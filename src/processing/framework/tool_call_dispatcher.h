@@ -149,12 +149,43 @@ public:
   Json::Value submitBlocking( const Json::Value &envelope,
                               std::chrono::milliseconds timeout = std::chrono::minutes( 30 ) );
 
+  /// Event-loop-free sync wait for a task submitted through the sink. Wired by
+  /// the Task Center flavor onto the ExecutionPlane so dispatchAndAwait() never
+  /// depends on Qt queued delivery for its wakeup — the #559 deadlock class is
+  /// structurally impossible on this path (the terminal notification arrives
+  /// via a thread-safe channel, and the payload commit runs on the calling
+  /// thread, which is the Data Manager's owning thread in every production
+  /// caller). Test harnesses with fake sinks/watchers leave it unset and keep
+  /// the legacy condition-variable wait.
+  using SyncAwait = std::function<Json::Value( long taskId, std::chrono::milliseconds timeout )>;
+  void setSyncAwait( SyncAwait await ) { mSyncAwait = std::move( await ); }
+
+  /// Entry tag propagated into the ExecutionPlane request ("agent", "mcp",
+  /// "cli", …) so JobEngine records carry which surface submitted the work.
+  void setSourceTag( const QString &tag ) { mSourceTag = tag; }
+  QString sourceTag() const { return mSourceTag; }
+
+  /// Build the standardized result payload for a terminal task with the
+  /// transactional output commit applied EXACTLY ONCE per task id (see
+  /// ExecutionPlane::buildCommittedResultPayload). Multiple surfaces watching
+  /// the same task (dispatcher watcher, copilot signal handler) can call this
+  /// without racing the commit or double-registering the asset.
+  Json::Value buildCommittedResultPayload( const sicnu::AlgorithmTaskInfo &info ) const;
+
 private:
   struct ParsedEnvelope {
     std::string name;
     Json::Value arguments; ///< object, or empty object when absent
     bool valid = false;
   };
+
+  /// submit() core shared with dispatchAndAwait(): everything after envelope
+  /// parsing/validation up to (optionally) completion-watcher registration.
+  /// When @a allowWatcher is false the sink submission happens without
+  /// registering mWatcher — used by the sync path whose wait/commit is owned
+  /// by mSyncAwait (prevents a double commit: watcher payload + sync payload).
+  bool submitParsed( const ParsedEnvelope &parsed, CompletionCallback onComplete,
+                     QString *errorOut, long *taskIdOut, bool allowWatcher );
 
   static ParsedEnvelope parseEnvelope( const Json::Value &envelope );
   /// Resolve-first id normalization: look the name up as-is; only on miss,
@@ -169,6 +200,8 @@ private:
 
   SubmissionSink mSink;
   CompletionWatcher mWatcher;
+  SyncAwait mSyncAwait;
+  QString mSourceTag = QStringLiteral( "dispatcher" );
   OutputCommitterHandler mOutputCommitterHandler;
   CanvasActionHandler mCanvasActionHandler;
   InteractionActionHandler mInteractionActionHandler;

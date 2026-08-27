@@ -5,6 +5,8 @@
 
 #include "processing/framework/algorithm_descriptor.h"
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/task_center.h"
+#include "jobs/job_engine.h"
 
 #include <json/json.h>
 
@@ -169,6 +171,11 @@ BatchProcessingDialog::BatchProcessingDialog( QWidget *parent )
   SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "batch_processing" ) );
   resize( 620, 520 );
   setupUi();
+  // Async batch (execution-plane goal): item completions arrive as TaskCenter
+  // terminal transitions delivered queued onto the GUI thread; auto-disconnects
+  // when the dialog is destroyed.
+  connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
+           this, &BatchProcessingDialog::onBatchTaskUpdated );
 }
 
 BatchProcessingDialog::~BatchProcessingDialog() = default;
@@ -346,12 +353,24 @@ void BatchProcessingDialog::onBrowseOutputDir()
     }
 }
 
+/// this-free batch-item runner (defined below, shared by the public member
+/// and the JobEngine executor so the async batch holds no `this` capture).
+bool runBatchItemImpl(const QString &algorithmId,
+                      const QString &inputFile,
+                      const QString &outputPath,
+                      QString *errorMessage,
+                      const QVariantMap &paramOverrides);
+
 void BatchProcessingDialog::onRun()
 {
     if (m_isRunning) {
         m_canceled = true;
         m_runButton->setEnabled(false);
         m_statusLabel->setText(tr("Canceling..."));
+        // Actually cancel the in-flight item; its terminal record advances the
+        // chain (submitNextBatchItem stops on m_canceled).
+        if (m_batchTaskId > 0)
+            sicnu::TaskCenter::instance().cancelTask(m_batchTaskId);
         return;
     }
 
@@ -419,69 +438,102 @@ void BatchProcessingDialog::onRun()
       }
     }
 
-    int successCount = 0;
-    int failCount = 0;
-    QStringList errorMessages;
+    // Async batch (execution-plane goal): each item is submitted to the
+    // TaskCenter as a one-shot JobEngine job and the loop advances in
+    // onBatchTaskUpdated. The GUI thread never blocks — the previous
+    // processEvents(ExcludeUserInputEvents) loop starved user input, so the
+    // Cancel button could not actually fire between items.
+    m_batchFiles = filesToProcess;
+    m_batchIndex = 0;
+    m_batchSuccess = 0;
+    m_batchFail = 0;
+    m_batchErrors.clear();
+    m_batchAlgorithmId = algorithmId;
+    m_batchOverrides = overrides;
+    m_batchOutputExt = outputExt;
+    m_batchTaskId = -1;
 
-    for (int i = 0; i < filesToProcess.size(); ++i) {
-        if (m_canceled) {
-            errorMessages.append(tr("Batch canceled by user"));
-            break;
-        }
+    submitNextBatchItem();
+}
 
-        const QString inputFile = filesToProcess[i];
-        m_statusLabel->setText(tr("Processing %1...").arg(QFileInfo(inputFile).fileName()));
-        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-
-        if (m_canceled) {
-            errorMessages.append(tr("Batch canceled by user"));
-            break;
-        }
-
-        // Build output path — DLGB-11 collision policy: same basename from
-        // different folders gets a numeric suffix (_1, _2, ...) before the extension.
-        QString baseName = QFileInfo(inputFile).completeBaseName();
-        QString nameWithoutExt = baseName + QStringLiteral("_processed");
-        QString outputPath = m_outputDir + QStringLiteral("/") + nameWithoutExt + outputExt;
-        if (QFileInfo::exists(outputPath)) {
-            int suffix = 1;
-            QString candidate;
-            do {
-                candidate = m_outputDir + QStringLiteral("/") + nameWithoutExt
-                            + QStringLiteral("_%1").arg(suffix++) + outputExt;
-            } while (QFileInfo::exists(candidate) && suffix < 10000);
-            outputPath = candidate;
-        }
-
-        try {
-            QString itemError;
-            if (runBatchItem(algorithmId, inputFile, outputPath, &itemError, overrides)) {
-                successCount++;
-            } else {
-                failCount++;
-                const QString entry = tr("%1: %2")
-                    .arg(QFileInfo(inputFile).fileName(),
-                         itemError.isEmpty() ? tr("Invalid parameters") : itemError);
-                errorMessages.append(entry);
-                QgsMessageLog::logMessage(entry, QStringLiteral("batch"), Qgis::MessageLevel::Warning);
-            }
-        } catch (const std::exception &e) {
-            failCount++;
-            const QString entry = tr("%1: %2")
-                .arg(QFileInfo(inputFile).fileName(), QString::fromUtf8(e.what()));
-            errorMessages.append(entry);
-            QgsMessageLog::logMessage(entry, QStringLiteral("batch"), Qgis::MessageLevel::Critical);
-        } catch (...) {
-            failCount++;
-            const QString entry = tr("%1: unknown error").arg(QFileInfo(inputFile).fileName());
-            errorMessages.append(entry);
-            QgsMessageLog::logMessage(entry, QStringLiteral("batch"), Qgis::MessageLevel::Critical);
-        }
-
-        m_progressBar->setValue(i + 1);
+void BatchProcessingDialog::submitNextBatchItem()
+{
+    if (m_canceled) {
+        m_batchErrors.append(tr("Batch canceled by user"));
+        finishBatch();
+        return;
+    }
+    if (m_batchIndex >= m_batchFiles.size()) {
+        finishBatch();
+        return;
     }
 
+    const QString inputFile = m_batchFiles.at(m_batchIndex);
+    m_statusLabel->setText(tr("Processing %1...").arg(QFileInfo(inputFile).fileName()));
+    const QString outputPath = uniqueOutputPath(inputFile);
+
+    sicnu::jobs::JobRequest request;
+    request.algorithmId = QStringLiteral("batch:%1").arg(m_batchAlgorithmId).toStdString();
+    request.title = tr("Batch: %1").arg(QFileInfo(inputFile).fileName()).toStdString();
+    request.source = "batch_dialog";
+
+    // The executor wraps the (unchanged) synchronous item runner; parameter
+    // checks throw before any work, matching the old try/catch reporting.
+    const QString algorithmId = m_batchAlgorithmId;
+    const QVariantMap overrides = m_batchOverrides;
+    sicnu::TaskCenter::JobExecutor executor =
+        [algorithmId, inputFile, outputPath, overrides](
+            const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) -> Json::Value {
+            QString itemError;
+            if (!runBatchItemImpl(algorithmId, inputFile, outputPath, &itemError, overrides))
+                throw std::runtime_error(
+                    itemError.isEmpty() ? "Invalid parameters" : itemError.toStdString());
+            Json::Value result(Json::objectValue);
+            result["output"] = outputPath.toStdString();
+            return result;
+        };
+
+    m_batchTaskId = sicnu::TaskCenter::instance().submitJob(request, executor);
+    if (m_batchTaskId <= 0) {
+        m_batchFail++;
+        m_batchErrors.append(tr("%1: task submission failed")
+                                 .arg(QFileInfo(inputFile).fileName()));
+        ++m_batchIndex;
+        submitNextBatchItem();
+    }
+}
+
+void BatchProcessingDialog::onBatchTaskUpdated(const sicnu::AlgorithmTaskInfo &info)
+{
+    if (!m_isRunning || info.taskId != m_batchTaskId)
+        return;
+    if (!sicnu::isTerminalStatus(info.status))
+        return;
+
+    const QString inputFile = m_batchFiles.value(m_batchIndex);
+    if (info.status == sicnu::TaskStatus::Completed) {
+        m_batchSuccess++;
+    } else if (info.status == sicnu::TaskStatus::Canceled) {
+        // A user cancel of the in-flight item is a batch stop, not an item
+        // failure; submitNextBatchItem records the single cancellation note.
+    } else {
+        m_batchFail++;
+        QString reason = info.errorMessage;
+        if (reason.isEmpty())
+            reason = tr("Invalid parameters");
+        const QString entry = tr("%1: %2").arg(QFileInfo(inputFile).fileName(), reason);
+        m_batchErrors.append(entry);
+        QgsMessageLog::logMessage(entry, QStringLiteral("batch"), Qgis::MessageLevel::Warning);
+    }
+
+    m_progressBar->setValue(++m_batchIndex);
+    submitNextBatchItem();
+}
+
+void BatchProcessingDialog::finishBatch()
+{
     m_isRunning = false;
+    m_batchTaskId = -1;
     m_runButton->setText(tr("Run Batch"));
     m_runButton->setEnabled(true);
     if (m_addFilesBtn) m_addFilesBtn->setEnabled(true);
@@ -492,27 +544,46 @@ void BatchProcessingDialog::onRun()
 
     if (m_canceled) {
         m_statusLabel->setText(tr("Batch canceled: %1 succeeded, %2 failed")
-                                   .arg(successCount).arg(failCount));
+                                   .arg(m_batchSuccess).arg(m_batchFail));
     } else {
         m_statusLabel->setText(tr("Batch complete: %1 succeeded, %2 failed")
-                                   .arg(successCount).arg(failCount));
+                                   .arg(m_batchSuccess).arg(m_batchFail));
     }
 
-    if (failCount > 0) {
+    if (m_batchFail > 0) {
         QString details = tr("Batch complete with errors:\n%1 succeeded, %2 failed")
-                              .arg(successCount).arg(failCount);
-        if (!errorMessages.isEmpty()) {
+                              .arg(m_batchSuccess).arg(m_batchFail);
+        if (!m_batchErrors.isEmpty()) {
             const int maxShow = 8;
-            details += QLatin1Char('\n') + errorMessages.mid(0, maxShow).join(QLatin1Char('\n'));
-            if (errorMessages.size() > maxShow)
-                details += tr("\n… and %1 more (see log)").arg(errorMessages.size() - maxShow);
+            details += QLatin1Char('\n') + m_batchErrors.mid(0, maxShow).join(QLatin1Char('\n'));
+            if (m_batchErrors.size() > maxShow)
+                details += tr("\n… and %1 more (see log)").arg(m_batchErrors.size() - maxShow);
         }
         QMessageBox::warning(this, tr("Batch Processing"), details);
     } else {
         QMessageBox::information(this, tr("Batch Processing"),
                                  tr("Batch complete:\n%1 files processed successfully")
-                                     .arg(successCount));
+                                     .arg(m_batchSuccess));
     }
+}
+
+QString BatchProcessingDialog::uniqueOutputPath(const QString &inputFile) const
+{
+    // DLGB-11 collision policy: same basename from different folders gets a
+    // numeric suffix (_1, _2, ...) before the extension.
+    const QString baseName = QFileInfo(inputFile).completeBaseName();
+    const QString nameWithoutExt = baseName + QStringLiteral("_processed");
+    QString outputPath = m_outputDir + QStringLiteral("/") + nameWithoutExt + m_batchOutputExt;
+    if (QFileInfo::exists(outputPath)) {
+        int suffix = 1;
+        QString candidate;
+        do {
+            candidate = m_outputDir + QStringLiteral("/") + nameWithoutExt
+                        + QStringLiteral("_%1").arg(suffix++) + m_batchOutputExt;
+        } while (QFileInfo::exists(candidate) && suffix < 10000);
+        outputPath = candidate;
+    }
+    return outputPath;
 }
 
 void BatchProcessingDialog::onAlgorithmChanged(int index)
@@ -753,11 +824,23 @@ bool BatchProcessingDialog::runBatchItem(const QString &algorithmId,
                                          QString *errorMessage,
                                          const QVariantMap &paramOverrides)
 {
+    return runBatchItemImpl(algorithmId, inputFile, outputPath, errorMessage, paramOverrides);
+}
+
+/// this-free implementation shared by the public member (GUI/tests) and the
+/// JobEngine executor (worker thread): touching no dialog state lets the
+/// async batch survive a dialog destroyed while an item is still running.
+bool runBatchItemImpl(const QString &algorithmId,
+                      const QString &inputFile,
+                      const QString &outputPath,
+                      QString *errorMessage,
+                      const QVariantMap &paramOverrides)
+{
     if (algorithmId.startsWith(QStringLiteral("rs:"))) {
         const auto adapter = AtomicAlgorithmRegistry::instance().findAdapter(algorithmId.toStdString());
         if (!adapter) {
             if (errorMessage)
-                *errorMessage = tr("RS operator not found: %1").arg(algorithmId);
+                *errorMessage = BatchProcessingDialog::tr("RS operator not found: %1").arg(algorithmId);
             return false;
         }
         try {
@@ -795,7 +878,7 @@ bool BatchProcessingDialog::runBatchItem(const QString &algorithmId,
                             && result["output"].isString()
                             && !result["output"].asString().empty();
             if (!ok && errorMessage)
-                *errorMessage = tr("RS operator returned no output");
+                *errorMessage = BatchProcessingDialog::tr("RS operator returned no output");
             return ok;
         } catch (const std::exception &e) {
             if (errorMessage)
@@ -807,7 +890,7 @@ bool BatchProcessingDialog::runBatchItem(const QString &algorithmId,
     const QgsProcessingAlgorithm *alg = QgsApplication::processingRegistry()->algorithmById(algorithmId);
     if (!alg) {
         if (errorMessage)
-            *errorMessage = tr("Algorithm not found: %1").arg(algorithmId);
+            *errorMessage = BatchProcessingDialog::tr("Algorithm not found: %1").arg(algorithmId);
         return false;
     }
 
@@ -835,7 +918,7 @@ bool BatchProcessingDialog::runBatchItem(const QString &algorithmId,
     std::unique_ptr<QgsProcessingAlgorithm> algClone(alg->create());
     if (!algClone) {
         if (errorMessage)
-            *errorMessage = tr("Failed to create algorithm instance: %1").arg(algorithmId);
+            *errorMessage = BatchProcessingDialog::tr("Failed to create algorithm instance: %1").arg(algorithmId);
         return false;
     }
     QgsProcessingContext context;
@@ -854,7 +937,7 @@ bool BatchProcessingDialog::runBatchItem(const QString &algorithmId,
     if (results.isEmpty()) {
         if (errorMessage)
             *errorMessage = feedback.textLog().isEmpty()
-                ? tr("Algorithm returned no results")
+                ? BatchProcessingDialog::tr("Algorithm returned no results")
                 : feedback.textLog();
         return false;
     }

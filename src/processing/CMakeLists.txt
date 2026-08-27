@@ -216,6 +216,7 @@ add_library(sicnu_task_center STATIC
     framework/resource_monitor.cpp
     framework/task_resource_budget.cpp
     framework/agent_workflow_executor.cpp
+    framework/execution_plane.cpp
     # Task Center seam for OutputCommitter and ToolCallDispatcher default constructor
     # — kept out of sicnu_processing so that library does not need JobEngine / TaskCenter link deps.
     framework/output_committer_task_center.cpp

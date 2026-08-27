@@ -391,8 +391,13 @@ QString ToolCallDispatcher::rejectionReason( const Json::Value &envelope ) const
 bool ToolCallDispatcher::submit( const Json::Value &envelope, CompletionCallback onComplete,
                                  QString *errorOut, long *taskIdOut )
 {
-  const ParsedEnvelope parsed = parseEnvelope( envelope );
+  return submitParsed( parseEnvelope( envelope ), std::move( onComplete ), errorOut, taskIdOut,
+                       /*allowWatcher=*/true );
+}
 
+bool ToolCallDispatcher::submitParsed( const ParsedEnvelope &parsed, CompletionCallback onComplete,
+                                       QString *errorOut, long *taskIdOut, bool allowWatcher )
+{
   const QString reason = rejectionReasonFor( parsed );
   if ( !reason.isEmpty() )
   {
@@ -441,7 +446,7 @@ bool ToolCallDispatcher::submit( const Json::Value &envelope, CompletionCallback
   if ( taskIdOut )
     *taskIdOut = taskId;
 
-  if ( mWatcher )
+  if ( allowWatcher && mWatcher )
   {
     mWatcher( taskId, std::move( onComplete ) );
   }
@@ -450,6 +455,35 @@ bool ToolCallDispatcher::submit( const Json::Value &envelope, CompletionCallback
 
 Json::Value ToolCallDispatcher::dispatchAndAwait( const Json::Value &envelope, std::chrono::milliseconds timeout )
 {
+  const ParsedEnvelope parsed = parseEnvelope( envelope );
+
+  // Production wiring (Task Center flavor) provides an event-loop-free sync
+  // await on the ExecutionPlane: the wakeup rides a thread-safe completion
+  // channel and the payload commit runs on this (owning) thread, so blocking
+  // here can never wedge a queued delivery (#559). The watcher is NOT
+  // registered on this path — the commit is owned by the sync await, exactly
+  // once.
+  if ( mSyncAwait )
+  {
+    // Interaction actions deliver their payload inline through this callback;
+    // algorithm tasks ignore it (taskId > 0 ≠ sentinel) and await below.
+    auto inlineResult = std::make_shared<Json::Value>();
+    long taskId = -1;
+    QString error;
+    if ( !submitParsed( parsed,
+                        [inlineResult]( const Json::Value &payload ) { *inlineResult = payload; },
+                        &error, &taskId, /*allowWatcher=*/false ) )
+    {
+      Json::Value errorResult( Json::objectValue );
+      errorResult["status"] = "error";
+      errorResult["errorMessage"] = error.toStdString();
+      return errorResult;
+    }
+    if ( taskId == 9000001 )
+      return *inlineResult; // interaction action: already delivered synchronously
+    return mSyncAwait( taskId, timeout );
+  }
+
   struct AwaitState
   {
     std::mutex mutex;
@@ -461,14 +495,14 @@ Json::Value ToolCallDispatcher::dispatchAndAwait( const Json::Value &envelope, s
   auto state = std::make_shared<AwaitState>();
 
   QString error;
-  const bool submitted = submit( envelope, [state]( const Json::Value &resultPayload ) {
+  const bool submitted = submitParsed( parsed, [state]( const Json::Value &resultPayload ) {
     {
       std::lock_guard<std::mutex> lock( state->mutex );
       state->captured = resultPayload;
       state->done = true;
     }
     state->cv.notify_all();
-  }, &error );
+  }, &error, nullptr, /*allowWatcher=*/true );
 
   if ( !submitted )
   {

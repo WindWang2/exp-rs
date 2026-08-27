@@ -390,6 +390,12 @@ QVariantMap mcpStatusForTask(const sicnu::AlgorithmTaskInfo &info)
     default:
         result[QStringLiteral("status")] = QStringLiteral("running");
         break;
+    case sicnu::TaskStatus::WaitingResource:
+        result[QStringLiteral("status")] = QStringLiteral("waiting_resource");
+        break;
+    case sicnu::TaskStatus::Cancelling:
+        result[QStringLiteral("status")] = QStringLiteral("cancelling");
+        break;
     }
     result[QStringLiteral("progress")] = info.progressPercentage;
     if (!info.logBuffer.isEmpty())
@@ -428,6 +434,7 @@ McpServer::McpServer(QObject *parent)
     : QObject(parent)
 {
     ProcessingJobAdapter::registerProcessingJobExecutor();
+    mDispatcher.setSourceTag(QStringLiteral("mcp"));
     mDispatcher.setInteractionActionHandler([](const std::string &name, const Json::Value &args) {
         return sicnu::agent::InteractionToolRegistry::instance().execute(name, args);
     });

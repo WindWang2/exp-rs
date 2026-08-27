@@ -349,12 +349,14 @@ TEST_CASE("TaskCenter - Running cancellation waits for the worker terminal state
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     REQUIRE(started.load());
     REQUIRE(sicnu::TaskCenter::instance().cancelTask(taskId));
-    REQUIRE(sicnu::TaskCenter::instance().getTaskInfo(taskId).status == sicnu::TaskStatus::Running);
+    // Cancel-requested dispatched work is explicitly Cancelling (not silently
+    // Running) until the worker's terminal record arrives.
+    REQUIRE(sicnu::TaskCenter::instance().getTaskInfo(taskId).status == sicnu::TaskStatus::Cancelling);
 
     releaseWorker.store(true);
     engine.waitUntilIdleForTests();
-    for (int attempt = 0; attempt < 20
-                      && sicnu::TaskCenter::instance().getTaskInfo(taskId).status == sicnu::TaskStatus::Running;
+    for (int attempt = 0; attempt < 200
+                      && sicnu::TaskCenter::instance().getTaskInfo(taskId).status == sicnu::TaskStatus::Cancelling;
          ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
@@ -551,8 +553,8 @@ TEST_CASE( "TaskCenter - resource profile throttling distinguishes concurrency c
         const auto st = center.getTaskInfo( id ).status;
         if ( st == sicnu::TaskStatus::Running )
             ++cliRunning;
-        if ( st == sicnu::TaskStatus::Queued )
-            ++cliQueued;
+        if ( st == sicnu::TaskStatus::Queued || st == sicnu::TaskStatus::WaitingResource )
+            ++cliQueued; // WaitingResource = admission-held, still queued work
     }
     for ( long id : inprocIds )
     {
@@ -803,12 +805,14 @@ TEST_CASE( "TaskCenter - RSS watermark holds queued tasks then releases on compl
     REQUIRE( center.getTaskInfo( id1 ).status == sicnu::TaskStatus::Running );
     REQUIRE( center.getTaskInfo( id2 ).status == sicnu::TaskStatus::Running );
 
-    // Raise RSS to the watermark, then enqueue a third task - it must stay Queued.
+    // Raise RSS to the watermark, then enqueue a third task - it must stay held.
     fakeRss.store( 100 );
     long id3 = center.enqueueTask( QStringLiteral( "mem_inproc:task" ), {}, false,
                                    sicnu::TaskPriority::Normal, {}, true );
     std::this_thread::sleep_for( std::chrono::milliseconds( 30 ) ); // let any pending dispatch settle
-    REQUIRE( center.getTaskInfo( id3 ).status == sicnu::TaskStatus::Queued );
+    // Admission-held (RSS watermark) tasks surface explicitly as
+    // WaitingResource instead of silently Queued.
+    REQUIRE( center.getTaskInfo( id3 ).status == sicnu::TaskStatus::WaitingResource );
 
     // Drop RSS below the watermark and release the workers. Their completions
     // re-enter processNextQueuedTasks, which now sees low pressure and launches
@@ -966,7 +970,8 @@ TEST_CASE( "TaskCenter - OBIA-style batch holds under RSS pressure then drains t
         for ( long id : ids )
         {
             const auto s = center.getTaskInfo( id ).status;
-            if ( s == sicnu::TaskStatus::Queued ) ++queued;
+            if ( s == sicnu::TaskStatus::Queued || s == sicnu::TaskStatus::WaitingResource )
+                ++queued; // WaitingResource = admission-held, still queued work
             else if ( s == sicnu::TaskStatus::Running ) ++running;
         }
         if ( running > 0 && queued > 0 )

@@ -38,7 +38,14 @@ enum class TaskStatus {
     Paused,
     Completed,
     Failed,
-    Canceled
+    Canceled,
+    /// Launch-eligible (parents satisfied, autoDispatch) but held back by
+    /// resource admission: RAM budget, RSS watermark, profile/global worker
+    /// slots. Re-evaluated on every terminal transition; never drops work.
+    WaitingResource,
+    /// Cancel was requested on a dispatched task; the worker has not yet
+    /// reported a terminal record. Transitions to Canceled via the listener.
+    Cancelling
 };
 
 inline bool isTerminalStatus( TaskStatus status )
@@ -79,6 +86,13 @@ struct AlgorithmTaskInfo {
     /// Resolved from AlgorithmEngine when the algorithm is registered; otherwise
     /// defaults to InProcessThread.
     ProviderResourceProfile resourceProfile = ProviderResourceProfile::InProcessThread;
+    /// Per-task RAM estimate override (MiB) from the execution plane (e.g. a
+    /// preflight- or request-supplied estimate). 0 → use the registry-backed
+    /// resolver with its conservative per-class fallback.
+    unsigned int resourceEstimateOverrideMb = 0;
+    /// Entry tag propagated from the submitting surface ("agent", "mcp",
+    /// "gui", "cli", "workflow") into the JobEngine request for provenance.
+    QString source;
     QString outputLayerPath;
     QString stepId;
     long pipelineId = -1;
@@ -96,12 +110,37 @@ struct PipelineExecutionInfo {
     QString errorMessage;
 };
 
+/// Point-in-time resource admission snapshot for a candidate task: the data
+/// the ExecutionPlane consults (and exposes to preflight consumers) when
+/// deciding whether a submission would launch now or be held in
+/// WaitingResource. Pure information — no side effects.
+struct TaskAdmissionSnapshot
+{
+    bool wouldAdmit = false;
+    /// True when the RSS watermark alone holds the launch (global hold).
+    bool rssHold = false;
+    unsigned int candidateMb = 0;  ///< resolved estimate for the candidate
+    unsigned int runningMb = 0;    ///< summed estimates of Running tasks
+    unsigned int budgetMb = 0;     ///< configured RAM budget cap (0 = disabled)
+    unsigned int runningCount = 0; ///< Running + Cancelling tasks
+    unsigned int globalLimit = 0;
+    QString reason;                ///< human-readable hold reason when !wouldAdmit
+};
+
 class TaskCenter : public QObject {
     Q_OBJECT
 public:
     using JobExecutor = std::function<Json::Value(const sicnu::jobs::JobRequest&,
                                                    sicnu::operators::RSOperatorContext&)>;
     using CancelHook = std::function<void()>;
+    /// Thread-safe terminal notification: invoked EXACTLY ONCE per task, from
+    /// the thread that performs the terminal transition (a JobEngine worker
+    /// thread, or the thread that called cancel/mark*), always outside
+    /// m_mutex. Callbacks must be cheap and lock-free; affinity marshaling is
+    /// the callback's responsibility (see ExecutionPlane::watch). This is the
+    /// event-loop-independent completion channel the ExecutionPlane uses —
+    /// unlike Qt queued delivery it cannot deadlock a sync waiter.
+    using TaskCompletionCallback = std::function<void(const AlgorithmTaskInfo&)>;
 
     static TaskCenter& instance();
 
@@ -110,7 +149,9 @@ public:
                      bool autoLoad = true,
                      TaskPriority priority = TaskPriority::Normal,
                      const QList<long>& parentTaskIds = QList<long>(),
-                     bool autoDispatch = false);
+                     bool autoDispatch = false,
+                     unsigned int resourceEstimateOverrideMb = 0,
+                     const QString& source = QString());
 
     /// Submit a DAG Task Pipeline for execution (auto-dispatched via JobEngine).
     long submitPipeline( const sicnu::workflow::WorkflowDefinition &def, bool autoLoad = true );
@@ -145,6 +186,26 @@ public:
     PipelineExecutionInfo getPipelineInfo(long pipelineId) const;
     void clearCompletedTasks();
     void shutdown();
+
+    /// True once shutdown() has been called (await loops poll this so a
+    /// shutdown never leaves a sync waiter blocked until its timeout).
+    bool isShuttingDown() const { return m_isShuttingDown.load(); }
+
+    /// Register a terminal-transition callback for @a taskId. Returns a
+    /// removal token (> 0), or 0 when the task is unknown. When the task is
+    /// ALREADY terminal the callback fires inline immediately on the calling
+    /// thread and 0 is returned (nothing left to remove). Exactly-once per
+    /// registration: terminal transitions are deduplicated, and fired
+    /// callbacks are removed automatically.
+    long addTaskCompletionCallback(long taskId, TaskCompletionCallback callback);
+    /// Remove a not-yet-fired callback registration (e.g. handle destroyed).
+    void removeTaskCompletionCallback(long taskId, long token);
+
+    /// Point-in-time admission snapshot for a candidate (see struct). Pure
+    /// query shared by the ExecutionPlane and preflight consumers so
+    /// "Preflight → Resource Admission → TaskCenter" consults one logic.
+    TaskAdmissionSnapshot admissionSnapshot(const QString& algorithmId,
+                                            unsigned int resourceEstimateOverrideMb = 0) const;
 
     /// Wait for task to reach a terminal status or timeout.
     AlgorithmTaskInfo waitForTask( long taskId,
@@ -209,6 +270,11 @@ private:
     void queueTaskLogLocked( long taskId, const QString &message );
     /// Drain queued signals; never holds m_mutex across emit. Safe if slots re-enter.
     void flushPendingSignals();
+    /// Pop + invoke the completion callbacks registered for a task that just
+    /// reached a terminal status. Called WITHOUT m_mutex held; each callback
+    /// sees the terminal task snapshot. Exactly-once: registrations are
+    /// removed before invocation and terminal transitions are deduplicated.
+    void fireTaskCompletionCallbacks( long taskId );
     void applyPlaceholdersForTask(long taskId);
     void updatePipelineForTaskLocked(long taskId);
     long submitJobImpl(const sicnu::jobs::JobRequest& request,
@@ -256,6 +322,8 @@ private:
     QMap<std::string, long> m_taskByJobId; ///< jobId → taskId, listener dispatch (ADR 0051)
     QMap<long, std::size_t> m_forwardedLogCounts; ///< per-task log dedup key (logLines.size())
     QMap<long, double> m_lastForwardedProgress; ///< per-task progress dedup
+    QMap<long, QMap<long, TaskCompletionCallback>> m_completionCallbacks; ///< per-task terminal callbacks
+    long m_nextCompletionToken = 1;
     QMap<ProviderResourceProfile, unsigned int> m_profileLimits; ///< empty entry → use defaultLimitForProfile
     unsigned int m_globalConcurrencyLimit = 0; ///< 0 → hardware_concurrency()-1 (min 1)
     long m_nextTaskId = 1;
@@ -265,6 +333,9 @@ private:
     /// Installs the registry-backed estimate resolver (idempotent). Called once
     /// from the constructor; re-installed if a test clears it via {}.
     void installDefaultEstimateResolver();
+    /// Per-task resolved estimate: the task's override when set, else the
+    /// budget resolver (registry estimate + conservative class fallback).
+    unsigned int taskEstimateMbLocked( const AlgorithmTaskInfo &task ) const;
 };
 
 } // namespace sicnu

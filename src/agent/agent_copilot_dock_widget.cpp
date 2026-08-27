@@ -154,6 +154,7 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapC
   m_dataManager = dataManager;
   m_canvas = canvas;
   m_workflowExecutor.setDataManager( dataManager );
+  m_toolCallDispatcher.setSourceTag( QStringLiteral( "agent" ) );
   m_toolCallDispatcher.setDataManager( dataManager );
 
   m_viewControlService.setDataManager( dataManager );
@@ -426,7 +427,7 @@ void AgentCopilotDockWidget::watchToolCallCompletion( long taskId, processing::T
   const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
   if ( isTerminalStatus( info.status ) )
   {
-    onComplete( processing::ToolCallDispatcher::buildTaskResultPayload( info, m_toolCallDispatcher.outputCommitterHandler() ) );
+    onComplete( m_toolCallDispatcher.buildCommittedResultPayload( info ) );
     return;
   }
   m_pendingToolCallCompletions.insert( taskId, std::move( onComplete ) );
@@ -447,7 +448,7 @@ void AgentCopilotDockWidget::onTaskCenterTaskUpdated( const sicnu::AlgorithmTask
   // Committing and payload shape live in ToolCallDispatcher (injected
   // DataManager); layer loading after commit is handled by QgisDisplayManager
   // auto-display on DataManager::assetAdded.
-  callback( processing::ToolCallDispatcher::buildTaskResultPayload( info, m_toolCallDispatcher.outputCommitterHandler() ) );
+  callback( m_toolCallDispatcher.buildCommittedResultPayload( info ) );
 }
 
 void AgentCopilotDockWidget::appendErrorMessage( const QString &errorMsg )
