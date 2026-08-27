@@ -303,3 +303,39 @@ TEST_CASE( "PostProcess: polygonize successfully overwrites existing destination
   REQUIRE_FALSE( QFile::exists( shpPath + QLatin1String( ".tmp~" ) ) );
 }
 
+
+TEST_CASE( "majorityFilter handles more than 64 distinct labels in a 9x9 window (#612)", "[post_process]" )
+{
+  // A 9x9 window centered on label 1 surrounded by 80 distinct other labels:
+  // previously the fixed 64-entry table dropped labels beyond the 64th, and
+  // label 0 (NoData) could win. Label 1 is the ONLY repeated label, so the
+  // mode must be 1 under the corrected vote table.
+  cv::Mat src( 9, 9, CV_32SC1 );
+  int v = 2;
+  for ( int r = 0; r < 9; ++r )
+    for ( int c = 0; c < 9; ++c )
+    {
+      if ( r == 4 && c == 4 )
+        src.at<int>( r, c ) = 1;
+      else if ( r == 4 && c == 3 )
+        src.at<int>( r, c ) = 1; // second vote for label 1
+      else
+        src.at<int>( r, c ) = v++;
+    }
+  cv::Mat dst;
+  REQUIRE( RsPostProcess::majorityFilter( src, dst, 9, nullptr ) );
+  REQUIRE( dst.at<int>( 4, 4 ) == 1 );
+}
+
+TEST_CASE( "majorityFilter does not let label 0 (NoData) win (#612)", "[post_process]" )
+{
+  // Center pixel is valid label 7; most of the window is 0 (NoData). The
+  // mode of the VALID votes must win; NoData must not grow into the center.
+  cv::Mat src( 5, 5, CV_32SC1, cv::Scalar( 0 ) );
+  src.at<int>( 2, 2 ) = 7;
+  src.at<int>( 2, 1 ) = 7;
+  src.at<int>( 1, 2 ) = 7;
+  cv::Mat dst;
+  REQUIRE( RsPostProcess::majorityFilter( src, dst, 5, nullptr ) );
+  REQUIRE( dst.at<int>( 2, 2 ) == 7 );
+}

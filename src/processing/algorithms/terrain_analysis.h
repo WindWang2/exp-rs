@@ -22,11 +22,22 @@ class TerrainAnalysis
     static bool slope( const float *dem, float *out, int width, int height,
                        float cellSize, float nodata );
 
+    /// Slope with separate x/y pixel sizes (map units per pixel). Needed for
+    /// anisotropic pixels and for geographic (degree) DEMs auto-converted to
+    /// metres per degree at scene-centre latitude (#612): dz/dx uses
+    /// cellSizeX, dz/dy uses cellSizeY.
+    static bool slope( const float *dem, float *out, int width, int height,
+                       float cellSizeX, float cellSizeY, float nodata );
+
     /// Compute aspect from DEM using 3x3 window (Horn 1981).
     /// Output: aspect in degrees [0, 360), clockwise from north.
     /// Flat areas (slope == 0) get aspect = -1.
     static bool aspect( const float *dem, float *out, int width, int height,
                         float cellSize, float nodata );
+
+    /// Aspect with separate x/y pixel sizes (see the slope overload).
+    static bool aspect( const float *dem, float *out, int width, int height,
+                        float cellSizeX, float cellSizeY, float nodata );
 
     /// Compute hillshade from DEM.
     /// sunAzimuth: sun direction in degrees clockwise from north (default 315).
@@ -35,6 +46,13 @@ class TerrainAnalysis
     static bool hillshade( const float *dem, float *out, int width, int height,
                            float cellSize, float nodata,
                            float sunAzimuth = 315.0f, float sunElevation = 45.0f );
+
+    /// Hillshade with separate x/y pixel sizes (see the slope overload).
+    /// sunAzimuth/sunElevation are explicit here (no defaults) so the
+    /// isotropic overload stays unambiguous for legacy call sites.
+    static bool hillshade( const float *dem, float *out, int width, int height,
+                           float cellSizeX, float cellSizeY, float nodata,
+                           float sunAzimuth, float sunElevation );
 
     /// Compute roughness: local max-min elevation difference in 3x3 window.
     /// Output: roughness in map units.

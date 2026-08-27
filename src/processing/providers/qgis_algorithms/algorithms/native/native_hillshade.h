@@ -124,7 +124,7 @@ protected:
 
         // Compute hillshade
         if ( !TerrainAnalysis::hillshade( demData.constData(), hsData.data(), nCols, nRows,
-                                          static_cast<float>( cellSize ), nodata,
+                                          static_cast<float>( cellSize ), static_cast<float>( cellSize ), nodata,
                                           static_cast<float>( sunAzimuth ), static_cast<float>( sunElevation ) ) )
         {
             throw QgsProcessingException( QObject::tr( "Hillshade computation failed" ) );

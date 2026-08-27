@@ -277,11 +277,27 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
     std::vector<float> inputBuf(maxBlockPixels);
     std::vector<float> maskBuf;
 
+    const int dtype = input.bandDataType(1);
+    // #612: Float64/Int32/UInt32 inputs must not round-trip through a float32
+    // buffer (silent precision loss: float64 mantissa, int32 > 2^24). These
+    // dtypes use native-type GDALRasterIO; all others are exact in float32.
+    const bool nativeDtypePath = (dtype == GDT_Float64 || dtype == GDT_Int32 || dtype == GDT_UInt32);
+    std::vector<double> dblBuf;
+    std::vector<int32_t> i32Buf;
+    std::vector<uint32_t> u32Buf;
+    if (nativeDtypePath) {
+        if (dtype == GDT_Float64)
+            dblBuf.resize(maxBlockPixels);
+        else if (dtype == GDT_Int32)
+            i32Buf.resize(maxBlockPixels);
+        else
+            u32Buf.resize(maxBlockPixels);
+    }
+
     const std::array<double, 6> inGt = input.geoTransform();
     const std::array<double, 6> maskGt = mask.geoTransform();
     const bool sameGrid = !aligned;
 
-    const int dtype = input.bandDataType(1);
     GdalDatasetWrapper out;
     QString errorMessage;
     if (!out.create(QString::fromStdString(outputPath), width, height, bandCount,
@@ -353,22 +369,55 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
         }
 
         for (int b = 1; b <= bandCount; ++b) {
-            if (!input.readBandWindow(b, 0, y0, width, blockH, inputBuf.data())) {
-                throw RSOperatorError(ErrorCode::GdalError,
-                                      "Failed to read input band " + std::to_string(b));
-            }
             const double noData = outputNoData[b - 1];
-            for (size_t i = 0; i < blockPixels; ++i) {
-                const int32_t off = maskOffsets[i];
-                if (off >= 0 && maskBuf[static_cast<size_t>(off)] > 0.0f) {
-                    inputBuf[i] = static_cast<float>(noData);
-                    if (b == 1)
-                        ++masked;
+            if (nativeDtypePath) {
+                void *raw = dtype == GDT_Float64 ? static_cast<void *>(dblBuf.data())
+                           : dtype == GDT_Int32  ? static_cast<void *>(i32Buf.data())
+                                                 : static_cast<void *>(u32Buf.data());
+                GDALRasterBandH inBand = GDALGetRasterBand(input.dataset(), b);
+                if (!inBand
+                    || GDALRasterIO(inBand, GF_Read, 0, y0, width, blockH, raw,
+                                    width, blockH, static_cast<GDALDataType>(dtype), 0, 0) != CE_None) {
+                    throw RSOperatorError(ErrorCode::GdalError,
+                                          "Failed to read input band " + std::to_string(b));
                 }
-            }
-            if (!out.writeBandWindow(b, 0, y0, width, blockH, inputBuf.data())) {
-                throw RSOperatorError(ErrorCode::GdalError,
-                                      "Failed to write output band " + std::to_string(b));
+                for (size_t i = 0; i < blockPixels; ++i) {
+                    const int32_t off = maskOffsets[i];
+                    if (off >= 0 && maskBuf[static_cast<size_t>(off)] > 0.0f) {
+                        if (dtype == GDT_Float64)
+                            dblBuf[i] = noData;
+                        else if (dtype == GDT_Int32)
+                            i32Buf[i] = static_cast<int32_t>(std::llround(noData));
+                        else
+                            u32Buf[i] = static_cast<uint32_t>(std::llround(noData));
+                        if (b == 1)
+                            ++masked;
+                    }
+                }
+                GDALRasterBandH outBand = GDALGetRasterBand(out.dataset(), b);
+                if (!outBand
+                    || GDALRasterIO(outBand, GF_Write, 0, y0, width, blockH, raw,
+                                    width, blockH, static_cast<GDALDataType>(dtype), 0, 0) != CE_None) {
+                    throw RSOperatorError(ErrorCode::GdalError,
+                                          "Failed to write output band " + std::to_string(b));
+                }
+            } else {
+                if (!input.readBandWindow(b, 0, y0, width, blockH, inputBuf.data())) {
+                    throw RSOperatorError(ErrorCode::GdalError,
+                                          "Failed to read input band " + std::to_string(b));
+                }
+                for (size_t i = 0; i < blockPixels; ++i) {
+                    const int32_t off = maskOffsets[i];
+                    if (off >= 0 && maskBuf[static_cast<size_t>(off)] > 0.0f) {
+                        inputBuf[i] = static_cast<float>(noData);
+                        if (b == 1)
+                            ++masked;
+                    }
+                }
+                if (!out.writeBandWindow(b, 0, y0, width, blockH, inputBuf.data())) {
+                    throw RSOperatorError(ErrorCode::GdalError,
+                                          "Failed to write output band " + std::to_string(b));
+                }
             }
         }
 

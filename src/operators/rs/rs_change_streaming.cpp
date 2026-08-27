@@ -146,6 +146,23 @@ MaskDerivation writeMaskFromMagnitude( const std::string &magPath, const GdalDat
         throw RSOperatorError( ErrorCode::GdalError,
                                "Failed to reopen magnitude raster for masking" );
     }
+    // In the threshold path magPath IS the original input, whose declared
+    // NoData (e.g. -9999) must map to the mask's NoData (255), not compare
+    // against the threshold as a value (#612). The magnitude raster's own
+    // NoData is NaN, so this conversion is a no-op there.
+    bool magHasNodata = false;
+    const float magNodataF = [&]() {
+        const double nd = magDs.bandNoDataValue( 1, &magHasNodata );
+        return ( magHasNodata && std::isfinite( nd ) ) ? static_cast<float>( nd )
+                                                       : std::numeric_limits<float>::quiet_NaN();
+    }();
+    const auto normalizeTile = [&]( std::vector<float> &buf, size_t n ) {
+        if ( !magHasNodata || !std::isfinite( magNodataF ) )
+            return;
+        for ( size_t p = 0; p < n; ++p )
+            if ( buf[p] == magNodataF )
+                buf[p] = std::numeric_limits<float>::quiet_NaN();
+    };
     std::vector<double> hist( static_cast<size_t>( kMaskHistogramBins ), 0.0 );
     size_t histFinite = 0;
     const double magRange = magStats.maxVal - magStats.minVal;
@@ -164,6 +181,7 @@ MaskDerivation writeMaskFromMagnitude( const std::string &magPath, const GdalDat
                     throw RSOperatorError( ErrorCode::GdalError,
                                            "Failed to read magnitude tile" );
                 }
+                normalizeTile( tileBuf, n );
                 for ( size_t p = 0; p < n; ++p )
                 {
                     const double v = tileBuf[p];
@@ -245,6 +263,7 @@ MaskDerivation writeMaskFromMagnitude( const std::string &magPath, const GdalDat
                 throw RSOperatorError( ErrorCode::GdalError,
                                        "Failed to read magnitude tile" );
             }
+            normalizeTile( tileBuf, n );
             if ( !ChangeDetection::changeMask( tileBuf.data(), tileMask.data(), n, thresholdUsed ) )
             {
                 throw RSOperatorError( ErrorCode::ComputationError,

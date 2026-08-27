@@ -25,7 +25,7 @@ float TerrainAnalysis::getCell( const float *dem, int width, int height,
 // ---------------------------------------------------------------------------
 
 bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height,
-                             float cellSize, float nodata )
+                             float cellSizeX, float cellSizeY, float nodata )
 {
     if ( !dem || !out ) {
         SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "slope: null pointer argument");
@@ -36,17 +36,20 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
         SICNU_LOG_ERROR(SicnuLogTags::Algorithms, error);
         return false;
     }
-    if ( cellSize <= 0 ) {
-        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("slope: invalid cellSize %1").arg(cellSize));
+    if ( cellSizeX <= 0 || cellSizeY <= 0 ) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("slope: invalid cellSize x=%1 y=%2").arg(cellSizeX).arg(cellSizeY));
         return false;
     }
 
-    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Computing slope: %1x%2, cellSize=%3" )
-        .arg( width ).arg( height ).arg( cellSize ) );
+    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Computing slope: %1x%2, cellSizeX=%3, cellSizeY=%4" )
+        .arg( width ).arg( height ).arg( cellSizeX ).arg( cellSizeY ) );
 
-    const float invCs = 1.0f / cellSize;
-    const float invCs2 = 1.0f / ( 2.0f * cellSize );
-    const float inv8cs = 1.0f / ( 8.0f * cellSize );
+    const float invCsX = 1.0f / cellSizeX;
+    const float invCsY = 1.0f / cellSizeY;
+    const float invCs2X = 1.0f / ( 2.0f * cellSizeX );
+    const float invCs2Y = 1.0f / ( 2.0f * cellSizeY );
+    const float inv8csX = 1.0f / ( 8.0f * cellSizeX );
+    const float inv8csY = 1.0f / ( 8.0f * cellSizeY );
 
     auto isInvalid = [nodata]( float v ) { return v == nodata || std::isnan( v ); };
 
@@ -72,11 +75,11 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
             const bool validF = !isInvalid( f );
             const bool validD = !isInvalid( d );
             if ( validF && validD ) {
-                dzdx = ( f - d ) * invCs2;
+                dzdx = ( f - d ) * invCs2X;
             } else if ( validF ) {
-                dzdx = ( f - z ) * invCs;
+                dzdx = ( f - z ) * invCsX;
             } else if ( validD ) {
-                dzdx = ( z - d ) * invCs;
+                dzdx = ( z - d ) * invCsX;
             } else {
                 dzdx = 0.0f;
             }
@@ -84,17 +87,17 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
             const bool validH = !isInvalid( h );
             const bool validB = !isInvalid( b );
             if ( validH && validB ) {
-                dzdy = ( h - b ) * invCs2;
+                dzdy = ( h - b ) * invCs2Y;
             } else if ( validH ) {
-                dzdy = ( h - z ) * invCs;
+                dzdy = ( h - z ) * invCsY;
             } else if ( validB ) {
-                dzdy = ( z - b ) * invCs;
+                dzdy = ( z - b ) * invCsY;
             } else {
                 dzdy = 0.0f;
             }
         } else {
-            dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8cs;
-            dzdy = ( ( g + 2.0f * h + i ) - ( a + 2.0f * b + c2 ) ) * inv8cs;
+            dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8csX;
+            dzdy = ( ( g + 2.0f * h + i ) - ( a + 2.0f * b + c2 ) ) * inv8csY;
         }
         out[idx] = std::atan( std::sqrt( dzdx * dzdx + dzdy * dzdy ) ) * 180.0f / static_cast<float>( M_PI );
     };
@@ -122,11 +125,11 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
             const bool validF = !isInvalid( f );
             const bool validD = !isInvalid( d );
             if ( validF && validD ) {
-                dzdx = ( f - d ) * invCs2;
+                dzdx = ( f - d ) * invCs2X;
             } else if ( validF ) {
-                dzdx = ( f - z ) * invCs;
+                dzdx = ( f - z ) * invCsX;
             } else if ( validD ) {
-                dzdx = ( z - d ) * invCs;
+                dzdx = ( z - d ) * invCsX;
             } else {
                 dzdx = 0.0f;
             }
@@ -134,17 +137,17 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
             const bool validH = !isInvalid( h );
             const bool validB = !isInvalid( b );
             if ( validH && validB ) {
-                dzdy = ( h - b ) * invCs2;
+                dzdy = ( h - b ) * invCs2Y;
             } else if ( validH ) {
-                dzdy = ( h - z ) * invCs;
+                dzdy = ( h - z ) * invCsY;
             } else if ( validB ) {
-                dzdy = ( z - b ) * invCs;
+                dzdy = ( z - b ) * invCsY;
             } else {
                 dzdy = 0.0f;
             }
         } else {
-            dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8cs;
-            dzdy = ( ( g + 2.0f * h + i ) - ( a + 2.0f * b + c2 ) ) * inv8cs;
+            dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8csX;
+            dzdy = ( ( g + 2.0f * h + i ) - ( a + 2.0f * b + c2 ) ) * inv8csY;
         }
         out[idx] = std::atan( std::sqrt( dzdx * dzdx + dzdy * dzdy ) ) * 180.0f / static_cast<float>( M_PI );
     };
@@ -164,12 +167,37 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
     return true;
 }
 
+
+// ---------------------------------------------------------------------------
+// Single-cellSize compatibility overloads (#612): isotropic pixels
+// ---------------------------------------------------------------------------
+
+bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height,
+                             float cellSize, float nodata )
+{
+    return slope( dem, out, width, height, cellSize, cellSize, nodata );
+}
+
+bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int height,
+                              float cellSize, float nodata )
+{
+    return aspect( dem, out, width, height, cellSize, cellSize, nodata );
+}
+
+bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int height,
+                                 float cellSize, float nodata,
+                                 float sunAzimuth, float sunElevation )
+{
+    return hillshade( dem, out, width, height, cellSize, cellSize, nodata,
+                      sunAzimuth, sunElevation );
+}
+
 // ---------------------------------------------------------------------------
 // Aspect (Horn 1981)
 // ---------------------------------------------------------------------------
 
 bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int height,
-                              float cellSize, float nodata )
+                              float cellSizeX, float cellSizeY, float nodata )
 {
     if ( !dem || !out ) {
         SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "aspect: null pointer argument");
@@ -180,16 +208,19 @@ bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int heigh
         SICNU_LOG_ERROR(SicnuLogTags::Algorithms, error);
         return false;
     }
-    if ( cellSize <= 0 ) {
-        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("aspect: invalid cellSize %1").arg(cellSize));
+    if ( cellSizeX <= 0 || cellSizeY <= 0 ) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("aspect: invalid cellSize x=%1 y=%2").arg(cellSizeX).arg(cellSizeY));
         return false;
     }
 
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Computing aspect: %1x%2" ).arg( width ).arg( height ) );
 
-    const float invCs = 1.0f / cellSize;
-    const float invCs2 = 1.0f / ( 2.0f * cellSize );
-    const float inv8cs = 1.0f / ( 8.0f * cellSize );
+    const float invCsX = 1.0f / cellSizeX;
+    const float invCsY = 1.0f / cellSizeY;
+    const float invCs2X = 1.0f / ( 2.0f * cellSizeX );
+    const float invCs2Y = 1.0f / ( 2.0f * cellSizeY );
+    const float inv8csX = 1.0f / ( 8.0f * cellSizeX );
+    const float inv8csY = 1.0f / ( 8.0f * cellSizeY );
     const float toDeg = 180.0f / static_cast<float>( M_PI );
 
     auto isInvalid = [nodata]( float v ) { return v == nodata || std::isnan( v ); };
@@ -228,11 +259,11 @@ bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int heigh
             const bool validF = !isInvalid( f );
             const bool validD = !isInvalid( d );
             if ( validF && validD ) {
-                dzdx = ( f - d ) * invCs2;
+                dzdx = ( f - d ) * invCs2X;
             } else if ( validF ) {
-                dzdx = ( f - z ) * invCs;
+                dzdx = ( f - z ) * invCsX;
             } else if ( validD ) {
-                dzdx = ( z - d ) * invCs;
+                dzdx = ( z - d ) * invCsX;
             } else {
                 dzdx = 0.0f;
             }
@@ -240,17 +271,17 @@ bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int heigh
             const bool validH = !isInvalid( h );
             const bool validB = !isInvalid( b );
             if ( validH && validB ) {
-                dzdy = ( h - b ) * invCs2;
+                dzdy = ( h - b ) * invCs2Y;
             } else if ( validH ) {
-                dzdy = ( h - z ) * invCs;
+                dzdy = ( h - z ) * invCsY;
             } else if ( validB ) {
-                dzdy = ( z - b ) * invCs;
+                dzdy = ( z - b ) * invCsY;
             } else {
                 dzdy = 0.0f;
             }
         } else {
-            dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8cs;
-            dzdy = ( ( g + 2.0f * h + i ) - ( a + 2.0f * b + c2 ) ) * inv8cs;
+            dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8csX;
+            dzdy = ( ( g + 2.0f * h + i ) - ( a + 2.0f * b + c2 ) ) * inv8csY;
         }
 
         if ( std::abs( dzdx ) < 1e-10f && std::abs( dzdy ) < 1e-10f ) { out[idx] = -1.0f; return; }
@@ -276,7 +307,7 @@ bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int heigh
 // ---------------------------------------------------------------------------
 
 bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int height,
-                                 float cellSize, float nodata,
+                                 float cellSizeX, float cellSizeY, float nodata,
                                  float sunAzimuth, float sunElevation )
 {
     if ( !dem || !out ) {
@@ -288,8 +319,8 @@ bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int he
         SICNU_LOG_ERROR(SicnuLogTags::Algorithms, error);
         return false;
     }
-    if ( cellSize <= 0 ) {
-        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("hillshade: invalid cellSize %1").arg(cellSize));
+    if ( cellSizeX <= 0 || cellSizeY <= 0 ) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("hillshade: invalid cellSize x=%1 y=%2").arg(cellSizeX).arg(cellSizeY));
         return false;
     }
 
@@ -300,9 +331,12 @@ bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int he
     const float azRad = sunAzimuth * static_cast<float>( M_PI ) / 180.0f;
     const float cosZen = std::cos( zenRad );
     const float sinZen = std::sin( zenRad );
-    const float invCs = 1.0f / cellSize;
-    const float invCs2 = 1.0f / ( 2.0f * cellSize );
-    const float inv8cs = 1.0f / ( 8.0f * cellSize );
+    const float invCsX = 1.0f / cellSizeX;
+    const float invCsY = 1.0f / cellSizeY;
+    const float invCs2X = 1.0f / ( 2.0f * cellSizeX );
+    const float invCs2Y = 1.0f / ( 2.0f * cellSizeY );
+    const float inv8csX = 1.0f / ( 8.0f * cellSizeX );
+    const float inv8csY = 1.0f / ( 8.0f * cellSizeY );
 
     auto isInvalid = [nodata]( float v ) { return v == nodata || std::isnan( v ); };
     auto computeHillshade = [&]( int r, int c, bool useBounds ) {
@@ -339,11 +373,11 @@ bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int he
             const bool validF = !isInvalid( f );
             const bool validD = !isInvalid( d );
             if ( validF && validD ) {
-                dzdx = ( f - d ) * invCs2;
+                dzdx = ( f - d ) * invCs2X;
             } else if ( validF ) {
-                dzdx = ( f - z ) * invCs;
+                dzdx = ( f - z ) * invCsX;
             } else if ( validD ) {
-                dzdx = ( z - d ) * invCs;
+                dzdx = ( z - d ) * invCsX;
             } else {
                 dzdx = 0.0f;
             }
@@ -351,17 +385,17 @@ bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int he
             const bool validH = !isInvalid( h );
             const bool validB = !isInvalid( b );
             if ( validH && validB ) {
-                dzdy = ( h - b ) * invCs2;
+                dzdy = ( h - b ) * invCs2Y;
             } else if ( validH ) {
-                dzdy = ( h - z ) * invCs;
+                dzdy = ( h - z ) * invCsY;
             } else if ( validB ) {
-                dzdy = ( z - b ) * invCs;
+                dzdy = ( z - b ) * invCsY;
             } else {
                 dzdy = 0.0f;
             }
         } else {
-            dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8cs;
-            dzdy = ( ( g + 2.0f * h + i ) - ( a + 2.0f * b + c2 ) ) * inv8cs;
+            dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8csX;
+            dzdy = ( ( g + 2.0f * h + i ) - ( a + 2.0f * b + c2 ) ) * inv8csY;
         }
 
         const float slopeRad = std::atan( std::sqrt( dzdx * dzdx + dzdy * dzdy ) );

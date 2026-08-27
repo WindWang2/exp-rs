@@ -337,3 +337,26 @@ TEST_CASE( "TerrainAnalysis: rectangular grid 64-bit index safety", "[terrain]" 
     REQUIRE( hsOut[testIdx] >= 0.0f );
     REQUIRE( hsOut[testIdx] <= 1.0f );
 }
+
+TEST_CASE( "Slope: anisotropic cell sizes use x/y separately (#612)", "[terrain]" )
+{
+    // DEM rising 1 m per pixel in x only; square pixels give 45 degrees at
+    // cellSize 1. Doubling cellSizeX must halve the slope angle accordingly:
+    // tan(slope) = dz/dx = 1/(2*1) -> ~26.57 degrees.
+    const int W = 5, H = 5;
+    std::vector<float> dem( static_cast<size_t>( W ) * H );
+    for ( int r = 0; r < H; ++r )
+        for ( int c = 0; c < W; ++c )
+            dem[static_cast<size_t>( r ) * W + c] = static_cast<float>( c );
+
+    std::vector<float> out( dem.size() );
+    REQUIRE( TerrainAnalysis::slope( dem.data(), out.data(), W, H, 1.0f, 1.0f, -9999.0f ) );
+    REQUIRE( out[static_cast<size_t>( 2 ) * W + 2] == Approx( 45.0f ).margin( 0.01f ) );
+
+    REQUIRE( TerrainAnalysis::slope( dem.data(), out.data(), W, H, 2.0f, 1.0f, -9999.0f ) );
+    REQUIRE( out[static_cast<size_t>( 2 ) * W + 2] == Approx( 26.565f ).margin( 0.01f ) );
+
+    // Same via the isotropic overload (regression pin).
+    REQUIRE( TerrainAnalysis::slope( dem.data(), out.data(), W, H, 1.0f, -9999.0f ) );
+    REQUIRE( out[static_cast<size_t>( 2 ) * W + 2] == Approx( 45.0f ).margin( 0.01f ) );
+}

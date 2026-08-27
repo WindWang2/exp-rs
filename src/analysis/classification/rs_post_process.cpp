@@ -146,14 +146,19 @@ int modeOfWindow( const cv::Mat &labels, int r, int c, int k )
   const int c0 = std::max( 0, c - half );
   const int c1 = std::min( W - 1, c + half );
 
-  // Stack-allocated frequency table to eliminate heap allocations per pixel
+  // Frequency table sized to the window (k*k cells can hold at most k*k
+  // DISTINCT labels). The previous fixed cap of 64 silently dropped votes
+  // for >=9x9 windows on many-class maps (#612), biasing the mode.
+  // Label 0 is the segmenters' NoData and does not vote: letting it
+  // participate could grow NoData into valid areas.
   struct FreqEntry
   {
     int val;
     int count;
   };
-  std::array<FreqEntry, 64> freq;
-  int numEntries = 0;
+  const int maxEntries = k * k;
+  std::vector<FreqEntry> freq;
+  freq.reserve( static_cast<size_t>( maxEntries ) );
 
   for ( int rr = r0; rr <= r1; ++rr )
   {
@@ -161,31 +166,38 @@ int modeOfWindow( const cv::Mat &labels, int r, int c, int k )
     for ( int cc = c0; cc <= c1; ++cc )
     {
       const int v = row[cc];
+      if ( v == 0 )
+        continue;
       bool found = false;
-      for ( int i = 0; i < numEntries; ++i )
+      for ( FreqEntry &e : freq )
       {
-        if ( freq[i].val == v )
+        if ( e.val == v )
         {
-          ++freq[i].count;
+          ++e.count;
           found = true;
           break;
         }
       }
-      if ( !found && numEntries < 64 )
+      if ( !found )
       {
-        freq[numEntries++] = { v, 1 };
+        freq.push_back( { v, 1 } );
       }
     }
   }
 
+  if ( freq.empty() )
+    return pixelAt( labels, r, c );  // only NoData around: keep the center
+
   int bestVal = pixelAt( labels, r, c );
+  if ( bestVal == 0 )
+    bestVal = freq.front().val;
   int bestCnt = -1;
-  for ( int i = 0; i < numEntries; ++i )
+  for ( const FreqEntry &e : freq )
   {
-    if ( freq[i].count > bestCnt || ( freq[i].count == bestCnt && freq[i].val < bestVal ) )
+    if ( e.count > bestCnt || ( e.count == bestCnt && e.val < bestVal ) )
     {
-      bestCnt = freq[i].count;
-      bestVal = freq[i].val;
+      bestCnt = e.count;
+      bestVal = e.val;
     }
   }
   return bestVal;

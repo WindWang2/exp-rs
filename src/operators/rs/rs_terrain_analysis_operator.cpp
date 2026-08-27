@@ -12,6 +12,9 @@
 
 #include <QString>
 
+#include <ogr_srs_api.h>
+#include <cpl_error.h>
+
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -100,13 +103,57 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
                               "Failed to open input DEM: " + inputPath);
     }
 
-    float cellSize = 30.0f;
+    // Per-axis pixel size in METRES (#612). A geographic (degree) DEM fed to
+    // the Horn kernels with cellSize in degrees yields dz(m)/dx(deg) and
+    // slope ~90 degrees everywhere - silently. Instead: degrees are
+    // auto-converted to metres per degree at scene-centre latitude (x uses
+    // the longitude arc, y the latitude arc), and anisotropic projected
+    // pixels use |gt[1]| and |gt[5]| separately.
+    float cellSizeX = 30.0f;
+    float cellSizeY = 30.0f;
     if (params.isMember("cellSize") && params["cellSize"].isNumeric()) {
-        cellSize = static_cast<float>(params["cellSize"].asDouble());
+        // Explicit cellSize keeps its historical meaning: metres (or map
+        // units) applied to both axes.
+        cellSizeX = cellSizeY = static_cast<float>(params["cellSize"].asDouble());
     } else {
         const std::array<double, 6> gt = ds.geoTransform();
-        if (std::abs(gt[1]) > 1e-7) {
-            cellSize = static_cast<float>(std::abs(gt[1]));
+        const double resX = std::abs(gt[1]);
+        const double resY = std::abs(gt[5]);
+        if (resX > 1e-7) {
+            cellSizeX = static_cast<float>(resX);
+            cellSizeY = static_cast<float>(resY > 1e-7 ? resY : resX);
+        }
+        bool isGeographic = false;
+        {
+            const QString wkt = ds.projection();
+            if (!wkt.isEmpty()) {
+                OGRSpatialReferenceH srs = OSRNewSpatialReference(nullptr);
+                if (srs) {
+                    const QByteArray wktBytes = wkt.toUtf8();
+                    char *wktPtr = const_cast<char *>(wktBytes.constData());
+                    if (OSRImportFromWkt(srs, &wktPtr) == OGRERR_NONE && OSRIsGeographic(srs)) {
+                        isGeographic = true;
+                        // Scene-centre latitude from the geotransform (row
+                        // height/2). WGS84 arc lengths per degree (Snyder).
+                        const double phiDeg = gt[3] + (ds.height() / 2.0) * gt[5];
+                        const double phiRad = phiDeg * M_PI / 180.0;
+                        const double cosPhi = std::cos(phiRad);
+                        const double mPerDegLat =
+                            111132.92 - 559.82 * std::cos(2 * phiRad) + 1.175 * std::cos(4 * phiRad);
+                        const double mPerDegLon =
+                            111412.84 * cosPhi - 93.5 * std::cos(3 * phiRad);
+                        cellSizeX = static_cast<float>(resX * mPerDegLon);
+                        cellSizeY = static_cast<float>((resY > 1e-7 ? resY : resX) * mPerDegLat);
+                        context.logInfo("Geographic DEM: converted pixel size to metres "
+                                        "at centre latitude " + std::to_string(phiDeg));
+                    }
+                    OSRDestroySpatialReference(srs);
+                }
+            }
+        }
+        if (!isGeographic) {
+            context.logInfo("Pixel size from geotransform: x=" + std::to_string(cellSizeX) +
+                            " y=" + std::to_string(cellSizeY) + " (map units)");
         }
     }
 
@@ -127,7 +174,7 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
     const int width = ds.width();
     const int height = ds.height();
 
-    context.logInfo("Computing " + product + " from " + inputPath + " (cellSize=" + std::to_string(cellSize) + ")");
+    context.logInfo("Computing " + product + " from " + inputPath + " (cellSizeX=" + std::to_string(cellSizeX) + ", cellSizeY=" + std::to_string(cellSizeY) + ")");
     context.reportProgress(0.2, "Reading DEM");
 
     std::vector<float> dem;
@@ -144,11 +191,11 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
 
     bool ok = false;
     if (product == "slope") {
-        ok = TerrainAnalysis::slope(dem.data(), out.data(), width, height, cellSize, computeNodata);
+        ok = TerrainAnalysis::slope(dem.data(), out.data(), width, height, cellSizeX, cellSizeY, computeNodata);
     } else if (product == "aspect") {
-        ok = TerrainAnalysis::aspect(dem.data(), out.data(), width, height, cellSize, computeNodata);
+        ok = TerrainAnalysis::aspect(dem.data(), out.data(), width, height, cellSizeX, cellSizeY, computeNodata);
     } else if (product == "hillshade") {
-        ok = TerrainAnalysis::hillshade(dem.data(), out.data(), width, height, cellSize, computeNodata,
+        ok = TerrainAnalysis::hillshade(dem.data(), out.data(), width, height, cellSizeX, cellSizeY, computeNodata,
                                         sunAzimuth, sunElevation);
     } else if (product == "roughness") {
         ok = TerrainAnalysis::roughness(dem.data(), out.data(), width, height, computeNodata);
