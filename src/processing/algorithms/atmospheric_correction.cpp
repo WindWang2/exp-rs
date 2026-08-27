@@ -555,4 +555,120 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
     return true;
 }
 
+bool processFileDos(const QString &sourcePath, const QString &outputPath,
+                    int bandNum, int method,
+                    const RadiometricCalibration::BandCoefficients &coeffs,
+                    RadiometricCalibration::SensorType sensor,
+                    double sunElevationDeg,
+                    float airmass, QString *errorMessage)
+{
+    using RadiometricCalibration::toToaReflectance;
+    using RadiometricCalibration::SensorType;
+
+    if (method != Method::Dos1 && method != Method::Dos2) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("processFileDos only supports Dos1/Dos2");
+        return false;
+    }
+    if (sensor == SensorType::Landsat && !std::isfinite(sunElevationDeg)) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Landsat DOS requires a finite sun elevation");
+        return false;
+    }
+
+    GdalDatasetWrapper srcDataset;
+    if (!srcDataset.open(sourcePath)) {
+        if (errorMessage)
+            *errorMessage = srcDataset.lastError();
+        return false;
+    }
+    const int width = srcDataset.width();
+    const int height = srcDataset.height();
+
+    GdalDatasetWrapper outDataset;
+    if (!outDataset.create(outputPath, width, height, 1, GDT_Float32,
+                           srcDataset.geoTransform(), srcDataset.projection(), errorMessage))
+        return false;
+
+    // Surface-reflectance output: NaN is the NoData convention.
+    outDataset.setBandNoDataValue(1, std::numeric_limits<double>::quiet_NaN());
+
+    bool hasSrcNoData = false;
+    const double bandNoData = srcDataset.bandNoDataValue(bandNum, &hasSrcNoData);
+
+    constexpr int kTile = 256;
+    const float transmittance = (method == Method::Dos2) ? estimateTransmittance(airmass) : 1.0f;
+
+    // Passes 1+2: dark-object statistics in TOA-reflectance space (the same
+    // streaming histogram estimator the radiance path uses).
+    float darkLevel = 0.0f;
+    {
+        DarkObjectStats stats;
+        std::vector<float> rhoToa;
+        const auto statsPass = [&](bool binning) -> bool {
+            return GdalBlockStream(srcDataset, bandNum, kTile, kTile).forEach(
+                [&](const GdalBlockStream::Tile &tile, const float *pixels) {
+                    const size_t n = static_cast<size_t>(tile.width) * tile.height;
+                    rhoToa.resize(n);
+                    if (!toToaReflectance(pixels, rhoToa.data(), n, coeffs, sensor, sunElevationDeg))
+                        return false;
+                    if (binning)
+                        stats.accumulateBins(rhoToa.data(), n);
+                    else
+                        stats.accumulateRange(rhoToa.data(), n);
+                    return true;
+                });
+        };
+        if (!statsPass(false)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Failed to compute TOA reflectance for band %1 "
+                                               "(missing REFLECTANCE_MULT/ADD or QUANTIFICATION_VALUE?)")
+                                    .arg(bandNum);
+            return false;
+        }
+        if (stats.prepareBins()) {
+            if (!statsPass(true)) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("Failed to accumulate dark-object histogram for band %1").arg(bandNum);
+                return false;
+            }
+        }
+        darkLevel = stats.darkLevel();
+    }
+
+    // Pass 3: Chavez DOS in reflectance space.
+    std::vector<float> out;
+    QString tileError;
+    const bool ok = GdalBlockStream(srcDataset, bandNum, kTile, kTile).forEach(
+        [&](const GdalBlockStream::Tile &tile, const float *pixels) {
+            const size_t n = static_cast<size_t>(tile.width) * tile.height;
+            out.resize(n);
+            for (size_t i = 0; i < n; ++i) {
+                const bool invalid =
+                    !std::isfinite(pixels[i])
+                    || (hasSrcNoData
+                        && (!std::isnan(bandNoData) ? std::abs(pixels[i] - bandNoData) < 1e-4f : std::isnan(pixels[i])));
+                if (invalid) {
+                    out[i] = std::numeric_limits<float>::quiet_NaN();
+                    continue;
+                }
+                float rho = std::numeric_limits<float>::quiet_NaN();
+                if (!toToaReflectance(pixels + i, &rho, 1, coeffs, sensor, sunElevationDeg)) {
+                    rho = std::numeric_limits<float>::quiet_NaN();
+                }
+                out[i] = dosReflectance(rho, darkLevel, transmittance);
+            }
+            return outDataset.writeBandWindow(1, tile.xOffset, tile.yOffset,
+                                              tile.width, tile.height, out.data());
+        });
+    if (!ok) {
+        if (errorMessage)
+            *errorMessage = tileError.isEmpty()
+                                ? QStringLiteral("Failed to stream band %1").arg(bandNum)
+                                : tileError;
+        return false;
+    }
+    return true;
+}
+
 } // namespace AtmosphericCorrection

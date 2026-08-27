@@ -193,10 +193,77 @@ Json::Value runAtmosphericCorrectionCore(const std::string& defaultMethod,
         }
     }
 
+    // DOS1/DOS2 now run in TOA-reflectance space (#610): they require
+    // reflectance-capable coefficients (Landsat REFLECTANCE_MULT/ADD plus
+    // SUN_ELEVATION; Sentinel-2 QUANTIFICATION_VALUE/offsets) resolved from
+    // product metadata. Producing haze-corrected radiance while labeling it
+    // surface reflectance was the silent science bug this replaces.
+    if (methodCode == AtmosphericCorrection::Dos1 || methodCode == AtmosphericCorrection::Dos2) {
+        QString dosMetaPath = QString::fromStdString(getString(params, "metadata_path", ""));
+        if (dosMetaPath.isEmpty())
+            dosMetaPath = RadiometricCalibration::autoDetectMetadataFile(
+                QString::fromStdString(inputPath));
+        if (!dosMetaPath.isEmpty()) {
+            GdalDatasetWrapper ds;
+            QMap<int, QString> bandNames;
+            if (ds.open(QString::fromStdString(inputPath))) {
+                for (int b = 1; b <= ds.bandCount(); ++b) {
+                    const QString desc = ds.bandDescription(b);
+                    bandNames.insert(b, desc.isEmpty() ? QStringLiteral("B%1").arg(b) : desc);
+                }
+            }
+            RadiometricCalibration::CalibrationMetadata meta;
+            QString metaError;
+            if (RadiometricCalibration::loadMetadata(QString::fromStdString(inputPath),
+                                                     dosMetaPath, bandNames, &meta,
+                                                     &metaError)
+                && meta.bands.contains(band)) {
+                if (meta.sensor == RadiometricCalibration::SensorType::Landsat
+                    && !meta.hasSunElevation) {
+                    throw RSOperatorError(
+                        ErrorCode::InvalidInputData,
+                        "DOS surface-reflectance correction requires SUN_ELEVATION in "
+                        "the metadata (refusing to default to 90 degrees): " + dosMetaPath.toStdString());
+                }
+                const auto &c = meta.bands.value(band);
+                context.logInfo("DOS in reflectance space using " + dosMetaPath.toStdString());
+                QString dosError;
+                if (!AtmosphericCorrection::processFileDos(
+                        QString::fromStdString(inputPath),
+                        QString::fromStdString(outputPath),
+                        band, methodCode, c, meta.sensor, meta.sunElevationDeg,
+                        airmass, &dosError)) {
+                    throw RSOperatorError(ErrorCode::ComputationError,
+                                          "Atmospheric correction failed: " + dosError.toStdString());
+                }
+                context.throwIfCancelled();
+                context.reportProgress(1.0, "Atmospheric correction complete");
+                const char *dosState = SatelliteProducts::kRadiometricStateSurfaceReflectance;
+                QString dosStateError;
+                if (!SatelliteProducts::setRadiometricState(
+                        QString::fromStdString(outputPath), dosState, &dosStateError))
+                    context.logWarning(dosStateError.toStdString());
+                Json::Value dosResult(Json::objectValue);
+                dosResult["output"] = outputPath;
+                dosResult["method"] = method;
+                dosResult["band"] = band;
+                return dosResult;
+            }
+        }
+        {
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                "DOS1/DOS2 surface-reflectance correction requires product metadata with "
+                "reflectance coefficients (Landsat MTL REFLECTANCE_MULT/ADD + SUN_ELEVATION, "
+                "or Sentinel-2 MTD QUANTIFICATION_VALUE). Provide metadata_path or place "
+                "MTL/MTD next to the input. Use method dn_to_radiance for plain radiance.");
+        }
+    }
+
     // Resolve radiance gain/bias from product metadata (explicit MTL/MTD path
     // or auto-detected sibling) when the caller did not supply them — the
     // "sensor metadata populates parameters automatically" workflow.
-    if (methodCode != AtmosphericCorrection::Quac && (!hasGain || !hasBias)) {
+    if (methodCode == AtmosphericCorrection::DnToRadiance && (!hasGain || !hasBias)) {
         QString metadataPath = QString::fromStdString(getString(params, "metadata_path", ""));
         if (metadataPath.isEmpty())
             metadataPath = RadiometricCalibration::autoDetectMetadataFile(

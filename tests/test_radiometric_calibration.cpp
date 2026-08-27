@@ -844,3 +844,84 @@ TEST_CASE("loadMetadata with empty bandNames auto-discovers Sentinel-2 MTD bands
     // Bands without an offset entry are not fabricated
     CHECK_FALSE(meta.bands.contains(1));
 }
+
+// ---------------------------------------------------------------------------
+// #610: fail-closed sun elevation, BT NaN, Chavez DOS in reflectance space
+// ---------------------------------------------------------------------------
+
+TEST_CASE("TOA reflectance fails closed without SUN_ELEVATION (#610)", "[radcal][gdal]")
+{
+    ensureGdalInit();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const QString sourcePath = dir.filePath(QStringLiteral("noSunEl.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("out.tif"));
+    const QString mtlPath = dir.filePath(QStringLiteral("LC08_MTL.txt"));
+
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+    GDALDatasetH srcDs = createOutputTiff(sourcePath, 1, 1, 1, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+    GDALRasterBandH b1 = GDALGetRasterBand(srcDs, 1);
+    std::vector<float> band = {10000.0f};
+    REQUIRE(GDALRasterIO(b1, GF_Write, 0, 0, 1, 1, band.data(), 1, 1, GDT_Float32, 0, 0) == CE_None);
+    GDALSetDescription(b1, "B4");
+    GDALClose(srcDs);
+
+    // SUN_ELEVATION intentionally absent.
+    writeMtlFile(mtlPath, {
+        QStringLiteral("SPACECRAFT_ID = \"LANDSAT_8\""),
+        QStringLiteral("REFLECTANCE_MULT_BAND_4 = 0.00002"),
+        QStringLiteral("REFLECTANCE_ADD_BAND_4 = 0.0"),
+    });
+
+    QString error;
+    const bool ok = processFile(sourcePath, outputPath, mtlPath,
+                                static_cast<int>(OutputUnit::ToaReflectance),
+                                {}, &error);
+    REQUIRE_FALSE(ok);
+    REQUIRE(error.contains(QStringLiteral("SUN_ELEVATION")));
+}
+
+TEST_CASE("loadMetadata flags hasSunElevation (#610)", "[radcal][mtl]")
+{
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString mtlPath = dir.filePath(QStringLiteral("LC08_MTL.txt"));
+
+    writeMtlFile(mtlPath, {
+        QStringLiteral("SPACECRAFT_ID = \"LANDSAT_8\""),
+        QStringLiteral("SUN_ELEVATION = 42.0"),
+        QStringLiteral("REFLECTANCE_MULT_BAND_4 = 0.00002"),
+        QStringLiteral("REFLECTANCE_ADD_BAND_4 = 0.0"),
+    });
+    RadiometricCalibration::CalibrationMetadata meta;
+    QString err;
+    QMap<int, QString> bandNames;
+    bandNames.insert(1, QStringLiteral("B4"));
+    REQUIRE(RadiometricCalibration::loadMetadata(QString(), mtlPath, bandNames, &meta, &err));
+    CHECK(meta.hasSunElevation);
+    REQUIRE_THAT(meta.sunElevationDeg, WithinAbs(42.0, 1e-9));
+
+    writeMtlFile(mtlPath, {
+        QStringLiteral("SPACECRAFT_ID = \"LANDSAT_8\""),
+        QStringLiteral("REFLECTANCE_MULT_BAND_4 = 0.00002"),
+    });
+    REQUIRE(RadiometricCalibration::loadMetadata(QString(), mtlPath, bandNames, &meta, &err));
+    CHECK_FALSE(meta.hasSunElevation);
+}
+
+TEST_CASE("toBrightnessTemperature maps non-positive radiance to NaN, not 0 K (#610)", "[radcal]")
+{
+    // gain*bias chosen so the second DN maps to radiance <= 0.
+    RadiometricCalibration::BandCoefficients c;
+    c.radianceGain = 0.1;
+    c.radianceBias = -10.0; // DN 50 -> L = -5 (invalid), DN 200 -> L = 10 (valid)
+    c.k1 = 774.8853;
+    c.k2 = 1321.0789;
+    std::vector<float> dn = {200.0f, 50.0f};
+    std::vector<float> out(2);
+    REQUIRE(toBrightnessTemperature(dn.data(), out.data(), 2, c));
+    REQUIRE(std::isfinite(out[0]));
+    REQUIRE(std::isnan(out[1]));
+}

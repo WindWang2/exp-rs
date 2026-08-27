@@ -15,6 +15,7 @@
 #include <qgsrectangle.h>
 #include <qgscoordinatereferencesystem.h>
 
+#include <cmath>
 #include <vector>
 
 void AtmosphericCorrectionAlgorithm::initAlgorithm( const QVariantMap & )
@@ -84,7 +85,44 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
         return QVariantMap{ { QStringLiteral( "OUTPUT" ), dest } };
     }
 
-    // For DOS/DN-to-radiance: resolve gain/bias from metadata when the caller
+    // DOS1/DOS2 run in TOA-reflectance space (#610) and require
+    // reflectance-capable coefficients from product metadata; the old
+    // radiance-space output was mislabeled as surface reflectance.
+    if ( method == AtmosphericCorrection::Dos1 || method == AtmosphericCorrection::Dos2 )
+    {
+        const QString metaPath = RadiometricCalibration::autoDetectMetadataFile( inputLayer->source() );
+        RadiometricCalibration::CalibrationMetadata meta;
+        QString metaErr;
+        bool loaded = false;
+        if ( !metaPath.isEmpty() )
+        {
+            QMap<int, QString> bandNames;
+            bandNames.insert( 1, QStringLiteral( "B1" ) );
+            loaded = RadiometricCalibration::loadMetadata( inputLayer->source(), metaPath, bandNames, &meta, &metaErr )
+                     && meta.bands.contains( 1 );
+        }
+        if ( !loaded )
+            throw QgsProcessingException( QObject::tr(
+                "DOS1/DOS2 surface-reflectance correction requires product metadata with "
+                "reflectance coefficients (Landsat MTL REFLECTANCE_MULT/ADD + SUN_ELEVATION, "
+                "or Sentinel-2 MTD QUANTIFICATION_VALUE) next to the input." ) );
+        if ( meta.sensor == RadiometricCalibration::SensorType::Landsat && !meta.hasSunElevation )
+            throw QgsProcessingException( QObject::tr(
+                "SUN_ELEVATION missing from metadata; Landsat DOS requires it." ) );
+        const auto &c = meta.bands.value( 1 );
+        float airmassDos = 1.0f;
+        if ( method == AtmosphericCorrection::Dos2 && transmittance > 0.0f && transmittance <= 1.0f )
+            airmassDos = static_cast<float>( -std::log( static_cast<double>( transmittance ) ) / 0.1 );
+        QString dosError;
+        if ( !AtmosphericCorrection::processFileDos( inputLayer->source(), dest, 1, method,
+                c, meta.sensor, meta.sunElevationDeg, airmassDos, &dosError ) )
+            throw QgsProcessingException(
+                dosError.isEmpty() ? QObject::tr( "Atmospheric correction failed" ) : dosError );
+        feedback->setProgress( 100 );
+        return QVariantMap{ { QStringLiteral( "OUTPUT" ), dest } };
+    }
+
+    // For DN-to-radiance: resolve gain/bias from metadata when the caller
     // left the defaults (1/0) — mirrors RsAtmosphericCorrectionOperator which
     // throws if unresolved. This closes the silent identity-fallback gap (#301/#367).
     {

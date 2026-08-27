@@ -61,14 +61,19 @@ bool loadLandsatMtl(const QString &mtlPath, const QMap<int, QString> &bandNames,
         return false;
     }
 
+    // Reset: callers may reuse one struct across loads; stale flags/bands
+    // from a previous metadata file must never leak through.
+    *out = CalibrationMetadata{};
     out->sensor = SensorType::Landsat;
     out->spacecraft = kv.value(QStringLiteral("SPACECRAFT_ID"));
     out->processingLevel = kv.value(QStringLiteral("PROCESSING_LEVEL"));
     out->acquisitionDate = kv.value(QStringLiteral("DATE_ACQUIRED"));
     bool sunOk = false;
     const double sunEl = toDouble(kv.value(QStringLiteral("SUN_ELEVATION")), &sunOk);
-    if (sunOk && sunEl > 0.0 && sunEl < 90.0)
+    if (sunOk && sunEl > 0.0 && sunEl <= 90.0) {
         out->sunElevationDeg = sunEl;
+        out->hasSunElevation = true;
+    }
 
     // Map raster band index (1-based) -> Landsat band number.
     // Prefer the band-name mapping; fall back to identity (band i == MTL band i).
@@ -267,6 +272,8 @@ bool loadSentinel2Mtd(const QString &mtdPath, const QMap<int, QString> &bandName
         return false;
     }
 
+    // Reset: callers may reuse one struct across loads (see loadLandsatMtl).
+    *out = CalibrationMetadata{};
     out->sensor = SensorType::Sentinel2;
     const QDomElement root = doc.documentElement();
 
@@ -278,8 +285,10 @@ bool loadSentinel2Mtd(const QString &mtdPath, const QMap<int, QString> &bandName
                                    : mtdValue(sunEl, QStringLiteral("Mean_Sun_Zenith_Angle"));
     bool zenOk = false;
     const double zenith = toDouble(zenithText, &zenOk);
-    if (zenOk && zenith >= 0.0 && zenith <= 90.0)
+    if (zenOk && zenith >= 0.0 && zenith <= 90.0) {
         out->sunElevationDeg = 90.0 - zenith;
+        out->hasSunElevation = true;
+    }
 
     // Processing level: detect from the XML root tag name.
     // L2A products use <n1:Level-2A_User_Product>, L1C use <n1:Level-1C_User_Product>.
@@ -409,6 +418,8 @@ bool loadGdalMetadata(const QString &rasterPath, const QMap<int, QString> &bandN
         return false;
     }
 
+    // Reset: callers may reuse one struct across loads (see loadLandsatMtl).
+    *out = CalibrationMetadata{};
     out->sensor = SensorType::Generic;
     const char *sc = GDALGetMetadataItem(ds, "SICNU_SPACECRAFT", nullptr);
     if (sc)
@@ -419,8 +430,10 @@ bool loadGdalMetadata(const QString &rasterPath, const QMap<int, QString> &bandN
     const char *se = GDALGetMetadataItem(ds, "SUN_ELEVATION", nullptr);
     bool seOk = false;
     const double sunEl = se ? QString::fromUtf8(se).toDouble(&seOk) : 90.0;
-    if (seOk && sunEl > 0.0 && sunEl < 90.0)
+    if (seOk && sunEl > 0.0 && sunEl <= 90.0) {
         out->sunElevationDeg = sunEl;
+        out->hasSunElevation = true;
+    }
 
     const int bandCount = GDALGetRasterCount(ds);
     bool any = false;
@@ -585,7 +598,10 @@ bool toBrightnessTemperature(const float *dn, float *temperature, size_t count,
     for (size_t i = 0; i < count; i++) {
         const float l = gain * dn[i] + bias;
         if (l <= 0.0f || !std::isfinite(l)) {
-            temperature[i] = 0.0f;
+            // Non-positive radiance has no physical temperature. 0 K would be
+            // a finite, plausible-looking value that survives nodata stamping;
+            // NaN matches the file-level NoData convention instead.
+            temperature[i] = std::numeric_limits<float>::quiet_NaN();
             continue;
         }
         temperature[i] = k2 / std::log(k1 / l + 1.0f);
@@ -686,6 +702,14 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
             return false;
         }
         if (unit == OutputUnit::ToaReflectance) {
+            // Fail closed on a missing sun elevation: the 90-degree default
+            // silently skips the 1/sin(theta) normalization (a systematic
+            // ~1.5x multiplicative bias at 42 degrees elevation).
+            if (meta.sensor == SensorType::Landsat && !meta.hasSunElevation) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("SUN_ELEVATION missing from metadata; Landsat TOA reflectance requires it (refusing to default to 90 degrees)");
+                return false;
+            }
             if (meta.sensor == SensorType::Landsat &&
                 (!c.hasReflectance || !std::isfinite(c.reflMult) || !std::isfinite(c.reflAdd))) {
                 if (errorMessage)

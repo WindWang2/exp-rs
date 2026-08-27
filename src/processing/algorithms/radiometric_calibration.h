@@ -61,7 +61,12 @@ namespace RadiometricCalibration
      */
     struct CalibrationMetadata {
         SensorType sensor = SensorType::Unknown;
-        double sunElevationDeg = 90.0;  ///< Sun elevation angle (degrees), default zenith
+        double sunElevationDeg = 90.0;  ///< Sun elevation angle (degrees); meaningful only when hasSunElevation
+        /// True when SUN_ELEVATION (or S2 view zenith) was actually present in
+        /// metadata. The 90.0 default must never be used silently: Landsat TOA
+        /// reflectance without the 1/sin(theta) factor is off by ~1.5x at 42
+        /// degrees, so callers fail closed when this is false.
+        bool hasSunElevation = false;
         QString spacecraft;
         QString processingLevel;
         QString acquisitionDate;

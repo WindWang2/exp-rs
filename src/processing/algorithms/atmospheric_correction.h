@@ -2,8 +2,12 @@
 #pragma once
 
 #include <QString>
+#include <cmath>
 #include <cstddef>
 #include <functional>
+#include <limits>
+
+#include "radiometric_calibration.h"
 
 /**
  * Atmospheric correction algorithms for optical remote sensing.
@@ -130,6 +134,50 @@ namespace AtmosphericCorrection
     bool processFile(const QString &sourcePath, const QString &outputPath,
                      int bandNum, int method, float gain, float bias,
                      float airmass = 1.0f, QString *errorMessage = nullptr);
+
+    /**
+     * Chavez DOS1/DOS2 performed in TOA-reflectance space (#610).
+     *
+     * The old radiance-space kernels stopped at (L - Lmin), which is
+     * haze-corrected RADIANCE (2-3 orders of magnitude larger than
+     * reflectance) yet was recorded and advertised as surface reflectance.
+     * Working in true TOA-reflectance space makes the Chavez algebra exact
+     * without needing an ESUN table:
+     *
+     *   rho_surf = (rho_TOA - rho_TOA_dark + 0.01) / T_v
+     *
+     * where rho_TOA is computed per pixel by RadiometricCalibration::
+     * toToaReflectance (sensor-aware: Landsat (M*DN + A)/sin(sunEl), S2
+     * (DN + offset)/quantification), rho_TOA_dark is the histogram-based
+     * dark-object level in the same space, 0.01 is Chavez's 1% dark-object
+     * assumption, and T_v = 1 for DOS1 / estimateTransmittance(airmass)
+     * for DOS2.
+     *
+     * Requires reflectance-capable coefficients (Landsat REFLECTANCE_MULT/ADD
+     * plus a real SUN_ELEVATION; S2 QUANTIFICATION_VALUE/offsets) - callers
+     * fail closed when they are missing, because falling back to the
+     * radiance-space result would reintroduce the mislabeled output.
+     */
+    bool processFileDos(const QString &sourcePath, const QString &outputPath,
+                        int bandNum, int method,
+                        const RadiometricCalibration::BandCoefficients &coeffs,
+                        RadiometricCalibration::SensorType sensor,
+                        double sunElevationDeg,
+                        float airmass, QString *errorMessage = nullptr);
+
+    /**
+     * Pure per-pixel Chavez DOS step in TOA-reflectance space:
+     *   (rhoToa - toaDarkLevel + 0.01) / transmittance
+     * NaN input propagates as NaN.
+     */
+    inline float dosReflectance(float rhoToa, float toaDarkLevel, float transmittance)
+    {
+        if (!std::isfinite(rhoToa))
+            return std::numeric_limits<float>::quiet_NaN();
+        if (!(transmittance > 0.0f))
+            return std::numeric_limits<float>::quiet_NaN();
+        return (rhoToa - toaDarkLevel + 0.01f) / transmittance;
+    }
 
     /**
      * Apply multi-band atmospheric correction to a GeoTIFF and write output.

@@ -640,18 +640,40 @@ TEST_CASE("Atomic atmospheric correction operators execution and equivalence", "
     CHECK(QFile::exists(dnRadPath));
     CHECK(SatelliteProducts::readRadiometricState(dnRadPath) == QString::fromUtf8(SatelliteProducts::kRadiometricStateRadiance));
 
-    // 2. DOS1 atomic vs facade equivalence
-    auto dos1Op = RSOperatorRegistry::instance().create("rs:atmospheric_dos1");
-    REQUIRE(dos1Op != nullptr);
+    // 2. DOS1/DOS2 run in TOA-reflectance space (#610) and REQUIRE product
+    // metadata with reflectance coefficients - the radiance-space output was
+    // mislabeled surface reflectance. First assert the fail-closed path.
     auto atmosFacadeOp = RSOperatorRegistry::instance().create("rs:atmospheric_correction");
     REQUIRE(atmosFacadeOp != nullptr);
+    {
+        Json::Value noMetaParams(Json::objectValue);
+        noMetaParams["input"] = inputPath.toStdString();
+        noMetaParams["output"] = dos1FacadePath.toStdString();
+        noMetaParams["method"] = "dos1";
+        noMetaParams["band"] = 1;
+        REQUIRE_THROWS_WITH(atmosFacadeOp->run(noMetaParams, ctx),
+                            Catch::Matchers::ContainsSubstring("reflectance coefficients"));
+    }
+
+    // Landsat-style MTL next to the input: reflMult=1e-4, sunEl=30deg, so
+    // rho_TOA = 1e-4*DN/sin(30) = 2e-4*DN. Dark level (tiny scene -> global
+    // min fallback) = 2e-4*100 = 0.02; Chavez 1%: rho_surf = 2e-4*DN - 0.01.
+    QFile mtlFile(tmp.path() + "/atmos_input_MTL.txt");
+    REQUIRE(mtlFile.open(QIODevice::WriteOnly | QIODevice::Text));
+    QTextStream mtlStream(&mtlFile);
+    mtlStream << "SPACECRAFT_ID = \"LANDSAT_8\"\n"
+              << "SUN_ELEVATION = 30.0\n"
+              << "REFLECTANCE_MULT_BAND_1 = 0.0001\n"
+              << "REFLECTANCE_ADD_BAND_1 = 0.0\n";
+    mtlFile.close();
+
+    auto dos1Op = RSOperatorRegistry::instance().create("rs:atmospheric_dos1");
+    REQUIRE(dos1Op != nullptr);
 
     Json::Value dos1DirectParams(Json::objectValue);
     dos1DirectParams["input"] = inputPath.toStdString();
     dos1DirectParams["output"] = dos1DirectPath.toStdString();
     dos1DirectParams["band"] = 1;
-    dos1DirectParams["gain"] = 1.0;
-    dos1DirectParams["bias"] = 0.0;
     dos1Op->run(dos1DirectParams, ctx);
 
     Json::Value dos1FacadeParams(Json::objectValue);
@@ -659,8 +681,6 @@ TEST_CASE("Atomic atmospheric correction operators execution and equivalence", "
     dos1FacadeParams["output"] = dos1FacadePath.toStdString();
     dos1FacadeParams["method"] = "dos1";
     dos1FacadeParams["band"] = 1;
-    dos1FacadeParams["gain"] = 1.0;
-    dos1FacadeParams["bias"] = 0.0;
     atmosFacadeOp->run(dos1FacadeParams, ctx);
 
     GdalDatasetWrapper dsDos1Direct, dsDos1Facade;
@@ -671,22 +691,35 @@ TEST_CASE("Atomic atmospheric correction operators execution and equivalence", "
     REQUIRE(dsDos1Facade.readBandData(1, facadeDos1.data(), W, H));
     for (size_t i = 0; i < W * H; ++i) {
         CHECK(directDos1[i] == Catch::Approx(facadeDos1[i]).margin(1e-6f));
+        // Reflectance-scale values (the old radiance-space output was 2-3
+        // orders of magnitude larger and mislabeled).
+        const float expected = 2e-4f * bands[0][i] - 0.01f;
+        CHECK(facadeDos1[i] == Catch::Approx(expected).margin(1e-4f));
     }
     CHECK(SatelliteProducts::readRadiometricState(dos1DirectPath) == QString::fromUtf8(SatelliteProducts::kRadiometricStateSurfaceReflectance));
 
-    // 3. DOS2 atomic operator
+    // 3. DOS2 atomic operator: same scene divided by T = exp(-0.1*1.2).
     auto dos2Op = RSOperatorRegistry::instance().create("rs:atmospheric_dos2");
     REQUIRE(dos2Op != nullptr);
     Json::Value dos2Params(Json::objectValue);
     dos2Params["input"] = inputPath.toStdString();
     dos2Params["output"] = dos2Path.toStdString();
     dos2Params["band"] = 1;
-    dos2Params["gain"] = 1.0;
-    dos2Params["bias"] = 0.0;
     dos2Params["airmass"] = 1.2;
     dos2Op->run(dos2Params, ctx);
     CHECK(QFile::exists(dos2Path));
     CHECK(SatelliteProducts::readRadiometricState(dos2Path) == QString::fromUtf8(SatelliteProducts::kRadiometricStateSurfaceReflectance));
+    {
+        GdalDatasetWrapper dsDos2;
+        REQUIRE(dsDos2.open(dos2Path));
+        std::vector<float> dos2Out(W * H);
+        REQUIRE(dsDos2.readBandData(1, dos2Out.data(), W, H));
+        const float transmittance = std::exp(-0.12f);
+        for (size_t i = 0; i < W * H; ++i) {
+            const float expected = (2e-4f * bands[0][i] - 0.01f) / transmittance;
+            CHECK(dos2Out[i] == Catch::Approx(expected).margin(1e-4f));
+        }
+    }
 }
 
 

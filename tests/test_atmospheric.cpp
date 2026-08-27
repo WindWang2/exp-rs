@@ -470,3 +470,86 @@ TEST_CASE("processFileMultiBand applies QUAC", "[atm][quac][gdal]")
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// #610: Chavez DOS in TOA-reflectance space
+// ---------------------------------------------------------------------------
+
+TEST_CASE("dosReflectance kernel: Chavez 1% assumption in reflectance space", "[atm][dos1]")
+{
+    // rho_surf = (rho_TOA - dark + 0.01) / T
+    REQUIRE_THAT(AtmosphericCorrection::dosReflectance(0.30f, 0.10f, 1.0f),
+                 Catch::Matchers::WithinAbs(0.21f, 1e-6f));
+    // DOS2 divides by transmittance.
+    REQUIRE_THAT(AtmosphericCorrection::dosReflectance(0.30f, 0.10f, 0.9f),
+                 Catch::Matchers::WithinAbs(0.21f / 0.9f, 1e-6f));
+    // NaN input propagates.
+    REQUIRE(std::isnan(AtmosphericCorrection::dosReflectance(
+        std::numeric_limits<float>::quiet_NaN(), 0.1f, 1.0f)));
+    // Non-positive transmittance is invalid.
+    REQUIRE(std::isnan(AtmosphericCorrection::dosReflectance(0.3f, 0.1f, 0.0f)));
+}
+
+TEST_CASE("processFileDos produces reflectance-scale surface output (#610)", "[atm][gdal]")
+{
+    // Landsat-like synthetic scene: reflMult=2e-5, reflAdd=0, sunEl=30deg.
+    // rho_TOA = 2e-5 * DN / sin(30) = 4e-5 * DN.
+    // DN 10000 -> rho 0.40; DN 3000 -> 0.12; DN 6000 -> 0.24.
+    // Dark-object level (single tile, histogram falls back to min for tiny
+    // scenes) = 0.12 -> rho_surf = rho_TOA - 0.12 + 0.01.
+    // Expected: 0.40-0.11=0.29, 0.12-0.11=0.01, 0.24-0.11=0.13.
+    GDALAllRegister();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString src = dir.filePath(QStringLiteral("dos_src.tif"));
+    const QString dst = dir.filePath(QStringLiteral("dos_out.tif"));
+
+    GDALDriverH drv = GDALGetDriverByName("GTiff");
+    REQUIRE(drv);
+    GDALDatasetH ds = GDALCreate(drv, src.toUtf8().constData(), 3, 1, 1, GDT_Float32, nullptr);
+    REQUIRE(ds);
+    double gt[6] = {0, 1, 0, 0, 0, -1};
+    GDALSetGeoTransform(ds, gt);
+    GDALRasterBandH b = GDALGetRasterBand(ds, 1);
+    std::vector<float> dn = {10000.0f, 3000.0f, 6000.0f};
+    REQUIRE(GDALRasterIO(b, GF_Write, 0, 0, 3, 1, dn.data(), 3, 1, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(ds);
+
+    RadiometricCalibration::BandCoefficients c;
+    c.reflMult = 2e-5;
+    c.reflAdd = 0.0;
+    c.hasReflectance = true;
+    QString err;
+    REQUIRE(AtmosphericCorrection::processFileDos(
+        src, dst, 1, AtmosphericCorrection::Dos1, c,
+        RadiometricCalibration::SensorType::Landsat, 30.0, 1.0f, &err));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(dst));
+    std::vector<float> result(3, -999.0f);
+    REQUIRE(out.readBandData(1, result.data(), 3, 1));
+    REQUIRE_THAT(result[0], Catch::Matchers::WithinAbs(0.29f, 0.005f));
+    REQUIRE_THAT(result[1], Catch::Matchers::WithinAbs(0.01f, 0.005f));
+    REQUIRE_THAT(result[2], Catch::Matchers::WithinAbs(0.13f, 0.005f));
+}
+
+TEST_CASE("processFileDos refuses Landsat without finite sun elevation (#610)", "[atm][gdal]")
+{
+    GDALAllRegister();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString src = dir.filePath(QStringLiteral("dos_src2.tif"));
+    const QString dst = dir.filePath(QStringLiteral("dos_out2.tif"));
+    GDALDriverH drv = GDALGetDriverByName("GTiff");
+    REQUIRE(drv);
+    GDALDatasetH ds = GDALCreate(drv, src.toUtf8().constData(), 1, 1, 1, GDT_Float32, nullptr);
+    REQUIRE(ds);
+    GDALClose(ds);
+    RadiometricCalibration::BandCoefficients c;
+    c.reflMult = 2e-5;
+    QString err;
+    REQUIRE_FALSE(AtmosphericCorrection::processFileDos(
+        src, dst, 1, AtmosphericCorrection::Dos1, c,
+        RadiometricCalibration::SensorType::Landsat,
+        std::numeric_limits<double>::quiet_NaN(), 1.0f, &err));
+}
