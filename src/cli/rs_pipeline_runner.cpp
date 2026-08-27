@@ -20,6 +20,7 @@
 #include "data/derivation_record.h"
 #include "data/source_descriptor.h"
 
+#include <algorithm>
 #include <gdal.h>
 
 #include <QCoreApplication>
@@ -199,10 +200,19 @@ bool cliJsonToWorkflowDefinition( const Json::Value &pipelineJson,
   for ( Json::ArrayIndex i = 0; i < steps.size(); ++i )
   {
     const Json::Value step = steps[i];
+    std::string sid;
     if ( step.isMember( "id" ) && step["id"].isString() && !step["id"].asString().empty() )
-      allStepIds.insert( step["id"].asString() );
+      sid = step["id"].asString();
     else
-      allStepIds.insert( "step_" + std::to_string( i ) );
+      sid = "step_" + std::to_string( i );
+    // Reject duplicate explicit ids (#634/F16): TaskCenter keys steps by id,
+    // so duplicates silently collided one task per id.
+    if ( !allStepIds.insert( sid ).second )
+    {
+      if ( errorMessage )
+        *errorMessage = "Duplicate step id: " + sid;
+      return false;
+    }
   }
 
   std::string prevStepId;
@@ -318,7 +328,10 @@ bool RsPipelineRunner::addPythonPluginDirectory( const std::string &dirPath, std
       *errorOut = "Plugin directory does not exist: " + dirPath;
     return false;
   }
-  m_pythonPluginDirs.push_back( dirPath );
+  // Deduplicate (#634): repeated --python-plugin flags reloaded the same
+  // plugin once per occurrence.
+  if ( std::find( m_pythonPluginDirs.begin(), m_pythonPluginDirs.end(), dirPath ) == m_pythonPluginDirs.end() )
+    m_pythonPluginDirs.push_back( dirPath );
   return true;
 }
 

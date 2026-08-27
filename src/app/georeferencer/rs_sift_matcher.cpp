@@ -53,25 +53,29 @@ cv::Mat readGdalGray( const QString &path, int maxSide, double &scaleOut, double
   GDALRasterBand *band = ds->GetRasterBand( 1 );
   const GDALDataType dt = band ? band->GetRasterDataType() : GDT_Byte;
   cv::Mat fullGray;
+  // Decimated read (#631): request the WORKING resolution directly from
+  // GDAL instead of decoding the full-resolution band and resizing after -
+  // a 50k x 50k scene previously materialized 2.5-10 GB transiently on the
+  // SIFT worker before the downscale threw it away.
   if ( dt == GDT_Byte )
   {
-    fullGray.create( H, W, CV_8UC1 );
+    fullGray.create( dstH, dstW, CV_8UC1 );
     CPLErr err = band->RasterIO( GF_Read, 0, 0, W, H,
-                                 fullGray.data, W, H, GDT_Byte, 0, 0 );
+                                 fullGray.data, dstW, dstH, GDT_Byte, 0, 0 );
     GDALClose( ds );
     if ( err != CE_None )
       return {};
   }
   else
   {
-    cv::Mat fullFloat( H, W, CV_32FC1 );
+    cv::Mat fullFloat( dstH, dstW, CV_32FC1 );
     CPLErr err = band->RasterIO( GF_Read, 0, 0, W, H,
-                                 fullFloat.data, W, H, GDT_Float32, 0, 0 );
+                                 fullFloat.data, dstW, dstH, GDT_Float32, 0, 0 );
     GDALClose( ds );
     if ( err != CE_None )
       return {};
     // Percentile stretch [p2, p98] -> [0,255] to handle UInt16 1000..8500 without clamping.
-    const int N = H * W;
+    const int N = static_cast<int>( fullFloat.total() );
     const float *ptr = reinterpret_cast<float *>( fullFloat.data );
     std::vector<float> sample;
     sample.reserve( std::min( N, 100000 ) );
@@ -84,7 +88,7 @@ cv::Mat readGdalGray( const QString &path, int maxSide, double &scaleOut, double
         sample.push_back( v );
     }
     if ( sample.empty() )
-      return cv::Mat( H, W, CV_8UC1, cv::Scalar( 0 ) );
+      return cv::Mat( dstH, dstW, CV_8UC1, cv::Scalar( 0 ) );
     std::sort( sample.begin(), sample.end() );
     const size_t p2Idx = sample.size() * 2 / 100;
     const size_t p98Idx = sample.size() * 98 / 100;
@@ -99,7 +103,7 @@ cv::Mat readGdalGray( const QString &path, int maxSide, double &scaleOut, double
     {
       p98 = p2 + 1.0;
     }
-    fullGray.create( H, W, CV_8UC1 );
+    fullGray.create( fullFloat.rows, fullFloat.cols, CV_8UC1 );
     const double scale = 255.0 / ( p98 - p2 );
     for ( int i = 0; i < N; ++i )
     {

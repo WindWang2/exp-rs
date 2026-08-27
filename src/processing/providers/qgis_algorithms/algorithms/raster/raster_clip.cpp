@@ -1,6 +1,7 @@
 // src/processing/providers/qgis_algorithms/algorithms/raster/raster_clip.cpp
 #include "raster_clip.h"
 
+#include <cmath>
 #include <memory>
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
@@ -37,8 +38,8 @@ QVariantMap RasterClipAlgorithm::processAlgorithm( const QVariantMap &parameters
     double pixelX = layer->rasterUnitsPerPixelX();
     double pixelY = layer->rasterUnitsPerPixelY();
 
-    int nCols = static_cast<int>( extent.width() / pixelX );
-    int nRows = static_cast<int>( extent.height() / pixelY );
+    int nCols = static_cast<int>( std::lround( extent.width() / pixelX ) );  // floor truncated up to 1 px (#631 P1-28)
+    int nRows = static_cast<int>( std::lround( extent.height() / pixelY ) );
 
     if ( nCols <= 0 || nRows <= 0 )
         throw QgsProcessingException( QObject::tr( "Invalid extent for clipping" ) );

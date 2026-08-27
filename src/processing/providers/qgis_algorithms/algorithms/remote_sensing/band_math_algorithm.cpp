@@ -76,10 +76,21 @@ QVariantMap BandMathAlgorithm::processAlgorithm( const QVariantMap &parameters,
     if ( totalBands <= 0 )
         totalBands = 1;
 
-    // Read all bands from all layers into BandData map (b1, b2, ...)
+    // Read REFERENCED bands only into BandData map (b1, b2, ...): a 13-band
+    // 50k x 50k stack materialized ~130 GB when the expression touches two
+    // bands. Mirror of the raster_calculator filter (#631; P1-26).
+    const std::vector<int> referenced = BandMath::referencedBands( expression );
+    const QSet<int> wanted( referenced.begin(), referenced.end() );
     BandMath::BandData bandData;
     size_t totalPixels = static_cast<size_t>( nCols ) * static_cast<size_t>( nRows );
     int bandIndex = 1;
+    int loadedBands = 0;
+    for ( QgsRasterLayer *rl : rasterLayers )
+        if ( rl->dataProvider() )
+            loadedBands += rl->dataProvider()->bandCount();
+    if ( !wanted.isEmpty() )
+        totalBands = std::min( totalBands, static_cast<int>( wanted.size() ) );
+    (void)loadedBands;
 
     for ( QgsRasterLayer *rl : rasterLayers )
     {
@@ -88,6 +99,13 @@ QVariantMap BandMathAlgorithm::processAlgorithm( const QVariantMap &parameters,
         {
             if ( feedback->isCanceled() )
                 return {};
+            // bN indexes the concatenated band sequence: skip bands the
+            // expression never references.
+            if ( !wanted.isEmpty() && !wanted.contains( bandIndex ) )
+            {
+                bandIndex++;
+                continue;
+            }
 
             std::unique_ptr<QgsRasterBlock> block( provider->block( band, extent, nCols, nRows ) );
             if ( !block || !block->isValid() )

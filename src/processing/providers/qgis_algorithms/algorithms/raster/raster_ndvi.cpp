@@ -132,7 +132,13 @@ QVariantMap RasterNdviAlgorithm::processAlgorithm( const QVariantMap &parameters
             qgssize idx = static_cast<qgssize>( row ) * nCols + col;
             rowData[col] = ndviData[idx];
         }
-        (void)GDALRasterIO( band, GF_Write, 0, row, nCols, 1, rowData.data(), nCols, 1, GDT_Float32, 0, 0 );
+        // A per-row write error must not be swallowed: the algorithm would
+        // report success with a truncated output (#631 P1-25).
+        if ( GDALRasterIO( band, GF_Write, 0, row, nCols, 1, rowData.data(), nCols, 1, GDT_Float32, 0, 0 ) != CE_None )
+        {
+            GDALClose( dataset );
+            throw QgsProcessingException( QObject::tr( "Failed to write NDVI output row %1" ).arg( row ) );
+        }
     }
 
     GDALClose( dataset );

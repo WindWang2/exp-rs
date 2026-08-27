@@ -682,7 +682,7 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
 
         info.status = TaskStatus::Queued;
         info.progressPercentage = 0.0;
-        info.startTime = QDateTime::currentDateTime();
+        info.startTime = QDateTime::currentDateTimeUtc();
         info.parameterMap = params;
         info.autoLoadLayer = autoLoad;
 
@@ -981,7 +981,7 @@ void TaskCenter::processNextQueuedTasks()
         m_tasks[id].status = TaskStatus::Running;
         m_tasks[id].logBuffer.append(
           QString( QStringLiteral( "[%1] Dispatching to JobEngine (profile=%2)." ) )
-            .arg( QDateTime::currentDateTime().toString( QStringLiteral( "hh:mm:ss" ) ) )
+            .arg( QDateTime::currentDateTimeUtc().toString( QStringLiteral( "hh:mm:ss" ) ) )
             .arg( static_cast<int>( profile ) ) );
         updatePipelineForTaskLocked( id );
 
@@ -1172,7 +1172,7 @@ void TaskCenter::markTaskCompleted( long taskId,
         m_tasks[taskId].status = TaskStatus::Completed;
         m_tasks[taskId].resultPayload = resultPayload;
         m_tasks[taskId].progressPercentage = 1.0;
-        m_tasks[taskId].endTime = QDateTime::currentDateTime();
+        m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] Task completed successfully." ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ) ) );
 
@@ -1249,7 +1249,7 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
             info.errorMessage = isUserRoot
                                   ? QStringLiteral( "Task canceled" )
                                   : QStringLiteral( "Canceled due to upstream parent task %1." ).arg( upstreamCause );
-            info.endTime = QDateTime::currentDateTime();
+            info.endTime = QDateTime::currentDateTimeUtc();
             info.logBuffer.append( isUserRoot
                                      ? QStringLiteral( "Task canceled by user." )
                                      : QStringLiteral( "Canceled due to upstream parent task %1." ).arg( upstreamCause ) );
@@ -1302,7 +1302,7 @@ void TaskCenter::dispatchPendingCancels( const QList<QPointer<QgsTask>> &handles
                 auto &info = m_tasks[targetId];
                 info.status = TaskStatus::Canceled;
                 info.errorMessage = strandedReason;
-                info.endTime = QDateTime::currentDateTime();
+                info.endTime = QDateTime::currentDateTimeUtc();
                 info.logBuffer.append( strandedReason );
                 updatePipelineForTaskLocked( targetId );
                 queueTaskUpdatedLocked( targetId );
@@ -1329,7 +1329,7 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
             return;
         m_tasks[taskId].status = TaskStatus::Failed;
         m_tasks[taskId].errorMessage = error;
-        m_tasks[taskId].endTime = QDateTime::currentDateTime();
+        m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] Task failed: %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), error ) );
         updatePipelineForTaskLocked( taskId );
@@ -1364,7 +1364,7 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
             return;
         m_tasks[taskId].status = TaskStatus::Canceled;
         m_tasks[taskId].errorMessage = reason;
-        m_tasks[taskId].endTime = QDateTime::currentDateTime();
+        m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), reason ) );
         updatePipelineForTaskLocked( taskId );
@@ -1619,7 +1619,7 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
             info.status = TaskStatus::Queued;
             info.priority = TaskPriority::Normal;
             info.parentTaskIds = parentTaskIds;
-            info.startTime = QDateTime::currentDateTime();
+            info.startTime = QDateTime::currentDateTimeUtc();
             info.parameterMap = params;
             info.autoLoadLayer = autoLoad;
             info.autoDispatch = true;

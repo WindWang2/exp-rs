@@ -1,6 +1,7 @@
 // native_clip_raster.h
 #pragma once
 
+#include <cmath>
 #include <memory>
 #include <processing/qgsprocessingalgorithm.h>
 #include "processing/algorithm_help_catalog.h"
@@ -54,8 +55,8 @@ protected:
 
         feedback->setProgressText( QObject::tr( "Clipping raster..." ) );
 
-        int nCols = static_cast<int>( extent.width() / layer->rasterUnitsPerPixelX() );
-        int nRows = static_cast<int>( extent.height() / layer->rasterUnitsPerPixelY() );
+        int nCols = static_cast<int>( std::lround( extent.width() / layer->rasterUnitsPerPixelX() ) );
+        int nRows = static_cast<int>( std::lround( extent.height() / layer->rasterUnitsPerPixelY() ) );
 
         if ( nCols <= 0 || nRows <= 0 )
             throw QgsProcessingException( QObject::tr( "Invalid extent for clipping" ) );
