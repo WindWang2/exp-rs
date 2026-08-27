@@ -15,10 +15,12 @@
 #include <qgsrectangle.h>
 #include <qgsrubberband.h>
 
+#include <QDateTime>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QMessageBox>
 #include <QPointer>
+#include <QUuid>
 
 namespace sicnu::agent
 {
@@ -48,7 +50,12 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
 
   mainLayout->addLayout( headerLayout );
 
-  // 2. Chat Scroll Area
+  // 2. Run Inspector (collapsible, lightweight observability panel)
+  setupRunInspector();
+  if ( m_runInspector.container )
+    mainLayout->addWidget( m_runInspector.container.data() );
+
+  // 3. Chat Scroll Area
   m_scrollArea = new QScrollArea( mainWidget );
   m_scrollArea->setWidgetResizable( true );
   m_chatContainer = new QWidget( m_scrollArea );
@@ -194,6 +201,126 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapC
     } );
 }
 
+void AgentCopilotDockWidget::setupRunInspector()
+{
+  auto *container = new QFrame( this );
+  container->setFrameShape( QFrame::StyledPanel );
+  container->setStyleSheet( QStringLiteral( "background-color: #1e293b; border: 1px solid #475569; border-radius: 6px; padding: 4px;" ) );
+
+  auto *layout = new QVBoxLayout( container );
+  layout->setContentsMargins( 6, 6, 6, 6 );
+  layout->setSpacing( 4 );
+
+  auto *titleLayout = new QHBoxLayout();
+  m_runInspector.titleLabel = new QLabel( tr( "Run Inspector" ), container );
+  m_runInspector.titleLabel->setStyleSheet( QStringLiteral( "color: #e2e8f0; font-weight: bold;" ) );
+  titleLayout->addWidget( m_runInspector.titleLabel.data(), 1 );
+
+  auto *toggleBtn = new QPushButton( tr( "折叠 ▲" ), container );
+  toggleBtn->setFlat( true );
+  toggleBtn->setStyleSheet( QStringLiteral( "color: #94a3b8;" ) );
+  titleLayout->addWidget( toggleBtn );
+  layout->addLayout( titleLayout );
+
+  auto makeLabel = [container]( const QString &text ) {
+    auto *label = new QLabel( text, container );
+    label->setStyleSheet( QStringLiteral( "color: #cbd5e1;" ) );
+    label->setWordWrap( true );
+    return label;
+  };
+
+  m_runInspector.stageLabel = makeLabel( tr( "Stage: -" ) );
+  m_runInspector.taskLabel = makeLabel( tr( "Task: -" ) );
+  m_runInspector.callsLabel = makeLabel( tr( "Calls: 0" ) );
+  m_runInspector.errorsLabel = makeLabel( tr( "Errors: 0" ) );
+  m_runInspector.durationLabel = makeLabel( tr( "Duration: 0s" ) );
+
+  layout->addWidget( m_runInspector.stageLabel.data() );
+  layout->addWidget( m_runInspector.taskLabel.data() );
+  layout->addWidget( m_runInspector.callsLabel.data() );
+  layout->addWidget( m_runInspector.errorsLabel.data() );
+  layout->addWidget( m_runInspector.durationLabel.data() );
+
+  m_runInspector.container = container;
+
+  connect( toggleBtn, &QPushButton::clicked, this, [this, toggleBtn]() {
+    m_runInspector.expanded = !m_runInspector.expanded;
+    if ( m_runInspector.stageLabel )
+      m_runInspector.stageLabel->setVisible( m_runInspector.expanded );
+    if ( m_runInspector.taskLabel )
+      m_runInspector.taskLabel->setVisible( m_runInspector.expanded );
+    if ( m_runInspector.callsLabel )
+      m_runInspector.callsLabel->setVisible( m_runInspector.expanded );
+    if ( m_runInspector.errorsLabel )
+      m_runInspector.errorsLabel->setVisible( m_runInspector.expanded );
+    if ( m_runInspector.durationLabel )
+      m_runInspector.durationLabel->setVisible( m_runInspector.expanded );
+    toggleBtn->setText( m_runInspector.expanded ? tr( "折叠 ▲" ) : tr( "展开 ▼" ) );
+  } );
+}
+
+void AgentCopilotDockWidget::updateRunInspector()
+{
+  if ( !m_runInspector.container )
+    return;
+
+  if ( m_runInspector.titleLabel )
+  {
+    m_runInspector.titleLabel->setText(
+      m_currentRunId.isEmpty()
+        ? tr( "Run Inspector" )
+        : QString( tr( "Run Inspector — %1" ) ).arg( m_currentRunId.left( 8 ) ) );
+  }
+  if ( m_runInspector.stageLabel )
+    m_runInspector.stageLabel->setText( QString( tr( "Stage: %1" ) ).arg( m_currentRunStage.isEmpty() ? QStringLiteral( "-" ) : m_currentRunStage ) );
+
+  QString taskText = tr( "Task: -" );
+  if ( !m_submittedTaskIds.isEmpty() )
+  {
+    const long latestTaskId = *std::max_element( m_submittedTaskIds.cbegin(), m_submittedTaskIds.cend() );
+    const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo( latestTaskId );
+    taskText = QString( tr( "Task: %1 (id %2)" ) ).arg( info.algorithmId.isEmpty() ? QStringLiteral( "-" ) : info.algorithmId ).arg( latestTaskId );
+  }
+  if ( m_runInspector.taskLabel )
+    m_runInspector.taskLabel->setText( taskText );
+
+  if ( m_runInspector.callsLabel )
+    m_runInspector.callsLabel->setText( QString( tr( "Calls: %1" ) ).arg( m_toolCallCards.size() ) );
+
+  int errorCount = m_lastError.isEmpty() ? 0 : 1;
+  if ( m_runInspector.errorsLabel )
+  {
+    m_runInspector.errorsLabel->setText(
+      QString( tr( "Errors: %1%2" ) )
+        .arg( errorCount )
+        .arg( errorCount ? QStringLiteral( " — %1" ).arg( m_lastError ) : QString() ) );
+  }
+
+  if ( m_runInspector.durationLabel && m_runStartTime.isValid() )
+  {
+    const qint64 elapsedSecs = m_runStartTime.secsTo( QDateTime::currentDateTimeUtc() );
+    m_runInspector.durationLabel->setText( QString( tr( "Duration: %1s" ) ).arg( elapsedSecs ) );
+  }
+}
+
+void AgentCopilotDockWidget::setRunStage( const QString &stage )
+{
+  m_currentRunStage = stage;
+  updateRunInspector();
+}
+
+void AgentCopilotDockWidget::cancelCurrentRunTasks()
+{
+  for ( long taskId : std::as_const( m_submittedTaskIds ) )
+  {
+    sicnu::TaskCenter::instance().cancelTask( taskId );
+  }
+  for ( long pipelineId : std::as_const( m_submittedPipelineIds ) )
+  {
+    sicnu::TaskCenter::instance().cancelPipeline( pipelineId );
+  }
+}
+
 Json::Value AgentCopilotDockWidget::handleCanvasAction( const std::string &action,
                                                         const Json::Value &arguments )
 {
@@ -263,6 +390,17 @@ void AgentCopilotDockWidget::onClearClicked()
   m_pendingToolCallCompletions.clear();
   m_completionGuard = std::make_shared<std::atomic<bool>>( true );
 
+  // Reset per-run state so the inspector and stop button start clean.
+  m_currentRunId.clear();
+  m_submittedTaskIds.clear();
+  m_submittedPipelineIds.clear();
+  m_currentRunStage.clear();
+  m_lastError.clear();
+  m_runRepairAttempts = 0;
+  m_runStartTime = QDateTime();
+  m_toolCallCards.clear();
+  updateRunInspector();
+
   m_currentReasoningLabel = nullptr;
   m_currentContentLabel = nullptr;
   m_messageHistory = QJsonArray();
@@ -279,8 +417,12 @@ void AgentCopilotDockWidget::onSendClicked()
 {
   if ( m_isStreaming )
   {
+    // Stop streaming first, then cancel any TaskCenter work that was submitted
+    // for this run so the user-visible stop button actually stops processing.
     m_client->cancel();
+    cancelCurrentRunTasks();
     onLlmFinished();
+    setRunStage( tr( "Canceled" ) );
     return;
   }
 
@@ -294,6 +436,17 @@ void AgentCopilotDockWidget::onSendClicked()
 
 void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
 {
+  // Start a new run. This resets the inspector and the stop→cancel set even
+  // when the previous run was not explicitly cleared.
+  m_currentRunId = QUuid::createUuid().toString( QUuid::WithoutBraces );
+  m_submittedTaskIds.clear();
+  m_submittedPipelineIds.clear();
+  m_lastError.clear();
+  m_runRepairAttempts = 0;
+  m_runStartTime = QDateTime::currentDateTimeUtc();
+  m_toolCallCards.clear();
+  setRunStage( tr( "Understanding" ) );
+
   appendUserMessageCard( promptText );
 
   // Build Workspace System Context
@@ -400,16 +553,24 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
     // to the approval card as a QJsonObject.
     const Json::Value planArgs = m_toolCallDispatcher.argumentsFor( cppEnvelope );
     appendPlanApprovalCard( QJsonObject::fromVariantMap( processing::jsonObjectToVariantMap( planArgs ) ) );
+    setRunStage( tr( "Planning" ) );
     return;
   }
 
-  appendToolCallCard( toolCallJson );
+  const QString toolCallId = toolCallJson[QStringLiteral( "id" )].toString();
+  m_toolCallCards.insert( toolCallId, appendToolCallCard( toolCallJson ) );
+  updateRunInspector();
 
   if ( classification == processing::ToolCallClassification::Invalid )
   {
     // rejectionReason reports the same reason submit() would give, without
     // the side-effect of a doomed submission.
-    handleToolCallRejection( m_toolCallDispatcher.rejectionReason( cppEnvelope ) );
+    const QString reason = m_toolCallDispatcher.rejectionReason( cppEnvelope );
+    handleToolCallRejection( reason );
+    m_lastError = reason;
+    updateToolCallCard( toolCallId, tr( "rejected" ), reason );
+    setRunStage( tr( "Failed" ) );
+    updateRunInspector();
     return;
   }
 
@@ -423,21 +584,68 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
   if ( !ok )
   {
     handleToolCallRejection( error );
+    m_lastError = error;
+    updateToolCallCard( toolCallId, tr( "rejected" ), error );
+    setRunStage( tr( "Failed" ) );
     return;
   }
   // For interaction actions the dispatcher completed synchronously (sentinel
   // task id 9000001). No watcher needed — result already delivered via the
   // InteractionActionHandler inline.
-  if (taskId == 9000001)
+  if ( taskId == 9000001 )
   {
+    updateToolCallCard( toolCallId, tr( "completed" ), tr( "Interaction action completed synchronously" ) );
     return;
   }
   if ( taskId > 0 )
   {
+    m_submittedTaskIds.insert( taskId );
+    setRunStage( tr( "Running" ) );
+
     auto guard = m_completionGuard;
-    watchToolCallCompletion( taskId, [guard, this, toolCallJson]( const Json::Value &resultPayload ) mutable {
+    watchToolCallCompletion( taskId, [guard, this, toolCallJson, toolCallId, taskId]( const Json::Value &resultPayload ) mutable {
       if ( !guard || !*guard )
         return;
+
+      const bool ok = resultPayload.isObject()
+                      && resultPayload.isMember( "status" )
+                      && resultPayload["status"].asString() == "success";
+      const bool verified = resultPayload.isMember( "verified" ) ? resultPayload["verified"].asBool() : ok;
+
+      QString statusText = ok ? tr( "成功" ) : tr( "失败" );
+      QString detailText;
+      if ( ok && verified )
+      {
+        QStringList parts;
+        if ( resultPayload.isMember( "output" ) )
+          parts.append( tr( "output: %1" ).arg( QString::fromStdString( resultPayload["output"].asString() ) ) );
+        if ( resultPayload.isMember( "assetId" ) )
+          parts.append( tr( "assetId: %1" ).arg( QString::fromStdString( resultPayload["assetId"].asString() ) ) );
+        parts.append( tr( "verified: %1" ).arg( verified ? tr( "yes" ) : tr( "no" ) ) );
+        detailText = parts.join( QStringLiteral( " | " ) );
+        setRunStage( tr( "Completed" ) );
+      }
+      else
+      {
+        const QString error = resultPayload.isMember( "errorMessage" )
+                              ? QString::fromStdString( resultPayload["errorMessage"].asString() )
+                              : QStringLiteral( "unknown error" );
+        detailText = error;
+        m_lastError = error;
+        setRunStage( tr( "Failed" ) );
+      }
+      updateToolCallCard( toolCallId, statusText, detailText );
+      updateRunInspector();
+
+      // Auto-zoom the active canvas to any new output asset so the user sees
+      // the result of the tool call immediately (P1-M1).
+      if ( ok && resultPayload.isMember( "assetId" ) && resultPayload["assetId"].isString() )
+      {
+        Json::Value zoomParams( Json::objectValue );
+        zoomParams["asset_id"] = resultPayload["assetId"];
+        m_viewControlService.zoomToAsset( zoomParams );
+      }
+
       sendToolResultFollowUp( toolCallJson, resultPayload );
     } );
   }
@@ -557,21 +765,51 @@ void AgentCopilotDockWidget::appendErrorMessage( const QString &errorMsg )
   }
 }
 
-void AgentCopilotDockWidget::appendToolCallCard( const QJsonObject &toolCallJson )
+QPointer<QWidget> AgentCopilotDockWidget::appendToolCallCard( const QJsonObject &toolCallJson )
 {
   auto *card = new QFrame( m_chatContainer );
   card->setFrameShape( QFrame::StyledPanel );
   card->setStyleSheet( QStringLiteral( "background-color: #0f172a; border: 1px solid #38bdf8; border-radius: 6px; padding: 6px;" ) );
+  card->setObjectName( QStringLiteral( "ToolCallCard" ) );
 
   auto *layout = new QVBoxLayout( card );
   QJsonObject funcObj = toolCallJson[QStringLiteral( "function" )].toObject();
   QString algName = funcObj[QStringLiteral( "name" )].toString();
 
   auto *title = new QLabel( QString( "⚡ 准备执行工具: <b>%1</b>" ).arg( algName.toHtmlEscaped() ), card );
+  title->setObjectName( QStringLiteral( "ToolCallCardTitle" ) );
   title->setStyleSheet( QStringLiteral( "color: #38bdf8;" ) );
+  title->setWordWrap( true );
   layout->addWidget( title );
 
+  auto *details = new QLabel( tr( "Status: submitted" ), card );
+  details->setObjectName( QStringLiteral( "ToolCallCardDetails" ) );
+  details->setStyleSheet( QStringLiteral( "color: #94a3b8;" ) );
+  details->setWordWrap( true );
+  layout->addWidget( details );
+
   m_chatLayout->addWidget( card );
+  return card;
+}
+
+void AgentCopilotDockWidget::updateToolCallCard( const QString &toolCallId,
+                                                 const QString &statusText,
+                                                 const QString &detailText )
+{
+  QPointer<QWidget> card = m_toolCallCards.value( toolCallId );
+  if ( !card )
+    return;
+
+  auto *title = card->findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
+  if ( title && !statusText.isEmpty() )
+  {
+    title->setText( QString( "%1 <span style=\"color:%2;\">[%3]</span>" )
+                      .arg( title->text().toHtmlEscaped(), statusText.contains( tr( "失败" ) ) ? QStringLiteral( "#f87171" ) : QStringLiteral( "#4ade80" ), statusText.toHtmlEscaped() ) );
+  }
+
+  auto *details = card->findChild<QLabel *>( QStringLiteral( "ToolCallCardDetails" ) );
+  if ( details )
+    details->setText( detailText );
 }
 
 void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson )
@@ -610,11 +848,12 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
     runBtn->setText( QStringLiteral( "执行中…" ) );
     QPointer<QPushButton> safeRunBtn = runBtn;
     auto guard = m_completionGuard;
+    setRunStage( tr( "Running" ) );
     // Execute the approved plan asynchronously. AgentWorkflowExecutor owns
     // pipeline watching and marshals the completion callback onto this
     // widget's thread — no detached std::thread (ADR 0047).
-    m_workflowExecutor.executeAgentPlanAsync( processing::jsonValueFromQJson( planJson ),
-                                              [guard, this, safeRunBtn]( const Json::Value &resultPayload ) {
+    const long pipelineId = m_workflowExecutor.executeAgentPlanAsync( processing::jsonValueFromQJson( planJson ),
+                                                                      [guard, this, safeRunBtn]( const Json::Value &resultPayload ) {
       // Completion payload shape is owned by the workflow executor; read it
       // in Json-land instead of round-tripping through QJson (ADR 0048).
       if ( !guard || !*guard )
@@ -622,18 +861,28 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
       const Json::Value resultObj = resultPayload.isObject() ? resultPayload : Json::Value( Json::objectValue );
       if ( resultObj["status"].asString() != "success" )
       {
-        appendErrorMessage( QString::fromStdString( resultObj["errorMessage"].asString() ) );
+        const QString error = QString::fromStdString( resultObj["errorMessage"].asString() );
+        appendErrorMessage( error );
+        m_lastError = error;
+        setRunStage( tr( "Failed" ) );
         if ( safeRunBtn )
         {
           safeRunBtn->setEnabled( true );
           safeRunBtn->setText( QStringLiteral( "重试执行" ) );
         }
       }
-      else if ( safeRunBtn )
+      else
       {
-        safeRunBtn->setText( QStringLiteral( "已完成" ) );
+        setRunStage( tr( "Completed" ) );
+        if ( safeRunBtn )
+        {
+          safeRunBtn->setText( QStringLiteral( "已完成" ) );
+        }
       }
+      updateRunInspector();
     }, this );
+    if ( pipelineId >= 0 )
+      m_submittedPipelineIds.insert( pipelineId );
   } );
 }
 
@@ -663,12 +912,26 @@ void AgentCopilotDockWidget::onLlmFinished()
   }
 }
 
+QString AgentCopilotDockWidget::runInspectorSummary() const
+{
+  QStringList parts;
+  parts.append( QStringLiteral( "run=%1" ).arg( m_currentRunId.isEmpty() ? QStringLiteral( "-" ) : m_currentRunId.left( 8 ) ) );
+  parts.append( QStringLiteral( "stage=%1" ).arg( m_currentRunStage.isEmpty() ? QStringLiteral( "-" ) : m_currentRunStage ) );
+  parts.append( QStringLiteral( "tasks=%1" ).arg( m_submittedTaskIds.size() ) );
+  parts.append( QStringLiteral( "calls=%1" ).arg( m_toolCallCards.size() ) );
+  if ( !m_lastError.isEmpty() )
+    parts.append( QStringLiteral( "error=%1" ).arg( m_lastError ) );
+  return parts.join( QStringLiteral( " | " ) );
+}
+
 void AgentCopilotDockWidget::onErrorOccurred( const QString &errorMsg )
 {
   if ( m_currentContentLabel )
   {
     m_currentContentLabel->setText( QString( "<font color='red'>错误: %1</font>" ).arg( errorMsg.toHtmlEscaped() ) );
   }
+  m_lastError = errorMsg;
+  setRunStage( tr( "Failed" ) );
   onLlmFinished();
 }
 

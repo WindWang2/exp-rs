@@ -4076,6 +4076,7 @@ target_link_libraries(test_agent_copilot_ui PRIVATE
   sicnu_agent
   sicnu_data
   sicnu_processing
+  GDAL::GDAL
 )
 
 qt_add_executable(test_agent_canvas_sync

@@ -23,9 +23,45 @@
 #include <chrono>
 #include <thread>
 
+#include <gdal_priv.h>
+#include <ogr_spatialref.h>
+
 using namespace sicnu::agent;
 using namespace sicnu::data;
 using namespace sicnu::processing;
+
+namespace {
+
+bool writeTinyRaster( const QString &path, int width, int height, int bands )
+{
+  GDALAllRegister();
+  GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "GTiff" );
+  if ( !driver )
+    return false;
+  GDALDataset *ds = driver->Create( path.toUtf8().constData(), width, height, bands, GDT_Float32, nullptr );
+  if ( !ds )
+    return false;
+
+  std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+  ds->SetGeoTransform( gt.data() );
+  OGRSpatialReference srs;
+  srs.importFromEPSG( 32648 );
+  char *wkt = nullptr;
+  srs.exportToWkt( &wkt );
+  ds->SetProjection( wkt );
+  CPLFree( wkt );
+
+  for ( int b = 1; b <= bands; ++b )
+  {
+    GDALRasterBand *band = ds->GetRasterBand( b );
+    std::vector<float> data( width * height, static_cast<float>( b ) );
+    band->RasterIO( GF_Write, 0, 0, width, height, data.data(), width, height, GDT_Float32, 0, 0 );
+  }
+  GDALClose( ( GDALDatasetH )ds );
+  return true;
+}
+
+} // namespace
 
 static void ensureQtApp()
 {
@@ -60,9 +96,14 @@ class LifecycleStubAdapter : public AtomicAlgorithmAdapter
     {
       if ( mMode == Mode::SleepThenComplete )
       {
-        if ( mSleepMs > 0 )
-          std::this_thread::sleep_for( std::chrono::milliseconds( mSleepMs ) );
-        Q_UNUSED( isCancelled )
+        // Respect cancellation so stop→cancel tests can observe terminal Canceled.
+        const int sliceMs = 20;
+        for ( int slept = 0; slept < mSleepMs; slept += sliceMs )
+        {
+          if ( isCancelled && isCancelled() )
+            throw std::runtime_error( "Canceled" );
+          std::this_thread::sleep_for( std::chrono::milliseconds( sliceMs ) );
+        }
         Json::Value result( Json::objectValue );
         result["status"] = "ok";
         result["echo"] = params;
@@ -70,6 +111,7 @@ class LifecycleStubAdapter : public AtomicAlgorithmAdapter
       }
       else
       {
+        Q_UNUSED( isCancelled )
         Json::Value result( Json::objectValue );
         result["status"] = "ok";
         result["output"] = mOutputPath.toStdString();
@@ -209,6 +251,141 @@ TEST_CASE( "AgentCopilotDockWidget clear cancels stale completion callbacks", "[
   QEventLoop loop;
   QTimer::singleShot( 1200, &loop, &QEventLoop::quit );
   loop.exec();
+}
+
+TEST_CASE( "AgentCopilotDockWidget stop cancels submitted TaskCenter tasks", "[agent][ui][cancel]" )
+{
+  ensureQtApp();
+  wireRegistryFallback();
+  AtomicAlgorithmRegistry::instance().reset();
+  AtomicAlgorithmRegistry::instance().registerAdapter(
+    std::make_shared<LifecycleStubAdapter>( "stub:sleepy_stop",
+                                            LifecycleStubAdapter::Mode::SleepThenComplete,
+                                            5000 ) );
+
+  DataManager dataMgr;
+  AgentCopilotDockWidget dock;
+  dock.setContext( &dataMgr, nullptr );
+
+  REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed",
+                                      Qt::QueuedConnection,
+                                      Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:sleepy_stop" ) ) ) ) );
+
+  // Pump until the task is registered in the run inspector.
+  long taskId = -1;
+  for ( int i = 0; i < 200 && taskId < 0; ++i )
+  {
+    QCoreApplication::processEvents();
+    const QString summary = dock.runInspectorSummary();
+    if ( summary.contains( QStringLiteral( "tasks=1" ) ) )
+    {
+      const auto tasks = sicnu::TaskCenter::instance().allTasks();
+      for ( const auto &info : tasks )
+      {
+        if ( info.algorithmId == QStringLiteral( "stub:sleepy_stop" ) )
+          taskId = std::max( taskId, info.taskId );
+      }
+    }
+    if ( taskId < 0 )
+      std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  }
+  REQUIRE( taskId > 0 );
+
+  // The private stop path is routed through onSendClicked in production; here
+  // we exercise the cancel hook directly because driving the LLM streaming
+  // state in a headless unit test is unstable.
+  REQUIRE( QMetaObject::invokeMethod( &dock, "cancelCurrentRunTasks" ) );
+
+  // The task may briefly be "Cancelling"; wait for the terminal transition.
+  sicnu::AlgorithmTaskInfo finalInfo;
+  for ( int i = 0; i < 200; ++i )
+  {
+    finalInfo = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+    if ( sicnu::isTerminalStatus( finalInfo.status ) )
+      break;
+    QCoreApplication::processEvents();
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  }
+  CHECK( finalInfo.status == sicnu::TaskStatus::Canceled );
+}
+
+TEST_CASE( "AgentCopilotDockWidget tool-call card shows result summary", "[agent][ui][toolcard]" )
+{
+  ensureQtApp();
+  wireRegistryFallback();
+  AtomicAlgorithmRegistry::instance().reset();
+
+  const QString outputPath = QStringLiteral( "/tmp/stub_output_agent.tif" );
+  REQUIRE( writeTinyRaster( outputPath, 4, 4, 1 ) );
+
+  AtomicAlgorithmRegistry::instance().registerAdapter(
+    std::make_shared<LifecycleStubAdapter>( "stub:write_output",
+                                            LifecycleStubAdapter::Mode::WriteOutput,
+                                            0,
+                                            outputPath ) );
+
+  DataManager dataMgr;
+  AgentCopilotDockWidget dock;
+  dock.setContext( &dataMgr, nullptr );
+
+  REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed",
+                                      Qt::QueuedConnection,
+                                      Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:write_output" ) ) ) ) );
+
+  // Wait for the task to complete and the card to be updated.
+  bool foundSummary = false;
+  QString lastDetails;
+  for ( int i = 0; i < 400 && !foundSummary; ++i )
+  {
+    QCoreApplication::processEvents();
+    for ( QLabel *label : dock.findChildren<QLabel *>( QStringLiteral( "ToolCallCardDetails" ) ) )
+    {
+      lastDetails = label->text();
+      if ( lastDetails.contains( outputPath ) || lastDetails.contains( QStringLiteral( "verified" ) ) )
+      {
+        foundSummary = true;
+        break;
+      }
+    }
+    if ( !foundSummary )
+      std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  }
+  INFO( "card details: " << lastDetails.toStdString() );
+  REQUIRE( foundSummary );
+  CHECK( dock.runInspectorSummary().contains( QStringLiteral( "stage=Completed" ) ) );
+}
+
+TEST_CASE( "AgentCopilotDockWidget inspector state reflects run lifecycle", "[agent][ui][inspector]" )
+{
+  ensureQtApp();
+  wireRegistryFallback();
+  AtomicAlgorithmRegistry::instance().reset();
+  AtomicAlgorithmRegistry::instance().registerAdapter(
+    std::make_shared<LifecycleStubAdapter>( "stub:inspector_lifecycle",
+                                            LifecycleStubAdapter::Mode::SleepThenComplete,
+                                            50 ) );
+
+  DataManager dataMgr;
+  AgentCopilotDockWidget dock;
+  dock.setContext( &dataMgr, nullptr );
+
+  CHECK( dock.runInspectorSummary().contains( QStringLiteral( "stage=-" ) ) );
+
+  REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed",
+                                      Qt::QueuedConnection,
+                                      Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:inspector_lifecycle" ) ) ) ) );
+
+  // Eventually the inspector should report a terminal stage.
+  bool terminal = false;
+  for ( int i = 0; i < 400 && !terminal; ++i )
+  {
+    QCoreApplication::processEvents();
+    const QString summary = dock.runInspectorSummary();
+    terminal = summary.contains( QStringLiteral( "stage=Completed" ) ) || summary.contains( QStringLiteral( "stage=Failed" ) );
+    if ( !terminal )
+      std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  }
+  CHECK( terminal );
 }
 
 TEST_CASE( "InteractionToolRegistry handler returns error after service destruction", "[agent][interaction][lifecycle]" )

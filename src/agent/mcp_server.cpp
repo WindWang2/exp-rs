@@ -44,6 +44,25 @@
 
 namespace {
 
+/// Structured MCP tool error that preserves machine-readable codes in the
+/// JSON-RPC error.data field without losing the human-facing message.
+/// Derives from std::runtime_error so existing `catch (std::runtime_error&)`
+/// handlers in tests and callers keep compiling.
+struct McpToolError : public std::runtime_error
+{
+    QString errorCode;
+    QString errorCategory;
+    int rpcCode = -32000;
+
+    McpToolError( const QString &msg, const QString &code = QString(), const QString &category = QString(), int rpc = -32000 )
+      : std::runtime_error( msg.toUtf8().constData() )
+      , errorCode( code )
+      , errorCategory( category )
+      , rpcCode( rpc )
+    {
+    }
+};
+
 QString mcpDataTypeToString( Qgis::DataType type ) {
     switch ( type ) {
         case Qgis::DataType::UnknownDataType: return QStringLiteral("Unknown");
@@ -722,6 +741,18 @@ void McpServer::handleRequest(const QVariantMap &request)
             callResult[QStringLiteral("content")] = contentList;
             sendResponse(id, callResult);
         }
+        catch (const McpToolError &e)
+        {
+            if (!isNotification)
+            {
+                QVariantMap data;
+                if (!e.errorCode.isEmpty())
+                    data[QStringLiteral("errorCode")] = e.errorCode;
+                if (!e.errorCategory.isEmpty())
+                    data[QStringLiteral("errorCategory")] = e.errorCategory;
+                sendError(id, e.rpcCode, QString::fromUtf8(e.what()), data);
+            }
+        }
         catch (const std::exception &e)
         {
             if (!isNotification)
@@ -757,8 +788,15 @@ void McpServer::sendResponse(const QVariant &id, const QVariantMap &result)
 
 void McpServer::sendError(const QVariant &id, int code, const QString &message)
 {
+    sendError(id, code, message, QVariantMap());
+}
+
+void McpServer::sendError(const QVariant &id, int code, const QString &message, const QVariantMap &data)
+{
     if ((id.isNull() || !id.isValid()) && code != -32700 && code != -32600)
         return;
+
+    const bool hasData = !data.isEmpty();
 
     if (id.isNull() || !id.isValid())
     {
@@ -768,6 +806,8 @@ void McpServer::sendError(const QVariant &id, int code, const QString &message)
         QJsonObject err;
         err[QStringLiteral("code")] = code;
         err[QStringLiteral("message")] = message;
+        if (hasData)
+            err[QStringLiteral("data")] = QJsonObject::fromVariantMap(data);
         resp[QStringLiteral("error")] = err;
         QJsonDocument doc(resp);
         std::cout << doc.toJson(QJsonDocument::Compact).constData() << std::endl;
@@ -781,6 +821,8 @@ void McpServer::sendError(const QVariant &id, int code, const QString &message)
     QVariantMap errorObj;
     errorObj[QStringLiteral("code")] = code;
     errorObj[QStringLiteral("message")] = message;
+    if (hasData)
+        errorObj[QStringLiteral("data")] = data;
     response[QStringLiteral("error")] = errorObj;
 
     QJsonDocument doc = QJsonDocument::fromVariant(response);
@@ -1118,10 +1160,13 @@ QVariantMap McpServer::dispatchToolCall(const QString &toolId, const QVariantMap
     if (sicnu::processing::ToolCallDispatcher::isInteractionAction(toolId.toStdString())) {
         const Json::Value resVal = mDispatcher.dispatchAndAwait(envelope);
         if (resVal.isObject() && resVal.isMember("status") && resVal["status"].asString() == "error") {
-            const std::string errMsg = resVal.isMember("errorMessage")
-                ? resVal["errorMessage"].asString()
-                : "Interaction tool execution failed";
-            throw std::runtime_error(errMsg);
+            const QString errMsg = resVal.isMember("errorMessage")
+                ? QString::fromStdString(resVal["errorMessage"].asString())
+                : QStringLiteral("Interaction tool execution failed");
+            const QString errCode = resVal.isMember("errorCode")
+                ? QString::fromStdString(resVal["errorCode"].asString())
+                : QStringLiteral("INTERACTION_ERROR");
+            throw McpToolError(errMsg, errCode, QStringLiteral("runtime"));
         }
         return sicnu::processing::jsonObjectToVariantMap(resVal);
     }
@@ -1633,18 +1678,28 @@ QVariantMap McpServer::handleSpatialToolCall(const QString &toolId, const QVaria
     registry.registerBuiltinTools();
     const auto tool = registry.find(toolId.toStdString());
     if (!tool)
-        throw std::runtime_error(QStringLiteral("Unknown spatial tool: %1").arg(toolId).toStdString());
+        throw McpToolError(QStringLiteral("Unknown spatial tool: %1").arg(toolId),
+                           QStringLiteral("UNKNOWN_TOOL"),
+                           QStringLiteral("validation"));
 
     const Json::Value input = sicnu::processing::variantToJsonValue(parameters);
     const std::string schemaError =
         sicnu::agent::spatial_tools::validateAgainstRequired(input, (*tool)->inputSchema());
     if (!schemaError.empty())
-        throw std::runtime_error(toolId.toStdString() + ": " + schemaError);
+        throw McpToolError(QString::fromStdString(toolId.toStdString() + ": " + schemaError),
+                           QStringLiteral("INVALID_PARAMETER"),
+                           QStringLiteral("validation"));
 
     SICNU_LOG_INFO(SicnuLogTags::MCP, QString("Executing spatial tool: %1").arg(toolId));
     const auto result = (*tool)->execute(input);
     if (!result.success)
-        throw std::runtime_error(toolId.toStdString() + ": " + result.error);
+    {
+        // Preserve the existing message contract; callers that ignore `data`
+        // still see the same human-readable text.
+        throw McpToolError(QString::fromStdString(toolId.toStdString() + ": " + result.error),
+                           QString::fromStdString(result.errorCode),
+                           QString::fromStdString(result.errorCategory));
+    }
 
     QVariantMap out;
     out[QStringLiteral("status")] = QStringLiteral("ok");

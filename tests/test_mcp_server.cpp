@@ -61,7 +61,18 @@ public:
         lastErrorId = id;
         lastErrorCode = code;
         lastErrorMessage = message;
+        lastErrorData.clear();
     }
+
+    void sendError(const QVariant &id, int code, const QString &message, const QVariantMap &data) override
+    {
+        lastErrorId = id;
+        lastErrorCode = code;
+        lastErrorMessage = message;
+        lastErrorData = data;
+    }
+
+    QVariantMap lastErrorData;
 
     QVariantMap testListAlgorithms() { return handleListAlgorithms(); }
     QVariantMap testGetAlgorithmSchema(const QString &id) { return handleGetAlgorithmSchema(id); }
@@ -939,7 +950,7 @@ TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][s
     CHECK( payload.contains( QStringLiteral( "featureCount" ) ) );
     CHECK( payload.contains( geojsonPath ) );
 
-    // Missing required parameter surfaces a tool-level error.
+    // Missing required parameter surfaces a tool-level error with structured codes.
     QVariantMap badReq = callReq;
     badReq[QStringLiteral( "id" )] = 43;
     QVariantMap badParams;
@@ -949,6 +960,8 @@ TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][s
     server.testHandleRequest( badReq );
     CHECK( server.lastErrorId.toInt() == 43 );
     CHECK( server.lastErrorMessage.contains( QStringLiteral( "path" ) ) );
+    CHECK( server.lastErrorData.value( QStringLiteral( "errorCode" ) ).toString() == QStringLiteral( "INVALID_PARAMETER" ) );
+    CHECK( server.lastErrorData.value( QStringLiteral( "errorCategory" ) ).toString() == QStringLiteral( "validation" ) );
 
     // tools/list includes the spatial catalog tools alongside meta tools.
     QVariantMap listReq;
