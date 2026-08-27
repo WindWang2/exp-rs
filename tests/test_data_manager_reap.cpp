@@ -1,12 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <QCoreApplication>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QSignalSpy>
 #include <QString>
 #include <QTemporaryDir>
 
+#include <thread>
 #include <vector>
 
 #include <gdal.h>
@@ -444,4 +447,92 @@ TEST_CASE( "reapTaskTemporaries with no task temporaries reaps nothing",
   CHECK( result.skippedLeased.isEmpty() );
   CHECK( manager.asset( sessionId ).has_value() );
   CHECK( QFile::exists( sessionPath ) );
+}
+
+TEST_CASE( "reap survives a re-entrant assetAboutToUnload slot that mutates the catalog (#615)",
+           "[data_manager][reap][reentrancy]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+
+  const QString victimPath =
+    stageFixture( dir, QStringLiteral( "samples/dem_sample.tif" ), QStringLiteral( "victim.tif" ) );
+  const AssetId victimId =
+    registerDeletableTemporaryRaster( manager, victimPath, PersistencePolicy::SessionTemporary );
+
+  const QString bystanderPath =
+    stageFixture( dir, QStringLiteral( "samples/dem_sample.tif" ), QStringLiteral( "bystander.tif" ) );
+  const AssetId bystanderId =
+    registerDeletableTemporaryRaster( manager, bystanderPath, PersistencePolicy::SessionTemporary );
+
+  // A DirectConnection slot that unloads ANOTHER asset when the victim's
+  // unload is announced - this reallocates/mutates m_impl->records between
+  // the old code's snapshot capture and its erase (UAF / stale iterator).
+  // The guard flag keeps the re-entrant unload from recursing when the
+  // bystander's own assetAboutToUnload fires.
+  bool bystanderUnloaded = false;
+  const QMetaObject::Connection conn = QObject::connect(
+    &manager, &DataManager::assetAboutToUnload, &manager,
+    [&manager, &bystanderUnloaded, bystanderId]( const AssetId &announced ) {
+      if ( bystanderUnloaded || announced == bystanderId )
+        return;
+      bystanderUnloaded = true;
+      const auto plan = manager.planUnload( bystanderId ).confirmedCascade();
+      manager.unload( plan );
+    },
+    Qt::DirectConnection );
+
+  const ReapResult result = manager.reap( ReapRequest{ victimId } );
+
+  CHECK( result.unloaded );
+  CHECK_FALSE( manager.asset( victimId ).has_value() );
+  CHECK_FALSE( manager.asset( bystanderId ).has_value() );
+}
+
+TEST_CASE( "AssetLease released from a worker thread does not strand the lease (#615)",
+           "[data_manager][lease][threads]" )
+{
+  // Queued lease cleanup needs an event dispatcher on the manager's thread
+  // (production always has the application event loop).
+  static QCoreApplication *app = []() {
+    if ( !QCoreApplication::instance() )
+    {
+      static int argc = 1;
+      static char a0[] = "test_data_manager_reap";
+      char *argv[] = {a0, nullptr};
+      return new QCoreApplication( argc, argv );
+    }
+    return QCoreApplication::instance();
+  }();
+  (void)app;
+
+  QTemporaryDir dir;
+  DataManager manager;
+
+  const QString path =
+    stageFixture( dir, QStringLiteral( "samples/dem_sample.tif" ), QStringLiteral( "leased.tif" ) );
+  const AssetId id =
+    registerDeletableTemporaryRaster( manager, path, PersistencePolicy::SessionTemporary );
+
+  {
+    auto leaseResult = manager.acquire( AssetRef{ id, AssetRevision::initial() },
+                                        AssetUse{ LeaseKind::Task, QStringLiteral( "worker" ) } );
+    REQUIRE( leaseResult );
+    AssetLease lease = leaseResult.take();
+    REQUIRE( lease.isValid() );
+
+    // Release from a foreign thread (as the destructor would): the holder's
+    // single release attempt must consume the lease instead of returning
+    // Invalid and leaving it active forever.
+    std::thread releaser( [l = std::move( lease )]() mutable { (void)l.release(); } );
+    releaser.join();
+  }
+
+  // The manager-thread queued cleanup runs through the event loop; drain it.
+  for ( int i = 0; i < 10; ++i )
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
+
+  // unload/reap must no longer be blocked by a stranded lease.
+  const ReapResult result = manager.reap( ReapRequest{ id } );
+  CHECK( result.unloaded );
 }

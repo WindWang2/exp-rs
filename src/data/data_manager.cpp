@@ -1,6 +1,7 @@
 #include "data_manager.h"
 
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <utility>
 
@@ -73,7 +74,10 @@ struct AssetLeaseControl
   LeaseKind kind = LeaseKind::View;
   QString purpose;
   QPointer<DataManager> manager;
-  bool active = false;
+  // Atomic: AssetLease::release() neutralizes the flag from a foreign
+  // thread (the RAII holder's single release attempt must always consume
+  // the lease) while the manager thread may be reading lease impacts.
+  std::atomic<bool> active{ false };
 };
 
 } // namespace internal
@@ -622,8 +626,15 @@ Result<AssetLease> DataManager::acquire( const AssetRef &asset, const AssetUse &
   }
 
   const quint64 token = m_impl->nextLeaseToken++;
-  auto control = std::make_shared<internal::AssetLeaseControl>(
-    internal::AssetLeaseControl{ asset.id, token, use.kind, use.purpose, this, true } );
+  // The control holds a std::atomic flag, so it is built in place rather
+  // than move-constructed from a temporary.
+  auto control = std::make_shared<internal::AssetLeaseControl>();
+  control->assetId = asset.id;
+  control->token = token;
+  control->kind = use.kind;
+  control->purpose = use.purpose;
+  control->manager = this;
+  control->active.store( true, std::memory_order_release );
   m_impl->leases.push_back( Impl::LeaseRecord{ control } );
   m_impl->catalogGeneration++;
 
@@ -915,7 +926,16 @@ Result<AssetId> DataManager::createVirtualRaster(
   if ( registered.reusedExisting )
     return Result<AssetId>::success( registered.assetId );
 
+  // registerSource emitted assetAdded before returning; a DirectConnection
+  // slot may have re-entered and unloaded/reaped the just-registered asset.
   const auto recordIt = m_impl->findRecord( registered.assetId );
+  if ( recordIt == m_impl->records.end() )
+  {
+    return Result<AssetId>::failure(
+      Diagnostic{ QStringLiteral( "virtual_raster.vanished" ),
+                  QStringLiteral( "The virtual raster was unloaded while being created" ),
+                  DiagnosticSeverity::Error } );
+  }
   recordIt->virtualRecipe = recipe;
 
   // One edge per DISTINCT input asset (a recipe may reference one asset in
@@ -982,6 +1002,13 @@ Result<AssetId> DataManager::restoreVirtualRaster(
 
   if ( !m_impl->vrtScratchDir || !m_impl->vrtScratchDir->isValid() )
     m_impl->vrtScratchDir = std::make_unique<QTemporaryDir>();
+  if ( !m_impl->vrtScratchDir->isValid() )
+  {
+    return Result<AssetId>::failure(
+      Diagnostic{ QStringLiteral( "virtual_raster.scratch_dir_unavailable" ),
+                  QStringLiteral( "Failed to create scratch directory for virtual raster" ),
+                  DiagnosticSeverity::Error } );
+  }
   const QString vrtPath = QStringLiteral( "%1/vrt_%2.vrt" )
                             .arg( m_impl->vrtScratchDir->path(), recipeHash );
 
@@ -1307,11 +1334,32 @@ ReapResult DataManager::reap( const ReapRequest &request )
   // as unload does.
   emit assetAboutToUnload( request.id );
 
-  const QString sourcePath = snapshot.source().canonicalSource;
-  const bool deletable =
-    snapshot.capabilities().testFlag( AssetCapability::DeletableSource );
+  // The emit runs DirectConnection slots that may re-enter the manager and
+  // mutate the catalog (unload/reap/register), invalidating recordIt and the
+  // pre-emit snapshot reference (same reentrancy family as DATAPY-7, which
+  // unload() already handles). Re-locate the record and re-read everything
+  // from the fresh state before erasing.
+  const auto freshIt = m_impl->findRecord( request.id );
+  if ( freshIt == m_impl->records.end() )
+  {
+    result.diagnostics.append(
+      Diagnostic{ QStringLiteral( "reap.unknown_asset" ),
+                  QStringLiteral( "The asset was removed while reaping was announced" ),
+                  DiagnosticSeverity::Error } );
+    return result;
+  }
 
-  m_impl->records.erase( recordIt );
+  // A slot may also have acquired a fresh lease on the asset during the emit;
+  // revoke it like unload() does so no LeaseRecord dangles on an erased asset.
+  const QVector<LeaseImpact> freshImpacts = m_impl->leaseImpacts( request.id );
+  for ( const LeaseImpact &impact : freshImpacts )
+    revokeLease( impact.lease );
+
+  const QString sourcePath = freshIt->snapshot.source().canonicalSource;
+  const bool deletable =
+    freshIt->snapshot.capabilities().testFlag( AssetCapability::DeletableSource );
+
+  m_impl->records.erase( freshIt );
   pruneChildFromCollections( request.id );
   pruneDependencyEdgesOf( request.id );
   m_impl->catalogGeneration++;
@@ -1560,6 +1608,24 @@ LeaseOutcome AssetLease::release()
     return LeaseOutcome::Invalid;
 
   DataManager *manager = m_control->manager.data();
+  if ( QThread::currentThread() != manager->thread() )
+  {
+    // Cross-thread release: releaseLease() refuses to mutate the lease
+    // table from a foreign thread, and this destructor-bound call is the
+    // holder's ONLY release attempt - returning Invalid here would strand
+    // the lease (blocking unload/reap of the asset) until process exit.
+    // Neutralize the control immediately and marshal the actual record
+    // removal to the manager's thread (the queued call is dropped safely
+    // if the manager is destroyed first).
+    m_control->active.store( false, std::memory_order_release );
+    m_control->manager.clear();
+    QMetaObject::invokeMethod(
+      manager,
+      [manager, ref = toRef()]() { manager->releaseLease( ref ); },
+      Qt::QueuedConnection );
+    return LeaseOutcome::Released;
+  }
+
   const LeaseOutcome outcome = manager->releaseLease( toRef() );
   return outcome;
 }
