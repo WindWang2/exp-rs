@@ -174,6 +174,21 @@ void ensureAlgorithmEngineInitialized()
 {
     static const bool done = [] {
         sicnu::AlgorithmEngine::instance().initialize();
+        // Mirror src/app/main.cpp: bridge the unified registry into the
+        // JobEngine fallback so provider algorithms (qgis_algorithms:*,
+        // gdal_tools:*, ...) are executable when submitted as jobs.
+        sicnu::jobs::JobEngine::instance().setFallbackExecutor(
+            []( const sicnu::jobs::JobRequest &req, sicnu::operators::RSOperatorContext &ctx ) {
+                const auto adapter =
+                    sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( req.algorithmId );
+                if ( !adapter )
+                    throw std::runtime_error( "Unknown algorithm: " + req.algorithmId );
+                sicnu::processing::ProgressCallback progressBridge;
+                progressBridge = [&ctx]( int percent, const std::string &message ) {
+                    ctx.reportProgress( percent / 100.0, message );
+                };
+                return adapter->execute( req.params, progressBridge, [&ctx]() { return ctx.isCancelled(); } );
+            } );
         return true;
     }();
     (void)done;
@@ -528,9 +543,26 @@ TEST_CASE("McpServer executes qgis processing algorithms to terminal state", "[a
     QTemporaryDir tempDir;
     REQUIRE(tempDir.isValid());
 
+    // #630: the previous version never created the input raster, used an
+    // invalid expression ('A + 10' is not band-math syntax), and accepted
+    // 'failed' as terminal - it passed purely through the failure path and
+    // proved nothing about executing qgis algorithms.
+    const QString inputPath = tempDir.filePath("input.tif");
+    {
+        std::vector<std::vector<float>> bands(2, std::vector<float>(16, 0.0f));
+        for (size_t i = 0; i < 16; ++i)
+        {
+            bands[0][i] = 100.0f + static_cast<float>(i);
+            bands[1][i] = 50.0f + static_cast<float>(i);
+        }
+        std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+        QString writeErr;
+        REQUIRE(writeGdalOutput(inputPath, 4, 4, bands, gt, QString(), &writeErr));
+    }
+
     QVariantMap params;
-    params["INPUT_LAYERS"] = tempDir.filePath("input.tif");
-    params["EXPRESSION"] = QStringLiteral("A + 10");
+    params["INPUT_LAYERS"] = inputPath;
+    params["EXPRESSION"] = QStringLiteral("b1 + 10");
     params["OUTPUT"] = tempDir.filePath("band_math_out.tif");
 
     QVariantMap res = server.testExecuteAlgorithm("qgis_algorithms:rs_band_math", params);
@@ -539,7 +571,14 @@ TEST_CASE("McpServer executes qgis processing algorithms to terminal state", "[a
     REQUIRE(execId.startsWith("task-"));
 
     const QString terminal = waitForTerminal(server, execId);
-    REQUIRE((terminal == "completed" || terminal == "failed"));
+    QVariantMap dbgStatus = server.testGetExecutionStatus(execId);
+    const long dbgTaskId = execId.mid(QStringLiteral("task-").size()).toLong();
+    const auto dbgInfo = sicnu::TaskCenter::instance().getTaskInfo(dbgTaskId);
+    INFO("terminal=" << terminal.toStdString()
+         << " taskError=" << dbgInfo.errorMessage.toStdString()
+         << " taskStatus=" << static_cast<int>(dbgInfo.status));
+    REQUIRE(terminal == "completed");
+    CHECK(QFile::exists(tempDir.filePath("band_math_out.tif")));
 
     QVariantMap status = server.testGetExecutionStatus(execId);
     REQUIRE(status.value("execution_id").toString() == execId);

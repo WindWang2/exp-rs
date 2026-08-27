@@ -294,3 +294,39 @@ TEST_CASE("GdalDatasetWrapper move assignment transfers ownership", "[gdal][wrap
     REQUIRE(ds2.isValid());
     REQUIRE_FALSE(ds1.isValid());
 }
+
+// Restored regression home (#595): readBandWindowScaled pads out-of-raster
+// regions with the caller's nodata instead of reading garbage (formerly
+// tests/test_g02_gdal_regression.cpp, deleted with the legacy suites).
+TEST_CASE("readBandWindowScaled pads out-of-raster region with nodata (#595)", "[gdal][wrapper][g02]")
+{
+    GDALAllRegister();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("scaled.tif"));
+    GDALDriverH drv = GDALGetDriverByName("GTiff");
+    REQUIRE(drv != nullptr);
+    GDALDatasetH ds = GDALCreate(drv, path.toUtf8().constData(), 4, 4, 1, GDT_Float32, nullptr);
+    REQUIRE(ds != nullptr);
+    GDALRasterBandH band = GDALGetRasterBand(ds, 1);
+    std::vector<float> data(16);
+    for (int i = 0; i < 16; ++i) data[i] = static_cast<float>(i);
+    REQUIRE(GDALRasterIO(band, GF_Write, 0, 0, 4, 4, data.data(), 4, 4, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(ds);
+
+    GdalDatasetWrapper w;
+    REQUIRE(w.open(path));
+
+    // Window extends past the right/bottom edges by 2 px in each axis,
+    // read at the same resolution: the padding must equal the nodata arg.
+    constexpr float kNoData = -3.5f;
+    std::vector<float> buf(6 * 6, 12345.0f);
+    REQUIRE(w.readBandWindowScaled(1, 2, 2, 6, 6, buf.data(), 6, 6, kNoData));
+    // In-bounds corner (2,2) = raster value 2*4+2 = 10; padded corner = kNoData.
+    REQUIRE_THAT(buf[0], Catch::Matchers::WithinAbs(10.0f, 1e-6f));
+    REQUIRE_THAT(buf[6 * 6 - 1], Catch::Matchers::WithinAbs(kNoData, 1e-6f));
+    // The whole 2px right/bottom padding ring is nodata.
+    for (int y = 0; y < 6; ++y)
+        for (int x = 4; x < 6; ++x)
+            REQUIRE_THAT(buf[y * 6 + x], Catch::Matchers::WithinAbs(kNoData, 1e-6f));
+}

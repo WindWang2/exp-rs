@@ -481,9 +481,24 @@ TEST_CASE("CLI workspace containment enforced post-expansion", "[cli][pipeline][
     auto result = runner.runFromJson(pipeline);
 
     // The env-expanded input escapes the workspace: the run must fail
-    // containment validation instead of touching files outside ws.
+    // CONTAINMENT validation (not merely fail because the file is missing -
+    // deleting the containment check must turn this test red, #630).
     CHECK(!result.success);
+    CHECK(QString::fromStdString(result.errorMessage).contains("workspace", Qt::CaseInsensitive));
 
     qunsetenv("SICNU_PIPELINE_WORKSPACE");
     qunsetenv("W1_SECRET_OUT");
 }
+
+// Env hygiene for the containment test above: a failing REQUIRE previously
+// leaked SICNU_PIPELINE_WORKSPACE into later tests in the same process.
+namespace {
+struct WorkspaceEnvGuard
+{
+    ~WorkspaceEnvGuard()
+    {
+        qunsetenv("SICNU_PIPELINE_WORKSPACE");
+        qunsetenv("W1_SECRET_OUT");
+    }
+};
+} // namespace
