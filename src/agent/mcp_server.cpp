@@ -99,6 +99,7 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("gdal:"),
         QStringLiteral("gdal_tools:"),
         QStringLiteral("otb:"),
+        QStringLiteral("otb_tools:"),
         QStringLiteral("qgis:"),
         QStringLiteral("qgis_algorithms:"),
         QStringLiteral("opencv:"), // operator surface uses opencv: filters
@@ -1115,7 +1116,7 @@ bool McpServer::isToolIdAllowed(const QString &toolId, QString *reason)
     if (reason) {
         *reason = QStringLiteral(
             "Tool id '%1' is not in the MCP allow-list "
-            "(rs:, gdal:, gdal_tools:, otb:, qgis:, qgis_algorithms:, opencv:, spatial:).").arg(toolId);
+            "(rs:, gdal:, gdal_tools:, otb:, otb_tools:, qgis:, qgis_algorithms:, opencv:, spatial:).").arg(toolId);
     }
     return false;
 }

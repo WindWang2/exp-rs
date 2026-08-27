@@ -28,11 +28,11 @@ The desktop ships this chain as the `lab.preprocess.optical` DAG;
 | Change detection | `rs:change_detection` | diff/ratio/ND-diff/CVA; Otsu/percentile/statistical thresholds; MMU cleanup; grids + radiometric state must match |
 | Post-classification change | `rs:post_classification_change` | transition matrix, gains/losses |
 | Supervised classification | `rs:supervised_classification` | NormalBayes/SVM; model sidecar validates feature compatibility |
-| Segmentation (OBIA) | `otb:segmentation` (MeanShift) | follow with `gdal:polygonize` + majority filter |
+| Segmentation (OBIA) | `rs:obia_segment` (OTB MeanShift required) or `otb_tools:otb_segmentation` | follow with `gdal:polygonize` + majority filter |
 | Vectorize a raster | `gdal:polygonize` | segmentation/classification maps → polygons |
 | Deep-learning inference | `rs:infer` | ONNX via cv::dnn; model name from `spatial:list_models` |
 | Hyperspectral | `rs:mnf`, `rs:sam_classify`, `rs:spectral_unmixing`, `rs:rx_anomaly` | wavelength-aware; start from an ROI mean spectrum |
-| Terrain | `gdal:dem` (slope/aspect/hillshade/…) | needs an elevation raster |
+| Terrain | `rs:terrain_analysis` (slope/aspect/hillshade/TRI/TPI; geographic DEMs auto-converted) or `gdal_tools:gdaldem` | needs an elevation raster |
 | Pan-sharpening | fusion (Brovey/IHS/PCA) | grid preflight runs automatically in dialogs |
 
 ## Planning rules

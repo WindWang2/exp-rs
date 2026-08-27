@@ -22,11 +22,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 
 /** Max characters of a tool result kept (tail preserved). */
 const MAX_RESULT_CHARS = 50_000;
 const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
+const STARTUP_TIMEOUT_MS = 30 * 1000;
+const MAX_LINE_BUFFER_CHARS = 32 * 1024 * 1024;
 
 type Pending = {
   resolve: (value: any) => void;
@@ -42,6 +44,8 @@ class McpBridge {
   private buffer = "";
   private startError: string | null = null;
   private exited = false;
+  private stopped = false;
+  private stderrTail = "";
 
   constructor(private readonly bin: string, private readonly extraArgs: string[]) {}
 
@@ -73,11 +77,23 @@ class McpBridge {
 
     this.child.stdout!.setEncoding("utf8");
     this.child.stdout!.on("data", (chunk) => this.onStdout(chunk));
+    // Keep a stderr tail so a child crash is diagnosable from exprs_status
+    // and the exit error (Qt/QGIS plugin failures precede most crashes).
     this.child.stderr!.setEncoding("utf8");
-    this.child.stderr!.on("data", () => {});
+    this.child.stderr!.on("data", (chunk: string) => {
+      this.stderrTail = (this.stderrTail + chunk).slice(-4000);
+    });
+    // Persistent handler: once("error") left later child errors unhandled
+    // (EventEmitter throws on an "error" event with no listener).
+    this.child.on("error", (err) => {
+      this.startError = `exp-rs MCP server error: ${err?.message ?? err}`;
+    });
     this.child.on("exit", (code) => {
       this.exited = true;
-      const err = new Error(`exp-rs MCP server exited (code ${code})`);
+      const tail = this.stderrTail.trim();
+      const err = new Error(
+        `exp-rs MCP server exited (code ${code})${tail ? `; stderr tail:\n${tail}` : ""}`,
+      );
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
         p.reject(err);
@@ -85,8 +101,22 @@ class McpBridge {
       this.pending.clear();
     });
     this.child.stdin!.on("error", () => {});
-    process.on("exit", () => this.child?.kill());
+    process.on("exit", () => this.stop());
 
+    // Startup deadline: a child that spawns but hangs during Qt/QGIS init
+    // must not stall extension load for the full 10-minute request timeout.
+    const startupDeadline = new Promise<never>((_, reject) => {
+      const t = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `exp-rs MCP server did not initialize within ${STARTUP_TIMEOUT_MS / 1000}s`,
+            ),
+          ),
+        STARTUP_TIMEOUT_MS,
+      );
+      spawnFailure.catch(() => {}).finally(() => clearTimeout(t));
+    });
     await Promise.race([
       this.request("initialize", {
         protocolVersion: "2024-11-05",
@@ -94,12 +124,26 @@ class McpBridge {
         clientInfo: { name: "pi-exp-rs-spatial", version: "1.0.0" },
       }),
       spawnFailure,
+      startupDeadline,
     ]);
     this.notify("notifications/initialized", {});
   }
 
   private onStdout(chunk: string): void {
     this.buffer += chunk;
+    if (this.buffer.length > MAX_LINE_BUFFER_CHARS) {
+      // Fail fast instead of growing without bound on a runaway server.
+      this.buffer = "";
+      const err = new Error(
+        `exp-rs MCP bridge: response line exceeded ${MAX_LINE_BUFFER_CHARS} chars`,
+      );
+      for (const p of this.pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(err);
+      }
+      this.pending.clear();
+      return;
+    }
     let newline = this.buffer.indexOf("\n");
     while (newline >= 0) {
       const line = this.buffer.slice(0, newline).trim();
@@ -114,6 +158,19 @@ class McpBridge {
     try {
       msg = JSON.parse(line);
     } catch {
+      console.error("[exp-rs-spatial] dropping non-JSON line from server");
+      return;
+    }
+    // A spec-conformant error response with id:null (e.g. a payload larger
+    // than the server's 4 MiB line cap) answers ALL pending requests with a
+    // parse fault - surface it instead of timing out for 10 minutes.
+    if (msg.id === null && msg.error) {
+      const err = new Error(msg.error.message ?? "MCP protocol error (id:null)");
+      for (const p of this.pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(err);
+      }
+      this.pending.clear();
       return;
     }
     if (msg.id === undefined || msg.id === null) return; // notification
@@ -122,7 +179,12 @@ class McpBridge {
     this.pending.delete(msg.id);
     clearTimeout(pending.timer);
     if (msg.error) {
-      pending.reject(new Error(msg.error.message ?? JSON.stringify(msg.error)));
+      // Preserve the structured code/data (errorCode/errorCategory) so Pi
+      // can classify retryable vs fatal instead of parsing prose.
+      const err = new Error(msg.error.message ?? JSON.stringify(msg.error));
+      (err as any).code = msg.error.code;
+      (err as any).data = msg.error.data;
+      pending.reject(err);
     } else {
       pending.resolve(msg.result);
     }
@@ -130,8 +192,22 @@ class McpBridge {
 
   request(method: string, params: any): Promise<any> {
     return new Promise((resolve, reject) => {
+      if ((!this.child || this.exited) && this.stopped) {
+        reject(new Error("exp-rs MCP bridge was stopped"));
+        return;
+      }
       if (!this.child || this.exited) {
-        reject(new Error("exp-rs MCP server is not running"));
+        // Lazy respawn after a crash: without this every tool failed
+        // permanently until the Pi process restarted (#623).
+        this.start()
+          .then(() => this.request(method, params).then(resolve, reject))
+          .catch((err) =>
+            reject(
+              new Error(
+                `exp-rs MCP server crashed and restart failed: ${err?.message ?? err}`,
+              ),
+            ),
+          );
         return;
       }
       const id = this.nextId++;
@@ -157,6 +233,7 @@ class McpBridge {
   }
 
   stop(): void {
+    this.stopped = true;
     this.exited = true;
     const err = new Error("exp-rs MCP bridge stopped");
     for (const p of this.pending.values()) {
@@ -164,8 +241,20 @@ class McpBridge {
       p.reject(err);
     }
     this.pending.clear();
-    this.child?.kill();
+    const child = this.child;
+    if (child) {
+      // Grace ladder: SIGTERM lets the Qt app flush and tear down; escalate
+      // to SIGKILL after a grace period so stop() cannot leak the child.
+      child.kill();
+      const killer = setTimeout(() => child.kill("SIGKILL"), 5000);
+      child.once("exit", () => clearTimeout(killer));
+    }
     this.child = null;
+  }
+
+  /** True when the child process is alive (for exprs_status liveness). */
+  get alive(): boolean {
+    return !!this.child && !this.exited;
   }
 }
 
@@ -207,7 +296,7 @@ function detectBinary(): string | null {
   ];
   for (const candidate of candidates) {
     try {
-      if (existsSync(candidate)) return candidate;
+      if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
     } catch {
       // ignore
     }
@@ -220,8 +309,8 @@ function wantedCategories(): Set<string> {
   const raw = process.env.EXP_RS_TOOL_CATEGORIES ?? "meta,spatial,data";
   const set = new Set<string>();
   for (const part of raw.split(",")) {
-    const trimmed = part.trim();
-    if (trimmed) set.add(trimmed.toLowerCase() === "meta" ? "meta" : trimmed);
+    const trimmed = part.trim().toLowerCase();
+    if (trimmed) set.add(trimmed);
   }
   return set;
 }
@@ -261,36 +350,48 @@ export default async function (pi: ExtensionAPI) {
         ),
       }),
       async execute(_toolCallId, params, signal) {
-        const deadline = Date.now() + (params.timeout_seconds ?? 300) * 1_000;
-        const interval = params.poll_interval_ms ?? 1_000;
-        for (;;) {
-          if (signal?.aborted) throw new Error("Aborted while waiting for execution");
-          const result = await bridge.request("tools/call", {
-            name: "get_execution_status",
-            arguments: { execution_id: params.execution_id },
-          });
-          const text: string = result?.content?.[0]?.text ?? "{}";
-          let status = "unknown";
-          try {
-            status = JSON.parse(text).status ?? status;
-          } catch {
-            // keep polling on malformed payloads
+        const deadline = Date.now() + (params.timeout_seconds ?? 300) * 1000;
+        const interval = params.poll_interval_ms ?? 1000;
+        // Abort must also stop SERVER-side work: fire-and-forget a cancel so
+        // an aborted 30-minute classification does not keep burning CPU
+        // while Pi believes it stopped (#623).
+        const cancelServerSide = () => {
+          bridge
+            .request("tools/call", {
+              name: "cancel_execution",
+              arguments: { execution_id: params.execution_id },
+            })
+            .catch(() => {});
+        };
+        signal?.addEventListener("abort", cancelServerSide, { once: true });
+        try {
+          for (;;) {
+            if (signal?.aborted) throw new Error("Aborted while waiting for execution");
+            const result = await bridge.request("tools/call", {
+              name: "get_execution_status",
+              arguments: { execution_id: params.execution_id },
+            });
+            const text: string = result?.content?.[0]?.text ?? "{}";
+            let status = "unknown";
+            try {
+              status = JSON.parse(text).status ?? status;
+            } catch {
+              // keep polling on malformed payloads
+            }
+            if (status === "completed" || status === "failed" || status === "canceled") {
+              return { content: [{ type: "text" as const, text: truncateTail(text) }], details: {} };
+            }
+            if (Date.now() + interval > deadline) {
+              // A timeout is a failure the model can distinguish from
+              // completion, not a green result.
+              throw new Error(
+                `Timed out waiting for execution '${params.execution_id}' (still '${status}')`,
+              );
+            }
+            await new Promise((r) => setTimeout(r, interval));
           }
-          if (status === "completed" || status === "failed" || status === "canceled") {
-            return { content: [{ type: "text" as const, text: truncateTail(text) }], details: {} };
-          }
-          if (Date.now() + interval > deadline) {
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: truncateTail(`Timed out still '${status}'. Last response:\n${text}`),
-                },
-              ],
-              details: {},
-            };
-          }
-          await new Promise((r) => setTimeout(r, interval));
+        } finally {
+          signal?.removeEventListener("abort", cancelServerSide);
         }
       },
     });
@@ -337,10 +438,16 @@ export default async function (pi: ExtensionAPI) {
       name: "exprs_status",
       label: "exp-rs bridge status",
       description:
-        "Reports whether the exp-rs spatial bridge is connected and how to fix it (EXP_RS_MCP_BIN, build the project first).",
+        "Reports whether the exp-rs spatial bridge is connected (live liveness, not the startup snapshot) and how to fix it (EXP_RS_MCP_BIN, build the project first).",
       parameters: Type.Object({}),
       async execute() {
-        return { content: [{ type: "text" as const, text: message }], details: {} };
+        const live = bridge.alive
+          ? "bridge: CONNECTED (child process alive)"
+          : `bridge: DISCONNECTED${bridge.error ? ` (${bridge.error})` : ""}`;
+        return {
+          content: [{ type: "text" as const, text: `${live}\n${message}` }],
+          details: {},
+        };
       },
     });
   };
@@ -357,6 +464,9 @@ export default async function (pi: ExtensionAPI) {
     registerWaitTool();
     console.log(`[exp-rs-spatial] bridged ${count} tools from ${bin}`);
   } catch (err: any) {
+    // start() may have spawned a healthy child that then failed the tool
+    // registration - tear it down so nothing leaks (#623).
+    bridge.stop();
     registerStatusTool(
       `exp-rs bridge failed to start (${bin}): ${err?.message ?? err}. Set EXP_RS_MCP_BIN or rebuild the project.`,
     );

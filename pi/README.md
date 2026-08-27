@@ -41,7 +41,7 @@ pi -e pi/exp-rs-spatial.ts
 |---|---|---|
 | `EXP_RS_MCP_BIN` | auto-detect (`build/sicnu_geo_rs`, `build-dev/…`) | Binary launched with `--mcp` |
 | `EXP_RS_MCP_ARGS` | — | Extra CLI args for the server |
-| `EXP_RS_TOOL_CATEGORIES` | `meta,spatial,data` | Tool prefixes to bridge (add `rs,gdal,otb,qgis,opencv,view,raster` for direct algorithm tools) |
+| `EXP_RS_TOOL_CATEGORIES` | `meta,spatial,data` | Tool prefixes to bridge (case-insensitive; add `rs,gdal,gdal_tools,otb_tools,qgis_algorithms,opencv,view,raster` for direct algorithm tools — matching the MCP allow-list prefixes) |
 | `SICNU_MCP_WORKSPACE` | — | Restrict server file access to this root |
 | `SICNU_MODELS_DIR` | `<repo>/models` | Model manifest catalog root |
 
@@ -52,8 +52,9 @@ original id is included in each tool description.
 ## What the agent gets
 
 - **Discovery**: `exprs_search_algorithms` / `exprs_list_algorithms`
-  (catalog sidecars in `data/processing/algorithm_meta/` add task/input/
-  output/gpu/accuracy to every entry).
+  (catalog sidecars in `data/processing/algorithm_meta/` enrich supported
+  algorithms with task/input/output/gpu metadata; coverage is incremental,
+  not every catalog entry has one yet).
 - **Understanding**: `exprs_spatial_raster_inspect`,
   `exprs_spatial_vector_inspect` (band roles, wavelengths, radiometric
   state, field schemas, sampled features).
