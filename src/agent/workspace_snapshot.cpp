@@ -78,25 +78,12 @@ MapViewSnapshot::ActiveRasterDisplay captureActiveRaster( QgsMapLayer *layer )
     return out; // Unsupported renderer — leave inactive.
   }
 
-  // Real Data Range of the band the stretch resolves against: for gray it is
-  // the gray band; for RGB it is the red band (the stretch pipeline's
-  // reference). Request ONLY Min|Max (not the default All, which scans Mean /
-  // StdDev / SumOfSquares over the whole raster) so a snapshot capture never
-  // blocks the GUI thread on a large uncached raster (ADR 0008).
-  const int statsBand = out.grayBand > 0 ? out.grayBand : out.redBand;
-  if ( statsBand > 0 && raster->dataProvider() )
-  {
-    const auto requested =
-      Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max;
-    const QgsRasterBandStats stats =
-      raster->dataProvider()->bandStatistics( statsBand, requested, QgsRectangle(), 250000 );
-    if ( stats.statsGathered & Qgis::RasterBandStatistic::Min &&
-         stats.statsGathered & Qgis::RasterBandStatistic::Max )
-    {
-      out.dataMin = stats.minimumValue;
-      out.dataMax = stats.maximumValue;
-    }
-  }
+  // Real Data Range: deliberately NOT sampled via bandStatistics() on the
+  // GUI thread — that GDAL scan blocks the event loop on large rasters.
+  // Range is surfaced via DataManager cached asset metadata when available
+  // (see assets loop above); renderer-derived dataMin/dataMax are left unset
+  // here and can be filled off the GUI thread if needed.
+  Q_UNUSED( raster );
 
   // Stretch algorithm + display window from the renderer's contrast enhancement
   // (the same object the display-stretch pipeline applies). For MultiBandColor

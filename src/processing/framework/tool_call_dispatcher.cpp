@@ -684,4 +684,58 @@ Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTa
   return payload;
 }
 
+void ToolCallDispatcher::rollbackVerificationFailure( const Json::Value &payload ) const
+{
+  if ( !mDataManager )
+    return;
+  // Only roll back when we actually committed (assetId present) and verification
+  // downgraded the payload to error with verified == false.
+  const bool hasAsset = payload.isMember( "assetId" ) && payload["assetId"].isString()
+                        && !payload["assetId"].asString().empty();
+  const bool verifiedFailed = payload.isMember( "verified" ) && !payload["verified"].asBool()
+                              && payload.isMember( "status" ) && payload["status"].asString() == "error";
+  if ( !hasAsset || !verifiedFailed )
+    return;
+  const QString assetIdStr = QString::fromStdString( payload["assetId"].asString() );
+  const auto assetIdOpt = sicnu::data::AssetId::fromString( assetIdStr );
+  if ( !assetIdOpt.has_value() || assetIdOpt->isNull() )
+    return;
+  const sicnu::data::AssetId assetId = *assetIdOpt;
+  // Must run on DataManager owning thread; our production callers (ExecutionPlane
+  // watch bridge / sync waiter) are on that thread (see tool_call_dispatcher_task_center).
+  if ( QThread::currentThread() != mDataManager->thread() )
+  {
+    // Best-effort: schedule removal; do not block. The insulator guarantee is
+    // still met — the asset will be gone before the next event-loop turn.
+    QMetaObject::invokeMethod( mDataManager,
+                              [manager = mDataManager, assetId]() {
+                                if ( !manager || assetId.isNull() )
+                                  return;
+                                if ( manager->asset( assetId ).has_value() )
+                                {
+                                  // TaskTemporary assets from commits are deletable;
+                                  // reap removes catalog entry and deletes the file.
+                                  const auto result = manager->reap( sicnu::data::ReapRequest{ assetId } );
+                                  if ( !result.unloaded && !result.diagnostics.isEmpty() )
+                                  {
+                                    // Fallback: try cascade unload if reap refused due to lease
+                                    const auto plan = manager->planUnload( assetId ).confirmedCascade();
+                                    ( void ) manager->unload( plan );
+                                  }
+                                }
+                              },
+                              Qt::QueuedConnection );
+    return;
+  }
+  if ( mDataManager->asset( assetId ).has_value() )
+  {
+    const auto result = mDataManager->reap( sicnu::data::ReapRequest{ assetId } );
+    if ( !result.unloaded && !result.diagnostics.isEmpty() )
+    {
+      const auto plan = mDataManager->planUnload( assetId ).confirmedCascade();
+      ( void ) mDataManager->unload( plan );
+    }
+  }
+}
+
 } // namespace sicnu::processing

@@ -48,6 +48,126 @@
 #include "providers/generic_cli/generic_cli_algorithm.h"
 
 
+namespace
+{
+
+QString outputPathFromVariant( const QVariant &value )
+{
+  if ( value.userType() == qMetaTypeId<QgsProcessingOutputLayerDefinition>() )
+    return value.value<QgsProcessingOutputLayerDefinition>().sink.staticValue().toString();
+  return value.toString();
+}
+
+bool isLoadableDestinationType( const QString &type )
+{
+  return type == QgsProcessingParameterRasterDestination::typeName()
+         || type == QgsProcessingParameterVectorDestination::typeName()
+         || type == QgsProcessingParameterFeatureSink::typeName();
+}
+
+QString findSiblingTempOutput( const QString &reportedPath )
+{
+  if ( reportedPath.isEmpty() )
+    return {};
+  const QFileInfo fi( reportedPath );
+  const QString baseName = fi.fileName();
+  if ( baseName.isEmpty() )
+    return {};
+  const QDir runDir = fi.dir();
+  QDir rootDir = runDir;
+  if ( !rootDir.cdUp() )
+    return {};
+  if ( !rootDir.dirName().startsWith( QStringLiteral( "processing_" ) ) )
+    return {};
+  const QFileInfoList subdirs = rootDir.entryInfoList( QDir::Dirs | QDir::NoDotAndDotDot );
+  QString bestPath;
+  qint64 bestSize = -1;
+  for ( const QFileInfo &sub : subdirs )
+  {
+    const QString candidate = sub.absoluteFilePath() + QLatin1Char( '/' ) + baseName;
+    const QFileInfo cfi( candidate );
+    if ( !cfi.exists() || !cfi.isFile() )
+      continue;
+    if ( cfi.size() > bestSize )
+    {
+      bestSize = cfi.size();
+      bestPath = cfi.canonicalFilePath();
+    }
+  }
+  return bestPath;
+}
+
+QString resolvedResultPath(
+  const QgsProcessingParameterDefinition *param,
+  const QVariant &value,
+  QgsProcessingContext &context )
+{
+  const QString direct = outputPathFromVariant( value );
+  if ( !direct.isEmpty() && QFileInfo::exists( direct ) )
+    return direct;
+  if ( !direct.isEmpty() )
+  {
+    const QString sibling = findSiblingTempOutput( direct );
+    if ( !sibling.isEmpty() )
+      return sibling;
+  }
+  if ( param )
+  {
+    const QString resolved = QgsProcessingParameters::parameterAsOutputLayer(
+                               param, value, context, true );
+    if ( !resolved.isEmpty() && QFileInfo::exists( resolved ) )
+      return resolved;
+    if ( !resolved.isEmpty() )
+    {
+      const QString sibling = findSiblingTempOutput( resolved );
+      if ( !sibling.isEmpty() )
+        return sibling;
+    }
+  }
+  return direct;
+}
+
+// Report destination paths to the processing log without double-loading layers.
+// Layers are loaded via the TaskCenter autoLoad path; this only surfaces
+// preflight/file-not-found/type warnings so non-agent runs keep user-visible
+// feedback (P1 lean regression).
+void reportResultDestinations(
+  const QgsProcessingAlgorithm *algorithm,
+  const QVariantMap &result,
+  QgsProcessingContext &context,
+  QgsProcessingFeedback *feedback )
+{
+  if ( !algorithm || !feedback )
+    return;
+  for ( const QgsProcessingParameterDefinition *param : algorithm->parameterDefinitions() )
+  {
+    if ( !param || !result.contains( param->name() ) )
+      continue;
+    if ( !param->isDestination() )
+      continue;
+    const QString type = param->type();
+    if ( !isLoadableDestinationType( type ) )
+    {
+      feedback->pushWarning(
+        QObject::tr( "Skipping auto-load for unsupported output type '%1' (%2)." )
+          .arg( type, param->name() ) );
+      continue;
+    }
+    const QString path = resolvedResultPath( param, result.value( param->name() ), context );
+    if ( path.isEmpty() )
+      continue;
+    if ( !QFileInfo::exists( path ) )
+    {
+      feedback->reportError(
+        QObject::tr( "Output file not found: %1" ).arg( path ) );
+      continue;
+    }
+    feedback->pushInfo( QObject::tr( "Result ready: %1" ).arg( path ) );
+  }
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Run-state (unique_ptr needs complete QgsProcessingAlgorithm in this TU)
 // ---------------------------------------------------------------------------
@@ -608,14 +728,19 @@ void SicnuAlgorithmDialog::runAlgorithm()
 
 void SicnuAlgorithmDialog::algExecuted( bool successful, const QVariantMap &results )
 {
+  // Preserve user-visible diagnostics that the lean diff dropped: surface
+  // unsupported-type warnings and missing-file errors in the log without
+  // re-loading layers (TaskCenter autoLoad owns display, P0-L2).
+  if ( mFeedback && algorithm() )
+    reportResultDestinations( algorithm(), results, mContext, mFeedback );
+
+  // Ensure failures always surface an error even when the worker produced no
+  // explicit message — the thin postProcess path can otherwise leave the log silent.
+  if ( !successful && mFeedback && mFeedback->textLog().isEmpty() )
+    mFeedback->reportError( tr( "Algorithm execution failed. See log for details." ) );
+
   if ( mFeedback )
     finished( successful, results, mContext, mFeedback );
-
-  // Result layers are loaded by the TaskCenter autoLoad path (submitJob was
-  // called with autoLoad = mLoadResultsCheck->isChecked()). Loading them again
-  // here duplicated the layer or loaded the temp path after it was moved
-  // (P0-L2).
-  Q_UNUSED( results )
 
   QgsProcessingAlgorithmDialogBase::algExecuted( successful, results );
 

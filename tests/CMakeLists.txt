@@ -648,6 +648,40 @@ target_include_directories(test_agent_run_coordinator PRIVATE
 )
 sicnu_discover_tests(test_agent_run_coordinator)
 
+# Closed-loop gap closure (Tester C): repairable/unrepairable, retry limit,
+# verification gate, invalid output, registration, layer load, final map,
+# GUI close, inspector transitions — QTemporaryDir + heap QApplication
+add_executable(test_agent_closed_loop test_agent_closed_loop.cpp)
+target_link_libraries(test_agent_closed_loop PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_agent
+  sicnu_data
+  sicnu_processing
+  sicnu_task_center
+  sicnu_jobs
+  sicnu_operators
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_agent_closed_loop PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_agent_closed_loop PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_agent_closed_loop PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_agent_closed_loop PRIVATE jsoncpp)
+endif()
+target_include_directories(test_agent_closed_loop PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_agent_closed_loop)
+
 # Unified datasource resolver contract (GH #560)
 sicnu_add_test(test_datasource_resolver)
 

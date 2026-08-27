@@ -191,6 +191,11 @@ public:
   /// without racing the commit or double-registering the asset.
   Json::Value buildCommittedResultPayload( const sicnu::AlgorithmTaskInfo &info ) const;
 
+  /// Insulator: when verification fails after a successful commit, roll back
+  /// the committed Data Asset so no unverified layer can remain in the
+  /// catalog (and thus never auto-displays or survives as final map state).
+  void rollbackVerificationFailure( const Json::Value &payload ) const;
+
 private:
   struct ParsedEnvelope {
     std::string name;

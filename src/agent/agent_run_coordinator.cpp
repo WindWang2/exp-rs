@@ -226,6 +226,7 @@ QString AgentRunCoordinator::startRun( const AgentRunRequest &request )
     m_activeRunId = run.id;
     m_cancelRequested.store( false );
     m_currentCancel = nullptr;
+    m_currentTaskId = -1;
   }
 
   executeRun( std::move( run ) );
@@ -247,6 +248,7 @@ AgentRun AgentRunCoordinator::runSynchronously( const AgentRunRequest &request )
     m_activeRunId = run.id;
     m_cancelRequested.store( false );
     m_currentCancel = nullptr;
+    m_currentTaskId = -1;
   }
 
   return executeRun( std::move( run ) );
@@ -254,12 +256,21 @@ AgentRun AgentRunCoordinator::runSynchronously( const AgentRunRequest &request )
 
 AgentRun AgentRunCoordinator::executeRun( AgentRun run )
 {
+  auto makeCanceledPayload = []() -> Json::Value {
+    Json::Value v( Json::objectValue );
+    v["status"] = "canceled";
+    v["errorMessage"] = "Run canceled by user";
+    v["canceled"] = true;
+    return v;
+  };
+
   auto finalize = [this]( AgentRun &r ) {
     r.completedAtUtc = QDateTime::currentDateTimeUtc();
     {
       QMutexLocker lock( &m_mutex );
       m_runs[r.id] = r;
       m_currentCancel = nullptr;
+      m_currentTaskId = -1;
     }
     emitTerminalSignal( r );
   };
@@ -304,6 +315,7 @@ AgentRun AgentRunCoordinator::executeRun( AgentRun run )
   {
     if ( m_cancelRequested.load() )
     {
+      run.executionPayload = makeCanceledPayload();
       transitionStage( run, AgentRunStage::Canceled );
       finalize( run );
       return run;
@@ -315,11 +327,22 @@ AgentRun AgentRunCoordinator::executeRun( AgentRun run )
     {
       QMutexLocker lock( &m_mutex );
       m_currentCancel = cancelFn;
+      m_currentTaskId = run.taskId;
       m_runs[run.id] = run;
     }
 
     if ( m_cancelRequested.load() )
     {
+      // Cancel wins over whatever the execution just returned.
+      if ( run.taskId > 0 )
+        sicnu::TaskCenter::instance().cancelTask( run.taskId );
+      if ( m_currentCancel )
+      {
+        try { m_currentCancel(); } catch ( ... ) {}
+      }
+      run.executionPayload = makeCanceledPayload();
+      if ( run.taskId > 0 )
+        run.executionPayload["taskId"] = static_cast<Json::Int64>( run.taskId );
       transitionStage( run, AgentRunStage::Canceled );
       finalize( run );
       return run;
@@ -373,6 +396,7 @@ AgentRun AgentRunCoordinator::executeRun( AgentRun run )
                               ? QStringLiteral( "Output verification failed" )
                               : run.verification.issues.first();
         run.errors.append( issue );
+        rollbackCommittedAsset( run.executionPayload );
 
         if ( run.repairAttempts < kMaxRepairAttempts )
         {
@@ -399,6 +423,7 @@ AgentRun AgentRunCoordinator::executeRun( AgentRun run )
     break;
   }
 
+  // Verification gate: Presenting only after verified success.
   transitionStage( run, AgentRunStage::Presenting );
   if ( m_presentFunction )
     m_presentFunction( run );
@@ -436,23 +461,96 @@ void AgentRunCoordinator::emitTerminalSignal( const AgentRun &run )
 
 void AgentRunCoordinator::cancelRun( const QString &runId )
 {
-  QMutexLocker lock( &m_mutex );
-  m_cancelRequested.store( true );
-  if ( m_currentCancel )
-    m_currentCancel();
-
-  auto it = m_runs.find( runId );
-  if ( it != m_runs.end() && it->stage != AgentRunStage::Completed && it->stage != AgentRunStage::Failed )
+  std::function<void()> cancelCopy;
+  long taskIdCopy = -1;
   {
-    it->stage = AgentRunStage::Canceled;
-    it->completedAtUtc = QDateTime::currentDateTimeUtc();
+    QMutexLocker lock( &m_mutex );
+    m_cancelRequested.store( true );
+    cancelCopy = m_currentCancel;
+    taskIdCopy = m_currentTaskId;
+
+    // Also try the map's taskId when the caller supplies a concrete runId.
+    auto it = m_runs.find( runId );
+    if ( it != m_runs.end() && it->taskId > 0 )
+      taskIdCopy = it->taskId;
+    if ( it != m_runs.end() && it->stage != AgentRunStage::Completed && it->stage != AgentRunStage::Failed
+         && it->stage != AgentRunStage::Canceled )
+    {
+      it->stage = AgentRunStage::Canceled;
+      it->completedAtUtc = QDateTime::currentDateTimeUtc();
+      if ( it->executionPayload.isNull() || !it->executionPayload.isMember( "canceled" ) )
+      {
+        Json::Value v( Json::objectValue );
+        v["status"] = "canceled";
+        v["errorMessage"] = "Run canceled by user";
+        v["canceled"] = true;
+        if ( it->taskId > 0 )
+          v["taskId"] = static_cast<Json::Int64>( it->taskId );
+        it->executionPayload = v;
+      }
+    }
   }
+
+  // Outside the lock: cancel is re-entrant and may emit.
+  if ( cancelCopy )
+  {
+    try { cancelCopy(); } catch ( ... ) {}
+  }
+  if ( taskIdCopy > 0 )
+    sicnu::TaskCenter::instance().cancelTask( taskIdCopy );
 }
 
 AgentRun AgentRunCoordinator::runState( const QString &runId ) const
 {
   QMutexLocker lock( &m_mutex );
   return m_runs.value( runId );
+}
+
+void AgentRunCoordinator::rollbackCommittedAsset( const Json::Value &payload ) const
+{
+  if ( !m_dataManager )
+    return;
+  const bool hasAsset = payload.isObject()
+                        && payload.isMember( "assetId" )
+                        && payload["assetId"].isString()
+                        && !payload["assetId"].asString().empty();
+  if ( !hasAsset )
+    return;
+  const QString assetIdStr = QString::fromStdString( payload["assetId"].asString() );
+  const auto assetIdOpt = sicnu::data::AssetId::fromString( assetIdStr );
+  if ( !assetIdOpt.has_value() )
+    return;
+  const sicnu::data::AssetId assetId = *assetIdOpt;
+  if ( assetId.isNull() )
+    return;
+  if ( QThread::currentThread() != m_dataManager->thread() )
+  {
+    QMetaObject::invokeMethod( m_dataManager,
+                              [manager = m_dataManager, assetId]() {
+                                if ( !manager || assetId.isNull() )
+                                  return;
+                                if ( manager->asset( assetId ).has_value() )
+                                {
+                                  const auto result = manager->reap( sicnu::data::ReapRequest{ assetId } );
+                                  if ( !result.unloaded )
+                                  {
+                                    const auto plan = manager->planUnload( assetId ).confirmedCascade();
+                                    ( void ) manager->unload( plan );
+                                  }
+                                }
+                              },
+                              Qt::QueuedConnection );
+    return;
+  }
+  if ( m_dataManager->asset( assetId ).has_value() )
+  {
+    const auto result = m_dataManager->reap( sicnu::data::ReapRequest{ assetId } );
+    if ( !result.unloaded )
+    {
+      const auto plan = m_dataManager->planUnload( assetId ).confirmedCascade();
+      ( void ) m_dataManager->unload( plan );
+    }
+  }
 }
 
 } // namespace sicnu::agent

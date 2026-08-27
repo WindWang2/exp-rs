@@ -126,6 +126,9 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     /// Setting the atomic to false and clearing the pending map makes every
     /// outstanding callback no-op after the dock is cleared or destroyed.
     std::shared_ptr<std::atomic<bool>> m_completionGuard;
+    /// Monotonic run epoch: bumped on every new run / clear so callbacks from
+    /// a previous run (or a reopened dock) cannot pollute the new run's inspector.
+    quint64 m_runEpoch = 0;
 
     LlmStreamingClient *m_client = nullptr;
     QJsonArray m_messageHistory;

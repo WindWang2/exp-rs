@@ -18,6 +18,7 @@
 #include <QEventLoop>
 #include <QJsonObject>
 #include <QMetaObject>
+#include <QTemporaryDir>
 #include <QTimer>
 
 #include <chrono>
@@ -65,13 +66,14 @@ bool writeTinyRaster( const QString &path, int width, int height, int bands )
 
 static void ensureQtApp()
 {
-  if ( !QApplication::instance() )
-  {
-    static int argc = 1;
-    static char appName[] = "test_agent_copilot_ui";
-    static char *argv[] = { appName, nullptr };
-    new QApplication( argc, argv );
-  }
+  if ( QApplication::instance() )
+    return;
+  static int argc = 1;
+  static char appName[] = "test_agent_copilot_ui";
+  static char *argv[] = { appName, nullptr };
+  // Heap-allocated and intentionally leaked: static QApplication would
+  // destruct after Catch2 and trigger teardown races with QGIS singletons.
+  new QApplication( argc, argv );
 }
 
 namespace {
@@ -315,7 +317,9 @@ TEST_CASE( "AgentCopilotDockWidget tool-call card shows result summary", "[agent
   wireRegistryFallback();
   AtomicAlgorithmRegistry::instance().reset();
 
-  const QString outputPath = QStringLiteral( "/tmp/stub_output_agent.tif" );
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString outputPath = tmp.path() + QStringLiteral( "/stub_output_agent.tif" );
   REQUIRE( writeTinyRaster( outputPath, 4, 4, 1 ) );
 
   AtomicAlgorithmRegistry::instance().registerAdapter(

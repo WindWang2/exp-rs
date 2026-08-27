@@ -389,6 +389,7 @@ void AgentCopilotDockWidget::onClearClicked()
     *m_completionGuard = false;
   m_pendingToolCallCompletions.clear();
   m_completionGuard = std::make_shared<std::atomic<bool>>( true );
+  ++m_runEpoch;
 
   // Reset per-run state so the inspector and stop button start clean.
   m_currentRunId.clear();
@@ -436,8 +437,15 @@ void AgentCopilotDockWidget::onSendClicked()
 
 void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
 {
-  // Start a new run. This resets the inspector and the stop→cancel set even
-  // when the previous run was not explicitly cleared.
+  // Start a new run. Invalidate any completions from the previous run so a
+  // late callback cannot pollute the new inspector/cards (cross-run epoch).
+  if ( m_completionGuard )
+    *m_completionGuard = false;
+  m_pendingToolCallCompletions.clear();
+  m_completionGuard = std::make_shared<std::atomic<bool>>( true );
+  ++m_runEpoch;
+  cancelCurrentRunTasks();
+
   m_currentRunId = QUuid::createUuid().toString( QUuid::WithoutBraces );
   m_submittedTaskIds.clear();
   m_submittedPipelineIds.clear();
@@ -603,8 +611,11 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
     setRunStage( tr( "Running" ) );
 
     auto guard = m_completionGuard;
-    watchToolCallCompletion( taskId, [guard, this, toolCallJson, toolCallId, taskId]( const Json::Value &resultPayload ) mutable {
+    const quint64 epoch = m_runEpoch;
+    watchToolCallCompletion( taskId, [guard, epoch, this, toolCallJson, toolCallId, taskId]( const Json::Value &resultPayload ) mutable {
       if ( !guard || !*guard )
+        return;
+      if ( epoch != m_runEpoch )
         return;
 
       const bool ok = resultPayload.isObject()
@@ -848,15 +859,18 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
     runBtn->setText( QStringLiteral( "执行中…" ) );
     QPointer<QPushButton> safeRunBtn = runBtn;
     auto guard = m_completionGuard;
+    const quint64 epoch = m_runEpoch;
     setRunStage( tr( "Running" ) );
     // Execute the approved plan asynchronously. AgentWorkflowExecutor owns
     // pipeline watching and marshals the completion callback onto this
     // widget's thread — no detached std::thread (ADR 0047).
     const long pipelineId = m_workflowExecutor.executeAgentPlanAsync( processing::jsonValueFromQJson( planJson ),
-                                                                      [guard, this, safeRunBtn]( const Json::Value &resultPayload ) {
+                                                                      [guard, epoch, this, safeRunBtn]( const Json::Value &resultPayload ) {
       // Completion payload shape is owned by the workflow executor; read it
       // in Json-land instead of round-tripping through QJson (ADR 0048).
       if ( !guard || !*guard )
+        return;
+      if ( epoch != m_runEpoch )
         return;
       const Json::Value resultObj = resultPayload.isObject() ? resultPayload : Json::Value( Json::objectValue );
       if ( resultObj["status"].asString() != "success" )

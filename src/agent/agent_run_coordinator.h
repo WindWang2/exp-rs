@@ -135,6 +135,7 @@ class SICNU_AGENT_EXPORT AgentRunCoordinator : public QObject
     void transitionStage( AgentRun &run, AgentRunStage stage );
     void emitTerminalSignal( const AgentRun &run );
     void installDefaultFunctions();
+    void rollbackCommittedAsset( const Json::Value &payload ) const;
 
     PreflightFunction m_preflightFunction;
     ExecuteFunction m_executeFunction;
@@ -149,6 +150,7 @@ class SICNU_AGENT_EXPORT AgentRunCoordinator : public QObject
     QString m_activeRunId;
     std::atomic<bool> m_cancelRequested{ false };
     std::function<void()> m_currentCancel;
+    long m_currentTaskId = -1;
 };
 
 } // namespace sicnu::agent

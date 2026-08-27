@@ -86,7 +86,10 @@ ToolCallDispatcher::ToolCallDispatcher()
 
 Json::Value ToolCallDispatcher::buildCommittedResultPayload( const sicnu::AlgorithmTaskInfo &info ) const
 {
-  return ExecutionPlane::instance().buildCommittedResultPayload( info, mOutputCommitterHandler, mOutputVerificationHandler );
+  Json::Value payload =
+    ExecutionPlane::instance().buildCommittedResultPayload( info, mOutputCommitterHandler, mOutputVerificationHandler );
+  rollbackVerificationFailure( payload );
+  return payload;
 }
 
 } // namespace sicnu::processing
