@@ -52,10 +52,11 @@ boost_ref/
 itk_ref/
 otb_ref/
 
-# Agent skills are installed tooling (see skills-lock.json for re-install),
-# not project source. Keep the project-level AGENTS.md config only.
-.agents/skills/
-.agents/vendor/
+# .agents/ holds installed tooling (see skills-lock.json for re-install) and
+# transient agent workspaces (implementer briefings, progress notes) — not
+# project source. Keep the project-level AGENTS.md config only.
+.agents/*/
+
 
 # README showcase imagery (large GIFs/PNGs) — not needed for build/runtime.
 images/README-md/

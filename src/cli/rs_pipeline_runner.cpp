@@ -495,7 +495,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
                                                           : info.resultPayload;
           reportProgress( i, totalSteps, 1.0, "Finished " + stepDef.operatorId );
         }
-        else
+        else if ( sicnu::isTerminalStatus( info.status ) )
         {
           stepResult.success = false;
           stepResult.errorMessage = info.errorMessage.toStdString();
@@ -508,6 +508,18 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
           result.errorMessage = "Step " + std::to_string( i + 1 ) + " (" + stepDef.operatorId +
                                 ") failed: " + stepResult.errorMessage;
           reportLog( "error", result.errorMessage );
+        }
+        else
+        {
+          // Still in flight (Queued/Running/Cancelling/...) when a sibling
+          // failed and the wait loop exited early: the cancelPipeline below
+          // kills these. Report them as canceled by the sibling failure -
+          // not as failed - and leave result.errorMessage to the real
+          // failure reported above.
+          stepResult.success = false;
+          stepResult.errorMessage = "Canceled: sibling step failed while this step was still in flight";
+          reportLog( "warn", "Step " + std::to_string( i + 1 ) + " (" + stepDef.operatorId +
+                             ") " + stepResult.errorMessage );
         }
         result.steps.push_back( stepResult );
       }

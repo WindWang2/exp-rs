@@ -71,6 +71,78 @@ TEST_CASE( "makeExecutionFingerprintV2 determinism and revision sensitivity", "[
   REQUIRE_FALSE( fp1 == fpPortChanged );
 }
 
+TEST_CASE( "Fingerprints distinguish doubles that 16-digit formatting merges", "[workflow][v2][fingerprint][numbers]" )
+{
+  const AssetId asset = AssetId::generate();
+  TaggedDerivationInput in;
+  in.assetId = asset;
+  in.revision = AssetRevision::fromValue( 1 );
+
+  QJsonObject shortVal;
+  shortVal["x"] = 0.3;
+
+  QJsonObject longVal;
+  longVal["x"] = 0.30000000000000004; // differs from 0.3 only in the 17th significant digit
+
+  const auto fpShort = makeExecutionFingerprintV2( "rs:op", "1.0", shortVal, { in } );
+  const auto fpLong = makeExecutionFingerprintV2( "rs:op", "1.0", longVal, { in } );
+  REQUIRE( fpShort.isValid() );
+  REQUIRE_FALSE( fpShort == fpLong ); // regression: 'g',16 canonicalized both to "0.3"
+
+  // Canonical serializer details. Note: QJsonValue normalizes -0.0 to +0.0 on
+  // storage, so the ES6 "-0" distinction is not observable through QJsonObject
+  // inputs; the serializer branch exists for direct-call correctness.
+  QJsonObject negZero;
+  negZero["z"] = -0.0;
+  QJsonObject posZero;
+  posZero["z"] = 0.0;
+  REQUIRE( canonicalizeJsonRfc8785( negZero ) == canonicalizeJsonRfc8785( posZero ) );
+
+  QJsonObject huge;
+  huge["n"] = 1e19; // beyond qint64: must not hit UB in the integer fast path
+  REQUIRE( canonicalizeJsonRfc8785( huge ).contains( "1e" ) );
+
+  QJsonObject roundTrips;
+  roundTrips["a"] = 0.1;
+  const QByteArray canon = canonicalizeJsonRfc8785( roundTrips );
+  REQUIRE( canon == "{\"a\":0.1}" ); // shortest round-trip keeps "0.1", not "0.10000000000000001"
+}
+
+TEST_CASE( "Fingerprints are order-independent when inputs share ports and asset", "[workflow][v2][fingerprint][ordering]" )
+{
+  const AssetId asset = AssetId::generate();
+
+  // Same (toPort, fromPort, assetId, revision) but differing band references
+  // and content digest: ordering over these extra fields must not depend on
+  // the caller's list order.
+  TaggedDerivationInput inA;
+  inA.assetId = asset;
+  inA.revision = AssetRevision::fromValue( 3 );
+  inA.toPort = "input";
+  inA.bandReferences = { "B1", "B2" };
+  inA.lazyContentDigest = "aaaa";
+
+  TaggedDerivationInput inB;
+  inB.assetId = asset;
+  inB.revision = AssetRevision::fromValue( 3 );
+  inB.toPort = "input";
+  inB.bandReferences = { "B3" };
+  inB.lazyContentDigest = "bbbb";
+
+  QJsonObject params;
+
+  const auto fp1 = makeExecutionFingerprintV2( "rs:op", "1.0", params, { inA, inB } );
+  const auto fp2 = makeExecutionFingerprintV2( "rs:op", "1.0", params, { inB, inA } );
+  REQUIRE( fp1.isValid() );
+  REQUIRE( fp1 == fp2 );
+
+  // And a differing digest alone still changes the fingerprint
+  TaggedDerivationInput inBMutated = inB;
+  inBMutated.lazyContentDigest = "cccc";
+  const auto fp3 = makeExecutionFingerprintV2( "rs:op", "1.0", params, { inA, inBMutated } );
+  REQUIRE_FALSE( fp1 == fp3 );
+}
+
 TEST_CASE( "ExecutionResultCache with V2 fingerprints", "[workflow][v2][cache]" )
 {
   auto &cache = ExecutionResultCache::instance();

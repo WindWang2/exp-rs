@@ -59,7 +59,6 @@ add_library(sicnu_processing SHARED
     framework/output_committer.cpp
     framework/artifact_gc.cpp
     framework/collection_import_service.cpp
-    ${CMAKE_SOURCE_DIR}/src/agent/output_verifier.cpp
 
     providers/gdal_tools/provider.cpp
     providers/gdal_tools/gdal_tool_wrapper.cpp

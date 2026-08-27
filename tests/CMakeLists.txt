@@ -508,6 +508,7 @@ add_executable(test_placeholder_grammar test_placeholder_grammar.cpp)
 target_link_libraries(test_placeholder_grammar PRIVATE
   Catch2::Catch2WithMain
   sicnu_workflow
+  sicnu_workflow_runtime
 )
 target_include_directories(test_placeholder_grammar PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -1924,6 +1925,7 @@ target_link_libraries(test_georeferencing_session PRIVATE
   qgis_app_georef
   sicnu_jobs
   sicnu_task_center
+  sicnu_workflow_runtime
   GDAL::GDAL
 )
 target_include_directories(test_georeferencing_session PRIVATE
@@ -3043,6 +3045,7 @@ if(TARGET sicnu_operators)
     sicnu_task_center
     sicnu_jobs
     sicnu_workflow
+    sicnu_workflow_runtime
     sicnu_python_isolated
     Sicnu::qgis_display
     Sicnu::data
@@ -3718,6 +3721,7 @@ if(TARGET sicnu_workflow)
   target_link_libraries(test_workflow_runtime PRIVATE
     Catch2::Catch2WithMain
     sicnu_workflow
+    sicnu_workflow_runtime
     sicnu_operators
     sicnu_processing
     sicnu_task_center
@@ -3739,6 +3743,7 @@ if(TARGET sicnu_workflow)
   target_link_libraries(test_workflow_cancel PRIVATE
     Catch2::Catch2WithMain
     sicnu_workflow
+    sicnu_workflow_runtime
     sicnu_operators
     sicnu_processing
     sicnu_task_center
@@ -3760,6 +3765,7 @@ if(TARGET sicnu_workflow)
   target_link_libraries(test_workflow_execution_plane PRIVATE
     Catch2::Catch2WithMain
     sicnu_workflow
+    sicnu_workflow_runtime
     sicnu_operators
     sicnu_processing
     sicnu_task_center
@@ -3890,6 +3896,7 @@ target_link_libraries(test_workflow_session_controller PRIVATE
   sicnu_processing
   sicnu_operators
   sicnu_workflow
+  sicnu_workflow_runtime
   sicnu_task_center
   sicnu_core
   Sicnu::data
@@ -3911,6 +3918,7 @@ target_link_libraries(test_classify_workflow_bridge PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   sicnu_workflow
+  sicnu_workflow_runtime
 )
 target_include_directories(test_classify_workflow_bridge PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -3940,6 +3948,7 @@ target_link_libraries(test_python_engine PRIVATE
   sicnu_task_center
   sicnu_jobs
   sicnu_workflow
+  sicnu_workflow_runtime
   Python::Python
   CURL::libcurl
   ${PCRE2_16}
@@ -4064,6 +4073,7 @@ target_link_libraries(test_python_plugin_host PRIVATE
   sicnu_task_center
   sicnu_jobs
   sicnu_workflow
+  sicnu_workflow_runtime
   Sicnu::data
   qgis_core
   GDAL::GDAL
@@ -4182,6 +4192,7 @@ target_link_libraries(test_agent_canvas_sync PRIVATE
   qgis_gui
   sicnu_agent
   sicnu_workflow
+  sicnu_workflow_runtime
   sicnu_processing
 )
 target_include_directories(test_agent_canvas_sync PRIVATE
@@ -5093,6 +5104,7 @@ target_link_libraries(test_workflow_pipeline PRIVATE
   Catch2::Catch2
   Qt6::Core
   sicnu_workflow
+  sicnu_workflow_runtime
 )
 target_include_directories(test_workflow_pipeline PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -5123,6 +5135,7 @@ target_link_libraries(test_workflow_pipeline_ui PRIVATE
   sicnu_processing
   sicnu_operators
   sicnu_workflow
+  sicnu_workflow_runtime
   sicnu_task_center
   sicnu_data
 )
@@ -5219,6 +5232,7 @@ target_link_libraries(test_subsystem_stability PRIVATE
   sicnu_agent
   sicnu_operators
   sicnu_workflow
+  sicnu_workflow_runtime
   GDAL::GDAL
 )
 if(TARGET jsoncpp)
@@ -5253,6 +5267,7 @@ target_link_libraries(test_e2e_phase2 PRIVATE
   sicnu_agent
   sicnu_operators
   sicnu_workflow
+  sicnu_workflow_runtime
   GDAL::GDAL
 )
 if(TARGET jsoncpp)
@@ -5279,6 +5294,7 @@ target_link_libraries(test_workflow_engine_v2 PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   sicnu_workflow
+  sicnu_workflow_runtime
   sicnu_data
   sicnu_processing
   sicnu_task_center
@@ -5310,6 +5326,7 @@ target_link_libraries(test_workflow_recovery PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   sicnu_workflow
+  sicnu_workflow_runtime
   sicnu_data
   sicnu_processing
   sicnu_task_center
@@ -5329,6 +5346,7 @@ target_link_libraries(test_workflow_artifact_gc PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   sicnu_workflow
+  sicnu_workflow_runtime
   sicnu_processing
   sicnu_data
   sicnu_task_center

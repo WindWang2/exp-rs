@@ -6,6 +6,9 @@
 #include <processing/qgsprocessingregistry.h>
 #include <processing/qgsprocessingalgorithm.h>
 
+#include <QCoreApplication>
+#include <QThread>
+
 namespace sicnu::processing {
 
 static std::function<void(AtomicAlgorithmRegistry&)> sRsOperatorProvider;
@@ -76,7 +79,16 @@ AtomicAlgorithmAdapterPtr AtomicAlgorithmRegistry::findAdapter( const std::strin
   if ( it != mAdapters.end() )
     return it->second;
 
-  if ( QgsApplication::processingRegistry() )
+  // The QGIS processing registry lazily constructs QgsApplication members,
+  // which is main-thread-only machinery (QgsRuntimeProfiler asserts - and
+  // Qt aborts the process - when they are first touched from a worker
+  // thread, e.g. WorkflowRuntime::runStepViaExecutionPlane's preflight
+  // estimate on a runner thread). Only consult the registry from the main
+  // thread; worker threads treat the algorithm as unlisted and callers fall
+  // back to their defaults.
+  if ( QCoreApplication::instance()
+       && QThread::currentThread() == QCoreApplication::instance()->thread()
+       && QgsApplication::processingRegistry() )
   {
     const QString qid = QString::fromStdString( algorithmId );
     if ( const QgsProcessingAlgorithm *alg = QgsApplication::processingRegistry()->algorithmById( qid ) )

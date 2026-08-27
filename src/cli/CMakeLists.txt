@@ -47,6 +47,7 @@ target_link_libraries(sicnu_geo_rs_cli PRIVATE
     sicnu_task_center
     sicnu_jobs
     sicnu_workflow
+    sicnu_workflow_runtime
     GDAL::GDAL
 )
 

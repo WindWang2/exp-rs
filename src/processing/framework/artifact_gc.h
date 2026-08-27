@@ -2,44 +2,52 @@
 
 #include <QString>
 #include <QStringList>
-#include <QSet>
-#include <vector>
-#include <memory>
 
 #include "sicnu_processing_export.h"
 #include "workflow/workflow_run.h"
 
-namespace sicnu::data {
-class DataManager;
-}
-
 namespace sicnu::processing {
 
 struct GCSweepReport {
-  QStringList reapedFiles;
-  QStringList retainedFiles;
-  QStringList errors;
+  QStringList reapedFiles;   // successfully deleted files (including sidecars)
+  QStringList retainedFiles; // kept outputs (final outputs, cache-shared, outside workspace)
+  QStringList errors;        // "path: reason" for every failed removal
   int reapedCount = 0;
 };
 
 class SICNU_PROCESSING_EXPORT ArtifactGC {
 public:
-  explicit ArtifactGC( sicnu::data::DataManager *dataManager = nullptr );
+  ArtifactGC() = default;
 
   /// Inspect files from a workflow run that are eligible for reaping.
-  /// If retainFinalOutputs is true, the final step's output (and any step producing an explicit workflow artifact) is retained.
+  ///
+  /// Gating rules (all must hold):
+  /// - the run is in the Completed state (Running/Interrupted/Failed/Canceled
+  ///   runs keep everything: resume and retry depend on their intermediates);
+  /// - the step's status is "Completed" (only reap what was actually produced
+  ///   and consumed downstream);
+  /// - the step was NOT served from the result cache (cache-hit outputs are
+  ///   shared assets owned by ExecutionResultCache);
+  /// - the output is neither a DAG leaf (nothing consumes it) nor a declared
+  ///   workflow artifact, when retainFinalOutputs is true;
+  /// - the output path lies in the same directory as (or below) a retained
+  ///   final output, so persisted paths from a tampered or corrupt checkpoint
+  ///   can never nominate files outside the run workspace for deletion.
   QStringList inspectReapable( const sicnu::workflow::WorkflowRun &run,
                                bool retainFinalOutputs = true ) const;
 
-  /// Delete intermediate temporary outputs from a workflow run.
+  /// Delete intermediate temporary outputs from a workflow run (see
+  /// inspectReapable for the gating rules). Deletion failures are collected
+  /// in GCSweepReport::errors instead of being silently dropped.
   GCSweepReport sweepRun( const sicnu::workflow::WorkflowRun &run,
                           bool retainFinalOutputs = true );
 
-  /// Clean temporary files directly for a given list of paths (and their sidecars).
-  static QStringList removeFilesWithSidecars( const QStringList &filePaths );
-
-private:
-  sicnu::data::DataManager *m_dataManager = nullptr;
+  /// Remove files and their sidecars. Each file is first renamed to a
+  /// ".gctrash" staging name and then deleted, so a concurrent reader either
+  /// sees the file or a clean miss - never a half-deleted sidecar set.
+  /// @param errors when non-null, receives a "path: reason" entry for every
+  /// failed removal.
+  static QStringList removeFilesWithSidecars( const QStringList &filePaths, QStringList *errors = nullptr );
 };
 
 } // namespace sicnu::processing
