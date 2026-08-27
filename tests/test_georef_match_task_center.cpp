@@ -17,17 +17,7 @@ namespace
 
 sicnu::AlgorithmTaskInfo waitForTerminalTask( long taskId )
 {
-  sicnu::AlgorithmTaskInfo info;
-  for ( int attempt = 0; attempt < 2000; ++attempt )
-  {
-    info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
-    if ( info.status == sicnu::TaskStatus::Completed
-         || info.status == sicnu::TaskStatus::Failed
-         || info.status == sicnu::TaskStatus::Canceled )
-      return info;
-    std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
-  }
-  return info;
+  return sicnu::TaskCenter::instance().waitForTask( taskId, std::chrono::seconds( 15 ) );
 }
 
 } // namespace

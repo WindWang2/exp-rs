@@ -54,8 +54,29 @@ struct ExecutionFingerprint
   /// input).
   QByteArray digest;
 
+  QString toHex() const { return QString::fromUtf8( digest.toHex() ); }
+  std::string toStdString() const { return digest.toHex().toStdString(); }
+  bool isValid() const { return !digest.isEmpty(); }
+
   bool operator==( const ExecutionFingerprint & ) const = default;
 };
+
+/// Tagged derivation input for RFC 8785 execution fingerprints (Workflow Engine 2.0).
+struct TaggedDerivationInput
+{
+  AssetId assetId;
+  AssetRevision revision = AssetRevision::initial();
+  QString fromPort;
+  QString toPort;
+  QStringList bandReferences;
+  QString valueDomain;
+  QString lazyContentDigest;
+
+  bool operator==( const TaggedDerivationInput & ) const = default;
+};
+
+/// RFC 8785 JSON Canonicalization Scheme serializer with strictly sorted UTF-16 code point keys.
+QByteArray canonicalizeJsonRfc8785( const QJsonObject &obj );
 
 /// Build a fingerprint from the components. @a parameters is normalized (sorted
 /// by key) before hashing so parameter-map insertion order does not affect the
@@ -64,6 +85,12 @@ ExecutionFingerprint makeExecutionFingerprint( const QString &algorithmId,
                                                const QString &algorithmVersion,
                                                const QJsonObject &parameters,
                                                const QVector<DerivationInput> &inputs );
+
+/// Workflow Engine 2.0: Canonical RFC 8785 fingerprint with TaggedDerivationInputs.
+ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
+                                                 const QString &algorithmVersion,
+                                                 const QJsonObject &parameters,
+                                                 const QVector<TaggedDerivationInput> &inputs );
 
 /// Convenience: build a fingerprint directly from a DerivationRecord (carries
 /// algorithmId/version/parameters/inputs).

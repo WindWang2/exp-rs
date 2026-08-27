@@ -103,6 +103,7 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
   def.steps.clear();
   if ( json.isMember( "steps" ) && json["steps"].isArray() )
   {
+    std::unordered_set<std::string> seenStepIds;
     for ( const auto &stepVal : json["steps"] )
     {
       if ( !stepVal.isObject() )
@@ -111,6 +112,17 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
       StepDef step;
       if ( stepVal.isMember( "id" ) && stepVal["id"].isString() )
         step.id = stepVal["id"].asString();
+
+      if ( !step.id.empty() )
+      {
+        if ( seenStepIds.find( step.id ) != seenStepIds.end() )
+        {
+          error = "Duplicate step id: " + step.id;
+          return false;
+        }
+        seenStepIds.insert( step.id );
+      }
+
       if ( stepVal.isMember( "title" ) && stepVal["title"].isString() )
         step.title = stepVal["title"].asString();
       if ( stepVal.isMember( "kind" ) && stepVal["kind"].isInt() )

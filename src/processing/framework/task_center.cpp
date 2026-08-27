@@ -438,70 +438,131 @@ void TaskCenter::flushPendingSignals()
     }
 }
 
+QList<long> TaskCenter::collectTransitiveDescendantsLocked( long rootTaskId ) const
+{
+    QList<long> descendants;
+    QSet<long> visited;
+    visited.insert( rootTaskId );
+    bool addedNew = true;
+    while ( addedNew )
+    {
+        addedNew = false;
+        for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
+        {
+            if ( isTerminalStatus( it.value().status ) )
+                continue;
+            if ( visited.contains( it.key() ) )
+                continue;
+            for ( long parentId : it.value().parentTaskIds )
+            {
+                if ( visited.contains( parentId ) )
+                {
+                    visited.insert( it.key() );
+                    descendants.append( it.key() );
+                    addedNew = true;
+                    break;
+                }
+            }
+        }
+    }
+    return descendants;
+}
+
+QVariant TaskCenter::substituteVariantRecursive( const QVariant &value,
+                                                const std::function<std::string( const sicnu::workflow::PlaceholderRef & )> &resolver )
+{
+    if ( value.typeId() == QMetaType::QString )
+    {
+        const std::string raw = value.toString().toStdString();
+        const std::string sub = sicnu::workflow::substitutePlaceholders( raw, resolver );
+        return QString::fromStdString( sub );
+    }
+    if ( value.typeId() == QMetaType::QVariantList )
+    {
+        QVariantList list = value.toList();
+        for ( int i = 0; i < list.size(); ++i )
+        {
+            list[i] = substituteVariantRecursive( list[i], resolver );
+        }
+        return list;
+    }
+    if ( value.typeId() == QMetaType::QVariantMap )
+    {
+        QVariantMap map = value.toMap();
+        for ( auto it = map.begin(); it != map.end(); ++it )
+        {
+            it.value() = substituteVariantRecursive( it.value(), resolver );
+        }
+        return map;
+    }
+    return value;
+}
+
 void TaskCenter::applyPlaceholdersForTask( long taskId )
 {
     if ( !m_tasks.contains( taskId ) )
         return;
 
+    auto resolveRef = [&]( const sicnu::workflow::PlaceholderRef &ref ) -> std::string {
+        for ( long parentId : m_tasks[taskId].parentTaskIds )
+        {
+            if ( !m_tasks.contains( parentId ) )
+                continue;
+
+            const QString parentStepId = m_tasks[parentId].stepId;
+            bool isMatch = false;
+            if ( !parentStepId.isEmpty() && ref.stepId == parentStepId.toStdString() )
+            {
+                isMatch = true;
+            }
+            else if ( ref.parentTaskId == parentId || ref.isParentKeyword )
+            {
+                isMatch = true;
+            }
+
+            if ( isMatch )
+            {
+                // Port-aware: try resultPayload[portName] first (376).
+                const Json::Value &payload = m_tasks[parentId].resultPayload;
+                if ( payload.isObject() && payload.isMember( ref.portName ) && payload[ref.portName].isString() )
+                {
+                    const std::string s = payload[ref.portName].asString();
+                    if ( !s.empty() ) return s;
+                }
+                // Also check case where portName is the generic "output" but payload uses another key;
+                // fallback to outputLayerPath / outputPathFromResult for single-output steps.
+                QString pOut = m_tasks[parentId].outputLayerPath;
+                if ( pOut.isEmpty() )
+                    pOut = outputPathFromResult( payload );
+                // If still empty and portName != "output", try payload[portName] via variant map results stored earlier.
+                if ( pOut.isEmpty() && payload.isObject() )
+                {
+                    for ( const auto &name : payload.getMemberNames() )
+                    {
+                        if ( QString::fromStdString( name ).compare( QString::fromStdString( ref.portName ), Qt::CaseInsensitive ) == 0
+                             && payload[name].isString() )
+                        {
+                            const std::string s = payload[name].asString();
+                            if ( !s.empty() ) return s;
+                        }
+                    }
+                }
+                return pOut.toStdString();
+            }
+        }
+        return ref.rawRef;
+    };
+
     QVariantMap &pMap = m_tasks[taskId].parameterMap;
     for ( auto pIt = pMap.begin(); pIt != pMap.end(); ++pIt )
     {
-        // Only string parameters participate in placeholder substitution.
-        if ( pIt.value().typeId() != QMetaType::QString )
-            continue;
+        pIt.value() = substituteVariantRecursive( pIt.value(), resolveRef );
+    }
 
-        std::string rawVal = pIt.value().toString().toStdString();
-        std::string substituted = sicnu::workflow::substitutePlaceholders( rawVal, [&]( const sicnu::workflow::PlaceholderRef &ref ) -> std::string {
-            for ( long parentId : m_tasks[taskId].parentTaskIds )
-            {
-                if ( !m_tasks.contains( parentId ) )
-                    continue;
-
-                const QString parentStepId = m_tasks[parentId].stepId;
-                bool isMatch = false;
-                if ( !parentStepId.isEmpty() && ref.stepId == parentStepId.toStdString() )
-                {
-                    isMatch = true;
-                }
-                else if ( ref.parentTaskId == parentId || ref.isParentKeyword )
-                {
-                    isMatch = true;
-                }
-
-                if ( isMatch )
-                {
-                    // Port-aware: try resultPayload[portName] first (376).
-                    const Json::Value &payload = m_tasks[parentId].resultPayload;
-                    if ( payload.isObject() && payload.isMember( ref.portName ) && payload[ref.portName].isString() )
-                    {
-                        const std::string s = payload[ref.portName].asString();
-                        if ( !s.empty() ) return s;
-                    }
-                    // Also check case where portName is the generic "output" but payload uses another key;
-                    // fallback to outputLayerPath / outputPathFromResult for single-output steps.
-                    QString pOut = m_tasks[parentId].outputLayerPath;
-                    if ( pOut.isEmpty() )
-                        pOut = outputPathFromResult( payload );
-                    // If still empty and portName != "output", try payload[portName] via variant map results stored earlier.
-                    if ( pOut.isEmpty() && payload.isObject() )
-                    {
-                        for ( const auto &name : payload.getMemberNames() )
-                        {
-                            if ( QString::fromStdString( name ).compare( QString::fromStdString( ref.portName ), Qt::CaseInsensitive ) == 0
-                                 && payload[name].isString() )
-                            {
-                                const std::string s = payload[name].asString();
-                                if ( !s.empty() ) return s;
-                            }
-                        }
-                    }
-                    return pOut.toStdString();
-                }
-            }
-            return ref.rawRef;
-        } );
-
-        *pIt = QString::fromStdString( substituted );
+    if ( m_tasks[taskId].hasJobRequest )
+    {
+        sicnu::jobs::JobRequest &req = m_tasks[taskId].jobRequest;
+        req.params = variantMapToJsonParams( pMap );
     }
 
     // Refresh detected output path after substitution
@@ -509,6 +570,7 @@ void TaskCenter::applyPlaceholdersForTask( long taskId )
     if ( !detectedPath.isEmpty() )
         m_tasks[taskId].outputLayerPath = detectedPath;
 }
+
 
 void TaskCenter::updatePipelineForTaskLocked( long taskId )
 {
@@ -1121,6 +1183,7 @@ void TaskCenter::markTaskCompleted( long taskId,
 void TaskCenter::markTaskFailed( long taskId, const QString &error )
 {
     QList<long> cascadeCanceledIds;
+    std::vector<std::string> jobIdsToCancel;
     {
         QMutexLocker locker( &m_mutex );
         // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
@@ -1134,27 +1197,43 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
 
-        QList<long> keys = m_tasks.keys();
-        for ( long id : keys )
+        const QList<long> descendants = collectTransitiveDescendantsLocked( taskId );
+        for ( long targetId : descendants )
         {
-            if ( m_tasks[id].parentTaskIds.contains( taskId )
-                 && ( m_tasks[id].status == TaskStatus::Queued
-                      || m_tasks[id].status == TaskStatus::WaitingResource ) )
+            auto &info = m_tasks[targetId];
+            if ( isTerminalStatus( info.status ) )
+                continue;
+
+            if ( info.taskHandle )
+                info.taskHandle->cancel();
+
+            if ( !info.jobId.empty() )
             {
-                m_tasks[id].status = TaskStatus::Canceled;
-                m_tasks[id].endTime = QDateTime::currentDateTime();
-                m_tasks[id].errorMessage = QStringLiteral( "Canceled due to upstream parent task failure." );
-                m_tasks[id].logBuffer.append( QStringLiteral( "Canceled due to upstream parent task failure." ) );
-                updatePipelineForTaskLocked( id );
-                queueTaskUpdatedLocked( id );
-                cascadeCanceledIds.append( id );
+                info.status = TaskStatus::Cancelling;
+                jobIdsToCancel.push_back( info.jobId );
+                info.logBuffer.append( QStringLiteral( "Cancellation requested due to upstream parent task failure." ) );
             }
+            else
+            {
+                info.status = TaskStatus::Canceled;
+                info.errorMessage = QStringLiteral( "Canceled due to upstream parent task failure." );
+                info.endTime = QDateTime::currentDateTime();
+                info.logBuffer.append( QStringLiteral( "Canceled due to upstream parent task failure." ) );
+                cascadeCanceledIds.append( targetId );
+            }
+
+            updatePipelineForTaskLocked( targetId );
+            queueTaskUpdatedLocked( targetId );
         }
 
         processNextQueuedTasks();
     }
     flushPendingLaunches();
     flushPendingSignals();
+
+    for ( const auto &jId : jobIdsToCancel )
+        sicnu::jobs::JobEngine::instance().cancel( jId );
+
     fireTaskCompletionCallbacks( taskId );
     for ( long id : cascadeCanceledIds )
         fireTaskCompletionCallbacks( id );
@@ -1162,6 +1241,8 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
 
 void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
 {
+    QList<long> cascadeCanceledIds;
+    std::vector<std::string> jobIdsToCancel;
     {
         QMutexLocker locker( &m_mutex );
         // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
@@ -1174,16 +1255,53 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), reason ) );
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
+
+        const QList<long> descendants = collectTransitiveDescendantsLocked( taskId );
+        for ( long targetId : descendants )
+        {
+            auto &info = m_tasks[targetId];
+            if ( isTerminalStatus( info.status ) )
+                continue;
+
+            if ( info.taskHandle )
+                info.taskHandle->cancel();
+
+            if ( !info.jobId.empty() )
+            {
+                info.status = TaskStatus::Cancelling;
+                jobIdsToCancel.push_back( info.jobId );
+                info.logBuffer.append( QStringLiteral( "Cancellation requested due to upstream parent task cancellation." ) );
+            }
+            else
+            {
+                info.status = TaskStatus::Canceled;
+                info.errorMessage = QStringLiteral( "Canceled due to upstream parent task cancellation." );
+                info.endTime = QDateTime::currentDateTime();
+                info.logBuffer.append( QStringLiteral( "Canceled due to upstream parent task cancellation." ) );
+                cascadeCanceledIds.append( targetId );
+            }
+
+            updatePipelineForTaskLocked( targetId );
+            queueTaskUpdatedLocked( targetId );
+        }
+
         processNextQueuedTasks();
     }
     flushPendingLaunches();
     flushPendingSignals();
+
+    for ( const auto &jId : jobIdsToCancel )
+        sicnu::jobs::JobEngine::instance().cancel( jId );
+
     fireTaskCompletionCallbacks( taskId );
+    for ( long id : cascadeCanceledIds )
+        fireTaskCompletionCallbacks( id );
 }
 
 bool TaskCenter::cancelTask( long taskId )
 {
     std::vector<std::string> jobIdsToCancel;
+    QList<long> cascadeCanceledIds;
     {
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) )
@@ -1191,32 +1309,11 @@ bool TaskCenter::cancelTask( long taskId )
         if ( isTerminalStatus( m_tasks[taskId].status ) )
             return false;
 
-        // Recursive search for all descendant task IDs in the DAG
-        QSet<long> canceledAncestors;
-        canceledAncestors.insert( taskId );
-        bool addedNew = true;
-        while ( addedNew )
-        {
-            addedNew = false;
-            for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
-            {
-                if ( isTerminalStatus( it.value().status ) )
-                    continue;
-                if ( canceledAncestors.contains( it.key() ) )
-                    continue;
-                for ( long parentId : it.value().parentTaskIds )
-                {
-                    if ( canceledAncestors.contains( parentId ) )
-                    {
-                        canceledAncestors.insert( it.key() );
-                        addedNew = true;
-                        break;
-                    }
-                }
-            }
-        }
+        QList<long> targets;
+        targets.append( taskId );
+        targets.append( collectTransitiveDescendantsLocked( taskId ) );
 
-        for ( long targetId : canceledAncestors )
+        for ( long targetId : targets )
         {
             auto &info = m_tasks[targetId];
             if ( isTerminalStatus( info.status ) )
@@ -1246,6 +1343,7 @@ bool TaskCenter::cancelTask( long taskId )
                 info.logBuffer.append( ( targetId == taskId )
                                          ? QStringLiteral( "Task canceled by user." )
                                          : QStringLiteral( "Canceled due to upstream parent task cancellation." ) );
+                cascadeCanceledIds.append( targetId );
 
                 if ( !info.outputLayerPath.isEmpty() && QFile::exists( info.outputLayerPath ) )
                 {
@@ -1268,6 +1366,9 @@ bool TaskCenter::cancelTask( long taskId )
 
     for ( const auto &jId : jobIdsToCancel )
         sicnu::jobs::JobEngine::instance().cancel( jId );
+
+    for ( long id : cascadeCanceledIds )
+        fireTaskCompletionCallbacks( id );
 
     return true;
 }

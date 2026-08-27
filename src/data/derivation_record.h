@@ -52,6 +52,9 @@ struct DerivationRecord
   /// context (e.g. the auth config used to reach remote inputs). Never a
   /// password, token, or other credential material.
   QString authConfigId;
+  QString workflowId;
+  QString workflowRunId;
+  QString stepId;
 
   QJsonObject toJson() const;
 
@@ -74,6 +77,25 @@ inline DerivationRecord makeTaskDerivation( const QString &algorithmId,
   DerivationRecord record;
   record.algorithmId = algorithmId;
   record.parameters = parameters;
+  record.taskReference = taskReference;
+  record.completedAtUtc = QDateTime::currentDateTimeUtc();
+  return record;
+}
+
+/// Builds a DerivationRecord for a workflow run step execution.
+inline DerivationRecord makeWorkflowDerivation( const QString &algorithmId,
+                                                const QJsonObject &parameters,
+                                                const QString &workflowId,
+                                                const QString &workflowRunId,
+                                                const QString &stepId,
+                                                const QString &taskReference = QString() )
+{
+  DerivationRecord record;
+  record.algorithmId = algorithmId;
+  record.parameters = parameters;
+  record.workflowId = workflowId;
+  record.workflowRunId = workflowRunId;
+  record.stepId = stepId;
   record.taskReference = taskReference;
   record.completedAtUtc = QDateTime::currentDateTimeUtc();
   return record;

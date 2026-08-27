@@ -25,6 +25,7 @@ class RSOperatorContext;
 
 namespace sicnu::workflow {
 struct WorkflowDefinition;
+struct PlaceholderRef;
 }
 
 namespace sicnu {
@@ -275,6 +276,9 @@ private:
     /// sees the terminal task snapshot. Exactly-once: registrations are
     /// removed before invocation and terminal transitions are deduplicated.
     void fireTaskCompletionCallbacks( long taskId );
+    QList<long> collectTransitiveDescendantsLocked( long rootTaskId ) const;
+    static QVariant substituteVariantRecursive( const QVariant &value,
+                                                const std::function<std::string( const sicnu::workflow::PlaceholderRef & )> &resolver );
     void applyPlaceholdersForTask(long taskId);
     void updatePipelineForTaskLocked(long taskId);
     long submitJobImpl(const sicnu::jobs::JobRequest& request,

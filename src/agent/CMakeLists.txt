@@ -2,7 +2,6 @@
 add_library(sicnu_agent SHARED
   agent_run_coordinator.cpp
   agent_run_coordinator.h
-  output_verifier.cpp
   output_verifier.h
   workspace_snapshot.cpp
   workspace_snapshot.h

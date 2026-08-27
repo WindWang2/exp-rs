@@ -144,21 +144,28 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
     return false;
   };
 
+  const bool isInPlace = ( request.tempPath == request.stablePath )
+    || ( !request.tempPath.isEmpty() && QFile::exists( request.tempPath )
+         && QFileInfo( request.tempPath ).canonicalFilePath() == QFileInfo( request.stablePath ).canonicalFilePath() );
+
   QStringList renamed;
-  for ( const PublishPair &pair : publishes )
+  if ( !isInPlace )
   {
-    if ( QFile::exists( pair.to ) )
-      QFile::remove( pair.to );
-    if ( !moveOrCopy( pair.from, pair.to ) )
+    for ( const PublishPair &pair : publishes )
     {
-      for ( const QString &done : renamed )
-        QFile::remove( done );
-      return CommitResult::failure( diagnostic(
-        QStringLiteral( "output.publish_failed" ),
-        QStringLiteral( "Failed to publish output to %1" )
-          .arg( request.stablePath ) ) );
+      if ( QFile::exists( pair.to ) )
+        QFile::remove( pair.to );
+      if ( !moveOrCopy( pair.from, pair.to ) )
+      {
+        for ( const QString &done : renamed )
+          QFile::remove( done );
+        return CommitResult::failure( diagnostic(
+          QStringLiteral( "output.publish_failed" ),
+          QStringLiteral( "Failed to publish output to %1" )
+            .arg( request.stablePath ) ) );
+      }
+      renamed.append( pair.to );
     }
-    renamed.append( pair.to );
   }
 
   SourceDescriptor source;
@@ -181,8 +188,11 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
     // task", roll the publish back: remove the just-published files (primary
     // + sidecars, #462) so there is no orphaned, apparently-valid output and
     // nothing is registered.
-    for ( const QString &published : renamed )
-      QFile::remove( published );
+    if ( !isInPlace )
+    {
+      for ( const QString &published : renamed )
+        QFile::remove( published );
+    }
 
     const QVector<Diagnostic> detail = registered.diagnostics.isEmpty()
       ? QVector<Diagnostic>{ diagnostic(
