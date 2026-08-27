@@ -603,7 +603,23 @@ void McpServer::handleRequest(const QVariantMap &request)
     else if (method == QStringLiteral("tools/call"))
     {
         QString toolName = params.value(QStringLiteral("name")).toString();
-        QVariantMap arguments = params.value(QStringLiteral("arguments")).toMap();
+        // MCP spec: tools/call arguments are OPTIONAL but must be an object
+        // when present.
+        QVariantMap arguments;
+        const QVariant rawArguments = params.value(QStringLiteral("arguments"));
+        if (!rawArguments.isValid() || rawArguments.isNull())
+        {
+            // absent: empty arguments
+        }
+        else if (rawArguments.type() != QVariant::Map)
+        {
+            sendError(id, -32602, QStringLiteral("tools/call 'arguments' must be an object"));
+            return;
+        }
+        else
+        {
+            arguments = rawArguments.toMap();
+        }
 
         QVariantMap callResult;
         QVariantList contentList;
@@ -732,7 +748,9 @@ void McpServer::handleRequest(const QVariantMap &request)
             {
                 if (isNotification)
                     return;
-                sendError(id, -32601, QStringLiteral("Method not found: ") + toolName);
+                // Unknown TOOL inside a valid tools/call is an invalid-params
+                // problem (-32602), not an unknown method (#620).
+                sendError(id, -32602, QStringLiteral("Unknown tool: ") + toolName);
                 return;
             }
 
@@ -1712,6 +1730,19 @@ QVariantMap McpServer::handleSpatialToolCall(const QString &toolId, const QVaria
         throw McpToolError(QStringLiteral("Unknown spatial tool: %1").arg(toolId),
                            QStringLiteral("UNKNOWN_TOOL"),
                            QStringLiteral("validation"));
+
+    // The ADR-0122 inline path must honour the same SICNU_MCP_WORKSPACE
+    // containment as dispatchToolCall: raster/vector inspect GDALOpen any
+    // caller path, which would otherwise probe the filesystem outside the
+    // configured workspace (#620).
+    QString denyReason;
+    if (!validateWorkspacePaths(parameters, &denyReason))
+    {
+        SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
+        throw McpToolError(toolId + QStringLiteral(": ") + denyReason,
+                           QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
+                           QStringLiteral("validation"));
+    }
 
     const Json::Value input = sicnu::processing::variantToJsonValue(parameters);
     const std::string schemaError =
