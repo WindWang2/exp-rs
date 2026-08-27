@@ -218,6 +218,11 @@ TEST_CASE( "registry surfaces provider load failures", "[models][runtime]" )
 
 TEST_CASE( "runtime-layer readiness verdicts are honest", "[models][runtime]" )
 {
+  // Each ctest-discovered case runs in its own process: this case needs the
+  // fakefw provider registered or readiness reports UnsupportedRuntime
+  // before the hardware checks it is asserting.
+  FakeProviderGuard fakeProviderGuard;
+
   ModelHardwareCapabilities noGpu;
   ModelHardwareCapabilities withGpu;
   withGpu.cudaAvailable = true;
