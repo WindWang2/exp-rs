@@ -499,3 +499,75 @@ TEST_CASE( "OutputCommitter::discardTemporary Removes All Sidecars", "[processin
 }
 
 
+
+TEST_CASE("Failed re-commit preserves the previous stable output (#617)", "[output_committer][rollback]")
+{
+    // Multi-pair publish that fails on the SECOND file: the stable dir lives
+    // on a different filesystem than the temp dir (rename fails -> copy
+    // fallback), and the temp sidecar is unreadable (copy fails). The old
+    // sequence removed the stable files before moving replacements in, and
+    // its rollback deleted only the newly published names - the last good
+    // output was destroyed. Publish-then-swap must restore the originals.
+    QTemporaryDir tempDir; // tmpfs
+    REQUIRE(tempDir.isValid());
+
+    // Stable dir on the build filesystem (different device than /tmp).
+    const QString stableDir = QDir::current().filePath("committer_rollback_test");
+    QDir().mkpath(stableDir);
+    struct DirCleaner
+    {
+        QString path;
+        ~DirCleaner() { QDir(path).removeRecursively(); }
+    } cleaner{stableDir};
+
+    const QString stable = stableDir + "/stable.tif";
+    const QString stableSidecar = stableDir + "/stable.tfw";
+    {
+        // A real (openable) old primary so the pre-state is a valid output.
+        GDALDriverH drv = GDALGetDriverByName("GTiff");
+        REQUIRE(drv != nullptr);
+        GDALDatasetH ds = GDALCreate(drv, stable.toUtf8().constData(), 2, 2, 1, GDT_Byte, nullptr);
+        REQUIRE(ds != nullptr);
+        GDALClose(ds);
+        QFile f2(stableSidecar);
+        REQUIRE(f2.open(QIODevice::WriteOnly));
+        f2.write("OLD-SIDECAR");
+    }
+
+    const QString tempPrimary = tempDir.path() + "/scratch.tif";
+    const QString tempSidecar = tempDir.path() + "/scratch.tfw";
+    {
+        GDALDriverH drv = GDALGetDriverByName("GTiff");
+        REQUIRE(drv != nullptr);
+        GDALDatasetH ds = GDALCreate(drv, tempPrimary.toUtf8().constData(), 2, 2, 1, GDT_Byte, nullptr);
+        REQUIRE(ds != nullptr);
+        GDALClose(ds);
+        QFile f2(tempSidecar);
+        REQUIRE(f2.open(QIODevice::WriteOnly));
+        f2.write("NEW-SIDECAR");
+    }
+    // Unreadable temp sidecar: the cross-filesystem copy fails on the second
+    // publish pair while the first (readable primary) still succeeds.
+    QFile::setPermissions(tempSidecar, QFileDevice::Permissions());
+
+    DataManager manager;
+    OutputCommitter committer(&manager);
+    AlgorithmOutputRequest request;
+    request.tempPath = tempPrimary;
+    request.stablePath = stable;
+
+    const CommitResult result = committer.commit(request);
+    REQUIRE_FALSE(result);
+
+    // The previous good output must survive: still openable, sidecar intact.
+    GDALDatasetH check = GDALOpenEx(stable.toUtf8().constData(), GDAL_OF_RASTER,
+                                    nullptr, nullptr, nullptr);
+    REQUIRE(check != nullptr);
+    GDALClose(check);
+    QFile out2(stableSidecar);
+    REQUIRE(out2.open(QIODevice::ReadOnly));
+    REQUIRE(out2.readAll() == QByteArray("OLD-SIDECAR"));
+    // No staging leftovers.
+    REQUIRE_FALSE(QFile::exists(stable + ".new"));
+    REQUIRE_FALSE(QFile::exists(stable + ".old"));
+}

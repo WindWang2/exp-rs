@@ -14,6 +14,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QElapsedTimer>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
@@ -203,10 +204,28 @@ bool OtbToolWrapper::runOtbApplication(const QString &program, const QStringList
         return false;
     }
 
+    // Watchdog + graceful cancel ladder (#618): terminate first so multi-GB
+    // OTB writes can flush, escalate to kill after a grace period, and
+    // classify a signal death as a crash (a killed tool reports exitCode 0).
+    QElapsedTimer watchdog;
+    watchdog.start();
+    const qint64 timeoutMs = 60 * 60 * 1000; // OTB composites can be long
     while (proc.state() == QProcess::Running) {
         if (feedback && feedback->isCanceled()) {
-            proc.kill();
+            proc.terminate();
+            if (!proc.waitForFinished(5000))
+                proc.kill();
             feedback->reportError(QObject::tr("OTB application canceled by user."));
+            return false;
+        }
+        if (watchdog.elapsed() > timeoutMs) {
+            proc.terminate();
+            if (!proc.waitForFinished(5000))
+                proc.kill();
+            const QString err = QObject::tr("OTB application timed out after %1 s and was terminated.")
+                                    .arg(timeoutMs / 1000);
+            if (feedback) feedback->reportError(err);
+            SICNU_LOG_ERROR( SicnuLogTags::OTB, err );
             return false;
         }
         proc.waitForReadyRead(100);
@@ -216,6 +235,13 @@ bool OtbToolWrapper::runOtbApplication(const QString &program, const QStringList
             if (feedback) feedback->pushInfo(msg);
             SICNU_LOG_INFO( SicnuLogTags::OTB, msg );
         }
+    }
+
+    if (proc.exitStatus() == QProcess::CrashExit) {
+        const QString err = QObject::tr("OTB application crashed (killed by signal).");
+        if (feedback) feedback->reportError(err);
+        SICNU_LOG_ERROR( SicnuLogTags::OTB, err );
+        return false;
     }
 
     if (proc.exitCode() != 0) {

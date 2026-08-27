@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "processing/framework/json_params_converter.h"
 #include "processing/framework/task_center.h"
 #include "processing/framework/resource_monitor.h"
 #include "processing/framework/algorithm_engine.h"
@@ -1196,3 +1197,40 @@ TEST_CASE("TaskCenter - Progress and markRunning never regress terminal states",
     REQUIRE(center.getTaskInfo(canceledId).status == sicnu::TaskStatus::Canceled);
 }
 
+
+TEST_CASE( "retryTask rejects a non-terminal task (no double submission) (#616)", "[processing][task_center][retry]" )
+{
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+
+    // Enqueue WITHOUT dispatch: the task stays Queued (still schedulable).
+    QVariantMap params;
+    const long id = sicnu::TaskCenter::instance().enqueueTask(
+        "test:never_dispatched", params, false, sicnu::TaskPriority::Normal, QList<long>{}, false );
+    REQUIRE( id > 0 );
+    const auto info = sicnu::TaskCenter::instance().getTaskInfo( id );
+    REQUIRE( ( info.status == sicnu::TaskStatus::Queued || info.status == sicnu::TaskStatus::WaitingResource ) );
+
+    const auto countBefore = sicnu::TaskCenter::instance().allTasks().size();
+    // The original is non-terminal: retry must be refused instead of
+    // enqueueing a second copy of the same work.
+    REQUIRE_FALSE( sicnu::TaskCenter::instance().retryTask( id ) );
+    REQUIRE( sicnu::TaskCenter::instance().allTasks().size() == countBefore );
+
+    sicnu::TaskCenter::instance().cancelTask( id );
+}
+
+TEST_CASE( "jsonParamsToVariantMap survives out-of-range integers (#619)", "[task_center][json]" )
+{
+    // A JSON uint > INT_MAX (and > INT64_MAX) previously reached jsoncpp's
+    // throwing asInt()/asInt64() inside the scheduler path.
+    Json::Value params( Json::objectValue );
+    params["window"] = Json::Value( Json::UInt64( 3000000000ULL ) );  // > INT_MAX, fits int64
+    params["huge"] = Json::UInt64( 18446744073709551615ULL );  // > INT64_MAX
+    params["small"] = 42;
+
+    const QVariantMap map = sicnu::processing::jsonParamsToVariantMap( params );
+    REQUIRE( map.value( "window" ).toLongLong() == 3000000000LL );
+    REQUIRE( map.value( "small" ).toInt() == 42 );
+    REQUIRE( map.contains( "huge" ) );  // string form, no exception
+}

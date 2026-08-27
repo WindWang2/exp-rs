@@ -5,6 +5,7 @@
 
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QElapsedTimer>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QFileInfo>
@@ -379,11 +380,33 @@ QVariantMap GenericCliAlgorithm::processAlgorithm(const QVariantMap &parameters,
         throw QgsProcessingException(err);
     }
 
+    // Watchdog (#618): an external tool that hangs must not block its worker
+    // thread forever. Default 30 minutes; tools may declare timeout_seconds.
+    qint64 timeoutMs = 30 * 60 * 1000;
+    if (m_config.contains(QStringLiteral("timeout_seconds")))
+        timeoutMs = m_config.value(QStringLiteral("timeout_seconds")).toInt() * 1000;
+    QElapsedTimer watchdog;
+    watchdog.start();
+
     while (proc.state() == QProcess::Running) {
         if (feedback && feedback->isCanceled()) {
-            proc.kill();
+            // Grace ladder: terminate (SIGTERM) first so the tool can flush
+            // multi-GB outputs, escalate to kill after a grace period (#618).
+            proc.terminate();
+            if (!proc.waitForFinished(5000))
+                proc.kill();
             const QString err = QObject::tr("Tool execution canceled by user.");
             feedback->reportError(err);
+            throw QgsProcessingException(err);
+        }
+        if (watchdog.elapsed() > timeoutMs) {
+            proc.terminate();
+            if (!proc.waitForFinished(5000))
+                proc.kill();
+            const QString err = QObject::tr("Tool timed out after %1 s and was terminated.")
+                                    .arg(timeoutMs / 1000);
+            if (feedback) feedback->reportError(err);
+            QgsMessageLog::logMessage(err, "generic_cli", Qgis::MessageLevel::Critical);
             throw QgsProcessingException(err);
         }
         proc.waitForReadyRead(100);
@@ -393,6 +416,16 @@ QVariantMap GenericCliAlgorithm::processAlgorithm(const QVariantMap &parameters,
             if (feedback) feedback->pushInfo(msg);
             QgsMessageLog::logMessage(msg, "generic_cli", Qgis::MessageLevel::Info);
         }
+    }
+
+    // A tool killed by a signal reports exitCode()==0 with CrashExit -
+    // classify it as the crash it is instead of a misleading later
+    // "output file is missing" (#618).
+    if (proc.exitStatus() == QProcess::CrashExit) {
+        QString err = QObject::tr("Tool crashed (killed by signal).");
+        if (feedback) feedback->reportError(err);
+        QgsMessageLog::logMessage(err, "generic_cli", Qgis::MessageLevel::Critical);
+        throw QgsProcessingException(err);
     }
 
     if (proc.exitCode() != 0) {

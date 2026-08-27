@@ -7,6 +7,7 @@
 #include <QMetaType>
 #include <QString>
 #include <QStringList>
+#include <limits>
 #include <QVariant>
 #include <QVariantList>
 #include <QVariantMap>
@@ -37,7 +38,13 @@ inline QVariantMap jsonParamsToVariantMap( const Json::Value &params )
     else if ( val.isBool() )
       variantMap[QString::fromStdString( key )] = val.asBool();
     else if ( val.isInt() || val.isUInt() || val.isInt64() || val.isUInt64() )
-      variantMap[QString::fromStdString( key )] = static_cast<qint64>( val.asInt64() );
+    {
+      // Guarded: asInt64() throws on uint64 > INT64_MAX (#619).
+      if ( val.isUInt64() && val.asUInt64() > static_cast<Json::UInt64>( std::numeric_limits<qint64>::max() ) )
+        variantMap[QString::fromStdString( key )] = QString::fromStdString( val.asString() );
+      else
+        variantMap[QString::fromStdString( key )] = static_cast<qint64>( val.asInt64() );
+    }
     else if ( val.isDouble() || val.isNumeric() )
       variantMap[QString::fromStdString( key )] = val.asDouble();
     else if ( val.isArray() || val.isObject() )
@@ -74,10 +81,27 @@ inline QVariant jsonValueToVariant( const Json::Value &value )
     return QVariant();
   if ( value.isBool() )
     return value.asBool();
-  if ( value.isInt() || value.isUInt() )
+  // Range-guarded narrowing (#619): jsoncpp's asInt()/asInt64() THROW
+  // Json::LogicError for out-of-range values (e.g. a uint > INT_MAX from an
+  // agent call), which escapes through TaskCenter's scheduler path.
+  if ( value.isInt() )
     return value.asInt();
-  if ( value.isInt64() || value.isUInt64() )
+  if ( value.isUInt() )
+  {
+    const Json::UInt64 v = value.asUInt64();
+    if ( v <= static_cast<Json::UInt64>( std::numeric_limits<int>::max() ) )
+      return static_cast<int>( v );
+    return static_cast<qlonglong>( v );
+  }
+  if ( value.isInt64() )
     return static_cast<qlonglong>( value.asInt64() );
+  if ( value.isUInt64() )
+  {
+    const Json::UInt64 v = value.asUInt64();
+    if ( v <= static_cast<Json::UInt64>( std::numeric_limits<qlonglong>::max() ) )
+      return static_cast<qlonglong>( v );
+    return QString::fromStdString( value.asString() );  // > 2^63: string form, no throw
+  }
   if ( value.isDouble() )
     return value.asDouble();
   if ( value.isString() )

@@ -804,18 +804,23 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
             updateTaskProgress( taskId, record.progress );
     }
 
-    std::size_t forwarded = 0;
+    // Copy the not-yet-forwarded slice out under the lock and append it
+    // outside: the old check-then-act let two racing updaters (listener
+    // record vs. submit-time catch-up record) both read the same `forwarded`
+    // count and append the same lines twice (#616).
+    std::vector<QString> newLines;
     {
         QMutexLocker locker( &m_mutex );
-        forwarded = m_forwardedLogCounts.value( taskId, 0 );
+        const std::size_t forwarded = m_forwardedLogCounts.value( taskId, 0 );
         if ( record.logLines.size() > forwarded )
+        {
+            for ( std::size_t i = forwarded; i < record.logLines.size(); ++i )
+                newLines.push_back( QString::fromStdString( record.logLines[i].text ) );
             m_forwardedLogCounts[taskId] = record.logLines.size();
+        }
     }
-    while ( forwarded < record.logLines.size() )
-    {
-        appendTaskLog( taskId, QString::fromStdString( record.logLines[forwarded].text ) );
-        ++forwarded;
-    }
+    for ( const QString &line : newLines )
+        appendTaskLog( taskId, line );
 
     if ( record.state == sicnu::jobs::JobState::Succeeded )
     {
@@ -1442,8 +1447,15 @@ bool TaskCenter::pauseTask( long taskId )
             return false;
         if ( m_tasks[taskId].status == TaskStatus::Running )
         {
+            // hold() has the same thread-affinity caveat as cancel()
+            // (dispatchPendingCancels marshals that call): invoke it on the
+            // handle's own thread instead of the caller's (#616).
             if ( m_tasks[taskId].taskHandle )
-                m_tasks[taskId].taskHandle->hold();
+            {
+                QgsTask *handle = m_tasks[taskId].taskHandle.data();
+                QMetaObject::invokeMethod( handle, [handle]() { handle->hold(); },
+                                           Qt::QueuedConnection );
+            }
             m_tasks[taskId].status = TaskStatus::Paused;
             m_tasks[taskId].logBuffer.append( QStringLiteral( "Task paused." ) );
             updatePipelineForTaskLocked( taskId );
@@ -1466,7 +1478,11 @@ bool TaskCenter::resumeTask( long taskId )
         if ( m_tasks[taskId].status == TaskStatus::Paused )
         {
             if ( m_tasks[taskId].taskHandle )
-                m_tasks[taskId].taskHandle->unhold();
+            {
+                QgsTask *handle = m_tasks[taskId].taskHandle.data();
+                QMetaObject::invokeMethod( handle, [handle]() { handle->unhold(); },
+                                           Qt::QueuedConnection );
+            }
             m_tasks[taskId].status = TaskStatus::Running;
             m_tasks[taskId].logBuffer.append( QStringLiteral( "Task resumed." ) );
             updatePipelineForTaskLocked( taskId );
@@ -1486,12 +1502,16 @@ bool TaskCenter::retryTask( long taskId )
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) )
             return false;
+        // A non-terminal task is still schedulable/running: enqueueing a
+        // retry beside it would execute the same work twice (#616).
+        if ( !isTerminalStatus( m_tasks[taskId].status ) )
+            return false;
         oldInfo = m_tasks[taskId];
     }
     if ( oldInfo.hasJobRequest )
         return submitJob( oldInfo.jobRequest, oldInfo.jobExecutor, {}, oldInfo.autoLoadLayer ) > 0;
     return enqueueTask( oldInfo.algorithmId, oldInfo.parameterMap, oldInfo.autoLoadLayer, oldInfo.priority,
-                        oldInfo.parentTaskIds, oldInfo.autoDispatch )
+                        oldInfo.parentTaskIds, true )
            > 0;
 }
 

@@ -148,23 +148,54 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
     || ( !request.tempPath.isEmpty() && QFile::exists( request.tempPath )
          && QFileInfo( request.tempPath ).canonicalFilePath() == QFileInfo( request.stablePath ).canonicalFilePath() );
 
-  QStringList renamed;
+  // Publish-then-swap (#617): stage each file at "<to>.new" and atomically
+  // rename it over the stable path. The old sequence removed the previous
+  // stable file BEFORE the replacement was in place, and its rollback deleted
+  // only the newly published names - a failure on pair 2/3 (or a failed
+  // registerSource after publish) destroyed the last good output entirely.
+  // On failure the .new staging files are removed and the previous stable
+  // files (renamed to ".old" during the swap) are restored.
+  QStringList published;
+  QStringList stagedOld;
   if ( !isInPlace )
   {
+    bool publishOk = true;
     for ( const PublishPair &pair : publishes )
     {
-      if ( QFile::exists( pair.to ) )
-        QFile::remove( pair.to );
-      if ( !moveOrCopy( pair.from, pair.to ) )
+      const QString staging = pair.to + QStringLiteral( ".new" );
+      const QString backup = pair.to + QStringLiteral( ".old" );
+      QFile::remove( staging );
+      QFile::remove( backup );
+      if ( QFile::exists( pair.to ) && !QFile::rename( pair.to, backup ) )
       {
-        for ( const QString &done : renamed )
-          QFile::remove( done );
-        return CommitResult::failure( diagnostic(
-          QStringLiteral( "output.publish_failed" ),
-          QStringLiteral( "Failed to publish output to %1" )
-            .arg( request.stablePath ) ) );
+        publishOk = false;
+        break;
       }
-      renamed.append( pair.to );
+      if ( !moveOrCopy( pair.from, staging ) || !QFile::rename( staging, pair.to ) )
+      {
+        publishOk = false;
+        // Restore this pair's previous stable file if it was moved aside.
+        if ( QFile::exists( backup ) && !QFile::exists( pair.to ) )
+          QFile::rename( backup, pair.to );
+        break;
+      }
+      stagedOld.append( backup );
+      published.append( pair.to );
+    }
+    if ( !publishOk )
+    {
+      // Roll back already-published pairs: remove the new file, restore the
+      // .old backup - the pre-commit stable state survives intact.
+      for ( int i = stagedOld.size() - 1; i >= 0; --i )
+      {
+        QFile::remove( published[i] );
+        if ( QFile::exists( stagedOld[i] ) )
+          QFile::rename( stagedOld[i], published[i] );
+      }
+      return CommitResult::failure( diagnostic(
+        QStringLiteral( "output.publish_failed" ),
+        QStringLiteral( "Failed to publish output to %1" )
+          .arg( request.stablePath ) ) );
     }
   }
 
@@ -190,8 +221,14 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
     // nothing is registered.
     if ( !isInPlace )
     {
-      for ( const QString &published : renamed )
-        QFile::remove( published );
+      // Restore the pre-commit stable files (#617): the catalog registration
+      // failed, but the user's previous good output must survive.
+      for ( int i = stagedOld.size() - 1; i >= 0; --i )
+      {
+        QFile::remove( published[i] );
+        if ( QFile::exists( stagedOld[i] ) )
+          QFile::rename( stagedOld[i], published[i] );
+      }
     }
 
     const QVector<Diagnostic> detail = registered.diagnostics.isEmpty()
@@ -218,6 +255,10 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
                                                  "attached" ),
                                  DiagnosticSeverity::Warning } );
   }
+
+  // Commit succeeded: the pre-commit backups are no longer needed.
+  for ( const QString &backup : stagedOld )
+    QFile::remove( backup );
 
   if ( request.autoLoad )
     emit displayRequested( registered.assetId );

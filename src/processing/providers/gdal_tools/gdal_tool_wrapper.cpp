@@ -12,6 +12,7 @@
 #include <qgsvectorlayer.h>
 #include <processing/qgsprocessingparameters.h>
 
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QRegularExpression>
 
@@ -189,10 +190,27 @@ bool GdalToolWrapper::runExternalTool(const QString &program, const QStringList 
         return false;
     }
 
+    // Watchdog + graceful cancel ladder (#618): terminate first, escalate to
+    // kill after a grace period; classify signal deaths as crashes.
+    QElapsedTimer watchdog;
+    watchdog.start();
+    const qint64 timeoutMs = 30 * 60 * 1000;
     while (proc.state() == QProcess::Running) {
         if (feedback && feedback->isCanceled()) {
-            proc.kill();
+            proc.terminate();
+            if (!proc.waitForFinished(5000))
+                proc.kill();
             feedback->reportError(QObject::tr("Tool execution canceled by user."));
+            return false;
+        }
+        if (watchdog.elapsed() > timeoutMs) {
+            proc.terminate();
+            if (!proc.waitForFinished(5000))
+                proc.kill();
+            const QString err = QObject::tr("Tool timed out after %1 s and was terminated.")
+                                    .arg(timeoutMs / 1000);
+            if (feedback) feedback->reportError(err);
+            SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
             return false;
         }
         proc.waitForReadyRead(100);
@@ -209,6 +227,13 @@ bool GdalToolWrapper::runExternalTool(const QString &program, const QStringList 
     QByteArray remaining = proc.readAllStandardOutput();
     if (!remaining.isEmpty() && capturedStdout) {
         capturedStdout->append(remaining);
+    }
+
+    if (proc.exitStatus() == QProcess::CrashExit) {
+        const QString err = QObject::tr("Tool crashed (killed by signal).");
+        if (feedback) feedback->reportError(err);
+        SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
+        return false;
     }
 
     if (proc.exitCode() != 0) {
