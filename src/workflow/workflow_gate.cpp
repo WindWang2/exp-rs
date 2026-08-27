@@ -20,9 +20,9 @@ bool isParamValueNonEmpty( const Json::Value &params, const std::string &key )
     return false;
   if ( v.isString() )
     return !v.asString().empty();
-  // Paths and other scalar-like values: treat as non-empty if convertible string is non-empty
-  if ( v.isNumeric() || v.isBool() )
-    return !v.asString().empty();
+  if ( v.isBool() || v.isNumeric() )
+    return true;
+
   if ( v.isArray() || v.isObject() )
     return !v.empty();
   return false;

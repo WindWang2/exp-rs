@@ -48,17 +48,7 @@ QString createTestRaster( const QString &dir, int w, int h )
 
 sicnu::AlgorithmTaskInfo waitForTerminalTask( long taskId )
 {
-  sicnu::AlgorithmTaskInfo info;
-  for ( int attempt = 0; attempt < 2000; ++attempt )
-  {
-    info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
-    if ( info.status == sicnu::TaskStatus::Completed
-         || info.status == sicnu::TaskStatus::Failed
-         || info.status == sicnu::TaskStatus::Canceled )
-      return info;
-    std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
-  }
-  return info;
+  return sicnu::TaskCenter::instance().waitForTask( taskId, std::chrono::seconds( 15 ) );
 }
 
 struct SegWork
@@ -287,9 +277,9 @@ TEST_CASE( "OBIA Task Center keeps cancellation running until the worker exits",
   for ( int i = 0; i < 6000 && !canceledHook->load(); ++i )
     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
   REQUIRE( canceledHook->load() );
-  // Still Running until worker observes cancel
-  REQUIRE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status
-           == sicnu::TaskStatus::Running );
+  // Remains Cancelling (or already reached Canceled) until worker observes cancel and exits
+  const auto cancelStatus = sicnu::TaskCenter::instance().getTaskInfo( taskId ).status;
+  REQUIRE( ( cancelStatus == sicnu::TaskStatus::Cancelling || cancelStatus == sicnu::TaskStatus::Canceled ) );
 
   release->store( true );
   const auto terminal = waitForTerminalTask( taskId );

@@ -84,6 +84,9 @@ QJsonObject DerivationRecord::toJson() const
   json.insert( kSoftwareVersion, softwareVersion );
   json.insert( kCompletedAt, completedAtUtc.toString( Qt::ISODateWithMs ) );
   json.insert( kAuthConfigId, authConfigId );
+  json.insert( QStringLiteral( "workflowId" ), workflowId );
+  json.insert( QStringLiteral( "workflowRunId" ), workflowRunId );
+  json.insert( QStringLiteral( "stepId" ), stepId );
   return json;
 }
 
@@ -122,6 +125,9 @@ Result<DerivationRecord> DerivationRecord::fromJson( const QJsonObject &json )
     }
   }
   record.authConfigId = json.value( kAuthConfigId ).toString();
+  record.workflowId = json.value( QStringLiteral( "workflowId" ) ).toString();
+  record.workflowRunId = json.value( QStringLiteral( "workflowRunId" ) ).toString();
+  record.stepId = json.value( QStringLiteral( "stepId" ) ).toString();
   return Result<DerivationRecord>::success( record );
 }
 

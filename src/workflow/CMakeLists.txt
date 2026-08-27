@@ -6,6 +6,8 @@ set(SICNU_WORKFLOW_SOURCES
   workflow_runtime.cpp
   builtin_definitions.cpp
   placeholder_grammar.cpp
+  workflow_run.cpp
+  workflow_checkpoint.cpp
 )
 add_library(sicnu_workflow STATIC ${SICNU_WORKFLOW_SOURCES})
 target_include_directories(sicnu_workflow PUBLIC
@@ -28,15 +30,10 @@ if(TARGET sicnu_operators)
   target_link_libraries(sicnu_workflow PUBLIC sicnu_operators)
 endif()
 
-# Qt and GDAL needed for ExecutionPlane/OutputVerifier includes (header-only usage);
-# no link to task_center/processing/agent to avoid static↔shared cycles — final
-# executables link those libs directly.
-if(TARGET Qt6::Core)
-  target_link_libraries(sicnu_workflow PUBLIC Qt6::Core)
+if(TARGET sicnu_task_center)
+  target_link_libraries(sicnu_workflow PUBLIC sicnu_task_center sicnu_processing)
 endif()
-if(TARGET GDAL::GDAL)
-  target_link_libraries(sicnu_workflow PUBLIC GDAL::GDAL)
-endif()
+
 
 set_target_properties(sicnu_workflow PROPERTIES
   CXX_STANDARD 20

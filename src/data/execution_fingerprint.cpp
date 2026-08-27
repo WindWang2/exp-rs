@@ -4,6 +4,7 @@
 #include <QCryptographicHash>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QHash>
 #include <algorithm>
 #include <mutex>
@@ -60,7 +61,70 @@ QByteArray hashCanonical( const QByteArray &canonical )
 {
   return QCryptographicHash::hash( canonical, QCryptographicHash::Sha256 );
 }
+
+QByteArray canonicalizeJsonValue( const QJsonValue &val )
+{
+  if ( val.isNull() )
+    return "null";
+  if ( val.isBool() )
+    return val.toBool() ? "true" : "false";
+  if ( val.isDouble() )
+  {
+    double d = val.toDouble();
+    if ( d == static_cast<qint64>( d ) )
+      return QByteArray::number( static_cast<qint64>( d ) );
+    return QByteArray::number( d, 'g', 16 );
+  }
+  if ( val.isString() )
+  {
+    QJsonArray wrap{ val.toString() };
+    QByteArray s = QJsonDocument( wrap ).toJson( QJsonDocument::Compact );
+    if ( s.startsWith( '[' ) && s.endsWith( ']' ) )
+      return s.mid( 1, s.length() - 2 );
+    return s;
+  }
+  if ( val.isArray() )
+  {
+    const QJsonArray arr = val.toArray();
+    QByteArray out = "[";
+    for ( int i = 0; i < arr.size(); ++i )
+    {
+      if ( i > 0 ) out.append( ',' );
+      out.append( canonicalizeJsonValue( arr[i] ) );
+    }
+    out.append( ']' );
+    return out;
+  }
+  if ( val.isObject() )
+  {
+    const QJsonObject obj = val.toObject();
+    QStringList keys = obj.keys();
+    keys.sort();
+    QByteArray out = "{";
+    for ( int i = 0; i < keys.size(); ++i )
+    {
+      if ( i > 0 ) out.append( ',' );
+      const QString &k = keys[i];
+      QJsonArray wrap{ k };
+      QByteArray keyStr = QJsonDocument( wrap ).toJson( QJsonDocument::Compact );
+      if ( keyStr.startsWith( '[' ) && keyStr.endsWith( ']' ) )
+        keyStr = keyStr.mid( 1, keyStr.length() - 2 );
+      out.append( keyStr );
+      out.append( ':' );
+      out.append( canonicalizeJsonValue( obj.value( k ) ) );
+    }
+    out.append( '}' );
+    return out;
+  }
+  return QByteArray();
+}
+
 } // namespace
+
+QByteArray canonicalizeJsonRfc8785( const QJsonObject &obj )
+{
+  return canonicalizeJsonValue( obj );
+}
 
 ExecutionFingerprint makeExecutionFingerprint( const QString &algorithmId,
                                                const QString &algorithmVersion,
@@ -69,6 +133,66 @@ ExecutionFingerprint makeExecutionFingerprint( const QString &algorithmId,
 {
   return ExecutionFingerprint{ hashCanonical( canonicalForm( algorithmId, algorithmVersion,
                                                              parameters, inputs ) ) };
+}
+
+ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
+                                                 const QString &algorithmVersion,
+                                                 const QJsonObject &parameters,
+                                                 const QVector<TaggedDerivationInput> &inputs )
+{
+  QByteArray out;
+  out.append( "v=2\n" );
+  out.append( "alg=" );
+  out.append( algorithmId.toUtf8() );
+  out.append( "\nver=" );
+  out.append( algorithmVersion.toUtf8() );
+  out.append( "\nparams=" );
+  out.append( canonicalizeJsonRfc8785( parameters ) );
+
+  QVector<TaggedDerivationInput> sortedInputs = inputs;
+  std::stable_sort( sortedInputs.begin(), sortedInputs.end(), []( const TaggedDerivationInput &a, const TaggedDerivationInput &b ) {
+    if ( a.toPort != b.toPort ) return a.toPort < b.toPort;
+    if ( a.fromPort != b.fromPort ) return a.fromPort < b.fromPort;
+    if ( a.assetId != b.assetId ) return a.assetId.toString() < b.assetId.toString();
+    return a.revision.value() < b.revision.value();
+  } );
+
+  for ( const auto &in : sortedInputs )
+  {
+    out.append( "\nin=" );
+    out.append( in.assetId.toString().toUtf8() );
+    out.append( "@rev=" );
+    out.append( QByteArray::number( static_cast<qint64>( in.revision.value() ) ) );
+    if ( !in.fromPort.isEmpty() )
+    {
+      out.append( ";from=" );
+      out.append( in.fromPort.toUtf8() );
+    }
+    if ( !in.toPort.isEmpty() )
+    {
+      out.append( ";to=" );
+      out.append( in.toPort.toUtf8() );
+    }
+    if ( !in.bandReferences.isEmpty() )
+    {
+      out.append( ";bands=" );
+      QStringList bands = in.bandReferences;
+      bands.sort();
+      out.append( bands.join( ',' ).toUtf8() );
+    }
+    if ( !in.valueDomain.isEmpty() )
+    {
+      out.append( ";vd=" );
+      out.append( in.valueDomain.toUtf8() );
+    }
+    if ( !in.lazyContentDigest.isEmpty() )
+    {
+      out.append( ";digest=" );
+      out.append( in.lazyContentDigest.toUtf8() );
+    }
+  }
+
+  return ExecutionFingerprint{ QCryptographicHash::hash( out, QCryptographicHash::Sha256 ) };
 }
 
 ExecutionResultCache &ExecutionResultCache::instance()

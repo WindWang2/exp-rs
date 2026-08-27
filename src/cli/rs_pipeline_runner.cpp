@@ -454,7 +454,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
       reportProgress( completedCount, totalSteps, 0.0, "Waiting for next step" );
     }
 
-    if ( pipeInfo.isCompleted )
+    if ( pipeInfo.isCompleted || pipeInfo.isFailed )
     {
       result.steps.clear();
       result.steps.reserve( static_cast<size_t>( totalSteps ) );
