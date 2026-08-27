@@ -862,3 +862,47 @@ TEST_CASE("BandMath SIMD vs Scalar differential oracle testing over 10,000 point
         }
     }
 }
+
+TEST_CASE("BandMath rejects pathological nesting without crashing (#613)", "[bandmath][parser]")
+{
+    BandMath::BandData bands;
+    bands[1] = {1.0f, 2.0f, 3.0f, 4.0f};
+    std::vector<float> out(4);
+
+    // 100k unmatched '(' previously recursed unbounded (stack overflow).
+    std::string deep(100000, '(');
+    deep += "b1";
+    REQUIRE_FALSE(BandMath::evaluate(QString::fromStdString(deep), bands, out.data(), 4));
+
+    std::string bangs(100000, '!');
+    bangs += "b1";
+    REQUIRE_FALSE(BandMath::evaluate(QString::fromStdString(bangs), bands, out.data(), 4));
+
+    // Well-formed expression within the depth limit still parses.
+    std::string okExpr(100, '(');
+    okExpr += "b1";
+    okExpr += std::string(100, ')');
+    REQUIRE(BandMath::evaluate(QString::fromStdString(okExpr), bands, out.data(), 4));
+}
+
+TEST_CASE("BandMath rejects malformed numeric literals instead of NaN (#613)", "[bandmath][parser]")
+{
+    BandMath::BandData bands;
+    bands[1] = {1.0f, 2.0f, 3.0f, 4.0f};
+    std::vector<float> out(4);
+
+    REQUIRE_FALSE(BandMath::evaluate("b1 * 1e", bands, out.data(), 4));
+    REQUIRE_FALSE(BandMath::evaluate("b1 + 1e+", bands, out.data(), 4));
+    // Valid scientific notation still works.
+    REQUIRE(BandMath::evaluate("b1 * 1e-2", bands, out.data(), 4));
+    REQUIRE(BandMath::evaluate("b1 * 2.5e3", bands, out.data(), 4));
+}
+
+TEST_CASE("BandMath rejects huge band literals without UB (#613)", "[bandmath][parser]")
+{
+    BandMath::BandData bands;
+    bands[1] = {1.0f};
+    std::vector<float> out(1);
+
+    REQUIRE_FALSE(BandMath::evaluate("b9999999999999999999 + b1", bands, out.data(), 1));
+}

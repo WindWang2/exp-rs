@@ -737,14 +737,27 @@ public:
         if ((c == 'b' || c == 'B') && m_pos + 1 < m_src.size() && std::isdigit(m_src[m_pos + 1])) {
             size_t start = m_pos++;
             m_col++;
-            int band = 0;
+            // Accumulate in 64-bit with a digit cap (#613): int accumulation
+            // of a huge literal is signed-overflow UB before any validation.
+            long long band = 0;
+            int digits = 0;
+            bool overflow = false;
             while (m_pos < m_src.size() && std::isdigit(m_src[m_pos])) {
-                band = band * 10 + (m_src[m_pos] - '0');
+                if (++digits > 9 || band > ( std::numeric_limits<int>::max() - ( m_src[m_pos] - '0' ) ) / 10 )
+                    overflow = true;
+                else
+                    band = band * 10 + ( m_src[m_pos] - '0' );
                 m_pos++;
                 m_col++;
             }
+            if ( overflow ) {
+                // Band index out of representable range: reject as invalid
+                // token instead of wrapping (#613).
+                std::string text2 = m_src.substr(start, m_pos - start);
+                return Token{TokenType::Invalid, text2, 0.0f, std::numeric_limits<int>::max(), startLine, startCol};
+            }
             std::string text = m_src.substr(start, m_pos - start);
-            return Token{TokenType::BandRef, text, 0.0f, band, startLine, startCol};
+            return Token{TokenType::BandRef, text, 0.0f, static_cast<int>(band), startLine, startCol};
         }
 
         // Number literal (supports integers, decimals, scientific notation 1e-4)
@@ -769,9 +782,14 @@ public:
             std::string text = m_src.substr(start, m_pos - start);
             float val = 0.0f;
             try {
-                val = std::stof(text);
+                size_t consumed = 0;
+                val = std::stof(text, &consumed);
+                if ( consumed != text.size() )
+                    throw std::invalid_argument("trailing");
             } catch (...) {
-                val = std::numeric_limits<float>::quiet_NaN();
+                // Malformed literal like "1e" or "1e+" (#613): reject the
+                // token instead of silently producing an all-NaN raster.
+                return Token{TokenType::Invalid, text, 0.0f, 0, startLine, startCol};
             }
             return Token{TokenType::Number, text, val, 0, startLine, startCol};
         }
@@ -858,6 +876,11 @@ private:
     QString m_expr;
     Lexer m_lexer;
     Token m_current;
+    // Recursion depth guard (#613): parseUnary/parsePrimary/parseExpression
+    // are mutually recursive with no bound; ~100k '(' or '!' characters in an
+    // agent/user-supplied expression would overflow the stack (process crash).
+    int m_depth = 0;
+    static constexpr int kMaxDepth = 250;
     bool m_hasError = false;
     BandMathError m_error;
 
@@ -892,6 +915,16 @@ private:
     // Ternary -> LogicOr ('?' Expression ':' Ternary)?
     std::unique_ptr<AstNode> parseTernary()
     {
+        if (++m_depth > kMaxDepth) {
+            setError("Expression nesting too deep (limit 250)", m_current.line, m_current.column);
+            return nullptr;
+        }
+        struct DepthGuard
+        {
+            int &d;
+            ~DepthGuard() { --d; }
+        } depthGuard{ m_depth };
+
         auto cond = parseLogicOr();
         if (!cond) return nullptr;
 
@@ -1040,6 +1073,16 @@ private:
     // Unary -> ('-' | '!') Unary | Primary
     std::unique_ptr<AstNode> parseUnary()
     {
+        if (++m_depth > kMaxDepth) {
+            setError("Expression nesting too deep (limit 250)", m_current.line, m_current.column);
+            return nullptr;
+        }
+        struct DepthGuard
+        {
+            int &d;
+            ~DepthGuard() { --d; }
+        } depthGuard{ m_depth };
+
         if (m_current.type == TokenType::Minus) {
             advance();
             auto child = parseUnary();

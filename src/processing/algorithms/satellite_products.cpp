@@ -132,6 +132,12 @@ QString landsatBandNameFromKey(const QString& key)
 
 int landsatWavelength(const QString& bandName)
 {
+    // Collection-2 L2 stacks carry SR_Bn/ST_B10 names (#613): strip the
+    // prefix so wavelength/FWHM metadata resolves in the primary (MTL-key)
+    // discovery path exactly like the directory-scan fallback does.
+    QString name = bandName.toUpper();
+    if (name.startsWith(QStringLiteral("SR_")) || name.startsWith(QStringLiteral("ST_")))
+        name = name.mid(3);
     // Approximate OLI centre wavelengths (nm)
     static const QMap<QString, int> wl{
         {QStringLiteral("B1"), 443},  {QStringLiteral("B2"), 482},
@@ -141,7 +147,7 @@ int landsatWavelength(const QString& bandName)
         {QStringLiteral("B9"), 1373}, {QStringLiteral("B10"), 10895},
         {QStringLiteral("B11"), 12005},
     };
-    return wl.value(bandName.toUpper(), 0);
+    return wl.value(name, 0);
 }
 
 int sentinelWavelength(const QString& bandName)
@@ -205,6 +211,9 @@ BandRole legacyLandsatRole(const QString& bandName)
 
 int landsatFwhmNm(const QString& bandName, bool oli)
 {
+    QString name = bandName.toUpper();
+    if (name.startsWith(QStringLiteral("SR_")) || name.startsWith(QStringLiteral("ST_")))
+        name = name.mid(3);
     if (oli) {
         // Approximate OLI band widths (nm)
         static const QMap<QString, int> fwhm{
@@ -215,7 +224,7 @@ int landsatFwhmNm(const QString& bandName, bool oli)
             {QStringLiteral("B9"), 30},  {QStringLiteral("B10"), 570},
             {QStringLiteral("B11"), 690},
         };
-        return fwhm.value(bandName.toUpper(), 0);
+        return fwhm.value(name, 0);
     }
     // Approximate TM/ETM band widths (nm)
     static const QMap<QString, int> fwhm{
@@ -224,7 +233,7 @@ int landsatFwhmNm(const QString& bandName, bool oli)
         {QStringLiteral("B5"), 200}, {QStringLiteral("B6"), 2100},
         {QStringLiteral("B7"), 260}, {QStringLiteral("B8"), 310},
     };
-    return fwhm.value(bandName.toUpper(), 0);
+    return fwhm.value(name, 0);
 }
 
 int sentinelFwhmNm(const QString& bandName)
