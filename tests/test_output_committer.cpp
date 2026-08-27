@@ -502,6 +502,10 @@ TEST_CASE( "OutputCommitter::discardTemporary Removes All Sidecars", "[processin
 
 TEST_CASE("Failed re-commit preserves the previous stable output (#617)", "[output_committer][rollback]")
 {
+    // Self-contained driver registration: running this case alone (ctest -R)
+    // skips the earlier cases whose fixtures registered GDAL drivers.
+    GDALAllRegister();
+
     // Multi-pair publish that fails on the SECOND file: the stable dir lives
     // on a different filesystem than the temp dir (rename fails -> copy
     // fallback), and the temp sidecar is unreadable (copy fails). The old

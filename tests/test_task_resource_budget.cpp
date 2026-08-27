@@ -185,8 +185,8 @@ TEST_CASE( "TaskCenter resource budget holds a second heavy task until the first
         const auto st = center.getTaskInfo( id ).status;
         if ( st == sicnu::TaskStatus::Running )
             ++running;
-        else if ( st == sicnu::TaskStatus::Queued )
-            ++queued;
+        else if ( st == sicnu::TaskStatus::Queued || st == sicnu::TaskStatus::WaitingResource )
+            ++queued;  // budget-held tasks report WaitingResource (v2 admission gate)
     }
     CHECK( running == 1 );
     CHECK( queued == 2 );

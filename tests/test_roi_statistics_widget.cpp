@@ -3,6 +3,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include <QApplication>
+#include <QThread>
 #include <QTemporaryDir>
 
 #include "app/widgets/roi_statistics_widget.h"
@@ -68,6 +69,20 @@ QString makeTestRaster(const QString &path)
 
 } // namespace
 
+
+// #625: computeStatistics is asynchronous (thread pool + queued delivery);
+// spin the event loop until the results land or a timeout.
+static void waitForAsyncStats(RoiStatisticsWidget &widget, int expectedBands)
+{
+    for (int i = 0; i < 400; ++i)
+    {
+        if (widget.statistics().size() == expectedBands)
+            return;
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        QThread::msleep(5);
+    }
+}
+
 TEST_CASE("RoiStatisticsWidget tests polygon containment and NoData filtering (#429)", "[app][widgets][roi_stats][429]")
 {
     TestAppFixture fixture;
@@ -86,6 +101,7 @@ TEST_CASE("RoiStatisticsWidget tests polygon containment and NoData filtering (#
     {
         widget.setRoiLayer(nullptr);
         widget.computeStatistics();
+        waitForAsyncStats(widget, 2);
 
         auto stats = widget.statistics();
         REQUIRE(stats.size() == 2);
@@ -122,6 +138,7 @@ TEST_CASE("RoiStatisticsWidget tests polygon containment and NoData filtering (#
 
         widget.setRoiLayer(roiLayer.get());
         widget.computeStatistics();
+        waitForAsyncStats(widget, 2);
 
         auto stats = widget.statistics();
         REQUIRE(stats.size() == 2);
@@ -159,6 +176,7 @@ TEST_CASE("RoiStatisticsWidget tests polygon containment and NoData filtering (#
 
         widget.setRoiLayer(roiLayer.get());
         widget.computeStatistics();
+        waitForAsyncStats(widget, 2);
 
         auto stats = widget.statistics();
         REQUIRE(stats.size() == 2);

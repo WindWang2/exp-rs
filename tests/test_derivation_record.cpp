@@ -102,6 +102,11 @@ TEST_CASE( "Derivation record serialization excludes credential material",
     QStringLiteral( "softwareVersion" ),
     QStringLiteral( "completedAt" ),
     QStringLiteral( "authConfigId" ),
+    // Workflow Engine v2 provenance linkage (#589/#607): non-secret run/step
+    // references produced by the v2 orchestrator.
+    QStringLiteral( "workflowId" ),
+    QStringLiteral( "workflowRunId" ),
+    QStringLiteral( "stepId" ),
   };
   CHECK( keySet( json ) == allowedTopLevel );
 

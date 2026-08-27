@@ -345,8 +345,10 @@ TEST_CASE( "Classification Task Center keeps cancellation running until its work
   REQUIRE( started.load() );
   REQUIRE( sicnu::TaskCenter::instance().cancelTask( taskId ) );
   REQUIRE( workerCancelled.load() );
+  // Aligned with the cascade-cancel semantics (#604): cancelTask moves a
+  // running task to Cancelling (not Running) until its worker exits.
   REQUIRE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status
-           == sicnu::TaskStatus::Running );
+           == sicnu::TaskStatus::Cancelling );
   releaseWorker.store( true );
   REQUIRE( waitForTerminalTask( taskId ).status == sicnu::TaskStatus::Canceled );
 }
@@ -367,8 +369,10 @@ TEST_CASE( "Classification Task Center keeps cross-validation cancellation runni
   REQUIRE( started.load() );
   REQUIRE( sicnu::TaskCenter::instance().cancelTask( taskId ) );
   REQUIRE( workerCancelled.load() );
+  // Aligned with the cascade-cancel semantics (#604): cancelTask moves a
+  // running task to Cancelling (not Running) until its worker exits.
   REQUIRE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status
-           == sicnu::TaskStatus::Running );
+           == sicnu::TaskStatus::Cancelling );
   releaseWorker.store( true );
   REQUIRE( waitForTerminalTask( taskId ).status == sicnu::TaskStatus::Canceled );
 }
