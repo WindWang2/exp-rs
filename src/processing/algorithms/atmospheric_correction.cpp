@@ -549,6 +549,9 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
             *errorMessage = tileError.isEmpty()
                                 ? QStringLiteral("Failed to stream band %1").arg(bandNum)
                                 : tileError;
+        // A truncated output must not be left behind as a seemingly valid
+        // raster (GUI/CLI direct paths bypass the OutputCommitter) (#617).
+        QFile::remove(outputPath);
         return false;
     }
 
@@ -624,12 +627,14 @@ bool processFileDos(const QString &sourcePath, const QString &outputPath,
                 *errorMessage = QStringLiteral("Failed to compute TOA reflectance for band %1 "
                                                "(missing REFLECTANCE_MULT/ADD or QUANTIFICATION_VALUE?)")
                                     .arg(bandNum);
+            QFile::remove(outputPath);
             return false;
         }
         if (stats.prepareBins()) {
             if (!statsPass(true)) {
                 if (errorMessage)
                     *errorMessage = QStringLiteral("Failed to accumulate dark-object histogram for band %1").arg(bandNum);
+                QFile::remove(outputPath);
                 return false;
             }
         }
@@ -666,6 +671,7 @@ bool processFileDos(const QString &sourcePath, const QString &outputPath,
             *errorMessage = tileError.isEmpty()
                                 ? QStringLiteral("Failed to stream band %1").arg(bandNum)
                                 : tileError;
+        QFile::remove(outputPath);
         return false;
     }
     return true;

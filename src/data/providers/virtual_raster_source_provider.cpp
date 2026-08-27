@@ -45,6 +45,11 @@ QString escapeXml( const QString &text )
   escaped.replace( QLatin1Char( '&' ), QStringLiteral( "&amp;" ) );
   escaped.replace( QLatin1Char( '<' ), QStringLiteral( "&lt;" ) );
   escaped.replace( QLatin1Char( '>' ), QStringLiteral( "&gt;" ) );
+  // Attribute values (SourceFilename paths, dataType) are quoted with '"' -
+  // a literal double quote in a POSIX path would otherwise terminate the
+  // attribute and corrupt the VRT (#633).
+  escaped.replace( QLatin1Char( '"' ), QStringLiteral( "&quot;" ) );
+  escaped.replace( QLatin1Char( '\'' ), QStringLiteral( "&apos;" ) );
   return escaped;
 }
 

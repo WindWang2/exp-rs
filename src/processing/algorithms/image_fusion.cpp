@@ -6,6 +6,7 @@
 #include "data/raster_grid_compat.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_grid_compat.h"
+#include <QFile>
 #include <gdal.h>
 
 #include <cmath>
@@ -775,6 +776,19 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
     {
         return false;
     }
+    // A failure after the output file exists must not leave a truncated
+    // GeoTIFF behind as a seemingly valid raster (GUI/CLI direct paths
+    // bypass the OutputCommitter) (#617).
+    struct OutputCleanupGuard
+    {
+        QString path;
+        bool keep = false;
+        ~OutputCleanupGuard()
+        {
+            if ( !keep )
+                QFile::remove( path );
+        }
+    } outputGuard{ outputPath, false };
 
     // Resolve the working NoData sentinel from both inputs: prefer the pan's
     // declared NoData, then the first MS band that declares one. Without any
@@ -903,7 +917,8 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                 }
             }
         }
-        return true;
+        outputGuard.keep = true;
+    return true;
     }
     else if ( params.method == QStringLiteral( "brovey" ) )
     {
@@ -958,7 +973,8 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                 }
             }
         }
-        return true;
+        outputGuard.keep = true;
+    return true;
     }
     else if ( params.method == QStringLiteral( "ihs" ) )
     {
@@ -1058,7 +1074,8 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                 }
             }
         }
-        return true;
+        outputGuard.keep = true;
+    return true;
     }
     else if ( params.method == QStringLiteral( "pca" ) )
     {
@@ -1333,7 +1350,8 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                 }
             }
         }
-        return true;
+        outputGuard.keep = true;
+    return true;
     }
     else if ( params.method == QStringLiteral( "gram_schmidt" ) )
     {
@@ -1484,7 +1502,8 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                 }
             }
         }
-        return true;
+        outputGuard.keep = true;
+    return true;
     }
 
     if ( errorMessage )

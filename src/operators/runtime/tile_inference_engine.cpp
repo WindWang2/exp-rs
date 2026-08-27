@@ -7,6 +7,7 @@
 #include <opencv2/dnn.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include <map>
 #include <QFile>
 #include <QString>
 
@@ -113,6 +114,30 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   const int rasterBands = ds.bandCount();
   if ( rasterW <= 0 || rasterH <= 0 || rasterBands <= 0 )
     throw RSOperatorError( ErrorCode::InvalidInputData, "input raster is empty: " + inputPath );
+
+  // Manifest dtype contract (#632): input.dtype must match the raster's
+  // actual GDAL type (the engine always reads float32; a mismatched dtype
+  // silently misnormalizes).
+  if ( !m_model.input.dtype.empty() )
+  {
+    const int rasterType = ds.bandDataType( 1 );
+    static const std::map<std::string, int> kAccepted = {
+      { "float32", GDT_Float32 }, { "float64", GDT_Float64 },
+      { "float16", GDT_Float32 }, { "uint16", GDT_UInt16 },
+      { "int16", GDT_Int16 },     { "uint8", GDT_Byte },
+      { "int32", GDT_Int32 },     { "uint32", GDT_UInt32 },
+    };
+    const auto it = kAccepted.find( m_model.input.dtype );
+    if ( it == kAccepted.end() )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "model manifest declares unsupported input dtype '" + m_model.input.dtype + "'" );
+    if ( rasterType != it->second )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "model manifest requires input dtype '" + m_model.input.dtype
+                               + "' but the raster band 1 has GDAL type "
+                               + std::to_string( rasterType )
+                               + " (convert the raster or update the manifest)" );
+  }
 
   std::vector<int> bandList = bands;
   if ( bandList.empty() )
