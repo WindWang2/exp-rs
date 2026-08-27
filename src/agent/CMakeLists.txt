@@ -1,5 +1,7 @@
 # src/agent/CMakeLists.txt
 add_library(sicnu_agent SHARED
+  output_verifier.cpp
+  output_verifier.h
   workspace_snapshot.cpp
   workspace_snapshot.h
   view_control_service.cpp

@@ -674,8 +674,10 @@ TEST_CASE( "ToolCallDispatcher supports OutputCommitterHandler for output asset 
   {
     ToolCallDispatcher::OutputCommitterHandler handler = []( const sicnu::AlgorithmTaskInfo &,
                                                              std::string &outCommittedPath,
-                                                             std::string & ) -> bool {
+                                                             std::string &,
+                                                             std::string &outAssetId ) -> bool {
       outCommittedPath = "/committed/ndvi_out.tif";
+      outAssetId = "asset-42";
       return true;
     };
     harness.dispatcher.setOutputCommitterHandler( handler );
@@ -690,13 +692,16 @@ TEST_CASE( "ToolCallDispatcher supports OutputCommitterHandler for output asset 
     Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, harness.dispatcher.outputCommitterHandler() );
     REQUIRE( payload["status"].asString() == "success" );
     REQUIRE( payload["output"].asString() == "/committed/ndvi_out.tif" );
+    REQUIRE( payload["assetId"].asString() == "asset-42" );
+    REQUIRE( payload["assetKind"].asString() == "raster" );
   }
 
   SECTION( "refused handler fails the payload with commitError diagnostic" )
   {
     ToolCallDispatcher::OutputCommitterHandler handler = []( const sicnu::AlgorithmTaskInfo &,
                                                              std::string &,
-                                                             std::string &outCommitError ) -> bool {
+                                                             std::string &outCommitError,
+                                                             std::string & ) -> bool {
       outCommitError = "Disk space quota exceeded";
       return false;
     };
@@ -712,6 +717,76 @@ TEST_CASE( "ToolCallDispatcher supports OutputCommitterHandler for output asset 
     REQUIRE( payload["output"].asString() == "/tmp/raw_out.tif" );
     REQUIRE( payload["commitError"].asString() == "Disk space quota exceeded" );
     REQUIRE( payload["errorMessage"].asString() == "Disk space quota exceeded" );
+  }
+}
+
+TEST_CASE( "ToolCallDispatcher enriches payload with assetId and verification", "[processing][tool_call_dispatcher][verification]" )
+{
+  FakeDispatcherHarness harness;
+
+  ToolCallDispatcher::OutputCommitterHandler commitHandler = []( const sicnu::AlgorithmTaskInfo &,
+                                                                 std::string &outCommittedPath,
+                                                                 std::string &,
+                                                                 std::string &outAssetId ) -> bool {
+    outCommittedPath = "/committed/ndvi_out.tif";
+    outAssetId = "asset-99";
+    return true;
+  };
+
+  SECTION( "verification ok enriches summary and marks verified" )
+  {
+    ToolCallDispatcher::OutputVerificationHandler verifyHandler = []( const QString &, const QString & ) -> Json::Value {
+      Json::Value v( Json::objectValue );
+      v["ok"] = true;
+      v["kind"] = "raster";
+      Json::Value summary( Json::objectValue );
+      summary["width"] = 64;
+      summary["height"] = 64;
+      v["summary"] = summary;
+      v["issues"] = Json::Value( Json::arrayValue );
+      v["warnings"] = Json::Value( Json::arrayValue );
+      return v;
+    };
+
+    sicnu::AlgorithmTaskInfo info;
+    info.taskId = 20;
+    info.algorithmId = QStringLiteral( "rs:spectral_index" );
+    info.status = sicnu::TaskStatus::Completed;
+    info.outputLayerPath = QStringLiteral( "/tmp/raw_out.tif" );
+
+    Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, commitHandler, verifyHandler );
+    REQUIRE( payload["status"].asString() == "success" );
+    REQUIRE( payload["assetId"].asString() == "asset-99" );
+    REQUIRE( payload["assetKind"].asString() == "raster" );
+    REQUIRE( payload["verified"].asBool() == true );
+    REQUIRE( payload["verification"]["ok"].asBool() == true );
+    REQUIRE( payload["verification"]["summary"]["width"].asInt() == 64 );
+  }
+
+  SECTION( "verification failure downgrades payload to error" )
+  {
+    ToolCallDispatcher::OutputVerificationHandler verifyHandler = []( const QString &, const QString & ) -> Json::Value {
+      Json::Value v( Json::objectValue );
+      v["ok"] = false;
+      v["kind"] = "raster";
+      v["summary"] = Json::Value( Json::objectValue );
+      Json::Value issues( Json::arrayValue );
+      issues.append( "all pixels are NoData" );
+      v["issues"] = issues;
+      v["warnings"] = Json::Value( Json::arrayValue );
+      return v;
+    };
+
+    sicnu::AlgorithmTaskInfo info;
+    info.taskId = 21;
+    info.algorithmId = QStringLiteral( "rs:spectral_index" );
+    info.status = sicnu::TaskStatus::Completed;
+    info.outputLayerPath = QStringLiteral( "/tmp/raw_out.tif" );
+
+    Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, commitHandler, verifyHandler );
+    REQUIRE( payload["status"].asString() == "error" );
+    REQUIRE( payload["verified"].asBool() == false );
+    REQUIRE( payload["verificationIssues"][0].asString() == "all pixels are NoData" );
   }
 }
 

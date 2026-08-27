@@ -616,6 +616,21 @@ sicnu_discover_tests(test_agent_tool_catalog)
 # Spatial tool framework tests (ADR 0122)
 sicnu_add_test(test_spatial_tools)
 
+# Output verification for committed agent outputs
+add_executable(test_output_verifier test_output_verifier.cpp)
+target_link_libraries(test_output_verifier PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_agent
+  GDAL::GDAL
+)
+target_include_directories(test_output_verifier PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_output_verifier)
+
 # Unified datasource resolver contract (GH #560)
 sicnu_add_test(test_datasource_resolver)
 

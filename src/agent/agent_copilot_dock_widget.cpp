@@ -2,6 +2,7 @@
 #include "agent_copilot_dock_widget.h"
 #include "interaction_tool_registry.h"
 #include "llm_settings_dialog.h"
+#include "output_verifier.h"
 #include "workspace_snapshot.h"
 
 #include "processing/framework/atomic_algorithm_registry.h"
@@ -157,6 +158,25 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapC
   m_workflowExecutor.setDataManager( dataManager );
   m_toolCallDispatcher.setSourceTag( QStringLiteral( "agent" ) );
   m_toolCallDispatcher.setDataManager( dataManager );
+  m_toolCallDispatcher.setOutputVerificationHandler(
+    []( const QString &committedPath, const QString &kindHint ) -> Json::Value {
+      const sicnu::agent::OutputVerification verification =
+        sicnu::agent::OutputVerifier().verify( committedPath, kindHint );
+
+      Json::Value result( Json::objectValue );
+      result["ok"] = verification.ok;
+      result["kind"] = verification.kind.toStdString();
+      result["summary"] = verification.summary;
+      Json::Value issues( Json::arrayValue );
+      for ( const QString &issue : verification.issues )
+        issues.append( issue.toStdString() );
+      result["issues"] = issues;
+      Json::Value warnings( Json::arrayValue );
+      for ( const QString &warning : verification.warnings )
+        warnings.append( warning.toStdString() );
+      result["warnings"] = warnings;
+      return result;
+    } );
 
   m_viewControlService.setDataManager( dataManager );
   m_viewControlService.setMapCanvas( canvas );

@@ -307,7 +307,7 @@ TEST_CASE( "cancel during execution reaches Canceled without committing",
   std::atomic<int> commits{ 0 };
   const Json::Value payload = ExecutionPlane::instance().awaitResult(
     handle.taskId(), std::chrono::milliseconds( 500 ),
-    [&]( const sicnu::AlgorithmTaskInfo &, std::string &, std::string & ) {
+    [&]( const sicnu::AlgorithmTaskInfo &, std::string &, std::string &, std::string & ) {
       ++commits;
       return true;
     } );
@@ -331,7 +331,7 @@ TEST_CASE( "timeout cancels and a late completion yields one truthful outcome",
 
   std::atomic<int> commits{ 0 };
   auto countingCommitter = []( std::atomic<int> *counter ) {
-    return [counter]( const sicnu::AlgorithmTaskInfo &, std::string &path, std::string & ) {
+    return [counter]( const sicnu::AlgorithmTaskInfo &, std::string &path, std::string &, std::string & ) {
       ++( *counter );
       path = "/tmp/committed-once.tif";
       return true;

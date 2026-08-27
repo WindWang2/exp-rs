@@ -51,6 +51,17 @@ sicnu::data::AssetKind assetKindForSuffix( const QString &suffix )
   return sicnu::data::AssetKind::Raster;
 }
 
+QString assetKindLabel( const QString &path )
+{
+  switch ( assetKindForSuffix( QFileInfo( path ).suffix() ) )
+  {
+    case sicnu::data::AssetKind::Vector:
+      return QStringLiteral( "vector" );
+    default:
+      return QStringLiteral( "raster" );
+  }
+}
+
 } // namespace
 
 ToolCallDispatcher::ToolCallDispatcher( SubmissionSink sink, CompletionWatcher watcher )
@@ -67,7 +78,8 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
     QPointer<sicnu::data::DataManager> managerGuard( dataManager );
     mOutputCommitterHandler = [managerGuard]( const sicnu::AlgorithmTaskInfo &info,
                                               std::string &outCommittedPath,
-                                              std::string &outCommitError ) -> bool {
+                                              std::string &outCommitError,
+                                              std::string &outAssetId ) -> bool {
       if ( !managerGuard )
       {
         outCommitError = "DataManager was destroyed before the output could be committed";
@@ -95,6 +107,7 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
       if ( commitResult )
       {
         outCommittedPath = stablePath.toStdString();
+        outAssetId = commitResult.value().toString().toStdString();
         return true;
       }
       else
@@ -561,7 +574,8 @@ Json::Value ToolCallDispatcher::submitBlocking( const Json::Value &envelope, std
 }
 
 Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTaskInfo &info,
-                                              const OutputCommitterHandler &committerHandler )
+                                              const OutputCommitterHandler &committerHandler,
+                                              const OutputVerificationHandler &verificationHandler )
 {
   Json::Value payload = info.resultPayload.isNull() ? Json::Value( Json::objectValue ) : info.resultPayload;
   payload["algorithmId"] = info.algorithmId.toStdString();
@@ -579,9 +593,41 @@ Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTa
       // operator-reported path so the result and the asset agree.
       std::string committedPath;
       std::string commitError;
-      if ( committerHandler( info, committedPath, commitError ) )
+      std::string assetId;
+      if ( committerHandler( info, committedPath, commitError, assetId ) )
       {
         payload["output"] = committedPath;
+        if ( !assetId.empty() )
+        {
+          payload["assetId"] = assetId;
+        }
+        payload["assetKind"] = assetKindLabel( info.outputLayerPath ).toStdString();
+
+        if ( verificationHandler )
+        {
+          const Json::Value verification = verificationHandler( QString::fromStdString( committedPath ),
+                                                                  assetKindLabel( info.outputLayerPath ) );
+          payload["verification"] = verification.isObject() ? verification : Json::Value( Json::objectValue );
+          const bool verified = payload["verification"].isMember( "ok" ) && payload["verification"]["ok"].asBool();
+          payload["verified"] = verified;
+          if ( !verified )
+          {
+            payload["status"] = "error";
+            Json::Value issues( Json::arrayValue );
+            if ( payload["verification"].isMember( "issues" ) && payload["verification"]["issues"].isArray() )
+            {
+              for ( const auto &issue : payload["verification"]["issues"] )
+                issues.append( issue );
+            }
+            else
+            {
+              issues.append( "Output verification failed" );
+            }
+            payload["verificationIssues"] = issues;
+            if ( !payload.isMember( "errorMessage" ) )
+              payload["errorMessage"] = "Output verification failed";
+          }
+        }
       }
       else
       {

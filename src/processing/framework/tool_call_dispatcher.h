@@ -122,13 +122,26 @@ public:
                QString *errorOut = nullptr, long *taskIdOut = nullptr );
 
   /// Handler invoked to transactionally commit output assets upon completion.
-  /// Returns true on success and sets @a outCommittedPath; returns false on failure and sets @a outCommitError.
+  /// Returns true on success and sets @a outCommittedPath and @a outAssetId;
+  /// returns false on failure and sets @a outCommitError.
   using OutputCommitterHandler = std::function<bool( const sicnu::AlgorithmTaskInfo &info,
                                                      std::string &outCommittedPath,
-                                                     std::string &outCommitError )>;
+                                                     std::string &outCommitError,
+                                                     std::string &outAssetId )>;
 
   void setOutputCommitterHandler( OutputCommitterHandler handler ) { mOutputCommitterHandler = std::move( handler ); }
   const OutputCommitterHandler &outputCommitterHandler() const { return mOutputCommitterHandler; }
+
+  /// Optional post-commit verification handler.  When set, the dispatcher
+  /// enriches successful payloads with "assetId", "assetKind" and a
+  /// "verification" block.  The returned JSON must contain "ok" (bool),
+  /// "kind" (string), "summary" (object) and "issues" (array of strings).
+  /// Verification failures downgrade the payload to status "error" with
+  /// "verified": false and "verificationIssues".
+  using OutputVerificationHandler = std::function<Json::Value( const QString &committedPath,
+                                                               const QString &kindHint )>;
+  void setOutputVerificationHandler( OutputVerificationHandler handler ) { mOutputVerificationHandler = std::move( handler ); }
+  const OutputVerificationHandler &outputVerificationHandler() const { return mOutputVerificationHandler; }
 
   /// Build a standardized result payload (status "success" / "error", output,
   /// errorMessage, etc.) from an AlgorithmTaskInfo struct. If @a committerHandler is
@@ -137,7 +150,8 @@ public:
   /// downgrades the payload to status "error" (commitError and errorMessage set)
   /// and keeps the task's original output path.
   static Json::Value buildTaskResultPayload( const sicnu::AlgorithmTaskInfo &info,
-                                              const OutputCommitterHandler &committerHandler = {} );
+                                              const OutputCommitterHandler &committerHandler = {},
+                                              const OutputVerificationHandler &verificationHandler = {} );
 
   /// Synchronous entry point: submits task, awaits completion or timeout,
   /// applies OutputCommitterHandler if configured, and returns standardized result JSON.
@@ -203,6 +217,7 @@ private:
   SyncAwait mSyncAwait;
   QString mSourceTag = QStringLiteral( "dispatcher" );
   OutputCommitterHandler mOutputCommitterHandler;
+  OutputVerificationHandler mOutputVerificationHandler;
   CanvasActionHandler mCanvasActionHandler;
   InteractionActionHandler mInteractionActionHandler;
   sicnu::data::DataManager *mDataManager = nullptr;

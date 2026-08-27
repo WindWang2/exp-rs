@@ -178,9 +178,10 @@ class ExecutionPlane
   public:
     /// Output committer handler signature (same contract as
     /// ToolCallDispatcher::OutputCommitterHandler): commit the task's temp
-    /// output to a stable asset; returns the stable path or the error.
+    /// output to a stable asset; returns the stable path + asset id or the error.
     using OutputCommitterHandler =
-      std::function<bool( const sicnu::AlgorithmTaskInfo &, std::string &outCommittedPath, std::string &outCommitError )>;
+      std::function<bool( const sicnu::AlgorithmTaskInfo &, std::string &outCommittedPath,
+                          std::string &outCommitError, std::string &outAssetId )>;
 
     static ExecutionPlane &instance();
 
@@ -210,6 +211,11 @@ class ExecutionPlane
     /// delivery cannot deadlock them (sync waiters use await(), not this).
     static void deliverOnAffinity( QObject *affinityContext, std::function<void()> fn );
 
+    /// Optional verification enrichment applied after a successful commit.
+    /// Returns a JSON object with "ok", "kind", "summary" and "issues".
+    using OutputVerificationHandler = std::function<Json::Value( const QString &committedPath,
+                                                                 const QString &kindHint )>;
+
     /// Build the standardized result payload for a terminal task, applying
     /// the committer handler EXACTLY ONCE per task id (first builder wins;
     /// later builders reuse the cached outcome). This is what allows several
@@ -219,7 +225,8 @@ class ExecutionPlane
     /// commit runs on the CALLING thread — callers on the DataManager's
     /// owning thread (the normal case: bridge thread, sync waiter) are safe.
     Json::Value buildCommittedResultPayload( const sicnu::AlgorithmTaskInfo &info,
-                                             const OutputCommitterHandler &committerHandler );
+                                             const OutputCommitterHandler &committerHandler,
+                                             const OutputVerificationHandler &verificationHandler = {} );
 
     /// Sync completion: wait (event-loop-free) for @a taskId, enforce the
     /// timeout (cancel on expiry when the request allows), then build the
@@ -231,7 +238,8 @@ class ExecutionPlane
                              std::chrono::milliseconds timeout,
                              const OutputCommitterHandler &committerHandler,
                              QObject *affinityContext = nullptr,
-                             bool cancelOnTimeout = true );
+                             bool cancelOnTimeout = true,
+                             const OutputVerificationHandler &verificationHandler = {} );
 
     /// Preflight → Admission bridge: run AlgorithmPreflight for @a
     /// algorithmId/@a params and extract its resource estimate (MiB, 0 when
