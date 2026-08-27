@@ -57,7 +57,6 @@ add_library(sicnu_processing SHARED
     # task_center.cpp lives in sicnu_task_center (below): JobEngine link would
     # form a cycle if pulled into this shared lib (processing→jobs→operators→processing).
     framework/output_committer.cpp
-    framework/artifact_gc.cpp
     framework/collection_import_service.cpp
 
     providers/gdal_tools/provider.cpp

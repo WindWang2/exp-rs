@@ -2,17 +2,19 @@
 #
 # Two targets:
 #  - sicnu_workflow (SHARED): the self-contained core - definitions, gates,
-#    sessions, placeholder grammar, and the Workflow Engine 2.0 run/checkpoint
-#    aggregate. Shared like sicnu_processing/sicnu_operators because shared
-#    consumers (artifact_gc in sicnu_processing) need the run's out-of-line
-#    accessors resolvable at final link, which a static archive cannot
-#    provide without duplicating the objects (and their static state).
+#    sessions, placeholder grammar, the Workflow Engine 2.0 run/checkpoint
+#    aggregate, and ArtifactGC. ArtifactGC consumes WorkflowRun and used to
+#    live in sicnu_processing, which cannot link sicnu_workflow (cycle:
+#    workflow -> operators -> processing), so executables linking only
+#    sicnu_processing could not resolve the run accessors; it now ships in
+#    this library, which sits above processing in the layer stack.
 #  - sicnu_workflow_runtime (STATIC): WorkflowRuntime + built-in workflow
 #    registrations. These reference ExecutionPlane (sicnu_task_center) and
 #    OutputVerifier (sicnu_agent) and deliberately keep the historical
 #    static-deferral contract: symbols resolve at final link time in the
 #    executables/tests, which link those libs directly.
 set(SICNU_WORKFLOW_CORE_SOURCES
+  artifact_gc.cpp
   workflow_definition.cpp
   workflow_gate.cpp
   workflow_session.cpp
@@ -31,6 +33,12 @@ target_include_directories(sicnu_workflow PUBLIC
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/processing
   ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_target_properties(sicnu_workflow PROPERTIES
+  WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+install(TARGETS sicnu_workflow
+  LIBRARY DESTINATION ${QGIS_LIB_SUBDIR}
 )
 # Link jsoncpp the same way sicnu_operators does in this repo
 if(TARGET jsoncpp)

@@ -129,7 +129,7 @@ for ( auto &run : interruptedRuns ) {
 地理空间栅格往往包含关联的 Sidecar 文件（如 `.tfw`、`.aux.xml`、`.hdr`、`.enp`、`.prj`）。`ArtifactGC` 在回收中间图层时会自动检测并清理所有派生的 sidecar 文件。
 
 ```cpp
-#include "processing/framework/artifact_gc.h"
+#include "workflow/artifact_gc.h"
 
 ArtifactGC gc;
 

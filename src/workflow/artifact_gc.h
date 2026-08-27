@@ -3,10 +3,9 @@
 #include <QString>
 #include <QStringList>
 
-#include "sicnu_processing_export.h"
-#include "workflow/workflow_run.h"
+#include "workflow_run.h"
 
-namespace sicnu::processing {
+namespace sicnu::workflow {
 
 struct GCSweepReport {
   QStringList reapedFiles;   // successfully deleted files (including sidecars)
@@ -15,7 +14,7 @@ struct GCSweepReport {
   int reapedCount = 0;
 };
 
-class SICNU_PROCESSING_EXPORT ArtifactGC {
+class ArtifactGC {
 public:
   ArtifactGC() = default;
 
@@ -33,13 +32,13 @@ public:
   /// - the output path lies in the same directory as (or below) a retained
   ///   final output, so persisted paths from a tampered or corrupt checkpoint
   ///   can never nominate files outside the run workspace for deletion.
-  QStringList inspectReapable( const sicnu::workflow::WorkflowRun &run,
+  QStringList inspectReapable( const WorkflowRun &run,
                                bool retainFinalOutputs = true ) const;
 
   /// Delete intermediate temporary outputs from a workflow run (see
   /// inspectReapable for the gating rules). Deletion failures are collected
   /// in GCSweepReport::errors instead of being silently dropped.
-  GCSweepReport sweepRun( const sicnu::workflow::WorkflowRun &run,
+  GCSweepReport sweepRun( const WorkflowRun &run,
                           bool retainFinalOutputs = true );
 
   /// Remove files and their sidecars. Each file is first renamed to a
@@ -50,4 +49,4 @@ public:
   static QStringList removeFilesWithSidecars( const QStringList &filePaths, QStringList *errors = nullptr );
 };
 
-} // namespace sicnu::processing
+} // namespace sicnu::workflow

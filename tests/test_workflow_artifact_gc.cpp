@@ -1,11 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "processing/framework/artifact_gc.h"
+#include "workflow/artifact_gc.h"
 #include "workflow/workflow_run.h"
 #include <QTemporaryDir>
 #include <QFile>
 
-using namespace sicnu::processing;
 using namespace sicnu::workflow;
 
 namespace {

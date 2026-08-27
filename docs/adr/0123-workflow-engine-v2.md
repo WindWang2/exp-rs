@@ -43,7 +43,7 @@ Step execution cache keys are computed using RFC 8785 (JSON Canonicalization Sch
 - **Run Restoration**: Serializes run status, step artifacts, execution timestamps, and error summaries.
 - **Interruption Recovery**: `recoverInterruptedRuns()` identifies non-terminal workflow checkpoints on disk and transitions them safely to `Interrupted` state, enabling incremental step-level resumption.
 
-### 4. Intermediate Artifact Lifecycle & Garbage Collection (`sicnu::processing::ArtifactGC`)
+### 4. Intermediate Artifact Lifecycle & Garbage Collection (`sicnu::workflow::ArtifactGC`)
 - **Lifecycle Scopes**: Artifacts declare lifetime tags (`TaskTemporary`, `SessionTemporary`, `Persistent`).
 - **Sweep Strategy**: `sweepRun()` cleans up unreferenced intermediate files and cascades deletion to sidecar files (e.g., `.tfw`, `.aux.xml`, `.enp`).
 - **Protected Outputs**: Final workflow deliverables (`Persistent`) and active checkpoints are strictly preserved from deletion.

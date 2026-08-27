@@ -6,7 +6,7 @@
 #include <QSet>
 #include <unordered_set>
 
-namespace sicnu::processing {
+namespace sicnu::workflow {
 
 namespace {
 
@@ -198,4 +198,4 @@ GCSweepReport ArtifactGC::sweepRun( const sicnu::workflow::WorkflowRun &run,
   return report;
 }
 
-} // namespace sicnu::processing
+} // namespace sicnu::workflow
