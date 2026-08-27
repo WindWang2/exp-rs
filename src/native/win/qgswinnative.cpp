@@ -239,7 +239,7 @@ bool QgsWinNativeEventFilter::nativeEventFilter( const QByteArray &eventType, vo
 
       for ( const QString &drive : drives )
       {
-        emit usbStorageNotification( u"%1:/"_s.arg( drive ), wParam == DBT_DEVICEARRIVAL );
+        emit usbStorageNotification( drive, wParam == DBT_DEVICEARRIVAL );
       }
       return false;
     }

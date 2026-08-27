@@ -137,8 +137,13 @@ void PythonIpcServer::onReadyRead()
           {
             bool isErr = msg.contains( QStringLiteral( "error" ) );
             QJsonObject res = isErr ? msg[QStringLiteral( "error" )].toObject() : msg[QStringLiteral( "result" )].toObject();
-            it->second( res, isErr );
+            // Erase BEFORE invoking (#624): the callback may re-enter
+            // sendRequest (rehash -> iterator invalidation) or call
+            // takeInFlightRequests (erasing this id) - erasing afterwards
+            // with the stale iterator was UB.
+            auto callback = std::move( it->second );
             m_callbacks.erase( it );
+            callback( res, isErr );
           }
           dropInFlight( id );
         }

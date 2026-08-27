@@ -59,6 +59,7 @@ class SicnuMapCanvasProxy:
         }
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
         buf = _pending_proxy_buf
+        buf_bytes = b""
         while True:
             # Drain any queued non-matching lines from previous proxy calls first
             if _pending_proxy_lines:
@@ -76,10 +77,13 @@ class SicnuMapCanvasProxy:
             data = self._s.recv(4096)
             if not data:
                 break
-            buf += data.decode("utf-8")
-            while "\n" in buf:
-                line, buf = buf.split("\n", 1)
-                line = line.strip()
+            # Byte-accurate framing (#624): decode only COMPLETE lines so a
+            # multi-byte UTF-8 sequence split across a recv boundary waits
+            # for its continuation instead of being corrupted.
+            buf_bytes += data
+            while b"\n" in buf_bytes:
+                raw, buf_bytes = buf_bytes.split(b"\n", 1)
+                line = raw.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
                 try:
@@ -89,11 +93,11 @@ class SicnuMapCanvasProxy:
                 # DATAPY-11: correlate on id; host→daemon requests have "method"
                 # and must not be consumed as proxy response.
                 if obj.get("id") == req_id and ("result" in obj or "error" in obj):
-                    _pending_proxy_buf = buf
+                    _pending_proxy_buf = buf + buf_bytes.decode("utf-8", errors="replace")
                     return obj.get("result", {})
                 # Non-matching line: buffer for main loop to dispatch
                 _pending_proxy_lines.append(line)
-        _pending_proxy_buf = buf
+        _pending_proxy_buf = buf + buf_bytes.decode("utf-8", errors="replace")
         return {}
 
     def extent(self):
@@ -156,6 +160,7 @@ class SicnuPythonIface:
         }
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
         buf = _pending_proxy_buf
+        buf_bytes = b""
         while True:
             if _pending_proxy_lines:
                 line = _pending_proxy_lines.pop(0)
@@ -171,10 +176,13 @@ class SicnuPythonIface:
             data = self._s.recv(4096)
             if not data:
                 break
-            buf += data.decode("utf-8")
-            while "\n" in buf:
-                line, buf = buf.split("\n", 1)
-                line = line.strip()
+            # Byte-accurate framing (#624): decode only COMPLETE lines so a
+            # multi-byte UTF-8 sequence split across a recv boundary waits
+            # for its continuation instead of being corrupted.
+            buf_bytes += data
+            while b"\n" in buf_bytes:
+                raw, buf_bytes = buf_bytes.split(b"\n", 1)
+                line = raw.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
                 try:
@@ -182,10 +190,10 @@ class SicnuPythonIface:
                 except Exception:
                     continue
                 if obj.get("id") == req_id and ("result" in obj or "error" in obj):
-                    _pending_proxy_buf = buf
+                    _pending_proxy_buf = buf + buf_bytes.decode("utf-8", errors="replace")
                     return obj.get("result", {})
                 _pending_proxy_lines.append(line)
-        _pending_proxy_buf = buf
+        _pending_proxy_buf = buf + buf_bytes.decode("utf-8", errors="replace")
         return None
 
     def mapCanvas(self):
@@ -249,6 +257,8 @@ def main():
         sys.exit(1)
 
     buffer = ""
+
+    buffer_bytes = b""
     # DATAPY-11: drain lines that proxy _get_state buffered as non-matching
     # responses so they are dispatched instead of lost.
     while True:
@@ -616,7 +626,17 @@ def main():
             data = s.recv(4096)
             if not data:
                 break
-            buffer += data.decode("utf-8")
+            # Accumulate raw bytes and decode per COMPLETE line (#624):
+            # decoding each 4 KiB chunk independently raises
+            # UnicodeDecodeError when a multi-byte UTF-8 sequence (CJK
+            # paths/strings are routine) splits across a recv boundary,
+            # which killed the daemon (break) and every resident plugin.
+            buffer_bytes += data
+            while b"\n" in buffer_bytes:
+                raw_line, buffer_bytes = buffer_bytes.split(b"\n", 1)
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if line:
+                    buffer += line + "\n"
         except Exception as e:
             sys.stderr.write(f"WorkerDaemon loop error: {e}\n")
             break

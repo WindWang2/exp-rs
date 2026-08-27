@@ -49,6 +49,10 @@ PythonPluginAdapter::~PythonPluginAdapter()
     // Belt and braces: unload() early-returns when the plugin was never fully
     // initialized, but the crash-logger connection may still be alive (#522).
     QObject::disconnect( m_workerCrashedConnection );
+    // #624: the restart-rebind connection captures the raw WorkerNode; a
+    // failed initialize() that never reached unload() left it armed for the
+    // pool's lifetime (UAF window if the node is later destroyed).
+    QObject::disconnect( m_restartRebindConnection );
 }
 
 bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
@@ -194,8 +198,24 @@ bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
 
 void PythonPluginAdapter::unload()
 {
-    if ( !m_initialized || !m_workerNode || !m_workerNode->server )
+    if ( !m_initialized )
         return;
+    // #624: after kMaxWorkerRestarts the node keeps server == nullptr; the
+    // old early-return left BOTH connections armed and the node marked busy
+    // forever. Tear down bookkeeping first, then bail out of the IPC parts.
+    QObject::disconnect( m_workerCrashedConnection );
+    QObject::disconnect( m_restartRebindConnection );
+    if ( !m_workerNode || !m_workerNode->server )
+    {
+        if ( m_workerNode )
+        {
+            if ( m_pool )
+                m_pool->releaseWorker( m_workerNode );
+            m_workerNode = nullptr;
+        }
+        m_initialized = false;
+        return;
+    }
 
     QJsonObject params;
     params[QStringLiteral( "package_name" )] = m_packageName;

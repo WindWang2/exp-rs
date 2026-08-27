@@ -18,7 +18,16 @@ endif()
 if(MSVC)
     add_compile_options(/utf-8 /bigobj /W4 /wd4251 /wd4275 /wd4100 /wd4127 /wd4244 /wd4267)
 else()
+    option(ENABLE_LTO "Enable Link-Time Optimization for Release builds" OFF)
+
+# LTO policy (#629): the historical global -fno-lto silently defeated
+# CMAKE_INTERPROCEDURAL_OPTIMIZATION (Release/ENABLE_LTO). Keep LTO off for
+# debuggability by default, but honour explicit opt-in.
+if(ENABLE_LTO)
+    add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+else()
     add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -fno-lto)
+endif()
     add_link_options(-fno-lto)
 endif()
 
@@ -247,9 +256,17 @@ if(ENABLE_SANITIZERS)
         # to avoid ld.so conflicts with non-instrumented system libraries (Qt6, GDAL, etc.)
         # --allow-shlib-undefined: our qgis_gui stubs have unresolved typeinfo for
         # header-only QScintilla stubs; the symbols are never called at runtime.
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address,undefined -Wl,--allow-shlib-undefined")
+        # GNU-ld only: Apple ld rejects the flag (the sanitizer preset cannot
+        # link on macOS without this guard) (#629).
+        if(NOT APPLE)
+            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address,undefined -Wl,--allow-shlib-undefined")
+        else()
+            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address,undefined -Wl,-undefined,dynamic_lookup")
+        endif()
         # Also allow undefined symbols in shared libraries (same QScintilla stub reason)
-        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--allow-shlib-undefined")
+        if(NOT APPLE)
+            set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--allow-shlib-undefined")
+        endif()
     endif()
     # Disable LeakSanitizer: QGIS uses intentional singleton patterns (QgsExpression
     # function registry, QgsNumericFormatRegistry, Qt/GDAL driver allocations) that
@@ -290,7 +307,6 @@ if(SICNU_BUILD_OTB)
     set(ITK_BUILD_DEFAULT_MODULES OFF CACHE BOOL "" FORCE)
 
     # ── ITK: only algorithm core modules ──────────────────────────────────
-    set(ITK_BUILD_DEFAULT_MODULES OFF CACHE BOOL "" FORCE)
     foreach(m
         # Core
         ITKCommon
@@ -429,7 +445,7 @@ if(SICNU_BUILD_OTB)
     find_path(GDAL_INCLUDE_DIR gdal.h HINTS /usr/include/gdal)
     find_library(GDAL_LIBRARY NAMES gdal)
     set(GDAL_INCLUDE_DIRS "${GDAL_INCLUDE_DIR}" CACHE PATH "" FORCE)
-    set(GDAL_LIBRARIES "${GDAL_LIBRARY}" CACHE PATH "" FORCE)
+    set(GDAL_LIBRARIES "${GDAL_LIBRARY}" CACHE STRING "" FORCE)
     set(GDAL_FOUND TRUE CACHE BOOL "" FORCE)
 
     # OTB requires Boost (filesystem, serialization).

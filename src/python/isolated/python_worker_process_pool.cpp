@@ -271,10 +271,13 @@ void PythonWorkerProcessPool::handleWorkerCrash( WorkerNode *node )
   // a second bridge to the same server (crossed IPC).
   const bool wasBusy = node->isBusy;
   node->restartCount++;
-  // DATAPY-4: exponential backoff before restart to avoid tight crash loop
+  // DATAPY-4: exponential backoff before restart to avoid tight crash loop.
+  // Scheduled with a timer instead of msleep (#624): workerCrashed is a
+  // direct connection on the GUI thread, and the sleep froze the UI for up
+  // to 10 s per crash. The whole restart body runs inside the timer so the
+  // crash handler returns immediately.
   const int backoffMs = std::min( 500 * ( 1 << std::min( node->restartCount, 5 ) ), 10000 );
-  if ( backoffMs > 0 )
-    QThread::msleep( static_cast<unsigned long>( backoffMs ) );
+  QTimer::singleShot( backoffMs, this, [this, node, wasBusy, id, pending = std::move( pending )]() mutable {
   QString socketName = QString( "sicnu_pool_%1_%2_%3" )
                          .arg( QCoreApplication::applicationPid() )
                          .arg( id )
@@ -352,6 +355,7 @@ void PythonWorkerProcessPool::handleWorkerCrash( WorkerNode *node )
     qWarning() << "Worker restart listen failed for id:" << id;
     failPendingRequests( pending );
   }
+  } );
 }
 
 void PythonWorkerProcessPool::failPendingRequests(
