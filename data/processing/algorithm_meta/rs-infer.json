@@ -4,6 +4,6 @@
   "input": "raster",
   "output": "raster",
   "gpu": false,
-  "notes": "ONNX inference via cv::dnn (tracer bullet). Accepts a model path or a ModelCatalog name (spatial:list_models). No preprocessing/postprocessing: feed bands, write output.",
-  "tags": ["inference", "onnx", "deep-learning", "model"]
+  "notes": "ONNX inference via the model runtime (cv::dnn provider, cached sessions). Accepts a model path or a ModelCatalog name (spatial:list_models); catalog models must be ready (artifact present, checksum verified). Bounded tiled execution with manifest v2 preprocessing/postprocessing contracts; memory policy Streaming.",
+  "tags": ["inference", "onnx", "deep-learning", "model", "tiled"]
 }

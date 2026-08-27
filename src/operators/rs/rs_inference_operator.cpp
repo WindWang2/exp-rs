@@ -1,5 +1,5 @@
 /***************************************************************************
- * rs_inference_operator.cpp  —  On-device ONNX inference RSOperator (tracer bullet)
+ * rs_inference_operator.cpp  —  On-device ONNX inference RSOperator
  ***************************************************************************/
 #include "rs_inference_operator.h"
 
@@ -8,18 +8,78 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "operators/framework/model_catalog.h"
-#include "opencv/opencv_utils.h"
+#include "operators/runtime/model_runtime.h"
+#include "operators/runtime/tile_inference_engine.h"
 
-#include <opencv2/core.hpp>
-#include <opencv2/dnn.hpp>
+#include "processing/framework/resource_estimation.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
-#include <vector>
+#include <QFileInfo>
+
+#include <algorithm>
+#include <string>
 
 namespace sicnu::operators::rs {
 
 using namespace params;
-using opencv::readRasterBandsToMats;
-using opencv::writeMatsToRaster;
+using runtime::ModelRuntimeRegistry;
+using runtime::TileInferenceEngine;
+
+namespace {
+
+/**
+ * Resolve the `model` parameter to a catalog ModelInfo ready for execution.
+ * Direct file references build an ad-hoc contract (default preprocessing,
+ * default tiling); catalog names go through the full readiness pipeline.
+ * The returned info's readiness signals resolution success/failure.
+ */
+ModelInfo resolveModel( const std::string &modelReference, std::string *errorDetail )
+{
+  const QFileInfo direct( QString::fromStdString( modelReference ) );
+  if ( direct.exists() && direct.isFile() )
+  {
+    ModelInfo info;
+    info.name = modelReference;
+    info.task = "inference";
+    info.framework = "onnx";
+    info.readiness = ModelReadiness::Ready;
+    info.resolvedArtifactPath = direct.absoluteFilePath().toStdString();
+    info.path = modelReference;
+    return info;
+  }
+
+  // Catalog lookup: lazy-loads on first use so run_workflow / direct operator
+  // calls resolve names without a prior spatial:list_models call. A miss
+  // triggers ONE refresh so newly installed models are found without paying
+  // a directory rescan on every run.
+  auto model = ModelCatalog::instance().find( modelReference );
+  if ( !model )
+  {
+    ModelCatalog::instance().reload();
+    model = ModelCatalog::instance().find( modelReference );
+  }
+  if ( !model )
+  {
+    if ( errorDetail )
+      *errorDetail = "Model file not found and not a catalog name: " + modelReference
+                     + " (catalog directory: " + ModelCatalog::instance().directory() + ")";
+    ModelInfo missing;
+    missing.readiness = ModelReadiness::MissingArtifact;
+    return missing;
+  }
+  if ( model->readiness != ModelReadiness::Ready )
+  {
+    if ( errorDetail )
+      *errorDetail = "Model '" + model->name + "' is not ready ("
+                     + modelReadinessName( model->readiness ) + "): "
+                     + ( model->readinessReason.empty() ? std::string( "unavailable" )
+                                                        : model->readinessReason );
+    return *model; // readiness != Ready signals the failure
+  }
+  return *model;
+}
+
+} // namespace
 
 Json::Value RsInferenceOperator::schema() const
 {
@@ -44,9 +104,13 @@ Json::Value RsInferenceOperator::schema() const
     Json::Value outputs( Json::objectValue );
     outputs["output"] = makeRasterParam( "output", "Output raster path" );
     outputs["backend"] = makeStringParam( "backend", "Inference backend", "" );
+    outputs["device"] = makeStringParam( "device", "Execution device (cpu/cuda)", "" );
+    outputs["model"] = makeStringParam( "model", "Resolved model name or path", "" );
     outputs["outBands"] = makeIntegerParam( "outBands", "Number of bands written", 0 );
     outputs["width"] = makeIntegerParam( "width", "Output raster width", 0 );
     outputs["height"] = makeIntegerParam( "height", "Output raster height", 0 );
+    outputs["tileSize"] = makeIntegerParam( "tileSize", "Core tile edge used (px)", 0 );
+    outputs["tiles"] = makeIntegerParam( "tiles", "Tiles processed", 0 );
 
     Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
     root["required"] = makeRequired( { "input", "model", "output" } );
@@ -63,21 +127,63 @@ Json::Value RsInferenceOperator::metadata() const
     meta["tags"].append( "onnx" );
     meta["tags"].append( "edge-ai" );
     meta["tags"].append( "deep-learning" );
-    meta["purpose"] = "Run a pretrained ONNX model on a raster with pure C++ (cv::dnn).";
+    meta["purpose"] = "Run a pretrained ONNX model on a raster with pure C++ (cv::dnn), tiled with bounded memory.";
     meta["prerequisites"].append( "Model must be loadable by cv::dnn::readNetFromONNX." );
-    meta["workflowHints"].append( "No preprocessing/postprocessing — feed bands, write output." );
+    meta["workflowHints"].append( "Preprocessing/postprocessing follow the model manifest (v2) contracts; default is bands-in/raster-out identity chaining." );
+    meta["workflowHints"].append( "Catalog models must be ready (artifact present, checksum verified) — see spatial:list_models." );
     return meta;
 }
 
 Json::Value RsInferenceOperator::executionEstimate() const
 {
-    // FullRaster (default policy): all input bands are held as CV_32F mats plus
-    // the merged NCHW blob, model output and per-channel output mats. Model
-    // weights are model-dependent and not included.
-    Json::Value est( Json::objectValue );
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 67108864; // 4-band input: bands + blob + output (64 MiB)
+    // Static fallback: the tiled engine's per-tile working set for a default
+    // 512 px tile, 4 bands, batch 1 (~3 tile-sized buffers) plus a weights
+    // overhead floor. The dynamic estimateExecution(params) refines this from
+    // the actual raster header and model contracts.
+    return sicnu::processing::makeStreamingEstimate( 512, 512, 4, 4, 3,
+                                                     /*matrixBytes*/ 0,
+                                                     /*fixedOverhead*/ 64 * 1024 * 1024 );
+}
+
+Json::Value RsInferenceOperator::estimateExecution( const Json::Value &params ) const
+{
+    const std::string inputPath = params.isObject() && params.isMember( "input" )
+                                    ? params["input"].asString()
+                                    : std::string();
+    const std::string modelReference = params.isObject() && params.isMember( "model" )
+                                         ? params["model"].asString()
+                                         : std::string();
+
+    // Contract lookup for estimation must not require readiness (a missing
+    // artifact still carries parseable tiling/runtime contracts).
+    const ModelInfo model = resolveModel( modelReference, nullptr );
+
+    const int tile = TileInferenceEngine::effectiveTileSize( model );
+    const int halo = TileInferenceEngine::effectiveHalo( model );
+    const std::uint64_t batch = static_cast<std::uint64_t>( std::max( 1, model.tiling.batchSize ) );
+
+    std::uint64_t bands = 4; // conservative default when the raster is unknown
+    GdalDatasetWrapper ds;
+    if ( !inputPath.empty() && ds.open( QString::fromStdString( inputPath ) ) )
+    {
+        bands = static_cast<std::uint64_t>( ds.bandCount() );
+        // A bands parameter narrows the fed channels.
+        if ( params.isObject() && params.isMember( "bands" ) && params["bands"].isArray() )
+            bands = std::max<std::uint64_t>( 1, static_cast<std::uint64_t>( params["bands"].size() ) );
+    }
+
+    const std::uint64_t edge = static_cast<std::uint64_t>( tile + 2 * halo );
+    // Read window + detached tile + blob + output planes ≈ 4 tile-sized sets
+    // per batched tile; model weights are the fixed overhead when declared.
+    const std::uint64_t modelRamBytes =
+        static_cast<std::uint64_t>( std::max( 0, model.runtime.estimatedRamMb ) ) * 1024 * 1024;
+    Json::Value est = sicnu::processing::makeStreamingEstimate( edge, edge, bands, 4,
+                                                                batch * 4, /*matrixBytes*/ 0,
+                                                                /*fixedOverhead*/ modelRamBytes + 32 * 1024 * 1024 );
+    // VRAM contract surfaces for admission tooling (TaskCenter admits on RAM
+    // today; GPU-aware admission is a documented follow-up).
+    if ( model.runtime.gpu )
+        est["estimatedVramMb"] = model.runtime.estimatedVramMb;
     return est;
 }
 
@@ -88,149 +194,68 @@ Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorConte
                                "Operator parameters must be a JSON object" );
 
     const std::string inputPath = requireString( params, "input" );
-    std::string modelPath = requireString( params, "model" );
+    const std::string modelReference = requireString( params, "model" );
     const std::string outputPath = requireString( params, "output" );
 
     if ( !fileExists( inputPath ) )
         throw RSOperatorError( ErrorCode::FileNotFound,
                                "Input raster not found: " + inputPath );
-    // ADR 0122: `model` accepts a catalog name (models/<name>/model.json,
-    // spatial:list_models) as well as a direct path. The catalog lazy-loads
-    // on first use here so run_workflow / direct operator calls resolve
-    // names without a prior spatial:list_models call.
-    if ( !fileExists( modelPath ) )
+
+    // Resolve catalog name or direct path to a ready model contract.
+    std::string errorDetail;
+    const ModelInfo model = resolveModel( modelReference, &errorDetail );
+    if ( model.readiness != ModelReadiness::Ready )
     {
-        auto &catalog = sicnu::operators::ModelCatalog::instance();
-        catalog.reload();
-        const auto model = catalog.find( modelPath );
-        if ( model && !model->path.empty() )
-            modelPath = model->path;
+        const ErrorCode code = model.readiness == ModelReadiness::MissingArtifact
+                                   ? ErrorCode::FileNotFound
+                                   : ErrorCode::InvalidInputData;
+        throw RSOperatorError( code, errorDetail.empty() ? "model is not ready" : errorDetail );
     }
-    if ( !fileExists( modelPath ) )
-        throw RSOperatorError( ErrorCode::FileNotFound,
-                               "Model file not found (path or catalog name): " + modelPath );
 
-    std::string errorMessage;
-    context.reportProgress( 0.1, "Reading input raster bands" );
+    // Runtime-layer verdict: provider availability + GPU/VRAM contract.
+    auto &registry = ModelRuntimeRegistry::instance();
+    const runtime::ModelHardwareCapabilities hw = registry.hardware();
+    std::string runtimeReason;
+    const ModelReadiness runtimeReadiness =
+        runtime::evaluateRuntimeReadiness( model, hw, &runtimeReason );
+    if ( runtimeReadiness != ModelReadiness::Ready )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "Model '" + model.name + "' cannot execute: " + runtimeReason );
 
-    // Read the requested bands (default: all) as CV_32FC1 mats. Each band is one
-    // channel of the NCHW blob the model consumes. parseBands validates 1-based
-    // indices against the actual band count (same semantics as the other rs:
-    // operators), throwing InvalidParameter on an out-of-range band.
-    const int bandCount = opencv::rasterBandCount( inputPath );
+    context.reportProgress( 0.05, "Acquiring model runtime session" );
+    std::string loadError;
+    const auto session = registry.acquire( model, &loadError );
+    if ( !session )
+        throw RSOperatorError( ErrorCode::ComputationError,
+                               "Failed to load model session: " + loadError );
+
+    const int bandCount = [ & ] {
+        GdalDatasetWrapper ds;
+        if ( !ds.open( QString::fromStdString( inputPath ) ) )
+            throw RSOperatorError( ErrorCode::GdalError, "Failed to open input raster: " + inputPath );
+        return ds.bandCount();
+    }();
     if ( bandCount <= 0 )
         throw RSOperatorError( ErrorCode::GdalError,
                                "Failed to read band count from input raster" );
     const std::vector<int> bands = parseBands( params, bandCount );
 
-    std::vector<cv::Mat> bandMats;
-    if ( bands.empty() )
-    {
-        bandMats = readRasterBandsToMats( inputPath, &errorMessage );
-    }
-    else
-    {
-        for ( int b : bands )
-        {
-            cv::Mat m = opencv::readRasterBandToMat( inputPath, b, &errorMessage );
-            if ( m.empty() )
-                throw RSOperatorError( ErrorCode::GdalError,
-                                       "Failed to read band " + std::to_string( b ) +
-                                           ": " + errorMessage );
-            bandMats.push_back( std::move( m ) );
-        }
-    }
-    if ( bandMats.empty() )
-        throw RSOperatorError( ErrorCode::GdalError,
-                               "Failed to read input raster: " + errorMessage );
-
-    const int height = bandMats[0].rows;
-    const int width = bandMats[0].cols;
-
     context.throwIfCancelled();
-    context.reportProgress( 0.3, "Loading ONNX model" );
+    context.reportProgressForced( 0.1, "Running tiled inference" );
 
-    // Load the model. readNetFromONNX throws cv::Exception on a bad path/format;
-    // translate to an operator error so a bad model surfaces, not a crash.
-    cv::dnn::Net net;
-    try
-    {
-        net = cv::dnn::readNetFromONNX( modelPath );
-    }
-    catch ( const cv::Exception &e )
-    {
-        throw RSOperatorError( ErrorCode::ComputationError,
-                               "Failed to load ONNX model: " + std::string( e.what() ) );
-    }
-    if ( net.empty() )
-        throw RSOperatorError( ErrorCode::InvalidInputData,
-                               "Loaded model is empty: " + modelPath );
-
-    context.throwIfCancelled();
-    context.reportProgress( 0.5, "Running inference" );
-
-    // Stack the bands into a 4-D NCHW float blob (1, bandCount, H, W): merge the
-    // per-band mats into one (H, W, bandCount) image, then blobFromImage transposes
-    // to NCHW and converts to float32 — the layout most image ONNX models expect.
-    cv::Mat stacked;
-    cv::merge( bandMats, stacked ); // (H, W, bandCount)
-    cv::Mat nchw = cv::dnn::blobFromImage( stacked ); // (1, bandCount, H, W)
-    net.setInput( nchw );
-
-    cv::Mat output;
-    try
-    {
-        output = net.forward();
-    }
-    catch ( const cv::Exception &e )
-    {
-        throw RSOperatorError( ErrorCode::ComputationError,
-                               "Inference forward pass failed: " + std::string( e.what() ) );
-    }
-    if ( output.empty() )
-        throw RSOperatorError( ErrorCode::ComputationError,
-                               "Inference produced an empty output" );
-
-    context.throwIfCancelled();
-    context.reportProgress( 0.8, "Writing output raster" );
-
-    // The output blob is expected to be NCHW (1, C_out, H, W) over the input
-    // grid. Validate the shape before reshaping — a model whose output isn't
-    // 4-D NCHW or whose spatial dims don't match the input is unsupported by
-    // this tracer-bullet slice and must surface as an operator error, not an
-    // uncaught cv::Exception from reshape(). Each output channel becomes a band.
-    if ( output.dims != 4 || output.size[0] != 1 ||
-         output.size[2] != height || output.size[3] != width )
-    {
-        throw RSOperatorError(
-            ErrorCode::InvalidInputData,
-            "Model output is not a 4-D NCHW blob matching the input grid; this "
-            "operator supports per-pixel models whose output keeps the input "
-            "(height, width). Got a " +
-                std::to_string( output.dims ) + "-D output." );
-    }
-    const int outChannels = output.size[1];
-    std::vector<cv::Mat> outMats;
-    outMats.reserve( outChannels );
-    cv::Mat flat = output.reshape( 1, std::vector<int>{ outChannels, height * width } );
-    for ( int c = 0; c < outChannels; ++c )
-    {
-        cv::Mat row = flat.row( c ).reshape( 1, height ).clone(); // (H, W) CV_32F
-        outMats.push_back( std::move( row ) );
-    }
-
-    if ( !writeMatsToRaster( outputPath, outMats, inputPath, &errorMessage ) )
-        throw RSOperatorError( ErrorCode::FileNotWritable,
-                               "Failed to write output raster: " + errorMessage );
-
-    context.reportProgress( 1.0, "Inference complete" );
+    TileInferenceEngine engine( model, session );
+    const runtime::TileInferenceStats stats = engine.run( inputPath, bands, outputPath, context );
 
     Json::Value result( Json::objectValue );
     result["output"] = outputPath;
-    result["backend"] = "opencv_dnn";
-    result["outBands"] = outChannels;
-    result["width"] = width;
-    result["height"] = height;
+    result["backend"] = session->backendName();
+    result["device"] = session->deviceName();
+    result["model"] = model.name;
+    result["outBands"] = stats.outBands;
+    result["width"] = stats.outWidth;
+    result["height"] = stats.outHeight;
+    result["tileSize"] = stats.tileSize;
+    result["tiles"] = stats.tilesProcessed;
     return result;
 }
 
