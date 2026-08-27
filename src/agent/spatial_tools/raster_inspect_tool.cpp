@@ -6,6 +6,8 @@
 
 #include <QFileInfo>
 
+#include "qgsdatasourceresolver.h"
+
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -118,12 +120,12 @@ SpatialToolResult RasterInspectTool::execute( const Json::Value &input )
   if ( path.empty() )
     return SpatialToolResult::failure( "Missing required parameter: path" );
 
-  if ( !QFileInfo::exists( QString::fromStdString( path ) ) && path.rfind( "/vsi", 0 ) != 0 )
-    return SpatialToolResult::failure( "Raster file not found: " + path );
+  if ( QgsDataSourceResolver::requiresLocalExistenceCheck( QString::fromStdString( path ) ) && !QFileInfo::exists( QString::fromStdString( path ) ) )
+    return SpatialToolResult::failure( "Raster file not found: " + path, "local_file_not_found", "io", false );
 
   GDALDatasetUniquePtr ds( GDALDataset::Open( path.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY ) );
   if ( !ds )
-    return SpatialToolResult::failure( "GDAL could not open raster: " + path );
+    return SpatialToolResult::failure( "GDAL could not open raster: " + path, "gdal_open_failed", "io", false );
 
   const bool withStats = input.isMember( "stats" ) && input["stats"].asBool();
 

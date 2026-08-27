@@ -16,6 +16,7 @@
 #include "operators/framework/model_catalog.h"
 #include "processing/framework/algorithm_meta_store.h"
 
+#include <cpl_vsi.h>
 #include <gdal_priv.h>
 #include <ogrsf_frmts.h>
 #include <ogr_spatialref.h>
@@ -109,6 +110,14 @@ std::string createTestVector( const QString &path )
     GDALClose( ds );
     return path.toStdString();
 }
+
+/// RAII helper to ensure VSI files are removed even when assertions throw.
+struct VsiGuard
+{
+    explicit VsiGuard( std::string p ) : path( std::move( p ) ) {}
+    ~VsiGuard() { if ( !path.empty() ) VSIUnlink( path.c_str() ); }
+    std::string path;
+};
 
 } // namespace
 
@@ -220,25 +229,6 @@ TEST_CASE( "VectorInspectTool inspects a generated GeoJSON", "[agent][spatial][v
     CHECK( layer["sampleFeatures"][0]["attributes"]["value"].asDouble() == Catch::Approx( 1.5 ) );
     CHECK( layer["sampleFeatures"][0]["geometryJson"].asString().find( "Point" )
                != std::string::npos );
-}
-
-TEST_CASE( "VectorInspectTool supports /vsi virtual paths and connection strings", "[agent][spatial_tools]" )
-{
-    ensureGdalDrivers();
-    const std::string memPath = "/vsimem/test_vector.geojson";
-    createTestVector( QString::fromStdString( memPath ) );
-
-    sicnu::agent::spatial_tools::VectorInspectTool tool;
-    Json::Value input( Json::objectValue );
-    input["path"] = memPath;
-    input["max_features"] = 1;
-
-    const auto result = tool.execute( input );
-    REQUIRE( result.success );
-    CHECK( result.output["layerCount"].asInt() == 1 );
-    CHECK( result.output["driver"].asString() == "GeoJSON" );
-
-    VSIUnlink( memPath.c_str() );
 }
 
 TEST_CASE( "ModelCatalog scans manifests and the tool exposes them", "[agent][spatial][models]" )
@@ -425,4 +415,125 @@ TEST_CASE( "SpatialToolProvider feeds the unified AgentToolCatalog", "[agent][sp
     CHECK( tool->inputSchema["required"][0].asString() == "path" );
 
     CHECK( AgentToolCatalog::instance().findTool( "spatial:list_models" ).has_value() );
+}
+
+// ——— Unified resolver regression tests (GH #560) ————————————————
+
+TEST_CASE( "RasterInspectTool accepts /vsimem raster (GH #560 regression)", "[agent][spatial][raster][vsimem]" )
+{
+    const std::string vsiPath = "/vsimem/test_raster_inspect.tif";
+    // Create a small GTiff directly in /vsimem (mirrors createTestRaster)
+    ensureGdalDrivers();
+    {
+        GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "GTiff" );
+        REQUIRE( driver != nullptr );
+        GDALDataset *ds = driver->Create( vsiPath.c_str(), 8, 8, 2, GDT_Float32, nullptr );
+        REQUIRE( ds != nullptr );
+        double gt[6] = { 500000.0, 30.0, 0.0, 5000000.0, 0.0, -30.0 };
+        ds->SetGeoTransform( gt );
+        OGRSpatialReference srs;
+        srs.importFromEPSG( 32650 );
+        char *wkt = nullptr;
+        srs.exportToWkt( &wkt );
+        ds->SetProjection( wkt );
+        CPLFree( wkt );
+        GDALRasterBand *nir = ds->GetRasterBand( 1 );
+        nir->SetNoDataValue( -9999.0 );
+        nir->SetMetadataItem( "SICNU_BAND_ROLE", "NIR", nullptr );
+        float row[8];
+        for ( int y = 0; y < 8; ++y )
+        {
+            for ( int x = 0; x < 8; ++x )
+                row[x] = static_cast<float>( y * 8 + x );
+            nir->RasterIO( GF_Write, 0, y, 8, 1, row, 8, 1, GDT_Float32, 0, 0 );
+        }
+        GDALClose( ds );
+    }
+    VsiGuard guard( vsiPath );
+
+    sicnu::agent::spatial_tools::RasterInspectTool tool;
+    Json::Value input( Json::objectValue );
+    input["path"] = vsiPath;
+    input["stats"] = true;
+    const auto result = tool.execute( input );
+    REQUIRE( result.success );
+    CHECK( result.output["driver"].asString() == "GTiff" );
+    CHECK( result.output["size"]["width"].asInt() == 8 );
+}
+
+TEST_CASE( "VectorInspectTool accepts /vsimem vector (issue #560 regression)", "[agent][spatial][vector][vsimem]" )
+{
+    const std::string vsiPath = "/vsimem/test_vector_inspect.geojson";
+    ensureGdalDrivers();
+    {
+        GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "GeoJSON" );
+        REQUIRE( driver != nullptr );
+        GDALDataset *ds = driver->Create( vsiPath.c_str(), 0, 0, 0, GDT_Unknown, nullptr );
+        REQUIRE( ds != nullptr );
+        OGRSpatialReference srs;
+        srs.importFromEPSG( 4326 );
+        OGRLayer *layer = ds->CreateLayer( "points", &srs, wkbPoint, nullptr );
+        REQUIRE( layer != nullptr );
+        OGRFieldDefn nameField( "name", OFTString );
+        layer->CreateField( &nameField );
+        OGRFieldDefn valueField( "value", OFTReal );
+        layer->CreateField( &valueField );
+        for ( int i = 0; i < 3; ++i )
+        {
+            OGRFeature *feature = OGRFeature::CreateFeature( layer->GetLayerDefn() );
+            feature->SetField( "name", ( std::string( "p" ) + std::to_string( i ) ).c_str() );
+            feature->SetField( "value", 1.5 * ( i + 1 ) );
+            OGRPoint point( 116.0 + 0.1 * i, 39.0 + 0.1 * i );
+            feature->SetGeometry( &point );
+            REQUIRE( layer->CreateFeature( feature ) == OGRERR_NONE );
+            OGRFeature::DestroyFeature( feature );
+        }
+        GDALClose( ds );
+    }
+    VsiGuard guard( vsiPath );
+
+    sicnu::agent::spatial_tools::VectorInspectTool tool;
+    Json::Value input( Json::objectValue );
+    input["path"] = vsiPath;
+    input["max_features"] = 2;
+    const auto result = tool.execute( input );
+    REQUIRE( result.success );
+    CHECK( result.output["layerCount"].asInt() == 1 );
+}
+
+TEST_CASE( "VectorInspectTool does not reject PG connection string at existence stage", "[agent][spatial][vector][resolver]" )
+{
+    sicnu::agent::spatial_tools::VectorInspectTool tool;
+    Json::Value input( Json::objectValue );
+    input["path"] = "PG:dbname=nonexistent_db_xyz";
+    const auto result = tool.execute( input );
+    // Must fail (no real DB), but NOT via the local-file existence gate
+    CHECK_FALSE( result.success );
+    CHECK( result.error.find( "not found" ) == std::string::npos );
+    if ( !result.errorCode.empty() )
+        CHECK( result.errorCode == "provider_open_failed" );
+}
+
+TEST_CASE( "Missing local raster still reports not found with local_file_not_found", "[agent][spatial][raster][resolver]" )
+{
+    sicnu::agent::spatial_tools::RasterInspectTool tool;
+    Json::Value input( Json::objectValue );
+    input["path"] = "/definitely/not/a/raster_for_resolver_test.tif";
+    const auto result = tool.execute( input );
+    CHECK_FALSE( result.success );
+    CHECK( result.error.find( "not found" ) != std::string::npos );
+    if ( !result.errorCode.empty() )
+        CHECK( result.errorCode == "local_file_not_found" );
+}
+
+TEST_CASE( "Missing local vector still reports not found with local_file_not_found", "[agent][spatial][vector][resolver]" )
+{
+    sicnu::agent::spatial_tools::VectorInspectTool tool;
+    Json::Value input( Json::objectValue );
+    input["path"] = "/definitely/not/a/vector_for_resolver_test.geojson";
+    const auto result = tool.execute( input );
+    CHECK_FALSE( result.success );
+    CHECK( result.error.find( "not found" ) != std::string::npos );
+    if ( !result.errorCode.empty() )
+        CHECK( result.errorCode == "local_file_not_found" );
 }

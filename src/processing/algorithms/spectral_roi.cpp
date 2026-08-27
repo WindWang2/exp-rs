@@ -5,6 +5,8 @@
 
 #include <QFileInfo>
 
+#include "qgsdatasourceresolver.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -31,7 +33,7 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
             *errorMessage = QStringLiteral( "ROI polygon needs at least 3 points" );
         return false;
     }
-    if ( !QFileInfo::exists( rasterPath ) )
+    if ( QgsDataSourceResolver::requiresLocalExistenceCheck( rasterPath ) && !QFileInfo::exists( rasterPath ) )
     {
         if ( errorMessage )
             *errorMessage = QStringLiteral( "Raster not found: %1" ).arg( rasterPath );

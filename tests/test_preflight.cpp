@@ -9,6 +9,11 @@
 #include <QTemporaryDir>
 #include <array>
 
+#include <cpl_vsi.h>
+#include <gdal_priv.h>
+#include <ogr_api.h>
+#include <ogr_spatialref.h>
+
 #include "processing/framework/algorithm_preflight.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -50,6 +55,34 @@ void writeRaster( const QString &path, int width, int height, float value )
     QString err;
     std::vector<std::vector<float>> bands = { band };
     REQUIRE( writeGdalOutput( path, width, height, bands, gt, "EPSG:32648", &err ) );
+}
+
+void createVsimemRaster( const char *vsiPath )
+{
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    GDALDatasetH ds = GDALCreate( driver, vsiPath, 16, 16, 1, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    double gt[6] = { 500000, 30, 0, 4500000, 0, -30 };
+    REQUIRE( GDALSetGeoTransform( ds, gt ) == CE_None );
+    {
+        OGRSpatialReference srs;
+        srs.importFromEPSG( 32648 );
+        char *wkt = nullptr;
+        srs.exportToWkt( &wkt );
+        if ( wkt )
+        {
+            GDALSetProjection( ds, wkt );
+            CPLFree( wkt );
+        }
+    }
+    GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+    REQUIRE( band != nullptr );
+    std::vector<float> line( 16, 1.0f );
+    for ( int row = 0; row < 16; ++row )
+        REQUIRE( GDALRasterIO( band, GF_Write, 0, row, 16, 1, line.data(), 16, 1, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( ds );
 }
 
 } // namespace
@@ -213,5 +246,78 @@ TEST_CASE( "Dynamic estimates reflect actual working sets (QUAC / mosaic)", "[pr
         REQUIRE( est["tileHeight"].asInt() == 512 );
         REQUIRE( est["estimatedRamBytes"].asUInt64() == 4194304 );
     }
+}
+
+// ——— Unified resolver regression tests (GH #560) ———————
+
+TEST_CASE( "preflight does not emit input_not_found for /vsimem raster", "[processing][preflight][vsimem]" )
+{
+    const char *vsiPath = "/vsimem/preflight_test_raster.tif";
+    createVsimemRaster( vsiPath );
+    struct Guard { const char *p; ~Guard() { VSIUnlink( p ); } } guard{ vsiPath };
+
+    AlgorithmDescriptor desc;
+    desc.id = "stub:vsimem_preflight";
+    PortDescriptor port;
+    port.name = "input";
+    port.type = DataType::Raster;
+    port.required = true;
+    desc.inputs.push_back( port );
+    ContractStubAdapter adapter( "stub:vsimem_preflight", desc );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = vsiPath;
+    const Json::Value preflight = preflightAdapter( adapter, params );
+
+    // After resolver migration: virtual source is probed via GDALOpenEx, not
+    // filesystem existence. Must NOT produce input_not_found.
+    const Json::Value issues = preflight["compatibility"]["issues"];
+    for ( Json::ArrayIndex i = 0; i < issues.size(); ++i )
+        CHECK( issues[i]["code"].asString() != "input_not_found" );
+
+    // Valid raster -> overall preflight is valid (no compatibility blockers).
+    // Before migration this would be invalid due to input_not_found; the check
+    // documents the intended contract – if the resolver migration is not yet
+    // present the assertion will expose the deviation.
+    CHECK( preflight["valid"].asBool() == true );
+    if ( preflight["datasets"].isMember( "input" ) )
+    {
+        // Probe should have observed a real raster (width/height present or at
+        // least not marked missing). The exact shape is determined by GDAL open.
+        const Json::Value dsInfo = preflight["datasets"]["input"];
+        // Must not be the "exists=false" filesystem fallback.
+        if ( dsInfo.isMember( "exists" ) )
+            CHECK( dsInfo["exists"].asBool() == true );
+    }
+}
+
+TEST_CASE( "preflight reports gdal_open_failed for OGR connection string", "[processing][preflight][resolver]" )
+{
+    AlgorithmDescriptor desc;
+    desc.id = "stub:pg_preflight";
+    PortDescriptor port;
+    port.name = "input";
+    port.type = DataType::Raster;
+    port.required = true;
+    desc.inputs.push_back( port );
+    ContractStubAdapter adapter( "stub:pg_preflight", desc );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = "PG:dbname=nonexistent_db_xyz";
+    const Json::Value preflight = preflightAdapter( adapter, params );
+
+    const Json::Value issues = preflight["compatibility"]["issues"];
+    bool hasGdalOpenFailed = false;
+    bool hasInputNotFound = false;
+    for ( Json::ArrayIndex i = 0; i < issues.size(); ++i )
+    {
+        const std::string code = issues[i]["code"].asString();
+        if ( code == "gdal_open_failed" ) hasGdalOpenFailed = true;
+        if ( code == "input_not_found" ) hasInputNotFound = true;
+    }
+    // Virtual/connection source that fails to open must surface as
+    // gdal_open_failed, not as a plain filesystem missing-file error.
+    CHECK( hasGdalOpenFailed );
+    CHECK_FALSE( hasInputNotFound );
 }
 

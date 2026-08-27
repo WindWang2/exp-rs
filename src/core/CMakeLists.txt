@@ -458,6 +458,7 @@ set(QGIS_CORE_SRCS
   qgsdatabasetablemodel.cpp
   qgsdatadefinedsizelegend.cpp
   qgsdatasourceuri.cpp
+  qgsdatasourceresolver.cpp
   qgsdataproviderelevationproperties.cpp
   qgsdataprovidertemporalcapabilities.cpp
   qgsdatetimestatisticalsummary.cpp
@@ -1172,6 +1173,7 @@ set(QGIS_CORE_HDRS
   qgsdataproviderelevationproperties.h
   qgsdataprovidertemporalcapabilities.h
   qgsdatasourceuri.h
+  qgsdatasourceresolver.h
   qgsdatetimestatisticalsummary.h
   qgsdbfilterproxymodel.h
   qgsdbquerylog.h

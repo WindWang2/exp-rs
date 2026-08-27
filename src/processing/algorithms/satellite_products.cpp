@@ -8,6 +8,8 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+
+#include "qgsdatasourceresolver.h"
 #include <QRegularExpression>
 #include <QTextStream>
 
@@ -838,7 +840,7 @@ bool discoverLandsat(const QString& path, ProductInfo* out, QString* errorMessag
 
     for (const auto& p : ordered) {
         const QString bandPath = rootDir.absoluteFilePath(p.second);
-        if (!QFileInfo::exists(bandPath))
+        if ( QgsDataSourceResolver::requiresLocalExistenceCheck( bandPath ) && !QFileInfo::exists( bandPath ) )
             continue;
         BandFile bf;
         bf.path = bandPath;
