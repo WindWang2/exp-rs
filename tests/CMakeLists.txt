@@ -2993,6 +2993,11 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
     qgis_app_obia
     sicnu_jobs
     sicnu_task_center
+    # qgis_app_classify (pulled in via qgis_app_obia) references
+    # WorkflowRuntime (rs_classify_workflow_bridge); resolve it here.
+    sicnu_workflow
+    sicnu_workflow_runtime
+    sicnu_agent
     GDAL::GDAL
     ${OpenCV_LIBRARIES}
   )

@@ -115,6 +115,35 @@ QString TaskCenterDock::formatPriority(TaskPriority priority) const
     }
 }
 
+// #627: full clear()+rebuild on every update dropped the user's selection
+// (cancel became a race while any task emitted progress). Upsert in place:
+// update the row when it exists, insert when missing, remove rows whose
+// task vanished; only an empty tree falls back to a full rebuild.
+static QTreeWidgetItem *findTaskItem(QTreeWidget *tree, long taskId)
+{
+    const QString idText = QString::number(taskId);
+    QTreeWidgetItemIterator it(tree);
+    while (*it)
+    {
+        if ((*it)->text(0) == idText)
+            return *it;
+        ++it;
+    }
+    return nullptr;
+}
+
+static void fillTaskItem(const TaskCenterDock *dock, QTreeWidgetItem *item, const AlgorithmTaskInfo &info)
+{
+    item->setText(0, QString::number(info.taskId));
+    item->setText(1, info.algorithmName);
+    item->setText(2, dock->formatPriority(info.priority));
+    item->setText(3, dock->formatStatus(info.status));
+    item->setText(4, QString("%1%").arg(static_cast<int>(info.progressPercentage * 100)));
+    qint64 elapsedSecs = info.startTime.secsTo(info.endTime.isValid() ? info.endTime : QDateTime::currentDateTime());
+    item->setText(5, QString("%1s").arg(elapsedSecs));
+    item->setText(6, QStringLiteral("--"));
+}
+
 void TaskCenterDock::refreshTaskList()
 {
     m_taskTree->clear();
@@ -162,15 +191,21 @@ void TaskCenterDock::refreshTaskList()
 
 void TaskCenterDock::onTaskAdded(const AlgorithmTaskInfo& info)
 {
-    Q_UNUSED(info);
-    refreshTaskList();
+    if (!findTaskItem(m_taskTree, info.taskId))
+        refreshTaskList();
 }
 
 void TaskCenterDock::onTaskUpdated(const AlgorithmTaskInfo& info)
 {
-    Q_UNUSED(info);
-    refreshTaskList();
-    onSelectionChanged();
+    QTreeWidgetItem *item = findTaskItem(m_taskTree, info.taskId);
+    if (!item)
+    {
+        refreshTaskList();
+        return;
+    }
+    fillTaskItem(this, item, info);
+    // Selection/details are driven by the tree's current item; an in-place
+    // text update keeps it (and the Cancel button state) intact.
 }
 
 void TaskCenterDock::onTaskLogAdded(long taskId, const QString& message)

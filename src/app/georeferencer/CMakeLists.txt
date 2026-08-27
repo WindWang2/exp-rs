@@ -63,6 +63,7 @@ target_link_libraries(qgis_app_georef PUBLIC
     qgis_gui
     sicnu_processing
     sicnu_workflow
+    sicnu_workflow_runtime
     sicnu_jobs
     sicnu_task_center
     Qt6::Core

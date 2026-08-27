@@ -55,4 +55,10 @@ private:
     QPointer<QgsVectorLayer> m_roiLayer;
 
     QVector<BandStats> m_stats;
+
+    // Async compute state (#625): epoch invalidates in-flight results when a
+    // newer request starts or the widget is destroyed; m_computing guards
+    // double-submit (Refresh is disabled while running).
+    uint64_t m_requestEpoch = 0;
+    bool m_computing = false;
 };

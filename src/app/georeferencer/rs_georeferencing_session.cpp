@@ -11,7 +11,9 @@
 #include <QByteArray>
 #include <QMainWindow>
 #include <QSettings>
+#include <QThread>
 #include <QWidget>
+#include <atomic>
 #include <cmath>
 
 namespace
@@ -45,8 +47,25 @@ RsGeoreferencingSession::~RsGeoreferencingSession()
     cancelWarpTask( mPendingWarpTaskId );
   if ( mPendingWarpTask )
   {
-    delete mPendingWarpTask;
-    mPendingWarpTask = nullptr;
+    // #626: cancel is asynchronous - the GDAL warp observes it at the next
+    // progress callback - so the JobEngine worker may still be inside
+    // task->run() here. Hard-deleting while it runs is a use-after-free
+    // (reachable by closing the georeferencer mid-warp). Bounded-wait for
+    // the executor to observe the cancellation; on pathological timeout
+    // prefer a leak over a crash.
+    if ( mWarpExecutorActive.load() )
+    {
+      for ( int i = 0; i < 500 && mWarpExecutorActive.load( std::memory_order_acquire ); ++i )
+        QThread::msleep( 10 );
+      if ( mWarpExecutorActive.load( std::memory_order_acquire ) )
+        QgsLogger::warning( "Georeferencing warp did not stop within 5s of close; "
+                            "deferring its cleanup" );
+    }
+    if ( !mWarpExecutorActive.load( std::memory_order_acquire ) )
+    {
+      delete mPendingWarpTask;
+      mPendingWarpTask = nullptr;
+    }
   }
 }
 
@@ -403,8 +422,14 @@ long RsGeoreferencingSession::startWarpTask( const RsGeorefWarpSnapshot &snap )
   mPendingSnap = snap;
   mPendingWarpTask = task;
 
-  auto jobExec = [task]( const sicnu::jobs::JobRequest &request,
+  auto jobExec = [task, this]( const sicnu::jobs::JobRequest &request,
                         sicnu::operators::RSOperatorContext &ctx ) {
+    struct ActiveGuard
+    {
+      std::atomic<bool> &flag;
+      ~ActiveGuard() { flag.store( false, std::memory_order_release ); }
+    } activeGuard{ mWarpExecutorActive };
+    mWarpExecutorActive.store( true, std::memory_order_release );
     ctx.logInfo( "Georef warp" );
     ctx.reportProgress( 0.0, "Warping" );
     const bool ok = task->run();

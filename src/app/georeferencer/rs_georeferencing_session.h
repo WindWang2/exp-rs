@@ -6,6 +6,8 @@
 #pragma once
 
 #include <QObject>
+
+#include <atomic>
 #include <QString>
 #include <QVector>
 
@@ -199,6 +201,9 @@ class RsGeoreferencingSession : public QObject
 
     long mPendingWarpTaskId = -1;
     RsWarpTask *mPendingWarpTask = nullptr; // deleteLater on terminal
+    /// True while the JobEngine worker is inside mPendingWarpTask->run();
+    /// the destructor bounded-waits on it instead of hard-deleting (#626).
+    std::atomic<bool> mWarpExecutorActive{ false };
     RsGeorefWarpSnapshot mPendingSnap;
 
     // WorkflowRuntime mirror (ADR 0028)

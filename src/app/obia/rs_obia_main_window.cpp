@@ -730,11 +730,11 @@ void RsObiaMainWindow::cancelActiveTask()
         m_pendingSegWork.reset();
         m_pendingHierWork.reset();
         m_pendingHierClsWork.reset();
-        if ( m_pendingFlatTask )
-        {
-            m_pendingFlatTask->deleteLater();
-            m_pendingFlatTask = nullptr;
-        }
+        // #626: the task object is shared_ptr-owned with a deleteLater
+        // deleter; resetting our handle here never destroys it under the
+        // still-running executor (its captured copy keeps it alive and the
+        // final release queues deleteLater on the GUI thread).
+        m_pendingFlatTask.reset();
         m_pendingFlatOutputPath.clear();
         m_pendingCanceled.reset();
         finishPendingUi();
@@ -756,7 +756,7 @@ void RsObiaMainWindow::onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
     auto hierWork = m_pendingHierWork;
     auto hierClsWork = m_pendingHierClsWork;
     auto levelWork = m_pendingLevelWork;
-    RsObiaTask *flatTask = m_pendingFlatTask;
+    std::shared_ptr<RsObiaTask> flatTask = m_pendingFlatTask;
     const QString flatOut = m_pendingFlatOutputPath;
 
     m_pendingTaskId = -1;
@@ -870,9 +870,7 @@ void RsObiaMainWindow::onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
         if ( info.status == sicnu::TaskStatus::Canceled )
         {
             statusBar()->showMessage( tr( "OBIA classify cancelled" ), 3000 );
-            if ( flatTask )
-                flatTask->deleteLater();
-            return;
+            return;  // flatTask (shared_ptr) releases on scope exit -> deleteLater
         }
         if ( info.status == sicnu::TaskStatus::Completed && flatTask && flatTask->result().ok )
         {
@@ -1570,19 +1568,29 @@ long RsObiaMainWindow::startFlatClassifyTask( RsObiaTask *task, const QString &o
     req.params["output"] = outputPath.toStdString();
 
     m_pendingOp = PendingOp::FlatClassify;
-    m_pendingFlatTask = task;
+    // #626: shared ownership with a thread-safe deleter - see the executor
+    // lambda below. RsObiaTask is a QObject living on the GUI thread, so
+    // deleteLater is the only safe destruction path from any thread.
+    m_pendingFlatTask = std::shared_ptr<RsObiaTask>( task, []( RsObiaTask *t ) {
+        if ( t )
+            t->deleteLater();
+    } );
+    const std::shared_ptr<RsObiaTask> taskHandle = m_pendingFlatTask;
     m_pendingFlatOutputPath = outputPath;
     m_pendingProgress = nullptr;
 
     const long taskId = sicnu::TaskCenter::instance().submitJob(
         req,
-        [task]( const sicnu::jobs::JobRequest &request,
+        [taskHandle]( const sicnu::jobs::JobRequest &request,
                 sicnu::operators::RSOperatorContext &ctx ) {
+            // `task` is a shared_ptr with a deleteLater deleter: destroying
+            // the last reference after run() returns queues the deletion on
+            // the GUI thread (cancel/close cannot UAF it, #626).
             ctx.logInfo( "OBIA classify" );
             ctx.reportProgress( 0.0, "Classifying objects" );
-            const bool ok = task->run();
+            const bool ok = taskHandle->run();
             if ( ctx.isCancelled()
-                 || ( !ok && task->result().errorMessage.contains(
+                 || ( !ok && taskHandle->result().errorMessage.contains(
                                  QStringLiteral( "cancel" ), Qt::CaseInsensitive ) ) )
             {
                 throw sicnu::operators::RSOperatorError(
@@ -1592,14 +1600,14 @@ long RsObiaMainWindow::startFlatClassifyTask( RsObiaTask *task, const QString &o
             {
                 throw sicnu::operators::RSOperatorError(
                     sicnu::operators::ErrorCode::ComputationError,
-                    task->result().errorMessage.toStdString() );
+                    taskHandle->result().errorMessage.toStdString() );
             }
             Json::Value result( Json::objectValue );
             result["output"] = request.params.get( "output", "" ).asString();
-            result["durationMs"] = task->result().durationMs;
+            result["durationMs"] = taskHandle->result().durationMs;
             return result;
         },
-        [task]() { task->cancel(); },
+        [taskHandle]() { taskHandle->cancel(); },
         /*autoLoad=*/false );
 
     m_pendingTaskId = taskId;

@@ -236,6 +236,10 @@ class RsObiaMainWindow : public QMainWindow
     std::shared_ptr<PendingHierWork> m_pendingHierWork;
     std::shared_ptr<PendingHierClsWork> m_pendingHierClsWork;
     std::shared_ptr<PendingLevelWork> m_pendingLevelWork;
-    RsObiaTask *m_pendingFlatTask = nullptr; // deleteLater after terminal
+    /// #626: shared ownership with a deleteLater deleter - cancelling or
+    /// closing while the JobEngine executor is still inside run() resets our
+    /// reference without destroying the object under it; the final release
+    /// (whichever thread it happens on) queues deletion on the GUI thread.
+    std::shared_ptr<RsObiaTask> m_pendingFlatTask;
     QString m_pendingFlatOutputPath;
 };

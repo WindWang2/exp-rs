@@ -181,8 +181,17 @@ void RasterProcessingDialogBase::setupButtonBar( QVBoxLayout *layout )
   auto *cancelBtn = new QPushButton( tr( "取消" ), this );
   cancelBtn->setObjectName( QStringLiteral( "rsDialogCancelBtn" ) );
   SicnuUi::markSecondary( cancelBtn );
-  SicnuDialogHelp::tip( cancelBtn, tr( "关闭对话框（任务运行中将忽略关闭）。" ) );
-  connect( cancelBtn, &QPushButton::clicked, this, &QDialog::reject );
+  // While a task is running the button cancels the cooperative job (the
+  // failure callback handles isCanceled -> finishRun); otherwise it closes
+  // the dialog (#627 - previously a long run could neither be cancelled
+  // from the dialog nor closed).
+  SicnuDialogHelp::tip( cancelBtn, tr( "任务运行中取消任务，否则关闭对话框。" ) );
+  connect( cancelBtn, &QPushButton::clicked, this, [this]() {
+    if ( isRunning() )
+      m_jobHandle.cancel();
+    else
+      QDialog::reject();
+  } );
   btnLayout->addWidget( cancelBtn );
 
   m_runButton = new QPushButton( tr( "运行" ), this );
