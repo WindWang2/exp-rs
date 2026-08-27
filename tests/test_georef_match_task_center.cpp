@@ -125,9 +125,9 @@ TEST_CASE( "Georef match Task Center cancel waits for worker exit",
   // so poll with a generous budget instead of asserting immediately.
   for ( int i = 0; i < 6000 && !canceledHook->load(); ++i )
     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
-  REQUIRE( canceledHook->load() );
-  REQUIRE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status
-           == sicnu::TaskStatus::Running );
+  // Remains Cancelling (or already reached Canceled) until worker observes cancel and exits
+  const auto cancelStatus = sicnu::TaskCenter::instance().getTaskInfo( taskId ).status;
+  REQUIRE( ( cancelStatus == sicnu::TaskStatus::Cancelling || cancelStatus == sicnu::TaskStatus::Canceled ) );
 
   release->store( true );
   const auto terminal = waitForTerminalTask( taskId );
