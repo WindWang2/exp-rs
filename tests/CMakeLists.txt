@@ -682,6 +682,37 @@ target_include_directories(test_agent_closed_loop PRIVATE
 )
 sicnu_discover_tests(test_agent_closed_loop)
 
+# Model catalog v2 contracts: readiness states, checksums, ranking gates
+sicnu_add_test(test_model_catalog_v2)
+
+# Model runtime registry, ONNX provider, tile inference engine and rs:infer
+# integration (needs OpenCV for the cv::dnn surface).
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+    add_executable(test_model_runtime test_model_runtime.cpp)
+    target_link_libraries(test_model_runtime PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    if(TARGET jsoncpp)
+        target_link_libraries(test_model_runtime PRIVATE jsoncpp)
+    elseif(JSONCPP_LIBRARIES)
+        target_include_directories(test_model_runtime PRIVATE ${JSONCPP_INCLUDE_DIRS})
+        target_link_libraries(test_model_runtime PRIVATE ${JSONCPP_LIBRARIES})
+    else()
+        target_link_libraries(test_model_runtime PRIVATE jsoncpp)
+    endif()
+    target_include_directories(test_model_runtime PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_model_runtime)
+endif()
+
 # Unified datasource resolver contract (GH #560)
 sicnu_add_test(test_datasource_resolver)
 
