@@ -24,6 +24,7 @@ namespace sicnu::agent
 
 AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
   : QDockWidget( QStringLiteral( "🤖 AI Copilot 智能助手" ), parent )
+  , m_completionGuard( std::make_shared<std::atomic<bool>>( true ) )
 {
   setObjectName( QStringLiteral( "AgentCopilotDockWidget" ) );
   setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
@@ -234,6 +235,14 @@ void AgentCopilotDockWidget::onClearClicked()
     onLlmFinished();
   }
 
+  // Cancel any outstanding async completion callbacks that still hold a
+  // reference to this dock, then clear the pending map so the taskUpdated
+  // slot cannot resurrect and invoke a stale callback (P0-U4).
+  if ( m_completionGuard )
+    *m_completionGuard = false;
+  m_pendingToolCallCompletions.clear();
+  m_completionGuard = std::make_shared<std::atomic<bool>>( true );
+
   m_currentReasoningLabel = nullptr;
   m_currentContentLabel = nullptr;
   m_messageHistory = QJsonArray();
@@ -405,7 +414,10 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
   }
   if (taskId > 0)
   {
-    watchToolCallCompletion(taskId, [this]( const Json::Value &resultPayload ) {
+    auto guard = m_completionGuard;
+    watchToolCallCompletion(taskId, [guard, this]( const Json::Value &resultPayload ) {
+      if ( !guard || !*guard )
+        return;
       if ( resultPayload.isObject() && resultPayload.isMember( "status" ) && resultPayload["status"].asString() == "error" )
       {
         const std::string msg = resultPayload.isMember( "errorMessage" ) ? resultPayload["errorMessage"].asString() : "Tool execution failed";
@@ -511,13 +523,16 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
     runBtn->setEnabled( false );
     runBtn->setText( QStringLiteral( "执行中…" ) );
     QPointer<QPushButton> safeRunBtn = runBtn;
+    auto guard = m_completionGuard;
     // Execute the approved plan asynchronously. AgentWorkflowExecutor owns
     // pipeline watching and marshals the completion callback onto this
     // widget's thread — no detached std::thread (ADR 0047).
     m_workflowExecutor.executeAgentPlanAsync( processing::jsonValueFromQJson( planJson ),
-                                              [this, safeRunBtn]( const Json::Value &resultPayload ) {
+                                              [guard, this, safeRunBtn]( const Json::Value &resultPayload ) {
       // Completion payload shape is owned by the workflow executor; read it
       // in Json-land instead of round-tripping through QJson (ADR 0048).
+      if ( !guard || !*guard )
+        return;
       const Json::Value resultObj = resultPayload.isObject() ? resultPayload : Json::Value( Json::objectValue );
       if ( resultObj["status"].asString() != "success" )
       {
@@ -538,6 +553,14 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
 
 AgentCopilotDockWidget::~AgentCopilotDockWidget()
 {
+  // Disable every async callback that still references this dock (A1).
+  // The shared_ptr guard outlives us in copies held by the dispatcher /
+  // executor, so those copies will no-op instead of touching a destroyed
+  // widget. Clear the pending map to release those lambdas promptly.
+  if ( m_completionGuard )
+    *m_completionGuard = false;
+  m_pendingToolCallCompletions.clear();
+
   if ( m_client )
   {
     m_client->disconnect( this );

@@ -156,6 +156,7 @@ add_executable(test_execution_plane test_execution_plane.cpp)
 target_link_libraries(test_execution_plane PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
+  Qt6::Test
   qgis_core
   Sicnu::data
   sicnu_processing

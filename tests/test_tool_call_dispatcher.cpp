@@ -16,8 +16,11 @@
 #include "processing/framework/tool_call_dispatcher.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/task_center.h"
+#include "data/data_manager.h"
 #include "jobs/job_engine.h"
 #include "operators/rs/rs_spectral_index_operator.h"
+
+#include <string>
 
 using namespace sicnu::processing;
 
@@ -943,4 +946,28 @@ TEST_CASE( "ToolCallDispatcher default-constructor dispatchAndAwait completes wi
   INFO( "elapsed ms: " << elapsedMs << ", status: " << result["status"].asString() );
   REQUIRE( result["status"].asString() == "success" );
   REQUIRE( elapsedMs < 6000 );
+}
+
+TEST_CASE( "ToolCallDispatcher output commit handler survives DataManager destruction",
+           "[processing][tool_call_dispatcher][lifecycle]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+
+  ToolCallDispatcher dispatcher;
+  {
+    sicnu::data::DataManager manager;
+    dispatcher.setDataManager( &manager );
+  } // manager destroyed while dispatcher still holds the commit handler
+
+  sicnu::AlgorithmTaskInfo info;
+  info.taskId = 12345;
+  info.status = sicnu::TaskStatus::Completed;
+  info.algorithmId = QStringLiteral( "stub:lifetime" );
+  info.outputLayerPath = QStringLiteral( "/tmp/should_not_be_used.tif" );
+
+  const Json::Value payload = dispatcher.buildCommittedResultPayload( info );
+
+  REQUIRE( payload["status"].asString() == "error" );
+  const std::string errorMessage = payload["errorMessage"].asString();
+  REQUIRE( errorMessage.find( "DataManager" ) != std::string::npos );
 }

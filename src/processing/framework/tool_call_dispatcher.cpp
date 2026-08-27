@@ -7,7 +7,9 @@
 #include "task_center.h"
 
 #include "output_committer.h"
+#include "data/data_manager.h"
 #include <QCoreApplication>
+#include <QPointer>
 #include <QDateTime>
 #include <QDebug>
 #include <QEventLoop>
@@ -62,10 +64,16 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
   mDataManager = dataManager;
   if ( dataManager )
   {
-    mOutputCommitterHandler = [dataManager]( const sicnu::AlgorithmTaskInfo &info,
-                                             std::string &outCommittedPath,
-                                             std::string &outCommitError ) -> bool {
-      sicnu::OutputCommitter committer( dataManager );
+    QPointer<sicnu::data::DataManager> managerGuard( dataManager );
+    mOutputCommitterHandler = [managerGuard]( const sicnu::AlgorithmTaskInfo &info,
+                                              std::string &outCommittedPath,
+                                              std::string &outCommitError ) -> bool {
+      if ( !managerGuard )
+      {
+        outCommitError = "DataManager was destroyed before the output could be committed";
+        return false;
+      }
+      sicnu::OutputCommitter committer( managerGuard );
       const QFileInfo outInfo( info.outputLayerPath );
       const QString suffix = outInfo.suffix().isEmpty() ? QStringLiteral( "tif" ) : outInfo.suffix();
       const QString stablePath = outInfo.absolutePath() + QStringLiteral( "/" )

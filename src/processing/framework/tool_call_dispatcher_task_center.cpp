@@ -38,7 +38,11 @@ ToolCallDispatcher::ToolCallDispatcher()
       ExecutionRequest request;
       request.algorithmId = algorithmId;
       request.params = params;
-      request.autoLoad = true;
+      // The committed stable asset is auto-displayed via DataManager::assetAdded /
+      // QgisDisplayManager. Leaving autoLoad=true would also emit
+      // TaskCenter::layerAutoLoadRequested with the temp path, producing a
+      // duplicate layer or a layer pointing at a moved-away temp file (P0-L1).
+      request.autoLoad = false;
       request.source = mSourceTag;
       return ExecutionPlane::instance().submit( request ).taskId();
     } )

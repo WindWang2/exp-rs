@@ -24,6 +24,9 @@
 
 #include <QMap>
 
+#include <atomic>
+#include <memory>
+
 namespace sicnu::data
 {
 class DataManager;
@@ -98,6 +101,11 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
 
     processing::ToolCallDispatcher m_toolCallDispatcher;
     QMap<long, processing::ToolCallDispatcher::CompletionCallback> m_pendingToolCallCompletions;
+
+    /// Shared guard for all async completion callbacks that touch `this`.
+    /// Setting the atomic to false and clearing the pending map makes every
+    /// outstanding callback no-op after the dock is cleared or destroyed.
+    std::shared_ptr<std::atomic<bool>> m_completionGuard;
 
     LlmStreamingClient *m_client = nullptr;
     QJsonArray m_messageHistory;

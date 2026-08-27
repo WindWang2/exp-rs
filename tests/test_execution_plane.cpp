@@ -20,6 +20,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -545,6 +546,46 @@ TEST_CASE( "agent tool call commits a stable asset with provenance",
   REQUIRE( provenance.has_value() );
   CHECK( provenance->algorithmId == QStringLiteral( "stub:producer" ) );
   CHECK( provenance->taskReference == QString::number( result["taskId"].asInt64() ) );
+}
+
+// ---------------------------------------------------------------------------
+// 8b. P0-L1 regression: agent tool call must not emit the temp-path
+// layerAutoLoadRequested signal. The single layer load comes from the stable
+// asset via DataManager::assetAdded / QgisDisplayManager in the app layer.
+// ---------------------------------------------------------------------------
+TEST_CASE( "agent tool call commits a stable asset without temp-path auto-load",
+           "[processing][execution_plane][agent_path][layer]" )
+{
+  ensureCoreApp();
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString tempPath = dir.path() + QStringLiteral( "/result.tif" );
+  writeSmallGeoTiff( tempPath );
+  REQUIRE( QFileInfo::exists( tempPath ) );
+
+  registerStub( "stub:producer_noload", BehavioralStubAdapter::Mode::WriteOutput, 0, tempPath );
+
+  sicnu::data::DataManager dataManager;
+  ToolCallDispatcher dispatcher;
+  dispatcher.setSourceTag( QStringLiteral( "agent" ) );
+  dispatcher.setDataManager( &dataManager );
+
+  QSignalSpy loadSpy( &TaskCenter::instance(), &TaskCenter::layerAutoLoadRequested );
+
+  const Json::Value result =
+    dispatcher.dispatchAndAwait( envelopeFor( "stub:producer_noload" ), std::chrono::seconds( 8 ) );
+
+  REQUIRE( result["status"].asString() == "success" );
+  REQUIRE( loadSpy.count() == 0 );
+
+  const QString committed = QString::fromStdString( result["output"].asString() );
+  REQUIRE( committed.endsWith( QStringLiteral( "_committed.tif" ) ) );
+  REQUIRE( QFileInfo::exists( committed ) );
+  REQUIRE_FALSE( QFileInfo::exists( tempPath ) );
+
+  const auto assets = dataManager.assets();
+  REQUIRE( assets.size() == 1 );
+  CHECK( assets.first().source().canonicalSource == committed );
 }
 
 // ---------------------------------------------------------------------------
