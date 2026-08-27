@@ -4,12 +4,17 @@
 #include "workflow_types.h"
 
 #include <json/json.h>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace sicnu::workflow {
 
+// Session state is guarded by an internal mutex (#503, restored after a
+// parallel-fix clobber): runStep()/requestCancel() may be used from worker
+// threads while the GUI thread snapshots. m_def is immutable after
+// construction, so definition()/stepById() read it without the lock.
 class WorkflowSession
 {
   public:
@@ -30,16 +35,19 @@ class WorkflowSession
     void setMode( SessionMode mode );
     void setDirty( bool d );
 
-    void setPipelineId( long pipelineId ) { m_pipelineId = pipelineId; }
-    long pipelineId() const { return m_pipelineId; }
+    void setPipelineId( long pipelineId );
+    long pipelineId() const;
 
-    void setPipelineStatusResolver( PipelineStatusResolver resolver ) { m_pipelineResolver = std::move( resolver ); }
+    void setPipelineStatusResolver( PipelineStatusResolver resolver );
 
     const WorkflowDefinition &definition() const;
     const StepDef *currentStep() const;
     const StepDef *stepById( const std::string &id ) const;
 
   private:
+    Json::Value paramsForUnlocked( const std::string &stepId ) const;
+    SessionSnapshot snapshotUnlocked() const;
+
     WorkflowDefinition m_def;
     std::string m_sessionId;
     std::string m_currentStepId;
@@ -50,6 +58,7 @@ class WorkflowSession
     Json::Value m_paramsByStep;
     std::unordered_map<std::string, std::string> m_artifacts;
     PipelineStatusResolver m_pipelineResolver;
+    mutable std::mutex m_mutex;
 };
 
 } // namespace sicnu::workflow

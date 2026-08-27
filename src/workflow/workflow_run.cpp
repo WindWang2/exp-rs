@@ -17,8 +17,12 @@ std::string currentIsoTimestamp()
 {
   const auto now = std::chrono::system_clock::now();
   const auto itt = std::chrono::system_clock::to_time_t( now );
+  std::tm tmBuf{};
+  // gmtime returns a shared static buffer - not safe when two runs are
+  // touched from different threads (checkpoint recovery vs. background run).
+  gmtime_r( &itt, &tmBuf );
   std::ostringstream ss;
-  ss << std::put_time( std::gmtime( &itt ), "%Y-%m-%dT%H:%M:%SZ" );
+  ss << std::put_time( &tmBuf, "%Y-%m-%dT%H:%M:%SZ" );
   return ss.str();
 }
 

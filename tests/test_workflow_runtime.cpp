@@ -14,7 +14,9 @@
 #include "workflow/workflow_types.h"
 
 #include <QCoreApplication>
+#include <thread>
 #include <unordered_map>
+#include <vector>
 
 using namespace sicnu::workflow;
 using namespace sicnu::operators;
@@ -622,4 +624,47 @@ TEST_CASE( "Change-detection DAG aligns before aligning grids then diffs", "[wor
   CHECK( d->steps[1].params["method"].asString() == "difference" );
   REQUIRE( d->steps[1].gates.size() == 1 );
   CHECK( d->steps[1].gates[0].require == "paramNonEmpty:change.after" );
+}
+
+TEST_CASE( "WorkflowSession concurrent access is safe (#503 regression)", "[workflow][session][concurrency]" )
+{
+  ensureTestAddRegistered();
+  WorkflowSession session( makeTwoStep(), "stress-session" );
+  constexpr int kThreads = 4;
+  constexpr int kIters = 200;
+
+  std::vector<std::thread> threads;
+  for ( int t = 0; t < kThreads; ++t )
+  {
+    threads.emplace_back( [&, t]() {
+      for ( int i = 0; i < kIters; ++i )
+      {
+        const std::string key = "artifact_" + std::to_string( t );
+        session.setArtifact( key, std::to_string( i ) );
+        (void)session.hasArtifact( key );
+        (void)session.artifact( key );
+        Json::Value p( Json::objectValue );
+        p["a"] = i;
+        p["b"] = t;
+        session.setParams( "configure", p );
+        (void)session.resolveParams( "configure" );
+        session.markStepComplete( "configure" );
+        (void)session.snapshot();
+        (void)session.currentStep();
+        session.setDirty( i % 2 == 0 );
+      }
+    } );
+  }
+  for ( auto &th : threads )
+    th.join();
+
+  // All per-thread artifacts must be visible after the storm.
+  const auto snap = session.snapshot();
+  for ( int t = 0; t < kThreads; ++t )
+  {
+    const std::string key = "artifact_" + std::to_string( t );
+    REQUIRE( snap.artifacts.find( key ) != snap.artifacts.end() );
+  }
+  REQUIRE( snap.completedStepIds.size() == 1 );
+  REQUIRE( snap.completedStepIds[0] == "configure" );
 }

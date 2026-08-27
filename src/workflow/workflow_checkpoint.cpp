@@ -80,8 +80,10 @@ QString WorkflowCheckpointManager::saveCheckpoint( const WorkflowRun &run, const
   }
 
   const int fd = file.handle();
+#if defined( Q_OS_UNIX )
   if ( fd >= 0 )
     ::fsync( fd );
+#endif
   file.close();
 
   // Atomic replace: std::filesystem::rename maps to rename(2) on POSIX and

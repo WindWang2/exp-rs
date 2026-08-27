@@ -47,7 +47,7 @@ WorkflowSession::WorkflowSession( WorkflowDefinition def, std::string sessionId 
     m_currentStepId = m_def.steps.front().id;
 }
 
-SessionSnapshot WorkflowSession::snapshot() const
+SessionSnapshot WorkflowSession::snapshotUnlocked() const
 {
   SessionSnapshot snap;
   snap.sessionId = m_sessionId;
@@ -59,14 +59,32 @@ SessionSnapshot WorkflowSession::snapshot() const
   snap.pipelineId = m_pipelineId;
   snap.paramsByStep = m_paramsByStep;
   snap.artifacts = m_artifacts;
+  return snap;
+}
+
+SessionSnapshot WorkflowSession::snapshot() const
+{
+  PipelineStatusResolver resolver;
+  {
+    std::lock_guard<std::mutex> lock( m_mutex );
+    resolver = m_pipelineResolver;
+  }
+
+  SessionSnapshot snap;
+  {
+    std::lock_guard<std::mutex> lock( m_mutex );
+    snap = snapshotUnlocked();
+  }
 
   // ── Authoritative pipeline step status enrichment ──────────────────
   // When bound to a TaskCenter pipeline, query the resolver for
   // real-time step statuses and merge completed steps that the local
   // m_completed list may not yet know about (async DAG execution).
-  if ( m_pipelineId >= 0 && m_pipelineResolver )
+  // The resolver reaches into TaskCenter and is invoked outside the
+  // session lock to avoid holding it across foreign mutexes.
+  if ( snap.pipelineId >= 0 && resolver )
   {
-    const auto statuses = m_pipelineResolver( m_pipelineId );
+    const auto statuses = resolver( snap.pipelineId );
     for ( const auto &[stepId, status] : statuses )
     {
       if ( status == PipelineStepStatus::Completed && stepById( stepId ) )
@@ -84,26 +102,35 @@ bool WorkflowSession::gotoStep( const std::string &stepId )
 {
   if ( !stepById( stepId ) )
     return false;
+  std::lock_guard<std::mutex> lock( m_mutex );
   m_currentStepId = stepId;
   return true;
 }
 
 void WorkflowSession::setParams( const std::string &stepId, const Json::Value &params )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   m_paramsByStep[stepId] = params;
   m_dirty = true;
 }
 
-Json::Value WorkflowSession::paramsFor( const std::string &stepId ) const
+Json::Value WorkflowSession::paramsForUnlocked( const std::string &stepId ) const
 {
   if ( !m_paramsByStep.isObject() || !m_paramsByStep.isMember( stepId ) )
     return Json::Value( Json::objectValue );
   return m_paramsByStep[stepId];
 }
 
+Json::Value WorkflowSession::paramsFor( const std::string &stepId ) const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return paramsForUnlocked( stepId );
+}
+
 Json::Value WorkflowSession::resolveParams( const std::string &stepId ) const
 {
-  const Json::Value raw = paramsFor( stepId );
+  std::lock_guard<std::mutex> lock( m_mutex );
+  const Json::Value raw = paramsForUnlocked( stepId );
   if ( raw.isNull() || !raw.isObject() )
     return raw;
 
@@ -139,16 +166,19 @@ Json::Value WorkflowSession::resolveParams( const std::string &stepId ) const
 
 void WorkflowSession::setArtifact( const std::string &name, const std::string &value )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   m_artifacts[name] = value;
 }
 
 bool WorkflowSession::hasArtifact( const std::string &name ) const
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   return m_artifacts.find( name ) != m_artifacts.end();
 }
 
 std::string WorkflowSession::artifact( const std::string &name ) const
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   auto it = m_artifacts.find( name );
   if ( it != m_artifacts.end() )
     return it->second;
@@ -157,7 +187,10 @@ std::string WorkflowSession::artifact( const std::string &name ) const
 
 void WorkflowSession::markStepComplete( const std::string &stepId )
 {
-  if ( !stepById( stepId ) || m_completed.size() >= m_def.steps.size() )
+  if ( !stepById( stepId ) )
+    return;
+  std::lock_guard<std::mutex> lock( m_mutex );
+  if ( m_completed.size() >= m_def.steps.size() )
     return;
   if ( std::find( m_completed.begin(), m_completed.end(), stepId ) == m_completed.end() )
     m_completed.push_back( stepId );
@@ -165,12 +198,32 @@ void WorkflowSession::markStepComplete( const std::string &stepId )
 
 void WorkflowSession::setMode( SessionMode mode )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   m_mode = mode;
 }
 
 void WorkflowSession::setDirty( bool d )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   m_dirty = d;
+}
+
+void WorkflowSession::setPipelineId( long pipelineId )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_pipelineId = pipelineId;
+}
+
+long WorkflowSession::pipelineId() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_pipelineId;
+}
+
+void WorkflowSession::setPipelineStatusResolver( PipelineStatusResolver resolver )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_pipelineResolver = std::move( resolver );
 }
 
 const WorkflowDefinition &WorkflowSession::definition() const
@@ -180,7 +233,12 @@ const WorkflowDefinition &WorkflowSession::definition() const
 
 const StepDef *WorkflowSession::currentStep() const
 {
-  return stepById( m_currentStepId );
+  std::string currentId;
+  {
+    std::lock_guard<std::mutex> lock( m_mutex );
+    currentId = m_currentStepId;
+  }
+  return stepById( currentId );
 }
 
 const StepDef *WorkflowSession::stepById( const std::string &id ) const

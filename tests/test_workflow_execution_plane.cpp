@@ -108,6 +108,24 @@ public:
   }
 };
 
+// Operator that counts executions and always fails (#614 regression):
+// runStep must NOT re-run it synchronously after the plane task failed.
+std::atomic<int> g_failCount{0};
+class CountingFailOperator : public RSOperator
+{
+public:
+  std::string name() const override { return "test:fail_count_plane"; }
+  std::string displayName() const override { return "CountFailPlane"; }
+  std::string group() const override { return "test"; }
+  std::string description() const override { return "count executions, always fail"; }
+  Json::Value schema() const override { return Json::Value(Json::objectValue); }
+  Json::Value run(const Json::Value &, RSOperatorContext &) override
+  {
+    g_failCount.fetch_add(1);
+    throw RSOperatorError(ErrorCode::ComputationError, "counting boom");
+  }
+};
+
 void ensureOps()
 {
   ensureApp();
@@ -116,6 +134,8 @@ void ensureOps()
     reg.registerOperator("test:fast_add_plane", [](){ return std::make_unique<FastAddOperator>(); });
   if (!reg.hasOperator("test:slow_plane"))
     reg.registerOperator("test:slow_plane", [](){ return std::make_unique<SlowPlaneOperator>(); });
+  if (!reg.hasOperator("test:fail_count_plane"))
+    reg.registerOperator("test:fail_count_plane", [](){ return std::make_unique<CountingFailOperator>(); });
   // Refresh Atomic registry so ExecutionPlane can find them via JobEngine fallback
   AtomicAlgorithmRegistry::instance().reset();
   // Ensure fallback is wired (like production)
@@ -326,4 +346,63 @@ TEST_CASE("WorkflowRuntime fallback to sync when ExecutionPlane disabled", "[wor
   rt.setParams(sid, "run", p);
   Json::Value r = rt.runStep(sid, "run");
   REQUIRE(r["result"].asDouble() == 30.0);
+}
+
+TEST_CASE("Plane task failure never falls back to sync re-execution (#614)", "[workflow][execution_plane][fallback]")
+{
+  ensureOps();
+  wireFallback();
+  WorkflowRuntime rt(false);
+  rt.setUseExecutionPlane(true);
+
+  WorkflowDefinition d;
+  d.id = "wf:plane_fail_no_fallback";
+  d.title = "PlaneFailNoFallback";
+  d.host = HostKind::TaskPanel;
+  StepDef step;
+  step.id = "boom";
+  step.title = "Boom";
+  step.kind = StepKind::Operator;
+  step.operatorId = "test:fail_count_plane";
+  step.resourceEstimateMb = 8;
+  step.verificationPolicy = "skip";
+  d.steps = {step};
+  rt.registerDefinition(d);
+  const std::string sid = rt.open("wf:plane_fail_no_fallback");
+  REQUIRE_FALSE(sid.empty());
+
+  g_failCount.store(0);
+  bool threw = false;
+  std::string msg;
+  try {
+    rt.runStep(sid, "boom");
+  } catch (const std::exception &e) {
+    threw = true;
+    msg = e.what();
+  }
+  REQUIRE(threw);
+  REQUIRE(msg.find("counting boom") != std::string::npos);
+  // Exactly one execution: the dispatched plane task. The old code erased
+  // the active-task evidence via ClearGuard before the fallback decision and
+  // re-ran the operator synchronously (count == 2).
+  REQUIRE(g_failCount.load() == 1);
+}
+
+TEST_CASE("workflowDefinitionFromJson rejects out-of-range enums (#614)", "[workflow][definition]")
+{
+  ensureOps();
+  Json::Value defJson(Json::objectValue);
+  defJson["id"] = "wf:bad_enum";
+  defJson["host"] = 99;
+  Json::Value steps(Json::arrayValue);
+  Json::Value s(Json::objectValue);
+  s["id"] = "s1";
+  s["operatorId"] = "test:fast_add_plane";
+  s["kind"] = 42;
+  steps.append(s);
+  defJson["steps"] = steps;
+  WorkflowDefinition def;
+  std::string err;
+  REQUIRE_FALSE(workflowDefinitionFromJson(defJson, def, err));
+  REQUIRE((err.find("host") != std::string::npos || err.find("kind") != std::string::npos));
 }

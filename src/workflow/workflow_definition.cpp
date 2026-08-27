@@ -98,7 +98,15 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
   if ( json.isMember( "workspaceKind" ) && json["workspaceKind"].isString() )
     def.workspaceKind = json["workspaceKind"].asString();
   if ( json.isMember( "host" ) && json["host"].isInt() )
-    def.host = static_cast<HostKind>( json["host"].asInt() );
+  {
+    const int host = json["host"].asInt();
+    if ( host < static_cast<int>( HostKind::TaskPanel ) || host > static_cast<int>( HostKind::Workspace ) )
+    {
+      error = "Invalid host kind: " + std::to_string( host );
+      return false;
+    }
+    def.host = static_cast<HostKind>( host );
+  }
 
   def.steps.clear();
   if ( json.isMember( "steps" ) && json["steps"].isArray() )
@@ -126,7 +134,15 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
       if ( stepVal.isMember( "title" ) && stepVal["title"].isString() )
         step.title = stepVal["title"].asString();
       if ( stepVal.isMember( "kind" ) && stepVal["kind"].isInt() )
-        step.kind = static_cast<StepKind>( stepVal["kind"].asInt() );
+      {
+        const int kind = stepVal["kind"].asInt();
+        if ( kind < static_cast<int>( StepKind::Operator ) || kind > static_cast<int>( StepKind::Composite ) )
+        {
+          error = "Invalid step kind: " + std::to_string( kind );
+          return false;
+        }
+        step.kind = static_cast<StepKind>( kind );
+      }
       else
         step.kind = StepKind::Operator;
 

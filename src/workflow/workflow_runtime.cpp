@@ -28,6 +28,15 @@ namespace sicnu::workflow {
 
 namespace {
 
+// Thrown by runStepViaExecutionPlane once a task has been dispatched to the
+// plane. runStep must never fall back to the synchronous operator path for
+// these: the operator already ran (or is being cancelled), so re-running it
+// would duplicate side effects on the same outputs.
+class PlaneTaskFailure : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
+
 std::string jsonValueToArtifactString( const Json::Value &v )
 {
   if ( v.isString() )
@@ -224,47 +233,39 @@ Json::Value WorkflowRuntime::runStep( const std::string &sessionId, const std::s
 
   // Default path: async via ExecutionPlane/TaskCenter with transactional commit
   // and OutputVerifier. Keep the original synchronous RSOperator path as a
-  // fallback when the plane is disabled or submission fails.
-  if ( m_useExecutionPlane )
+  // fallback only when the plane was unavailable BEFORE any task was
+  // dispatched; once a task ran, PlaneTaskFailure propagates (re-running the
+  // operator would duplicate side effects).
+  bool useExecutionPlane;
+  {
+    std::lock_guard<std::mutex> lock( m_mutex );
+    useExecutionPlane = m_useExecutionPlane;
+  }
+  if ( useExecutionPlane )
   {
     try
     {
       return runStepViaExecutionPlane( sessionId, stepId, step, params, sessionPtr, cancelFlagPtr );
     }
+    catch ( const PlaneTaskFailure & )
+    {
+      // A dispatched task failed, was cancelled, timed out, or failed
+      // commit/verification — never silently re-run it synchronously.
+      throw;
+    }
     catch ( const std::exception &e )
     {
       const std::string msg = e.what();
-      // Fallback only for plane infrastructure failures; operator/cancel/
-      // verification errors must propagate directly.
-      if ( msg.find( "ExecutionPlane" ) != std::string::npos
-           || msg.find( "TaskCenter" ) != std::string::npos
-           || msg.find( "submit failed" ) != std::string::npos
-           || msg.find( "Unknown task" ) != std::string::npos )
+      // Fallback only for pre-dispatch plane infrastructure failures
+      // (submission rejected / invalid handle). Everything after submission
+      // is typed as PlaneTaskFailure above.
+      if ( msg.find( "ExecutionPlane submit failed" ) != std::string::npos )
       {
         // fall through to sync
       }
-      else if ( msg.find( "cancelled" ) != std::string::npos
-                || msg.find( "canceled" ) != std::string::npos
-                || msg.find( "verification" ) != std::string::npos
-                || msg.find( "commit" ) != std::string::npos
-                || msg.find( "Operator not found" ) != std::string::npos
-                || msg.find( "Operator failed" ) != std::string::npos )
-      {
-        throw;
-      }
       else
       {
-        // For any other execution failure (task Failed), do not silently
-        // fallback — the operator genuinely failed via the async path.
-        // Only fallback when the plane itself was unavailable.
-        // Check if task id was ever assigned; if so, don't fallback.
-        {
-          std::lock_guard<std::mutex> lock( m_mutex );
-          auto it = m_activeTaskIds.find( sessionId );
-          if ( it != m_activeTaskIds.end() && it->second > 0 )
-            throw;
-        }
-        // Plane not used — fallback to sync for infrastructure issues.
+        throw;
       }
     }
   }
@@ -407,7 +408,7 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
       // Timeout — treat as failure; the task may still be running but the
       // caller cannot wait forever. Request cancel best-effort.
       handle.cancel();
-      throw std::runtime_error( "ExecutionPlane await timed out for task " + std::to_string( taskId ) );
+      throw PlaneTaskFailure( "ExecutionPlane await timed out for task " + std::to_string( taskId ) );
     }
     return true;
   };
@@ -447,31 +448,31 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
     cancelWatcher.join();
 
   if ( !awaitError.empty() )
-    throw std::runtime_error( awaitError );
+    throw PlaneTaskFailure( awaitError );
   if ( !awaitOk )
-    throw std::runtime_error( "ExecutionPlane await failed" );
+    throw PlaneTaskFailure( "ExecutionPlane await failed" );
 
   // Fetch terminal task info (thread-safe).
   const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
 
   if ( info.taskId != taskId )
-    throw std::runtime_error( "ExecutionPlane Unknown task id: " + std::to_string( taskId ) );
+    throw PlaneTaskFailure( "ExecutionPlane Unknown task id: " + std::to_string( taskId ) );
 
   if ( info.status == sicnu::TaskStatus::Canceled
        || info.status == sicnu::TaskStatus::Cancelling )
   {
-    throw std::runtime_error( "Operator cancelled: " + step->operatorId );
+    throw PlaneTaskFailure( "Operator cancelled: " + step->operatorId );
   }
   if ( info.status == sicnu::TaskStatus::Failed )
   {
     std::string msg = info.errorMessage.toStdString();
     if ( msg.empty() )
       msg = "Operator failed: " + step->operatorId;
-    throw std::runtime_error( msg );
+    throw PlaneTaskFailure( msg );
   }
   if ( info.status != sicnu::TaskStatus::Completed )
   {
-    throw std::runtime_error( "Task did not complete successfully, status=" + std::to_string( static_cast<int>( info.status ) ) );
+    throw PlaneTaskFailure( "Task did not complete successfully, status=" + std::to_string( static_cast<int>( info.status ) ) );
   }
 
   Json::Value result = info.resultPayload;
@@ -481,6 +482,14 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
     if ( result.isNull() || !result.isObject() )
       result = Json::Value( Json::objectValue );
     result["output"] = info.outputLayerPath.toStdString();
+  }
+
+  // Snapshot the manager under the lock; setDataManager may race from
+  // another thread (setUseExecutionPlane/setDataManager hold m_mutex).
+  sicnu::data::DataManager *dataManager;
+  {
+    std::lock_guard<std::mutex> lock( m_mutex );
+    dataManager = m_dataManager;
   }
 
   // Transactional commit + verification for file outputs.
@@ -500,7 +509,7 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
     const QString kindLabel = assetKindLabelForPath( qTemp, step->verificationPolicy );
     const bool skipVerify = kindLabel == QStringLiteral( "skip" );
 
-    if ( m_dataManager )
+    if ( dataManager )
     {
       // Transactional commit via OutputCommitter (temp -> stable asset)
       const QFileInfo tempInfo( qTemp );
@@ -519,14 +528,14 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
       commitReq.derivation.taskReference = QString::number( taskId );
       commitReq.derivation.completedAtUtc = QDateTime::currentDateTimeUtc();
 
-      sicnu::OutputCommitter committer( m_dataManager );
+      sicnu::OutputCommitter committer( dataManager );
       const auto commitResult = committer.commit( commitReq );
       if ( !commitResult )
       {
         const QString diag = commitResult.diagnostics().isEmpty()
                                ? QStringLiteral( "OutputCommitter commit failed" )
                                : commitResult.diagnostics().first().message;
-        throw std::runtime_error( std::string( "Output commit failed: " ) + diag.toStdString() + " (" + outputTempPath + ")" );
+        throw PlaneTaskFailure( std::string( "Output commit failed: " ) + diag.toStdString() + " (" + outputTempPath + ")" );
       }
       committedPath = stablePath.toStdString();
       committedAssetId = commitResult.value().toString().toStdString();
@@ -553,7 +562,7 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
         // layer remains in the catalog (closed-loop insulator).
         if ( !committedAssetId.empty() )
           rollbackCommittedAsset( committedAssetId );
-        else if ( m_dataManager && !committedPath.empty() && QFile::exists( QString::fromStdString( committedPath ) ) )
+        else if ( dataManager && !committedPath.empty() && QFile::exists( QString::fromStdString( committedPath ) ) )
           QFile::remove( QString::fromStdString( committedPath ) );
 
         std::string issues;
@@ -561,7 +570,7 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
           issues += iss.toStdString() + "; ";
         if ( issues.empty() )
           issues = "Output verification failed for " + committedPath;
-        throw std::runtime_error( std::string( "Output verification failed: " ) + issues );
+        throw PlaneTaskFailure( std::string( "Output verification failed: " ) + issues );
       }
     }
   }
