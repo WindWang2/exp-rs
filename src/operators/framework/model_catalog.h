@@ -1,6 +1,8 @@
 // src/operators/framework/model_catalog.h
 #pragma once
 
+#include "operators/framework/model_readiness.h"
+
 #include <json/json.h>
 
 #include <optional>
@@ -8,6 +10,94 @@
 #include <vector>
 
 namespace sicnu::operators {
+
+/**
+ * Artifact (weight file) contract — manifest v2 `artifact` section. All fields
+ * optional; `path` falls back to the legacy top-level `path` string.
+ */
+struct ModelArtifactContract
+{
+  std::string path;        ///< Weight file, relative to the manifest or absolute
+  std::string checksum;    ///< Hex digest; "sha256:<hex>" or bare hex (algorithm inferred)
+  unsigned long long sizeBytes = 0; ///< Declared size; 0 = unchecked
+};
+
+/**
+ * Model input contract — manifest v2 `input` section (object form). The legacy
+ * string form ("input": "raster") only fills dataType.
+ */
+struct ModelInputContract
+{
+  std::string dataType;    ///< "raster" (only supported kind today)
+  std::string dtype;       ///< Expected tensor dtype, e.g. "float32" ("" = unspecified)
+  std::string layout;      ///< "NCHW" (default) — the blob layout fed to the model
+  std::vector<std::string> bandRoles; ///< e.g. ["Red","Green","Blue","NIR"]
+  int width = 0;           ///< Fixed input width when the graph requires one (0 = dynamic)
+  int height = 0;          ///< Fixed input height (0 = dynamic)
+};
+
+/**
+ * Preprocessing contract — manifest v2 `preprocess` section. Executed by the
+ * tile inference engine between the GDAL window read and the model blob.
+ */
+struct ModelPreprocessContract
+{
+  std::string normalize;   ///< "none" (default) | "linear" (x*scale) | "mean_std" ((x-mean)/std*scale)
+  std::vector<double> mean;   ///< Per-channel means (mean_std)
+  std::vector<double> stdv;   ///< Per-channel standard deviations (mean_std)
+  double scale = 1.0;         ///< Multiplicative scale applied last (linear & mean_std)
+  std::string resize;         ///< "none" (default) | "to_input" (resize each tile to input.width/height)
+  std::string interpolation;  ///< "bilinear" (default) | "nearest"
+  std::string nodataPolicy;   ///< "zero" (default): non-finite input pixels become 0 before the model
+};
+
+/**
+ * Tiling contract — manifest v2 `tiling` section. Drives the tile inference
+ * engine geometry; `supported` also mirrors the legacy supportsTiling field.
+ */
+struct ModelTilingContract
+{
+  bool supported = true;
+  int tileSize = 0;    ///< Preferred tile size in px (0 = engine default)
+  int overlap = 0;     ///< Adjacent-tile overlap in px (engine reads halo = overlap/2 each side)
+  int halo = 0;        ///< Explicit halo radius in px (takes precedence over overlap/2)
+  int batchSize = 1;   ///< Tiles batched into one forward pass
+};
+
+/**
+ * Output contract — manifest v2 `output` section (object form). The legacy
+ * string form only fills type.
+ */
+struct ModelOutputContract
+{
+  std::string type;         ///< "raster" | "polygon" | "vector" | ...
+  std::vector<std::string> tensorNames;
+  std::vector<std::string> classes;
+  double threshold = -1.0;  ///< Detection/confidence threshold (<0 = none)
+};
+
+/**
+ * Postprocessing contract — manifest v2 `postprocess` section.
+ */
+struct ModelPostprocessContract
+{
+  bool nms = false;             ///< Non-maximum suppression (detection models)
+  double maskThreshold = -1.0;  ///< Probability→binary mask threshold (<0 = keep probabilities)
+  bool polygonize = false;      ///< Chain mask→polygon conversion (gdal:polygonize)
+  double simplify = 0.0;        ///< Geometry simplification tolerance (map units)
+};
+
+/**
+ * Runtime contract — manifest v2 `runtime` section; the legacy flat fields
+ * (`gpu`, `estimated_vram_mb`, ...) parse into the same structure.
+ */
+struct ModelRuntimeContract
+{
+  bool gpu = false;
+  bool cpuFallback = true;
+  int estimatedRamMb = 0;
+  int estimatedVramMb = 0;
+};
 
 /**
  * One registered model runtime entry (ADR 0122). Deserialized from
@@ -20,7 +110,7 @@ struct ModelInfo {
   std::string inputType;   ///< Input contract, e.g. "raster"
   std::string outputType;  ///< Output contract, e.g. "polygon" | "raster"
   std::string framework;   ///< Runtime, e.g. "onnx"
-  std::string path;        ///< Local weight file path (optional until downloaded)
+  std::string path;        ///< Local weight file path as written in the manifest (optional until downloaded)
   bool gpu = false;        ///< Whether a GPU is expected/required
   double accuracy = -1.0;  ///< Optional benchmark accuracy in [0, 1] (<0 = unreported)
   std::string description;
@@ -35,6 +125,25 @@ struct ModelInfo {
   int estimatedVramMb = 0;                     ///< VRAM required/recommended when GPU=true
   bool supportsTiling = true;                  ///< Whether model supports sliding-window tiling
   bool cpuFallback = true;                     ///< Whether CPU inference fallback is supported
+
+  // Manifest v2 inference contracts (all optional; absent sections keep defaults)
+  ModelArtifactContract artifact;
+  ModelInputContract input;
+  ModelPreprocessContract preprocess;
+  ModelTilingContract tiling;
+  ModelOutputContract output;
+  ModelPostprocessContract postprocess;
+  ModelRuntimeContract runtime;
+
+  // Real availability state computed at load time (catalog-static half: the
+  // runtime layer adds UnsupportedRuntime/IncompatibleHardware on top).
+  // Default Ready is the "not yet verified" sentinel for parseManifest: load
+  // bumps it to InvalidManifest only when a contract check fires, otherwise
+  // ensureLoadedLocked delegates to verifyArtifactLocked which sets Ready /
+  // MissingArtifact / ChecksumMismatch.
+  ModelReadiness readiness = ModelReadiness::Ready;
+  std::string readinessReason;      ///< Human-readable explanation when not Ready
+  std::string resolvedArtifactPath; ///< Absolute artifact path (manifest-dir resolved)
 
   Json::Value toJson() const;
 };
@@ -65,6 +174,16 @@ struct ModelCandidate {
 };
 
 /**
+ * A catalog-level diagnostic: a manifest that could not be indexed (bad JSON,
+ * missing name, duplicate id). Surfaced via ModelCatalog::issues() so callers
+ * can explain why an expected model is absent.
+ */
+struct ModelCatalogIssue {
+  std::string manifestPath;
+  std::string message;
+};
+
+/**
  * ModelCatalog — scans a directory of model manifests (models/<name>/
  * model.json) so agents and the inference operator can discover available
  * model runtimes by task and contract (ADR 0122 step 7). Resolution order
@@ -85,7 +204,9 @@ class ModelCatalog {
     static std::string defaultModelsDirectory();
 
     /// (Re)reads every models/<name>/model.json under the directory.
-    /// Missing directory yields an empty catalog, not an error.
+    /// Missing directory yields an empty catalog, not an error. Artifact
+    /// checksums are (re)verified here; digests are cached per
+    /// (path, size, mtime) so unchanged weights are not re-hashed.
     void reload();
 
     std::vector<ModelInfo> models() const;
@@ -93,13 +214,28 @@ class ModelCatalog {
     std::optional<ModelInfo> find( const std::string &name ) const;
     std::vector<ModelCandidate> rankModels( const ModelQueryCriteria &criteria ) const;
 
+    /// Diagnostics from the last load: unparseable manifests, missing names,
+    /// duplicate model ids. Empty when the catalog loaded cleanly.
+    std::vector<ModelCatalogIssue> issues() const;
+
+    /// Resolve a model reference (catalog name or direct file path) to a
+    /// ready-to-use artifact path. Returns nullopt when the reference is
+    /// neither an existing file nor a catalog entry; @a error receives the
+    /// readiness explanation for catalog entries that are not ready.
+    static std::optional<std::string> resolveArtifactPath( const std::string &modelReference,
+                                                           std::string *error = nullptr );
+
   private:
     ModelCatalog() = default;
     void ensureLoadedLocked() const;
+    struct VerifiedArtifact;
+    bool verifyArtifactLocked( ModelInfo &info ) const;
 
     std::string mDirectory;
     mutable bool mLoaded = false;
     mutable std::vector<ModelInfo> mModels;
+    mutable std::vector<ModelCatalogIssue> mIssues;
+    mutable std::vector<VerifiedArtifact> mVerified; ///< checksum cache (path, size, mtime)
 };
 
 } // namespace sicnu::operators

@@ -19,6 +19,11 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         opencv/opencv_operator_base.cpp
         opencv/opencv_filter_operators.cpp
         opencv/opencv_operators_init.cpp
+        # Model runtime layer (cv::dnn tensor surface): session registry,
+        # ONNX provider, bounded tile inference engine.
+        runtime/model_runtime.cpp
+        runtime/opencv_dnn_runtime.cpp
+        runtime/tile_inference_engine.cpp
     )
     message(STATUS "OpenCV operators enabled (imgproc found)")
 else()

@@ -282,7 +282,15 @@ TEST_CASE( "ModelCatalog scans manifests and the tool exposes them", "[agent][sp
 TEST_CASE( "ModelCatalog multi-criteria ranking and compatibility evaluation", "[agent][spatial][models]" )
 {
     QTemporaryDir dir;
+    // Ranking fixtures carry (dummy) weight files so readiness gating —
+    // models without an artifact rank incompatible — does not mask the
+    // multi-criteria behavior under test here.
     QDir( dir.path() ).mkpath( "seg-s2" );
+    {
+        QFile w( dir.filePath( "seg-s2/weights.onnx" ) );
+        REQUIRE( w.open( QIODevice::WriteOnly ) );
+        w.write( "seg-weights" );
+    }
     QFile m1( dir.filePath( "seg-s2/model.json" ) );
     REQUIRE( m1.open( QIODevice::WriteOnly ) );
     m1.write( R"({
@@ -290,6 +298,7 @@ TEST_CASE( "ModelCatalog multi-criteria ranking and compatibility evaluation", "
         "task": "segmentation",
         "input": "raster",
         "output": "raster",
+        "path": "weights.onnx",
         "accuracy": 0.92,
         "domain": {
             "sensors": ["Sentinel-2"],
@@ -304,6 +313,11 @@ TEST_CASE( "ModelCatalog multi-criteria ranking and compatibility evaluation", "
     m1.close();
 
     QDir( dir.path() ).mkpath( "det-wv" );
+    {
+        QFile w( dir.filePath( "det-wv/weights.onnx" ) );
+        REQUIRE( w.open( QIODevice::WriteOnly ) );
+        w.write( "det-weights" );
+    }
     QFile m2( dir.filePath( "det-wv/model.json" ) );
     REQUIRE( m2.open( QIODevice::WriteOnly ) );
     m2.write( R"({
@@ -311,6 +325,7 @@ TEST_CASE( "ModelCatalog multi-criteria ranking and compatibility evaluation", "
         "task": "detection",
         "input": "raster",
         "output": "vector",
+        "path": "weights.onnx",
         "accuracy": 0.85,
         "domain": {
             "sensors": ["WorldView-3"],
