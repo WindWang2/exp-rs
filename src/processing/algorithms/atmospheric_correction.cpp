@@ -338,9 +338,14 @@ bool quac(const float *const *dnBands, float *const *outBands,
         for (size_t i = 0; i < pixels; ++i) {
             float v = std::isnan(src[i]) ? std::numeric_limits<float>::quiet_NaN()
                                          : gain * src[i] + offset;
-            // Clip to physically plausible reflectance range.
+            // Clamp only the negative side (#632): hard-clipping the upper
+            // bound destroyed bright targets (clouds, bright soils with true
+            // reflectance > 1 after the gain stretch), biasing downstream
+            // ratios. Values above 1 are kept - QUAC is an approximation
+            // (percentile stretch, not Bernstein endmember means); the
+            // deviation is documented in the operator schema.
             if (!std::isnan(v))
-                v = std::max(0.0f, std::min(1.0f, v));
+                v = std::max(0.0f, v);
             dst[i] = v;
         }
     }

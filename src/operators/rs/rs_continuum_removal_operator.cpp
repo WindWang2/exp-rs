@@ -126,7 +126,7 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
     std::vector<float> removed( bandCount );
     // Wavelengths from band WAVELENGTH metadata (fallback to indices when absent)
     std::vector<float> wavelengths( bandCount, 0.0f );
-    bool hasWavelengths = false;
+    bool hasWavelengths = true;
     for ( int b = 1; b <= bandCount; ++b )
     {
         QString wlStr = ds.bandMetadataItem( b, "WAVELENGTH" );
@@ -134,11 +134,17 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
         double v = wlStr.isEmpty() ? 0.0 : wlStr.toDouble( &ok );
         if ( ok && v > 0.0 ) {
             wavelengths[b - 1] = static_cast<float>( v );
-            hasWavelengths = true;
         } else {
-            wavelengths[b - 1] = static_cast<float>( b );
+            // All-or-none (#632): mixing nm-scale wavelengths with band
+            // indices lands the missing bands at x = 1..N on a 2000 nm axis,
+            // badly distorting the convex hull. Fall back to pure indices.
+            hasWavelengths = false;
+            break;
         }
     }
+    if ( !hasWavelengths )
+        for ( int b = 1; b <= bandCount; ++b )
+            wavelengths[b - 1] = static_cast<float>( b );
     const float *wlPtr = hasWavelengths ? wavelengths.data() : nullptr;
 
     for ( int y = 0; y < height; y += kTile )
