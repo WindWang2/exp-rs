@@ -3751,21 +3751,74 @@ sicnu_discover_tests(test_raster_processing_dialog_base)
 # Workflow engine runtime smoke test (Qt-free headers; may link Qt6::Core via sicnu_operators)
 if(TARGET sicnu_workflow)
   add_executable(test_workflow_runtime test_workflow_runtime.cpp)
-  target_link_libraries(test_workflow_runtime PRIVATE Catch2::Catch2WithMain sicnu_workflow)
-  # Mock operator registration in tests needs QCoreApplication + RSOperator headers.
-  if(TARGET sicnu_operators)
-    target_link_libraries(test_workflow_runtime PRIVATE sicnu_operators Qt6::Core)
+  target_link_libraries(test_workflow_runtime PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_workflow
+    sicnu_operators
+    sicnu_processing
+    sicnu_task_center
+    sicnu_jobs
+    sicnu_agent
+    Sicnu::data
+    Qt6::Core
+    Qt6::Gui
+    qgis_core
+    GDAL::GDAL
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(test_workflow_runtime PRIVATE jsoncpp)
   endif()
-  target_include_directories(test_workflow_runtime PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_include_directories(test_workflow_runtime PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
   sicnu_discover_tests(test_workflow_runtime)
 
   add_executable(test_workflow_cancel test_workflow_cancel.cpp)
-  target_link_libraries(test_workflow_cancel PRIVATE Catch2::Catch2WithMain sicnu_workflow)
-  if(TARGET sicnu_operators)
-    target_link_libraries(test_workflow_cancel PRIVATE sicnu_operators Qt6::Core)
+  target_link_libraries(test_workflow_cancel PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_workflow
+    sicnu_operators
+    sicnu_processing
+    sicnu_task_center
+    sicnu_jobs
+    sicnu_agent
+    Sicnu::data
+    Qt6::Core
+    Qt6::Gui
+    qgis_core
+    GDAL::GDAL
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(test_workflow_cancel PRIVATE jsoncpp)
   endif()
-  target_include_directories(test_workflow_cancel PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_include_directories(test_workflow_cancel PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
   sicnu_discover_tests(test_workflow_cancel)
+
+  add_executable(test_workflow_execution_plane test_workflow_execution_plane.cpp)
+  target_link_libraries(test_workflow_execution_plane PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_workflow
+    sicnu_operators
+    sicnu_processing
+    sicnu_task_center
+    sicnu_jobs
+    sicnu_agent
+    Sicnu::data
+    Qt6::Core
+    Qt6::Gui
+    qgis_core
+    GDAL::GDAL
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(test_workflow_execution_plane PRIVATE jsoncpp)
+  elseif(JSONCPP_LIBRARIES)
+    target_include_directories(test_workflow_execution_plane PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(test_workflow_execution_plane PRIVATE ${JSONCPP_LIBRARIES})
+  endif()
+  target_include_directories(test_workflow_execution_plane PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_workflow_execution_plane)
+
 endif()
 
 # JobEngine scheduling tests (submit/cancel/workers + RSOperator execution)

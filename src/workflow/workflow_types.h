@@ -40,6 +40,8 @@ struct StepDef {
   StepUiMeta uiMeta;
   std::vector<StepConnection> inputs; // incoming dependency edges
   Json::Value params; // default or configured operator parameters
+  unsigned int resourceEstimateMb = 0; // 0 = auto (estimateFromPreflight / registry fallback)
+  std::string verificationPolicy; // "" = auto, "raster"/"vector"/"skip"
 };
 
 struct WorkflowDefinition {

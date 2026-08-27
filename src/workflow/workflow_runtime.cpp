@@ -1,4 +1,3 @@
-// src/workflow/workflow_runtime.cpp
 #include "workflow_runtime.h"
 
 #include "builtin_definitions.h"
@@ -8,8 +7,22 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
 
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QString>
+
+#include <chrono>
 #include <sstream>
 #include <stdexcept>
+
+#include "agent/output_verifier.h"
+#include "data/data_asset.h"
+#include "data/data_manager.h"
+#include "processing/framework/execution_plane.h"
+#include "processing/framework/json_params_converter.h"
+#include "processing/framework/output_committer.h"
+#include "processing/framework/task_center.h"
 
 namespace sicnu::workflow {
 
@@ -36,6 +49,33 @@ std::string joinHints( const std::vector<std::string> &hints )
     oss << hints[i];
   }
   return oss.str();
+}
+
+QString assetKindLabelForPath( const QString &path, const std::string &verificationPolicy )
+{
+  if ( !verificationPolicy.empty() )
+  {
+    QString vp = QString::fromStdString( verificationPolicy ).toLower();
+    if ( vp == QStringLiteral( "vector" ) || vp == QStringLiteral( "ogr" ) )
+      return QStringLiteral( "vector" );
+    if ( vp == QStringLiteral( "raster" ) || vp == QStringLiteral( "gdal" ) )
+      return QStringLiteral( "raster" );
+    if ( vp == QStringLiteral( "skip" ) || vp == QStringLiteral( "none" ) )
+      return QStringLiteral( "skip" );
+  }
+  const QString suffix = QFileInfo( path ).suffix().toLower();
+  if ( suffix == QStringLiteral( "shp" ) || suffix == QStringLiteral( "geojson" )
+       || suffix == QStringLiteral( "gpkg" ) || suffix == QStringLiteral( "kml" )
+       || suffix == QStringLiteral( "csv" ) || suffix == QStringLiteral( "tsv" )
+       || suffix == QStringLiteral( "json" ) || suffix == QStringLiteral( "xml" ) )
+    return QStringLiteral( "vector" );
+  return QStringLiteral( "raster" );
+}
+
+sicnu::data::AssetKind assetKindEnum( const QString &label )
+{
+  return label == QStringLiteral( "vector" ) ? sicnu::data::AssetKind::Vector
+                                             : sicnu::data::AssetKind::Raster;
 }
 
 } // namespace
@@ -150,11 +190,13 @@ CanRunResult WorkflowRuntime::canRun( const std::string &sessionId, const std::s
 
 Json::Value WorkflowRuntime::runStep( const std::string &sessionId, const std::string &stepId )
 {
-  auto s = session( sessionId );
-  if ( !s )
+  // Capture session and cancel flag with shared_ptr to keep them alive even if
+  // close() erases the map entry concurrently (concurrent keep-alive).
+  auto sessionPtr = session( sessionId );
+  if ( !sessionPtr )
     throw std::runtime_error( "Session not found: " + sessionId );
 
-  const StepDef *step = s->stepById( stepId );
+  const StepDef *step = sessionPtr->stepById( stepId );
   if ( !step )
     throw std::runtime_error( "Step not found: " + stepId );
 
@@ -177,8 +219,64 @@ Json::Value WorkflowRuntime::runStep( const std::string &sessionId, const std::s
     throw std::runtime_error( "Step has empty operatorId: " + stepId );
   }
 
-  const Json::Value params = s->resolveParams( stepId );
+  const Json::Value params = sessionPtr->resolveParams( stepId );
+  auto cancelFlagPtr = cancelFlag( sessionId );
 
+  // Default path: async via ExecutionPlane/TaskCenter with transactional commit
+  // and OutputVerifier. Keep the original synchronous RSOperator path as a
+  // fallback when the plane is disabled or submission fails.
+  if ( m_useExecutionPlane )
+  {
+    try
+    {
+      return runStepViaExecutionPlane( sessionId, stepId, step, params, sessionPtr, cancelFlagPtr );
+    }
+    catch ( const std::exception &e )
+    {
+      const std::string msg = e.what();
+      // Fallback only for plane infrastructure failures; operator/cancel/
+      // verification errors must propagate directly.
+      if ( msg.find( "ExecutionPlane" ) != std::string::npos
+           || msg.find( "TaskCenter" ) != std::string::npos
+           || msg.find( "submit failed" ) != std::string::npos
+           || msg.find( "Unknown task" ) != std::string::npos )
+      {
+        // fall through to sync
+      }
+      else if ( msg.find( "cancelled" ) != std::string::npos
+                || msg.find( "canceled" ) != std::string::npos
+                || msg.find( "verification" ) != std::string::npos
+                || msg.find( "commit" ) != std::string::npos
+                || msg.find( "Operator not found" ) != std::string::npos
+                || msg.find( "Operator failed" ) != std::string::npos )
+      {
+        throw;
+      }
+      else
+      {
+        // For any other execution failure (task Failed), do not silently
+        // fallback — the operator genuinely failed via the async path.
+        // Only fallback when the plane itself was unavailable.
+        // Check if task id was ever assigned; if so, don't fallback.
+        {
+          std::lock_guard<std::mutex> lock( m_mutex );
+          auto it = m_activeTaskIds.find( sessionId );
+          if ( it != m_activeTaskIds.end() && it->second > 0 )
+            throw;
+        }
+        // Plane not used — fallback to sync for infrastructure issues.
+      }
+    }
+  }
+
+  return runStepSync( sessionId, stepId, step, params, sessionPtr, cancelFlagPtr );
+}
+
+Json::Value WorkflowRuntime::runStepSync( const std::string &sessionId, const std::string &stepId,
+                                          const StepDef *step, const Json::Value &params,
+                                          std::shared_ptr<WorkflowSession> sessionPtr,
+                                          std::shared_ptr<std::atomic<bool>> cancelFlagPtr )
+{
   auto op = sicnu::operators::RSOperatorRegistry::instance().create( step->operatorId );
   if ( !op )
   {
@@ -190,7 +288,6 @@ Json::Value WorkflowRuntime::runStep( const std::string &sessionId, const std::s
   // so requestCancel() aborts a long-running operator step mid-run. The
   // shared_ptr local keeps the flag alive for the whole step even if close()
   // erases the session's map entry concurrently (no use-after-free).
-  const auto cancelFlagPtr = cancelFlag( sessionId );
   if ( cancelFlagPtr )
   {
     context.setCancelFlag( cancelFlagPtr.get() );
@@ -205,28 +302,321 @@ Json::Value WorkflowRuntime::runStep( const std::string &sessionId, const std::s
     throw std::runtime_error( e.message() );
   }
 
-  // Artifact side-effects from operator result
+  // Artifact side-effects from operator result — capture sessionPtr to keep
+  // the session alive even if close() raced.
   if ( result.isMember( "output" ) && result["output"].isString() )
   {
     const std::string name = step->artifactOnSuccess.empty() ? "output" : step->artifactOnSuccess;
-    s->setArtifact( name, result["output"].asString() );
+    sessionPtr->setArtifact( name, result["output"].asString() );
   }
   else if ( result.isMember( "result" ) )
   {
-    // Prefer "result" when artifactOnSuccess is the default "output" (non-file operators).
     const std::string name =
       ( step->artifactOnSuccess.empty() || step->artifactOnSuccess == "output" )
         ? "result"
         : step->artifactOnSuccess;
-    s->setArtifact( name, jsonValueToArtifactString( result["result"] ) );
+    sessionPtr->setArtifact( name, jsonValueToArtifactString( result["result"] ) );
   }
   else if ( !step->artifactOnSuccess.empty() )
   {
-    s->setArtifact( step->artifactOnSuccess, jsonValueToArtifactString( result ) );
+    sessionPtr->setArtifact( step->artifactOnSuccess, jsonValueToArtifactString( result ) );
   }
 
-  s->markStepComplete( stepId );
+  sessionPtr->markStepComplete( stepId );
   return result;
+}
+
+Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessionId, const std::string &stepId,
+                                                       const StepDef *step, const Json::Value &params,
+                                                       std::shared_ptr<WorkflowSession> sessionPtr,
+                                                       std::shared_ptr<std::atomic<bool>> cancelFlagPtr )
+{
+  // Derive resource estimate: explicit step field wins, otherwise use
+  // ExecutionPlane::estimateFromPreflight which accounts for tiled inference
+  // (rs:infer tile/halo/band geometry) via Operator::estimateExecution.
+  unsigned int estimateMb = step->resourceEstimateMb;
+  if ( estimateMb == 0 )
+  {
+    try
+    {
+      estimateMb = sicnu::processing::ExecutionPlane::estimateFromPreflight( step->operatorId, params );
+    }
+    catch ( ... )
+    {
+      estimateMb = 0;
+    }
+  }
+
+  sicnu::processing::ExecutionRequest request;
+  request.algorithmId = QString::fromStdString( step->operatorId );
+  request.params = sicnu::processing::jsonParamsToVariantMap( params );
+  request.resourceEstimateMb = estimateMb;
+  request.source = QStringLiteral( "workflow" );
+  request.correlationId = QString::fromStdString( sessionId + ":" + stepId );
+  request.autoLoad = false;
+  request.autoDispatch = true;
+
+  // Submit via ExecutionPlane (TaskCenter admission, resource-aware).
+  sicnu::processing::ExecutionHandle handle;
+  try
+  {
+    handle = sicnu::processing::ExecutionPlane::instance().submit( request );
+  }
+  catch ( const std::exception &e )
+  {
+    throw std::runtime_error( std::string( "ExecutionPlane submit failed: " ) + e.what() );
+  }
+
+  if ( !handle.valid() || handle.taskId() <= 0 )
+  {
+    throw std::runtime_error( "ExecutionPlane submit failed: invalid handle" );
+  }
+
+  const long taskId = handle.taskId();
+  {
+    std::lock_guard<std::mutex> lock( m_mutex );
+    m_activeTaskIds[sessionId] = taskId;
+  }
+
+  // Ensure the active task id is cleared on exit (success, failure, or
+  // cancellation) so a subsequent runStep in the same session starts fresh.
+  struct ClearGuard
+  {
+    WorkflowRuntime *rt;
+    std::string sid;
+    ~ClearGuard()
+    {
+      std::lock_guard<std::mutex> lock( rt->m_mutex );
+      rt->m_activeTaskIds.erase( sid );
+    }
+  } clearGuard{ this, sessionId };
+
+  // Observe cooperative cancellation: if the session flag is set before or
+  // during await, cancel the plane handle (TaskCenter -> JobEngine).
+  // The shared_ptr keep-alive ensures the flag remains valid.
+  auto cancelCheckAndWait = [&]() -> bool {
+    // If already cancelled before wait, propagate immediately.
+    if ( cancelFlagPtr && cancelFlagPtr->load( std::memory_order_acquire ) )
+    {
+      handle.cancel();
+    }
+    // Event-loop-free wait for terminal state; respects TaskCenter shutdown.
+    const bool terminal = handle.await( std::chrono::minutes( 30 ) );
+    if ( !terminal )
+    {
+      // Timeout — treat as failure; the task may still be running but the
+      // caller cannot wait forever. Request cancel best-effort.
+      handle.cancel();
+      throw std::runtime_error( "ExecutionPlane await timed out for task " + std::to_string( taskId ) );
+    }
+    return true;
+  };
+
+  // Also spawn a lightweight poller that watches the session flag and
+  // cancels the handle promptly (sub-second) while awaiting, without
+  // blocking the await itself. This keeps cancellation latency low.
+  std::atomic<bool> done{ false };
+  std::thread cancelWatcher;
+  if ( cancelFlagPtr )
+  {
+    cancelWatcher = std::thread( [&, cancelFlagPtr, handle, &done]() mutable {
+      while ( !done.load( std::memory_order_acquire ) )
+      {
+        if ( cancelFlagPtr->load( std::memory_order_acquire ) )
+        {
+          handle.cancel();
+          break;
+        }
+        std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+      }
+    } );
+  }
+
+  bool awaitOk = false;
+  std::string awaitError;
+  try
+  {
+    awaitOk = cancelCheckAndWait();
+  }
+  catch ( const std::exception &e )
+  {
+    awaitError = e.what();
+  }
+  done.store( true, std::memory_order_release );
+  if ( cancelWatcher.joinable() )
+    cancelWatcher.join();
+
+  if ( !awaitError.empty() )
+    throw std::runtime_error( awaitError );
+  if ( !awaitOk )
+    throw std::runtime_error( "ExecutionPlane await failed" );
+
+  // Fetch terminal task info (thread-safe).
+  const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+
+  if ( info.taskId != taskId )
+    throw std::runtime_error( "ExecutionPlane Unknown task id: " + std::to_string( taskId ) );
+
+  if ( info.status == sicnu::TaskStatus::Canceled
+       || info.status == sicnu::TaskStatus::Cancelling )
+  {
+    throw std::runtime_error( "Operator cancelled: " + step->operatorId );
+  }
+  if ( info.status == sicnu::TaskStatus::Failed )
+  {
+    std::string msg = info.errorMessage.toStdString();
+    if ( msg.empty() )
+      msg = "Operator failed: " + step->operatorId;
+    throw std::runtime_error( msg );
+  }
+  if ( info.status != sicnu::TaskStatus::Completed )
+  {
+    throw std::runtime_error( "Task did not complete successfully, status=" + std::to_string( static_cast<int>( info.status ) ) );
+  }
+
+  Json::Value result = info.resultPayload;
+  // Fallback: some adapters only fill outputLayerPath, not resultPayload["output"]
+  if ( ( result.isNull() || !result.isMember( "output" ) ) && !info.outputLayerPath.isEmpty() )
+  {
+    if ( result.isNull() || !result.isObject() )
+      result = Json::Value( Json::objectValue );
+    result["output"] = info.outputLayerPath.toStdString();
+  }
+
+  // Transactional commit + verification for file outputs.
+  std::string committedPath;
+  std::string committedAssetId;
+  std::string outputTempPath;
+  if ( result.isMember( "output" ) && result["output"].isString() )
+    outputTempPath = result["output"].asString();
+  else if ( !info.outputLayerPath.isEmpty() )
+    outputTempPath = info.outputLayerPath.toStdString();
+
+  const bool hasFileOutput = !outputTempPath.empty() && QFile::exists( QString::fromStdString( outputTempPath ) );
+
+  if ( hasFileOutput )
+  {
+    const QString qTemp = QString::fromStdString( outputTempPath );
+    const QString kindLabel = assetKindLabelForPath( qTemp, step->verificationPolicy );
+    const bool skipVerify = kindLabel == QStringLiteral( "skip" );
+
+    if ( m_dataManager )
+    {
+      // Transactional commit via OutputCommitter (temp -> stable asset)
+      const QFileInfo tempInfo( qTemp );
+      const QString suffix = tempInfo.suffix().isEmpty() ? QStringLiteral( "tif" ) : tempInfo.suffix();
+      const QString stablePath = tempInfo.absolutePath() + QDir::separator()
+                                 + tempInfo.completeBaseName() + QStringLiteral( "_committed." ) + suffix;
+
+      sicnu::AlgorithmOutputRequest commitReq;
+      commitReq.kind = assetKindEnum( kindLabel == QStringLiteral( "skip" ) ? QStringLiteral( "raster" ) : kindLabel );
+      commitReq.tempPath = qTemp;
+      commitReq.stablePath = stablePath;
+      commitReq.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
+      commitReq.autoLoad = false;
+      commitReq.derivation.algorithmId = info.algorithmId;
+      commitReq.derivation.parameters = QJsonObject::fromVariantMap( info.parameterMap );
+      commitReq.derivation.taskReference = QString::number( taskId );
+      commitReq.derivation.completedAtUtc = QDateTime::currentDateTimeUtc();
+
+      sicnu::OutputCommitter committer( m_dataManager );
+      const auto commitResult = committer.commit( commitReq );
+      if ( !commitResult )
+      {
+        const QString diag = commitResult.diagnostics().isEmpty()
+                               ? QStringLiteral( "OutputCommitter commit failed" )
+                               : commitResult.diagnostics().first().message;
+        throw std::runtime_error( std::string( "Output commit failed: " ) + diag.toStdString() + " (" + outputTempPath + ")" );
+      }
+      committedPath = stablePath.toStdString();
+      committedAssetId = commitResult.value().toString().toStdString();
+      // Patch result to point at the stable asset
+      result["output"] = committedPath;
+      result["assetId"] = committedAssetId;
+    }
+    else
+    {
+      // No DataManager: use temp path directly, no stable promotion
+      committedPath = outputTempPath;
+    }
+
+    // Closed-loop verification via OutputVerifier
+    if ( !skipVerify )
+    {
+      sicnu::agent::OutputVerifier verifier;
+      const QString verifyPath = QString::fromStdString( committedPath.empty() ? outputTempPath : committedPath );
+      const QString hint = kindLabel == QStringLiteral( "skip" ) ? QString() : kindLabel;
+      const sicnu::agent::OutputVerification report = verifier.verify( verifyPath, hint );
+      if ( !report.ok )
+      {
+        // Verification failed -> rollback committed asset so no invalid
+        // layer remains in the catalog (closed-loop insulator).
+        if ( !committedAssetId.empty() )
+          rollbackCommittedAsset( committedAssetId );
+        else if ( m_dataManager && !committedPath.empty() && QFile::exists( QString::fromStdString( committedPath ) ) )
+          QFile::remove( QString::fromStdString( committedPath ) );
+
+        std::string issues;
+        for ( const auto &iss : report.issues )
+          issues += iss.toStdString() + "; ";
+        if ( issues.empty() )
+          issues = "Output verification failed for " + committedPath;
+        throw std::runtime_error( std::string( "Output verification failed: " ) + issues );
+      }
+    }
+  }
+
+  // Artifact side-effects — use sessionPtr keep-alive, not a fresh lookup.
+  if ( result.isMember( "output" ) && result["output"].isString() )
+  {
+    const std::string outStr = result["output"].asString();
+    const std::string name = step->artifactOnSuccess.empty() ? "output" : step->artifactOnSuccess;
+    // On successful commit, prefer the stable asset path / assetId.
+    if ( !committedAssetId.empty() )
+      sessionPtr->setArtifact( name, committedAssetId );
+    else if ( !committedPath.empty() )
+      sessionPtr->setArtifact( name, committedPath );
+    else
+      sessionPtr->setArtifact( name, outStr );
+
+    // Also keep a path artifact for consumers that expect a filesystem path
+    // even when we promoted to an assetId (e.g. downstream placeholder $step.output).
+    if ( !committedAssetId.empty() && !committedPath.empty() )
+      sessionPtr->setArtifact( name + "_path", committedPath );
+  }
+  else if ( result.isMember( "result" ) )
+  {
+    const std::string name =
+      ( step->artifactOnSuccess.empty() || step->artifactOnSuccess == "output" )
+        ? "result"
+        : step->artifactOnSuccess;
+    sessionPtr->setArtifact( name, jsonValueToArtifactString( result["result"] ) );
+  }
+  else if ( !step->artifactOnSuccess.empty() )
+  {
+    sessionPtr->setArtifact( step->artifactOnSuccess, jsonValueToArtifactString( result ) );
+  }
+
+  sessionPtr->markStepComplete( stepId );
+  return result;
+}
+
+bool WorkflowRuntime::rollbackCommittedAsset( const std::string &assetIdStr )
+{
+  if ( !m_dataManager || assetIdStr.empty() )
+    return false;
+  const auto idOpt = sicnu::data::AssetId::fromString( QString::fromStdString( assetIdStr ) );
+  if ( !idOpt || idOpt->isNull() )
+    return false;
+  if ( !m_dataManager->asset( *idOpt ).has_value() )
+    return false;
+  const auto reapRes = m_dataManager->reap( sicnu::data::ReapRequest{ *idOpt } );
+  if ( !reapRes.unloaded )
+  {
+    const auto plan = m_dataManager->planUnload( *idOpt ).confirmedCascade();
+    (void)m_dataManager->unload( plan );
+  }
+  return reapRes.unloaded;
 }
 
 void WorkflowRuntime::markStepComplete( const std::string &sessionId, const std::string &stepId )
@@ -250,6 +640,16 @@ void WorkflowRuntime::requestCancel( const std::string &sessionId )
   auto flag = cancelFlag( sessionId );
   if ( flag )
     flag->store( true, std::memory_order_release );
+
+  long taskId = -1;
+  {
+    std::lock_guard<std::mutex> lock( m_mutex );
+    auto it = m_activeTaskIds.find( sessionId );
+    if ( it != m_activeTaskIds.end() )
+      taskId = it->second;
+  }
+  if ( taskId > 0 )
+    sicnu::TaskCenter::instance().cancelTask( taskId );
 }
 
 void WorkflowRuntime::close( const std::string &sessionId )
@@ -257,6 +657,31 @@ void WorkflowRuntime::close( const std::string &sessionId )
   std::lock_guard<std::mutex> lock( m_mutex );
   m_sessions.erase( sessionId );
   m_cancelFlags.erase( sessionId );
+  m_activeTaskIds.erase( sessionId );
+}
+
+void WorkflowRuntime::setDataManager( sicnu::data::DataManager *dataManager )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_dataManager = dataManager;
+}
+
+sicnu::data::DataManager *WorkflowRuntime::dataManager() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_dataManager;
+}
+
+void WorkflowRuntime::setUseExecutionPlane( bool use )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_useExecutionPlane = use;
+}
+
+bool WorkflowRuntime::useExecutionPlane() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_useExecutionPlane;
 }
 
 std::shared_ptr<std::atomic<bool>> WorkflowRuntime::cancelFlag( const std::string &sessionId )
