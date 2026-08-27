@@ -10,14 +10,21 @@
 #include <QString>
 #include <QVariantMap>
 
+#include <QTemporaryDir>
+
 #include <chrono>
 #include <thread>
+
+#include <gdal.h>
 
 #include "processing/framework/tool_call_dispatcher.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/task_center.h"
+#include "data/data_manager.h"
 #include "jobs/job_engine.h"
 #include "operators/rs/rs_spectral_index_operator.h"
+
+#include <string>
 
 using namespace sicnu::processing;
 
@@ -671,8 +678,10 @@ TEST_CASE( "ToolCallDispatcher supports OutputCommitterHandler for output asset 
   {
     ToolCallDispatcher::OutputCommitterHandler handler = []( const sicnu::AlgorithmTaskInfo &,
                                                              std::string &outCommittedPath,
-                                                             std::string & ) -> bool {
+                                                             std::string &,
+                                                             std::string &outAssetId ) -> bool {
       outCommittedPath = "/committed/ndvi_out.tif";
+      outAssetId = "asset-42";
       return true;
     };
     harness.dispatcher.setOutputCommitterHandler( handler );
@@ -687,13 +696,16 @@ TEST_CASE( "ToolCallDispatcher supports OutputCommitterHandler for output asset 
     Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, harness.dispatcher.outputCommitterHandler() );
     REQUIRE( payload["status"].asString() == "success" );
     REQUIRE( payload["output"].asString() == "/committed/ndvi_out.tif" );
+    REQUIRE( payload["assetId"].asString() == "asset-42" );
+    REQUIRE( payload["assetKind"].asString() == "raster" );
   }
 
   SECTION( "refused handler fails the payload with commitError diagnostic" )
   {
     ToolCallDispatcher::OutputCommitterHandler handler = []( const sicnu::AlgorithmTaskInfo &,
                                                              std::string &,
-                                                             std::string &outCommitError ) -> bool {
+                                                             std::string &outCommitError,
+                                                             std::string & ) -> bool {
       outCommitError = "Disk space quota exceeded";
       return false;
     };
@@ -709,6 +721,76 @@ TEST_CASE( "ToolCallDispatcher supports OutputCommitterHandler for output asset 
     REQUIRE( payload["output"].asString() == "/tmp/raw_out.tif" );
     REQUIRE( payload["commitError"].asString() == "Disk space quota exceeded" );
     REQUIRE( payload["errorMessage"].asString() == "Disk space quota exceeded" );
+  }
+}
+
+TEST_CASE( "ToolCallDispatcher enriches payload with assetId and verification", "[processing][tool_call_dispatcher][verification]" )
+{
+  FakeDispatcherHarness harness;
+
+  ToolCallDispatcher::OutputCommitterHandler commitHandler = []( const sicnu::AlgorithmTaskInfo &,
+                                                                 std::string &outCommittedPath,
+                                                                 std::string &,
+                                                                 std::string &outAssetId ) -> bool {
+    outCommittedPath = "/committed/ndvi_out.tif";
+    outAssetId = "asset-99";
+    return true;
+  };
+
+  SECTION( "verification ok enriches summary and marks verified" )
+  {
+    ToolCallDispatcher::OutputVerificationHandler verifyHandler = []( const QString &, const QString & ) -> Json::Value {
+      Json::Value v( Json::objectValue );
+      v["ok"] = true;
+      v["kind"] = "raster";
+      Json::Value summary( Json::objectValue );
+      summary["width"] = 64;
+      summary["height"] = 64;
+      v["summary"] = summary;
+      v["issues"] = Json::Value( Json::arrayValue );
+      v["warnings"] = Json::Value( Json::arrayValue );
+      return v;
+    };
+
+    sicnu::AlgorithmTaskInfo info;
+    info.taskId = 20;
+    info.algorithmId = QStringLiteral( "rs:spectral_index" );
+    info.status = sicnu::TaskStatus::Completed;
+    info.outputLayerPath = QStringLiteral( "/tmp/raw_out.tif" );
+
+    Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, commitHandler, verifyHandler );
+    REQUIRE( payload["status"].asString() == "success" );
+    REQUIRE( payload["assetId"].asString() == "asset-99" );
+    REQUIRE( payload["assetKind"].asString() == "raster" );
+    REQUIRE( payload["verified"].asBool() == true );
+    REQUIRE( payload["verification"]["ok"].asBool() == true );
+    REQUIRE( payload["verification"]["summary"]["width"].asInt() == 64 );
+  }
+
+  SECTION( "verification failure downgrades payload to error" )
+  {
+    ToolCallDispatcher::OutputVerificationHandler verifyHandler = []( const QString &, const QString & ) -> Json::Value {
+      Json::Value v( Json::objectValue );
+      v["ok"] = false;
+      v["kind"] = "raster";
+      v["summary"] = Json::Value( Json::objectValue );
+      Json::Value issues( Json::arrayValue );
+      issues.append( "all pixels are NoData" );
+      v["issues"] = issues;
+      v["warnings"] = Json::Value( Json::arrayValue );
+      return v;
+    };
+
+    sicnu::AlgorithmTaskInfo info;
+    info.taskId = 21;
+    info.algorithmId = QStringLiteral( "rs:spectral_index" );
+    info.status = sicnu::TaskStatus::Completed;
+    info.outputLayerPath = QStringLiteral( "/tmp/raw_out.tif" );
+
+    Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, commitHandler, verifyHandler );
+    REQUIRE( payload["status"].asString() == "error" );
+    REQUIRE( payload["verified"].asBool() == false );
+    REQUIRE( payload["verificationIssues"][0].asString() == "all pixels are NoData" );
   }
 }
 
@@ -943,4 +1025,164 @@ TEST_CASE( "ToolCallDispatcher default-constructor dispatchAndAwait completes wi
   INFO( "elapsed ms: " << elapsedMs << ", status: " << result["status"].asString() );
   REQUIRE( result["status"].asString() == "success" );
   REQUIRE( elapsedMs < 6000 );
+}
+
+TEST_CASE( "ToolCallDispatcher output commit handler survives DataManager destruction",
+           "[processing][tool_call_dispatcher][lifecycle]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+
+  ToolCallDispatcher dispatcher;
+  {
+    sicnu::data::DataManager manager;
+    dispatcher.setDataManager( &manager );
+  } // manager destroyed while dispatcher still holds the commit handler
+
+  sicnu::AlgorithmTaskInfo info;
+  info.taskId = 12345;
+  info.status = sicnu::TaskStatus::Completed;
+  info.algorithmId = QStringLiteral( "stub:lifetime" );
+  info.outputLayerPath = QStringLiteral( "/tmp/should_not_be_used.tif" );
+
+  const Json::Value payload = dispatcher.buildCommittedResultPayload( info );
+
+  REQUIRE( payload["status"].asString() == "error" );
+  const std::string errorMessage = payload["errorMessage"].asString();
+  REQUIRE( errorMessage.find( "DataManager" ) != std::string::npos );
+}
+
+TEST_CASE( "ToolCallDispatcher asset kind falls back to algorithm descriptor when extension is missing",
+           "[processing][tool_call_dispatcher][asset_kind]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+
+  AlgorithmDescriptor vectorDesc;
+  PortDescriptor out;
+  out.name = "OUTPUT";
+  out.type = DataType::Vector;
+  vectorDesc.outputs.push_back( out );
+  AtomicAlgorithmRegistry::instance().registerAdapter( std::make_shared<StubAdapter>( "stub:vector_noext", vectorDesc ) );
+
+  AlgorithmDescriptor rasterDesc;
+  PortDescriptor rout;
+  rout.name = "OUTPUT";
+  rout.type = DataType::Raster;
+  rasterDesc.outputs.push_back( rout );
+  AtomicAlgorithmRegistry::instance().registerAdapter( std::make_shared<StubAdapter>( "stub:raster_noext", rasterDesc ) );
+
+  CHECK( ToolCallDispatcher::assetKindLabel( QStringLiteral( "/tmp/unknown" ), QStringLiteral( "stub:vector_noext" ) )
+         == QStringLiteral( "vector" ) );
+  CHECK( ToolCallDispatcher::assetKindLabel( QStringLiteral( "/tmp/unknown" ), QStringLiteral( "stub:raster_noext" ) )
+         == QStringLiteral( "raster" ) );
+  // Suffix still takes precedence when present.
+  CHECK( ToolCallDispatcher::assetKindLabel( QStringLiteral( "/tmp/road.shp" ), QStringLiteral( "stub:raster_noext" ) )
+         == QStringLiteral( "vector" ) );
+  // Unknown algorithm falls back to raster.
+  CHECK( ToolCallDispatcher::assetKindLabel( QStringLiteral( "/tmp/unknown" ) ) == QStringLiteral( "raster" ) );
+}
+
+TEST_CASE( "ToolCallDispatcher verification failure rolls back committed asset", "[processing][tool_call_dispatcher][verification][insulator]" )
+{
+  // Insulator invariant: a committed asset degraded to error by verification
+  // must not remain in the catalog (no unverified final map state).
+  sicnu::data::DataManager manager;
+
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString outPath = tmp.path() + QStringLiteral( "/committed.tif" );
+  GDALAllRegister();
+  {
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    GDALDatasetH ds = GDALCreate( driver, outPath.toUtf8().constData(), 4, 4, 1, GDT_Byte, nullptr );
+    REQUIRE( ds != nullptr );
+    GDALClose( ds );
+  }
+  sicnu::data::SourceDescriptor src;
+  src.canonicalSource = outPath;
+  src.providerKey = QStringLiteral( "gdal" );
+  sicnu::data::RegisterRequest req{ src };
+  req.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
+  req.additionalCapabilities = sicnu::data::AssetCapability::DeletableSource;
+  const auto reg = manager.registerSource( req );
+  REQUIRE( !reg.assetId.isNull() );
+  const sicnu::data::AssetId assetId = reg.assetId;
+
+  ToolCallDispatcher dispatcher;
+  dispatcher.setDataManager( &manager );
+
+  // Simulate a successful commit that verification then downgrades.
+  auto commitHandler = [assetIdStr = assetId.toString().toStdString(), outPathStd = outPath.toStdString()](
+                        const sicnu::AlgorithmTaskInfo &, std::string &outCommittedPath,
+                        std::string &, std::string &outAssetId ) -> bool {
+    outCommittedPath = outPathStd;
+    outAssetId = assetIdStr;
+    return true;
+  };
+  auto verifyFail = []( const QString &, const QString & ) -> Json::Value {
+    Json::Value v( Json::objectValue );
+    v["ok"] = false;
+    v["kind"] = "raster";
+    v["summary"] = Json::Value( Json::objectValue );
+    Json::Value issues( Json::arrayValue );
+    issues.append( "all pixels are NoData" );
+    v["issues"] = issues;
+    v["warnings"] = Json::Value( Json::arrayValue );
+    return v;
+  };
+
+  sicnu::AlgorithmTaskInfo info;
+  info.taskId = 9991;
+  info.algorithmId = QStringLiteral( "rs:ndvi" );
+  info.status = sicnu::TaskStatus::Completed;
+  info.outputLayerPath = outPath;
+
+  const Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, commitHandler, verifyFail );
+  REQUIRE( payload["status"].asString() == "error" );
+  REQUIRE( payload["verified"].asBool() == false );
+  // Static path does not own DataManager, so no auto-rollback — asset still present.
+  CHECK( manager.asset( assetId ).has_value() );
+
+  // Integrated path: buildCommittedResultPayload with DataManager does rollback (insulator).
+  ToolCallDispatcher dispatcher2;
+  dispatcher2.setDataManager( &manager );
+  // Re-register a second asset for the instance test (previous may have been reaped).
+  sicnu::data::SourceDescriptor src2;
+  src2.canonicalSource = outPath;
+  src2.providerKey = QStringLiteral( "gdal" );
+  // Need a distinct path for second registration due to dedup.
+  const QString outPath2 = tmp.path() + QStringLiteral( "/committed2.tif" );
+  {
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    GDALDatasetH ds = GDALCreate( driver, outPath2.toUtf8().constData(), 4, 4, 1, GDT_Byte, nullptr );
+    GDALClose( ds );
+  }
+  src2.canonicalSource = outPath2;
+  sicnu::data::RegisterRequest req2{ src2 };
+  req2.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
+  req2.additionalCapabilities = sicnu::data::AssetCapability::DeletableSource;
+  const auto reg2 = manager.registerSource( req2 );
+  REQUIRE( !reg2.assetId.isNull() );
+  const sicnu::data::AssetId assetId2 = reg2.assetId;
+
+  auto commitHandler2 = [assetIdStr = assetId2.toString().toStdString(), outPathStd = outPath2.toStdString()](
+                         const sicnu::AlgorithmTaskInfo &, std::string &outCommittedPath,
+                         std::string &, std::string &outAssetId ) -> bool {
+    outCommittedPath = outPathStd;
+    outAssetId = assetIdStr;
+    return true;
+  };
+  dispatcher2.setOutputCommitterHandler( commitHandler2 );
+  dispatcher2.setOutputVerificationHandler( verifyFail );
+
+  sicnu::AlgorithmTaskInfo info2;
+  info2.taskId = 9992;
+  info2.algorithmId = QStringLiteral( "rs:ndvi" );
+  info2.status = sicnu::TaskStatus::Completed;
+  info2.outputLayerPath = outPath2;
+
+  const Json::Value payload3 = dispatcher2.buildCommittedResultPayload( info2 );
+  REQUIRE( payload3["status"].asString() == "error" );
+  // Insulator: asset must be gone after verification failure.
+  CHECK_FALSE( manager.asset( assetId2 ).has_value() );
 }

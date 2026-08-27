@@ -1,5 +1,6 @@
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <QCoreApplication>
 #include <QFileInfo>
@@ -212,6 +213,52 @@ TEST_CASE( "ActiveViewHost displayAsset shows an existing catalog entry",
   CHECK( context->dataManager().leaseCount( assetId ) == 1 );
   CHECK( context->displayManager().mapLayer( second.value() ) != nullptr );
   CHECK( project->count() == 1 );
+}
+
+TEST_CASE( "ActiveViewHost displayAsset can explicitly zoom to the new layer",
+           "[active_view_host][data_context]" )
+{
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  QgsLayerTreeView treeView;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore() };
+  auto createdContext = sicnu::app::ProjectContext::create( viewSpec );
+  REQUIRE( createdContext );
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+  ActiveViewHost host( &canvas, &treeView, nullptr,
+                       &context->dataManager(), &context->displayManager(),
+                       context->mainViewId(), nullptr );
+  host.initLayerTree();
+
+  const auto loaded = host.openRasterPath(
+      fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ) );
+  REQUIRE( loaded );
+  const sicnu::data::AssetId assetId =
+      context->dataManager().assets().first().id();
+  QgsMapLayer *layer = context->displayManager().mapLayer( loaded.value() );
+  REQUIRE( layer != nullptr );
+  const QgsRectangle layerExtent = layer->extent();
+
+  // Start from an unrelated extent and re-display with explicit zoom.
+  const QgsRectangle originalExtent( 100.0, 100.0, 200.0, 200.0 );
+  host.setExtent( originalExtent );
+  const QgsRectangle previousExtent = canvas.extent();
+  REQUIRE_FALSE( previousExtent == layerExtent );
+
+  REQUIRE( context->displayManager().removeLayer( loaded.value() ) );
+
+  const auto redisplayed = host.displayAsset( assetId, true );
+  REQUIRE( redisplayed );
+  QgsMapLayer *redisplayedLayer = context->displayManager().mapLayer( redisplayed.value() );
+  REQUIRE( redisplayedLayer != nullptr );
+  // QgsMapCanvas may adjust the visible rectangle to preserve aspect ratio,
+  // but the canvas center must match the layer's center after zooming.
+  const QgsPointXY expectedCenter = redisplayedLayer->extent().center();
+  CHECK( canvas.extent().center().x() == Catch::Approx( expectedCenter.x() ) );
+  CHECK( canvas.extent().center().y() == Catch::Approx( expectedCenter.y() ) );
 }
 
 TEST_CASE( "setActiveViewId rejects unknown views",

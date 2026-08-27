@@ -20,18 +20,20 @@ public:
     ~TaskCenterDock() override = default;
 
     bool autoLoadLayers() const;
+    QString formatStatus(TaskStatus status) const;
+    QString formatPriority(TaskPriority priority) const;
 
 public slots:
     void refreshTaskList();
     void onTaskAdded(const AlgorithmTaskInfo& info);
     void onTaskUpdated(const AlgorithmTaskInfo& info);
     void onTaskLogAdded(long taskId, const QString& message);
+    void onSelectionChanged();
 
 signals:
     void layerAutoLoadRequested(const QString& filePath);
 
 private slots:
-    void onSelectionChanged();
     void onCancelClicked();
     void onPauseClicked();
     void onResumeClicked();
@@ -41,8 +43,6 @@ private slots:
 private:
     void setupUi();
     long selectedTaskId() const;
-    QString formatStatus(TaskStatus status) const;
-    QString formatPriority(TaskPriority priority) const;
 
     QTreeWidget *m_taskTree = nullptr;
     QTextBrowser *m_parameterBrowser = nullptr;

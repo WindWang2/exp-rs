@@ -1,13 +1,16 @@
 // src/processing/framework/tool_call_dispatcher.cpp
 #include "tool_call_dispatcher.h"
 
+#include "algorithm_descriptor.h"
 #include "atomic_algorithm_registry.h"
 #include "json_params_converter.h"
 #include "schema_validator.h"
 #include "task_center.h"
 
 #include "output_committer.h"
+#include "data/data_manager.h"
 #include <QCoreApplication>
+#include <QPointer>
 #include <QDateTime>
 #include <QDebug>
 #include <QEventLoop>
@@ -49,7 +52,47 @@ sicnu::data::AssetKind assetKindForSuffix( const QString &suffix )
   return sicnu::data::AssetKind::Raster;
 }
 
+/// Resolves the asset kind for a tool-call output path.  When the path has a
+/// recognised suffix we trust it; otherwise we consult the algorithm descriptor
+/// so that vector outputs without an extension are not misclassified as raster.
+/// Falls back to raster when no hint is available.
+sicnu::data::AssetKind assetKindForOutputPath( const QString &path, const QString &algorithmId )
+{
+  const QString suffix = QFileInfo( path ).suffix();
+  if ( !suffix.isEmpty() )
+    return assetKindForSuffix( suffix );
+
+  const auto adapter = AtomicAlgorithmRegistry::instance().findAdapter( algorithmId.toStdString() );
+  if ( adapter )
+  {
+    for ( const auto &port : adapter->descriptor().outputs )
+    {
+      if ( port.type == DataType::Vector )
+        return sicnu::data::AssetKind::Vector;
+      if ( port.type == DataType::Raster )
+        return sicnu::data::AssetKind::Raster;
+    }
+  }
+  return sicnu::data::AssetKind::Raster;
+}
+
+QString assetKindLabelImpl( const QString &path, const QString &algorithmId )
+{
+  switch ( assetKindForOutputPath( path, algorithmId ) )
+  {
+    case sicnu::data::AssetKind::Vector:
+      return QStringLiteral( "vector" );
+    default:
+      return QStringLiteral( "raster" );
+  }
+}
+
 } // namespace
+
+QString ToolCallDispatcher::assetKindLabel( const QString &path, const QString &algorithmId )
+{
+  return assetKindLabelImpl( path, algorithmId );
+}
 
 ToolCallDispatcher::ToolCallDispatcher( SubmissionSink sink, CompletionWatcher watcher )
   : mSink( std::move( sink ) )
@@ -62,17 +105,25 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
   mDataManager = dataManager;
   if ( dataManager )
   {
-    mOutputCommitterHandler = [dataManager]( const sicnu::AlgorithmTaskInfo &info,
-                                             std::string &outCommittedPath,
-                                             std::string &outCommitError ) -> bool {
-      sicnu::OutputCommitter committer( dataManager );
+    QPointer<sicnu::data::DataManager> managerGuard( dataManager );
+    mOutputCommitterHandler = [managerGuard]( const sicnu::AlgorithmTaskInfo &info,
+                                              std::string &outCommittedPath,
+                                              std::string &outCommitError,
+                                              std::string &outAssetId ) -> bool {
+      if ( !managerGuard )
+      {
+        outCommitError = "DataManager was destroyed before the output could be committed";
+        return false;
+      }
+      sicnu::OutputCommitter committer( managerGuard );
       const QFileInfo outInfo( info.outputLayerPath );
-      const QString suffix = outInfo.suffix().isEmpty() ? QStringLiteral( "tif" ) : outInfo.suffix();
+      const QString suffix = outInfo.suffix();
+      const QString stableSuffix = suffix.isEmpty() ? QStringLiteral( "tif" ) : suffix;
       const QString stablePath = outInfo.absolutePath() + QStringLiteral( "/" )
-                                 + outInfo.completeBaseName() + QStringLiteral( "_committed." ) + suffix;
+                                 + outInfo.completeBaseName() + QStringLiteral( "_committed." ) + stableSuffix;
 
       sicnu::AlgorithmOutputRequest request;
-      request.kind = assetKindForSuffix( suffix );
+      request.kind = assetKindForOutputPath( info.outputLayerPath, info.algorithmId );
       request.tempPath = info.outputLayerPath;
       request.stablePath = stablePath;
       request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
@@ -87,6 +138,7 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
       if ( commitResult )
       {
         outCommittedPath = stablePath.toStdString();
+        outAssetId = commitResult.value().toString().toStdString();
         return true;
       }
       else
@@ -553,7 +605,8 @@ Json::Value ToolCallDispatcher::submitBlocking( const Json::Value &envelope, std
 }
 
 Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTaskInfo &info,
-                                              const OutputCommitterHandler &committerHandler )
+                                              const OutputCommitterHandler &committerHandler,
+                                              const OutputVerificationHandler &verificationHandler )
 {
   Json::Value payload = info.resultPayload.isNull() ? Json::Value( Json::objectValue ) : info.resultPayload;
   payload["algorithmId"] = info.algorithmId.toStdString();
@@ -571,9 +624,41 @@ Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTa
       // operator-reported path so the result and the asset agree.
       std::string committedPath;
       std::string commitError;
-      if ( committerHandler( info, committedPath, commitError ) )
+      std::string assetId;
+      if ( committerHandler( info, committedPath, commitError, assetId ) )
       {
         payload["output"] = committedPath;
+        if ( !assetId.empty() )
+        {
+          payload["assetId"] = assetId;
+        }
+        payload["assetKind"] = assetKindLabelImpl( info.outputLayerPath, info.algorithmId ).toStdString();
+
+        if ( verificationHandler )
+        {
+          const Json::Value verification = verificationHandler( QString::fromStdString( committedPath ),
+                                                                  assetKindLabelImpl( info.outputLayerPath, info.algorithmId ) );
+          payload["verification"] = verification.isObject() ? verification : Json::Value( Json::objectValue );
+          const bool verified = payload["verification"].isMember( "ok" ) && payload["verification"]["ok"].asBool();
+          payload["verified"] = verified;
+          if ( !verified )
+          {
+            payload["status"] = "error";
+            Json::Value issues( Json::arrayValue );
+            if ( payload["verification"].isMember( "issues" ) && payload["verification"]["issues"].isArray() )
+            {
+              for ( const auto &issue : payload["verification"]["issues"] )
+                issues.append( issue );
+            }
+            else
+            {
+              issues.append( "Output verification failed" );
+            }
+            payload["verificationIssues"] = issues;
+            if ( !payload.isMember( "errorMessage" ) )
+              payload["errorMessage"] = "Output verification failed";
+          }
+        }
       }
       else
       {
@@ -597,6 +682,60 @@ Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTa
     payload["errorMessage"] = info.errorMessage.toStdString();
   }
   return payload;
+}
+
+void ToolCallDispatcher::rollbackVerificationFailure( const Json::Value &payload ) const
+{
+  if ( !mDataManager )
+    return;
+  // Only roll back when we actually committed (assetId present) and verification
+  // downgraded the payload to error with verified == false.
+  const bool hasAsset = payload.isMember( "assetId" ) && payload["assetId"].isString()
+                        && !payload["assetId"].asString().empty();
+  const bool verifiedFailed = payload.isMember( "verified" ) && !payload["verified"].asBool()
+                              && payload.isMember( "status" ) && payload["status"].asString() == "error";
+  if ( !hasAsset || !verifiedFailed )
+    return;
+  const QString assetIdStr = QString::fromStdString( payload["assetId"].asString() );
+  const auto assetIdOpt = sicnu::data::AssetId::fromString( assetIdStr );
+  if ( !assetIdOpt.has_value() || assetIdOpt->isNull() )
+    return;
+  const sicnu::data::AssetId assetId = *assetIdOpt;
+  // Must run on DataManager owning thread; our production callers (ExecutionPlane
+  // watch bridge / sync waiter) are on that thread (see tool_call_dispatcher_task_center).
+  if ( QThread::currentThread() != mDataManager->thread() )
+  {
+    // Best-effort: schedule removal; do not block. The insulator guarantee is
+    // still met — the asset will be gone before the next event-loop turn.
+    QMetaObject::invokeMethod( mDataManager,
+                              [manager = mDataManager, assetId]() {
+                                if ( !manager || assetId.isNull() )
+                                  return;
+                                if ( manager->asset( assetId ).has_value() )
+                                {
+                                  // TaskTemporary assets from commits are deletable;
+                                  // reap removes catalog entry and deletes the file.
+                                  const auto result = manager->reap( sicnu::data::ReapRequest{ assetId } );
+                                  if ( !result.unloaded && !result.diagnostics.isEmpty() )
+                                  {
+                                    // Fallback: try cascade unload if reap refused due to lease
+                                    const auto plan = manager->planUnload( assetId ).confirmedCascade();
+                                    ( void ) manager->unload( plan );
+                                  }
+                                }
+                              },
+                              Qt::QueuedConnection );
+    return;
+  }
+  if ( mDataManager->asset( assetId ).has_value() )
+  {
+    const auto result = mDataManager->reap( sicnu::data::ReapRequest{ assetId } );
+    if ( !result.unloaded && !result.diagnostics.isEmpty() )
+    {
+      const auto plan = mDataManager->planUnload( assetId ).confirmedCascade();
+      ( void ) mDataManager->unload( plan );
+    }
+  }
 }
 
 } // namespace sicnu::processing

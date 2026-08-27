@@ -47,6 +47,7 @@
 #include "providers/otb_tools/otb_tool_wrapper.h"
 #include "providers/generic_cli/generic_cli_algorithm.h"
 
+
 namespace
 {
 
@@ -54,61 +55,30 @@ QString outputPathFromVariant( const QVariant &value )
 {
   if ( value.userType() == qMetaTypeId<QgsProcessingOutputLayerDefinition>() )
     return value.value<QgsProcessingOutputLayerDefinition>().sink.staticValue().toString();
-
   return value.toString();
 }
 
-QString normalizedLayerSource( const QString &source )
+bool isLoadableDestinationType( const QString &type )
 {
-  if ( source.isEmpty() )
-    return source;
-
-  const QFileInfo fi( source );
-  if ( fi.exists() )
-    return fi.canonicalFilePath();
-
-  return source;
+  return type == QgsProcessingParameterRasterDestination::typeName()
+         || type == QgsProcessingParameterVectorDestination::typeName()
+         || type == QgsProcessingParameterFeatureSink::typeName();
 }
 
-bool projectHasLayerWithSource( const QString &source )
-{
-  const QString normalized = normalizedLayerSource( source );
-  const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
-  for ( QgsMapLayer *layer : layers )
-  {
-    if ( !layer )
-      continue;
-    if ( layer->source() == source
-         || normalizedLayerSource( layer->source() ) == normalized )
-      return true;
-  }
-  return false;
-}
-
-/**
- * If a temporary destination was re-resolved after the algorithm wrote the file,
- * the reported path can point at an empty sibling dir under processing_XXXXXX.
- * Search for the same basename under that processing root.
- */
 QString findSiblingTempOutput( const QString &reportedPath )
 {
   if ( reportedPath.isEmpty() )
     return {};
-
   const QFileInfo fi( reportedPath );
   const QString baseName = fi.fileName();
   if ( baseName.isEmpty() )
     return {};
-
-  // Expect .../processing_XXXXXX/<uuid>/OUTPUT.tif
   const QDir runDir = fi.dir();
   QDir rootDir = runDir;
   if ( !rootDir.cdUp() )
     return {};
-
   if ( !rootDir.dirName().startsWith( QStringLiteral( "processing_" ) ) )
     return {};
-
   const QFileInfoList subdirs = rootDir.entryInfoList( QDir::Dirs | QDir::NoDotAndDotDot );
   QString bestPath;
   qint64 bestSize = -1;
@@ -135,24 +105,18 @@ QString resolvedResultPath(
   const QString direct = outputPathFromVariant( value );
   if ( !direct.isEmpty() && QFileInfo::exists( direct ) )
     return direct;
-
-  // Recover when TEMPORARY_OUTPUT was resolved more than once (new UUID dir).
   if ( !direct.isEmpty() )
   {
     const QString sibling = findSiblingTempOutput( direct );
     if ( !sibling.isEmpty() )
       return sibling;
   }
-
   if ( param )
   {
-    // testOnly=true: do not register layers; still may generate a NEW temp path
-    // if value is still the TEMPORARY_OUTPUT token — only accept if the file exists.
     const QString resolved = QgsProcessingParameters::parameterAsOutputLayer(
                                param, value, context, true );
     if ( !resolved.isEmpty() && QFileInfo::exists( resolved ) )
       return resolved;
-
     if ( !resolved.isEmpty() )
     {
       const QString sibling = findSiblingTempOutput( resolved );
@@ -160,163 +124,46 @@ QString resolvedResultPath(
         return sibling;
     }
   }
-
   return direct;
 }
 
-QgisDesktopWindow *findMainWindow( QWidget *start )
-{
-  for ( QWidget *w = start; w; w = w->parentWidget() )
-  {
-    if ( auto *mainWin = qobject_cast<QgisDesktopWindow *>( w ) )
-      return mainWin;
-  }
-  return nullptr;
-}
-
-bool isLoadableDestinationType( const QString &type )
-{
-  return type == QgsProcessingParameterRasterDestination::typeName()
-         || type == QgsProcessingParameterVectorDestination::typeName()
-         || type == QgsProcessingParameterFeatureSink::typeName();
-}
-
-bool addRasterToProject( const QString &path, QgsProcessingFeedback *feedback )
-{
-  const QFileInfo fi( path );
-  auto *layer = new QgsRasterLayer( path, fi.fileName(), QStringLiteral( "gdal" ) );
-  if ( !layer->isValid() )
-  {
-    if ( feedback )
-    {
-      feedback->reportError(
-        QObject::tr( "Failed to load result raster: %1" )
-          .arg( layer->error().message() ) );
-    }
-    delete layer;
-    return false;
-  }
-
-  QgsProject *project = QgsProject::instance();
-  project->addMapLayer( layer, false );
-  QgsLayerTreeGroup *group = project->layerTreeRoot()->findGroup( QStringLiteral( "Raster Layers" ) );
-  if ( !group )
-    group = project->layerTreeRoot()->insertGroup( 0, QStringLiteral( "Raster Layers" ) );
-  group->addLayer( layer );
-  return true;
-}
-
-bool addVectorToProject( const QString &path, QgsProcessingFeedback *feedback )
-{
-  const QFileInfo fi( path );
-  auto *layer = new QgsVectorLayer( path, fi.fileName(), QStringLiteral( "ogr" ) );
-  if ( !layer->isValid() )
-  {
-    if ( feedback )
-    {
-      feedback->reportError(
-        QObject::tr( "Failed to load result vector: %1" )
-          .arg( layer->error().message() ) );
-    }
-    delete layer;
-    return false;
-  }
-
-  QgsProject *project = QgsProject::instance();
-  project->addMapLayer( layer, false );
-  QgsLayerTreeGroup *group = project->layerTreeRoot()->findGroup( QStringLiteral( "Vector Layers" ) );
-  if ( !group )
-    group = project->layerTreeRoot()->insertGroup( 0, QStringLiteral( "Vector Layers" ) );
-  group->addLayer( layer );
-  return true;
-}
-
-int loadFileResultLayers(
+// Report destination paths to the processing log without double-loading layers.
+// Layers are loaded via the TaskCenter autoLoad path; this only surfaces
+// preflight/file-not-found/type warnings so non-agent runs keep user-visible
+// feedback (P1 lean regression).
+void reportResultDestinations(
   const QgsProcessingAlgorithm *algorithm,
   const QVariantMap &result,
   QgsProcessingContext &context,
-  QgsProcessingFeedback *feedback,
-  QWidget *parentWidget )
+  QgsProcessingFeedback *feedback )
 {
-  if ( !algorithm )
-    return 0;
-
-  QgisDesktopWindow *mainWin = findMainWindow( parentWidget );
-  int loadedCount = 0;
-
+  if ( !algorithm || !feedback )
+    return;
   for ( const QgsProcessingParameterDefinition *param : algorithm->parameterDefinitions() )
   {
     if ( !param || !result.contains( param->name() ) )
       continue;
-
     if ( !param->isDestination() )
       continue;
-
     const QString type = param->type();
     if ( !isLoadableDestinationType( type ) )
     {
-      if ( feedback )
-      {
-        feedback->pushWarning(
-          QObject::tr( "Skipping auto-load for unsupported output type '%1' (%2)." )
-            .arg( type, param->name() ) );
-      }
+      feedback->pushWarning(
+        QObject::tr( "Skipping auto-load for unsupported output type '%1' (%2)." )
+          .arg( type, param->name() ) );
       continue;
     }
-
     const QString path = resolvedResultPath( param, result.value( param->name() ), context );
     if ( path.isEmpty() )
       continue;
-
     if ( !QFileInfo::exists( path ) )
     {
-      if ( feedback )
-      {
-        feedback->reportError(
-          QObject::tr( "Output file not found: %1" ).arg( path ) );
-      }
+      feedback->reportError(
+        QObject::tr( "Output file not found: %1" ).arg( path ) );
       continue;
     }
-
-    if ( projectHasLayerWithSource( path ) )
-      continue;
-
-    bool loaded = false;
-    if ( type == QgsProcessingParameterRasterDestination::typeName() )
-    {
-      // Prefer Data Manager + Display Manager via main window (ADR 0010 Wave B).
-      if ( mainWin )
-      {
-        mainWin->loadRasterLayer( path );
-        loaded = true;
-      }
-      else
-      {
-        loaded = addRasterToProject( path, feedback );
-      }
-    }
-    else // vector / feature sink
-    {
-      if ( mainWin )
-      {
-        mainWin->loadVectorLayer( path );
-        loaded = true;
-      }
-      else
-      {
-        loaded = addVectorToProject( path, feedback );
-      }
-    }
-
-    if ( !loaded )
-      continue;
-
-    if ( feedback )
-      feedback->pushInfo( QObject::tr( "Loaded result layer: %1" ).arg( path ) );
-    ++loadedCount;
+    feedback->pushInfo( QObject::tr( "Result ready: %1" ).arg( path ) );
   }
-
-  return loadedCount;
 }
 
 } // namespace
@@ -667,8 +514,9 @@ void SicnuAlgorithmDialog::runAlgorithm()
   QgsProcessingFeedback *feedback = mFeedback;
 
   applyContextOverrides( &mContext );
-  // File-based CLI tools load via loadFileResultLayers; clear framework queue
-  // so we do not double-load when destinationProject is also set.
+  // Result layer loading is handled by the TaskCenter autoLoad path (see
+  // submitJob below). Clear any framework-level completion layers so a stale
+  // destinationProject does not introduce a second load.
   mContext.setLayersToLoadOnCompletion( {} );
 
   blockControlsWhileRunning();
@@ -880,13 +728,19 @@ void SicnuAlgorithmDialog::runAlgorithm()
 
 void SicnuAlgorithmDialog::algExecuted( bool successful, const QVariantMap &results )
 {
+  // Preserve user-visible diagnostics that the lean diff dropped: surface
+  // unsupported-type warnings and missing-file errors in the log without
+  // re-loading layers (TaskCenter autoLoad owns display, P0-L2).
+  if ( mFeedback && algorithm() )
+    reportResultDestinations( algorithm(), results, mContext, mFeedback );
+
+  // Ensure failures always surface an error even when the worker produced no
+  // explicit message — the thin postProcess path can otherwise leave the log silent.
+  if ( !successful && mFeedback && mFeedback->textLog().isEmpty() )
+    mFeedback->reportError( tr( "Algorithm execution failed. See log for details." ) );
+
   if ( mFeedback )
     finished( successful, results, mContext, mFeedback );
-
-  if ( successful && algorithm() && mLoadResultsCheck && mLoadResultsCheck->isChecked() )
-  {
-    loadFileResultLayers( algorithm(), results, mContext, mFeedback, parentWidget() );
-  }
 
   QgsProcessingAlgorithmDialogBase::algExecuted( successful, results );
 

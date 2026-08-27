@@ -12,6 +12,7 @@
 #include <qgsrasterdataprovider.h>
 #include <algorithm>
 #include <sstream>
+#include <QPointer>
 
 namespace sicnu::agent {
 
@@ -23,6 +24,14 @@ Json::Value createEmptyObjectSchema()
   schema["type"] = "object";
   schema["properties"] = Json::Value( Json::objectValue );
   return schema;
+}
+
+Json::Value serviceUnavailableError()
+{
+  Json::Value result( Json::objectValue );
+  result["status"] = "error";
+  result["errorMessage"] = "Interactive tool service is no longer available";
+  return result;
 }
 
 Json::Value createViewStateSchema()
@@ -385,6 +394,8 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service,
   if ( service )
   {
 
+    QPointer<ViewControlService> safeService( service );
+
   // 1. view:get_state
   {
     InteractionToolDefinition def;
@@ -393,8 +404,9 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service,
     def.category = "view";
     def.description = "Query the current active map view state, including CRS, extent bounding box, scale, rotation, and active layer.";
     def.inputSchema = createViewStateSchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->getState( params );
+    def.handler = [safeService]( const Json::Value &params ) {
+      if ( !safeService ) return serviceUnavailableError();
+      return safeService->getState( params );
     };
     registerTool( std::move( def ) );
   }
@@ -407,8 +419,9 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service,
     def.category = "view";
     def.description = "Set the spatial extent / bounding box of the map canvas (via bbox object, extent array, or WKT geometry).";
     def.inputSchema = createSetExtentSchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->setExtent( params );
+    def.handler = [safeService]( const Json::Value &params ) {
+      if ( !safeService ) return serviceUnavailableError();
+      return safeService->setExtent( params );
     };
     registerTool( std::move( def ) );
   }
@@ -421,8 +434,9 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service,
     def.category = "view";
     def.description = "Zoom the map canvas to the spatial extent of a specified layer by ID or layer name.";
     def.inputSchema = createZoomToLayerSchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->zoomToLayer( params );
+    def.handler = [safeService]( const Json::Value &params ) {
+      if ( !safeService ) return serviceUnavailableError();
+      return safeService->zoomToLayer( params );
     };
     registerTool( std::move( def ) );
   }
@@ -435,8 +449,9 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service,
     def.category = "view";
     def.description = "Zoom the map canvas to the spatial extent of a registered Data Manager asset.";
     def.inputSchema = createZoomToAssetSchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->zoomToAsset( params );
+    def.handler = [safeService]( const Json::Value &params ) {
+      if ( !safeService ) return serviceUnavailableError();
+      return safeService->zoomToAsset( params );
     };
     registerTool( std::move( def ) );
   }
@@ -449,8 +464,9 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service,
     def.category = "view";
     def.description = "Zoom the map canvas to fit the full bounding extent of all loaded and visible layers.";
     def.inputSchema = createEmptyObjectSchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->fitAll( params );
+    def.handler = [safeService]( const Json::Value &params ) {
+      if ( !safeService ) return serviceUnavailableError();
+      return safeService->fitAll( params );
     };
     registerTool( std::move( def ) );
   }
@@ -463,8 +479,9 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service,
     def.category = "canvas";
     def.description = "Zoom the map canvas to a specific spatial extent [xmin, ymin, xmax, ymax].";
     def.inputSchema = createSetExtentSchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->setExtent( params );
+    def.handler = [safeService]( const Json::Value &params ) {
+      if ( !safeService ) return serviceUnavailableError();
+      return safeService->setExtent( params );
     };
     registerTool( std::move( def ) );
   }
@@ -477,8 +494,9 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service,
     def.category = "view";
     def.description = "Set the map canvas scale denominator (e.g. 50000 for 1:50000 scale).";
     def.inputSchema = createSetScaleSchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->setScale( params );
+    def.handler = [safeService]( const Json::Value &params ) {
+      if ( !safeService ) return serviceUnavailableError();
+      return safeService->setScale( params );
     };
     registerTool( std::move( def ) );
   }
@@ -491,8 +509,9 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service,
     def.category = "roi";
     def.description = "Draw or set a Region of Interest (ROI) polygon or bounding box on the map canvas.";
     def.inputSchema = createRoiSetSchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->setRoi( params );
+    def.handler = [safeService]( const Json::Value &params ) {
+      if ( !safeService ) return serviceUnavailableError();
+      return safeService->setRoi( params );
     };
     registerTool( std::move( def ) );
   }
@@ -505,8 +524,9 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service,
     def.category = "roi";
     def.description = "Clear the active Region of Interest (ROI) rubberband from the map canvas.";
     def.inputSchema = createEmptyObjectSchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->clearRoi( params );
+    def.handler = [safeService]( const Json::Value &params ) {
+      if ( !safeService ) return serviceUnavailableError();
+      return safeService->clearRoi( params );
     };
     registerTool( std::move( def ) );
   }
@@ -519,8 +539,9 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service,
     def.category = "canvas";
     def.description = "Draw a Region of Interest on the map canvas (backward compatibility alias for roi:set).";
     def.inputSchema = createRoiSetSchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->setRoi( params );
+    def.handler = [safeService]( const Json::Value &params ) {
+      if ( !safeService ) return serviceUnavailableError();
+      return safeService->setRoi( params );
     };
     registerTool( std::move( def ) );
   }
@@ -787,6 +808,8 @@ void InteractionToolRegistry::registerRasterTools( RasterDisplayService *service
   if ( !service )
     return;
 
+  QPointer<RasterDisplayService> safeRaster( service );
+
   // 1. raster:get_display
   {
     InteractionToolDefinition def;
@@ -795,8 +818,9 @@ void InteractionToolRegistry::registerRasterTools( RasterDisplayService *service
     def.category = "raster";
     def.description = "Get the current raster layer display configuration including renderer type, band composition, stretch algorithm/range, and opacity.";
     def.inputSchema = createRasterGetDisplaySchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->getDisplay( params );
+    def.handler = [safeRaster]( const Json::Value &params ) {
+      if ( !safeRaster ) return serviceUnavailableError();
+      return safeRaster->getDisplay( params );
     };
     registerTool( std::move( def ) );
   }
@@ -809,8 +833,9 @@ void InteractionToolRegistry::registerRasterTools( RasterDisplayService *service
     def.category = "raster";
     def.description = "Set RGB band composition for a raster layer using semantic band roles (e.g. 'red', 'green', 'blue', 'nir', 'swir1', 'swir2') or 1-based band numbers.";
     def.inputSchema = createRasterSetBandCompositeSchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->setBandComposite( params );
+    def.handler = [safeRaster]( const Json::Value &params ) {
+      if ( !safeRaster ) return serviceUnavailableError();
+      return safeRaster->setBandComposite( params );
     };
     registerTool( std::move( def ) );
   }
@@ -823,8 +848,9 @@ void InteractionToolRegistry::registerRasterTools( RasterDisplayService *service
     def.category = "raster";
     def.description = "Adjust the display contrast stretch of a raster layer. Supports 'minimum_maximum', 'percent_clip' (with lower/upper percentiles), and 'stddev' (with factor/k).";
     def.inputSchema = createRasterSetStretchSchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->setStretch( params );
+    def.handler = [safeRaster]( const Json::Value &params ) {
+      if ( !safeRaster ) return serviceUnavailableError();
+      return safeRaster->setStretch( params );
     };
     registerTool( std::move( def ) );
   }
@@ -837,8 +863,9 @@ void InteractionToolRegistry::registerRasterTools( RasterDisplayService *service
     def.category = "raster";
     def.description = "Reset a raster layer's display presentation to its default renderer, standard RGB/grayscale bands, default stretch, and full opacity.";
     def.inputSchema = createRasterResetDisplaySchema();
-    def.handler = [service]( const Json::Value &params ) {
-      return service->resetDisplay( params );
+    def.handler = [safeRaster]( const Json::Value &params ) {
+      if ( !safeRaster ) return serviceUnavailableError();
+      return safeRaster->resetDisplay( params );
     };
     registerTool( std::move( def ) );
   }

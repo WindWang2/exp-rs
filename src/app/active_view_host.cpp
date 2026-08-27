@@ -233,7 +233,7 @@ ActiveViewHost::openVectorPath( const QString &filePath )
 }
 
 sicnu::data::Result<sicnu::display::DisplayLayerId>
-ActiveViewHost::displayAsset( sicnu::data::AssetId assetId )
+ActiveViewHost::displayAsset( sicnu::data::AssetId assetId, bool zoomToLayer )
 {
     using sicnu::data::Diagnostic;
     using sicnu::data::DiagnosticSeverity;
@@ -281,7 +281,7 @@ ActiveViewHost::displayAsset( sicnu::data::AssetId assetId )
 
     placeInTreeGroup( layer, asset->kind() );
     refreshCanvasLayers();
-    if ( !hadVisibleLayers )
+    if ( zoomToLayer || !hadVisibleLayers )
         setCanvasExtentReprojected( targetCanvas, layer );
 
     return Result<DisplayLayerId>::success( displayed.value() );
@@ -542,6 +542,10 @@ void ActiveViewHost::refreshCanvasLayers()
     if ( !m_mapCanvas )
         return;
 
+    // TODO(P1-M2): This reads the global project tree checked layers, which is
+    // correct for the main view but wrong once secondary DisplayManager views
+    // exist. The active view's layer visibility should come from the view's own
+    // QgsLayerTree (via QgisDisplayManager), not QgsProject::checkedLayers().
     QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
     QList<QgsMapLayer *> layers = root->checkedLayers();
     m_mapCanvas->setLayers( layers );

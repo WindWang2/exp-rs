@@ -428,7 +428,9 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
   if ( targetStepId.isEmpty() && isSingleJob )
     targetStepId = m_activeStepId;
 
-  if ( info.status == sicnu::TaskStatus::Running )
+  if ( info.status == sicnu::TaskStatus::Running
+       || info.status == sicnu::TaskStatus::WaitingResource
+       || info.status == sicnu::TaskStatus::Cancelling )
   {
     emit stepStatusChanged( targetStepId, "running" );
     return;

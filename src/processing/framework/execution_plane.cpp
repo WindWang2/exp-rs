@@ -138,10 +138,11 @@ void ExecutionPlane::deliverOnAffinity( QObject *affinityContext, std::function<
 }
 
 Json::Value ExecutionPlane::buildCommittedResultPayload( const sicnu::AlgorithmTaskInfo &info,
-                                                         const OutputCommitterHandler &committerHandler )
+                                                         const OutputCommitterHandler &committerHandler,
+                                                         const OutputVerificationHandler &verificationHandler )
 {
   if ( info.taskId <= 0 )
-    return ToolCallDispatcher::buildTaskResultPayload( info, committerHandler );
+    return ToolCallDispatcher::buildTaskResultPayload( info, committerHandler, verificationHandler );
 
   // One builder at a time globally: commits are rare (terminal only) and this
   // closes the commit race (watcher vs signal-handler vs sync waiter) without
@@ -152,7 +153,7 @@ Json::Value ExecutionPlane::buildCommittedResultPayload( const sicnu::AlgorithmT
   if ( it != m_commitCache.end() )
     return it->second.payload;
 
-  Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, committerHandler );
+  Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, committerHandler, verificationHandler );
 
   CommitOutcome outcome;
   outcome.payload = payload;
@@ -174,7 +175,8 @@ Json::Value ExecutionPlane::awaitResult( long taskId,
                                          std::chrono::milliseconds timeout,
                                          const OutputCommitterHandler &committerHandler,
                                          QObject *affinityContext,
-                                         bool cancelOnTimeout )
+                                         bool cancelOnTimeout,
+                                         const OutputVerificationHandler &verificationHandler )
 {
   auto &center = sicnu::TaskCenter::instance();
 
@@ -276,8 +278,8 @@ Json::Value ExecutionPlane::awaitResult( long taskId,
     auto future = promise->get_future();
     QMetaObject::invokeMethod(
       affinityContext,
-      [this, info, committerHandler, promise]() {
-        promise->set_value( buildCommittedResultPayload( info, committerHandler ) );
+      [this, info, committerHandler, verificationHandler, promise]() {
+        promise->set_value( buildCommittedResultPayload( info, committerHandler, verificationHandler ) );
       },
       Qt::QueuedConnection );
     if ( future.wait_for( std::chrono::milliseconds( 5000 ) ) == std::future_status::ready )
@@ -287,7 +289,7 @@ Json::Value ExecutionPlane::awaitResult( long taskId,
     return ToolCallDispatcher::buildTaskResultPayload( info, nullptr );
   }
 
-  return buildCommittedResultPayload( info, committerHandler );
+  return buildCommittedResultPayload( info, committerHandler, verificationHandler );
 }
 
 unsigned int ExecutionPlane::estimateFromPreflight( const std::string &algorithmId, const Json::Value &params )

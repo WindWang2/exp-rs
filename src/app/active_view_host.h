@@ -126,8 +126,11 @@ class ActiveViewHost : public QObject
     openVectorPath( const QString &filePath );
 
     /// Display an already-registered Asset on the active view (no re-register).
+    /// When \p zoomToLayer is true the canvas is always re-fitted to the new
+    /// layer; otherwise the legacy behaviour only zooms when the canvas had no
+    /// visible layers before the display.
     sicnu::data::Result<sicnu::display::DisplayLayerId>
-    displayAsset( sicnu::data::AssetId assetId );
+    displayAsset( sicnu::data::AssetId assetId, bool zoomToLayer = false );
 
     // Compatibility names used by main window during migration
     sicnu::data::Result<sicnu::display::DisplayLayerId>

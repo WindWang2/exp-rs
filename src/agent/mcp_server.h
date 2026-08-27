@@ -74,6 +74,7 @@ protected:
     void handleRequest(const QVariantMap &request);
     virtual void sendResponse(const QVariant &id, const QVariantMap &result);
     virtual void sendError(const QVariant &id, int code, const QString &message);
+    virtual void sendError(const QVariant &id, int code, const QString &message, const QVariantMap &data);
     virtual void sendNotification(const QString &method, const QVariantMap &params);
 
     // MCP Methods — canonical algorithm surface

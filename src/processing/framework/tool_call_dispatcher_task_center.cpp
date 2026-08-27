@@ -38,13 +38,17 @@ ToolCallDispatcher::ToolCallDispatcher()
       ExecutionRequest request;
       request.algorithmId = algorithmId;
       request.params = params;
-      request.autoLoad = true;
+      // The committed stable asset is auto-displayed via DataManager::assetAdded /
+      // QgisDisplayManager. Leaving autoLoad=true would also emit
+      // TaskCenter::layerAutoLoadRequested with the temp path, producing a
+      // duplicate layer or a layer pointing at a moved-away temp file (P0-L1).
+      request.autoLoad = false;
       request.source = mSourceTag;
       return ExecutionPlane::instance().submit( request ).taskId();
     } )
-  , m_commitBridge( std::make_shared<QObject>() )
   , mWatcher( [this]( long taskId, CompletionCallback onComplete ) {
       OutputCommitterHandler committerHandler = mOutputCommitterHandler;
+      OutputVerificationHandler verificationHandler = mOutputVerificationHandler;
       std::shared_ptr<QObject> bridge = m_commitBridge;
       // deliver runs on the bridge (Data Manager owner) thread whenever
       // needed; buildCommittedResultPayload applies the transactional commit
@@ -53,19 +57,21 @@ ToolCallDispatcher::ToolCallDispatcher()
       // builders reuse the cached payload instead of racing the commit.
       ExecutionPlane::instance().watch(
         taskId,
-        [bridge, cb = std::move( onComplete ), committerHandler = std::move( committerHandler )](
-          const sicnu::AlgorithmTaskInfo &info ) mutable {
+        [bridge, cb = std::move( onComplete ), committerHandler = std::move( committerHandler ),
+         verificationHandler = std::move( verificationHandler )]( const sicnu::AlgorithmTaskInfo &info ) mutable {
           ExecutionPlane::deliverOnAffinity(
             bridge.get(),
-            [info, cb = std::move( cb ), committerHandler = std::move( committerHandler )]() mutable {
+            [info, cb = std::move( cb ), committerHandler = std::move( committerHandler ),
+             verificationHandler = std::move( verificationHandler )]() mutable {
               const Json::Value payload =
-                ExecutionPlane::instance().buildCommittedResultPayload( info, committerHandler );
+                ExecutionPlane::instance().buildCommittedResultPayload( info, committerHandler, verificationHandler );
               if ( cb )
                 cb( payload );
             } );
         },
         /*affinityContext=*/bridge.get() );
     } )
+  , m_commitBridge( std::make_shared<QObject>() )
 {
   std::shared_ptr<QObject> bridge = m_commitBridge;
   mSyncAwait = [this, bridge]( long taskId, std::chrono::milliseconds timeout ) -> Json::Value {
@@ -73,13 +79,17 @@ ToolCallDispatcher::ToolCallDispatcher()
     // constructor); the commit then runs on the calling thread — the Data
     // Manager's owning thread for every production caller of the sync path.
     return ExecutionPlane::instance().awaitResult( taskId, timeout, mOutputCommitterHandler,
-                                                   bridge.get(), /*cancelOnTimeout=*/true );
+                                                   bridge.get(), /*cancelOnTimeout=*/true,
+                                                   mOutputVerificationHandler );
   };
 }
 
 Json::Value ToolCallDispatcher::buildCommittedResultPayload( const sicnu::AlgorithmTaskInfo &info ) const
 {
-  return ExecutionPlane::instance().buildCommittedResultPayload( info, mOutputCommitterHandler );
+  Json::Value payload =
+    ExecutionPlane::instance().buildCommittedResultPayload( info, mOutputCommitterHandler, mOutputVerificationHandler );
+  rollbackVerificationFailure( payload );
+  return payload;
 }
 
 } // namespace sicnu::processing
