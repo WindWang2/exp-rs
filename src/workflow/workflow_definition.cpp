@@ -1,6 +1,7 @@
 // src/workflow/workflow_definition.cpp
 #include "workflow_definition.h"
 
+#include <algorithm>
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
@@ -26,6 +27,10 @@ Json::Value workflowDefinitionToJson( const WorkflowDefinition &def )
     stepVal["kind"] = static_cast<int>( step.kind );
     stepVal["operatorId"] = step.operatorId;
     stepVal["artifactOnSuccess"] = step.artifactOnSuccess;
+    if ( step.resourceEstimateMb > 0 )
+      stepVal["resourceEstimateMb"] = step.resourceEstimateMb;
+    if ( !step.verificationPolicy.empty() )
+      stepVal["verificationPolicy"] = step.verificationPolicy;
 
     // Spatial & Port UI Metadata
     Json::Value uiObj( Json::objectValue );
@@ -125,6 +130,18 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
 
       if ( stepVal.isMember( "artifactOnSuccess" ) && stepVal["artifactOnSuccess"].isString() )
         step.artifactOnSuccess = stepVal["artifactOnSuccess"].asString();
+
+      // Optional resource estimate (MiB) — forward compatible, 0 = auto
+      if ( stepVal.isMember( "resourceEstimateMb" ) && stepVal["resourceEstimateMb"].isUInt() )
+        step.resourceEstimateMb = stepVal["resourceEstimateMb"].asUInt();
+      else if ( stepVal.isMember( "resourceEstimateMb" ) && stepVal["resourceEstimateMb"].isInt() )
+        step.resourceEstimateMb = static_cast<unsigned int>( std::max( 0, stepVal["resourceEstimateMb"].asInt() ) );
+      else if ( stepVal.isMember( "resourceEstimate" ) && stepVal["resourceEstimate"].isUInt() )
+        step.resourceEstimateMb = stepVal["resourceEstimate"].asUInt();
+      if ( stepVal.isMember( "verificationPolicy" ) && stepVal["verificationPolicy"].isString() )
+        step.verificationPolicy = stepVal["verificationPolicy"].asString();
+      else if ( stepVal.isMember( "verification" ) && stepVal["verification"].isString() )
+        step.verificationPolicy = stepVal["verification"].asString();
 
       if ( stepVal.isMember( "meta" ) && stepVal["meta"].isMember( "ui" ) )
       {

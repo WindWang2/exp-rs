@@ -1,4 +1,3 @@
-// src/workflow/workflow_runtime.h
 #pragma once
 
 #include "workflow_definition.h"
@@ -13,6 +12,10 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+namespace sicnu::data {
+class DataManager;
+}
 
 namespace sicnu::workflow {
 
@@ -41,6 +44,9 @@ class WorkflowRuntime
 
     /// Synchronous run for unit tests / headless use.
     /// @throws std::runtime_error if gates fail, step kind is not Operator, or operator fails
+    /// Default path is async via ExecutionPlane/TaskCenter with transactional
+    /// commit and OutputVerifier; falls back to the original synchronous
+    /// RSOperator path when the plane is disabled or unavailable.
     Json::Value runStep( const std::string &sessionId, const std::string &stepId );
 
     void markStepComplete( const std::string &sessionId, const std::string &stepId );
@@ -49,11 +55,23 @@ class WorkflowRuntime
     void setArtifact( const std::string &sessionId, const std::string &name, const std::string &value );
 
     /// Request cooperative cancellation of a session's current operator step
-    /// (observed via RSOperatorContext::throwIfCancelled()). Safe from any
+    /// (observed via RSOperatorContext::throwIfCancelled() and via
+    /// TaskCenter cancellation for ExecutionPlane runs). Safe from any
     /// thread; cancellation is best-effort for operators that poll the flag.
     void requestCancel( const std::string &sessionId );
 
     void close( const std::string &sessionId );
+
+    /// Optional DataManager for transactional output commit (OutputCommitter).
+    /// When null, outputs are used directly without stable-asset promotion
+    /// (verification still runs on the temp path if present).
+    void setDataManager( sicnu::data::DataManager *dataManager );
+    sicnu::data::DataManager *dataManager() const;
+
+    /// Control the async ExecutionPlane path (default true). When false,
+    /// runStep always uses the synchronous RSOperator fallback.
+    void setUseExecutionPlane( bool use );
+    bool useExecutionPlane() const;
 
   private:
     std::shared_ptr<WorkflowSession> session( const std::string &sessionId ) const;
@@ -61,10 +79,25 @@ class WorkflowRuntime
     /// Per-session cooperative cancellation flag (created in open()).
     std::shared_ptr<std::atomic<bool>> cancelFlag( const std::string &sessionId );
 
+    Json::Value runStepSync( const std::string &sessionId, const std::string &stepId,
+                             const StepDef *step, const Json::Value &params,
+                             std::shared_ptr<WorkflowSession> sessionPtr,
+                             std::shared_ptr<std::atomic<bool>> cancelFlagPtr );
+
+    Json::Value runStepViaExecutionPlane( const std::string &sessionId, const std::string &stepId,
+                                          const StepDef *step, const Json::Value &params,
+                                          std::shared_ptr<WorkflowSession> sessionPtr,
+                                          std::shared_ptr<std::atomic<bool>> cancelFlagPtr );
+
+    bool rollbackCommittedAsset( const std::string &assetIdStr );
+
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, std::shared_ptr<WorkflowDefinition>> m_defs;
     std::unordered_map<std::string, std::shared_ptr<WorkflowSession>> m_sessions;
     std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> m_cancelFlags;
+    std::unordered_map<std::string, long> m_activeTaskIds;
+    sicnu::data::DataManager *m_dataManager = nullptr;
+    bool m_useExecutionPlane = true;
     int m_nextId = 1;
 };
 
