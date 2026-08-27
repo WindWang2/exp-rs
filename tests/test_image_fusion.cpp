@@ -536,3 +536,51 @@ TEST_CASE( "Native PCA Fusion - Jacobi Eigen Decomposition Accuracy", "[image_fu
     }
 }
 
+
+TEST_CASE( "Brovey: negative band sums map to nodata, not sign-inverted values (#611)", "[fusion]" )
+{
+    constexpr int W = 2, H = 1;
+    const float NODATA = -9999.0f;
+    // Band 2 has negative values such that the sum is negative for pixel 0.
+    std::vector<float> b1 = { 0.3f, 0.2f };
+    std::vector<float> b2 = { -0.5f, 0.3f };
+    std::vector<float> pan = { 10.0f, 10.0f };
+    QVector<const float *> ms = { b1.data(), b2.data() };
+    auto result = ImageFusion::brovey( ms, 2, pan.data(), W, H, NODATA );
+    REQUIRE( result.size() == 2 );
+    // sum for pixel 0 = -0.2 (negative) -> nodata; pixel 1 sum = 0.5 -> valid.
+    REQUIRE( result[0][0] == NODATA );
+    REQUIRE( result[1][0] == NODATA );
+    REQUIRE( result[0][1] != NODATA );
+}
+
+TEST_CASE( "PCA Fusion: output correlates positively with pan regardless of eigenvector sign (#611)", "[fusion]" )
+{
+    // Construct a scene whose leading principal component is negatively
+    // correlated with the pan band: all MS bands DECREASE where pan
+    // increases. Without the sign convention, the fused output would be
+    // spatially inverted relative to pan.
+    constexpr int W = 8, H = 1;
+    const float NODATA = -9999.0f;
+    std::vector<float> mb0, mb1, mb2;
+    std::vector<float> pan( W * H );
+    for ( int i = 0; i < W * H; ++i )
+    {
+        const float t = static_cast<float>( i );
+        mb0.push_back( 100.0f - 3.0f * t );  // strongly anti-correlated with pan
+        mb1.push_back( 50.0f - 1.0f * t );
+        mb2.push_back( 20.0f - 0.5f * t );
+        pan[i] = t;
+    }
+    QVector<const float *> msBands = { mb0.data(), mb1.data(), mb2.data() };
+    auto result = ImageFusion::pcaFusion( msBands, 3, pan.data(), W, H, NODATA );
+    REQUIRE( result.size() == 3 );
+    // The fused product must vary in the SAME direction as pan: the last
+    // pixel (brightest pan) must exceed the first pixel (darkest pan) in
+    // every band - PC1 (dominated by the common trend) now carries the pan
+    // structure with the corrected sign.
+    for ( int b = 0; b < 3; ++b )
+    {
+        REQUIRE( result[b][W * H - 1] > result[b][0] );
+    }
+}

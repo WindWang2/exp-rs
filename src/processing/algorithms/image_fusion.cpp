@@ -144,7 +144,7 @@ QVector<QVector<float>> ImageFusion::brovey(
         {
             if ( !validPixel[i] ||
                  panBand[i] == nodata || std::isnan( panBand[i] ) ||
-                 msSum[i] < 1e-10f )
+                 msSum[i] <= 1e-10f )  // negative band sums (negative reflectance) invert signs -> NoData
             {
                 result[b][i] = nodata;
             }
@@ -316,6 +316,21 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
         for ( int b = 0; b < nBands; ++b )
             sortedEigVec[b * nBands + i] = eigVec[b * nBands + eigIdx[i]];
     eigVec = sortedEigVec;
+
+    // Sign convention (#611): Jacobi eigenvector signs are arbitrary. If the
+    // leading eigenvector column is net-negative, substituting the pan band
+    // (positively correlated with the scene) for PC1 would inject the pan
+    // structure NEGATIVELY into every band - spatially inverted sharpening.
+    // Force sum_b V[b,0] >= 0; projections and the inverse transform below
+    // both use the same (negated) column, so the PCA round trip is unchanged.
+    {
+        double colSum = 0;
+        for ( int b = 0; b < nBands; ++b )
+            colSum += eigVec[b * nBands + 0];
+        if ( colSum < 0 )
+            for ( int b = 0; b < nBands; ++b )
+                eigVec[b * nBands + 0] = -eigVec[b * nBands + 0];
+    }
 
     // Step 3: Forward PCA (project data onto eigenvectors)
     QVector<QVector<float>> pc( nBands );
@@ -733,7 +748,22 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
              params.redIdx >= nMsBands || params.greenIdx >= nMsBands || params.blueIdx >= nMsBands )
         {
             if ( errorMessage )
-                *errorMessage = QStringLiteral( "Invalid RGB band selection for IHS fusion" );
+                *errorMessage = QStringLiteral(
+                    "Invalid RGB band selection for IHS fusion: redIdx/greenIdx/blueIdx are "
+                    "0-BASED indices into the MS raster (0..%1)" )
+                        .arg( nMsBands - 1 );
+            return false;
+        }
+        if ( params.redIdx == params.greenIdx || params.redIdx == params.blueIdx
+             || params.greenIdx == params.blueIdx )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral(
+                    "IHS fusion requires three DISTINCT 0-based RGB band indices "
+                    "(got red=%1 green=%2 blue=%3)" )
+                        .arg( params.redIdx )
+                        .arg( params.greenIdx )
+                        .arg( params.blueIdx );
             return false;
         }
     }
@@ -914,7 +944,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                     {
                         if ( msData[i] == nodata || std::isnan( msData[i] ) ||
                              panBuf[i] == nodata || std::isnan( panBuf[i] ) ||
-                             msSum[i] < 1e-10f )
+                             msSum[i] <= 1e-10f )  // negative band sums invert signs -> NoData
                         {
                             outData[i] = nodata;
                         }
@@ -1212,6 +1242,18 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
         for ( int i = 0; i < nMsBands; ++i )
             for ( int b = 0; b < nMsBands; ++b )
                 V[b][i] = eigVec[b * nMsBands + eigIdx[i]];
+
+        // Sign convention (#611): see the in-memory pcaFusion variant. Without
+        // this, a net-negative leading eigenvector substitutes the pan band
+        // with inverted sign and every band comes out spatially inverted.
+        {
+            double colSum = 0;
+            for ( int b = 0; b < nMsBands; ++b )
+                colSum += V[b][0];
+            if ( colSum < 0 )
+                for ( int b = 0; b < nMsBands; ++b )
+                    V[b][0] = -V[b][0];
+        }
 
         // PC1 mean is mathematically 0 and PC1 stddev is sqrt(lambda1)
         double stdPC1 = std::sqrt( std::max( 0.0, eigVal[eigIdx[0] * nMsBands + eigIdx[0]] ) );
