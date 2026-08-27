@@ -55,6 +55,14 @@ class CORE_EXPORT QgsProcessingAlgRunnerTask : public QgsTask
      */
     bool algorithmCanceled() { return isCanceled(); }
 
+    /**
+     * The context the algorithm actually EXECUTED in. Result layers and
+     * layersToLoadOnCompletion land here (not in the caller's context);
+     * post-execution result handling must use this context, otherwise no
+     * output layers are found and nothing loads (#628).
+     */
+    QgsProcessingContext *executionContext() const { return mOwnedContext.get(); }
+
   signals:
 
     /**

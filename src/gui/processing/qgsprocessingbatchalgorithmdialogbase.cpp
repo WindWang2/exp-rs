@@ -121,6 +121,7 @@ void QgsProcessingBatchAlgorithmDialogBase::executeNext()
   if ( !( algorithm()->flags() & Qgis::ProcessingAlgorithmFlag::NoThreading ) )
   {
     QgsProcessingAlgRunnerTask *task = new QgsProcessingAlgRunnerTask( algorithm(), mCurrentParameters, *mTaskContext, mBatchFeedback.get(), QgsTask::CanCancel | QgsTask::Hidden );
+    m_currentRunnerTask = task;
     if ( task->algorithmCanceled() )
       onTaskComplete( false, {} );
     else
@@ -157,7 +158,15 @@ void QgsProcessingBatchAlgorithmDialogBase::onTaskComplete( bool ok, const QVari
 
     mResults.append( QVariantMap( { { u"parameters"_s, mCurrentParameters }, { u"results"_s, results } } ) );
 
-    handleAlgorithmResults( algorithm(), *mTaskContext, mBatchFeedback.get(), mCurrentParameters );
+    // #628: the runner task executes in an OWNED context (the #482
+    // dangling-context fix); result layers live there, not in mTaskContext -
+    // handling results against the caller's context found zero layers and
+    // silently loaded nothing.
+    if ( m_currentRunnerTask )
+      handleAlgorithmResults( algorithm(), *m_currentRunnerTask->executionContext(), mBatchFeedback.get(), mCurrentParameters );
+    else
+      handleAlgorithmResults( algorithm(), *mTaskContext, mBatchFeedback.get(), mCurrentParameters );
+    m_currentRunnerTask = nullptr;
     executeNext();
   }
   else if ( mBatchFeedback->isCanceled() )

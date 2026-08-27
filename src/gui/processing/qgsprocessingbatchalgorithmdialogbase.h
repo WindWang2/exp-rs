@@ -109,6 +109,8 @@ class GUI_EXPORT QgsProcessingBatchAlgorithmDialogBase : public QgsProcessingAlg
     std::unique_ptr<QgsProcessingFeedback> mFeedback;
     std::unique_ptr<QgsProcessingBatchFeedback> mBatchFeedback;
     std::unique_ptr<QgsProcessingContext> mTaskContext;
+    //! The in-flight runner task whose OWNED context holds the result layers (#628).
+    QgsProcessingAlgRunnerTask *m_currentRunnerTask = nullptr;
     QList<QVariantMap> mResults;
     QList<QVariantMap> mErrors;
     QElapsedTimer mTotalTimer;
