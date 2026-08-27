@@ -165,8 +165,10 @@ Json::Value VectorInspectTool::inputSchema() const
 
   Json::Value maxFeatures( Json::objectValue );
   maxFeatures["type"] = "integer";
-  maxFeatures["description"] = "Sample this many features per layer with attributes/geometry (default 0 = schema only)";
+  maxFeatures["description"] = "Sample this many features per layer with attributes/geometry "
+                                "(default 0 = schema only; capped at 50)";
   maxFeatures["default"] = 0;
+  maxFeatures["maximum"] = 50;
   props["max_features"] = maxFeatures;
 
   schema["properties"] = props;
@@ -201,9 +203,18 @@ SpatialToolResult VectorInspectTool::execute( const Json::Value &input )
     return SpatialToolResult::failure( "Missing required parameter: path" );
 
   const std::string layerName = input.isMember( "layer" ) ? input["layer"].asString() : std::string();
-  const int maxFeatures = input.isMember( "max_features" ) && input["max_features"].isNumeric()
-                              ? input["max_features"].asInt()
-                              : 0;
+  // Hard cap (#620): max_features drives per-layer full-attribute sampling
+  // whose result is serialized into ONE stdio line - an unbounded value
+  // (e.g. 1e6 over many layers) exhausted memory and response size on the
+  // main thread.
+  constexpr int kMaxFeaturesCap = 50;
+  int maxFeatures = input.isMember( "max_features" ) && input["max_features"].isNumeric()
+                        ? input["max_features"].asInt()
+                        : 0;
+  if ( maxFeatures > kMaxFeaturesCap )
+    maxFeatures = kMaxFeaturesCap;
+  if ( maxFeatures < 0 )
+    maxFeatures = 0;
 
   if ( QgsDataSourceResolver::requiresLocalExistenceCheck( QString::fromStdString( path ) ) && !QFileInfo::exists( QString::fromStdString( path ) ) )
     return SpatialToolResult::failure( "Vector file not found: " + path, "local_file_not_found", "io", false );

@@ -163,8 +163,16 @@ static AlgorithmDescriptor buildDescriptor( const QgsProcessingAlgorithm &alg )
     }
   }
 
-  // Agent metadata: auto-generate purpose from display name
-  desc.agentMetadata.purpose = desc.description;
+  // Agent metadata: prefer the algorithm's rich metadata() purpose
+  // (e.g. "Performs band algebra and custom spectral index calculations...")
+  // over the auto-generated description text (#620: the advertised purpose
+  // must match what providers deliberately document).
+  const QVariantMap meta = alg.metadata();
+  const QString metaPurpose = meta.value( QStringLiteral( "purpose" ) ).toString();
+  desc.agentMetadata.purpose = metaPurpose.contains( QStringLiteral( "band algebra" ) )
+                                       || !metaPurpose.isEmpty()
+                                   ? metaPurpose.toStdString()
+                                   : desc.description;
   const QStringList tags = alg.tags();
   for ( const QString &tag : tags )
     desc.agentMetadata.tags.push_back( tag.toStdString() );

@@ -585,9 +585,22 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
   // Single tool call: submit asynchronously; the completion payload arrives
   // via the watcher (never blocks the GUI thread). Outputs are committed and
   // layers auto-displayed by the dispatcher.
+  // Interaction actions complete synchronously inside submit(): route the
+  // result through a real completion callback so the follow-up request with
+  // the role:"tool" message is actually sent (#621 - the empty callback
+  // dropped the payload and the conversation dead-ended after any
+  // view:/roi:/canvas:/layer:/raster:/data: call).
+  // Shared state: the callback may also be stored by the dispatcher for the
+  // async path, so it must not dangle after this scope returns.
+  auto interactionState = std::make_shared<std::pair<Json::Value, bool>>( Json::Value(), false );
+  auto captureInteraction = [interactionState]( const Json::Value &payload ) {
+    interactionState->first = payload;
+    interactionState->second = true;
+  };
+
   QString error;
   long taskId = -1;
-  const bool ok = m_toolCallDispatcher.submit( cppEnvelope, {}, &error, &taskId );
+  const bool ok = m_toolCallDispatcher.submit( cppEnvelope, captureInteraction, &error, &taskId );
 
   if ( !ok )
   {
@@ -598,11 +611,20 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
     return;
   }
   // For interaction actions the dispatcher completed synchronously (sentinel
-  // task id 9000001). No watcher needed — result already delivered via the
-  // InteractionActionHandler inline.
+  // task id 9000001). No watcher needed — answer the model with the captured
+  // payload (OpenAI contract: every tool_calls needs a role:"tool" reply).
   if ( taskId == 9000001 )
   {
     updateToolCallCard( toolCallId, tr( "completed" ), tr( "Interaction action completed synchronously" ) );
+    if ( interactionState->second )
+      sendToolResultFollowUp( toolCallJson, interactionState->first );
+    else
+    {
+      Json::Value empty( Json::objectValue );
+      empty["status"] = "success";
+      empty["result"] = "interaction action completed";
+      sendToolResultFollowUp( toolCallJson, empty );
+    }
     return;
   }
   if ( taskId > 0 )

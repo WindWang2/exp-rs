@@ -133,8 +133,17 @@ void registerNoopOperator()
 {
     sicnu::operators::RSOperatorRegistry::instance().registerOperator(
         "rs:mcp_noop", []() { return std::make_unique<NoopOperator>(); });
-    // Mirror the new operator into AtomicAlgorithmRegistry (dispatcher surface).
-    sicnu::processing::AtomicAlgorithmRegistry::instance().reset();
+    // Mirror the new operator into AtomicAlgorithmRegistry (dispatcher
+    // surface) WITHOUT reset(): reset() drops every provider-based adapter
+    // (qgis_algorithms:*, ...) for the rest of the process and broke the
+    // later search/schema sections. Register the single noop adapter
+    // directly instead.
+    auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
+    if (!registry.findAdapter("rs:mcp_noop")) {
+        auto op = sicnu::operators::RSOperatorRegistry::instance().create("rs:mcp_noop");
+        if (op)
+            registry.registerAdapter(std::make_shared<sicnu::processing::RsOperatorAdapter>(std::move(op)));
+    }
 }
 
 QString waitForTerminal(TestMcpServer &server, const QString &execId)
@@ -154,12 +163,30 @@ QString waitForTerminal(TestMcpServer &server, const QString &execId)
 
 } // namespace
 
+namespace {
+/// Mirrors production app startup (src/app/main.cpp): the engine registers
+/// its provider adapters, which mirror qgis_algorithms:*/gdal_tools:*/*
+/// descriptors into AtomicAlgorithmRegistry. Without this the schema and
+/// execute_algorithm surfaces see only rs: operators (#620 regression fix;
+/// the call was lost when the legacy suites were pruned in the workflow-v2
+/// test pass).
+void ensureAlgorithmEngineInitialized()
+{
+    static const bool done = [] {
+        sicnu::AlgorithmEngine::instance().initialize();
+        return true;
+    }();
+    (void)done;
+}
+} // namespace
+
 TEST_CASE("MCP Server tests", "[agent][mcp]") {
     // Register providers if not already registered
     if (!QgsApplication::processingRegistry()->providerById("qgis_algorithms"))
     {
         QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
     }
+    ensureAlgorithmEngineInitialized();
 
     TestMcpServer server;
 
@@ -490,6 +517,7 @@ TEST_CASE("McpServer synchronously rejects unknown algorithms and operators", "[
 }
 
 TEST_CASE("McpServer executes qgis processing algorithms to terminal state", "[agent][mcp][execute_algorithm]") {
+    ensureAlgorithmEngineInitialized();
     if (!QgsApplication::processingRegistry()->providerById("qgis_algorithms"))
     {
         QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
@@ -957,11 +985,18 @@ TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][s
     badParams[QStringLiteral( "name" )] = QStringLiteral( "spatial:vector_inspect" );
     badReq[QStringLiteral( "params" )] = badParams;
     server.lastErrorId = QVariant();
+    server.lastResponseId = QVariant();
     server.testHandleRequest( badReq );
-    CHECK( server.lastErrorId.toInt() == 43 );
-    CHECK( server.lastErrorMessage.contains( QStringLiteral( "path" ) ) );
-    CHECK( server.lastErrorData.value( QStringLiteral( "errorCode" ) ).toString() == QStringLiteral( "INVALID_PARAMETER" ) );
-    CHECK( server.lastErrorData.value( QStringLiteral( "errorCategory" ) ).toString() == QStringLiteral( "validation" ) );
+    // Execution failures are MCP tool results with isError:true (#620), not
+    // JSON-RPC errors; structured codes ride along in the result object.
+    CHECK( server.lastErrorId.isNull() );
+    CHECK( server.lastResponseId.toInt() == 43 );
+    CHECK( server.lastResponseResult.value( QStringLiteral( "isError" ) ).toBool() );
+    const auto badContent = server.lastResponseResult.value( QStringLiteral( "content" ) ).toList();
+    REQUIRE( badContent.size() == 1 );
+    CHECK( badContent.first().toMap().value( QStringLiteral( "text" ) ).toString().contains( QStringLiteral( "path" ) ) );
+    CHECK( server.lastResponseResult.value( QStringLiteral( "errorCode" ) ).toString() == QStringLiteral( "INVALID_PARAMETER" ) );
+    CHECK( server.lastResponseResult.value( QStringLiteral( "errorCategory" ) ).toString() == QStringLiteral( "validation" ) );
 
     // tools/list includes the spatial catalog tools alongside meta tools.
     QVariantMap listReq;

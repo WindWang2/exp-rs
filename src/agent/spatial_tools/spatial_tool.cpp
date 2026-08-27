@@ -22,6 +22,40 @@ std::string validateAgainstRequired( const Json::Value &input, const Json::Value
     if ( !input.isMember( key.asString() ) )
       return "Missing required parameter: " + key.asString();
   }
+
+  // Declared-type check (#620): validating only `required` let a
+  // {"path": {"a": 1}} input reach asString() and escape as an untyped
+  // -32000 instead of a structured INVALID_PARAMETER.
+  const Json::Value &properties = schema.isMember( "properties" ) && schema["properties"].isObject()
+                                      ? schema["properties"]
+                                      : Json::Value::nullSingleton();
+  if ( properties.isNull() )
+    return std::string();
+  for ( const auto &name : input.getMemberNames() )
+  {
+    if ( !properties.isMember( name ) )
+      continue;
+    const Json::Value &decl = properties[name];
+    if ( !decl.isObject() || !decl.isMember( "type" ) || !decl["type"].isString() )
+      continue;
+    const std::string type = decl["type"].asString();
+    const Json::Value &value = input[name];
+    bool ok = true;
+    if ( type == "string" )
+      ok = value.isString();
+    else if ( type == "integer" )
+      ok = value.isIntegral();
+    else if ( type == "number" )
+      ok = value.isNumeric();
+    else if ( type == "boolean" )
+      ok = value.isBool();
+    else if ( type == "array" )
+      ok = value.isArray();
+    else if ( type == "object" )
+      ok = value.isObject();
+    if ( !ok )
+      return "Parameter '" + name + "' must be of type " + type;
+  }
   return std::string();
 }
 

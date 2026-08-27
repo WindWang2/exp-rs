@@ -1,6 +1,8 @@
 // src/agent/tool_catalog/interaction_tool_provider.cpp
 #include "interaction_tool_provider.h"
 
+#include "agent/interaction_tool_registry.h"
+
 namespace sicnu::agent::tool_catalog {
 
 namespace {
@@ -293,6 +295,12 @@ InteractionToolProvider::InteractionToolProvider()
 
 void InteractionToolProvider::resetDefaults()
 {
+  // Single source of truth (#622): descriptors derive from the live
+  // InteractionToolRegistry (the same definitions tools/call dispatches
+  // through), replacing the hand-duplicated static set that had drifted
+  // (stale enums, wrong required flags) and omitted ~10 dispatchable tools.
+  // The static factories below are kept for the richer output ports of the
+  // two display tools; registry entries only fill gaps.
   std::lock_guard<std::mutex> lock( mMutex );
   mTools.clear();
 
@@ -307,6 +315,30 @@ void InteractionToolProvider::resetDefaults()
 
   auto zoom = makeZoomToExtentTool();
   mTools[zoom.name] = zoom;
+  // Derive any registry tool not already covered above so every dispatchable
+  // interaction tool is advertised (view:*, roi:*, raster:get/reset_display...).
+  try
+  {
+    for ( const auto &def : sicnu::agent::InteractionToolRegistry::instance().listTools() )
+    {
+      if ( mTools.find( def.name ) != mTools.end() )
+        continue;
+      AgentTool tool;
+      tool.name = def.name;
+      tool.displayName = def.displayName;
+      tool.category = ToolCategory::Interaction;
+      tool.group = def.category;
+      tool.description = def.description;
+      tool.inputSchema = def.inputSchema;
+      mTools[def.name] = std::move( tool );
+    }
+  }
+  catch ( ... )
+  {
+    // Registry unavailable (early static init): the static set above still
+    // provides the core display tools.
+  }
+
 }
 
 std::vector<AgentTool> InteractionToolProvider::provideTools() const

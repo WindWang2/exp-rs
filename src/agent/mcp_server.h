@@ -72,6 +72,13 @@ private slots:
 
 protected:
     void handleRequest(const QVariantMap &request);
+    /// Sends a tools/call execution failure as an MCP result object with
+    /// isError:true (plus structured errorCode/errorCategory when known)
+    /// instead of a JSON-RPC error response (#620).
+    void sendToolErrorResult(const QVariant &id, const QString &message,
+                             const QString &errorCode = QString(),
+                             const QString &errorCategory = QString());
+
     virtual void sendResponse(const QVariant &id, const QVariantMap &result);
     virtual void sendError(const QVariant &id, int code, const QString &message);
     virtual void sendError(const QVariant &id, int code, const QString &message, const QVariantMap &data);

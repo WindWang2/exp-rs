@@ -741,27 +741,24 @@ void McpServer::handleRequest(const QVariantMap &request)
             callResult[QStringLiteral("content")] = contentList;
             sendResponse(id, callResult);
         }
+        // Tool EXECUTION failures are tool results with isError:true (MCP
+        // spec) so the model can read the failure and react; JSON-RPC error
+        // responses are reserved for protocol faults (#620). The structured
+        // errorCode/errorCategory ride along in the result object.
         catch (const McpToolError &e)
         {
             if (!isNotification)
-            {
-                QVariantMap data;
-                if (!e.errorCode.isEmpty())
-                    data[QStringLiteral("errorCode")] = e.errorCode;
-                if (!e.errorCategory.isEmpty())
-                    data[QStringLiteral("errorCategory")] = e.errorCategory;
-                sendError(id, e.rpcCode, QString::fromUtf8(e.what()), data);
-            }
+                sendToolErrorResult(id, QString::fromUtf8(e.what()), e.errorCode, e.errorCategory);
         }
         catch (const std::exception &e)
         {
             if (!isNotification)
-                sendError(id, -32000, QString::fromUtf8(e.what()));
+                sendToolErrorResult(id, QString::fromUtf8(e.what()), QString(), QString());
         }
         catch (...)
         {
             if (!isNotification)
-                sendError(id, -32000, QStringLiteral("Unknown error during tool execution"));
+                sendToolErrorResult(id, QStringLiteral("Unknown error during tool execution"), QString(), QString());
         }
     }
     else
@@ -770,6 +767,29 @@ void McpServer::handleRequest(const QVariantMap &request)
             return;
         sendError(id, -32601, QStringLiteral("Method not found: ") + method);
     }
+}
+
+void McpServer::sendToolErrorResult(const QVariant &id, const QString &message,
+                                    const QString &errorCode, const QString &errorCategory)
+{
+    // MCP-spec failure surface (#620): a tools/call execution error is a
+    // RESULT object with isError:true, never a JSON-RPC error response
+    // (those are transport/protocol faults). The structured code/category
+    // let agent runtimes classify (retry vs re-plan vs abort).
+    QVariantMap contentObj;
+    contentObj[QStringLiteral("type")] = QStringLiteral("text");
+    contentObj[QStringLiteral("text")] = message;
+    QVariantList contentList;
+    contentList.append(contentObj);
+
+    QVariantMap callResult;
+    callResult[QStringLiteral("content")] = contentList;
+    callResult[QStringLiteral("isError")] = true;
+    if (!errorCode.isEmpty())
+        callResult[QStringLiteral("errorCode")] = errorCode;
+    if (!errorCategory.isEmpty())
+        callResult[QStringLiteral("errorCategory")] = errorCategory;
+    sendResponse(id, callResult);
 }
 
 void McpServer::sendResponse(const QVariant &id, const QVariantMap &result)
@@ -873,6 +893,16 @@ QVariantMap McpServer::handleListAlgorithms()
         algMap[QStringLiteral("tags")] = tags;
         algMap[QStringLiteral("memoryPolicy")] = QString::fromStdString(desc.agentMetadata.memoryPolicy);
         algMap[QStringLiteral("largeRasterSafe")] = desc.agentMetadata.largeRasterSafe;
+
+        // Surface the descriptor's agent purpose (provider metadata() or
+        // generated) under the same "metadata" key the provider branch
+        // below uses, so both listing paths speak one shape (#620).
+        if (!desc.agentMetadata.purpose.empty())
+        {
+            QVariantMap metaMap;
+            metaMap[QStringLiteral("purpose")] = QString::fromStdString(desc.agentMetadata.purpose);
+            algMap[QStringLiteral("metadata")] = metaMap;
+        }
 
         QVariantList outList;
         for (const auto &out : desc.outputs)
