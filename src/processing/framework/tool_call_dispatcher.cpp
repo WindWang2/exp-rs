@@ -1,6 +1,7 @@
 // src/processing/framework/tool_call_dispatcher.cpp
 #include "tool_call_dispatcher.h"
 
+#include "algorithm_descriptor.h"
 #include "atomic_algorithm_registry.h"
 #include "json_params_converter.h"
 #include "schema_validator.h"
@@ -51,9 +52,33 @@ sicnu::data::AssetKind assetKindForSuffix( const QString &suffix )
   return sicnu::data::AssetKind::Raster;
 }
 
-QString assetKindLabel( const QString &path )
+/// Resolves the asset kind for a tool-call output path.  When the path has a
+/// recognised suffix we trust it; otherwise we consult the algorithm descriptor
+/// so that vector outputs without an extension are not misclassified as raster.
+/// Falls back to raster when no hint is available.
+sicnu::data::AssetKind assetKindForOutputPath( const QString &path, const QString &algorithmId )
 {
-  switch ( assetKindForSuffix( QFileInfo( path ).suffix() ) )
+  const QString suffix = QFileInfo( path ).suffix();
+  if ( !suffix.isEmpty() )
+    return assetKindForSuffix( suffix );
+
+  const auto adapter = AtomicAlgorithmRegistry::instance().findAdapter( algorithmId.toStdString() );
+  if ( adapter )
+  {
+    for ( const auto &port : adapter->descriptor().outputs )
+    {
+      if ( port.type == DataType::Vector )
+        return sicnu::data::AssetKind::Vector;
+      if ( port.type == DataType::Raster )
+        return sicnu::data::AssetKind::Raster;
+    }
+  }
+  return sicnu::data::AssetKind::Raster;
+}
+
+QString assetKindLabelImpl( const QString &path, const QString &algorithmId )
+{
+  switch ( assetKindForOutputPath( path, algorithmId ) )
   {
     case sicnu::data::AssetKind::Vector:
       return QStringLiteral( "vector" );
@@ -63,6 +88,11 @@ QString assetKindLabel( const QString &path )
 }
 
 } // namespace
+
+QString ToolCallDispatcher::assetKindLabel( const QString &path, const QString &algorithmId )
+{
+  return assetKindLabelImpl( path, algorithmId );
+}
 
 ToolCallDispatcher::ToolCallDispatcher( SubmissionSink sink, CompletionWatcher watcher )
   : mSink( std::move( sink ) )
@@ -87,12 +117,13 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
       }
       sicnu::OutputCommitter committer( managerGuard );
       const QFileInfo outInfo( info.outputLayerPath );
-      const QString suffix = outInfo.suffix().isEmpty() ? QStringLiteral( "tif" ) : outInfo.suffix();
+      const QString suffix = outInfo.suffix();
+      const QString stableSuffix = suffix.isEmpty() ? QStringLiteral( "tif" ) : suffix;
       const QString stablePath = outInfo.absolutePath() + QStringLiteral( "/" )
-                                 + outInfo.completeBaseName() + QStringLiteral( "_committed." ) + suffix;
+                                 + outInfo.completeBaseName() + QStringLiteral( "_committed." ) + stableSuffix;
 
       sicnu::AlgorithmOutputRequest request;
-      request.kind = assetKindForSuffix( suffix );
+      request.kind = assetKindForOutputPath( info.outputLayerPath, info.algorithmId );
       request.tempPath = info.outputLayerPath;
       request.stablePath = stablePath;
       request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
@@ -601,12 +632,12 @@ Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTa
         {
           payload["assetId"] = assetId;
         }
-        payload["assetKind"] = assetKindLabel( info.outputLayerPath ).toStdString();
+        payload["assetKind"] = assetKindLabelImpl( info.outputLayerPath, info.algorithmId ).toStdString();
 
         if ( verificationHandler )
         {
           const Json::Value verification = verificationHandler( QString::fromStdString( committedPath ),
-                                                                  assetKindLabel( info.outputLayerPath ) );
+                                                                  assetKindLabelImpl( info.outputLayerPath, info.algorithmId ) );
           payload["verification"] = verification.isObject() ? verification : Json::Value( Json::objectValue );
           const bool verified = payload["verification"].isMember( "ok" ) && payload["verification"]["ok"].asBool();
           payload["verified"] = verified;

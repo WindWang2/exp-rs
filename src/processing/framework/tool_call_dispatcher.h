@@ -153,6 +153,11 @@ public:
                                               const OutputCommitterHandler &committerHandler = {},
                                               const OutputVerificationHandler &verificationHandler = {} );
 
+  /// Returns "raster" or "vector" for an output path.  When the path has no
+  /// extension the algorithm descriptor is consulted so vector outputs are not
+  /// misclassified (P1-M3).
+  static QString assetKindLabel( const QString &path, const QString &algorithmId = QString() );
+
   /// Synchronous entry point: submits task, awaits completion or timeout,
   /// applies OutputCommitterHandler if configured, and returns standardized result JSON.
   Json::Value dispatchAndAwait( const Json::Value &envelope,

@@ -161,10 +161,15 @@ void GuiJobHandle::onTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
   if ( m_taskId < 0 || info.taskId != m_taskId )
     return;
 
-  if ( info.status == sicnu::TaskStatus::Running || info.status == sicnu::TaskStatus::Queued )
+  if ( info.status == sicnu::TaskStatus::Running || info.status == sicnu::TaskStatus::Queued
+       || info.status == sicnu::TaskStatus::WaitingResource || info.status == sicnu::TaskStatus::Cancelling )
   {
     int pct = static_cast<int>( info.progressPercentage );
     QString statusText = info.errorMessage;
+    if ( statusText.isEmpty() && info.status == sicnu::TaskStatus::WaitingResource )
+      statusText = QObject::tr( "Waiting for available resources" );
+    if ( statusText.isEmpty() && info.status == sicnu::TaskStatus::Cancelling )
+      statusText = QObject::tr( "Cancellation in progress" );
     if ( m_onProgress )
     {
       m_onProgress( pct, statusText );

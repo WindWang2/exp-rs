@@ -1046,3 +1046,33 @@ TEST_CASE( "ToolCallDispatcher output commit handler survives DataManager destru
   const std::string errorMessage = payload["errorMessage"].asString();
   REQUIRE( errorMessage.find( "DataManager" ) != std::string::npos );
 }
+
+TEST_CASE( "ToolCallDispatcher asset kind falls back to algorithm descriptor when extension is missing",
+           "[processing][tool_call_dispatcher][asset_kind]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+
+  AlgorithmDescriptor vectorDesc;
+  PortDescriptor out;
+  out.name = "OUTPUT";
+  out.type = DataType::Vector;
+  vectorDesc.outputs.push_back( out );
+  AtomicAlgorithmRegistry::instance().registerAdapter( std::make_shared<StubAdapter>( "stub:vector_noext", vectorDesc ) );
+
+  AlgorithmDescriptor rasterDesc;
+  PortDescriptor rout;
+  rout.name = "OUTPUT";
+  rout.type = DataType::Raster;
+  rasterDesc.outputs.push_back( rout );
+  AtomicAlgorithmRegistry::instance().registerAdapter( std::make_shared<StubAdapter>( "stub:raster_noext", rasterDesc ) );
+
+  CHECK( ToolCallDispatcher::assetKindLabel( QStringLiteral( "/tmp/unknown" ), QStringLiteral( "stub:vector_noext" ) )
+         == QStringLiteral( "vector" ) );
+  CHECK( ToolCallDispatcher::assetKindLabel( QStringLiteral( "/tmp/unknown" ), QStringLiteral( "stub:raster_noext" ) )
+         == QStringLiteral( "raster" ) );
+  // Suffix still takes precedence when present.
+  CHECK( ToolCallDispatcher::assetKindLabel( QStringLiteral( "/tmp/road.shp" ), QStringLiteral( "stub:raster_noext" ) )
+         == QStringLiteral( "vector" ) );
+  // Unknown algorithm falls back to raster.
+  CHECK( ToolCallDispatcher::assetKindLabel( QStringLiteral( "/tmp/unknown" ) ) == QStringLiteral( "raster" ) );
+}

@@ -94,7 +94,9 @@ QString TaskCenterDock::formatStatus(TaskStatus status) const
 {
     switch (status) {
         case TaskStatus::Queued: return tr("排队中");
+        case TaskStatus::WaitingResource: return tr("等待资源");
         case TaskStatus::Running: return tr("运行中");
+        case TaskStatus::Cancelling: return tr("取消中");
         case TaskStatus::Paused: return tr("已暂停");
         case TaskStatus::Completed: return tr("已完成");
         case TaskStatus::Failed: return tr("失败");
@@ -209,7 +211,7 @@ void TaskCenterDock::onSelectionChanged()
 
     m_pauseBtn->setEnabled(info.status == TaskStatus::Running);
     m_resumeBtn->setEnabled(info.status == TaskStatus::Paused);
-    m_cancelBtn->setEnabled(info.status == TaskStatus::Queued || info.status == TaskStatus::Running || info.status == TaskStatus::Paused);
+    m_cancelBtn->setEnabled((info.status == TaskStatus::Queued || info.status == TaskStatus::Running || info.status == TaskStatus::Paused || info.status == TaskStatus::WaitingResource) && info.status != TaskStatus::Cancelling);
     m_retryBtn->setEnabled(info.status == TaskStatus::Failed || info.status == TaskStatus::Canceled);
 }
 

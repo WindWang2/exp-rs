@@ -399,7 +399,7 @@ bool RsJobPanel::passesFilter( const QString &stateText ) const
   if ( key == QLatin1String( "all" ) )
     return true;
   if ( key == QLatin1String( "active" ) )
-    return stateText == tr( "排队" ) || stateText == tr( "运行中" ) || stateText == tr( "已暂停" );
+    return stateText == tr( "排队" ) || stateText == tr( "等待资源" ) || stateText == tr( "运行中" ) || stateText == tr( "取消中" ) || stateText == tr( "已暂停" );
   if ( key == QLatin1String( "failed" ) )
     return stateText == tr( "失败" );
   if ( key == QLatin1String( "finished" ) )
