@@ -20,15 +20,15 @@ if(MSVC)
 else()
     option(ENABLE_LTO "Enable Link-Time Optimization for Release builds" OFF)
 
-# LTO policy (#629): the historical global -fno-lto silently defeated
-# CMAKE_INTERPROCEDURAL_OPTIMIZATION (Release/ENABLE_LTO). Keep LTO off for
-# debuggability by default, but honour explicit opt-in.
-if(ENABLE_LTO)
-    add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
-else()
-    add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -fno-lto)
-endif()
-    add_link_options(-fno-lto)
+    # LTO policy (#629): the historical global -fno-lto silently defeated
+    # CMAKE_INTERPROCEDURAL_OPTIMIZATION (Release/ENABLE_LTO). Keep LTO off for
+    # debuggability by default, but honour explicit opt-in.
+    if(ENABLE_LTO)
+        add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+    else()
+        add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -fno-lto)
+        add_link_options(-fno-lto)
+    endif()
 endif()
 
 set(CPACK_PACKAGE_VERSION_MAJOR 1)
