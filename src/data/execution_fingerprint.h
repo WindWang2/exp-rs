@@ -79,9 +79,14 @@ struct TaggedDerivationInput
   bool operator==( const TaggedDerivationInput & ) const = default;
 };
 
-/// Canonical JSON serializer with strictly sorted keys and ES6-style
-/// shortest-round-trip number formatting (the number serialization mandated
-/// by RFC 8785 / JCS), suitable for hashing.
+/// Canonical JSON serializer with strictly sorted keys and shortest-round-trip
+/// number formatting, suitable for hashing. RFC 8785 / JCS COMPATIBLE, NOT
+/// byte-identical: distinct doubles always serialize distinctly (and -0
+/// serializes as "0" per §3.2.2.3), but the exponent form follows Qt's 'g'
+/// format — two-digit exponents (1e-07, not 1e-7) and a precision-dependent
+/// fixed/exponential switch instead of the ES6 1e21/1e-6 thresholds — so the
+/// bytes may differ from a strict JCS serializer. Self-consistent hashing is
+/// what the cache relies on; cross-implementation byte equality is not claimed.
 QByteArray canonicalizeJsonRfc8785( const QJsonObject &obj );
 
 /// Build a fingerprint from the components. @a parameters is normalized (sorted

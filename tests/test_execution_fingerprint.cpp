@@ -112,6 +112,40 @@ TEST_CASE( "fingerprintFromDerivation matches makeExecutionFingerprint",
   REQUIRE( fromRec == direct );
 }
 
+TEST_CASE( "RFC 8785 canonical form: -0.0 and 0.0 serialize identically",
+           "[cache][fingerprint]" )
+{
+  // RFC 8785 §3.2.2.3: negative zero serializes as "0". Both zero signs are
+  // the same parameter value and must not split the cache into two entries.
+  const auto z = canonicalizeJsonRfc8785( QJsonObject{ { "x", 0.0 } } );
+  const auto nz = canonicalizeJsonRfc8785( QJsonObject{ { "x", -0.0 } } );
+  REQUIRE( z == nz );
+  REQUIRE( z == QByteArray( R"({"x":0})" ) );
+}
+
+TEST_CASE( "RFC 8785 canonical form: shortest round-trip distinguishes near-equal doubles",
+           "[cache][fingerprint]" )
+{
+  const auto a = canonicalizeJsonRfc8785( QJsonObject{ { "x", 0.3 } } );
+  const auto b = canonicalizeJsonRfc8785( QJsonObject{ { "x", 0.30000000000000004 } } );
+  REQUIRE( a != b );
+  REQUIRE( a == QByteArray( R"({"x":0.3})" ) );
+}
+
+TEST_CASE( "ExecutionFingerprint v1 framing is not delimiter-injectable",
+           "[cache][fingerprint]" )
+{
+  // An adversarial algorithm id containing the '\nver=' framing must not
+  // alias a genuinely different (id, version) pair: before field escaping
+  // these two tuples produced byte-identical canonical forms.
+  const QJsonObject params;
+  const QVector<DerivationInput> inputs{ makeInput( AssetId::generate(), AssetRevision::initial() ) };
+
+  const auto injected = makeExecutionFingerprint( "rs:x\nver=2.0", "1.0", params, inputs );
+  const auto genuine = makeExecutionFingerprint( "rs:x", "2.0", params, inputs );
+  REQUIRE_FALSE( injected == genuine );
+}
+
 TEST_CASE( "ExecutionResultCache: off by default; opt-in lookup/store/invalidate",
            "[cache]" )
 {

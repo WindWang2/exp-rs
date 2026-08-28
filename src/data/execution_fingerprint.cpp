@@ -15,9 +15,24 @@ namespace sicnu::data
 
 namespace
 {
+/// JSON string serialization of @a s (quotes + escaping, no array wrapper).
+/// Used for every caller-controlled string in a canonical form so a value
+/// containing the framing delimiters ('\n', ';', '=') cannot inject or shift
+/// the field layout — two different (id, version) tuples must never collide
+/// into the same canonical bytes.
+QByteArray jsonEscaped( const QString &s )
+{
+  QJsonArray wrap = { s };
+  QByteArray out = QJsonDocument( wrap ).toJson( QJsonDocument::Compact );
+  if ( out.startsWith( '[' ) && out.endsWith( ']' ) )
+    return out.mid( 1, out.size() - 2 );
+  return out;
+}
+
 /// Canonical, order-independent string form of the fingerprint inputs, hashed
 /// with SHA-256. Parameter keys are sorted so map insertion order does not
-/// change the fingerprint.
+/// change the fingerprint. Every caller-controlled string is JSON-escaped so
+/// the '\n'-delimited framing is not injectable.
 QByteArray canonicalForm( const QString &algorithmId,
                           const QString &algorithmVersion,
                           const QJsonObject &parameters,
@@ -25,9 +40,9 @@ QByteArray canonicalForm( const QString &algorithmId,
 {
   QByteArray out;
   out.append( "alg=" );
-  out.append( algorithmId.toUtf8() );
+  out.append( jsonEscaped( algorithmId ) );
   out.append( "\nver=" );
-  out.append( algorithmVersion.toUtf8() );
+  out.append( jsonEscaped( algorithmVersion ) );
 
   // Normalize parameters: serialize via QJsonDocument with sorted keys.
   QJsonObject sortedParams = parameters;
@@ -38,18 +53,18 @@ QByteArray canonicalForm( const QString &algorithmId,
   for ( const auto &in : inputs )
   {
     out.append( "\nin=" );
-    out.append( in.assetId.toString().toUtf8() );
+    out.append( jsonEscaped( in.assetId.toString() ) );
     out.append( "@rev=" );
     out.append( QByteArray::number( static_cast<qint64>( in.revision.value() ) ) );
     if ( !in.bandReferences.isEmpty() )
     {
       out.append( ";bands=" );
-      out.append( in.bandReferences.join( ',' ).toUtf8() );
+      out.append( jsonEscaped( in.bandReferences.join( ',' ) ) );
     }
     if ( !in.valueDomain.isEmpty() )
     {
       out.append( ";vd=" );
-      out.append( in.valueDomain.toUtf8() );
+      out.append( jsonEscaped( in.valueDomain ) );
     }
   }
   return out;
@@ -73,7 +88,9 @@ QByteArray canonicalizeJsonValue( const QJsonValue &val )
   {
     const double d = val.toDouble();
     if ( d == 0.0 )
-      return std::signbit( d ) ? "-0" : "0"; // ES6 distinguishes -0 from 0
+      return "0"; // RFC 8785 §3.2.2.3: ES6 Number::toString does not
+                  // distinguish -0, so both zero signs serialize as "0" and
+                  // hash identically instead of splitting the cache.
     // Integer-valued doubles within the qint64 range serialize exactly. The
     // range guard also avoids UB on the static_cast for |d| >= 2^63.
     if ( std::fabs( d ) < 9.2233720368547758e18 && d == static_cast<qint64>( d ) )
@@ -93,13 +110,7 @@ QByteArray canonicalizeJsonValue( const QJsonValue &val )
     return QByteArray::number( d, 'g', 17 );
   }
   if ( val.isString() )
-  {
-    QJsonArray wrap = { val.toString() };
-    QByteArray s = QJsonDocument( wrap ).toJson( QJsonDocument::Compact );
-    if ( s.startsWith( '[' ) && s.endsWith( ']' ) )
-      return s.mid( 1, s.size() - 2 );
-    return s;
-  }
+    return jsonEscaped( val.toString() );
   if ( val.isArray() )
   {
     const QJsonArray arr = val.toArray();
@@ -122,11 +133,7 @@ QByteArray canonicalizeJsonValue( const QJsonValue &val )
     {
       if ( i > 0 ) out.append( ',' );
       const QString &k = keys[i];
-      QJsonArray wrap = { k };
-      QByteArray keyStr = QJsonDocument( wrap ).toJson( QJsonDocument::Compact );
-      if ( keyStr.startsWith( '[' ) && keyStr.endsWith( ']' ) )
-        keyStr = keyStr.mid( 1, keyStr.size() - 2 );
-      out.append( keyStr );
+      out.append( jsonEscaped( k ) );
       out.append( ':' );
       out.append( canonicalizeJsonValue( obj.value( k ) ) );
     }
