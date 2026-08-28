@@ -1,6 +1,7 @@
 #ifndef MCP_SERVER_H
 #define MCP_SERVER_H
 
+#include <QHash>
 #include <QObject>
 #include <QVariantMap>
 #include <QThread>
@@ -137,6 +138,10 @@ private:
     QCoreApplication *mApp = nullptr;
     /// Data Manager asset authority for lineage/provenance queries.
     sicnu::data::DataManager *m_dataManager = nullptr;
+    /// rpc request id -> TaskCenter task id for in-flight tools/call
+    /// executions, so a notifications/cancelled can cancel the mapped task
+    /// (#634). Bound: entries are only added, never queried after terminal.
+    QHash<qlonglong, long> m_cancelledRequestTasks;
 };
 
 #endif // MCP_SERVER_H

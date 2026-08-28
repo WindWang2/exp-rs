@@ -1,4 +1,5 @@
 #include "agent_run_coordinator.h"
+#include <algorithm>
 
 #include "data/data_manager.h"
 #include "processing/framework/algorithm_preflight.h"
@@ -229,8 +230,11 @@ QString AgentRunCoordinator::startRun( const AgentRunRequest &request )
     m_currentTaskId = -1;
   }
 
+  // Save the id before the move: a moved-from QString is null, so the old
+  // return always handed back an empty id (#634).
+  const QString runId = run.id;
   executeRun( std::move( run ) );
-  return run.id;
+  return runId;
 }
 
 AgentRun AgentRunCoordinator::runSynchronously( const AgentRunRequest &request )
@@ -439,6 +443,23 @@ void AgentRunCoordinator::transitionStage( AgentRun &run, AgentRunStage stage )
   {
     QMutexLocker lock( &m_mutex );
     m_runs[run.id] = run;
+    // Bound the run history (#634): every run record was retained forever.
+    // Keep the most recent 50, dropping only TERMINAL runs (active ones must
+    // survive for status queries and late transitions).
+    if ( m_runs.size() > 50 )
+    {
+      QStringList terminalIds;
+      for ( auto it = m_runs.begin(); it != m_runs.end(); ++it )
+      {
+        if ( it->id != m_activeRunId
+             && ( it->stage == AgentRunStage::Completed || it->stage == AgentRunStage::Failed ) )
+          terminalIds.append( it->id );
+      }
+      std::sort( terminalIds.begin(), terminalIds.end() );  // uuids sort by creation time only loosely; any stable drop is fine
+      const int excess = static_cast<int>( m_runs.size() ) - 50;
+      for ( int i = 0; i < excess && i < terminalIds.size(); ++i )
+        m_runs.remove( terminalIds[i] );
+    }
   }
   emit runStageChanged( run );
 }

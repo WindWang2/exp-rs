@@ -358,6 +358,9 @@ std::vector<InteractionToolDefinition> InteractionToolRegistry::listTools() cons
   {
     result.push_back( def );
   }
+  // Deterministic listing order (#634).
+  std::sort( result.begin(), result.end(),
+             []( const InteractionToolDefinition &a, const InteractionToolDefinition &b ) { return a.name < b.name; } );
   return result;
 }
 

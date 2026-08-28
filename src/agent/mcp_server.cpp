@@ -351,18 +351,29 @@ QVariantMap executionStatusResponse( sicnu::data::DataManager *dataManager,
     QVariantMap result = mcpStatusForTask(info);
     result[QStringLiteral("execution_id")] = executionId;
     result[QStringLiteral("algorithm_id")] = info.algorithmId;
-    if ( dataManager && info.status == sicnu::TaskStatus::Completed )
+    // Asset resolution (#634): the committed payload already carries the
+    // asset id (both committers stamp it); the provenance scan below is a
+    // FALLBACK that walked every asset x provenance() per poll - O(N) on
+    // every get_execution_status. Only run it when the payload lacks the id
+    // AND the catalog is small enough for the scan to be cheap.
+    const QVariant payloadAssetId = result.value( QStringLiteral( "result" ) ).toMap()
+                                        .value( QStringLiteral( "assetId" ) );
+    if ( dataManager && info.status == sicnu::TaskStatus::Completed
+         && payloadAssetId.toString().isEmpty() )
     {
         const QString taskRef = QString::number( info.taskId );
         const auto snapshots = dataManager->assets();
-        for ( const auto &snapshot : snapshots )
+        if ( snapshots.size() <= 200 )
         {
-            const auto prov = dataManager->provenance( snapshot.id() );
-            if ( prov && prov->taskReference == taskRef )
+            for ( const auto &snapshot : snapshots )
             {
-                result[QStringLiteral("asset_id")] = snapshot.id().toString();
-                result[QStringLiteral("asset_name")] = snapshot.displayName();
-                break;
+                const auto prov = dataManager->provenance( snapshot.id() );
+                if ( prov && prov->taskReference == taskRef )
+                {
+                    result[QStringLiteral("asset_id")] = snapshot.id().toString();
+                    result[QStringLiteral("asset_name")] = snapshot.displayName();
+                    break;
+                }
             }
         }
     }
@@ -538,6 +549,25 @@ void McpServer::handleRequest(const QVariantMap &request)
         result[QStringLiteral("serverInfo")] = serverInfo;
 
         sendResponse(id, result);
+    }
+    else if (method == QStringLiteral("notifications/cancelled"))
+    {
+        // MCP cancellation notification (#634): the client dropped a request
+        // (e.g. user abort). Best-effort: when the cancelled request id maps
+        // to a known tools/call execution, cancel its task so server-side
+        // work actually stops.
+        bool idOk = false;
+        const qlonglong cancelledRpcId = request.value(QStringLiteral("requestId")).toLongLong(&idOk);
+        QVariantMap cancelledInfo = request.value(QStringLiteral("requestInfo")).toMap();
+        Q_UNUSED(cancelledInfo)
+        if ( idOk )
+        {
+            const long taskId = m_cancelledRequestTasks.value( cancelledRpcId, -1 );
+            if ( taskId > 0 )
+                sicnu::TaskCenter::instance().cancelTask( taskId );
+        }
+        // Notifications never get a response.
+        return;
     }
     else if (method == QStringLiteral("notifications/initialized"))
     {
@@ -754,8 +784,23 @@ void McpServer::handleRequest(const QVariantMap &request)
                 return;
             }
 
+            // Remember the rpc-id -> task-id mapping so a later
+            // notifications/cancelled for this request can cancel the task.
+            if ( resultData.contains( QStringLiteral( "execution_id" ) ) )
+            {
+                bool tidOk = false;
+                const long tid = resultData.value( QStringLiteral( "execution_id" ) )
+                                     .toString()
+                                     .mid( QStringLiteral( "task-" ).size() )
+                                     .toLong( &tidOk );
+                if ( tidOk && tid > 0 && id.type() == QVariant::LongLong )
+                    m_cancelledRequestTasks[ id.toLongLong() ] = tid;
+            }
+
             QJsonDocument resultDoc = QJsonDocument::fromVariant(resultData);
-            contentObj[QStringLiteral("text")] = QString::fromUtf8(resultDoc.toJson(QJsonDocument::Indented));
+            // Compact (#634): indented JSON inflated every tools/call payload
+            // (whitespace is pure transport cost for the model).
+            contentObj[QStringLiteral("text")] = QString::fromUtf8(resultDoc.toJson(QJsonDocument::Compact));
             contentList.append(contentObj);
             callResult[QStringLiteral("content")] = contentList;
             sendResponse(id, callResult);
@@ -813,7 +858,9 @@ void McpServer::sendToolErrorResult(const QVariant &id, const QString &message,
 
 void McpServer::sendResponse(const QVariant &id, const QVariantMap &result)
 {
-    if (id.isNull() || !id.isValid())
+    // An explicit null id still identifies a response to a request that
+    // failed to parse (#634); only an ABSENT id means notification.
+    if (!id.isValid())
         return;
 
     QVariantMap response;

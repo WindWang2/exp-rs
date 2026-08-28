@@ -560,8 +560,17 @@ GDALDatasetH createOutputTiff(const QString &path,
         return nullptr;
     }
 
-    GDALSetGeoTransform(ds, const_cast<double *>(geoTransform.data()));
-    GDALSetProjection(ds, projection.toUtf8().constData());
+    // Check the setters (#634): a failed georeference write silently produced
+    // an unpositioned raster that "opened fine".
+    if (GDALSetGeoTransform(ds, const_cast<double *>(geoTransform.data())) != CE_None
+        && errorMessage) {
+        *errorMessage = QStringLiteral("Failed to set geotransform on %1").arg(path);
+    }
+    if (!projection.isEmpty()
+        && GDALSetProjection(ds, projection.toUtf8().constData()) != CE_None
+        && errorMessage) {
+        *errorMessage = QStringLiteral("Failed to set projection on %1").arg(path);
+    }
 
     return ds;
 }

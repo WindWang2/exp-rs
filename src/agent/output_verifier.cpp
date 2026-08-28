@@ -248,7 +248,9 @@ OutputVerification OutputVerifier::verifyVector( const QString &path )
     return report;
   }
 
-  const GIntBig featureCount = OGR_L_GetFeatureCount( layer, 1 ); // force count, small datasets only
+  // force=0 (#634): force=1 parsed the whole CSV/GeoJSON on the GUI thread
+  // just to count features; unknown (-1) is reported as such by the caller.
+  const GIntBig featureCount = OGR_L_GetFeatureCount( layer, 0 );
   report.summary["featureCount"] = static_cast<Json::Int64>( featureCount );
   if ( featureCount == 0 )
     addWarning( report, QStringLiteral( "First layer contains no features" ) );

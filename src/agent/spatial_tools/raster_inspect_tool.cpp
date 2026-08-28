@@ -1,5 +1,7 @@
 // src/agent/spatial_tools/raster_inspect_tool.cpp
 #include "raster_inspect_tool.h"
+#include <limits>
+#include <vector>
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
@@ -32,16 +34,65 @@ Json::Value bandStats( GDALRasterBand *band )
 {
   Json::Value stats( Json::objectValue );
   double minVal = 0.0, maxVal = 0.0, meanVal = 0.0, stdDev = 0.0;
-  // approx_ok=true: compute from overviews / subsampling when available so
-  // huge rasters stay fast; force=true: compute when no cached stats exist.
-  CPLErr err = band->GetStatistics( /*approx_ok=*/true, /*force=*/true,
+  // force=false (#634): force=true computed exact statistics over every
+  // pixel of a huge overview-less raster ON THE MAIN THREAD. Prefer the
+  // cached/PAM statistics (or overview-derived approximations) - they are
+  // the bounded-cost answer.
+  CPLErr err = band->GetStatistics( /*approx_ok=*/true, /*force=*/false,
                                     &minVal, &maxVal, &meanVal, &stdDev );
-  if ( err != CE_None )
+  if ( err == CE_None )
+  {
+    stats["min"] = minVal;
+    stats["max"] = maxVal;
+    stats["mean"] = meanVal;
+    stats["stddev"] = stdDev;
     return stats;
-  stats["min"] = minVal;
-  stats["max"] = maxVal;
-  stats["mean"] = meanVal;
-  stats["stddev"] = stdDev;
+  }
+
+  // Nothing cached: compute from a BOUNDED decimated window (<= 512x512
+  // samples) instead of the full scene - documented as approximate.
+  const int w = band->GetXSize();
+  const int h = band->GetYSize();
+  constexpr int kMaxSamples = 512;
+  int bufW = w, bufH = h;
+  if ( w > kMaxSamples || h > kMaxSamples )
+  {
+    const double scale = std::min( static_cast<double>( kMaxSamples ) / w,
+                                   static_cast<double>( kMaxSamples ) / h );
+    bufW = std::max( 1, static_cast<int>( w * scale ) );
+    bufH = std::max( 1, static_cast<int>( h * scale ) );
+  }
+  std::vector<float> buf( static_cast<size_t>( bufW ) * bufH );
+  if ( band->RasterIO( GF_Read, 0, 0, w, h, buf.data(), bufW, bufH,
+                       GDT_Float32, 0, 0 ) != CE_None )
+    return stats;
+
+  int hasNoData = 0;
+  const double nd = band->GetNoDataValue( &hasNoData );
+  const float ndF = static_cast<float>( nd );
+  double sum = 0.0, sumSq = 0.0;
+  double mn = std::numeric_limits<double>::infinity();
+  double mx = -std::numeric_limits<double>::infinity();
+  size_t n = 0;
+  for ( float v : buf )
+  {
+    if ( !std::isfinite( v ) || ( hasNoData && v == ndF ) )
+      continue;
+    sum += v;
+    sumSq += static_cast<double>( v ) * v;
+    mn = std::min( mn, static_cast<double>( v ) );
+    mx = std::max( mx, static_cast<double>( v ) );
+    ++n;
+  }
+  if ( n == 0 )
+    return stats;
+  const double mean = sum / n;
+  const double variance = std::max( 0.0, sumSq / n - mean * mean );
+  stats["min"] = mn;
+  stats["max"] = mx;
+  stats["mean"] = mean;
+  stats["stddev"] = std::sqrt( variance );
+  stats["approximate"] = ( bufW != w || bufH != h );
   return stats;
 }
 

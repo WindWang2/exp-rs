@@ -1,5 +1,6 @@
 // src/agent/tool_catalog/interaction_tool_provider.cpp
 #include "interaction_tool_provider.h"
+#include <algorithm>
 
 #include "agent/interaction_tool_registry.h"
 
@@ -350,6 +351,9 @@ std::vector<AgentTool> InteractionToolProvider::provideTools() const
   {
     result.push_back( pair.second );
   }
+  // Deterministic listing order (#634).
+  std::sort( result.begin(), result.end(),
+             []( const AgentTool &a, const AgentTool &b ) { return a.name < b.name; } );
   return result;
 }
 
