@@ -282,6 +282,7 @@ TEST_CASE("TaskCenter - Retry preserves a submitted job's auto-load preference",
     REQUIRE(taskId > 0);
     REQUIRE_FALSE(sicnu::TaskCenter::instance().getTaskInfo(taskId).autoLoadLayer);
     engine.waitUntilIdleForTests();
+    waitForTerminalStatus( sicnu::TaskCenter::instance(), taskId );
     REQUIRE(sicnu::TaskCenter::instance().retryTask(taskId));
 
     const auto tasks = sicnu::TaskCenter::instance().allTasks();
