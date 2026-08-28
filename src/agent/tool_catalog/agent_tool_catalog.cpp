@@ -16,6 +16,26 @@ namespace sicnu::agent::tool_catalog {
 
 namespace {
 
+// Custom tools live in an unordered_map; flattening it directly makes tool
+// listings nondeterministic across runs. Append sorted by name so catalogs,
+// MCP tool arrays, and prompt exports are stable (#634).
+void appendCustomToolsSorted( const std::unordered_map<std::string, AgentTool> &custom,
+                              std::vector<AgentTool> &out,
+                              const std::optional<ToolCategory> &category = {} )
+{
+  std::vector<const AgentTool *> refs;
+  refs.reserve( custom.size() );
+  for ( const auto &pair : custom )
+  {
+    if ( !category || pair.second.category == *category )
+      refs.push_back( &pair.second );
+  }
+  std::sort( refs.begin(), refs.end(),
+             []( const AgentTool *a, const AgentTool *b ) { return a->name < b->name; } );
+  for ( const AgentTool *tool : refs )
+    out.push_back( *tool );
+}
+
 std::string toLower( const std::string &str )
 {
   std::string result = str;
@@ -277,13 +297,7 @@ std::vector<AgentTool> AgentToolCatalog::listTools( std::optional<ToolCategory> 
     }
   }
 
-  for ( const auto &pair : mCustomTools )
-  {
-    if ( !category || pair.second.category == *category )
-    {
-      result.push_back( pair.second );
-    }
-  }
+  appendCustomToolsSorted( mCustomTools, result, category );
 
   if ( !category )
   {
@@ -505,10 +519,7 @@ Json::Value AgentToolCatalog::exportOpenAiToolDefinitions( const std::vector<Age
         mCachedTools.push_back( std::move( tool ) );
       }
     }
-    for ( const auto &pair : mCustomTools )
-    {
-      mCachedTools.push_back( pair.second );
-    }
+    appendCustomToolsSorted( mCustomTools, mCachedTools );
     mCacheValid = true;
   }
 
@@ -550,10 +561,7 @@ Json::Value AgentToolCatalog::exportMcpTools( const std::vector<AgentTool> &tool
         mCachedTools.push_back( std::move( tool ) );
       }
     }
-    for ( const auto &pair : mCustomTools )
-    {
-      mCachedTools.push_back( pair.second );
-    }
+    appendCustomToolsSorted( mCustomTools, mCachedTools );
     mCacheValid = true;
   }
 

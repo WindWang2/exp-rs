@@ -227,8 +227,9 @@ TEST_CASE( "VectorInspectTool inspects a generated GeoJSON", "[agent][spatial][v
     CHECK( layer["sampleFeatures"].size() == 2 );
     CHECK( layer["sampleFeatures"][0]["attributes"]["name"].asString() == "p0" );
     CHECK( layer["sampleFeatures"][0]["attributes"]["value"].asDouble() == Catch::Approx( 1.5 ) );
-    CHECK( layer["sampleFeatures"][0]["geometryJson"].asString().find( "Point" )
-               != std::string::npos );
+    // Geometry is embedded as a JSON object (not a double-encoded string).
+    CHECK( layer["sampleFeatures"][0]["geometry"].isObject() );
+    CHECK( layer["sampleFeatures"][0]["geometry"]["type"].asString() == "Point" );
 }
 
 TEST_CASE( "ModelCatalog scans manifests and the tool exposes them", "[agent][spatial][models]" )

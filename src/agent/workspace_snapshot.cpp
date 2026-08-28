@@ -80,9 +80,9 @@ MapViewSnapshot::ActiveRasterDisplay captureActiveRaster( QgsMapLayer *layer )
 
   // Real Data Range: deliberately NOT sampled via bandStatistics() on the
   // GUI thread — that GDAL scan blocks the event loop on large rasters.
-  // Range is surfaced via DataManager cached asset metadata when available
-  // (see assets loop above); renderer-derived dataMin/dataMax are left unset
-  // here and can be filled off the GUI thread if needed.
+  // dataMin/dataMax therefore stay unset on this capture path; the prompt's
+  // "Real Data Range" line is emitted only when another (off-thread)
+  // producer fills the fields.
   Q_UNUSED( raster );
 
   // Stretch algorithm + display window from the renderer's contrast enhancement
@@ -265,6 +265,9 @@ QString WorkspaceSnapshot::toSystemPromptHeader() const
         if ( !channels.isEmpty() )
           prompt += QString( "  - Bands: %1\n" ).arg( channels.join( QStringLiteral( " " ) ) );
       }
+      // Emitted only when dataMin/dataMax are populated: the GUI-thread
+      // capture path leaves them unset (see captureActiveRaster), so this
+      // line appears only for snapshots filled by an off-thread producer.
       if ( mapView.activeRaster.dataMin && mapView.activeRaster.dataMax )
         prompt += QString( "  - Real Data Range: [%1, %2]\n" )
                     .arg( *mapView.activeRaster.dataMin )

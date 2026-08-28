@@ -9,6 +9,7 @@
 #include "qgsdatasourceresolver.h"
 
 #include <cstring>
+#include <memory>
 #include <string>
 
 namespace sicnu::agent::spatial_tools {
@@ -116,7 +117,17 @@ Json::Value describeLayer( OGRLayer *layer, int maxFeatures )
         char *geojson = geom->exportToJson();
         if ( geojson )
         {
-          f["geometryJson"] = geojson;
+          // Embed as a JSON object, not an escaped string — assigning the
+          // raw text would double-encode (every quote/backslash escaped) and
+          // cost ~2x bytes per feature. Raw string only as parse fallback.
+          Json::Value geomVal;
+          std::string parseErr;
+          const std::unique_ptr<Json::CharReader> reader(
+            Json::CharReaderBuilder{}.newCharReader() );
+          if ( reader->parse( geojson, geojson + std::strlen( geojson ), &geomVal, &parseErr ) )
+            f["geometry"] = std::move( geomVal );
+          else
+            f["geometryJson"] = geojson;
           CPLFree( geojson );
         }
       }

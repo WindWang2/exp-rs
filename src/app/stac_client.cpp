@@ -198,8 +198,9 @@ void StacClient::runSearch(const QUrl &url)
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         // 392 belt-and-suspenders: final URL after redirects must still pass policy
-        if (!validateUrlPolicy(reply->url(), true).isEmpty()) {
-            emit searchCompleted(QVariantList(), validateUrlPolicy(reply->url(), true));
+        const QString policyError = validateUrlPolicy(reply->url(), true);
+        if (!policyError.isEmpty()) {
+            emit searchCompleted(QVariantList(), policyError);
             return;
         }
         if (reply->error() != QNetworkReply::NoError)
