@@ -3,6 +3,7 @@
 #include "processing/algorithms/image_enhancement.h"
 #include <vector>
 #include <cmath>
+#include <limits>
 #include <algorithm>
 
 using namespace Catch;
@@ -50,4 +51,17 @@ TEST_CASE("Contrast stretch preserves nodata", "[enhancement]") {
     REQUIRE(output[2] == Approx(nodata));
     REQUIRE(output[0] == Approx(0.0f));
     REQUIRE(output[4] == Approx(255.0f));
+}
+
+TEST_CASE("Lee filter excludes +-Inf pixels from local statistics", "[enhancement]") {
+    // A single +Inf must not poison the summed-area table: before the
+    // isfinite() guard every window whose rectangle contained the cell
+    // produced Inf/NaN local statistics (#634).
+    constexpr int W = 10, H = 10;
+    std::vector<float> input(W * H, 1.0f);
+    input[5 * W + 5] = std::numeric_limits<float>::infinity();
+    std::vector<float> output(W * H, 0.0f);
+    ImageEnhancement::leeFilter(input.data(), output.data(), W, H, 3, 0.5f);
+    for (float v : output)
+        REQUIRE(std::isfinite(v));
 }

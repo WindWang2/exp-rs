@@ -1356,7 +1356,12 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
     else if ( params.method == QStringLiteral( "gram_schmidt" ) )
     {
         // 2-PASS TILE STREAMING FOR GRAM-SCHMIDT FUSION
-        // PASS 1: Accumulate centered covariance for GS coefficient (matches in-memory gramSchmidtFusion)
+        // Streaming simplification of the in-memory gramSchmidtFusion: PASS 1
+        // fits only the synthetic-pan projection
+        // coef[b+1][0] = Cov(MS_b, synPan) / Var(synPan); the full modified
+        // Gram-Schmidt (residuals against ALL prior GS_j, higher coefficient
+        // columns) is not reproduced. PASS 2 applies the classic one-step
+        // adjustment MS_b + coef * (histogram-matched pan - synPan).
         StatsAccumulator statsSynPan, statsP;
         std::vector<std::vector<double>> coef( nMsBands + 1, std::vector<double>( nMsBands + 1, 0.0 ) );
         std::vector<double> sumMs( nMsBands, 0.0 );

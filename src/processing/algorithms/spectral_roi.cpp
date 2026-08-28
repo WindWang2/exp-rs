@@ -98,10 +98,25 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
         maxRow = std::max( maxRow, py );
     }
 
-    const int col0 = std::max( 0, static_cast<int>( std::floor( minCol ) ) );
-    const int col1 = std::min( width, static_cast<int>( std::ceil( maxCol ) ) + 1 );
-    const int row0 = std::max( 0, static_cast<int>( std::floor( minRow ) ) );
-    const int row1 = std::min( height, static_cast<int>( std::ceil( maxRow ) ) + 1 );
+    // Clamp in double space BEFORE the int cast: a polygon projected far
+    // outside the raster (or a degenerate geotransform feeding NaN) would
+    // otherwise hit an out-of-range/UB double→int conversion.
+    if ( !std::isfinite( minCol ) || !std::isfinite( maxCol )
+         || !std::isfinite( minRow ) || !std::isfinite( maxRow ) )
+    {
+        GDALClose( ds );
+        result->mean.assign( bandCount, std::numeric_limits<float>::quiet_NaN() );
+        result->stddev.assign( bandCount, std::numeric_limits<float>::quiet_NaN() );
+        return true;
+    }
+    const double colLo = std::clamp( std::floor( minCol ), 0.0, static_cast<double>( width ) );
+    const double colHi = std::clamp( std::ceil( maxCol ) + 1.0, 0.0, static_cast<double>( width ) );
+    const double rowLo = std::clamp( std::floor( minRow ), 0.0, static_cast<double>( height ) );
+    const double rowHi = std::clamp( std::ceil( maxRow ) + 1.0, 0.0, static_cast<double>( height ) );
+    const int col0 = static_cast<int>( colLo );
+    const int col1 = static_cast<int>( colHi );
+    const int row0 = static_cast<int>( rowLo );
+    const int row1 = static_cast<int>( rowHi );
 
     // No overlap between the polygon's pixel-space box and the raster.
     if ( col0 >= col1 || row0 >= row1 )
@@ -112,12 +127,15 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
         return true;
     }
 
-    // Accumulate per band: sum and sum of squares. Point-in-polygon is
+    // Accumulate per band with Welford's online algorithm: a sum / sum-of-
+    // squares pair loses precision to catastrophic cancellation when the mean
+    // is large and the spread small (DN ~10000 ± 1). Point-in-polygon is
     // evaluated once per pixel; per band the ROI window is read in ONE
     // GDALRasterIO call (band-major), not 1x1 per pixel — O(bands) I/O calls
     // instead of O(pixels x bands) (ADR 0105 review remediation).
-    std::vector<double> sum( bandCount, 0.0 );
-    std::vector<double> sumSq( bandCount, 0.0 );
+    std::vector<double> welfordMean( bandCount, 0.0 );
+    std::vector<double> welfordM2( bandCount, 0.0 );
+    std::vector<size_t> validCount( bandCount, 0 );
     size_t pixels = 0;
 
     const int windowW = col1 - col0;
@@ -149,7 +167,6 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
         bandHasNodata[b - 1] = ( hasNd != 0 );
         bandNodata[b - 1] = nd;
     }
-    std::vector<size_t> validCount( bandCount, 0 );
     if ( pixels > 0 )
     {
         std::vector<float> window( static_cast<size_t>( windowW ) * windowH );
@@ -158,7 +175,12 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
             if ( GDALRasterIO( GDALGetRasterBand( ds, b ), GF_Read,
                                col0, row0, windowW, windowH, window.data(),
                                windowW, windowH, GDT_Float32, 0, 0 ) != CE_None )
+            {
+                // The band reports NaN downstream (validCount stays 0) — log
+                // so a failed window read is not silent.
+                qWarning( "SpectralRoiProfile: ROI window read failed for band %d", b );
                 continue;
+            }
             const bool hasNd = bandHasNodata[b - 1];
             // Float-space compare: matches large sentinels exactly (#444).
             const float ndF = static_cast<float>( bandNodata[b - 1] );
@@ -172,9 +194,10 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
                     continue;
                 if ( hasNd && value == ndF )
                     continue;
-                sum[b - 1] += value;
-                sumSq[b - 1] += static_cast<double>( value ) * value;
-                ++validCount[b - 1];
+                const size_t n = ++validCount[b - 1];
+                const double delta = static_cast<double>( value ) - welfordMean[b - 1];
+                welfordMean[b - 1] += delta / static_cast<double>( n );
+                welfordM2[b - 1] += delta * ( static_cast<double>( value ) - welfordMean[b - 1] );
             }
         }
     }
@@ -202,9 +225,10 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
             const size_t vc = validCount[b];
             if ( vc == 0 )
                 continue;
-            const double n = static_cast<double>( vc );
-            result->mean[b] = static_cast<float>( sum[b] / n );
-            const double variance = std::max( 0.0, sumSq[b] / n - ( sum[b] / n ) * ( sum[b] / n ) );
+            // Population variance (same N denominator as before); Welford's
+            // M2 accumulation just removes the cancellation error.
+            const double variance = std::max( 0.0, welfordM2[b] / static_cast<double>( vc ) );
+            result->mean[b] = static_cast<float>( welfordMean[b] );
             result->stddev[b] = static_cast<float>( std::sqrt( variance ) );
         }
     }

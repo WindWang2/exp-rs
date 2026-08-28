@@ -176,7 +176,13 @@ void finalizeCovariance( BackgroundStats *stats )
     if ( !stats || stats->count == 0 )
         return;
     const int bands = static_cast<int>( stats->mean.size() );
-    const double invCount = 1.0 / static_cast<double>( stats->count );
+    // Sample covariance (N-1 denominator), the estimator the Reed–Xiaoli
+    // detector is defined on. count==1 leaves the all-zero matrix (the single
+    // centered sample is 0), which invertCovariance rejects downstream.
+    const double denom = stats->count > 1
+                             ? static_cast<double>( stats->count - 1 )
+                             : static_cast<double>( stats->count );
+    const double invCount = 1.0 / denom;
     for ( int i = 0; i < bands; ++i )
     {
         for ( int j = i; j < bands; ++j )

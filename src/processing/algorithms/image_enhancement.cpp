@@ -597,7 +597,7 @@ void ImageEnhancement::laplacianFilter(const float *input, float *output, int wi
 
 // Helper: compute local mean and variance for a pixel
 // Integral image (summed-area table) for O(1) local statistics
-// Handles NaN pixels by tracking valid pixel count separately
+// Handles non-finite (NaN/±Inf) pixels by tracking valid pixel count separately
 class IntegralImage {
 public:
     IntegralImage(const float *input, int width, int height)
@@ -616,11 +616,13 @@ public:
                 int idxUp = y * (m_width + 1) + (x + 1);
                 int idxDiag = y * (m_width + 1) + x;
 
-                if (!std::isnan(val)) {
+                if (std::isfinite(val)) {
                     m_sum[idx] = m_sum[idxLeft] + m_sum[idxUp] - m_sum[idxDiag] + val;
                     m_sumSq[idx] = m_sumSq[idxLeft] + m_sumSq[idxUp] - m_sumSq[idxDiag] + val * val;
                     m_count[idx] = m_count[idxLeft] + m_count[idxUp] - m_count[idxDiag] + 1;
                 } else {
+                    // NaN and ±Inf are both excluded: one +Inf would otherwise
+                    // poison every downstream window of the summed-area table.
                     m_sum[idx] = m_sum[idxLeft] + m_sum[idxUp] - m_sum[idxDiag];
                     m_sumSq[idx] = m_sumSq[idxLeft] + m_sumSq[idxUp] - m_sumSq[idxDiag];
                     m_count[idx] = m_count[idxLeft] + m_count[idxUp] - m_count[idxDiag];
@@ -1082,10 +1084,12 @@ void ImageEnhancement::bandRatio(const float *band1, const float *band2,
 // Basis: u = (2R - G - B) / sqrt(6), v = (G - B) / sqrt(2)
 // I = (R + G + B) / 3
 // H = atan2(v, u) / (2*pi), mapped to [0, 1)
-// S = sqrt(u^2 + v^2) / (3*I) = 1 - min(R,G,B)/I  (when I > 0, else 0)
+// S = sqrt(u^2 + v^2) / (3*I)  (when I > 0, else 0)
 //
-// This saturation formula gives S in [0, 1] and is mathematically consistent
-// with the basis vectors, allowing exact round-trip reconstruction.
+// This cylindrical S is NOT the hexcone formula 1 - min(R,G,B)/I — they
+// coincide only at the extremes (e.g. R=1,G=0,B=0 gives S=0.8165 here but
+// 1 - min/I = 1). S spans [0, 1] and is mathematically consistent with the
+// basis vectors, allowing exact round-trip reconstruction.
 
 void ImageEnhancement::rgbToIhs(float r, float g, float b,
                                   float &i, float &h, float &s)
@@ -1107,7 +1111,8 @@ void ImageEnhancement::rgbToIhs(float r, float g, float b,
     float u = (2.0f * r - g - b) / sqrt6;
     float v = (g - b) / sqrt2;
 
-    // S = sqrt(u^2 + v^2) / (3*I), which equals 1 - min(R,G,B)/I
+    // S = sqrt(u^2 + v^2) / (3*I) — cylindrical saturation (see block comment:
+    // deliberately not the hexcone 1 - min/I form)
     float chroma = std::sqrt(u * u + v * v);
     s = chroma * inv3 / i;
 

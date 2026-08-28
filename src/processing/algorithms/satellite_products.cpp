@@ -279,10 +279,14 @@ const BandFile* findBand(const QVector<BandFile>& bands, const QString& want)
                 return &b;
         }
     }
-    // MODIS / long subdataset names: substring match only if unique-ish and not short "B*"
+    // MODIS / long subdataset names: substring match, both directions gated
+    // at >= 4 chars — an ungated `w.contains(n)` let a short band name match
+    // anywhere inside a long requested label.
     if (w.size() >= 4) {
         for (const BandFile& b : bands) {
             const QString n = b.name.toUpper();
+            if (n.size() < 4)
+                continue;
             if (n.endsWith(w) || n.contains(w) || w.contains(n))
                 return &b;
         }
@@ -728,8 +732,11 @@ bool georeferenceModis(const QString& inputPath,
         if (progress)
             progress(0.05, QStringLiteral("Assigning MODIS sinusoidal tile georeference"));
         tempSinu = absOut + QStringLiteral(".sinu_tmp.tif");
-        if (!assignModisSinusoidalGeoref(absIn, tempSinu, tileH, tileV, errorMessage))
+        if (!assignModisSinusoidalGeoref(absIn, tempSinu, tileH, tileV, errorMessage)) {
+            // assign may leave a partial .sinu_tmp.tif behind; don't leak it.
+            QFile::remove(tempSinu);
             return false;
+        }
         sinuPath = tempSinu;
     }
 
@@ -929,9 +936,6 @@ bool discoverSentinel2(const QString& path, ProductInfo* out,
             // ok
         }
         mtdPath = findMtdInDir(rootDir);
-        if (mtdPath.isEmpty() && rootDir.dirName().endsWith(QStringLiteral(".SAFE"), Qt::CaseInsensitive)) {
-            mtdPath = findMtdInDir(rootDir);
-        }
     } else {
         if (errorMessage)
             *errorMessage = QStringLiteral("Not a Sentinel-2 SAFE directory or MTD xml: %1").arg(path);
@@ -1187,6 +1191,20 @@ bool discoverModis(const QString& path, ProductInfo* out, QString* errorMessage)
 
     char** subdatasets = const_cast<char**>(GDALGetMetadata(ds, "SUBDATASETS"));
     if (subdatasets && CSLCount(subdatasets) > 0) {
+        // Collect NAME->DESC pairs first: the DESC entry is needed to recover
+        // a readable name when the NAME's trailing component is a bare index.
+        QMap<QString, QString> descByName;
+        for (int i = 0; subdatasets[i] != nullptr; ++i) {
+            const QString dEntry = QString::fromUtf8(subdatasets[i]);
+            if (!dEntry.startsWith(QStringLiteral("SUBDATASET_")) || !dEntry.contains(QStringLiteral("_DESC=")))
+                continue;
+            const int dEq = dEntry.indexOf(QLatin1Char('='));
+            if (dEq < 0)
+                continue;
+            const QString dKey = dEntry.left(dEq); // SUBDATASET_n_DESC
+            descByName.insert(dKey.left(dKey.size() - 5) + QStringLiteral("_NAME"),
+                              dEntry.mid(dEq + 1));
+        }
         // Pairs: SUBDATASET_n_NAME / SUBDATASET_n_DESC
         for (int i = 0; subdatasets[i] != nullptr; ++i) {
             const QString entry = QString::fromUtf8(subdatasets[i]);
@@ -1202,6 +1220,21 @@ bool discoverModis(const QString& path, ProductInfo* out, QString* errorMessage)
             if (colon >= 0)
                 shortName = shortName.mid(colon + 1);
             shortName = shortName.trimmed();
+            // Plain HDF4_SDS names end in the SDS index ("...:0", "...:1"),
+            // collapsing every band to a bare digit. Fall back to the paired
+            // DESC text, which carries the real SDS name for these drivers.
+            static const QRegularExpression digitsOnly(QStringLiteral(R"(^\d+$)"));
+            if (digitsOnly.match(shortName).hasMatch()) {
+                const QString desc = descByName.value(entry.left(eq));
+                // DESC shape for these drivers: "[w x h] SDS Name (type)"
+                const int closeBracket = desc.indexOf(QLatin1Char(']'));
+                const int openParen = desc.lastIndexOf(QLatin1Char('('));
+                const QString descName = (closeBracket >= 0 && openParen > closeBracket)
+                                             ? desc.mid(closeBracket + 1, openParen - closeBracket - 1).trimmed()
+                                             : desc.trimmed();
+                if (!descName.isEmpty())
+                    shortName = descName;
+            }
 
             BandFile bf;
             bf.path = subPath;

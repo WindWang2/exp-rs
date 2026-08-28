@@ -16,7 +16,9 @@ float safeDiv(float numerator, float denominator)
 
 double safeDivDouble(double numerator, double denominator)
 {
-    return (denominator == 0.0) ? 0.0 : (numerator / denominator);
+    return (denominator == 0.0)
+        ? std::numeric_limits<double>::quiet_NaN()
+        : (numerator / denominator);
 }
 
 Stats computeStats(const float *data, size_t count)

@@ -165,10 +165,10 @@ TEST_CASE("MathUtils::safeDivDouble", "[math_utils]")
         REQUIRE(result == Catch::Approx(5.0));
     }
 
-    SECTION("division by zero returns 0.0")
+    SECTION("division by zero returns NaN — same contract as safeDiv")
     {
         double result = MathUtils::safeDivDouble(10.0, 0.0);
-        REQUIRE(result == Catch::Approx(0.0));
+        REQUIRE(std::isnan(result));
     }
 
     SECTION("negative division")

@@ -514,7 +514,12 @@ bool TerrainAnalysis::tri( const float *dem, float *out, int width, int height,
                     count++;
                 }
             }
-            out[idx] = static_cast<float>(MathUtils::safeDivDouble(sumDiff, count));
+            // Guard preserves the historical 0.0 for cells with no valid
+            // neighbors now that safeDivDouble's zero-denominator contract is
+            // NaN (#634).
+            out[idx] = count > 0
+                          ? static_cast<float>( MathUtils::safeDivDouble( sumDiff, count ) )
+                          : 0.0f;
         }
     }
     return true;

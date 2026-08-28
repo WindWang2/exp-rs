@@ -165,7 +165,14 @@ bool Library::save( const QString &path, QString *errorMessage ) const
             *errorMessage = QStringLiteral( "Cannot write spectral library: %1" ).arg( path );
         return false;
     }
-    file.write( QJsonDocument( toJson() ).toJson( QJsonDocument::Compact ) );
+    const QByteArray payload = QJsonDocument( toJson() ).toJson( QJsonDocument::Compact );
+    if ( file.write( payload ) != payload.size() || !file.flush() )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "Failed writing spectral library %1: %2" )
+                                .arg( path, file.errorString() );
+        return false;
+    }
     return true;
 }
 

@@ -83,11 +83,13 @@ RsAccuracyAssessment::compute( const QVector<int> &yt, const QVector<int> &yp )
       colSum += r.confusion.at<int>( k, i );
     }
     const int id = r.classIds[i];
-    r.producerAcc[id] = MathUtils::safeDivDouble( d, rowSum );
-    r.userAcc[id]     = MathUtils::safeDivDouble( d, colSum );
+    // Absent classes (row/column sums of 0) report 0.0 via an explicit
+    // guard: safeDivDouble's zero-denominator contract is NaN.
+    r.producerAcc[id] = rowSum > 0 ? MathUtils::safeDivDouble( d, rowSum ) : 0.0;
+    r.userAcc[id]     = colSum > 0 ? MathUtils::safeDivDouble( d, colSum ) : 0.0;
     const double p = r.producerAcc[id];
     const double u = r.userAcc[id];
-    r.f1[id] = MathUtils::safeDivDouble( 2.0 * p * u, p + u );
+    r.f1[id] = ( p + u ) > 0.0 ? MathUtils::safeDivDouble( 2.0 * p * u, p + u ) : 0.0;
   }
 
   SICNU_LOG_SUCCESS( SicnuLogTags::Classification, QString( "Accuracy: overall=%1, kappa=%2, classes=%3" )

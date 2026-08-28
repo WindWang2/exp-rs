@@ -30,7 +30,6 @@ add_library(sicnu_processing SHARED
     algorithms/endmember_extraction.cpp
     algorithms/spectral_library.cpp
     algorithms/spectral_roi.cpp
-    algorithms/vector_optimizer.cpp
     algorithms/satellite_products.cpp
 
     framework/input_validator.cpp

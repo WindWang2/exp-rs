@@ -38,10 +38,10 @@ struct AccumulatorStats {
 float safeDiv(float numerator, float denominator);
 
 /**
- * Safe division for doubles: returns 0.0 when denominator is zero.
- * Note: Unlike safeDiv (which returns NaN for float), this returns 0.0
- * because callers in accuracy assessment and terrain analysis expect 0.0
- * as the fallback value for guarded divisions.
+ * Safe division for doubles: returns NaN when the denominator is zero —
+ * same zero-denominator contract as safeDiv. Callers that need a neutral
+ * 0.0 for a degenerate denominator must guard it explicitly (see
+ * rs_accuracy_assessment per-class metrics).
  */
 double safeDivDouble(double numerator, double denominator);
 
