@@ -313,8 +313,11 @@ bool copyRasterPixels(GDALDatasetH src, GDALDatasetH dst, QString* errorMessage)
             *errorMessage = QStringLiteral("Source/destination raster size or band count mismatch");
         return false;
     }
-    const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
-    std::vector<float> buffer(pixelCount);
+    // Windowed copy (#634): the whole-band float buffer (~10 GB at 50k x 50k)
+    // became an uncaught bad_alloc on first-class scenes; row-block windows
+    // keep memory O(width * kBlockRows) per band.
+    constexpr int kBlockRows = 256;
+    std::vector<float> buffer;
     for (int b = 1; b <= bandCount; ++b) {
         GDALRasterBandH sb = GDALGetRasterBand(src, b);
         GDALRasterBandH db = GDALGetRasterBand(dst, b);
@@ -323,19 +326,23 @@ bool copyRasterPixels(GDALDatasetH src, GDALDatasetH dst, QString* errorMessage)
                 *errorMessage = QStringLiteral("Missing band %1 during pixel copy").arg(b);
             return false;
         }
-        if (GDALRasterIO(sb, GF_Read, 0, 0, width, height, buffer.data(), width, height,
-                         GDT_Float32, 0, 0)
-            != CE_None) {
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Failed to read band %1").arg(b);
-            return false;
-        }
-        if (GDALRasterIO(db, GF_Write, 0, 0, width, height, buffer.data(), width, height,
-                         GDT_Float32, 0, 0)
-            != CE_None) {
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Failed to write band %1").arg(b);
-            return false;
+        for (int y = 0; y < height; y += kBlockRows) {
+            const int rows = std::min(kBlockRows, height - y);
+            buffer.assign(static_cast<size_t>(width) * rows, 0.0f);
+            if (GDALRasterIO(sb, GF_Read, 0, y, width, rows, buffer.data(), width, rows,
+                             GDT_Float32, 0, 0)
+                != CE_None) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("Failed to read band %1").arg(b);
+                return false;
+            }
+            if (GDALRasterIO(db, GF_Write, 0, y, width, rows, buffer.data(), width, rows,
+                             GDT_Float32, 0, 0)
+                != CE_None) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("Failed to write band %1").arg(b);
+                return false;
+            }
         }
         const char* desc = GDALGetDescription(sb);
         if (desc && desc[0])
@@ -1352,9 +1359,11 @@ bool stackToGeoTiff(const ProductInfo& product,
         return false;
     }
 
-    const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
-    // Use float buffer for read (GDAL converts)
-    std::vector<float> buffer(pixelCount);
+    // Windowed stacking (#634): the whole-band float buffer (~10 GB at
+    // 50k x 50k) became an uncaught bad_alloc; row-block windows keep memory
+    // O(width * kBlockRows).
+    constexpr int kBlockRows = 256;
+    std::vector<float> buffer;
 
     for (int i = 0; i < selected.size(); ++i) {
         if (progress)
@@ -1392,29 +1401,33 @@ bool stackToGeoTiff(const ProductInfo& product,
                                     .arg(selected[i].path);
             return false;
         }
-        CPLErr cerr = GDALRasterIO(srcBand, GF_Read, 0, 0, width, height,
-                                   buffer.data(), width, height, GDT_Float32, 0, 0);
-        if (cerr != CE_None) {
-            GDALClose(src);
-            GDALClose(outDs);
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Failed to read band %1").arg(selected[i].name);
-            return false;
-        }
-
         int hasNoData = 0;
         double ndVal = GDALGetRasterNoDataValue(srcBand, &hasNoData);
 
         GDALRasterBandH dstBand = GDALGetRasterBand(outDs, i + 1);
-        cerr = GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
-                            buffer.data(), width, height, GDT_Float32, 0, 0);
-        GDALClose(src);
-        if (cerr != CE_None) {
-            GDALClose(outDs);
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Failed to write band %1").arg(selected[i].name);
-            return false;
+        for (int y = 0; y < height; y += kBlockRows) {
+            const int rows = std::min(kBlockRows, height - y);
+            buffer.assign(static_cast<size_t>(width) * rows, 0.0f);
+            CPLErr cerr = GDALRasterIO(srcBand, GF_Read, 0, y, width, rows,
+                                       buffer.data(), width, rows, GDT_Float32, 0, 0);
+            if (cerr != CE_None) {
+                GDALClose(src);
+                GDALClose(outDs);
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("Failed to read band %1").arg(selected[i].name);
+                return false;
+            }
+            cerr = GDALRasterIO(dstBand, GF_Write, 0, y, width, rows,
+                                buffer.data(), width, rows, GDT_Float32, 0, 0);
+            if (cerr != CE_None) {
+                GDALClose(src);
+                GDALClose(outDs);
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("Failed to write band %1").arg(selected[i].name);
+                return false;
+            }
         }
+        GDALClose(src);
 
         if (hasNoData) {
             GDALSetRasterNoDataValue(dstBand, ndVal);

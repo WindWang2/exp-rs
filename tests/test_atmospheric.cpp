@@ -553,3 +553,60 @@ TEST_CASE("processFileDos refuses Landsat without finite sun elevation (#610)", 
         RadiometricCalibration::SensorType::Landsat,
         std::numeric_limits<double>::quiet_NaN(), 1.0f, &err));
 }
+
+TEST_CASE("processFileMultiBand QUAC streaming matches the in-memory kernel (#634)", "[atm][quac][gdal][stream]")
+{
+    ensureGdalInit();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const QString sourcePath = dir.filePath(QStringLiteral("quac_stream_src.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("quac_stream_out.tif"));
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+
+    // 300x40 spans multiple 256-tiles in x, exercising the streaming path.
+    constexpr int W = 300, H = 40, B = 3;
+    GDALDatasetH srcDs = createOutputTiff(sourcePath, W, H, B, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+    std::vector<std::vector<float>> bands(B, std::vector<float>(W * H));
+    for (int b = 0; b < B; ++b) {
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W; ++x) {
+                const size_t i = static_cast<size_t>(y) * W + x;
+                bands[b][i] = static_cast<float>((x * 7 + y * 13) % 251) * (b + 1);
+            }
+        GDALRasterBandH rb = GDALGetRasterBand(srcDs, b + 1);
+        REQUIRE(GDALRasterIO(rb, GF_Write, 0, 0, W, H, bands[b].data(), W, H, GDT_Float32, 0, 0) == CE_None);
+    }
+    GDALClose(srcDs);
+
+    // Reference: the in-memory kernel on the same buffers.
+    std::vector<std::vector<float>> ref(B, std::vector<float>(W * H));
+    std::vector<const float *> inPtrs(B);
+    std::vector<float *> outPtrs(B);
+    for (int b = 0; b < B; ++b) {
+        inPtrs[b] = bands[b].data();
+        outPtrs[b] = ref[b].data();
+    }
+    QString kErr;
+    REQUIRE(AtmosphericCorrection::quac(inPtrs.data(), outPtrs.data(), B,
+                                        static_cast<size_t>(W) * H, &kErr));
+
+    // Streaming file path.
+    QString error;
+    REQUIRE(AtmosphericCorrection::processFileMultiBand(sourcePath, outputPath,
+                                                        AtmosphericCorrection::Quac, &error));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    std::vector<float> result(W * H);
+    for (int b = 0; b < B; ++b) {
+        REQUIRE(out.readBandData(b + 1, result.data(), W, H));
+        for (size_t i = 0; i < static_cast<size_t>(W) * H; ++i) {
+            // The streaming path derives percentiles from a 65536-bin
+            // histogram (bin-centre rank) while the kernel uses exact
+            // nth_element - allow a small absolute tolerance.
+            REQUIRE_THAT(result[i], Catch::Matchers::WithinAbs(ref[b][i], 0.02f));
+        }
+    }
+}

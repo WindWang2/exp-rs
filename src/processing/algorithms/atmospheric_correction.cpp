@@ -69,6 +69,91 @@ bool dos1(const float *dn, float *surface, size_t count, float gain, float bias)
 
 namespace {
 
+/// Incremental percentile statistics over a streamed band (QUAC, #634).
+///
+/// Same two-pass pattern as DarkObjectStats: accumulateRange() over the
+/// whole scene, prepareBins(), accumulateBins(), then percentile(q) walks
+/// the histogram to the requested rank. Memory is O(bins); 65536 bins give
+/// sub-permille rank resolution for QUAC's 1%/99% stretch on DN-scale data.
+/// Non-finite values are invalid.
+struct StreamingPercentiles
+{
+    explicit StreamingPercentiles( int bins = 65536 )
+      : m_nbins( std::max( 16, std::min( bins, 1 << 20 ) ) )
+    {
+    }
+
+    void accumulateRange( const float *data, size_t count )
+    {
+        if ( !data )
+            return;
+        for ( size_t i = 0; i < count; ++i ) {
+            const float v = data[i];
+            if ( !std::isfinite( v ) )
+                continue;
+            m_minVal = std::min( m_minVal, static_cast<double>( v ) );
+            m_maxVal = std::max( m_maxVal, static_cast<double>( v ) );
+            ++m_valid;
+        }
+    }
+
+    bool prepareBins()
+    {
+        if ( m_valid == 0 )
+            return false;
+        if ( m_maxVal <= m_minVal ) {
+            m_singleLevel = true;
+            return false;
+        }
+        m_binWidth = ( m_maxVal - m_minVal ) / ( m_nbins - 1 );
+        m_counts.assign( static_cast<size_t>( m_nbins ), 0 );
+        return true;
+    }
+
+    void accumulateBins( const float *data, size_t count )
+    {
+        if ( !data || m_counts.empty() )
+            return;
+        for ( size_t i = 0; i < count; ++i ) {
+            const float v = data[i];
+            if ( !std::isfinite( v ) )
+                continue;
+            size_t b = static_cast<size_t>( ( v - m_minVal ) / m_binWidth );
+            if ( b >= static_cast<size_t>( m_nbins ) )
+                b = static_cast<size_t>( m_nbins ) - 1;
+            ++m_counts[b];
+        }
+    }
+
+    /// Value at rank q in [0,1] of the valid distribution (bin centre).
+    float percentile( double q ) const
+    {
+        if ( m_valid == 0 )
+            return 0.0f;
+        if ( m_singleLevel || m_counts.empty() )
+            return static_cast<float>( m_minVal );
+        const double rank = q * static_cast<double>( m_valid - 1 );
+        size_t cumulative = 0;
+        for ( int b = 0; b < m_nbins; ++b ) {
+            cumulative += m_counts[static_cast<size_t>( b )];
+            if ( static_cast<double>( cumulative ) > rank )
+                return static_cast<float>( m_minVal + ( b + 0.5 ) * m_binWidth );
+        }
+        return static_cast<float>( m_maxVal );
+    }
+
+    bool hasValid() const { return m_valid > 0; }
+
+private:
+    int m_nbins;
+    double m_minVal = std::numeric_limits<double>::infinity();
+    double m_maxVal = -std::numeric_limits<double>::infinity();
+    double m_binWidth = 0.0;
+    size_t m_valid = 0;
+    bool m_singleLevel = false;
+    std::vector<uint64_t> m_counts;
+};
+
 /// Incremental dark-object statistics (Chavez 1996).
 ///
 /// Streams tile-by-tile: accumulateRange() over the whole scene, then
@@ -372,71 +457,124 @@ bool processFileMultiBand(const QString &sourcePath, const QString &outputPath,
     const int width = srcDataset.width();
     const int height = srcDataset.height();
     const int bandCount = srcDataset.bandCount();
-    const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
     if (bandCount < 2) {
         if (errorMessage)
             *errorMessage = QStringLiteral("QUAC requires a multi-band raster (>= 2 bands)");
         return false;
     }
 
-    if (progress)
-        progress(0.1, QStringLiteral("Reading %1 bands").arg(bandCount));
-
-    // Read all bands into memory (QUAC needs full-scene statistics).
-    std::vector<std::vector<float>> dnBands(bandCount, std::vector<float>(pixelCount));
-    std::vector<float *> dnPtrs(bandCount), outPtrs(bandCount);
-    for (int b = 0; b < bandCount; ++b) {
-        if (!srcDataset.readBandData(b + 1, dnBands[b].data(), width, height)) {
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Failed to read band %1").arg(b + 1);
-            return false;
-        }
-        bool hasNoData = false;
-        const double nodataVal = srcDataset.bandNoDataValue( b + 1, &hasNoData );
-        if ( hasNoData && std::isfinite( nodataVal ) ) {
-            // Float-space compare: large sentinels (-3.4e38) match exactly (#444).
-            const float nodataF = static_cast<float>( nodataVal );
-            for ( size_t i = 0; i < pixelCount; ++i ) {
-                if ( !std::isfinite( dnBands[b][i] ) || dnBands[b][i] == nodataF )
-                    dnBands[b][i] = std::numeric_limits<float>::quiet_NaN();
-            }
-        }
-        dnPtrs[b] = dnBands[b].data();
-        if (progress)
-            progress(0.1 + 0.3 * (b + 1) / bandCount, QStringLiteral("Read band %1").arg(b + 1));
-    }
-
-    // Allocate output buffers.
-    std::vector<std::vector<float>> outBands(bandCount, std::vector<float>(pixelCount));
-    for (int b = 0; b < bandCount; ++b)
-        outPtrs[b] = outBands[b].data();
-
-    if (progress)
-        progress(0.45, QStringLiteral("Running QUAC"));
-
-    QString quacErr;
-    if (!quac(dnPtrs.data(), outPtrs.data(), bandCount, pixelCount, &quacErr)) {
+    // Streaming QUAC (#634): the old path materialized TWO full copies of
+    // every band (2 x bandCount x W x H floats - ~200 GB at 50k x 50k x 10
+    // bands). The transform is per-band independent, so each band streams
+    // with O(tile) memory: two stats passes (range, then bins), then a
+    // transform-and-write pass. The in-memory quac() kernel keeps its
+    // contract for direct callers/tests.
+    GdalDatasetWrapper outDataset;
+    QString createError;
+    if (!outDataset.create(outputPath, width, height, bandCount, GDT_Float32,
+                           srcDataset.geoTransform(), srcDataset.projection(), &createError)) {
         if (errorMessage)
-            *errorMessage = quacErr;
+            *errorMessage = createError;
         return false;
     }
-
-    if (progress)
-        progress(0.9, QStringLiteral("Writing output"));
-
     bool hasFirstNoData = false;
     const double firstNodata = srcDataset.bandNoDataValue(1, &hasFirstNoData);
-    std::optional<double> outNodata;
     if (hasFirstNoData)
-        outNodata = firstNodata;
+        outDataset.setBandNoDataValue(1, firstNodata);
 
-    QString writeError;
-    if (!writeGdalOutput(outputPath, width, height, outBands,
-                         srcDataset.geoTransform(), srcDataset.projection(), &writeError,
-                         outNodata)) {
+    constexpr int kTile = 256;
+    std::vector<float> dark(bandCount), bright(bandCount);
+
+    // Passes 1+2 per band: streaming 1%/99% percentiles.
+    for (int b = 0; b < bandCount; ++b) {
+        bool hasNoData = false;
+        const double nodataVal = srcDataset.bandNoDataValue(b + 1, &hasNoData);
+        const float nodataF = static_cast<float>(nodataVal);
+        const bool maskNodata = hasNoData && std::isfinite(nodataVal);
+        std::vector<float> tile;
+        auto normalize = [&](size_t n) {
+            if (!maskNodata)
+                return;
+            for (size_t i = 0; i < n; ++i)
+                if (tile[i] == nodataF)
+                    tile[i] = std::numeric_limits<float>::quiet_NaN();
+        };
+
+        StreamingPercentiles stats;
+        const auto statsPass = [&](bool binning) -> bool {
+            return GdalBlockStream(srcDataset, b + 1, kTile, kTile).forEach(
+                [&](const GdalBlockStream::Tile &t, const float *pixels) {
+                    const size_t n = static_cast<size_t>(t.width) * t.height;
+                    tile.assign(pixels, pixels + n);
+                    normalize(n);
+                    if (binning)
+                        stats.accumulateBins(tile.data(), n);
+                    else
+                        stats.accumulateRange(tile.data(), n);
+                    return true;
+                });
+        };
+        if (!statsPass(false) || !stats.prepareBins() || !statsPass(true) || !stats.hasValid()) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("QUAC: band %1 has no valid pixels").arg(b + 1);
+            QFile::remove(outputPath);
+            return false;
+        }
+        dark[b] = stats.percentile(0.01);
+        bright[b] = stats.percentile(0.99);
+        if (progress)
+            progress(0.1 + 0.4 * (b + 1) / bandCount, QStringLiteral("QUAC stats band %1").arg(b + 1));
+    }
+
+    // Scene-average references (same math as the in-memory kernel).
+    const float meanBright = std::accumulate(bright.begin(), bright.end(), 0.0f) / bandCount;
+    const float meanDark = std::accumulate(dark.begin(), dark.end(), 0.0f) / bandCount;
+    const float refRange = meanBright - meanDark;
+    if (refRange <= 0.0f || meanBright <= 0.0f) {
         if (errorMessage)
-            *errorMessage = writeError;
+            *errorMessage = QStringLiteral("QUAC: degenerate image (zero dynamic range or all-dark scene)");
+        QFile::remove(outputPath);
         return false;
+    }
+
+    // Pass 3 per band: transform and write tile-by-tile.
+    for (int b = 0; b < bandCount; ++b) {
+        const float range = bright[b] - dark[b];
+        const float gain = (range > 0.0f) ? 0.5f * refRange / (range * meanBright) : 0.0f;
+        const float offset = -dark[b] * gain;
+        const bool flatBand = range <= 0.0f;
+
+        bool hasNoData = false;
+        const double nodataVal = srcDataset.bandNoDataValue(b + 1, &hasNoData);
+        const float nodataF = static_cast<float>(nodataVal);
+        const bool maskNodata = hasNoData && std::isfinite(nodataVal);
+
+        std::vector<float> out;
+        bool ok = GdalBlockStream(srcDataset, b + 1, kTile, kTile).forEach(
+            [&](const GdalBlockStream::Tile &t, const float *pixels) {
+                const size_t n = static_cast<size_t>(t.width) * t.height;
+                out.resize(n);
+                for (size_t i = 0; i < n; ++i) {
+                    const float v = pixels[i];
+                    const bool invalid = !std::isfinite(v) || (maskNodata && v == nodataF);
+                    if (invalid)
+                        out[i] = std::numeric_limits<float>::quiet_NaN();
+                    else if (flatBand)
+                        out[i] = 0.0f;
+                    else
+                        out[i] = std::max(0.0f, gain * v + offset);  // clamp negatives only (#632)
+                }
+                return outDataset.writeBandWindow(b + 1, t.xOffset, t.yOffset,
+                                                  t.width, t.height, out.data());
+            });
+        if (!ok) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("QUAC: failed to stream band %1").arg(b + 1);
+            QFile::remove(outputPath);
+            return false;
+        }
+        if (progress)
+            progress(0.5 + 0.45 * (b + 1) / bandCount, QStringLiteral("QUAC write band %1").arg(b + 1));
     }
 
     if (progress)
