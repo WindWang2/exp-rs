@@ -687,6 +687,14 @@ void JobEngine::runOperatorJob( const std::string &jobId )
       auto it = m_jobs.find( jobId );
       if ( it == m_jobs.end() )
         return;
+      // Skip the whole-record copy + notify when nothing observable changed:
+      // high-frequency ticks with the same value were the main source of
+      // per-callback O(logs) churn (#634). New log lines still get through —
+      // the log callback notifies with its own record copy.
+      const bool unchanged = it->second.progress == progress
+                             && ( message.empty() || it->second.statusMessage == message );
+      if ( unchanged )
+        return;
       it->second.progress = progress;
       if ( !message.empty() )
         it->second.statusMessage = message;

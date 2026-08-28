@@ -25,7 +25,10 @@ void AlgorithmEngine::registerProvider( AlgorithmProviderAdapterPtr provider )
 {
     if ( provider )
     {
-        m_providers.insert( provider->providerId(), provider );
+        {
+            QMutexLocker locker( &m_providersMutex );
+            m_providers.insert( provider->providerId(), provider );
+        }
         provider->initialize();
         provider->discoverAlgorithms( *this );
     }
@@ -33,6 +36,7 @@ void AlgorithmEngine::registerProvider( AlgorithmProviderAdapterPtr provider )
 
 QList<AlgorithmProviderAdapterPtr> AlgorithmEngine::registeredProviders() const
 {
+    QMutexLocker locker( &m_providersMutex );
     return m_providers.values();
 }
 

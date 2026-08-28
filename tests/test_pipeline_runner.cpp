@@ -107,6 +107,23 @@ TEST_CASE("Pipeline JSON validation", "[cli][pipeline]") {
         std::string error;
         CHECK(RsPipelineRunner::validatePipelineJson(root, &error) == false);
     }
+
+    SECTION("Duplicate explicit step ids are rejected") {
+        // A silent duplicate would collide in TaskCenter's stepToTaskId
+        // QHash and orphan one step's wiring (#634).
+        Json::Value root(Json::objectValue);
+        Json::Value s1(Json::objectValue);
+        s1["operator"] = "test:op";
+        s1["id"] = "dup";
+        Json::Value s2(Json::objectValue);
+        s2["operator"] = "test:op";
+        s2["id"] = "dup";
+        root["steps"].append(s1);
+        root["steps"].append(s2);
+        std::string error;
+        CHECK(RsPipelineRunner::validatePipelineJson(root, &error) == false);
+        CHECK(error.find("dup") != std::string::npos);
+    }
 }
 
 TEST_CASE("Pipeline runner executes NDVI step", "[cli][pipeline]") {

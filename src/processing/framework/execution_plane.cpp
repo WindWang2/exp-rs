@@ -255,6 +255,12 @@ Json::Value ExecutionPlane::awaitResult( long taskId,
 
     if ( !terminal )
     {
+      // Abandoning the wait must also drop the completion-callback
+      // registration: a task that never reaches terminal state would
+      // otherwise keep its entry in TaskCenter's registry forever (#634).
+      // The callback itself holds only a weak_ptr, so a late fire after
+      // removal is a harmless no-op.
+      center.removeTaskCompletionCallback( taskId, shared->callbackToken );
       Json::Value errorResult( Json::objectValue );
       errorResult["status"] = "error";
       errorResult["taskId"] = static_cast<Json::Int64>( taskId );

@@ -686,6 +686,7 @@ bool RsPipelineRunner::validatePipelineJson( const Json::Value &pipelineJson,
     return false;
   }
 
+  std::unordered_set<std::string> seenStepIds;
   for ( Json::ArrayIndex i = 0; i < steps.size(); ++i )
   {
     const Json::Value step = steps[i];
@@ -711,6 +712,21 @@ bool RsPipelineRunner::validatePipelineJson( const Json::Value &pipelineJson,
     // cliJsonToWorkflowDefinition (after ${VAR} expansion and CWD
     // resolution) — pre-expansion checks here would be bypassable
     // (issue #313) and are intentionally omitted.
+
+    // Duplicate step ids must fail validation, not just conversion: the
+    // conversion-time check alone lets an invalid pipeline pass validation
+    // and surface only at submit (#634).
+    std::string sid;
+    if ( step.isMember( "id" ) && step["id"].isString() && !step["id"].asString().empty() )
+      sid = step["id"].asString();
+    else
+      sid = "step_" + std::to_string( i );
+    if ( !seenStepIds.insert( sid ).second )
+    {
+      if ( errorMessage )
+        *errorMessage = "Duplicate step id: " + sid;
+      return false;
+    }
   }
   return true;
 }

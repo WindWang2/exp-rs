@@ -1,6 +1,7 @@
 #include "task_center.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QMetaObject>
 #include <QMutexLocker>
@@ -1257,7 +1258,17 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
 
             if ( cleanupScratchOutputs && !info.outputLayerPath.isEmpty() && QFile::exists( info.outputLayerPath ) )
             {
+                // Scratch-only deletion: the system temp root (portable —
+                // QDir::tempPath() resolves %TEMP% on Windows, which a plain
+                // "/tmp/" prefix check always missed) or a .scratch path.
+                // Trailing separator so a sibling like /tmp2/x.tif under a
+                // /tmp temp root is never prefix-matched.
+                const QString tempRoot = QDir::tempPath();
+                const QString tempPrefix = tempRoot.endsWith( QLatin1Char( '/' ) )
+                                               ? tempRoot
+                                               : tempRoot + QLatin1Char( '/' );
                 if ( info.outputLayerPath.startsWith( QStringLiteral( "/tmp/" ) )
+                     || info.outputLayerPath.startsWith( tempPrefix )
                      || info.outputLayerPath.contains( QStringLiteral( ".scratch" ) ) )
                 {
                     QFile::remove( info.outputLayerPath );

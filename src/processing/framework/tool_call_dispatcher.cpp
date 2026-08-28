@@ -576,7 +576,11 @@ Json::Value ToolCallDispatcher::dispatchAndAwait( const Json::Value &envelope, s
       }
       if ( std::chrono::steady_clock::now() >= deadline )
         break;
-      QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
+      // ExcludeUserInputEvents: pumping AllEvents here let a user click
+      // (menu → dispatch another tool call) re-enter this await loop while
+      // the first dispatch is still live. Timers and network delivers — what
+      // the awaited task actually needs — are still serviced (#634).
+      QCoreApplication::processEvents( QEventLoop::ExcludeUserInputEvents, 50 );
       std::unique_lock<std::mutex> lock( state->mutex );
       state->cv.wait_for( lock, std::chrono::milliseconds( 10 ), [state]() { return state->done; } );
       if ( state->done )

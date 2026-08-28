@@ -4,6 +4,27 @@
 
 namespace sicnu::processing {
 
+namespace {
+// Markdown table cells break on raw '|' and newlines — escape pipe, collapse
+// line breaks to spaces (#634).
+std::string escapeTableCell( const std::string &text )
+{
+  std::string out;
+  out.reserve( text.size() );
+  for ( const char c : text )
+  {
+    switch ( c )
+    {
+      case '|': out += "\\|"; break;
+      case '\n':
+      case '\r': out += ' '; break;
+      default: out += c; break;
+    }
+  }
+  return out;
+}
+} // namespace
+
 Json::Value AgentToolCallExporter::exportOpenAiToolDefinitions( const std::vector<AlgorithmDescriptor> &descriptors )
 {
   Json::Value root( Json::arrayValue );
@@ -38,8 +59,9 @@ std::string AgentToolCallExporter::exportSystemPromptCatalog( const std::vector<
     if ( !desc.agentMetadata.purpose.empty() )
       cleanDesc += " (" + desc.agentMetadata.purpose + ")";
 
-    ss << "| `" << desc.id << "` | " << desc.displayName << " | " << desc.group
-       << " | " << cleanDesc << " | " << reqStr << " |\n";
+    ss << "| `" << escapeTableCell( desc.id ) << "` | " << escapeTableCell( desc.displayName )
+       << " | " << escapeTableCell( desc.group )
+       << " | " << escapeTableCell( cleanDesc ) << " | " << escapeTableCell( reqStr ) << " |\n";
   }
 
   return ss.str();
