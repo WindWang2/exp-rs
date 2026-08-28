@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QDialog>
+#include <QUrl>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QTableWidget>
@@ -20,7 +21,8 @@ public:
 
 private slots:
     void searchCatalog();
-    void onSearchCompleted(const QVariantList &features, const QString &error);
+    void onSearchCompleted(const QVariantList &features, const QString &error,
+                           const QUrl &nextPage = QUrl());
     void loadSelectedAsset();
 
 private:
@@ -34,6 +36,7 @@ private:
     QLineEdit *m_bboxEdit = nullptr;
     QTableWidget *m_resultsTable = nullptr;
     QPushButton *m_searchButton = nullptr;
+    QPushButton *m_moreButton = nullptr;  // STAC pagination (#634)
     QPushButton *m_loadButton = nullptr;
     StacClient *m_stacClient = nullptr;
     QList<QVariantMap> m_featureData;

@@ -2,6 +2,7 @@
 #include "qgs_display_stretch.h"
 #include "piecewise_linear_enhancement.h"
 
+#include <qgsrectangle.h>
 #include <qgsrasterlayer.h>
 #include <qgsrasterdataprovider.h>
 #include <qgsrasterrenderer.h>
@@ -28,8 +29,12 @@ static bool bandRange( QgsRasterDataProvider *provider, int band,
 {
   if ( !provider || band < 1 )
     return false;
+  // Sample-capped statistics (#634): the uncapped call computed a full
+  // first-time scan per band on the GUI thread from slider events; the
+  // 250k sample cap matches BandCompositionRail's established pattern.
   const QgsRasterBandStats stats = provider->bandStatistics(
-    band, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max );
+    band, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max,
+    QgsRectangle(), 250000 );
   if ( !std::isfinite( stats.minimumValue ) || !std::isfinite( stats.maximumValue )
        || !( stats.maximumValue > stats.minimumValue ) )
     return false;
@@ -62,9 +67,11 @@ static std::vector<ControlPoint> equalizationCurve( QgsRasterDataProvider *provi
                                                     double maximum )
 {
   constexpr int binCount = 256;
+  // Sample-capped histogram (#634): sampleSize=0 computed a full-resolution
+  // histogram on the GUI thread.
   const QgsRasterHistogram histogram =
     provider->histogram( band, binCount, minimum, maximum,
-                         QgsRectangle(), 0, true );
+                         QgsRectangle(), 250000, true );
   if ( !histogram.valid || histogram.histogramVector.size() < 2 )
     return {};
 
@@ -110,9 +117,11 @@ static bool percentileRange( QgsRasterDataProvider *provider, int band,
                              double &lower, double &upper )
 {
   constexpr int binCount = 1024;
+  // Sample-capped histogram (#634): sampleSize=0 computed a full-resolution
+  // histogram on the GUI thread.
   const QgsRasterHistogram histogram =
     provider->histogram( band, binCount, minimum, maximum,
-                         QgsRectangle(), 0, true );
+                         QgsRectangle(), 250000, true );
   if ( !histogram.valid || histogram.histogramVector.size() < 2 )
     return false;
 

@@ -2,6 +2,7 @@
 #include "multi_temporal_widget.h"
 #include "core/sicnu_logging.h"
 
+#include <qgsrectangle.h>
 #include <qgsrasterlayer.h>
 #include <qgsrasterdataprovider.h>
 
@@ -132,8 +133,12 @@ void MultiTemporalWidget::computeTemporalStats()
 
     for (int b = 0; b < bandCount; ++b) {
         // Read band stats from both layers
-        auto stats1 = layer1->dataProvider()->bandStatistics(b + 1);
-        auto stats2 = layer2->dataProvider()->bandStatistics(b + 1);
+        // Sample-capped (#634): uncapped stats scanned both layers fully on
+        // the GUI thread per click.
+        auto stats1 = layer1->dataProvider()->bandStatistics(
+            b + 1, Qgis::RasterBandStatistic::All, QgsRectangle(), 250000);
+        auto stats2 = layer2->dataProvider()->bandStatistics(
+            b + 1, Qgis::RasterBandStatistic::All, QgsRectangle(), 250000);
 
         double mean1 = stats1.mean;
         double mean2 = stats2.mean;

@@ -1,5 +1,9 @@
 // stac_browser_dialog.cpp — STAC Catalog Browser Dialog
 #include "stac_browser_dialog.h"
+#include <gdal.h>
+#include <QPointer>
+#include <QApplication>
+#include <QThreadPool>
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
 #include "main_window.h"
@@ -51,6 +55,13 @@ void StacBrowserDialog::setupUi()
   m_datetimeEdit = new QLineEdit( querySec );
   m_bboxEdit = new QLineEdit( querySec );
   m_bboxEdit->setPlaceholderText( tr( "min_lon,min_lat,max_lon,max_lat" ) );
+  m_moreButton = new QPushButton( tr( "更多结果" ), querySec );
+  m_moreButton->setToolTip( tr( "加载下一页检索结果。" ) );
+  m_moreButton->hide();
+  connect( m_moreButton, &QPushButton::clicked, this, [this]() {
+      m_moreButton->setEnabled( false );
+      m_stacClient->searchNext();
+  } );
   SicnuDialogHelp::tip( m_endpointEdit, tr( "STAC API 根 URL。" ) );
   SicnuDialogHelp::tip( m_collectionEdit, tr( "集合 ID，如 sentinel-2-l2a。" ) );
   SicnuDialogHelp::tip( m_datetimeEdit, tr( "时间过滤（ISO）。" ) );
@@ -65,7 +76,13 @@ void StacBrowserDialog::setupUi()
   SicnuUi::markPrimary( m_searchButton );
   SicnuDialogHelp::tip( m_searchButton, tr( "按条件检索 STAC 要素。" ) );
   connect( m_searchButton, &QPushButton::clicked, this, &StacBrowserDialog::searchCatalog );
-  qobject_cast<QVBoxLayout *>( querySec->layout() )->addWidget(  m_searchButton );
+  SicnuUi::markSecondary( m_moreButton );
+  auto *searchRow = new QWidget( querySec );
+  auto *searchRowLayout = new QHBoxLayout( searchRow );
+  searchRowLayout->setContentsMargins( 0, 0, 0, 0 );
+  searchRowLayout->addWidget( m_searchButton, 1 );
+  searchRowLayout->addWidget( m_moreButton );
+  qobject_cast<QVBoxLayout *>( querySec->layout() )->addWidget( searchRow );
   mainLayout->addWidget( querySec );
 
   QFrame *resSec = SicnuUi::makeSection( this, tr( "检索结果" ) );
@@ -117,10 +134,12 @@ void StacBrowserDialog::searchCatalog()
                          m_datetimeEdit->text().trimmed(), bbox);
 }
 
-void StacBrowserDialog::onSearchCompleted(const QVariantList &features, const QString &error)
+void StacBrowserDialog::onSearchCompleted(const QVariantList &features, const QString &error,
+                                          const QUrl &nextPage)
 {
     m_searchButton->setEnabled(true);
     m_searchButton->setText(tr("Search"));
+    m_moreButton->setEnabled(true);
 
     if (!error.isEmpty()) {
         QMessageBox::warning(this, tr("Search Failed"), error);
@@ -128,6 +147,10 @@ void StacBrowserDialog::onSearchCompleted(const QVariantList &features, const QS
     }
 
     populateResults(features);
+
+    // STAC pagination (#634): offer the next page when the server provides
+    // a `next` link - the fixed limit previously hid everything past page 1.
+    m_moreButton->setVisible( nextPage.isValid() && !nextPage.isEmpty() );
 }
 
 void StacBrowserDialog::populateResults(const QVariantList &features)
@@ -170,17 +193,47 @@ void StacBrowserDialog::loadSelectedAsset()
     }
 
     // Route through main shell Data/Display seam (ADR 0010 Wave B) — no raw addMapLayer.
+    // The COG VALIDATION open happens OFF the GUI thread (#634): a
+    // /vsicurl/ source on a cold cache did synchronous network round trips
+    // inside the click slot. The worker pre-opens the dataset (validates
+    // + warms GDAL caches); registration still runs on the GUI thread
+    // (DataManager is thread-affine).
     if ( auto *mw = qobject_cast<QgisDesktopWindow *>( parentWidget() ) )
     {
-        if ( !mw->loadDataLayer( vsicurl ) )
-        {
-            QMessageBox::warning( this, tr( "Error" ),
-                                  tr( "Failed to register/display STAC COG via Data Manager." ) );
-            return;
-        }
-        if ( m_canvas )
-            m_canvas->zoomToFullExtent();
-        accept();
+        QApplication::setOverrideCursor( Qt::WaitCursor );
+        setEnabled( false );
+        QPointer<QgisDesktopWindow> safeMw( mw );
+        QPointer<StacBrowserDialog> safeSelf( this );
+        QThreadPool::globalInstance()->start( [safeSelf, safeMw, vsicurl]() {
+            GDALAllRegister();
+            GDALDatasetH ds = GDALOpenEx( vsicurl.toUtf8().constData(),
+                                          GDAL_OF_RASTER | GDAL_OF_READONLY,
+                                          nullptr, nullptr, nullptr );
+            const bool openable = ds != nullptr;
+            if ( ds )
+                GDALClose( ds );
+            QMetaObject::invokeMethod( qApp, [safeSelf, safeMw, vsicurl, openable]() {
+                QApplication::restoreOverrideCursor();
+                if ( !safeSelf || !safeMw )
+                    return;
+                safeSelf->setEnabled( true );
+                if ( !openable )
+                {
+                    QMessageBox::warning( safeSelf, safeSelf->tr( "Error" ),
+                                          safeSelf->tr( "Failed to load COG from STAC asset." ) );
+                    return;
+                }
+                if ( !safeMw->loadDataLayer( vsicurl ) )
+                {
+                    QMessageBox::warning( safeSelf, safeSelf->tr( "Error" ),
+                                          safeSelf->tr( "Failed to register/display STAC COG via Data Manager." ) );
+                    return;
+                }
+                if ( safeSelf->m_canvas )
+                    safeSelf->m_canvas->zoomToFullExtent();
+                safeSelf->accept();
+            } );
+        } );
         return;
     }
 

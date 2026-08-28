@@ -2,12 +2,14 @@
 #pragma once
 
 #include <QDialog>
+#include <QLabel>
 
 class ComparisonWidget;
 class QComboBox;
 class QPushButton;
 class RasterLayerCombo;
 class QgsRasterLayer;
+class QgsMapRendererParallelJob;
 
 /**
  * Dialog for comparing two raster layers side-by-side or with flicker mode.
@@ -38,4 +40,15 @@ private:
 
     QgsRasterLayer *m_leftLayer = nullptr;
     QgsRasterLayer *m_rightLayer = nullptr;
+
+    // Asynchronous preview renders (#634): waitForFinished() on the GUI
+    // thread blocked until both 400x400 renders completed - on /vsicurl/
+    // or overview-less sources that froze the dialog. One job per side,
+    // result delivered via the finished signal (SwipeMapTool pattern).
+    QgsMapRendererParallelJob *m_leftJob = nullptr;
+    QgsMapRendererParallelJob *m_rightJob = nullptr;
+    QLabel *m_leftPreview = nullptr;
+    QLabel *m_rightPreview = nullptr;
+
+    void startPreviewRender(QgsRasterLayer *layer, bool isLeft);
 };

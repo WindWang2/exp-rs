@@ -119,45 +119,70 @@ void ComparisonDialog::onLoadLayers()
 void ComparisonDialog::loadLayerToWidget(QgsRasterLayer *layer, bool isLeft)
 {
     if (!layer || !layer->isValid()) return;
+    startPreviewRender(layer, isLeft);
+}
 
-    // Render the layer to a QPixmap at preview resolution. QGIS renders at
-    // the output size, reading only the needed pixels — a lightweight preview
-    // (the DoD "preview without executing the full raster" seam).
+void ComparisonDialog::startPreviewRender(QgsRasterLayer *layer, bool isLeft)
+{
+    // Asynchronous preview (#634): the old QgsMapRendererParallelJob +
+    // waitForFinished() ran ON the GUI thread - on /vsicurl/ or
+    // overview-less sources both 400x400 renders froze the dialog. The
+    // finished signal delivers the image (SwipeMapTool pattern); a stale
+    // job for a superseded load is cancelled and discarded.
     const QSize size(400, 400);
-    QPixmap pixmap;
     QgsMapSettings mapSettings;
     mapSettings.setDestinationCrs(layer->crs());
     mapSettings.setExtent(layer->extent());
     mapSettings.setOutputSize(size);
     mapSettings.setLayers({layer});
-    QgsMapRendererParallelJob job(mapSettings);
-    job.start();
-    job.waitForFinished();
-    const QImage image = job.renderedImage();
-    if (!image.isNull())
-        pixmap = QPixmap::fromImage(image);
 
-    if (pixmap.isNull())
+    QgsMapRendererParallelJob *&job = isLeft ? m_leftJob : m_rightJob;
+    if (job)
     {
-        // Fallback placeholder when rendering is unavailable (e.g. unreadable
-        // provider): describe the layer instead of a blank pane.
-        pixmap = QPixmap(size);
-        pixmap.fill(Qt::darkGray);
-        QPainter painter(&pixmap);
-        painter.setPen(Qt::white);
-        painter.setFont(QFont("Arial", 12));
-        painter.drawText(pixmap.rect(), Qt::AlignCenter,
-                         tr("%1\n%2 bands\n%3 x %4 pixels")
-                             .arg(layer->name())
-                             .arg(layer->bandCount())
-                             .arg(layer->width())
-                             .arg(layer->height()));
-        painter.end();
+        job->cancel();
+        job->deleteLater();
     }
+    job = new QgsMapRendererParallelJob(mapSettings);
+    job->setParent(this);
 
-    if (isLeft) {
-        m_comparisonWidget->setLeftImage(pixmap);
-    } else {
-        m_comparisonWidget->setRightImage(pixmap);
-    }
+    const QSize previewSize = size;
+    connect(job, &QgsMapRendererParallelJob::finished, this,
+            [this, job, isLeft, previewSize]() {
+                if ((isLeft ? m_leftJob : m_rightJob) != job)
+                    return;  // superseded
+                QPixmap pixmap;
+                const QImage image = job->renderedImage();
+                if (!image.isNull())
+                    pixmap = QPixmap::fromImage(image);
+
+                if (pixmap.isNull())
+                {
+                    pixmap = QPixmap(previewSize);
+                    pixmap.fill(Qt::darkGray);
+                    QPainter painter(&pixmap);
+                    painter.setPen(Qt::white);
+                    painter.setFont(QFont("Arial", 12));
+                    painter.drawText(pixmap.rect(), Qt::AlignCenter,
+                                     tr("preview unavailable"));
+                    painter.end();
+                }
+
+                if (isLeft)
+                    m_comparisonWidget->setLeftImage(pixmap);
+                else
+                    m_comparisonWidget->setRightImage(pixmap);
+                job->deleteLater();
+                if (isLeft) m_leftJob = nullptr; else m_rightJob = nullptr;
+            });
+
+    job->start();
+
+    // Placeholder while rendering (keeps the panes responsive-looking).
+    QPixmap placeholder(size);
+    placeholder.fill(Qt::darkGray);
+
+    if (isLeft)
+        m_comparisonWidget->setLeftImage(placeholder);
+    else
+        m_comparisonWidget->setRightImage(placeholder);
 }

@@ -176,7 +176,11 @@ void StacClient::search(const QString &endpoint, const QString &collection,
     }
 
     const QUrl url = buildSearchUrl(endpoint, collection, datetime, bbox, limit);
+    runSearch(url);
+}
 
+void StacClient::runSearch(const QUrl &url)
+{
     QNetworkRequest request(url);
     request.setTransferTimeout(10000);
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
@@ -215,6 +219,27 @@ void StacClient::search(const QString &endpoint, const QString &collection,
 
         const QVariantMap root = doc.toVariant().toMap();
         const QVariantList features = root.value(QStringLiteral("features")).toList();
-        emit searchCompleted(features);
+        // STAC paging (#634): follow the `next` link when the server provides
+        // one - a fixed limit silently hid everything past page one.
+        QUrl next;
+        const QVariantList links = root.value(QStringLiteral("links")).toList();
+        for ( const QVariant &linkVar : links )
+        {
+            const QVariantMap link = linkVar.toMap();
+            if ( link.value( QStringLiteral( "rel" ) ).toString() == QStringLiteral( "next" ) )
+            {
+                next = QUrl( link.value( QStringLiteral( "href" ) ).toString() );
+                break;
+            }
+        }
+        m_nextPage = next;
+        emit searchCompleted(features, QString(), next);
     });
+}
+
+void StacClient::searchNext()
+{
+    if ( m_nextPage.isEmpty() || !m_nextPage.isValid() )
+        return;
+    runSearch( m_nextPage );
 }

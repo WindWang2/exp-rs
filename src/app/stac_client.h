@@ -13,7 +13,8 @@ class StacClient : public QObject
 {
     Q_OBJECT
 signals:
-    void searchCompleted(const QVariantList &features, const QString &error = QString());
+    void searchCompleted(const QVariantList &features, const QString &error = QString(),
+                         const QUrl &nextPage = QUrl());
 
 public:
     explicit StacClient(QObject *parent = nullptr) : QObject(parent) {}
@@ -46,12 +47,21 @@ public:
      */
     static QString selectCogHref(const QJsonObject &stacItemFeature);
 
+    /// Follows the `next` link of the previous search (pagination, #634).
+    /// No-op when no next page exists.
+    void searchNext();
+
     void search(const QString &endpoint, const QString &collection,
                 const QString &datetime, const QStringList &bbox,
                 int limit = 50);
 
 private:
     QNetworkAccessManager mManager;
+
+private:
+    QUrl m_nextPage;
+
+    void runSearch(const QUrl &url);
 };
 
 #endif // STAC_CLIENT_H
