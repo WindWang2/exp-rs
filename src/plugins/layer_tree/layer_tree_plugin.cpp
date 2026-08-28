@@ -58,8 +58,10 @@ bool LayerTreePlugin::initialize(SicnuAppInterface *iface)
     m_model->setFlag(QgsLayerTreeModel::AllowLegendChangeState);
     m_model->setFlag(QgsLayerTreeModel::ActionHierarchical);
 
+    // setLayerTreeModel() installs the model (wrapping it in the layer-tree
+    // proxy) — an explicit setModel() on top would build a second proxy and
+    // duplicate the signal wiring (#634).
     layerTree->setLayerTreeModel(m_model);
-    layerTree->setModel(m_model);
     layerTree->expandAll();
     m_layerTreeView = layerTree;
 

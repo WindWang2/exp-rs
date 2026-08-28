@@ -52,10 +52,16 @@ void QwtPlotRenderer::renderPlot(QwtPlot *plot, QPainter *painter, const QRectF 
         }
     }
 
-    // Set scale intervals
-    if (xMin < xMax) {
-        xMap.setScaleInterval(xMin, xMax);
+    // No drawable data (all items empty/invisible, or degenerate bounds):
+    // the sentinel bounds (1e30/-1e30) would otherwise leave garbage/inverted
+    // scale intervals for the transform calls below.
+    if (!(xMin < xMax) || !(yMin < yMax)) {
+        painter->restore();
+        return;
     }
+
+    // Set scale intervals (the guard above established xMin < xMax).
+    xMap.setScaleInterval(xMin, xMax);
     yMap.setScaleInterval(yMin, yMax);
 
     // Render histograms

@@ -58,9 +58,11 @@ QgsMacNative::~QgsMacNative() {
 }
 
 void QgsMacNative::setIconPath(const QString &iconPath) {
+  // autorelease: the property assignment retains, so a bare alloc here both
+  // leaks the new image and (on repeat calls) the previous one (#634).
   mQgsUserNotificationCenter->_qgisIcon =
-      [[NSImage alloc] initWithCGImage:QPixmap(iconPath).toImage().toCGImage()
-                                  size:NSZeroSize];
+      [[[NSImage alloc] initWithCGImage:QPixmap(iconPath).toImage().toCGImage()
+                                  size:NSZeroSize] autorelease];
 }
 
 const char *QgsMacNative::currentAppLocalizedName() {
@@ -82,7 +84,8 @@ void QgsMacNative::currentAppActivateIgnoringOtherApps() {
 
 void QgsMacNative::openFileExplorerAndSelectFile(const QString &path) {
   NSString *pathStr =
-      [[NSString alloc] initWithUTF8String:path.toUtf8().constData()];
+      [[[NSString alloc] initWithUTF8String:path.toUtf8().constData()]
+          autorelease]; // #634: bare alloc leaked
   NSArray *fileURLs =
       [NSArray arrayWithObjects:[NSURL fileURLWithPath:pathStr], nil];
   [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:fileURLs];
@@ -109,8 +112,9 @@ QgsNative::NotificationResult QgsMacNative::showDesktopNotification(
     image = mQgsUserNotificationCenter->_qgisIcon;
   } else {
     const QPixmap px = QPixmap::fromImage(settings.image);
-    image = [[NSImage alloc] initWithCGImage:px.toImage().toCGImage()
-                                        size:NSZeroSize];
+    // autorelease: contentImage assignment retains — a bare alloc leaked (#634).
+    image = [[[NSImage alloc] initWithCGImage:px.toImage().toCGImage()
+                                        size:NSZeroSize] autorelease];
   }
   notification.contentImage = image;
 

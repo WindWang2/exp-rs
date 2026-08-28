@@ -32,6 +32,11 @@ QsciLexerJSON::~QsciLexerJSON() {}
 QsciAPIs::~QsciAPIs() {}
 
 // --- MOC Stubs for classes outside AUTOMOC scan scope ---
+// HAZARD (#634): these fake metaObject()s alias the BASE class meta-object,
+// so qobject_cast<QsciLexerHTML*>(any QsciLexer*) succeeds and distinct
+// lexer subclasses are indistinguishable. Safe only while the stub lexers
+// have no virtual behavior and nobody qobject_casts to a subclass; if these
+// classes are ever really enabled, give each its own Q_OBJECT meta-object.
 const QMetaObject *QsciLexerHTML::metaObject() const { return &QsciLexer::staticMetaObject; }
 void *QsciLexerHTML::qt_metacast( const char *c ) { return QsciLexer::qt_metacast( c ); }
 int QsciLexerHTML::qt_metacall( QMetaObject::Call c, int id, void **a ) { return QsciLexer::qt_metacall( c, id, a ); }
