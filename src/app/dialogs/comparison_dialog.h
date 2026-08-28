@@ -20,6 +20,7 @@ class ComparisonDialog : public QDialog
 
 public:
     explicit ComparisonDialog(QWidget *parent = nullptr);
+    ~ComparisonDialog() override;
 
     void setLeftLayer(QgsRasterLayer *layer);
     void setRightLayer(QgsRasterLayer *layer);

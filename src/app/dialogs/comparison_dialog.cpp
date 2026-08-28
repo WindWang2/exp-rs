@@ -116,6 +116,23 @@ void ComparisonDialog::onLoadLayers()
     }
 }
 
+ComparisonDialog::~ComparisonDialog()
+{
+    // In-flight preview renders must be cancelled and drained before the
+    // member job pointers die; destroying a RUNNING QgsMapRendererParallelJob
+    // crashed (#634 follow-up).
+    for ( QgsMapRendererParallelJob *job : { m_leftJob, m_rightJob } )
+    {
+        if ( job )
+        {
+            job->cancel();
+            job->waitForFinished();
+            delete job;
+        }
+    }
+    m_leftJob = m_rightJob = nullptr;
+}
+
 void ComparisonDialog::loadLayerToWidget(QgsRasterLayer *layer, bool isLeft)
 {
     if (!layer || !layer->isValid()) return;

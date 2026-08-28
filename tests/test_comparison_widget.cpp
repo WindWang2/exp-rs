@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <QThread>
 #include <catch2/catch_approx.hpp>
 #include "app/widgets/comparison_widget.h"
 #include "app/dialogs/comparison_dialog.h"
@@ -162,6 +163,13 @@ TEST_CASE("ComparisonDialog renders real raster previews", "[comparison][dialog]
 
     dialog.setLeftLayer(&beforeLayer);
     dialog.setRightLayer(&afterLayer);
+    // Placeholders land synchronously; the async renders deliver via the
+    // event loop (#634) - drain it with a bounded wait.
+    for ( int i = 0; i < 200; ++i )
+    {
+        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+        QThread::msleep( 5 );
+    }
     CHECK(widget->hasLeftImage());
     CHECK(widget->hasRightImage());
 
