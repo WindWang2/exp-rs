@@ -318,10 +318,15 @@ void InteractionToolProvider::resetDefaults()
   mTools[zoom.name] = zoom;
   // Derive any registry tool not already covered above so every dispatchable
   // interaction tool is advertised (view:*, roi:*, raster:get/reset_display...).
+  // data:* is excluded: those tools are owned by DataToolProvider, and the
+  // registry unconditionally registers them too — deriving them here listed
+  // every data:* tool twice in the catalog (#641).
   try
   {
     for ( const auto &def : sicnu::agent::InteractionToolRegistry::instance().listTools() )
     {
+      if ( def.name.startsWith( QStringLiteral( "data:" ) ) )
+        continue;
       if ( mTools.find( def.name ) != mTools.end() )
         continue;
       AgentTool tool;

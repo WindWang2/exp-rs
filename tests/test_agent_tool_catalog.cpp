@@ -3,6 +3,7 @@
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "agent/tool_catalog/algorithm_tool_provider.h"
 #include "agent/tool_catalog/interaction_tool_provider.h"
+#include "agent/interaction_tool_registry.h"
 #include "agent/tool_catalog/data_tool_provider.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -296,6 +297,33 @@ TEST_CASE( "AgentToolCatalog: Duplicate Name Detection", "[agent][tool_catalog][
 {
   auto &catalog = AgentToolCatalog::instance();
   catalog.reset();
+
+  SECTION( "No duplicates when the InteractionToolRegistry is populated (#641)" )
+  {
+    // The real app populates InteractionToolRegistry (which unconditionally
+    // registers data:*) BEFORE the catalog singleton is first constructed.
+    // Reproduce that order here: with a populated registry the derivation
+    // used to re-adopt the data:* tools DataToolProvider already owns and
+    // listTools() emitted each one twice.
+    auto &registry = sicnu::agent::InteractionToolRegistry::instance();
+    registry.reset();
+    registry.registerDataTools( nullptr );
+
+    catalog.reset();
+
+    CHECK_FALSE( catalog.hasDuplicates() );
+    CHECK( catalog.findDuplicateNames().empty() );
+
+    std::size_t listLayersCount = 0;
+    for ( const auto &tool : catalog.listTools() )
+    {
+      if ( tool.name == "data:list_layers" )
+        ++listLayersCount;
+    }
+    CHECK( listLayersCount == 1 );
+
+    registry.reset();
+  }
 
   SECTION( "No duplicates in default catalog" )
   {
