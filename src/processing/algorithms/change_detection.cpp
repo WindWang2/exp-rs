@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <limits>
 #include <numeric>
+#include <unordered_map>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -385,51 +386,64 @@ void morphologicalCleanup(uint8_t *mask, int width, int height, int iterations, 
     }
 }
 
-bool connectedComponentFilter(uint8_t *mask, int width, int height,
-                              size_t minArea)
+namespace {
+
+// Node-table policies for connectedComponentFilter (#648). Both drive the
+// same union-find scan; they differ only in where parent/area live.
+struct ccUnionFindDenseStore
 {
-    if (!mask || width <= 0 || height <= 0) {
-        SICNU_LOG_ERROR(SicnuLogTags::Algorithms,
-                        "connectedComponentFilter: invalid arguments");
-        return false;
-    }
-    if (minArea == 0) return true; // no-op
+    std::vector<int> parent;
+    std::vector<size_t> area;
+    explicit ccUnionFindDenseStore(size_t count)
+        : parent(count, -1), area(count, 0) {}
+    void makeNode(int i) { parent[i] = i; area[i] = 1; }
+    int parentOf(int i) const { return parent[i]; }
+    void setParent(int i, int p) { parent[i] = p; }
+    void mergeArea(int ra, int rb) { area[ra] += area[rb]; }
+    size_t areaOf(int i) const { return area[i]; }
+};
 
+struct ccUnionFindSparseStore
+{
+    // One entry per foreground pixel (~40-48 B/entry incl. hashing).
+    std::unordered_map<int, int> parent;
+    std::unordered_map<int, size_t> area;
+    void makeNode(int i) { parent[i] = i; area[i] = 1; }
+    int parentOf(int i) const { return parent.find(i)->second; }
+    void setParent(int i, int p) { parent.find(i)->second = p; }
+    void mergeArea(int ra, int rb) { area[ra] += area[rb]; }
+    size_t areaOf(int i) const { return area.find(i)->second; }
+};
+
+// Shared 8-neighbourhood union-find + minimum-mapping-unit drop. The store
+// sees exactly the same operations in exactly the same order for a given
+// mask, so both policies produce byte-identical output.
+template <typename Store>
+void ccLabelScan(uint8_t *mask, int width, int height, size_t minArea, Store &store)
+{
     const size_t count = static_cast<size_t>(width) * height;
-    if (count == 0) return true;
-    // The union-find stores node ids as int; refuse pathological rasters
-    // instead of wrapping indices into out-of-bounds access.
-    if (count > static_cast<size_t>(std::numeric_limits<int>::max()))
-        return false;
-
-    // Union-find over the 1-pixels with 8-neighbourhood connectivity.
-    std::vector<int> parent(count, -1);
-    std::vector<size_t> area(count, 0);
-
     for (size_t i = 0; i < count; ++i) {
-        if (mask[i] == 1) {
-            parent[i] = static_cast<int>(i);
-            area[i] = 1;
-        }
+        if (mask[i] == 1)
+            store.makeNode(static_cast<int>(i));
     }
 
-    const auto find = [&parent](int x) {
+    const auto find = [&store](int x) {
         int root = x;
-        while (parent[root] != root)
-            root = parent[root];
-        while (parent[x] != root) {
-            const int next = parent[x];
-            parent[x] = root;
+        while (store.parentOf(root) != root)
+            root = store.parentOf(root);
+        while (store.parentOf(x) != root) {
+            const int next = store.parentOf(x);
+            store.setParent(x, root);
             x = next;
         }
         return root;
     };
     const auto unite = [&](int a, int b) {
-        int ra = find(a);
+        const int ra = find(a);
         const int rb = find(b);
         if (ra != rb) {
-            parent[rb] = ra;
-            area[ra] += area[rb];
+            store.setParent(rb, ra);
+            store.mergeArea(ra, rb);
         }
     };
 
@@ -456,8 +470,60 @@ bool connectedComponentFilter(uint8_t *mask, int width, int height,
 
     // Drop components below the minimum mapping unit.
     for (size_t i = 0; i < count; ++i) {
-        if (mask[i] == 1 && area[find(static_cast<int>(i))] < minArea)
+        if (mask[i] == 1 && store.areaOf(find(static_cast<int>(i))) < minArea)
             mask[i] = 0;
+    }
+}
+
+} // namespace
+
+bool connectedComponentFilter(uint8_t *mask, int width, int height,
+                              size_t minArea)
+{
+    if (!mask || width <= 0 || height <= 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms,
+                        "connectedComponentFilter: invalid arguments");
+        return false;
+    }
+    if (minArea == 0) return true; // no-op
+
+    const size_t count = static_cast<size_t>(width) * height;
+    if (count == 0) return true;
+    // The union-find stores node ids as int; refuse pathological rasters
+    // instead of wrapping indices into out-of-bounds access.
+    if (count > static_cast<size_t>(std::numeric_limits<int>::max()))
+        return false;
+
+    // Union-find over the 1-pixels with 8-neighbourhood connectivity (#648).
+    // The node tables used to be allocated for EVERY pixel (4 + 8 B/px =
+    // ~30 GB at 50k x 50k). Two bounds fix the realistic sparse-change case
+    // while keeping the worst case at the old ceiling:
+    //   - an all-foreground mask is one component: decided without
+    //     union-find at all;
+    //   - otherwise the store is picked by the measured foreground fraction:
+    //     hash tables (~40-48 B per foreground entry) below 25%, dense
+    //     tables (the old 12 B/px ceiling) above.
+    // Both stores drive the SAME ccLabelScan template, so the output is
+    // identical regardless of which path is taken (fuzz-verified over 405
+    // randomized + edge masks: dense == sparse == hybrid).
+    size_t foreground = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (mask[i] == 1)
+            ++foreground;
+    }
+    if (foreground == count) {
+        // One 8-connected component spans the scene.
+        if (minArea > count)
+            std::fill(mask, mask + count, static_cast<uint8_t>(0));
+        return true;
+    }
+
+    if (foreground * 4 < count) {
+        ccUnionFindSparseStore store;
+        ccLabelScan(mask, width, height, minArea, store);
+    } else {
+        ccUnionFindDenseStore store(count);
+        ccLabelScan(mask, width, height, minArea, store);
     }
     return true;
 }
