@@ -8,6 +8,11 @@
 #include "jobs/job_types.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_run.h"
+#include "data/execution_fingerprint.h"
+
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
 
 #include <QObject>
 
@@ -668,6 +673,148 @@ TEST_CASE("TaskCenter - v2 run fingerprints are stable and transitively invalida
     CHECK(run4->state() == sicnu::workflow::WorkflowRunState::Failed);
     CHECK_FALSE(run4->errorMessage().empty());
 
+    engine.clearExecutors();
+}
+
+TEST_CASE("TaskCenter - execution cache skips identical pipeline steps end to end", "[processing][task_center][pipeline][v2][cache]") {
+    auto& engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    auto& cache = sicnu::data::ExecutionResultCache::instance();
+    cache.clear();
+    cache.setEnabled(true); // opt-in for this test; disabled again below
+
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString aOut = dir.filePath("a_out.tif");
+    const QString bOut = dir.filePath("b_out.tif");
+
+    static std::atomic<int> aRuns{0};
+    static std::atomic<int> bRuns{0};
+    aRuns.store(0);
+    bRuns.store(0);
+
+    engine.registerExecutor("pipe:cache_a", [aOut](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
+        aRuns.fetch_add(1);
+        context.logInfo("a executed");
+        QFile f(aOut);
+        REQUIRE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        f.write("a-payload
+");
+        f.close();
+        Json::Value result(Json::objectValue);
+        result["output"] = aOut.toStdString();
+        return result;
+    });
+    engine.registerExecutor("pipe:cache_b", [bOut](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
+        bRuns.fetch_add(1);
+        context.logInfo("b executed");
+        QFile f(bOut);
+        REQUIRE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        f.write("b-payload
+");
+        f.close();
+        Json::Value result(Json::objectValue);
+        result["output"] = bOut.toStdString();
+        return result;
+    });
+
+    auto& center = sicnu::TaskCenter::instance();
+
+    // Fingerprints cover operator id + canonical params + upstream derivation,
+    // so runs share step fingerprints only when their params are identical.
+    auto makeDef = [](const std::string& defId, const QString& aOutputPath, const QString& bOutputPath) {
+        sicnu::workflow::WorkflowDefinition def;
+        def.id = defId;
+        def.title = "Cache pipeline";
+        sicnu::workflow::StepDef a;
+        a.id = "a";
+        a.kind = sicnu::workflow::StepKind::Operator;
+        a.operatorId = "pipe:cache_a";
+        a.params["output"] = aOutputPath.toStdString();
+        sicnu::workflow::StepDef b;
+        b.id = "b";
+        b.kind = sicnu::workflow::StepKind::Operator;
+        b.operatorId = "pipe:cache_b";
+        b.params["input"] = "$a.output";
+        b.params["output"] = bOutputPath.toStdString();
+        sicnu::workflow::StepConnection conn;
+        conn.fromStepId = "a";
+        conn.fromPort = "output";
+        conn.toPort = "input";
+        b.inputs.push_back(conn);
+        def.steps = { a, b };
+        return def;
+    };
+
+    // Run 1: cold cache - both steps execute.
+    long p1 = center.submitPipeline(makeDef("cache_def_1", aOut, bOut), false);
+    REQUIRE(p1 > 0);
+    auto info1 = center.waitForPipeline(p1);
+    REQUIRE(info1.isCompleted);
+    REQUIRE_FALSE(info1.isFailed);
+    REQUIRE(aRuns.load() == 1);
+    REQUIRE(bRuns.load() == 1);
+
+    // Run 2: identical JSON - both steps served from cache, nothing re-runs.
+    long p2 = center.submitPipeline(makeDef("cache_def_2", aOut, bOut), false);
+    REQUIRE(p2 > 0);
+    auto info2 = center.waitForPipeline(p2);
+    REQUIRE(info2.isCompleted);
+    REQUIRE_FALSE(info2.isFailed);
+    REQUIRE(aRuns.load() == 1);
+    REQUIRE(bRuns.load() == 1);
+
+    auto run2 = center.workflowRunForPipeline(p2);
+    REQUIRE(run2 != nullptr);
+    const auto planA = run2->stepPlan("a");
+    const auto planB = run2->stepPlan("b");
+    REQUIRE(planA.has_value());
+    REQUIRE(planB.has_value());
+    CHECK(planA->cacheHit);
+    CHECK(planA->cachedOutputPath == aOut.toStdString());
+    CHECK(planA->status == "Completed");
+    CHECK(planB->cacheHit);
+    CHECK(planB->cachedOutputPath == bOut.toStdString());
+    const auto bTaskId2 = info2.stepToTaskId.value("b");
+    CHECK(center.getTaskInfo(bTaskId2).status == sicnu::TaskStatus::Completed);
+    CHECK(center.getTaskInfo(bTaskId2).outputLayerPath == bOut);
+
+    // Run 3: only the downstream step's params change. Step a is still served
+    // from cache; step b misses and re-executes, consuming the CACHED upstream
+    // artifact through placeholder substitution off the pre-completed task.
+    const QString bOut2 = dir.filePath("b_out2.tif");
+    long p3 = center.submitPipeline(makeDef("cache_def_3", aOut, bOut2), false);
+    REQUIRE(p3 > 0);
+    auto info3 = center.waitForPipeline(p3);
+    REQUIRE(info3.isCompleted);
+    REQUIRE(aRuns.load() == 1);  // upstream untouched
+    REQUIRE(bRuns.load() == 2);  // downstream invalidated and re-run
+    const auto aTaskId3 = info3.stepToTaskId.value("a");
+    CHECK(center.getTaskInfo(aTaskId3).status == sicnu::TaskStatus::Completed);
+    const auto bTaskId3 = info3.stepToTaskId.value("b");
+    CHECK(center.getTaskInfo(bTaskId3).parameterMap.value("input").toString() == aOut);
+
+    // Run 4: upstream params changed -> both fingerprints change -> re-execute.
+    const QString aOut2 = dir.filePath("a_out2.tif");
+    long p4 = center.submitPipeline(makeDef("cache_def_4", aOut2, bOut), false);
+    REQUIRE(p4 > 0);
+    auto info4 = center.waitForPipeline(p4);
+    REQUIRE(info4.isCompleted);
+    REQUIRE(aRuns.load() == 2);
+    REQUIRE(bRuns.load() == 3);
+
+    // Run 5: cache disabled - full recompute even for identical JSON.
+    cache.setEnabled(false);
+    long p5 = center.submitPipeline(makeDef("cache_def_5", aOut, bOut), false);
+    REQUIRE(p5 > 0);
+    auto info5 = center.waitForPipeline(p5);
+    REQUIRE(info5.isCompleted);
+    REQUIRE(aRuns.load() == 3);
+    REQUIRE(bRuns.load() == 4);
+
+    cache.setEnabled(false);
+    cache.clear();
     engine.clearExecutors();
 }
 

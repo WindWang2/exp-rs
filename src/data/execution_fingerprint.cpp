@@ -1,6 +1,8 @@
 // src/data/execution_fingerprint.cpp
 #include "execution_fingerprint.h"
 
+#include <QFile>
+
 #include <QCryptographicHash>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -329,12 +331,66 @@ void ExecutionResultCache::evictIfNeededLocked()
     }
     m_entries.erase( lruIt );
   }
+  while ( static_cast<size_t>( m_pathEntries.size() ) > m_maxEntries )
+  {
+    QHash<QByteArray, PathEntry>::iterator lruIt = m_pathEntries.begin();
+    for ( QHash<QByteArray, PathEntry>::iterator it = m_pathEntries.begin(); it != m_pathEntries.end(); ++it )
+    {
+      if ( it->lastUsedTick < lruIt->lastUsedTick )
+        lruIt = it;
+    }
+    m_pathEntries.erase( lruIt );
+  }
 }
 
 void ExecutionResultCache::invalidate( const ExecutionFingerprint &fp )
 {
   std::lock_guard<std::recursive_mutex> locker( m_mutex );
   m_entries.remove( fp.digest );
+  m_pathEntries.remove( fp.digest );
+}
+
+std::optional<QString> ExecutionResultCache::lookupOutputPath( const ExecutionFingerprint &fp ) const
+{
+  std::lock_guard<std::recursive_mutex> locker( m_mutex );
+  if ( !m_enabled )
+    return std::nullopt;
+  auto it = m_pathEntries.find( fp.digest );
+  if ( it == m_pathEntries.end() )
+    return std::nullopt;
+  if ( !QFile::exists( it->path ) )
+  {
+    // The cached artifact vanished (GC, manual cleanup): a stale entry must
+    // never be served, so drop it and report a miss.
+    m_pathEntries.erase( it );
+    return std::nullopt;
+  }
+  it->lastUsedTick = ++m_clock;
+  return it->path;
+}
+
+void ExecutionResultCache::storeOutputPath( const ExecutionFingerprint &fp, const QString &outputPath )
+{
+  if ( outputPath.isEmpty() )
+    return;
+  std::lock_guard<std::recursive_mutex> locker( m_mutex );
+  if ( !m_enabled )
+    return;
+  auto it = m_pathEntries.find( fp.digest );
+  if ( it != m_pathEntries.end() )
+  {
+    it->path = outputPath;
+    it->lastUsedTick = ++m_clock;
+    return;
+  }
+  m_pathEntries.insert( fp.digest, PathEntry{ outputPath, ++m_clock } );
+  evictIfNeededLocked();
+}
+
+int ExecutionResultCache::pathSize() const
+{
+  std::lock_guard<std::recursive_mutex> locker( m_mutex );
+  return m_pathEntries.size();
 }
 
 void ExecutionResultCache::clear()

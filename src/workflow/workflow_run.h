@@ -53,6 +53,9 @@ struct StepPlan {
   std::string fingerprint;
   bool cacheHit = false;
   std::string cachedOutputAssetId;
+  /// Output file path of the prior identical execution when cacheHit (#667).
+  /// Pipeline steps consume plain files, so the served artifact is a path.
+  std::string cachedOutputPath;
   std::string status = "Pending"; // Pending, Ready, Running, Completed, Failed, Canceled, Skipped
   long taskId = -1;
   Json::Value resultPayload;

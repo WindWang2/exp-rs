@@ -654,6 +654,9 @@ void TaskCenter::updatePipelineForTaskLocked( long taskId )
 
     mirrorStepToRunLocked( pipelineId, stepId.toStdString(), m_tasks[taskId].status );
 
+    if ( m_tasks[taskId].status == TaskStatus::Completed )
+        storePipelineStepOutputLocked( pipelineId, taskId );
+
     if ( allTerminal )
     {
         pipe.isCompleted = true;
@@ -845,6 +848,26 @@ void TaskCenter::finalizeWorkflowRunLocked( long pipelineId, bool failed,
     run.recalculateProgress();
 
     sicnu::workflow::WorkflowCheckpointManager().saveCheckpoint( run );
+}
+
+void TaskCenter::storePipelineStepOutputLocked( long pipelineId, long taskId )
+{
+    const auto runIt = m_pipelineRuns.find( pipelineId );
+    if ( runIt == m_pipelineRuns.end() || !runIt.value() )
+        return;
+    auto plan = runIt.value()->stepPlan( m_tasks[taskId].stepId.toStdString() );
+    if ( !plan || plan->fingerprint.empty() || plan->cacheHit )
+        return; // cache-hit steps own nothing: their output belongs to the prior run
+
+    const QString out = findOutputPathInParams( m_tasks[taskId].parameterMap );
+    if ( out.isEmpty() )
+        return;
+
+    sicnu::data::ExecutionFingerprint fp;
+    fp.digest = QByteArray::fromHex( QString::fromStdString( plan->fingerprint ).toUtf8() );
+    if ( !fp.isValid() )
+        return;
+    sicnu::data::ExecutionResultCache::instance().storeOutputPath( fp, out );
 }
 
 std::shared_ptr<const sicnu::workflow::WorkflowRun>
@@ -1818,6 +1841,11 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
 
         QMap<std::string, long> stepToTaskId;
 
+        // Workflow Engine 2.0 run aggregate (ADR 0123, #662): built BEFORE the
+        // task loop so each step can consult the execution cache (#667).
+        attachWorkflowRunLocked( pipelineId, def, ordered );
+        std::vector<long> precompletedTaskIds;
+
         for ( const auto &stepId : ordered )
         {
             const sicnu::workflow::StepDef *step = nullptr;
@@ -1845,36 +1873,69 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
 
             QVariantMap params = sicnu::processing::jsonParamsToVariantMap( step->params );
 
+            // Execution-cache consultation (#667): an identical prior step
+            // (same operator, canonical params, upstream derivation revisions)
+            // skips re-execution. The cached output path is injected as the
+            // pre-completed task's result payload so downstream placeholder
+            // substitution resolves $stepId.output to the cached artifact.
+            QString cachedPath;
+            const auto runIt = m_pipelineRuns.find( pipelineId );
+            if ( runIt != m_pipelineRuns.end() && runIt.value() )
+            {
+                if ( auto plan = runIt.value()->stepPlan( stepId );
+                     plan && plan->cacheHit && !plan->cachedOutputPath.empty() )
+                    cachedPath = QString::fromStdString( plan->cachedOutputPath );
+            }
+
             long taskId = m_nextTaskId++;
             AlgorithmTaskInfo info;
             info.taskId = taskId;
             info.algorithmId = QString::fromStdString( step->operatorId );
             info.algorithmName = step->title.empty() ? QString::fromStdString( step->operatorId )
                                                      : QString::fromStdString( step->title );
-            info.status = TaskStatus::Queued;
             info.priority = TaskPriority::Normal;
             info.parentTaskIds = parentTaskIds;
             info.startTime = QDateTime::currentDateTimeUtc();
             info.parameterMap = params;
             info.autoLoadLayer = autoLoad;
-            info.autoDispatch = true;
             info.resourceProfile = resolveResourceProfile( info.algorithmId );
             info.stepId = QString::fromStdString( stepId );
             info.pipelineId = pipelineId;
 
-            info.outputLayerPath = findOutputPathInParams( params );
-
-            info.logBuffer.append( QString( QStringLiteral( "[%1] Pipeline step %2 queued." ) )
-                                     .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ),
-                                           QString::fromStdString( stepId ) ) );
+            if ( !cachedPath.isEmpty() )
+            {
+                // Pre-completed task: no JobEngine job, terminal from birth.
+                info.status = TaskStatus::Completed;
+                info.autoDispatch = false;
+                info.endTime = QDateTime::currentDateTimeUtc();
+                Json::Value payload( Json::objectValue );
+                payload["output"] = cachedPath.toStdString();
+                info.resultPayload = payload;
+                info.outputLayerPath = cachedPath;
+                info.logBuffer.append( QString( QStringLiteral( "[%1] Pipeline step %2 served from execution cache." ) )
+                                         .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ),
+                                               QString::fromStdString( stepId ) ) );
+            }
+            else
+            {
+                info.status = TaskStatus::Queued;
+                info.autoDispatch = true;
+                info.outputLayerPath = findOutputPathInParams( params );
+                info.logBuffer.append( QString( QStringLiteral( "[%1] Pipeline step %2 queued." ) )
+                                         .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ),
+                                               QString::fromStdString( stepId ) ) );
+            }
 
             m_tasks[taskId] = info;
             stepToTaskId[stepId] = taskId;
             pipeInfo.stepToTaskId[stepId] = taskId;
             pipeInfo.taskToStepId[taskId] = stepId;
-            pipeInfo.stepStatuses[stepId] = TaskStatus::Queued;
+            pipeInfo.stepStatuses[stepId] = info.status;
 
             queueTaskAddedLocked( taskId );
+
+            if ( !cachedPath.isEmpty() )
+                precompletedTaskIds.push_back( taskId );
         }
 
         if ( pipeInfo.stepToTaskId.isEmpty() )
@@ -1890,14 +1951,17 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                 pipeInfo.errorMessage = QStringLiteral( "Pipeline contains no dispatchable operator steps" );
             }
             m_pipelines[pipelineId] = pipeInfo;
+            finalizeWorkflowRunLocked( pipelineId, pipeInfo.isFailed, pipeInfo.errorMessage );
             m_waitCondition.wakeAll();
             return pipelineId;
         }
 
         m_pipelines[pipelineId] = pipeInfo;
-        // Workflow Engine 2.0 run aggregate (ADR 0123, #662): built for every
-        // dispatchable pipeline, mirroring statuses from this point on.
-        attachWorkflowRunLocked( pipelineId, def, ordered );
+        // A pre-completed (cache-hit) step has no job-listener transition that
+        // would ever mark the pipeline terminal, so drive the aggregate here:
+        // a fully cached pipeline completes on this pass.
+        for ( long preId : precompletedTaskIds )
+            updatePipelineForTaskLocked( preId );
         processNextQueuedTasks();
     }
     flushPendingLaunches();
