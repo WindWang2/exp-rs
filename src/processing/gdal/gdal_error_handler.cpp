@@ -13,6 +13,11 @@ namespace
 // any outer handler on this thread. A thread-local stack keeps every level
 // intact.
 thread_local std::vector<GdalErrorHandler *> s_handlerStack;
+// The process default captured when the FIRST handler on this thread
+// installs, so uninstalling the last handler (in or out of LIFO order)
+// genuinely restores the default instead of leaving the static routing
+// handler installed, silently swallowing CPL diagnostics (#654).
+thread_local CPLErrorHandler s_processDefaultHandler = nullptr;
 } // namespace
 
 GdalErrorHandler::GdalErrorHandler() = default;
@@ -24,9 +29,13 @@ GdalErrorHandler::~GdalErrorHandler()
 
 void GdalErrorHandler::install()
 {
+    if ( s_handlerStack.empty() )
+        s_processDefaultHandler = CPLSetErrorHandler(errorHandler);
+    else
+        CPLSetErrorHandler(errorHandler);
     s_handlerStack.push_back( this );
     s_activeHandler = this;
-    m_previousHandler = CPLSetErrorHandler(errorHandler);
+    m_previousHandler = s_processDefaultHandler;
 }
 
 void GdalErrorHandler::uninstall()
@@ -43,7 +52,15 @@ void GdalErrorHandler::uninstall()
     }
     if ( s_activeHandler == this )
     {
-        CPLSetErrorHandler(m_previousHandler);
+        // Out-of-LIFO uninstalls (#654): m_previousHandler is what the CPL
+        // chain pointed at when THIS handler installed. When the stack
+        // empties through such an uninstall, that is the first installer's
+        // captured process default (handlers below already popped) — and
+        // when another handler remains, the routing callback must stay
+        // armed. Either way the process default, captured once per thread,
+        // is the only correct final restore target.
+        CPLSetErrorHandler( s_handlerStack.empty() ? s_processDefaultHandler
+                                                   : errorHandler );
         m_previousHandler = nullptr;
         s_activeHandler = s_handlerStack.empty() ? nullptr : s_handlerStack.back();
     }

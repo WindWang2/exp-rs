@@ -310,38 +310,7 @@ float estimateTransmittance(float airmass)
 // QUAC (Quick Atmospheric Correction) - Bernstein et al., 2008
 // ---------------------------------------------------------------------------
 
-namespace {
 
-/// Compute the p-th percentile (0..100) of valid (non-NaN) values in @p data.
-/// @p scratch is an out-of-place buffer reused by the caller to avoid extra copies.
-float percentileFromScratch(std::vector<float> &scratch, float pct, size_t validCount)
-{
-    // scratch[0..validCount) already contains only valid values (NaN partitioned out).
-    if (validCount == 0)
-        return 0.0f;
-    if (validCount == 1)
-        return scratch[0];
-    const size_t rank = static_cast<size_t>(pct / 100.0f * (validCount - 1));
-    std::nth_element(scratch.begin(), scratch.begin() + rank, scratch.begin() + validCount);
-    return scratch[rank];
-}
-
-float percentile(const std::vector<float> &data, float pct)
-{
-    std::vector<float> scratch = data;
-    auto end = std::partition(scratch.begin(), scratch.end(),
-                              [](float v) { return !std::isnan(v); });
-    const size_t n = static_cast<size_t>(std::distance(scratch.begin(), end));
-    if (n == 0)
-        return 0.0f;
-    if (n == 1)
-        return scratch[0];
-    const size_t rank = static_cast<size_t>(pct / 100.0f * (n - 1));
-    std::nth_element(scratch.begin(), scratch.begin() + rank, end);
-    return scratch[rank];
-}
-
-} // namespace
 
 bool quac(const float *const *dnBands, float *const *outBands,
           int bandCount, size_t pixels, QString *errorMessage)

@@ -689,12 +689,16 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
         }
         const BandCoefficients &c = meta.bands.value(b);
         if (unit == OutputUnit::BrightnessTemperature &&
-            (!std::isfinite(c.k1) || !std::isfinite(c.k2) || c.k1 <= 0.0 || c.k2 <= 0.0 ||
+            (!c.hasRadiance || !std::isfinite(c.k1) || !std::isfinite(c.k2) || c.k1 <= 0.0 || c.k2 <= 0.0 ||
              !std::isfinite(c.radianceGain) || !std::isfinite(c.radianceBias))) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("Band %1 lacks valid thermal K1/K2/radiance constants for brightness temperature conversion").arg(b);
             return false;
         }
+        // #654: the BT path performs the radiance step implicitly, so an
+        // MTL without RADIANCE_MULT/ADD would silently run DN through the
+        // Planck inversion - the same identity-defaults fail-closed rule as
+        // toRadiance (#301).
         if (unit == OutputUnit::Radiance &&
             (!c.hasRadiance || !std::isfinite(c.radianceGain) || !std::isfinite(c.radianceBias))) {
             if (errorMessage)
