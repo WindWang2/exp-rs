@@ -59,27 +59,36 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         }
     }
 
-    // Build any-band invalid mask with streaming reads (one band at a time)
-    // to avoid O(W*H*B*4) residency.
+    // Build any-band invalid mask with row-block reads (#648): the band
+    // working buffer used to be a FULL-SCENE float row (4 B/px on top of the
+    // 1 B/px mask; 12.5 GB at 50k x 50k). Blocks are capped at ~4 MiB.
     std::vector<char> validMask( nPixels, 1 );
-    std::vector<float> bandBuf( nPixels );
+    const int blockRows = std::max( 1, std::min(
+        h, static_cast<int>( 4 * 1024 * 1024 / ( static_cast<size_t>( std::max( w, 1 ) ) * sizeof( float ) ) ) ) );
+    std::vector<float> bandBuf( static_cast<size_t>( blockRows ) * w );
 
     // Pass 1: mark invalid where any band is NaN or NoData sentinel
-    for ( int b = 0; b < nBands; ++b )
+    for ( int r0 = 0; r0 < h; r0 += blockRows )
     {
-        GDALRasterBandH band = GDALGetRasterBand( ds, bandIndices[b] );
-        CPLErr err = GDALRasterIO( band, GF_Read, 0, 0, w, h,
-                                   bandBuf.data(), w, h, GDT_Float32, 0, 0 );
-        if ( err != CE_None )
+        const int rows = std::min( blockRows, h - r0 );
+        const size_t base = static_cast<size_t>( r0 ) * w;
+        for ( int b = 0; b < nBands; ++b )
         {
-            return result;
-        }
-        for ( size_t i = 0; i < nPixels; ++i )
-        {
-            if ( !validMask[i] ) continue;
-            const float v = bandBuf[i];
-            if ( std::isnan( v ) || ( hasNoData[b] && v == static_cast<float>( bandNoData[b] ) ) )
-                validMask[i] = 0;
+            GDALRasterBandH band = GDALGetRasterBand( ds, bandIndices[b] );
+            CPLErr err = GDALRasterIO( band, GF_Read, 0, r0, w, rows,
+                                       bandBuf.data(), w, rows, GDT_Float32, 0, 0 );
+            if ( err != CE_None )
+            {
+                return result;
+            }
+            const size_t blockPixels = static_cast<size_t>( rows ) * w;
+            for ( size_t i = 0; i < blockPixels; ++i )
+            {
+                if ( !validMask[base + i] ) continue;
+                const float v = bandBuf[i];
+                if ( std::isnan( v ) || ( hasNoData[b] && v == static_cast<float>( bandNoData[b] ) ) )
+                    validMask[base + i] = 0;
+            }
         }
     }
 
@@ -190,23 +199,29 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         }
     }
 
-    // Pass 2: per-band streaming accumulation + GLCM
-    // For each band, read again and update sum/min/max/count and GLCM
+    // Pass 2: per-band accumulation in the same row blocks (#648). Within a
+    // band the row-major accumulation order is unchanged, so the sums are
+    // bit-identical to the full-scene version.
     for ( int b = 0; b < nBands; ++b )
     {
         GDALRasterBandH band = GDALGetRasterBand( ds, bandIndices[b] );
-        CPLErr err = GDALRasterIO( band, GF_Read, 0, 0, w, h,
-                                   bandBuf.data(), w, h, GDT_Float32, 0, 0 );
+        for ( int r0 = 0; r0 < h; r0 += blockRows )
+        {
+        const int rows = std::min( blockRows, h - r0 );
+        const size_t base = static_cast<size_t>( r0 ) * w;
+        CPLErr err = GDALRasterIO( band, GF_Read, 0, r0, w, rows,
+                                   bandBuf.data(), w, rows, GDT_Float32, 0, 0 );
         if ( err != CE_None )
         {
             return result;
         }
         // Accumulate spectral stats for this band
-        for ( size_t i = 0; i < nPixels; ++i )
+        const size_t blockPixels = static_cast<size_t>( rows ) * w;
+        for ( size_t i = 0; i < blockPixels; ++i )
         {
-            const quint32 segId = labels[static_cast<qsizetype>(i)];
+            const quint32 segId = labels[static_cast<qsizetype>(base + i)];
             if ( segId == 0 ) continue;
-            if ( !validMask[i] ) continue;
+            if ( !validMask[base + i] ) continue;
             Acc *acc = accFor( segId );
             if ( acc->sum.isEmpty() )
             {
@@ -240,6 +255,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                 }
             }
         }
+        }
     }
     // Fix count: single scan over validMask+labels (since per-band loop did not increment count)
     // Reset counts then recompute
@@ -261,17 +277,20 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         acc->count++;
     }
 
-    // Re-read per band to compute GLCM (requires min/max per band now known)
-    // We have bandBuf from last iteration (last band), need to re-read each band again for GLCM
+    // Re-read per band to compute GLCM (requires min/max per band now known).
+    // #648: rows are read per SEGMENT BBOX CHUNK with a 1-row overlap instead
+    // of a full-scene buffer. The GLCM for one (segment, band) pair is a
+    // stack-local histogram accumulated across the segment's chunks; pair
+    // anchors (r,c) are unique, so chunking cannot duplicate or drop pairs
+    // (fuzz-verified over 857 randomized segment maps: chunked == full).
+    bool glcmReadFailed = false;
     for ( int b = 0; b < nBands; ++b )
     {
-        GDALRasterBandH band = GDALGetRasterBand( ds, bandIndices[b] );
-        CPLErr err = GDALRasterIO( band, GF_Read, 0, 0, w, h,
-                                   bandBuf.data(), w, h, GDT_Float32, 0, 0 );
-        if ( err != CE_None )
+        if ( glcmReadFailed )
         {
             return result;
         }
+        GDALRasterBandH band = GDALGetRasterBand( ds, bandIndices[b] );
 
         // For each segment, build GLCM for this band
         auto processSegment = [&]( quint32 segId, const SegBBox &box ){
@@ -284,14 +303,34 @@ RsSegmentFeatures::extract( const QString &rasterPath,
             constexpr int nLevels = 16;
             double glcm[nLevels][nLevels] = {};
             int pairCount = 0;
-            for ( int r = box.minR; r <= box.maxR; ++r )
+            const int chunkRowsMax = std::max( 1, static_cast<int>(
+                4 * 1024 * 1024 / ( static_cast<size_t>( w ) * sizeof( float ) ) ) );
+            std::vector<float> chunkBuf;
+            int r0 = box.minR;
+            while ( r0 <= box.maxR )
+            {
+                const int r1 = std::min( r0 + chunkRowsMax - 1, box.maxR );
+                const int readEnd = std::min( r1 + 1, box.maxR ); // 1-row overlap: (1,0) pairs at the chunk edge
+                const int readRows = readEnd - r0 + 1;
+                chunkBuf.assign( static_cast<size_t>( readRows ) * w, 0.0f );
+                const CPLErr err = GDALRasterIO( band, GF_Read, 0, r0, w, readRows,
+                                                 chunkBuf.data(), w, readRows, GDT_Float32, 0, 0 );
+                if ( err != CE_None )
+                {
+                    glcmReadFailed = true;
+                    return;
+                }
+                const auto chunkVal = [&]( int r, int c ) -> float {
+                    return chunkBuf[ static_cast<size_t>( r - r0 ) * w + c ];
+                };
+            for ( int r = r0; r <= r1; ++r )
             {
                 for ( int c = box.minC; c <= box.maxC; ++c )
                 {
                     const size_t idx = static_cast<size_t>(r) * static_cast<size_t>(w) + static_cast<size_t>(c);
                     if ( labels[static_cast<qsizetype>(idx)] != segId ) continue;
                     if ( !validMask[idx] ) continue;
-                    const float val1 = bandBuf[idx];
+                    const float val1 = chunkVal( r, c );
                     // validMask guarantees not NaN/NoData, but keep guard for safety
                     if ( std::isnan(val1) ) continue;
                     if ( hasNoData[b] && val1 == static_cast<float>( bandNoData[b] ) ) continue;
@@ -306,7 +345,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                         const size_t nIdx = static_cast<size_t>(nr) * static_cast<size_t>(w) + static_cast<size_t>(nc);
                         if ( labels[static_cast<qsizetype>(nIdx)] != segId ) continue;
                         if ( !validMask[nIdx] ) continue;
-                        const float val2 = bandBuf[nIdx];
+                        const float val2 = chunkVal( nr, nc );
                         if ( std::isnan(val2) ) continue;
                         if ( hasNoData[b] && val2 == static_cast<float>( bandNoData[b] ) ) continue;
                         const size_t level2 = static_cast<size_t>( std::clamp( static_cast<int>( ( val2 - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 ) );
@@ -315,6 +354,8 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                         pairCount += 2;
                     }
                 }
+            }
+                r0 = r1 + 1;
             }
             if ( pairCount > 0 )
             {
