@@ -283,6 +283,38 @@ TEST_CASE("ChangeDetection connectedComponentFilter enforces the MMU", "[process
     }
 }
 
+TEST_CASE("ChangeDetection connectedComponentFilter sparse path matches dense semantics", "[processing][change_detection][c1]") {
+    // #648: masks below 25% foreground run the hash-table store, all-
+    // foreground masks take the single-component early-out. Both must agree
+    // with the dense union-find on the MMU decision.
+    SECTION("Sparse mask (8% foreground) keeps large component, drops dots") {
+        std::vector<uint8_t> mask(50 * 50, 0);
+        for (int r = 10; r < 20; ++r)
+            for (int c = 10; c < 20; ++c)
+                mask[r * 50 + c] = 1; // 100-px component (4% of the scene)
+        mask[30 * 50 + 30] = 1; // 1-px dot
+        mask[45 * 50 + 45] = 1; // another dot
+        REQUIRE(connectedComponentFilter(mask.data(), 50, 50, 5));
+        CHECK(mask[15 * 50 + 15] == 1);
+        CHECK(mask[30 * 50 + 30] == 0);
+        CHECK(mask[45 * 50 + 45] == 0);
+    }
+
+    SECTION("All-foreground mask is a single component (no clearing below minArea)") {
+        std::vector<uint8_t> mask(8 * 8, 1);
+        REQUIRE(connectedComponentFilter(mask.data(), 8, 8, 64));
+        for (const uint8_t v : mask)
+            CHECK(v == 1);
+    }
+
+    SECTION("All-foreground mask with minArea > count clears everything") {
+        std::vector<uint8_t> mask(8 * 8, 1);
+        REQUIRE(connectedComponentFilter(mask.data(), 8, 8, 65));
+        for (const uint8_t v : mask)
+            CHECK(v == 0);
+    }
+}
+
 TEST_CASE("ChangeDetection percentileThreshold p=0 returns the minimum", "[processing][change_detection]") {
     std::vector<float> values = {10.0f, 5.0f, 20.0f, 3.0f};
     float threshold = 0.0f;
