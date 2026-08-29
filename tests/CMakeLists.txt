@@ -56,6 +56,21 @@ function(sicnu_add_test NAME)
   sicnu_discover_tests(${NAME})
 endfunction()
 
+# Single jsoncpp resolution for hand-rolled test targets (#653): the canonical
+# if(TARGET jsoncpp)/elseif(JSONCPP_LIBRARIES)/else fallback that used to be
+# copy-pasted per target. Targets with DIFFERENT fallback policies (no-else,
+# if-only, pkg-config probes) deliberately keep their own blocks.
+function(sicnu_link_jsoncpp tgt)
+    if(TARGET jsoncpp)
+        target_link_libraries(${tgt} PRIVATE jsoncpp)
+    elseif(JSONCPP_LIBRARIES)
+        target_include_directories(${tgt} PRIVATE ${JSONCPP_INCLUDE_DIRS})
+        target_link_libraries(${tgt} PRIVATE ${JSONCPP_LIBRARIES})
+    else()
+        target_link_libraries(${tgt} PRIVATE jsoncpp)
+    endif()
+endfunction()
+
 # Core and domain tests
 sicnu_add_test(test_crs)
 sicnu_add_test(test_geometry)
@@ -132,14 +147,7 @@ target_link_libraries(test_tool_call_dispatcher PRIVATE
   sicnu_task_center
   sicnu_operators
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_tool_call_dispatcher PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_tool_call_dispatcher PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_tool_call_dispatcher PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_tool_call_dispatcher PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_tool_call_dispatcher)
 target_include_directories(test_tool_call_dispatcher PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
@@ -162,14 +170,7 @@ target_link_libraries(test_execution_plane PRIVATE
   sicnu_task_center
   sicnu_operators
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_execution_plane PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_execution_plane PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_execution_plane PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_execution_plane PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_execution_plane)
 target_include_directories(test_execution_plane PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
@@ -628,14 +629,7 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         sicnu_operators
         ${OpenCV_LIBS}
     )
-    if(TARGET jsoncpp)
-        target_link_libraries(test_model_runtime PRIVATE jsoncpp)
-    elseif(JSONCPP_LIBRARIES)
-        target_include_directories(test_model_runtime PRIVATE ${JSONCPP_INCLUDE_DIRS})
-        target_link_libraries(test_model_runtime PRIVATE ${JSONCPP_LIBRARIES})
-    else()
-        target_link_libraries(test_model_runtime PRIVATE jsoncpp)
-    endif()
+    sicnu_link_jsoncpp(test_model_runtime)
     target_include_directories(test_model_runtime PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_BINARY_DIR}
@@ -1097,14 +1091,7 @@ target_link_libraries(test_change_detection PRIVATE
   sicnu_processing
   sicnu_operators
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_change_detection PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_change_detection PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_change_detection PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_change_detection PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_change_detection)
 target_include_directories(test_change_detection PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
@@ -3029,14 +3016,7 @@ if(TARGET sicnu_operators)
     )
     target_compile_definitions(test_pipeline_runner PRIVATE SICNU_EMBED_PYTHON=1)
   endif()
-  if(TARGET jsoncpp)
-    target_link_libraries(test_pipeline_runner PRIVATE jsoncpp)
-  elseif(JSONCPP_LIBRARIES)
-    target_include_directories(test_pipeline_runner PRIVATE ${JSONCPP_INCLUDE_DIRS})
-    target_link_libraries(test_pipeline_runner PRIVATE ${JSONCPP_LIBRARIES})
-  else()
-    target_link_libraries(test_pipeline_runner PRIVATE jsoncpp)
-  endif()
+  sicnu_link_jsoncpp(test_pipeline_runner)
   sicnu_discover_tests(test_pipeline_runner)
 
   # RSOperator framework unit tests (no OpenCV required)
@@ -3050,14 +3030,7 @@ if(TARGET sicnu_operators)
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
   )
-  if(TARGET jsoncpp)
-    target_link_libraries(test_rs_operator PRIVATE jsoncpp)
-  elseif(JSONCPP_LIBRARIES)
-    target_include_directories(test_rs_operator PRIVATE ${JSONCPP_INCLUDE_DIRS})
-    target_link_libraries(test_rs_operator PRIVATE ${JSONCPP_LIBRARIES})
-  else()
-    target_link_libraries(test_rs_operator PRIVATE jsoncpp)
-  endif()
+  sicnu_link_jsoncpp(test_rs_operator)
   sicnu_discover_tests(test_rs_operator)
 
   # Native RS operator integration tests (registry, schema, execution on
@@ -3079,14 +3052,7 @@ if(TARGET sicnu_operators)
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
   )
-  if(TARGET jsoncpp)
-    target_link_libraries(test_rs_operators PRIVATE jsoncpp)
-  elseif(JSONCPP_LIBRARIES)
-    target_include_directories(test_rs_operators PRIVATE ${JSONCPP_INCLUDE_DIRS})
-    target_link_libraries(test_rs_operators PRIVATE ${JSONCPP_LIBRARIES})
-  else()
-    target_link_libraries(test_rs_operators PRIVATE jsoncpp)
-  endif()
+  sicnu_link_jsoncpp(test_rs_operators)
   sicnu_discover_tests(test_rs_operators)
 
   # OTB operator tests
@@ -3106,14 +3072,7 @@ if(TARGET sicnu_operators)
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
   )
-  if(TARGET jsoncpp)
-    target_link_libraries(test_otb_operators PRIVATE jsoncpp)
-  elseif(JSONCPP_LIBRARIES)
-    target_include_directories(test_otb_operators PRIVATE ${JSONCPP_INCLUDE_DIRS})
-    target_link_libraries(test_otb_operators PRIVATE ${JSONCPP_LIBRARIES})
-  else()
-    target_link_libraries(test_otb_operators PRIVATE jsoncpp)
-  endif()
+  sicnu_link_jsoncpp(test_otb_operators)
   sicnu_discover_tests(test_otb_operators)
 
   # RS Operation Logger tests
@@ -3133,14 +3092,7 @@ if(TARGET sicnu_operators)
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
   )
-  if(TARGET jsoncpp)
-    target_link_libraries(test_operation_logger PRIVATE jsoncpp)
-  elseif(JSONCPP_LIBRARIES)
-    target_include_directories(test_operation_logger PRIVATE ${JSONCPP_INCLUDE_DIRS})
-    target_link_libraries(test_operation_logger PRIVATE ${JSONCPP_LIBRARIES})
-  else()
-    target_link_libraries(test_operation_logger PRIVATE jsoncpp)
-  endif()
+  sicnu_link_jsoncpp(test_operation_logger)
   sicnu_discover_tests(test_operation_logger)
 
   # GDAL operator tests (orthorectification / reproject / clip / polygonize).
@@ -3162,14 +3114,7 @@ if(TARGET sicnu_operators)
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
   )
-  if(TARGET jsoncpp)
-    target_link_libraries(test_gdal_ortho_operators PRIVATE jsoncpp)
-  elseif(JSONCPP_LIBRARIES)
-    target_include_directories(test_gdal_ortho_operators PRIVATE ${JSONCPP_INCLUDE_DIRS})
-    target_link_libraries(test_gdal_ortho_operators PRIVATE ${JSONCPP_LIBRARIES})
-  else()
-    target_link_libraries(test_gdal_ortho_operators PRIVATE jsoncpp)
-  endif()
+  sicnu_link_jsoncpp(test_gdal_ortho_operators)
   sicnu_discover_tests(test_gdal_ortho_operators)
 
   # QA mask operator + kernel tests (Landsat QA_PIXEL / Sentinel-2 SCL /
@@ -3190,14 +3135,7 @@ if(TARGET sicnu_operators)
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
   )
-  if(TARGET jsoncpp)
-    target_link_libraries(test_qa_mask PRIVATE jsoncpp)
-  elseif(JSONCPP_LIBRARIES)
-    target_include_directories(test_qa_mask PRIVATE ${JSONCPP_INCLUDE_DIRS})
-    target_link_libraries(test_qa_mask PRIVATE ${JSONCPP_LIBRARIES})
-  else()
-    target_link_libraries(test_qa_mask PRIVATE jsoncpp)
-  endif()
+  sicnu_link_jsoncpp(test_qa_mask)
   sicnu_discover_tests(test_qa_mask)
 
   # MNF transform tests - kernel (SNR ordering, signal recovery) + operator.
@@ -3217,14 +3155,7 @@ if(TARGET sicnu_operators)
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
   )
-  if(TARGET jsoncpp)
-    target_link_libraries(test_mnf PRIVATE jsoncpp)
-  elseif(JSONCPP_LIBRARIES)
-    target_include_directories(test_mnf PRIVATE ${JSONCPP_INCLUDE_DIRS})
-    target_link_libraries(test_mnf PRIVATE ${JSONCPP_LIBRARIES})
-  else()
-    target_link_libraries(test_mnf PRIVATE jsoncpp)
-  endif()
+  sicnu_link_jsoncpp(test_mnf)
   sicnu_discover_tests(test_mnf)
 
   # Linear spectral unmixing tests - kernel (abundance recovery, error) + operator.
@@ -3244,14 +3175,7 @@ if(TARGET sicnu_operators)
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
   )
-  if(TARGET jsoncpp)
-    target_link_libraries(test_spectral_unmixing PRIVATE jsoncpp)
-  elseif(JSONCPP_LIBRARIES)
-    target_include_directories(test_spectral_unmixing PRIVATE ${JSONCPP_INCLUDE_DIRS})
-    target_link_libraries(test_spectral_unmixing PRIVATE ${JSONCPP_LIBRARIES})
-  else()
-    target_link_libraries(test_spectral_unmixing PRIVATE jsoncpp)
-  endif()
+  sicnu_link_jsoncpp(test_spectral_unmixing)
   sicnu_discover_tests(test_spectral_unmixing)
 
   # RX anomaly detection tests - kernel (outlier flagging) + operator.
@@ -3271,14 +3195,7 @@ if(TARGET sicnu_operators)
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
   )
-  if(TARGET jsoncpp)
-    target_link_libraries(test_spectral_anomaly PRIVATE jsoncpp)
-  elseif(JSONCPP_LIBRARIES)
-    target_include_directories(test_spectral_anomaly PRIVATE ${JSONCPP_INCLUDE_DIRS})
-    target_link_libraries(test_spectral_anomaly PRIVATE ${JSONCPP_LIBRARIES})
-  else()
-    target_link_libraries(test_spectral_anomaly PRIVATE jsoncpp)
-  endif()
+  sicnu_link_jsoncpp(test_spectral_anomaly)
   sicnu_discover_tests(test_spectral_anomaly)
 
   # Spectral resampling tests - kernel (interpolation, guards) + operator.
@@ -3298,14 +3215,7 @@ if(TARGET sicnu_operators)
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
   )
-  if(TARGET jsoncpp)
-    target_link_libraries(test_spectral_resampling PRIVATE jsoncpp)
-  elseif(JSONCPP_LIBRARIES)
-    target_include_directories(test_spectral_resampling PRIVATE ${JSONCPP_INCLUDE_DIRS})
-    target_link_libraries(test_spectral_resampling PRIVATE ${JSONCPP_LIBRARIES})
-  else()
-    target_link_libraries(test_spectral_resampling PRIVATE jsoncpp)
-  endif()
+  sicnu_link_jsoncpp(test_spectral_resampling)
   sicnu_discover_tests(test_spectral_resampling)
 
   # Endmember extraction (PPI) tests - kernel (vertex recovery) + operator.
@@ -3325,14 +3235,7 @@ if(TARGET sicnu_operators)
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
   )
-  if(TARGET jsoncpp)
-    target_link_libraries(test_endmember_extraction PRIVATE jsoncpp)
-  elseif(JSONCPP_LIBRARIES)
-    target_include_directories(test_endmember_extraction PRIVATE ${JSONCPP_INCLUDE_DIRS})
-    target_link_libraries(test_endmember_extraction PRIVATE ${JSONCPP_LIBRARIES})
-  else()
-    target_link_libraries(test_endmember_extraction PRIVATE jsoncpp)
-  endif()
+  sicnu_link_jsoncpp(test_endmember_extraction)
   sicnu_discover_tests(test_endmember_extraction)
 
   # Spectral library domain tests - JSON round-trip, malformed input.
@@ -3378,14 +3281,7 @@ if(TARGET sicnu_operators)
       ${CMAKE_BINARY_DIR}
       ${OpenCV_INCLUDE_DIRS}
     )
-    if(TARGET jsoncpp)
-      target_link_libraries(test_opencv_operators PRIVATE jsoncpp)
-    elseif(JSONCPP_LIBRARIES)
-      target_include_directories(test_opencv_operators PRIVATE ${JSONCPP_INCLUDE_DIRS})
-      target_link_libraries(test_opencv_operators PRIVATE ${JSONCPP_LIBRARIES})
-    else()
-      target_link_libraries(test_opencv_operators PRIVATE jsoncpp)
-    endif()
+    sicnu_link_jsoncpp(test_opencv_operators)
     sicnu_discover_tests(test_opencv_operators)
   endif()
 endif()
@@ -4411,14 +4307,7 @@ target_include_directories(test_satellite_products PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_satellite_products PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_satellite_products PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_satellite_products PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_satellite_products PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_satellite_products)
 sicnu_discover_tests(test_satellite_products)
 
 # Product import dialog tests - probe-preview-commit transaction (headless;
@@ -4483,14 +4372,7 @@ target_include_directories(test_orthorectification_dialog PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_orthorectification_dialog PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_orthorectification_dialog PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_orthorectification_dialog PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_orthorectification_dialog PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_orthorectification_dialog)
 set_target_properties(test_orthorectification_dialog PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_orthorectification_dialog)
 
@@ -4521,14 +4403,7 @@ target_include_directories(test_batch_processing_dialog PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_batch_processing_dialog PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_batch_processing_dialog PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_batch_processing_dialog PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_batch_processing_dialog PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_batch_processing_dialog)
 set_target_properties(test_batch_processing_dialog PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_batch_processing_dialog)
 
@@ -4560,14 +4435,7 @@ target_include_directories(test_grid_compat_dialog_utils PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_grid_compat_dialog_utils PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_grid_compat_dialog_utils PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_grid_compat_dialog_utils PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_grid_compat_dialog_utils PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_grid_compat_dialog_utils)
 set_target_properties(test_grid_compat_dialog_utils PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_grid_compat_dialog_utils)
 
@@ -4604,14 +4472,7 @@ target_include_directories(test_change_detection_dialog PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_change_detection_dialog PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_change_detection_dialog PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_change_detection_dialog PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_change_detection_dialog PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_change_detection_dialog)
 set_target_properties(test_change_detection_dialog PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_change_detection_dialog)
 
@@ -4645,14 +4506,7 @@ target_include_directories(test_apply_mask_dialog PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_apply_mask_dialog PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_apply_mask_dialog PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_apply_mask_dialog PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_apply_mask_dialog PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_apply_mask_dialog)
 set_target_properties(test_apply_mask_dialog PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_apply_mask_dialog)
 
@@ -4683,14 +4537,7 @@ target_include_directories(test_spectral_library_dialog PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_spectral_library_dialog PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_spectral_library_dialog PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_spectral_library_dialog PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_spectral_library_dialog PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_spectral_library_dialog)
 set_target_properties(test_spectral_library_dialog PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_spectral_library_dialog)
 
@@ -4725,14 +4572,7 @@ target_include_directories(test_post_classification_dialog PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_post_classification_dialog PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_post_classification_dialog PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_post_classification_dialog PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_post_classification_dialog PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_post_classification_dialog)
 set_target_properties(test_post_classification_dialog PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_post_classification_dialog)
 
@@ -4834,14 +4674,7 @@ target_include_directories(test_spectral_index_dialog PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_spectral_index_dialog PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_spectral_index_dialog PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_spectral_index_dialog PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_spectral_index_dialog PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_spectral_index_dialog)
 sicnu_discover_tests(test_spectral_index_dialog)
 
 # Virtual raster recipe tests - recipe value type + JSON round-trip (#55)
@@ -5124,14 +4957,7 @@ if(OpenCV_FOUND)
   target_include_directories(test_rs_golden_e2e PRIVATE ${OpenCV_INCLUDE_DIRS})
   target_link_libraries(test_rs_golden_e2e PRIVATE ${OpenCV_LIBRARIES})
 endif()
-if(TARGET jsoncpp)
-  target_link_libraries(test_rs_golden_e2e PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_rs_golden_e2e PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_rs_golden_e2e PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_rs_golden_e2e PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_rs_golden_e2e)
 set_target_properties(test_rs_golden_e2e PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_rs_golden_e2e)
 
@@ -5190,14 +5016,7 @@ target_link_libraries(test_subsystem_stability PRIVATE
   sicnu_workflow_runtime
   GDAL::GDAL
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_subsystem_stability PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_subsystem_stability PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_subsystem_stability PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_subsystem_stability PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_subsystem_stability)
 target_include_directories(test_subsystem_stability PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -5225,14 +5044,7 @@ target_link_libraries(test_e2e_phase2 PRIVATE
   sicnu_workflow_runtime
   GDAL::GDAL
 )
-if(TARGET jsoncpp)
-  target_link_libraries(test_e2e_phase2 PRIVATE jsoncpp)
-elseif(JSONCPP_LIBRARIES)
-  target_include_directories(test_e2e_phase2 PRIVATE ${JSONCPP_INCLUDE_DIRS})
-  target_link_libraries(test_e2e_phase2 PRIVATE ${JSONCPP_LIBRARIES})
-else()
-  target_link_libraries(test_e2e_phase2 PRIVATE jsoncpp)
-endif()
+sicnu_link_jsoncpp(test_e2e_phase2)
 target_include_directories(test_e2e_phase2 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
