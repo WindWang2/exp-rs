@@ -13,6 +13,7 @@
 #include "processing/framework/algorithm_preflight.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "shell/processing_job_adapter.h"
+#include "workflow/workflow_run.h"
 #include "interaction_tool_registry.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "agent/tool_catalog/agent_tool.h"
@@ -1894,6 +1895,15 @@ QVariantMap McpServer::handleGetWorkflowStatus(long pipelineId)
     result[QStringLiteral("isFailed")] = info.isFailed;
     if (!info.errorMessage.isEmpty())
         result[QStringLiteral("errorMessage")] = info.errorMessage;
+
+    // Workflow Engine 2.0 lifecycle (ADR 0123, #662): additive keys — the
+    // run aggregate mirrors this pipeline when it exists.
+    if (const auto run = sicnu::TaskCenter::instance().workflowRunForPipeline(pipelineId)) {
+        result[QStringLiteral("run_id")] = QString::fromStdString(run->runId());
+        result[QStringLiteral("run_state")] =
+            QString::fromStdString(sicnu::workflow::workflowRunStateToString(run->state()));
+        result[QStringLiteral("run_progress")] = run->progress();
+    }
 
     QVariantList steps;
     for (const auto &stepId : info.orderedStepIds) {

@@ -7,12 +7,14 @@
 #include "jobs/job_engine.h"
 #include "jobs/job_types.h"
 #include "workflow/workflow_definition.h"
+#include "workflow/workflow_run.h"
 
 #include <QObject>
 
 #include <chrono>
 #include <atomic>
 #include <future>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -548,6 +550,123 @@ TEST_CASE("TaskCenter - Native submitPipeline dispatches DAG and resolves $stepI
     REQUIRE(center.getTaskInfo(s2TaskId).status == sicnu::TaskStatus::Completed);
     REQUIRE(observedStep2Input == "/tmp/step1_ndvi.tif");
     REQUIRE(center.getTaskInfo(s2TaskId).parameterMap.value("input").toString() == QStringLiteral("/tmp/step1_ndvi.tif"));
+
+    engine.clearExecutors();
+
+    // Workflow Engine 2.0 wiring (#662): the run aggregate mirrors the
+    // pipeline — lifecycle, per-step fingerprints, progress.
+    auto run = center.workflowRunForPipeline(pId);
+    REQUIRE(run != nullptr);
+    CHECK(run->state() == sicnu::workflow::WorkflowRunState::Completed);
+    CHECK(run->stepPlans().size() == 2);
+    for (const auto& plan : run->stepPlans()) {
+        CHECK(plan.fingerprint.size() == 64); // full SHA-256 hex digest
+        CHECK(plan.status == "Completed");
+    }
+    const auto fp1 = run->stepPlan("step1");
+    const auto fp2 = run->stepPlan("step2");
+    REQUIRE(fp1.has_value());
+    REQUIRE(fp2.has_value());
+    CHECK(fp1->fingerprint != fp2->fingerprint);
+}
+
+TEST_CASE("TaskCenter - v2 run fingerprints are stable and transitively invalidate", "[processing][task_center][pipeline][v2]") {
+    auto& engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.registerExecutor("pipe:v2a", [](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
+        context.logInfo("a done");
+        Json::Value result(Json::objectValue);
+        result["output"] = "/tmp/v2_a.tif";
+        return result;
+    });
+    engine.registerExecutor("pipe:v2b", [](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
+        context.logInfo("b done");
+        Json::Value result(Json::objectValue);
+        result["output"] = "/tmp/v2_b.tif";
+        return result;
+    });
+
+    auto& center = sicnu::TaskCenter::instance();
+
+    auto makeDef = [](const std::string& defId, const char* step1Output) {
+        sicnu::workflow::WorkflowDefinition def;
+        def.id = defId;
+        def.title = "V2 fingerprint def";
+        sicnu::workflow::StepDef a;
+        a.id = "a";
+        a.kind = sicnu::workflow::StepKind::Operator;
+        a.operatorId = "pipe:v2a";
+        a.params["output"] = step1Output;
+        sicnu::workflow::StepDef b;
+        b.id = "b";
+        b.kind = sicnu::workflow::StepKind::Operator;
+        b.operatorId = "pipe:v2b";
+        b.params["input"] = "$a.output";
+        b.params["output"] = "/tmp/v2_b.tif";
+        sicnu::workflow::StepConnection conn;
+        conn.fromStepId = "a";
+        conn.fromPort = "output";
+        conn.toPort = "input";
+        b.inputs.push_back(conn);
+        def.steps = { a, b };
+        return def;
+    };
+
+    // Identical definitions produce identical step fingerprints — the
+    // precondition for cache reuse (#667).
+    long id1 = center.submitPipeline(makeDef("v2_def_1", "/tmp/v2_a.tif"), false);
+    long id2 = center.submitPipeline(makeDef("v2_def_2", "/tmp/v2_a.tif"), false);
+    REQUIRE(id1 > 0);
+    REQUIRE(id2 > 0);
+    center.waitForPipeline(id1);
+    center.waitForPipeline(id2);
+    auto run1 = center.workflowRunForPipeline(id1);
+    auto run2 = center.workflowRunForPipeline(id2);
+    REQUIRE(run1 != nullptr);
+    REQUIRE(run2 != nullptr);
+    const auto fpA1 = run1->stepPlan("a");
+    const auto fpA2 = run2->stepPlan("a");
+    REQUIRE(fpA1.has_value());
+    REQUIRE(fpA2.has_value());
+    CHECK(fpA1->fingerprint == fpA2->fingerprint);
+
+    // Changing an upstream step's params changes both its own fingerprint and
+    // the downstream step's fingerprint (transitive invalidation).
+    long id3 = center.submitPipeline(makeDef("v2_def_3", "/tmp/v2_a_CHANGED.tif"), false);
+    REQUIRE(id3 > 0);
+    center.waitForPipeline(id3);
+    auto run3 = center.workflowRunForPipeline(id3);
+    REQUIRE(run3 != nullptr);
+    const auto fpA3 = run3->stepPlan("a");
+    const auto fpB3 = run3->stepPlan("b");
+    REQUIRE(fpA3.has_value());
+    REQUIRE(fpB3.has_value());
+    CHECK(fpA3->fingerprint != fpA1->fingerprint);
+    const auto fpB1 = run1->stepPlan("b");
+    REQUIRE(fpB1.has_value());
+    CHECK(fpB3->fingerprint != fpB1->fingerprint);
+
+    // A failed pipeline transitions the run to Failed with the error message.
+    engine.registerExecutor("pipe:v2fail", [](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext&) {
+        throw std::runtime_error("v2 wiring failure test");
+    });
+    sicnu::workflow::WorkflowDefinition failDef;
+    failDef.id = "v2_def_fail";
+    sicnu::workflow::StepDef bad;
+    bad.id = "bad";
+    bad.kind = sicnu::workflow::StepKind::Operator;
+    bad.operatorId = "pipe:v2fail";
+    bad.params["output"] = "/tmp/v2_fail.tif";
+    failDef.steps = { bad };
+    long id4 = center.submitPipeline(failDef, false);
+    REQUIRE(id4 > 0);
+    auto info4 = center.waitForPipeline(id4);
+    REQUIRE(info4.isFailed);
+    auto run4 = center.workflowRunForPipeline(id4);
+    REQUIRE(run4 != nullptr);
+    CHECK(run4->state() == sicnu::workflow::WorkflowRunState::Failed);
+    CHECK_FALSE(run4->errorMessage().empty());
 
     engine.clearExecutors();
 }

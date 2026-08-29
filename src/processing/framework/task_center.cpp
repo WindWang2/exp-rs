@@ -3,17 +3,24 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QJsonObject>
 #include <QMetaObject>
 #include <QMutexLocker>
 #include <QSet>
 #include <QTimer>
+#include <map>
+#include <optional>
 #include <utility>
 
 #include "framework/json_params_converter.h"
 #include "atomic_algorithm_registry.h"
 #include "jobs/job_engine.h"
 #include "workflow/workflow_definition.h"
+#include "workflow/workflow_run.h"
+#include "workflow/workflow_checkpoint.h"
 #include "workflow/placeholder_grammar.h"
+#include "data/execution_fingerprint.h"
+#include "data/asset_types.h"
 
 namespace sicnu {
 
@@ -645,13 +652,208 @@ void TaskCenter::updatePipelineForTaskLocked( long taskId )
             anyFailed = true;
     }
 
+    mirrorStepToRunLocked( pipelineId, stepId.toStdString(), m_tasks[taskId].status );
+
     if ( allTerminal )
     {
         pipe.isCompleted = true;
         pipe.isFailed = anyFailed;
+        finalizeWorkflowRunLocked( pipelineId, anyFailed, pipe.errorMessage );
     }
 }
 
+// --- Workflow Engine 2.0 wiring (ADR 0123, #662) ----------------------------
+
+namespace {
+
+/// Deterministic pseudo-AssetId for an upstream pipeline step, derived from
+/// the parent step's fingerprint so any upstream change (params, inputs)
+/// yields a different derivation identity downstream. Returns nullopt when
+/// the fingerprint hex cannot be shaped into a UUID string.
+std::optional<sicnu::data::AssetId> stepAssetIdFromFingerprint( const std::string &fpHex )
+{
+    if ( fpHex.size() < 32 )
+        return std::nullopt;
+    const QString hex = QString::fromStdString( fpHex.substr( 0, 32 ) );
+    const QString uuid = QStringLiteral( "%1-%2-%3-%4-%5" )
+                             .arg( hex.mid( 0, 8 ), hex.mid( 8, 4 ), hex.mid( 12, 4 ),
+                                   hex.mid( 16, 4 ), hex.mid( 20, 12 ) );
+    return sicnu::data::AssetId::fromString( uuid );
+}
+
+/// Numeric revision token for an upstream step: the parent fingerprint's first
+/// 8 hex chars, so a changed upstream plan invalidates the child fingerprint.
+sicnu::data::AssetRevision stepRevisionFromFingerprint( const std::string &fpHex )
+{
+    if ( fpHex.size() < 8 )
+        return sicnu::data::AssetRevision::initial();
+    const quint64 value = std::stoull( fpHex.substr( 0, 8 ), nullptr, 16 );
+    return sicnu::data::AssetRevision::fromValue( value ? value : 1 );
+}
+
+/// TaskStatus -> StepPlan status vocabulary (workflow_run.h StepPlan).
+std::string stepStatusForTaskStatus( TaskStatus status )
+{
+    switch ( status )
+    {
+    case TaskStatus::Queued:
+    case TaskStatus::WaitingResource:
+        return "Ready";
+    case TaskStatus::Running:
+    case TaskStatus::Paused:
+    case TaskStatus::Cancelling:
+        return "Running";
+    case TaskStatus::Completed:
+        return "Completed";
+    case TaskStatus::Failed:
+        return "Failed";
+    case TaskStatus::Canceled:
+        return "Canceled";
+    }
+    return "Running";
+}
+
+} // namespace
+
+void TaskCenter::attachWorkflowRunLocked( long pipelineId,
+                                          const sicnu::workflow::WorkflowDefinition &def,
+                                          const std::vector<std::string> &orderedStepIds )
+{
+    std::shared_ptr<sicnu::workflow::WorkflowRun> run =
+        sicnu::workflow::WorkflowRun::createFromDefinition( def );
+    if ( !run )
+        return;
+
+    // Submit-time planning is done once the topological order exists; the run
+    // enters Running when the pipeline is dispatched below.
+    run->transitionTo( sicnu::workflow::WorkflowRunState::Planning );
+    run->transitionTo( sicnu::workflow::WorkflowRunState::Ready );
+
+    // Fingerprints are computed in topological order so parent plans exist
+    // when children are hashed: a child's derivation revision is its parent's
+    // fingerprint, which gives transitive invalidation for param/path changes.
+    std::map<std::string, std::string> stepFingerprints;
+    std::vector<sicnu::workflow::StepPlan> plans;
+    plans.reserve( def.steps.size() );
+
+    for ( const auto &stepId : orderedStepIds )
+    {
+        const sicnu::workflow::StepDef *step = nullptr;
+        for ( const auto &s : def.steps )
+        {
+            if ( s.id == stepId )
+            {
+                step = &s;
+                break;
+            }
+        }
+        if ( !step )
+            continue;
+
+        sicnu::workflow::StepPlan plan;
+        plan.stepId = step->id;
+        plan.operatorId = step->operatorId;
+        plan.kind = step->kind;
+        plan.rawParams = step->params;
+        plan.resolvedParams = step->params; // placeholders resolve per-task at dispatch
+        for ( const auto &conn : step->inputs )
+            plan.dependencies.push_back( conn.fromStepId );
+
+        const QJsonObject paramsJson = QJsonObject::fromVariantMap(
+            sicnu::processing::jsonParamsToVariantMap( step->params ) );
+        QVector<sicnu::data::TaggedDerivationInput> inputs;
+        for ( const auto &conn : step->inputs )
+        {
+            const auto parentIt = stepFingerprints.find( conn.fromStepId );
+            if ( parentIt == stepFingerprints.end() )
+                continue;
+            const auto assetId = stepAssetIdFromFingerprint( parentIt->second );
+            if ( !assetId )
+                continue;
+            sicnu::data::TaggedDerivationInput in;
+            in.assetId = *assetId;
+            in.revision = stepRevisionFromFingerprint( parentIt->second );
+            in.fromPort = QString::fromStdString( conn.fromPort );
+            in.toPort = QString::fromStdString( conn.toPort );
+            inputs.append( in );
+        }
+        // Operator versions are not yet declared by the registry; the constant
+        // keeps the fingerprint contract total. When the meta store publishes
+        // versions, thread them through here so upgrades invalidate the cache.
+        const sicnu::data::ExecutionFingerprint fp = sicnu::data::makeExecutionFingerprintV2(
+            QString::fromStdString( step->operatorId ), QStringLiteral( "1" ),
+            paramsJson, inputs );
+        if ( fp.isValid() )
+        {
+            plan.fingerprint = fp.toStdString();
+            stepFingerprints[step->id] = plan.fingerprint;
+        }
+
+        plans.push_back( std::move( plan ) );
+    }
+
+    run->setStepPlans( std::move( plans ) );
+    run->transitionTo( sicnu::workflow::WorkflowRunState::Running );
+
+    // Crash-safe checkpoint at submit; refreshed on every mirrored transition.
+    sicnu::workflow::WorkflowCheckpointManager().saveCheckpoint( *run );
+
+    m_pipelineRuns[pipelineId] = std::move( run );
+}
+
+void TaskCenter::mirrorStepToRunLocked( long pipelineId, const std::string &stepId,
+                                        TaskStatus status )
+{
+    const auto runIt = m_pipelineRuns.find( pipelineId );
+    if ( runIt == m_pipelineRuns.end() || !runIt.value() )
+        return;
+    sicnu::workflow::WorkflowRun &run = *runIt.value();
+
+    auto plan = run.stepPlan( stepId );
+    if ( !plan )
+        return;
+    plan->status = stepStatusForTaskStatus( status );
+    if ( status == TaskStatus::Completed )
+        plan->endTime = QDateTime::currentDateTimeUtc().toString(
+            QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) );
+    run.updateStepPlan( *plan );
+
+    sicnu::workflow::WorkflowCheckpointManager().saveCheckpoint( run );
+}
+
+void TaskCenter::finalizeWorkflowRunLocked( long pipelineId, bool failed,
+                                            const QString &errorMessage )
+{
+    const auto runIt = m_pipelineRuns.find( pipelineId );
+    if ( runIt == m_pipelineRuns.end() || !runIt.value() )
+        return;
+    sicnu::workflow::WorkflowRun &run = *runIt.value();
+
+    if ( sicnu::workflow::isTerminalRunState( run.state() ) )
+        return;
+
+    if ( failed )
+    {
+        if ( !errorMessage.isEmpty() )
+            run.setErrorMessage( errorMessage.toStdString() );
+        run.transitionTo( sicnu::workflow::WorkflowRunState::Failed );
+    }
+    else
+    {
+        run.transitionTo( sicnu::workflow::WorkflowRunState::Completed );
+    }
+    run.recalculateProgress();
+
+    sicnu::workflow::WorkflowCheckpointManager().saveCheckpoint( run );
+}
+
+std::shared_ptr<const sicnu::workflow::WorkflowRun>
+TaskCenter::workflowRunForPipeline( long pipelineId ) const
+{
+    QMutexLocker locker( &m_mutex );
+    const auto it = m_pipelineRuns.find( pipelineId );
+    return it == m_pipelineRuns.end() ? nullptr : it.value();
+}
 long TaskCenter::enqueueTask( const QString &algorithmId,
                               const QVariantMap &params,
                               bool autoLoad,
@@ -1693,6 +1895,9 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
         }
 
         m_pipelines[pipelineId] = pipeInfo;
+        // Workflow Engine 2.0 run aggregate (ADR 0123, #662): built for every
+        // dispatchable pipeline, mirroring statuses from this point on.
+        attachWorkflowRunLocked( pipelineId, def, ordered );
         processNextQueuedTasks();
     }
     flushPendingLaunches();

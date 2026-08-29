@@ -230,6 +230,9 @@ target_link_libraries(sicnu_task_center PUBLIC
     sicnu_processing
     sicnu_jobs
     sicnu_workflow
+    # Workflow Engine 2.0 wiring (#662): task_center.cpp fingerprints pipeline
+    # steps via makeExecutionFingerprintV2 and AssetRevision.
+    Sicnu::data
 )
 set_target_properties(sicnu_task_center PROPERTIES
     POSITION_INDEPENDENT_CODE ON
