@@ -48,6 +48,34 @@ inline const char *memoryPolicyName( RSOperatorMemoryPolicy policy )
     return "full_raster";
 }
 
+/// Numeric reproducibility of an operator under parallel or blocked
+/// execution (ADR 0124). Discrete-verdict outputs (class maps, change
+/// labels, category recodes) are expected to be stable under either grade;
+/// the grade governs continuous statistics only. Serial single-threaded
+/// execution keeps bit-exact output unconditionally and stays the
+/// regression anchor for all suites.
+enum class RSOperatorDeterminism
+{
+  BitExact,   ///< results identical regardless of scheduling/reduction order
+  Tolerance,  ///< results within the operator's documented relative tolerance
+              ///< (default 1e-6) of the serial result under parallel execution
+};
+
+/// Stable lowercase identifier for a determinism grade ("bit_exact",
+/// "tolerance"). Header-inline so any library that consumes the operator
+/// metadata (e.g. sicnu_processing) needs no link dependency on the
+/// operators library.
+inline const char *determinismGradeName( RSOperatorDeterminism grade )
+{
+    switch ( grade ) {
+    case RSOperatorDeterminism::BitExact:
+        return "bit_exact";
+    case RSOperatorDeterminism::Tolerance:
+        return "tolerance";
+    }
+    return "bit_exact";
+}
+
 /**
  * Abstract base class for all remote sensing operators.
  *
@@ -95,6 +123,19 @@ public:
     virtual RSOperatorMemoryPolicy memoryPolicy() const
     {
       return RSOperatorMemoryPolicy::FullRaster;
+    }
+
+    /**
+     * Numeric reproducibility under parallel or blocked execution (ADR 0124).
+     * Defaults to BitExact — the serial, scheduling-independent baseline.
+     * Operators whose parallel implementation reorders floating-point
+     * accumulation override to Tolerance and document their relative
+     * tolerance. Changing an operator's grade is a schema-visible,
+     * reviewable event.
+     */
+    virtual RSOperatorDeterminism determinism() const
+    {
+      return RSOperatorDeterminism::BitExact;
     }
 
     /**

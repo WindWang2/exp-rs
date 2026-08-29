@@ -240,6 +240,9 @@ Json::Value AgentMetadata::toJson() const
   if ( !memoryPolicy.empty() )
     root["memoryPolicy"] = memoryPolicy;
 
+  if ( !determinismGrade.empty() )
+    root["determinism"] = determinismGrade;
+
   if ( execution.isObject() && !execution.empty() )
     root["execution"] = execution;
 
@@ -294,6 +297,17 @@ AgentMetadata AgentMetadata::fromJson( const Json::Value &val )
 
   if ( val.isMember( "memoryPolicy" ) && val["memoryPolicy"].isString() )
     meta.memoryPolicy = val["memoryPolicy"].asString();
+
+  // ADR 0124: unknown grades fall back to the serial-safe default rather
+  // than propagating an unparsable value through the metadata surface.
+  if ( val.isMember( "determinism" ) && val["determinism"].isString() )
+  {
+    const std::string grade = val["determinism"].asString();
+    if ( grade == "bit_exact" || grade == "tolerance" )
+      meta.determinismGrade = grade;
+    else
+      meta.determinismGrade = "bit_exact";
+  }
 
   if ( val.isMember( "execution" ) && val["execution"].isObject() )
     meta.execution = val["execution"];

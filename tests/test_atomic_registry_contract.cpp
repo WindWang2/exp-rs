@@ -40,6 +40,9 @@ TEST_CASE( "Registry exposes unique ids and stable descriptors", "[processing][r
     REQUIRE( first.id == second.id );
     REQUIRE( first.outputs.size() == second.outputs.size() );
     REQUIRE( first.agentMetadata.memoryPolicy == second.agentMetadata.memoryPolicy );
+    // ADR 0124: operator descriptors surface a determinism grade through the
+    // same metadata surface (default bit_exact — the serial baseline).
+    REQUIRE( first.agentMetadata.determinismGrade == "bit_exact" );
 }
 
 TEST_CASE( "Legacy facade IDs remain registered and executable", "[processing][registry][compat]" )

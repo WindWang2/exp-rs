@@ -71,6 +71,11 @@ struct AgentMetadata
   /// Large-raster memory policy ("streaming", "multipass_streaming",
   /// "full_raster", "external_process", "unsupported_for_large_raster").
   std::string memoryPolicy;
+  /// Numeric reproducibility under parallel or blocked execution (ADR 0124):
+  /// "bit_exact" or "tolerance". Distinct from `deterministic`, which marks
+  /// stochastic kernels; the grade governs floating-point accumulation order
+  /// for otherwise deterministic kernels.
+  std::string determinismGrade;
   /// Declared execution-resource estimate: tileWidth/tileHeight/
   /// estimatedRamBytes/temporaryDiskBytes (0 = unknown). Empty object = none.
   Json::Value execution;

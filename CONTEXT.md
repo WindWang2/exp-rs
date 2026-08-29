@@ -24,6 +24,10 @@ _Avoid_: Async job, Processing item, Worker unit
 A directed acyclic graph (DAG) of dependent `AlgorithmTask` nodes where output dataset paths automatically flow as inputs into downstream algorithm nodes.
 _Avoid_: Workflow graph, Execution chain, Process tree
 
+**Workflow Session**:
+The interactive, wizard-mode execution surface for a WorkflowDefinition (`WorkflowSession`): a **human** schedules it — navigating step by step (`gotoStep`), setting parameters per step, and re-running steps made dirty by parameter changes — while each executed step still runs through the Task Center seam. Distinct from the Task Pipeline, where the **engine** owns scheduling of the whole DAG up front. A session is never auto-parallelized across steps; its steps may run out of definition order or not at all.
+_Avoid_: Pipeline run, Batch workflow (a Session is human-scheduled; a Pipeline is engine-scheduled)
+
 **Resource Throttler**:
 The scheduling subsystem responsible for managing task priority queues (`High`, `Normal`, `Low`), sorting queued task execution, and automatically capping max concurrent background threads to `std::thread::hardware_concurrency() - 1`.
 _Avoid_: Core limiter, Thread pool filter
@@ -35,6 +39,14 @@ _Avoid_: RS algorithm, Kernel op, JSON task
 **Operator Registry**:
 The source-of-truth registry (`RSOperatorRegistry`) where Operators are registered by name and from which the headless CLI, MCP tools, and GUI task helpers execute them. The Agent surface does not consume it directly: each Operator is mirrored into the `AtomicAlgorithmRegistry` through a thin `RsOperatorAdapter` wrapper, so the Agent sees Operators and provider algorithms through one uniform adapter interface.
 _Avoid_: Algorithm list, CLI registry
+
+**Operator-ization**:
+The act of making an existing algorithm reachable as an Operator by wrapping it behind the operator JSON parameter/result seam and registering it in the Operator Registry — without changing the algorithm kernel. A wrapped algorithm keeps its module home; physically relocating its code into the operator source tree is incidental, never the goal.
+_Avoid_: Rewrite, Port, Refactor (Operator-ization wraps a kernel; it does not rewrite one)
+
+**Determinism Grade**:
+The per-operator declaration of numeric reproducibility under parallel or blocked execution: **bit-exact** (results are identical regardless of scheduling and reduction order) or **tolerance** (results stay within a documented relative tolerance, e.g. 1e-6, because parallel reduction reorders floating-point accumulation). Discrete-verdict outputs (class maps, change labels) are expected to be stable under either grade; the grade governs continuous statistics only.
+_Avoid_: Accuracy, Precision (the grade is about reproducibility, not error magnitude)
 
 **Tool Call Dispatcher**:
 The single deep seam between Agent-facing surfaces (Agent Copilot, MCP Server, Headless Runner) and the Task Center for LLM tool calls (`ToolCallDispatcher` in `src/processing/framework`). It encapsulates tool-call envelope parsing, algorithm ID normalization, required parameter validation, task submission, terminal status completion watching (`TaskCenter`), transactional output asset committing via `OutputCommitter`, and synchronous/asynchronous execution (`dispatchAndAwait`). Callers interact solely through its interface without writing custom polling loops or error/output payload formatting code.
@@ -494,7 +506,7 @@ _Avoid_: Workspace state map, Context dict, UI state dump
   5. **New remap test** trains K-Means with permuted label ids (5/9) and asserts predictions map to the training labels in the accuracy path and the written class map, with a lowercase `"kmeans"` methodName to pin the trap removal.
 - **Consequences**: one construction path, color formula, sampling policy and NoData discovery; remap semantics observably unchanged (identity when no table; the unsupervised operator's all-zero dummy trainY keeps raw 1..K cluster ids); `"kmeans"` strings now construct K-Means instead of falling back to SVM — only reachable via sidecar predict-only, which still fails cleanly (K-Means has no `load()`).
 
-### ADR 0062–0122: Index
+### ADR 0062–0124: Index
 
 ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision, and consequences in each file). Titles for orientation:
 
@@ -559,3 +571,5 @@ ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision
 - **ADR 0120**: Agent-Ready Atomic Architecture
 - **ADR 0121**: Agent Interaction Layer
 - **ADR 0122**: Pi-Based Spatial Intelligence Layer
+- **ADR 0123**: Workflow Engine 2.0 (State Lifecycle, Deterministic Cache, Recovery, and Artifact GC)
+- **ADR 0124**: Per-Operator Determinism Grades for Parallel Execution
