@@ -813,7 +813,18 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
     {
         QMutexLocker locker( &m_mutex );
         const std::size_t forwarded = m_forwardedLogCounts.value( taskId, 0 );
-        if ( record.logLines.size() > forwarded )
+        if ( record.logLinesOffset > 0 )
+        {
+            // Delta record from the engine (#638): logLines holds only the
+            // lines appended since the previous notify, starting at engine
+            // index (logLinesOffset - 1); the engine-side cursor guarantees
+            // each line is shipped exactly once.
+            for ( const auto &line : record.logLines )
+                newLines.push_back( QString::fromStdString( line.text ) );
+            m_forwardedLogCounts[taskId] =
+                ( record.logLinesOffset - 1 ) + record.logLines.size();
+        }
+        else if ( record.logLines.size() > forwarded )
         {
             for ( std::size_t i = forwarded; i < record.logLines.size(); ++i )
                 newLines.push_back( QString::fromStdString( record.logLines[i].text ) );

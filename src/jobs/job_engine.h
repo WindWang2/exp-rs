@@ -170,6 +170,9 @@ class JobEngine
     std::deque<std::string> m_queue;
     std::unordered_map<std::string, JobRecord> m_jobs;
     std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> m_cancelFlags;
+    /// Per-job index of the first log line not yet shipped in a delta notify
+    /// (#638); cleaned up with the job's other transient state on finish.
+    std::unordered_map<std::string, std::size_t> m_deltaLogCursor;
     std::unordered_map<std::string, JobBody> m_jobBodies; // per-job one-shot
     std::vector<std::pair<std::string, JobExecutor>> m_prefixExecutors;
     JobExecutor m_fallbackExecutor; // catch-all, tried after RSOperatorRegistry

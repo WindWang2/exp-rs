@@ -12,6 +12,7 @@
 
 #include <chrono>
 #include <atomic>
+#include <future>
 #include <thread>
 #include <vector>
 
@@ -190,6 +191,72 @@ TEST_CASE("TaskCenter - Preserves a submitted job result", "[processing][task_ce
     REQUIRE(info.resultPayload["output"].asString() == "/tmp/task-center-result.tif");
     REQUIRE(info.outputLayerPath == QStringLiteral("/tmp/task-center-result.tif"));
     REQUIRE(info.logBuffer.join('\n').contains(QStringLiteral("tracer completed")));
+}
+
+TEST_CASE("TaskCenter - forwards operator log lines incrementally (delta notify)", "[processing][task_center]") {
+    auto& engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+
+    // The executor logs one line, then waits until the TEST has observed that
+    // line in the task log while the task is still Running. With a broken
+    // delta notify (lines dropped at notify time and only flushed by the
+    // terminal record, #638) nothing is observable before terminal and the
+    // poll below times out - the regression is detected deterministically.
+    std::promise<void> lineOneObserved;
+    std::shared_future<void> lineOneObservedFuture = lineOneObserved.get_future().share();
+    // Always unblock the executor (even if an assertion below aborts the test
+    // case) so a failing run cannot leave a worker thread parked forever.
+    struct PromiseSignaler {
+        std::promise<void>& promise;
+        bool fired = false;
+        void fire() { if ( !fired ) { promise.set_value(); fired = true; } }
+        ~PromiseSignaler() { try { fire(); } catch ( ... ) {} }
+    } lineOneSignaler{ lineOneObserved };
+    engine.registerExecutor("test:log-delta",
+                            [&lineOneObserved, lineOneObservedFuture](
+                              const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
+        context.logInfo("delta line one");
+        lineOneObservedFuture.wait();
+        context.logInfo("delta line two");
+        context.logInfo("delta line three");
+        Json::Value result(Json::objectValue);
+        result["output"] = "delta-done";
+        return result;
+    });
+
+    sicnu::jobs::JobRequest request;
+    request.algorithmId = "test:log-delta";
+    request.source = "task_panel";
+    const long taskId = sicnu::TaskCenter::instance().submitJob(request);
+    REQUIRE(taskId > 0);
+
+    bool streamedBeforeTerminal = false;
+    for (int attempt = 0; attempt < 5000; ++attempt) {
+        const auto info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
+        if (info.logBuffer.join('
+').contains(QStringLiteral("delta line one"))) {
+            streamedBeforeTerminal = true;
+            break;
+        }
+        if (sicnu::isTerminalStatus(info.status))
+            break; // terminal flushed the lines instead: broken streaming
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(streamedBeforeTerminal);
+
+    lineOneSignaler.fire();
+    engine.waitUntilIdleForTests();
+    waitForTerminalStatus( sicnu::TaskCenter::instance(), taskId );
+
+    // Every line must land exactly once once the job is terminal.
+    const auto info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
+    REQUIRE(info.status == sicnu::TaskStatus::Completed);
+    const QString log = info.logBuffer.join('
+');
+    REQUIRE(log.contains(QStringLiteral("delta line one")));
+    REQUIRE(log.contains(QStringLiteral("delta line two")));
+    REQUIRE(log.contains(QStringLiteral("delta line three")));
 }
 
 TEST_CASE("TaskCenter - clearCompletedTasks also prunes the JobEngine records", "[processing][task_center][clear]") {

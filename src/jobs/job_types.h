@@ -34,6 +34,13 @@ struct JobRecord {
   double progress = -1.0; // -1 = indeterminate
   std::string statusMessage;
   std::vector<JobLogLine> logLines;
+  /// Transmission hint for notify() copies: 0 = logLines is the cumulative
+  /// vector; >0 = delta notify (#638) where logLines holds only the slice
+  /// beginning at engine-side index (logLinesOffset - 1). Consumers that
+  /// forward log lines must append the whole slice exactly once and treat
+  /// (logLinesOffset - 1) + size as the new engine total. The authoritative
+  /// record kept by the engine is always cumulative.
+  std::size_t logLinesOffset = 0;
   Json::Value result;
   std::string error;
   int64_t createdAtMs = 0;

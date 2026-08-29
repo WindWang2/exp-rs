@@ -587,6 +587,7 @@ void JobEngine::finishJobLocked( JobRecord &rec, bool wasExclusive )
     m_exclusiveRunning = false;
   m_cancelFlags.erase( rec.id );
   m_jobBodies.erase( rec.id );
+  m_deltaLogCursor.erase( rec.id );
 }
 
 void JobEngine::runOperatorJob( const std::string &jobId )
@@ -668,11 +669,14 @@ void JobEngine::runOperatorJob( const std::string &jobId )
   ctx.setCancelFlag( cancelFlag.get() );
 
   ctx.setLogCallback( [this, jobId]( const std::string &message, const std::string &level ) {
-    // #634: log lines were notified with a FULL JobRecord copy (including
-    // result + the entire growing logLines) on every line. A chatty operator
-    // on a long run paid O(n^2) memory traffic. Ship a delta instead: the
-    // log-line payload is the only thing new, and the full record is still
-    // reachable from the TaskCenter listener on successful completion.
+    // #634/#638: log lines were notified with a FULL JobRecord copy (including
+    // result + the entire growing logLines) on every line — a chatty operator
+    // paid O(n^2) memory traffic. Ship a delta instead: id + only the lines
+    // appended since the previous notify. TaskCenter keys on record.id and
+    // uses logLinesOffset to append the slice exactly once; the full
+    // cumulative record is still reachable via snapshot() and the terminal
+    // notify. (The first cut of this delta omitted id and shipped a 1-line
+    // slice, so TaskCenter silently dropped every streaming log line.)
     JobRecord copy;
     {
       std::lock_guard<std::mutex> lock( m_mutex );
@@ -680,11 +684,20 @@ void JobEngine::runOperatorJob( const std::string &jobId )
       if ( it == m_jobs.end() )
         return;
       appendLog( it->second, logLevelFromString( level ), message );
-      // Minimal snapshot: enough for the UI's log slot; the TaskCenter
-      // listener already enqueues the terminal record separately.
+      copy.id = it->second.id;
       copy.progress = it->second.progress;
       copy.state = it->second.state;
-      copy.logLines.push_back( it->second.logLines.back() );
+      const std::size_t total = it->second.logLines.size();
+      std::size_t &cursor = m_deltaLogCursor[jobId];
+      if ( total > cursor )
+      {
+        // 1-based: logLinesOffset == 0 is reserved for cumulative records.
+        copy.logLinesOffset = cursor + 1;
+        copy.logLines.reserve( total - cursor );
+        for ( std::size_t i = cursor; i < total; ++i )
+          copy.logLines.push_back( it->second.logLines[i] );
+        cursor = total;
+      }
     }
     notify( copy );
   } );
