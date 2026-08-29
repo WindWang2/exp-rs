@@ -248,6 +248,7 @@ class McpBridge {
         this.pending.delete(id);
         clearTimeout(timer);
         this.notify("notifications/cancelled", { requestId: id });
+        cleanup();
         reject(new Error("Aborted during exp-rs tool call"));
       };
       if (signal) {
@@ -257,7 +258,19 @@ class McpBridge {
         }
         signal.addEventListener("abort", onAbort, { once: true });
       }
-      this.pending.set(id, { resolve, reject, timer });
+      // Every settle path must drop the abort listener: a long-lived signal
+      // otherwise accumulated one onAbort closure per request, firing
+      // spurious notifications/cancelled for already-completed rpc ids
+      // (harmless server-side, but a leak) (#645).
+      const wrappedResolve = (value: any) => {
+        cleanup();
+        resolve(value);
+      };
+      const wrappedReject = (err: Error) => {
+        cleanup();
+        reject(err);
+      };
+      this.pending.set(id, { resolve: wrappedResolve, reject: wrappedReject, timer });
       const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params });
       this.child.stdin!.write(payload + "\n", (err) => {
         if (err) {

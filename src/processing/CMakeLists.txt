@@ -202,7 +202,7 @@ if(OpenCV_FOUND)
   target_link_libraries(sicnu_processing PRIVATE ${OpenCV_LIBRARIES})
 endif()
 
-target_compile_definitions(sicnu_processing PUBLIC
+target_compile_definitions(sicnu_processing PRIVATE
     SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 set_target_properties(sicnu_processing PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
@@ -237,5 +237,7 @@ set_target_properties(sicnu_task_center PROPERTIES
 )
 
 install(TARGETS sicnu_processing
+    RUNTIME DESTINATION ${QGIS_BIN_DIR}
     LIBRARY DESTINATION ${QGIS_LIB_SUBDIR}
+    ARCHIVE DESTINATION ${QGIS_LIB_DIR}
 )

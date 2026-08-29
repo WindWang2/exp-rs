@@ -746,8 +746,7 @@ void AgentCopilotDockWidget::sendToolResultFollowUp( const QJsonObject &toolCall
   constexpr int kMaxToolResultChars = 50000;
   if ( content.size() > kMaxToolResultChars )
     content = content.left( kMaxToolResultChars )
-              + QStringLiteral( "
-…[truncated %1 characters]" ).arg( content.size() - kMaxToolResultChars );
+              + QStringLiteral( "\n…[truncated %1 characters]" ).arg( content.size() - kMaxToolResultChars );
 
   QJsonArray toolCalls;
   toolCalls.append( toolCallJson );

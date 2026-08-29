@@ -15,18 +15,28 @@ namespace sicnu::data
 
 namespace
 {
-/// JSON string serialization of @a s (quotes + escaping, no array wrapper).
-/// Used for every caller-controlled string in a canonical form so a value
-/// containing the framing delimiters ('\n', ';', '=') cannot inject or shift
-/// the field layout — two different (id, version) tuples must never collide
-/// into the same canonical bytes.
+/// JSON string serialization of @a s (quotes + escaping, no array wrapper),
+/// then hex-encoded. Hex is injective and contains none of the framing
+/// delimiters (newline, ';', '=', '@'), so a caller-controlled string cannot
+/// inject or shift the field layout - two different (id, version) tuples can
+/// never collide into the same canonical bytes. (Plain JSON escaping left
+/// ';'/@/=' intact inside the JSON body, so sub-field injection like
+/// fromPort="output;to=x" still collided with two-field inputs, #639.)
 QByteArray jsonEscaped( const QString &s )
 {
   QJsonArray wrap = { s };
   QByteArray out = QJsonDocument( wrap ).toJson( QJsonDocument::Compact );
   if ( out.startsWith( '[' ) && out.endsWith( ']' ) )
-    return out.mid( 1, out.size() - 2 );
-  return out;
+    out = out.mid( 1, out.size() - 2 );
+  static const char hex[] = "0123456789abcdef";
+  QByteArray encoded;
+  encoded.reserve( out.size() * 2 );
+  for ( unsigned char c : out )
+  {
+    encoded.append( hex[c >> 4] );
+    encoded.append( hex[c & 0xF] );
+  }
+  return encoded;
 }
 
 /// Canonical, order-independent string form of the fingerprint inputs, hashed
@@ -167,8 +177,8 @@ ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
   QByteArray out;
   // Every caller-controlled string goes through jsonEscaped() — the same
   // guarantee as the V1 canonical form: an id/port/band value containing the
-  // framing delimiters ('\n', ';', '=', '@') cannot inject or shift the field
-  // layout, so distinct (algorithmId, version) tuples can never collide into
+  // framing delimiters (newline, ';', '=', '@') cannot inject or shift the
+  // field layout, so distinct (algorithmId, version) tuples can never collide into
   // the same canonical bytes (#639).
   out.append( "v=2\n" );
   out.append( "alg=" );

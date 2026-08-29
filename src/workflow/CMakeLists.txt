@@ -38,7 +38,9 @@ set_target_properties(sicnu_workflow PROPERTIES
   WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 install(TARGETS sicnu_workflow
+  RUNTIME DESTINATION ${QGIS_BIN_DIR}
   LIBRARY DESTINATION ${QGIS_LIB_SUBDIR}
+  ARCHIVE DESTINATION ${QGIS_LIB_DIR}
 )
 # Link jsoncpp the same way sicnu_operators does in this repo
 if(TARGET jsoncpp)

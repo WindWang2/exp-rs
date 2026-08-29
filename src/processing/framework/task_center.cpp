@@ -818,11 +818,22 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
             // Delta record from the engine (#638): logLines holds only the
             // lines appended since the previous notify, starting at engine
             // index (logLinesOffset - 1); the engine-side cursor guarantees
-            // each line is shipped exactly once.
-            for ( const auto &line : record.logLines )
-                newLines.push_back( QString::fromStdString( line.text ) );
-            m_forwardedLogCounts[taskId] =
-                ( record.logLinesOffset - 1 ) + record.logLines.size();
+            // each line is shipped exactly once BY THE ENGINE. The
+            // submit-time catch-up snapshot (cumulative) races this consumer
+            // from the submitting thread, so skip any delta line whose
+            // engine index was already forwarded instead of blindly
+            // appending - the two producers must stay idempotent.
+            const std::size_t first = record.logLinesOffset - 1;
+            std::size_t seen = m_forwardedLogCounts.value( taskId, 0 );
+            for ( std::size_t i = 0; i < record.logLines.size(); ++i )
+            {
+                const std::size_t engineIndex = first + i;
+                if ( engineIndex < seen )
+                    continue;
+                newLines.push_back( QString::fromStdString( record.logLines[i].text ) );
+                seen = engineIndex + 1;
+            }
+            m_forwardedLogCounts[taskId] = seen;
         }
         else if ( record.logLines.size() > forwarded )
         {

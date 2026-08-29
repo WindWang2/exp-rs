@@ -234,8 +234,7 @@ TEST_CASE("TaskCenter - forwards operator log lines incrementally (delta notify)
     bool streamedBeforeTerminal = false;
     for (int attempt = 0; attempt < 5000; ++attempt) {
         const auto info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
-        if (info.logBuffer.join('
-').contains(QStringLiteral("delta line one"))) {
+        if (info.logBuffer.join('\n').contains(QStringLiteral("delta line one"))) {
             streamedBeforeTerminal = true;
             break;
         }
@@ -252,8 +251,7 @@ TEST_CASE("TaskCenter - forwards operator log lines incrementally (delta notify)
     // Every line must land exactly once once the job is terminal.
     const auto info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
     REQUIRE(info.status == sicnu::TaskStatus::Completed);
-    const QString log = info.logBuffer.join('
-');
+    const QString log = info.logBuffer.join('\n');
     REQUIRE(log.contains(QStringLiteral("delta line one")));
     REQUIRE(log.contains(QStringLiteral("delta line two")));
     REQUIRE(log.contains(QStringLiteral("delta line three")));

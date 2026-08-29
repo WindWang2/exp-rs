@@ -154,7 +154,9 @@ set_target_properties(sicnu_operators PROPERTIES
 )
 
 install(TARGETS sicnu_operators
+    RUNTIME DESTINATION ${QGIS_BIN_DIR}
     LIBRARY DESTINATION ${QGIS_LIB_SUBDIR}
+    ARCHIVE DESTINATION ${QGIS_LIB_DIR}
 )
 
 # ---------------------------------------------------------------------------

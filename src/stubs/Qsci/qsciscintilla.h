@@ -164,6 +164,22 @@ public:
     virtual void selectAll(bool = true) {}
     virtual void clearSelections() { m_selStart = 0; m_selEnd = 0; }
 
+    // Removal/undo contracts exercised by QgsCodeEditor's comment/replace
+    // flows. The stub keeps no cursor model: insert() appends (the sole live
+    // call path empties the buffer via selectAll()+removeSelectedText()
+    // first, so position is irrelevant there).
+    virtual void removeSelectedText()
+    {
+        if ( !hasSelectedText() )
+            return;
+        m_text.remove( m_selStart, m_selEnd - m_selStart );
+        clearSelections();
+        emit textChanged();
+    }
+    virtual void insert(const QString &s) { m_text += s; emit textChanged(); }
+    virtual void beginUndoAction() {}
+    virtual void endUndoAction() {}
+
     // Margins
     virtual void setMarginsFont(const QFont &) {}
     virtual void setMarginsBackgroundColor(const QColor &) {}
@@ -344,8 +360,7 @@ private:
     {
         if ( line < 0 || index < 0 )
             return -1;
-        const QStringList lines = m_text.split( QLatin1Char('
-') );
+        const QStringList lines = m_text.split( QLatin1Char('\n') );
         if ( line >= lines.size() || index > lines[line].length() )
             return -1;
         int pos = 0;
@@ -363,8 +378,7 @@ private:
         int lineStart = 0;
         for ( int i = 0; i < pos; ++i )
         {
-            if ( m_text.at( i ) == QLatin1Char('
-') )
+            if ( m_text.at( i ) == QLatin1Char('\n') )
             {
                 ++l;
                 lineStart = i + 1;

@@ -286,6 +286,10 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   {
     markInvalid( "tiling.halo/overlap declared but tiling.tile_size is not" );
   }
+  if ( info.preprocess.scale != 1.0
+       && info.preprocess.normalize != "linear" && info.preprocess.normalize != "mean_std" )
+    markInvalid( "preprocess.scale is declared but normalize is neither linear nor mean_std - "
+                 "the scale would silently not execute; set normalize or remove the scale" );
   if ( info.postprocess.nms )
     markInvalid( "postprocess.nms is declared but not implemented by any runtime - remove it or implement NMS" );
   if ( info.postprocess.polygonize )
