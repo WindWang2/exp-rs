@@ -106,11 +106,16 @@ protected:
     QVariantMap handleExecuteOperator(const QString &operatorId, const QVariantMap &parameters);
 
     // MCP Methods — Unified Agent Tool Catalog (Algorithms + Interaction + Data)
-    QVariantMap handleListTools(const QString &category = QString(), bool compact = false,
+    // Meta discovery tools default to compact (#643): agents list names +
+    // descriptions and pull a candidate's schema via get_tool_schema. The
+    // PROTOCOL tools/list (consumed by bridges, which need every
+    // inputSchema to register tools) is a separate surface and stays
+    // full-schema.
+    QVariantMap handleListTools(const QString &category = QString(), bool compact = true,
                                 int limit = 0, int cursor = 0);
     QVariantMap handleSearchTools(const QString &query, const QString &group = QString(),
                                   const QString &tag = QString(), const QString &inputType = QString(),
-                                  const QString &outputType = QString(), bool compact = false,
+                                  const QString &outputType = QString(), bool compact = true,
                                   int limit = 0, int cursor = 0);
     QVariantMap handleGetToolSchema(const QString &toolId);
 

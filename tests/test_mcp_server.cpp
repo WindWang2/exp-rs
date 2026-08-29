@@ -101,7 +101,10 @@ public:
     {
         return handlePreflightAlgorithm(id, params);
     }
-    QVariantMap testListTools(const QString &category = QString()) { return handleListTools(category); }
+    QVariantMap testListTools(const QString &category = QString(), bool compact = true)
+    {
+        return handleListTools(category, compact);
+    }
     QVariantMap testSearchTools(const QString &query, const QString &group = QString(),
                                 const QString &tag = QString(), const QString &inputType = QString(),
                                 const QString &outputType = QString())
@@ -318,7 +321,8 @@ TEST_CASE("MCP Server tests", "[agent][mcp]") {
 
     SECTION("list_tools returns unified schema with category, name, description, schema") {
         registerGuiHost();
-        QVariantMap res = server.testListTools();
+        // compact=false embeds the per-entry schemas (#643 default omits them).
+        QVariantMap res = server.testListTools(QString(), false);
         QVariantList tools = res.value("tools").toList();
         REQUIRE_FALSE(tools.isEmpty());
         REQUIRE(res.value("count").toInt() == tools.size());
@@ -343,6 +347,25 @@ TEST_CASE("MCP Server tests", "[agent][mcp]") {
         CHECK(foundProcessing);
         CHECK(foundInteraction);
         CHECK(foundData);
+    }
+
+    SECTION("list_tools defaults to compact: no per-entry schemas, pagination fields present") {
+        registerGuiHost();
+        QVariantMap res = server.testListTools();
+        QVariantList tools = res.value("tools").toList();
+        REQUIRE_FALSE(tools.isEmpty());
+        CHECK(res.value("compact").toBool());
+        CHECK(res.value("count").toInt() == tools.size());
+        for (const QVariant &t : tools) {
+            QVariantMap tMap = t.toMap();
+            REQUIRE(tMap.contains("name"));
+            REQUIRE_FALSE(tMap.contains("schema"));
+        }
+        // The full-schema surface remains reachable via compact=false and
+        // per-tool schemas via get_tool_schema.
+        QVariantMap full = server.testListTools(QString(), false);
+        REQUIRE(full.value("count").toInt() == res.value("count").toInt());
+        CHECK(full.value("tools").toList().first().toMap().contains("schema"));
     }
 
     SECTION("search_tools searches unified catalog by query") {

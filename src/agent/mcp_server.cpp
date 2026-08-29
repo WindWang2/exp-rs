@@ -294,10 +294,10 @@ const MetaToolDef kMetaTools[] = {
       { { "tool_name", "string", "Interaction tool name (e.g. 'view:get_state', 'view:set_extent', 'roi:set')", true } } },
     { "list_tools",
       "List all unified agent tools (Processing algorithms, Interaction/Canvas tools, Data tools). "
-      "Returns category, name, description, and JSON schema. Pass compact=true to omit the "
-      "per-entry schemas (much smaller payload) and pull a candidate's schema via get_tool_schema.",
+      "Returns category, name, and description per tool; input schemas are omitted by default "
+      "(pull a candidate's full schema via get_tool_schema). Pass compact=false to embed every schema.",
       { { "category", "string", "Optional category filter: 'Processing', 'Interaction', 'Data', 'Custom'.", false },
-        { "compact", "boolean", "Omit per-entry input schemas for a compact listing. Optional, default false.", false },
+        { "compact", "boolean", "Set false to embed per-entry input schemas (default: omitted).", false },
         { "limit", "integer", "Max entries per page (offset pagination). 0 = all. Optional.", false },
         { "cursor", "integer", "Offset of the first entry to return; pass nextCursor from the previous page. Optional.", false } } },
     { "search_tools",
@@ -307,7 +307,7 @@ const MetaToolDef kMetaTools[] = {
         { "tag", "string", "Tag filter. Optional.", false },
         { "input_type", "string", "Input data type filter. Optional.", false },
         { "output_type", "string", "Output data type filter. Optional.", false },
-        { "compact", "boolean", "Omit per-entry input schemas for a compact listing. Optional, default false.", false },
+        { "compact", "boolean", "Set false to embed per-entry input schemas (default: omitted).", false },
         { "limit", "integer", "Max entries per page (offset pagination). 0 = all. Optional.", false },
         { "cursor", "integer", "Offset of the first entry to return; pass nextCursor from the previous page. Optional.", false } } },
     { "get_tool_schema",
@@ -759,7 +759,9 @@ void McpServer::handleRequest(const QVariantMap &request)
                 // full schema for a candidate via get_tool_schema. Default
                 // remains full-schema so existing clients are unaffected.
                 resultData = handleListTools(arguments.value(QStringLiteral("category")).toString(),
-                                             arguments.value(QStringLiteral("compact")).toBool(),
+                                             arguments.contains(QStringLiteral("compact"))
+                                                 ? arguments.value(QStringLiteral("compact")).toBool()
+                                                 : true,
                                              arguments.value(QStringLiteral("limit")).toInt(),
                                              arguments.value(QStringLiteral("cursor")).toInt());
             }
@@ -771,7 +773,9 @@ void McpServer::handleRequest(const QVariantMap &request)
                     arguments.value(QStringLiteral("tag")).toString(),
                     arguments.value(QStringLiteral("input_type")).toString(),
                     arguments.value(QStringLiteral("output_type")).toString(),
-                    arguments.value(QStringLiteral("compact")).toBool(),
+                    arguments.contains(QStringLiteral("compact"))
+                        ? arguments.value(QStringLiteral("compact")).toBool()
+                        : true,
                     arguments.value(QStringLiteral("limit")).toInt(),
                     arguments.value(QStringLiteral("cursor")).toInt());
             }
