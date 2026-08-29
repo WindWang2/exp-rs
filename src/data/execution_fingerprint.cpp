@@ -165,11 +165,16 @@ ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
                                                  const QVector<TaggedDerivationInput> &inputs )
 {
   QByteArray out;
+  // Every caller-controlled string goes through jsonEscaped() — the same
+  // guarantee as the V1 canonical form: an id/port/band value containing the
+  // framing delimiters ('\n', ';', '=', '@') cannot inject or shift the field
+  // layout, so distinct (algorithmId, version) tuples can never collide into
+  // the same canonical bytes (#639).
   out.append( "v=2\n" );
   out.append( "alg=" );
-  out.append( algorithmId.toUtf8() );
+  out.append( jsonEscaped( algorithmId ) );
   out.append( "\nver=" );
-  out.append( algorithmVersion.toUtf8() );
+  out.append( jsonEscaped( algorithmVersion ) );
   out.append( "\nparams=" );
   out.append( canonicalizeJsonRfc8785( parameters ) );
 
@@ -200,35 +205,35 @@ ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
   for ( const auto &in : sortedInputs )
   {
     out.append( "\nin=" );
-    out.append( in.assetId.toString().toUtf8() );
+    out.append( jsonEscaped( in.assetId.toString() ) );
     out.append( "@rev=" );
     out.append( QByteArray::number( static_cast<qint64>( in.revision.value() ) ) );
     if ( !in.fromPort.isEmpty() )
     {
       out.append( ";from=" );
-      out.append( in.fromPort.toUtf8() );
+      out.append( jsonEscaped( in.fromPort ) );
     }
     if ( !in.toPort.isEmpty() )
     {
       out.append( ";to=" );
-      out.append( in.toPort.toUtf8() );
+      out.append( jsonEscaped( in.toPort ) );
     }
     if ( !in.bandReferences.isEmpty() )
     {
       out.append( ";bands=" );
       QStringList bands = in.bandReferences;
       bands.sort();
-      out.append( bands.join( ',' ).toUtf8() );
+      out.append( jsonEscaped( bands.join( ',' ) ) );
     }
     if ( !in.valueDomain.isEmpty() )
     {
       out.append( ";vd=" );
-      out.append( in.valueDomain.toUtf8() );
+      out.append( jsonEscaped( in.valueDomain ) );
     }
     if ( !in.lazyContentDigest.isEmpty() )
     {
       out.append( ";digest=" );
-      out.append( in.lazyContentDigest.toUtf8() );
+      out.append( jsonEscaped( in.lazyContentDigest ) );
     }
   }
 

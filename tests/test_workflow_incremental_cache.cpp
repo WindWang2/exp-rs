@@ -71,6 +71,44 @@ TEST_CASE( "makeExecutionFingerprintV2 determinism and revision sensitivity", "[
   REQUIRE_FALSE( fp1 == fpPortChanged );
 }
 
+TEST_CASE( "makeExecutionFingerprintV2 framing is not injectable via delimiters", "[workflow][v2][fingerprint]" )
+{
+  // Values containing the framing delimiters ('\n', ';', '=', '@') must not
+  // be able to shift the field layout: two distinct (algorithmId, version)
+  // tuples that would concatenate to the same unescaped bytes (#639) must
+  // produce different digests.
+  const AssetId asset = AssetId::generate();
+  TaggedDerivationInput in;
+  in.assetId = asset;
+  in.revision = AssetRevision::fromValue( 1 );
+  in.fromPort = "output";
+  in.toPort = "inputA";
+
+  QJsonObject params;
+
+  const auto fpInjected = makeExecutionFingerprintV2( "rs:op\nver=9.9", "1.0", params, { in } );
+  const auto fpHonest = makeExecutionFingerprintV2( "rs:op", "9.9\nver=1.0", params, { in } );
+  REQUIRE( fpInjected.isValid() );
+  REQUIRE( fpHonest.isValid() );
+  REQUIRE_FALSE( fpInjected == fpHonest );
+
+  // Port names carrying framing characters must stay distinct from honest
+  // field boundaries.
+  TaggedDerivationInput portInject = in;
+  portInject.fromPort = "output\nin=other@rev=1";
+  const auto fpPortInject = makeExecutionFingerprintV2( "rs:op", "1.0", params, { portInject } );
+  REQUIRE_FALSE( fpPortInject == fpHonest );
+
+  // Band references with framing characters likewise.
+  TaggedDerivationInput bandInject = in;
+  bandInject.bandReferences = QStringList{ "b1;bands=x" };
+  const auto fpBandInject = makeExecutionFingerprintV2( "rs:op", "1.0", params, { bandInject } );
+  TaggedDerivationInput bandHonest = in;
+  bandHonest.bandReferences = QStringList{ "b1" };
+  const auto fpBandHonest = makeExecutionFingerprintV2( "rs:op", "1.0", params, { bandHonest } );
+  REQUIRE_FALSE( fpBandInject == fpBandHonest );
+}
+
 TEST_CASE( "Fingerprints distinguish doubles that 16-digit formatting merges", "[workflow][v2][fingerprint][numbers]" )
 {
   const AssetId asset = AssetId::generate();

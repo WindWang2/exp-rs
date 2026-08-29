@@ -412,3 +412,125 @@ TEST_CASE( "The VRT band data type follows the input band's native type",
   REQUIRE( raster->bands.size() == 1 );
   CHECK( raster->bands.first().dataType == QStringLiteral( "Byte" ) );
 }
+
+namespace
+{
+
+/// Writes a single-band Float32 GeoTIFF with a high-precision geographic
+/// geotransform and an exact Float32 NoData sentinel. Used to prove the VRT
+/// XML serializes doubles at full round-trip precision (#639): 6-significant-
+/// digit formatting shifted the GeoTransform origin by ~50 m and broke exact
+/// NoData sentinel compares.
+QString writePrecisionGrid( const QString &path )
+{
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver != nullptr );
+  constexpr int W = 16, H = 16;
+  GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr );
+  REQUIRE( ds != nullptr );
+  std::array<double, 6> gt = { -123.456789, 0.0001, 0.0, 45.678901, 0.0, -0.0001 };
+  REQUIRE( GDALSetGeoTransform( ds, gt.data() ) == CE_None );
+  GDALSetProjection(
+    ds, "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],"
+        "PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]" );
+  GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+  // -3.4e38f stored as double differs from "-3.4e+38" (6-digit rounding).
+  const double sentinel = static_cast<double>( -3.4e38f );
+  REQUIRE( GDALSetNoDataValue( ds, sentinel ) == CE_None );
+  std::vector<float> line( W, 1.0f );
+  line[0] = -3.4e38f;
+  for ( int row = 0; row < H; ++row )
+    GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
+  GDALClose( ds );
+  return path;
+}
+
+QVector<double> parseGeoTransform( const QString &vrtXml )
+{
+  QVector<double> values;
+  const int start = vrtXml.indexOf( QLatin1String( "<GeoTransform>" ) );
+  if ( start < 0 )
+    return values;
+  const int begin = start + static_cast<int>( qstrlen( "<GeoTransform>" ) );
+  const int end = vrtXml.indexOf( QLatin1String( "</GeoTransform>" ), begin );
+  if ( end < 0 )
+    return values;
+  const QStringList parts = vrtXml.mid( begin, end - begin ).split( ',' );
+  for ( const QString &part : parts )
+    values.append( part.trimmed().toDouble() );
+  return values;
+}
+
+} // namespace
+
+TEST_CASE( "VRT XML preserves georeference and NoData at full precision",
+           "[virtual_raster][create][precision]" )
+{
+  ensureQgisApplication();
+  QTemporaryDir dir;
+  DataManager manager;
+
+  const AssetId input = registerRaster(
+    manager, writePrecisionGrid( dir.filePath( QStringLiteral( "precision.tif" ) ) ) );
+
+  const Result<AssetId> created = manager.createVirtualRaster( recipeFor( { BandRef{ input, 1 } } ) );
+  REQUIRE( created );
+
+  const std::optional<AssetSnapshot> snapshot = manager.asset( created.value() );
+  REQUIRE( snapshot.has_value() );
+  QFile vrtFile( snapshot->source().canonicalSource );
+  REQUIRE( vrtFile.open( QIODevice::ReadOnly | QIODevice::Text ) );
+  const QString xml = QString::fromUtf8( vrtFile.readAll() );
+  vrtFile.close();
+
+  // GeoTransform origin must round-trip exactly (6-digit output gives
+  // "-123.457" / "45.6789").
+  const QVector<double> gt = parseGeoTransform( xml );
+  REQUIRE( gt.size() == 6 );
+  CHECK( gt[0] == -123.456789 );
+  CHECK( gt[3] == 45.678901 );
+  CHECK( gt[1] == 0.0001 );
+  CHECK( gt[5] == -0.0001 );
+
+  // NoData sentinel must round-trip exactly so GDAL's ComplexSource NODATA
+  // compare still masks sentinel pixels (6-digit output gives "-3.4e+38").
+  const double sentinel = static_cast<double>( -3.4e38f );
+  const int nodataIdx = xml.indexOf( QLatin1String( "<NoDataValue>" ) );
+  REQUIRE( nodataIdx >= 0 );
+  const int nodataBegin = nodataIdx + static_cast<int>( qstrlen( "<NoDataValue>" ) );
+  const int nodataEnd = xml.indexOf( QLatin1String( "</NoDataValue>" ), nodataBegin );
+  REQUIRE( nodataEnd > nodataBegin );
+  const double parsedNodata = xml.mid( nodataBegin, nodataEnd - nodataBegin ).trimmed().toDouble();
+  CHECK( parsedNodata == sentinel );
+}
+
+TEST_CASE( "createVirtualRaster refuses absurd target dimensions instead of wrapping",
+           "[virtual_raster][create][overflow]" )
+{
+  ensureQgisApplication();
+  QTemporaryDir dir;
+  DataManager manager;
+
+  const AssetId input = registerRaster(
+    manager, writeByteGrid( dir.filePath( QStringLiteral( "utm.tif" ) ),
+                            QStringLiteral( "EPSG:32648" ) ) );
+
+  // 120 m extent / 1e-9 target resolution => 1.2e11 px per axis, far beyond
+  // INT_MAX. llround -> int would wrap into garbage (possibly negative)
+  // dimensions (#639); the creation must be refused instead.
+  VirtualRasterRecipe recipe = recipeFor( { BandRef{ input, 1 } } );
+  recipe.targetResolutionX = 1e-9;
+  recipe.targetResolutionY = 1e-9;
+
+  const Result<AssetId> created = manager.createVirtualRaster( recipe );
+  REQUIRE_FALSE( created );
+  bool mentionsGrid = false;
+  for ( const Diagnostic &d : created.diagnostics() )
+  {
+    if ( d.code.contains( QLatin1String( "grid" ) ) ||
+         d.code.contains( QLatin1String( "dimension" ) ) ||
+         d.code.contains( QLatin1String( "resolution" ) ) )
+      mentionsGrid = true;
+  }
+  CHECK( mentionsGrid );
+}

@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "data_manager.h"
+#include "raster_grid_compat.h"
 
 namespace sicnu::data
 {
@@ -161,6 +162,9 @@ PreflightResult preflightVirtualRaster( const VirtualRasterRecipe &recipe,
   // meaningful in a common CRS, and the RequiresReprojection verdict reuses
   // this below. An input without a CRS is treated as being in the recipe's
   // target CRS (the MissingCRS check above guarantees targetCrs is set then).
+  // Comparison is semantic (GDAL IsSame, via raster_grid_compat's shared
+  // helper): equivalent-but-differently-encoded WKTs of one CRS must not
+  // force a spurious RequiresReprojection verdict.
   QString commonCrs;
   bool crsDiffer = false;
   for ( const RasterStructure &structure : structures )
@@ -169,7 +173,7 @@ PreflightResult preflightVirtualRaster( const VirtualRasterRecipe &recipe,
                                                    : structure.crsWkt;
     if ( commonCrs.isEmpty() )
       commonCrs = crs;
-    else if ( crs != commonCrs )
+    else if ( !isSameCrs( crs, commonCrs ) )
       crsDiffer = true;
   }
 

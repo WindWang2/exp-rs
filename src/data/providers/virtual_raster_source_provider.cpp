@@ -53,6 +53,24 @@ QString escapeXml( const QString &text )
   return escaped;
 }
 
+// Full round-trip precision: QString::arg(double) / QString::number(double)
+// default to 6 significant digits, which silently shifted the VRT GeoTransform
+// origin by up to ~0.5 m (projected) / ~50 m (geographic) and rounded NoData
+// sentinels (e.g. -3.4e38f) so GDAL's exact ComplexSource NODATA compare no
+// longer masked them.
+QString formatVrtDouble( double value )
+{
+  if ( !std::isfinite( value ) )
+    return QString::number( value, 'g', 17 );
+  for ( int precision = 15; precision <= 17; ++precision )
+  {
+    const QString candidate = QString::number( value, 'g', precision );
+    if ( candidate.toDouble() == value )
+      return candidate;
+  }
+  return QString::number( value, 'g', 17 );
+}
+
 } // namespace
 
 QString buildVirtualRasterXml( const VirtualRasterRecipe &recipe,
@@ -118,12 +136,21 @@ QString buildVirtualRasterXml( const VirtualRasterRecipe &recipe,
        extent.maximumY <= extent.minimumY )
     return QString();
 
+  // Validate the quotient in double before the int cast: a unit-mismatched
+  // recipe (e.g. metre extent with a degree target resolution) yields
+  // quotients far beyond INT_MAX, where llround -> int wraps into garbage
+  // (possibly negative) dimensions (#633). Fail closed via the empty-XML
+  // path ("virtual_raster.grid_invalid").
+  constexpr double kMaxVrtDimension = 1000000000.0;
+  const double widthF = ( extent.maximumX - extent.minimumX ) / resX;
+  const double heightF = ( extent.maximumY - extent.minimumY ) / resY;
+  if ( widthF <= 0.0 || heightF <= 0.0 ||
+       widthF > kMaxVrtDimension || heightF > kMaxVrtDimension )
+    return QString();
   const int width =
-    std::max( 1, static_cast<int>( std::llround(
-                   ( extent.maximumX - extent.minimumX ) / resX ) ) );
+    std::max( 1, static_cast<int>( std::llround( widthF ) ) );
   const int height =
-    std::max( 1, static_cast<int>( std::llround(
-                   ( extent.maximumY - extent.minimumY ) / resY ) ) );
+    std::max( 1, static_cast<int>( std::llround( heightF ) ) );
 
   QString xml;
   QTextStream out( &xml );
@@ -134,10 +161,10 @@ QString buildVirtualRasterXml( const VirtualRasterRecipe &recipe,
     out << QStringLiteral( "  <SRS>%1</SRS>\n" ).arg( escapeXml( targetCrs ) );
   out << QStringLiteral(
            "  <GeoTransform>%1, %2, 0, %3, 0, %4</GeoTransform>\n" )
-           .arg( extent.minimumX )
-           .arg( resX )
-           .arg( extent.maximumY )
-           .arg( -resY );
+           .arg( formatVrtDouble( extent.minimumX ) )
+           .arg( formatVrtDouble( resX ) )
+           .arg( formatVrtDouble( extent.maximumY ) )
+           .arg( formatVrtDouble( -resY ) );
 
   for ( int i = 0; i < recipe.inputs.size(); ++i )
   {
@@ -176,12 +203,12 @@ QString buildVirtualRasterXml( const VirtualRasterRecipe &recipe,
     if ( recipe.noDataPolicy == NoDataPolicy::FillValue )
     {
       out << QStringLiteral( "    <NoDataValue>%1</NoDataValue>\n" )
-               .arg( recipe.noDataFillValue );
+               .arg( formatVrtDouble( recipe.noDataFillValue ) );
     }
     else if ( inputNoData.has_value() )
     {
       out << QStringLiteral( "    <NoDataValue>%1</NoDataValue>\n" )
-               .arg( *inputNoData );
+               .arg( formatVrtDouble( *inputNoData ) );
     }
 
     const bool useComplex = ( recipe.noDataPolicy == NoDataPolicy::FillValue ) || inputNoData.has_value();
@@ -198,11 +225,11 @@ QString buildVirtualRasterXml( const VirtualRasterRecipe &recipe,
              .arg( bandRef.bandNumber );
     if ( recipe.noDataPolicy == NoDataPolicy::FillValue )
     {
-      out << QStringLiteral( "      <NODATA>%1</NODATA>\n" ).arg( recipe.noDataFillValue );
+      out << QStringLiteral( "      <NODATA>%1</NODATA>\n" ).arg( formatVrtDouble( recipe.noDataFillValue ) );
     }
     else if ( inputNoData.has_value() )
     {
-      out << QStringLiteral( "      <NODATA>%1</NODATA>\n" ).arg( *inputNoData );
+      out << QStringLiteral( "      <NODATA>%1</NODATA>\n" ).arg( formatVrtDouble( *inputNoData ) );
     }
 
     if ( raster->hasGeoTransform && raster->extent.valid )
@@ -230,16 +257,16 @@ QString buildVirtualRasterXml( const VirtualRasterRecipe &recipe,
 
           out << QStringLiteral(
                    "      <SrcRect xOff=\"%1\" yOff=\"%2\" xSize=\"%3\" ySize=\"%4\"/>\n" )
-                   .arg( srcXMin )
-                   .arg( srcYMin )
-                   .arg( srcXMax - srcXMin )
-                   .arg( srcYMax - srcYMin );
+                   .arg( formatVrtDouble( srcXMin ) )
+                   .arg( formatVrtDouble( srcYMin ) )
+                   .arg( formatVrtDouble( srcXMax - srcXMin ) )
+                   .arg( formatVrtDouble( srcYMax - srcYMin ) );
           out << QStringLiteral(
                    "      <DstRect xOff=\"%1\" yOff=\"%2\" xSize=\"%3\" ySize=\"%4\"/>\n" )
-                   .arg( ( oMinX - extent.minimumX ) / resX )
-                   .arg( ( extent.maximumY - oMaxY ) / resY )
-                   .arg( ( oMaxX - oMinX ) / resX )
-                   .arg( ( oMaxY - oMinY ) / resY );
+                   .arg( formatVrtDouble( ( oMinX - extent.minimumX ) / resX ) )
+                   .arg( formatVrtDouble( ( extent.maximumY - oMaxY ) / resY ) )
+                   .arg( formatVrtDouble( ( oMaxX - oMinX ) / resX ) )
+                   .arg( formatVrtDouble( ( oMaxY - oMinY ) / resY ) );
         }
       }
     }

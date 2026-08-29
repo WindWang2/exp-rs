@@ -1239,15 +1239,23 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
 
   emit assetAboutToUnload( confirmedPlan.assetId() );
 
-  if ( confirmedPlan.cascade() )
+  // DATAPY-7: re-validate leaseImpacts after emit — a slot may have re-entered
+  // and acquired a new lease which is not in liveLeaseImpacts (captured before
+  // emit). A cascade revokes the fresh list (prevents a dangling LeaseRecord on
+  // an erased asset); a non-cascade unload refuses instead, matching the
+  // pre-emit lease-safety rule above.
   {
-    // DATAPY-7: re-validate leaseImpacts after emit — a slot may have re-entered
-    // and acquired a new lease which is not in liveLeaseImpacts (captured before
-    // emit). Revoking the fresh list prevents a dangling LeaseRecord on an erased
-    // asset.
     const QVector<LeaseImpact> freshImpacts = m_impl->leaseImpacts( confirmedPlan.assetId() );
-    for ( const LeaseImpact &impact : freshImpacts )
-      revokeLease( impact.lease );
+    if ( confirmedPlan.cascade() )
+    {
+      for ( const LeaseImpact &impact : freshImpacts )
+        revokeLease( impact.lease );
+    }
+    else if ( !freshImpacts.isEmpty() )
+    {
+      return Result<void>::failure( leasedRefusalDiagnostics( QStringLiteral( "unload" ),
+                                                              freshImpacts ) );
+    }
   }
 
   // Re-locate the record: the cascade dependent removals above erased records,
@@ -1604,10 +1612,17 @@ LeaseRef AssetLease::toRef() const
 
 LeaseOutcome AssetLease::release()
 {
-  if ( !isValid() )
+  if ( !m_control || !m_control->active.load( std::memory_order_acquire ) )
     return LeaseOutcome::Invalid;
 
+  // Snapshot the manager QPointer once: it may be destroyed concurrently
+  // (app shutdown while a foreign-thread lease unwinds). Calling isValid()
+  // and then reading .data() again is a TOCTOU window that would dereference
+  // a null/dangling QObject below.
   DataManager *manager = m_control->manager.data();
+  if ( !manager )
+    return LeaseOutcome::Invalid;
+
   if ( QThread::currentThread() != manager->thread() )
   {
     // Cross-thread release: releaseLease() refuses to mutate the lease
@@ -1800,13 +1815,20 @@ Result<void> DataManager::unloadCollection( CollectionId id, bool cascade )
       return Result<void>::failure( externalDependentDiagnostics );
 
     // Cascade: unload each existing child first, then the collection node.
+    // Emit before locating: a connected slot may re-enter the manager and
+    // mutate the records (mirroring the DATAPY-7 revalidation in unload()).
     for ( const AssetId &childId : children )
     {
+      emit assetAboutToUnload( childId );
       const auto childIt = m_impl->findRecord( childId );
       if ( childIt == m_impl->records.end() )
         continue;
-      emit assetAboutToUnload( childId );
+      // A slot may have acquired a lease during the emit; revoking the fresh
+      // list prevents a dangling LeaseRecord on the erased asset.
+      for ( const LeaseImpact &impact : m_impl->leaseImpacts( childId ) )
+        revokeLease( impact.lease );
       m_impl->records.erase( childIt );
+      pruneChildFromCollections( childId );
       pruneDependencyEdgesOf( childId );
       m_impl->catalogGeneration++;
       emit assetRemoved( childId );

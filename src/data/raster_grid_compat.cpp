@@ -13,19 +13,6 @@ namespace sicnu::data
 namespace
 {
 
-bool isSameCrs( const QString &wktA, const QString &wktB )
-{
-  if ( wktA.trimmed() == wktB.trimmed() )
-    return true;
-  OGRSpatialReference srsA, srsB;
-  if ( srsA.importFromWkt( wktA.toUtf8().constData() ) == OGRERR_NONE &&
-       srsB.importFromWkt( wktB.toUtf8().constData() ) == OGRERR_NONE )
-  {
-    return srsA.IsSame( &srsB ) != 0;
-  }
-  return false;
-}
-
 /// Relative tolerance for grid (pixel size / extent) comparison, mirroring
 /// virtual_raster_preflight's kGridTolerance.
 constexpr double kGridTolerance = 1e-9;
@@ -74,6 +61,19 @@ QString formatExtent( const SpatialExtent &e )
 }
 
 } // namespace
+
+bool isSameCrs( const QString &wktA, const QString &wktB )
+{
+  if ( wktA.trimmed() == wktB.trimmed() )
+    return true;
+  OGRSpatialReference srsA, srsB;
+  if ( srsA.importFromWkt( wktA.toUtf8().constData() ) == OGRERR_NONE &&
+       srsB.importFromWkt( wktB.toUtf8().constData() ) == OGRERR_NONE )
+  {
+    return srsA.IsSame( &srsB ) != 0;
+  }
+  return false;
+}
 
 double RasterGrid::pixelSizeX() const
 {

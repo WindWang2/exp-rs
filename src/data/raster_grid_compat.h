@@ -86,4 +86,9 @@ GridCompatReport compareGrids( const RasterGrid &a, const RasterGrid &b );
 GridCompatReport compareStructures( const RasterStructure &a,
                                     const RasterStructure &b );
 
+/// Semantic CRS equality: true when the WKTs are lexically identical after
+/// trimming, or when GDAL reports the two spatial references as the same
+/// (equivalent WKT1/WKT2 encodings of one CRS compare equal).
+bool isSameCrs( const QString &wktA, const QString &wktB );
+
 } // namespace sicnu::data
