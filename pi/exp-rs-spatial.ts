@@ -36,6 +36,23 @@ type Pending = {
   timer: NodeJS.Timeout;
 };
 
+/** Live bridges, so the (single) process-exit hook tears all of them down.
+ * Extension reload used to leak the previous child for the whole session
+ * because start() re-registered `process.on("exit")` per spawn and Pi never
+ * invoked an unload hook (#645). */
+const activeBridges = new Set<McpBridge>();
+let exitHookInstalled = false;
+function installExitHook(): void {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  // During exit, timers never fire, so stop()'s SIGKILL escalation cannot
+  // run. Best-effort: SIGTERM + destroy stdin - the server exits on stdin
+  // EOF, and the OS reaps the child when the parent dies.
+  process.on("exit", () => {
+    for (const bridge of activeBridges) bridge.stop();
+  });
+}
+
 /** Minimal newline-delimited JSON-RPC client for the exp-rs MCP server. */
 class McpBridge {
   private child: ChildProcess | null = null;
@@ -47,7 +64,10 @@ class McpBridge {
   private stopped = false;
   private stderrTail = "";
 
-  constructor(private readonly bin: string, private readonly extraArgs: string[]) {}
+  constructor(private readonly bin: string, private readonly extraArgs: string[]) {
+    installExitHook();
+    activeBridges.add(this);
+  }
 
   get error(): string | null {
     return this.startError;
@@ -101,7 +121,9 @@ class McpBridge {
       this.pending.clear();
     });
     this.child.stdin!.on("error", () => {});
-    process.on("exit", () => this.stop());
+    // Process-exit teardown is installed once at module level (see
+    // installExitHook) - registering it here stacked a listener per
+    // (re)spawn and MaxListeners-warned after ~10 respawns (#645).
 
     // Startup deadline: a child that spawns but hangs during Qt/QGIS init
     // must not stall extension load for the full 10-minute request timeout.
@@ -190,7 +212,7 @@ class McpBridge {
     }
   }
 
-  request(method: string, params: any): Promise<any> {
+  request(method: string, params: any, signal?: AbortSignal): Promise<any> {
     return new Promise((resolve, reject) => {
       if ((!this.child || this.exited) && this.stopped) {
         reject(new Error("exp-rs MCP bridge was stopped"));
@@ -200,7 +222,7 @@ class McpBridge {
         // Lazy respawn after a crash: without this every tool failed
         // permanently until the Pi process restarted (#623).
         this.start()
-          .then(() => this.request(method, params).then(resolve, reject))
+          .then(() => this.request(method, params, signal).then(resolve, reject))
           .catch((err) =>
             reject(
               new Error(
@@ -211,16 +233,37 @@ class McpBridge {
         return;
       }
       const id = this.nextId++;
+      const cleanup = () => {
+        if (signal) signal.removeEventListener("abort", onAbort);
+      };
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        cleanup();
         reject(new Error(`MCP request timed out: ${method}`));
       }, REQUEST_TIMEOUT_MS);
+      // Abort must also stop SERVER-side work: fire notifications/cancelled
+      // for this rpc id so the server cancels the task behind the call -
+      // without it an aborted long execution kept burning CPU (#623/#645).
+      const onAbort = () => {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        this.notify("notifications/cancelled", { requestId: id });
+        reject(new Error("Aborted during exp-rs tool call"));
+      };
+      if (signal) {
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
       this.pending.set(id, { resolve, reject, timer });
       const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params });
       this.child.stdin!.write(payload + "\n", (err) => {
         if (err) {
           this.pending.delete(id);
           clearTimeout(timer);
+          cleanup();
           reject(new Error(`MCP write failed: ${err.message}`));
         }
       });
@@ -245,10 +288,19 @@ class McpBridge {
     if (child) {
       // Grace ladder: SIGTERM lets the Qt app flush and tear down; escalate
       // to SIGKILL after a grace period so stop() cannot leak the child.
+      // Destroying stdin first makes the server exit on EOF even when this
+      // runs inside the process-exit hook, where timers (SIGKILL escalation)
+      // never fire (#645).
+      try {
+        child.stdin?.destroy();
+      } catch {
+        // already gone
+      }
       child.kill();
       const killer = setTimeout(() => child.kill("SIGKILL"), 5000);
       child.once("exit", () => clearTimeout(killer));
     }
+    activeBridges.delete(this);
     this.child = null;
   }
 
@@ -258,20 +310,17 @@ class McpBridge {
   }
 }
 
-/** Races a bridge request against an AbortSignal so long calls stay cancellable. */
+/** Runs a bridge request, cancellable via AbortSignal: on abort the local
+ * promise rejects AND the server is told to cancel the work behind the rpc
+ * id (notifications/cancelled) - previously the race was local-only and the
+ * aborted execution kept running server-side (#645). */
 async function requestOrAbort(
   bridge: McpBridge,
   method: string,
   params: any,
   signal?: AbortSignal,
 ): Promise<any> {
-  if (!signal) return bridge.request(method, params);
-  const aborted = new Promise<never>((_, reject) => {
-    const onAbort = () => reject(new Error("Aborted during exp-rs tool call"));
-    if (signal.aborted) onAbort();
-    else signal.addEventListener("abort", onAbort, { once: true });
-  });
-  return Promise.race([bridge.request(method, params), aborted]);
+  return bridge.request(method, params, signal);
 }
 
 function truncateTail(text: string, max = MAX_RESULT_CHARS): string {
@@ -424,7 +473,16 @@ export default async function (pi: ExtensionAPI) {
           );
           const text: string =
             result?.content?.map((c: any) => c.text ?? "").join("\n") ?? "(no content)";
-          if (result?.isError) throw new Error(truncateTail(text));
+          if (result?.isError) {
+            const err = new Error(truncateTail(text));
+            // Preserve the structured taxonomy (INVALID_PARAMETER,
+            // PATH_OUTSIDE_WORKSPACE, ...) so Pi can classify instead of
+            // parsing prose - protocol errors already carried code/data;
+            // tool execution errors dropped them (#645).
+            (err as any).errorCode = result?.errorCode;
+            (err as any).errorCategory = result?.errorCategory;
+            throw err;
+          }
           return { content: [{ type: "text" as const, text: truncateTail(text) }], details: {} };
         },
       });

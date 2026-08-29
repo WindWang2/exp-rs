@@ -566,7 +566,13 @@ void McpServer::handleRequest(const QVariantMap &request)
         // (e.g. user abort). Best-effort: when the cancelled request id maps
         // to a known tools/call execution, cancel its task so server-side
         // work actually stops.
-        const QString cancelledRpcId = request.value(QStringLiteral("requestId")).toString();
+        // MCP spec: notifications/cancelled carries { requestId } in params.
+        // The params form is authoritative; the top-level form is accepted as
+        // a defensive fallback (pre-spec clients, #645).
+        const QVariantMap cancelledParams = request.value(QStringLiteral("params")).toMap();
+        QString cancelledRpcId = cancelledParams.value(QStringLiteral("requestId")).toString();
+        if (cancelledRpcId.isEmpty())
+            cancelledRpcId = request.value(QStringLiteral("requestId")).toString();
         QVariantMap cancelledInfo = request.value(QStringLiteral("requestInfo")).toMap();
         Q_UNUSED(cancelledInfo)
         if ( !cancelledRpcId.isEmpty() )
