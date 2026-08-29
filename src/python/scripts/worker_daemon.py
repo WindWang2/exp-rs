@@ -38,7 +38,7 @@ def _mount_shm_array(key, width, height, bands, dtype_code):
     return shm, arr
 
 
-_pending_proxy_buf = ""
+_pending_proxy_buf = b""  # raw carryover bytes (#649) — never decoded with errors="replace"
 _pending_proxy_lines = []  # type: list[str]
 
 class SicnuMapCanvasProxy:
@@ -58,22 +58,33 @@ class SicnuMapCanvasProxy:
             "id": req_id
         }
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
+        # Carryover is raw bytes: the previous str round-trip replaced a
+        # multi-byte UTF-8 sequence split at the tail with U+FFFD, silently
+        # corrupting the interleaved host request (#649).
         buf = _pending_proxy_buf
         buf_bytes = b""
+        # Scan the queued lines ONCE per wait cycle, then fall through to
+        # recv(). The previous pop+append rotation spun forever (never
+        # reaching recv) on a stale line whose id never matched (#649).
+        drained_queue = False
         while True:
-            # Drain any queued non-matching lines from previous proxy calls first
-            if _pending_proxy_lines:
-                line = _pending_proxy_lines.pop(0)
-                try:
-                    obj = json.loads(line)
-                except Exception:
-                    continue
-                if obj.get("id") == req_id:
-                    return obj.get("result", {})
-                else:
-                    # Not our response — keep for main dispatch loop (re-queue)
-                    _pending_proxy_lines.append(line)
-                    continue
+            if _pending_proxy_lines and not drained_queue:
+                remaining = []
+                while _pending_proxy_lines:
+                    line = _pending_proxy_lines.pop(0)
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+                    # DATAPY-11: a host->daemon request has "method" and no
+                    # result/error - never consume it as a proxy response.
+                    if obj.get("id") == req_id and ("result" in obj or "error" in obj):
+                        _pending_proxy_buf = buf + buf_bytes
+                        return obj.get("result", {})
+                    remaining.append(line)
+                _pending_proxy_lines.extend(remaining)
+                drained_queue = True
+                continue
             data = self._s.recv(4096)
             if not data:
                 break
@@ -93,11 +104,11 @@ class SicnuMapCanvasProxy:
                 # DATAPY-11: correlate on id; host→daemon requests have "method"
                 # and must not be consumed as proxy response.
                 if obj.get("id") == req_id and ("result" in obj or "error" in obj):
-                    _pending_proxy_buf = buf + buf_bytes.decode("utf-8", errors="replace")
+                    _pending_proxy_buf = buf + buf_bytes
                     return obj.get("result", {})
                 # Non-matching line: buffer for main loop to dispatch
                 _pending_proxy_lines.append(line)
-        _pending_proxy_buf = buf + buf_bytes.decode("utf-8", errors="replace")
+        _pending_proxy_buf = buf + buf_bytes
         return {}
 
     def extent(self):
@@ -161,18 +172,23 @@ class SicnuPythonIface:
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
         buf = _pending_proxy_buf
         buf_bytes = b""
+        drained_queue = False
         while True:
-            if _pending_proxy_lines:
-                line = _pending_proxy_lines.pop(0)
-                try:
-                    obj = json.loads(line)
-                except Exception:
-                    continue
-                if obj.get("id") == req_id:
-                    return obj.get("result", {})
-                else:
-                    _pending_proxy_lines.append(line)
-                    continue
+            if _pending_proxy_lines and not drained_queue:
+                remaining = []
+                while _pending_proxy_lines:
+                    line = _pending_proxy_lines.pop(0)
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+                    if obj.get("id") == req_id and ("result" in obj or "error" in obj):
+                        _pending_proxy_buf = buf + buf_bytes
+                        return obj.get("result", {})
+                    remaining.append(line)
+                _pending_proxy_lines.extend(remaining)
+                drained_queue = True
+                continue
             data = self._s.recv(4096)
             if not data:
                 break
@@ -190,10 +206,10 @@ class SicnuPythonIface:
                 except Exception:
                     continue
                 if obj.get("id") == req_id and ("result" in obj or "error" in obj):
-                    _pending_proxy_buf = buf + buf_bytes.decode("utf-8", errors="replace")
+                    _pending_proxy_buf = buf + buf_bytes
                     return obj.get("result", {})
                 _pending_proxy_lines.append(line)
-        _pending_proxy_buf = buf + buf_bytes.decode("utf-8", errors="replace")
+        _pending_proxy_buf = buf + buf_bytes
         return None
 
     def mapCanvas(self):
