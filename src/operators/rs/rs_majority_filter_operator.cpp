@@ -141,7 +141,9 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
 
     // Output dtype: labels pass through unchanged outside the filter, so the
     // value range equals the input's; scan once to apply the ADR-0019-S4
-    // policy the save path used (Byte/UInt16/Int32).
+    // policy the save path used (Byte/UInt16/Int32). Labels are read through
+    // a float window (exact for Byte/UInt16; Int32 beyond 2^24 is pathological
+    // for class maps and would lose precision — stated boundary).
     double inMin = std::numeric_limits<double>::max();
     double inMax = std::numeric_limits<double>::lowest();
     {
@@ -183,6 +185,9 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
         output.setBandColorTable(1, colorTable);
     }
 
+    // Any failure/cancel must not leave a partial raster at the output path
+    // (#647 streaming-output contract).
+    try {
     const int totalBlocks = (height + blockRows - 1) / blockRows;
     int blockIndex = 0;
     bool ok = true;
@@ -283,11 +288,19 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
     context.throwIfCancelled();
     context.reportProgress(0.8, "Saving majority-filtered raster");
 
-    QString closeError;
-    if (!ok || !output.closeWithError(&closeError)) {
+    if (!ok) {
+        output.abandon();
         throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed to save majority-filtered raster: "
-                                  + (ok ? closeError.toStdString() : outputPath));
+                              "Failed to save majority-filtered raster: " + outputPath);
+    }
+    QString closeError;
+    if (!output.closeWithError(&closeError)) {
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              "Failed to save majority-filtered raster: " + closeError.toStdString());
+    }
+    } catch (...) {
+        output.abandon();
+        throw;
     }
 
     // Preserve sidecar JSON metadata if present

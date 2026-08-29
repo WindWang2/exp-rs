@@ -700,8 +700,7 @@ TEST_CASE("TaskCenter - execution cache skips identical pipeline steps end to en
         context.logInfo("a executed");
         QFile f(aOut);
         REQUIRE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
-        f.write("a-payload
-");
+        f.write("a-payload\n");
         f.close();
         Json::Value result(Json::objectValue);
         result["output"] = aOut.toStdString();
@@ -712,8 +711,7 @@ TEST_CASE("TaskCenter - execution cache skips identical pipeline steps end to en
         context.logInfo("b executed");
         QFile f(bOut);
         REQUIRE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
-        f.write("b-payload
-");
+        f.write("b-payload\n");
         f.close();
         Json::Value result(Json::objectValue);
         result["output"] = bOut.toStdString();
@@ -835,8 +833,7 @@ TEST_CASE("TaskCenter - completed pipeline checkpoints steps and sweeps intermed
         context.logInfo("mid executed");
         QFile f(intermediate);
         REQUIRE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
-        f.write("mid
-");
+        f.write("mid\n");
         Json::Value result(Json::objectValue);
         result["output"] = intermediate.toStdString();
         return result;
@@ -845,8 +842,7 @@ TEST_CASE("TaskCenter - completed pipeline checkpoints steps and sweeps intermed
         context.logInfo("leaf executed");
         QFile f(finalOut);
         REQUIRE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
-        f.write("leaf
-");
+        f.write("leaf\n");
         Json::Value result(Json::objectValue);
         result["output"] = finalOut.toStdString();
         return result;

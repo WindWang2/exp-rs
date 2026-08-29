@@ -166,6 +166,11 @@ public:
   /// Number of cached output paths (diagnostics / tests).
   int pathSize() const;
 
+  /// Every currently cached output path (no particular order). Consumers
+  /// (e.g. ArtifactGC in TaskCenter) treat these as protected files: a
+  /// cached path is the artifact a future identical execution reuses.
+  QStringList cachedOutputPaths() const;
+
   /// Clear all entries (test isolation / cache reset).
   void clear();
 

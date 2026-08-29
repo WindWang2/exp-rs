@@ -323,6 +323,9 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         return true;
     };
 
+    // Any failure/cancel after this point must not leave a partial raster at
+    // the output path (#647 streaming-output contract).
+    try {
     context.reportProgress(0.1, "Reading input bands");
 
     bool ok = false;
@@ -408,6 +411,10 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         if (postDs.isValid()) {
             validateBand(nirBand, "NIR (pre-fire)");
             validateBand(swir2Band, "SWIR2 (pre-fire)");
+            if (postNirBand < 1 || postNirBand > postDs.bandCount()
+                    || postSwir2Band < 1 || postSwir2Band > postDs.bandCount()) {
+                throw RSOperatorError(ErrorCode::InvalidParameter, "Post-fire band numbers out of range");
+            }
         } else {
             validateBand(nirBand, "NIR (pre)");
             validateBand(swir2Band, "SWIR2 (pre)");
@@ -503,16 +510,20 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                           });
     }
 
+    context.throwIfCancelled();
     if (!ok) {
+        output.abandon();
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Spectral index computation failed");
     }
-
-    context.throwIfCancelled();
     QString closeError;
     if (!output.closeWithError(&closeError)) {
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to write output raster: " + closeError.toStdString());
+    }
+    } catch (...) {
+        output.abandon();
+        throw;
     }
 
     ds.close();

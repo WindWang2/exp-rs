@@ -296,20 +296,26 @@ TEST_CASE( "setMaxWorkers honors overrides within a safe window", "[job]" )
 
 TEST_CASE( "default pool size follows hardware minus one UI core", "[job]" )
 {
-  // Pure policy: one worker per core minus the UI-reserved core (ADR 0002),
-  // floored at kMinWorkers.
-  const unsigned hw = std::thread::hardware_concurrency();
-  const int expected = std::max( JobEngine::kMinWorkers,
-                                 hw > 0 ? static_cast<int>( hw ) - 1
-                                        : JobEngine::kMinWorkers );
-  REQUIRE( JobEngine::defaultWorkerCount() == expected );
+  // Pure policy (#661): one worker per core minus the UI-reserved core
+  // (ADR 0002), floored at kMinWorkers; an unknown core count (0) degrades
+  // to the floor. Exercised through the injectable overload so the property
+  // is pinned without depending on the host's core count.
+  REQUIRE( JobEngine::defaultWorkerCount( 8 ) == 7 );
+  REQUIRE( JobEngine::defaultWorkerCount( 3 ) == 2 );
+  REQUIRE( JobEngine::defaultWorkerCount( 1 ) == 2 );
+  REQUIRE( JobEngine::defaultWorkerCount( 0 ) == 2 );
 
-  // shutdown() restores the default pool size after an override.
+  const unsigned hw = std::thread::hardware_concurrency();
+  if ( hw > 0 )
+    REQUIRE( JobEngine::defaultWorkerCount() == JobEngine::defaultWorkerCount( hw ) );
+
+  // shutdownForTests() restores the default pool size after an override
+  // (plain shutdown() leaves the pool size alone: it only joins workers).
   EngineGuard guard;
   auto &eng = guard.engine();
   eng.setMaxWorkers( 8 );
   REQUIRE( eng.maxWorkers() == 8 );
-  eng.shutdown();
+  eng.shutdownForTests();
   REQUIRE( eng.maxWorkers() == JobEngine::defaultWorkerCount() );
 }
 

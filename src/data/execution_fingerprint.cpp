@@ -393,6 +393,16 @@ int ExecutionResultCache::pathSize() const
   return m_pathEntries.size();
 }
 
+QStringList ExecutionResultCache::cachedOutputPaths() const
+{
+  std::lock_guard<std::recursive_mutex> locker( m_mutex );
+  QStringList paths;
+  paths.reserve( m_pathEntries.size() );
+  for ( auto it = m_pathEntries.begin(); it != m_pathEntries.end(); ++it )
+    paths.append( it->path );
+  return paths;
+}
+
 void ExecutionResultCache::clear()
 {
   std::lock_guard<std::recursive_mutex> locker( m_mutex );

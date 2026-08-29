@@ -281,6 +281,9 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
     const int totalBlocks = (height + blockRows - 1) / blockRows;
     int blockIndex = 0;
     bool ok = true;
+    // Any failure/cancel after this point must not leave a partial raster at
+    // the output path (#647 streaming-output contract).
+    try {
     for (int y0 = 0; y0 < height && ok; y0 += blockRows, ++blockIndex) {
         context.throwIfCancelled();
         const int rows = std::min(blockRows, height - y0);
@@ -306,18 +309,26 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
             masked += (mask[i] != 0) ? 1 : 0;
         const GdalBlockStream::Tile tile{0, y0, width, rows, 0, width, rows,
                                          blockIndex, totalBlocks};
-        ok = output.writeTile(1, tile, mask.data());
+        ok = output.writeTileRaw(1, tile, mask.data(), GDT_Byte);
         context.reportProgress(0.1 + 0.6 * (static_cast<double>(blockIndex + 1) / totalBlocks),
                                "Computing QA mask");
     }
 
     context.reportProgress(0.7, "Writing mask raster");
 
-    QString closeError;
-    if (!ok || !output.closeWithError(&closeError)) {
+    if (!ok) {
+        output.abandon();
         throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed to write mask raster: "
-                                  + (ok ? closeError.toStdString() : outputPath));
+                              "Failed to write mask raster: " + outputPath);
+    }
+    QString closeError;
+    if (!output.closeWithError(&closeError)) {
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              "Failed to write mask raster: " + closeError.toStdString());
+    }
+    } catch (...) {
+        output.abandon();
+        throw;
     }
 
     context.reportProgress(1.0, "QA mask complete");

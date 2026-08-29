@@ -64,6 +64,9 @@ class JobEngine
     /// the core reserved for UI (ADR 0002), floored at kMinWorkers.
     /// hardware_concurrency() == 0 (unknown) degrades to kMinWorkers.
     static int defaultWorkerCount();
+    /// Injectable core-count overload: the pure policy so tests can pin
+    /// "cap 8 -> pool 7" without depending on the host.
+    static int defaultWorkerCount( unsigned hardwareConcurrency );
 
     /// Lower bound for pool sizes: keeps a worker from starving the very
     /// pool it runs on and preserves the historical floor.

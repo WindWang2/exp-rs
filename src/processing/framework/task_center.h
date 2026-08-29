@@ -398,7 +398,7 @@ private:
     /// cache-hit steps and steps without a fingerprint.
     void storePipelineStepOutputLocked( long pipelineId, long taskId );
     /// Task id for a pipeline step id, or -1. Requires m_mutex.
-    long m_taskForStepLocked( long pipelineId, const std::string &stepId ) const;
+    long taskForStepLocked( long pipelineId, const std::string &stepId ) const;
 };
 
 } // namespace sicnu

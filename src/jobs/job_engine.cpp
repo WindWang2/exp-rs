@@ -35,14 +35,20 @@ JobEngine &JobEngine::instance()
   return e;
 }
 
-int JobEngine::defaultWorkerCount()
+int JobEngine::defaultWorkerCount( unsigned hardwareConcurrency )
 {
   // One worker per core minus the UI-reserved core (ADR 0002), floored at
-  // kMinWorkers. hardware_concurrency() == 0 means "unknown" — degrade to
+  // kMinWorkers. hardwareConcurrency == 0 means "unknown" — degrade to
   // the floor instead of an empty pool.
-  const unsigned hw = std::thread::hardware_concurrency();
-  const int cores = hw > 0 ? static_cast<int>( hw ) : kMinWorkers;
+  const int cores = hardwareConcurrency > 0 ? static_cast<int>( hardwareConcurrency )
+                                            : kMinWorkers;
   return std::max( kMinWorkers, cores - 1 );
+}
+
+int JobEngine::defaultWorkerCount()
+{
+  const unsigned hw = std::thread::hardware_concurrency();
+  return defaultWorkerCount( hw );
 }
 
 JobEngine::JobEngine() = default;

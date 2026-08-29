@@ -207,8 +207,11 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
     const int blockRows = std::max(1, std::min(256, height));
     const size_t blockSize = static_cast<size_t>(width) * blockRows;
 
-    // Pass 1: recoded value range. Input is read through the same GDT_Int32
-    // conversion loadLabelRaster used, so the mapped values match exactly.
+    // Pass 1: recoded value range. Input values are read through a float
+    // window (GdalDatasetWrapper's conversion read): exact for Byte/UInt16
+    // label rasters; Int32 labels beyond the float mantissa (> 2^24) would
+    // lose precision — pathological for class maps, noted here so the
+    // boundary is explicit.
     double outMin = std::numeric_limits<double>::max();
     double outMax = std::numeric_limits<double>::lowest();
     {
@@ -259,7 +262,9 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
         output.setBandColorTable(1, colorTable); // palette only for Byte output
     }
 
-    // Pass 2: stream the mapping and write the output blocks.
+    // Pass 2: stream the mapping and write the output blocks. Any failure or
+    // cancel must not leave a partial raster at the output path (#647).
+    try {
     const int totalBlocks = (height + blockRows - 1) / blockRows;
     int blockIndex = 0;
     bool ok = true;
@@ -301,11 +306,19 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
         }
     }
 
-    QString closeError;
-    if (!ok || !output.closeWithError(&closeError)) {
+    if (!ok) {
+        output.abandon();
         throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed to save recoded raster: "
-                                  + (ok ? closeError.toStdString() : outputPath));
+                              "Failed to save recoded raster: " + outputPath);
+    }
+    QString closeError;
+    if (!output.closeWithError(&closeError)) {
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              "Failed to save recoded raster: " + closeError.toStdString());
+    }
+    } catch (...) {
+        output.abandon();
+        throw;
     }
 
     // Update and preserve sidecar JSON metadata if present

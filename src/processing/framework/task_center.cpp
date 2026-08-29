@@ -791,6 +791,16 @@ void TaskCenter::attachWorkflowRunLocked( long pipelineId,
         {
             plan.fingerprint = fp.toStdString();
             stepFingerprints[step->id] = plan.fingerprint;
+            // Execution-cache consultation (#667): an identical prior step
+            // (same operator, canonical params, upstream derivation revisions)
+            // is served pre-completed by submitPipeline. lookupOutputPath
+            // returns nullopt when the cache is disabled or the cached file
+            // no longer exists, so a disabled cache degrades to re-execution.
+            if ( auto cached = sicnu::data::ExecutionResultCache::instance().lookupOutputPath( fp ) )
+            {
+                plan.cacheHit = true;
+                plan.cachedOutputPath = cached->toStdString();
+            }
         }
 
         plans.push_back( std::move( plan ) );
@@ -823,7 +833,7 @@ void TaskCenter::mirrorStepToRunLocked( long pipelineId, const std::string &step
             QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) );
         // Feed ArtifactGC workspace gating and checkpoint consumers: the plan
         // must know the produced file. Mirrors the task's detected output.
-        const long mirrorTaskId = m_taskForStepLocked( pipelineId, stepId );
+        const long mirrorTaskId = taskForStepLocked( pipelineId, stepId );
         if ( mirrorTaskId > 0 && m_tasks.contains( mirrorTaskId ) )
         {
             const AlgorithmTaskInfo &task = m_tasks[mirrorTaskId];
@@ -869,11 +879,25 @@ void TaskCenter::finalizeWorkflowRunLocked( long pipelineId, bool failed,
     // completed run. Gating lives in ArtifactGC (Completed run, completed
     // non-cache-hit non-leaf steps, inside the retained-outputs workspace);
     // failures are logged, never fatal — GC must not fail the pipeline.
+    // Files whose fingerprints are still live in the execution path cache
+    // (#667) are protected: a future identical submission reuses them.
+    // (When the cache is disabled nothing is stored, so nothing is protected
+    // and the sweep behaves exactly like sweepRun.)
     if ( run.state() == sicnu::workflow::WorkflowRunState::Completed )
     {
-        const sicnu::workflow::GCSweepReport report =
-            sicnu::workflow::ArtifactGC().sweepRun( run, /*retainFinalOutputs=*/true );
-        for ( const QString &error : report.errors )
+        const QStringList reapable =
+            sicnu::workflow::ArtifactGC().inspectReapable( run, /*retainFinalOutputs=*/true );
+        const QStringList protectedPaths =
+            sicnu::data::ExecutionResultCache::instance().cachedOutputPaths();
+        QStringList toReap;
+        for ( const QString &path : reapable )
+        {
+            if ( !protectedPaths.contains( path ) )
+                toReap.append( path );
+        }
+        QStringList errors;
+        sicnu::workflow::ArtifactGC::removeFilesWithSidecars( toReap, &errors );
+        for ( const QString &error : errors )
             qWarning( "ArtifactGC: %s", error.toUtf8().constData() );
     }
 }
@@ -898,7 +922,7 @@ void TaskCenter::storePipelineStepOutputLocked( long pipelineId, long taskId )
     sicnu::data::ExecutionResultCache::instance().storeOutputPath( fp, out );
 }
 
-long TaskCenter::m_taskForStepLocked( long pipelineId, const std::string &stepId ) const
+long TaskCenter::taskForStepLocked( long pipelineId, const std::string &stepId ) const
 {
     const auto pipeIt = m_pipelines.find( pipelineId );
     if ( pipeIt == m_pipelines.end() )
