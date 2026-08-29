@@ -62,9 +62,12 @@ PythonScriptEditor::~PythonScriptEditor()
             m_runnerThread->setParent(nullptr);
             QObject::connect(m_runnerThread, &QThread::finished, m_runnerThread, &QObject::deleteLater);
             if (m_runner) {
-                if (QCoreApplication::instance())
-                    m_runner->moveToThread(QCoreApplication::instance()->thread());
-                m_runner->deleteLater();
+                // #650: the worker thread may still be inside the runner's
+                // slot (that is exactly why the wait timed out) -
+                // moveToThread() on an object executing in another thread is
+                // undefined behavior. The runner is unparented, so retire it
+                // on its own thread via the finished signal instead.
+                QObject::connect(m_runnerThread, &QThread::finished, m_runner, &QObject::deleteLater);
                 m_runner = nullptr;
             }
             m_runnerThread = nullptr;

@@ -5,6 +5,7 @@
 // executor seam (ADR 0020 decision 3); production delegates to Task Center.
 #pragma once
 
+#include <QSemaphore>
 #include <QObject>
 
 #include <atomic>
@@ -204,6 +205,9 @@ class RsGeoreferencingSession : public QObject
     /// True while the JobEngine worker is inside mPendingWarpTask->run();
     /// the destructor bounded-waits on it instead of hard-deleting (#626).
     std::atomic<bool> mWarpExecutorActive{ false };
+    /// Released when the executor leaves the warp job (#650): the destructor
+    /// blocks on this instead of a 500x10 ms GUI-thread spin.
+    QSemaphore mWarpExecutorDone{ 0 };
     RsGeorefWarpSnapshot mPendingSnap;
 
     // WorkflowRuntime mirror (ADR 0028)

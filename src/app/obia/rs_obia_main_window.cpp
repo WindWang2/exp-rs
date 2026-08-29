@@ -107,7 +107,16 @@ RsObiaMainWindow::RsObiaMainWindow( QWidget *parent )
              this, &RsObiaMainWindow::onObiaTaskUpdated );
 }
 
-RsObiaMainWindow::~RsObiaMainWindow() = default;
+RsObiaMainWindow::~RsObiaMainWindow()
+{
+  // #650: the app-global WaitCursor override installed by the task launchers
+  // was only restored from finishPendingUi() (via the taskUpdated signal).
+  // Closing this non-modal window mid-run dropped that connection and left
+  // the WaitCursor overridden for the whole application session while the
+  // task silently ran to completion. cancelActiveTask() cancels the task and
+  // restores the cursor before member teardown destroys the progress dialog.
+  cancelActiveTask();
+}
 
 // ---------------------------------------------------------------------------
 // UI setup

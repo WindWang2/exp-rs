@@ -513,9 +513,15 @@ int main(int argc, char *argv[])
     // Python embedding disabled
     // QgisPython::instance().finalize();
 
-    window.reset();
+    // #650: cancel and join the execution machinery BEFORE the widget tree
+    // goes away. Destroying the window first freed dialog-owned state
+    // (e.g. QgsProcessingFeedback) that JobEngine workers still dereferenced
+    // from progress callbacks - a teardown use-after-free on long runs
+    // (#177). shutdown() cancels in-flight tasks and joins the workers, so
+    // nothing executes against GUI-owned objects during window destruction.
     sicnu::TaskCenter::instance().shutdown();
     sicnu::jobs::JobEngine::instance().shutdown();
+    window.reset();
     delete logFile;
     delete app;
     return result;

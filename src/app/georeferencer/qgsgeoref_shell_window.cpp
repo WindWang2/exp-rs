@@ -122,6 +122,10 @@ QgsGeorefShellWindow::QgsGeorefShellWindow( QgisInterface *iface, QWidget *paren
 
 QgsGeorefShellWindow::~QgsGeorefShellWindow()
 {
+  // #650: releases the raw, unparented mPendingGcpPick point object - the
+  // destructor used to leak it whenever the window closed while a GCP pick
+  // was armed.
+  clearPendingGcpPick();
   qDeleteAll( mDataPoints );
   mDataPoints.clear();
   qDeleteAll( mGcpViewPoints );

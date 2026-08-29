@@ -55,9 +55,11 @@ RsGeoreferencingSession::~RsGeoreferencingSession()
     // prefer a leak over a crash.
     if ( mWarpExecutorActive.load() )
     {
-      for ( int i = 0; i < 500 && mWarpExecutorActive.load( std::memory_order_acquire ); ++i )
-        QThread::msleep( 10 );
-      if ( mWarpExecutorActive.load( std::memory_order_acquire ) )
+      // #650: wait on the executor's completion semaphore instead of spinning
+      // the GUI thread with 500x10 ms sleeps. The semaphore is released when
+      // the job's ActiveGuard unwinds; a pathological timeout still prefers a
+      // leak over a crash (#626).
+      if ( !mWarpExecutorDone.tryAcquire( 1, 5000 ) )
         QgsLogger::warning( "Georeferencing warp did not stop within 5s of close; "
                             "deferring its cleanup" );
     }
@@ -427,8 +429,18 @@ long RsGeoreferencingSession::startWarpTask( const RsGeorefWarpSnapshot &snap )
     struct ActiveGuard
     {
       std::atomic<bool> &flag;
-      ~ActiveGuard() { flag.store( false, std::memory_order_release ); }
-    } activeGuard{ mWarpExecutorActive };
+      QSemaphore &done;
+      ~ActiveGuard()
+      {
+        flag.store( false, std::memory_order_release );
+        done.release();
+      }
+    } activeGuard{ mWarpExecutorActive, mWarpExecutorDone };
+    // Drain stale counts so a retry's completion signal cannot be satisfied
+    // by a previous run's release.
+    while ( mWarpExecutorDone.tryAcquire() )
+    {
+    }
     mWarpExecutorActive.store( true, std::memory_order_release );
     ctx.logInfo( "Georef warp" );
     ctx.reportProgress( 0.0, "Warping" );

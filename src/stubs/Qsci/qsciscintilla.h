@@ -85,19 +85,84 @@ public:
     virtual int length() const { return m_text.length(); }
     virtual int lines() const { return m_text.isEmpty() ? 0 : m_text.count(QLatin1Char('\n')) + 1; }
     virtual int lineLength(int line) const { return text(line).length(); }
-    virtual void insertAt(const QString &s, int, int) { m_text += s; emit textChanged(); }
-    virtual void remove(int, int) {}
-    virtual void replaceSelectedText(const QString &s) { m_text = s; emit textChanged(); }
-    virtual bool hasSelectedText() const { return false; }
-    virtual QString selectedText() const { return {}; }
+    // Position-accurate editing (#651): the stub models text as a QString and
+    // keeps a linear selection range over it, implementing the contracts the
+    // live QgsCodeEditor features rely on (toggleComment's
+    // setSelection + removeSelectedText, insertText's replaceSelectedText and
+    // insertAt). Lines and columns are 0-based, matching the QScintilla
+    // line/index convention used at those call sites. The previous stub
+    // appended at the end / no-op'd / clobbered the buffer, so
+    // ToggleComment corrupted editor content.
+    virtual void insertAt(const QString &s, int line, int index)
+    {
+        const int pos = positionFromLineIndex( line, index );
+        if ( pos < 0 )
+            m_text += s; // out-of-range target: keep the legacy append fallback
+        else
+            m_text.insert( pos, s );
+        emit textChanged();
+    }
+    virtual void remove(int pos, int length)
+    {
+        if ( pos < 0 || length <= 0 || pos >= m_text.length() )
+            return;
+        m_text.remove( pos, qMin( length, m_text.length() - pos ) );
+        emit textChanged();
+    }
+    virtual void replaceSelectedText(const QString &s)
+    {
+        if ( !hasSelectedText() )
+            return;
+        m_text.replace( m_selStart, m_selEnd - m_selStart, s );
+        clearSelections();
+        emit textChanged();
+    }
+    virtual bool hasSelectedText() const
+    {
+        return m_selStart < m_selEnd && m_selEnd <= m_text.length();
+    }
+    virtual QString selectedText() const
+    {
+        if ( !hasSelectedText() )
+            return {};
+        return m_text.mid( m_selStart, m_selEnd - m_selStart );
+    }
 
     // Selection / cursor
-    virtual void getCursorPosition(int *, int *) const {}
+    virtual void getCursorPosition(int *line, int *index) const
+    {
+        // Always defined: the previous stub left caller outputs uninitialized.
+        if ( line ) *line = -1;
+        if ( index ) *index = -1;
+    }
     virtual void setCursorPosition(int, int) {}
-    virtual void getSelection(int *, int *, int *, int *) const {}
-    virtual void setSelection(int, int, int, int) {}
+    virtual void getSelection(int *lineFrom, int *indexFrom, int *lineTo, int *indexTo) const
+    {
+        if ( !hasSelectedText() )
+        {
+            if ( lineFrom ) *lineFrom = -1;
+            if ( indexFrom ) *indexFrom = -1;
+            if ( lineTo ) *lineTo = -1;
+            if ( indexTo ) *indexTo = -1;
+            return;
+        }
+        lineIndexFromPosition( m_selStart, lineFrom, indexFrom );
+        lineIndexFromPosition( m_selEnd, lineTo, indexTo );
+    }
+    virtual void setSelection(int lineFrom, int indexFrom, int lineTo, int indexTo)
+    {
+        const int start = positionFromLineIndex( lineFrom, indexFrom );
+        const int end = positionFromLineIndex( lineTo, indexTo );
+        if ( start < 0 || end < 0 )
+        {
+            clearSelections();
+            return;
+        }
+        m_selStart = qMin( start, end );
+        m_selEnd = qMax( start, end );
+    }
     virtual void selectAll(bool = true) {}
-    virtual void clearSelections() {}
+    virtual void clearSelections() { m_selStart = 0; m_selEnd = 0; }
 
     // Margins
     virtual void setMarginsFont(const QFont &) {}
@@ -271,4 +336,41 @@ Q_SIGNALS:
 private:
     QString m_text;
     bool m_modified = false;
+    int m_selStart = 0;
+    int m_selEnd = 0;
+
+    // Linear QString position of (line, index), or -1 when out of range.
+    int positionFromLineIndex(int line, int index) const
+    {
+        if ( line < 0 || index < 0 )
+            return -1;
+        const QStringList lines = m_text.split( QLatin1Char('
+') );
+        if ( line >= lines.size() || index > lines[line].length() )
+            return -1;
+        int pos = 0;
+        for ( int i = 0; i < line; ++i )
+            pos += lines[i].length() + 1; // + the newline
+        return pos + index;
+    }
+    void lineIndexFromPosition(int pos, int *line, int *index) const
+    {
+        if ( line ) *line = -1;
+        if ( index ) *index = -1;
+        if ( pos < 0 || pos > m_text.length() )
+            return;
+        int l = 0;
+        int lineStart = 0;
+        for ( int i = 0; i < pos; ++i )
+        {
+            if ( m_text.at( i ) == QLatin1Char('
+') )
+            {
+                ++l;
+                lineStart = i + 1;
+            }
+        }
+        if ( line ) *line = l;
+        if ( index ) *index = pos - lineStart;
+    }
 };
