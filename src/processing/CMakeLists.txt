@@ -46,8 +46,6 @@ add_library(sicnu_processing SHARED
     framework/atomic_algorithm_registry.cpp
     framework/json_params_converter.h
     framework/tool_call_dispatcher.cpp
-    ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_context.cpp
-    ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_error.cpp
     framework/python_algorithm_adapter.cpp
     framework/python_processing_provider_adapter.cpp
     framework/python_processing_provider_adapter.h
@@ -175,6 +173,7 @@ target_link_libraries(sicnu_processing PUBLIC
     Qt6::Xml
     qgis_core
     GDAL::GDAL
+    sicnu_operators_core
 )
 # Sicnu::data is linked PRIVATE here: output_committer (in this target) is the
 # only consumer of data headers from sicnu_processing. Downstream targets that

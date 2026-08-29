@@ -1,8 +1,22 @@
 # SICNU GEO RS — Operator framework and operator implementations
-set(SICNU_OPERATORS_SOURCES
-    framework/rs_operator_error.cpp
-    framework/rs_progress_callback.cpp
+
+# Leaf seam for the RSOperatorContext/RSOperatorError contracts (#652): both
+# sicnu_operators and sicnu_processing used to compile these TUs (two SHARED
+# libs exporting the same classes = ODR/RTTI hazard, the #573 class). A leaf
+# STATIC lib linked by both keeps exactly one copy. The TUs and their headers
+# are dependency-free (std-only), so no Qt/GDAL linkage is needed here.
+add_library(sicnu_operators_core STATIC
     framework/rs_operator_context.cpp
+    framework/rs_operator_error.cpp
+)
+target_include_directories(sicnu_operators_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
+# The leaf is linked into SHARED targets; force PIC so the static objects are
+# linkable into sicnu_processing/sicnu_operators regardless of the global
+# CMAKE_POSITION_INDEPENDENT_CODE default.
+set_target_properties(sicnu_operators_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+set(SICNU_OPERATORS_SOURCES
+    framework/rs_progress_callback.cpp
     framework/rs_schema.cpp
     framework/rs_operator.cpp
     framework/rs_operator_registry.cpp
@@ -119,6 +133,7 @@ target_include_directories(sicnu_operators
 target_link_libraries(sicnu_operators
     PUBLIC
         Qt6::Core
+        sicnu_operators_core
         sicnu_processing
     PRIVATE
         ${JSONCPP_LIBRARIES}

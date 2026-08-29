@@ -53,12 +53,14 @@ struct McpToolError : public std::runtime_error
     QString errorCode;
     QString errorCategory;
     int rpcCode = -32000;
+    bool retryable = false;
 
-    McpToolError( const QString &msg, const QString &code = QString(), const QString &category = QString(), int rpc = -32000 )
+    McpToolError( const QString &msg, const QString &code = QString(), const QString &category = QString(), int rpc = -32000, bool retryable_ = false )
       : std::runtime_error( msg.toUtf8().constData() )
       , errorCode( code )
       , errorCategory( category )
       , rpcCode( rpc )
+      , retryable( retryable_ )
     {
     }
 };
@@ -841,7 +843,7 @@ void McpServer::handleRequest(const QVariantMap &request)
         catch (const McpToolError &e)
         {
             if (!isNotification)
-                sendToolErrorResult(id, QString::fromUtf8(e.what()), e.errorCode, e.errorCategory);
+                sendToolErrorResult(id, QString::fromUtf8(e.what()), e.errorCode, e.errorCategory, e.retryable);
         }
         catch (const std::exception &e)
         {
@@ -863,7 +865,8 @@ void McpServer::handleRequest(const QVariantMap &request)
 }
 
 void McpServer::sendToolErrorResult(const QVariant &id, const QString &message,
-                                    const QString &errorCode, const QString &errorCategory)
+                                    const QString &errorCode, const QString &errorCategory,
+                                    bool retryable)
 {
     // MCP-spec failure surface (#620): a tools/call execution error is a
     // RESULT object with isError:true, never a JSON-RPC error response
@@ -882,6 +885,7 @@ void McpServer::sendToolErrorResult(const QVariant &id, const QString &message,
         callResult[QStringLiteral("errorCode")] = errorCode;
     if (!errorCategory.isEmpty())
         callResult[QStringLiteral("errorCategory")] = errorCategory;
+    callResult[QStringLiteral("retryable")] = retryable;
     sendResponse(id, callResult);
 }
 
@@ -1891,10 +1895,25 @@ QVariantMap McpServer::handleSpatialToolCall(const QString &toolId, const QVaria
     if (!result.success)
     {
         // Preserve the existing message contract; callers that ignore `data`
-        // still see the same human-readable text.
+        // still see the same human-readable text. Codes are normalized to the
+        // structured taxonomy at this boundary (#644): the spatial tools'
+        // lowercase io codes (local_file_not_found, gdal_open_failed,
+        // provider_open_failed) map to DATA_IO, MODEL_NOT_FOUND to
+        // MODEL_NOT_READY; SpatialToolResult::retryable is forwarded instead
+        // of being dropped.
+        QString errorCode = QString::fromStdString(result.errorCode);
+        const QString upper = errorCode.toUpper();
+        if (upper == QStringLiteral("LOCAL_FILE_NOT_FOUND")
+            || upper == QStringLiteral("GDAL_OPEN_FAILED")
+            || upper == QStringLiteral("PROVIDER_OPEN_FAILED"))
+            errorCode = QStringLiteral("DATA_IO");
+        else if (upper == QStringLiteral("MODEL_NOT_FOUND"))
+            errorCode = QStringLiteral("MODEL_NOT_READY");
         throw McpToolError(QString::fromStdString(toolId.toStdString() + ": " + result.error),
-                           QString::fromStdString(result.errorCode),
-                           QString::fromStdString(result.errorCategory));
+                           errorCode,
+                           QString::fromStdString(result.errorCategory),
+                           -32000,
+                           result.retryable);
     }
 
     QVariantMap out;

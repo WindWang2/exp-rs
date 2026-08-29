@@ -85,6 +85,11 @@ TEST_CASE("Placeholder Grammar - Parsing all supported syntax variants", "[workf
 TEST_CASE("Placeholder Grammar - Substitution and edge inference", "[workflow][grammar]") {
     SECTION("substitutePlaceholders replaces resolved tokens and environment variables") {
         setenv("TEST_EXP_RS_WORK", "/tmp/exp_rs_workspace", 1);
+        // Scope guard: the variable was leaked into every later test in this
+        // process (cross-test env pollution, #656).
+        struct EnvGuard {
+            ~EnvGuard() { unsetenv("TEST_EXP_RS_WORK"); }
+        } envGuard;
         std::string input = "Process ${step1.output} with ${task.5.output} in ${TEST_EXP_RS_WORK}";
         std::string resolved = substitutePlaceholders(input, [](const PlaceholderRef &ref) {
             if (ref.stepId == "step1") return std::string("/tmp/step1_out.tif");

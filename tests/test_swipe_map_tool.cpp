@@ -11,11 +11,24 @@
 
 #include "app/map_tools/swipe_map_tool.h"
 
-TEST_CASE("SwipeMapTool creation and defaults", "[gui][swipe]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+namespace {
 
+// Heap-allocated, intentionally leaked: one QApplication per process (the
+// established pattern in this suite's GUI tests). Stack-constructing one per
+// TEST_CASE constructs/destructs the app five times per binary run (#568).
+void ensureApp()
+{
+    if ( QApplication::instance() )
+        return;
+    static int argc = 0;
+    static char *argv[] = { nullptr };
+    new QApplication( argc, argv );
+}
+
+} // namespace
+
+TEST_CASE("SwipeMapTool creation and defaults", "[gui][swipe]") {
+    ensureApp();
     QgsMapCanvas canvas;
     SwipeMapTool tool(&canvas);
 
@@ -27,10 +40,7 @@ TEST_CASE("SwipeMapTool creation and defaults", "[gui][swipe]") {
 }
 
 TEST_CASE("SwipeMapTool position clamping", "[gui][swipe]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
-
+    ensureApp();
     QgsMapCanvas canvas;
     SwipeMapTool tool(&canvas);
 
@@ -51,10 +61,7 @@ TEST_CASE("SwipeMapTool position clamping", "[gui][swipe]") {
 }
 
 TEST_CASE("SwipeMapTool direction switching", "[gui][swipe]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
-
+    ensureApp();
     QgsMapCanvas canvas;
     SwipeMapTool tool(&canvas);
 
@@ -71,15 +78,19 @@ TEST_CASE("SwipeMapTool direction switching", "[gui][swipe]") {
 }
 
 TEST_CASE("SwipeMapTool layer assignment", "[gui][swipe]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
-
+    ensureApp();
     QgsMapCanvas canvas;
     SwipeMapTool tool(&canvas);
 
+    // #656: sample rasters under data/ are not committed - raw relative
+    // paths made this a shape-only assertion on nonexistent layers. The
+    // layers are expected to be invalid here; the contract under test is
+    // pointer plumbing, so the invalidity is asserted explicitly instead of
+    // being left silently unchecked.
     auto *layer1 = new QgsRasterLayer(QStringLiteral("data/dem_sample.tif"), QStringLiteral("dem"));
     auto *layer2 = new QgsRasterLayer(QStringLiteral("data/landsat_sample.tif"), QStringLiteral("landsat"));
+    CHECK_FALSE(layer1->isValid());
+    CHECK_FALSE(layer2->isValid());
 
     tool.setBaseLayer(layer1);
     tool.setCompareLayer(layer2);
@@ -93,10 +104,7 @@ TEST_CASE("SwipeMapTool layer assignment", "[gui][swipe]") {
 }
 
 TEST_CASE("SwipeMapTool emits swipePositionChanged", "[gui][swipe]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
-
+    ensureApp();
     QgsMapCanvas canvas;
     SwipeMapTool tool(&canvas);
 

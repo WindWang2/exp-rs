@@ -206,11 +206,13 @@ TEST_CASE("GdalDatasetWrapper reads projection", "[gdal][wrapper]")
 TEST_CASE("GdalDatasetWrapper handles empty projection gracefully", "[gdal][wrapper]")
 {
     GdalDatasetWrapper ds;
-    ds.open(testDataPath()); // sample_crops.tif has no CRS
+    REQUIRE(ds.open(testDataPath())); // sample_crops.tif has no CRS
 
-    QString proj = ds.projection();
-    // Empty projection is valid — just means CRS not defined
-    REQUIRE(true); // API doesn't crash
+    // The dataset opens and reports a projection that is not a CRS definition:
+    // either empty or an empty WKT string, never garbage (#656).
+    const QString proj = ds.projection();
+    CHECK(proj.isEmpty());
+    REQUIRE_FALSE(proj.contains(QStringLiteral("EPSG")));
 }
 
 // --- Band reading ---

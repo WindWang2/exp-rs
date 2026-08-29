@@ -78,7 +78,8 @@ protected:
     /// instead of a JSON-RPC error response (#620).
     void sendToolErrorResult(const QVariant &id, const QString &message,
                              const QString &errorCode = QString(),
-                             const QString &errorCategory = QString());
+                             const QString &errorCategory = QString(),
+                             bool retryable = false);
 
     virtual void sendResponse(const QVariant &id, const QVariantMap &result);
     virtual void sendError(const QVariant &id, int code, const QString &message);

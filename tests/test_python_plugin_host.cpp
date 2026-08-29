@@ -390,6 +390,9 @@ TEST_CASE( "SharedMemorySegment: uint8 dtype round-trips correctly", "[python][s
 // finished. Before the unlink fix this leaks: each create() mints a new POSIX
 // shm object that nobody unlinks, so /dev/shm/sicnu_shm_* grows without bound.
 // ---------------------------------------------------------------------------
+#ifdef Q_OS_UNIX
+// POSIX shared memory (/dev/shm) is a UNIX concept; on Windows the QDir
+// listing is empty before AND after, so the leak assertion is vacuous (#656).
 TEST_CASE( "SharedMemorySegment: no /dev/shm leak after a read round-trip and detach",
            "[python][shm][lifetime]" )
 {
@@ -468,6 +471,8 @@ TEST_CASE( "SharedMemorySegment: no /dev/shm leak after a read round-trip and de
 // corruption — the invariant the unique-key + per-segment lifetime design
 // exists to provide.
 // ---------------------------------------------------------------------------
+#endif // Q_OS_UNIX
+
 TEST_CASE( "SharedMemorySegment: N distinct segments on N workers read concurrently all checksum correctly",
            "[python][shm][concurrency]" )
 {

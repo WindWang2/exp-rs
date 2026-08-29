@@ -159,7 +159,10 @@ TEST_CASE("HistogramStretchWidget setRasterLayer", "[gui][histogram]") {
     HistogramStretchWidget widget;
 
     auto *layer = new QgsRasterLayer(samplePath("dem_sample.tif"), QStringLiteral("dem"));
-    if (layer->isValid()) {
+    // #656: fail loudly on a missing deterministic fixture instead of
+    // silently skipping the regression coverage.
+    REQUIRE(layer->isValid());
+    {
         widget.setRasterLayer(layer);
         CHECK(widget.rasterLayer() == layer);
         CHECK(widget.band() == 1);
@@ -180,7 +183,10 @@ TEST_CASE("HistogramStretchWidget algorithm switching", "[gui][histogram]") {
     HistogramStretchWidget widget;
 
     auto *layer = new QgsRasterLayer(samplePath("dem_sample.tif"), QStringLiteral("dem"));
-    if (layer->isValid()) {
+    // #656: fail loudly on a missing deterministic fixture instead of
+    // silently skipping the regression coverage.
+    REQUIRE(layer->isValid());
+    {
         widget.setRasterLayer(layer);
 
         QSignalSpy spy(&widget, &HistogramStretchWidget::stretchApplied);
@@ -232,11 +238,8 @@ TEST_CASE("HistogramStretchWidget normalizes a master piecewise curve per RGB ba
     ensureApp();
 
     auto *layer = new QgsRasterLayer(samplePath("landsat_sample.tif"), QStringLiteral("landsat"));
-    if ( !layer->isValid() || layer->bandCount() < 3 ) {
-        WARN("landsat_sample.tif not available, skipping RGB piecewise regression test");
-        delete layer;
-        return;
-    }
+    REQUIRE( layer->isValid() );
+    REQUIRE( layer->bandCount() >= 3 );
 
     layer->setRenderer(new QgsMultiBandColorRenderer(layer->dataProvider(), 1, 2, 3));
 
@@ -265,11 +268,8 @@ TEST_CASE("HistogramStretchWidget renders CCD1 piecewise output without a white 
     ensureApp();
 
     auto *layer = new QgsRasterLayer(samplePath("CCD1.dat"), QStringLiteral("CCD1"));
-    if ( !layer->isValid() || layer->bandCount() < 3 ) {
-        WARN("CCD1.dat not available, skipping CCD1 rendering regression test");
-        delete layer;
-        return;
-    }
+    REQUIRE( layer->isValid() );
+    REQUIRE( layer->bandCount() >= 3 );
 
     layer->setRenderer(new QgsMultiBandColorRenderer(layer->dataProvider(), 1, 2, 3));
     HistogramStretchWidget widget;
@@ -521,7 +521,10 @@ TEST_CASE("HistogramStretchWidget resetStretch", "[gui][histogram]") {
     HistogramStretchWidget widget;
 
     auto *layer = new QgsRasterLayer(samplePath("dem_sample.tif"), QStringLiteral("dem"));
-    if (layer->isValid()) {
+    // #656: fail loudly on a missing deterministic fixture instead of
+    // silently skipping the regression coverage.
+    REQUIRE(layer->isValid());
+    {
         widget.setRasterLayer(layer);
         widget.resetStretch();
         // After reset, min/max should be restored to data range
@@ -539,12 +542,9 @@ TEST_CASE("HistogramStretchWidget survives deleted layer", "[gui][histogram]") {
 
     HistogramStretchWidget widget;
     auto *layer = new QgsRasterLayer(samplePath("dem_sample.tif"), QStringLiteral("dem"));
-    if ( !layer->isValid() )
-    {
-        WARN("dem_sample.tif not available, skipping deleted-layer test");
-        delete layer;
-        return;
-    }
+    // #656: fixture synthesis is deterministic - a missing fixture is
+    // a harness failure and must fail loudly, not silently skip.
+    REQUIRE( layer->isValid() );
 
     widget.setRasterLayer( layer );
     widget.applyStretch();
