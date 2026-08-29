@@ -35,6 +35,16 @@ JobEngine &JobEngine::instance()
   return e;
 }
 
+int JobEngine::defaultWorkerCount()
+{
+  // One worker per core minus the UI-reserved core (ADR 0002), floored at
+  // kMinWorkers. hardware_concurrency() == 0 means "unknown" — degrade to
+  // the floor instead of an empty pool.
+  const unsigned hw = std::thread::hardware_concurrency();
+  const int cores = hw > 0 ? static_cast<int>( hw ) : kMinWorkers;
+  return std::max( kMinWorkers, cores - 1 );
+}
+
 JobEngine::JobEngine() = default;
 
 JobEngine::~JobEngine()
@@ -117,7 +127,7 @@ void JobEngine::shutdown()
 void JobEngine::setMaxWorkers( int n )
 {
   std::lock_guard<std::mutex> lock( m_mutex );
-  m_maxWorkers = std::clamp( n, 2, 4 );
+  m_maxWorkers = std::clamp( n, kMinWorkers, kMaxWorkersOverride );
   if ( !m_stop.load() )
     ensureWorkersLocked();
   m_cv.notify_all();
@@ -438,7 +448,7 @@ void JobEngine::shutdownForTests()
     m_jobBodies.clear();
     m_prefixExecutors.clear();
     m_fallbackExecutor = nullptr;
-    m_maxWorkers = 3;
+    m_maxWorkers = defaultWorkerCount();
     m_running = 0;
     m_exclusiveRunning = false;
     m_listener = nullptr;
