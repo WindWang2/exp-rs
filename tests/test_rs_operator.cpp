@@ -348,7 +348,7 @@ TEST_CASE( "Every registered operator declares a valid memory policy", "[operato
   CHECK( registry.create( "otb:meanshift_segmentation" )->memoryPolicy()
          == RSOperatorMemoryPolicy::ExternalProcess );
   CHECK( registry.create( "rs:spectral_index" )->memoryPolicy()
-         == RSOperatorMemoryPolicy::FullRaster );
+         == RSOperatorMemoryPolicy::Streaming );
 }
 
 // ---------------------------------------------------------------------------

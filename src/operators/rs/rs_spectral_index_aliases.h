@@ -23,6 +23,11 @@ public:
         return "Compute Normalized Difference Vegetation Index: (NIR - Red) / (NIR + Red).";
     }
 
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        return RSOperatorMemoryPolicy::Streaming; // delegates to the streaming core (#664)
+    }
+
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
@@ -39,6 +44,11 @@ public:
     std::string group() const override { return "spectral"; }
     std::string description() const override {
         return "Compute Enhanced Vegetation Index: 2.5 * (NIR - Red) / (NIR + 6*Red - 7.5*Blue + 1).";
+    }
+
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        return RSOperatorMemoryPolicy::Streaming; // delegates to the streaming core (#664)
     }
 
     Json::Value schema() const override;
@@ -59,6 +69,11 @@ public:
         return "Compute Normalized Difference Water Index: (Green - NIR) / (Green + NIR).";
     }
 
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        return RSOperatorMemoryPolicy::Streaming; // delegates to the streaming core (#664)
+    }
+
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
@@ -75,6 +90,11 @@ public:
     std::string group() const override { return "spectral"; }
     std::string description() const override {
         return "Compute Soil-Adjusted Vegetation Index: ((NIR - Red) / (NIR + Red + 0.5)) * 1.5.";
+    }
+
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        return RSOperatorMemoryPolicy::Streaming; // delegates to the streaming core (#664)
     }
 
     Json::Value schema() const override;
@@ -95,6 +115,11 @@ public:
         return "Compute Normalized Difference Built-up Index: (SWIR - NIR) / (SWIR + NIR).";
     }
 
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        return RSOperatorMemoryPolicy::Streaming; // delegates to the streaming core (#664)
+    }
+
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
@@ -111,6 +136,11 @@ public:
     std::string group() const override { return "spectral"; }
     std::string description() const override {
         return "Compute Modified Normalized Difference Water Index: (Green - SWIR) / (Green + SWIR).";
+    }
+
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        return RSOperatorMemoryPolicy::Streaming; // delegates to the streaming core (#664)
     }
 
     Json::Value schema() const override;

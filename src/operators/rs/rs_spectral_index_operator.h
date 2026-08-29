@@ -53,6 +53,11 @@ public:
         return "Compute a spectral index (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI, NBR, dNBR, BSI, NDRE, CI, NDSI, NDTI) from raster bands.";
     }
 
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        return RSOperatorMemoryPolicy::Streaming; // row-block streaming (#664)
+    }
+
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;

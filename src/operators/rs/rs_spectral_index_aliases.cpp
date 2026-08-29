@@ -53,9 +53,9 @@ Json::Value RsNdviOperator::metadata() const {
 
 Json::Value RsNdviOperator::executionEstimate() const {
     Json::Value est(Json::objectValue);
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 16777216;
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 2097152;
     return est;
 }
 
@@ -104,9 +104,9 @@ Json::Value RsEviOperator::metadata() const {
 
 Json::Value RsEviOperator::executionEstimate() const {
     Json::Value est(Json::objectValue);
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 20971520;
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 2097152;
     return est;
 }
 
@@ -154,9 +154,9 @@ Json::Value RsNdwiOperator::metadata() const {
 
 Json::Value RsNdwiOperator::executionEstimate() const {
     Json::Value est(Json::objectValue);
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 16777216;
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 2097152;
     return est;
 }
 
@@ -204,9 +204,9 @@ Json::Value RsSaviOperator::metadata() const {
 
 Json::Value RsSaviOperator::executionEstimate() const {
     Json::Value est(Json::objectValue);
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 16777216;
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 2097152;
     return est;
 }
 
@@ -255,9 +255,9 @@ Json::Value RsNdbiOperator::metadata() const {
 
 Json::Value RsNdbiOperator::executionEstimate() const {
     Json::Value est(Json::objectValue);
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 16777216;
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 2097152;
     return est;
 }
 
@@ -305,9 +305,9 @@ Json::Value RsMndwiOperator::metadata() const {
 
 Json::Value RsMndwiOperator::executionEstimate() const {
     Json::Value est(Json::objectValue);
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 16777216;
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 2097152;
     return est;
 }
 
