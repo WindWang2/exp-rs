@@ -560,7 +560,8 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
     // arguments exactly as classify()/submit() see them, then hand the plan
     // to the approval card as a QJsonObject.
     const Json::Value planArgs = m_toolCallDispatcher.argumentsFor( cppEnvelope );
-    appendPlanApprovalCard( QJsonObject::fromVariantMap( processing::jsonObjectToVariantMap( planArgs ) ) );
+    appendPlanApprovalCard( QJsonObject::fromVariantMap( processing::jsonObjectToVariantMap( planArgs ) ),
+                            toolCallJson );
     setRunStage( tr( "Planning" ) );
     return;
   }
@@ -574,7 +575,7 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
     // rejectionReason reports the same reason submit() would give, without
     // the side-effect of a doomed submission.
     const QString reason = m_toolCallDispatcher.rejectionReason( cppEnvelope );
-    handleToolCallRejection( reason );
+    handleToolCallRejection( reason, toolCallJson );
     m_lastError = reason;
     updateToolCallCard( toolCallId, tr( "rejected" ), reason );
     setRunStage( tr( "Failed" ) );
@@ -604,7 +605,7 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
 
   if ( !ok )
   {
-    handleToolCallRejection( error );
+    handleToolCallRejection( error, toolCallJson );
     m_lastError = error;
     updateToolCallCard( toolCallId, tr( "rejected" ), error );
     setRunStage( tr( "Failed" ) );
@@ -684,9 +685,23 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
   }
 }
 
-void AgentCopilotDockWidget::handleToolCallRejection( const QString &errorMsg )
+void AgentCopilotDockWidget::handleToolCallRejection( const QString &errorMsg, const QJsonObject &toolCallJson )
 {
   appendErrorMessage( errorMsg.isEmpty() ? QStringLiteral( "工具调用失败。" ) : errorMsg );
+
+  // #621/#642: a rejected tool call must still receive a role:"tool" reply,
+  // otherwise the model never learns the call failed and the turn dead-ends.
+  // Only possible when the envelope is well-formed enough to be a real
+  // tool_calls entry on the wire; a garbage envelope has no call to answer.
+  if ( !toolCallJson.isEmpty()
+       && !toolCallJson[QStringLiteral( "id" )].toString().isEmpty()
+       && toolCallJson.contains( QStringLiteral( "function" ) ) )
+  {
+    Json::Value failure( Json::objectValue );
+    failure["status"] = "error";
+    failure["errorMessage"] = errorMsg.toStdString();
+    sendToolResultFollowUp( toolCallJson, failure );
+  }
 }
 
 void AgentCopilotDockWidget::sendToolResultFollowUp( const QJsonObject &toolCallJson,
@@ -724,6 +739,16 @@ void AgentCopilotDockWidget::sendToolResultFollowUp( const QJsonObject &toolCall
     content = QString::fromStdString( resultPayload.toStyledString() );
   }
 
+  // Budget the tool-result payload: a giant committed payload (full lineage,
+  // large feature dumps) re-sent on every follow-up can blow the context
+  // window (#642). Tail-truncate with an explicit marker, mirroring the Pi
+  // bridge's budget.
+  constexpr int kMaxToolResultChars = 50000;
+  if ( content.size() > kMaxToolResultChars )
+    content = content.left( kMaxToolResultChars )
+              + QStringLiteral( "
+…[truncated %1 characters]" ).arg( content.size() - kMaxToolResultChars );
+
   QJsonArray toolCalls;
   toolCalls.append( toolCallJson );
 
@@ -737,9 +762,12 @@ void AgentCopilotDockWidget::sendToolResultFollowUp( const QJsonObject &toolCall
   toolMsg[QStringLiteral( "tool_call_id" )] = toolCallJson[QStringLiteral( "id" )].toString();
   toolMsg[QStringLiteral( "content" )] = content;
 
-  QJsonArray followUpMessages = m_messageHistory;
-  followUpMessages.append( assistantMsg );
-  followUpMessages.append( toolMsg );
+  // #621/#642: the completed tool exchange must persist in the conversation
+  // history. Building the follow-up from the original [system, user] array
+  // erased every prior exchange, so a second tool round ran with the first
+  // round's result amnesia'd out.
+  m_messageHistory.append( assistantMsg );
+  m_messageHistory.append( toolMsg );
 
   // Ask the model to produce the final answer based on the execution evidence.
   QJsonObject finalUserMsg;
@@ -747,7 +775,9 @@ void AgentCopilotDockWidget::sendToolResultFollowUp( const QJsonObject &toolCall
   finalUserMsg[QStringLiteral( "content" )] = QStringLiteral(
     "请根据上述工具执行结果生成最终回答。如果执行失败或验证未通过，必须明确说明失败原因，"
     "不得报喜。" );
-  followUpMessages.append( finalUserMsg );
+  m_messageHistory.append( finalUserMsg );
+
+  const QJsonArray followUpMessages = m_messageHistory;
 
   m_isStreaming = true;
   if ( m_sendBtn )
@@ -845,7 +875,7 @@ void AgentCopilotDockWidget::updateToolCallCard( const QString &toolCallId,
     details->setText( detailText );
 }
 
-void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson )
+void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson, const QJsonObject &toolCallJson )
 {
   auto *card = new QFrame( m_chatContainer );
   card->setFrameShape( QFrame::StyledPanel );
@@ -887,7 +917,7 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
     // pipeline watching and marshals the completion callback onto this
     // widget's thread — no detached std::thread (ADR 0047).
     const long pipelineId = m_workflowExecutor.executeAgentPlanAsync( processing::jsonValueFromQJson( planJson ),
-                                                                      [guard, epoch, this, safeRunBtn]( const Json::Value &resultPayload ) {
+                                                                      [guard, epoch, this, safeRunBtn, toolCallJson]( const Json::Value &resultPayload ) {
       // Completion payload shape is owned by the workflow executor; read it
       // in Json-land instead of round-tripping through QJson (ADR 0048).
       if ( !guard || !*guard )
@@ -906,6 +936,20 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
           safeRunBtn->setEnabled( true );
           safeRunBtn->setText( QStringLiteral( "重试执行" ) );
         }
+        // #621/#642: the plan outcome must re-enter the LLM loop — without a
+        // role:"tool" reply the model that proposed the steps never learns
+        // what happened and the conversation stalls until the user prompts.
+        if ( !toolCallJson.isEmpty() && !toolCallJson[QStringLiteral( "id" )].toString().isEmpty() )
+        {
+          Json::Value failure( Json::objectValue );
+          failure["status"] = "error";
+          if ( resultObj.isMember( "errorMessage" ) )
+            failure["errorMessage"] = resultObj["errorMessage"];
+          else
+            failure["errorMessage"] = error.isEmpty() ? QStringLiteral( "plan execution failed" ).toStdString()
+                                                      : error.toStdString();
+          sendToolResultFollowUp( toolCallJson, failure );
+        }
       }
       else
       {
@@ -914,6 +958,8 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
         {
           safeRunBtn->setText( QStringLiteral( "已完成" ) );
         }
+        if ( !toolCallJson.isEmpty() && !toolCallJson[QStringLiteral( "id" )].toString().isEmpty() )
+          sendToolResultFollowUp( toolCallJson, resultObj );
       }
       updateRunInspector();
     }, this );

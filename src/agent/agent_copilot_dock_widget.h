@@ -90,11 +90,11 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     /// update it with stage/result summary (P1-U3).
     QPointer<QWidget> appendToolCallCard( const QJsonObject &toolCallJson );
     void updateToolCallCard( const QString &toolCallId, const QString &statusText, const QString &detailText );
-    void appendPlanApprovalCard( const QJsonObject &planJson );
+    void appendPlanApprovalCard( const QJsonObject &planJson, const QJsonObject &toolCallJson = QJsonObject() );
     void appendErrorMessage( const QString &errorMsg );
     /// Shared rejection tail: surface the reason in the chat and emit an error
     /// result payload.
-    void handleToolCallRejection( const QString &errorMsg );
+    void handleToolCallRejection( const QString &errorMsg, const QJsonObject &toolCallJson = QJsonObject() );
     /// Registers a completion callback for a tool-call task; invokes it
     /// immediately when the task is already terminal.
     void watchToolCallCompletion( long taskId, processing::ToolCallDispatcher::CompletionCallback onComplete );

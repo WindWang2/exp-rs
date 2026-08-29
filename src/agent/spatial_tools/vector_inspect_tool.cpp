@@ -44,8 +44,13 @@ Json::Value describeLayer( OGRLayer *layer, int maxFeatures )
   else
     out["featureCount"] = "unknown";
 
+  // Prefer the driver-stored extent: GetExtent(force=true) scans every
+  // feature on the calling (MCP) thread for drivers without a stored extent
+  // (CSV, GeoJSON, ...), which stalls the tool's bounded-cost contract (#644).
   OGREnvelope extent;
-  if ( layer->GetExtent( &extent, /*force=*/true ) == OGRERR_NONE )
+  const bool haveExtent = layer->GetExtent( &extent, /*force=*/false ) == OGRERR_NONE
+                          || layer->GetExtent( &extent, /*force=*/true ) == OGRERR_NONE;
+  if ( haveExtent )
   {
     Json::Value ext( Json::objectValue );
     ext["minX"] = extent.MinX;

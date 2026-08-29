@@ -1,4 +1,5 @@
 // src/agent/spatial_tools/spatial_tool_provider.cpp
+#include <algorithm>
 #include "spatial_tool_provider.h"
 
 #include "spatial_tool.h"
@@ -33,6 +34,10 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
 
     tools.push_back( std::move( tool ) );
   }
+  // Deterministic listing order (#643): SpatialToolRegistry::tools() iterates
+  // an unordered_map; sort so tools/list is stable across runs.
+  std::sort( tools.begin(), tools.end(),
+             []( const AgentTool &a, const AgentTool &b ) { return a.name < b.name; } );
   return tools;
 }
 

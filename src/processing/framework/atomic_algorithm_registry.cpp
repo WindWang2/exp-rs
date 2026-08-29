@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "atomic_algorithm_registry.h"
 #include "agent_tool_call_exporter.h"
 #include "provider_algorithm_adapter.h"
@@ -115,6 +116,12 @@ std::vector<AlgorithmDescriptor> AtomicAlgorithmRegistry::listDescriptors() cons
       result.push_back( pair.second->descriptor() );
     }
   }
+  // Deterministic listing order (#643): mAdapters is an unordered_map, so the
+  // iteration order (and therefore tools/list) varied between runs.
+  std::sort( result.begin(), result.end(),
+             []( const AlgorithmDescriptor &a, const AlgorithmDescriptor &b ) {
+               return a.id < b.id;
+             } );
   return result;
 }
 

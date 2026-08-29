@@ -606,7 +606,7 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
     Json::Value props( Json::objectValue );
     Json::Value layerId( Json::objectValue );
     layerId["type"] = "string";
-    layerId["description"] = "Layer ID, layer name, or file path to describe";
+    layerId["description"] = "Layer ID or layer name to describe (project layers only; use spatial:raster_inspect / spatial:vector_inspect for file paths)";
     props["layer_id"] = layerId;
     schema["properties"] = props;
     Json::Value req( Json::arrayValue );

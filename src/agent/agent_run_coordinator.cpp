@@ -452,7 +452,8 @@ void AgentRunCoordinator::transitionStage( AgentRun &run, AgentRunStage stage )
       for ( auto it = m_runs.begin(); it != m_runs.end(); ++it )
       {
         if ( it->id != m_activeRunId
-             && ( it->stage == AgentRunStage::Completed || it->stage == AgentRunStage::Failed ) )
+             && ( it->stage == AgentRunStage::Completed || it->stage == AgentRunStage::Failed
+                  || it->stage == AgentRunStage::Canceled ) )
           terminalIds.append( it->id );
       }
       std::sort( terminalIds.begin(), terminalIds.end() );  // uuids sort by creation time only loosely; any stable drop is fine
