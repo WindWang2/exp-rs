@@ -8,6 +8,8 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_multiband_block_stream.h"
 
 #include <gdal_priv.h>
 #include <QFileInfo>
@@ -18,6 +20,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <vector>
 
 namespace sicnu::operators::rs {
 
@@ -116,44 +119,175 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
                               "kernel must be an odd integer >= 3 (e.g. 3, 5, 7)");
     }
 
-    context.logInfo("Running 3x3 majority filter on " + inputPath);
+    context.logInfo("Running majority filter (kernel=" + std::to_string(kernel) + ") on " + inputPath);
     context.reportProgress(0.1, "Loading classification label raster");
 
-    cv::Mat labels;
-    double gt[6] = { 0, 1, 0, 0, 0, -1 };
-    QString wkt;
-    QString err;
-    if (!RsPostProcess::loadLabelRaster(QString::fromStdString(inputPath), labels, gt, wkt, &err)) {
+    // Streaming execution (#666, ADR 0124 grade bit-exact): row-blocks with a
+    // halo of kernel/2 pixels so every window sees the same neighbor values it
+    // saw in the full-raster path. The mode rule is replicated exactly:
+    // label 0 (NoData) never votes, ties break toward the smaller label, an
+    // all-NoData window keeps the center pixel. Values pass through the same
+    // GDT_Int32 conversion loadLabelRaster used.
+    const int half = kernel / 2;
+    GdalDatasetWrapper inDs;
+    if (!inDs.open(QString::fromStdString(inputPath))) {
         throw RSOperatorError(ErrorCode::GdalError,
-                              "Failed to load label raster: " + err.toStdString());
+                              "Failed to open label raster: " + inputPath);
+    }
+    const int width = inDs.width();
+    const int height = inDs.height();
+    const int blockRows = std::max(kernel, std::min(256, height));
+    const int haloRows = std::min(half, height);
+
+    // Output dtype: labels pass through unchanged outside the filter, so the
+    // value range equals the input's; scan once to apply the ADR-0019-S4
+    // policy the save path used (Byte/UInt16/Int32).
+    double inMin = std::numeric_limits<double>::max();
+    double inMax = std::numeric_limits<double>::lowest();
+    {
+        std::vector<float> sweep(static_cast<size_t>(width) * std::min(blockRows, height));
+        for (int y0 = 0; y0 < height; y0 += blockRows) {
+            const int rows = std::min(blockRows, height - y0);
+            if (!inDs.readBandWindow(1, 0, y0, width, rows, sweep.data())) {
+                throw RSOperatorError(ErrorCode::GdalError,
+                                      "Failed to read label band: " + inputPath);
+            }
+            const size_t n = static_cast<size_t>(width) * rows;
+            for (size_t i = 0; i < n; ++i) {
+                inMin = std::min(inMin, static_cast<double>(sweep[i]));
+                inMax = std::max(inMax, static_cast<double>(sweep[i]));
+            }
+        }
+    }
+    if (inMin > inMax) {
+        inMin = 0;
+        inMax = 0;
+    }
+    GDALDataType gdt = GDT_Byte;
+    if (inMin < 0.0 || inMax > 65535.0)
+        gdt = GDT_Int32;
+    else if (inMax > 255.0)
+        gdt = GDT_UInt16;
+
+    QVector<QRgb> colorTable;
+    loadRasterColorTable(QString::fromStdString(inputPath), colorTable);
+
+    GdalStreamingOutput output(QString::fromStdString(outputPath), width, height, 1,
+                               static_cast<int>(gdt), inDs.geoTransform(),
+                               inDs.projection());
+    if (!output.isOpen()) {
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              "Failed to save majority-filtered raster: " + outputPath);
+    }
+    if (gdt == GDT_Byte) {
+        output.setBandColorTable(1, colorTable);
     }
 
-    context.throwIfCancelled();
-    context.reportProgress(0.3, "Filtering labels");
+    const int totalBlocks = (height + blockRows - 1) / blockRows;
+    int blockIndex = 0;
+    bool ok = true;
+    for (int y0 = 0; y0 < height && ok; y0 += blockRows, ++blockIndex) {
+        context.throwIfCancelled();
+        const int rows = std::min(blockRows, height - y0);
+        const int readY0 = std::max(0, y0 - half);
+        const int readEnd = std::min(height, y0 + rows + half); // exclusive
+        const int readRows = readEnd - readY0;
+        const size_t readCount = static_cast<size_t>(width) * readRows;
 
-    cv::Mat outLabels;
-    if (!RsPostProcess::majorityFilter(labels, outLabels, kernel, &err, [&context]() { return context.isCancelled(); })) {
-        throw RSOperatorError(ErrorCode::ComputationError,
-                              "Majority filter failed: " + err.toStdString());
+        std::vector<int> labels(readCount);
+        {
+            std::vector<float> block(readCount);
+            if (!inDs.readBandWindow(1, 0, readY0, width, readRows, block.data())) {
+                throw RSOperatorError(ErrorCode::GdalError,
+                                      "Failed to read label band: " + inputPath);
+            }
+            for (size_t i = 0; i < readCount; ++i)
+                labels[i] = static_cast<int>(block[i]);
+        }
+
+        // mode of the k*k window at (blockRow r, col c), matching
+        // RsPostProcess::majorityFilter exactly (incl. boundary clamping).
+        const auto pixelAt = [&](int absRow, int c) {
+            return labels[static_cast<size_t>(absRow - readY0) * width + c];
+        };
+        std::vector<int> outRow(static_cast<size_t>(width) * rows);
+        struct FreqEntry { int val; int count; };
+        std::vector<FreqEntry> freq;
+        freq.reserve(static_cast<size_t>(kernel) * kernel);
+        for (int r = 0; r < rows; ++r) {
+            const int absR = y0 + r;
+            for (int c = 0; c < width; ++c) {
+                const int r0 = std::max(0, absR - half);
+                const int r1 = std::min(height - 1, absR + half);
+                const int c0 = std::max(0, c - half);
+                const int c1 = std::min(width - 1, c + half);
+                freq.clear();
+                for (int rr = r0; rr <= r1; ++rr) {
+                    for (int cc = c0; cc <= c1; ++cc) {
+                        const int v = pixelAt(rr, cc);
+                        if (v == 0)
+                            continue;
+                        bool found = false;
+                        for (FreqEntry &e : freq) {
+                            if (e.val == v) {
+                                ++e.count;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found)
+                            freq.push_back({ v, 1 });
+                    }
+                }
+                if (freq.empty()) {
+                    outRow[static_cast<size_t>(r) * width + c] = pixelAt(absR, c);
+                    continue;
+                }
+                int bestVal = pixelAt(absR, c);
+                if (bestVal == 0)
+                    bestVal = freq.front().val;
+                int bestCnt = -1;
+                for (const FreqEntry &e : freq) {
+                    if (e.count > bestCnt || (e.count == bestCnt && e.val < bestVal)) {
+                        bestCnt = e.count;
+                        bestVal = e.val;
+                    }
+                }
+                outRow[static_cast<size_t>(r) * width + c] = bestVal;
+            }
+        }
+
+        // Typed output block (labels keep their integer dtype).
+        const size_t n = static_cast<size_t>(width) * rows;
+        std::vector<quint8> u8;
+        std::vector<quint16> u16;
+        const void *pixels = outRow.data();
+        if (gdt == GDT_Byte) {
+            u8.resize(n);
+            for (size_t i = 0; i < n; ++i)
+                u8[i] = static_cast<quint8>(outRow[i]);
+            pixels = u8.data();
+        } else if (gdt == GDT_UInt16) {
+            u16.resize(n);
+            for (size_t i = 0; i < n; ++i)
+                u16[i] = static_cast<quint16>(outRow[i]);
+            pixels = u16.data();
+        }
+        const GdalBlockStream::Tile tile{0, y0, width, rows, 0, width, rows,
+                                         blockIndex, totalBlocks};
+        ok = output.writeTileRaw(1, tile, pixels, gdt);
+        context.reportProgress(0.1 + 0.7 * (static_cast<double>(blockIndex + 1) / totalBlocks),
+                               "Filtering labels");
     }
 
     context.throwIfCancelled();
     context.reportProgress(0.8, "Saving majority-filtered raster");
 
-    QVector<QRgb> colorTable;
-    loadRasterColorTable(QString::fromStdString(inputPath), colorTable);
-
-    QStringList creationOptions{
-        QStringLiteral("TILED=YES"),
-        QStringLiteral("COMPRESS=DEFLATE"),
-        QStringLiteral("PREDICTOR=2")
-    };
-
-    if (!RsPostProcess::saveLabelRaster(QString::fromStdString(outputPath), outLabels, gt, wkt,
-                                        colorTable, creationOptions,
-                                        std::numeric_limits<double>::quiet_NaN(), &err)) {
+    QString closeError;
+    if (!ok || !output.closeWithError(&closeError)) {
         throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed to save majority-filtered raster: " + err.toStdString());
+                              "Failed to save majority-filtered raster: "
+                                  + (ok ? closeError.toStdString() : outputPath));
     }
 
     // Preserve sidecar JSON metadata if present
