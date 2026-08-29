@@ -97,6 +97,10 @@ public:
         return handleSpatialToolCall(name, args);
     }
     QVariantMap testGetLineage(const QString &id) { return handleGetLineage(id); }
+    QVariantMap testPreflightAlgorithm(const QString &id, const QVariantMap &params)
+    {
+        return handlePreflightAlgorithm(id, params);
+    }
     QVariantMap testListTools(const QString &category = QString()) { return handleListTools(category); }
     QVariantMap testSearchTools(const QString &query, const QString &group = QString(),
                                 const QString &tag = QString(), const QString &inputType = QString(),
@@ -981,6 +985,112 @@ TEST_CASE( "McpServer run_workflow rejects malformed pipelines", "[agent][mcp][w
         threwMissing = true;
     }
     CHECK( threwMissing );
+}
+
+TEST_CASE( "McpServer enforces the SICNU_MCP_WORKSPACE sandbox on every execution entry point", "[agent][mcp][sandbox]" )
+{
+    registerNoopOperator();
+    TestMcpServer server;
+
+    // Save/restore the process env so other test cases are unaffected.
+    const QString savedWorkspace = qEnvironmentVariable( "SICNU_MCP_WORKSPACE" );
+    struct EnvGuard {
+        QString saved;
+        ~EnvGuard()
+        {
+            if ( saved.isEmpty() )
+                qunsetenv( "SICNU_MCP_WORKSPACE" );
+            else
+                qputenv( "SICNU_MCP_WORKSPACE", saved.toUtf8() );
+        }
+    } envGuard{ savedWorkspace };
+
+    QTemporaryDir workspace;
+    QTemporaryDir outside;
+    REQUIRE( qputenv( "SICNU_MCP_WORKSPACE", workspace.path().toUtf8() ) );
+
+    SECTION( "run_workflow rejects a JSON-text pipeline whose step param is outside" )
+    {
+        QVariantMap args;
+        args[QStringLiteral( "pipeline" )] = QStringLiteral(
+            "{\"id\":\"p1\",\"steps\":[{\"id\":\"s1\",\"operator\":\"rs:mcp_noop\","
+            "\"params\":{\"output\":\"%1\"}}]}" )
+            .arg( outside.filePath( QStringLiteral( "out.tif" ) ) );
+        try
+        {
+            server.testRunWorkflow( args );
+            FAIL( "expected PATH_OUTSIDE_WORKSPACE rejection" );
+        }
+        catch ( const std::runtime_error &e )
+        {
+            REQUIRE( QString::fromStdString( e.what() )
+                         .contains( QStringLiteral( "Path outside SICNU_MCP_WORKSPACE" ) ) );
+        }
+    }
+
+    SECTION( "run_workflow rejects an out-of-workspace path in a map pipeline" )
+    {
+        QVariantList steps;
+        QVariantMap step;
+        step[QStringLiteral( "id" )] = QStringLiteral( "s1" );
+        step[QStringLiteral( "operator" )] = QStringLiteral( "rs:mcp_noop" );
+        QVariantMap params;
+        params[QStringLiteral( "output" )] = outside.filePath( QStringLiteral( "out.tif" ) );
+        step[QStringLiteral( "params" )] = params;
+        steps.append( step );
+        QVariantMap pipeline;
+        pipeline[QStringLiteral( "id" )] = QStringLiteral( "p1" );
+        pipeline[QStringLiteral( "steps" )] = steps;
+        QVariantMap args;
+        args[QStringLiteral( "pipeline" )] = pipeline;
+        try
+        {
+            server.testRunWorkflow( args );
+            FAIL( "expected PATH_OUTSIDE_WORKSPACE rejection" );
+        }
+        catch ( const std::runtime_error &e )
+        {
+            REQUIRE( QString::fromStdString( e.what() )
+                         .contains( QStringLiteral( "Path outside SICNU_MCP_WORKSPACE" ) ) );
+        }
+    }
+
+    SECTION( "run_workflow still accepts in-workspace and relative paths" )
+    {
+        QVariantList steps;
+        QVariantMap step;
+        step[QStringLiteral( "id" )] = QStringLiteral( "s1" );
+        step[QStringLiteral( "operator" )] = QStringLiteral( "rs:mcp_noop" );
+        QVariantMap params;
+        params[QStringLiteral( "output" )] = workspace.filePath( QStringLiteral( "out.tif" ) );
+        params[QStringLiteral( "scratch" )] = QStringLiteral( "relative/scratch.tif" );
+        step[QStringLiteral( "params" )] = params;
+        steps.append( step );
+        QVariantMap pipeline;
+        pipeline[QStringLiteral( "id" )] = QStringLiteral( "p1" );
+        pipeline[QStringLiteral( "steps" )] = steps;
+        QVariantMap args;
+        args[QStringLiteral( "pipeline" )] = pipeline;
+        const QVariantMap submitted = server.testRunWorkflow( args );
+        REQUIRE( submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong() >= 0 );
+    }
+
+    SECTION( "preflight_algorithm rejects paths outside before algorithm resolution" )
+    {
+        try
+        {
+            server.testPreflightAlgorithm( "rs:no_such_algorithm",
+                                           { { QStringLiteral( "input" ), outside.filePath( QStringLiteral( "probe.tif" ) ) } } );
+            FAIL( "expected PATH_OUTSIDE_WORKSPACE rejection" );
+        }
+        catch ( const std::runtime_error &e )
+        {
+            // The sandbox must run BEFORE algorithm resolution: the error is
+            // the containment denial, not "Algorithm not found".
+            REQUIRE( QString::fromStdString( e.what() )
+                         .contains( QStringLiteral( "Path outside SICNU_MCP_WORKSPACE" ) ) );
+        }
+    }
 }
 
 TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][spatial]" )

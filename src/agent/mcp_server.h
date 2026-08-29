@@ -105,10 +105,10 @@ protected:
     QVariantMap handleExecuteOperator(const QString &operatorId, const QVariantMap &parameters);
 
     // MCP Methods — Unified Agent Tool Catalog (Algorithms + Interaction + Data)
-    QVariantMap handleListTools(const QString &category = QString());
+    QVariantMap handleListTools(const QString &category = QString(), bool compact = false);
     QVariantMap handleSearchTools(const QString &query, const QString &group = QString(),
                                   const QString &tag = QString(), const QString &inputType = QString(),
-                                  const QString &outputType = QString());
+                                  const QString &outputType = QString(), bool compact = false);
     QVariantMap handleGetToolSchema(const QString &toolId);
 
     // MCP Methods — Agent Interaction Layer
@@ -141,7 +141,10 @@ private:
     /// rpc request id -> TaskCenter task id for in-flight tools/call
     /// executions, so a notifications/cancelled can cancel the mapped task
     /// (#634). Bound: entries are only added, never queried after terminal.
-    QHash<qlonglong, long> m_cancelledRequestTasks;
+    /// rpc request id (numeric OR string, JSON-RPC 2.0 allows both) -> task
+    /// id; entries are removed when consumed by notifications/cancelled and
+    /// the map is bounded (#644).
+    QHash<QString, long> m_cancelledRequestTasks;
 };
 
 #endif // MCP_SERVER_H

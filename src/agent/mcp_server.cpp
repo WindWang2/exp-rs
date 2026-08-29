@@ -292,15 +292,18 @@ const MetaToolDef kMetaTools[] = {
       { { "tool_name", "string", "Interaction tool name (e.g. 'view:get_state', 'view:set_extent', 'roi:set')", true } } },
     { "list_tools",
       "List all unified agent tools (Processing algorithms, Interaction/Canvas tools, Data tools). "
-      "Returns category, name, description, and JSON schema.",
-      { { "category", "string", "Optional category filter: 'Processing', 'Interaction', 'Data', 'Custom'.", false } } },
+      "Returns category, name, description, and JSON schema. Pass compact=true to omit the "
+      "per-entry schemas (much smaller payload) and pull a candidate's schema via get_tool_schema.",
+      { { "category", "string", "Optional category filter: 'Processing', 'Interaction', 'Data', 'Custom'.", false },
+        { "compact", "boolean", "Omit per-entry input schemas for a compact listing. Optional, default false.", false } } },
     { "search_tools",
       "Search unified agent tools by free text (e.g. 'show raster', 'roi', 'spectral'), group, tag, or input/output type.",
       { { "query", "string", "Free-text filter matched against name, group, purpose, tags, and description.", false },
         { "group", "string", "Exact or substring group filter. Optional.", false },
         { "tag", "string", "Tag filter. Optional.", false },
         { "input_type", "string", "Input data type filter. Optional.", false },
-        { "output_type", "string", "Output data type filter. Optional.", false } } },
+        { "output_type", "string", "Output data type filter. Optional.", false },
+        { "compact", "boolean", "Omit per-entry input schemas for a compact listing. Optional, default false.", false } } },
     { "get_tool_schema",
       "Get parameter JSON Schema and metadata for any registered tool in the unified Agent Tool Catalog.",
       { { "tool_id", "string", "Unique ID of the tool, e.g. 'rs:spectral_index', 'canvas:draw_roi', 'data:list_layers'", true } } },
@@ -525,6 +528,13 @@ void McpServer::handleRequest(const QVariantMap &request)
 {
     QVariant id = request.value(QStringLiteral("id"));
     const bool isNotification = !request.contains(QStringLiteral("id"));
+    // JSON-RPC 2.0: an explicit "id": null identifies a REQUEST that must be
+    // answered with "id": null; only an ABSENT id means notification. An
+    // absent id arrives here as an invalid QVariant and an explicit null as
+    // an invalid one too, so tag the latter with a valid Nullptr variant —
+    // QJsonValue::fromVariant serializes it as null (#644).
+    if ( !isNotification && !id.isValid() )
+        id = QVariant::fromValue<std::nullptr_t>( nullptr );
     QString method = request.value(QStringLiteral("method")).toString();
     QVariantMap params = request.value(QStringLiteral("params")).toMap();
 
@@ -556,15 +566,17 @@ void McpServer::handleRequest(const QVariantMap &request)
         // (e.g. user abort). Best-effort: when the cancelled request id maps
         // to a known tools/call execution, cancel its task so server-side
         // work actually stops.
-        bool idOk = false;
-        const qlonglong cancelledRpcId = request.value(QStringLiteral("requestId")).toLongLong(&idOk);
+        const QString cancelledRpcId = request.value(QStringLiteral("requestId")).toString();
         QVariantMap cancelledInfo = request.value(QStringLiteral("requestInfo")).toMap();
         Q_UNUSED(cancelledInfo)
-        if ( idOk )
+        if ( !cancelledRpcId.isEmpty() )
         {
             const long taskId = m_cancelledRequestTasks.value( cancelledRpcId, -1 );
             if ( taskId > 0 )
                 sicnu::TaskCenter::instance().cancelTask( taskId );
+            // Cancellation is one-shot: consume the entry so the map cannot
+            // grow without bound (#644).
+            m_cancelledRequestTasks.remove( cancelledRpcId );
         }
         // Notifications never get a response.
         return;
@@ -731,7 +743,11 @@ void McpServer::handleRequest(const QVariantMap &request)
             }
             else if (toolName == QStringLiteral("list_tools"))
             {
-                resultData = handleListTools(arguments.value(QStringLiteral("category")).toString());
+                // Compact mode (#643): omit per-entry input schemas — pull the
+                // full schema for a candidate via get_tool_schema. Default
+                // remains full-schema so existing clients are unaffected.
+                resultData = handleListTools(arguments.value(QStringLiteral("category")).toString(),
+                                             arguments.value(QStringLiteral("compact")).toBool());
             }
             else if (toolName == QStringLiteral("search_tools"))
             {
@@ -740,7 +756,8 @@ void McpServer::handleRequest(const QVariantMap &request)
                     arguments.value(QStringLiteral("group")).toString(),
                     arguments.value(QStringLiteral("tag")).toString(),
                     arguments.value(QStringLiteral("input_type")).toString(),
-                    arguments.value(QStringLiteral("output_type")).toString());
+                    arguments.value(QStringLiteral("output_type")).toString(),
+                    arguments.value(QStringLiteral("compact")).toBool());
             }
             else if (toolName == QStringLiteral("get_tool_schema"))
             {
@@ -793,8 +810,14 @@ void McpServer::handleRequest(const QVariantMap &request)
                                      .toString()
                                      .mid( QStringLiteral( "task-" ).size() )
                                      .toLong( &tidOk );
-                if ( tidOk && tid > 0 && id.type() == QVariant::LongLong )
-                    m_cancelledRequestTasks[ id.toLongLong() ] = tid;
+                if ( tidOk && tid > 0 && !id.toString().isEmpty() )
+                {
+                    // JSON-RPC 2.0 request ids may be numbers OR strings —
+                    // both must be cancellable (#644). Keep the map bounded.
+                    m_cancelledRequestTasks.insert( id.toString(), tid );
+                    while ( m_cancelledRequestTasks.size() > 1024 )
+                        m_cancelledRequestTasks.erase( m_cancelledRequestTasks.begin() );
+                }
             }
 
             QJsonDocument resultDoc = QJsonDocument::fromVariant(resultData);
@@ -858,10 +881,22 @@ void McpServer::sendToolErrorResult(const QVariant &id, const QString &message,
 
 void McpServer::sendResponse(const QVariant &id, const QVariantMap &result)
 {
-    // An explicit null id still identifies a response to a request that
-    // failed to parse (#634); only an ABSENT id means notification.
+    // An absent id means notification (no response). An explicit "id": null
+    // request arrives as a valid Nullptr marker and IS answered — the
+    // response carries "id": null on the wire (#644).
     if (!id.isValid())
         return;
+    if (id.metaType().id() == QMetaType::Nullptr)
+    {
+        QJsonObject resp;
+        resp[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+        resp[QStringLiteral("id")] = QJsonValue(QJsonValue::Null);
+        const QJsonObject resultObj = QJsonObject::fromVariantMap(result);
+        resp[QStringLiteral("result")] = resultObj;
+        QJsonDocument doc(resp);
+        std::cout << doc.toJson(QJsonDocument::Compact).constData() << std::endl;
+        return;
+    }
 
     QVariantMap response;
     response[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
@@ -879,12 +914,17 @@ void McpServer::sendError(const QVariant &id, int code, const QString &message)
 
 void McpServer::sendError(const QVariant &id, int code, const QString &message, const QVariantMap &data)
 {
-    if ((id.isNull() || !id.isValid()) && code != -32700 && code != -32600)
+    // The explicit-null marker (Nullptr) is answerable like any other id; only
+    // a truly ABSENT id (invalid, not Nullptr) suppresses regular error
+    // responses (#644).
+    const bool explicitNullId = id.metaType().id() == QMetaType::Nullptr;
+    const bool absentId = !id.isValid() || ( id.isNull() && !explicitNullId );
+    if (absentId && code != -32700 && code != -32600)
         return;
 
     const bool hasData = !data.isEmpty();
 
-    if (id.isNull() || !id.isValid())
+    if (absentId || explicitNullId)
     {
         QJsonObject resp;
         resp[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
@@ -1312,6 +1352,19 @@ QVariantMap McpServer::handleGetAlgorithmSchema(const QString &algorithmId)
 
 QVariantMap McpServer::handlePreflightAlgorithm(const QString &algorithmId, const QVariantMap &parameters)
 {
+    // Preflight probes datasets (size/bands/CRS) at the caller-provided paths,
+    // so it must honour the same SICNU_MCP_WORKSPACE containment as the
+    // execute path - otherwise read-probing any file outside the workspace is
+    // possible through this meta tool (#640).
+    QString denyReason;
+    if (!validateWorkspacePaths(parameters, &denyReason))
+    {
+        SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
+        throw McpToolError(algorithmId + QStringLiteral(": ") + denyReason,
+                           QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
+                           QStringLiteral("validation"));
+    }
+
     const Json::Value paramsJson = sicnu::processing::variantToJsonValue(parameters);
     const Json::Value preflight = sicnu::processing::preflightAlgorithm(algorithmId.toStdString(), paramsJson);
     return sicnu::processing::jsonObjectToVariantMap(preflight);
@@ -1577,7 +1630,7 @@ QVariantMap McpServer::handleGetInteractionSchema(const QString &toolName)
     return result;
 }
 
-QVariantMap McpServer::handleListTools(const QString &category)
+QVariantMap McpServer::handleListTools(const QString &category, bool compact)
 {
     using namespace sicnu::agent::tool_catalog;
     std::optional<ToolCategory> catFilter = std::nullopt;
@@ -1611,19 +1664,21 @@ QVariantMap McpServer::handleListTools(const QString &category)
         toolMap[QStringLiteral("category")] = QString::fromStdString(toolCategoryToString(t.category));
         toolMap[QStringLiteral("name")] = QString::fromStdString(t.name);
         toolMap[QStringLiteral("description")] = QString::fromStdString(t.description.empty() ? t.displayName : t.description);
-        toolMap[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(t.inputSchema);
+        if (!compact)
+            toolMap[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(t.inputSchema);
         toolList.append(toolMap);
     }
 
     QVariantMap result;
     result[QStringLiteral("tools")] = toolList;
     result[QStringLiteral("count")] = toolList.size();
+    result[QStringLiteral("compact")] = compact;
     return result;
 }
 
 QVariantMap McpServer::handleSearchTools(const QString &query, const QString &group,
                                         const QString &tag, const QString &inputType,
-                                        const QString &outputType)
+                                        const QString &outputType, bool compact)
 {
     using namespace sicnu::agent::tool_catalog;
     SearchQuery sq;
@@ -1653,13 +1708,15 @@ QVariantMap McpServer::handleSearchTools(const QString &query, const QString &gr
         toolMap[QStringLiteral("category")] = QString::fromStdString(toolCategoryToString(t.category));
         toolMap[QStringLiteral("name")] = QString::fromStdString(t.name);
         toolMap[QStringLiteral("description")] = QString::fromStdString(t.description.empty() ? t.displayName : t.description);
-        toolMap[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(t.inputSchema);
+        if (!compact)
+            toolMap[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(t.inputSchema);
         toolList.append(toolMap);
     }
 
     QVariantMap result;
     result[QStringLiteral("tools")] = toolList;
     result[QStringLiteral("count")] = toolList.size();
+    result[QStringLiteral("compact")] = compact;
     return result;
 }
 
@@ -1696,6 +1753,30 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
     }
     if (pipelineJson.trimmed().isEmpty())
         throw std::runtime_error("Missing required parameter: pipeline");
+
+    // run_workflow submits straight into TaskCenter, so it must satisfy the
+    // same SICNU_MCP_WORKSPACE containment as execute_algorithm - otherwise
+    // step params can read/write any caller-chosen path (#640). The pipeline
+    // may arrive as JSON text, so validate the parsed structure rather than
+    // the raw argument strings.
+    {
+        QVariant pipelineValue = pipelineArg;
+        if (pipelineArg.typeId() == QMetaType::QString) {
+            const QJsonDocument doc = QJsonDocument::fromJson(pipelineJson.toUtf8());
+            if (doc.isObject())
+                pipelineValue = doc.object().toVariantMap();
+        }
+        QVariantMap containmentArgs;
+        containmentArgs.insert(QStringLiteral("pipeline"), pipelineValue);
+        QString denyReason;
+        if (!validateWorkspacePaths(containmentArgs, &denyReason))
+        {
+            SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
+            throw McpToolError(QStringLiteral("run_workflow: ") + denyReason,
+                               QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
+                               QStringLiteral("validation"));
+        }
+    }
 
     const bool autoLoad = arguments.value(QStringLiteral("auto_load")).toBool();
 
