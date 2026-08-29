@@ -948,10 +948,20 @@ void RsObiaMainWindow::applySegmentationResult(
     mSelectTool->setSegmentMap( mSegMap );
 
     double gt[6] = { 0, 1, 0, 0, 0, 1 };
+    // #655: read the projection once here. The rasterize loop below used to
+    // re-open the dataset PER FEATURE just to copy the projection - a
+    // GUI-thread stall proportional to the ROI feature count (and network
+    // round trips for /vsicurl/ sources).
+    QByteArray rasterProjection;
     GDALDatasetH rds = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly );
     if ( rds )
     {
         GDALGetGeoTransform( rds, gt );
+        if ( const char *proj = GDALGetProjectionRef( rds ) )
+        {
+            if ( proj[0] )
+                rasterProjection = proj;
+        }
         GDALClose( rds );
     }
     mSelectTool->setGeoTransform( gt );
@@ -1143,10 +1153,20 @@ void RsObiaMainWindow::applyHierarchyResult( RsObjectHierarchy hierarchy,
     mSelectTool->setSegmentMap( mSegMap );
 
     double gt[6] = { 0, 1, 0, 0, 0, 1 };
+    // #655: read the projection once here. The rasterize loop below used to
+    // re-open the dataset PER FEATURE just to copy the projection - a
+    // GUI-thread stall proportional to the ROI feature count (and network
+    // round trips for /vsicurl/ sources).
+    QByteArray rasterProjection;
     GDALDatasetH rds = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly );
     if ( rds )
     {
         GDALGetGeoTransform( rds, gt );
+        if ( const char *proj = GDALGetProjectionRef( rds ) )
+        {
+            if ( proj[0] )
+                rasterProjection = proj;
+        }
         GDALClose( rds );
     }
     mSelectTool->setGeoTransform( gt );
@@ -1691,10 +1711,20 @@ void RsObiaMainWindow::importRoiLabels()
     }
 
     double gt[6] = { 0, 1, 0, 0, 0, 1 };
+    // #655: read the projection once here. The rasterize loop below used to
+    // re-open the dataset PER FEATURE just to copy the projection - a
+    // GUI-thread stall proportional to the ROI feature count (and network
+    // round trips for /vsicurl/ sources).
+    QByteArray rasterProjection;
     GDALDatasetH rds = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly );
     if ( rds )
     {
         GDALGetGeoTransform( rds, gt );
+        if ( const char *proj = GDALGetProjectionRef( rds ) )
+        {
+            if ( proj[0] )
+                rasterProjection = proj;
+        }
         GDALClose( rds );
     }
 
@@ -1768,14 +1798,9 @@ void RsObiaMainWindow::importRoiLabels()
                 double gtWin[6] = { gt[0] + c0 * gt[1] + r0 * gt[2], gt[1], gt[2],
                                     gt[3] + c0 * gt[4] + r0 * gt[5], gt[4], gt[5] };
                 GDALSetGeoTransform( memDs, gtWin );
-                // copy projection from source raster if available
-                GDALDatasetH srcDsTmp = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly );
-                if ( srcDsTmp )
-                {
-                    const char *proj = GDALGetProjectionRef( srcDsTmp );
-                    if ( proj && proj[0] ) GDALSetProjection( memDs, proj );
-                    GDALClose( srcDsTmp );
-                }
+                // copy the (pre-read) projection from the source raster
+                if ( !rasterProjection.isEmpty() )
+                    GDALSetProjection( memDs, rasterProjection.constData() );
                 GDALRasterBandH memBand = GDALGetRasterBand( memDs, 1 );
                 unsigned char zero = 0;
                 // initialize to 0
