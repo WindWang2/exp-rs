@@ -297,7 +297,9 @@ const MetaToolDef kMetaTools[] = {
       "Returns category, name, description, and JSON schema. Pass compact=true to omit the "
       "per-entry schemas (much smaller payload) and pull a candidate's schema via get_tool_schema.",
       { { "category", "string", "Optional category filter: 'Processing', 'Interaction', 'Data', 'Custom'.", false },
-        { "compact", "boolean", "Omit per-entry input schemas for a compact listing. Optional, default false.", false } } },
+        { "compact", "boolean", "Omit per-entry input schemas for a compact listing. Optional, default false.", false },
+        { "limit", "integer", "Max entries per page (offset pagination). 0 = all. Optional.", false },
+        { "cursor", "integer", "Offset of the first entry to return; pass nextCursor from the previous page. Optional.", false } } },
     { "search_tools",
       "Search unified agent tools by free text (e.g. 'show raster', 'roi', 'spectral'), group, tag, or input/output type.",
       { { "query", "string", "Free-text filter matched against name, group, purpose, tags, and description.", false },
@@ -305,7 +307,9 @@ const MetaToolDef kMetaTools[] = {
         { "tag", "string", "Tag filter. Optional.", false },
         { "input_type", "string", "Input data type filter. Optional.", false },
         { "output_type", "string", "Output data type filter. Optional.", false },
-        { "compact", "boolean", "Omit per-entry input schemas for a compact listing. Optional, default false.", false } } },
+        { "compact", "boolean", "Omit per-entry input schemas for a compact listing. Optional, default false.", false },
+        { "limit", "integer", "Max entries per page (offset pagination). 0 = all. Optional.", false },
+        { "cursor", "integer", "Offset of the first entry to return; pass nextCursor from the previous page. Optional.", false } } },
     { "get_tool_schema",
       "Get parameter JSON Schema and metadata for any registered tool in the unified Agent Tool Catalog.",
       { { "tool_id", "string", "Unique ID of the tool, e.g. 'rs:spectral_index', 'canvas:draw_roi', 'data:list_layers'", true } } },
@@ -755,7 +759,9 @@ void McpServer::handleRequest(const QVariantMap &request)
                 // full schema for a candidate via get_tool_schema. Default
                 // remains full-schema so existing clients are unaffected.
                 resultData = handleListTools(arguments.value(QStringLiteral("category")).toString(),
-                                             arguments.value(QStringLiteral("compact")).toBool());
+                                             arguments.value(QStringLiteral("compact")).toBool(),
+                                             arguments.value(QStringLiteral("limit")).toInt(),
+                                             arguments.value(QStringLiteral("cursor")).toInt());
             }
             else if (toolName == QStringLiteral("search_tools"))
             {
@@ -765,7 +771,9 @@ void McpServer::handleRequest(const QVariantMap &request)
                     arguments.value(QStringLiteral("tag")).toString(),
                     arguments.value(QStringLiteral("input_type")).toString(),
                     arguments.value(QStringLiteral("output_type")).toString(),
-                    arguments.value(QStringLiteral("compact")).toBool());
+                    arguments.value(QStringLiteral("compact")).toBool(),
+                    arguments.value(QStringLiteral("limit")).toInt(),
+                    arguments.value(QStringLiteral("cursor")).toInt());
             }
             else if (toolName == QStringLiteral("get_tool_schema"))
             {
@@ -1640,7 +1648,8 @@ QVariantMap McpServer::handleGetInteractionSchema(const QString &toolName)
     return result;
 }
 
-QVariantMap McpServer::handleListTools(const QString &category, bool compact)
+QVariantMap McpServer::handleListTools(const QString &category, bool compact,
+                                       int limit, int cursor)
 {
     using namespace sicnu::agent::tool_catalog;
     std::optional<ToolCategory> catFilter = std::nullopt;
@@ -1679,7 +1688,30 @@ QVariantMap McpServer::handleListTools(const QString &category, bool compact)
         toolList.append(toolMap);
     }
 
+    // Opt-in offset pagination (#643): limit <= 0 keeps the full payload so
+    // existing clients (Pi bridge) are unaffected. The listing is
+    // deterministically ordered, so a numeric cursor is stable.
     QVariantMap result;
+    if (limit > 0) {
+        const int start = cursor > 0 ? cursor : 0;
+        QVariantList page;
+        int nextCursor = -1;
+        for (int i = start; i < toolList.size(); ++i) {
+            if (limit > 0 && page.size() >= limit) {
+                nextCursor = i;
+                break;
+            }
+            page.append(toolList.at(i));
+        }
+        result[QStringLiteral("tools")] = page;
+        result[QStringLiteral("count")] = page.size();
+        result[QStringLiteral("total")] = toolList.size();
+        result[QStringLiteral("cursor")] = start;
+        if (nextCursor >= 0)
+            result[QStringLiteral("nextCursor")] = nextCursor;
+        result[QStringLiteral("compact")] = compact;
+        return result;
+    }
     result[QStringLiteral("tools")] = toolList;
     result[QStringLiteral("count")] = toolList.size();
     result[QStringLiteral("compact")] = compact;
@@ -1688,7 +1720,8 @@ QVariantMap McpServer::handleListTools(const QString &category, bool compact)
 
 QVariantMap McpServer::handleSearchTools(const QString &query, const QString &group,
                                         const QString &tag, const QString &inputType,
-                                        const QString &outputType, bool compact)
+                                        const QString &outputType, bool compact,
+                                        int limit, int cursor)
 {
     using namespace sicnu::agent::tool_catalog;
     SearchQuery sq;
@@ -1723,7 +1756,30 @@ QVariantMap McpServer::handleSearchTools(const QString &query, const QString &gr
         toolList.append(toolMap);
     }
 
+    // Opt-in offset pagination (#643): limit <= 0 keeps the full payload so
+    // existing clients (Pi bridge) are unaffected. The listing is
+    // deterministically ordered, so a numeric cursor is stable.
     QVariantMap result;
+    if (limit > 0) {
+        const int start = cursor > 0 ? cursor : 0;
+        QVariantList page;
+        int nextCursor = -1;
+        for (int i = start; i < toolList.size(); ++i) {
+            if (limit > 0 && page.size() >= limit) {
+                nextCursor = i;
+                break;
+            }
+            page.append(toolList.at(i));
+        }
+        result[QStringLiteral("tools")] = page;
+        result[QStringLiteral("count")] = page.size();
+        result[QStringLiteral("total")] = toolList.size();
+        result[QStringLiteral("cursor")] = start;
+        if (nextCursor >= 0)
+            result[QStringLiteral("nextCursor")] = nextCursor;
+        result[QStringLiteral("compact")] = compact;
+        return result;
+    }
     result[QStringLiteral("tools")] = toolList;
     result[QStringLiteral("count")] = toolList.size();
     result[QStringLiteral("compact")] = compact;
