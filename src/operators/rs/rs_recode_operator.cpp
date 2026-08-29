@@ -8,6 +8,8 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_multiband_block_stream.h"
 
 #include <gdal_priv.h>
 #include <QFileInfo>
@@ -187,26 +189,58 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
     context.logInfo("Running class recode on " + inputPath);
     context.reportProgress(0.1, "Loading classification label raster");
 
-    cv::Mat labels;
-    double gt[6] = { 0, 1, 0, 0, 0, -1 };
-    QString wkt;
-    QString err;
-    if (!RsPostProcess::loadLabelRaster(QString::fromStdString(inputPath), labels, gt, wkt, &err)) {
-        throw RSOperatorError(ErrorCode::GdalError,
-                              "Failed to load label raster: " + err.toStdString());
-    }
-
     context.throwIfCancelled();
     context.reportProgress(0.3, "Recoding class labels");
 
-    cv::Mat outLabels;
-    if (!RsPostProcess::recode(labels, outLabels, recodeMap, &err)) {
-        throw RSOperatorError(ErrorCode::ComputationError,
-                              "Recode failed: " + err.toStdString());
+    // Streaming execution (#665, ADR 0124 grade bit-exact): pass 1 sweeps the
+    // raster in row-blocks to learn the recoded value range (the save-side
+    // dtype policy is a function of the OUTPUT values), pass 2 streams the
+    // mapping again and writes each block. Output values are bit-identical to
+    // the former full-raster path; only the memory profile changed.
+    GdalDatasetWrapper inDs;
+    if (!inDs.open(QString::fromStdString(inputPath))) {
+        throw RSOperatorError(ErrorCode::GdalError,
+                              "Failed to open label raster: " + inputPath);
+    }
+    const int width = inDs.width();
+    const int height = inDs.height();
+    const int blockRows = std::max(1, std::min(256, height));
+    const size_t blockSize = static_cast<size_t>(width) * blockRows;
+
+    // Pass 1: recoded value range. Input is read through the same GDT_Int32
+    // conversion loadLabelRaster used, so the mapped values match exactly.
+    double outMin = std::numeric_limits<double>::max();
+    double outMax = std::numeric_limits<double>::lowest();
+    {
+        std::vector<float> block(blockSize);
+        for (int y0 = 0; y0 < height; y0 += blockRows) {
+            context.throwIfCancelled();
+            const int rows = std::min(blockRows, height - y0);
+            const size_t n = static_cast<size_t>(width) * rows;
+            if (!inDs.readBandWindow(1, 0, y0, width, rows, block.data())) {
+                throw RSOperatorError(ErrorCode::GdalError,
+                                      "Failed to read label band: " + inputPath);
+            }
+            for (size_t i = 0; i < n; ++i) {
+                const int v = recodeMap.value(static_cast<int>(block[i]),
+                                              static_cast<int>(block[i]));
+                outMin = std::min(outMin, static_cast<double>(v));
+                outMax = std::max(outMax, static_cast<double>(v));
+            }
+        }
+    }
+    if (outMin > outMax) { // empty raster guard
+        outMin = 0;
+        outMax = 0;
     }
 
-    context.throwIfCancelled();
-    context.reportProgress(0.8, "Saving recoded raster");
+    // Dtype policy mirrors saveLabelRaster (ADR 0019 S4): Byte / UInt16 /
+    // Int32 by output range; negative labels force Int32.
+    GDALDataType gdt = GDT_Byte;
+    if (outMin < 0.0 || outMax > 65535.0)
+        gdt = GDT_Int32;
+    else if (outMax > 255.0)
+        gdt = GDT_UInt16;
 
     QVector<QRgb> colorTable;
     loadRasterColorTable(QString::fromStdString(inputPath), colorTable);
@@ -214,17 +248,64 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
         remappedColorTable(colorTable, recodeMap);
     }
 
-    QStringList creationOptions{
-        QStringLiteral("TILED=YES"),
-        QStringLiteral("COMPRESS=DEFLATE"),
-        QStringLiteral("PREDICTOR=2")
-    };
-
-    if (!RsPostProcess::saveLabelRaster(QString::fromStdString(outputPath), outLabels, gt, wkt,
-                                        colorTable, creationOptions,
-                                        std::numeric_limits<double>::quiet_NaN(), &err)) {
+    GdalStreamingOutput output(QString::fromStdString(outputPath), width, height, 1,
+                               static_cast<int>(gdt), inDs.geoTransform(),
+                               inDs.projection());
+    if (!output.isOpen()) {
         throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed to save recoded raster: " + err.toStdString());
+                              "Failed to save recoded raster: " + outputPath);
+    }
+    if (gdt == GDT_Byte) {
+        output.setBandColorTable(1, colorTable); // palette only for Byte output
+    }
+
+    // Pass 2: stream the mapping and write the output blocks.
+    const int totalBlocks = (height + blockRows - 1) / blockRows;
+    int blockIndex = 0;
+    bool ok = true;
+    {
+        std::vector<float> block(blockSize);
+        std::vector<int> outBlock(blockSize);
+        std::vector<quint16> u16Block(blockSize);
+        std::vector<quint8> u8Block(blockSize);
+        for (int y0 = 0; y0 < height && ok; y0 += blockRows, ++blockIndex) {
+            context.throwIfCancelled();
+            const int rows = std::min(blockRows, height - y0);
+            const size_t n = static_cast<size_t>(width) * rows;
+            if (!inDs.readBandWindow(1, 0, y0, width, rows, block.data())) {
+                throw RSOperatorError(ErrorCode::GdalError,
+                                      "Failed to read label band: " + inputPath);
+            }
+            for (size_t i = 0; i < n; ++i) {
+                const int v = recodeMap.value(static_cast<int>(block[i]),
+                                              static_cast<int>(block[i]));
+                outBlock[i] = v;
+            }
+            const GdalBlockStream::Tile tile{0, y0, width, rows, 0, width, rows,
+                                             blockIndex, totalBlocks};
+            const void *pixels = outBlock.data();
+            if (gdt == GDT_Byte) {
+                for (size_t i = 0; i < n; ++i)
+                    u8Block[i] = static_cast<quint8>(outBlock[i]);
+                pixels = u8Block.data();
+            } else if (gdt == GDT_UInt16) {
+                for (size_t i = 0; i < n; ++i)
+                    u16Block[i] = static_cast<quint16>(outBlock[i]);
+                pixels = u16Block.data();
+            }
+            // writeTile writes floats; typed label blocks go through the raw
+            // window writer so the output keeps the label dtype.
+            ok = output.writeTileRaw(1, tile, pixels, gdt);
+            context.reportProgress(0.3 + 0.5 * (static_cast<double>(blockIndex + 1) / totalBlocks),
+                                   "Recoding class labels");
+        }
+    }
+
+    QString closeError;
+    if (!ok || !output.closeWithError(&closeError)) {
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              "Failed to save recoded raster: "
+                                  + (ok ? closeError.toStdString() : outputPath));
     }
 
     // Update and preserve sidecar JSON metadata if present

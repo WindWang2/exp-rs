@@ -3,6 +3,7 @@
 #include "gdal_multiband_block_stream.h"
 #include "gdal_dataset_wrapper.h"
 
+#include <QColor>
 #include <QDebug>
 #include <QFile>
 #include <algorithm>
@@ -134,6 +135,52 @@ GdalStreamingOutput::GdalStreamingOutput( const QString &path, int width, int he
 GdalStreamingOutput::~GdalStreamingOutput()
 {
     close();
+}
+
+bool GdalStreamingOutput::setMetadataItem( const QString &key, const QString &value )
+{
+    if ( !m_ds )
+        return false;
+    return GDALSetMetadataItem( m_ds, key.toUtf8().constData(),
+                                value.toUtf8().constData(), nullptr ) == CE_None;
+}
+
+bool GdalStreamingOutput::setBandColorTable( int band, const QVector<QRgb> &colors )
+{
+    if ( !m_ds || colors.isEmpty() )
+        return false;
+    GDALRasterBandH b = GDALGetRasterBand( m_ds, band );
+    if ( !b )
+        return false;
+    GDALColorTableH table = GDALCreateColorTable( GPI_RGB );
+    for ( int i = 0; i < colors.size() && i < 256; ++i )
+    {
+        GDALColorEntry entry;
+        entry.c1 = qRed( colors[i] );
+        entry.c2 = qGreen( colors[i] );
+        entry.c3 = qBlue( colors[i] );
+        entry.c4 = 255;
+        GDALSetColorEntry( table, i, &entry );
+    }
+    const bool ok = GDALSetRasterColorTable( b, table ) == CE_None;
+    GDALDestroyColorTable( table );
+    return ok;
+}
+
+bool GdalStreamingOutput::writeTileRaw( int band, const GdalBlockStream::Tile &tile,
+                                        const void *pixels, int dtype )
+{
+    if ( !m_ds )
+        return false;
+    GDALRasterBandH b = GDALGetRasterBand( m_ds, band );
+    if ( !b )
+        return false;
+    const CPLErr err = GDALRasterIO( b, GF_Write, tile.xOffset, tile.yOffset,
+                                     tile.width, tile.height,
+                                     const_cast<void *>( pixels ),
+                                     tile.width, tile.height,
+                                     static_cast<GDALDataType>( dtype ), 0, 0 );
+    return err == CE_None;
 }
 
 bool GdalStreamingOutput::writeTile( int band, const GdalBlockStream::Tile &tile,

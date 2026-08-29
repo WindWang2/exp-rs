@@ -53,6 +53,11 @@ public:
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        return RSOperatorMemoryPolicy::Streaming; // row-block streaming (#665)
+    }
+
     Json::Value run(const Json::Value& params, RSOperatorContext& context) override;
 };
 
