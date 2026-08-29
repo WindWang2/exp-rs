@@ -8,6 +8,7 @@
 #include "jobs/job_types.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_run.h"
+#include "workflow/workflow_checkpoint.h"
 #include "data/execution_fingerprint.h"
 
 #include <QDir>
@@ -815,6 +816,91 @@ TEST_CASE("TaskCenter - execution cache skips identical pipeline steps end to en
 
     cache.setEnabled(false);
     cache.clear();
+    engine.clearExecutors();
+}
+
+TEST_CASE("TaskCenter - completed pipeline checkpoints steps and sweeps intermediates", "[processing][task_center][pipeline][v2][gc]") {
+    auto& engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    // Both outputs in one directory so the leaf output's directory is the GC
+    // workspace root and the intermediate is inside it.
+    const QString intermediate = dir.filePath("gc_intermediate.tif");
+    const QString finalOut = dir.filePath("gc_final.tif");
+
+    engine.registerExecutor("pipe:gc_mid", [intermediate](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
+        context.logInfo("mid executed");
+        QFile f(intermediate);
+        REQUIRE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        f.write("mid
+");
+        Json::Value result(Json::objectValue);
+        result["output"] = intermediate.toStdString();
+        return result;
+    });
+    engine.registerExecutor("pipe:gc_leaf", [finalOut](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
+        context.logInfo("leaf executed");
+        QFile f(finalOut);
+        REQUIRE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        f.write("leaf
+");
+        Json::Value result(Json::objectValue);
+        result["output"] = finalOut.toStdString();
+        return result;
+    });
+
+    auto& center = sicnu::TaskCenter::instance();
+
+    sicnu::workflow::WorkflowDefinition def;
+    def.id = "gc_def";
+    def.title = "GC pipeline";
+    sicnu::workflow::StepDef mid;
+    mid.id = "mid";
+    mid.kind = sicnu::workflow::StepKind::Operator;
+    mid.operatorId = "pipe:gc_mid";
+    mid.params["output"] = intermediate.toStdString();
+    sicnu::workflow::StepDef leaf;
+    leaf.id = "leaf";
+    leaf.kind = sicnu::workflow::StepKind::Operator;
+    leaf.operatorId = "pipe:gc_leaf";
+    leaf.params["input"] = "$mid.output";
+    leaf.params["output"] = finalOut.toStdString();
+    sicnu::workflow::StepConnection conn;
+    conn.fromStepId = "mid";
+    conn.fromPort = "output";
+    conn.toPort = "input";
+    leaf.inputs.push_back(conn);
+    def.steps = { mid, leaf };
+
+    long pId = center.submitPipeline(def, false);
+    REQUIRE(pId > 0);
+    auto info = center.waitForPipeline(pId);
+    REQUIRE(info.isCompleted);
+    REQUIRE_FALSE(info.isFailed);
+
+    // Completed run: the leaf output survives, the consumed intermediate is
+    // swept by ArtifactGC (workspace-gated to the leaf's directory).
+    REQUIRE(QFile::exists(finalOut));
+    INFO("intermediate should be reaped by ArtifactGC after completion");
+    CHECK_FALSE(QFile::exists(intermediate));
+
+    // The final checkpoint reflects the terminal run state.
+    auto run = center.workflowRunForPipeline(pId);
+    REQUIRE(run != nullptr);
+    CHECK(run->state() == sicnu::workflow::WorkflowRunState::Completed);
+
+    // The run's persisted plans carry output paths (ArtifactGC gating input
+    // for a recovered run).
+    const auto midPlan = run->stepPlan("mid");
+    const auto leafPlan = run->stepPlan("leaf");
+    REQUIRE(midPlan.has_value());
+    REQUIRE(leafPlan.has_value());
+    CHECK(midPlan->outputLayerPath == intermediate.toStdString());
+    CHECK(leafPlan->outputLayerPath == finalOut.toStdString());
+
     engine.clearExecutors();
 }
 

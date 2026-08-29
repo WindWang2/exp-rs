@@ -1,6 +1,7 @@
 #include "task_center.h"
 
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QJsonObject>
@@ -817,8 +818,23 @@ void TaskCenter::mirrorStepToRunLocked( long pipelineId, const std::string &step
         return;
     plan->status = stepStatusForTaskStatus( status );
     if ( status == TaskStatus::Completed )
+    {
         plan->endTime = QDateTime::currentDateTimeUtc().toString(
             QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) );
+        // Feed ArtifactGC workspace gating and checkpoint consumers: the plan
+        // must know the produced file. Mirrors the task's detected output.
+        const long mirrorTaskId = m_taskForStepLocked( pipelineId, stepId );
+        if ( mirrorTaskId > 0 && m_tasks.contains( mirrorTaskId ) )
+        {
+            const AlgorithmTaskInfo &task = m_tasks[mirrorTaskId];
+            if ( !task.outputLayerPath.isEmpty() )
+            {
+                plan->outputLayerPath = task.outputLayerPath.toStdString();
+                if ( plan->resultPayload.isNull() && !task.resultPayload.isNull() )
+                    plan->resultPayload = task.resultPayload;
+            }
+        }
+    }
     run.updateStepPlan( *plan );
 
     sicnu::workflow::WorkflowCheckpointManager().saveCheckpoint( run );
@@ -848,6 +864,18 @@ void TaskCenter::finalizeWorkflowRunLocked( long pipelineId, bool failed,
     run.recalculateProgress();
 
     sicnu::workflow::WorkflowCheckpointManager().saveCheckpoint( run );
+
+    // Artifact GC (ADR 0123, #668): sweep intermediate artifacts of the
+    // completed run. Gating lives in ArtifactGC (Completed run, completed
+    // non-cache-hit non-leaf steps, inside the retained-outputs workspace);
+    // failures are logged, never fatal — GC must not fail the pipeline.
+    if ( run.state() == sicnu::workflow::WorkflowRunState::Completed )
+    {
+        const sicnu::workflow::GCSweepReport report =
+            sicnu::workflow::ArtifactGC().sweepRun( run, /*retainFinalOutputs=*/true );
+        for ( const QString &error : report.errors )
+            qWarning( "ArtifactGC: %s", error.toUtf8().constData() );
+    }
 }
 
 void TaskCenter::storePipelineStepOutputLocked( long pipelineId, long taskId )
@@ -868,6 +896,15 @@ void TaskCenter::storePipelineStepOutputLocked( long pipelineId, long taskId )
     if ( !fp.isValid() )
         return;
     sicnu::data::ExecutionResultCache::instance().storeOutputPath( fp, out );
+}
+
+long TaskCenter::m_taskForStepLocked( long pipelineId, const std::string &stepId ) const
+{
+    const auto pipeIt = m_pipelines.find( pipelineId );
+    if ( pipeIt == m_pipelines.end() )
+        return -1;
+    const auto taskIt = pipeIt->stepToTaskId.find( QString::fromStdString( stepId ) );
+    return taskIt == pipeIt->stepToTaskId.end() ? -1 : taskIt.value();
 }
 
 std::shared_ptr<const sicnu::workflow::WorkflowRun>
