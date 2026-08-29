@@ -413,6 +413,53 @@ TEST_CASE( "tile engine batches tiles per the manifest contract", "[models][runt
     CHECK( pixels[i] == Catch::Approx( expectedBand[i] ).margin( 1e-3 ) );
 }
 
+TEST_CASE( "tile engine preserves GDAL band order for multi-band inputs (no R/B swap)", "[models][runtime][engine]" )
+{
+  REQUIRE( QFile::exists( identityModelPath() ) );
+
+  QTemporaryDir dir;
+  const QString inputPath = dir.filePath( QStringLiteral( "input.tif" ) );
+  const QString outputPath = dir.filePath( QStringLiteral( "output.tif" ) );
+
+  sicnu::testing::RsSyntheticRasterBuilder builder( 64, 64, 3 );
+  // Distinct per-band constants so a channel swap is directly observable.
+  builder.withConstantValue( 1, 10.0f );
+  builder.withConstantValue( 2, 20.0f );
+  builder.withConstantValue( 3, 30.0f );
+  builder.writeToDisk( inputPath );
+
+  ModelInfo info;
+  info.name = "identity";
+  info.framework = "onnx";
+  info.readiness = ModelReadiness::Ready;
+  info.resolvedArtifactPath = identityModelPath().toStdString();
+  info.tiling.tileSize = 64; // single tile
+
+  auto &registry = ModelRuntimeRegistry::instance();
+  registry.releaseAll();
+  const auto session = registry.acquire( info );
+  REQUIRE( session );
+
+  RSOperatorContext context;
+  TileInferenceEngine engine( info, session );
+  const auto stats = engine.run( inputPath.toStdString(), {}, outputPath.toStdString(), context );
+  CHECK( stats.outBands == 3 );
+
+  // Identity must be per-band: output band i == input band i. OpenCV's
+  // blobFromImage default swapRB=true would exchange bands 1 and 3.
+  const float expected[3] = { 10.0f, 20.0f, 30.0f };
+  GdalDatasetWrapper out;
+  REQUIRE( out.open( outputPath ) );
+  REQUIRE( out.bandCount() == 3 );
+  for ( int b = 1; b <= 3; ++b )
+  {
+    std::vector<float> pixels( 64 * 64 );
+    REQUIRE( out.readBandData( b, pixels.data(), 64, 64 ) );
+    for ( std::size_t i = 0; i < pixels.size(); ++i )
+      CHECK( pixels[i] == Catch::Approx( expected[b - 1] ).margin( 1e-3 ) );
+  }
+}
+
 TEST_CASE( "tile engine propagates nodata and honours cancellation", "[models][runtime][engine]" )
 {
   REQUIRE( QFile::exists( identityModelPath() ) );

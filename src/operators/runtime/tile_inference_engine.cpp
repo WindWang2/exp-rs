@@ -335,11 +335,16 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       continue;
 
     // One forward pass per batch on the shared (cached) session.
+    // swapRB=false: the tile buffer already holds GDAL band order, and the
+    // manifest band_roles expect channel i == file band i — OpenCV's default
+    // swapRB=true would silently exchange bands 1 and 3.
     cv::Mat blob;
     if ( batchMats.size() == 1 )
-      blob = cv::dnn::blobFromImage( batchMats.front() );
+      blob = cv::dnn::blobFromImage( batchMats.front(), 1.0, cv::Size(), cv::Scalar(),
+                                     /*swapRB=*/false, /*crop=*/false );
     else
-      blob = cv::dnn::blobFromImages( batchMats );
+      blob = cv::dnn::blobFromImages( batchMats, 1.0, cv::Size(), cv::Scalar(),
+                                      /*swapRB=*/false, /*crop=*/false );
     cv::Mat output;
     try
     {
