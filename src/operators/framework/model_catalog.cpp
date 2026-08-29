@@ -258,6 +258,43 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   if ( info.preprocess.resize == "to_input" && ( info.input.width <= 0 || info.input.height <= 0 ) )
     markInvalid( "preprocess.resize is to_input but input.width/height are not declared" );
 
+  // Declared-but-unenforced values must fail loudly instead of silently
+  // running identity behaviour (#646) - the read-but-never-enforced class
+  // that #632 closed for input.dtype.
+  if ( !info.preprocess.normalize.empty()
+       && info.preprocess.normalize != "none"
+       && info.preprocess.normalize != "linear"
+       && info.preprocess.normalize != "mean_std" )
+    markInvalid( "unsupported preprocess.normalize '" + info.preprocess.normalize
+                 + "' (supported: none, linear, mean_std)" );
+  if ( !info.preprocess.nodataPolicy.empty() && info.preprocess.nodataPolicy != "zero" )
+    markInvalid( "unsupported preprocess.nodata_policy '" + info.preprocess.nodataPolicy
+                 + "' (only 'zero' is executed)" );
+  if ( info.tiling.tileSize > 0 )
+  {
+    if ( info.tiling.tileSize > 32768 )
+      markInvalid( "tiling.tile_size " + std::to_string( info.tiling.tileSize )
+                   + " is absurdly large (max 32768)" );
+    if ( info.tiling.halo > info.tiling.tileSize / 2 )
+      markInvalid( "tiling.halo " + std::to_string( info.tiling.halo )
+                   + " exceeds tile_size/2 - the inference window would be memory-unbounded" );
+    if ( info.tiling.overlap > info.tiling.tileSize / 2 )
+      markInvalid( "tiling.overlap " + std::to_string( info.tiling.overlap )
+                   + " exceeds tile_size/2" );
+  }
+  else if ( info.tiling.halo > 0 || info.tiling.overlap > 0 )
+  {
+    markInvalid( "tiling.halo/overlap declared but tiling.tile_size is not" );
+  }
+  if ( info.postprocess.nms )
+    markInvalid( "postprocess.nms is declared but not implemented by any runtime - remove it or implement NMS" );
+  if ( info.postprocess.polygonize )
+    markInvalid( "postprocess.polygonize is declared but not implemented by any runtime - remove it or implement mask->polygon chaining" );
+  if ( info.postprocess.simplify > 0.0 )
+    markInvalid( "postprocess.simplify is declared but not implemented by any runtime" );
+  if ( info.output.threshold >= 0.0 )
+    markInvalid( "output.threshold is declared but not executed (use postprocess.mask_threshold, which the runtime enforces)" );
+
   // --- Artifact path resolution (manifest-dir relative — never CWD) -----------
   if ( !info.artifact.path.empty() )
   {
@@ -848,7 +885,11 @@ std::vector<ModelCandidate> ModelCatalog::rankModels( const ModelQueryCriteria &
   std::sort( candidates.begin(), candidates.end(), []( const ModelCandidate &a, const ModelCandidate &b ) {
     if ( a.compatible != b.compatible )
       return a.compatible > b.compatible;
-    return a.score > b.score;
+    if ( a.score != b.score )
+      return a.score > b.score;
+    // Deterministic tertiary key (#646): equal scores must not depend on
+    // unordered_map iteration order (std::sort is not stable).
+    return a.model.name < b.model.name;
   } );
 
   return candidates;

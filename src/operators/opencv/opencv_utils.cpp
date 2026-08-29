@@ -208,6 +208,13 @@ bool writeMatsToRaster(const std::string& outputPath,
         return false;
     }
 
+    // Remove the partial output if any write/close below fails (#647).
+    struct FileCleanup {
+        std::string path;
+        bool committed = false;
+        ~FileCleanup() { if (!committed) QFile::remove(QString::fromStdString(path)); }
+    } cleanup{ outputPath, false };
+
     for (int i = 0; i < bandCount; ++i) {
         GDALRasterBandH band = GDALGetRasterBand(outDs, i + 1);
         bool srcHasNodata = false;
@@ -239,6 +246,7 @@ bool writeMatsToRaster(const std::string& outputPath,
     }
 
     GDALClose(outDs);
+    cleanup.committed = true;
     return true;
 }
 

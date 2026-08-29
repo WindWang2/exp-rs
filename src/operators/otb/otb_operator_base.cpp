@@ -1,6 +1,7 @@
 /***************************************************************************
  * otb_operator_base.cpp  —  Common OTB CLI execution logic
  ***************************************************************************/
+#include <QFile>
 #include "otb_operator_base.h"
 
 #include "operators/framework/rs_operator_context.h"
@@ -115,6 +116,24 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
 
     QString accumulatedOutput;
 
+    // Best-effort output cleanup (#647): OTB applications write their product
+    // at the "-out" argument. On cancellation or a non-zero exit the truncated
+    // file must be removed instead of left looking like a result.
+    QString outputPath;
+    for (int i = 0; i + 1 < args.size(); ++i) {
+        if (args.at(i) == QLatin1String("-out")) {
+            outputPath = args.at(i + 1);
+            break;
+        }
+    }
+    struct OutputCleanup {
+        QString path;
+        bool committed = false;
+        ~OutputCleanup() { if (!path.isEmpty() && !committed) QFile::remove(path); }
+    };
+    OutputCleanup cleanup{ outputPath };
+
+    try {
     while (proc.state() == QProcess::Running) {
         context.throwIfCancelled();
 
@@ -147,11 +166,8 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
     }
 
     if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
-        const QString errorOutput = QString::fromUtf8(proc.readAllStandardError());
-        if (!errorOutput.isEmpty()) {
-            accumulatedOutput += QStringLiteral("\n") + errorOutput;
-        }
-
+        // Under MergedChannels readAllStandardError() is always empty - the
+        // diagnostic text already landed in accumulatedOutput.
         Json::Value details(Json::objectValue);
         details["exitCode"] = proc.exitCode();
         if (!accumulatedOutput.isEmpty()) {
@@ -166,7 +182,11 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
 
         throw RSOperatorError(ErrorCode::OtbError, message, details);
     }
+    } catch (...) {
+        throw; // the OutputCleanup destructor removes the partial product
+    }
 
+    cleanup.committed = true;
     return true;
 }
 

@@ -38,9 +38,11 @@ bool OpenCvDnnRuntime::load( std::string *errorMessage )
   if ( m_net.empty() )
     return fail( "loaded model is empty: " + m_artifactPath );
 
-  // Backend/target selection — the honest version of the manifest's gpu flag:
-  // CUDA only when the model wants it AND the OpenCV build offers it. VRAM
-  // budgets are enforced by evaluateRuntimeReadiness before we get here.
+  // Backend/target selection - the honest version of the manifest's gpu flag:
+  // CUDA only when the model wants it AND the OpenCV build offers it. The
+  // VRAM budget demotion happens in ModelRuntimeRegistry::acquire (with
+  // cpu_fallback enabled, readiness deliberately skips the VRAM check, so
+  // the runtime owns the demotion - #646).
   const bool useCuda = m_modelWantsGpu && m_hw.cudaAvailable;
   if ( useCuda )
   {

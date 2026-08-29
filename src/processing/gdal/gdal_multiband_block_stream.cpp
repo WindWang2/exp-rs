@@ -4,6 +4,7 @@
 #include "gdal_dataset_wrapper.h"
 
 #include <QDebug>
+#include <QFile>
 #include <algorithm>
 
 // ---------------------------------------------------------------------------
@@ -116,9 +117,18 @@ GdalStreamingOutput::GdalStreamingOutput( const QString &path, int width, int he
                                           int bands, int dtype,
                                           const std::array<double, 6> &geoTransform,
                                           const QString &projection )
+    : m_path( path )
 {
     QString err;
+    // createOutputTiff reports setter failures (georeference/projection) but
+    // still returns the dataset; treat a reported error as fatal here so a
+    // streaming writer never produces an unpositioned raster silently (#647).
     m_ds = createOutputTiff( path, width, height, bands, dtype, geoTransform, projection, &err );
+    if ( m_ds && !err.isEmpty() )
+    {
+        GDALClose( m_ds );
+        m_ds = nullptr;
+    }
 }
 
 GdalStreamingOutput::~GdalStreamingOutput()
@@ -182,7 +192,15 @@ void GdalStreamingOutput::close()
         }
         m_ds = nullptr;
     }
+    if ( m_removeOnClose )
+        removeOutput();
 }
+void GdalStreamingOutput::removeOutput()
+{
+    if ( !m_path.isEmpty() )
+        QFile::remove( m_path );
+}
+
 bool GdalStreamingOutput::closeWithError(QString *errorMessage)
 {
     if ( !m_ds )
@@ -195,6 +213,7 @@ bool GdalStreamingOutput::closeWithError(QString *errorMessage)
         CPLErrorReset();
         GDALClose( m_ds );
         m_ds = nullptr;
+        removeOutput();
         return false;
     }
     CPLErrorReset();
@@ -205,6 +224,15 @@ bool GdalStreamingOutput::closeWithError(QString *errorMessage)
         if ( errorMessage ) *errorMessage = msg ? QString::fromUtf8(msg) : QStringLiteral("Close failed");
         CPLErrorReset();
         m_ds = nullptr;
+        removeOutput();
+        return false;
+    }
+    if ( m_removeOnClose )
+    {
+        // Abandoned mid-run: the dataset itself is fine, but the run that owns
+        // it failed/cancelled - the partial result must not look like output (#647).
+        m_ds = nullptr;
+        removeOutput();
         return false;
     }
     m_ds = nullptr;

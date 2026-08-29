@@ -151,14 +151,10 @@ TEST_CASE( "v2 manifests parse the full inference contract", "[models][catalog]"
       "output": {
           "type": "raster",
           "tensor_names": ["probability"],
-          "classes": ["background", "building"],
-          "threshold": 0.5
+          "classes": ["background", "building"]
       },
       "postprocess": {
-          "nms": false,
-          "mask_threshold": 0.5,
-          "polygonize": true,
-          "simplify": 1.5
+          "mask_threshold": 0.5
       },
       "domain": {
           "sensors": ["GF-2"],
@@ -213,11 +209,15 @@ TEST_CASE( "v2 manifests parse the full inference contract", "[models][catalog]"
 
   CHECK( model->output.type == "raster" );
   CHECK( model->output.classes.size() == 2 );
-  CHECK( model->output.threshold == Catch::Approx( 0.5 ) );
+  // #646: output.threshold / postprocess.nms / polygonize / simplify are
+  // declared-but-unenforced keys — no valid manifest declares them anymore
+  // (the enforcement test proves they are rejected). The enforceable mask
+  // threshold stays.
+  CHECK( model->output.threshold < 0.0 );
 
   CHECK( model->postprocess.maskThreshold == Catch::Approx( 0.5 ) );
-  CHECK( model->postprocess.polygonize );
-  CHECK( model->postprocess.simplify == Catch::Approx( 1.5 ) );
+  CHECK_FALSE( model->postprocess.polygonize );
+  CHECK( model->postprocess.simplify == Catch::Approx( 0.0 ) );
 
   CHECK( model->runtime.gpu );
   CHECK( model->runtime.cpuFallback );
@@ -363,6 +363,72 @@ TEST_CASE( "internally inconsistent v2 contracts are invalid manifests", "[model
   REQUIRE( badResize.has_value() );
   CHECK( badResize->readiness == ModelReadiness::InvalidManifest );
   CHECK( badResize->readinessReason.find( "to_input" ) != std::string::npos );
+}
+
+TEST_CASE( "manifest fields that the runtime does not execute are rejected", "[models][catalog][enforcement]" )
+{
+  QTemporaryDir dir;
+  // #646: every manifest field must either be enforced at inference or fail
+  // the manifest loudly at parse. Declared-but-identity behaviour is the
+  // read-but-never-enforced class #632 closed for input.dtype.
+  writeManifest( dir, QStringLiteral( "bad-normalize" ), R"({
+      "name": "bad-normalize",
+      "preprocess": { "normalize": "Mean_Std " }
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "bad-nodata" ), R"({
+      "name": "bad-nodata",
+      "preprocess": { "nodata_policy": "nan" }
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "bad-halo" ), R"({
+      "name": "bad-halo",
+      "tiling": { "tile_size": 256, "halo": 100000, "overlap": 8 }
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "bad-halo-no-tile" ), R"({
+      "name": "bad-halo-no-tile",
+      "tiling": { "halo": 4 }
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "bad-postprocess" ), R"({
+      "name": "bad-postprocess",
+      "postprocess": { "polygonize": true, "nms": true, "simplify": 2.0 }
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "bad-threshold" ), R"({
+      "name": "bad-threshold",
+      "output": { "type": "mask", "threshold": 0.5 }
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "good-tiling" ), R"({
+      "name": "good-tiling",
+      "tiling": { "tile_size": 256, "halo": 64, "overlap": 32, "batch_size": 4 },
+      "preprocess": { "normalize": "linear", "scale": 0.00387, "nodata_policy": "zero" }
+  })", QByteArray( "w" ) );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  struct Expectation {
+    const char *name;
+    const char *reasonFragment;
+  };
+  for ( const auto &e : {
+           Expectation{ "bad-normalize", "normalize" },
+           Expectation{ "bad-nodata", "nodata_policy" },
+           Expectation{ "bad-halo", "halo" },
+           Expectation{ "bad-halo-no-tile", "tile_size" },
+           Expectation{ "bad-postprocess", "polygonize" },
+           Expectation{ "bad-threshold", "output.threshold" },
+       } )
+  {
+    const auto model = catalog.find( e.name );
+    INFO( "manifest: " << e.name );
+    REQUIRE( model.has_value() );
+    CHECK( model->readiness == ModelReadiness::InvalidManifest );
+    CHECK( model->readinessReason.find( e.reasonFragment ) != std::string::npos );
+  }
+
+  // The supported surface (bounded tiling, linear scale, zero nodata) stays
+  // loadable: validation must not over-reject.
+  const auto good = catalog.find( "good-tiling" );
+  REQUIRE( good.has_value() );
+  CHECK( good->readiness != ModelReadiness::InvalidManifest );
 }
 
 TEST_CASE( "rankModels honors band roles and readiness", "[models][catalog][ranking]" )

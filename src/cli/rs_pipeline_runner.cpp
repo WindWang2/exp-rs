@@ -495,9 +495,42 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
         // Prefer live substituted params from the task when available.
         if ( !info.parameterMap.isEmpty() )
         {
+          // Type-aware conversion (#647): stringifying every QVariant turned
+          // numeric params into "512"-style strings and list params into
+          // empty strings, misreporting what actually ran.
           Json::Value liveParams( Json::objectValue );
           for ( auto it = info.parameterMap.begin(); it != info.parameterMap.end(); ++it )
-            liveParams[it.key().toStdString()] = it.value().toString().toStdString();
+          {
+            const QVariant &value = it.value();
+            switch ( value.typeId() )
+            {
+              case QMetaType::Bool:
+                liveParams[it.key().toStdString()] = value.toBool();
+                break;
+              case QMetaType::Int:
+              case QMetaType::LongLong:
+              case QMetaType::UInt:
+              case QMetaType::ULongLong:
+                liveParams[it.key().toStdString()] = Json::Int64( value.toLongLong() );
+                break;
+              case QMetaType::Double:
+              case QMetaType::Float:
+                liveParams[it.key().toStdString()] = value.toDouble();
+                break;
+              case QMetaType::QStringList:
+              case QMetaType::QVariantList:
+              {
+                Json::Value arr( Json::arrayValue );
+                for ( const QVariant &item : value.toList() )
+                  arr.append( item.toString().toStdString() );
+                liveParams[it.key().toStdString()] = arr;
+                break;
+              }
+              default:
+                liveParams[it.key().toStdString()] = value.toString().toStdString();
+                break;
+            }
+          }
           stepResult.params = liveParams;
         }
 

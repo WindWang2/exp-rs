@@ -609,6 +609,14 @@ bool writeGdalOutput(const QString &outputPath, int width, int height,
                                         GDT_Float32, geoTransform, projection, errorMessage);
     if (!ds) return false;
 
+    // Any failure past this point must not leave a truncated output at the
+    // caller's path looking like a result (#647).
+    struct FileCleanup {
+        QString path;
+        bool committed = false;
+        ~FileCleanup() { if (!committed) QFile::remove(path); }
+    } cleanup{ outputPath, false };
+
     for (int b = 0; b < bandCount; ++b) {
         GDALRasterBandH dstBand = GDALGetRasterBand(ds, b + 1);
         if (!dstBand) {
@@ -652,5 +660,6 @@ bool writeGdalOutput(const QString &outputPath, int width, int height,
         CPLErrorReset();
         return false;
     }
+    cleanup.committed = true;
     return true;
 }

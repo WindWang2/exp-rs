@@ -119,7 +119,13 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, std::stri
 
   // The cache key includes the device the session would run on so a fallback
   // switch (cuda unavailable → cpu) can never serve a stale-GPU session.
-  const bool wantGpu = model.runtime.gpu && hw.cudaAvailable;
+  // VRAM budget demotion (#646): with cpu_fallback enabled, readiness skips
+  // the VRAM check, so the runtime itself must demote when the estimate does
+  // not fit the host budget - otherwise the model silently runs on a GPU
+  // that cannot hold it.
+  const bool vramExceedsBudget = hw.vramBudgetMb > 0
+                                 && model.runtime.estimatedVramMb > hw.vramBudgetMb;
+  const bool wantGpu = model.runtime.gpu && hw.cudaAvailable && !vramExceedsBudget;
   const std::string key = framework + "|" + artifact + "|" + ( wantGpu ? "cuda" : "cpu" );
 
   const auto cached = m_cache.find( key );

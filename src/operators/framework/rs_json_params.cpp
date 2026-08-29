@@ -1,6 +1,7 @@
 /***************************************************************************
  * rs_json_params.cpp
  ***************************************************************************/
+#include <limits>
 #include "rs_json_params.h"
 
 #include <QFile>
@@ -42,7 +43,16 @@ int getInt(const Json::Value& params, const std::string& key, int defaultValue) 
         throw RSOperatorError(ErrorCode::TypeMismatch,
                               "Parameter '" + key + "' must be an integer");
     }
-    return params[key].asInt();
+    // jsoncpp throws Json::LogicError from asInt() for out-of-range numerics
+    // (#647): range-check through int64 and surface a structured
+    // InvalidParameter instead of leaking the raw library message.
+    const Json::Int64 value = params[key].asInt64();
+    if (value < std::numeric_limits<int>::min()
+        || value > std::numeric_limits<int>::max()) {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "Parameter '" + key + "' is out of integer range");
+    }
+    return static_cast<int>(value);
 }
 
 double getDouble(const Json::Value& params, const std::string& key, double defaultValue) {

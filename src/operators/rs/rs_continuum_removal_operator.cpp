@@ -54,7 +54,12 @@ Json::Value RsContinuumRemovalOperator::executionEstimate() const {
     Json::Value est( Json::objectValue );
     est["tileWidth"] = 256;
     est["tileHeight"] = 256;
-    est["estimatedRamBytes"] = 67108864; // ~64 MiB tile working set
+    // The real tile working set is 2 x (tile^2 x bands x 4 B) (tileBip +
+    // tileOut): a fixed 64 MiB under-declared hyperspectral runs by up to 4x
+    // at 400 bands, so admission admitted them below their true footprint
+    // (#647). Scale with the 224-band imaging-spectrometer reference, same
+    // convention as rs:spectral_resample.
+    est["estimatedRamBytes"] = Json::Value::UInt64( 2ULL * 256ULL * 256ULL * 224ULL * 4ULL );
     return est;
 }
 

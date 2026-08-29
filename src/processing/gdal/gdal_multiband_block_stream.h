@@ -141,6 +141,16 @@ class GdalStreamingOutput
     void close();
     bool closeWithError(QString *errorMessage = nullptr);
 
+    /// Mark the output as abandoned: close()/closeWithError() delete the
+    /// (truncated) file instead of leaving a partial result at the caller's
+    /// output path (#647). Call on every failure/cancellation path.
+    void abandon() { m_removeOnClose = true; }
+    /// Delete the output file unconditionally (e.g. after closeWithError
+    /// already flushed-and-failed). Best effort.
+    void removeOutput();
+
   private:
     GDALDatasetH m_ds = nullptr;
+    QString m_path;
+    bool m_removeOnClose = false;
 };

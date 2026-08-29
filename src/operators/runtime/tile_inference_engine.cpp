@@ -157,6 +157,17 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   }
   const int bandCount = static_cast<int>( bandList.size() );
 
+  // Manifest band_roles contract (#646): roles feed ranking, but at inference
+  // the fed band count must match the declared roles (band i maps to role i,
+  // and channel order is the file order - see the blob construction below).
+  if ( !m_model.input.bandRoles.empty()
+       && m_model.input.bandRoles.size() != static_cast<std::size_t>( bandCount ) )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "model manifest declares "
+                             + std::to_string( m_model.input.bandRoles.size() )
+                             + " band roles but " + std::to_string( bandCount )
+                             + " bands are fed (pass an explicit band list or fix the manifest)" );
+
   // Contract check that needs real data: per-channel mean/std must match the
   // bands actually fed to the model.
   const ModelPreprocessContract &pre = m_model.preprocess;
@@ -221,12 +232,21 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   std::vector<CoreTile> batchCores;
 
   std::unique_ptr<GdalStreamingOutput> writer;
+  // Any failure after the writer exists must not leave a truncated GeoTIFF at
+  // the caller's output path looking like a result (#647): the catch below
+  // abandons the writer so its destructor removes the partial file.
+  auto abandonOnFailure = [ &writer ]() {
+    if ( writer )
+      writer->abandon();
+  };
   const std::array<double, 6> geoTransform = ds.geoTransform();
   const QString projection = ds.projection();
 
   context.reportProgressForced( 0.0, "Tiled inference: " + std::to_string( totalTiles ) + " tiles" );
 
   int done = 0;
+  try
+  {
   for ( int tileIndex = 0; tileIndex < totalTiles; ++tileIndex )
   {
     context.throwIfCancelled();
@@ -280,7 +300,8 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           maskRow[col] = allInvalid ? 1 : 0;
         }
       }
-      // nodata_policy "zero" (default): non-finite samples become 0.
+      // nodata_policy "zero" (default; the only supported policy - others
+      // are rejected at manifest parse, #646): non-finite samples become 0.
       const std::size_t totalFloats = static_cast<std::size_t>( winH ) * winW * bandCount;
       for ( std::size_t i = 0; i < totalFloats; ++i )
       {
@@ -291,7 +312,10 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       const double *meanArr = meanStd && !pre.mean.empty() ? pre.mean.data() : nullptr;
       const double *stdArr = meanStd && !pre.stdv.empty() ? pre.stdv.data() : nullptr;
       const double scale = pre.scale;
-      if ( meanStd || scale != 1.0 )
+      // Scale applies only to linear/mean_std normalization (#646): with
+      // normalize "none" the pixels must reach the model unscaled, matching
+      // the model_catalog.h contract ("applied last (linear & mean_std)").
+      if ( meanStd || ( pre.normalize == "linear" && scale != 1.0 ) )
       {
         float *data = windowBuffer.data();
         for ( std::size_t i = 0; i < totalFloats; ++i )
@@ -464,10 +488,21 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                             "Tiled inference: " + std::to_string( done ) + "/" + std::to_string( totalTiles ) );
   }
 
+  }
+  catch ( ... )
+  {
+    abandonOnFailure();
+    throw;
+  }
+
   QString writeError;
   if ( !writer || !writer->closeWithError( &writeError ) )
+  {
+    if ( writer )
+      writer->removeOutput();
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "failed to finalize output raster: " + writeError.toStdString() );
+  }
   context.reportProgressForced( 1.0, "Tiled inference complete" );
   stats.tilesProcessed = done;
   return stats;
