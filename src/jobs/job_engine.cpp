@@ -668,6 +668,11 @@ void JobEngine::runOperatorJob( const std::string &jobId )
   ctx.setCancelFlag( cancelFlag.get() );
 
   ctx.setLogCallback( [this, jobId]( const std::string &message, const std::string &level ) {
+    // #634: log lines were notified with a FULL JobRecord copy (including
+    // result + the entire growing logLines) on every line. A chatty operator
+    // on a long run paid O(n^2) memory traffic. Ship a delta instead: the
+    // log-line payload is the only thing new, and the full record is still
+    // reachable from the TaskCenter listener on successful completion.
     JobRecord copy;
     {
       std::lock_guard<std::mutex> lock( m_mutex );
@@ -675,7 +680,11 @@ void JobEngine::runOperatorJob( const std::string &jobId )
       if ( it == m_jobs.end() )
         return;
       appendLog( it->second, logLevelFromString( level ), message );
-      copy = it->second;
+      // Minimal snapshot: enough for the UI's log slot; the TaskCenter
+      // listener already enqueues the terminal record separately.
+      copy.progress = it->second.progress;
+      copy.state = it->second.state;
+      copy.logLines.push_back( it->second.logLines.back() );
     }
     notify( copy );
   } );

@@ -100,7 +100,6 @@ private:
     };
 
     void computeHistograms();
-    void computeSingleBandHistogram( int bandNum, BandData &data );
     void drawChart( QPainter &painter, const QRect &chartRect );
     void drawAxes( QPainter &painter, const QRect &chartRect );
     void drawBars( QPainter &painter, const QRect &chartRect );

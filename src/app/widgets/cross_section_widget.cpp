@@ -50,10 +50,18 @@ void CrossSectionWidget::extractProfile(const QgsPointXY &start, const QgsPointX
     GDALGetGeoTransform(ds, gt);
 
     // Convert world coordinates to pixel coordinates
-    double sx = (start.x() - gt[0]) / gt[1];
-    double sy = (start.y() - gt[3]) / gt[5];
-    double ex = (end.x() - gt[0]) / gt[1];
-    double ey = (end.y() - gt[3]) / gt[5];
+    // Handle rotated rasters (#634): gt[2]/gt[4] (rotation) was ignored,
+    // so samples were shifted on any geotransform with shear.
+    double invGt[6];
+    if ( !GDALInvGeoTransform( gt, invGt ) )
+    {
+        GDALClose( ds );
+        return;
+    }
+    const double sx = invGt[0] + start.x() * invGt[1] + start.y() * invGt[2];
+    const double sy = invGt[3] + start.x() * invGt[4] + start.y() * invGt[5];
+    const double ex = invGt[0] + end.x() * invGt[1] + end.y() * invGt[2];
+    const double ey = invGt[3] + end.x() * invGt[4] + end.y() * invGt[5];
 
     // Sample along the line
     double dx = ex - sx;

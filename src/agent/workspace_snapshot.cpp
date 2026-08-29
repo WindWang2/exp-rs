@@ -81,8 +81,9 @@ MapViewSnapshot::ActiveRasterDisplay captureActiveRaster( QgsMapLayer *layer )
   // Real Data Range: deliberately NOT sampled via bandStatistics() on the
   // GUI thread — that GDAL scan blocks the event loop on large rasters.
   // dataMin/dataMax therefore stay unset on this capture path; the prompt's
-  // "Real Data Range" line is emitted only when another (off-thread)
-  // producer fills the fields.
+  // "Real Data Range" line (resolvePromptHeader) is emitted only when
+  // another (off-thread) producer fills the fields. (#634: tracker owned
+  // by the off-thread refresh - no action here)
   Q_UNUSED( raster );
 
   // Stretch algorithm + display window from the renderer's contrast enhancement
