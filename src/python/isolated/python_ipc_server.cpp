@@ -2,6 +2,8 @@
 #include "python_ipc_server.h"
 
 #include <QDebug>
+#include <QElapsedTimer>
+#include <algorithm>
 #include <QEventLoop>
 #include <QJsonArray>
 #include <QPointer>
@@ -295,7 +297,8 @@ AwaitStatus PythonIpcServer::sendRequestAndAwait( const QString &method, const Q
 }
 
 AwaitStatus PythonIpcServer::sendRequestSync( const QString &method, const QJsonObject &params,
-                                              QJsonObject &result, bool &isError, int timeoutMs )
+                                              QJsonObject &result, bool &isError, int timeoutMs,
+                                              const std::function<bool()> &cancelPredicate )
 {
   result = QJsonObject();
   isError = false;
@@ -309,46 +312,133 @@ AwaitStatus PythonIpcServer::sendRequestSync( const QString &method, const QJson
     return sendRequestAndAwait( method, params, result, isError, timeoutMs );
   }
 
-  // Worker thread: invoke sendRequestAndAwait on server's home thread via shared context
+  // Worker thread (#649): only the SEND is marshalled onto the server's home
+  // thread (the socket is a home-thread object and the marshalled lambda is
+  // quick and non-blocking). The worker then blocks on a QWaitCondition that
+  // the response/disconnect handlers wake. The previous implementation queued
+  // the whole sendRequestAndAwait onto the home thread, which ran a nested
+  // QEventLoop there for up to timeoutMs - a GUI-thread re-entrancy window
+  // per py: call, despite the header contract claiming a QEventLoop-free
+  // synchronous wait.
   struct SyncContext
   {
     QMutex mutex;
     QWaitCondition waitCond;
     bool done = false;
-    AwaitStatus status = AwaitStatus::NoClient;
+    bool responded = false;
+    bool disconnected = false;
+    int reqId = -1; // valid (>= 0) once the home thread has sent the request
+    bool cancelled = false;
     QJsonObject result;
     bool isError = false;
+    std::function<bool()> cancelPredicate;
   };
   auto ctx = std::make_shared<SyncContext>();
+  ctx->cancelPredicate = cancelPredicate;
 
   QPointer<PythonIpcServer> weakServer( this );
-  QMetaObject::invokeMethod( this, [weakServer, method, params, timeoutMs, ctx]() {
-    if ( weakServer )
+
+  // Sends on the home thread; wakes the worker when the request could not be
+  // sent at all (no client at send time).
+  QMetaObject::invokeMethod( this, [weakServer, method, params, ctx]() {
+    if ( !weakServer )
     {
-      ctx->status = weakServer->sendRequestAndAwait( method, params, ctx->result, ctx->isError, timeoutMs );
+      QMutexLocker lock( &ctx->mutex );
+      ctx->done = true;
+      ctx->disconnected = true;
+      ctx->waitCond.wakeAll();
+      return;
     }
-    else
-    {
-      ctx->status = AwaitStatus::Disconnected;
-    }
+    const int reqId = weakServer->sendRequestInternal(
+      method, params,
+      [ctx]( const QJsonObject &response, bool responseIsError ) {
+        // Runs on the home thread when the worker's response arrives.
+        QMutexLocker lock( &ctx->mutex );
+        ctx->responded = true;
+        ctx->result = response;
+        ctx->isError = responseIsError;
+        ctx->done = true;
+        ctx->waitCond.wakeAll();
+      },
+      1, false );
     QMutexLocker lock( &ctx->mutex );
-    ctx->done = true;
-    ctx->waitCond.wakeAll();
+    ctx->reqId = reqId;
+    if ( reqId < 0 )
+    {
+      ctx->done = true;
+      ctx->waitCond.wakeAll();
+    }
   }, Qt::QueuedConnection );
 
+  // Wake the worker on disconnect as well (otherwise it sits out the full
+  // timeout after the client died).
+  QMetaObject::Connection disconnectConn =
+    connect( this, &PythonIpcServer::clientDisconnected, this, [ctx]() {
+      QMutexLocker lock( &ctx->mutex );
+      ctx->disconnected = true;
+      ctx->done = true;
+      ctx->waitCond.wakeAll();
+    }, Qt::QueuedConnection );
+
+  bool timedOut = false;
   {
     QMutexLocker lock( &ctx->mutex );
+    QElapsedTimer deadline;
+    deadline.start();
     while ( !ctx->done )
     {
-      if ( !ctx->waitCond.wait( &ctx->mutex, timeoutMs + 1000 ) )
+      // Poll the cancellation predicate in bounded slices so a cancel wakes
+      // this wait within ~250 ms instead of sitting out the full timeout
+      // (spurious wakeups are handled by the while loop).
+      if ( ctx->cancelPredicate && ctx->cancelPredicate() )
       {
-        return AwaitStatus::Timeout;
+        ctx->cancelled = true;
+        ctx->done = true;
+        break;
       }
+      const qint64 remaining = timeoutMs - deadline.elapsed();
+      if ( remaining <= 0 )
+      {
+        timedOut = true;
+        break;
+      }
+      if ( !ctx->waitCond.wait( &ctx->mutex, std::min<qint64>( remaining, 250 ) ) )
+        continue; // re-check done/cancel/timeout under the lock
     }
   }
-  result = ctx->result;
-  isError = ctx->isError;
-  return ctx->status;
+  disconnect( disconnectConn );
+
+  const bool eraseCallback = !ctx->responded && ctx->reqId >= 0;
+  const int reqId = ctx->reqId;
+  if ( eraseCallback )
+  {
+    // m_callbacks lives on the home thread; marshal the erase (fire-and-
+    // forget - a late response then resolves into an abandoned context).
+    QMetaObject::invokeMethod( this, [this, reqId]() {
+      m_callbacks.erase( reqId );
+    }, Qt::QueuedConnection );
+  }
+
+  AwaitStatus status = AwaitStatus::Ok;
+  if ( ctx->responded )
+  {
+    result = ctx->result;
+    isError = ctx->isError;
+    status = AwaitStatus::Ok;
+  }
+  else if ( ctx->cancelled )
+  {
+    status = AwaitStatus::Cancelled;
+  }
+  else if ( timedOut )
+  {
+    status = AwaitStatus::Timeout;
+  }
+  else
+  {
+    status = AwaitStatus::Disconnected;
+  }
+  return status;
 }
 
 void PythonIpcServer::sendResponse( int id, const QJsonObject &result )

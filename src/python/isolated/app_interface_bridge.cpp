@@ -340,7 +340,8 @@ void AppInterfaceBridge::setupDefaultAlgorithmHandler()
         QJsonObject execResult;
         bool execIsError = false;
         const AwaitStatus awaitStatus = ipc->sendRequestSync(
-          QStringLiteral( "processing.execute_algorithm" ), req, execResult, execIsError, 300000 );
+          QStringLiteral( "processing.execute_algorithm" ), req, execResult, execIsError, 300000,
+          isCancelled );
         // Drop the mapping before returning; the daemon has already
         // close()+unlink()ed on its side too (best-effort, idempotent).
         shmSegs.clear();
@@ -352,6 +353,8 @@ void AppInterfaceBridge::setupDefaultAlgorithmHandler()
             throw std::runtime_error( "Python worker disconnected during algorithm execution" );
           case AwaitStatus::Timeout:
             throw std::runtime_error( "Python algorithm execution timed out" );
+          case AwaitStatus::Cancelled:
+            throw std::runtime_error( "Python algorithm execution cancelled" );
           case AwaitStatus::Ok:
             break;
         }

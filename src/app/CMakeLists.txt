@@ -315,7 +315,10 @@ if(SICNU_EMBED_PYTHON)
         ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
         ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
         ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_runner.cpp
-        ${CMAKE_SOURCE_DIR}/src/app/python/sicnu_app_interface.cpp
+        # sicnu_app_interface.cpp is NOT compiled into the exe (#652): it
+        # already lives in sicnu_core (exported, WINDOWS_EXPORT_ALL_SYMBOLS ON)
+        # and this exe links sicnu_core - a second exe-side copy is the ODR
+        # hazard. The CLI keeps its own copy (it does not link sicnu_core).
         widgets/python_script_editor.cpp
         widgets/python_script_editor.h
     )

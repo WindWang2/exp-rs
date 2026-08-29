@@ -22,6 +22,7 @@ enum class AwaitStatus
   NoClient,     ///< No worker connected; nothing was sent
   Timeout,      ///< timeoutMs elapsed without a response
   Disconnected, ///< Worker disconnected while awaiting the response
+  Cancelled,    ///< cancelPredicate returned true while awaiting (#649)
 };
 
 class PythonIpcServer : public QObject
@@ -70,14 +71,20 @@ class PythonIpcServer : public QObject
     AwaitStatus sendRequestAndAwait( const QString &method, const QJsonObject &params,
                                      QJsonObject &result, bool &isError, int timeoutMs );
 
-    /// Synchronous request/response using waitForReadyRead (no QEventLoop).
-    /// Safe from any thread, including JobEngine worker threads: during the
-    /// wait the readyRead signal is disconnected so the calling thread owns the
-    /// socket exclusively. Incoming JSON-RPC requests (e.g. iface.get_active_layer)
+    /// Synchronous request/response, safe from any thread including JobEngine
+    /// worker threads. Main thread: QEventLoop-based (sendRequestAndAwait).
+    /// Worker threads (#649): only the send is marshalled to the home thread;
+    /// the caller blocks on a QWaitCondition (no nested event loop anywhere,
+    /// no GUI-thread re-entrancy) and cancellation is polled in <=250 ms
+    /// slices. Incoming JSON-RPC requests (e.g. iface.get_active_layer)
     /// received while waiting are queued and re-emitted via messageReceived on
     /// the server's home thread after the call returns, so they are not lost.
+    /// @param cancelPredicate polled (<= every 250 ms) while the caller's
+    /// thread waits; when it fires the wait returns Cancelled and the
+    /// in-flight request is retired (#649).
     AwaitStatus sendRequestSync( const QString &method, const QJsonObject &params,
-                                 QJsonObject &result, bool &isError, int timeoutMs );
+                                 QJsonObject &result, bool &isError, int timeoutMs,
+                                 const std::function<bool()> &cancelPredicate = {} );
 
     void sendResponse( int id, const QJsonObject &result );
     void sendError( int id, const QString &errorMessage );
