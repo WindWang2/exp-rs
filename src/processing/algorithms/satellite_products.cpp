@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
+#include <stdexcept>
 #include <QFileInfo>
 
 #include "qgsdatasourceresolver.h"
@@ -465,9 +466,15 @@ QVector<BandFile> selectBands(const ProductInfo& product, const QStringList& ban
         }
         return selected;
     }
+    QStringList missing;
     for (const QString& want : bandNames) {
         if (const BandFile* hit = findBand(product.bands, want))
             selected.append(*hit);
+        else
+            missing.append(want);
+    }
+    if (!missing.isEmpty()) {
+        throw std::runtime_error(QStringLiteral("Requested bands not found: %1").arg(missing.join(QStringLiteral(", "))).toStdString());
     }
     return selected;
 }
@@ -1353,7 +1360,14 @@ bool stackToGeoTiff(const ProductInfo& product,
         return false;
     }
 
-    QVector<BandFile> selected = selectBands(product, bandNames);
+    QVector<BandFile> selected;
+    try {
+        selected = selectBands(product, bandNames);
+    } catch (const std::exception &e) {
+        if (errorMessage)
+            *errorMessage = QString::fromStdString(e.what());
+        return false;
+    }
     if (selected.isEmpty()) {
         if (errorMessage)
             *errorMessage = bandNames.isEmpty()
