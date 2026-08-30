@@ -294,23 +294,38 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
     }
 
     // Rank by PPI count, tie-broken by index for determinism.
-    std::vector<size_t> order(pixelCount);
+    // Collect validity up front (#681): invalid pixels score 0 but ranked
+    // across all pixels, so the tail of the selection was sentinel/NaN
+    // spectra — matching the in-memory kernel semantics where tail-validity is clamped.
+    std::vector<bool> isValidPixel(pixelCount, false);
+    streamTiles([&](const float *tile, size_t n, size_t base) {
+        for (size_t p = 0; p < n; ++p)
+            isValidPixel[base + p] = isPixelValid(tile + p * B);
+        return true;
+    });
+    const size_t validCount = static_cast<size_t>(std::count(isValidPixel.begin(), isValidPixel.end(), true));
+    if (validCount == 0)
+        throw RSOperatorError(ErrorCode::InvalidInputData, "No valid pixels for endmember selection");
+    std::vector<size_t> order;
+    order.reserve(validCount);
     for (size_t i = 0; i < pixelCount; ++i)
-        order[i] = i;
+        if (isValidPixel[i])
+            order.push_back(i);
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
         if (counts[a] != counts[b])
             return counts[a] > counts[b];
         return a < b;
     });
+    const int take = std::min<int>(nEndmembers, static_cast<int>(validCount));
 
     context.reportProgress(0.8, "PPI pass 3/3: extracting endmembers");
     EndmemberExtraction::EndmemberResult result;
-    result.endmembers.resize(static_cast<size_t>(nEndmembers) * bandCount);
-    result.endmemberIndices.resize(nEndmembers);
+    result.endmembers.resize(static_cast<size_t>(take) * bandCount);
+    result.endmemberIndices.resize(take);
     result.ppiCounts = std::move(counts);
     {
         std::unordered_set<int> chosen;
-        for (int e = 0; e < nEndmembers; ++e)
+        for (int e = 0; e < take; ++e)
         {
             result.endmemberIndices[static_cast<size_t>(e)] =
                 static_cast<int>(order[static_cast<size_t>(e)]);
@@ -323,7 +338,7 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
                 if (chosen.count(idx) == 0)
                     continue;
                 const float *spectrum = tile + p * B;
-                for (int e = 0; e < nEndmembers; ++e)
+                for (int e = 0; e < take; ++e)
                 {
                     if (result.endmemberIndices[static_cast<size_t>(e)] == idx)
                     {
@@ -342,7 +357,7 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
 
     Json::Value json(Json::objectValue);
     Json::Value ends(Json::arrayValue);
-    for (int e = 0; e < nEndmembers; ++e)
+    for (int e = 0; e < take; ++e)
     {
         Json::Value spectrum(Json::arrayValue);
         for (int b = 0; b < bandCount; ++b)
