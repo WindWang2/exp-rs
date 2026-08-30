@@ -22,6 +22,7 @@
 
 #include <gdal.h>
 
+#include <QColor>   // QRgb (setBandColorTable)
 #include <QString>
 #include <QVector>
 
