@@ -155,9 +155,10 @@ public:
 
   /// Look up the output path of a prior identical execution. Returns nullopt
   /// when disabled, absent, or the cached file no longer exists on disk
-  /// (self-healing against external deletion). The existence check keeps a
-  /// stale entry from ever being served.
-  std::optional<QString> lookupOutputPath( const ExecutionFingerprint &fp ) const;
+  /// (self-healing against external deletion: the stale entry is erased).
+  /// Deliberately NON-const: the self-heal erase and the LRU recency touch
+  /// mutate the cache.
+  std::optional<QString> lookupOutputPath( const ExecutionFingerprint &fp );
 
   /// Record the output path of a freshly-completed step. No-op when disabled
   /// or the path is empty. May evict the least-recently-used path entry.

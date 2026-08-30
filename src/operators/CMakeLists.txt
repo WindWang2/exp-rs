@@ -10,6 +10,18 @@ add_library(sicnu_operators_core STATIC
     framework/rs_operator_error.cpp
 )
 target_include_directories(sicnu_operators_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
+# rs_operator_error.h (a public header) includes <json/json.h>, so the leaf
+# needs the same jsoncpp resolution as its consumers: the canonical jsoncpp
+# target when defined, else pkg-config include dirs + libs. Missing this is
+# what red-flagged Tier 1/2 with 'json/json.h: No such file or directory'.
+if(TARGET jsoncpp)
+    target_link_libraries(sicnu_operators_core PUBLIC jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+    target_include_directories(sicnu_operators_core PUBLIC ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(sicnu_operators_core PUBLIC ${JSONCPP_LIBRARIES})
+else()
+    target_link_libraries(sicnu_operators_core PUBLIC jsoncpp)
+endif()
 # The leaf is linked into SHARED targets; force PIC so the static objects are
 # linkable into sicnu_processing/sicnu_operators regardless of the global
 # CMAKE_POSITION_INDEPENDENT_CODE default.

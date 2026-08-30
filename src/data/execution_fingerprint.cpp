@@ -350,7 +350,7 @@ void ExecutionResultCache::invalidate( const ExecutionFingerprint &fp )
   m_pathEntries.remove( fp.digest );
 }
 
-std::optional<QString> ExecutionResultCache::lookupOutputPath( const ExecutionFingerprint &fp ) const
+std::optional<QString> ExecutionResultCache::lookupOutputPath( const ExecutionFingerprint &fp )
 {
   std::lock_guard<std::recursive_mutex> locker( m_mutex );
   if ( !m_enabled )
