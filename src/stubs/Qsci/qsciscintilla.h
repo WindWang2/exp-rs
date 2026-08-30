@@ -326,8 +326,6 @@ public:
     virtual void setFirstVisibleLine(int) {}
     virtual int firstVisibleLine() const { return 0; }
     virtual int lineAt(const QPoint &) const { return -1; }
-    virtual void lineIndexFromPosition(int, int *, int *) const {}
-    virtual int positionFromLineIndex(int, int) const { return 0; }
     virtual int lineEndPosition(int) const { return 0; }
 
     virtual QsciAPIs *apis() const { return nullptr; }
@@ -356,7 +354,9 @@ private:
     int m_selEnd = 0;
 
     // Linear QString position of (line, index), or -1 when out of range.
-    int positionFromLineIndex(int line, int index) const
+    // Virtual: the no-op placeholders that used to shadow these (returning 0
+    // / leaving the out-params untouched) are superseded by these real ones.
+    virtual int positionFromLineIndex(int line, int index) const
     {
         if ( line < 0 || index < 0 )
             return -1;
@@ -368,7 +368,7 @@ private:
             pos += lines[i].length() + 1; // + the newline
         return pos + index;
     }
-    void lineIndexFromPosition(int pos, int *line, int *index) const
+    virtual void lineIndexFromPosition(int pos, int *line, int *index) const
     {
         if ( line ) *line = -1;
         if ( index ) *index = -1;
