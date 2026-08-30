@@ -288,15 +288,20 @@ Json::Value runAtmosphericCorrectionCore(const std::string& defaultMethod,
                                                      &metaError)
                 && meta.bands.contains(band)) {
                 const auto &c = meta.bands.value(band);
-                if (!hasGain) {
-                    gain = static_cast<float>(c.radianceGain);
-                    context.logInfo("Resolved radiance gain from " + metadataPath.toStdString());
+                if (!c.hasRadiance) {
+                    context.logWarning("Metadata for band " + std::to_string(band) +
+                                       " carries no radiance coefficients");
+                } else if (!hasGain || !hasBias) {
+                    if (!hasGain) {
+                        gain = static_cast<float>(c.radianceGain);
+                        context.logInfo("Resolved radiance gain from " + metadataPath.toStdString());
+                    }
+                    if (!hasBias) {
+                        bias = static_cast<float>(c.radianceBias);
+                        context.logInfo("Resolved radiance bias from " + metadataPath.toStdString());
+                    }
+                    resolved = true;
                 }
-                if (!hasBias) {
-                    bias = static_cast<float>(c.radianceBias);
-                    context.logInfo("Resolved radiance bias from " + metadataPath.toStdString());
-                }
-                resolved = true;
             }
         }
         if (!resolved && (!hasGain || !hasBias)) {
