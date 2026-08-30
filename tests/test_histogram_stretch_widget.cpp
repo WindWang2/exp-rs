@@ -166,8 +166,6 @@ TEST_CASE("HistogramStretchWidget setRasterLayer", "[gui][histogram]") {
         widget.setRasterLayer(layer);
         CHECK(widget.rasterLayer() == layer);
         CHECK(widget.band() == 1);
-    } else {
-        WARN("dem_sample.tif not available, skipping raster test");
     }
 
     delete layer;
@@ -206,8 +204,6 @@ TEST_CASE("HistogramStretchWidget algorithm switching", "[gui][histogram]") {
             CHECK( layer->renderer() != nullptr );
         }
         CHECK( spy.count() >= algorithmCombo->count() );
-    } else {
-        WARN("dem_sample.tif not available, skipping algorithm test");
     }
 
     delete layer;
@@ -530,8 +526,6 @@ TEST_CASE("HistogramStretchWidget resetStretch", "[gui][histogram]") {
         // After reset, min/max should be restored to data range
         // (verify no crash and layer remains valid)
         CHECK(widget.rasterLayer() == layer);
-    } else {
-        WARN("dem_sample.tif not available, skipping reset test");
     }
 
     delete layer;
