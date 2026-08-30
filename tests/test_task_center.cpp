@@ -654,7 +654,7 @@ TEST_CASE("TaskCenter - v2 run fingerprints are stable and transitively invalida
     CHECK(fpB3->fingerprint != fpB1->fingerprint);
 
     // A failed pipeline transitions the run to Failed with the error message.
-    engine.registerExecutor("pipe:v2fail", [](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext&) {
+    engine.registerExecutor("pipe:v2fail", [](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext&) -> Json::Value {
         throw std::runtime_error("v2 wiring failure test");
     });
     sicnu::workflow::WorkflowDefinition failDef;
