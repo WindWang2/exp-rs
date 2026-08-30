@@ -743,7 +743,10 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
                 } else {
                     float cuSq = noiseVariance;
                     float clSq = localVar / (mean * mean);
-                    float weight = (clSq <= cuSq) ? 0.0f : (1.0f - cuSq / clSq) / (1.0f + cuSq);
+                    // Lee weight is (1 - Cu^2/Ci^2); the Kuan filter adds
+                    // the extra 1/(1+Cu^2) factor (see :978) — the previous
+                    // copy here made Lee ≡ Kuan (#678).
+                    float weight = (clSq <= cuSq) ? 0.0f : 1.0f - cuSq / clSq;
                     output[y * width + x] = mean + weight * (pixel - mean);
                 }
             }
@@ -975,7 +978,7 @@ void ImageEnhancement::kuanFilter(const float *input, float *output,
                     // Local variation less than noise → full smoothing
                     weight = 0.0f;
                 } else {
-                weight = (1.0f - cuSq / clSq) / (1.0f + cuSq);
+                weight = 1.0f - cuSq / clSq;
             }
 
             output[y * width + x] = mean + weight * (pixel - mean);
