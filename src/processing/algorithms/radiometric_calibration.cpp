@@ -157,11 +157,7 @@ bool loadLandsatMtl(const QString &mtlPath, const QMap<int, QString> &bandNames,
             v = toDouble(kv.value(QStringLiteral("RADIANCE_ADD")), &bOk);
             if (bOk) c.radianceBias = v;
         }
-        if (gOk) c.hasRadiance = true;
-        if (gOk && bOk) c.hasRadiance = true;
-        // For single-coefficient presence we treat that as having radiance intent only when at least one was found.
-        // The flag is per-band to gate toRadiance validation.
-        if (gOk || bOk) c.hasRadiance = true;
+        if (gOk || bOk) c.hasRadiance = true; // per-band gate for hasRadiance validation.
         // Reflectance
         tryCandidates(QStringLiteral("REFLECTANCE_MULT_BAND_"), candNumeric, &v, &rmOk);
         if (rmOk) c.reflMult = v;
