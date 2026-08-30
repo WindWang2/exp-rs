@@ -905,7 +905,7 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
     emit viewPlanInCanvasRequested( planJson );
   } );
 
-  connect( runBtn, &QPushButton::clicked, this, [this, planJson, runBtn]() {
+  connect( runBtn, &QPushButton::clicked, this, [this, planJson, toolCallJson, runBtn]() {
     runBtn->setEnabled( false );
     runBtn->setText( QStringLiteral( "执行中…" ) );
     QPointer<QPushButton> safeRunBtn = runBtn;
