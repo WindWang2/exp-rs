@@ -19,6 +19,7 @@
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_run.h"
 #include "workflow/workflow_checkpoint.h"
+#include "workflow/artifact_gc.h"
 #include "workflow/placeholder_grammar.h"
 #include "data/execution_fingerprint.h"
 #include "data/asset_types.h"
@@ -830,7 +831,8 @@ void TaskCenter::mirrorStepToRunLocked( long pipelineId, const std::string &step
     if ( status == TaskStatus::Completed )
     {
         plan->endTime = QDateTime::currentDateTimeUtc().toString(
-            QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) );
+                                        QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) )
+                            .toStdString();
         // Feed ArtifactGC workspace gating and checkpoint consumers: the plan
         // must know the produced file. Mirrors the task's detected output.
         const long mirrorTaskId = taskForStepLocked( pipelineId, stepId );
@@ -927,7 +929,7 @@ long TaskCenter::taskForStepLocked( long pipelineId, const std::string &stepId )
     const auto pipeIt = m_pipelines.find( pipelineId );
     if ( pipeIt == m_pipelines.end() )
         return -1;
-    const auto taskIt = pipeIt->stepToTaskId.find( QString::fromStdString( stepId ) );
+    const auto taskIt = pipeIt->stepToTaskId.find( stepId );
     return taskIt == pipeIt->stepToTaskId.end() ? -1 : taskIt.value();
 }
 
