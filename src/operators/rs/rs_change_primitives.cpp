@@ -22,6 +22,18 @@
 #include <optional>
 #include <string>
 
+namespace {
+void normalizeToNoData(GdalDatasetWrapper &ds, int bandNum, std::vector<float> &buf) {
+    bool hasNodata = false;
+    const double nd = ds.bandNoDataValue(bandNum, &hasNodata);
+    if (!hasNodata || !std::isfinite(nd))
+        return;
+    const float ndF = static_cast<float>(nd);
+    for (float &v : buf)
+        if (v == ndF || !std::isfinite(v))
+            v = std::numeric_limits<float>::quiet_NaN();
+}
+} // namespace
 namespace sicnu::operators::rs {
 
 using namespace params;
@@ -472,6 +484,10 @@ Json::Value RsChangeCvaAngleOperator::run( const Json::Value &params, RSOperator
     {
         throw RSOperatorError( ErrorCode::GdalError, "Failed to read raster bands" );
     }
+    normalizeToNoData(beforeDs, b1, beforeBuf1);
+    normalizeToNoData(beforeDs, b2, beforeBuf2);
+    normalizeToNoData(afterDs, a1, afterBuf1);
+    normalizeToNoData(afterDs, a2, afterBuf2);
 
     std::vector<float> out( pixels );
     QString err;
@@ -607,6 +623,8 @@ Json::Value RsChangeSamOperator::run( const Json::Value &params, RSOperatorConte
         {
             throw RSOperatorError( ErrorCode::GdalError, "Failed to read band " + std::to_string( b + 1 ) );
         }
+        normalizeToNoData(beforeDs, b + 1, beforeBands[b]);
+        normalizeToNoData(afterDs, b + 1, afterBands[b]);
         bPtrs[b] = beforeBands[b].data();
         aPtrs[b] = afterBands[b].data();
     }
@@ -737,6 +755,8 @@ Json::Value RsChangeLogRatioOperator::run( const Json::Value &params, RSOperator
     {
         throw RSOperatorError( ErrorCode::GdalError, "Failed to read raster bands" );
     }
+    normalizeToNoData(beforeDs, bBand, beforeBuf);
+    normalizeToNoData(afterDs, aBand, afterBuf);
 
     if ( !ChangeDetection::logRatio( beforeBuf.data(), afterBuf.data(), out.data(), pixels, epsilon ) )
     {
@@ -859,6 +879,8 @@ Json::Value RsChangeIrMadOperator::run( const Json::Value &params, RSOperatorCon
         {
             throw RSOperatorError( ErrorCode::GdalError, "Failed to read band " + std::to_string( b + 1 ) );
         }
+        normalizeToNoData(beforeDs, b + 1, beforeBands[b]);
+        normalizeToNoData(afterDs, b + 1, afterBands[b]);
         bPtrs[b] = beforeBands[b].data();
         aPtrs[b] = afterBands[b].data();
     }
