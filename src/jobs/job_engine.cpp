@@ -27,7 +27,33 @@ bool isTerminalState( JobState state )
   return state == JobState::Succeeded || state == JobState::Failed || state == JobState::Cancelled;
 }
 
+/// Test-injectable ceiling standing in for hardware_concurrency (#661):
+/// 0 = use the host's real core count.
+std::atomic<int> s_concurrencyCeilingOverride{ 0 };
+
 } // namespace
+
+int JobEngine::concurrencyCeiling()
+{
+  const int overrideCores = s_concurrencyCeilingOverride.load( std::memory_order_relaxed );
+  if ( overrideCores > 0 )
+    return overrideCores;
+  const unsigned int hw = std::thread::hardware_concurrency();
+  return static_cast<int>( std::max( 1u, hw ) );
+}
+
+void JobEngine::setConcurrencyCeilingForTests( int cores )
+{
+  s_concurrencyCeilingOverride.store( cores, std::memory_order_relaxed );
+}
+
+int JobEngine::defaultWorkerCount()
+{
+  // Throttler cap minus one core reserved for UI; floor of 1 protects
+  // single-core machines (#661).
+  const int cap = concurrencyCeiling();
+  return std::clamp( cap - 1, 1, cap );
+}
 
 JobEngine &JobEngine::instance()
 {
@@ -35,7 +61,10 @@ JobEngine &JobEngine::instance()
   return e;
 }
 
-JobEngine::JobEngine() = default;
+JobEngine::JobEngine()
+{
+  m_maxWorkers = defaultWorkerCount();
+}
 
 JobEngine::~JobEngine()
 {
@@ -52,6 +81,10 @@ void JobEngine::shutdown()
     if ( m_shuttingDown )
       return;
     m_shuttingDown = true;
+    // Latched: production shutdown is final (#684). Only shutdownForTests
+    // clears it, so a late submit cannot resurrect worker threads while the
+    // process is tearing down.
+    m_stopped = true;
     m_stop.store( true );
     m_generation++;
     toJoin.swap( m_workers );
@@ -117,7 +150,7 @@ void JobEngine::shutdown()
 void JobEngine::setMaxWorkers( int n )
 {
   std::lock_guard<std::mutex> lock( m_mutex );
-  m_maxWorkers = std::clamp( n, 2, 4 );
+  m_maxWorkers = std::max( 1, n );
   if ( !m_stop.load() )
     ensureWorkersLocked();
   m_cv.notify_all();
@@ -182,7 +215,9 @@ std::string JobEngine::submit( JobRequest req, JobExecutor executor, CancelHook 
   JobRecord copy;
   {
     std::lock_guard<std::mutex> lock( m_mutex );
-    if ( m_shuttingDown )
+    // m_stopped (latched production shutdown, #684) rejects like
+    // m_shuttingDown — unlike m_stop it is never cleared by a submit.
+    if ( m_shuttingDown || m_stopped )
     {
       id = "job-" + std::to_string( m_nextId.fetch_add( 1 ) );
       JobRecord rec;
@@ -191,7 +226,8 @@ std::string JobEngine::submit( JobRequest req, JobExecutor executor, CancelHook 
       rec.state = JobState::Cancelled;
       rec.createdAtMs = nowUnixMs();
       rec.finishedAtMs = rec.createdAtMs;
-      rec.statusMessage = "Cancelled: JobEngine is shutting down";
+      rec.statusMessage = m_shuttingDown ? "Cancelled: JobEngine is shutting down"
+                                         : "Cancelled: JobEngine has been shut down";
       m_jobs.emplace( id, rec );
       copy = rec;
     }
@@ -438,10 +474,13 @@ void JobEngine::shutdownForTests()
     m_jobBodies.clear();
     m_prefixExecutors.clear();
     m_fallbackExecutor = nullptr;
-    m_maxWorkers = 3;
+    m_maxWorkers = defaultWorkerCount();
     m_running = 0;
     m_exclusiveRunning = false;
     m_listener = nullptr;
+    // Explicit test reset: clears the production-shutdown latch (#684) so
+    // the engine remains reusable after a real shutdown() in-process.
+    m_stopped = false;
     m_stop.store( false );
   }
   m_cv.notify_all();
@@ -449,7 +488,7 @@ void JobEngine::shutdownForTests()
 
 void JobEngine::ensureWorkersLocked()
 {
-  if ( m_shuttingDown )
+  if ( m_shuttingDown || m_stopped )
     return;
   const uint64_t gen = m_generation;
   while ( static_cast<int>( m_workers.size() ) < m_maxWorkers )
@@ -467,7 +506,7 @@ void JobEngine::workerLoop( uint64_t gen )
       std::unique_lock<std::mutex> lock( m_mutex );
       for ( ;; )
       {
-        if ( m_shuttingDown || gen != m_generation || m_stop.load() )
+        if ( m_shuttingDown || m_stopped || gen != m_generation || m_stop.load() )
           return;
         auto picked = tryPickJobLocked();
         if ( picked.has_value() )
@@ -476,7 +515,7 @@ void JobEngine::workerLoop( uint64_t gen )
           break;
         }
         m_cv.wait( lock );
-        if ( m_shuttingDown || gen != m_generation || m_stop.load() )
+        if ( m_shuttingDown || m_stopped || gen != m_generation || m_stop.load() )
           return;
       }
     }
@@ -493,60 +532,64 @@ std::optional<std::string> JobEngine::tryPickJobLocked()
   if ( m_queue.empty() || m_exclusiveRunning )
     return std::nullopt;
 
-  bool exclusiveQueued = false;
-  for ( const auto &id : m_queue )
+  // Best-priority pick (stable: earliest arrival wins ties) so a burst of
+  // submissions cannot invert the caller's priority order inside the engine
+  // queue (#686). Exclusive and non-exclusive candidates are tracked
+  // separately so the drain-then-exclusive policy is untouched (ADR 0002).
+  auto bestExclusive = m_queue.end();
+  auto bestNonExclusive = m_queue.end();
+  int bestExclusivePriority = 0;
+  int bestNonExclusivePriority = 0;
+  for ( auto it = m_queue.begin(); it != m_queue.end(); ++it )
   {
-    auto it = m_jobs.find( id );
-    if ( it != m_jobs.end() && it->second.state == JobState::Queued && it->second.request.exclusive )
+    auto jit = m_jobs.find( *it );
+    if ( jit == m_jobs.end() || jit->second.state != JobState::Queued )
+      continue;
+    const bool exclusive = jit->second.request.exclusive;
+    const int priority = jit->second.request.priority;
+    auto &best = exclusive ? bestExclusive : bestNonExclusive;
+    int &bestPriority = exclusive ? bestExclusivePriority : bestNonExclusivePriority;
+    if ( best == m_queue.end() || priority < bestPriority )
     {
-      exclusiveQueued = true;
-      break;
+      best = it;
+      bestPriority = priority;
     }
   }
 
-  if ( exclusiveQueued )
+  if ( bestExclusive != m_queue.end() )
   {
     if ( m_running > 0 )
       return std::nullopt; // drain before exclusive
 
-    for ( auto it = m_queue.begin(); it != m_queue.end(); ++it )
-    {
-      auto jit = m_jobs.find( *it );
-      if ( jit == m_jobs.end() || jit->second.state != JobState::Queued )
-        continue;
-      if ( !jit->second.request.exclusive )
-        continue;
+    const std::string id = *bestExclusive;
+    auto jit = m_jobs.find( id );
+    m_queue.erase( bestExclusive );
+    if ( jit == m_jobs.end() || jit->second.state != JobState::Queued )
+      return std::nullopt;
 
-      const std::string id = *it;
-      m_queue.erase( it );
-      jit->second.state = JobState::Running;
-      jit->second.startedAtMs = nowUnixMs();
-      m_running += 1;
-      m_exclusiveRunning = true;
-      return id;
-    }
-    return std::nullopt;
+    jit->second.state = JobState::Running;
+    jit->second.startedAtMs = nowUnixMs();
+    m_running += 1;
+    m_exclusiveRunning = true;
+    return id;
   }
 
   if ( m_running >= m_maxWorkers )
     return std::nullopt;
 
-  while ( !m_queue.empty() )
-  {
-    const std::string id = m_queue.front();
-    m_queue.pop_front();
-    auto jit = m_jobs.find( id );
-    if ( jit == m_jobs.end() || jit->second.state != JobState::Queued )
-      continue;
+  if ( bestNonExclusive == m_queue.end() )
+    return std::nullopt;
 
-    jit->second.state = JobState::Running;
-    jit->second.startedAtMs = nowUnixMs();
-    m_running += 1;
-    if ( jit->second.request.exclusive )
-      m_exclusiveRunning = true;
-    return id;
-  }
-  return std::nullopt;
+  const std::string id = *bestNonExclusive;
+  auto jit = m_jobs.find( id );
+  m_queue.erase( bestNonExclusive );
+  if ( jit == m_jobs.end() || jit->second.state != JobState::Queued )
+    return std::nullopt;
+
+  jit->second.state = JobState::Running;
+  jit->second.startedAtMs = nowUnixMs();
+  m_running += 1;
+  return id;
 }
 
 void JobEngine::appendLog( JobRecord &rec, JobLogLevel level, const std::string &text )

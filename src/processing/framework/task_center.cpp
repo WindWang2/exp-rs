@@ -119,8 +119,11 @@ ProviderResourceProfile TaskCenter::resolveResourceProfile( const QString &algor
 
 unsigned int TaskCenter::defaultLimitForProfile( ProviderResourceProfile profile ) const
 {
-    const unsigned int hw = std::max( 1u, std::thread::hardware_concurrency() );
-    const unsigned int inProcessDefault = std::max( 1u, hw > 1 ? hw - 1 : 1u );
+    // Single source of truth (#686/#661): the in-process admission default is
+    // the JobEngine worker pool (itself the throttler cap = hw-1 by default),
+    // so a task marked Running always has a real worker waiting for it.
+    const unsigned int inProcessDefault = std::max( 1u, static_cast<unsigned int>(
+        std::max( 1, sicnu::jobs::JobEngine::instance().maxWorkers() ) ) );
     switch ( profile )
     {
       case ProviderResourceProfile::ExternalCliSubprocess:
@@ -689,15 +692,38 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
 
         info.outputLayerPath = findOutputPathInParams( params );
 
+        // Resolve the RAM estimate once (#702): the scheduler consulted the
+        // registry-backed resolver for every running task on every pass.
+        if ( resourceEstimateOverrideMb == 0 )
+        {
+            info.resolvedEstimateMb = m_resourceBudget.resolve( algorithmId.toStdString() ).ramMb;
+            info.estimateResolved = true;
+        }
+
         info.logBuffer.append( QString( QStringLiteral( "[%1] Task queued with priority %2." ) )
                                  .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ) )
                                  .arg( static_cast<int>( priority ) ) );
 
-        m_tasks[id] = info;
-        queueTaskAddedLocked( id );
-
-        processNextQueuedTasks();
+        if ( m_isShuttingDown.load() )
+        {
+            // Work admitted during teardown can never complete (#684): land
+            // the record as Canceled instead of staging it for launch.
+            info.status = TaskStatus::Canceled;
+            info.errorMessage = QStringLiteral( "Task Center is shutting down" );
+            info.endTime = QDateTime::currentDateTimeUtc();
+            info.logBuffer.append( info.errorMessage );
+            m_tasks[id] = info;
+            queueTaskAddedLocked( id );
+        }
+        else
+        {
+            m_tasks[id] = info;
+            queueTaskAddedLocked( id );
+            processNextQueuedTasks();
+        }
     }
+    if ( m_isShuttingDown.load() )
+        return id;
     flushPendingLaunches();
     flushPendingSignals();
     return id;
@@ -737,24 +763,47 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
         return taskId;
     }
 
+    bool mapped = false;
+    bool canceledDuringSubmit = false;
+
     {
         QMutexLocker locker( &m_mutex );
         if ( m_tasks.contains( taskId ) )
         {
-            m_tasks[taskId].jobId = jobId;
-            m_tasks[taskId].jobRequest = request;
-            m_tasks[taskId].hasJobRequest = true;
-            m_tasks[taskId].jobExecutor = std::move( executor );
-            m_taskByJobId[jobId] = taskId;
+            if ( isTerminalStatus( m_tasks[taskId].status ) )
+            {
+                // Canceled while the engine submit was in flight (#683):
+                // the freshly submitted engine job must not outlive its
+                // terminal task (mirror of flushPendingLaunches' recheck).
+                canceledDuringSubmit = true;
+            }
+            else
+            {
+                m_tasks[taskId].jobId = jobId;
+                m_tasks[taskId].jobRequest = request;
+                m_tasks[taskId].hasJobRequest = true;
+                m_tasks[taskId].jobExecutor = std::move( executor );
+                m_taskByJobId[jobId] = taskId;
+                mapped = true;
+            }
         }
     }
+    if ( canceledDuringSubmit )
+    {
+        sicnu::jobs::JobEngine::instance().cancel( jobId );
+        return taskId;
+    }
 
-    markTaskRunning( taskId );
+    if ( mapped )
+        markTaskRunning( taskId );
     // Catch-up: a job that reached a terminal state before the listener could
     // dispatch it (mapping registered after submit returned) must still land
     // in the bookkeeping. Delta logic makes this idempotent.
-    if ( const auto record = sicnu::jobs::JobEngine::instance().snapshot( jobId ) )
-        onJobRecord( *record );
+    if ( mapped )
+    {
+        if ( const auto record = sicnu::jobs::JobEngine::instance().snapshot( jobId ) )
+            onJobRecord( *record );
+    }
     return taskId;
 }
 
@@ -866,6 +915,15 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
     }
     else
     {
+        // Engine "Started" record: stamp actual dispatch time (#686). The
+        // enqueue-time stamp conflated queue wait with run time.
+        if ( record.state == sicnu::jobs::JobState::Running && record.startedAtMs > 0 )
+        {
+            QMutexLocker locker( &m_mutex );
+            auto it = m_tasks.find( taskId );
+            if ( it != m_tasks.end() )
+                it->startTime = QDateTime::fromMSecsSinceEpoch( record.startedAtMs );
+        }
         return; // Queued/Running records keep the per-task dispatch state
     }
 
@@ -880,12 +938,20 @@ unsigned int TaskCenter::taskEstimateMbLocked( const AlgorithmTaskInfo &task ) c
 {
     if ( task.resourceEstimateOverrideMb > 0 )
         return task.resourceEstimateOverrideMb;
+    // Per-task cache (#702): the estimate never changes over a task's
+    // lifetime; resolving per scheduling pass hammered the registry.
+    if ( task.estimateResolved )
+        return task.resolvedEstimateMb;
     return m_resourceBudget.resolve( task.algorithmId.toStdString() ).ramMb;
 }
 
 void TaskCenter::processNextQueuedTasks()
 {
     // Called with m_mutex held. Only stages work; callers must flushPendingLaunches() outside the lock.
+    // No new work during teardown (#684): a late terminal notify (RSS-hold
+    // QTimer, finishing job) must not stage launches that can never run.
+    if ( m_isShuttingDown.load() )
+        return;
     const unsigned int globalMax = m_globalConcurrencyLimit > 0
                                      ? m_globalConcurrencyLimit
                                      : defaultLimitForProfile( ProviderResourceProfile::InProcessThread );
@@ -1012,6 +1078,9 @@ void TaskCenter::processNextQueuedTasks()
         launch.taskId = id;
         launch.request.algorithmId = m_tasks[id].algorithmId.toStdString();
         launch.request.title = m_tasks[id].algorithmName.toStdString();
+        // Priority propagates into the engine queue (#686) so even work that
+        // waits transiently inside the engine keeps the caller's order.
+        launch.request.priority = static_cast<int>( m_tasks[id].priority );
         launch.request.source = m_tasks[id].source.isEmpty()
                                   ? ( m_tasks[id].pipelineId >= 0 ? "pipeline" : "task_center" )
                                   : m_tasks[id].source.toStdString();
@@ -1079,6 +1148,10 @@ void TaskCenter::flushPendingLaunches()
 
     if ( launches.isEmpty() )
         return;
+    // Never submit to the engine during teardown (#684): the jobs would
+    // either be rejected or resurrect worker threads after shutdown().
+    if ( m_isShuttingDown.load() )
+        return;
     ensureJobListener();
 
     for ( auto &launch : launches )
@@ -1120,7 +1193,16 @@ void TaskCenter::flushPendingLaunches()
         }
         if ( mapped )
         {
-            // Catch-up snapshot; see submitJobImpl for the rationale.
+            // startTime = actual dispatch, not enqueue time (#686): the
+            // enqueue stamp conflated wait time with run time in every
+            // exported record.
+            {
+                QMutexLocker reLock2( &m_mutex );
+                if ( m_tasks.contains( launch.taskId ) && m_tasks[launch.taskId].jobId == jobId )
+                    m_tasks[launch.taskId].startTime = QDateTime::currentDateTimeUtc();
+            }
+            // Catch-up snapshot; see submitJobImpl for the rationale. Called
+            // WITHOUT m_mutex: processJobRecord re-enters TaskCenter locks.
             if ( const auto record = sicnu::jobs::JobEngine::instance().snapshot( jobId ) )
                 onJobRecord( *record );
         }
@@ -1368,6 +1450,16 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
 
+        // The task's own engine job must die with the task (#702): only the
+        // descendants used to flow into jobCancelTargets, so a root whose
+        // terminal transition came from outside the engine (external failure
+        // injection, rollback) ran to completion and its terminal record was
+        // silently discarded. When the transition itself came from the
+        // engine's terminal record the job is already terminal and cancel()
+        // is a cheap no-op.
+        if ( !m_tasks[taskId].jobId.empty() )
+            jobCancelTargets.emplace_back( m_tasks[taskId].jobId, taskId );
+
         const QList<long> descendants = collectTransitiveDescendantsLocked( taskId );
         cascadeCancelTargetsLocked( descendants, -1, QStringLiteral( "failure" ), false,
                                     cascadeCanceledIds, jobCancelTargets, handlesToCancel );
@@ -1402,6 +1494,12 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), reason ) );
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
+
+        // Same own-job rule as markTaskFailed (#702): cancel the root's own
+        // engine job when the terminal transition came from outside the
+        // engine; a job that is already terminal cancels as a no-op.
+        if ( !m_tasks[taskId].jobId.empty() )
+            jobCancelTargets.emplace_back( m_tasks[taskId].jobId, taskId );
 
         const QList<long> descendants = collectTransitiveDescendantsLocked( taskId );
         cascadeCancelTargetsLocked( descendants, -1, QStringLiteral( "cancellation" ), false,
@@ -1480,20 +1578,30 @@ bool TaskCenter::pauseTask( long taskId )
             return false;
         if ( m_tasks[taskId].status == TaskStatus::Running )
         {
-            // hold() has the same thread-affinity caveat as cancel()
-            // (dispatchPendingCancels marshals that call): invoke it on the
-            // handle's own thread instead of the caller's (#616).
             if ( m_tasks[taskId].taskHandle )
             {
+                // hold() has the same thread-affinity caveat as cancel()
+                // (dispatchPendingCancels marshals that call): invoke it on
+                // the handle's own thread instead of the caller's (#616).
                 QgsTask *handle = m_tasks[taskId].taskHandle.data();
                 QMetaObject::invokeMethod( handle, [handle]() { handle->hold(); },
                                            Qt::QueuedConnection );
+                m_tasks[taskId].status = TaskStatus::Paused;
+                m_tasks[taskId].logBuffer.append( QStringLiteral( "Task paused." ) );
+                updatePipelineForTaskLocked( taskId );
+                queueTaskUpdatedLocked( taskId );
+                ok = true;
             }
-            m_tasks[taskId].status = TaskStatus::Paused;
-            m_tasks[taskId].logBuffer.append( QStringLiteral( "Task paused." ) );
-            updatePipelineForTaskLocked( taskId );
-            queueTaskUpdatedLocked( taskId );
-            ok = true;
+            else if ( !m_tasks[taskId].jobId.empty() )
+            {
+                // Refuse to fabricate Paused for engine-dispatched work
+                // (#702): the job kept running while the status said Paused,
+                // Paused tasks were excluded from admission counts (the
+                // scheduler over-admitted), and nothing ever auto-resumed.
+                m_tasks[taskId].logBuffer.append(
+                    QStringLiteral( "Pause requested but not supported for engine-dispatched tasks; task keeps running." ) );
+                queueTaskLogLocked( taskId, m_tasks[taskId].logBuffer.last() );
+            }
         }
     }
     if ( ok )
@@ -1528,24 +1636,84 @@ bool TaskCenter::resumeTask( long taskId )
     return ok;
 }
 
-bool TaskCenter::retryTask( long taskId )
+long TaskCenter::retryTask( long taskId )
 {
     AlgorithmTaskInfo oldInfo;
     {
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) )
-            return false;
+            return 0;
         // A non-terminal task is still schedulable/running: enqueueing a
         // retry beside it would execute the same work twice (#616).
         if ( !isTerminalStatus( m_tasks[taskId].status ) )
-            return false;
+            return 0;
         oldInfo = m_tasks[taskId];
     }
+
+    // Drop parents that are not Completed (#685): a cascade-canceled parent
+    // can never satisfy the scheduling gate, so keeping it stranded the
+    // retry in Queued forever (never failing, blocking waitForTask to its
+    // timeout). Completed parents still gate the retry normally.
+    QList<long> retryParents;
+    QStringList droppedParents;
+    {
+        QMutexLocker locker( &m_mutex );
+        for ( long parentId : oldInfo.parentTaskIds )
+        {
+            if ( m_tasks.contains( parentId ) && m_tasks[parentId].status != TaskStatus::Completed )
+                droppedParents.append( QString::number( parentId ) );
+            else
+                retryParents.append( parentId );
+        }
+    }
+
+    long newId = -1;
     if ( oldInfo.hasJobRequest )
-        return submitJob( oldInfo.jobRequest, oldInfo.jobExecutor, {}, oldInfo.autoLoadLayer ) > 0;
-    return enqueueTask( oldInfo.algorithmId, oldInfo.parameterMap, oldInfo.autoLoadLayer, oldInfo.priority,
-                        oldInfo.parentTaskIds, true )
-           > 0;
+        newId = submitJob( oldInfo.jobRequest, oldInfo.jobExecutor, {}, oldInfo.autoLoadLayer );
+    else
+        newId = enqueueTask( oldInfo.algorithmId, oldInfo.parameterMap, oldInfo.autoLoadLayer,
+                             oldInfo.priority, retryParents, true );
+    if ( newId <= 0 )
+        return 0;
+
+    // Keep the retry attached to its pipeline (#702.1): re-register the step
+    // mapping on the new task and remap children that were gating on the old
+    // task id, so a later child retry finds satisfiable parents instead of a
+    // permanently-Canceled one.
+    {
+        QMutexLocker locker( &m_mutex );
+        if ( !m_tasks.contains( newId ) )
+            return 0;
+        if ( oldInfo.pipelineId >= 0 && m_pipelines.contains( oldInfo.pipelineId ) && !oldInfo.stepId.isEmpty() )
+        {
+            AlgorithmTaskInfo &info = m_tasks[newId];
+            info.stepId = oldInfo.stepId;
+            info.pipelineId = oldInfo.pipelineId;
+            PipelineExecutionInfo &pipe = m_pipelines[oldInfo.pipelineId];
+            pipe.taskToStepId.remove( oldInfo.taskId );
+            pipe.stepToTaskId[oldInfo.stepId.toStdString()] = newId;
+            pipe.taskToStepId[newId] = oldInfo.stepId.toStdString();
+            pipe.stepStatuses[oldInfo.stepId.toStdString()] = info.status;
+            updatePipelineForTaskLocked( newId );
+            queueTaskUpdatedLocked( newId );
+        }
+        for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
+        {
+            if ( it->parentTaskIds.contains( oldInfo.taskId ) )
+            {
+                std::replace( it->parentTaskIds.begin(), it->parentTaskIds.end(), oldInfo.taskId, newId );
+            }
+        }
+        if ( !droppedParents.isEmpty() )
+        {
+            m_tasks[newId].logBuffer.append(
+                QStringLiteral( "Retry dropped unsatisfied parent(s) %1 to avoid stranding in Queued." )
+                    .arg( droppedParents.join( QStringLiteral( ", " ) ) ) );
+            queueTaskLogLocked( newId, m_tasks[newId].logBuffer.last() );
+        }
+    }
+    flushPendingSignals();
+    return newId;
 }
 
 QList<AlgorithmTaskInfo> TaskCenter::allTasks() const

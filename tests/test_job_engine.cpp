@@ -277,15 +277,17 @@ TEST_CASE( "failed operator sets error", "[job]" )
   REQUIRE_FALSE( snap->error.empty() );
 }
 
-TEST_CASE( "setMaxWorkers clamps to 2..4", "[job]" )
+TEST_CASE( "setMaxWorkers honors overrides with a safe floor (#661)", "[job]" )
 {
   EngineGuard guard;
   auto &eng = guard.engine();
 
   eng.setMaxWorkers( 1 );
-  REQUIRE( eng.maxWorkers() == 2 );
+  REQUIRE( eng.maxWorkers() == 1 );
+  eng.setMaxWorkers( 0 );
+  REQUIRE( eng.maxWorkers() == 1 );
   eng.setMaxWorkers( 99 );
-  REQUIRE( eng.maxWorkers() == 4 );
+  REQUIRE( eng.maxWorkers() == 99 );
   eng.setMaxWorkers( 3 );
   REQUIRE( eng.maxWorkers() == 3 );
 }
@@ -1379,4 +1381,148 @@ TEST_CASE( "dynamic maxWorkers adjustment under load", "[job][concurrency]" )
     REQUIRE( snap.has_value() );
     REQUIRE( snap->state == JobState::Succeeded );
   }
+}
+
+// ---------------------------------------------------------------------------
+// #661/#686: worker pool defaults to the throttler cap via an injectable
+// ceiling, explicit overrides are honored with a safe floor, and the engine
+// queue picks best-priority-first.
+// ---------------------------------------------------------------------------
+TEST_CASE( "default worker count follows the injected concurrency ceiling (#661)", "[job]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+
+  JobEngine::setConcurrencyCeilingForTests( 8 );
+  eng.shutdownForTests(); // re-derives the default pool size from the ceiling
+  REQUIRE( eng.maxWorkers() == 7 );
+
+  JobEngine::setConcurrencyCeilingForTests( 2 );
+  eng.shutdownForTests();
+  REQUIRE( eng.maxWorkers() == 1 );
+
+  JobEngine::setConcurrencyCeilingForTests( 1 );
+  eng.shutdownForTests();
+  REQUIRE( eng.maxWorkers() == 1 ); // safe floor on a 1-core machine
+
+  JobEngine::setConcurrencyCeilingForTests( 0 ); // restore host-derived cap
+  eng.shutdownForTests();
+}
+
+TEST_CASE( "setMaxWorkers honors overrides and clamps misconfiguration to a safe floor (#661)", "[job]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+
+  eng.setMaxWorkers( 0 );
+  REQUIRE( eng.maxWorkers() == 1 );
+  eng.setMaxWorkers( -3 );
+  REQUIRE( eng.maxWorkers() == 1 );
+  eng.setMaxWorkers( 9 );
+  REQUIRE( eng.maxWorkers() == 9 ); // no artificial 2..4 clamp
+  eng.setMaxWorkers( 2 );
+  REQUIRE( eng.maxWorkers() == 2 );
+}
+
+TEST_CASE( "engine queue picks best-priority-first, stable on ties (#686)", "[job]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.setMaxWorkers( 1 );
+
+  std::atomic<bool> releaseBlocker{ false };
+  std::atomic<bool> blockerRunning{ false };
+  std::vector<std::string> launchOrder;
+  std::mutex orderMutex;
+
+  eng.registerExecutor( "prio:blocker", [&]( const JobRequest &, RSOperatorContext & ) {
+    blockerRunning.store( true );
+    while ( !releaseBlocker.load() )
+      std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    std::lock_guard<std::mutex> lock( orderMutex );
+    launchOrder.push_back( "blocker" );
+    return Json::Value( Json::objectValue );
+  } );
+  eng.registerExecutor( "prio:low", [&]( const JobRequest &, RSOperatorContext & ) {
+    std::lock_guard<std::mutex> lock( orderMutex );
+    launchOrder.push_back( "low" );
+    return Json::Value( Json::objectValue );
+  } );
+  eng.registerExecutor( "prio:high", [&]( const JobRequest &, RSOperatorContext & ) {
+    std::lock_guard<std::mutex> lock( orderMutex );
+    launchOrder.push_back( "high" );
+    return Json::Value( Json::objectValue );
+  } );
+  eng.registerExecutor( "prio:mid", [&]( const JobRequest &, RSOperatorContext & ) {
+    std::lock_guard<std::mutex> lock( orderMutex );
+    launchOrder.push_back( "mid" );
+    return Json::Value( Json::objectValue );
+  } );
+
+  const auto blocker = eng.submit( JobRequest{ "prio:blocker", {}, "b", "test", false, {}, 1 } );
+  REQUIRE( !blocker.empty() );
+
+  bool running = false;
+  for ( int i = 0; i < 500 && !running; ++i )
+  {
+    running = eng.snapshot( blocker )->state == JobState::Running;
+    if ( !running )
+      std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+  }
+  REQUIRE( running );
+
+  // Submitted out of order: Low first, Normal second, High last.
+  const auto low = eng.submit( JobRequest{ "prio:low", {}, "l", "test", false, {}, 2 } );
+  const auto normal = eng.submit( JobRequest{ "prio:mid", {}, "n", "test", false, {}, 1 } );
+  const auto high = eng.submit( JobRequest{ "prio:high", {}, "h", "test", false, {}, 0 } );
+
+  releaseBlocker.store( true );
+  eng.waitUntilIdleForTests( 15000 );
+
+  std::lock_guard<std::mutex> lock( orderMutex );
+  REQUIRE( launchOrder.size() == 4 );
+  REQUIRE( launchOrder[0] == "blocker" );
+  REQUIRE( launchOrder[1] == "high" );
+  REQUIRE( launchOrder[2] == "mid" );
+  REQUIRE( launchOrder[3] == "low" );
+  eng.clearExecutors();
+}
+
+// ---------------------------------------------------------------------------
+// #684: production shutdown is latched — late submits are rejected with a
+// cancelled record and no worker resurrection; shutdownForTests clears it.
+// ---------------------------------------------------------------------------
+TEST_CASE( "submit after production shutdown stays rejected (#684)", "[job]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+
+  eng.shutdown();
+  REQUIRE( eng.maxWorkers() >= 1 );
+
+  JobRequest req;
+  req.algorithmId = "test:add";
+  req.params["a"] = 1;
+  req.params["b"] = 2;
+  req.title = "late";
+  req.source = "test";
+
+  const auto first = eng.submit( req );
+  auto snap = eng.snapshot( first );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Cancelled );
+
+  // Latched: a second submit cannot resurrect the pool either.
+  const auto second = eng.submit( req );
+  snap = eng.snapshot( second );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Cancelled );
+
+  // Explicit test reset re-arms the engine.
+  eng.shutdownForTests();
+  const auto third = eng.submit( req );
+  eng.waitUntilIdleForTests( 15000 );
+  snap = eng.snapshot( third );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Succeeded );
 }

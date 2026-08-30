@@ -60,10 +60,26 @@ class JobEngine
 
     static JobEngine &instance();
 
-    void setMaxWorkers( int n ); // clamp 2..4
+    /// Worker pool default: the Resource Throttler concurrency cap
+    /// (hardware_concurrency - 1, reserving one core for UI; clamped to a
+    /// safe floor of 1) instead of the historical hard 2..4 clamp, so DAG
+    /// pipelines saturate multi-core workstations (#661/#686). Tests inject
+    /// a ceiling instead of depending on host core counts.
+    static int defaultWorkerCount();
+    static int concurrencyCeiling();
+    static void setConcurrencyCeilingForTests( int cores );
+
+    /// Explicit overrides are honored (no upper clamp: oversubscription is
+    /// preferable to silently ignoring the caller); misconfiguration clamps
+    /// to a safe floor of 1. Priority/throttling behavior (ADR 0002) is
+    /// unchanged.
+    void setMaxWorkers( int n );
     int maxWorkers() const;
 
-    /** Stop and join all worker threads. Safe to call multiple times. */
+    /** Stop and join all worker threads. Safe to call multiple times.
+     * Production shutdown is latched: submits after it are rejected with a
+     * cancelled record instead of resurrecting worker threads during
+     * teardown (#684). shutdownForTests() clears the latch. */
     void shutdown();
 
     /** Submit RSOperator (or prefix-registered executor) job. */
@@ -182,6 +198,9 @@ class JobEngine
     int m_running = 0;
     bool m_exclusiveRunning = false;
     bool m_shuttingDown = false;
+    /// Latched production-shutdown flag (#684): distinct from the
+    /// test-resettable m_stop so a late submit cannot resurrect workers.
+    bool m_stopped = false;
     uint64_t m_generation = 0;
     std::atomic<bool> m_stop{false};
     std::atomic<uint64_t> m_nextId{1};

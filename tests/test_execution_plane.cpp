@@ -588,6 +588,43 @@ TEST_CASE( "agent tool call commits a stable asset without temp-path auto-load",
   CHECK( assets.first().source().canonicalSource == committed );
 }
 
+
+// ---------------------------------------------------------------------------
+// #702.6: watch() returns a removable token so a never-terminal task does not
+// pin its captured state for the process lifetime.
+// ---------------------------------------------------------------------------
+TEST_CASE( "watch token can be removed before the terminal transition (#702)",
+           "[processing][execution_plane][watch]" )
+{
+  registerStub( "stub:watch_token", BehavioralStubAdapter::Mode::SleepThenComplete, /*sleepMs=*/1500 );
+  SchedulingGuard schedulingGuard;
+
+  ExecutionRequest request;
+  request.algorithmId = QStringLiteral( "stub:watch_token" );
+  const long taskId = ExecutionPlane::instance().submit( request ).taskId();
+  REQUIRE( taskId > 0 );
+
+  std::atomic<int> deliveries{ 0 };
+  const long token = ExecutionPlane::instance().watch(
+      taskId, [ &deliveries ]( const sicnu::AlgorithmTaskInfo & ) { deliveries.fetch_add( 1 ); } );
+  REQUIRE( token > 0 );
+
+  // Removing the registration before the terminal transition must suppress
+  // the callback (before the fix the token was discarded and the callback
+  // state was pinned for the process lifetime).
+  ExecutionPlane::instance().removeWatch( taskId, token );
+
+  TaskCenter::instance().waitForTask( taskId, std::chrono::seconds( 10 ) );
+  REQUIRE( deliveries.load() == 0 );
+
+  // A watch registered on an already-terminal task fires inline and reports
+  // the sentinel (nothing left to remove).
+  long inlineToken = 0;
+  ExecutionPlane::instance().watch(
+      taskId, [ &inlineToken ]( const sicnu::AlgorithmTaskInfo & ) { inlineToken = -2; } );
+  REQUIRE( inlineToken == -2 );
+}
+
 // ---------------------------------------------------------------------------
 // 9. Shutdown with a running task: sync awaiters wake promptly. MUST BE LAST:
 //    TaskCenter::shutdown latches for the lifetime of the process.
