@@ -359,16 +359,54 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       continue;
 
     // One forward pass per batch on the shared (cached) session.
-    // swapRB=false: the tile buffer already holds GDAL band order, and the
-    // manifest band_roles expect channel i == file band i — OpenCV's default
-    // swapRB=true would silently exchange bands 1 and 3.
+    // Manual NCHW pack (#671): blobFromImage(s) asserts channels in
+    // {1,3,4} — multispectral / SAR inference (2, >=5 channels) died with
+    // a raw cv::Exception that also violates the engine's RSOperatorError
+    // contract. The buffer already holds GDAL band order and manifest
+    // band_roles expect channel i == file band i, so we keep that order
+    // (swapRB=false equivalent) without delegating to the imread helper.
+    // Also validate the band_roles arity up front so a manifest mismatch
+    // surfaces as a typed error rather than a late tensor shape mismatch.
+    if ( !m_model.input.bandRoles.empty()
+         && static_cast<int>( m_model.input.bandRoles.size() ) != static_cast<int>( bandList.size() ) )
+    {
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "model band_roles ("
+                                 + std::to_string( m_model.input.bandRoles.size() )
+                                 + ") does not match fed channel count (" + std::to_string( bandList.size() )
+                                 + ")" );
+    }
     cv::Mat blob;
-    if ( batchMats.size() == 1 )
-      blob = cv::dnn::blobFromImage( batchMats.front(), 1.0, cv::Size(), cv::Scalar(),
-                                     /*swapRB=*/false, /*crop=*/false );
-    else
-      blob = cv::dnn::blobFromImages( batchMats, 1.0, cv::Size(), cv::Scalar(),
-                                      /*swapRB=*/false, /*crop=*/false );
+    try {
+      const int C = static_cast<int>( bandList.size() );
+      const int B = static_cast<int>( batchMats.size() );
+      const int H = batchMats.front().rows;
+      const int W = batchMats.front().cols;
+      // Single- and multi-channel tiles already share the same pack logic —
+      // keeping one explicit path avoids a divergence between blobFromImage vs
+      // blobFromImages shape conventions.
+      int dims[4] = { B, C, H, W };
+      blob = cv::Mat( 4, dims, CV_32F );
+      blob.setTo( 0 );
+      for ( int b = 0; b < B; ++b ) {
+        std::vector<cv::Mat> channels;
+        cv::split( batchMats[static_cast<size_t>( b )], channels );
+        for ( int c = 0; c < C; ++c ) {
+          const cv::Mat &ch = channels[static_cast<size_t>( c )];
+          const int idx[3] = { b, c, 0 };
+          float *dst = blob.ptr<float>( idx );
+          for ( int y = 0; y < H; ++y ) {
+            std::memcpy( dst + y * W, ch.ptr<float>( y ), static_cast<size_t>( W ) * sizeof( float ) );
+          }
+        }
+      }
+    } catch ( const RSOperatorError & ) {
+      throw;
+    } catch ( const std::exception &e ) {
+      throw RSOperatorError( ErrorCode::OpenCvError, std::string( "failed to build inference blob: " ) + e.what() );
+    } catch ( ... ) {
+      throw RSOperatorError( ErrorCode::OpenCvError, "failed to build inference blob (unknown)" );
+    }
     cv::Mat output;
     try
     {
@@ -388,6 +426,26 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     const int outW = output.size[3];
     if ( outChannels <= 0 )
       throw RSOperatorError( ErrorCode::ComputationError, "model output has no channels" );
+
+    // Depth check (#690): ArgMax / class-index heads emit int32/int64; the
+    // per-pixel planes are later read as float — type-punning integer bits
+    // into float32 silently corrupts. Fail or convert deterministically.
+    if ( output.depth() != CV_32F ) {
+      const int d = output.depth();
+      const std::string dname = (d == CV_32S) ? "int32" : (d == CV_64F) ? "float64" : (d == CV_32S + 1) ? "int16" : std::to_string(d);
+      if ( d == CV_32S || d == CV_64F || d == CV_16S || d == CV_8U ) {
+        // Convert integer/float heads to CV_32F — preserves argmax class
+        // indices (lossless for the int32/int64 range used by segmentation
+        // class maps) and degrades gracefully for other float depths.
+        cv::Mat converted;
+        output.convertTo( converted, CV_32F );
+        output = converted;
+      } else {
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "model output dtype is " + dname
+                                   + " — expected float32 (int32/int64 argmax heads were converted; other dtypes are unsupported: re-export the model with float outputs)" );
+      }
+    }
 
     if ( !writer )
     {
