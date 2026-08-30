@@ -436,7 +436,7 @@ QString writePrecisionGrid( const QString &path )
   GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
   // -3.4e38f stored as double differs from "-3.4e+38" (6-digit rounding).
   const double sentinel = static_cast<double>( -3.4e38f );
-  REQUIRE( GDALSetNoDataValue( ds, sentinel ) == CE_None );
+  REQUIRE( GDALSetRasterNoDataValue( ds, sentinel ) == CE_None );
   std::vector<float> line( W, 1.0f );
   line[0] = -3.4e38f;
   for ( int row = 0; row < H; ++row )
