@@ -5,6 +5,8 @@
 
 #include "qgsprocessingalgorithm.h"
 #include "qgsprocessingcontext.h"
+#include "qgsprocessingregistry.h"
+#include "qgsapplication.h"
 #include "qgsprocessingfeedback.h"
 #include "qgsprocessingoutputs.h"
 #include "qgsprocessingparameters.h"
@@ -185,8 +187,7 @@ static AlgorithmDescriptor buildDescriptor( const QgsProcessingAlgorithm &alg )
 // ---------------------------------------------------------------------------
 
 ProviderAlgorithmAdapter::ProviderAlgorithmAdapter( const QgsProcessingAlgorithm &alg )
-  : mAlg( &alg )
-  , mDesc( buildDescriptor( alg ) )
+  : mDesc( buildDescriptor( alg ) )
 {
 }
 
@@ -210,11 +211,18 @@ Json::Value ProviderAlgorithmAdapter::estimateExecution( const Json::Value & /*p
 Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, ProgressCallback progressCb,
                                                std::function<bool()> isCancelledFn )
 {
-  if ( !mAlg )
-    throw std::runtime_error( "ProviderAlgorithmAdapter: null algorithm pointer" );
+  // Re-resolve the algorithm by id at execute time (#695): the provider owns
+  // the algorithm instance, so the raw pointer cached at registration can
+  // dangle after provider removal/refresh/teardown reordering.
+  const QgsProcessingAlgorithm *sourceAlg =
+      QgsApplication::processingRegistry()
+          ? QgsApplication::processingRegistry()->algorithmById( QString::fromStdString( mDesc.id ) )
+          : nullptr;
+  if ( !sourceAlg )
+    throw std::runtime_error( "ProviderAlgorithmAdapter: algorithm is no longer available: " + mDesc.id );
 
   // Create a fresh clone for this execution.
-  std::unique_ptr<QgsProcessingAlgorithm> algorithm( mAlg->create() );
+  std::unique_ptr<QgsProcessingAlgorithm> algorithm( sourceAlg->create() );
   if ( !algorithm )
     throw std::runtime_error( "ProviderAlgorithmAdapter: failed to clone algorithm " + mDesc.id );
 

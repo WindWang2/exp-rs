@@ -20,7 +20,10 @@ class ProviderAlgorithmAdapter : public AtomicAlgorithmAdapter
 {
 public:
   /// Constructs from a registry-owned algorithm. A descriptor is built eagerly;
-  /// execution clones the algorithm via create().
+  /// execution re-resolves the algorithm from QgsProcessingRegistry by id and
+  /// clones it via create() — the provider owns the algorithm, so caching the
+  /// raw pointer here was a use-after-free window across provider
+  /// removal/refresh (#695).
   explicit ProviderAlgorithmAdapter( const QgsProcessingAlgorithm &alg );
   ~ProviderAlgorithmAdapter() override = default;
 
@@ -33,8 +36,6 @@ public:
   Json::Value estimateExecution( const Json::Value &params ) const override;
 
 private:
-  /// The registry-owned algorithm pointer (non-owning, used for create()).
-  const QgsProcessingAlgorithm *mAlg = nullptr;
   AlgorithmDescriptor mDesc;
 };
 
