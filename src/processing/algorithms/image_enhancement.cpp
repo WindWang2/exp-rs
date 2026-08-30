@@ -1201,74 +1201,83 @@ void ImageEnhancement::jacobiEigen(std::vector<std::vector<float>> &A, int n,
     for (int i = 0; i < n; i++)
         eigenvectors[i][i] = 1.0f;
 
-    const int maxIter = 200;
-    const float tolerance = 1e-10f;
+    eigenvalues.assign(n, 0.0f);
+    if (n <= 0)
+        return;
+    if (n == 1) {
+        eigenvalues[0] = A[0][0];
+        return;
+    }
 
-    for (int iter = 0; iter < maxIter; iter++) {
-        // Find largest off-diagonal element
+    // Classical cyclic Jacobi (#670): full sweeps of Givens rotations with a
+    // RELATIVE convergence test. The previous solver performed at most 200
+    // individual rotations with an absolute 1e-10 tolerance on covariance
+    // entries — one classical sweep alone needs n(n-1)/2 rotations (a
+    // 224-band hyperspectral cube needs ~25k per sweep), and the absolute
+    // tolerance is unreachable for DN-scale entries (10^4..10^6), so PCA/MNF
+    // silently returned partial-rotation components for >~15 bands.
+    const int maxSweeps = 60;
+    const float eps = std::numeric_limits<float>::epsilon();
+
+    for (int sweep = 0; sweep < maxSweeps; sweep++) {
         float maxOff = 0.0f;
-        int p = 0, q = 1;
+        float maxDiag = 0.0f;
         for (int i = 0; i < n; i++) {
-            for (int j = i + 1; j < n; j++) {
-                if (std::abs(A[i][j]) > maxOff) {
-                    maxOff = std::abs(A[i][j]);
-                    p = i;
-                    q = j;
-                }
-            }
+            maxDiag = std::max(maxDiag, std::abs(A[i][i]));
+            for (int j = i + 1; j < n; j++)
+                maxOff = std::max(maxOff, std::abs(A[i][j]));
         }
 
-        if (maxOff < tolerance)
+        // Relative test: converged when the off-diagonal energy is at the
+        // float rounding level of the diagonal magnitude.
+        if (maxOff <= eps * std::max(maxDiag, 1.0f))
             break;
 
-        // Compute rotation angle
-        float app = A[p][p];
-        float aqq = A[q][q];
-        float apq = A[p][q];
+        for (int p = 0; p < n; p++) {
+            for (int q = p + 1; q < n; q++) {
+                const float apq = A[p][q];
+                // Skip numerically-already-zero pairs: rotating them would
+                // only add rounding noise.
+                if (std::abs(apq) <= eps * std::max(std::abs(A[p][p]), std::abs(A[q][q])))
+                    continue;
 
-        float theta;
-        if (std::abs(app - aqq) < 1e-15f) {
-            theta = static_cast<float>(M_PI / 4.0);
-        } else {
-            theta = 0.5f * std::atan2(2.0f * apq, aqq - app);
-        }
+                const float theta = 0.5f * std::atan2(2.0f * apq, A[q][q] - A[p][p]);
+                const float c = std::cos(theta);
+                const float s = std::sin(theta);
 
-        float c = std::cos(theta);
-        float s = std::sin(theta);
+                // A' = G^T * A * G: update rows/cols p and q.
+                const float app = A[p][p];
+                const float aqq = A[q][q];
+                const float newApp = c * c * app + s * s * aqq - 2.0f * s * c * apq;
+                const float newAqq = s * s * app + c * c * aqq + 2.0f * s * c * apq;
 
-        // Compute new matrix elements: A' = G^T * A * G
-        // Only update rows/cols p and q (others unchanged)
-        float newApp = c * c * app + s * s * aqq - 2.0f * s * c * apq;
-        float newAqq = s * s * app + c * c * aqq + 2.0f * s * c * apq;
-        float newApq = 0.0f; // By construction
+                for (int r = 0; r < n; r++) {
+                    if (r == p || r == q) continue;
+                    const float arp = A[r][p];
+                    const float arq = A[r][q];
+                    A[r][p] = c * arp - s * arq;
+                    A[p][r] = A[r][p];
+                    A[r][q] = s * arp + c * arq;
+                    A[q][r] = A[r][q];
+                }
 
-        // Update off-diagonal elements in rows/cols p and q
-        for (int r = 0; r < n; r++) {
-            if (r == p || r == q) continue;
-            float arp = A[r][p];
-            float arq = A[r][q];
-            A[r][p] = c * arp - s * arq;
-            A[p][r] = A[r][p];
-            A[r][q] = s * arp + c * arq;
-            A[q][r] = A[r][q];
-        }
+                A[p][p] = newApp;
+                A[q][q] = newAqq;
+                A[p][q] = 0.0f; // by construction
+                A[q][p] = 0.0f;
 
-        A[p][p] = newApp;
-        A[q][q] = newAqq;
-        A[p][q] = newApq;
-        A[q][p] = newApq;
-
-        // Update eigenvectors
-        for (int r = 0; r < n; r++) {
-            float erp = eigenvectors[r][p];
-            float erq = eigenvectors[r][q];
-            eigenvectors[r][p] = c * erp - s * erq;
-            eigenvectors[r][q] = s * erp + c * erq;
+                // Accumulate eigenvectors: V' = V * G.
+                for (int r = 0; r < n; r++) {
+                    const float erp = eigenvectors[r][p];
+                    const float erq = eigenvectors[r][q];
+                    eigenvectors[r][p] = c * erp - s * erq;
+                    eigenvectors[r][q] = s * erp + c * erq;
+                }
+            }
         }
     }
 
     // Extract eigenvalues from diagonal
-    eigenvalues.resize(n);
     for (int i = 0; i < n; i++)
         eigenvalues[i] = A[i][i];
 }
