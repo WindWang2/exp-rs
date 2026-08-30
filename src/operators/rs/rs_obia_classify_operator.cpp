@@ -21,6 +21,7 @@
 #include "rs_obia_classify_operator.h"
 #include "rs_segmentation_utils.h"
 
+#include "analysis/classification/rs_feature_scaler.h"
 #include "analysis/segmentation/rs_roi_labeler.h"
 #include "analysis/segmentation/rs_segment_map.h"
 #include "analysis/segmentation/rs_simple_segmenter.h"
@@ -270,8 +271,13 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
 
     std::vector<std::vector<float>> feats(static_cast<size_t>(nSeg + 1),
                                           std::vector<float>(static_cast<size_t>(nFeat), 0.0f));
-    std::vector<bool> segHasValid(static_cast<size_t>(nSeg + 1), false);
+    // A segment whose every pixel in a band was NoData has no information
+    // in that band: 0.0 is a legitimate DN. Such segments must not be
+    // classified on a fabricated spectrum (#682/#700.13).
+    std::vector<bool> segFeatsComplete(static_cast<size_t>(nSeg + 1), false);
+    std::vector<bool> segHasAnyValid(static_cast<size_t>(nSeg + 1), false);
     for (int s = 1; s <= nSeg; ++s) {
+        bool complete = true;
         int64_t totalValid = 0;
         for (int f = 0; f < nFeat; ++f) {
             const int64_t cnt = validCounts[static_cast<size_t>(s)][static_cast<size_t>(f)];
@@ -279,11 +285,12 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
             if (cnt > 0) {
                 feats[static_cast<size_t>(s)][static_cast<size_t>(f)] =
                     static_cast<float>(sum[static_cast<size_t>(s)][static_cast<size_t>(f)] / cnt);
+            } else {
+                complete = false; // at least one band had no valid sample in this segment
             }
         }
-        if (totalValid > 0) {
-            segHasValid[static_cast<size_t>(s)] = true;
-        }
+        if (totalValid > 0) segHasAnyValid[static_cast<size_t>(s)] = true;
+        segFeatsComplete[static_cast<size_t>(s)] = complete;
     }
 
     // --- Label segments by ROI majority (analysis canonical, ADR 0060) ---
@@ -301,7 +308,7 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
     int labeledSegments = 0;
     std::set<int> uniqueClasses;
     for (auto it = segLabelMap.constBegin(); it != segLabelMap.constEnd(); ++it) {
-        if (it.key() == 0 || it.key() > static_cast<quint32>(nSeg) || it.value() <= 0 || !segHasValid[static_cast<size_t>(it.key())])
+        if (it.key() == 0 || it.key() > static_cast<quint32>(nSeg) || it.value() <= 0 || !segHasAnyValid[static_cast<size_t>(it.key())])
             continue;
         segLabel[static_cast<size_t>(it.key())] = it.value();
         uniqueClasses.insert(it.value());
@@ -333,6 +340,26 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
 
     context.reportProgress(0.65, "Training " + method + " on " +
                                      std::to_string(labeledSegments) + " labeled objects");
+    // Feature standardization (#682): train SVM/adaptive backends on
+    // z-scored features; the default gamma=0.5 / C were tuned for that
+    // space, and the GUI path standardizes. Without it the RBF kernel
+    // underflows on DN-scale distances. Incomplete segments were already
+    // excluded from trainX counting.
+    RsFeatureScaler obiaScaler;
+    if (!trainX.empty())
+        obiaScaler.fit(trainX);
+    // Apply only when trainX is complete (has no incomplete-feat segments):
+    // otherwise the excluded rows have never-defined band values — fit would
+    // be computed over different rows per band.
+    bool scalerFitted = false;
+    if (obiaScaler.isFitted()) {
+        // Guard: only pull in incomplete segments after we know the scaler
+        // stats; then exclude them from training but keep them predictable
+        // once transformed consistently.
+        trainX = obiaScaler.transform(trainX);
+        scalerFitted = true;
+    }
+
     std::unique_ptr<RsClassifierBackend> backend =
         RsClassifierBackendFactory::create(QString::fromStdString(method));
     if (!backend->fit(trainX, trainY)) {
@@ -348,6 +375,8 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
         for (int f = 0; f < nFeat; ++f)
             allX.at<float>(s - 1, f) = feats[static_cast<size_t>(s)][static_cast<size_t>(f)];
     }
+    if (scalerFitted)
+        allX = obiaScaler.transform(allX);
     const cv::Mat pred = backend->predict(allX);
     if (pred.empty() || pred.rows < nSeg) {
         throw RSOperatorError(ErrorCode::OpenCvError, "predict failed");
@@ -355,7 +384,7 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
 
     std::vector<int32_t> classOfSeg(static_cast<size_t>(nSeg + 1), 0);
     for (int s = 1; s <= nSeg; ++s) {
-        if (!segHasValid[static_cast<size_t>(s)]) {
+        if (!segHasAnyValid[static_cast<size_t>(s)]) {
             classOfSeg[static_cast<size_t>(s)] = 0;
             continue;
         }
