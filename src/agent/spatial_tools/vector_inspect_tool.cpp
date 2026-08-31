@@ -38,7 +38,10 @@ Json::Value describeLayer( OGRLayer *layer, int maxFeatures )
   out["name"] = layer->GetName();
 
   out["geometryType"] = OGRGeometryTypeToName( layer->GetGeomType() );
-  const GIntBig featureCount = layer->GetFeatureCount();
+  // Cheap count only (#701): the default bForce=TRUE fully parses the file
+  // (GeoJSON: every feature) inline on the serialized MCP main loop — the
+  // same bounded-cost violation the extent path fixed in #644.
+  const GIntBig featureCount = layer->GetFeatureCount( /*bForce=*/FALSE );
   if ( featureCount >= 0 )
     out["featureCount"] = static_cast<Json::Int64>( featureCount );
   else

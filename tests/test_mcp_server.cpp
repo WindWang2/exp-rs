@@ -1129,6 +1129,13 @@ TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][s
 
     TestMcpServer server;
 
+    // The initialize handshake gates other requests with -32002 (#701).
+    QVariantMap initReq;
+    initReq[QStringLiteral( "id" )] = 0;
+    initReq[QStringLiteral( "method" )] = QStringLiteral( "initialize" );
+    server.testHandleRequest( initReq );
+    REQUIRE( server.lastResponseId.toInt() == 0 );
+
     // tools/call dispatch: full JSON-RPC path for a spatial: tool.
     QVariantMap callReq;
     callReq[QStringLiteral( "id" )] = 42;

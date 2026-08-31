@@ -574,7 +574,7 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
     // submission path runs autoLoad=false), so the tool answered "no data"
     // while the session's committed outputs lived in the DataManager asset
     // catalog. Fall back to the catalog when the project is empty.
-    def.handler = [dataManager]( const Json::Value & ) {
+    def.handler = [dataManager = QPointer<sicnu::data::DataManager>( dataManager )]( const Json::Value & ) {
       Json::Value result( Json::objectValue );
       Json::Value layers( Json::arrayValue );
       int projectLayerCount = 0;
@@ -653,7 +653,7 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
     // #688: same headless fallback as data:list_layers — resolve the target
     // against the DataManager asset catalog when the project has no such
     // layer (the MCP mode is always project-empty).
-    def.handler = [dataManager]( const Json::Value &params ) {
+    def.handler = [dataManager = QPointer<sicnu::data::DataManager>( dataManager )]( const Json::Value &params ) {
       std::string targetId;
       if ( params.isMember( "layer_id" ) && params["layer_id"].isString() )
         targetId = params["layer_id"].asString();
@@ -841,7 +841,7 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
     schema["required"] = req;
     def.inputSchema = schema;
 
-    def.handler = [dataManager]( const Json::Value &params ) {
+    def.handler = [dataManager = QPointer<sicnu::data::DataManager>( dataManager )]( const Json::Value &params ) {
       if ( !dataManager )
       {
         Json::Value err( Json::objectValue );

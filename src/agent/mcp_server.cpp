@@ -546,6 +546,17 @@ void McpServer::handleRequest(const QVariantMap &request)
     QString method = request.value(QStringLiteral("method")).toString();
     QVariantMap params = request.value(QStringLiteral("params")).toMap();
 
+    // MCP spec: requests other than initialize/ping before the handshake
+    // are rejected with -32002 Server not initialized (#701.7) — the old
+    // server answered everything, so a mis-ordered client got confusing
+    // half-valid responses instead of the protocol error.
+    if ( !m_initialized && method != QStringLiteral( "initialize" )
+         && method != QStringLiteral( "ping" ) && !method.startsWith( QStringLiteral( "notifications/" ) ) )
+    {
+        sendError( id, -32002, QStringLiteral( "Server not initialized" ) );
+        return;
+    }
+
     SICNU_LOG_INFO(SicnuLogTags::MCP, QString("MCP request: %1 (id=%2)").arg(method).arg(id.toString()));
 
     if (method == QStringLiteral("initialize"))
@@ -554,6 +565,7 @@ void McpServer::handleRequest(const QVariantMap &request)
         // MCP spec: server responds with latest version it supports, not echo.
         static const QString kSupportedVersion = QStringLiteral("2024-11-05");
         result[QStringLiteral("protocolVersion")] = kSupportedVersion;
+        m_initialized = true;
 
         QVariantMap capabilities;
         QVariantMap toolsCap;
