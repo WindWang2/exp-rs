@@ -1,6 +1,8 @@
 // tests/test_gui_job_adapter.cpp
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+
 #include <QCoreApplication>
 
 #include <chrono>
@@ -26,19 +28,46 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
     CHECK(handle.taskId() == -1);
 
     SECTION("Busy-gating: cannot submit second job while one is running") {
+        // Deterministic body: a bare real algorithm name races its own
+        // terminal record against the submit return (it can fail before
+        // isRunning() is even checked). A blocking executor pins the task
+        // Running until cancellation lands (#696 semantics).
+        std::atomic<bool> release{ false };
         jobs::JobRequest req;
-        req.algorithmId = "gdal:contrast_stretch";
-        req.title = "Test Job";
+        req.algorithmId = "guijob:blocking";
 
-        long id1 = handle.submitJob(req, nullptr, nullptr);
+        long id1 = handle.submitJob(
+            req,
+            [&release](const jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx) -> Json::Value {
+                while ( !release.load() && !ctx.isCancelled() )
+                    std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+                return Json::Value( Json::objectValue );
+            },
+            nullptr, true,
+            nullptr, nullptr);
         REQUIRE(id1 > 0);
-        CHECK(handle.isRunning());
+        for ( int i = 0; i < 500 && !handle.isRunning(); ++i ) {
+            QCoreApplication::processEvents();
+            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+        }
+        REQUIRE(handle.isRunning());
         CHECK(handle.taskId() == id1);
 
         long id2 = handle.submitJob(req, nullptr, nullptr);
         CHECK(id2 == -1); // Busy-gated
 
+        // #696: cancel only REQUESTS; the handle stays busy until the
+        // terminal record arrives (Run must not re-enable mid-write).
         handle.cancel();
+        CHECK(handle.isRunning());
+        release.store( true );
+        bool settled = false;
+        for ( int i = 0; i < 500 && !settled; ++i ) {
+            QCoreApplication::processEvents();
+            settled = !handle.isRunning();
+            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+        }
+        CHECK( settled );
         CHECK_FALSE(handle.isRunning());
     }
 

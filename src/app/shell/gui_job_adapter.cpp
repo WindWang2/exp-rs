@@ -36,7 +36,9 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
   m_onFailure = std::move( onFailure );
   m_onProgress = std::move( onProgress );
 
-  const long submittedId = m_taskCenter->submitJob( req );
+  // #674: this seam self-loads its result (dialog accept / panel), so the
+  // TaskCenter default-on layerAutoLoadRequested path would double-load.
+  const long submittedId = m_taskCenter->submitJob( req, {}, {}, /*autoLoad=*/false );
   m_taskId = submittedId;
   if ( m_taskId < 0 )
   {
@@ -136,23 +138,15 @@ long GuiJobHandle::submitTask( const QString &algorithmId,
 
 void GuiJobHandle::cancel()
 {
+  // Only REQUEST the cancellation (#696): resetting m_taskId and firing
+  // onFailure synchronously re-enabled Run (and unguarded reject()) while
+  // the operator was still mid-write, so a second run could target the
+  // same output file or destroy the dialog under the executor. The
+  // terminal taskUpdated record drives the reset + callbacks; Cancelling
+  // progress keeps reporting until it lands.
   if ( m_taskId >= 0 )
   {
-    long idToCancel = m_taskId;
-    m_taskCenter->cancelTask( idToCancel );
-    if ( m_taskId == idToCancel )
-    {
-      m_taskId = -1;
-      auto onFailure = std::move( m_onFailure );
-      m_onSuccess = nullptr;
-      m_onFailure = nullptr;
-      m_onProgress = nullptr;
-      if ( onFailure )
-      {
-        onFailure( QStringLiteral( "Canceled" ), true );
-      }
-      emit taskFailed( QStringLiteral( "Canceled" ), true );
-    }
+    m_taskCenter->cancelTask( m_taskId );
   }
 }
 
