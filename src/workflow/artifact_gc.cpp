@@ -95,22 +95,30 @@ QStringList ArtifactGC::inspectReapable( const sicnu::workflow::WorkflowRun &run
   // the run workspace. Their canonical directories are the only roots under
   // which reaping is allowed; without at least one retained output there is
   // no established workspace and nothing is reaped.
+  // Workspace roots (#697): when finals are retained they alone define the
+  // workspace (a tampered intermediate pointing OUTSIDE it is then refused —
+  // the gating test pins this). With retainFinalOutputs=false the flag used
+  // to populate nothing and pass 2 reaped NOTHING (effectively inverted);
+  // instead every Completed output's directory becomes a root and finals
+  // reap alongside intermediates.
   QSet<QString> workspaceRoots;
   for ( const auto &plan : plans )
   {
     const QString outPath = QString::fromStdString( plan.outputLayerPath );
     if ( outPath.isEmpty() || !QFile::exists( outPath ) )
       continue;
+    if ( plan.status != "Completed" )
+      continue; // never derive the workspace from an unproduced output
 
     const bool isLeaf = ( consumedStepIds.find( plan.stepId ) == consumedStepIds.end() );
     const bool isArtifact = ( artifactPaths.find( plan.outputLayerPath ) != artifactPaths.end() );
-    if ( retainFinalOutputs && ( isLeaf || isArtifact ) )
-    {
-      const QFileInfo fi( outPath );
-      const QString dir = QFileInfo( fi.absolutePath() ).canonicalFilePath();
-      if ( !dir.isEmpty() )
-        workspaceRoots.insert( dir );
-    }
+    if ( retainFinalOutputs && !( isLeaf || isArtifact ) )
+      continue; // retained mode: only the finals anchor the workspace
+
+    const QFileInfo fi( outPath );
+    const QString dir = QFileInfo( fi.absolutePath() ).canonicalFilePath();
+    if ( !dir.isEmpty() )
+      workspaceRoots.insert( dir );
   }
   if ( workspaceRoots.isEmpty() )
     return QStringList();
@@ -128,8 +136,8 @@ QStringList ArtifactGC::inspectReapable( const sicnu::workflow::WorkflowRun &run
 
     const bool isLeaf = ( consumedStepIds.find( plan.stepId ) == consumedStepIds.end() );
     const bool isArtifact = ( artifactPaths.find( plan.outputLayerPath ) != artifactPaths.end() );
-    if ( isLeaf || isArtifact )
-      continue; // retained final output
+    if ( retainFinalOutputs && ( isLeaf || isArtifact ) )
+      continue; // retained final output (false: finals reap too, #697)
 
     if ( plan.status != "Completed" )
       continue; // not (fully) produced - retry may need it
