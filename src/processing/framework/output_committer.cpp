@@ -174,6 +174,11 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
       if ( !moveOrCopy( pair.from, staging ) || !QFile::rename( staging, pair.to ) )
       {
         publishOk = false;
+        // A failed cross-filesystem copy can leave a partial <stable>.new
+        // behind (cleanup only ran at the START of the next pair) — remove
+        // it so nothing half-written survives the failure (#703.4).
+        if ( QFile::exists( staging ) )
+          QFile::remove( staging );
         // Restore this pair's previous stable file if it was moved aside.
         if ( QFile::exists( backup ) && !QFile::exists( pair.to ) )
           QFile::rename( backup, pair.to );
@@ -240,11 +245,29 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
     return CommitResult::failure( detail );
   }
 
+  QVector<Diagnostic> warnings;
+  // Re-publish over an already-registered stable path (#687): the dedup
+  // path returned the existing id without advancing the revision or
+  // emitting anything, although the file bytes just changed — display
+  // layers never refreshed, leases stayed on the stale revision, and
+  // content-keyed caches served the old output. Advance + notify now.
+  if ( registered.reusedExisting )
+  {
+    const Result<void> notified = m_dataManager->notifyExternalContentChange( registered.assetId );
+    if ( !notified )
+    {
+      warnings.append( Diagnostic{ QStringLiteral( "output.revision_not_advanced" ),
+                                   QStringLiteral( "Output was re-published over a "
+                                                   "registered asset but the revision "
+                                                   "could not be advanced" ),
+                                   DiagnosticSeverity::Warning } );
+    }
+  }
+
   // Registration emitted `assetAdded` once (registerSource guarantees it).
   // Provenance is the final step: surface an attach failure as a warning
   // diagnostic alongside the otherwise-successful registration, so provenance
   // can't vanish silently.
-  QVector<Diagnostic> warnings;
   const Result<void> attached =
     m_dataManager->attachDerivationRecord( registered.assetId, request.derivation );
   if ( !attached )

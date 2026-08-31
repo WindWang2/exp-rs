@@ -1071,3 +1071,39 @@ TEST_CASE( "Lineage queries ignore unknown asset ids", "[data_manager][provenanc
   CHECK( manager->derivedFrom( AssetId::generate() ).isEmpty() );
   CHECK( manager->derivedOutputsOf( AssetId::generate() ).isEmpty() );
 }
+
+// ---------------------------------------------------------------------------
+// #687: re-publishing bytes over an already-registered stable path must
+// advance the revision and emit assetChanged — observers (display layers,
+// leases, content-keyed caches) re-read the replaced content.
+// ---------------------------------------------------------------------------
+TEST_CASE( "notifyExternalContentChange advances revision and emits assetChanged (#687)",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+
+  RegisterRequest request;
+  request.source = memoryRaster( QStringLiteral( "stable-output" ) );
+  const auto registered = manager->registerSource( request );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+  const AssetRevision before = manager->asset( registered.assetId )->revision();
+
+  int changes = 0;
+  AssetId changedId;
+  QObject::connect( manager.get(), &DataManager::assetChanged, [&]( AssetId id ) {
+    ++changes;
+    changedId = id;
+  } );
+
+  REQUIRE( manager->notifyExternalContentChange( registered.assetId ) );
+  CHECK( changes == 1 );
+  CHECK( changedId == registered.assetId );
+  const auto after = manager->asset( registered.assetId );
+  REQUIRE( after.has_value() );
+  CHECK( after->revision() != before );
+  CHECK( manager->catalogGeneration() >= 1 );
+
+  // Unknown id fails with a structured diagnostic instead of asserting.
+  AssetId bogus;
+  CHECK_FALSE( manager->notifyExternalContentChange( bogus ) );
+}

@@ -106,6 +106,13 @@ class DataManager : public QObject
     /// revision, releases the Edit Lease, and emits one assetChanged so other
     /// Display Layers refresh. Fails if no active Edit Lease exists.
     Result<void> commitEdit( AssetId id );
+    /// Advances the asset revision and emits assetChanged for an asset whose
+    /// backing content was replaced outside the Edit-Lease flow (e.g. the
+    /// OutputCommitter re-publishing bytes over an already-registered stable
+    /// path, #687). Without this, display layers never refresh, leases stay
+    /// pinned to the old revision, and content-addressed caches serve stale
+    /// outputs. Fails for an unknown asset id.
+    Result<void> notifyExternalContentChange( AssetId id );
     /// Rolls back the active Edit Lease without advancing the revision. The Edit
     /// Lease is released and no change event is emitted.
     Result<void> rollbackEdit( AssetId id );
