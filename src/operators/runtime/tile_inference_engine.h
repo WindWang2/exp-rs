@@ -56,6 +56,9 @@ class TileInferenceEngine
     static int effectiveHalo( const ModelInfo &model );
 
   private:
+    /// Resolved GDAL type of the manifest's input.dtype (-1 = undeclared);
+    /// checked against every FED band after selection (#705.3).
+    int m_declaredDtype = -1;
     ModelInfo m_model;
     ModelRuntimePtr m_runtime;
 };

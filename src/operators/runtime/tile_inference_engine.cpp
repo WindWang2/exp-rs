@@ -120,7 +120,6 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   // silently misnormalizes).
   if ( !m_model.input.dtype.empty() )
   {
-    const int rasterType = ds.bandDataType( 1 );
     static const std::map<std::string, int> kAccepted = {
       { "float32", GDT_Float32 }, { "float64", GDT_Float64 },
       { "float16", GDT_Float32 }, { "uint16", GDT_UInt16 },
@@ -131,12 +130,10 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     if ( it == kAccepted.end() )
       throw RSOperatorError( ErrorCode::InvalidParameter,
                              "model manifest declares unsupported input dtype '" + m_model.input.dtype + "'" );
-    if ( rasterType != it->second )
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "model manifest requires input dtype '" + m_model.input.dtype
-                               + "' but the raster band 1 has GDAL type "
-                               + std::to_string( rasterType )
-                               + " (convert the raster or update the manifest)" );
+    // NOTE: per-band comparison happens after band selection below (#705.3)
+    // — mixed-type VRTs dodged the contract for the actually-fed bands
+    // when only band 1 was checked.
+    m_declaredDtype = it->second;
   }
 
   std::vector<int> bandList = bands;
@@ -145,6 +142,18 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     bandList.resize( rasterBands );
     for ( int i = 0; i < rasterBands; ++i )
       bandList[static_cast<std::size_t>( i )] = i + 1;
+  }
+  if ( m_declaredDtype >= 0 )
+  {
+    for ( int b : bandList )
+    {
+      if ( ds.bandDataType( b ) != m_declaredDtype )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "model manifest requires input dtype '" + m_model.input.dtype
+                                 + "' but raster band " + std::to_string( b ) + " has GDAL type "
+                                 + std::to_string( ds.bandDataType( b ) )
+                                 + " (convert the raster or update the manifest)" );
+    }
   }
   else
   {
@@ -230,6 +239,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   std::vector<cv::Mat> batchMasks;
   std::vector<std::pair<int, int>> batchFedSize;
   std::vector<CoreTile> batchCores;
+  std::vector<CoreTile> nodataTiles; // skipped all-nodata cores (#705.4)
 
   std::unique_ptr<GdalStreamingOutput> writer;
   // Any failure after the writer exists must not leave a truncated GeoTIFF at
@@ -333,6 +343,20 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           data[i] = static_cast<float>( v );
         }
       }
+    }
+
+    // All-nodata core: skip the forward pass entirely (#705.4) — the output
+    // is restored to NaN afterwards anyway, so the GPU/CPU pass is pure
+    // waste. Only once the writer exists (the first real batch reveals the
+    // output channel count); an entirely-nodata raster keeps the legacy
+    // forward so the output geometry is still established.
+    if ( writer && cv::countNonZero( invalidMask ) == invalidMask.total() )
+    {
+      nodataTiles.push_back( t );
+      ++done;
+      context.reportProgress( static_cast<double>( done ) / static_cast<double>( totalTiles ),
+                              "Tiled inference: " + std::to_string( done ) + "/" + std::to_string( totalTiles ) );
+      continue;
     }
 
     cv::Mat tileMat = hwc.clone(); // detached from the reused window buffer
@@ -546,6 +570,25 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                             "Tiled inference: " + std::to_string( done ) + "/" + std::to_string( totalTiles ) );
   }
 
+    // Flush skipped all-nodata tiles as NaN now that the writer exists
+    // (also runs for the trailing no-batch case).
+    if ( writer && !nodataTiles.empty() )
+    {
+      std::vector<float> nanPlane;
+      for ( const CoreTile &bt : nodataTiles )
+      {
+        nanPlane.assign( static_cast<std::size_t>( bt.w ) * bt.h,
+                         std::numeric_limits<float>::quiet_NaN() );
+        const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
+                                               0, 1 };
+        for ( int c = 0; c < stats.outBands; ++c )
+          if ( !writer->writeTile( c + 1, writeTile, nanPlane.data() ) )
+            throw RSOperatorError( ErrorCode::FileNotWritable,
+                                   "failed to write nodata tile at (" + std::to_string( bt.x ) + ", "
+                                     + std::to_string( bt.y ) + ")" );
+      }
+      nodataTiles.clear();
+    }
   }
   catch ( ... )
   {
