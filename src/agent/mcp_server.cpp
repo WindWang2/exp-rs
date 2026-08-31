@@ -2,6 +2,8 @@
 #include "core/sicnu_logging.h"
 #include "env_flag.h"
 
+#include <optional>
+#include "data/data_asset.h"
 #include "data/data_manager.h"
 #include "data/asset_types.h"
 #include "data/derivation_record.h"
@@ -1453,6 +1455,27 @@ QVariantMap McpServer::handleListLayers()
         layerList.append(layerMap);
     }
 
+    // #688: MCP mode is always project-empty (autoLoad=false on every
+    // submission path) — surface the DataManager asset catalog so the agent
+    // can actually discover the session's committed outputs.
+    if (layers.isEmpty() && m_dataManager)
+    {
+        for (const auto &asset : m_dataManager->assets())
+        {
+            QVariantMap layerMap;
+            layerMap[QStringLiteral("id")] = asset.id().toString();
+            layerMap[QStringLiteral("name")] = asset.displayName();
+            layerMap[QStringLiteral("type")] = asset.kind() == sicnu::data::AssetKind::Raster
+                                                   ? QStringLiteral("raster")
+                                                   : QStringLiteral("vector");
+            layerMap[QStringLiteral("source")] = asset.source().canonicalSource;
+            const auto &structure = asset.structure();
+            if (const auto *raster = std::get_if<sicnu::data::RasterStructure>(&structure))
+                layerMap[QStringLiteral("bands")] = raster->bandCount;
+            layerList.append(layerMap);
+        }
+    }
+
     result[QStringLiteral("layers")] = layerList;
     return result;
 }
@@ -1467,6 +1490,61 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
         if (!layers.isEmpty())
         {
             layer = layers.first();
+        }
+    }
+
+    if (!layer && m_dataManager)
+    {
+        // #688: headless fallback — resolve the target against the asset
+        // catalog (by AssetId, then by display name) and answer from the
+        // registered structure instead of failing with "Layer not found".
+        const auto id = sicnu::data::AssetId::fromString(layerId);
+        std::optional<sicnu::data::AssetSnapshot> snapshot;
+        if (id)
+            snapshot = m_dataManager->asset(*id);
+        if (!snapshot)
+        {
+            for (const auto &candidate : m_dataManager->assets())
+            {
+                if (candidate.displayName() == layerId)
+                {
+                    snapshot = candidate;
+                    break;
+                }
+            }
+        }
+        if (snapshot)
+        {
+            QVariantMap assetResult;
+            assetResult[QStringLiteral("id")] = snapshot->id().toString();
+            assetResult[QStringLiteral("name")] = snapshot->displayName();
+            assetResult[QStringLiteral("source")] = snapshot->source().canonicalSource;
+            const auto &structure = snapshot->structure();
+            if (const auto *raster = std::get_if<sicnu::data::RasterStructure>(&structure))
+            {
+                assetResult[QStringLiteral("type")] = QStringLiteral("raster");
+                assetResult[QStringLiteral("width")] = raster->width;
+                assetResult[QStringLiteral("height")] = raster->height;
+                assetResult[QStringLiteral("bands")] = raster->bandCount;
+                assetResult[QStringLiteral("crs")] = raster->crsWkt;
+                if (raster->extent.valid)
+                {
+                    assetResult[QStringLiteral("extent")] = QVariantMap{
+                        {QStringLiteral("xmin"), raster->extent.minimumX},
+                        {QStringLiteral("ymin"), raster->extent.minimumY},
+                        {QStringLiteral("xmax"), raster->extent.maximumX},
+                        {QStringLiteral("ymax"), raster->extent.maximumY}
+                    };
+                }
+            }
+            else if (const auto *vector = std::get_if<sicnu::data::VectorStructure>(&structure))
+            {
+                assetResult[QStringLiteral("type")] = QStringLiteral("vector");
+                assetResult[QStringLiteral("layerCount")] = vector->layerCount;
+                if (!vector->layers.isEmpty())
+                    assetResult[QStringLiteral("crs")] = vector->layers.first().crsWkt;
+            }
+            return assetResult;
         }
     }
 

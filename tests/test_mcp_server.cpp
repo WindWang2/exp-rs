@@ -1225,3 +1225,38 @@ TEST_CASE( "McpServer::handleSearchAlgorithms performs case-insensitive inputTyp
 }
 
 
+
+// ---------------------------------------------------------------------------
+// #688: in MCP mode the project is always empty (autoLoad=false on every
+// submission path) — list_layers/describe_dataset must answer from the
+// DataManager asset catalog or the agent cannot discover committed outputs.
+// ---------------------------------------------------------------------------
+TEST_CASE( "list_layers and describe_dataset answer from the asset catalog when the project is empty (#688)",
+           "[agent][mcp][headless]" )
+{
+  using namespace sicnu::data;
+
+  const auto manager = makeLineageDataManager();
+  REQUIRE( manager );
+
+  TestMcpServer server;
+  server.setDataManager( manager.get() );
+
+  RegisterRequest request;
+  request.source = memoryRasterSource( QStringLiteral( "headless-scene" ) );
+  const auto registered = manager->registerSource( request );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+
+  // Project has no layers: the catalog fallback must list the asset.
+  const QVariantMap listed = server.testListLayers();
+  const QVariantList layers = listed.value( QStringLiteral( "layers" ) ).toList();
+  REQUIRE( layers.size() == 1 );
+  const QVariantMap first = layers.first().toMap();
+  CHECK( first.value( QStringLiteral( "id" ) ).toString() == registered.assetId.toString() );
+  CHECK( first.value( QStringLiteral( "source" ) ).toString() == QStringLiteral( "headless-scene" ) );
+
+  // describe_dataset resolves the same asset by id in headless mode.
+  const QVariantMap described = server.testDescribeDataset( registered.assetId.toString() );
+  CHECK( described.value( QStringLiteral( "id" ) ).toString() == registered.assetId.toString() );
+  CHECK( described.value( QStringLiteral( "source" ) ).toString() == QStringLiteral( "headless-scene" ) );
+}
