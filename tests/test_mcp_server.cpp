@@ -610,7 +610,12 @@ TEST_CASE("McpServer executes qgis processing algorithms to terminal state", "[a
     QVariantMap status = server.testGetExecutionStatus(execId);
     REQUIRE(status.value("execution_id").toString() == execId);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    sicnu::jobs::JobEngine::instance().shutdown();
+    // Test-scope cleanup only (#684 made production shutdown latched: a
+    // later submit must NOT resurrect worker threads). shutdownForTests
+    // joins the pool AND clears the latch, so subsequent test cases keep
+    // executing; the production call here used to rely on the old
+    // submit-side m_stop reset to keep working.
+    sicnu::jobs::JobEngine::instance().shutdownForTests();
 }
 
 TEST_CASE("McpServer describe_dataset exposes semantic band roles", "[agent][mcp][semantic]") {
