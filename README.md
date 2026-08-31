@@ -103,7 +103,7 @@ make -j$(nproc)
 QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 ```
 
-**1,758 Catch2 test cases** covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, TaskCenter DAG execution, the processing framework, and the spatial tool / MCP agent surface.
+**1,800+ Catch2 test cases** (see `ctest -N` for the live count) covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, TaskCenter DAG execution, the processing framework, and the spatial tool / MCP agent surface.
 Headless CLI binary built at `sicnu_geo_rs_cli` with `--list` operator discovery and `--schema` inspection. The desktop binary doubles as a stdio MCP server (`sicnu_geo_rs --mcp`).
 
 ### Toolbox coverage gate

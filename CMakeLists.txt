@@ -272,15 +272,13 @@ if(ENABLE_SANITIZERS)
     # function registry, QgsNumericFormatRegistry, Qt/GDAL driver allocations) that
     # live for the process lifetime and are reported as leaks. These are not bugs.
     set(ENV{LSAN_OPTIONS} "detect_leaks=0")
-    # Also write CTestCustom.cmake so ctest sets LSAN_OPTIONS for test discovery
-    file(WRITE "${CMAKE_BINARY_DIR}/CTestCustom.cmake"
-      "set(ENV{LSAN_OPTIONS} \"detect_leaks=0\")\n")
 endif()
 
-# Release optimization flags
+# Release optimization flags. ENABLE_LTO is declared once above (NOT MSVC
+# branch, default OFF per the #629 policy); re-declaring it here with ON
+# silently flipped the default on GCC/Clang Release builds (#706).
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     add_compile_options(-O2 -DNDEBUG)
-    option(ENABLE_LTO "Enable Link-Time Optimization for Release builds" ON)
     if(ENABLE_LTO)
         set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
     endif()
@@ -656,6 +654,12 @@ add_subdirectory(src/app)
 # SICNU_GEO_RS: Unit tests (Catch2)
 if(ENABLE_TESTS)
     enable_testing()
+    # QGIS/Qt/GDAL driver singletons live for the process lifetime and are
+    # reported as leaks; ctest must suppress them for test discovery too.
+    # Written unconditionally (#706): previously only the sanitizer branch
+    # wrote it, so non-sanitizer lanes relied on CI exporting LSAN_OPTIONS.
+    file(WRITE "${CMAKE_BINARY_DIR}/CTestCustom.cmake"
+      "set(ENV{LSAN_OPTIONS} \"detect_leaks=0\")\n")
     FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
