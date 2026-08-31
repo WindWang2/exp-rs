@@ -603,18 +603,24 @@ public:
     IntegralImage(const float *input, int width, int height)
         : m_width(width), m_height(height)
     {
-        // Build integral images for sum, sum-of-squares, and valid count
-        m_sum.resize((width + 1) * (height + 1), 0.0);
-        m_sumSq.resize((width + 1) * (height + 1), 0.0);
-        m_count.resize((width + 1) * (height + 1), 0);
+        // Build integral images for sum, sum-of-squares, and valid count.
+        // Strides and indexes in size_t (#691): (width+1)*(height+1) and
+        // (y+1)*(width+1) overflow int32 at 46341^2 and per-pixel beyond
+        // ~2^31 elements (e.g. a 100000x30000 strip at y>21473) — silent
+        // corrupt indexing / std::length_error on very large rasters.
+        m_rowStride = static_cast<std::size_t>(width) + 1;
+        const std::size_t cells = m_rowStride * (static_cast<std::size_t>(height) + 1);
+        m_sum.resize(cells, 0.0);
+        m_sumSq.resize(cells, 0.0);
+        m_count.resize(cells, 0);
 
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                float val = input[y * width + x];
-                int idx = (y + 1) * (m_width + 1) + (x + 1);
-                int idxLeft = (y + 1) * (m_width + 1) + x;
-                int idxUp = y * (m_width + 1) + (x + 1);
-                int idxDiag = y * (m_width + 1) + x;
+                float val = input[static_cast<std::size_t>(y) * width + x];
+                const std::size_t idx = (static_cast<std::size_t>(y) + 1) * m_rowStride + (x + 1);
+                const std::size_t idxLeft = (static_cast<std::size_t>(y) + 1) * m_rowStride + x;
+                const std::size_t idxUp = static_cast<std::size_t>(y) * m_rowStride + (x + 1);
+                const std::size_t idxDiag = static_cast<std::size_t>(y) * m_rowStride + x;
 
                 if (std::isfinite(val)) {
                     m_sum[idx] = m_sum[idxLeft] + m_sum[idxUp] - m_sum[idxDiag] + val;
@@ -640,30 +646,31 @@ public:
         x2 = std::clamp(x2, 0, m_width - 1);
         y2 = std::clamp(y2, 0, m_height - 1);
 
-        // Integral image uses 1-indexed coordinates
-        int r1 = y1;
-        int r2 = y2 + 1;
-        int c1 = x1;
-        int c2 = x2 + 1;
+        // Integral image uses 1-indexed coordinates (size_t stride, #691)
+        const std::size_t r1 = static_cast<std::size_t>(y1);
+        const std::size_t r2 = static_cast<std::size_t>(y2) + 1;
+        const std::size_t c1 = static_cast<std::size_t>(x1);
+        const std::size_t c2 = static_cast<std::size_t>(x2) + 1;
 
-        sum = m_sum[r2 * (m_width+1) + c2]
-            - m_sum[r1 * (m_width+1) + c2]
-            - m_sum[r2 * (m_width+1) + c1]
-            + m_sum[r1 * (m_width+1) + c1];
+        sum = m_sum[r2 * m_rowStride + c2]
+            - m_sum[r1 * m_rowStride + c2]
+            - m_sum[r2 * m_rowStride + c1]
+            + m_sum[r1 * m_rowStride + c1];
 
-        sumSq = m_sumSq[r2 * (m_width+1) + c2]
-              - m_sumSq[r1 * (m_width+1) + c2]
-              - m_sumSq[r2 * (m_width+1) + c1]
-              + m_sumSq[r1 * (m_width+1) + c1];
+        sumSq = m_sumSq[r2 * m_rowStride + c2]
+              - m_sumSq[r1 * m_rowStride + c2]
+              - m_sumSq[r2 * m_rowStride + c1]
+              + m_sumSq[r1 * m_rowStride + c1];
 
-        count = m_count[r2 * (m_width+1) + c2]
-              - m_count[r1 * (m_width+1) + c2]
-              - m_count[r2 * (m_width+1) + c1]
-              + m_count[r1 * (m_width+1) + c1];
+        count = m_count[r2 * m_rowStride + c2]
+              - m_count[r1 * m_rowStride + c2]
+              - m_count[r2 * m_rowStride + c1]
+              + m_count[r1 * m_rowStride + c1];
     }
 
 private:
     int m_width, m_height;
+    std::size_t m_rowStride = 0;
     std::vector<double> m_sum;
     std::vector<double> m_sumSq;
     std::vector<int> m_count;
