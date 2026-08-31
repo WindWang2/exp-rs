@@ -127,6 +127,8 @@ Json::Value RsInferenceOperator::metadata() const
     meta["tags"].append( "onnx" );
     meta["tags"].append( "edge-ai" );
     meta["tags"].append( "deep-learning" );
+    meta["tags"].append( "model" );
+    meta["tags"].append( "tiled" );
     meta["purpose"] = "Run a pretrained ONNX model on a raster with pure C++ (cv::dnn), tiled with bounded memory.";
     meta["prerequisites"].append( "Model must be loadable by cv::dnn::readNetFromONNX." );
     meta["workflowHints"].append( "Preprocessing/postprocessing follow the model manifest (v2) contracts; default is bands-in/raster-out identity chaining." );

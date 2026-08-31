@@ -30,7 +30,8 @@ Json::Value AlgorithmMetaEntry::toJson() const
   out["task"] = task;
   out["input"] = input;
   out["output"] = output;
-  out["gpu"] = gpu;
+  if ( gpuDeclared )
+    out["gpu"] = gpu;
   if ( accuracy >= 0.0 )
     out["accuracy"] = accuracy;
   if ( !notes.empty() )
@@ -79,7 +80,11 @@ size_t AlgorithmMetaStore::loadFromDirectory( const std::string &dir )
     entry.task = obj.value( QStringLiteral( "task" ) ).toString().toStdString();
     entry.input = obj.value( QStringLiteral( "input" ) ).toString().toStdString();
     entry.output = obj.value( QStringLiteral( "output" ) ).toString().toStdString();
-    entry.gpu = obj.value( QStringLiteral( "gpu" ) ).toBool( false );
+    if ( obj.contains( QStringLiteral( "gpu" ) ) )
+    {
+      entry.gpu = obj.value( QStringLiteral( "gpu" ) ).toBool( false );
+      entry.gpuDeclared = true;
+    }
     const QJsonValue accuracy = obj.value( QStringLiteral( "accuracy" ) );
     entry.accuracy = accuracy.isDouble() ? accuracy.toDouble() : -1.0;
     entry.notes = obj.value( QStringLiteral( "notes" ) ).toString().toStdString();
