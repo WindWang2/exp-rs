@@ -325,7 +325,7 @@ void InteractionToolProvider::resetDefaults()
   {
     for ( const auto &def : sicnu::agent::InteractionToolRegistry::instance().listTools() )
     {
-      if ( def.name.startsWith( QStringLiteral( "data:" ) ) )
+      if ( def.name.rfind( "data:", 0 ) == 0 )
         continue;
       if ( mTools.find( def.name ) != mTools.end() )
         continue;
