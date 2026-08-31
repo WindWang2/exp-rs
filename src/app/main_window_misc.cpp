@@ -2,6 +2,7 @@
 #include "main_window.h"
 
 #include "app_paths.h"
+#include "dialogs/help_viewer_dialog.h"
 #include "dialogs/preferences_dialog.h"
 #include "processing/tools/tool_path_manager.h"
 
@@ -155,7 +156,14 @@ void QgisDesktopWindow::showProcessingHistory()
 }
 
 // ── Help Actions ──────────────────────────────────────────────────────────
-void QgisDesktopWindow::helpContents() { QMessageBox::information(this, "Help", "QGIS Help"); }
+void QgisDesktopWindow::helpContents()
+{
+    auto *viewer = new HelpViewerDialog( this );
+    viewer->setAttribute( Qt::WA_DeleteOnClose );
+    viewer->show();
+    viewer->raise();
+    viewer->activateWindow();
+}
 void QgisDesktopWindow::checkVersion() { QMessageBox::information(this, "Version", "SICNU GEO RS v0.9.2-dev"); }
 void QgisDesktopWindow::about()
 {

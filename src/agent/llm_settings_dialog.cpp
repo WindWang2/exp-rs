@@ -19,14 +19,22 @@ LlmSettingsDialog::LlmSettingsDialog( QWidget *parent )
   auto *formLayout = new QFormLayout();
 
   m_providerCombo = new QComboBox( this );
+  m_providerCombo->setToolTip( tr( "选择预设或自定义大模型服务提供商" ) );
   m_baseUrlEdit = new QLineEdit( this );
+  m_baseUrlEdit->setPlaceholderText( QStringLiteral( "https://api.openai.com/v1" ) );
+  m_baseUrlEdit->setToolTip( tr( "大模型 API 服务端点根路径" ) );
   m_apiKeyEdit = new QLineEdit( this );
   m_apiKeyEdit->setEchoMode( QLineEdit::Password );
+  m_apiKeyEdit->setPlaceholderText( tr( "输入 API 密钥 (本地模型可留空)" ) );
+  m_apiKeyEdit->setToolTip( tr( "身份鉴权令牌" ) );
   m_modelNameEdit = new QLineEdit( this );
+  m_modelNameEdit->setPlaceholderText( QStringLiteral( "gpt-4o, qwen-plus, etc." ) );
+  m_modelNameEdit->setToolTip( tr( "请求调用的模型名称" ) );
   m_tempSpin = new QDoubleSpinBox( this );
   m_tempSpin->setRange( 0.0, 1.0 );
   m_tempSpin->setSingleStep( 0.1 );
   m_tempSpin->setValue( 0.2 );
+  m_tempSpin->setToolTip( tr( "采样温度 (0.0~1.0)" ) );
 
   formLayout->addRow( QStringLiteral( "供应商 (Provider):" ), m_providerCombo );
   formLayout->addRow( QStringLiteral( "Base URL:" ), m_baseUrlEdit );
@@ -38,6 +46,7 @@ LlmSettingsDialog::LlmSettingsDialog( QWidget *parent )
 
   auto *testLayout = new QHBoxLayout();
   m_testBtn = new QPushButton( QStringLiteral( "测试网络连通性" ), this );
+  m_testBtn->setToolTip( tr( "测试与大模型服务的连通性" ) );
   m_statusLabel = new QLabel( this );
   testLayout->addWidget( m_testBtn );
   testLayout->addWidget( m_statusLabel, 1 );

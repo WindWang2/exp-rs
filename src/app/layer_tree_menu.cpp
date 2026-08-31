@@ -47,8 +47,12 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
 
     if (!node) {
         if (m_activeViewHost) {
-            menu->addAction(QObject::tr("Add Raster Layer..."), menu, addRasterAction);
-            menu->addAction(QObject::tr("Add Vector Layer..."), menu, addVectorAction);
+            QAction *actRaster = menu->addAction(QObject::tr("Add Raster Layer..."), menu, addRasterAction);
+            actRaster->setToolTip(QObject::tr("打开并加载多波段遥感栅格影像图层"));
+            actRaster->setStatusTip(QObject::tr("添加栅格影像图层到当前工程"));
+            QAction *actVector = menu->addAction(QObject::tr("Add Vector Layer..."), menu, addVectorAction);
+            actVector->setToolTip(QObject::tr("打开并加载矢量要素图层 (Shapefile / GeoPackage)"));
+            actVector->setStatusTip(QObject::tr("添加矢量图层到当前工程"));
         }
         menu->addSeparator();
         if (mView) {
@@ -73,6 +77,8 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
 
         if (m_activeViewHost) {
             QAction *zoomAction = menu->addAction(QObject::tr("Zoom to Layer"));
+            zoomAction->setToolTip(QObject::tr("缩放画布以完整显示该图层的空间范围"));
+            zoomAction->setStatusTip(QObject::tr("缩放到选中图层范围"));
             QObject::connect(zoomAction, &QAction::triggered, menu, [hostPtr, layerPtr]() {
                 if (hostPtr && layerPtr) {
                     hostPtr->zoomToLayer(layerPtr.data());
@@ -82,6 +88,8 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
 
         if (layer && layer->type() == Qgis::LayerType::Raster) {
             QAction *zoomNative = menu->addAction(QObject::tr("Zoom to Native Resolution (1:1)"));
+            zoomNative->setToolTip(QObject::tr("以 1:1 原始像元分辨率显示当前栅格"));
+            zoomNative->setStatusTip(QObject::tr("缩放到原始像元分辨率"));
             QObject::connect(zoomNative, &QAction::triggered, menu, [hostPtr, layerPtr]() {
                 if (hostPtr && layerPtr) {
                     hostPtr->zoomToNativeResolution(layerPtr.data());
@@ -90,11 +98,13 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
         }
 
         if (m_activeViewHost) {
-            menu->addAction(QObject::tr("Properties..."), menu, [hostPtr, layerPtr]() {
+            QAction *propsAction = menu->addAction(QObject::tr("Properties..."), menu, [hostPtr, layerPtr]() {
                 if (hostPtr && layerPtr) {
                     hostPtr->showLayerProperties(layerPtr.data());
                 }
             });
+            propsAction->setToolTip(QObject::tr("打开图层属性对话框 (波段渲染、透明度、元数据与投影)"));
+            propsAction->setStatusTip(QObject::tr("查看和修改图层属性"));
         }
         menu->addSeparator();
         menu->addAction(defActions->actionRenameGroupOrLayer());
@@ -108,8 +118,12 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
 
     menu->addSeparator();
     if (m_activeViewHost) {
-        menu->addAction(QObject::tr("Add Raster Layer..."), menu, addRasterAction);
-        menu->addAction(QObject::tr("Add Vector Layer..."), menu, addVectorAction);
+        QAction *actRaster = menu->addAction(QObject::tr("Add Raster Layer..."), menu, addRasterAction);
+        actRaster->setToolTip(QObject::tr("打开并加载多波段遥感栅格影像图层"));
+        actRaster->setStatusTip(QObject::tr("添加栅格影像图层到当前工程"));
+        QAction *actVector = menu->addAction(QObject::tr("Add Vector Layer..."), menu, addVectorAction);
+        actVector->setToolTip(QObject::tr("打开并加载矢量要素图层 (Shapefile / GeoPackage)"));
+        actVector->setStatusTip(QObject::tr("添加矢量图层到当前工程"));
     }
 
     return menu;

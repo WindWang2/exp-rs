@@ -325,9 +325,37 @@ public:
     virtual void setCursorStyle(int) {}
     virtual void setFirstVisibleLine(int) {}
     virtual int firstVisibleLine() const { return 0; }
-    virtual int lineAt(const QPoint &) const { return -1; }
-    virtual void lineIndexFromPosition(int, int *, int *) const {}
-    virtual int positionFromLineIndex(int, int) const { return 0; }
+    virtual void lineIndexFromPosition(int pos, int *line, int *index) const
+    {
+        if ( line ) *line = -1;
+        if ( index ) *index = -1;
+        if ( pos < 0 || pos > m_text.length() )
+            return;
+        int l = 0;
+        int lineStart = 0;
+        for ( int i = 0; i < pos; ++i )
+        {
+            if ( m_text.at( i ) == QLatin1Char('\n') )
+            {
+                ++l;
+                lineStart = i + 1;
+            }
+        }
+        if ( line ) *line = l;
+        if ( index ) *index = pos - lineStart;
+    }
+    virtual int positionFromLineIndex(int line, int index) const
+    {
+        if ( line < 0 || index < 0 )
+            return -1;
+        const QStringList lines = m_text.split( QLatin1Char('\n') );
+        if ( line >= lines.size() || index > lines[line].length() )
+            return -1;
+        int pos = 0;
+        for ( int i = 0; i < line; ++i )
+            pos += lines[i].length() + 1; // + the newline
+        return pos + index;
+    }
     virtual int lineEndPosition(int) const { return 0; }
 
     virtual QsciAPIs *apis() const { return nullptr; }
@@ -354,37 +382,4 @@ private:
     bool m_modified = false;
     int m_selStart = 0;
     int m_selEnd = 0;
-
-    // Linear QString position of (line, index), or -1 when out of range.
-    int positionFromLineIndex(int line, int index) const
-    {
-        if ( line < 0 || index < 0 )
-            return -1;
-        const QStringList lines = m_text.split( QLatin1Char('\n') );
-        if ( line >= lines.size() || index > lines[line].length() )
-            return -1;
-        int pos = 0;
-        for ( int i = 0; i < line; ++i )
-            pos += lines[i].length() + 1; // + the newline
-        return pos + index;
-    }
-    void lineIndexFromPosition(int pos, int *line, int *index) const
-    {
-        if ( line ) *line = -1;
-        if ( index ) *index = -1;
-        if ( pos < 0 || pos > m_text.length() )
-            return;
-        int l = 0;
-        int lineStart = 0;
-        for ( int i = 0; i < pos; ++i )
-        {
-            if ( m_text.at( i ) == QLatin1Char('\n') )
-            {
-                ++l;
-                lineStart = i + 1;
-            }
-        }
-        if ( line ) *line = l;
-        if ( index ) *index = pos - lineStart;
-    }
 };

@@ -209,9 +209,11 @@ QFrame *RsClassifyFlowchartWidget::createStepCard( FlowStep step, const QString 
                     "QPushButton:hover { "
                     "  background: palette(midlight); "
                     "}" ) );
+  actBtn->setToolTip( tr( "点击执行流程步骤: %1" ).arg( title ) );
   bottomRow->addWidget( actBtn );
 
   cardLay->addLayout( bottomRow );
+  card->setToolTip( tr( "<b>第 %1 步：%2</b><br>%3" ).arg( num, title, desc ) );
 
   const int idx = static_cast<int>( step );
   StepCard sc;

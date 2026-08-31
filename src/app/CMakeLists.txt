@@ -148,6 +148,8 @@ add_executable(sicnu_geo_rs
     dialogs/async_runner_base.cpp
     dialogs/async_algorithm_runner.cpp
     dialogs/async_gdal_runner.cpp
+    dialogs/help_viewer_dialog.cpp
+    dialogs/help_viewer_dialog.h
     layout/qgslayoutdesignerdialog.cpp
     map_tools/measure_tool.cpp
     map_tools/rs_roi_spectrum_tool.cpp

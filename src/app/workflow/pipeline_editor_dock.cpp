@@ -51,36 +51,45 @@ void PipelineEditorDock::createToolBar()
   ) );
 
   auto *newAct = mToolBar->addAction( tr( "➕ 新建" ) );
+  newAct->setToolTip( tr( "新建工作流 (Ctrl+N)" ) );
   connect( newAct, &QAction::triggered, this, &PipelineEditorDock::onNewClicked );
 
   auto *openAct = mToolBar->addAction( tr( "📂 打开" ) );
+  openAct->setToolTip( tr( "打开工作流 (.json) (Ctrl+O)" ) );
   connect( openAct, &QAction::triggered, this, &PipelineEditorDock::onOpenClicked );
 
   auto *saveAct = mToolBar->addAction( tr( "💾 保存" ) );
+  saveAct->setToolTip( tr( "保存工作流 (.json) (Ctrl+S)" ) );
   connect( saveAct, &QAction::triggered, this, &PipelineEditorDock::onSaveClicked );
 
   mToolBar->addSeparator();
 
   auto *runAct = mToolBar->addAction( tr( "▶️ 运行全流程" ) );
+  runAct->setToolTip( tr( "运行全流程 (按拓扑顺序调度执行)" ) );
   connect( runAct, &QAction::triggered, this, &PipelineEditorDock::onRunFullClicked );
 
   auto *stopAct = mToolBar->addAction( tr( "⏹️ 停止" ) );
+  stopAct->setToolTip( tr( "停止正在运行的流程任务" ) );
   connect( stopAct, &QAction::triggered, this, &PipelineEditorDock::onStopClicked );
 
   mToolBar->addSeparator();
 
   auto *zoomFitAct = mToolBar->addAction( tr( "🔍 适应窗口" ) );
+  zoomFitAct->setToolTip( tr( "适应窗口显示所有节点" ) );
   connect( zoomFitAct, &QAction::triggered, mCanvasWidget, &PipelineCanvasWidget::zoomToFit );
 
   auto *zoomResetAct = mToolBar->addAction( tr( "🔄 100%" ) );
+  zoomResetAct->setToolTip( tr( "恢复 100% 比例" ) );
   connect( zoomResetAct, &QAction::triggered, mCanvasWidget, &PipelineCanvasWidget::resetZoom );
 
   auto *deleteAct = mToolBar->addAction( tr( "🗑️ 删除选中" ) );
+  deleteAct->setToolTip( tr( "删除选中节点或连线 (Delete)" ) );
   connect( deleteAct, &QAction::triggered, mCanvasWidget, &PipelineCanvasWidget::deleteSelected );
 
   mToolBar->addSeparator();
 
   auto *presetAct = mToolBar->addAction( tr( "📌 预设模板" ) );
+  presetAct->setToolTip( tr( "展开预设模板库" ) );
   connect( presetAct, &QAction::triggered, this, &PipelineEditorDock::onTogglePresetCatalog );
 }
 

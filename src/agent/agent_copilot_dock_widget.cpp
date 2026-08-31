@@ -40,8 +40,11 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
   // 1. Header Toolbar
   auto *headerLayout = new QHBoxLayout();
   m_providerCombo = new QComboBox( mainWidget );
+  m_providerCombo->setToolTip( tr( "选择 AI 模型服务配置" ) );
   m_settingsBtn = new QPushButton( QStringLiteral( "⚙️ 设置" ), mainWidget );
+  m_settingsBtn->setToolTip( tr( "打开 AI Copilot 模型与连接设置" ) );
   m_clearBtn = new QPushButton( QStringLiteral( "🧹 清空对话" ), mainWidget );
+  m_clearBtn->setToolTip( tr( "清空对话历史" ) );
 
   headerLayout->addWidget( new QLabel( QStringLiteral( "模型:" ), mainWidget ) );
   headerLayout->addWidget( m_providerCombo, 1 );
@@ -74,6 +77,7 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
   m_inputEdit->setFixedHeight( 60 );
 
   m_sendBtn = new QPushButton( QStringLiteral( "发送 ▶" ), mainWidget );
+  m_sendBtn->setToolTip( tr( "发送遥感指令 (Ctrl+Enter)" ) );
   m_sendBtn->setFixedHeight( 60 );
 
   inputLayout->addWidget( m_inputEdit, 1 );
