@@ -498,6 +498,18 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
     RelocateResult{ request.id, newRevision, std::move( relocateDiagnostics ) } );
 }
 
+std::optional<AssetId> DataManager::assetIdForSource( const QString &canonicalPath ) const
+{
+  if ( canonicalPath.isEmpty() )
+    return std::nullopt;
+  for ( const Impl::AssetRecord &record : m_impl->records )
+  {
+    if ( record.snapshot.source().canonicalSource == canonicalPath )
+      return record.snapshot.id();
+  }
+  return std::nullopt;
+}
+
 std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const
 {
   const auto it = m_impl->findRecord( id );

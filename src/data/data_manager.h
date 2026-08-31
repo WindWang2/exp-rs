@@ -80,6 +80,10 @@ class DataManager : public QObject
     Result<AssetId> restoreSource( const RestoreRequest &request );
     Result<RelocateResult> relocate( const RelocateRequest &request );
     std::optional<AssetSnapshot> asset( AssetId id ) const;
+    /// Reverse lookup for provenance construction (#698): the registered
+    /// asset whose canonical source matches @a canonicalPath, if any. Scans
+    /// the catalog — commit paths are terminal-only, so the cost is fine.
+    std::optional<AssetId> assetIdForSource( const QString &canonicalPath ) const;
     QVector<AssetSnapshot> assets( const AssetQuery &query = {} ) const;
 
     /// Structured provenance attached to an asset, if any. Algorithm-produced

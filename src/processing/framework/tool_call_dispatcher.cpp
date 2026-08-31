@@ -132,6 +132,36 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
       request.derivation.parameters = QJsonObject::fromVariantMap( info.parameterMap );
       request.derivation.taskReference = QString::number( info.taskId );
       request.derivation.completedAtUtc = QDateTime::currentDateTimeUtc();
+      // Input lineage (#698): resolve the parameter paths that reference
+      // registered assets into DerivationInputs so derivedFrom()/
+      // derivedOutputsOf() actually trace the graph (every commit used to
+      // record only the operator+parameters — the source edge was missing
+      // exactly where the platform commits most). Unresolvable paths
+      // (foreign files, placeholders) are skipped, not fatal.
+      {
+        const QVariantMap &pmap = info.parameterMap;
+        for ( auto it = pmap.begin(); it != pmap.end(); ++it )
+        {
+          if ( it.value().type() != QVariant::String )
+            continue;
+          const QString path = it.value().toString();
+          if ( path.isEmpty() || path.startsWith( QLatin1Char( '$' ) ) || path == info.outputLayerPath )
+            continue;
+          const QFileInfo fi( path );
+          if ( !fi.isFile() )
+            continue;
+          const auto inputId = managerGuard->assetIdForSource( fi.absoluteFilePath() );
+          if ( !inputId )
+            continue;
+          const auto snapshot = managerGuard->asset( *inputId );
+          if ( !snapshot )
+            continue;
+          sicnu::data::DerivationInput input;
+          input.assetId = snapshot->id();
+          input.revision = snapshot->revision();
+          request.derivation.inputs.append( input );
+        }
+      }
 
       const auto commitResult = committer.commit( request );
 

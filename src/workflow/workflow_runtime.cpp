@@ -8,6 +8,8 @@
 #include "operators/framework/rs_operator_registry.h"
 
 #include <QDir>
+#include <QJsonDocument>
+#include <QSaveFile>
 #include <QFile>
 #include <QFileInfo>
 #include <QString>
@@ -545,8 +547,29 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
     }
     else
     {
-      // No DataManager: use temp path directly, no stable promotion
+      // No DataManager: use temp path directly, no stable promotion. Write
+      // the provenance sidecar anyway (#698) — the README's "every derived
+      // raster records source, operator, parameters, and time" held
+      // nowhere on this path. Best-effort: a failed sidecar write logs and
+      // continues (the output itself already exists).
       committedPath = outputTempPath;
+      sicnu::data::DerivationRecord sidecar = sicnu::data::makeTaskDerivation(
+        info.algorithmId, QJsonObject::fromVariantMap( info.parameterMap ),
+        QString::number( taskId ) );
+      const QString sidecarPath = QString::fromStdString( outputTempPath )
+                                    + QStringLiteral( ".provenance.json" );
+      QSaveFile sidecarFile( sidecarPath );
+      if ( sidecarFile.open( QIODevice::WriteOnly ) )
+      {
+        const QJsonDocument doc( sidecar.toJson() );
+        sidecarFile.write( doc.toJson( QJsonDocument::Compact ) );
+        if ( !sidecarFile.commit() )
+          qWarning() << "[workflow] provenance sidecar write failed:" << sidecarPath;
+      }
+      else
+      {
+        qWarning() << "[workflow] provenance sidecar open failed:" << sidecarPath;
+      }
     }
 
     // Closed-loop verification via OutputVerifier

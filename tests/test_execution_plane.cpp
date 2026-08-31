@@ -200,6 +200,15 @@ Json::Value envelopeFor( const std::string &name )
   return envelope;
 }
 
+/// envelopeFor with parameters (#698 lineage test needs an input path param).
+Json::Value envelopeFor( const std::string &name, const Json::Value &parameters )
+{
+  Json::Value envelope( Json::objectValue );
+  envelope["name"] = name;
+  envelope["parameters"] = parameters;
+  return envelope;
+}
+
 /// Minimal real GeoTIFF so OutputCommitter validation succeeds.
 void writeSmallGeoTiff( const QString &path )
 {
@@ -546,6 +555,59 @@ TEST_CASE( "agent tool call commits a stable asset with provenance",
   REQUIRE( provenance.has_value() );
   CHECK( provenance->algorithmId == QStringLiteral( "stub:producer" ) );
   CHECK( provenance->taskReference == QString::number( result["taskId"].asInt64() ) );
+}
+// ---------------------------------------------------------------------------
+// #698: commits must carry INPUT lineage — a parameter path that references
+// a registered asset becomes a DerivationInput so derivedFrom() traces the
+// graph (previously every commit recorded only operator+parameters).
+// ---------------------------------------------------------------------------
+TEST_CASE( "agent tool call records input lineage for registered parameter paths (#698)",
+           "[processing][execution_plane][agent_path][provenance]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString inputPath = dir.path() + QStringLiteral( "/input_scene.tif" );
+  writeSmallGeoTiff( inputPath );
+  const QString tempPath = dir.path() + QStringLiteral( "/result.tif" );
+  writeSmallGeoTiff( tempPath );
+  REQUIRE( QFileInfo::exists( inputPath ) );
+  REQUIRE( QFileInfo::exists( tempPath ) );
+
+  sicnu::data::DataManager dataManager;
+  // Register the input scene so the commit can resolve it to an asset.
+  sicnu::data::RegisterRequest inputRequest;
+  inputRequest.source.canonicalSource = inputPath;
+  inputRequest.source.providerKey = QStringLiteral( "gdal" );
+  const auto inputRegistered = dataManager.registerSource( inputRequest );
+  REQUIRE_FALSE( inputRegistered.assetId.isNull() );
+
+  registerStub( "stub:lineage_producer", BehavioralStubAdapter::Mode::WriteOutput, 0, tempPath );
+
+  ToolCallDispatcher dispatcher;
+  dispatcher.setSourceTag( QStringLiteral( "agent" ) );
+  dispatcher.setDataManager( &dataManager );
+
+  Json::Value parameters( Json::objectValue );
+  parameters["input"] = inputPath.toStdString();
+  const Json::Value result = dispatcher.dispatchAndAwait(
+    envelopeFor( "stub:lineage_producer", parameters ), std::chrono::seconds( 8 ) );
+
+  REQUIRE( result["status"].asString() == "success" );
+  const QString committed = QString::fromStdString( result["output"].asString() );
+  REQUIRE( committed.endsWith( QStringLiteral( "_committed.tif" ) ) );
+
+  const auto outputId = sicnu::data::AssetId::fromString(
+    QString::fromStdString( result["assetId"].asString() ) );
+  REQUIRE( outputId.has_value() );
+  const auto provenance = dataManager.provenance( *outputId );
+  REQUIRE( provenance.has_value() );
+  REQUIRE( provenance->inputs.size() == 1 );
+  CHECK( provenance->inputs.first().assetId == inputRegistered.assetId );
+
+  // The lineage graph answers in both directions now.
+  const auto derived = dataManager.derivedOutputsOf( inputRegistered.assetId );
+  REQUIRE( derived.size() == 1 );
+  CHECK( derived.first() == *outputId );
 }
 
 // ---------------------------------------------------------------------------
