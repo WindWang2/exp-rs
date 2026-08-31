@@ -1484,7 +1484,11 @@ QVariantMap McpServer::handleListLayers()
             layerMap[QStringLiteral("name")] = asset.displayName();
             layerMap[QStringLiteral("type")] = asset.kind() == sicnu::data::AssetKind::Raster
                                                    ? QStringLiteral("raster")
-                                                   : QStringLiteral("vector");
+                                             : asset.kind() == sicnu::data::AssetKind::Vector
+                                                   ? QStringLiteral("vector")
+                                             : asset.kind() == sicnu::data::AssetKind::VirtualRaster
+                                                   ? QStringLiteral("virtual_raster")
+                                                   : QStringLiteral("remote_map");
             layerMap[QStringLiteral("source")] = asset.source().canonicalSource;
             const auto &structure = asset.structure();
             if (const auto *raster = std::get_if<sicnu::data::RasterStructure>(&structure))

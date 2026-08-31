@@ -308,8 +308,10 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
     int labeledSegments = 0;
     std::set<int> uniqueClasses;
     for (auto it = segLabelMap.constBegin(); it != segLabelMap.constEnd(); ++it) {
-        if (it.key() == 0 || it.key() > static_cast<quint32>(nSeg) || it.value() <= 0 || !segHasAnyValid[static_cast<size_t>(it.key())])
-            continue;
+        if (it.key() == 0 || it.key() > static_cast<quint32>(nSeg) || it.value() <= 0
+            || !segHasAnyValid[static_cast<size_t>(it.key())]
+            || !segFeatsComplete[static_cast<size_t>(it.key())])
+            continue; // excluded from training too: trainX rows must match
         segLabel[static_cast<size_t>(it.key())] = it.value();
         uniqueClasses.insert(it.value());
         ++labeledSegments;
@@ -332,6 +334,11 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
     for (int s = 1; s <= nSeg; ++s) {
         if (segLabel[static_cast<size_t>(s)] <= 0)
             continue;
+        // Segments with a fully-nodata band have a fabricated 0.0 feature
+        // (0.0 is a legitimate DN) — exclude them from training instead of
+        // teaching the backend a phantom spectrum (#682/#700.13).
+        if (!segFeatsComplete[static_cast<size_t>(s)])
+            continue;
         for (int f = 0; f < nFeat; ++f)
             trainX.at<float>(row, f) = feats[static_cast<size_t>(s)][static_cast<size_t>(f)];
         trainY.at<int>(row, 0) = segLabel[static_cast<size_t>(s)];
@@ -340,22 +347,13 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
 
     context.reportProgress(0.65, "Training " + method + " on " +
                                      std::to_string(labeledSegments) + " labeled objects");
-    // Feature standardization (#682): train SVM/adaptive backends on
-    // z-scored features; the default gamma=0.5 / C were tuned for that
-    // space, and the GUI path standardizes. Without it the RBF kernel
-    // underflows on DN-scale distances. Incomplete segments were already
-    // excluded from trainX counting.
+    // Feature standardization (#682): train the backend on z-scored
+    // features — the default gamma=0.5 / C were tuned for that space and the
+    // GUI path standardizes; without it the RBF kernel underflows on
+    // DN-scale distances. Incomplete segments are already excluded above.
     RsFeatureScaler obiaScaler;
-    if (!trainX.empty())
-        obiaScaler.fit(trainX);
-    // Apply only when trainX is complete (has no incomplete-feat segments):
-    // otherwise the excluded rows have never-defined band values — fit would
-    // be computed over different rows per band.
     bool scalerFitted = false;
-    if (obiaScaler.isFitted()) {
-        // Guard: only pull in incomplete segments after we know the scaler
-        // stats; then exclude them from training but keep them predictable
-        // once transformed consistently.
+    if (!trainX.empty() && obiaScaler.fit(trainX)) {
         trainX = obiaScaler.transform(trainX);
         scalerFitted = true;
     }
@@ -384,8 +382,8 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
 
     std::vector<int32_t> classOfSeg(static_cast<size_t>(nSeg + 1), 0);
     for (int s = 1; s <= nSeg; ++s) {
-        if (!segHasAnyValid[static_cast<size_t>(s)]) {
-            classOfSeg[static_cast<size_t>(s)] = 0;
+        if (!segHasAnyValid[static_cast<size_t>(s)] || !segFeatsComplete[static_cast<size_t>(s)]) {
+            classOfSeg[static_cast<size_t>(s)] = 0; // no/deficient spectrum: unclassified
             continue;
         }
         // Backend predictions are integral class ids already; negative is

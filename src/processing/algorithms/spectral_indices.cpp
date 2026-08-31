@@ -73,10 +73,15 @@ bool savi(const float *nir, const float *red, float *out, size_t count)
     }
     if (count == 0) return false;
     const bool scaled = isScaledReflectance(nir, red, count);
-    const float L = scaled ? 5000.0f : 0.5f; // 0.5*10000 when the data are DN-scaled
+    // Only the soil-brightness term scales with the data (L=0.5 on [0,1]
+    // reflectance → 0.5*10000 on DN-scaled products): the trailing factor
+    // (1+L) is dimensionless and must stay 1.5 in BOTH regimes — scaling it
+    // too multiplied DN-scale outputs by ~3334x (#680 review).
+    const float L = scaled ? 5000.0f : 0.5f;
+    constexpr float kOnePlusL = 1.5f;
     for (size_t i = 0; i < count; i++) {
         if (!std::isfinite(nir[i]) || !std::isfinite(red[i])) { out[i] = std::numeric_limits<float>::quiet_NaN(); continue; }
-        out[i] = MathUtils::safeDiv(nir[i] - red[i], nir[i] + red[i] + L) * (1.0f + L);
+        out[i] = MathUtils::safeDiv(nir[i] - red[i], nir[i] + red[i] + L) * kOnePlusL;
     }
     return true;
 }

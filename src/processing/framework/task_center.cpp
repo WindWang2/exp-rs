@@ -1150,8 +1150,33 @@ void TaskCenter::flushPendingLaunches()
         return;
     // Never submit to the engine during teardown (#684): the jobs would
     // either be rejected or resurrect worker threads after shutdown().
+    // Staged launches keep status Running with no jobId, so finalize them
+    // as Canceled — otherwise they strand as phantom Running tasks after
+    // shutdown (#684 review), mirroring enqueueTask's teardown branch.
     if ( m_isShuttingDown.load() )
+    {
+        QList<long> stranded;
+        {
+            QMutexLocker locker( &m_mutex );
+            for ( const PendingLaunch &launch : launches )
+            {
+                if ( m_tasks.contains( launch.taskId )
+                     && !isTerminalStatus( m_tasks[launch.taskId].status ) )
+                {
+                    m_tasks[launch.taskId].status = TaskStatus::Canceled;
+                    m_tasks[launch.taskId].errorMessage =
+                        QStringLiteral( "Task Center is shutting down" );
+                    m_tasks[launch.taskId].endTime = QDateTime::currentDateTimeUtc();
+                    queueTaskUpdatedLocked( launch.taskId );
+                    stranded.append( launch.taskId );
+                }
+            }
+        }
+        flushPendingSignals();
+        for ( long id : stranded )
+            fireTaskCompletionCallbacks( id );
         return;
+    }
     ensureJobListener();
 
     for ( auto &launch : launches )

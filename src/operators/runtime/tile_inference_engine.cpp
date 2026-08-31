@@ -143,6 +143,12 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     for ( int i = 0; i < rasterBands; ++i )
       bandList[static_cast<std::size_t>( i )] = i + 1;
   }
+  for ( int b : bandList )
+  {
+    if ( b < 1 || b > rasterBands )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "band index " + std::to_string( b ) + " is out of range (1.." + std::to_string( rasterBands ) + ")" );
+  }
   if ( m_declaredDtype >= 0 )
   {
     for ( int b : bandList )
@@ -391,24 +397,24 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     // (swapRB=false equivalent) without delegating to the imread helper.
     // Also validate the band_roles arity up front so a manifest mismatch
     // surfaces as a typed error rather than a late tensor shape mismatch.
-    if ( !m_model.input.bandRoles.empty()
-         && static_cast<int>( m_model.input.bandRoles.size() ) != static_cast<int>( bandList.size() ) )
-    {
-      throw RSOperatorError( ErrorCode::InvalidParameter,
-                             "model band_roles ("
-                                 + std::to_string( m_model.input.bandRoles.size() )
-                                 + ") does not match fed channel count (" + std::to_string( bandList.size() )
-                                 + ")" );
-    }
     cv::Mat blob;
     try {
       const int C = static_cast<int>( bandList.size() );
       const int B = static_cast<int>( batchMats.size() );
       const int H = batchMats.front().rows;
       const int W = batchMats.front().cols;
-      // Single- and multi-channel tiles already share the same pack logic —
-      // keeping one explicit path avoids a divergence between blobFromImage vs
-      // blobFromImages shape conventions.
+      // blobFromImages asserted same-size batches (a mixed batch threw);
+      // edge tiles make that reachable whenever raster dims are not a
+      // multiple of the tile size and resizeToInput is off — keep the check
+      // LOUD instead of silently packing garbage (#671 review).
+      for ( const cv::Mat &m : batchMats )
+      {
+        if ( m.rows != H || m.cols != W )
+          throw RSOperatorError( ErrorCode::InvalidInputData,
+                                 "mixed tile sizes in one inference batch (" + std::to_string( m.cols ) + "x"
+                                   + std::to_string( m.rows ) + " vs " + std::to_string( W ) + "x"
+                                   + std::to_string( H ) + ") - enable resize:to_input or align the raster" );
+      }
       int dims[4] = { B, C, H, W };
       blob = cv::Mat( 4, dims, CV_32F );
       blob.setTo( 0 );
@@ -417,10 +423,14 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
         cv::split( batchMats[static_cast<size_t>( b )], channels );
         for ( int c = 0; c < C; ++c ) {
           const cv::Mat &ch = channels[static_cast<size_t>( c )];
-          const int idx[3] = { b, c, 0 };
-          float *dst = blob.ptr<float>( idx );
+          // ptr(b, c, 0) is the 3-arg overload (data + b*step0 + c*step1):
+          // the const int* overload reads idx[dims] (a 4th, garbage element)
+          // on a 4-D Mat — an OOB stack read whose damage depends on the
+          // stack garbage (#671 review).
+          float *dst = blob.ptr<float>( b, c, 0 );
           for ( int y = 0; y < H; ++y ) {
-            std::memcpy( dst + y * W, ch.ptr<float>( y ), static_cast<size_t>( W ) * sizeof( float ) );
+            std::memcpy( dst + static_cast<size_t>( y ) * W, ch.ptr<float>( y ),
+                         static_cast<size_t>( W ) * sizeof( float ) );
           }
         }
       }

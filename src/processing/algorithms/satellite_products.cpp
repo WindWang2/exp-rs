@@ -155,7 +155,7 @@ int landsatWavelength(const QString& bandName, bool oli)
         {QStringLiteral("B1"), 485}, {QStringLiteral("B2"), 560},
         {QStringLiteral("B3"), 660}, {QStringLiteral("B4"), 830},
         {QStringLiteral("B5"), 1650}, {QStringLiteral("B6"), 11350},
-        {QStringLiteral("B7"), 2220}, {QStringLiteral("B8"), 555},
+        {QStringLiteral("B7"), 2220}, {QStringLiteral("B8"), 710},
         {QStringLiteral("B9"), 0}, {QStringLiteral("B10"), 0},
         {QStringLiteral("B11"), 0},
     };

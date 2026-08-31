@@ -15,15 +15,10 @@ namespace sicnu::data
 
 namespace
 {
-/// JSON string serialization of @a s (quotes + escaping, no array wrapper),
-/// then hex-encoded. Hex is injective and contains none of the framing
-/// delimiters (newline, ';', '=', '@'), so a caller-controlled string cannot
-/// inject or shift the field layout - two different (id, version) tuples can
-/// never collide into the same canonical bytes. (Plain JSON escaping left
-/// ';'/@/=' intact inside the JSON body, so sub-field injection like
-/// fromPort="output;to=x" still collided with two-field inputs, #639.)
 /// Plain JSON string literal (quotes + standard escaping) — the RFC 8785
 /// canonical-JSON form used for every string inside canonicalizeJsonValue.
+/// (The #639 hex hardening lives in framingLiteral() below; hex has no place
+/// inside the canonical JSON itself.)
 QByteArray jsonEscaped( const QString &s )
 {
   QJsonArray wrap = { s };

@@ -141,6 +141,7 @@ export class McpBridge {
 
     // Startup deadline: a child that spawns but hangs during Qt/QGIS init
     // must not stall extension load for the full 10-minute request timeout.
+    let cancelStartupDeadline: () => void = () => {};
     const startupDeadline = new Promise<never>((_, reject) => {
       const t = setTimeout(
         () =>
@@ -151,17 +152,24 @@ export class McpBridge {
           ),
         STARTUP_TIMEOUT_MS,
       );
+      cancelStartupDeadline = () => clearTimeout(t);
       spawnFailure.catch(() => {}).finally(() => clearTimeout(t));
     });
-    await Promise.race([
-      this.request("initialize", {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "pi-exp-rs-spatial", version: "1.0.0" },
-      }),
-      spawnFailure,
-      startupDeadline,
-    ]);
+    try {
+      await Promise.race([
+        this.request("initialize", {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "pi-exp-rs-spatial", version: "1.0.0" },
+        }),
+        spawnFailure,
+        startupDeadline,
+      ]);
+    } finally {
+      // Clear on EVERY settle path: a healthy initialize used to leave the
+      // 30s timer armed, pinning the event loop after every spawn/respawn.
+      cancelStartupDeadline();
+    }
     this.notify("notifications/initialized", {});
   }
 

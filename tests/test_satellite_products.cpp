@@ -67,7 +67,11 @@ QString writeFakeLandsatScene(const QDir& root)
     out << "  PROCESSING_LEVEL = \"L1TP\"\n";
     out << "  DATE_ACQUIRED = \"2020-06-15\"\n";
     out << "  LANDSAT_PRODUCT_ID = \"LC08_L1TP_TEST\"\n";
-    out << "  FILE_NAME_BAND_2 = \"LC08_L1TP_TEST_B2.TIF\"\n";
+    // #676: the declared B2 filename used to mismatch the on-disk file
+    // (TEST_ vs CLASS_) — the old importer silently dropped the band and
+    // still reported bandCount=4 (the exact bug the fix makes fail loud).
+    // The fixture is now self-consistent so the honest path stacks 4 bands.
+    out << "  FILE_NAME_BAND_2 = \"LC08_L1TP_CLASS_B2.TIF\"\n";
     out << "  FILE_NAME_BAND_3 = \"LC08_L1TP_CLASS_B3.TIF\"\n";
     out << "  FILE_NAME_BAND_4 = \"LC08_L1TP_CLASS_B4.TIF\"\n";
     out << "  FILE_NAME_BAND_5 = \"LC08_L1TP_CLASS_B5.TIF\"\n";
@@ -232,6 +236,41 @@ TEST_CASE("Landsat stack to GeoTIFF", "[satellite][landsat]")
     REQUIRE(ds.bandCount() == 2);
     REQUIRE(ds.width() == 4);
     REQUIRE(ds.height() == 4);
+}
+
+TEST_CASE("rs:landsat_import operator fails loud on a missing requested band (#676)",
+           "[operators][landsat][import]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString mtl = writeFakeLandsatScene(QDir(tmp.path()));
+    const QString out = tmp.filePath(QStringLiteral("ls_missing.tif"));
+
+    auto op = RSOperatorRegistry::instance().create("rs:landsat_import");
+    REQUIRE(op != nullptr);
+
+    // B10 is not part of the scene: the request must fail naming it instead
+    // of stacking a shifted band set with a success status.
+    Json::Value params(Json::objectValue);
+    params["input"] = mtl.toStdString();
+    params["output"] = out.toStdString();
+    params["bands"] = Json::Value(Json::arrayValue);
+    params["bands"].append("B2");
+    params["bands"].append("B10");
+
+    RSOperatorContext ctx;
+    bool threw = false;
+    std::string message;
+    try {
+        (void)op->execute(params, ctx);
+    } catch (const RSOperatorError &e) {
+        threw = true;
+        message = e.what();
+    }
+    REQUIRE(threw);
+    CHECK(message.find("B10") != std::string::npos);
+    CHECK_FALSE(QFileInfo::exists(out)); // no partial/shifted stack published
 }
 
 TEST_CASE("rs:landsat_import operator", "[operators][landsat]")

@@ -150,7 +150,13 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
           const QFileInfo fi( path );
           if ( !fi.isFile() )
             continue;
-          const auto inputId = managerGuard->assetIdForSource( fi.absoluteFilePath() );
+          // Registered assets store a canonicalized source; compare the
+          // canonical form so symlinked / case-variant parameter paths still
+          // resolve (a plain absoluteFilePath match silently dropped those
+          // lineage edges) (#698 review).
+          const QString canonical = fi.canonicalFilePath();
+          const auto inputId = managerGuard->assetIdForSource(
+            canonical.isEmpty() ? fi.absoluteFilePath() : canonical );
           if ( !inputId )
             continue;
           const auto snapshot = managerGuard->asset( *inputId );

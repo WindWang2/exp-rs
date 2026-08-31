@@ -638,7 +638,7 @@ public:
     }
 
     void computeRegion(int x1, int y1, int x2, int y2,
-                       double &sum, double &sumSq, int &count) const
+                       double &sum, double &sumSq, qint64 &count) const
     {
         // Clamp to valid pixel range
         x1 = std::clamp(x1, 0, m_width - 1);
@@ -673,7 +673,7 @@ private:
     std::size_t m_rowStride = 0;
     std::vector<double> m_sum;
     std::vector<double> m_sumSq;
-    std::vector<int> m_count;
+    std::vector<qint64> m_count;
 };
 
 static void localStats(const IntegralImage &integral, int width, int height,
@@ -688,7 +688,7 @@ static void localStats(const IntegralImage &integral, int width, int height,
     int y2 = std::clamp(cy + half, 0, height - 1);
 
     double sum, sumSq;
-    int count;
+    qint64 count;
     integral.computeRegion(x1, y1, x2, y2, sum, sumSq, count);
     if (count <= 0) {
         mean = 0.0f;
@@ -985,7 +985,9 @@ void ImageEnhancement::kuanFilter(const float *input, float *output,
                     // Local variation less than noise → full smoothing
                     weight = 0.0f;
                 } else {
-                weight = 1.0f - cuSq / clSq;
+                // Kuan keeps the extra 1/(1+Cu^2) factor that Lee drops
+                // (#678 — a shared perl edit stripped it from BOTH filters).
+                weight = ( 1.0f - cuSq / clSq ) / ( 1.0f + cuSq );
             }
 
             output[y * width + x] = mean + weight * (pixel - mean);
