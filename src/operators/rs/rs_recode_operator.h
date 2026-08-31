@@ -23,6 +23,7 @@ class RsRecodeOperator : public RSOperator {
 public:
     std::string name() const override { return "rs:recode"; }
     std::string displayName() const override { return "Class Recode"; }
+    std::string determinismGrade() const override { return "bit-exact"; } // #659 (ADR 0124)
     std::string group() const override { return "classification"; }
     std::string description() const override {
         return "Remap integer class labels according to a recode mapping table.";

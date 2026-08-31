@@ -1526,3 +1526,46 @@ TEST_CASE( "submit after production shutdown stays rejected (#684)", "[job]" )
   REQUIRE( snap.has_value() );
   REQUIRE( snap->state == JobState::Succeeded );
 }
+
+// ---------------------------------------------------------------------------
+// #659 (ADR 0124): every registered operator declares a valid Determinism
+// Grade and the four streaming candidates are bit-exact.
+// ---------------------------------------------------------------------------
+TEST_CASE( "operator schemas carry a valid determinism grade (#659)", "[operators][schema]" )
+{
+  const auto names = RSOperatorRegistry::instance().operatorNames();
+  REQUIRE( !names.empty() );
+
+  // Every override must be vocabulary-valid; the default is "tolerance".
+  for ( const auto &name : names )
+  {
+    auto op = RSOperatorRegistry::instance().create( name );
+    if ( !op )
+      continue;
+    const std::string grade = op->determinismGrade();
+    INFO( "operator: " << name << " grade: " << grade );
+    CHECK( ( grade == "bit-exact" || grade == "tolerance" ) );
+  }
+
+  // stampDeterminismGrade rejects invalid vocabulary at build time.
+  Json::Value root = makeRootSchema( "t", "d", Json::Value( Json::objectValue ),
+                                     Json::Value( Json::objectValue ) );
+  stampDeterminismGrade( root, "bit-exact" );
+  CHECK( root["determinismGrade"].asString() == "bit-exact" );
+  stampDeterminismGrade( root, "tolerance" );
+  CHECK( root["determinismGrade"].asString() == "tolerance" );
+  bool threw = false;
+  try { stampDeterminismGrade( root, "Bit-Exact" ); } catch ( const std::invalid_argument & ) { threw = true; }
+  CHECK( threw );
+
+  // The four streaming candidates (#664/#665/#666 targets) are pure
+  // per-pixel / deterministic-tie-break mappings.
+  for ( const char *name : { "rs:spectral_index", "rs:qa_mask", "rs:recode", "rs:majority_filter" } )
+  {
+    auto op = RSOperatorRegistry::instance().create( name );
+    if ( !op )
+      continue; // optional build config
+    INFO( "bit-exact candidate: " << name );
+    CHECK( op->determinismGrade() == "bit-exact" );
+  }
+}

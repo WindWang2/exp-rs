@@ -24,6 +24,12 @@ Json::Value makeRootSchema(const std::string& title,
                            const Json::Value& outputs);
 
 /**
+ * Stamps the schema root with the operator's Determinism Grade (ADR 0124,
+ * #659): "bit-exact" | "tolerance". Call after makeRootSchema.
+ */
+void stampDeterminismGrade(Json::Value& schemaRoot, const std::string& grade);
+
+/**
  * Declares a required parameter name list.
  */
 Json::Value makeRequired(const std::vector<std::string>& names);

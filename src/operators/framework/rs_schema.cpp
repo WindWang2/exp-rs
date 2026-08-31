@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "rs_schema.h"
 
+#include <stdexcept>
+
 namespace sicnu::operators::schema {
 
 namespace {
@@ -31,6 +33,16 @@ Json::Value makeRootSchema(const std::string& title,
     root["properties"] = params;
     root["outputs"] = outputs;
     return root;
+}
+
+void stampDeterminismGrade(Json::Value& schemaRoot, const std::string& grade) {
+    // Fail fast at schema build time on an invalid grade (#659): a typo'd
+    // override must never reach the uniform schema surface.
+    if (grade != "bit-exact" && grade != "tolerance") {
+        throw std::invalid_argument("invalid determinism grade '" + grade
+                                    + "' (expected bit-exact|tolerance)");
+    }
+    schemaRoot["determinismGrade"] = grade;
 }
 
 Json::Value makeRequired(const std::vector<std::string>& names) {

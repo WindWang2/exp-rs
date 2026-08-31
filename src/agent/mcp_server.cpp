@@ -8,6 +8,7 @@
 #include "data/asset_types.h"
 #include "data/derivation_record.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "operators/framework/rs_schema.h"
 #include "operators/framework/rs_operator.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/algorithm_meta_store.h"
@@ -1231,7 +1232,11 @@ QVariantMap McpServer::handleGetOperatorSchema(const QString &operatorId)
         throw std::runtime_error(QStringLiteral("Operator not found: %1").arg(operatorId).toStdString());
     }
 
-    QVariantMap result = sicnu::processing::jsonObjectToVariantMap(op->schema());
+    // Uniform schema surface carries the Determinism Grade (#659, ADR 0124)
+    // so GUI / CLI / MCP / agents see one vocabulary.
+    Json::Value schemaJson = op->schema();
+    sicnu::operators::schema::stampDeterminismGrade(schemaJson, op->determinismGrade());
+    QVariantMap result = sicnu::processing::jsonObjectToVariantMap(schemaJson);
     result[QStringLiteral("operator_id")] = operatorId;
     result[QStringLiteral("metadata")] = sicnu::processing::jsonObjectToVariantMap(op->metadata());
     return result;

@@ -48,6 +48,7 @@ class RsSpectralIndexOperator : public RSOperator {
 public:
     std::string name() const override { return "rs:spectral_index"; }
     std::string displayName() const override { return "Spectral Index"; }
+    std::string determinismGrade() const override { return "bit-exact"; } // #659 (ADR 0124)
     std::string group() const override { return "spectral"; }
     std::string description() const override {
         return "Compute a spectral index (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI, NBR, dNBR, BSI, NDRE, CI, NDSI, NDTI) from raster bands.";
