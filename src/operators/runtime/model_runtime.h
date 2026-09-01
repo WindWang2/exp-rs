@@ -71,6 +71,27 @@ class IModelRuntime
      * forward-pass failure (callers translate to their error type).
      */
     virtual cv::Mat infer( const cv::Mat &nchwBlob ) = 0;
+
+    /**
+     * Names of the loaded graph's output tensors, in the order the runtime
+     * would produce them. Empty when the implementation cannot enumerate
+     * them — consumers then treat the manifest output.tensor_names contract
+     * as advisory (#705).
+     */
+    virtual std::vector<std::string> outputTensorNames() const { return {}; }
+
+    /**
+     * infer() selecting a specific named output tensor (manifest
+     * output.tensor_names contract, #705). The default ignores the name and
+     * runs the default head, which is correct for single-output runtimes;
+     * @p outputName empty also selects the default head. Throws
+     * std::runtime_error on the same conditions as infer().
+     */
+    virtual cv::Mat infer( const cv::Mat &nchwBlob, const std::string &outputName )
+    {
+      ( void )outputName;
+      return infer( nchwBlob );
+    }
 };
 
 using ModelRuntimePtr = std::shared_ptr<IModelRuntime>;

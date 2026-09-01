@@ -175,8 +175,21 @@ Json::Value RsInferenceOperator::estimateExecution( const Json::Value &params ) 
     const std::uint64_t edge = static_cast<std::uint64_t>( tile + 2 * halo );
     // Read window + detached tile + blob + output planes ≈ 4 tile-sized sets
     // per batched tile; model weights are the fixed overhead when declared.
-    const std::uint64_t modelRamBytes =
+    std::uint64_t modelRamBytes =
         static_cast<std::uint64_t>( std::max( 0, model.runtime.estimatedRamMb ) ) * 1024 * 1024;
+    // #689: no shipped manifest declares estimated_ram_mb, which hid the
+    // (dominant) weight bytes from the admission estimate. When undeclared,
+    // floor the model term with the resolved artifact's size on disk (the
+    // serialized weights, rounded up to whole MiB) and keep the read-window
+    // math unchanged.
+    if ( modelRamBytes == 0 && !model.resolvedArtifactPath.empty() )
+    {
+        const std::uint64_t artifactBytes = static_cast<std::uint64_t>(
+            QFileInfo( QString::fromStdString( model.resolvedArtifactPath ) ).size() );
+        constexpr std::uint64_t kMiB = 1024 * 1024;
+        if ( artifactBytes > 0 )
+            modelRamBytes = ( ( artifactBytes + kMiB - 1 ) / kMiB ) * kMiB;
+    }
     Json::Value est = sicnu::processing::makeStreamingEstimate( edge, edge, bands, 4,
                                                                 batch * 4, /*matrixBytes*/ 0,
                                                                 /*fixedOverhead*/ modelRamBytes + 32 * 1024 * 1024 );
@@ -256,6 +269,7 @@ Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorConte
     result["height"] = stats.outHeight;
     result["tileSize"] = stats.tileSize;
     result["tiles"] = stats.tilesProcessed;
+    result["tilesSkippedNoData"] = stats.tilesSkippedNoData;
     return result;
 }
 

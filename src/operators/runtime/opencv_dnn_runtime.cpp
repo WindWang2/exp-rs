@@ -63,6 +63,11 @@ bool OpenCvDnnRuntime::load( std::string *errorMessage )
 
 cv::Mat OpenCvDnnRuntime::infer( const cv::Mat &nchwBlob )
 {
+  return infer( nchwBlob, std::string() );
+}
+
+cv::Mat OpenCvDnnRuntime::infer( const cv::Mat &nchwBlob, const std::string &outputName )
+{
   if ( !m_loaded )
     throw std::runtime_error( "runtime session is not loaded" );
   if ( nchwBlob.empty() || nchwBlob.dims != 4 )
@@ -72,10 +77,27 @@ cv::Mat OpenCvDnnRuntime::infer( const cv::Mat &nchwBlob )
   // so a cached session is safe to share across TaskCenter workers.
   std::lock_guard<std::mutex> lock( m_inferMutex );
   m_net.setInput( nchwBlob );
-  cv::Mat output = m_net.forward();
+  cv::Mat output = outputName.empty() ? m_net.forward() : m_net.forward( outputName );
   if ( output.empty() )
     throw std::runtime_error( "inference produced an empty output" );
   return output;
+}
+
+std::vector<std::string> OpenCvDnnRuntime::outputTensorNames() const
+{
+  std::vector<std::string> names;
+  if ( !m_loaded )
+    return names;
+  try
+  {
+    for ( const auto &name : m_net.getUnconnectedOutLayersNames() )
+      names.push_back( name ); // cv::String == std::string
+  }
+  catch ( const cv::Exception & )
+  {
+    // Enumeration is best-effort; an empty list reads as "unknown" upstream.
+  }
+  return names;
 }
 
 } // namespace sicnu::operators::runtime

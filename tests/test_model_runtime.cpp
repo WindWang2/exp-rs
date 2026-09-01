@@ -26,6 +26,8 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -650,4 +652,352 @@ TEST_CASE( "rs:infer estimates feed ExecutionPlane admission", "[models][runtime
 
   // CPU-only manifest → no VRAM key in the estimate payload.
   CHECK_FALSE( est.isMember( "estimatedVramMb" ) );
+}
+
+// ---------------------------------------------------------------------------
+// Contract enforcement additions (#690 / #671 / #705)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "tile engine contract validators", "[models][runtime][engine]" )
+{
+  using sicnu::operators::runtime::TileInferenceEngine;
+
+  ModelInfo info;
+
+  // #705a: input.dtype is checked for EVERY consumed band, not just band 1.
+  CHECK( TileInferenceEngine::inputDTypeMismatch( info, { 1, 2 }, []( int ) { return GDT_Float32; } ).empty() );
+  info.input.dtype = "float32";
+  CHECK( TileInferenceEngine::inputDTypeMismatch( info, { 1, 2, 3 }, []( int ) { return GDT_Float32; } ).empty() );
+  const std::string mixedError = TileInferenceEngine::inputDTypeMismatch(
+    info, { 1, 2, 3 }, []( int band ) { return band == 2 ? GDT_UInt16 : GDT_Float32; } );
+  CHECK( mixedError.find( "band 2" ) != std::string::npos );
+  CHECK( mixedError.find( "float32" ) != std::string::npos );
+  // The fed band list (not the full raster) is the checked surface.
+  CHECK( TileInferenceEngine::inputDTypeMismatch( info, { 3 }, []( int band ) {
+          return band == 2 ? GDT_UInt16 : GDT_Float32;
+        } ).empty() );
+  info.input.dtype = "bfloat16";
+  CHECK( TileInferenceEngine::inputDTypeMismatch( info, { 1 }, []( int ) { return GDT_Float32; } )
+           .find( "unsupported input dtype" ) != std::string::npos );
+
+  // #705d: declared tensor names must exist in the graph (when enumerable).
+  CHECK( TileInferenceEngine::missingOutputTensor( info, {} ).empty() ); // nothing declared
+  info.output.tensorNames = { "probability" };
+  CHECK( TileInferenceEngine::missingOutputTensor( info, {} ).empty() ); // graph not enumerable
+  CHECK( TileInferenceEngine::missingOutputTensor( info, { "logits", "probability" } ).empty() );
+  const std::string missing = TileInferenceEngine::missingOutputTensor( info, { "logits" } );
+  CHECK( missing.find( "probability" ) != std::string::npos );
+  CHECK( missing.find( "logits" ) != std::string::npos );
+
+  // #690: the writer emits float32 — other depths are rejected by name.
+  CHECK( TileInferenceEngine::outputTypeMismatch( CV_32F, "probability" ).empty() );
+  const std::string typeError = TileInferenceEngine::outputTypeMismatch( CV_32S, "probability" );
+  CHECK( typeError.find( "probability" ) != std::string::npos );
+  CHECK( typeError.find( "CV_32S" ) != std::string::npos );
+  CHECK( typeError.find( "CV_32F" ) != std::string::npos );
+
+  // #705d: declared classes count is a channel-count contract on the head.
+  CHECK( TileInferenceEngine::classesChannelMismatch( info, 1, "probability" ).empty() );
+  info.output.classes = { "background", "building" };
+  CHECK( TileInferenceEngine::classesChannelMismatch( info, 2, "probability" ).empty() );
+  const std::string classesError = TileInferenceEngine::classesChannelMismatch( info, 1, "probability" );
+  CHECK( classesError.find( "probability" ) != std::string::npos );
+  CHECK( classesError.find( "2 classes" ) != std::string::npos );
+
+  // #705b: the whole-batch NoData skip decision.
+  CHECK_FALSE( TileInferenceEngine::batchIsAllNoData( {} ) );
+  CHECK( TileInferenceEngine::batchIsAllNoData( { 0, 0, 0 } ) );
+  CHECK_FALSE( TileInferenceEngine::batchIsAllNoData( { 0, 4096, 0 } ) );
+}
+
+namespace {
+/// Fake runtime for output-contract enforcement: reports fixed graph output
+/// names, records the requested output tensor, and can serve a non-CV_32F
+/// result to prove the engine rejects it (#690/#705).
+class NamedOutputRuntime final : public IModelRuntime
+{
+  public:
+    NamedOutputRuntime( std::vector<std::string> outputNames, int cvType = CV_32F )
+        : m_outputNames( std::move( outputNames ) ), m_cvType( cvType ) {}
+
+    std::string framework() const override { return "fakefw"; }
+    std::string backendName() const override { return "fake_backend"; }
+    std::string deviceName() const override { return "cpu"; }
+    std::string artifactPath() const override { return "/tmp/fake.onnx"; }
+
+    std::vector<std::string> outputTensorNames() const override { return m_outputNames; }
+
+    cv::Mat infer( const cv::Mat &nchwBlob ) override { return infer( nchwBlob, std::string() ); }
+
+    cv::Mat infer( const cv::Mat &nchwBlob, const std::string &outputName ) override
+    {
+      std::lock_guard<std::mutex> lock( m_mutex );
+      ++inferCount;
+      lastRequestedOutput = outputName;
+      cv::Mat out;
+      if ( m_cvType == CV_32F )
+        out = nchwBlob.clone();
+      else
+        nchwBlob.convertTo( out, m_cvType );
+      return out;
+    }
+
+    int inferCount = 0;
+    std::string lastRequestedOutput;
+
+  private:
+    std::vector<std::string> m_outputNames;
+    int m_cvType;
+    std::mutex m_mutex;
+};
+
+/// 64x64 single-band float32 raster on disk.
+QString writeTinyRaster( const QTemporaryDir &dir, const QString &name )
+{
+  const QString path = dir.filePath( name );
+  sicnu::testing::RsSyntheticRasterBuilder builder( 64, 64, 1 );
+  builder.withRampPattern( 1, 0.0f, 50.0f );
+  builder.writeToDisk( path );
+  return path;
+}
+
+ModelInfo bareModel()
+{
+  ModelInfo info;
+  info.name = "bare";
+  info.framework = "fakefw";
+  info.readiness = ModelReadiness::Ready;
+  return info;
+}
+} // namespace
+
+TEST_CASE( "tile engine runs the declared output tensor head", "[models][runtime][engine]" )
+{
+  QTemporaryDir dir;
+  const QString inputPath = writeTinyRaster( dir, QStringLiteral( "input.tif" ) );
+  const QString outputPath = dir.filePath( QStringLiteral( "output.tif" ) );
+
+  auto runtime = std::make_shared<NamedOutputRuntime>(
+    std::vector<std::string>{ "logits", "probability" } );
+
+  ModelInfo info = bareModel();
+  info.output.tensorNames = { "probability" };
+
+  TileInferenceEngine engine( info, runtime );
+  RSOperatorContext context;
+  REQUIRE_NOTHROW( engine.run( inputPath.toStdString(), {}, outputPath.toStdString(), context ) );
+  // The declared name selected the forward head.
+  CHECK( runtime->inferCount == 1 );
+  CHECK( runtime->lastRequestedOutput == "probability" );
+}
+
+TEST_CASE( "tile engine rejects a declared output tensor the graph lacks", "[models][runtime][engine]" )
+{
+  QTemporaryDir dir;
+  const QString inputPath = writeTinyRaster( dir, QStringLiteral( "input.tif" ) );
+
+  auto runtime = std::make_shared<NamedOutputRuntime>( std::vector<std::string>{ "logits" } );
+  ModelInfo info = bareModel();
+  info.output.tensorNames = { "probability" };
+
+  TileInferenceEngine engine( info, runtime );
+  RSOperatorContext context;
+  bool threw = false;
+  try
+  {
+    engine.run( inputPath.toStdString(), {}, dir.filePath( QStringLiteral( "unused.tif" ) ).toStdString(), context );
+  }
+  catch ( const RSOperatorError &e )
+  {
+    threw = true;
+    const std::string what = e.what();
+    CHECK( what.find( "probability" ) != std::string::npos );
+    CHECK( what.find( "logits" ) != std::string::npos );
+  }
+  CHECK( threw );
+  CHECK( runtime->inferCount == 0 ); // failed before any forward pass
+}
+
+TEST_CASE( "tile engine rejects class-count conflicts and non-float32 outputs", "[models][runtime][engine]" )
+{
+  QTemporaryDir dir;
+  const QString inputPath = writeTinyRaster( dir, QStringLiteral( "input.tif" ) );
+
+  // #705d: the identity head writes 1 channel; 2 declared classes conflict.
+  {
+    auto runtime = std::make_shared<NamedOutputRuntime>( std::vector<std::string>{} );
+    ModelInfo info = bareModel();
+    info.output.classes = { "background", "building" };
+    TileInferenceEngine engine( info, runtime );
+    RSOperatorContext context;
+    bool threw = false;
+    try
+    {
+      engine.run( inputPath.toStdString(), {},
+                  dir.filePath( QStringLiteral( "classes.tif" ) ).toStdString(), context );
+    }
+    catch ( const RSOperatorError &e )
+    {
+      threw = true;
+      CHECK( std::string( e.what() ).find( "2 classes" ) != std::string::npos );
+    }
+    CHECK( threw );
+    CHECK_FALSE( QFile::exists( dir.filePath( QStringLiteral( "classes.tif" ) ) ) );
+  }
+
+  // #690: a CV_32S head must never be bit-cast into the float32 raster.
+  {
+    auto runtime = std::make_shared<NamedOutputRuntime>( std::vector<std::string>{}, CV_32S );
+    ModelInfo info = bareModel();
+    TileInferenceEngine engine( info, runtime );
+    RSOperatorContext context;
+    bool threw = false;
+    try
+    {
+      engine.run( inputPath.toStdString(), {},
+                  dir.filePath( QStringLiteral( "int32.tif" ) ).toStdString(), context );
+    }
+    catch ( const RSOperatorError &e )
+    {
+      threw = true;
+      const std::string what = e.what();
+      CHECK( what.find( "CV_32F" ) != std::string::npos );
+      CHECK( what.find( "CV_32S" ) != std::string::npos );
+    }
+    CHECK( threw );
+    CHECK_FALSE( QFile::exists( dir.filePath( QStringLiteral( "int32.tif" ) ) ) );
+  }
+}
+
+TEST_CASE( "tile engine skips the forward pass for all-nodata tiles", "[models][runtime][engine]" )
+{
+  QTemporaryDir dir;
+  const QString outputPath = dir.filePath( QStringLiteral( "output.tif" ) );
+
+  // One of the four 64px core tiles is fully nodata: its forward pass must be
+  // skipped and NoData written directly (#705).
+  {
+    const QString inputPath = dir.filePath( QStringLiteral( "partial.tif" ) );
+    sicnu::testing::RsSyntheticRasterBuilder builder( 128, 128, 1 );
+    builder.withNoData( -9999.0 ).withRampPattern( 1, 0.0f, 100.0f );
+    for ( int y = 0; y < 64; ++y )
+      for ( int x = 64; x < 128; ++x )
+        builder.withPixel( 1, x, y, -9999.0f );
+    builder.writeToDisk( inputPath );
+
+    auto runtime = std::make_shared<FakeRuntime>( "/tmp/fake.onnx", 1.0f );
+    ModelInfo info = bareModel();
+    info.tiling.tileSize = 64;
+
+    TileInferenceEngine engine( info, runtime );
+    RSOperatorContext context;
+    const auto stats = engine.run( inputPath.toStdString(), {}, outputPath.toStdString(), context );
+    CHECK( stats.tilesProcessed == 4 );
+    CHECK( stats.tilesSkippedNoData == 1 );
+    CHECK( runtime->inferCount == 3 );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    std::vector<float> pixels( 128 * 128 );
+    REQUIRE( out.readBandData( 1, pixels.data(), 128, 128 ) );
+    int nanCount = 0;
+    for ( int row = 0; row < 64; ++row )
+      for ( int col = 64; col < 128; ++col )
+        if ( std::isnan( pixels[static_cast<std::size_t>( row ) * 128 + col] ) )
+          ++nanCount;
+    CHECK( nanCount == 64 * 64 );
+  }
+
+  // Entire raster nodata: exactly one probe forward establishes the output
+  // shape, everything else is written as NoData directly.
+  {
+    const QString inputPath = dir.filePath( QStringLiteral( "allnodata.tif" ) );
+    sicnu::testing::RsSyntheticRasterBuilder builder( 128, 128, 1 );
+    builder.withNoData( -9999.0 ).withConstantValue( 1, -9999.0f );
+    builder.writeToDisk( inputPath );
+
+    auto runtime = std::make_shared<FakeRuntime>( "/tmp/fake.onnx", 1.0f );
+    ModelInfo info = bareModel();
+    info.tiling.tileSize = 64;
+
+    TileInferenceEngine engine( info, runtime );
+    RSOperatorContext context;
+    const auto stats = engine.run( inputPath.toStdString(), {}, outputPath.toStdString(), context );
+    CHECK( stats.tilesProcessed == 4 );
+    CHECK( stats.tilesSkippedNoData == 4 );
+    CHECK( runtime->inferCount == 1 );
+    CHECK( stats.outBands == 1 );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    std::vector<float> pixels( 128 * 128 );
+    REQUIRE( out.readBandData( 1, pixels.data(), 128, 128 ) );
+    int nanCount = 0;
+    for ( const float p : pixels )
+      nanCount += std::isnan( p ) ? 1 : 0;
+    CHECK( nanCount == 128 * 128 );
+  }
+}
+
+TEST_CASE( "rs:infer floors the model RAM term with the artifact size", "[models][runtime][admission]" )
+{
+  QTemporaryDir dir;
+  installIdentityCatalog( dir, QStringLiteral( "ident" ),
+                          QStringLiteral( "\"tiling\": { \"tile_size\": 64, \"overlap\": 16 }" ) );
+
+  const QString inputPath = dir.filePath( QStringLiteral( "input.tif" ) );
+  sicnu::testing::RsSyntheticRasterBuilder builder( 128, 128, 3 );
+  builder.writeToDisk( inputPath );
+
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "rs:infer" );
+  REQUIRE( op );
+
+  Json::Value params( Json::objectValue );
+  params["input"] = inputPath.toStdString();
+  params["output"] = dir.filePath( QStringLiteral( "output.tif" ) ).toStdString();
+
+  // Shared window math: edge = 64 + 2*8 halo, 3 bands, 4 B/sample, 4 buffer
+  // sets (batch 1). The manifest declares no estimated_ram_mb, so #689 floors
+  // the model term with the artifact size (rounded up to whole MiB).
+  const std::uint64_t windowBytes = 80ull * 80 * 3 * 4 * 4;
+  const auto artifactMiB = [&] {
+    const auto model = ModelCatalog::instance().find( "ident" );
+    REQUIRE( model.has_value() );
+    const qint64 bytes = QFileInfo( QString::fromStdString( model->resolvedArtifactPath ) ).size();
+    REQUIRE( bytes > 0 );
+    return ( static_cast<std::uint64_t>( bytes ) + 1024ull * 1024 - 1 ) / ( 1024ull * 1024 );
+  }();
+
+  {
+    params["model"] = "ident";
+    const Json::Value est = op->estimateExecution( params );
+    REQUIRE( est.isMember( "estimatedRamBytes" ) );
+    const std::uint64_t expected =
+      windowBytes + artifactMiB * 1024ull * 1024 + 32ull * 1024 * 1024;
+    CHECK( est["estimatedRamBytes"].asUInt64() == expected );
+  }
+
+  // An explicit runtime.estimated_ram_mb still wins over the floor.
+  {
+    QDir( dir.path() ).mkpath( QStringLiteral( "ident-ram" ) );
+    QFile::copy( identityModelPath(), dir.filePath( QStringLiteral( "ident-ram/model.onnx" ) ) );
+    QFile manifest( dir.filePath( QStringLiteral( "ident-ram/model.json" ) ) );
+    REQUIRE( manifest.open( QIODevice::WriteOnly ) );
+    manifest.write( R"({
+        "name": "ident-ram",
+        "task": "segmentation",
+        "framework": "onnx",
+        "artifact": { "path": "model.onnx" },
+        "runtime": { "estimated_ram_mb": 768 }
+    })" );
+    manifest.close();
+    ModelCatalog::instance().reload();
+
+    params["model"] = "ident-ram";
+    const Json::Value est = op->estimateExecution( params );
+    REQUIRE( est.isMember( "estimatedRamBytes" ) );
+    const std::uint64_t expected =
+      windowBytes + 768ull * 1024 * 1024 + 32ull * 1024 * 1024;
+    CHECK( est["estimatedRamBytes"].asUInt64() == expected );
+  }
 }
