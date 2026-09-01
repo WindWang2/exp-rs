@@ -368,3 +368,172 @@ TEST_CASE("Speckle filters: NaN preservation and mask handling", "[speckle][noda
     REQUIRE(std::isfinite(outKuan[3 * W + 4]));
     REQUIRE(std::isfinite(outGamma[3 * W + 4]));
 }
+
+// ---------------------------------------------------------------------------
+// Streaming dialog path (#691): the speckle filter dialog now streams each
+// band through halo tiles (ImageEnhancementStreaming) instead of materializing
+// full frames + an IntegralImage SAT. The full-frame ImageEnhancement kernels
+// are the oracle: the tile kernels must reproduce their output up to
+// floating-point summation order (last-ULP; tested with a 1e-3 margin).
+// ---------------------------------------------------------------------------
+
+#include "processing/algorithms/image_enhancement_streaming.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_multiband_block_stream.h"
+
+#include <QTemporaryDir>
+#include <QString>
+
+#include <gdal.h>
+
+#include <array>
+#include <limits>
+#include <optional>
+
+namespace IES = ImageEnhancementStreaming;
+
+namespace
+{
+
+// Deterministic SAR-like raster with NaN holes, written to @a path.
+std::vector<std::vector<float>> makeSpeckleRaster( const QString &path, int w, int h, int bands )
+{
+    std::vector<std::vector<float>> data( bands, std::vector<float>( static_cast<size_t>( w ) * h ) );
+    for ( int b = 0; b < bands; ++b )
+    {
+        for ( int y = 0; y < h; ++y )
+        {
+            for ( int x = 0; x < w; ++x )
+            {
+                const size_t i = static_cast<size_t>( y ) * w + x;
+                float v = 40.0f + 12.0f * static_cast<float>( ( x * 7 + y * 13 + b * 29 ) % 17 )
+                        + 5.0f * static_cast<float>( ( x + y + b ) % 3 );
+                if ( ( x * 31 + y * 17 + b ) % 53 == 0 )
+                    v = std::numeric_limits<float>::quiet_NaN();
+                data[b][i] = v;
+            }
+        }
+    }
+    std::array<double, 6> gt = { 0, 1, 0, 0, 0, -1 };
+    QString err;
+    REQUIRE( writeGdalOutput( path, w, h, data, gt, QString(), &err ) );
+    return data;
+}
+
+std::vector<std::vector<float>> readRasterBands( const QString &path, int w, int h, int bands )
+{
+    GdalDatasetWrapper ds;
+    REQUIRE( ds.open( path ) );
+    std::vector<std::vector<float>> out( bands, std::vector<float>( static_cast<size_t>( w ) * h ) );
+    for ( int b = 1; b <= bands; ++b )
+        REQUIRE( ds.readBandData( b, out[static_cast<size_t>( b - 1 )].data(), w, h ) );
+    return out;
+}
+
+void requireCloseOrBothNan( float a, float b )
+{
+    if ( std::isnan( a ) && std::isnan( b ) )
+        return;
+    REQUIRE( a == Approx( b ).margin( 1e-3 ) );
+}
+
+void runSpeckleStreamingCase( int filterIndex, int kernelSize, int tileDim, float param )
+{
+    ensureGdalInit();
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    const int w = 37, h = 41, bands = 2;
+    const QString srcPath = tmp.path() + QStringLiteral( "/src.tif" );
+    const QString dstPath = tmp.path() + QStringLiteral( "/dst.tif" );
+    const std::vector<std::vector<float>> input = makeSpeckleRaster( srcPath, w, h, bands );
+
+    // Oracle: the full-frame kernels the dialog used before the conversion.
+    std::vector<std::vector<float>> oracle( bands );
+    for ( int b = 0; b < bands; ++b )
+    {
+        oracle[b].assign( static_cast<size_t>( w ) * h, 0.0f );
+        switch ( filterIndex )
+        {
+            case 0: ImageEnhancement::leeFilter( input[b].data(), oracle[b].data(), w, h, kernelSize, param ); break;
+            case 1: ImageEnhancement::frostFilter( input[b].data(), oracle[b].data(), w, h, kernelSize, param ); break;
+            case 2: ImageEnhancement::kuanFilter( input[b].data(), oracle[b].data(), w, h, kernelSize, param ); break;
+            case 3: ImageEnhancement::gammaMapFilter( input[b].data(), oracle[b].data(), w, h, kernelSize, param ); break;
+        }
+    }
+
+    // Streaming: one band at a time through halo tiles (same loop shape as
+    // SpeckleFilterDialog::onRun).
+    GdalDatasetWrapper src;
+    REQUIRE( src.open( srcPath ) );
+    GdalStreamingOutput dst( dstPath, w, h, bands, GDT_Float32, src.geoTransform(), src.projection() );
+    REQUIRE( dst.isOpen() );
+    for ( int b = 1; b <= bands; ++b )
+    {
+        IES::WindowedTileFn kernel;
+        switch ( filterIndex )
+        {
+            case 0: kernel = [kernelSize, param]( const GdalBlockStream::Tile &t, const float *buf, float *core ) {
+                        IES::speckleTileLee( t, buf, core, kernelSize, param ); }; break;
+            case 1: kernel = [kernelSize, param]( const GdalBlockStream::Tile &t, const float *buf, float *core ) {
+                        IES::speckleTileFrost( t, buf, core, kernelSize, param ); }; break;
+            case 2: kernel = [kernelSize, param]( const GdalBlockStream::Tile &t, const float *buf, float *core ) {
+                        IES::speckleTileKuan( t, buf, core, kernelSize, param ); }; break;
+            case 3: kernel = [kernelSize, param]( const GdalBlockStream::Tile &t, const float *buf, float *core ) {
+                        IES::speckleTileGammaMap( t, buf, core, kernelSize, param ); }; break;
+        }
+        REQUIRE( IES::streamBandWindowed( src, b, dst, tileDim, kernelSize / 2, kernel ) );
+    }
+    REQUIRE( dst.closeWithError( nullptr ) );
+
+    const std::vector<std::vector<float>> got = readRasterBands( dstPath, w, h, bands );
+    for ( int b = 0; b < bands; ++b )
+        for ( size_t i = 0; i < got[b].size(); ++i )
+            requireCloseOrBothNan( got[b][i], oracle[b][i] );
+}
+
+} // namespace
+
+TEST_CASE( "Streaming speckle tiles match full-frame kernels (multi-tile)", "[speckle][streaming]" )
+{
+    SECTION( "Lee 5x5" )        { runSpeckleStreamingCase( 0, 5, 16, 1.0f ); }
+    SECTION( "Frost 5x5" )      { runSpeckleStreamingCase( 1, 5, 16, 2.0f ); }
+    SECTION( "Kuan 3x3" )       { runSpeckleStreamingCase( 2, 3, 16, 1.0f ); }
+    SECTION( "Gamma-MAP 7x7" )  { runSpeckleStreamingCase( 3, 7, 16, 1.0f ); }
+}
+
+TEST_CASE( "Streaming speckle tiles match full-frame kernels (single tile)", "[speckle][streaming]" )
+{
+    runSpeckleStreamingCase( 0, 5, 256, 0.1f );
+}
+
+TEST_CASE( "Streaming speckle preserves NaN mask through tiles", "[speckle][streaming][nodata]" )
+{
+    ensureGdalInit();
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const int w = 20, h = 20;
+    const QString srcPath = tmp.path() + QStringLiteral( "/src.tif" );
+    const QString dstPath = tmp.path() + QStringLiteral( "/dst.tif" );
+    makeSpeckleRaster( srcPath, w, h, 1 );
+
+    GdalDatasetWrapper src;
+    REQUIRE( src.open( srcPath ) );
+    GdalStreamingOutput dst( dstPath, w, h, 1, GDT_Float32, src.geoTransform(), src.projection() );
+    REQUIRE( dst.isOpen() );
+    REQUIRE( IES::streamBandWindowed( src, 1, dst, 8, 1,
+                                      []( const GdalBlockStream::Tile &t, const float *buf, float *core ) {
+                                          IES::speckleTileLee( t, buf, core, 3, 1.0f );
+                                      } ) );
+    REQUIRE( dst.closeWithError( nullptr ) );
+
+    const std::vector<std::vector<float>> got = readRasterBands( dstPath, w, h, 1 );
+    // The synthetic pattern plants NaN at (x*31 + y*17) % 53 == 0 cells, e.g.
+    // (x=3, y=7): 93 + 119 = 212 = 4*53.
+    REQUIRE( std::isnan( got[0][static_cast<size_t>( 7 ) * 20 + 3] ) );
+    // Generic check: every NaN planted in the input is NaN in the output.
+    for ( int y = 0; y < h; ++y )
+        for ( int x = 0; x < w; ++x )
+            if ( ( x * 31 + y * 17 ) % 53 == 0 )
+                REQUIRE( std::isnan( got[0][static_cast<size_t>( y ) * 20 + x] ) );
+}

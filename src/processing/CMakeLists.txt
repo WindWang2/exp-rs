@@ -21,6 +21,7 @@ add_library(sicnu_processing SHARED
     algorithms/math_utils.cpp
     algorithms/mosaic.cpp
     algorithms/image_enhancement.cpp
+    algorithms/image_enhancement_streaming.cpp
     algorithms/chunked_processor.cpp
     algorithms/terrain_analysis.cpp
     algorithms/image_fusion.cpp
