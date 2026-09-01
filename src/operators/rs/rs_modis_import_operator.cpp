@@ -107,23 +107,35 @@ Json::Value RsModisImportOperator::run(const Json::Value& p, RSOperatorContext& 
                               err.isEmpty() ? "MODIS discovery failed" : err.toStdString());
     }
 
-    // If preferred sur_refl names are missing, stack all non-QA bands.
+    // #676: a user-specified band list must resolve fully — fail closed and
+    // name the missing bands instead of silently stacking fewer bands (which
+    // shifted every downstream positional band reference while the operator
+    // reported the requested count). The system default preference list stays
+    // lenient: it is pruned to the available bands (2-band products like
+    // MOD09GQ carry only part of the 7-band sur_refl list), falling back to
+    // all non-QA bands when none match.
+    const bool userSpecifiedBands =
+        p.isMember("bands") && p["bands"].isArray() && !p["bands"].empty();
     {
-        QStringList missing;
-        for (const QString& n : bandNames) {
-            bool found = false;
-            for (const auto& b : product.bands) {
-                if (b.name.contains(n, Qt::CaseInsensitive)
-                    || n.contains(b.name, Qt::CaseInsensitive)) {
-                    found = true;
-                    break;
-                }
+        const QStringList missing = SatelliteProducts::unresolvableBands(product, bandNames);
+        if (!missing.isEmpty()) {
+            if (userSpecifiedBands) {
+                throw RSOperatorError(ErrorCode::InvalidInputData,
+                                      ("Requested bands not found in product (missingBands: "
+                                       + missing.join(QStringLiteral(", ")) + ")")
+                                          .toStdString());
             }
-            if (!found)
-                missing << n;
+            if (missing.size() == bandNames.size()) {
+                bandNames.clear(); // selectBands → all non-QA
+            } else {
+                QStringList pruned;
+                for (const QString& n : bandNames) {
+                    if (!missing.contains(n))
+                        pruned << n;
+                }
+                bandNames = pruned;
+            }
         }
-        if (missing.size() == bandNames.size())
-            bandNames.clear(); // selectBands → all non-QA
     }
 
     context.logInfo("MODIS product: " + product.productId.toStdString()

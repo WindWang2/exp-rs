@@ -610,3 +610,84 @@ TEST_CASE("processFileMultiBand QUAC streaming matches the in-memory kernel (#63
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// #675: multi-band QUAC output declares NaN NoData per band (never the
+// band-1 source sentinel, which the write pass converts to NaN anyway).
+// ---------------------------------------------------------------------------
+
+TEST_CASE("processFileMultiBand QUAC declares NaN NoData on every output band (#675)",
+          "[atm][quac][gdal]")
+{
+    ensureGdalInit();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const QString sourcePath = dir.filePath(QStringLiteral("quac_nd_src.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("quac_nd_out.tif"));
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+
+    // 2-band 8x8 raster. Band 1 declares a sentinel NoData (0.0) like a
+    // source stack would; band 2 carries no declaration. One invalid pixel
+    // per band (sentinel on band 1, raw NaN on band 2).
+    constexpr int W = 8, H = 8, B = 2;
+    const float nanF = std::numeric_limits<float>::quiet_NaN();
+    GDALDatasetH srcDs = createOutputTiff(sourcePath, W, H, B, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+    {
+        GDALRasterBandH rb1 = GDALGetRasterBand(srcDs, 1);
+        REQUIRE(rb1 != nullptr);
+        GDALSetRasterNoDataValue(rb1, 0.0);
+        std::vector<float> band1(static_cast<size_t>(W) * H);
+        for (int i = 0; i < W * H; ++i)
+            band1[i] = static_cast<float>(i) + 1.0f; // dynamic range, no zeros
+        band1[0] = 0.0f;                             // declared sentinel
+        REQUIRE(GDALRasterIO(rb1, GF_Write, 0, 0, W, H, band1.data(), W, H,
+                             GDT_Float32, 0, 0) == CE_None);
+
+        GDALRasterBandH rb2 = GDALGetRasterBand(srcDs, 2);
+        REQUIRE(rb2 != nullptr);
+        std::vector<float> band2(static_cast<size_t>(W) * H);
+        for (int i = 0; i < W * H; ++i)
+            band2[i] = static_cast<float>(i) + 1.0f;
+        band2[1] = nanF; // undeclared NaN invalid pixel
+        REQUIRE(GDALRasterIO(rb2, GF_Write, 0, 0, W, H, band2.data(), W, H,
+                             GDT_Float32, 0, 0) == CE_None);
+    }
+    GDALClose(srcDs);
+
+    QString error;
+    REQUIRE(AtmosphericCorrection::processFileMultiBand(
+        sourcePath, outputPath, AtmosphericCorrection::Quac, &error));
+    REQUIRE(QFile::exists(outputPath));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    REQUIRE(out.bandCount() == B);
+
+    // Every band declares NaN as NoData (before the fix band 1 declared the
+    // source sentinel 0.0 and bands >= 2 declared nothing).
+    for (int b = 1; b <= B; ++b) {
+        bool has = false;
+        const double nd = out.bandNoDataValue(b, &has);
+        REQUIRE(has);
+        REQUIRE(std::isnan(nd));
+    }
+
+    // Each band's own invalid pixel comes back NaN; every valid pixel stays
+    // finite. Band 1 pixel 0 was the declared sentinel, band 2 pixel 1 a raw
+    // NaN — the old code declared the sentinel for band 1 only and left
+    // band 2's NaN undeclared.
+    std::vector<float> band1(static_cast<size_t>(W) * H);
+    std::vector<float> band2(static_cast<size_t>(W) * H);
+    REQUIRE(out.readBandData(1, band1.data(), W, H));
+    REQUIRE(out.readBandData(2, band2.data(), W, H));
+    REQUIRE(std::isnan(band1[0]));
+    REQUIRE(std::isfinite(band1[1]));
+    REQUIRE(std::isfinite(band2[0]));
+    REQUIRE(std::isnan(band2[1]));
+    for (int i = 2; i < W * H; ++i) {
+        REQUIRE(std::isfinite(band1[i]));
+        REQUIRE(std::isfinite(band2[i]));
+    }
+}
