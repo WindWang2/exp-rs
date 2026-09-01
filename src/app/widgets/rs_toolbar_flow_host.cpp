@@ -277,7 +277,7 @@ int RsToolbarFlowHost::insertIndexAt( const QPoint &posInHost ) const
   QList<const Chip *> items;
   for ( const Chip &c : m_chips )
   {
-    if ( c.visible && c.frame )
+    if ( c.visible && c.frame && ( !m_dragging || &c != m_dragChip ) )
       items.append( &c );
   }
   std::sort( items.begin(), items.end(), []( const Chip *a, const Chip *b ) {
@@ -296,7 +296,7 @@ int RsToolbarFlowHost::insertIndexAt( const QPoint &posInHost ) const
     if ( posInHost.y() < g.center().y() - kRowH / 2 && i == 0 )
       return 0;
     // Same row-ish: if cursor left of center, insert before
-    if ( g.contains( posInHost ) || ( posInHost.y() >= g.top() && posInHost.y() <= g.bottom() ) )
+    if ( g.contains( posInHost ) )
     {
       if ( posInHost.x() < g.center().x() )
         return i;
@@ -320,7 +320,7 @@ void RsToolbarFlowHost::paintEvent( QPaintEvent *event )
   if ( m_usedRows > 1 )
   {
     QPainter p( this );
-    p.setPen( QColor( 0xE2, 0xE6, 0xEB ) );
+    p.setPen( palette().color( QPalette::Mid ) );
     p.drawLine( 0, kRowH, width(), kRowH );
   }
 }

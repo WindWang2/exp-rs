@@ -240,6 +240,31 @@ QTabBar::tab:hover {
     color: #E8ECF1;
 }
 
+QTabBar::tab:bottom {
+    border-top: none;
+    border-bottom: 1px solid #4A5260;
+    border-bottom-left-radius: 4px;
+    border-bottom-right-radius: 4px;
+    border-top-left-radius: 0px;
+    border-top-right-radius: 0px;
+}
+
+QTabBar::tab:bottom:selected {
+    border-bottom: 2px solid #2BB673;
+    border-top: none;
+}
+
+QDockWidget::close-button, QDockWidget::float-button {
+    border: none;
+    background: transparent;
+    padding: 2px;
+    border-radius: 2px;
+}
+
+QDockWidget::close-button:hover, QDockWidget::float-button:hover {
+    background-color: #343B46;
+}
+
 /* ============ Menu Bar ============ */
 QMenuBar {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1E2229, stop:1 #1A1D23);
@@ -393,21 +418,31 @@ QCheckBox::indicator:unchecked, QTreeView::indicator:unchecked {
     background-color: #1E2229;
 }
 
-/* ============ Splitter ============ */
+/* ============ Splitters & Dock Separators ============ */
 QSplitter::handle {
     background-color: #343B46;
 }
 
 QSplitter::handle:horizontal {
-    width: 2px;
+    width: 4px;
 }
 
 QSplitter::handle:vertical {
-    height: 2px;
+    height: 4px;
 }
 
-QSplitter::handle:hover {
+QSplitter::handle:hover, QSplitter::handle:pressed {
     background-color: #2BB673; /* ac */
+}
+
+QMainWindow::separator {
+    background-color: #343B46;
+    width: 4px;
+    height: 4px;
+}
+
+QMainWindow::separator:hover {
+    background-color: #2BB673;
 }
 
 /* ============ Scrollbars ============ */
@@ -1453,3 +1488,113 @@ QComboBox#rsRibbonCombo QAbstractItemView {
 #rsRibbonPageScroll QScrollBar::handle:horizontal:hover {
     background: #4A5260;
 }
+
+/* ============ Empty State Widget ============ */
+sicnu--RsEmptyStateWidget, #RsEmptyStateWidget {
+    background-color: transparent;
+}
+#rsEmptyStateTitle {
+    font-size: 14px;
+    font-weight: 600;
+    color: #E8ECF1;
+}
+#rsEmptyStateDesc {
+    font-size: 12px;
+    color: #A8B0BC;
+}
+
+/* ============ Pipeline Editor Dock ============ */
+#rsPipelineToolBar {
+    background-color: #1E2229;
+    border-bottom: 1px solid #343B46;
+    padding: 2px;
+}
+#rsPipelineToolBar QToolButton {
+    color: #E8ECF1;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 3px;
+    border: 1px solid transparent;
+}
+#rsPipelineToolBar QToolButton:hover {
+    background-color: #343B46;
+    border: 1px solid #4A5260;
+}
+
+/* ============ Preset Catalog ============ */
+#rsPresetHeader {
+    font-weight: bold;
+    font-size: 13px;
+    color: #2BB673;
+}
+#rsPresetList {
+    background-color: #1E2229;
+    color: #E8ECF1;
+    border: 1px solid #343B46;
+    border-radius: 4px;
+}
+#rsPresetList::item {
+    padding: 8px;
+    border-bottom: 1px solid #343B46;
+}
+#rsPresetList::item:selected {
+    background-color: rgba(43, 182, 115, 0.2);
+    color: #2BB673;
+}
+#rsPresetDesc {
+    color: #A8B0BC;
+    font-size: 11px;
+    padding: 6px;
+    background: #14171C;
+    border: 1px solid #343B46;
+    border-radius: 4px;
+}
+
+/* ============ Copilot & Run Inspector ============ */
+#runInspectorContainer {
+    background-color: #1E2229;
+    border: 1px solid #343B46;
+    border-radius: 6px;
+    padding: 4px;
+}
+#userBubble {
+    background-color: #1B382B;
+    color: #E8ECF1;
+    border: 1px solid #2BB673;
+    border-radius: 6px;
+    padding: 6px;
+}
+#agentBubble {
+    background-color: #22262E;
+    color: #E8ECF1;
+    border: 1px solid #343B46;
+    border-radius: 6px;
+    padding: 6px;
+}
+#agentReasoning {
+    color: #A8B0BC;
+    font-style: italic;
+}
+#toolCallCard {
+    background-color: #1E2229;
+    border: 1px solid #2BB673;
+    border-radius: 6px;
+    padding: 6px;
+}
+#planApprovalCard {
+    background-color: #1E2229;
+    border: 1px solid #2BB673;
+    border-radius: 6px;
+    padding: 8px;
+}
+
+/* ============ Secondary Map View Header ============ */
+#rsSecondaryMapViewHeader {
+    background: #22262E;
+    border-bottom: 1px solid #343B46;
+}
+#rsSecondaryMapViewHeader[active="true"] {
+    background: #1B382B;
+    border-bottom: 1px solid #2BB673;
+}
+

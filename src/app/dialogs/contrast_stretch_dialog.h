@@ -7,6 +7,7 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class HistogramStretchWidget;
+class RasterLayerCombo;
 
 /**
  * Dialog for Photoshop-style Interactive Contrast Stretch and Levels Adjustment.
@@ -24,15 +25,17 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("contrast_stretch"); }
-    QString dialogTitle() const override { return tr("Photoshop 风格对比度拉伸 (Contrast Stretch & Levels)"); }
+    QString dialogTitle() const override { return tr("对比度拉伸与色阶调节"); }
     void onRun() override;
 
 private slots:
+    void onLayerChanged(int index);
     void onMethodChanged(int index);
 
 private:
     void setupUi();
 
+    RasterLayerCombo *m_layerCombo = nullptr;
     HistogramStretchWidget *m_stretchWidget = nullptr;
     QComboBox *m_methodCombo = nullptr;
     QDoubleSpinBox *m_clipSpin = nullptr;

@@ -105,9 +105,9 @@ void QgisDesktopWindow::options()
 
         // Log-to-file takes effect after restart (sink is opened in main.cpp at startup).
         if ( dialog.logToFile() )
-            statusBar()->showMessage( tr( "Preferences saved (log-to-file applies on next launch)" ), 4000 );
+            statusBar()->showMessage( tr( "首选项已保存（文件日志将在下次启动时生效）" ), 4000 );
         else
-            statusBar()->showMessage( tr( "Preferences saved" ), 3000 );
+            statusBar()->showMessage( tr( "首选项已保存" ), 3000 );
     }
 }
 
@@ -128,7 +128,7 @@ void QgisDesktopWindow::showProcessingHistory()
 {
     // Create a dialog to show processing history
     QDialog dialog(this);
-    dialog.setWindowTitle(tr("Processing History"));
+    dialog.setWindowTitle(tr("处理历史"));
     dialog.setMinimumSize(600, 400);
 
     auto *layout = new QVBoxLayout(&dialog);
@@ -136,7 +136,7 @@ void QgisDesktopWindow::showProcessingHistory()
     // Get history entries from the registry
     QgsHistoryProviderRegistry *historyReg = QgsGui::historyProviderRegistry();
     if (!historyReg) {
-        auto *label = new QLabel(tr("History registry not available."), &dialog);
+        auto *label = new QLabel(tr("处理历史记录不可用。"), &dialog);
         layout->addWidget(label);
         dialog.exec();
         return;
@@ -148,7 +148,7 @@ void QgisDesktopWindow::showProcessingHistory()
     layout->addWidget(historyWidget);
 
     // Add close button
-    auto *closeButton = new QPushButton(tr("Close"), &dialog);
+    auto *closeButton = new QPushButton(tr("关闭"), &dialog);
     connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::accept);
     layout->addWidget(closeButton);
 
@@ -164,19 +164,19 @@ void QgisDesktopWindow::helpContents()
     viewer->raise();
     viewer->activateWindow();
 }
-void QgisDesktopWindow::checkVersion() { QMessageBox::information(this, "Version", "SICNU GEO RS v0.9.2-dev"); }
+void QgisDesktopWindow::checkVersion() { QMessageBox::information(this, tr("版本信息"), tr("SICNU GEO RS 遥感图像解译平台 v0.9.2-dev")); }
 void QgisDesktopWindow::about()
 {
-    QMessageBox::about(this, "About",
-        "SICNU GEO RS\n\n"
-        "Professional Remote Sensing Analysis Platform\n"
-        "Built with QGIS C++ Libraries\n\n"
-        "Version v0.9.2-dev\n\n"
-        "Features:\n"
-        "- Raster and vector layer support\n"
-        "- QGIS-compatible layer properties\n"
-        "- CRS/Projection selection\n"
-        "- Native QGIS rendering performance");
+    QMessageBox::about(this, tr("关于 RS Studio"),
+        tr("SICNU GEO RS 遥感图像解译与分析平台\n\n"
+           "专业级遥感数据处理与智能解译桌面端\n"
+           "基于 Qt 6 与现代遥感算法架构构建\n\n"
+           "版本：v0.9.2-dev\n\n"
+           "核心特性：\n"
+           "- 完整的多源栅格与矢量图层支持\n"
+           "- 高性能多波段渲染与实时色彩拉伸\n"
+           "- 坐标参考系统与投影智能转换\n"
+           "- 丰富的遥感处理工具箱与异步任务调度"));
 }
 
 void QgisDesktopWindow::loadSampleData()

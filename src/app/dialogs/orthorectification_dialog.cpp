@@ -60,16 +60,15 @@ void OrthorectificationDialog::setupUi()
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
   setupHelpBanner( mainLayout );
 
-  QFrame *sec = SicnuUi::makeSection(
-    this, tr( "正射参数" ),
+  QGroupBox *paramGroup = setupParamGroup(
+    mainLayout, tr( "正射参数" ) );
+  paramGroup->setToolTip(
     tr( "基于 RPC/GCP 与可选 DEM 对影像做地形纠正。输入栅格必须携带 "
         "RPC 元数据或 GCP。" ) );
-  auto *form = new QFormLayout();
-  form->setContentsMargins( 0, 0, 0, 0 );
-  form->setHorizontalSpacing( 12 );
-  form->setVerticalSpacing( 8 );
+  auto *form = SicnuUi::makeFormLayout();
+  qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );
 
-  m_targetCrsEdit = new CrsSelector( sec );
+  m_targetCrsEdit = new CrsSelector( paramGroup );
   // Keep the inner edit's stable object name so tests and UI lookups by name
   // keep working; the browse button delegates to the QGIS projection dialog.
   m_targetCrsEdit->lineEdit()->setObjectName( QStringLiteral( "orthoTargetCrsEdit" ) );
@@ -79,19 +78,20 @@ void OrthorectificationDialog::setupUi()
   form->addRow( tr( "目标 CRS" ), m_targetCrsEdit );
 
   auto *demRow = new QHBoxLayout;
-  m_demEdit = new QLineEdit( sec );
+  m_demEdit = new QLineEdit( paramGroup );
   m_demEdit->setObjectName( QStringLiteral( "orthoDemEdit" ) );
   m_demEdit->setPlaceholderText( tr( "DEM 栅格（可选，用于地形纠正）" ) );
   SicnuDialogHelp::tip( m_demEdit, tr( "指定用于地形校正的高程栅格路径（DEM/DSM）" ) );
-  m_demBrowseButton = new QPushButton( tr( "浏览…" ), sec );
+  m_demBrowseButton = new QPushButton( tr( "浏览…" ), paramGroup );
+  SicnuUi::markSecondary( m_demBrowseButton );
   SicnuDialogHelp::tip( m_demBrowseButton, tr( "浏览并选择 DEM 高程栅格文件" ) );
   connect( m_demBrowseButton, &QPushButton::clicked, this,
            &OrthorectificationDialog::onBrowseDem );
   demRow->addWidget( m_demEdit, 1 );
   demRow->addWidget( m_demBrowseButton );
-  form->addRow( tr( "DEM" ), demRow );
+  form->addRow( tr( "DEM 栅格" ), demRow );
 
-  m_resamplingCombo = new QComboBox( sec );
+  m_resamplingCombo = new QComboBox( paramGroup );
   m_resamplingCombo->setObjectName( QStringLiteral( "orthoResamplingCombo" ) );
   m_resamplingCombo->addItem( tr( "双线性（默认）" ), QStringLiteral( "bilinear" ) );
   m_resamplingCombo->addItem( tr( "最邻近" ), QStringLiteral( "nearest" ) );
@@ -99,9 +99,9 @@ void OrthorectificationDialog::setupUi()
   m_resamplingCombo->addItem( tr( "三次样条" ), QStringLiteral( "cubicspline" ) );
   m_resamplingCombo->addItem( tr( "Lanczos" ), QStringLiteral( "lanczos" ) );
   SicnuDialogHelp::tip( m_resamplingCombo, tr( "栅格重采样插值算法：连续影像建议双线性或三次卷积，分类/离散栅格建议最邻近" ) );
-  form->addRow( tr( "重采样" ), m_resamplingCombo );
+  form->addRow( tr( "重采样方法" ), m_resamplingCombo );
 
-  m_resolutionSpin = new QDoubleSpinBox( sec );
+  m_resolutionSpin = new QDoubleSpinBox( paramGroup );
   m_resolutionSpin->setObjectName( QStringLiteral( "orthoResolutionSpin" ) );
   m_resolutionSpin->setRange( 0.0, 1e9 );
   m_resolutionSpin->setDecimals( 6 );
@@ -110,7 +110,7 @@ void OrthorectificationDialog::setupUi()
   SicnuDialogHelp::tip( m_resolutionSpin, tr( "输出像元尺寸（目标 CRS 单位）；0 = 自动。" ) );
   form->addRow( tr( "输出分辨率" ), m_resolutionSpin );
 
-  m_heightSpin = new QDoubleSpinBox( sec );
+  m_heightSpin = new QDoubleSpinBox( paramGroup );
   m_heightSpin->setObjectName( QStringLiteral( "orthoHeightSpin" ) );
   m_heightSpin->setRange( -10000.0, 100000.0 );
   m_heightSpin->setDecimals( 2 );
@@ -119,11 +119,11 @@ void OrthorectificationDialog::setupUi()
   SicnuDialogHelp::tip( m_heightSpin, tr( "无 DEM 时的恒定高程（米）。" ) );
   form->addRow( tr( "恒定高程" ), m_heightSpin );
 
-  m_nodataCheck = new QCheckBox( tr( "设置输出 NoData" ), sec );
+  m_nodataCheck = new QCheckBox( tr( "指定 NoData 值" ), paramGroup );
   m_nodataCheck->setObjectName( QStringLiteral( "orthoNodataCheck" ) );
   m_nodataCheck->setChecked( false );
   SicnuDialogHelp::tip( m_nodataCheck, tr( "是否为输出正射影像指定自定义的无效像元值 (NoData)" ) );
-  m_nodataSpin = new QDoubleSpinBox( sec );
+  m_nodataSpin = new QDoubleSpinBox( paramGroup );
   m_nodataSpin->setObjectName( QStringLiteral( "orthoNodataSpin" ) );
   m_nodataSpin->setRange( -1e9, 1e9 );
   m_nodataSpin->setDecimals( 6 );
@@ -134,15 +134,11 @@ void OrthorectificationDialog::setupUi()
   auto *nodataRow = new QHBoxLayout;
   nodataRow->addWidget( m_nodataCheck );
   nodataRow->addWidget( m_nodataSpin, 1 );
-  form->addRow( tr( "NoData" ), nodataRow );
+  form->addRow( tr( "NoData 设置" ), nodataRow );
 
-  m_modelStatusLabel = new QLabel( sec );
+  m_modelStatusLabel = SicnuUi::makeHintLabel( paramGroup, QString() );
   m_modelStatusLabel->setWordWrap( true );
-  m_modelStatusLabel->setStyleSheet( QStringLiteral( "color: #666;" ) );
   form->addRow( QString(), m_modelStatusLabel );
-
-  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
-  mainLayout->addWidget( sec );
 
   setupOutputRow( mainLayout );
   setupButtonBar( mainLayout );

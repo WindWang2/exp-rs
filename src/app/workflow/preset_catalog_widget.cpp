@@ -15,37 +15,30 @@ PresetCatalogWidget::PresetCatalogWidget( QWidget *parent )
   layout->setContentsMargins( 8, 8, 8, 8 );
   layout->setSpacing( 6 );
 
-  auto *header = new QLabel( tr( "预设流程模板 / Presets" ), this );
-  header->setStyleSheet( QStringLiteral( "font-weight: bold; font-size: 13px; color: #38bdf8;" ) );
+  auto *header = new QLabel( tr( "预设流程模板" ), this );
+  header->setObjectName( QStringLiteral( "rsPresetHeader" ) );
   layout->addWidget( header );
 
   mSearchEdit = new QLineEdit( this );
-  mSearchEdit->setPlaceholderText( tr( "🔍 搜索流程模板..." ) );
+  mSearchEdit->setPlaceholderText( tr( "搜索流程模板..." ) );
   mSearchEdit->setClearButtonEnabled( true );
   layout->addWidget( mSearchEdit );
 
   mListWidget = new QListWidget( this );
+  mListWidget->setObjectName( QStringLiteral( "rsPresetList" ) );
   mListWidget->setSelectionMode( QAbstractItemView::SingleSelection );
-  mListWidget->setStyleSheet( QStringLiteral(
-    "QListWidget { background-color: #1e293b; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; }"
-    "QListWidget::item { padding: 8px; border-bottom: 1px solid #334155; }"
-    "QListWidget::item:selected { background-color: #0284c7; color: #ffffff; }"
-  ) );
   layout->addWidget( mListWidget, 1 );
 
   mDescLabel = new QLabel( tr( "请选择上方流程模板查看说明" ), this );
+  mDescLabel->setObjectName( QStringLiteral( "rsPresetDesc" ) );
   mDescLabel->setWordWrap( true );
-  mDescLabel->setStyleSheet( QStringLiteral( "color: #94a3b8; font-size: 11px; padding: 4px; background: #0f172a; border-radius: 4px;" ) );
   mDescLabel->setMinimumHeight( 60 );
   layout->addWidget( mDescLabel );
 
-  mLoadBtn = new QPushButton( tr( "加载模板到画布 / Load Template" ), this );
+  mLoadBtn = new QPushButton( tr( "加载模板到画布" ), this );
+  mLoadBtn->setObjectName( QStringLiteral( "rsPresetLoadBtn" ) );
   mLoadBtn->setEnabled( false );
-  mLoadBtn->setStyleSheet( QStringLiteral(
-    "QPushButton { background-color: #0284c7; color: white; border: none; padding: 8px; border-radius: 4px; font-weight: bold; }"
-    "QPushButton:hover { background-color: #0369a1; }"
-    "QPushButton:disabled { background-color: #475569; color: #94a3b8; }"
-  ) );
+  mLoadBtn->setProperty( "primary", true );
   layout->addWidget( mLoadBtn );
 
   connect( mSearchEdit, &QLineEdit::textChanged, this, &PresetCatalogWidget::onSearchTextChanged );
@@ -341,7 +334,7 @@ void PresetCatalogWidget::populatePresets( const QString &filter )
         continue;
     }
 
-    auto *item = new QListWidgetItem( QStringLiteral( "📌 %1 (%2)" ).arg( preset.title, preset.category ), mListWidget );
+    auto *item = new QListWidgetItem( QStringLiteral( "%1 (%2)" ).arg( preset.title, preset.category ), mListWidget );
     item->setData( Qt::UserRole, preset.id );
   }
 

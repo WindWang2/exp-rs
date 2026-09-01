@@ -8,6 +8,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QFont>
+#include <QFormLayout>
 #include <QFrame>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -53,8 +54,8 @@ void polishDialog( QDialog *dlg, int minWidth )
 QVBoxLayout *makeDialogRootLayout( QWidget *host )
 {
   auto *root = new QVBoxLayout( host );
-  root->setContentsMargins( 14, 12, 14, 12 );
-  root->setSpacing( 12 );
+  root->setContentsMargins( 12, 12, 12, 12 );
+  root->setSpacing( 10 );
   return root;
 }
 
@@ -64,7 +65,7 @@ QFrame *makeSection( QWidget *parent, const QString &title, const QString &tip )
   frame->setObjectName( QStringLiteral( "rsDialogSection" ) );
   frame->setFrameShape( QFrame::StyledPanel );
   auto *lay = new QVBoxLayout( frame );
-  lay->setContentsMargins( 12, 10, 12, 12 );
+  lay->setContentsMargins( 12, 10, 12, 10 );
   lay->setSpacing( 8 );
 
   auto *header = new QLabel( title, frame );
@@ -84,11 +85,31 @@ QFrame *makeSection( QWidget *parent, const QString &title, const QString &tip )
   return frame;
 }
 
-QGroupBox *makeGroup( QWidget *parent, const QString &title )
+QGroupBox *makeGroup( QWidget *parent, const QString &title, const QString &tip )
 {
   auto *g = new QGroupBox( title, parent );
   g->setObjectName( QStringLiteral( "rsDialogGroup" ) );
+  QFont f = g->font();
+  f.setBold( true );
+  g->setFont( f );
+  if ( !tip.isEmpty() )
+  {
+    g->setToolTip( tip );
+    g->setWhatsThis( tip );
+    g->setStatusTip( tip );
+  }
   return g;
+}
+
+QFormLayout *makeFormLayout( QWidget *parent )
+{
+  auto *form = new QFormLayout( parent );
+  form->setLabelAlignment( Qt::AlignRight | Qt::AlignVCenter );
+  form->setFieldGrowthPolicy( QFormLayout::ExpandingFieldsGrow );
+  form->setContentsMargins( 10, 8, 10, 8 );
+  form->setHorizontalSpacing( 10 );
+  form->setVerticalSpacing( 8 );
+  return form;
 }
 
 QLabel *makeHintLabel( QWidget *parent, const QString &text )
@@ -96,7 +117,6 @@ QLabel *makeHintLabel( QWidget *parent, const QString &text )
   auto *lbl = new QLabel( text, parent );
   lbl->setObjectName( QStringLiteral( "rsDialogHint" ) );
   lbl->setWordWrap( true );
-  lbl->setObjectName( QStringLiteral( "rsDialogHint" ) );
   return lbl;
 }
 

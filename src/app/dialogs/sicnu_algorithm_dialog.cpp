@@ -252,8 +252,11 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
   auto *advancedGroup = new QGroupBox( tr( "高级参数" ) );
   advancedGroup->setObjectName( QStringLiteral( "rsDialogGroup" ) );
   auto *advancedLayout = new QFormLayout( advancedGroup );
-  advancedLayout->setLabelAlignment( Qt::AlignRight );
+  advancedLayout->setLabelAlignment( Qt::AlignRight | Qt::AlignVCenter );
   advancedLayout->setFieldGrowthPolicy( QFormLayout::ExpandingFieldsGrow );
+  advancedLayout->setContentsMargins( 10, 8, 10, 8 );
+  advancedLayout->setHorizontalSpacing( 10 );
+  advancedLayout->setVerticalSpacing( 8 );
   advancedGroup->hide();
 
   const auto paramDefs = algorithm()->parameterDefinitions();
@@ -280,7 +283,7 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
       continue;
     }
 
-    QLabel *label = new QLabel( param->description() + QStringLiteral( ":" ) );
+    QLabel *label = new QLabel( param->description() );
     const QString paramTip = param->toolTip().isEmpty()
                                ? param->description()
                                : param->toolTip();
@@ -316,20 +319,20 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
     formLayout->addWidget( advancedGroup );
 
   QSettings settings;
-  mLoadResultsCheck = new QCheckBox( tr( "Load result layers into map" ) );
+  mLoadResultsCheck = new QCheckBox( tr( "完成后将结果图层加载到工程中" ) );
   mLoadResultsCheck->setChecked(
     settings.value( QStringLiteral( "processing/loadResultsToLayers" ), true ).toBool() );
   mLoadResultsCheck->setToolTip(
-    tr( "When enabled, output rasters and vectors are added to the layer list after the tool finishes." ) );
-  formLayout->addRow( mLoadResultsCheck );
+    tr( "启用后，算法执行完毕生成的结果栅格或矢量图层将自动加入左侧图层树并显示在地图视图中。" ) );
+  formLayout->addRow( QString(), mLoadResultsCheck );
 
   // GDAL / OTB / Generic CLI: live command-line preview from current parameters.
-  mCommandGroup = new QGroupBox( tr( "调用命令 (Command)" ) );
+  mCommandGroup = new QGroupBox( tr( "调用命令行预览" ) );
   mCommandGroup->setObjectName( QStringLiteral( "rsAlgCommandPreviewGroup" ) );
   mCommandGroup->setToolTip( tr(
     "根据上方参数实时生成的外部命令行。可复制到终端手动执行（路径与临时输出可能与实际运行略有差异）。" ) );
   auto *cmdLayout = new QVBoxLayout( mCommandGroup );
-  cmdLayout->setContentsMargins( 6, 6, 6, 6 );
+  cmdLayout->setContentsMargins( 8, 8, 8, 8 );
   mCommandPreview = new QPlainTextEdit( mCommandGroup );
   mCommandPreview->setObjectName( QStringLiteral( "rsAlgCommandPreview" ) );
   mCommandPreview->setReadOnly( true );

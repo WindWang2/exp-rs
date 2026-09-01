@@ -845,7 +845,7 @@ void QgisDesktopWindow::setupStatusBar()
     bar->setFixedHeight( 28 );
 
     // Ready / task summary (left)
-    m_readyLabel = new QLabel( tr( "Ready" ), bar );
+    m_readyLabel = new QLabel( tr( "就绪" ), bar );
     m_readyLabel->setObjectName( QStringLiteral( "rsReadyLabel" ) );
     bar->addWidget( m_readyLabel );
 
@@ -916,7 +916,7 @@ void QgisDesktopWindow::setupStatusBar()
     m_renderTimeLabel->setObjectName( QStringLiteral( "rsRenderLabel" ) );
     bar->addPermanentWidget( m_renderTimeLabel );
 
-    m_cacheLabel = new QLabel( tr( "Cache: 0 MB" ), bar );
+    m_cacheLabel = new QLabel( tr( "缓存: 0 MB" ), bar );
     m_cacheLabel->setObjectName( QStringLiteral( "rsCacheLabel" ) );
     bar->addPermanentWidget( m_cacheLabel );
 }

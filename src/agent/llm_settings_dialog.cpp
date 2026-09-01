@@ -12,7 +12,7 @@ namespace sicnu::agent
 LlmSettingsDialog::LlmSettingsDialog( QWidget *parent )
   : QDialog( parent )
 {
-  setWindowTitle( QStringLiteral( "AI Copilot 模型配置 (LLM Settings)" ) );
+  setWindowTitle( tr( "AI Copilot 模型与服务设置" ) );
   resize( 500, 320 );
 
   auto *mainLayout = new QVBoxLayout( this );
@@ -36,16 +36,16 @@ LlmSettingsDialog::LlmSettingsDialog( QWidget *parent )
   m_tempSpin->setValue( 0.2 );
   m_tempSpin->setToolTip( tr( "采样温度 (0.0~1.0)" ) );
 
-  formLayout->addRow( QStringLiteral( "供应商 (Provider):" ), m_providerCombo );
-  formLayout->addRow( QStringLiteral( "Base URL:" ), m_baseUrlEdit );
-  formLayout->addRow( QStringLiteral( "API Key:" ), m_apiKeyEdit );
-  formLayout->addRow( QStringLiteral( "模型名称 (Model Name):" ), m_modelNameEdit );
-  formLayout->addRow( QStringLiteral( "采样温度 (Temperature):" ), m_tempSpin );
+  formLayout->addRow( tr( "服务提供商：" ), m_providerCombo );
+  formLayout->addRow( tr( "接口地址 (Base URL)：" ), m_baseUrlEdit );
+  formLayout->addRow( tr( "API 密钥 (API Key)：" ), m_apiKeyEdit );
+  formLayout->addRow( tr( "模型名称 (Model)：" ), m_modelNameEdit );
+  formLayout->addRow( tr( "采样温度 (Temperature)：" ), m_tempSpin );
 
   mainLayout->addLayout( formLayout );
 
   auto *testLayout = new QHBoxLayout();
-  m_testBtn = new QPushButton( QStringLiteral( "测试网络连通性" ), this );
+  m_testBtn = new QPushButton( tr( "测试网络连通性" ), this );
   m_testBtn->setToolTip( tr( "测试与大模型服务的连通性" ) );
   m_statusLabel = new QLabel( this );
   testLayout->addWidget( m_testBtn );
@@ -119,24 +119,24 @@ LlmProviderProfile LlmSettingsDialog::selectedProfile() const
 
 void LlmSettingsDialog::onTestConnectionClicked()
 {
-  m_statusLabel->setText( QStringLiteral( "正在测试连接..." ) );
-  m_statusLabel->setStyleSheet( QStringLiteral( "color: blue;" ) );
+  m_statusLabel->setText( tr( "正在测试连接..." ) );
+  m_statusLabel->setStyleSheet( QStringLiteral( "color: #0284c7; font-weight: 500;" ) );
 
   if ( !m_testClient )
   {
     m_testClient = new LlmStreamingClient( this );
     connect( m_testClient, &LlmStreamingClient::contentTokenReceived, this, [this]( const QString & ) {
-      m_statusLabel->setText( QStringLiteral( "连接成功！(Connection OK)" ) );
-      m_statusLabel->setStyleSheet( QStringLiteral( "color: green;" ) );
+      m_statusLabel->setText( tr( "连接成功！" ) );
+      m_statusLabel->setStyleSheet( QStringLiteral( "color: #16a34a; font-weight: 600;" ) );
     } );
     connect( m_testClient, &LlmStreamingClient::errorOccurred, this, [this]( const QString &err ) {
-      m_statusLabel->setText( QString( "连接失败: %1" ).arg( err ) );
-      m_statusLabel->setStyleSheet( QStringLiteral( "color: red;" ) );
+      m_statusLabel->setText( tr( "连接失败：%1" ).arg( err ) );
+      m_statusLabel->setStyleSheet( QStringLiteral( "color: #dc2626;" ) );
     } );
     connect( m_testClient, &LlmStreamingClient::finished, this, [this]() {
-      if (m_statusLabel->text().contains(QStringLiteral("正在测试"))) {
-        m_statusLabel->setText( QStringLiteral( "连接成功，但无内容返回" ) );
-        m_statusLabel->setStyleSheet( QStringLiteral( "color: orange;" ) );
+      if (m_statusLabel->text().contains(tr("正在测试"))) {
+        m_statusLabel->setText( tr( "连接成功，但无内容返回" ) );
+        m_statusLabel->setStyleSheet( QStringLiteral( "color: #d97706;" ) );
       }
     } );
   }

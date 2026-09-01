@@ -6,7 +6,6 @@
 #include <QThreadPool>
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
-#include "main_window.h"
 #include "stac_client.h"
 
 #include <QPushButton>
@@ -198,11 +197,11 @@ void StacBrowserDialog::loadSelectedAsset()
     // inside the click slot. The worker pre-opens the dataset (validates
     // + warms GDAL caches); registration still runs on the GUI thread
     // (DataManager is thread-affine).
-    if ( auto *mw = qobject_cast<QgisDesktopWindow *>( parentWidget() ) )
+    if ( auto *mw = parentWidget() )
     {
         QApplication::setOverrideCursor( Qt::WaitCursor );
         setEnabled( false );
-        QPointer<QgisDesktopWindow> safeMw( mw );
+        QPointer<QWidget> safeMw( mw );
         QPointer<StacBrowserDialog> safeSelf( this );
         QThreadPool::globalInstance()->start( [safeSelf, safeMw, vsicurl]() {
             GDALAllRegister();
@@ -223,7 +222,10 @@ void StacBrowserDialog::loadSelectedAsset()
                                           safeSelf->tr( "Failed to load COG from STAC asset." ) );
                     return;
                 }
-                if ( !safeMw->loadDataLayer( vsicurl ) )
+                bool ok = false;
+                if ( !QMetaObject::invokeMethod( safeMw.data(), "loadDataLayer", Qt::DirectConnection,
+                                                 Q_RETURN_ARG( bool, ok ),
+                                                 Q_ARG( QString, vsicurl ) ) || !ok )
                 {
                     QMessageBox::warning( safeSelf, safeSelf->tr( "Error" ),
                                           safeSelf->tr( "Failed to register/display STAC COG via Data Manager." ) );

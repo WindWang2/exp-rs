@@ -2,8 +2,11 @@
 #pragma once
 
 #include <QDialog>
+#include <QDialogButtonBox>
+#include <QGroupBox>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSize>
 #include <QString>
 #include <QVBoxLayout>
 #include <QVariantMap>
@@ -26,8 +29,9 @@ class QgsProcessingContext;
  *   - onRun() for the actual processing logic
  *
  * The base class provides:
- *   - Output file browse UI
- *   - Run/Cancel button bar
+ *   - Output file browse UI with standardized QGroupBox ("输出配置")
+ *   - Standardized QDialogButtonBox button bar (Help, Reset, Cancel, Run)
+ *   - Dynamic High-DPI responsive minimumSizeHint
  *   - Input validation (output path, raster layer)
  *   - Default completion/failure handling
  */
@@ -37,6 +41,16 @@ class RasterProcessingDialogBase : public QDialog
 
 public:
     explicit RasterProcessingDialogBase(QWidget *parent = nullptr);
+
+    /**
+     * Minimum size hint calculating responsive dimensions for High-DPI displays.
+     */
+    QSize minimumSizeHint() const override;
+
+    /**
+     * Preferred size hint calculating responsive dimensions for High-DPI displays.
+     */
+    QSize sizeHint() const override;
 
     /**
      * Ignore reject/close while a background task is running.
@@ -110,6 +124,31 @@ public:
     void runOperatorTask(const QString &operatorId, const Json::Value &params,
                          const std::function<void(const Json::Value &result)> &onResult);
 
+    /**
+     * Whether the dialog should auto-accept (close) after a successful run.
+     * Dialogs that surface result summaries (transition matrices, statistics)
+     * can configure this or return false so the user can read the metrics before dismissing.
+     */
+    virtual bool shouldAutoAcceptOnSuccess() const { return m_autoAcceptOnSuccess; }
+
+    /**
+     * Configure auto-accept behavior on success.
+     */
+    void setShouldAutoAcceptOnSuccess(bool autoAccept) { m_autoAcceptOnSuccess = autoAccept; }
+
+    /**
+     * Access to the dialog button box.
+     */
+    QDialogButtonBox *buttonBox() const { return m_buttonBox; }
+
+    /**
+     * Access to individual buttons in the button box.
+     */
+    QPushButton *runButton() const { return m_runButton; }
+    QPushButton *cancelButton() const { return m_cancelButton; }
+    QPushButton *resetButton() const { return m_resetButton; }
+    QPushButton *helpButton() const { return m_helpButton; }
+
 protected:
     // --- Virtual hooks for subclasses ---
 
@@ -130,13 +169,6 @@ protected:
     virtual bool validateInputs();
 
     /**
-     * Whether the dialog should auto-accept (close) after a successful run.
-     * Dialogs that surface result summaries (transition matrices, statistics)
-     * should return false so the user can read the metrics before dismissing.
-     */
-    virtual bool shouldAutoAcceptOnSuccess() const { return true; }
-
-    /**
      * Execute the processing. Called when Run is clicked and inputs are valid.
      */
     virtual void onRun() = 0;
@@ -149,12 +181,32 @@ protected:
     // --- UI helpers ---
 
     /**
-     * Create the output file row (label + line edit + browse button).
+     * Create standard input source group container (titled "输入数据").
+     */
+    QGroupBox *setupInputGroup(QVBoxLayout *layout, const QString &title = QString());
+
+    /**
+     * Create standard algorithm parameter group container (titled "算法参数").
+     */
+    QGroupBox *setupParamGroup(QVBoxLayout *layout, const QString &title = QString());
+
+    /**
+     * Create the standardized output group (titled "输出配置", containing output path edit and browse button).
+     */
+    QGroupBox *setupOutputGroup(QVBoxLayout *layout, const QString &title = QString());
+
+    /**
+     * Create standard advanced options group container (titled "高级选项").
+     */
+    QGroupBox *setupAdvancedGroup(QVBoxLayout *layout, const QString &title = QString());
+
+    /**
+     * Legacy alias for setupOutputGroup to maintain subclass compatibility.
      */
     void setupOutputRow(QVBoxLayout *layout);
 
     /**
-     * Create the button bar (Help + Run + Cancel).
+     * Create the button bar using standard QDialogButtonBox (Help, Reset, Cancel, Run/OK).
      */
     void setupButtonBar(QVBoxLayout *layout);
 
@@ -185,6 +237,22 @@ protected:
      */
     void handleFailed(const QString &error);
 
+protected slots:
+    /**
+     * Slot invoked when the Run / OK button is clicked or Enter is pressed.
+     */
+    virtual void onRunClicked();
+
+    /**
+     * Slot invoked when the Reset button is clicked. Subclasses can override to restore defaults.
+     */
+    virtual void onResetClicked();
+
+    /**
+     * Slot invoked when the Help button is clicked.
+     */
+    virtual void onHelpClicked();
+
 public slots:
     /**
      * Slot for async runner completed signal (JobEngine operator/callable path).
@@ -200,8 +268,12 @@ protected:
     // --- Members ---
     QgsRasterLayer *m_rasterLayer = nullptr;
     QLineEdit *m_outputEdit = nullptr;
+    QDialogButtonBox *m_buttonBox = nullptr;
     QPushButton *m_runButton = nullptr;
     QPushButton *m_cancelButton = nullptr;
+    QPushButton *m_resetButton = nullptr;
+    QPushButton *m_helpButton = nullptr;
     bool m_running = false;
+    bool m_autoAcceptOnSuccess = true;
     sicnu::app::GuiJobHandle m_jobHandle{ this };
 };

@@ -8,6 +8,7 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class RasterLayerCombo;
 
 /**
  * Radiometric calibration dialog: converts DN to radiance / TOA reflectance /
@@ -32,6 +33,7 @@ protected:
     void onRun() override;
 
 private slots:
+    void onLayerChanged(int index);
     void onBrowseMetadata();
     void onAllBandsToggled(bool checked);
 
@@ -44,6 +46,7 @@ private:
 
     QString resolvedMetadataPath() const;
 
+    RasterLayerCombo *m_layerCombo = nullptr;
     QComboBox *m_unitCombo = nullptr;
     QCheckBox *m_allBandsCheck = nullptr;
     QComboBox *m_bandCombo = nullptr;

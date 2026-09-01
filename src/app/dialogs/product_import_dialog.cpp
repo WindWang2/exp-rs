@@ -3,6 +3,7 @@
 
 #include <QDialogButtonBox>
 #include <QFileDialog>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -49,6 +50,8 @@ ProductImportDialog::ProductImportDialog( QWidget *parent )
 {
   setObjectName( QStringLiteral( "productImportDialog" ) );
   setWindowTitle( familyTitle() );
+  setMinimumWidth( 560 );
+  resize( 600, 480 );
   setupUi();
   setWhatsThis( SicnuDialogHelp::htmlForTool( helpTool(), windowTitle() ) );
   setToolTip( SicnuDialogHelp::shortForTool( helpTool(), windowTitle() ) );
@@ -84,46 +87,73 @@ void ProductImportDialog::setSourcePath( const QString &path, bool autoProbe )
 void ProductImportDialog::setupUi()
 {
   auto *layout = new QVBoxLayout( this );
+  layout->setContentsMargins( 12, 12, 12, 12 );
+  layout->setSpacing( 10 );
 
-  // Source directory row.
+  // Source directory group
+  auto *sourceGroup = new QGroupBox( tr( "产品数据源目录" ), this );
+  sourceGroup->setObjectName( QStringLiteral( "rsDialogGroup" ) );
+  sourceGroup->setToolTip( tr( "指定包含卫星元数据与各波段栅格的根目录。" ) );
+  auto *sourceLayout = new QVBoxLayout( sourceGroup );
+  sourceLayout->setContentsMargins( 10, 8, 10, 8 );
+  sourceLayout->setSpacing( 8 );
+
   auto *pathRow = new QHBoxLayout;
-  m_pathEdit = new QLineEdit( this );
+  pathRow->setSpacing( 8 );
+  m_pathEdit = new QLineEdit( sourceGroup );
   m_pathEdit->setPlaceholderText( tr( "产品目录（自动识别 Landsat / Sentinel-2 / MODIS）" ) );
-  m_browseButton = new QPushButton( tr( "浏览…" ), this );
-  m_probeButton = new QPushButton( tr( "探测" ), this );
+  m_browseButton = new QPushButton( tr( "浏览…" ), sourceGroup );
+  m_browseButton->setProperty( "sicnuSecondary", true );
+  m_probeButton = new QPushButton( tr( "探测识别" ), sourceGroup );
+  m_probeButton->setProperty( "sicnuPrimary", true );
   pathRow->addWidget( m_pathEdit, 1 );
   pathRow->addWidget( m_browseButton );
   pathRow->addWidget( m_probeButton );
-  layout->addLayout( pathRow );
+  sourceLayout->addLayout( pathRow );
+  layout->addWidget( sourceGroup );
 
-  // Preview tree: one row per child candidate (grid group), with its bands.
-  m_previewTree = new QTreeWidget( this );
+  // Preview tree group
+  auto *previewGroup = new QGroupBox( tr( "发现的数据子项与波段预览" ), this );
+  previewGroup->setObjectName( QStringLiteral( "rsDialogGroup" ) );
+  previewGroup->setToolTip( tr( "勾选需要导入到工程资产管理器的子项和波段。" ) );
+  auto *previewLayout = new QVBoxLayout( previewGroup );
+  previewLayout->setContentsMargins( 10, 8, 10, 8 );
+  previewLayout->setSpacing( 8 );
+
+  m_previewTree = new QTreeWidget( previewGroup );
   m_previewTree->setObjectName( QStringLiteral( "productPreviewTree" ) );
   m_previewTree->setColumnCount( 2 );
-  m_previewTree->setHeaderLabels( { tr( "子项（网格组）" ), tr( "波段" ) } );
+  m_previewTree->setHeaderLabels( { tr( "子项（网格组）" ), tr( "包含波段" ) } );
   m_previewTree->setRootIsDecorated( false );
+  m_previewTree->setAlternatingRowColors( true );
   m_previewTree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
   SicnuDialogHelp::tip( m_previewTree, tr( "预览探测到的子项（网格组）与波段；勾选需导入的波段。" ) );
-  layout->addWidget( m_previewTree, 1 );
+  previewLayout->addWidget( m_previewTree, 1 );
+  layout->addWidget( previewGroup, 1 );
 
   // Status label.
   m_statusLabel = new QLabel( this );
+  m_statusLabel->setObjectName( QStringLiteral( "rsDialogHint" ) );
   m_statusLabel->setWordWrap( true );
   layout->addWidget( m_statusLabel );
 
   // Import / Cancel / Help buttons.
   auto *buttonRow = new QHBoxLayout;
+  buttonRow->setSpacing( 8 );
   auto *helpButton = new QPushButton( tr( "帮助" ), this );
+  helpButton->setProperty( "sicnuSecondary", true );
   connect( helpButton, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, helpTool(), windowTitle() );
   } );
   buttonRow->addWidget( helpButton );
   buttonRow->addStretch( 1 );
-  m_importButton = new QPushButton( tr( "导入" ), this );
+  m_importButton = new QPushButton( tr( "导入所选" ), this );
+  m_importButton->setProperty( "sicnuPrimary", true );
   m_importButton->setDefault( true );
   m_importButton->setEnabled( false );
   SicnuDialogHelp::tip( m_importButton, tr( "导入选中的波段到工程（探测成功后可用）。" ) );
   m_cancelButton = new QPushButton( tr( "取消" ), this );
+  m_cancelButton->setProperty( "sicnuSecondary", true );
   SicnuDialogHelp::tip( m_cancelButton, tr( "关闭对话框，不执行导入。" ) );
   buttonRow->addWidget( m_importButton );
   buttonRow->addWidget( m_cancelButton );

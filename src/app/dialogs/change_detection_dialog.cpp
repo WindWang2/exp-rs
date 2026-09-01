@@ -32,24 +32,23 @@ void ChangeDetectionDialog::setupUi()
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
   setupHelpBanner( mainLayout );
 
-  QFrame *inputSec = SicnuUi::makeSection(
-    this, tr( "双时相输入" ),
-    tr( "前后时相须几何对齐。可先做影像配准。" ) );
-  auto *form = new QFormLayout();
-  form->setContentsMargins( 0, 0, 0, 0 );
-  form->setHorizontalSpacing( 12 );
-  form->setVerticalSpacing( 8 );
+  QGroupBox *inputGroup = setupInputGroup(
+    mainLayout, tr( "双时相输入数据" ) );
+  inputGroup->setToolTip(
+    tr( "前后时相须完成高精度几何配准与辐射归一化。" ) );
+  auto *form = SicnuUi::makeFormLayout();
+  qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( form );
 
-  m_beforeLayerCombo = new RasterLayerCombo( inputSec );
+  m_beforeLayerCombo = new RasterLayerCombo( inputGroup );
   m_beforeLayerCombo->setObjectName( QStringLiteral( "cdBeforeCombo" ) );
-  m_afterLayerCombo = new RasterLayerCombo( inputSec );
+  m_afterLayerCombo = new RasterLayerCombo( inputGroup );
   m_afterLayerCombo->setObjectName( QStringLiteral( "cdAfterCombo" ) );
-  m_beforeBandCombo = new QComboBox( inputSec );
-  m_afterBandCombo = new QComboBox( inputSec );
-  SicnuDialogHelp::tip( m_beforeLayerCombo, tr( "变化前（较早）影像。" ) );
-  SicnuDialogHelp::tip( m_afterLayerCombo, tr( "变化后（较晚）影像。" ) );
-  SicnuDialogHelp::tip( m_beforeBandCombo, tr( "前期波段。" ) );
-  SicnuDialogHelp::tip( m_afterBandCombo, tr( "后期波段。" ) );
+  m_beforeBandCombo = new QComboBox( inputGroup );
+  m_afterBandCombo = new QComboBox( inputGroup );
+  SicnuDialogHelp::tip( m_beforeLayerCombo, tr( "变化前（较早）时相栅格影像。" ) );
+  SicnuDialogHelp::tip( m_afterLayerCombo, tr( "变化后（较晚）时相栅格影像。" ) );
+  SicnuDialogHelp::tip( m_beforeBandCombo, tr( "前期影像参与比较的波段。" ) );
+  SicnuDialogHelp::tip( m_afterBandCombo, tr( "后期影像参与比较的波段。" ) );
   form->addRow( tr( "前期影像" ), m_beforeLayerCombo );
   form->addRow( tr( "前期波段" ), m_beforeBandCombo );
   form->addRow( tr( "后期影像" ), m_afterLayerCombo );
@@ -58,25 +57,23 @@ void ChangeDetectionDialog::setupUi()
   // Dual-view interpretation aid (DoD: synchronized viewports / swipe where
   // they improve interpretation): open the comparison dialog prefilled with
   // the selected before/after rasters.
-  auto *compareButton = new QPushButton( tr( "双视图对比..." ), inputSec );
+  auto *compareButton = new QPushButton( tr( "双视图对比…" ), inputGroup );
   compareButton->setObjectName( QStringLiteral( "changeCompareButton" ) );
+  SicnuUi::markSecondary( compareButton );
   SicnuDialogHelp::tip( compareButton, tr(
     "打开并排对比视图（分割线/Swipe + 闪烁），目视检查配准与变化。" ) );
   connect( compareButton, &QPushButton::clicked,
            this, &ChangeDetectionDialog::openComparisonPreview );
-  qobject_cast<QVBoxLayout *>( inputSec->layout() )->addWidget( compareButton );
+  form->addRow( QString(), compareButton );
 
-  qobject_cast<QVBoxLayout *>( inputSec->layout() )->addLayout( form );
-  mainLayout->addWidget( inputSec );
+  QGroupBox *methodGroup = setupParamGroup(
+    mainLayout, tr( "检测方法与掩膜选项" ) );
+  methodGroup->setToolTip(
+    tr( "支持差值法、归一化差值法、比值法、CVA 变化向量分析与 MAD 多变量变化检测。" ) );
+  auto *methodForm = SicnuUi::makeFormLayout();
+  qobject_cast<QVBoxLayout *>( methodGroup->layout() )->addLayout( methodForm );
 
-  QFrame *methodSec = SicnuUi::makeSection(
-    this, tr( "检测方法" ),
-    tr( "差值 / 归一化差值 / 比值 / CVA / 变化掩膜。" ) );
-  auto *methodForm = new QFormLayout();
-  methodForm->setContentsMargins( 0, 0, 0, 0 );
-  methodForm->setHorizontalSpacing( 12 );
-
-  m_methodCombo = new QComboBox( methodSec );
+  m_methodCombo = new QComboBox( methodGroup );
   m_methodCombo->setObjectName( QStringLiteral( "cdMethodCombo" ) );
   m_methodCombo->addItem( tr( "差值 Difference" ), QStringLiteral( "difference" ) );
   m_methodCombo->addItem( tr( "归一化差值" ), QStringLiteral( "normalized_difference" ) );
@@ -87,27 +84,28 @@ void ChangeDetectionDialog::setupUi()
   SicnuDialogHelp::tip( m_methodCombo, tr(
     "• 差值：后−前\n• 归一化差值：(后−前)/(后+前)\n• 比值：后/前\n"
     "• CVA：多波段变化向量幅值（用全部波段）\n• MAD：多变量变化检测（CCA 典型相关分析）\n• 掩膜：|差值|≥阈值" ) );
-  methodForm->addRow( tr( "方法" ), m_methodCombo );
+  methodForm->addRow( tr( "变化算法" ), m_methodCombo );
 
-  m_makeMaskCheck = new QCheckBox( tr( "同时输出变化掩膜" ), methodSec );
+  m_makeMaskCheck = new QCheckBox( tr( "同时输出二值变化掩膜" ), methodGroup );
   m_makeMaskCheck->setObjectName( QStringLiteral( "cdMakeMaskCheck" ) );
   SicnuDialogHelp::tip( m_makeMaskCheck, tr(
     "除方法栅格外，再输出 0/1 变化掩膜（可配阈值策略、形态学清理与最小制图单元）。" ) );
   methodForm->addRow( QString(), m_makeMaskCheck );
 
   // Mask parameter section: threshold strategy + cleanup + minimum mapping unit.
-  m_maskParamFrame = new QFrame( methodSec );
-  auto *maskForm = new QFormLayout();
+  m_maskParamFrame = new QFrame( methodGroup );
+  auto *maskForm = new QFormLayout( m_maskParamFrame );
   maskForm->setContentsMargins( 0, 0, 0, 0 );
-  maskForm->setHorizontalSpacing( 12 );
+  maskForm->setHorizontalSpacing( 10 );
+  maskForm->setVerticalSpacing( 8 );
 
   m_thresholdMethodCombo = new QComboBox( m_maskParamFrame );
   m_thresholdMethodCombo->setObjectName( QStringLiteral( "cdThresholdMethodCombo" ) );
-  m_thresholdMethodCombo->addItem( tr( "手动" ), QStringLiteral( "manual" ) );
-  m_thresholdMethodCombo->addItem( tr( "Otsu" ), QStringLiteral( "otsu" ) );
-  m_thresholdMethodCombo->addItem( tr( "百分位" ), QStringLiteral( "percentile" ) );
-  m_thresholdMethodCombo->addItem( tr( "统计（均值+kσ）" ), QStringLiteral( "statistical" ) );
-  SicnuDialogHelp::tip( m_thresholdMethodCombo, tr( "掩膜阈值策略。" ) );
+  m_thresholdMethodCombo->addItem( tr( "手动阈值" ), QStringLiteral( "manual" ) );
+  m_thresholdMethodCombo->addItem( tr( "Otsu 大津法" ), QStringLiteral( "otsu" ) );
+  m_thresholdMethodCombo->addItem( tr( "分位数阈值" ), QStringLiteral( "percentile" ) );
+  m_thresholdMethodCombo->addItem( tr( "统计阈值（均值+kσ）" ), QStringLiteral( "statistical" ) );
+  SicnuDialogHelp::tip( m_thresholdMethodCombo, tr( "二值变化掩膜阈值提取策略。" ) );
   maskForm->addRow( tr( "阈值策略" ), m_thresholdMethodCombo );
 
   m_thresholdLabel = new QLabel( tr( "阈值" ), m_maskParamFrame );
@@ -116,7 +114,7 @@ void ChangeDetectionDialog::setupUi()
   m_thresholdSpin->setRange( 0.0, 10000.0 );
   m_thresholdSpin->setDecimals( 2 );
   m_thresholdSpin->setValue( 10.0 );
-  SicnuDialogHelp::tip( m_thresholdSpin, tr( "手动阈值。" ) );
+  SicnuDialogHelp::tip( m_thresholdSpin, tr( "手动指定绝对变化阈值。" ) );
   maskForm->addRow( m_thresholdLabel, m_thresholdSpin );
 
   m_percentileSpin = new QDoubleSpinBox( m_maskParamFrame );
@@ -124,44 +122,42 @@ void ChangeDetectionDialog::setupUi()
   m_percentileSpin->setRange( 0.0, 100.0 );
   m_percentileSpin->setDecimals( 1 );
   m_percentileSpin->setValue( 90.0 );
-  SicnuDialogHelp::tip( m_percentileSpin, tr( "百分位（0-100）。" ) );
-  maskForm->addRow( tr( "百分位" ), m_percentileSpin );
+  SicnuDialogHelp::tip( m_percentileSpin, tr( "按变化强度百分位提取变化区域（0~100）。" ) );
+  maskForm->addRow( tr( "分位数值 (%)" ), m_percentileSpin );
 
   m_statisticalKSpin = new QDoubleSpinBox( m_maskParamFrame );
   m_statisticalKSpin->setObjectName( QStringLiteral( "cdStatisticalKSpin" ) );
   m_statisticalKSpin->setRange( 0.0, 10.0 );
   m_statisticalKSpin->setDecimals( 2 );
   m_statisticalKSpin->setValue( 2.0 );
-  SicnuDialogHelp::tip( m_statisticalKSpin, tr( "统计阈值 = 均值 + k×标准差。" ) );
-  maskForm->addRow( tr( "k（标准差倍数）" ), m_statisticalKSpin );
+  SicnuDialogHelp::tip( m_statisticalKSpin, tr( "统计阈值 = 变化均值 + k × 标准差。" ) );
+  maskForm->addRow( tr( "k (标准差倍数)" ), m_statisticalKSpin );
 
   m_cleanupCombo = new QComboBox( m_maskParamFrame );
   m_cleanupCombo->setObjectName( QStringLiteral( "cdCleanupCombo" ) );
-  m_cleanupCombo->addItem( tr( "无" ), QStringLiteral( "none" ) );
-  m_cleanupCombo->addItem( tr( "腐蚀" ), QStringLiteral( "erode" ) );
-  m_cleanupCombo->addItem( tr( "膨胀" ), QStringLiteral( "dilate" ) );
-  m_cleanupCombo->addItem( tr( "开运算" ), QStringLiteral( "open" ) );
-  m_cleanupCombo->addItem( tr( "闭运算" ), QStringLiteral( "close" ) );
-  SicnuDialogHelp::tip( m_cleanupCombo, tr( "掩膜形态学清理。" ) );
+  m_cleanupCombo->addItem( tr( "无操作" ), QStringLiteral( "none" ) );
+  m_cleanupCombo->addItem( tr( "形态学腐蚀" ), QStringLiteral( "erode" ) );
+  m_cleanupCombo->addItem( tr( "形态学膨胀" ), QStringLiteral( "dilate" ) );
+  m_cleanupCombo->addItem( tr( "开运算 (去孤立斑)" ), QStringLiteral( "open" ) );
+  m_cleanupCombo->addItem( tr( "闭运算 (填孔洞)" ), QStringLiteral( "close" ) );
+  SicnuDialogHelp::tip( m_cleanupCombo, tr( "二值变化掩膜形态学后处理操作。" ) );
   maskForm->addRow( tr( "形态学清理" ), m_cleanupCombo );
 
   m_cleanupIterSpin = new QSpinBox( m_maskParamFrame );
   m_cleanupIterSpin->setObjectName( QStringLiteral( "cdCleanupIterSpin" ) );
   m_cleanupIterSpin->setRange( 1, 20 );
   m_cleanupIterSpin->setValue( 1 );
-  maskForm->addRow( tr( "清理次数" ), m_cleanupIterSpin );
+  SicnuDialogHelp::tip( m_cleanupIterSpin, tr( "形态学运算迭代次数" ) );
+  maskForm->addRow( tr( "迭代次数" ), m_cleanupIterSpin );
 
   m_minAreaSpin = new QSpinBox( m_maskParamFrame );
   m_minAreaSpin->setObjectName( QStringLiteral( "cdMinAreaSpin" ) );
   m_minAreaSpin->setRange( 0, 100000000 );
   m_minAreaSpin->setValue( 0 );
-  SicnuDialogHelp::tip( m_minAreaSpin, tr( "最小制图单元（像元）：移除小于该面积的连通域；0 = 关闭。" ) );
-  maskForm->addRow( tr( "最小制图单元（像元）" ), m_minAreaSpin );
+  SicnuDialogHelp::tip( m_minAreaSpin, tr( "最小制图单元（像元）：移除小于该面积的碎小连通斑块；0 = 关闭。" ) );
+  maskForm->addRow( tr( "最小制图单元 (像元)" ), m_minAreaSpin );
 
-  m_maskParamFrame->setLayout( maskForm );
   methodForm->addRow( m_maskParamFrame );
-  qobject_cast<QVBoxLayout *>( methodSec->layout() )->addLayout( methodForm );
-  mainLayout->addWidget( methodSec );
 
   setupOutputRow( mainLayout );
   m_statusLabel = SicnuUi::makeHintLabel( this, tr( "就绪" ) );

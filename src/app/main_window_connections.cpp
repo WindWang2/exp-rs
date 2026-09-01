@@ -107,6 +107,8 @@ void QgisDesktopWindow::setupConnections()
             }
         }
         syncStatusBarLayer( layer );
+        updateCanvasEmptyState();
+        updateLayersEmptyState();
     } );
     m_renderTimer.start();
 
@@ -127,6 +129,15 @@ void QgisDesktopWindow::setupConnections()
     // Identify tool results
     connect(m_identifyTool, &CustomIdentifyTool::identifyCompleted,
             this, &QgisDesktopWindow::onIdentifyResults);
+
+    connect( QgsProject::instance(), &QgsProject::layersAdded, this, [this]() {
+        updateCanvasEmptyState();
+        updateLayersEmptyState();
+    } );
+    connect( QgsProject::instance(), &QgsProject::layersRemoved, this, [this]() {
+        updateCanvasEmptyState();
+        updateLayersEmptyState();
+    } );
 
     // Project signals
     connect(QgsProject::instance(), &QgsProject::readProject,
@@ -341,7 +352,7 @@ void QgisDesktopWindow::onProjectRead(const QDomDocument &doc)
     }
     updateEditingUI(activeVl);
 
-    statusBar()->showMessage("Project loaded", 3000);
+    statusBar()->showMessage(tr("工程已加载"), 3000);
 }
 
 void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
@@ -360,7 +371,7 @@ void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
                         written.diagnostics() ) ) );
         }
     }
-    statusBar()->showMessage("Project saved", 2000);
+    statusBar()->showMessage(tr("工程已保存"), 2000);
 }
 
 void QgisDesktopWindow::onCrsChanged(const QgsCoordinateReferenceSystem &crs)

@@ -28,60 +28,70 @@ void TerrainDialog::setupUi()
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
   setupHelpBanner( mainLayout );
 
-  QFrame *inputSec = SicnuUi::makeSection(
-    this, tr( "输入" ),
-    tr( "选择 DEM 与分析产品。米制投影下坡度/阴影更可靠。" ) );
-  auto *inputForm = new QFormLayout();
-  inputForm->setContentsMargins( 0, 0, 0, 0 );
-  inputForm->setHorizontalSpacing( 12 );
-  inputForm->setVerticalSpacing( 8 );
+  QGroupBox *inputGroup = setupInputGroup(
+    mainLayout, tr( "输入数据与分析类型" ) );
+  inputGroup->setToolTip(
+    tr( "选择 DEM 高程栅格与目标分析产品。建议在米制投影坐标系下运行以保证坡度与阴影计算精度。" ) );
+  auto *inputForm = SicnuUi::makeFormLayout();
+  qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( inputForm );
 
-  mLayerCombo = new QComboBox( inputSec );
-  SicnuDialogHelp::tip( mLayerCombo, tr( "DEM 高程栅格。" ) );
+  mLayerCombo = new QComboBox( inputGroup );
+  mLayerCombo->setObjectName( QStringLiteral( "terrainLayerCombo" ) );
+  SicnuDialogHelp::tip( mLayerCombo, tr( "参与计算的 DEM 高程栅格图层。" ) );
   inputForm->addRow( tr( "DEM 图层" ), mLayerCombo );
 
-  mAnalysisCombo = new QComboBox( inputSec );
-  mAnalysisCombo->addItem( tr( "坡度 (度)" ), "slope" );
-  mAnalysisCombo->addItem( tr( "坡向 (度)" ), "aspect" );
-  mAnalysisCombo->addItem( tr( "山体阴影" ), "hillshade" );
-  mAnalysisCombo->addItem( tr( "粗糙度 Roughness" ), "roughness" );
-  mAnalysisCombo->addItem( tr( "TRI 地形起伏" ), "tri" );
-  mAnalysisCombo->addItem( tr( "TPI 地形位置" ), "tpi" );
+  mAnalysisCombo = new QComboBox( inputGroup );
+  mAnalysisCombo->setObjectName( QStringLiteral( "terrainAnalysisCombo" ) );
+  mAnalysisCombo->addItem( tr( "坡度 (Slope, 度)" ), QStringLiteral( "slope" ) );
+  mAnalysisCombo->addItem( tr( "坡向 (Aspect, 度)" ), QStringLiteral( "aspect" ) );
+  mAnalysisCombo->addItem( tr( "山体阴影 (Hillshade)" ), QStringLiteral( "hillshade" ) );
+  mAnalysisCombo->addItem( tr( "地表粗糙度 (Roughness)" ), QStringLiteral( "roughness" ) );
+  mAnalysisCombo->addItem( tr( "地形起伏度 (TRI)" ), QStringLiteral( "tri" ) );
+  mAnalysisCombo->addItem( tr( "地形位置指数 (TPI)" ), QStringLiteral( "tpi" ) );
   SicnuDialogHelp::tip( mAnalysisCombo, tr(
-    "坡度/坡向；Hillshade 需太阳方位/高度；Roughness/TRI/TPI。" ) );
+    "坡度/坡向计算；山体阴影需指定太阳方位角与高度角；粗糙度/TRI/TPI 为地貌特征指数。" ) );
   inputForm->addRow( tr( "分析类型" ), mAnalysisCombo );
-  qobject_cast<QVBoxLayout *>( inputSec->layout() )->addLayout( inputForm );
-  mainLayout->addWidget( inputSec );
 
-  QFrame *paramSec = SicnuUi::makeSection(
-    this, tr( "参数" ),
-    tr( "像元大小常自动估算；太阳参数仅用于山体阴影。" ) );
-  auto *paramForm = new QFormLayout();
-  paramForm->setContentsMargins( 0, 0, 0, 0 );
-  paramForm->setHorizontalSpacing( 12 );
-  paramForm->setVerticalSpacing( 8 );
+  QGroupBox *paramGroup = setupParamGroup(
+    mainLayout, tr( "地形计算参数" ) );
+  paramGroup->setToolTip(
+    tr( "像元尺寸通常根据栅格空间分辨率自动估算；太阳光照参数仅在山体阴影分析时生效。" ) );
+  auto *paramForm = SicnuUi::makeFormLayout();
+  qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( paramForm );
 
-  mCellSizeSpin = new QDoubleSpinBox( paramSec );
-  mCellSizeSpin->setRange( 0.001, 10000.0 );
+  mCellSizeSpin = new QDoubleSpinBox( paramGroup );
+  mCellSizeSpin->setObjectName( QStringLiteral( "terrainCellSizeSpin" ) );
+  mCellSizeSpin->setRange( 0.000001, 100000.0 );
+  mCellSizeSpin->setDecimals( 4 );
   mCellSizeSpin->setValue( 1.0 );
-  SicnuDialogHelp::tip( mCellSizeSpin, tr( "像元大小（地图单位）。" ) );
+  SicnuDialogHelp::tip( mCellSizeSpin, tr( "水平与垂直网格像元大小（地图坐标单位）。" ) );
   paramForm->addRow( tr( "像元大小" ), mCellSizeSpin );
 
-  mSunAzimuthSpin = new QDoubleSpinBox( paramSec );
-  mSunAzimuthSpin->setRange( 0, 360 );
+  mSunAzimuthSpin = new QDoubleSpinBox( paramGroup );
+  mSunAzimuthSpin->setObjectName( QStringLiteral( "terrainSunAzimuthSpin" ) );
+  mSunAzimuthSpin->setRange( 0.0, 360.0 );
   mSunAzimuthSpin->setValue( 315.0 );
   mSunAzimuthSpin->setSuffix( QStringLiteral( "°" ) );
-  SicnuDialogHelp::tip( mSunAzimuthSpin, tr( "太阳方位：自北顺时针 0–360°。" ) );
-  paramForm->addRow( tr( "太阳方位" ), mSunAzimuthSpin );
+  SicnuDialogHelp::tip( mSunAzimuthSpin, tr( "太阳方位角：自正北顺时针旋转角度 (0°~360°)。" ) );
+  paramForm->addRow( tr( "太阳方位角" ), mSunAzimuthSpin );
 
-  mSunElevationSpin = new QDoubleSpinBox( paramSec );
-  mSunElevationSpin->setRange( 0, 90 );
+  mSunElevationSpin = new QDoubleSpinBox( paramGroup );
+  mSunElevationSpin->setObjectName( QStringLiteral( "terrainSunElevationSpin" ) );
+  mSunElevationSpin->setRange( 0.0, 90.0 );
   mSunElevationSpin->setValue( 45.0 );
   mSunElevationSpin->setSuffix( QStringLiteral( "°" ) );
-  SicnuDialogHelp::tip( mSunElevationSpin, tr( "太阳高度：0–90°。" ) );
-  paramForm->addRow( tr( "太阳高度" ), mSunElevationSpin );
-  qobject_cast<QVBoxLayout *>( paramSec->layout() )->addLayout( paramForm );
-  mainLayout->addWidget( paramSec );
+  SicnuDialogHelp::tip( mSunElevationSpin, tr( "太阳高度角：太阳光线与地平面的夹角 (0°~90°)。" ) );
+  paramForm->addRow( tr( "太阳高度角" ), mSunElevationSpin );
+
+  auto updateSunParamsVisibility = [this]() {
+    const QString product = mAnalysisCombo->currentData().toString();
+    const bool isHillshade = ( product == QStringLiteral( "hillshade" ) );
+    mSunAzimuthSpin->setEnabled( isHillshade );
+    mSunElevationSpin->setEnabled( isHillshade );
+  };
+  connect( mAnalysisCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, updateSunParamsVisibility );
+  updateSunParamsVisibility();
 
   setupOutputRow( mainLayout );
   mStatusLabel = SicnuUi::makeHintLabel( this, tr( "就绪" ) );

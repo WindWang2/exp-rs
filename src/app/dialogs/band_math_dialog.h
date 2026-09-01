@@ -3,7 +3,9 @@
 
 #include "raster_processing_dialog_base.h"
 
+class QLabel;
 class QLineEdit;
+class RasterLayerCombo;
 
 /**
  * Dialog for Band Math operations.
@@ -17,13 +19,21 @@ class BandMathDialog : public RasterProcessingDialogBase
 public:
     explicit BandMathDialog(QWidget *parent = nullptr);
 
+    void setRasterLayer(QgsRasterLayer *layer) override;
+
 protected:
     QString toolName() const override { return QStringLiteral("band_math"); }
-    QString dialogTitle() const override { return tr("Band Math"); }
+    QString dialogTitle() const override { return tr("波段运算"); }
     void onRun() override;
+
+private slots:
+    void onLayerChanged(int index);
 
 private:
     void setupUi();
+    void updateBandInfo();
 
+    RasterLayerCombo *m_layerCombo = nullptr;
+    QLabel *m_bandInfoLabel = nullptr;
     QLineEdit *m_expressionEdit = nullptr;
 };

@@ -169,6 +169,7 @@ add_executable(sicnu_geo_rs
     widgets/progress_dialog.cpp
     widgets/comparison_widget.cpp
     widgets/guided_workflow_widget.cpp
+    widgets/rs_empty_state_widget.cpp
     panels/data_manager_panel.cpp
     panels/task_center_dock.cpp
     panels/mosaic_panel.cpp

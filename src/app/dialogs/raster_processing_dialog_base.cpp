@@ -41,7 +41,29 @@ QString gdalErrorMarker()
 RasterProcessingDialogBase::RasterProcessingDialogBase( QWidget *parent )
   : QDialog( parent )
 {
-  SicnuUi::polishDialog( this, 460 );
+  SicnuUi::polishDialog( this, 520 );
+}
+
+QSize RasterProcessingDialogBase::minimumSizeHint() const
+{
+  const int charWidth = fontMetrics().horizontalAdvance( QLatin1Char( 'M' ) );
+  const int lineHeight = fontMetrics().lineSpacing();
+  const int minW = std::max( 520, charWidth * 38 );
+  const int minH = std::max( 420, lineHeight * 16 );
+
+  QSize baseHint = QDialog::minimumSizeHint();
+  return QSize( std::max( minW, baseHint.width() ), std::max( minH, baseHint.height() ) );
+}
+
+QSize RasterProcessingDialogBase::sizeHint() const
+{
+  const int charWidth = fontMetrics().horizontalAdvance( QLatin1Char( 'M' ) );
+  const int lineHeight = fontMetrics().lineSpacing();
+  const int hintW = std::max( 560, charWidth * 42 );
+  const int hintH = std::max( 460, lineHeight * 18 );
+
+  QSize baseHint = QDialog::sizeHint();
+  return QSize( std::max( hintW, baseHint.width() ), std::max( hintH, baseHint.height() ) );
 }
 
 void RasterProcessingDialogBase::reject()
@@ -124,25 +146,67 @@ QString RasterProcessingDialogBase::dialogHelpHtml() const
   return SicnuDialogHelp::htmlForTool( toolName(), dialogTitle() );
 }
 
-void RasterProcessingDialogBase::setupOutputRow( QVBoxLayout *layout )
+QGroupBox *RasterProcessingDialogBase::setupInputGroup( QVBoxLayout *layout, const QString &title )
 {
-  QFrame *sec = SicnuUi::makeSection(
-    this, tr( "输出" ),
-    tr( "结果保存路径。运行前必须填写；建议使用 .tif 扩展名。" ) );
-  auto *form = new QFormLayout();
-  form->setContentsMargins( 0, 0, 0, 0 );
-  form->setHorizontalSpacing( 12 );
-  form->setVerticalSpacing( 8 );
-  form->setFieldGrowthPolicy( QFormLayout::ExpandingFieldsGrow );
+  if ( !layout )
+    return nullptr;
+  const QString gTitle = title.isEmpty() ? tr( "输入数据" ) : title;
+  auto *group = SicnuUi::makeGroup( this, gTitle );
+  auto *gl = new QVBoxLayout( group );
+  gl->setContentsMargins( 12, 10, 12, 10 );
+  gl->setSpacing( 8 );
+  layout->addWidget( group );
+  return group;
+}
 
-  m_outputEdit = new QLineEdit( sec );
+QGroupBox *RasterProcessingDialogBase::setupParamGroup( QVBoxLayout *layout, const QString &title )
+{
+  if ( !layout )
+    return nullptr;
+  const QString gTitle = title.isEmpty() ? tr( "算法参数" ) : title;
+  auto *group = SicnuUi::makeGroup( this, gTitle );
+  auto *gl = new QVBoxLayout( group );
+  gl->setContentsMargins( 12, 10, 12, 10 );
+  gl->setSpacing( 8 );
+  layout->addWidget( group );
+  return group;
+}
+
+QGroupBox *RasterProcessingDialogBase::setupAdvancedGroup( QVBoxLayout *layout, const QString &title )
+{
+  if ( !layout )
+    return nullptr;
+  const QString gTitle = title.isEmpty() ? tr( "高级选项" ) : title;
+  auto *group = SicnuUi::makeGroup( this, gTitle );
+  auto *gl = new QVBoxLayout( group );
+  gl->setContentsMargins( 12, 10, 12, 10 );
+  gl->setSpacing( 8 );
+  layout->addWidget( group );
+  return group;
+}
+
+QGroupBox *RasterProcessingDialogBase::setupOutputGroup( QVBoxLayout *layout, const QString &title )
+{
+  if ( !layout )
+    return nullptr;
+  const QString gTitle = title.isEmpty() ? tr( "输出配置" ) : title;
+  auto *group = SicnuUi::makeGroup( this, gTitle, tr( "结果保存路径与输出选项。运行前必须填写；建议使用 .tif 扩展名。" ) );
+  auto *gl = new QVBoxLayout( group );
+  gl->setContentsMargins( 12, 10, 12, 10 );
+  gl->setSpacing( 8 );
+
+  auto *form = SicnuUi::makeFormLayout();
+  form->setContentsMargins( 0, 0, 0, 0 );
+
+  m_outputEdit = new QLineEdit( group );
   m_outputEdit->setObjectName( QStringLiteral( "rsDialogOutputEdit" ) );
-  m_outputEdit->setPlaceholderText( tr( "/path/to/output.tif" ) );
+  m_outputEdit->setPlaceholderText( tr( "选择或输入输出 GeoTIFF 文件路径 (*.tif)..." ) );
   SicnuDialogHelp::tip( m_outputEdit, tr( "结果保存路径。建议使用 .tif 扩展名。" ) );
 
-  auto *browseBtn = new QPushButton( tr( "浏览…" ), sec );
+  auto *browseBtn = new QPushButton( tr( "浏览…" ), group );
   browseBtn->setObjectName( QStringLiteral( "rsDialogBrowseBtn" ) );
   SicnuUi::markSecondary( browseBtn );
+  browseBtn->setFixedWidth( 76 );
   SicnuDialogHelp::tip( browseBtn, tr( "浏览选择输出文件位置。" ) );
   connect( browseBtn, &QPushButton::clicked, this, &RasterProcessingDialogBase::browseOutput );
 
@@ -152,41 +216,61 @@ void RasterProcessingDialogBase::setupOutputRow( QVBoxLayout *layout )
   row->addWidget( m_outputEdit, 1 );
   row->addWidget( browseBtn );
 
-  auto *pathLabel = new QLabel( tr( "文件路径" ), sec );
+  auto *pathLabel = new QLabel( tr( "输出路径" ), group );
   SicnuDialogHelp::tip( pathLabel, tr( "输出 GeoTIFF 路径。运行前必须填写。" ) );
   form->addRow( pathLabel, row );
-  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
+
+  gl->addLayout( form );
 
   auto *hint = SicnuUi::makeHintLabel(
-    sec, tr( "提示：处理完成后可从日志或工程图层中加载结果。" ) );
-  qobject_cast<QVBoxLayout *>( sec->layout() )->addWidget(  hint );
+    group, tr( "提示：处理完成后可从日志或工程图层中加载结果。" ) );
+  gl->addWidget( hint );
 
-  layout->addWidget( sec );
+  layout->addWidget( group );
+  return group;
+}
+
+void RasterProcessingDialogBase::setupOutputRow( QVBoxLayout *layout )
+{
+  setupOutputGroup( layout );
 }
 
 void RasterProcessingDialogBase::setupButtonBar( QVBoxLayout *layout )
 {
-  auto *btnLayout = SicnuUi::makeActionRow( this );
+  if ( !layout )
+    return;
 
-  auto *helpBtn = new QPushButton( tr( "帮助" ), this );
-  helpBtn->setObjectName( QStringLiteral( "rsDialogHelpButton" ) );
-  SicnuUi::markSecondary( helpBtn );
-  SicnuDialogHelp::tip( helpBtn, tr( "查看本功能的说明文档与使用提示。" ) );
-  connect( helpBtn, &QPushButton::clicked, this, [this]() {
-    SicnuDialogHelp::showHelpBox( this, dialogTitle(), dialogHelpHtml() );
-  } );
-  btnLayout->addWidget( helpBtn );
-  btnLayout->addStretch();
+  m_buttonBox = new QDialogButtonBox( this );
+  m_buttonBox->setObjectName( QStringLiteral( "rsDialogButtonBox" ) );
 
-  auto *cancelBtn = new QPushButton( tr( "取消" ), this );
-  cancelBtn->setObjectName( QStringLiteral( "rsDialogCancelBtn" ) );
-  SicnuUi::markSecondary( cancelBtn );
-  // While a task is running the button cancels the cooperative job (the
-  // failure callback handles isCanceled -> finishRun); otherwise it closes
-  // the dialog (#627 - previously a long run could neither be cancelled
-  // from the dialog nor closed).
-  SicnuDialogHelp::tip( cancelBtn, tr( "任务运行中取消任务，否则关闭对话框。" ) );
-  connect( cancelBtn, &QPushButton::clicked, this, [this]() {
+  // Help button (HelpRole)
+  m_helpButton = m_buttonBox->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
+  m_helpButton->setObjectName( QStringLiteral( "rsDialogHelpButton" ) );
+  SicnuUi::markSecondary( m_helpButton );
+  SicnuDialogHelp::tip( m_helpButton, tr( "查看本功能的说明文档与使用提示。" ) );
+
+  // Reset button (ResetRole)
+  m_resetButton = m_buttonBox->addButton( tr( "重置" ), QDialogButtonBox::ResetRole );
+  m_resetButton->setObjectName( QStringLiteral( "rsDialogResetButton" ) );
+  SicnuUi::markSecondary( m_resetButton );
+  SicnuDialogHelp::tip( m_resetButton, tr( "恢复所有参数到默认初始状态。" ) );
+
+  // Cancel button (RejectRole)
+  m_cancelButton = m_buttonBox->addButton( tr( "取消" ), QDialogButtonBox::RejectRole );
+  m_cancelButton->setObjectName( QStringLiteral( "rsDialogCancelBtn" ) );
+  SicnuUi::markSecondary( m_cancelButton );
+  SicnuDialogHelp::tip( m_cancelButton, tr( "任务运行中取消任务，否则关闭对话框。" ) );
+
+  // Run button (AcceptRole)
+  m_runButton = m_buttonBox->addButton( tr( "运行" ), QDialogButtonBox::AcceptRole );
+  m_runButton->setObjectName( QStringLiteral( "rsPrimaryButton" ) );
+  m_runButton->setDefault( true );
+  SicnuUi::markPrimary( m_runButton );
+  SicnuDialogHelp::tip( m_runButton, tr( "校验输入后开始处理。运行中请勿关闭对话框。" ) );
+
+  // Connect signals
+  connect( m_buttonBox, &QDialogButtonBox::accepted, this, &RasterProcessingDialogBase::onRunClicked );
+  connect( m_buttonBox, &QDialogButtonBox::rejected, this, [this]() {
     if ( isRunning() )
     {
       // Stay in "cancelling" until the terminal record lands (#696): the
@@ -202,20 +286,32 @@ void RasterProcessingDialogBase::setupButtonBar( QVBoxLayout *layout )
     else
       QDialog::reject();
   } );
-  m_cancelButton = cancelBtn;
-  btnLayout->addWidget( cancelBtn );
+  connect( m_buttonBox, &QDialogButtonBox::helpRequested, this, &RasterProcessingDialogBase::onHelpClicked );
+  if ( m_resetButton )
+  {
+    connect( m_resetButton, &QPushButton::clicked, this, &RasterProcessingDialogBase::onResetClicked );
+  }
 
-  m_runButton = new QPushButton( tr( "运行" ), this );
-  m_runButton->setObjectName( QStringLiteral( "rsPrimaryButton" ) );
-  SicnuUi::markPrimary( m_runButton );
-  SicnuDialogHelp::tip( m_runButton, tr( "校验输入后开始处理。运行中请勿关闭对话框。" ) );
-  connect( m_runButton, &QPushButton::clicked, this, [this]() {
-    if ( validateInputs() )
-      onRun();
-  } );
-  btnLayout->addWidget( m_runButton );
+  layout->addWidget( m_buttonBox );
+}
 
-  layout->addLayout( btnLayout );
+void RasterProcessingDialogBase::onRunClicked()
+{
+  if ( isRunning() )
+    return;
+  if ( validateInputs() )
+    onRun();
+}
+
+void RasterProcessingDialogBase::onResetClicked()
+{
+  if ( m_outputEdit )
+    m_outputEdit->clear();
+}
+
+void RasterProcessingDialogBase::onHelpClicked()
+{
+  SicnuDialogHelp::showHelpBox( this, dialogTitle(), dialogHelpHtml() );
 }
 
 void RasterProcessingDialogBase::browseOutput()
@@ -239,6 +335,8 @@ void RasterProcessingDialogBase::startRun()
     m_runButton->setEnabled( false );
     m_runButton->setText( tr( "运行中…" ) );
   }
+  if ( m_resetButton )
+    m_resetButton->setEnabled( false );
   // Prevent Esc / window-close from destroying the dialog mid-run.
   setCursor( Qt::WaitCursor );
 }
@@ -256,6 +354,8 @@ void RasterProcessingDialogBase::finishRun()
     m_cancelButton->setEnabled( true );
     m_cancelButton->setText( tr( "取消" ) );
   }
+  if ( m_resetButton )
+    m_resetButton->setEnabled( true );
   unsetCursor();
 }
 

@@ -10,13 +10,14 @@
 #include "processing/gdal/gdal_safe_call.h"
 #include "processing/framework/task_center.h"
 #include "app/widgets/histogram_stretch_widget.h"
+#include "widgets/raster_layer_combo.h"
 
 #include <raster/qgsrasterlayer.h>
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
-#include <QFrame>
+#include <QGroupBox>
 #include <QLabel>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -36,46 +37,76 @@ ContrastStretchDialog::ContrastStretchDialog( QWidget *parent )
 void ContrastStretchDialog::setRasterLayer( QgsRasterLayer *layer )
 {
   RasterProcessingDialogBase::setRasterLayer( layer );
+  if ( m_layerCombo && layer )
+  {
+    const int idx = m_layerCombo->findData( layer->id() );
+    if ( idx >= 0 && m_layerCombo->currentIndex() != idx )
+    {
+      m_layerCombo->blockSignals( true );
+      m_layerCombo->setCurrentIndex( idx );
+      m_layerCombo->blockSignals( false );
+    }
+  }
   if ( m_stretchWidget && layer )
   {
     m_stretchWidget->setRasterLayer( layer );
   }
 }
 
+void ContrastStretchDialog::onLayerChanged( int /*index*/ )
+{
+  if ( m_layerCombo )
+  {
+    auto *layer = m_layerCombo->currentRasterLayer();
+    if ( layer && layer != m_rasterLayer )
+      setRasterLayer( layer );
+  }
+}
+
 void ContrastStretchDialog::setupUi()
 {
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
-
   setupHelpBanner( mainLayout );
+
+  // Input Layer Group
+  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "输入数据" ) );
+  auto *inputForm = SicnuUi::makeFormLayout();
+  inputForm->setContentsMargins( 0, 0, 0, 0 );
+
+  m_layerCombo = new RasterLayerCombo( inputGroup );
+  m_layerCombo->setObjectName( QStringLiteral( "contrastStretchInputLayerCombo" ) );
+  SicnuDialogHelp::tip( m_layerCombo, tr( "选择待执行对比度拉伸的栅格图层。" ) );
+  m_layerCombo->populate();
+  connect( m_layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, &ContrastStretchDialog::onLayerChanged );
+  inputForm->addRow( tr( "输入栅格" ), m_layerCombo );
+  qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( inputForm );
 
   // Embedded Interactive Photoshop Levels & Histogram Panel
   m_stretchWidget = new HistogramStretchWidget( this );
   mainLayout->addWidget( m_stretchWidget, 1 );
 
-  QFrame *sec = SicnuUi::makeSection(
-    this, tr( "预设算法与导出一览" ),
-    tr( "选择特定预设方法或直接导出拉伸后的 GeoTIFF 图像。" ) );
-  auto *form = new QFormLayout();
+  // Preset Parameters Group
+  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "预设算法与导出" ) );
+  auto *form = SicnuUi::makeFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
-  form->setHorizontalSpacing( 12 );
-  form->setVerticalSpacing( 8 );
 
-  m_methodCombo = new QComboBox( sec );
-  m_methodCombo->addItems( { tr( "Photoshop 自定义色阶" ), tr( "线性 (Min-Max)" ), tr( "百分比裁剪" ),
-                             tr( "标准差" ), tr( "直方图均衡" ) } );
+  m_methodCombo = new QComboBox( paramGroup );
+  m_methodCombo->addItems( { tr( "Photoshop 自定义色阶" ), tr( "线性拉伸 (Min-Max)" ), tr( "百分比裁剪拉伸" ),
+                             tr( "标准差拉伸" ), tr( "直方图均衡化" ) } );
   SicnuDialogHelp::tip( m_methodCombo, tr(
     "拉伸方法：\n"
     "• Photoshop 色阶：交互调节阴影、高光与 Gamma 中音\n"
     "• 线性：最小–最大\n"
     "• 百分比裁剪：两端裁剪后再拉伸\n"
     "• 标准差：均值±K×标准差\n"
-    "• 直方图均衡：增强全局对比" ) );
+    "• 直方图均衡化：增强全局对比" ) );
   connect( m_methodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &ContrastStretchDialog::onMethodChanged );
   form->addRow( tr( "预设方法" ), m_methodCombo );
 
-  m_clipLabel = new QLabel( tr( "裁剪比例" ), sec );
-  m_clipSpin = new QDoubleSpinBox( sec );
+  m_clipLabel = new QLabel( tr( "裁剪比例" ), paramGroup );
+  m_clipSpin = new QDoubleSpinBox( paramGroup );
   m_clipSpin->setRange( 0.1, 50.0 );
   m_clipSpin->setValue( 2.0 );
   m_clipSpin->setSingleStep( 0.5 );
@@ -84,8 +115,8 @@ void ContrastStretchDialog::setupUi()
   SicnuDialogHelp::tip( m_clipSpin, tr( "两端各舍弃该比例像元后再拉伸。常用 1–2%。" ) );
   form->addRow( m_clipLabel, m_clipSpin );
 
-  m_stddevLabel = new QLabel( tr( "标准差倍数 K" ), sec );
-  m_stddevSpin = new QDoubleSpinBox( sec );
+  m_stddevLabel = new QLabel( tr( "标准差倍数 K" ), paramGroup );
+  m_stddevSpin = new QDoubleSpinBox( paramGroup );
   m_stddevSpin->setRange( 0.1, 10.0 );
   m_stddevSpin->setValue( 2.0 );
   m_stddevSpin->setSingleStep( 0.5 );
@@ -93,13 +124,17 @@ void ContrastStretchDialog::setupUi()
   SicnuDialogHelp::tip( m_stddevSpin, tr( "拉伸到 mean±K·σ。常用 2。" ) );
   form->addRow( m_stddevLabel, m_stddevSpin );
 
-  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
-  mainLayout->addWidget( sec );
+  qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );
 
   setupOutputRow( mainLayout );
   setupButtonBar( mainLayout );
 
   onMethodChanged( 0 );
+
+  if ( m_rasterLayer )
+    m_layerCombo->selectLayer( m_rasterLayer->id() );
+  else if ( m_layerCombo->count() > 0 )
+    setRasterLayer( m_layerCombo->currentRasterLayer() );
 }
 
 void ContrastStretchDialog::onMethodChanged( int index )

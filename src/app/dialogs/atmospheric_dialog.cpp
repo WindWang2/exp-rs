@@ -2,12 +2,13 @@
 #include "atmospheric_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
+#include "widgets/raster_layer_combo.h"
 
 #include <raster/qgsrasterlayer.h>
 
 #include <QVBoxLayout>
 #include <QFormLayout>
-#include <QFrame>
+#include <QGroupBox>
 #include <QLabel>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -28,8 +29,28 @@ AtmosphericDialog::AtmosphericDialog( QWidget *parent )
 void AtmosphericDialog::setRasterLayer( QgsRasterLayer *layer )
 {
   RasterProcessingDialogBase::setRasterLayer( layer );
+  if ( m_layerCombo && layer )
+  {
+    const int idx = m_layerCombo->findData( layer->id() );
+    if ( idx >= 0 && m_layerCombo->currentIndex() != idx )
+    {
+      m_layerCombo->blockSignals( true );
+      m_layerCombo->setCurrentIndex( idx );
+      m_layerCombo->blockSignals( false );
+    }
+  }
   populateBandCombo();
   refreshMetadata();
+}
+
+void AtmosphericDialog::onLayerChanged( int /*index*/ )
+{
+  if ( m_layerCombo )
+  {
+    auto *layer = m_layerCombo->currentRasterLayer();
+    if ( layer && layer != m_rasterLayer )
+      setRasterLayer( layer );
+  }
 }
 
 void AtmosphericDialog::setupUi()
@@ -37,15 +58,26 @@ void AtmosphericDialog::setupUi()
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
   setupHelpBanner( mainLayout );
 
-  QFrame *sec = SicnuUi::makeSection(
-    this, tr( "校正参数" ),
-    tr( "选择方法、波段与定标系数。DOS2 需气团；QUAC 自动处理全波段。" ) );
-  auto *form = new QFormLayout();
-  form->setContentsMargins( 0, 0, 0, 0 );
-  form->setHorizontalSpacing( 12 );
-  form->setVerticalSpacing( 8 );
+  // Input Data Group
+  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "输入数据" ) );
+  auto *inputForm = SicnuUi::makeFormLayout();
+  inputForm->setContentsMargins( 0, 0, 0, 0 );
 
-  m_methodCombo = new QComboBox( sec );
+  m_layerCombo = new RasterLayerCombo( inputGroup );
+  m_layerCombo->setObjectName( QStringLiteral( "atmosphericInputLayerCombo" ) );
+  SicnuDialogHelp::tip( m_layerCombo, tr( "选择待执行大气校正的栅格图层。" ) );
+  m_layerCombo->populate();
+  connect( m_layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, &AtmosphericDialog::onLayerChanged );
+  inputForm->addRow( tr( "输入栅格" ), m_layerCombo );
+  qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( inputForm );
+
+  // Parameters Group
+  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "校正参数" ) );
+  auto *form = SicnuUi::makeFormLayout();
+  form->setContentsMargins( 0, 0, 0, 0 );
+
+  m_methodCombo = new QComboBox( paramGroup );
   m_methodCombo->addItem( tr( "DN → 辐射亮度" ), QStringLiteral( "dn_to_radiance" ) );
   m_methodCombo->addItem( tr( "DOS1 暗目标减法" ), QStringLiteral( "dos1" ) );
   m_methodCombo->addItem( tr( "DOS2（含透过率）" ), QStringLiteral( "dos2" ) );
@@ -54,16 +86,16 @@ void AtmosphericDialog::setupUi()
     "• DN->辐射：L=gain×DN+bias\n• DOS1：暗目标减法\n• DOS2：DOS1 + 透过率\n• QUAC：基于图像统计的全波段快速校正" ) );
   connect( m_methodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &AtmosphericDialog::onMethodChanged );
-  form->addRow( tr( "方法" ), m_methodCombo );
+  form->addRow( tr( "校正方法" ), m_methodCombo );
 
-  m_bandCombo = new QComboBox( sec );
+  m_bandCombo = new QComboBox( paramGroup );
   SicnuDialogHelp::tip( m_bandCombo, tr( "要校正的波段号。" ) );
   connect( m_bandCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &AtmosphericDialog::refreshMetadata );
-  form->addRow( tr( "波段" ), m_bandCombo );
+  form->addRow( tr( "目标波段" ), m_bandCombo );
   m_bandLabel = qobject_cast<QLabel *>( form->labelForField( m_bandCombo ) );
 
-  m_gainSpin = new QDoubleSpinBox( sec );
+  m_gainSpin = new QDoubleSpinBox( paramGroup );
   m_gainSpin->setRange( 0.0001, 1000.0 );
   m_gainSpin->setDecimals( 6 );
   m_gainSpin->setValue( 0.01 );
@@ -71,7 +103,7 @@ void AtmosphericDialog::setupUi()
   form->addRow( tr( "增益 Gain" ), m_gainSpin );
   m_gainLabel = qobject_cast<QLabel *>( form->labelForField( m_gainSpin ) );
 
-  m_biasSpin = new QDoubleSpinBox( sec );
+  m_biasSpin = new QDoubleSpinBox( paramGroup );
   m_biasSpin->setRange( -1000.0, 1000.0 );
   m_biasSpin->setDecimals( 6 );
   m_biasSpin->setValue( 0.0 );
@@ -79,8 +111,8 @@ void AtmosphericDialog::setupUi()
   form->addRow( tr( "偏置 Bias" ), m_biasSpin );
   m_biasLabel = qobject_cast<QLabel *>( form->labelForField( m_biasSpin ) );
 
-  m_airmassLabel = new QLabel( tr( "气团 Airmass" ), sec );
-  m_airmassSpin = new QDoubleSpinBox( sec );
+  m_airmassLabel = new QLabel( tr( "气团 Airmass" ), paramGroup );
+  m_airmassSpin = new QDoubleSpinBox( paramGroup );
   m_airmassSpin->setRange( 1.0, 10.0 );
   m_airmassSpin->setDecimals( 2 );
   m_airmassSpin->setValue( 1.0 );
@@ -89,13 +121,12 @@ void AtmosphericDialog::setupUi()
   SicnuDialogHelp::tip( m_airmassSpin, tr( "气团（仅 DOS2），通常≥1。" ) );
   form->addRow( m_airmassLabel, m_airmassSpin );
 
-  m_metadataStatusLabel = new QLabel( sec );
+  m_metadataStatusLabel = SicnuUi::makeHintLabel( paramGroup, QString() );
   m_metadataStatusLabel->setWordWrap( true );
-  m_metadataStatusLabel->setStyleSheet( QStringLiteral( "color: #666;" ) );
   form->addRow( QString(), m_metadataStatusLabel );
 
-  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
-  mainLayout->addWidget( sec );
+  qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );
+
   setupOutputRow( mainLayout );
   setupButtonBar( mainLayout );
   mainLayout->addStretch( 1 );
@@ -105,6 +136,11 @@ void AtmosphericDialog::setupUi()
            this, &AtmosphericDialog::onCoefficientChanged );
   connect( m_biasSpin, QOverload<double>::of( &QDoubleSpinBox::valueChanged ),
            this, &AtmosphericDialog::onCoefficientChanged );
+
+  if ( m_rasterLayer )
+    m_layerCombo->selectLayer( m_rasterLayer->id() );
+  else if ( m_layerCombo->count() > 0 )
+    setRasterLayer( m_layerCombo->currentRasterLayer() );
 }
 
 void AtmosphericDialog::populateBandCombo()

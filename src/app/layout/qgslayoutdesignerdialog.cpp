@@ -49,6 +49,7 @@ QgsLayoutDesignerDialog::QgsLayoutDesignerDialog(QgsMasterLayoutInterface *layou
 
     // Create the window as a top-level window (not embedded in the main window).
     mWindow = new QMainWindow(nullptr, Qt::Window);
+    connect(mWindow.data(), &QObject::destroyed, this, &QObject::deleteLater);
 
     // QgsMasterLayoutInterface is also a QgsLayout (via QgsPrintLayout).
     mLayout = dynamic_cast<QgsLayout *>(layout);
@@ -162,15 +163,15 @@ void QgsLayoutDesignerDialog::setupUi()
 
     mView = new QgsLayoutView(central);
 
-    // Bind the view to the layout — critical: without this the canvas is blank.
-    if (mLayout)
-        mView->setCurrentLayout(mLayout);
-
     // Rulers.
     mHorizontalRuler = new QgsLayoutRuler(central, Qt::Horizontal);
     mVerticalRuler = new QgsLayoutRuler(central, Qt::Vertical);
     mView->setHorizontalRuler(mHorizontalRuler);
     mView->setVerticalRuler(mVerticalRuler);
+
+    // Bind the view to the layout — critical: without this the canvas is blank.
+    if (mLayout)
+        mView->setCurrentLayout(mLayout);
 
     // Layout: corner spacer + horizontal ruler on top, vertical ruler + view.
     auto *corner = new QWidget(central);

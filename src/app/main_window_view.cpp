@@ -34,13 +34,13 @@ void QgisDesktopWindow::identifyFeatures() { m_mapCanvas->setMapTool(m_identifyT
 void QgisDesktopWindow::measureDistance()
 {
     m_mapCanvas->setMapTool( m_measureDistanceTool );
-    statusBar()->showMessage( tr( "Measure Distance: click to add points, double-click or right-click to finish" ), 5000 );
+    statusBar()->showMessage( tr( "距离测量：单击添加点，双击或右键结束测量" ), 5000 );
 }
 
 void QgisDesktopWindow::measureArea()
 {
     m_mapCanvas->setMapTool( m_measureAreaTool );
-    statusBar()->showMessage( tr( "Measure Area: click to add points, double-click or right-click to finish" ), 5000 );
+    statusBar()->showMessage( tr( "面积测量：单击添加点，双击或右键结束测量" ), 5000 );
 }
 
 void QgisDesktopWindow::openGeoreferencer()
@@ -429,7 +429,7 @@ void QgisDesktopWindow::toggleDualViewportSync( bool on )
 void QgisDesktopWindow::zoomFullExtent()
 {
     m_mapCanvas->zoomToFullExtent();
-    statusBar()->showMessage("Full extent", 2000);
+    statusBar()->showMessage(tr("全图范围"), 2000);
 }
 
 void QgisDesktopWindow::zoomToLayer()
@@ -452,12 +452,12 @@ void QgisDesktopWindow::zoomToLayer()
         }
         m_mapCanvas->setExtent(extent);
         m_mapCanvas->refresh();
-        statusBar()->showMessage("Zoomed to layer", 2000);
+        statusBar()->showMessage(tr("缩放到图层"), 2000);
     }
 }
 
 void QgisDesktopWindow::refreshMap()
 {
     m_mapCanvas->refresh();
-    statusBar()->showMessage("Map refreshed", 2000);
+    statusBar()->showMessage(tr("画布已刷新"), 2000);
 }

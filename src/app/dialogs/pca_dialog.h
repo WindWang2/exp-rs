@@ -19,7 +19,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("pca"); }
-    QString dialogTitle() const override { return tr("Principal Component Analysis"); }
+    QString dialogTitle() const override { return tr("主成分分析 (PCA)"); }
     void onRun() override;
 
 private slots:

@@ -37,6 +37,12 @@ QgsLayoutViewToolSelect::QgsLayoutViewToolSelect( QgsLayoutView *view )
   mRubberBand = std::make_unique<QgsLayoutViewRectangularRubberBand>( view );
   mRubberBand->setBrush( QBrush( QColor( 224, 178, 76, 63 ) ) );
   mRubberBand->setPen( QPen( QBrush( QColor( 254, 58, 29, 100 ) ), 0, Qt::DotLine ) );
+
+  connect( view, &QgsLayoutView::layoutSet, this, &QgsLayoutViewToolSelect::setLayout );
+  if ( view && view->currentLayout() )
+  {
+    setLayout( view->currentLayout() );
+  }
 }
 
 QgsLayoutViewToolSelect::~QgsLayoutViewToolSelect()
@@ -52,12 +58,12 @@ QgsLayoutViewToolSelect::~QgsLayoutViewToolSelect()
 
 void QgsLayoutViewToolSelect::layoutPressEvent( QgsLayoutViewMouseEvent *event )
 {
-  if ( mMouseHandles->shouldBlockEvent( event ) )
+  if ( mMouseHandles && mMouseHandles->shouldBlockEvent( event ) )
   {
     //swallow clicks while dragging/resizing items
     return;
   }
-  if ( mMouseHandles->isVisible() )
+  if ( mMouseHandles && mMouseHandles->isVisible() )
   {
     //selection handles are being shown, get mouse action for current cursor position
     Qgis::MouseHandlesAction mouseAction = mMouseHandles->mouseActionForScenePos( event->layoutPoint() );
@@ -163,7 +169,8 @@ void QgsLayoutViewToolSelect::layoutPressEvent( QgsLayoutViewMouseEvent *event )
     // Due to the selection tolerance, items can be selected while the mouse is not over them,
     // so we cannot just forward the mouse press event by calling event->ignore().
     // We call startMove to simulate a mouse press event on the handles
-    mMouseHandles->startMove( view()->mapToScene( event->pos() ) );
+    if ( mMouseHandles )
+      mMouseHandles->startMove( view()->mapToScene( event->pos() ) );
 
     emit itemFocused( selectedItem );
   }
@@ -177,9 +184,9 @@ void QgsLayoutViewToolSelect::layoutMoveEvent( QgsLayoutViewMouseEvent *event )
   }
   else
   {
-    if ( !mMouseHandles->isDragging() && !mMouseHandles->isResizing() )
+    if ( !mMouseHandles || ( !mMouseHandles->isDragging() && !mMouseHandles->isResizing() ) )
     {
-      if ( layout()->layoutItemAt( event->layoutPoint(), true, searchToleranceInLayoutUnits() ) )
+      if ( layout() && layout()->layoutItemAt( event->layoutPoint(), true, searchToleranceInLayoutUnits() ) )
       {
         view()->viewport()->setCursor( Qt::SizeAllCursor );
       }
@@ -194,7 +201,7 @@ void QgsLayoutViewToolSelect::layoutMoveEvent( QgsLayoutViewMouseEvent *event )
 
 void QgsLayoutViewToolSelect::layoutReleaseEvent( QgsLayoutViewMouseEvent *event )
 {
-  if ( event->button() != Qt::LeftButton && mMouseHandles->shouldBlockEvent( event ) )
+  if ( event->button() != Qt::LeftButton && mMouseHandles && mMouseHandles->shouldBlockEvent( event ) )
   {
     //swallow clicks while dragging/resizing items
     return;
@@ -226,7 +233,8 @@ void QgsLayoutViewToolSelect::layoutReleaseEvent( QgsLayoutViewMouseEvent *event
   else
   {
     //not adding to or removing from selection, so clear current selection
-    whileBlocking( layout() )->deselectAll();
+    if ( layout() )
+      whileBlocking( layout() )->deselectAll();
   }
 
   //determine item selection mode, default to intersection
@@ -242,9 +250,10 @@ void QgsLayoutViewToolSelect::layoutReleaseEvent( QgsLayoutViewMouseEvent *event
   if ( wasClick )
   {
     const double tolerance = searchToleranceInLayoutUnits();
-    itemList = layout()->items( QRectF( rect.center().x() - tolerance, rect.center().y() - tolerance, 2 * tolerance, 2 * tolerance ), selectionMode );
+    if ( layout() )
+      itemList = layout()->items( QRectF( rect.center().x() - tolerance, rect.center().y() - tolerance, 2 * tolerance, 2 * tolerance ), selectionMode );
   }
-  else
+  else if ( layout() )
     itemList = layout()->items( rect, selectionMode );
 
   QgsLayoutItemPage *focusedPaperItem = nullptr;
@@ -278,7 +287,7 @@ void QgsLayoutViewToolSelect::layoutReleaseEvent( QgsLayoutViewMouseEvent *event
 
 
   //update item panel
-  const QList<QgsLayoutItem *> selectedItemList = layout()->selectedLayoutItems();
+  const QList<QgsLayoutItem *> selectedItemList = layout() ? layout()->selectedLayoutItems() : QList<QgsLayoutItem *>();
   if ( !selectedItemList.isEmpty() )
   {
     emit itemFocused( selectedItemList.at( 0 ) );
@@ -291,12 +300,13 @@ void QgsLayoutViewToolSelect::layoutReleaseEvent( QgsLayoutViewMouseEvent *event
   {
     emit itemFocused( nullptr );
   }
-  mMouseHandles->selectionChanged();
+  if ( mMouseHandles )
+    mMouseHandles->selectionChanged();
 }
 
 void QgsLayoutViewToolSelect::wheelEvent( QWheelEvent *event )
 {
-  if ( mMouseHandles->shouldBlockEvent( event ) )
+  if ( mMouseHandles && mMouseHandles->shouldBlockEvent( event ) )
   {
     //ignore wheel events while dragging/resizing items
     return;
@@ -309,7 +319,7 @@ void QgsLayoutViewToolSelect::wheelEvent( QWheelEvent *event )
 
 void QgsLayoutViewToolSelect::keyPressEvent( QKeyEvent *event )
 {
-  if ( mMouseHandles->isDragging() || mMouseHandles->isResizing() )
+  if ( mMouseHandles && ( mMouseHandles->isDragging() || mMouseHandles->isResizing() ) )
   {
     return;
   }
@@ -339,7 +349,13 @@ void QgsLayoutViewToolSelect::setLayout( QgsLayout *layout )
 {
   // existing handles are owned by previous layout
   if ( mMouseHandles )
+  {
     mMouseHandles->deleteLater();
+    mMouseHandles = nullptr;
+  }
+
+  if ( !layout )
+    return;
 
   //add mouse selection handles to layout, and initially hide
   mMouseHandles = new QgsLayoutMouseHandles( layout, view() );
@@ -347,6 +363,7 @@ void QgsLayoutViewToolSelect::setLayout( QgsLayout *layout )
   mMouseHandles->setZValue( QgsLayout::ZMouseHandles );
   layout->addItem( mMouseHandles );
 }
+
 double QgsLayoutViewToolSelect::searchToleranceInLayoutUnits()
 {
   const double pixelsPerMm = view()->physicalDpiX() / 25.4;

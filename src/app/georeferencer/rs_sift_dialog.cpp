@@ -6,6 +6,7 @@
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QFrame>
+#include <QGroupBox>
 #include <QLabel>
 #include <QPushButton>
 #include <QSpinBox>
@@ -62,18 +63,14 @@ RsSiftDialog::RsSiftDialog( QWidget *parent )
     this, SicnuDialogHelp::shortForTool( QStringLiteral( "sift_match" ),
                                          tr( "SIFT 自动匹配" ) ) ) );
 
-  QFrame *sec = SicnuUi::makeSection( this, tr( "匹配参数" ) );
-  auto *form = new QFormLayout();
-  form->setContentsMargins( 0, 0, 0, 0 );
-  form->setHorizontalSpacing( 12 );
-  form->setVerticalSpacing( 8 );
+  QGroupBox *paramGroup = SicnuUi::makeGroup( this, tr( "SIFT 特征提取与匹配参数" ) );
+  auto *form = SicnuUi::makeFormLayout( paramGroup );
   form->addRow( tr( "对比度阈值" ), mContrast );
   form->addRow( tr( "最多匹配数" ), mMaxMatches );
   form->addRow( tr( "最小内点比" ), mMinInlier );
   form->addRow( tr( "RANSAC 容差" ), mRansacThresh );
   form->addRow( tr( "最大边长" ), mMaxImageSide );
-  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
-  root->addWidget( sec );
+  root->addWidget( paramGroup );
 
   auto *buttons = new QDialogButtonBox(
     QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Help, this );
@@ -81,6 +78,8 @@ RsSiftDialog::RsSiftDialog( QWidget *parent )
   buttons->button( QDialogButtonBox::Cancel )->setText( tr( "取消" ) );
   buttons->button( QDialogButtonBox::Help )->setText( tr( "帮助" ) );
   SicnuUi::markPrimary( buttons->button( QDialogButtonBox::Ok ) );
+  SicnuUi::markSecondary( buttons->button( QDialogButtonBox::Cancel ) );
+  SicnuUi::markSecondary( buttons->button( QDialogButtonBox::Help ) );
   connect( buttons, &QDialogButtonBox::accepted, this, &QDialog::accept );
   connect( buttons, &QDialogButtonBox::rejected, this, &QDialog::reject );
   connect( buttons, &QDialogButtonBox::helpRequested, this, [this]() {

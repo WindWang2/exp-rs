@@ -23,23 +23,23 @@ PcaDialog::PcaDialog(QWidget *parent)
 void PcaDialog::setupUi()
 {
     auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
-
     setupHelpBanner( mainLayout );
 
-    QFrame *sec = SicnuUi::makeSection(
-      this, tr( "参数" ),
-      tr( "主成分个数不超过输入波段数；前几个 PC 通常含大部分方差。" ) );
-    auto *form = new QFormLayout();
-    form->setContentsMargins( 0, 0, 0, 0 );
-    m_componentsSpin = new QSpinBox( sec );
-    m_componentsSpin->setRange( 1, 10 );
+    QGroupBox *paramGroup = setupParamGroup(
+      mainLayout, tr( "PCA 变换参数" ) );
+    paramGroup->setToolTip(
+      tr( "主成分个数不得超过输入影像的波段总数；前几个主成分通常聚集了绝大部分方差信息。" ) );
+    auto *form = SicnuUi::makeFormLayout();
+    qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );
+
+    m_componentsSpin = new QSpinBox( paramGroup );
+    m_componentsSpin->setObjectName( QStringLiteral( "pcaComponentsSpin" ) );
+    m_componentsSpin->setRange( 1, 100 );
     m_componentsSpin->setValue( 3 );
     SicnuDialogHelp::tip( m_componentsSpin, tr(
       "输出主成分个数，必须 ≤ 输入波段数。"
-      "前几个 PC 通常含大部分方差，用于去相关与降维。" ) );
-    form->addRow( tr( "主成分数" ), m_componentsSpin );
-    qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
-    mainLayout->addWidget( sec );
+      "前几个 PC 通常含大部分方差，用于波段去相关与降维压缩。" ) );
+    form->addRow( tr( "主成分个数" ), m_componentsSpin );
 
     setupOutputRow( mainLayout );
     setupButtonBar( mainLayout );
@@ -48,15 +48,15 @@ void PcaDialog::setupUi()
 
 void PcaDialog::onRun()
 {
-    if (!m_rasterLayer) {
-        QMessageBox::warning(this, tr("PCA"), tr("No raster layer selected."));
+    if (!m_rasterLayer || !m_rasterLayer->isValid()) {
+        QMessageBox::warning(this, dialogTitle(), tr("请先选择一个有效的栅格图层。"));
         return;
     }
 
     const int numComponents = m_componentsSpin->value();
     if (numComponents > m_rasterLayer->bandCount()) {
-        QMessageBox::warning(this, tr("PCA"),
-                             tr("Number of components (%1) exceeds band count (%2).")
+        QMessageBox::warning(this, dialogTitle(),
+                             tr("指定的主成分数 (%1) 超出输入栅格的波段总数 (%2)。")
                                  .arg(numComponents).arg(m_rasterLayer->bandCount()));
         return;
     }

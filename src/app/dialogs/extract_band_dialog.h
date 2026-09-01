@@ -3,8 +3,9 @@
 
 #include "raster_processing_dialog_base.h"
 
-class QComboBox;
+class BandRoleCombo;
 class QLabel;
+class RasterLayerCombo;
 
 class ExtractBandDialog : public RasterProcessingDialogBase
 {
@@ -13,21 +14,22 @@ class ExtractBandDialog : public RasterProcessingDialogBase
 public:
     explicit ExtractBandDialog(QWidget *parent = nullptr);
 
+    void setRasterLayer(QgsRasterLayer *layer) override;
+
 protected:
     QString toolName() const override { return QStringLiteral("extract_band"); }
-    QString dialogTitle() const override { return tr("Extract Band"); }
+    QString dialogTitle() const override { return tr("提取波段"); }
     bool validateInputs() override;
     void onRun() override;
 
 private slots:
-    void onLayerChanged();
+    void onLayerChanged(int index);
     void populateBandCombo();
 
 private:
     void setupUi();
 
-    QComboBox *m_layerCombo = nullptr;
-    QComboBox *m_bandCombo = nullptr;
+    RasterLayerCombo *m_layerCombo = nullptr;
+    BandRoleCombo *m_bandCombo = nullptr;
     QLabel *m_infoLabel = nullptr;
-
 };

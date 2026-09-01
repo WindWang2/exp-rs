@@ -26,7 +26,7 @@ namespace sicnu::agent
 {
 
 AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
-  : QDockWidget( QStringLiteral( "🤖 AI Copilot 智能助手" ), parent )
+  : QDockWidget( tr( "AI Copilot 智能助手" ), parent )
   , m_completionGuard( std::make_shared<std::atomic<bool>>( true ) )
 {
   setObjectName( QStringLiteral( "AgentCopilotDockWidget" ) );
@@ -41,12 +41,12 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
   auto *headerLayout = new QHBoxLayout();
   m_providerCombo = new QComboBox( mainWidget );
   m_providerCombo->setToolTip( tr( "选择 AI 模型服务配置" ) );
-  m_settingsBtn = new QPushButton( QStringLiteral( "⚙️ 设置" ), mainWidget );
+  m_settingsBtn = new QPushButton( tr( "设置" ), mainWidget );
   m_settingsBtn->setToolTip( tr( "打开 AI Copilot 模型与连接设置" ) );
-  m_clearBtn = new QPushButton( QStringLiteral( "🧹 清空对话" ), mainWidget );
+  m_clearBtn = new QPushButton( tr( "清空对话" ), mainWidget );
   m_clearBtn->setToolTip( tr( "清空对话历史" ) );
 
-  headerLayout->addWidget( new QLabel( QStringLiteral( "模型:" ), mainWidget ) );
+  headerLayout->addWidget( new QLabel( tr( "模型:" ), mainWidget ) );
   headerLayout->addWidget( m_providerCombo, 1 );
   headerLayout->addWidget( m_settingsBtn );
   headerLayout->addWidget( m_clearBtn );
@@ -73,10 +73,11 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
   // 3. Bottom Input Bar
   auto *inputLayout = new QHBoxLayout();
   m_inputEdit = new QTextEdit( mainWidget );
-  m_inputEdit->setPlaceholderText( QStringLiteral( "输入遥感指令 (例: 对当前 Landsat 图像计算 NDVI)..." ) );
+  m_inputEdit->setPlaceholderText( tr( "输入遥感指令 (例: 对当前 Landsat 图像计算 NDVI)..." ) );
   m_inputEdit->setFixedHeight( 60 );
 
-  m_sendBtn = new QPushButton( QStringLiteral( "发送 ▶" ), mainWidget );
+  m_sendBtn = new QPushButton( tr( "发送" ), mainWidget );
+  m_sendBtn->setProperty( "primary", true );
   m_sendBtn->setToolTip( tr( "发送遥感指令 (Ctrl+Enter)" ) );
   m_sendBtn->setFixedHeight( 60 );
 
@@ -208,36 +209,33 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapC
 void AgentCopilotDockWidget::setupRunInspector()
 {
   auto *container = new QFrame( this );
+  container->setObjectName( QStringLiteral( "runInspectorContainer" ) );
   container->setFrameShape( QFrame::StyledPanel );
-  container->setStyleSheet( QStringLiteral( "background-color: #1e293b; border: 1px solid #475569; border-radius: 6px; padding: 4px;" ) );
 
   auto *layout = new QVBoxLayout( container );
   layout->setContentsMargins( 6, 6, 6, 6 );
   layout->setSpacing( 4 );
 
   auto *titleLayout = new QHBoxLayout();
-  m_runInspector.titleLabel = new QLabel( tr( "Run Inspector" ), container );
-  m_runInspector.titleLabel->setStyleSheet( QStringLiteral( "color: #e2e8f0; font-weight: bold;" ) );
+  m_runInspector.titleLabel = new QLabel( tr( "运行监测器" ), container );
   titleLayout->addWidget( m_runInspector.titleLabel.data(), 1 );
 
-  auto *toggleBtn = new QPushButton( tr( "折叠 ▲" ), container );
+  auto *toggleBtn = new QPushButton( tr( "折叠" ), container );
   toggleBtn->setFlat( true );
-  toggleBtn->setStyleSheet( QStringLiteral( "color: #94a3b8;" ) );
   titleLayout->addWidget( toggleBtn );
   layout->addLayout( titleLayout );
 
   auto makeLabel = [container]( const QString &text ) {
     auto *label = new QLabel( text, container );
-    label->setStyleSheet( QStringLiteral( "color: #cbd5e1;" ) );
     label->setWordWrap( true );
     return label;
   };
 
-  m_runInspector.stageLabel = makeLabel( tr( "Stage: -" ) );
-  m_runInspector.taskLabel = makeLabel( tr( "Task: -" ) );
-  m_runInspector.callsLabel = makeLabel( tr( "Calls: 0" ) );
-  m_runInspector.errorsLabel = makeLabel( tr( "Errors: 0" ) );
-  m_runInspector.durationLabel = makeLabel( tr( "Duration: 0s" ) );
+  m_runInspector.stageLabel = makeLabel( tr( "阶段: -" ) );
+  m_runInspector.taskLabel = makeLabel( tr( "任务: -" ) );
+  m_runInspector.callsLabel = makeLabel( tr( "调用: 0" ) );
+  m_runInspector.errorsLabel = makeLabel( tr( "错误: 0" ) );
+  m_runInspector.durationLabel = makeLabel( tr( "耗时: 0s" ) );
 
   layout->addWidget( m_runInspector.stageLabel.data() );
   layout->addWidget( m_runInspector.taskLabel.data() );
@@ -259,7 +257,7 @@ void AgentCopilotDockWidget::setupRunInspector()
       m_runInspector.errorsLabel->setVisible( m_runInspector.expanded );
     if ( m_runInspector.durationLabel )
       m_runInspector.durationLabel->setVisible( m_runInspector.expanded );
-    toggleBtn->setText( m_runInspector.expanded ? tr( "折叠 ▲" ) : tr( "展开 ▼" ) );
+    toggleBtn->setText( m_runInspector.expanded ? tr( "折叠" ) : tr( "展开" ) );
   } );
 }
 
@@ -272,30 +270,30 @@ void AgentCopilotDockWidget::updateRunInspector()
   {
     m_runInspector.titleLabel->setText(
       m_currentRunId.isEmpty()
-        ? tr( "Run Inspector" )
-        : QString( tr( "Run Inspector — %1" ) ).arg( m_currentRunId.left( 8 ) ) );
+        ? tr( "运行监测器" )
+        : QString( tr( "运行监测器 — %1" ) ).arg( m_currentRunId.left( 8 ) ) );
   }
   if ( m_runInspector.stageLabel )
-    m_runInspector.stageLabel->setText( QString( tr( "Stage: %1" ) ).arg( m_currentRunStage.isEmpty() ? QStringLiteral( "-" ) : m_currentRunStage ) );
+    m_runInspector.stageLabel->setText( QString( tr( "阶段: %1" ) ).arg( m_currentRunStage.isEmpty() ? QStringLiteral( "-" ) : m_currentRunStage ) );
 
-  QString taskText = tr( "Task: -" );
+  QString taskText = tr( "任务: -" );
   if ( !m_submittedTaskIds.isEmpty() )
   {
     const long latestTaskId = *std::max_element( m_submittedTaskIds.cbegin(), m_submittedTaskIds.cend() );
     const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo( latestTaskId );
-    taskText = QString( tr( "Task: %1 (id %2)" ) ).arg( info.algorithmId.isEmpty() ? QStringLiteral( "-" ) : info.algorithmId ).arg( latestTaskId );
+    taskText = QString( tr( "任务: %1 (ID %2)" ) ).arg( info.algorithmId.isEmpty() ? QStringLiteral( "-" ) : info.algorithmId ).arg( latestTaskId );
   }
   if ( m_runInspector.taskLabel )
     m_runInspector.taskLabel->setText( taskText );
 
   if ( m_runInspector.callsLabel )
-    m_runInspector.callsLabel->setText( QString( tr( "Calls: %1" ) ).arg( m_toolCallCards.size() ) );
+    m_runInspector.callsLabel->setText( QString( tr( "调用: %1" ) ).arg( m_toolCallCards.size() ) );
 
   int errorCount = m_lastError.isEmpty() ? 0 : 1;
   if ( m_runInspector.errorsLabel )
   {
     m_runInspector.errorsLabel->setText(
-      QString( tr( "Errors: %1%2" ) )
+      QString( tr( "错误: %1%2" ) )
         .arg( errorCount )
         .arg( errorCount ? QStringLiteral( " — %1" ).arg( m_lastError ) : QString() ) );
   }
@@ -303,7 +301,7 @@ void AgentCopilotDockWidget::updateRunInspector()
   if ( m_runInspector.durationLabel && m_runStartTime.isValid() )
   {
     const qint64 elapsedSecs = m_runStartTime.secsTo( QDateTime::currentDateTimeUtc() );
-    m_runInspector.durationLabel->setText( QString( tr( "Duration: %1s" ) ).arg( elapsedSecs ) );
+    m_runInspector.durationLabel->setText( QString( tr( "耗时: %1s" ) ).arg( elapsedSecs ) );
   }
 }
 
@@ -512,8 +510,8 @@ void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
 void AgentCopilotDockWidget::appendUserMessageCard( const QString &text )
 {
   auto *card = new QFrame( m_chatContainer );
+  card->setObjectName( QStringLiteral( "userBubble" ) );
   card->setFrameShape( QFrame::StyledPanel );
-  card->setStyleSheet( QStringLiteral( "background-color: #0284c7; color: white; border-radius: 6px; padding: 6px;" ) );
 
   auto *layout = new QVBoxLayout( card );
   auto *label = new QLabel( QString( "<b>你:</b> %1" ).arg( text.toHtmlEscaped() ), card );
@@ -526,14 +524,14 @@ void AgentCopilotDockWidget::appendUserMessageCard( const QString &text )
 void AgentCopilotDockWidget::appendAssistantMessageCard()
 {
   auto *card = new QFrame( m_chatContainer );
+  card->setObjectName( QStringLiteral( "agentBubble" ) );
   card->setFrameShape( QFrame::StyledPanel );
-  card->setStyleSheet( QStringLiteral( "background-color: #1e293b; color: #f8fafc; border-radius: 6px; padding: 6px;" ) );
 
   auto *layout = new QVBoxLayout( card );
 
   m_currentReasoningLabel = new QLabel( card );
+  m_currentReasoningLabel->setObjectName( QStringLiteral( "agentReasoning" ) );
   m_currentReasoningLabel->setWordWrap( true );
-  m_currentReasoningLabel->setStyleSheet( QStringLiteral( "color: #94a3b8; font-style: italic;" ) );
   m_currentReasoningLabel->setVisible( false );
   layout->addWidget( m_currentReasoningLabel );
 
@@ -553,7 +551,7 @@ void AgentCopilotDockWidget::onReasoningTokenReceived( const QString &text )
   if ( m_currentReasoningLabel )
   {
     m_currentReasoningLabel->setVisible( true );
-    m_currentReasoningLabel->setText( QString( "🧠 思考过程:\n%1" ).arg( m_accumulatedReasoning.toHtmlEscaped() ) );
+    m_currentReasoningLabel->setText( QString( "<b>思考过程:</b><br/>%1" ).arg( m_accumulatedReasoning.toHtmlEscaped() ) );
   }
 }
 
@@ -848,23 +846,20 @@ void AgentCopilotDockWidget::appendErrorMessage( const QString &errorMsg )
 QPointer<QWidget> AgentCopilotDockWidget::appendToolCallCard( const QJsonObject &toolCallJson )
 {
   auto *card = new QFrame( m_chatContainer );
+  card->setObjectName( QStringLiteral( "toolCallCard" ) );
   card->setFrameShape( QFrame::StyledPanel );
-  card->setStyleSheet( QStringLiteral( "background-color: #0f172a; border: 1px solid #38bdf8; border-radius: 6px; padding: 6px;" ) );
-  card->setObjectName( QStringLiteral( "ToolCallCard" ) );
 
   auto *layout = new QVBoxLayout( card );
   QJsonObject funcObj = toolCallJson[QStringLiteral( "function" )].toObject();
   QString algName = funcObj[QStringLiteral( "name" )].toString();
 
-  auto *title = new QLabel( QString( "⚡ 准备执行工具: <b>%1</b>" ).arg( algName.toHtmlEscaped() ), card );
+  auto *title = new QLabel( QString( tr( "准备执行工具: <b>%1</b>" ) ).arg( algName.toHtmlEscaped() ), card );
   title->setObjectName( QStringLiteral( "ToolCallCardTitle" ) );
-  title->setStyleSheet( QStringLiteral( "color: #38bdf8;" ) );
   title->setWordWrap( true );
   layout->addWidget( title );
 
-  auto *details = new QLabel( tr( "Status: submitted" ), card );
+  auto *details = new QLabel( tr( "状态: 已提交" ), card );
   details->setObjectName( QStringLiteral( "ToolCallCardDetails" ) );
-  details->setStyleSheet( QStringLiteral( "color: #94a3b8;" ) );
   details->setWordWrap( true );
   layout->addWidget( details );
 
@@ -895,8 +890,8 @@ void AgentCopilotDockWidget::updateToolCallCard( const QString &toolCallId,
 void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson, const QJsonObject &toolCallJson )
 {
   auto *card = new QFrame( m_chatContainer );
+  card->setObjectName( QStringLiteral( "planApprovalCard" ) );
   card->setFrameShape( QFrame::StyledPanel );
-  card->setStyleSheet( QStringLiteral( "background-color: #0f172a; border: 1px solid #10b981; border-radius: 6px; padding: 8px;" ) );
 
   auto *layout = new QVBoxLayout( card );
 
@@ -904,14 +899,13 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
   if ( planJson.contains( QStringLiteral( "steps" ) ) && planJson[QStringLiteral( "steps" )].isArray() )
     stepCount = planJson[QStringLiteral( "steps" )].toArray().size();
 
-  auto *title = new QLabel( QString( "📋 AI Agent 提出了 <b>%1 步骤</b> 的遥感处理工作流计划" ).arg( stepCount ), card );
-  title->setStyleSheet( QStringLiteral( "color: #10b981; font-weight: bold;" ) );
+  auto *title = new QLabel( QString( tr( "AI Copilot 提出了 <b>%1 个步骤</b> 的遥感处理工作流计划" ) ).arg( stepCount ), card );
   layout->addWidget( title );
 
   auto *btnLayout = new QHBoxLayout();
-  auto *previewBtn = new QPushButton( QStringLiteral( "👁️ 在画布中预览" ), card );
-  auto *runBtn = new QPushButton( QStringLiteral( "▶ 确认并执行" ), card );
-  runBtn->setStyleSheet( QStringLiteral( "background-color: #059669; color: white; font-weight: bold;" ) );
+  auto *previewBtn = new QPushButton( tr( "在画布中预览" ), card );
+  auto *runBtn = new QPushButton( tr( "确认并执行" ), card );
+  runBtn->setProperty( "primary", true );
 
   btnLayout->addWidget( previewBtn );
   btnLayout->addWidget( runBtn );

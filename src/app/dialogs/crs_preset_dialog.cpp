@@ -1,6 +1,7 @@
 // src/app/dialogs/crs_preset_dialog.cpp
 #include "crs_preset_dialog.h"
 #include "dialog_help_catalog.h"
+#include "dialog_utils.h"
 #include "crs_presets.h"
 
 #include <qgscoordinatereferencesystem.h>
@@ -14,14 +15,15 @@
 #include <QPushButton>
 #include <QGroupBox>
 #include <QFormLayout>
+#include <QDialogButtonBox>
 
 CrsPresetDialog::CrsPresetDialog( QWidget *parent )
     : QDialog( parent )
 {
-    setWindowTitle( tr( "Select CRS Preset" ) );
+    setWindowTitle( tr( "选择坐标系预设" ) );
     
     SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "crs_preset" ) );
-resize( 650, 480 );
+    resize( 650, 480 );
     setupUi();
     populateTree();
 }
@@ -33,70 +35,95 @@ int CrsPresetDialog::selectedEpsg() const
 
 void CrsPresetDialog::setupUi()
 {
-    auto *mainLayout = new QVBoxLayout( this );
+    SicnuUi::polishDialog( this, 650 );
+    resize( 720, 500 );
+
+    auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
 
     // Search bar at top
-    auto *searchLayout = new QHBoxLayout();
-    searchLayout->addWidget( new QLabel( tr( "Search:" ) ) );
-    m_searchEdit = new QLineEdit( this );
-    m_searchEdit->setPlaceholderText( tr( "Filter by name or EPSG code..." ) );
-    SicnuDialogHelp::tip( m_searchEdit, tr( "按名称或 EPSG 代码过滤预设列表。" ) );
-    searchLayout->addWidget( m_searchEdit );
-    mainLayout->addLayout( searchLayout );
+    auto *searchGroup = SicnuUi::makeGroup( this, tr( "坐标系预设检索" ) );
+    auto *searchLayout = new QHBoxLayout( searchGroup );
+    searchLayout->setContentsMargins( 10, 8, 10, 8 );
+    searchLayout->setSpacing( 8 );
+
+    auto *searchLabel = new QLabel( tr( "快速检索" ), searchGroup );
+    m_searchEdit = new QLineEdit( searchGroup );
+    m_searchEdit->setObjectName( QStringLiteral( "crsSearchEdit" ) );
+    m_searchEdit->setPlaceholderText( tr( "按名称或 EPSG 代码过滤（如 WGS 84、3857、CGCS2000 等）…" ) );
+    SicnuDialogHelp::tip( m_searchEdit, tr( "按坐标系名称或 EPSG 代码快速过滤预设列表。" ) );
+    searchLayout->addWidget( searchLabel );
+    searchLayout->addWidget( m_searchEdit, 1 );
+    mainLayout->addWidget( searchGroup );
 
     // Splitter: tree on left, details on right
     auto *splitter = new QSplitter( Qt::Horizontal, this );
 
-    // Left panel: tree view
-    m_treeWidget = new QTreeWidget( splitter );
-    m_treeWidget->setHeaderLabels( { tr( "Name" ), tr( "EPSG" ) } );
+    // Left panel: tree view in group
+    auto *treeGroup = SicnuUi::makeGroup( this, tr( "常用坐标系预设" ) );
+    auto *treeGroupLayout = new QVBoxLayout( treeGroup );
+    treeGroupLayout->setContentsMargins( 10, 8, 10, 8 );
+    treeGroupLayout->setSpacing( 8 );
+
+    m_treeWidget = new QTreeWidget( treeGroup );
+    m_treeWidget->setObjectName( QStringLiteral( "crsTreeWidget" ) );
+    m_treeWidget->setHeaderLabels( { tr( "坐标系名称" ), tr( "EPSG" ) } );
     m_treeWidget->setColumnCount( 2 );
     m_treeWidget->setRootIsDecorated( true );
     m_treeWidget->setAlternatingRowColors( true );
     m_treeWidget->setSelectionMode( QAbstractItemView::SingleSelection );
-    SicnuDialogHelp::tip( m_treeWidget, tr( "常用坐标系分组列表。选中后右侧显示详情，双击可确认。" ) );
+    SicnuDialogHelp::tip( m_treeWidget, tr( "常用坐标系分组列表。选中后右侧显示详情，双击可直接应用。" ) );
+    treeGroupLayout->addWidget( m_treeWidget );
 
     // Right panel: details group box
-    auto *detailsWidget = new QWidget( splitter );
-    auto *detailsLayout = new QFormLayout( detailsWidget );
-    detailsLayout->setContentsMargins( 8, 8, 8, 8 );
+    auto *detailsGroup = SicnuUi::makeGroup( this, tr( "坐标系详细信息" ) );
+    auto *detailsLayout = SicnuUi::makeFormLayout( detailsGroup );
 
-    m_nameLabel = new QLabel( this );
+    m_nameLabel = new QLabel( detailsGroup );
     m_nameLabel->setWordWrap( true );
-    detailsLayout->addRow( tr( "Name:" ), m_nameLabel );
+    detailsLayout->addRow( tr( "坐标系名称" ), m_nameLabel );
 
-    m_epsgLabel = new QLabel( this );
-    detailsLayout->addRow( tr( "EPSG Code:" ), m_epsgLabel );
+    m_epsgLabel = new QLabel( detailsGroup );
+    detailsLayout->addRow( tr( "EPSG 代码" ), m_epsgLabel );
 
-    m_categoryLabel = new QLabel( this );
-    detailsLayout->addRow( tr( "Category:" ), m_categoryLabel );
+    m_categoryLabel = new QLabel( detailsGroup );
+    detailsLayout->addRow( tr( "所属分类" ), m_categoryLabel );
 
-    m_descriptionLabel = new QLabel( this );
+    m_descriptionLabel = new QLabel( detailsGroup );
     m_descriptionLabel->setWordWrap( true );
-    detailsLayout->addRow( tr( "Description:" ), m_descriptionLabel );
+    detailsLayout->addRow( tr( "详细描述" ), m_descriptionLabel );
 
-    m_wktLabel = new QLabel( this );
+    m_wktLabel = new QLabel( detailsGroup );
     m_wktLabel->setWordWrap( true );
     m_wktLabel->setTextInteractionFlags( Qt::TextSelectableByMouse );
-    detailsLayout->addRow( tr( "WKT:" ), m_wktLabel );
+    detailsLayout->addRow( tr( "WKT 定义" ), m_wktLabel );
 
-    splitter->addWidget( m_treeWidget );
-    splitter->addWidget( detailsWidget );
-    splitter->setStretchFactor( 0, 2 );
-    splitter->setStretchFactor( 1, 1 );
+    splitter->addWidget( treeGroup );
+    splitter->addWidget( detailsGroup );
+    splitter->setStretchFactor( 0, 3 );
+    splitter->setStretchFactor( 1, 2 );
 
     mainLayout->addWidget( splitter, 1 );
 
-    // Bottom buttons
-    auto *btnLayout = new QHBoxLayout();
-    btnLayout->addStretch();
-    m_okButton = new QPushButton( tr( "OK" ), this );
+    // Single unified standard button box
+    auto *buttonBox = new QDialogButtonBox( this );
+    buttonBox->setObjectName( QStringLiteral( "crsPresetButtonBox" ) );
+
+    auto *helpBtn = buttonBox->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
+    SicnuUi::markSecondary( helpBtn );
+    SicnuDialogHelp::tip( helpBtn, tr( "查看坐标系预设说明与帮助。" ) );
+    connect( helpBtn, &QPushButton::clicked, this, [this]() {
+        SicnuDialogHelp::showToolHelp( this, QStringLiteral( "crs_preset" ), windowTitle() );
+    } );
+
+    m_cancelButton = buttonBox->addButton( tr( "取消" ), QDialogButtonBox::RejectRole );
+    SicnuUi::markSecondary( m_cancelButton );
+
+    m_okButton = buttonBox->addButton( tr( "确定" ), QDialogButtonBox::AcceptRole );
+    SicnuUi::markPrimary( m_okButton );
     m_okButton->setDefault( true );
     m_okButton->setEnabled( false );
-    m_cancelButton = new QPushButton( tr( "Cancel" ), this );
-    btnLayout->addWidget( m_okButton );
-    btnLayout->addWidget( m_cancelButton );
-    mainLayout->addLayout( btnLayout );
+
+    mainLayout->addWidget( buttonBox );
 
     // Connections
     connect( m_searchEdit, &QLineEdit::textChanged,
@@ -111,16 +138,6 @@ void CrsPresetDialog::setupUi()
         accept();
     } );
     connect( m_cancelButton, &QPushButton::clicked, this, &QDialog::reject );
-
-    auto *helpRow = new QHBoxLayout();
-    helpRow->addStretch();
-    auto *helpBtn = new QPushButton( tr( "帮助" ), this );
-    SicnuDialogHelp::tip( helpBtn, tr( "查看本对话框说明。" ) );
-    connect( helpBtn, &QPushButton::clicked, this, [this]() {
-        SicnuDialogHelp::showToolHelp( this, QStringLiteral( "crs_preset" ), windowTitle() );
-    } );
-    helpRow->addWidget( helpBtn );
-    mainLayout->addLayout( helpRow );
 }
 
 void CrsPresetDialog::populateTree()
@@ -132,7 +149,7 @@ void CrsPresetDialog::populateTree()
     if ( !recentPresets.isEmpty() )
     {
         auto *categoryItem = new QTreeWidgetItem( m_treeWidget );
-        categoryItem->setText( 0, tr( "Recently Used" ) );
+        categoryItem->setText( 0, tr( "最近使用" ) );
         categoryItem->setFlags( Qt::ItemIsEnabled );
 
         for ( const CrsPreset &preset : recentPresets )

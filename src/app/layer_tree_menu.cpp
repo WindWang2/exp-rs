@@ -28,8 +28,8 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
     auto addRasterAction = [hostPtr]() {
         if (hostPtr) {
             const QString file = QFileDialog::getOpenFileName(
-                nullptr, QObject::tr("Add Raster Layer"), QString(),
-                QObject::tr("Raster Formats (*.tif *.tiff *.img *.dat *.pix *.vrt *.nc *.hdf *.h5 *.png *.jpg *.jpeg);;All Files (*.*)") );
+                nullptr, QObject::tr("添加栅格图层"), QString(),
+                QObject::tr("栅格文件 (*.tif *.tiff *.img *.dat *.pix *.vrt *.nc *.hdf *.h5 *.png *.jpg *.jpeg);;所有文件 (*.*)") );
             if (!file.isEmpty())
                 hostPtr->openRasterPath(file);
         }
@@ -38,8 +38,8 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
     auto addVectorAction = [hostPtr]() {
         if (hostPtr) {
             const QString file = QFileDialog::getOpenFileName(
-                nullptr, QObject::tr("Add Vector Layer"), QString(),
-                QObject::tr("Vector Formats (*.shp *.gpkg *.geojson *.kml *.tab *.mif);;All Files (*.*)") );
+                nullptr, QObject::tr("添加矢量图层"), QString(),
+                QObject::tr("矢量文件 (*.shp *.gpkg *.geojson *.kml *.tab *.mif);;所有文件 (*.*)") );
             if (!file.isEmpty())
                 hostPtr->openVectorPath(file);
         }
@@ -47,10 +47,10 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
 
     if (!node) {
         if (m_activeViewHost) {
-            QAction *actRaster = menu->addAction(QObject::tr("Add Raster Layer..."), menu, addRasterAction);
+            QAction *actRaster = menu->addAction(QObject::tr("添加栅格图层..."), menu, addRasterAction);
             actRaster->setToolTip(QObject::tr("打开并加载多波段遥感栅格影像图层"));
             actRaster->setStatusTip(QObject::tr("添加栅格影像图层到当前工程"));
-            QAction *actVector = menu->addAction(QObject::tr("Add Vector Layer..."), menu, addVectorAction);
+            QAction *actVector = menu->addAction(QObject::tr("添加矢量图层..."), menu, addVectorAction);
             actVector->setToolTip(QObject::tr("打开并加载矢量要素图层 (Shapefile / GeoPackage)"));
             actVector->setStatusTip(QObject::tr("添加矢量图层到当前工程"));
         }
@@ -76,7 +76,7 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
         QPointer<QgsMapLayer> layerPtr(layer);
 
         if (m_activeViewHost) {
-            QAction *zoomAction = menu->addAction(QObject::tr("Zoom to Layer"));
+            QAction *zoomAction = menu->addAction(QObject::tr("缩放到图层"));
             zoomAction->setToolTip(QObject::tr("缩放画布以完整显示该图层的空间范围"));
             zoomAction->setStatusTip(QObject::tr("缩放到选中图层范围"));
             QObject::connect(zoomAction, &QAction::triggered, menu, [hostPtr, layerPtr]() {
@@ -87,7 +87,7 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
         }
 
         if (layer && layer->type() == Qgis::LayerType::Raster) {
-            QAction *zoomNative = menu->addAction(QObject::tr("Zoom to Native Resolution (1:1)"));
+            QAction *zoomNative = menu->addAction(QObject::tr("缩放到原始分辨率 (1:1)"));
             zoomNative->setToolTip(QObject::tr("以 1:1 原始像元分辨率显示当前栅格"));
             zoomNative->setStatusTip(QObject::tr("缩放到原始像元分辨率"));
             QObject::connect(zoomNative, &QAction::triggered, menu, [hostPtr, layerPtr]() {
@@ -98,7 +98,7 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
         }
 
         if (m_activeViewHost) {
-            QAction *propsAction = menu->addAction(QObject::tr("Properties..."), menu, [hostPtr, layerPtr]() {
+            QAction *propsAction = menu->addAction(QObject::tr("图层属性..."), menu, [hostPtr, layerPtr]() {
                 if (hostPtr && layerPtr) {
                     hostPtr->showLayerProperties(layerPtr.data());
                 }

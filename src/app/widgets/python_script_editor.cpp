@@ -88,20 +88,21 @@ void PythonScriptEditor::setupUi()
     auto *toolbarLayout = new QHBoxLayout();
     toolbarLayout->setSpacing(4);
 
-    m_runButton = new QPushButton(tr("Run"), this);
-    m_runButton->setToolTip(tr("Run script (Ctrl+Enter)"));
+    m_runButton = new QPushButton(tr("运行"), this);
+    m_runButton->setProperty("primary", true);
+    m_runButton->setToolTip(tr("运行脚本 (Ctrl+Enter)"));
     m_runButton->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Return));
 
-    m_openButton = new QPushButton(tr("Open"), this);
-    m_openButton->setToolTip(tr("Open Python script"));
+    m_openButton = new QPushButton(tr("打开"), this);
+    m_openButton->setToolTip(tr("打开 Python 脚本"));
 
-    m_saveButton = new QPushButton(tr("Save"), this);
-    m_saveButton->setToolTip(tr("Save Python script"));
+    m_saveButton = new QPushButton(tr("保存"), this);
+    m_saveButton->setToolTip(tr("保存 Python 脚本"));
 
-    m_clearButton = new QPushButton(tr("Clear"), this);
-    m_clearButton->setToolTip(tr("Clear output panel"));
+    m_clearButton = new QPushButton(tr("清空"), this);
+    m_clearButton->setToolTip(tr("清空输出面板"));
 
-    m_statusLabel = new QLabel(tr("Ready"), this);
+    m_statusLabel = new QLabel(tr("就绪"), this);
     m_statusLabel->setEnabled(false);
 
     toolbarLayout->addWidget(m_runButton);
@@ -120,7 +121,7 @@ void PythonScriptEditor::setupUi()
     editorFont.setStyleHint(QFont::Monospace);
     editorFont.setPointSize(10);
     m_editor->setFont(editorFont);
-    m_editor->setPlaceholderText(tr("Enter Python code here..."));
+    m_editor->setPlaceholderText(tr("在此输入 Python 脚本代码..."));
     mainLayout->addWidget(m_editor, 3);
 
     // Output panel
@@ -131,7 +132,7 @@ void PythonScriptEditor::setupUi()
     outputFont.setStyleHint(QFont::Monospace);
     outputFont.setPointSize(10);
     m_output->setFont(outputFont);
-    m_output->setPlaceholderText(tr("Script output appears here..."));
+    m_output->setPlaceholderText(tr("脚本执行输出将在此显示..."));
     mainLayout->addWidget(m_output, 1);
 
     connect(m_runButton, &QPushButton::clicked, this, &PythonScriptEditor::runScript);

@@ -23,8 +23,10 @@
 #include "widgets/histogram_stretch_widget.h"
 #include "widgets/band_composition_rail.h"
 #include "widgets/rs_toolbar_flow_host.h"
+#include "widgets/rs_empty_state_widget.h"
 
 #include <QVBoxLayout>
+#include <QStackedWidget>
 #include <QMenu>
 #include <QMenuBar>
 #include <QFileDialog>
@@ -71,18 +73,34 @@ void QgisDesktopWindow::setupDockWidgets()
     QVBoxLayout *layersLayout = new QVBoxLayout(layersContainer);
     layersLayout->setContentsMargins(0, 0, 0, 0);
 
-    // Create QGIS C++ layer tree view
-    m_layerTreeView = new QgsLayerTreeView(layersContainer);
-    m_layerTreeView->setHeaderHidden(false);
+    m_layersStack = new QStackedWidget(layersContainer);
+    m_layersStack->setObjectName(QStringLiteral("rsLayersStack"));
 
-    layersLayout->addWidget(m_layerTreeView);
+    // Create QGIS C++ layer tree view
+    m_layerTreeView = new QgsLayerTreeView(m_layersStack);
+    m_layerTreeView->setHeaderHidden(false);
+    m_layersStack->addWidget(m_layerTreeView); // Index 0: Tree
+
+    m_layersEmptyState = new sicnu::RsEmptyStateWidget(
+        QStringLiteral( "l_yer_st_ck" ),
+        tr( "暂无图层" ),
+        tr( "从数据管理面板添加或直接打开遥感影像与矢量数据" ),
+        tr( "添加图层..." ),
+        m_layersStack );
+    connect( m_layersEmptyState, &sicnu::RsEmptyStateWidget::actionClicked, this, [this]() {
+        addRasterLayer();
+    } );
+    m_layersStack->addWidget( m_layersEmptyState ); // Index 1: Empty State
+    m_layersStack->setCurrentIndex( 1 ); // Initially empty
+
+    layersLayout->addWidget(m_layersStack);
 
     m_layersDock->setWidget(layersContainer);
     addDockWidget(Qt::LeftDockWidgetArea, m_layersDock);
 
     // Browser Panel (Left, below layers)
     m_browserModel = new QgsBrowserGuiModel( this );
-    m_browserDock = new QgsBrowserDockWidget( "Browser", m_browserModel, this );
+    m_browserDock = new QgsBrowserDockWidget( tr( "文件浏览" ), m_browserModel, this );
     m_browserDock->setObjectName( "browserDock" );
     m_browserDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
     addDockWidget( Qt::LeftDockWidgetArea, m_browserDock );
@@ -101,7 +119,7 @@ void QgisDesktopWindow::setupDockWidgets()
     // ProjectContext exists (setupDockWidgets runs before context creation).
 
     // Processing Toolbox Panel (Right, with Overview)
-    m_processingDock = new QgsDockWidget("Processing Toolbox", this);
+    m_processingDock = new QgsDockWidget( tr( "处理工具箱" ), this );
     m_processingDock->setObjectName("processingDock");
     m_processingDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
 
@@ -113,7 +131,7 @@ void QgisDesktopWindow::setupDockWidgets()
 
     auto *searchEdit = new QgsFilterLineEdit(toolboxContainer);
     searchEdit->setShowSearchIcon(true);
-    searchEdit->setPlaceholderText(tr("Search algorithms..."));
+    searchEdit->setPlaceholderText(tr("搜索算法..."));
     toolboxLayout->addWidget(searchEdit);
 
     m_toolboxView = new QgsProcessingToolboxTreeView( toolboxContainer,
@@ -134,14 +152,14 @@ void QgisDesktopWindow::setupDockWidgets()
 
 #ifdef SICNU_EMBED_PYTHON
     // Python Console (lazy-loaded on first use)
-    m_pythonDock = new QgsDockWidget(tr("Python Console"), this);
+    m_pythonDock = new QgsDockWidget(tr("Python 控制台"), this);
     m_pythonDock->setObjectName("pythonDock");
     m_pythonDock->setWidget(new QWidget(m_pythonDock)); // Placeholder
     addDockWidget(Qt::BottomDockWidgetArea, m_pythonDock);
     m_pythonDock->hide(); // Hidden until first use
 
     // Python Script Editor Dock (lazy-loaded on first use)
-    m_pythonScriptEditorDock = new QgsDockWidget(tr("Python Script Editor"), this);
+    m_pythonScriptEditorDock = new QgsDockWidget(tr("Python 脚本编辑器"), this);
     m_pythonScriptEditorDock->setObjectName("pythonScriptEditorDock");
     m_pythonScriptEditorDock->setWidget(new QWidget(m_pythonScriptEditorDock)); // Placeholder
     addDockWidget(Qt::BottomDockWidgetArea, m_pythonScriptEditorDock);
@@ -173,7 +191,7 @@ void QgisDesktopWindow::setupDockWidgets()
             // Check if already in favorites
             bool isFav = QgsGui::processingFavoriteAlgorithmManager()->isFavorite(algId);
             if (isFav) {
-                QAction *removeFav = menu.addAction(tr("Remove from Favorites"));
+                QAction *removeFav = menu.addAction(tr("从收藏夹中移除"));
                 connect(removeFav, &QAction::triggered, this, [this, algId]() {
                     QgsGui::processingFavoriteAlgorithmManager()->remove(algId);
                     m_toolboxView->setRegistry(QgsApplication::processingRegistry(),
@@ -181,7 +199,7 @@ void QgisDesktopWindow::setupDockWidgets()
                         QgsGui::processingFavoriteAlgorithmManager());
                 });
             } else {
-                QAction *addFav = menu.addAction(tr("Add to Favorites"));
+                QAction *addFav = menu.addAction(tr("添加到收藏夹"));
                 connect(addFav, &QAction::triggered, this, [this, algId]() {
                     QgsGui::processingFavoriteAlgorithmManager()->add(algId);
                     m_toolboxView->setRegistry(QgsApplication::processingRegistry(),
@@ -191,7 +209,7 @@ void QgisDesktopWindow::setupDockWidgets()
             }
 
             // Open algorithm action
-            QAction *openAlg = menu.addAction(tr("Open Algorithm"));
+            QAction *openAlg = menu.addAction(tr("打开算法"));
             connect(openAlg, &QAction::triggered, this, [this, algId]() {
                 openProcessingAlgorithm(algId);
             });
@@ -201,7 +219,7 @@ void QgisDesktopWindow::setupDockWidgets()
 
 
     // Overview Panel (Right, tabified with Processing Toolbox)
-    m_overviewDock = new QgsDockWidget("Overview", this);
+    m_overviewDock = new QgsDockWidget( tr( "鹰眼视图" ), this );
     m_overviewDock->setObjectName("overviewDock");
     m_overviewDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     m_overviewCanvas = new QgsMapOverviewCanvas(m_overviewDock, m_mapCanvas);
@@ -212,19 +230,19 @@ void QgisDesktopWindow::setupDockWidgets()
     m_processingDock->raise();
 
     // Identify Results Panel (Right, tabified with Processing/Overview)
-    m_identifyDock = new QgsDockWidget(tr("Identify Results"), this);
+    m_identifyDock = new QgsDockWidget(tr("要素识别"), this);
     m_identifyDock->setObjectName("identifyDock");
     m_identifyDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
 
     m_identifyResults = new QTextBrowser(m_identifyDock);
     m_identifyResults->setOpenExternalLinks(false);
-    m_identifyResults->setPlaceholderText(tr("Click on the map with the Identify tool to see feature details here."));
+    m_identifyResults->setPlaceholderText(tr("使用要素识别工具在地图上点击以查看要素详情。"));
     m_identifyDock->setWidget(m_identifyResults);
     addDockWidget(Qt::RightDockWidgetArea, m_identifyDock);
     tabifyDockWidget(m_overviewDock, m_identifyDock);
 
     // Spectral Profile Panel (Right, tabified with Identify Results)
-    m_spectralDock = new QgsDockWidget(tr("Spectral Profile"), this);
+    m_spectralDock = new QgsDockWidget(tr("光谱曲线"), this);
     m_spectralDock->setObjectName("spectralDock");
     m_spectralDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
 
@@ -270,7 +288,7 @@ void QgisDesktopWindow::setupDockWidgets()
     auto *workflowWidget = new GuidedWorkflowWidget(this);
     m_workflowDock = new QgsDockWidget(this);
     m_workflowDock->setObjectName("workflowDock");
-    m_workflowDock->setWindowTitle(tr("Guided Workflows"));
+    m_workflowDock->setWindowTitle(tr("引导式工作流"));
     m_workflowDock->setWidget(workflowWidget);
     addDockWidget(Qt::RightDockWidgetArea, m_workflowDock);
     tabifyDockWidget(m_processingDock, m_workflowDock);
@@ -349,6 +367,9 @@ void QgisDesktopWindow::setupDataManagerPanel()
         tabifyDockWidget( m_layersDock, m_dataManagerPanel );
     // Prefer catalog front after setup (product shell also raises it).
     m_dataManagerPanel->raise();
+
+    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::importRequested,
+             this, [this]() { addRasterLayer(); } );
 
     connect( m_dataManagerPanel, &sicnu::DataManagerPanel::displayRequested,
              this, [this]( sicnu::data::AssetId assetId ) {

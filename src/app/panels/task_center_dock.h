@@ -8,6 +8,7 @@
 #include <QCheckBox>
 #include <QLabel>
 #include <QVariantMap>
+#include <QStackedWidget>
 
 #include "processing/framework/task_center.h"
 
@@ -45,6 +46,8 @@ private:
     long selectedTaskId() const;
 
     QTreeWidget *m_taskTree = nullptr;
+    QStackedWidget *m_treeStack = nullptr;
+    class RsEmptyStateWidget *m_emptyState = nullptr;
     QTextBrowser *m_parameterBrowser = nullptr;
     QTextBrowser *m_logBrowser = nullptr;
     QPushButton *m_cancelBtn = nullptr;

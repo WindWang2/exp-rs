@@ -6,7 +6,7 @@
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
-
+class RasterLayerCombo;
 
 /**
  * Dialog for SAR Speckle Filtering operations.
@@ -20,22 +20,25 @@ class SpeckleFilterDialog : public RasterProcessingDialogBase
 public:
     explicit SpeckleFilterDialog(QWidget *parent = nullptr);
 
+    void setRasterLayer(QgsRasterLayer *layer) override;
+
 protected:
     QString toolName() const override { return QStringLiteral("speckle_filter"); }
-    QString dialogTitle() const override { return tr("Speckle Filter"); }
+    QString dialogTitle() const override { return tr("SAR 斑点滤波"); }
     void onRun() override;
 
 private slots:
+    void onLayerChanged(int index);
     void onFilterTypeChanged(int index);
 
 private:
     void setupUi();
 
+    RasterLayerCombo *m_layerCombo = nullptr;
     QComboBox *m_filterTypeCombo = nullptr;
     QComboBox *m_kernelSizeCombo = nullptr;
     QDoubleSpinBox *m_noiseVarSpin = nullptr;
     QDoubleSpinBox *m_dampingSpin = nullptr;
     QLabel *m_noiseVarLabel = nullptr;
     QLabel *m_dampingLabel = nullptr;
-
 };
