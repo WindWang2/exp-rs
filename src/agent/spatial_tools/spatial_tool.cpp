@@ -1,6 +1,8 @@
 // src/agent/spatial_tools/spatial_tool.cpp
 #include "spatial_tool.h"
 
+#include "../layout_tools/layout_tools.h"
+
 #include "model_catalog_tool.h"
 #include "raster_inspect_tool.h"
 #include "vector_inspect_tool.h"
@@ -83,6 +85,9 @@ void SpatialToolRegistry::registerBuiltinTools()
   };
   for ( const auto &tool : kBuiltinTools )
     registerTool( tool );
+  // Cartographic layout tools (Cartographic Layout Studio); layout:* tools
+  // mutate layout state and must register alongside the spatial tool surface.
+  layout_tools::registerBuiltinLayoutTools();
 }
 
 void SpatialToolRegistry::reset()

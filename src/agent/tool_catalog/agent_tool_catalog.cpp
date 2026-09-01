@@ -1,5 +1,7 @@
 // src/agent/tool_catalog/agent_tool_catalog.cpp
 #include "agent_tool_catalog.h"
+
+#include "../layout_tools/layout_tool_provider.h"
 #include "algorithm_tool_provider.h"
 #include "interaction_tool_provider.h"
 #include "data_tool_provider.h"
@@ -188,6 +190,8 @@ void AgentToolCatalog::initializeDefaults()
   // (its own mutex — no interaction with mMutex).
   sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerBuiltinTools();
   mProviders.push_back( std::make_shared<sicnu::agent::spatial_tools::SpatialToolProvider>() );
+  // Cartographic layout tools (layout:*) join under their own provider/group.
+  mProviders.push_back( std::make_shared<sicnu::agent::layout_tools::LayoutToolProvider>() );
 
   mCacheValid = false;
   mCachedTools.clear();

@@ -112,6 +112,7 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("raster:"), // agent raster display tools
         QStringLiteral("data:"),   // data manager tools
         QStringLiteral("spatial:"), // spatial inspection/catalog tools (ADR 0122)
+        QStringLiteral("layout:"),  // cartographic layout tools (Layout Studio)
     };
     for (const QString &prefix : kAllowed) {
         if (checkId.startsWith(prefix))
@@ -795,7 +796,8 @@ void McpServer::handleRequest(const QVariantMap &request)
                     throw std::runtime_error("Invalid or missing pipeline_id");
                 resultData = handleGetWorkflowStatus(pipelineId);
             }
-            else if (toolName.startsWith(QStringLiteral("spatial:")))
+            else if (toolName.startsWith(QStringLiteral("spatial:")) ||
+                     toolName.startsWith(QStringLiteral("layout:")))
             {
                 resultData = handleSpatialToolCall(toolName, arguments);
             }
@@ -1243,7 +1245,7 @@ bool McpServer::isToolIdAllowed(const QString &toolId, QString *reason)
     if (reason) {
         *reason = QStringLiteral(
             "Tool id '%1' is not in the MCP allow-list "
-            "(rs:, gdal:, gdal_tools:, otb:, otb_tools:, qgis:, qgis_algorithms:, opencv:, spatial:).").arg(toolId);
+            "(rs:, gdal:, gdal_tools:, otb:, otb_tools:, qgis:, qgis_algorithms:, opencv:, spatial:, layout:).").arg(toolId);
     }
     return false;
 }

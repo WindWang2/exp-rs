@@ -19,6 +19,10 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
   std::vector<AgentTool> tools;
   for ( const auto &spatial : SpatialToolRegistry::instance().tools() )
   {
+    // layout:* tools join the catalog through their own provider/group.
+    if ( spatial->name().rfind( "spatial:", 0 ) != 0 )
+      continue;
+
     AgentTool tool;
     tool.name = spatial->name();
     tool.displayName = spatial->displayName();
