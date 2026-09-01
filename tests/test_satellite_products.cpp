@@ -72,7 +72,7 @@ QString writeFakeLandsatScene(const QDir& root,
     out << "  PROCESSING_LEVEL = \"" << level << "\"\n";
     out << "  DATE_ACQUIRED = \"2020-06-15\"\n";
     out << "  LANDSAT_PRODUCT_ID = \"LC08_L1TP_TEST\"\n";
-    out << "  FILE_NAME_BAND_2 = \"LC08_L1TP_TEST_B2.TIF\"\n";
+    out << "  FILE_NAME_BAND_2 = \"LC08_L1TP_CLASS_B2.TIF\"\n";
     out << "  FILE_NAME_BAND_3 = \"LC08_L1TP_CLASS_B3.TIF\"\n";
     out << "  FILE_NAME_BAND_4 = \"LC08_L1TP_CLASS_B4.TIF\"\n";
     out << "  FILE_NAME_BAND_5 = \"LC08_L1TP_CLASS_B5.TIF\"\n";
@@ -562,13 +562,16 @@ TEST_CASE("Landsat 4-7 discovery stamps TM/ETM+ wavelengths (#673)", "[satellite
     SatelliteProducts::ProductInfo info;
     QString err;
     REQUIRE(SatelliteProducts::discoverLandsat(mtl, &info, &err));
-    bool sawB1 = false;
+    // The fixture's MTL declares B2..B5; the TM/ETM+ table is asserted on
+    // the bands that exist (B5 is the sharpest discriminator: TM SWIR1 1650
+    // vs the OLI table's NIR 865 that used to be stamped for every Landsat).
+    bool sawB3 = false;
     bool sawB4 = false;
     bool sawB5 = false;
     for (const auto& b : info.bands) {
-        if (b.name == QStringLiteral("B1")) {
-            sawB1 = true;
-            CHECK(b.wavelengthNm == 485); // TM Blue, not OLI Coastal 443
+        if (b.name == QStringLiteral("B3")) {
+            sawB3 = true;
+            CHECK(b.wavelengthNm == 660); // TM Red
         }
         if (b.name == QStringLiteral("B4")) {
             sawB4 = true;
@@ -579,7 +582,7 @@ TEST_CASE("Landsat 4-7 discovery stamps TM/ETM+ wavelengths (#673)", "[satellite
             CHECK(b.wavelengthNm == 1650); // TM SWIR1, not OLI NIR 865
         }
     }
-    REQUIRE(sawB1);
+    REQUIRE(sawB3);
     REQUIRE(sawB4);
     REQUIRE(sawB5);
 

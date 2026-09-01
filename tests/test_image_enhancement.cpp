@@ -448,7 +448,14 @@ TEST_CASE( "Streaming band ratio and IHS tiles match point kernels", "[enhanceme
     IES::bandRatioTile( a.data(), b.data(), got.data(), a.size() );
     ImageEnhancement::bandRatio( a.data(), b.data(), oracle.data(), a.size() );
     for ( size_t i = 0; i < a.size(); ++i )
-        REQUIRE( got[i] == Approx( oracle[i] ).margin( 1e-6 ) );
+    {
+        // b[3] == 0 -> both kernels yield NaN (parity holds); Approx cannot
+        // match NaN, so compare NaN-ness explicitly.
+        if ( std::isnan( oracle[i] ) )
+            REQUIRE( std::isnan( got[i] ) );
+        else
+            REQUIRE( got[i] == Approx( oracle[i] ).margin( 1e-6 ) );
+    }
 
     // ihsTransformTile === the panel's per-pixel masking + rgbToIhs
     const float ndR = -9999.0f, ndG = -9999.0f, ndB = -9999.0f;

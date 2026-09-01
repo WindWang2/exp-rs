@@ -364,9 +364,9 @@ TEST_CASE("rs:qa_mask reads UInt16 QA bands natively and honours declared nodata
     RSOperatorContext ctx;
     Json::Value result = op->run(params, ctx);
     // 8 = cloud -> masked; 16 = shadow -> masked; 65535 = declared nodata ->
-    // unmasked; 4 -> clear. The declared-nodata pixel must not be confused
-    // with the "all flags set" QA word 65535.
-    CHECK(result["maskedPixels"].asUInt64() == 2);
+    // unmasked (must not be confused with "all flags set"); 4 = bit 2 =
+    // CIRRUS, which the cloud mask includes (cloud|dilated|cirrus) -> masked.
+    CHECK(result["maskedPixels"].asUInt64() == 3);
     CHECK(result["totalPixels"].asUInt64() == 4);
 
     GdalDatasetWrapper out;
@@ -376,5 +376,5 @@ TEST_CASE("rs:qa_mask reads UInt16 QA bands natively and honours declared nodata
     CHECK(mask[0] == 1.0f);
     CHECK(mask[1] == 1.0f);
     CHECK(mask[2] == 0.0f);
-    CHECK(mask[3] == 0.0f);
+    CHECK(mask[3] == 1.0f);
 }

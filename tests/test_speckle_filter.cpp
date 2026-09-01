@@ -372,15 +372,15 @@ TEST_CASE("Speckle filters: NaN preservation and mask handling", "[speckle][noda
 // ---- Lee vs Kuan regression (#678) ----
 
 TEST_CASE("Lee filter uses Lee's own weighting, not Kuan's (#678)", "[speckle][678]") {
-    // 3x3 ramp image; with kernel 3 every pixel's window is the whole image,
-    // so mean and variance are exactly known:
-    //   mean = 5, var = 285/9 - 25 = 6.6667, Cl^2 = 6.6667/25 = 0.26667.
+    // 3x3 ramp image. The kernels clamp the window rect to the raster
+    // (localStats), so pixel [0]'s 3x3 window is the 2x2 corner {1,2,4,5}:
+    //   mean = 3, var = (4+1+1+4)/4 = 2.5, Cl^2 = 2.5/9 = 0.27778.
     // noiseVariance = Cu^2 = 0.05 < Cl^2, so the weight is positive and the
     // two formulas diverge:
-    //   Lee:  w = 1 - Cu^2/Cl^2          = 0.8125
-    //   Kuan: w = (1 - Cu^2/Cl^2)/(1+Cu^2) = 0.773810
-    // Pixel value 1 -> Lee  = 5 + 0.8125*(1-5)   = 1.75
-    //                   Kuan = 5 + 0.773810*(1-5) = 1.904762
+    //   Lee:  w = 1 - Cu^2/Cl^2            = 0.82
+    //   Kuan: w = (1 - Cu^2/Cl^2)/(1+Cu^2) = 0.780952
+    // Pixel value 1 -> Lee  = 3 + 0.82*(1-3)     = 1.36
+    //                   Kuan = 3 + 0.780952*(1-3) = 1.438095
     std::vector<float> input = { 1.f, 2.f, 3.f,
                                  4.f, 5.f, 6.f,
                                  7.f, 8.f, 9.f };
@@ -388,15 +388,23 @@ TEST_CASE("Lee filter uses Lee's own weighting, not Kuan's (#678)", "[speckle][6
     ImageEnhancement::leeFilter(input.data(), outLee.data(), 3, 3, 3, 0.05f);
     ImageEnhancement::kuanFilter(input.data(), outKuan.data(), 3, 3, 3, 0.05f);
 
-    // Golden values (hand-computed above).
-    CHECK(outLee[0] == Approx(1.75f).margin(1e-3));
-    CHECK(outKuan[0] == Approx(1.904762f).margin(1e-3));
+    // Golden values (hand-computed above for the clamped corner window).
+    CHECK(outLee[0] == Approx(1.36f).margin(1e-3));
+    CHECK(outKuan[0] == Approx(1.438095f).margin(1e-3));
 
     // The two filters must no longer be bit-identical on a divergent window.
+    // Corner pixel [0] has exact hand-computed weights (0.82 vs 0.780952):
+    // divergence 0.0781. Interior-adjacent pixels whose window variance sits
+    // just above Cu^2 legitimately diverge less, so the strong assertion is
+    // made where the arithmetic is exact.
+    CHECK(std::abs(outLee[0] - outKuan[0]) > 0.01f);
+    int differing = 0;
     for (int i = 0; i < 9; ++i) {
         if (i == 4) continue;  // center pixel == mean -> both output the mean
-        CHECK(std::abs(outLee[i] - outKuan[i]) > 0.01f);
+        if (std::abs(outLee[i] - outKuan[i]) > 1e-4f)
+            ++differing;
     }
+    CHECK(differing >= 7); // Lee != Kuan across the raster, not one fluke pixel
 
     // Flat region: Cl^2 = 0 <= Cu^2 -> both smooth fully to the mean.
     std::vector<float> flat(9, 5.0f);
