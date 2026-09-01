@@ -480,6 +480,8 @@ Json::Value createRasterResetDisplaySchema()
 }
 
 
+} // namespace
+
 // Shared catalog-presentation API (see header): forwards to the internal
 // helpers above so both the interaction tools and the MCP native handlers
 // use ONE implementation (#688, review P2).
@@ -490,8 +492,6 @@ bool catalogSameSourcePath( const QString &a, const QString &b ) { return sameSo
 std::optional<sicnu::data::AssetSnapshot> catalogResolveAsset( sicnu::data::DataManager *dataManager,
                                                                const QString &target )
 { return resolveCatalogAsset( dataManager, target ); }
-
-} // namespace
 
 InteractionToolRegistry::InteractionToolRegistry()
 {
