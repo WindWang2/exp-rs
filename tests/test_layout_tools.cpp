@@ -636,7 +636,7 @@ TEST_CASE( "Raster renderer drives legend color ramp nodes in layouts", "[layout
   REQUIRE( map->layers().contains( layer ) );
 
   auto legendAdded = run( "layout:add_item",
-                          R"({"layout":"Thematic","type":"legend","properties":{"title":"高程 (m)"}})" );
+                          R"json({"layout":"Thematic","type":"legend","properties":{"title":"高程 (m)"}})json" );
   REQUIRE( legendAdded.success );
   QgsLayoutItem *legendItem =
       LayoutService::instance().findItem( layout, QString::fromStdString( legendAdded.output["id"].asString() ) );
