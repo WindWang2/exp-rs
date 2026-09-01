@@ -63,6 +63,13 @@ class McpBridge {
   private exited = false;
   private stopped = false;
   private stderrTail = "";
+  // Respawn bookkeeping (#669): a crash-looping child used to drive an
+  // unbounded spawn loop because `exited` was never reset in start(), so
+  // every request re-entered the respawn branch and leaked another child.
+  private starting: Promise<void> | null = null;
+  private lastSpawnAt = 0;
+  private fastCrashCount = 0;
+  private lastExitError: string | null = null;
 
   constructor(private readonly bin: string, private readonly extraArgs: string[]) {
     installExitHook();
@@ -74,6 +81,23 @@ class McpBridge {
   }
 
   async start(): Promise<void> {
+    // One spawn at a time: concurrent requests hitting the lazy-respawn
+    // branch must share a single in-flight start, not spawn N children.
+    if (this.starting) return this.starting;
+    this.starting = (async () => {
+      await this.spawn();
+    })();
+    try {
+      await this.starting;
+    } finally {
+      this.starting = null;
+    }
+  }
+
+  private async spawn(): Promise<void> {
+    if (this.stopped) {
+      throw new Error("exp-rs MCP bridge was stopped");
+    }
     const childEnv: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) {
       if (v !== undefined) childEnv[k] = v;
@@ -83,6 +107,14 @@ class McpBridge {
     delete childEnv.LD_LIBRARY_PATH;
     childEnv.QT_QPA_PLATFORM = "offscreen";
 
+    // Reset the stale crash state BEFORE spawning (#669): `exited` left over
+    // from a previous crash made every subsequent request re-enter the
+    // respawn branch and spawn yet another child — a fork bomb of leaked
+    // processes while the (healthy) new child was already running.
+    this.exited = false;
+    this.startError = null;
+    this.stderrTail = "";
+    this.lastSpawnAt = Date.now();
     this.child = spawn(this.bin, ["--mcp", ...this.extraArgs], {
       stdio: ["pipe", "pipe", "pipe"],
       env: childEnv,
@@ -114,6 +146,11 @@ class McpBridge {
       const err = new Error(
         `exp-rs MCP server exited (code ${code})${tail ? `; stderr tail:\n${tail}` : ""}`,
       );
+      this.lastExitError = err.message;
+      // Circuit breaker accounting: a child dying within 10s of spawn is a
+      // fast crash; 5 in a row disables lazy respawn instead of looping.
+      if (Date.now() - this.lastSpawnAt < 10_000) this.fastCrashCount++;
+      else this.fastCrashCount = 0;
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
         p.reject(err);
@@ -219,6 +256,15 @@ class McpBridge {
         return;
       }
       if (!this.child || this.exited) {
+        if (this.fastCrashCount >= 5) {
+          reject(
+            new Error(
+              `exp-rs MCP server keeps crashing (${this.fastCrashCount} fast crashes); ` +
+                `lazy respawn disabled. Last exit: ${this.lastExitError ?? "unknown"}`,
+            ),
+          );
+          return;
+        }
         // Lazy respawn after a crash: without this every tool failed
         // permanently until the Pi process restarted (#623).
         this.start()
