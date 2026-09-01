@@ -19,6 +19,10 @@ class QgsLayoutViewToolSelect;
 class QgsLayoutViewToolPan;
 class QgsLayoutViewToolZoom;
 class QgsLayoutViewToolMoveItemContent;
+class QgsPanelWidgetStack;
+class QDockWidget;
+class QUndoView;
+class QUndoStack;
 
 /**
  * Layout designer implementing QgsLayoutDesignerInterface.
@@ -26,7 +30,20 @@ class QgsLayoutViewToolMoveItemContent;
  * Provides a print-composer window with: map items linked to the current map
  * canvas extent/layers, auto-linked legend / scale bar / north arrow, map grids
  * with coordinate annotations, rulers, and interactive select/pan/zoom tools.
- * Export to PDF / image is supported via QgsLayoutExporter.
+ * Export to PDF / image / SVG is supported via QgsLayoutExporter.
+ *
+ * Item property editing pipeline:
+ *
+ *   canvas selection (view / select tool)
+ *       → itemFocused
+ *       → showItemOptions()
+ *       → QgsLayoutItemGuiRegistry::createItemWidget()  (per-type item widget)
+ *       → widget writes through QgsLayoutItem setters + QgsLayoutUndoStack
+ *
+ * The real QgsLayoutItem is the single source of truth: the property panel is
+ * only a view/editor, and interactive drags push the same undo commands as
+ * panel edits, so the panel and the scene stay synchronized in both
+ * directions.
  */
 class QgsLayoutDesignerDialog : public QgsLayoutDesignerInterface
 {
@@ -87,19 +104,48 @@ private slots:
     void onAddGrid();
     void onAddLabel();
     void onAddImage();
+    void onAddShape();
+    void onAddChart();
     void onExportToPdf();
     void onExportToImage();
+    void onExportToSvg();
     void onDeleteSelectedItems();
+    void onDuplicateSelectedItems();
+    void onSelectAllItems();
+    void onDeselectAllItems();
     void onZoomToPage();
+
+    // Stacking / locking
+    void onRaiseItems();
+    void onLowerItems();
+    void onBringToFront();
+    void onSendToBack();
+    void onLockItems(bool locked);
+
+    // Page / template
+    void onShowPageProperties();
+    void onAutoArrange();
+    void onSaveAsTemplate();
+    void onLoadFromTemplate();
 
 private:
     void setupUi();
     void setupMenus();
     void setupToolbars();
+    void setupItemPropertiesPanel();
+    void setupUndoRedo();
+    void connectSelectionToInspector();
+    void clearItemPanel();
+
+    QWidget *buildMultiSelectionPanel(const QList<QgsLayoutItem *> &items);
+
+    // Clamps a desired item rect (mm) onto the current page so newly added
+    // items never land off-page on small formats.
+    QRectF defaultItemRect(double x, double y, double width, double height) const;
 
     QPointer<QMainWindow> mWindow;
     QgsMasterLayoutInterface *mMasterLayout = nullptr;
-    QgsLayout *mLayout = nullptr;
+    QPointer<QgsLayout> mLayout;  // QPointer: layouts can be removed from the project while open
     QgsLayoutView *mView = nullptr;
     QgsMessageBar *mMessageBar = nullptr;
     QgsMapCanvas *mCanvas = nullptr;
@@ -116,6 +162,20 @@ private:
     QgsLayoutViewToolPan *mPanTool = nullptr;
     QgsLayoutViewToolZoom *mZoomTool = nullptr;
     QgsLayoutViewToolMoveItemContent *mMoveContentTool = nullptr;
+
+    // Item property inspector (single source of truth stays on the item).
+    // QPointer: children of mWindow die with the window, and mCurrentItem is
+    // cleared by Qt when the bound item is destroyed.
+    QPointer<QDockWidget> mItemPropertiesDock;
+    QPointer<QgsPanelWidgetStack> mItemsStack;
+    QPointer<QgsLayoutItem> mCurrentItem;
+    QMetaObject::Connection mItemDestroyedConnection;
+
+    // Undo / redo
+    QDockWidget *mUndoDock = nullptr;
+    QUndoView *mUndoView = nullptr;
+    QAction *mActionUndo = nullptr;
+    QAction *mActionRedo = nullptr;
 
     // Menus
     QMenu *mLayoutMenu = nullptr;

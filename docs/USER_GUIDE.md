@@ -75,6 +75,12 @@
     - 10.4 [影像几何配准专用快捷键](#104-影像几何配准专用快捷键)
     - 10.5 [属性表与内嵌脚本编辑器快捷键](#105-属性表与内嵌脚本编辑器快捷键)
 
+11. [第 11 章：专业制图布局 (Cartographic Layout Studio)](#第-11-章专业制图布局-cartographic-layout-studio)
+    - 11.1 [布局设计器与对象属性检查器](#111-布局设计器与对象属性检查器)
+    - 11.2 [制图要素与地图框联动](#112-制图要素与地图框联动)
+    - 11.3 [对齐、分布与多选批量编辑](#113-对齐分布与多选批量编辑)
+    - 11.4 [模板与高质量导出](#114-模板与高质量导出)
+    - 11.5 [Agent / Pi 制图工具 (layout:*)](#115-agent--pi-制图工具-layout)
 ---
 
 # 第 1 章：系统概述与快速入门 (System Overview & Quick Start)
@@ -1163,6 +1169,56 @@ Copilot 面板上方集成了轻量级可折叠的 **运行检视器 (`Run Inspe
 | `Ctrl+J` (属性表) | **缩放到选中行要素** | 将地图视口迅速缩放并居中定位到表格中选中的要素 |
 | `Ctrl+P` (属性表) | **平移到选中行要素** | 将地图视口平移至选中要素（保持当前比例尺不变） |
 | `Ctrl+Return` | **运行 Python 脚本** | 在 Python 脚本编辑器中一键执行当前脚本代码 |
+
+## 第 11 章：专业制图布局 (Cartographic Layout Studio)
+
+> **功能入口**：Ribbon「制图」页 → 新建打印布局；布局设计器独立窗口。
+
+### 11.1 布局设计器与对象属性检查器
+
+布局设计器（Layout Designer）基于 QGIS 打印布局引擎，提供完整的制图排版能力：
+
+- **选择 → 检查器 → 修改 → 即时刷新 → Undo/Redo** 全链路属性编辑。选中任意对象（地图框、标题、图例、比例尺、指北针、图片、几何图形、统计图）后，右侧 **Item Properties** 面板显示其真实属性；修改 X/Y/宽高/旋转/不透明度等即刻作用于对象本身，拖动对象时面板数值同步回显。
+- **历史面板**（History dock）镜像布局 Undo 栈，`Ctrl+Z` / `Ctrl+Shift+Z` 可精确回退包括移动、缩放、旋转、颜色、字体在内的每一步操作；连续微调（如拖动数值框）自动合并为单条撤销记录。
+- **页面属性**：Layout → Page Properties 设置纸张尺寸（A0–A5、Letter）、横竖向与背景。
+- 所有未注册类型的对象仍可通过通用几何/外观面板编辑，保证「每个对象都可编辑」。
+
+### 11.2 制图要素与地图框联动
+
+- **地图框 (Map)**：添加时自动继承当前地图画布范围与旋转；通过属性面板可切换图层集、主题、CRS、比例与旋转。
+- **图例 (Legend) / 比例尺 (Scale Bar) / 指北针 (North Arrow)**：自动链接到最近添加的地图框 —— 地图旋转或比例变化时联动更新；栅格波段渲染（如伪彩色）会以**色带图例节点**形式自动出现在图例中（即连续色标 Color Bar，双击图例条目可编辑色带样式）。
+- **网格 (Grid)**：按地图范围自动估算 1/2/5×10ⁿ 整数间隔并叠加坐标注记。
+- **自动排版**：Layout → Auto Arrange 一键生成经典专题图版式（标题置顶、地图主区、图例靠右、比例尺置底、指北针图区右上角、来源注记），不会移动用户已有对象。
+
+### 11.3 对齐、分布与多选批量编辑
+
+- Edit → Align / Distribute 菜单提供六向对齐与八种分布（复用 QGIS QgsLayoutAligner，全部可撤销）。
+- 多选（Shift+点击 / 框选）后，检查器切换为**批量面板**：一次修改全部选中对象的不透明度、旋转、可见性与锁定状态（单条撤销记录）。
+- Ordering 子菜单（置顶/置底/上移/下移）、锁定（`Ctrl+L`）、复制（`Ctrl+D`）、全选/取消全选齐备。
+- Settings 菜单可开关**吸附**（网格 / 参考线 / 对象边缘）与容差；从标尺拖出参考线进行精确定位。
+
+### 11.4 模板与高质量导出
+
+- **模板**：Layout → Save as Template / Load from Template 使用 QGIS 原生 `.qpt` 格式，页面、字体、样式、链接关系完整往返。
+- **导出**：PDF / SVG（矢量优先）与 PNG / JPEG（300 DPI 默认）。栅格导出内置**内存预检**：按 RGBA 双缓冲估算，超过 30000 像素边限或 4 GiB 安全上限的请求会被拒绝并提示降低 DPI（>1 GiB 需确认），杜绝 A0 高 DPI 场景下的失控内存占用。
+
+### 11.5 Agent / Pi 制图工具 (layout:*)
+
+exp-rs MCP 服务器（`--mcp`）暴露 14 个 `layout:*` 工具，Pi 可用自然语言完成制图闭环（「把图例放到右下角」→ `layout:list_items` + `layout:set_item_properties`）：
+
+| 工具 | 用途 |
+|---|---|
+| `layout:list` / `layout:create` | 列出 / 新建布局（A0–A5、Letter，横竖向） |
+| `layout:list_items` / `layout:get_item_properties` | 紧凑对象清单 / 完整属性读取 |
+| `layout:add_item` / `layout:remove_item` | 添加（map/label/title/legend/scalebar/northarrow/picture/shape/chart）/ 删除对象 |
+| `layout:set_item_properties` | 批量修改属性（一次一条撤销记录，单位 mm） |
+| `layout:align_items` / `layout:distribute_items` | 对齐 / 分布 |
+| `layout:auto_arrange` | 生成经典专题版式（支持 dry-run） |
+| `layout:save_template` / `layout:apply_template` | `.qpt` 模板保存 / 应用 |
+| `layout:export` | 导出 png/jpg/pdf/svg（含内存预检） |
+| `layout:save_project` / `layout:load_project` | 工程持久化（布局随工程保存） |
+
+> **同一属性层**：GUI 检查器与 MCP 工具都通过 QgsLayoutItem setter + QgsLayoutUndoStack 命令（相同命令 ID）修改对象，人工编辑与 Agent 编辑语义完全一致，布局对象本身是唯一事实来源。
 
 ---
 

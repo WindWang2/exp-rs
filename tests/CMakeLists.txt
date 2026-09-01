@@ -2380,6 +2380,7 @@ if(TARGET qgis_app_classify)
     Qt6::Widgets
     Qt6::Test
     sicnu_processing
+    sicnu_agent
     qgis_core
     qgis_gui
   )
@@ -2390,6 +2391,9 @@ if(TARGET qgis_app_classify)
   )
   set_target_properties(test_layout_designer PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(test_layout_designer)
+
+# Headless MCP cartographic layout tools (Cartographic Layout Studio).
+sicnu_add_test(test_layout_tools)
 
   # Phase 10A Task 10.4 — Pixel rasterizer (geometry -> pixel index set)
   add_executable(test_pixel_rasterizer test_pixel_rasterizer.cpp)

@@ -39,6 +39,12 @@ add_library(sicnu_agent SHARED
   spatial_tools/model_catalog_tool.h
   spatial_tools/spatial_tool_provider.cpp
   spatial_tools/spatial_tool_provider.h
+  layout_tools/layout_service.cpp
+  layout_tools/layout_service.h
+  layout_tools/layout_tools.cpp
+  layout_tools/layout_tools.h
+  layout_tools/layout_tool_provider.cpp
+  layout_tools/layout_tool_provider.h
 )
 
 target_link_libraries(sicnu_agent PUBLIC
