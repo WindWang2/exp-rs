@@ -31,6 +31,7 @@
 #include "data/data_manager.h"
 #include "processing/framework/atomic_algorithm_adapter.h"
 #include "processing/framework/task_center.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 #include "jobs/job_engine.h"
 #include "workflow/workflow_run_coordinator.h"
 #include "operators/framework/rs_operator_context.h"
@@ -91,6 +92,11 @@ int main(int argc, char *argv[])
 {
     qInstallMessageHandler(messageHandler);
     qDebug() << "Starting SICNU GEO RS...";
+
+    // Register GDAL drivers and apply the process-wide nested-parallelism cap
+    // (OpenCV internal thread pool, #692) before any operator or provider can
+    // run. Idempotent — the CLI/MCP entry points call it too.
+    ensureGdalInit();
 
     bool mcpMode = false;
     for (int i = 1; i < argc; ++i) {

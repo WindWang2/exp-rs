@@ -10,6 +10,7 @@
 #include "processing/tools/tool_path_manager.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -133,9 +134,37 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
     };
     OutputCleanup cleanup{ outputPath };
 
+    // Watchdog + graceful cancel ladder (#693, ports the #618 provider-wrapper
+    // pattern from otb_tool_wrapper.cpp): cancellation must not just throw and
+    // let the QProcess destructor orphan the otbcli child, which would keep
+    // running (and holding the deleted output's fd) forever. terminate() first
+    // so multi-GB OTB writes can flush, then kill() after a grace period.
+    const auto terminateGracefully = [&proc]() {
+        proc.terminate();
+        if (!proc.waitForFinished(5000))
+            proc.kill();
+        proc.waitForFinished(2000);
+    };
+    QElapsedTimer watchdog;
+    watchdog.start();
+    const qint64 maxRuntimeMs = 60 * 60 * 1000; // OTB composites can be long
+
     try {
     while (proc.state() == QProcess::Running) {
-        context.throwIfCancelled();
+        try {
+            context.throwIfCancelled();
+        } catch (...) {
+            terminateGracefully();
+            throw;
+        }
+
+        if (watchdog.elapsed() > maxRuntimeMs) {
+            terminateGracefully();
+            throw RSOperatorError(ErrorCode::OtbError,
+                                  "OTB application exceeded the maximum runtime ("
+                                      + std::to_string(maxRuntimeMs / 1000)
+                                      + " s) and was terminated.");
+        }
 
         proc.waitForReadyRead(100);
         const QByteArray output = proc.readAllStandardOutput();
@@ -183,6 +212,9 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
         throw RSOperatorError(ErrorCode::OtbError, message, details);
     }
     } catch (...) {
+        // Any escape route must leave no orphan: terminate() on an
+        // already-finished process is a harmless no-op.
+        terminateGracefully();
         throw; // the OutputCleanup destructor removes the partial product
     }
 

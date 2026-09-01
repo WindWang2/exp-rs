@@ -1,6 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include "processing/algorithms/image_enhancement.h"
+#include "processing/algorithms/chunked_processor.h"
+#include <QThread>
+#include <atomic>
+#include <mutex>
+#include <set>
 #include <vector>
 #include <cmath>
 #include <limits>
@@ -64,4 +69,70 @@ TEST_CASE("Lee filter excludes +-Inf pixels from local statistics", "[enhancemen
     ImageEnhancement::leeFilter(input.data(), output.data(), W, H, 3, 0.5f);
     for (float v : output)
         REQUIRE(std::isfinite(v));
+}
+
+TEST_CASE("Speckle filters reject rasters beyond the integral-image limit", "[enhancement][integral-image]") {
+    // #691: width*height > INT32_MAX used to overflow the all-int32 index
+    // math and the per-pixel valid-count vector. The guard must fail loudly
+    // (log + untouched output) BEFORE touching the buffers or allocating, so
+    // 1-element buffers are enough to exercise it.
+    constexpr int W = 50000;
+    constexpr int H = 50000; // 2.5e9 pixels > INT32_MAX
+    float input = 1.0f;
+
+    float output = -777.0f;
+    ImageEnhancement::leeFilter(&input, &output, W, H, 3, 0.5f);
+    REQUIRE(output == -777.0f);
+
+    output = -777.0f;
+    ImageEnhancement::enhancedLeeFilter(&input, &output, W, H, 3, 0.5f, 1.0f);
+    REQUIRE(output == -777.0f);
+
+    output = -777.0f;
+    ImageEnhancement::frostFilter(&input, &output, W, H, 3, 0.5f);
+    REQUIRE(output == -777.0f);
+
+    output = -777.0f;
+    ImageEnhancement::kuanFilter(&input, &output, W, H, 3, 0.5f);
+    REQUIRE(output == -777.0f);
+
+    output = -777.0f;
+    ImageEnhancement::gammaMapFilter(&input, &output, W, H, 3, 0.5f);
+    REQUIRE(output == -777.0f);
+}
+
+TEST_CASE("ChunkedProcessor respects the maxThreads cap", "[enhancement][chunked]") {
+    // #692: process() fans out on a dedicated (non-global) pool bounded by the
+    // nested-parallelism token. maxThreads=1 must execute all chunks on a
+    // single thread instead of one thread per core.
+    constexpr int W = 8;
+    constexpr int H = 600; // 3 chunks at the default 256-row chunk height
+    ChunkedProcessor processor(W, H, 0);
+    REQUIRE(processor.chunkCount() > 1);
+
+    std::mutex threadsMutex;
+    std::set<const QThread *> threads;
+    std::atomic<int> executed{0};
+    auto recordThread = [&](const ChunkedProcessor::Chunk &chunk) {
+        {
+            std::lock_guard<std::mutex> lock(threadsMutex);
+            threads.insert(QThread::currentThread());
+        }
+        ++executed;
+        return chunk.endRow > chunk.startRow;
+    };
+
+    REQUIRE(processor.process(recordThread, nullptr, 1));
+    REQUIRE(executed.load() == processor.chunkCount());
+    REQUIRE(threads.size() == 1);
+
+    // Default token: all chunks still complete; observed concurrency never
+    // exceeds the documented auto budget (cores / 4, at least 1).
+    executed.store(0);
+    threads.clear();
+    REQUIRE(processor.process(recordThread));
+    REQUIRE(executed.load() == processor.chunkCount());
+    REQUIRE(threads.size() >= 1);
+    REQUIRE(threads.size() <= static_cast<size_t>(ChunkedProcessor::defaultMaxThreads()));
+    REQUIRE(ChunkedProcessor::defaultMaxThreads() >= 1);
 }

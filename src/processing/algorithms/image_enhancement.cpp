@@ -7,6 +7,7 @@
 #include <gdal.h>
 #include <cmath>
 #include <algorithm>
+#include <cstdint>
 #include <numeric>
 #include <vector>
 #include <limits>
@@ -598,23 +599,31 @@ void ImageEnhancement::laplacianFilter(const float *input, float *output, int wi
 // Helper: compute local mean and variance for a pixel
 // Integral image (summed-area table) for O(1) local statistics
 // Handles non-finite (NaN/±Inf) pixels by tracking valid pixel count separately
+//
+// #691: index math uses std::size_t and the valid-pixel counter is int64 —
+// the all-int32 version overflowed beyond ~46339² pixels (both the
+// (width+1)*(height+1) cell index and the accumulated counts). Callers must
+// screen dimensions with integralImageDimensionsSupported() first.
 class IntegralImage {
 public:
     IntegralImage(const float *input, int width, int height)
         : m_width(width), m_height(height)
     {
-        // Build integral images for sum, sum-of-squares, and valid count
-        m_sum.resize((width + 1) * (height + 1), 0.0);
-        m_sumSq.resize((width + 1) * (height + 1), 0.0);
-        m_count.resize((width + 1) * (height + 1), 0);
+        // Stride/cell count in size_t: (w+1)*(h+1) can exceed int32 even when
+        // w*h does not (46340² is the last safe int32 square).
+        const std::size_t stride = static_cast<std::size_t>(width) + 1;
+        const std::size_t cells = stride * (static_cast<std::size_t>(height) + 1);
+        m_sum.resize(cells, 0.0);
+        m_sumSq.resize(cells, 0.0);
+        m_count.resize(cells, 0);
 
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                float val = input[y * width + x];
-                int idx = (y + 1) * (m_width + 1) + (x + 1);
-                int idxLeft = (y + 1) * (m_width + 1) + x;
-                int idxUp = y * (m_width + 1) + (x + 1);
-                int idxDiag = y * (m_width + 1) + x;
+                float val = input[static_cast<std::size_t>(y) * width + x];
+                std::size_t idx = static_cast<std::size_t>(y + 1) * stride + (x + 1);
+                std::size_t idxLeft = static_cast<std::size_t>(y + 1) * stride + x;
+                std::size_t idxUp = static_cast<std::size_t>(y) * stride + (x + 1);
+                std::size_t idxDiag = static_cast<std::size_t>(y) * stride + x;
 
                 if (std::isfinite(val)) {
                     m_sum[idx] = m_sum[idxLeft] + m_sum[idxUp] - m_sum[idxDiag] + val;
@@ -632,7 +641,7 @@ public:
     }
 
     void computeRegion(int x1, int y1, int x2, int y2,
-                       double &sum, double &sumSq, int &count) const
+                       double &sum, double &sumSq, std::int64_t &count) const
     {
         // Clamp to valid pixel range
         x1 = std::clamp(x1, 0, m_width - 1);
@@ -641,33 +650,52 @@ public:
         y2 = std::clamp(y2, 0, m_height - 1);
 
         // Integral image uses 1-indexed coordinates
-        int r1 = y1;
-        int r2 = y2 + 1;
-        int c1 = x1;
-        int c2 = x2 + 1;
+        const std::size_t stride = static_cast<std::size_t>(m_width) + 1;
+        const std::size_t r1 = static_cast<std::size_t>(y1);
+        const std::size_t r2 = static_cast<std::size_t>(y2) + 1;
+        const std::size_t c1 = static_cast<std::size_t>(x1);
+        const std::size_t c2 = static_cast<std::size_t>(x2) + 1;
 
-        sum = m_sum[r2 * (m_width+1) + c2]
-            - m_sum[r1 * (m_width+1) + c2]
-            - m_sum[r2 * (m_width+1) + c1]
-            + m_sum[r1 * (m_width+1) + c1];
+        sum = m_sum[r2 * stride + c2]
+            - m_sum[r1 * stride + c2]
+            - m_sum[r2 * stride + c1]
+            + m_sum[r1 * stride + c1];
 
-        sumSq = m_sumSq[r2 * (m_width+1) + c2]
-              - m_sumSq[r1 * (m_width+1) + c2]
-              - m_sumSq[r2 * (m_width+1) + c1]
-              + m_sumSq[r1 * (m_width+1) + c1];
+        sumSq = m_sumSq[r2 * stride + c2]
+              - m_sumSq[r1 * stride + c2]
+              - m_sumSq[r2 * stride + c1]
+              + m_sumSq[r1 * stride + c1];
 
-        count = m_count[r2 * (m_width+1) + c2]
-              - m_count[r1 * (m_width+1) + c2]
-              - m_count[r2 * (m_width+1) + c1]
-              + m_count[r1 * (m_width+1) + c1];
+        count = m_count[r2 * stride + c2]
+              - m_count[r1 * stride + c2]
+              - m_count[r2 * stride + c1]
+              + m_count[r1 * stride + c1];
     }
 
 private:
     int m_width, m_height;
     std::vector<double> m_sum;
     std::vector<double> m_sumSq;
-    std::vector<int> m_count;
+    std::vector<std::int64_t> m_count;
 };
+
+// #691: the summed-area table allocates (width+1)*(height+1) cells of 20
+// bytes and accumulates per-pixel counts; beyond INT32_MAX total pixels it
+// would exhaust the memory budget and corrupt results. Fail loudly (log and
+// bail, matching the ImageEnhancement error convention) instead of silently
+// producing garbage.
+static bool integralImageDimensionsSupported(int width, int height, const char *who)
+{
+    if (static_cast<std::int64_t>(width) * static_cast<std::int64_t>(height)
+            <= static_cast<std::int64_t>(INT32_MAX)) {
+        return true;
+    }
+    SICNU_LOG_ERROR(SicnuLogTags::Algorithms,
+                    QString("%1: raster %2x%3 exceeds the integral-image limit of %4 pixels "
+                            "(int32 index space); refusing to compute corrupted local statistics")
+                        .arg(who).arg(width).arg(height).arg(INT32_MAX));
+    return false;
+}
 
 static void localStats(const IntegralImage &integral, int width, int height,
                        int cx, int cy, int kernelSize,
@@ -681,7 +709,7 @@ static void localStats(const IntegralImage &integral, int width, int height,
     int y2 = std::clamp(cy + half, 0, height - 1);
 
     double sum, sumSq;
-    int count;
+    std::int64_t count;
     integral.computeRegion(x1, y1, x2, y2, sum, sumSq, count);
     if (count <= 0) {
         mean = 0.0f;
@@ -718,6 +746,8 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
         .arg( width ).arg( height ).arg( kernelSize ).arg( noiseVariance ) );
 
     // Build integral image for O(1) local statistics
+    if (!integralImageDimensionsSupported(width, height, "leeFilter"))
+        return;
     IntegralImage integral(input, width, height);
 
     const int half = kernelSize / 2;
@@ -752,7 +782,7 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
             }
         }
         return true;
-    });
+    }, nullptr, ChunkedProcessor::defaultMaxThreads());
 }
 
 void ImageEnhancement::enhancedLeeFilter(const float *input, float *output,
@@ -783,6 +813,8 @@ void ImageEnhancement::enhancedLeeFilter(const float *input, float *output,
         .arg( width ).arg( height ).arg( kernelSize ).arg( noiseVariance ).arg( damping ) );
 
     // Build integral image for O(1) local statistics
+    if (!integralImageDimensionsSupported(width, height, "enhancedLeeFilter"))
+        return;
     IntegralImage integral(input, width, height);
 
     const int half = kernelSize / 2;
@@ -827,7 +859,7 @@ void ImageEnhancement::enhancedLeeFilter(const float *input, float *output,
             }
         }
         return true;
-    });
+    }, nullptr, ChunkedProcessor::defaultMaxThreads());
 }
 
 void ImageEnhancement::frostFilter(const float *input, float *output,
@@ -855,6 +887,8 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
     int half = kernelSize / 2;
 
     // Build integral image for O(1) local statistics
+    if (!integralImageDimensionsSupported(width, height, "frostFilter"))
+        return;
     IntegralImage integral(input, width, height);
 
     // Precompute distance lookup table (only depends on kernel geometry)
@@ -914,7 +948,7 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
             }
         }
         return true;
-    });
+    }, nullptr, ChunkedProcessor::defaultMaxThreads());
 }
 
 void ImageEnhancement::kuanFilter(const float *input, float *output,
@@ -941,6 +975,8 @@ void ImageEnhancement::kuanFilter(const float *input, float *output,
     // Kuan filter: similar to Lee but with different weighting
 
     // Build integral image for O(1) local statistics
+    if (!integralImageDimensionsSupported(width, height, "kuanFilter"))
+        return;
     IntegralImage integral(input, width, height);
 
     const int half = kernelSize / 2;
@@ -985,7 +1021,7 @@ void ImageEnhancement::kuanFilter(const float *input, float *output,
             }
         }
         return true;
-    });
+    }, nullptr, ChunkedProcessor::defaultMaxThreads());
 }
 
 void ImageEnhancement::gammaMapFilter(const float *input, float *output,
@@ -1012,6 +1048,8 @@ void ImageEnhancement::gammaMapFilter(const float *input, float *output,
     // Gamma-MAP filter: Maximum A Posteriori for Gamma distributed speckle
 
     // Build integral image for O(1) local statistics
+    if (!integralImageDimensionsSupported(width, height, "gammaMapFilter"))
+        return;
     IntegralImage integral(input, width, height);
 
     const int half = kernelSize / 2;
@@ -1061,7 +1099,7 @@ void ImageEnhancement::gammaMapFilter(const float *input, float *output,
             }
         }
         return true;
-    });
+    }, nullptr, ChunkedProcessor::defaultMaxThreads());
 }
 
 // ---- Band ratio ----

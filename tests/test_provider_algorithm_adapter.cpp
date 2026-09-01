@@ -2,11 +2,21 @@
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <QCoreApplication>
+
+#include <memory>
+#include <utility>
+
+#include "operators/framework/rs_operator_error.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/provider_algorithm_adapter.h"
+#include "processing/framework/qgs_processing_provider_adapter.h"
+#include "processing/framework/algorithm_engine.h"
 #include "qgsprocessingalgorithm.h"
 #include "qgsprocessingparameters.h"
 #include "qgsprocessingoutputs.h"
+#include "qgsprocessingprovider.h"
+#include "processing/qgsprocessingregistry.h"
 #include "qgsapplication.h"
 
 using namespace sicnu::processing;
@@ -40,6 +50,41 @@ public:
     return results;
   }
 };
+
+/// Minimal provider owning a DummyTestAlgorithm, registered into the real
+/// QgsProcessingRegistry so execute() can resolve it by id (#695 flow).
+class DummyTestProvider : public QgsProcessingProvider
+{
+public:
+  explicit DummyTestProvider( QString providerId = QStringLiteral( "sicnu_test" ) )
+    : m_providerId( std::move( providerId ) ) {}
+
+  QString id() const override { return m_providerId; }
+  QString name() const override { return QStringLiteral( "SICNU Test Provider" ); }
+  void loadAlgorithms() override
+  {
+    addAlgorithm( new DummyTestAlgorithm() );
+  }
+
+private:
+  QString m_providerId;
+};
+
+namespace
+{
+  QCoreApplication *ensureCoreApp()
+  {
+    static QCoreApplication *sApp = nullptr;
+    if ( !sApp )
+    {
+      static int argc = 1;
+      static char name[] = "test_provider_algorithm_adapter";
+      static char *argv[] = { name, nullptr };
+      sApp = new QCoreApplication( argc, argv );
+    }
+    return sApp;
+  }
+}
 
 TEST_CASE( "ProviderAlgorithmAdapter builds descriptor and executes QgsProcessingAlgorithm", "[processing][adapter]" )
 {
@@ -80,14 +125,13 @@ TEST_CASE( "ProviderAlgorithmAdapter builds descriptor and executes QgsProcessin
   REQUIRE( desc.outputs[0].name == "OUTPUT_STR" );
   REQUIRE( desc.outputs[0].type == DataType::String );
 
-  // Test execution
+  // Test execution (#695): a stack-local algorithm is NOT registered in the
+  // QgsProcessingRegistry, so execute() must fail with a typed error instead
+  // of dereferencing an algorithm pointer a provider may have already freed.
   Json::Value params( Json::objectValue );
   params["INPUT_STR"] = "hello";
 
-  Json::Value result = adapter.execute( params );
-  REQUIRE_FALSE( result.isMember( "error" ) );
-  REQUIRE( result.isMember( "OUTPUT_STR" ) );
-  REQUIRE( result["OUTPUT_STR"].asString() == "processed_hello" );
+  REQUIRE_THROWS_AS( adapter.execute( params ), sicnu::operators::RSOperatorError );
 }
 
 TEST_CASE("AtomicAlgorithmRegistry integrates ProviderAlgorithmAdapter", "[processing][provider_adapter]")
@@ -118,6 +162,63 @@ TEST_CASE("AtomicAlgorithmRegistry integrates ProviderAlgorithmAdapter", "[proce
     }
   }
   REQUIRE( foundDummy );
+}
+
+TEST_CASE( "ProviderAlgorithmAdapter resolves live algorithm via processing registry", "[processing][adapter][registry]" )
+{
+  ensureCoreApp();
+  QgsProcessingRegistry *qgisRegistry = QgsApplication::processingRegistry();
+  REQUIRE( qgisRegistry != nullptr );
+
+  if ( !qgisRegistry->providerById( QStringLiteral( "sicnu_test" ) ) )
+    REQUIRE( qgisRegistry->addProvider( new DummyTestProvider() ) );
+
+  const QString algId = QStringLiteral( "sicnu_test:dummyalg" );
+  const QgsProcessingAlgorithm *live = qgisRegistry->algorithmById( algId );
+  REQUIRE( live != nullptr );
+
+  ProviderAlgorithmAdapter adapter( *live );
+  REQUIRE( adapter.algorithmId() == algId.toStdString() );
+
+  // Execution re-resolves by id and clones — works while the provider is alive.
+  Json::Value params( Json::objectValue );
+  params["INPUT_STR"] = "hello";
+  Json::Value result = adapter.execute( params );
+  REQUIRE( result.isMember( "OUTPUT_STR" ) );
+  REQUIRE( result["OUTPUT_STR"].asString() == "processed_hello" );
+
+  // #695: removeProvider() DELETES the provider and its algorithms before
+  // emitting providerRemoved(id). The adapter must not touch the freed
+  // algorithm — it re-resolves and fails with a typed error instead (this
+  // used to be a use-after-free when the raw pointer was cached).
+  REQUIRE( qgisRegistry->removeProvider( QStringLiteral( "sicnu_test" ) ) );
+  REQUIRE( qgisRegistry->algorithmById( algId ) == nullptr );
+  REQUIRE_THROWS_AS( adapter.execute( params ), sicnu::operators::RSOperatorError );
+}
+
+TEST_CASE( "providerRemoved hook unregisters adapters of the removed provider", "[processing][adapter][registry]" )
+{
+  ensureCoreApp();
+  QgsProcessingRegistry *qgisRegistry = QgsApplication::processingRegistry();
+  REQUIRE( qgisRegistry != nullptr );
+
+  if ( !qgisRegistry->providerById( QStringLiteral( "sicnu_hook" ) ) )
+    REQUIRE( qgisRegistry->addProvider( new DummyTestProvider( QStringLiteral( "sicnu_hook" ) ) ) );
+
+  // discoverAlgorithms() both caches the adapters in AtomicAlgorithmRegistry
+  // and installs the providerRemoved hook (first call in this process).
+  sicnu::QgsProcessingProviderAdapter providerAdapter(
+    QStringLiteral( "sicnu_hook" ), QStringLiteral( "SICNU Hook Provider" ),
+    sicnu::ProviderResourceProfile::InProcessThread, nullptr );
+  providerAdapter.discoverAlgorithms( sicnu::AlgorithmEngine::instance() );
+
+  auto &adapters = AtomicAlgorithmRegistry::instance();
+  REQUIRE( adapters.findAdapter( "sicnu_hook:dummyalg" ) != nullptr );
+
+  // Removing the provider must drop the stale catalog entries whose
+  // algorithms died with it.
+  REQUIRE( qgisRegistry->removeProvider( QStringLiteral( "sicnu_hook" ) ) );
+  REQUIRE( adapters.findAdapter( "sicnu_hook:dummyalg" ) == nullptr );
 }
 
 

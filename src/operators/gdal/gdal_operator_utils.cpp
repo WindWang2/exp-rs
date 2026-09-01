@@ -158,18 +158,29 @@ std::pair<int, int> runGdalWarpOnDataset(GDALDatasetH hSrcDS,
 
     int bUsageError = FALSE;
     GDALDatasetH hDstDS = nullptr;
+    // #694: the handle must be closed exactly once. Null it after every close
+    // so the catch(...) safety net below can never double-close, and remember
+    // whether the warp actually completed: only then may the output be kept —
+    // an unexpected throw after a good warp must not delete the result.
+    bool warpCompleted = false;
     try {
         hDstDS = GDALWarp(outputPath.c_str(), nullptr, 1, &hSrcDS, psOptions, &bUsageError);
         GDALWarpAppOptionsFree(psOptions);
 
         if (context.isCancelled()) {
-            if (hDstDS) GDALClose(hDstDS);
+            if (hDstDS) {
+                GDALClose(hDstDS);
+                hDstDS = nullptr;
+            }
             QFile::remove(QString::fromStdString(outputPath));
             throw RSOperatorError(ErrorCode::Cancelled, logLabel + " cancelled");
         }
 
         if (!hDstDS || bUsageError) {
-            if (hDstDS) GDALClose(hDstDS);
+            if (hDstDS) {
+                GDALClose(hDstDS);
+                hDstDS = nullptr;
+            }
             QFile::remove(QString::fromStdString(outputPath));
             throw RSOperatorError(ErrorCode::GdalError,
                                   logLabel + " failed for output: " + outputPath);
@@ -178,12 +189,19 @@ std::pair<int, int> runGdalWarpOnDataset(GDALDatasetH hSrcDS,
         const int outputWidth = GDALGetRasterXSize(hDstDS);
         const int outputHeight = GDALGetRasterYSize(hDstDS);
         GDALClose(hDstDS);
+        hDstDS = nullptr;
+        warpCompleted = true;
 
         context.reportProgress(1.0, logLabel + " complete");
         return {outputWidth, outputHeight};
     } catch (...) {
-        if (hDstDS) GDALClose(hDstDS);
-        QFile::remove(QString::fromStdString(outputPath));
+        if (hDstDS) {
+            GDALClose(hDstDS);
+            hDstDS = nullptr;
+        }
+        if (!warpCompleted) {
+            QFile::remove(QString::fromStdString(outputPath));
+        }
         throw;
     }
 }

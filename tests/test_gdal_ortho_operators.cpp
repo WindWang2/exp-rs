@@ -19,7 +19,10 @@
 #include <ogr_srs_api.h>
 
 #include <QDir>
+#include <QFile>
 #include <QTemporaryDir>
+
+#include <atomic>
 
 using namespace sicnu::operators;
 using namespace sicnu::operators::gdal;
@@ -141,6 +144,36 @@ TEST_CASE("GdalOrthorectificationOperator rejects raster without RPC/GCP", "[gda
     } catch (const RSOperatorError& e) {
         REQUIRE(e.code() == ErrorCode::InvalidInputData);
     }
+}
+
+TEST_CASE("Orthorectification cancel leaves no partial output", "[gdal][cancel]") {
+    // #694: a cancelled warp must not leave a partial GTiff at the user's
+    // output path. The ortho operator used to inline the warp without the
+    // cancel check, so a cancelled run kept the truncated file.
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
+
+    QString input = createGcpRaster(tempDir.path(), "cancel_in.tif", 32, 32);
+    QString output = tempDir.path() + QDir::separator() + "cancel_out.tif";
+
+    auto op = std::make_unique<GdalOrthorectificationOperator>();
+    std::atomic<bool> cancelled{true};
+    RSOperatorContext ctx;
+    ctx.setCancelFlag(&cancelled);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = input.toStdString();
+    params["output"] = output.toStdString();
+
+    bool cancelledThrown = false;
+    try {
+        (void)op->run(params, ctx);
+        FAIL("Expected RSOperatorError(Cancelled)");
+    } catch (const RSOperatorError& e) {
+        cancelledThrown = (e.code() == ErrorCode::Cancelled);
+    }
+    REQUIRE(cancelledThrown);
+    REQUIRE_FALSE(QFile::exists(output));
 }
 
 TEST_CASE("GdalOrthorectificationOperator orthorectifies GCP raster", "[gdal]") {
