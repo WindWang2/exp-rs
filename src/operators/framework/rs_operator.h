@@ -120,6 +120,15 @@ public:
      * Memory policy for large-raster processing. Defaults to FullRaster;
      * streaming / external-process operators override it.
      */
+    /// Determinism Grade (ADR 0124 / #659): "bit-exact" when repeated runs
+    /// with identical inputs and parameters produce byte-identical outputs
+    /// (pure per-pixel math, deterministic tie-breaking); "tolerance" when
+    /// floating-point reduction order, threading or iterative solvers may
+    /// vary within tolerance. Exposed on the schema root as
+    /// "determinismGrade" and surfaced through the uniform schema listing
+    /// consumed by GUI / CLI / MCP tools / agents.
+    virtual std::string determinismGrade() const { return "tolerance"; }
+
     virtual RSOperatorMemoryPolicy memoryPolicy() const
     {
       return RSOperatorMemoryPolicy::FullRaster;

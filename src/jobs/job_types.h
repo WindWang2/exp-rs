@@ -25,6 +25,12 @@ struct JobRequest {
   std::string source; // ui|task_panel|dialog|toolbox|module|mcp|workflow
   bool exclusive = false;
   std::string clientTag;
+  /// Scheduling hint mirroring TaskCenter's TaskPriority (0=High, 1=Normal,
+  /// 2=Low). The engine picks queued work best-priority-first (stable by
+  /// arrival) so a burst of submissions cannot invert the caller's priority
+  /// order inside the engine queue (#686). Callers that don't care can leave
+  /// the Normal default.
+  int priority = 1;
 };
 
 struct JobRecord {

@@ -80,6 +80,13 @@ private slots:
     /// transition (TaskCenter::taskUpdated) and chains the next item.
     void onBatchTaskUpdated(const sicnu::AlgorithmTaskInfo &info);
 
+protected:
+    /// #704.1: X/Close while the chain is mid-run silently abandoned it —
+    /// the in-flight item kept running and auto-loading. Mirror
+    /// RasterProcessingDialogBase::reject().
+    void reject() override;
+    void closeEvent( QCloseEvent *event ) override;
+
 private:
     void setupUi();
     void updateAlgorithmParameters();

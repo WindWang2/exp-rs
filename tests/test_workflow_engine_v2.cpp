@@ -249,3 +249,31 @@ TEST_CASE( "fromJson rejects invalid payloads instead of defaulting", "[workflow
     REQUIRE( !err.empty() );
   }
 }
+// ---------------------------------------------------------------------------
+// #697 residue: WorkflowRun::fromJson rejects unknown step statuses and
+// duplicate stepPlans ids (a torn/edited checkpoint must not silently dodge
+// recovery reconciliation).
+// ---------------------------------------------------------------------------
+TEST_CASE( "WorkflowRun::fromJson rejects unknown step status and duplicate ids (#697)",
+           "[workflow][v2][checkpoint]" )
+{
+  auto baseRun = WorkflowRun::createFromDefinition( makeSingleStepDefinition(), "validate-run" );
+  REQUIRE( baseRun != nullptr );
+  std::string err;
+  const Json::Value good = baseRun->toJson();
+  REQUIRE( WorkflowRun::fromJson( good, err ) != nullptr );
+
+  // Unknown status vocabulary.
+  Json::Value badStatus = good;
+  badStatus["stepPlans"][0]["status"] = "Runing"; // typo
+  err.clear();
+  REQUIRE( WorkflowRun::fromJson( badStatus, err ) == nullptr );
+  REQUIRE( err.find( "unknown step status" ) != std::string::npos );
+
+  // Duplicate plan ids skew progress/lookup.
+  Json::Value dupIds = good;
+  dupIds["stepPlans"].append( good["stepPlans"][0] ); // same stepId twice
+  err.clear();
+  REQUIRE( WorkflowRun::fromJson( dupIds, err ) == nullptr );
+  REQUIRE( err.find( "duplicate stepPlans id" ) != std::string::npos );
+}

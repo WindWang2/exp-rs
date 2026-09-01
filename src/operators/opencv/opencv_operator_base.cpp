@@ -8,11 +8,39 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_schema.h"
 
+#include <QMutex>
 #include <QString>
+
+#include <opencv2/core.hpp>
 
 namespace sicnu::operators::opencv {
 
+namespace {
+// Cap OpenCV's internal parallel_for threads (#692): GaussianBlur / median /
+// Canny defaulted to one thread per core, multiplying the ChunkedProcessor
+// fan and oversubscribing JobEngine workers. Applied once per process.
+void capOpenCvThreadsOnce()
+{
+    static QMutex mutex;
+    QMutexLocker locker(&mutex);
+    static bool capped = false;
+    if (capped)
+        return;
+    capped = true;
+    // SICNU_CV_THREADS overrides (a positive count sets it; an explicit 0
+    // disables OpenCV-internal threading entirely).
+    int threads = 2;
+    if (qEnvironmentVariableIsSet("SICNU_CV_THREADS")) {
+        const int envVal = qEnvironmentVariableIntValue("SICNU_CV_THREADS");
+        if (envVal >= 0)
+            threads = envVal;
+    }
+    cv::setNumThreads(threads);
+}
+} // namespace
+
 Json::Value OpenCvOperatorBase::run(const Json::Value& params, RSOperatorContext& context) {
+    capOpenCvThreadsOnce();
     validateCommonParams(params);
 
     const std::string inputPath = requireString(params, "input");

@@ -603,18 +603,24 @@ public:
     IntegralImage(const float *input, int width, int height)
         : m_width(width), m_height(height)
     {
-        // Build integral images for sum, sum-of-squares, and valid count
-        m_sum.resize((width + 1) * (height + 1), 0.0);
-        m_sumSq.resize((width + 1) * (height + 1), 0.0);
-        m_count.resize((width + 1) * (height + 1), 0);
+        // Build integral images for sum, sum-of-squares, and valid count.
+        // Strides and indexes in size_t (#691): (width+1)*(height+1) and
+        // (y+1)*(width+1) overflow int32 at 46341^2 and per-pixel beyond
+        // ~2^31 elements (e.g. a 100000x30000 strip at y>21473) — silent
+        // corrupt indexing / std::length_error on very large rasters.
+        m_rowStride = static_cast<std::size_t>(width) + 1;
+        const std::size_t cells = m_rowStride * (static_cast<std::size_t>(height) + 1);
+        m_sum.resize(cells, 0.0);
+        m_sumSq.resize(cells, 0.0);
+        m_count.resize(cells, 0);
 
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                float val = input[y * width + x];
-                int idx = (y + 1) * (m_width + 1) + (x + 1);
-                int idxLeft = (y + 1) * (m_width + 1) + x;
-                int idxUp = y * (m_width + 1) + (x + 1);
-                int idxDiag = y * (m_width + 1) + x;
+                float val = input[static_cast<std::size_t>(y) * width + x];
+                const std::size_t idx = (static_cast<std::size_t>(y) + 1) * m_rowStride + (x + 1);
+                const std::size_t idxLeft = (static_cast<std::size_t>(y) + 1) * m_rowStride + x;
+                const std::size_t idxUp = static_cast<std::size_t>(y) * m_rowStride + (x + 1);
+                const std::size_t idxDiag = static_cast<std::size_t>(y) * m_rowStride + x;
 
                 if (std::isfinite(val)) {
                     m_sum[idx] = m_sum[idxLeft] + m_sum[idxUp] - m_sum[idxDiag] + val;
@@ -632,7 +638,7 @@ public:
     }
 
     void computeRegion(int x1, int y1, int x2, int y2,
-                       double &sum, double &sumSq, int &count) const
+                       double &sum, double &sumSq, qint64 &count) const
     {
         // Clamp to valid pixel range
         x1 = std::clamp(x1, 0, m_width - 1);
@@ -640,33 +646,34 @@ public:
         x2 = std::clamp(x2, 0, m_width - 1);
         y2 = std::clamp(y2, 0, m_height - 1);
 
-        // Integral image uses 1-indexed coordinates
-        int r1 = y1;
-        int r2 = y2 + 1;
-        int c1 = x1;
-        int c2 = x2 + 1;
+        // Integral image uses 1-indexed coordinates (size_t stride, #691)
+        const std::size_t r1 = static_cast<std::size_t>(y1);
+        const std::size_t r2 = static_cast<std::size_t>(y2) + 1;
+        const std::size_t c1 = static_cast<std::size_t>(x1);
+        const std::size_t c2 = static_cast<std::size_t>(x2) + 1;
 
-        sum = m_sum[r2 * (m_width+1) + c2]
-            - m_sum[r1 * (m_width+1) + c2]
-            - m_sum[r2 * (m_width+1) + c1]
-            + m_sum[r1 * (m_width+1) + c1];
+        sum = m_sum[r2 * m_rowStride + c2]
+            - m_sum[r1 * m_rowStride + c2]
+            - m_sum[r2 * m_rowStride + c1]
+            + m_sum[r1 * m_rowStride + c1];
 
-        sumSq = m_sumSq[r2 * (m_width+1) + c2]
-              - m_sumSq[r1 * (m_width+1) + c2]
-              - m_sumSq[r2 * (m_width+1) + c1]
-              + m_sumSq[r1 * (m_width+1) + c1];
+        sumSq = m_sumSq[r2 * m_rowStride + c2]
+              - m_sumSq[r1 * m_rowStride + c2]
+              - m_sumSq[r2 * m_rowStride + c1]
+              + m_sumSq[r1 * m_rowStride + c1];
 
-        count = m_count[r2 * (m_width+1) + c2]
-              - m_count[r1 * (m_width+1) + c2]
-              - m_count[r2 * (m_width+1) + c1]
-              + m_count[r1 * (m_width+1) + c1];
+        count = m_count[r2 * m_rowStride + c2]
+              - m_count[r1 * m_rowStride + c2]
+              - m_count[r2 * m_rowStride + c1]
+              + m_count[r1 * m_rowStride + c1];
     }
 
 private:
     int m_width, m_height;
+    std::size_t m_rowStride = 0;
     std::vector<double> m_sum;
     std::vector<double> m_sumSq;
-    std::vector<int> m_count;
+    std::vector<qint64> m_count;
 };
 
 static void localStats(const IntegralImage &integral, int width, int height,
@@ -681,7 +688,7 @@ static void localStats(const IntegralImage &integral, int width, int height,
     int y2 = std::clamp(cy + half, 0, height - 1);
 
     double sum, sumSq;
-    int count;
+    qint64 count;
     integral.computeRegion(x1, y1, x2, y2, sum, sumSq, count);
     if (count <= 0) {
         mean = 0.0f;
@@ -743,7 +750,10 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
                 } else {
                     float cuSq = noiseVariance;
                     float clSq = localVar / (mean * mean);
-                    float weight = (clSq <= cuSq) ? 0.0f : (1.0f - cuSq / clSq) / (1.0f + cuSq);
+                    // Lee weight is (1 - Cu^2/Ci^2); the Kuan filter adds
+                    // the extra 1/(1+Cu^2) factor (see :978) — the previous
+                    // copy here made Lee ≡ Kuan (#678).
+                    float weight = (clSq <= cuSq) ? 0.0f : 1.0f - cuSq / clSq;
                     output[y * width + x] = mean + weight * (pixel - mean);
                 }
             }
@@ -975,7 +985,9 @@ void ImageEnhancement::kuanFilter(const float *input, float *output,
                     // Local variation less than noise → full smoothing
                     weight = 0.0f;
                 } else {
-                weight = (1.0f - cuSq / clSq) / (1.0f + cuSq);
+                // Kuan keeps the extra 1/(1+Cu^2) factor that Lee drops
+                // (#678 — a shared perl edit stripped it from BOTH filters).
+                weight = ( 1.0f - cuSq / clSq ) / ( 1.0f + cuSq );
             }
 
             output[y * width + x] = mean + weight * (pixel - mean);
@@ -1201,74 +1213,83 @@ void ImageEnhancement::jacobiEigen(std::vector<std::vector<float>> &A, int n,
     for (int i = 0; i < n; i++)
         eigenvectors[i][i] = 1.0f;
 
-    const int maxIter = 200;
-    const float tolerance = 1e-10f;
+    eigenvalues.assign(n, 0.0f);
+    if (n <= 0)
+        return;
+    if (n == 1) {
+        eigenvalues[0] = A[0][0];
+        return;
+    }
 
-    for (int iter = 0; iter < maxIter; iter++) {
-        // Find largest off-diagonal element
+    // Classical cyclic Jacobi (#670): full sweeps of Givens rotations with a
+    // RELATIVE convergence test. The previous solver performed at most 200
+    // individual rotations with an absolute 1e-10 tolerance on covariance
+    // entries — one classical sweep alone needs n(n-1)/2 rotations (a
+    // 224-band hyperspectral cube needs ~25k per sweep), and the absolute
+    // tolerance is unreachable for DN-scale entries (10^4..10^6), so PCA/MNF
+    // silently returned partial-rotation components for >~15 bands.
+    const int maxSweeps = 60;
+    const float eps = std::numeric_limits<float>::epsilon();
+
+    for (int sweep = 0; sweep < maxSweeps; sweep++) {
         float maxOff = 0.0f;
-        int p = 0, q = 1;
+        float maxDiag = 0.0f;
         for (int i = 0; i < n; i++) {
-            for (int j = i + 1; j < n; j++) {
-                if (std::abs(A[i][j]) > maxOff) {
-                    maxOff = std::abs(A[i][j]);
-                    p = i;
-                    q = j;
-                }
-            }
+            maxDiag = std::max(maxDiag, std::abs(A[i][i]));
+            for (int j = i + 1; j < n; j++)
+                maxOff = std::max(maxOff, std::abs(A[i][j]));
         }
 
-        if (maxOff < tolerance)
+        // Relative test: converged when the off-diagonal energy is at the
+        // float rounding level of the diagonal magnitude.
+        if (maxOff <= eps * std::max(maxDiag, 1.0f))
             break;
 
-        // Compute rotation angle
-        float app = A[p][p];
-        float aqq = A[q][q];
-        float apq = A[p][q];
+        for (int p = 0; p < n; p++) {
+            for (int q = p + 1; q < n; q++) {
+                const float apq = A[p][q];
+                // Skip numerically-already-zero pairs: rotating them would
+                // only add rounding noise.
+                if (std::abs(apq) <= eps * std::max(std::abs(A[p][p]), std::abs(A[q][q])))
+                    continue;
 
-        float theta;
-        if (std::abs(app - aqq) < 1e-15f) {
-            theta = static_cast<float>(M_PI / 4.0);
-        } else {
-            theta = 0.5f * std::atan2(2.0f * apq, aqq - app);
-        }
+                const float theta = 0.5f * std::atan2(2.0f * apq, A[q][q] - A[p][p]);
+                const float c = std::cos(theta);
+                const float s = std::sin(theta);
 
-        float c = std::cos(theta);
-        float s = std::sin(theta);
+                // A' = G^T * A * G: update rows/cols p and q.
+                const float app = A[p][p];
+                const float aqq = A[q][q];
+                const float newApp = c * c * app + s * s * aqq - 2.0f * s * c * apq;
+                const float newAqq = s * s * app + c * c * aqq + 2.0f * s * c * apq;
 
-        // Compute new matrix elements: A' = G^T * A * G
-        // Only update rows/cols p and q (others unchanged)
-        float newApp = c * c * app + s * s * aqq - 2.0f * s * c * apq;
-        float newAqq = s * s * app + c * c * aqq + 2.0f * s * c * apq;
-        float newApq = 0.0f; // By construction
+                for (int r = 0; r < n; r++) {
+                    if (r == p || r == q) continue;
+                    const float arp = A[r][p];
+                    const float arq = A[r][q];
+                    A[r][p] = c * arp - s * arq;
+                    A[p][r] = A[r][p];
+                    A[r][q] = s * arp + c * arq;
+                    A[q][r] = A[r][q];
+                }
 
-        // Update off-diagonal elements in rows/cols p and q
-        for (int r = 0; r < n; r++) {
-            if (r == p || r == q) continue;
-            float arp = A[r][p];
-            float arq = A[r][q];
-            A[r][p] = c * arp - s * arq;
-            A[p][r] = A[r][p];
-            A[r][q] = s * arp + c * arq;
-            A[q][r] = A[r][q];
-        }
+                A[p][p] = newApp;
+                A[q][q] = newAqq;
+                A[p][q] = 0.0f; // by construction
+                A[q][p] = 0.0f;
 
-        A[p][p] = newApp;
-        A[q][q] = newAqq;
-        A[p][q] = newApq;
-        A[q][p] = newApq;
-
-        // Update eigenvectors
-        for (int r = 0; r < n; r++) {
-            float erp = eigenvectors[r][p];
-            float erq = eigenvectors[r][q];
-            eigenvectors[r][p] = c * erp - s * erq;
-            eigenvectors[r][q] = s * erp + c * erq;
+                // Accumulate eigenvectors: V' = V * G.
+                for (int r = 0; r < n; r++) {
+                    const float erp = eigenvectors[r][p];
+                    const float erq = eigenvectors[r][q];
+                    eigenvectors[r][p] = c * erp - s * erq;
+                    eigenvectors[r][q] = s * erp + c * erq;
+                }
+            }
         }
     }
 
     // Extract eigenvalues from diagonal
-    eigenvalues.resize(n);
     for (int i = 0; i < n; i++)
         eigenvalues[i] = A[i][i];
 }

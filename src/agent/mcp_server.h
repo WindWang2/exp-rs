@@ -129,6 +129,8 @@ protected:
     QVariantMap handleSpatialToolCall(const QString &toolId, const QVariantMap &parameters);
 
 private:
+    /// Set by the initialize handshake; gates other requests with -32002.
+    bool m_initialized = false;
     /// Unified tool execution helper routing calls through ToolCallDispatcher
     QVariantMap dispatchToolCall(const QString &toolId, const QVariantMap &parameters, bool isOperatorCall);
     /// Allow-list: rs:, gdal:, gdal_tools:, otb:, qgis:, qgis_algorithms:, opencv:; custom_tools: only with SICNU_MCP_TRUST_CUSTOM_TOOLS=1

@@ -314,11 +314,19 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
         }
     }
 
+    // Standardize features (#682): the K-Means eps=1e-4 termination is
+    // tuned for z-score features (ADR 0050), and the GUI path fits the scaler
+    // on train features. Fitting here mirrors that behavior on the direct-
+    // trainX path, where the pipeline's fitScaler flag is otherwise ignored.
+    RsFeatureScaler scaler;
+    scaler.fit(trainX);
+
     RsClassificationPipeline::Config cfg;
     cfg.sourceRaster = QString::fromStdString(inputPath);
     cfg.outputRaster = QString::fromStdString(outputPath);
     cfg.bandIndices = QVector<int>(bands.begin(), bands.end());
-    cfg.trainX = trainX;
+    cfg.scaler = scaler;
+    cfg.trainX = scaler.isFitted() ? scaler.transform(trainX) : trainX;
     // KMeans fit() ignores y, but the pipeline requires a non-empty trainY
     // when the backend is not fitted. Dummy zeros satisfy the check.
     // methodName is metadata only (log + sidecar) — the cluster→class remap

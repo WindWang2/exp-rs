@@ -519,8 +519,16 @@ void RasterProcessingDialogBase::handleCompleted( const QString &outputPath )
   if ( shouldAutoAcceptOnSuccess() )
     accept();
   else
+  {
+    // #674 review: with the TaskCenter auto-load disabled for this seam,
+    // a review dialog that stays open had NO load path left (the
+    // post-classification dialog never loads on accept). The dialog is the
+    // single owner: emit for the main window to load.
     QgsMessageLog::logMessage( tr( "%1 结果已在对话框中展示，请查看后手动关闭。" ).arg( dialogTitle() ),
                                toolName(), Qgis::MessageLevel::Info );
+    if ( !outputPath.isEmpty() )
+      emit resultReadyForDisplay( outputPath );
+  }
 }
 
 void RasterProcessingDialogBase::handleFailed( const QString &error )

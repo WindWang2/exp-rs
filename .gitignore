@@ -88,3 +88,4 @@ vcpkg_installed/
 run_sicnu_geo_rs.bat
 
 # Agent-session planning artifacts (audit leftovers) must not be committed at the repo root.
+benchmarks/

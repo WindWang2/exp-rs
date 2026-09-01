@@ -11,6 +11,15 @@
 namespace SpectralIndices
 {
 
+static bool isScaledReflectance(const float *a, const float *b, size_t n) {
+    float m = 0.0f;
+    for (size_t i = 0; i < n && m <= 5.0f; i++)
+        if (std::isfinite(a[i])) m = std::max(m, std::abs(a[i]));
+    for (size_t i = 0; i < n && m <= 5.0f; i++)
+        if (std::isfinite(b[i])) m = std::max(m, std::abs(b[i]));
+    return m > 5.0f; // 0..10000 DN lands here; 0..1 reflectance never does
+}
+
 bool ndvi(const float *nir, const float *red, float *out, size_t count)
 {
     if (!nir || !red || !out) {
@@ -29,13 +38,33 @@ bool evi(const float *nir, const float *red, const float *blue, float *out, size
         return false;
     }
     if (count == 0) return false;
+    const bool scaled = isScaledReflectance(nir, red, count);
+    if (scaled) {
+        for (size_t i = 0; i < count; i++) {
+            if (!std::isfinite(nir[i]) || !std::isfinite(red[i]) || (blue && !std::isfinite(blue[i]))) {
+                out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+            }
+            const float denom = nir[i] + 6.0f * red[i] - 7.5f * blue[i] + 10000.0f;
+            out[i] = MathUtils::safeDiv(2.5f * (nir[i] - red[i]), denom);
+        }
+        return true;
+    }
     for (size_t i = 0; i < count; i++) {
+        if (!std::isfinite(nir[i]) || !std::isfinite(red[i]) || (blue && !std::isfinite(blue[i]))) {
+            out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+        }
         float denom = nir[i] + 6.0f * red[i] - 7.5f * blue[i] + 1.0f;
         out[i] = MathUtils::safeDiv(2.5f * (nir[i] - red[i]), denom);
     }
     return true;
 }
 
+// Scale heuristic for #680: the stack output copies pixels verbatim (no
+// gain/bias applied, satellite_products.cpp:1515), but stamps
+// SICNU_RADIOMETRIC_STATE = reflectance — so S2/Landsat L2 values sit on
+// 0..10000. SAVI with L=0.5 is then negligible (SAVI ~= 1.5*NDVI). Detect
+// the DN scale by the magnitude of the samples (max absolute > 5) and
+// scale L/EWI constant proportionally, matching the index magnitude.
 bool savi(const float *nir, const float *red, float *out, size_t count)
 {
     if (!nir || !red || !out) {
@@ -43,9 +72,16 @@ bool savi(const float *nir, const float *red, float *out, size_t count)
         return false;
     }
     if (count == 0) return false;
-    constexpr float L = 0.5f;
+    const bool scaled = isScaledReflectance(nir, red, count);
+    // Only the soil-brightness term scales with the data (L=0.5 on [0,1]
+    // reflectance → 0.5*10000 on DN-scaled products): the trailing factor
+    // (1+L) is dimensionless and must stay 1.5 in BOTH regimes — scaling it
+    // too multiplied DN-scale outputs by ~3334x (#680 review).
+    const float L = scaled ? 5000.0f : 0.5f;
+    constexpr float kOnePlusL = 1.5f;
     for (size_t i = 0; i < count; i++) {
-        out[i] = MathUtils::safeDiv(nir[i] - red[i], nir[i] + red[i] + L) * (1.0f + L);
+        if (!std::isfinite(nir[i]) || !std::isfinite(red[i])) { out[i] = std::numeric_limits<float>::quiet_NaN(); continue; }
+        out[i] = MathUtils::safeDiv(nir[i] - red[i], nir[i] + red[i] + L) * kOnePlusL;
     }
     return true;
 }

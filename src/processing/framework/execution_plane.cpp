@@ -102,12 +102,12 @@ ExecutionContext ExecutionPlane::contextFor( long taskId ) const
   return ctx;
 }
 
-bool ExecutionPlane::watch( long taskId,
+long ExecutionPlane::watch( long taskId,
                             std::function<void( const sicnu::AlgorithmTaskInfo & )> deliver,
                             QObject *affinityContext ) const
 {
   if ( taskId <= 0 || !deliver )
-    return false;
+    return 0;
 
   auto dispatch = [deliver, affinityContext]( const sicnu::AlgorithmTaskInfo &info ) {
     deliverOnAffinity( affinityContext, [info, deliver]() { deliver( info ); } );
@@ -115,10 +115,23 @@ bool ExecutionPlane::watch( long taskId,
 
   // addTaskCompletionCallback returns >0 when registered, and 0 both for an
   // unknown task and for an already-terminal task where it fired the callback
-  // inline — distinguish by task existence.
-  if ( sicnu::TaskCenter::instance().addTaskCompletionCallback( taskId, std::move( dispatch ) ) > 0 )
-    return true;
-  return sicnu::TaskCenter::instance().getTaskInfo( taskId ).taskId == taskId;
+  // inline — distinguish by task existence. The token is surfaced so callers
+  // can remove a never-fired registration instead of leaking it (#702).
+  const long token =
+      sicnu::TaskCenter::instance().addTaskCompletionCallback( taskId, std::move( dispatch ) );
+  if ( token > 0 )
+    return token;
+  // Already-terminal: the callback fired inline; nothing removable. Keep the
+  // legacy truthy "delivered" semantics via a negative sentinel that
+  // removeWatch() ignores.
+  return sicnu::TaskCenter::instance().getTaskInfo( taskId ).taskId == taskId ? -1 : 0;
+}
+
+void ExecutionPlane::removeWatch( long taskId, long token ) const
+{
+  if ( taskId <= 0 || token <= 0 )
+    return;
+  sicnu::TaskCenter::instance().removeTaskCompletionCallback( taskId, token );
 }
 
 void ExecutionPlane::deliverOnAffinity( QObject *affinityContext, std::function<void()> fn )

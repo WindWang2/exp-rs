@@ -610,7 +610,12 @@ TEST_CASE("McpServer executes qgis processing algorithms to terminal state", "[a
     QVariantMap status = server.testGetExecutionStatus(execId);
     REQUIRE(status.value("execution_id").toString() == execId);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    sicnu::jobs::JobEngine::instance().shutdown();
+    // Test-scope cleanup only (#684 made production shutdown latched: a
+    // later submit must NOT resurrect worker threads). shutdownForTests
+    // joins the pool AND clears the latch, so subsequent test cases keep
+    // executing; the production call here used to rely on the old
+    // submit-side m_stop reset to keep working.
+    sicnu::jobs::JobEngine::instance().shutdownForTests();
 }
 
 TEST_CASE("McpServer describe_dataset exposes semantic band roles", "[agent][mcp][semantic]") {
@@ -1124,6 +1129,13 @@ TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][s
 
     TestMcpServer server;
 
+    // The initialize handshake gates other requests with -32002 (#701).
+    QVariantMap initReq;
+    initReq[QStringLiteral( "id" )] = 0;
+    initReq[QStringLiteral( "method" )] = QStringLiteral( "initialize" );
+    server.testHandleRequest( initReq );
+    REQUIRE( server.lastResponseId.toInt() == 0 );
+
     // tools/call dispatch: full JSON-RPC path for a spatial: tool.
     QVariantMap callReq;
     callReq[QStringLiteral( "id" )] = 42;
@@ -1225,3 +1237,38 @@ TEST_CASE( "McpServer::handleSearchAlgorithms performs case-insensitive inputTyp
 }
 
 
+
+// ---------------------------------------------------------------------------
+// #688: in MCP mode the project is always empty (autoLoad=false on every
+// submission path) — list_layers/describe_dataset must answer from the
+// DataManager asset catalog or the agent cannot discover committed outputs.
+// ---------------------------------------------------------------------------
+TEST_CASE( "list_layers and describe_dataset answer from the asset catalog when the project is empty (#688)",
+           "[agent][mcp][headless]" )
+{
+  using namespace sicnu::data;
+
+  const auto manager = makeLineageDataManager();
+  REQUIRE( manager );
+
+  TestMcpServer server;
+  server.setDataManager( manager.get() );
+
+  RegisterRequest request;
+  request.source = memoryRasterSource( QStringLiteral( "headless-scene" ) );
+  const auto registered = manager->registerSource( request );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+
+  // Project has no layers: the catalog fallback must list the asset.
+  const QVariantMap listed = server.testListLayers();
+  const QVariantList layers = listed.value( QStringLiteral( "layers" ) ).toList();
+  REQUIRE( layers.size() == 1 );
+  const QVariantMap first = layers.first().toMap();
+  CHECK( first.value( QStringLiteral( "id" ) ).toString() == registered.assetId.toString() );
+  CHECK( first.value( QStringLiteral( "source" ) ).toString() == QStringLiteral( "headless-scene" ) );
+
+  // describe_dataset resolves the same asset by id in headless mode.
+  const QVariantMap described = server.testDescribeDataset( registered.assetId.toString() );
+  CHECK( described.value( QStringLiteral( "id" ) ).toString() == registered.assetId.toString() );
+  CHECK( described.value( QStringLiteral( "source" ) ).toString() == QStringLiteral( "headless-scene" ) );
+}

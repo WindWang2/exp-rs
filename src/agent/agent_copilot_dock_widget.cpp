@@ -424,6 +424,13 @@ void AgentCopilotDockWidget::onSendClicked()
     // for this run so the user-visible stop button actually stops processing.
     m_client->cancel();
     cancelCurrentRunTasks();
+    // #704.2: a tool completion landing after Stop used to re-enter
+    // sendToolResultFollowUp, set m_isStreaming and re-contact the LLM —
+    // overriding the user's stop. Bumping the epoch makes every in-flight
+    // completion callback of this run a no-op (same cross-run guard
+    // sendPrompt uses), and clearing the pending map drops them promptly.
+    ++m_runEpoch;
+    m_pendingToolCallCompletions.clear();
     onLlmFinished();
     setRunStage( tr( "Canceled" ) );
     return;

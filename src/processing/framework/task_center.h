@@ -100,6 +100,12 @@ struct AlgorithmTaskInfo {
     QString outputLayerPath;
     QString stepId;
     long pipelineId = -1;
+    /// Per-task resolved RAM estimate (MiB), computed once at enqueue from
+    /// the registry-backed resolver (#702: re-resolving per scheduling pass
+    /// hit the registry for every running task on every pass). Valid when
+    /// estimateResolved is set; 0 otherwise.
+    unsigned int resolvedEstimateMb = 0;
+    bool estimateResolved = false;
 };
 
 struct PipelineExecutionInfo {
@@ -174,7 +180,11 @@ public:
     bool cancelPipeline(long pipelineId);
     bool pauseTask(long taskId);
     bool resumeTask(long taskId);
-    bool retryTask(long taskId);
+    /// Re-run a terminal task. Returns the NEW task id (> 0) on success and 0
+    /// on failure (0 preserves legacy bool-style checks: a failed retry is
+    /// falsy). The retry drops parents that are not Completed (#685) and
+    /// stays attached to the original pipeline step (#702).
+    long retryTask(long taskId);
 
     void updateTaskProgress(long taskId, double progress);
     void appendTaskLog(long taskId, const QString& message);

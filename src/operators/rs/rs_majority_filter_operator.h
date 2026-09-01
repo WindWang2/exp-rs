@@ -23,6 +23,7 @@ class RsMajorityFilterOperator : public RSOperator {
 public:
     std::string name() const override { return "rs:majority_filter"; }
     std::string displayName() const override { return "3x3 Majority Filter"; }
+    std::string determinismGrade() const override { return "bit-exact"; } // #659 (ADR 0124)
     std::string group() const override { return "classification"; }
     std::string description() const override {
         return "Apply a majority sliding-window filter to a classification raster to reduce noise.";

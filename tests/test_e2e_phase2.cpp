@@ -1014,13 +1014,20 @@ TEST_CASE("Tier 2 - Subsystem: WorkflowRuntime non-existent step error handling"
     runtime.close(sessionId);
 }
 
-TEST_CASE("Tier 2 - Subsystem: JobEngine max worker clamping boundaries", "[e2e][tier2][subsystem]") {
+TEST_CASE("Tier 2 - Subsystem: JobEngine max worker floor and explicit overrides", "[e2e][tier2][subsystem]") {
     auto &engine = JobEngine::instance();
+    // #661: the historical 2..4 clamp silently capped multi-core
+    // workstations; overrides are honored (no upper clamp —
+    // oversubscription is preferable to ignoring the caller) and
+    // misconfiguration clamps to a safe floor of 1.
     engine.setMaxWorkers(-5);
-    CHECK(engine.maxWorkers() == 2); // Clamped to min 2
+    CHECK(engine.maxWorkers() == 1); // safe floor
+
+    engine.setMaxWorkers(0);
+    CHECK(engine.maxWorkers() == 1);
 
     engine.setMaxWorkers(100);
-    CHECK(engine.maxWorkers() == 4); // Clamped to max 4
+    CHECK(engine.maxWorkers() == 100); // explicit override honored
 
     engine.setMaxWorkers(3);
     CHECK(engine.maxWorkers() == 3);

@@ -446,10 +446,11 @@ bool processFileMultiBand(const QString &sourcePath, const QString &outputPath,
             *errorMessage = createError;
         return false;
     }
-    bool hasFirstNoData = false;
-    const double firstNodata = srcDataset.bandNoDataValue(1, &hasFirstNoData);
-    if (hasFirstNoData)
-        outDataset.setBandNoDataValue(1, firstNodata);
+    // Per-band NaN sentinel so clamped-0 valid pixels don't collide with
+    // the NoData declaration and NaN invalid pixels are actually masked in
+    // every band, not just honest-to-goodness band-1 (#675).
+    for (int b = 0; b < bandCount; ++b)
+        outDataset.setBandNoDataValue(b + 1, std::numeric_limits<float>::quiet_NaN());
 
     constexpr int kTile = 256;
     std::vector<float> dark(bandCount), bright(bandCount);

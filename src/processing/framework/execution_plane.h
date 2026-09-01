@@ -198,12 +198,20 @@ class ExecutionPlane
     /// terminal transition, outside TaskCenter locks. When @a affinityContext
     /// is given, @a deliver runs on that QObject's thread (QueuedConnection)
     /// whenever the transitioning thread differs and a QCoreApplication exists
-    /// — otherwise @a deliver runs inline. Returns false when the task is
-    /// unknown. If the task is already terminal, @a deliver runs inline on the
-    /// calling thread immediately.
-    bool watch( long taskId,
+    /// — otherwise @a deliver runs inline. Returns 0 when the task is unknown;
+    /// otherwise a nonzero registration: a positive token that removeWatch()
+    /// accepts to drop a not-yet-fired registration (without it a task that
+    /// never reaches terminal kept its captured state alive for the process
+    /// lifetime, #702), or the sentinel -1 when the task was already terminal
+    /// and @a deliver ran inline on the calling thread (legacy truthiness —
+    /// removeWatch() ignores it).
+    long watch( long taskId,
                 std::function<void( const sicnu::AlgorithmTaskInfo &)> deliver,
                 QObject *affinityContext = nullptr ) const;
+
+    /// Remove a not-yet-fired watch registration (no-op after the callback
+    /// fired or for an unknown/sentinel token).
+    void removeWatch( long taskId, long token ) const;
 
     /// Marshal @a fn onto @a affinityContext's thread when needed: queued when
     /// the current thread differs and an application object exists, inline

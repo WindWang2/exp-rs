@@ -545,3 +545,131 @@ TEST_CASE( "Benchmark: SAR speckle filters (Lee & Enhanced Lee)", "[benchmark][s
     } );
 }
 
+// ---------------------------------------------------------------------------
+// #660: the remaining streaming-candidate workloads (qa_mask / recode /
+// majority_filter) and one representative multi-step pipeline, so every
+// performance ticket gets a before/after against the same harness.
+// ---------------------------------------------------------------------------
+TEST_CASE( "Benchmark: qa_mask (streaming candidate)", "[benchmark]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const bool large = largeBench();
+    const int W = large ? 2048 : 512;
+    const int H = large ? 2048 : 512;
+    const QString inPath = dir.filePath( QStringLiteral( "qa_in.tif" ) );
+    const QString outPath = dir.filePath( QStringLiteral( "qa_out.tif" ) );
+    buildSyntheticRaster( inPath, W, H, 1 );
+
+    sicnu::operators::RSOperatorContext ctx;
+    runBench( "qa_mask", [&] {
+        Json::Value params( Json::objectValue );
+        params["input"] = inPath.toStdString();
+        params["output"] = outPath.toStdString();
+        // Synthetic raster carries no band-role metadata: pin the QA band
+        // explicitly and give the generic-bitmask fallback a bit budget
+        // (the operator's documented parameterization for plain rasters).
+        params["qa_band"] = 1;
+        params["bits"] = 3;
+        const Json::Value res = runOperator( "rs:qa_mask", params, ctx );
+        CHECK( res["output"].asString() == outPath.toStdString() );
+    } );
+}
+
+TEST_CASE( "Benchmark: recode (streaming candidate)", "[benchmark]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const bool large = largeBench();
+    const int W = large ? 2048 : 512;
+    const int H = large ? 2048 : 512;
+    const QString inPath = dir.filePath( QStringLiteral( "recode_in.tif" ) );
+    const QString outPath = dir.filePath( QStringLiteral( "recode_out.tif" ) );
+    // Integer class labels (recode's contract): small label domain.
+    ensureGdalInit();
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+    GDALDatasetH ds = createOutputTiff( inPath, W, H, 1, GDT_Byte, gt, QString() );
+    REQUIRE( ds != nullptr );
+    {
+        std::vector<uint8_t> labels( static_cast<size_t>( W ) * H );
+        uint32_t state = 0x12345678u;
+        for ( auto &v : labels )
+            v = static_cast<uint8_t>( lcgFloat( state ) * 8.0f );
+        REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, W, H,
+                               labels.data(), W, H, GDT_Byte, 0, 0 ) == CE_None );
+    }
+    GDALClose( ds );
+
+    sicnu::operators::RSOperatorContext ctx;
+    runBench( "recode", [&] {
+        Json::Value params( Json::objectValue );
+        params["input"] = inPath.toStdString();
+        params["output"] = outPath.toStdString();
+        Json::Value map( Json::objectValue );
+        map["1"] = 11;
+        map["2"] = 12;
+        map["3"] = 13;
+        params["recode_map"] = map;
+        const Json::Value res = runOperator( "rs:recode", params, ctx );
+        CHECK( res["output"].asString() == outPath.toStdString() );
+    } );
+}
+
+TEST_CASE( "Benchmark: majority_filter (halo candidate)", "[benchmark]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const bool large = largeBench();
+    const int W = large ? 1536 : 384; // neighborhood filter: costlier per px
+    const int H = large ? 1536 : 384;
+    const QString inPath = dir.filePath( QStringLiteral( "mf_in.tif" ) );
+    const QString outPath = dir.filePath( QStringLiteral( "mf_out.tif" ) );
+    buildSyntheticRaster( inPath, W, H, 1 );
+
+    sicnu::operators::RSOperatorContext ctx;
+    runBench( "majority_filter", [&] {
+        Json::Value params( Json::objectValue );
+        params["input"] = inPath.toStdString();
+        params["output"] = outPath.toStdString();
+        const Json::Value res = runOperator( "rs:majority_filter", params, ctx );
+        CHECK( res["output"].asString() == outPath.toStdString() );
+    } );
+}
+
+TEST_CASE( "Benchmark: multi-step pipeline (index -> mask -> recode)", "[benchmark][pipeline]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const bool large = largeBench();
+    const int W = large ? 2048 : 512;
+    const int H = large ? 2048 : 512;
+    const QString inPath = dir.filePath( QStringLiteral( "pipe_in.tif" ) );
+    const QString ndviPath = dir.filePath( QStringLiteral( "pipe_ndvi.tif" ) );
+    const QString maskPath = dir.filePath( QStringLiteral( "pipe_mask.tif" ) );
+    const QString outPath = dir.filePath( QStringLiteral( "pipe_out.tif" ) );
+    buildSyntheticRaster( inPath, W, H, 4 );
+
+    sicnu::operators::RSOperatorContext ctx;
+    runBench( "pipeline ndvi|mask|recode", [&] {
+        Json::Value p1( Json::objectValue );
+        p1["input"] = inPath.toStdString();
+        p1["output"] = ndviPath.toStdString();
+        p1["index"] = "ndvi";
+        CHECK( runOperator( "rs:spectral_index", p1, ctx )["output"].asString() == ndviPath.toStdString() );
+
+        Json::Value p2( Json::objectValue );
+        p2["input"] = ndviPath.toStdString();
+        p2["output"] = maskPath.toStdString();
+        p2["qa_band"] = 1; // synthetic NDVI carries no band-role metadata
+        p2["bits"] = 3;    // generic-bitmask fallback budget
+        CHECK( runOperator( "rs:qa_mask", p2, ctx )["output"].asString() == maskPath.toStdString() );
+
+        Json::Value p3( Json::objectValue );
+        p3["input"] = maskPath.toStdString();
+        p3["output"] = outPath.toStdString();
+        Json::Value rmap( Json::objectValue );
+        rmap["1"] = 21;
+        p3["recode_map"] = rmap;
+        CHECK( runOperator( "rs:recode", p3, ctx )["output"].asString() == outPath.toStdString() );
+    } );
+}

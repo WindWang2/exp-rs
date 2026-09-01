@@ -862,7 +862,21 @@ sicnu_discover_tests(test_gdal_multiband_block_stream)
 # Performance benchmarks (Phase B of the perf/architecture goal). Runnable via
 # ctest (small sizes) or directly with SICNU_BENCH_LARGE=1 for nightly profiling.
 # Uses the standard sicnu_add_test link set (operators + task_center + resource_monitor).
-sicnu_add_test(test_perf_benchmarks)
+sicnu_add_test(test_perf_benchmarks TIMEOUT 300 RUN_SERIAL TRUE)
+# #706: the python-bindings smoke test existed but was registered nowhere —
+# it silently never ran in any lane. Guarded on the bindings target existing.
+if(TARGET _sicnu_operators AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bindings.py)
+    set(_sicnu_py ${Python_EXECUTABLE})
+    if(NOT _sicnu_py)
+        set(_sicnu_py python3)
+    endif()
+    add_test(
+        NAME python_bindings_smoke
+        COMMAND ${_sicnu_py} ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bindings.py
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    set_tests_properties(python_bindings_smoke PROPERTIES TIMEOUT 300)
+endif()
+
 
 # Resource-aware scheduler tests (Phase C): pure TaskResourceBudget unit tests +
 # TaskCenter integration of the RAM-budget launch gate.

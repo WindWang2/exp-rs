@@ -243,9 +243,13 @@ void QgisDesktopWindow::refreshStatusTaskSummary()
     const auto tasks = sicnu::TaskCenter::instance().allTasks();
     for ( const auto &t : tasks )
     {
-        if ( t.status == sicnu::TaskStatus::Running )
+        // #704.5: WaitingResource (admission-held) and Cancelling are busy
+        // states too — the old summary showed "Ready" while jobs waited or
+        // were mid-cancel.
+        if ( t.status == sicnu::TaskStatus::Running || t.status == sicnu::TaskStatus::Cancelling )
             ++running;
-        else if ( t.status == sicnu::TaskStatus::Queued || t.status == sicnu::TaskStatus::Paused )
+        else if ( t.status == sicnu::TaskStatus::Queued || t.status == sicnu::TaskStatus::Paused
+                  || t.status == sicnu::TaskStatus::WaitingResource )
             ++queued;
     }
 

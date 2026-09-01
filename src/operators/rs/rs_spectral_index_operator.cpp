@@ -71,6 +71,9 @@ Json::Value RsSpectralIndexOperator::metadata() const {
     meta["tags"].append("nbr");
     meta["tags"].append("dnbr");
     meta["tags"].append("bsi");
+    meta["tags"].append("index");
+    meta["tags"].append("vegetation");
+    meta["tags"].append("water");
     meta["tags"].append("ndre");
     meta["tags"].append("ci");
     meta["tags"].append("ndsi");

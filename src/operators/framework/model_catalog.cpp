@@ -298,6 +298,10 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     markInvalid( "postprocess.simplify is declared but not implemented by any runtime" );
   if ( info.output.threshold >= 0.0 )
     markInvalid( "output.threshold is declared but not executed (use postprocess.mask_threshold, which the runtime enforces)" );
+  if ( !info.output.tensorNames.empty() )
+    markInvalid( "output.tensor_names is declared but not implemented by any runtime - remove it or implement named-output mapping" );
+  if ( !info.output.classes.empty() )
+    markInvalid( "output.classes is declared but not implemented by any runtime (argmax + class recoding) - remove it or implement class recoding" );
 
   // --- Artifact path resolution (manifest-dir relative — never CWD) -----------
   if ( !info.artifact.path.empty() )

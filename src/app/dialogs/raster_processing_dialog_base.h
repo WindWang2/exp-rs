@@ -42,6 +42,15 @@ class RasterProcessingDialogBase : public QDialog
 public:
     explicit RasterProcessingDialogBase(QWidget *parent = nullptr);
 
+    /// Emitted exactly once with the completed output path when this dialog
+    /// does NOT auto-accept (#674): the dialog is then the single owner of
+    /// loading the result (the TaskCenter auto-load path is disabled for
+    /// this seam). Connect to the main window's loadRasterLayer.
+signals:
+    void resultReadyForDisplay(const QString &outputPath);
+
+public:
+
     /**
      * Minimum size hint calculating responsive dimensions for High-DPI displays.
      */

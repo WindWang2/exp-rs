@@ -117,6 +117,10 @@ Json::Value RsChangeDetectionOperator::metadata() const {
     meta["tags"].append("change-detection");
     meta["tags"].append("temporal");
     meta["tags"].append("difference");
+    meta["tags"].append("change");
+    meta["tags"].append("timeseries");
+    meta["tags"].append("threshold");
+    meta["tags"].append("cva");
     meta["purpose"] = "Identify land-cover or surface changes between two dates.";
     meta["prerequisites"].append("Before and after rasters must be co-registered and same size "
                                  "(grid compatibility is preflighted).");

@@ -17,28 +17,45 @@ namespace sicnu::data
 
 namespace
 {
-/// JSON string serialization of @a s (quotes + escaping, no array wrapper),
-/// then hex-encoded. Hex is injective and contains none of the framing
-/// delimiters (newline, ';', '=', '@'), so a caller-controlled string cannot
-/// inject or shift the field layout - two different (id, version) tuples can
-/// never collide into the same canonical bytes. (Plain JSON escaping left
-/// ';'/@/=' intact inside the JSON body, so sub-field injection like
-/// fromPort="output;to=x" still collided with two-field inputs, #639.)
+/// Plain JSON string literal (quotes + standard escaping) — the RFC 8785
+/// canonical-JSON form used for every string inside canonicalizeJsonValue.
+/// (The #639 hex hardening lives in framingLiteral() below; hex has no place
+/// inside the canonical JSON itself.)
 QByteArray jsonEscaped( const QString &s )
 {
   QJsonArray wrap = { s };
   QByteArray out = QJsonDocument( wrap ).toJson( QJsonDocument::Compact );
   if ( out.startsWith( '[' ) && out.endsWith( ']' ) )
     out = out.mid( 1, out.size() - 2 );
+  return out;
+}
+
+/// Framing form for the V1/V2 canonical layouts (#639): JSON string literal,
+/// then hex-encoded. Hex is injective and contains none of the framing
+/// delimiters (newline, ';', '=', '@'), so a caller-controlled string cannot
+/// inject or shift the field layout — two different (id, version) tuples can
+/// never collide into the same canonical bytes. (Plain JSON escaping left
+/// ';'/@/'=' intact inside the JSON body, so sub-field injection like
+/// fromPort="output;to=x" still collided with two-field inputs, #639.)
+/// canonicalizeJsonRfc8785 must NOT use this: RFC 8785 output is readable
+/// canonical JSON, and hex-encoding every string silently changed the params
+/// serialization (#639 follow-up).
+QByteArray hexFramed( const QByteArray &jsonLiteral )
+{
   static const char hex[] = "0123456789abcdef";
   QByteArray encoded;
-  encoded.reserve( out.size() * 2 );
-  for ( unsigned char c : out )
+  encoded.reserve( jsonLiteral.size() * 2 );
+  for ( unsigned char c : jsonLiteral )
   {
     encoded.append( hex[c >> 4] );
     encoded.append( hex[c & 0xF] );
   }
   return encoded;
+}
+
+QByteArray framingLiteral( const QString &s )
+{
+  return hexFramed( jsonEscaped( s ) );
 }
 
 /// Canonical, order-independent string form of the fingerprint inputs, hashed
@@ -52,9 +69,9 @@ QByteArray canonicalForm( const QString &algorithmId,
 {
   QByteArray out;
   out.append( "alg=" );
-  out.append( jsonEscaped( algorithmId ) );
+  out.append( framingLiteral( algorithmId ) );
   out.append( "\nver=" );
-  out.append( jsonEscaped( algorithmVersion ) );
+  out.append( framingLiteral( algorithmVersion ) );
 
   // Normalize parameters: serialize via QJsonDocument with sorted keys.
   QJsonObject sortedParams = parameters;
@@ -65,18 +82,18 @@ QByteArray canonicalForm( const QString &algorithmId,
   for ( const auto &in : inputs )
   {
     out.append( "\nin=" );
-    out.append( jsonEscaped( in.assetId.toString() ) );
+    out.append( framingLiteral( in.assetId.toString() ) );
     out.append( "@rev=" );
     out.append( QByteArray::number( static_cast<qint64>( in.revision.value() ) ) );
     if ( !in.bandReferences.isEmpty() )
     {
       out.append( ";bands=" );
-      out.append( jsonEscaped( in.bandReferences.join( ',' ) ) );
+      out.append( framingLiteral( in.bandReferences.join( ',' ) ) );
     }
     if ( !in.valueDomain.isEmpty() )
     {
       out.append( ";vd=" );
-      out.append( jsonEscaped( in.valueDomain ) );
+      out.append( framingLiteral( in.valueDomain ) );
     }
   }
   return out;
@@ -184,9 +201,9 @@ ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
   // the same canonical bytes (#639).
   out.append( "v=2\n" );
   out.append( "alg=" );
-  out.append( jsonEscaped( algorithmId ) );
+  out.append( framingLiteral( algorithmId ) );
   out.append( "\nver=" );
-  out.append( jsonEscaped( algorithmVersion ) );
+  out.append( framingLiteral( algorithmVersion ) );
   out.append( "\nparams=" );
   out.append( canonicalizeJsonRfc8785( parameters ) );
 
@@ -217,35 +234,35 @@ ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
   for ( const auto &in : sortedInputs )
   {
     out.append( "\nin=" );
-    out.append( jsonEscaped( in.assetId.toString() ) );
+    out.append( framingLiteral( in.assetId.toString() ) );
     out.append( "@rev=" );
     out.append( QByteArray::number( static_cast<qint64>( in.revision.value() ) ) );
     if ( !in.fromPort.isEmpty() )
     {
       out.append( ";from=" );
-      out.append( jsonEscaped( in.fromPort ) );
+      out.append( framingLiteral( in.fromPort ) );
     }
     if ( !in.toPort.isEmpty() )
     {
       out.append( ";to=" );
-      out.append( jsonEscaped( in.toPort ) );
+      out.append( framingLiteral( in.toPort ) );
     }
     if ( !in.bandReferences.isEmpty() )
     {
       out.append( ";bands=" );
       QStringList bands = in.bandReferences;
       bands.sort();
-      out.append( jsonEscaped( bands.join( ',' ) ) );
+      out.append( framingLiteral( bands.join( ',' ) ) );
     }
     if ( !in.valueDomain.isEmpty() )
     {
       out.append( ";vd=" );
-      out.append( jsonEscaped( in.valueDomain ) );
+      out.append( framingLiteral( in.valueDomain ) );
     }
     if ( !in.lazyContentDigest.isEmpty() )
     {
       out.append( ";digest=" );
-      out.append( jsonEscaped( in.lazyContentDigest ) );
+      out.append( framingLiteral( in.lazyContentDigest ) );
     }
   }
 

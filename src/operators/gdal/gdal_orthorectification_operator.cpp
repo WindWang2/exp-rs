@@ -9,6 +9,7 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <QFile>
 #include <QString>
 
 #include <gdal.h>
@@ -209,6 +210,15 @@ Json::Value GdalOrthorectificationOperator::run(const Json::Value& params,
     context.logInfo("Starting GDAL orthorectification: " + inputPath + " -> " + outputPath);
 
     int bUsageError = FALSE;
+    // Cancel is honoured after the warp too (#694): without this check a
+    // cancelled job still reported success and published its output.
+    if (context.isCancelled()) {
+        GDALWarpAppOptionsFree(psOptions);
+        GDALClose(hSrcDS);
+        QFile::remove(QString::fromStdString(outputPath));
+        throw RSOperatorError(ErrorCode::Cancelled, "Orthorectification cancelled");
+    }
+
     GDALDatasetH hDstDS = GDALWarp(outputPath.c_str(), nullptr, 1, &hSrcDS,
                                    psOptions, &bUsageError);
 
@@ -218,12 +228,22 @@ Json::Value GdalOrthorectificationOperator::run(const Json::Value& params,
         if (hDstDS)
             GDALClose(hDstDS);
         GDALClose(hSrcDS);
+        // Remove the truncated product so nothing downstream consumes it (#694).
+        QFile::remove(QString::fromStdString(outputPath));
         throw RSOperatorError(ErrorCode::GdalError,
                               "GDAL orthorectification failed for: " + inputPath);
     }
 
     const int outputWidth = GDALGetRasterXSize(hDstDS);
     const int outputHeight = GDALGetRasterYSize(hDstDS);
+
+    if (context.isCancelled()) {
+        GDALClose(hDstDS);
+        GDALClose(hSrcDS);
+        // Cancelled mid-warp: the partial product must not be published (#694).
+        QFile::remove(QString::fromStdString(outputPath));
+        throw RSOperatorError(ErrorCode::Cancelled, "Orthorectification cancelled");
+    }
 
     GDALClose(hDstDS);
     GDALClose(hSrcDS);

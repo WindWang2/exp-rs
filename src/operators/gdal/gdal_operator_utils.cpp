@@ -158,18 +158,24 @@ std::pair<int, int> runGdalWarpOnDataset(GDALDatasetH hSrcDS,
 
     int bUsageError = FALSE;
     GDALDatasetH hDstDS = nullptr;
+    // False only after the warp fully succeeded and the dataset was closed;
+    // a throw from the post-warp progress report must not delete a valid,
+    // fully written output (#694).
+    bool warpFailed = true;
     try {
         hDstDS = GDALWarp(outputPath.c_str(), nullptr, 1, &hSrcDS, psOptions, &bUsageError);
         GDALWarpAppOptionsFree(psOptions);
 
         if (context.isCancelled()) {
             if (hDstDS) GDALClose(hDstDS);
+            hDstDS = nullptr;
             QFile::remove(QString::fromStdString(outputPath));
             throw RSOperatorError(ErrorCode::Cancelled, logLabel + " cancelled");
         }
 
         if (!hDstDS || bUsageError) {
             if (hDstDS) GDALClose(hDstDS);
+            hDstDS = nullptr;
             QFile::remove(QString::fromStdString(outputPath));
             throw RSOperatorError(ErrorCode::GdalError,
                                   logLabel + " failed for output: " + outputPath);
@@ -178,12 +184,15 @@ std::pair<int, int> runGdalWarpOnDataset(GDALDatasetH hSrcDS,
         const int outputWidth = GDALGetRasterXSize(hDstDS);
         const int outputHeight = GDALGetRasterYSize(hDstDS);
         GDALClose(hDstDS);
+        hDstDS = nullptr; // the catch path must not double-close (#694)
+        warpFailed = false;
 
         context.reportProgress(1.0, logLabel + " complete");
         return {outputWidth, outputHeight};
     } catch (...) {
         if (hDstDS) GDALClose(hDstDS);
-        QFile::remove(QString::fromStdString(outputPath));
+        if (warpFailed)
+            QFile::remove(QString::fromStdString(outputPath));
         throw;
     }
 }

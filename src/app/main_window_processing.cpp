@@ -101,6 +101,11 @@ static void openRasterDialog(QgisDesktopWindow *win, const QString &title,
     if (rasterLayer) {
         dialog.setRasterLayer(rasterLayer);
     }
+    // Review dialogs (shouldAutoAcceptOnSuccess()==false) stay open after
+    // completion and own the single result load themselves (#674 review):
+    // the TaskCenter auto-load is disabled for this seam.
+    QObject::connect(&dialog, &RasterProcessingDialogBase::resultReadyForDisplay,
+                     win, &QgisDesktopWindow::loadRasterLayer);
     if (dialog.exec() == QDialog::Accepted) {
         QString outPath = dialog.outputPath();
         if (!outPath.isEmpty() && QFile::exists(outPath))
@@ -290,6 +295,10 @@ void QgisDesktopWindow::openPostClassificationDialog()
     }
     PostClassificationDialog dlg(this);
     dlg.populateLayers();
+    // Never loads on accept (#674 review): the dialog's own signal is the
+    // single load path for its result.
+    QObject::connect(&dlg, &RasterProcessingDialogBase::resultReadyForDisplay,
+                     this, &QgisDesktopWindow::loadRasterLayer);
     dlg.exec();
 }
 

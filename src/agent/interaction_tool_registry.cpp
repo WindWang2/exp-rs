@@ -1,5 +1,7 @@
 // src/agent/interaction_tool_registry.cpp
 #include "interaction_tool_registry.h"
+
+#include <optional>
 #include "view_control_service.h"
 #include "raster_display_service.h"
 #include "data/data_manager.h"
@@ -568,12 +570,18 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
     def.category = "data";
     def.description = "List all raster and vector layers currently loaded in the project and map canvas with layer IDs, names, types, and CRS.";
     def.inputSchema = createEmptyObjectSchema();
-    def.handler = []( const Json::Value & ) {
+    // #688: in headless/MCP mode the project never contains layers (every
+    // submission path runs autoLoad=false), so the tool answered "no data"
+    // while the session's committed outputs lived in the DataManager asset
+    // catalog. Fall back to the catalog when the project is empty.
+    def.handler = [dataManager = QPointer<sicnu::data::DataManager>( dataManager )]( const Json::Value & ) {
       Json::Value result( Json::objectValue );
       Json::Value layers( Json::arrayValue );
+      int projectLayerCount = 0;
       if ( QgsProject::instance() )
       {
         QMap<QString, QgsMapLayer *> mapLayers = QgsProject::instance()->mapLayers();
+        projectLayerCount = mapLayers.size();
         for ( auto it = mapLayers.begin(); it != mapLayers.end(); ++it )
         {
           QgsMapLayer *layer = it.value();
@@ -584,6 +592,34 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
           l["type"] = (layer->type() == Qgis::LayerType::Raster) ? "raster" : "vector";
           l["source"] = layer->source().toStdString();
           l["crs"] = layer->crs().authid().toStdString();
+          layers.append( l );
+        }
+      }
+      if ( projectLayerCount == 0 && dataManager )
+      {
+        for ( const auto &asset : dataManager->assets() )
+        {
+          Json::Value l( Json::objectValue );
+          l["id"] = asset.id().toString().toStdString();
+          l["name"] = asset.displayName().toStdString();
+          l["type"] = asset.kind() == sicnu::data::AssetKind::Raster ? "raster"
+                    : asset.kind() == sicnu::data::AssetKind::Vector ? "vector"
+                    : asset.kind() == sicnu::data::AssetKind::VirtualRaster ? "virtual_raster"
+                    : "remote_map";
+          l["source"] = asset.source().canonicalSource.toStdString();
+          const auto &structure = asset.structure();
+          if ( const auto *raster = std::get_if<sicnu::data::RasterStructure>( &structure ) )
+          {
+            l["width"] = raster->width;
+            l["height"] = raster->height;
+            l["bands"] = raster->bandCount;
+            Json::Value roles( Json::arrayValue );
+            for ( const auto &band : raster->bands )
+              roles.append( band.role == sicnu::data::BandRole::Unknown
+                              ? Json::Value( "" )
+                              : Json::Value( sicnu::data::bandRoleToString( band.role ).toStdString() ) );
+            l["bandRoles"] = roles;
+          }
           layers.append( l );
         }
       }
@@ -614,7 +650,10 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
     schema["required"] = req;
     def.inputSchema = schema;
 
-    def.handler = []( const Json::Value &params ) {
+    // #688: same headless fallback as data:list_layers — resolve the target
+    // against the DataManager asset catalog when the project has no such
+    // layer (the MCP mode is always project-empty).
+    def.handler = [dataManager = QPointer<sicnu::data::DataManager>( dataManager )]( const Json::Value &params ) {
       std::string targetId;
       if ( params.isMember( "layer_id" ) && params["layer_id"].isString() )
         targetId = params["layer_id"].asString();
@@ -633,6 +672,66 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
           QList<QgsMapLayer *> layers = QgsProject::instance()->mapLayersByName( qTarget );
           if ( !layers.isEmpty() )
             layer = layers.first();
+        }
+      }
+
+      if ( !layer && dataManager )
+      {
+        const auto id = sicnu::data::AssetId::fromString( qTarget );
+        std::optional<sicnu::data::AssetSnapshot> snapshot;
+        if ( id )
+          snapshot = dataManager->asset( *id );
+        if ( !snapshot )
+        {
+          // No by-name lookup in the catalog: scan display names.
+          for ( const auto &candidate : dataManager->assets() )
+          {
+            if ( candidate.displayName() == qTarget )
+            {
+              snapshot = candidate;
+              break;
+            }
+          }
+        }
+        if ( snapshot )
+        {
+          Json::Value result( Json::objectValue );
+          result["id"] = snapshot->id().toString().toStdString();
+          result["name"] = snapshot->displayName().toStdString();
+          result["source"] = snapshot->source().canonicalSource.toStdString();
+          const auto &structure = snapshot->structure();
+          if ( const auto *raster = std::get_if<sicnu::data::RasterStructure>( &structure ) )
+          {
+            result["type"] = "raster";
+            result["width"] = raster->width;
+            result["height"] = raster->height;
+            result["bandCount"] = raster->bandCount;
+            result["crs"] = raster->crsWkt.toStdString();
+            if ( raster->extent.valid )
+            {
+              Json::Value ext( Json::objectValue );
+              ext["xmin"] = raster->extent.minimumX;
+              ext["ymin"] = raster->extent.minimumY;
+              ext["xmax"] = raster->extent.maximumX;
+              ext["ymax"] = raster->extent.maximumY;
+              result["extent"] = ext;
+            }
+            Json::Value roles( Json::arrayValue );
+            for ( const auto &band : raster->bands )
+              roles.append( band.role == sicnu::data::BandRole::Unknown
+                              ? Json::Value( "" )
+                              : Json::Value( sicnu::data::bandRoleToString( band.role ).toStdString() ) );
+            result["bandRoles"] = roles;
+          }
+          else if ( const auto *vector = std::get_if<sicnu::data::VectorStructure>( &structure ) )
+          {
+            result["type"] = "vector";
+            result["layerCount"] = vector->layerCount;
+            if ( !vector->layers.isEmpty() )
+              result["crs"] = vector->layers.first().crsWkt.toStdString();
+          }
+          result["status"] = "success";
+          return result;
         }
       }
 
@@ -742,7 +841,7 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
     schema["required"] = req;
     def.inputSchema = schema;
 
-    def.handler = [dataManager]( const Json::Value &params ) {
+    def.handler = [dataManager = QPointer<sicnu::data::DataManager>( dataManager )]( const Json::Value &params ) {
       if ( !dataManager )
       {
         Json::Value err( Json::objectValue );

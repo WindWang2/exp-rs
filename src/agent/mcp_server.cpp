@@ -2,10 +2,13 @@
 #include "core/sicnu_logging.h"
 #include "env_flag.h"
 
+#include <optional>
+#include "data/data_asset.h"
 #include "data/data_manager.h"
 #include "data/asset_types.h"
 #include "data/derivation_record.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "operators/framework/rs_schema.h"
 #include "operators/framework/rs_operator.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/algorithm_meta_store.h"
@@ -545,6 +548,17 @@ void McpServer::handleRequest(const QVariantMap &request)
     QString method = request.value(QStringLiteral("method")).toString();
     QVariantMap params = request.value(QStringLiteral("params")).toMap();
 
+    // MCP spec: requests other than initialize/ping before the handshake
+    // are rejected with -32002 Server not initialized (#701.7) — the old
+    // server answered everything, so a mis-ordered client got confusing
+    // half-valid responses instead of the protocol error.
+    if ( !m_initialized && method != QStringLiteral( "initialize" )
+         && method != QStringLiteral( "ping" ) && !method.startsWith( QStringLiteral( "notifications/" ) ) )
+    {
+        sendError( id, -32002, QStringLiteral( "Server not initialized" ) );
+        return;
+    }
+
     SICNU_LOG_INFO(SicnuLogTags::MCP, QString("MCP request: %1 (id=%2)").arg(method).arg(id.toString()));
 
     if (method == QStringLiteral("initialize"))
@@ -553,6 +567,7 @@ void McpServer::handleRequest(const QVariantMap &request)
         // MCP spec: server responds with latest version it supports, not echo.
         static const QString kSupportedVersion = QStringLiteral("2024-11-05");
         result[QStringLiteral("protocolVersion")] = kSupportedVersion;
+        m_initialized = true;
 
         QVariantMap capabilities;
         QVariantMap toolsCap;
@@ -1218,7 +1233,11 @@ QVariantMap McpServer::handleGetOperatorSchema(const QString &operatorId)
         throw std::runtime_error(QStringLiteral("Operator not found: %1").arg(operatorId).toStdString());
     }
 
-    QVariantMap result = sicnu::processing::jsonObjectToVariantMap(op->schema());
+    // Uniform schema surface carries the Determinism Grade (#659, ADR 0124)
+    // so GUI / CLI / MCP / agents see one vocabulary.
+    Json::Value schemaJson = op->schema();
+    sicnu::operators::schema::stampDeterminismGrade(schemaJson, op->determinismGrade());
+    QVariantMap result = sicnu::processing::jsonObjectToVariantMap(schemaJson);
     result[QStringLiteral("operator_id")] = operatorId;
     result[QStringLiteral("metadata")] = sicnu::processing::jsonObjectToVariantMap(op->metadata());
     return result;
@@ -1454,6 +1473,31 @@ QVariantMap McpServer::handleListLayers()
         layerList.append(layerMap);
     }
 
+    // #688: MCP mode is always project-empty (autoLoad=false on every
+    // submission path) — surface the DataManager asset catalog so the agent
+    // can actually discover the session's committed outputs.
+    if (layers.isEmpty() && m_dataManager)
+    {
+        for (const auto &asset : m_dataManager->assets())
+        {
+            QVariantMap layerMap;
+            layerMap[QStringLiteral("id")] = asset.id().toString();
+            layerMap[QStringLiteral("name")] = asset.displayName();
+            layerMap[QStringLiteral("type")] = asset.kind() == sicnu::data::AssetKind::Raster
+                                                   ? QStringLiteral("raster")
+                                             : asset.kind() == sicnu::data::AssetKind::Vector
+                                                   ? QStringLiteral("vector")
+                                             : asset.kind() == sicnu::data::AssetKind::VirtualRaster
+                                                   ? QStringLiteral("virtual_raster")
+                                                   : QStringLiteral("remote_map");
+            layerMap[QStringLiteral("source")] = asset.source().canonicalSource;
+            const auto &structure = asset.structure();
+            if (const auto *raster = std::get_if<sicnu::data::RasterStructure>(&structure))
+                layerMap[QStringLiteral("bands")] = raster->bandCount;
+            layerList.append(layerMap);
+        }
+    }
+
     result[QStringLiteral("layers")] = layerList;
     return result;
 }
@@ -1468,6 +1512,61 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
         if (!layers.isEmpty())
         {
             layer = layers.first();
+        }
+    }
+
+    if (!layer && m_dataManager)
+    {
+        // #688: headless fallback — resolve the target against the asset
+        // catalog (by AssetId, then by display name) and answer from the
+        // registered structure instead of failing with "Layer not found".
+        const auto id = sicnu::data::AssetId::fromString(layerId);
+        std::optional<sicnu::data::AssetSnapshot> snapshot;
+        if (id)
+            snapshot = m_dataManager->asset(*id);
+        if (!snapshot)
+        {
+            for (const auto &candidate : m_dataManager->assets())
+            {
+                if (candidate.displayName() == layerId)
+                {
+                    snapshot = candidate;
+                    break;
+                }
+            }
+        }
+        if (snapshot)
+        {
+            QVariantMap assetResult;
+            assetResult[QStringLiteral("id")] = snapshot->id().toString();
+            assetResult[QStringLiteral("name")] = snapshot->displayName();
+            assetResult[QStringLiteral("source")] = snapshot->source().canonicalSource;
+            const auto &structure = snapshot->structure();
+            if (const auto *raster = std::get_if<sicnu::data::RasterStructure>(&structure))
+            {
+                assetResult[QStringLiteral("type")] = QStringLiteral("raster");
+                assetResult[QStringLiteral("width")] = raster->width;
+                assetResult[QStringLiteral("height")] = raster->height;
+                assetResult[QStringLiteral("bands")] = raster->bandCount;
+                assetResult[QStringLiteral("crs")] = raster->crsWkt;
+                if (raster->extent.valid)
+                {
+                    assetResult[QStringLiteral("extent")] = QVariantMap{
+                        {QStringLiteral("xmin"), raster->extent.minimumX},
+                        {QStringLiteral("ymin"), raster->extent.minimumY},
+                        {QStringLiteral("xmax"), raster->extent.maximumX},
+                        {QStringLiteral("ymax"), raster->extent.maximumY}
+                    };
+                }
+            }
+            else if (const auto *vector = std::get_if<sicnu::data::VectorStructure>(&structure))
+            {
+                assetResult[QStringLiteral("type")] = QStringLiteral("vector");
+                assetResult[QStringLiteral("layerCount")] = vector->layerCount;
+                if (!vector->layers.isEmpty())
+                    assetResult[QStringLiteral("crs")] = vector->layers.first().crsWkt;
+            }
+            return assetResult;
         }
     }
 

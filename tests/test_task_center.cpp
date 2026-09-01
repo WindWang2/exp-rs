@@ -1648,3 +1648,313 @@ TEST_CASE( "jsonParamsToVariantMap survives out-of-range integers (#619)", "[tas
     REQUIRE( map.value( "small" ).toInt() == 42 );
     REQUIRE( map.contains( "huge" ) );  // string form, no exception
 }
+
+// ---------------------------------------------------------------------------
+// #683: a task canceled while the engine submit was in flight must not leave
+// the freshly submitted engine job running. Deterministic interleaving via a
+// synchronous taskAdded slot: the cancel lands after enqueueTask but BEFORE
+// submitJobImpl re-locks to register the job mapping — the exact window the
+// issue describes. The engine job body is cooperative and only exits when it
+// observes cancellation, so the old code (nobody ever cancels the engine job)
+// would leave it Running until waitUntilIdleForTests times out.
+// ---------------------------------------------------------------------------
+TEST_CASE( "TaskCenter - cancel during submit cancels the in-flight engine job (#683)",
+           "[processing][task_center][cancel_race]" )
+{
+    auto &center = sicnu::TaskCenter::instance();
+    auto &engine = sicnu::jobs::JobEngine::instance();
+
+    engine.clearExecutors();
+    engine.registerExecutor( "cancelrace:blocking", []( const sicnu::jobs::JobRequest &,
+                                                        sicnu::operators::RSOperatorContext &ctx ) {
+        while ( !ctx.isCancelled() )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+        throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
+                                                 QStringLiteral( "canceled during submit" ).toStdString() );
+        return Json::Value( Json::objectValue ); // unreachable; fixes return-type deduction
+    } );
+
+    QMetaObject::Connection cancelOnAdded = QObject::connect(
+        &center, &sicnu::TaskCenter::taskAdded,
+        [ &center ]( const sicnu::AlgorithmTaskInfo &info ) {
+            // Cancel synchronously on the submitting thread while the engine
+            // submit is still in flight (mapping not yet registered).
+            center.cancelTask( info.taskId );
+        } );
+
+    sicnu::jobs::JobRequest request;
+    request.algorithmId = "cancelrace:blocking";
+    request.title = "cancel race";
+    request.source = "test";
+    const long taskId = center.submitJob( request );
+    REQUIRE( taskId > 0 );
+    QObject::disconnect( cancelOnAdded );
+
+    // The engine job must have been cancelled by the recheck: if it kept
+    // running, waitUntilIdleForTests would time out at 15s. The task→job
+    // mapping is deliberately NOT registered on this path (the task was
+    // terminal before the mapping landed), so assert on the engine record.
+    engine.waitUntilIdleForTests( 15000 );
+    const auto info = center.getTaskInfo( taskId );
+    REQUIRE( sicnu::isTerminalStatus( info.status ) );
+
+    bool foundCancelledRecord = false;
+    for ( const auto &record : engine.list() )
+    {
+        if ( record.request.algorithmId == "cancelrace:blocking" )
+        {
+            REQUIRE( record.state == sicnu::jobs::JobState::Cancelled );
+            foundCancelledRecord = true;
+        }
+    }
+    REQUIRE( foundCancelledRecord );
+
+    engine.clearExecutors();
+}
+
+// ---------------------------------------------------------------------------
+// #685: retrying a cascade-canceled pipeline step whose parent is Canceled
+// must drop the unsatisfied parent and actually run, not strand in Queued.
+// ---------------------------------------------------------------------------
+namespace {
+void waitForTerminal( sicnu::TaskCenter &center, long taskId, int attempts = 400 )
+{
+    for ( int i = 0; i < attempts; ++i )
+    {
+        if ( sicnu::isTerminalStatus( center.getTaskInfo( taskId ).status ) )
+            return;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+}
+} // namespace
+
+TEST_CASE( "TaskCenter - retry of cascade-canceled step drops unsatisfied parents (#685)",
+           "[processing][task_center][retry]" )
+{
+    auto &center = sicnu::TaskCenter::instance();
+    auto &engine = sicnu::jobs::JobEngine::instance();
+
+    engine.clearExecutors();
+    engine.registerExecutor( "retryfail:step", []( const sicnu::jobs::JobRequest &,
+                                                   sicnu::operators::RSOperatorContext & ) {
+        Json::Value out( Json::objectValue );
+        out["output"] = "/tmp/retryfail.tif";
+        return out;
+    } );
+
+    std::atomic<bool> releaseParent{ false };
+    engine.registerExecutor( "retryfail:fail", [ &releaseParent ]( const sicnu::jobs::JobRequest &,
+                                                                   sicnu::operators::RSOperatorContext & ) {
+        // Deterministic cascade: hold the parent Running until the child is
+        // enqueued, so the failure cascade has a live descendant to cancel.
+        while ( !releaseParent.load() )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+        throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Unknown,
+                                                 QStringLiteral( "boom" ).toStdString() );
+        return Json::Value( Json::objectValue ); // unreachable; fixes return-type deduction
+    } );
+
+    const long parent = center.enqueueTask( QStringLiteral( "retryfail:fail" ), {}, false,
+                                            sicnu::TaskPriority::Normal, {}, true );
+    REQUIRE( parent > 0 );
+    const long child = center.enqueueTask( QStringLiteral( "retryfail:step" ), {}, false,
+                                           sicnu::TaskPriority::Normal, { parent }, true );
+    REQUIRE( child > 0 );
+    REQUIRE( center.getTaskInfo( child ).status == sicnu::TaskStatus::Queued );
+
+    releaseParent.store( true );
+
+    waitForTerminal( center, parent );
+    waitForTerminal( center, child );
+    REQUIRE( center.getTaskInfo( parent ).status == sicnu::TaskStatus::Failed );
+    REQUIRE( center.getTaskInfo( child ).status == sicnu::TaskStatus::Canceled );
+
+    // The child's only parent is Failed (never Completed): before the fix the
+    // retry sat in Queued forever.
+    const long retryId = center.retryTask( child );
+    REQUIRE( retryId > 0 );
+    REQUIRE( retryId != child ); // the retry is a fresh task
+
+    // waitUntilIdleForTests times out if the retry stranded in Queued; the
+    // terminal transition can lag engine-idle (see waitForTerminalStatus).
+    engine.waitUntilIdleForTests( 15000 );
+    waitForTerminal( center, retryId );
+    REQUIRE( center.getTaskInfo( retryId ).status == sicnu::TaskStatus::Completed );
+    // The dropped-parent note is visible in the retry log.
+    const auto info = center.getTaskInfo( retryId );
+    REQUIRE( info.parentTaskIds.isEmpty() );
+
+    engine.clearExecutors();
+}
+
+// ---------------------------------------------------------------------------
+// #702.1: a retried pipeline step stays attached to its pipeline — the step
+// mapping follows the new task and the pipeline status tracks it.
+// ---------------------------------------------------------------------------
+TEST_CASE( "TaskCenter - retry keeps the pipeline step attached (#702)",
+           "[processing][task_center][retry][pipeline]" )
+{
+    auto &center = sicnu::TaskCenter::instance();
+    auto &engine = sicnu::jobs::JobEngine::instance();
+
+    engine.clearExecutors();
+    std::atomic<int> firstAttempts{ 0 };
+    engine.registerExecutor( "retrypipe:first", [ &firstAttempts ]( const sicnu::jobs::JobRequest &,
+                                                                    sicnu::operators::RSOperatorContext & ) {
+        // Fail exactly once so the retry path exercises a real recovery.
+        if ( firstAttempts.fetch_add( 1 ) == 0 )
+        {
+            throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Unknown,
+                                                     QStringLiteral( "step one fails" ).toStdString() );
+        }
+        return Json::Value( Json::objectValue );
+    } );
+    engine.registerExecutor( "retrypipe:ok", []( const sicnu::jobs::JobRequest &,
+                                                 sicnu::operators::RSOperatorContext & ) {
+        Json::Value out( Json::objectValue );
+        out["output"] = "/tmp/retrypipe.tif";
+        return out;
+    } );
+
+    const std::string pipelineJson = R"({
+        "id": "retry-pipe",
+        "steps": [
+            { "id": "step1", "type": "operator", "operatorId": "retrypipe:first", "params": {} },
+            { "id": "step2", "type": "operator", "operatorId": "retrypipe:ok", "params": {},
+              "inputs": [ { "fromStepId": "step1", "fromPort": "output", "toPort": "input" } ] }
+        ]
+    })";
+    const long pipelineId = center.submitPipelineJson( pipelineJson, false );
+    REQUIRE( pipelineId > 0 );
+
+    const auto pipe = center.getPipelineInfo( pipelineId );
+    REQUIRE( pipe.stepToTaskId.contains( "step1" ) );
+    const long step1TaskId = pipe.stepToTaskId.value( "step1" );
+    const long step2TaskId = pipe.stepToTaskId.value( "step2" );
+
+    waitForTerminal( center, step1TaskId );
+    REQUIRE( center.getTaskInfo( step1TaskId ).status == sicnu::TaskStatus::Failed );
+
+    const long retriedTaskId = center.retryTask( step1TaskId );
+    REQUIRE( retriedTaskId > 0 );
+
+    // The step mapping now points at the retry task, not the old failed one.
+    const auto after = center.getPipelineInfo( pipelineId );
+    REQUIRE( after.stepToTaskId.value( "step1" ) == retriedTaskId );
+    REQUIRE( retriedTaskId != step1TaskId );
+    REQUIRE( center.getTaskInfo( retriedTaskId ).stepId == QStringLiteral( "step1" ) );
+    REQUIRE( center.getTaskInfo( retriedTaskId ).pipelineId == pipelineId );
+
+    // The child step gated on the old task id is remapped to the retry, so a
+    // later retry of step2 finds satisfiable parents instead of a Failed one.
+    const auto info2 = center.getTaskInfo( step2TaskId );
+    REQUIRE( info2.parentTaskIds.contains( retriedTaskId ) );
+
+    engine.waitUntilIdleForTests( 15000 );
+    waitForTerminal( center, retriedTaskId );
+    REQUIRE( center.getTaskInfo( retriedTaskId ).status == sicnu::TaskStatus::Completed );
+
+    engine.clearExecutors();
+}
+
+// ---------------------------------------------------------------------------
+// #702.2: pausing an engine-dispatched task must refuse instead of
+// fabricating a Paused status while the job keeps running.
+// ---------------------------------------------------------------------------
+TEST_CASE( "TaskCenter - pauseTask refuses to fabricate Paused for engine tasks (#702)",
+           "[processing][task_center][pause]" )
+{
+    auto &center = sicnu::TaskCenter::instance();
+    auto &engine = sicnu::jobs::JobEngine::instance();
+
+    engine.clearExecutors();
+    std::atomic<bool> releaseJob{ false };
+    engine.registerExecutor( "pausetest:blocking", [ &releaseJob ]( const sicnu::jobs::JobRequest &,
+                                                                    sicnu::operators::RSOperatorContext & ) {
+        while ( !releaseJob.load() )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+        Json::Value out( Json::objectValue );
+        out["output"] = "/tmp/pausetest.tif";
+        return out;
+    } );
+
+    const long taskId = center.enqueueTask( QStringLiteral( "pausetest:blocking" ), {}, false,
+                                            sicnu::TaskPriority::Normal, {}, true );
+    REQUIRE( taskId > 0 );
+
+    bool running = false;
+    for ( int i = 0; i < 500 && !running; ++i )
+    {
+        running = center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Running;
+        if ( !running )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+    }
+    REQUIRE( running );
+
+    // No attached QgsTask handle: the engine keeps running regardless —
+    // refusing is the truthful response.
+    REQUIRE_FALSE( center.pauseTask( taskId ) );
+    REQUIRE( center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Running );
+
+    releaseJob.store( true );
+    engine.waitUntilIdleForTests( 15000 );
+    REQUIRE( center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Completed );
+
+    engine.clearExecutors();
+}
+
+// ---------------------------------------------------------------------------
+// #702.3: a terminal transition from outside the engine cancels the task's
+// own engine job instead of letting it run to completion.
+// ---------------------------------------------------------------------------
+TEST_CASE( "TaskCenter - markTaskCanceled cancels the task's own engine job (#702)",
+           "[processing][task_center][cancel]" )
+{
+    auto &center = sicnu::TaskCenter::instance();
+    auto &engine = sicnu::jobs::JobEngine::instance();
+
+    engine.clearExecutors();
+    std::atomic<bool> releaseJob{ false };
+    engine.registerExecutor( "ownjob:blocking", [ &releaseJob ]( const sicnu::jobs::JobRequest &,
+                                                                 sicnu::operators::RSOperatorContext &ctx ) {
+        // Cooperative: observes the cancel flag even without releaseJob.
+        while ( !ctx.isCancelled() && !releaseJob.load() )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+        if ( ctx.isCancelled() )
+            throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
+                                                     QStringLiteral( "canceled" ).toStdString() );
+        Json::Value out( Json::objectValue );
+
+        out["output"] = "/tmp/ownjob.tif";
+        return out;
+    } );
+
+    const long taskId = center.enqueueTask( QStringLiteral( "ownjob:blocking" ), {}, false,
+                                            sicnu::TaskPriority::Normal, {}, true );
+    REQUIRE( taskId > 0 );
+
+    bool running = false;
+    for ( int i = 0; i < 500 && !running; ++i )
+    {
+        running = center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Running;
+        if ( !running )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+    }
+    REQUIRE( running );
+
+    // External terminal transition (not engine-driven): before the fix the
+    // engine job ran to completion and its record was discarded.
+    center.markTaskCanceled( taskId, QStringLiteral( "external cancel" ) );
+    releaseJob.store( false );
+
+    engine.waitUntilIdleForTests( 15000 );
+    REQUIRE( center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Canceled );
+
+    const auto jobId = center.getTaskInfo( taskId ).jobId;
+    REQUIRE( !jobId.empty() );
+    const auto record = engine.snapshot( jobId );
+    if ( record.has_value() )
+        REQUIRE( record->state == sicnu::jobs::JobState::Cancelled );
+
+    engine.clearExecutors();
+}

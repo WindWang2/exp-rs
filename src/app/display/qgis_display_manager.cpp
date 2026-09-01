@@ -439,6 +439,15 @@ QgisDisplayManager::addLayer(DisplayViewId viewId, data::AssetId assetId,
         QStringLiteral("display.asset_not_found"),
         QStringLiteral("No registered Data Asset matches the requested id")));
   }
+  // Already-displayed dedup (#674): first display of a new asset double-added
+  // because assetAdded auto-display and the caller's explicit addLayer both
+  // fired. Adding an asset the view already shows returns the existing layer.
+  for (const auto &[key, record] : m_impl->layers) {
+    (void)key;
+    if (record->snapshot.assetId() == assetId && record->snapshot.viewId() == viewId
+        && !record->mapLayer.isNull())
+      return data::Result<DisplayLayerId>::success(record->snapshot.id());
+  }
   if (asset->state() != data::AssetState::Ready) {
     return data::Result<DisplayLayerId>::failure(displayDiagnostic(
         QStringLiteral("display.asset_not_ready"),

@@ -170,7 +170,10 @@ struct DataManager::Impl
     QVector<LeaseImpact> impacts;
     for ( const LeaseRecord &lease : leases )
     {
-      if ( lease.control->assetId == id )
+      // Released-but-not-yet-erased leases must not block unload/reap
+      // (#703.1): cross-thread AssetLease destruction flips active
+      // atomically; the record removal is queued.
+      if ( lease.control->active && lease.control->assetId == id )
       {
         impacts.append( LeaseImpact{ LeaseRef{ lease.control->assetId,
                                                lease.control->token,
@@ -495,6 +498,18 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
     RelocateResult{ request.id, newRevision, std::move( relocateDiagnostics ) } );
 }
 
+std::optional<AssetId> DataManager::assetIdForSource( const QString &canonicalPath ) const
+{
+  if ( canonicalPath.isEmpty() )
+    return std::nullopt;
+  for ( const Impl::AssetRecord &record : m_impl->records )
+  {
+    if ( record.snapshot.source().canonicalSource == canonicalPath )
+      return record.snapshot.id();
+  }
+  return std::nullopt;
+}
+
 std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const
 {
   const auto it = m_impl->findRecord( id );
@@ -694,6 +709,41 @@ Result<void> DataManager::commitEdit( AssetId id )
   return Result<void>::success();
 }
 
+Result<void> DataManager::notifyExternalContentChange( AssetId id )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<void>::failure( wrongThreadDiagnostic() );
+
+  const auto recordIt = m_impl->findRecord( id );
+  if ( recordIt == m_impl->records.end() )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "asset.unknown" ),
+                  QStringLiteral( "No registered Data Asset matches the requested id" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  // Same contract as commitEdit (#687): a revision advance + one
+  // assetChanged so every observer (display layers, leases, caches)
+  // re-reads the replaced content.
+  const AssetRevision newRevision = recordIt->snapshot.revision().next();
+  recordIt->snapshot = AssetSnapshot{ recordIt->snapshot.id(),
+                                      newRevision,
+                                      recordIt->snapshot.source(),
+                                      recordIt->snapshot.kind(),
+                                      recordIt->snapshot.state(),
+                                      recordIt->snapshot.capabilities(),
+                                      recordIt->snapshot.persistence(),
+                                      recordIt->snapshot.storageKind(),
+                                      recordIt->snapshot.displayName(),
+                                      recordIt->snapshot.structure(),
+                                      recordIt->snapshot.acquisitionTime(),
+                                      recordIt->snapshot.parentCollectionId() };
+  m_impl->catalogGeneration++;
+  emit assetChanged( id );
+  return Result<void>::success();
+}
+
 Result<void> DataManager::rollbackEdit( AssetId id )
 {
   if ( QThread::currentThread() != thread() )
@@ -736,7 +786,7 @@ int DataManager::leaseCount( AssetId id ) const
   return static_cast<int>(
     std::count_if( m_impl->leases.begin(), m_impl->leases.end(),
                    [&]( const Impl::LeaseRecord &lease ) {
-                     return lease.control->assetId == id;
+                     return lease.control->active && lease.control->assetId == id;
                    } ) );
 }
 
@@ -745,7 +795,7 @@ QVector<LeaseRef> DataManager::leases( AssetId id ) const
   QVector<LeaseRef> result;
   for ( const Impl::LeaseRecord &lease : m_impl->leases )
   {
-    if ( lease.control->assetId == id )
+    if ( lease.control->active && lease.control->assetId == id )
     {
       result.append(
         LeaseRef{ lease.control->assetId, lease.control->token, lease.control->kind } );
@@ -953,7 +1003,16 @@ Result<AssetId> DataManager::createVirtualRaster(
     if ( !edge )
     {
       const UnloadPlan plan = planUnload( registered.assetId ).confirmedCascade();
-      ( void ) unload( plan );
+      const Result<void> unloadResult = unload( plan );
+      if ( !unloadResult )
+      {
+        // The compensating unload failed: a partially-registered virtual
+        // asset may remain. Append the diagnostics instead of discarding
+        // them (#703.5).
+        QVector<Diagnostic> diags = edge.diagnostics();
+        diags.append( unloadResult.diagnostics() );
+        return Result<AssetId>::failure( diags );
+      }
       return Result<AssetId>::failure( edge.diagnostics() );
     }
   }
@@ -1740,7 +1799,10 @@ Result<void> DataManager::addChildToCollection( CollectionId collectionId,
                   DiagnosticSeverity::Error } );
   }
 
-  collectionIt->childAssetIds.append( childAssetId );
+  // Re-adding an already-parented child duplicated childAssetIds (and the
+  // persisted <child> rows) (#703.2).
+  if ( !collectionIt->childAssetIds.contains( childAssetId ) )
+    collectionIt->childAssetIds.append( childAssetId );
   assetIt->snapshot.m_parentCollectionId = collectionId;
   m_impl->catalogGeneration++;
   return Result<void>::success();

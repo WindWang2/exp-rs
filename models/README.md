@@ -70,9 +70,9 @@ them with the readiness explanation.
   },
   "preprocess": {
     "normalize": "mean_std",          // none | linear | mean_std
-    "mean": [0.485, 0.456, 0.406],    // per band_role
+    "mean": [0.485, 0.456, 0.406],    // per band_role, in PIXEL units
     "std":  [0.229, 0.224, 0.225],
-    "scale": 0.00392,                 // applied last (linear: x*scale)
+    "scale": 1.0,                     // applied LAST as (x-mean)/std*scale; keep 1.0 with mean_std
     "resize": "to_input",             // none | to_input (requires input.width/height)
     "interpolation": "bilinear",      // bilinear | nearest
     "nodata_policy": "zero"           // zero (non-finite input → 0 before the model)

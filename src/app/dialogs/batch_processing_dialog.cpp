@@ -963,3 +963,21 @@ void BatchProcessingDialog::setOutputDir(const QString &dir)
     m_outputDir = dir;
     m_outputDirEdit->setText(dir);
 }
+
+void BatchProcessingDialog::reject()
+{
+    // Busy guard (#704.1): closing mid-run abandoned the chain silently.
+    if ( m_isRunning )
+        return;
+    QDialog::reject();
+}
+
+void BatchProcessingDialog::closeEvent( QCloseEvent *event )
+{
+    if ( m_isRunning )
+    {
+        event->ignore();
+        return;
+    }
+    QDialog::closeEvent( event );
+}

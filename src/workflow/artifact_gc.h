@@ -31,7 +31,10 @@ public:
   ///   workflow artifact, when retainFinalOutputs is true;
   /// - the output path lies in the same directory as (or below) a retained
   ///   final output, so persisted paths from a tampered or corrupt checkpoint
-  ///   can never nominate files outside the run workspace for deletion.
+  ///   can never nominate files outside the run workspace for deletion
+  ///   (this containment guarantee is scoped to retainFinalOutputs=true;
+  ///   with the flag false every Completed output anchors a root and finals
+  ///   reap too — the explicit full-cleanup opt-in, #697).
   QStringList inspectReapable( const WorkflowRun &run,
                                bool retainFinalOutputs = true ) const;
 

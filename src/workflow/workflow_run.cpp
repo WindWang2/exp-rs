@@ -1,4 +1,6 @@
 #include "workflow_run.h"
+
+#include <set>
 #include "workflow_definition.h"
 
 #include <atomic>
@@ -645,16 +647,36 @@ std::unique_ptr<WorkflowRun> WorkflowRun::fromJson( const Json::Value &json, std
     }
   }
 
-  for ( const auto &stepJson : json["stepPlans"] )
   {
-    std::string stepError;
-    StepPlan plan = StepPlan::fromJson( stepJson, &stepError );
-    if ( !stepError.empty() )
+    // #697/#702.5: a torn/edited checkpoint with a misspelled status or
+    // duplicate plan ids used to parse silently and dodge recovery
+    // reconciliation. Validate the vocabulary and reject duplicates.
+    static const std::set<std::string> kPlanStatuses = {
+      "Pending", "Ready", "Running", "Cancelling",
+      "Completed", "Failed", "Canceled", "Skipped",
+    };
+    std::set<std::string> seenStepIds;
+    for ( const auto &stepJson : json["stepPlans"] )
     {
-      error = "Failed to parse StepPlan: " + stepError;
-      return nullptr;
+      std::string stepError;
+      StepPlan plan = StepPlan::fromJson( stepJson, &stepError );
+      if ( !stepError.empty() )
+      {
+        error = "Failed to parse StepPlan: " + stepError;
+        return nullptr;
+      }
+      if ( kPlanStatuses.find( plan.status ) == kPlanStatuses.end() )
+      {
+        error = "Invalid checkpoint: unknown step status '" + plan.status + "'";
+        return nullptr;
+      }
+      if ( !seenStepIds.insert( plan.stepId ).second )
+      {
+        error = "Invalid checkpoint: duplicate stepPlans id '" + plan.stepId + "'";
+        return nullptr;
+      }
+      run->m_stepPlans.push_back( std::move( plan ) );
     }
-    run->m_stepPlans.push_back( std::move( plan ) );
   }
 
   if ( json.isMember( "artifacts" ) && json["artifacts"].isObject() )

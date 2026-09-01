@@ -61,13 +61,20 @@ QVector<QVector<float>> ImageFusion::linearWeighted(
     if ( nBands <= 0 || !panBand || width <= 0 || height <= 0 )
         return result;
 
-    // Build default weights if not provided (equal weight per band)
+    // Build default weights if not provided (equal weight per band).
+    // A non-empty but wrong-sized array is a caller error: indexing
+    // weights[b] would read past the end (#677).
     QVector<float> weights = msWeights;
     if ( weights.isEmpty() ) {
         weights.resize(nBands);
         float defaultMsWeight = 1.0f - panWeight;
         for (int b = 0; b < nBands; ++b)
             weights[b] = defaultMsWeight;
+    } else if ( weights.size() != nBands ) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms,
+                        QStringLiteral("linear fusion msWeights size %1 does not match band count %2")
+                            .arg(weights.size()).arg(nBands));
+        return QVector<QVector<float>>{};
     }
 
     SICNU_LOG_INFO( SicnuLogTags::Algorithms,
@@ -874,6 +881,13 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
             float defaultMsWeight = 1.0f - params.panWeight;
             for ( int b = 0; b < nMsBands; ++b )
                 weights[b] = defaultMsWeight;
+        }
+        else if ( weights.size() != nMsBands )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral( "msWeights size %1 does not match band count %2" )
+                                    .arg( weights.size() ).arg( nMsBands );
+            return false;
         }
 
         for ( int r = 0; r < rows; ++r )

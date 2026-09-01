@@ -15,7 +15,9 @@
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "operators/framework/model_catalog.h"
 #include "processing/framework/algorithm_meta_store.h"
+#include "processing/framework/atomic_algorithm_registry.h"
 
+#include <algorithm>
 #include <cpl_vsi.h>
 #include <gdal_priv.h>
 #include <ogrsf_frmts.h>
@@ -552,4 +554,54 @@ TEST_CASE( "Missing local vector still reports not found with local_file_not_fou
     CHECK( result.error.find( "not found" ) != std::string::npos );
     if ( !result.errorCode.empty() )
         CHECK( result.errorCode == "local_file_not_found" );
+}
+
+// ---------------------------------------------------------------------------
+// #707: sidecars are a hand-maintained overlay over the in-code descriptors —
+// validate them so drift fails the build instead of misleading agents:
+// every shipped sidecar id must resolve to a registered descriptor, and the
+// overlapping vocabulary (tags) must agree with AgentMetadata.
+// ---------------------------------------------------------------------------
+TEST_CASE( "AlgorithmMetaStore sidecars stay consistent with registered descriptors (#707)",
+           "[agent][spatial][meta][drift]" )
+{
+    auto &store = sicnu::processing::AlgorithmMetaStore::instance();
+    const size_t loaded = store.loadDefaults();
+    REQUIRE( loaded >= 1 );
+
+    int checked = 0;
+    for ( const auto &entry : store.entries() )
+    {
+        const auto adapter =
+            sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( entry.id );
+        INFO( "sidecar id: " << entry.id );
+        REQUIRE( adapter != nullptr );
+
+        const auto desc = adapter->descriptor();
+        // tags is the only overlapping field today; it must not contradict.
+        if ( !entry.tags.empty() )
+        {
+            for ( const auto &tag : entry.tags )
+            {
+                const auto &metaTags = desc.agentMetadata.tags;
+                INFO( "tag only in sidecar: " << tag << " (descriptor tags derive from the operator's metadata())" );
+                CHECK( std::find( metaTags.begin(), metaTags.end(), tag ) != metaTags.end() );
+            }
+        }
+        // An undeclared gpu must not be reported as a confident false.
+        if ( !entry.gpuDeclared )
+            CHECK_FALSE( entry.toJson().isMember( "gpu" ) );
+        ++checked;
+    }
+    CHECK( checked >= 1 );
+
+    // The concrete drift that motivated this: rs:infer is not CPU-only —
+    // GPU selection is model-manifest + hardware driven, so the sidecar
+    // must not claim a gpu fact at all.
+    const auto infer = store.find( "rs:infer" );
+    if ( infer.has_value() )
+    {
+        CHECK( infer->gpuDeclared == false );
+        CHECK_FALSE( infer->toJson().isMember( "gpu" ) );
+    }
 }

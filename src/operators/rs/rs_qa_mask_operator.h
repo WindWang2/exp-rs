@@ -44,6 +44,7 @@ class RsQaMaskOperator : public RSOperator {
 public:
     std::string name() const override { return "rs:qa_mask"; }
     std::string displayName() const override { return "QA Mask"; }
+    std::string determinismGrade() const override { return "bit-exact"; } // #659 (ADR 0124)
     std::string group() const override { return "qa"; }
     std::string description() const override {
         return "Derive a cloud / cloud-shadow / snow mask from Landsat QA_PIXEL "

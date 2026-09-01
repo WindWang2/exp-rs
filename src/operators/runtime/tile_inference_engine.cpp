@@ -120,7 +120,6 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   // silently misnormalizes).
   if ( !m_model.input.dtype.empty() )
   {
-    const int rasterType = ds.bandDataType( 1 );
     static const std::map<std::string, int> kAccepted = {
       { "float32", GDT_Float32 }, { "float64", GDT_Float64 },
       { "float16", GDT_Float32 }, { "uint16", GDT_UInt16 },
@@ -131,12 +130,10 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     if ( it == kAccepted.end() )
       throw RSOperatorError( ErrorCode::InvalidParameter,
                              "model manifest declares unsupported input dtype '" + m_model.input.dtype + "'" );
-    if ( rasterType != it->second )
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "model manifest requires input dtype '" + m_model.input.dtype
-                               + "' but the raster band 1 has GDAL type "
-                               + std::to_string( rasterType )
-                               + " (convert the raster or update the manifest)" );
+    // NOTE: per-band comparison happens after band selection below (#705.3)
+    // — mixed-type VRTs dodged the contract for the actually-fed bands
+    // when only band 1 was checked.
+    m_declaredDtype = it->second;
   }
 
   std::vector<int> bandList = bands;
@@ -145,6 +142,24 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     bandList.resize( rasterBands );
     for ( int i = 0; i < rasterBands; ++i )
       bandList[static_cast<std::size_t>( i )] = i + 1;
+  }
+  for ( int b : bandList )
+  {
+    if ( b < 1 || b > rasterBands )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "band index " + std::to_string( b ) + " is out of range (1.." + std::to_string( rasterBands ) + ")" );
+  }
+  if ( m_declaredDtype >= 0 )
+  {
+    for ( int b : bandList )
+    {
+      if ( ds.bandDataType( b ) != m_declaredDtype )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "model manifest requires input dtype '" + m_model.input.dtype
+                                 + "' but raster band " + std::to_string( b ) + " has GDAL type "
+                                 + std::to_string( ds.bandDataType( b ) )
+                                 + " (convert the raster or update the manifest)" );
+    }
   }
   else
   {
@@ -230,6 +245,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   std::vector<cv::Mat> batchMasks;
   std::vector<std::pair<int, int>> batchFedSize;
   std::vector<CoreTile> batchCores;
+  std::vector<CoreTile> nodataTiles; // skipped all-nodata cores (#705.4)
 
   std::unique_ptr<GdalStreamingOutput> writer;
   // Any failure after the writer exists must not leave a truncated GeoTIFF at
@@ -335,6 +351,20 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       }
     }
 
+    // All-nodata core: skip the forward pass entirely (#705.4) — the output
+    // is restored to NaN afterwards anyway, so the GPU/CPU pass is pure
+    // waste. Only once the writer exists (the first real batch reveals the
+    // output channel count); an entirely-nodata raster keeps the legacy
+    // forward so the output geometry is still established.
+    if ( writer && cv::countNonZero( invalidMask ) == invalidMask.total() )
+    {
+      nodataTiles.push_back( t );
+      ++done;
+      context.reportProgress( static_cast<double>( done ) / static_cast<double>( totalTiles ),
+                              "Tiled inference: " + std::to_string( done ) + "/" + std::to_string( totalTiles ) );
+      continue;
+    }
+
     cv::Mat tileMat = hwc.clone(); // detached from the reused window buffer
     batchCores.push_back( t );
     if ( resizeToInput && ( winW != modelW || winH != modelH ) )
@@ -359,16 +389,58 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       continue;
 
     // One forward pass per batch on the shared (cached) session.
-    // swapRB=false: the tile buffer already holds GDAL band order, and the
-    // manifest band_roles expect channel i == file band i — OpenCV's default
-    // swapRB=true would silently exchange bands 1 and 3.
+    // Manual NCHW pack (#671): blobFromImage(s) asserts channels in
+    // {1,3,4} — multispectral / SAR inference (2, >=5 channels) died with
+    // a raw cv::Exception that also violates the engine's RSOperatorError
+    // contract. The buffer already holds GDAL band order and manifest
+    // band_roles expect channel i == file band i, so we keep that order
+    // (swapRB=false equivalent) without delegating to the imread helper.
+    // Also validate the band_roles arity up front so a manifest mismatch
+    // surfaces as a typed error rather than a late tensor shape mismatch.
     cv::Mat blob;
-    if ( batchMats.size() == 1 )
-      blob = cv::dnn::blobFromImage( batchMats.front(), 1.0, cv::Size(), cv::Scalar(),
-                                     /*swapRB=*/false, /*crop=*/false );
-    else
-      blob = cv::dnn::blobFromImages( batchMats, 1.0, cv::Size(), cv::Scalar(),
-                                      /*swapRB=*/false, /*crop=*/false );
+    try {
+      const int C = static_cast<int>( bandList.size() );
+      const int B = static_cast<int>( batchMats.size() );
+      const int H = batchMats.front().rows;
+      const int W = batchMats.front().cols;
+      // blobFromImages asserted same-size batches (a mixed batch threw);
+      // edge tiles make that reachable whenever raster dims are not a
+      // multiple of the tile size and resizeToInput is off — keep the check
+      // LOUD instead of silently packing garbage (#671 review).
+      for ( const cv::Mat &m : batchMats )
+      {
+        if ( m.rows != H || m.cols != W )
+          throw RSOperatorError( ErrorCode::InvalidInputData,
+                                 "mixed tile sizes in one inference batch (" + std::to_string( m.cols ) + "x"
+                                   + std::to_string( m.rows ) + " vs " + std::to_string( W ) + "x"
+                                   + std::to_string( H ) + ") - enable resize:to_input or align the raster" );
+      }
+      int dims[4] = { B, C, H, W };
+      blob = cv::Mat( 4, dims, CV_32F );
+      blob.setTo( 0 );
+      for ( int b = 0; b < B; ++b ) {
+        std::vector<cv::Mat> channels;
+        cv::split( batchMats[static_cast<size_t>( b )], channels );
+        for ( int c = 0; c < C; ++c ) {
+          const cv::Mat &ch = channels[static_cast<size_t>( c )];
+          // ptr(b, c, 0) is the 3-arg overload (data + b*step0 + c*step1):
+          // the const int* overload reads idx[dims] (a 4th, garbage element)
+          // on a 4-D Mat — an OOB stack read whose damage depends on the
+          // stack garbage (#671 review).
+          float *dst = blob.ptr<float>( b, c, 0 );
+          for ( int y = 0; y < H; ++y ) {
+            std::memcpy( dst + static_cast<size_t>( y ) * W, ch.ptr<float>( y ),
+                         static_cast<size_t>( W ) * sizeof( float ) );
+          }
+        }
+      }
+    } catch ( const RSOperatorError & ) {
+      throw;
+    } catch ( const std::exception &e ) {
+      throw RSOperatorError( ErrorCode::OpenCvError, std::string( "failed to build inference blob: " ) + e.what() );
+    } catch ( ... ) {
+      throw RSOperatorError( ErrorCode::OpenCvError, "failed to build inference blob (unknown)" );
+    }
     cv::Mat output;
     try
     {
@@ -388,6 +460,26 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     const int outW = output.size[3];
     if ( outChannels <= 0 )
       throw RSOperatorError( ErrorCode::ComputationError, "model output has no channels" );
+
+    // Depth check (#690): ArgMax / class-index heads emit int32/int64; the
+    // per-pixel planes are later read as float — type-punning integer bits
+    // into float32 silently corrupts. Fail or convert deterministically.
+    if ( output.depth() != CV_32F ) {
+      const int d = output.depth();
+      const std::string dname = (d == CV_32S) ? "int32" : (d == CV_64F) ? "float64" : (d == CV_32S + 1) ? "int16" : std::to_string(d);
+      if ( d == CV_32S || d == CV_64F || d == CV_16S || d == CV_8U ) {
+        // Convert integer/float heads to CV_32F — preserves argmax class
+        // indices (lossless for the int32/int64 range used by segmentation
+        // class maps) and degrades gracefully for other float depths.
+        cv::Mat converted;
+        output.convertTo( converted, CV_32F );
+        output = converted;
+      } else {
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "model output dtype is " + dname
+                                   + " — expected float32 (int32/int64 argmax heads were converted; other dtypes are unsupported: re-export the model with float outputs)" );
+      }
+    }
 
     if ( !writer )
     {
@@ -488,6 +580,25 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                             "Tiled inference: " + std::to_string( done ) + "/" + std::to_string( totalTiles ) );
   }
 
+    // Flush skipped all-nodata tiles as NaN now that the writer exists
+    // (also runs for the trailing no-batch case).
+    if ( writer && !nodataTiles.empty() )
+    {
+      std::vector<float> nanPlane;
+      for ( const CoreTile &bt : nodataTiles )
+      {
+        nanPlane.assign( static_cast<std::size_t>( bt.w ) * bt.h,
+                         std::numeric_limits<float>::quiet_NaN() );
+        const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
+                                               0, 1 };
+        for ( int c = 0; c < stats.outBands; ++c )
+          if ( !writer->writeTile( c + 1, writeTile, nanPlane.data() ) )
+            throw RSOperatorError( ErrorCode::FileNotWritable,
+                                   "failed to write nodata tile at (" + std::to_string( bt.x ) + ", "
+                                     + std::to_string( bt.y ) + ")" );
+      }
+      nodataTiles.clear();
+    }
   }
   catch ( ... )
   {

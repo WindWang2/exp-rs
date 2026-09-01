@@ -21,6 +21,11 @@ struct AlgorithmMetaEntry {
   std::string input;    ///< Primary input contract, e.g. "raster"
   std::string output;   ///< Primary output contract, e.g. "polygon"
   bool gpu = false;     ///< Whether the algorithm can/should use a GPU
+  /// True only when the sidecar explicitly declared "gpu" (#707): a missing
+  /// field must not surface as a confident "gpu": false — that exact drift
+  /// told agents rs:infer was CPU-only while the runtime selects CUDA
+  /// sessions whenever the model and hardware allow.
+  bool gpuDeclared = false;
   double accuracy = -1.0; ///< Optional benchmark accuracy in [0, 1] (<0 = unreported)
   std::string notes;    ///< Human/agent-facing selection guidance
   std::vector<std::string> tags;

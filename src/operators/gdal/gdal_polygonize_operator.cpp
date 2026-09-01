@@ -61,6 +61,9 @@ Json::Value GdalPolygonizeOperator::metadata() const {
     meta["tags"].append("polygonize");
     meta["tags"].append("vectorize");
     meta["tags"].append("segments");
+    meta["tags"].append("polygon");
+    meta["tags"].append("segmentation");
+    meta["tags"].append("export");
     meta["purpose"] = "Export class maps or segment labels as polygon vectors";
     meta["useCases"] = Json::Value(Json::arrayValue);
     meta["useCases"].append("Vectorize OBIA segment labels for map production");

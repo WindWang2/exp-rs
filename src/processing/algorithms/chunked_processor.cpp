@@ -3,9 +3,31 @@
 
 #include <algorithm>
 #include <atomic>
+#include <QThread>
+#include <QThreadPool>
 #include <QtConcurrent>
 #include <QVector>
 #include <qgsfeedback.h>
+
+namespace {
+// Dedicated bounded pool (#692): chunk fans used to land on
+// QThreadPool::globalInstance() — the pool QGIS map rendering shares — from
+// JobEngine worker threads, so several concurrent filter jobs starved canvas
+// repaints with hw runnable threads each. A per-process pool capped at 4
+// bounds the fan-out regardless of host cores.
+QThreadPool *chunkPool()
+{
+    static QThreadPool *pool = [] {
+        auto *p = new QThreadPool();
+        const int hw = std::max(1, QThread::idealThreadCount());
+        p->setMaxThreadCount(std::min(hw, 4));
+        // Do not keep idle threads around between filter runs.
+        p->setExpiryTimeout(30000);
+        return p;
+    }();
+    return pool;
+}
+} // namespace
 
 ChunkedProcessor::ChunkedProcessor(int width, int height, int overlap, int chunkHeight)
     : m_width(width)
@@ -57,7 +79,7 @@ bool ChunkedProcessor::process(const ChunkCallback &callback, QgsFeedback *feedb
     std::atomic<int> completedChunks{0};
     const int totalChunks = m_chunks.size();
 
-    QtConcurrent::blockingMap(indices, [&](int idx) {
+    QtConcurrent::blockingMap(chunkPool(), indices, [&](int idx) {
         // Check for cancellation
         if (feedback && feedback->isCanceled()) {
             results[idx] = 0;

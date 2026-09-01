@@ -2,6 +2,7 @@
 #include "model_catalog_tool.h"
 
 #include "operators/framework/model_catalog.h"
+#include "operators/runtime/model_runtime.h"
 
 namespace sicnu::agent::spatial_tools {
 
@@ -47,9 +48,14 @@ Json::Value ModelCatalogTool::inputSchema() const
   resolution["description"] = "Spatial resolution in meters for compatibility evaluation";
   props["resolution"] = resolution;
 
+  Json::Value bandRoles( Json::objectValue );
+  bandRoles["type"] = "array";
+  bandRoles["items"]["type"] = "string";
+  bandRoles["description"] = "Filter/rank by required band roles (e.g. [\"Red\",\"NIR\"])";
+  props["band_roles"] = bandRoles;
   Json::Value gpuAvailable( Json::objectValue );
   gpuAvailable["type"] = "boolean";
-  gpuAvailable["description"] = "Whether GPU acceleration is available on the target environment";
+  gpuAvailable["description"] = "Whether GPU acceleration is available on the target environment (defaults to detected hardware, not false)";
   props["gpu_available"] = gpuAvailable;
 
   Json::Value vramBudget( Json::objectValue );
@@ -87,7 +93,8 @@ Json::Value ModelCatalogTool::outputSchema() const
 SpatialToolResult ModelCatalogTool::execute( const Json::Value &input )
 {
   auto &catalog = sicnu::operators::ModelCatalog::instance();
-  catalog.reload();
+  // Lazy load (#701): an unconditional reload() rescanned the whole model
+  // directory on every call, inline on the serialized MCP main loop.
 
   Json::Value out( Json::objectValue );
   out["directory"] = catalog.directory();
@@ -106,6 +113,7 @@ SpatialToolResult ModelCatalogTool::execute( const Json::Value &input )
 
   const bool shouldRank = ( input.isMember( "rank" ) && input["rank"].asBool() ) ||
                           input.isMember( "sensor" ) ||
+                          input.isMember( "band_roles" ) ||
                           input.isMember( "resolution" ) ||
                           input.isMember( "gpu_available" ) ||
                           input.isMember( "vram_budget_mb" );
@@ -117,10 +125,21 @@ SpatialToolResult ModelCatalogTool::execute( const Json::Value &input )
       criteria.task = input["task"].asString();
     if ( input.isMember( "sensor" ) )
       criteria.sensor = input["sensor"].asString();
+    if ( input.isMember( "band_roles" ) && input["band_roles"].isArray() )
+      for ( const auto &role : input["band_roles"] )
+        criteria.bandRoles.push_back( role.asString() );
     if ( input.isMember( "resolution" ) && input["resolution"].isNumeric() )
       criteria.resolutionMeters = input["resolution"].asDouble();
     if ( input.isMember( "gpu_available" ) )
       criteria.gpuAvailable = input["gpu_available"].asBool();
+    else
+    {
+      // Detect instead of defaulting false (#705.2): omitting the flag used
+      // to mark every gpu:true,cpu_fallback:false model incompatible even
+      // on CUDA hosts.
+      criteria.gpuAvailable =
+          sicnu::operators::runtime::ModelRuntimeRegistry::instance().hardware().cudaAvailable;
+    }
     if ( input.isMember( "vram_budget_mb" ) && input["vram_budget_mb"].isNumeric() )
       criteria.maxVramMb = input["vram_budget_mb"].asInt();
 

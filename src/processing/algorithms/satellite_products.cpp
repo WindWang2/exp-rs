@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
+#include <stdexcept>
 #include <QFileInfo>
 
 #include "qgsdatasourceresolver.h"
@@ -130,7 +131,7 @@ QString landsatBandNameFromKey(const QString& key)
     return QStringLiteral("B%1").arg(suffix);
 }
 
-int landsatWavelength(const QString& bandName)
+int landsatWavelength(const QString& bandName, bool oli)
 {
     // Collection-2 L2 stacks carry SR_Bn/ST_B10 names (#613): strip the
     // prefix so wavelength/FWHM metadata resolves in the primary (MTL-key)
@@ -138,14 +139,25 @@ int landsatWavelength(const QString& bandName)
     QString name = bandName.toUpper();
     if (name.startsWith(QStringLiteral("SR_")) || name.startsWith(QStringLiteral("ST_")))
         name = name.mid(3);
-    // Approximate OLI centre wavelengths (nm)
+    if (oli) {
+        static const QMap<QString, int> wl{
+            {QStringLiteral("B1"), 443},  {QStringLiteral("B2"), 482},
+            {QStringLiteral("B3"), 561},  {QStringLiteral("B4"), 655},
+            {QStringLiteral("B5"), 865},  {QStringLiteral("B6"), 1609},
+            {QStringLiteral("B7"), 2201}, {QStringLiteral("B8"), 590},
+            {QStringLiteral("B9"), 1373}, {QStringLiteral("B10"), 10895},
+            {QStringLiteral("B11"), 12005},
+        };
+        return wl.value(name, 0);
+    }
+    // TM/ETM+ centre wavelengths (nm), for Landsat 4-7 (#673).
     static const QMap<QString, int> wl{
-        {QStringLiteral("B1"), 443},  {QStringLiteral("B2"), 482},
-        {QStringLiteral("B3"), 561},  {QStringLiteral("B4"), 655},
-        {QStringLiteral("B5"), 865},  {QStringLiteral("B6"), 1609},
-        {QStringLiteral("B7"), 2201}, {QStringLiteral("B8"), 590},
-        {QStringLiteral("B9"), 1373}, {QStringLiteral("B10"), 10895},
-        {QStringLiteral("B11"), 12005},
+        {QStringLiteral("B1"), 485}, {QStringLiteral("B2"), 560},
+        {QStringLiteral("B3"), 660}, {QStringLiteral("B4"), 830},
+        {QStringLiteral("B5"), 1650}, {QStringLiteral("B6"), 11350},
+        {QStringLiteral("B7"), 2220}, {QStringLiteral("B8"), 710},
+        {QStringLiteral("B9"), 0}, {QStringLiteral("B10"), 0},
+        {QStringLiteral("B11"), 0},
     };
     return wl.value(name, 0);
 }
@@ -208,6 +220,9 @@ BandRole legacyLandsatRole(const QString& bandName)
     };
     return roles.value(bandName.toUpper(), BandRole::Unknown);
 }
+
+int landsatWavelength(const QString& bandName)
+{ return landsatWavelength(bandName, true); }
 
 int landsatFwhmNm(const QString& bandName, bool oli)
 {
@@ -451,9 +466,15 @@ QVector<BandFile> selectBands(const ProductInfo& product, const QStringList& ban
         }
         return selected;
     }
+    QStringList missing;
     for (const QString& want : bandNames) {
         if (const BandFile* hit = findBand(product.bands, want))
             selected.append(*hit);
+        else
+            missing.append(want);
+    }
+    if (!missing.isEmpty()) {
+        throw std::runtime_error(QStringLiteral("Requested bands not found: %1").arg(missing.join(QStringLiteral(", "))).toStdString());
     }
     return selected;
 }
@@ -868,7 +889,7 @@ bool discoverLandsat(const QString& path, ProductInfo* out, QString* errorMessag
         BandFile bf;
         bf.path = bandPath;
         bf.name = p.first;
-        bf.wavelengthNm = landsatWavelength(p.first);
+        bf.wavelengthNm = landsatWavelength(p.first, oliLandsat);
         bf.fwhmNm = landsatFwhmNm(p.first, oliLandsat);
         bf.role = landsatBandRole(p.first, out->spacecraft);
         out->bands.append(bf);
@@ -892,7 +913,7 @@ bool discoverLandsat(const QString& path, ProductInfo* out, QString* errorMessag
             bf.name = m.captured(1).toUpper();
             if (bf.name.startsWith(QStringLiteral("SR_")))
                 bf.name = bf.name.mid(3);
-            bf.wavelengthNm = landsatWavelength(bf.name);
+            bf.wavelengthNm = landsatWavelength(bf.name, oliLandsat);
             bf.fwhmNm = landsatFwhmNm(bf.name, oliLandsat);
             bf.role = landsatBandRole(bf.name, out->spacecraft);
             out->bands.append(bf);
@@ -1339,7 +1360,14 @@ bool stackToGeoTiff(const ProductInfo& product,
         return false;
     }
 
-    QVector<BandFile> selected = selectBands(product, bandNames);
+    QVector<BandFile> selected;
+    try {
+        selected = selectBands(product, bandNames);
+    } catch (const std::exception &e) {
+        if (errorMessage)
+            *errorMessage = QString::fromStdString(e.what());
+        return false;
+    }
     if (selected.isEmpty()) {
         if (errorMessage)
             *errorMessage = bandNames.isEmpty()

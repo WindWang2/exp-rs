@@ -209,3 +209,39 @@ TEST_CASE( "ArtifactGC retains outputs of steps that did not complete", "[workfl
   gc.sweepRun( *setup.run );
   REQUIRE( QFile::exists( step1Out ) );
 }
+
+// ---------------------------------------------------------------------------
+// #697 residue: retainFinalOutputs=false actually reaps (the flag used to be
+// dead — pass 1 populated nothing and pass 2's containment check rejected
+// everything).
+// ---------------------------------------------------------------------------
+TEST_CASE( "ArtifactGC retainFinalOutputs=false reaps finals too (#697)",
+           "[workflow][v2][gc]" )
+{
+  QTemporaryDir tmpDir;
+  REQUIRE( tmpDir.isValid() );
+
+  const QString step1Out = tmpDir.filePath( "intermediate.tif" );
+  const QString finalOut = tmpDir.filePath( "final.tif" );
+  QFile( step1Out ).open( QIODevice::WriteOnly );
+  QFile( finalOut ).open( QIODevice::WriteOnly );
+
+  TwoStepRun setup = makeTwoStepRun( step1Out, finalOut );
+  transitionToCompleted( *setup.run );
+
+  ArtifactGC gc;
+  REQUIRE( gc.inspectReapable( *setup.run, /*retainFinalOutputs=*/false ).size() == 2 );
+  GCSweepReport report = gc.sweepRun( *setup.run, /*retainFinalOutputs=*/false );
+  CHECK( report.reapedCount == 2 );
+  CHECK_FALSE( QFile::exists( step1Out ) );
+  CHECK_FALSE( QFile::exists( finalOut ) );
+
+  // Default (retain=true) still keeps the final.
+  QFile( step1Out ).open( QIODevice::WriteOnly );
+  QFile( finalOut ).open( QIODevice::WriteOnly );
+  TwoStepRun setup2 = makeTwoStepRun( step1Out, finalOut );
+  transitionToCompleted( *setup2.run );
+  GCSweepReport keep = gc.sweepRun( *setup2.run, /*retainFinalOutputs=*/true );
+  CHECK( keep.reapedCount == 1 );
+  CHECK( QFile::exists( finalOut ) );
+}
