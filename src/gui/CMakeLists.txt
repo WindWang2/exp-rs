@@ -2193,6 +2193,3 @@ install(TARGETS qgis_gui
   LIBRARY DESTINATION ${QGIS_LIB_DIR}
   ARCHIVE DESTINATION ${QGIS_LIB_DIR})
 
-
-# GCC 16.2.x ICE workaround — see the matching block in src/core/CMakeLists.txt.
-target_compile_options(qgis_gui PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O0>)

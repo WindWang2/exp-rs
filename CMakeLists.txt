@@ -18,6 +18,16 @@ endif()
 if(MSVC)
     add_compile_options(/utf-8 /bigobj /W4 /wd4251 /wd4275 /wd4100 /wd4127 /wd4244 /wd4267)
 else()
+    # GCC 16.x front-end recursion overflows the default 8 MiB stack on the
+    # deepest Qt/QGIS template TUs and dies as an "internal compiler error:
+    # segfault" (which TUs die varies with -O level and include depth). Launch
+    # compiles through a wrapper that raises the soft stack limit — see
+    # cmake/raise-compiler-stack.sh. No-op for other compilers.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+       AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16
+       AND NOT CMAKE_CXX_COMPILER_LAUNCHER)
+        set(CMAKE_CXX_COMPILER_LAUNCHER "${CMAKE_SOURCE_DIR}/cmake/raise-compiler-stack.sh")
+    endif()
     option(ENABLE_LTO "Enable Link-Time Optimization for Release builds" OFF)
 
     # LTO policy (#629): the historical global -fno-lto silently defeated

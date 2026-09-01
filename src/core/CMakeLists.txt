@@ -1,18 +1,6 @@
 ############################################################
 # sources
 
-# GCC 16 (16.2.x) ICEs on these TUs at -O2/-O3 (internal compiler error in
-# qmap.h / QMetaType instantiation paths). -O1 compiles them cleanly and the
-# runtime cost for these files is negligible. Drop when the toolchain is fixed.
-set_source_files_properties(
-  mesh/qgsmeshcalcutils.cpp
-  pointcloud/qgspointcloudlayerrenderer.cpp
-  providers/copc/qgscopcprovider.cpp
-  providers/vpc/qgsvirtualpointcloudprovider.cpp
-  qgsvectorfilewriter.cpp
-  vectortile/qgsvectortilelayer.cpp
-  vectortile/qgsvectortileloader.cpp
-  PROPERTIES COMPILE_OPTIONS "-O1")
 
 BISON_TARGET(QgsExpressionParser   qgsexpressionparser.yy   ${CMAKE_CURRENT_BINARY_DIR}/qgsexpressionparser.cpp COMPILE_FLAGS "-p exp_")
 FLEX_TARGET(QgsExpressionLexer qgsexpressionlexer.ll ${CMAKE_CURRENT_BINARY_DIR}/qgsexpressionlexer.cpp)
@@ -2963,10 +2951,3 @@ install(TARGETS sicnu_core
   LIBRARY DESTINATION ${QGIS_LIB_DIR}
   ARCHIVE DESTINATION ${QGIS_LIB_DIR})
 
-
-# GCC 16.2.x ICEs on a subset of these vendored QGIS TUs at -O2/-O3 (and at
-# least one even at -O1). The whole vendored library builds at -O0 instead of
-# per-file whack-a-mole: it is not on a measured hot path for the platform's
-# own operators/algorithms (which keep full optimization), and -O0 compiles
-# faster. Remove when the toolchain is fixed.
-target_compile_options(qgis_core PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O0>)
