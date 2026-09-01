@@ -44,6 +44,12 @@ struct DerivationRecord
   /// remote access is represented solely by `authConfigId` below.
   QJsonObject parameters;
   QVector<DerivationInput> inputs;
+  /// Input paths the run parameters referenced that could NOT be resolved to
+  /// registered Data Assets when the record was built (not yet registered,
+  /// mis-spelled, or produced mid-pipeline). Diagnostics-only (#698): the raw
+  /// reference is preserved here instead of being dropped silently — the
+  /// lineage graph records what resolved, and this records what did not.
+  QStringList unresolvedInputPaths;
   AssetId outputAssetId;
   QString taskReference;
   QString softwareVersion;
@@ -69,26 +75,35 @@ struct DerivationRecord
 /// parameter snapshot, task reference, and completion timestamp. The output
 /// Asset ID is stamped by DataManager::attachDerivationRecord. Shared by the
 /// CLI pipeline runner and TaskCenter-backed committers so every produced
-/// asset records the same provenance shape.
+/// asset records the same provenance shape. When the caller resolved the run's
+/// input paths against the catalog, the resolved lineage rides in `inputs`
+/// and anything unresolvable in `unresolvedInputPaths` (#698).
 inline DerivationRecord makeTaskDerivation( const QString &algorithmId,
                                             const QJsonObject &parameters,
-                                            const QString &taskReference )
+                                            const QString &taskReference,
+                                            QVector<DerivationInput> inputs = {},
+                                            const QStringList &unresolvedInputPaths = {} )
 {
   DerivationRecord record;
   record.algorithmId = algorithmId;
   record.parameters = parameters;
+  record.inputs = std::move( inputs );
+  record.unresolvedInputPaths = unresolvedInputPaths;
   record.taskReference = taskReference;
   record.completedAtUtc = QDateTime::currentDateTimeUtc();
   return record;
 }
 
-/// Builds a DerivationRecord for a workflow run step execution.
+/// Builds a DerivationRecord for a workflow run step execution. Like
+/// makeTaskDerivation, the caller may stamp the resolved input lineage (#698).
 inline DerivationRecord makeWorkflowDerivation( const QString &algorithmId,
                                                 const QJsonObject &parameters,
                                                 const QString &workflowId,
                                                 const QString &workflowRunId,
                                                 const QString &stepId,
-                                                const QString &taskReference = QString() )
+                                                const QString &taskReference = QString(),
+                                                QVector<DerivationInput> inputs = {},
+                                                const QStringList &unresolvedInputPaths = {} )
 {
   DerivationRecord record;
   record.algorithmId = algorithmId;
@@ -97,6 +112,8 @@ inline DerivationRecord makeWorkflowDerivation( const QString &algorithmId,
   record.workflowRunId = workflowRunId;
   record.stepId = stepId;
   record.taskReference = taskReference;
+  record.inputs = std::move( inputs );
+  record.unresolvedInputPaths = unresolvedInputPaths;
   record.completedAtUtc = QDateTime::currentDateTimeUtc();
   return record;
 }

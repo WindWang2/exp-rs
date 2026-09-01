@@ -1387,10 +1387,24 @@ bool stackToGeoTiff(const ProductInfo& product,
                                           selected.size(), static_cast<int>(GDT_Float32),
                                           gt, projection, &err);
     if (!outDs) {
+        // A failed creation can still leave a zero-byte/partial file behind;
+        // never orphan it (#703).
+        QFile::remove(outputPath);
         if (errorMessage)
             *errorMessage = err.isEmpty() ? QStringLiteral("Failed to create output GeoTIFF") : err;
         return false;
     }
+
+    // Any failure from here on leaves a partial (invalid) GeoTIFF at
+    // outputPath. Every error return removes it so callers never inherit an
+    // apparently-valid staging file from a failed stack (#703).
+    const auto failRemovingPartial = [outputPath](QString *errorMessagePtr,
+                                                  const QString &message) {
+        QFile::remove(outputPath);
+        if (errorMessagePtr)
+            *errorMessagePtr = message;
+        return false;
+    };
 
     // Windowed stacking (#634): the whole-band float buffer (~10 GB at
     // 50k x 50k) became an uncaught bad_alloc; row-block windows keep memory
@@ -1406,21 +1420,19 @@ bool stackToGeoTiff(const ProductInfo& product,
         GDALDatasetH src = GDALOpen(selected[i].path.toUtf8().constData(), GA_ReadOnly);
         if (!src) {
             GDALClose(outDs);
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Failed to open band: %1").arg(selected[i].path);
-            return false;
+            return failRemovingPartial(errorMessage,
+                                       QStringLiteral("Failed to open band: %1").arg(selected[i].path));
         }
 
         if (GDALGetRasterXSize(src) != width || GDALGetRasterYSize(src) != height) {
             GDALClose(src);
             GDALClose(outDs);
-            if (errorMessage)
-                *errorMessage = QStringLiteral(
-                                    "Band size mismatch for %1 (expected %2x%3)")
-                                    .arg(selected[i].name)
-                                    .arg(width)
-                                    .arg(height);
-            return false;
+            return failRemovingPartial(errorMessage,
+                                       QStringLiteral(
+                                           "Band size mismatch for %1 (expected %2x%3)")
+                                           .arg(selected[i].name)
+                                           .arg(width)
+                                           .arg(height));
         }
 
         const int srcBandIndex = selected[i].sourceBand > 0 ? selected[i].sourceBand : 1;
@@ -1428,11 +1440,10 @@ bool stackToGeoTiff(const ProductInfo& product,
         if (!srcBand) {
             GDALClose(src);
             GDALClose(outDs);
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Missing band %1 in %2")
-                                    .arg(srcBandIndex)
-                                    .arg(selected[i].path);
-            return false;
+            return failRemovingPartial(errorMessage,
+                                       QStringLiteral("Missing band %1 in %2")
+                                           .arg(srcBandIndex)
+                                           .arg(selected[i].path));
         }
         int hasNoData = 0;
         double ndVal = GDALGetRasterNoDataValue(srcBand, &hasNoData);
@@ -1446,18 +1457,16 @@ bool stackToGeoTiff(const ProductInfo& product,
             if (cerr != CE_None) {
                 GDALClose(src);
                 GDALClose(outDs);
-                if (errorMessage)
-                    *errorMessage = QStringLiteral("Failed to read band %1").arg(selected[i].name);
-                return false;
+                return failRemovingPartial(errorMessage,
+                                           QStringLiteral("Failed to read band %1").arg(selected[i].name));
             }
             cerr = GDALRasterIO(dstBand, GF_Write, 0, y, width, rows,
                                 buffer.data(), width, rows, GDT_Float32, 0, 0);
             if (cerr != CE_None) {
                 GDALClose(src);
                 GDALClose(outDs);
-                if (errorMessage)
-                    *errorMessage = QStringLiteral("Failed to write band %1").arg(selected[i].name);
-                return false;
+                return failRemovingPartial(errorMessage,
+                                           QStringLiteral("Failed to write band %1").arg(selected[i].name));
             }
         }
         GDALClose(src);

@@ -464,19 +464,34 @@ data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
     if (restored.collectionId.isNull())
       failed = true;
 
-    // Re-bind the persisted children (in order).
+    // Re-bind the persisted children (in order). Duplicated persisted entries
+    // (#703) are collapsed on read-back: the manager refuses to double-add, and
+    // here the repeat entry is reported and skipped instead of silently
+    // re-binding (and the catalog never holds the duplicate).
+    QSet<QString> boundChildren;
     for (QDomElement child = coll.firstChildElement(QStringLiteral("child"));
          !child.isNull();
          child = child.nextSiblingElement(QStringLiteral("child"))) {
       const std::optional<data::AssetId> childId =
           data::AssetId::fromString(child.attribute(QStringLiteral("assetId")));
-      if (childId) {
-        const data::Result<void> added = context.dataManager().addChildToCollection(
-            *collectionId, *childId);
-        if (!added) {
-          diagnostics += added.diagnostics();
-          failed = true;
-        }
+      if (!childId)
+        continue;
+      const QString childKey = childId->toString();
+      if (boundChildren.contains(childKey)) {
+        diagnostics.append(data::Diagnostic{
+            QStringLiteral("project.duplicate_collection_child"),
+            QStringLiteral("A persisted collection lists child %1 more than "
+                           "once; the duplicate entry was skipped")
+                .arg(childKey),
+            data::DiagnosticSeverity::Warning});
+        continue;
+      }
+      boundChildren.insert(childKey);
+      const data::Result<void> added = context.dataManager().addChildToCollection(
+          *collectionId, *childId);
+      if (!added) {
+        diagnostics += added.diagnostics();
+        failed = true;
       }
     }
   }

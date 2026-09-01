@@ -14,8 +14,11 @@
 #include "agent/interaction_tool_registry.h"
 #include "agent/view_control_service.h"
 #include "agent/mcp_server.h"
+#include "data/asset_types.h"
+#include "data/data_manager.h"
 #include "processing/framework/tool_call_dispatcher.h"
 #include "processing/framework/json_params_converter.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <qgsapplication.h>
 #include <qgscoordinatereferencesystem.h>
@@ -23,7 +26,13 @@
 #include <qgsmapcanvas.h>
 #include <qgsproject.h>
 #include <qgsrectangle.h>
+#include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
+
+#include <QTemporaryDir>
+
+#include <array>
+#include <vector>
 
 using namespace sicnu::agent;
 using namespace sicnu::processing;
@@ -610,3 +619,78 @@ TEST_CASE( "InteractionToolRegistry normalizes multi-colon tool names", "[agent]
   REQUIRE( found );
 }
 
+
+TEST_CASE( "data tools are backed by the DataManager catalog headless (#688)",
+           "[agent][interaction][data]" )
+{
+  TestAppFixture fixture;
+  auto &registry = InteractionToolRegistry::instance();
+  registry.reset();
+
+  // A committed temp raster in the DataManager catalog; NO QgsProject layer.
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString path = dir.filePath( QStringLiteral( "headless_scene.tif" ) );
+  std::vector<std::vector<float>> bands( 2, std::vector<float>( 4, 7.0f ) );
+  std::array<double, 6> gt = { 0, 1, 0, 0, 0, -1 };
+  QString err;
+  REQUIRE( writeGdalOutput( path, 2, 2, bands, gt, QStringLiteral( "EPSG:4326" ), &err ) );
+
+  sicnu::data::DataManager manager;
+  sicnu::data::RegisterRequest request;
+  request.source.providerKey = QStringLiteral( "gdal" );
+  request.source.canonicalSource = path;
+  const auto registered = manager.registerSource( request );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+
+  QgsProject::instance()->removeAllMapLayers();
+
+  ViewControlService service;
+  registry.registerBuiltinTools( &service, nullptr, &manager );
+
+  SECTION( "data:list_layers reports catalog assets with empty QgsProject" )
+  {
+    Json::Value listRes = registry.execute( "data_list_layers", Json::Value( Json::objectValue ) );
+    REQUIRE( listRes["status"].asString() == "success" );
+    REQUIRE( listRes["layers"].size() == 1 );
+    const Json::Value &layer = listRes["layers"][0];
+    CHECK( layer["assetId"].asString() == registered.assetId.toString().toStdString() );
+    CHECK( layer["revision"].asUInt64() == 1 );
+    CHECK( layer["kind"].asString() == "raster" );
+    CHECK( layer["bandCount"].asInt() == 2 );
+    CHECK( layer["path"].asString() == path.toStdString() );
+    CHECK_FALSE( layer.isMember( "displayed" ) );
+  }
+
+  SECTION( "data:describe_dataset describes the asset by id without a map layer" )
+  {
+    Json::Value descParams( Json::objectValue );
+    descParams["layer_id"] = registered.assetId.toString().toStdString();
+    Json::Value descRes = registry.execute( "data:describe_dataset", descParams );
+    REQUIRE( descRes["status"].asString() == "success" );
+    CHECK( descRes["assetId"].asString() == registered.assetId.toString().toStdString() );
+    CHECK( descRes["width"].asInt() == 2 );
+    CHECK( descRes["height"].asInt() == 2 );
+    CHECK( descRes["band_count"].asInt() == 2 );
+    CHECK( descRes["crs"].asString() == "EPSG:4326" );
+    REQUIRE( descRes["bands"].size() == 2 );
+  }
+
+  SECTION( "a displayed layer for the same source merges instead of duplicating" )
+  {
+    auto *layer = new QgsRasterLayer( path, QStringLiteral( "headless_scene" ) );
+    REQUIRE( layer->isValid() );
+    QgsProject::instance()->addMapLayer( layer );
+
+    Json::Value listRes = registry.execute( "data_list_layers", Json::Value( Json::objectValue ) );
+    REQUIRE( listRes["status"].asString() == "success" );
+    // One catalog row enriched with display state, not a second row.
+    REQUIRE( listRes["layers"].size() == 1 );
+    CHECK( listRes["layers"][0]["displayed"].asBool() );
+    CHECK( listRes["layers"][0]["layerId"].asString() == layer->id().toStdString() );
+
+    QgsProject::instance()->removeMapLayer( layer->id() );
+  }
+
+  QgsProject::instance()->removeAllMapLayers();
+}

@@ -82,6 +82,13 @@ class DataManager : public QObject
     std::optional<AssetSnapshot> asset( AssetId id ) const;
     QVector<AssetSnapshot> assets( const AssetQuery &query = {} ) const;
 
+    /// The asset whose source descriptor's canonical path is @p path, if any.
+    /// Matches the descriptor's canonicalSource first and falls back to an
+    /// absolute-path comparison (relative spellings of the same file resolve to
+    /// the same asset). Read-only lookup over the catalog — the commit pipeline
+    /// uses it to stamp derivation input lineage (#698).
+    std::optional<AssetSnapshot> findByPath( const QString &path ) const;
+
     /// Structured provenance attached to an asset, if any. Algorithm-produced
     /// assets carry a Derivation Record; directly-registered assets do not.
     std::optional<DerivationRecord> provenance( AssetId id ) const;
@@ -217,8 +224,12 @@ class DataManager : public QObject
     /// Attaches a Derivation Record to an existing asset, the final step of a
     /// transactional algorithm-output commit performed outside this layer. The
     /// record's `outputAssetId` is stamped with `id` (its caller-supplied value
-    /// is ignored) so provenance always agrees with the registered asset. Does
-    /// not emit `assetChanged` — registration already emitted `assetAdded`.
+    /// is ignored) so provenance always agrees with the registered asset. The
+    /// first attach for an asset does not emit `assetChanged` — registration
+    /// already emitted `assetAdded`. When the attach REPLACES an existing
+    /// derivation (a re-commit over the same stable path, #687) the provenance
+    /// silently changed under the asset's identity, so one `assetChanged` is
+    /// emitted to refresh observers.
     Result<void> attachDerivationRecord( AssetId id, const DerivationRecord &derivation );
 
   signals:

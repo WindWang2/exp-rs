@@ -79,6 +79,10 @@ QJsonObject DerivationRecord::toJson() const
     inputsJson.append( inputToJson( input ) );
   json.insert( kInputs, inputsJson );
 
+  if ( !unresolvedInputPaths.isEmpty() )
+    json.insert( QStringLiteral( "unresolvedInputPaths" ),
+                 QJsonArray::fromStringList( unresolvedInputPaths ) );
+
   json.insert( kOutputAssetId, outputAssetId.isNull() ? QString() : outputAssetId.toString() );
   json.insert( kTaskReference, taskReference );
   json.insert( kSoftwareVersion, softwareVersion );
@@ -105,6 +109,10 @@ Result<DerivationRecord> DerivationRecord::fromJson( const QJsonObject &json )
       return Result<DerivationRecord>::failure( input.diagnostics() );
     record.inputs.append( input.take() );
   }
+
+  const QJsonArray unresolvedJson = json.value( QStringLiteral( "unresolvedInputPaths" ) ).toArray();
+  for ( const QJsonValue &unresolvedValue : unresolvedJson )
+    record.unresolvedInputPaths.append( unresolvedValue.toString() );
 
   Result<AssetId> outputAssetId = assetIdFromJson( json, kOutputAssetId );
   if ( !outputAssetId )

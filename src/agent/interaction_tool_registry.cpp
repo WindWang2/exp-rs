@@ -3,15 +3,18 @@
 #include "view_control_service.h"
 #include "raster_display_service.h"
 #include "data/data_manager.h"
+#include "data/data_asset.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/framework/json_params_converter.h"
 
 #include <qgsproject.h>
+#include <qgscoordinatereferencesystem.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
 #include <qgsrasterdataprovider.h>
 #include <algorithm>
 #include <sstream>
+#include <QFileInfo>
 #include <QPointer>
 
 namespace sicnu::agent {
@@ -24,6 +27,189 @@ Json::Value createEmptyObjectSchema()
   schema["type"] = "object";
   schema["properties"] = Json::Value( Json::objectValue );
   return schema;
+}
+
+// --- DataManager-backed catalog helpers (#688) --------------------------------
+// data:list_layers and data:describe_dataset read the catalog FIRST: the
+// DataManager holds every committed asset, while QgsProject::mapLayers() only
+// holds displayed layers (and is empty headless). QgsProject is merged back in
+// as secondary display state, never as the primary source.
+
+/// Full asset-kind label for the "kind" key ("type" stays the coarse
+/// raster/vector split the tools originally reported).
+QString catalogKindLabel( sicnu::data::AssetKind kind )
+{
+  using sicnu::data::AssetKind;
+  switch ( kind )
+  {
+    case AssetKind::Raster:
+      return QStringLiteral( "raster" );
+    case AssetKind::Vector:
+      return QStringLiteral( "vector" );
+    case AssetKind::RemoteMap:
+      return QStringLiteral( "remote_map" );
+    case AssetKind::VirtualRaster:
+      return QStringLiteral( "virtual_raster" );
+  }
+  Q_UNREACHABLE();
+  return {};
+}
+
+int rasterBandCount( const sicnu::data::AssetSnapshot &snapshot )
+{
+  if ( const auto *raster =
+         std::get_if<sicnu::data::RasterStructure>( &snapshot.structure() ) )
+    return raster->bandCount;
+  return -1;
+}
+
+QString crsAuthidFromWkt( const QString &wkt )
+{
+  if ( wkt.trimmed().isEmpty() )
+    return QString();
+  return QgsCoordinateReferenceSystem::fromWkt( wkt ).authid();
+}
+
+bool sameSourcePath( const QString &a, const QString &b )
+{
+  if ( a == b )
+    return true;
+  const QString absolute = QFileInfo( a ).absoluteFilePath();
+  return !absolute.isEmpty() && absolute == QFileInfo( b ).absoluteFilePath();
+}
+
+/// Resolves a user-supplied target (asset id, canonical path, or display
+/// name) to a catalog asset. Invalid or unmatched targets yield nullopt so
+/// the caller can fall back to the QgsProject layer lookup.
+std::optional<sicnu::data::AssetSnapshot> resolveCatalogAsset(
+  sicnu::data::DataManager *dataManager, const QString &target )
+{
+  if ( !dataManager )
+    return std::nullopt;
+  const QString trimmed = target.trimmed();
+  if ( trimmed.isEmpty() )
+    return std::nullopt;
+  if ( const auto id = sicnu::data::AssetId::fromString( trimmed ) )
+  {
+    if ( const auto snapshot = dataManager->asset( *id ) )
+      return snapshot;
+  }
+  for ( const auto &snapshot : dataManager->assets() )
+  {
+    if ( snapshot.source().canonicalSource == trimmed )
+      return snapshot;
+  }
+  for ( const auto &snapshot : dataManager->assets() )
+  {
+    if ( snapshot.displayName() == trimmed )
+      return snapshot;
+  }
+  return std::nullopt;
+}
+
+/// One catalog row for data:list_layers. Keeps the pre-existing keys
+/// (id/name/type/source/crs) and adds the catalog fields (assetId/revision/
+/// kind/bandCount/path).
+Json::Value catalogLayerEntry( const sicnu::data::AssetSnapshot &snapshot )
+{
+  Json::Value l( Json::objectValue );
+  const std::string assetIdText = snapshot.id().toString().toStdString();
+  l["id"] = assetIdText;
+  l["assetId"] = assetIdText;
+  l["revision"] = static_cast<Json::UInt64>( snapshot.revision().value() );
+  l["name"] = snapshot.displayName().toStdString();
+  const bool isVector = snapshot.kind() == sicnu::data::AssetKind::Vector;
+  l["type"] = isVector ? "vector" : "raster";
+  l["kind"] = catalogKindLabel( snapshot.kind() ).toStdString();
+  const std::string canonical = snapshot.source().canonicalSource.toStdString();
+  l["path"] = canonical;
+  l["source"] = canonical;
+  if ( const int bandCount = rasterBandCount( snapshot ); bandCount >= 0 )
+    l["bandCount"] = bandCount;
+  QString crs;
+  if ( const auto *raster =
+         std::get_if<sicnu::data::RasterStructure>( &snapshot.structure() ) )
+    crs = crsAuthidFromWkt( raster->crsWkt );
+  else if ( const auto *vector =
+              std::get_if<sicnu::data::VectorStructure>( &snapshot.structure() );
+            vector && !vector->layers.isEmpty() )
+    crs = crsAuthidFromWkt( vector->layers.first().crsWkt );
+  l["crs"] = crs.toStdString();
+  return l;
+}
+
+/// Describes a catalog asset for data:describe_dataset: structural metadata
+/// from AssetStructure (dimensions, extent, CRS, per-band data types and
+/// semantic roles) without requiring a displayed Qgs layer.
+Json::Value catalogDatasetDescription( const sicnu::data::AssetSnapshot &snapshot )
+{
+  Json::Value result( Json::objectValue );
+  const std::string assetIdText = snapshot.id().toString().toStdString();
+  result["id"] = assetIdText;
+  result["assetId"] = assetIdText;
+  result["revision"] = static_cast<Json::UInt64>( snapshot.revision().value() );
+  result["name"] = snapshot.displayName().toStdString();
+  result["kind"] = catalogKindLabel( snapshot.kind() ).toStdString();
+  const bool isVector = snapshot.kind() == sicnu::data::AssetKind::Vector;
+  result["type"] = isVector ? "vector" : "raster";
+  result["path"] = snapshot.source().canonicalSource.toStdString();
+  result["source"] = snapshot.source().canonicalSource.toStdString();
+
+  if ( const auto *raster =
+         std::get_if<sicnu::data::RasterStructure>( &snapshot.structure() ) )
+  {
+    result["crs"] = crsAuthidFromWkt( raster->crsWkt ).toStdString();
+    result["width"] = raster->width;
+    result["height"] = raster->height;
+    result["band_count"] = raster->bandCount;
+
+    if ( raster->extent.valid )
+    {
+      Json::Value ext( Json::objectValue );
+      ext["xmin"] = raster->extent.minimumX;
+      ext["ymin"] = raster->extent.minimumY;
+      ext["xmax"] = raster->extent.maximumX;
+      ext["ymax"] = raster->extent.maximumY;
+      result["extent"] = ext;
+    }
+
+    Json::Value bands( Json::arrayValue );
+    for ( int i = 0; i < raster->bands.size(); ++i )
+    {
+      const sicnu::data::RasterBandStructure &band = raster->bands.at( i );
+      Json::Value b( Json::objectValue );
+      b["index"] = band.number > 0 ? band.number : i + 1;
+      b["dataType"] = band.dataType.toStdString();
+      b["color_interpretation"] = band.colorInterpretation.toStdString();
+      b["has_nodata"] = band.noDataValue.has_value();
+      if ( band.noDataValue )
+        b["nodata_value"] = *band.noDataValue;
+      b["role"] = sicnu::data::bandRoleToString( band.role ).toStdString();
+      bands.append( b );
+    }
+    result["bands"] = bands;
+  }
+  else if ( const auto *vector =
+              std::get_if<sicnu::data::VectorStructure>( &snapshot.structure() ) )
+  {
+    result["layer_count"] = vector->layerCount;
+    if ( !vector->layers.isEmpty() )
+      result["crs"] = crsAuthidFromWkt( vector->layers.first().crsWkt ).toStdString();
+
+    Json::Value layers( Json::arrayValue );
+    for ( const sicnu::data::VectorLayerStructure &layer : vector->layers )
+    {
+      Json::Value l( Json::objectValue );
+      l["name"] = layer.name.toStdString();
+      l["feature_count"] = static_cast<Json::Int64>( layer.featureCount );
+      l["geometry_type"] = layer.geometryType.toStdString();
+      l["crs"] = crsAuthidFromWkt( layer.crsWkt ).toStdString();
+      layers.append( l );
+    }
+    result["layers"] = layers;
+  }
+  result["status"] = "success";
+  return result;
 }
 
 Json::Value serviceUnavailableError()
@@ -566,24 +752,76 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
     def.name = "data:list_layers";
     def.displayName = "List Loaded Map Layers";
     def.category = "data";
-    def.description = "List all raster and vector layers currently loaded in the project and map canvas with layer IDs, names, types, and CRS.";
+    def.description = "List all committed data assets in the DataManager catalog plus any displayed map layers, with IDs, names, types, band counts, revisions, and CRS.";
     def.inputSchema = createEmptyObjectSchema();
-    def.handler = []( const Json::Value & ) {
+    def.handler = [dataManager]( const Json::Value & ) {
       Json::Value result( Json::objectValue );
       Json::Value layers( Json::arrayValue );
+
+      // Displayed-layer state, resolved up front (secondary source): path ->
+      // Qgs layer id. QgsProject::mapLayers() is empty headless and never
+      // contains committed-but-not-displayed assets (#688).
+      QMap<QString, QString> displayedLayerIdByPath;
       if ( QgsProject::instance() )
       {
         QMap<QString, QgsMapLayer *> mapLayers = QgsProject::instance()->mapLayers();
         for ( auto it = mapLayers.begin(); it != mapLayers.end(); ++it )
         {
           QgsMapLayer *layer = it.value();
-          if ( !layer ) continue;
+          if ( layer )
+            displayedLayerIdByPath.insert( layer->source(), layer->id() );
+        }
+      }
+
+      // Primary source: the DataManager catalog.
+      if ( dataManager )
+      {
+        for ( const auto &snapshot : dataManager->assets() )
+        {
+          Json::Value l = catalogLayerEntry( snapshot );
+          const QString layerId =
+            displayedLayerIdByPath.value( snapshot.source().canonicalSource );
+          if ( !layerId.isEmpty() )
+          {
+            l["displayed"] = true;
+            l["layerId"] = layerId.toStdString();
+          }
+          layers.append( l );
+        }
+      }
+
+      // Secondary enrichment: displayed layers absent from the catalog keep
+      // their original entry shape (a pure-Qgs project still lists layers).
+      if ( QgsProject::instance() )
+      {
+        QMap<QString, QgsMapLayer *> mapLayers = QgsProject::instance()->mapLayers();
+        for ( auto it = mapLayers.begin(); it != mapLayers.end(); ++it )
+        {
+          QgsMapLayer *layer = it.value();
+          if ( !layer )
+            continue;
+          bool inCatalog = false;
+          if ( dataManager )
+          {
+            for ( const auto &snapshot : dataManager->assets() )
+            {
+              if ( sameSourcePath( snapshot.source().canonicalSource,
+                                   layer->source() ) )
+              {
+                inCatalog = true;
+                break;
+              }
+            }
+          }
+          if ( inCatalog )
+            continue;
           Json::Value l( Json::objectValue );
           l["id"] = layer->id().toStdString();
           l["name"] = layer->name().toStdString();
-          l["type"] = (layer->type() == Qgis::LayerType::Raster) ? "raster" : "vector";
+          l["type"] = ( layer->type() == Qgis::LayerType::Raster ) ? "raster" : "vector";
           l["source"] = layer->source().toStdString();
           l["crs"] = layer->crs().authid().toStdString();
+          l["displayed"] = true;
           layers.append( l );
         }
       }
@@ -606,7 +844,7 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
     Json::Value props( Json::objectValue );
     Json::Value layerId( Json::objectValue );
     layerId["type"] = "string";
-    layerId["description"] = "Layer ID or layer name to describe (project layers only; use spatial:raster_inspect / spatial:vector_inspect for file paths)";
+    layerId["description"] = "Asset ID, file path, layer ID, or layer name to describe (works headless against the DataManager catalog; displayed project layers also accepted)";
     props["layer_id"] = layerId;
     schema["properties"] = props;
     Json::Value req( Json::arrayValue );
@@ -614,7 +852,7 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
     schema["required"] = req;
     def.inputSchema = schema;
 
-    def.handler = []( const Json::Value &params ) {
+    def.handler = [dataManager]( const Json::Value &params ) {
       std::string targetId;
       if ( params.isMember( "layer_id" ) && params["layer_id"].isString() )
         targetId = params["layer_id"].asString();
@@ -624,6 +862,15 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
         targetId = params["dataset"].asString();
 
       QString qTarget = QString::fromStdString( targetId );
+
+      // Primary source: the DataManager catalog — an asset id, canonical path,
+      // or display name. Covers headless sessions and every committed asset,
+      // displayed or not (#688).
+      if ( const auto snapshot = resolveCatalogAsset( dataManager, qTarget ) )
+        return catalogDatasetDescription( *snapshot );
+
+      // Secondary source: QgsProject displayed layers (GUI-only lookup by
+      // layer id or name).
       QgsMapLayer *layer = nullptr;
       if ( QgsProject::instance() )
       {
