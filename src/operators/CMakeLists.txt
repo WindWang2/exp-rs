@@ -92,6 +92,14 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_pca_operator.cpp
     rs/rs_mnf_operator.cpp
     rs/rs_mosaic_operator.cpp
+    rs/rs_temporal_collection_input.cpp
+    rs/rs_temporal_output.cpp
+    rs/rs_temporal_summary_operator.cpp
+    rs/rs_temporal_composite_operator.cpp
+    rs/rs_temporal_index_operator.cpp
+    rs/rs_temporal_trend_operator.cpp
+    rs/rs_temporal_anomaly_operator.cpp
+    rs/rs_temporal_extract_series_operator.cpp
     rs/rs_landsat_import_operator.cpp
     rs/rs_sentinel2_import_operator.cpp
     rs/rs_modis_import_operator.cpp
