@@ -465,10 +465,13 @@ Json::Value RsChangeCvaAngleOperator::run( const Json::Value &params, RSOperator
     std::vector<float> beforeBuf1( pixels ), beforeBuf2( pixels );
     std::vector<float> afterBuf1( pixels ), afterBuf2( pixels );
 
-    if ( !beforeDs.readBandData( b1, beforeBuf1.data(), width, height ) ||
-         !beforeDs.readBandData( b2, beforeBuf2.data(), width, height ) ||
-         !afterDs.readBandData( a1, afterBuf1.data(), width, height ) ||
-         !afterDs.readBandData( a2, afterBuf2.data(), width, height ) )
+    // Masked reads (#679): declared NoData sentinels and non-finite pixels are
+    // NaN-ized here, matching the streaming primitives' readTileBip semantics —
+    // raw readBandData used to feed -9999 etc. into the metric as valid data.
+    if ( !beforeDs.readBandMasked( b1, beforeBuf1.data(), width, height ) ||
+         !beforeDs.readBandMasked( b2, beforeBuf2.data(), width, height ) ||
+         !afterDs.readBandMasked( a1, afterBuf1.data(), width, height ) ||
+         !afterDs.readBandMasked( a2, afterBuf2.data(), width, height ) )
     {
         throw RSOperatorError( ErrorCode::GdalError, "Failed to read raster bands" );
     }
@@ -602,8 +605,10 @@ Json::Value RsChangeSamOperator::run( const Json::Value &params, RSOperatorConte
 
     for ( int b = 0; b < bandCount; ++b )
     {
-        if ( !beforeDs.readBandData( b + 1, beforeBands[b].data(), width, height ) ||
-             !afterDs.readBandData( b + 1, afterBands[b].data(), width, height ) )
+        // Masked reads (#679): declared NoData + non-finite -> NaN, matching
+        // the streaming MAD/CVA primitives.
+        if ( !beforeDs.readBandMasked( b + 1, beforeBands[b].data(), width, height ) ||
+             !afterDs.readBandMasked( b + 1, afterBands[b].data(), width, height ) )
         {
             throw RSOperatorError( ErrorCode::GdalError, "Failed to read band " + std::to_string( b + 1 ) );
         }
@@ -732,8 +737,10 @@ Json::Value RsChangeLogRatioOperator::run( const Json::Value &params, RSOperator
     const size_t pixels = static_cast<size_t>( width ) * height;
     std::vector<float> beforeBuf( pixels ), afterBuf( pixels ), out( pixels );
 
-    if ( !beforeDs.readBandData( bBand, beforeBuf.data(), width, height ) ||
-         !afterDs.readBandData( aBand, afterBuf.data(), width, height ) )
+    // Masked reads (#679): declared NoData + non-finite -> NaN, matching the
+    // streaming ratio primitive.
+    if ( !beforeDs.readBandMasked( bBand, beforeBuf.data(), width, height ) ||
+         !afterDs.readBandMasked( aBand, afterBuf.data(), width, height ) )
     {
         throw RSOperatorError( ErrorCode::GdalError, "Failed to read raster bands" );
     }
@@ -854,8 +861,10 @@ Json::Value RsChangeIrMadOperator::run( const Json::Value &params, RSOperatorCon
 
     for ( int b = 0; b < bandCount; ++b )
     {
-        if ( !beforeDs.readBandData( b + 1, beforeBands[b].data(), width, height ) ||
-             !afterDs.readBandData( b + 1, afterBands[b].data(), width, height ) )
+        // Masked reads (#679): declared NoData + non-finite -> NaN, matching
+        // the streaming MAD primitive.
+        if ( !beforeDs.readBandMasked( b + 1, beforeBands[b].data(), width, height ) ||
+             !afterDs.readBandMasked( b + 1, afterBands[b].data(), width, height ) )
         {
             throw RSOperatorError( ErrorCode::GdalError, "Failed to read band " + std::to_string( b + 1 ) );
         }

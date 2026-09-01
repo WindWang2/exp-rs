@@ -368,3 +368,43 @@ TEST_CASE("Speckle filters: NaN preservation and mask handling", "[speckle][noda
     REQUIRE(std::isfinite(outKuan[3 * W + 4]));
     REQUIRE(std::isfinite(outGamma[3 * W + 4]));
 }
+
+// ---- Lee vs Kuan regression (#678) ----
+
+TEST_CASE("Lee filter uses Lee's own weighting, not Kuan's (#678)", "[speckle][678]") {
+    // 3x3 ramp image; with kernel 3 every pixel's window is the whole image,
+    // so mean and variance are exactly known:
+    //   mean = 5, var = 285/9 - 25 = 6.6667, Cl^2 = 6.6667/25 = 0.26667.
+    // noiseVariance = Cu^2 = 0.05 < Cl^2, so the weight is positive and the
+    // two formulas diverge:
+    //   Lee:  w = 1 - Cu^2/Cl^2          = 0.8125
+    //   Kuan: w = (1 - Cu^2/Cl^2)/(1+Cu) = 0.773810
+    // Pixel value 1 -> Lee  = 5 + 0.8125*(1-5)   = 1.75
+    //                   Kuan = 5 + 0.773810*(1-5) = 1.904762
+    std::vector<float> input = { 1.f, 2.f, 3.f,
+                                 4.f, 5.f, 6.f,
+                                 7.f, 8.f, 9.f };
+    std::vector<float> outLee(9, 0.0f), outKuan(9, 0.0f);
+    ImageEnhancement::leeFilter(input.data(), outLee.data(), 3, 3, 3, 0.05f);
+    ImageEnhancement::kuanFilter(input.data(), outKuan.data(), 3, 3, 3, 0.05f);
+
+    // Golden values (hand-computed above).
+    CHECK(outLee[0] == Approx(1.75f).margin(1e-3));
+    CHECK(outKuan[0] == Approx(1.904762f).margin(1e-3));
+
+    // The two filters must no longer be bit-identical on a divergent window.
+    for (int i = 0; i < 9; ++i) {
+        if (i == 4) continue;  // center pixel == mean -> both output the mean
+        CHECK(std::abs(outLee[i] - outKuan[i]) > 0.01f);
+    }
+
+    // Flat region: Cl^2 = 0 <= Cu^2 -> both smooth fully to the mean.
+    std::vector<float> flat(9, 5.0f);
+    std::vector<float> flatLee(9, 0.0f), flatKuan(9, 0.0f);
+    ImageEnhancement::leeFilter(flat.data(), flatLee.data(), 3, 3, 3, 0.05f);
+    ImageEnhancement::kuanFilter(flat.data(), flatKuan.data(), 3, 3, 3, 0.05f);
+    for (int i = 0; i < 9; ++i) {
+        CHECK(flatLee[i] == Approx(5.0f).margin(1e-4));
+        CHECK(flatKuan[i] == Approx(5.0f).margin(1e-4));
+    }
+}

@@ -516,3 +516,92 @@ TEST_CASE( "SpectralClassification::samClassify Handles Infinite Values", "[spec
     CHECK( std::isnan( angles[1] ) );
 }
 
+
+TEST_CASE( "rs:continuum_removal re-orders bands onto an unsorted WAVELENGTH axis (#700)", "[continuum][gdal][700]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString inputPath = dir.filePath( QStringLiteral( "wl_in.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "wl_cr.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    // 1 pixel, 4 bands whose band order disagrees with wavelength order:
+    //   band:    1     2     3     4
+    //   wl(nm): 1400   800  1100  1700
+    //   refl:  0.6   1.0   0.5   1.0
+    // Sorted onto the wavelength axis the spectrum is (800,1.0) (1100,0.5)
+    // (1400,0.6) (1700,1.0): the upper hull is the 1.0 tie-line from 800 to
+    // 1700, so the removed values equal the input reflectances. The old
+    // unsalted hull over the raw band order returned 1.0/2.5/1.0/1.0.
+    const float vals[4] = { 0.6f, 1.0f, 0.5f, 1.0f };
+    const char *wls[4] = { "1400.0", "800.0", "1100.0", "1700.0" };
+
+    GDALDatasetH inDs = createOutputTiff( inputPath, 1, 1, 4, GDT_Float32, gt, QString() );
+    REQUIRE( inDs != nullptr );
+    for ( int b = 0; b < 4; ++b )
+    {
+        GDALRasterBandH band = GDALGetRasterBand( inDs, b + 1 );
+        std::vector<float> cell = { vals[b] };
+        REQUIRE( GDALRasterIO( band, GF_Write, 0, 0, 1, 1, cell.data(), 1, 1,
+                               GDT_Float32, 0, 0 ) == CE_None );
+        REQUIRE( GDALSetMetadataItem( band, "WAVELENGTH", wls[b], nullptr ) == CE_None );
+    }
+    GDALClose( inDs );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+
+    RsContinuumRemovalOperator op;
+    RSOperatorContext ctx;
+    Json::Value result = op.run( params, ctx );
+    REQUIRE( result["bands"].asInt() == 4 );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    REQUIRE( out.bandCount() == 4 );
+    // Output bands keep the input band order, values = input / continuum(1.0).
+    const float expected[4] = { 0.6f, 1.0f, 0.5f, 1.0f };
+    for ( int b = 1; b <= 4; ++b )
+    {
+        std::vector<float> cell( 1 );
+        REQUIRE( out.readBandData( b, cell.data(), 1, 1 ) );
+        CHECK( cell[0] == Approx( expected[b - 1] ).margin( 1e-3 ) );
+    }
+}
+
+TEST_CASE( "rs:continuum_removal rejects duplicate WAVELENGTH values (#700)", "[continuum][gdal][700]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString inputPath = dir.filePath( QStringLiteral( "dup_in.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "dup_cr.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    GDALDatasetH inDs = createOutputTiff( inputPath, 1, 1, 3, GDT_Float32, gt, QString() );
+    REQUIRE( inDs != nullptr );
+    const char *wls[3] = { "900.0", "700.0", "900.0" };  // duplicate across bands
+    for ( int b = 0; b < 3; ++b )
+    {
+        GDALRasterBandH band = GDALGetRasterBand( inDs, b + 1 );
+        std::vector<float> cell = { 0.5f };
+        REQUIRE( GDALRasterIO( band, GF_Write, 0, 0, 1, 1, cell.data(), 1, 1,
+                               GDT_Float32, 0, 0 ) == CE_None );
+        REQUIRE( GDALSetMetadataItem( band, "WAVELENGTH", wls[b], nullptr ) == CE_None );
+    }
+    GDALClose( inDs );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+
+    RsContinuumRemovalOperator op;
+    RSOperatorContext ctx;
+    REQUIRE_THROWS( op.run( params, ctx ) );
+}

@@ -906,3 +906,39 @@ TEST_CASE("BandMath rejects huge band literals without UB (#613)", "[bandmath][p
 
     REQUIRE_FALSE(BandMath::evaluate("b9999999999999999999 + b1", bands, out.data(), 1));
 }
+
+// --- Unary-minus vs '^' precedence (#700) ---
+
+TEST_CASE("BandMath binds '^' tighter than unary minus (#700)", "[bandmath][operators][700]")
+{
+    BandMath::BandData bands;
+    bands[1] = { 3.0f, 2.0f };
+    std::vector<float> out(2);
+
+    // -b1^2 is -(b1^2), not (-b1)^2 (standard math convention).
+    REQUIRE(BandMath::evaluate("-b1^2", bands, out.data(), 2));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(-9.0f, 0.001f));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(-4.0f, 0.001f));
+
+    // Constants follow the same rule.
+    REQUIRE(BandMath::evaluate("-2^2", bands, out.data(), 1));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(-4.0f, 0.001f));
+
+    // Parentheses still force the unary minus to bind first.
+    REQUIRE(BandMath::evaluate("(-b1)^2", bands, out.data(), 2));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(9.0f, 0.001f));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(4.0f, 0.001f));
+
+    // Negative exponents keep working through the unary branch.
+    REQUIRE(BandMath::evaluate("2^-1", bands, out.data(), 1));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.5f, 0.001f));
+
+    // Right-associativity of '^' is preserved: 2^3^2 = 2^(3^2) = 512.
+    REQUIRE(BandMath::evaluate("2^3^2", bands, out.data(), 1));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(512.0f, 0.001f));
+
+    // Multiplication still binds looser than '^' and unary minus:
+    // -b1*2 = (-b1)*2 = -6.
+    REQUIRE(BandMath::evaluate("-b1*2", bands, out.data(), 2));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(-6.0f, 0.001f));
+}

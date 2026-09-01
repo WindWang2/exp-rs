@@ -14,7 +14,9 @@
 
 #include <QString>
 
+#include <algorithm>
 #include <cstring>
+#include <numeric>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -100,6 +102,69 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
     double srcNodata = ds.bandNoDataValue( 1, &hasNodata );
     const float nodata = hasNodata ? static_cast<float>( srcNodata ) : std::numeric_limits<float>::quiet_NaN();
 
+    // Wavelengths from band WAVELENGTH metadata (fallback to indices when absent)
+    std::vector<float> wavelengths( bandCount, 0.0f );
+    bool hasWavelengths = true;
+    for ( int b = 1; b <= bandCount; ++b )
+    {
+        QString wlStr = ds.bandMetadataItem( b, "WAVELENGTH" );
+        bool ok = false;
+        double v = wlStr.isEmpty() ? 0.0 : wlStr.toDouble( &ok );
+        if ( ok && v > 0.0 ) {
+            wavelengths[b - 1] = static_cast<float>( v );
+        } else {
+            // All-or-none (#632): mixing nm-scale wavelengths with band
+            // indices lands the missing bands at x = 1..N on a 2000 nm axis,
+            // badly distorting the convex hull. Fall back to pure indices.
+            hasWavelengths = false;
+            break;
+        }
+    }
+    if ( !hasWavelengths )
+        for ( int b = 1; b <= bandCount; ++b )
+            wavelengths[b - 1] = static_cast<float>( b );
+
+    // The continuum hull walks bands left→right and assumes the wavelength
+    // axis ascends with band index (#700). Band order may legitimately differ
+    // from wavelength order (positions follow the requested band list), so
+    // sort the axis and track the permutation applied to the spectra.
+    std::vector<int> wlPerm;  // empty = identity permutation
+    std::vector<float> sortedWl;
+    if ( hasWavelengths )
+    {
+        bool ascending = true;
+        for ( int b = 1; b < bandCount; ++b )
+        {
+            if ( wavelengths[b] < wavelengths[b - 1] )
+            {
+                ascending = false;
+                break;
+            }
+        }
+        if ( !ascending )
+        {
+            wlPerm.resize( bandCount );
+            std::iota( wlPerm.begin(), wlPerm.end(), 0 );
+            std::stable_sort( wlPerm.begin(), wlPerm.end(),
+                              [&wavelengths]( int a, int b ) { return wavelengths[a] < wavelengths[b]; } );
+            sortedWl.resize( bandCount );
+            for ( int b = 0; b < bandCount; ++b )
+                sortedWl[b] = wavelengths[wlPerm[b]];
+            for ( int b = 1; b < bandCount; ++b )
+            {
+                if ( sortedWl[b] == sortedWl[b - 1] )
+                    throw RSOperatorError( ErrorCode::InvalidInputData,
+                                          "Continuum removal: duplicate WAVELENGTH metadata across bands — "
+                                          "the continuum hull is ill-defined; fix the per-band WAVELENGTH tags" );
+            }
+            context.logWarning( "Continuum removal: WAVELENGTH axis is not ascending in band order — "
+                                "spectra re-ordered by wavelength for the continuum hull" );
+        }
+    }
+    const float *wlPtr = hasWavelengths
+        ? ( wlPerm.empty() ? wavelengths.data() : sortedWl.data() )
+        : nullptr;
+
     // Stream over 256x256 BIP tiles
     constexpr int kTile = 256;
     const size_t maxTilePixels = static_cast<size_t>( kTile ) * kTile;
@@ -129,28 +194,6 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
 
     std::vector<float> spectrum( bandCount );
     std::vector<float> removed( bandCount );
-    // Wavelengths from band WAVELENGTH metadata (fallback to indices when absent)
-    std::vector<float> wavelengths( bandCount, 0.0f );
-    bool hasWavelengths = true;
-    for ( int b = 1; b <= bandCount; ++b )
-    {
-        QString wlStr = ds.bandMetadataItem( b, "WAVELENGTH" );
-        bool ok = false;
-        double v = wlStr.isEmpty() ? 0.0 : wlStr.toDouble( &ok );
-        if ( ok && v > 0.0 ) {
-            wavelengths[b - 1] = static_cast<float>( v );
-        } else {
-            // All-or-none (#632): mixing nm-scale wavelengths with band
-            // indices lands the missing bands at x = 1..N on a 2000 nm axis,
-            // badly distorting the convex hull. Fall back to pure indices.
-            hasWavelengths = false;
-            break;
-        }
-    }
-    if ( !hasWavelengths )
-        for ( int b = 1; b <= bandCount; ++b )
-            wavelengths[b - 1] = static_cast<float>( b );
-    const float *wlPtr = hasWavelengths ? wavelengths.data() : nullptr;
 
     for ( int y = 0; y < height; y += kTile )
     {
@@ -182,12 +225,31 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
             {
                 const float *specIn = tileBip.data() + p * B;
                 float *specOut = tileOut.data() + p * B;
-                std::memcpy( spectrum.data(), specIn, sizeof( float ) * bandCount );
+                if ( wlPerm.empty() )
+                {
+                    std::memcpy( spectrum.data(), specIn, sizeof( float ) * bandCount );
+                }
+                else
+                {
+                    // Re-order onto the ascending wavelength axis before the hull.
+                    for ( int b = 0; b < bandCount; ++b )
+                        spectrum[b] = specIn[wlPerm[b]];
+                }
 
                 if ( SpectralClassification::continuumRemoval( spectrum.data(), wlPtr, removed.data(),
                                                                 bandCount, nodata ) )
                 {
-                    std::memcpy( specOut, removed.data(), sizeof( float ) * bandCount );
+                    if ( wlPerm.empty() )
+                    {
+                        std::memcpy( specOut, removed.data(), sizeof( float ) * bandCount );
+                    }
+                    else
+                    {
+                        // Invert the permutation so output bands keep the
+                        // input's band order.
+                        for ( int b = 0; b < bandCount; ++b )
+                            specOut[wlPerm[b]] = removed[b];
+                    }
                 }
                 else
                 {

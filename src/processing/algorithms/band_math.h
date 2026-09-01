@@ -29,7 +29,9 @@
  *                   savi(nir, red, L), nbr(nir, swir2), bsi(swir, red, nir, blue)
  *
  * Operator precedence (low -> high):
- *   ?: -> || -> && -> comparison -> + - -> * / % -> ^ -> unary - ! -> primary
+ *   ?: -> || -> && -> comparison -> + - -> * / % -> unary - ! -> ^ -> primary
+ *   ('^' binds tighter than unary minus: -b2^2 == -(b2^2); 2^-3 is a negative
+ *   exponent. Use parentheses for (-b2)^2.)
  */
 namespace BandMath
 {

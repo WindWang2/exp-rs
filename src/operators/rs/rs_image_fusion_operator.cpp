@@ -128,6 +128,33 @@ Json::Value RsImageFusionOperator::run(const Json::Value& params,
         }
     }
 
+    // Linear fusion with a partial weight list used to read out of bounds in
+    // the fusion kernels (#677). The kernels now pad with the equal-weight
+    // default; surface the same warning here so agent callers see it.
+    if (method == "linear" && !fusionParams.msWeights.isEmpty()) {
+        GdalDatasetWrapper msProbe;
+        if (msProbe.open(QString::fromStdString(msPath))) {
+            const int msBands = msProbe.bandCount();
+            if (fusionParams.msWeights.size() < msBands) {
+                QString paddedBands;
+                for (int b = fusionParams.msWeights.size(); b < msBands; ++b) {
+                    if (!paddedBands.isEmpty())
+                        paddedBands += QStringLiteral(", ");
+                    paddedBands += QString::number(b + 1);
+                }
+                context.logWarning(
+                    QStringLiteral("msWeights has %1 entries for %2 MS bands — "
+                                   "band(s) %3 will be fused with the default "
+                                   "weight (1 - panWeight = %4)")
+                        .arg(fusionParams.msWeights.size())
+                        .arg(msBands)
+                        .arg(paddedBands)
+                        .arg(1.0f - panWeight)
+                        .toStdString());
+            }
+        }
+    }
+
     QString errorMessage;
     if (!ImageFusion::processNativeFusion(QString::fromStdString(panPath),
                                           QString::fromStdString(msPath),
