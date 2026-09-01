@@ -4,6 +4,7 @@
 // store, and the catalog provider bridge.
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <QFile>
 
 #include <QTemporaryDir>
 
@@ -552,4 +553,45 @@ TEST_CASE( "Missing local vector still reports not found with local_file_not_fou
     CHECK( result.error.find( "not found" ) != std::string::npos );
     if ( !result.errorCode.empty() )
         CHECK( result.errorCode == "local_file_not_found" );
+}
+
+
+TEST_CASE( "Sidecar capabilities resolve toward the descriptor as single source (#707)", "[agent][spatial][meta]" )
+{
+    // The descriptor wins on every declared field; the sidecar survives only
+    // as a sparse, agreeing override. The historical drift was rs:infer:
+    // sidecar gpu=false while CUDA inference works per model.
+    sicnu::processing::AgentMetadata descriptor;
+    descriptor.taskFamily = "inference";
+    descriptor.gpuAccelerated = true;
+    descriptor.tags = { "inference", "onnx" };
+
+    sicnu::processing::AlgorithmMetaEntry sidecar;
+    sidecar.id = "rs:infer";
+    sidecar.task = "inference";
+    sidecar.gpu = false; // the drift case
+    sidecar.notes = "sidecar guidance survives when the descriptor is silent";
+
+    sicnu::processing::AlgorithmMetaStore store;
+    store.loadFromDirectory( "/nonexistent-drift-test-dir" );
+    // Inject the entry through the public directory API: write a temp sidecar.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    {
+        QFile f( dir.path() + "/rs-infer.json" );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( R"({"id":"rs:infer","task":"inference","gpu":false,)"
+                 R"("notes":"sidecar guidance survives when the descriptor is silent"})" );
+    }
+    REQUIRE( store.loadFromDirectory( dir.path().toStdString() ) == 1 );
+
+    std::vector<std::string> drift;
+    const auto resolved = store.resolveAgainstDescriptor( "rs:infer", descriptor, &drift );
+    REQUIRE( resolved.has_value() );
+    CHECK( resolved->gpu == true );            // descriptor wins
+    CHECK( resolved->task == "inference" );
+    CHECK( resolved->notes.find( "sidecar guidance" ) == 0 ); // unset in descriptor → passes through
+    REQUIRE( drift.size() == 1 );
+    CHECK( drift[0].find( "gpu" ) != std::string::npos );
+    CHECK( drift[0].find( "descriptor=true" ) != std::string::npos );
 }

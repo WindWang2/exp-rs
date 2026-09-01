@@ -3,6 +3,8 @@
 
 #include <json/json.h>
 
+#include "algorithm_descriptor.h"
+
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -50,6 +52,20 @@ class AlgorithmMetaStore {
     std::optional<AlgorithmMetaEntry> find( const std::string &id ) const;
     std::vector<AlgorithmMetaEntry> entries() const;
     size_t size() const;
+
+    /// Descriptor-backed resolution (#707): the AlgorithmDescriptor's
+    /// AgentMetadata is the single source of truth. The sidecar survives as
+    /// a SPARSE OVERRIDE that must agree with the descriptor: sidecar fields
+    /// that contradict a declared descriptor field are dropped (descriptor
+    /// wins) and reported via @a drift as "field: sidecar=X descriptor=Y"
+    /// entries, so silent capability drift ("descriptor says GPU, sidecar
+    /// says no GPU") can be logged and tested instead of shipping both
+    /// answers to agents. Fields the descriptor leaves unset pass through
+    /// from the sidecar. Returns nullopt when no sidecar exists.
+    std::optional<AlgorithmMetaEntry> resolveAgainstDescriptor(
+        const std::string &id,
+        const AgentMetadata &descriptor,
+        std::vector<std::string> *drift = nullptr ) const;
 
   private:
     AlgorithmMetaStore() = default;

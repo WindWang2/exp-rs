@@ -179,6 +179,8 @@ Json::Value RsSupervisedClassificationOperator::metadata() const {
     meta["tags"].append("classification");
     meta["tags"].append("svm");
     meta["tags"].append("model");
+        meta["task"] = "classification";
+    meta["gpu"] = false;
     meta["purpose"] = "Classify multi-band imagery using labeled polygons or a saved model";
     meta["useCases"] = Json::Value(Json::arrayValue);
     meta["useCases"].append("Land-cover mapping from ROI polygons");

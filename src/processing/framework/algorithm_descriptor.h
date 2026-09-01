@@ -96,6 +96,19 @@ struct AgentMetadata
   /// it to prefer composable primitives over monolithic selectors.
   std::string facadeOf;
 
+  // --- Capability fields absorbed from the algorithm_meta sidecars (#707):
+  // --- the descriptor is the single source of truth; sidecars remain sparse
+  // --- optional overrides that must agree with these values.
+  /// Task family ("segmentation", "classification", "inference", ...).
+  std::string taskFamily;
+  /// The algorithm can use GPU acceleration (per-model resolution may still
+  /// land on CPU — this is capability, not requirement).
+  bool gpuAccelerated = false;
+  /// Optional benchmark accuracy in [0, 1]; negative = unreported.
+  double accuracy = -1.0;
+  /// Human/agent-facing selection guidance.
+  std::string notes;
+
   Json::Value toJson() const;
   static AgentMetadata fromJson( const Json::Value &val );
 };

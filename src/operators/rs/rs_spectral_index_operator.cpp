@@ -73,6 +73,8 @@ Json::Value RsSpectralIndexOperator::metadata() const {
     meta["tags"].append("ndsi");
     meta["tags"].append("ndti");
     meta["tags"].append("vegetation");
+        meta["task"] = "index-computation";
+    meta["gpu"] = false;
     meta["purpose"] = "Derive vegetation, water, soil, snow, fire, or built-up indices from multispectral imagery.";
     meta["prerequisites"].append("Input raster must have sufficient bands for the selected index.");
     meta["workflowHints"].append("Apply atmospheric correction before computing indices for best results.");
