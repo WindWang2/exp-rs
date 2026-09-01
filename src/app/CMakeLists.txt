@@ -137,6 +137,7 @@ add_executable(sicnu_geo_rs
     dialogs/fusion_dialog.cpp
     dialogs/sicnu_algorithm_dialog.cpp
     dialogs/mosaic_dialog.cpp
+    dialogs/temporal_analysis_dialog.cpp
     dialogs/change_detection_dialog.cpp
     dialogs/dialog_utils.cpp
     dialogs/dialog_help_catalog.cpp
@@ -155,7 +156,6 @@ add_executable(sicnu_geo_rs
     map_tools/rs_roi_spectrum_tool.cpp
     widgets/annotation_widget.cpp
     widgets/cross_section_widget.cpp
-    widgets/multi_temporal_widget.cpp
     widgets/roi_statistics_widget.cpp
     widgets/histogram_widget.cpp
     widgets/histogram_stretch_widget.cpp

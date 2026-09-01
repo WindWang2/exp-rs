@@ -469,6 +469,9 @@ void QgisDesktopWindow::setupMenu()
     tip( analysisMenu->addAction( ic( "ch_nge_detect" ), tr( "变化检测..." ),
                                   this, &QgisDesktopWindow::openChangeDetectionDialog ),
          tr( "双时相：差值 / 归一化差值 / 变化掩膜。" ) );
+    tip( analysisMenu->addAction( ic( "veget_tion_index" ), tr( "时间序列分析..." ),
+                                      this, &QgisDesktopWindow::openTemporalAnalysisDialog ),
+         tr( "多时相统计 / 合成 / 指数时序 / 趋势 / 异常 / 点与 ROI 序列（含科学预检）。" ) );
     tip( analysisMenu->addAction( ic( "p_nsh_r_en" ), tr( "影像融合..." ),
                                   this, &QgisDesktopWindow::openFusionDialog ),
          tr( "全色锐化：Linear / Brovey / IHS / PCA 或 OTB/GDAL。" ) );
