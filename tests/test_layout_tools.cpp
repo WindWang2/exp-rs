@@ -6,6 +6,7 @@
 // template round-trip, export with memory preflight, and project persistence.
 #include <catch2/catch_test_macros.hpp>
 
+#include <QElapsedTimer>
 #include <QFile>
 #include <QImage>
 #include <QTemporaryDir>
@@ -495,6 +496,71 @@ TEST_CASE( "layout:auto_arrange builds the thematic composition without touching
     CHECK( item->positionWithUnits().x() + item->sizeWithUnits().width() <= 210.5 );
     CHECK( item->positionWithUnits().y() + item->sizeWithUnits().height() <= 297.5 );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Performance smoke: large layouts must stay linear and interactive.
+// ---------------------------------------------------------------------------
+TEST_CASE( "Layout tools scale to 500 items without quadratic blowups", "[layout][mcp][perf]" )
+{
+  ensureQgisApplication();
+  cleanupProject();
+
+  REQUIRE( run( "layout:create", R"({"name":"Big"})" ).success );
+  QgsPrintLayout *layout = LayoutService::instance().findLayout( QStringLiteral( "Big" ) );
+  REQUIRE( layout != nullptr );
+
+  // Build 500 shapes through the service (direct API: creation cost is not
+  // what this test measures).
+  for ( int i = 0; i < 500; ++i )
+  {
+    const std::string input = R"({"layout":"Big","type":"shape","properties":{"x":)" +
+                              std::to_string( 2 + ( i % 20 ) * 10 ) + R"(,"y":)" +
+                              std::to_string( 2 + ( i / 20 ) * 5 ) + R"(,"name":"shape_)" +
+                              std::to_string( i ) + R"("}})";
+    REQUIRE( run( "layout:add_item", input ).success );
+  }
+  QList<QgsLayoutItem *> items;
+  layout->layoutItems( items );
+  int contentCount = 0;
+  for ( QgsLayoutItem *item : items )
+  {
+    if ( item->type() != QgsLayoutItemRegistry::LayoutPage )
+      ++contentCount;
+  }
+  REQUIRE( contentCount == 500 );
+
+  // Compact listing of all 500 items.
+  QElapsedTimer timer;
+  timer.start();
+  auto listing = run( "layout:list_items", R"({"layout":"Big"})" );
+  REQUIRE( listing.success );
+  REQUIRE( listing.output["items"].size() == 500 );
+  const qint64 listMs = timer.elapsed();
+
+  // Full property read of one item resolves through the uuid pass.
+  timer.restart();
+  QgsLayoutItem *first = LayoutService::instance().findItem( layout, QStringLiteral( "shape_0" ) );
+  REQUIRE( first != nullptr );
+  const Json::Value props = LayoutService::instance().itemProperties( first );
+  REQUIRE( props.isMember( "x" ) );
+  const qint64 readMs = timer.elapsed();
+
+  // One batch edit must not rescan quadratically (generous CI-safe bounds;
+  // a quadratic regression would be seconds-to-minutes, not milliseconds).
+  timer.restart();
+  Json::Value update( Json::objectValue );
+  update["opacity"] = 55.0;
+  update["rotation"] = 10.0;
+  QStringList applied, ignored;
+  REQUIRE( LayoutService::instance().applyItemProperties( first, update, &applied, &ignored, nullptr ) );
+  const qint64 editMs = timer.elapsed();
+  REQUIRE( fuzzyEquals( first->itemOpacity(), 0.55 ) );
+
+  INFO( "list 500 items: " << listMs << " ms; read: " << readMs << " ms; edit: " << editMs << " ms" );
+  CHECK( listMs < 2000 );
+  CHECK( readMs < 100 );
+  CHECK( editMs < 200 );
 }
 
 // ---------------------------------------------------------------------------
