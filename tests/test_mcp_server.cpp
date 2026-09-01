@@ -74,11 +74,49 @@ public:
 
     QVariantMap lastErrorData;
 
-    QVariantMap testListAlgorithms() { return handleListAlgorithms(); }
+    // Paginate through every page (#701): sections assert on specific
+    // entries anywhere in the catalog, which exceeds one 50-entry page.
+    QVariantMap testListAlgorithms()
+    {
+        QVariantMap all;
+        QVariantList entries;
+        int cursor = 0;
+        for ( ;; )
+        {
+            const QVariantMap page = handleListAlgorithms( 500, cursor );
+            const QVariantList slice = page.value( "algorithms" ).toList();
+            entries.append( slice );
+            const QVariant next = page.value( "nextCursor" );
+            if ( slice.isEmpty() || !next.isValid() || next.toInt() < 0 )
+                break;
+            cursor = next.toInt();
+        }
+        all[QStringLiteral("algorithms")] = entries;
+        all[QStringLiteral("count")] = entries.size();
+        return all;
+    }
     QVariantMap testGetAlgorithmSchema(const QString &id) { return handleGetAlgorithmSchema(id); }
     QVariantMap testListLayers() { return handleListLayers(); }
     QVariantMap testDescribeDataset(const QString &id) { return handleDescribeDataset(id); }
-    QVariantMap testListOperators() { return handleListOperators(); }
+    QVariantMap testListOperators()
+    {
+        QVariantMap all;
+        QVariantList entries;
+        int cursor = 0;
+        for ( ;; )
+        {
+            const QVariantMap page = handleListOperators( 500, cursor );
+            const QVariantList slice = page.value( "operators" ).toList();
+            entries.append( slice );
+            const QVariant next = page.value( "nextCursor" );
+            if ( slice.isEmpty() || !next.isValid() || next.toInt() < 0 )
+                break;
+            cursor = next.toInt();
+        }
+        all[QStringLiteral("operators")] = entries;
+        all[QStringLiteral("count")] = entries.size();
+        return all;
+    }
     QVariantMap testGetOperatorSchema(const QString &id) { return handleGetOperatorSchema(id); }
     QVariantMap testExecuteOperator(const QString &id, const QVariantMap &params)
     {

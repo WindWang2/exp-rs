@@ -564,6 +564,7 @@ TEST_CASE( "Sidecar capabilities resolve toward the descriptor as single source 
     sicnu::processing::AgentMetadata descriptor;
     descriptor.taskFamily = "inference";
     descriptor.gpuAccelerated = true;
+    descriptor.gpuDeclared = true; // tri-state: undeclared must not override
     descriptor.tags = { "inference", "onnx" };
 
     sicnu::processing::AlgorithmMetaEntry sidecar;

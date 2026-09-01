@@ -202,10 +202,12 @@ namespace {
  */
 bool processingRegistryReadable()
 {
-  if ( QgsApplication::instance() )
-    return true;
-  return QCoreApplication::instance()
-         && QThread::currentThread() == QCoreApplication::instance()->thread();
+  // QgsApplication::processingRegistry() is backed by a process-wide
+  // members() singleton (no QgsApplication/QCoreApplication instance
+  // required — the MCP headless harness runs without one), and read-only
+  // algorithmById lookups are safe from worker threads once providers are
+  // loaded at startup.
+  return QgsApplication::processingRegistry() != nullptr;
 }
 
 } // anonymous namespace
@@ -247,6 +249,22 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
   {
     if ( QgsProcessingRegistry *registry = QgsApplication::processingRegistry() )
       liveAlg = registry->algorithmById( mAlgorithmId );
+  }
+
+  if ( !liveAlg && processingRegistryReadable() )
+  {
+    // QgsProcessingRegistry::algorithmById reads the provider's algorithm map
+    // WITHOUT triggering the provider's lazy load (QgsProcessingProvider::
+    // algorithms() does); a freshly added provider therefore misses until
+    // something touches algorithms() once. Force the load and retry.
+    if ( QgsProcessingRegistry *registry = QgsApplication::processingRegistry() )
+    {
+      if ( QgsProcessingProvider *provider = registry->providerById( mProviderId ) )
+      {
+        (void)provider->algorithms();
+        liveAlg = registry->algorithmById( mAlgorithmId );
+      }
+    }
   }
 
   if ( !liveAlg )
