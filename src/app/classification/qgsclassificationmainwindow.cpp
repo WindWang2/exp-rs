@@ -2378,7 +2378,18 @@ RsPixelIgnoreOptions QgsClassificationMainWindow::currentIgnoreOptions() const
 void QgsClassificationMainWindow::applyClassification()
 {
   if ( m_classifyBusy )
+  {
+    // #704: the same entry doubles as Stop while a classification runs —
+    // cancel used to be reachable only through the hidden job panel. The
+    // executor observes the cooperative flag mid-tile; the busy state clears
+    // when the terminal record lands (see the failure callback).
+    if ( m_jobHandle.isRunning() )
+    {
+      statusBar()->showMessage( tr( "正在取消分类…" ), 5000 );
+      m_jobHandle.cancel();
+    }
     return;
+  }
   if ( m_sourceRasterPath.isEmpty() )
   {
     statusBar()->showMessage( tr( "请先 File → Open source raster..." ), 5000 );
