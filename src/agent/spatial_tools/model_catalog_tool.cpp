@@ -3,6 +3,13 @@
 
 #include "operators/framework/model_catalog.h"
 
+// The GPU default comes from the platform's own CUDA detection (the model
+// runtime layer) — reused, never re-implemented here. That layer only exists
+// in OpenCV builds; without OpenCV gpu_available keeps its false default.
+#ifdef SICNU_HAS_OPENCV
+#include "operators/runtime/model_runtime.h"
+#endif
+
 namespace sicnu::agent::spatial_tools {
 
 std::string ModelCatalogTool::description() const
@@ -12,8 +19,10 @@ std::string ModelCatalogTool::description() const
          "classification, detection, ...), input/output contract, framework "
          "(onnx), GPU requirement, benchmark accuracy, supported sensors, and "
          "local weight paths. Supports automated multi-criteria ranking by "
-         "sensor, spatial resolution, and GPU/VRAM hardware constraints to "
-         "assist Pi in selecting optimal models before rs:inference.";
+         "input band roles, sensor, spatial resolution, and GPU/VRAM hardware "
+         "constraints to assist Pi in selecting optimal models before "
+         "rs:inference. gpu_available defaults to the platform's own CUDA "
+         "detection when the argument is omitted.";
 }
 
 std::vector<std::string> ModelCatalogTool::tags() const
@@ -42,6 +51,17 @@ Json::Value ModelCatalogTool::inputSchema() const
   sensor["description"] = "Filter / rank models compatible with this sensor (e.g. 'Sentinel-2', 'Landsat-8', 'GF-2')";
   props["sensor"] = sensor;
 
+  // Optional array of band-role names (mirrors the manifest input.band_roles
+  // vocabulary, e.g. ["Red", "Green", "Blue", "NIR"]) feeding rankModels'
+  // band-role scoring (#705).
+  Json::Value bandRoles( Json::objectValue );
+  bandRoles["type"] = "array";
+  bandRoles["description"] = "Band roles to rank models by (e.g. ['Red', 'Green', 'Blue', 'NIR'])";
+  Json::Value roleItems( Json::objectValue );
+  roleItems["type"] = "string";
+  bandRoles["items"] = roleItems;
+  props["band_roles"] = bandRoles;
+
   Json::Value resolution( Json::objectValue );
   resolution["type"] = "number";
   resolution["description"] = "Spatial resolution in meters for compatibility evaluation";
@@ -49,7 +69,7 @@ Json::Value ModelCatalogTool::inputSchema() const
 
   Json::Value gpuAvailable( Json::objectValue );
   gpuAvailable["type"] = "boolean";
-  gpuAvailable["description"] = "Whether GPU acceleration is available on the target environment";
+  gpuAvailable["description"] = "Whether GPU acceleration is available (default: auto-detected from the platform)";
   props["gpu_available"] = gpuAvailable;
 
   Json::Value vramBudget( Json::objectValue );
@@ -106,6 +126,7 @@ SpatialToolResult ModelCatalogTool::execute( const Json::Value &input )
 
   const bool shouldRank = ( input.isMember( "rank" ) && input["rank"].asBool() ) ||
                           input.isMember( "sensor" ) ||
+                          input.isMember( "band_roles" ) ||
                           input.isMember( "resolution" ) ||
                           input.isMember( "gpu_available" ) ||
                           input.isMember( "vram_budget_mb" );
@@ -117,10 +138,29 @@ SpatialToolResult ModelCatalogTool::execute( const Json::Value &input )
       criteria.task = input["task"].asString();
     if ( input.isMember( "sensor" ) )
       criteria.sensor = input["sensor"].asString();
+    if ( input.isMember( "band_roles" ) && input["band_roles"].isArray() )
+    {
+      const Json::Value &roles = input["band_roles"];
+      for ( Json::ArrayIndex i = 0; i < roles.size(); ++i )
+      {
+        if ( roles[i].isString() && !roles[i].asString().empty() )
+          criteria.bandRoles.push_back( roles[i].asString() );
+      }
+    }
     if ( input.isMember( "resolution" ) && input["resolution"].isNumeric() )
       criteria.resolutionMeters = input["resolution"].asDouble();
+    // #705: gpu_available defaults to the platform's own CUDA detection so
+    // GPU-accelerated models are not silently penalized (−0.05) in every
+    // default ranking; an explicit argument still wins.
     if ( input.isMember( "gpu_available" ) )
       criteria.gpuAvailable = input["gpu_available"].asBool();
+    else
+    {
+#ifdef SICNU_HAS_OPENCV
+      criteria.gpuAvailable =
+        sicnu::operators::runtime::ModelRuntimeRegistry::instance().hardware().cudaAvailable;
+#endif
+    }
     if ( input.isMember( "vram_budget_mb" ) && input["vram_budget_mb"].isNumeric() )
       criteria.maxVramMb = input["vram_budget_mb"].asInt();
 

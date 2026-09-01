@@ -98,6 +98,105 @@ int TileInferenceEngine::effectiveHalo( const ModelInfo &model )
   return model.tiling.halo > 0 ? model.tiling.halo : model.tiling.overlap / 2;
 }
 
+std::string TileInferenceEngine::inputDTypeMismatch( const ModelInfo &model,
+                                                     const std::vector<int> &bands,
+                                                     const std::function<int( int )> &bandDataType )
+{
+  if ( model.input.dtype.empty() || bands.empty() )
+    return {};
+  static const std::map<std::string, int> kAccepted = {
+    { "float32", GDT_Float32 }, { "float64", GDT_Float64 },
+    { "float16", GDT_Float32 }, { "uint16", GDT_UInt16 },
+    { "int16", GDT_Int16 },     { "uint8", GDT_Byte },
+    { "int32", GDT_Int32 },     { "uint32", GDT_UInt32 },
+  };
+  const auto accepted = kAccepted.find( model.input.dtype );
+  if ( accepted == kAccepted.end() )
+    return "model manifest declares unsupported input dtype '" + model.input.dtype + "'";
+  for ( int band : bands )
+  {
+    const int rasterType = bandDataType( band );
+    if ( rasterType != accepted->second )
+      return "model manifest requires input dtype '" + model.input.dtype
+               + "' but the raster band " + std::to_string( band ) + " has GDAL type "
+               + std::to_string( rasterType )
+               + " (convert the raster or update the manifest)";
+  }
+  return {};
+}
+
+std::string TileInferenceEngine::missingOutputTensor( const ModelInfo &model,
+                                                      const std::vector<std::string> &graphOutputNames )
+{
+  if ( model.output.tensorNames.empty() )
+    return {};
+  if ( graphOutputNames.empty() )
+    return {}; // runtime cannot enumerate outputs — contract stays advisory
+  for ( const auto &declared : model.output.tensorNames )
+  {
+    if ( std::find( graphOutputNames.begin(), graphOutputNames.end(), declared )
+         == graphOutputNames.end() )
+    {
+      std::string available;
+      for ( const auto &name : graphOutputNames )
+        available += ( available.empty() ? "" : ", " ) + name;
+      return "model manifest declares output tensor '" + declared
+               + "' but the loaded graph provides only: " + available;
+    }
+  }
+  return {};
+}
+
+std::string TileInferenceEngine::outputTypeMismatch( int outputCvType, const std::string &tensorName )
+{
+  if ( outputCvType == CV_32F )
+    return {};
+  // Mnemonic for the common depths keeps the message readable; quantized
+  // (8U/16U) heads are rejected until a dequantizing write path exists (#690).
+  const char *depthName = nullptr;
+  switch ( outputCvType )
+  {
+    case CV_8U: depthName = "CV_8U"; break;
+    case CV_8S: depthName = "CV_8S"; break;
+    case CV_16U: depthName = "CV_16U"; break;
+    case CV_16S: depthName = "CV_16S"; break;
+    case CV_32S: depthName = "CV_32S"; break;
+    case CV_64F: depthName = "CV_64F"; break;
+    case CV_16F: depthName = "CV_16F"; break;
+    default: break; // the numeric type is authoritative for exotic combos
+  }
+  std::string actual = std::to_string( outputCvType );
+  if ( depthName )
+    actual += std::string( " (" ) + depthName + ")";
+  return "model output tensor '" + ( tensorName.empty() ? std::string( "<default>" ) : tensorName )
+           + "' has OpenCV type " + actual
+           + " but the raster writer emits float32: expected CV_32F (type 5)";
+}
+
+std::string TileInferenceEngine::classesChannelMismatch( const ModelInfo &model, int outputChannels,
+                                                         const std::string &tensorName )
+{
+  const std::size_t declared = model.output.classes.size();
+  if ( declared == 0 || outputChannels == static_cast<int>( declared ) )
+    return {};
+  return "model output tensor '" + ( tensorName.empty() ? std::string( "<default>" ) : tensorName )
+           + "' has " + std::to_string( outputChannels ) + " channel(s) but the manifest declares "
+           + std::to_string( declared )
+           + " classes (the raster head writes one channel per class)";
+}
+
+bool TileInferenceEngine::batchIsAllNoData( const std::vector<int> &validPixelCounts )
+{
+  if ( validPixelCounts.empty() )
+    return false;
+  for ( int valid : validPixelCounts )
+  {
+    if ( valid > 0 )
+      return false;
+  }
+  return true;
+}
+
 TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                                              const std::vector<int> &bands,
                                              const std::string &outputPath,
@@ -105,6 +204,18 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
 {
   if ( !m_runtime )
     throw RSOperatorError( ErrorCode::ComputationError, "tile inference engine has no runtime session" );
+
+  // Manifest output.tensor_names contract (#705): every declared name must
+  // exist in the loaded graph; the first declared name selects the head the
+  // engine consumes. Skipped when the runtime cannot enumerate its outputs.
+  std::string outputTensorName;
+  if ( !m_model.output.tensorNames.empty() )
+  {
+    outputTensorName = m_model.output.tensorNames.front();
+    if ( const std::string missing = missingOutputTensor( m_model, m_runtime->outputTensorNames() );
+         !missing.empty() )
+      throw RSOperatorError( ErrorCode::InvalidInputData, missing );
+  }
 
   GdalDatasetWrapper ds;
   if ( !ds.open( QString::fromStdString( inputPath ) ) )
@@ -114,30 +225,6 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   const int rasterBands = ds.bandCount();
   if ( rasterW <= 0 || rasterH <= 0 || rasterBands <= 0 )
     throw RSOperatorError( ErrorCode::InvalidInputData, "input raster is empty: " + inputPath );
-
-  // Manifest dtype contract (#632): input.dtype must match the raster's
-  // actual GDAL type (the engine always reads float32; a mismatched dtype
-  // silently misnormalizes).
-  if ( !m_model.input.dtype.empty() )
-  {
-    const int rasterType = ds.bandDataType( 1 );
-    static const std::map<std::string, int> kAccepted = {
-      { "float32", GDT_Float32 }, { "float64", GDT_Float64 },
-      { "float16", GDT_Float32 }, { "uint16", GDT_UInt16 },
-      { "int16", GDT_Int16 },     { "uint8", GDT_Byte },
-      { "int32", GDT_Int32 },     { "uint32", GDT_UInt32 },
-    };
-    const auto it = kAccepted.find( m_model.input.dtype );
-    if ( it == kAccepted.end() )
-      throw RSOperatorError( ErrorCode::InvalidParameter,
-                             "model manifest declares unsupported input dtype '" + m_model.input.dtype + "'" );
-    if ( rasterType != it->second )
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "model manifest requires input dtype '" + m_model.input.dtype
-                               + "' but the raster band 1 has GDAL type "
-                               + std::to_string( rasterType )
-                               + " (convert the raster or update the manifest)" );
-  }
 
   std::vector<int> bandList = bands;
   if ( bandList.empty() )
@@ -156,6 +243,16 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     }
   }
   const int bandCount = static_cast<int>( bandList.size() );
+
+  // Manifest dtype contract (#632/#705): input.dtype must match the raster's
+  // actual GDAL type for EVERY band fed to the model (the engine always reads
+  // float32; a mismatched dtype silently misnormalizes). Checking band 1
+  // alone let mixed-type rasters pass validation and fail only mid-read.
+  if ( const std::string dtypeError =
+         inputDTypeMismatch( m_model, bandList,
+                             [ &ds ]( int band ) { return ds.bandDataType( band ); } );
+       !dtypeError.empty() )
+    throw RSOperatorError( ErrorCode::InvalidInputData, dtypeError );
 
   // Manifest band_roles contract (#646): roles feed ranking, but at inference
   // the fed band count must match the declared roles (band i maps to role i,
@@ -230,6 +327,10 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   std::vector<cv::Mat> batchMasks;
   std::vector<std::pair<int, int>> batchFedSize;
   std::vector<CoreTile> batchCores;
+  std::vector<int> batchValidPixels;
+  // Core tiles of batches whose every pixel is nodata: their forward pass is
+  // skipped and NoData is written directly once the writer exists (#705).
+  std::vector<CoreTile> deferredNoData;
 
   std::unique_ptr<GdalStreamingOutput> writer;
   // Any failure after the writer exists must not leave a truncated GeoTIFF at
@@ -244,135 +345,66 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
 
   context.reportProgressForced( 0.0, "Tiled inference: " + std::to_string( totalTiles ) + " tiles" );
 
-  int done = 0;
-  try
+  int done = 0;    // tiles fully written (forwarded or NoData-flushed)
+  int skipped = 0; // tiles deferred as all-nodata, not yet written
+
+  // Writes NoData directly for tiles whose forward pass was skipped (#705):
+  // every core pixel of these tiles is invalid, so every output channel is
+  // the writer's NoData value — the same NaN the mask restore writes for
+  // partially invalid tiles.
+  auto flushDeferredNoData = [ & ]( int currentTileIndex )
   {
-  for ( int tileIndex = 0; tileIndex < totalTiles; ++tileIndex )
+    if ( !writer || deferredNoData.empty() )
+      return;
+    for ( const CoreTile &dt : deferredNoData )
+    {
+      cv::Mat nanPlane( dt.h, dt.w, CV_32FC1, cv::Scalar( std::numeric_limits<float>::quiet_NaN() ) );
+      for ( int c = 0; c < stats.outBands; ++c )
+      {
+        const GdalBlockStream::Tile writeTile{ dt.x, dt.y, dt.w, dt.h, 0, dt.w, dt.h,
+                                               currentTileIndex, totalTiles };
+        if ( !writer->writeTile( c + 1, writeTile, nanPlane.ptr<float>() ) )
+          throw RSOperatorError( ErrorCode::FileNotWritable,
+                                 "failed to write output tile at ("
+                                   + std::to_string( dt.x ) + ", " + std::to_string( dt.y ) + ")" );
+      }
+      ++done;
+      --skipped;
+    }
+    deferredNoData.clear();
+  };
+
+  // One forward pass + streaming write for the tiles accumulated in the
+  // batch buffers. Runs for regular batches and for the all-nodata probe.
+  auto flushBatch = [ & ]( int currentTileIndex )
   {
-    context.throwIfCancelled();
-
-    const CoreTile &t = core[static_cast<std::size_t>( tileIndex ) ];
-    const int winX = t.x - halo;
-    const int winY = t.y - halo;
-    const int winW = t.w + 2 * halo;
-    const int winH = t.h + 2 * halo;
-    if ( !readBipWindow( ds, bandList, winX, winY, winW, winH, windowBuffer.data() ) )
-      throw RSOperatorError( ErrorCode::GdalError, "failed to read tile window at (" + std::to_string( t.x )
-                             + ", " + std::to_string( t.y ) + ")" );
-
-    // Declared sentinels → NaN so the mask/zero pipeline below sees them.
-    {
-      const std::size_t totalFloats = static_cast<std::size_t>( winH ) * winW * bandCount;
-      for ( std::size_t i = 0; i < totalFloats; ++i )
-      {
-        const std::size_t b = i % static_cast<std::size_t>( bandCount );
-        if ( bandHasSentinel[b] && windowBuffer[i] == bandSentinel[b] )
-          windowBuffer[i] = std::numeric_limits<float>::quiet_NaN();
-      }
-    }
-
-    // Wrap the window as HWC float and preprocess in place. Pixels where EVERY
-    // band is non-finite are marked invalid: the model sees 0 (nodata_policy
-    // "zero") and the output pixel is restored to NaN afterwards.
-    cv::Mat hwc( winH, winW, CV_32FC( bandCount ), windowBuffer.data() );
-    cv::Mat invalidMask( t.h, t.w, CV_8UC1, cv::Scalar( 0 ) );
-    {
-      const float *src = windowBuffer.data();
-      const std::size_t windowStride = static_cast<std::size_t>( winW ) * bandCount;
-      for ( int row = 0; row < t.h; ++row )
-      {
-        // Core region row inside the window starts at halo pixels in.
-        const float *winRow = src + static_cast<std::size_t>( row + halo ) * windowStride
-                              + static_cast<std::size_t>( halo ) * bandCount;
-        uchar *maskRow = invalidMask.ptr<uchar>( row );
-        for ( int col = 0; col < t.w; ++col )
-        {
-          const float *px = winRow + static_cast<std::size_t>( col ) * bandCount;
-          bool allInvalid = true;
-          for ( int c = 0; c < bandCount; ++c )
-          {
-            if ( std::isfinite( px[c] ) )
-            {
-              allInvalid = false;
-              break;
-            }
-          }
-          maskRow[col] = allInvalid ? 1 : 0;
-        }
-      }
-      // nodata_policy "zero" (default; the only supported policy - others
-      // are rejected at manifest parse, #646): non-finite samples become 0.
-      const std::size_t totalFloats = static_cast<std::size_t>( winH ) * winW * bandCount;
-      for ( std::size_t i = 0; i < totalFloats; ++i )
-      {
-        if ( !std::isfinite( windowBuffer[i] ) )
-          windowBuffer[i] = 0.0f;
-      }
-      // Normalize in place (HWC): linear x*scale, mean_std (x-mean)/std*scale.
-      const double *meanArr = meanStd && !pre.mean.empty() ? pre.mean.data() : nullptr;
-      const double *stdArr = meanStd && !pre.stdv.empty() ? pre.stdv.data() : nullptr;
-      const double scale = pre.scale;
-      // Scale applies only to linear/mean_std normalization (#646): with
-      // normalize "none" the pixels must reach the model unscaled, matching
-      // the model_catalog.h contract ("applied last (linear & mean_std)").
-      if ( meanStd || ( pre.normalize == "linear" && scale != 1.0 ) )
-      {
-        float *data = windowBuffer.data();
-        for ( std::size_t i = 0; i < totalFloats; ++i )
-        {
-          const std::size_t c = i % static_cast<std::size_t>( bandCount );
-          double v = data[i];
-          if ( meanStd )
-          {
-            if ( meanArr )
-              v -= meanArr[c];
-            if ( stdArr && stdArr[c] > 0.0 )
-              v /= stdArr[c];
-          }
-          v *= scale;
-          data[i] = static_cast<float>( v );
-        }
-      }
-    }
-
-    cv::Mat tileMat = hwc.clone(); // detached from the reused window buffer
-    batchCores.push_back( t );
-    if ( resizeToInput && ( winW != modelW || winH != modelH ) )
-    {
-      // cv::resize is limited to few channels; resample per band and merge.
-      std::vector<cv::Mat> channels;
-      cv::split( tileMat, channels );
-      for ( auto &ch : channels )
-      {
-        cv::Mat resized;
-        cv::resize( ch, resized, cv::Size( modelW, modelH ), 0, 0, interp );
-        ch = resized;
-      }
-      cv::merge( channels, tileMat );
-    }
-    batchMats.push_back( std::move( tileMat ) );
-    batchMasks.push_back( invalidMask.clone() ); // detached from the per-tile scratch mask
-    batchFedSize.emplace_back( resizeToInput ? modelW : winW, resizeToInput ? modelH : winH );
-
-    const bool batchFull = static_cast<int>( batchMats.size() ) >= batchSize || tileIndex == totalTiles - 1;
-    if ( !batchFull )
-      continue;
-
     // One forward pass per batch on the shared (cached) session.
     // swapRB=false: the tile buffer already holds GDAL band order, and the
     // manifest band_roles expect channel i == file band i — OpenCV's default
     // swapRB=true would silently exchange bands 1 and 3.
     cv::Mat blob;
-    if ( batchMats.size() == 1 )
-      blob = cv::dnn::blobFromImage( batchMats.front(), 1.0, cv::Size(), cv::Scalar(),
-                                     /*swapRB=*/false, /*crop=*/false );
-    else
-      blob = cv::dnn::blobFromImages( batchMats, 1.0, cv::Size(), cv::Scalar(),
-                                      /*swapRB=*/false, /*crop=*/false );
+    try
+    {
+      if ( batchMats.size() == 1 )
+        blob = cv::dnn::blobFromImage( batchMats.front(), 1.0, cv::Size(), cv::Scalar(),
+                                       /*swapRB=*/false, /*crop=*/false );
+      else
+        blob = cv::dnn::blobFromImages( batchMats, 1.0, cv::Size(), cv::Scalar(),
+                                        /*swapRB=*/false, /*crop=*/false );
+    }
+    // #671: blob construction used to sit outside the try below, so a
+    // cv::Exception from blobFromImage escaped run() unconverted.
+    catch ( const std::exception &e )
+    {
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             std::string( "model input tensor preparation failed (bands fed: " )
+                               + std::to_string( bandCount ) + "): " + e.what() );
+    }
     cv::Mat output;
     try
     {
-      output = m_runtime->infer( blob );
+      output = outputTensorName.empty() ? m_runtime->infer( blob )
+                                        : m_runtime->infer( blob, outputTensorName );
     }
     catch ( const std::exception &e )
     {
@@ -383,11 +415,22 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       throw RSOperatorError( ErrorCode::InvalidInputData,
                              "model output is not a 4-D NCHW batch matching the input tiles (got dims="
                                + std::to_string( output.dims ) + ", N=" + std::to_string( output.size[0] ) + ")" );
+    // #690: the writer emits GDT_Float32 and planes are written via
+    // ptr<float>() — any other output depth would be bit-cast into garbage
+    // on disk.
+    if ( const std::string typeError = outputTypeMismatch( output.type(), outputTensorName );
+         !typeError.empty() )
+      throw RSOperatorError( ErrorCode::InvalidInputData, typeError );
     const int outChannels = output.size[1];
     const int outH = output.size[2];
     const int outW = output.size[3];
     if ( outChannels <= 0 )
       throw RSOperatorError( ErrorCode::ComputationError, "model output has no channels" );
+    // #705: a declared classes count is a shape contract on the class-
+    // index/probability head (one channel per class).
+    if ( const std::string classesError = classesChannelMismatch( m_model, outChannels, outputTensorName );
+         !classesError.empty() )
+      throw RSOperatorError( ErrorCode::InvalidInputData, classesError );
 
     if ( !writer )
     {
@@ -405,6 +448,10 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                              "model output channel count changed mid-run (" + std::to_string( stats.outBands )
                                + " → " + std::to_string( outChannels ) + ")" );
     }
+
+    // The writer exists now, so NoData tiles deferred by earlier all-nodata
+    // batches can go straight to disk.
+    flushDeferredNoData( currentTileIndex );
 
     const cv::Mat flat = output.reshape( 1, std::vector<int>{ static_cast<int>( batchMats.size() ) * outChannels,
                                                              outH * outW } );
@@ -472,7 +519,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           }
         }
         const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
-                                               tileIndex, totalTiles };
+                                               currentTileIndex, totalTiles };
         if ( !writer->writeTile( c + 1, writeTile, plane.ptr<float>() ) )
           throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write output tile at ("
                                  + std::to_string( bt.x ) + ", " + std::to_string( bt.y ) + ")" );
@@ -483,10 +530,172 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     batchMasks.clear();
     batchFedSize.clear();
     batchCores.clear();
+    batchValidPixels.clear();
+  };
 
-    context.reportProgress( static_cast<double>( done ) / static_cast<double>( totalTiles ),
-                            "Tiled inference: " + std::to_string( done ) + "/" + std::to_string( totalTiles ) );
+  try
+  {
+  for ( int tileIndex = 0; tileIndex < totalTiles; ++tileIndex )
+  {
+    context.throwIfCancelled();
+
+    const CoreTile &t = core[static_cast<std::size_t>( tileIndex ) ];
+    const int winX = t.x - halo;
+    const int winY = t.y - halo;
+    const int winW = t.w + 2 * halo;
+    const int winH = t.h + 2 * halo;
+    if ( !readBipWindow( ds, bandList, winX, winY, winW, winH, windowBuffer.data() ) )
+      throw RSOperatorError( ErrorCode::GdalError, "failed to read tile window at (" + std::to_string( t.x )
+                             + ", " + std::to_string( t.y ) + ")" );
+
+    // Declared sentinels → NaN so the mask/zero pipeline below sees them.
+    {
+      const std::size_t totalFloats = static_cast<std::size_t>( winH ) * winW * bandCount;
+      for ( std::size_t i = 0; i < totalFloats; ++i )
+      {
+        const std::size_t b = i % static_cast<std::size_t>( bandCount );
+        if ( bandHasSentinel[b] && windowBuffer[i] == bandSentinel[b] )
+          windowBuffer[i] = std::numeric_limits<float>::quiet_NaN();
+      }
+    }
+
+    // Wrap the window as HWC float and preprocess in place. Pixels where EVERY
+    // band is non-finite are marked invalid: the model sees 0 (nodata_policy
+    // "zero") and the output pixel is restored to NaN afterwards.
+    cv::Mat hwc( winH, winW, CV_32FC( bandCount ), windowBuffer.data() );
+    cv::Mat invalidMask( t.h, t.w, CV_8UC1, cv::Scalar( 0 ) );
+    int validPixels = 0; // core pixels with at least one finite band (#705)
+    {
+      const float *src = windowBuffer.data();
+      const std::size_t windowStride = static_cast<std::size_t>( winW ) * bandCount;
+      for ( int row = 0; row < t.h; ++row )
+      {
+        // Core region row inside the window starts at halo pixels in.
+        const float *winRow = src + static_cast<std::size_t>( row + halo ) * windowStride
+                              + static_cast<std::size_t>( halo ) * bandCount;
+        uchar *maskRow = invalidMask.ptr<uchar>( row );
+        for ( int col = 0; col < t.w; ++col )
+        {
+          const float *px = winRow + static_cast<std::size_t>( col ) * bandCount;
+          bool allInvalid = true;
+          for ( int c = 0; c < bandCount; ++c )
+          {
+            if ( std::isfinite( px[c] ) )
+            {
+              allInvalid = false;
+              break;
+            }
+          }
+          maskRow[col] = allInvalid ? 1 : 0;
+          if ( !allInvalid )
+            ++validPixels;
+        }
+      }
+      // nodata_policy "zero" (default; the only supported policy - others
+      // are rejected at manifest parse, #646): non-finite samples become 0.
+      const std::size_t totalFloats = static_cast<std::size_t>( winH ) * winW * bandCount;
+      for ( std::size_t i = 0; i < totalFloats; ++i )
+      {
+        if ( !std::isfinite( windowBuffer[i] ) )
+          windowBuffer[i] = 0.0f;
+      }
+      // Normalize in place (HWC): linear x*scale, mean_std (x-mean)/std*scale.
+      const double *meanArr = meanStd && !pre.mean.empty() ? pre.mean.data() : nullptr;
+      const double *stdArr = meanStd && !pre.stdv.empty() ? pre.stdv.data() : nullptr;
+      const double scale = pre.scale;
+      // Scale applies only to linear/mean_std normalization (#646): with
+      // normalize "none" the pixels must reach the model unscaled, matching
+      // the model_catalog.h contract ("applied last (linear & mean_std)").
+      if ( meanStd || ( pre.normalize == "linear" && scale != 1.0 ) )
+      {
+        float *data = windowBuffer.data();
+        for ( std::size_t i = 0; i < totalFloats; ++i )
+        {
+          const std::size_t c = i % static_cast<std::size_t>( bandCount );
+          double v = data[i];
+          if ( meanStd )
+          {
+            if ( meanArr )
+              v -= meanArr[c];
+            if ( stdArr && stdArr[c] > 0.0 )
+              v /= stdArr[c];
+          }
+          v *= scale;
+          data[i] = static_cast<float>( v );
+        }
+      }
+    }
+
+    cv::Mat tileMat = hwc.clone(); // detached from the reused window buffer
+    batchCores.push_back( t );
+    if ( resizeToInput && ( winW != modelW || winH != modelH ) )
+    {
+      // cv::resize is limited to few channels; resample per band and merge.
+      std::vector<cv::Mat> channels;
+      cv::split( tileMat, channels );
+      for ( auto &ch : channels )
+      {
+        cv::Mat resized;
+        cv::resize( ch, resized, cv::Size( modelW, modelH ), 0, 0, interp );
+        ch = resized;
+      }
+      cv::merge( channels, tileMat );
+    }
+    batchMats.push_back( std::move( tileMat ) );
+    batchMasks.push_back( invalidMask.clone() ); // detached from the per-tile scratch mask
+    batchFedSize.emplace_back( resizeToInput ? modelW : winW, resizeToInput ? modelH : winH );
+    batchValidPixels.push_back( validPixels );
+
+    const bool batchFull = static_cast<int>( batchMats.size() ) >= batchSize || tileIndex == totalTiles - 1;
+    if ( !batchFull )
+      continue;
+
+    // #705: a batch whose tiles hold ZERO valid pixels would run full forward
+    // passes only for every output pixel to be overwritten by the NoData
+    // restore — skip the forward and queue direct NoData writes instead
+    // (flushed as soon as the streaming writer exists).
+    if ( batchIsAllNoData( batchValidPixels ) )
+    {
+      skipped += static_cast<int>( batchCores.size() );
+      stats.tilesSkippedNoData += static_cast<int>( batchCores.size() );
+      deferredNoData.insert( deferredNoData.end(), batchCores.begin(), batchCores.end() );
+      batchMats.clear();
+      batchMasks.clear();
+      batchFedSize.clear();
+      batchCores.clear();
+      batchValidPixels.clear();
+      context.reportProgress( static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
+                              "Tiled inference: " + std::to_string( done + skipped ) + "/"
+                                + std::to_string( totalTiles ) );
+      continue;
+    }
+
+    flushBatch( tileIndex );
+    context.reportProgress( static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
+                            "Tiled inference: " + std::to_string( done + skipped ) + "/"
+                              + std::to_string( totalTiles ) );
   }
+
+  // Entire raster is NoData: no regular batch ever ran, so the writer (and
+  // with it the model's true output channel count) does not exist yet. One
+  // zero-tile probe forward establishes the output shape — its result is
+  // NaN-restored like any other invalid tile. The probe tile is popped from
+  // the deferred list and written by the normal flushBatch path.
+  if ( !deferredNoData.empty() && !writer )
+  {
+    const CoreTile probeTile = deferredNoData.front();
+    deferredNoData.erase( deferredNoData.begin() );
+    const int probeFedW = resizeToInput ? modelW : probeTile.w + 2 * halo;
+    const int probeFedH = resizeToInput ? modelH : probeTile.h + 2 * halo;
+    batchMats.push_back( cv::Mat( probeFedH, probeFedW, CV_32FC( bandCount ), cv::Scalar( 0.0 ) ) );
+    batchMasks.push_back( cv::Mat( probeTile.h, probeTile.w, CV_8UC1, cv::Scalar( 1 ) ) );
+    batchFedSize.emplace_back( probeFedW, probeFedH );
+    batchCores.push_back( probeTile );
+    batchValidPixels.push_back( 0 );
+    flushBatch( totalTiles - 1 );
+  }
+  if ( !deferredNoData.empty() )
+    flushDeferredNoData( totalTiles - 1 );
 
   }
   catch ( ... )

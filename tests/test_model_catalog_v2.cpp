@@ -497,6 +497,43 @@ TEST_CASE( "rankModels honors band roles and readiness", "[models][catalog][rank
   CHECK( agn->compatible );
 }
 
+TEST_CASE( "model listing exposes band roles and GPU availability for ranking", "[models][catalog][ranking]" )
+{
+  QTemporaryDir dir;
+  writeManifest( dir, QStringLiteral( "listed" ), R"({
+      "name": "listed",
+      "task": "segmentation",
+      "gpu": true,
+      "input": { "band_roles": ["Red", "Green", "Blue", "NIR"] },
+      "path": "weights.onnx"
+  })",
+                 QByteArray( "w" ) );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  // The spatial:list_models payload (ModelInfo::toJson) must carry the fields
+  // the query side ranks on: band_roles for role scoring and gpu /
+  // runtime.gpu for hardware-aware ordering (#705).
+  const auto model = catalog.find( "listed" );
+  REQUIRE( model.has_value() );
+  const Json::Value json = model->toJson();
+  REQUIRE( json.isMember( "band_roles" ) );
+  REQUIRE( json["band_roles"].size() == 4 );
+  CHECK( json["band_roles"][0].asString() == "Red" );
+  CHECK( json["band_roles"][3].asString() == "NIR" );
+  CHECK( json["gpu"].asBool() );
+  REQUIRE( json.isMember( "runtime" ) );
+  CHECK( json["runtime"]["gpu"].asBool() );
+
+  // Query side: ranking by a subset of the declared roles stays compatible.
+  sicnu::operators::ModelQueryCriteria criteria;
+  criteria.bandRoles = { "Red", "NIR" };
+  const auto ranked = catalog.rankModels( criteria );
+  REQUIRE( ranked.size() == 1 );
+  CHECK( ranked[0].compatible );
+}
+
 TEST_CASE( "resolveArtifactPath resolves files, names, and explains failures", "[models][catalog]" )
 {
   QTemporaryDir dir;
