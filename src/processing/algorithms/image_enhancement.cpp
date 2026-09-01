@@ -743,7 +743,10 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
                 } else {
                     float cuSq = noiseVariance;
                     float clSq = localVar / (mean * mean);
-                    float weight = (clSq <= cuSq) ? 0.0f : (1.0f - cuSq / clSq) / (1.0f + cuSq);
+                    // Lee's additive-noise model: w = max(0, 1 - Cu^2/Cl^2).
+                    // The /(1 + Cu^2) denominator is KUAN's expansion and made
+                    // this filter bit-identical to kuanFilter (#678).
+                    float weight = (clSq <= cuSq) ? 0.0f : std::max(0.0f, 1.0f - cuSq / clSq);
                     output[y * width + x] = mean + weight * (pixel - mean);
                 }
             }
@@ -1201,76 +1204,109 @@ void ImageEnhancement::jacobiEigen(std::vector<std::vector<float>> &A, int n,
     for (int i = 0; i < n; i++)
         eigenvectors[i][i] = 1.0f;
 
-    const int maxIter = 200;
-    const float tolerance = 1e-10f;
+    eigenvalues.assign(n, 0.0f);
+    if (n <= 0)
+        return;
+    if (n == 1) {
+        eigenvalues[0] = A[0][0];
+        return;
+    }
 
-    for (int iter = 0; iter < maxIter; iter++) {
-        // Find largest off-diagonal element
-        float maxOff = 0.0f;
-        int p = 0, q = 1;
-        for (int i = 0; i < n; i++) {
-            for (int j = i + 1; j < n; j++) {
-                if (std::abs(A[i][j]) > maxOff) {
-                    maxOff = std::abs(A[i][j]);
-                    p = i;
-                    q = j;
+    // Cyclic Jacobi (#670): the previous variant was a CLASSICAL Jacobi that
+    // annihilated one largest off-diagonal pivot per call under a hard budget
+    // of 200 rotations total. Convergence needs O(n^2) rotations (~6-10 full
+    // sweeps of n(n-1)/2 pivots), so PCA/MNF silently returned unconverged
+    // decompositions once a single sweep outgrew the budget (~>=12-16 bands),
+    // and the absolute 1e-10f tolerance is below float precision for typical
+    // covariances so the cap was always burned without any signal. We now
+    // sweep ALL pivots repeatedly in double precision and terminate on a
+    // tolerance relative to the matrix Frobenius norm.
+    std::vector<std::vector<double>> Ad(n, std::vector<double>(n));
+    double frobSq = 0.0;
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            const double v = static_cast<double>(A[i][j]);
+            Ad[i][j] = v;
+            frobSq += v * v;
+        }
+    }
+    const double norm = std::sqrt(frobSq);
+    const double tolerance = 1e-10 * norm;  // 0 for a zero matrix — converges immediately
+
+    const int maxSweeps = 30;
+    bool converged = false;
+    for (int sweep = 0; sweep < maxSweeps && !converged; sweep++) {
+        // Termination check: off-diagonal Frobenius norm relative to |A|.
+        double offSq = 0.0;
+        for (int i = 0; i < n; i++)
+            for (int j = i + 1; j < n; j++)
+                offSq += Ad[i][j] * Ad[i][j];
+        if (std::sqrt(2.0 * offSq) <= tolerance) {
+            converged = true;
+            break;
+        }
+
+        // One cyclic sweep: rotate every off-diagonal pivot once.
+        for (int p = 0; p < n - 1; p++) {
+            for (int q = p + 1; q < n; q++) {
+                const double apq = Ad[p][q];
+                if (apq == 0.0)
+                    continue;
+
+                const double app = Ad[p][p];
+                const double aqq = Ad[q][q];
+                // Rotation angle that annihilates Ad[p][q] (atan2 handles
+                // app == aqq, yielding theta = +/-pi/4).
+                const double theta = 0.5 * std::atan2(2.0 * apq, aqq - app);
+                const double c = std::cos(theta);
+                const double s = std::sin(theta);
+
+                // Compute new matrix elements: A' = G^T * A * G
+                // Only update rows/cols p and q (others unchanged)
+                const double newApp = c * c * app + s * s * aqq - 2.0 * s * c * apq;
+                const double newAqq = s * s * app + c * c * aqq + 2.0 * s * c * apq;
+
+                // Update off-diagonal elements in rows/cols p and q
+                for (int r = 0; r < n; r++) {
+                    if (r == p || r == q) continue;
+                    const double arp = Ad[r][p];
+                    const double arq = Ad[r][q];
+                    Ad[r][p] = c * arp - s * arq;
+                    Ad[p][r] = Ad[r][p];
+                    Ad[r][q] = s * arp + c * arq;
+                    Ad[q][r] = Ad[r][q];
+                }
+
+                Ad[p][p] = newApp;
+                Ad[q][q] = newAqq;
+                Ad[p][q] = 0.0; // By construction
+                Ad[q][p] = 0.0;
+
+                // Update eigenvectors
+                for (int r = 0; r < n; r++) {
+                    const double erp = eigenvectors[r][p];
+                    const double erq = eigenvectors[r][q];
+                    eigenvectors[r][p] = static_cast<float>(c * erp - s * erq);
+                    eigenvectors[r][q] = static_cast<float>(s * erp + c * erq);
                 }
             }
         }
-
-        if (maxOff < tolerance)
-            break;
-
-        // Compute rotation angle
-        float app = A[p][p];
-        float aqq = A[q][q];
-        float apq = A[p][q];
-
-        float theta;
-        if (std::abs(app - aqq) < 1e-15f) {
-            theta = static_cast<float>(M_PI / 4.0);
-        } else {
-            theta = 0.5f * std::atan2(2.0f * apq, aqq - app);
-        }
-
-        float c = std::cos(theta);
-        float s = std::sin(theta);
-
-        // Compute new matrix elements: A' = G^T * A * G
-        // Only update rows/cols p and q (others unchanged)
-        float newApp = c * c * app + s * s * aqq - 2.0f * s * c * apq;
-        float newAqq = s * s * app + c * c * aqq + 2.0f * s * c * apq;
-        float newApq = 0.0f; // By construction
-
-        // Update off-diagonal elements in rows/cols p and q
-        for (int r = 0; r < n; r++) {
-            if (r == p || r == q) continue;
-            float arp = A[r][p];
-            float arq = A[r][q];
-            A[r][p] = c * arp - s * arq;
-            A[p][r] = A[r][p];
-            A[r][q] = s * arp + c * arq;
-            A[q][r] = A[r][q];
-        }
-
-        A[p][p] = newApp;
-        A[q][q] = newAqq;
-        A[p][q] = newApq;
-        A[q][p] = newApq;
-
-        // Update eigenvectors
-        for (int r = 0; r < n; r++) {
-            float erp = eigenvectors[r][p];
-            float erq = eigenvectors[r][q];
-            eigenvectors[r][p] = c * erp - s * erq;
-            eigenvectors[r][q] = s * erp + c * erq;
-        }
     }
 
-    // Extract eigenvalues from diagonal
-    eigenvalues.resize(n);
-    for (int i = 0; i < n; i++)
-        eigenvalues[i] = A[i][i];
+    if (!converged) {
+        SICNU_LOG_WARN( SicnuLogTags::Algorithms,
+            QString( "jacobiEigen: %1 sweeps did not reach the off-diagonal tolerance "
+                     "(|A|=%2) — eigen decomposition may be inexact" )
+                .arg( maxSweeps ).arg( norm ) );
+    }
+
+    // Write the diagonalized matrix back (float output contract unchanged) and
+    // extract eigenvalues from the diagonal. Callers sort descending themselves.
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++)
+            A[i][j] = static_cast<float>(Ad[i][j]);
+        eigenvalues[i] = static_cast<float>(Ad[i][i]);
+    }
 }
 
 ImageEnhancement::PcaResult ImageEnhancement::pca(

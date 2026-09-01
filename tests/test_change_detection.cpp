@@ -6,6 +6,7 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "operators/rs/rs_spectral_index_operator.h"
 #include "operators/rs/rs_change_primitives.h"
+#include "operators/rs/rs_change_detection_operator.h"
 #include "operators/framework/rs_operator_context.h"
 
 #include <QTemporaryDir>
@@ -14,6 +15,7 @@
 #include <gdal.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -921,4 +923,187 @@ TEST_CASE("New change primitive operators execute and output valid rasters", "[o
         Json::Value res = op.run(params, ctx);
         CHECK(res["method"].asString() == "irmad");
     }
+}
+
+// ===========================================================================
+// Regression tests for #679 (atoms mask declared NoData) and #700 (area units)
+// ===========================================================================
+
+TEST_CASE("Change primitive atoms mask declared NoData to NaN (#679)", "[operators][change_primitives][679]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+
+    // 8 pixels; after masking 2, IR-MAD still has N=6 >= bandCount+2 valid.
+    constexpr int W = 8, H = 1, B = 2;
+    const float ND = -9999.0f;
+    const QString beforePath = tmp.path() + "/nd_before.tif";
+    const QString afterPath = tmp.path() + "/nd_after.tif";
+
+    const auto makeRaster = [&](const QString &path,
+                                const std::vector<std::vector<float>> &bands) {
+        GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(), W, H, B, GDT_Float32, nullptr);
+        REQUIRE(ds != nullptr);
+        for (int b = 0; b < B; ++b) {
+            GDALRasterBandH band = GDALGetRasterBand(ds, b + 1);
+            REQUIRE(GDALSetRasterNoDataValue(band, ND) == CE_None);
+            REQUIRE(GDALRasterIO(band, GF_Write, 0, 0, W, H,
+                                 const_cast<float *>(bands[b].data()), W, H, GDT_Float32, 0, 0) == CE_None);
+        }
+        GDALClose(ds);
+    };
+
+    // Pixel 0: NoData in before band 1. Pixel 1: NoData in after band 2.
+    std::vector<std::vector<float>> before = {
+        { ND, 12.f, 11.f, 12.f, 10.f, 11.f, 12.f, 10.f },
+        { 20.f, 21.f, 20.f, 22.f, 21.f, 20.f, 22.f, 21.f } };
+    std::vector<std::vector<float>> after = {
+        { 11.f, 12.f, 12.f, 11.f, 12.f, 11.f, 12.f, 11.f },
+        { 21.f, ND, 21.f, 20.f, 21.f, 21.f, 20.f, 21.f } };
+    makeRaster(beforePath, before);
+    makeRaster(afterPath, after);
+
+    sicnu::operators::RSOperatorContext ctx;
+    const auto readBand = [&](const QString &path, std::vector<float> &buf) {
+        GdalDatasetWrapper out;
+        REQUIRE(out.open(path));
+        REQUIRE(out.bandCount() == 1);
+        buf.assign(W, 0.0f);
+        REQUIRE(out.readBandData(1, buf.data(), W, H));
+    };
+
+    SECTION("RsChangeSamOperator") {
+        sicnu::operators::rs::RsChangeSamOperator op;
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = (tmp.path() + "/nd_sam.tif").toStdString();
+        Json::Value res = op.run(params, ctx);
+        std::vector<float> out;
+        readBand(QString::fromStdString(res["output"].asString()), out);
+        // Declared-NoData pixels must be NaN, not angles computed from -9999.
+        CHECK(std::isnan(out[0]));
+        CHECK(std::isnan(out[1]));
+        // Unmasked pixels stay finite.
+        CHECK(std::isfinite(out[2]));
+        CHECK(std::isfinite(out[3]));
+    }
+
+    SECTION("RsChangeCvaAngleOperator") {
+        sicnu::operators::rs::RsChangeCvaAngleOperator op;
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = (tmp.path() + "/nd_cva.tif").toStdString();
+        Json::Value res = op.run(params, ctx);
+        std::vector<float> out;
+        readBand(QString::fromStdString(res["output"].asString()), out);
+        // Pixels 2/3 are fully valid; 0/1 each touch a declared sentinel.
+        CHECK(std::isnan(out[0]));
+        CHECK(std::isnan(out[1]));
+        CHECK(std::isfinite(out[2]));
+    }
+
+    SECTION("RsChangeLogRatioOperator") {
+        sicnu::operators::rs::RsChangeLogRatioOperator op;
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = (tmp.path() + "/nd_lr.tif").toStdString();
+        Json::Value res = op.run(params, ctx);
+        std::vector<float> out;
+        readBand(QString::fromStdString(res["output"].asString()), out);
+        // before band 1 pixel 0 is the declared sentinel -> NaN, not ln of it.
+        CHECK(std::isnan(out[0]));
+        CHECK(std::isfinite(out[1]));
+    }
+
+    SECTION("RsChangeIrMadOperator") {
+        sicnu::operators::rs::RsChangeIrMadOperator op;
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = (tmp.path() + "/nd_irmad.tif").toStdString();
+        params["maxIterations"] = 3;
+        Json::Value res = op.run(params, ctx);
+        std::vector<float> out;
+        readBand(QString::fromStdString(res["output"].asString()), out);
+        // IR-MAD excludes non-finite pixels from the fit and NaN-fills them.
+        CHECK(std::isnan(out[0]));
+        CHECK(std::isnan(out[1]));
+        CHECK(std::isfinite(out[2]));
+        CHECK(std::isfinite(out[3]));
+    }
+}
+
+TEST_CASE("Change mask reports changedArea in m2 for geographic CRS (#700)", "[operators][change_primitives][700]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+
+    constexpr int W = 4, H = 4;
+    // Geographic CRS (EPSG:4326-style WKT), 0.001-degree pixels.
+    const char *geogWkt =
+        "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],"
+        "PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]";
+    std::array<double, 6> gt = { 0.0, 0.001, 0.0, 50.0, 0.0, -0.001 };
+
+    const QString beforePath = tmp.path() + "/geo_before.tif";
+    const QString afterPath = tmp.path() + "/geo_after.tif";
+    std::vector<float> before(W * H, 10.0f);
+    std::vector<float> after(W * H, 10.0f);
+    after[0] = 50.0f;  // one strong change
+
+    const auto makeGeoRaster = [&](const QString &path, const std::vector<float> &data) {
+        GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr);
+        REQUIRE(ds != nullptr);
+        REQUIRE(GDALSetGeoTransform(ds, const_cast<double *>(gt.data())) == CE_None);
+        REQUIRE(GDALSetProjection(ds, geogWkt) == CE_None);
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H,
+                             const_cast<float *>(data.data()), W, H, GDT_Float32, 0, 0) == CE_None);
+        GDALClose(ds);
+    };
+    makeGeoRaster(beforePath, before);
+    makeGeoRaster(afterPath, after);
+
+    sicnu::operators::rs::RsChangeDetectionOperator op;
+    sicnu::operators::RSOperatorContext ctx;
+    Json::Value params(Json::objectValue);
+    params["before"] = beforePath.toStdString();
+    params["after"] = afterPath.toStdString();
+    params["output"] = (tmp.path() + "/geo_mask.tif").toStdString();
+    params["method"] = "difference";
+    params["makeMask"] = true;
+    params["thresholdMethod"] = "manual";
+    params["threshold"] = 10.0;
+    Json::Value res = op.run(params, ctx);
+
+    REQUIRE(res.isMember("changedArea"));
+    // The unit is always square metres now.
+    REQUIRE(res.isMember("changedAreaUnit"));
+    CHECK(res["changedAreaUnit"].asString() == "m2");
+
+    const double changedPixels = res["changedPixels"].asDouble();
+    REQUIRE(changedPixels > 0.0);
+
+    // Per-pixel area via the same scene-centre geodesic approximation the
+    // operator uses (arc lengths at the centre latitude).
+    const double phiDeg = gt[3] + (H / 2.0) * gt[5];
+    const double phiRad = phiDeg * 0.017453292519943295;
+    const double mPerDegLat =
+        111132.92 - 559.82 * std::cos(2 * phiRad) + 1.175 * std::cos(4 * phiRad);
+    const double mPerDegLon = 111412.84 * std::cos(phiRad) - 93.5 * std::cos(3 * phiRad);
+    const double expectedPixelArea =
+        std::abs(gt[1]) * mPerDegLon * std::abs(gt[5]) * mPerDegLat;
+
+    const double perPixel = res["changedArea"].asDouble() / changedPixels;
+    CHECK(perPixel == Catch::Approx(expectedPixelArea).margin(expectedPixelArea * 0.01));
+    // Guard against a regression to square degrees (0.001^2 = 1e-6 per pixel).
+    CHECK(perPixel > 1000.0);
 }

@@ -584,3 +584,146 @@ TEST_CASE( "PCA Fusion: output correlates positively with pan regardless of eige
         REQUIRE( result[b][W * H - 1] > result[b][0] );
     }
 }
+
+// ===========================================================================
+// Linear fusion weight padding (#677)
+// ===========================================================================
+
+TEST_CASE( "Linear fusion pads a short msWeights list instead of reading out of bounds (#677)", "[fusion][677]" )
+{
+    constexpr int W = 2, H = 1;
+    std::vector<float> b1 = { 1.0f, 2.0f };
+    std::vector<float> b2 = { 3.0f, 4.0f };
+    std::vector<float> pan = { 10.0f, 20.0f };
+    QVector<const float *> ms = { b1.data(), b2.data() };
+
+    // Non-empty but shorter than the band count: used to index weights[1]
+    // out of bounds (UB). Now padded with the equal-weight default
+    // (1 - panWeight = 0.8) and fused deterministically.
+    QVector<float> shortWeights = { 0.5f };
+    auto result = ImageFusion::linearWeighted( ms, 2, pan.data(), W, H, NODATA,
+                                               shortWeights, 0.2f );
+    REQUIRE( result.size() == 2 );
+    // Band 1 keeps its explicit weight 0.5.
+    CHECK( result[0][0] == Approx( 0.5f * 1.0f + 0.2f * 10.0f ).margin( 1e-4 ) );
+    CHECK( result[0][1] == Approx( 0.5f * 2.0f + 0.2f * 20.0f ).margin( 1e-4 ) );
+    // Band 2 is fused with the padded default weight 0.8.
+    CHECK( result[1][0] == Approx( 0.8f * 3.0f + 0.2f * 10.0f ).margin( 1e-4 ) );
+    CHECK( result[1][1] == Approx( 0.8f * 4.0f + 0.2f * 20.0f ).margin( 1e-4 ) );
+}
+
+TEST_CASE( "Streaming linear fusion pads a short msWeights list (#677)", "[fusion][gdal][677]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "pan_pad.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms_pad.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused_pad.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    GDALDatasetH panDs = createOutputTiff( panPath, 2, 1, 1, GDT_Float32, gt, QString() );
+    GDALDatasetH msDs = createOutputTiff( msPath, 2, 1, 2, GDT_Float32, gt, QString() );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    std::vector<float> pan = { 10.0f, 20.0f };
+    std::vector<float> ms1 = { 1.0f, 2.0f };
+    std::vector<float> ms2 = { 3.0f, 4.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 2, 1,
+                           pan.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 1,
+                           ms1.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, 2, 1,
+                           ms2.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "linear" );
+    params.panWeight = 0.2f;
+    params.msWeights = { 0.5f };  // 1 entry for a 2-band MS raster (#677)
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    REQUIRE( error.isEmpty() );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    REQUIRE( out.bandCount() == 2 );
+    std::vector<float> out1( 2 ), out2( 2 );
+    REQUIRE( out.readBandData( 1, out1.data(), 2, 1 ) );
+    REQUIRE( out.readBandData( 2, out2.data(), 2, 1 ) );
+    CHECK( out1[0] == Approx( 0.5f * 1.0f + 0.2f * 10.0f ).margin( 1e-4 ) );
+    CHECK( out1[1] == Approx( 0.5f * 2.0f + 0.2f * 20.0f ).margin( 1e-4 ) );
+    CHECK( out2[0] == Approx( 0.8f * 3.0f + 0.2f * 10.0f ).margin( 1e-4 ) );
+    CHECK( out2[1] == Approx( 0.8f * 4.0f + 0.2f * 20.0f ).margin( 1e-4 ) );
+}
+
+// ===========================================================================
+// Streaming Brovey must match the in-memory kernel on partial coverage (#700)
+// ===========================================================================
+
+TEST_CASE( "Streaming brovey invalidates partially-NoData pixels like the kernel (#700)", "[fusion][gdal][700]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "pan_nd.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms_nd.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused_nd.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    // 2x1 MS raster, 2 bands: pixel 0 has NoData in band 2 only.
+    GDALDatasetH panDs = createOutputTiff( panPath, 2, 1, 1, GDT_Float32, gt, QString() );
+    GDALDatasetH msDs = createOutputTiff( msPath, 2, 1, 2, GDT_Float32, gt, QString() );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    std::vector<float> pan = { 10.0f, 10.0f };
+    std::vector<float> ms1 = { 4.0f, 4.0f };
+    std::vector<float> ms2 = { NODATA, 2.0f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 2, 1,
+                           pan.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( panDs, 1 ), NODATA ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 1,
+                           ms1.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, 2, 1,
+                           ms2.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( msDs, 1 ), NODATA ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( msDs, 2 ), NODATA ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+
+    // Reference: the in-memory kernel marks pixel 0 invalid in every band.
+    const float b1v = 4.0f, b2v = 2.0f, pv = 10.0f;
+    std::vector<float> k1 = { b1v, b1v }, k2 = { NODATA, b2v }, kp = { pv, pv };
+    QVector<const float *> kms = { k1.data(), k2.data() };
+    auto expected = ImageFusion::brovey( kms, 2, kp.data(), 2, 1, NODATA );
+    REQUIRE( expected[0][0] == NODATA );
+    REQUIRE( expected[1][0] == NODATA );
+    REQUIRE( expected[0][1] != NODATA );
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "brovey" );
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    REQUIRE( error.isEmpty() );
+
+    // The streamed output must agree: pixel 0 is NoData in every band, not a
+    // partial-sum fusion of band 1 alone.
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    REQUIRE( out.bandCount() == 2 );
+    std::vector<float> out1( 2 ), out2( 2 );
+    REQUIRE( out.readBandData( 1, out1.data(), 2, 1 ) );
+    REQUIRE( out.readBandData( 2, out2.data(), 2, 1 ) );
+    CHECK( out1[0] == NODATA );
+    CHECK( out2[0] == NODATA );
+    // Pixel 1 fuses normally: (4/6)*10, (2/6)*10.
+    CHECK( out1[1] == Approx( ( 4.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+    CHECK( out2[1] == Approx( ( 2.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+}

@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QDebug>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <mutex>
@@ -207,6 +208,35 @@ bool GdalDatasetWrapper::readBandData(int bandNum, float *buffer, int dstWidth, 
                               buffer, dstWidth, dstHeight, GDT_Float32,
                               0, 0);
     return err == CE_None;
+}
+
+bool GdalDatasetWrapper::readBandMasked(int bandNum, float *buffer, int dstWidth, int dstHeight) const
+{
+    if (!readBandData(bandNum, buffer, dstWidth, dstHeight))
+        return false;
+
+    const size_t n = static_cast<size_t>(dstWidth) * static_cast<size_t>(dstHeight);
+    bool hasNodata = false;
+    const double nd = bandNoDataValue(bandNum, &hasNodata);
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    if (hasNodata && std::isfinite(nd)) {
+        // Float-space compare: matches large sentinels (-3.4e38) exactly where
+        // a double-space absolute tolerance never would (#444).
+        const float ndF = static_cast<float>(nd);
+        for (size_t i = 0; i < n; ++i) {
+            const float v = buffer[i];
+            if (!std::isfinite(v) || v == ndF)
+                buffer[i] = nan;
+        }
+    } else {
+        // No (finite) declared sentinel: still normalize non-finite pixels to
+        // NaN so statistics and kernels see a single missing-value convention.
+        for (size_t i = 0; i < n; ++i) {
+            if (!std::isfinite(buffer[i]))
+                buffer[i] = nan;
+        }
+    }
+    return true;
 }
 
 bool GdalDatasetWrapper::readBandWindow(int bandNum, int xOff, int yOff,

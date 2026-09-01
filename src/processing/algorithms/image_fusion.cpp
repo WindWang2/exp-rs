@@ -68,6 +68,23 @@ QVector<QVector<float>> ImageFusion::linearWeighted(
         float defaultMsWeight = 1.0f - panWeight;
         for (int b = 0; b < nBands; ++b)
             weights[b] = defaultMsWeight;
+    } else if ( weights.size() < nBands ) {
+        // A non-empty weight list shorter than the band count used to read
+        // weights[b] out of bounds below (#677). Pad with the same equal-weight
+        // default the empty case uses and report which bands were padded.
+        const float defaultMsWeight = 1.0f - panWeight;
+        QString paddedBands;
+        for ( int b = weights.size(); b < nBands; ++b ) {
+            weights.append( defaultMsWeight );
+            if ( !paddedBands.isEmpty() )
+                paddedBands += QStringLiteral( ", " );
+            paddedBands += QString::number( b + 1 );
+        }
+        SICNU_LOG_WARN( SicnuLogTags::Algorithms,
+            QString( "Linear weighted fusion: %1 weights given for %2 bands — "
+                     "padded band(s) %3 with default weight %4" )
+                .arg( msWeights.size() ).arg( nBands )
+                .arg( paddedBands ).arg( defaultMsWeight ) );
     }
 
     SICNU_LOG_INFO( SicnuLogTags::Algorithms,
@@ -875,6 +892,26 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
             for ( int b = 0; b < nMsBands; ++b )
                 weights[b] = defaultMsWeight;
         }
+        else if ( weights.size() < nMsBands )
+        {
+            // A non-empty weight list shorter than the band count would read
+            // weights[b] out of bounds below (#677). Pad with the same
+            // equal-weight default the empty case uses and report it.
+            const float defaultMsWeight = 1.0f - params.panWeight;
+            QString paddedBands;
+            for ( int b = weights.size(); b < nMsBands; ++b )
+            {
+                weights.append( defaultMsWeight );
+                if ( !paddedBands.isEmpty() )
+                    paddedBands += QStringLiteral( ", " );
+                paddedBands += QString::number( b + 1 );
+            }
+            SICNU_LOG_WARN( SicnuLogTags::Algorithms,
+                QString( "Linear fusion: %1 msWeights given for %2 MS bands — "
+                         "padded band(s) %3 with default weight %4" )
+                    .arg( params.msWeights.size() ).arg( nMsBands )
+                    .arg( paddedBands ).arg( defaultMsWeight ) );
+        }
 
         for ( int r = 0; r < rows; ++r )
         {
@@ -923,6 +960,10 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
     else if ( params.method == QStringLiteral( "brovey" ) )
     {
         std::vector<float> msSum( maxTilePixels );
+        // A pixel is only fusable when EVERY MS band (and the pan band) is
+        // valid — mirrors the in-memory brovey() kernel so streaming output
+        // cannot invent values from a partial band sum (#700).
+        std::vector<bool> validPixel( maxTilePixels );
 
         for ( int r = 0; r < rows; ++r )
         {
@@ -937,6 +978,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                 if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
                     return false;
                 std::fill_n( msSum.begin(), tileSize, 0.0f );
+                std::fill_n( validPixel.begin(), tileSize, true );
 
                 for ( int b = 0; b < nMsBands; ++b )
                 {
@@ -945,7 +987,11 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                     const float *msData = msBuf[b].data();
                     for ( size_t i = 0; i < tileSize; ++i )
                     {
-                        if ( msData[i] != nodata && !std::isnan( msData[i] ) )
+                        if ( !validPixel[i] )
+                            continue;
+                        if ( msData[i] == nodata || std::isnan( msData[i] ) )
+                            validPixel[i] = false;
+                        else
                             msSum[i] += msData[i];
                     }
                 }
@@ -957,7 +1003,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
 
                     for ( size_t i = 0; i < tileSize; ++i )
                     {
-                        if ( msData[i] == nodata || std::isnan( msData[i] ) ||
+                        if ( !validPixel[i] ||
                              panBuf[i] == nodata || std::isnan( panBuf[i] ) ||
                              msSum[i] <= 1e-10f )  // negative band sums invert signs -> NoData
                         {

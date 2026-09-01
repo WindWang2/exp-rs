@@ -1031,10 +1031,10 @@ private:
         return node;
     }
 
-    // Multiplicative -> Exponential (('*' | '/' | '%') Exponential)*
+    // Multiplicative -> Unary (('*' | '/' | '%') Unary)*
     std::unique_ptr<AstNode> parseMultiplicative()
     {
-        auto node = parseExponential();
+        auto node = parseUnary();
         if (!node) return nullptr;
 
         while (m_current.type == TokenType::Mul || m_current.type == TokenType::Div || m_current.type == TokenType::Mod) {
@@ -1042,7 +1042,7 @@ private:
             if (m_current.type == TokenType::Div) op = '/';
             else if (m_current.type == TokenType::Mod) op = '%';
             advance();
-            auto right = parseExponential();
+            auto right = parseUnary();
             if (!right) {
                 if (!m_hasError) setError(QString("Expected operand after '%1'").arg(op), m_current.line, m_current.column);
                 return nullptr;
@@ -1052,15 +1052,17 @@ private:
         return node;
     }
 
-    // Exponential -> Unary ('^' Exponential)?  (right-associative)
+    // Exponential -> Primary ('^' Unary)?  (right-associative; '^' binds
+    // tighter than unary minus so -b2^2 parses as -(b2^2), the standard math
+    // convention (#700), while 2^-3 remains a valid negative exponent)
     std::unique_ptr<AstNode> parseExponential()
     {
-        auto node = parseUnary();
+        auto node = parsePrimary();
         if (!node) return nullptr;
 
         if (m_current.type == TokenType::Pow) {
             advance();
-            auto right = parseExponential();
+            auto right = parseUnary();
             if (!right) {
                 if (!m_hasError) setError("Expected operand after '^'", m_current.line, m_current.column);
                 return nullptr;
@@ -1070,7 +1072,7 @@ private:
         return node;
     }
 
-    // Unary -> ('-' | '!') Unary | Primary
+    // Unary -> ('-' | '!') Unary | Exponential
     std::unique_ptr<AstNode> parseUnary()
     {
         if (++m_depth > kMaxDepth) {
@@ -1101,7 +1103,7 @@ private:
             }
             return std::make_unique<UnaryOpNode>(UnaryOpNode::Type::Not, std::move(child));
         }
-        return parsePrimary();
+        return parseExponential();
     }
 
     // Primary -> NUMBER | BAND_REF | '(' Expression ')' | FunctionCall

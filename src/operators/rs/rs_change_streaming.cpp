@@ -11,6 +11,7 @@
 #include <QString>
 
 #include <gdal.h>
+#include <ogr_srs_api.h>
 
 #include <algorithm>
 #include <cmath>
@@ -24,6 +25,23 @@ namespace {
 
 constexpr int kTileDim = 256;
 constexpr int kMaskHistogramBins = 65536;
+constexpr double kDegToRad = 0.017453292519943295;
+
+/// True when the WKT describes a geographic (lat/lon) CRS.
+bool isGeographicCrs( const QString &wkt )
+{
+    if ( wkt.isEmpty() )
+        return false;
+    OGRSpatialReferenceH srs = OSRNewSpatialReference( nullptr );
+    if ( !srs )
+        return false;
+    const QByteArray wktBytes = wkt.toUtf8();
+    char *wktPtr = const_cast<char *>( wktBytes.constData() );
+    const bool geographic =
+        ( OSRImportFromWkt( srs, &wktPtr ) == OGRERR_NONE && OSRIsGeographic( srs ) );
+    OSRDestroySpatialReference( srs );
+    return geographic;
+}
 
 struct DatasetFileGuard
 {
@@ -579,9 +597,25 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
     if ( beforeDs.hasGeoTransform() )
     {
         const auto gt = beforeDs.geoTransform();
-        const double pixelArea = std::abs( gt[1] * gt[5] );
+        double pixelArea = std::abs( gt[1] * gt[5] );
+        // Geographic CRS: |gt[1]|·|gt[5]| counts square DEGREES, not m². Convert
+        // with scene-centre arc lengths (Snyder) so changedArea is always m²,
+        // matching the projected-CRS unit (#700).
+        if ( pixelArea > 0.0 && isGeographicCrs( beforeDs.projection() ) )
+        {
+            const double phiDeg = gt[3] + ( height / 2.0 ) * gt[5];
+            const double phiRad = phiDeg * kDegToRad;
+            const double mPerDegLat =
+                111132.92 - 559.82 * std::cos( 2 * phiRad ) + 1.175 * std::cos( 4 * phiRad );
+            const double mPerDegLon =
+                111412.84 * std::cos( phiRad ) - 93.5 * std::cos( 3 * phiRad );
+            pixelArea = std::abs( gt[1] ) * mPerDegLon * std::abs( gt[5] ) * mPerDegLat;
+        }
         if ( pixelArea > 0.0 )
+        {
             result["changedArea"] = static_cast<double>( derived.changed ) * pixelArea;
+            result["changedAreaUnit"] = "m2";
+        }
     }
     context.reportProgress( 1.0, "Change detection complete" );
     return result;
