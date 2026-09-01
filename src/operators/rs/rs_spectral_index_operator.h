@@ -50,7 +50,12 @@ public:
     std::string displayName() const override { return "Spectral Index"; }
     std::string group() const override { return "spectral"; }
     std::string description() const override {
-        return "Compute a spectral index (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI, NBR, dNBR, BSI, NDRE, CI, NDSI, NDTI) from raster bands.";
+        return "Compute a spectral index (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI, NBR, dNBR, BSI, "
+               "NDRE, CI, NDSI, NDTI) from raster bands. Scale rule (#680): EVI/SAVI constants "
+               "assume unit reflectance [0,1]; when the input carries SICNU_NUMERIC_SCALE "
+               "(stamped at Level-2 import), the participating bands are divided by it for the "
+               "computation, while ratio indices are scale-invariant and inputs are never "
+               "rescaled on disk.";
     }
 
     Json::Value schema() const override;

@@ -12,6 +12,7 @@
 
 #include <QString>
 
+#include <cmath>
 #include <filesystem>
 #include <string>
 
@@ -30,6 +31,54 @@ std::string paramPathValue( const Json::Value &value )
         return value[key].asString();
   }
   return {};
+}
+
+/// Records the extended per-dataset contract facts (#6): GDAL type name,
+/// declared nodata presence, dataset numeric scale, and GDAL scale/offset.
+/// Reporting only — no gating is derived from these keys yet.
+void extendProbeWithContractFacts( Json::Value &info, int bandCount,
+                                   GDALDatasetH handle )
+{
+  if ( !handle || bandCount < 1 )
+    return;
+  bool anyNoData = false;
+  bool scaleOffsetApplied = false;
+  for ( int b = 1; b <= bandCount; ++b )
+  {
+    GDALRasterBandH band = GDALGetRasterBand( handle, b );
+    if ( !band )
+      continue;
+    int hasNd = 0;
+    GDALGetRasterNoDataValue( band, &hasNd );
+    anyNoData = anyNoData || hasNd != 0;
+    int hasScale = 0;
+    int hasOffset = 0;
+    const double scale = GDALGetRasterScale( band, &hasScale );
+    const double offset = GDALGetRasterOffset( band, &hasOffset );
+    if ( ( hasScale && scale != 1.0 ) || ( hasOffset && offset != 0.0 ) )
+    {
+      if ( !scaleOffsetApplied )
+      {
+        Json::Value so( Json::objectValue );
+        so["band"] = b;
+        so["scale"] = scale;
+        so["offset"] = offset;
+        info["scaleOffset"] = so;
+      }
+      scaleOffsetApplied = true;
+    }
+  }
+  info["noDataDeclared"] = anyNoData;
+  info["scaleOffsetApplied"] = scaleOffsetApplied;
+
+  // Importer-stamped numeric scale (#680): stored_pixel / scale = physical value.
+  if ( const char *scaleMeta = GDALGetMetadataItem( handle, "SICNU_NUMERIC_SCALE", nullptr ) )
+  {
+    bool ok = false;
+    const double v = QString::fromUtf8( scaleMeta ).toDouble( &ok );
+    if ( ok && std::isfinite( v ) && v > 0.0 )
+      info["numericScale"] = v;
+  }
 }
 
 /// Lightweight GDAL probe of a raster file. Returns an object with size/bands/
@@ -67,18 +116,23 @@ Json::Value probeRasterDataset( const std::string &path )
       const int dtype = ds.bandDataType( 1 );
       info["dataType"] = gdalBytesPerSample( dtype ) > 0
                            ? ( gdalBytesPerSample( dtype ) * 8 )
-                           : 0; // bit depth
+                           : 0; // bit depth (existing key, kept stable)
+      // GDAL type name ("Byte", "UInt16", "Int16", "Float32", ...): the bit
+      // depth alone cannot distinguish e.g. UInt16 from Int16 (#6).
+      if ( const char *typeName = GDALGetDataTypeName( static_cast<GDALDataType>( dtype ) ) )
+        info["dtype"] = typeName;
     }
     info["crs"] = ds.projection().toStdString();
 
     // Dataset-level radiometric state metadata (importers write this).
     if ( void *h = ds.dataset() )
     {
-      if ( const char *rs = GDALGetMetadataItem( static_cast<GDALDatasetH>( h ),
-                                                 "SICNU_RADIOMETRIC_STATE", nullptr ) )
+      GDALDatasetH handle = static_cast<GDALDatasetH>( h );
+      if ( const char *rs = GDALGetMetadataItem( handle, "SICNU_RADIOMETRIC_STATE", nullptr ) )
       {
         info["radiometricState"] = rs;
       }
+      extendProbeWithContractFacts( info, ds.bandCount(), handle );
     }
     return info;
   }
@@ -113,6 +167,8 @@ Json::Value probeRasterDataset( const std::string &path )
       const GDALDataType dt = GDALGetRasterDataType( band );
       const int bytes = GDALGetDataTypeSizeBytes( dt );
       info["dataType"] = bytes > 0 ? bytes * 8 : 0;
+      if ( const char *typeName = GDALGetDataTypeName( dt ) )
+        info["dtype"] = typeName;
     }
   }
   if ( const char *proj = GDALGetProjectionRef( hDS ) )
@@ -121,6 +177,7 @@ Json::Value probeRasterDataset( const std::string &path )
     info["crs"] = "";
   if ( const char *rs = GDALGetMetadataItem( hDS, "SICNU_RADIOMETRIC_STATE", nullptr ) )
     info["radiometricState"] = rs;
+  extendProbeWithContractFacts( info, GDALGetRasterCount( hDS ), hDS );
 
   GDALClose( hDS );
   CPLErrorReset();

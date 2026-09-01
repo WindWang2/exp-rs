@@ -3,11 +3,14 @@
 // Algorithm preflight: schema validation + dataset probes + compatibility +
 // dynamic resource estimate, without executing the algorithm (PLAN →
 // PREFLIGHT → EXECUTE contract).
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <QFile>
 #include <QTemporaryDir>
 #include <array>
+#include <cstdint>
+#include <vector>
 
 #include <cpl_vsi.h>
 #include <gdal_priv.h>
@@ -319,5 +322,101 @@ TEST_CASE( "preflight reports gdal_open_failed for OGR connection string", "[pro
     // gdal_open_failed, not as a plain filesystem missing-file error.
     CHECK( hasGdalOpenFailed );
     CHECK_FALSE( hasInputNotFound );
+}
+
+// ——— Extended dataset probe: dtype name / nodata / numeric scale / scale-offset (#6) ———
+
+TEST_CASE( "preflight probe reports dtype, nodata, numericScale, scaleOffset (#6)", "[processing][preflight][probe]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    AlgorithmDescriptor desc;
+    desc.id = "stub:probe_preflight";
+    PortDescriptor port;
+    port.name = "input";
+    port.type = DataType::Raster;
+    port.required = true;
+    desc.inputs.push_back( port );
+    ContractStubAdapter adapter( "stub:probe_preflight", desc );
+
+    SECTION( "UInt16 reflectance stack with importer-stamped numeric scale" )
+    {
+        const QString raster = tmp.path() + "/dn_stack.tif";
+        {
+            ensureGdalInit();
+            GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+            REQUIRE( driver != nullptr );
+            GDALDatasetH ds = GDALCreate( driver, raster.toUtf8().constData(), 8, 8, 1, GDT_UInt16, nullptr );
+            REQUIRE( ds != nullptr );
+            double gt[6] = { 500000, 30, 0, 4500000, 0, -30 };
+            REQUIRE( GDALSetGeoTransform( ds, gt ) == CE_None );
+            GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+            REQUIRE( band != nullptr );
+            std::vector<uint16_t> line( 8, 4000 );
+            for ( int row = 0; row < 8; ++row )
+                REQUIRE( GDALRasterIO( band, GF_Write, 0, row, 8, 1, line.data(), 8, 1,
+                                       GDT_UInt16, 0, 0 ) == CE_None );
+            REQUIRE( GDALSetRasterNoDataValue( band, 0.0 ) == CE_None );
+            GDALSetMetadataItem( ds, "SICNU_RADIOMETRIC_STATE", "surface_reflectance", nullptr );
+            GDALSetMetadataItem( ds, "SICNU_NUMERIC_SCALE", "10000", nullptr );
+            GDALClose( ds );
+        }
+
+        Json::Value params( Json::objectValue );
+        params["input"] = raster.toStdString();
+        const Json::Value preflight = preflightAdapter( adapter, params );
+        REQUIRE( preflight["valid"].asBool() == true );
+
+        const Json::Value &info = preflight["datasets"]["input"];
+        // Existing keys stay stable...
+        REQUIRE( info["dataType"].asInt() == 16 );
+        REQUIRE( info["radiometricState"].asString() == "surface_reflectance" );
+        // ...new contract keys are added (report-only).
+        CHECK( info["dtype"].asString() == "UInt16" );
+        CHECK( info["noDataDeclared"].asBool() == true );
+        REQUIRE( info.isMember( "numericScale" ) );
+        CHECK( info["numericScale"].asDouble() == Catch::Approx( 10000.0 ) );
+        CHECK( info["scaleOffsetApplied"].asBool() == false );
+    }
+
+    SECTION( "Float32 raster with GDAL scale/offset reports scaleOffsetApplied" )
+    {
+        const QString raster = tmp.path() + "/scaled.tif";
+        {
+            ensureGdalInit();
+            GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+            REQUIRE( driver != nullptr );
+            GDALDatasetH ds = GDALCreate( driver, raster.toUtf8().constData(), 8, 8, 1, GDT_Float32, nullptr );
+            REQUIRE( ds != nullptr );
+            double gt[6] = { 500000, 30, 0, 4500000, 0, -30 };
+            REQUIRE( GDALSetGeoTransform( ds, gt ) == CE_None );
+            GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+            REQUIRE( band != nullptr );
+            std::vector<float> line( 8, 1.0f );
+            for ( int row = 0; row < 8; ++row )
+                REQUIRE( GDALRasterIO( band, GF_Write, 0, row, 8, 1, line.data(), 8, 1,
+                                       GDT_Float32, 0, 0 ) == CE_None );
+            // No declared nodata on this one; identity-free scale/offset.
+            REQUIRE( GDALSetRasterScale( band, 0.0001 ) == CE_None );
+            REQUIRE( GDALSetRasterOffset( band, -0.1 ) == CE_None );
+            GDALClose( ds );
+        }
+
+        Json::Value params( Json::objectValue );
+        params["input"] = raster.toStdString();
+        const Json::Value preflight = preflightAdapter( adapter, params );
+        REQUIRE( preflight["valid"].asBool() == true );
+
+        const Json::Value &info = preflight["datasets"]["input"];
+        CHECK( info["dtype"].asString() == "Float32" );
+        CHECK( info["dataType"].asInt() == 32 );
+        CHECK( info["noDataDeclared"].asBool() == false );
+        CHECK( info["scaleOffsetApplied"].asBool() == true );
+        REQUIRE( info["scaleOffset"]["band"].asInt() == 1 );
+        CHECK( info["scaleOffset"]["scale"].asDouble() == Catch::Approx( 0.0001 ) );
+        CHECK( info["scaleOffset"]["offset"].asDouble() == Catch::Approx( -0.1 ) );
+        CHECK_FALSE( info.isMember( "numericScale" ) );
+    }
 }
 

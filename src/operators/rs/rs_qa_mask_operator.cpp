@@ -15,6 +15,8 @@
 
 #include <gdal.h>
 
+#include <cmath>
+#include <cstdint>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -183,8 +185,8 @@ Json::Value RsQaMaskOperator::metadata() const {
 
 Json::Value RsQaMaskOperator::executionEstimate() const {
     // FullRaster (base default): no preferred tile. run() loads the whole QA
-    // band as float32 plus a UInt8 mask and a uint16 conversion buffer (7
-    // bytes/pixel in flight); typical 1024x1024 input -> ~7 MiB.
+    // band in its native dtype plus a uint16 conversion buffer and a UInt8
+    // mask (≤ 7 bytes/pixel in flight); typical 1024x1024 input -> ~7 MiB.
     Json::Value est(Json::objectValue);
     est["tileWidth"] = 0;
     est["tileHeight"] = 0;
@@ -252,27 +254,131 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
 
     context.logInfo("Computing QA mask (source=" + source + ", mask=" + maskSelection + ")");
 
-    std::vector<float> qa(pixelCount);
-    if (!ds.readBandData(qaBand, qa.data(), width, height)) {
+    // #699: read the QA band in its NATIVE data type. The previous path read
+    // the band as Float32 and static_cast<uint16_t>'d every sample: casting
+    // NaN / negative sentinels to uint16 is undefined behaviour (in practice
+    // yielding 0 = "clear" by accident) and values >= 65536 silently
+    // truncated. Conversion now applies explicit guards and counts the
+    // irregular samples.
+    const int qaType = ds.bandDataType(qaBand);
+    bool hasNodata = false;
+    const double nodataVal = ds.bandNoDataValue(qaBand, &hasNodata);
+
+    std::vector<uint16_t> values(pixelCount, 0);
+    size_t irregular = 0;
+    auto convertSample = [&](double v) -> uint16_t {
+        if (hasNodata && std::isfinite(nodataVal) && std::abs(v - nodataVal) < 1e-9) {
+            ++irregular;
+            return 0; // declared NoData -> not a QA word; leave unmasked
+        }
+        if (!std::isfinite(v)) {
+            ++irregular;
+            return 0; // NaN/Inf -> keep the historical "clear" outcome, no UB
+        }
+        if (v < 0.0) {
+            ++irregular;
+            return 0; // negative sentinel -> clear
+        }
+        if (v > 65535.0) {
+            ++irregular;
+            return 65535; // clamp instead of silently truncating high bits
+        }
+        return static_cast<uint16_t>(v);
+    };
+
+    bool readOk = false;
+    switch (qaType) {
+    case GDT_Byte: {
+        std::vector<uint8_t> raw(pixelCount);
+        readOk = ds.readBandDataNative(qaBand, raw.data(), width, height);
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    case GDT_UInt16: {
+        readOk = ds.readBandDataNative(qaBand, values.data(), width, height);
+        if (readOk && hasNodata && std::isfinite(nodataVal) && nodataVal >= 0.0
+            && nodataVal <= 65535.0) {
+            const auto nd = static_cast<uint16_t>(nodataVal);
+            for (size_t i = 0; i < pixelCount; ++i) {
+                if (values[i] == nd) {
+                    values[i] = 0;
+                    ++irregular;
+                }
+            }
+        }
+        break;
+    }
+    case GDT_Int16: {
+        std::vector<int16_t> raw(pixelCount);
+        readOk = ds.readBandDataNative(qaBand, raw.data(), width, height);
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    case GDT_UInt32: {
+        std::vector<uint32_t> raw(pixelCount);
+        readOk = ds.readBandDataNative(qaBand, raw.data(), width, height);
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    case GDT_Int32: {
+        std::vector<int32_t> raw(pixelCount);
+        readOk = ds.readBandDataNative(qaBand, raw.data(), width, height);
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    case GDT_Float32: {
+        std::vector<float> raw(pixelCount);
+        readOk = ds.readBandData(qaBand, raw.data(), width, height);
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    case GDT_Float64: {
+        std::vector<double> raw(pixelCount);
+        GDALRasterBandH band = ds.dataset()
+            ? GDALGetRasterBand(static_cast<GDALDatasetH>(ds.dataset()), qaBand)
+            : nullptr;
+        readOk = band
+                 && GDALRasterIO(band, GF_Read, 0, 0, width, height,
+                                 raw.data(), width, height, GDT_Float64, 0, 0)
+                        == CE_None;
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    default: {
+        // Unknown/complex types: fall back to the Float32 read; the same
+        // finite/range guards apply during conversion.
+        std::vector<float> raw(pixelCount);
+        readOk = ds.readBandData(qaBand, raw.data(), width, height);
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    }
+    if (!readOk) {
         throw RSOperatorError(ErrorCode::GdalError,
                               "Failed to read QA band " + std::to_string(qaBand));
+    }
+    if (irregular > 0) {
+        context.logWarning(
+            "QA band contained " + std::to_string(irregular)
+            + " non-finite / out-of-range / declared-NoData sample(s); treated as clear (unmasked)");
     }
 
     std::vector<uint8_t> mask(pixelCount);
     if (source == "sentinel2_scl") {
         std::vector<uint8_t> scl(pixelCount);
         for (size_t i = 0; i < pixelCount; ++i)
-            scl[i] = static_cast<uint8_t>(qa[i]);
+            scl[i] = static_cast<uint8_t>(values[i]);
         QaMask::sclMask(scl.data(), mask.data(), pixelCount, sclClasses);
     } else if (source == "generic_bitmask") {
-        std::vector<uint16_t> values(pixelCount);
-        for (size_t i = 0; i < pixelCount; ++i)
-            values[i] = static_cast<uint16_t>(qa[i]);
         QaMask::genericBitmaskMask(values.data(), mask.data(), pixelCount, genericBits);
     } else {
-        std::vector<uint16_t> values(pixelCount);
-        for (size_t i = 0; i < pixelCount; ++i)
-            values[i] = static_cast<uint16_t>(qa[i]);
         QaMask::landsatQaMask(values.data(), mask.data(), pixelCount, landsatFlags);
     }
 

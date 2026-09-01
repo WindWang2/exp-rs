@@ -673,6 +673,37 @@ TEST_CASE("autoDetectMetadataFile scans sibling MTL/MTD files", "[radcal][metada
         CHECK(RadiometricCalibration::autoDetectMetadataFile(stacked)
                   .endsWith(QStringLiteral("MTD_MSIL2A.xml")));
     }
+
+    SECTION("Multiple MTL files fail closed naming the candidates (#699)") {
+        writeMtlFile(dir.filePath(QStringLiteral("LC08_A_MTL.txt")), {});
+        writeMtlFile(dir.filePath(QStringLiteral("LC08_B_MTL.txt")), {});
+        QString err;
+        const QString found = RadiometricCalibration::autoDetectMetadataFile(
+            dir.filePath(QStringLiteral("scene.tif")), &err);
+        // No alphabetical guessing: refuse to pick and name the candidates.
+        CHECK(found.isEmpty());
+        REQUIRE_FALSE(err.isEmpty());
+        CHECK(err.contains(QStringLiteral("LC08_A_MTL.txt")));
+        CHECK(err.contains(QStringLiteral("LC08_B_MTL.txt")));
+        CHECK(err.contains(QStringLiteral("metadata_path")));
+    }
+
+    SECTION("Multiple MTD files fail closed naming the candidates (#699)") {
+        for (const QString& name : {QStringLiteral("MTD_MSIL1C.xml"),
+                                    QStringLiteral("MTD_MSIL2A.xml")}) {
+            QFile mtd(dir.filePath(name));
+            REQUIRE(mtd.open(QIODevice::WriteOnly | QIODevice::Text));
+            mtd.write("<n1:Level-2A_User_Product></n1:Level-2A_User_Product>");
+            mtd.close();
+        }
+        QString err;
+        const QString found = RadiometricCalibration::autoDetectMetadataFile(
+            dir.filePath(QStringLiteral("scene.tif")), &err);
+        CHECK(found.isEmpty());
+        REQUIRE_FALSE(err.isEmpty());
+        CHECK(err.contains(QStringLiteral("MTD_MSIL1C.xml")));
+        CHECK(err.contains(QStringLiteral("MTD_MSIL2A.xml")));
+    }
 }
 
 TEST_CASE("toToaReflectance generic GDAL scale/offset computes DN*scale + offset", "[radcal][toa][generic]")

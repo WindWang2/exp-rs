@@ -105,8 +105,13 @@ Json::Value RsRadiometricCalibrationOperator::run(const Json::Value &params,
     // caller did not supply one — "metadata automatically detected" workflow.
     QString metadataPath = QString::fromStdString(metadataPathParam);
     if (metadataPath.isEmpty()) {
+        QString detectError;
         metadataPath = RadiometricCalibration::autoDetectMetadataFile(
-            QString::fromStdString(inputPath));
+            QString::fromStdString(inputPath), &detectError);
+        // Ambiguous sibling metadata must fail closed, not guess (#699).
+        if (metadataPath.isEmpty() && !detectError.isEmpty())
+            throw RSOperatorError(ErrorCode::InvalidInputData,
+                                  detectError.toStdString());
         if (!metadataPath.isEmpty())
             context.logInfo("Auto-detected calibration metadata: " + metadataPath.toStdString());
     }

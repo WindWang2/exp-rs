@@ -106,6 +106,14 @@ bool stackToGeoTiff(const ProductInfo& product,
                     const std::function<void(double, const QString&)>& progress = {});
 
 /**
+ * Names in @p bandNames that cannot be resolved against the discovered
+ * @p product bands (empty when @p bandNames is empty — all non-QA bands — or
+ * when every name resolves). Import operators fail closed on a non-empty
+ * result instead of silently stacking fewer bands than requested (#676).
+ */
+QStringList unresolvableBands(const ProductInfo& product, const QStringList& bandNames);
+
+/**
  * MODIS sinusoidal sphere WKT (radius 6371007.181 m) used by NASA MODIS tiles.
  */
 QString modisSinusoidalWkt();
@@ -198,6 +206,17 @@ constexpr char kRadiometricStateToaReflectance[] = "toa_reflectance";
 constexpr char kRadiometricStateSurfaceReflectance[] = "surface_reflectance";
 constexpr char kRadiometricStateBrightnessTemperature[] = "brightness_temperature";
 constexpr char kRadiometricStateDigitalNumber[] = "digital_number";
+
+/// Metadata key: "SICNU_NUMERIC_SCALE". When present, stored pixel values are
+/// scaled encodings of the quantity named by kRadiometricStateKey:
+/// physical_value = stored_pixel / scale. Written at import for Level-2
+/// reflectance products whose pixels are stacked verbatim (Sentinel-2 L2A:
+/// the MTD BOA quantification, default 10000; Landsat C2 L2: 1 /
+/// REFLECTANCE_MULT when a single uniform mult covers the stack). Absent
+/// means scale 1 — stored values already carry physical units. Scale-
+/// sensitive consumers (EVI/SAVI additive constants) must honour it;
+/// ratio-based indices are scale-invariant and may ignore it.
+constexpr char kNumericScaleKey[] = "SICNU_NUMERIC_SCALE";
 
 /// Writes the radiometric-state dataset metadata to \p path. Returns false
 /// (with \p errorMessage set) when the file cannot be opened for update.

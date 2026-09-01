@@ -111,6 +111,17 @@ Json::Value RsSentinel2ImportOperator::run(const Json::Value& p, RSOperatorConte
                     + std::to_string(product.bands.size()) + " band files @ " + resolution + ")");
     context.throwIfCancelled();
 
+    // Fail closed when any requested band cannot be resolved (#676): the old
+    // path silently dropped it, reported the requested bandCount, and shifted
+    // every positional band reference downstream.
+    const QStringList missing = SatelliteProducts::unresolvableBands(product, bandNames);
+    if (!missing.isEmpty()) {
+        throw RSOperatorError(ErrorCode::InvalidInputData,
+                              ("Requested bands not found in product (missingBands: "
+                               + missing.join(QStringLiteral(", ")) + ")")
+                                  .toStdString());
+    }
+
     context.reportProgress(0.15, "Stacking bands to GeoTIFF");
     const bool ok = SatelliteProducts::stackToGeoTiff(
         product, bandNames, QString::fromStdString(outputPath), &err,

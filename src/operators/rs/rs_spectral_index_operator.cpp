@@ -8,11 +8,14 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
+#include "processing/algorithms/satellite_products.h"
 #include "processing/algorithms/spectral_indices.h"
 #include "processing/algorithms/math_utils.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QString>
+
+#include <gdal.h>
 
 #include <cmath>
 #include <limits>
@@ -81,6 +84,11 @@ Json::Value RsSpectralIndexOperator::metadata() const {
     meta["limitations"].append("Band numbers are 1-based and must exist in the input raster. When a band "
                                "parameter is omitted, it is resolved from the input's SICNU_BAND_ROLE "
                                "product metadata (semantic band roles) instead of the positional default.");
+    meta["limitations"].append("EVI and SAVI constants assume unit reflectance [0,1]. When the input "
+                               "carries SICNU_NUMERIC_SCALE (stamped by rs:landsat_import / "
+                               "rs:sentinel2_import for verbatim DN-scale Level-2 stacks), the "
+                               "participating bands are divided by it for the computation; ratio "
+                               "indices are scale-invariant and inputs are never rescaled on disk.");
     meta["facadeOf"] = "rs:ndvi,rs:evi,rs:ndwi,rs:savi,rs:ndbi,rs:mndwi,rs:nbr,rs:dnbr,rs:bsi,rs:ndre,rs:ci,rs:ndsi,rs:ndti";
     return meta;
 }
@@ -148,6 +156,26 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     const int width = ds.width();
     const int height = ds.height();
     const int bandCount = ds.bandCount();
+
+    // #680: EVI/SAVI carry additive constants (+1.0, +0.5, ·1.5) that assume
+    // unit reflectance in [0,1]. Reflectance products stacked at import keep
+    // their stored DN-scale pixels (back-compat) and are stamped with
+    // SICNU_NUMERIC_SCALE instead; when present and != 1, the participating
+    // bands are divided by it for the index computation. Ratio-based indices
+    // are scale-invariant and read bands verbatim; stored input pixels are
+    // never rescaled, and outputs stay in the index's native [-1, ~1] range.
+    double numericScale = 1.0;
+    if (void *datasetHandle = ds.dataset()) {
+        if (const char *rawScale = GDALGetMetadataItem(
+                static_cast<GDALDatasetH>(datasetHandle),
+                SatelliteProducts::kNumericScaleKey, nullptr)) {
+            bool ok = false;
+            const double v = QString::fromUtf8(rawScale).toDouble(&ok);
+            if (ok && std::isfinite(v) && v > 0.0)
+                numericScale = v;
+        }
+    }
+    const bool applyNumericScale = std::abs(numericScale - 1.0) > 1e-9;
 
     // 1-based band number carrying @a role, or 0 when the input has no such
     // role (plain rasters without product metadata return 0).
@@ -239,6 +267,11 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     };
 
     context.logInfo("Computing " + indexName + " from " + inputPath);
+    if (applyNumericScale && (indexName == "EVI" || indexName == "SAVI")) {
+        context.logInfo("Input carries " + std::string(SatelliteProducts::kNumericScaleKey)
+                        + "=" + std::to_string(numericScale)
+                        + "; dividing the participating bands by it for " + indexName);
+    }
 
     std::vector<float> nir, red, green, blue, swir, swir2, redEdge, out;
 
@@ -264,6 +297,18 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         readBandFromDs(ds, bandNum, buffer);
     };
 
+    // Divide a band buffer by the stamped numeric scale (#680). Non-finite
+    // values (already NaN'd nodata) pass through untouched.
+    auto scaleBand = [&](std::vector<float>& buffer) {
+        if (!applyNumericScale)
+            return;
+        const float invScale = static_cast<float>(1.0 / numericScale);
+        for (float& v : buffer) {
+            if (std::isfinite(v))
+                v *= invScale;
+        }
+    };
+
     context.reportProgress(0.1, "Reading input bands");
 
     const size_t totalPixels = static_cast<size_t>(width) * height;
@@ -283,12 +328,18 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         readBand(nirBand, nir);
         readBand(redBand, red);
         readBand(blueBand, blue);
+        // Scale-sensitive constants: normalise to unit reflectance first (#680).
+        scaleBand(nir);
+        scaleBand(red);
+        scaleBand(blue);
         ok = SpectralIndices::evi(nir.data(), red.data(), blue.data(), out.data(), out.size());
     } else if (indexName == "SAVI") {
         validateBand(nirBand, "NIR");
         validateBand(redBand, "Red");
         readBand(nirBand, nir);
         readBand(redBand, red);
+        scaleBand(nir);
+        scaleBand(red);
         ok = SpectralIndices::savi(nir.data(), red.data(), out.data(), out.size());
     } else if (indexName == "NDWI") {
         validateBand(greenBand, "Green");
