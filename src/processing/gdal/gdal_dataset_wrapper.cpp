@@ -76,6 +76,23 @@ void GdalDatasetWrapper::close()
     }
 }
 
+bool GdalDatasetWrapper::closeWithError( QString *errorMessage )
+{
+    if ( !m_dataset )
+        return true;
+    CPLErrorReset();
+    GDALClose( static_cast<GDALDatasetH>( m_dataset ) );
+    m_dataset = nullptr;
+    if ( CPLGetLastErrorType() == CE_Failure )
+    {
+        if ( errorMessage )
+            *errorMessage = QString::fromUtf8( CPLGetLastErrorMsg() );
+        CPLErrorReset();
+        return false;
+    }
+    return true;
+}
+
 bool GdalDatasetWrapper::isValid() const
 {
     return m_dataset != nullptr;

@@ -32,6 +32,14 @@ add_library(sicnu_processing SHARED
     algorithms/spectral_roi.cpp
     algorithms/satellite_products.cpp
 
+    # Temporal (multi-date) remote sensing core: time semantics, collection
+    # model, scientific preflight, bounded streaming reader, stable stats.
+    algorithms/temporal/temporal_time.cpp
+    algorithms/temporal/temporal_band_roles.cpp
+    algorithms/temporal/temporal_collection.cpp
+    algorithms/temporal/temporal_preflight.cpp
+    algorithms/temporal/temporal_stream.cpp
+
     framework/input_validator.cpp
     framework/algorithm_engine.cpp
     framework/algorithm_descriptor.cpp

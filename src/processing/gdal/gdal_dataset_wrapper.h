@@ -117,6 +117,15 @@ public:
     /// Close the dataset (also called by destructor).
     void close();
 
+    /**
+     * Close and surface deferred flush/write failures (e.g. ENOSPC hit while
+     * the GTiff driver flushes edge tiles during GDALClose). Unlike close(),
+     * which only logs, this returns false and fills @p errorMessage so
+     * callers can fail the run and clean the partial output instead of
+     * committing a truncated file as success.
+     */
+    bool closeWithError( QString *errorMessage = nullptr );
+
     /// True if a dataset is currently open.
     bool isValid() const;
 
