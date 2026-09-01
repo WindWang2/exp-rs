@@ -1300,3 +1300,214 @@ TEST_CASE( "jsonParamsToVariantMap survives out-of-range integers (#619)", "[tas
     REQUIRE( map.value( "small" ).toInt() == 42 );
     REQUIRE( map.contains( "huge" ) );  // string form, no exception
 }
+
+
+// ---------------------------------------------------------------------------
+// Spatial Execution Platform Phase 1 regressions: honest Running, unified
+// admission, sticky shutdown, retry semantics (#683-#686, #696, #702).
+// ---------------------------------------------------------------------------
+
+namespace {
+// Saturate the engine so nothing else can start; returns when every blocker
+// task has actually reached Running (worker picked it up).
+std::vector<long> saturateEngine(sicnu::TaskCenter &center, sicnu::jobs::JobEngine &engine,
+                                 int count, std::atomic_bool &release)
+{
+    std::vector<long> ids;
+    for (int i = 0; i < count; ++i) {
+        sicnu::jobs::JobRequest req;
+        req.algorithmId = "callable:platform_blocker";
+        ids.push_back(center.submitJob(
+            req, [&release](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx) {
+                while (!release.load() && !ctx.isCancelled())
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                return Json::Value(Json::objectValue);
+            }));
+    }
+    for (long id : ids) {
+        for (int attempt = 0; attempt < 600
+             && center.getTaskInfo(id).status != sicnu::TaskStatus::Running
+             && !sicnu::isTerminalStatus(center.getTaskInfo(id).status);
+             ++attempt)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return ids;
+}
+} // namespace
+
+TEST_CASE("TaskCenter - submitJob shares admission with the engine: Running means a worker started (#686)",
+          "[processing][task_center][platform]")
+{
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.setMaxWorkers(2);
+    auto &center = sicnu::TaskCenter::instance();
+
+    std::atomic_bool release{false};
+    const auto blockers = saturateEngine(center, engine, 2, release);
+    REQUIRE(center.getTaskInfo(blockers[0]).status == sicnu::TaskStatus::Running);
+    REQUIRE(center.getTaskInfo(blockers[1]).status == sicnu::TaskStatus::Running);
+
+    // Third task beyond engine capacity: must NOT claim Running and must not
+    // execute while both workers are held.
+    std::atomic_bool extraRan{false};
+    sicnu::jobs::JobRequest extraReq;
+    extraReq.algorithmId = "callable:platform_extra";
+    const long extra = center.submitJob(
+        extraReq, [&extraRan](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &) {
+            extraRan.store(true);
+            return Json::Value(Json::objectValue);
+        });
+    REQUIRE(extra > 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    const auto st = center.getTaskInfo(extra).status;
+    REQUIRE(st != sicnu::TaskStatus::Running); // Queued/WaitingResource/Dispatching at most
+    REQUIRE_FALSE(extraRan.load());
+
+    release.store(true);
+    waitForTerminalStatus(center, extra);
+    REQUIRE(center.getTaskInfo(extra).status == sicnu::TaskStatus::Completed);
+    for (long id : blockers)
+        waitForTerminalStatus(center, id);
+}
+
+TEST_CASE("TaskCenter - cancel of an undispatched submitted job never executes it (#683)",
+          "[processing][task_center][platform]")
+{
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.setMaxWorkers(2);
+    auto &center = sicnu::TaskCenter::instance();
+
+    std::atomic_bool release{false};
+    const auto blockers = saturateEngine(center, engine, 2, release);
+
+    std::atomic_bool ran{false};
+    sicnu::jobs::JobRequest req;
+    req.algorithmId = "callable:platform_cancel_me";
+    const long victim = center.submitJob(
+        req, [&ran](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &) {
+            ran.store(true);
+            return Json::Value(Json::objectValue);
+        });
+    REQUIRE(victim > 0);
+    // Cancel while admitted-but-not-running (or resource-held): the task must
+    // reach Canceled and the executor must never observe a start.
+    REQUIRE(center.cancelTask(victim));
+    waitForTerminalStatus(center, victim);
+    REQUIRE(center.getTaskInfo(victim).status == sicnu::TaskStatus::Canceled);
+    REQUIRE_FALSE(ran.load());
+
+    release.store(true);
+    for (long id : blockers)
+        waitForTerminalStatus(center, id);
+}
+
+TEST_CASE("TaskCenter - retryTask of a cascade-canceled pipeline step is not stranded (#685)",
+          "[processing][task_center][platform][retry]")
+{
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.setMaxWorkers(2);
+    auto &center = sicnu::TaskCenter::instance();
+
+    engine.registerExecutor("plat:upstream", [](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &) {
+        Json::Value r(Json::objectValue);
+        r["output"] = "/tmp/plat_upstream.tif";
+        return r;
+    });
+    engine.registerExecutor("plat:downstream", [](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &) {
+        return Json::Value(Json::objectValue);
+    });
+
+    sicnu::workflow::WorkflowDefinition def;
+    def.id = "plat_retry_def";
+    def.title = "Retry Pipeline";
+    sicnu::workflow::StepDef up;
+    up.id = "up";
+    up.title = "Upstream";
+    up.kind = sicnu::workflow::StepKind::Operator;
+    up.operatorId = "plat:upstream";
+    sicnu::workflow::StepDef down;
+    down.id = "down";
+    down.title = "Downstream";
+    down.kind = sicnu::workflow::StepKind::Operator;
+    down.operatorId = "plat:downstream";
+    sicnu::workflow::StepConnection conn;
+    conn.fromStepId = "up";
+    conn.fromPort = "output";
+    conn.toPort = "input";
+    down.inputs.push_back(conn);
+    def.steps.push_back(up);
+    def.steps.push_back(down);
+
+    // Hold every worker so "up" stays admitted-but-undispatched and "down"
+    // stays DAG-gated.
+    std::atomic_bool release{false};
+    const auto blockers = saturateEngine(center, engine, 2, release);
+
+    const long pipeId = center.submitPipeline(def, false);
+    REQUIRE(pipeId > 0);
+    auto pipe = center.getPipelineInfo(pipeId);
+    const long upTask = pipe.stepToTaskId["up"];
+    const long downTask = pipe.stepToTaskId["down"];
+
+    // Cascade-cancel the root: "up" cancels, "down" is cascade-canceled while
+    // it was never dispatched (the exact #685 shape).
+    REQUIRE(center.cancelTask(upTask));
+    waitForTerminalStatus(center, upTask);
+    waitForTerminalStatus(center, downTask);
+    REQUIRE(center.getTaskInfo(downTask).status == sicnu::TaskStatus::Canceled);
+
+    // Retry the cascade-canceled step: previously it re-enqueued with the old
+    // (Canceled) parent and stranded in Queued forever.
+    release.store(true);
+    for (long id : blockers)
+        waitForTerminalStatus(center, id);
+    REQUIRE(center.retryTask(downTask));
+
+    // The retried pipeline must fully complete now.
+    for (int attempt = 0; attempt < 600; ++attempt) {
+        pipe = center.getPipelineInfo(pipeId);
+        if (pipe.isCompleted || pipe.isFailed)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    REQUIRE(pipe.isCompleted);
+    REQUIRE_FALSE(pipe.isFailed);
+}
+
+TEST_CASE("TaskCenter - pauseTask refuses engine-dispatched work instead of fabricating Paused (#702)",
+          "[processing][task_center][platform]")
+{
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.setMaxWorkers(2);
+    auto &center = sicnu::TaskCenter::instance();
+
+    std::atomic_bool release{false};
+    const auto blockers = saturateEngine(center, engine, 2, release);
+    (void)blockers;
+
+    sicnu::jobs::JobRequest req;
+    req.algorithmId = "callable:platform_pause_me";
+    std::atomic_bool ran{false};
+    const long taskId = center.submitJob(
+        req, [&ran](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &) {
+            ran.store(true);
+            return Json::Value(Json::objectValue);
+        });
+    REQUIRE(taskId > 0);
+
+    // Not dispatched to a worker and no QgsTask handle: pause must refuse.
+    REQUIRE_FALSE(center.pauseTask(taskId));
+    REQUIRE(center.getTaskInfo(taskId).status != sicnu::TaskStatus::Paused);
+
+    release.store(true);
+    waitForTerminalStatus(center, taskId);
+    REQUIRE(ran.load());
+}

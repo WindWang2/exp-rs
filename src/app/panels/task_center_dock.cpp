@@ -95,6 +95,7 @@ QString TaskCenterDock::formatStatus(TaskStatus status) const
     switch (status) {
         case TaskStatus::Queued: return tr("排队中");
         case TaskStatus::WaitingResource: return tr("等待资源");
+        case TaskStatus::Dispatching: return tr("调度中");
         case TaskStatus::Running: return tr("运行中");
         case TaskStatus::Cancelling: return tr("取消中");
         case TaskStatus::Paused: return tr("已暂停");

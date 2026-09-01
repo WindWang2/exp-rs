@@ -46,6 +46,11 @@ enum class TaskStatus {
     /// resource admission: RAM budget, RSS watermark, profile/global worker
     /// slots. Re-evaluated on every terminal transition; never drops work.
     WaitingResource,
+    /// Admitted and submitted to JobEngine, but no worker has picked the job
+    /// yet. "Running" is reserved for actual worker start (the engine's first
+    /// Running record / first progress tick flips this), so callers never see
+    /// Running while the task is merely engine-queued.
+    Dispatching,
     /// Cancel was requested on a dispatched task; the worker has not yet
     /// reported a terminal record. Transitions to Canceled via the listener.
     Cancelling
@@ -82,6 +87,10 @@ struct AlgorithmTaskInfo {
     sicnu::jobs::JobRequest jobRequest;
     bool hasJobRequest = false;
     JobExecutor jobExecutor;
+    /// One-shot cancel hook handed to JobEngine at dispatch time (submitJob
+    /// callers may supply one, e.g. to kill an external process). Moved into
+    /// the PendingLaunch at staging; empty afterwards.
+    std::function<void()> jobCancelHook;
     bool autoLoadLayer = true;
     /// When true, processNextQueuedTasks submits the task to JobEngine once parents complete.
     bool autoDispatch = false;
@@ -125,7 +134,7 @@ struct TaskAdmissionSnapshot
     unsigned int candidateMb = 0;  ///< resolved estimate for the candidate
     unsigned int runningMb = 0;    ///< summed estimates of Running tasks
     unsigned int budgetMb = 0;     ///< configured RAM budget cap (0 = disabled)
-    unsigned int runningCount = 0; ///< Running + Cancelling tasks
+    unsigned int runningCount = 0; ///< active tasks: Running/Cancelling/Dispatching/Paused
     unsigned int globalLimit = 0;
     QString reason;                ///< human-readable hold reason when !wouldAdmit
 };
@@ -161,11 +170,15 @@ public:
     long submitPipelineJson( const std::string &jsonPipeline, bool autoLoad = true );
 
     /// Submit a JobEngine request while keeping Task Center as the caller-facing seam.
+    /// Both overloads go through the SAME gated admission as enqueueTask(autoDispatch):
+    /// slots / RSS / RAM budget, WaitingResource holds, priority order, and
+    /// Dispatching→Running on actual worker start.
     long submitJob(const sicnu::jobs::JobRequest& request);
     long submitJob(const sicnu::jobs::JobRequest& request,
                    JobExecutor executor,
                    CancelHook onCancel = {},
-                   bool autoLoad = true);
+                   bool autoLoad = true,
+                   TaskPriority priority = TaskPriority::Normal);
 
     void attachQgsTask(long taskId, QgsTask* qgsTask);
 
@@ -189,6 +202,13 @@ public:
     PipelineExecutionInfo getPipelineInfo(long pipelineId) const;
     void clearCompletedTasks();
     void shutdown();
+
+    /// Test-only: run the real shutdown semantics (cancel-all, terminate the
+    /// engine) and then RESET both singletons to a clean reusable state.
+    /// Production shutdown is sticky (no new work ever); tests that verify
+    /// shutdown behavior call this afterwards so later tests in the same
+    /// binary can still submit.
+    void shutdownForTests();
 
     /// True once shutdown() has been called (await loops poll this so a
     /// shutdown never leaves a sync waiter blocked until its timeout).
@@ -308,7 +328,13 @@ private:
     long submitJobImpl(const sicnu::jobs::JobRequest& request,
                        JobExecutor executor,
                        CancelHook onCancel,
-                       bool autoLoad);
+                       bool autoLoad,
+                       TaskPriority priority);
+    /// Shutdown finalization (#684): cancel every non-terminal task (engine
+    /// flags armed, queued jobs cancelled), then — after the engine joined —
+    /// force any task still in Dispatching/Running/Cancelling to Canceled so
+    /// waiters and completion callbacks always observe a terminal state.
+    void cancelAllForShutdown();
     /// Owns JobEngine's single listener slot (ADR 0051). Re-installed on every
     /// submit so a test-side reset (shutdownForTests / EngineGuard) cannot
     /// silently detach task bookkeeping; tests driving TaskCenter and
@@ -331,6 +357,7 @@ private:
         sicnu::jobs::JobRequest request;
         JobExecutor executor;
         bool hasExecutor = false;
+        CancelHook onCancel;
     };
 
     struct PendingLog {

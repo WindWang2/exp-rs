@@ -229,13 +229,17 @@ void QgisDesktopWindow::refreshStatusTaskSummary()
 
     int running = 0;
     int queued = 0;
+    int cancelling = 0;
     const auto tasks = sicnu::TaskCenter::instance().allTasks();
     for ( const auto &t : tasks )
     {
-        if ( t.status == sicnu::TaskStatus::Running )
+        if ( t.status == sicnu::TaskStatus::Running || t.status == sicnu::TaskStatus::Dispatching )
             ++running;
-        else if ( t.status == sicnu::TaskStatus::Queued || t.status == sicnu::TaskStatus::Paused )
+        else if ( t.status == sicnu::TaskStatus::Queued || t.status == sicnu::TaskStatus::Paused
+                  || t.status == sicnu::TaskStatus::WaitingResource )
             ++queued;
+        else if ( t.status == sicnu::TaskStatus::Cancelling )
+            ++cancelling;
     }
 
     const int qgisActive = QgsApplication::taskManager()
@@ -243,7 +247,12 @@ void QgisDesktopWindow::refreshStatusTaskSummary()
                              : 0;
 
     const QString prevName = m_readyLabel->objectName();
-    if ( running > 0 || queued > 0 )
+    if ( cancelling > 0 )
+    {
+        m_readyLabel->setText( tr( "取消中 %1 · 运行 %2 · 排队 %3" ).arg( cancelling ).arg( running ).arg( queued ) );
+        m_readyLabel->setObjectName( QStringLiteral( "rsReadyBusy" ) );
+    }
+    else if ( running > 0 || queued > 0 )
     {
         m_readyLabel->setText( tr( "运行 %1 · 排队 %2" ).arg( running ).arg( queued ) );
         m_readyLabel->setObjectName( QStringLiteral( "rsReadyBusy" ) );

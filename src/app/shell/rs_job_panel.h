@@ -94,4 +94,13 @@ class RsJobPanel : public QgsDockWidget
     /// Per-task "load outputs to main map" preference (UI override of autoLoad).
     QHash<long, bool> m_loadToMain;
     bool m_blockItemChanged = false;
+    /// Incremental log view state (#704): task whose log is shown and how
+    /// many lines were rendered — progress ticks append only the new slice
+    /// instead of re-setting the whole text.
+    long m_logTaskId = -1;
+    int m_logLinesShown = 0;
+    /// Detail-pane throttle (#704): rebuild (JSON re-print + output re-stat)
+    /// only on status change or at most twice a second during progress spam.
+    qint64 m_lastDetailRebuildMs = 0;
+    int m_lastDetailStatus = -1;
 };

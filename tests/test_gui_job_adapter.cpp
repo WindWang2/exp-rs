@@ -3,6 +3,7 @@
 
 #include <QCoreApplication>
 
+#include <atomic>
 #include <chrono>
 #include <thread>
 #include "shell/gui_job_adapter.h"
@@ -39,6 +40,12 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
         CHECK(id2 == -1); // Busy-gated
 
         handle.cancel();
+        // #696: cancel keeps the handle busy until the terminal record; the
+        // unknown algorithm fails fast, so pump briefly until it lands.
+        for (int i = 0; i < 300 && handle.isRunning(); ++i) {
+            QCoreApplication::processEvents();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
         CHECK_FALSE(handle.isRunning());
     }
 
@@ -154,5 +161,62 @@ TEST_CASE("GuiJobHandle returns the submitted id even when the job is terminal o
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     CHECK(failureCalled);
+    CHECK_FALSE(handle.isRunning());
+}
+
+
+TEST_CASE("GuiJobHandle - cancel stays busy until the worker truly stops (#696)",
+          "[app][shell][gui_job_adapter][696]") {
+    int argc = 1;
+    static char arg0[] = "test_gui_job_adapter";
+    char *argv[] = { arg0, nullptr };
+    if (!QCoreApplication::instance())
+        new QCoreApplication(argc, argv);
+
+    auto &engine = jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.setMaxWorkers(2);
+
+    GuiJobHandle handle;
+    std::atomic_bool started{false};
+    std::atomic_bool release{false};
+    bool failureCalled = false;
+    bool reportedCanceled = false;
+
+    jobs::JobRequest req;
+    req.algorithmId = "callable:slow_writer";
+    const long id = handle.submitJob(
+        req,
+        [&started, &release](const jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx) {
+            started.store(true);
+            // Mirror a long GDAL write that only observes cancel cooperatively.
+            while (!release.load() && !ctx.isCancelled())
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            ctx.throwIfCancelled();
+            return Json::Value(Json::objectValue);
+        },
+        nullptr, false, nullptr,
+        [&](const QString &, bool wasCanceled) {
+            failureCalled = true;
+            reportedCanceled = wasCanceled;
+        });
+    REQUIRE(id > 0);
+    for (int i = 0; i < 2000 && !started.load(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE(started.load());
+
+    handle.cancel();
+    // The worker is still writing: the handle must stay busy so the dialog
+    // cannot re-enable Run against the same output path.
+    REQUIRE(handle.isRunning());
+
+    release.store(true);
+    for (int i = 0; i < 600 && !failureCalled; ++i) {
+        QCoreApplication::processEvents();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(failureCalled);
+    CHECK(reportedCanceled);
     CHECK_FALSE(handle.isRunning());
 }

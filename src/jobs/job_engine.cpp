@@ -49,9 +49,10 @@ void JobEngine::shutdown()
   std::vector<std::function<void()>> cancelHooks;
   {
     std::lock_guard<std::mutex> lock( m_mutex );
-    if ( m_shuttingDown )
+    if ( m_shuttingDown || m_terminated )
       return;
     m_shuttingDown = true;
+    m_terminated = true; // sticky (#684): submit() must never respawn workers
     m_stop.store( true );
     m_generation++;
     toJoin.swap( m_workers );
@@ -182,7 +183,7 @@ std::string JobEngine::submit( JobRequest req, JobExecutor executor, CancelHook 
   JobRecord copy;
   {
     std::lock_guard<std::mutex> lock( m_mutex );
-    if ( m_shuttingDown )
+    if ( m_shuttingDown || m_terminated )
     {
       id = "job-" + std::to_string( m_nextId.fetch_add( 1 ) );
       JobRecord rec;
@@ -191,18 +192,13 @@ std::string JobEngine::submit( JobRequest req, JobExecutor executor, CancelHook 
       rec.state = JobState::Cancelled;
       rec.createdAtMs = nowUnixMs();
       rec.finishedAtMs = rec.createdAtMs;
-      rec.statusMessage = "Cancelled: JobEngine is shutting down";
+      rec.statusMessage = m_terminated ? "Cancelled: JobEngine is terminated"
+                                       : "Cancelled: JobEngine is shutting down";
       m_jobs.emplace( id, rec );
       copy = rec;
     }
     else
     {
-      if ( m_stop.load() )
-      {
-        // After shutdownForTests, allow reuse
-        m_stop.store( false );
-      }
-
       id = "job-" + std::to_string( m_nextId.fetch_add( 1 ) );
 
       JobRecord rec;
@@ -442,15 +438,23 @@ void JobEngine::shutdownForTests()
     m_running = 0;
     m_exclusiveRunning = false;
     m_listener = nullptr;
+    m_shuttingDown = false;
+    m_terminated = false; // explicit test-only reset: the engine is reusable
     m_stop.store( false );
   }
   m_cv.notify_all();
 }
 
+bool JobEngine::isTerminated() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_terminated;
+}
+
 void JobEngine::ensureWorkersLocked()
 {
-  if ( m_shuttingDown )
-    return;
+  if ( m_shuttingDown || m_terminated )
+    return; // terminated engines never respawn workers (#684)
   const uint64_t gen = m_generation;
   while ( static_cast<int>( m_workers.size() ) < m_maxWorkers )
   {
@@ -531,22 +535,37 @@ std::optional<std::string> JobEngine::tryPickJobLocked()
   if ( m_running >= m_maxWorkers )
     return std::nullopt;
 
-  while ( !m_queue.empty() )
+  // Priority-aware pick (#686): TaskCenter stages in priority order, but its
+  // admission count can exceed the worker pool, so several jobs may sit in
+  // this queue. Pick the lowest priority value (High first), FIFO within the
+  // same priority, instead of blind front-pop — otherwise a late-submitted
+  // High task runs behind everything staged before it.
+  auto bestIt = m_queue.end();
+  int bestPriority = 0;
+  for ( auto it = m_queue.begin(); it != m_queue.end(); ++it )
   {
-    const std::string id = m_queue.front();
-    m_queue.pop_front();
-    auto jit = m_jobs.find( id );
+    auto jit = m_jobs.find( *it );
     if ( jit == m_jobs.end() || jit->second.state != JobState::Queued )
       continue;
-
-    jit->second.state = JobState::Running;
-    jit->second.startedAtMs = nowUnixMs();
-    m_running += 1;
-    if ( jit->second.request.exclusive )
-      m_exclusiveRunning = true;
-    return id;
+    const int prio = jit->second.request.priority;
+    if ( bestIt == m_queue.end() || prio < bestPriority )
+    {
+      bestIt = it;
+      bestPriority = prio;
+    }
   }
-  return std::nullopt;
+  if ( bestIt == m_queue.end() )
+    return std::nullopt;
+
+  const std::string id = *bestIt;
+  m_queue.erase( bestIt );
+  auto jit = m_jobs.find( id );
+  jit->second.state = JobState::Running;
+  jit->second.startedAtMs = nowUnixMs();
+  m_running += 1;
+  if ( jit->second.request.exclusive )
+    m_exclusiveRunning = true;
+  return id;
 }
 
 void JobEngine::appendLog( JobRecord &rec, JobLogLevel level, const std::string &text )

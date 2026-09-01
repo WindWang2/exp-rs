@@ -55,6 +55,7 @@ enum class ExecutionState
   Created,
   Submitted,        ///< accepted by TaskCenter, not yet admitted
   WaitingResource,  ///< held by resource admission (RAM budget / slots / RSS)
+  Dispatching,      ///< admitted + submitted to JobEngine; no worker started yet
   Running,
   Cancelling,
   Completed,

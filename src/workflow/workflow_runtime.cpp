@@ -7,10 +7,16 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QMetaObject>
 #include <QString>
+#include <QThread>
+
+#include <future>
+#include <memory>
 
 #include <chrono>
 #include <sstream>
@@ -528,8 +534,39 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
       commitReq.derivation.taskReference = QString::number( taskId );
       commitReq.derivation.completedAtUtc = QDateTime::currentDateTimeUtc();
 
-      sicnu::OutputCommitter committer( dataManager );
-      const auto commitResult = committer.commit( commitReq );
+      // DataManager mutations must run on its own (affinity) thread: it has
+      // no internal locking, and this workflow caller can be any worker
+      // thread (#702). Marshal the commit like ExecutionPlane does; on a
+      // starved affinity thread fail closed instead of committing from the
+      // wrong thread. Same-thread callers (GUI) commit directly.
+      sicnu::CommitResult commitResult;
+      bool commitRan = false;
+      if ( QCoreApplication::instance() && dataManager->thread() != QThread::currentThread() )
+      {
+        auto promise = std::make_shared<std::promise<sicnu::CommitResult>>();
+        auto future = promise->get_future();
+        QMetaObject::invokeMethod(
+          dataManager,
+          [dataManager, commitReq, promise]() {
+            sicnu::OutputCommitter committer( dataManager );
+            promise->set_value( committer.commit( commitReq ) );
+          },
+          Qt::QueuedConnection );
+        if ( future.wait_for( std::chrono::milliseconds( 10000 ) ) == std::future_status::ready )
+        {
+          commitResult = future.get();
+          commitRan = true;
+        }
+      }
+      else
+      {
+        sicnu::OutputCommitter committer( dataManager );
+        commitResult = committer.commit( commitReq );
+        commitRan = true;
+      }
+      if ( !commitRan )
+        throw PlaneTaskFailure( std::string( "Output commit timed out on the DataManager thread (" )
+                                + outputTempPath + ")" );
       if ( !commitResult )
       {
         const QString diag = commitResult.diagnostics().isEmpty()

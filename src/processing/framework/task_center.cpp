@@ -85,13 +85,99 @@ void TaskCenter::shutdown()
     {
         QMutexLocker locker( &m_mutex );
         m_waitCondition.wakeAll();
+        // No new staging/flushing once shutdown began (#684): drop anything
+        // already staged but not yet submitted to the engine.
+        m_pendingLaunches.clear();
     }
+    // Cancel every non-terminal task FIRST (engine flags armed while the
+    // engine still accepts cancel), then join the engine, then finalize.
+    cancelAllForShutdown();
     sicnu::jobs::JobEngine::instance().shutdown();
+
+    // The engine is terminated: no further job records can arrive. Force any
+    // task still mid-flight (Cancelling, or never-cancelled stragglers) to a
+    // terminal state so waiters and completion callbacks always resolve.
+    QList<long> toFinalize;
+    {
+        QMutexLocker locker( &m_mutex );
+        const QList<long> keys = m_tasks.keys();
+        for ( long id : keys )
+        {
+            if ( isTerminalStatus( m_tasks[id].status ) )
+                continue;
+            auto &info = m_tasks[id];
+            const bool wasCancelling = ( info.status == TaskStatus::Cancelling );
+            info.status = TaskStatus::Canceled;
+            info.errorMessage = wasCancelling ? QStringLiteral( "Canceled during shutdown" )
+                                              : QStringLiteral( "Canceled: application is shutting down" );
+            info.endTime = QDateTime::currentDateTimeUtc();
+            info.logBuffer.append( info.errorMessage );
+            updatePipelineForTaskLocked( id );
+            queueTaskUpdatedLocked( id );
+            toFinalize.append( id );
+        }
+        m_waitCondition.wakeAll();
+    }
+    flushPendingSignals();
+    for ( long id : toFinalize )
+        fireTaskCompletionCallbacks( id );
+    {
+        // Everything is terminal now; any registration that survived the
+        // finalization pass is stale (defense against the #702 watch-leak
+        // family) — nothing can fire it anymore.
+        QMutexLocker locker( &m_mutex );
+        m_completionCallbacks.clear();
+    }
+}
+
+void TaskCenter::cancelAllForShutdown()
+{
+    QList<long> nonTerminal;
+    {
+        QMutexLocker locker( &m_mutex );
+        for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
+        {
+            if ( !isTerminalStatus( it.value().status ) )
+                nonTerminal.append( it.key() );
+        }
+    }
+    // cancelTask is self-contained (lock, cascade, flush); call it per task.
+    // Queued/WaitingResource/Dispatching tasks finalize synchronously;
+    // dispatched ones go Cancelling and resolve via the terminal record
+    // (or the finalization pass in shutdown() after the engine joined).
+    for ( long id : nonTerminal )
+        cancelTask( id );
 }
 
 TaskCenter::~TaskCenter()
 {
     shutdown();
+}
+
+void TaskCenter::shutdownForTests()
+{
+    shutdown();
+    {
+        QMutexLocker locker( &m_mutex );
+        m_isShuttingDown.store( false );
+        m_tasks.clear();
+        m_pipelines.clear();
+        m_pendingLaunches.clear();
+        m_pendingTaskAdded.clear();
+        m_pendingTaskUpdated.clear();
+        m_pendingLogs.clear();
+        m_taskByJobId.clear();
+        m_forwardedLogCounts.clear();
+        m_lastForwardedProgress.clear();
+        m_completionCallbacks.clear();
+        m_nextTaskId = 1;
+        m_nextPipelineId = 1;
+        m_waitCondition.wakeAll();
+    }
+    // Engine reset must happen outside m_mutex: shutdownForTests joins
+    // workers and resets the sticky termination flag (#684).
+    sicnu::jobs::JobEngine::instance().shutdownForTests();
+    flushPendingSignals();
 }
 
 TaskCenter::TaskCenter()
@@ -119,19 +205,25 @@ ProviderResourceProfile TaskCenter::resolveResourceProfile( const QString &algor
 
 unsigned int TaskCenter::defaultLimitForProfile( ProviderResourceProfile profile ) const
 {
-    const unsigned int hw = std::max( 1u, std::thread::hardware_concurrency() );
-    const unsigned int inProcessDefault = std::max( 1u, hw > 1 ? hw - 1 : 1u );
+    // ONE capacity fact (#686): in-process admission equals the JobEngine
+    // worker pool. Previously this was hardware_concurrency()-1 while the
+    // engine clamped to 2-4 workers, so TaskCenter staged hw-1 tasks as
+    // "Running" that then sat in the engine FIFO behind workers that did
+    // not exist — fake Running, FIFO-overridden priority, and a RAM budget
+    // charged by tasks holding no memory.
+    const unsigned int engineWorkers = static_cast<unsigned int>(
+        std::max( 1, sicnu::jobs::JobEngine::instance().maxWorkers() ) );
     switch ( profile )
     {
       case ProviderResourceProfile::ExternalCliSubprocess:
-        return std::min( 2u, inProcessDefault );
+        return std::min( 2u, engineWorkers );
       case ProviderResourceProfile::PythonWorkerProcess:
-        return std::min( 2u, inProcessDefault );
+        return std::min( 2u, engineWorkers );
       case ProviderResourceProfile::QgsTaskThread:
-        return std::max( 1u, inProcessDefault / 2 );
+        return std::max( 1u, engineWorkers / 2 );
       case ProviderResourceProfile::InProcessThread:
       default:
-        return inProcessDefault;
+        return engineWorkers;
     }
 }
 
@@ -352,7 +444,11 @@ TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
     unsigned int runningInProfile = 0;
     for ( const auto &t : m_tasks )
     {
-        if ( t.status != TaskStatus::Running && t.status != TaskStatus::Cancelling )
+        // Mirror the admission pass exactly: Dispatching holds a slot until
+        // the worker reports, Paused holds its slot, Cancelling holds the
+        // worker until the terminal record.
+        if ( t.status != TaskStatus::Running && t.status != TaskStatus::Cancelling
+             && t.status != TaskStatus::Dispatching && t.status != TaskStatus::Paused )
             continue;
         snap.runningCount += 1;
         snap.runningMb += taskEstimateMbLocked( t );
@@ -661,6 +757,8 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
                               unsigned int resourceEstimateOverrideMb,
                               const QString &source )
 {
+    if ( m_isShuttingDown.load() )
+        return -1; // no new work after shutdown (#684)
     long id = -1;
     {
         QMutexLocker locker( &m_mutex );
@@ -705,56 +803,73 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
 
 long TaskCenter::submitJob( const sicnu::jobs::JobRequest &request )
 {
-    return submitJobImpl( request, {}, {}, true );
+    return submitJobImpl( request, {}, {}, true, TaskPriority::Normal );
 }
 
 long TaskCenter::submitJob( const sicnu::jobs::JobRequest &request,
                             JobExecutor executor,
                             CancelHook onCancel,
-                            bool autoLoad )
+                            bool autoLoad,
+                            TaskPriority priority )
 {
-    return submitJobImpl( request, std::move( executor ), std::move( onCancel ), autoLoad );
+    return submitJobImpl( request, std::move( executor ), std::move( onCancel ), autoLoad, priority );
 }
 
 long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
                                 JobExecutor executor,
                                 CancelHook onCancel,
-                                bool autoLoad )
+                                bool autoLoad,
+                                TaskPriority priority )
 {
     ensureJobListener();
 
+    if ( m_isShuttingDown.load() )
+        return -1; // no new work after shutdown (#684)
+
     QVariantMap params = sicnu::processing::jsonParamsToVariantMap( request.params );
 
-    // Tracking-only enqueue; this path owns JobEngine submission itself.
+    // ONE admission path (#683/#686): submitJob used to bypass the gated
+    // auto-dispatch pipeline and hand the job straight to JobEngine (marking
+    // the task Running before any worker existed, with no cancel-during-submit
+    // recheck). Stage through the same queue as everyone else: the task is
+    // enqueued tracking-only, then armed with its request/executor under the
+    // lock and admitted by processNextQueuedTasks (slots / RSS / RAM budget /
+    // priority). Executors never run before admission because autoDispatch is
+    // only flipped inside the same critical section.
     const long taskId = enqueueTask( QString::fromStdString( request.algorithmId ), params, autoLoad,
-                                     TaskPriority::Normal, {}, false );
-    const std::string jobId = executor
-                                  ? sicnu::jobs::JobEngine::instance().submit( request, executor, std::move( onCancel ) )
-                                  : sicnu::jobs::JobEngine::instance().submit( request );
-    if ( jobId.empty() )
-    {
-        markTaskFailed( taskId, QStringLiteral( "Task Center could not submit the job" ) );
-        return taskId;
-    }
+                                     priority, {}, false, 0,
+                                     QString::fromStdString( request.source ) );
+    if ( taskId < 0 )
+        return -1;
 
     {
         QMutexLocker locker( &m_mutex );
-        if ( m_tasks.contains( taskId ) )
+        auto it = m_tasks.find( taskId );
+        if ( it == m_tasks.end() )
+            return -1; // cleared concurrently (shutdown)
+        if ( m_isShuttingDown.load() )
         {
-            m_tasks[taskId].jobId = jobId;
-            m_tasks[taskId].jobRequest = request;
-            m_tasks[taskId].hasJobRequest = true;
-            m_tasks[taskId].jobExecutor = std::move( executor );
-            m_taskByJobId[jobId] = taskId;
+            // Shutdown slipped between enqueue and arming: no launch will
+            // ever happen. Finalize inline so callers/waiters resolve.
+            it->status = TaskStatus::Canceled;
+            it->errorMessage = QStringLiteral( "Canceled: application is shutting down" );
+            it->endTime = QDateTime::currentDateTimeUtc();
+            queueTaskUpdatedLocked( taskId );
+        }
+        else
+        {
+            it->jobRequest = request;
+            it->hasJobRequest = true;
+            it->jobExecutor = std::move( executor );
+            it->jobCancelHook = std::move( onCancel );
+            it->autoDispatch = true;
+            processNextQueuedTasks();
         }
     }
-
-    markTaskRunning( taskId );
-    // Catch-up: a job that reached a terminal state before the listener could
-    // dispatch it (mapping registered after submit returned) must still land
-    // in the bookkeeping. Delta logic makes this idempotent.
-    if ( const auto record = sicnu::jobs::JobEngine::instance().snapshot( jobId ) )
-        onJobRecord( *record );
+    flushPendingLaunches();
+    flushPendingSignals();
+    if ( m_isShuttingDown.load() )
+        fireTaskCompletionCallbacks( taskId );
     return taskId;
 }
 
@@ -787,6 +902,32 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return; // task gone, or stale/duplicate record (catch-up vs listener)
+    }
+
+    // The engine's Running record is the ONLY sanctioned source for the
+    // caller-facing Running status: a worker actually picked the job
+    // (#686). Dispatching → Running here; startTime becomes the real
+    // worker start, not the enqueue timestamp.
+    if ( record.state == sicnu::jobs::JobState::Running )
+    {
+        bool flipped = false;
+        {
+            QMutexLocker locker( &m_mutex );
+            auto it = m_tasks.find( taskId );
+            if ( it != m_tasks.end()
+                 && ( it->status == TaskStatus::Queued || it->status == TaskStatus::WaitingResource
+                      || it->status == TaskStatus::Dispatching ) )
+            {
+                it->status = TaskStatus::Running;
+                if ( record.startedAtMs > 0 )
+                    it->startTime = QDateTime::fromMSecsSinceEpoch( record.startedAtMs, Qt::UTC );
+                updatePipelineForTaskLocked( taskId );
+                queueTaskUpdatedLocked( taskId );
+                flipped = true;
+            }
+        }
+        if ( flipped )
+            flushPendingSignals(); // deliver the honest Running state promptly
     }
 
     if ( record.progress >= 0.0 )
@@ -886,20 +1027,25 @@ unsigned int TaskCenter::taskEstimateMbLocked( const AlgorithmTaskInfo &task ) c
 void TaskCenter::processNextQueuedTasks()
 {
     // Called with m_mutex held. Only stages work; callers must flushPendingLaunches() outside the lock.
+    if ( m_isShuttingDown.load() )
+        return; // shutdown stages nothing new (#684)
     const unsigned int globalMax = m_globalConcurrencyLimit > 0
                                      ? m_globalConcurrencyLimit
                                      : defaultLimitForProfile( ProviderResourceProfile::InProcessThread );
 
     QMap<ProviderResourceProfile, unsigned int> runningByProfile;
     unsigned int totalRunning = 0;
-    unsigned int runningTotalMb = 0; // RAM estimate sum of Running tasks (resource-aware gate)
+    unsigned int runningTotalMb = 0; // RAM estimate sum of active tasks (resource-aware gate)
 
-    // Pending launches already have status Running; count only Running tasks once.
-    // Cancelling tasks still occupy their worker slot until the job reports
-    // its terminal record, so they count toward every limit.
+    // Pending launches (Dispatching) already hold their slot; count each
+    // active task once. Cancelling tasks still occupy their worker slot until
+    // the job reports its terminal record, and Paused tasks hold their
+    // (engine or QgsTask) slot too — counting them prevents over-admission
+    // while real workers stay busy (#702).
     for ( const auto &t : m_tasks )
     {
-        if ( t.status != TaskStatus::Running && t.status != TaskStatus::Cancelling )
+        if ( t.status != TaskStatus::Running && t.status != TaskStatus::Cancelling
+             && t.status != TaskStatus::Dispatching && t.status != TaskStatus::Paused )
             continue;
         runningByProfile[t.resourceProfile] = runningByProfile.value( t.resourceProfile, 0u ) + 1u;
         ++totalRunning;
@@ -1001,7 +1147,7 @@ void TaskCenter::processNextQueuedTasks()
             continue;
         }
 
-        m_tasks[id].status = TaskStatus::Running;
+        m_tasks[id].status = TaskStatus::Dispatching;
         m_tasks[id].logBuffer.append(
           QString( QStringLiteral( "[%1] Dispatching to JobEngine (profile=%2)." ) )
             .arg( QDateTime::currentDateTimeUtc().toString( QStringLiteral( "hh:mm:ss" ) ) )
@@ -1016,12 +1162,15 @@ void TaskCenter::processNextQueuedTasks()
                                   ? ( m_tasks[id].pipelineId >= 0 ? "pipeline" : "task_center" )
                                   : m_tasks[id].source.toStdString();
         launch.request.params = variantMapToJsonParams( m_tasks[id].parameterMap );
+        launch.request.priority = static_cast<int>( m_tasks[id].priority );
+        launch.onCancel = std::move( m_tasks[id].jobCancelHook );
         if ( m_tasks[id].hasJobRequest && m_tasks[id].jobExecutor )
         {
             launch.executor = m_tasks[id].jobExecutor;
             launch.hasExecutor = true;
             launch.request = m_tasks[id].jobRequest;
             launch.request.params = variantMapToJsonParams( m_tasks[id].parameterMap );
+            launch.request.priority = static_cast<int>( m_tasks[id].priority );
         }
         else
         {
@@ -1074,6 +1223,13 @@ void TaskCenter::flushPendingLaunches()
     QList<PendingLaunch> launches;
     {
         QMutexLocker locker( &m_mutex );
+        if ( m_isShuttingDown.load() )
+        {
+            // Shutdown in progress: never hand new work to the engine (#684).
+            // The staged tasks are canceled by the shutdown pass.
+            m_pendingLaunches.clear();
+            return;
+        }
         launches.swap( m_pendingLaunches );
     }
 
@@ -1093,7 +1249,8 @@ void TaskCenter::flushPendingLaunches()
 
         std::string jobId;
         if ( launch.hasExecutor )
-            jobId = sicnu::jobs::JobEngine::instance().submit( launch.request, std::move( launch.executor ) );
+            jobId = sicnu::jobs::JobEngine::instance().submit( launch.request, std::move( launch.executor ),
+                                                               std::move( launch.onCancel ) );
         else
             jobId = sicnu::jobs::JobEngine::instance().submit( launch.request );
 
@@ -1146,8 +1303,11 @@ void TaskCenter::updateTaskProgress( long taskId, double progress )
         // the worker's terminal record arrives).
         if ( m_tasks[taskId].status == TaskStatus::Queued
              || m_tasks[taskId].status == TaskStatus::WaitingResource
+             || m_tasks[taskId].status == TaskStatus::Dispatching
              || m_tasks[taskId].status == TaskStatus::Running )
         {
+            // Progress ticks mean the executor is genuinely running — flip
+            // pre-start states (staged/queued) to Running.
             m_tasks[taskId].status = TaskStatus::Running;
         }
         updatePipelineForTaskLocked( taskId );
@@ -1395,6 +1555,13 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
         // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
         if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return;
+        // The root's own engine job must be cancelled too (#702): callers of
+        // markTaskCanceled other than processJobRecord (e.g. future direct
+        // paths) would otherwise orphan a running job that keeps writing
+        // output while the task shows Canceled. When the job is already
+        // terminal (the listener path), engine cancel is a harmless no-op.
+        if ( !m_tasks[taskId].jobId.empty() )
+            jobCancelTargets.emplace_back( m_tasks[taskId].jobId, taskId );
         m_tasks[taskId].status = TaskStatus::Canceled;
         m_tasks[taskId].errorMessage = reason;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
@@ -1478,17 +1645,23 @@ bool TaskCenter::pauseTask( long taskId )
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) )
             return false;
-        if ( m_tasks[taskId].status == TaskStatus::Running )
+        if ( m_tasks[taskId].status == TaskStatus::Running
+             || m_tasks[taskId].status == TaskStatus::Dispatching )
         {
+            // JobEngine has no pause primitive: a worker either runs or is
+            // cancelled. Only tasks backed by a QgsTask handle (legacy
+            // QgsTask path, where hold() genuinely parks the work) may pause;
+            // engine-dispatched tasks must NOT fabricate Paused (#702) — the
+            // status would free an admission slot while the worker keeps
+            // running at full speed.
+            if ( !m_tasks[taskId].taskHandle )
+                return false;
             // hold() has the same thread-affinity caveat as cancel()
             // (dispatchPendingCancels marshals that call): invoke it on the
             // handle's own thread instead of the caller's (#616).
-            if ( m_tasks[taskId].taskHandle )
-            {
-                QgsTask *handle = m_tasks[taskId].taskHandle.data();
-                QMetaObject::invokeMethod( handle, [handle]() { handle->hold(); },
-                                           Qt::QueuedConnection );
-            }
+            QgsTask *handle = m_tasks[taskId].taskHandle.data();
+            QMetaObject::invokeMethod( handle, [handle]() { handle->hold(); },
+                                       Qt::QueuedConnection );
             m_tasks[taskId].status = TaskStatus::Paused;
             m_tasks[taskId].logBuffer.append( QStringLiteral( "Task paused." ) );
             updatePipelineForTaskLocked( taskId );
@@ -1541,11 +1714,87 @@ bool TaskCenter::retryTask( long taskId )
             return false;
         oldInfo = m_tasks[taskId];
     }
+
+    // Retry must not strand behind parents that can never satisfy DAG gating
+    // (#685): a cascade-canceled/failed parent is terminal-but-not-Completed,
+    // so a retry keeping it would sit in Queued forever. Keep parents that
+    // completed or are still live; drop the rest (missing parents already
+    // count as satisfied).
+    QList<long> retryParents;
+    {
+        QMutexLocker locker( &m_mutex );
+        for ( long parentId : oldInfo.parentTaskIds )
+        {
+            const auto it = m_tasks.find( parentId );
+            if ( it == m_tasks.end() )
+                continue; // cleared: treated as satisfied, drop from the list
+            if ( it->status == TaskStatus::Completed || !isTerminalStatus( it->status ) )
+                retryParents.append( parentId );
+        }
+    }
+
+    long newTaskId = -1;
     if ( oldInfo.hasJobRequest )
-        return submitJob( oldInfo.jobRequest, oldInfo.jobExecutor, {}, oldInfo.autoLoadLayer ) > 0;
-    return enqueueTask( oldInfo.algorithmId, oldInfo.parameterMap, oldInfo.autoLoadLayer, oldInfo.priority,
-                        oldInfo.parentTaskIds, true )
-           > 0;
+    {
+        newTaskId = submitJob( oldInfo.jobRequest, oldInfo.jobExecutor, {}, oldInfo.autoLoadLayer,
+                               oldInfo.priority );
+    }
+    else
+    {
+        newTaskId = enqueueTask( oldInfo.algorithmId, oldInfo.parameterMap, oldInfo.autoLoadLayer,
+                                 oldInfo.priority, retryParents, true, oldInfo.resourceEstimateOverrideMb,
+                                 oldInfo.source );
+    }
+    if ( newTaskId <= 0 )
+        return false;
+
+    // Keep the retry attached to its pipeline (#702): without the remap the
+    // pipeline kept pointing at the OLD canceled task, so a retried step could
+    // never un-fail the pipeline and MCP workflow status stayed wrong.
+    if ( oldInfo.pipelineId >= 0 && !oldInfo.stepId.isEmpty() )
+    {
+        QMutexLocker locker( &m_mutex );
+        auto pipeIt = m_pipelines.find( oldInfo.pipelineId );
+        auto newIt = m_tasks.find( newTaskId );
+        if ( pipeIt != m_pipelines.end() && newIt != m_tasks.end() )
+        {
+            const std::string stepKey = oldInfo.stepId.toStdString();
+            PipelineExecutionInfo &pipe = pipeIt.value();
+            pipe.taskToStepId.remove( taskId );
+            pipe.taskToStepId[newTaskId] = stepKey;
+            pipe.stepToTaskId[stepKey] = newTaskId;
+            pipe.stepStatuses[stepKey] = TaskStatus::Queued;
+            newIt->pipelineId = oldInfo.pipelineId;
+            newIt->stepId = oldInfo.stepId;
+
+            // Recompute the roll-up from step statuses: the retried step is
+            // queued again, so an all-terminal pipeline reopens; a failure
+            // latch from a DIFFERENT step must survive.
+            bool allTerminal = !pipe.stepToTaskId.isEmpty();
+            bool anyFailed = false;
+            for ( auto it = pipe.stepToTaskId.begin(); it != pipe.stepToTaskId.end(); ++it )
+            {
+                const auto taskIt = m_tasks.find( it.value() );
+                if ( taskIt == m_tasks.end() )
+                {
+                    allTerminal = false;
+                    break;
+                }
+                if ( !isTerminalStatus( taskIt->status ) )
+                {
+                    allTerminal = false;
+                    break;
+                }
+                if ( taskIt->status == TaskStatus::Failed || taskIt->status == TaskStatus::Canceled )
+                    anyFailed = true;
+            }
+            pipe.isCompleted = allTerminal;
+            pipe.isFailed = allTerminal && anyFailed;
+            if ( !allTerminal && pipe.errorMessage == oldInfo.errorMessage )
+                pipe.errorMessage.clear(); // the only failed step is being retried
+        }
+    }
+    return true;
 }
 
 QList<AlgorithmTaskInfo> TaskCenter::allTasks() const
@@ -1583,6 +1832,7 @@ void TaskCenter::clearCompletedTasks()
         {
             m_forwardedLogCounts.remove( id );
             m_lastForwardedProgress.remove( id );
+            m_completionCallbacks.remove( id ); // defense (#702): stale registrations
         }
         for ( auto it = m_taskByJobId.begin(); it != m_taskByJobId.end(); )
         {
@@ -1600,6 +1850,9 @@ void TaskCenter::clearCompletedTasks()
 
 long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def, bool autoLoad )
 {
+    if ( m_isShuttingDown.load() )
+        return -1; // no new work after shutdown (#684)
+
     std::vector<std::string> ordered;
     std::string sortError;
     if ( !sicnu::workflow::topologicalSortSteps( def, ordered, sortError ) )

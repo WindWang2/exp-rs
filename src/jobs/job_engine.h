@@ -63,7 +63,12 @@ class JobEngine
     void setMaxWorkers( int n ); // clamp 2..4
     int maxWorkers() const;
 
-    /** Stop and join all worker threads. Safe to call multiple times. */
+    /**
+     * Stop and join all worker threads. Safe to call multiple times.
+     * STICKY in production: after shutdown() the engine is terminated —
+     * submit() returns a Cancelled record and never respawns workers
+     * (#684). Only shutdownForTests() resets the terminated state.
+     */
     void shutdown();
 
     /** Submit RSOperator (or prefix-registered executor) job. */
@@ -144,6 +149,10 @@ class JobEngine
     void waitUntilIdleForTests( int timeoutMs = 10000 );
     void shutdownForTests(); // join workers; engine remains reusable
 
+    /// True once production shutdown() ran (sticky; cleared only by
+    /// shutdownForTests). Used by tests to assert no-resurrect semantics.
+    bool isTerminated() const;
+
   private:
     JobEngine();
     ~JobEngine();
@@ -182,6 +191,10 @@ class JobEngine
     int m_running = 0;
     bool m_exclusiveRunning = false;
     bool m_shuttingDown = false;
+    /// Sticky production termination (#684): set by shutdown(), never cleared
+    /// except by shutdownForTests(). submit()/ensureWorkersLocked() refuse
+    /// while set so a post-shutdown submit cannot resurrect worker threads.
+    bool m_terminated = false;
     uint64_t m_generation = 0;
     std::atomic<bool> m_stop{false};
     std::atomic<uint64_t> m_nextId{1};

@@ -25,6 +25,11 @@ struct JobRequest {
   std::string source; // ui|task_panel|dialog|toolbox|module|mcp|workflow
   bool exclusive = false;
   std::string clientTag;
+  /// Scheduling priority mirror of sicnu::TaskPriority (0 = High, 1 = Normal,
+  /// 2 = Low). Set by TaskCenter at staging so the engine's queue pick honors
+  /// the same priority order the admission pass used; workers pick the lowest
+  /// value first, FIFO within equal priority.
+  int priority = 1;
 };
 
 struct JobRecord {

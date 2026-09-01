@@ -201,6 +201,7 @@ protected:
     QgsRasterLayer *m_rasterLayer = nullptr;
     QLineEdit *m_outputEdit = nullptr;
     QPushButton *m_runButton = nullptr;
+    QPushButton *m_cancelButton = nullptr;
     bool m_running = false;
     sicnu::app::GuiJobHandle m_jobHandle{ this };
 };

@@ -188,10 +188,21 @@ void RasterProcessingDialogBase::setupButtonBar( QVBoxLayout *layout )
   SicnuDialogHelp::tip( cancelBtn, tr( "任务运行中取消任务，否则关闭对话框。" ) );
   connect( cancelBtn, &QPushButton::clicked, this, [this]() {
     if ( isRunning() )
+    {
+      // Stay in "cancelling" until the terminal record lands (#696): the
+      // handle remains busy, so Run stays disabled and the dialog cannot
+      // close or restart while the worker finishes writing.
       m_jobHandle.cancel();
+      if ( isRunning() && m_cancelButton )
+      {
+        m_cancelButton->setEnabled( false );
+        m_cancelButton->setText( tr( "取消中…" ) );
+      }
+    }
     else
       QDialog::reject();
   } );
+  m_cancelButton = cancelBtn;
   btnLayout->addWidget( cancelBtn );
 
   m_runButton = new QPushButton( tr( "运行" ), this );
@@ -239,6 +250,11 @@ void RasterProcessingDialogBase::finishRun()
   {
     m_runButton->setEnabled( true );
     m_runButton->setText( tr( "运行" ) );
+  }
+  if ( m_cancelButton )
+  {
+    m_cancelButton->setEnabled( true );
+    m_cancelButton->setText( tr( "取消" ) );
   }
   unsetCursor();
 }

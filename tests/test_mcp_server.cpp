@@ -610,7 +610,7 @@ TEST_CASE("McpServer executes qgis processing algorithms to terminal state", "[a
     QVariantMap status = server.testGetExecutionStatus(execId);
     REQUIRE(status.value("execution_id").toString() == execId);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    sicnu::jobs::JobEngine::instance().shutdown();
+    sicnu::jobs::JobEngine::instance().shutdownForTests();
 }
 
 TEST_CASE("McpServer describe_dataset exposes semantic band roles", "[agent][mcp][semantic]") {
