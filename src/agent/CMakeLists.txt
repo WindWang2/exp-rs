@@ -52,6 +52,8 @@ target_link_libraries(sicnu_agent PUBLIC
   sicnu_processing
   sicnu_task_center
   sicnu_operators
+  # mcp_server routes run_workflow through WorkflowRunCoordinator (#697).
+  sicnu_workflow_runtime
   ${JSONCPP_LIBRARIES}
 )
 
