@@ -46,6 +46,9 @@ Json::Value bandStats( GDALRasterBand *band )
     stats["max"] = maxVal;
     stats["mean"] = meanVal;
     stats["stddev"] = stdDev;
+    // #701: cached/PAM statistics may be overview-derived; flag them the
+    // same way the decimated path does so consumers see one honest contract.
+    stats["approximate"] = true;
     return stats;
   }
 

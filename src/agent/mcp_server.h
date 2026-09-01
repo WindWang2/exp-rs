@@ -87,10 +87,10 @@ protected:
     virtual void sendNotification(const QString &method, const QVariantMap &params);
 
     // MCP Methods — canonical algorithm surface
-    QVariantMap handleListAlgorithms();
+    QVariantMap handleListAlgorithms(int limit = 50, int cursor = 0);
     QVariantMap handleSearchAlgorithms(const QString &query, const QString &group,
                                        const QString &inputType, const QString &outputType,
-                                       bool largeRasterSafeOnly);
+                                       bool largeRasterSafeOnly, int limit = 50, int cursor = 0);
     QVariantMap handleGetAlgorithmSchema(const QString &algorithmId);
     QVariantMap handlePreflightAlgorithm(const QString &algorithmId, const QVariantMap &parameters);
     QVariantMap handleExecuteAlgorithm(const QString &algorithmId, const QVariantMap &parameters);
@@ -101,7 +101,7 @@ protected:
     QVariantMap handleGetLineage(const QString &assetId);
 
     // MCP Methods — RSOperator kernel (preferred Agent surface)
-    QVariantMap handleListOperators();
+    QVariantMap handleListOperators(int limit = 50, int cursor = 0);
     QVariantMap handleGetOperatorSchema(const QString &operatorId);
     QVariantMap handleExecuteOperator(const QString &operatorId, const QVariantMap &parameters);
 

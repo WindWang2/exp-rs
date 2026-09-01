@@ -51,6 +51,11 @@ class WorkflowRunCoordinator : public QObject {
     /// swept by ArtifactGC. Returns the TaskCenter pipelineId (> 0), or -1.
     long startTrackedPipeline( const WorkflowDefinition &def, bool autoLoad = true );
 
+    /// JSON flavor (MCP run_workflow): parses the pipeline JSON with the same
+    /// rules as TaskCenter::submitPipelineJson and tracks it. -1 on a parse
+    /// error (the caller reports the expected shape).
+    long startTrackedPipelineJson( const std::string &jsonPipeline, bool autoLoad = true );
+
     /// Startup recovery (#697): mark non-terminal runs Interrupted (steps
     /// stuck Running/Cancelling reset to Pending) and optionally resubmit the
     /// remaining work. With @a autoResume false the runs stay resumable via

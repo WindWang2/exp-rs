@@ -123,6 +123,22 @@ void WorkflowRunCoordinator::persistRunLocked( WorkflowRun &run )
     m_checkpoints.saveCheckpoint( run, checkpointDirectoryLocked() );
 }
 
+long WorkflowRunCoordinator::startTrackedPipelineJson( const std::string &jsonPipeline, bool autoLoad )
+{
+    Json::CharReaderBuilder builder;
+    Json::Value root;
+    std::string errs;
+    std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    if ( !reader->parse( jsonPipeline.c_str(), jsonPipeline.c_str() + jsonPipeline.length(), &root, &errs ) )
+        return -1;
+
+    WorkflowDefinition def;
+    std::string parseErr;
+    if ( !workflowDefinitionFromJson( root, def, parseErr ) )
+        return -1;
+    return startTrackedPipeline( def, autoLoad );
+}
+
 long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def, bool autoLoad )
 {
     auto run = WorkflowRun::createFromDefinition( def );

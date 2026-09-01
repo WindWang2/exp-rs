@@ -1,7 +1,4 @@
-# GCC 16 (16.2.x) ICE workaround — see the matching block in src/core/CMakeLists.txt.
-set_source_files_properties(
-  annotations/qgscreateannotationitemmaptool.cpp
-  PROPERTIES COMPILE_OPTIONS "-O1")
+
 
 set(QGIS_GUI_SRCS
   actions/qgsactionmenu.cpp
@@ -2195,3 +2192,7 @@ install(TARGETS qgis_gui
   RUNTIME DESTINATION ${QGIS_BIN_DIR}
   LIBRARY DESTINATION ${QGIS_LIB_DIR}
   ARCHIVE DESTINATION ${QGIS_LIB_DIR})
+
+
+# GCC 16.2.x ICE workaround — see the matching block in src/core/CMakeLists.txt.
+target_compile_options(qgis_gui PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O0>)

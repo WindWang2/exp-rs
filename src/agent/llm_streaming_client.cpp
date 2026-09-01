@@ -238,13 +238,17 @@ void LlmStreamingClient::emitParsedToolCallOnce()
     QJsonObject funcObj;
     funcObj[QStringLiteral( "name" )] = accu.name;
 
+    bool argsResolved = false;
     QJsonDocument argsDoc = QJsonDocument::fromJson( accu.arguments.toUtf8() );
     if ( argsDoc.isObject() )
     {
       funcObj[QStringLiteral( "arguments" )] = argsDoc.object();
+      argsResolved = true;
     }
     else
     {
+      // Some providers stream arguments as a JSON-encoded STRING of the
+      // object; unwrap one level when it parses back into an object.
       QString rawArgs = accu.arguments.trimmed();
       if ( rawArgs.startsWith( '"' ) && rawArgs.endsWith( '"' ) && rawArgs.size() > 2 )
       {
@@ -256,21 +260,23 @@ void LlmStreamingClient::emitParsedToolCallOnce()
           if ( nestedDoc.isObject() )
           {
             funcObj[QStringLiteral( "arguments" )] = nestedDoc.object();
-          }
-          else
-          {
-            funcObj[QStringLiteral( "arguments" )] = accu.arguments;
+            argsResolved = true;
           }
         }
-        else
-        {
-          funcObj[QStringLiteral( "arguments" )] = accu.arguments;
-        }
       }
-      else
-      {
-        funcObj[QStringLiteral( "arguments" )] = accu.arguments;
-      }
+    }
+
+    // #701: a stream that ended mid-tool-call leaves truncated argument
+    // JSON. Emitting it anyway produced tool calls whose arguments were a
+    // garbage raw string that exploded downstream schema validation — and
+    // worse, an EMPTY arguments string emitted a call that looked complete.
+    // Refuse to emit an unparsed tool call: the model is re-prompted with
+    // the plain-text remainder instead of executing a broken call.
+    if ( !argsResolved )
+    {
+      qWarning() << "[llm] dropping truncated tool call" << accu.name
+                 << "(arguments did not parse as a JSON object; stream ended mid-call)";
+      continue;
     }
 
     QJsonObject toolCallObj;

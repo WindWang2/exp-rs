@@ -6,6 +6,7 @@
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "workflow/workflow_definition.h"
+#include "workflow/workflow_run_coordinator.h"
 #include "workflow/workflow_types.h"
 #include "workflow/placeholder_grammar.h"
 
@@ -480,7 +481,10 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
   reportLog( "info", "Starting pipeline via TaskCenter: " + def.title +
                        " (" + std::to_string( totalSteps ) + " steps)" );
 
-  const long pipelineId = sicnu::TaskCenter::instance().submitPipeline( def, /*autoLoad=*/false );
+  // Tracked submission (#697): CLI pipelines persist per-transition
+  // checkpoints and are resumable after an interrupted run.
+  const long pipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipeline(
+      def, /*autoLoad=*/false );
   if ( pipelineId < 0 )
   {
     result.errorMessage = "TaskCenter rejected the pipeline DAG";

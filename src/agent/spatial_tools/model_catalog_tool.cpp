@@ -106,8 +106,14 @@ Json::Value ModelCatalogTool::outputSchema() const
 
 SpatialToolResult ModelCatalogTool::execute( const Json::Value &input )
 {
+  // #701: reload() rescans + re-hashes the manifest directory on EVERY call
+  // (ready-state checks re-verify artifact checksums). Use the cached catalog
+  // and fall back to ONE refresh only when a requested name misses — the
+  // same lazy retry rs:infer uses for newly installed models.
   auto &catalog = sicnu::operators::ModelCatalog::instance();
-  catalog.reload();
+  const std::string requestedName = input.isMember( "name" ) ? input["name"].asString() : std::string();
+  if ( !requestedName.empty() && !catalog.find( requestedName ) )
+    catalog.reload();
 
   Json::Value out( Json::objectValue );
   out["directory"] = catalog.directory();

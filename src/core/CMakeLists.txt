@@ -2963,3 +2963,10 @@ install(TARGETS sicnu_core
   LIBRARY DESTINATION ${QGIS_LIB_DIR}
   ARCHIVE DESTINATION ${QGIS_LIB_DIR})
 
+
+# GCC 16.2.x ICEs on a subset of these vendored QGIS TUs at -O2/-O3 (and at
+# least one even at -O1). The whole vendored library builds at -O0 instead of
+# per-file whack-a-mole: it is not on a measured hot path for the platform's
+# own operators/algorithms (which keep full optimization), and -O0 compiles
+# faster. Remove when the toolchain is fixed.
+target_compile_options(qgis_core PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O0>)

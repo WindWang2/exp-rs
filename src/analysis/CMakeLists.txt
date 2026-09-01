@@ -37,3 +37,7 @@ add_subdirectory(classification)
 
 # Phase 10B — OBIA segmentation data model + feature extraction
 add_subdirectory(segmentation)
+
+
+# GCC 16.2.x ICE workaround — see the matching block in src/core/CMakeLists.txt.
+target_compile_options(qgis_analysis PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O0>)

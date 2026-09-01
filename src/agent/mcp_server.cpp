@@ -1,4 +1,6 @@
 #include "mcp_server.h"
+
+#include "workflow/workflow_run_coordinator.h"
 #include "core/sicnu_logging.h"
 #include "env_flag.h"
 
@@ -18,7 +20,10 @@
 #include "agent/tool_catalog/agent_tool.h"
 #include "agent/spatial_tools/spatial_tool.h"
 
+#include <optional>
 #include <iostream>
+#include <limits>
+#include <vector>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -288,11 +293,13 @@ struct MetaToolDef {
 
 const MetaToolDef kMetaTools[] = {
     { "list_algorithms",
-      "List all available remote sensing and GIS processing algorithms (canonical "
+      "List available remote sensing and GIS processing algorithms (canonical "
       "catalog: rs: operators + provider algorithms). Compact discovery layer — "
-      "id, name, group, tags, outputs, memory policy. Use get_algorithm_schema "
-      "for the full parameter schema of a specific algorithm.",
-      {} },
+      "id, name, group, tags, outputs, memory policy. Paginated: pass "
+      "cursor=nextCursor until it is -1. Use get_algorithm_schema for the full "
+      "parameter schema of a specific algorithm.",
+      { { "limit", "integer", "Page size (1-500, default 50).", false },
+        { "cursor", "integer", "Offset from the previous page's nextCursor (default 0).", false } } },
     { "search_algorithms",
       "Search/filter the canonical algorithm catalog by group, tag, purpose text, "
       "input or output type, or large-raster safety. Returns the same compact "
@@ -301,7 +308,9 @@ const MetaToolDef kMetaTools[] = {
         { "group", "string", "Exact group filter (e.g. 'spectral', 'change detection'). Optional.", false },
         { "input_type", "string", "Input data type filter (Raster/Vector/Table/Numeric/Integer/String/Boolean/Json). Optional.", false },
         { "output_type", "string", "Output data type filter (Raster/Vector/Table/Numeric/Integer/String/Boolean/Json). Optional.", false },
-        { "large_raster_safe", "boolean", "When true, only streaming/multipass operators. Optional.", false } } },
+        { "large_raster_safe", "boolean", "When true, only streaming/multipass operators. Optional.", false },
+        { "limit", "integer", "Page size (1-500, default 50).", false },
+        { "cursor", "integer", "Offset from the previous page's nextCursor (default 0).", false } } },
     { "get_algorithm_schema",
       "Get the detailed input parameter JSON Schema, real output ports, and agent "
       "metadata for a specific algorithm.",
@@ -325,8 +334,10 @@ const MetaToolDef kMetaTools[] = {
       "Cancel an actively running algorithm execution.",
       { { "execution_id", "string", "The execution ID of the run to cancel", true } } },
     { "list_operators",
-      "List all registered RSOperator algorithms (legacy Agent surface: rs:/opencv:/gdal:/otb:).",
-      {} },
+      "List registered RSOperator algorithms (legacy Agent surface: rs:/opencv:/gdal:/otb:). "
+      "Paginated: pass cursor=nextCursor until it is -1.",
+      { { "limit", "integer", "Page size (1-500, default 50).", false },
+        { "cursor", "integer", "Offset from the previous page's nextCursor (default 0).", false } } },
     { "get_operator_schema",
       "Get JSON Schema and metadata for an RSOperator (e.g. 'rs:spectral_index').",
       { { "operator_id", "string", "Operator id, e.g. 'rs:spectral_index'", true } } },
@@ -459,7 +470,27 @@ void attachCatalogEntry( QVariantMap &algMap, const QString &id )
         return true;
     }();
     Q_UNUSED( kMetaLoaded )
-    const auto entry = sicnu::processing::AlgorithmMetaStore::instance().find( id.toStdString() );
+    // #707: the descriptor is the single source of truth — resolve the
+    // sidecar against it so contradicting capability fields (the historical
+    // "sidecar says no GPU" drift) cannot reach agents. Drift is logged.
+    const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(
+        id.toStdString() );
+    const auto &store = sicnu::processing::AlgorithmMetaStore::instance();
+    std::optional<sicnu::processing::AlgorithmMetaEntry> entry;
+    if ( adapter )
+    {
+        std::vector<std::string> drift;
+        entry = store.resolveAgainstDescriptor( id.toStdString(),
+                                                adapter->descriptor().agentMetadata, &drift );
+        for ( const auto &d : drift )
+        {
+            qWarning() << "[mcp] algorithm capability drift resolved:" << id << QString::fromStdString( d );
+        }
+    }
+    else
+    {
+        entry = store.find( id.toStdString() );
+    }
     if ( entry )
         algMap[QStringLiteral("catalog")] = sicnu::processing::jsonValueToVariant( entry->toJson() );
 }
@@ -510,20 +541,30 @@ void StdinReader::requestStop()
 
 void StdinReader::run()
 {
-    constexpr size_t kMaxMcpLine = 4 * 1024 * 1024;
-    std::string stdLine;
-    while (!m_stopRequested && std::getline(std::cin, stdLine))
+    // #701: std::getline buffered the WHOLE line before the size check, so a
+    // hostile/garbled peer could make the process buffer gigabytes before the
+    // 4 MiB guard ever ran. istream::getline into a fixed buffer caps the
+    // allocation up front; an oversized line sets failbit and is discarded
+    // without ever being stored.
+    constexpr std::streamsize kMaxMcpLine = 4 * 1024 * 1024;
+    std::vector<char> buffer( static_cast<size_t>( kMaxMcpLine ) + 1, '\0' );
+    while ( !m_stopRequested )
     {
-        if (stdLine.size() > kMaxMcpLine)
+        std::cin.getline( buffer.data(), kMaxMcpLine + 1 );
+        if ( std::cin.eof() )
+            break;
+        if ( std::cin.fail() )
         {
-            // Oversized line: report parse error without allocating huge QString
-            emit lineRead(QStringLiteral("__MCP_LINE_TOO_LONG__"));
+            std::cin.clear();
+            std::cin.ignore( std::numeric_limits<std::streamsize>::max(), '\n' );
+            emit lineRead( QStringLiteral( "__MCP_LINE_TOO_LONG__" ) );
             continue;
         }
-        QString line = QString::fromStdString(stdLine).trimmed();
-        if (!line.isEmpty())
+        // JSON-RPC frames are UTF-8.
+        QString line = QString::fromUtf8( buffer.data() ).trimmed();
+        if ( !line.isEmpty() )
         {
-            emit lineRead(line);
+            emit lineRead( line );
         }
     }
 }
@@ -744,7 +785,9 @@ void McpServer::handleRequest(const QVariantMap &request)
             QVariantMap resultData;
             if (toolName == QStringLiteral("list_algorithms"))
             {
-                resultData = handleListAlgorithms();
+                resultData = handleListAlgorithms(
+                    qBound(1, arguments.value(QStringLiteral("limit")).toInt(), 500),
+                    qMax(0, arguments.value(QStringLiteral("cursor")).toInt()));
             }
             else if (toolName == QStringLiteral("search_algorithms"))
             {
@@ -753,7 +796,9 @@ void McpServer::handleRequest(const QVariantMap &request)
                     arguments.value(QStringLiteral("group")).toString(),
                     arguments.value(QStringLiteral("input_type")).toString(),
                     arguments.value(QStringLiteral("output_type")).toString(),
-                    arguments.value(QStringLiteral("large_raster_safe")).toBool());
+                    arguments.value(QStringLiteral("large_raster_safe")).toBool(),
+                    qBound(1, arguments.value(QStringLiteral("limit")).toInt(), 500),
+                    qMax(0, arguments.value(QStringLiteral("cursor")).toInt()));
             }
             else if (toolName == QStringLiteral("get_algorithm_schema"))
             {
@@ -770,7 +815,9 @@ void McpServer::handleRequest(const QVariantMap &request)
             }
             else if (toolName == QStringLiteral("list_operators"))
             {
-                resultData = handleListOperators();
+                resultData = handleListOperators(
+                    qBound(1, arguments.value(QStringLiteral("limit")).toInt(), 500),
+                    qMax(0, arguments.value(QStringLiteral("cursor")).toInt()));
             }
             else if (toolName == QStringLiteral("get_operator_schema"))
             {
@@ -1048,7 +1095,7 @@ void McpServer::sendNotification(const QString &method, const QVariantMap &param
 }
 
 // MCP Handlers implementation
-QVariantMap McpServer::handleListAlgorithms()
+QVariantMap McpServer::handleListAlgorithms(int limit, int cursor)
 {
     QVariantMap result;
     QVariantList algList;
@@ -1160,16 +1207,38 @@ QVariantMap McpServer::handleListAlgorithms()
         }
     }
 
-    result[QStringLiteral("algorithms")] = algList;
-    result[QStringLiteral("count")] = static_cast<int>(algList.size());
+    // #701: the catalog runs to hundreds of entries; unbounded responses
+    // flooded agent contexts. Mirror list_tools pagination (limit/cursor,
+    // nextCursor empty on the last page). limit <= 0 returns everything
+    // (internal callers like search).
+    const int totalCount = static_cast<int>(algList.size());
+    if (limit > 0)
+    {
+        const int start = qMax(0, cursor);
+        const int end = qMin(totalCount, start + limit);
+        QVariantList page;
+        for (int i = start; i < end; ++i)
+            page.append(algList.at(i));
+        result[QStringLiteral("algorithms")] = page;
+        result[QStringLiteral("count")] = static_cast<int>(page.size());
+        result[QStringLiteral("total")] = totalCount;
+        result[QStringLiteral("limit")] = limit;
+        result[QStringLiteral("cursor")] = start;
+        result[QStringLiteral("nextCursor")] = (end < totalCount) ? end : QVariant(-1);
+    }
+    else
+    {
+        result[QStringLiteral("algorithms")] = algList;
+        result[QStringLiteral("count")] = totalCount;
+    }
     return result;
 }
 
 QVariantMap McpServer::handleSearchAlgorithms(const QString &query, const QString &group,
                                               const QString &inputType, const QString &outputType,
-                                              bool largeRasterSafeOnly)
+                                              bool largeRasterSafeOnly, int limit, int cursor)
 {
-    QVariantMap result = handleListAlgorithms();
+    QVariantMap result = handleListAlgorithms(0, 0); // unfiltered fetch; paginate below
     const QVariantList all = result.value(QStringLiteral("algorithms")).toList();
     QVariantList filtered;
 
@@ -1232,13 +1301,32 @@ QVariantMap McpServer::handleSearchAlgorithms(const QString &query, const QStrin
         filtered.append(entryVar);
     }
 
+    // #701: paginated like list_algorithms (search hits can be large too).
     QVariantMap out;
-    out[QStringLiteral("algorithms")] = filtered;
-    out[QStringLiteral("count")] = static_cast<int>(filtered.size());
+    const int totalCount = static_cast<int>(filtered.size());
+    if (limit > 0)
+    {
+        const int start = qMax(0, cursor);
+        const int end = qMin(totalCount, start + limit);
+        QVariantList page;
+        for (int i = start; i < end; ++i)
+            page.append(filtered.at(i));
+        out[QStringLiteral("algorithms")] = page;
+        out[QStringLiteral("count")] = static_cast<int>(page.size());
+        out[QStringLiteral("total")] = totalCount;
+        out[QStringLiteral("limit")] = limit;
+        out[QStringLiteral("cursor")] = start;
+        out[QStringLiteral("nextCursor")] = (end < totalCount) ? end : QVariant(-1);
+    }
+    else
+    {
+        out[QStringLiteral("algorithms")] = filtered;
+        out[QStringLiteral("count")] = totalCount;
+    }
     return out;
 }
 
-QVariantMap McpServer::handleListOperators()
+QVariantMap McpServer::handleListOperators(int limit, int cursor)
 {
     QVariantMap result;
     QVariantList opList;
@@ -1265,7 +1353,25 @@ QVariantMap McpServer::handleListOperators()
     }
 
     result[QStringLiteral("operators")] = opList;
-    result[QStringLiteral("count")] = static_cast<int>(opList.size());
+    const int totalCount = static_cast<int>(opList.size());
+    if (limit > 0)
+    {
+        const int start = qMax(0, cursor);
+        const int end = qMin(totalCount, start + limit);
+        QVariantList page;
+        for (int i = start; i < end; ++i)
+            page.append(opList.at(i));
+        result[QStringLiteral("operators")] = page;
+        result[QStringLiteral("count")] = static_cast<int>(page.size());
+        result[QStringLiteral("total")] = totalCount;
+        result[QStringLiteral("limit")] = limit;
+        result[QStringLiteral("cursor")] = start;
+        result[QStringLiteral("nextCursor")] = (end < totalCount) ? end : QVariant(-1);
+    }
+    else
+    {
+        result[QStringLiteral("count")] = totalCount;
+    }
     return result;
 }
 
@@ -1725,7 +1831,17 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
         QgsVectorLayer *vector = qobject_cast<QgsVectorLayer *>(layer);
         if (vector)
         {
-            result[QStringLiteral("feature_count")] = static_cast<qlonglong>(vector->featureCount());
+            // #701: featureCount() can force a full provider-side scan on
+            // layers whose count is not cached; surface the provider count
+            // only when it is cheap/known, "unknown" otherwise (mirrors
+            // vector_inspect_tool).
+            const qlonglong providerCount = vector->dataProvider()
+                                                 ? static_cast<qlonglong>( vector->dataProvider()->featureCount() )
+                                                 : -1;
+            if ( providerCount >= 0 )
+                result[QStringLiteral("feature_count")] = providerCount;
+            else
+                result[QStringLiteral("feature_count")] = QStringLiteral("unknown");
 
             QString geomType = QStringLiteral("Unknown");
             switch (vector->geometryType())
@@ -2046,7 +2162,9 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
 
     const bool autoLoad = arguments.value(QStringLiteral("auto_load")).toBool();
 
-    const long pipelineId = sicnu::TaskCenter::instance().submitPipelineJson(
+    // Tracked submission (#697): MCP workflows persist checkpoints per step
+    // transition and become resumable after a crash instead of vanishing.
+    const long pipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipelineJson(
         pipelineJson.toStdString(), autoLoad);
     if (pipelineId < 0)
         throw std::runtime_error(
