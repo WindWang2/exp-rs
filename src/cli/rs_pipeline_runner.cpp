@@ -54,6 +54,75 @@ bool cliIsInterrupted()
 
 namespace {
 
+// --- Input lineage resolution (#698) ---------------------------------------
+// Input-side counterpart of TaskCenter's findOutputPathInParams: collects the
+// step's "input"-like parameter values that are existing file paths, then
+// resolves them against the DataManager catalog into (AssetId, revision)
+// lineage records. Paths that do not resolve are reported in unresolvedPaths
+// so provenance records them instead of dropping them silently. (Kept local to
+// this TU, mirroring how providerKeyFor-style helpers are shared by copy
+// across the commit pipeline.)
+
+QStringList findPipelineInputPaths( const QVariantMap &params )
+{
+  QStringList paths;
+  for ( auto it = params.begin(); it != params.end(); ++it )
+  {
+    if ( !it.key().contains( QStringLiteral( "input" ), Qt::CaseInsensitive ) )
+      continue;
+
+    const QVariant value = it.value();
+    QStringList candidates;
+    if ( value.userType() == qMetaTypeId<QStringList>() )
+      candidates = value.toStringList();
+    else
+      candidates.append( value.toString() );
+
+    for ( const QString &candidate : candidates )
+    {
+      const QString trimmed = candidate.trimmed();
+      if ( trimmed.isEmpty() || trimmed.startsWith( QLatin1Char( '$' ) ) )
+        continue;
+      if ( !paths.contains( trimmed ) && QFileInfo::exists( trimmed ) )
+        paths.append( trimmed );
+    }
+  }
+  return paths;
+}
+
+struct PipelineInputLineage
+{
+  QVector<sicnu::data::DerivationInput> inputs;
+  QStringList unresolvedPaths;
+};
+
+PipelineInputLineage resolvePipelineInputLineage( sicnu::data::DataManager *dataManager,
+                                                  const QVariantMap &params )
+{
+  PipelineInputLineage lineage;
+  const QStringList paths = findPipelineInputPaths( params );
+  if ( !dataManager )
+  {
+    // No catalog wired: nothing can resolve. Keep every path visible.
+    lineage.unresolvedPaths = paths;
+    return lineage;
+  }
+  for ( const QString &path : paths )
+  {
+    const auto snapshot = dataManager->findByPath( path );
+    if ( !snapshot )
+    {
+      lineage.unresolvedPaths.append( path );
+      continue;
+    }
+    sicnu::data::DerivationInput input;
+    input.assetId = snapshot->id();
+    input.revision = snapshot->revision();
+    lineage.inputs.append( input );
+  }
+  return lineage;
+}
+
 std::string expandEnvironmentPlaceholders( const std::string &input,
                                            const std::unordered_set<std::string> &knownStepIds )
 {
@@ -653,11 +722,18 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
       continue;
     }
 
-    // Provenance is attached after successful registration (ADR 0023).
+    // Provenance is attached after successful registration (ADR 0023). The
+    // step's "input"-like parameter paths are resolved against the catalog so
+    // the record carries real derivedFrom edges (#698); paths that do not
+    // resolve are recorded in unresolvedInputPaths, never dropped silently.
+    const PipelineInputLineage lineage =
+      resolvePipelineInputLineage( m_dataManager, task.parameterMap );
     const sicnu::data::DerivationRecord derivation =
       sicnu::data::makeTaskDerivation( task.algorithmId,
                                        QJsonObject::fromVariantMap( task.parameterMap ),
-                                       QString::number( taskId ) );
+                                       QString::number( taskId ),
+                                       lineage.inputs,
+                                       lineage.unresolvedPaths );
     m_dataManager->attachDerivationRecord( registered.assetId, derivation );
   }
 }

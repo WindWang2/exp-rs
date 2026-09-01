@@ -7,6 +7,7 @@
 
 #include <QCryptographicHash>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QPointer>
 #include <QTemporaryDir>
@@ -170,7 +171,12 @@ struct DataManager::Impl
     QVector<LeaseImpact> impacts;
     for ( const LeaseRecord &lease : leases )
     {
-      if ( lease.control->assetId == id )
+      // Only ACTIVE leases count (#703): a cross-thread AssetLease::release()
+      // neutralizes the control immediately and queues the record removal for
+      // the manager's thread. Until that queued call runs, the dead record
+      // must not block unload/reap (mirroring the Edit-lease conflict check,
+      // which already filtered on active).
+      if ( lease.control->assetId == id && lease.control->active )
       {
         impacts.append( LeaseImpact{ LeaseRef{ lease.control->assetId,
                                                lease.control->token,
@@ -261,10 +267,43 @@ RegisterResult DataManager::registerSource( const RegisterRequest &request )
     normalizedDescriptor.providerKey = source.canonicalProviderKey;
 
   const SourceKey sourceKey = normalizedDescriptor.sourceKey();
-  for ( const Impl::AssetRecord &record : m_impl->records )
+  for ( Impl::AssetRecord &record : m_impl->records )
   {
-    if ( record.sourceKey == sourceKey )
+    if ( record.sourceKey != sourceKey )
+      continue;
+
+    // Dedup hit. The bytes behind the stable path may still have changed:
+    // OutputCommitter's publish-then-swap replaces them, and a source file can
+    // be mutated externally. Reuse silently would leave the snapshot (and any
+    // displayed layer) stale while the content moved under it (#687).
+    const bool structureDiffers = record.snapshot.structure() != source.structure;
+    if ( !request.notifyUpdateOnReuse && !structureDiffers )
       return RegisterResult{ record.snapshot.id(), true, {} };
+
+    // Treat the asset as updated: refresh the snapshot from the fresh
+    // resolution, advance the revision one step (mirroring relocate), and
+    // emit assetChanged so displays reload. The descriptor is preserved —
+    // the re-registration carries a bare provider/path descriptor and must
+    // not drop the stored dataOptions (which also key the identity).
+    const AssetId existingId = record.snapshot.id();
+    AssetSnapshot updated{ existingId,
+                           record.snapshot.revision().next(),
+                           record.snapshot.source(),
+                           source.kind,
+                           source.state,
+                           record.snapshot.capabilities() | source.capabilities
+                             | request.additionalCapabilities,
+                           record.snapshot.persistence(),
+                           source.storageKind,
+                           source.displayName,
+                           source.structure,
+                           record.snapshot.acquisitionTime(),
+                           record.snapshot.parentCollectionId() };
+    record.snapshot = std::move( updated );
+    m_impl->catalogGeneration++;
+
+    emit assetChanged( existingId );
+    return RegisterResult{ existingId, true, resolved.diagnostics() };
   }
 
   const AssetId id = AssetId::generate();
@@ -521,6 +560,24 @@ QVector<AssetSnapshot> DataManager::assets( const AssetQuery &query ) const
   return snapshots;
 }
 
+std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) const
+{
+  if ( path.trimmed().isEmpty() )
+    return std::nullopt;
+
+  const QString absolute = QFileInfo( path ).absoluteFilePath();
+  for ( const Impl::AssetRecord &record : m_impl->records )
+  {
+    const QString &canonical = record.snapshot.source().canonicalSource;
+    if ( canonical == path )
+      return record.snapshot;
+    // A relative or differently-spelled path still resolves to the same file.
+    if ( !absolute.isEmpty() && QFileInfo( canonical ).absoluteFilePath() == absolute )
+      return record.snapshot;
+  }
+  return std::nullopt;
+}
+
 quint64 DataManager::catalogGeneration() const
 {
   return m_impl->catalogGeneration;
@@ -580,7 +637,15 @@ Result<void> DataManager::attachDerivationRecord( AssetId id,
 
   DerivationRecord stamped = derivation;
   stamped.outputAssetId = id;
+  // Replacing an existing derivation (#687): a re-commit over the same stable
+  // path rewrites provenance under an unchanged asset identity. Emit one
+  // assetChanged so observers refresh, mirroring the revision bump emitted by
+  // the registerSource update path. A first attach stays silent — registration
+  // already emitted assetAdded for the fresh asset.
+  const bool replaced = it->derivation.has_value();
   it->derivation = stamped;
+  if ( replaced )
+    emit assetChanged( id );
   return Result<void>::success();
 }
 
@@ -736,7 +801,8 @@ int DataManager::leaseCount( AssetId id ) const
   return static_cast<int>(
     std::count_if( m_impl->leases.begin(), m_impl->leases.end(),
                    [&]( const Impl::LeaseRecord &lease ) {
-                     return lease.control->assetId == id;
+                     // Active leases only (#703): see Impl::leaseImpacts.
+                     return lease.control->assetId == id && lease.control->active;
                    } ) );
 }
 
@@ -745,7 +811,8 @@ QVector<LeaseRef> DataManager::leases( AssetId id ) const
   QVector<LeaseRef> result;
   for ( const Impl::LeaseRecord &lease : m_impl->leases )
   {
-    if ( lease.control->assetId == id )
+    // Active leases only (#703): see Impl::leaseImpacts.
+    if ( lease.control->assetId == id && lease.control->active )
     {
       result.append(
         LeaseRef{ lease.control->assetId, lease.control->token, lease.control->kind } );
@@ -1739,6 +1806,12 @@ Result<void> DataManager::addChildToCollection( CollectionId collectionId,
                   QStringLiteral( "The child asset already belongs to another collection" ),
                   DiagnosticSeverity::Error } );
   }
+
+  // Duplicate child (#703): the serializer read-back re-adds persisted <child>
+  // entries verbatim, so a duplicated persisted entry would append twice.
+  // Re-adding a child already in THIS collection is a successful no-op.
+  if ( collectionIt->childAssetIds.contains( childAssetId ) )
+    return Result<void>::success();
 
   collectionIt->childAssetIds.append( childAssetId );
   assetIt->snapshot.m_parentCollectionId = collectionId;

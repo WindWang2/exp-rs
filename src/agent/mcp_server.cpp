@@ -86,6 +86,65 @@ QString mcpDataTypeToString( Qgis::DataType type ) {
     }
 }
 
+// DataManager-backed catalog helpers (#688): the catalog is the primary
+// source for list_layers/describe_dataset; QgsProject only enriches with
+// display state. Headless sessions hold no QgsProject layers at all.
+QString mcpAssetKindLabel( sicnu::data::AssetKind kind )
+{
+    switch ( kind )
+    {
+        case sicnu::data::AssetKind::Raster: return QStringLiteral("raster");
+        case sicnu::data::AssetKind::Vector: return QStringLiteral("vector");
+        case sicnu::data::AssetKind::RemoteMap: return QStringLiteral("remote_map");
+        case sicnu::data::AssetKind::VirtualRaster: return QStringLiteral("virtual_raster");
+    }
+    Q_UNREACHABLE();
+    return QString();
+}
+
+QString mcpCrsAuthidFromWkt( const QString &wkt )
+{
+    if ( wkt.trimmed().isEmpty() )
+        return QString();
+    return QgsCoordinateReferenceSystem::fromWkt( wkt ).authid();
+}
+
+bool mcpSameSourcePath( const QString &a, const QString &b )
+{
+    if ( a == b )
+        return true;
+    const QString absolute = QFileInfo( a ).absoluteFilePath();
+    return !absolute.isEmpty() && absolute == QFileInfo( b ).absoluteFilePath();
+}
+
+/// Resolves a describe target (asset id, canonical path, or display name) to
+/// a catalog asset; nullopt lets the caller fall back to QgsProject layers.
+std::optional<sicnu::data::AssetSnapshot> mcpResolveCatalogAsset(
+    const sicnu::data::DataManager *dataManager, const QString &target )
+{
+    if ( !dataManager )
+        return std::nullopt;
+    const QString trimmed = target.trimmed();
+    if ( trimmed.isEmpty() )
+        return std::nullopt;
+    if ( const auto id = sicnu::data::AssetId::fromString( trimmed ) )
+    {
+        if ( const auto snapshot = dataManager->asset( *id ) )
+            return snapshot;
+    }
+    for ( const auto &snapshot : dataManager->assets() )
+    {
+        if ( snapshot.source().canonicalSource == trimmed )
+            return snapshot;
+    }
+    for ( const auto &snapshot : dataManager->assets() )
+    {
+        if ( snapshot.displayName() == trimmed )
+            return snapshot;
+    }
+    return std::nullopt;
+}
+
 bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
 {
     if (isCustomTools)
@@ -1437,20 +1496,86 @@ QVariantMap McpServer::handleListLayers()
     QVariantMap result;
     QVariantList layerList;
 
-    QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
-    for (auto it = layers.begin(); it != layers.end(); ++it)
+    // Displayed-layer state, resolved up front (secondary source): path -> Qgs
+    // layer id. QgsProject::mapLayers() is empty headless and never contains
+    // committed-but-not-displayed assets (#688).
+    QMap<QString, QString> displayedLayerIdByPath;
+    if (QgsProject::instance())
     {
-        QgsMapLayer *layer = it.value();
-        if (!layer)
-            continue;
+        const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
+        for (auto it = layers.begin(); it != layers.end(); ++it)
+        {
+            QgsMapLayer *layer = it.value();
+            if (layer)
+                displayedLayerIdByPath.insert(layer->source(), layer->id());
+        }
+    }
 
-        QVariantMap layerMap;
-        layerMap[QStringLiteral("id")] = layer->id();
-        layerMap[QStringLiteral("name")] = layer->name();
-        layerMap[QStringLiteral("type")] = (layer->type() == Qgis::LayerType::Raster) ? QStringLiteral("raster") : QStringLiteral("vector");
-        layerMap[QStringLiteral("source")] = layer->source();
+    // Primary source: the DataManager catalog.
+    if (m_dataManager)
+    {
+        for (const auto &snapshot : m_dataManager->assets())
+        {
+            QVariantMap layerMap;
+            const QString assetId = snapshot.id().toString();
+            layerMap[QStringLiteral("id")] = assetId;
+            layerMap[QStringLiteral("assetId")] = assetId;
+            layerMap[QStringLiteral("revision")] = qulonglong(snapshot.revision().value());
+            layerMap[QStringLiteral("name")] = snapshot.displayName();
+            const bool isVector = snapshot.kind() == sicnu::data::AssetKind::Vector;
+            layerMap[QStringLiteral("type")] = isVector ? QStringLiteral("vector") : QStringLiteral("raster");
+            layerMap[QStringLiteral("kind")] = mcpAssetKindLabel(snapshot.kind());
+            layerMap[QStringLiteral("path")] = snapshot.source().canonicalSource;
+            layerMap[QStringLiteral("source")] = snapshot.source().canonicalSource;
+            if (const auto *raster = std::get_if<sicnu::data::RasterStructure>(&snapshot.structure());
+                raster && raster->bandCount >= 0)
+            {
+                layerMap[QStringLiteral("bandCount")] = raster->bandCount;
+                layerMap[QStringLiteral("crs")] = mcpCrsAuthidFromWkt(raster->crsWkt);
+            }
+            const QString layerId = displayedLayerIdByPath.value(snapshot.source().canonicalSource);
+            if (!layerId.isEmpty())
+            {
+                layerMap[QStringLiteral("displayed")] = true;
+                layerMap[QStringLiteral("layerId")] = layerId;
+            }
+            layerList.append(layerMap);
+        }
+    }
 
-        layerList.append(layerMap);
+    // Secondary enrichment: displayed layers absent from the catalog keep the
+    // original entry shape (a pure-Qgs project still lists layers).
+    if (QgsProject::instance())
+    {
+        QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
+        for (auto it = layers.begin(); it != layers.end(); ++it)
+        {
+            QgsMapLayer *layer = it.value();
+            if (!layer)
+                continue;
+            bool inCatalog = false;
+            if (m_dataManager)
+            {
+                for (const auto &snapshot : m_dataManager->assets())
+                {
+                    if (mcpSameSourcePath(snapshot.source().canonicalSource, layer->source()))
+                    {
+                        inCatalog = true;
+                        break;
+                    }
+                }
+            }
+            if (inCatalog)
+                continue;
+
+            QVariantMap layerMap;
+            layerMap[QStringLiteral("id")] = layer->id();
+            layerMap[QStringLiteral("name")] = layer->name();
+            layerMap[QStringLiteral("type")] = (layer->type() == Qgis::LayerType::Raster) ? QStringLiteral("raster") : QStringLiteral("vector");
+            layerMap[QStringLiteral("source")] = layer->source();
+            layerMap[QStringLiteral("displayed")] = true;
+            layerList.append(layerMap);
+        }
     }
 
     result[QStringLiteral("layers")] = layerList;
@@ -1459,6 +1584,77 @@ QVariantMap McpServer::handleListLayers()
 
 QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
 {
+    // Primary source: the DataManager catalog — an asset id, canonical path,
+    // or display name. Covers headless sessions and every committed asset,
+    // displayed or not (#688).
+    if (const auto snapshot = mcpResolveCatalogAsset(m_dataManager, layerId))
+    {
+        QVariantMap result;
+        const QString assetIdText = snapshot->id().toString();
+        result[QStringLiteral("id")] = assetIdText;
+        result[QStringLiteral("assetId")] = assetIdText;
+        result[QStringLiteral("revision")] = qulonglong(snapshot->revision().value());
+        result[QStringLiteral("name")] = snapshot->displayName();
+        result[QStringLiteral("kind")] = mcpAssetKindLabel(snapshot->kind());
+        const bool isVector = snapshot->kind() == sicnu::data::AssetKind::Vector;
+        result[QStringLiteral("type")] = isVector ? QStringLiteral("vector") : QStringLiteral("raster");
+        result[QStringLiteral("path")] = snapshot->source().canonicalSource;
+        result[QStringLiteral("source")] = snapshot->source().canonicalSource;
+
+        if (const auto *raster = std::get_if<sicnu::data::RasterStructure>(&snapshot->structure()))
+        {
+            result[QStringLiteral("crs")] = mcpCrsAuthidFromWkt(raster->crsWkt);
+            result[QStringLiteral("width")] = raster->width;
+            result[QStringLiteral("height")] = raster->height;
+            result[QStringLiteral("band_count")] = raster->bandCount;
+
+            if (raster->extent.valid)
+            {
+                result[QStringLiteral("extent")] = QVariantMap{
+                    {QStringLiteral("xmin"), raster->extent.minimumX},
+                    {QStringLiteral("ymin"), raster->extent.minimumY},
+                    {QStringLiteral("xmax"), raster->extent.maximumX},
+                    {QStringLiteral("ymax"), raster->extent.maximumY}
+                };
+            }
+
+            QVariantList bands;
+            for (int i = 0; i < raster->bands.size(); ++i)
+            {
+                const sicnu::data::RasterBandStructure &band = raster->bands.at(i);
+                QVariantMap bandMap;
+                bandMap[QStringLiteral("index")] = band.number > 0 ? band.number : i + 1;
+                bandMap[QStringLiteral("dataType")] = band.dataType;
+                bandMap[QStringLiteral("color_interpretation")] = band.colorInterpretation;
+                bandMap[QStringLiteral("has_nodata")] = band.noDataValue.has_value();
+                if (band.noDataValue)
+                    bandMap[QStringLiteral("nodata_value")] = *band.noDataValue;
+                bandMap[QStringLiteral("role")] = sicnu::data::bandRoleToString(band.role);
+                bands.append(bandMap);
+            }
+            result[QStringLiteral("bands")] = bands;
+        }
+        else if (const auto *vector = std::get_if<sicnu::data::VectorStructure>(&snapshot->structure()))
+        {
+            result[QStringLiteral("layer_count")] = vector->layerCount;
+            if (!vector->layers.isEmpty())
+                result[QStringLiteral("crs")] = mcpCrsAuthidFromWkt(vector->layers.first().crsWkt);
+            QVariantList layers;
+            for (const sicnu::data::VectorLayerStructure &layer : vector->layers)
+            {
+                QVariantMap layerMap;
+                layerMap[QStringLiteral("name")] = layer.name;
+                layerMap[QStringLiteral("feature_count")] = static_cast<qlonglong>(layer.featureCount);
+                layerMap[QStringLiteral("geometry_type")] = layer.geometryType;
+                layerMap[QStringLiteral("crs")] = mcpCrsAuthidFromWkt(layer.crsWkt);
+                layers.append(layerMap);
+            }
+            result[QStringLiteral("layers")] = layers;
+        }
+        return result;
+    }
+
+    // Secondary source: QgsProject displayed layers.
     QgsMapLayer *layer = QgsProject::instance()->mapLayer(layerId);
     if (!layer)
     {

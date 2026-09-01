@@ -4,6 +4,7 @@
 #include <thread>
 #include <type_traits>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryFile>
 
 #include "data/asset_types.h"
@@ -47,6 +48,11 @@ using sicnu::data::internal::SourceProviderRegistry;
 namespace
 {
 
+/// Width reported by the "memory-drift-raster" provider. Tests mutate this to
+/// simulate the bytes behind an already-registered source changing on disk
+/// (same SourceKey, new structure) for the #687 re-commit regression tests.
+int g_driftRasterWidth = 100;
+
 class InMemorySourceProvider final : public SourceProvider
 {
   public:
@@ -57,6 +63,23 @@ class InMemorySourceProvider final : public SourceProvider
 
     Result<ResolvedSource> resolve( const SourceDescriptor &source ) const override
     {
+      if ( source.providerKey == QStringLiteral( "memory-drift-raster" ) )
+      {
+        RasterStructure structure;
+        structure.driverName = QStringLiteral( "GTiff" );
+        structure.width = g_driftRasterWidth;
+        structure.height = 50;
+        structure.bandCount = 3;
+        return Result<ResolvedSource>::success(
+          ResolvedSource{ AssetKind::Raster,
+                          AssetState::Ready,
+                          AssetCapability::Renderable | AssetCapability::ReadablePixels,
+                          StorageKind::Memory,
+                          QStringLiteral( "Drift raster" ),
+                          QString(),
+                          QString(),
+                          structure } );
+      }
       if ( source.providerKey == QStringLiteral( "memory-error" ) )
       {
         return Result<ResolvedSource>::failure(
@@ -1070,4 +1093,173 @@ TEST_CASE( "Lineage queries ignore unknown asset ids", "[data_manager][provenanc
   const auto manager = makeDataManager();
   CHECK( manager->derivedFrom( AssetId::generate() ).isEmpty() );
   CHECK( manager->derivedOutputsOf( AssetId::generate() ).isEmpty() );
+}
+
+TEST_CASE( "findByPath resolves an asset by canonical and absolute path",
+           "[data_manager][lookup]" )
+{
+  const auto manager = makeDataManager();
+
+  RegisterRequest request;
+  request.source = memoryRaster( QStringLiteral( "scene-a" ) );
+  const auto registered = manager->registerSource( request );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+
+  const auto byCanonical = manager->findByPath( QStringLiteral( "scene-a" ) );
+  REQUIRE( byCanonical.has_value() );
+  CHECK( byCanonical->id() == registered.assetId );
+
+  const QFileInfo info( QStringLiteral( "scene-a" ) );
+  const auto byAbsolute = manager->findByPath( info.absoluteFilePath() );
+  REQUIRE( byAbsolute.has_value() );
+  CHECK( byAbsolute->id() == registered.assetId );
+
+  CHECK_FALSE( manager->findByPath( QStringLiteral( "unregistered" ) ).has_value() );
+  CHECK_FALSE( manager->findByPath( QString() ).has_value() );
+}
+
+TEST_CASE( "Re-registering an updated source with the update flag advances the "
+           "revision and emits one change event",
+           "[data_manager][recommit]" )
+{
+  const auto manager = makeDataManager();
+
+  RegisterRequest firstRequest;
+  firstRequest.source = memorySource( QStringLiteral( "memory-structured-raster" ),
+                                      QStringLiteral( "scene" ) );
+  const auto first = manager->registerSource( firstRequest );
+  REQUIRE_FALSE( first.assetId.isNull() );
+  REQUIRE( manager->asset( first.assetId )->revision() == AssetRevision::initial() );
+
+  int changeEvents = 0;
+  AssetId changedId;
+  QObject::connect( manager.get(), &DataManager::assetChanged,
+                    [&]( AssetId emitted ) { ++changeEvents; changedId = emitted; } );
+
+  // Re-commit over the same stable path (#687): the bytes were replaced under
+  // the unchanged identity, so the caller flags the update. No new asset, no
+  // assetAdded — one revision step and one assetChanged instead.
+  RegisterRequest reCommitRequest = firstRequest;
+  reCommitRequest.notifyUpdateOnReuse = true;
+  const auto reCommit = manager->registerSource( reCommitRequest );
+  CHECK( reCommit.assetId == first.assetId );
+  CHECK( reCommit.reusedExisting );
+  CHECK( manager->assets().size() == 1 );
+  CHECK( manager->asset( first.assetId )->revision() == AssetRevision::initial().next() );
+  REQUIRE( changeEvents == 1 );
+  CHECK( changedId == first.assetId );
+
+  // A plain re-registration after the bump does not keep bumping.
+  const auto plainReuse = manager->registerSource( firstRequest );
+  CHECK( plainReuse.assetId == first.assetId );
+  CHECK( plainReuse.reusedExisting );
+  CHECK( changeEvents == 1 );
+  CHECK( manager->asset( first.assetId )->revision() == AssetRevision::initial().next() );
+}
+
+TEST_CASE( "Re-registering a source whose structure drifted advances the "
+           "revision without the flag",
+           "[data_manager][recommit]" )
+{
+  const auto manager = makeDataManager();
+
+  g_driftRasterWidth = 100;
+  RegisterRequest request;
+  request.source = memorySource( QStringLiteral( "memory-drift-raster" ),
+                                 QStringLiteral( "drift-scene" ) );
+  const auto first = manager->registerSource( request );
+  REQUIRE_FALSE( first.assetId.isNull() );
+
+  // The bytes behind the registered source change on disk (a new width).
+  g_driftRasterWidth = 200;
+
+  int changeEvents = 0;
+  QObject::connect( manager.get(), &DataManager::assetChanged,
+                    [&]( AssetId ) { ++changeEvents; } );
+
+  const auto reRegistered = manager->registerSource( request );
+  CHECK( reRegistered.assetId == first.assetId );
+  CHECK( reRegistered.reusedExisting );
+  CHECK( manager->assets().size() == 1 );
+  CHECK( manager->asset( first.assetId )->revision() == AssetRevision::initial().next() );
+  CHECK( changeEvents == 1 );
+
+  // The refreshed snapshot carries the new structure.
+  const auto structure =
+    std::get_if<RasterStructure>( &manager->asset( first.assetId )->structure() );
+  REQUIRE( structure != nullptr );
+  CHECK( structure->width == 200 );
+}
+
+TEST_CASE( "Re-attaching a Derivation Record replaces it and emits one change "
+           "event",
+           "[data_manager][provenance][recommit]" )
+{
+  const auto manager = makeDataManager();
+
+  RegisterRequest request;
+  request.source = memoryRaster( QStringLiteral( "output" ) );
+  const auto registered = manager->registerSource( request );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+
+  sicnu::data::DerivationRecord firstRecord = sicnu::data::makeTaskDerivation(
+    QStringLiteral( "rs:first" ), QJsonObject{}, QStringLiteral( "task-1" ) );
+  int changeEvents = 0;
+  QObject::connect( manager.get(), &DataManager::assetChanged,
+                    [&]( AssetId ) { ++changeEvents; } );
+
+  // First attach stays silent — registration already emitted assetAdded.
+  REQUIRE( manager->attachDerivationRecord( registered.assetId, firstRecord ) );
+  CHECK( changeEvents == 0 );
+  CHECK( manager->provenance( registered.assetId )->algorithmId ==
+         QStringLiteral( "rs:first" ) );
+
+  // A re-commit replaces the provenance; the silent overwrite was the #687
+  // half of the bug — the replacement emits one assetChanged.
+  const sicnu::data::DerivationRecord secondRecord = sicnu::data::makeTaskDerivation(
+    QStringLiteral( "rs:second" ), QJsonObject{}, QStringLiteral( "task-2" ) );
+  REQUIRE( manager->attachDerivationRecord( registered.assetId, secondRecord ) );
+  CHECK( changeEvents == 1 );
+  const auto provenance = manager->provenance( registered.assetId );
+  REQUIRE( provenance.has_value() );
+  CHECK( provenance->algorithmId == QStringLiteral( "rs:second" ) );
+  CHECK( provenance->outputAssetId == registered.assetId );
+}
+
+TEST_CASE( "A cross-thread released lease stops blocking unload and lease "
+           "queries",
+           "[data_manager][lease]" )
+{
+  const auto manager = makeDataManager();
+
+  RegisterRequest request;
+  request.source = memoryRaster( QStringLiteral( "leased" ) );
+  const auto registered = manager->registerSource( request );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+
+  auto acquired = manager->acquire(
+    AssetRef{ registered.assetId },
+    AssetUse{ LeaseKind::View, QStringLiteral( "cross-thread" ) } );
+  REQUIRE( acquired );
+  CHECK( manager->leaseCount( registered.assetId ) == 1 );
+  CHECK( manager->leases( registered.assetId ).size() == 1 );
+
+  // Destroy the lease on a foreign thread: AssetLease::release neutralizes
+  // the control immediately and only QUEUES the record removal for the
+  // manager's thread (#703). The dead record must not block unload/reap.
+  std::thread destroyer( [lease = std::move( acquired ).take()]() mutable {
+    AssetLease foreign = std::move( lease );
+    ( void ) foreign;
+  } );
+  destroyer.join();
+
+  CHECK( manager->leaseCount( registered.assetId ) == 0 );
+  CHECK( manager->leases( registered.assetId ).isEmpty() );
+  CHECK( manager->hasActiveEditLease( registered.assetId ) == false );
+
+  const UnloadPlan plan = manager->planUnload( registered.assetId );
+  CHECK( plan.canUnload() );
+  CHECK( plan.activeLeases().isEmpty() );
+  REQUIRE( manager->unload( plan ) );
+  CHECK( manager->assets().isEmpty() );
 }

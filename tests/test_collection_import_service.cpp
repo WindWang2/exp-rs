@@ -12,6 +12,9 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTextStream>
@@ -940,3 +943,111 @@ TEST_CASE( "CollectionImportService zero-arg discoverer constructor uses default
   REQUIRE( preview.children.size() == 4 );
 }
 
+
+TEST_CASE( "Commit records the probed band roles and wavelengths on the child asset",
+           "[collection_import][commit][band_metadata]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  StubDiscoverer discoverer;
+  CollectionImportService service( &manager, &discoverer );
+
+  const QString path = stageRaster( dir, QStringLiteral( "bands.tif" ) );
+  ChildCandidate candidate;
+  candidate.kind = AssetKind::Raster;
+  candidate.displayName = QStringLiteral( "10m" );
+  candidate.gridLabel = QStringLiteral( "10m" );
+  candidate.sourcePath = path;
+  ChildBandInfo red;
+  red.name = QStringLiteral( "B4" );
+  red.sourcePath = path;
+  red.sourceBand = 1;
+  red.wavelengthNm = 665;
+  red.role = sicnu::data::BandRole::Red;
+  ChildBandInfo nir;
+  nir.name = QStringLiteral( "B8" );
+  nir.sourcePath = path;
+  nir.sourceBand = 2;
+  nir.wavelengthNm = 833;
+  nir.role = sicnu::data::BandRole::NIR;
+  candidate.bands.append( red );
+  candidate.bands.append( nir );
+
+  const CommitImportResult result =
+    service.commit( { previewOver( { candidate } ), { 0 }, PersistencePolicy::ProjectPersistent } );
+  REQUIRE( result.childAssetIds.size() == 1 );
+
+  const auto snapshot = manager.asset( result.childAssetIds.first() );
+  REQUIRE( snapshot.has_value() );
+  REQUIRE( snapshot->source().dataOptions.contains( QStringLiteral( "bandMetadata" ) ) );
+  const QJsonArray bands = QJsonDocument::fromJson(
+    snapshot->source().dataOptions.value( QStringLiteral( "bandMetadata" ) ).toUtf8() ).array();
+  REQUIRE( bands.size() == 2 );
+  CHECK( bands.at( 0 ).toObject().value( QStringLiteral( "name" ) ).toString() ==
+         QStringLiteral( "B4" ) );
+  CHECK( bands.at( 0 ).toObject().value( QStringLiteral( "role" ) ).toString() ==
+         QStringLiteral( "red" ) );
+  CHECK( bands.at( 0 ).toObject().value( QStringLiteral( "wavelengthNm" ) ).toInt() == 665 );
+  CHECK( bands.at( 1 ).toObject().value( QStringLiteral( "role" ) ).toString() ==
+         QStringLiteral( "nir" ) );
+  CHECK( bands.at( 1 ).toObject().value( QStringLiteral( "wavelengthNm" ) ).toInt() == 833 );
+
+  // A child whose discovery captured no role and no wavelength must NOT gain
+  // the option: dataOptions participate in the SourceKey identity, and plain
+  // registrations of the same file must keep deduplicating unchanged.
+  const QString plainPath = stageRaster( dir, QStringLiteral( "plain.tif" ) );
+  const CommitImportResult plainResult = service.commit(
+    { previewOver( { rasterChild( plainPath, QStringLiteral( "20m" ) ) } ),
+      { 0 },
+      PersistencePolicy::ProjectPersistent } );
+  REQUIRE( plainResult.childAssetIds.size() == 1 );
+  const auto plainSnapshot = manager.asset( plainResult.childAssetIds.first() );
+  REQUIRE( plainSnapshot.has_value() );
+  CHECK_FALSE( plainSnapshot->source().dataOptions.contains( QStringLiteral( "bandMetadata" ) ) );
+}
+
+TEST_CASE( "Rollback failures are appended to the commit diagnostics, not discarded",
+           "[collection_import][commit][rollback]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  StubDiscoverer discoverer;
+  CollectionImportService service( &manager, &discoverer );
+
+  const QString pathA = stageRaster( dir, QStringLiteral( "a.tif" ) );
+  const QString pathB = stageRaster( dir, QStringLiteral( "b.tif" ) );
+  const ImportPreview preview =
+    previewOver( { rasterChild( pathA, QStringLiteral( "10m" ) ),
+                   rasterChild( pathB, QStringLiteral( "20m" ) ),
+                   rasterChild( QStringLiteral( "/nonexistent/bogus.xyz123" ),
+                                QStringLiteral( "60m" ) ) } );
+
+  CommitImportResult result;
+  bool reapedDuringRollback = false;
+  // Track what the commit registers; rollback unloads exactly those children
+  // in order. When the FIRST created child is unloaded, reap the SECOND one
+  // re-entrantly: the rollback's next unload then fails ("unload.unknown_asset").
+  // Before the fix that failure was (void)-discarded; now it must ride in the
+  // commit's diagnostics.
+  QVector<AssetId> addedDuringCommit;
+  QObject::connect( &manager, &DataManager::assetAdded,
+                    [&]( AssetId id ) { addedDuringCommit.append( id ); } );
+  QObject::connect( &manager, &DataManager::assetAboutToUnload, [&]( AssetId id ) {
+    if ( reapedDuringRollback || addedDuringCommit.size() < 2 )
+      return;
+    if ( id == addedDuringCommit.at( 0 ) )
+    {
+      reapedDuringRollback = true;
+      ( void ) manager.reap( { addedDuringCommit.at( 1 ) } );
+    }
+  } );
+
+  result = service.commit( { preview, { 0, 1, 2 }, PersistencePolicy::ProjectPersistent } );
+
+  CHECK( reapedDuringRollback );
+  CHECK( result.collectionId.isNull() );
+  // The provider's registration-failure diagnostics come first; the surfaced
+  // rollback failure (previously discarded) rides last.
+  REQUIRE_FALSE( result.diagnostics.isEmpty() );
+  CHECK( result.diagnostics.last().code == QStringLiteral( "unload.unknown_asset" ) );
+}

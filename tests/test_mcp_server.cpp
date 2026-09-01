@@ -1225,3 +1225,249 @@ TEST_CASE( "McpServer::handleSearchAlgorithms performs case-insensitive inputTyp
 }
 
 
+
+TEST_CASE( "McpServer data surfaces list and describe committed assets without "
+           "QgsProject layers",
+           "[agent][mcp][catalog]" )
+{
+  // A real temp raster registered in the DataManager catalog; no map layer is
+  // added to QgsProject (headless shape, #688).
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString path = dir.filePath( QStringLiteral( "scene.tif" ) );
+  std::vector<std::vector<float>> bands( 2, std::vector<float>( 4, 5.0f ) );
+  std::array<double, 6> gt = { 0, 1, 0, 0, 0, -1 };
+  QString err;
+  REQUIRE( writeGdalOutput( path, 2, 2, bands, gt, QStringLiteral( "EPSG:32648" ), &err ) );
+
+  sicnu::data::DataManager manager;
+  sicnu::data::RegisterRequest request;
+  request.source.providerKey = QStringLiteral( "gdal" );
+  request.source.canonicalSource = path;
+  const auto registered = manager.registerSource( request );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+  REQUIRE( manager.assets().size() == 1 );
+
+  QgsProject::instance()->removeAllMapLayers();
+
+  TestMcpServer server;
+  server.setDataManager( &manager );
+
+  SECTION( "list_layers reports the committed asset" )
+  {
+    const QVariantMap result = server.testListLayers();
+    REQUIRE( result.contains( QStringLiteral( "layers" ) ) );
+    const QVariantList layers = result.value( QStringLiteral( "layers" ) ).toList();
+    REQUIRE( layers.size() == 1 );
+    const QVariantMap layer = layers.first().toMap();
+    CHECK( layer.value( QStringLiteral( "assetId" ) ).toString()
+           == registered.assetId.toString() );
+    CHECK( layer.value( QStringLiteral( "id" ) ).toString()
+           == registered.assetId.toString() );
+    CHECK( layer.value( QStringLiteral( "name" ) ).toString()
+           == QStringLiteral( "scene" ) );
+    CHECK( layer.value( QStringLiteral( "path" ) ).toString() == path );
+    CHECK( layer.value( QStringLiteral( "type" ) ).toString() == QStringLiteral( "raster" ) );
+    CHECK( layer.value( QStringLiteral( "kind" ) ).toString() == QStringLiteral( "raster" ) );
+    CHECK( layer.value( QStringLiteral( "revision" ) ).toULongLong() == 1 );
+    CHECK( layer.value( QStringLiteral( "bandCount" ) ).toInt() == 2 );
+    // This binary has no QgsApplication::initQgis fixture, so the CRS may
+    // resolve to an empty authid here; the authid itself is covered by the
+    // interaction-tools suite. Structure wiring is what this asserts.
+    const QString crs = layer.value( QStringLiteral( "crs" ) ).toString();
+    CHECK( crs.isEmpty() || crs == QLatin1String( "EPSG:32648" ) );
+    CHECK_FALSE( layer.contains( QStringLiteral( "displayed" ) ) );
+  }
+
+  SECTION( "describe_dataset describes the committed asset by id" )
+  {
+    const QVariantMap result = server.testDescribeDataset( registered.assetId.toString() );
+    CHECK( result.value( QStringLiteral( "assetId" ) ).toString()
+           == registered.assetId.toString() );
+    CHECK( result.value( QStringLiteral( "width" ) ).toInt() == 2 );
+    CHECK( result.value( QStringLiteral( "height" ) ).toInt() == 2 );
+    CHECK( result.value( QStringLiteral( "band_count" ) ).toInt() == 2 );
+    const QVariantList bandList = result.value( QStringLiteral( "bands" ) ).toList();
+    REQUIRE( bandList.size() == 2 );
+    CHECK( bandList.first().toMap().value( QStringLiteral( "index" ) ).toInt() == 1 );
+    CHECK( bandList.first().toMap().contains( QStringLiteral( "role" ) ) );
+  }
+
+  SECTION( "describe_dataset also accepts the asset path" )
+  {
+    const QVariantMap result = server.testDescribeDataset( path );
+    CHECK( result.value( QStringLiteral( "assetId" ) ).toString()
+           == registered.assetId.toString() );
+  }
+
+  SECTION( "unknown targets still fail with the actionable error" )
+  {
+    try
+    {
+      server.testDescribeDataset( QStringLiteral( "no-such-layer" ) );
+      FAIL( "expected std::runtime_error for unknown target" );
+    }
+    catch ( const std::runtime_error &e )
+    {
+      CHECK( QString::fromStdString( e.what() ).contains( QStringLiteral( "Layer not found" ) ) );
+    }
+  }
+
+  QgsProject::instance()->removeAllMapLayers();
+}
+
+TEST_CASE( "Tool-call output commits stamp derivation input lineage (#698)",
+           "[agent][mcp][provenance]" )
+{
+  using namespace sicnu::data;
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString inputPath = dir.filePath( QStringLiteral( "input.tif" ) );
+  const QString outputPath = dir.filePath( QStringLiteral( "out.tif" ) );
+  std::vector<std::vector<float>> bands( 1, std::vector<float>( 4, 3.0f ) );
+  std::array<double, 6> gt = { 0, 1, 0, 0, 0, -1 };
+  QString err;
+  REQUIRE( writeGdalOutput( inputPath, 2, 2, bands, gt, QString(), &err ) );
+  REQUIRE( writeGdalOutput( outputPath, 2, 2, bands, gt, QString(), &err ) );
+
+  DataManager manager;
+  RegisterRequest inputRequest;
+  inputRequest.source.providerKey = QStringLiteral( "gdal" );
+  inputRequest.source.canonicalSource = inputPath;
+  const auto input = manager.registerSource( inputRequest );
+  REQUIRE_FALSE( input.assetId.isNull() );
+
+  sicnu::processing::ToolCallDispatcher dispatcher( {}, {} );
+  dispatcher.setDataManager( &manager );
+
+  sicnu::AlgorithmTaskInfo info;
+  info.taskId = 77;
+  info.algorithmId = QStringLiteral( "rs:spectral_index" );
+  info.status = sicnu::TaskStatus::Completed;
+  info.outputLayerPath = outputPath;
+
+  SECTION( "a registered input path becomes a derivedFrom edge" )
+  {
+    info.parameterMap.insert( QStringLiteral( "input" ), inputPath );
+    const Json::Value payload = sicnu::processing::ToolCallDispatcher::buildTaskResultPayload(
+      info, dispatcher.outputCommitterHandler(), {} );
+    REQUIRE( payload["status"].asString() == "success" );
+    REQUIRE( payload.isMember( "assetId" ) );
+
+    const auto outputAsset =
+      AssetId::fromString( QString::fromStdString( payload["assetId"].asString() ) );
+    REQUIRE( outputAsset.has_value() );
+
+    const QVector<AssetId> inputs = manager.derivedFrom( *outputAsset );
+    REQUIRE( inputs.size() == 1 );
+    CHECK( inputs.first() == input.assetId );
+    CHECK( manager.derivedOutputsOf( input.assetId ).first() == *outputAsset );
+
+    const auto provenance = manager.provenance( *outputAsset );
+    REQUIRE( provenance.has_value() );
+    REQUIRE( provenance->inputs.size() == 1 );
+    CHECK( provenance->inputs.first().assetId == input.assetId );
+    CHECK( provenance->inputs.first().revision == manager.asset( input.assetId )->revision() );
+    CHECK( provenance->unresolvedInputPaths.isEmpty() );
+  }
+
+  SECTION( "an unregistered existing input path is recorded, not dropped" )
+  {
+    info.parameterMap.insert( QStringLiteral( "input" ), inputPath );
+    // A second existing file that was never registered as an asset.
+    const QString strayPath = dir.filePath( QStringLiteral( "stray.tif" ) );
+    REQUIRE( writeGdalOutput( strayPath, 2, 2, bands, gt, QString(), &err ) );
+    info.parameterMap.insert( QStringLiteral( "aux_input" ), strayPath );
+
+    const Json::Value payload = sicnu::processing::ToolCallDispatcher::buildTaskResultPayload(
+      info, dispatcher.outputCommitterHandler(), {} );
+    REQUIRE( payload["status"].asString() == "success" );
+    const auto outputAsset =
+      AssetId::fromString( QString::fromStdString( payload["assetId"].asString() ) );
+    REQUIRE( outputAsset.has_value() );
+
+    // The registered input still resolves; the stray path is preserved in the
+    // diagnostics field instead of vanishing.
+    const QVector<AssetId> inputs = manager.derivedFrom( *outputAsset );
+    REQUIRE( inputs.size() == 1 );
+    CHECK( inputs.first() == input.assetId );
+
+    const auto provenance = manager.provenance( *outputAsset );
+    REQUIRE( provenance.has_value() );
+    REQUIRE( provenance->unresolvedInputPaths.size() == 1 );
+    CHECK( provenance->unresolvedInputPaths.first() == strayPath );
+  }
+}
+
+TEST_CASE( "OutputCommitter re-commit over the stable path advances the revision "
+           "and emits assetChanged (#687)",
+           "[agent][mcp][commit]" )
+{
+  const auto manager = makeLineageDataManager();
+  REQUIRE( manager );
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString stablePath = dir.filePath( QStringLiteral( "scene_committed.tif" ) );
+
+  // First commit registers the stable path at revision 1.
+  const QString tempA = dir.filePath( QStringLiteral( "temp_a.tif" ) );
+  {
+    std::vector<std::vector<float>> bands( 1, std::vector<float>( 4, 1.0f ) );
+    std::array<double, 6> gt = { 0, 1, 0, 0, 0, -1 };
+    QString err;
+    REQUIRE( writeGdalOutput( tempA, 2, 2, bands, gt, QString(), &err ) );
+  }
+  sicnu::OutputCommitter committer( manager.get() );
+  sicnu::AlgorithmOutputRequest request;
+  request.kind = sicnu::data::AssetKind::Raster;
+  request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
+  request.stablePath = stablePath;
+  request.derivation.algorithmId = QStringLiteral( "rs:first" );
+  request.derivation.taskReference = QStringLiteral( "task-1" );
+
+  int changeEvents = 0;
+  QObject::connect( manager.get(), &sicnu::data::DataManager::assetChanged,
+                    [&]( sicnu::data::AssetId ) { ++changeEvents; } );
+
+  {
+    request.tempPath = tempA;
+    const auto first = committer.commit( request );
+    REQUIRE( first );
+    const auto snapshot = manager->asset( first.value() );
+    REQUIRE( snapshot.has_value() );
+    CHECK( snapshot->revision() == sicnu::data::AssetRevision::initial() );
+    CHECK( manager->provenance( first.value() )->algorithmId == QStringLiteral( "rs:first" ) );
+    CHECK( changeEvents == 0 );
+  }
+
+  // Re-commit: new bytes, same stable path. The asset must not silently keep
+  // its stale snapshot: revision bumps and observers are notified.
+  const QString tempB = dir.filePath( QStringLiteral( "temp_b.tif" ) );
+  {
+    std::vector<std::vector<float>> bands( 2, std::vector<float>( 4, 2.0f ) );
+    std::array<double, 6> gt = { 0, 1, 0, 0, 0, -1 };
+    QString err;
+    REQUIRE( writeGdalOutput( tempB, 2, 2, bands, gt, QString(), &err ) );
+  }
+  sicnu::data::AssetId committedId;
+  {
+    request.tempPath = tempB;
+    request.derivation.algorithmId = QStringLiteral( "rs:second" );
+    request.derivation.taskReference = QStringLiteral( "task-2" );
+    const auto second = committer.commit( request );
+    REQUIRE( second );
+    committedId = second.value();
+  }
+
+  const auto snapshot = manager->asset( committedId );
+  REQUIRE( snapshot.has_value() );
+  CHECK( manager->assets().size() == 1 );
+  CHECK( snapshot->revision() == sicnu::data::AssetRevision::initial().next() );
+  // One change from the registerSource update, one from the replaced derivation.
+  CHECK( changeEvents == 2 );
+  const auto provenance = manager->provenance( committedId );
+  REQUIRE( provenance.has_value() );
+  CHECK( provenance->algorithmId == QStringLiteral( "rs:second" ) );
+}
