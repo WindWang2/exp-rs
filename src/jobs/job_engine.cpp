@@ -57,11 +57,23 @@ void JobEngine::shutdown()
     m_generation++;
     toJoin.swap( m_workers );
 
-    // Arm cancel flags of running jobs and collect cancel hooks
+    // Arm cancel flags of running jobs and collect cancel hooks. Also cover
+    // the tryPick→runOperatorJob window: a job popped as Running whose flag
+    // has not been created/adopted yet gets a pre-armed flag that
+    // runOperatorJob adopts (review P2 — cancel() handles this, shutdown
+    // didn't).
     for ( auto &kv : m_cancelFlags )
     {
       if ( kv.second )
         kv.second->store( true, std::memory_order_release );
+    }
+    for ( auto &kv : m_jobs )
+    {
+      if ( kv.second.state != JobState::Running )
+        continue;
+      auto fit = m_cancelFlags.find( kv.first );
+      if ( fit == m_cancelFlags.end() || !fit->second )
+        m_cancelFlags[kv.first] = std::make_shared<std::atomic<bool>>( true );
     }
     for ( auto &kv : m_jobBodies )
     {

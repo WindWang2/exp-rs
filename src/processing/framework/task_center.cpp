@@ -762,6 +762,12 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
     long id = -1;
     {
         QMutexLocker locker( &m_mutex );
+        // Recheck under the lock: shutdown()'s finalization pass could have
+        // completed between the atomic read above and here, and a task
+        // inserted afterwards would strand in Queued forever with its
+        // completion callbacks never firing (review P1).
+        if ( m_isShuttingDown.load() )
+            return -1;
         id = m_nextTaskId++;
         AlgorithmTaskInfo info;
         info.taskId = id;
@@ -803,23 +809,26 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
 
 long TaskCenter::submitJob( const sicnu::jobs::JobRequest &request )
 {
-    return submitJobImpl( request, {}, {}, true, TaskPriority::Normal );
+    return submitJobImpl( request, {}, {}, true, TaskPriority::Normal, {} );
 }
 
 long TaskCenter::submitJob( const sicnu::jobs::JobRequest &request,
                             JobExecutor executor,
                             CancelHook onCancel,
                             bool autoLoad,
-                            TaskPriority priority )
+                            TaskPriority priority,
+                            const QList<long> &parentTaskIds )
 {
-    return submitJobImpl( request, std::move( executor ), std::move( onCancel ), autoLoad, priority );
+    return submitJobImpl( request, std::move( executor ), std::move( onCancel ), autoLoad, priority,
+                          parentTaskIds );
 }
 
 long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
                                 JobExecutor executor,
                                 CancelHook onCancel,
                                 bool autoLoad,
-                                TaskPriority priority )
+                                TaskPriority priority,
+                                const QList<long> &parentTaskIds )
 {
     ensureJobListener();
 
@@ -837,7 +846,7 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
     // priority). Executors never run before admission because autoDispatch is
     // only flipped inside the same critical section.
     const long taskId = enqueueTask( QString::fromStdString( request.algorithmId ), params, autoLoad,
-                                     priority, {}, false, 0,
+                                     priority, parentTaskIds, false, 0,
                                      QString::fromStdString( request.source ) );
     if ( taskId < 0 )
         return -1;
@@ -1736,8 +1745,14 @@ bool TaskCenter::retryTask( long taskId )
     long newTaskId = -1;
     if ( oldInfo.hasJobRequest )
     {
+        // Dispatched-step retries historically ran parent-free. Keep LIVE
+        // parents (still-running upstream steps whose $parent.port
+        // placeholders resolve from their payloads) and drop only the
+        // unsatisfiable terminal ones — running ahead of a live parent would
+        // execute with unresolved placeholder paths (review P1). The staged
+        // admission path enforces parent gating at scheduling time.
         newTaskId = submitJob( oldInfo.jobRequest, oldInfo.jobExecutor, {}, oldInfo.autoLoadLayer,
-                               oldInfo.priority );
+                               oldInfo.priority, retryParents );
     }
     else
     {

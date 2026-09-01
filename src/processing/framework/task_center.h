@@ -178,7 +178,8 @@ public:
                    JobExecutor executor,
                    CancelHook onCancel = {},
                    bool autoLoad = true,
-                   TaskPriority priority = TaskPriority::Normal);
+                   TaskPriority priority = TaskPriority::Normal,
+                   const QList<long>& parentTaskIds = QList<long>());
 
     void attachQgsTask(long taskId, QgsTask* qgsTask);
 
@@ -329,7 +330,8 @@ private:
                        JobExecutor executor,
                        CancelHook onCancel,
                        bool autoLoad,
-                       TaskPriority priority);
+                       TaskPriority priority,
+                       const QList<long>& parentTaskIds);
     /// Shutdown finalization (#684): cancel every non-terminal task (engine
     /// flags armed, queued jobs cancelled), then — after the engine joined —
     /// force any task still in Dispatching/Running/Cancelling to Canceled so

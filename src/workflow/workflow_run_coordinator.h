@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -110,6 +111,7 @@ class WorkflowRunCoordinator : public QObject {
     QString m_checkpointDir; // empty → defaultCheckpointDirectory()
     std::map<long, std::shared_ptr<WorkflowRun>> m_runsByPipeline;
     std::map<std::string, long> m_pipelineByRunId;
+    std::set<std::string> m_resuming; ///< concurrent resumeRun guard
     bool m_connected = false;
 };
 

@@ -239,6 +239,13 @@ void LlmStreamingClient::emitParsedToolCallOnce()
     funcObj[QStringLiteral( "name" )] = accu.name;
 
     bool argsResolved = false;
+    if ( accu.arguments.trimmed().isEmpty() )
+    {
+      // A tool call with NO arguments is legitimate — treat "" as {} instead
+      // of dropping the call (review P2).
+      funcObj[QStringLiteral( "arguments" )] = QJsonObject();
+      argsResolved = true;
+    }
     QJsonDocument argsDoc = QJsonDocument::fromJson( accu.arguments.toUtf8() );
     if ( argsDoc.isObject() )
     {

@@ -718,6 +718,10 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
     sicnu::data::RegisterRequest request;
     request.source = source;
     request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
+    // Re-runs replace the bytes at this stable path: bump the revision and
+    // emit assetChanged like OutputCommitter's commit path (#687/#703 review
+    // P2 — a silent dedup here left displayed layers stale).
+    request.notifyUpdateOnReuse = true;
 
     const auto registered = m_dataManager->registerSource( request );
     if ( registered.assetId.isNull() )

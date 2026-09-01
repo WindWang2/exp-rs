@@ -98,6 +98,17 @@ class McpBridge {
     if (this.stopped) {
       throw new Error("exp-rs MCP bridge was stopped");
     }
+    // Startup-race guard: if a previous spawn's child is somehow still alive
+    // (e.g. an initialize timeout left it hanging with exited=false), kill it
+    // before spawning a replacement — otherwise it blocks every respawn while
+    // its stdio goes nowhere (review P2).
+    if (this.child && !this.exited) {
+      try {
+        this.child.kill();
+      } catch {
+        /* already dead */
+      }
+    }
     const childEnv: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) {
       if (v !== undefined) childEnv[k] = v;

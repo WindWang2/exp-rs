@@ -157,7 +157,10 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     {
         run->setErrorMessage( "Pipeline contains no dispatchable operator steps" );
         run->transitionTo( WorkflowRunState::Failed );
-        persistRunLocked( *run );
+        {
+            std::lock_guard<std::mutex> lock( m_mutex );
+            persistRunLocked( *run );
+        }
         return -1;
     }
 
@@ -175,6 +178,7 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
         }
     }
 
+    const std::string freshRunId = run->runId();
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         if ( !m_connected )
@@ -187,8 +191,48 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
             m_connected = true;
         }
         m_runsByPipeline[pipelineId] = run;
-        m_pipelineByRunId[run->runId()] = pipelineId;
+        m_pipelineByRunId[freshRunId] = pipelineId;
+
+        // submitPipeline dispatched BEFORE this registration: any transition
+        // in that window was missed by onTaskUpdated (review P1 — a fast first
+        // step could even complete and the run would never finalize). Fold the
+        // pipeline's CURRENT state in through the same per-step update path so
+        // the run converges no matter what happened in between.
+        const PipelineExecutionInfo pipeNow = center.getPipelineInfo( pipelineId );
+        for ( const auto &stepId : pipeNow.orderedStepIds )
+        {
+            const long taskId = pipeNow.stepToTaskId.value( stepId, -1 );
+            if ( taskId < 0 )
+                continue;
+            const AlgorithmTaskInfo info = center.getTaskInfo( taskId );
+            if ( info.taskId != taskId )
+                continue;
+            if ( StepPlan *plan = run->findStepPlan( stepId ) )
+            {
+                plan->status = stepStatusForTaskStatus( info.status ).toStdString();
+                plan->taskId = taskId;
+                if ( info.status == sicnu::TaskStatus::Completed
+                     && !info.outputLayerPath.isEmpty() )
+                {
+                    plan->outputLayerPath = info.outputLayerPath.toStdString();
+                    run->setArtifact( stepId, plan->outputLayerPath );
+                }
+                run->updateStepPlan( *plan );
+            }
+        }
         persistRunLocked( *run );
+
+        // All steps may have gone terminal inside the missed window.
+        const auto plans = run->stepPlans();
+        const bool allTerminal = !plans.empty() && std::all_of( plans.begin(), plans.end(),
+                                                                []( const StepPlan &p2 ) {
+                                                                  return p2.status == "Completed"
+                                                                         || p2.status == "Failed"
+                                                                         || p2.status == "Canceled"
+                                                                         || p2.status == "Skipped";
+                                                                } );
+        if ( allTerminal && !isTerminalRunState( run->state() ) )
+            finalizeRunLocked( pipelineId, *run );
     }
     return pipelineId;
 }
@@ -249,8 +293,8 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
                                                                      || p.status == "Canceled"
                                                                      || p.status == "Skipped";
                                                             } );
-    if ( allTerminal )
-        finalizeRunLocked( info.pipelineId, *run );
+    if ( allTerminal && !isTerminalRunState( run->state() ) )
+        finalizeRunLocked( info.pipelineId, *run ); // exactly once per run
 }
 
 void WorkflowRunCoordinator::finalizeRunLocked( long pipelineId, WorkflowRun &run )
@@ -304,7 +348,9 @@ WorkflowRunCoordinator::RecoveryReport WorkflowRunCoordinator::recoverAtStartup(
     std::vector<std::shared_ptr<WorkflowRun>> recovered;
     {
         std::lock_guard<std::mutex> lock( m_mutex );
-        recovered = m_checkpoints.recoverInterruptedRuns( checkpointDirectory() );
+        // checkpointDirectory() relocks m_mutex (non-recursive): use the
+        // locked variant or startup self-deadlocks (review P0).
+        recovered = m_checkpoints.recoverInterruptedRuns( checkpointDirectoryLocked() );
     }
     for ( const auto &run : recovered )
     {
@@ -326,6 +372,27 @@ WorkflowRunCoordinator::RecoveryReport WorkflowRunCoordinator::recoverAtStartup(
 
 long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error )
 {
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        if ( m_resuming.count( runId ) > 0 )
+        {
+            if ( error )
+                *error = QStringLiteral( "Run %1 is already resuming" ).arg( QString::fromStdString( runId ) );
+            return -1;
+        }
+        m_resuming.insert( runId );
+    }
+    struct ResumingGuard
+    {
+        WorkflowRunCoordinator *self;
+        const std::string &id;
+        ~ResumingGuard()
+        {
+            std::lock_guard<std::mutex> lock( self->m_mutex );
+            self->m_resuming.erase( id );
+        }
+    } resumingGuard{ this, runId };
+
     const QString path = checkpointPathFor( runId );
     if ( !QFile::exists( path ) )
     {
@@ -439,6 +506,10 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
                 }
             }
             m_pipelineByRunId.erase( it->second->runId() );
+            // The fresh submission persisted a checkpoint under ITS runId
+            // before the swap; recovery would resurrect it as a ghost
+            // Interrupted run duplicating this resume (review P1).
+            QFile::remove( checkpointPathLocked( it->second->runId() ) );
             it->second = run;
             m_pipelineByRunId[run->runId()] = pipelineId;
             persistRunLocked( *run );

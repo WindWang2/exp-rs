@@ -459,6 +459,16 @@ QVariantMap executionStatusResponse( sicnu::data::DataManager *dataManager,
     return result;
 }
 
+/// Page size for the paginated list endpoints: absent/invalid limit means the
+/// documented default (50), explicit values clamp to 1..500 (#701 review P0:
+/// qBound(1, 0, 500) collapsed "no limit given" to a single-entry page).
+static int mcpPageLimit(int requested)
+{
+    if (requested <= 0)
+        return 50;
+    return qBound(1, requested, 500);
+}
+
 /// Attaches the ADR 0122 algorithm catalog sidecar (task/input/output/gpu/
 /// accuracy) to a discovery entry when a manifest exists for the id. The
 /// store loads data/processing/algorithm_meta/*.json once per process.
@@ -551,14 +561,29 @@ void StdinReader::run()
     while ( !m_stopRequested )
     {
         std::cin.getline( buffer.data(), kMaxMcpLine + 1 );
-        if ( std::cin.eof() )
-            break;
         if ( std::cin.fail() )
         {
             std::cin.clear();
             std::cin.ignore( std::numeric_limits<std::streamsize>::max(), '\n' );
             emit lineRead( QStringLiteral( "__MCP_LINE_TOO_LONG__" ) );
+            // An overlong line that ended AT EOF leaves no further input:
+            // without this break the loop would spin emitting TOO_LONG.
+            if ( std::cin.eof() )
+                break;
             continue;
+        }
+        if ( std::cin.eof() )
+        {
+            // A final frame without a trailing newline still counts: getline
+            // stored it before hitting EOF (review P2 — the old getline loop
+            // delivered it; dropping it loses the last request).
+            if ( buffer.data()[0] != '\0' )
+            {
+                const QString line = QString::fromUtf8( buffer.data() ).trimmed();
+                if ( !line.isEmpty() )
+                    emit lineRead( line );
+            }
+            break;
         }
         // JSON-RPC frames are UTF-8.
         QString line = QString::fromUtf8( buffer.data() ).trimmed();
@@ -786,7 +811,7 @@ void McpServer::handleRequest(const QVariantMap &request)
             if (toolName == QStringLiteral("list_algorithms"))
             {
                 resultData = handleListAlgorithms(
-                    qBound(1, arguments.value(QStringLiteral("limit")).toInt(), 500),
+                    mcpPageLimit(arguments.value(QStringLiteral("limit")).toInt()),
                     qMax(0, arguments.value(QStringLiteral("cursor")).toInt()));
             }
             else if (toolName == QStringLiteral("search_algorithms"))
@@ -797,7 +822,7 @@ void McpServer::handleRequest(const QVariantMap &request)
                     arguments.value(QStringLiteral("input_type")).toString(),
                     arguments.value(QStringLiteral("output_type")).toString(),
                     arguments.value(QStringLiteral("large_raster_safe")).toBool(),
-                    qBound(1, arguments.value(QStringLiteral("limit")).toInt(), 500),
+                    mcpPageLimit(arguments.value(QStringLiteral("limit")).toInt()),
                     qMax(0, arguments.value(QStringLiteral("cursor")).toInt()));
             }
             else if (toolName == QStringLiteral("get_algorithm_schema"))
@@ -816,7 +841,7 @@ void McpServer::handleRequest(const QVariantMap &request)
             else if (toolName == QStringLiteral("list_operators"))
             {
                 resultData = handleListOperators(
-                    qBound(1, arguments.value(QStringLiteral("limit")).toInt(), 500),
+                    mcpPageLimit(arguments.value(QStringLiteral("limit")).toInt()),
                     qMax(0, arguments.value(QStringLiteral("cursor")).toInt()));
             }
             else if (toolName == QStringLiteral("get_operator_schema"))
@@ -1838,10 +1863,10 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
             const qlonglong providerCount = vector->dataProvider()
                                                  ? static_cast<qlonglong>( vector->dataProvider()->featureCount() )
                                                  : -1;
+            // Omit when unknown: the key's type must stay numeric for
+            // clients (review P2 — number/string wobble breaks typed parsers).
             if ( providerCount >= 0 )
                 result[QStringLiteral("feature_count")] = providerCount;
-            else
-                result[QStringLiteral("feature_count")] = QStringLiteral("unknown");
 
             QString geomType = QStringLiteral("Unknown");
             switch (vector->geometryType())
