@@ -194,7 +194,7 @@ TEST_CASE("Adding the same Data Asset to a view deduplicates; allowDuplicate opt
   CHECK(dataManager.leaseCount(assetId) == 1);
 
   // Explicit opt-in preserves the legacy multi-layer capability.
-  QgisDisplayManager::AddLayerOptions dupOptions;
+  sicnu::display::AddLayerOptions dupOptions;
   dupOptions.allowDuplicate = true;
   const auto thirdAdded = displayManager.addLayer(viewId, assetId, dupOptions);
   REQUIRE(thirdAdded);
