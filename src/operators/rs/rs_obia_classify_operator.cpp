@@ -21,6 +21,7 @@
 #include "rs_obia_classify_operator.h"
 #include "rs_segmentation_utils.h"
 
+#include "analysis/classification/rs_feature_scaler.h"
 #include "analysis/segmentation/rs_roi_labeler.h"
 #include "analysis/segmentation/rs_segment_map.h"
 #include "analysis/segmentation/rs_simple_segmenter.h"
@@ -333,9 +334,17 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
 
     context.reportProgress(0.65, "Training " + method + " on " +
                                      std::to_string(labeledSegments) + " labeled objects");
+    // #682: the canonical object-classification path (RsObjectClassification)
+    // fits a Z-score scaler on the training segments and transforms train and
+    // predict features; this operator used to train on raw means, so distance
+    // methods (SVM gamma in particular) collapsed on DN-scale features and
+    // diverged from the GUI results.
+    RsFeatureScaler scaler;
+    scaler.fit(trainX, RsFeatureScaler::Method::ZScore);
+    const cv::Mat scaledTrainX = scaler.transform(trainX);
     std::unique_ptr<RsClassifierBackend> backend =
         RsClassifierBackendFactory::create(QString::fromStdString(method));
-    if (!backend->fit(trainX, trainY)) {
+    if (!backend->fit(scaledTrainX, trainY)) {
         throw RSOperatorError(ErrorCode::OpenCvError,
                               method == "normal_bayes" ? "NormalBayes training failed"
                                                        : "SVM training failed");
@@ -348,7 +357,7 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
         for (int f = 0; f < nFeat; ++f)
             allX.at<float>(s - 1, f) = feats[static_cast<size_t>(s)][static_cast<size_t>(f)];
     }
-    const cv::Mat pred = backend->predict(allX);
+    const cv::Mat pred = backend->predict(scaler.transform(allX));
     if (pred.empty() || pred.rows < nSeg) {
         throw RSOperatorError(ErrorCode::OpenCvError, "predict failed");
     }
