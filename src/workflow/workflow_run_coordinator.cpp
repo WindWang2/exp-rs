@@ -108,7 +108,7 @@ QString WorkflowRunCoordinator::checkpointDirectoryLocked() const
 QString WorkflowRunCoordinator::checkpointPathLocked( const std::string &runId ) const
 {
     return checkpointDirectoryLocked() + QDir::separator()
-           + QString::fromStdString( runId ) + QStringLiteral( ".json" );
+           + QStringLiteral( "checkpoint_%1.json" ).arg( QString::fromStdString( runId ) );
 }
 
 QString WorkflowRunCoordinator::checkpointPathFor( const std::string &runId ) const
@@ -459,9 +459,23 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
         bool changed = false;
         resumed.params = substituteJsonPlaceholders( step.params, resolver, &changed );
         // Edges to reusable steps are dropped with the step itself: TaskCenter
-        // only wires parent links for steps present in this submission, and
-        // the literal substitution above already carries the data forward.
-        remaining.steps.push_back( resumed );
+        // only wires parent links for steps present in this submission, the
+        // literal substitution above already carries the data forward, and
+        // the topological sort must not see references to excluded steps.
+        // Keep only connections whose source step is ALSO being resubmitted;
+        // edges from pre-resolved steps were consumed by the substitution and
+        // would otherwise reference steps absent from the resume submission.
+        StepDef withLiveEdges = resumed;
+        withLiveEdges.inputs.clear();
+        for ( const auto &conn : resumed.inputs )
+        {
+            const bool sourceResubmitted = std::any_of(
+                remaining.steps.begin(), remaining.steps.end(),
+                [&]( const StepDef &kept ) { return kept.id == conn.fromStepId; } );
+            if ( sourceResubmitted )
+                withLiveEdges.inputs.push_back( conn );
+        }
+        remaining.steps.push_back( withLiveEdges );
     }
     if ( remaining.steps.empty() )
     {

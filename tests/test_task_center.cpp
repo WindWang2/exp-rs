@@ -1143,22 +1143,33 @@ TEST_CASE( "TaskCenter - memory limit 0 keeps the gate open under batch load",
         ids.append( center.enqueueTask( QStringLiteral( "batch_disabled:task" ), {}, false,
                                         sicnu::TaskPriority::Normal, {}, true ) );
 
-    // Despite a huge fake RSS, the disabled gate lets up to 8 run at once.
+    // This test RAISES admission to BATCH explicitly (to exercise the RSS
+    // gate in isolation), which exceeds the engine worker pool: all BATCH
+    // tasks are admitted (#686 semantics: admitted = Dispatching or Running),
+    // while the count of tasks ACTUALLY running on a worker never exceeds
+    // JobEngine::maxWorkers().
     for ( int attempt = 0; attempt < 400; ++attempt )
     {
-        int running = 0;
+        int admitted = 0;
         for ( long id : ids )
-            if ( center.getTaskInfo( id ).status == sicnu::TaskStatus::Running )
-                ++running;
-        if ( running >= BATCH )
+            if ( center.getTaskInfo( id ).status == sicnu::TaskStatus::Running
+                 || center.getTaskInfo( id ).status == sicnu::TaskStatus::Dispatching )
+                ++admitted;
+        if ( admitted >= BATCH )
             break;
         std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
     }
-    int running = 0;
+    int admitted = 0, onWorker = 0;
     for ( long id : ids )
-        if ( center.getTaskInfo( id ).status == sicnu::TaskStatus::Running )
-            ++running;
-    CHECK( running == BATCH );
+    {
+        const auto st = center.getTaskInfo( id ).status;
+        if ( st == sicnu::TaskStatus::Running || st == sicnu::TaskStatus::Dispatching )
+            ++admitted;
+        if ( st == sicnu::TaskStatus::Running )
+            ++onWorker;
+    }
+    CHECK( admitted == BATCH );
+    CHECK( onWorker <= engine.maxWorkers() ); // honest Running (#686)
 
     releaseWorkers.store( true );
     engine.waitUntilIdleForTests();
@@ -1468,8 +1479,24 @@ TEST_CASE("TaskCenter - retryTask of a cascade-canceled pipeline step is not str
     for (long id : blockers)
         waitForTerminalStatus(center, id);
     REQUIRE(center.retryTask(downTask));
+    // The retried STEP must not strand in Queued forever (#685): with the
+    // unsatisfiable parent dropped it launches and completes.
+    {
+        const long retriedDown = center.getPipelineInfo(pipeId).stepToTaskId.value("down");
+        REQUIRE(retriedDown > 0);
+        REQUIRE(retriedDown != downTask);
+        for (int attempt = 0; attempt < 600; ++attempt) {
+            if (sicnu::isTerminalStatus(center.getTaskInfo(retriedDown).status))
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        REQUIRE(center.getTaskInfo(retriedDown).status == sicnu::TaskStatus::Completed);
+    }
 
-    // The retried pipeline must fully complete now.
+    // The pipeline stays failed while the canceled ROOT is not retried (its
+    // step never ran); retrying the root remaps the step and the pipeline
+    // rolls up to completed.
+    REQUIRE(center.retryTask(upTask));
     for (int attempt = 0; attempt < 600; ++attempt) {
         pipe = center.getPipelineInfo(pipeId);
         if (pipe.isCompleted || pipe.isFailed)

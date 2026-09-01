@@ -1462,12 +1462,18 @@ TEST_CASE( "engine queue pick honors request priority (#686)", "[job][priority]"
       ranNormal.store( true );
       return Json::Value( Json::objectValue );
     } );
+  std::promise<void> proceedHigh;
+  auto futHigh = proceedHigh.get_future().share();
   JobRequest highReq;
   highReq.algorithmId = "callable:high_prio";
   highReq.priority = 0; // High — submitted later, must start first
   const auto idHigh = eng.submit(
-    highReq, [&ranHigh]( const JobRequest &, RSOperatorContext & ) {
+    highReq, [&ranHigh, futHigh]( const JobRequest &, RSOperatorContext & ) {
       ranHigh.store( true );
+      // Hold the worker so the "Normal must not have started" window is
+      // deterministic: with the OTHER worker still parked on blockerA,
+      // Normal can only start if THIS worker picked the wrong job first.
+      futHigh.wait();
       return Json::Value( Json::objectValue );
     } );
 
@@ -1478,6 +1484,7 @@ TEST_CASE( "engine queue pick honors request priority (#686)", "[job][priority]"
   REQUIRE( ranHigh.load() );
   REQUIRE_FALSE( ranNormal.load() );
 
+  proceedHigh.set_value();
   proceedA.set_value();
   eng.waitUntilIdleForTests();
   REQUIRE( ranNormal.load() );
