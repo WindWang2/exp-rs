@@ -22,11 +22,13 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QTabWidget>
 #include <QTextCursor>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QVBoxLayout>
+#include "widgets/rs_empty_state_widget.h"
 
 #include "dialogs/dialog_help_catalog.h"
 
@@ -225,8 +227,12 @@ void RsJobPanel::setupUi()
   mainLayout->addWidget( toolbar );
 
   auto *splitter = new QSplitter( Qt::Horizontal, mainWidget );
+  splitter->setObjectName( QStringLiteral( "rsJobSplitter" ) );
 
-  m_jobTree = new QTreeWidget( splitter );
+  m_treeStack = new QStackedWidget( splitter );
+  m_treeStack->setObjectName( QStringLiteral( "rsJobTreeStack" ) );
+
+  m_jobTree = new QTreeWidget( m_treeStack );
   m_jobTree->setObjectName( QStringLiteral( "rsJobTree" ) );
   m_jobTree->setColumnCount( 5 );
   m_jobTree->setHeaderLabels( { tr( "标题" ), tr( "状态" ), tr( "进度" ), tr( "加载" ), tr( "预计剩余" ) } );
@@ -248,7 +254,18 @@ void RsJobPanel::setupUi()
   m_jobTree->setColumnWidth( ColEta, qMax( 80, fm.horizontalAdvance( QStringLiteral( "99h 59m 59s" ) ) + 24 ) );
   m_jobTree->headerItem()->setToolTip( ColEta, tr( "基于已用时间与当前进度的估算；进度为 0 或暂停时不可用" ) );
   m_jobTree->headerItem()->setToolTip( ColLoad, tr( "勾选：任务成功后自动将输出加载到主程序" ) );
-  splitter->addWidget( m_jobTree );
+  m_treeStack->addWidget( m_jobTree ); // Index 0: Tree
+
+  m_emptyState = new sicnu::RsEmptyStateWidget(
+      QStringLiteral( "check_outline" ),
+      tr( "暂无任务" ),
+      tr( "所有计算与算法任务均已完成或尚未提交。可在处理工具箱或工作流中启动新任务。" ),
+      QString(),
+      m_treeStack );
+  m_treeStack->addWidget( m_emptyState ); // Index 1: Empty State
+  m_treeStack->setCurrentIndex( 1 ); // Initially empty
+
+  splitter->addWidget( m_treeStack );
 
   m_detailTabs = new QTabWidget( splitter );
   m_detailTabs->setObjectName( QStringLiteral( "rsJobDetailTabs" ) );
@@ -472,6 +489,8 @@ void RsJobPanel::refreshAll()
     m_detailView->clear();
     m_logView->clear();
   }
+  if ( m_treeStack )
+    m_treeStack->setCurrentIndex( m_jobTree->topLevelItemCount() > 0 ? 0 : 1 );
   updateActionEnabled();
 }
 
@@ -505,6 +524,8 @@ void RsJobPanel::upsertTaskRow( const sicnu::AlgorithmTaskInfo &info )
       m_logView->clear();
       updateActionEnabled();
     }
+    if ( m_treeStack )
+      m_treeStack->setCurrentIndex( m_jobTree->topLevelItemCount() > 0 ? 0 : 1 );
     return;
   }
 
@@ -530,6 +551,9 @@ void RsJobPanel::upsertTaskRow( const sicnu::AlgorithmTaskInfo &info )
                        .arg( taskId )
                        .arg( info.algorithmId ) );
   m_blockItemChanged = false;
+
+  if ( m_treeStack )
+    m_treeStack->setCurrentIndex( m_jobTree->topLevelItemCount() > 0 ? 0 : 1 );
 
   if ( m_selectedId < 0 && info.status == sicnu::TaskStatus::Running )
     m_jobTree->setCurrentItem( found );

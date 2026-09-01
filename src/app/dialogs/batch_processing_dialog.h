@@ -13,6 +13,7 @@ class QComboBox;
 class QDoubleSpinBox;
 class QFormLayout;
 class QFrame;
+class QGroupBox;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
@@ -110,7 +111,7 @@ private:
 
     /// "参数覆盖" section: rebuilt per algorithm (RS operators get typed
     /// editors, QGIS algorithms get QGIS parameter-widget wrappers).
-    QFrame *m_paramFrame = nullptr;
+    QGroupBox *m_paramFrame = nullptr;
     QFormLayout *m_paramForm = nullptr;
     /// Parameter-name → editor widget for the current RS operator.
     QHash<QString, QWidget *> m_paramWidgets;

@@ -137,25 +137,30 @@ void PipelinePortItem::paint( QPainter *painter, const QStyleOptionGraphicsItem 
     textRect = QRectF( 24, 0, PORT_WIDTH - PIN_RADIUS * 2 - 28, PORT_HEIGHT );
     painter->drawText( textRect, Qt::AlignRight | Qt::AlignVCenter, mDisplayLabel );
 
-    // 👁️ Add to map toggle icon button for output ports
+    // Add to map toggle icon button for output ports (vector eye)
     QRectF eyeRect( 2, ( PORT_HEIGHT - 16 ) * 0.5, 18, 16 );
+    painter->setRenderHint( QPainter::Antialiasing );
     if ( mAddToMap )
     {
       painter->setPen( QPen( QColor( "#38bdf8" ), 1.2 ) );
       painter->setBrush( QColor( "#0284c7" ).lighter( 130 ) );
       painter->drawRoundedRect( eyeRect, 3, 3 );
-      painter->setPen( Qt::white );
-      painter->setFont( QFont( QStringLiteral( "IBM Plex Sans" ), 8, QFont::Bold ) );
-      painter->drawText( eyeRect, Qt::AlignCenter, "👁" );
+      painter->setPen( QPen( Qt::white, 1.2 ) );
+      painter->drawArc( eyeRect.adjusted( 3, 4, -3, -4 ), 30 * 16, 120 * 16 );
+      painter->drawArc( eyeRect.adjusted( 3, 4, -3, -4 ), 210 * 16, 120 * 16 );
+      painter->setBrush( Qt::white );
+      painter->drawEllipse( eyeRect.center(), 2.0, 2.0 );
     }
     else
     {
       painter->setPen( QPen( QColor( "#64748b" ), 1.0 ) );
       painter->setBrush( QColor( "#1e293b" ) );
       painter->drawRoundedRect( eyeRect, 3, 3 );
-      painter->setPen( QColor( "#64748b" ) );
-      painter->setFont( QFont( QStringLiteral( "IBM Plex Sans" ), 8 ) );
-      painter->drawText( eyeRect, Qt::AlignCenter, "👁" );
+      painter->setPen( QPen( QColor( "#64748b" ), 1.0 ) );
+      painter->drawArc( eyeRect.adjusted( 3, 4, -3, -4 ), 30 * 16, 120 * 16 );
+      painter->drawArc( eyeRect.adjusted( 3, 4, -3, -4 ), 210 * 16, 120 * 16 );
+      painter->setBrush( QColor( "#64748b" ) );
+      painter->drawEllipse( eyeRect.center(), 1.5, 1.5 );
     }
   }
 }

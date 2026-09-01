@@ -10,6 +10,7 @@ class QComboBox;
 class QCheckBox;
 class QLabel;
 class QgsRasterLayer;
+class RasterLayerCombo;
 
 /**
  * Dialog for Spectral Index calculations.
@@ -33,10 +34,11 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("spectral_index"); }
-    QString dialogTitle() const override { return tr("Spectral Index"); }
+    QString dialogTitle() const override { return tr("光谱指数"); }
     void onRun() override;
 
 private slots:
+    void onLayerChanged(int index);
     void onIndexChanged(int index);
     void onInputAssetChanged(int comboIndex);
 
@@ -56,6 +58,8 @@ private:
 
     sicnu::data::DataManager *m_dataManager = nullptr;
 
+    RasterLayerCombo *m_layerCombo = nullptr;
+    QLabel *m_layerLabel = nullptr;
     QComboBox *m_inputAssetCombo = nullptr;
     QLabel *m_inputAssetLabel = nullptr;
 

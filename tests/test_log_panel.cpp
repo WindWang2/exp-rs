@@ -14,7 +14,7 @@
 TEST_CASE("LogPanel can be created", "[logging]") {
     LogPanel panel;
     CHECK(panel.widget() != nullptr);
-    CHECK(panel.windowTitle().contains("Log", Qt::CaseInsensitive));
+    CHECK((panel.windowTitle().contains("Log", Qt::CaseInsensitive) || panel.windowTitle().contains("日志")));
 }
 
 TEST_CASE("LogPanel receives messages from QgsMessageLog", "[logging]") {

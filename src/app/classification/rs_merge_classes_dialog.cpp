@@ -6,10 +6,13 @@
 #include <QColorDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QVBoxLayout>
+
+#include "dialogs/dialog_utils.h"
 
 #include <algorithm>
 
@@ -26,43 +29,49 @@ QMap<int, int> buildRecodeMap( const QList<int> &sourceIds, int targetId )
 RsMergeClassesDialog::RsMergeClassesDialog( QWidget *parent )
   : QDialog( parent )
 {
-  setWindowTitle( tr( "合并类别" ) );
+  setWindowTitle( tr( "合并分类类别" ) );
   setObjectName( QStringLiteral( "rsMergeClassesDialog" ) );
+  SicnuUi::polishDialog( this, 380 );
   setModal( true );
-  resize( 360, 200 );
 
-  auto *root = new QVBoxLayout( this );
-  root->setContentsMargins( 12, 12, 12, 12 );
-  root->setSpacing( 10 );
+  auto *root = SicnuUi::makeDialogRootLayout( this );
 
-  m_sourceLabel = new QLabel( this );
+  m_sourceLabel = SicnuUi::makeHintLabel( this, QString() );
   m_sourceLabel->setWordWrap( true );
   root->addWidget( m_sourceLabel );
 
-  auto *form = new QFormLayout;
-  form->setSpacing( 8 );
+  auto *targetGroup = SicnuUi::makeGroup( this, tr( "合并目标类别属性" ) );
+  auto *form = SicnuUi::makeFormLayout( targetGroup );
 
-  m_targetIdLabel = new QLabel( this );
+  m_targetIdLabel = new QLabel( targetGroup );
   SicnuDialogHelp::tip( m_targetIdLabel, tr( "合并后新类别的 ID（固定取所选源类别的最小 ID）" ) );
-  form->addRow( tr( "目标 ID:" ), m_targetIdLabel );
+  form->addRow( tr( "目标 ID" ), m_targetIdLabel );
 
-  m_nameEdit = new QLineEdit( this );
+  m_nameEdit = new QLineEdit( targetGroup );
+  m_nameEdit->setObjectName( QStringLiteral( "mergeTargetNameEdit" ) );
   SicnuDialogHelp::tip( m_nameEdit, tr( "合并后新类别的显示名称" ) );
-  form->addRow( tr( "目标名称:" ), m_nameEdit );
+  form->addRow( tr( "目标名称" ), m_nameEdit );
 
-  m_colorBtn = new QPushButton( this );
+  m_colorBtn = new QPushButton( targetGroup );
+  m_colorBtn->setObjectName( QStringLiteral( "mergeTargetColorBtn" ) );
   SicnuDialogHelp::tip( m_colorBtn, tr( "点击选择合并后新类别在地图与分类表中的显示颜色" ) );
   connect( m_colorBtn, &QPushButton::clicked, this, &RsMergeClassesDialog::pickColor );
-  form->addRow( tr( "目标颜色:" ), m_colorBtn );
+  form->addRow( tr( "目标颜色" ), m_colorBtn );
 
-  root->addLayout( form );
+  root->addWidget( targetGroup );
 
   SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "merge_classes" ) );
 
   auto *buttons = new QDialogButtonBox(
     QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this );
+  buttons->button( QDialogButtonBox::Ok )->setText( tr( "确定" ) );
+  buttons->button( QDialogButtonBox::Cancel )->setText( tr( "取消" ) );
+  SicnuUi::markPrimary( buttons->button( QDialogButtonBox::Ok ) );
+  SicnuUi::markSecondary( buttons->button( QDialogButtonBox::Cancel ) );
+
   auto *helpBtn = buttons->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
   helpBtn->setToolTip( tr( "打开本对话框的帮助说明。" ) );
+  SicnuUi::markSecondary( helpBtn );
   connect( helpBtn, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "merge_classes" ), windowTitle() );
   } );

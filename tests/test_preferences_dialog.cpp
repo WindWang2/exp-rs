@@ -1,208 +1,171 @@
-// Preferences Dialog tests — verify settings dialog functionality
+// tests/test_preferences_dialog.cpp — Comprehensive tests for real PreferencesDialog
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
-#include <QDialog>
 #include <QSettings>
 #include <QTabWidget>
 #include <QLineEdit>
 #include <QComboBox>
-#include <QVBoxLayout>
+#include <QCheckBox>
+#include <QDialogButtonBox>
+#include <QPushButton>
 
-// Mock PreferencesDialog for testing
-class TestPreferencesDialog : public QDialog
+#include <qgsapplication.h>
+
+#include "dialogs/preferences_dialog.h"
+
+namespace {
+
+void ensureQgisApp()
 {
-public:
-    TestPreferencesDialog(QWidget *parent = nullptr) : QDialog(parent)
-    {
-        setWindowTitle("Preferences");
-        m_tabWidget = new QTabWidget(this);
+    if ( QApplication::instance() )
+        return;
 
-        // General tab
-        auto *generalTab = new QWidget();
-        m_themeCombo = new QComboBox(generalTab);
-        m_themeCombo->addItems({"Light", "Dark"});
-        m_crsCombo = new QComboBox(generalTab);
-        m_crsCombo->addItems({"EPSG:4326", "EPSG:3857", "EPSG:32649"});
-        m_tabWidget->addTab(generalTab, "General");
+    static int argc = 1;
+    static char appName[] = "test_preferences_dialog";
+    static char *argv[] = { appName, nullptr };
+    static auto *app = new QgsApplication( argc, argv, true );
+    ( void ) app;
+    QgsApplication::initQgis();
+}
 
-        // Tools tab
-        auto *toolsTab = new QWidget();
-        m_gdalPathEdit = new QLineEdit(toolsTab);
-        m_otbPathEdit = new QLineEdit(toolsTab);
-        m_tabWidget->addTab(toolsTab, "Tools");
+} // namespace
 
-        // About tab
-        auto *aboutTab = new QWidget();
-        m_tabWidget->addTab(aboutTab, "About");
-    }
-
-    int tabCount() const { return m_tabWidget->count(); }
-    QString tabTitle(int index) const { return m_tabWidget->tabText(index); }
-
-    void setTheme(const QString &theme) { m_themeCombo->setCurrentText(theme); }
-    QString theme() const { return m_themeCombo->currentText(); }
-
-    void setDefaultCrs(const QString &crs) { m_crsCombo->setCurrentText(crs); }
-    QString defaultCrs() const { return m_crsCombo->currentText(); }
-
-    void setGdalPath(const QString &path) { m_gdalPathEdit->setText(path); }
-    QString gdalPath() const { return m_gdalPathEdit->text(); }
-
-    void setOtbPath(const QString &path) { m_otbPathEdit->setText(path); }
-    QString otbPath() const { return m_otbPathEdit->text(); }
-
-    void loadSettings()
-    {
-        QSettings settings;
-        setTheme(settings.value("preferences/theme", "Light").toString());
-        setDefaultCrs(settings.value("preferences/defaultCrs", "EPSG:4326").toString());
-        setGdalPath(settings.value("tools/gdalPath", "").toString());
-        setOtbPath(settings.value("tools/otbPath", "").toString());
-    }
-
-    void saveSettings()
-    {
-        QSettings settings;
-        settings.setValue("preferences/theme", theme());
-        settings.setValue("preferences/defaultCrs", defaultCrs());
-        settings.setValue("tools/gdalPath", gdalPath());
-        settings.setValue("tools/otbPath", otbPath());
-    }
-
-private:
-    QTabWidget *m_tabWidget;
-    QComboBox *m_themeCombo;
-    QComboBox *m_crsCombo;
-    QLineEdit *m_gdalPathEdit;
-    QLineEdit *m_otbPathEdit;
-};
-
-// Helper to ensure single QApplication instance
-static QApplication *ensureApp()
+TEST_CASE( "PreferencesDialog - Creation and UI Structure", "[gui][preferences]" )
 {
-    if (!qApp) {
-        static int argc = 1;
-        static char appName[] = "test_runner";
-        static char *argv[] = { appName, nullptr };
-        new QApplication(argc, argv);
-    }
-    return static_cast<QApplication*>(qApp);
+    ensureQgisApp();
+
+    PreferencesDialog dialog;
+    CHECK( ( dialog.windowTitle().contains( "Preferences", Qt::CaseInsensitive ) || dialog.windowTitle().contains( "首选项" ) ) );
+
+    auto *tabWidget = dialog.findChild<QTabWidget *>( QStringLiteral( "preferencesTabWidget" ) );
+    REQUIRE( tabWidget != nullptr );
+    CHECK( tabWidget->count() == 3 );
+    CHECK( ( tabWidget->tabText( 0 ).contains( "General" ) || tabWidget->tabText( 0 ).contains( "常规" ) ) );
+    CHECK( ( tabWidget->tabText( 1 ).contains( "Tools" ) || tabWidget->tabText( 1 ).contains( "外部工具" ) ) );
+    CHECK( ( tabWidget->tabText( 2 ).contains( "About" ) || tabWidget->tabText( 2 ).contains( "关于" ) ) );
+
+    auto *buttonBox = dialog.findChild<QDialogButtonBox *>( QStringLiteral( "preferencesButtonBox" ) );
+    REQUIRE( buttonBox != nullptr );
+    CHECK( buttonBox->button( QDialogButtonBox::Ok ) != nullptr );
+    CHECK( buttonBox->button( QDialogButtonBox::Cancel ) != nullptr );
+    CHECK( buttonBox->button( QDialogButtonBox::Apply ) != nullptr );
+    CHECK( buttonBox->button( QDialogButtonBox::Help ) != nullptr );
 }
 
+TEST_CASE( "PreferencesDialog - Theme Setting", "[gui][preferences]" )
+{
+    ensureQgisApp();
 
-TEST_CASE("PreferencesDialog creation", "[gui][preferences]") {
-    ensureApp();
+    PreferencesDialog dialog;
 
-    SECTION("Creates with correct title") {
-        TestPreferencesDialog dialog;
-        CHECK(dialog.windowTitle() == "Preferences");
+    SECTION( "Default theme is light" ) {
+        CHECK( dialog.theme() == "light" );
     }
 
-    SECTION("Has required tabs") {
-        TestPreferencesDialog dialog;
-        CHECK(dialog.tabCount() == 3);
-        CHECK(dialog.tabTitle(0) == "General");
-        CHECK(dialog.tabTitle(1) == "Tools");
-        CHECK(dialog.tabTitle(2) == "About");
-    }
-}
-
-TEST_CASE("PreferencesDialog theme setting", "[gui][preferences]") {
-    ensureApp();
-
-    TestPreferencesDialog dialog;
-
-    SECTION("Default theme is Light") {
-        CHECK(dialog.theme() == "Light");
+    SECTION( "Can set dark theme" ) {
+        dialog.setTheme( "dark" );
+        CHECK( dialog.theme() == "dark" );
     }
 
-    SECTION("Can set Dark theme") {
-        dialog.setTheme("Dark");
-        CHECK(dialog.theme() == "Dark");
-    }
-}
-
-TEST_CASE("PreferencesDialog CRS setting", "[gui][preferences]") {
-    ensureApp();
-
-    TestPreferencesDialog dialog;
-
-    SECTION("Default CRS is EPSG:4326") {
-        CHECK(dialog.defaultCrs() == "EPSG:4326");
-    }
-
-    SECTION("Can set different CRS") {
-        dialog.setDefaultCrs("EPSG:3857");
-        CHECK(dialog.defaultCrs() == "EPSG:3857");
+    SECTION( "Can toggle back to light theme" ) {
+        dialog.setTheme( "dark" );
+        CHECK( dialog.theme() == "dark" );
+        dialog.setTheme( "light" );
+        CHECK( dialog.theme() == "light" );
     }
 }
 
-TEST_CASE("PreferencesDialog tool paths", "[gui][preferences]") {
-    ensureApp();
+TEST_CASE( "PreferencesDialog - CRS Setting", "[gui][preferences]" )
+{
+    ensureQgisApp();
 
-    TestPreferencesDialog dialog;
+    PreferencesDialog dialog;
 
-    SECTION("Default paths are empty") {
-        CHECK(dialog.gdalPath().isEmpty());
-        CHECK(dialog.otbPath().isEmpty());
+    SECTION( "Default CRS is EPSG:4326" ) {
+        CHECK( dialog.defaultCrs().contains( "EPSG:4326" ) );
     }
 
-    SECTION("Can set GDAL path") {
-        dialog.setGdalPath("/usr/bin");
-        CHECK(dialog.gdalPath() == "/usr/bin");
-    }
+    SECTION( "Can set different CRS" ) {
+        dialog.setDefaultCrs( "EPSG:3857" );
+        CHECK( dialog.defaultCrs().contains( "EPSG:3857" ) );
 
-    SECTION("Can set OTB path") {
-        dialog.setOtbPath("/opt/otb/bin");
-        CHECK(dialog.otbPath() == "/opt/otb/bin");
+        dialog.setDefaultCrs( "EPSG:32649" );
+        CHECK( dialog.defaultCrs().contains( "EPSG:32649" ) );
     }
 }
 
-TEST_CASE("PreferencesDialog settings persistence", "[gui][preferences]") {
-    ensureApp();
+TEST_CASE( "PreferencesDialog - Tool Paths Configuration", "[gui][preferences]" )
+{
+    ensureQgisApp();
 
-    QSettings::setDefaultFormat(QSettings::IniFormat);
+    PreferencesDialog dialog;
+
+    SECTION( "Default paths" ) {
+        // Can be empty or preloaded from settings
+        dialog.setGdalPath( "" );
+        dialog.setOtbPath( "" );
+        CHECK( dialog.gdalPath().isEmpty() );
+        CHECK( dialog.otbPath().isEmpty() );
+    }
+
+    SECTION( "Can set GDAL path" ) {
+        dialog.setGdalPath( "/usr/bin" );
+        CHECK( dialog.gdalPath() == "/usr/bin" );
+    }
+
+    SECTION( "Can set OTB path" ) {
+        dialog.setOtbPath( "/opt/otb/bin" );
+        CHECK( dialog.otbPath() == "/opt/otb/bin" );
+    }
+}
+
+TEST_CASE( "PreferencesDialog - Logging Configuration", "[gui][preferences]" )
+{
+    ensureQgisApp();
+
+    PreferencesDialog dialog;
+
+    SECTION( "Toggle log to file" ) {
+        dialog.setLogToFile( true );
+        CHECK( dialog.logToFile() == true );
+
+        dialog.setLogToFile( false );
+        CHECK( dialog.logToFile() == false );
+    }
+
+    SECTION( "Set log file path" ) {
+        dialog.setLogFilePath( "/tmp/rs_studio.log" );
+        CHECK( dialog.logFilePath() == "/tmp/rs_studio.log" );
+    }
+}
+
+TEST_CASE( "PreferencesDialog - Settings Persistence via saveSettings and loadSettings", "[gui][preferences]" )
+{
+    ensureQgisApp();
+
+    QSettings::setDefaultFormat( QSettings::IniFormat );
     QSettings settings;
     settings.clear();
 
-    SECTION("Save and load settings") {
-        TestPreferencesDialog dialog1;
-        dialog1.setTheme("Dark");
-        dialog1.setDefaultCrs("EPSG:32649");
-        dialog1.setGdalPath("/usr/local/bin");
+    SECTION( "Save and load round-trip" ) {
+        PreferencesDialog dialog1;
+        dialog1.setTheme( "dark" );
+        dialog1.setDefaultCrs( "EPSG:32649" );
+        dialog1.setGdalPath( "/usr/local/bin" );
+        dialog1.setOtbPath( "/opt/otb/bin" );
+        dialog1.setLogToFile( true );
+        dialog1.setLogFilePath( "/var/log/rs_test.log" );
         dialog1.saveSettings();
 
-        TestPreferencesDialog dialog2;
+        PreferencesDialog dialog2;
         dialog2.loadSettings();
-        CHECK(dialog2.theme() == "Dark");
-        CHECK(dialog2.defaultCrs() == "EPSG:32649");
-        CHECK(dialog2.gdalPath() == "/usr/local/bin");
-    }
-
-    settings.clear();
-}
-
-TEST_CASE("Theme setting is read from QSettings on startup", "[gui][preferences][theme]") {
-    ensureApp();
-
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings settings;
-    settings.clear();
-
-    SECTION("Dark theme is saved and can be read") {
-        // Save dark theme
-        settings.setValue("preferences/theme", "dark");
-
-        // Read it back
-        QString theme = settings.value("preferences/theme", "light").toString();
-        CHECK(theme == "dark");
-    }
-
-    SECTION("Default theme is light when not set") {
-        // Don't set any theme
-        QString theme = settings.value("preferences/theme", "light").toString();
-        CHECK(theme == "light");
+        CHECK( dialog2.theme() == "dark" );
+        CHECK( dialog2.defaultCrs().contains( "EPSG:32649" ) );
+        CHECK( dialog2.gdalPath() == "/usr/local/bin" );
+        CHECK( dialog2.otbPath() == "/opt/otb/bin" );
+        CHECK( dialog2.logToFile() == true );
+        CHECK( dialog2.logFilePath() == "/var/log/rs_test.log" );
     }
 
     settings.clear();

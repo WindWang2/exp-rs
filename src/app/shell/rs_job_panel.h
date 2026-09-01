@@ -26,6 +26,9 @@ class QTabWidget;
 class QMenu;
 class QPoint;
 class QLabel;
+namespace sicnu {
+class RsEmptyStateWidget;
+}
 
 /**
  * Unified task list projected from Task Center.
@@ -82,6 +85,8 @@ class RsJobPanel : public QgsDockWidget
     void copyText( const QString &text );
 
     QTreeWidget *m_jobTree = nullptr;
+    class QStackedWidget *m_treeStack = nullptr;
+    sicnu::RsEmptyStateWidget *m_emptyState = nullptr;
     QTabWidget *m_detailTabs = nullptr;
     QPlainTextEdit *m_detailView = nullptr;
     QPlainTextEdit *m_logView = nullptr;

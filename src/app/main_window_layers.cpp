@@ -243,7 +243,7 @@ void QgisDesktopWindow::layerProperties()
 {
     QList<QgsMapLayer*> selected = m_activeViewHost->selectedLayers();
     if (selected.isEmpty()) {
-        QMessageBox::information(this, "Layer Properties", "No layer selected");
+        QMessageBox::information(this, tr("图层属性"), tr("未选中任何图层"));
         return;
     }
 
@@ -271,7 +271,7 @@ void QgisDesktopWindow::setProjectCrs()
                 m_mapCanvas->setDestinationCrs(crs);
                 m_mapCanvas->refresh();
                 updateCrsDisplay();
-                statusBar()->showMessage(QString("Project CRS set to: %1").arg(crs.authid()), 3000);
+                statusBar()->showMessage(tr("工程坐标系设置为: %1").arg(crs.authid()), 3000);
             }
         }
     }

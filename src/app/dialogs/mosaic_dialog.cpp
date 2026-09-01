@@ -25,33 +25,41 @@ void MosaicDialog::setupUi()
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
   setupHelpBanner( mainLayout );
 
-  QFrame *sec = SicnuUi::makeSection(
-    this, tr( "输入影像" ),
-    tr( "至少 2 个栅格；投影宜一致。重叠区按引擎默认策略合并。" ) );
+  QGroupBox *inputGroup = setupInputGroup(
+    mainLayout, tr( "输入影像列表" ) );
+  inputGroup->setToolTip(
+    tr( "至少添加 2 个栅格文件；建议统一空间参考与分辨率。重叠区按默认策略拼接合并。" ) );
 
-  m_inputList = new QListWidget( sec );
+  auto *groupLayout = new QVBoxLayout( inputGroup );
+  groupLayout->setContentsMargins( 10, 8, 10, 8 );
+  groupLayout->setSpacing( 8 );
+
+  m_inputList = new QListWidget( inputGroup );
+  m_inputList->setObjectName( QStringLiteral( "mosaicInputList" ) );
   m_inputList->setMinimumHeight( 140 );
-  SicnuDialogHelp::tip( m_inputList, tr( "参与镶嵌的栅格列表。" ) );
-  qobject_cast<QVBoxLayout *>( sec->layout() )->addWidget(  m_inputList );
+  m_inputList->setAlternatingRowColors( true );
+  SicnuDialogHelp::tip( m_inputList, tr( "参与镶嵌的栅格文件列表。" ) );
+  groupLayout->addWidget( m_inputList );
 
   auto *btnRow = new QHBoxLayout();
-  auto *addBtn = new QPushButton( tr( "添加…" ), sec );
+  btnRow->setSpacing( 8 );
+  auto *addBtn = new QPushButton( tr( "添加文件…" ), inputGroup );
   SicnuUi::markSecondary( addBtn );
-  SicnuDialogHelp::tip( addBtn, tr( "添加一个或多个栅格文件。" ) );
+  SicnuDialogHelp::tip( addBtn, tr( "添加一个或多个栅格文件到待镶嵌列表。" ) );
   connect( addBtn, &QPushButton::clicked, this, &MosaicDialog::addInputFile );
   btnRow->addWidget( addBtn );
 
-  auto *removeBtn = new QPushButton( tr( "移除选中" ), sec );
+  auto *removeBtn = new QPushButton( tr( "移除选中" ), inputGroup );
   SicnuUi::markSecondary( removeBtn );
-  SicnuDialogHelp::tip( removeBtn, tr( "从列表移除选中文件。" ) );
+  SicnuDialogHelp::tip( removeBtn, tr( "从待镶嵌列表中移除选中的栅格文件。" ) );
   connect( removeBtn, &QPushButton::clicked, this, &MosaicDialog::removeInputFile );
   btnRow->addWidget( removeBtn );
   btnRow->addStretch();
-  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( btnRow );
-  qobject_cast<QVBoxLayout *>( sec->layout() )->addWidget(  SicnuUi::makeHintLabel(
-    sec, tr( "建议：先统一投影与分辨率，再镶嵌。" ) ) );
+  groupLayout->addLayout( btnRow );
 
-  mainLayout->addWidget( sec );
+  groupLayout->addWidget( SicnuUi::makeHintLabel(
+    inputGroup, tr( "提示：建议在镶嵌前统一各影像的坐标参考系 (CRS) 与像元分辨率。" ) ) );
+
   setupOutputRow( mainLayout );
   setupButtonBar( mainLayout );
   mainLayout->addStretch( 1 );

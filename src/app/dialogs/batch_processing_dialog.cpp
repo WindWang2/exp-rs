@@ -27,6 +27,7 @@
 #include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QEventLoop>
+#include <QGroupBox>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -185,27 +186,27 @@ void BatchProcessingDialog::setupUi()
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
 
   // Help strip
-  auto *banner = SicnuUi::makeSection(
-    this, tr( "流程" ),
-    tr( "选算法 → 添加文件 → 设输出目录 → 运行批量。" ) );
-  qobject_cast<QVBoxLayout *>( banner->layout() )->addWidget(  SicnuUi::makeHintLabel(
+  auto *banner = SicnuUi::makeGroup(
+    this, tr( "批处理流程指引" ),
+    tr( "选择算法 → 添加待处理文件 → 设置输出目录 → 启动批量处理任务。" ) );
+  auto *bannerLayout = new QVBoxLayout( banner );
+  bannerLayout->setContentsMargins( 10, 8, 10, 8 );
+  bannerLayout->addWidget( SicnuUi::makeHintLabel(
     banner, SicnuDialogHelp::shortForTool(
               QStringLiteral( "batch_processing" ), tr( "批量处理" ) ) ) );
   mainLayout->addWidget( banner );
 
-  QFrame *algSec = SicnuUi::makeSection( this, tr( "算法" ) );
-  auto *algForm = new QFormLayout();
-  algForm->setContentsMargins( 0, 0, 0, 0 );
-  m_algorithmCombo = new QComboBox( algSec );
+  QGroupBox *algGroup = SicnuUi::makeGroup( this, tr( "算法选择" ) );
+  auto *algForm = SicnuUi::makeFormLayout( algGroup );
+  m_algorithmCombo = new QComboBox( algGroup );
   m_algorithmCombo->setObjectName( QStringLiteral( "batchAlgorithmCombo" ) );
-  m_algorithmCombo->setMinimumWidth( 300 );
+  m_algorithmCombo->setMinimumWidth( 320 );
   SicnuDialogHelp::tip( m_algorithmCombo, tr(
-    "选择要批量运行的算法。建议先在工具箱对单文件验证。" ) );
+    "选择要批量运行的遥感或地理处理算法。建议先在工具箱对单个文件验证效果。" ) );
   connect( m_algorithmCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &BatchProcessingDialog::onAlgorithmChanged );
   algForm->addRow( tr( "处理算法" ), m_algorithmCombo );
-  qobject_cast<QVBoxLayout *>( algSec->layout() )->addLayout( algForm );
-  mainLayout->addWidget( algSec );
+  mainLayout->addWidget( algGroup );
 
   const auto algorithms = QgsApplication::processingRegistry()->algorithms();
   for ( const QgsProcessingAlgorithm *alg : algorithms )
@@ -228,52 +229,56 @@ void BatchProcessingDialog::setupUi()
   }
 
   // Operator parameter overrides (advanced): rebuilt on algorithm change.
-  m_paramFrame = SicnuUi::makeSection( this, tr( "参数覆盖" ),
-                                       tr( "覆盖批量运行所用的算法参数（输入与输出由文件列表决定）。" ) );
-  m_paramForm = new QFormLayout();
-  m_paramForm->setContentsMargins( 0, 0, 0, 0 );
-  qobject_cast<QVBoxLayout *>( m_paramFrame->layout() )->addLayout( m_paramForm );
+  m_paramFrame = SicnuUi::makeGroup( this, tr( "算法参数覆盖 (可选)" ),
+                                     tr( "覆盖批量运行所用的算法参数（输入与输出由待处理文件列表自动决定）。" ) );
+  m_paramForm = SicnuUi::makeFormLayout( m_paramFrame );
   m_paramFrame->setVisible( false );
   mainLayout->addWidget( m_paramFrame );
 
-  QFrame *fileSec = SicnuUi::makeSection( this, tr( "输入文件" ) );
-  m_fileList = new QListWidget( fileSec );
+  QGroupBox *fileGroup = SicnuUi::makeGroup( this, tr( "输入文件列表" ) );
+  auto *fileGroupLayout = new QVBoxLayout( fileGroup );
+  fileGroupLayout->setContentsMargins( 10, 8, 10, 8 );
+  fileGroupLayout->setSpacing( 8 );
+
+  m_fileList = new QListWidget( fileGroup );
   m_fileList->setObjectName( QStringLiteral( "batchFileList" ) );
   m_fileList->setSelectionMode( QListWidget::ExtendedSelection );
   m_fileList->setMinimumHeight( 140 );
-  SicnuDialogHelp::tip( m_fileList, tr( "待处理文件列表。" ) );
-  qobject_cast<QVBoxLayout *>( fileSec->layout() )->addWidget(  m_fileList );
+  m_fileList->setAlternatingRowColors( true );
+  SicnuDialogHelp::tip( m_fileList, tr( "待处理的文件列表。" ) );
+  fileGroupLayout->addWidget( m_fileList );
+
   auto *fileButtonLayout = new QHBoxLayout();
-  m_addFilesBtn = new QPushButton( tr( "添加文件…" ), fileSec );
+  fileButtonLayout->setSpacing( 8 );
+  m_addFilesBtn = new QPushButton( tr( "添加文件…" ), fileGroup );
   SicnuUi::markSecondary( m_addFilesBtn );
   connect( m_addFilesBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onAddFiles );
   fileButtonLayout->addWidget( m_addFilesBtn );
-  m_removeBtn = new QPushButton( tr( "移除选中" ), fileSec );
+  m_removeBtn = new QPushButton( tr( "移除选中" ), fileGroup );
   SicnuUi::markSecondary( m_removeBtn );
   connect( m_removeBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onRemoveSelected );
   fileButtonLayout->addWidget( m_removeBtn );
   fileButtonLayout->addStretch();
-  qobject_cast<QVBoxLayout *>( fileSec->layout() )->addLayout( fileButtonLayout );
-  mainLayout->addWidget( fileSec );
+  fileGroupLayout->addLayout( fileButtonLayout );
+  mainLayout->addWidget( fileGroup );
 
-  QFrame *outSec = SicnuUi::makeSection( this, tr( "输出" ) );
-  auto *outForm = new QFormLayout();
-  outForm->setContentsMargins( 0, 0, 0, 0 );
-  m_outputDirEdit = new QLineEdit( outSec );
+  QGroupBox *outGroup = SicnuUi::makeGroup( this, tr( "输出目录设置" ) );
+  auto *outForm = SicnuUi::makeFormLayout( outGroup );
+  m_outputDirEdit = new QLineEdit( outGroup );
   m_outputDirEdit->setObjectName( QStringLiteral( "batchOutputDirEdit" ) );
-  SicnuDialogHelp::tip( m_outputDirEdit, tr( "所有结果写入此目录。" ) );
+  m_outputDirEdit->setPlaceholderText( tr( "选择批量处理结果保存目录…" ) );
+  SicnuDialogHelp::tip( m_outputDirEdit, tr( "所有批量运行的结果文件均写入此目录。" ) );
   connect( m_outputDirEdit, &QLineEdit::textChanged, this, [this]( const QString &text ) {
     m_outputDir = text.trimmed();
   } );
-  m_browseBtn = new QPushButton( tr( "浏览…" ), outSec );
+  m_browseBtn = new QPushButton( tr( "浏览…" ), outGroup );
   SicnuUi::markSecondary( m_browseBtn );
   connect( m_browseBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onBrowseOutputDir );
   auto *outRow = new QHBoxLayout();
   outRow->addWidget( m_outputDirEdit, 1 );
   outRow->addWidget( m_browseBtn );
   outForm->addRow( tr( "输出目录" ), outRow );
-  qobject_cast<QVBoxLayout *>( outSec->layout() )->addLayout( outForm );
-  mainLayout->addWidget( outSec );
+  mainLayout->addWidget( outGroup );
 
   m_progressBar = new QProgressBar( this );
   m_progressBar->setObjectName( QStringLiteral( "batchProgressBar" ) );
@@ -282,24 +287,24 @@ void BatchProcessingDialog::setupUi()
   m_statusLabel = SicnuUi::makeHintLabel( this, tr( "就绪" ) );
   mainLayout->addWidget( m_statusLabel );
 
-  auto *btnLayout = SicnuUi::makeActionRow( this );
-  auto *helpBtn = new QPushButton( tr( "帮助" ), this );
+  auto *buttonBox = new QDialogButtonBox( this );
+  buttonBox->setObjectName( QStringLiteral( "rsDialogButtonBox" ) );
+  auto *helpBtn = buttonBox->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
   SicnuUi::markSecondary( helpBtn );
   connect( helpBtn, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "batch_processing" ), windowTitle() );
   } );
-  btnLayout->addWidget( helpBtn );
-  btnLayout->addStretch();
-  auto *closeBtn = new QPushButton( tr( "关闭" ), this );
+
+  auto *closeBtn = buttonBox->addButton( tr( "关闭" ), QDialogButtonBox::RejectRole );
   SicnuUi::markSecondary( closeBtn );
   connect( closeBtn, &QPushButton::clicked, this, &QDialog::accept );
-  btnLayout->addWidget( closeBtn );
-  m_runButton = new QPushButton( tr( "运行批量" ), this );
+
+  m_runButton = buttonBox->addButton( tr( "运行批量" ), QDialogButtonBox::AcceptRole );
   SicnuUi::markPrimary( m_runButton );
-  SicnuDialogHelp::tip( m_runButton, tr( "按列表顺序运行。运行中请勿关闭。" ) );
+  SicnuDialogHelp::tip( m_runButton, tr( "按列表顺序逐个执行处理任务。批量运行中请勿强制关闭对话框。" ) );
   connect( m_runButton, &QPushButton::clicked, this, &BatchProcessingDialog::onRun );
-  btnLayout->addWidget( m_runButton );
-  mainLayout->addLayout( btnLayout );
+
+  mainLayout->addWidget( buttonBox );
 
   // The first addItem() fired currentIndexChanged before the widgets existed;
   // rebuild the parameter section for the initially selected algorithm now.
@@ -319,8 +324,8 @@ void BatchProcessingDialog::setAlgorithmId(const QString &algorithmId)
 void BatchProcessingDialog::onAddFiles()
 {
     QStringList files = QFileDialog::getOpenFileNames(
-        this, tr("Select Input Files"), QString(),
-        tr("GeoTIFF (*.tif *.tiff);;Shapefile (*.shp);;All Files (*)"));
+        this, tr("选择输入文件"), QString(),
+        tr("遥感栅格与矢量 (*.tif *.tiff *.img *.shp *.gpkg);;所有文件 (*)"));
 
     for (const QString &file : files) {
         if (!m_inputFiles.contains(file)) {
@@ -329,7 +334,7 @@ void BatchProcessingDialog::onAddFiles()
         }
     }
 
-    m_statusLabel->setText(tr("%1 files selected").arg(m_inputFiles.size()));
+    m_statusLabel->setText(tr("已选择 %1 个输入文件").arg(m_inputFiles.size()));
 }
 
 void BatchProcessingDialog::onRemoveSelected()
@@ -341,12 +346,12 @@ void BatchProcessingDialog::onRemoveSelected()
         delete item;
     }
 
-    m_statusLabel->setText(tr("%1 files selected").arg(m_inputFiles.size()));
+    m_statusLabel->setText(tr("已选择 %1 个输入文件").arg(m_inputFiles.size()));
 }
 
 void BatchProcessingDialog::onBrowseOutputDir()
 {
-    QString dir = QFileDialog::getExistingDirectory(this, tr("Select Output Directory"));
+    QString dir = QFileDialog::getExistingDirectory(this, tr("选择输出目录"));
     if (!dir.isEmpty()) {
         m_outputDir = dir;
         m_outputDirEdit->setText(dir);
@@ -366,7 +371,7 @@ void BatchProcessingDialog::onRun()
     if (m_isRunning) {
         m_canceled = true;
         m_runButton->setEnabled(false);
-        m_statusLabel->setText(tr("Canceling..."));
+        m_statusLabel->setText(tr("正在取消…"));
         // Actually cancel the in-flight item; its terminal record advances the
         // chain (submitNextBatchItem stops on m_canceled).
         if (m_batchTaskId > 0)
@@ -375,8 +380,8 @@ void BatchProcessingDialog::onRun()
     }
 
     if (m_inputFiles.isEmpty()) {
-        QMessageBox::warning(this, tr("Batch Processing"),
-                             tr("Please add input files."));
+        QMessageBox::warning(this, tr("批量处理"),
+                             tr("请先添加待处理的输入文件。"));
         return;
     }
 
@@ -385,8 +390,8 @@ void BatchProcessingDialog::onRun()
     }
 
     if (m_outputDir.isEmpty()) {
-        QMessageBox::warning(this, tr("Batch Processing"),
-                             tr("Please select an output directory."));
+        QMessageBox::warning(this, tr("批量处理"),
+                             tr("请指定输出保存目录。"));
         return;
     }
 
@@ -394,8 +399,8 @@ void BatchProcessingDialog::onRun()
     {
         QDir outDir(m_outputDir);
         if (!outDir.exists() && !outDir.mkpath(QStringLiteral("."))) {
-            QMessageBox::warning(this, tr("Batch Processing"),
-                                 tr("Failed to create output directory:\n%1").arg(m_outputDir));
+            QMessageBox::warning(this, tr("批量处理"),
+                                 tr("创建输出目录失败：\n%1").arg(m_outputDir));
             return;
         }
     }
@@ -403,7 +408,7 @@ void BatchProcessingDialog::onRun()
     // Toggle button to Cancel during batch; lock configuration controls against concurrent mutation
     m_isRunning = true;
     m_canceled = false;
-    m_runButton->setText(tr("Cancel"));
+    m_runButton->setText(tr("取消"));
     m_runButton->setEnabled(true);
     if (m_addFilesBtn) m_addFilesBtn->setEnabled(false);
     if (m_removeBtn) m_removeBtn->setEnabled(false);
@@ -459,7 +464,7 @@ void BatchProcessingDialog::onRun()
 void BatchProcessingDialog::submitNextBatchItem()
 {
     if (m_canceled) {
-        m_batchErrors.append(tr("Batch canceled by user"));
+        m_batchErrors.append(tr("批量处理已被用户取消"));
         finishBatch();
         return;
     }
@@ -469,12 +474,12 @@ void BatchProcessingDialog::submitNextBatchItem()
     }
 
     const QString inputFile = m_batchFiles.at(m_batchIndex);
-    m_statusLabel->setText(tr("Processing %1...").arg(QFileInfo(inputFile).fileName()));
+    m_statusLabel->setText(tr("正在处理 %1…").arg(QFileInfo(inputFile).fileName()));
     const QString outputPath = uniqueOutputPath(inputFile);
 
     sicnu::jobs::JobRequest request;
     request.algorithmId = QStringLiteral("batch:%1").arg(m_batchAlgorithmId).toStdString();
-    request.title = tr("Batch: %1").arg(QFileInfo(inputFile).fileName()).toStdString();
+    request.title = tr("批量: %1").arg(QFileInfo(inputFile).fileName()).toStdString();
     request.source = "batch_dialog";
 
     // The executor wraps the (unchanged) synchronous item runner; parameter
@@ -496,7 +501,7 @@ void BatchProcessingDialog::submitNextBatchItem()
     m_batchTaskId = sicnu::TaskCenter::instance().submitJob(request, executor);
     if (m_batchTaskId <= 0) {
         m_batchFail++;
-        m_batchErrors.append(tr("%1: task submission failed")
+        m_batchErrors.append(tr("%1: 任务提交失败")
                                  .arg(QFileInfo(inputFile).fileName()));
         ++m_batchIndex;
         submitNextBatchItem();
@@ -520,7 +525,7 @@ void BatchProcessingDialog::onBatchTaskUpdated(const sicnu::AlgorithmTaskInfo &i
         m_batchFail++;
         QString reason = info.errorMessage;
         if (reason.isEmpty())
-            reason = tr("Invalid parameters");
+            reason = tr("参数无效");
         const QString entry = tr("%1: %2").arg(QFileInfo(inputFile).fileName(), reason);
         m_batchErrors.append(entry);
         QgsMessageLog::logMessage(entry, QStringLiteral("batch"), Qgis::MessageLevel::Warning);
@@ -534,7 +539,7 @@ void BatchProcessingDialog::finishBatch()
 {
     m_isRunning = false;
     m_batchTaskId = -1;
-    m_runButton->setText(tr("Run Batch"));
+    m_runButton->setText(tr("运行批量"));
     m_runButton->setEnabled(true);
     if (m_addFilesBtn) m_addFilesBtn->setEnabled(true);
     if (m_removeBtn) m_removeBtn->setEnabled(true);
@@ -543,26 +548,26 @@ void BatchProcessingDialog::finishBatch()
     if (m_paramFrame) m_paramFrame->setEnabled(true);
 
     if (m_canceled) {
-        m_statusLabel->setText(tr("Batch canceled: %1 succeeded, %2 failed")
+        m_statusLabel->setText(tr("批量处理已取消：%1 个成功，%2 个失败")
                                    .arg(m_batchSuccess).arg(m_batchFail));
     } else {
-        m_statusLabel->setText(tr("Batch complete: %1 succeeded, %2 failed")
+        m_statusLabel->setText(tr("批量处理完成：%1 个成功，%2 个失败")
                                    .arg(m_batchSuccess).arg(m_batchFail));
     }
 
     if (m_batchFail > 0) {
-        QString details = tr("Batch complete with errors:\n%1 succeeded, %2 failed")
+        QString details = tr("批量处理完成（存在部分失败）：\n%1 个成功，%2 个失败")
                               .arg(m_batchSuccess).arg(m_batchFail);
         if (!m_batchErrors.isEmpty()) {
             const int maxShow = 8;
             details += QLatin1Char('\n') + m_batchErrors.mid(0, maxShow).join(QLatin1Char('\n'));
             if (m_batchErrors.size() > maxShow)
-                details += tr("\n… and %1 more (see log)").arg(m_batchErrors.size() - maxShow);
+                details += tr("\n… 及其余 %1 个错误（详见系统日志）").arg(m_batchErrors.size() - maxShow);
         }
-        QMessageBox::warning(this, tr("Batch Processing"), details);
+        QMessageBox::warning(this, tr("批量处理"), details);
     } else {
-        QMessageBox::information(this, tr("Batch Processing"),
-                                 tr("Batch complete:\n%1 files processed successfully")
+        QMessageBox::information(this, tr("批量处理"),
+                                 tr("批量处理完成：\n成功处理 %1 个文件")
                                      .arg(m_batchSuccess));
     }
 }

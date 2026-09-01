@@ -52,8 +52,10 @@ void QgisDesktopWindow::newProject()
 
     m_mapCanvas->setLayers({});
     m_mapCanvas->refresh();
+    updateCanvasEmptyState();
+    updateLayersEmptyState();
     updateEditingUI(nullptr);
-    statusBar()->showMessage("New project created", 3000);
+    statusBar()->showMessage(tr("已新建工程"), 3000);
 }
 
 void QgisDesktopWindow::newLayout()
@@ -75,8 +77,8 @@ void QgisDesktopWindow::openProject()
         return;
 
     QString filePath = QFileDialog::getOpenFileName(
-        this, "Open Project", "",
-        "QGIS Projects (*.qgs *.qgz);;All Files (*.*)"
+        this, tr("打开工程"), "",
+        tr("QGIS 工程文件 (*.qgs *.qgz);;所有文件 (*.*)")
     );
     if (!filePath.isEmpty()) {
         if ( !m_projectContext )
@@ -111,9 +113,11 @@ void QgisDesktopWindow::openProject()
             return;
         }
         refreshCanvasLayers();
+        updateCanvasEmptyState();
+        updateLayersEmptyState();
         updateCrsDisplay();
         updateEditingUI(currentVectorLayer());
-        statusBar()->showMessage(QString("Opened project: %1").arg(filePath), 3000);
+        statusBar()->showMessage(tr("已打开工程：%1").arg(filePath), 3000);
     }
 }
 
@@ -123,19 +127,19 @@ void QgisDesktopWindow::saveProject()
         saveProjectAs();
     } else {
         QgsProject::instance()->write();
-        statusBar()->showMessage("Project saved", 3000);
+        statusBar()->showMessage(tr("工程已保存"), 3000);
     }
 }
 
 void QgisDesktopWindow::saveProjectAs()
 {
     QString filePath = QFileDialog::getSaveFileName(
-        this, "Save Project", "",
-        "QGIS Projects (*.qgs);;All Files (*.*)"
+        this, tr("保存工程"), "",
+        tr("QGIS 工程文件 (*.qgs);;所有文件 (*.*)")
     );
     if (!filePath.isEmpty()) {
         QgsProject::instance()->write(filePath);
-        statusBar()->showMessage(QString("Saved project: %1").arg(filePath), 3000);
+        statusBar()->showMessage(tr("工程已保存至：%1").arg(filePath), 3000);
     }
 }
 

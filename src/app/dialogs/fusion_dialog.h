@@ -19,7 +19,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("fusion"); }
-    QString dialogTitle() const override { return tr("Image Fusion"); }
+    QString dialogTitle() const override { return tr("影像融合"); }
     bool validateInputs() override;
     void onRun() override;
 

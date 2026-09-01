@@ -7,6 +7,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -15,6 +16,8 @@
 #include <QSpinBox>
 #include <QTableWidget>
 #include <QVBoxLayout>
+
+#include "dialogs/dialog_utils.h"
 
 QString RsPostProcessDialog::algorithmTitle( Algorithm a )
 {
@@ -59,16 +62,15 @@ RsPostProcessDialog::RsPostProcessDialog( Algorithm algo, QWidget *parent )
   setWindowTitle( algorithmTitle( algo ) );
   setObjectName( QStringLiteral( "rsPostProcessDialog_%1" )
                    .arg( static_cast<int>( algo ) ) );
+  SicnuUi::polishDialog( this, 520 );
   setModal( true );
-  resize( 480, 360 );
+  resize( 540, 420 );
   setupUi();
 }
 
 void RsPostProcessDialog::setupUi()
 {
-  auto *root = new QVBoxLayout( this );
-  root->setContentsMargins( 12, 12, 12, 12 );
-  root->setSpacing( 10 );
+  auto *root = SicnuUi::makeDialogRootLayout( this );
 
   QString hint;
   switch ( m_algo )
@@ -89,23 +91,24 @@ void RsPostProcessDialog::setupUi()
       hint = tr( "将分类/标签栅格矢量化为面要素（.gpkg 或 .shp）。" );
       break;
   }
-  m_hintLabel = new QLabel( hint, this );
+  m_hintLabel = SicnuUi::makeHintLabel( this, hint );
   m_hintLabel->setWordWrap( true );
-  m_hintLabel->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
   root->addWidget( m_hintLabel );
 
-  auto *form = new QFormLayout;
-  form->setSpacing( 6 );
+  auto *ioGroup = SicnuUi::makeGroup( this, tr( "输入与输出数据" ) );
+  auto *ioForm = SicnuUi::makeFormLayout( ioGroup );
 
   auto makeBrowse = [this]( QLineEdit **editOut, const QString &obj,
                             const QString &placeholder, bool save,
                             const QString &filter ) {
     auto *row = new QHBoxLayout;
+    row->setSpacing( 8 );
     auto *edit = new QLineEdit( this );
     edit->setObjectName( obj );
     edit->setPlaceholderText( placeholder );
     *editOut = edit;
     auto *btn = new QPushButton( tr( "浏览…" ), this );
+    SicnuUi::markSecondary( btn );
     SicnuDialogHelp::tip( btn, save ? tr( "选择输出文件保存路径" ) : tr( "选择输入文件路径" ) );
     connect( btn, &QPushButton::clicked, this, [this, edit, save, filter, placeholder]() {
       const QString p = save
@@ -123,7 +126,7 @@ void RsPostProcessDialog::setupUi()
                             tr( "分类/标签栅格" ), false,
                             tr( "GeoTIFF (*.tif *.tiff);;All files (*)" ) );
   SicnuDialogHelp::tip( m_inputEdit, tr( "待进行后处理的输入分类或标签栅格文件" ) );
-  form->addRow( tr( "输入栅格" ), inRow );
+  ioForm->addRow( tr( "输入栅格" ), inRow );
 
   const bool isVectorOut = ( m_algo == Algorithm::Polygonize );
   auto *outRow = makeBrowse( &m_outputEdit, QStringLiteral( "ppOutput" ),
@@ -133,54 +136,66 @@ void RsPostProcessDialog::setupUi()
                                ? tr( "GeoPackage (*.gpkg);;ESRI Shapefile (*.shp)" )
                                : tr( "GeoTIFF (*.tif)" ) );
   SicnuDialogHelp::tip( m_outputEdit, isVectorOut ? tr( "矢量化输出文件路径 (*.gpkg 或 *.shp)" ) : tr( "后处理结果栅格输出路径 (*.tif)" ) );
-  form->addRow( isVectorOut ? tr( "输出矢量" ) : tr( "输出栅格" ), outRow );
+  ioForm->addRow( isVectorOut ? tr( "输出矢量" ) : tr( "输出栅格" ), outRow );
+  root->addWidget( ioGroup );
 
   // Algorithm-specific parameters
-  switch ( m_algo )
+  if ( m_algo != Algorithm::Polygonize )
   {
-    case Algorithm::Sieve:
-      m_sieveSpin = new QSpinBox( this );
-      m_sieveSpin->setRange( 1, 1000000 );
-      m_sieveSpin->setValue( 10 );
-      SicnuDialogHelp::tip( m_sieveSpin, tr( "面积阈值（像元数）：小于该像元数的碎小连通斑块将被滤除并由邻域填充" ) );
-      form->addRow( tr( "面积阈值（像元）" ), m_sieveSpin );
-      m_connectSpin = new QSpinBox( this );
-      m_connectSpin->setRange( 4, 8 );
-      m_connectSpin->setSingleStep( 4 );
-      m_connectSpin->setValue( 8 );
-      SicnuDialogHelp::tip( m_connectSpin, tr( "像素连通性：4 连通（上下左右）或 8 连通（含对角线）" ) );
-      form->addRow( tr( "连通性 (4/8)" ), m_connectSpin );
-      break;
-    case Algorithm::Majority:
-      m_majoritySpin = new QSpinBox( this );
-      m_majoritySpin->setRange( 3, 7 );
-      m_majoritySpin->setSingleStep( 2 );
-      m_majoritySpin->setValue( 3 );
-      SicnuDialogHelp::tip( m_majoritySpin, tr( "众数滤波窗口边长（奇数 3/5/7），越大平滑强度越高" ) );
-      form->addRow( tr( "核大小（奇数）" ), m_majoritySpin );
-      break;
-    case Algorithm::Clump:
-      m_connectSpin = new QSpinBox( this );
-      m_connectSpin->setRange( 4, 8 );
-      m_connectSpin->setSingleStep( 4 );
-      m_connectSpin->setValue( 8 );
-      SicnuDialogHelp::tip( m_connectSpin, tr( "连通域判定方式：4 连通或 8 连通" ) );
-      form->addRow( tr( "连通性 (4/8)" ), m_connectSpin );
-      break;
-    case Algorithm::Recode:
-      m_recodeTable = new QTableWidget( 6, 2, this );
-      m_recodeTable->setHorizontalHeaderLabels( { tr( "旧类" ), tr( "新类" ) } );
-      m_recodeTable->horizontalHeader()->setStretchLastSection( true );
-      m_recodeTable->verticalHeader()->setVisible( false );
-      m_recodeTable->setMinimumHeight( 140 );
-      SicnuDialogHelp::tip( m_recodeTable, tr( "旧类别 ID 到新类别 ID 的映射对照表" ) );
-      form->addRow( tr( "重编码表" ), m_recodeTable );
-      break;
-    case Algorithm::Polygonize:
-      break;
-  }
+    auto *paramGroup = SicnuUi::makeGroup( this, tr( "算法控制参数" ) );
+    auto *paramForm = SicnuUi::makeFormLayout( paramGroup );
 
-  root->addLayout( form );
+    switch ( m_algo )
+    {
+      case Algorithm::Sieve:
+        m_sieveSpin = new QSpinBox( paramGroup );
+        m_sieveSpin->setObjectName( QStringLiteral( "ppSieveSpin" ) );
+        m_sieveSpin->setRange( 1, 1000000 );
+        m_sieveSpin->setValue( 10 );
+        SicnuDialogHelp::tip( m_sieveSpin, tr( "面积阈值（像元数）：小于该像元数的碎小连通斑块将被滤除并由邻域填充" ) );
+        paramForm->addRow( tr( "面积阈值 (像元)" ), m_sieveSpin );
+        m_connectSpin = new QSpinBox( paramGroup );
+        m_connectSpin->setObjectName( QStringLiteral( "ppConnectSpin" ) );
+        m_connectSpin->setRange( 4, 8 );
+        m_connectSpin->setSingleStep( 4 );
+        m_connectSpin->setValue( 8 );
+        SicnuDialogHelp::tip( m_connectSpin, tr( "像素连通性：4 连通（上下左右）或 8 连通（含对角线）" ) );
+        paramForm->addRow( tr( "连通性 (4/8)" ), m_connectSpin );
+        break;
+      case Algorithm::Majority:
+        m_majoritySpin = new QSpinBox( paramGroup );
+        m_majoritySpin->setObjectName( QStringLiteral( "ppMajoritySpin" ) );
+        m_majoritySpin->setRange( 3, 7 );
+        m_majoritySpin->setSingleStep( 2 );
+        m_majoritySpin->setValue( 3 );
+        SicnuDialogHelp::tip( m_majoritySpin, tr( "众数滤波窗口边长（奇数 3/5/7），越大平滑强度越高" ) );
+        paramForm->addRow( tr( "核大小 (奇数)" ), m_majoritySpin );
+        break;
+      case Algorithm::Clump:
+        m_connectSpin = new QSpinBox( paramGroup );
+        m_connectSpin->setObjectName( QStringLiteral( "ppConnectSpin" ) );
+        m_connectSpin->setRange( 4, 8 );
+        m_connectSpin->setSingleStep( 4 );
+        m_connectSpin->setValue( 8 );
+        SicnuDialogHelp::tip( m_connectSpin, tr( "连通域判定方式：4 连通或 8 连通" ) );
+        paramForm->addRow( tr( "连通性 (4/8)" ), m_connectSpin );
+        break;
+      case Algorithm::Recode:
+        m_recodeTable = new QTableWidget( 6, 2, paramGroup );
+        m_recodeTable->setObjectName( QStringLiteral( "ppRecodeTable" ) );
+        m_recodeTable->setHorizontalHeaderLabels( { tr( "旧类" ), tr( "新类" ) } );
+        m_recodeTable->horizontalHeader()->setStretchLastSection( true );
+        m_recodeTable->verticalHeader()->setVisible( false );
+        m_recodeTable->setAlternatingRowColors( true );
+        m_recodeTable->setMinimumHeight( 140 );
+        SicnuDialogHelp::tip( m_recodeTable, tr( "旧类别 ID 到新类别 ID 的映射对照表" ) );
+        paramForm->addRow( tr( "重编码对照表" ), m_recodeTable );
+        break;
+      case Algorithm::Polygonize:
+        break;
+    }
+    root->addWidget( paramGroup );
+  }
 
   SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "post_process" ) );
 
@@ -195,8 +210,13 @@ void RsPostProcessDialog::setupUi()
   auto *buttons = new QDialogButtonBox(
     QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this );
   buttons->button( QDialogButtonBox::Ok )->setText( tr( "运行" ) );
+  buttons->button( QDialogButtonBox::Cancel )->setText( tr( "取消" ) );
+  SicnuUi::markPrimary( buttons->button( QDialogButtonBox::Ok ) );
+  SicnuUi::markSecondary( buttons->button( QDialogButtonBox::Cancel ) );
+
   auto *helpBtn = buttons->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
   helpBtn->setToolTip( tr( "打开本对话框的帮助说明。" ) );
+  SicnuUi::markSecondary( helpBtn );
   connect( helpBtn, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "post_process" ), windowTitle() );
   } );

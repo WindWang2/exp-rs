@@ -11,6 +11,11 @@ class QLineEdit;
 class QPushButton;
 class QLabel;
 class QProgressBar;
+class QStackedWidget;
+
+namespace sicnu {
+class RsEmptyStateWidget;
+}
 
 /**
  * Panel for mosaicking (stitching) multiple raster files into a single output.
@@ -62,6 +67,8 @@ private:
     void setupUi();
 
     QListWidget *m_inputList = nullptr;
+    QStackedWidget *m_inputStack = nullptr;
+    sicnu::RsEmptyStateWidget *m_emptyState = nullptr;
     QLineEdit *m_outputEdit = nullptr;
     QPushButton *m_runButton = nullptr;
     QLabel *m_statusLabel = nullptr;

@@ -1,8 +1,10 @@
 #include "task_center_dock.h"
+#include "widgets/rs_empty_state_widget.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QHeaderView>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -12,7 +14,7 @@
 namespace sicnu {
 
 TaskCenterDock::TaskCenterDock(QWidget *parent)
-    : QDockWidget(tr("任务中心 (Task Center)"), parent)
+    : QDockWidget(tr("任务中心"), parent)
 {
     setObjectName(QStringLiteral("TaskCenterDock"));
     setupUi();
@@ -32,11 +34,25 @@ void TaskCenterDock::setupUi()
     mainLayout->setContentsMargins(4, 4, 4, 4);
 
     QSplitter *splitter = new QSplitter(Qt::Vertical, mainWidget);
+    splitter->setObjectName(QStringLiteral("rsTaskCenterSplitter"));
 
-    m_taskTree = new QTreeWidget(splitter);
+    m_treeStack = new QStackedWidget(splitter);
+    m_treeStack->setObjectName(QStringLiteral("rsTaskCenterTreeStack"));
+
+    m_taskTree = new QTreeWidget(m_treeStack);
     m_taskTree->setHeaderLabels({tr("ID"), tr("算法名称"), tr("优先级"), tr("状态"), tr("进度"), tr("已用时间"), tr("预计剩余")});
     m_taskTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_taskTree->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_treeStack->addWidget(m_taskTree); // Index 0: Tree
+
+    m_emptyState = new RsEmptyStateWidget(
+        QStringLiteral("check_outline"),
+        tr("暂无任务"),
+        tr("当前没有正在运行或排队的算法处理任务。可在处理工具箱中选择算法执行。"),
+        QString(),
+        m_treeStack);
+    m_treeStack->addWidget(m_emptyState); // Index 1: Empty
+    m_treeStack->setCurrentIndex(1); // Initially empty
 
     QTabWidget *detailsTab = new QTabWidget(splitter);
     m_parameterBrowser = new QTextBrowser(detailsTab);
@@ -45,7 +61,7 @@ void TaskCenterDock::setupUi()
     detailsTab->addTab(m_parameterBrowser, tr("输入参数"));
     detailsTab->addTab(m_logBrowser, tr("运行日志"));
 
-    splitter->addWidget(m_taskTree);
+    splitter->addWidget(m_treeStack);
     splitter->addWidget(detailsTab);
     splitter->setSizes({200, 150});
 
@@ -187,6 +203,8 @@ void TaskCenterDock::refreshTaskList()
         }
     }
     m_taskTree->expandAll();
+    if (m_treeStack)
+        m_treeStack->setCurrentIndex(tasks.empty() ? 1 : 0);
 }
 
 void TaskCenterDock::onTaskAdded(const AlgorithmTaskInfo& info)

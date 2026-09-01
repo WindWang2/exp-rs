@@ -17,7 +17,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("terrain"); }
-    QString dialogTitle() const override { return tr("Terrain Analysis"); }
+    QString dialogTitle() const override { return tr("地形分析"); }
     bool validateInputs() override;
     void onRun() override;
 

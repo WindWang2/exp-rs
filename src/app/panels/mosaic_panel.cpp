@@ -1,5 +1,6 @@
 // src/app/panels/mosaic_panel.cpp
 #include "mosaic_panel.h"
+#include "widgets/rs_empty_state_widget.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -13,6 +14,7 @@
 #include <QLabel>
 #include <QGroupBox>
 #include <QListWidget>
+#include <QStackedWidget>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QFileDialog>
@@ -33,7 +35,7 @@
 MosaicPanel::MosaicPanel(QWidget *parent)
     : QWidget(parent)
 {
-    setWindowTitle(tr("Mosaic"));
+    setWindowTitle(tr("影像镶嵌"));
     setupUi();
 }
 
@@ -42,18 +44,33 @@ void MosaicPanel::setupUi()
     auto *mainLayout = new QVBoxLayout(this);
 
     // --- Input files group ---
-    auto *inputGroup = new QGroupBox(tr("Input Rasters"), this);
+    auto *inputGroup = new QGroupBox(tr("输入栅格影像"), this);
     auto *inputLayout = new QVBoxLayout(inputGroup);
 
-    m_inputList = new QListWidget(this);
-    inputLayout->addWidget(m_inputList);
+    m_inputStack = new QStackedWidget(inputGroup);
+    m_inputStack->setObjectName(QStringLiteral("rsMosaicInputStack"));
+
+    m_inputList = new QListWidget(m_inputStack);
+    m_inputStack->addWidget(m_inputList); // Index 0: List
+
+    m_emptyState = new sicnu::RsEmptyStateWidget(
+        QStringLiteral("l_yer_st_ck"),
+        tr("暂无镶嵌输入影像"),
+        tr("添加需要拼接镶嵌的遥感影像条带或分幅切片数据。"),
+        tr("添加影像..."),
+        m_inputStack);
+    connect(m_emptyState, &sicnu::RsEmptyStateWidget::actionClicked, this, &MosaicPanel::addInputFile);
+    m_inputStack->addWidget(m_emptyState); // Index 1: Empty
+    m_inputStack->setCurrentIndex(1); // Initially empty
+
+    inputLayout->addWidget(m_inputStack);
 
     auto *inputBtnLayout = new QHBoxLayout();
-    auto *addBtn = new QPushButton(tr("Add..."), this);
+    auto *addBtn = new QPushButton(tr("添加..."), this);
     connect(addBtn, &QPushButton::clicked, this, &MosaicPanel::addInputFile);
     inputBtnLayout->addWidget(addBtn);
 
-    auto *removeBtn = new QPushButton(tr("Remove"), this);
+    auto *removeBtn = new QPushButton(tr("移除"), this);
     connect(removeBtn, &QPushButton::clicked, this, &MosaicPanel::removeInputFile);
     inputBtnLayout->addWidget(removeBtn);
 
@@ -64,10 +81,10 @@ void MosaicPanel::setupUi()
 
     // --- Output file ---
     auto *outLayout = new QHBoxLayout();
-    outLayout->addWidget(new QLabel(tr("Output:")));
+    outLayout->addWidget(new QLabel(tr("输出路径：")));
     m_outputEdit = new QLineEdit(this);
     outLayout->addWidget(m_outputEdit);
-    auto *browseBtn = new QPushButton(tr("Browse..."), this);
+    auto *browseBtn = new QPushButton(tr("浏览..."), this);
     connect(browseBtn, &QPushButton::clicked, this, &MosaicPanel::browseOutput);
     outLayout->addWidget(browseBtn);
     mainLayout->addLayout(outLayout);
@@ -84,7 +101,8 @@ void MosaicPanel::setupUi()
     // --- Buttons ---
     auto *btnLayout = new QHBoxLayout();
     btnLayout->addStretch();
-    m_runButton = new QPushButton(tr("Run"), this);
+    m_runButton = new QPushButton(tr("运行镶嵌"), this);
+    m_runButton->setProperty("primary", true);
     connect(m_runButton, &QPushButton::clicked, this, &MosaicPanel::runMosaic);
     btnLayout->addWidget(m_runButton);
     mainLayout->addLayout(btnLayout);
@@ -108,12 +126,14 @@ QStringList MosaicPanel::inputFiles() const
 
 void MosaicPanel::addInputFile()
 {
-    QStringList paths = QFileDialog::getOpenFileNames(this, tr("Add Input Rasters"), QString(),
-                                                      tr("Raster files (*.tif *.tiff *.img *.asc);;All files (*)"));
+    QStringList paths = QFileDialog::getOpenFileNames(this, tr("添加输入栅格影像"), QString(),
+                                                      tr("栅格文件 (*.tif *.tiff *.img *.asc);;所有文件 (*)"));
     for (const QString &path : paths) {
         if (!path.isEmpty())
             m_inputList->addItem(path);
     }
+    if (m_inputStack)
+        m_inputStack->setCurrentIndex(m_inputList->count() > 0 ? 0 : 1);
 }
 
 void MosaicPanel::removeInputFile()
@@ -122,11 +142,13 @@ void MosaicPanel::removeInputFile()
     for (QListWidgetItem *item : selected) {
         delete m_inputList->takeItem(m_inputList->row(item));
     }
+    if (m_inputStack)
+        m_inputStack->setCurrentIndex(m_inputList->count() > 0 ? 0 : 1);
 }
 
 void MosaicPanel::browseOutput()
 {
-    QString path = QFileDialog::getSaveFileName(this, tr("Output File"), QString(),
+    QString path = QFileDialog::getSaveFileName(this, tr("选择输出文件"), QString(),
                                                 tr("GeoTIFF (*.tif)"));
     if (!path.isEmpty())
         m_outputEdit->setText(path);
@@ -136,13 +158,13 @@ void MosaicPanel::runMosaic()
 {
     // --- Validate ---
     if (m_inputList->count() < 2) {
-        QMessageBox::warning(this, tr("Mosaic"), tr("At least 2 input rasters are required."));
+        QMessageBox::warning(this, tr("影像镶嵌"), tr("至少需要 2 个输入栅格影像。"));
         return;
     }
 
     QString outPath = outputPath();
     if (outPath.isEmpty()) {
-        QMessageBox::warning(this, tr("Mosaic"), tr("Please specify an output file."));
+        QMessageBox::warning(this, tr("影像镶嵌"), tr("请指定输出文件路径。"));
         return;
     }
 

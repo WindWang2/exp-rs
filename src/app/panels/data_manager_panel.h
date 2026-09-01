@@ -14,6 +14,12 @@ class QTreeWidgetItem;
 class QTextBrowser;
 class QSplitter;
 class QLabel;
+class QStackedWidget;
+
+namespace sicnu
+{
+class RsEmptyStateWidget;
+}
 
 namespace sicnu::data
 {
@@ -66,6 +72,7 @@ class DataManagerPanel : public QDockWidget
     void refresh();
 
   signals:
+    void importRequested();
     void displayRequested( sicnu::data::AssetId id );
     void unloadRequested( sicnu::data::AssetId id );
     /// Batch unload (multi-select). Shell should confirm once then unload each.
@@ -96,6 +103,8 @@ class DataManagerPanel : public QDockWidget
 
     sicnu::data::DataManager *m_dataManager = nullptr; // not owned
     QTreeWidget *m_tree = nullptr;
+    QStackedWidget *m_treeStack = nullptr;
+    RsEmptyStateWidget *m_emptyState = nullptr;
     QTextBrowser *m_detailView = nullptr;
     QLabel *m_detailTitle = nullptr;
     QSplitter *m_splitter = nullptr;

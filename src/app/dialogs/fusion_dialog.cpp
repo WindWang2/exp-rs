@@ -24,66 +24,71 @@
 FusionDialog::FusionDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
-  setWindowTitle( tr( "影像融合 / 全色锐化" ) );
+  setWindowTitle( dialogTitle() );
   setMinimumWidth( 520 );
 
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
   setupHelpBanner( mainLayout );
 
-  QFrame *sec = SicnuUi::makeSection(
-    this, tr( "输入与方法" ),
-    tr( "全色 + 多光谱须大致同范围并已配准。按方法显示权重或 RGB 波段。" ) );
-  auto *inputLayout = new QFormLayout();
-  inputLayout->setContentsMargins( 0, 0, 0, 0 );
-  inputLayout->setHorizontalSpacing( 12 );
-  inputLayout->setVerticalSpacing( 8 );
+  QGroupBox *inputGroup = setupInputGroup(
+    mainLayout, tr( "输入与融合方法" ) );
+  inputGroup->setToolTip(
+    tr( "全色与多光谱影像须空间覆盖一致并已完成高精度几何配准。" ) );
+  auto *inputLayout = SicnuUi::makeFormLayout();
+  qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( inputLayout );
 
-  mPanCombo = new QComboBox( sec );
-  SicnuDialogHelp::tip( mPanCombo, tr( "全色高分辨率单波段。" ) );
-  inputLayout->addRow( tr( "全色 (高分)" ), mPanCombo );
+  mPanCombo = new QComboBox( inputGroup );
+  mPanCombo->setObjectName( QStringLiteral( "fusionPanCombo" ) );
+  SicnuDialogHelp::tip( mPanCombo, tr( "全色高分辨率单波段栅格。" ) );
+  inputLayout->addRow( tr( "全色影像 (高分)" ), mPanCombo );
 
-  mMsCombo = new QComboBox( sec );
-  SicnuDialogHelp::tip( mMsCombo, tr( "多光谱低分辨率影像。" ) );
-  inputLayout->addRow( tr( "多光谱 (低分)" ), mMsCombo );
+  mMsCombo = new QComboBox( inputGroup );
+  mMsCombo->setObjectName( QStringLiteral( "fusionMsCombo" ) );
+  SicnuDialogHelp::tip( mMsCombo, tr( "多光谱低分辨率多波段影像。" ) );
+  inputLayout->addRow( tr( "多光谱影像 (低分)" ), mMsCombo );
 
-  mMethodCombo = new QComboBox( sec );
-  mMethodCombo->addItem( tr( "线性加权" ), "linear" );
-  mMethodCombo->addItem( tr( "Brovey 变换" ), "brovey" );
-  mMethodCombo->addItem( tr( "IHS 融合 (需 RGB)" ), "ihs" );
-  mMethodCombo->addItem( tr( "PCA 融合" ), "pca" );
-  mMethodCombo->addItem( tr( "OTB BundleToPerfectSensor" ), "otb_btps" );
-  mMethodCombo->addItem( tr( "GDAL Pansharpen" ), "gdal_pansharp" );
+  mMethodCombo = new QComboBox( inputGroup );
+  mMethodCombo->setObjectName( QStringLiteral( "fusionMethodCombo" ) );
+  mMethodCombo->addItem( tr( "线性加权" ), QStringLiteral( "linear" ) );
+  mMethodCombo->addItem( tr( "Brovey 变换" ), QStringLiteral( "brovey" ) );
+  mMethodCombo->addItem( tr( "IHS 融合 (需 RGB)" ), QStringLiteral( "ihs" ) );
+  mMethodCombo->addItem( tr( "PCA 融合" ), QStringLiteral( "pca" ) );
+  mMethodCombo->addItem( tr( "OTB BundleToPerfectSensor" ), QStringLiteral( "otb_btps" ) );
+  mMethodCombo->addItem( tr( "GDAL Pansharpen" ), QStringLiteral( "gdal_pansharp" ) );
   SicnuDialogHelp::tip( mMethodCombo, tr(
-    "Linear / Brovey / IHS / PCA；或 OTB/GDAL 外部 pansharpen。" ) );
-  inputLayout->addRow( tr( "方法" ), mMethodCombo );
+    "内置方法：Linear / Brovey / IHS / PCA；外部工具：OTB / GDAL 全色锐化。" ) );
+  inputLayout->addRow( tr( "融合方法" ), mMethodCombo );
 
-  mWeightLabel = new QLabel( tr( "全色权重" ), sec );
-  mWeightSpin = new QDoubleSpinBox( sec );
+  mWeightLabel = new QLabel( tr( "全色权重" ), inputGroup );
+  mWeightSpin = new QDoubleSpinBox( inputGroup );
+  mWeightSpin->setObjectName( QStringLiteral( "fusionWeightSpin" ) );
   mWeightSpin->setRange( 0.0, 1.0 );
   mWeightSpin->setValue( 0.5 );
   mWeightSpin->setSingleStep( 0.1 );
   mWeightSpin->setDecimals( 2 );
-  SicnuDialogHelp::tip( mWeightSpin, tr( "线性融合中全色占比 0–1。" ) );
+  SicnuDialogHelp::tip( mWeightSpin, tr( "线性融合中全色波段占比 (0.0~1.0)。" ) );
   inputLayout->addRow( mWeightLabel, mWeightSpin );
 
-  mBandWeightsWidget = new QWidget( sec );
+  mBandWeightsWidget = new QWidget( inputGroup );
   mBandWeightsLayout = new QFormLayout( mBandWeightsWidget );
   mBandWeightsLayout->setContentsMargins( 0, 0, 0, 0 );
+  mBandWeightsLayout->setHorizontalSpacing( 10 );
+  mBandWeightsLayout->setVerticalSpacing( 8 );
   inputLayout->addRow( tr( "分波段权重" ), mBandWeightsWidget );
 
   mWeightLabel->setVisible( false );
   mWeightSpin->setVisible( false );
   mBandWeightsWidget->setVisible( false );
 
-  mRedCombo = new QComboBox( sec );
-  mGreenCombo = new QComboBox( sec );
-  mBlueCombo = new QComboBox( sec );
-  SicnuDialogHelp::tip( mRedCombo, tr( "IHS：红波段。" ) );
-  SicnuDialogHelp::tip( mGreenCombo, tr( "IHS：绿波段。" ) );
-  SicnuDialogHelp::tip( mBlueCombo, tr( "IHS：蓝波段。" ) );
-  mRedLabel = new QLabel( tr( "红波段" ), sec );
-  mGreenLabel = new QLabel( tr( "绿波段" ), sec );
-  mBlueLabel = new QLabel( tr( "蓝波段" ), sec );
+  mRedCombo = new QComboBox( inputGroup );
+  mGreenCombo = new QComboBox( inputGroup );
+  mBlueCombo = new QComboBox( inputGroup );
+  SicnuDialogHelp::tip( mRedCombo, tr( "IHS 变换对应的红波段。" ) );
+  SicnuDialogHelp::tip( mGreenCombo, tr( "IHS 变换对应的绿波段。" ) );
+  SicnuDialogHelp::tip( mBlueCombo, tr( "IHS 变换对应的蓝波段。" ) );
+  mRedLabel = new QLabel( tr( "红波段 (R)" ), inputGroup );
+  mGreenLabel = new QLabel( tr( "绿波段 (G)" ), inputGroup );
+  mBlueLabel = new QLabel( tr( "蓝波段 (B)" ), inputGroup );
   inputLayout->addRow( mRedLabel, mRedCombo );
   inputLayout->addRow( mGreenLabel, mGreenCombo );
   inputLayout->addRow( mBlueLabel, mBlueCombo );
@@ -111,8 +116,6 @@ FusionDialog::FusionDialog( QWidget *parent )
   connect( mMethodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, updateMethodUi );
 
-  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( inputLayout );
-  mainLayout->addWidget( sec );
   setupOutputRow( mainLayout );
   mStatusLabel = SicnuUi::makeHintLabel( this, tr( "就绪" ) );
   mainLayout->addWidget( mStatusLabel );
@@ -150,7 +153,7 @@ FusionDialog::FusionDialog( QWidget *parent )
         spin->setValue( 0.5 );
         spin->setSingleStep( 0.1 );
         spin->setDecimals( 2 );
-        mBandWeightsLayout->addRow( name + QLatin1Char( ':' ), spin );
+        mBandWeightsLayout->addRow( name, spin );
         mBandWeightSpins.append( spin );
       }
       if ( mRedCombo->count() > 0 )
@@ -197,7 +200,7 @@ void FusionDialog::onRun()
 
     if ( !panLayer || !msLayer )
     {
-        QMessageBox::warning( this, tr( "Error" ), tr( "Select both panchromatic and multispectral layers." ) );
+        QMessageBox::warning( this, dialogTitle(), tr( "请同时选择全色和多光谱图层。" ) );
         return;
     }
 
@@ -208,8 +211,8 @@ void FusionDialog::onRun()
         panLayer->source(), msLayer->source(), /*allowPixelSizeMismatch=*/true );
     if ( !gridMessage.isEmpty() )
     {
-        QMessageBox::warning( this, tr( "Error" ),
-            tr( "Pan and multispectral rasters are not co-registered:\n%1" )
+        QMessageBox::warning( this, dialogTitle(),
+            tr( "全色与多光谱栅格像元网格未配准：\n%1" )
                 .arg( gridMessage ) );
         return;
     }
@@ -235,8 +238,8 @@ void FusionDialog::onRun()
         if ( rIdx < 0 || gIdx < 0 || bIdx < 0 ||
              rIdx >= nMsBands || gIdx >= nMsBands || bIdx >= nMsBands )
         {
-            QMessageBox::warning( this, tr( "Error" ),
-                tr( "IHS fusion requires selecting R, G, B bands from the multispectral image." ) );
+            QMessageBox::warning( this, dialogTitle(),
+                tr( "IHS 融合需要为多光谱影像指定有效的红、绿、蓝波段。" ) );
             return;
         }
     }
@@ -306,8 +309,8 @@ void FusionDialog::onMethodChanged(int index) { Q_UNUSED(index); }
 
 void FusionDialog::onBrowsePan()
 {
-    QString path = QFileDialog::getOpenFileName(this, tr("Select Panchromatic Image"), QString(),
-                                                tr("GeoTIFF (*.tif *.tiff);;All Files (*)"));
+    QString path = QFileDialog::getOpenFileName(this, tr("选择全色影像"), QString(),
+                                                tr("GeoTIFF 栅格 (*.tif *.tiff);;所有文件 (*)"));
     if (!path.isEmpty()) {
         // Find or add layer
         for (int i = 0; i < mPanCombo->count(); ++i) {
@@ -322,8 +325,8 @@ void FusionDialog::onBrowsePan()
 
 void FusionDialog::onBrowseMs()
 {
-    QString path = QFileDialog::getOpenFileName(this, tr("Select Multispectral Image"), QString(),
-                                                tr("GeoTIFF (*.tif *.tiff);;All Files (*)"));
+    QString path = QFileDialog::getOpenFileName(this, tr("选择多光谱影像"), QString(),
+                                                tr("GeoTIFF 栅格 (*.tif *.tiff);;所有文件 (*)"));
     if (!path.isEmpty()) {
         for (int i = 0; i < mMsCombo->count(); ++i) {
             auto *rl = mMsCombo->itemData(i).value<QgsRasterLayer*>();

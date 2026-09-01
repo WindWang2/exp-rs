@@ -22,12 +22,15 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include "dialog_utils.h"
+
 #include <functional>
 
 HelpViewerDialog::HelpViewerDialog( QWidget *parent )
   : QDialog( parent )
 {
   setWindowTitle( tr( "RS Studio 用户手册与帮助文档" ) );
+  SicnuUi::polishDialog( this, 720 );
   resize( 1060, 720 );
   setMinimumSize( 680, 460 );
 
@@ -39,9 +42,7 @@ HelpViewerDialog::~HelpViewerDialog() = default;
 
 void HelpViewerDialog::setupUi()
 {
-  auto *rootLayout = new QVBoxLayout( this );
-  rootLayout->setContentsMargins( 8, 8, 8, 8 );
-  rootLayout->setSpacing( 6 );
+  auto *rootLayout = SicnuUi::makeDialogRootLayout( this );
 
   m_splitter = new QSplitter( Qt::Horizontal, this );
 
@@ -49,16 +50,16 @@ void HelpViewerDialog::setupUi()
   auto *leftWidget = new QWidget( m_splitter );
   auto *leftLayout = new QVBoxLayout( leftWidget );
   leftLayout->setContentsMargins( 0, 0, 0, 0 );
-  leftLayout->setSpacing( 4 );
+  leftLayout->setSpacing( 6 );
 
   auto *tocHeaderLayout = new QHBoxLayout();
-  auto *tocTitle = new QLabel( tr( "<b>📖 文档目录 (Contents)</b>" ), leftWidget );
+  auto *tocTitle = new QLabel( tr( "<b>文档目录</b>" ), leftWidget );
   tocHeaderLayout->addWidget( tocTitle );
   leftLayout->addLayout( tocHeaderLayout );
 
   m_filterEdit = new QLineEdit( leftWidget );
   m_filterEdit->setObjectName( QStringLiteral( "helpViewerFilterEdit" ) );
-  m_filterEdit->setPlaceholderText( tr( "🔍 过滤章节目录..." ) );
+  m_filterEdit->setPlaceholderText( tr( "过滤章节目录…" ) );
   m_filterEdit->setClearButtonEnabled( true );
   connect( m_filterEdit, &QLineEdit::textChanged, this, &HelpViewerDialog::filterToc );
   leftLayout->addWidget( m_filterEdit );
@@ -77,14 +78,14 @@ void HelpViewerDialog::setupUi()
   auto *rightWidget = new QWidget( m_splitter );
   auto *rightLayout = new QVBoxLayout( rightWidget );
   rightLayout->setContentsMargins( 0, 0, 0, 0 );
-  rightLayout->setSpacing( 4 );
+  rightLayout->setSpacing( 6 );
 
   auto *topBarLayout = new QHBoxLayout();
-  topBarLayout->setSpacing( 4 );
+  topBarLayout->setSpacing( 6 );
 
   m_searchEdit = new QLineEdit( rightWidget );
   m_searchEdit->setObjectName( QStringLiteral( "helpViewerSearchEdit" ) );
-  m_searchEdit->setPlaceholderText( tr( "🔍 在文档正文中查找..." ) );
+  m_searchEdit->setPlaceholderText( tr( "在文档正文中查找…" ) );
   m_searchEdit->setClearButtonEnabled( true );
   connect( m_searchEdit, &QLineEdit::returnPressed, this, [this]() {
     searchContent( m_searchEdit->text(), true );
@@ -92,12 +93,14 @@ void HelpViewerDialog::setupUi()
   topBarLayout->addWidget( m_searchEdit, 1 );
 
   auto *findNextBtn = new QPushButton( tr( "下一个" ), rightWidget );
+  SicnuUi::markSecondary( findNextBtn );
   connect( findNextBtn, &QPushButton::clicked, this, [this]() {
     searchContent( m_searchEdit->text(), true );
   } );
   topBarLayout->addWidget( findNextBtn );
 
   auto *findPrevBtn = new QPushButton( tr( "上一个" ), rightWidget );
+  SicnuUi::markSecondary( findPrevBtn );
   connect( findPrevBtn, &QPushButton::clicked, this, [this]() {
     searchContent( m_searchEdit->text(), false );
   } );
@@ -105,23 +108,25 @@ void HelpViewerDialog::setupUi()
 
   topBarLayout->addSpacing( 8 );
 
-  m_zoomInBtn = new QPushButton( QStringLiteral( "➕" ), rightWidget );
-  m_zoomInBtn->setFixedWidth( 32 );
+  m_zoomInBtn = new QPushButton( tr( "放大" ), rightWidget );
+  SicnuUi::markSecondary( m_zoomInBtn );
   connect( m_zoomInBtn, &QPushButton::clicked, this, &HelpViewerDialog::zoomIn );
   topBarLayout->addWidget( m_zoomInBtn );
 
-  m_zoomOutBtn = new QPushButton( QStringLiteral( "➖" ), rightWidget );
-  m_zoomOutBtn->setFixedWidth( 32 );
+  m_zoomOutBtn = new QPushButton( tr( "缩小" ), rightWidget );
+  SicnuUi::markSecondary( m_zoomOutBtn );
   connect( m_zoomOutBtn, &QPushButton::clicked, this, &HelpViewerDialog::zoomOut );
   topBarLayout->addWidget( m_zoomOutBtn );
 
   m_zoomResetBtn = new QPushButton( tr( "100%" ), rightWidget );
+  SicnuUi::markSecondary( m_zoomResetBtn );
   connect( m_zoomResetBtn, &QPushButton::clicked, this, &HelpViewerDialog::resetZoom );
   topBarLayout->addWidget( m_zoomResetBtn );
 
   topBarLayout->addSpacing( 8 );
 
-  m_externalBtn = new QPushButton( tr( "🌐 外部浏览器" ), rightWidget );
+  m_externalBtn = new QPushButton( tr( "外部浏览器" ), rightWidget );
+  SicnuUi::markSecondary( m_externalBtn );
   connect( m_externalBtn, &QPushButton::clicked, this, &HelpViewerDialog::openInExternalBrowser );
   topBarLayout->addWidget( m_externalBtn );
 
@@ -141,6 +146,8 @@ void HelpViewerDialog::setupUi()
   rootLayout->addWidget( m_splitter, 1 );
 
   auto *bottomBox = new QDialogButtonBox( QDialogButtonBox::Close, this );
+  bottomBox->button( QDialogButtonBox::Close )->setText( tr( "关闭" ) );
+  SicnuUi::markSecondary( bottomBox->button( QDialogButtonBox::Close ) );
   connect( bottomBox, &QDialogButtonBox::rejected, this, &QDialog::accept );
   rootLayout->addWidget( bottomBox );
 }

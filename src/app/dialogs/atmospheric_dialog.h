@@ -6,6 +6,7 @@
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
+class RasterLayerCombo;
 
 /**
  * Dialog for Atmospheric Correction operations.
@@ -26,10 +27,11 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("atmospheric_correction"); }
-    QString dialogTitle() const override { return tr("Atmospheric Correction"); }
+    QString dialogTitle() const override { return tr("大气校正"); }
     void onRun() override;
 
 private slots:
+    void onLayerChanged(int index);
     void onMethodChanged(int index);
     void onCoefficientChanged();
 
@@ -40,6 +42,7 @@ private:
     /// selected band; updates the status label.
     void refreshMetadata();
 
+    RasterLayerCombo *m_layerCombo = nullptr;
     QComboBox *m_methodCombo = nullptr;
     QComboBox *m_bandCombo = nullptr;
     QDoubleSpinBox *m_gainSpin = nullptr;

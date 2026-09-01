@@ -211,10 +211,10 @@ void PipelineCanvasWidget::contextMenuEvent( QContextMenuEvent *event )
   if ( node )
   {
     QString stepId = node->stepId();
-    QAction *runUpToAct = menu.addAction( QString( "▶ Run Up to '%1'" ).arg( node->title() ) );
-    QAction *viewLogsAct = menu.addAction( "📜 View Live Execution Logs" );
+    QAction *runUpToAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "media-playback-start" ), QIcon( QStringLiteral( ":/icons/media-playback-start" ) ) ), tr( "执行至此节点 '%1'" ).arg( node->title() ) );
+    QAction *viewLogsAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "text-x-generic" ), QIcon( QStringLiteral( ":/icons/text-x-generic" ) ) ), tr( "查看实时执行日志" ) );
     menu.addSeparator();
-    QAction *deleteNodeAct = menu.addAction( "🗑️ Delete Node" );
+    QAction *deleteNodeAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "edit-delete" ), QIcon( QStringLiteral( ":/icons/edit-delete" ) ) ), tr( "删除节点" ) );
 
     QAction *selectedAct = menu.exec( event->globalPos() );
     if ( selectedAct == runUpToAct )
@@ -232,7 +232,7 @@ void PipelineCanvasWidget::contextMenuEvent( QContextMenuEvent *event )
   }
   else if ( conn )
   {
-    QAction *deleteConnAct = menu.addAction( tr( "🗑️ 删除连线 / Delete Connection" ) );
+    QAction *deleteConnAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "edit-delete" ), QIcon( QStringLiteral( ":/icons/edit-delete" ) ) ), tr( "删除连线" ) );
     QAction *selectedAct = menu.exec( event->globalPos() );
     if ( selectedAct == deleteConnAct )
     {
@@ -241,8 +241,8 @@ void PipelineCanvasWidget::contextMenuEvent( QContextMenuEvent *event )
   }
   else
   {
-    QAction *zoomFitAct = menu.addAction( "🔍 Zoom to Fit" );
-    QAction *resetZoomAct = menu.addAction( "🔄 Reset Zoom" );
+    QAction *zoomFitAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "zoom-fit-best" ), QIcon( QStringLiteral( ":/icons/zoom-fit-best" ) ) ), tr( "适应窗口" ) );
+    QAction *resetZoomAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "zoom-original" ), QIcon( QStringLiteral( ":/icons/zoom-original" ) ) ), tr( "100% 视图" ) );
 
     QAction *selectedAct = menu.exec( event->globalPos() );
     if ( selectedAct == zoomFitAct )

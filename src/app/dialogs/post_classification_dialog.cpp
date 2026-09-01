@@ -29,22 +29,21 @@ void PostClassificationDialog::setupUi()
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
   setupHelpBanner( mainLayout );
 
-  QFrame *inputSec = SicnuUi::makeSection(
-    this, tr( "双时相分类输入" ),
+  QGroupBox *inputGroup = setupInputGroup(
+    mainLayout, tr( "双时相分类结果输入" ) );
+  inputGroup->setToolTip(
     tr( "比较两期分类结果：输出逐类转移矩阵（行=前时相类，列=后时相类）、"
         "逐类增益/损失与变化类型图。" ) );
-  auto *form = new QFormLayout();
-  form->setContentsMargins( 0, 0, 0, 0 );
-  form->setHorizontalSpacing( 12 );
-  form->setVerticalSpacing( 8 );
+  auto *form = SicnuUi::makeFormLayout();
+  qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( form );
 
-  m_beforeLayerCombo = new RasterLayerCombo( inputSec );
+  m_beforeLayerCombo = new RasterLayerCombo( inputGroup );
   m_beforeLayerCombo->setObjectName( QStringLiteral( "postClassBeforeCombo" ) );
-  m_afterLayerCombo = new RasterLayerCombo( inputSec );
+  m_afterLayerCombo = new RasterLayerCombo( inputGroup );
   m_afterLayerCombo->setObjectName( QStringLiteral( "postClassAfterCombo" ) );
-  m_beforeBandCombo = new QComboBox( inputSec );
+  m_beforeBandCombo = new QComboBox( inputGroup );
   m_beforeBandCombo->setObjectName( QStringLiteral( "postClassBeforeBandCombo" ) );
-  m_afterBandCombo = new QComboBox( inputSec );
+  m_afterBandCombo = new QComboBox( inputGroup );
   m_afterBandCombo->setObjectName( QStringLiteral( "postClassAfterBandCombo" ) );
   SicnuDialogHelp::tip( m_beforeLayerCombo, tr( "前期分类栅格（主题图）。" ) );
   SicnuDialogHelp::tip( m_afterLayerCombo, tr( "后期分类栅格（主题图）。" ) );
@@ -55,7 +54,7 @@ void PostClassificationDialog::setupUi()
   form->addRow( tr( "后期分类" ), m_afterLayerCombo );
   form->addRow( tr( "后期波段" ), m_afterBandCombo );
 
-  m_classCountSpin = new QSpinBox( inputSec );
+  m_classCountSpin = new QSpinBox( inputGroup );
   m_classCountSpin->setObjectName( QStringLiteral( "postClassCountSpin" ) );
   m_classCountSpin->setRange( 0, 255 );
   m_classCountSpin->setValue( 0 );
@@ -63,14 +62,11 @@ void PostClassificationDialog::setupUi()
   SicnuDialogHelp::tip( m_classCountSpin, tr(
     "类别总数（变化码 before*classCount+after 须装入 UInt16，故 ≤255）。"
     "0 = 按两期影像中观测到的最大类别自动推断。" ) );
-  form->addRow( tr( "类别数" ), m_classCountSpin );
-
-  qobject_cast<QVBoxLayout *>( inputSec->layout() )->addLayout( form );
-  mainLayout->addWidget( inputSec );
+  form->addRow( tr( "类别总数" ), m_classCountSpin );
 
   setupOutputRow( mainLayout );
 
-  m_summaryLabel = SicnuUi::makeHintLabel( this, tr( "运行后在此显示变化统计摘要。" ) );
+  m_summaryLabel = SicnuUi::makeHintLabel( this, tr( "运行后在此显示变化统计摘要与转移矩阵。" ) );
   m_summaryLabel->setObjectName( QStringLiteral( "postClassSummaryLabel" ) );
   m_summaryLabel->setWordWrap( true );
   mainLayout->addWidget( m_summaryLabel );

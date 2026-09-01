@@ -56,6 +56,63 @@ function(sicnu_add_test NAME)
   sicnu_discover_tests(${NAME})
 endfunction()
 
+# Helper function to add a Catch2 offscreen UI dialog test executable
+function(sicnu_add_dialog_test NAME)
+  cmake_parse_arguments(PARSE_ARGV 1 ARG "NO_DEFAULT_MAIN" "MAIN_SOURCE" "SOURCES;EXTRA_LIBS;EXTRA_INCLUDES")
+
+  set(_srcs ${NAME}.cpp)
+  if(ARG_MAIN_SOURCE)
+    list(APPEND _srcs ${ARG_MAIN_SOURCE})
+  endif()
+  if(ARG_SOURCES)
+    list(APPEND _srcs ${ARG_SOURCES})
+  endif()
+  if(ARG_UNPARSED_ARGUMENTS)
+    list(APPEND _srcs ${ARG_UNPARSED_ARGUMENTS})
+  endif()
+
+  add_executable(${NAME}
+    ${_srcs}
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/raster_layer_combo.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  )
+  set_target_properties(${NAME} PROPERTIES AUTOMOC ON)
+
+  set(_catch_lib Catch2::Catch2WithMain)
+  if(ARG_NO_DEFAULT_MAIN OR ARG_MAIN_SOURCE)
+    set(_catch_lib Catch2::Catch2)
+  endif()
+
+  target_link_libraries(${NAME} PRIVATE
+    ${_catch_lib}
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Test
+    Qt6::Concurrent
+    sicnu_jobs
+    sicnu_operators
+    sicnu_task_center
+    qgis_core
+    qgis_gui
+    sicnu_processing
+    sicnu_data
+    ${ARG_EXTRA_LIBS}
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
+    ${CMAKE_BINARY_DIR}
+    ${ARG_EXTRA_INCLUDES}
+  )
+  sicnu_link_jsoncpp(${NAME})
+  sicnu_discover_tests(${NAME})
+endfunction()
+
 # Single jsoncpp resolution for hand-rolled test targets (#653): the canonical
 # if(TARGET jsoncpp)/elseif(JSONCPP_LIBRARIES)/else fallback that used to be
 # copy-pasted per target. Targets with DIFFERENT fallback policies (no-else,
@@ -283,6 +340,7 @@ sicnu_discover_tests(test_theme_selector_parity)
 add_executable(test_task_center_dock
     test_task_center_dock.cpp
     ${CMAKE_SOURCE_DIR}/src/app/panels/task_center_dock.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
 )
 target_link_libraries(test_task_center_dock PRIVATE
     Catch2::Catch2WithMain
@@ -296,6 +354,7 @@ target_link_libraries(test_task_center_dock PRIVATE
 )
 target_include_directories(test_task_center_dock PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
     ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_task_center_dock)
@@ -1007,19 +1066,30 @@ target_include_directories(test_panel_persistence PRIVATE
 sicnu_discover_tests(test_panel_persistence)
 
 # Preferences dialog tests
-add_executable(test_preferences_dialog test_preferences_dialog.cpp)
+add_executable(test_preferences_dialog
+  test_preferences_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/preferences_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+)
 target_link_libraries(test_preferences_dialog PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  Qt6::Test
   qgis_core
   qgis_gui
+  sicnu_processing
+  sicnu_data
+  GDAL::GDAL
 )
 target_include_directories(test_preferences_dialog PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_preferences_dialog PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_preferences_dialog)
 
 # Processing dialog tests
@@ -1132,6 +1202,38 @@ target_include_directories(test_mosaic PRIVATE
 )
 sicnu_discover_tests(test_mosaic)
 
+# Mosaic panel UI tests
+add_executable(test_mosaic_panel
+  test_mosaic_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/mosaic_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+)
+target_link_libraries(test_mosaic_panel PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_jobs
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_mosaic_panel PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_mosaic_panel PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_mosaic_panel)
+
 # Processing integration tests
 add_executable(test_processing_integration test_processing_integration.cpp)
 target_link_libraries(test_processing_integration PRIVATE
@@ -1152,6 +1254,7 @@ sicnu_discover_tests(test_processing_integration)
 # Log panel tests
 add_executable(test_log_panel test_log_panel.cpp
   ${CMAKE_SOURCE_DIR}/src/app/log_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
   ${CMAKE_SOURCE_DIR}/tests/test_log_panel_main.cpp
 )
 target_link_libraries(test_log_panel PRIVATE
@@ -2232,6 +2335,7 @@ if(TARGET qgis_app_classify)
 
   # RS Studio Help System & User Guide verification suite
   add_executable(test_help_system test_help_system.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/help_viewer_dialog.cpp)
   target_link_libraries(test_help_system PRIVATE
@@ -2251,6 +2355,27 @@ if(TARGET qgis_app_classify)
   )
   set_target_properties(test_help_system PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(test_help_system)
+
+  # Layout Designer & Tools verification suite
+  add_executable(test_layout_designer test_layout_designer.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/layout/qgslayoutdesignerdialog.cpp)
+  target_link_libraries(test_layout_designer PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Test
+    sicnu_processing
+    qgis_core
+    qgis_gui
+  )
+  target_include_directories(test_layout_designer PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_layout_designer PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_layout_designer)
 
   # Phase 10A Task 10.4 — Pixel rasterizer (geometry -> pixel index set)
   add_executable(test_pixel_rasterizer test_pixel_rasterizer.cpp)
@@ -3557,36 +3682,9 @@ target_include_directories(test_dialog_edge_cases PRIVATE
 sicnu_discover_tests(test_dialog_edge_cases)
 
 # Raster processing dialog base — run lifecycle (JobEngine-backed)
-add_executable(test_raster_processing_dialog_base
-  test_raster_processing_dialog_base.cpp
-  test_raster_processing_dialog_base_main.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+sicnu_add_dialog_test(test_raster_processing_dialog_base
+  MAIN_SOURCE test_raster_processing_dialog_base_main.cpp
 )
-set_target_properties(test_raster_processing_dialog_base PROPERTIES AUTOMOC ON)
-target_link_libraries(test_raster_processing_dialog_base PRIVATE
-  Catch2::Catch2
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  sicnu_jobs
-  sicnu_operators
-  sicnu_task_center
-
-  Qt6::Concurrent
-  qgis_core
-  qgis_gui
-  sicnu_data
-)
-target_include_directories(test_raster_processing_dialog_base PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/app
-  ${CMAKE_BINARY_DIR}
-)
-sicnu_discover_tests(test_raster_processing_dialog_base)
 
 # Workflow engine runtime smoke test (Qt-free headers; may link Qt6::Core via sicnu_operators)
 if(TARGET sicnu_workflow)
@@ -4099,6 +4197,7 @@ sicnu_discover_tests(test_data_project_roundtrip)
 add_executable(test_data_manager_panel
   test_data_manager_panel.cpp
   ${CMAKE_SOURCE_DIR}/src/app/panels/data_manager_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
 )
 target_link_libraries(test_data_manager_panel PRIVATE
@@ -4364,39 +4463,10 @@ sicnu_discover_tests(test_product_import_dialog)
 # Orthorectification dialog tests - headless param building over the
 # gdal:orthorectification operator contract (mirrors the base-class test's
 # JobEngine-backed dependency chain).
-add_executable(test_orthorectification_dialog
-  test_orthorectification_dialog.cpp
+sicnu_add_dialog_test(test_orthorectification_dialog
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/orthorectification_dialog.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
 )
-target_link_libraries(test_orthorectification_dialog PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  Qt6::Test
-  Qt6::Concurrent
-  sicnu_jobs
-  sicnu_operators
-  sicnu_task_center
-  qgis_core
-  qgis_gui
-  sicnu_processing
-  sicnu_data
-)
-target_include_directories(test_orthorectification_dialog PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/app
-  ${CMAKE_BINARY_DIR}
-)
-sicnu_link_jsoncpp(test_orthorectification_dialog)
-set_target_properties(test_orthorectification_dialog PROPERTIES AUTOMOC ON)
-sicnu_discover_tests(test_orthorectification_dialog)
 
 # Batch processing dialog — RS-operator listing and per-file batch execution
 add_executable(test_batch_processing_dialog
@@ -4462,75 +4532,17 @@ set_target_properties(test_grid_compat_dialog_utils PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_grid_compat_dialog_utils)
 
 # Change-detection dialog — method/mask parameter alignment with the backend
-add_executable(test_change_detection_dialog
-  test_change_detection_dialog.cpp
+sicnu_add_dialog_test(test_change_detection_dialog
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/change_detection_dialog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/comparison_dialog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/comparison_widget.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/raster_layer_combo.cpp
 )
-target_link_libraries(test_change_detection_dialog PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  Qt6::Test
-  Qt6::Concurrent
-  sicnu_jobs
-  sicnu_operators
-  sicnu_task_center
-  qgis_core
-  qgis_gui
-  sicnu_processing
-  sicnu_data
-)
-target_include_directories(test_change_detection_dialog PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/app
-  ${CMAKE_BINARY_DIR}
-)
-sicnu_link_jsoncpp(test_change_detection_dialog)
-set_target_properties(test_change_detection_dialog PROPERTIES AUTOMOC ON)
-sicnu_discover_tests(test_change_detection_dialog)
 
 # Apply-mask dialog — operator JSON assembly from widget state
-add_executable(test_apply_mask_dialog
-  test_apply_mask_dialog.cpp
+sicnu_add_dialog_test(test_apply_mask_dialog
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/apply_mask_dialog.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
 )
-target_link_libraries(test_apply_mask_dialog PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  Qt6::Test
-  Qt6::Concurrent
-  sicnu_jobs
-  sicnu_operators
-  sicnu_task_center
-  qgis_core
-  qgis_gui
-  sicnu_processing
-  sicnu_data
-)
-target_include_directories(test_apply_mask_dialog PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/app
-  ${CMAKE_BINARY_DIR}
-)
-sicnu_link_jsoncpp(test_apply_mask_dialog)
-set_target_properties(test_apply_mask_dialog PROPERTIES AUTOMOC ON)
-sicnu_discover_tests(test_apply_mask_dialog)
 
 # Spectral library matching dialog — SAM-ranked match table + save round trip
 add_executable(test_spectral_library_dialog
@@ -4564,39 +4576,10 @@ set_target_properties(test_spectral_library_dialog PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_spectral_library_dialog)
 
 # Post-classification comparison dialog — operator JSON assembly
-add_executable(test_post_classification_dialog
-  test_post_classification_dialog.cpp
+sicnu_add_dialog_test(test_post_classification_dialog
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/post_classification_dialog.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/raster_layer_combo.cpp
 )
-target_link_libraries(test_post_classification_dialog PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  Qt6::Test
-  Qt6::Concurrent
-  sicnu_jobs
-  sicnu_operators
-  sicnu_task_center
-  qgis_core
-  qgis_gui
-  sicnu_processing
-  sicnu_data
-)
-target_include_directories(test_post_classification_dialog PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/app
-  ${CMAKE_BINARY_DIR}
-)
-sicnu_link_jsoncpp(test_post_classification_dialog)
-set_target_properties(test_post_classification_dialog PROPERTIES AUTOMOC ON)
-sicnu_discover_tests(test_post_classification_dialog)
 
 # Shared band-role selector widget (C5)
 add_executable(test_band_role_combo
@@ -4666,38 +4649,62 @@ target_include_directories(test_crs_selector PRIVATE
 sicnu_discover_tests(test_crs_selector)
 
 # Spectral index dialog — role-based band preselection via BandRoleCombo (C5)
-add_executable(test_spectral_index_dialog
-  test_spectral_index_dialog.cpp
+sicnu_add_dialog_test(test_spectral_index_dialog
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/spectral_index_dialog.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/band_role_combo.cpp
 )
-target_link_libraries(test_spectral_index_dialog PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  Qt6::Test
-  Qt6::Concurrent
-  sicnu_jobs
-  sicnu_operators
-  sicnu_task_center
-  qgis_core
-  qgis_gui
-  sicnu_processing
-  sicnu_data
+
+# M2 processing dialogs empirical stress and adversarial testing suite
+sicnu_add_dialog_test(test_m2_dialog_stress
+  MAIN_SOURCE test_raster_processing_dialog_base_main.cpp
+  SOURCES
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/atmospheric_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/radiometric_calibration_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/contrast_stretch_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_stretch_widget.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/spatial_filter_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/speckle_filter_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/spectral_index_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/spectral_library_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/band_ratio_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/band_math_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/extract_band_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/qa_mask_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/orthorectification_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/mosaic_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/fusion_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/change_detection_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/comparison_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/comparison_widget.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/pca_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/post_classification_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/terrain_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/apply_mask_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/batch_processing_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/product_import_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/crs_preset_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/crs_presets.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/help_viewer_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/preferences_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/classification/rs_merge_classes_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/classification/rs_post_process_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/classification/rs_post_process_task.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/georeferencer/rs_sift_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/georeferencer/rs_template_match_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/band_role_combo.cpp
+    ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_gdal_runner.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_runner_base.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_algorithm_runner.cpp
+  EXTRA_LIBS
+    GDAL::GDAL
+    Sicnu::qgis_display
+  EXTRA_INCLUDES
+    ${CMAKE_SOURCE_DIR}/src/app/classification
+    ${CMAKE_SOURCE_DIR}/src/app/georeferencer
 )
-target_include_directories(test_spectral_index_dialog PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/app
-  ${CMAKE_BINARY_DIR}
-)
-sicnu_link_jsoncpp(test_spectral_index_dialog)
-sicnu_discover_tests(test_spectral_index_dialog)
 
 # Virtual raster recipe tests - recipe value type + JSON round-trip (#55)
 qt_add_executable(test_virtual_raster_recipe
@@ -4733,6 +4740,7 @@ qt_add_executable(test_xyz_source_provider
 )
 target_link_libraries(test_xyz_source_provider PRIVATE
   Catch2::Catch2WithMain
+  Catch2::Catch2
   Qt6::Core
   sicnu_data
 )
@@ -4747,6 +4755,7 @@ qt_add_executable(test_remote_map_services
 )
 target_link_libraries(test_remote_map_services PRIVATE
   Catch2::Catch2WithMain
+  Catch2::Catch2
   Qt6::Core
   sicnu_data
 )
@@ -5149,3 +5158,219 @@ target_include_directories(test_workflow_artifact_gc PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_workflow_artifact_gc)
+
+# Milestone 2 Batch A Dialogs Empirical Challenge Suite
+sicnu_add_dialog_test(test_m2_batch_a_dialogs
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/atmospheric_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/radiometric_calibration_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/contrast_stretch_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/spatial_filter_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/speckle_filter_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/spectral_index_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/spectral_library_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/band_ratio_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/band_math_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/extract_band_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/qa_mask_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_gdal_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_runner_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/band_role_combo.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_stretch_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_types.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_resolve.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_apply.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/piecewise_linear_enhancement.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/qgs_display_stretch.cpp
+  EXTRA_LIBS GDAL::GDAL
+)
+
+# Milestone 2 Batch B Dialogs Empirical Challenge Suite
+sicnu_add_dialog_test(test_m2_batch_b_dialogs
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/orthorectification_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/mosaic_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/fusion_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/change_detection_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/pca_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/post_classification_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/terrain_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/apply_mask_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/batch_processing_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/product_import_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/crs_preset_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/crs_presets.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/comparison_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/help_viewer_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/preferences_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/classification/rs_merge_classes_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/classification/rs_post_process_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer/rs_sift_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer/rs_template_match_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/comparison_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/band_role_combo.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/sicnu_algorithm_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/stac_browser_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/stac_client.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/classification/rs_accuracy_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/classification/rs_accuracy_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/classification/rs_classifier_load_dialog.cpp
+  EXTRA_LIBS GDAL::GDAL Qt6::Network qgis_analysis
+)
+
+# Milestone 3 RsEmptyStateWidget Unit Tests
+add_executable(test_rs_empty_state_widget
+  test_rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+)
+target_link_libraries(test_rs_empty_state_widget PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+)
+target_include_directories(test_rs_empty_state_widget PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_rs_empty_state_widget PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_rs_empty_state_widget)
+
+# Milestone 3 Empirical Challenger Stress Suite
+add_executable(test_m3_stress
+  test_m3_stress.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/mosaic_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/task_center_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/log_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/data_manager_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+)
+target_link_libraries(test_m3_stress PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_jobs
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_m3_stress PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_m3_stress PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_m3_stress)
+
+
+
+
+# Milestone 3 Challenger 2 Adversarial Stress Suite
+add_executable(test_m3_adversarial_challenge
+  test_m3_adversarial_challenge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_toolbar_flow_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/mosaic_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/task_center_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/log_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+)
+target_link_libraries(test_m3_adversarial_challenge PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_jobs
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_m3_adversarial_challenge PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_m3_adversarial_challenge PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_m3_adversarial_challenge)
+
+# Final Challenger 1 Verification Suite
+add_executable(test_final_challenge
+  test_final_challenge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/log_panel.cpp
+)
+target_link_libraries(test_final_challenge PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_final_challenge PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_final_challenge PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_final_challenge)
+
+# Final Challenger 2 Empirical Verification Suite
+add_executable(test_final_challenger_2_empirical
+  test_final_challenger_2_empirical.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_toolbar_flow_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/mosaic_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/task_center_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/preferences_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+)
+target_link_libraries(test_final_challenger_2_empirical PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_jobs
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_final_challenger_2_empirical PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_final_challenger_2_empirical PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_final_challenger_2_empirical)
+
+

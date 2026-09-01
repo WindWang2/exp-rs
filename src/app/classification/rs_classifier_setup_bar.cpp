@@ -129,11 +129,11 @@ void RsClassifierSetupBar::buildLayout()
   row->addWidget( mOutputEdit, /*stretch*/ 1 );
 
   // --- Action buttons -------------------------------------------------------
-  mBtnCv = new QPushButton( tr( "⚖ 交叉验证" ), this );
+  mBtnCv = new QPushButton( tr( "交叉验证" ), this );
   mBtnCv->setObjectName( QStringLiteral( "rsClassifierBtnCv" ) );
   SicnuDialogHelp::tip( mBtnCv, tr(
     "分层 K 折交叉验证，估计模型稳定性（不写整景分类图）。" ) );
-  mBtnPreview = new QPushButton( tr( "▶ 快速预览" ), this );
+  mBtnPreview = new QPushButton( tr( "快速预览" ), this );
   mBtnPreview->setObjectName( QStringLiteral( "rsClassifierBtnPreview" ) );
   SicnuDialogHelp::tip( mBtnPreview, tr(
     "仅对当前地图视口范围分类并临时加载，便于快速试参数。" ) );

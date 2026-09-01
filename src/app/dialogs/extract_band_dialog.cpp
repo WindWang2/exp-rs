@@ -3,14 +3,15 @@
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "widgets/band_role_combo.h"
+#include "widgets/raster_layer_combo.h"
 
 #include <qgsrasterlayer.h>
 #include <qgsproject.h>
 
-#include <QComboBox>
 #include <QFileInfo>
 #include <QFormLayout>
-#include <QFrame>
+#include <QGroupBox>
 #include <QLabel>
 #include <QMessageBox>
 #include <QVBoxLayout>
@@ -27,8 +28,25 @@
 ExtractBandDialog::ExtractBandDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
-  setWindowTitle( tr( "提取波段" ) );
+  setWindowTitle( dialogTitle() );
+  setMinimumWidth( 520 );
   setupUi();
+}
+
+void ExtractBandDialog::setRasterLayer( QgsRasterLayer *layer )
+{
+  RasterProcessingDialogBase::setRasterLayer( layer );
+  if ( m_layerCombo && layer )
+  {
+    const int idx = m_layerCombo->findData( layer->id() );
+    if ( idx >= 0 && m_layerCombo->currentIndex() != idx )
+    {
+      m_layerCombo->blockSignals( true );
+      m_layerCombo->setCurrentIndex( idx );
+      m_layerCombo->blockSignals( false );
+    }
+  }
+  populateBandCombo();
 }
 
 void ExtractBandDialog::setupUi()
@@ -36,64 +54,66 @@ void ExtractBandDialog::setupUi()
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
   setupHelpBanner( mainLayout );
 
-  QFrame *sec = SicnuUi::makeSection(
-    this, tr( "输入" ),
-    tr( "从多波段栅格中抽取一个波段保存为单波段文件。" ) );
-  auto *form = new QFormLayout();
+  // Input & Band Selection Group
+  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "输入与波段选择" ) );
+  auto *form = SicnuUi::makeFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
-  form->setHorizontalSpacing( 12 );
 
-  m_layerCombo = new QComboBox( sec );
-  SicnuDialogHelp::tip( m_layerCombo, tr( "工程中的多波段栅格（波段数>1）。" ) );
+  m_layerCombo = new RasterLayerCombo( inputGroup );
+  m_layerCombo->setObjectName( QStringLiteral( "extractBandInputLayerCombo" ) );
+  SicnuDialogHelp::tip( m_layerCombo, tr( "工程中的多波段栅格图层。" ) );
+  m_layerCombo->populate();
+  connect( m_layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, &ExtractBandDialog::onLayerChanged );
   form->addRow( tr( "栅格图层" ), m_layerCombo );
 
-  m_bandCombo = new QComboBox( sec );
-  SicnuDialogHelp::tip( m_bandCombo, tr( "要导出的波段。" ) );
-  form->addRow( tr( "波段" ), m_bandCombo );
+  m_bandCombo = new BandRoleCombo( inputGroup );
+  m_bandCombo->setObjectName( QStringLiteral( "extractBandRoleCombo" ) );
+  SicnuDialogHelp::tip( m_bandCombo, tr( "选择待抽取并单独导出的目标波段。" ) );
+  form->addRow( tr( "目标波段" ), m_bandCombo );
 
-  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
-  mainLayout->addWidget( sec );
+  qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( form );
+  qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addWidget( SicnuUi::makeHintLabel(
+    inputGroup, tr( "提示：从多波段栅格中抽取单一波段并另存为独立的单波段 GeoTIFF 影像。" ) ) );
+
   setupOutputRow( mainLayout );
   setupButtonBar( mainLayout );
   mainLayout->addStretch( 1 );
 
-  connect( m_layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
-           this, &ExtractBandDialog::onLayerChanged );
-
-  populateRasterLayerCombo( m_layerCombo );
-  for ( int i = m_layerCombo->count() - 1; i >= 0; --i )
-  {
-    auto *rl = m_layerCombo->itemData( i ).value<QgsRasterLayer *>();
-    if ( !rl || rl->bandCount() <= 1 )
-      m_layerCombo->removeItem( i );
-  }
-  if ( m_layerCombo->count() > 0 )
-    populateBandCombo();
+  if ( m_rasterLayer )
+    m_layerCombo->selectLayer( m_rasterLayer->id() );
+  else if ( m_layerCombo->count() > 0 )
+    setRasterLayer( m_layerCombo->currentRasterLayer() );
 }
 
 void ExtractBandDialog::populateBandCombo()
 {
-  m_bandCombo->clear();
-  auto *rl = m_layerCombo->currentData().value<QgsRasterLayer *>();
-  if ( !rl )
+  if ( !m_bandCombo )
     return;
-  for ( int i = 1; i <= rl->bandCount(); ++i )
+  auto *rl = m_layerCombo ? m_layerCombo->currentRasterLayer() : m_rasterLayer;
+  if ( !rl || !rl->isValid() )
   {
-    QString bandName = rl->bandName( i );
-    if ( bandName.isEmpty() )
-      bandName = tr( "波段 %1" ).arg( i );
-    m_bandCombo->addItem( bandName, i );
+    m_bandCombo->clear();
+    return;
   }
+  m_bandCombo->setRaster( rl->source() );
+  if ( m_bandCombo->count() > 1 && m_bandCombo->currentIndex() <= 0 )
+    m_bandCombo->setCurrentIndex( 1 );
 }
 
-void ExtractBandDialog::onLayerChanged()
+void ExtractBandDialog::onLayerChanged( int /*index*/ )
 {
-  populateBandCombo();
+  if ( m_layerCombo )
+  {
+    auto *layer = m_layerCombo->currentRasterLayer();
+    if ( layer && layer != m_rasterLayer )
+      setRasterLayer( layer );
+  }
 }
 
 bool ExtractBandDialog::validateInputs()
 {
-  auto *rl = m_layerCombo ? m_layerCombo->currentData().value<QgsRasterLayer *>() : nullptr;
+  auto *rl = m_layerCombo ? m_layerCombo->currentRasterLayer() : m_rasterLayer;
   if ( !rl || !rl->isValid() )
   {
     QMessageBox::warning( this, dialogTitle(), tr( "请选择有效的栅格图层。" ) );
@@ -103,7 +123,7 @@ bool ExtractBandDialog::validateInputs()
   int bandIndex = m_bandCombo ? m_bandCombo->currentData().toInt() : 0;
   if ( bandIndex < 1 )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请选择要提取的波段。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "请选择要提取的目标波段。" ) );
     return false;
   }
 
@@ -125,17 +145,17 @@ bool ExtractBandDialog::validateInputs()
 
 void ExtractBandDialog::onRun()
 {
-  auto *rl = m_layerCombo->currentData().value<QgsRasterLayer *>();
+  auto *rl = m_layerCombo ? m_layerCombo->currentRasterLayer() : m_rasterLayer;
   if ( !rl )
   {
     QMessageBox::warning( this, dialogTitle(), tr( "请选择栅格图层。" ) );
     return;
   }
 
-  int bandIndex = m_bandCombo->currentData().toInt();
+  int bandIndex = m_bandCombo ? m_bandCombo->currentData().toInt() : 0;
   if ( bandIndex < 1 )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请选择要提取的波段。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "请选择要提取的目标波段。" ) );
     return;
   }
 
@@ -146,7 +166,8 @@ void ExtractBandDialog::onRun()
     outPath = QFileInfo( inputPath ).path() + QLatin1Char( '/' )
               + QFileInfo( inputPath ).baseName()
               + tr( "_band%1.tif" ).arg( bandIndex );
-    m_outputEdit->setText( outPath );
+    if ( m_outputEdit )
+      m_outputEdit->setText( outPath );
   }
 
   setRasterLayer( rl );

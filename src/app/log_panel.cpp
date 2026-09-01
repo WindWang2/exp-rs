@@ -1,8 +1,9 @@
-// src/app/log_panel.cpp — Enhanced log panel implementation
 #include "log_panel.h"
+#include "widgets/rs_empty_state_widget.h"
 
 #include <qgsapplication.h>
 #include <QTextEdit>
+#include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QComboBox>
@@ -15,7 +16,7 @@
 #include <QAction>
 
 LogPanel::LogPanel(QWidget *parent)
-    : QgsDockWidget(tr("Log"), parent)
+    : QgsDockWidget(tr("系统日志"), parent)
 {
     setupUi();
 
@@ -40,28 +41,28 @@ void LogPanel::setupUi()
     toolbarLayout->setSpacing(4);
 
     // Level filter
-    toolbarLayout->addWidget(new QLabel(tr("Level:")));
+    toolbarLayout->addWidget(new QLabel(tr("级别：")));
     m_levelFilter = new QComboBox(toolbar);
-    m_levelFilter->addItem(tr("All"), -1);
-    m_levelFilter->addItem(tr("Info"), static_cast<int>(Qgis::MessageLevel::Info));
-    m_levelFilter->addItem(tr("Warning"), static_cast<int>(Qgis::MessageLevel::Warning));
-    m_levelFilter->addItem(tr("Error"), static_cast<int>(Qgis::MessageLevel::Critical));
-    m_levelFilter->addItem(tr("Success"), static_cast<int>(Qgis::MessageLevel::Success));
+    m_levelFilter->addItem(tr("全部"), -1);
+    m_levelFilter->addItem(tr("信息"), static_cast<int>(Qgis::MessageLevel::Info));
+    m_levelFilter->addItem(tr("警告"), static_cast<int>(Qgis::MessageLevel::Warning));
+    m_levelFilter->addItem(tr("错误"), static_cast<int>(Qgis::MessageLevel::Critical));
+    m_levelFilter->addItem(tr("成功"), static_cast<int>(Qgis::MessageLevel::Success));
     m_levelFilter->setMinimumWidth(80);
     toolbarLayout->addWidget(m_levelFilter);
 
     // Tag filter
-    toolbarLayout->addWidget(new QLabel(tr("Tag:")));
+    toolbarLayout->addWidget(new QLabel(tr("标签：")));
     m_tagFilter = new QComboBox(toolbar);
-    m_tagFilter->addItem(tr("All"), "");
+    m_tagFilter->addItem(tr("全部"), "");
     m_tagFilter->setEditable(true);
     m_tagFilter->setMinimumWidth(100);
     toolbarLayout->addWidget(m_tagFilter);
 
     // Search
-    toolbarLayout->addWidget(new QLabel(tr("Search:")));
+    toolbarLayout->addWidget(new QLabel(tr("搜索：")));
     m_searchEdit = new QLineEdit(toolbar);
-    m_searchEdit->setPlaceholderText(tr("Filter messages..."));
+    m_searchEdit->setPlaceholderText(tr("过滤日志消息..."));
     m_searchEdit->setClearButtonEnabled(true);
     toolbarLayout->addWidget(m_searchEdit);
 
@@ -69,26 +70,40 @@ void LogPanel::setupUi()
     toolbarLayout->addStretch();
 
     // Auto-scroll
-    m_autoScrollCheck = new QCheckBox(tr("Auto-scroll"), toolbar);
+    m_autoScrollCheck = new QCheckBox(tr("自动滚动"), toolbar);
     m_autoScrollCheck->setChecked(true);
     toolbarLayout->addWidget(m_autoScrollCheck);
 
     // Message count
-    m_countLabel = new QLabel(tr("0 messages"), toolbar);
+    m_countLabel = new QLabel(tr("0 条消息"), toolbar);
     toolbarLayout->addWidget(m_countLabel);
 
     // Clear button
-    m_clearButton = new QPushButton(tr("Clear"), toolbar);
+    m_clearButton = new QPushButton(tr("清空"), toolbar);
     toolbarLayout->addWidget(m_clearButton);
 
     mainLayout->addWidget(toolbar);
 
-    // Text area
-    mTextEdit = new QTextEdit(mainWidget);
+    // Text area stack with empty state
+    m_textStack = new QStackedWidget(mainWidget);
+    m_textStack->setObjectName(QStringLiteral("rsLogTextStack"));
+
+    mTextEdit = new QTextEdit(m_textStack);
     mTextEdit->setReadOnly(true);
     mTextEdit->setLineWrapMode(QTextEdit::NoWrap);
     mTextEdit->document()->setMaximumBlockCount(50000);
-    mainLayout->addWidget(mTextEdit);
+    m_textStack->addWidget(mTextEdit); // Index 0: Text
+
+    m_emptyState = new sicnu::RsEmptyStateWidget(
+        QStringLiteral("chat_bubble_outline"),
+        tr("暂无系统日志"),
+        tr("系统运行正常，当前尚未产生日志消息。执行算法或操作时将在此显示详细记录。"),
+        QString(),
+        m_textStack);
+    m_textStack->addWidget(m_emptyState); // Index 1: Empty
+    m_textStack->setCurrentIndex(1); // Initially empty
+
+    mainLayout->addWidget(m_textStack);
 
     setWidget(mainWidget);
 
@@ -110,8 +125,9 @@ bool LogPanel::shouldShowMessage(const QString &message, const QString &tag, Qgi
         return false;
 
     // Tag filter
-    QString tagFilter = m_tagFilter->currentText();
-    if (!tagFilter.isEmpty() && tagFilter != tr("All") && !tag.contains(tagFilter, Qt::CaseInsensitive))
+    QString tagData = m_tagFilter->currentData().toString();
+    QString tagText = m_tagFilter->currentText();
+    if (!tagData.isEmpty() && tagText != tr("全部") && tagText != tr("All") && !tag.contains(tagText, Qt::CaseInsensitive))
         return false;
 
     // Search filter — match message body as well as tag
@@ -139,14 +155,16 @@ void LogPanel::clearMessages()
     mTextEdit->clear();
     mMessageCount = 0;
     mLastMessage.clear();
-    m_countLabel->setText(tr("0 messages"));
+    m_countLabel->setText(tr("0 条消息"));
+    if (m_textStack)
+        m_textStack->setCurrentIndex(1);
 }
 
 void LogPanel::logMessage(const QString &message, const QString &tag, Qgis::MessageLevel level)
 {
     int count = ++mMessageCount;
     mLastMessage = message;
-    m_countLabel->setText(tr("%1 messages").arg(count));
+    m_countLabel->setText(tr("%1 条消息").arg(count));
 
     // Add tag to filter dropdown if not already present
     if (m_tagFilter->findText(tag) == -1) {
@@ -156,28 +174,31 @@ void LogPanel::logMessage(const QString &message, const QString &tag, Qgis::Mess
     if (!shouldShowMessage(message, tag, level))
         return;
 
+    if (m_textStack)
+        m_textStack->setCurrentIndex(0);
+
     QString prefix;
     QColor color;
     switch (level) {
         case Qgis::MessageLevel::Info:
             prefix = QStringLiteral("[INFO]");
-            color = QColor(100, 180, 255); // Blue
+            color = QColor("#0284c7"); // Sky blue
             break;
         case Qgis::MessageLevel::Warning:
             prefix = QStringLiteral("[WARN]");
-            color = QColor(255, 200, 50); // Yellow
+            color = QColor("#d97706"); // Amber
             break;
         case Qgis::MessageLevel::Critical:
             prefix = QStringLiteral("[ERROR]");
-            color = QColor(255, 100, 100); // Red
+            color = QColor("#dc2626"); // Red
             break;
         case Qgis::MessageLevel::Success:
             prefix = QStringLiteral("[OK]");
-            color = QColor(100, 220, 100); // Green
+            color = QColor("#16a34a"); // Green
             break;
         case Qgis::MessageLevel::NoLevel:
             prefix = QStringLiteral("[LOG]");
-            color = QColor(180, 180, 180); // Gray
+            color = QColor("#64748b"); // Slate
             break;
     }
 

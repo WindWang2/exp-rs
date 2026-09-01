@@ -1,4 +1,5 @@
 #include "data_manager_panel.h"
+#include "widgets/rs_empty_state_widget.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -11,6 +12,7 @@
 #include <QPainter>
 #include <QSize>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStyle>
 #include <QStyledItemDelegate>
 #include <QStyleOptionViewItem>
@@ -438,11 +440,11 @@ QString wrapHtml( const QString &body )
 {
   return QStringLiteral(
            "<html><head><style>"
-           "body{font-family:sans-serif;font-size:12px;color:#1f2328;margin:8px;}"
+           "body{font-family:sans-serif;font-size:12px;margin:8px;}"
            "h2{font-size:14px;margin:0 0 8px 0;}"
-           "h3{font-size:12px;margin:12px 0 4px 0;color:#0969da;border-bottom:1px solid #d0d7de;padding-bottom:2px;}"
+           "h3{font-size:12px;margin:12px 0 4px 0;color:#0B6E4F;border-bottom:1px solid #c5cdd6;padding-bottom:2px;}"
            "table.meta{width:100%;border-collapse:collapse;}"
-           "td.k{width:28%;color:#656d76;padding:2px 6px 2px 0;vertical-align:top;}"
+           "td.k{width:28%;opacity:0.75;padding:2px 6px 2px 0;vertical-align:top;}"
            "td.v{padding:2px 0;word-break:break-all;}"
            "div.block{line-height:1.45;}"
            "</style></head><body>%1</body></html>" )
@@ -477,6 +479,21 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
     0, tr( "左侧色条表示状态（绿=可用，红=不可用）；类型作为名称前缀" ) );
   m_tree->setMinimumWidth( 220 );
 
+  m_treeStack = new QStackedWidget( this );
+  m_treeStack->setObjectName( QStringLiteral( "dataManagerTreeStack" ) );
+  m_treeStack->addWidget( m_tree ); // Index 0: Tree
+
+  m_emptyState = new RsEmptyStateWidget(
+      QStringLiteral( "d_t_b_se" ),
+      tr( "暂无数据资产" ),
+      tr( "暂未登记任何数据资产或集合。导入遥感影像、矢量文件或高光谱数据开始工作。" ),
+      tr( "导入数据资产..." ),
+      m_treeStack );
+  connect( m_emptyState, &RsEmptyStateWidget::actionClicked,
+           this, &DataManagerPanel::importRequested );
+  m_treeStack->addWidget( m_emptyState ); // Index 1: Empty State
+  m_treeStack->setCurrentIndex( 1 ); // Initially empty
+
   auto *detailHost = new QWidget( this );
   detailHost->setObjectName( QStringLiteral( "dataManagerDetailHost" ) );
   auto *detailLay = new QVBoxLayout( detailHost );
@@ -497,7 +514,7 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   // Catalog on top, metadata inspector below (vertical split).
   m_splitter = new QSplitter( Qt::Vertical, this );
   m_splitter->setObjectName( QStringLiteral( "dataManagerSplitter" ) );
-  m_splitter->addWidget( m_tree );
+  m_splitter->addWidget( m_treeStack );
   m_splitter->addWidget( detailHost );
   m_splitter->setStretchFactor( 0, 3 );
   m_splitter->setStretchFactor( 1, 2 );
@@ -715,6 +732,11 @@ void DataManagerPanel::refresh()
     if ( restored )
       selectAsset( *restored );
   }
+  const bool hasData = m_dataManager &&
+    ( !m_dataManager->assets().isEmpty() || !m_dataManager->collections().isEmpty() );
+  if ( m_treeStack )
+    m_treeStack->setCurrentIndex( hasData ? 0 : 1 );
+
   onSelectionChanged();
 }
 

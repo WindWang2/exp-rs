@@ -4,16 +4,18 @@
 #include "dialog_help_catalog.h"
 
 #include <QString>
+#include <QGroupBox>
 
 class QComboBox;
+class QDialog;
+class QDialogButtonBox;
+class QFormLayout;
 class QFrame;
-class QGroupBox;
 class QHBoxLayout;
 class QLabel;
 class QPushButton;
 class QVBoxLayout;
 class QWidget;
-class QDialog;
 
 /**
  * Populate a combo box with all valid raster layers from the current project.
@@ -39,17 +41,21 @@ namespace SicnuUi
 {
 
 /// Apply standard dialog shell: min size, margins-friendly object names.
-void polishDialog( QDialog *dlg, int minWidth = 480 );
+void polishDialog( QDialog *dlg, int minWidth = 520 );
 
-/// Root vertical layout with consistent margins/spacing for dialogs.
+/// Root vertical layout with consistent margins (12~14px) and spacing (10~12px) for dialogs.
 QVBoxLayout *makeDialogRootLayout( QWidget *host );
 
-/// Card-style section frame with bold title + optional tip.
+/// Card-style section frame with bold title + optional tip (margins: 10~12px, spacing: 8px).
 QFrame *makeSection( QWidget *parent, const QString &title,
                      const QString &tip = QString() );
 
-/// GroupBox with unified objectName for QSS.
-QGroupBox *makeGroup( QWidget *parent, const QString &title );
+/// Standardized GroupBox with unified styling, bold title, optional tip (margins: 10~14px, spacing: 8px).
+QGroupBox *makeGroup( QWidget *parent, const QString &title,
+                      const QString &tip = QString() );
+
+/// Standardized QFormLayout with right-aligned labels, 10px h-spacing, 8px v-spacing, and standard margins.
+QFormLayout *makeFormLayout( QWidget *parent = nullptr );
 
 /// Muted helper / hint label under a field.
 QLabel *makeHintLabel( QWidget *parent, const QString &text );

@@ -12,6 +12,12 @@ class QLineEdit;
 class QLabel;
 class QPushButton;
 class QCheckBox;
+class QStackedWidget;
+
+namespace sicnu
+{
+class RsEmptyStateWidget;
+}
 
 /**
  * Enhanced log panel with:
@@ -44,6 +50,8 @@ private:
     void flushPendingMessages();
 
     QTextEdit *mTextEdit = nullptr;
+    QStackedWidget *m_textStack = nullptr;
+    sicnu::RsEmptyStateWidget *m_emptyState = nullptr;
     QComboBox *m_levelFilter = nullptr;
     QComboBox *m_tagFilter = nullptr;
     QLineEdit *m_searchEdit = nullptr;

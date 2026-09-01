@@ -13,7 +13,7 @@
 namespace sicnu::workflow::gui {
 
 PipelineEditorDock::PipelineEditorDock( QWidget *parent )
-  : QDockWidget( tr( "任务流程编辑器 / Task Pipeline Editor" ), parent )
+  : QDockWidget( tr( "任务流程编辑器" ), parent )
 {
   setObjectName( QStringLiteral( "rsPipelineEditorDock" ) );
   setAllowedAreas( Qt::AllDockWidgetAreas );
@@ -24,6 +24,7 @@ PipelineEditorDock::PipelineEditorDock( QWidget *parent )
   layout->setSpacing( 0 );
 
   mSplitter = new QSplitter( Qt::Horizontal, mainWidget );
+  mSplitter->setObjectName( QStringLiteral( "rsPipelineSplitter" ) );
   mCanvasWidget = new PipelineCanvasWidget( mSplitter );
   mPresetWidget = new PresetCatalogWidget( mSplitter );
 
@@ -43,52 +44,48 @@ PipelineEditorDock::PipelineEditorDock( QWidget *parent )
 void PipelineEditorDock::createToolBar()
 {
   mToolBar = new QToolBar( this );
+  mToolBar->setObjectName( QStringLiteral( "rsPipelineToolBar" ) );
   mToolBar->setIconSize( QSize( 16, 16 ) );
-  mToolBar->setStyleSheet( QStringLiteral(
-    "QToolBar { background-color: #1e293b; border-bottom: 1px solid #334155; padding: 2px; }"
-    "QToolButton { color: #f8fafc; font-size: 12px; padding: 4px 8px; border-radius: 3px; }"
-    "QToolButton:hover { background-color: #334155; }"
-  ) );
 
-  auto *newAct = mToolBar->addAction( tr( "➕ 新建" ) );
+  auto *newAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "document-new" ), QIcon( QStringLiteral( ":/icons/document-new" ) ) ), tr( "新建" ) );
   newAct->setToolTip( tr( "新建工作流 (Ctrl+N)" ) );
   connect( newAct, &QAction::triggered, this, &PipelineEditorDock::onNewClicked );
 
-  auto *openAct = mToolBar->addAction( tr( "📂 打开" ) );
+  auto *openAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "document-open" ), QIcon( QStringLiteral( ":/icons/document-open" ) ) ), tr( "打开" ) );
   openAct->setToolTip( tr( "打开工作流 (.json) (Ctrl+O)" ) );
   connect( openAct, &QAction::triggered, this, &PipelineEditorDock::onOpenClicked );
 
-  auto *saveAct = mToolBar->addAction( tr( "💾 保存" ) );
+  auto *saveAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "document-save" ), QIcon( QStringLiteral( ":/icons/document-save" ) ) ), tr( "保存" ) );
   saveAct->setToolTip( tr( "保存工作流 (.json) (Ctrl+S)" ) );
   connect( saveAct, &QAction::triggered, this, &PipelineEditorDock::onSaveClicked );
 
   mToolBar->addSeparator();
 
-  auto *runAct = mToolBar->addAction( tr( "▶️ 运行全流程" ) );
+  auto *runAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "media-playback-start" ), QIcon( QStringLiteral( ":/icons/media-playback-start" ) ) ), tr( "运行全流程" ) );
   runAct->setToolTip( tr( "运行全流程 (按拓扑顺序调度执行)" ) );
   connect( runAct, &QAction::triggered, this, &PipelineEditorDock::onRunFullClicked );
 
-  auto *stopAct = mToolBar->addAction( tr( "⏹️ 停止" ) );
+  auto *stopAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "media-playback-stop" ), QIcon( QStringLiteral( ":/icons/media-playback-stop" ) ) ), tr( "停止" ) );
   stopAct->setToolTip( tr( "停止正在运行的流程任务" ) );
   connect( stopAct, &QAction::triggered, this, &PipelineEditorDock::onStopClicked );
 
   mToolBar->addSeparator();
 
-  auto *zoomFitAct = mToolBar->addAction( tr( "🔍 适应窗口" ) );
+  auto *zoomFitAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "zoom-fit-best" ), QIcon( QStringLiteral( ":/icons/zoom-fit-best" ) ) ), tr( "适应窗口" ) );
   zoomFitAct->setToolTip( tr( "适应窗口显示所有节点" ) );
   connect( zoomFitAct, &QAction::triggered, mCanvasWidget, &PipelineCanvasWidget::zoomToFit );
 
-  auto *zoomResetAct = mToolBar->addAction( tr( "🔄 100%" ) );
+  auto *zoomResetAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "zoom-original" ), QIcon( QStringLiteral( ":/icons/zoom-original" ) ) ), tr( "100% 视图" ) );
   zoomResetAct->setToolTip( tr( "恢复 100% 比例" ) );
   connect( zoomResetAct, &QAction::triggered, mCanvasWidget, &PipelineCanvasWidget::resetZoom );
 
-  auto *deleteAct = mToolBar->addAction( tr( "🗑️ 删除选中" ) );
+  auto *deleteAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "edit-delete" ), QIcon( QStringLiteral( ":/icons/edit-delete" ) ) ), tr( "删除选中" ) );
   deleteAct->setToolTip( tr( "删除选中节点或连线 (Delete)" ) );
   connect( deleteAct, &QAction::triggered, mCanvasWidget, &PipelineCanvasWidget::deleteSelected );
 
   mToolBar->addSeparator();
 
-  auto *presetAct = mToolBar->addAction( tr( "📌 预设模板" ) );
+  auto *presetAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "bookmarks" ), QIcon( QStringLiteral( ":/icons/bookmarks" ) ) ), tr( "预设模板" ) );
   presetAct->setToolTip( tr( "展开预设模板库" ) );
   connect( presetAct, &QAction::triggered, this, &PipelineEditorDock::onTogglePresetCatalog );
 }

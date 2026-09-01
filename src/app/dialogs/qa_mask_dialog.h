@@ -7,6 +7,7 @@ class BandRoleCombo;
 class QComboBox;
 class QLabel;
 class QSpinBox;
+class RasterLayerCombo;
 
 /**
  * Dialog for deriving a cloud / cloud-shadow / snow mask from a product QA
@@ -28,11 +29,13 @@ protected:
     void onRun() override;
 
 private slots:
+    void onLayerChanged(int index);
     void onSourceChanged(int index);
 
 private:
     void setupUi();
 
+    RasterLayerCombo *m_layerCombo = nullptr;
     QComboBox *m_sourceCombo = nullptr;
     QComboBox *m_maskCombo = nullptr;
     BandRoleCombo *m_bandCombo = nullptr;

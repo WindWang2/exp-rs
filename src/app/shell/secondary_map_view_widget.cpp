@@ -109,11 +109,13 @@ void SecondaryMapViewWidget::setActiveHighlight( bool active )
   {
     m_titleLabel->setText( active ? tr( "第二视图（活动）" ) : tr( "第二视图" ) );
   }
-  setStyleSheet( active
-                     ? QStringLiteral(
-                           "#rsSecondaryMapViewHeader { background: #E6F4EE; border-bottom: 1px solid #0B6E4F; }" )
-                     : QStringLiteral(
-                           "#rsSecondaryMapViewHeader { background: #F4F5F7; border-bottom: 1px solid #E2E6EB; }" ) );
+  auto *header = findChild<QWidget *>( QStringLiteral( "rsSecondaryMapViewHeader" ) );
+  if ( header )
+  {
+    header->setProperty( "active", active );
+    header->style()->unpolish( header );
+    header->style()->polish( header );
+  }
 }
 
 void SecondaryMapViewWidget::mousePressEvent( QMouseEvent *event )

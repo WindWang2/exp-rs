@@ -162,13 +162,9 @@ TEST_CASE("HistogramStretchWidget setRasterLayer", "[gui][histogram]") {
     // #656: fail loudly on a missing deterministic fixture instead of
     // silently skipping the regression coverage.
     REQUIRE(layer->isValid());
-    {
-        widget.setRasterLayer(layer);
-        CHECK(widget.rasterLayer() == layer);
-        CHECK(widget.band() == 1);
-    } else {
-        WARN("dem_sample.tif not available, skipping raster test");
-    }
+    widget.setRasterLayer(layer);
+    CHECK(widget.rasterLayer() == layer);
+    CHECK(widget.band() == 1);
 
     delete layer;
     // QPointer must clear after layer destruction (no use-after-free on next apply).
@@ -186,29 +182,25 @@ TEST_CASE("HistogramStretchWidget algorithm switching", "[gui][histogram]") {
     // #656: fail loudly on a missing deterministic fixture instead of
     // silently skipping the regression coverage.
     REQUIRE(layer->isValid());
+    widget.setRasterLayer(layer);
+
+    QSignalSpy spy(&widget, &HistogramStretchWidget::stretchApplied);
+    REQUIRE(spy.isValid());
+
+    // Find the stretch algorithm combo (not channel/band).
+    QList<QComboBox *> combos = widget.findChildren<QComboBox *>();
+    REQUIRE(combos.size() >= 3);
+    QComboBox *algorithmCombo = combos.at(2); // channel, band, algorithm
+
+    // Switch through all stretch algorithms — regression for crash on 增强/算法切换.
+    for ( int i = 0; i < algorithmCombo->count(); ++i )
     {
-        widget.setRasterLayer(layer);
-
-        QSignalSpy spy(&widget, &HistogramStretchWidget::stretchApplied);
-        REQUIRE(spy.isValid());
-
-        // Find the stretch algorithm combo (not channel/band).
-        QList<QComboBox *> combos = widget.findChildren<QComboBox *>();
-        REQUIRE(combos.size() >= 3);
-        QComboBox *algorithmCombo = combos.at(2); // channel, band, algorithm
-
-        // Switch through all stretch algorithms — regression for crash on 增强/算法切换.
-        for ( int i = 0; i < algorithmCombo->count(); ++i )
-        {
-            algorithmCombo->setCurrentIndex( i );
-            widget.applyStretch();
-            CHECK( layer->isValid() );
-            CHECK( layer->renderer() != nullptr );
-        }
-        CHECK( spy.count() >= algorithmCombo->count() );
-    } else {
-        WARN("dem_sample.tif not available, skipping algorithm test");
+        algorithmCombo->setCurrentIndex( i );
+        widget.applyStretch();
+        CHECK( layer->isValid() );
+        CHECK( layer->renderer() != nullptr );
     }
+    CHECK( spy.count() >= algorithmCombo->count() );
 
     delete layer;
     CHECK(widget.rasterLayer() == nullptr);
@@ -524,15 +516,11 @@ TEST_CASE("HistogramStretchWidget resetStretch", "[gui][histogram]") {
     // #656: fail loudly on a missing deterministic fixture instead of
     // silently skipping the regression coverage.
     REQUIRE(layer->isValid());
-    {
-        widget.setRasterLayer(layer);
-        widget.resetStretch();
-        // After reset, min/max should be restored to data range
-        // (verify no crash and layer remains valid)
-        CHECK(widget.rasterLayer() == layer);
-    } else {
-        WARN("dem_sample.tif not available, skipping reset test");
-    }
+    widget.setRasterLayer(layer);
+    widget.resetStretch();
+    // After reset, min/max should be restored to data range
+    // (verify no crash and layer remains valid)
+    CHECK(widget.rasterLayer() == layer);
 
     delete layer;
 }

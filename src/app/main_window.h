@@ -29,6 +29,7 @@ class QMenuBar;
 class QSlider;
 class QToolBar;
 class QVBoxLayout;
+class QStackedWidget;
 class ActiveViewHost;
 class QSplitter;
 class SecondaryMapViewWidget;
@@ -54,6 +55,7 @@ class QgsMapToolScaleFeature;
 
 namespace sicnu {
 
+class RsEmptyStateWidget;
 class DataManagerPanel;
 namespace data {
 class AssetId;
@@ -160,7 +162,7 @@ public:
      * (registers a Data Asset and adds a main-view Display Layer). Returns true
      * on success. Loading errors are reported through the UI shell.
      */
-    bool loadDataLayer(const QString &filePath);
+    Q_INVOKABLE bool loadDataLayer(const QString &filePath);
 
   public slots:
     void addRasterLayer();
@@ -350,9 +352,16 @@ private:
     /** Apply light/dark Canopy Lab theme (Fusion + QSS). */
     void applyUiTheme( const QString &theme );
 
+    void updateCanvasEmptyState();
+    void updateLayersEmptyState();
+
     // QGIS C++ components
     QgsMapCanvas *m_mapCanvas = nullptr;
+    QStackedWidget *m_canvasStack = nullptr;
+    sicnu::RsEmptyStateWidget *m_canvasEmptyState = nullptr;
     QgsLayerTreeView *m_layerTreeView = nullptr;
+    QStackedWidget *m_layersStack = nullptr;
+    sicnu::RsEmptyStateWidget *m_layersEmptyState = nullptr;
     QgsLayerTreeModel *m_layerTreeModel = nullptr;
     QWidget *m_mapCanvasContainer = nullptr;
     QSplitter *m_mapSplitter = nullptr;

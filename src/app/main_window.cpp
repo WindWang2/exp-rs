@@ -6,6 +6,8 @@
 #include "map_tools/rs_roi_spectrum_tool.h"
 #include "app_paths.h"
 #include "qgis_app_facade.h"
+#include "widgets/rs_empty_state_widget.h"
+#include <QStackedWidget>
 
 #ifdef SICNU_EMBED_PYTHON
 #include "widgets/python_script_editor.h"
@@ -294,9 +296,30 @@ void QgisDesktopWindow::setupMapCanvas()
 {
     m_mapCanvas = new QgsMapCanvas(m_mapCanvasContainer);
 
+    m_canvasStack = new QStackedWidget(m_mapCanvasContainer);
+    m_canvasStack->setObjectName(QStringLiteral("rsCanvasStack"));
+
+    // Page 0: Empty / Welcome State
+    m_canvasEmptyState = new sicnu::RsEmptyStateWidget(
+        QStringLiteral("app_icon"),
+        tr("RS Studio 遥感影像处理与分析工作台"),
+        tr("支持多源遥感卫星影像（光学/高光谱/SAR/DEM）的高性能渲染、波段运算、正射校正与智能解译。\n点击下方按钮或按 Ctrl+O 打开遥感数据开始工作。"),
+        tr("打开遥感数据 (Ctrl+O)"),
+        m_canvasStack);
+    m_canvasEmptyState->setIconSize(QSize(64, 64));
+    connect(m_canvasEmptyState, &sicnu::RsEmptyStateWidget::actionClicked, this, [this]() {
+        addRasterLayer();
+    });
+    m_canvasStack->addWidget(m_canvasEmptyState); // Index 0: Welcome
+
+    // Page 1: Map Canvas
+    m_canvasStack->addWidget(m_mapCanvas); // Index 1: Canvas
+
     QVBoxLayout *layout = new QVBoxLayout(m_mapCanvasContainer);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->addWidget(m_mapCanvas);
+    layout->addWidget(m_canvasStack);
+
+    m_canvasStack->setCurrentIndex(0); // Initially empty
 
     // Performance Optimization (matching QGIS defaults)
     m_mapCanvas->setParallelRenderingEnabled(true);
@@ -370,3 +393,18 @@ void QgisDesktopWindow::setupMapCanvas()
     // Set default tool (QGIS default: pan)
     m_mapCanvas->setMapTool(m_panTool);
 }
+
+void QgisDesktopWindow::updateCanvasEmptyState()
+{
+    const bool hasLayers = m_mapCanvas && !m_mapCanvas->layers().isEmpty();
+    if ( m_canvasStack )
+        m_canvasStack->setCurrentIndex( hasLayers ? 1 : 0 );
+}
+
+void QgisDesktopWindow::updateLayersEmptyState()
+{
+    const bool hasLayers = m_mapCanvas && !m_mapCanvas->layers().isEmpty();
+    if ( m_layersStack )
+        m_layersStack->setCurrentIndex( hasLayers ? 0 : 1 );
+}
+
