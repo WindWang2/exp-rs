@@ -44,14 +44,24 @@ void windowStats( const GdalBlockStream::Tile &tile, const float *haloBuf,
     const int half = kernelSize / 2;
     const int bufW = tile.bufferWidth;
     const float *center = haloBuf + static_cast<size_t>( cy + tile.halo ) * bufW + ( cx + tile.halo );
+    const int rasterX = tile.xOffset + cx;
+    const int rasterY = tile.yOffset + cy;
     double sum = 0.0;
     double sumSq = 0.0;
     int count = 0;
     for ( int dy = -half; dy <= half; ++dy )
     {
+        // The full-frame kernels compute window statistics over the
+        // rect CLAMPED to the raster (localStats): border windows have
+        // fewer samples. Halo positions outside the raster are
+        // edge-replicated fill and must NOT be counted (review P1).
+        if ( rasterY + dy < 0 || ( tile.rasterHeight > 0 && rasterY + dy >= tile.rasterHeight ) )
+            continue;
         const float *row = center + dy * bufW; // signed offset: dy may be negative
         for ( int dx = -half; dx <= half; ++dx )
         {
+            if ( rasterX + dx < 0 || ( tile.rasterWidth > 0 && rasterX + dx >= tile.rasterWidth ) )
+                continue;
             const float v = row[dx];
             if ( std::isfinite( v ) )
             {
@@ -242,7 +252,10 @@ void speckleTileLee( const GdalBlockStream::Tile &tile, const float *haloBuf,
             {
                 const float cuSq = noiseVariance;
                 const float clSq = localVar / ( mean * mean );
-                const float weight = ( clSq <= cuSq ) ? 0.0f : ( 1.0f - cuSq / clSq ) / ( 1.0f + cuSq );
+                // LEE's additive-noise weight (#678, review P0): the
+                // /(1+Cu^2) denominator is KUAN's — it made Lee and Kuan
+                // bit-identical. Mirror the corrected full-frame kernel.
+                const float weight = ( clSq <= cuSq ) ? 0.0f : std::max( 0.0f, 1.0f - cuSq / clSq );
                 out = mean + weight * ( pixel - mean );
             }
         }

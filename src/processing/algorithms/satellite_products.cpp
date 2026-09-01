@@ -1675,6 +1675,7 @@ bool stackToGeoTiff(const ProductInfo& product,
             static const QRegularExpression bandNumRe(
                 QStringLiteral( "^B(\\d+)$" ) );
             double mult = 0.0;
+            double add = 0.0;
             int multBands = 0;
             bool uniform = true;
             for ( const BandFile &bf : selected )
@@ -1682,32 +1683,44 @@ bool stackToGeoTiff(const ProductInfo& product,
                 const auto m = bandNumRe.match( bf.name );
                 if ( !m.hasMatch() )
                     continue;
-                bool ok = false;
+                bool okM = false;
+                bool okA = false;
                 const double v =
                     product.attributes
                         .value( QStringLiteral( "REFLECTANCE_MULT_BAND_%1" ).arg( m.captured( 1 ) ) )
-                        .toDouble( &ok );
-                if ( !ok || !std::isfinite( v ) || v <= 0.0 )
+                        .toDouble( &okM );
+                const double a =
+                    product.attributes
+                        .value( QStringLiteral( "REFLECTANCE_ADD_BAND_%1" ).arg( m.captured( 1 ) ) )
+                        .toDouble( &okA );
+                if ( !okM || !std::isfinite( v ) || v <= 0.0 )
                     continue; // e.g. thermal ST_* bands carry no reflectance mult
                 ++multBands;
                 if ( multBands == 1 )
                 {
                     mult = v;
+                    add = okA ? a : 0.0;
                 }
-                else if ( std::abs( v - mult ) > 1e-9 * std::abs( mult ) )
+                else if ( std::abs( v - mult ) > 1e-9 * std::abs( mult )
+                          || std::abs( ( okA ? a : 0.0 ) - add ) > 1e-9 )
                 {
                     uniform = false;
                     break;
                 }
             }
-            if ( uniform && multBands > 0 && mult > 0.0 )
+            // A pure scale contract requires the additive term to be zero:
+            // Landsat C2 L2 carries REFLECTANCE_ADD = -0.2, so dividing by
+            // 1/mult alone leaves DN*mult = rho + 0.2 — EVI/SAVI would run on
+            // biased reflectance (review P1). Stamp only when add == 0.
+            if ( uniform && multBands > 0 && mult > 0.0 && std::abs( add ) <= 1e-12 )
             {
                 numericScale = 1.0 / mult;
             }
             else if ( multBands > 0 )
             {
-                qWarning() << "stackToGeoTiff: non-uniform Landsat REFLECTANCE_MULT across the "
-                              "stacked bands; SICNU_NUMERIC_SCALE not stamped";
+                qWarning() << "stackToGeoTiff: Landsat reflectance coefficients are not a pure "
+                              "scale (non-uniform MULT or non-zero ADD); SICNU_NUMERIC_SCALE "
+                              "not stamped — run rs:radiometric_calibration for true reflectance";
             }
         }
         if ( numericScale > 0.0 && std::isfinite( numericScale ) )

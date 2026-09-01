@@ -536,7 +536,9 @@ void runSpeckleStreamingCase( int filterIndex, int kernelSize, int tileDim, floa
 
 TEST_CASE( "Streaming speckle tiles match full-frame kernels (multi-tile)", "[speckle][streaming]" )
 {
-    SECTION( "Lee 5x5" )        { runSpeckleStreamingCase( 0, 5, 16, 1.0f ); }
+    // noiseVariance 0.1 keeps Lee's weight strictly inside (0,1) — with 1.0
+    // the weight collapses to 0 and the section passes vacuously (review P0).
+    SECTION( "Lee 5x5" )        { runSpeckleStreamingCase( 0, 5, 16, 0.1f ); }
     SECTION( "Frost 5x5" )      { runSpeckleStreamingCase( 1, 5, 16, 2.0f ); }
     SECTION( "Kuan 3x3" )       { runSpeckleStreamingCase( 2, 3, 16, 1.0f ); }
     SECTION( "Gamma-MAP 7x7" )  { runSpeckleStreamingCase( 3, 7, 16, 1.0f ); }
