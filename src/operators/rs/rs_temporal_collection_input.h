@@ -16,10 +16,15 @@
 #pragma once
 
 #include "processing/algorithms/temporal/temporal_collection.h"
+#include "processing/algorithms/temporal/temporal_preflight.h"
 
 #include <json/json.h>
 
 #include <QString>
+
+namespace sicnu::operators {
+class RSOperatorContext;
+}
 
 namespace sicnu::operators::rs::temporal_input
 {

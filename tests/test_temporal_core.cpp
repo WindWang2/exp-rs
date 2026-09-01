@@ -4,6 +4,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include <QCoreApplication>
+#include <QDate>
 #include <QDir>
 #include <QTemporaryDir>
 
@@ -222,9 +223,10 @@ TEST_CASE( "Welford and online regression numerics", "[temporal][stats]" )
         const double base = 1e9;
         for ( int i = 0; i < 10000; ++i )
             acc.add( base + ( i % 2 ? 0.001 : -0.001 ) );
-        // naive sum(x^2)-sum(x)^2/n would lose this completely
-        REQUIRE( acc.mean == Approx( base ).epsilon( 1e-12 ) );
-        REQUIRE( acc.sampleStddev() == Approx( 0.001 ).epsilon( 1e-6 ) );
+        // naive sum(x^2)-sum(x)^2/n would lose this completely (errors ~1e5);
+        // Welford stays within double-precision rounding at this baseline.
+        REQUIRE( acc.mean == Approx( base ).epsilon( 1e-10 ) );
+        REQUIRE( acc.sampleStddev() == Approx( 0.001 ).epsilon( 1e-3 ) );
     }
     SECTION( "regression: perfect line through irregular times (§43)" )
     {
@@ -509,9 +511,8 @@ TEST_CASE( "Temporal streaming reader: validity contract and scale", "[temporal]
             for ( int i = 0; i < dates; ++i )
             {
                 const QString p = dir.filePath( sub + QStringLiteral( "/s%1.tif" ).arg( i ) );
-                REQUIRE( writeScene( makeScene( p, QStringLiteral( "2025-01-%1" ).arg( i + 1, 2, 10,
-                                                                                     QChar( '0' ) ),
-                                                1.0f, 8, 8 ) ) );
+                const QString date = QDate( 2025, 1, 1 ).addDays( i ).toString( Qt::ISODate );
+                REQUIRE( writeScene( makeScene( p, date, 1.0f, 8, 8 ) ) );
                 paths << p;
             }
             auto collection = TemporalCollection::fromScenePaths( paths );

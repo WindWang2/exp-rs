@@ -133,7 +133,9 @@ Json::Value RsTemporalExtractSeriesOperator::schema() const
   Json::Value outputs( Json::objectValue );
   outputs["output"] = makeOutputParam( "output", "Series CSV", "csv" );
   outputs["series"] = makeStringParam( "series", "JSON series array in the result" );
-  return makeRootSchema( displayName(), description(), props, outputs );
+  Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
+  root["required"] = makeRequired( { "output" } );
+  return root;
 }
 
 Json::Value RsTemporalExtractSeriesOperator::metadata() const
@@ -164,7 +166,7 @@ Json::Value RsTemporalExtractSeriesOperator::metadata() const
 
 Json::Value RsTemporalExtractSeriesOperator::executionEstimate() const
 {
-  return makeStreamingEstimate( 256, 256, 1, 4, 4, 0, 1 * 1024 * 1024 );
+  return sicnu::processing::makeStreamingEstimate( 256, 256, 1, 4, 4, 0, 1 * 1024 * 1024 );
 }
 
 namespace

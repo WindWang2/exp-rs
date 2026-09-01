@@ -85,7 +85,9 @@ Json::Value RsTemporalAnomalyOperator::schema() const
   Json::Value outputs( Json::objectValue );
   outputs["output"] = makeOutputParam( "output", "Anomaly GeoTIFF", "tif" );
   outputs["sceneCount"] = makeIntegerParam( "sceneCount", "Baseline scenes used", 0 );
-  return makeRootSchema( displayName(), description(), props, outputs );
+  Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
+  root["required"] = makeRequired( { "output" } );
+  return root;
 }
 
 Json::Value RsTemporalAnomalyOperator::metadata() const
@@ -116,13 +118,13 @@ Json::Value RsTemporalAnomalyOperator::metadata() const
 
 Json::Value RsTemporalAnomalyOperator::executionEstimate() const
 {
-  return makeStreamingEstimate( kDefaultTileSize, kDefaultTileSize, 1, 4, 6, 0, 2 * 1024 * 1024 );
+  return sicnu::processing::makeStreamingEstimate( kDefaultTileSize, kDefaultTileSize, 1, 4, 6, 0, 2 * 1024 * 1024 );
 }
 
 Json::Value RsTemporalAnomalyOperator::estimateExecution( const Json::Value &params ) const
 {
   const int tileSize = std::clamp( getInt( params, "tile_size", kDefaultTileSize ), 16, 4096 );
-  return makeStreamingEstimate( tileSize, tileSize, 1, 4, 9, 0, 2 * 1024 * 1024 );
+  return sicnu::processing::makeStreamingEstimate( tileSize, tileSize, 1, 4, 9, 0, 2 * 1024 * 1024 );
 }
 
 Json::Value RsTemporalAnomalyOperator::run( const Json::Value &params, RSOperatorContext &context )

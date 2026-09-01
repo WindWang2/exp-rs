@@ -101,7 +101,9 @@ Json::Value RsTemporalSummaryOperator::schema() const
   outputs["output"] = makeOutputParam( "output", "Summary GeoTIFF", "tif" );
   outputs["sceneCount"] = makeIntegerParam( "sceneCount", "Number of scenes analysed", 0 );
   outputs["validFraction"] = makeNumberParam( "validFraction", "Fraction of valid samples", 0.0 );
-  return makeRootSchema( displayName(), description(), props, outputs );
+  Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
+  root["required"] = makeRequired( { "output" } );
+  return root;
 }
 
 Json::Value RsTemporalSummaryOperator::metadata() const
@@ -131,7 +133,7 @@ Json::Value RsTemporalSummaryOperator::metadata() const
 
 Json::Value RsTemporalSummaryOperator::executionEstimate() const
 {
-  return makeStreamingEstimate( kDefaultTileSize, kDefaultTileSize, 1, 4, 8, 0, 2 * 1024 * 1024 );
+  return sicnu::processing::makeStreamingEstimate( kDefaultTileSize, kDefaultTileSize, 1, 4, 8, 0, 2 * 1024 * 1024 );
 }
 
 Json::Value RsTemporalSummaryOperator::estimateExecution( const Json::Value &params ) const
@@ -143,7 +145,7 @@ Json::Value RsTemporalSummaryOperator::estimateExecution( const Json::Value &par
     scenes = std::max<int>( 1, static_cast<int>( params["scenes"].size() ) );
   int side = median ? medianTileSide( tileSize, scenes ) : tileSize;
   // per pixel: 1 value buffer + 6 accumulator floats (Welford + min/max)
-  Json::Value est = makeStreamingEstimate(
+  Json::Value est = sicnu::processing::makeStreamingEstimate(
     side, side, 1, 4, median ? static_cast<std::uint64_t>( scenes ) + 6 : 7, 0,
     2 * 1024 * 1024 );
   return est;

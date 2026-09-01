@@ -188,7 +188,8 @@ TEST_CASE( "temporal_summary: hand-computed statistics", "[temporal][operators][
 
     const Json::Value result = runOp( "rs:temporal_summary", params );
     REQUIRE( result["sceneCount"].asInt() == 3 );
-    REQUIRE( result["validFraction"].asDouble() == Approx( 6.0 / 12.0 ) );
+    // valid samples: date1 2 + date2 3 + date3 3 = 8 of 12
+    REQUIRE( result["validFraction"].asDouble() == Approx( 8.0 / 12.0 ) );
 
     const auto count = readBand( fx.filePath( QStringLiteral( "summary.tif" ) ), 2 );
     const auto mean = readBand( fx.filePath( QStringLiteral( "summary.tif" ) ), 3 );
@@ -237,7 +238,7 @@ TEST_CASE( "temporal_summary: exact median with include_median", "[temporal][ope
 
     const auto median = readBand( fx.filePath( QStringLiteral( "summary.tif" ) ), 7 );
     REQUIRE( median[0] == Approx( 15.0 ) ); // even valid count: avg of 10,20
-    REQUIRE( median[1] == Approx( 20.0 ) ); // odd valid count: 20,30 -> 20? no: values 20,30 -> median 25? see below
+    REQUIRE( median[1] == Approx( 25.0 ) ); // valid {20,30} -> even count -> 25
 }
 
 TEST_CASE( "temporal_summary: 100 dates stay memory-bounded", "[temporal][operators][summary][streaming]" )
@@ -686,7 +687,8 @@ TEST_CASE( "temporal_extract_series: ROI polygon bounded by bbox (§26)", "[temp
     scenes.append( fx.filePath( "roi.tif" ).toStdString() );
     params["scenes"] = scenes;
     params["band"] = 1;
-    // triangle around centers (500015,4499985) and (500045,4499985)
+    // rectangle containing row-0 pixel centers (500015,4499985) and
+    // (500045,4499985) but excluding rows 1-3 (center y = 4499955...)
     Json::Value polygon( Json::arrayValue );
     auto vertex = []( double x, double y ) {
         Json::Value v( Json::arrayValue );
@@ -694,10 +696,11 @@ TEST_CASE( "temporal_extract_series: ROI polygon bounded by bbox (§26)", "[temp
         v.append( y );
         return v;
     };
-    polygon.append( vertex( 500010, 4500000 ) );
-    polygon.append( vertex( 500050, 4500000 ) );
-    polygon.append( vertex( 500030, 4499970 ) );
-    polygon.append( vertex( 500010, 4500000 ) );
+    polygon.append( vertex( 500005, 4500005 ) );
+    polygon.append( vertex( 500060, 4500005 ) );
+    polygon.append( vertex( 500060, 4499975 ) );
+    polygon.append( vertex( 500005, 4499975 ) );
+    polygon.append( vertex( 500005, 4500005 ) );
     params["polygon"] = polygon;
     params["output"] = fx.filePath( QStringLiteral( "roi.csv" ) ).toStdString();
     const Json::Value result = runOp( "rs:temporal_extract_series", params );
@@ -726,7 +729,7 @@ TEST_CASE( "temporal operators: scale/offset float vs scaled-int agree (§45)",
         for ( int i = 0; i < 3; ++i )
         {
             TestScene s = makeTestScene( fx.filePath( QStringLiteral( "sc_%1_%2.tif" ).arg( tag ).arg( i ) ),
-                                         QStringLiteral( dates[i] ), { vals[i] }, 1, 1 );
+                                         QString::fromLatin1( dates[i] ), { vals[i] }, 1, 1 );
             s.declareScale = declareScale;
             s.scale = 0.0001;
             REQUIRE( writeTestScene( s ) );
@@ -734,7 +737,8 @@ TEST_CASE( "temporal operators: scale/offset float vs scaled-int agree (§45)",
         Json::Value params( Json::objectValue );
         Json::Value sceneArr( Json::arrayValue );
         for ( int i = 0; i < 3; ++i )
-            sceneArr.append( fx.filePath( QStringLiteral( "sc%1.tif" ).arg( i ) ).toStdString() );
+            sceneArr.append(
+                fx.filePath( QStringLiteral( "sc_%1_%2.tif" ).arg( tag ).arg( i ) ).toStdString() );
         params["scenes"] = sceneArr;
         params["band"] = 1;
         params["output"] = fx.filePath( out ).toStdString();

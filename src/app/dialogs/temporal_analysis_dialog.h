@@ -7,6 +7,8 @@
 
 #include "raster_processing_dialog_base.h"
 
+#include <QComboBox>
+
 #include <json/json.h>
 
 #include <QStringList>

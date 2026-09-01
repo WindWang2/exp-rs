@@ -153,7 +153,7 @@ private:
   QString m_projection;
   AcquisitionTime m_referenceTime;
   // scratch buffers (the reader's entire steady-state memory)
-  std::vector<std::uint8_t> m_nativeBytes; // QA band native read (<=2 bytes/sample)
+  std::vector<float> m_maskFloat; // mask band read (GDAL converts any numeric dtype)
   std::vector<std::uint8_t> m_maskBytes;
   std::vector<std::uint16_t> m_qaU16;
   std::vector<std::uint8_t> m_sclU8;

@@ -82,17 +82,18 @@ TemporalTileReader::TemporalTileReader( const TemporalCollection &collection,
 
 void TemporalTileReader::ensureScratch( size_t samples, size_t maskElemSize )
 {
-  if ( m_nativeBytes.size() < samples * maskElemSize )
-    m_nativeBytes.resize( samples * maskElemSize );
+  if ( m_maskFloat.size() < samples )
+    m_maskFloat.resize( samples );
   if ( m_maskBytes.size() < samples )
     m_maskBytes.resize( samples );
   if ( m_qaU16.size() < samples )
     m_qaU16.resize( samples );
   if ( m_sclU8.size() < samples )
     m_sclU8.resize( samples );
-  // bytes -> 4-byte float slots, rounded up
-  const std::uint64_t bytes = static_cast<std::uint64_t>( samples ) * ( maskElemSize + 1 ) +
-                              static_cast<std::uint64_t>( samples ) * 3; // qa + scl scratch
+  // reader scratch bytes: mask float (4) + mask bytes (1) + qa (2) + scl (1)
+  // = 8 B/pixel; maskElemSize is informational (float read converts).
+  (void)maskElemSize;
+  const std::uint64_t bytes = static_cast<std::uint64_t>( samples ) * 8;
   m_peakScratchSlots = std::max( m_peakScratchSlots, ( bytes + 3 ) / 4 );
 }
 
@@ -197,59 +198,49 @@ bool TemporalTileReader::normalizeAndMask( int sceneIndex, int band, int x, int 
   if ( rad.maskBand <= 0 || rad.maskKind.isEmpty() )
     return true;
 
-  const int dtype = ds.bandDataType( rad.maskBand );
-  const int elemSize = ( dtype == GDT_Byte ) ? 1 : 2; // preflight rejected wider dtypes
-  ensureScratch( pixels, static_cast<size_t>( elemSize ) );
-  if ( !ds.readBandWindowNative( rad.maskBand, x, y, w, h, m_nativeBytes.data() ) )
+  // Mask read through the FLOAT window API: GDAL converts any numeric mask
+  // dtype (Byte/UInt16/Int32/Float...) losslessly for QA value ranges, so no
+  // native-size buffers (and no 16-bit dtype gate) are needed. NaN comes from
+  // edge padding and masks those samples (fail closed).
+  ensureScratch( pixels, sizeof( float ) );
+  if ( !ds.readBandWindow( rad.maskBand, x, y, w, h, m_maskFloat.data() ) )
     return false; // fail closed: an unreadable mask must not silently pass clouds
 
   if ( rad.maskKind == QLatin1String( "sentinel2_scl" ) )
   {
+    // Float read -> class-id bytes (non-finite/out-of-range becomes 0 = SCL
+    // no-data, which is masked) -> shared SCL kernel.
+    for ( size_t i = 0; i < pixels; ++i )
+    {
+      const float v = m_maskFloat[i];
+      m_sclU8[i] = ( std::isfinite( v ) && v >= 0.0f && v <= 15.0f )
+                       ? static_cast<std::uint8_t>( static_cast<int>( v ) )
+                       : 0;
+    }
     bool classes[16] = {};
     for ( int c : temporal_mask_defaults::kSclMaskedClasses )
       classes[c] = true;
-    if ( elemSize == 1 )
-    {
-      QaMask::sclMask( m_nativeBytes.data(), m_maskBytes.data(), pixels, classes );
-    }
-    else
-    {
-      // Wide SCL-like band: reduce to its low byte before class matching.
-      for ( size_t i = 0; i < pixels; ++i )
-      {
-        std::uint16_t wide = 0;
-        std::memcpy( &wide, m_nativeBytes.data() + i * 2, 2 );
-        m_sclU8[i] = static_cast<std::uint8_t>( wide & 0xFF );
-      }
-      QaMask::sclMask( m_sclU8.data(), m_maskBytes.data(), pixels, classes );
-    }
+    QaMask::sclMask( m_sclU8.data(), m_maskBytes.data(), pixels, classes );
   }
   else if ( rad.maskKind == QLatin1String( "landsat_qa_pixel" ) )
   {
-    if ( elemSize == 1 )
+    // Float read -> QA word (non-finite becomes fill bit 0 -> masked) ->
+    // shared QA_PIXEL kernel. QA values fit float's exact integer range.
+    for ( size_t i = 0; i < pixels; ++i )
     {
-      for ( size_t i = 0; i < pixels; ++i )
-        m_qaU16[i] = m_nativeBytes.data()[i];
-    }
-    else
-    {
-      std::memcpy( m_qaU16.data(), m_nativeBytes.data(), pixels * 2 );
+      const float v = m_maskFloat[i];
+      m_qaU16[i] = std::isfinite( v ) && v >= 0.0f && v < 65536.0f
+                       ? static_cast<std::uint16_t>( static_cast<int>( v ) )
+                       : 0;
     }
     QaMask::landsatQaMask( m_qaU16.data(), m_maskBytes.data(), pixels,
                            temporal_mask_defaults::kLandsatFlags );
   }
   else if ( rad.maskKind == QLatin1String( "explicit" ) )
   {
-    // User-designated 0/1 validity mask band: any non-zero sample masks.
+    // User-designated validity mask band: any non-zero (or non-finite) masks.
     for ( size_t i = 0; i < pixels; ++i )
-    {
-      std::uint16_t sample = 0;
-      if ( elemSize == 1 )
-        sample = m_nativeBytes.data()[i];
-      else
-        std::memcpy( &sample, m_nativeBytes.data() + i * 2, 2 );
-      m_maskBytes[i] = sample != 0 ? 1 : 0;
-    }
+      m_maskBytes[i] = ( !std::isfinite( m_maskFloat[i] ) || m_maskFloat[i] != 0.0f ) ? 1 : 0;
   }
   else
   {
@@ -319,9 +310,8 @@ bool TemporalTileReader::readSceneBandPixel( int sceneIndex, int band, int x, in
     const SceneRadiometry &rad = m_radiometry.at( sceneIndex );
     if ( rad.maskBand > 0 && !rad.maskKind.isEmpty() )
     {
-      std::uint16_t maskSample = 0;
-      bool masked = false;
-      if ( ds.readBandWindowNative( rad.maskBand, x, y, 1, 1, &maskSample ) )
+      float maskSample = kNan;
+      if ( ds.readPixel( rad.maskBand, x, y, &maskSample ) )
       {
         std::uint8_t flag = 0;
         if ( rad.maskKind == QLatin1String( "sentinel2_scl" ) )
@@ -329,23 +319,27 @@ bool TemporalTileReader::readSceneBandPixel( int sceneIndex, int band, int x, in
           bool classes[16] = {};
           for ( int c : temporal_mask_defaults::kSclMaskedClasses )
             classes[c] = true;
-          const std::uint8_t scl = static_cast<std::uint8_t>( maskSample & 0xFF );
+          std::uint8_t scl = 0;
+          if ( std::isfinite( maskSample ) && maskSample >= 0.0f && maskSample <= 15.0f )
+            scl = static_cast<std::uint8_t>( static_cast<int>( maskSample ) );
           QaMask::sclMask( &scl, &flag, 1, classes );
         }
         else if ( rad.maskKind == QLatin1String( "landsat_qa_pixel" ) )
         {
-          QaMask::landsatQaMask( &maskSample, &flag, 1, temporal_mask_defaults::kLandsatFlags );
+          std::uint16_t qa = 0; // non-finite -> 0 (fill bit set) -> masked
+          if ( std::isfinite( maskSample ) && maskSample >= 0.0f && maskSample < 65536.0f )
+            qa = static_cast<std::uint16_t>( static_cast<int>( maskSample ) );
+          QaMask::landsatQaMask( &qa, &flag, 1, temporal_mask_defaults::kLandsatFlags );
         }
         else if ( rad.maskKind == QLatin1String( "explicit" ) )
         {
-          flag = maskSample != 0 ? 1 : 0;
+          flag = ( !std::isfinite( maskSample ) || maskSample != 0.0f ) ? 1 : 0;
         }
-        masked = flag != 0;
-      }
-      if ( masked )
-      {
-        *out = kNan;
-        return true;
+        if ( flag != 0 )
+        {
+          *out = kNan;
+          return true;
+        }
       }
     }
   }
@@ -358,7 +352,7 @@ std::uint64_t TemporalTileReader::internalFloatSlots() const
 {
   // Derived from the LIVE scratch buffers (they can outgrow the tile for
   // bbox-window ROI reads) so the number never understates residency.
-  const std::uint64_t bytes = static_cast<std::uint64_t>( m_nativeBytes.size() ) +
+  const std::uint64_t bytes = static_cast<std::uint64_t>( m_maskFloat.size() ) * 4 +
                               static_cast<std::uint64_t>( m_maskBytes.size() ) +
                               static_cast<std::uint64_t>( m_qaU16.size() ) * 2 +
                               static_cast<std::uint64_t>( m_sclU8.size() );
@@ -370,8 +364,8 @@ std::uint64_t TemporalTileReader::estimateWorkingSetBytes( int tileWidth, int ti
                                                            std::uint64_t accumulatorFloatsPerPixel )
 {
   const std::uint64_t tilePixels = static_cast<std::uint64_t>( tileWidth ) * tileHeight;
-  // reader scratch: native(2B) + mask(1B) + qa(2B) + scl(1B) per pixel = 6 B
-  const std::uint64_t readerBytes = tilePixels * 6;
+  // reader scratch: mask float (4B) + mask bytes + qa(2B) + scl(1B) = 8 B/pixel
+  const std::uint64_t readerBytes = tilePixels * 8;
   const std::uint64_t callerSlots = tilePixels * buffersPerPixel + tilePixels * accumulatorFloatsPerPixel;
   return readerBytes + callerSlots * sizeof( float );
 }

@@ -70,7 +70,9 @@ Json::Value RsTemporalTrendOperator::schema() const
   Json::Value outputs( Json::objectValue );
   outputs["output"] = makeOutputParam( "output", "Trend GeoTIFF", "tif" );
   outputs["sceneCount"] = makeIntegerParam( "sceneCount", "Scenes in the regression", 0 );
-  return makeRootSchema( displayName(), description(), props, outputs );
+  Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
+  root["required"] = makeRequired( { "output" } );
+  return root;
 }
 
 Json::Value RsTemporalTrendOperator::metadata() const
@@ -102,14 +104,14 @@ Json::Value RsTemporalTrendOperator::metadata() const
 
 Json::Value RsTemporalTrendOperator::executionEstimate() const
 {
-  return makeStreamingEstimate( kDefaultTileSize, kDefaultTileSize, 1, 4, 7, 0, 2 * 1024 * 1024 );
+  return sicnu::processing::makeStreamingEstimate( kDefaultTileSize, kDefaultTileSize, 1, 4, 7, 0, 2 * 1024 * 1024 );
 }
 
 Json::Value RsTemporalTrendOperator::estimateExecution( const Json::Value &params ) const
 {
   const int tileSize = std::clamp( getInt( params, "tile_size", kDefaultTileSize ), 16, 4096 );
   // 2 tile buffers + OnlineRegression (48 B = 12 float slots) per pixel
-  return makeStreamingEstimate( tileSize, tileSize, 1, 4, 14, 0, 2 * 1024 * 1024 );
+  return sicnu::processing::makeStreamingEstimate( tileSize, tileSize, 1, 4, 14, 0, 2 * 1024 * 1024 );
 }
 
 Json::Value RsTemporalTrendOperator::run( const Json::Value &params, RSOperatorContext &context )

@@ -45,11 +45,14 @@ BandScaleOffset bandScaleOffset( const GdalDatasetWrapper &ds, int band )
   return so;
 }
 
-/// Native dtypes the shared QaMask kernels + reader scratch can handle.
+/// Numeric dtypes only — the reader's float window read converts any of
+/// these losslessly for QA value ranges; complex mask bands are refused.
 bool maskBandTypeSupported( const GdalDatasetWrapper &ds, int band )
 {
   const int dtype = ds.bandDataType( band );
-  return dtype == GDT_Byte || dtype == GDT_UInt16 || dtype == GDT_Int16;
+  return dtype == GDT_Byte || dtype == GDT_UInt16 || dtype == GDT_Int16 ||
+         dtype == GDT_UInt32 || dtype == GDT_Int32 || dtype == GDT_Float32 ||
+         dtype == GDT_Float64;
 }
 
 /// Mask-band inference. Deliberately conservative: the generic BandRole::QA

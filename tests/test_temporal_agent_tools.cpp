@@ -17,7 +17,8 @@
 #include <string>
 
 #include "agent/spatial_tools/spatial_tool.h"
-#include "agent/spatial_tools/spatial_tool_registry.h"
+#include "agent/spatial_tools/spatial_tool_provider.h"
+#include "agent/tool_catalog/agent_tool.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/framework/atomic_algorithm_registry.h"
@@ -89,9 +90,9 @@ TEST_CASE( "Temporal operators register in the operator registry", "[temporal][r
         REQUIRE( op != nullptr );
         REQUIRE( op->group() == "temporal" );
         // streaming memory policy declared, never FullRaster
-        REQUIRE( op->memoryPolicy() == sicnu::operators::RSOperatorMemoryPolicy::Streaming ||
-                 op->memoryPolicy() ==
-                     sicnu::operators::RSOperatorMemoryPolicy::MultiPassStreaming );
+        const auto policy = op->memoryPolicy();
+        REQUIRE( ( policy == sicnu::operators::RSOperatorMemoryPolicy::Streaming ||
+                   policy == sicnu::operators::RSOperatorMemoryPolicy::MultiPassStreaming ) );
         const Json::Value schema = op->schema();
         REQUIRE( schema.isObject() );
         REQUIRE( schema.isMember( "properties" ) );
@@ -235,12 +236,12 @@ TEST_CASE( "temporal:* tools register and stay compact (§34/§35)", "[temporal]
 TEST_CASE( "temporal tools surface in the agent tool catalog", "[temporal][agent][catalog]" )
 {
     ensureApp();
-    auto &catalog = sicnu::agent::AgentToolCatalog::instance();
+    auto &catalog = sicnu::agent::tool_catalog::AgentToolCatalog::instance();
     catalog.reset();
     catalog.initializeDefaults();
     const auto listTool = catalog.findTool( "temporal:describe_collection" );
     REQUIRE( listTool.has_value() );
-    REQUIRE( listTool->category == sicnu::agent::ToolCategory::Data );
+    REQUIRE( listTool->category == sicnu::agent::tool_catalog::ToolCategory::Data );
     const auto schema = catalog.getSchema( "temporal:preflight_collection" );
     REQUIRE( !schema.empty() );
 }

@@ -135,7 +135,7 @@ void TemporalAnalysisDialog::setupUi()
   m_algorithmCombo = new QComboBox( paramGroup );
   m_algorithmCombo->setObjectName( QStringLiteral( "temporalAlgorithmCombo" ) );
   for ( const auto &entry : kAlgorithms )
-    m_algorithmCombo->addItem( tr( entry.label ), QStringLiteral( entry.id ) );
+    m_algorithmCombo->addItem( tr( entry.label ), QString::fromLatin1( entry.id ) );
   SicnuDialogHelp::tip( m_algorithmCombo, tr( "时间序列分析算法（经处理注册表执行，可在工具箱/Agent 中复用）。" ) );
   connect( m_algorithmCombo, &QComboBox::currentIndexChanged, this, &TemporalAnalysisDialog::algorithmChanged );
   algRow->addWidget( m_algorithmCombo, 1 );
@@ -209,7 +209,7 @@ void TemporalAnalysisDialog::setupUi()
     m_indexCombo = new QComboBox( page );
     m_indexCombo->setObjectName( QStringLiteral( "temporalIndexCombo" ) );
     for ( const char *idx : { "NDVI", "EVI", "SAVI", "NDWI", "NDBI", "MNDWI", "NBR", "NDRE", "NDSI", "NDTI" } )
-      m_indexCombo->addItem( QStringLiteral( idx ), QStringLiteral( idx ) );
+      m_indexCombo->addItem( QString::fromLatin1( idx ), QString::fromLatin1( idx ) );
     SicnuDialogHelp::tip( m_indexCombo,
                           tr( "与单景光谱指数相同的计算内核；输出为逐日期一个波段的栈（保留获取时间元数据）。" ) );
     lay->addWidget( m_indexCombo );

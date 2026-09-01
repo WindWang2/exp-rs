@@ -133,7 +133,9 @@ Json::Value RsTemporalIndexSeriesOperator::schema() const
   Json::Value outputs( Json::objectValue );
   outputs["output"] = makeOutputParam( "output", "Index-series GeoTIFF", "tif" );
   outputs["sceneCount"] = makeIntegerParam( "sceneCount", "Dates in the series", 0 );
-  return makeRootSchema( displayName(), description(), props, outputs );
+  Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
+  root["required"] = makeRequired( { "index", "output" } );
+  return root;
 }
 
 Json::Value RsTemporalIndexSeriesOperator::metadata() const
@@ -163,7 +165,7 @@ Json::Value RsTemporalIndexSeriesOperator::metadata() const
 
 Json::Value RsTemporalIndexSeriesOperator::executionEstimate() const
 {
-  return makeStreamingEstimate( kDefaultTileSize, kDefaultTileSize, 3, 4, 4, 0, 2 * 1024 * 1024 );
+  return sicnu::processing::makeStreamingEstimate( kDefaultTileSize, kDefaultTileSize, 3, 4, 4, 0, 2 * 1024 * 1024 );
 }
 
 Json::Value RsTemporalIndexSeriesOperator::estimateExecution( const Json::Value &params ) const
@@ -171,7 +173,7 @@ Json::Value RsTemporalIndexSeriesOperator::estimateExecution( const Json::Value 
   const int tileSize = std::clamp( getInt( params, "tile_size", kDefaultTileSize ), 16, 4096 );
   const std::string index = getEnum( params, "index", indexNames(), "NDVI" );
   const int kernelInputs = index == "EVI" ? 3 : 2;
-  return makeStreamingEstimate( tileSize, tileSize, 1, 4, kernelInputs + 1, 0, 2 * 1024 * 1024 );
+  return sicnu::processing::makeStreamingEstimate( tileSize, tileSize, 1, 4, kernelInputs + 1, 0, 2 * 1024 * 1024 );
 }
 
 Json::Value RsTemporalIndexSeriesOperator::run( const Json::Value &params, RSOperatorContext &context )

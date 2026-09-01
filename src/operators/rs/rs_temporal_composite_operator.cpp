@@ -29,6 +29,7 @@ namespace sicnu::operators::rs
 {
 
 using namespace params;
+using temporal::AcquisitionTime;
 using temporal::TemporalTileReader;
 
 namespace
@@ -107,7 +108,7 @@ QString groupLabel( const temporal::TemporalCollection &collection,
   if ( period == QLatin1String( "all" ) )
     return QString();
   const QString date = collection.scenes().at( indices.front() ).time.dateString();
-  return date.remove( QLatin1Char( '-' ) );
+  return QString( date ).remove( QLatin1Char( '-' ) );
 }
 
 int medianTileSide( int requestedTileSize, int maxGroupSize )
@@ -196,7 +197,9 @@ Json::Value RsTemporalCompositeOperator::schema() const
   outputs["output"] = makeOutputParam( "output", "Composite GeoTIFF (first period for grouped runs)", "tif" );
   outputs["sceneCount"] = makeIntegerParam( "sceneCount", "Scenes composited", 0 );
   outputs["periodCount"] = makeIntegerParam( "periodCount", "Composites produced", 0 );
-  return makeRootSchema( displayName(), description(), props, outputs );
+  Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
+  root["required"] = makeRequired( { "output" } );
+  return root;
 }
 
 Json::Value RsTemporalCompositeOperator::metadata() const
@@ -228,7 +231,7 @@ Json::Value RsTemporalCompositeOperator::metadata() const
 
 Json::Value RsTemporalCompositeOperator::executionEstimate() const
 {
-  return makeStreamingEstimate( kDefaultTileSize, kDefaultTileSize, 1, 4, 8, 0, 2 * 1024 * 1024 );
+  return sicnu::processing::makeStreamingEstimate( kDefaultTileSize, kDefaultTileSize, 1, 4, 8, 0, 2 * 1024 * 1024 );
 }
 
 Json::Value RsTemporalCompositeOperator::estimateExecution( const Json::Value &params ) const
@@ -245,7 +248,7 @@ Json::Value RsTemporalCompositeOperator::estimateExecution( const Json::Value &p
     side = medianTileSide( tileSize, scenes );
     buffers = static_cast<std::uint64_t>( scenes );
   }
-  return makeStreamingEstimate( side, side, 1, 4, buffers, 0, 2 * 1024 * 1024 );
+  return sicnu::processing::makeStreamingEstimate( side, side, 1, 4, buffers, 0, 2 * 1024 * 1024 );
 }
 
 Json::Value RsTemporalCompositeOperator::run( const Json::Value &params, RSOperatorContext &context )
@@ -356,7 +359,7 @@ Json::Value RsTemporalCompositeOperator::run( const Json::Value &params, RSOpera
       mid.epochMillis = ( firstScene.time.epochMillis + lastScene.time.epochMillis ) / 2;
       mid.precision = temporal::TimePrecision::Date;
       mid.valid = true;
-      mid.iso = QDateTime::fromMSecsSinceEpoch( mid.epochMillis, QTimeZone::UTC() )
+      mid.iso = QDateTime::fromMSecsSinceEpoch( mid.epochMillis, QTimeZone::utc() )
                     .toString( Qt::ISODate );
       groupTarget = mid;
     }

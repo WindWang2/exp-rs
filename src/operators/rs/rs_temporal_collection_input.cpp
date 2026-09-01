@@ -133,7 +133,7 @@ temporal::DuplicatePolicy parseDuplicatePolicy( const Json::Value &params )
     return temporal::DuplicatePolicy::KeepAll;
   bool ok = false;
   const auto policy = temporal::duplicatePolicyFromString(
-    getString( params, "duplicate_policy", "keep_all" ), &ok );
+    QString::fromStdString( getString( params, "duplicate_policy", "keep_all" ) ), &ok );
   if ( !ok )
     throw RSOperatorError( ErrorCode::InvalidParameter,
                            "duplicate_policy must be 'keep_all' or 'reject'" );
