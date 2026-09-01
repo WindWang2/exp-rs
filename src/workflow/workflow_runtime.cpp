@@ -16,6 +16,7 @@
 #include <QThread>
 
 #include <atomic>
+#include <optional>
 #include <future>
 #include <memory>
 
@@ -540,7 +541,7 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
       // thread (#702). Marshal the commit like ExecutionPlane does; on a
       // starved affinity thread fail closed instead of committing from the
       // wrong thread. Same-thread callers (GUI) commit directly.
-      sicnu::CommitResult commitResult;
+      std::optional<sicnu::CommitResult> commitResult;
       bool commitRan = false;
       if ( QCoreApplication::instance() && dataManager->thread() != QThread::currentThread() )
       {
@@ -577,15 +578,15 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
       if ( !commitRan )
         throw PlaneTaskFailure( std::string( "Output commit timed out on the DataManager thread (" )
                                 + outputTempPath + ")" );
-      if ( !commitResult )
+      if ( !commitResult.has_value() || !*commitResult )
       {
-        const QString diag = commitResult.diagnostics().isEmpty()
+        const QString diag = commitResult->diagnostics().isEmpty()
                                ? QStringLiteral( "OutputCommitter commit failed" )
-                               : commitResult.diagnostics().first().message;
+                               : commitResult->diagnostics().first().message;
         throw PlaneTaskFailure( std::string( "Output commit failed: " ) + diag.toStdString() + " (" + outputTempPath + ")" );
       }
       committedPath = stablePath.toStdString();
-      committedAssetId = commitResult.value().toString().toStdString();
+      committedAssetId = commitResult->value().toString().toStdString();
       // Patch result to point at the stable asset
       result["output"] = committedPath;
       result["assetId"] = committedAssetId;

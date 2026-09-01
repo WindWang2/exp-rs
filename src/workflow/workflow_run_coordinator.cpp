@@ -1,6 +1,8 @@
 // src/workflow/workflow_run_coordinator.cpp — see header for the contract.
 #include "workflow_run_coordinator.h"
 
+#include "artifact_gc.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -141,7 +143,7 @@ long WorkflowRunCoordinator::startTrackedPipelineJson( const std::string &jsonPi
 
 long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def, bool autoLoad )
 {
-    auto run = WorkflowRun::createFromDefinition( def );
+    std::shared_ptr<WorkflowRun> run = WorkflowRun::createFromDefinition( def );
     if ( !run )
         return -1;
     run->transitionTo( WorkflowRunState::Ready );
@@ -299,7 +301,7 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
 
 void WorkflowRunCoordinator::finalizeRunLocked( long pipelineId, WorkflowRun &run )
 {
-    const auto plans = run->stepPlans();
+    const auto plans = run.stepPlans();
     const bool anyFailed = std::any_of( plans.begin(), plans.end(),
                                         []( const StepPlan &p ) { return p.status == "Failed"; } );
     const bool anyCanceled = std::any_of( plans.begin(), plans.end(),
