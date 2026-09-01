@@ -8,8 +8,6 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
-#include "processing/algorithms/change_detection.h"
-#include "processing/algorithms/math_utils.h"
 #include "processing/algorithms/satellite_products.h"
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -161,8 +159,11 @@ Json::Value primitiveSchema( const std::string &displayName, const std::string &
 
 /// Input-dependent estimate: derives the tile working set from the actual band
 /// count of the before raster when available (overflow-safe); falls back to the
-/// static typical-input estimate otherwise.
-Json::Value primitiveEstimate( const Json::Value &params )
+/// static typical-input estimate otherwise. @p tilesOfBands is the per-atom
+/// tile working set in "tiles of bands" (BIP input tiles plus any per-tile
+/// band-major copies and scratch — e.g. 3 for the simple magnitude atoms, 5
+/// for SAM/IR-MAD which scatter the BIP tile into band-major buffers).
+Json::Value primitiveEstimate( const Json::Value &params, std::uint64_t tilesOfBands = 3 )
 {
     if ( params.isObject() && params.isMember( "before" ) && params["before"].isString() )
     {
@@ -171,10 +172,10 @@ Json::Value primitiveEstimate( const Json::Value &params )
              && probe.bandCount() > 0 )
         {
             const std::uint64_t bands = static_cast<std::uint64_t>( probe.bandCount() );
-            // 2 BIP input tiles + output tile + band scratch ≈ 3 tiles of bands.
             std::optional<std::uint64_t> ram =
                 sicnu::processing::checkedMulN(
-                    { 256ULL, 256ULL, bands, static_cast<std::uint64_t>( sizeof( float ) ), 3ULL } );
+                    { 256ULL, 256ULL, bands, static_cast<std::uint64_t>( sizeof( float ) ),
+                      tilesOfBands } );
             if ( ram )
             {
                 Json::Value est( Json::objectValue );
@@ -410,16 +411,25 @@ Json::Value RsChangeCvaAngleOperator::metadata() const
 
 Json::Value RsChangeCvaAngleOperator::executionEstimate() const
 {
+    // 256x256 tile working set: 2 x 2-band BIP input tiles, 4 band-major tile
+    // buffers, magnitude + angle + read-scratch tiles, one Byte quadrant tile —
+    // O(tile), independent of raster size.
+    constexpr long long kTilePixels = 256LL * 256;
+    constexpr long long kFloatTiles = 11LL;
     Json::Value est( Json::objectValue );
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 16777216;
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = Json::Value::UInt64(
+        static_cast<std::uint64_t>( kFloatTiles * kTilePixels
+                                    * static_cast<long long>( sizeof( float ) ) + kTilePixels ) );
     return est;
 }
 
-Json::Value RsChangeCvaAngleOperator::estimateExecution( const Json::Value &params ) const
+Json::Value RsChangeCvaAngleOperator::estimateExecution( const Json::Value & ) const
 {
-    return primitiveEstimate( params );
+    // The CVA-angle working set is fixed at 2 bands regardless of the input
+    // band count, so the static tile estimate is already exact.
+    return executionEstimate();
 }
 
 Json::Value RsChangeCvaAngleOperator::run( const Json::Value &params, RSOperatorContext &context )
@@ -461,62 +471,17 @@ Json::Value RsChangeCvaAngleOperator::run( const Json::Value &params, RSOperator
     if ( a1 < 1 || a1 > afterDs.bandCount() || a2 < 1 || a2 > afterDs.bandCount() )
         throw RSOperatorError( ErrorCode::InvalidParameter, "After band numbers out of range" );
 
-    const size_t pixels = static_cast<size_t>( width ) * height;
-    std::vector<float> beforeBuf1( pixels ), beforeBuf2( pixels );
-    std::vector<float> afterBuf1( pixels ), afterBuf2( pixels );
+    // Tile-streamed: the kernel runs per 256x256 tile and only the tile's
+    // angle/magnitude buffers are resident (rs_change_streaming.h).
+    ChangeAtomStreamingOptions atomOpts;
+    atomOpts.beforeBand = b1;
+    atomOpts.beforeBand2 = b2;
+    atomOpts.afterBand = a1;
+    atomOpts.afterBand2 = a2;
+    atomOpts.mode = mode;
+    atomOpts.outputPath = outputPath;
 
-    // Masked reads (#679): declared NoData sentinels and non-finite pixels are
-    // NaN-ized here, matching the streaming primitives' readTileBip semantics —
-    // raw readBandData used to feed -9999 etc. into the metric as valid data.
-    if ( !beforeDs.readBandMasked( b1, beforeBuf1.data(), width, height ) ||
-         !beforeDs.readBandMasked( b2, beforeBuf2.data(), width, height ) ||
-         !afterDs.readBandMasked( a1, afterBuf1.data(), width, height ) ||
-         !afterDs.readBandMasked( a2, afterBuf2.data(), width, height ) )
-    {
-        throw RSOperatorError( ErrorCode::GdalError, "Failed to read raster bands" );
-    }
-
-    std::vector<float> out( pixels );
-    QString err;
-    if ( mode == "quadrant" )
-    {
-        std::vector<uint8_t> quadBuf( pixels );
-        if ( !ChangeDetection::cvaQuadrant( beforeBuf1.data(), beforeBuf2.data(),
-                                            afterBuf1.data(), afterBuf2.data(),
-                                            pixels, quadBuf.data(), &err ) )
-        {
-            throw RSOperatorError( ErrorCode::ComputationError, "CVA quadrant calculation failed: " + err.toStdString() );
-        }
-        for ( size_t i = 0; i < pixels; ++i )
-            out[i] = static_cast<float>( quadBuf[i] );
-    }
-    else
-    {
-        std::vector<float> magBuf( pixels );
-        if ( !ChangeDetection::cvaMagnitudeAndAngle( beforeBuf1.data(), beforeBuf2.data(),
-                                                    afterBuf1.data(), afterBuf2.data(),
-                                                    pixels, magBuf.data(), out.data(), &err ) )
-        {
-            throw RSOperatorError( ErrorCode::ComputationError, "CVA angle calculation failed: " + err.toStdString() );
-        }
-    }
-
-    std::vector<std::vector<float>> outBands = { std::move( out ) };
-    QString writeErr;
-    const double nodataVal = ( mode == "quadrant" ) ? 255.0 : std::numeric_limits<double>::quiet_NaN();
-    if ( !writeGdalOutput( QString::fromStdString( outputPath ), width, height, outBands,
-                          beforeDs.geoTransform(), beforeDs.projection(), &writeErr, nodataVal ) )
-    {
-        throw RSOperatorError( ErrorCode::FileNotWritable, "Failed to write output raster: " + writeErr.toStdString() );
-    }
-
-    Json::Value result( Json::objectValue );
-    result["output"] = outputPath;
-    result["method"] = "cva_angle";
-    result["mode"] = mode;
-    result["width"] = width;
-    result["height"] = height;
-    return result;
+    return runCvaAngleStreaming( beforeDs, afterDs, width, height, atomOpts, context );
 }
 
 // --- rs:change_sam ----------------------------------------------------------
@@ -557,16 +522,24 @@ Json::Value RsChangeSamOperator::metadata() const
 
 Json::Value RsChangeSamOperator::executionEstimate() const
 {
+    // 256x256 tile working set: 2 BIP input tiles + 2 per-tile band-major
+    // copies (SAM needs band-major pointers) + scratch/output tile —
+    // O(tile * bands), independent of raster size.
+    constexpr long long kTilePixels = 256LL * 256;
+    constexpr long long kBandCount = 6; // nominal multi-spectral scene
     Json::Value est( Json::objectValue );
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 33554432;
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = Json::Value::UInt64(
+        static_cast<std::uint64_t>( ( 4LL * kBandCount + 2LL ) * kTilePixels
+                                    * static_cast<long long>( sizeof( float ) ) ) );
     return est;
 }
 
 Json::Value RsChangeSamOperator::estimateExecution( const Json::Value &params ) const
 {
-    return primitiveEstimate( params );
+    // 2 BIP input tiles + 2 band-major scatter tiles + output/scratch.
+    return primitiveEstimate( params, 5 );
 }
 
 Json::Value RsChangeSamOperator::run( const Json::Value &params, RSOperatorContext &context )
@@ -598,50 +571,12 @@ Json::Value RsChangeSamOperator::run( const Json::Value &params, RSOperatorConte
     if ( afterDs.bandCount() != bandCount )
         throw RSOperatorError( ErrorCode::InvalidInputData, "SAM requires identical band counts on before and after rasters" );
 
-    const size_t pixels = static_cast<size_t>( width ) * height;
-    std::vector<std::vector<float>> beforeBands( bandCount, std::vector<float>( pixels ) );
-    std::vector<std::vector<float>> afterBands( bandCount, std::vector<float>( pixels ) );
-    std::vector<const float*> bPtrs( bandCount ), aPtrs( bandCount );
+    // Tile-streamed: per-tile band-major vectors feed the SAM kernel; the
+    // working set is O(tilePixels * bands), never a full frame.
+    ChangeAtomStreamingOptions atomOpts;
+    atomOpts.outputPath = outputPath;
 
-    for ( int b = 0; b < bandCount; ++b )
-    {
-        // Masked reads (#679): declared NoData + non-finite -> NaN, matching
-        // the streaming MAD/CVA primitives.
-        if ( !beforeDs.readBandMasked( b + 1, beforeBands[b].data(), width, height ) ||
-             !afterDs.readBandMasked( b + 1, afterBands[b].data(), width, height ) )
-        {
-            throw RSOperatorError( ErrorCode::GdalError, "Failed to read band " + std::to_string( b + 1 ) );
-        }
-        bPtrs[b] = beforeBands[b].data();
-        aPtrs[b] = afterBands[b].data();
-    }
-
-    std::vector<float> out( pixels );
-    QString err;
-    if ( !ChangeDetection::samChangeAngle( bPtrs.data(), aPtrs.data(), bandCount, pixels, out.data(), &err ) )
-    {
-        throw RSOperatorError( ErrorCode::ComputationError, "SAM computation failed: " + err.toStdString() );
-    }
-
-    MathUtils::Stats stats = MathUtils::computeStats( out.data(), pixels );
-
-    std::vector<std::vector<float>> outBands = { std::move( out ) };
-    QString writeErr;
-    if ( !writeGdalOutput( QString::fromStdString( outputPath ), width, height, outBands,
-                          beforeDs.geoTransform(), beforeDs.projection(), &writeErr,
-                          std::numeric_limits<double>::quiet_NaN() ) )
-    {
-        throw RSOperatorError( ErrorCode::FileNotWritable, "Failed to write output raster: " + writeErr.toStdString() );
-    }
-
-    Json::Value result( Json::objectValue );
-    result["output"] = outputPath;
-    result["method"] = "sam";
-    result["width"] = width;
-    result["height"] = height;
-    result["mean"] = stats.mean;
-    result["stddev"] = stats.stddev;
-    return result;
+    return runSamStreaming( beforeDs, afterDs, width, height, atomOpts, context );
 }
 
 // --- rs:change_log_ratio ----------------------------------------------------
@@ -686,16 +621,24 @@ Json::Value RsChangeLogRatioOperator::metadata() const
 
 Json::Value RsChangeLogRatioOperator::executionEstimate() const
 {
+    // 256x256 tile working set: before + after + read-scratch + output tiles —
+    // O(tile), independent of raster size (single band per date).
+    constexpr long long kTilePixels = 256LL * 256;
+    constexpr long long kFloatTiles = 4LL;
     Json::Value est( Json::objectValue );
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 16777216;
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = Json::Value::UInt64(
+        static_cast<std::uint64_t>( kFloatTiles * kTilePixels
+                                    * static_cast<long long>( sizeof( float ) ) ) );
     return est;
 }
 
-Json::Value RsChangeLogRatioOperator::estimateExecution( const Json::Value &params ) const
+Json::Value RsChangeLogRatioOperator::estimateExecution( const Json::Value & ) const
 {
-    return primitiveEstimate( params );
+    // Single-band per date: the working set is fixed at 4 tiles regardless of
+    // the input band count, so the static tile estimate is already exact.
+    return executionEstimate();
 }
 
 Json::Value RsChangeLogRatioOperator::run( const Json::Value &params, RSOperatorContext &context )
@@ -734,41 +677,15 @@ Json::Value RsChangeLogRatioOperator::run( const Json::Value &params, RSOperator
     if ( aBand < 1 || aBand > afterDs.bandCount() )
         throw RSOperatorError( ErrorCode::InvalidParameter, "After band out of range" );
 
-    const size_t pixels = static_cast<size_t>( width ) * height;
-    std::vector<float> beforeBuf( pixels ), afterBuf( pixels ), out( pixels );
+    // Tile-streamed: the per-pixel log ratio runs per 256x256 tile with the
+    // same masked-read semantics as the streaming ratio primitive.
+    ChangeAtomStreamingOptions atomOpts;
+    atomOpts.beforeBand = bBand;
+    atomOpts.afterBand = aBand;
+    atomOpts.epsilon = epsilon;
+    atomOpts.outputPath = outputPath;
 
-    // Masked reads (#679): declared NoData + non-finite -> NaN, matching the
-    // streaming ratio primitive.
-    if ( !beforeDs.readBandMasked( bBand, beforeBuf.data(), width, height ) ||
-         !afterDs.readBandMasked( aBand, afterBuf.data(), width, height ) )
-    {
-        throw RSOperatorError( ErrorCode::GdalError, "Failed to read raster bands" );
-    }
-
-    if ( !ChangeDetection::logRatio( beforeBuf.data(), afterBuf.data(), out.data(), pixels, epsilon ) )
-    {
-        throw RSOperatorError( ErrorCode::ComputationError, "Log ratio calculation failed" );
-    }
-
-    MathUtils::Stats stats = MathUtils::computeStats( out.data(), pixels );
-
-    std::vector<std::vector<float>> outBands = { std::move( out ) };
-    QString writeErr;
-    if ( !writeGdalOutput( QString::fromStdString( outputPath ), width, height, outBands,
-                          beforeDs.geoTransform(), beforeDs.projection(), &writeErr,
-                          std::numeric_limits<double>::quiet_NaN() ) )
-    {
-        throw RSOperatorError( ErrorCode::FileNotWritable, "Failed to write output raster: " + writeErr.toStdString() );
-    }
-
-    Json::Value result( Json::objectValue );
-    result["output"] = outputPath;
-    result["method"] = "log_ratio";
-    result["width"] = width;
-    result["height"] = height;
-    result["mean"] = stats.mean;
-    result["stddev"] = stats.stddev;
-    return result;
+    return runLogRatioStreaming( beforeDs, afterDs, width, height, atomOpts, context );
 }
 
 // --- rs:change_irmad --------------------------------------------------------
@@ -811,16 +728,42 @@ Json::Value RsChangeIrMadOperator::metadata() const
 
 Json::Value RsChangeIrMadOperator::executionEstimate() const
 {
+    // Multi-pass streaming: per-pass 256x256 tile working set (2 BIP input
+    // tiles + 2 tile copies + scratch/output, 6-band nominal) plus the
+    // documented full-resolution Float64 weight frame carried between
+    // reweighting iterations (8 bytes per pixel; sized exactly by
+    // estimateExecution when the raster can be probed).
+    constexpr long long kTilePixels = 256LL * 256;
+    constexpr long long kBandCount = 6;
     Json::Value est( Json::objectValue );
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 33554432;
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = Json::Value::UInt64(
+        static_cast<std::uint64_t>( ( 4LL * kBandCount + 2LL ) * kTilePixels
+                                    * static_cast<long long>( sizeof( float ) ) ) );
+    est["note"] = "plus one Float64 weight frame (8 bytes per pixel) held "
+                  "between IR-MAD reweighting iterations";
     return est;
 }
 
 Json::Value RsChangeIrMadOperator::estimateExecution( const Json::Value &params ) const
 {
-    return primitiveEstimate( params );
+    // Tile passes: 2 BIP input tiles + 2 tile copies + output/scratch;
+    // plus the exact weight-frame bytes when the raster can be probed.
+    Json::Value est = primitiveEstimate( params, 5 );
+    if ( params.isObject() && params.isMember( "before" ) && params["before"].isString() )
+    {
+        GdalDatasetWrapper probe;
+        if ( probe.open( QString::fromStdString( params["before"].asString() ) ) )
+        {
+            const std::uint64_t weightBytes =
+                static_cast<std::uint64_t>( probe.width() )
+                * static_cast<std::uint64_t>( probe.height() ) * static_cast<std::uint64_t>( sizeof( double ) );
+            est["estimatedRamBytes"] = Json::Value::UInt64(
+                est["estimatedRamBytes"].asUInt64() + weightBytes );
+        }
+    }
+    return est;
 }
 
 Json::Value RsChangeIrMadOperator::run( const Json::Value &params, RSOperatorContext &context )
@@ -854,51 +797,17 @@ Json::Value RsChangeIrMadOperator::run( const Json::Value &params, RSOperatorCon
     if ( afterDs.bandCount() != bandCount )
         throw RSOperatorError( ErrorCode::InvalidInputData, "IR-MAD requires identical band counts on before and after rasters" );
 
-    const size_t pixels = static_cast<size_t>( width ) * height;
-    std::vector<std::vector<float>> beforeBands( bandCount, std::vector<float>( pixels ) );
-    std::vector<std::vector<float>> afterBands( bandCount, std::vector<float>( pixels ) );
-    std::vector<const float*> bPtrs( bandCount ), aPtrs( bandCount );
+    // Tile-streamed multi-pass IR-MAD: every iteration's weighted-sum and
+    // covariance passes, each reweighting pass and the final transform stream
+    // 256x256 tiles (rs_change_streaming.h). The algorithm's only cross-pass
+    // per-pixel state is the Chi-square weight vector, carried as one
+    // Float64 frame (8 B/px) instead of the legacy full band stacks.
+    ChangeAtomStreamingOptions atomOpts;
+    atomOpts.maxIterations = maxIterations;
+    atomOpts.convThreshold = convThreshold;
+    atomOpts.outputPath = outputPath;
 
-    for ( int b = 0; b < bandCount; ++b )
-    {
-        // Masked reads (#679): declared NoData + non-finite -> NaN, matching
-        // the streaming MAD primitive.
-        if ( !beforeDs.readBandMasked( b + 1, beforeBands[b].data(), width, height ) ||
-             !afterDs.readBandMasked( b + 1, afterBands[b].data(), width, height ) )
-        {
-            throw RSOperatorError( ErrorCode::GdalError, "Failed to read band " + std::to_string( b + 1 ) );
-        }
-        bPtrs[b] = beforeBands[b].data();
-        aPtrs[b] = afterBands[b].data();
-    }
-
-    std::vector<float> out( pixels );
-    QString err;
-    if ( !ChangeDetection::irMadChange( bPtrs.data(), aPtrs.data(), bandCount, pixels, out.data(),
-                                        maxIterations, convThreshold, &err ) )
-    {
-        throw RSOperatorError( ErrorCode::ComputationError, "IR-MAD computation failed: " + err.toStdString() );
-    }
-
-    MathUtils::Stats stats = MathUtils::computeStats( out.data(), pixels );
-
-    std::vector<std::vector<float>> outBands = { std::move( out ) };
-    QString writeErr;
-    if ( !writeGdalOutput( QString::fromStdString( outputPath ), width, height, outBands,
-                          beforeDs.geoTransform(), beforeDs.projection(), &writeErr,
-                          std::numeric_limits<double>::quiet_NaN() ) )
-    {
-        throw RSOperatorError( ErrorCode::FileNotWritable, "Failed to write output raster: " + writeErr.toStdString() );
-    }
-
-    Json::Value result( Json::objectValue );
-    result["output"] = outputPath;
-    result["method"] = "irmad";
-    result["width"] = width;
-    result["height"] = height;
-    result["mean"] = stats.mean;
-    result["stddev"] = stats.stddev;
-    return result;
+    return runIrMadStreaming( beforeDs, afterDs, width, height, atomOpts, context );
 }
 
 } // namespace sicnu::operators::rs

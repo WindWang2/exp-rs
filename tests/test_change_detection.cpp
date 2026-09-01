@@ -3,6 +3,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include "processing/algorithms/change_detection.h"
+#include "processing/algorithms/math_utils.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "operators/rs/rs_spectral_index_operator.h"
 #include "operators/rs/rs_change_primitives.h"
@@ -1106,4 +1107,393 @@ TEST_CASE("Change mask reports changedArea in m2 for geographic CRS (#700)", "[o
     CHECK(perPixel == Catch::Approx(expectedPixelArea).margin(expectedPixelArea * 0.01));
     // Guard against a regression to square degrees (0.001^2 = 1e-6 per pixel).
     CHECK(perPixel > 1000.0);
+}
+
+// ===========================================================================
+// Tile-streaming conversion of the change atoms (#691): log_ratio, cva_angle,
+// sam, irmad must reproduce the full-frame kernels from change_detection.cpp
+// exactly (masked NoData -> NaN), across 256-tile boundaries too.
+// ===========================================================================
+
+namespace {
+
+constexpr float kAtomNoData = -9999.0f;
+
+/// Deterministic before/after pair for the streaming-atom tests: smooth
+/// gradient background, a changed block (x in [width/4, width/2)) in the after
+/// image, NaN on every 97th pixel of every band, and — when @p withNoData — a
+/// declared -9999 sentinel on every 23rd pixel of before band 1 / after band 2
+/// (metadata + values, the #679 regression shape).
+void writeAtomPair(const QString &beforePath, const QString &afterPath,
+                   int width, int height, int bands, bool withNoData)
+{
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+
+    const auto writeRaster = [&](const QString &path, bool withChange) {
+        GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(),
+                                     width, height, bands, GDT_Float32, nullptr);
+        REQUIRE(ds != nullptr);
+        for (int b = 0; b < bands; ++b) {
+            std::vector<float> buf(static_cast<size_t>(width) * height);
+            for (int y = 0; y < height; ++y) {
+                for (int x = 0; x < width; ++x) {
+                    const size_t i = static_cast<size_t>(y) * width + x;
+                    double v = x * 0.5 + y * 0.25 + b * 3.0;
+                    if (withChange && x >= width / 4 && x < width / 2)
+                        v += 40.0 + 10.0 * b;
+                    if (i % 97 == 0)
+                        v = std::numeric_limits<float>::quiet_NaN();
+                    if (withNoData && b <= 1 && i % 23 == 7)
+                        v = kAtomNoData;
+                    buf[i] = static_cast<float>(v);
+                }
+            }
+            GDALRasterBandH band = GDALGetRasterBand(ds, b + 1);
+            REQUIRE(band != nullptr);
+            if (withNoData)
+                REQUIRE(GDALSetRasterNoDataValue(band, kAtomNoData) == CE_None);
+            REQUIRE(GDALRasterIO(band, GF_Write, 0, 0, width, height,
+                                 buf.data(), width, height, GDT_Float32, 0, 0) == CE_None);
+        }
+        GDALClose(ds);
+    };
+
+    writeRaster(beforePath, false);
+    writeRaster(afterPath, true);
+}
+
+/// Reads all @p bands of @p path with the atoms' masked-read semantics
+/// (declared NoData + non-finite -> NaN) into band-major buffers, which is
+/// exactly the input convention of the full-frame kernels.
+void readMaskedBands(const QString &path, int bands,
+                     std::vector<std::vector<float>> &out)
+{
+    GdalDatasetWrapper ds;
+    REQUIRE(ds.open(path));
+    out.assign(static_cast<size_t>(bands), {});
+    for (int b = 0; b < bands; ++b) {
+        out[static_cast<size_t>(b)].assign(
+            static_cast<size_t>(ds.width()) * ds.height(), 0.0f);
+        REQUIRE(ds.readBandMasked(b + 1, out[static_cast<size_t>(b)].data(),
+                                  ds.width(), ds.height()));
+    }
+}
+
+/// Reads back the single-band Float32 output raster a streaming atom wrote.
+std::vector<float> readAtomOutput(const Json::Value &result)
+{
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(QString::fromStdString(result["output"].asString())));
+    REQUIRE(outDs.bandCount() == 1);
+    std::vector<float> out(static_cast<size_t>(outDs.width()) * outDs.height(), 0.0f);
+    REQUIRE(outDs.readBandData(1, out.data(), outDs.width(), outDs.height()));
+    return out;
+}
+
+/// NaN-aware streaming-vs-oracle comparison: every oracle NaN must stay NaN in
+/// the streamed output, every finite oracle value must match within
+/// @p margin / @p epsilon, and the scene must have exercised at least one NaN
+/// (i.e. the masked-read propagation actually ran).
+void checkStreamingMatchesOracle(const std::vector<float> &out,
+                                 const std::vector<float> &oracle,
+                                 double margin, double epsilon)
+{
+    REQUIRE(out.size() == oracle.size());
+    size_t nanCount = 0;
+    for (size_t i = 0; i < oracle.size(); ++i) {
+        if (std::isnan(oracle[i])) {
+            ++nanCount;
+            CHECK(std::isnan(out[i]));
+        } else {
+            CHECK(out[i] == Approx(oracle[i]).margin(margin).epsilon(epsilon));
+        }
+    }
+    CHECK(nanCount > 0);
+}
+
+/// The result JSON's mean/stddev must describe the oracle raster (streaming
+/// Welford vs the kernel's two-pass stats: FP-rounding tolerance only).
+void checkResultStats(const Json::Value &result, const std::vector<float> &oracle)
+{
+    const MathUtils::Stats stats = MathUtils::computeStats(oracle.data(), oracle.size());
+    CHECK(result["mean"].asDouble() == Approx(stats.mean).margin(1e-3).epsilon(1e-4));
+    CHECK(result["stddev"].asDouble() == Approx(stats.stddev).margin(1e-3).epsilon(1e-4));
+}
+
+/// Band-major pointer arrays over masked full-frame reads — the exact shape
+/// the full-frame kernels (samChangeAngle / irMadChange) take.
+void maskedBandPtrs(const std::vector<std::vector<float>> &bands,
+                    std::vector<const float *> &ptrs)
+{
+    ptrs.clear();
+    for (const auto &band : bands)
+        ptrs.push_back(band.data());
+}
+
+} // namespace
+
+TEST_CASE("rs:change_cva_angle streams tiles and matches the full-frame kernel",
+          "[operators][change_primitives][streaming]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 6, H = 4, B = 3;
+    const QString beforePath = tmp.path() + "/cva_before.tif";
+    const QString afterPath = tmp.path() + "/cva_after.tif";
+    writeAtomPair(beforePath, afterPath, W, H, B, /*withNoData=*/true);
+
+    // Oracle: full-frame kernels over masked reads of the same rasters.
+    std::vector<std::vector<float>> beforeBands, afterBands;
+    readMaskedBands(beforePath, B, beforeBands);
+    readMaskedBands(afterPath, B, afterBands);
+    const size_t pixels = static_cast<size_t>(W) * H;
+    std::vector<float> oracleMag(pixels), oracleAngle(pixels);
+    std::vector<uint8_t> oracleQuad(pixels);
+    QString err;
+    REQUIRE(cvaMagnitudeAndAngle(beforeBands[0].data(), beforeBands[1].data(),
+                                 afterBands[0].data(), afterBands[1].data(),
+                                 pixels, oracleMag.data(), oracleAngle.data(), &err));
+    REQUIRE(cvaQuadrant(beforeBands[0].data(), beforeBands[1].data(),
+                        afterBands[0].data(), afterBands[1].data(),
+                        pixels, oracleQuad.data(), &err));
+
+    sicnu::operators::rs::RsChangeCvaAngleOperator op;
+    sicnu::operators::RSOperatorContext ctx;
+    const auto runCva = [&](const std::string &outName, const char *mode) {
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = (tmp.path() + "/" + QString::fromStdString(outName)).toStdString();
+        params["mode"] = mode;
+        return op.run(params, ctx);
+    };
+
+    SECTION("angle mode matches cvaMagnitudeAndAngle") {
+        Json::Value res = runCva("cva_angle_out.tif", "angle");
+        CHECK(res["method"].asString() == "cva_angle");
+        CHECK(res["mode"].asString() == "angle");
+        CHECK(res["width"].asInt() == W);
+        CHECK(res["height"].asInt() == H);
+        checkStreamingMatchesOracle(readAtomOutput(res), oracleAngle, 1e-6, 1e-7);
+    }
+
+    SECTION("quadrant mode matches cvaQuadrant") {
+        Json::Value res = runCva("cva_quad_out.tif", "quadrant");
+        CHECK(res["mode"].asString() == "quadrant");
+        const std::vector<float> out = readAtomOutput(res);
+        REQUIRE(out.size() == pixels);
+        size_t noDataCount = 0;
+        for (size_t i = 0; i < pixels; ++i) {
+            CHECK(out[i] == static_cast<float>(oracleQuad[i]));
+            if (oracleQuad[i] == 255)
+                ++noDataCount;
+        }
+        CHECK(noDataCount > 0); // sentinel pixels classified NoData, not quadrant 4
+    }
+}
+
+TEST_CASE("rs:change_sam streams tiles and matches the full-frame kernel",
+          "[operators][change_primitives][streaming]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 6, H = 4, B = 3;
+    const QString beforePath = tmp.path() + "/sam_before.tif";
+    const QString afterPath = tmp.path() + "/sam_after.tif";
+    writeAtomPair(beforePath, afterPath, W, H, B, /*withNoData=*/true);
+
+    std::vector<std::vector<float>> beforeBands, afterBands;
+    readMaskedBands(beforePath, B, beforeBands);
+    readMaskedBands(afterPath, B, afterBands);
+    std::vector<const float *> bPtrs, aPtrs;
+    maskedBandPtrs(beforeBands, bPtrs);
+    maskedBandPtrs(afterBands, aPtrs);
+    const size_t pixels = static_cast<size_t>(W) * H;
+    std::vector<float> oracle(pixels);
+    QString err;
+    REQUIRE(samChangeAngle(bPtrs.data(), aPtrs.data(), B, pixels, oracle.data(), &err));
+
+    sicnu::operators::rs::RsChangeSamOperator op;
+    sicnu::operators::RSOperatorContext ctx;
+    Json::Value params(Json::objectValue);
+    params["before"] = beforePath.toStdString();
+    params["after"] = afterPath.toStdString();
+    params["output"] = (tmp.path() + "/sam_out.tif").toStdString();
+    Json::Value res = op.run(params, ctx);
+    CHECK(res["method"].asString() == "sam");
+    CHECK(res["width"].asInt() == W);
+    CHECK(res["height"].asInt() == H);
+
+    checkStreamingMatchesOracle(readAtomOutput(res), oracle, 1e-6, 1e-7);
+    checkResultStats(res, oracle);
+}
+
+TEST_CASE("rs:change_log_ratio streams tiles and matches the full-frame kernel",
+          "[operators][change_primitives][streaming]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 6, H = 4, B = 3;
+    const QString beforePath = tmp.path() + "/lr_before.tif";
+    const QString afterPath = tmp.path() + "/lr_after.tif";
+    writeAtomPair(beforePath, afterPath, W, H, B, /*withNoData=*/true);
+
+    std::vector<std::vector<float>> beforeBands, afterBands;
+    readMaskedBands(beforePath, B, beforeBands);
+    readMaskedBands(afterPath, B, afterBands);
+    const size_t pixels = static_cast<size_t>(W) * H;
+    std::vector<float> oracle(pixels);
+    REQUIRE(logRatio(beforeBands[0].data(), afterBands[0].data(),
+                     oracle.data(), pixels, 1e-4f));
+
+    sicnu::operators::rs::RsChangeLogRatioOperator op;
+    sicnu::operators::RSOperatorContext ctx;
+    Json::Value params(Json::objectValue);
+    params["before"] = beforePath.toStdString();
+    params["after"] = afterPath.toStdString();
+    params["output"] = (tmp.path() + "/lr_out.tif").toStdString();
+    Json::Value res = op.run(params, ctx);
+    CHECK(res["method"].asString() == "log_ratio");
+    CHECK(res["width"].asInt() == W);
+    CHECK(res["height"].asInt() == H);
+
+    checkStreamingMatchesOracle(readAtomOutput(res), oracle, 1e-6, 1e-7);
+    checkResultStats(res, oracle);
+
+    SECTION("custom epsilon follows the kernel") {
+        std::vector<float> oracleEps(pixels);
+        REQUIRE(logRatio(beforeBands[0].data(), afterBands[0].data(),
+                         oracleEps.data(), pixels, 0.5f));
+        params["output"] = (tmp.path() + "/lr_eps_out.tif").toStdString();
+        params["epsilon"] = 0.5;
+        Json::Value resEps = op.run(params, ctx);
+        checkStreamingMatchesOracle(readAtomOutput(resEps), oracleEps, 1e-6, 1e-7);
+    }
+}
+
+TEST_CASE("rs:change_irmad streams every pass and matches the full-frame kernel",
+          "[operators][change_primitives][streaming]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 6, H = 4, B = 3;
+    const QString beforePath = tmp.path() + "/irmad_before.tif";
+    const QString afterPath = tmp.path() + "/irmad_after.tif";
+    writeAtomPair(beforePath, afterPath, W, H, B, /*withNoData=*/true);
+
+    std::vector<std::vector<float>> beforeBands, afterBands;
+    readMaskedBands(beforePath, B, beforeBands);
+    readMaskedBands(afterPath, B, afterBands);
+    std::vector<const float *> bPtrs, aPtrs;
+    maskedBandPtrs(beforeBands, bPtrs);
+    maskedBandPtrs(afterBands, aPtrs);
+    const size_t pixels = static_cast<size_t>(W) * H;
+    std::vector<float> oracle(pixels);
+    QString err;
+    REQUIRE(irMadChange(bPtrs.data(), aPtrs.data(), B, pixels, oracle.data(),
+                        20, 1e-4, &err));
+
+    sicnu::operators::rs::RsChangeIrMadOperator op;
+    sicnu::operators::RSOperatorContext ctx;
+    Json::Value params(Json::objectValue);
+    params["before"] = beforePath.toStdString();
+    params["after"] = afterPath.toStdString();
+    params["output"] = (tmp.path() + "/irmad_out.tif").toStdString();
+    params["maxIterations"] = 20;
+    params["convThreshold"] = 1e-4;
+    Json::Value res = op.run(params, ctx);
+    CHECK(res["method"].asString() == "irmad");
+    CHECK(res["width"].asInt() == W);
+    CHECK(res["height"].asInt() == H);
+
+    // The streamed iteration performs the same accumulations in the same
+    // pixel order as the kernel (weights carried as double), so this is
+    // near-exact; the margin only covers FP associativity.
+    checkStreamingMatchesOracle(readAtomOutput(res), oracle, 1e-3, 1e-4);
+    checkResultStats(res, oracle);
+}
+
+TEST_CASE("Change atoms stream across 256-tile boundaries (520x300) matching the kernel",
+          "[operators][change_primitives][streaming][multi_tile]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    // 520 = 2 x 256 + 8, 300 = 256 + 44: partial tiles on both axes.
+    constexpr int W = 520, H = 300, B = 3;
+    const QString beforePath = tmp.path() + "/tile_before.tif";
+    const QString afterPath = tmp.path() + "/tile_after.tif";
+    writeAtomPair(beforePath, afterPath, W, H, B, /*withNoData=*/true);
+
+    std::vector<std::vector<float>> beforeBands, afterBands;
+    readMaskedBands(beforePath, B, beforeBands);
+    readMaskedBands(afterPath, B, afterBands);
+    std::vector<const float *> bPtrs, aPtrs;
+    maskedBandPtrs(beforeBands, bPtrs);
+    maskedBandPtrs(afterBands, aPtrs);
+    const size_t pixels = static_cast<size_t>(W) * H;
+    sicnu::operators::RSOperatorContext ctx;
+
+    SECTION("cva_angle") {
+        std::vector<float> oracleMag(pixels), oracle(pixels);
+        QString err;
+        REQUIRE(cvaMagnitudeAndAngle(beforeBands[0].data(), beforeBands[1].data(),
+                                     afterBands[0].data(), afterBands[1].data(),
+                                     pixels, oracleMag.data(), oracle.data(), &err));
+        sicnu::operators::rs::RsChangeCvaAngleOperator op;
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = (tmp.path() + "/tile_cva.tif").toStdString();
+        Json::Value res = op.run(params, ctx);
+        CHECK(res["width"].asInt() == W);
+        CHECK(res["height"].asInt() == H);
+        checkStreamingMatchesOracle(readAtomOutput(res), oracle, 1e-6, 1e-7);
+    }
+
+    SECTION("sam") {
+        std::vector<float> oracle(pixels);
+        QString err;
+        REQUIRE(samChangeAngle(bPtrs.data(), aPtrs.data(), B, pixels, oracle.data(), &err));
+        sicnu::operators::rs::RsChangeSamOperator op;
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = (tmp.path() + "/tile_sam.tif").toStdString();
+        Json::Value res = op.run(params, ctx);
+        checkStreamingMatchesOracle(readAtomOutput(res), oracle, 1e-6, 1e-7);
+        checkResultStats(res, oracle);
+    }
+
+    SECTION("log_ratio") {
+        std::vector<float> oracle(pixels);
+        REQUIRE(logRatio(beforeBands[0].data(), afterBands[0].data(),
+                         oracle.data(), pixels, 1e-4f));
+        sicnu::operators::rs::RsChangeLogRatioOperator op;
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = (tmp.path() + "/tile_lr.tif").toStdString();
+        Json::Value res = op.run(params, ctx);
+        checkStreamingMatchesOracle(readAtomOutput(res), oracle, 1e-6, 1e-7);
+        checkResultStats(res, oracle);
+    }
+
+    SECTION("irmad") {
+        std::vector<float> oracle(pixels);
+        QString err;
+        REQUIRE(irMadChange(bPtrs.data(), aPtrs.data(), B, pixels, oracle.data(),
+                            20, 1e-4, &err));
+        sicnu::operators::rs::RsChangeIrMadOperator op;
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = (tmp.path() + "/tile_irmad.tif").toStdString();
+        params["maxIterations"] = 20;
+        params["convThreshold"] = 1e-4;
+        Json::Value res = op.run(params, ctx);
+        checkStreamingMatchesOracle(readAtomOutput(res), oracle, 1e-3, 1e-4);
+        checkResultStats(res, oracle);
+    }
 }
