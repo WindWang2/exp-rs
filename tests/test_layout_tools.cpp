@@ -646,5 +646,5 @@ TEST_CASE( "Raster renderer drives legend color ramp nodes in layouts", "[layout
 
   // The legend model mirrors the linked map's layers.
   legend->refresh();
-  CHECK( legend->model()->layerTreeRoot()->findLayers().size() == 1 );
+  CHECK( legend->model()->rootGroup()->findLayers().size() == 1 );
 }
