@@ -9,7 +9,7 @@
 ulimit -s 262144 2>/dev/null || ulimit -s unlimited 2>/dev/null || true
 
 attempt=0
-max=3
+max=8
 status=0
 while [ "$attempt" -lt "$max" ]; do
     if "$@"; then
