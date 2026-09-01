@@ -10,6 +10,7 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/spectral_indices.h"
 #include "processing/algorithms/math_utils.h"
+#include "processing/algorithms/temporal/temporal_band_roles.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QString>
@@ -147,79 +148,26 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     const int height = ds.height();
     const int bandCount = ds.bandCount();
 
-    // 1-based band number carrying @a role, or 0 when the input has no such
-    // role (plain rasters without product metadata return 0).
-    auto bandWithRole = [&](sicnu::data::BandRole role) {
-        const QByteArray roleId = sicnu::data::bandRoleToString(role).toLatin1();
-        for (int b = 1; b <= bandCount; ++b) {
-            if (ds.bandMetadataItem(b, "SICNU_BAND_ROLE") == QLatin1String(roleId))
-                return b;
-        }
-        return 0;
-    };
-
-    int nirBand = nirExplicit;
-    int redBand = redExplicit;
-    int greenBand = greenExplicit;
-    int blueBand = blueExplicit;
-    int swirBand = swirExplicit;
-    int swir2Band = swir2Explicit;
-    int redEdgeBand = redEdgeExplicit;
+    // Band resolution is delegated to the shared temporal resolver
+    // (explicit > SICNU_BAND_ROLE > SWIR1/SWIR2 cross-fallback > positional
+    // defaults) so single-scene and temporal-series operators cannot drift.
+    int nirBand, redBand, greenBand, blueBand, swirBand, swir2Band, redEdgeBand;
     bool anyHardcodedFallback = false;
-
-    if (!hasNir) {
-        nirBand = bandWithRole(sicnu::data::BandRole::NIR);
-        if (nirBand <= 0) {
-            nirBand = 4;
-            anyHardcodedFallback = true;
-        }
-    }
-    if (!hasRed) {
-        redBand = bandWithRole(sicnu::data::BandRole::Red);
-        if (redBand <= 0) {
-            redBand = 3;
-            anyHardcodedFallback = true;
-        }
-    }
-    if (!hasGreen) {
-        greenBand = bandWithRole(sicnu::data::BandRole::Green);
-        if (greenBand <= 0) {
-            greenBand = 2;
-            anyHardcodedFallback = true;
-        }
-    }
-    if (!hasBlue) {
-        blueBand = bandWithRole(sicnu::data::BandRole::Blue);
-        if (blueBand <= 0) {
-            blueBand = 1;
-            anyHardcodedFallback = true;
-        }
-    }
-    if (!hasSwir) {
-        swirBand = bandWithRole(sicnu::data::BandRole::SWIR1);
-        if (swirBand <= 0)
-            swirBand = bandWithRole(sicnu::data::BandRole::SWIR2);
-        if (swirBand <= 0) {
-            swirBand = 5;
-            anyHardcodedFallback = true;
-        }
-    }
-    if (!hasSwir2) {
-        swir2Band = bandWithRole(sicnu::data::BandRole::SWIR2);
-        if (swir2Band <= 0)
-            swir2Band = bandWithRole(sicnu::data::BandRole::SWIR1);
-        if (swir2Band <= 0) {
-            swir2Band = std::min(6, bandCount);
-            anyHardcodedFallback = true;
-        }
-    }
-    if (!hasRedEdge) {
-        redEdgeBand = bandWithRole(sicnu::data::BandRole::RedEdge);
-        if (redEdgeBand <= 0) {
-            redEdgeBand = std::min(5, bandCount);
-            anyHardcodedFallback = true;
-        }
-    }
+    auto resolveWithFlag = [&](const char *roleId, int explicitBand, bool hasExplicit) {
+        if (hasExplicit)
+            return explicitBand;
+        bool fallback = false;
+        const int band = sicnu::temporal::resolveBand(ds, QLatin1String(roleId), 0, &fallback);
+        anyHardcodedFallback = anyHardcodedFallback || fallback;
+        return band;
+    };
+    nirBand = resolveWithFlag("nir", nirExplicit, hasNir);
+    redBand = resolveWithFlag("red", redExplicit, hasRed);
+    greenBand = resolveWithFlag("green", greenExplicit, hasGreen);
+    blueBand = resolveWithFlag("blue", blueExplicit, hasBlue);
+    swirBand = resolveWithFlag("swir1", swirExplicit, hasSwir);
+    swir2Band = resolveWithFlag("swir2", swir2Explicit, hasSwir2);
+    redEdgeBand = resolveWithFlag("red_edge", redEdgeExplicit, hasRedEdge);
 
     if (anyHardcodedFallback) {
         context.logWarning(
