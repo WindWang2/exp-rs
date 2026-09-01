@@ -439,6 +439,18 @@ QgisDisplayManager::addLayer(DisplayViewId viewId, data::AssetId assetId,
         QStringLiteral("display.asset_not_found"),
         QStringLiteral("No registered Data Asset matches the requested id")));
   }
+
+  // #674: three independent auto-load paths (TaskCenter signal, dialog
+  // accept, job panel, plus the assetAdded auto-display) could each add the
+  // same result. Dedupe at the seam: the view displays each asset once.
+  if (!options.allowDuplicate) {
+    for (const auto &[id, record] : m_impl->layers) {
+      if (record && record->mapLayer && record->snapshot.viewId() == viewId
+          && record->snapshot.assetId() == assetId) {
+        return data::Result<DisplayLayerId>::success(record->snapshot.id());
+      }
+    }
+  }
   if (asset->state() != data::AssetState::Ready) {
     return data::Result<DisplayLayerId>::failure(displayDiagnostic(
         QStringLiteral("display.asset_not_ready"),

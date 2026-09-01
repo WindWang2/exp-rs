@@ -361,6 +361,16 @@ bool runBatchItemImpl(const QString &algorithmId,
                       QString *errorMessage,
                       const QVariantMap &paramOverrides);
 
+void BatchProcessingDialog::reject()
+{
+    if (m_isRunning) {
+        // Running batch: ignore Esc/X (#704). Cancelling via the button
+        // advances the chain to a clean stop and re-enables closing.
+        return;
+    }
+    QDialog::reject();
+}
+
 void BatchProcessingDialog::onRun()
 {
     if (m_isRunning) {
