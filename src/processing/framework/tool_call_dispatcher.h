@@ -194,7 +194,11 @@ public:
   /// Insulator: when verification fails after a successful commit, roll back
   /// the committed Data Asset so no unverified layer can remain in the
   /// catalog (and thus never auto-displays or survives as final map state).
-  void rollbackVerificationFailure( const Json::Value &payload ) const;
+  /// Rollback failures (reap/unload refusals) are appended to @a payload as
+  /// "rollbackErrors" (#703) instead of being discarded; on the deferred
+  /// cross-thread path there is no payload to annotate, so failures are
+  /// logged there.
+  void rollbackVerificationFailure( Json::Value &payload ) const;
 
 private:
   struct ParsedEnvelope {

@@ -6,6 +6,7 @@
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "workflow/workflow_definition.h"
+#include "workflow/workflow_run_coordinator.h"
 #include "workflow/workflow_types.h"
 #include "workflow/placeholder_grammar.h"
 
@@ -53,6 +54,43 @@ bool cliIsInterrupted()
 }
 
 namespace {
+
+// --- Input lineage resolution (#698) ---------------------------------------
+// Input-side counterpart of TaskCenter's findOutputPathInParams: collects the
+// step's "input"-like parameter values that are existing file paths, then
+// resolves them against the DataManager catalog into (AssetId, revision)
+// lineage records. Paths that do not resolve are reported in unresolvedPaths
+// so provenance records them instead of dropping them silently. (Kept local to
+// this TU, mirroring how providerKeyFor-style helpers are shared by copy
+// across the commit pipeline.)
+
+QStringList findPipelineInputPaths( const QVariantMap &params )
+{
+  QStringList paths;
+  for ( auto it = params.begin(); it != params.end(); ++it )
+  {
+    if ( !it.key().contains( QStringLiteral( "input" ), Qt::CaseInsensitive ) )
+      continue;
+
+    const QVariant value = it.value();
+    QStringList candidates;
+    if ( value.userType() == qMetaTypeId<QStringList>() )
+      candidates = value.toStringList();
+    else
+      candidates.append( value.toString() );
+
+    for ( const QString &candidate : candidates )
+    {
+      const QString trimmed = candidate.trimmed();
+      if ( trimmed.isEmpty() || trimmed.startsWith( QLatin1Char( '$' ) ) )
+        continue;
+      if ( !paths.contains( trimmed ) && QFileInfo::exists( trimmed ) )
+        paths.append( trimmed );
+    }
+  }
+  return paths;
+}
+
 
 std::string expandEnvironmentPlaceholders( const std::string &input,
                                            const std::unordered_set<std::string> &knownStepIds )
@@ -411,7 +449,10 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
   reportLog( "info", "Starting pipeline via TaskCenter: " + def.title +
                        " (" + std::to_string( totalSteps ) + " steps)" );
 
-  const long pipelineId = sicnu::TaskCenter::instance().submitPipeline( def, /*autoLoad=*/false );
+  // Tracked submission (#697): CLI pipelines persist per-transition
+  // checkpoints and are resumable after an interrupted run.
+  const long pipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipeline(
+      def, /*autoLoad=*/false );
   if ( pipelineId < 0 )
   {
     result.errorMessage = "TaskCenter rejected the pipeline DAG";
@@ -645,6 +686,10 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
     sicnu::data::RegisterRequest request;
     request.source = source;
     request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
+    // Re-runs replace the bytes at this stable path: bump the revision and
+    // emit assetChanged like OutputCommitter's commit path (#687/#703 review
+    // P2 — a silent dedup here left displayed layers stale).
+    request.notifyUpdateOnReuse = true;
 
     const auto registered = m_dataManager->registerSource( request );
     if ( registered.assetId.isNull() )
@@ -653,11 +698,19 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
       continue;
     }
 
-    // Provenance is attached after successful registration (ADR 0023).
+    // Provenance is attached after successful registration (ADR 0023). The
+    // step's "input"-like parameter paths are resolved against the catalog so
+    // the record carries real derivedFrom edges (#698); paths that do not
+    // resolve are recorded in unresolvedInputPaths, never dropped silently.
+    const sicnu::data::InputLineage lineage =
+      sicnu::data::resolveInputLineage(
+          m_dataManager, sicnu::data::findInputPathsInParams( task.parameterMap ) );
     const sicnu::data::DerivationRecord derivation =
       sicnu::data::makeTaskDerivation( task.algorithmId,
                                        QJsonObject::fromVariantMap( task.parameterMap ),
-                                       QString::number( taskId ) );
+                                       QString::number( taskId ),
+                                       lineage.inputs,
+                                       lineage.unresolvedPaths );
     m_dataManager->attachDerivationRecord( registered.assetId, derivation );
   }
 }

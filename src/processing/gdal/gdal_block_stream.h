@@ -50,6 +50,12 @@ class GdalBlockStream
         int bufferHeight;  ///< height of the pixels buffer (height + 2*halo)
         int index;         ///< 0-based tile index in row-major visit order
         int totalTiles;    ///< total tile count
+        /// Full raster dimensions: halo buffer positions outside
+        /// [0,rasterWidth) x [0,rasterHeight) contain edge-replicated fill,
+        /// which consumers whose full-frame kernels clamp the window rect
+        /// (statistics, not neighbor reads) must skip.
+        int rasterWidth = 0;
+        int rasterHeight = 0;
     };
 
     /**

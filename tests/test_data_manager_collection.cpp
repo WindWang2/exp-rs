@@ -385,3 +385,32 @@ TEST_CASE( "Asset mutations preserve parentCollectionId (relocate, promote, comm
   CHECK( manager.asset( child )->parentCollectionId() == collectionId );
 }
 
+
+TEST_CASE( "Re-adding a child already in the collection is a successful no-op",
+           "[data_manager][collection][duplicate]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+
+  const QString pathA = dir.filePath( QStringLiteral( "a.tif" ) );
+  REQUIRE( QFile::copy( fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ), pathA ) );
+  const AssetId childA = registerRasterAsset( manager, pathA );
+
+  const CollectionId collectionId =
+    manager.createCollection( { QStringLiteral( "scene" ), sampleMetadata() } ).collectionId;
+  REQUIRE( manager.addChildToCollection( collectionId, childA ) );
+
+  // Duplicate persisted <child> entries (or any future caller) must not
+  // duplicate children (#703): the re-add succeeds and changes nothing.
+  REQUIRE( manager.addChildToCollection( collectionId, childA ) );
+  CHECK( manager.collection( collectionId )->childAssetIds.size() == 1 );
+
+  // A second child still appends after the dedup guard.
+  const QString pathB = dir.filePath( QStringLiteral( "b.tif" ) );
+  REQUIRE( QFile::copy( fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ), pathB ) );
+  const AssetId childB = registerRasterAsset( manager, pathB );
+  REQUIRE( manager.addChildToCollection( collectionId, childB ) );
+  const auto collection = manager.collection( collectionId );
+  REQUIRE( collection->childAssetIds.size() == 2 );
+  CHECK( collection->childAssetIds == ( QVector<AssetId>{ childA, childB } ) );
+}

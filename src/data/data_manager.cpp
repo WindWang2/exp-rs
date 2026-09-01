@@ -7,6 +7,7 @@
 
 #include <QCryptographicHash>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QPointer>
 #include <QTemporaryDir>
@@ -170,10 +171,12 @@ struct DataManager::Impl
     QVector<LeaseImpact> impacts;
     for ( const LeaseRecord &lease : leases )
     {
-      // Released-but-not-yet-erased leases must not block unload/reap
-      // (#703.1): cross-thread AssetLease destruction flips active
-      // atomically; the record removal is queued.
-      if ( lease.control->active && lease.control->assetId == id )
+      // Only ACTIVE leases count (#703): a cross-thread AssetLease::release()
+      // neutralizes the control immediately and queues the record removal for
+      // the manager's thread. Until that queued call runs, the dead record
+      // must not block unload/reap (mirroring the Edit-lease conflict check,
+      // which already filtered on active).
+      if ( lease.control->assetId == id && lease.control->active )
       {
         impacts.append( LeaseImpact{ LeaseRef{ lease.control->assetId,
                                                lease.control->token,
@@ -264,10 +267,43 @@ RegisterResult DataManager::registerSource( const RegisterRequest &request )
     normalizedDescriptor.providerKey = source.canonicalProviderKey;
 
   const SourceKey sourceKey = normalizedDescriptor.sourceKey();
-  for ( const Impl::AssetRecord &record : m_impl->records )
+  for ( Impl::AssetRecord &record : m_impl->records )
   {
-    if ( record.sourceKey == sourceKey )
+    if ( record.sourceKey != sourceKey )
+      continue;
+
+    // Dedup hit. The bytes behind the stable path may still have changed:
+    // OutputCommitter's publish-then-swap replaces them, and a source file can
+    // be mutated externally. Reuse silently would leave the snapshot (and any
+    // displayed layer) stale while the content moved under it (#687).
+    const bool structureDiffers = record.snapshot.structure() != source.structure;
+    if ( !request.notifyUpdateOnReuse && !structureDiffers )
       return RegisterResult{ record.snapshot.id(), true, {} };
+
+    // Treat the asset as updated: refresh the snapshot from the fresh
+    // resolution, advance the revision one step (mirroring relocate), and
+    // emit assetChanged so displays reload. The descriptor is preserved —
+    // the re-registration carries a bare provider/path descriptor and must
+    // not drop the stored dataOptions (which also key the identity).
+    const AssetId existingId = record.snapshot.id();
+    AssetSnapshot updated{ existingId,
+                           record.snapshot.revision().next(),
+                           record.snapshot.source(),
+                           source.kind,
+                           source.state,
+                           record.snapshot.capabilities() | source.capabilities
+                             | request.additionalCapabilities,
+                           record.snapshot.persistence(),
+                           source.storageKind,
+                           source.displayName,
+                           source.structure,
+                           record.snapshot.acquisitionTime(),
+                           record.snapshot.parentCollectionId() };
+    record.snapshot = std::move( updated );
+    m_impl->catalogGeneration++;
+
+    emit assetChanged( existingId );
+    return RegisterResult{ existingId, true, resolved.diagnostics() };
   }
 
   const AssetId id = AssetId::generate();
@@ -498,18 +534,6 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
     RelocateResult{ request.id, newRevision, std::move( relocateDiagnostics ) } );
 }
 
-std::optional<AssetId> DataManager::assetIdForSource( const QString &canonicalPath ) const
-{
-  if ( canonicalPath.isEmpty() )
-    return std::nullopt;
-  for ( const Impl::AssetRecord &record : m_impl->records )
-  {
-    if ( record.snapshot.source().canonicalSource == canonicalPath )
-      return record.snapshot.id();
-  }
-  return std::nullopt;
-}
-
 std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const
 {
   const auto it = m_impl->findRecord( id );
@@ -534,6 +558,24 @@ QVector<AssetSnapshot> DataManager::assets( const AssetQuery &query ) const
     snapshots.push_back( record.snapshot );
   }
   return snapshots;
+}
+
+std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) const
+{
+  if ( path.trimmed().isEmpty() )
+    return std::nullopt;
+
+  const QString absolute = QFileInfo( path ).absoluteFilePath();
+  for ( const Impl::AssetRecord &record : m_impl->records )
+  {
+    const QString &canonical = record.snapshot.source().canonicalSource;
+    if ( canonical == path )
+      return record.snapshot;
+    // A relative or differently-spelled path still resolves to the same file.
+    if ( !absolute.isEmpty() && QFileInfo( canonical ).absoluteFilePath() == absolute )
+      return record.snapshot;
+  }
+  return std::nullopt;
 }
 
 quint64 DataManager::catalogGeneration() const
@@ -595,7 +637,15 @@ Result<void> DataManager::attachDerivationRecord( AssetId id,
 
   DerivationRecord stamped = derivation;
   stamped.outputAssetId = id;
+  // Replacing an existing derivation (#687): a re-commit over the same stable
+  // path rewrites provenance under an unchanged asset identity. Emit one
+  // assetChanged so observers refresh, mirroring the revision bump emitted by
+  // the registerSource update path. A first attach stays silent — registration
+  // already emitted assetAdded for the fresh asset.
+  const bool replaced = it->derivation.has_value();
   it->derivation = stamped;
+  if ( replaced )
+    emit assetChanged( id );
   return Result<void>::success();
 }
 
@@ -709,41 +759,6 @@ Result<void> DataManager::commitEdit( AssetId id )
   return Result<void>::success();
 }
 
-Result<void> DataManager::notifyExternalContentChange( AssetId id )
-{
-  if ( QThread::currentThread() != thread() )
-    return Result<void>::failure( wrongThreadDiagnostic() );
-
-  const auto recordIt = m_impl->findRecord( id );
-  if ( recordIt == m_impl->records.end() )
-  {
-    return Result<void>::failure(
-      Diagnostic{ QStringLiteral( "asset.unknown" ),
-                  QStringLiteral( "No registered Data Asset matches the requested id" ),
-                  DiagnosticSeverity::Error } );
-  }
-
-  // Same contract as commitEdit (#687): a revision advance + one
-  // assetChanged so every observer (display layers, leases, caches)
-  // re-reads the replaced content.
-  const AssetRevision newRevision = recordIt->snapshot.revision().next();
-  recordIt->snapshot = AssetSnapshot{ recordIt->snapshot.id(),
-                                      newRevision,
-                                      recordIt->snapshot.source(),
-                                      recordIt->snapshot.kind(),
-                                      recordIt->snapshot.state(),
-                                      recordIt->snapshot.capabilities(),
-                                      recordIt->snapshot.persistence(),
-                                      recordIt->snapshot.storageKind(),
-                                      recordIt->snapshot.displayName(),
-                                      recordIt->snapshot.structure(),
-                                      recordIt->snapshot.acquisitionTime(),
-                                      recordIt->snapshot.parentCollectionId() };
-  m_impl->catalogGeneration++;
-  emit assetChanged( id );
-  return Result<void>::success();
-}
-
 Result<void> DataManager::rollbackEdit( AssetId id )
 {
   if ( QThread::currentThread() != thread() )
@@ -786,7 +801,8 @@ int DataManager::leaseCount( AssetId id ) const
   return static_cast<int>(
     std::count_if( m_impl->leases.begin(), m_impl->leases.end(),
                    [&]( const Impl::LeaseRecord &lease ) {
-                     return lease.control->active && lease.control->assetId == id;
+                     // Active leases only (#703): see Impl::leaseImpacts.
+                     return lease.control->assetId == id && lease.control->active;
                    } ) );
 }
 
@@ -795,7 +811,8 @@ QVector<LeaseRef> DataManager::leases( AssetId id ) const
   QVector<LeaseRef> result;
   for ( const Impl::LeaseRecord &lease : m_impl->leases )
   {
-    if ( lease.control->active && lease.control->assetId == id )
+    // Active leases only (#703): see Impl::leaseImpacts.
+    if ( lease.control->assetId == id && lease.control->active )
     {
       result.append(
         LeaseRef{ lease.control->assetId, lease.control->token, lease.control->kind } );
@@ -1003,16 +1020,7 @@ Result<AssetId> DataManager::createVirtualRaster(
     if ( !edge )
     {
       const UnloadPlan plan = planUnload( registered.assetId ).confirmedCascade();
-      const Result<void> unloadResult = unload( plan );
-      if ( !unloadResult )
-      {
-        // The compensating unload failed: a partially-registered virtual
-        // asset may remain. Append the diagnostics instead of discarding
-        // them (#703.5).
-        QVector<Diagnostic> diags = edge.diagnostics();
-        diags.append( unloadResult.diagnostics() );
-        return Result<AssetId>::failure( diags );
-      }
+      ( void ) unload( plan );
       return Result<AssetId>::failure( edge.diagnostics() );
     }
   }
@@ -1799,10 +1807,13 @@ Result<void> DataManager::addChildToCollection( CollectionId collectionId,
                   DiagnosticSeverity::Error } );
   }
 
-  // Re-adding an already-parented child duplicated childAssetIds (and the
-  // persisted <child> rows) (#703.2).
-  if ( !collectionIt->childAssetIds.contains( childAssetId ) )
-    collectionIt->childAssetIds.append( childAssetId );
+  // Duplicate child (#703): the serializer read-back re-adds persisted <child>
+  // entries verbatim, so a duplicated persisted entry would append twice.
+  // Re-adding a child already in THIS collection is a successful no-op.
+  if ( collectionIt->childAssetIds.contains( childAssetId ) )
+    return Result<void>::success();
+
+  collectionIt->childAssetIds.append( childAssetId );
   assetIt->snapshot.m_parentCollectionId = collectionId;
   m_impl->catalogGeneration++;
   return Result<void>::success();

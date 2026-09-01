@@ -40,6 +40,16 @@ struct RegisterRequest
   /// datetime an importer carries from its preview). Empty by default; when
   /// engaged it lands on the resulting DataAsset's acquisition-time field.
   std::optional<QDateTime> acquisitionTime;
+  /// Re-commit over an already-registered stable path (#687): when the dedup
+  /// by SourceKey hits and this flag is set, the caller asserts it replaced
+  /// the bytes at that path (the OutputCommitter publish-then-swap does).
+  /// The existing asset is treated as updated: its structure snapshot is
+  /// refreshed from the fresh resolution, its revision advances one step
+  /// (mirroring relocate), and one `assetChanged` is emitted so displayed
+  /// layers reload. Without the flag a dedup hit still bumps when the fresh
+  /// structure differs from the snapshot (an externally mutated source), and
+  /// otherwise reuses the asset unchanged.
+  bool notifyUpdateOnReuse = false;
 };
 
 struct RegisterResult

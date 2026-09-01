@@ -102,7 +102,8 @@ Json::Value RsChangeDetectionOperator::schema() const {
     outputs["changedPixels"] = makeIntegerParam("changedPixels", "Changed pixel count (mask)", 0);
     outputs["totalPixels"] = makeIntegerParam("totalPixels", "Evaluated pixel count (mask)", 0);
     outputs["changedPercent"] = makeNumberParam("changedPercent", "Changed pixel percentage (mask)", 0.0);
-    outputs["changedArea"] = makeNumberParam("changedArea", "Changed area in map units squared (mask)", 0.0);
+    outputs["changedArea"] = makeNumberParam("changedArea", "Changed area in m2 (mask; geodesic approximation for geographic CRS)", 0.0);
+    outputs["changedAreaUnit"] = makeStringParam("changedAreaUnit", "Unit of changedArea (always m2)", "m2");
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
     root["required"] = makeRequired({"before", "after", "output"});
@@ -117,10 +118,8 @@ Json::Value RsChangeDetectionOperator::metadata() const {
     meta["tags"].append("change-detection");
     meta["tags"].append("temporal");
     meta["tags"].append("difference");
-    meta["tags"].append("change");
-    meta["tags"].append("timeseries");
-    meta["tags"].append("threshold");
-    meta["tags"].append("cva");
+        meta["task"] = "change-detection";
+    meta["gpu"] = false;
     meta["purpose"] = "Identify land-cover or surface changes between two dates.";
     meta["prerequisites"].append("Before and after rasters must be co-registered and same size "
                                  "(grid compatibility is preflighted).");

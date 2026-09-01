@@ -7,20 +7,12 @@
 #include "jobs/job_engine.h"
 #include "jobs/job_types.h"
 #include "workflow/workflow_definition.h"
-#include "workflow/workflow_run.h"
-#include "workflow/workflow_checkpoint.h"
-#include "data/execution_fingerprint.h"
-
-#include <QDir>
-#include <QFile>
-#include <QTemporaryDir>
 
 #include <QObject>
 
 #include <chrono>
 #include <atomic>
 #include <future>
-#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -556,346 +548,6 @@ TEST_CASE("TaskCenter - Native submitPipeline dispatches DAG and resolves $stepI
     REQUIRE(center.getTaskInfo(s2TaskId).status == sicnu::TaskStatus::Completed);
     REQUIRE(observedStep2Input == "/tmp/step1_ndvi.tif");
     REQUIRE(center.getTaskInfo(s2TaskId).parameterMap.value("input").toString() == QStringLiteral("/tmp/step1_ndvi.tif"));
-
-    engine.clearExecutors();
-
-    // Workflow Engine 2.0 wiring (#662): the run aggregate mirrors the
-    // pipeline — lifecycle, per-step fingerprints, progress.
-    auto run = center.workflowRunForPipeline(pId);
-    REQUIRE(run != nullptr);
-    CHECK(run->state() == sicnu::workflow::WorkflowRunState::Completed);
-    CHECK(run->stepPlans().size() == 2);
-    for (const auto& plan : run->stepPlans()) {
-        CHECK(plan.fingerprint.size() == 64); // full SHA-256 hex digest
-        CHECK(plan.status == "Completed");
-    }
-    const auto fp1 = run->stepPlan("step1");
-    const auto fp2 = run->stepPlan("step2");
-    REQUIRE(fp1.has_value());
-    REQUIRE(fp2.has_value());
-    CHECK(fp1->fingerprint != fp2->fingerprint);
-}
-
-TEST_CASE("TaskCenter - v2 run fingerprints are stable and transitively invalidate", "[processing][task_center][pipeline][v2]") {
-    auto& engine = sicnu::jobs::JobEngine::instance();
-    engine.shutdownForTests();
-    engine.clearExecutors();
-    engine.registerExecutor("pipe:v2a", [](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
-        context.logInfo("a done");
-        Json::Value result(Json::objectValue);
-        result["output"] = "/tmp/v2_a.tif";
-        return result;
-    });
-    engine.registerExecutor("pipe:v2b", [](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
-        context.logInfo("b done");
-        Json::Value result(Json::objectValue);
-        result["output"] = "/tmp/v2_b.tif";
-        return result;
-    });
-
-    auto& center = sicnu::TaskCenter::instance();
-
-    auto makeDef = [](const std::string& defId, const char* step1Output) {
-        sicnu::workflow::WorkflowDefinition def;
-        def.id = defId;
-        def.title = "V2 fingerprint def";
-        sicnu::workflow::StepDef a;
-        a.id = "a";
-        a.kind = sicnu::workflow::StepKind::Operator;
-        a.operatorId = "pipe:v2a";
-        a.params["output"] = step1Output;
-        sicnu::workflow::StepDef b;
-        b.id = "b";
-        b.kind = sicnu::workflow::StepKind::Operator;
-        b.operatorId = "pipe:v2b";
-        b.params["input"] = "$a.output";
-        b.params["output"] = "/tmp/v2_b.tif";
-        sicnu::workflow::StepConnection conn;
-        conn.fromStepId = "a";
-        conn.fromPort = "output";
-        conn.toPort = "input";
-        b.inputs.push_back(conn);
-        def.steps = { a, b };
-        return def;
-    };
-
-    // Identical definitions produce identical step fingerprints — the
-    // precondition for cache reuse (#667).
-    long id1 = center.submitPipeline(makeDef("v2_def_1", "/tmp/v2_a.tif"), false);
-    long id2 = center.submitPipeline(makeDef("v2_def_2", "/tmp/v2_a.tif"), false);
-    REQUIRE(id1 > 0);
-    REQUIRE(id2 > 0);
-    center.waitForPipeline(id1);
-    center.waitForPipeline(id2);
-    auto run1 = center.workflowRunForPipeline(id1);
-    auto run2 = center.workflowRunForPipeline(id2);
-    REQUIRE(run1 != nullptr);
-    REQUIRE(run2 != nullptr);
-    const auto fpA1 = run1->stepPlan("a");
-    const auto fpA2 = run2->stepPlan("a");
-    REQUIRE(fpA1.has_value());
-    REQUIRE(fpA2.has_value());
-    CHECK(fpA1->fingerprint == fpA2->fingerprint);
-
-    // Changing an upstream step's params changes both its own fingerprint and
-    // the downstream step's fingerprint (transitive invalidation).
-    long id3 = center.submitPipeline(makeDef("v2_def_3", "/tmp/v2_a_CHANGED.tif"), false);
-    REQUIRE(id3 > 0);
-    center.waitForPipeline(id3);
-    auto run3 = center.workflowRunForPipeline(id3);
-    REQUIRE(run3 != nullptr);
-    const auto fpA3 = run3->stepPlan("a");
-    const auto fpB3 = run3->stepPlan("b");
-    REQUIRE(fpA3.has_value());
-    REQUIRE(fpB3.has_value());
-    CHECK(fpA3->fingerprint != fpA1->fingerprint);
-    const auto fpB1 = run1->stepPlan("b");
-    REQUIRE(fpB1.has_value());
-    CHECK(fpB3->fingerprint != fpB1->fingerprint);
-
-    // A failed pipeline transitions the run to Failed with the error message.
-    engine.registerExecutor("pipe:v2fail", [](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext&) -> Json::Value {
-        throw std::runtime_error("v2 wiring failure test");
-    });
-    sicnu::workflow::WorkflowDefinition failDef;
-    failDef.id = "v2_def_fail";
-    sicnu::workflow::StepDef bad;
-    bad.id = "bad";
-    bad.kind = sicnu::workflow::StepKind::Operator;
-    bad.operatorId = "pipe:v2fail";
-    bad.params["output"] = "/tmp/v2_fail.tif";
-    failDef.steps = { bad };
-    long id4 = center.submitPipeline(failDef, false);
-    REQUIRE(id4 > 0);
-    auto info4 = center.waitForPipeline(id4);
-    REQUIRE(info4.isFailed);
-    auto run4 = center.workflowRunForPipeline(id4);
-    REQUIRE(run4 != nullptr);
-    CHECK(run4->state() == sicnu::workflow::WorkflowRunState::Failed);
-    CHECK_FALSE(run4->errorMessage().empty());
-
-    engine.clearExecutors();
-}
-
-TEST_CASE("TaskCenter - execution cache skips identical pipeline steps end to end", "[processing][task_center][pipeline][v2][cache]") {
-    auto& engine = sicnu::jobs::JobEngine::instance();
-    engine.shutdownForTests();
-    engine.clearExecutors();
-    auto& cache = sicnu::data::ExecutionResultCache::instance();
-    cache.clear();
-    cache.setEnabled(true); // opt-in for this test; disabled again below
-
-    QTemporaryDir dir;
-    REQUIRE(dir.isValid());
-    const QString aOut = dir.filePath("a_out.tif");
-    const QString bOut = dir.filePath("b_out.tif");
-
-    static std::atomic<int> aRuns{0};
-    static std::atomic<int> bRuns{0};
-    aRuns.store(0);
-    bRuns.store(0);
-
-    engine.registerExecutor("pipe:cache_a", [aOut](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
-        aRuns.fetch_add(1);
-        context.logInfo("a executed");
-        QFile f(aOut);
-        REQUIRE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
-        f.write("a-payload\n");
-        f.close();
-        Json::Value result(Json::objectValue);
-        result["output"] = aOut.toStdString();
-        return result;
-    });
-    engine.registerExecutor("pipe:cache_b", [bOut](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
-        bRuns.fetch_add(1);
-        context.logInfo("b executed");
-        QFile f(bOut);
-        REQUIRE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
-        f.write("b-payload\n");
-        f.close();
-        Json::Value result(Json::objectValue);
-        result["output"] = bOut.toStdString();
-        return result;
-    });
-
-    auto& center = sicnu::TaskCenter::instance();
-
-    // Fingerprints cover operator id + canonical params + upstream derivation,
-    // so runs share step fingerprints only when their params are identical.
-    auto makeDef = [](const std::string& defId, const QString& aOutputPath, const QString& bOutputPath) {
-        sicnu::workflow::WorkflowDefinition def;
-        def.id = defId;
-        def.title = "Cache pipeline";
-        sicnu::workflow::StepDef a;
-        a.id = "a";
-        a.kind = sicnu::workflow::StepKind::Operator;
-        a.operatorId = "pipe:cache_a";
-        a.params["output"] = aOutputPath.toStdString();
-        sicnu::workflow::StepDef b;
-        b.id = "b";
-        b.kind = sicnu::workflow::StepKind::Operator;
-        b.operatorId = "pipe:cache_b";
-        b.params["input"] = "$a.output";
-        b.params["output"] = bOutputPath.toStdString();
-        sicnu::workflow::StepConnection conn;
-        conn.fromStepId = "a";
-        conn.fromPort = "output";
-        conn.toPort = "input";
-        b.inputs.push_back(conn);
-        def.steps = { a, b };
-        return def;
-    };
-
-    // Run 1: cold cache - both steps execute.
-    long p1 = center.submitPipeline(makeDef("cache_def_1", aOut, bOut), false);
-    REQUIRE(p1 > 0);
-    auto info1 = center.waitForPipeline(p1);
-    REQUIRE(info1.isCompleted);
-    REQUIRE_FALSE(info1.isFailed);
-    REQUIRE(aRuns.load() == 1);
-    REQUIRE(bRuns.load() == 1);
-
-    // Run 2: identical JSON - both steps served from cache, nothing re-runs.
-    long p2 = center.submitPipeline(makeDef("cache_def_2", aOut, bOut), false);
-    REQUIRE(p2 > 0);
-    auto info2 = center.waitForPipeline(p2);
-    REQUIRE(info2.isCompleted);
-    REQUIRE_FALSE(info2.isFailed);
-    REQUIRE(aRuns.load() == 1);
-    REQUIRE(bRuns.load() == 1);
-
-    auto run2 = center.workflowRunForPipeline(p2);
-    REQUIRE(run2 != nullptr);
-    const auto planA = run2->stepPlan("a");
-    const auto planB = run2->stepPlan("b");
-    REQUIRE(planA.has_value());
-    REQUIRE(planB.has_value());
-    CHECK(planA->cacheHit);
-    CHECK(planA->cachedOutputPath == aOut.toStdString());
-    CHECK(planA->status == "Completed");
-    CHECK(planB->cacheHit);
-    CHECK(planB->cachedOutputPath == bOut.toStdString());
-    const auto bTaskId2 = info2.stepToTaskId.value("b");
-    CHECK(center.getTaskInfo(bTaskId2).status == sicnu::TaskStatus::Completed);
-    CHECK(center.getTaskInfo(bTaskId2).outputLayerPath == bOut);
-
-    // Run 3: only the downstream step's params change. Step a is still served
-    // from cache; step b misses and re-executes, consuming the CACHED upstream
-    // artifact through placeholder substitution off the pre-completed task.
-    const QString bOut2 = dir.filePath("b_out2.tif");
-    long p3 = center.submitPipeline(makeDef("cache_def_3", aOut, bOut2), false);
-    REQUIRE(p3 > 0);
-    auto info3 = center.waitForPipeline(p3);
-    REQUIRE(info3.isCompleted);
-    REQUIRE(aRuns.load() == 1);  // upstream untouched
-    REQUIRE(bRuns.load() == 2);  // downstream invalidated and re-run
-    const auto aTaskId3 = info3.stepToTaskId.value("a");
-    CHECK(center.getTaskInfo(aTaskId3).status == sicnu::TaskStatus::Completed);
-    const auto bTaskId3 = info3.stepToTaskId.value("b");
-    CHECK(center.getTaskInfo(bTaskId3).parameterMap.value("input").toString() == aOut);
-
-    // Run 4: upstream params changed -> both fingerprints change -> re-execute.
-    const QString aOut2 = dir.filePath("a_out2.tif");
-    long p4 = center.submitPipeline(makeDef("cache_def_4", aOut2, bOut), false);
-    REQUIRE(p4 > 0);
-    auto info4 = center.waitForPipeline(p4);
-    REQUIRE(info4.isCompleted);
-    REQUIRE(aRuns.load() == 2);
-    REQUIRE(bRuns.load() == 3);
-
-    // Run 5: cache disabled - full recompute even for identical JSON.
-    cache.setEnabled(false);
-    long p5 = center.submitPipeline(makeDef("cache_def_5", aOut, bOut), false);
-    REQUIRE(p5 > 0);
-    auto info5 = center.waitForPipeline(p5);
-    REQUIRE(info5.isCompleted);
-    REQUIRE(aRuns.load() == 3);
-    REQUIRE(bRuns.load() == 4);
-
-    cache.setEnabled(false);
-    cache.clear();
-    engine.clearExecutors();
-}
-
-TEST_CASE("TaskCenter - completed pipeline checkpoints steps and sweeps intermediates", "[processing][task_center][pipeline][v2][gc]") {
-    auto& engine = sicnu::jobs::JobEngine::instance();
-    engine.shutdownForTests();
-    engine.clearExecutors();
-
-    QTemporaryDir dir;
-    REQUIRE(dir.isValid());
-    // Both outputs in one directory so the leaf output's directory is the GC
-    // workspace root and the intermediate is inside it.
-    const QString intermediate = dir.filePath("gc_intermediate.tif");
-    const QString finalOut = dir.filePath("gc_final.tif");
-
-    engine.registerExecutor("pipe:gc_mid", [intermediate](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
-        context.logInfo("mid executed");
-        QFile f(intermediate);
-        REQUIRE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
-        f.write("mid\n");
-        Json::Value result(Json::objectValue);
-        result["output"] = intermediate.toStdString();
-        return result;
-    });
-    engine.registerExecutor("pipe:gc_leaf", [finalOut](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
-        context.logInfo("leaf executed");
-        QFile f(finalOut);
-        REQUIRE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
-        f.write("leaf\n");
-        Json::Value result(Json::objectValue);
-        result["output"] = finalOut.toStdString();
-        return result;
-    });
-
-    auto& center = sicnu::TaskCenter::instance();
-
-    sicnu::workflow::WorkflowDefinition def;
-    def.id = "gc_def";
-    def.title = "GC pipeline";
-    sicnu::workflow::StepDef mid;
-    mid.id = "mid";
-    mid.kind = sicnu::workflow::StepKind::Operator;
-    mid.operatorId = "pipe:gc_mid";
-    mid.params["output"] = intermediate.toStdString();
-    sicnu::workflow::StepDef leaf;
-    leaf.id = "leaf";
-    leaf.kind = sicnu::workflow::StepKind::Operator;
-    leaf.operatorId = "pipe:gc_leaf";
-    leaf.params["input"] = "$mid.output";
-    leaf.params["output"] = finalOut.toStdString();
-    sicnu::workflow::StepConnection conn;
-    conn.fromStepId = "mid";
-    conn.fromPort = "output";
-    conn.toPort = "input";
-    leaf.inputs.push_back(conn);
-    def.steps = { mid, leaf };
-
-    long pId = center.submitPipeline(def, false);
-    REQUIRE(pId > 0);
-    auto info = center.waitForPipeline(pId);
-    REQUIRE(info.isCompleted);
-    REQUIRE_FALSE(info.isFailed);
-
-    // Completed run: the leaf output survives, the consumed intermediate is
-    // swept by ArtifactGC (workspace-gated to the leaf's directory).
-    REQUIRE(QFile::exists(finalOut));
-    INFO("intermediate should be reaped by ArtifactGC after completion");
-    CHECK_FALSE(QFile::exists(intermediate));
-
-    // The final checkpoint reflects the terminal run state.
-    auto run = center.workflowRunForPipeline(pId);
-    REQUIRE(run != nullptr);
-    CHECK(run->state() == sicnu::workflow::WorkflowRunState::Completed);
-
-    // The run's persisted plans carry output paths (ArtifactGC gating input
-    // for a recovered run).
-    const auto midPlan = run->stepPlan("mid");
-    const auto leafPlan = run->stepPlan("leaf");
-    REQUIRE(midPlan.has_value());
-    REQUIRE(leafPlan.has_value());
-    CHECK(midPlan->outputLayerPath == intermediate.toStdString());
-    CHECK(leafPlan->outputLayerPath == finalOut.toStdString());
 
     engine.clearExecutors();
 }
@@ -1491,22 +1143,33 @@ TEST_CASE( "TaskCenter - memory limit 0 keeps the gate open under batch load",
         ids.append( center.enqueueTask( QStringLiteral( "batch_disabled:task" ), {}, false,
                                         sicnu::TaskPriority::Normal, {}, true ) );
 
-    // Despite a huge fake RSS, the disabled gate lets up to 8 run at once.
+    // This test RAISES admission to BATCH explicitly (to exercise the RSS
+    // gate in isolation), which exceeds the engine worker pool: all BATCH
+    // tasks are admitted (#686 semantics: admitted = Dispatching or Running),
+    // while the count of tasks ACTUALLY running on a worker never exceeds
+    // JobEngine::maxWorkers().
     for ( int attempt = 0; attempt < 400; ++attempt )
     {
-        int running = 0;
+        int admitted = 0;
         for ( long id : ids )
-            if ( center.getTaskInfo( id ).status == sicnu::TaskStatus::Running )
-                ++running;
-        if ( running >= BATCH )
+            if ( center.getTaskInfo( id ).status == sicnu::TaskStatus::Running
+                 || center.getTaskInfo( id ).status == sicnu::TaskStatus::Dispatching )
+                ++admitted;
+        if ( admitted >= BATCH )
             break;
         std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
     }
-    int running = 0;
+    int admitted = 0, onWorker = 0;
     for ( long id : ids )
-        if ( center.getTaskInfo( id ).status == sicnu::TaskStatus::Running )
-            ++running;
-    CHECK( running == BATCH );
+    {
+        const auto st = center.getTaskInfo( id ).status;
+        if ( st == sicnu::TaskStatus::Running || st == sicnu::TaskStatus::Dispatching )
+            ++admitted;
+        if ( st == sicnu::TaskStatus::Running )
+            ++onWorker;
+    }
+    CHECK( admitted == BATCH );
+    CHECK( onWorker <= engine.maxWorkers() ); // honest Running (#686)
 
     releaseWorkers.store( true );
     engine.waitUntilIdleForTests();
@@ -1649,312 +1312,229 @@ TEST_CASE( "jsonParamsToVariantMap survives out-of-range integers (#619)", "[tas
     REQUIRE( map.contains( "huge" ) );  // string form, no exception
 }
 
-// ---------------------------------------------------------------------------
-// #683: a task canceled while the engine submit was in flight must not leave
-// the freshly submitted engine job running. Deterministic interleaving via a
-// synchronous taskAdded slot: the cancel lands after enqueueTask but BEFORE
-// submitJobImpl re-locks to register the job mapping — the exact window the
-// issue describes. The engine job body is cooperative and only exits when it
-// observes cancellation, so the old code (nobody ever cancels the engine job)
-// would leave it Running until waitUntilIdleForTests times out.
-// ---------------------------------------------------------------------------
-TEST_CASE( "TaskCenter - cancel during submit cancels the in-flight engine job (#683)",
-           "[processing][task_center][cancel_race]" )
-{
-    auto &center = sicnu::TaskCenter::instance();
-    auto &engine = sicnu::jobs::JobEngine::instance();
-
-    engine.clearExecutors();
-    engine.registerExecutor( "cancelrace:blocking", []( const sicnu::jobs::JobRequest &,
-                                                        sicnu::operators::RSOperatorContext &ctx ) {
-        while ( !ctx.isCancelled() )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
-        throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
-                                                 QStringLiteral( "canceled during submit" ).toStdString() );
-        return Json::Value( Json::objectValue ); // unreachable; fixes return-type deduction
-    } );
-
-    QMetaObject::Connection cancelOnAdded = QObject::connect(
-        &center, &sicnu::TaskCenter::taskAdded,
-        [ &center ]( const sicnu::AlgorithmTaskInfo &info ) {
-            // Cancel synchronously on the submitting thread while the engine
-            // submit is still in flight (mapping not yet registered).
-            center.cancelTask( info.taskId );
-        } );
-
-    sicnu::jobs::JobRequest request;
-    request.algorithmId = "cancelrace:blocking";
-    request.title = "cancel race";
-    request.source = "test";
-    const long taskId = center.submitJob( request );
-    REQUIRE( taskId > 0 );
-    QObject::disconnect( cancelOnAdded );
-
-    // The engine job must have been cancelled by the recheck: if it kept
-    // running, waitUntilIdleForTests would time out at 15s. The task→job
-    // mapping is deliberately NOT registered on this path (the task was
-    // terminal before the mapping landed), so assert on the engine record.
-    engine.waitUntilIdleForTests( 15000 );
-    const auto info = center.getTaskInfo( taskId );
-    REQUIRE( sicnu::isTerminalStatus( info.status ) );
-
-    bool foundCancelledRecord = false;
-    for ( const auto &record : engine.list() )
-    {
-        if ( record.request.algorithmId == "cancelrace:blocking" )
-        {
-            REQUIRE( record.state == sicnu::jobs::JobState::Cancelled );
-            foundCancelledRecord = true;
-        }
-    }
-    REQUIRE( foundCancelledRecord );
-
-    engine.clearExecutors();
-}
 
 // ---------------------------------------------------------------------------
-// #685: retrying a cascade-canceled pipeline step whose parent is Canceled
-// must drop the unsatisfied parent and actually run, not strand in Queued.
+// Spatial Execution Platform Phase 1 regressions: honest Running, unified
+// admission, sticky shutdown, retry semantics (#683-#686, #696, #702).
 // ---------------------------------------------------------------------------
+
 namespace {
-void waitForTerminal( sicnu::TaskCenter &center, long taskId, int attempts = 400 )
+// Saturate the engine so nothing else can start; returns when every blocker
+// task has actually reached Running (worker picked it up).
+std::vector<long> saturateEngine(sicnu::TaskCenter &center, sicnu::jobs::JobEngine &engine,
+                                 int count, std::atomic_bool &release)
 {
-    for ( int i = 0; i < attempts; ++i )
-    {
-        if ( sicnu::isTerminalStatus( center.getTaskInfo( taskId ).status ) )
-            return;
-        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    std::vector<long> ids;
+    for (int i = 0; i < count; ++i) {
+        sicnu::jobs::JobRequest req;
+        req.algorithmId = "callable:platform_blocker";
+        ids.push_back(center.submitJob(
+            req, [&release](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx) {
+                while (!release.load() && !ctx.isCancelled())
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                return Json::Value(Json::objectValue);
+            }));
     }
+    for (long id : ids) {
+        for (int attempt = 0; attempt < 600
+             && center.getTaskInfo(id).status != sicnu::TaskStatus::Running
+             && !sicnu::isTerminalStatus(center.getTaskInfo(id).status);
+             ++attempt)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return ids;
 }
 } // namespace
 
-TEST_CASE( "TaskCenter - retry of cascade-canceled step drops unsatisfied parents (#685)",
-           "[processing][task_center][retry]" )
+TEST_CASE("TaskCenter - submitJob shares admission with the engine: Running means a worker started (#686)",
+          "[processing][task_center][platform]")
 {
-    auto &center = sicnu::TaskCenter::instance();
     auto &engine = sicnu::jobs::JobEngine::instance();
-
+    engine.shutdownForTests();
     engine.clearExecutors();
-    engine.registerExecutor( "retryfail:step", []( const sicnu::jobs::JobRequest &,
-                                                   sicnu::operators::RSOperatorContext & ) {
-        Json::Value out( Json::objectValue );
-        out["output"] = "/tmp/retryfail.tif";
-        return out;
-    } );
+    engine.setMaxWorkers(2);
+    auto &center = sicnu::TaskCenter::instance();
 
-    std::atomic<bool> releaseParent{ false };
-    engine.registerExecutor( "retryfail:fail", [ &releaseParent ]( const sicnu::jobs::JobRequest &,
-                                                                   sicnu::operators::RSOperatorContext & ) {
-        // Deterministic cascade: hold the parent Running until the child is
-        // enqueued, so the failure cascade has a live descendant to cancel.
-        while ( !releaseParent.load() )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
-        throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Unknown,
-                                                 QStringLiteral( "boom" ).toStdString() );
-        return Json::Value( Json::objectValue ); // unreachable; fixes return-type deduction
-    } );
+    std::atomic_bool release{false};
+    const auto blockers = saturateEngine(center, engine, 2, release);
+    REQUIRE(center.getTaskInfo(blockers[0]).status == sicnu::TaskStatus::Running);
+    REQUIRE(center.getTaskInfo(blockers[1]).status == sicnu::TaskStatus::Running);
 
-    const long parent = center.enqueueTask( QStringLiteral( "retryfail:fail" ), {}, false,
-                                            sicnu::TaskPriority::Normal, {}, true );
-    REQUIRE( parent > 0 );
-    const long child = center.enqueueTask( QStringLiteral( "retryfail:step" ), {}, false,
-                                           sicnu::TaskPriority::Normal, { parent }, true );
-    REQUIRE( child > 0 );
-    REQUIRE( center.getTaskInfo( child ).status == sicnu::TaskStatus::Queued );
+    // Third task beyond engine capacity: must NOT claim Running and must not
+    // execute while both workers are held.
+    std::atomic_bool extraRan{false};
+    sicnu::jobs::JobRequest extraReq;
+    extraReq.algorithmId = "callable:platform_extra";
+    const long extra = center.submitJob(
+        extraReq, [&extraRan](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &) {
+            extraRan.store(true);
+            return Json::Value(Json::objectValue);
+        });
+    REQUIRE(extra > 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    const auto st = center.getTaskInfo(extra).status;
+    REQUIRE(st != sicnu::TaskStatus::Running); // Queued/WaitingResource/Dispatching at most
+    REQUIRE_FALSE(extraRan.load());
 
-    releaseParent.store( true );
-
-    waitForTerminal( center, parent );
-    waitForTerminal( center, child );
-    REQUIRE( center.getTaskInfo( parent ).status == sicnu::TaskStatus::Failed );
-    REQUIRE( center.getTaskInfo( child ).status == sicnu::TaskStatus::Canceled );
-
-    // The child's only parent is Failed (never Completed): before the fix the
-    // retry sat in Queued forever.
-    const long retryId = center.retryTask( child );
-    REQUIRE( retryId > 0 );
-    REQUIRE( retryId != child ); // the retry is a fresh task
-
-    // waitUntilIdleForTests times out if the retry stranded in Queued; the
-    // terminal transition can lag engine-idle (see waitForTerminalStatus).
-    engine.waitUntilIdleForTests( 15000 );
-    waitForTerminal( center, retryId );
-    REQUIRE( center.getTaskInfo( retryId ).status == sicnu::TaskStatus::Completed );
-    // The dropped-parent note is visible in the retry log.
-    const auto info = center.getTaskInfo( retryId );
-    REQUIRE( info.parentTaskIds.isEmpty() );
-
-    engine.clearExecutors();
+    release.store(true);
+    waitForTerminalStatus(center, extra);
+    REQUIRE(center.getTaskInfo(extra).status == sicnu::TaskStatus::Completed);
+    for (long id : blockers)
+        waitForTerminalStatus(center, id);
 }
 
-// ---------------------------------------------------------------------------
-// #702.1: a retried pipeline step stays attached to its pipeline — the step
-// mapping follows the new task and the pipeline status tracks it.
-// ---------------------------------------------------------------------------
-TEST_CASE( "TaskCenter - retry keeps the pipeline step attached (#702)",
-           "[processing][task_center][retry][pipeline]" )
+TEST_CASE("TaskCenter - cancel of an undispatched submitted job never executes it (#683)",
+          "[processing][task_center][platform]")
 {
-    auto &center = sicnu::TaskCenter::instance();
     auto &engine = sicnu::jobs::JobEngine::instance();
-
+    engine.shutdownForTests();
     engine.clearExecutors();
-    std::atomic<int> firstAttempts{ 0 };
-    engine.registerExecutor( "retrypipe:first", [ &firstAttempts ]( const sicnu::jobs::JobRequest &,
-                                                                    sicnu::operators::RSOperatorContext & ) {
-        // Fail exactly once so the retry path exercises a real recovery.
-        if ( firstAttempts.fetch_add( 1 ) == 0 )
-        {
-            throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Unknown,
-                                                     QStringLiteral( "step one fails" ).toStdString() );
+    engine.setMaxWorkers(2);
+    auto &center = sicnu::TaskCenter::instance();
+
+    std::atomic_bool release{false};
+    const auto blockers = saturateEngine(center, engine, 2, release);
+
+    std::atomic_bool ran{false};
+    sicnu::jobs::JobRequest req;
+    req.algorithmId = "callable:platform_cancel_me";
+    const long victim = center.submitJob(
+        req, [&ran](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &) {
+            ran.store(true);
+            return Json::Value(Json::objectValue);
+        });
+    REQUIRE(victim > 0);
+    // Cancel while admitted-but-not-running (or resource-held): the task must
+    // reach Canceled and the executor must never observe a start.
+    REQUIRE(center.cancelTask(victim));
+    waitForTerminalStatus(center, victim);
+    REQUIRE(center.getTaskInfo(victim).status == sicnu::TaskStatus::Canceled);
+    REQUIRE_FALSE(ran.load());
+
+    release.store(true);
+    for (long id : blockers)
+        waitForTerminalStatus(center, id);
+}
+
+TEST_CASE("TaskCenter - retryTask of a cascade-canceled pipeline step is not stranded (#685)",
+          "[processing][task_center][platform][retry]")
+{
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.setMaxWorkers(2);
+    auto &center = sicnu::TaskCenter::instance();
+
+    engine.registerExecutor("plat:upstream", [](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &) {
+        Json::Value r(Json::objectValue);
+        r["output"] = "/tmp/plat_upstream.tif";
+        return r;
+    });
+    engine.registerExecutor("plat:downstream", [](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &) {
+        return Json::Value(Json::objectValue);
+    });
+
+    sicnu::workflow::WorkflowDefinition def;
+    def.id = "plat_retry_def";
+    def.title = "Retry Pipeline";
+    sicnu::workflow::StepDef up;
+    up.id = "up";
+    up.title = "Upstream";
+    up.kind = sicnu::workflow::StepKind::Operator;
+    up.operatorId = "plat:upstream";
+    sicnu::workflow::StepDef down;
+    down.id = "down";
+    down.title = "Downstream";
+    down.kind = sicnu::workflow::StepKind::Operator;
+    down.operatorId = "plat:downstream";
+    sicnu::workflow::StepConnection conn;
+    conn.fromStepId = "up";
+    conn.fromPort = "output";
+    conn.toPort = "input";
+    down.inputs.push_back(conn);
+    def.steps.push_back(up);
+    def.steps.push_back(down);
+
+    // Hold every worker so "up" stays admitted-but-undispatched and "down"
+    // stays DAG-gated.
+    std::atomic_bool release{false};
+    const auto blockers = saturateEngine(center, engine, 2, release);
+
+    const long pipeId = center.submitPipeline(def, false);
+    REQUIRE(pipeId > 0);
+    auto pipe = center.getPipelineInfo(pipeId);
+    const long upTask = pipe.stepToTaskId["up"];
+    const long downTask = pipe.stepToTaskId["down"];
+
+    // Cascade-cancel the root: "up" cancels, "down" is cascade-canceled while
+    // it was never dispatched (the exact #685 shape).
+    REQUIRE(center.cancelTask(upTask));
+    waitForTerminalStatus(center, upTask);
+    waitForTerminalStatus(center, downTask);
+    REQUIRE(center.getTaskInfo(downTask).status == sicnu::TaskStatus::Canceled);
+
+    // Retry the cascade-canceled step: previously it re-enqueued with the old
+    // (Canceled) parent and stranded in Queued forever.
+    release.store(true);
+    for (long id : blockers)
+        waitForTerminalStatus(center, id);
+    REQUIRE(center.retryTask(downTask));
+    // The retried STEP must not strand in Queued forever (#685): with the
+    // unsatisfiable parent dropped it launches and completes.
+    {
+        const long retriedDown = center.getPipelineInfo(pipeId).stepToTaskId.value("down");
+        REQUIRE(retriedDown > 0);
+        REQUIRE(retriedDown != downTask);
+        for (int attempt = 0; attempt < 600; ++attempt) {
+            if (sicnu::isTerminalStatus(center.getTaskInfo(retriedDown).status))
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
-        return Json::Value( Json::objectValue );
-    } );
-    engine.registerExecutor( "retrypipe:ok", []( const sicnu::jobs::JobRequest &,
-                                                 sicnu::operators::RSOperatorContext & ) {
-        Json::Value out( Json::objectValue );
-        out["output"] = "/tmp/retrypipe.tif";
-        return out;
-    } );
+        REQUIRE(center.getTaskInfo(retriedDown).status == sicnu::TaskStatus::Completed);
+    }
 
-    const std::string pipelineJson = R"({
-        "id": "retry-pipe",
-        "steps": [
-            { "id": "step1", "type": "operator", "operatorId": "retrypipe:first", "params": {} },
-            { "id": "step2", "type": "operator", "operatorId": "retrypipe:ok", "params": {},
-              "inputs": [ { "fromStepId": "step1", "fromPort": "output", "toPort": "input" } ] }
-        ]
-    })";
-    const long pipelineId = center.submitPipelineJson( pipelineJson, false );
-    REQUIRE( pipelineId > 0 );
-
-    const auto pipe = center.getPipelineInfo( pipelineId );
-    REQUIRE( pipe.stepToTaskId.contains( "step1" ) );
-    const long step1TaskId = pipe.stepToTaskId.value( "step1" );
-    const long step2TaskId = pipe.stepToTaskId.value( "step2" );
-
-    waitForTerminal( center, step1TaskId );
-    REQUIRE( center.getTaskInfo( step1TaskId ).status == sicnu::TaskStatus::Failed );
-
-    const long retriedTaskId = center.retryTask( step1TaskId );
-    REQUIRE( retriedTaskId > 0 );
-
-    // The step mapping now points at the retry task, not the old failed one.
-    const auto after = center.getPipelineInfo( pipelineId );
-    REQUIRE( after.stepToTaskId.value( "step1" ) == retriedTaskId );
-    REQUIRE( retriedTaskId != step1TaskId );
-    REQUIRE( center.getTaskInfo( retriedTaskId ).stepId == QStringLiteral( "step1" ) );
-    REQUIRE( center.getTaskInfo( retriedTaskId ).pipelineId == pipelineId );
-
-    // The child step gated on the old task id is remapped to the retry, so a
-    // later retry of step2 finds satisfiable parents instead of a Failed one.
-    const auto info2 = center.getTaskInfo( step2TaskId );
-    REQUIRE( info2.parentTaskIds.contains( retriedTaskId ) );
-
-    engine.waitUntilIdleForTests( 15000 );
-    waitForTerminal( center, retriedTaskId );
-    REQUIRE( center.getTaskInfo( retriedTaskId ).status == sicnu::TaskStatus::Completed );
-
-    engine.clearExecutors();
+    // The pipeline stays failed while the canceled ROOT is not retried (its
+    // step never ran); retrying the root remaps the step and the pipeline
+    // rolls up to completed.
+    REQUIRE(center.retryTask(upTask));
+    for (int attempt = 0; attempt < 600; ++attempt) {
+        pipe = center.getPipelineInfo(pipeId);
+        if (pipe.isCompleted || pipe.isFailed)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    REQUIRE(pipe.isCompleted);
+    REQUIRE_FALSE(pipe.isFailed);
 }
 
-// ---------------------------------------------------------------------------
-// #702.2: pausing an engine-dispatched task must refuse instead of
-// fabricating a Paused status while the job keeps running.
-// ---------------------------------------------------------------------------
-TEST_CASE( "TaskCenter - pauseTask refuses to fabricate Paused for engine tasks (#702)",
-           "[processing][task_center][pause]" )
+TEST_CASE("TaskCenter - pauseTask refuses engine-dispatched work instead of fabricating Paused (#702)",
+          "[processing][task_center][platform]")
 {
-    auto &center = sicnu::TaskCenter::instance();
     auto &engine = sicnu::jobs::JobEngine::instance();
-
+    engine.shutdownForTests();
     engine.clearExecutors();
-    std::atomic<bool> releaseJob{ false };
-    engine.registerExecutor( "pausetest:blocking", [ &releaseJob ]( const sicnu::jobs::JobRequest &,
-                                                                    sicnu::operators::RSOperatorContext & ) {
-        while ( !releaseJob.load() )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
-        Json::Value out( Json::objectValue );
-        out["output"] = "/tmp/pausetest.tif";
-        return out;
-    } );
-
-    const long taskId = center.enqueueTask( QStringLiteral( "pausetest:blocking" ), {}, false,
-                                            sicnu::TaskPriority::Normal, {}, true );
-    REQUIRE( taskId > 0 );
-
-    bool running = false;
-    for ( int i = 0; i < 500 && !running; ++i )
-    {
-        running = center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Running;
-        if ( !running )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
-    }
-    REQUIRE( running );
-
-    // No attached QgsTask handle: the engine keeps running regardless —
-    // refusing is the truthful response.
-    REQUIRE_FALSE( center.pauseTask( taskId ) );
-    REQUIRE( center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Running );
-
-    releaseJob.store( true );
-    engine.waitUntilIdleForTests( 15000 );
-    REQUIRE( center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Completed );
-
-    engine.clearExecutors();
-}
-
-// ---------------------------------------------------------------------------
-// #702.3: a terminal transition from outside the engine cancels the task's
-// own engine job instead of letting it run to completion.
-// ---------------------------------------------------------------------------
-TEST_CASE( "TaskCenter - markTaskCanceled cancels the task's own engine job (#702)",
-           "[processing][task_center][cancel]" )
-{
+    engine.setMaxWorkers(2);
     auto &center = sicnu::TaskCenter::instance();
-    auto &engine = sicnu::jobs::JobEngine::instance();
 
-    engine.clearExecutors();
-    std::atomic<bool> releaseJob{ false };
-    engine.registerExecutor( "ownjob:blocking", [ &releaseJob ]( const sicnu::jobs::JobRequest &,
-                                                                 sicnu::operators::RSOperatorContext &ctx ) {
-        // Cooperative: observes the cancel flag even without releaseJob.
-        while ( !ctx.isCancelled() && !releaseJob.load() )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
-        if ( ctx.isCancelled() )
-            throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
-                                                     QStringLiteral( "canceled" ).toStdString() );
-        Json::Value out( Json::objectValue );
+    std::atomic_bool release{false};
+    const auto blockers = saturateEngine(center, engine, 2, release);
+    (void)blockers;
 
-        out["output"] = "/tmp/ownjob.tif";
-        return out;
-    } );
+    sicnu::jobs::JobRequest req;
+    req.algorithmId = "callable:platform_pause_me";
+    std::atomic_bool ran{false};
+    const long taskId = center.submitJob(
+        req, [&ran](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &) {
+            ran.store(true);
+            return Json::Value(Json::objectValue);
+        });
+    REQUIRE(taskId > 0);
 
-    const long taskId = center.enqueueTask( QStringLiteral( "ownjob:blocking" ), {}, false,
-                                            sicnu::TaskPriority::Normal, {}, true );
-    REQUIRE( taskId > 0 );
+    // Not dispatched to a worker and no QgsTask handle: pause must refuse.
+    REQUIRE_FALSE(center.pauseTask(taskId));
+    REQUIRE(center.getTaskInfo(taskId).status != sicnu::TaskStatus::Paused);
 
-    bool running = false;
-    for ( int i = 0; i < 500 && !running; ++i )
-    {
-        running = center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Running;
-        if ( !running )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
-    }
-    REQUIRE( running );
-
-    // External terminal transition (not engine-driven): before the fix the
-    // engine job ran to completion and its record was discarded.
-    center.markTaskCanceled( taskId, QStringLiteral( "external cancel" ) );
-    releaseJob.store( false );
-
-    engine.waitUntilIdleForTests( 15000 );
-    REQUIRE( center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Canceled );
-
-    const auto jobId = center.getTaskInfo( taskId ).jobId;
-    REQUIRE( !jobId.empty() );
-    const auto record = engine.snapshot( jobId );
-    if ( record.has_value() )
-        REQUIRE( record->state == sicnu::jobs::JobState::Cancelled );
-
-    engine.clearExecutors();
+    release.store(true);
+    waitForTerminalStatus(center, taskId);
+    REQUIRE(ran.load());
 }

@@ -37,6 +37,8 @@ namespace sicnu::operators::rs {
  *   height   (int)    Output raster height (matches input)
  *   tileSize (int)    Core tile edge used (px)
  *   tiles    (int)    Tiles processed
+ *   tilesSkippedNoData (int) Tiles whose forward pass was skipped because
+ *                     every core pixel was nodata (NoData written directly)
  */
 class RsInferenceOperator : public RSOperator {
 public:

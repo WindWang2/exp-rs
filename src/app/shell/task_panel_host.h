@@ -40,11 +40,17 @@ class TaskPanelHost : public QWidget
 
   signals:
     void runClicked();
+    /// #704: the Run button becomes a Stop button while a task is in flight;
+    /// owners cancel their pending task/pipeline on this signal.
+    void stopClicked();
     void helpClicked();
     void closeClicked();
 
   private:
     void applyHintStyle( bool isError );
+    void onActionButtonClicked();
+
+    bool m_running = false;
 
     QLabel *m_title = nullptr;
     QLabel *m_help = nullptr;

@@ -5,14 +5,18 @@
 
 #include "qgsprocessingalgorithm.h"
 #include "qgsprocessingcontext.h"
-#include "qgsprocessingregistry.h"
-#include "qgsapplication.h"
 #include "qgsprocessingfeedback.h"
 #include "qgsprocessingoutputs.h"
 #include "qgsprocessingparameters.h"
+#include "qgsprocessingregistry.h"
+#include "qgsprocessingprovider.h"
+#include "qgsapplication.h"
 #include "qgsexception.h"
 #include "qgsproject.h"
 #include "qgis.h"
+
+#include <QCoreApplication>
+#include <QThread>
 
 #include <memory>
 
@@ -186,8 +190,32 @@ static AlgorithmDescriptor buildDescriptor( const QgsProcessingAlgorithm &alg )
 // ProviderAlgorithmAdapter
 // ---------------------------------------------------------------------------
 
+namespace {
+
+/**
+ * Whether QgsApplication::processingRegistry() may be consulted from the
+ * current thread. QGIS lazily constructs its application members on first
+ * touch, which is only safe on the main thread (the same guard exists in
+ * atomic_algorithm_registry.cpp: lazily constructing QgsRuntimeProfiler from
+ * a worker thread asserts). Once the QgsApplication instance exists, members
+ * are main-thread-built and reading them from worker threads is fine.
+ */
+bool processingRegistryReadable()
+{
+  // QgsApplication::processingRegistry() is backed by a process-wide
+  // members() singleton (no QgsApplication/QCoreApplication instance
+  // required — the MCP headless harness runs without one), and read-only
+  // algorithmById lookups are safe from worker threads once providers are
+  // loaded at startup.
+  return QgsApplication::processingRegistry() != nullptr;
+}
+
+} // anonymous namespace
+
 ProviderAlgorithmAdapter::ProviderAlgorithmAdapter( const QgsProcessingAlgorithm &alg )
-  : mDesc( buildDescriptor( alg ) )
+  : mProviderId( alg.provider() ? alg.provider()->id() : QString() )
+  , mAlgorithmId( alg.id() )
+  , mDesc( buildDescriptor( alg ) )
 {
 }
 
@@ -211,18 +239,49 @@ Json::Value ProviderAlgorithmAdapter::estimateExecution( const Json::Value & /*p
 Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, ProgressCallback progressCb,
                                                std::function<bool()> isCancelledFn )
 {
-  // Re-resolve the algorithm by id at execute time (#695): the provider owns
-  // the algorithm instance, so the raw pointer cached at registration can
-  // dangle after provider removal/refresh/teardown reordering.
-  const QgsProcessingAlgorithm *sourceAlg =
-      QgsApplication::processingRegistry()
-          ? QgsApplication::processingRegistry()->algorithmById( QString::fromStdString( mDesc.id ) )
-          : nullptr;
-  if ( !sourceAlg )
-    throw std::runtime_error( "ProviderAlgorithmAdapter: algorithm is no longer available: " + mDesc.id );
+  // #695: re-resolve the live algorithm from the processing registry by id —
+  // the provider-owned instance this adapter was built from may have been
+  // deleted when its provider was unloaded, so caching the raw pointer risks
+  // a use-after-free here. A missing algorithm fails with a typed error
+  // instead of dereferencing freed memory.
+  const QgsProcessingAlgorithm *liveAlg = nullptr;
+  if ( processingRegistryReadable() )
+  {
+    if ( QgsProcessingRegistry *registry = QgsApplication::processingRegistry() )
+      liveAlg = registry->algorithmById( mAlgorithmId );
+  }
+
+  if ( !liveAlg && processingRegistryReadable() )
+  {
+    // QgsProcessingRegistry::algorithmById reads the provider's algorithm map
+    // WITHOUT triggering the provider's lazy load (QgsProcessingProvider::
+    // algorithms() does); a freshly added provider therefore misses until
+    // something touches algorithms() once. Force the load and retry.
+    if ( QgsProcessingRegistry *registry = QgsApplication::processingRegistry() )
+    {
+      if ( QgsProcessingProvider *provider = registry->providerById( mProviderId ) )
+      {
+        (void)provider->algorithms();
+        liveAlg = registry->algorithmById( mAlgorithmId );
+      }
+    }
+  }
+
+  if ( !liveAlg )
+  {
+    Json::Value details( Json::objectValue );
+    details["algorithmId"] = mAlgorithmId.toStdString();
+    if ( !mProviderId.isEmpty() )
+      details["providerId"] = mProviderId.toStdString();
+    throw sicnu::operators::RSOperatorError(
+      sicnu::operators::ErrorCode::QgisProcessingError,
+      "Provider algorithm unavailable (provider removed or not registered): "
+        + mAlgorithmId.toStdString(),
+      details );
+  }
 
   // Create a fresh clone for this execution.
-  std::unique_ptr<QgsProcessingAlgorithm> algorithm( sourceAlg->create() );
+  std::unique_ptr<QgsProcessingAlgorithm> algorithm( liveAlg->create() );
   if ( !algorithm )
     throw std::runtime_error( "ProviderAlgorithmAdapter: failed to clone algorithm " + mDesc.id );
 

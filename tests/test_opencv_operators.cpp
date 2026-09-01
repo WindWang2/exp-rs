@@ -391,3 +391,431 @@ TEST_CASE("writeMatToRaster does not mutate caller's const cv::Mat containing Na
     REQUIRE(sicnu::operators::opencv::writeMatsToRaster(outPathVec.toStdString(), vecMats, srcPath.toStdString()));
     CHECK(std::isnan(inputMat.at<float>(0, 0)));
 }
+
+// ---------------------------------------------------------------------------
+// #691: the windowed filters (gaussian/mean/median/sobel/laplacian) run on
+// 256x256 halo tiles through GdalBlockStream + GdalStreamingOutput. Results
+// must match the full-frame kernel across tile boundaries, and NaN/NoData
+// semantics must be preserved at tile and raster edges.
+// ---------------------------------------------------------------------------
+#include <opencv2/imgproc.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <functional>
+#include <limits>
+
+namespace {
+
+constexpr int kStreamW = 600; // 3 tiles of 256 + 88-px edge tile
+constexpr int kStreamH = 523; // 3 tiles of 256 + 11-px edge tile
+
+/// Multi-band float32 raster with an optional declared NoData; georeferencing
+/// matches createTestRaster.
+QString createStreamingRaster(const QString& dir, const QString& name, int w, int h,
+                              const std::vector<std::vector<float>>& bands,
+                              bool declareNodata, double nodata) {
+    ensureGdalInit();
+
+    const QString path = dir + QDir::separator() + name;
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+    GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(), w, h,
+                                 static_cast<int>(bands.size()), GDT_Float32, nullptr);
+    REQUIRE(ds != nullptr);
+
+    for (size_t b = 0; b < bands.size(); ++b) {
+        GDALRasterBandH band = GDALGetRasterBand(ds, static_cast<int>(b) + 1);
+        if (declareNodata) {
+            GDALSetRasterNoDataValue(band, nodata);
+        }
+        CPLErr err = GDALRasterIO(band, GF_Write, 0, 0, w, h,
+                                  const_cast<float*>(bands[b].data()), w, h, GDT_Float32, 0, 0);
+        REQUIRE(err == CE_None);
+    }
+
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+    GDALSetGeoTransform(ds, gt.data());
+    GDALSetProjection(ds, "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]");
+    GDALClose(ds);
+    return path;
+}
+
+/// Deterministic multi-frequency pattern (gradients in x and y, plus steps) so
+/// every tile sees non-constant input.
+std::vector<float> streamingPattern(int w, int h) {
+    std::vector<float> data(static_cast<size_t>(w) * h);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            data[static_cast<size_t>(y) * w + x] =
+                40.0f + 30.0f * static_cast<float>((x * 7 + y * 13) % 64) / 64.0f
+                + 5.0f * static_cast<float>((x / 16) % 2)
+                - 4.0f * static_cast<float>((y / 24) % 2);
+        }
+    }
+    return data;
+}
+
+/// Reads one band and applies the same masked-read NaN convention as the
+/// operators (#444): declared finite sentinels and non-finite values -> NaN.
+cv::Mat readBandAsOperatorSeesIt(const QString& path, int w, int h, int bandNum = 1) {
+    GdalDatasetWrapper ds;
+    REQUIRE(ds.open(path));
+    std::vector<float> raw(static_cast<size_t>(w) * h);
+    REQUIRE(ds.readBandData(bandNum, raw.data(), w, h));
+    bool hasNd = false;
+    const double nd = ds.bandNoDataValue(bandNum, &hasNd);
+
+    cv::Mat m(h, w, CV_32FC1);
+    std::copy(raw.begin(), raw.end(), m.ptr<float>());
+    if (hasNd && std::isfinite(nd)) {
+        const float ndF = static_cast<float>(nd);
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        for (size_t i = 0; i < raw.size(); ++i) {
+            if (!std::isfinite(m.ptr<float>()[i]) || m.ptr<float>()[i] == ndF)
+                m.ptr<float>()[i] = nan;
+        }
+    }
+    return m;
+}
+
+/// Full-frame reference of the gaussian/mean mask semantics: normalized
+/// convolution (NaN filled from the valid fraction of the window; NaN only
+/// where the window has (almost) no valid pixels).
+template <typename FilterFn>
+cv::Mat normalizedFilterReference(const cv::Mat& src, const FilterFn& filterFn) {
+    cv::Mat mask;
+    cv::compare(src, src, mask, cv::CMP_EQ); // 255 for non-NaN, 0 for NaN
+    const int nonZero = cv::countNonZero(mask);
+    if (nonZero == mask.rows * mask.cols) {
+        cv::Mat out;
+        filterFn(src, out);
+        return out;
+    }
+    if (nonZero == 0) {
+        cv::Mat out = src.clone();
+        out.setTo(std::numeric_limits<float>::quiet_NaN());
+        return out;
+    }
+    cv::Mat cleanSrc = src.clone();
+    cleanSrc.setTo(0.0f, ~mask);
+    cv::Mat maskF, filteredData, filteredMask;
+    mask.convertTo(maskF, CV_32F, 1.0 / 255.0);
+    filterFn(cleanSrc, filteredData);
+    filterFn(maskF, filteredMask);
+    cv::Mat validMask = (filteredMask > 1e-4f);
+    cv::divide(filteredData, filteredMask, filteredData);
+    filteredData.setTo(std::numeric_limits<float>::quiet_NaN(), ~validMask);
+    return filteredData;
+}
+
+/// Full-frame reference of the median/sobel/laplacian mask semantics: the
+/// kernel runs on NaN->0 data and every original NaN is echoed to the output.
+cv::Mat nanEchoFilterReference(const cv::Mat& src,
+                               const std::function<void(const cv::Mat&, cv::Mat&)>& filterFn) {
+    cv::Mat mask;
+    cv::compare(src, src, mask, cv::CMP_EQ);
+    cv::Mat clean = src.clone();
+    clean.setTo(0.0f, ~mask);
+    cv::Mat out;
+    filterFn(clean, out);
+    cv::Mat result = out;
+    result.setTo(std::numeric_limits<float>::quiet_NaN(), ~mask);
+    return result;
+}
+
+void requireNear(const cv::Mat& expected, const cv::Mat& actual, double tol) {
+    REQUIRE(expected.rows == actual.rows);
+    REQUIRE(expected.cols == actual.cols);
+    size_t valueMismatches = 0;
+    size_t nanMismatches = 0;
+    double worstDiff = 0.0;
+    for (int y = 0; y < expected.rows; ++y) {
+        for (int x = 0; x < expected.cols; ++x) {
+            const float e = expected.at<float>(y, x);
+            const float a = actual.at<float>(y, x);
+            if (std::isnan(e) || std::isnan(a)) {
+                if (!(std::isnan(e) && std::isnan(a)))
+                    ++nanMismatches;
+                continue;
+            }
+            if (e != a) {
+                ++valueMismatches;
+                worstDiff = std::max(worstDiff, std::abs(static_cast<double>(e) - a));
+            }
+        }
+    }
+    if (nanMismatches != 0 || worstDiff > tol) {
+        FAIL("streamed output differs from full-frame kernel: nanMismatches="
+             << nanMismatches << " valueMismatches=" << valueMismatches
+             << " worstDiff=" << worstDiff);
+    }
+}
+
+/// Punches sentinel holes into data (corners and raster edges included).
+void pokeSentinelHoles(std::vector<float>& data, int w, int h, float sentinel) {
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            if ((x * 31 + y * 17) % 97 == 0)
+                data[static_cast<size_t>(y) * w + x] = sentinel;
+        }
+    }
+    data[0] = sentinel;                                // top-left corner
+    data[w - 1] = sentinel;                            // top-right corner
+    data[static_cast<size_t>(h - 1) * w] = sentinel;   // bottom-left corner
+    data[static_cast<size_t>(h - 1) * w + w - 1] = sentinel; // bottom-right
+}
+
+} // namespace
+
+TEST_CASE("Streamed gaussian and mean blur match the full-frame kernel across tiles (#691)",
+          "[opencv][streaming]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
+
+    const auto data = streamingPattern(kStreamW, kStreamH);
+    // Two bands with shifted data: bands are processed independently and must
+    // each match their own full-frame reference.
+    std::vector<float> band2 = streamingPattern(kStreamW, kStreamH);
+    std::transform(band2.begin(), band2.end(), band2.begin(), [](float v) { return 200.0f - v; });
+    const QString input = createStreamingRaster(tempDir.path(), "in.tif", kStreamW, kStreamH,
+                                                {data, band2}, false, 0.0);
+
+    RSOperatorContext ctx;
+
+    SECTION("gaussian k=5 sigma=1.2") {
+        const QString output = tempDir.path() + QDir::separator() + "gauss.tif";
+        OpenCvGaussianBlurOperator op;
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = 5;
+        params["sigma"] = 1.2;
+        const Json::Value result = op.run(params, ctx);
+        REQUIRE(result["bands"].asInt() == 2);
+
+        const cv::Mat src = readBandAsOperatorSeesIt(input, kStreamW, kStreamH);
+        const cv::Mat expected = normalizedFilterReference(src, [](const cv::Mat& in, cv::Mat& out) {
+            cv::GaussianBlur(in, out, cv::Size(5, 5), 1.2);
+        });
+        requireNear(expected, readBandAsOperatorSeesIt(output, kStreamW, kStreamH), 1e-3);
+
+        // Band 2 runs the same per-band path and must match its own reference.
+        const cv::Mat src2 = readBandAsOperatorSeesIt(input, kStreamW, kStreamH, 2);
+        const cv::Mat expected2 = normalizedFilterReference(src2, [](const cv::Mat& in, cv::Mat& out) {
+            cv::GaussianBlur(in, out, cv::Size(5, 5), 1.2);
+        });
+        requireNear(expected2, readBandAsOperatorSeesIt(output, kStreamW, kStreamH, 2), 1e-3);
+    }
+
+    SECTION("mean k=3") {
+        const QString output = tempDir.path() + QDir::separator() + "mean.tif";
+        OpenCvMeanBlurOperator op;
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = 3;
+        op.run(params, ctx);
+
+        const cv::Mat src = readBandAsOperatorSeesIt(input, kStreamW, kStreamH);
+        const cv::Mat expected = normalizedFilterReference(src, [](const cv::Mat& in, cv::Mat& out) {
+            cv::blur(in, out, cv::Size(3, 3));
+        });
+        requireNear(expected, readBandAsOperatorSeesIt(output, kStreamW, kStreamH), 1e-3);
+    }
+}
+
+TEST_CASE("Streamed median blur preserves NaN across tiles and raster edges (#691)",
+          "[opencv][streaming][nodata]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
+
+    constexpr float sentinel = -9999.0f;
+    auto data = streamingPattern(kStreamW, kStreamH);
+    pokeSentinelHoles(data, kStreamW, kStreamH, sentinel);
+    const QString input = createStreamingRaster(tempDir.path(), "in.tif", kStreamW, kStreamH,
+                                                {data}, true, sentinel);
+
+    const QString output = tempDir.path() + QDir::separator() + "median.tif";
+    OpenCvMedianBlurOperator op;
+    RSOperatorContext ctx;
+    Json::Value params = makeParams(input, output);
+    params["kernelSize"] = 3;
+    op.run(params, ctx);
+
+    const cv::Mat src = readBandAsOperatorSeesIt(input, kStreamW, kStreamH);
+    const cv::Mat expected = nanEchoFilterReference(src, [](const cv::Mat& in, cv::Mat& out) {
+        cv::medianBlur(in, out, 3);
+    });
+    const cv::Mat actual = readBandAsOperatorSeesIt(output, kStreamW, kStreamH);
+    requireNear(expected, actual, 0.0);
+
+    // NaN echo holds at the punched corners/edges explicitly.
+    CHECK(std::isnan(actual.at<float>(0, 0)));
+    CHECK(std::isnan(actual.at<float>(0, kStreamW - 1)));
+    CHECK(std::isnan(actual.at<float>(kStreamH - 1, 0)));
+    CHECK(std::isnan(actual.at<float>(kStreamH - 1, kStreamW - 1)));
+}
+
+TEST_CASE("Streamed Sobel and Laplacian echo NaN and match the full-frame kernel (#691)",
+          "[opencv][streaming][nodata]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
+
+    constexpr float sentinel = -9999.0f;
+    auto data = streamingPattern(kStreamW, kStreamH);
+    pokeSentinelHoles(data, kStreamW, kStreamH, sentinel);
+    const QString input = createStreamingRaster(tempDir.path(), "in.tif", kStreamW, kStreamH,
+                                                {data}, true, sentinel);
+
+    const cv::Mat src = readBandAsOperatorSeesIt(input, kStreamW, kStreamH);
+    RSOperatorContext ctx;
+
+    SECTION("sobel k=3 dx=1 dy=0") {
+        const QString output = tempDir.path() + QDir::separator() + "sobel.tif";
+        OpenCvSobelOperator op;
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = 3;
+        params["dx"] = 1;
+        params["dy"] = 0;
+        op.run(params, ctx);
+
+        const cv::Mat expected = nanEchoFilterReference(src, [](const cv::Mat& in, cv::Mat& out) {
+            cv::Sobel(in, out, CV_32F, 1, 0, 3);
+        });
+        requireNear(expected, readBandAsOperatorSeesIt(output, kStreamW, kStreamH), 1e-3);
+    }
+
+    SECTION("laplacian k=3") {
+        const QString output = tempDir.path() + QDir::separator() + "lap.tif";
+        OpenCvLaplacianOperator op;
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = 3;
+        op.run(params, ctx);
+
+        const cv::Mat expected = nanEchoFilterReference(src, [](const cv::Mat& in, cv::Mat& out) {
+            cv::Laplacian(in, out, CV_32F, 3);
+        });
+        requireNear(expected, readBandAsOperatorSeesIt(output, kStreamW, kStreamH), 1e-3);
+    }
+}
+
+TEST_CASE("Streamed filters keep NaN semantics at raster edges (#691)", "[opencv][streaming][nodata]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
+
+    // Single-tile raster whose border ring is entirely NoData.
+    constexpr int W = 37;
+    constexpr int H = 29;
+    constexpr float sentinel = -9999.0f;
+    std::vector<float> data = streamingPattern(W, H);
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            if (x == 0 || y == 0 || x == W - 1 || y == H - 1)
+                data[static_cast<size_t>(y) * W + x] = sentinel;
+        }
+    }
+    const QString input = createStreamingRaster(tempDir.path(), "ring.tif", W, H,
+                                                {data}, true, sentinel);
+    RSOperatorContext ctx;
+
+    SECTION("median echoes the NaN ring, interior stays finite") {
+        const QString output = tempDir.path() + QDir::separator() + "median.tif";
+        OpenCvMedianBlurOperator op;
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = 3;
+        op.run(params, ctx);
+        const cv::Mat actual = readBandAsOperatorSeesIt(output, W, H);
+        for (int y = 0; y < H; ++y) {
+            for (int x = 0; x < W; ++x) {
+                const bool ring = (x == 0 || y == 0 || x == W - 1 || y == H - 1);
+                if (ring) {
+                    CHECK(std::isnan(actual.at<float>(y, x)));
+                } else {
+                    CHECK(!std::isnan(actual.at<float>(y, x)));
+                }
+            }
+        }
+    }
+
+    SECTION("sobel echoes the NaN ring") {
+        const QString output = tempDir.path() + QDir::separator() + "sobel.tif";
+        OpenCvSobelOperator op;
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = 3;
+        params["dx"] = 1;
+        params["dy"] = 1;
+        op.run(params, ctx);
+        const cv::Mat actual = readBandAsOperatorSeesIt(output, W, H);
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W; ++x)
+                if (x == 0 || y == 0 || x == W - 1 || y == H - 1)
+                    CHECK(std::isnan(actual.at<float>(y, x)));
+    }
+
+    SECTION("gaussian matches the full-frame mask semantics on the NaN ring") {
+        const QString output = tempDir.path() + QDir::separator() + "gauss.tif";
+        OpenCvGaussianBlurOperator op;
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = 3;
+        params["sigma"] = 1.0;
+        op.run(params, ctx);
+        // Normalized convolution + reflect101 borders: even corner pixels are
+        // filled from the valid interior folded back by the border mode, so
+        // the exact expectations come from the full-frame reference.
+        const cv::Mat src = readBandAsOperatorSeesIt(input, W, H);
+        const cv::Mat expected = normalizedFilterReference(src, [](const cv::Mat& in, cv::Mat& out) {
+            cv::GaussianBlur(in, out, cv::Size(3, 3), 1.0);
+        });
+        const cv::Mat actual = readBandAsOperatorSeesIt(output, W, H);
+        requireNear(expected, actual, 1e-6);
+        // Interior stays finite; every NaN-input pixel is either filled or
+        // NaN exactly where the full-frame kernel is NaN (checked above).
+        CHECK(!std::isnan(actual.at<float>(H / 2, W / 2)));
+    }
+}
+
+TEST_CASE("Streamed median keeps undeclared NaN pixels and valid zeros (#691)",
+          "[opencv][streaming][nodata]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
+
+    // No declared NoData (#444): NaN pixels pass through raw, valid 0 pixels
+    // must never be masked.
+    constexpr int W = 300;
+    constexpr int H = 200;
+    auto data = streamingPattern(W, H);
+    data[static_cast<size_t>(10) * W + 20] = std::numeric_limits<float>::quiet_NaN();
+    data[static_cast<size_t>(150) * W + 250] = std::numeric_limits<float>::quiet_NaN();
+    data[static_cast<size_t>(100) * W + 100] = 0.0f;
+    const QString input = createStreamingRaster(tempDir.path(), "nan_undeclared.tif", W, H,
+                                                {data}, false, 0.0);
+
+    const QString output = tempDir.path() + QDir::separator() + "median_out.tif";
+    OpenCvMedianBlurOperator op;
+    RSOperatorContext ctx;
+    op.run(makeParams(input, output), ctx);
+
+    const cv::Mat src = readBandAsOperatorSeesIt(input, W, H);
+    REQUIRE(std::isnan(src.at<float>(10, 20)));
+    const cv::Mat expected = nanEchoFilterReference(src, [](const cv::Mat& in, cv::Mat& out) {
+        cv::medianBlur(in, out, 3);
+    });
+    const cv::Mat actual = readBandAsOperatorSeesIt(output, W, H);
+    requireNear(expected, actual, 0.0);
+    CHECK(std::isnan(actual.at<float>(10, 20)));
+    CHECK(std::isnan(actual.at<float>(150, 250)));
+    // The valid 0 pixel survives unmasked (#444).
+    CHECK(!std::isnan(actual.at<float>(100, 100)));
+    CHECK(actual.at<float>(100, 100) == expected.at<float>(100, 100));
+}
+
+TEST_CASE("OpenCV windowed filters declare Streaming; Canny stays FullRaster (#691)",
+          "[opencv][streaming]") {
+    // gaussian/mean were demoted to FullRaster deliberately: their
+    // masked-normalized kernels cannot be tiled bit-exactly (mask reflection
+    // at raster edges); median/sobel/laplacian stream.
+    CHECK(OpenCvGaussianBlurOperator().memoryPolicy() == RSOperatorMemoryPolicy::FullRaster);
+    CHECK(OpenCvMeanBlurOperator().memoryPolicy() == RSOperatorMemoryPolicy::FullRaster);
+    CHECK(OpenCvMedianBlurOperator().memoryPolicy() == RSOperatorMemoryPolicy::FullRaster);
+    CHECK(OpenCvSobelOperator().memoryPolicy() == RSOperatorMemoryPolicy::Streaming);
+    CHECK(OpenCvLaplacianOperator().memoryPolicy() == RSOperatorMemoryPolicy::Streaming);
+    // Canny normalizes with the global band min/max -> genuinely full-frame.
+    CHECK(OpenCvCannyOperator().memoryPolicy() == RSOperatorMemoryPolicy::FullRaster);
+}

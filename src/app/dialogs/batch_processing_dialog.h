@@ -80,12 +80,12 @@ private slots:
     /// transition (TaskCenter::taskUpdated) and chains the next item.
     void onBatchTaskUpdated(const sicnu::AlgorithmTaskInfo &info);
 
+
 protected:
-    /// #704.1: X/Close while the chain is mid-run silently abandoned it —
-    /// the in-flight item kept running and auto-loading. Mirror
-    /// RasterProcessingDialogBase::reject().
+    /// A mid-run close would silently abandon the chain while the in-flight
+    /// item keeps running and auto-loading (#704): block Esc/X while running
+    /// — the user cancels via the Cancel button first.
     void reject() override;
-    void closeEvent( QCloseEvent *event ) override;
 
 private:
     void setupUi();

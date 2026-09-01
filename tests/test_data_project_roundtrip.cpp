@@ -1066,3 +1066,96 @@ TEST_CASE("A Data Asset's acquisition time round-trips through the project",
   CHECK_FALSE(plainAfter->acquisitionTime());
 }
 
+
+TEST_CASE("A duplicated persisted collection child is deduplicated on read-back",
+          "[project][data_roundtrip][collection]") {
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore()};
+  auto createdContext = sicnu::app::ProjectContext::create(viewSpec);
+  REQUIRE(createdContext);
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+
+  QTemporaryDir dir;
+  const QString stagedPath = dir.filePath(QStringLiteral("dup_child.tif"));
+  REQUIRE(QFile::copy(fixturePath(QStringLiteral("samples/dem_sample.tif")),
+                      stagedPath));
+  sicnu::data::SourceDescriptor source;
+  source.providerKey = QStringLiteral("gdal");
+  source.canonicalSource = stagedPath;
+  const sicnu::data::RegisterResult child =
+      context->dataManager().registerSource({source});
+  REQUIRE_FALSE(child.assetId.isNull());
+
+  const sicnu::data::CollectionCreateResult collection =
+      context->dataManager().createCollection(
+          {QStringLiteral("dup-child scene"), {}});
+  REQUIRE_FALSE(collection.collectionId.isNull());
+  REQUIRE(context->dataManager().addChildToCollection(
+      collection.collectionId, child.assetId));
+
+  sicnu::app::DataProjectSerializer serializer;
+  bool writeSucceeded = false;
+  bool readSucceeded = false;
+  QVector<sicnu::data::Diagnostic> readDiagnostics;
+  QObject signalReceiver;
+  QObject::connect(project, &QgsProject::writeProject, &signalReceiver,
+                   [&](QDomDocument &document) {
+                     writeSucceeded =
+                         static_cast<bool>(serializer.write(document, *context));
+                   });
+  QObject::connect(project, &QgsProject::readProject, &signalReceiver,
+                   [&](const QDomDocument &document) {
+                     const sicnu::data::Result<void> read =
+                         serializer.read(document, *project, *context);
+                     readSucceeded = static_cast<bool>(read);
+                     readDiagnostics = read.diagnostics();
+                   });
+
+  QTemporaryDir temporaryDirectory;
+  const QString projectPath =
+      temporaryDirectory.filePath(QStringLiteral("dup_child_roundtrip.qgs"));
+  REQUIRE(project->write(projectPath));
+  REQUIRE(writeSucceeded);
+
+  // Inject a duplicated <child> entry into the persisted collection, as a
+  // corrupted/older writer might have (#703).
+  {
+    QFile projectFile(projectPath);
+    REQUIRE(projectFile.open(QIODevice::ReadOnly));
+    QDomDocument document;
+    REQUIRE(document.setContent(&projectFile));
+    projectFile.close();
+
+    QDomNodeList collectionNodes =
+        document.elementsByTagName(QStringLiteral("collection"));
+    REQUIRE(collectionNodes.size() == 1);
+    QDomElement collectionElement = collectionNodes.at(0).toElement();
+    QDomElement originalChild =
+        collectionElement.firstChildElement(QStringLiteral("child"));
+    REQUIRE_FALSE(originalChild.isNull());
+    collectionElement.appendChild(originalChild.cloneNode(true));
+    REQUIRE(projectFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    projectFile.write(document.toByteArray());
+    projectFile.close();
+  }
+
+  REQUIRE(context->clearProject(*project));
+  REQUIRE(project->read(projectPath));
+  REQUIRE(readSucceeded);
+
+  // The duplicate is reported and skipped; the collection holds ONE child.
+  const auto restored = context->dataManager().collection(collection.collectionId);
+  REQUIRE(restored);
+  REQUIRE(restored->childAssetIds.size() == 1);
+  CHECK(restored->childAssetIds.first() == child.assetId);
+  bool duplicateReported = false;
+  for (const auto &diagnostic : readDiagnostics) {
+    if (diagnostic.code == QStringLiteral("project.duplicate_collection_child"))
+      duplicateReported = true;
+  }
+  CHECK(duplicateReported);
+}

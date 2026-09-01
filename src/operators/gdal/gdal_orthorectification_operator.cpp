@@ -9,7 +9,6 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
-#include <QFile>
 #include <QString>
 
 #include <gdal.h>
@@ -148,7 +147,7 @@ Json::Value GdalOrthorectificationOperator::run(const Json::Value& params,
                     " georeferencing metadata");
 
     // Build GDALWarp options.
-    std::vector<QString> optionStrings;
+    std::vector<std::string> optionStrings;
 
     optionStrings.emplace_back("-of");
     optionStrings.emplace_back("GTiff");
@@ -157,7 +156,7 @@ Json::Value GdalOrthorectificationOperator::run(const Json::Value& params,
     optionStrings.emplace_back("COMPRESS=LZW");
 
     optionStrings.emplace_back("-r");
-    optionStrings.emplace_back(QString::fromStdString(resampling));
+    optionStrings.emplace_back(resampling);
 
     if (hasRpcMetadata(hSrcDS)) {
         optionStrings.emplace_back("-rpc");
@@ -165,95 +164,55 @@ Json::Value GdalOrthorectificationOperator::run(const Json::Value& params,
 
     if (!demPath.empty()) {
         optionStrings.emplace_back("-to");
-        optionStrings.emplace_back(QStringLiteral("RPC_DEM=%1").arg(QString::fromStdString(demPath)));
+        optionStrings.emplace_back("RPC_DEM=" + demPath);
         optionStrings.emplace_back("-to");
         optionStrings.emplace_back("RPC_DEMINTERPOLATION=bilinear");
     }
 
     if (height != 0.0) {
         optionStrings.emplace_back("-to");
-        optionStrings.emplace_back(QStringLiteral("RPC_HEIGHT=%1").arg(height, 0, 'f', 2));
+        optionStrings.emplace_back("RPC_HEIGHT=" + QString::number(height, 'f', 2).toStdString());
     }
 
     if (!dstCrs.empty()) {
         optionStrings.emplace_back("-t_srs");
-        optionStrings.emplace_back(QString::fromStdString(dstCrs));
+        optionStrings.emplace_back(dstCrs);
     }
 
     if (targetResolution > 0.0) {
+        const std::string res = QString::number(targetResolution, 'f', 10).toStdString();
         optionStrings.emplace_back("-tr");
-        optionStrings.emplace_back(QString::number(targetResolution, 'f', 10));
-        optionStrings.emplace_back(QString::number(targetResolution, 'f', 10));
+        optionStrings.emplace_back(res);
+        optionStrings.emplace_back(res);
     }
 
     if (hasNodata) {
         optionStrings.emplace_back("-dstnodata");
-        optionStrings.emplace_back(QString::number(nodata, 'f', 10));
+        optionStrings.emplace_back(QString::number(nodata, 'f', 10).toStdString());
     }
-
-    // GDALWarpAppOptionsNew expects option argv only (no program name).
-    char** argv = nullptr;
-    for (const auto& s : optionStrings)
-        argv = CSLAddString(argv, s.toUtf8().constData());
-
-    GDALWarpAppOptions* psOptions = GDALWarpAppOptionsNew(argv, nullptr);
-    CSLDestroy(argv);
-
-    if (!psOptions) {
-        GDALClose(hSrcDS);
-        throw RSOperatorError(ErrorCode::GdalError,
-                              "Failed to create GDAL warp options");
-    }
-
-    GDALWarpAppOptionsSetProgress(psOptions, util::gdalProgressCallback, &context);
 
     context.logInfo("Starting GDAL orthorectification: " + inputPath + " -> " + outputPath);
 
-    int bUsageError = FALSE;
-    // Cancel is honoured after the warp too (#694): without this check a
-    // cancelled job still reported success and published its output.
-    if (context.isCancelled()) {
-        GDALWarpAppOptionsFree(psOptions);
+    // #694: delegate to the shared warp runner instead of an inlined copy —
+    // it polls context.isCancelled() during the warp and removes the partial
+    // GTiff on cancel/failure, so a cancelled or failed orthorectification
+    // never leaves a partial output at the user's output path.
+    std::pair<int, int> outputDims{0, 0};
+    try {
+        outputDims = runGdalWarpOnDataset(hSrcDS, outputPath, optionStrings, context,
+                                          "Orthorectification");
+    } catch (...) {
         GDALClose(hSrcDS);
-        QFile::remove(QString::fromStdString(outputPath));
-        throw RSOperatorError(ErrorCode::Cancelled, "Orthorectification cancelled");
+        throw;
     }
-
-    GDALDatasetH hDstDS = GDALWarp(outputPath.c_str(), nullptr, 1, &hSrcDS,
-                                   psOptions, &bUsageError);
-
-    GDALWarpAppOptionsFree(psOptions);
-
-    if (!hDstDS || bUsageError) {
-        if (hDstDS)
-            GDALClose(hDstDS);
-        GDALClose(hSrcDS);
-        // Remove the truncated product so nothing downstream consumes it (#694).
-        QFile::remove(QString::fromStdString(outputPath));
-        throw RSOperatorError(ErrorCode::GdalError,
-                              "GDAL orthorectification failed for: " + inputPath);
-    }
-
-    const int outputWidth = GDALGetRasterXSize(hDstDS);
-    const int outputHeight = GDALGetRasterYSize(hDstDS);
-
-    if (context.isCancelled()) {
-        GDALClose(hDstDS);
-        GDALClose(hSrcDS);
-        // Cancelled mid-warp: the partial product must not be published (#694).
-        QFile::remove(QString::fromStdString(outputPath));
-        throw RSOperatorError(ErrorCode::Cancelled, "Orthorectification cancelled");
-    }
-
-    GDALClose(hDstDS);
     GDALClose(hSrcDS);
 
     context.reportProgress(1.0, "Orthorectification complete");
 
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;
-    result["width"] = outputWidth;
-    result["height"] = outputHeight;
+    result["width"] = outputDims.first;
+    result["height"] = outputDims.second;
     return result;
 }
 

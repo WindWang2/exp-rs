@@ -5,9 +5,9 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QDir>
+#include <QDebug>
 #include <QDirIterator>
 #include <QFile>
-#include <stdexcept>
 #include <QFileInfo>
 
 #include "qgsdatasourceresolver.h"
@@ -140,6 +140,7 @@ int landsatWavelength(const QString& bandName, bool oli)
     if (name.startsWith(QStringLiteral("SR_")) || name.startsWith(QStringLiteral("ST_")))
         name = name.mid(3);
     if (oli) {
+        // Approximate OLI (Landsat 8/9) centre wavelengths (nm)
         static const QMap<QString, int> wl{
             {QStringLiteral("B1"), 443},  {QStringLiteral("B2"), 482},
             {QStringLiteral("B3"), 561},  {QStringLiteral("B4"), 655},
@@ -150,14 +151,15 @@ int landsatWavelength(const QString& bandName, bool oli)
         };
         return wl.value(name, 0);
     }
-    // TM/ETM+ centre wavelengths (nm), for Landsat 4-7 (#673).
+    // TM/ETM+ (Landsat 4-7) centre wavelengths (nm) (#673): B1 Blue, B2 Green,
+    // B3 Red, B4 NIR, B5 SWIR1, B6 thermal, B7 SWIR2, B8 pan (ETM+ only).
+    // Sharing the OLI table mislabelled e.g. TM B5 (1650 nm) as OLI NIR
+    // (865 nm), breaking wavelength-aware consumers.
     static const QMap<QString, int> wl{
-        {QStringLiteral("B1"), 485}, {QStringLiteral("B2"), 560},
-        {QStringLiteral("B3"), 660}, {QStringLiteral("B4"), 830},
-        {QStringLiteral("B5"), 1650}, {QStringLiteral("B6"), 11350},
-        {QStringLiteral("B7"), 2220}, {QStringLiteral("B8"), 710},
-        {QStringLiteral("B9"), 0}, {QStringLiteral("B10"), 0},
-        {QStringLiteral("B11"), 0},
+        {QStringLiteral("B1"), 485},  {QStringLiteral("B2"), 560},
+        {QStringLiteral("B3"), 660},  {QStringLiteral("B4"), 830},
+        {QStringLiteral("B5"), 1650}, {QStringLiteral("B6"), 11450},
+        {QStringLiteral("B7"), 2210}, {QStringLiteral("B8"), 710},
     };
     return wl.value(name, 0);
 }
@@ -220,9 +222,6 @@ BandRole legacyLandsatRole(const QString& bandName)
     };
     return roles.value(bandName.toUpper(), BandRole::Unknown);
 }
-
-int landsatWavelength(const QString& bandName)
-{ return landsatWavelength(bandName, true); }
 
 int landsatFwhmNm(const QString& bandName, bool oli)
 {
@@ -456,8 +455,11 @@ bool warpToCrs(const QString& inputPath, const QString& outputPath, const QStrin
     return true;
 }
 
-QVector<BandFile> selectBands(const ProductInfo& product, const QStringList& bandNames)
+QVector<BandFile> selectBands(const ProductInfo& product, const QStringList& bandNames,
+                              QStringList* missingBands)
 {
+    if (missingBands)
+        missingBands->clear();
     QVector<BandFile> selected;
     if (bandNames.isEmpty()) {
         for (const BandFile& b : product.bands) {
@@ -466,20 +468,58 @@ QVector<BandFile> selectBands(const ProductInfo& product, const QStringList& ban
         }
         return selected;
     }
-    QStringList missing;
     for (const QString& want : bandNames) {
         if (const BandFile* hit = findBand(product.bands, want))
             selected.append(*hit);
-        else
-            missing.append(want);
-    }
-    if (!missing.isEmpty()) {
-        throw std::runtime_error(QStringLiteral("Requested bands not found: %1").arg(missing.join(QStringLiteral(", "))).toStdString());
+        else if (missingBands)
+            missingBands->append(want);
     }
     return selected;
 }
 
+/// Parses the Sentinel-2 radiometric quantification value from an MTD_MSIL*.xml
+/// (BOA tag for L2A, plain/RADIO for L1C). Returns 0.0 when unparseable (#680).
+double sentinel2QuantificationValue(const QString& mtdPath)
+{
+    QFile f(mtdPath);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return 0.0;
+    const QString xml = QString::fromUtf8(f.readAll());
+    // Order matters: the L2A BOA tag wins over the generic L1C tag, and the
+    // anchored "<TAG>" pattern never matches the BOA_/RADIO_-prefixed variants.
+    const QStringList tags{
+        QStringLiteral("BOA_QUANTIFICATION_VALUE"),
+        QStringLiteral("QUANTIFICATION_VALUE"),
+        QStringLiteral("RADIO_QUANTIFICATION_VALUE"),
+    };
+    for (const QString& tag : tags) {
+        const QRegularExpression re(
+            QStringLiteral("<%1>\\s*([-+0-9.eE]+)\\s*</%1>").arg(tag),
+            QRegularExpression::CaseInsensitiveOption);
+        const auto m = re.match(xml);
+        if (!m.hasMatch())
+            continue;
+        bool ok = false;
+        const double v = m.captured(1).toDouble(&ok);
+        if (ok && v > 0.0 && std::isfinite(v))
+            return v;
+    }
+    return 0.0;
+}
+
 } // namespace
+
+QStringList unresolvableBands(const ProductInfo& product, const QStringList& bandNames)
+{
+    if (bandNames.isEmpty())
+        return {};
+    QStringList missing;
+    for (const QString& want : bandNames) {
+        if (!findBand(product.bands, want))
+            missing.append(want);
+    }
+    return missing;
+}
 
 sicnu::data::BandRole landsatBandRole(const QString& bandName, const QString& spacecraft)
 {
@@ -1360,19 +1400,23 @@ bool stackToGeoTiff(const ProductInfo& product,
         return false;
     }
 
-    QVector<BandFile> selected;
-    try {
-        selected = selectBands(product, bandNames);
-    } catch (const std::exception &e) {
-        if (errorMessage)
-            *errorMessage = QString::fromStdString(e.what());
-        return false;
-    }
+    QStringList missingBands;
+    QVector<BandFile> selected = selectBands(product, bandNames, &missingBands);
     if (selected.isEmpty()) {
         if (errorMessage)
             *errorMessage = bandNames.isEmpty()
                                 ? QStringLiteral("No stackable optical bands in product")
-                                : QStringLiteral("Requested bands not found in product");
+                                : QStringLiteral("Requested bands not found in product (missingBands: %1)")
+                                      .arg(missingBands.join(QStringLiteral(", ")));
+        return false;
+    }
+    // Fail closed on partially unresolvable band lists (#676): silently
+    // stacking fewer bands than requested shifted every downstream positional
+    // band reference while the import reported the requested bandCount.
+    if (!missingBands.isEmpty()) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Requested bands not found in product (missingBands: %1)")
+                                .arg(missingBands.join(QStringLiteral(", ")));
         return false;
     }
 
@@ -1415,10 +1459,24 @@ bool stackToGeoTiff(const ProductInfo& product,
                                           selected.size(), static_cast<int>(GDT_Float32),
                                           gt, projection, &err);
     if (!outDs) {
+        // A failed creation can still leave a zero-byte/partial file behind;
+        // never orphan it (#703).
+        QFile::remove(outputPath);
         if (errorMessage)
             *errorMessage = err.isEmpty() ? QStringLiteral("Failed to create output GeoTIFF") : err;
         return false;
     }
+
+    // Any failure from here on leaves a partial (invalid) GeoTIFF at
+    // outputPath. Every error return removes it so callers never inherit an
+    // apparently-valid staging file from a failed stack (#703).
+    const auto failRemovingPartial = [outputPath](QString *errorMessagePtr,
+                                                  const QString &message) {
+        QFile::remove(outputPath);
+        if (errorMessagePtr)
+            *errorMessagePtr = message;
+        return false;
+    };
 
     // Windowed stacking (#634): the whole-band float buffer (~10 GB at
     // 50k x 50k) became an uncaught bad_alloc; row-block windows keep memory
@@ -1434,21 +1492,19 @@ bool stackToGeoTiff(const ProductInfo& product,
         GDALDatasetH src = GDALOpen(selected[i].path.toUtf8().constData(), GA_ReadOnly);
         if (!src) {
             GDALClose(outDs);
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Failed to open band: %1").arg(selected[i].path);
-            return false;
+            return failRemovingPartial(errorMessage,
+                                       QStringLiteral("Failed to open band: %1").arg(selected[i].path));
         }
 
         if (GDALGetRasterXSize(src) != width || GDALGetRasterYSize(src) != height) {
             GDALClose(src);
             GDALClose(outDs);
-            if (errorMessage)
-                *errorMessage = QStringLiteral(
-                                    "Band size mismatch for %1 (expected %2x%3)")
-                                    .arg(selected[i].name)
-                                    .arg(width)
-                                    .arg(height);
-            return false;
+            return failRemovingPartial(errorMessage,
+                                       QStringLiteral(
+                                           "Band size mismatch for %1 (expected %2x%3)")
+                                           .arg(selected[i].name)
+                                           .arg(width)
+                                           .arg(height));
         }
 
         const int srcBandIndex = selected[i].sourceBand > 0 ? selected[i].sourceBand : 1;
@@ -1456,11 +1512,10 @@ bool stackToGeoTiff(const ProductInfo& product,
         if (!srcBand) {
             GDALClose(src);
             GDALClose(outDs);
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Missing band %1 in %2")
-                                    .arg(srcBandIndex)
-                                    .arg(selected[i].path);
-            return false;
+            return failRemovingPartial(errorMessage,
+                                       QStringLiteral("Missing band %1 in %2")
+                                           .arg(srcBandIndex)
+                                           .arg(selected[i].path));
         }
         int hasNoData = 0;
         double ndVal = GDALGetRasterNoDataValue(srcBand, &hasNoData);
@@ -1474,18 +1529,16 @@ bool stackToGeoTiff(const ProductInfo& product,
             if (cerr != CE_None) {
                 GDALClose(src);
                 GDALClose(outDs);
-                if (errorMessage)
-                    *errorMessage = QStringLiteral("Failed to read band %1").arg(selected[i].name);
-                return false;
+                return failRemovingPartial(errorMessage,
+                                           QStringLiteral("Failed to read band %1").arg(selected[i].name));
             }
             cerr = GDALRasterIO(dstBand, GF_Write, 0, y, width, rows,
                                 buffer.data(), width, rows, GDT_Float32, 0, 0);
             if (cerr != CE_None) {
                 GDALClose(src);
                 GDALClose(outDs);
-                if (errorMessage)
-                    *errorMessage = QStringLiteral("Failed to write band %1").arg(selected[i].name);
-                return false;
+                return failRemovingPartial(errorMessage,
+                                           QStringLiteral("Failed to write band %1").arg(selected[i].name));
             }
         }
         GDALClose(src);
@@ -1592,6 +1645,91 @@ bool stackToGeoTiff(const ProductInfo& product,
     }
     if ( importedState )
         GDALSetMetadataItem( outDs, kRadiometricStateKey, importedState, nullptr );
+
+    // #680: the state key above records *intent* (surface reflectance), not
+    // the numeric encoding. Level-2 pixels are stacked verbatim (no gain/bias
+    // applied), so stamp the divisor that recovers unit reflectance:
+    // reflectance = stored_pixel / SICNU_NUMERIC_SCALE. Scale-sensitive
+    // consumers (EVI/SAVI additive constants) read this key; ratio indices
+    // are scale-invariant. Stored pixel values are never rescaled here
+    // (back-compat with existing callers and stacked outputs).
+    const bool isSurfaceReflectanceImport =
+        importedState && std::strcmp( importedState, kRadiometricStateSurfaceReflectance ) == 0;
+    if ( isSurfaceReflectanceImport )
+    {
+        double numericScale = 0.0;
+        if ( product.type == ProductType::Sentinel2 )
+        {
+            // S2 L2A: honour the MTD quantification when parseable, otherwise
+            // the ESA-published BOA quantification of 10000.
+            const double quant = sentinel2QuantificationValue( product.metadataPath );
+            numericScale = quant > 0.0 ? quant : 10000.0;
+        }
+        else if ( product.type == ProductType::Landsat )
+        {
+            // Landsat Collection 2 L2: REFLECTANCE_MULT_BAND_n already is the
+            // reflectance-per-DN factor (the reciprocal of the quantification).
+            // Stamp 1/mult only when ONE uniform mult covers the stacked
+            // reflectance bands; mixed/missing coefficients cannot be described
+            // by a single divisor, so stamp nothing (and say so).
+            static const QRegularExpression bandNumRe(
+                QStringLiteral( "^B(\\d+)$" ) );
+            double mult = 0.0;
+            double add = 0.0;
+            int multBands = 0;
+            bool uniform = true;
+            for ( const BandFile &bf : selected )
+            {
+                const auto m = bandNumRe.match( bf.name );
+                if ( !m.hasMatch() )
+                    continue;
+                bool okM = false;
+                bool okA = false;
+                const double v =
+                    product.attributes
+                        .value( QStringLiteral( "REFLECTANCE_MULT_BAND_%1" ).arg( m.captured( 1 ) ) )
+                        .toDouble( &okM );
+                const double a =
+                    product.attributes
+                        .value( QStringLiteral( "REFLECTANCE_ADD_BAND_%1" ).arg( m.captured( 1 ) ) )
+                        .toDouble( &okA );
+                if ( !okM || !std::isfinite( v ) || v <= 0.0 )
+                    continue; // e.g. thermal ST_* bands carry no reflectance mult
+                ++multBands;
+                if ( multBands == 1 )
+                {
+                    mult = v;
+                    add = okA ? a : 0.0;
+                }
+                else if ( std::abs( v - mult ) > 1e-9 * std::abs( mult )
+                          || std::abs( ( okA ? a : 0.0 ) - add ) > 1e-9 )
+                {
+                    uniform = false;
+                    break;
+                }
+            }
+            // A pure scale contract requires the additive term to be zero:
+            // Landsat C2 L2 carries REFLECTANCE_ADD = -0.2, so dividing by
+            // 1/mult alone leaves DN*mult = rho + 0.2 — EVI/SAVI would run on
+            // biased reflectance (review P1). Stamp only when add == 0.
+            if ( uniform && multBands > 0 && mult > 0.0 && std::abs( add ) <= 1e-12 )
+            {
+                numericScale = 1.0 / mult;
+            }
+            else if ( multBands > 0 )
+            {
+                qWarning() << "stackToGeoTiff: Landsat reflectance coefficients are not a pure "
+                              "scale (non-uniform MULT or non-zero ADD); SICNU_NUMERIC_SCALE "
+                              "not stamped — run rs:radiometric_calibration for true reflectance";
+            }
+        }
+        if ( numericScale > 0.0 && std::isfinite( numericScale ) )
+        {
+            GDALSetMetadataItem( outDs, kNumericScaleKey,
+                                 QByteArray::number( numericScale, 'g', 12 ).constData(),
+                                 nullptr );
+        }
+    }
 
     GDALClose(outDs);
     if (progress)

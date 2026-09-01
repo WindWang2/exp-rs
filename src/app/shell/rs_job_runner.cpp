@@ -16,6 +16,7 @@ sicnu::jobs::JobState mapStatus( TaskStatus status )
   {
     case TaskStatus::Queued:
     case TaskStatus::WaitingResource:
+    case TaskStatus::Dispatching: // admitted, no worker started yet
       return JobState::Queued;
     case TaskStatus::Running:
     case TaskStatus::Paused:

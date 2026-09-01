@@ -1,8 +1,13 @@
 #include "collection_import_service.h"
 
 #include "data/data_asset.h"
+#include "data/band_role.h"
 #include "data/data_manager.h"
 #include "data/source_descriptor.h"
+
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 using sicnu::data::AssetId;
 using sicnu::data::AssetKind;
@@ -193,16 +198,24 @@ CommitImportResult CollectionImportService::commit( const CommitImportRequest &r
   // Rolls back the commit: unloads every child this commit created, then
   // removes the collection node non-cascading so any adopted (standalone,
   // pre-existing) children survive as standalone assets with no parent. A
-  // reused asset owned by a different collection is never touched.
-  auto rollback = [this, &result, &createdChildren]() {
+  // reused asset owned by a different collection is never touched. Rollback
+  // failures are appended to `rollbackDiagnostics` (#703) instead of being
+  // discarded — the caller folds them into the reported failure.
+  auto rollback = [this, &result, &createdChildren](
+                    QVector<Diagnostic> *rollbackDiagnostics ) {
     for ( const AssetId &childId : createdChildren )
     {
       const UnloadPlan plan = m_dataManager->planUnload( childId ).confirmedCascade();
-      ( void ) m_dataManager->unload( plan );
+      const Result<void> unloaded = m_dataManager->unload( plan );
+      if ( !unloaded && rollbackDiagnostics )
+        rollbackDiagnostics->append( unloaded.diagnostics() );
     }
     // Non-cascade: the collection node is removed and any remaining (adopted,
     // standalone) children are kept, their parent pointer cleared.
-    ( void ) m_dataManager->unloadCollection( result.collectionId, /*cascade=*/false );
+    const Result<void> removed =
+      m_dataManager->unloadCollection( result.collectionId, /*cascade=*/false );
+    if ( !removed && rollbackDiagnostics )
+      rollbackDiagnostics->append( removed.diagnostics() );
     result.collectionId = CollectionId();
     result.childAssetIds.clear();
   };
@@ -243,6 +256,46 @@ CommitImportResult CollectionImportService::commit( const CommitImportRequest &r
     source.canonicalSource = child.bands.isEmpty() ? child.sourcePath
                                                    : child.bands.first().sourcePath;
 
+    // Record the probed per-band semantics (#703): discovery captured each
+    // band's role and centre wavelength, and without this they never reach
+    // the catalog. The metadata rides in dataOptions as one compact JSON
+    // array (the same string-option convention the virtual-raster "recipe"
+    // option uses). dataOptions participate in the SourceKey identity, so an
+    // imported product with product semantics is deliberately distinct from a
+    // bare registration of the same file; when discovery captured no role and
+    // no wavelength the option is omitted so plain registrations keep
+    // deduplicating unchanged.
+    if ( !child.bands.isEmpty() )
+    {
+      bool hasSemantics = false;
+      QJsonArray bandsJson;
+      for ( const ChildBandInfo &band : child.bands )
+      {
+        QJsonObject bandJson;
+        bandJson.insert( QStringLiteral( "name" ), band.name );
+        bandJson.insert( QStringLiteral( "sourceBand" ), band.sourceBand );
+        if ( band.role != sicnu::data::BandRole::Unknown )
+        {
+          bandJson.insert( QStringLiteral( "role" ),
+                           sicnu::data::bandRoleToString( band.role ) );
+          hasSemantics = true;
+        }
+        if ( band.wavelengthNm > 0 )
+        {
+          bandJson.insert( QStringLiteral( "wavelengthNm" ), band.wavelengthNm );
+          hasSemantics = true;
+        }
+        bandsJson.append( bandJson );
+      }
+      if ( hasSemantics )
+      {
+        source.dataOptions.insert(
+          QStringLiteral( "bandMetadata" ),
+          QString::fromUtf8(
+            QJsonDocument( bandsJson ).toJson( QJsonDocument::Compact ) ) );
+      }
+    }
+
     RegisterRequest registration;
     registration.source = source;
     registration.persistence = request.persistence;
@@ -252,15 +305,17 @@ CommitImportResult CollectionImportService::commit( const CommitImportRequest &r
     if ( registered.assetId.isNull() )
     {
       // Mid-commit failure: roll back only what this commit created. The
-      // catalog never holds a half-imported product.
-      rollback();
+      // catalog never holds a half-imported product. Rollback failures ride
+      // along in the diagnostics (#703) instead of being discarded.
+      QVector<Diagnostic> rollbackDiagnostics;
+      rollback( &rollbackDiagnostics );
       const QVector<Diagnostic> detail = registered.diagnostics.isEmpty()
         ? QVector<Diagnostic>{ diagnostic(
             QStringLiteral( "import.child_register_failed" ),
             QStringLiteral( "Registering a child asset failed; the import was "
                             "rolled back" ) ) }
         : registered.diagnostics;
-      result.diagnostics = detail;
+      result.diagnostics = detail + rollbackDiagnostics;
       return result;
     }
 
@@ -283,11 +338,14 @@ CommitImportResult CollectionImportService::commit( const CommitImportRequest &r
         // The source is already a child of a DIFFERENT collection (a child can
         // belong to only one collection). Fail fast with an import-scoped
         // diagnostic; the reused asset is left untouched.
-        rollback();
-        result.diagnostics = { diagnostic(
+        QVector<Diagnostic> rollbackDiagnostics;
+        rollback( &rollbackDiagnostics );
+        QVector<Diagnostic> detail{ diagnostic(
           QStringLiteral( "import.child_in_other_collection" ),
           QStringLiteral( "The source %1 is already imported as a child of another "
                           "collection" ).arg( source.canonicalSource ) ) };
+        detail += rollbackDiagnostics;
+        result.diagnostics = detail;
         return result;
       }
       // A standalone pre-existing asset: adopt it (set this collection as its
@@ -296,8 +354,9 @@ CommitImportResult CollectionImportService::commit( const CommitImportRequest &r
         m_dataManager->addChildToCollection( result.collectionId, registered.assetId );
       if ( !added )
       {
-        rollback();
-        result.diagnostics = added.diagnostics();
+        QVector<Diagnostic> rollbackDiagnostics;
+        rollback( &rollbackDiagnostics );
+        result.diagnostics = added.diagnostics() + rollbackDiagnostics;
         return result;
       }
       result.childAssetIds.append( registered.assetId );
@@ -311,8 +370,9 @@ CommitImportResult CollectionImportService::commit( const CommitImportRequest &r
     if ( !added )
     {
       createdChildren.append( registered.assetId );
-      rollback();
-      result.diagnostics = added.diagnostics();
+      QVector<Diagnostic> rollbackDiagnostics;
+      rollback( &rollbackDiagnostics );
+      result.diagnostics = added.diagnostics() + rollbackDiagnostics;
       return result;
     }
 

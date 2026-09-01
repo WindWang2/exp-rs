@@ -41,14 +41,29 @@ public:
     const Chunk &chunk(int index) const { return m_chunks[index]; }
 
     /**
+     * Nested-parallelism token (#692): default cap on the number of chunks
+     * processed concurrently. Derived from the core count divided by the
+     * worst-case number of concurrent outer jobs (JobEngine clamps its worker
+     * pool to 2..4 threads; sicnu_processing cannot link sicnu_jobs, so the
+     * budget assumes 4). Callers that know their outer parallelism should
+     * pass an explicit maxThreads to process() instead.
+     */
+    static int defaultMaxThreads();
+
+    /**
      * Process all chunks in parallel using QtConcurrent.
      * The callback is called once per chunk, potentially from different threads.
      * @param callback Function to process each chunk
      * @param feedback Optional feedback for progress reporting and cancellation
+     * @param maxThreads Nested-parallelism token (#692): cap on the number of
+     *        chunks executed concurrently. Runs on a dedicated (non-global)
+     *        thread pool with this bound. 0 = auto (defaultMaxThreads());
+     *        values < 1 are clamped to 1.
      * @return true if all chunks succeeded
      */
     using ChunkCallback = std::function<bool(const Chunk &chunk)>;
-    bool process(const ChunkCallback &callback, QgsFeedback *feedback = nullptr);
+    bool process(const ChunkCallback &callback, QgsFeedback *feedback = nullptr,
+                 int maxThreads = 0);
 
 private:
     int m_width;

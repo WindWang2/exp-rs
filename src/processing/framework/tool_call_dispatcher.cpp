@@ -87,6 +87,8 @@ QString assetKindLabelImpl( const QString &path, const QString &algorithmId )
   }
 }
 
+
+
 } // namespace
 
 QString ToolCallDispatcher::assetKindLabel( const QString &path, const QString &algorithmId )
@@ -128,46 +130,19 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
       request.stablePath = stablePath;
       request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
       request.autoLoad = false;
-      request.derivation.algorithmId = info.algorithmId;
-      request.derivation.parameters = QJsonObject::fromVariantMap( info.parameterMap );
-      request.derivation.taskReference = QString::number( info.taskId );
-      request.derivation.completedAtUtc = QDateTime::currentDateTimeUtc();
-      // Input lineage (#698): resolve the parameter paths that reference
-      // registered assets into DerivationInputs so derivedFrom()/
-      // derivedOutputsOf() actually trace the graph (every commit used to
-      // record only the operator+parameters — the source edge was missing
-      // exactly where the platform commits most). Unresolvable paths
-      // (foreign files, placeholders) are skipped, not fatal.
-      {
-        const QVariantMap &pmap = info.parameterMap;
-        for ( auto it = pmap.begin(); it != pmap.end(); ++it )
-        {
-          if ( it.value().type() != QVariant::String )
-            continue;
-          const QString path = it.value().toString();
-          if ( path.isEmpty() || path.startsWith( QLatin1Char( '$' ) ) || path == info.outputLayerPath )
-            continue;
-          const QFileInfo fi( path );
-          if ( !fi.isFile() )
-            continue;
-          // Registered assets store a canonicalized source; compare the
-          // canonical form so symlinked / case-variant parameter paths still
-          // resolve (a plain absoluteFilePath match silently dropped those
-          // lineage edges) (#698 review).
-          const QString canonical = fi.canonicalFilePath();
-          const auto inputId = managerGuard->assetIdForSource(
-            canonical.isEmpty() ? fi.absoluteFilePath() : canonical );
-          if ( !inputId )
-            continue;
-          const auto snapshot = managerGuard->asset( *inputId );
-          if ( !snapshot )
-            continue;
-          sicnu::data::DerivationInput input;
-          input.assetId = snapshot->id();
-          input.revision = snapshot->revision();
-          request.derivation.inputs.append( input );
-        }
-      }
+      // Input lineage (#698): the task's "input"-like parameters that point at
+      // existing files are resolved against the catalog so the derivation
+      // record carries real derivedFrom edges (asset id + revision); paths
+      // that do not resolve are preserved in unresolvedInputPaths.
+      const sicnu::data::InputLineage lineage = sicnu::data::resolveInputLineage(
+        managerGuard.data(), sicnu::data::findInputPathsInParams( info.parameterMap ) );
+
+      request.derivation = sicnu::data::makeTaskDerivation(
+        info.algorithmId,
+        QJsonObject::fromVariantMap( info.parameterMap ),
+        QString::number( info.taskId ),
+        lineage.inputs,
+        lineage.unresolvedPaths );
 
       const auto commitResult = committer.commit( request );
 
@@ -724,7 +699,7 @@ Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTa
   return payload;
 }
 
-void ToolCallDispatcher::rollbackVerificationFailure( const Json::Value &payload ) const
+void ToolCallDispatcher::rollbackVerificationFailure( Json::Value &payload ) const
 {
   if ( !mDataManager )
     return;
@@ -760,7 +735,18 @@ void ToolCallDispatcher::rollbackVerificationFailure( const Json::Value &payload
                                   {
                                     // Fallback: try cascade unload if reap refused due to lease
                                     const auto plan = manager->planUnload( assetId ).confirmedCascade();
-                                    ( void ) manager->unload( plan );
+                                    const auto unloadResult = manager->unload( plan );
+                                    // Deferred path: no payload left to annotate; log the
+                                    // failures instead of discarding them silently (#703).
+                                    if ( !unloadResult )
+                                    {
+                                      for ( const auto &diagnostic : result.diagnostics )
+                                        qWarning() << "ToolCallDispatcher: rollback reap refused:"
+                                                   << diagnostic.message;
+                                      for ( const auto &diagnostic : unloadResult.diagnostics() )
+                                        qWarning() << "ToolCallDispatcher: rollback unload failed:"
+                                                   << diagnostic.message;
+                                    }
                                   }
                                 }
                               },
@@ -773,7 +759,21 @@ void ToolCallDispatcher::rollbackVerificationFailure( const Json::Value &payload
     if ( !result.unloaded && !result.diagnostics.isEmpty() )
     {
       const auto plan = mDataManager->planUnload( assetId ).confirmedCascade();
-      ( void ) mDataManager->unload( plan );
+      const auto unloadResult = mDataManager->unload( plan );
+      // Surface the rollback failures in the returned payload (#703) instead
+      // of (void)-discarding them: the caller sees WHY the asset survived.
+      Json::Value rollbackErrors( Json::arrayValue );
+      for ( const auto &diagnostic : result.diagnostics )
+        rollbackErrors.append( QStringLiteral( "rollback reap: %1" )
+                                 .arg( diagnostic.message ).toStdString() );
+      if ( !unloadResult )
+      {
+        for ( const auto &diagnostic : unloadResult.diagnostics() )
+          rollbackErrors.append( QStringLiteral( "rollback unload: %1" )
+                                   .arg( diagnostic.message ).toStdString() );
+      }
+      if ( !rollbackErrors.empty() )
+        payload["rollbackErrors"] = rollbackErrors;
     }
   }
 }

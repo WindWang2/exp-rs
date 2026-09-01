@@ -215,6 +215,12 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
   // be reaped (catalog removal + file deletion). DeletableSource is the
   // capability that gates physical deletion at reap time.
   registration.additionalCapabilities = AssetCapability::DeletableSource;
+  // The publish above replaced the bytes at the stable path. When that path is
+  // already registered (#687: a re-run of the same operator/output param hits
+  // the same stable path), the dedup hit must not silently reuse the stale
+  // snapshot: the Data Manager refreshes the structure, advances the revision,
+  // and emits assetChanged so displayed layers reload.
+  registration.notifyUpdateOnReuse = true;
 
   const RegisterResult registered = m_dataManager->registerSource( registration );
   if ( registered.assetId.isNull() )

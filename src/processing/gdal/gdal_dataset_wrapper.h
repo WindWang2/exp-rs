@@ -11,6 +11,9 @@ typedef void *GDALDatasetH;
 
 /// Ensure GDAL drivers are registered (once per process, thread-safe).
 /// Prefer this over calling GDALAllRegister() directly.
+/// Also caps OpenCV's internal thread pool to 1 (override with the
+/// SICNU_CV_NUM_THREADS environment variable) so nested parallelism stays
+/// bounded when operators run on JobEngine workers (#692).
 void ensureGdalInit();
 
 /**
@@ -150,6 +153,21 @@ public:
      * @return true on success
      */
     bool readBandData(int bandNum, float *buffer, int dstWidth, int dstHeight) const;
+
+    /**
+     * Read an entire band into a float buffer with declared-NoData masking
+     * (#679): pixels matching the band's declared NoData sentinel (compared in
+     * float space — the cast sentinel matches large double sentinels exactly,
+     * #444) and non-finite values are converted to NaN, so downstream kernels
+     * and statistics treat them as missing. Bands without a declared sentinel
+     * only have non-finite values NaN-ized.
+     * @param bandNum 1-based band number
+     * @param buffer  pre-allocated buffer of size dstWidth * dstHeight
+     * @param dstWidth  destination width in pixels
+     * @param dstHeight destination height in pixels
+     * @return true on success
+     */
+    bool readBandMasked(int bandNum, float *buffer, int dstWidth, int dstHeight) const;
 
     /**
      * Read a rectangular window of a band into a float buffer (out-of-core

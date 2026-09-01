@@ -446,11 +446,15 @@ bool processFileMultiBand(const QString &sourcePath, const QString &outputPath,
             *errorMessage = createError;
         return false;
     }
-    // Per-band NaN sentinel so clamped-0 valid pixels don't collide with
-    // the NoData declaration and NaN invalid pixels are actually masked in
-    // every band, not just honest-to-goodness band-1 (#675).
-    for (int b = 0; b < bandCount; ++b)
-        outDataset.setBandNoDataValue(b + 1, std::numeric_limits<float>::quiet_NaN());
+    // #675: the write pass below emits NaN for every invalid pixel of EVERY
+    // band, so the output must declare NaN as NoData per band. Declaring the
+    // band-1 source sentinel lied twice: the sentinel never appears in-band,
+    // while bands >= 2 carried NaN with no declared contract at all. (The
+    // single-band processFile keeps the source-sentinel convention — it
+    // writes the sentinel verbatim.)
+    const double quacNoData = std::numeric_limits<double>::quiet_NaN();
+    for (int b = 1; b <= bandCount; ++b)
+        outDataset.setBandNoDataValue(b, quacNoData);
 
     constexpr int kTile = 256;
     std::vector<float> dark(bandCount), bright(bandCount);

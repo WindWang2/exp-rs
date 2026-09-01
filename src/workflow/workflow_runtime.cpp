@@ -7,12 +7,20 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QJsonDocument>
 #include <QSaveFile>
 #include <QFile>
 #include <QFileInfo>
+#include <QMetaObject>
 #include <QString>
+#include <QThread>
+
+#include <atomic>
+#include <optional>
+#include <future>
+#include <memory>
 
 #include <chrono>
 #include <sstream>
@@ -530,17 +538,57 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
       commitReq.derivation.taskReference = QString::number( taskId );
       commitReq.derivation.completedAtUtc = QDateTime::currentDateTimeUtc();
 
-      sicnu::OutputCommitter committer( dataManager );
-      const auto commitResult = committer.commit( commitReq );
-      if ( !commitResult )
+      // DataManager mutations must run on its own (affinity) thread: it has
+      // no internal locking, and this workflow caller can be any worker
+      // thread (#702). Marshal the commit like ExecutionPlane does; on a
+      // starved affinity thread fail closed instead of committing from the
+      // wrong thread. Same-thread callers (GUI) commit directly.
+      std::optional<sicnu::CommitResult> commitResult;
+      bool commitRan = false;
+      if ( QCoreApplication::instance() && dataManager->thread() != QThread::currentThread() )
       {
-        const QString diag = commitResult.diagnostics().isEmpty()
+        auto promise = std::make_shared<std::promise<sicnu::CommitResult>>();
+        auto cancelled = std::make_shared<std::atomic<bool>>( false );
+        auto future = promise->get_future();
+        QMetaObject::invokeMethod(
+          dataManager,
+          [dataManager, commitReq, promise, cancelled]() {
+            if ( cancelled->load() )
+              return; // the caller already failed closed on its timeout
+            sicnu::OutputCommitter committer( dataManager );
+            promise->set_value( committer.commit( commitReq ) );
+          },
+          Qt::QueuedConnection );
+        if ( future.wait_for( std::chrono::milliseconds( 10000 ) ) == std::future_status::ready )
+        {
+          commitResult = future.get();
+          commitRan = true;
+        }
+        else
+        {
+          // Review P2: mark the late delivery dead so a starved affinity
+          // thread cannot commit an asset AFTER this step already failed.
+          cancelled->store( true );
+        }
+      }
+      else
+      {
+        sicnu::OutputCommitter committer( dataManager );
+        commitResult = committer.commit( commitReq );
+        commitRan = true;
+      }
+      if ( !commitRan )
+        throw PlaneTaskFailure( std::string( "Output commit timed out on the DataManager thread (" )
+                                + outputTempPath + ")" );
+      if ( !commitResult.has_value() || !*commitResult )
+      {
+        const QString diag = commitResult->diagnostics().isEmpty()
                                ? QStringLiteral( "OutputCommitter commit failed" )
-                               : commitResult.diagnostics().first().message;
+                               : commitResult->diagnostics().first().message;
         throw PlaneTaskFailure( std::string( "Output commit failed: " ) + diag.toStdString() + " (" + outputTempPath + ")" );
       }
       committedPath = stablePath.toStdString();
-      committedAssetId = commitResult.value().toString().toStdString();
+      committedAssetId = commitResult->value().toString().toStdString();
       // Patch result to point at the stable asset
       result["output"] = committedPath;
       result["assetId"] = committedAssetId;

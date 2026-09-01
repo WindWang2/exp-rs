@@ -2,7 +2,13 @@
 #include "model_catalog_tool.h"
 
 #include "operators/framework/model_catalog.h"
+
+// The GPU default comes from the platform's own CUDA detection (the model
+// runtime layer) — reused, never re-implemented here. That layer only exists
+// in OpenCV builds; without OpenCV gpu_available keeps its false default.
+#ifdef SICNU_HAS_OPENCV
 #include "operators/runtime/model_runtime.h"
+#endif
 
 namespace sicnu::agent::spatial_tools {
 
@@ -13,8 +19,10 @@ std::string ModelCatalogTool::description() const
          "classification, detection, ...), input/output contract, framework "
          "(onnx), GPU requirement, benchmark accuracy, supported sensors, and "
          "local weight paths. Supports automated multi-criteria ranking by "
-         "sensor, spatial resolution, and GPU/VRAM hardware constraints to "
-         "assist Pi in selecting optimal models before rs:inference.";
+         "input band roles, sensor, spatial resolution, and GPU/VRAM hardware "
+         "constraints to assist Pi in selecting optimal models before "
+         "rs:inference. gpu_available defaults to the platform's own CUDA "
+         "detection when the argument is omitted.";
 }
 
 std::vector<std::string> ModelCatalogTool::tags() const
@@ -43,19 +51,25 @@ Json::Value ModelCatalogTool::inputSchema() const
   sensor["description"] = "Filter / rank models compatible with this sensor (e.g. 'Sentinel-2', 'Landsat-8', 'GF-2')";
   props["sensor"] = sensor;
 
+  // Optional array of band-role names (mirrors the manifest input.band_roles
+  // vocabulary, e.g. ["Red", "Green", "Blue", "NIR"]) feeding rankModels'
+  // band-role scoring (#705).
+  Json::Value bandRoles( Json::objectValue );
+  bandRoles["type"] = "array";
+  bandRoles["description"] = "Band roles to rank models by (e.g. ['Red', 'Green', 'Blue', 'NIR'])";
+  Json::Value roleItems( Json::objectValue );
+  roleItems["type"] = "string";
+  bandRoles["items"] = roleItems;
+  props["band_roles"] = bandRoles;
+
   Json::Value resolution( Json::objectValue );
   resolution["type"] = "number";
   resolution["description"] = "Spatial resolution in meters for compatibility evaluation";
   props["resolution"] = resolution;
 
-  Json::Value bandRoles( Json::objectValue );
-  bandRoles["type"] = "array";
-  bandRoles["items"]["type"] = "string";
-  bandRoles["description"] = "Filter/rank by required band roles (e.g. [\"Red\",\"NIR\"])";
-  props["band_roles"] = bandRoles;
   Json::Value gpuAvailable( Json::objectValue );
   gpuAvailable["type"] = "boolean";
-  gpuAvailable["description"] = "Whether GPU acceleration is available on the target environment (defaults to detected hardware, not false)";
+  gpuAvailable["description"] = "Whether GPU acceleration is available (default: auto-detected from the platform)";
   props["gpu_available"] = gpuAvailable;
 
   Json::Value vramBudget( Json::objectValue );
@@ -92,9 +106,14 @@ Json::Value ModelCatalogTool::outputSchema() const
 
 SpatialToolResult ModelCatalogTool::execute( const Json::Value &input )
 {
+  // #701: reload() rescans + re-hashes the manifest directory on EVERY call
+  // (ready-state checks re-verify artifact checksums). Use the cached catalog
+  // and fall back to ONE refresh only when a requested name misses — the
+  // same lazy retry rs:infer uses for newly installed models.
   auto &catalog = sicnu::operators::ModelCatalog::instance();
-  // Lazy load (#701): an unconditional reload() rescanned the whole model
-  // directory on every call, inline on the serialized MCP main loop.
+  const std::string requestedName = input.isMember( "name" ) ? input["name"].asString() : std::string();
+  if ( !requestedName.empty() && !catalog.find( requestedName ) )
+    catalog.reload();
 
   Json::Value out( Json::objectValue );
   out["directory"] = catalog.directory();
@@ -126,19 +145,27 @@ SpatialToolResult ModelCatalogTool::execute( const Json::Value &input )
     if ( input.isMember( "sensor" ) )
       criteria.sensor = input["sensor"].asString();
     if ( input.isMember( "band_roles" ) && input["band_roles"].isArray() )
-      for ( const auto &role : input["band_roles"] )
-        criteria.bandRoles.push_back( role.asString() );
+    {
+      const Json::Value &roles = input["band_roles"];
+      for ( Json::ArrayIndex i = 0; i < roles.size(); ++i )
+      {
+        if ( roles[i].isString() && !roles[i].asString().empty() )
+          criteria.bandRoles.push_back( roles[i].asString() );
+      }
+    }
     if ( input.isMember( "resolution" ) && input["resolution"].isNumeric() )
       criteria.resolutionMeters = input["resolution"].asDouble();
+    // #705: gpu_available defaults to the platform's own CUDA detection so
+    // GPU-accelerated models are not silently penalized (−0.05) in every
+    // default ranking; an explicit argument still wins.
     if ( input.isMember( "gpu_available" ) )
       criteria.gpuAvailable = input["gpu_available"].asBool();
     else
     {
-      // Detect instead of defaulting false (#705.2): omitting the flag used
-      // to mark every gpu:true,cpu_fallback:false model incompatible even
-      // on CUDA hosts.
+#ifdef SICNU_HAS_OPENCV
       criteria.gpuAvailable =
-          sicnu::operators::runtime::ModelRuntimeRegistry::instance().hardware().cudaAvailable;
+        sicnu::operators::runtime::ModelRuntimeRegistry::instance().hardware().cudaAvailable;
+#endif
     }
     if ( input.isMember( "vram_budget_mb" ) && input["vram_budget_mb"].isNumeric() )
       criteria.maxVramMb = input["vram_budget_mb"].asInt();

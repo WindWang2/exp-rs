@@ -3,7 +3,9 @@
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
 #include "processing/algorithms/image_enhancement.h"
+#include "processing/algorithms/image_enhancement_streaming.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_multiband_block_stream.h"
 #include "processing/gdal/gdal_safe_call.h"
 #include "widgets/raster_layer_combo.h"
 
@@ -154,51 +156,61 @@ void SpeckleFilterDialog::onRun()
       GdalDatasetWrapper srcDataset;
       if ( !srcDataset.open( sourcePath ) )
         return QString();
-      int width = srcDataset.width();
-      int height = srcDataset.height();
-      int bandCount = srcDataset.bandCount();
-      size_t pixelCount = static_cast<size_t>( width ) * static_cast<size_t>( height );
-      std::vector<std::vector<float>> outputBands( bandCount, std::vector<float>( pixelCount ) );
-      for ( int b = 0; b < bandCount; ++b )
+      const int width = srcDataset.width();
+      const int height = srcDataset.height();
+      const int bandCount = srcDataset.bandCount();
+
+      // Streaming conversion (#691): the previous body materialized
+      // outputBands[B] + bandData (B+1 full frames) plus a whole-raster
+      // IntegralImage SAT (20 B/px). Now each band is streamed through halo
+      // tiles (halo = kernel radius) and written tile-by-tile; the tile
+      // kernels in image_enhancement_streaming accumulate the window
+      // statistics directly and replicate the lee/frost/kuan/gamma-map
+      // formulas of ImageEnhancement's full-frame kernels.
+      GdalStreamingOutput dst( outputPath, width, height, bandCount, GDT_Float32,
+                               srcDataset.geoTransform(), srcDataset.projection() );
+      if ( !dst.isOpen() )
+        return QString();
+
+      const int halo = kernelSize / 2;
+      for ( int b = 1; b <= bandCount; ++b )
       {
-        std::vector<float> bandData( pixelCount );
-        if ( !srcDataset.readBandData( b + 1, bandData.data(), width, height ) )
-          return QString();
+        ImageEnhancementStreaming::WindowedTileFn kernel;
         switch ( filterIndex )
         {
           case 0:
-            ImageEnhancement::leeFilter( bandData.data(), outputBands[b].data(),
-                                         width, height, kernelSize, noiseVar );
+            kernel = [&]( const GdalBlockStream::Tile &tile, const float *buf, float *core ) {
+              ImageEnhancementStreaming::speckleTileLee( tile, buf, core, kernelSize, noiseVar );
+            };
             break;
           case 1:
-            ImageEnhancement::frostFilter( bandData.data(), outputBands[b].data(),
-                                           width, height, kernelSize, damping );
+            kernel = [&]( const GdalBlockStream::Tile &tile, const float *buf, float *core ) {
+              ImageEnhancementStreaming::speckleTileFrost( tile, buf, core, kernelSize, damping );
+            };
             break;
           case 2:
-            ImageEnhancement::kuanFilter( bandData.data(), outputBands[b].data(),
-                                          width, height, kernelSize, noiseVar );
+            kernel = [&]( const GdalBlockStream::Tile &tile, const float *buf, float *core ) {
+              ImageEnhancementStreaming::speckleTileKuan( tile, buf, core, kernelSize, noiseVar );
+            };
             break;
           case 3:
-            ImageEnhancement::gammaMapFilter( bandData.data(), outputBands[b].data(),
-                                              width, height, kernelSize, noiseVar );
+            kernel = [&]( const GdalBlockStream::Tile &tile, const float *buf, float *core ) {
+              ImageEnhancementStreaming::speckleTileGammaMap( tile, buf, core, kernelSize, noiseVar );
+            };
             break;
+        }
+        if ( !ImageEnhancementStreaming::streamBandWindowed( srcDataset, b, dst,
+                                                             ImageEnhancementStreaming::kTileDim,
+                                                             halo, kernel ) )
+        {
+          // Abandon: the destructor/close removes the partial output (#647).
+          dst.abandon();
+          return QString();
         }
       }
       QString error;
-      GdalDatasetGuard dstGuard( createOutputTiff( outputPath, width, height, bandCount,
-                                                   GDT_Float32, srcDataset.geoTransform(),
-                                                   srcDataset.projection(), &error ) );
-      if ( !dstGuard )
+      if ( !dst.closeWithError( &error ) )
         return QString();
-      for ( int b = 0; b < bandCount; ++b )
-      {
-        GDALRasterBandH dstBand = GDALGetRasterBand( dstGuard.get(), b + 1 );
-        if ( !dstBand )
-          return QString();
-        GDAL_SAFE_CALL( GDALRasterIO( dstBand, GF_Write, 0, 0, width, height,
-                                      outputBands[b].data(), width, height, GDT_Float32, 0, 0 ),
-                        "Failed to write output band" );
-      }
       return outputPath;
     }
     catch ( const std::runtime_error & )

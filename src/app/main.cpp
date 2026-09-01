@@ -31,7 +31,9 @@
 #include "data/data_manager.h"
 #include "processing/framework/atomic_algorithm_adapter.h"
 #include "processing/framework/task_center.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 #include "jobs/job_engine.h"
+#include "workflow/workflow_run_coordinator.h"
 #include "operators/framework/rs_operator_context.h"
 
 // QGIS C++ includes
@@ -90,6 +92,11 @@ int main(int argc, char *argv[])
 {
     qInstallMessageHandler(messageHandler);
     qDebug() << "Starting SICNU GEO RS...";
+
+    // Register GDAL drivers and apply the process-wide nested-parallelism cap
+    // (OpenCV internal thread pool, #692) before any operator or provider can
+    // run. Idempotent — the CLI/MCP entry points call it too.
+    ensureGdalInit();
 
     bool mcpMode = false;
     for (int i = 1; i < argc; ++i) {
@@ -194,6 +201,10 @@ int main(int argc, char *argv[])
         // GUI-only view/roi/canvas/raster tools stay unregistered headlessly
         // and are filtered from tools/list (see McpServer::handleListTools).
         sicnu::agent::InteractionToolRegistry::instance().registerDataTools( mcpDataManager.get() );
+        // Crash recovery (#697): mark interrupted runs resumable before any
+        // new work is accepted. No silent auto-resume headlessly — an agent
+        // can resume explicitly once it discovers the runs.
+        sicnu::workflow::WorkflowRunCoordinator::instance().recoverAtStartup( /*autoResume=*/false );
         McpServer server;
         server.setDataManager( mcpDataManager.get() );
         server.start(app);
@@ -255,6 +266,11 @@ int main(int argc, char *argv[])
     } else {
         qWarning() << "Could not load theme:" << qssPath;
     }
+
+    // Crash recovery (#697): interrupted workflow runs become resumable
+    // before the user starts new work (the panel surfaces them; nothing is
+    // silently re-executed).
+    sicnu::workflow::WorkflowRunCoordinator::instance().recoverAtStartup( /*autoResume=*/false );
 
     // Heap-allocated: must be destroyed before QgsApplication teardown
     qDebug() << "Creating window...";
@@ -519,6 +535,9 @@ int main(int argc, char *argv[])
     // from progress callbacks - a teardown use-after-free on long runs
     // (#177). shutdown() cancels in-flight tasks and joins the workers, so
     // nothing executes against GUI-owned objects during window destruction.
+    // GUI-mode recovery happens in runMainWindow (before interactive use);
+    // shutdown ordering is unaffected by the coordinator (process-lifetime
+    // singleton, checkpoint saves are atomic).
     sicnu::TaskCenter::instance().shutdown();
     sicnu::jobs::JobEngine::instance().shutdown();
     window.reset();

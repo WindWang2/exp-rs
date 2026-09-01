@@ -257,6 +257,14 @@ Json::Value AgentMetadata::toJson() const
   if ( !facadeOf.empty() )
     root["facadeOf"] = facadeOf;
 
+  if ( !taskFamily.empty() )
+    root["task"] = taskFamily;
+  root["gpu"] = gpuAccelerated;
+  if ( accuracy >= 0.0 )
+    root["accuracy"] = accuracy;
+  if ( !notes.empty() )
+    root["notes"] = notes;
+
   return root;
 }
 
@@ -328,6 +336,18 @@ AgentMetadata AgentMetadata::fromJson( const Json::Value &val )
     meta.producesProvenance = val["producesProvenance"].asBool();
   if ( val.isMember( "facadeOf" ) && val["facadeOf"].isString() )
     meta.facadeOf = val["facadeOf"].asString();
+
+  if ( val.isMember( "task" ) && val["task"].isString() )
+    meta.taskFamily = val["task"].asString();
+  if ( val.isMember( "gpu" ) && val["gpu"].isBool() )
+  {
+    meta.gpuAccelerated = val["gpu"].asBool();
+    meta.gpuDeclared = true;
+  }
+  if ( val.isMember( "accuracy" ) && val["accuracy"].isNumeric() )
+    meta.accuracy = val["accuracy"].asDouble();
+  if ( val.isMember( "notes" ) && val["notes"].isString() )
+    meta.notes = val["notes"].asString();
 
   return meta;
 }

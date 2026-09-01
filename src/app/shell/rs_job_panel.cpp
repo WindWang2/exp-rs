@@ -105,6 +105,7 @@ bool isActiveStatus( sicnu::TaskStatus status )
 {
   return status == sicnu::TaskStatus::Queued
          || status == sicnu::TaskStatus::WaitingResource
+         || status == sicnu::TaskStatus::Dispatching
          || status == sicnu::TaskStatus::Running
          || status == sicnu::TaskStatus::Cancelling
          || status == sicnu::TaskStatus::Paused;
@@ -128,6 +129,7 @@ QColor statusColor( sicnu::TaskStatus status, bool isDark )
       case sicnu::TaskStatus::Failed:    return QColor( 0xf0, 0x71, 0x67 ); // red
       case sicnu::TaskStatus::Paused:    return QColor( 0xe0, 0xa8, 0x2e ); // amber
       case sicnu::TaskStatus::WaitingResource: return QColor( 0xb0, 0x8a, 0xd0 ); // violet
+      case sicnu::TaskStatus::Dispatching: return QColor( 0x6f, 0xa8, 0xdc ); // light blue
       case sicnu::TaskStatus::Cancelling: return QColor( 0xd9, 0x7b, 0x0f ); // deep amber
       case sicnu::TaskStatus::Queued:
       case sicnu::TaskStatus::Canceled:  return QColor( 0xa8, 0xb0, 0xbc ); // gray
@@ -142,6 +144,7 @@ QColor statusColor( sicnu::TaskStatus status, bool isDark )
       case sicnu::TaskStatus::Failed:    return QColor( 0xcf, 0x22, 0x2e ); // red
       case sicnu::TaskStatus::Paused:    return QColor( 0x8c, 0x5b, 0x00 ); // amber
       case sicnu::TaskStatus::WaitingResource: return QColor( 0x6f, 0x42, 0xc1 ); // violet
+      case sicnu::TaskStatus::Dispatching: return QColor( 0x54, 0x8c, 0xd7 ); // light blue
       case sicnu::TaskStatus::Cancelling: return QColor( 0xbf, 0x68, 0x00 ); // deep amber
       case sicnu::TaskStatus::Queued:
       case sicnu::TaskStatus::Canceled:  return QColor( 0x5a, 0x65, 0x73 ); // gray
@@ -337,6 +340,8 @@ QString RsJobPanel::statusToString( sicnu::TaskStatus status )
       return QObject::tr( "排队" );
     case sicnu::TaskStatus::WaitingResource:
       return QObject::tr( "等待资源" );
+    case sicnu::TaskStatus::Dispatching:
+      return QObject::tr( "调度中" );
     case sicnu::TaskStatus::Running:
       return QObject::tr( "运行中" );
     case sicnu::TaskStatus::Cancelling:
@@ -561,16 +566,42 @@ void RsJobPanel::upsertTaskRow( const sicnu::AlgorithmTaskInfo &info )
 
 void RsJobPanel::fillLogForTask( long taskId )
 {
-  m_logView->clear();
   const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
   if ( info.taskId != taskId )
   {
     m_logView->setPlainText( tr( "(任务不存在)" ) );
+    m_logTaskId = -1;
+    m_logLinesShown = 0;
     return;
   }
 
+  // #704: progress ticks used to clear + re-set the WHOLE log text per tick.
+  // Same task with only appended lines → append the new slice; a task switch
+  // or a shrunk buffer (task cleared/recreated) falls back to a full refill.
+  const int totalLines = info.logBuffer.size();
+  if ( taskId == m_logTaskId && totalLines > m_logLinesShown && m_logLinesShown >= 0 )
+  {
+    QStringList added;
+    for ( int i = m_logLinesShown; i < totalLines; ++i )
+      added.append( info.logBuffer.at( i ) );
+    if ( !info.errorMessage.isEmpty() )
+      added.append( QStringLiteral( "[ERROR] %1" ).arg( info.errorMessage ) );
+    if ( !added.isEmpty() )
+    {
+      m_logView->appendPlainText( added.join( QLatin1Char( '\n' ) ) );
+      auto cursor = m_logView->textCursor();
+      cursor.movePosition( QTextCursor::End );
+      m_logView->setTextCursor( cursor );
+    }
+    m_logLinesShown = totalLines;
+    return;
+  }
+
+  m_logView->clear();
+  m_logTaskId = taskId;
+
   QStringList lines;
-  lines.reserve( info.logBuffer.size() + 4 );
+  lines.reserve( totalLines + 4 );
   lines.append( tr( "—— 任务日志 · %1 ——" ).arg( taskTitle( info ) ) );
   for ( const QString &line : info.logBuffer )
     lines.append( line );
@@ -578,6 +609,7 @@ void RsJobPanel::fillLogForTask( long taskId )
     lines.append( QStringLiteral( "[ERROR] %1" ).arg( info.errorMessage ) );
   if ( lines.size() == 1 )
     lines.append( tr( "(暂无日志)" ) );
+  m_logLinesShown = totalLines;
 
   m_logView->setPlainText( lines.join( QLatin1Char( '\n' ) ) );
   auto cursor = m_logView->textCursor();
@@ -587,8 +619,21 @@ void RsJobPanel::fillLogForTask( long taskId )
 
 void RsJobPanel::fillDetailsForTask( long taskId )
 {
-  m_detailView->clear();
+  // #704: the detail pane re-prints JSON and re-stats every output path; on
+  // chatty progress ticks that is pure GUI-thread churn. Rebuild on status
+  // change or at most every 500 ms; other call sites that need a guaranteed
+  // refresh pass the task through updateDetailNow.
   const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+  const int statusInt = static_cast<int>( info.status );
+  const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+  const bool statusChanged = statusInt != m_lastDetailStatus;
+  if ( !statusChanged && taskId == m_selectedId
+       && nowMs - m_lastDetailRebuildMs < 500 )
+    return;
+  m_lastDetailStatus = statusInt;
+  m_lastDetailRebuildMs = nowMs;
+
+  m_detailView->clear();
   if ( info.taskId != taskId )
   {
     m_detailView->setPlainText( tr( "(任务不存在)" ) );
@@ -842,6 +887,8 @@ void RsJobPanel::onTaskLogAdded( long taskId, const QString & )
 void RsJobPanel::onSelectionChanged()
 {
   m_selectedId = selectedTaskId();
+  m_lastDetailStatus = -1; // force one detail rebuild for the new selection
+  m_logTaskId = -1;        // and a full log refill
   if ( m_selectedId < 0 )
   {
     m_detailView->clear();

@@ -339,3 +339,17 @@ TEST_CASE( "majorityFilter does not let label 0 (NoData) win (#612)", "[post_pro
   REQUIRE( RsPostProcess::majorityFilter( src, dst, 5, nullptr ) );
   REQUIRE( dst.at<int>( 2, 2 ) == 7 );
 }
+
+TEST_CASE( "majorityFilter keeps a NoData (label 0) center as NoData (#700)", "[post_process][700]" )
+{
+  // The center pixel is NoData (label 0) surrounded by a uniform class 5.
+  // The filter must not grow class 5 into the NoData center; only VALID
+  // centers are replaced by the window mode.
+  cv::Mat src( 5, 5, CV_32SC1, cv::Scalar( 5 ) );
+  src.at<int>( 2, 2 ) = 0;
+  cv::Mat dst;
+  REQUIRE( RsPostProcess::majorityFilter( src, dst, 3, nullptr ) );
+  REQUIRE( dst.at<int>( 2, 2 ) == 0 );
+  // Valid centers are still smoothed to the window mode.
+  REQUIRE( dst.at<int>( 0, 0 ) == 5 );
+}

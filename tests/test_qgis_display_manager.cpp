@@ -168,7 +168,7 @@ TEST_CASE("A QGIS display view registers its canvas tree and layer store",
   CHECK(snapshot->layerIds().isEmpty());
 }
 
-TEST_CASE("Adding the same Data Asset creates independent QGIS Display Layers",
+TEST_CASE("Adding the same Data Asset to a view deduplicates; allowDuplicate opts in (#674)",
           "[qgis_display_manager]") {
   ensureQgisApplication();
   DataManager dataManager;
@@ -180,22 +180,34 @@ TEST_CASE("Adding the same Data Asset creates independent QGIS Display Layers",
       createView(displayManager, canvas, layerTree, layerStore);
   const sicnu::data::AssetId assetId = registerRaster(dataManager);
 
+  // #674: three auto-load paths (TaskCenter signal, dialog accept, job
+  // panel, assetAdded auto-display) can all fire for one result. The default
+  // is one layer per asset per view: the second add returns the SAME layer.
   const auto firstAdded = displayManager.addLayer(viewId, assetId);
   const auto secondAdded = displayManager.addLayer(viewId, assetId);
   REQUIRE(firstAdded);
   REQUIRE(secondAdded);
-  CHECK_FALSE(firstAdded.value() == secondAdded.value());
+  CHECK(firstAdded.value() == secondAdded.value());
+  CHECK(layerStore.count() == 1);
+  CHECK(layerTree.findLayers().size() == 1);
+  CHECK(canvas.layers().size() == 1);
+  CHECK(dataManager.leaseCount(assetId) == 1);
+
+  // Explicit opt-in preserves the legacy multi-layer capability.
+  sicnu::display::AddLayerOptions dupOptions;
+  dupOptions.allowDuplicate = true;
+  const auto thirdAdded = displayManager.addLayer(viewId, assetId, dupOptions);
+  REQUIRE(thirdAdded);
+  CHECK_FALSE(thirdAdded.value() == firstAdded.value());
+  CHECK(layerStore.count() == 2);
+  CHECK(dataManager.leaseCount(assetId) == 2);
 
   QgsMapLayer *first = displayManager.mapLayer(firstAdded.value());
-  QgsMapLayer *second = displayManager.mapLayer(secondAdded.value());
+  QgsMapLayer *second = displayManager.mapLayer(thirdAdded.value());
   REQUIRE(first != nullptr);
   REQUIRE(second != nullptr);
   CHECK(first != second);
   CHECK(first->id() != second->id());
-  CHECK(layerStore.count() == 2);
-  CHECK(layerTree.findLayers().size() == 2);
-  CHECK(canvas.layers().size() == 2);
-  CHECK(dataManager.leaseCount(assetId) == 2);
 
   CHECK(first->customProperty(QStringLiteral("sicnu/assetId")).toString() ==
         assetId.toString());
@@ -206,7 +218,7 @@ TEST_CASE("Adding the same Data Asset creates independent QGIS Display Layers",
       viewId.toString());
 
   const auto firstSnapshot = displayManager.layer(firstAdded.value());
-  const auto secondSnapshot = displayManager.layer(secondAdded.value());
+  const auto secondSnapshot = displayManager.layer(thirdAdded.value());
   REQUIRE(firstSnapshot);
   REQUIRE(secondSnapshot);
   CHECK(firstSnapshot->viewId() == viewId);
@@ -227,7 +239,7 @@ TEST_CASE("Adding the same Data Asset creates independent QGIS Display Layers",
   const auto viewSnapshot = displayManager.view(viewId);
   REQUIRE(viewSnapshot);
   REQUIRE(viewSnapshot->layerIds().size() == 2);
-  CHECK(viewSnapshot->layerIds().at(0) == secondAdded.value());
+  CHECK(viewSnapshot->layerIds().at(0) == thirdAdded.value());
   CHECK(viewSnapshot->layerIds().at(1) == firstAdded.value());
 }
 

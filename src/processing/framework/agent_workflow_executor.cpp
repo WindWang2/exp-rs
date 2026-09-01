@@ -1,5 +1,7 @@
 // src/processing/framework/agent_workflow_executor.cpp
 #include "agent_workflow_executor.h"
+
+#include "workflow/workflow_run_coordinator.h"
 #include "data/data_manager.h"
 #include "task_center.h"
 #include "workflow/workflow_types.h"
@@ -103,7 +105,8 @@ Json::Value AgentWorkflowExecutor::executeAgentPlan( const Json::Value &planJson
   // TODO(P1-E1): plan-step outputs bypass ExecutionPlane/OutputCommitter when
   // autoLoad=false. Each step output should be committed/registered so the
   // agent can reference stable asset ids and the final result is loaded.
-  const long pipelineId = TaskCenter::instance().submitPipeline( def, /*autoLoad=*/false );
+  // Tracked submission: plan execution gets checkpoint/recovery/GC (#697).
+  const long pipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipeline( def, /*autoLoad=*/false );
   if ( pipelineId < 0 )
     return makePlanErrorResult( static_cast<int>( def.steps.size() ), -1, "TaskCenter rejected the agent plan pipeline." );
 
@@ -127,7 +130,8 @@ long AgentWorkflowExecutor::executeAgentPlanAsync( const Json::Value &planJson, 
   // TODO(P1-E1): async plan path has the same OutputCommitter bypass as the
   // blocking path. Wire step completion through the committer before invoking
   // the plan-level callback.
-  const long pipelineId = TaskCenter::instance().submitPipeline( def, /*autoLoad=*/false );
+  // Tracked submission: plan execution gets checkpoint/recovery/GC (#697).
+  const long pipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipeline( def, /*autoLoad=*/false );
   if ( pipelineId < 0 )
   {
     deliverPlanResult( callback, context, makePlanErrorResult( static_cast<int>( def.steps.size() ), -1, "TaskCenter rejected the agent plan pipeline." ) );

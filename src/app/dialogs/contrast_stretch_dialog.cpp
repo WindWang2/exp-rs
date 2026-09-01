@@ -4,7 +4,9 @@
 #include "dialog_utils.h"
 #include "async_gdal_runner.h"
 #include "processing/algorithms/image_enhancement.h"
+#include "processing/algorithms/image_enhancement_streaming.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_multiband_block_stream.h"
 #include "processing/gdal/gdal_safe_call.h"
 #include "processing/framework/task_center.h"
 #include "app/widgets/histogram_stretch_widget.h"
@@ -172,86 +174,69 @@ void ContrastStretchDialog::onRun()
     if ( !srcDataset.open( sourcePath ) )
       return QStringLiteral( "\x01SICNU_ERR\x01" "Failed to open GDAL dataset" );
 
-    int width = srcDataset.width();
-    int height = srcDataset.height();
-    int bandCount = srcDataset.bandCount();
-    size_t pixelCount = static_cast<size_t>( width ) * static_cast<size_t>( height );
+    const int width = srcDataset.width();
+    const int height = srcDataset.height();
+    const int bandCount = srcDataset.bandCount();
 
-    if ( pixelCount > 500000000ULL || ( static_cast<uint64_t>( bandCount ) * pixelCount * sizeof( float ) ) > 2000000000ULL )
-      return QStringLiteral( "\x01SICNU_ERR\x01" "Image is too large for in-memory processing (>2GB memory requirement)" );
+    // Streaming conversion (#691): the previous body materialized allBands +
+    // outputBands (2×B full-raster frames) and rejected rasters above 2 GiB
+    // with a typed error. Each band now runs through a streaming statistics
+    // pass and a streaming apply pass (ImageEnhancementStreaming::
+    // streamBandStretch — a behavioural replica of the ImageEnhancement
+    // stretch kernels) and is written tile-by-tile, so peak memory is O(tile)
+    // for any raster size.
+    GdalStreamingOutput dst( outputPath, width, height, bandCount, GDT_Float32,
+                             srcDataset.geoTransform(), srcDataset.projection() );
+    if ( !dst.isOpen() )
+      return QStringLiteral( "\x01SICNU_ERR\x01" "Failed to create output raster" );
 
-    std::vector<std::vector<float>> allBands( bandCount, std::vector<float>( pixelCount ) );
-    for ( int b = 0; b < bandCount; ++b )
+    for ( int b = 1; b <= bandCount; ++b )
     {
-      if ( !srcDataset.readBandData( b + 1, allBands[b].data(), width, height ) )
-        return QStringLiteral( "\x01SICNU_ERR\x01" "Failed to read band %1" ).arg( b + 1 );
-    }
-
-    std::vector<std::vector<float>> outputBands( bandCount, std::vector<float>( pixelCount ) );
-
-    // Resolve each band's declared NoData (float-cast; NaN when undeclared) so
-    // stretches mask the real sentinel instead of a fabricated -9999 (#445).
-    std::vector<float> bandNodata( bandCount, std::numeric_limits<float>::quiet_NaN() );
-    for ( int b = 0; b < bandCount; ++b )
-    {
+      // Resolve the band's declared NoData (float-cast; NaN when undeclared)
+      // so stretches mask the real sentinel instead of a fabricated -9999 (#445).
       bool hasNd = false;
-      const double nd = srcDataset.bandNoDataValue( b + 1, &hasNd );
-      if ( hasNd && std::isfinite( nd ) )
-        bandNodata[b] = static_cast<float>( nd );
-    }
+      const double nd = srcDataset.bandNoDataValue( b, &hasNd );
+      const float ndF = ( hasNd && std::isfinite( nd ) )
+                          ? static_cast<float>( nd )
+                          : std::numeric_limits<float>::quiet_NaN();
 
-    for ( int b = 0; b < bandCount; ++b )
-    {
-      const float ndF = bandNodata[b];
+      ImageEnhancementStreaming::StretchParams params;
       switch ( methodIndex )
       {
         case 0:
-          ImageEnhancement::piecewiseLinearStretch( allBands[b].data(), outputBands[b].data(),
-                                                    pixelCount, stdPoints, ndF );
+          params.kind = ImageEnhancementStreaming::StretchKind::Piecewise;
+          params.piecewisePoints = stdPoints;
           break;
         case 1:
-        {
-          // Min/max over valid pixels only: NaN/Inf and declared-NoData pixels
-          // must not seed the stretch bounds (#445).
-          float minVal = std::numeric_limits<float>::max();
-          float maxVal = std::numeric_limits<float>::lowest();
-          for ( float v : allBands[b] )
-          {
-            if ( !std::isfinite( v ) || v == ndF )
-              continue;
-            minVal = std::min( minVal, v );
-            maxVal = std::max( maxVal, v );
-          }
-          if ( minVal > maxVal )
-          {
-            minVal = 0.0f;
-            maxVal = 0.0f;
-          }
-          ImageEnhancement::linearStretch( allBands[b].data(), outputBands[b].data(),
-                                           pixelCount, minVal, maxVal, ndF );
+          params.kind = ImageEnhancementStreaming::StretchKind::Linear;
           break;
-        }
         case 2:
-          ImageEnhancement::percentClipStretch( allBands[b].data(), outputBands[b].data(),
-                                                pixelCount, static_cast<float>( clipValue ), ndF );
+          params.kind = ImageEnhancementStreaming::StretchKind::PercentClip;
+          params.clipPercent = static_cast<float>( clipValue );
           break;
         case 3:
-          ImageEnhancement::stddevStretch( allBands[b].data(), outputBands[b].data(),
-                                           pixelCount, static_cast<float>( stddevValue ), ndF );
+          params.kind = ImageEnhancementStreaming::StretchKind::StdDev;
+          params.stddevK = static_cast<float>( stddevValue );
           break;
         case 4:
-          ImageEnhancement::histogramEqualize( allBands[b].data(), outputBands[b].data(),
-                                               pixelCount, 256, ndF );
+          params.kind = ImageEnhancementStreaming::StretchKind::HistogramEqualize;
           break;
+      }
+
+      QString bandError;
+      if ( !ImageEnhancementStreaming::streamBandStretch( srcDataset, b, ndF, params, dst,
+                                                          ImageEnhancementStreaming::kTileDim,
+                                                          &bandError ) )
+      {
+        // Abandon: the close below removes the partial output (#647).
+        dst.abandon();
+        return QStringLiteral( "\x01SICNU_ERR\x01" ) + bandError;
       }
     }
 
     QString error;
-    if ( !writeGdalOutput( outputPath, width, height, outputBands,
-                           srcDataset.geoTransform(), srcDataset.projection(), &error ) )
-    {
+    if ( !dst.closeWithError( &error ) )
       return QStringLiteral( "\x01SICNU_ERR\x01" ) + error;
-    }
 
     return outputPath;
   } );

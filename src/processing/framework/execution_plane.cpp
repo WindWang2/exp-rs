@@ -28,6 +28,7 @@ QString ExecutionResult::stateName( ExecutionState state )
     case ExecutionState::Created: return QStringLiteral( "created" );
     case ExecutionState::Submitted: return QStringLiteral( "submitted" );
     case ExecutionState::WaitingResource: return QStringLiteral( "waiting_resource" );
+    case ExecutionState::Dispatching: return QStringLiteral( "dispatching" );
     case ExecutionState::Running: return QStringLiteral( "running" );
     case ExecutionState::Cancelling: return QStringLiteral( "cancelling" );
     case ExecutionState::Completed: return QStringLiteral( "completed" );
@@ -50,6 +51,7 @@ ExecutionState ExecutionPlane::stateForTaskStatus( sicnu::TaskStatus status )
   {
     case sicnu::TaskStatus::Queued: return ExecutionState::Submitted;
     case sicnu::TaskStatus::WaitingResource: return ExecutionState::WaitingResource;
+    case sicnu::TaskStatus::Dispatching: return ExecutionState::Dispatching;
     case sicnu::TaskStatus::Running: return ExecutionState::Running;
     case sicnu::TaskStatus::Cancelling: return ExecutionState::Cancelling;
     case sicnu::TaskStatus::Paused: return ExecutionState::Running;
@@ -69,6 +71,13 @@ ExecutionHandle ExecutionPlane::submit( const ExecutionRequest &request )
 
   auto shared = std::make_shared<ExecutionHandle::Shared>();
   shared->taskId = taskId;
+  if ( taskId <= 0 )
+  {
+    // Rejected at the seam (shutdown): resolve the handle immediately so an
+    // awaiter never blocks on its timeout (#684).
+    std::lock_guard<std::mutex> lock( shared->mutex );
+    shared->terminal = true;
+  }
   if ( taskId > 0 )
   {
     // Event-loop-independent terminal channel: the callback fires on the

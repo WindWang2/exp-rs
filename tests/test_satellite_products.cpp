@@ -12,6 +12,7 @@
 #include <gdal_priv.h>
 
 #include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/rs/rs_landsat_import_operator.h"
 #include "operators/rs/rs_sentinel2_import_operator.h"
@@ -22,6 +23,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace sicnu::operators;
@@ -52,7 +54,10 @@ void writeTinyBand(const QString& path, float fill)
                             QStringLiteral("EPSG:32648"), &err));
 }
 
-QString writeFakeLandsatScene(const QDir& root)
+QString writeFakeLandsatScene(const QDir& root,
+                              const QString& spacecraft = QStringLiteral("LANDSAT_8"),
+                              const QString& level = QStringLiteral("L1TP"),
+                              const QStringList& extraMtlLines = {})
 {
     const QString scene = root.filePath(QStringLiteral("LC08_L1TP_TEST"));
     QDir().mkpath(scene);
@@ -63,18 +68,16 @@ QString writeFakeLandsatScene(const QDir& root)
     REQUIRE(mtl.open(QIODevice::WriteOnly | QIODevice::Text));
     QTextStream out(&mtl);
     out << "GROUP = LANDSAT_METADATA_FILE\n";
-    out << "  SPACECRAFT_ID = \"LANDSAT_8\"\n";
-    out << "  PROCESSING_LEVEL = \"L1TP\"\n";
+    out << "  SPACECRAFT_ID = \"" << spacecraft << "\"\n";
+    out << "  PROCESSING_LEVEL = \"" << level << "\"\n";
     out << "  DATE_ACQUIRED = \"2020-06-15\"\n";
     out << "  LANDSAT_PRODUCT_ID = \"LC08_L1TP_TEST\"\n";
-    // #676: the declared B2 filename used to mismatch the on-disk file
-    // (TEST_ vs CLASS_) — the old importer silently dropped the band and
-    // still reported bandCount=4 (the exact bug the fix makes fail loud).
-    // The fixture is now self-consistent so the honest path stacks 4 bands.
     out << "  FILE_NAME_BAND_2 = \"LC08_L1TP_CLASS_B2.TIF\"\n";
     out << "  FILE_NAME_BAND_3 = \"LC08_L1TP_CLASS_B3.TIF\"\n";
     out << "  FILE_NAME_BAND_4 = \"LC08_L1TP_CLASS_B4.TIF\"\n";
     out << "  FILE_NAME_BAND_5 = \"LC08_L1TP_CLASS_B5.TIF\"\n";
+    for (const QString& line : extraMtlLines)
+        out << "  " << line << "\n";
     out << "END_GROUP = LANDSAT_METADATA_FILE\n";
     out << "END\n";
     mtl.close();
@@ -236,41 +239,6 @@ TEST_CASE("Landsat stack to GeoTIFF", "[satellite][landsat]")
     REQUIRE(ds.bandCount() == 2);
     REQUIRE(ds.width() == 4);
     REQUIRE(ds.height() == 4);
-}
-
-TEST_CASE("rs:landsat_import operator fails loud on a missing requested band (#676)",
-           "[operators][landsat][import]")
-{
-    ensureApp();
-    QTemporaryDir tmp;
-    REQUIRE(tmp.isValid());
-    const QString mtl = writeFakeLandsatScene(QDir(tmp.path()));
-    const QString out = tmp.filePath(QStringLiteral("ls_missing.tif"));
-
-    auto op = RSOperatorRegistry::instance().create("rs:landsat_import");
-    REQUIRE(op != nullptr);
-
-    // B10 is not part of the scene: the request must fail naming it instead
-    // of stacking a shifted band set with a success status.
-    Json::Value params(Json::objectValue);
-    params["input"] = mtl.toStdString();
-    params["output"] = out.toStdString();
-    params["bands"] = Json::Value(Json::arrayValue);
-    params["bands"].append("B2");
-    params["bands"].append("B10");
-
-    RSOperatorContext ctx;
-    bool threw = false;
-    std::string message;
-    try {
-        (void)op->execute(params, ctx);
-    } catch (const RSOperatorError &e) {
-        threw = true;
-        message = e.what();
-    }
-    REQUIRE(threw);
-    CHECK(message.find("B10") != std::string::npos);
-    CHECK_FALSE(QFileInfo::exists(out)); // no partial/shifted stack published
 }
 
 TEST_CASE("rs:landsat_import operator", "[operators][landsat]")
@@ -576,4 +544,373 @@ TEST_CASE("Landsat stack writes band role and FWHM metadata", "[satellite][lands
     CHECK(QString::fromUtf8(redFwhm) == QStringLiteral("30"));
     CHECK(QString::fromUtf8(nirFwhm) == QStringLiteral("77"));
     GDALClose(ds);
+}
+
+// ---------------------------------------------------------------------------
+// #673: Landsat 4-7 must use the TM/ETM+ centre-wavelength table
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Landsat 4-7 discovery stamps TM/ETM+ wavelengths (#673)", "[satellite][landsat]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString mtl = writeFakeLandsatScene(QDir(tmp.path()),
+                                              QStringLiteral("LANDSAT_5"),
+                                              QStringLiteral("L1TP"));
+
+    SatelliteProducts::ProductInfo info;
+    QString err;
+    REQUIRE(SatelliteProducts::discoverLandsat(mtl, &info, &err));
+    // The fixture's MTL declares B2..B5; the TM/ETM+ table is asserted on
+    // the bands that exist (B5 is the sharpest discriminator: TM SWIR1 1650
+    // vs the OLI table's NIR 865 that used to be stamped for every Landsat).
+    bool sawB3 = false;
+    bool sawB4 = false;
+    bool sawB5 = false;
+    for (const auto& b : info.bands) {
+        if (b.name == QStringLiteral("B3")) {
+            sawB3 = true;
+            CHECK(b.wavelengthNm == 660); // TM Red
+        }
+        if (b.name == QStringLiteral("B4")) {
+            sawB4 = true;
+            CHECK(b.wavelengthNm == 830); // TM NIR
+        }
+        if (b.name == QStringLiteral("B5")) {
+            sawB5 = true;
+            CHECK(b.wavelengthNm == 1650); // TM SWIR1, not OLI NIR 865
+        }
+    }
+    REQUIRE(sawB3);
+    REQUIRE(sawB4);
+    REQUIRE(sawB5);
+
+    // The OLI table still applies to Landsat 8/9.
+    QTemporaryDir tmpOli;
+    REQUIRE(tmpOli.isValid());
+    const QString mtlOli = writeFakeLandsatScene(QDir(tmpOli.path()));
+    SatelliteProducts::ProductInfo oliInfo;
+    REQUIRE(SatelliteProducts::discoverLandsat(mtlOli, &oliInfo));
+    for (const auto& b : oliInfo.bands) {
+        if (b.name == QStringLiteral("B4"))
+            CHECK(b.wavelengthNm == 655); // OLI Red
+        if (b.name == QStringLiteral("B5"))
+            CHECK(b.wavelengthNm == 865); // OLI NIR
+    }
+}
+
+// ---------------------------------------------------------------------------
+// #680: Level-2 imports stamp SICNU_NUMERIC_SCALE without rescaling pixels
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Landsat L2 stack stamps SICNU_NUMERIC_SCALE from uniform REFLECTANCE_MULT (#680)",
+          "[satellite][landsat]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QStringList extra = {
+        QStringLiteral("REFLECTANCE_MULT_BAND_2 = 0.0000275"),
+        QStringLiteral("REFLECTANCE_MULT_BAND_3 = 0.0000275"),
+        QStringLiteral("REFLECTANCE_MULT_BAND_4 = 0.0000275"),
+        QStringLiteral("REFLECTANCE_MULT_BAND_5 = 0.0000275"),
+    };
+    const QString mtl = writeFakeLandsatScene(QDir(tmp.path()),
+                                              QStringLiteral("LANDSAT_8"),
+                                              QStringLiteral("L2SP"), extra);
+    const QString out = tmp.filePath(QStringLiteral("landsat_l2_stack.tif"));
+
+    SatelliteProducts::ProductInfo info;
+    REQUIRE(SatelliteProducts::discoverLandsat(mtl, &info));
+    QString err;
+    REQUIRE(SatelliteProducts::stackToGeoTiff(
+        info, {QStringLiteral("B4"), QStringLiteral("B5")}, out, &err));
+
+    GDALDatasetH ds = GDALOpen(out.toUtf8().constData(), GA_ReadOnly);
+    REQUIRE(ds != nullptr);
+    const char* state = GDALGetMetadataItem(ds, "SICNU_RADIOMETRIC_STATE", nullptr);
+    REQUIRE(state != nullptr);
+    CHECK(QString::fromUtf8(state) == QStringLiteral("surface_reflectance"));
+    const char* scale = GDALGetMetadataItem(ds, "SICNU_NUMERIC_SCALE", nullptr);
+    REQUIRE(scale != nullptr);
+    // REFLECTANCE_MULT is already reflectance-per-DN: the stamped divisor is
+    // its reciprocal (1 / 0.0000275 = 36363.636...).
+    CHECK(QString::fromUtf8(scale) == QString::number(1.0 / 0.0000275, 'g', 12));
+
+    // Pixels stay verbatim (back-compat): no implicit rescaling at import.
+    GDALRasterBandH red = GDALGetRasterBand(ds, 1);
+    REQUIRE(red != nullptr);
+    std::vector<float> pixels(16);
+    REQUIRE(GDALRasterIO(red, GF_Read, 0, 0, 4, 4, pixels.data(), 4, 4,
+                         GDT_Float32, 0, 0) == CE_None);
+    for (float v : pixels)
+        REQUIRE_THAT(v, Catch::Matchers::WithinAbs(80.0f, 0.0f)); // B4 fill value
+    GDALClose(ds);
+}
+
+TEST_CASE("Landsat L1 and non-uniform-mult stacks carry no numeric scale (#680)",
+          "[satellite][landsat]")
+{
+    ensureApp();
+
+    SECTION("Level-1 (DN) product") {
+        QTemporaryDir tmp;
+        REQUIRE(tmp.isValid());
+        const QString mtl = writeFakeLandsatScene(QDir(tmp.path()));
+        const QString out = tmp.filePath(QStringLiteral("l1_stack.tif"));
+        SatelliteProducts::ProductInfo info;
+        REQUIRE(SatelliteProducts::discoverLandsat(mtl, &info));
+        QString err;
+        REQUIRE(SatelliteProducts::stackToGeoTiff(
+            info, {QStringLiteral("B4"), QStringLiteral("B5")}, out, &err));
+        GDALDatasetH ds = GDALOpen(out.toUtf8().constData(), GA_ReadOnly);
+        REQUIRE(ds != nullptr);
+        CHECK(GDALGetMetadataItem(ds, "SICNU_NUMERIC_SCALE", nullptr) == nullptr);
+        GDALClose(ds);
+    }
+
+    SECTION("Level-2 with non-uniform REFLECTANCE_MULT: stamp nothing") {
+        QTemporaryDir tmp;
+        REQUIRE(tmp.isValid());
+        const QStringList mixed = {
+            QStringLiteral("REFLECTANCE_MULT_BAND_2 = 0.0000275"),
+            QStringLiteral("REFLECTANCE_MULT_BAND_4 = 0.0000275"),
+            QStringLiteral("REFLECTANCE_MULT_BAND_5 = 0.0000135"),
+        };
+        const QString mtl = writeFakeLandsatScene(QDir(tmp.path()),
+                                                  QStringLiteral("LANDSAT_8"),
+                                                  QStringLiteral("L2SP"), mixed);
+        const QString out = tmp.filePath(QStringLiteral("l2_mixed_stack.tif"));
+        SatelliteProducts::ProductInfo info;
+        REQUIRE(SatelliteProducts::discoverLandsat(mtl, &info));
+        QString err;
+        REQUIRE(SatelliteProducts::stackToGeoTiff(
+            info, {QStringLiteral("B2"), QStringLiteral("B4"), QStringLiteral("B5")}, out, &err));
+        GDALDatasetH ds = GDALOpen(out.toUtf8().constData(), GA_ReadOnly);
+        REQUIRE(ds != nullptr);
+        CHECK(GDALGetMetadataItem(ds, "SICNU_NUMERIC_SCALE", nullptr) == nullptr);
+        GDALClose(ds);
+    }
+}
+
+TEST_CASE("Sentinel-2 L2A stack stamps SICNU_NUMERIC_SCALE (MTD quantification or 10000) (#680)",
+          "[satellite][sentinel2]")
+{
+    ensureApp();
+
+    SECTION("Default when the MTD carries no quantification tag") {
+        QTemporaryDir tmp;
+        REQUIRE(tmp.isValid());
+        const QString safe = writeFakeSentinel2Safe(QDir(tmp.path()));
+        const QString out = tmp.filePath(QStringLiteral("s2_default_scale.tif"));
+        SatelliteProducts::ProductInfo info;
+        REQUIRE(SatelliteProducts::discoverSentinel2(safe, &info));
+        QString err;
+        REQUIRE(SatelliteProducts::stackToGeoTiff(
+            info, {QStringLiteral("B4"), QStringLiteral("B8")}, out, &err));
+
+        GDALDatasetH ds = GDALOpen(out.toUtf8().constData(), GA_ReadOnly);
+        REQUIRE(ds != nullptr);
+        const char* scale = GDALGetMetadataItem(ds, "SICNU_NUMERIC_SCALE", nullptr);
+        REQUIRE(scale != nullptr);
+        CHECK(QString::fromUtf8(scale) == QStringLiteral("10000"));
+        const char* state = GDALGetMetadataItem(ds, "SICNU_RADIOMETRIC_STATE", nullptr);
+        REQUIRE(state != nullptr);
+        CHECK(QString::fromUtf8(state) == QStringLiteral("surface_reflectance"));
+        GDALClose(ds);
+    }
+
+    SECTION("BOA_QUANTIFICATION_VALUE from the MTD wins") {
+        QTemporaryDir tmp;
+        REQUIRE(tmp.isValid());
+        // Variant of writeFakeSentinel2Safe with an explicit quantification.
+        const QString safe = tmp.filePath(
+            QStringLiteral("S2A_MSIL2A_20200615T000000_N9999_R000_T32TQQ_20200615T000000.SAFE"));
+        const QString img = safe + QStringLiteral("/GRANULE/L2A_T32TQQ/IMG_DATA/R10m");
+        QDir().mkpath(img);
+        QFile mtd(QDir(safe).filePath(QStringLiteral("MTD_MSIL2A.xml")));
+        REQUIRE(mtd.open(QIODevice::WriteOnly | QIODevice::Text));
+        mtd.write(
+            "<n1:Level-2A_User_Product>"
+            "<General_Info><Product_Image_Characteristics><Radiometric_Info>"
+            "<BOA_QUANTIFICATION_VALUE>5000</BOA_QUANTIFICATION_VALUE>"
+            "</Radiometric_Info></Product_Image_Characteristics></General_Info>"
+            "</n1:Level-2A_User_Product>");
+        mtd.close();
+        writeTinyBand(img + QStringLiteral("/T32TQQ_20200615T000000_B04_10m.tif"), 40.f);
+        writeTinyBand(img + QStringLiteral("/T32TQQ_20200615T000000_B08_10m.tif"), 180.f);
+
+        const QString out = tmp.filePath(QStringLiteral("s2_quant_scale.tif"));
+        SatelliteProducts::ProductInfo info;
+        QString err;
+        REQUIRE(SatelliteProducts::discoverSentinel2(safe, &info, QStringLiteral("10m"), &err));
+        REQUIRE(SatelliteProducts::stackToGeoTiff(
+            info, {QStringLiteral("B4"), QStringLiteral("B8")}, out, &err));
+        GDALDatasetH ds = GDALOpen(out.toUtf8().constData(), GA_ReadOnly);
+        REQUIRE(ds != nullptr);
+        const char* scale = GDALGetMetadataItem(ds, "SICNU_NUMERIC_SCALE", nullptr);
+        REQUIRE(scale != nullptr);
+        CHECK(QString::fromUtf8(scale) == QStringLiteral("5000"));
+        GDALClose(ds);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// #676: import fails closed listing unresolvable bands
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Landsat import fails closed listing missingBands (#676)", "[satellite][landsat][operators]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString mtl = writeFakeLandsatScene(QDir(tmp.path()));
+
+    SECTION("Kernel stackToGeoTiff refuses partial band lists") {
+        SatelliteProducts::ProductInfo info;
+        REQUIRE(SatelliteProducts::discoverLandsat(mtl, &info));
+        const QString out = tmp.filePath(QStringLiteral("partial.tif"));
+        QString err;
+        REQUIRE_FALSE(SatelliteProducts::stackToGeoTiff(
+            info, {QStringLiteral("B4"), QStringLiteral("B9")}, out, &err));
+        REQUIRE(err.contains(QStringLiteral("missingBands")));
+        REQUIRE(err.contains(QStringLiteral("B9")));
+        REQUIRE_FALSE(QFileInfo::exists(out));
+    }
+
+    SECTION("rs:landsat_import throws RSOperatorError naming the missing bands") {
+        auto op = RSOperatorRegistry::instance().create("rs:landsat_import");
+        REQUIRE(op != nullptr);
+        Json::Value params(Json::objectValue);
+        params["input"] = mtl.toStdString();
+        params["output"] = (tmp.path() + QStringLiteral("/op_partial.tif")).toStdString();
+        params["bands"] = Json::Value(Json::arrayValue);
+        params["bands"].append("B2");
+        params["bands"].append("B7");
+        params["bands"].append("B9");
+        RSOperatorContext ctx;
+        try {
+            (void)op->execute(params, ctx);
+            FAIL("rs:landsat_import accepted a partially unresolvable band list");
+        } catch (const RSOperatorError& e) {
+            const std::string msg = e.message();
+            REQUIRE(msg.find("missingBands") != std::string::npos);
+            REQUIRE(msg.find("B7") != std::string::npos);
+            REQUIRE(msg.find("B9") != std::string::npos);
+        }
+        REQUIRE_FALSE(QFile::exists(tmp.path() + QStringLiteral("/op_partial.tif")));
+    }
+}
+
+TEST_CASE("Sentinel-2 import fails closed listing missingBands (#676)", "[satellite][sentinel2][operators]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString safe = writeFakeSentinel2Safe(QDir(tmp.path()));
+
+    auto op = RSOperatorRegistry::instance().create("rs:sentinel2_import");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = safe.toStdString();
+    params["output"] = (tmp.path() + QStringLiteral("/s2_partial.tif")).toStdString();
+    params["resolution"] = "10m";
+    params["bands"] = Json::Value(Json::arrayValue);
+    params["bands"].append("B4");
+    params["bands"].append("B12"); // 20 m band, not discovered at 10 m
+    RSOperatorContext ctx;
+    REQUIRE_THROWS_AS(op->execute(params, ctx), RSOperatorError);
+    REQUIRE_FALSE(QFile::exists(tmp.path() + QStringLiteral("/s2_partial.tif")));
+}
+
+// ---------------------------------------------------------------------------
+// #680: rs:spectral_index divides by SICNU_NUMERIC_SCALE for EVI/SAVI
+// ---------------------------------------------------------------------------
+
+TEST_CASE("rs:spectral_index EVI/SAVI honour SICNU_NUMERIC_SCALE (#680)",
+          "[operators][spectral][landsat]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    // 4-band DN-scale stack (Blue, Green, Red, NIR) stamped scale=10000.
+    // Reflectance: blue=0.1, red=0.2, nir=0.4.
+    const QString input = tmp.path() + QStringLiteral("/dn_stack.tif");
+    {
+        ensureGdalInit();
+        constexpr int W = 4, H = 4;
+        const std::vector<float> fills = {1000.f, 1500.f, 2000.f, 4000.f};
+        QString err;
+        std::vector<std::vector<float>> bands;
+        for (float f : fills)
+            bands.emplace_back(static_cast<size_t>(W * H), f);
+        std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+        REQUIRE(writeGdalOutput(input, W, H, bands, gt,
+                                QStringLiteral("EPSG:32648"), &err));
+        GDALDatasetH ds = GDALOpen(input.toUtf8().constData(), GA_Update);
+        REQUIRE(ds != nullptr);
+        const char* roles[] = {"blue", "green", "red", "nir"};
+        for (int b = 1; b <= 4; ++b) {
+            GDALSetMetadataItem(GDALGetRasterBand(ds, b), "SICNU_BAND_ROLE", roles[b - 1], nullptr);
+        }
+        GDALSetMetadataItem(ds, "SICNU_NUMERIC_SCALE", "10000", nullptr);
+        GDALSetMetadataItem(ds, "SICNU_RADIOMETRIC_STATE", "surface_reflectance", nullptr);
+        GDALClose(ds);
+    }
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+
+    // Hand-computed expectations in unit reflectance space:
+    //   EVI  = 2.5*(0.4-0.2) / (0.4 + 6*0.2 - 7.5*0.1 + 1.0) = 0.5 / 1.85
+    //   SAVI = (0.4-0.2) / (0.4+0.2+0.5) * 1.5               = 0.3/1.1
+    // Without the scale guard, EVI on raw DN would be ~0.588 (wrong).
+    const double expectedEvi = 2.5 * 0.2 / 1.85;
+    const double expectedSavi = 0.2 / 1.1 * 1.5;
+    const double unscaledEvi = 2.5 * 2000.0 / (4000.0 + 6 * 2000.0 - 7.5 * 1000.0 + 1.0);
+
+    auto runIndex = [&](const char* index) {
+        const QString output = tmp.path() + QStringLiteral("/")
+                               + QString::fromLatin1(index).toLower() + QStringLiteral(".tif");
+        Json::Value params(Json::objectValue);
+        params["input"] = input.toStdString();
+        params["output"] = output.toStdString();
+        params["index"] = index;
+        op->execute(params, ctx);
+        return output;
+    };
+
+    {
+        const QString out = runIndex("EVI");
+        GdalDatasetWrapper ds;
+        REQUIRE(ds.open(out));
+        std::vector<float> pixels(16);
+        REQUIRE(ds.readBandData(1, pixels.data(), 4, 4));
+        for (float v : pixels)
+            REQUIRE_THAT(v, Catch::Matchers::WithinAbs(expectedEvi, 1e-4));
+    }
+    {
+        const QString out = runIndex("SAVI");
+        GdalDatasetWrapper ds;
+        REQUIRE(ds.open(out));
+        std::vector<float> pixels(16);
+        REQUIRE(ds.readBandData(1, pixels.data(), 4, 4));
+        for (float v : pixels)
+            REQUIRE_THAT(v, Catch::Matchers::WithinAbs(expectedSavi, 1e-4));
+    }
+    // Ratio indices are scale-invariant: NDVI reads DN verbatim and stays exact.
+    {
+        const QString out = runIndex("NDVI");
+        GdalDatasetWrapper ds;
+        REQUIRE(ds.open(out));
+        std::vector<float> pixels(16);
+        REQUIRE(ds.readBandData(1, pixels.data(), 4, 4));
+        for (float v : pixels)
+            REQUIRE_THAT(v, Catch::Matchers::WithinAbs(0.2f / 0.6f, 1e-5));
+    }
+    // Sanity: the guard actually changed something (unscaled EVI differs).
+    REQUIRE(std::abs(unscaledEvi - expectedEvi) > 0.1);
 }

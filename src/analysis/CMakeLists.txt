@@ -37,3 +37,4 @@ add_subdirectory(classification)
 
 # Phase 10B — OBIA segmentation data model + feature extraction
 add_subdirectory(segmentation)
+

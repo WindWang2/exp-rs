@@ -3,31 +3,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <QtConcurrent>
 #include <QThread>
 #include <QThreadPool>
-#include <QtConcurrent>
 #include <QVector>
 #include <qgsfeedback.h>
-
-namespace {
-// Dedicated bounded pool (#692): chunk fans used to land on
-// QThreadPool::globalInstance() — the pool QGIS map rendering shares — from
-// JobEngine worker threads, so several concurrent filter jobs starved canvas
-// repaints with hw runnable threads each. A per-process pool capped at 4
-// bounds the fan-out regardless of host cores.
-QThreadPool *chunkPool()
-{
-    static QThreadPool *pool = [] {
-        auto *p = new QThreadPool();
-        const int hw = std::max(1, QThread::idealThreadCount());
-        p->setMaxThreadCount(std::min(hw, 4));
-        // Do not keep idle threads around between filter runs.
-        p->setExpiryTimeout(30000);
-        return p;
-    }();
-    return pool;
-}
-} // namespace
 
 ChunkedProcessor::ChunkedProcessor(int width, int height, int overlap, int chunkHeight)
     : m_width(width)
@@ -35,6 +15,15 @@ ChunkedProcessor::ChunkedProcessor(int width, int height, int overlap, int chunk
     , m_overlap(overlap)
 {
     buildChunks(chunkHeight);
+}
+
+int ChunkedProcessor::defaultMaxThreads()
+{
+    // JobEngine clamps its worker pool to 2..4 threads and sicnu_processing
+    // cannot link sicnu_jobs (library cycle), so budget for the worst case of
+    // 4 concurrent outer jobs fanning out here (#692).
+    constexpr int kAssumedOuterJobs = 4;
+    return std::max(1, QThread::idealThreadCount() / kAssumedOuterJobs);
 }
 
 void ChunkedProcessor::buildChunks(int chunkHeight)
@@ -56,7 +45,8 @@ void ChunkedProcessor::buildChunks(int chunkHeight)
     }
 }
 
-bool ChunkedProcessor::process(const ChunkCallback &callback, QgsFeedback *feedback)
+bool ChunkedProcessor::process(const ChunkCallback &callback, QgsFeedback *feedback,
+                               int maxThreads)
 {
     if (m_chunks.empty())
         return true;
@@ -79,7 +69,16 @@ bool ChunkedProcessor::process(const ChunkCallback &callback, QgsFeedback *feedb
     std::atomic<int> completedChunks{0};
     const int totalChunks = m_chunks.size();
 
-    QtConcurrent::blockingMap(chunkPool(), indices, [&](int idx) {
+    // Bounded fan-out (#692): a dedicated pool instead of
+    // QThreadPool::globalInstance(), capped by the nested-parallelism token so
+    // N concurrent jobs cannot each spawn one thread per core.
+    int threadCap = maxThreads;
+    if (threadCap <= 0)
+        threadCap = defaultMaxThreads();
+    QThreadPool pool;
+    pool.setMaxThreadCount(threadCap);
+
+    QtConcurrent::blockingMap(&pool, indices, [&](int idx) {
         // Check for cancellation
         if (feedback && feedback->isCanceled()) {
             results[idx] = 0;

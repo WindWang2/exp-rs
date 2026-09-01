@@ -3,6 +3,7 @@
 #include <optional>
 
 #include <QDockWidget>
+#include <QTimer>
 #include <QList>
 #include <QString>
 
@@ -85,6 +86,10 @@ class DataManagerPanel : public QDockWidget
     void onItemActivated( QTreeWidgetItem *item, int column );
     void onContextMenu( const QPoint &pos );
     void onSelectionChanged();
+    /// Coalesced tree refresh (#704): a burst of N asset signals (batch
+    /// import) used to trigger N FULL tree rebuilds on the GUI thread; a
+    /// 250 ms trailing timer collapses the burst into one rebuild.
+    void scheduleCoalescedRefresh();
 
   private:
     sicnu::data::AssetId assetForItem( QTreeWidgetItem *item ) const;
@@ -102,6 +107,7 @@ class DataManagerPanel : public QDockWidget
     void applyHelpTips();
 
     sicnu::data::DataManager *m_dataManager = nullptr; // not owned
+    QTimer *m_refreshCoalesceTimer = nullptr; // not owned (child of this)
     QTreeWidget *m_tree = nullptr;
     QStackedWidget *m_treeStack = nullptr;
     RsEmptyStateWidget *m_emptyState = nullptr;

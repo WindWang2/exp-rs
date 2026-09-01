@@ -37,6 +37,11 @@ class OpenCvDnnRuntime final : public IModelRuntime
     std::string artifactPath() const override { return m_artifactPath; }
 
     cv::Mat infer( const cv::Mat &nchwBlob ) override;
+    cv::Mat infer( const cv::Mat &nchwBlob, const std::string &outputName ) override;
+
+    /// The ONNX graph's unconnected output layer names (empty before load or
+    /// when enumeration fails — consumers treat that as "unknown", #705).
+    std::vector<std::string> outputTensorNames() const override;
 
   private:
     std::string m_artifactPath;

@@ -71,6 +71,10 @@ struct DisplayViewSpec {
 struct AddLayerOptions {
   QString displayName;
   bool insertOnTop = true;
+  /// #674: when false (default), adding an asset the view already displays
+  /// returns the existing DisplayLayerId instead of creating a duplicate
+  /// layer — one result, one layer, no matter how many auto-load paths fire.
+  bool allowDuplicate = false;
 };
 
 struct AdoptLayerOptions {

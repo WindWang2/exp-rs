@@ -10,14 +10,13 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/qa_mask.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
-#include "processing/gdal/gdal_multiband_block_stream.h"
 
 #include <QString>
 
-#include <algorithm>
-
 #include <gdal.h>
 
+#include <cmath>
+#include <cstdint>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -175,8 +174,8 @@ Json::Value RsQaMaskOperator::metadata() const {
     meta["tags"].append("qa");
     meta["tags"].append("cloud");
     meta["tags"].append("mask");
-    meta["tags"].append("landsat");
-    meta["tags"].append("sentinel-2");
+        meta["task"] = "quality-masking";
+    meta["gpu"] = false;
     meta["purpose"] = "Derive cloud / cloud-shadow / snow masks from product QA bands.";
     meta["prerequisites"].append("Input must carry a QA band (Landsat QA_PIXEL or Sentinel-2 SCL) or an explicit qa_band.");
     meta["workflowHints"].append("Apply the mask to exclude obscured pixels before computing indices or change detection.");
@@ -186,8 +185,8 @@ Json::Value RsQaMaskOperator::metadata() const {
 
 Json::Value RsQaMaskOperator::executionEstimate() const {
     // FullRaster (base default): no preferred tile. run() loads the whole QA
-    // band as float32 plus a UInt8 mask and a uint16 conversion buffer (7
-    // bytes/pixel in flight); typical 1024x1024 input -> ~7 MiB.
+    // band in its native dtype plus a uint16 conversion buffer and a UInt8
+    // mask (≤ 7 bytes/pixel in flight); typical 1024x1024 input -> ~7 MiB.
     Json::Value est(Json::objectValue);
     est["tileWidth"] = 0;
     est["tileHeight"] = 0;
@@ -255,83 +254,160 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
 
     context.logInfo("Computing QA mask (source=" + source + ", mask=" + maskSelection + ")");
 
-    // Streaming execution (#665, ADR 0124 grade bit-exact): the QA band is
-    // processed in horizontal row-blocks — O(blockRows*width) resident —
-    // instead of the former full-raster float + mask buffers. The per-pixel
-    // kernels are unchanged, so results are bit-identical.
-    const int blockRows = std::max(1, std::min(256, height));
-    const size_t blockSize = static_cast<size_t>(width) * blockRows;
-    std::vector<float> qa(blockSize);
-    std::vector<uint8_t> mask(blockSize);
-    std::vector<uint8_t> scl(blockSize);
-    std::vector<uint16_t> values(blockSize);
-    size_t masked = 0;
+    // #699: read the QA band in its NATIVE data type. The previous path read
+    // the band as Float32 and static_cast<uint16_t>'d every sample: casting
+    // NaN / negative sentinels to uint16 is undefined behaviour (in practice
+    // yielding 0 = "clear" by accident) and values >= 65536 silently
+    // truncated. Conversion now applies explicit guards and counts the
+    // irregular samples.
+    const int qaType = ds.bandDataType(qaBand);
+    bool hasNodata = false;
+    const double nodataVal = ds.bandNoDataValue(qaBand, &hasNodata);
 
-    // UInt8 output: 1 = masked, 0 = clear.
-    GdalStreamingOutput output(QString::fromStdString(outputPath), width, height, 1,
-                               static_cast<int>(GDT_Byte),
-                               ds.geoTransform(), ds.projection());
-    if (!output.isOpen()) {
-        throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed to create mask raster: " + outputPath);
-    }
-    output.setMetadataItem(QStringLiteral("SICNU_QA_MASK_SOURCE"),
-                           QString::fromStdString(source));
-    output.setMetadataItem(QStringLiteral("SICNU_QA_MASK_SELECTION"),
-                           QString::fromStdString(maskSelection));
-
-    const int totalBlocks = (height + blockRows - 1) / blockRows;
-    int blockIndex = 0;
-    bool ok = true;
-    // Any failure/cancel after this point must not leave a partial raster at
-    // the output path (#647 streaming-output contract).
-    try {
-    for (int y0 = 0; y0 < height && ok; y0 += blockRows, ++blockIndex) {
-        context.throwIfCancelled();
-        const int rows = std::min(blockRows, height - y0);
-        const size_t n = static_cast<size_t>(width) * rows;
-        if (!ds.readBandWindow(qaBand, 0, y0, width, rows, qa.data())) {
-            throw RSOperatorError(ErrorCode::GdalError,
-                                  "Failed to read QA band " + std::to_string(qaBand));
+    std::vector<uint16_t> values(pixelCount, 0);
+    size_t irregular = 0;
+    auto convertSample = [&](double v) -> uint16_t {
+        if (hasNodata && std::isfinite(nodataVal) && std::abs(v - nodataVal) < 1e-9) {
+            ++irregular;
+            return 0; // declared NoData -> not a QA word; leave unmasked
         }
-        if (source == "sentinel2_scl") {
-            for (size_t i = 0; i < n; ++i)
-                scl[i] = static_cast<uint8_t>(qa[i]);
-            QaMask::sclMask(scl.data(), mask.data(), n, sclClasses);
-        } else if (source == "generic_bitmask") {
-            for (size_t i = 0; i < n; ++i)
-                values[i] = static_cast<uint16_t>(qa[i]);
-            QaMask::genericBitmaskMask(values.data(), mask.data(), n, genericBits);
-        } else {
-            for (size_t i = 0; i < n; ++i)
-                values[i] = static_cast<uint16_t>(qa[i]);
-            QaMask::landsatQaMask(values.data(), mask.data(), n, landsatFlags);
+        if (!std::isfinite(v)) {
+            ++irregular;
+            return 0; // NaN/Inf -> keep the historical "clear" outcome, no UB
         }
-        for (size_t i = 0; i < n; ++i)
-            masked += (mask[i] != 0) ? 1 : 0;
-        const GdalBlockStream::Tile tile{0, y0, width, rows, 0, width, rows,
-                                         blockIndex, totalBlocks};
-        ok = output.writeTileRaw(1, tile, mask.data(), GDT_Byte);
-        context.reportProgress(0.1 + 0.6 * (static_cast<double>(blockIndex + 1) / totalBlocks),
-                               "Computing QA mask");
+        if (v < 0.0) {
+            ++irregular;
+            return 0; // negative sentinel -> clear
+        }
+        if (v > 65535.0) {
+            ++irregular;
+            return 65535; // clamp instead of silently truncating high bits
+        }
+        return static_cast<uint16_t>(v);
+    };
+
+    bool readOk = false;
+    switch (qaType) {
+    case GDT_Byte: {
+        std::vector<uint8_t> raw(pixelCount);
+        readOk = ds.readBandDataNative(qaBand, raw.data(), width, height);
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    case GDT_UInt16: {
+        readOk = ds.readBandDataNative(qaBand, values.data(), width, height);
+        if (readOk && hasNodata && std::isfinite(nodataVal) && nodataVal >= 0.0
+            && nodataVal <= 65535.0) {
+            const auto nd = static_cast<uint16_t>(nodataVal);
+            for (size_t i = 0; i < pixelCount; ++i) {
+                if (values[i] == nd) {
+                    values[i] = 0;
+                    ++irregular;
+                }
+            }
+        }
+        break;
+    }
+    case GDT_Int16: {
+        std::vector<int16_t> raw(pixelCount);
+        readOk = ds.readBandDataNative(qaBand, raw.data(), width, height);
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    case GDT_UInt32: {
+        std::vector<uint32_t> raw(pixelCount);
+        readOk = ds.readBandDataNative(qaBand, raw.data(), width, height);
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    case GDT_Int32: {
+        std::vector<int32_t> raw(pixelCount);
+        readOk = ds.readBandDataNative(qaBand, raw.data(), width, height);
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    case GDT_Float32: {
+        std::vector<float> raw(pixelCount);
+        readOk = ds.readBandData(qaBand, raw.data(), width, height);
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    case GDT_Float64: {
+        std::vector<double> raw(pixelCount);
+        GDALRasterBandH band = ds.dataset()
+            ? GDALGetRasterBand(static_cast<GDALDatasetH>(ds.dataset()), qaBand)
+            : nullptr;
+        readOk = band
+                 && GDALRasterIO(band, GF_Read, 0, 0, width, height,
+                                 raw.data(), width, height, GDT_Float64, 0, 0)
+                        == CE_None;
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    default: {
+        // Unknown/complex types: fall back to the Float32 read; the same
+        // finite/range guards apply during conversion.
+        std::vector<float> raw(pixelCount);
+        readOk = ds.readBandData(qaBand, raw.data(), width, height);
+        for (size_t i = 0; readOk && i < pixelCount; ++i)
+            values[i] = convertSample(raw[i]);
+        break;
+    }
+    }
+    if (!readOk) {
+        throw RSOperatorError(ErrorCode::GdalError,
+                              "Failed to read QA band " + std::to_string(qaBand));
+    }
+    if (irregular > 0) {
+        context.logWarning(
+            "QA band contained " + std::to_string(irregular)
+            + " non-finite / out-of-range / declared-NoData sample(s); treated as clear (unmasked)");
     }
 
+    std::vector<uint8_t> mask(pixelCount);
+    if (source == "sentinel2_scl") {
+        std::vector<uint8_t> scl(pixelCount);
+        for (size_t i = 0; i < pixelCount; ++i)
+            scl[i] = static_cast<uint8_t>(values[i]);
+        QaMask::sclMask(scl.data(), mask.data(), pixelCount, sclClasses);
+    } else if (source == "generic_bitmask") {
+        QaMask::genericBitmaskMask(values.data(), mask.data(), pixelCount, genericBits);
+    } else {
+        QaMask::landsatQaMask(values.data(), mask.data(), pixelCount, landsatFlags);
+    }
+
+    context.throwIfCancelled();
     context.reportProgress(0.7, "Writing mask raster");
 
-    if (!ok) {
-        output.abandon();
+    // UInt8 output: 1 = masked, 0 = clear.
+    QString errorMessage;
+    GDALDatasetH outDs = createOutputTiff(QString::fromStdString(outputPath), width, height,
+                                          1, static_cast<int>(GDT_Byte),
+                                          ds.geoTransform(), ds.projection(), &errorMessage);
+    if (!outDs) {
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              "Failed to create mask raster: " + errorMessage.toStdString());
+    }
+    GDALRasterBandH outBand = GDALGetRasterBand(outDs, 1);
+    const CPLErr writeErr = GDALRasterIO(outBand, GF_Write, 0, 0, width, height,
+                                         mask.data(), width, height, GDT_Byte, 0, 0);
+    GDALSetMetadataItem(outDs, "SICNU_QA_MASK_SOURCE", source.c_str(), nullptr);
+    GDALSetMetadataItem(outDs, "SICNU_QA_MASK_SELECTION", maskSelection.c_str(), nullptr);
+    GDALClose(outDs);
+    if (writeErr != CE_None) {
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to write mask raster: " + outputPath);
     }
-    QString closeError;
-    if (!output.closeWithError(&closeError)) {
-        throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed to write mask raster: " + closeError.toStdString());
-    }
-    } catch (...) {
-        output.abandon();
-        throw;
-    }
+
+    size_t masked = 0;
+    for (uint8_t v : mask)
+        masked += (v != 0) ? 1 : 0;
 
     context.reportProgress(1.0, "QA mask complete");
 

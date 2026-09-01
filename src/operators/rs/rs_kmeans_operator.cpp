@@ -86,6 +86,12 @@ Json::Value RsKmeansOperator::schema() const {
     props["maxSamples"] = makeIntegerParam("maxSamples",
                                            "Max samples for centroid fitting (0 = all pixels)",
                                            100000);
+    props["scale"] = makeBooleanParam(
+        "scale",
+        "Fit a feature scaler (Z-score standardization) before clustering — the same "
+        "semantics the classification GUI applies. Leave on for parity; disable only "
+        "to cluster on raw DN values.",
+        true);
     Json::Value bands = makeStringParam("bands", "Optional 1-based band index array", "");
     bands["type"] = "array";
     bands["items"] = Json::Value(Json::objectValue);
@@ -334,6 +340,11 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     // lowercase spelling workaround is needed and 1-based cluster ids
     // survive verbatim.
     cfg.trainY = cv::Mat::zeros(nSamples, 1, CV_32S);
+    // #682: the GUI always Z-scores features before KMeans; the operator used
+    // to train on raw DN, so identical inputs clustered differently between
+    // surfaces. Standardize by default; explicit scale=false opts out.
+    const bool scale = getBool(params, "scale", true);
+    cfg.fitScaler = scale;
     cfg.methodName = QStringLiteral("kmeans");
     for (int id = 1; id <= k; ++id)
         cfg.classColors[id] = rsSynthesizedClassColor(id);

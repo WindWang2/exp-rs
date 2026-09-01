@@ -7,40 +7,48 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_schema.h"
+#include "processing/gdal/gdal_multiband_block_stream.h"
 
-#include <QMutex>
 #include <QString>
 
-#include <opencv2/core.hpp>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <vector>
 
 namespace sicnu::operators::opencv {
 
 namespace {
-// Cap OpenCV's internal parallel_for threads (#692): GaussianBlur / median /
-// Canny defaulted to one thread per core, multiplying the ChunkedProcessor
-// fan and oversubscribing JobEngine workers. Applied once per process.
-void capOpenCvThreadsOnce()
-{
-    static QMutex mutex;
-    QMutexLocker locker(&mutex);
-    static bool capped = false;
-    if (capped)
+
+/// Streaming tile dimension for the filter path (GdalBlockStream default).
+constexpr int kStreamTileDim = 256;
+
+/**
+ * Converts a raw tile buffer to the operator's NaN convention, mirroring
+ * readRasterBandsToMats: with a declared finite NoData, sentinel and
+ * non-finite pixels become NaN; without one, values pass through unchanged
+ * so valid 0 pixels are never masked (#444).
+ */
+void maskBufferToNan(float* pixels, size_t count, bool hasNodata, float nodataF) {
+    if (!hasNodata) {
         return;
-    capped = true;
-    // SICNU_CV_THREADS overrides (a positive count sets it; an explicit 0
-    // disables OpenCV-internal threading entirely).
-    int threads = 2;
-    if (qEnvironmentVariableIsSet("SICNU_CV_THREADS")) {
-        const int envVal = qEnvironmentVariableIntValue("SICNU_CV_THREADS");
-        if (envVal >= 0)
-            threads = envVal;
     }
-    cv::setNumThreads(threads);
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    for (size_t i = 0; i < count; ++i) {
+        if (!std::isfinite(pixels[i]) || pixels[i] == nodataF) {
+            pixels[i] = nan;
+        }
+    }
 }
+
 } // namespace
 
+int OpenCvOperatorBase::neighborhoodRadius(const Json::Value& params) const {
+    (void)params;
+    return -1; // full-frame by default; windowed filters override
+}
+
 Json::Value OpenCvOperatorBase::run(const Json::Value& params, RSOperatorContext& context) {
-    capOpenCvThreadsOnce();
     validateCommonParams(params);
 
     const std::string inputPath = requireString(params, "input");
@@ -49,6 +57,11 @@ Json::Value OpenCvOperatorBase::run(const Json::Value& params, RSOperatorContext
     if (!fileExists(inputPath)) {
         throw RSOperatorError(ErrorCode::FileNotFound,
                               "Input raster not found: " + inputPath);
+    }
+
+    const int halo = neighborhoodRadius(params);
+    if (halo >= 0) {
+        return runStreaming(inputPath, outputPath, halo, params, context);
     }
 
     context.logInfo("Reading raster: " + inputPath);
@@ -75,6 +88,154 @@ Json::Value OpenCvOperatorBase::run(const Json::Value& params, RSOperatorContext
     if (!writeMatsToRaster(outputPath, bands, inputPath, &writeError)) {
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to write output raster: " + writeError);
+    }
+
+    context.reportProgress(1.0, "Complete");
+
+    Json::Value result(Json::objectValue);
+    result["output"] = outputPath;
+    result["bands"] = bandCount;
+    return result;
+}
+
+Json::Value OpenCvOperatorBase::runStreaming(const std::string& inputPath,
+                                             const std::string& outputPath,
+                                             int halo,
+                                             const Json::Value& params,
+                                             RSOperatorContext& context) {
+    GdalDatasetWrapper ds;
+    if (!ds.open(QString::fromStdString(inputPath))) {
+        throw RSOperatorError(ErrorCode::GdalError, ds.lastError().toStdString());
+    }
+
+    const int width = ds.width();
+    const int height = ds.height();
+    const int bandCount = ds.bandCount();
+    if (width <= 0 || height <= 0 || bandCount <= 0) {
+        throw RSOperatorError(ErrorCode::InvalidInputData,
+                              "Failed to read raster bands from: " + inputPath);
+    }
+
+    context.logInfo("Streaming raster tiles: " + inputPath);
+
+    GdalStreamingOutput out(QString::fromStdString(outputPath), width, height,
+                            bandCount, GDT_Float32, ds.geoTransform(), ds.projection());
+    if (!out.isOpen()) {
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              "Failed to create output raster: " + outputPath);
+    }
+
+    const float quietNan = std::numeric_limits<float>::quiet_NaN();
+
+    for (int band = 1; band <= bandCount; ++band) {
+        context.throwIfCancelled();
+        context.reportProgress(static_cast<double>(band - 1) / bandCount,
+                               "Processing band " + std::to_string(band) + "/" +
+                                   std::to_string(bandCount));
+
+        // Masked read (#444): a declared finite NoData turns sentinel and
+        // non-finite pixels into NaN; undeclared NoData passes through so
+        // valid 0 pixels survive. Per band, like readRasterBandsToMats.
+        bool hasNodata = false;
+        const double nodata = ds.bandNoDataValue(band, &hasNodata);
+        const bool nodataActive = hasNodata && std::isfinite(nodata);
+        const float nodataF = nodataActive ? static_cast<float>(nodata) : 0.0f;
+
+        // Output NoData exactly like writeMatsToRaster (#445): declared
+        // sentinels are echoed, undeclared sources declare NaN.
+        if (!out.setBandNoDataValue(band, nodataActive ? nodata
+                                                       : static_cast<double>(quietNan))) {
+            out.abandon();
+            throw RSOperatorError(ErrorCode::FileNotWritable,
+                                  "Failed to declare NoData on output raster: " + outputPath);
+        }
+
+        GdalBlockStream stream(ds, band, kStreamTileDim, kStreamTileDim, halo);
+        std::vector<float> buf(static_cast<size_t>(kStreamTileDim + 2 * halo) *
+                               static_cast<size_t>(kStreamTileDim + 2 * halo));
+
+        bool complete = false;
+        try {
+            complete = stream.forEach([&](const GdalBlockStream::Tile& tile,
+                                          const float* pixels) {
+                context.throwIfCancelled();
+
+                const int bufW = tile.bufferWidth;
+                const int bufH = tile.bufferHeight;
+                const size_t bufPixels = static_cast<size_t>(bufW) * bufH;
+                std::copy(pixels, pixels + bufPixels, buf.begin());
+                maskBufferToNan(buf.data(), bufPixels, nodataActive, nodataF);
+
+                // Real-data window inside the halo buffer (mirrors
+                // GdalBlockStream::forEach's replicate-clamped margins).
+                // Filtering only this window makes the kernel extrapolate its
+                // own border exactly where the full-frame call would at the
+                // raster border; interior tiles are covered by real halo.
+                const int readX = std::max(0, tile.xOffset - halo);
+                const int readY = std::max(0, tile.yOffset - halo);
+                const int readW = std::min(width, tile.xOffset + tile.width + halo) - readX;
+                const int readH = std::min(height, tile.yOffset + tile.height + halo) - readY;
+                const int dstX = (tile.xOffset - halo < 0) ? (halo - tile.xOffset) : 0;
+                const int dstY = (tile.yOffset - halo < 0) ? (halo - tile.yOffset) : 0;
+
+                cv::Mat bufMat(bufH, bufW, CV_32FC1, buf.data());
+                // Filter the real-data window inside the halo buffer: the
+                // kernel then extrapolates its own border exactly where the
+                // full-frame call would at the raster border, and interior
+                // tiles are covered by real halo — verified bit-exact for the
+                // replicate/echo kernels (median/sobel/laplacian). The
+                // masked-normalized kernels (gaussian/mean) cannot be tiled
+                // bit-exactly and stay on the full-frame path (see their
+                // neighborhoodRadius overrides).
+                const int readX = std::max(0, tile.xOffset - halo);
+                const int readY = std::max(0, tile.yOffset - halo);
+                const int readW = std::min(width, tile.xOffset + tile.width + halo) - readX;
+                const int readH = std::min(height, tile.yOffset + tile.height + halo) - readY;
+                const int dstX = (tile.xOffset - halo < 0) ? (halo - tile.xOffset) : 0;
+                const int dstY = (tile.yOffset - halo < 0) ? (halo - tile.yOffset) : 0;
+                cv::Mat roi = bufMat(cv::Rect(dstX, dstY, readW, readH));
+                applyFilter(roi, params);
+
+                // Core pixels always sit at (halo, halo) in the buffer.
+                cv::Mat core = bufMat(cv::Rect(halo, halo, tile.width, tile.height)).clone();
+                if (nodataActive) {
+                    float* corePtr = core.ptr<float>();
+                    const size_t corePixels = static_cast<size_t>(tile.width) * tile.height;
+                    for (size_t i = 0; i < corePixels; ++i) {
+                        if (std::isnan(corePtr[i])) {
+                            corePtr[i] = nodataF;
+                        }
+                    }
+                }
+
+                if (!out.writeTile(band, tile, core.ptr<float>())) {
+                    out.abandon();
+                    throw RSOperatorError(ErrorCode::GdalError,
+                                          "Failed to write tile of output band " +
+                                              std::to_string(band) + ": " + outputPath);
+                }
+                return true;
+            });
+        } catch (...) {
+            out.abandon(); // destructor closes and removes the partial output
+            throw;
+        }
+        if (!complete) {
+            out.abandon();
+            throw RSOperatorError(ErrorCode::GdalError,
+                                  "Failed to read raster band " + std::to_string(band) +
+                                      " from: " + inputPath);
+        }
+
+        context.reportProgress(static_cast<double>(band) / bandCount,
+                               "Finished band " + std::to_string(band));
+    }
+
+    context.logInfo("Writing output: " + outputPath);
+    QString writeError;
+    if (!out.closeWithError(&writeError)) {
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              "Failed to write output raster: " + writeError.toStdString());
     }
 
     context.reportProgress(1.0, "Complete");

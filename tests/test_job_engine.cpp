@@ -1409,3 +1409,114 @@ TEST_CASE( "dynamic maxWorkers adjustment under load", "[job][concurrency]" )
     REQUIRE( snap->state == JobState::Succeeded );
   }
 }
+
+
+TEST_CASE( "production shutdown is sticky: submit never resurrects workers (#684)", "[job][lifecycle]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  eng.shutdown(); // production shutdown terminates the engine
+  REQUIRE( eng.isTerminated() );
+
+  std::atomic_bool executed{ false };
+  JobRequest req;
+  req.algorithmId = "callable:post_shutdown";
+  const auto id = eng.submit(
+    req, [&executed]( const JobRequest &, RSOperatorContext & ) {
+      executed.store( true );
+      return Json::Value( Json::objectValue );
+    } );
+  REQUIRE( !id.empty() );
+  auto snap = eng.snapshot( id );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Cancelled ); // refused, not queued
+  std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+  REQUIRE_FALSE( executed.load() ); // and never executed by a resurrected worker
+
+  // The test-only reset restores reusability for subsequent tests.
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+  REQUIRE_FALSE( eng.isTerminated() );
+  std::atomic_bool executed2{ false };
+  const auto id2 = eng.submit(
+    req, [&executed2]( const JobRequest &, RSOperatorContext & ) {
+      executed2.store( true );
+      return Json::Value( Json::objectValue );
+    } );
+  eng.waitUntilIdleForTests();
+  REQUIRE( executed2.load() );
+  REQUIRE( eng.snapshot( id2 )->state == JobState::Succeeded );
+}
+
+TEST_CASE( "engine queue pick honors request priority (#686)", "[job][priority]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  std::promise<void> startedA, startedB;
+  std::promise<void> proceedA, proceedB;
+  auto futA = proceedA.get_future().share();
+  auto futB = proceedB.get_future().share();
+
+  auto blockerA = [futA, &startedA]( const JobRequest &, RSOperatorContext & ) {
+    startedA.set_value();
+    futA.wait();
+    return Json::Value( Json::objectValue );
+  };
+  auto blockerB = [futB, &startedB]( const JobRequest &, RSOperatorContext & ) {
+    startedB.set_value();
+    futB.wait();
+    return Json::Value( Json::objectValue );
+  };
+
+  JobRequest block;
+  block.algorithmId = "callable:block_prio";
+  eng.submit( block, blockerA );
+  eng.submit( block, blockerB );
+  startedA.get_future().wait();
+  startedB.get_future().wait();
+
+  std::atomic_bool ranNormal{ false };
+  std::atomic_bool ranHigh{ false };
+  JobRequest normalReq;
+  normalReq.algorithmId = "callable:normal_prio";
+  normalReq.priority = 1; // Normal
+  const auto idNormal = eng.submit(
+    normalReq, [&ranNormal]( const JobRequest &, RSOperatorContext & ) {
+      ranNormal.store( true );
+      return Json::Value( Json::objectValue );
+    } );
+  std::promise<void> proceedHigh;
+  auto futHigh = proceedHigh.get_future().share();
+  JobRequest highReq;
+  highReq.algorithmId = "callable:high_prio";
+  highReq.priority = 0; // High — submitted later, must start first
+  const auto idHigh = eng.submit(
+    highReq, [&ranHigh, futHigh]( const JobRequest &, RSOperatorContext & ) {
+      ranHigh.store( true );
+      // Hold the worker so the "Normal must not have started" window is
+      // deterministic: with the OTHER worker still parked on blockerA,
+      // Normal can only start if THIS worker picked the wrong job first.
+      futHigh.wait();
+      return Json::Value( Json::objectValue );
+    } );
+
+  // Free exactly one worker: it must pick the High task, not the FIFO-first Normal.
+  proceedB.set_value();
+  for ( int i = 0; i < 2000 && !ranHigh.load(); ++i )
+    std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+  REQUIRE( ranHigh.load() );
+  REQUIRE_FALSE( ranNormal.load() );
+
+  proceedHigh.set_value();
+  proceedA.set_value();
+  eng.waitUntilIdleForTests();
+  REQUIRE( ranNormal.load() );
+  REQUIRE( eng.snapshot( idHigh )->state == JobState::Succeeded );
+  REQUIRE( eng.snapshot( idNormal )->state == JobState::Succeeded );
+}

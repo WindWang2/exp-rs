@@ -11,6 +11,8 @@
 #include <gdal_priv.h>
 
 #include <array>
+#include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "operators/framework/rs_operator_registry.h"
@@ -276,4 +278,103 @@ TEST_CASE("rs:qa_mask rejects rasters without a QA band", "[operators][rs][qa]")
     RSOperatorContext ctx;
     REQUIRE_THROWS_AS(op->run(params, ctx), RSOperatorError);
     CHECK_FALSE(QFile::exists(output));
+}
+
+// --- #699: native-type QA reads (no float round-trip + UB casts) -----------
+
+TEST_CASE("rs:qa_mask reads float QA bands natively and guards non-finite values (#699)",
+          "[operators][rs][qa]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString input = tmp.path() + "/qa_float.tif";
+    const QString output = tmp.path() + "/qa_float_mask.tif";
+
+    // Float32 QA band mixing valid flags with values the old float->uint16
+    // cast turned into UB or silent truncation.
+    ensureGdalInit();
+    constexpr int W = 4, H = 1;
+    std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+    GDALDatasetH ds = createOutputTiff(input, W, H, 1, GDT_Float32, gt, QString());
+    REQUIRE(ds != nullptr);
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> qa = {8.0f, nan, 70000.0f, -5.0f};
+    REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H, qa.data(),
+                         W, H, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(ds);
+
+    auto op = RSOperatorRegistry::instance().create("rs:qa_mask");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = input.toStdString();
+    params["output"] = output.toStdString();
+    params["qa_band"] = 1;
+    params["source"] = "landsat_qa_pixel";
+    params["mask"] = "cloud_and_shadow";
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    // 8 = cloud -> masked; NaN -> clear (no UB); 70000 -> clamped to 65535
+    // (all QA bits set -> masked), not truncated; -5 -> clear.
+    CHECK(result["maskedPixels"].asUInt64() == 2);
+    CHECK(result["totalPixels"].asUInt64() == 4);
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(output));
+    std::vector<float> mask(W * H);
+    REQUIRE(out.readBandData(1, mask.data(), W, H));
+    CHECK(mask[0] == 1.0f);
+    CHECK(mask[1] == 0.0f);
+    CHECK(mask[2] == 1.0f);
+    CHECK(mask[3] == 0.0f);
+}
+
+TEST_CASE("rs:qa_mask reads UInt16 QA bands natively and honours declared nodata (#699)",
+          "[operators][rs][qa]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString input = tmp.path() + "/qa_uint16.tif";
+    const QString output = tmp.path() + "/qa_uint16_mask.tif";
+
+    // Native UInt16 QA band (real Landsat C2 QA_PIXEL dtype) with declared
+    // nodata 65535 — previously read through Float32 and cast back.
+    ensureGdalInit();
+    constexpr int W = 4, H = 1;
+    std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+    GDALDatasetH ds = createOutputTiff(input, W, H, 1, GDT_UInt16, gt, QString());
+    REQUIRE(ds != nullptr);
+    const uint16_t qa[W] = {8, 16, 65535, 4};
+    REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H,
+                         const_cast<uint16_t*>(qa), W, H, GDT_UInt16, 0, 0) == CE_None);
+    REQUIRE(GDALSetRasterNoDataValue(GDALGetRasterBand(ds, 1), 65535.0) == CE_None);
+    GDALClose(ds);
+
+    auto op = RSOperatorRegistry::instance().create("rs:qa_mask");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = input.toStdString();
+    params["output"] = output.toStdString();
+    params["qa_band"] = 1;
+    params["source"] = "landsat_qa_pixel";
+    params["mask"] = "cloud_and_shadow";
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    // 8 = cloud -> masked; 16 = shadow -> masked; 65535 = declared nodata ->
+    // unmasked (must not be confused with "all flags set"); 4 = bit 2 =
+    // CIRRUS, which the cloud mask includes (cloud|dilated|cirrus) -> masked.
+    CHECK(result["maskedPixels"].asUInt64() == 3);
+    CHECK(result["totalPixels"].asUInt64() == 4);
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(output));
+    std::vector<float> mask(W * H);
+    REQUIRE(out.readBandData(1, mask.data(), W, H));
+    CHECK(mask[0] == 1.0f);
+    CHECK(mask[1] == 1.0f);
+    CHECK(mask[2] == 0.0f);
+    CHECK(mask[3] == 1.0f);
 }

@@ -61,20 +61,30 @@ QVector<QVector<float>> ImageFusion::linearWeighted(
     if ( nBands <= 0 || !panBand || width <= 0 || height <= 0 )
         return result;
 
-    // Build default weights if not provided (equal weight per band).
-    // A non-empty but wrong-sized array is a caller error: indexing
-    // weights[b] would read past the end (#677).
+    // Build default weights if not provided (equal weight per band)
     QVector<float> weights = msWeights;
     if ( weights.isEmpty() ) {
         weights.resize(nBands);
         float defaultMsWeight = 1.0f - panWeight;
         for (int b = 0; b < nBands; ++b)
             weights[b] = defaultMsWeight;
-    } else if ( weights.size() != nBands ) {
-        SICNU_LOG_ERROR(SicnuLogTags::Algorithms,
-                        QStringLiteral("linear fusion msWeights size %1 does not match band count %2")
-                            .arg(weights.size()).arg(nBands));
-        return QVector<QVector<float>>{};
+    } else if ( weights.size() < nBands ) {
+        // A non-empty weight list shorter than the band count used to read
+        // weights[b] out of bounds below (#677). Pad with the same equal-weight
+        // default the empty case uses and report which bands were padded.
+        const float defaultMsWeight = 1.0f - panWeight;
+        QString paddedBands;
+        for ( int b = weights.size(); b < nBands; ++b ) {
+            weights.append( defaultMsWeight );
+            if ( !paddedBands.isEmpty() )
+                paddedBands += QStringLiteral( ", " );
+            paddedBands += QString::number( b + 1 );
+        }
+        SICNU_LOG_WARN( SicnuLogTags::Algorithms,
+            QString( "Linear weighted fusion: %1 weights given for %2 bands — "
+                     "padded band(s) %3 with default weight %4" )
+                .arg( msWeights.size() ).arg( nBands )
+                .arg( paddedBands ).arg( defaultMsWeight ) );
     }
 
     SICNU_LOG_INFO( SicnuLogTags::Algorithms,
@@ -240,75 +250,27 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
         for ( int b2 = 0; b2 < b1; ++b2 )
             cov[b1 * nBands + b2] = cov[b2 * nBands + b1];
 
-    // Step 2: Jacobi eigen decomposition
+    // #670: the shared cyclic ImageEnhancement::jacobiEigen replaces the
+    // inline classical Jacobi whose 100-total-rotation cap silently left the
+    // covariance unconverged for >= ~10 bands. Layout preserved: eigVec
+    // column j = eigenvector j; eigenvalues on the eigVal diagonal.
     QVector<double> eigVec( nBands * nBands, 0.0 );
-    for ( int i = 0; i < nBands; ++i )
-        eigVec[i * nBands + i] = 1.0;
-    QVector<double> eigVal( cov );
-
-    for ( int iter = 0; iter < 100; ++iter )
+    QVector<double> eigVal( nBands * nBands, 0.0 );
     {
-        // Find largest off-diagonal element
-        int p = 0, q = 1;
-        double maxVal = 0;
+        std::vector<std::vector<float>> A( nBands, std::vector<float>( nBands, 0.0f ) );
         for ( int i = 0; i < nBands; ++i )
-        {
-            for ( int j = i + 1; j < nBands; ++j )
-            {
-                double v = std::abs( eigVal[i * nBands + j] );
-                if ( v > maxVal )
-                {
-                    maxVal = v;
-                    p = i;
-                    q = j;
-                }
-            }
-        }
-        if ( maxVal < 1e-10 )
-            break;
-
-        // Compute rotation angle
-        double app = eigVal[p * nBands + p];
-        double aqq = eigVal[q * nBands + q];
-        double apq = eigVal[p * nBands + q];
-
-        double theta;
-        if ( std::abs( app - aqq ) < 1e-15 )
-            theta = M_PI / 4.0;
-        else
-            theta = 0.5 * std::atan2( 2.0 * apq, aqq - app );
-
-        double c = std::cos( theta );
-        double s = std::sin( theta );
-
-        double newApp = c * c * app + s * s * aqq - 2.0 * s * c * apq;
-        double newAqq = s * s * app + c * c * aqq + 2.0 * s * c * apq;
-
-        for ( int r = 0; r < nBands; ++r )
-        {
-            if ( r == p || r == q )
-                continue;
-            double arp = eigVal[r * nBands + p];
-            double arq = eigVal[r * nBands + q];
-            eigVal[r * nBands + p] = c * arp - s * arq;
-            eigVal[p * nBands + r] = eigVal[r * nBands + p];
-            eigVal[r * nBands + q] = s * arp + c * arq;
-            eigVal[q * nBands + r] = eigVal[r * nBands + q];
-        }
-
-        eigVal[p * nBands + p] = newApp;
-        eigVal[q * nBands + q] = newAqq;
-        eigVal[p * nBands + q] = 0.0;
-        eigVal[q * nBands + p] = 0.0;
-
-        // Update eigenvectors
-        for ( int r = 0; r < nBands; ++r )
-        {
-            double erp = eigVec[r * nBands + p];
-            double erq = eigVec[r * nBands + q];
-            eigVec[r * nBands + p] = c * erp - s * erq;
-            eigVec[r * nBands + q] = s * erp + c * erq;
-        }
+            for ( int j = 0; j < nBands; ++j )
+                A[static_cast<size_t>( i )][static_cast<size_t>( j )] =
+                    static_cast<float>( cov[i * nBands + j] );
+        std::vector<float> eigenvalues;
+        std::vector<std::vector<float>> eigenvectors;
+        ImageEnhancement::jacobiEigen( A, nBands, eigenvalues, eigenvectors );
+        for ( int i = 0; i < nBands; ++i )
+            for ( int j = 0; j < nBands; ++j )
+                eigVec[i * nBands + j] =
+                    eigenvectors[static_cast<size_t>( i )][static_cast<size_t>( j )];
+        for ( int i = 0; i < nBands; ++i )
+            eigVal[i * nBands + i] = eigenvalues[static_cast<size_t>( i )];
     }
 
     // Sort eigenvalues in descending order (PC1 = largest variance)
@@ -882,12 +844,25 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
             for ( int b = 0; b < nMsBands; ++b )
                 weights[b] = defaultMsWeight;
         }
-        else if ( weights.size() != nMsBands )
+        else if ( weights.size() < nMsBands )
         {
-            if ( errorMessage )
-                *errorMessage = QStringLiteral( "msWeights size %1 does not match band count %2" )
-                                    .arg( weights.size() ).arg( nMsBands );
-            return false;
+            // A non-empty weight list shorter than the band count would read
+            // weights[b] out of bounds below (#677). Pad with the same
+            // equal-weight default the empty case uses and report it.
+            const float defaultMsWeight = 1.0f - params.panWeight;
+            QString paddedBands;
+            for ( int b = weights.size(); b < nMsBands; ++b )
+            {
+                weights.append( defaultMsWeight );
+                if ( !paddedBands.isEmpty() )
+                    paddedBands += QStringLiteral( ", " );
+                paddedBands += QString::number( b + 1 );
+            }
+            SICNU_LOG_WARN( SicnuLogTags::Algorithms,
+                QString( "Linear fusion: %1 msWeights given for %2 MS bands — "
+                         "padded band(s) %3 with default weight %4" )
+                    .arg( params.msWeights.size() ).arg( nMsBands )
+                    .arg( paddedBands ).arg( defaultMsWeight ) );
         }
 
         for ( int r = 0; r < rows; ++r )
@@ -937,6 +912,10 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
     else if ( params.method == QStringLiteral( "brovey" ) )
     {
         std::vector<float> msSum( maxTilePixels );
+        // A pixel is only fusable when EVERY MS band (and the pan band) is
+        // valid — mirrors the in-memory brovey() kernel so streaming output
+        // cannot invent values from a partial band sum (#700).
+        std::vector<bool> validPixel( maxTilePixels );
 
         for ( int r = 0; r < rows; ++r )
         {
@@ -951,6 +930,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                 if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
                     return false;
                 std::fill_n( msSum.begin(), tileSize, 0.0f );
+                std::fill_n( validPixel.begin(), tileSize, true );
 
                 for ( int b = 0; b < nMsBands; ++b )
                 {
@@ -959,7 +939,11 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                     const float *msData = msBuf[b].data();
                     for ( size_t i = 0; i < tileSize; ++i )
                     {
-                        if ( msData[i] != nodata && !std::isnan( msData[i] ) )
+                        if ( !validPixel[i] )
+                            continue;
+                        if ( msData[i] == nodata || std::isnan( msData[i] ) )
+                            validPixel[i] = false;
+                        else
                             msSum[i] += msData[i];
                     }
                 }
@@ -971,7 +955,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
 
                     for ( size_t i = 0; i < tileSize; ++i )
                     {
-                        if ( msData[i] == nodata || std::isnan( msData[i] ) ||
+                        if ( !validPixel[i] ||
                              panBuf[i] == nodata || std::isnan( panBuf[i] ) ||
                              msSum[i] <= 1e-10f )  // negative band sums invert signs -> NoData
                         {
@@ -1203,64 +1187,25 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
             for ( int b2 = 0; b2 < nMsBands; ++b2 )
                 cov[b1][b2] /= covDivisor;
 
-        // Jacobi eigen decomposition for symmetric nMsBands x nMsBands matrix
+        // #670: delegate to the shared cyclic jacobiEigen (see the in-memory
+        // variant above) — the inline 100-rotation cap diverged for many bands.
         std::vector<double> eigVec( nMsBands * nMsBands, 0.0 );
-        for ( int i = 0; i < nMsBands; ++i ) eigVec[i * nMsBands + i] = 1.0;
         std::vector<double> eigVal( nMsBands * nMsBands, 0.0 );
-        for ( int b1 = 0; b1 < nMsBands; ++b1 )
-            for ( int b2 = 0; b2 < nMsBands; ++b2 )
-                eigVal[b1 * nMsBands + b2] = cov[b1][b2];
-
-        for ( int iter = 0; iter < 100; ++iter )
         {
-            int p = 0, q = 1;
-            double maxVal = 0;
+            std::vector<std::vector<float>> A( nMsBands, std::vector<float>( nMsBands, 0.0f ) );
             for ( int i = 0; i < nMsBands; ++i )
-            {
-                for ( int j = i + 1; j < nMsBands; ++j )
-                {
-                    double v = std::abs( eigVal[i * nMsBands + j] );
-                    if ( v > maxVal ) { maxVal = v; p = i; q = j; }
-                }
-            }
-            if ( maxVal < 1e-10 ) break;
-
-            double theta = 0.5 * std::atan2( 2.0 * eigVal[p * nMsBands + q],
-                                              eigVal[p * nMsBands + p] - eigVal[q * nMsBands + q] );
-            double c = std::cos( theta );
-            double s = std::sin( theta );
-
-            double app = eigVal[p * nMsBands + p];
-            double aqq = eigVal[q * nMsBands + q];
-            double apq = eigVal[p * nMsBands + q];
-
-            double newApp = c * c * app + s * s * aqq + 2.0 * s * c * apq;
-            double newAqq = s * s * app + c * c * aqq - 2.0 * s * c * apq;
-
-            for ( int r = 0; r < nMsBands; ++r )
-            {
-                if ( r == p || r == q )
-                    continue;
-                double arp = eigVal[r * nMsBands + p];
-                double arq = eigVal[r * nMsBands + q];
-                eigVal[r * nMsBands + p] = c * arp + s * arq;
-                eigVal[p * nMsBands + r] = eigVal[r * nMsBands + p];
-                eigVal[r * nMsBands + q] = -s * arp + c * arq;
-                eigVal[q * nMsBands + r] = eigVal[r * nMsBands + q];
-            }
-
-            eigVal[p * nMsBands + p] = newApp;
-            eigVal[q * nMsBands + q] = newAqq;
-            eigVal[p * nMsBands + q] = 0.0;
-            eigVal[q * nMsBands + p] = 0.0;
-
+                for ( int j = 0; j < nMsBands; ++j )
+                    A[static_cast<size_t>( i )][static_cast<size_t>( j )] =
+                        static_cast<float>( cov[i][j] );
+            std::vector<float> eigenvalues;
+            std::vector<std::vector<float>> eigenvectors;
+            ImageEnhancement::jacobiEigen( A, nMsBands, eigenvalues, eigenvectors );
             for ( int i = 0; i < nMsBands; ++i )
-            {
-                double vp = eigVec[i * nMsBands + p];
-                double vq = eigVec[i * nMsBands + q];
-                eigVec[i * nMsBands + p] = c * vp + s * vq;
-                eigVec[i * nMsBands + q] = -s * vp + c * vq;
-            }
+                for ( int j = 0; j < nMsBands; ++j )
+                    eigVec[static_cast<size_t>( i * nMsBands + j )] =
+                        eigenvectors[static_cast<size_t>( i )][static_cast<size_t>( j )];
+            for ( int i = 0; i < nMsBands; ++i )
+                eigVal[static_cast<size_t>( i * nMsBands + i )] = eigenvalues[static_cast<size_t>( i )];
         }
 
         std::vector<int> eigIdx( nMsBands );

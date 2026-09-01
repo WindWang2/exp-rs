@@ -1,28 +1,19 @@
 #include "task_center.h"
 
 #include <QCoreApplication>
-#include <QDebug>
 #include <QDir>
 #include <QFile>
-#include <QJsonObject>
 #include <QMetaObject>
 #include <QMutexLocker>
 #include <QSet>
 #include <QTimer>
-#include <map>
-#include <optional>
 #include <utility>
 
 #include "framework/json_params_converter.h"
 #include "atomic_algorithm_registry.h"
 #include "jobs/job_engine.h"
 #include "workflow/workflow_definition.h"
-#include "workflow/workflow_run.h"
-#include "workflow/workflow_checkpoint.h"
-#include "workflow/artifact_gc.h"
 #include "workflow/placeholder_grammar.h"
-#include "data/execution_fingerprint.h"
-#include "data/asset_types.h"
 
 namespace sicnu {
 
@@ -94,13 +85,99 @@ void TaskCenter::shutdown()
     {
         QMutexLocker locker( &m_mutex );
         m_waitCondition.wakeAll();
+        // No new staging/flushing once shutdown began (#684): drop anything
+        // already staged but not yet submitted to the engine.
+        m_pendingLaunches.clear();
     }
+    // Cancel every non-terminal task FIRST (engine flags armed while the
+    // engine still accepts cancel), then join the engine, then finalize.
+    cancelAllForShutdown();
     sicnu::jobs::JobEngine::instance().shutdown();
+
+    // The engine is terminated: no further job records can arrive. Force any
+    // task still mid-flight (Cancelling, or never-cancelled stragglers) to a
+    // terminal state so waiters and completion callbacks always resolve.
+    QList<long> toFinalize;
+    {
+        QMutexLocker locker( &m_mutex );
+        const QList<long> keys = m_tasks.keys();
+        for ( long id : keys )
+        {
+            if ( isTerminalStatus( m_tasks[id].status ) )
+                continue;
+            auto &info = m_tasks[id];
+            const bool wasCancelling = ( info.status == TaskStatus::Cancelling );
+            info.status = TaskStatus::Canceled;
+            info.errorMessage = wasCancelling ? QStringLiteral( "Canceled during shutdown" )
+                                              : QStringLiteral( "Canceled: application is shutting down" );
+            info.endTime = QDateTime::currentDateTimeUtc();
+            info.logBuffer.append( info.errorMessage );
+            updatePipelineForTaskLocked( id );
+            queueTaskUpdatedLocked( id );
+            toFinalize.append( id );
+        }
+        m_waitCondition.wakeAll();
+    }
+    flushPendingSignals();
+    for ( long id : toFinalize )
+        fireTaskCompletionCallbacks( id );
+    {
+        // Everything is terminal now; any registration that survived the
+        // finalization pass is stale (defense against the #702 watch-leak
+        // family) — nothing can fire it anymore.
+        QMutexLocker locker( &m_mutex );
+        m_completionCallbacks.clear();
+    }
+}
+
+void TaskCenter::cancelAllForShutdown()
+{
+    QList<long> nonTerminal;
+    {
+        QMutexLocker locker( &m_mutex );
+        for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
+        {
+            if ( !isTerminalStatus( it.value().status ) )
+                nonTerminal.append( it.key() );
+        }
+    }
+    // cancelTask is self-contained (lock, cascade, flush); call it per task.
+    // Queued/WaitingResource/Dispatching tasks finalize synchronously;
+    // dispatched ones go Cancelling and resolve via the terminal record
+    // (or the finalization pass in shutdown() after the engine joined).
+    for ( long id : nonTerminal )
+        cancelTask( id );
 }
 
 TaskCenter::~TaskCenter()
 {
     shutdown();
+}
+
+void TaskCenter::shutdownForTests()
+{
+    shutdown();
+    {
+        QMutexLocker locker( &m_mutex );
+        m_isShuttingDown.store( false );
+        m_tasks.clear();
+        m_pipelines.clear();
+        m_pendingLaunches.clear();
+        m_pendingTaskAdded.clear();
+        m_pendingTaskUpdated.clear();
+        m_pendingLogs.clear();
+        m_taskByJobId.clear();
+        m_forwardedLogCounts.clear();
+        m_lastForwardedProgress.clear();
+        m_completionCallbacks.clear();
+        m_nextTaskId = 1;
+        m_nextPipelineId = 1;
+        m_waitCondition.wakeAll();
+    }
+    // Engine reset must happen outside m_mutex: shutdownForTests joins
+    // workers and resets the sticky termination flag (#684).
+    sicnu::jobs::JobEngine::instance().shutdownForTests();
+    flushPendingSignals();
 }
 
 TaskCenter::TaskCenter()
@@ -128,22 +205,25 @@ ProviderResourceProfile TaskCenter::resolveResourceProfile( const QString &algor
 
 unsigned int TaskCenter::defaultLimitForProfile( ProviderResourceProfile profile ) const
 {
-    // Single source of truth (#686/#661): the in-process admission default is
-    // the JobEngine worker pool (itself the throttler cap = hw-1 by default),
-    // so a task marked Running always has a real worker waiting for it.
-    const unsigned int inProcessDefault = std::max( 1u, static_cast<unsigned int>(
-        std::max( 1, sicnu::jobs::JobEngine::instance().maxWorkers() ) ) );
+    // ONE capacity fact (#686): in-process admission equals the JobEngine
+    // worker pool. Previously this was hardware_concurrency()-1 while the
+    // engine clamped to 2-4 workers, so TaskCenter staged hw-1 tasks as
+    // "Running" that then sat in the engine FIFO behind workers that did
+    // not exist — fake Running, FIFO-overridden priority, and a RAM budget
+    // charged by tasks holding no memory.
+    const unsigned int engineWorkers = static_cast<unsigned int>(
+        std::max( 1, sicnu::jobs::JobEngine::instance().maxWorkers() ) );
     switch ( profile )
     {
       case ProviderResourceProfile::ExternalCliSubprocess:
-        return std::min( 2u, inProcessDefault );
+        return std::min( 2u, engineWorkers );
       case ProviderResourceProfile::PythonWorkerProcess:
-        return std::min( 2u, inProcessDefault );
+        return std::min( 2u, engineWorkers );
       case ProviderResourceProfile::QgsTaskThread:
-        return std::max( 1u, inProcessDefault / 2 );
+        return std::max( 1u, engineWorkers / 2 );
       case ProviderResourceProfile::InProcessThread:
       default:
-        return inProcessDefault;
+        return engineWorkers;
     }
 }
 
@@ -364,7 +444,11 @@ TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
     unsigned int runningInProfile = 0;
     for ( const auto &t : m_tasks )
     {
-        if ( t.status != TaskStatus::Running && t.status != TaskStatus::Cancelling )
+        // Mirror the admission pass exactly: Dispatching holds a slot until
+        // the worker reports, Paused holds its slot, Cancelling holds the
+        // worker until the terminal record.
+        if ( t.status != TaskStatus::Running && t.status != TaskStatus::Cancelling
+             && t.status != TaskStatus::Dispatching && t.status != TaskStatus::Paused )
             continue;
         snap.runningCount += 1;
         snap.runningMb += taskEstimateMbLocked( t );
@@ -657,292 +741,13 @@ void TaskCenter::updatePipelineForTaskLocked( long taskId )
             anyFailed = true;
     }
 
-    mirrorStepToRunLocked( pipelineId, stepId.toStdString(), m_tasks[taskId].status );
-
-    if ( m_tasks[taskId].status == TaskStatus::Completed )
-        storePipelineStepOutputLocked( pipelineId, taskId );
-
     if ( allTerminal )
     {
         pipe.isCompleted = true;
         pipe.isFailed = anyFailed;
-        finalizeWorkflowRunLocked( pipelineId, anyFailed, pipe.errorMessage );
     }
 }
 
-// --- Workflow Engine 2.0 wiring (ADR 0123, #662) ----------------------------
-
-namespace {
-
-/// Deterministic pseudo-AssetId for an upstream pipeline step, derived from
-/// the parent step's fingerprint so any upstream change (params, inputs)
-/// yields a different derivation identity downstream. Returns nullopt when
-/// the fingerprint hex cannot be shaped into a UUID string.
-std::optional<sicnu::data::AssetId> stepAssetIdFromFingerprint( const std::string &fpHex )
-{
-    if ( fpHex.size() < 32 )
-        return std::nullopt;
-    const QString hex = QString::fromStdString( fpHex.substr( 0, 32 ) );
-    const QString uuid = QStringLiteral( "%1-%2-%3-%4-%5" )
-                             .arg( hex.mid( 0, 8 ), hex.mid( 8, 4 ), hex.mid( 12, 4 ),
-                                   hex.mid( 16, 4 ), hex.mid( 20, 12 ) );
-    return sicnu::data::AssetId::fromString( uuid );
-}
-
-/// Numeric revision token for an upstream step: the parent fingerprint's first
-/// 8 hex chars, so a changed upstream plan invalidates the child fingerprint.
-sicnu::data::AssetRevision stepRevisionFromFingerprint( const std::string &fpHex )
-{
-    if ( fpHex.size() < 8 )
-        return sicnu::data::AssetRevision::initial();
-    const quint64 value = std::stoull( fpHex.substr( 0, 8 ), nullptr, 16 );
-    return sicnu::data::AssetRevision::fromValue( value ? value : 1 );
-}
-
-/// TaskStatus -> StepPlan status vocabulary (workflow_run.h StepPlan).
-std::string stepStatusForTaskStatus( TaskStatus status )
-{
-    switch ( status )
-    {
-    case TaskStatus::Queued:
-    case TaskStatus::WaitingResource:
-        return "Ready";
-    case TaskStatus::Running:
-    case TaskStatus::Paused:
-    case TaskStatus::Cancelling:
-        return "Running";
-    case TaskStatus::Completed:
-        return "Completed";
-    case TaskStatus::Failed:
-        return "Failed";
-    case TaskStatus::Canceled:
-        return "Canceled";
-    }
-    return "Running";
-}
-
-} // namespace
-
-void TaskCenter::attachWorkflowRunLocked( long pipelineId,
-                                          const sicnu::workflow::WorkflowDefinition &def,
-                                          const std::vector<std::string> &orderedStepIds )
-{
-    std::shared_ptr<sicnu::workflow::WorkflowRun> run =
-        sicnu::workflow::WorkflowRun::createFromDefinition( def );
-    if ( !run )
-        return;
-
-    // Submit-time planning is done once the topological order exists; the run
-    // enters Running when the pipeline is dispatched below.
-    run->transitionTo( sicnu::workflow::WorkflowRunState::Planning );
-    run->transitionTo( sicnu::workflow::WorkflowRunState::Ready );
-
-    // Fingerprints are computed in topological order so parent plans exist
-    // when children are hashed: a child's derivation revision is its parent's
-    // fingerprint, which gives transitive invalidation for param/path changes.
-    std::map<std::string, std::string> stepFingerprints;
-    std::vector<sicnu::workflow::StepPlan> plans;
-    plans.reserve( def.steps.size() );
-
-    for ( const auto &stepId : orderedStepIds )
-    {
-        const sicnu::workflow::StepDef *step = nullptr;
-        for ( const auto &s : def.steps )
-        {
-            if ( s.id == stepId )
-            {
-                step = &s;
-                break;
-            }
-        }
-        if ( !step )
-            continue;
-
-        sicnu::workflow::StepPlan plan;
-        plan.stepId = step->id;
-        plan.operatorId = step->operatorId;
-        plan.kind = step->kind;
-        plan.rawParams = step->params;
-        plan.resolvedParams = step->params; // placeholders resolve per-task at dispatch
-        for ( const auto &conn : step->inputs )
-            plan.dependencies.push_back( conn.fromStepId );
-
-        const QJsonObject paramsJson = QJsonObject::fromVariantMap(
-            sicnu::processing::jsonParamsToVariantMap( step->params ) );
-        QVector<sicnu::data::TaggedDerivationInput> inputs;
-        for ( const auto &conn : step->inputs )
-        {
-            const auto parentIt = stepFingerprints.find( conn.fromStepId );
-            if ( parentIt == stepFingerprints.end() )
-                continue;
-            const auto assetId = stepAssetIdFromFingerprint( parentIt->second );
-            if ( !assetId )
-                continue;
-            sicnu::data::TaggedDerivationInput in;
-            in.assetId = *assetId;
-            in.revision = stepRevisionFromFingerprint( parentIt->second );
-            in.fromPort = QString::fromStdString( conn.fromPort );
-            in.toPort = QString::fromStdString( conn.toPort );
-            inputs.append( in );
-        }
-        // Operator versions are not yet declared by the registry; the constant
-        // keeps the fingerprint contract total. When the meta store publishes
-        // versions, thread them through here so upgrades invalidate the cache.
-        const sicnu::data::ExecutionFingerprint fp = sicnu::data::makeExecutionFingerprintV2(
-            QString::fromStdString( step->operatorId ), QStringLiteral( "1" ),
-            paramsJson, inputs );
-        if ( fp.isValid() )
-        {
-            plan.fingerprint = fp.toStdString();
-            stepFingerprints[step->id] = plan.fingerprint;
-            // Execution-cache consultation (#667): an identical prior step
-            // (same operator, canonical params, upstream derivation revisions)
-            // is served pre-completed by submitPipeline. lookupOutputPath
-            // returns nullopt when the cache is disabled or the cached file
-            // no longer exists, so a disabled cache degrades to re-execution.
-            if ( auto cached = sicnu::data::ExecutionResultCache::instance().lookupOutputPath( fp ) )
-            {
-                plan.cacheHit = true;
-                plan.cachedOutputPath = cached->toStdString();
-            }
-        }
-
-        plans.push_back( std::move( plan ) );
-    }
-
-    run->setStepPlans( std::move( plans ) );
-    run->transitionTo( sicnu::workflow::WorkflowRunState::Running );
-
-    // Crash-safe checkpoint at submit; refreshed on every mirrored transition.
-    sicnu::workflow::WorkflowCheckpointManager().saveCheckpoint( *run );
-
-    m_pipelineRuns[pipelineId] = std::move( run );
-}
-
-void TaskCenter::mirrorStepToRunLocked( long pipelineId, const std::string &stepId,
-                                        TaskStatus status )
-{
-    const auto runIt = m_pipelineRuns.find( pipelineId );
-    if ( runIt == m_pipelineRuns.end() || !runIt.value() )
-        return;
-    sicnu::workflow::WorkflowRun &run = *runIt.value();
-
-    auto plan = run.stepPlan( stepId );
-    if ( !plan )
-        return;
-    plan->status = stepStatusForTaskStatus( status );
-    if ( status == TaskStatus::Completed )
-    {
-        plan->endTime = QDateTime::currentDateTimeUtc().toString(
-                                        QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) )
-                            .toStdString();
-        // Feed ArtifactGC workspace gating and checkpoint consumers: the plan
-        // must know the produced file. Mirrors the task's detected output.
-        const long mirrorTaskId = taskForStepLocked( pipelineId, stepId );
-        if ( mirrorTaskId > 0 && m_tasks.contains( mirrorTaskId ) )
-        {
-            const AlgorithmTaskInfo &task = m_tasks[mirrorTaskId];
-            if ( !task.outputLayerPath.isEmpty() )
-            {
-                plan->outputLayerPath = task.outputLayerPath.toStdString();
-                if ( plan->resultPayload.isNull() && !task.resultPayload.isNull() )
-                    plan->resultPayload = task.resultPayload;
-            }
-        }
-    }
-    run.updateStepPlan( *plan );
-
-    sicnu::workflow::WorkflowCheckpointManager().saveCheckpoint( run );
-}
-
-void TaskCenter::finalizeWorkflowRunLocked( long pipelineId, bool failed,
-                                            const QString &errorMessage )
-{
-    const auto runIt = m_pipelineRuns.find( pipelineId );
-    if ( runIt == m_pipelineRuns.end() || !runIt.value() )
-        return;
-    sicnu::workflow::WorkflowRun &run = *runIt.value();
-
-    if ( sicnu::workflow::isTerminalRunState( run.state() ) )
-        return;
-
-    if ( failed )
-    {
-        if ( !errorMessage.isEmpty() )
-            run.setErrorMessage( errorMessage.toStdString() );
-        run.transitionTo( sicnu::workflow::WorkflowRunState::Failed );
-    }
-    else
-    {
-        run.transitionTo( sicnu::workflow::WorkflowRunState::Completed );
-    }
-    run.recalculateProgress();
-
-    sicnu::workflow::WorkflowCheckpointManager().saveCheckpoint( run );
-
-    // Artifact GC (ADR 0123, #668): sweep intermediate artifacts of the
-    // completed run. Gating lives in ArtifactGC (Completed run, completed
-    // non-cache-hit non-leaf steps, inside the retained-outputs workspace);
-    // failures are logged, never fatal — GC must not fail the pipeline.
-    // Files whose fingerprints are still live in the execution path cache
-    // (#667) are protected: a future identical submission reuses them.
-    // (When the cache is disabled nothing is stored, so nothing is protected
-    // and the sweep behaves exactly like sweepRun.)
-    if ( run.state() == sicnu::workflow::WorkflowRunState::Completed )
-    {
-        const QStringList reapable =
-            sicnu::workflow::ArtifactGC().inspectReapable( run, /*retainFinalOutputs=*/true );
-        const QStringList protectedPaths =
-            sicnu::data::ExecutionResultCache::instance().cachedOutputPaths();
-        QStringList toReap;
-        for ( const QString &path : reapable )
-        {
-            if ( !protectedPaths.contains( path ) )
-                toReap.append( path );
-        }
-        QStringList errors;
-        sicnu::workflow::ArtifactGC::removeFilesWithSidecars( toReap, &errors );
-        for ( const QString &error : errors )
-            qWarning( "ArtifactGC: %s", error.toUtf8().constData() );
-    }
-}
-
-void TaskCenter::storePipelineStepOutputLocked( long pipelineId, long taskId )
-{
-    const auto runIt = m_pipelineRuns.find( pipelineId );
-    if ( runIt == m_pipelineRuns.end() || !runIt.value() )
-        return;
-    auto plan = runIt.value()->stepPlan( m_tasks[taskId].stepId.toStdString() );
-    if ( !plan || plan->fingerprint.empty() || plan->cacheHit )
-        return; // cache-hit steps own nothing: their output belongs to the prior run
-
-    const QString out = findOutputPathInParams( m_tasks[taskId].parameterMap );
-    if ( out.isEmpty() )
-        return;
-
-    sicnu::data::ExecutionFingerprint fp;
-    fp.digest = QByteArray::fromHex( QString::fromStdString( plan->fingerprint ).toUtf8() );
-    if ( !fp.isValid() )
-        return;
-    sicnu::data::ExecutionResultCache::instance().storeOutputPath( fp, out );
-}
-
-long TaskCenter::taskForStepLocked( long pipelineId, const std::string &stepId ) const
-{
-    const auto pipeIt = m_pipelines.find( pipelineId );
-    if ( pipeIt == m_pipelines.end() )
-        return -1;
-    const auto taskIt = pipeIt->stepToTaskId.find( stepId );
-    return taskIt == pipeIt->stepToTaskId.end() ? -1 : taskIt.value();
-}
-
-std::shared_ptr<const sicnu::workflow::WorkflowRun>
-TaskCenter::workflowRunForPipeline( long pipelineId ) const
-{
-    QMutexLocker locker( &m_mutex );
-    const auto it = m_pipelineRuns.find( pipelineId );
-    return it == m_pipelineRuns.end() ? nullptr : it.value();
-}
 long TaskCenter::enqueueTask( const QString &algorithmId,
                               const QVariantMap &params,
                               bool autoLoad,
@@ -952,9 +757,17 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
                               unsigned int resourceEstimateOverrideMb,
                               const QString &source )
 {
+    if ( m_isShuttingDown.load() )
+        return -1; // no new work after shutdown (#684)
     long id = -1;
     {
         QMutexLocker locker( &m_mutex );
+        // Recheck under the lock: shutdown()'s finalization pass could have
+        // completed between the atomic read above and here, and a task
+        // inserted afterwards would strand in Queued forever with its
+        // completion callbacks never firing (review P1).
+        if ( m_isShuttingDown.load() )
+            return -1;
         id = m_nextTaskId++;
         AlgorithmTaskInfo info;
         info.taskId = id;
@@ -980,38 +793,15 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
 
         info.outputLayerPath = findOutputPathInParams( params );
 
-        // Resolve the RAM estimate once (#702): the scheduler consulted the
-        // registry-backed resolver for every running task on every pass.
-        if ( resourceEstimateOverrideMb == 0 )
-        {
-            info.resolvedEstimateMb = m_resourceBudget.resolve( algorithmId.toStdString() ).ramMb;
-            info.estimateResolved = true;
-        }
-
         info.logBuffer.append( QString( QStringLiteral( "[%1] Task queued with priority %2." ) )
                                  .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ) )
                                  .arg( static_cast<int>( priority ) ) );
 
-        if ( m_isShuttingDown.load() )
-        {
-            // Work admitted during teardown can never complete (#684): land
-            // the record as Canceled instead of staging it for launch.
-            info.status = TaskStatus::Canceled;
-            info.errorMessage = QStringLiteral( "Task Center is shutting down" );
-            info.endTime = QDateTime::currentDateTimeUtc();
-            info.logBuffer.append( info.errorMessage );
-            m_tasks[id] = info;
-            queueTaskAddedLocked( id );
-        }
-        else
-        {
-            m_tasks[id] = info;
-            queueTaskAddedLocked( id );
-            processNextQueuedTasks();
-        }
+        m_tasks[id] = info;
+        queueTaskAddedLocked( id );
+
+        processNextQueuedTasks();
     }
-    if ( m_isShuttingDown.load() )
-        return id;
     flushPendingLaunches();
     flushPendingSignals();
     return id;
@@ -1019,79 +809,76 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
 
 long TaskCenter::submitJob( const sicnu::jobs::JobRequest &request )
 {
-    return submitJobImpl( request, {}, {}, true );
+    return submitJobImpl( request, {}, {}, true, TaskPriority::Normal, {} );
 }
 
 long TaskCenter::submitJob( const sicnu::jobs::JobRequest &request,
                             JobExecutor executor,
                             CancelHook onCancel,
-                            bool autoLoad )
+                            bool autoLoad,
+                            TaskPriority priority,
+                            const QList<long> &parentTaskIds )
 {
-    return submitJobImpl( request, std::move( executor ), std::move( onCancel ), autoLoad );
+    return submitJobImpl( request, std::move( executor ), std::move( onCancel ), autoLoad, priority,
+                          parentTaskIds );
 }
 
 long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
                                 JobExecutor executor,
                                 CancelHook onCancel,
-                                bool autoLoad )
+                                bool autoLoad,
+                                TaskPriority priority,
+                                const QList<long> &parentTaskIds )
 {
     ensureJobListener();
 
+    if ( m_isShuttingDown.load() )
+        return -1; // no new work after shutdown (#684)
+
     QVariantMap params = sicnu::processing::jsonParamsToVariantMap( request.params );
 
-    // Tracking-only enqueue; this path owns JobEngine submission itself.
+    // ONE admission path (#683/#686): submitJob used to bypass the gated
+    // auto-dispatch pipeline and hand the job straight to JobEngine (marking
+    // the task Running before any worker existed, with no cancel-during-submit
+    // recheck). Stage through the same queue as everyone else: the task is
+    // enqueued tracking-only, then armed with its request/executor under the
+    // lock and admitted by processNextQueuedTasks (slots / RSS / RAM budget /
+    // priority). Executors never run before admission because autoDispatch is
+    // only flipped inside the same critical section.
     const long taskId = enqueueTask( QString::fromStdString( request.algorithmId ), params, autoLoad,
-                                     TaskPriority::Normal, {}, false );
-    const std::string jobId = executor
-                                  ? sicnu::jobs::JobEngine::instance().submit( request, executor, std::move( onCancel ) )
-                                  : sicnu::jobs::JobEngine::instance().submit( request );
-    if ( jobId.empty() )
-    {
-        markTaskFailed( taskId, QStringLiteral( "Task Center could not submit the job" ) );
-        return taskId;
-    }
-
-    bool mapped = false;
-    bool canceledDuringSubmit = false;
+                                     priority, parentTaskIds, false, 0,
+                                     QString::fromStdString( request.source ) );
+    if ( taskId < 0 )
+        return -1;
 
     {
         QMutexLocker locker( &m_mutex );
-        if ( m_tasks.contains( taskId ) )
+        auto it = m_tasks.find( taskId );
+        if ( it == m_tasks.end() )
+            return -1; // cleared concurrently (shutdown)
+        if ( m_isShuttingDown.load() )
         {
-            if ( isTerminalStatus( m_tasks[taskId].status ) )
-            {
-                // Canceled while the engine submit was in flight (#683):
-                // the freshly submitted engine job must not outlive its
-                // terminal task (mirror of flushPendingLaunches' recheck).
-                canceledDuringSubmit = true;
-            }
-            else
-            {
-                m_tasks[taskId].jobId = jobId;
-                m_tasks[taskId].jobRequest = request;
-                m_tasks[taskId].hasJobRequest = true;
-                m_tasks[taskId].jobExecutor = std::move( executor );
-                m_taskByJobId[jobId] = taskId;
-                mapped = true;
-            }
+            // Shutdown slipped between enqueue and arming: no launch will
+            // ever happen. Finalize inline so callers/waiters resolve.
+            it->status = TaskStatus::Canceled;
+            it->errorMessage = QStringLiteral( "Canceled: application is shutting down" );
+            it->endTime = QDateTime::currentDateTimeUtc();
+            queueTaskUpdatedLocked( taskId );
+        }
+        else
+        {
+            it->jobRequest = request;
+            it->hasJobRequest = true;
+            it->jobExecutor = std::move( executor );
+            it->jobCancelHook = std::move( onCancel );
+            it->autoDispatch = true;
+            processNextQueuedTasks();
         }
     }
-    if ( canceledDuringSubmit )
-    {
-        sicnu::jobs::JobEngine::instance().cancel( jobId );
-        return taskId;
-    }
-
-    if ( mapped )
-        markTaskRunning( taskId );
-    // Catch-up: a job that reached a terminal state before the listener could
-    // dispatch it (mapping registered after submit returned) must still land
-    // in the bookkeeping. Delta logic makes this idempotent.
-    if ( mapped )
-    {
-        if ( const auto record = sicnu::jobs::JobEngine::instance().snapshot( jobId ) )
-            onJobRecord( *record );
-    }
+    flushPendingLaunches();
+    flushPendingSignals();
+    if ( m_isShuttingDown.load() )
+        fireTaskCompletionCallbacks( taskId );
     return taskId;
 }
 
@@ -1124,6 +911,32 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return; // task gone, or stale/duplicate record (catch-up vs listener)
+    }
+
+    // The engine's Running record is the ONLY sanctioned source for the
+    // caller-facing Running status: a worker actually picked the job
+    // (#686). Dispatching → Running here; startTime becomes the real
+    // worker start, not the enqueue timestamp.
+    if ( record.state == sicnu::jobs::JobState::Running )
+    {
+        bool flipped = false;
+        {
+            QMutexLocker locker( &m_mutex );
+            auto it = m_tasks.find( taskId );
+            if ( it != m_tasks.end()
+                 && ( it->status == TaskStatus::Queued || it->status == TaskStatus::WaitingResource
+                      || it->status == TaskStatus::Dispatching ) )
+            {
+                it->status = TaskStatus::Running;
+                if ( record.startedAtMs > 0 )
+                    it->startTime = QDateTime::fromMSecsSinceEpoch( record.startedAtMs, Qt::UTC );
+                updatePipelineForTaskLocked( taskId );
+                queueTaskUpdatedLocked( taskId );
+                flipped = true;
+            }
+        }
+        if ( flipped )
+            flushPendingSignals(); // deliver the honest Running state promptly
     }
 
     if ( record.progress >= 0.0 )
@@ -1203,15 +1016,6 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
     }
     else
     {
-        // Engine "Started" record: stamp actual dispatch time (#686). The
-        // enqueue-time stamp conflated queue wait with run time.
-        if ( record.state == sicnu::jobs::JobState::Running && record.startedAtMs > 0 )
-        {
-            QMutexLocker locker( &m_mutex );
-            auto it = m_tasks.find( taskId );
-            if ( it != m_tasks.end() )
-                it->startTime = QDateTime::fromMSecsSinceEpoch( record.startedAtMs );
-        }
         return; // Queued/Running records keep the per-task dispatch state
     }
 
@@ -1226,34 +1030,31 @@ unsigned int TaskCenter::taskEstimateMbLocked( const AlgorithmTaskInfo &task ) c
 {
     if ( task.resourceEstimateOverrideMb > 0 )
         return task.resourceEstimateOverrideMb;
-    // Per-task cache (#702): the estimate never changes over a task's
-    // lifetime; resolving per scheduling pass hammered the registry.
-    if ( task.estimateResolved )
-        return task.resolvedEstimateMb;
     return m_resourceBudget.resolve( task.algorithmId.toStdString() ).ramMb;
 }
 
 void TaskCenter::processNextQueuedTasks()
 {
     // Called with m_mutex held. Only stages work; callers must flushPendingLaunches() outside the lock.
-    // No new work during teardown (#684): a late terminal notify (RSS-hold
-    // QTimer, finishing job) must not stage launches that can never run.
     if ( m_isShuttingDown.load() )
-        return;
+        return; // shutdown stages nothing new (#684)
     const unsigned int globalMax = m_globalConcurrencyLimit > 0
                                      ? m_globalConcurrencyLimit
                                      : defaultLimitForProfile( ProviderResourceProfile::InProcessThread );
 
     QMap<ProviderResourceProfile, unsigned int> runningByProfile;
     unsigned int totalRunning = 0;
-    unsigned int runningTotalMb = 0; // RAM estimate sum of Running tasks (resource-aware gate)
+    unsigned int runningTotalMb = 0; // RAM estimate sum of active tasks (resource-aware gate)
 
-    // Pending launches already have status Running; count only Running tasks once.
-    // Cancelling tasks still occupy their worker slot until the job reports
-    // its terminal record, so they count toward every limit.
+    // Pending launches (Dispatching) already hold their slot; count each
+    // active task once. Cancelling tasks still occupy their worker slot until
+    // the job reports its terminal record, and Paused tasks hold their
+    // (engine or QgsTask) slot too — counting them prevents over-admission
+    // while real workers stay busy (#702).
     for ( const auto &t : m_tasks )
     {
-        if ( t.status != TaskStatus::Running && t.status != TaskStatus::Cancelling )
+        if ( t.status != TaskStatus::Running && t.status != TaskStatus::Cancelling
+             && t.status != TaskStatus::Dispatching && t.status != TaskStatus::Paused )
             continue;
         runningByProfile[t.resourceProfile] = runningByProfile.value( t.resourceProfile, 0u ) + 1u;
         ++totalRunning;
@@ -1355,7 +1156,7 @@ void TaskCenter::processNextQueuedTasks()
             continue;
         }
 
-        m_tasks[id].status = TaskStatus::Running;
+        m_tasks[id].status = TaskStatus::Dispatching;
         m_tasks[id].logBuffer.append(
           QString( QStringLiteral( "[%1] Dispatching to JobEngine (profile=%2)." ) )
             .arg( QDateTime::currentDateTimeUtc().toString( QStringLiteral( "hh:mm:ss" ) ) )
@@ -1366,19 +1167,19 @@ void TaskCenter::processNextQueuedTasks()
         launch.taskId = id;
         launch.request.algorithmId = m_tasks[id].algorithmId.toStdString();
         launch.request.title = m_tasks[id].algorithmName.toStdString();
-        // Priority propagates into the engine queue (#686) so even work that
-        // waits transiently inside the engine keeps the caller's order.
-        launch.request.priority = static_cast<int>( m_tasks[id].priority );
         launch.request.source = m_tasks[id].source.isEmpty()
                                   ? ( m_tasks[id].pipelineId >= 0 ? "pipeline" : "task_center" )
                                   : m_tasks[id].source.toStdString();
         launch.request.params = variantMapToJsonParams( m_tasks[id].parameterMap );
+        launch.request.priority = static_cast<int>( m_tasks[id].priority );
+        launch.onCancel = std::move( m_tasks[id].jobCancelHook );
         if ( m_tasks[id].hasJobRequest && m_tasks[id].jobExecutor )
         {
             launch.executor = m_tasks[id].jobExecutor;
             launch.hasExecutor = true;
             launch.request = m_tasks[id].jobRequest;
             launch.request.params = variantMapToJsonParams( m_tasks[id].parameterMap );
+            launch.request.priority = static_cast<int>( m_tasks[id].priority );
         }
         else
         {
@@ -1431,40 +1232,18 @@ void TaskCenter::flushPendingLaunches()
     QList<PendingLaunch> launches;
     {
         QMutexLocker locker( &m_mutex );
+        if ( m_isShuttingDown.load() )
+        {
+            // Shutdown in progress: never hand new work to the engine (#684).
+            // The staged tasks are canceled by the shutdown pass.
+            m_pendingLaunches.clear();
+            return;
+        }
         launches.swap( m_pendingLaunches );
     }
 
     if ( launches.isEmpty() )
         return;
-    // Never submit to the engine during teardown (#684): the jobs would
-    // either be rejected or resurrect worker threads after shutdown().
-    // Staged launches keep status Running with no jobId, so finalize them
-    // as Canceled — otherwise they strand as phantom Running tasks after
-    // shutdown (#684 review), mirroring enqueueTask's teardown branch.
-    if ( m_isShuttingDown.load() )
-    {
-        QList<long> stranded;
-        {
-            QMutexLocker locker( &m_mutex );
-            for ( const PendingLaunch &launch : launches )
-            {
-                if ( m_tasks.contains( launch.taskId )
-                     && !isTerminalStatus( m_tasks[launch.taskId].status ) )
-                {
-                    m_tasks[launch.taskId].status = TaskStatus::Canceled;
-                    m_tasks[launch.taskId].errorMessage =
-                        QStringLiteral( "Task Center is shutting down" );
-                    m_tasks[launch.taskId].endTime = QDateTime::currentDateTimeUtc();
-                    queueTaskUpdatedLocked( launch.taskId );
-                    stranded.append( launch.taskId );
-                }
-            }
-        }
-        flushPendingSignals();
-        for ( long id : stranded )
-            fireTaskCompletionCallbacks( id );
-        return;
-    }
     ensureJobListener();
 
     for ( auto &launch : launches )
@@ -1479,7 +1258,8 @@ void TaskCenter::flushPendingLaunches()
 
         std::string jobId;
         if ( launch.hasExecutor )
-            jobId = sicnu::jobs::JobEngine::instance().submit( launch.request, std::move( launch.executor ) );
+            jobId = sicnu::jobs::JobEngine::instance().submit( launch.request, std::move( launch.executor ),
+                                                               std::move( launch.onCancel ) );
         else
             jobId = sicnu::jobs::JobEngine::instance().submit( launch.request );
 
@@ -1506,16 +1286,7 @@ void TaskCenter::flushPendingLaunches()
         }
         if ( mapped )
         {
-            // startTime = actual dispatch, not enqueue time (#686): the
-            // enqueue stamp conflated wait time with run time in every
-            // exported record.
-            {
-                QMutexLocker reLock2( &m_mutex );
-                if ( m_tasks.contains( launch.taskId ) && m_tasks[launch.taskId].jobId == jobId )
-                    m_tasks[launch.taskId].startTime = QDateTime::currentDateTimeUtc();
-            }
-            // Catch-up snapshot; see submitJobImpl for the rationale. Called
-            // WITHOUT m_mutex: processJobRecord re-enters TaskCenter locks.
+            // Catch-up snapshot; see submitJobImpl for the rationale.
             if ( const auto record = sicnu::jobs::JobEngine::instance().snapshot( jobId ) )
                 onJobRecord( *record );
         }
@@ -1541,8 +1312,11 @@ void TaskCenter::updateTaskProgress( long taskId, double progress )
         // the worker's terminal record arrives).
         if ( m_tasks[taskId].status == TaskStatus::Queued
              || m_tasks[taskId].status == TaskStatus::WaitingResource
+             || m_tasks[taskId].status == TaskStatus::Dispatching
              || m_tasks[taskId].status == TaskStatus::Running )
         {
+            // Progress ticks mean the executor is genuinely running — flip
+            // pre-start states (staged/queued) to Running.
             m_tasks[taskId].status = TaskStatus::Running;
         }
         updatePipelineForTaskLocked( taskId );
@@ -1621,6 +1395,12 @@ void TaskCenter::markTaskCompleted( long taskId,
 
         shouldAutoLoad = m_tasks[taskId].autoLoadLayer && !m_tasks[taskId].outputLayerPath.isEmpty();
         autoLoadPath = m_tasks[taskId].outputLayerPath;
+
+        // Terminal transitions own their listener-dispatch mapping: without
+        // this, tasks finalized off the listener path (stranded Cancelling,
+        // shutdown) leak their jobId→taskId entry forever (review P2).
+        if ( !m_tasks[taskId].jobId.empty() )
+            m_taskByJobId.remove( m_tasks[taskId].jobId );
 
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
@@ -1760,18 +1540,10 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] Task failed: %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), error ) );
+        if ( !m_tasks[taskId].jobId.empty() )
+            m_taskByJobId.remove( m_tasks[taskId].jobId );
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
-
-        // The task's own engine job must die with the task (#702): only the
-        // descendants used to flow into jobCancelTargets, so a root whose
-        // terminal transition came from outside the engine (external failure
-        // injection, rollback) ran to completion and its terminal record was
-        // silently discarded. When the transition itself came from the
-        // engine's terminal record the job is already terminal and cancel()
-        // is a cheap no-op.
-        if ( !m_tasks[taskId].jobId.empty() )
-            jobCancelTargets.emplace_back( m_tasks[taskId].jobId, taskId );
 
         const QList<long> descendants = collectTransitiveDescendantsLocked( taskId );
         cascadeCancelTargetsLocked( descendants, -1, QStringLiteral( "failure" ), false,
@@ -1800,19 +1572,23 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
         // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
         if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return;
+        // The root's own engine job must be cancelled too (#702): callers of
+        // markTaskCanceled other than processJobRecord (e.g. future direct
+        // paths) would otherwise orphan a running job that keeps writing
+        // output while the task shows Canceled. When the job is already
+        // terminal (the listener path), engine cancel is a harmless no-op.
+        const std::string rootJobId = m_tasks[taskId].jobId;
+        if ( !rootJobId.empty() )
+            jobCancelTargets.emplace_back( rootJobId, taskId );
         m_tasks[taskId].status = TaskStatus::Canceled;
         m_tasks[taskId].errorMessage = reason;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), reason ) );
+        if ( !rootJobId.empty() )
+            m_taskByJobId.remove( rootJobId );
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
-
-        // Same own-job rule as markTaskFailed (#702): cancel the root's own
-        // engine job when the terminal transition came from outside the
-        // engine; a job that is already terminal cancels as a no-op.
-        if ( !m_tasks[taskId].jobId.empty() )
-            jobCancelTargets.emplace_back( m_tasks[taskId].jobId, taskId );
 
         const QList<long> descendants = collectTransitiveDescendantsLocked( taskId );
         cascadeCancelTargetsLocked( descendants, -1, QStringLiteral( "cancellation" ), false,
@@ -1889,32 +1665,28 @@ bool TaskCenter::pauseTask( long taskId )
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) )
             return false;
-        if ( m_tasks[taskId].status == TaskStatus::Running )
+        if ( m_tasks[taskId].status == TaskStatus::Running
+             || m_tasks[taskId].status == TaskStatus::Dispatching )
         {
-            if ( m_tasks[taskId].taskHandle )
-            {
-                // hold() has the same thread-affinity caveat as cancel()
-                // (dispatchPendingCancels marshals that call): invoke it on
-                // the handle's own thread instead of the caller's (#616).
-                QgsTask *handle = m_tasks[taskId].taskHandle.data();
-                QMetaObject::invokeMethod( handle, [handle]() { handle->hold(); },
-                                           Qt::QueuedConnection );
-                m_tasks[taskId].status = TaskStatus::Paused;
-                m_tasks[taskId].logBuffer.append( QStringLiteral( "Task paused." ) );
-                updatePipelineForTaskLocked( taskId );
-                queueTaskUpdatedLocked( taskId );
-                ok = true;
-            }
-            else if ( !m_tasks[taskId].jobId.empty() )
-            {
-                // Refuse to fabricate Paused for engine-dispatched work
-                // (#702): the job kept running while the status said Paused,
-                // Paused tasks were excluded from admission counts (the
-                // scheduler over-admitted), and nothing ever auto-resumed.
-                m_tasks[taskId].logBuffer.append(
-                    QStringLiteral( "Pause requested but not supported for engine-dispatched tasks; task keeps running." ) );
-                queueTaskLogLocked( taskId, m_tasks[taskId].logBuffer.last() );
-            }
+            // JobEngine has no pause primitive: a worker either runs or is
+            // cancelled. Only tasks backed by a QgsTask handle (legacy
+            // QgsTask path, where hold() genuinely parks the work) may pause;
+            // engine-dispatched tasks must NOT fabricate Paused (#702) — the
+            // status would free an admission slot while the worker keeps
+            // running at full speed.
+            if ( !m_tasks[taskId].taskHandle )
+                return false;
+            // hold() has the same thread-affinity caveat as cancel()
+            // (dispatchPendingCancels marshals that call): invoke it on the
+            // handle's own thread instead of the caller's (#616).
+            QgsTask *handle = m_tasks[taskId].taskHandle.data();
+            QMetaObject::invokeMethod( handle, [handle]() { handle->hold(); },
+                                       Qt::QueuedConnection );
+            m_tasks[taskId].status = TaskStatus::Paused;
+            m_tasks[taskId].logBuffer.append( QStringLiteral( "Task paused." ) );
+            updatePipelineForTaskLocked( taskId );
+            queueTaskUpdatedLocked( taskId );
+            ok = true;
         }
     }
     if ( ok )
@@ -1949,84 +1721,106 @@ bool TaskCenter::resumeTask( long taskId )
     return ok;
 }
 
-long TaskCenter::retryTask( long taskId )
+bool TaskCenter::retryTask( long taskId )
 {
     AlgorithmTaskInfo oldInfo;
     {
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) )
-            return 0;
+            return false;
         // A non-terminal task is still schedulable/running: enqueueing a
         // retry beside it would execute the same work twice (#616).
         if ( !isTerminalStatus( m_tasks[taskId].status ) )
-            return 0;
+            return false;
         oldInfo = m_tasks[taskId];
     }
 
-    // Drop parents that are not Completed (#685): a cascade-canceled parent
-    // can never satisfy the scheduling gate, so keeping it stranded the
-    // retry in Queued forever (never failing, blocking waitForTask to its
-    // timeout). Completed parents still gate the retry normally.
+    // Retry must not strand behind parents that can never satisfy DAG gating
+    // (#685): a cascade-canceled/failed parent is terminal-but-not-Completed,
+    // so a retry keeping it would sit in Queued forever. Keep parents that
+    // completed or are still live; drop the rest (missing parents already
+    // count as satisfied).
     QList<long> retryParents;
-    QStringList droppedParents;
     {
         QMutexLocker locker( &m_mutex );
         for ( long parentId : oldInfo.parentTaskIds )
         {
-            if ( m_tasks.contains( parentId ) && m_tasks[parentId].status != TaskStatus::Completed )
-                droppedParents.append( QString::number( parentId ) );
-            else
+            const auto it = m_tasks.find( parentId );
+            if ( it == m_tasks.end() )
+                continue; // cleared: treated as satisfied, drop from the list
+            if ( it->status == TaskStatus::Completed || !isTerminalStatus( it->status ) )
                 retryParents.append( parentId );
         }
     }
 
-    long newId = -1;
+    long newTaskId = -1;
     if ( oldInfo.hasJobRequest )
-        newId = submitJob( oldInfo.jobRequest, oldInfo.jobExecutor, {}, oldInfo.autoLoadLayer );
+    {
+        // Dispatched-step retries historically ran parent-free. Keep LIVE
+        // parents (still-running upstream steps whose $parent.port
+        // placeholders resolve from their payloads) and drop only the
+        // unsatisfiable terminal ones — running ahead of a live parent would
+        // execute with unresolved placeholder paths (review P1). The staged
+        // admission path enforces parent gating at scheduling time.
+        newTaskId = submitJob( oldInfo.jobRequest, oldInfo.jobExecutor, {}, oldInfo.autoLoadLayer,
+                               oldInfo.priority, retryParents );
+    }
     else
-        newId = enqueueTask( oldInfo.algorithmId, oldInfo.parameterMap, oldInfo.autoLoadLayer,
-                             oldInfo.priority, retryParents, true );
-    if ( newId <= 0 )
-        return 0;
+    {
+        newTaskId = enqueueTask( oldInfo.algorithmId, oldInfo.parameterMap, oldInfo.autoLoadLayer,
+                                 oldInfo.priority, retryParents, true, oldInfo.resourceEstimateOverrideMb,
+                                 oldInfo.source );
+    }
+    if ( newTaskId <= 0 )
+        return false;
 
-    // Keep the retry attached to its pipeline (#702.1): re-register the step
-    // mapping on the new task and remap children that were gating on the old
-    // task id, so a later child retry finds satisfiable parents instead of a
-    // permanently-Canceled one.
+    // Keep the retry attached to its pipeline (#702): without the remap the
+    // pipeline kept pointing at the OLD canceled task, so a retried step could
+    // never un-fail the pipeline and MCP workflow status stayed wrong.
+    if ( oldInfo.pipelineId >= 0 && !oldInfo.stepId.isEmpty() )
     {
         QMutexLocker locker( &m_mutex );
-        if ( !m_tasks.contains( newId ) )
-            return 0;
-        if ( oldInfo.pipelineId >= 0 && m_pipelines.contains( oldInfo.pipelineId ) && !oldInfo.stepId.isEmpty() )
+        auto pipeIt = m_pipelines.find( oldInfo.pipelineId );
+        auto newIt = m_tasks.find( newTaskId );
+        if ( pipeIt != m_pipelines.end() && newIt != m_tasks.end() )
         {
-            AlgorithmTaskInfo &info = m_tasks[newId];
-            info.stepId = oldInfo.stepId;
-            info.pipelineId = oldInfo.pipelineId;
-            PipelineExecutionInfo &pipe = m_pipelines[oldInfo.pipelineId];
-            pipe.taskToStepId.remove( oldInfo.taskId );
-            pipe.stepToTaskId[oldInfo.stepId.toStdString()] = newId;
-            pipe.taskToStepId[newId] = oldInfo.stepId.toStdString();
-            pipe.stepStatuses[oldInfo.stepId.toStdString()] = info.status;
-            updatePipelineForTaskLocked( newId );
-            queueTaskUpdatedLocked( newId );
-        }
-        for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
-        {
-            if ( it->parentTaskIds.contains( oldInfo.taskId ) )
+            const std::string stepKey = oldInfo.stepId.toStdString();
+            PipelineExecutionInfo &pipe = pipeIt.value();
+            pipe.taskToStepId.remove( taskId );
+            pipe.taskToStepId[newTaskId] = stepKey;
+            pipe.stepToTaskId[stepKey] = newTaskId;
+            pipe.stepStatuses[stepKey] = TaskStatus::Queued;
+            newIt->pipelineId = oldInfo.pipelineId;
+            newIt->stepId = oldInfo.stepId;
+
+            // Recompute the roll-up from step statuses: the retried step is
+            // queued again, so an all-terminal pipeline reopens; a failure
+            // latch from a DIFFERENT step must survive.
+            bool allTerminal = !pipe.stepToTaskId.isEmpty();
+            bool anyFailed = false;
+            for ( auto it = pipe.stepToTaskId.begin(); it != pipe.stepToTaskId.end(); ++it )
             {
-                std::replace( it->parentTaskIds.begin(), it->parentTaskIds.end(), oldInfo.taskId, newId );
+                const auto taskIt = m_tasks.find( it.value() );
+                if ( taskIt == m_tasks.end() )
+                {
+                    allTerminal = false;
+                    break;
+                }
+                if ( !isTerminalStatus( taskIt->status ) )
+                {
+                    allTerminal = false;
+                    break;
+                }
+                if ( taskIt->status == TaskStatus::Failed || taskIt->status == TaskStatus::Canceled )
+                    anyFailed = true;
             }
-        }
-        if ( !droppedParents.isEmpty() )
-        {
-            m_tasks[newId].logBuffer.append(
-                QStringLiteral( "Retry dropped unsatisfied parent(s) %1 to avoid stranding in Queued." )
-                    .arg( droppedParents.join( QStringLiteral( ", " ) ) ) );
-            queueTaskLogLocked( newId, m_tasks[newId].logBuffer.last() );
+            pipe.isCompleted = allTerminal;
+            pipe.isFailed = allTerminal && anyFailed;
+            if ( !allTerminal && pipe.errorMessage == oldInfo.errorMessage )
+                pipe.errorMessage.clear(); // the only failed step is being retried
         }
     }
-    flushPendingSignals();
-    return newId;
+    return true;
 }
 
 QList<AlgorithmTaskInfo> TaskCenter::allTasks() const
@@ -2064,6 +1858,7 @@ void TaskCenter::clearCompletedTasks()
         {
             m_forwardedLogCounts.remove( id );
             m_lastForwardedProgress.remove( id );
+            m_completionCallbacks.remove( id ); // defense (#702): stale registrations
         }
         for ( auto it = m_taskByJobId.begin(); it != m_taskByJobId.end(); )
         {
@@ -2081,6 +1876,9 @@ void TaskCenter::clearCompletedTasks()
 
 long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def, bool autoLoad )
 {
+    if ( m_isShuttingDown.load() )
+        return -1; // no new work after shutdown (#684)
+
     std::vector<std::string> ordered;
     std::string sortError;
     if ( !sicnu::workflow::topologicalSortSteps( def, ordered, sortError ) )
@@ -2096,11 +1894,6 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
         pipeInfo.orderedStepIds = ordered;
 
         QMap<std::string, long> stepToTaskId;
-
-        // Workflow Engine 2.0 run aggregate (ADR 0123, #662): built BEFORE the
-        // task loop so each step can consult the execution cache (#667).
-        attachWorkflowRunLocked( pipelineId, def, ordered );
-        std::vector<long> precompletedTaskIds;
 
         for ( const auto &stepId : ordered )
         {
@@ -2129,69 +1922,36 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
 
             QVariantMap params = sicnu::processing::jsonParamsToVariantMap( step->params );
 
-            // Execution-cache consultation (#667): an identical prior step
-            // (same operator, canonical params, upstream derivation revisions)
-            // skips re-execution. The cached output path is injected as the
-            // pre-completed task's result payload so downstream placeholder
-            // substitution resolves $stepId.output to the cached artifact.
-            QString cachedPath;
-            const auto runIt = m_pipelineRuns.find( pipelineId );
-            if ( runIt != m_pipelineRuns.end() && runIt.value() )
-            {
-                if ( auto plan = runIt.value()->stepPlan( stepId );
-                     plan && plan->cacheHit && !plan->cachedOutputPath.empty() )
-                    cachedPath = QString::fromStdString( plan->cachedOutputPath );
-            }
-
             long taskId = m_nextTaskId++;
             AlgorithmTaskInfo info;
             info.taskId = taskId;
             info.algorithmId = QString::fromStdString( step->operatorId );
             info.algorithmName = step->title.empty() ? QString::fromStdString( step->operatorId )
                                                      : QString::fromStdString( step->title );
+            info.status = TaskStatus::Queued;
             info.priority = TaskPriority::Normal;
             info.parentTaskIds = parentTaskIds;
             info.startTime = QDateTime::currentDateTimeUtc();
             info.parameterMap = params;
             info.autoLoadLayer = autoLoad;
+            info.autoDispatch = true;
             info.resourceProfile = resolveResourceProfile( info.algorithmId );
             info.stepId = QString::fromStdString( stepId );
             info.pipelineId = pipelineId;
 
-            if ( !cachedPath.isEmpty() )
-            {
-                // Pre-completed task: no JobEngine job, terminal from birth.
-                info.status = TaskStatus::Completed;
-                info.autoDispatch = false;
-                info.endTime = QDateTime::currentDateTimeUtc();
-                Json::Value payload( Json::objectValue );
-                payload["output"] = cachedPath.toStdString();
-                info.resultPayload = payload;
-                info.outputLayerPath = cachedPath;
-                info.logBuffer.append( QString( QStringLiteral( "[%1] Pipeline step %2 served from execution cache." ) )
-                                         .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ),
-                                               QString::fromStdString( stepId ) ) );
-            }
-            else
-            {
-                info.status = TaskStatus::Queued;
-                info.autoDispatch = true;
-                info.outputLayerPath = findOutputPathInParams( params );
-                info.logBuffer.append( QString( QStringLiteral( "[%1] Pipeline step %2 queued." ) )
-                                         .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ),
-                                               QString::fromStdString( stepId ) ) );
-            }
+            info.outputLayerPath = findOutputPathInParams( params );
+
+            info.logBuffer.append( QString( QStringLiteral( "[%1] Pipeline step %2 queued." ) )
+                                     .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ),
+                                           QString::fromStdString( stepId ) ) );
 
             m_tasks[taskId] = info;
             stepToTaskId[stepId] = taskId;
             pipeInfo.stepToTaskId[stepId] = taskId;
             pipeInfo.taskToStepId[taskId] = stepId;
-            pipeInfo.stepStatuses[stepId] = info.status;
+            pipeInfo.stepStatuses[stepId] = TaskStatus::Queued;
 
             queueTaskAddedLocked( taskId );
-
-            if ( !cachedPath.isEmpty() )
-                precompletedTaskIds.push_back( taskId );
         }
 
         if ( pipeInfo.stepToTaskId.isEmpty() )
@@ -2207,17 +1967,11 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                 pipeInfo.errorMessage = QStringLiteral( "Pipeline contains no dispatchable operator steps" );
             }
             m_pipelines[pipelineId] = pipeInfo;
-            finalizeWorkflowRunLocked( pipelineId, pipeInfo.isFailed, pipeInfo.errorMessage );
             m_waitCondition.wakeAll();
             return pipelineId;
         }
 
         m_pipelines[pipelineId] = pipeInfo;
-        // A pre-completed (cache-hit) step has no job-listener transition that
-        // would ever mark the pipeline terminal, so drive the aggregate here:
-        // a fully cached pipeline completes on this pass.
-        for ( long preId : precompletedTaskIds )
-            updatePipelineForTaskLocked( preId );
         processNextQueuedTasks();
     }
     flushPendingLaunches();

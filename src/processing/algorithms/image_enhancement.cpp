@@ -7,6 +7,7 @@
 #include <gdal.h>
 #include <cmath>
 #include <algorithm>
+#include <cstdint>
 #include <numeric>
 #include <vector>
 #include <limits>
@@ -598,18 +599,20 @@ void ImageEnhancement::laplacianFilter(const float *input, float *output, int wi
 // Helper: compute local mean and variance for a pixel
 // Integral image (summed-area table) for O(1) local statistics
 // Handles non-finite (NaN/±Inf) pixels by tracking valid pixel count separately
+//
+// #691: index math uses std::size_t and the valid-pixel counter is int64 —
+// the all-int32 version overflowed beyond ~46339² pixels (both the
+// (width+1)*(height+1) cell index and the accumulated counts). Callers must
+// screen dimensions with integralImageDimensionsSupported() first.
 class IntegralImage {
 public:
     IntegralImage(const float *input, int width, int height)
         : m_width(width), m_height(height)
     {
-        // Build integral images for sum, sum-of-squares, and valid count.
-        // Strides and indexes in size_t (#691): (width+1)*(height+1) and
-        // (y+1)*(width+1) overflow int32 at 46341^2 and per-pixel beyond
-        // ~2^31 elements (e.g. a 100000x30000 strip at y>21473) — silent
-        // corrupt indexing / std::length_error on very large rasters.
-        m_rowStride = static_cast<std::size_t>(width) + 1;
-        const std::size_t cells = m_rowStride * (static_cast<std::size_t>(height) + 1);
+        // Stride/cell count in size_t: (w+1)*(h+1) can exceed int32 even when
+        // w*h does not (46340² is the last safe int32 square).
+        const std::size_t stride = static_cast<std::size_t>(width) + 1;
+        const std::size_t cells = stride * (static_cast<std::size_t>(height) + 1);
         m_sum.resize(cells, 0.0);
         m_sumSq.resize(cells, 0.0);
         m_count.resize(cells, 0);
@@ -617,10 +620,10 @@ public:
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 float val = input[static_cast<std::size_t>(y) * width + x];
-                const std::size_t idx = (static_cast<std::size_t>(y) + 1) * m_rowStride + (x + 1);
-                const std::size_t idxLeft = (static_cast<std::size_t>(y) + 1) * m_rowStride + x;
-                const std::size_t idxUp = static_cast<std::size_t>(y) * m_rowStride + (x + 1);
-                const std::size_t idxDiag = static_cast<std::size_t>(y) * m_rowStride + x;
+                std::size_t idx = static_cast<std::size_t>(y + 1) * stride + (x + 1);
+                std::size_t idxLeft = static_cast<std::size_t>(y + 1) * stride + x;
+                std::size_t idxUp = static_cast<std::size_t>(y) * stride + (x + 1);
+                std::size_t idxDiag = static_cast<std::size_t>(y) * stride + x;
 
                 if (std::isfinite(val)) {
                     m_sum[idx] = m_sum[idxLeft] + m_sum[idxUp] - m_sum[idxDiag] + val;
@@ -638,7 +641,7 @@ public:
     }
 
     void computeRegion(int x1, int y1, int x2, int y2,
-                       double &sum, double &sumSq, qint64 &count) const
+                       double &sum, double &sumSq, std::int64_t &count) const
     {
         // Clamp to valid pixel range
         x1 = std::clamp(x1, 0, m_width - 1);
@@ -646,35 +649,53 @@ public:
         x2 = std::clamp(x2, 0, m_width - 1);
         y2 = std::clamp(y2, 0, m_height - 1);
 
-        // Integral image uses 1-indexed coordinates (size_t stride, #691)
+        // Integral image uses 1-indexed coordinates
+        const std::size_t stride = static_cast<std::size_t>(m_width) + 1;
         const std::size_t r1 = static_cast<std::size_t>(y1);
         const std::size_t r2 = static_cast<std::size_t>(y2) + 1;
         const std::size_t c1 = static_cast<std::size_t>(x1);
         const std::size_t c2 = static_cast<std::size_t>(x2) + 1;
 
-        sum = m_sum[r2 * m_rowStride + c2]
-            - m_sum[r1 * m_rowStride + c2]
-            - m_sum[r2 * m_rowStride + c1]
-            + m_sum[r1 * m_rowStride + c1];
+        sum = m_sum[r2 * stride + c2]
+            - m_sum[r1 * stride + c2]
+            - m_sum[r2 * stride + c1]
+            + m_sum[r1 * stride + c1];
 
-        sumSq = m_sumSq[r2 * m_rowStride + c2]
-              - m_sumSq[r1 * m_rowStride + c2]
-              - m_sumSq[r2 * m_rowStride + c1]
-              + m_sumSq[r1 * m_rowStride + c1];
+        sumSq = m_sumSq[r2 * stride + c2]
+              - m_sumSq[r1 * stride + c2]
+              - m_sumSq[r2 * stride + c1]
+              + m_sumSq[r1 * stride + c1];
 
-        count = m_count[r2 * m_rowStride + c2]
-              - m_count[r1 * m_rowStride + c2]
-              - m_count[r2 * m_rowStride + c1]
-              + m_count[r1 * m_rowStride + c1];
+        count = m_count[r2 * stride + c2]
+              - m_count[r1 * stride + c2]
+              - m_count[r2 * stride + c1]
+              + m_count[r1 * stride + c1];
     }
 
 private:
     int m_width, m_height;
-    std::size_t m_rowStride = 0;
     std::vector<double> m_sum;
     std::vector<double> m_sumSq;
-    std::vector<qint64> m_count;
+    std::vector<std::int64_t> m_count;
 };
+
+// #691: the summed-area table allocates (width+1)*(height+1) cells of 20
+// bytes and accumulates per-pixel counts; beyond INT32_MAX total pixels it
+// would exhaust the memory budget and corrupt results. Fail loudly (log and
+// bail, matching the ImageEnhancement error convention) instead of silently
+// producing garbage.
+static bool integralImageDimensionsSupported(int width, int height, const char *who)
+{
+    if (static_cast<std::int64_t>(width) * static_cast<std::int64_t>(height)
+            <= static_cast<std::int64_t>(INT32_MAX)) {
+        return true;
+    }
+    SICNU_LOG_ERROR(SicnuLogTags::Algorithms,
+                    QString("%1: raster %2x%3 exceeds the integral-image limit of %4 pixels "
+                            "(int32 index space); refusing to compute corrupted local statistics")
+                        .arg(who).arg(width).arg(height).arg(INT32_MAX));
+    return false;
+}
 
 static void localStats(const IntegralImage &integral, int width, int height,
                        int cx, int cy, int kernelSize,
@@ -688,7 +709,7 @@ static void localStats(const IntegralImage &integral, int width, int height,
     int y2 = std::clamp(cy + half, 0, height - 1);
 
     double sum, sumSq;
-    qint64 count;
+    std::int64_t count;
     integral.computeRegion(x1, y1, x2, y2, sum, sumSq, count);
     if (count <= 0) {
         mean = 0.0f;
@@ -725,6 +746,8 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
         .arg( width ).arg( height ).arg( kernelSize ).arg( noiseVariance ) );
 
     // Build integral image for O(1) local statistics
+    if (!integralImageDimensionsSupported(width, height, "leeFilter"))
+        return;
     IntegralImage integral(input, width, height);
 
     const int half = kernelSize / 2;
@@ -750,16 +773,16 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
                 } else {
                     float cuSq = noiseVariance;
                     float clSq = localVar / (mean * mean);
-                    // Lee weight is (1 - Cu^2/Ci^2); the Kuan filter adds
-                    // the extra 1/(1+Cu^2) factor (see :978) — the previous
-                    // copy here made Lee ≡ Kuan (#678).
-                    float weight = (clSq <= cuSq) ? 0.0f : 1.0f - cuSq / clSq;
+                    // Lee's additive-noise model: w = max(0, 1 - Cu^2/Cl^2).
+                    // The /(1 + Cu^2) denominator is KUAN's expansion and made
+                    // this filter bit-identical to kuanFilter (#678).
+                    float weight = (clSq <= cuSq) ? 0.0f : std::max(0.0f, 1.0f - cuSq / clSq);
                     output[y * width + x] = mean + weight * (pixel - mean);
                 }
             }
         }
         return true;
-    });
+    }, nullptr, ChunkedProcessor::defaultMaxThreads());
 }
 
 void ImageEnhancement::enhancedLeeFilter(const float *input, float *output,
@@ -790,6 +813,8 @@ void ImageEnhancement::enhancedLeeFilter(const float *input, float *output,
         .arg( width ).arg( height ).arg( kernelSize ).arg( noiseVariance ).arg( damping ) );
 
     // Build integral image for O(1) local statistics
+    if (!integralImageDimensionsSupported(width, height, "enhancedLeeFilter"))
+        return;
     IntegralImage integral(input, width, height);
 
     const int half = kernelSize / 2;
@@ -834,7 +859,7 @@ void ImageEnhancement::enhancedLeeFilter(const float *input, float *output,
             }
         }
         return true;
-    });
+    }, nullptr, ChunkedProcessor::defaultMaxThreads());
 }
 
 void ImageEnhancement::frostFilter(const float *input, float *output,
@@ -862,6 +887,8 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
     int half = kernelSize / 2;
 
     // Build integral image for O(1) local statistics
+    if (!integralImageDimensionsSupported(width, height, "frostFilter"))
+        return;
     IntegralImage integral(input, width, height);
 
     // Precompute distance lookup table (only depends on kernel geometry)
@@ -921,7 +948,7 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
             }
         }
         return true;
-    });
+    }, nullptr, ChunkedProcessor::defaultMaxThreads());
 }
 
 void ImageEnhancement::kuanFilter(const float *input, float *output,
@@ -948,6 +975,8 @@ void ImageEnhancement::kuanFilter(const float *input, float *output,
     // Kuan filter: similar to Lee but with different weighting
 
     // Build integral image for O(1) local statistics
+    if (!integralImageDimensionsSupported(width, height, "kuanFilter"))
+        return;
     IntegralImage integral(input, width, height);
 
     const int half = kernelSize / 2;
@@ -985,16 +1014,14 @@ void ImageEnhancement::kuanFilter(const float *input, float *output,
                     // Local variation less than noise → full smoothing
                     weight = 0.0f;
                 } else {
-                // Kuan keeps the extra 1/(1+Cu^2) factor that Lee drops
-                // (#678 — a shared perl edit stripped it from BOTH filters).
-                weight = ( 1.0f - cuSq / clSq ) / ( 1.0f + cuSq );
+                weight = (1.0f - cuSq / clSq) / (1.0f + cuSq);
             }
 
             output[y * width + x] = mean + weight * (pixel - mean);
             }
         }
         return true;
-    });
+    }, nullptr, ChunkedProcessor::defaultMaxThreads());
 }
 
 void ImageEnhancement::gammaMapFilter(const float *input, float *output,
@@ -1021,6 +1048,8 @@ void ImageEnhancement::gammaMapFilter(const float *input, float *output,
     // Gamma-MAP filter: Maximum A Posteriori for Gamma distributed speckle
 
     // Build integral image for O(1) local statistics
+    if (!integralImageDimensionsSupported(width, height, "gammaMapFilter"))
+        return;
     IntegralImage integral(input, width, height);
 
     const int half = kernelSize / 2;
@@ -1070,7 +1099,7 @@ void ImageEnhancement::gammaMapFilter(const float *input, float *output,
             }
         }
         return true;
-    });
+    }, nullptr, ChunkedProcessor::defaultMaxThreads());
 }
 
 // ---- Band ratio ----
@@ -1221,77 +1250,101 @@ void ImageEnhancement::jacobiEigen(std::vector<std::vector<float>> &A, int n,
         return;
     }
 
-    // Classical cyclic Jacobi (#670): full sweeps of Givens rotations with a
-    // RELATIVE convergence test. The previous solver performed at most 200
-    // individual rotations with an absolute 1e-10 tolerance on covariance
-    // entries — one classical sweep alone needs n(n-1)/2 rotations (a
-    // 224-band hyperspectral cube needs ~25k per sweep), and the absolute
-    // tolerance is unreachable for DN-scale entries (10^4..10^6), so PCA/MNF
-    // silently returned partial-rotation components for >~15 bands.
-    const int maxSweeps = 60;
-    const float eps = std::numeric_limits<float>::epsilon();
+    // Cyclic Jacobi (#670): the previous variant was a CLASSICAL Jacobi that
+    // annihilated one largest off-diagonal pivot per call under a hard budget
+    // of 200 rotations total. Convergence needs O(n^2) rotations (~6-10 full
+    // sweeps of n(n-1)/2 pivots), so PCA/MNF silently returned unconverged
+    // decompositions once a single sweep outgrew the budget (~>=12-16 bands),
+    // and the absolute 1e-10f tolerance is below float precision for typical
+    // covariances so the cap was always burned without any signal. We now
+    // sweep ALL pivots repeatedly in double precision and terminate on a
+    // tolerance relative to the matrix Frobenius norm.
+    std::vector<std::vector<double>> Ad(n, std::vector<double>(n));
+    double frobSq = 0.0;
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            const double v = static_cast<double>(A[i][j]);
+            Ad[i][j] = v;
+            frobSq += v * v;
+        }
+    }
+    const double norm = std::sqrt(frobSq);
+    const double tolerance = 1e-10 * norm;  // 0 for a zero matrix — converges immediately
 
-    for (int sweep = 0; sweep < maxSweeps; sweep++) {
-        float maxOff = 0.0f;
-        float maxDiag = 0.0f;
-        for (int i = 0; i < n; i++) {
-            maxDiag = std::max(maxDiag, std::abs(A[i][i]));
+    const int maxSweeps = 30;
+    bool converged = false;
+    for (int sweep = 0; sweep < maxSweeps && !converged; sweep++) {
+        // Termination check: off-diagonal Frobenius norm relative to |A|.
+        double offSq = 0.0;
+        for (int i = 0; i < n; i++)
             for (int j = i + 1; j < n; j++)
-                maxOff = std::max(maxOff, std::abs(A[i][j]));
+                offSq += Ad[i][j] * Ad[i][j];
+        if (std::sqrt(2.0 * offSq) <= tolerance) {
+            converged = true;
+            break;
         }
 
-        // Relative test: converged when the off-diagonal energy is at the
-        // float rounding level of the diagonal magnitude.
-        if (maxOff <= eps * std::max(maxDiag, 1.0f))
-            break;
-
-        for (int p = 0; p < n; p++) {
+        // One cyclic sweep: rotate every off-diagonal pivot once.
+        for (int p = 0; p < n - 1; p++) {
             for (int q = p + 1; q < n; q++) {
-                const float apq = A[p][q];
-                // Skip numerically-already-zero pairs: rotating them would
-                // only add rounding noise.
-                if (std::abs(apq) <= eps * std::max(std::abs(A[p][p]), std::abs(A[q][q])))
+                const double apq = Ad[p][q];
+                if (apq == 0.0)
                     continue;
 
-                const float theta = 0.5f * std::atan2(2.0f * apq, A[q][q] - A[p][p]);
-                const float c = std::cos(theta);
-                const float s = std::sin(theta);
+                const double app = Ad[p][p];
+                const double aqq = Ad[q][q];
+                // Rotation angle that annihilates Ad[p][q] (atan2 handles
+                // app == aqq, yielding theta = +/-pi/4).
+                const double theta = 0.5 * std::atan2(2.0 * apq, aqq - app);
+                const double c = std::cos(theta);
+                const double s = std::sin(theta);
 
-                // A' = G^T * A * G: update rows/cols p and q.
-                const float app = A[p][p];
-                const float aqq = A[q][q];
-                const float newApp = c * c * app + s * s * aqq - 2.0f * s * c * apq;
-                const float newAqq = s * s * app + c * c * aqq + 2.0f * s * c * apq;
+                // Compute new matrix elements: A' = G^T * A * G
+                // Only update rows/cols p and q (others unchanged)
+                const double newApp = c * c * app + s * s * aqq - 2.0 * s * c * apq;
+                const double newAqq = s * s * app + c * c * aqq + 2.0 * s * c * apq;
 
+                // Update off-diagonal elements in rows/cols p and q
                 for (int r = 0; r < n; r++) {
                     if (r == p || r == q) continue;
-                    const float arp = A[r][p];
-                    const float arq = A[r][q];
-                    A[r][p] = c * arp - s * arq;
-                    A[p][r] = A[r][p];
-                    A[r][q] = s * arp + c * arq;
-                    A[q][r] = A[r][q];
+                    const double arp = Ad[r][p];
+                    const double arq = Ad[r][q];
+                    Ad[r][p] = c * arp - s * arq;
+                    Ad[p][r] = Ad[r][p];
+                    Ad[r][q] = s * arp + c * arq;
+                    Ad[q][r] = Ad[r][q];
                 }
 
-                A[p][p] = newApp;
-                A[q][q] = newAqq;
-                A[p][q] = 0.0f; // by construction
-                A[q][p] = 0.0f;
+                Ad[p][p] = newApp;
+                Ad[q][q] = newAqq;
+                Ad[p][q] = 0.0; // By construction
+                Ad[q][p] = 0.0;
 
-                // Accumulate eigenvectors: V' = V * G.
+                // Update eigenvectors
                 for (int r = 0; r < n; r++) {
-                    const float erp = eigenvectors[r][p];
-                    const float erq = eigenvectors[r][q];
-                    eigenvectors[r][p] = c * erp - s * erq;
-                    eigenvectors[r][q] = s * erp + c * erq;
+                    const double erp = eigenvectors[r][p];
+                    const double erq = eigenvectors[r][q];
+                    eigenvectors[r][p] = static_cast<float>(c * erp - s * erq);
+                    eigenvectors[r][q] = static_cast<float>(s * erp + c * erq);
                 }
             }
         }
     }
 
-    // Extract eigenvalues from diagonal
-    for (int i = 0; i < n; i++)
-        eigenvalues[i] = A[i][i];
+    if (!converged) {
+        SICNU_LOG_WARN( SicnuLogTags::Algorithms,
+            QString( "jacobiEigen: %1 sweeps did not reach the off-diagonal tolerance "
+                     "(|A|=%2) — eigen decomposition may be inexact" )
+                .arg( maxSweeps ).arg( norm ) );
+    }
+
+    // Write the diagonalized matrix back (float output contract unchanged) and
+    // extract eigenvalues from the diagonal. Callers sort descending themselves.
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++)
+            A[i][j] = static_cast<float>(Ad[i][j]);
+        eigenvalues[i] = static_cast<float>(Ad[i][i]);
+    }
 }
 
 ImageEnhancement::PcaResult ImageEnhancement::pca(

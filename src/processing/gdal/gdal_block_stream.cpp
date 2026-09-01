@@ -46,6 +46,8 @@ void GdalBlockStream::buildTiles()
             t.bufferHeight = height + 2 * m_halo;
             t.index = idx;
             t.totalTiles = cols * rows;
+            t.rasterWidth = m_rasterWidth;
+            t.rasterHeight = m_rasterHeight;
             m_tiles.push_back( t );
             ++idx;
         }

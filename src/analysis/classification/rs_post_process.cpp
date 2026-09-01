@@ -188,9 +188,14 @@ int modeOfWindow( const cv::Mat &labels, int r, int c, int k )
   if ( freq.empty() )
     return pixelAt( labels, r, c );  // only NoData around: keep the center
 
-  int bestVal = pixelAt( labels, r, c );
-  if ( bestVal == 0 )
-    bestVal = freq.front().val;
+  // A NoData (label 0) CENTER stays NoData (#700): the filter must not grow
+  // classes into NoData areas, it only relabels valid centers. Label 0 also
+  // does not vote (see above), so this only leaves untouched pixels 0.
+  const int center = pixelAt( labels, r, c );
+  if ( center == 0 )
+    return 0;
+
+  int bestVal = center;
   int bestCnt = -1;
   for ( const FreqEntry &e : freq )
   {

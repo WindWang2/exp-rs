@@ -462,8 +462,10 @@ bool loadGdalMetadata(const QString &rasterPath, const QMap<int, QString> &bandN
 // Public metadata loader
 // ---------------------------------------------------------------------------
 
-QString autoDetectMetadataFile(const QString &rasterPath)
+QString autoDetectMetadataFile(const QString &rasterPath, QString *errorMessage)
 {
+    if (errorMessage)
+        errorMessage->clear();
     const QFileInfo fi(rasterPath);
     const QDir dir = fi.absoluteDir();
     const QStringList mtl = dir.entryList({QStringLiteral("*_MTL.txt")},
@@ -473,6 +475,23 @@ QString autoDetectMetadataFile(const QString &rasterPath)
 
     if (mtl.isEmpty() && mtd.isEmpty())
         return {};
+    // #699: multiple candidates mean multiple scenes (or arbitrary files)
+    // share the directory; picking .first() alphabetically attached the wrong
+    // coefficients. Fail closed and name the candidates instead of guessing.
+    if (mtl.size() > 1) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Multiple Landsat MTL files found next to %1 (%2). "
+                                           "Pass metadata_path explicitly.")
+                                .arg(rasterPath, mtl.join(QStringLiteral(", ")));
+        return {};
+    }
+    if (mtd.size() > 1) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Multiple Sentinel-2 MTD files found next to %1 (%2). "
+                                           "Pass metadata_path explicitly.")
+                                .arg(rasterPath, mtd.join(QStringLiteral(", ")));
+        return {};
+    }
     if (mtl.isEmpty())
         return dir.absoluteFilePath(mtd.first());
     if (mtd.isEmpty())

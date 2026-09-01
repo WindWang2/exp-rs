@@ -721,4 +721,7 @@ TEST_CASE( "shutdown wakes sync awaiters promptly (run last)",
   // shutdown() joins JobEngine workers (the stub finishes ≤400ms); the
   // awaiter must release within that window, not after its own 30s timeout.
   REQUIRE( elapsedMs < 5000 );
+
+  // Restore both singletons for any test registered after this one.
+  sicnu::TaskCenter::instance().shutdownForTests();
 }

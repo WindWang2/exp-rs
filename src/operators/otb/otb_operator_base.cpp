@@ -10,8 +10,8 @@
 #include "processing/tools/tool_path_manager.h"
 
 #include <QDir>
-#include <QFileInfo>
 #include <QElapsedTimer>
+#include <QFileInfo>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QString>
@@ -134,40 +134,43 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
     };
     OutputCleanup cleanup{ outputPath };
 
-    // Watchdog + grace ladder + crash classification (#693), mirroring the
-    // provider-level runner (#618): a hung otbcli used to pin a JobEngine
-    // worker forever (the pool is small), and a tool killed by a signal
-    // reported exit code 0, i.e. success.
-    QElapsedTimer watchdog;
-    watchdog.start();
-    const qint64 watchdogTimeoutMs = 60 * 60 * 1000; // OTB composites can be long
-    // Keep the error-detail tail bounded: a chatty OTB application could
-    // otherwise accumulate unbounded output for the whole run.
-    constexpr qsizetype maxAccumulatedOutput = 1024 * 1024;
-
-    auto terminateLadder = [&proc]() {
+    // Watchdog + graceful cancel ladder (#693, ports the #618 provider-wrapper
+    // pattern from otb_tool_wrapper.cpp): cancellation must not just throw and
+    // let the QProcess destructor orphan the otbcli child, which would keep
+    // running (and holding the deleted output's fd) forever. terminate() first
+    // so multi-GB OTB writes can flush, then kill() after a grace period.
+    const auto terminateGracefully = [&proc]() {
         proc.terminate();
         if (!proc.waitForFinished(5000))
             proc.kill();
+        proc.waitForFinished(2000);
     };
+    QElapsedTimer watchdog;
+    watchdog.start();
+    const qint64 maxRuntimeMs = 60 * 60 * 1000; // OTB composites can be long
 
     try {
     while (proc.state() == QProcess::Running) {
-        context.throwIfCancelled();
+        try {
+            context.throwIfCancelled();
+        } catch (...) {
+            terminateGracefully();
+            throw;
+        }
 
-        if (watchdog.elapsed() > watchdogTimeoutMs) {
-            terminateLadder();
+        if (watchdog.elapsed() > maxRuntimeMs) {
+            terminateGracefully();
             throw RSOperatorError(ErrorCode::OtbError,
-                                  "OTB application timed out after " +
-                                      std::to_string(watchdogTimeoutMs / 1000) + " s and was terminated.");
+                                  "OTB application exceeded the maximum runtime ("
+                                      + std::to_string(maxRuntimeMs / 1000)
+                                      + " s) and was terminated.");
         }
 
         proc.waitForReadyRead(100);
         const QByteArray output = proc.readAllStandardOutput();
         if (!output.isEmpty()) {
             const QString text = QString::fromUtf8(output);
-            if (accumulatedOutput.size() < maxAccumulatedOutput)
-                accumulatedOutput += text;
+            accumulatedOutput += text;
             context.logInfo(text.toStdString());
 
             // OTB may emit progress on the same stream; try to parse it.
@@ -187,17 +190,11 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
     const QByteArray remaining = proc.readAllStandardOutput();
     if (!remaining.isEmpty()) {
         const QString text = QString::fromUtf8(remaining);
-        if (accumulatedOutput.size() < maxAccumulatedOutput)
-            accumulatedOutput += text;
+        accumulatedOutput += text;
         context.logInfo(text.toStdString());
     }
 
-    if (proc.exitStatus() == QProcess::CrashExit) {
-        throw RSOperatorError(ErrorCode::OtbError,
-                              "OTB application crashed (killed by signal).");
-    }
-
-    if (proc.exitCode() != 0) {
+    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
         // Under MergedChannels readAllStandardError() is always empty - the
         // diagnostic text already landed in accumulatedOutput.
         Json::Value details(Json::objectValue);
@@ -215,12 +212,10 @@ bool OtbOperatorBase::runOtbProcess(const QString& program, const QStringList& a
         throw RSOperatorError(ErrorCode::OtbError, message, details);
     }
     } catch (...) {
-        // Cancellation/timeout/errors leave the loop with the process maybe
-        // still running - tear it down so no orphan otbcli outlives the job,
-        // then let the OutputCleanup destructor remove the partial product.
-        if (proc.state() != QProcess::NotRunning)
-            terminateLadder();
-        throw;
+        // Any escape route must leave no orphan: terminate() on an
+        // already-finished process is a harmless no-op.
+        terminateGracefully();
+        throw; // the OutputCleanup destructor removes the partial product
     }
 
     cleanup.committed = true;

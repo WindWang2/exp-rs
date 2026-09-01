@@ -433,6 +433,20 @@ void AgentCopilotDockWidget::onSendClicked()
     m_pendingToolCallCompletions.clear();
     onLlmFinished();
     setRunStage( tr( "Canceled" ) );
+
+    // #704: a tool-completion callback landing after Stop used to re-enter
+    // sendToolResultFollowUp (m_isStreaming = true again, LLM re-contacted),
+    // resurrecting a run the user explicitly stopped. Invalidate the run the
+    // same way sendPrompt does: kill the completion guard, drop pending
+    // completions and bump the epoch so in-flight watchers no-op.
+    if ( m_completionGuard )
+      *m_completionGuard = false;
+    m_pendingToolCallCompletions.clear();
+    m_completionGuard = std::make_shared<std::atomic<bool>>( true );
+    ++m_runEpoch;
+    m_currentRunId.clear();
+    m_submittedTaskIds.clear();
+    m_submittedPipelineIds.clear();
     return;
   }
 

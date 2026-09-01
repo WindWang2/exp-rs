@@ -272,7 +272,17 @@ void RasterProcessingDialogBase::setupButtonBar( QVBoxLayout *layout )
   connect( m_buttonBox, &QDialogButtonBox::accepted, this, &RasterProcessingDialogBase::onRunClicked );
   connect( m_buttonBox, &QDialogButtonBox::rejected, this, [this]() {
     if ( isRunning() )
+    {
+      // Stay in "cancelling" until the terminal record lands (#696): the
+      // handle remains busy, so Run stays disabled and the dialog cannot
+      // close or restart while the worker finishes writing.
       m_jobHandle.cancel();
+      if ( isRunning() && m_cancelButton )
+      {
+        m_cancelButton->setEnabled( false );
+        m_cancelButton->setText( tr( "取消中…" ) );
+      }
+    }
     else
       QDialog::reject();
   } );
@@ -338,6 +348,11 @@ void RasterProcessingDialogBase::finishRun()
   {
     m_runButton->setEnabled( true );
     m_runButton->setText( tr( "运行" ) );
+  }
+  if ( m_cancelButton )
+  {
+    m_cancelButton->setEnabled( true );
+    m_cancelButton->setText( tr( "取消" ) );
   }
   if ( m_resetButton )
     m_resetButton->setEnabled( true );

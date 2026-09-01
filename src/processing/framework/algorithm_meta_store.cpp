@@ -1,4 +1,5 @@
 // src/processing/framework/algorithm_meta_store.cpp
+#include <algorithm>
 #include "algorithm_meta_store.h"
 
 #include "runtime_paths.h"
@@ -125,6 +126,71 @@ size_t AlgorithmMetaStore::size() const
 {
   std::lock_guard<std::mutex> lock( storeMutex() );
   return mEntries.size();
+}
+
+
+
+std::optional<AlgorithmMetaEntry> AlgorithmMetaStore::resolveAgainstDescriptor(
+    const std::string &id,
+    const AgentMetadata &descriptor,
+    std::vector<std::string> *drift ) const
+{
+    auto entry = find( id );
+    if ( !entry )
+        return std::nullopt;
+
+    auto noteDrift = [drift]( const char *field, const std::string &sidecarValue,
+                              const std::string &descriptorValue ) {
+        if ( drift )
+            drift->push_back( std::string( field ) + ": sidecar=" + sidecarValue
+                              + " descriptor=" + descriptorValue + " (descriptor wins)" );
+    };
+
+    if ( !descriptor.taskFamily.empty() )
+    {
+        if ( entry->task != descriptor.taskFamily )
+        {
+            noteDrift( "task", entry->task.empty() ? "<unset>" : entry->task,
+                       descriptor.taskFamily );
+            entry->task = descriptor.taskFamily;
+        }
+    }
+    {
+        // gpu: authoritative ONLY when the descriptor explicitly declared the
+        // capability (tri-state); an undeclared descriptor must not flip an
+        // honest sidecar gpu:true to false (review P2).
+        if ( descriptor.gpuDeclared && entry->gpu != descriptor.gpuAccelerated )
+        {
+            noteDrift( "gpu", entry->gpu ? "true" : "false",
+                       descriptor.gpuAccelerated ? "true" : "false" );
+            entry->gpu = descriptor.gpuAccelerated;
+        }
+    }
+    if ( descriptor.accuracy >= 0.0 && entry->accuracy != descriptor.accuracy )
+    {
+        if ( entry->accuracy >= 0.0 )
+            noteDrift( "accuracy", std::to_string( entry->accuracy ),
+                       std::to_string( descriptor.accuracy ) );
+        entry->accuracy = descriptor.accuracy;
+    }
+    if ( !descriptor.notes.empty() && entry->notes != descriptor.notes )
+    {
+        if ( !entry->notes.empty() )
+            noteDrift( "notes", "<sidecar text>", "<descriptor text>" );
+        entry->notes = descriptor.notes;
+    }
+    if ( !descriptor.tags.empty() )
+    {
+        // Union merge, descriptor order first, duplicates dropped.
+        std::vector<std::string> merged = descriptor.tags;
+        for ( const auto &t : entry->tags )
+        {
+            if ( std::find( merged.begin(), merged.end(), t ) == merged.end() )
+                merged.push_back( t );
+        }
+        entry->tags = std::move( merged );
+    }
+    return entry;
 }
 
 } // namespace sicnu::processing

@@ -200,9 +200,16 @@ Json::Value runAtmosphericCorrectionCore(const std::string& defaultMethod,
     // surface reflectance was the silent science bug this replaces.
     if (methodCode == AtmosphericCorrection::Dos1 || methodCode == AtmosphericCorrection::Dos2) {
         QString dosMetaPath = QString::fromStdString(getString(params, "metadata_path", ""));
-        if (dosMetaPath.isEmpty())
+        if (dosMetaPath.isEmpty()) {
+            QString detectError;
             dosMetaPath = RadiometricCalibration::autoDetectMetadataFile(
-                QString::fromStdString(inputPath));
+                QString::fromStdString(inputPath), &detectError);
+            // Ambiguous sibling metadata must fail closed, not guess (#699).
+            if (dosMetaPath.isEmpty() && !detectError.isEmpty()) {
+                throw RSOperatorError(ErrorCode::InvalidInputData,
+                                      detectError.toStdString());
+            }
+        }
         if (!dosMetaPath.isEmpty()) {
             GdalDatasetWrapper ds;
             QMap<int, QString> bandNames;
@@ -265,9 +272,16 @@ Json::Value runAtmosphericCorrectionCore(const std::string& defaultMethod,
     // "sensor metadata populates parameters automatically" workflow.
     if (methodCode == AtmosphericCorrection::DnToRadiance && (!hasGain || !hasBias)) {
         QString metadataPath = QString::fromStdString(getString(params, "metadata_path", ""));
-        if (metadataPath.isEmpty())
+        if (metadataPath.isEmpty()) {
+            QString detectError;
             metadataPath = RadiometricCalibration::autoDetectMetadataFile(
-                QString::fromStdString(inputPath));
+                QString::fromStdString(inputPath), &detectError);
+            // Ambiguous sibling metadata must fail closed, not guess (#699).
+            if (metadataPath.isEmpty() && !detectError.isEmpty()) {
+                throw RSOperatorError(ErrorCode::InvalidInputData,
+                                      detectError.toStdString());
+            }
+        }
         bool resolved = false;
         if (!metadataPath.isEmpty()) {
             GdalDatasetWrapper ds;

@@ -60,30 +60,15 @@ class JobEngine
 
     static JobEngine &instance();
 
-    /// Default pool size policy (#661): one worker per hardware core minus
-    /// the core reserved for UI (ADR 0002), floored at kMinWorkers.
-    /// hardware_concurrency() == 0 (unknown) degrades to kMinWorkers.
-    static int defaultWorkerCount();
-    /// Injectable core-count overload: the pure policy so tests can pin
-    /// "cap 8 -> pool 7" without depending on the host.
-    static int defaultWorkerCount( unsigned hardwareConcurrency );
-
-    /// Lower bound for pool sizes: keeps a worker from starving the very
-    /// pool it runs on and preserves the historical floor.
-    static constexpr int kMinWorkers = 2;
-    /// Upper bound for explicit overrides, guarding against misconfiguration
-    /// while still honoring real workstation sizes.
-    static constexpr int kMaxWorkersOverride = 64;
-
-    /// Explicit override of the pool size. Honored as-is within
-    /// [kMinWorkers, kMaxWorkersOverride]; values outside are clamped.
-    void setMaxWorkers( int n );
+    void setMaxWorkers( int n ); // clamp 2..4
     int maxWorkers() const;
 
-    /** Stop and join all worker threads. Safe to call multiple times.
-     * Production shutdown is latched: submits after it are rejected with a
-     * cancelled record instead of resurrecting worker threads during
-     * teardown (#684). shutdownForTests() clears the latch. */
+    /**
+     * Stop and join all worker threads. Safe to call multiple times.
+     * STICKY in production: after shutdown() the engine is terminated —
+     * submit() returns a Cancelled record and never respawns workers
+     * (#684). Only shutdownForTests() resets the terminated state.
+     */
     void shutdown();
 
     /** Submit RSOperator (or prefix-registered executor) job. */
@@ -164,6 +149,10 @@ class JobEngine
     void waitUntilIdleForTests( int timeoutMs = 10000 );
     void shutdownForTests(); // join workers; engine remains reusable
 
+    /// True once production shutdown() ran (sticky; cleared only by
+    /// shutdownForTests). Used by tests to assert no-resurrect semantics.
+    bool isTerminated() const;
+
   private:
     JobEngine();
     ~JobEngine();
@@ -198,13 +187,14 @@ class JobEngine
     JobExecutor m_fallbackExecutor; // catch-all, tried after RSOperatorRegistry
     std::vector<std::thread> m_workers;
     Listener m_listener;
-    int m_maxWorkers = defaultWorkerCount();
+    int m_maxWorkers = 3;
     int m_running = 0;
     bool m_exclusiveRunning = false;
     bool m_shuttingDown = false;
-    /// Latched production-shutdown flag (#684): distinct from the
-    /// test-resettable m_stop so a late submit cannot resurrect workers.
-    bool m_stopped = false;
+    /// Sticky production termination (#684): set by shutdown(), never cleared
+    /// except by shutdownForTests(). submit()/ensureWorkersLocked() refuse
+    /// while set so a post-shutdown submit cannot resurrect worker threads.
+    bool m_terminated = false;
     uint64_t m_generation = 0;
     std::atomic<bool> m_stop{false};
     std::atomic<uint64_t> m_nextId{1};

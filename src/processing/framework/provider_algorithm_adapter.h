@@ -7,6 +7,8 @@
 
 #include "atomic_algorithm_adapter.h"
 
+#include <QString>
+
 class QgsProcessingAlgorithm;
 
 namespace sicnu::processing {
@@ -15,15 +17,17 @@ namespace sicnu::processing {
  * Adapter that wraps a QgsProcessingAlgorithm into the AtomicAlgorithmAdapter
  * interface.  Constructed from a const reference to a registry-owned algorithm
  * (a clone is created for execution).
+ *
+ * Lifetime note (#695): the adapter does NOT cache the provider-owned
+ * algorithm pointer — QgsProcessingRegistry may delete the algorithm when its
+ * provider is unloaded. execute() re-resolves the live algorithm from the
+ * processing registry by id and fails with a typed error when it is gone.
  */
 class ProviderAlgorithmAdapter : public AtomicAlgorithmAdapter
 {
 public:
   /// Constructs from a registry-owned algorithm. A descriptor is built eagerly;
-  /// execution re-resolves the algorithm from QgsProcessingRegistry by id and
-  /// clones it via create() — the provider owns the algorithm, so caching the
-  /// raw pointer here was a use-after-free window across provider
-  /// removal/refresh (#695).
+  /// execution re-resolves the algorithm by id and clones it via create().
   explicit ProviderAlgorithmAdapter( const QgsProcessingAlgorithm &alg );
   ~ProviderAlgorithmAdapter() override = default;
 
@@ -36,6 +40,10 @@ public:
   Json::Value estimateExecution( const Json::Value &params ) const override;
 
 private:
+  /// Owning provider id (empty for provider-less algorithms) and the full
+  /// algorithm id used to look the live algorithm up in QgsProcessingRegistry.
+  QString mProviderId;
+  QString mAlgorithmId;
   AlgorithmDescriptor mDesc;
 };
 

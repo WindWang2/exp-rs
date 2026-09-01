@@ -141,18 +141,93 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
     const int windowW = col1 - col0;
     const int windowH = row1 - row0;
     std::vector<uint8_t> inside( static_cast<size_t>( windowW ) * windowH, 0 );
-    for ( int row = row0; row < row1; ++row )
+
+    // #704: per-polygon containment is O(vertices) per pixel (a 5,000-vertex
+    // ROI over a 3000x3000 window ≈ 4.5e10 edge tests). Rasterize the polygon
+    // ONCE with an even-odd scanline in pixel space: O(vertices*rows + W*H).
+    // Degenerate geotransforms fall back to the exact per-pixel test.
+    const double det = gt[1] * gt[5] - gt[2] * gt[4];
+    bool rasterized = false;
+    if ( std::abs( det ) > 1e-15 )
     {
-        const double rCenter = row + 0.5;
-        for ( int col = col0; col < col1; ++col )
+        // Transform polygon vertices into pixel space via the inverse affine.
+        struct PixEdge
         {
-            const double cCenter = col + 0.5;
-            const double mapX = gt[0] + cCenter * gt[1] + rCenter * gt[2];
-            const double mapY = gt[3] + cCenter * gt[4] + rCenter * gt[5];
-            if ( polygon.containsPoint( QPointF( mapX, mapY ), Qt::OddEvenFill ) )
+            double x0, y0, x1, y1;
+        };
+        std::vector<PixEdge> edges;
+        edges.reserve( static_cast<size_t>( polygon.size() ) );
+        const double invA = gt[5] / det, invB = -gt[2] / det;
+        const double invC = -gt[4] / det, invD = gt[1] / det;
+        std::vector<QPointF> px( static_cast<size_t>( polygon.size() ) );
+        for ( int i = 0; i < polygon.size(); ++i )
+        {
+            const QPointF &pt = polygon.at( i );
+            const double dx = pt.x() - gt[0];
+            const double dy = pt.y() - gt[3];
+            px[static_cast<size_t>( i )] = QPointF( invA * dx + invB * dy,
+                                                    invC * dx + invD * dy );
+        }
+        for ( size_t i = 0; i < px.size(); ++i )
+        {
+            const QPointF &a = px[i];
+            const QPointF &b = px[( i + 1 ) % px.size()];
+            if ( a.y() == b.y() )
+                continue; // horizontal edges contribute nothing to even-odd crossings
+            edges.push_back( PixEdge{ a.x(), a.y(), b.x(), b.y() } );
+        }
+
+        std::vector<double> xs;
+        xs.reserve( 16 );
+        for ( int row = row0; row < row1; ++row )
+        {
+            const double cy = row + 0.5; // pixel-center scanline
+            xs.clear();
+            for ( const PixEdge &e : edges )
             {
-                inside[static_cast<size_t>( row - row0 ) * windowW + ( col - col0 )] = 1;
-                ++pixels;
+                const double yMin = std::min( e.y0, e.y1 );
+                const double yMax = std::max( e.y0, e.y1 );
+                if ( cy < yMin || cy >= yMax )
+                    continue;
+                const double t = ( cy - e.y0 ) / ( e.y1 - e.y0 );
+                xs.push_back( e.x0 + t * ( e.x1 - e.x0 ) );
+            }
+            if ( xs.size() < 2 )
+                continue;
+            std::sort( xs.begin(), xs.end() );
+            const size_t rowBase = static_cast<size_t>( row - row0 ) * windowW;
+            for ( size_t k = 0; k + 1 < xs.size(); k += 2 )
+            {
+                // Pixel center col+0.5 is inside when xs[k] <= center < xs[k+1].
+                int cStart = static_cast<int>( std::ceil( xs[k] - 0.5 ) );
+                int cEnd = static_cast<int>( std::ceil( xs[k + 1] - 0.5 ) );
+                cStart = std::max( cStart, col0 );
+                cEnd = std::min( cEnd, col1 );
+                for ( int col = cStart; col < cEnd; ++col )
+                {
+                    inside[rowBase + static_cast<size_t>( col - col0 )] = 1;
+                    ++pixels;
+                }
+            }
+        }
+        rasterized = true;
+    }
+
+    if ( !rasterized )
+    {
+        for ( int row = row0; row < row1; ++row )
+        {
+            const double rCenter = row + 0.5;
+            for ( int col = col0; col < col1; ++col )
+            {
+                const double cCenter = col + 0.5;
+                const double mapX = gt[0] + cCenter * gt[1] + rCenter * gt[2];
+                const double mapY = gt[3] + cCenter * gt[4] + rCenter * gt[5];
+                if ( polygon.containsPoint( QPointF( mapX, mapY ), Qt::OddEvenFill ) )
+                {
+                    inside[static_cast<size_t>( row - row0 ) * windowW + ( col - col0 )] = 1;
+                    ++pixels;
+                }
             }
         }
     }

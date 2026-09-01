@@ -36,9 +36,7 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
   m_onFailure = std::move( onFailure );
   m_onProgress = std::move( onProgress );
 
-  // #674: this seam self-loads its result (dialog accept / panel), so the
-  // TaskCenter default-on layerAutoLoadRequested path would double-load.
-  const long submittedId = m_taskCenter->submitJob( req, {}, {}, /*autoLoad=*/false );
+  const long submittedId = m_taskCenter->submitJob( req );
   m_taskId = submittedId;
   if ( m_taskId < 0 )
   {
@@ -138,15 +136,42 @@ long GuiJobHandle::submitTask( const QString &algorithmId,
 
 void GuiJobHandle::cancel()
 {
-  // Only REQUEST the cancellation (#696): resetting m_taskId and firing
-  // onFailure synchronously re-enabled Run (and unguarded reject()) while
-  // the operator was still mid-write, so a second run could target the
-  // same output file or destroy the dialog under the executor. The
-  // terminal taskUpdated record drives the reset + callbacks; Cancelling
-  // progress keeps reporting until it lands.
-  if ( m_taskId >= 0 )
+  if ( m_taskId < 0 )
+    return;
+  const long idToCancel = m_taskId;
+
+  // Cooperative cancel: the underlying worker keeps writing until it observes
+  // the cancel flag, so the handle MUST stay busy (isRunning() == true) until
+  // the terminal record arrives (#696). Clearing m_taskId here used to
+  // re-enable the caller's Run button while the first worker was still
+  // writing the output file, allowing a second run against the same path.
+  // While cancelling, the taskUpdated stream shows "Cancellation in progress"
+  // (see onTaskUpdated); the terminal Canceled update then runs the normal
+  // failure path, which is where dialogs re-enable Run.
+  const bool cancelRequested = m_taskCenter->cancelTask( idToCancel );
+  if ( !cancelRequested )
   {
-    m_taskCenter->cancelTask( m_taskId );
+    // Already terminal (or unknown). Catch up directly so the terminal
+    // update is never missed; if the task is gone entirely, synthesize the
+    // canceled outcome this handle promised its caller.
+    const sicnu::AlgorithmTaskInfo info = m_taskCenter->getTaskInfo( idToCancel );
+    if ( info.taskId == idToCancel
+         && ( info.status == sicnu::TaskStatus::Completed || info.status == sicnu::TaskStatus::Failed
+              || info.status == sicnu::TaskStatus::Canceled ) )
+    {
+      onTaskUpdated( info );
+    }
+    else if ( m_taskId == idToCancel )
+    {
+      m_taskId = -1;
+      auto onFailure = std::move( m_onFailure );
+      m_onSuccess = nullptr;
+      m_onFailure = nullptr;
+      m_onProgress = nullptr;
+      if ( onFailure )
+        onFailure( QStringLiteral( "Canceled" ), true );
+      emit taskFailed( QStringLiteral( "Canceled" ), true );
+    }
   }
 }
 
@@ -156,12 +181,16 @@ void GuiJobHandle::onTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
     return;
 
   if ( info.status == sicnu::TaskStatus::Running || info.status == sicnu::TaskStatus::Queued
-       || info.status == sicnu::TaskStatus::WaitingResource || info.status == sicnu::TaskStatus::Cancelling )
+       || info.status == sicnu::TaskStatus::WaitingResource || info.status == sicnu::TaskStatus::Dispatching
+       || info.status == sicnu::TaskStatus::Cancelling )
   {
-    int pct = static_cast<int>( info.progressPercentage );
+    // progressPercentage is a 0..1 fraction; surface it as 0..100 (#704).
+    int pct = static_cast<int>( info.progressPercentage * 100.0 );
     QString statusText = info.errorMessage;
     if ( statusText.isEmpty() && info.status == sicnu::TaskStatus::WaitingResource )
       statusText = QObject::tr( "Waiting for available resources" );
+    if ( statusText.isEmpty() && info.status == sicnu::TaskStatus::Dispatching )
+      statusText = QObject::tr( "Starting" );
     if ( statusText.isEmpty() && info.status == sicnu::TaskStatus::Cancelling )
       statusText = QObject::tr( "Cancellation in progress" );
     if ( m_onProgress )
