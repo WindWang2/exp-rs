@@ -9,10 +9,19 @@
 
 #include <opencv2/imgproc.hpp>
 
+#include <algorithm>
+
 namespace sicnu::operators::opencv {
 
 using namespace schema;
 namespace {
+
+// Windowed filters stream per tile with a kernel-radius halo; a 1-pixel
+// minimum keeps kSize==1 kernels (identity Gaussian/median, thin Sobel)
+// inside the haloed stream path where the math is identical.
+int oddKernelRadius(const Json::Value& params, const char* key, int defaultSize) {
+    return std::max(1, getInt(params, key, defaultSize) / 2);
+}
 
 void applyNormalizedFilter(cv::Mat& srcDst, const std::function<void(const cv::Mat&, cv::Mat&)>& filterFn) {
     cv::Mat mask;
@@ -67,6 +76,10 @@ Json::Value OpenCvGaussianBlurOperator::operatorSchemaProperties() const {
     return props;
 }
 
+int OpenCvGaussianBlurOperator::neighborhoodRadius(const Json::Value& params) const {
+    return oddKernelRadius(params, "kernelSize", 5);
+}
+
 void OpenCvGaussianBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value& params) const {
     const int kernelSize = getInt(params, "kernelSize", 5);
     const double sigma = getDouble(params, "sigma", 1.0);
@@ -102,6 +115,10 @@ Json::Value OpenCvMeanBlurOperator::operatorSchemaProperties() const {
     return props;
 }
 
+int OpenCvMeanBlurOperator::neighborhoodRadius(const Json::Value& params) const {
+    return oddKernelRadius(params, "kernelSize", 3);
+}
+
 void OpenCvMeanBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value& params) const {
     const int kernelSize = getInt(params, "kernelSize", 3);
     if (!isValidKernelSize(kernelSize)) {
@@ -132,6 +149,12 @@ Json::Value OpenCvMedianBlurOperator::operatorSchemaProperties() const {
     Json::Value props(Json::objectValue);
     props["kernelSize"] = makeIntegerParam("kernelSize", "Median kernel size (odd)", 3);
     return props;
+}
+
+int OpenCvMedianBlurOperator::neighborhoodRadius(const Json::Value& params) const {
+    // cv::medianBlur extrapolates image borders by replication; the haloed
+    // tile stream reproduces that exactly (see the base class).
+    return oddKernelRadius(params, "kernelSize", 3);
 }
 
 void OpenCvMedianBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value& params) const {
@@ -173,6 +196,11 @@ Json::Value OpenCvSobelOperator::operatorSchemaProperties() const {
     props["dx"] = makeIntegerParam("dx", "Order of derivative in X direction", 1);
     props["dy"] = makeIntegerParam("dy", "Order of derivative in Y direction", 0);
     return props;
+}
+
+int OpenCvSobelOperator::neighborhoodRadius(const Json::Value& params) const {
+    // kSize==1 uses a 1x3/3x1 kernel: radius 1.
+    return oddKernelRadius(params, "kernelSize", 3);
 }
 
 void OpenCvSobelOperator::applyFilter(cv::Mat& srcDst, const Json::Value& params) const {
@@ -223,6 +251,11 @@ Json::Value OpenCvLaplacianOperator::operatorSchemaProperties() const {
     Json::Value props(Json::objectValue);
     props["kernelSize"] = makeIntegerParam("kernelSize", "Laplacian kernel size (odd)", 3);
     return props;
+}
+
+int OpenCvLaplacianOperator::neighborhoodRadius(const Json::Value& params) const {
+    // kSize==1 still uses the 3x3 Laplace kernel: radius 1.
+    return oddKernelRadius(params, "kernelSize", 3);
 }
 
 void OpenCvLaplacianOperator::applyFilter(cv::Mat& srcDst, const Json::Value& params) const {
