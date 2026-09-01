@@ -12,6 +12,7 @@
 #include "operators/framework/rs_operator_registry.h"
 #include "workflow/builtin_definitions.h"
 #include "workflow/workflow_definition.h"
+#include "workflow/workflow_run_coordinator.h"
 #include "workflow/workflow_types.h"
 #include "workflow/pipeline_canvas_widget.h"
 #include "workflow/pipeline_scene.h"
@@ -214,6 +215,14 @@ void WorkflowSessionController::ensureRunConnected()
     return;
   connect( m_panel, &TaskPanelHost::runClicked,
            this, &WorkflowSessionController::onRunClicked );
+  // #704: Stop affordance where the run started — cancel the in-flight step
+  // task or the whole tracked pipeline.
+  connect( m_panel, &TaskPanelHost::stopClicked, this, [this]() {
+    if ( m_activePipelineId > 0 )
+      sicnu::workflow::WorkflowRunCoordinator::instance().cancelRun( m_activePipelineId );
+    else if ( m_pendingTaskId > 0 )
+      sicnu::TaskCenter::instance().cancelTask( m_pendingTaskId );
+  } );
   m_runConnected = true;
 }
 
@@ -323,7 +332,10 @@ void WorkflowSessionController::runFullWorkflow()
     emit stepStatusChanged( QString::fromStdString( step.id ), "idle" );
   }
 
-  m_activePipelineId = sicnu::TaskCenter::instance().submitPipeline( *def, /*autoLoad=*/false );
+  // Tracked submission (#697): every step transition persists an atomic
+  // checkpoint, interrupted runs recover at startup, and ArtifactGC sweeps
+  // intermediates once the run completes.
+  m_activePipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipeline( *def, /*autoLoad=*/false );
   if ( m_activePipelineId < 0 )
   {
     emit statusMessage( tr( "工作流 DAG 提交失败" ) );
@@ -377,7 +389,10 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
     targetDef.steps = steps;
   }
 
-  m_activePipelineId = sicnu::TaskCenter::instance().submitPipeline( targetDef, /*autoLoad=*/false );
+  // Tracked submission (#697): every step transition persists an atomic
+  // checkpoint, interrupted runs recover at startup, and ArtifactGC sweeps
+  // intermediates once the run completes.
+  m_activePipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipeline( targetDef, /*autoLoad=*/false );
   if ( m_activePipelineId < 0 )
   {
     emit statusMessage( tr( "工作流 DAG 提交失败" ) );
@@ -430,6 +445,7 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
 
   if ( info.status == sicnu::TaskStatus::Running
        || info.status == sicnu::TaskStatus::WaitingResource
+       || info.status == sicnu::TaskStatus::Dispatching
        || info.status == sicnu::TaskStatus::Cancelling )
   {
     emit stepStatusChanged( targetStepId, "running" );

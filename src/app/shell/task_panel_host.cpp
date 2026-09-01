@@ -74,7 +74,9 @@ TaskPanelHost::TaskPanelHost( QWidget *parent )
 
   root->addLayout( actions );
 
-  connect( m_runBtn, &QPushButton::clicked, this, &TaskPanelHost::runClicked );
+  // #704: one affordance for both directions — Run while idle, Stop while
+  // the task is in flight (cancel used to be reachable only via the job panel).
+  connect( m_runBtn, &QPushButton::clicked, this, &TaskPanelHost::onActionButtonClicked );
   connect( m_helpBtn, &QPushButton::clicked, this, &TaskPanelHost::helpClicked );
   connect( m_closeBtn, &QPushButton::clicked, this, &TaskPanelHost::closeClicked );
 }
@@ -108,16 +110,31 @@ void TaskPanelHost::setHints( const QStringList &hints )
   applyHintStyle( true );
 }
 
+void TaskPanelHost::onActionButtonClicked()
+{
+  if ( m_running )
+    emit stopClicked();
+  else
+    emit runClicked();
+}
+
 void TaskPanelHost::setRunning( bool running )
 {
+  m_running = running;
   m_progress->setVisible( running );
   if ( running )
   {
     m_progress->setRange( 0, 0 );
     m_hint->clear();
     applyHintStyle( false );
+    m_runBtn->setText( tr( "停止" ) );
+    m_runBtn->setEnabled( true ); // Stop stays clickable while running
   }
-  m_runBtn->setEnabled( !running );
+  else
+  {
+    m_runBtn->setText( tr( "运行" ) );
+    m_runBtn->setEnabled( true );
+  }
   m_form->setEnabled( !running );
   m_helpBtn->setEnabled( !running );
   m_loadToMap->setEnabled( !running );

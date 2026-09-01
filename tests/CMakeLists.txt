@@ -5130,6 +5130,26 @@ target_include_directories(test_workflow_recovery PRIVATE
 )
 sicnu_discover_tests(test_workflow_recovery)
 
+add_executable(test_workflow_run_coordinator test_workflow_run_coordinator.cpp)
+target_link_libraries(test_workflow_run_coordinator PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_workflow
+  sicnu_workflow_runtime
+  sicnu_data
+  sicnu_processing
+  sicnu_task_center
+  sicnu_jobs
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_workflow_run_coordinator PRIVATE jsoncpp)
+endif()
+target_include_directories(test_workflow_run_coordinator PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_workflow_run_coordinator)
+
 add_executable(test_workflow_artifact_gc test_workflow_artifact_gc.cpp)
 target_link_libraries(test_workflow_artifact_gc PRIVATE
   Catch2::Catch2WithMain
