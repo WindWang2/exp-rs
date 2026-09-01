@@ -186,6 +186,7 @@ Json::Value StepPlan::toJson() const
   root["fingerprint"] = fingerprint;
   root["cacheHit"] = cacheHit;
   root["cachedOutputAssetId"] = cachedOutputAssetId;
+  root["cachedOutputPath"] = cachedOutputPath;
   root["status"] = status;
   root["taskId"] = static_cast<Json::Int64>( taskId );
   root["resultPayload"] = resultPayload;
@@ -245,6 +246,8 @@ StepPlan StepPlan::fromJson( const Json::Value &json, std::string *error )
     plan.cacheHit = json["cacheHit"].asBool();
   if ( json.isMember( "cachedOutputAssetId" ) && json["cachedOutputAssetId"].isString() )
     plan.cachedOutputAssetId = json["cachedOutputAssetId"].asString();
+  if ( json.isMember( "cachedOutputPath" ) && json["cachedOutputPath"].isString() )
+    plan.cachedOutputPath = json["cachedOutputPath"].asString();
   if ( json.isMember( "status" ) && json["status"].isString() )
     plan.status = json["status"].asString();
   if ( json.isMember( "taskId" ) && json["taskId"].isInt64() )

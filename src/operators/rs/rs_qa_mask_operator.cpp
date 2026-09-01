@@ -10,8 +10,11 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/qa_mask.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_multiband_block_stream.h"
 
 #include <QString>
+
+#include <algorithm>
 
 #include <gdal.h>
 
@@ -250,56 +253,83 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
 
     context.logInfo("Computing QA mask (source=" + source + ", mask=" + maskSelection + ")");
 
-    std::vector<float> qa(pixelCount);
-    if (!ds.readBandData(qaBand, qa.data(), width, height)) {
-        throw RSOperatorError(ErrorCode::GdalError,
-                              "Failed to read QA band " + std::to_string(qaBand));
-    }
-
-    std::vector<uint8_t> mask(pixelCount);
-    if (source == "sentinel2_scl") {
-        std::vector<uint8_t> scl(pixelCount);
-        for (size_t i = 0; i < pixelCount; ++i)
-            scl[i] = static_cast<uint8_t>(qa[i]);
-        QaMask::sclMask(scl.data(), mask.data(), pixelCount, sclClasses);
-    } else if (source == "generic_bitmask") {
-        std::vector<uint16_t> values(pixelCount);
-        for (size_t i = 0; i < pixelCount; ++i)
-            values[i] = static_cast<uint16_t>(qa[i]);
-        QaMask::genericBitmaskMask(values.data(), mask.data(), pixelCount, genericBits);
-    } else {
-        std::vector<uint16_t> values(pixelCount);
-        for (size_t i = 0; i < pixelCount; ++i)
-            values[i] = static_cast<uint16_t>(qa[i]);
-        QaMask::landsatQaMask(values.data(), mask.data(), pixelCount, landsatFlags);
-    }
-
-    context.throwIfCancelled();
-    context.reportProgress(0.7, "Writing mask raster");
+    // Streaming execution (#665, ADR 0124 grade bit-exact): the QA band is
+    // processed in horizontal row-blocks — O(blockRows*width) resident —
+    // instead of the former full-raster float + mask buffers. The per-pixel
+    // kernels are unchanged, so results are bit-identical.
+    const int blockRows = std::max(1, std::min(256, height));
+    const size_t blockSize = static_cast<size_t>(width) * blockRows;
+    std::vector<float> qa(blockSize);
+    std::vector<uint8_t> mask(blockSize);
+    std::vector<uint8_t> scl(blockSize);
+    std::vector<uint16_t> values(blockSize);
+    size_t masked = 0;
 
     // UInt8 output: 1 = masked, 0 = clear.
-    QString errorMessage;
-    GDALDatasetH outDs = createOutputTiff(QString::fromStdString(outputPath), width, height,
-                                          1, static_cast<int>(GDT_Byte),
-                                          ds.geoTransform(), ds.projection(), &errorMessage);
-    if (!outDs) {
+    GdalStreamingOutput output(QString::fromStdString(outputPath), width, height, 1,
+                               static_cast<int>(GDT_Byte),
+                               ds.geoTransform(), ds.projection());
+    if (!output.isOpen()) {
         throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed to create mask raster: " + errorMessage.toStdString());
+                              "Failed to create mask raster: " + outputPath);
     }
-    GDALRasterBandH outBand = GDALGetRasterBand(outDs, 1);
-    const CPLErr writeErr = GDALRasterIO(outBand, GF_Write, 0, 0, width, height,
-                                         mask.data(), width, height, GDT_Byte, 0, 0);
-    GDALSetMetadataItem(outDs, "SICNU_QA_MASK_SOURCE", source.c_str(), nullptr);
-    GDALSetMetadataItem(outDs, "SICNU_QA_MASK_SELECTION", maskSelection.c_str(), nullptr);
-    GDALClose(outDs);
-    if (writeErr != CE_None) {
+    output.setMetadataItem(QStringLiteral("SICNU_QA_MASK_SOURCE"),
+                           QString::fromStdString(source));
+    output.setMetadataItem(QStringLiteral("SICNU_QA_MASK_SELECTION"),
+                           QString::fromStdString(maskSelection));
+
+    const int totalBlocks = (height + blockRows - 1) / blockRows;
+    int blockIndex = 0;
+    bool ok = true;
+    // Any failure/cancel after this point must not leave a partial raster at
+    // the output path (#647 streaming-output contract).
+    try {
+    for (int y0 = 0; y0 < height && ok; y0 += blockRows, ++blockIndex) {
+        context.throwIfCancelled();
+        const int rows = std::min(blockRows, height - y0);
+        const size_t n = static_cast<size_t>(width) * rows;
+        if (!ds.readBandWindow(qaBand, 0, y0, width, rows, qa.data())) {
+            throw RSOperatorError(ErrorCode::GdalError,
+                                  "Failed to read QA band " + std::to_string(qaBand));
+        }
+        if (source == "sentinel2_scl") {
+            for (size_t i = 0; i < n; ++i)
+                scl[i] = static_cast<uint8_t>(qa[i]);
+            QaMask::sclMask(scl.data(), mask.data(), n, sclClasses);
+        } else if (source == "generic_bitmask") {
+            for (size_t i = 0; i < n; ++i)
+                values[i] = static_cast<uint16_t>(qa[i]);
+            QaMask::genericBitmaskMask(values.data(), mask.data(), n, genericBits);
+        } else {
+            for (size_t i = 0; i < n; ++i)
+                values[i] = static_cast<uint16_t>(qa[i]);
+            QaMask::landsatQaMask(values.data(), mask.data(), n, landsatFlags);
+        }
+        for (size_t i = 0; i < n; ++i)
+            masked += (mask[i] != 0) ? 1 : 0;
+        const GdalBlockStream::Tile tile{0, y0, width, rows, 0, width, rows,
+                                         blockIndex, totalBlocks};
+        ok = output.writeTileRaw(1, tile, mask.data(), GDT_Byte);
+        context.reportProgress(0.1 + 0.6 * (static_cast<double>(blockIndex + 1) / totalBlocks),
+                               "Computing QA mask");
+    }
+
+    context.reportProgress(0.7, "Writing mask raster");
+
+    if (!ok) {
+        output.abandon();
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to write mask raster: " + outputPath);
     }
-
-    size_t masked = 0;
-    for (uint8_t v : mask)
-        masked += (v != 0) ? 1 : 0;
+    QString closeError;
+    if (!output.closeWithError(&closeError)) {
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              "Failed to write mask raster: " + closeError.toStdString());
+    }
+    } catch (...) {
+        output.abandon();
+        throw;
+    }
 
     context.reportProgress(1.0, "QA mask complete");
 

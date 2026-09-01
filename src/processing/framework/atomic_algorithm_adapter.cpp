@@ -156,6 +156,10 @@ AlgorithmDescriptor AlgorithmDescriptorBuilder::buildFromRsOperator( const opera
   Json::Value meta = op.metadata();
   // Every operator declares a large-raster memory policy (default full_raster).
   meta["memoryPolicy"] = memoryPolicyName( op.memoryPolicy() );
+  // Every operator declares its numeric reproducibility grade (ADR 0124,
+  // default bit_exact): visible to GUI, CLI, MCP tools, and agents through
+  // the same metadata surface.
+  meta["determinism"] = determinismGradeName( op.determinism() );
   // largeRasterSafe derives from the memory policy: streaming and
   // multipass_streaming operators are safe on large rasters.
   const operators::RSOperatorMemoryPolicy policy = op.memoryPolicy();

@@ -147,6 +147,31 @@ public:
   /// Remove one entry (e.g. when an output asset is deleted). No-op when absent.
   void invalidate( const ExecutionFingerprint &fp );
 
+  // --- Output-path cache (#667, Workflow Engine 2.0 wiring) ------------------
+  // Pipeline steps produce plain files, not registered assets, so the
+  // AssetId store above has no producer on the pipeline path. This parallel
+  // store maps a fingerprint to the output FILE PATH of an identical prior
+  // step. Same enable gate, LRU bound, and thread-safety as the asset store.
+
+  /// Look up the output path of a prior identical execution. Returns nullopt
+  /// when disabled, absent, or the cached file no longer exists on disk
+  /// (self-healing against external deletion: the stale entry is erased).
+  /// Deliberately NON-const: the self-heal erase and the LRU recency touch
+  /// mutate the cache.
+  std::optional<QString> lookupOutputPath( const ExecutionFingerprint &fp );
+
+  /// Record the output path of a freshly-completed step. No-op when disabled
+  /// or the path is empty. May evict the least-recently-used path entry.
+  void storeOutputPath( const ExecutionFingerprint &fp, const QString &outputPath );
+
+  /// Number of cached output paths (diagnostics / tests).
+  int pathSize() const;
+
+  /// Every currently cached output path (no particular order). Consumers
+  /// (e.g. ArtifactGC in TaskCenter) treat these as protected files: a
+  /// cached path is the artifact a future identical execution reuses.
+  QStringList cachedOutputPaths() const;
+
   /// Clear all entries (test isolation / cache reset).
   void clear();
 
@@ -161,6 +186,13 @@ private:
     qint64 lastUsedTick = 0;
   };
   void evictIfNeededLocked();
+
+  struct PathEntry
+  {
+    QString path;
+    qint64 lastUsedTick = 0;
+  };
+  QHash<QByteArray, PathEntry> m_pathEntries;
 
   mutable std::recursive_mutex m_mutex;
   // mutable: lookup() is logically const but touches LRU recency bookkeeping.

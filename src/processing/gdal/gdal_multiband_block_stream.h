@@ -22,7 +22,9 @@
 
 #include <gdal.h>
 
+#include <QColor>   // QRgb (setBandColorTable)
 #include <QString>
+#include <QVector>
 
 #include <array>
 #include <cstddef>
@@ -126,12 +128,28 @@ class GdalStreamingOutput
 
     bool isOpen() const { return m_ds != nullptr; }
 
+    /// Write one tile of one band whose buffer is already in a specific GDAL
+    /// data type (@a dtype, e.g. GDT_Byte / GDT_UInt16 / GDT_Int32). Label
+    /// rasters must keep their integer dtype, so recode streams typed blocks
+    /// through this instead of float writeTile (#665).
+    bool writeTileRaw( int band, const GdalBlockStream::Tile &tile,
+                       const void *pixels, int dtype );
+
     /// Write one tile of one band. @a pixels is row-major, tile.width*tile.height
     /// floats for band @a band (1-based). Returns false on write failure.
     bool writeTile( int band, const GdalBlockStream::Tile &tile, const float *pixels );
 
     /// Set the NoData value for a specific band (1-based).
     bool setBandNoDataValue( int band, double nodata );
+
+    /// Set a dataset-level metadata item (UTF-8 key/value), mirroring
+    /// GDALSetMetadataItem on the output dataset. No-op when closed (#665).
+    bool setMetadataItem( const QString &key, const QString &value );
+
+    /// Attach a palette color table to a band (GDALColorTable interpretation
+    /// GPI_RGB), matching saveLabelRaster's Byte-output palette semantics.
+    /// No-op when closed or the table is empty (#665).
+    bool setBandColorTable( int band, const QVector<QRgb> &colors );
 
     /// Set the NoData value for all output bands.
     bool setNoDataValue( double nodata );

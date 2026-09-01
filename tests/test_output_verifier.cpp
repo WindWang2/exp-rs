@@ -37,7 +37,7 @@ void writeSmallGeoTiff( const QString &path, bool allNoData = false )
   CPLFree( wkt );
   OSRDestroySpatialReference( srs );
 
-  const double gt[6] = { 10.0, 1.0, 0.0, 20.0, 0.0, -1.0 };
+  double gt[6] = { 10.0, 1.0, 0.0, 20.0, 0.0, -1.0 }; // GDAL C API takes double*
   GDALSetGeoTransform( ds, gt );
 
   GDALRasterBandH band = GDALGetRasterBand( ds, 1 );

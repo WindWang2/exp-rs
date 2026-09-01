@@ -277,17 +277,46 @@ TEST_CASE( "failed operator sets error", "[job]" )
   REQUIRE_FALSE( snap->error.empty() );
 }
 
-TEST_CASE( "setMaxWorkers clamps to 2..4", "[job]" )
+TEST_CASE( "setMaxWorkers honors overrides within a safe window", "[job]" )
 {
   EngineGuard guard;
   auto &eng = guard.engine();
 
+  // Misconfiguration clamps to the safe floor / ceiling, real workstation
+  // sizes are honored as-is (#661).
   eng.setMaxWorkers( 1 );
-  REQUIRE( eng.maxWorkers() == 2 );
-  eng.setMaxWorkers( 99 );
-  REQUIRE( eng.maxWorkers() == 4 );
+  REQUIRE( eng.maxWorkers() == JobEngine::kMinWorkers );
+  eng.setMaxWorkers( 999 );
+  REQUIRE( eng.maxWorkers() == JobEngine::kMaxWorkersOverride );
+  eng.setMaxWorkers( 8 );
+  REQUIRE( eng.maxWorkers() == 8 );
   eng.setMaxWorkers( 3 );
   REQUIRE( eng.maxWorkers() == 3 );
+}
+
+TEST_CASE( "default pool size follows hardware minus one UI core", "[job]" )
+{
+  // Pure policy (#661): one worker per core minus the UI-reserved core
+  // (ADR 0002), floored at kMinWorkers; an unknown core count (0) degrades
+  // to the floor. Exercised through the injectable overload so the property
+  // is pinned without depending on the host's core count.
+  REQUIRE( JobEngine::defaultWorkerCount( 8 ) == 7 );
+  REQUIRE( JobEngine::defaultWorkerCount( 3 ) == 2 );
+  REQUIRE( JobEngine::defaultWorkerCount( 1 ) == 2 );
+  REQUIRE( JobEngine::defaultWorkerCount( 0 ) == 2 );
+
+  const unsigned hw = std::thread::hardware_concurrency();
+  if ( hw > 0 )
+    REQUIRE( JobEngine::defaultWorkerCount() == JobEngine::defaultWorkerCount( hw ) );
+
+  // shutdownForTests() restores the default pool size after an override
+  // (plain shutdown() leaves the pool size alone: it only joins workers).
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.setMaxWorkers( 8 );
+  REQUIRE( eng.maxWorkers() == 8 );
+  eng.shutdownForTests();
+  REQUIRE( eng.maxWorkers() == JobEngine::defaultWorkerCount() );
 }
 
 TEST_CASE( "registerExecutor prefix runs without RSOperator", "[job]" )

@@ -23,6 +23,10 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/gdal/gdal_operator_utils.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/algorithms/math_utils.h"
+#include "raster_bit_compare.h"
+
+#include <limits>
 
 #include "analysis/segmentation/rs_otb_segmenter.h"
 
@@ -469,6 +473,68 @@ TEST_CASE("RS spectral index NDVI execution", "[operators][rs]") {
     REQUIRE(ds.readBandData(1, out.data(), W, H));
     // NDVI = (100 - 50) / (100 + 50) = 0.333...
     CHECK(out[0] == Catch::Approx(1.0f / 3.0f).epsilon(0.001));
+}
+
+TEST_CASE("Streaming spectral index output is bit-exact against the full-raster kernel",
+          "[operators][rs][spectral][streaming]") {
+    // ADR 0124 anchor: the streaming implementation (#664) decomposes the
+    // raster into row blocks; because the NDVI kernel is strictly
+    // element-wise, the streamed result must be BIT-identical to one
+    // full-raster kernel invocation over the same bands. >256 rows forces
+    // multiple row blocks through the streaming path.
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/in.tif";
+    const QString outputPath = tmp.path() + "/out.tif";
+    const QString expectedPath = tmp.path() + "/expected.tif";
+
+    constexpr int W = 5;
+    constexpr int H = 600;
+    std::vector<std::vector<float>> bands(2);
+    bands[0].resize(static_cast<size_t>(W) * H);
+    bands[1].resize(static_cast<size_t>(W) * H);
+    for (int i = 0; i < W * H; ++i) {
+        bands[0][i] = 10.0f + static_cast<float>(i % 23);
+        bands[1][i] = 40.0f + static_cast<float>((i * 7) % 31);
+    }
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["index"] = "NDVI";
+    params["nir"] = 2;
+    params["red"] = 1;
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    REQUIRE(result["output"].asString() == outputPath.toStdString());
+
+    // Serial anchor: a single full-raster kernel invocation.
+    std::vector<float> expected(static_cast<size_t>(W) * H);
+    REQUIRE(MathUtils::normalizedDifference(
+        bands[1].data(), bands[0].data(), expected.data(), expected.size()));
+
+    // Persist the anchor with the same grid and NaN nodata the operator emits.
+    GdalDatasetWrapper in;
+    REQUIRE(in.open(inputPath));
+    QString err;
+    GDALDatasetH expDs = createOutputTiff(expectedPath, W, H, 1,
+                                          static_cast<int>(GDT_Float32),
+                                          in.geoTransform(), in.projection(), &err);
+    REQUIRE(expDs != nullptr);
+    REQUIRE(GDALRasterIO(GDALGetRasterBand(expDs, 1), GF_Write, 0, 0, W, H,
+                         expected.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+    GDALSetRasterNoDataValue(GDALGetRasterBand(expDs, 1),
+                             std::numeric_limits<double>::quiet_NaN());
+    GDALClose(expDs);
+
+    const auto report = sicnu::testing::compareRastersBitExact(
+        outputPath.toStdString(), expectedPath.toStdString());
+    if (!report.identical)
+        FAIL(report.detail);
 }
 
 TEST_CASE("Atomic spectral index operators execution and equivalence", "[operators][rs][spectral]") {

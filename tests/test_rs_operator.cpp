@@ -348,5 +348,44 @@ TEST_CASE( "Every registered operator declares a valid memory policy", "[operato
   CHECK( registry.create( "otb:meanshift_segmentation" )->memoryPolicy()
          == RSOperatorMemoryPolicy::ExternalProcess );
   CHECK( registry.create( "rs:spectral_index" )->memoryPolicy()
-         == RSOperatorMemoryPolicy::FullRaster );
+         == RSOperatorMemoryPolicy::Streaming );
 }
+
+// ---------------------------------------------------------------------------
+// Determinism grade (ADR 0124)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "determinismGradeName maps every grade to a stable id", "[operators][framework][determinism]" )
+{
+  CHECK( std::string( determinismGradeName( RSOperatorDeterminism::BitExact ) )
+         == "bit_exact" );
+  CHECK( std::string( determinismGradeName( RSOperatorDeterminism::Tolerance ) )
+         == "tolerance" );
+}
+
+TEST_CASE( "Every registered operator declares a determinism grade", "[operators][framework][determinism]" )
+{
+  auto &registry = RSOperatorRegistry::instance();
+  const auto names = registry.operatorNames();
+  REQUIRE_FALSE( names.empty() );
+
+  const auto validGrade = []( const std::string &g ) {
+    return g == "bit_exact" || g == "tolerance";
+  };
+
+  for ( const auto &name : names )
+  {
+    auto op = registry.create( name );
+    REQUIRE( op != nullptr );
+    CHECK( validGrade( determinismGradeName( op->determinism() ) ) );
+  }
+
+  // The default grade is the serial baseline: bit-exact. Operators that
+  // adopt parallel floating-point reductions must override explicitly
+  // (a schema-visible, reviewable event per ADR 0124).
+  CHECK( registry.create( "rs:spectral_index" )->determinism()
+         == RSOperatorDeterminism::BitExact );
+  CHECK( registry.create( "rs:change_difference" )->determinism()
+         == RSOperatorDeterminism::BitExact );
+}
+
