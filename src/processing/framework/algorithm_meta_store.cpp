@@ -151,10 +151,10 @@ std::optional<AlgorithmMetaEntry> AlgorithmMetaStore::resolveAgainstDescriptor(
         }
     }
     {
-        // gpu: the descriptor's capability bit is authoritative whenever the
-        // sidecar disagrees (the historical "sidecar says no GPU while CUDA
-        // inference works" drift, #707/#705).
-        if ( entry->gpu != descriptor.gpuAccelerated )
+        // gpu: authoritative ONLY when the descriptor explicitly declared the
+        // capability (tri-state); an undeclared descriptor must not flip an
+        // honest sidecar gpu:true to false (review P2).
+        if ( descriptor.gpuDeclared && entry->gpu != descriptor.gpuAccelerated )
         {
             noteDrift( "gpu", entry->gpu ? "true" : "false",
                        descriptor.gpuAccelerated ? "true" : "false" );

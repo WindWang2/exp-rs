@@ -37,7 +37,7 @@ Json::Value createEmptyObjectSchema()
 
 /// Full asset-kind label for the "kind" key ("type" stays the coarse
 /// raster/vector split the tools originally reported).
-QString catalogKindLabel( sicnu::data::AssetKind kind )
+QString catalogKindLabelImpl( sicnu::data::AssetKind kind )
 {
   using sicnu::data::AssetKind;
   switch ( kind )
@@ -478,6 +478,18 @@ Json::Value createRasterResetDisplaySchema()
   schema["properties"] = props;
   return schema;
 }
+
+
+// Shared catalog-presentation API (see header): forwards to the internal
+// helpers above so both the interaction tools and the MCP native handlers
+// use ONE implementation (#688, review P2).
+QString catalogKindLabel( sicnu::data::AssetKind kind ) { return catalogKindLabelImpl( kind ); }
+int catalogRasterBandCount( const sicnu::data::AssetSnapshot &snapshot ) { return rasterBandCount( snapshot ); }
+QString catalogCrsAuthidFromWkt( const QString &wkt ) { return crsAuthidFromWkt( wkt ); }
+bool catalogSameSourcePath( const QString &a, const QString &b ) { return sameSourcePath( a, b ); }
+std::optional<sicnu::data::AssetSnapshot> catalogResolveAsset( sicnu::data::DataManager *dataManager,
+                                                               const QString &target )
+{ return resolveCatalogAsset( dataManager, target ); }
 
 } // namespace
 

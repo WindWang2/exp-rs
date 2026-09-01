@@ -1,4 +1,8 @@
+#include <QFileInfo>
+#include <functional>
 #include "derivation_record.h"
+
+#include "data_manager.h"
 
 #include <QJsonArray>
 
@@ -137,6 +141,68 @@ Result<DerivationRecord> DerivationRecord::fromJson( const QJsonObject &json )
   record.workflowRunId = json.value( QStringLiteral( "workflowRunId" ) ).toString();
   record.stepId = json.value( QStringLiteral( "stepId" ) ).toString();
   return Result<DerivationRecord>::success( record );
+}
+
+
+QStringList findInputPathsInParams( const QVariantMap &params )
+{
+  QStringList paths;
+  std::function<void( const QVariant & )> collect = [ & ]( const QVariant &value ) {
+    QStringList candidates;
+    if ( value.userType() == QMetaType::QStringList )
+      candidates = value.toStringList();
+    else if ( value.userType() == QMetaType::QVariantList )
+    {
+      const QVariantList list = value.toList();
+      for ( const QVariant &item : list )
+        collect( item );
+      return;
+    }
+    else
+      candidates.append( value.toString() );
+
+    for ( const QString &candidate : candidates )
+    {
+      const QString trimmed = candidate.trimmed();
+      if ( trimmed.isEmpty() || trimmed.startsWith( QLatin1Char( '$' ) ) )
+        continue;
+      if ( !paths.contains( trimmed ) && QFileInfo::exists( trimmed ) )
+        paths.append( trimmed );
+    }
+  };
+
+  for ( auto it = params.begin(); it != params.end(); ++it )
+  {
+    if ( !it.key().contains( QStringLiteral( "input" ), Qt::CaseInsensitive ) )
+      continue;
+    collect( it.value() );
+  }
+  return paths;
+}
+
+InputLineage resolveInputLineage( DataManager *dataManager, const QStringList &paths )
+{
+  InputLineage lineage;
+  if ( !dataManager )
+  {
+    // No catalog wired: nothing can resolve. Keep every path visible.
+    lineage.unresolvedPaths = paths;
+    return lineage;
+  }
+  for ( const QString &path : paths )
+  {
+    const auto snapshot = dataManager->findByPath( path );
+    if ( !snapshot )
+    {
+      lineage.unresolvedPaths.append( path );
+      continue;
+    }
+    DerivationInput input;
+    input.assetId = snapshot->id();
+    input.revision = snapshot->revision();
+    lineage.inputs.append( input );
+  }
+  return lineage;
 }
 
 } // namespace sicnu::data

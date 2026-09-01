@@ -1,6 +1,7 @@
 // src/agent/interaction_tool_registry.h
 #pragma once
 
+#include <QString>
 #include <json/json.h>
 #include <functional>
 #include <mutex>
@@ -9,14 +10,27 @@
 #include <unordered_map>
 #include <vector>
 
+#include "data/asset_types.h"
+
 namespace sicnu::data {
 class DataManager;
+struct AssetSnapshot;
 }
 
 namespace sicnu::agent {
 
 class ViewControlService;
 class RasterDisplayService;
+
+/// DataManager catalog presentation helpers shared by the interaction tools
+/// and the MCP native handlers (#688). One implementation — the two surfaces
+/// used to carry verbatim copies that drifted (review P2).
+QString catalogKindLabel( sicnu::data::AssetKind kind );
+int catalogRasterBandCount( const sicnu::data::AssetSnapshot &snapshot );
+QString catalogCrsAuthidFromWkt( const QString &wkt );
+bool catalogSameSourcePath( const QString &a, const QString &b );
+std::optional<sicnu::data::AssetSnapshot> catalogResolveAsset( sicnu::data::DataManager *dataManager,
+                                                               const QString &target );
 
 /**
  * @brief Definition of an interaction tool (view controls, layer management, canvas ROI).

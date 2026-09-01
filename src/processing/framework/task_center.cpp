@@ -1396,6 +1396,12 @@ void TaskCenter::markTaskCompleted( long taskId,
         shouldAutoLoad = m_tasks[taskId].autoLoadLayer && !m_tasks[taskId].outputLayerPath.isEmpty();
         autoLoadPath = m_tasks[taskId].outputLayerPath;
 
+        // Terminal transitions own their listener-dispatch mapping: without
+        // this, tasks finalized off the listener path (stranded Cancelling,
+        // shutdown) leak their jobId→taskId entry forever (review P2).
+        if ( !m_tasks[taskId].jobId.empty() )
+            m_taskByJobId.remove( m_tasks[taskId].jobId );
+
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
         processNextQueuedTasks();
@@ -1534,6 +1540,8 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] Task failed: %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), error ) );
+        if ( !m_tasks[taskId].jobId.empty() )
+            m_taskByJobId.remove( m_tasks[taskId].jobId );
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
 
@@ -1569,13 +1577,16 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
         // paths) would otherwise orphan a running job that keeps writing
         // output while the task shows Canceled. When the job is already
         // terminal (the listener path), engine cancel is a harmless no-op.
-        if ( !m_tasks[taskId].jobId.empty() )
-            jobCancelTargets.emplace_back( m_tasks[taskId].jobId, taskId );
+        const std::string rootJobId = m_tasks[taskId].jobId;
+        if ( !rootJobId.empty() )
+            jobCancelTargets.emplace_back( rootJobId, taskId );
         m_tasks[taskId].status = TaskStatus::Canceled;
         m_tasks[taskId].errorMessage = reason;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), reason ) );
+        if ( !rootJobId.empty() )
+            m_taskByJobId.remove( rootJobId );
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
 

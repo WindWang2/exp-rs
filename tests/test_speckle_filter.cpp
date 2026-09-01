@@ -378,7 +378,7 @@ TEST_CASE("Lee filter uses Lee's own weighting, not Kuan's (#678)", "[speckle][6
     // noiseVariance = Cu^2 = 0.05 < Cl^2, so the weight is positive and the
     // two formulas diverge:
     //   Lee:  w = 1 - Cu^2/Cl^2          = 0.8125
-    //   Kuan: w = (1 - Cu^2/Cl^2)/(1+Cu) = 0.773810
+    //   Kuan: w = (1 - Cu^2/Cl^2)/(1+Cu^2) = 0.773810
     // Pixel value 1 -> Lee  = 5 + 0.8125*(1-5)   = 1.75
     //                   Kuan = 5 + 0.773810*(1-5) = 1.904762
     std::vector<float> input = { 1.f, 2.f, 3.f,

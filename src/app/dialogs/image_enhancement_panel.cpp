@@ -1,4 +1,5 @@
 // image_enhancement_panel.cpp — Unified Image Enhancement Panel
+#include <algorithm>
 #include "image_enhancement_panel.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
@@ -443,8 +444,13 @@ void ImageEnhancementPanel::onRun()
                             convolveTileMean(tile, buf, core, kernelSize); }; break;
                 case 1: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
                             convolveTileGaussian(tile, buf, core, kernelSize, static_cast<float>(sigma)); }; break;
-                case 2: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
-                            convolveTileMedian(tile, buf, core, kernelSize); }; break;
+                case 2: {
+                    // Full-frame medianFilter clamps the kernel to 7x7 — keep
+                    // the streamed path behaviorally identical (review P2).
+                    const int medianKernel = std::min(kernelSize, 7);
+                    kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
+                            convolveTileMedian(tile, buf, core, medianKernel); }; break;
+                }
                 case 3: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
                             convolveTileSobel(tile, buf, core); }; break;
                 case 4: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {

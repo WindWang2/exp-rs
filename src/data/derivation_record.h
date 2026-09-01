@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
+#include <QVariantMap>
 #include <QVector>
 
 #include "asset_types.h"
@@ -24,6 +25,27 @@ struct DerivationInput
 
   friend bool operator==( const DerivationInput &, const DerivationInput & ) = default;
 };
+
+/// Input-side counterpart of TaskCenter's findOutputPathInParams (#698):
+/// collects parameter values whose key mentions "input" (case-insensitive)
+/// and whose value is an existing file path. Placeholder references
+/// ("$step.output") and non-path strings are ignored — only paths that exist
+/// on disk at commit time can be resolved into lineage records. String,
+/// string-list and variant-list values are all considered. ONE implementation
+/// shared by the tool-call dispatcher and the CLI pipeline runner.
+QStringList findInputPathsInParams( const QVariantMap &params );
+
+/// Resolved input lineage for one run: paths that map to a registered asset
+/// become DerivationInput records (asset id + the revision that was present);
+/// anything else is kept in unresolvedPaths so provenance reports it instead
+/// of dropping it silently.
+struct InputLineage
+{
+  QVector<DerivationInput> inputs;
+  QStringList unresolvedPaths;
+};
+
+InputLineage resolveInputLineage( class DataManager *dataManager, const QStringList &paths );
 
 /// Structured, serializable record describing how a derived Data Asset was
 /// produced: algorithm ID and version, a snapshot of the parameters, the input

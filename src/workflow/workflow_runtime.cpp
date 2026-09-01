@@ -15,6 +15,7 @@
 #include <QString>
 #include <QThread>
 
+#include <atomic>
 #include <future>
 #include <memory>
 
@@ -544,10 +545,13 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
       if ( QCoreApplication::instance() && dataManager->thread() != QThread::currentThread() )
       {
         auto promise = std::make_shared<std::promise<sicnu::CommitResult>>();
+        auto cancelled = std::make_shared<std::atomic<bool>>( false );
         auto future = promise->get_future();
         QMetaObject::invokeMethod(
           dataManager,
-          [dataManager, commitReq, promise]() {
+          [dataManager, commitReq, promise, cancelled]() {
+            if ( cancelled->load() )
+              return; // the caller already failed closed on its timeout
             sicnu::OutputCommitter committer( dataManager );
             promise->set_value( committer.commit( commitReq ) );
           },
@@ -556,6 +560,12 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
         {
           commitResult = future.get();
           commitRan = true;
+        }
+        else
+        {
+          // Review P2: mark the late delivery dead so a starved affinity
+          // thread cannot commit an asset AFTER this step already failed.
+          cancelled->store( true );
         }
       }
       else

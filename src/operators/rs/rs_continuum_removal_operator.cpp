@@ -132,6 +132,15 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
     std::vector<float> sortedWl;
     if ( hasWavelengths )
     {
+        // Duplicate check first (review P2): an axis that is ascending WITH
+        // duplicates previously skipped the guard entirely.
+        for ( int b = 1; b < bandCount; ++b )
+        {
+            if ( wavelengths[b] == wavelengths[b - 1] )
+                throw RSOperatorError( ErrorCode::InvalidInputData,
+                                      "Continuum removal: duplicate WAVELENGTH metadata across bands — "
+                                      "the continuum hull is ill-defined; fix the per-band WAVELENGTH tags" );
+        }
         bool ascending = true;
         for ( int b = 1; b < bandCount; ++b )
         {
@@ -150,13 +159,6 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
             sortedWl.resize( bandCount );
             for ( int b = 0; b < bandCount; ++b )
                 sortedWl[b] = wavelengths[wlPerm[b]];
-            for ( int b = 1; b < bandCount; ++b )
-            {
-                if ( sortedWl[b] == sortedWl[b - 1] )
-                    throw RSOperatorError( ErrorCode::InvalidInputData,
-                                          "Continuum removal: duplicate WAVELENGTH metadata across bands — "
-                                          "the continuum hull is ill-defined; fix the per-band WAVELENGTH tags" );
-            }
             context.logWarning( "Continuum removal: WAVELENGTH axis is not ascending in band order — "
                                 "spectra re-ordered by wavelength for the continuum hull" );
         }

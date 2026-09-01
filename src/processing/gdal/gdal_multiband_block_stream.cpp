@@ -133,6 +133,12 @@ GdalStreamingOutput::GdalStreamingOutput( const QString &path, int width, int he
 
 GdalStreamingOutput::~GdalStreamingOutput()
 {
+    if ( !m_explicitlyClosed && m_ds )
+    {
+        // An exception unwound past the writer (or the caller forgot to
+        // close): the partial file must not survive as fake output.
+        m_removeOnClose = true;
+    }
     close();
 }
 
@@ -175,6 +181,7 @@ bool GdalStreamingOutput::setNoDataValue( double nodata )
 
 void GdalStreamingOutput::close()
 {
+    m_explicitlyClosed = true;
     if ( m_ds )
     {
         CPLErrorReset();
@@ -203,6 +210,7 @@ void GdalStreamingOutput::removeOutput()
 
 bool GdalStreamingOutput::closeWithError(QString *errorMessage)
 {
+    m_explicitlyClosed = true;
     if ( !m_ds )
         return true;
     CPLErrorReset();

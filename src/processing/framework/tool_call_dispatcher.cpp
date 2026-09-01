@@ -87,73 +87,7 @@ QString assetKindLabelImpl( const QString &path, const QString &algorithmId )
   }
 }
 
-/// Input-side counterpart of TaskCenter's findOutputPathInParams (#698):
-/// collects parameter values whose key mentions "input" (case-insensitive)
-/// and whose value is an existing file path. Placeholder references
-/// ("$step.output") and non-path strings are ignored — only paths that exist
-/// on disk at commit time can be resolved into lineage records.
-QStringList findInputPathsInParams( const QVariantMap &params )
-{
-  QStringList paths;
-  for ( auto it = params.begin(); it != params.end(); ++it )
-  {
-    if ( !it.key().contains( QStringLiteral( "input" ), Qt::CaseInsensitive ) )
-      continue;
 
-    const QVariant value = it.value();
-    QStringList candidates;
-    if ( value.userType() == qMetaTypeId<QStringList>() )
-      candidates = value.toStringList();
-    else
-      candidates.append( value.toString() );
-
-    for ( const QString &candidate : candidates )
-    {
-      const QString trimmed = candidate.trimmed();
-      if ( trimmed.isEmpty() || trimmed.startsWith( QLatin1Char( '$' ) ) )
-        continue;
-      if ( !paths.contains( trimmed ) && QFileInfo::exists( trimmed ) )
-        paths.append( trimmed );
-    }
-  }
-  return paths;
-}
-
-/// Resolved input lineage for one run (#698): paths that map to a registered
-/// asset become DerivationInput records (asset id + the revision that was
-/// present); anything else is kept in unresolvedPaths so provenance reports
-/// it instead of dropping it silently.
-struct InputLineage
-{
-  QVector<sicnu::data::DerivationInput> inputs;
-  QStringList unresolvedPaths;
-};
-
-InputLineage resolveInputLineage( sicnu::data::DataManager *dataManager,
-                                  const QStringList &paths )
-{
-  InputLineage lineage;
-  if ( !dataManager )
-  {
-    // No catalog wired: nothing can resolve. Keep every path visible.
-    lineage.unresolvedPaths = paths;
-    return lineage;
-  }
-  for ( const QString &path : paths )
-  {
-    const auto snapshot = dataManager->findByPath( path );
-    if ( !snapshot )
-    {
-      lineage.unresolvedPaths.append( path );
-      continue;
-    }
-    sicnu::data::DerivationInput input;
-    input.assetId = snapshot->id();
-    input.revision = snapshot->revision();
-    lineage.inputs.append( input );
-  }
-  return lineage;
-}
 
 } // namespace
 
@@ -200,8 +134,8 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
       // existing files are resolved against the catalog so the derivation
       // record carries real derivedFrom edges (asset id + revision); paths
       // that do not resolve are preserved in unresolvedInputPaths.
-      const InputLineage lineage = resolveInputLineage(
-        managerGuard.data(), findInputPathsInParams( info.parameterMap ) );
+      const sicnu::data::InputLineage lineage = sicnu::data::resolveInputLineage(
+        managerGuard.data(), sicnu::data::findInputPathsInParams( info.parameterMap ) );
 
       request.derivation = sicnu::data::makeTaskDerivation(
         info.algorithmId,

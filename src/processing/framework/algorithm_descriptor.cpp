@@ -326,7 +326,10 @@ AgentMetadata AgentMetadata::fromJson( const Json::Value &val )
   if ( val.isMember( "task" ) && val["task"].isString() )
     meta.taskFamily = val["task"].asString();
   if ( val.isMember( "gpu" ) && val["gpu"].isBool() )
+  {
     meta.gpuAccelerated = val["gpu"].asBool();
+    meta.gpuDeclared = true;
+  }
   if ( val.isMember( "accuracy" ) && val["accuracy"].isNumeric() )
     meta.accuracy = val["accuracy"].asDouble();
   if ( val.isMember( "notes" ) && val["notes"].isString() )

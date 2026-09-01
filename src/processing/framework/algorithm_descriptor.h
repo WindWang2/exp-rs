@@ -104,6 +104,11 @@ struct AgentMetadata
   /// The algorithm can use GPU acceleration (per-model resolution may still
   /// land on CPU — this is capability, not requirement).
   bool gpuAccelerated = false;
+  /// Tri-state marker: gpuAccelerated is AUTHORITATIVE only when the
+  /// descriptor explicitly declared it (review P2 — otherwise "descriptor
+  /// wins" degenerated to "default false wins" and silently flipped honest
+  /// sidecar gpu:true entries).
+  bool gpuDeclared = false;
   /// Optional benchmark accuracy in [0, 1]; negative = unreported.
   double accuracy = -1.0;
   /// Human/agent-facing selection guidance.

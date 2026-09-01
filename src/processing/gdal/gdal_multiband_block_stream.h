@@ -153,4 +153,8 @@ class GdalStreamingOutput
     GDALDatasetH m_ds = nullptr;
     QString m_path;
     bool m_removeOnClose = false;
+    /// Set by close()/closeWithError(); the destructor treats a still-open
+    /// output as abandoned (exception unwound past the writer) and removes
+    /// the partial file (#647 hygiene, review P2).
+    bool m_explicitlyClosed = false;
 };

@@ -94,61 +94,11 @@ QString mcpDataTypeToString( Qgis::DataType type ) {
 // DataManager-backed catalog helpers (#688): the catalog is the primary
 // source for list_layers/describe_dataset; QgsProject only enriches with
 // display state. Headless sessions hold no QgsProject layers at all.
-QString mcpAssetKindLabel( sicnu::data::AssetKind kind )
-{
-    switch ( kind )
-    {
-        case sicnu::data::AssetKind::Raster: return QStringLiteral("raster");
-        case sicnu::data::AssetKind::Vector: return QStringLiteral("vector");
-        case sicnu::data::AssetKind::RemoteMap: return QStringLiteral("remote_map");
-        case sicnu::data::AssetKind::VirtualRaster: return QStringLiteral("virtual_raster");
-    }
-    Q_UNREACHABLE();
-    return QString();
-}
 
-QString mcpCrsAuthidFromWkt( const QString &wkt )
-{
-    if ( wkt.trimmed().isEmpty() )
-        return QString();
-    return QgsCoordinateReferenceSystem::fromWkt( wkt ).authid();
-}
 
-bool mcpSameSourcePath( const QString &a, const QString &b )
-{
-    if ( a == b )
-        return true;
-    const QString absolute = QFileInfo( a ).absoluteFilePath();
-    return !absolute.isEmpty() && absolute == QFileInfo( b ).absoluteFilePath();
-}
 
 /// Resolves a describe target (asset id, canonical path, or display name) to
 /// a catalog asset; nullopt lets the caller fall back to QgsProject layers.
-std::optional<sicnu::data::AssetSnapshot> mcpResolveCatalogAsset(
-    const sicnu::data::DataManager *dataManager, const QString &target )
-{
-    if ( !dataManager )
-        return std::nullopt;
-    const QString trimmed = target.trimmed();
-    if ( trimmed.isEmpty() )
-        return std::nullopt;
-    if ( const auto id = sicnu::data::AssetId::fromString( trimmed ) )
-    {
-        if ( const auto snapshot = dataManager->asset( *id ) )
-            return snapshot;
-    }
-    for ( const auto &snapshot : dataManager->assets() )
-    {
-        if ( snapshot.source().canonicalSource == trimmed )
-            return snapshot;
-    }
-    for ( const auto &snapshot : dataManager->assets() )
-    {
-        if ( snapshot.displayName() == trimmed )
-            return snapshot;
-    }
-    return std::nullopt;
-}
 
 bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
 {
@@ -1655,14 +1605,14 @@ QVariantMap McpServer::handleListLayers()
             layerMap[QStringLiteral("name")] = snapshot.displayName();
             const bool isVector = snapshot.kind() == sicnu::data::AssetKind::Vector;
             layerMap[QStringLiteral("type")] = isVector ? QStringLiteral("vector") : QStringLiteral("raster");
-            layerMap[QStringLiteral("kind")] = mcpAssetKindLabel(snapshot.kind());
+            layerMap[QStringLiteral("kind")] = sicnu::agent::catalogKindLabel(snapshot.kind());
             layerMap[QStringLiteral("path")] = snapshot.source().canonicalSource;
             layerMap[QStringLiteral("source")] = snapshot.source().canonicalSource;
             if (const auto *raster = std::get_if<sicnu::data::RasterStructure>(&snapshot.structure());
                 raster && raster->bandCount >= 0)
             {
                 layerMap[QStringLiteral("bandCount")] = raster->bandCount;
-                layerMap[QStringLiteral("crs")] = mcpCrsAuthidFromWkt(raster->crsWkt);
+                layerMap[QStringLiteral("crs")] = sicnu::agent::catalogCrsAuthidFromWkt(raster->crsWkt);
             }
             const QString layerId = displayedLayerIdByPath.value(snapshot.source().canonicalSource);
             if (!layerId.isEmpty())
@@ -1689,7 +1639,7 @@ QVariantMap McpServer::handleListLayers()
             {
                 for (const auto &snapshot : m_dataManager->assets())
                 {
-                    if (mcpSameSourcePath(snapshot.source().canonicalSource, layer->source()))
+                    if (sicnu::agent::catalogSameSourcePath(snapshot.source().canonicalSource, layer->source()))
                     {
                         inCatalog = true;
                         break;
@@ -1718,7 +1668,7 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
     // Primary source: the DataManager catalog — an asset id, canonical path,
     // or display name. Covers headless sessions and every committed asset,
     // displayed or not (#688).
-    if (const auto snapshot = mcpResolveCatalogAsset(m_dataManager, layerId))
+    if (const auto snapshot = sicnu::agent::catalogResolveAsset(m_dataManager, layerId))
     {
         QVariantMap result;
         const QString assetIdText = snapshot->id().toString();
@@ -1726,7 +1676,7 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
         result[QStringLiteral("assetId")] = assetIdText;
         result[QStringLiteral("revision")] = qulonglong(snapshot->revision().value());
         result[QStringLiteral("name")] = snapshot->displayName();
-        result[QStringLiteral("kind")] = mcpAssetKindLabel(snapshot->kind());
+        result[QStringLiteral("kind")] = sicnu::agent::catalogKindLabel(snapshot->kind());
         const bool isVector = snapshot->kind() == sicnu::data::AssetKind::Vector;
         result[QStringLiteral("type")] = isVector ? QStringLiteral("vector") : QStringLiteral("raster");
         result[QStringLiteral("path")] = snapshot->source().canonicalSource;
@@ -1734,7 +1684,7 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
 
         if (const auto *raster = std::get_if<sicnu::data::RasterStructure>(&snapshot->structure()))
         {
-            result[QStringLiteral("crs")] = mcpCrsAuthidFromWkt(raster->crsWkt);
+            result[QStringLiteral("crs")] = sicnu::agent::catalogCrsAuthidFromWkt(raster->crsWkt);
             result[QStringLiteral("width")] = raster->width;
             result[QStringLiteral("height")] = raster->height;
             result[QStringLiteral("band_count")] = raster->bandCount;
@@ -1769,7 +1719,7 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
         {
             result[QStringLiteral("layer_count")] = vector->layerCount;
             if (!vector->layers.isEmpty())
-                result[QStringLiteral("crs")] = mcpCrsAuthidFromWkt(vector->layers.first().crsWkt);
+                result[QStringLiteral("crs")] = sicnu::agent::catalogCrsAuthidFromWkt(vector->layers.first().crsWkt);
             QVariantList layers;
             for (const sicnu::data::VectorLayerStructure &layer : vector->layers)
             {
@@ -1777,7 +1727,7 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
                 layerMap[QStringLiteral("name")] = layer.name;
                 layerMap[QStringLiteral("feature_count")] = static_cast<qlonglong>(layer.featureCount);
                 layerMap[QStringLiteral("geometry_type")] = layer.geometryType;
-                layerMap[QStringLiteral("crs")] = mcpCrsAuthidFromWkt(layer.crsWkt);
+                layerMap[QStringLiteral("crs")] = sicnu::agent::catalogCrsAuthidFromWkt(layer.crsWkt);
                 layers.append(layerMap);
             }
             result[QStringLiteral("layers")] = layers;
