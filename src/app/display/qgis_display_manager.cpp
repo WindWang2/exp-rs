@@ -442,11 +442,29 @@ QgisDisplayManager::addLayer(DisplayViewId viewId, data::AssetId assetId,
 
   // #674: three independent auto-load paths (TaskCenter signal, dialog
   // accept, job panel, plus the assetAdded auto-display) could each add the
-  // same result. Dedupe at the seam: the view displays each asset once.
-  if (!options.allowDuplicate) {
+  // same result — all as unnamed layers. Dedupe at the seam by
+  // (view, asset, displayName): unnamed re-adds collapse to the existing
+  // layer, while DISTINCT names are deliberate parallel views of one asset
+  // (comparison) and an active Edit Lease makes a re-add the read-only
+  // shadow layer of the editing session — neither dedupes.
+  if (!options.allowDuplicate
+      && !m_impl->dataManager->hasActiveEditLease(assetId)) {
+    // The layer's effective name is the explicit display name, or the asset's
+    // name when the add was unnamed (the auto-load paths never name layers).
+    const QString effectiveName = options.displayName.isEmpty()
+                                      ? asset->displayName()
+                                      : options.displayName;
     for (const auto &[id, record] : m_impl->layers) {
       if (record && record->mapLayer && record->snapshot.viewId() == viewId
-          && record->snapshot.assetId() == assetId) {
+          && record->snapshot.assetId() == assetId
+          && record->mapLayer->name() == effectiveName) {
+        // Never dedupe onto a stale read-only shadow: layers created while an
+        // Edit Lease was active stay read-only after the session ends, and a
+        // fresh writable add must not inherit that state.
+        const auto *asVector = qobject_cast<const QgsVectorLayer *>(
+            record->mapLayer.data());
+        if (asVector && asVector->readOnly())
+          continue;
         return data::Result<DisplayLayerId>::success(record->snapshot.id());
       }
     }
