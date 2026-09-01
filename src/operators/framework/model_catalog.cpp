@@ -238,7 +238,13 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   // --- Contract sanity (InvalidManifest reasons) ------------------------------
   auto markInvalid = [&info]( std::string reason ) {
     info.readiness = ModelReadiness::InvalidManifest;
-    info.readinessReason = std::move( reason );
+    // APPEND, don't replace: a manifest with several declared-but-unexecuted
+    // knobs must report every one of them (the last-wins behavior hid all
+    // but the final finding).
+    if ( info.readinessReason.empty() )
+      info.readinessReason = std::move( reason );
+    else
+      info.readinessReason += "; " + reason;
   };
   if ( !info.input.layout.empty() && info.input.layout != "NCHW" && info.input.layout != "nchw" )
     markInvalid( "unsupported input layout '" + info.input.layout + "' (only NCHW is executed)" );

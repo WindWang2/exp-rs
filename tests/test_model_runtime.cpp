@@ -988,6 +988,7 @@ TEST_CASE( "rs:infer floors the model RAM term with the artifact size", "[models
         "task": "segmentation",
         "framework": "onnx",
         "artifact": { "path": "model.onnx" },
+        "tiling": { "tile_size": 64, "overlap": 16 },
         "runtime": { "estimated_ram_mb": 768 }
     })" );
     manifest.close();
