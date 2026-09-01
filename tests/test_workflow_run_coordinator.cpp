@@ -116,18 +116,18 @@ TEST_CASE( "tracked pipeline persists checkpoints and completes (#697)", "[workf
     {
         snapshot = fx.coordinator.runForPipeline( pipelineId );
         REQUIRE( snapshot != nullptr );
-        if ( snapshot.state() == WorkflowRunState::Completed
-             || snapshot.state() == WorkflowRunState::Failed
-             || snapshot.state() == WorkflowRunState::Canceled )
+        if ( snapshot->state() == WorkflowRunState::Completed
+             || snapshot->state() == WorkflowRunState::Failed
+             || snapshot->state() == WorkflowRunState::Canceled )
             break;
         std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
     }
-    REQUIRE( snapshot.state() == WorkflowRunState::Completed );
+    REQUIRE( snapshot->state() == WorkflowRunState::Completed );
     REQUIRE( firstRan.load() );
     REQUIRE( secondRan.load() );
 
     // Both step plans landed Completed with recorded outputs.
-    const auto first = snapshot.stepPlan( "first" );
+    const auto first = snapshot->stepPlan( "first" );
     REQUIRE( first.has_value() );
     REQUIRE( first->status == "Completed" );
     REQUIRE( first->outputLayerPath == "/tmp/coord_ok_first.tif" );
@@ -135,7 +135,7 @@ TEST_CASE( "tracked pipeline persists checkpoints and completes (#697)", "[workf
     // The checkpoint of a COMPLETED run is removed after the GC sweep (the
     // committed outputs live on as assets; the run is done).
     const QString checkpointPath = fx.checkpointDir.path() + QDir::separator()
-                                   + QString::fromStdString( snapshot.runId() ) + ".json";
+                                   + QString::fromStdString( snapshot->runId() ) + ".json";
     REQUIRE_FALSE( QFile::exists( checkpointPath ) );
 }
 
@@ -191,14 +191,14 @@ TEST_CASE( "interrupted run recovers at startup and resumes remaining steps (#69
     {
         snapshot = fx.coordinator.runForPipeline( pipelineId );
         REQUIRE( snapshot != nullptr );
-        if ( snapshot.state() == WorkflowRunState::Completed
-             || snapshot.state() == WorkflowRunState::Failed
-             || snapshot.state() == WorkflowRunState::Canceled )
+        if ( snapshot->state() == WorkflowRunState::Completed
+             || snapshot->state() == WorkflowRunState::Failed
+             || snapshot->state() == WorkflowRunState::Canceled )
             break;
         std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
     }
-    REQUIRE( snapshot.state() == WorkflowRunState::Completed );
-    REQUIRE( snapshot.runId() == "coord_resume_crashed" ); // same lineage thread
+    REQUIRE( snapshot->state() == WorkflowRunState::Completed );
+    REQUIRE( snapshot->runId() == "coord_resume_crashed" ); // same lineage thread
     REQUIRE( secondRan.load() );
     REQUIRE_FALSE( firstRan.load() ); // completed step served from its output
 }
