@@ -179,7 +179,11 @@ Json::Value OpenCvOperatorBase::runStreaming(const std::string& inputPath,
                 const int dstY = (tile.yOffset - halo < 0) ? (halo - tile.yOffset) : 0;
 
                 cv::Mat bufMat(bufH, bufW, CV_32FC1, buf.data());
-                applyFilter(bufMat(cv::Rect(dstX, dstY, readW, readH)), params);
+                // cv::Mat::operator()(Rect) returns a Mat by value (a view);
+                // applyFilter takes a non-const lvalue reference — name the
+                // ROI so the reference binds.
+                cv::Mat roi = bufMat(cv::Rect(dstX, dstY, readW, readH));
+                applyFilter(roi, params);
 
                 // Core pixels always sit at (halo, halo) in the buffer.
                 cv::Mat core = bufMat(cv::Rect(halo, halo, tile.width, tile.height)).clone();
