@@ -198,35 +198,35 @@ void ActiveViewHost::initLayerTree()
 // ---------------------------------------------------------------------------
 
 sicnu::data::Result<sicnu::display::DisplayLayerId>
-ActiveViewHost::openPath( const QString &filePath )
+ActiveViewHost::openPath( const QString &filePath, const QString &displayName )
 {
     sicnu::data::SourceDescriptor source;
     source.canonicalSource = filePath;
-    const auto loaded = openSource( std::move( source ) );
+    const auto loaded = openSource( std::move( source ), displayName );
     if ( !loaded )
         reportDiagnostics( QObject::tr( "Open Path" ), loaded.diagnostics() );
     return loaded;
 }
 
 sicnu::data::Result<sicnu::display::DisplayLayerId>
-ActiveViewHost::openRasterPath( const QString &filePath )
+ActiveViewHost::openRasterPath( const QString &filePath, const QString &displayName )
 {
     sicnu::data::SourceDescriptor source;
     source.providerKey = QStringLiteral( "gdal" );
     source.canonicalSource = filePath;
-    const auto loaded = openSource( std::move( source ) );
+    const auto loaded = openSource( std::move( source ), displayName );
     if ( !loaded )
         reportDiagnostics( QObject::tr( "Open Raster" ), loaded.diagnostics() );
     return loaded;
 }
 
 sicnu::data::Result<sicnu::display::DisplayLayerId>
-ActiveViewHost::openVectorPath( const QString &filePath )
+ActiveViewHost::openVectorPath( const QString &filePath, const QString &displayName )
 {
     sicnu::data::SourceDescriptor source;
     source.providerKey = QStringLiteral( "ogr" );
     source.canonicalSource = filePath;
-    const auto loaded = openSource( std::move( source ) );
+    const auto loaded = openSource( std::move( source ), displayName );
     if ( !loaded )
         reportDiagnostics( QObject::tr( "Open Vector" ), loaded.diagnostics() );
     return loaded;
@@ -288,7 +288,7 @@ ActiveViewHost::displayAsset( sicnu::data::AssetId assetId, bool zoomToLayer )
 }
 
 sicnu::data::Result<sicnu::display::DisplayLayerId>
-ActiveViewHost::openSource( sicnu::data::SourceDescriptor source )
+ActiveViewHost::openSource( sicnu::data::SourceDescriptor source, const QString &displayName )
 {
     using sicnu::data::Diagnostic;
     using sicnu::data::DiagnosticSeverity;
@@ -322,8 +322,10 @@ ActiveViewHost::openSource( sicnu::data::SourceDescriptor source )
                         DiagnosticSeverity::Error } );
     }
 
+    sicnu::display::AddLayerOptions options;
+    options.displayName = displayName;
     const Result<DisplayLayerId> displayed =
-        m_displayManager->addLayer( activeViewId(), registered.assetId );
+        m_displayManager->addLayer( activeViewId(), registered.assetId, options );
     if ( !displayed )
         return displayed;
 

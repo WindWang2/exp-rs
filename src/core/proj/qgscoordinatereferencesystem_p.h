@@ -119,19 +119,37 @@ class QgsCoordinateReferenceSystemPrivate : public QSharedData
       // Which is not necessarily the case currently unfortunately. So
       // create a temporary dummy context, and attach it to the PJ* before destroying
       // it
-      PJ_CONTEXT *tmpContext = proj_context_create();
-      for ( auto it = mProjObjects.begin(); it != mProjObjects.end(); ++it )
+      try
       {
-        proj_assign_context( it.value(), tmpContext );
-        proj_destroy( it.value() );
+        PJ_CONTEXT *tmpContext = nullptr;
+        try
+        {
+          tmpContext = proj_context_create();
+        }
+        catch ( ... )
+        {
+          tmpContext = nullptr;
+        }
+        for ( auto it = mProjObjects.begin(); it != mProjObjects.end(); ++it )
+        {
+          if ( tmpContext )
+            proj_assign_context( it.value(), tmpContext );
+          proj_destroy( it.value() );
+        }
+        mProjObjects.clear();
+        if ( mPj )
+        {
+          if ( tmpContext )
+            proj_assign_context( mPj.get(), tmpContext );
+          mPj.reset();
+        }
+        if ( tmpContext )
+          proj_context_destroy( tmpContext );
       }
-      mProjObjects.clear();
-      if ( mPj )
+      catch ( ... )
       {
-        proj_assign_context( mPj.get(), tmpContext );
-        mPj.reset();
+        // Ignore any exceptions thrown during teardown when proj is shutting down
       }
-      proj_context_destroy( tmpContext );
     }
 
   public:

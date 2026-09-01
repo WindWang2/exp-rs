@@ -759,6 +759,39 @@ Result<void> DataManager::commitEdit( AssetId id )
   return Result<void>::success();
 }
 
+Result<void> DataManager::notifyExternalContentChange( AssetId id )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<void>::failure( wrongThreadDiagnostic() );
+
+  const auto recordIt = m_impl->findRecord( id );
+  if ( recordIt == m_impl->records.end() )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "asset.unknown" ),
+                  QStringLiteral( "No registered asset matches the requested id" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  const AssetRevision newRevision = recordIt->snapshot.revision().next();
+  recordIt->snapshot = AssetSnapshot{ recordIt->snapshot.id(),
+                                      newRevision,
+                                      recordIt->snapshot.source(),
+                                      recordIt->snapshot.kind(),
+                                      recordIt->snapshot.state(),
+                                      recordIt->snapshot.capabilities(),
+                                      recordIt->snapshot.persistence(),
+                                      recordIt->snapshot.storageKind(),
+                                      recordIt->snapshot.displayName(),
+                                      recordIt->snapshot.structure(),
+                                      recordIt->snapshot.acquisitionTime(),
+                                      recordIt->snapshot.parentCollectionId() };
+
+  m_impl->catalogGeneration++;
+  emit assetChanged( id );
+  return Result<void>::success();
+}
+
 Result<void> DataManager::rollbackEdit( AssetId id )
 {
   if ( QThread::currentThread() != thread() )

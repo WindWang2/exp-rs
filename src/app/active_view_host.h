@@ -119,11 +119,11 @@ class ActiveViewHost : public QObject
 
     // ── Open path → register Asset + display on active view ───────────
     sicnu::data::Result<sicnu::display::DisplayLayerId>
-    openPath( const QString &filePath );
+    openPath( const QString &filePath, const QString &displayName = QString() );
     sicnu::data::Result<sicnu::display::DisplayLayerId>
-    openRasterPath( const QString &filePath );
+    openRasterPath( const QString &filePath, const QString &displayName = QString() );
     sicnu::data::Result<sicnu::display::DisplayLayerId>
-    openVectorPath( const QString &filePath );
+    openVectorPath( const QString &filePath, const QString &displayName = QString() );
 
     /// Display an already-registered Asset on the active view (no re-register).
     /// When \p zoomToLayer is true the canvas is always re-fitted to the new
@@ -134,11 +134,11 @@ class ActiveViewHost : public QObject
 
     // Compatibility names used by main window during migration
     sicnu::data::Result<sicnu::display::DisplayLayerId>
-    loadLayer( const QString &filePath ) { return openPath( filePath ); }
+    loadLayer( const QString &filePath, const QString &displayName = QString() ) { return openPath( filePath, displayName ); }
     sicnu::data::Result<sicnu::display::DisplayLayerId>
-    loadRasterLayer( const QString &filePath ) { return openRasterPath( filePath ); }
+    loadRasterLayer( const QString &filePath, const QString &displayName = QString() ) { return openRasterPath( filePath, displayName ); }
     sicnu::data::Result<sicnu::display::DisplayLayerId>
-    loadVectorLayer( const QString &filePath ) { return openVectorPath( filePath ); }
+    loadVectorLayer( const QString &filePath, const QString &displayName = QString() ) { return openVectorPath( filePath, displayName ); }
 
     // ── Display-layer operations (not Asset unload) ───────────────────
     void showLayerProperties( QgsMapLayer *layer );
@@ -180,7 +180,7 @@ class ActiveViewHost : public QObject
     QgsLayerTreeModel *m_layerTreeModel = nullptr;
 
     sicnu::data::Result<sicnu::display::DisplayLayerId>
-    openSource( sicnu::data::SourceDescriptor source );
+    openSource( sicnu::data::SourceDescriptor source, const QString &displayName = QString() );
     void reportDiagnostics( const QString &title,
                             const QVector<sicnu::data::Diagnostic> &diagnostics );
     void placeInTreeGroup( QgsMapLayer *layer, sicnu::data::AssetKind kind );

@@ -1685,31 +1685,6 @@ QVariantMap McpServer::handleListLayers()
         }
     }
 
-    // #688: MCP mode is always project-empty (autoLoad=false on every
-    // submission path) — surface the DataManager asset catalog so the agent
-    // can actually discover the session's committed outputs.
-    if (layers.isEmpty() && m_dataManager)
-    {
-        for (const auto &asset : m_dataManager->assets())
-        {
-            QVariantMap layerMap;
-            layerMap[QStringLiteral("id")] = asset.id().toString();
-            layerMap[QStringLiteral("name")] = asset.displayName();
-            layerMap[QStringLiteral("type")] = asset.kind() == sicnu::data::AssetKind::Raster
-                                                   ? QStringLiteral("raster")
-                                             : asset.kind() == sicnu::data::AssetKind::Vector
-                                                   ? QStringLiteral("vector")
-                                             : asset.kind() == sicnu::data::AssetKind::VirtualRaster
-                                                   ? QStringLiteral("virtual_raster")
-                                                   : QStringLiteral("remote_map");
-            layerMap[QStringLiteral("source")] = asset.source().canonicalSource;
-            const auto &structure = asset.structure();
-            if (const auto *raster = std::get_if<sicnu::data::RasterStructure>(&structure))
-                layerMap[QStringLiteral("bands")] = raster->bandCount;
-            layerList.append(layerMap);
-        }
-    }
-
     result[QStringLiteral("layers")] = layerList;
     return result;
 }

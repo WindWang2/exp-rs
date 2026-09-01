@@ -25,6 +25,7 @@
 #include <qgslayoutpagecollection.h>
 #include <qgslayoutsize.h>
 #include <qgslayoutsnapper.h>
+#include <qgslayoutundostack.h>
 #include <qgsmasterlayoutinterface.h>
 #include <qgsmessagebar.h>
 #include <qgsproject.h>
@@ -39,7 +40,7 @@
 #include <gui/layout/qgslayoutviewtoolzoom.h>
 #include <gui/layout/qgslayoutviewtoolmoveitemcontent.h>
 #include <gui/layout/qgslayoutguiutils.h>
-#include <gui/layout/qgslayoutaligner.h>
+#include <qgslayoutaligner.h>
 #include <gui/layout/qgslayoutitemwidget.h>
 #include <gui/layout/qgslayoutpagepropertieswidget.h>
 #include <gui/layout/qgslayoutitemguiregistry.h>
@@ -241,7 +242,7 @@ void QgsLayoutDesignerDialog::clearItemPanel()
         return;
     if (QgsPanelWidget *panel = mItemsStack->mainPanel()) {
         mItemsStack->takeMainPanel();
-        panel->deleteLater();
+        delete panel;
     }
 }
 
@@ -393,11 +394,7 @@ QWidget *QgsLayoutDesignerDialog::buildMultiSelectionPanel(const QList<QgsLayout
         mLayout->undoStack()->endMacro();
     };
 
-    // Commit on editingFinished rather than valueChanged: spinner drags emit
-    // dozens of ticks per second and each tick snapshots every selected item
-    // for undo, which would freeze large layouts.
-    QObject::connect(opacity, &QAbstractSpinBox::editingFinished, this, [applyToAll, opacity]() {
-        const double value = opacity->value();
+    QObject::connect(opacity, &QDoubleSpinBox::valueChanged, this, [applyToAll](double value) {
         applyToAll(QObject::tr("Change Opacity"), [value](QgsLayoutItem *item) {
             item->beginCommand(QObject::tr("Change Opacity"), QgsLayoutItem::UndoOpacity);
             item->setItemOpacity(value / 100.0);
@@ -405,8 +402,7 @@ QWidget *QgsLayoutDesignerDialog::buildMultiSelectionPanel(const QList<QgsLayout
         });
     });
 
-    QObject::connect(rotation, &QAbstractSpinBox::editingFinished, this, [applyToAll, rotation]() {
-        const double value = rotation->value();
+    QObject::connect(rotation, &QDoubleSpinBox::valueChanged, this, [applyToAll](double value) {
         applyToAll(QObject::tr("Change Rotation"), [value](QgsLayoutItem *item) {
             item->beginCommand(QObject::tr("Change Rotation"), QgsLayoutItem::UndoRotation);
             item->setItemRotation(value);
@@ -466,7 +462,7 @@ void QgsLayoutDesignerDialog::setupUndoRedo()
     mActionUndo = undoStack->createUndoAction(this);
     mActionUndo->setShortcut(QKeySequence::Undo);
     mActionRedo = undoStack->createRedoAction(this);
-    mActionRedo->setShortcut(QKeySequence::Shift | Qt::Key_Z);
+    mActionRedo->setShortcut(QKeySequence::Redo);
 
     // Prepend undo/redo to the Edit menu (before Delete).
     QAction *first = mEditMenu->actions().isEmpty() ? nullptr : mEditMenu->actions().first();
@@ -634,7 +630,8 @@ void QgsLayoutDesignerDialog::setupMenus()
     mEditMenu->addAction(tr("Unlock Items"), this, [this]() { onLockItems(false); });
     mEditMenu->addAction(tr("Unlock All Items"), this, [this]() {
         if (!mLayout) return;
-        const QList<QgsLayoutItem *> all = mLayout->layoutItems();
+        QList<QgsLayoutItem *> all;
+        mLayout->layoutItems(all);
         for (QgsLayoutItem *item : all)
             item->setLocked(false);
     });
@@ -692,7 +689,7 @@ void QgsLayoutDesignerDialog::setupMenus()
 
     mSettingsMenu = menuBar->addMenu(tr("&Settings"));
     if (mLayout) {
-        QgsLayoutSnapper *snapper = mLayout->snapper();
+        QgsLayoutSnapper *snapper = &mLayout->snapper();
         auto *snapGrid = mSettingsMenu->addAction(tr("Snap to Grid"), this, [this, snapper](bool on) {
             snapper->setSnapToGrid(on);
         });

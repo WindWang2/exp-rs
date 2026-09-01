@@ -20,14 +20,16 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
   for ( const auto &spatial : SpatialToolRegistry::instance().tools() )
   {
     // layout:* tools join the catalog through their own provider/group.
-    if ( spatial->name().rfind( "spatial:", 0 ) != 0 )
+    const bool isSpatial = ( spatial->name().rfind( "spatial:", 0 ) == 0 );
+    const bool isTemporal = ( spatial->name().rfind( "temporal:", 0 ) == 0 );
+    if ( !isSpatial && !isTemporal )
       continue;
 
     AgentTool tool;
     tool.name = spatial->name();
     tool.displayName = spatial->displayName();
     tool.category = ToolCategory::Data;
-    tool.group = "spatial";
+    tool.group = isTemporal ? "temporal" : "spatial";
     tool.description = spatial->description();
     tool.tags = spatial->tags();
     tool.inputSchema = spatial->inputSchema();

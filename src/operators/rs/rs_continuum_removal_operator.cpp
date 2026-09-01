@@ -132,19 +132,26 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
     std::vector<float> sortedWl;
     if ( hasWavelengths )
     {
-        // Duplicate check first (review P2): an axis that is ascending WITH
-        // duplicates previously skipped the guard entirely.
+        wlPerm.resize( bandCount );
+        std::iota( wlPerm.begin(), wlPerm.end(), 0 );
+        std::stable_sort( wlPerm.begin(), wlPerm.end(),
+                          [&wavelengths]( int a, int b ) { return wavelengths[a] < wavelengths[b]; } );
+        sortedWl.resize( bandCount );
+        for ( int b = 0; b < bandCount; ++b )
+            sortedWl[b] = wavelengths[wlPerm[b]];
+
         for ( int b = 1; b < bandCount; ++b )
         {
-            if ( wavelengths[b] == wavelengths[b - 1] )
+            if ( sortedWl[b] == sortedWl[b - 1] )
                 throw RSOperatorError( ErrorCode::InvalidInputData,
                                       "Continuum removal: duplicate WAVELENGTH metadata across bands — "
                                       "the continuum hull is ill-defined; fix the per-band WAVELENGTH tags" );
         }
+
         bool ascending = true;
-        for ( int b = 1; b < bandCount; ++b )
+        for ( int b = 0; b < bandCount; ++b )
         {
-            if ( wavelengths[b] < wavelengths[b - 1] )
+            if ( wlPerm[b] != b )
             {
                 ascending = false;
                 break;
@@ -152,15 +159,12 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
         }
         if ( !ascending )
         {
-            wlPerm.resize( bandCount );
-            std::iota( wlPerm.begin(), wlPerm.end(), 0 );
-            std::stable_sort( wlPerm.begin(), wlPerm.end(),
-                              [&wavelengths]( int a, int b ) { return wavelengths[a] < wavelengths[b]; } );
-            sortedWl.resize( bandCount );
-            for ( int b = 0; b < bandCount; ++b )
-                sortedWl[b] = wavelengths[wlPerm[b]];
             context.logWarning( "Continuum removal: WAVELENGTH axis is not ascending in band order — "
                                 "spectra re-ordered by wavelength for the continuum hull" );
+        }
+        else
+        {
+            wlPerm.clear();
         }
     }
     const float *wlPtr = hasWavelengths

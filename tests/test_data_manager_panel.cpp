@@ -283,7 +283,9 @@ TEST_CASE( "The reference count reflects Display Layer view leases",
   panel.refresh();
   CHECK( panel.rowText( id, 4 ) == QStringLiteral( "1" ) );
 
-  REQUIRE( displayManager.addLayer( viewId, id ) );
+  sicnu::display::AddLayerOptions dupOptions;
+  dupOptions.allowDuplicate = true;
+  REQUIRE( displayManager.addLayer( viewId, id, dupOptions ) );
   panel.refresh();
   CHECK( panel.rowText( id, 4 ) == QStringLiteral( "2" ) );
 }

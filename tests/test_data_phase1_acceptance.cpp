@@ -124,8 +124,10 @@ TEST_CASE("Phase 1 first-deliverable data/display separation lifecycle",
 
   const auto firstDisplay = context->displayManager().addLayer(
       context->mainViewId(), assetId);
+  sicnu::display::AddLayerOptions dupOptions;
+  dupOptions.allowDuplicate = true;
   const auto secondDisplay = context->displayManager().addLayer(
-      context->mainViewId(), assetId);
+      context->mainViewId(), assetId, dupOptions);
   REQUIRE(firstDisplay);
   REQUIRE(secondDisplay);
   REQUIRE(firstDisplay.value() != secondDisplay.value());

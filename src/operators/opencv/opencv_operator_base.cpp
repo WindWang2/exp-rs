@@ -166,19 +166,6 @@ Json::Value OpenCvOperatorBase::runStreaming(const std::string& inputPath,
                 std::copy(pixels, pixels + bufPixels, buf.begin());
                 maskBufferToNan(buf.data(), bufPixels, nodataActive, nodataF);
 
-                // Real-data window inside the halo buffer (mirrors
-                // GdalBlockStream::forEach's replicate-clamped margins).
-                // Filtering only this window makes the kernel extrapolate its
-                // own border exactly where the full-frame call would at the
-                // raster border; interior tiles are covered by real halo.
-                const int readX = std::max(0, tile.xOffset - halo);
-                const int readY = std::max(0, tile.yOffset - halo);
-                const int readW = std::min(width, tile.xOffset + tile.width + halo) - readX;
-                const int readH = std::min(height, tile.yOffset + tile.height + halo) - readY;
-                const int dstX = (tile.xOffset - halo < 0) ? (halo - tile.xOffset) : 0;
-                const int dstY = (tile.yOffset - halo < 0) ? (halo - tile.yOffset) : 0;
-
-                cv::Mat bufMat(bufH, bufW, CV_32FC1, buf.data());
                 // Filter the real-data window inside the halo buffer: the
                 // kernel then extrapolates its own border exactly where the
                 // full-frame call would at the raster border, and interior
@@ -193,6 +180,8 @@ Json::Value OpenCvOperatorBase::runStreaming(const std::string& inputPath,
                 const int readH = std::min(height, tile.yOffset + tile.height + halo) - readY;
                 const int dstX = (tile.xOffset - halo < 0) ? (halo - tile.xOffset) : 0;
                 const int dstY = (tile.yOffset - halo < 0) ? (halo - tile.yOffset) : 0;
+
+                cv::Mat bufMat(bufH, bufW, CV_32FC1, buf.data());
                 cv::Mat roi = bufMat(cv::Rect(dstX, dstY, readW, readH));
                 applyFilter(roi, params);
 

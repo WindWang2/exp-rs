@@ -1016,18 +1016,16 @@ TEST_CASE("Tier 2 - Subsystem: WorkflowRuntime non-existent step error handling"
 
 TEST_CASE("Tier 2 - Subsystem: JobEngine max worker floor and explicit overrides", "[e2e][tier2][subsystem]") {
     auto &engine = JobEngine::instance();
-    // #661: the historical 2..4 clamp silently capped multi-core
-    // workstations; overrides are honored (no upper clamp —
-    // oversubscription is preferable to ignoring the caller) and
-    // misconfiguration clamps to a safe floor of 1.
+    // #661: Misconfiguration clamps to the safe floor / ceiling, real workstation
+    // sizes are honored as-is within [kMinWorkers, kMaxWorkersOverride].
     engine.setMaxWorkers(-5);
-    CHECK(engine.maxWorkers() == 1); // safe floor
+    CHECK(engine.maxWorkers() == JobEngine::kMinWorkers); // safe floor
 
     engine.setMaxWorkers(0);
-    CHECK(engine.maxWorkers() == 1);
+    CHECK(engine.maxWorkers() == JobEngine::kMinWorkers);
 
     engine.setMaxWorkers(100);
-    CHECK(engine.maxWorkers() == 100); // explicit override honored
+    CHECK(engine.maxWorkers() == JobEngine::kMaxWorkersOverride); // safe ceiling
 
     engine.setMaxWorkers(3);
     CHECK(engine.maxWorkers() == 3);

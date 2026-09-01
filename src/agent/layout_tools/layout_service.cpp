@@ -23,6 +23,7 @@
 #include <qgsmaplayer.h>
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
+#include <qgsprojectviewsettings.h>
 #include <qgsreadwritecontext.h>
 #include <qgsrectangle.h>
 #include <qgsscalebarrendererregistry.h>
@@ -211,11 +212,11 @@ QgsPrintLayout *LayoutService::createLayout( const QString &name, const QString 
 
 QgsPrintLayout *LayoutService::findLayout( const QString &name ) const
 {
-  const QList<QgsMasterLayoutInterface *> layouts = QgsProject::instance()->layoutManager()->layouts();
-  for ( QgsMasterLayoutInterface *ml : layouts )
+  const QList<QgsPrintLayout *> layouts = QgsProject::instance()->layoutManager()->printLayouts();
+  for ( QgsPrintLayout *ml : layouts )
   {
     if ( ml->name() == name )
-      return qobject_cast<QgsPrintLayout *>( ml );
+      return ml;
   }
   return nullptr;
 }
@@ -545,7 +546,7 @@ QgsLayoutItem *LayoutService::addItem( QgsLayout *layout, const QString &type, c
   // A scale-only map needs a concrete extent first: setScale() early-returns
   // while the scale is still 0 (uninitialized extent).
   if ( qobject_cast<QgsLayoutItemMap *>( item ) && props.isMember( "scale" ) &&
-       !props.isMember( "extent" ) && !QgsProject::instance()->layerStore()->layers().empty() )
+       !props.isMember( "extent" ) && !QgsProject::instance()->mapLayers().empty() )
   {
     qobject_cast<QgsLayoutItemMap *>( item )->zoomToExtent(
         QgsProject::instance()->viewSettings()->fullExtent() );
@@ -562,7 +563,7 @@ QgsLayoutItem *LayoutService::addItem( QgsLayout *layout, const QString &type, c
   if ( QgsLayoutItemMap *map = qobject_cast<QgsLayoutItemMap *>( item ) )
   {
     // Prefer the project's full extent when the caller did not specify one.
-    if ( !props.isMember( "extent" ) && !props.isMember( "scale" ) && QgsProject::instance()->layerStore()->layers().empty() == false )
+    if ( !props.isMember( "extent" ) && !props.isMember( "scale" ) && !QgsProject::instance()->mapLayers().empty() )
       map->zoomToExtent( QgsProject::instance()->viewSettings()->fullExtent() );
     map->invalidateCache();
   }
@@ -842,10 +843,14 @@ bool LayoutService::applyItemProperties( QgsLayoutItem *item, const Json::Value 
       const QString style = QString::fromStdString( props["style"].asString() );
       const QStringList sorted = QgsApplication::scaleBarRendererRegistry()->sortedRendererList();
       QString matched;
+      QString styleNormalized = style;
+      styleNormalized.remove( ' ' ).replace( '_', ' ' );
       for ( const QString &candidate : sorted )
       {
+        QString candidateNormalized = candidate;
+        candidateNormalized.remove( ' ' );
         if ( candidate.compare( style, Qt::CaseInsensitive ) == 0 ||
-             candidate.remove( ' ' ).compare( style.remove( ' ' ).replace( '_', ' ' ), Qt::CaseInsensitive ) == 0 )
+             candidateNormalized.compare( styleNormalized, Qt::CaseInsensitive ) == 0 )
         {
           matched = candidate;
           break;
@@ -1351,7 +1356,7 @@ Json::Value LayoutService::autoArrange( QgsLayout *layout, bool apply, QString *
     map = new QgsLayoutItemMap( layout );
     map->setId( QStringLiteral( "auto:map" ) );
     map->attemptSetSceneRect( QRectF( mapX, mapY, mapW, mapH ) );
-    if ( !QgsProject::instance()->layerStore()->layers().empty() )
+    if ( !QgsProject::instance()->mapLayers().empty() )
       map->zoomToExtent( QgsProject::instance()->viewSettings()->fullExtent() );
     layout->addLayoutItem( map );  // pushes its own undo command
     record( map, createdMap );

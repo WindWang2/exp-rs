@@ -99,13 +99,12 @@ QToolBar *SicnuAppInterface::pluginToolBar()
 
 QgsRasterLayer *SicnuAppInterface::addRasterLayer( const QString &rasterLayerPath, const QString &baseName )
 {
-    Q_UNUSED( baseName );
     // Data/Display seam (ADR 0009/0010/0015): register + display only via ActiveViewHost.
     // No QgsProject::addMapLayer bypass.
     if ( !m_activeViewHost || rasterLayerPath.isEmpty() )
         return nullptr;
 
-    const auto res = m_activeViewHost->openRasterPath( rasterLayerPath );
+    const auto res = m_activeViewHost->openRasterPath( rasterLayerPath, baseName );
     if ( !res )
         return nullptr;
 
@@ -120,12 +119,11 @@ QgsRasterLayer *SicnuAppInterface::addRasterLayer( const QString &rasterLayerPat
 
 QgsVectorLayer *SicnuAppInterface::addVectorLayer( const QString &vectorLayerPath, const QString &baseName, const QString &providerKey )
 {
-    Q_UNUSED( baseName );
     Q_UNUSED( providerKey );
     if ( !m_activeViewHost || vectorLayerPath.isEmpty() )
         return nullptr;
 
-    const auto res = m_activeViewHost->openVectorPath( vectorLayerPath );
+    const auto res = m_activeViewHost->openVectorPath( vectorLayerPath, baseName );
     if ( !res )
         return nullptr;
 

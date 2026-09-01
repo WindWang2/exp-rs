@@ -558,21 +558,39 @@ void QgsCoordinateTransformPrivate::freeProj()
   // Which is not necessarily the case currently unfortunately. So
   // create a temporary dummy context, and attach it to the PJ* before destroying
   // it
-  PJ_CONTEXT *tmpContext = proj_context_create();
-  for ( ; it != mProjProjections.constEnd(); ++it )
+  try
   {
-    proj_assign_context( it.value(), tmpContext );
-    proj_destroy( it.value() );
-  }
+    PJ_CONTEXT *tmpContext = nullptr;
+    try
+    {
+      tmpContext = proj_context_create();
+    }
+    catch ( ... )
+    {
+      tmpContext = nullptr;
+    }
+    for ( ; it != mProjProjections.constEnd(); ++it )
+    {
+      if ( tmpContext )
+        proj_assign_context( it.value(), tmpContext );
+      proj_destroy( it.value() );
+    }
 
-  it = mProjFallbackProjections.constBegin();
-  for ( ; it != mProjFallbackProjections.constEnd(); ++it )
+    it = mProjFallbackProjections.constBegin();
+    for ( ; it != mProjFallbackProjections.constEnd(); ++it )
+    {
+      if ( tmpContext )
+        proj_assign_context( it.value(), tmpContext );
+      proj_destroy( it.value() );
+    }
+
+    if ( tmpContext )
+      proj_context_destroy( tmpContext );
+  }
+  catch ( ... )
   {
-    proj_assign_context( it.value(), tmpContext );
-    proj_destroy( it.value() );
+    // Ignore any exceptions thrown during teardown when proj is shutting down
   }
-
-  proj_context_destroy( tmpContext );
   mProjProjections.clear();
   mProjFallbackProjections.clear();
 }

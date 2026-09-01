@@ -1042,7 +1042,7 @@ TEST_CASE( "Rollback failures are appended to the commit diagnostics, not discar
     }
   } );
 
-  result = service.commit( { preview, { 0, 1, 2 }, PersistencePolicy::ProjectPersistent } );
+  result = service.commit( { preview, { 0, 1, 2 }, PersistencePolicy::TaskTemporary } );
 
   CHECK( reapedDuringRollback );
   CHECK( result.collectionId.isNull() );

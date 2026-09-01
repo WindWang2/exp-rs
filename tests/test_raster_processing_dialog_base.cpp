@@ -94,11 +94,13 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
         REQUIRE(dialog.pendingTaskId() > 0);
         REQUIRE(sicnu::TaskCenter::instance().allTasks().size() == taskCountBefore + 1);
 
-        QEventLoop loop;
-        QTimer::singleShot(5000, &loop, &QEventLoop::quit);
-        QObject::connect(&dialog, &QDialog::accepted, &loop, &QEventLoop::quit);
-        QObject::connect(&dialog, &QDialog::rejected, &loop, &QEventLoop::quit);
-        loop.exec();
+        for (int i = 0; i < 500 && (!accepted || dialog.isRunning()); ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        for (int i = 0; i < 10; ++i) {
+            QCoreApplication::processEvents();
+        }
 
         REQUIRE(accepted);
         REQUIRE(dialog.runButton()->isEnabled());

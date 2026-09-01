@@ -510,14 +510,42 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
         const auto it = m_runsByPipeline.find( pipelineId );
         if ( it != m_runsByPipeline.end() )
         {
-            // Keep the fresh submission's live task ids on the original plans.
+            const auto &center = TaskCenter::instance();
+            const PipelineExecutionInfo pipeNow = center.getPipelineInfo( pipelineId );
+            // Keep the fresh submission's live task ids and any completed outcomes on the original plans.
             for ( const auto &fresh : it->second->stepPlans() )
             {
                 if ( StepPlan *plan = run->findStepPlan( fresh.stepId ) )
                 {
                     plan->taskId = fresh.taskId;
-                    if ( plan->status != "Completed" )
-                        plan->status = "Pending";
+                    if ( fresh.status == "Completed" || fresh.status == "Failed"
+                         || fresh.status == "Canceled" || fresh.status == "Skipped" )
+                    {
+                        plan->status = fresh.status;
+                        plan->outputLayerPath = fresh.outputLayerPath;
+                        plan->resultPayload = fresh.resultPayload;
+                        plan->errorMessage = fresh.errorMessage;
+                        if ( !plan->outputLayerPath.empty() )
+                            run->setArtifact( fresh.stepId, plan->outputLayerPath );
+                    }
+                    else
+                    {
+                        const long tid = pipeNow.stepToTaskId.value( fresh.stepId, fresh.taskId );
+                        const AlgorithmTaskInfo info = tid >= 0 ? center.getTaskInfo( tid ) : AlgorithmTaskInfo{};
+                        if ( info.taskId == tid && tid >= 0 )
+                        {
+                            plan->status = stepStatusForTaskStatus( info.status ).toStdString();
+                            if ( info.status == sicnu::TaskStatus::Completed && !info.outputLayerPath.isEmpty() )
+                            {
+                                plan->outputLayerPath = info.outputLayerPath.toStdString();
+                                run->setArtifact( fresh.stepId, plan->outputLayerPath );
+                            }
+                        }
+                        else if ( plan->status != "Completed" )
+                        {
+                            plan->status = "Pending";
+                        }
+                    }
                     run->updateStepPlan( *plan );
                 }
             }
@@ -529,6 +557,18 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
             it->second = run;
             m_pipelineByRunId[run->runId()] = pipelineId;
             persistRunLocked( *run );
+
+            // Check if all steps already finished before the swap landed
+            const auto plans = run->stepPlans();
+            const bool allTerminal = !plans.empty() && std::all_of( plans.begin(), plans.end(),
+                                                                    []( const StepPlan &p2 ) {
+                                                                      return p2.status == "Completed"
+                                                                             || p2.status == "Failed"
+                                                                             || p2.status == "Canceled"
+                                                                             || p2.status == "Skipped";
+                                                                    } );
+            if ( allTerminal && !isTerminalRunState( run->state() ) )
+                finalizeRunLocked( pipelineId, *run );
         }
     }
     return pipelineId;

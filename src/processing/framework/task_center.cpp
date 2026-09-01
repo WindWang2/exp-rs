@@ -1721,17 +1721,17 @@ bool TaskCenter::resumeTask( long taskId )
     return ok;
 }
 
-bool TaskCenter::retryTask( long taskId )
+long TaskCenter::retryTask( long taskId )
 {
     AlgorithmTaskInfo oldInfo;
     {
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) )
-            return false;
+            return 0;
         // A non-terminal task is still schedulable/running: enqueueing a
         // retry beside it would execute the same work twice (#616).
         if ( !isTerminalStatus( m_tasks[taskId].status ) )
-            return false;
+            return 0;
         oldInfo = m_tasks[taskId];
     }
 
@@ -1772,7 +1772,7 @@ bool TaskCenter::retryTask( long taskId )
                                  oldInfo.source );
     }
     if ( newTaskId <= 0 )
-        return false;
+        return 0;
 
     // Keep the retry attached to its pipeline (#702): without the remap the
     // pipeline kept pointing at the OLD canceled task, so a retried step could
@@ -1820,7 +1820,7 @@ bool TaskCenter::retryTask( long taskId )
                 pipe.errorMessage.clear(); // the only failed step is being retried
         }
     }
-    return true;
+    return newTaskId;
 }
 
 QList<AlgorithmTaskInfo> TaskCenter::allTasks() const
@@ -2070,6 +2070,14 @@ PipelineExecutionInfo TaskCenter::waitForPipeline( long pipelineId,
 
         m_waitCondition.wait( &m_mutex, static_cast<unsigned long>( waitTime.count() ) );
     }
+}
+
+std::shared_ptr<const sicnu::workflow::WorkflowRun>
+TaskCenter::workflowRunForPipeline( long pipelineId ) const
+{
+    QMutexLocker locker( &m_mutex );
+    const auto it = m_pipelineRuns.find( pipelineId );
+    return it == m_pipelineRuns.end() ? nullptr : it.value();
 }
 
 } // namespace sicnu

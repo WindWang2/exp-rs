@@ -530,22 +530,16 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
 
   if ( m_dataManager )
   {
-    // #704: batch imports emit one signal per asset; coalesce to a single
-    // trailing rebuild instead of N full tree rebuilds on the GUI thread.
     connect( m_dataManager, &sicnu::data::DataManager::assetAdded, this,
-             &DataManagerPanel::scheduleCoalescedRefresh );
+             &DataManagerPanel::refresh );
     connect( m_dataManager, &sicnu::data::DataManager::assetChanged, this,
-             &DataManagerPanel::scheduleCoalescedRefresh );
+             &DataManagerPanel::refresh );
     connect( m_dataManager, &sicnu::data::DataManager::assetRemoved, this,
-             &DataManagerPanel::scheduleCoalescedRefresh );
+             &DataManagerPanel::refresh );
     connect( m_dataManager, &sicnu::data::DataManager::collectionAdded, this,
-             &DataManagerPanel::scheduleCoalescedRefresh );
+             &DataManagerPanel::refresh );
     connect( m_dataManager, &sicnu::data::DataManager::collectionRemoved, this,
-             &DataManagerPanel::scheduleCoalescedRefresh );
-    m_refreshCoalesceTimer = new QTimer( this );
-    m_refreshCoalesceTimer->setSingleShot( true );
-    m_refreshCoalesceTimer->setInterval( 250 );
-    connect( m_refreshCoalesceTimer, &QTimer::timeout, this, &DataManagerPanel::refresh );
+             &DataManagerPanel::refresh );
   }
 
   clearDetails( tr( "选择数据资产或集合以查看元信息。" ) );

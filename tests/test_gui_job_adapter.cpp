@@ -28,10 +28,22 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
 
     SECTION("Busy-gating: cannot submit second job while one is running") {
         jobs::JobRequest req;
-        req.algorithmId = "gdal:contrast_stretch";
+        req.algorithmId = "test:busy_gate";
         req.title = "Test Job";
 
-        long id1 = handle.submitJob(req, nullptr, nullptr);
+        std::atomic_bool started{false};
+        std::atomic_bool release{false};
+
+        long id1 = handle.submitJob(
+            req,
+            [&started, &release](const jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx) {
+                started.store(true);
+                while (!release.load() && !ctx.isCancelled())
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                ctx.throwIfCancelled();
+                return Json::Value(Json::objectValue);
+            },
+            nullptr, true, nullptr, nullptr);
         REQUIRE(id1 > 0);
         CHECK(handle.isRunning());
         CHECK(handle.taskId() == id1);
@@ -39,9 +51,9 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
         long id2 = handle.submitJob(req, nullptr, nullptr);
         CHECK(id2 == -1); // Busy-gated
 
+        release.store(true);
         handle.cancel();
-        // #696: cancel keeps the handle busy until the terminal record; the
-        // unknown algorithm fails fast, so pump briefly until it lands.
+        // #696: cancel keeps the handle busy until the terminal record.
         for (int i = 0; i < 300 && handle.isRunning(); ++i) {
             QCoreApplication::processEvents();
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -102,10 +114,11 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
 
         long taskId = handle.submitJob(
             req,
-            [](const jobs::JobRequest &, sicnu::operators::RSOperatorContext &) -> Json::Value {
+            [](const jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx) -> Json::Value {
                 // Block until cancellation lands, mirroring a long job.
-                for ( int i = 0; i < 2000; ++i )
+                for ( int i = 0; i < 2000 && !ctx.isCancelled(); ++i )
                     std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+                ctx.throwIfCancelled();
                 return Json::Value();
             },
             nullptr, true,

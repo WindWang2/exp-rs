@@ -47,9 +47,9 @@ QString syntheticSample( const QString &name )
     // the .hdr automatically when the dataset is created with a .dat name.
     const bool ccd1 = name == QLatin1String( "CCD1.dat" );
     const QString path = dir.path() + QLatin1Char('/') +
-                         ( ccd1 ? QStringLiteral( "CCD1.dat" )
+                         ( ccd1 ? QStringLiteral( "CCD1.tif" )
                                 : QString::number( cache.size() ) + QStringLiteral( ".tif" ) );
-    GDALDriverH driver = GDALGetDriverByName( ccd1 ? "ENVI" : "GTiff" );
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
     REQUIRE(driver != nullptr);
     // landsat_sample.tif is multiband in production; mimic 7 bands so band-based
     // tests exercise multiband paths. CCD1 is a 3-band change-detection product.
@@ -219,6 +219,7 @@ TEST_CASE("HistogramStretchWidget band selection", "[gui][histogram]") {
         CHECK(widget.band() == 2);
         widget.setBand(3);
         CHECK(widget.band() == 3);
+        widget.setRasterLayer(nullptr);
     } else {
         WARN("landsat_sample.tif not available, skipping band test");
     }
@@ -253,6 +254,7 @@ TEST_CASE("HistogramStretchWidget normalizes a master piecewise curve per RGB ba
     CHECK(blueEnhancement->enhanceContrast(blueMidpoint) ==
           Catch::Approx(128).margin(2));
 
+    widget.setRasterLayer(nullptr);
     delete layer;
 }
 
@@ -293,6 +295,7 @@ TEST_CASE("HistogramStretchWidget renders CCD1 piecewise output without a white 
     CHECK(whitePixels < pixelCount * 0.98);
     CHECK(totalIntensity / (pixelCount * 3.0) < 255.0);
 
+    widget.setRasterLayer(nullptr);
     delete layer;
 }
 
@@ -372,6 +375,7 @@ TEST_CASE("Custom enhancement survives the renderer clone used by map rendering"
     CAPTURE(backgroundPixels);
     CHECK(backgroundPixels < image.width() * image.height() * 0.98);
 
+    widget.setRasterLayer(nullptr);
     delete layer;
 }
 
@@ -402,6 +406,7 @@ TEST_CASE("HistogramStretchWidget applies Photoshop gamma", "[gui][histogram]") 
     auto *enhancement = const_cast<QgsContrastEnhancement *>(renderer->redContrastEnhancement());
     REQUIRE(enhancement != nullptr);
     CHECK(enhancement->enhanceContrast(121.0) > 170);
+    widget.setRasterLayer(nullptr);
     delete layer;
 }
 
@@ -462,6 +467,7 @@ TEST_CASE("HistogramStretchWidget uses cumulative clipping and two sigma default
     REQUIRE(stdDev != nullptr);
     CHECK(stdDev->maximumValue() > 70.0);
     CHECK(stdDev->maximumValue() < 90.0);
+    widget.setRasterLayer(nullptr);
     delete layer;
 }
 
@@ -482,6 +488,7 @@ TEST_CASE("HistogramStretchWidget reset removes stale piecewise points", "[gui][
     REQUIRE(points.size() == 2);
     CHECK(points.front().y() == Catch::Approx(0.0));
     CHECK(points.back().y() == Catch::Approx(255.0));
+    widget.setRasterLayer(nullptr);
     delete layer;
 }
 
@@ -504,6 +511,7 @@ TEST_CASE("HistogramStretchWidget red channel does not alter green and blue", "[
     REQUIRE(renderer->redContrastEnhancement() != nullptr);
     CHECK(renderer->greenContrastEnhancement() == nullptr);
     CHECK(renderer->blueContrastEnhancement() == nullptr);
+    widget.setRasterLayer(nullptr);
     delete layer;
 }
 
@@ -522,6 +530,7 @@ TEST_CASE("HistogramStretchWidget resetStretch", "[gui][histogram]") {
     // (verify no crash and layer remains valid)
     CHECK(widget.rasterLayer() == layer);
 
+    widget.setRasterLayer(nullptr);
     delete layer;
 }
 

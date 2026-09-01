@@ -1161,6 +1161,12 @@ TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][s
     REQUIRE( !geojsonPath.isEmpty() );
 
     TestMcpServer server;
+    QVariantMap initReq;
+    initReq[QStringLiteral( "id" )] = 1;
+    initReq[QStringLiteral( "method" )] = QStringLiteral( "initialize" );
+    server.testHandleRequest( initReq );
+    server.lastErrorId = QVariant();
+    server.lastResponseId = QVariant();
 
     // tools/call dispatch: full JSON-RPC path for a spatial: tool.
     QVariantMap callReq;

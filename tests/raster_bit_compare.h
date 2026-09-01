@@ -97,7 +97,8 @@ inline RasterBitCompareReport compareRastersBitExact( const std::string &pathA,
         int okB = 0;
         const double ndA = GDALGetRasterNoDataValue( bandA, &okA );
         const double ndB = GDALGetRasterNoDataValue( bandB, &okB );
-        if ( okA != okB || ( okA && ndA != ndB ) )
+        const bool ndMatches = ( std::isnan( ndA ) && std::isnan( ndB ) ) || ( ndA == ndB );
+        if ( okA != okB || ( okA && !ndMatches ) )
             return fail( "band " + std::to_string( b ) + " nodata mismatch" );
 
         const size_t sampleBytes = GDALGetDataTypeSizeBytes( dtA );
