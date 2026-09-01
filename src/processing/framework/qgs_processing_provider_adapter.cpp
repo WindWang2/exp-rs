@@ -3,6 +3,8 @@
 #include "atomic_algorithm_registry.h"
 #include "provider_algorithm_adapter.h"
 
+#include <QCoreApplication>
+#include <QObject>
 #include <qgsapplication.h>
 #include <processing/qgsprocessingregistry.h>
 #include <processing/qgsprocessingprovider.h>
@@ -79,6 +81,28 @@ void QgsProcessingProviderAdapter::discoverAlgorithms( AlgorithmEngine &engine )
 
     processing::AtomicAlgorithmRegistry::instance().registerAdapter(
       std::make_shared<processing::ProviderAlgorithmAdapter>( *alg ) );
+  }
+
+  // Provider-removal safety (#695): when a provider is unloaded, drop every
+  // cached adapter whose algorithm id belongs to it so the Agent catalog never
+  // advertises tools whose backing algorithm has been deleted. (execute()
+  // additionally re-resolves the live algorithm per run — see
+  // provider_algorithm_adapter.cpp.) Installed once; the registry is the
+  // connection context, so the hook dies with it.
+  static bool s_removalHookInstalled = false;
+  if ( !s_removalHookInstalled )
+  {
+    s_removalHookInstalled = true;
+    QObject::connect( registry, &QgsProcessingRegistry::providerRemoved,
+                      registry, []( const QString &removedProviderId ) {
+        const QString prefix = removedProviderId + QLatin1Char( ':' );
+        auto &adapters = processing::AtomicAlgorithmRegistry::instance();
+        for ( const auto &desc : adapters.listDescriptors() )
+        {
+          if ( QString::fromStdString( desc.id ).startsWith( prefix ) )
+            adapters.unregisterAdapter( desc.id );
+        }
+      } );
   }
 }
 

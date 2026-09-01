@@ -11,6 +11,9 @@ typedef void *GDALDatasetH;
 
 /// Ensure GDAL drivers are registered (once per process, thread-safe).
 /// Prefer this over calling GDALAllRegister() directly.
+/// Also caps OpenCV's internal thread pool to 1 (override with the
+/// SICNU_CV_NUM_THREADS environment variable) so nested parallelism stays
+/// bounded when operators run on JobEngine workers (#692).
 void ensureGdalInit();
 
 /**

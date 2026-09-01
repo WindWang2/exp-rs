@@ -8,9 +8,15 @@
 #include "qgsprocessingfeedback.h"
 #include "qgsprocessingoutputs.h"
 #include "qgsprocessingparameters.h"
+#include "qgsprocessingregistry.h"
+#include "qgsprocessingprovider.h"
+#include "qgsapplication.h"
 #include "qgsexception.h"
 #include "qgsproject.h"
 #include "qgis.h"
+
+#include <QCoreApplication>
+#include <QThread>
 
 #include <memory>
 
@@ -184,8 +190,29 @@ static AlgorithmDescriptor buildDescriptor( const QgsProcessingAlgorithm &alg )
 // ProviderAlgorithmAdapter
 // ---------------------------------------------------------------------------
 
+namespace {
+
+/**
+ * Whether QgsApplication::processingRegistry() may be consulted from the
+ * current thread. QGIS lazily constructs its application members on first
+ * touch, which is only safe on the main thread (the same guard exists in
+ * atomic_algorithm_registry.cpp: lazily constructing QgsRuntimeProfiler from
+ * a worker thread asserts). Once the QgsApplication instance exists, members
+ * are main-thread-built and reading them from worker threads is fine.
+ */
+bool processingRegistryReadable()
+{
+  if ( QgsApplication::instance() )
+    return true;
+  return QCoreApplication::instance()
+         && QThread::currentThread() == QCoreApplication::instance()->thread();
+}
+
+} // anonymous namespace
+
 ProviderAlgorithmAdapter::ProviderAlgorithmAdapter( const QgsProcessingAlgorithm &alg )
-  : mAlg( &alg )
+  : mProviderId( alg.provider() ? alg.provider()->id() : QString() )
+  , mAlgorithmId( alg.id() )
   , mDesc( buildDescriptor( alg ) )
 {
 }
@@ -210,11 +237,33 @@ Json::Value ProviderAlgorithmAdapter::estimateExecution( const Json::Value & /*p
 Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, ProgressCallback progressCb,
                                                std::function<bool()> isCancelledFn )
 {
-  if ( !mAlg )
-    throw std::runtime_error( "ProviderAlgorithmAdapter: null algorithm pointer" );
+  // #695: re-resolve the live algorithm from the processing registry by id —
+  // the provider-owned instance this adapter was built from may have been
+  // deleted when its provider was unloaded, so caching the raw pointer risks
+  // a use-after-free here. A missing algorithm fails with a typed error
+  // instead of dereferencing freed memory.
+  const QgsProcessingAlgorithm *liveAlg = nullptr;
+  if ( processingRegistryReadable() )
+  {
+    if ( QgsProcessingRegistry *registry = QgsApplication::processingRegistry() )
+      liveAlg = registry->algorithmById( mAlgorithmId );
+  }
+
+  if ( !liveAlg )
+  {
+    Json::Value details( Json::objectValue );
+    details["algorithmId"] = mAlgorithmId.toStdString();
+    if ( !mProviderId.isEmpty() )
+      details["providerId"] = mProviderId.toStdString();
+    throw sicnu::operators::RSOperatorError(
+      sicnu::operators::ErrorCode::QgisProcessingError,
+      "Provider algorithm unavailable (provider removed or not registered): "
+        + mAlgorithmId.toStdString(),
+      details );
+  }
 
   // Create a fresh clone for this execution.
-  std::unique_ptr<QgsProcessingAlgorithm> algorithm( mAlg->create() );
+  std::unique_ptr<QgsProcessingAlgorithm> algorithm( liveAlg->create() );
   if ( !algorithm )
     throw std::runtime_error( "ProviderAlgorithmAdapter: failed to clone algorithm " + mDesc.id );
 

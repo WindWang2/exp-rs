@@ -6,6 +6,7 @@
 #include <cpl_string.h>
 #include <QFile>
 #include <QDebug>
+#include <QString>
 #include <algorithm>
 #include <cstring>
 #include <limits>
@@ -13,11 +14,49 @@
 
 #include "qgsdatasourceresolver.h"
 
-// Ensure GDAL drivers are registered (once per process, thread-safe)
+// OpenCV is an optional dependency of sicnu_processing; only the core header
+// is needed for the nested-parallelism cap below (#692).
+#if defined(__has_include)
+#  if __has_include(<opencv2/core.hpp>)
+#    include <opencv2/core.hpp>
+#    define SICNU_HAVE_OPENCV_CORE 1
+#  endif
+#endif
+
+namespace {
+
+#if defined(SICNU_HAVE_OPENCV_CORE)
+// Nested-parallelism cap (#692): operators and dialog compute run on
+// JobEngine's own worker pool (2-4 threads); OpenCV's internal pool must not
+// add another idealThreadCount() threads per running job. Defaults to
+// single-threaded OpenCV; set SICNU_CV_NUM_THREADS=<n> to restore a bounded
+// internal pool.
+void capOpenCvThreads()
+{
+    const QString raw = qEnvironmentVariable("SICNU_CV_NUM_THREADS");
+    bool ok = false;
+    int threads = raw.toInt(&ok);
+    if (!ok || threads < 1 || threads > 256)
+        threads = 1;
+    cv::setNumThreads(threads);
+}
+#else
+void capOpenCvThreads() {}
+#endif
+
+} // anonymous namespace
+
+// Ensure GDAL drivers are registered (once per process, thread-safe).
+// Also applies the process-wide nested-parallelism cap (#692): see
+// capOpenCvThreads() above. Called by the app/CLI/MCP entry points and lazily
+// by operators — whichever runs first wins.
 void ensureGdalInit()
 {
     static std::once_flag flag;
-    std::call_once(flag, []() { GDALAllRegister(); });
+    std::call_once(flag, []() {
+        GDALAllRegister();
+        capOpenCvThreads();
+    });
 }
 
 GdalDatasetWrapper::GdalDatasetWrapper() = default;
