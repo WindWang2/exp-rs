@@ -17,9 +17,10 @@
 
 #include <qgsapplication.h>
 #include <qgscolorrampshader.h>
-#include <qgsgradientcolorramp.h>
+#include <qgscolorrampimpl.h>
 #include <qgslayertree.h>
 #include <qgslayertreemodellegendnode.h>
+#include <qgscolorramplegendnode.h>
 #include <qgslayout.h>
 #include <qgslayoutitemlabel.h>
 #include <qgslayoutitemlegend.h>
@@ -27,6 +28,7 @@
 #include <qgslayoutitemregistry.h>
 #include <qgslayoutitemscalebar.h>
 #include <qgslayoutpagecollection.h>
+#include <qgslayoutmanager.h>
 #include <qgslayoutundostack.h>
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
@@ -360,7 +362,7 @@ TEST_CASE( "layout:export writes real images with memory preflight", "[layout][m
   REQUIRE( !image.isNull() );
   CHECK( std::abs( image.width() - 794 ) <= 2 );
   CHECK( std::abs( image.height() - 1123 ) <= 2 );
-  CHECK( !image.isNull() && image.sizeInBytes() > 0 );
+  CHECK( ( !image.isNull() && image.sizeInBytes() > 0 ) );
 
   // PDF export produces a valid non-empty file (%PDF magic).
   const QString pdf = dir.filePath( QStringLiteral( "out.pdf" ) );
