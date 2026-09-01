@@ -25,7 +25,6 @@ set(SICNU_WORKFLOW_CORE_SOURCES
 set(SICNU_WORKFLOW_RUNTIME_SOURCES
   workflow_runtime.cpp
   builtin_definitions.cpp
-  workflow_run_coordinator.cpp
 )
 add_library(sicnu_workflow SHARED ${SICNU_WORKFLOW_CORE_SOURCES})
 add_library(sicnu_workflow_runtime STATIC ${SICNU_WORKFLOW_RUNTIME_SOURCES})

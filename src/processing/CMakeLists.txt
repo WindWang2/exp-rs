@@ -215,6 +215,12 @@ add_library(sicnu_task_center STATIC
     framework/resource_monitor.cpp
     framework/task_resource_budget.cpp
     framework/agent_workflow_executor.cpp
+    # WorkflowRunCoordinator lives here (not in sicnu_workflow_runtime):
+    # it bridges TaskCenter pipelines to the persisted Workflow v2 core, and
+    # sicnu_agent (mcp_server) + every executor compiles against it — building
+    # it in the runtime would form a library cycle (runtime's autogen depends
+    # on agent headers).
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run_coordinator.cpp
     framework/execution_plane.cpp
     # Task Center seam for OutputCommitter and ToolCallDispatcher default constructor
     # — kept out of sicnu_processing so that library does not need JobEngine / TaskCenter link deps.
