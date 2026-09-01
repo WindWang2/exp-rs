@@ -1,3 +1,8 @@
+# GCC 16 (16.2.x) ICE workaround — see the matching block in src/core/CMakeLists.txt.
+set_source_files_properties(
+  providers/wmts_source_provider.cpp
+  PROPERTIES COMPILE_OPTIONS "-O1")
+
 qt_add_library(sicnu_data STATIC
   asset_types.cpp
   asset_types.h

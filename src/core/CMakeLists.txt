@@ -1,6 +1,19 @@
 ############################################################
 # sources
 
+# GCC 16 (16.2.x) ICEs on these TUs at -O2/-O3 (internal compiler error in
+# qmap.h / QMetaType instantiation paths). -O1 compiles them cleanly and the
+# runtime cost for these files is negligible. Drop when the toolchain is fixed.
+set_source_files_properties(
+  mesh/qgsmeshcalcutils.cpp
+  pointcloud/qgspointcloudlayerrenderer.cpp
+  providers/copc/qgscopcprovider.cpp
+  providers/vpc/qgsvirtualpointcloudprovider.cpp
+  qgsvectorfilewriter.cpp
+  vectortile/qgsvectortilelayer.cpp
+  vectortile/qgsvectortileloader.cpp
+  PROPERTIES COMPILE_OPTIONS "-O1")
+
 BISON_TARGET(QgsExpressionParser   qgsexpressionparser.yy   ${CMAKE_CURRENT_BINARY_DIR}/qgsexpressionparser.cpp COMPILE_FLAGS "-p exp_")
 FLEX_TARGET(QgsExpressionLexer qgsexpressionlexer.ll ${CMAKE_CURRENT_BINARY_DIR}/qgsexpressionlexer.cpp)
 ADD_FLEX_BISON_DEPENDENCY(QgsExpressionLexer QgsExpressionParser)
