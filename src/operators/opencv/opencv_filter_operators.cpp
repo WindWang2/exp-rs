@@ -77,7 +77,12 @@ Json::Value OpenCvGaussianBlurOperator::operatorSchemaProperties() const {
 }
 
 int OpenCvGaussianBlurOperator::neighborhoodRadius(const Json::Value& params) const {
-    return oddKernelRadius(params, "kernelSize", 5);
+    (void)params;
+    // NOT streamable bit-exactly: applyNormalizedFilter's mask division must
+    // see NoData holes and the reflect101 image of the MASK across the whole
+    // raster edge — a tile buffer reproduces values but not the mask's
+    // reflection. Keep the full-frame path; median/sobel/laplacian stream.
+    return -1;
 }
 
 void OpenCvGaussianBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value& params) const {
@@ -116,7 +121,10 @@ Json::Value OpenCvMeanBlurOperator::operatorSchemaProperties() const {
 }
 
 int OpenCvMeanBlurOperator::neighborhoodRadius(const Json::Value& params) const {
-    return oddKernelRadius(params, "kernelSize", 3);
+    (void)params;
+    // See OpenCvGaussianBlurOperator::neighborhoodRadius: masked-normalized
+    // convolution does not tile bit-exactly; keep the full-frame path.
+    return -1;
 }
 
 void OpenCvMeanBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value& params) const {
@@ -152,9 +160,12 @@ Json::Value OpenCvMedianBlurOperator::operatorSchemaProperties() const {
 }
 
 int OpenCvMedianBlurOperator::neighborhoodRadius(const Json::Value& params) const {
-    // cv::medianBlur extrapolates image borders by replication; the haloed
-    // tile stream reproduces that exactly (see the base class).
-    return oddKernelRadius(params, "kernelSize", 3);
+    (void)params;
+    // FullRaster on purpose: cv::medianBlur's ordering of NaN inside a window
+    // is unspecified and differs between a full image and an ROI view, so the
+    // streamed tiles cannot reproduce the full-frame output on NaN ringtones
+    // (parity review). Sobel/Laplacian (NaN-echo semantics) stream.
+    return -1;
 }
 
 void OpenCvMedianBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value& params) const {

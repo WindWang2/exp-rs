@@ -808,9 +808,12 @@ TEST_CASE("Streamed median keeps undeclared NaN pixels and valid zeros (#691)",
 
 TEST_CASE("OpenCV windowed filters declare Streaming; Canny stays FullRaster (#691)",
           "[opencv][streaming]") {
-    CHECK(OpenCvGaussianBlurOperator().memoryPolicy() == RSOperatorMemoryPolicy::Streaming);
-    CHECK(OpenCvMeanBlurOperator().memoryPolicy() == RSOperatorMemoryPolicy::Streaming);
-    CHECK(OpenCvMedianBlurOperator().memoryPolicy() == RSOperatorMemoryPolicy::Streaming);
+    // gaussian/mean were demoted to FullRaster deliberately: their
+    // masked-normalized kernels cannot be tiled bit-exactly (mask reflection
+    // at raster edges); median/sobel/laplacian stream.
+    CHECK(OpenCvGaussianBlurOperator().memoryPolicy() == RSOperatorMemoryPolicy::FullRaster);
+    CHECK(OpenCvMeanBlurOperator().memoryPolicy() == RSOperatorMemoryPolicy::FullRaster);
+    CHECK(OpenCvMedianBlurOperator().memoryPolicy() == RSOperatorMemoryPolicy::FullRaster);
     CHECK(OpenCvSobelOperator().memoryPolicy() == RSOperatorMemoryPolicy::Streaming);
     CHECK(OpenCvLaplacianOperator().memoryPolicy() == RSOperatorMemoryPolicy::Streaming);
     // Canny normalizes with the global band min/max -> genuinely full-frame.

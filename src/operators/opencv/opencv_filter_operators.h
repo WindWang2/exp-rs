@@ -13,10 +13,12 @@ public:
     std::string displayName() const override { return "Gaussian Blur"; }
     std::string group() const override { return "opencv-filter"; }
     std::string description() const override { return "Apply Gaussian blur using OpenCV."; }
-    // Windowed kernel: streamed tile-by-tile through the base (O(tile) memory).
+    // FullRaster on purpose: the masked-normalized kernel cannot be tiled
+    // bit-exactly (mask reflection at raster edges); median/sobel/laplacian
+    // stream instead.
     RSOperatorMemoryPolicy memoryPolicy() const override
     {
-        return RSOperatorMemoryPolicy::Streaming;
+        return RSOperatorMemoryPolicy::FullRaster;
     }
     Json::Value schema() const override;
     Json::Value metadata() const override;
@@ -38,10 +40,11 @@ public:
     std::string description() const override {
         return "Apply a box (mean) filter using OpenCV cv::blur.";
     }
-    // Windowed kernel: streamed tile-by-tile through the base (O(tile) memory).
+    // FullRaster on purpose: see OpenCvGaussianBlurOperator (masked-normalized
+    // kernels do not tile bit-exactly).
     RSOperatorMemoryPolicy memoryPolicy() const override
     {
-        return RSOperatorMemoryPolicy::Streaming;
+        return RSOperatorMemoryPolicy::FullRaster;
     }
     Json::Value schema() const override;
     Json::Value metadata() const override;
@@ -61,7 +64,9 @@ public:
     // Windowed kernel: streamed tile-by-tile through the base (O(tile) memory).
     RSOperatorMemoryPolicy memoryPolicy() const override
     {
-        return RSOperatorMemoryPolicy::Streaming;
+        // FullRaster on purpose: median's NaN ordering is view-dependent (see
+        // neighborhoodRadius); Sobel/Laplacian stream.
+        return RSOperatorMemoryPolicy::FullRaster;
     }
     Json::Value schema() const override;
     Json::Value metadata() const override;
