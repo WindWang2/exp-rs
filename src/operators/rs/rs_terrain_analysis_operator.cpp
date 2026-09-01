@@ -8,13 +8,16 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/terrain_analysis.h"
+#include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_multiband_block_stream.h"
 
 #include <QString>
 
 #include <ogr_srs_api.h>
 #include <cpl_error.h>
 
+#include <algorithm>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -67,12 +70,13 @@ Json::Value RsTerrainAnalysisOperator::metadata() const {
 
 Json::Value RsTerrainAnalysisOperator::executionEstimate() const
 {
-    // FullRaster (default policy): the whole DEM band plus one Float32 output
-    // band are resident; the 3x3-window kernels use no extra full-raster state.
+    // Streaming: the DEM is processed in 2048x2048 halo-1 tiles through
+    // GdalBlockStream and written via GdalStreamingOutput; peak RAM is two
+    // tile buffers (DEM + product) plus fixed overhead.
     Json::Value est(Json::objectValue);
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 12582912; // 2 x 1024x1024 Float32 buffers + 4 MiB fixed
+    est["tileWidth"] = 2048;
+    est["tileHeight"] = 2048;
+    est["estimatedRamBytes"] = 37748736; // 2 x 2048x2048 Float32 buffers + 4 MiB fixed
     return est;
 }
 
@@ -177,46 +181,117 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
     context.logInfo("Computing " + product + " from " + inputPath + " (cellSizeX=" + std::to_string(cellSizeX) + ", cellSizeY=" + std::to_string(cellSizeY) + ")");
     context.reportProgress(0.2, "Reading DEM");
 
-    std::vector<float> dem;
-    dem.resize(static_cast<size_t>(width) * height);
-    if (!ds.readBandData(1, dem.data(), width, height)) {
-        throw RSOperatorError(ErrorCode::GdalError,
-                              "Failed to read DEM band 1");
+    // The terrain kernels are 3x3-window computations, so the DEM is streamed
+    // in 2048x2048 tiles with a 1-pixel halo (GdalBlockStream) and the product
+    // is written tile-by-tile (GdalStreamingOutput). Neither the DEM band nor
+    // the product band is ever materialized whole.
+    constexpr int kTileDim = 2048;
+    constexpr int kHalo = 1;
+
+    auto runKernel = [&](const float* demTile, float* productTile, int tileW, int tileH) {
+        if (product == "slope") {
+            return TerrainAnalysis::slope(demTile, productTile, tileW, tileH, cellSizeX, cellSizeY, computeNodata);
+        } else if (product == "aspect") {
+            return TerrainAnalysis::aspect(demTile, productTile, tileW, tileH, cellSizeX, cellSizeY, computeNodata);
+        } else if (product == "hillshade") {
+            return TerrainAnalysis::hillshade(demTile, productTile, tileW, tileH, cellSizeX, cellSizeY, computeNodata,
+                                              sunAzimuth, sunElevation);
+        } else if (product == "roughness") {
+            return TerrainAnalysis::roughness(demTile, productTile, tileW, tileH, computeNodata);
+        } else if (product == "tri") {
+            return TerrainAnalysis::tri(demTile, productTile, tileW, tileH, computeNodata);
+        } else if (product == "tpi") {
+            return TerrainAnalysis::tpi(demTile, productTile, tileW, tileH, computeNodata);
+        }
+        return false;
+    };
+
+    GdalStreamingOutput out(QString::fromStdString(outputPath), width, height, 1,
+                            GDT_Float32, ds.geoTransform(), ds.projection());
+    if (!out.isOpen()) {
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              "Failed to create output raster: " + outputPath);
+    }
+    if (outNodata.has_value() && !out.setNoDataValue(*outNodata)) {
+        out.abandon();
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              "Failed to declare NoData on output raster: " + outputPath);
     }
 
-    std::vector<float> out;
-    out.resize(dem.size());
+    GdalBlockStream stream(ds, 1, kTileDim, kTileDim, kHalo);
+
+    const size_t bufPixels = static_cast<size_t>(kTileDim + 2 * kHalo) * (kTileDim + 2 * kHalo);
+    std::vector<float> demBuf(bufPixels);
+    std::vector<float> productBuf(bufPixels);
+    std::vector<float> coreBuf(static_cast<size_t>(kTileDim) * kTileDim);
 
     context.reportProgress(0.5, "Computing " + product);
 
-    bool ok = false;
-    if (product == "slope") {
-        ok = TerrainAnalysis::slope(dem.data(), out.data(), width, height, cellSizeX, cellSizeY, computeNodata);
-    } else if (product == "aspect") {
-        ok = TerrainAnalysis::aspect(dem.data(), out.data(), width, height, cellSizeX, cellSizeY, computeNodata);
-    } else if (product == "hillshade") {
-        ok = TerrainAnalysis::hillshade(dem.data(), out.data(), width, height, cellSizeX, cellSizeY, computeNodata,
-                                        sunAzimuth, sunElevation);
-    } else if (product == "roughness") {
-        ok = TerrainAnalysis::roughness(dem.data(), out.data(), width, height, computeNodata);
-    } else if (product == "tri") {
-        ok = TerrainAnalysis::tri(dem.data(), out.data(), width, height, computeNodata);
-    } else if (product == "tpi") {
-        ok = TerrainAnalysis::tpi(dem.data(), out.data(), width, height, computeNodata);
-    }
+    bool complete = false;
+    try {
+        complete = stream.forEach([&](const GdalBlockStream::Tile& tile, const float* pixels) {
+            context.throwIfCancelled();
 
-    if (!ok) {
-        throw RSOperatorError(ErrorCode::ComputationError,
-                              "Terrain analysis computation failed");
+            const int bufW = tile.bufferWidth;
+            const int bufH = tile.bufferHeight;
+            std::copy(pixels, pixels + static_cast<size_t>(bufW) * bufH, demBuf.begin());
+
+            // Full-frame kernels read out-of-bounds neighbors as nodata
+            // (TerrainAnalysis::getCell). The stream's replicate-filled
+            // clamped margins are reset to the compute nodata so the kernels
+            // see exactly the same 3x3 window contents at raster edges as the
+            // full-frame call did (== + isnan semantics unchanged).
+            const int readX = std::max(0, tile.xOffset - kHalo);
+            const int readY = std::max(0, tile.yOffset - kHalo);
+            const int readW = std::min(width, tile.xOffset + tile.width + kHalo) - readX;
+            const int readH = std::min(height, tile.yOffset + tile.height + kHalo) - readY;
+            const int dstX = (tile.xOffset - kHalo < 0) ? (kHalo - tile.xOffset) : 0;
+            const int dstY = (tile.yOffset - kHalo < 0) ? (kHalo - tile.yOffset) : 0;
+            for (int r = 0; r < bufH; ++r) {
+                for (int c = 0; c < bufW; ++c) {
+                    if (c < dstX || c >= dstX + readW || r < dstY || r >= dstY + readH) {
+                        demBuf[static_cast<size_t>(r) * bufW + c] = computeNodata;
+                    }
+                }
+            }
+
+            if (!runKernel(demBuf.data(), productBuf.data(), bufW, bufH)) {
+                out.abandon();
+                throw RSOperatorError(ErrorCode::ComputationError,
+                                      "Terrain analysis computation failed");
+            }
+
+            // Core pixels always sit at (kHalo, kHalo) in the haloed buffer.
+            for (int r = 0; r < tile.height; ++r) {
+                std::copy_n(productBuf.data() + static_cast<size_t>(r + kHalo) * bufW + kHalo,
+                            tile.width,
+                            coreBuf.data() + static_cast<size_t>(r) * tile.width);
+            }
+            if (!out.writeTile(1, tile, coreBuf.data())) {
+                out.abandon();
+                throw RSOperatorError(ErrorCode::GdalError,
+                                      "Failed to write tile of output raster: " + outputPath);
+            }
+
+            context.reportProgress(0.25 + 0.45 * (static_cast<double>(tile.index) + 1) / tile.totalTiles,
+                                   "Computing " + product);
+            return true;
+        });
+    } catch (...) {
+        out.abandon(); // destructor closes and removes the partial output
+        throw;
+    }
+    if (!complete) {
+        out.abandon();
+        throw RSOperatorError(ErrorCode::GdalError,
+                              "Failed to read DEM band 1");
     }
 
     context.throwIfCancelled();
     context.reportProgress(0.8, "Writing output raster");
 
-    std::vector<std::vector<float>> bands = {std::move(out)};
     QString errorMessage;
-    if (!writeGdalOutput(QString::fromStdString(outputPath), width, height, bands,
-                         ds.geoTransform(), ds.projection(), &errorMessage, outNodata)) {
+    if (!out.closeWithError(&errorMessage)) {
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to write output raster: " + errorMessage.toStdString());
     }

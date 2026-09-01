@@ -41,6 +41,11 @@ public:
     std::string description() const override {
         return "Compute slope, aspect, hillshade, roughness, TRI, or TPI from a DEM.";
     }
+    // 3x3-window kernels: streamed in halo-1 tiles (O(tile) memory).
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        return RSOperatorMemoryPolicy::Streaming;
+    }
 
     Json::Value schema() const override;
     Json::Value metadata() const override;

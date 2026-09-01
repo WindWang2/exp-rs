@@ -3149,3 +3149,191 @@ TEST_CASE("RS continuum removal preserves absent NoData without fabricating defa
 
 
 
+
+// ---------------------------------------------------------------------------
+// #691: rs:terrain_analysis streams the DEM in 2048x2048 halo-1 tiles through
+// GdalBlockStream and writes via GdalStreamingOutput. Every product must match
+// the full-frame TerrainAnalysis kernel, including at tile boundaries and
+// raster edges, with the (== + isnan) NoData echo semantics preserved.
+// ---------------------------------------------------------------------------
+#include "processing/algorithms/terrain_analysis.h"
+
+#include <algorithm>
+#include <limits>
+
+namespace {
+
+/// Deterministic DEM with gradients and steps; with withNodata, scattered
+/// sentinel pixels including all four raster corners.
+std::vector<float> streamingTerrainDem(int w, int h, float sentinel, bool withNodata) {
+    std::vector<float> dem(static_cast<size_t>(w) * h);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            dem[static_cast<size_t>(y) * w + x] =
+                100.0f + 1.5f * static_cast<float>((x * 7 + y * 11) % 97)
+                + 0.25f * static_cast<float>((x / 32) % 2);
+            if (withNodata && (x * 31 + y * 17) % 211 == 0)
+                dem[static_cast<size_t>(y) * w + x] = sentinel;
+        }
+    }
+    if (withNodata) {
+        dem[0] = sentinel;
+        dem[w - 1] = sentinel;
+        dem[static_cast<size_t>(h - 1) * w] = sentinel;
+        dem[static_cast<size_t>(h - 1) * w + w - 1] = sentinel;
+    }
+    return dem;
+}
+
+/// Runs rs:terrain_analysis for one product and reads the single output band.
+std::vector<float> runTerrainProduct(const QTemporaryDir &dir, const QString &input,
+                                     const std::string &product, double cellSize,
+                                     bool passNodata, double nodata, int w, int h) {
+    const QString outputPath = dir.filePath(QString::fromStdString(product + "_out.tif"));
+    auto op = RSOperatorRegistry::instance().create("rs:terrain_analysis");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = input.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["product"] = product;
+    params["cellSize"] = cellSize;
+    if (passNodata)
+        params["nodata"] = nodata;
+    RSOperatorContext ctx;
+    const Json::Value result = op->run(params, ctx);
+    CHECK(result["width"].asInt() == w);
+    CHECK(result["height"].asInt() == h);
+
+    GdalDatasetWrapper ds;
+    REQUIRE(ds.open(outputPath));
+    std::vector<float> out(static_cast<size_t>(w) * h);
+    REQUIRE(ds.readBandData(1, out.data(), w, h));
+    return out;
+}
+
+void requireSameTerrain(const std::vector<float> &expected, const std::vector<float> &actual) {
+    REQUIRE(expected.size() == actual.size());
+    size_t nanMismatches = 0;
+    size_t valueMismatches = 0;
+    double worstDiff = 0.0;
+    for (size_t i = 0; i < expected.size(); ++i) {
+        const float e = expected[i];
+        const float a = actual[i];
+        if (std::isnan(e) || std::isnan(a)) {
+            if (!(std::isnan(e) && std::isnan(a)))
+                ++nanMismatches;
+            continue;
+        }
+        if (e != a) {
+            ++valueMismatches;
+            worstDiff = std::max(worstDiff, std::abs(static_cast<double>(e) - a));
+        }
+    }
+    if (nanMismatches != 0 || worstDiff > 1e-4) {
+        FAIL("streamed terrain output differs from full-frame kernel: nanMismatches="
+             << nanMismatches << " valueMismatches=" << valueMismatches
+             << " worstDiff=" << worstDiff);
+    }
+}
+
+} // namespace
+
+TEST_CASE("RS terrain analysis streams halo tiles matching the full-frame kernel (#691)",
+          "[operators][rs][terrain]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    // 2x2 tiles of 2048 with awkward edges: 2300 = 2048+252, 2100 = 2048+52.
+    constexpr int W = 2300;
+    constexpr int H = 2100;
+    constexpr float kNodata = -9999.0f;
+    const std::vector<float> dem = streamingTerrainDem(W, H, kNodata, true);
+    const QString inputPath = tmp.filePath(QStringLiteral("dem.tif"));
+    {
+        const std::vector<std::vector<float>> bands(1, dem);
+        REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+        ensureGdalInit();
+        GDALDatasetH ds = GDALOpen(inputPath.toUtf8().constData(), GA_Update);
+        REQUIRE(ds != nullptr);
+        GDALSetRasterNoDataValue(GDALGetRasterBand(ds, 1), kNodata);
+        GDALClose(ds);
+    }
+
+    // Full-frame reference: the operator reads raw values and hands the
+    // compute nodata straight to the kernels, so the kernel called on the raw
+    // DEM with the declared sentinel is the exact spec.
+    constexpr double kCellSize = 30.0;
+    const float cellF = static_cast<float>(kCellSize);
+
+    SECTION("slope") {
+        std::vector<float> expected(dem.size());
+        REQUIRE(TerrainAnalysis::slope(dem.data(), expected.data(), W, H, cellF, cellF, kNodata));
+        const std::vector<float> actual =
+            runTerrainProduct(tmp, inputPath, "slope", kCellSize, true, kNodata, W, H);
+        requireSameTerrain(expected, actual);
+        CHECK(actual[0] == kNodata);                                       // corner echo
+        CHECK(actual[static_cast<size_t>(H - 1) * W + W - 1] == kNodata);  // corner echo
+    }
+
+    SECTION("hillshade") {
+        std::vector<float> expected(dem.size());
+        REQUIRE(TerrainAnalysis::hillshade(dem.data(), expected.data(), W, H, cellF, cellF,
+                                           kNodata, 315.0f, 45.0f));
+        const std::vector<float> actual =
+            runTerrainProduct(tmp, inputPath, "hillshade", kCellSize, true, kNodata, W, H);
+        requireSameTerrain(expected, actual);
+        CHECK(actual[static_cast<size_t>(H / 2) * W + W / 2] ==
+              Catch::Approx(expected[static_cast<size_t>(H / 2) * W + W / 2]).margin(1e-6));
+    }
+
+    SECTION("tpi") {
+        std::vector<float> expected(dem.size());
+        REQUIRE(TerrainAnalysis::tpi(dem.data(), expected.data(), W, H, kNodata));
+        const std::vector<float> actual =
+            runTerrainProduct(tmp, inputPath, "tpi", kCellSize, true, kNodata, W, H);
+        requireSameTerrain(expected, actual);
+
+        // Output declares the input's NoData.
+        GdalDatasetWrapper out;
+        REQUIRE(out.open(tmp.filePath(QStringLiteral("tpi_out.tif"))));
+        bool hasNodata = false;
+        const double nd = out.bandNoDataValue(1, &hasNodata);
+        CHECK(hasNodata);
+        CHECK(static_cast<float>(nd) == kNodata);
+    }
+}
+
+TEST_CASE("RS terrain analysis echoes NaN through the streaming path and keeps absent NoData undeclared (#691)",
+          "[operators][rs][terrain][nodata]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    // Small single-tile DEM with raw NaN cells and NO declared NoData: the
+    // compute nodata is NaN, kernels echo it, and the output must stay
+    // undeclared (#465 semantics through the streaming path).
+    constexpr int W = 64;
+    constexpr int H = 48;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> dem = streamingTerrainDem(W, H, nan, false);
+    dem[static_cast<size_t>(5) * W + 7] = nan;
+    dem[0] = nan;
+    const QString inputPath = tmp.filePath(QStringLiteral("dem_nan.tif"));
+    {
+        const std::vector<std::vector<float>> bands(1, dem);
+        REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+    }
+
+    std::vector<float> expected(dem.size());
+    REQUIRE(TerrainAnalysis::roughness(dem.data(), expected.data(), W, H, nan));
+    const std::vector<float> actual =
+        runTerrainProduct(tmp, inputPath, "roughness", 30.0, false, 0.0, W, H);
+    requireSameTerrain(expected, actual);
+    CHECK(std::isnan(actual[static_cast<size_t>(5) * W + 7]));
+    CHECK(std::isnan(actual[0]));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(tmp.filePath(QStringLiteral("roughness_out.tif"))));
+    bool hasNodata = false;
+    out.bandNoDataValue(1, &hasNodata);
+    CHECK_FALSE(hasNodata);
+}
