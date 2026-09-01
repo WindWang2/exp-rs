@@ -29,6 +29,7 @@
 #include "dialogs/terrain_dialog.h"
 #include "dialogs/fusion_dialog.h"
 #include "dialogs/mosaic_dialog.h"
+#include "dialogs/temporal_analysis_dialog.h"
 #include "dialogs/change_detection_dialog.h"
 #include "dialogs/crs_preset_dialog.h"
 #include "dialogs/comparison_dialog.h"
@@ -506,6 +507,21 @@ void QgisDesktopWindow::openMosaicDialog()
         return;
     }
     openRasterDialog<MosaicDialog>(this, tr("Mosaic"));
+}
+
+// ---------------------------------------------------------------------------
+// Temporal Analysis dialog
+// ---------------------------------------------------------------------------
+
+void QgisDesktopWindow::openTemporalAnalysisDialog()
+{
+    TemporalAnalysisDialog dialog(this);
+    if (dialog.exec() == QDialog::Accepted && dialog.wantsRasterLoad())
+    {
+        const QString outPath = dialog.outputPath();
+        if (!outPath.isEmpty() && QFile::exists(outPath))
+            loadRasterLayer(outPath);
+    }
 }
 
 // ---------------------------------------------------------------------------

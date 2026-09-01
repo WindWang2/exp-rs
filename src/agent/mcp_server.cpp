@@ -898,6 +898,10 @@ void McpServer::handleRequest(const QVariantMap &request)
             {
                 resultData = handleSpatialToolCall(toolName, arguments);
             }
+            else if (toolName.startsWith(QStringLiteral("temporal:")))
+            {
+                resultData = handleSpatialToolCall(toolName, arguments);
+            }
             else if (toolName.startsWith(QStringLiteral("view:")) ||
                      toolName.startsWith(QStringLiteral("roi:")) ||
                      toolName.startsWith(QStringLiteral("canvas:")) ||

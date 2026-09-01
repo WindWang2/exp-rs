@@ -15,7 +15,7 @@
  *   EXP_RS_MCP_BIN        binary to launch (default: auto-detect build dir)
  *   EXP_RS_MCP_ARGS       extra CLI args appended to --mcp
  *   EXP_RS_TOOL_CATEGORIES comma-separated tool prefixes to bridge
- *                         (default: "meta,spatial,data"; e.g. add "rs,gdal,otb")
+ *                         (default: "meta,spatial,data,temporal"; e.g. add "rs,gdal,otb")
  *   SICNU_MCP_WORKSPACE   passed through to restrict server file access
  *   SICNU_MODELS_DIR      passed through to locate model manifests
  */

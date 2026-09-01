@@ -211,6 +211,7 @@ public:
     void openRadiometricCalibrationDialog();
     void openOrthorectificationDialog();
     void openMosaicDialog();
+    void openTemporalAnalysisDialog();
     void openChangeDetectionDialog();
     void openPostClassificationDialog();
 

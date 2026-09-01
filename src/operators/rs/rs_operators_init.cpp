@@ -25,6 +25,12 @@
 #include "rs_pca_operator.h"
 #include "rs_mnf_operator.h"
 #include "rs_mosaic_operator.h"
+#include "rs_temporal_summary_operator.h"
+#include "rs_temporal_composite_operator.h"
+#include "rs_temporal_index_operator.h"
+#include "rs_temporal_trend_operator.h"
+#include "rs_temporal_anomaly_operator.h"
+#include "rs_temporal_extract_series_operator.h"
 #include "rs_landsat_import_operator.h"
 #include "rs_sentinel2_import_operator.h"
 #include "rs_modis_import_operator.h"
@@ -90,6 +96,12 @@ REGISTER_RS_OPERATOR(RsTerrainAnalysisOperator, "rs:terrain_analysis")
 REGISTER_RS_OPERATOR(RsPcaOperator, "rs:pca")
 REGISTER_RS_OPERATOR(RsMnfOperator, "rs:mnf")
 REGISTER_RS_OPERATOR(RsMosaicOperator, "rs:mosaic")
+REGISTER_RS_OPERATOR(RsTemporalSummaryOperator, "rs:temporal_summary")
+REGISTER_RS_OPERATOR(RsTemporalCompositeOperator, "rs:temporal_composite")
+REGISTER_RS_OPERATOR(RsTemporalIndexSeriesOperator, "rs:temporal_index_series")
+REGISTER_RS_OPERATOR(RsTemporalTrendOperator, "rs:temporal_trend")
+REGISTER_RS_OPERATOR(RsTemporalAnomalyOperator, "rs:temporal_anomaly")
+REGISTER_RS_OPERATOR(RsTemporalExtractSeriesOperator, "rs:temporal_extract_series")
 REGISTER_RS_OPERATOR(RsLandsatImportOperator, "rs:landsat_import")
 REGISTER_RS_OPERATOR(RsSentinel2ImportOperator, "rs:sentinel2_import")
 REGISTER_RS_OPERATOR(RsModisImportOperator, "rs:modis_import")

@@ -3307,6 +3307,60 @@ if(TARGET sicnu_operators)
   sicnu_link_jsoncpp(test_qa_mask)
   sicnu_discover_tests(test_qa_mask)
 
+  # Temporal (multi-date) remote sensing: core semantics, scientific operator
+  # correctness, agent/registry integration.
+  add_executable(test_temporal_core test_temporal_core.cpp)
+  target_link_libraries(test_temporal_core PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    Sicnu::data
+    sicnu_processing
+    GDAL::GDAL
+  )
+  target_include_directories(test_temporal_core PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_temporal_core)
+  sicnu_discover_tests(test_temporal_core)
+
+  add_executable(test_temporal_algorithms test_temporal_algorithms.cpp)
+  target_link_libraries(test_temporal_algorithms PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    Sicnu::data
+    sicnu_processing
+    sicnu_operators
+    GDAL::GDAL
+  )
+  target_include_directories(test_temporal_algorithms PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_temporal_algorithms)
+  sicnu_discover_tests(test_temporal_algorithms)
+
+  add_executable(test_temporal_agent_tools test_temporal_agent_tools.cpp)
+  target_link_libraries(test_temporal_agent_tools PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    qgis_core
+    Sicnu::data
+    sicnu_processing
+    sicnu_operators
+    sicnu_agent
+    GDAL::GDAL
+  )
+  target_include_directories(test_temporal_agent_tools PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_temporal_agent_tools)
+  sicnu_discover_tests(test_temporal_agent_tools)
+
   # MNF transform tests - kernel (SNR ordering, signal recovery) + operator.
   add_executable(test_mnf test_mnf.cpp)
   target_link_libraries(test_mnf PRIVATE
