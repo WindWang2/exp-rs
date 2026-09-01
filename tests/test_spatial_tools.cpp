@@ -572,9 +572,10 @@ TEST_CASE( "Sidecar capabilities resolve toward the descriptor as single source 
     sidecar.gpu = false; // the drift case
     sidecar.notes = "sidecar guidance survives when the descriptor is silent";
 
-    sicnu::processing::AlgorithmMetaStore store;
-    store.loadFromDirectory( "/nonexistent-drift-test-dir" );
-    // Inject the entry through the public directory API: write a temp sidecar.
+    // Inject the entry through the public directory API on the SINGLETON:
+    // the class constructor is private (singleton), but loadFromDirectory
+    // resets and (re)loads, so a temp directory with exactly this sidecar
+    // gives the deterministic one-entry store the test needs.
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     {
@@ -583,10 +584,10 @@ TEST_CASE( "Sidecar capabilities resolve toward the descriptor as single source 
         f.write( R"({"id":"rs:infer","task":"inference","gpu":false,)"
                  R"("notes":"sidecar guidance survives when the descriptor is silent"})" );
     }
-    REQUIRE( store.loadFromDirectory( dir.path().toStdString() ) == 1 );
+    REQUIRE( sicnu::processing::AlgorithmMetaStore::instance().loadFromDirectory( dir.path().toStdString() ) == 1 );
 
     std::vector<std::string> drift;
-    const auto resolved = store.resolveAgainstDescriptor( "rs:infer", descriptor, &drift );
+    const auto resolved = sicnu::processing::AlgorithmMetaStore::instance().resolveAgainstDescriptor( "rs:infer", descriptor, &drift );
     REQUIRE( resolved.has_value() );
     CHECK( resolved->gpu == true );            // descriptor wins
     CHECK( resolved->task == "inference" );

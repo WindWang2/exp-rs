@@ -1275,7 +1275,7 @@ TEST_CASE( "McpServer data surfaces list and describe committed assets without "
     // resolve to an empty authid here; the authid itself is covered by the
     // interaction-tools suite. Structure wiring is what this asserts.
     const QString crs = layer.value( QStringLiteral( "crs" ) ).toString();
-    CHECK( crs.isEmpty() || crs == QLatin1String( "EPSG:32648" ) );
+    CHECK( ( crs.isEmpty() || crs == QLatin1String( "EPSG:32648" ) ) );
     CHECK_FALSE( layer.contains( QStringLiteral( "displayed" ) ) );
   }
 
