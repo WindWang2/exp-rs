@@ -16,5 +16,7 @@ target_link_libraries(processing_plugin PRIVATE
 )
 
 install(TARGETS processing_plugin
+    RUNTIME DESTINATION ${QGIS_PLUGIN_SUBDIR}
     LIBRARY DESTINATION ${QGIS_PLUGIN_SUBDIR}
+    ARCHIVE DESTINATION ${QGIS_PLUGIN_SUBDIR}
 )

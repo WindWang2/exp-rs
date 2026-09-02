@@ -231,7 +231,9 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
             CXX_SCAN_FOR_MODULES OFF
         )
         install(TARGETS _sicnu_operators
+            RUNTIME DESTINATION ${QGIS_BIN_DIR}
             LIBRARY DESTINATION ${QGIS_LIB_SUBDIR}
+            ARCHIVE DESTINATION ${QGIS_LIB_DIR}
         )
 
         # Stage the pure-Python package wrapper so `import sicnu_operators` works.
