@@ -598,9 +598,69 @@ bool LayoutService::applyItemProperties( QgsLayoutItem *item, const Json::Value 
 
   // Begin a macro so one agent property edit = one undo step.
   undoStack->beginMacro( QStringLiteral( "Set Item Properties" ) );
+  // Mutators may throw (jsoncpp wrong-typed leaf accessors); the macro
+  // MUST be paired regardless, or the undo stack stays wedged in macro
+  // mode and every later layout edit breaks (#717).
+  bool mutatorsOk = true;
+  QString mutatorError;
+  try
+  {
+    applyItemPropertyMutators( item, layout, props, applied, ignored );
+  }
+  catch ( const std::exception &e )
+  {
+    mutatorsOk = false;
+    mutatorError = QString::fromUtf8( e.what() );
+  }
+  catch ( ... )
+  {
+    mutatorsOk = false;
+    mutatorError = QStringLiteral( "unknown error" );
+  }
+  undoStack->endMacro();
+  if ( !mutatorsOk )
+  {
+    if ( error )
+      *error = QStringLiteral( "Invalid property value: %1" ).arg( mutatorError );
+    return false;
+  }
 
-  // Mutators return whether the value was actually applied; failures (bad
-  // arity, unresolvable references) land in *ignored instead of *applied.
+  // Report keys that were not applied — unknown names, or valid names that
+  // do not apply to this item type (e.g. "text" on a map).
+  static const char *kKnown[] = { "name",  "x",     "y",     "width", "height",  "rotation", "opacity",
+                                  "visible", "locked", "z",    "exclude_from_exports", "frame_enabled",
+                                  "frame_color", "frame_width", "background_enabled", "background_color",
+                                  "text", "font_size", "bold", "italic", "color", "map_rotation", "scale", "extent",
+                                  "layers", "title", "linked_map", "style", "unit_label", "units_per_segment",
+                                  "path", "north_mode" };
+  const QSet<QString> handledSet = applied ? QSet<QString>( applied->cbegin(), applied->cend() ) : QSet<QString>();
+  for ( const std::string &key : members )
+  {
+    const QString qKey = QString::fromStdString( key );
+    if ( handledSet.contains( qKey ) )
+      continue;
+    if ( ignored )
+    {
+      const bool known = std::find( std::begin( kKnown ), std::end( kKnown ), key ) != std::end( kKnown );
+      ignored->append( known ? qKey + QStringLiteral( " (not applicable to this item type)" )
+                             : qKey + QStringLiteral( " (unknown property)" ) );
+    }
+  }
+
+  item->update();
+  return true;
+}
+
+// Applies the typed mutators for applyItemProperties. Extracted so the
+// caller can pair beginMacro/endMacro around it even when jsoncpp throws
+// on a wrong-typed leaf (asDouble/asString) — an exception between
+// beginMacro/endMacro used to leave the undo stack wedged in macro mode
+// forever (#717).
+void LayoutService::applyItemPropertyMutators( QgsLayoutItem *item, QgsLayout *layout,
+                                               const Json::Value &props, QStringList *applied,
+                                               QStringList *ignored )
+{
+  QgsLayoutUndoStack *undoStack = layout->undoStack();
   const auto setProp = [&]( const std::string &key, const std::function<bool()> &mutator ) {
     if ( !props.isMember( key ) )
       return;
@@ -950,32 +1010,6 @@ bool LayoutService::applyItemProperties( QgsLayoutItem *item, const Json::Value 
     } );
   }
 
-  undoStack->endMacro();
-
-  // Report keys that were not applied — unknown names, or valid names that
-  // do not apply to this item type (e.g. "text" on a map).
-  static const char *kKnown[] = { "name",  "x",     "y",     "width", "height",  "rotation", "opacity",
-                                  "visible", "locked", "z",    "exclude_from_exports", "frame_enabled",
-                                  "frame_color", "frame_width", "background_enabled", "background_color",
-                                  "text", "font_size", "bold", "italic", "color", "map_rotation", "scale", "extent",
-                                  "layers", "title", "linked_map", "style", "unit_label", "units_per_segment",
-                                  "path", "north_mode" };
-  const QSet<QString> handledSet = applied ? QSet<QString>( applied->cbegin(), applied->cend() ) : QSet<QString>();
-  for ( const std::string &key : members )
-  {
-    const QString qKey = QString::fromStdString( key );
-    if ( handledSet.contains( qKey ) )
-      continue;
-    if ( ignored )
-    {
-      const bool known = std::find( std::begin( kKnown ), std::end( kKnown ), key ) != std::end( kKnown );
-      ignored->append( known ? qKey + QStringLiteral( " (not applicable to this item type)" )
-                             : qKey + QStringLiteral( " (unknown property)" ) );
-    }
-  }
-
-  item->update();
-  return true;
 }
 
 bool LayoutService::alignItems( QgsLayout *layout, const QStringList &ids, const QString &alignment,

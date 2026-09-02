@@ -89,6 +89,12 @@ class LayoutService
                               QStringList *applied = nullptr, QStringList *ignored = nullptr,
                               QString *error = nullptr );
 
+    /// The typed mutator body of applyItemProperties (throws on wrong-typed
+    /// values — the caller owns the undo macro pairing, #717).
+    void applyItemPropertyMutators( QgsLayoutItem *item, QgsLayout *layout,
+                                    const Json::Value &props, QStringList *applied,
+                                    QStringList *ignored );
+
     // --- Multi-item operations ------------------------------------------------
 
     /// Aligns items (ids resolved via findItem) using QgsLayoutAligner.

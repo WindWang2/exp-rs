@@ -144,7 +144,8 @@ Result<DerivationRecord> DerivationRecord::fromJson( const QJsonObject &json )
 }
 
 
-QStringList findInputPathsInParams( const QVariantMap &params )
+QStringList findInputPathsInParams( const QVariantMap &params,
+                                    const QStringList &excludePaths )
 {
   QStringList paths;
   std::function<void( const QVariant & )> collect = [ & ]( const QVariant &value ) {
@@ -166,17 +167,20 @@ QStringList findInputPathsInParams( const QVariantMap &params )
       const QString trimmed = candidate.trimmed();
       if ( trimmed.isEmpty() || trimmed.startsWith( QLatin1Char( '$' ) ) )
         continue;
-      if ( !paths.contains( trimmed ) && QFileInfo::exists( trimmed ) )
+      if ( excludePaths.contains( trimmed ) )
+        continue;
+      // Files only: directories and volumes are not lineage inputs, and the
+      // isFile gate keeps arbitrary non-path string values from being
+      // speculative filesystem probes.
+      if ( !paths.contains( trimmed ) && QFileInfo( trimmed ).isFile() )
         paths.append( trimmed );
     }
   };
 
+  // Full scan (#718): lineage edges live on whatever key carries the path
+  // ("input", but also dNBR's "postfire" or fusion's "pan"/"ms").
   for ( auto it = params.begin(); it != params.end(); ++it )
-  {
-    if ( !it.key().contains( QStringLiteral( "input" ), Qt::CaseInsensitive ) )
-      continue;
     collect( it.value() );
-  }
   return paths;
 }
 

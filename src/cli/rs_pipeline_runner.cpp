@@ -4,6 +4,7 @@
 #include "rs_pipeline_runner.h"
 
 #include "processing/framework/task_center.h"
+#include "processing/algorithms/temporal/temporal_workspace.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_run_coordinator.h"
@@ -387,6 +388,10 @@ bool RsPipelineRunner::ensurePythonPluginsLoaded()
     m_ownedDataManager = std::make_unique<sicnu::data::DataManager>();
     m_dataManager = m_ownedDataManager.get();
   }
+  // Catalog seam for revision-aware execution caching + provenance (#667):
+  // the runner thread owns the catalog, matching TaskCenter's affinity rule.
+  sicnu::TaskCenter::instance().setCatalog( m_dataManager );
+  sicnu::temporal::setWorkspaceCatalog( m_dataManager );
 
   // Headless plugin stack (ADR 0023, TICKET-14): a view-less ProjectContext, a
   // widget-free SicnuAppInterface, and the sanctioned PluginHost lifecycle owner.
@@ -699,12 +704,14 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
     }
 
     // Provenance is attached after successful registration (ADR 0023). The
-    // step's "input"-like parameter paths are resolved against the catalog so
-    // the record carries real derivedFrom edges (#698); paths that do not
-    // resolve are recorded in unresolvedInputPaths, never dropped silently.
+    // step's parameter paths are resolved against the catalog so the record
+    // carries real derivedFrom edges (#698); paths that do not resolve are
+    // recorded in unresolvedInputPaths, never dropped silently. The step's
+    // own output path is excluded (#718).
     const sicnu::data::InputLineage lineage =
       sicnu::data::resolveInputLineage(
-          m_dataManager, sicnu::data::findInputPathsInParams( task.parameterMap ) );
+          m_dataManager,
+          sicnu::data::findInputPathsInParams( task.parameterMap, { path } ) );
     const sicnu::data::DerivationRecord derivation =
       sicnu::data::makeTaskDerivation( task.algorithmId,
                                        QJsonObject::fromVariantMap( task.parameterMap ),

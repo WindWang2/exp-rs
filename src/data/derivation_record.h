@@ -27,13 +27,18 @@ struct DerivationInput
 };
 
 /// Input-side counterpart of TaskCenter's findOutputPathInParams (#698):
-/// collects parameter values whose key mentions "input" (case-insensitive)
-/// and whose value is an existing file path. Placeholder references
-/// ("$step.output") and non-path strings are ignored — only paths that exist
-/// on disk at commit time can be resolved into lineage records. String,
+/// collects parameter values that are existing FILE paths, regardless of the
+/// parameter key — restricting the scan to keys mentioning "input" silently
+/// dropped real lineage edges for parameters like dNBR's "postfire" or
+/// fusion's "pan"/"ms" (#718). Placeholder references ("$step.output"),
+/// directories and non-path strings are ignored — only paths that exist on
+/// disk at commit time can be resolved into lineage records. Paths in
+/// @a excludePaths (callers pass the task's own output path so a re-run to an
+/// existing output never becomes its own input) are skipped. String,
 /// string-list and variant-list values are all considered. ONE implementation
 /// shared by the tool-call dispatcher and the CLI pipeline runner.
-QStringList findInputPathsInParams( const QVariantMap &params );
+QStringList findInputPathsInParams( const QVariantMap &params,
+                                    const QStringList &excludePaths = QStringList() );
 
 /// Resolved input lineage for one run: paths that map to a registered asset
 /// become DerivationInput records (asset id + the revision that was present);
