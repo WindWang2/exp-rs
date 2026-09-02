@@ -16,16 +16,6 @@ namespace {
 
 using sicnu::temporal::TemporalCollection;
 
-QString requireStringField( const Json::Value &input, const char *key, std::string *error )
-{
-  if ( !input.isObject() || !input.isMember( key ) || !input[key].isString() )
-  {
-    *error = std::string( "missing string parameter '" ) + key + "'";
-    return {};
-  }
-  return QString::fromStdString( input[key].asString() );
-}
-
 /// Collection from "collection" (descriptor path) or "scenes" (paths/objects).
 bool collectionFromInput( const Json::Value &input, TemporalCollection *out,
                           std::string *error )
@@ -109,7 +99,14 @@ bool collectionFromInput( const Json::Value &input, TemporalCollection *out,
   }
   for ( const QString &p : paths )
   {
-    if ( !QFile::exists( p ) )
+    // Remote COG hrefs (http(s), optionally /vsicurl/-prefixed) are valid
+    // scene references: GDAL validates them at open time under bounded HTTP
+    // timeouts. A local existence probe would wrongly reject them.
+    const QString trimmed = p.trimmed();
+    const bool remote = trimmed.startsWith( QLatin1String( "http://" ), Qt::CaseInsensitive ) ||
+                        trimmed.startsWith( QLatin1String( "https://" ), Qt::CaseInsensitive ) ||
+                        trimmed.startsWith( QLatin1String( "/vsicurl/" ), Qt::CaseInsensitive );
+    if ( !remote && !QFile::exists( p ) )
     {
       *error = "scene not found: " + p.toStdString();
       return false;
@@ -252,12 +249,18 @@ SpatialToolResult TemporalCreateCollectionTool::execute( const Json::Value &inpu
 
   if ( input.isMember( "name" ) && input["name"].isString() )
     collection.setName( QString::fromStdString( input["name"].asString() ) );
+  // An unrecognized duplicate_policy must be rejected like the operator path
+  // does, never silently coerced to keep_all into a persisted descriptor
+  // (#719).
   bool policyOk = false;
   const auto policy = sicnu::temporal::duplicatePolicyFromString(
     input.isMember( "duplicate_policy" ) && input["duplicate_policy"].isString()
         ? QString::fromStdString( input["duplicate_policy"].asString() )
         : QStringLiteral( "keep_all" ),
     &policyOk );
+  if ( !policyOk )
+    return SpatialToolResult::failure(
+      "duplicate_policy must be 'keep_all' or 'reject'", "INVALID_PARAMETER", "VALIDATION" );
   collection.setDuplicatePolicy( policy );
 
   int missingTimes = 0;

@@ -359,6 +359,8 @@ Json::Value RsTemporalAnomalyOperator::run( const Json::Value &params, RSOperato
   result["output"] = outputPath;
   result["method"] = method.toStdString();
   result["targetTime"] = prepared.collection.scenes().at( targetIndex ).time.iso.toStdString();
+  // The schema declares sceneCount as well as baselineCount (#719).
+  result["sceneCount"] = static_cast<Json::Int>( prepared.collection.sceneCount() );
   result["baselineCount"] = static_cast<Json::Int>( baselineIndices.size() );
   result["baselineInsufficient"] = static_cast<int>( baselineIndices.size() ) < minObservations;
   if ( !prepared.collection.timeRangeStartIso().isEmpty() )

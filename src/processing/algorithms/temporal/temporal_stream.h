@@ -110,20 +110,27 @@ public:
   /// Reads one tile of one band of one scene into @a out (tileWidth()×
   /// tileHeight() floats). Values are normalized per the class contract
   /// (finite-or-NaN). @a skipMasking disables QA masking for this read
-  /// (e.g. when reading the QA band itself).
+  /// (e.g. when reading the QA band itself). @a skipScaleOffset bypasses the
+  /// scene's scale/offset normalization (e.g. for a quality-score band that
+  /// is compared / written in its native units — GDAL scale/offset is per
+  /// band, and the uniform temporal normalization is only verified for the
+  /// analysis band).
   bool readSceneBandTile( int sceneIndex, int band, int tileIndex, float *out,
-                          bool skipMasking = false );
+                          bool skipMasking = false, bool skipScaleOffset = false );
 
   /// Reads an ARBITRARY window (not tile-aligned) of one band of one scene
   /// into @a out (w×h floats) with the identical normalization contract.
   /// Used by ROI extraction (bbox windows). Scratch buffers grow if the
   /// window exceeds the tile size (reflected in peakSlots()).
   bool readSceneBandWindow( int sceneIndex, int band, int xOff, int yOff, int w, int h,
-                            float *out, bool skipMasking = false );
+                            float *out, bool skipMasking = false,
+                            bool skipScaleOffset = false );
 
   /// Reads a single pixel of one band of one scene (point time series).
-  /// Same normalization contract as readSceneBandTile().
-  bool readSceneBandPixel( int sceneIndex, int band, int x, int y, float *out );
+  /// Same normalization contract as readSceneBandTile(). An unreadable mask
+  /// sample fails closed (NaN), matching the window path.
+  bool readSceneBandPixel( int sceneIndex, int band, int x, int y, float *out,
+                           bool skipMasking = false, bool skipScaleOffset = false );
 
   // --- instrumentation (goal §48: buffer accounting, never OOM roulette) ---
   /// Float slots held inside the reader (scratch tile + native QA buffers).
@@ -140,7 +147,7 @@ public:
 
 private:
   bool normalizeAndMask( int sceneIndex, int band, int x, int y, int w, int h,
-                         float *values, bool skipMasking );
+                         float *values, bool skipMasking, bool skipScaleOffset );
 
   QVector<TemporalSceneRef> m_scenes;
   std::vector<std::unique_ptr<GdalDatasetWrapper>> m_datasets; // owning: member dtors run even when the constructor throws

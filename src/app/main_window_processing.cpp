@@ -518,9 +518,18 @@ void QgisDesktopWindow::openTemporalAnalysisDialog()
     TemporalAnalysisDialog dialog(this);
     if (dialog.exec() == QDialog::Accepted && dialog.wantsRasterLoad())
     {
-        const QString outPath = dialog.outputPath();
-        if (!outPath.isEmpty() && QFile::exists(outPath))
-            loadRasterLayer(outPath);
+        // Load every produced raster: grouped composite runs write one file
+        // per period, and the bare output path alone would load nothing
+        // (#719). Falls back to the requested path for operators whose result
+        // payload was not captured.
+        QStringList outputs = dialog.producedOutputs();
+        if (outputs.isEmpty())
+            outputs.append(dialog.outputPath());
+        for (const QString &outPath : outputs)
+        {
+            if (!outPath.isEmpty() && QFile::exists(outPath))
+                loadRasterLayer(outPath);
+        }
     }
 }
 
