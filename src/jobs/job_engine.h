@@ -60,7 +60,25 @@ class JobEngine
 
     static JobEngine &instance();
 
-    void setMaxWorkers( int n ); // clamp 2..4
+    /// Default pool size policy (#661): one worker per hardware core minus
+    /// the core reserved for UI (ADR 0002), floored at kMinWorkers.
+    /// hardware_concurrency() == 0 (unknown) degrades to kMinWorkers.
+    static int defaultWorkerCount();
+
+    /// Injectable core of the same policy, so tests pin the property without
+    /// depending on the host's core count.
+    static int defaultWorkerCount( unsigned hardwareCores );
+
+    /// Lower bound for pool sizes: keeps a worker from starving the very
+    /// pool it runs on and preserves the historical floor.
+    static constexpr int kMinWorkers = 2;
+    /// Upper bound for explicit overrides, guarding against misconfiguration
+    /// while still honoring real workstation sizes.
+    static constexpr int kMaxWorkersOverride = 64;
+
+    /// Explicit override of the pool size. Honored as-is within
+    /// [kMinWorkers, kMaxWorkersOverride]; values outside are clamped.
+    void setMaxWorkers( int n );
     int maxWorkers() const;
 
     /**
@@ -187,7 +205,7 @@ class JobEngine
     JobExecutor m_fallbackExecutor; // catch-all, tried after RSOperatorRegistry
     std::vector<std::thread> m_workers;
     Listener m_listener;
-    int m_maxWorkers = 3;
+    int m_maxWorkers = defaultWorkerCount();
     int m_running = 0;
     bool m_exclusiveRunning = false;
     bool m_shuttingDown = false;
