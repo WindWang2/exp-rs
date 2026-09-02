@@ -2,14 +2,18 @@
 
 ## Status
 
-Accepted (phase 1 — library layer only)
+Accepted (wired — production entry points drive the v2 surface)
 
-> **Integration status**: the WorkflowRun / WorkflowCheckpointManager /
-> ArtifactGC / ExecutionResultCache v2 surface ships as a library + test
-> suite only. No production entry point drives it yet (production pipelines
-> still run through `TaskCenter::submitPipeline`). Wiring the v2 orchestrator
-> into a runner is the follow-up tracked in issue #589; until then the
-> surface must be treated as API-in-progress.
+> **Integration status**: **wired** (#662). Production pipeline submissions
+> go through `WorkflowRunCoordinator::startTrackedPipeline*` on every entry
+> surface — the GUI workflow session controller, the MCP `run_workflow` /
+> `resume_workflow` tools, the CLI pipeline runner, and the agent workflow
+> executor. Step transitions persist checkpoints, startup recovery scans
+> interrupted runs (`recoverAtStartup`), terminal runs sweep their
+> intermediates via `ArtifactGC`, and an interrupted run can be resumed from
+> its last checkpoint through MCP `resume_workflow` (#697). The TaskCenter
+> remains the dispatch source of truth; the v2 run aggregate mirrors it
+> additively, so a v2 hiccup cannot regress legacy pipeline behavior.
 
 ## Context
 

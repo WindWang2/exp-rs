@@ -252,12 +252,6 @@ public:
                                             std::chrono::milliseconds timeout = std::chrono::minutes( 30 ),
                                             std::chrono::milliseconds pollInterval = std::chrono::milliseconds( 10 ) ) const;
 
-    /// Workflow Engine 2.0 run aggregate for a pipeline (ADR 0123, #662):
-    /// lifecycle state, per-step plans with fingerprints, progress. Null when
-    /// the pipeline predates the wiring or its run could not be created.
-    std::shared_ptr<const sicnu::workflow::WorkflowRun>
-    workflowRunForPipeline( long pipelineId ) const;
-
     /// Cap concurrent Running tasks for @a profile (minimum 1). Used by processNextQueuedTasks.
     void setResourceProfileLimit( ProviderResourceProfile profile, unsigned int maxConcurrent );
     unsigned int resourceProfileLimit( ProviderResourceProfile profile ) const;
@@ -389,11 +383,6 @@ private:
     std::atomic<bool> m_isShuttingDown{false};
     QMap<long, AlgorithmTaskInfo> m_tasks;
     QMap<long, PipelineExecutionInfo> m_pipelines;
-    /// Workflow Engine 2.0 run aggregate per pipeline (ADR 0123 wiring, #662).
-    /// Mirrors step statuses and run lifecycle; the legacy PipelineExecutionInfo
-    /// above remains the dispatch source of truth, so a v2 hiccup can never
-    /// regress production behavior. Exposed read-only via workflowRunForPipeline().
-    QMap<long, std::shared_ptr<sicnu::workflow::WorkflowRun>> m_pipelineRuns;
     QList<PendingLaunch> m_pendingLaunches;
     QList<AlgorithmTaskInfo> m_pendingTaskAdded;
     QList<AlgorithmTaskInfo> m_pendingTaskUpdated;
@@ -402,6 +391,11 @@ private:
     QMap<long, std::size_t> m_forwardedLogCounts; ///< per-task log dedup key (logLines.size())
     QMap<long, double> m_lastForwardedProgress; ///< per-task progress dedup
     QMap<long, QMap<long, TaskCompletionCallback>> m_completionCallbacks; ///< per-task terminal callbacks
+    /// Per-task cached RAM estimate (#702): the registry-backed resolver runs
+    /// a locked registry lookup; an algorithm's estimate is immutable for the
+    /// task's lifetime, so resolve once per task instead of on every
+    /// scheduling pass. Invalidated by shutdownForTests/setEstimateResolver.
+    mutable QMap<long, unsigned int> m_estimateMbCache;
     long m_nextCompletionToken = 1;
     QMap<ProviderResourceProfile, unsigned int> m_profileLimits; ///< empty entry → use defaultLimitForProfile
     unsigned int m_globalConcurrencyLimit = 0; ///< 0 → hardware_concurrency()-1 (min 1)
@@ -416,28 +410,10 @@ private:
     /// budget resolver (registry estimate + conservative class fallback).
     unsigned int taskEstimateMbLocked( const AlgorithmTaskInfo &task ) const;
 
-    // --- Workflow Engine 2.0 wiring (ADR 0123, #662) -------------------------
-    /// Creates the WorkflowRun aggregate for a pipeline and builds its step
-    /// plans (topological-order fingerprints: operator id + canonical params
-    /// + parent-step derivation revisions). Defensive: failures leave the
-    /// pipeline running on the legacy path only.
-    void attachWorkflowRunLocked( long pipelineId,
-                                  const sicnu::workflow::WorkflowDefinition &def,
-                                  const std::vector<std::string> &orderedStepIds );
-    /// Mirrors a task status transition into the pipeline's run aggregate
-    /// (step plan status, checkpoint save). No-op when the pipeline has no run.
-    void mirrorStepToRunLocked( long pipelineId, const std::string &stepId,
-                                TaskStatus status );
-    /// Transitions the pipeline's run aggregate to its terminal state once
-    /// every step is terminal (Running -> Completed/Failed + final checkpoint).
-    void finalizeWorkflowRunLocked( long pipelineId, bool failed,
-                                    const QString &errorMessage );
-    /// Records a completed step's output path under its plan fingerprint so an
-    /// identical resubmission can skip re-execution (#667). No-op for
-    /// cache-hit steps and steps without a fingerprint.
-    void storePipelineStepOutputLocked( long pipelineId, long taskId );
-    /// Task id for a pipeline step id, or -1. Requires m_mutex.
-    long taskForStepLocked( long pipelineId, const std::string &stepId ) const;
+    // NOTE: the Workflow Engine 2.0 run aggregate lives in
+    // WorkflowRunCoordinator (single source of truth for lifecycle state,
+    // checkpoints and per-step fingerprints); the never-implemented TaskCenter
+    // mirror declarations from the #708 draft were removed (#697).
 };
 
 } // namespace sicnu

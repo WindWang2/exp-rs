@@ -430,7 +430,9 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
   std::thread cancelWatcher;
   if ( cancelFlagPtr )
   {
-    cancelWatcher = std::thread( [&, cancelFlagPtr, handle, &done]() mutable {
+    // Explicit captures only: &done by reference (atomic, non-copyable),
+    // pointer/ handle by value so the watcher never dangles.
+    cancelWatcher = std::thread( [cancelFlagPtr, handle, &done]() mutable {
       while ( !done.load( std::memory_order_acquire ) )
       {
         if ( cancelFlagPtr->load( std::memory_order_acquire ) )
@@ -632,7 +634,7 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
         // Verification failed -> rollback committed asset so no invalid
         // layer remains in the catalog (closed-loop insulator).
         if ( !committedAssetId.empty() )
-          rollbackCommittedAsset( committedAssetId );
+          rollbackCommittedAsset( dataManager, committedAssetId );
         else if ( dataManager && !committedPath.empty() && QFile::exists( QString::fromStdString( committedPath ) ) )
           QFile::remove( QString::fromStdString( committedPath ) );
 
@@ -681,20 +683,23 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
   return result;
 }
 
-bool WorkflowRuntime::rollbackCommittedAsset( const std::string &assetIdStr )
+bool WorkflowRuntime::rollbackCommittedAsset( sicnu::data::DataManager *dataManager,
+                                              const std::string &assetIdStr )
 {
-  if ( !m_dataManager || assetIdStr.empty() )
+  // #702: use the caller's snapshot instead of re-reading m_dataManager
+  // unlocked (setDataManager may race from another thread).
+  if ( !dataManager || assetIdStr.empty() )
     return false;
   const auto idOpt = sicnu::data::AssetId::fromString( QString::fromStdString( assetIdStr ) );
   if ( !idOpt || idOpt->isNull() )
     return false;
-  if ( !m_dataManager->asset( *idOpt ).has_value() )
+  if ( !dataManager->asset( *idOpt ).has_value() )
     return false;
-  const auto reapRes = m_dataManager->reap( sicnu::data::ReapRequest{ *idOpt } );
+  const auto reapRes = dataManager->reap( sicnu::data::ReapRequest{ *idOpt } );
   if ( !reapRes.unloaded )
   {
-    const auto plan = m_dataManager->planUnload( *idOpt ).confirmedCascade();
-    (void)m_dataManager->unload( plan );
+    const auto plan = dataManager->planUnload( *idOpt ).confirmedCascade();
+    (void)dataManager->unload( plan );
   }
   return reapRes.unloaded;
 }

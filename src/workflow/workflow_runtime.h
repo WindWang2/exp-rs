@@ -89,7 +89,11 @@ class WorkflowRuntime
                                           std::shared_ptr<WorkflowSession> sessionPtr,
                                           std::shared_ptr<std::atomic<bool>> cancelFlagPtr );
 
-    bool rollbackCommittedAsset( const std::string &assetIdStr );
+    /// Roll back a committed stable asset after failed verification. Takes the
+    /// caller's DataManager snapshot (#702): the runStep paths snapshot
+    /// m_dataManager under m_mutex exactly once; re-reading the member here
+    /// (unlocked) would be a formal data race with setDataManager.
+    bool rollbackCommittedAsset( sicnu::data::DataManager *dataManager, const std::string &assetIdStr );
 
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, std::shared_ptr<WorkflowDefinition>> m_defs;

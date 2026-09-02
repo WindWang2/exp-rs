@@ -169,6 +169,7 @@ void TaskCenter::shutdownForTests()
         m_taskByJobId.clear();
         m_forwardedLogCounts.clear();
         m_lastForwardedProgress.clear();
+        m_estimateMbCache.clear(); // task ids restart at 1: stale estimates must not leak across tests
         m_completionCallbacks.clear();
         m_nextTaskId = 1;
         m_nextPipelineId = 1;
@@ -355,6 +356,9 @@ void TaskCenter::setEstimateResolver( TaskEstimateResolver resolver )
         m_resourceBudget.setEstimateResolver( std::move( resolver ) );
     else
         installDefaultEstimateResolver();
+    // A different resolver may produce different estimates: drop the per-task
+    // cache so subsequent passes re-resolve (#702).
+    m_estimateMbCache.clear();
 }
 
 unsigned int TaskCenter::resolveEstimateMb( const std::string &algorithmId ) const
@@ -1030,7 +1034,16 @@ unsigned int TaskCenter::taskEstimateMbLocked( const AlgorithmTaskInfo &task ) c
 {
     if ( task.resourceEstimateOverrideMb > 0 )
         return task.resourceEstimateOverrideMb;
-    return m_resourceBudget.resolve( task.algorithmId.toStdString() ).ramMb;
+    // #702: the registry-backed resolver takes the registry mutex (and reads
+    // descriptor JSON) — re-running it for every active task on every
+    // scheduling pass under m_mutex was pure repeat work. An algorithm's
+    // estimate never changes for a given task, so cache it per task id.
+    const auto cached = m_estimateMbCache.constFind( task.taskId );
+    if ( cached != m_estimateMbCache.constEnd() )
+        return cached.value();
+    const unsigned int mb = m_resourceBudget.resolve( task.algorithmId.toStdString() ).ramMb;
+    m_estimateMbCache.insert( task.taskId, mb );
+    return mb;
 }
 
 void TaskCenter::processNextQueuedTasks()
@@ -1540,8 +1553,16 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] Task failed: %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), error ) );
-        if ( !m_tasks[taskId].jobId.empty() )
-            m_taskByJobId.remove( m_tasks[taskId].jobId );
+        // The root's own engine job must be cancelled too (#702, restored for
+        // #720): keep the terminal markTask* paths symmetric so an
+        // externally-driven failure kills the still-running engine job instead
+        // of orphaning it. When the failure came from the job's own terminal
+        // record (the listener path), engine cancel is a harmless no-op.
+        const std::string rootJobId = m_tasks[taskId].jobId;
+        if ( !rootJobId.empty() )
+            jobCancelTargets.emplace_back( rootJobId, taskId );
+        if ( !rootJobId.empty() )
+            m_taskByJobId.remove( rootJobId );
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
 
@@ -1858,6 +1879,7 @@ void TaskCenter::clearCompletedTasks()
         {
             m_forwardedLogCounts.remove( id );
             m_lastForwardedProgress.remove( id );
+            m_estimateMbCache.remove( id ); // keep the per-task estimate cache bounded
             m_completionCallbacks.remove( id ); // defense (#702): stale registrations
         }
         for ( auto it = m_taskByJobId.begin(); it != m_taskByJobId.end(); )
@@ -2070,14 +2092,6 @@ PipelineExecutionInfo TaskCenter::waitForPipeline( long pipelineId,
 
         m_waitCondition.wait( &m_mutex, static_cast<unsigned long>( waitTime.count() ) );
     }
-}
-
-std::shared_ptr<const sicnu::workflow::WorkflowRun>
-TaskCenter::workflowRunForPipeline( long pipelineId ) const
-{
-    QMutexLocker locker( &m_mutex );
-    const auto it = m_pipelineRuns.find( pipelineId );
-    return it == m_pipelineRuns.end() ? nullptr : it.value();
 }
 
 } // namespace sicnu
