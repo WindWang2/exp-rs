@@ -46,6 +46,20 @@ struct TemporalSceneRef
   int maskBand = 0;            ///< optional QA/cloud mask band (1-based; 0 = auto-detect)
   int originalIndex = 0;       ///< input order — deterministic tie-break
 
+  // --- Multimodal observation contract (goal §11, ADR 0125 forward seam) --
+  // Optional, additive descriptors so a future SpatioTemporalCollection can
+  // carry Optical / SAR / DEM / Auxiliary scenes under ONE identity without a
+  // new inheritance hierarchy. Nothing in the temporal layer branches on
+  // these yet: they round-trip through the descriptor, STAC ingestion can
+  // populate them, and preflight/agents may surface them. Empty = unclaimed.
+  QString modality;            ///< "optical" | "sar" | "dem" | "auxiliary" (empty = optical/unknown)
+  QString sensor;              ///< Finer than platform, e.g. "ETM+", "C-SAR" (empty = unknown)
+  QStringList bandRoles;       ///< Declared per-band role ids ("nir","red","vv","vh",...)
+  QStringList polarizations;   ///< SAR polarizations ("VV","VH","HH","HV"); empty = n/a
+  double resolutionMeters = 0.0;   ///< Nominal spatial resolution; 0 = unknown
+  QString radiometricState;    ///< "dn" | "toa_reflectance" | "boa_reflectance" | ... (empty = unknown)
+  double cloudCoverPercent = -1.0; ///< Scene quality [0,100]; <0 = unreported
+
   Json::Value toJson() const;
   static TemporalSceneRef fromJson( const Json::Value &v, QString *error );
 };

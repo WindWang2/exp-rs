@@ -290,7 +290,8 @@ bool TemporalTileReader::readSceneBandWindow( int sceneIndex, int band, int xOff
                            skipScaleOffset );
 }
 
-bool TemporalTileReader::readSceneBandPixel( int sceneIndex, int band, int x, int y, float *out )
+bool TemporalTileReader::readSceneBandPixel( int sceneIndex, int band, int x, int y, float *out,
+                                             bool skipMasking, bool skipScaleOffset )
 {
   if ( sceneIndex < 0 || sceneIndex >= sceneCount() )
     return false;
@@ -310,15 +311,17 @@ bool TemporalTileReader::readSceneBandPixel( int sceneIndex, int band, int x, in
     return true;
   }
   // Same gate as the tile path (normalizeAndMask): only scenes whose analysis
-  // band actually declares scale/offset are normalized.
+  // band actually declares scale/offset are normalized. skipScaleOffset keeps
+  // auxiliary reads (e.g. raw-DN quality scores) in native units, mirroring
+  // the tile/window paths.
   const bool sceneDeclaresScale =
       sceneIndex < m_radiometry.size() && m_radiometry.at( sceneIndex ).scaleDefined;
-  if ( m_options.applyScaleOffset && m_report.scaleOffsetDeclared &&
+  if ( !skipScaleOffset && m_options.applyScaleOffset && m_report.scaleOffsetDeclared &&
        m_report.uniformScaleOffset && sceneDeclaresScale )
     v = static_cast<float>( m_report.uniformScale * v + m_report.uniformOffset );
 
   // Per-pixel QA/cloud masking (same kernels, single-sample).
-  if ( m_options.applyQaMasking && sceneIndex < m_radiometry.size() )
+  if ( !skipMasking && m_options.applyQaMasking && sceneIndex < m_radiometry.size() )
   {
     const SceneRadiometry &rad = m_radiometry.at( sceneIndex );
     if ( rad.maskBand > 0 && !rad.maskKind.isEmpty() )

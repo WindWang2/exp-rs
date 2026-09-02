@@ -11,6 +11,8 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QCheckBox>
+#include <algorithm>
+#include <functional>
 #include <QComboBox>
 #include <QFileDialog>
 #include <QGridLayout>
@@ -574,5 +576,29 @@ void TemporalAnalysisDialog::onRun()
     }
   }
 
-  runOperatorTask( id, params );
+  // Capture the operator's full result: grouped composites produce one file
+  // per period and only the first lands in "output" — the shell must be able
+  // to load every produced raster (#719).
+  m_producedOutputs.clear();
+  runOperatorTask( id, params, [this]( const Json::Value &result ) {
+    collectProducedOutputs( result );
+  } );
+}
+
+void TemporalAnalysisDialog::collectProducedOutputs( const Json::Value &result )
+{
+  const auto addPath = [this]( const std::string &path ) {
+    if ( path.empty() )
+      return;
+    const QString qpath = QString::fromStdString( path );
+    if ( !m_producedOutputs.contains( qpath ) )
+      m_producedOutputs.append( qpath );
+  };
+  addPath( result["output"].asString() );
+  const Json::Value &outputs = result["outputs"];
+  if ( outputs.isArray() )
+  {
+    for ( const Json::Value &entry : outputs )
+      addPath( entry["output"].asString() );
+  }
 }

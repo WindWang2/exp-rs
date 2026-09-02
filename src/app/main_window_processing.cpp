@@ -520,22 +520,17 @@ void QgisDesktopWindow::openTemporalAnalysisDialog()
     TemporalAnalysisDialog dialog(this);
     if (dialog.exec() == QDialog::Accepted && dialog.wantsRasterLoad())
     {
-        const QString outPath = dialog.outputPath();
-        if (QFile::exists(outPath))
+        // Load every produced raster: grouped composite runs write one file
+        // per period, and the bare output path alone would load nothing
+        // (#719). Falls back to the requested path for operators whose result
+        // payload was not captured.
+        QStringList outputs = dialog.producedOutputs();
+        if (outputs.isEmpty())
+            outputs.append(dialog.outputPath());
+        for (const QString &outPath : outputs)
         {
-            loadRasterLayer(outPath);
-        }
-        else if (!outPath.isEmpty())
-        {
-            // Grouped composites (period != "all") write <base>_<label>.tif per
-            // group instead of the bare output path; load every group output,
-            // name-sorted == chronological (#719).
-            const QFileInfo info(outPath);
-            const QString stem = info.completeBaseName();
-            const QStringList grouped = info.dir().entryList(
-                { stem + QLatin1String("_*.tif") }, QDir::Files, QDir::Name);
-            for (const QString &name : grouped)
-                loadRasterLayer(info.absolutePath() + QLatin1Char('/') + name);
+            if (!outPath.isEmpty() && QFile::exists(outPath))
+                loadRasterLayer(outPath);
         }
     }
 }

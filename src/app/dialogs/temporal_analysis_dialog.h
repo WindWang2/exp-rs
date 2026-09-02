@@ -38,6 +38,11 @@ public:
     bool wantsRasterLoad() const { return m_algorithmCombo->currentData().toString() !=
                                          QStringLiteral( "rs:temporal_extract_series" ); }
 
+    /// Every raster output the operator actually produced (primary "output"
+    /// plus, for grouped composites, each period file), in production order.
+    /// Empty until a run completes; the shell loads these on accept (#719).
+    QStringList producedOutputs() const { return m_producedOutputs; }
+
 protected:
     QString toolName() const override { return QStringLiteral( "temporal_analysis" ); }
     QString dialogTitle() const override { return tr( "时间序列分析" ); }
@@ -56,6 +61,7 @@ private:
     void refreshStatusColumn();
     Json::Value buildScenesJson() const;
     QStringList scenePaths() const;
+    void collectProducedOutputs( const Json::Value &result );
 
     QTableWidget *m_sceneTable = nullptr;
     QLineEdit *m_filterEdit = nullptr;
@@ -71,4 +77,5 @@ private:
     QCheckBox *m_medianCheck = nullptr;
     QLineEdit *m_pointEdit = nullptr;
     QLineEdit *m_polygonEdit = nullptr;
+    QStringList m_producedOutputs;
 };

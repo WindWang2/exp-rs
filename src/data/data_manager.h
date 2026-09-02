@@ -10,6 +10,7 @@
 #include "data_asset.h"
 #include "data_result.h"
 #include "derivation_record.h"
+#include "temporal_workspace_types.h"
 #include "virtual_raster_recipe.h"
 
 namespace sicnu::data
@@ -241,6 +242,43 @@ class DataManager : public QObject
   /// rule). Emits `collectionRemoved` (and `assetRemoved` per cascaded child).
   Result<void> unloadCollection( CollectionId id, bool cascade );
 
+  // --- Temporal workspace (TemporalCollection as a first-class record) -------
+  //
+  // A TemporalCollection is a catalog entity the DataManager owns the identity
+  // of: id, revision, and the canonical descriptor document. The descriptor is
+  // the temporal layer's opaque schema (stored verbatim); the temporal layer
+  // binds scenes to registered Data Assets and converts between the typed
+  // collection and the stored document. These records are project-persistent
+  // via the `<temporalCollections>` serializer block.
+
+  /// Registers a temporal collection. An identical (name + descriptor) record
+  /// is returned with reusedExisting = true instead of creating a duplicate.
+  /// Emits `temporalCollectionAdded`.
+  TemporalCollectionCreateResult createTemporalCollection( const TemporalCollectionCreateRequest &request );
+
+  /// Restores a record with a specific id + revision (project
+  /// deserialization), mirroring restoreCollection. Emits
+  /// `temporalCollectionAdded`.
+  TemporalCollectionCreateResult restoreTemporalCollection( CollectionId id, quint64 revision,
+                                                            const TemporalCollectionCreateRequest &request );
+
+  /// Returns a snapshot of the temporal collection, if it exists.
+  std::optional<TemporalCollectionRecord> temporalCollection( CollectionId id ) const;
+
+  /// Lists every temporal collection record (insertion order).
+  QVector<TemporalCollectionRecord> temporalCollections() const;
+
+  /// Replaces the descriptor/name and bumps the record revision. Scene
+  /// re-binding (refreshing per-scene assetId/revision from the catalog) is a
+  /// caller concern — the data layer stores the descriptor verbatim. Emits
+  /// `temporalCollectionChanged`.
+  Result<TemporalCollectionRecord> updateTemporalCollection( CollectionId id,
+                                                             const TemporalCollectionCreateRequest &request );
+
+  /// Removes the record (scene assets are NOT touched: the descriptor only
+  /// references them). Emits `temporalCollectionRemoved`.
+  Result<void> removeTemporalCollection( CollectionId id );
+
     /// Attaches a Derivation Record to an existing asset, the final step of a
     /// transactional algorithm-output commit performed outside this layer. The
     /// record's `outputAssetId` is stamped with `id` (its caller-supplied value
@@ -259,6 +297,9 @@ class DataManager : public QObject
     void assetRemoved( AssetId id );
     void collectionAdded( CollectionId id );
     void collectionRemoved( CollectionId id );
+    void temporalCollectionAdded( CollectionId id );
+    void temporalCollectionChanged( CollectionId id );
+    void temporalCollectionRemoved( CollectionId id );
 
   private:
     friend class internal::SourceProviderRegistry;

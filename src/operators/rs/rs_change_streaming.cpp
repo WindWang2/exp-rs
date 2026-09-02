@@ -216,16 +216,12 @@ bool readTileBip( const GdalDatasetWrapper &beforeDs, const GdalDatasetWrapper &
                         bandScratch[p] = nan;
                 }
             } else if ( hasNd && !std::isfinite( nd ) ) {
-                // ±inf sentinels: std::isnan(±inf) is false, so the NaN-only
-                // rewrite never matched them and the branch was a no-op (#720).
-                // Match the declared sentinel itself; NaN observations are
-                // invalid either way.
-                const float ndF = static_cast<float>( nd );
-                for ( size_t p = 0; p < tilePixels; ++p ) {
-                    const float v = bandScratch[p];
-                    if ( std::isnan( v ) || v == ndF )
-                        bandScratch[p] = nan;
-                }
+                // Infinite declared NoData (±inf sentinel): sweep EVERY
+                // non-finite sample (inf sentinel and NaN alike) to NaN —
+                // an isnan-only test would let ±inf pass through as a
+                // "value" (#720).
+                for ( size_t p = 0; p < tilePixels; ++p )
+                    if ( !std::isfinite( bandScratch[p] ) ) bandScratch[p] = nan;
             }
         }
         for ( size_t p = 0; p < tilePixels; ++p )
@@ -245,13 +241,10 @@ bool readTileBip( const GdalDatasetWrapper &beforeDs, const GdalDatasetWrapper &
                         bandScratch[p] = nan;
                 }
             } else if ( hasNd && !std::isfinite( nd ) ) {
-                // ±inf sentinels: see the before-raster branch above (#720).
-                const float ndF = static_cast<float>( nd );
-                for ( size_t p = 0; p < tilePixels; ++p ) {
-                    const float v = bandScratch[p];
-                    if ( std::isnan( v ) || v == ndF )
-                        bandScratch[p] = nan;
-                }
+                // Infinite declared NoData (±inf sentinel): see before-copy
+                // comment (#720).
+                for ( size_t p = 0; p < tilePixels; ++p )
+                    if ( !std::isfinite( bandScratch[p] ) ) bandScratch[p] = nan;
             }
         }
         for ( size_t p = 0; p < tilePixels; ++p )

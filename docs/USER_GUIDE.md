@@ -1220,6 +1220,16 @@ exp-rs MCP 服务器（`--mcp`）暴露 14 个 `layout:*` 工具，Pi 可用自�
 
 > **同一属性层**：GUI 检查器与 MCP 工具都通过 QgsLayoutItem setter + QgsLayoutUndoStack 命令（相同命令 ID）修改对象，人工编辑与 Agent 编辑语义完全一致，布局对象本身是唯一事实来源。
 
+### 11.6 时间序列分析 (Temporal Workspace, ADR 0125)
+
+- **新建时间相集合**：`时间序列分析` 对话框中通过「添加场景」（任意本地 GeoTIFF 或 `/vsicurl/https://` COG URL）依次载入同格场景，自动解析获取时间（产品 `SICNU_ACQUISITION_DATE` / 显式输入 / Sentinel-2 / Landsat / MODIS 文件名）、平台、处理级别与波段角色；重复时相按 `keep_all`（保留全部）或 `reject`（阻塞）处理——集合按时序自动排序。
+- **科学预检** (Preflight)：运行同网对比（`compareGrids`）、光谱角色可解析性、`SICNU_RADIOMETRIC_STATE` 与 scale/offset 统一性、有效性契约（有限 NoData / NaN / QA 掩膜）校验；阻塞问题以模态对话框提示。
+- **六大时间算子**：`rs:temporal_summary` (mean/min/max/stddev/median), `rs:temporal_composite` (best-pixel/mean/median × `period=month/quarter/season/year`)，`rs:temporal_index_series` (逐时相复用 `rs:spectral_index` 同一核)，`rs:temporal_trend` (参数回归 slope/intercept/R²/n/RMSE)，`rs:temporal_anomaly` (baseline mean/z-score, 可设 `target_time` 与 `min_observations`)，`rs:temporal_extract_series` (点/多边形值序列 → CSV+JSON)——全部受 `O(tile)` 有界内存约束（默认 256×256），中位/分位数按 `T × tile × 4 B ≤ 256 MiB` 自动收缩瓦块。
+- **工作区记录持久化**：时间相集合作为 DataManager 一等记录存储（`id + revision + 场景{assetId, revision, path, 获取时间, 平台, 波段元数据, QA 引用}`），经 `<temporalCollections>` 扩展块随工程保存与还原，场景引用优先使用 `AssetRef` 并以路径回退；场景重提交会让 `revision` 失效、让工作流缓存命中失效、让溯源自动追踪最新输入。
+- **工作流/缓存/恢复**：时间算子接入 Workflow v2 指纹（`operator id + version + 归一化参数 + collection id/revision + 场景 AssetRef revisions`），同参同景在 cache 命中时复用已物化结果；`WorkflowCheckpointManager` 支持中断后恢复并保留集合引用。
+- **STAC 最小接入**：`处理/HOST-TOOLS → **STAC 目录检索**` (Ribbon「数据」) 支持按 `bbox` / `datetime` / `collection` / `limit` / `property_filter=key=value` 的最小可靠搜索 (`StacClient` 带 SSRF 边界、HTTPS 偏好、`SICNU_STAC_ALLOW_PRIVATE` 私网开关、`SICNU_MCP_ALLOW_REMOTE=0` 本地-only 开关) + `temporal:ingest_stac` (消费已获取的搜索响应文档，经 client-side 过滤构建 `TemporalCollection`，远程场景 href 以 `/vsicurl/` 为像素所有者)；时间对话框与算子均接受带 `/vsicurl/` 前缀的 COG URL。
+- **Agent / Pi 发现流**：MCP `tools/list` 与 Copilot 工具目录均暴露 `temporal:` 族（`register_collection`/`list_collections`/`get_collection`/`remove_collection`/`ingest_stac` + `create_collection`/`describe_collection`/`list_scenes`/`preflight_collection`）；`WorkspaceSnapshot` 在运行 POM 头中携带「时间相集合」区块（名称/修订/场景数/已绑定比/时间范围/平台），Agent 不经文件对话框即可预检与运行时间算子。
+
 ---
 
 > **结语**：RS Studio 致力于将复杂的遥感图像处理与现代人机工程学融为一体。如果您在使用过程中遇到任何疑问，欢迎按下键盘 **`F1`** 随时调阅本手册，或在 **AI Copilot** 面板中直接向智能助手提问！

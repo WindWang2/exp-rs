@@ -1,8 +1,14 @@
 // src/agent/workspace_snapshot.cpp
 #include "workspace_snapshot.h"
+
+#include <QSet>
+
+#include <algorithm>
 #include "data/band_role.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
+#include "processing/algorithms/temporal/temporal_collection.h"
+#include "processing/algorithms/temporal/temporal_workspace.h"
 #include <qgscontrastenhancement.h>
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
@@ -157,6 +163,39 @@ WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager,
     }
   }
 
+  // Temporal collection records: light descriptor summaries (no raster I/O)
+  // so the agent can discover multi-temporal inputs by name/time-range and
+  // address them by workspace id through the temporal:* tools.
+  if ( dataManager )
+  {
+    for ( const auto &record : dataManager->temporalCollections() )
+    {
+      TemporalCollectionInfo info;
+      info.id = record.id.toString();
+      info.name = record.displayName;
+      info.revision = static_cast<int>( record.revision );
+      TemporalCollection parsed;
+      QString parseError;
+      if ( sicnu::temporal::collectionFromDescriptorText( record.descriptor, &parsed, &parseError ) )
+      {
+        info.sceneCount = parsed.sceneCount();
+        info.timeStart = parsed.timeRangeStartIso();
+        info.timeEnd = parsed.timeRangeEndIso();
+        QSet<QString> platforms;
+        for ( const auto &scene : parsed.scenes() )
+        {
+          if ( !scene.assetId.isEmpty() )
+            ++info.scenesBound;
+          if ( !scene.platform.isEmpty() )
+            platforms.insert( scene.platform );
+        }
+        info.platforms = QStringList( platforms.cbegin(), platforms.cend() );
+        std::sort( info.platforms.begin(), info.platforms.end() );
+      }
+      snapshot.temporalCollections.append( info );
+    }
+  }
+
   if ( canvas )
   {
     snapshot.mapView.crsAuthId =
@@ -281,6 +320,28 @@ QString WorkspaceSnapshot::toSystemPromptHeader() const
                     .arg( *mapView.activeRaster.displayMin )
                     .arg( *mapView.activeRaster.displayMax );
       }
+    }
+  }
+
+  if ( !temporalCollections.isEmpty() )
+  {
+    prompt += QStringLiteral( "Temporal Collections (workspace records — address by id via "
+                              "temporal:get_collection / temporal:* tools; run rs:temporal_* "
+                              "operators with collection=<id>):
+" );
+    for ( const auto &collection : temporalCollections )
+    {
+      prompt += QString( "  - '%1' [%2] revision %3: %4 scene(s), %5 bound" )
+                  .arg( collection.name, collection.id )
+                  .arg( collection.revision )
+                  .arg( collection.sceneCount )
+                  .arg( collection.scenesBound );
+      if ( !collection.timeStart.isEmpty() )
+        prompt += QString( ", %1 … %2" ).arg( collection.timeStart, collection.timeEnd );
+      if ( !collection.platforms.isEmpty() )
+        prompt += QString( ", platform: %1" ).arg( collection.platforms.join( "/" ) );
+      prompt += QLatin1Char( '
+' );
     }
   }
 
