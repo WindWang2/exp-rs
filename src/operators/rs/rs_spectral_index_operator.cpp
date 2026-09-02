@@ -13,12 +13,15 @@
 #include "processing/algorithms/math_utils.h"
 #include "processing/algorithms/temporal/temporal_band_roles.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_multiband_block_stream.h" // GdalStreamingOutput + Tile
 
 #include <QString>
 
 #include <gdal.h>
 
+#include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <vector>
 
@@ -95,13 +98,13 @@ Json::Value RsSpectralIndexOperator::metadata() const {
 }
 
 Json::Value RsSpectralIndexOperator::executionEstimate() const {
-    // FullRaster (base default): no preferred tile; the whole input raster is
-    // resident. Typical input 1024x1024x4 float32 (~4 MiB/band); the worst-case
-    // index (EVI/BSI) keeps 4 input bands + 1 output buffer in flight at once.
+    // Streaming (#664): 256x256 row-blocks; the worst-case index (EVI/BSI,
+    // dNBR) keeps 4 input block buffers + 1 output block in flight — about
+    // 5 * 256 * 256 * 4 bytes = 1.25 MiB, rounded up to 2 MiB with overhead.
     Json::Value est(Json::objectValue);
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 33554432;
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 2097152;
     return est;
 }
 
@@ -221,111 +224,175 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                         + "; dividing the participating bands by it for " + indexName);
     }
 
-    std::vector<float> nir, red, green, blue, swir, swir2, redEdge, out;
+    // Streaming execution (#664, ADR 0124 grade bit-exact): the raster is
+    // processed in horizontal row-blocks so only O(blockRows*width) of each
+    // participating band is resident, instead of full-raster buffers. Every
+    // index kernel is strictly element-wise, so block-wise invocation is
+    // bit-identical to a full-raster pass.
+    const int blockRows = std::max(1, std::min(256, height));
+    const size_t blockSize = static_cast<size_t>(width) * blockRows;
 
-    auto readBandFromDs = [&](GdalDatasetWrapper &dataset, int bandNum, std::vector<float>& buffer) {
-        buffer.resize(static_cast<size_t>(dataset.width()) * dataset.height());
-        if (!dataset.readBandData(bandNum, buffer.data(), dataset.width(), dataset.height())) {
-            throw RSOperatorError(ErrorCode::GdalError,
-                                  "Failed to read band " + std::to_string(bandNum));
-        }
+    // A (dataset, band) pair with the band's finite NoData sentinel resolved
+    // once. Blocks read through it apply the same normalization the
+    // full-raster path used (sentinel / non-finite -> NaN) and, for
+    // scale-sensitive indices (#680), the numeric-scale normalization
+    // (finite values divided by the stamped scale).
+    struct BandSource
+    {
+        GdalDatasetWrapper *ds = nullptr;
+        int band = 0;
         bool hasNodata = false;
-        double nodataVal = dataset.bandNoDataValue(bandNum, &hasNodata);
-        if (hasNodata && std::isfinite(nodataVal)) {
-            const float nodataF = static_cast<float>(nodataVal);
-            for (float &val : buffer) {
-                if (val == nodataF || !std::isfinite(val)) {
-                    val = std::numeric_limits<float>::quiet_NaN();
-                }
+        double nodata = 0.0;
+        float invScale = 1.0f; // 1/SICNU_NUMERIC_SCALE when #680 applies, else 1
+    };
+    auto makeSource = [&](GdalDatasetWrapper &dataset, int bandNum,
+                          bool applyScale = false) {
+        BandSource src;
+        src.ds = &dataset;
+        src.band = bandNum;
+        src.nodata = dataset.bandNoDataValue(bandNum, &src.hasNodata);
+        if (src.hasNodata && !std::isfinite(src.nodata))
+            src.hasNodata = false;
+        if (applyScale && applyNumericScale)
+            src.invScale = static_cast<float>(1.0 / numericScale);
+        return src;
+    };
+    auto readBlock = [&](const BandSource &src, int y0, int rows, float *buf) {
+        if (!src.ds->readBandWindow(src.band, 0, y0, width, rows, buf)) {
+            throw RSOperatorError(ErrorCode::GdalError,
+                                  "Failed to read band " + std::to_string(src.band));
+        }
+        const size_t count = static_cast<size_t>(width) * rows;
+        if (src.hasNodata) {
+            const float nodataF = static_cast<float>(src.nodata);
+            for (size_t i = 0; i < count; ++i) {
+                if (buf[i] == nodataF || !std::isfinite(buf[i]))
+                    buf[i] = std::numeric_limits<float>::quiet_NaN();
+            }
+        }
+        if (src.invScale != 1.0f) {
+            // #680: normalize to unit reflectance; NaN'd nodata passes through.
+            for (size_t i = 0; i < count; ++i) {
+                if (std::isfinite(buf[i]))
+                    buf[i] *= src.invScale;
             }
         }
     };
 
-    auto readBand = [&](int bandNum, std::vector<float>& buffer) {
-        readBandFromDs(ds, bandNum, buffer);
-    };
+    // Streaming output: tiles are written as they are computed so no
+    // full-raster buffer is ever resident (#647 contract: failures/cancel
+    // abandon() the partial file instead of leaving it at the output path).
+    GdalStreamingOutput output(QString::fromStdString(outputPath), width, height, 1,
+                               GDT_Float32, ds.geoTransform(), ds.projection());
+    if (!output.isOpen()) {
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              "Failed to create output raster: " + outputPath);
+    }
+    output.setNoDataValue(std::numeric_limits<double>::quiet_NaN());
 
-    // Divide a band buffer by the stamped numeric scale (#680). Non-finite
-    // values (already NaN'd nodata) pass through untouched.
-    auto scaleBand = [&](std::vector<float>& buffer) {
-        if (!applyNumericScale)
-            return;
-        const float invScale = static_cast<float>(1.0 / numericScale);
-        for (float& v : buffer) {
-            if (std::isfinite(v))
-                v *= invScale;
+    // Generic row-block driver: reads each participating band's block, runs
+    // the element-wise branch kernel, and writes the result tile.
+    const auto streamBlocks = [&](const std::vector<BandSource> &sources,
+                                  const std::function<bool(const float *const *, float *, size_t)> &kernel) {
+        const size_t k = sources.size();
+        std::vector<std::vector<float>> in(k);
+        for (auto &buf : in)
+            buf.resize(blockSize);
+        std::vector<float> outBlk(blockSize);
+        std::vector<const float *> inPtr(k);
+        const int totalBlocks = (height + blockRows - 1) / blockRows;
+        int blockIndex = 0;
+        for (int y0 = 0; y0 < height; y0 += blockRows, ++blockIndex) {
+            context.throwIfCancelled();
+            const int rows = std::min(blockRows, height - y0);
+            const size_t n = static_cast<size_t>(width) * rows;
+            for (size_t s = 0; s < k; ++s)
+                readBlock(sources[s], y0, rows, in[s].data());
+            for (size_t s = 0; s < k; ++s)
+                inPtr[s] = in[s].data();
+            if (!kernel(inPtr.data(), outBlk.data(), n))
+                return false;
+            const GdalBlockStream::Tile tile{0, y0, width, rows, 0, width, rows,
+                                             blockIndex, totalBlocks};
+            if (!output.writeTile(1, tile, outBlk.data()))
+                return false;
+            context.reportProgress(0.1 + 0.7 * (static_cast<double>(blockIndex + 1) / totalBlocks),
+                                   "Computing " + indexName);
         }
+        return true;
     };
 
     context.reportProgress(0.1, "Reading input bands");
 
-    const size_t totalPixels = static_cast<size_t>(width) * height;
-    out.resize(totalPixels);
     bool ok = false;
 
     if (indexName == "NDVI") {
         validateBand(nirBand, "NIR");
         validateBand(redBand, "Red");
-        readBand(nirBand, nir);
-        readBand(redBand, red);
-        ok = MathUtils::normalizedDifference(nir.data(), red.data(), out.data(), out.size());
+        ok = streamBlocks({makeSource(ds, nirBand), makeSource(ds, redBand)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return MathUtils::normalizedDifference(in[0], in[1], outBlk, n);
+                          });
     } else if (indexName == "EVI") {
         validateBand(nirBand, "NIR");
         validateBand(redBand, "Red");
         validateBand(blueBand, "Blue");
-        readBand(nirBand, nir);
-        readBand(redBand, red);
-        readBand(blueBand, blue);
         // Scale-sensitive constants: normalise to unit reflectance first (#680).
-        scaleBand(nir);
-        scaleBand(red);
-        scaleBand(blue);
-        ok = SpectralIndices::evi(nir.data(), red.data(), blue.data(), out.data(), out.size());
+        ok = streamBlocks({makeSource(ds, nirBand, true), makeSource(ds, redBand, true),
+                           makeSource(ds, blueBand, true)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return SpectralIndices::evi(in[0], in[1], in[2], outBlk, n);
+                          });
     } else if (indexName == "SAVI") {
         validateBand(nirBand, "NIR");
         validateBand(redBand, "Red");
-        readBand(nirBand, nir);
-        readBand(redBand, red);
-        scaleBand(nir);
-        scaleBand(red);
-        ok = SpectralIndices::savi(nir.data(), red.data(), out.data(), out.size());
+        ok = streamBlocks({makeSource(ds, nirBand, true), makeSource(ds, redBand, true)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return SpectralIndices::savi(in[0], in[1], outBlk, n);
+                          });
     } else if (indexName == "NDWI") {
         validateBand(greenBand, "Green");
         validateBand(nirBand, "NIR");
-        readBand(greenBand, green);
-        readBand(nirBand, nir);
-        ok = MathUtils::normalizedDifference(green.data(), nir.data(), out.data(), out.size());
+        ok = streamBlocks({makeSource(ds, greenBand), makeSource(ds, nirBand)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return MathUtils::normalizedDifference(in[0], in[1], outBlk, n);
+                          });
     } else if (indexName == "NDBI") {
         validateBand(swirBand, "SWIR");
         validateBand(nirBand, "NIR");
-        readBand(swirBand, swir);
-        readBand(nirBand, nir);
-        ok = MathUtils::normalizedDifference(swir.data(), nir.data(), out.data(), out.size());
+        ok = streamBlocks({makeSource(ds, swirBand), makeSource(ds, nirBand)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return MathUtils::normalizedDifference(in[0], in[1], outBlk, n);
+                          });
     } else if (indexName == "MNDWI") {
         validateBand(greenBand, "Green");
         validateBand(swirBand, "SWIR");
-        readBand(greenBand, green);
-        readBand(swirBand, swir);
-        ok = MathUtils::normalizedDifference(green.data(), swir.data(), out.data(), out.size());
+        ok = streamBlocks({makeSource(ds, greenBand), makeSource(ds, swirBand)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return MathUtils::normalizedDifference(in[0], in[1], outBlk, n);
+                          });
     } else if (indexName == "NBR") {
         validateBand(nirBand, "NIR");
         validateBand(swir2Band, "SWIR2");
-        readBand(nirBand, nir);
-        readBand(swir2Band, swir2);
-        ok = MathUtils::normalizedDifference(nir.data(), swir2.data(), out.data(), out.size());
+        ok = streamBlocks({makeSource(ds, nirBand), makeSource(ds, swir2Band)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return MathUtils::normalizedDifference(in[0], in[1], outBlk, n);
+                          });
     } else if (indexName == "dNBR") {
-        // dNBR = NBR_pre - NBR_post
+        // dNBR = NBR_pre - NBR_post, streamed across both rasters' blocks.
         std::string postfirePath;
         if (params.isMember("postfire") && params["postfire"].isString())
             postfirePath = params["postfire"].asString();
         else if (params.isMember("after") && params["after"].isString())
             postfirePath = params["after"].asString();
 
+        GdalDatasetWrapper postDs;
+        int postNirBand = 0;
+        int postSwir2Band = 0;
         if (!postfirePath.empty()) {
             if (!fileExists(postfirePath)) {
                 throw RSOperatorError(ErrorCode::FileNotFound, "Post-fire raster not found: " + postfirePath);
             }
-            GdalDatasetWrapper postDs;
             if (!postDs.open(QString::fromStdString(postfirePath))) {
                 throw RSOperatorError(ErrorCode::GdalError, "Failed to open post-fire raster: " + postfirePath);
             }
@@ -334,136 +401,124 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             }
             validateBand(nirBand, "NIR (pre-fire)");
             validateBand(swir2Band, "SWIR2 (pre-fire)");
-            readBand(nirBand, nir);
-            readBand(swir2Band, swir2);
-
-            std::vector<float> nbrPre(totalPixels), nbrPost(totalPixels), postNir, postSwir2;
-            MathUtils::normalizedDifference(nir.data(), swir2.data(), nbrPre.data(), totalPixels);
-
-            int postNirBand = params.isMember("postNir") ? getInt(params, "postNir", nirBand) : nirBand;
-            int postSwir2Band = params.isMember("postSwir2") ? getInt(params, "postSwir2", swir2Band) : swir2Band;
+            postNirBand = params.isMember("postNir") ? getInt(params, "postNir", nirBand) : nirBand;
+            postSwir2Band = params.isMember("postSwir2") ? getInt(params, "postSwir2", swir2Band) : swir2Band;
             if (postNirBand < 1 || postNirBand > postDs.bandCount() || postSwir2Band < 1 || postSwir2Band > postDs.bandCount()) {
                 throw RSOperatorError(ErrorCode::InvalidParameter, "Post-fire band numbers out of range");
             }
-            readBandFromDs(postDs, postNirBand, postNir);
-            readBandFromDs(postDs, postSwir2Band, postSwir2);
-            MathUtils::normalizedDifference(postNir.data(), postSwir2.data(), nbrPost.data(), totalPixels);
-
-            for (size_t i = 0; i < totalPixels; ++i) {
-                out[i] = (std::isfinite(nbrPre[i]) && std::isfinite(nbrPost[i]))
-                             ? (nbrPre[i] - nbrPost[i])
-                             : std::numeric_limits<float>::quiet_NaN();
-            }
-            ok = true;
         } else {
             // Single raster pre/post bands
-            const int postNirBand = getInt(params, "postNir", 0);
-            const int postSwir2Band = getInt(params, "postSwir2", 0);
-            if (postNirBand >= 1 && postSwir2Band >= 1) {
-                validateBand(nirBand, "NIR (pre)");
-                validateBand(swir2Band, "SWIR2 (pre)");
-                validateBand(postNirBand, "NIR (post)");
-                validateBand(postSwir2Band, "SWIR2 (post)");
-                readBand(nirBand, nir);
-                readBand(swir2Band, swir2);
-                std::vector<float> postNir, postSwir2, nbrPre(totalPixels), nbrPost(totalPixels);
-                readBand(postNirBand, postNir);
-                readBand(postSwir2Band, postSwir2);
-                MathUtils::normalizedDifference(nir.data(), swir2.data(), nbrPre.data(), totalPixels);
-                MathUtils::normalizedDifference(postNir.data(), postSwir2.data(), nbrPost.data(), totalPixels);
-                for (size_t i = 0; i < totalPixels; ++i) {
-                    out[i] = (std::isfinite(nbrPre[i]) && std::isfinite(nbrPost[i]))
-                                 ? (nbrPre[i] - nbrPost[i])
-                                 : std::numeric_limits<float>::quiet_NaN();
-                }
-                ok = true;
-            } else {
+            postNirBand = getInt(params, "postNir", 0);
+            postSwir2Band = getInt(params, "postSwir2", 0);
+            if (postNirBand < 1 || postSwir2Band < 1) {
                 throw RSOperatorError(ErrorCode::InvalidParameter,
                                       "dNBR requires either 'postfire' raster path or 'postNir'/'postSwir2' band numbers");
             }
+            validateBand(nirBand, "NIR (pre)");
+            validateBand(swir2Band, "SWIR2 (pre)");
+            validateBand(postNirBand, "NIR (post)");
+            validateBand(postSwir2Band, "SWIR2 (post)");
         }
+        GdalDatasetWrapper &postRef = postDs.isValid() ? postDs : ds;
+        std::vector<float> nbrPre, nbrPost;
+        ok = streamBlocks({makeSource(ds, nirBand), makeSource(ds, swir2Band),
+                           makeSource(postRef, postNirBand), makeSource(postRef, postSwir2Band)},
+                          [&](const float *const *in, float *outBlk, size_t n) {
+                              nbrPre.resize(n);
+                              nbrPost.resize(n);
+                              MathUtils::normalizedDifference(in[0], in[1], nbrPre.data(), n);
+                              MathUtils::normalizedDifference(in[2], in[3], nbrPost.data(), n);
+                              const float nan = std::numeric_limits<float>::quiet_NaN();
+                              for (size_t i = 0; i < n; ++i) {
+                                  outBlk[i] = (std::isfinite(nbrPre[i]) && std::isfinite(nbrPost[i]))
+                                                  ? (nbrPre[i] - nbrPost[i])
+                                                  : nan;
+                              }
+                              return true;
+                          });
     } else if (indexName == "BSI") {
         // BSI = ((SWIR + Red) - (NIR + Blue)) / ((SWIR + Red) + (NIR + Blue))
         validateBand(swirBand, "SWIR");
         validateBand(redBand, "Red");
         validateBand(nirBand, "NIR");
         validateBand(blueBand, "Blue");
-        readBand(swirBand, swir);
-        readBand(redBand, red);
-        readBand(nirBand, nir);
-        readBand(blueBand, blue);
-
-        const float nan = std::numeric_limits<float>::quiet_NaN();
-        for (size_t i = 0; i < totalPixels; ++i) {
-            const float s = swir[i];
-            const float r = red[i];
-            const float n = nir[i];
-            const float b = blue[i];
-            if (!std::isfinite(s) || !std::isfinite(r) || !std::isfinite(n) || !std::isfinite(b)) {
-                out[i] = nan;
-                continue;
-            }
-            const float num = (s + r) - (n + b);
-            const float denom = (s + r) + (n + b);
-            out[i] = MathUtils::safeDiv(num, denom);
-        }
-        ok = true;
+        ok = streamBlocks({makeSource(ds, swirBand), makeSource(ds, redBand),
+                           makeSource(ds, nirBand), makeSource(ds, blueBand)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              const float nan = std::numeric_limits<float>::quiet_NaN();
+                              const float *swir = in[0];
+                              const float *red = in[1];
+                              const float *nirB = in[2];
+                              const float *blue = in[3];
+                              for (size_t i = 0; i < n; ++i) {
+                                  const float s = swir[i];
+                                  const float r = red[i];
+                                  const float nv = nirB[i];
+                                  const float b = blue[i];
+                                  if (!std::isfinite(s) || !std::isfinite(r)
+                                      || !std::isfinite(nv) || !std::isfinite(b)) {
+                                      outBlk[i] = nan;
+                                      continue;
+                                  }
+                                  const float num = (s + r) - (nv + b);
+                                  const float denom = (s + r) + (nv + b);
+                                  outBlk[i] = MathUtils::safeDiv(num, denom);
+                              }
+                              return true;
+                          });
     } else if (indexName == "NDRE") {
         // NDRE = (NIR - RedEdge) / (NIR + RedEdge)
         validateBand(nirBand, "NIR");
         validateBand(redEdgeBand, "RedEdge");
-        readBand(nirBand, nir);
-        readBand(redEdgeBand, redEdge);
-        ok = MathUtils::normalizedDifference(nir.data(), redEdge.data(), out.data(), out.size());
+        ok = streamBlocks({makeSource(ds, nirBand), makeSource(ds, redEdgeBand)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return MathUtils::normalizedDifference(in[0], in[1], outBlk, n);
+                          });
     } else if (indexName == "CI") {
         // CI = (NIR / RedEdge) - 1.0 = (NIR - RedEdge) / RedEdge
         validateBand(nirBand, "NIR");
         validateBand(redEdgeBand, "RedEdge");
-        readBand(nirBand, nir);
-        readBand(redEdgeBand, redEdge);
-
-        const float nan = std::numeric_limits<float>::quiet_NaN();
-        for (size_t i = 0; i < totalPixels; ++i) {
-            const float n = nir[i];
-            const float re = redEdge[i];
-            if (!std::isfinite(n) || !std::isfinite(re) || re == 0.0f) {
-                out[i] = nan;
-            } else {
-                out[i] = (n / re) - 1.0f;
-            }
-        }
-        ok = true;
+        ok = streamBlocks({makeSource(ds, nirBand), makeSource(ds, redEdgeBand)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              const float nan = std::numeric_limits<float>::quiet_NaN();
+                              const float *nirB = in[0];
+                              const float *re = in[1];
+                              for (size_t i = 0; i < n; ++i) {
+                                  if (!std::isfinite(nirB[i]) || !std::isfinite(re[i]) || re[i] == 0.0f)
+                                      outBlk[i] = nan;
+                                  else
+                                      outBlk[i] = (nirB[i] / re[i]) - 1.0f;
+                              }
+                              return true;
+                          });
     } else if (indexName == "NDSI") {
         // NDSI = (Green - SWIR) / (Green + SWIR)
         validateBand(greenBand, "Green");
         validateBand(swirBand, "SWIR");
-        readBand(greenBand, green);
-        readBand(swirBand, swir);
-        ok = MathUtils::normalizedDifference(green.data(), swir.data(), out.data(), out.size());
+        ok = streamBlocks({makeSource(ds, greenBand), makeSource(ds, swirBand)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return MathUtils::normalizedDifference(in[0], in[1], outBlk, n);
+                          });
     } else if (indexName == "NDTI") {
         // NDTI = (SWIR1 - SWIR2) / (SWIR1 + SWIR2)
         validateBand(swirBand, "SWIR1");
         validateBand(swir2Band, "SWIR2");
-        readBand(swirBand, swir);
-        readBand(swir2Band, swir2);
-        ok = MathUtils::normalizedDifference(swir.data(), swir2.data(), out.data(), out.size());
-    }
-
-    if (!ok) {
-        throw RSOperatorError(ErrorCode::ComputationError,
-                              "Spectral index computation failed");
+        ok = streamBlocks({makeSource(ds, swirBand), makeSource(ds, swir2Band)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return MathUtils::normalizedDifference(in[0], in[1], outBlk, n);
+                          });
     }
 
     context.throwIfCancelled();
-    context.reportProgress(0.7, "Writing output raster");
-
-    std::vector<std::vector<float>> bands = {std::move(out)};
-    QString errorMessage;
-    if (!writeGdalOutput(QString::fromStdString(outputPath), width, height, bands,
-                         ds.geoTransform(), ds.projection(), &errorMessage,
-                         std::numeric_limits<double>::quiet_NaN())) {
+    if (!ok) {
+        output.abandon();
+        throw RSOperatorError(ErrorCode::ComputationError,
+                              "Spectral index computation failed");
+    }
+    QString closeError;
+    if (!output.closeWithError(&closeError)) {
         throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed to write output raster: " + errorMessage.toStdString());
+                              "Failed to write output raster: " + closeError.toStdString());
     }
 
     ds.close();

@@ -1,5 +1,11 @@
 #include "rs_operator_registry.h"
 
+namespace sicnu::operators::rs {
+/// Set once every operator family has been registered; part of the #707
+/// provider-installation protocol. Defined in rs_operators_init.cpp.
+void markRegistryInitComplete();
+}
+
 namespace sicnu::operators {
 
 namespace rs { void initBuiltinRsOperators(); }
@@ -9,16 +15,32 @@ namespace opencv { void initBuiltinOpenCvOperators(); }
 #endif
 namespace otb { void initBuiltinOtbOperators(); }
 
+} // namespace sicnu::operators
+
+namespace sicnu::operators::rs {
+/// Published by instance() while its call_once chain runs so
+/// initBuiltinRsOperators() can register operators without re-entering
+/// instance(). Defined in rs_operators_init.cpp.
+extern RSOperatorRegistry *sRegistryUnderConstruction;
+}
+
+namespace sicnu::operators {
+
 RSOperatorRegistry& RSOperatorRegistry::instance() {
     static std::once_flag initFlag;
     static RSOperatorRegistry registry;
     std::call_once(initFlag, []() {
+        // registry's address is constant for the process lifetime; assign it
+        // directly rather than capturing (static locals cannot be captured).
+        sicnu::operators::rs::sRegistryUnderConstruction = &registry;
         rs::initBuiltinRsOperators();
         gdal::initBuiltinGdalOperators();
 #ifdef SICNU_HAS_OPENCV
         opencv::initBuiltinOpenCvOperators();
 #endif
         otb::initBuiltinOtbOperators();
+        sicnu::operators::rs::sRegistryUnderConstruction = nullptr;
+        rs::markRegistryInitComplete();
     });
     return registry;
 }

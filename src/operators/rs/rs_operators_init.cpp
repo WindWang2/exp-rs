@@ -119,24 +119,139 @@ REGISTER_RS_OPERATOR(RsRecodeOperator, "rs:recode")
 REGISTER_RS_OPERATOR(RsInferenceOperator, "rs:infer")
 #endif
 
+void installRsOperatorProvider();
+void markRegistryInitComplete();
+/// True once RSOperatorRegistry::instance()'s call_once chain has fully run
+/// (all operator families registered). installRsOperatorProvider() must not
+/// call RSOperatorRegistry::instance() before this — doing so re-enters the
+/// same call_once and deadlocks (#707).
+bool rsRegistryInitComplete();
+
+void installRsOperatorProvider();
+
 struct AtomicRsOperatorProviderRegistration {
   AtomicRsOperatorProviderRegistration() {
-    sicnu::processing::AtomicAlgorithmRegistry::setRsOperatorProvider([](sicnu::processing::AtomicAlgorithmRegistry &registry) {
-      auto names = RSOperatorRegistry::instance().operatorNames();
-      for ( const auto &name : names ) {
-        auto op = RSOperatorRegistry::instance().create( name );
-        if ( op ) {
-          auto adapter = std::make_shared<sicnu::processing::RsOperatorAdapter>( std::move( op ) );
-          registry.registerAdapter( adapter );
-        }
-      }
-    });
+    installRsOperatorProvider();
   }
 };
 static AtomicRsOperatorProviderRegistration sAtomicRsOperatorProviderReg;
 
+RSOperatorRegistry *sRegistryUnderConstruction = nullptr;
+
 void initBuiltinRsOperators() {
-  (void)sAtomicRsOperatorProviderReg;
+  // Runs inside RSOperatorRegistry::instance()'s call_once chain. The
+  // registry object is being constructed; its address is published through
+  // sRegistryUnderConstruction so this function never re-enters instance()
+  // (doing so from inside the chain leaves the init guard unreleased and
+  // the next instance() re-runs the chain, clearing m_factories — #707).
+  RSOperatorRegistry *registry = sRegistryUnderConstruction;
+  if ( !registry )
+    return;
+
+  // The REGISTER_RS_OPERATOR static initializers in this TU are
+  // dead-stripped when the linker decides no symbol is referenced, so the
+  // explicit list below is the ONLY guaranteed registration path (#707).
+  const auto add = [registry]( const std::string &id, auto factory ) {
+    registry->registerOperator( id, std::move( factory ) );
+  };
+  add( "rs:spectral_index", [] { return std::make_unique<RsSpectralIndexOperator>(); } );
+  add( "rs:ndvi", [] { return std::make_unique<RsNdviOperator>(); } );
+  add( "rs:evi", [] { return std::make_unique<RsEviOperator>(); } );
+  add( "rs:ndwi", [] { return std::make_unique<RsNdwiOperator>(); } );
+  add( "rs:savi", [] { return std::make_unique<RsSaviOperator>(); } );
+  add( "rs:ndbi", [] { return std::make_unique<RsNdbiOperator>(); } );
+  add( "rs:mndwi", [] { return std::make_unique<RsMndwiOperator>(); } );
+  add( "rs:band_math", [] { return std::make_unique<RsBandMathOperator>(); } );
+  add( "rs:sam_classify", [] { return std::make_unique<RsSamClassifyOperator>(); } );
+  add( "rs:spectral_unmixing", [] { return std::make_unique<RsSpectralUnmixingOperator>(); } );
+  add( "rs:rx_anomaly", [] { return std::make_unique<RsRxAnomalyOperator>(); } );
+  add( "rs:continuum_removal", [] { return std::make_unique<RsContinuumRemovalOperator>(); } );
+  add( "rs:spectral_resample", [] { return std::make_unique<RsSpectralResampleOperator>(); } );
+  add( "rs:endmember_extraction", [] { return std::make_unique<RsEndmemberExtractionOperator>(); } );
+  add( "rs:atmospheric_correction", [] { return std::make_unique<RsAtmosphericCorrectionOperator>(); } );
+  add( "rs:dn_to_radiance", [] { return std::make_unique<RsDnToRadianceOperator>(); } );
+  add( "rs:atmospheric_dos1", [] { return std::make_unique<RsAtmosphericDos1Operator>(); } );
+  add( "rs:atmospheric_dos2", [] { return std::make_unique<RsAtmosphericDos2Operator>(); } );
+  add( "rs:atmospheric_quac", [] { return std::make_unique<RsAtmosphericQuacOperator>(); } );
+  add( "rs:radiometric_calibration", [] { return std::make_unique<RsRadiometricCalibrationOperator>(); } );
+  add( "rs:change_detection", [] { return std::make_unique<RsChangeDetectionOperator>(); } );
+  add( "rs:change_difference", [] { return std::make_unique<RsChangeDifferenceOperator>(); } );
+  add( "rs:change_normalized_difference", [] { return std::make_unique<RsChangeNormalizedDifferenceOperator>(); } );
+  add( "rs:change_ratio", [] { return std::make_unique<RsChangeRatioOperator>(); } );
+  add( "rs:change_cva", [] { return std::make_unique<RsChangeCvaOperator>(); } );
+  add( "rs:change_cva_angle", [] { return std::make_unique<RsChangeCvaAngleOperator>(); } );
+  add( "rs:change_sam", [] { return std::make_unique<RsChangeSamOperator>(); } );
+  add( "rs:change_log_ratio", [] { return std::make_unique<RsChangeLogRatioOperator>(); } );
+  add( "rs:change_mad", [] { return std::make_unique<RsChangeMadOperator>(); } );
+  add( "rs:change_irmad", [] { return std::make_unique<RsChangeIrMadOperator>(); } );
+  add( "rs:threshold_raster", [] { return std::make_unique<RsThresholdRasterOperator>(); } );
+  add( "rs:post_classification_change", [] { return std::make_unique<RsPostClassificationChangeOperator>(); } );
+  add( "rs:qa_mask", [] { return std::make_unique<RsQaMaskOperator>(); } );
+  add( "rs:apply_mask", [] { return std::make_unique<RsApplyMaskOperator>(); } );
+  add( "rs:image_fusion", [] { return std::make_unique<RsImageFusionOperator>(); } );
+  add( "rs:fusion_linear", [] { return std::make_unique<RsFusionLinearOperator>(); } );
+  add( "rs:fusion_brovey", [] { return std::make_unique<RsFusionBroveyOperator>(); } );
+  add( "rs:fusion_pca", [] { return std::make_unique<RsFusionPcaOperator>(); } );
+  add( "rs:fusion_ihs", [] { return std::make_unique<RsFusionIhsOperator>(); } );
+  add( "rs:fusion_gram_schmidt", [] { return std::make_unique<RsFusionGramSchmidtOperator>(); } );
+  add( "rs:terrain_analysis", [] { return std::make_unique<RsTerrainAnalysisOperator>(); } );
+  add( "rs:pca", [] { return std::make_unique<RsPcaOperator>(); } );
+  add( "rs:mnf", [] { return std::make_unique<RsMnfOperator>(); } );
+  add( "rs:mosaic", [] { return std::make_unique<RsMosaicOperator>(); } );
+  add( "rs:temporal_summary", [] { return std::make_unique<RsTemporalSummaryOperator>(); } );
+  add( "rs:temporal_composite", [] { return std::make_unique<RsTemporalCompositeOperator>(); } );
+  add( "rs:temporal_index_series", [] { return std::make_unique<RsTemporalIndexSeriesOperator>(); } );
+  add( "rs:temporal_trend", [] { return std::make_unique<RsTemporalTrendOperator>(); } );
+  add( "rs:temporal_anomaly", [] { return std::make_unique<RsTemporalAnomalyOperator>(); } );
+  add( "rs:temporal_extract_series", [] { return std::make_unique<RsTemporalExtractSeriesOperator>(); } );
+  add( "rs:landsat_import", [] { return std::make_unique<RsLandsatImportOperator>(); } );
+  add( "rs:sentinel2_import", [] { return std::make_unique<RsSentinel2ImportOperator>(); } );
+  add( "rs:modis_import", [] { return std::make_unique<RsModisImportOperator>(); } );
+  add( "rs:modis_georeference", [] { return std::make_unique<RsModisGeoreferenceOperator>(); } );
+#ifdef SICNU_HAS_OPENCV
+  add( "rs:kmeans_classification", [] { return std::make_unique<RsKmeansOperator>(); } );
+  add( "rs:supervised_classification", [] { return std::make_unique<RsSupervisedClassificationOperator>(); } );
+  add( "rs:obia_segment", [] { return std::make_unique<RsObiaSegmentOperator>(); } );
+  add( "rs:obia_classify", [] { return std::make_unique<RsObiaClassifyOperator>(); } );
+  add( "rs:obia_hierarchy", [] { return std::make_unique<RsObiaHierarchyOperator>(); } );
+  add( "rs:segment_stats", [] { return std::make_unique<RsSegmentStatsOperator>(); } );
+  add( "rs:majority_filter", [] { return std::make_unique<RsMajorityFilterOperator>(); } );
+  add( "rs:recode", [] { return std::make_unique<RsRecodeOperator>(); } );
+  add( "rs:infer", [] { return std::make_unique<RsInferenceOperator>(); } );
+#endif
+}
+
+std::atomic<bool> sRegistrationComplete{ false };
+
+void markRegistryInitComplete() {
+  sRegistrationComplete.store( true, std::memory_order_release );
+}
+
+bool rsRegistryInitComplete() {
+  // Instance's call_once has finished once every REGISTER_RS_OPERATOR in this
+  // TU has fired; sentinel set by the call_once lambda itself.
+  return sRegistrationComplete.load( std::memory_order_acquire );
+}
+
+void installRsOperatorProvider() {
+  // Only safe to call after rsRegistryInitComplete() — see the comment there.
+  // instance() is safe here: the call_once chain completed before this
+  // function was called, so the registry object exists and no guard is
+  // acquired. Capture it by reference: the provider callback runs from
+  // AtomicAlgorithmRegistry::initialize()/reset(), which may already be
+  // inside an instance() call_once chain — calling instance() from inside
+  // that callback re-enters the same call_once and deadlocks (#707).
+  auto *rsRegistry = &RSOperatorRegistry::instance();
+  sicnu::processing::AtomicAlgorithmRegistry::setRsOperatorProvider([rsRegistry](sicnu::processing::AtomicAlgorithmRegistry &registry) {
+    auto names = rsRegistry->operatorNames();
+    for ( const auto &name : names ) {
+      auto op = rsRegistry->create( name );
+      if ( op ) {
+        auto adapter = std::make_shared<sicnu::processing::RsOperatorAdapter>( std::move( op ) );
+        registry.registerAdapter( adapter );
+      }
+    }
+  });
 }
 
 } // namespace sicnu::operators::rs

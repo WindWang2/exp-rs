@@ -19,6 +19,7 @@
 #include <QRgb>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <vector>
 
@@ -125,15 +126,26 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
     // Streaming execution (#666, ADR 0124 grade bit-exact): row-blocks with a
     // halo of kernel/2 pixels so every window sees the same neighbor values it
     // saw in the full-raster path. The mode rule is replicated exactly:
-    // label 0 (NoData) never votes, ties break toward the smaller label, an
-    // all-NoData window keeps the center pixel. Values pass through the same
-    // GDT_Int32 conversion loadLabelRaster used.
+    // label 0 AND the declared NoData sentinel never vote (#700), ties break
+    // toward the smaller label, an all-NoData window keeps the center pixel,
+    // and a NoData CENTER stays NoData (#700) — classes are never grown into
+    // NoData areas. Values pass through the same GDT_Int32 conversion
+    // loadLabelRaster used.
     const int half = kernel / 2;
     GdalDatasetWrapper inDs;
     if (!inDs.open(QString::fromStdString(inputPath))) {
         throw RSOperatorError(ErrorCode::GdalError,
                               "Failed to open label raster: " + inputPath);
     }
+    // #700: the declared band NoData is a non-voting sentinel alongside the
+    // label-0 convention. The threshold-mask output writes NoData=255, and
+    // with only label 0 excluded those pixels won majorities and grew into
+    // valid regions.
+    bool hasDeclaredNoData = false;
+    const double declaredNoData = inDs.bandNoDataValue(1, &hasDeclaredNoData);
+    const bool excludeDeclared = hasDeclaredNoData && std::isfinite(declaredNoData);
+    const int declaredNoDataLabel =
+        excludeDeclared ? static_cast<int>(declaredNoData) : 0;
     const int width = inDs.width();
     const int height = inDs.height();
     const int blockRows = std::max(kernel, std::min(256, height));
@@ -206,8 +218,12 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
                 throw RSOperatorError(ErrorCode::GdalError,
                                       "Failed to read label band: " + inputPath);
             }
-            for (size_t i = 0; i < readCount; ++i)
-                labels[i] = static_cast<int>(block[i]);
+            for (size_t i = 0; i < readCount; ++i) {
+                const float fv = block[i];
+                // NaN never converts to int (UB); a NaN NoData label acts as
+                // the non-voting 0 sentinel (#700).
+                labels[i] = std::isfinite(fv) ? static_cast<int>(fv) : 0;
+            }
         }
 
         // mode of the k*k window at (blockRow r, col c), matching
@@ -230,7 +246,9 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
                 for (int rr = r0; rr <= r1; ++rr) {
                     for (int cc = c0; cc <= c1; ++cc) {
                         const int v = pixelAt(rr, cc);
-                        if (v == 0)
+                        // Label 0 AND the declared NoData sentinel never vote
+                        // (#700).
+                        if (v == 0 || (excludeDeclared && v == declaredNoDataLabel))
                             continue;
                         bool found = false;
                         for (FreqEntry &e : freq) {
@@ -244,13 +262,16 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
                             freq.push_back({ v, 1 });
                     }
                 }
-                if (freq.empty()) {
-                    outRow[static_cast<size_t>(r) * width + c] = pixelAt(absR, c);
+                // A NoData CENTER stays NoData (#700): the filter must not
+                // grow classes into NoData areas, it only relabels valid
+                // centers — under either NoData convention (label 0 or the
+                // declared sentinel). Matches RsPostProcess::majorityFilter.
+                const int center = pixelAt(absR, c);
+                if (center == 0 || (excludeDeclared && center == declaredNoDataLabel)) {
+                    outRow[static_cast<size_t>(r) * width + c] = center;
                     continue;
                 }
-                int bestVal = pixelAt(absR, c);
-                if (bestVal == 0)
-                    bestVal = freq.front().val;
+                int bestVal = center;
                 int bestCnt = -1;
                 for (const FreqEntry &e : freq) {
                     if (e.count > bestCnt || (e.count == bestCnt && e.val < bestVal)) {

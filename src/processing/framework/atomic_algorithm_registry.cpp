@@ -33,17 +33,19 @@ void AtomicAlgorithmRegistry::initialize()
   // library has registered its provider — regardless of static-init ordering
   // between this library and the operators library. Called from
   // AlgorithmEngine::initialize() (app startup) and by tests via reset().
-  registerBuiltinRsOperators();
+  // Provider callbacks re-enter registerAdapter() (same mMutex): never hold
+  // the lock across them.
+  if ( sRsOperatorProvider )
+    sRsOperatorProvider( *this );
 }
 
 void AtomicAlgorithmRegistry::setRsOperatorProvider( std::function<void(AtomicAlgorithmRegistry&)> provider )
 {
+  // Only store the provider here: the callback re-enters registerAdapter()
+  // which takes mMutex, and some callers (initialize(), reset()) may be
+  // invoked with a lock already held on another thread or path. Populating
+  // is deferred to the next initialize()/reset()/findAdapter() miss.
   sRsOperatorProvider = std::move( provider );
-  // Populate after storing the provider. registerAdapter takes mMutex itself.
-  if ( sRsOperatorProvider )
-  {
-    sRsOperatorProvider( instance() );
-  }
 }
 
 void AtomicAlgorithmRegistry::reset()
@@ -53,11 +55,12 @@ void AtomicAlgorithmRegistry::reset()
     mAdapters.clear();
   }
 
-  // Provider callbacks re-enter via registerAdapter(); never hold mMutex across them.
+  // Provider callbacks re-enter registerAdapter() (same mMutex): never hold
+  // the lock across them — the comment above used to be at this call site
+  // while the lock was still held, deadlocking as soon as any test actually
+  // installed a provider (#707).
   if ( sRsOperatorProvider )
-  {
     sRsOperatorProvider( *this );
-  }
 }
 
 void AtomicAlgorithmRegistry::registerAdapter( AtomicAlgorithmAdapterPtr adapter )
@@ -85,9 +88,14 @@ AtomicAlgorithmAdapterPtr AtomicAlgorithmRegistry::findAdapter( const std::strin
   // Qt aborts the process - when they are first touched from a worker
   // thread, e.g. WorkflowRuntime::runStepViaExecutionPlane's preflight
   // estimate on a runner thread). Only consult the registry from the main
-  // thread; worker threads treat the algorithm as unlisted and callers fall
-  // back to their defaults.
-  if ( QCoreApplication::instance()
+  // thread AND when a full QgsApplication already exists — a bare
+  // QCoreApplication (test fixtures, headless runners) makes
+  // QCoreApplication::instance() non-null but lets processingRegistry()
+  // lazily construct ApplicationMembers, whose QSettings/QLibraryInfo
+  // initialization crashes without a fully-configured application (#697).
+  // Worker threads and headless processes treat the algorithm as unlisted
+  // and callers fall back to their defaults.
+  if ( QgsApplication::instance()
        && QThread::currentThread() == QCoreApplication::instance()->thread()
        && QgsApplication::processingRegistry() )
   {

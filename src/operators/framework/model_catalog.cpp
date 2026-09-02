@@ -484,6 +484,15 @@ Json::Value ModelCandidate::toJson() const
   return out;
 }
 
+/// Checksum cache entry: an artifact verified during an earlier load.
+struct ModelCatalog::VerifiedArtifact
+{
+  QString path;
+  unsigned long long sizeBytes = 0;
+  qint64 mtimeMs = 0;
+  QString checksumHex;
+};
+
 ModelCatalog &ModelCatalog::instance()
 {
   static ModelCatalog catalog;
@@ -527,15 +536,6 @@ std::string ModelCatalog::directory() const
   std::lock_guard<std::mutex> lock( catalogMutex() );
   return mDirectory.empty() ? defaultModelsDirectory() : mDirectory;
 }
-
-/// Checksum cache entry: an artifact verified during an earlier load.
-struct ModelCatalog::VerifiedArtifact
-{
-  QString path;
-  unsigned long long sizeBytes = 0;
-  qint64 mtimeMs = 0;
-  QString checksumHex;
-};
 
 bool ModelCatalog::verifyArtifactLocked( ModelInfo &info ) const
 {
