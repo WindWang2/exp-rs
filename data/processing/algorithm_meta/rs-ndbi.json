@@ -1,0 +1,13 @@
+{
+  "id" : "rs:ndbi",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "ndbi",
+    "urban",
+    "built-up"
+  ],
+  "task" : ""
+}

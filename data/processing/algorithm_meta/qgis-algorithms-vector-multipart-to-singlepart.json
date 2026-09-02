@@ -1,0 +1,12 @@
+{
+  "id" : "qgis_algorithms:vector_multipart_to_singlepart",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "multipart",
+    "singlepart",
+    "explode"
+  ],
+  "task" : ""
+}

@@ -1,0 +1,11 @@
+{
+  "id" : "rs:change_mad",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "change-detection",
+    "temporal"
+  ],
+  "task" : ""
+}

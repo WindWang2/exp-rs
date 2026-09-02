@@ -1,0 +1,13 @@
+{
+  "id" : "gdal_tools:gdalbuildvrt",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "gdalbuildvrt",
+    "virtual raster",
+    "vrt",
+    "gdal"
+  ],
+  "task" : ""
+}

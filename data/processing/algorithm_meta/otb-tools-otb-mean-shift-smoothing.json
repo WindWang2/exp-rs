@@ -1,0 +1,13 @@
+{
+  "id" : "otb_tools:otb_mean_shift_smoothing",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "mean shift",
+    "smoothing",
+    "filtering",
+    "otb"
+  ],
+  "task" : ""
+}

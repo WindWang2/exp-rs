@@ -1,0 +1,14 @@
+{
+  "id" : "gdal_tools:gdalwarp",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "gdalwarp",
+    "warp",
+    "reproject",
+    "clip",
+    "gdal"
+  ],
+  "task" : ""
+}

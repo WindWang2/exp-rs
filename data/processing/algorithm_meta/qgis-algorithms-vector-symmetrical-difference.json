@@ -1,0 +1,13 @@
+{
+  "id" : "qgis_algorithms:vector_symmetrical_difference",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "symmetrical",
+    "difference",
+    "xor",
+    "overlay"
+  ],
+  "task" : ""
+}

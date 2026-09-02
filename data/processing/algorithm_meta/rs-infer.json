@@ -1,15 +1,15 @@
 {
-  "id": "rs:infer",
-  "task": "inference",
-  "input": "raster",
-  "output": "raster",
-  "notes": "ONNX inference via the model runtime (cv::dnn provider, cached sessions). Accepts a model path or a ModelCatalog name (spatial:list_models); catalog models must be ready (artifact present, checksum verified). Bounded tiled execution with manifest v2 preprocessing/postprocessing contracts; memory policy Streaming.",
-  "tags": [
+  "gpu" : true,
+  "id" : "rs:infer",
+  "input" : "raster",
+  "notes" : "ONNX inference via the model runtime (cv::dnn provider, cached sessions). Accepts a model path or a ModelCatalog name (spatial:list_models); catalog models must be ready (artifact present, checksum verified). Bounded tiled execution with manifest v2 preprocessing/postprocessing contracts; memory policy Streaming.",
+  "output" : "raster",
+  "tags" : 
+  [
     "inference",
     "onnx",
-    "deep-learning",
-    "model",
-    "tiled"
+    "edge-ai",
+    "deep-learning"
   ],
-  "gpu": true
+  "task" : "inference"
 }

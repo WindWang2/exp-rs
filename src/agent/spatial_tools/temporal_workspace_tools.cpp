@@ -1,7 +1,10 @@
 // src/agent/spatial_tools/temporal_workspace_tools.cpp
 #include "temporal_workspace_tools.h"
 
+#include "data/data_manager.h"
+#include "data/temporal_workspace_types.h"
 #include "processing/algorithms/temporal/temporal_collection.h"
+#include "processing/algorithms/temporal/temporal_stac_adapter.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 
 #include <QFile>

@@ -534,14 +534,16 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
 
   if ( m_dataManager )
   {
+    // #704: batch imports emit one signal per asset; coalesce to a single
+    // trailing rebuild instead of N full tree rebuilds on the GUI thread.
     connect( m_dataManager, &sicnu::data::DataManager::assetAdded, this,
-             &DataManagerPanel::refresh );
+             &DataManagerPanel::scheduleCoalescedRefresh );
     connect( m_dataManager, &sicnu::data::DataManager::assetChanged, this,
-             &DataManagerPanel::refresh );
+             &DataManagerPanel::scheduleCoalescedRefresh );
     connect( m_dataManager, &sicnu::data::DataManager::assetRemoved, this,
-             &DataManagerPanel::refresh );
+             &DataManagerPanel::scheduleCoalescedRefresh );
     connect( m_dataManager, &sicnu::data::DataManager::collectionAdded, this,
-             &DataManagerPanel::refresh );
+             &DataManagerPanel::scheduleCoalescedRefresh );
     connect( m_dataManager, &sicnu::data::DataManager::collectionRemoved, this,
              &DataManagerPanel::scheduleCoalescedRefresh );
     connect( m_dataManager, &sicnu::data::DataManager::temporalCollectionAdded, this,
@@ -830,8 +832,7 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
       QAction *chosen = menu.exec( m_tree->viewport()->mapToGlobal( pos ) );
       if ( chosen == describeAction )
       {
-        QString summary = tr( "名称：%1
-修订：%2" ).arg( record->displayName )
+        QString summary = tr( "名称：%1\n修订：%2" ).arg( record->displayName )
                             .arg( record->revision );
         sicnu::temporal::TemporalCollection parsed;
         QString parseError;
@@ -846,21 +847,17 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
             if ( !scene.platform.isEmpty() && !platforms.contains( scene.platform ) )
               platforms.append( scene.platform );
           }
-          summary += QLatin1Char( '
-' ) + tr( "场景数：%1（已绑定资产 %2）" )
+          summary += QLatin1Char( '\n' ) + tr( "场景数：%1（已绑定资产 %2）" )
                        .arg( parsed.sceneCount() ).arg( bound );
           if ( !parsed.timeRangeStartIso().isEmpty() )
-            summary += QLatin1Char( '
-' ) + tr( "时间范围：%1 … %2" )
+            summary += QLatin1Char( '\n' ) + tr( "时间范围：%1 … %2" )
                          .arg( parsed.timeRangeStartIso(), parsed.timeRangeEndIso() );
           if ( !platforms.isEmpty() )
-            summary += QLatin1Char( '
-' ) + tr( "平台：%1" ).arg( platforms.join( ", " ) );
+            summary += QLatin1Char( '\n' ) + tr( "平台：%1" ).arg( platforms.join( ", " ) );
         }
         else
         {
-          summary += QLatin1Char( '
-' ) + tr( "描述符无效：%1" ).arg( parseError );
+          summary += QLatin1Char( '\n' ) + tr( "描述符无效：%1" ).arg( parseError );
         }
         QMessageBox::information( this, tr( "时间相集合" ), summary );
       }

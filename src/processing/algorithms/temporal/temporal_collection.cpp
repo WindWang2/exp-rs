@@ -146,7 +146,12 @@ TemporalSceneRef TemporalSceneRef::fromJson( const Json::Value &v, QString *erro
       return s;
     }
     s.time = parseAcquisitionTime( QString::fromStdString( v["time"].asString() ) );
-    s.timeSource = QStringLiteral( "descriptor" );
+    // Preserve a serialized time_source ("metadata"/"explicit"/...): the
+    // descriptor round-trip must be byte-stable or record-vs-file descriptor
+    // comparison (fingerprint identity, project reopen) breaks. "descriptor"
+    // is only the default for documents that did not carry the provenance.
+    if ( s.timeSource.isEmpty() )
+      s.timeSource = QStringLiteral( "descriptor" );
   }
   if ( v.isMember( "bands" ) )
   {

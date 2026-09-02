@@ -1,0 +1,12 @@
+{
+  "id" : "rs:mndwi",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "mndwi",
+    "water"
+  ],
+  "task" : ""
+}

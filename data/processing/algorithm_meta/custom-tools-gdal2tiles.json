@@ -1,0 +1,13 @@
+{
+  "id" : "custom_tools:gdal2tiles",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "gdal",
+    "tiles",
+    "web",
+    "custom"
+  ],
+  "task" : ""
+}

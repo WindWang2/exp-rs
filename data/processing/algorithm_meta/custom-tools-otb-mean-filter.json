@@ -1,0 +1,14 @@
+{
+  "id" : "custom_tools:otb_mean_filter",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "otb",
+    "filter",
+    "mean",
+    "smoothing",
+    "custom"
+  ],
+  "task" : ""
+}

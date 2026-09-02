@@ -1,0 +1,14 @@
+{
+  "id" : "gdal_tools:gdaltransform",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "gdaltransform",
+    "transform",
+    "coordinates",
+    "crs",
+    "gdal"
+  ],
+  "task" : ""
+}

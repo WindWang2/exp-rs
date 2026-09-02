@@ -1,0 +1,12 @@
+{
+  "id" : "qgis_algorithms:vector_clip",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "clip",
+    "cut",
+    "trim"
+  ],
+  "task" : ""
+}

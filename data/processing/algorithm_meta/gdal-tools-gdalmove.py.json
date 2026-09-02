@@ -1,0 +1,12 @@
+{
+  "id" : "gdal_tools:gdalmove.py",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "gdal",
+    "discovered",
+    "gdalmove.py"
+  ],
+  "task" : ""
+}

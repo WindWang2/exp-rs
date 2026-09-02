@@ -1,0 +1,14 @@
+{
+  "id" : "qgis_algorithms:rs_band_math",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "band",
+    "math",
+    "expression",
+    "raster",
+    "remote sensing"
+  ],
+  "task" : ""
+}

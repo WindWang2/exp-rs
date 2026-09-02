@@ -323,6 +323,15 @@ data::Result<void> ProjectContext::clearProject(QgsProject &project) {
       return data::Result<void>::failure(removed.diagnostics());
   }
 
+  // Temporal workspace records live in the project document too: drop them so
+  // a project re-read RESTORES the records instead of colliding with the
+  // in-memory copies (restoreTemporalCollection rejects a duplicate id, which
+  // would fail the whole read).
+  const QVector<data::TemporalCollectionRecord> temporalRecords =
+      m_dataManager.temporalCollections();
+  for (const data::TemporalCollectionRecord &record : temporalRecords)
+    m_dataManager.removeTemporalCollection(record.id);
+
   project.clear();
   return data::Result<void>::success();
 }

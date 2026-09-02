@@ -1,0 +1,12 @@
+{
+  "id" : "rs:endmember_extraction",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "endmember",
+    "hyperspectral",
+    "ppi"
+  ],
+  "task" : ""
+}

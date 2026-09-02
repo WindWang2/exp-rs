@@ -1,0 +1,13 @@
+{
+  "id" : "gdal:clip",
+  "input" : "vector",
+  "output" : "raster",
+  "tags" : 
+  [
+    "clip",
+    "cutline",
+    "extent",
+    "geometry"
+  ],
+  "task" : ""
+}

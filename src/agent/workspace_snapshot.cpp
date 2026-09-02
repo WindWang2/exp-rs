@@ -174,7 +174,7 @@ WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager,
       info.id = record.id.toString();
       info.name = record.displayName;
       info.revision = static_cast<int>( record.revision );
-      TemporalCollection parsed;
+      sicnu::temporal::TemporalCollection parsed;
       QString parseError;
       if ( sicnu::temporal::collectionFromDescriptorText( record.descriptor, &parsed, &parseError ) )
       {
@@ -327,8 +327,7 @@ QString WorkspaceSnapshot::toSystemPromptHeader() const
   {
     prompt += QStringLiteral( "Temporal Collections (workspace records — address by id via "
                               "temporal:get_collection / temporal:* tools; run rs:temporal_* "
-                              "operators with collection=<id>):
-" );
+                              "operators with collection=<id>):\n" );
     for ( const auto &collection : temporalCollections )
     {
       prompt += QString( "  - '%1' [%2] revision %3: %4 scene(s), %5 bound" )
@@ -340,8 +339,7 @@ QString WorkspaceSnapshot::toSystemPromptHeader() const
         prompt += QString( ", %1 … %2" ).arg( collection.timeStart, collection.timeEnd );
       if ( !collection.platforms.isEmpty() )
         prompt += QString( ", platform: %1" ).arg( collection.platforms.join( "/" ) );
-      prompt += QLatin1Char( '
-' );
+      prompt += QLatin1Char( '\n' );
     }
   }
 

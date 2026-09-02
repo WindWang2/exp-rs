@@ -1,0 +1,12 @@
+{
+  "id" : "rs:radiometric_calibration",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "radiometric",
+    "calibration",
+    "preprocessing"
+  ],
+  "task" : ""
+}

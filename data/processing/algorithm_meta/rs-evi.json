@@ -1,0 +1,12 @@
+{
+  "id" : "rs:evi",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "evi",
+    "vegetation"
+  ],
+  "task" : ""
+}

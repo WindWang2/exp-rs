@@ -51,7 +51,7 @@ namespace {
 
 void writeTwoBandRaster( const QString &path, int W, int H )
 {
-    sicnu::ensureGdalInit();
+    ::ensureGdalInit();
     GDALDriver *drv = GetGDALDriverManager()->GetDriverByName( "GTiff" );
     REQUIRE( drv != nullptr );
     GDALDataset *ds = drv->Create( path.toUtf8().constData(), W, H, 2, GDT_Float32, nullptr );
@@ -207,7 +207,7 @@ std::map<std::string, sicnu::AlgorithmTaskInfo> runPipelineAndWait(
         const auto it = info.stepToTaskId.find( stepId );
         if ( it == info.stepToTaskId.end() )
             continue;
-        tasks[stepId.toStdString()] = center.getTaskInfo( it.value() );
+        tasks[stepId] = center.getTaskInfo( it.value() );
     }
     return tasks;
 }
@@ -226,8 +226,11 @@ TEST_CASE( "Identical pipeline resubmission is served from the execution cache (
     CacheE2eFixture fx;
     const auto def = twoStepPipeline( fx.inputPath, fx.aPath, fx.bPath, /*kernel=*/3 );
 
-    // First submission: everything executes, both outputs land, and the
-    // completion path stores the outputs as cached artifacts.
+    // First submission: everything executes for real. A's input is a
+    // registered asset, so A stores a cached artifact at completion; B's
+    // input ($a.output) is a plain unregistered file in THIS run, so B is
+    // conservatively uncacheable — exactly the designed verdict (a step whose
+    // input cannot be revision-identified must never claim a hit).
     auto first = runPipelineAndWait( def );
     REQUIRE( first.size() == 2 );
     REQUIRE( first["a"].status == sicnu::TaskStatus::Completed );
@@ -236,22 +239,32 @@ TEST_CASE( "Identical pipeline resubmission is served from the execution cache (
     REQUIRE( QFile::exists( fx.bPath ) );
     REQUIRE( !servedFromCache( first["a"] ) );
     REQUIRE( !servedFromCache( first["b"] ) );
-    REQUIRE( sicnu::data::ExecutionResultCache::instance().pathSize() >= 2 );
+    REQUIRE( sicnu::data::ExecutionResultCache::instance().pathSize() >= 1 );
 
-    // The CLI registers step outputs after a run (registerStepOutputs); a
-    // resubmission then resolves B's input against the catalog too.
+    // The CLI registers step outputs after a run (registerStepOutputs); the
+    // next resubmission can now resolve B's input against the catalog too.
     REQUIRE( !registerRaster( fx.dataManager, fx.aPath ).isNull() );
     REQUIRE( !registerRaster( fx.dataManager, fx.bPath ).isNull() );
 
-    // Identical resubmission: both steps are cache hits — no operator runs.
+    // Second submission: A is served from cache; B executes once more (its
+    // first cacheable identity) and stores its output.
     auto second = runPipelineAndWait( def );
     REQUIRE( second.size() == 2 );
     REQUIRE( second["a"].status == sicnu::TaskStatus::Completed );
     REQUIRE( second["b"].status == sicnu::TaskStatus::Completed );
-    INFO( "step a served from cache: " << servedFromCache( second["a"] ) );
-    INFO( "step b served from cache: " << servedFromCache( second["b"] ) );
     REQUIRE( servedFromCache( second["a"] ) );
-    REQUIRE( servedFromCache( second["b"] ) );
+    REQUIRE( !servedFromCache( second["b"] ) );
+
+    // Third, identical submission: both steps are cache hits — no operator
+    // runs at all.
+    auto third = runPipelineAndWait( def );
+    REQUIRE( third.size() == 2 );
+    REQUIRE( third["a"].status == sicnu::TaskStatus::Completed );
+    REQUIRE( third["b"].status == sicnu::TaskStatus::Completed );
+    INFO( "step a served from cache: " << servedFromCache( third["a"] ) );
+    INFO( "step b served from cache: " << servedFromCache( third["b"] ) );
+    REQUIRE( servedFromCache( third["a"] ) );
+    REQUIRE( servedFromCache( third["b"] ) );
     REQUIRE( QFile::exists( fx.aPath ) );
     REQUIRE( QFile::exists( fx.bPath ) );
 }
@@ -386,20 +399,43 @@ TEST_CASE( "CLI process crash mid-pipeline recovers and resumes without re-runni
     crashed.setProcessEnvironment( cliEnv() );
     crashed.start( cliBinary, { QStringLiteral( "--pipeline" ), pipelinePath } );
     REQUIRE( crashed.waitForStarted( 10000 ) );
-    bool aAppeared = false;
+    // Kill only once step A's completion is CHECKPOINTED (not merely when its
+    // output file appears): the fold+persist of the completion transition
+    // lands milliseconds after the file write, and a kill inside that window
+    // legitimately leaves A non-completed — resume would then re-run A. The
+    // E2E asserts the stronger contract: a checkpointed-completed step never
+    // re-executes.
+    const QString checkpointDirEarly = homeDir.filePath( ".rs_studio/checkpoints" );
+    bool aCheckpointed = false;
     const auto killDeadline =
         std::chrono::steady_clock::now() + std::chrono::seconds( SICNU_TEST_TIME_LIMIT_S );
     while ( std::chrono::steady_clock::now() < killDeadline )
     {
-        if ( QFileInfo::exists( aPath ) && !QFileInfo::exists( bPath ) )
+        if ( QFileInfo::exists( aPath ) )
         {
-            aAppeared = true;
-            break;
+            const QStringList files = QDir( checkpointDirEarly )
+                .entryList( { QStringLiteral( "checkpoint_*.json" ) } );
+            for ( const QString &file : files )
+            {
+                QFile f( QDir( checkpointDirEarly ).filePath( file ) );
+                if ( !f.open( QIODevice::ReadOnly ) )
+                    continue;
+                const QByteArray text = f.readAll();
+                // StepPlan::toJson: {"stepId": "a", ..., "status": "Completed"}
+                if ( text.contains( "\"stepId\" : \"a\"" )
+                     && text.contains( "\"status\" : \"Completed\"" ) )
+                {
+                    aCheckpointed = true;
+                    break;
+                }
+            }
         }
+        if ( aCheckpointed )
+            break;
         REQUIRE( crashed.state() == QProcess::Running );
         std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
     }
-    REQUIRE( aAppeared );
+    REQUIRE( aCheckpointed );
     crashed.kill();
     REQUIRE( crashed.waitForFinished( 10000 ) );
     REQUIRE( crashed.exitStatus() == QProcess::CrashExit );
@@ -416,14 +452,14 @@ TEST_CASE( "CLI process crash mid-pipeline recovers and resumes without re-runni
     const QString listing = QString::fromUtf8( lister.readAllStandardOutput() );
     CAPTURE( listing.toStdString() );
     REQUIRE( lister.exitCode() == 0 );
-    REQUIRE( listing.contains( QStringLiteral( "interrupted" ) ) );
+    REQUIRE( listing.contains( QStringLiteral( "interrupted" ), Qt::CaseInsensitive ) );
 
     // Extract the run id from the listing (first token of its line).
     QString runId;
     for ( const QString &line : listing.split( '\n' ) )
     {
         const QString trimmed = line.trimmed();
-        if ( trimmed.contains( QStringLiteral( "state=interrupted" ) ) )
+        if ( trimmed.toLower().contains( QStringLiteral( "state=interrupted" ) ) )
         {
             runId = trimmed.section( ' ', 0, 0 );
             break;

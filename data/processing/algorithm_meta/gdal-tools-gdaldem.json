@@ -1,0 +1,15 @@
+{
+  "id" : "gdal_tools:gdaldem",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "gdaldem",
+    "terrain",
+    "hillshade",
+    "slope",
+    "aspect",
+    "gdal"
+  ],
+  "task" : ""
+}

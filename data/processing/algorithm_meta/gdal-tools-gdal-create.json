@@ -1,0 +1,12 @@
+{
+  "id" : "gdal_tools:gdal_create",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "gdal",
+    "discovered",
+    "gdal_create"
+  ],
+  "task" : ""
+}

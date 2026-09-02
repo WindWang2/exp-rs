@@ -1,0 +1,13 @@
+{
+  "id" : "otb_tools:otb_ortho_rectification",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "ortho",
+    "rectification",
+    "geometry",
+    "otb"
+  ],
+  "task" : ""
+}

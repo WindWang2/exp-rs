@@ -10,7 +10,7 @@
 #include <qgslayoutitemlegend.h>
 #include <qgslayoutitemmap.h>
 #include <qgslayoutitemscalebar.h>
-#include <qgspagescollection.h>
+#include <qgslayoutpagecollection.h>
 #include <qgslayoutitempage.h>
 #include <qgsprintlayout.h>
 #include <qgsmaplayer.h>
@@ -892,7 +892,7 @@ class LayoutPreflightTool final : public SpatialTool
       };
       const auto itemId = []( const QgsLayoutItem *item ) {
         const QString id = item->id();
-        return id.isEmpty() ? QStringLiteral( "<unnamed %1>" ).arg( item->stringType() ) : id;
+        return id.isEmpty() ? QStringLiteral( "<unnamed type %1>" ).arg( item->type() ) : id;
       };
 
       // Inventory by item type.
@@ -901,7 +901,11 @@ class LayoutPreflightTool final : public SpatialTool
       QList<QgsLayoutItemMap *> maps;
       QList<QgsLayoutItemScaleBar *> scaleBars;
       QList<QgsLayoutItem *> pictures;
-      const QList<QgsLayoutItem *> items = layout->items();
+      QList<QgsLayoutItem *> items;
+      const QList<QGraphicsItem *> sceneItems = layout->items();
+      for ( QGraphicsItem *sceneItem : sceneItems )
+        if ( auto *cast = dynamic_cast<QgsLayoutItem *>( sceneItem ) )
+          items.append( cast );
       for ( QgsLayoutItem *item : items )
       {
         if ( auto *label = dynamic_cast<QgsLayoutItemLabel *>( item ) )
@@ -919,10 +923,7 @@ class LayoutPreflightTool final : public SpatialTool
       for ( QgsLayoutItem *item : items )
       {
         const QString id = item->id().toLower();
-        const QString strType = item->stringType().toLower();
-        if ( id.contains( QStringLiteral( "north" ) ) || strType.contains( QStringLiteral( "arrow" ) )
-             || ( item->type() == QgsLayoutItemRegistry::LayoutPicture
-                  && id.contains( QStringLiteral( "north" ) ) ) )
+        if ( id.contains( QStringLiteral( "north" ) ) || id.contains( QStringLiteral( "arrow" ) ) )
           northCandidates.append( item );
       }
 
@@ -971,7 +972,7 @@ class LayoutPreflightTool final : public SpatialTool
         if ( legends.size() > maps.size() )
           addIssue( "legend_map_mismatch", "warning", QString(),
                     "More legends (" + std::to_string( legends.size() ) + ") than maps ("
-                      + std::to_string( maps.size() ) + ")." ) );
+                      + std::to_string( maps.size() ) + ")." );
       }
 
       // --- Source note ----------------------------------------------------

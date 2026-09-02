@@ -40,7 +40,7 @@ char *appArgv[] = {appArgv0, nullptr};
 void ensureApp()
 {
     if ( !QCoreApplication::instance() )
-        new QCoreApplication( appArgc, appArgv );
+        new QCoreApplication( appArgc(), appArgv );
 }
 
 /// A 2x2 Float32 scene with an acquisition date + a red band role, on a
@@ -436,7 +436,7 @@ TEST_CASE( "STAC item parsing: asset selection, cloud metadata, platform",
     CHECK( item.id == "item-03" );
     CHECK( item.datetime == QStringLiteral( "2024-03-15T10:20:30Z" ) );
     CHECK( item.platform == QStringLiteral( "Sentinel-2A" ) );
-    CHECK( item.cloudCover == CatchApprox( 12.5 ) );
+    CHECK( item.cloudCover == Catch::Approx( 12.5 ) );
     // The TIFF asset wins over the JPEG thumbnail (type-based pass).
     CHECK( item.rasterHref == QStringLiteral( "https://example.com/s2/item-03_B03.tif" ) );
     CHECK( item.rasterAssetKey == QStringLiteral( "green" ) );

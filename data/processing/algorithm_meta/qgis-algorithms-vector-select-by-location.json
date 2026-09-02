@@ -1,0 +1,13 @@
+{
+  "id" : "qgis_algorithms:vector_select_by_location",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "select",
+    "location",
+    "spatial",
+    "filter"
+  ],
+  "task" : ""
+}

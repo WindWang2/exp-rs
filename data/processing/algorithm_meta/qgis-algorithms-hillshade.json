@@ -1,0 +1,13 @@
+{
+  "id" : "qgis_algorithms:hillshade",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "hillshade",
+    "terrain",
+    "dem",
+    "shading"
+  ],
+  "task" : ""
+}

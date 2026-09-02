@@ -1,0 +1,14 @@
+{
+  "id" : "custom_tools:otb_disparity_to_dem",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "otb",
+    "stereo",
+    "dem",
+    "elevation",
+    "custom"
+  ],
+  "task" : ""
+}

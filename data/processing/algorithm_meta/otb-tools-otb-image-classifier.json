@@ -1,0 +1,13 @@
+{
+  "id" : "otb_tools:otb_image_classifier",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "classification",
+    "classifier",
+    "machine learning",
+    "otb"
+  ],
+  "task" : ""
+}

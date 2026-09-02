@@ -1,0 +1,15 @@
+{
+  "id" : "otb_tools:otb_segmentation",
+  "input" : "raster",
+  "output" : "vector",
+  "tags" : 
+  [
+    "segmentation",
+    "classification",
+    "image",
+    "otb",
+    "meanshift",
+    "obia"
+  ],
+  "task" : ""
+}

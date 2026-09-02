@@ -1,0 +1,14 @@
+{
+  "id" : "otb_tools:otb_lsms",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "lsms",
+    "segmentation",
+    "smoothing",
+    "filtering",
+    "otb"
+  ],
+  "task" : ""
+}

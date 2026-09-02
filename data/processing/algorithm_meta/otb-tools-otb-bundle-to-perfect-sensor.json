@@ -1,0 +1,14 @@
+{
+  "id" : "otb_tools:otb_bundle_to_perfect_sensor",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "bundle",
+    "sensor",
+    "pan-sharpening",
+    "geometry",
+    "otb"
+  ],
+  "task" : ""
+}

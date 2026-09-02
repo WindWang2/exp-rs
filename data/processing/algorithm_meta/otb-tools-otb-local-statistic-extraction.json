@@ -1,0 +1,14 @@
+{
+  "id" : "otb_tools:otb_local_statistic_extraction",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "statistics",
+    "local",
+    "feature",
+    "extraction",
+    "otb"
+  ],
+  "task" : ""
+}

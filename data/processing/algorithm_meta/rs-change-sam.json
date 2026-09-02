@@ -1,0 +1,12 @@
+{
+  "id" : "rs:change_sam",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "change-detection",
+    "sam",
+    "spectral-angle"
+  ],
+  "task" : ""
+}

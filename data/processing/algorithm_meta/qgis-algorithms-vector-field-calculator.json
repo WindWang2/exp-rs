@@ -1,0 +1,14 @@
+{
+  "id" : "qgis_algorithms:vector_field_calculator",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "field",
+    "calculator",
+    "expression",
+    "attribute",
+    "column"
+  ],
+  "task" : ""
+}

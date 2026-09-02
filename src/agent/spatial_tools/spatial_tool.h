@@ -9,6 +9,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <QString>
+
 namespace sicnu::agent::spatial_tools {
 
 /**
@@ -112,7 +114,6 @@ inline QString requireStringField( const Json::Value &input, const char *key, st
   }
   return QString::fromStdString( input[key].asString() );
 }
-};
 
 using SpatialToolPtr = std::shared_ptr<SpatialTool>;
 

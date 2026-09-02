@@ -1,0 +1,12 @@
+{
+  "id" : "gdal_tools:ogrmerge",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "gdal",
+    "discovered",
+    "ogrmerge"
+  ],
+  "task" : ""
+}

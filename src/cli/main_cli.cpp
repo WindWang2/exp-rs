@@ -203,10 +203,25 @@ int main(int argc, char *argv[])
                 entry.gpu = desc.agentMetadata.gpuAccelerated;
                 entry.gpuDeclared = true;
             }
-            if (entry.input.empty() && !desc.inputs.empty())
-                entry.input = sicnu::processing::dataTypeToString(desc.inputs.front().type);
-            if (entry.output.empty() && !desc.outputs.empty())
-                entry.output = sicnu::processing::dataTypeToString(desc.outputs.front().type);
+            // Primary input/output contract: the first RASTER/VECTOR port
+            // (schema property order puts scalars like band numbers first —
+            // dataTypeToString of those would claim "Integer" as the data
+            // contract). Empty when no data port exists.
+            const auto primaryDataKind = []( const std::vector<sicnu::processing::PortDescriptor> &ports ) {
+                for ( const auto &port : ports )
+                {
+                    const std::string kind = sicnu::processing::dataTypeToString( port.type );
+                    if ( kind == "Raster" )
+                        return std::string( "raster" );
+                    if ( kind == "Vector" )
+                        return std::string( "vector" );
+                }
+                return std::string();
+            };
+            if ( entry.input.empty() )
+                entry.input = primaryDataKind( desc.inputs );
+            if ( entry.output.empty() )
+                entry.output = primaryDataKind( desc.outputs );
             // Only ship files that carry at least one catalog-worthy fact:
             // id + defaults alone would be noise for every thin adapter.
             const bool hasContent = !entry.task.empty() || !entry.notes.empty()
@@ -214,8 +229,13 @@ int main(int argc, char *argv[])
                                     || entry.accuracy >= 0.0;
             if (!hasContent)
                 continue;
+            // Naming contract from ADR 0122: ':' AND '_' both map to '-'
+            // (rs:spectral_index -> rs-spectral-index), matching the
+            // hand-authored files this generator replaces.
             const QString fileName =
-                QString::fromStdString(desc.id).replace(QLatin1Char(':'), QLatin1Char('-'))
+                QString::fromStdString(desc.id)
+                    .replace(QLatin1Char(':'), QLatin1Char('-'))
+                    .replace(QLatin1Char('_'), QLatin1Char('-'))
                 + QStringLiteral(".json");
             QFile f(QDir(outDir).filePath(fileName));
             if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {

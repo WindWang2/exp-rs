@@ -1,0 +1,14 @@
+{
+  "id" : "otb_tools:otb_pixel_info",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "pixel",
+    "info",
+    "value",
+    "utilities",
+    "otb"
+  ],
+  "task" : ""
+}

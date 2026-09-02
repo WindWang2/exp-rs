@@ -1613,14 +1613,6 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] Task failed: %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), error ) );
-        // The root's own engine job must be cancelled too (#702, restored for
-        // #720): keep the terminal markTask* paths symmetric so an
-        // externally-driven failure kills the still-running engine job instead
-        // of orphaning it. When the failure came from the job's own terminal
-        // record (the listener path), engine cancel is a harmless no-op.
-        const std::string rootJobId = m_tasks[taskId].jobId;
-        if ( !rootJobId.empty() )
-            jobCancelTargets.emplace_back( rootJobId, taskId );
         if ( !rootJobId.empty() )
             m_taskByJobId.remove( rootJobId );
         updatePipelineForTaskLocked( taskId );

@@ -1,0 +1,13 @@
+{
+  "id" : "rs:atmospheric_dos2",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "atmospheric",
+    "dos",
+    "dos2",
+    "surface-reflectance"
+  ],
+  "task" : ""
+}

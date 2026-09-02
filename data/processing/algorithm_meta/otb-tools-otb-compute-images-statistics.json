@@ -1,0 +1,14 @@
+{
+  "id" : "otb_tools:otb_compute_images_statistics",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "statistics",
+    "mean",
+    "variance",
+    "radiometry",
+    "otb"
+  ],
+  "task" : ""
+}

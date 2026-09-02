@@ -4341,6 +4341,7 @@ target_link_libraries(test_data_manager_panel PRIVATE
   Qt6::Test
   qgis_core
   qgis_gui
+  sicnu_processing
   Sicnu::qgis_display
 )
 target_include_directories(test_data_manager_panel PRIVATE

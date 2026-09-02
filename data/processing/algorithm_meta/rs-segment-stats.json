@@ -1,0 +1,12 @@
+{
+  "id" : "rs:segment_stats",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "obia",
+    "statistics",
+    "csv"
+  ],
+  "task" : ""
+}

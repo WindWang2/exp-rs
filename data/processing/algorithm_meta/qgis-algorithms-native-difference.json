@@ -1,0 +1,12 @@
+{
+  "id" : "qgis_algorithms:native_difference",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "difference",
+    "erase",
+    "subtract"
+  ],
+  "task" : ""
+}

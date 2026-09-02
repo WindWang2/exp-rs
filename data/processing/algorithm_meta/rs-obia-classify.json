@@ -1,0 +1,12 @@
+{
+  "id" : "rs:obia_classify",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "obia",
+    "object-based",
+    "classification"
+  ],
+  "task" : ""
+}

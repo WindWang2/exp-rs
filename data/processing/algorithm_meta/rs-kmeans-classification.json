@@ -1,0 +1,12 @@
+{
+  "id" : "rs:kmeans_classification",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "kmeans",
+    "unsupervised",
+    "classification"
+  ],
+  "task" : ""
+}

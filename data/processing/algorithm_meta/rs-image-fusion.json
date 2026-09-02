@@ -1,0 +1,12 @@
+{
+  "id" : "rs:image_fusion",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "fusion",
+    "pan-sharpening",
+    "enhancement"
+  ],
+  "task" : ""
+}

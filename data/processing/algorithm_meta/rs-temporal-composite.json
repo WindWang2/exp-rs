@@ -1,0 +1,12 @@
+{
+  "id" : "rs:temporal_composite",
+  "input" : "",
+  "output" : "raster",
+  "tags" : 
+  [
+    "temporal",
+    "composite",
+    "best-pixel"
+  ],
+  "task" : ""
+}

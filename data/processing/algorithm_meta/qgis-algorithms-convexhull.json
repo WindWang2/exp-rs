@@ -1,0 +1,12 @@
+{
+  "id" : "qgis_algorithms:convexhull",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "convex",
+    "hull",
+    "envelope"
+  ],
+  "task" : ""
+}

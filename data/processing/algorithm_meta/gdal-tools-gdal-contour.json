@@ -1,0 +1,13 @@
+{
+  "id" : "gdal_tools:gdal_contour",
+  "input" : "raster",
+  "output" : "vector",
+  "tags" : 
+  [
+    "gdal_contour",
+    "contour",
+    "raster to vector",
+    "gdal"
+  ],
+  "task" : ""
+}

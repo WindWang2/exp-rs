@@ -1,0 +1,12 @@
+{
+  "id" : "qgis_algorithms:native_union",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "union",
+    "merge",
+    "combine"
+  ],
+  "task" : ""
+}

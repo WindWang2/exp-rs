@@ -1,9 +1,22 @@
 {
-  "id": "rs:spectral_index",
-  "task": "index-computation",
-  "input": "raster",
-  "output": "raster",
-  "gpu": false,
-  "notes": "Role-resolved spectral indices (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI). NIR/Red resolve by SICNU_BAND_ROLE when present, otherwise explicit band numbers. First analysis step after preprocessing in most workflows.",
-  "tags": ["ndvi", "spectral", "index", "vegetation", "water"]
+  "gpu" : false,
+  "id" : "rs:spectral_index",
+  "input" : "raster",
+  "notes" : "Role-resolved spectral indices (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI). NIR/Red resolve by SICNU_BAND_ROLE when present, otherwise explicit band numbers. First analysis step after preprocessing in most workflows.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "ndvi",
+    "evi",
+    "nbr",
+    "dnbr",
+    "bsi",
+    "ndre",
+    "ci",
+    "ndsi",
+    "ndti",
+    "vegetation"
+  ],
+  "task" : "index-computation"
 }

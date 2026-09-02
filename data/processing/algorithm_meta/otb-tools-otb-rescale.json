@@ -1,0 +1,14 @@
+{
+  "id" : "otb_tools:otb_rescale",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "rescale",
+    "normalize",
+    "stretch",
+    "utilities",
+    "otb"
+  ],
+  "task" : ""
+}

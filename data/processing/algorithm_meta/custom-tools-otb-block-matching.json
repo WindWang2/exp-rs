@@ -1,0 +1,14 @@
+{
+  "id" : "custom_tools:otb_block_matching",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "otb",
+    "stereo",
+    "disparity",
+    "block matching",
+    "custom"
+  ],
+  "task" : ""
+}
