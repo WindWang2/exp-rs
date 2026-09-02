@@ -34,6 +34,7 @@
 #include <QSet>
 
 #include <algorithm>
+#include <exception>
 #include <functional>
 
 using namespace std::string_literals;
@@ -593,12 +594,46 @@ bool LayoutService::applyItemProperties( QgsLayoutItem *item, const Json::Value 
     return false;
   }
 
+  QgsLayoutUndoStack *undoStack = item->layout()->undoStack();
+
+  // Begin a macro so one agent property edit = one undo step. jsoncpp is
+  // compiled with exceptions and only the top-level `properties` object is
+  // validated upstream, so one wrong-typed value (e.g. {"x": "42.5"}) makes a
+  // mutator below throw Json::LogicError. The values are applied inside a
+  // try block: an exception escaping between beginMacro()/endMacro() would
+  // leave the undo stack inside this open macro for the layout's lifetime,
+  // silently swallowing every later GUI/agent edit.
+  undoStack->beginMacro( QStringLiteral( "Set Item Properties" ) );
+
+  bool ok = false;
+  try
+  {
+    ok = applyItemPropertiesValues( item, props, applied, ignored );
+  }
+  catch ( const std::exception &e )
+  {
+    // A mutator that throws between its beginCommand()/endCommand() pair
+    // (e.g. "name") leaves an open command — discard it so the next
+    // endCommand() cannot pair the wrong before/after states, then let the
+    // endMacro() below close the macro cleanly.
+    undoStack->cancelCommand();
+    if ( error )
+      *error = QStringLiteral( "Invalid property value: %1" ).arg( QString::fromUtf8( e.what() ) );
+  }
+
+  undoStack->endMacro();
+
+  if ( ok )
+    item->update();
+  return ok;
+}
+
+bool LayoutService::applyItemPropertiesValues( QgsLayoutItem *item, const Json::Value &props,
+                                               QStringList *applied, QStringList *ignored )
+{
   QgsLayout *layout = item->layout();
   QgsLayoutUndoStack *undoStack = layout->undoStack();
   const auto members = props.getMemberNames();
-
-  // Begin a macro so one agent property edit = one undo step.
-  undoStack->beginMacro( QStringLiteral( "Set Item Properties" ) );
 
   // Mutators return whether the value was actually applied; failures (bad
   // arity, unresolvable references) land in *ignored instead of *applied.
@@ -955,8 +990,6 @@ bool LayoutService::applyItemProperties( QgsLayoutItem *item, const Json::Value 
     } );
   }
 
-  undoStack->endMacro();
-
   // Report keys that were not applied — unknown names, or valid names that
   // do not apply to this item type (e.g. "text" on a map).
   static const char *kKnown[] = { "name",  "x",     "y",     "width", "height",  "rotation", "opacity",
@@ -979,7 +1012,6 @@ bool LayoutService::applyItemProperties( QgsLayoutItem *item, const Json::Value 
     }
   }
 
-  item->update();
   return true;
 }
 
@@ -1304,14 +1336,17 @@ Json::Value LayoutService::autoArrange( QgsLayout *layout, bool apply, QString *
   };
 
   Json::Value arranged( Json::arrayValue );
-  const auto record = [&arranged]( QgsLayoutItem *item, bool created ) {
-    Json::Value info( Json::objectValue );
-    info["id"] = item->id().toStdString();
-    info["created"] = created;
+  const auto writeGeometry = []( Json::Value &info, QgsLayoutItem *item ) {
     info["x"] = std::round( item->positionWithUnits().x() * 10 ) / 10;
     info["y"] = std::round( item->positionWithUnits().y() * 10 ) / 10;
     info["width"] = std::round( item->sizeWithUnits().width() * 10 ) / 10;
     info["height"] = std::round( item->sizeWithUnits().height() * 10 ) / 10;
+  };
+  const auto record = [&arranged, &writeGeometry]( QgsLayoutItem *item, bool created ) {
+    Json::Value info( Json::objectValue );
+    info["id"] = item->id().toStdString();
+    info["created"] = created;
+    writeGeometry( info, item );
     arranged.append( info );
   };
 
@@ -1435,12 +1470,19 @@ Json::Value LayoutService::autoArrange( QgsLayout *layout, bool apply, QString *
     }
   }
 
-  // Size the legend to its content last, then report the final geometry.
+  // Size the legend to its content last, then refresh the geometry in the
+  // entry the loop above already recorded. Recording the legend a second
+  // time would double-count it in the "N new component(s)" summary and
+  // mis-report created=false for a just-created legend.
   if ( QgsLayoutItem *legendItem = findAutoItem( QStringLiteral( "auto:legend" ) ) )
   {
     if ( auto *legend = qobject_cast<QgsLayoutItemLegend *>( legendItem ) )
       legend->adjustBoxSize();
-    record( legendItem, false );
+    for ( Json::ArrayIndex i = 0; i < arranged.size(); ++i )
+    {
+      if ( arranged[i]["id"].asString() == legendItem->id().toStdString() )
+        writeGeometry( arranged[i], legendItem );
+    }
   }
 
   if ( QgsPrintLayout *printLayout = qobject_cast<QgsPrintLayout *>( layout ) )
