@@ -14,6 +14,14 @@
 #include "jobs/job_engine.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/placeholder_grammar.h"
+#include "operators/framework/rs_operator.h"
+#include "operators/framework/rs_operator_registry.h"
+#include "processing/algorithms/temporal/temporal_workspace.h"
+#include "data/data_manager.h"
+
+#include <QCryptographicHash>
+#include <QJsonObject>
+#include <QThread>
 
 namespace sicnu {
 
@@ -170,6 +178,7 @@ void TaskCenter::shutdownForTests()
         m_forwardedLogCounts.clear();
         m_lastForwardedProgress.clear();
         m_completionCallbacks.clear();
+        m_taskFingerprints.clear();
         m_nextTaskId = 1;
         m_nextPipelineId = 1;
         m_waitCondition.wakeAll();
@@ -1156,6 +1165,18 @@ void TaskCenter::processNextQueuedTasks()
             continue;
         }
 
+        // Revision-aware execution fingerprint (#667): computed while the
+        // params are final (post placeholder substitution) and BEFORE
+        // admission, so flushPendingLaunches can serve an identical prior
+        // execution instead of submitting. Invalid ⇒ not cacheable.
+        {
+            const sicnu::data::ExecutionFingerprint fp = taskExecutionFingerprintLocked( id );
+            if ( fp.isValid() )
+                m_taskFingerprints[id] = fp;
+            else
+                m_taskFingerprints.remove( id );
+        }
+
         m_tasks[id].status = TaskStatus::Dispatching;
         m_tasks[id].logBuffer.append(
           QString( QStringLiteral( "[%1] Dispatching to JobEngine (profile=%2)." ) )
@@ -1254,6 +1275,23 @@ void TaskCenter::flushPendingLaunches()
             {
                 continue; // Task was canceled/terminated between staging and flush!
             }
+        }
+
+        // Execution-cache serve (#667): runs outside m_mutex (file copy +
+        // terminal transition). On a miss the fingerprint goes back so the
+        // completion path can record the freshly produced output.
+        sicnu::data::ExecutionFingerprint fp;
+        {
+            QMutexLocker lock( &m_mutex );
+            fp = m_taskFingerprints.take( launch.taskId );
+        }
+        if ( fp.isValid() && serveFromExecutionCache( launch.taskId, fp ) )
+            continue;
+        if ( fp.isValid() )
+        {
+            QMutexLocker lock( &m_mutex );
+            if ( m_tasks.contains( launch.taskId ) && !isTerminalStatus( m_tasks[launch.taskId].status ) )
+                m_taskFingerprints[launch.taskId] = fp;
         }
 
         std::string jobId;
@@ -1402,6 +1440,19 @@ void TaskCenter::markTaskCompleted( long taskId,
         if ( !m_tasks[taskId].jobId.empty() )
             m_taskByJobId.remove( m_tasks[taskId].jobId );
 
+        // Execution-cache store (#667): the output of a completed
+        // revision-identified task is reusable by a future identical run.
+        if ( !m_tasks[taskId].outputLayerPath.isEmpty() )
+        {
+            const auto fpIt = m_taskFingerprints.constFind( taskId );
+            if ( fpIt != m_taskFingerprints.constEnd() )
+            {
+                sicnu::data::ExecutionResultCache::instance().storeOutputPath(
+                    *fpIt, m_tasks[taskId].outputLayerPath );
+                m_taskFingerprints.erase( fpIt );
+            }
+        }
+
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
         processNextQueuedTasks();
@@ -1535,6 +1586,15 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
         if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return;
+        // The root's own engine job must be cancelled too (#702, symmetric
+        // with markTaskCanceled): an externally-driven failure must kill the
+        // still-running engine job, or it keeps writing output while the task
+        // shows Failed. When the job is already terminal (the listener path),
+        // engine cancel is a harmless no-op.
+        const std::string rootJobId = m_tasks[taskId].jobId;
+        if ( !rootJobId.empty() )
+            jobCancelTargets.emplace_back( rootJobId, taskId );
+        m_taskFingerprints.remove( taskId );
         m_tasks[taskId].status = TaskStatus::Failed;
         m_tasks[taskId].errorMessage = error;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
@@ -1580,6 +1640,7 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
         const std::string rootJobId = m_tasks[taskId].jobId;
         if ( !rootJobId.empty() )
             jobCancelTargets.emplace_back( rootJobId, taskId );
+        m_taskFingerprints.remove( taskId );
         m_tasks[taskId].status = TaskStatus::Canceled;
         m_tasks[taskId].errorMessage = reason;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
@@ -1859,6 +1920,7 @@ void TaskCenter::clearCompletedTasks()
             m_forwardedLogCounts.remove( id );
             m_lastForwardedProgress.remove( id );
             m_completionCallbacks.remove( id ); // defense (#702): stale registrations
+            m_taskFingerprints.remove( id );
         }
         for ( auto it = m_taskByJobId.begin(); it != m_taskByJobId.end(); )
         {
@@ -2070,6 +2132,128 @@ PipelineExecutionInfo TaskCenter::waitForPipeline( long pipelineId,
 
         m_waitCondition.wait( &m_mutex, static_cast<unsigned long>( waitTime.count() ) );
     }
+}
+
+
+void TaskCenter::setCatalog( sicnu::data::DataManager *catalog )
+{
+    QMutexLocker locker( &m_mutex );
+    m_catalog = catalog;
+}
+
+std::shared_ptr<const sicnu::workflow::WorkflowRun>
+TaskCenter::workflowRunForPipeline( long pipelineId ) const
+{
+    QMutexLocker locker( &m_mutex );
+    const auto it = m_pipelineRuns.constFind( pipelineId );
+    return it == m_pipelineRuns.constEnd() ? nullptr : it.value();
+}
+
+sicnu::data::ExecutionFingerprint
+TaskCenter::taskExecutionFingerprintLocked( long taskId ) const
+{
+    // Disabled cache ⇒ no fingerprint at all (also skips the operator
+    // lookup/hash work for every dispatch in default configurations).
+    if ( !sicnu::data::ExecutionResultCache::instance().isEnabled() )
+        return {};
+    if ( !m_catalog )
+        return {};
+    // The catalog is single-thread-affine by contract (its mutators enforce
+    // it); identity resolution from a foreign thread would race concurrent
+    // mutations — conservatively refuse to fingerprint there.
+    if ( QThread::currentThread() != m_catalog->thread() )
+        return {};
+
+    const auto it = m_tasks.constFind( taskId );
+    if ( it == m_tasks.constEnd() )
+        return {};
+    const AlgorithmTaskInfo &info = it.value();
+
+    // Only registered RSOperators carry the schema/metadata contract needed
+    // to prove determinism; provider algorithms (gdal:/otb:/qgis:) and
+    // one-shot callables stay uncached.
+    const auto op = sicnu::operators::RSOperatorRegistry::instance().create(
+        info.algorithmId.toStdString() );
+    if ( !op )
+        return {};
+    const Json::Value meta = op->metadata();
+    if ( !( meta.isMember( "deterministic" ) && meta["deterministic"].asBool() ) )
+        return {};
+
+    // Implementation version proxy: the operator's schema document. A schema
+    // change (new params, changed defaults) implies a behavior change; the
+    // hash keeps the fingerprint honest without a hand-maintained version.
+    Json::StreamWriterBuilder schemaWriter;
+    schemaWriter["indentation"] = "";
+    const std::string schemaText = Json::writeString( schemaWriter, op->schema() );
+    const QString versionHash = QString::fromUtf8(
+        QCryptographicHash::hash( QByteArray::fromStdString( schemaText ),
+                                  QCryptographicHash::Sha256 ).toHex() );
+
+    // Exclude the destination from identity: two runs differing only in
+    // output path produce identical bytes (the served run copies the cached
+    // artifact onto its own output path).
+    QJsonObject params = QJsonObject::fromVariantMap( info.parameterMap );
+    const QString outputPath = info.outputLayerPath;
+    if ( !outputPath.isEmpty() )
+    {
+        for ( auto pit = params.begin(); pit != params.end(); )
+        {
+            if ( pit.value().isString() && pit.value().toString() == outputPath )
+                pit = params.erase( pit );
+            else
+                ++pit;
+        }
+    }
+
+    // Revision-aware input identity (registered path inputs + inline scenes
+    // + workspace-bound temporal collections). ANY unidentifiable input ⇒
+    // not cacheable — the conservative verdict that keeps hits honest.
+    QVector<sicnu::data::TaggedDerivationInput> inputs;
+    QString reason;
+    if ( !sicnu::temporal::fingerprintInputsForOperatorParams(
+             m_catalog, info.parameterMap, outputPath, &inputs, &reason ) )
+    {
+        return {};
+    }
+    return sicnu::data::makeExecutionFingerprintV2( info.algorithmId, versionHash,
+                                                    params, inputs );
+}
+
+bool TaskCenter::serveFromExecutionCache( long taskId, const sicnu::data::ExecutionFingerprint &fp )
+{
+    const auto cached = sicnu::data::ExecutionResultCache::instance().lookupOutputPath( fp );
+    if ( !cached )
+        return false;
+
+    QString outputPath;
+    {
+        QMutexLocker locker( &m_mutex );
+        const auto it = m_tasks.constFind( taskId );
+        if ( it == m_tasks.constEnd() || isTerminalStatus( it->status ) )
+            return false;
+        outputPath = it->outputLayerPath;
+    }
+    if ( outputPath.isEmpty() )
+        return false;
+
+    if ( *cached != outputPath )
+    {
+        // Materialize the cached artifact on this run's declared output path
+        // so downstream consumers and the result payload see the requested
+        // file. Failure falls through to a real execution.
+        QFile::remove( outputPath );
+        if ( !QFile::copy( *cached, outputPath ) )
+            return false;
+    }
+
+    QVariantMap results{ { QStringLiteral( "output" ), outputPath } };
+    Json::Value payload;
+    payload["output"] = outputPath.toStdString();
+    payload["cache"] = "hit";
+    payload["cachedFrom"] = cached->toStdString();
+    markTaskCompleted( taskId, results, payload );
+    return true;
 }
 
 } // namespace sicnu

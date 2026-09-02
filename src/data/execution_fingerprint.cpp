@@ -424,6 +424,7 @@ void ExecutionResultCache::clear()
 {
   std::lock_guard<std::recursive_mutex> locker( m_mutex );
   m_entries.clear();
+  m_pathEntries.clear(); // the path store must reset with the digest store (#720)
 }
 
 int ExecutionResultCache::size() const

@@ -248,9 +248,16 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
                     outRow[static_cast<size_t>(r) * width + c] = pixelAt(absR, c);
                     continue;
                 }
-                int bestVal = pixelAt(absR, c);
-                if (bestVal == 0)
-                    bestVal = freq.front().val;
+                // A NoData (label 0) center stays NoData (#700/#715): the
+                // filter must not grow classes into NoData areas — it only
+                // relabels valid centers. Label 0 does not vote, so this only
+                // leaves untouched pixels 0.
+                const int center = pixelAt(absR, c);
+                if (center == 0) {
+                    outRow[static_cast<size_t>(r) * width + c] = 0;
+                    continue;
+                }
+                int bestVal = center;
                 int bestCnt = -1;
                 for (const FreqEntry &e : freq) {
                     if (e.count > bestCnt || (e.count == bestCnt && e.val < bestVal)) {

@@ -216,8 +216,12 @@ bool readTileBip( const GdalDatasetWrapper &beforeDs, const GdalDatasetWrapper &
                         bandScratch[p] = nan;
                 }
             } else if ( hasNd && !std::isfinite( nd ) ) {
+                // Infinite declared NoData (±inf sentinel): sweep EVERY
+                // non-finite sample (inf sentinel and NaN alike) to NaN —
+                // an isnan-only test would let ±inf pass through as a
+                // "value" (#720).
                 for ( size_t p = 0; p < tilePixels; ++p )
-                    if ( std::isnan( bandScratch[p] ) ) bandScratch[p] = nan;
+                    if ( !std::isfinite( bandScratch[p] ) ) bandScratch[p] = nan;
             }
         }
         for ( size_t p = 0; p < tilePixels; ++p )
@@ -237,8 +241,10 @@ bool readTileBip( const GdalDatasetWrapper &beforeDs, const GdalDatasetWrapper &
                         bandScratch[p] = nan;
                 }
             } else if ( hasNd && !std::isfinite( nd ) ) {
+                // Infinite declared NoData (±inf sentinel): see before-copy
+                // comment (#720).
                 for ( size_t p = 0; p < tilePixels; ++p )
-                    if ( std::isnan( bandScratch[p] ) ) bandScratch[p] = nan;
+                    if ( !std::isfinite( bandScratch[p] ) ) bandScratch[p] = nan;
             }
         }
         for ( size_t p = 0; p < tilePixels; ++p )

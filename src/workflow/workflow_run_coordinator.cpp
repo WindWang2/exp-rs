@@ -244,14 +244,16 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     if ( info.pipelineId < 0 || info.stepId.isEmpty() )
         return;
 
-    std::shared_ptr<WorkflowRun> run;
-    {
-        std::lock_guard<std::mutex> lock( m_mutex );
-        const auto it = m_runsByPipeline.find( info.pipelineId );
-        if ( it == m_runsByPipeline.end() )
-            return;
-        run = it->second;
-    }
+    // The whole fold runs under m_mutex: resumeRun swaps the mapped run
+    // object under the same lock, so a transition either lands entirely
+    // before the swap (visible to its merge) or entirely after (folded into
+    // the swapped-in run) — never into a discarded object (#720).
+    std::lock_guard<std::mutex> lock( m_mutex );
+
+    const auto it = m_runsByPipeline.find( info.pipelineId );
+    if ( it == m_runsByPipeline.end() )
+        return;
+    std::shared_ptr<WorkflowRun> run = it->second;
 
     const std::string stepKey = info.stepId.toStdString();
     std::optional<StepPlan> plan = run->stepPlan( stepKey );
@@ -279,11 +281,6 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     }
     run->updateStepPlan( *plan );
 
-    std::lock_guard<std::mutex> lock( m_mutex );
-    // The map entry is ours for the process lifetime; re-check it survived
-    // (clearCompletedTasks on TaskCenter does not touch our bookkeeping).
-    if ( m_runsByPipeline.count( info.pipelineId ) == 0 )
-        return;
     persistRunLocked( *run );
 
     // Terminal roll-up when every step plan reached a terminal status.
@@ -510,15 +507,21 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
         const auto it = m_runsByPipeline.find( pipelineId );
         if ( it != m_runsByPipeline.end() )
         {
-            // Keep the fresh submission's live task ids on the original plans.
+            // Merge the fresh submission's plan state onto the original
+            // plans: a task can reach terminal state between the fresh
+            // run's creation and this swap, and with the fold under m_mutex
+            // that transition is visible here — discarding it (the old
+            // force-reset to "Pending") would strand the run forever
+            // (#720). The fresh plans are the live truth of this
+            // submission: adopt them wholesale for resubmitted steps.
             for ( const auto &fresh : it->second->stepPlans() )
             {
                 if ( StepPlan *plan = run->findStepPlan( fresh.stepId ) )
                 {
-                    plan->taskId = fresh.taskId;
-                    if ( plan->status != "Completed" )
-                        plan->status = "Pending";
+                    *plan = fresh;
                     run->updateStepPlan( *plan );
+                    if ( fresh.status == "Completed" && !fresh.outputLayerPath.empty() )
+                        run->setArtifact( fresh.stepId, fresh.outputLayerPath );
                 }
             }
             m_pipelineByRunId.erase( it->second->runId() );
@@ -529,6 +532,20 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
             it->second = run;
             m_pipelineByRunId[run->runId()] = pipelineId;
             persistRunLocked( *run );
+
+            // If every step went terminal inside the swap window (e.g. all
+            // cache-served), the fresh run folded its own roll-up — roll the
+            // original up here too, or it would stay Running forever.
+            const auto plans = run->stepPlans();
+            const bool allTerminal = !plans.empty() && std::all_of( plans.begin(), plans.end(),
+                                                                    []( const StepPlan &p ) {
+                                                                        return p.status == "Completed"
+                                                                               || p.status == "Failed"
+                                                                               || p.status == "Canceled"
+                                                                               || p.status == "Skipped";
+                                                                    } );
+            if ( allTerminal && !isTerminalRunState( run->state() ) )
+                finalizeRunLocked( pipelineId, *run );
         }
     }
     return pipelineId;

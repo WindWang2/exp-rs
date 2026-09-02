@@ -59,9 +59,13 @@ public:
                "rescaled on disk.";
     }
 
+    // Honest declaration (#716): the run body reads whole bands into RAM
+    // (multi-band index math over full buffers). Declaring Streaming here
+    // made TaskCenter under-charge memory for large rasters. Re-streaming via
+    // gdal_multiband_block_stream is a tracked follow-up (#664).
     RSOperatorMemoryPolicy memoryPolicy() const override
     {
-        return RSOperatorMemoryPolicy::Streaming; // row-block streaming (#664)
+        return RSOperatorMemoryPolicy::FullRaster;
     }
 
     Json::Value schema() const override;

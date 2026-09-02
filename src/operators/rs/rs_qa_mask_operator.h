@@ -54,9 +54,13 @@ public:
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
+    // Honest declaration (#716): the run body materializes the full QA band
+    // (native uint16 read + mask raster). Declaring Streaming here made
+    // TaskCenter under-charge memory for large rasters. Row-block streaming
+    // is a tracked follow-up (#665).
     RSOperatorMemoryPolicy memoryPolicy() const override
     {
-        return RSOperatorMemoryPolicy::Streaming; // row-block streaming (#665)
+        return RSOperatorMemoryPolicy::FullRaster;
     }
 
     Json::Value run(const Json::Value& params, RSOperatorContext& context) override;
