@@ -90,6 +90,13 @@ public:
   size_t toolCount() const;
 
   /**
+   * @brief Monotonic change counter (#701): bumped on every register,
+   * unregister, and reset so cache owners (AgentToolCatalog) can detect that
+   * the tool set they snapshotted went stale.
+   */
+  size_t revision() const;
+
+  /**
    * @brief Executes a registered interaction tool with parsed JSON arguments.
    *
    * If the tool is not found, returns a JSON object with status "error" and errorMessage.
@@ -149,6 +156,7 @@ private:
 
   mutable std::mutex m_mutex;
   std::unordered_map<std::string, InteractionToolDefinition> m_tools;
+  size_t m_revision = 0;
 };
 
 } // namespace sicnu::agent

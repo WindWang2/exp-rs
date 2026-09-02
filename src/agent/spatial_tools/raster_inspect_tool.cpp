@@ -30,6 +30,48 @@ std::string datasetMetadataItem( GDALDataset *ds, const char *key )
   return value ? std::string( value ) : std::string();
 }
 
+/// Bounded decimated-window statistics read in the band's native sample type
+/// (#701) and accumulated in double, so wide types keep full precision.
+/// Returns an empty object when the read fails or every sample is masked.
+template <typename T>
+Json::Value decimatedStats( GDALRasterBand *band, GDALDataType eType,
+                            int w, int h, int bufW, int bufH )
+{
+  Json::Value stats( Json::objectValue );
+  std::vector<T> buf( static_cast<size_t>( bufW ) * bufH );
+  if ( band->RasterIO( GF_Read, 0, 0, w, h, buf.data(), bufW, bufH,
+                       eType, 0, 0 ) != CE_None )
+    return stats;
+
+  int hasNoData = 0;
+  const double nd = band->GetNoDataValue( &hasNoData );
+  double sum = 0.0, sumSq = 0.0;
+  double mn = std::numeric_limits<double>::infinity();
+  double mx = -std::numeric_limits<double>::infinity();
+  size_t n = 0;
+  for ( T v : buf )
+  {
+    const double d = static_cast<double>( v );
+    if ( !std::isfinite( d ) || ( hasNoData && d == nd ) )
+      continue;
+    sum += d;
+    sumSq += d * d;
+    mn = std::min( mn, d );
+    mx = std::max( mx, d );
+    ++n;
+  }
+  if ( n == 0 )
+    return stats;
+  const double mean = sum / n;
+  const double variance = std::max( 0.0, sumSq / n - mean * mean );
+  stats["min"] = mn;
+  stats["max"] = mx;
+  stats["mean"] = mean;
+  stats["stddev"] = std::sqrt( variance );
+  stats["approximate"] = ( bufW != w || bufH != h );
+  return stats;
+}
+
 Json::Value bandStats( GDALRasterBand *band )
 {
   Json::Value stats( Json::objectValue );
@@ -65,38 +107,25 @@ Json::Value bandStats( GDALRasterBand *band )
     bufW = std::max( 1, static_cast<int>( w * scale ) );
     bufH = std::max( 1, static_cast<int>( h * scale ) );
   }
-  std::vector<float> buf( static_cast<size_t>( bufW ) * bufH );
-  if ( band->RasterIO( GF_Read, 0, 0, w, h, buf.data(), bufW, bufH,
-                       GDT_Float32, 0, 0 ) != CE_None )
-    return stats;
 
-  int hasNoData = 0;
-  const double nd = band->GetNoDataValue( &hasNoData );
-  const float ndF = static_cast<float>( nd );
-  double sum = 0.0, sumSq = 0.0;
-  double mn = std::numeric_limits<double>::infinity();
-  double mx = -std::numeric_limits<double>::infinity();
-  size_t n = 0;
-  for ( float v : buf )
+  // Read in the band's OWN data type (#701): forcing GDT_Float32 silently
+  // narrowed Float64/Int16/UInt16/Int32 rasters (Float64 lost ~7 significant
+  // digits before any statistics ran), so reported min/max/mean did not match
+  // the data an operator would actually read.
+  const GDALDataType eType = band->GetRasterDataType();
+  switch ( eType )
   {
-    if ( !std::isfinite( v ) || ( hasNoData && v == ndF ) )
-      continue;
-    sum += v;
-    sumSq += static_cast<double>( v ) * v;
-    mn = std::min( mn, static_cast<double>( v ) );
-    mx = std::max( mx, static_cast<double>( v ) );
-    ++n;
+    case GDT_Byte: return decimatedStats<GByte>( band, eType, w, h, bufW, bufH );
+    case GDT_UInt16: return decimatedStats<GUInt16>( band, eType, w, h, bufW, bufH );
+    case GDT_Int16: return decimatedStats<GInt16>( band, eType, w, h, bufW, bufH );
+    case GDT_UInt32: return decimatedStats<GUInt32>( band, eType, w, h, bufW, bufH );
+    case GDT_Int32: return decimatedStats<GInt32>( band, eType, w, h, bufW, bufH );
+    case GDT_Float32: return decimatedStats<float>( band, eType, w, h, bufW, bufH );
+    case GDT_Float64: return decimatedStats<double>( band, eType, w, h, bufW, bufH );
+    default:
+      // Complex / future types: narrow to Float32 as before rather than fail.
+      return decimatedStats<float>( band, GDT_Float32, w, h, bufW, bufH );
   }
-  if ( n == 0 )
-    return stats;
-  const double mean = sum / n;
-  const double variance = std::max( 0.0, sumSq / n - mean * mean );
-  stats["min"] = mn;
-  stats["max"] = mx;
-  stats["mean"] = mean;
-  stats["stddev"] = std::sqrt( variance );
-  stats["approximate"] = ( bufW != w || bufH != h );
-  return stats;
 }
 
 } // namespace

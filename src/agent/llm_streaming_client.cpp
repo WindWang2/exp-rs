@@ -8,6 +8,21 @@
 #include <QPointer>
 #include <QSslError>
 
+namespace {
+
+/// Transfer (in)activity timeout for the streaming chat request (#701).
+/// The old hardcoded 120 s aborted long-silent reasoning streams mid-thought;
+/// SICNU_LLM_TRANSFER_TIMEOUT_MS overrides it (milliseconds; 0 disables the
+/// timeout entirely, matching QNetworkRequest semantics).
+int configuredTransferTimeoutMs()
+{
+  bool ok = false;
+  const int v = qEnvironmentVariableIntValue( "SICNU_LLM_TRANSFER_TIMEOUT_MS", &ok );
+  return ok ? v : 120000;
+}
+
+} // namespace
+
 namespace sicnu::agent
 {
 
@@ -48,7 +63,10 @@ ChatRequestPayload LlmStreamingClient::buildChatRequest( const LlmProviderProfil
   }
 
   payload.request.setUrl( QUrl( endpointUrl ) );
-  payload.request.setTransferTimeout( 120000 );
+  // #701: configurable via SICNU_LLM_TRANSFER_TIMEOUT_MS (see
+  // configuredTransferTimeoutMs) — reasoning models can stay silent far
+  // longer than the old fixed 120 s before the first SSE bytes arrive.
+  payload.request.setTransferTimeout( configuredTransferTimeoutMs() );
   payload.request.setHeader( QNetworkRequest::ContentTypeHeader, QStringLiteral( "application/json" ) );
 
   if ( !profile.apiKey.isEmpty() )
@@ -313,9 +331,17 @@ void LlmStreamingClient::onReplyFinished()
     m_buffer.clear();
   }
 
-  // If no [DONE] token finalized the tool call, emit it now. No-op when the
-  // [DONE] path already emitted it — a parsed tool call is emitted exactly once.
-  emitParsedToolCallOnce();
+  // If no [DONE] token finalized the tool call, emit it now — but only while
+  // the stream has not been declared failed. onReplyError consumes the finish
+  // state (errorOccurred + finished) BEFORE finished arrives, and fragments
+  // accumulated up to a transport error are truncated: a call whose argument
+  // stream was cut right after the function name would otherwise go out
+  // through the fallback looking like a valid zero-argument call (#701).
+  // On the normal paths this stays a no-op or the intended fallback: the
+  // [DONE] path emits and clears the accumulation before setting the flag,
+  // and a clean close without [DONE] still has m_finishedEmitted == false.
+  if ( !m_finishedEmitted )
+    emitParsedToolCallOnce();
 
   if (reply->error() != QNetworkReply::NoError && reply->error() != QNetworkReply::OperationCanceledError)
   {

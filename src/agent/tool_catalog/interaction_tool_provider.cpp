@@ -8,6 +8,59 @@ namespace sicnu::agent::tool_catalog {
 
 namespace {
 
+// Band-selector property schema (#701): role string OR 1-based band number.
+// A property with no "type"/"anyOf" is invalid JSON Schema for strict
+// validators (TypeBox/Pi reject the whole tool schema), so the union the
+// handler actually accepts is modeled explicitly.
+Json::Value makeBandChannelProp( const char *description )
+{
+  Json::Value prop( Json::objectValue );
+  Json::Value asRole( Json::objectValue );
+  asRole["type"] = "string";
+  Json::Value asNumber( Json::objectValue );
+  asNumber["type"] = "integer";
+  Json::Value anyOf( Json::arrayValue );
+  anyOf.append( asRole );
+  anyOf.append( asNumber );
+  prop["anyOf"] = anyOf;
+  prop["description"] = description;
+  return prop;
+}
+
+// Derive pass shared by resetDefaults()/provideTools()/findTool() (#701):
+// adds every dispatchable InteractionToolRegistry tool that is not already
+// described here, so tools registered into the registry AFTER the provider
+// (or the catalog) was first constructed still appear. The old behavior
+// froze the snapshot at construction and made post-registration tools
+// undiscoverable until an explicit resetDefaults(). Registry-derived entries
+// never overwrite an existing entry: the static factories keep their richer
+// output ports, and explicit registerTool() customizations are preserved.
+void mergeRegistryToolsInto( std::unordered_map<std::string, AgentTool> &tools )
+{
+  try
+  {
+    for ( const auto &def : sicnu::agent::InteractionToolRegistry::instance().listTools() )
+    {
+      if ( def.name.rfind( "data:", 0 ) == 0 )
+        continue;
+      if ( tools.find( def.name ) != tools.end() )
+        continue;
+      AgentTool tool;
+      tool.name = def.name;
+      tool.displayName = def.displayName;
+      tool.category = ToolCategory::Interaction;
+      tool.group = def.category;
+      tool.description = def.description;
+      tool.inputSchema = def.inputSchema;
+      tools[def.name] = std::move( tool );
+    }
+  }
+  catch ( ... )
+  {
+    // Registry unavailable (early static init): the static set stands.
+  }
+}
+
 AgentTool makeDrawRoiTool()
 {
   AgentTool tool;
@@ -116,24 +169,16 @@ AgentTool makeSetBandCompositeTool()
   layerId["description"] = "Layer ID or layer name (alias for layer)";
   props["layer_id"] = layerId;
 
-  Json::Value rBand( Json::objectValue );
-  rBand["description"] = "Red channel band role (e.g. 'red','nir') or 1-based band number";
-  props["red"] = rBand;
-  props["red_band"] = rBand;
+  props["red"] = makeBandChannelProp( "Red channel band role (e.g. 'red','nir') or 1-based band number" );
+  props["red_band"] = makeBandChannelProp( "Red channel band role or 1-based band number (alias for red)" );
 
-  Json::Value gBand( Json::objectValue );
-  gBand["description"] = "Green channel band role or 1-based band number";
-  props["green"] = gBand;
-  props["green_band"] = gBand;
+  props["green"] = makeBandChannelProp( "Green channel band role or 1-based band number" );
+  props["green_band"] = makeBandChannelProp( "Green channel band role or 1-based band number (alias for green)" );
 
-  Json::Value bBand( Json::objectValue );
-  bBand["description"] = "Blue channel band role or 1-based band number";
-  props["blue"] = bBand;
-  props["blue_band"] = bBand;
+  props["blue"] = makeBandChannelProp( "Blue channel band role or 1-based band number" );
+  props["blue_band"] = makeBandChannelProp( "Blue channel band role or 1-based band number (alias for blue)" );
 
-  Json::Value grayProp( Json::objectValue );
-  grayProp["description"] = "Single channel band role or 1-based band number for grayscale rendering (optional)";
-  props["gray"] = grayProp;
+  props["gray"] = makeBandChannelProp( "Single channel band role or 1-based band number for grayscale rendering (optional)" );
 
   Json::Value opacityProp( Json::objectValue );
   opacityProp["type"] = "number";
@@ -321,35 +366,15 @@ void InteractionToolProvider::resetDefaults()
   // data:* is excluded: those tools are owned by DataToolProvider, and the
   // registry unconditionally registers them too — deriving them here listed
   // every data:* tool twice in the catalog (#641).
-  try
-  {
-    for ( const auto &def : sicnu::agent::InteractionToolRegistry::instance().listTools() )
-    {
-      if ( def.name.rfind( "data:", 0 ) == 0 )
-        continue;
-      if ( mTools.find( def.name ) != mTools.end() )
-        continue;
-      AgentTool tool;
-      tool.name = def.name;
-      tool.displayName = def.displayName;
-      tool.category = ToolCategory::Interaction;
-      tool.group = def.category;
-      tool.description = def.description;
-      tool.inputSchema = def.inputSchema;
-      mTools[def.name] = std::move( tool );
-    }
-  }
-  catch ( ... )
-  {
-    // Registry unavailable (early static init): the static set above still
-    // provides the core display tools.
-  }
-
+  mergeRegistryToolsInto( mTools );
 }
 
 std::vector<AgentTool> InteractionToolProvider::provideTools() const
 {
   std::lock_guard<std::mutex> lock( mMutex );
+  // Live re-sync (#701): pick up interaction tools registered after the
+  // provider was constructed instead of serving the construction snapshot.
+  mergeRegistryToolsInto( mTools );
   std::vector<AgentTool> result;
   result.reserve( mTools.size() );
   for ( const auto &pair : mTools )
@@ -365,6 +390,9 @@ std::vector<AgentTool> InteractionToolProvider::provideTools() const
 std::optional<AgentTool> InteractionToolProvider::findTool( const std::string &name ) const
 {
   std::lock_guard<std::mutex> lock( mMutex );
+  // Same live re-sync as provideTools(): a tool registered after construction
+  // must be findable by name too.
+  mergeRegistryToolsInto( mTools );
   auto it = mTools.find( name );
   if ( it != mTools.end() )
     return it->second;

@@ -195,3 +195,63 @@ TEST_CASE( "LlmStreamingClient::buildChatRequest assembles the wire body", "[age
   const QJsonObject bodyWithTools = QJsonDocument::fromJson( payload.body ).object();
   REQUIRE( bodyWithTools[QStringLiteral( "tools" )].toArray() == tools );
 }
+
+TEST_CASE( "LlmStreamingClient drops truncated tool calls (#701)", "[agent][client]" )
+{
+  ensureQtApp();
+
+  QJsonObject toolCallCaptured;
+  bool toolCallEmitted = false;
+  LlmStreamingClient client;
+  QObject::connect( &client, &LlmStreamingClient::toolCallParsed,
+                    [&]( const QJsonObject &toolCall ) {
+                      toolCallEmitted = true;
+                      toolCallCaptured = toolCall;
+                    } );
+
+  // Stream cut mid-tool-call: the name arrived, the arguments JSON did not.
+  client.parseSseLine( QStringLiteral(
+      "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"id\": \"call_1\", "
+      "\"function\": {\"name\": \"rs_ndvi\", \"arguments\": \"{\\\"input\\\":\\\"scene.t\"}}]}}]}" ) );
+  client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+
+  // The stream closed normally but the tool call is truncated: emitting it
+  // would hand the executor a garbage arguments blob as if it were valid.
+  REQUIRE_FALSE( toolCallEmitted );
+
+  // A call with NO arguments is legitimate and must still be emitted: the
+  // arguments-only stream cut is what must be dropped, not argument-less calls.
+  LlmStreamingClient argumentLessClient;
+  bool argumentLessEmitted = false;
+  QObject::connect( &argumentLessClient, &LlmStreamingClient::toolCallParsed,
+                    [&]( const QJsonObject & ) { argumentLessEmitted = true; } );
+  argumentLessClient.parseSseLine( QStringLiteral(
+      "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"id\": \"call_2\", "
+      "\"function\": {\"name\": \"data_list_layers\"}}]}}]}" ) );
+  argumentLessClient.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+  REQUIRE( argumentLessEmitted );
+}
+
+TEST_CASE( "LlmStreamingClient::buildChatRequest honours SICNU_LLM_TRANSFER_TIMEOUT_MS (#701)",
+           "[agent][client]" )
+{
+  ensureQtApp();
+
+  LlmProviderProfile profile;
+  profile.baseUrl = QStringLiteral( "http://localhost:8000/v1" );
+
+  qputenv( "SICNU_LLM_TRANSFER_TIMEOUT_MS", QByteArrayLiteral( "30000" ) );
+  ChatRequestPayload payload = LlmStreamingClient::buildChatRequest( profile, QJsonArray() );
+  REQUIRE( payload.request.transferTimeout() == 30000 );
+
+  // 0 disables the transfer timeout entirely (QNetworkRequest semantics) —
+  // the escape hatch for long-silent reasoning streams.
+  qputenv( "SICNU_LLM_TRANSFER_TIMEOUT_MS", QByteArrayLiteral( "0" ) );
+  payload = LlmStreamingClient::buildChatRequest( profile, QJsonArray() );
+  REQUIRE( payload.request.transferTimeout() == 0 );
+
+  // Unset: the historical default applies.
+  qunsetenv( "SICNU_LLM_TRANSFER_TIMEOUT_MS" );
+  payload = LlmStreamingClient::buildChatRequest( profile, QJsonArray() );
+  REQUIRE( payload.request.transferTimeout() == 120000 );
+}

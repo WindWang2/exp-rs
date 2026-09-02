@@ -399,3 +399,60 @@ TEST_CASE( "AgentToolCatalog concurrent tool registration invalidates export cac
   CHECK( exportCount.load() > 0 );
 }
 
+
+TEST_CASE( "AgentToolCatalog picks up interaction tools registered after first use (#701)",
+           "[agent][tool_catalog][live-sync]" )
+{
+  auto &catalog = AgentToolCatalog::instance();
+  auto &registry = sicnu::agent::InteractionToolRegistry::instance();
+  registry.reset();
+  catalog.reset();
+
+  // Warm every cache BEFORE the tool exists — the old snapshot behavior kept
+  // tools registered after first catalog use invisible until an explicit
+  // reset() of the catalog.
+  const auto warm = catalog.listTools();
+  REQUIRE_FALSE( warm.empty() );
+  REQUIRE( catalog.exportOpenAiToolDefinitions().isArray() );
+  REQUIRE_FALSE( catalog.findTool( "canvas:probe_marker" ).has_value() );
+
+  sicnu::agent::InteractionToolDefinition def;
+  def.name = "canvas:probe_marker";
+  def.displayName = "Probe Marker";
+  def.category = "canvas";
+  def.description = "Test-only interaction tool registered after first catalog use.";
+  Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
+  def.inputSchema = schema;
+  registry.registerTool( def );
+
+  // listTools() must reflect the new registry entry without a catalog reset.
+  bool foundInList = false;
+  for ( const auto &tool : catalog.listTools() )
+  {
+    if ( tool.name == "canvas:probe_marker" )
+    {
+      foundInList = true;
+      CHECK( tool.category == ToolCategory::Interaction );
+      CHECK( tool.description == def.description );
+    }
+  }
+  REQUIRE( foundInList );
+
+  // ...and findTool() (including the exporter path) must see it too.
+  REQUIRE( catalog.findTool( "canvas:probe_marker" ).has_value() );
+  const Json::Value defs = catalog.exportOpenAiToolDefinitions();
+  bool foundInExport = false;
+  for ( const auto &item : defs )
+  {
+    if ( item.isObject() && item["function"]["name"].asString() == "canvas_probe_marker" )
+    {
+      foundInExport = true;
+      break;
+    }
+  }
+  REQUIRE( foundInExport );
+
+  registry.reset();
+  catalog.reset();
+}

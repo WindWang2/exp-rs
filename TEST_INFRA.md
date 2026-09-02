@@ -59,3 +59,10 @@
   5. UI interaction simulations (combo selection, spinbox changes, file path entry).
   6. Parameter serialization (`buildParams()`) validation against JSON schema expectations.
   7. Reset button behavior and dialog destruction.
+
+## Auxiliary Test Lanes (#706)
+Non-Catch2 lanes registered in CTest so they run in the same `ctest` invocation:
+- `python_bindings_smoke` — Python bindings smoke test (`tests/test_python_bindings.py`), guarded on the `_sicnu_operators` target; TIMEOUT 300.
+- `pi_bridge_lifecycle` — pi/ bridge lifecycle regression tests (`node --test pi/test`, #669 respawn/fork-loop family), guarded on node >= 22.18 / >= 23.6 (default type stripping of the `.ts` bridge import); TIMEOUT 120.
+
+Lint lane (non-blocking CI step, Tier 1): `scripts/run_clang_tidy_changed.sh <base-ref> <build-dir>` runs the repo's targeted `.clang-tidy` over only the C++ files changed vs `<base-ref>`, using the build tree's `compile_commands.json` (exported by default on GCC/Clang generators).

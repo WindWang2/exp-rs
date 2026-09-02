@@ -374,6 +374,25 @@ Json::Value createRasterGetDisplaySchema()
   return schema;
 }
 
+// Band-selector property schema (#701): the handler accepts a semantic role
+// string OR a 1-based band number; a property with neither "type" nor
+// "anyOf" is rejected by strict JSON Schema validators (TypeBox/Pi), so the
+// union is modeled explicitly.
+Json::Value makeBandRoleProp( const char *description )
+{
+  Json::Value prop( Json::objectValue );
+  Json::Value asRole( Json::objectValue );
+  asRole["type"] = "string";
+  Json::Value asNumber( Json::objectValue );
+  asNumber["type"] = "integer";
+  Json::Value anyOf( Json::arrayValue );
+  anyOf.append( asRole );
+  anyOf.append( asNumber );
+  prop["anyOf"] = anyOf;
+  prop["description"] = description;
+  return prop;
+}
+
 Json::Value createRasterSetBandCompositeSchema()
 {
   Json::Value schema( Json::objectValue );
@@ -385,21 +404,10 @@ Json::Value createRasterSetBandCompositeSchema()
   layerProp["description"] = "Optional raster layer ID, layer display name, or asset ID. When omitted, the active raster layer is used.";
   props["layer"] = layerProp;
 
-  Json::Value redProp( Json::objectValue );
-  redProp["description"] = "Red channel band role (e.g. 'red', 'nir', 'swir1', 'swir2') or 1-based band number.";
-  props["red"] = redProp;
-
-  Json::Value greenProp( Json::objectValue );
-  greenProp["description"] = "Green channel band role (e.g. 'green', 'red') or 1-based band number.";
-  props["green"] = greenProp;
-
-  Json::Value blueProp( Json::objectValue );
-  blueProp["description"] = "Blue channel band role (e.g. 'blue', 'green') or 1-based band number.";
-  props["blue"] = blueProp;
-
-  Json::Value grayProp( Json::objectValue );
-  grayProp["description"] = "Optional single channel band role or 1-based band number for grayscale rendering.";
-  props["gray"] = grayProp;
+  props["red"] = makeBandRoleProp( "Red channel band role (e.g. 'red', 'nir', 'swir1', 'swir2') or 1-based band number." );
+  props["green"] = makeBandRoleProp( "Green channel band role (e.g. 'green', 'red') or 1-based band number." );
+  props["blue"] = makeBandRoleProp( "Blue channel band role (e.g. 'blue', 'green') or 1-based band number." );
+  props["gray"] = makeBandRoleProp( "Optional single channel band role or 1-based band number for grayscale rendering." );
 
   Json::Value opacityProp( Json::objectValue );
   opacityProp["type"] = "number";
@@ -434,12 +442,12 @@ Json::Value createRasterSetStretchSchema()
 
   Json::Value lowerProp( Json::objectValue );
   lowerProp["type"] = "number";
-  lowerProp["description"] = "Lower clip percentile for percent_clip (e.g. 2 for 2%).";
+  lowerProp["description"] = "Lower clip percentile in percent for percent_clip (e.g. 2 for 2%).";
   props["lower"] = lowerProp;
 
   Json::Value upperProp( Json::objectValue );
   upperProp["type"] = "number";
-  upperProp["description"] = "Upper clip percentile for percent_clip (e.g. 98 for 98%).";
+  upperProp["description"] = "Upper clip percentile in percent for percent_clip (e.g. 98 for 98%).";
   props["upper"] = upperProp;
 
   Json::Value factorProp( Json::objectValue );
@@ -507,18 +515,29 @@ void InteractionToolRegistry::reset()
 {
   std::lock_guard<std::mutex> lock( m_mutex );
   m_tools.clear();
+  ++m_revision;
 }
 
 void InteractionToolRegistry::registerTool( InteractionToolDefinition toolDef )
 {
   std::lock_guard<std::mutex> lock( m_mutex );
   m_tools[toolDef.name] = std::move( toolDef );
+  ++m_revision;
 }
 
 bool InteractionToolRegistry::unregisterTool( const std::string &name )
 {
   std::lock_guard<std::mutex> lock( m_mutex );
-  return m_tools.erase( name ) > 0;
+  const bool removed = m_tools.erase( name ) > 0;
+  if ( removed )
+    ++m_revision;
+  return removed;
+}
+
+size_t InteractionToolRegistry::revision() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_revision;
 }
 
 std::optional<InteractionToolDefinition> InteractionToolRegistry::findTool( const std::string &name ) const
@@ -766,7 +785,11 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
     def.category = "data";
     def.description = "List all committed data assets in the DataManager catalog plus any displayed map layers, with IDs, names, types, band counts, revisions, and CRS.";
     def.inputSchema = createEmptyObjectSchema();
-    def.handler = [dataManager]( const Json::Value & ) {
+    // QPointer, not a raw capture (#701): the handler lives in the static
+    // registry for the whole process lifetime while the DataManager is owned
+    // by main()'s MCP block (headless) or the dock widget (GUI) — a teardown
+    // UAF window the view/raster services already avoid with QPointer.
+    def.handler = [dataManager = QPointer<sicnu::data::DataManager>( dataManager )]( const Json::Value & ) {
       Json::Value result( Json::objectValue );
       Json::Value layers( Json::arrayValue );
 
@@ -864,7 +887,8 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
     schema["required"] = req;
     def.inputSchema = schema;
 
-    def.handler = [dataManager]( const Json::Value &params ) {
+    // QPointer capture (#701) — same teardown-safety rationale as above.
+    def.handler = [dataManager = QPointer<sicnu::data::DataManager>( dataManager )]( const Json::Value &params ) {
       std::string targetId;
       if ( params.isMember( "layer_id" ) && params["layer_id"].isString() )
         targetId = params["layer_id"].asString();
@@ -1001,7 +1025,8 @@ void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataM
     schema["required"] = req;
     def.inputSchema = schema;
 
-    def.handler = [dataManager]( const Json::Value &params ) {
+    // QPointer capture (#701) — same teardown-safety rationale as above.
+    def.handler = [dataManager = QPointer<sicnu::data::DataManager>( dataManager )]( const Json::Value &params ) {
       if ( !dataManager )
       {
         Json::Value err( Json::objectValue );

@@ -91,9 +91,18 @@ private:
   std::vector<ToolProviderPtr> mProviders;
   std::unordered_map<std::string, AgentTool> mCustomTools;
   mutable bool mCacheValid = false;
+  // InteractionToolRegistry revision at cache-build time (#701): the registry
+  // can register tools at any moment; a bump invalidates the catalog snapshot
+  // so post-registration tools are discoverable without a manual reset().
+  mutable size_t mCachedInteractionRevision = 0;
   mutable std::vector<AgentTool> mCachedTools;
   mutable Json::Value mCachedOpenAiDefs;
   mutable Json::Value mCachedMcpTools;
+
+  /// True when the cached tool set is still current (mMutex must be held).
+  /// Checks both the explicit invalidation flag and the live
+  /// InteractionToolRegistry revision.
+  bool cacheIsFresh() const;
 };
 
 } // namespace sicnu::agent::tool_catalog
