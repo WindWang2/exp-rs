@@ -138,7 +138,7 @@ TEST_CASE("ChangeDetection ratio divides after by before", "[processing][change_
     CHECK(out[0] == Approx(3.0f));
     CHECK(out[1] == Approx(1.0f));
     CHECK(std::isnan(out[2])); // before == 0 -> NaN
-    CHECK(out[3] == Approx(-2.0f));
+    CHECK(std::isnan(out[3])); // #700: negative before -> NaN (no sign-flipped ratios)
 }
 
 TEST_CASE("ChangeDetection cvaMagnitude sums squared band deltas", "[processing][change_detection][c1]") {

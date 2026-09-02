@@ -216,8 +216,16 @@ bool readTileBip( const GdalDatasetWrapper &beforeDs, const GdalDatasetWrapper &
                         bandScratch[p] = nan;
                 }
             } else if ( hasNd && !std::isfinite( nd ) ) {
-                for ( size_t p = 0; p < tilePixels; ++p )
-                    if ( std::isnan( bandScratch[p] ) ) bandScratch[p] = nan;
+                // ±inf sentinels: std::isnan(±inf) is false, so the NaN-only
+                // rewrite never matched them and the branch was a no-op (#720).
+                // Match the declared sentinel itself; NaN observations are
+                // invalid either way.
+                const float ndF = static_cast<float>( nd );
+                for ( size_t p = 0; p < tilePixels; ++p ) {
+                    const float v = bandScratch[p];
+                    if ( std::isnan( v ) || v == ndF )
+                        bandScratch[p] = nan;
+                }
             }
         }
         for ( size_t p = 0; p < tilePixels; ++p )
@@ -237,8 +245,13 @@ bool readTileBip( const GdalDatasetWrapper &beforeDs, const GdalDatasetWrapper &
                         bandScratch[p] = nan;
                 }
             } else if ( hasNd && !std::isfinite( nd ) ) {
-                for ( size_t p = 0; p < tilePixels; ++p )
-                    if ( std::isnan( bandScratch[p] ) ) bandScratch[p] = nan;
+                // ±inf sentinels: see the before-raster branch above (#720).
+                const float ndF = static_cast<float>( nd );
+                for ( size_t p = 0; p < tilePixels; ++p ) {
+                    const float v = bandScratch[p];
+                    if ( std::isnan( v ) || v == ndF )
+                        bandScratch[p] = nan;
+                }
             }
         }
         for ( size_t p = 0; p < tilePixels; ++p )
@@ -654,9 +667,13 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
                     }
                     break;
                 case ChangeMetric::Ratio:
+                    // #700: NaN for before <= 0 — negative `before` (water
+                    // after atmospheric correction) produced sign-flipped
+                    // "ratios" that Otsu reads as huge change; the log-ratio
+                    // metric clamps negatives, so stay consistent here.
                     for ( size_t p = 0; p < n; ++p )
                     {
-                        tileOut[p] = ( beforeBip[p] == 0.0f )
+                        tileOut[p] = ( beforeBip[p] <= 0.0f )
                                        ? nan
                                        : afterBip[p] / beforeBip[p];
                     }

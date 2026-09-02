@@ -499,7 +499,10 @@ bool TerrainAnalysis::tri( const float *dem, float *out, int width, int height,
                 continue;
             }
 
-            float sumDiff = 0;
+            // Riley et al. (1999) TRI: sqrt( sum of squared elevation
+            // differences over the 8 neighbours ). The previous mean |dz|
+            // was not comparable with GDAL/ArcGIS/GRASS "TRI" (#700).
+            double sumSqDiff = 0.0;
             int count = 0;
             for ( int dr = -1; dr <= 1; ++dr )
             {
@@ -510,16 +513,15 @@ bool TerrainAnalysis::tri( const float *dem, float *out, int width, int height,
                     const float v = getCell( dem, width, height, r + dr, c + dc, nodata );
                     if ( v == nodata || std::isnan( v ) )
                         continue;
-                    sumDiff += std::abs( z - v );
+                    const double d = static_cast<double>( z ) - v;
+                    sumSqDiff += d * d;
                     count++;
                 }
             }
             // Guard preserves the historical 0.0 for cells with no valid
-            // neighbors now that safeDivDouble's zero-denominator contract is
-            // NaN (#634).
-            out[idx] = count > 0
-                          ? static_cast<float>( MathUtils::safeDivDouble( sumDiff, count ) )
-                          : 0.0f;
+            // neighbors (the safeDivDouble zero-denominator contract is NaN,
+            // #634 — zero is the correct "no relief information" value here).
+            out[idx] = count > 0 ? static_cast<float>( std::sqrt( sumSqDiff ) ) : 0.0f;
         }
     }
     return true;

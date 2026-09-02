@@ -37,8 +37,19 @@ double toDouble(const QString &s, bool *ok = nullptr)
 
 /// Extract the trailing integer from a Landsat band name like "B4", "ST_B10".
 /// Matches the LAST digit group so names like "LC08_B4" resolve to 4, not 08.
+/// Landsat 7 VCID names ("B6_VCID_1", MTL suffix "6_VCID_1") are special: the
+/// last digit group is the VCID index, so the FIRST digit group (the band
+/// number 6) is returned (#699) — the trailing parse silently mapped the
+/// thermal VCID bands onto band 1/2.
 int bandNumberFromName(const QString &name)
 {
+    if (name.contains(QStringLiteral("VCID"), Qt::CaseInsensitive)) {
+        static const QRegularExpression firstRe(QStringLiteral("(\\d+)"));
+        const auto mFirst = firstRe.match(name);
+        if (mFirst.hasMatch())
+            return mFirst.captured(1).toInt();
+        return 0;
+    }
     static const QRegularExpression re(QStringLiteral("(\\d+)[^\\d]*$"));
     const auto m = re.match(name);
     if (!m.hasMatch())
@@ -117,6 +128,15 @@ bool loadLandsatMtl(const QString &mtlPath, const QMap<int, QString> &bandNames,
     for (auto it = effective.constBegin(); it != effective.constEnd(); ++it)
         rasterToRawToken.insert(it.key(), it.value().toUpper());
 
+    // Landsat 7 stores band 6 twice (RADIANCE_MULT_BAND_6_VCID_1/_2). The
+    // numeric fallback parses the LAST digit group, so "B6_VCID_1" would
+    // resolve to band 1 and silently apply blue-band coefficients to a
+    // thermal channel (#699): the verbatim MTL suffix must be tried first,
+    // and a _VCID token must never fall through to the (wrong) numeric key.
+    auto isVcidToken = [](const QString &token) {
+        return token.contains(QStringLiteral("VCID"));
+    };
+
     // Helper: try a list of candidate suffixes for a given MTL prefix and return the first match.
     auto tryCandidates = [&](const QString &prefix, const QStringList &candidates,
                              double *outVal, bool *ok) -> bool {
@@ -137,11 +157,22 @@ bool loadLandsatMtl(const QString &mtlPath, const QMap<int, QString> &bandNames,
         const int rasterBand = it.key();
         const int lb = landsatBandFor(rasterBand);
         const QString raw = rasterToRawToken.value(rasterBand);
-        // Candidate suffixes: raw token first (ST_B10), then numeric (10), then plain numeric fallback.
+        // Candidate suffixes tried in order:
+        //   1. raw token verbatim (ST_B10 / 6_VCID_1 from auto-discovery),
+        //   2. raw token with a leading "B" stripped (B6_VCID_1 -> 6_VCID_1,
+        //      the actual MTL key suffix for Landsat 7 VCID bands),
+        //   3. the numeric band (10) — EXCEPT for _VCID tokens, whose last
+        //      digit group is the VCID index, not the band number (#699):
+        //      failing closed (defaults + hasRadiance=false, so dn_to_radiance
+        //      throws) beats applying band-1 coefficients to a thermal channel.
         QStringList candNumeric;
         if (!raw.isEmpty())
             candNumeric.append(raw);
-        candNumeric.append(QString::number(lb));
+        if (raw.startsWith(QLatin1Char('B')) && raw.size() > 1 && raw.at(1).isDigit())
+            candNumeric.append(raw.mid(1));
+        const bool vcid = !raw.isEmpty() && isVcidToken(raw);
+        if (!vcid)
+            candNumeric.append(QString::number(lb));
         BandCoefficients c;  // defaults: gain=1, bias=0, reflMult=1, reflAdd=0, scale=1
         bool gOk = false, bOk = false, rmOk = false, raOk = false, k1Ok = false, k2Ok = false;
         double v;

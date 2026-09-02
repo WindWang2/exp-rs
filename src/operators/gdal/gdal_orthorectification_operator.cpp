@@ -12,10 +12,7 @@
 #include <QString>
 
 #include <gdal.h>
-#include <gdal_utils.h>
-#include <gdalwarper.h>
 #include <cpl_string.h>
-#include <ogr_srs_api.h>
 
 #include <vector>
 
@@ -28,15 +25,6 @@ namespace {
 const std::vector<std::string> s_resampling = {
     "nearest", "bilinear", "cubic", "cubicspline", "lanczos"
 };
-
-GDALResampleAlg parseResampling(const std::string& name) {
-    if (name == "nearest") return GRA_NearestNeighbour;
-    if (name == "bilinear") return GRA_Bilinear;
-    if (name == "cubic") return GRA_Cubic;
-    if (name == "cubicspline") return GRA_CubicSpline;
-    if (name == "lanczos") return GRA_Lanczos;
-    return GRA_Bilinear;
-}
 
 bool hasRpcMetadata(GDALDatasetH ds) {
     CSLConstList md = GDALGetMetadata(ds, "RPC");

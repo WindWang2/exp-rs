@@ -59,8 +59,9 @@ class TerrainAnalysis
     static bool roughness( const float *dem, float *out, int width, int height,
                            float nodata );
 
-    /// Compute TRI (Terrain Ruggedness Index): mean absolute difference
-    /// from center cell to 8 neighbors in 3x3 window.
+    /// Compute TRI (Terrain Ruggedness Index) after Riley et al. (1999):
+    /// sqrt of the sum of squared differences from the center cell to the
+    /// 8 neighbors in a 3x3 window (comparable with GDAL/ArcGIS/GRASS).
     static bool tri( const float *dem, float *out, int width, int height,
                      float nodata );
 

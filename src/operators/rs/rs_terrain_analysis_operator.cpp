@@ -18,6 +18,7 @@
 #include <cpl_error.h>
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -39,6 +40,7 @@ Json::Value RsTerrainAnalysisOperator::schema() const {
     props["output"] = makeOutputParam("output", "Output terrain product raster", "tif");
     props["product"] = makeEnumParam("product", "Terrain product to compute", s_products, "slope");
     props["cellSize"] = makeNumberParam("cellSize", "Pixel size in map units", 30.0);
+    props["zFactor"] = makeNumberParam("zFactor", "Vertical unit scaling: elevation-to-horizontal-unit ratio (1.0 = same unit; 0.3048 for a DEM in feet, 100.0 for centimetres)", 1.0);
     props["nodata"] = makeNumberParam("nodata", "DEM no-data value", -9999.0);
     props["sunAzimuth"] = makeNumberParam("sunAzimuth", "Sun azimuth for hillshade (degrees)", 315.0);
     props["sunElevation"] = makeNumberParam("sunElevation", "Sun elevation for hillshade (degrees)", 45.0);
@@ -98,6 +100,20 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
 
     const float sunAzimuth = static_cast<float>(getDouble(params, "sunAzimuth", 315.0));
     const float sunElevation = static_cast<float>(getDouble(params, "sunElevation", 45.0));
+
+    // #700: vertical unit scaling. The kernels assume elevation shares the
+    // horizontal cell-size unit (metres after the geographic-DEM
+    // conversion), so a feet DEM silently produced ~3.28x slope errors.
+    // zFactor converts elevation into the horizontal unit (0.3048 for feet,
+    // 100.0 for centimetres); 1.0 keeps the historical behaviour.
+    float zFactor = 1.0f;
+    if (params.isMember("zFactor") && params["zFactor"].isNumeric()) {
+        zFactor = static_cast<float>(params["zFactor"].asDouble());
+        if (!std::isfinite(zFactor) || zFactor <= 0.0f) {
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "zFactor must be a finite positive number");
+        }
+    }
 
     ensureGdalInit();
 
@@ -178,7 +194,7 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
     const int width = ds.width();
     const int height = ds.height();
 
-    context.logInfo("Computing " + product + " from " + inputPath + " (cellSizeX=" + std::to_string(cellSizeX) + ", cellSizeY=" + std::to_string(cellSizeY) + ")");
+    context.logInfo("Computing " + product + " from " + inputPath + " (cellSizeX=" + std::to_string(cellSizeX) + ", cellSizeY=" + std::to_string(cellSizeY) + ", zFactor=" + std::to_string(zFactor) + ")");
     context.reportProgress(0.2, "Reading DEM");
 
     // The terrain kernels are 3x3-window computations, so the DEM is streamed
@@ -234,7 +250,19 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
 
             const int bufW = tile.bufferWidth;
             const int bufH = tile.bufferHeight;
-            std::copy(pixels, pixels + static_cast<size_t>(bufW) * bufH, demBuf.begin());
+            const size_t bufN = static_cast<size_t>(bufW) * bufH;
+            std::copy(pixels, pixels + bufN, demBuf.begin());
+
+            // #700: apply the z factor to the real DEM samples BEFORE the
+            // nodata-margin reset below, so the edge margins keep the exact
+            // sentinel value the kernels test for.
+            if (zFactor != 1.0f) {
+                for (size_t i = 0; i < bufN; ++i) {
+                    float& v = demBuf[i];
+                    if (!std::isnan(v) && v != computeNodata)
+                        v *= zFactor;
+                }
+            }
 
             // Full-frame kernels read out-of-bounds neighbors as nodata
             // (TerrainAnalysis::getCell). The stream's replicate-filled

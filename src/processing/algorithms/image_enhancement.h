@@ -24,7 +24,15 @@ public:
 
     static PcaResult pca(const std::vector<std::vector<float>> &input, int numComponents);
 
-    static MnfResult mnf(const std::vector<std::vector<float>> &input, int numComponents);
+    /**
+     * In-memory MNF over band-major flat arrays. The noise covariance comes
+     * from horizontal shift differences; pass @p rasterWidth (> 1) so
+     * differences at row ends are skipped, matching processMnfFile. With the
+     * default 0 the array is treated as an unstructured series and the
+     * difference at each row end wraps (kept for API compatibility, #700).
+     */
+    static MnfResult mnf(const std::vector<std::vector<float>> &input, int numComponents,
+                         int rasterWidth = 0);
 
     /**
      * Run PCA on a multi-band GeoTIFF and write component bands to output.

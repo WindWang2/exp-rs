@@ -276,7 +276,7 @@ Json::Value RsChangeNormalizedDifferenceOperator::run( const Json::Value &params
 
 Json::Value RsChangeRatioOperator::schema() const
 {
-    return primitiveSchema( "Change Ratio", "after / before (NaN where before is 0)." );
+    return primitiveSchema( "Change Ratio", "after / before (NaN where before is <= 0)." );
 }
 Json::Value RsChangeRatioOperator::metadata() const
 {

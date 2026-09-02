@@ -40,7 +40,7 @@ enum class ChangeMetric
     Difference,           ///< after - before (signed; atomic primitive semantics)
     AbsoluteDifference,   ///< |after - before| (legacy facade "difference" semantics)
     NormalizedDifference, ///< (after - before) / (after + before)
-    Ratio,                ///< after / before (NaN where before == 0)
+    Ratio,                ///< after / before (NaN where before <= 0)
     Cva,                  ///< change vector analysis magnitude (all bands)
     Mad                   ///< multivariate alteration detection (all bands)
 };

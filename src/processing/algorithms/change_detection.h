@@ -25,8 +25,9 @@ bool changeMask(const float *diff, uint8_t *mask, size_t count, float threshold)
 ChangeStats statistics(const float *diff, size_t count);
 
 /**
- * Ratio change: out[i] = after[i] / before[i]. Pixels where before == 0
- * become NaN (guarded, matching the NaN convention of the other kernels).
+ * Ratio change: out[i] = after[i] / before[i]. Pixels where before <= 0
+ * become NaN (guarded, matching the NaN convention of the other kernels and
+ * the log-ratio treatment of non-positive reflectance, #700).
  */
 bool ratio(const float *before, const float *after, float *out, size_t count);
 

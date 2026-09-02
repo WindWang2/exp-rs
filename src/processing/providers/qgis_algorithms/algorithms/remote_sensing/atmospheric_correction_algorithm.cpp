@@ -15,8 +15,41 @@
 #include <qgsrectangle.h>
 #include <qgscoordinatereferencesystem.h>
 
+#include <gdal.h>
+#include <cpl_conv.h>
+
+#include <QMap>
 #include <cmath>
 #include <vector>
+
+namespace
+{
+
+/// Band-name map for MTL/MTD coefficient lookup, built from the raster's GDAL
+/// band descriptions (mirrors RsAtmosphericCorrectionOperator). Pinning
+/// band 1 = "B1" mislabelled any stack that does not start at B1 — the default
+/// Sentinel-2 10 m stack starts at B2 (#699). Missing descriptions fall back
+/// to the synthetic B<index> convention used by the importers.
+QMap<int, QString> bandNamesFromRaster( const QString &source )
+{
+  QMap<int, QString> bandNames;
+  if ( GDALDatasetH ds = GDALOpen( source.toUtf8().constData(), GA_ReadOnly ) )
+  {
+    const int bandCount = GDALGetRasterCount( ds );
+    for ( int b = 1; b <= bandCount; ++b )
+    {
+      if ( GDALRasterBandH band = GDALGetRasterBand( ds, b ) )
+      {
+        const QString desc = QString::fromUtf8( GDALGetDescription( band ) );
+        bandNames.insert( b, desc.isEmpty() ? QStringLiteral( "B%1" ).arg( b ) : desc );
+      }
+    }
+    GDALClose( ds );
+  }
+  return bandNames;
+}
+
+} // namespace
 
 void AtmosphericCorrectionAlgorithm::initAlgorithm( const QVariantMap & )
 {
@@ -96,8 +129,9 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
         bool loaded = false;
         if ( !metaPath.isEmpty() )
         {
-            QMap<int, QString> bandNames;
-            bandNames.insert( 1, QStringLiteral( "B1" ) );
+            // Resolve the band's real name from the raster's band descriptions
+            // instead of pinning band 1 = "B1" (#699).
+            const QMap<int, QString> bandNames = bandNamesFromRaster( inputLayer->source() );
             loaded = RadiometricCalibration::loadMetadata( inputLayer->source(), metaPath, bandNames, &meta, &metaErr )
                      && meta.bands.contains( 1 );
         }
@@ -132,8 +166,9 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
             if (!metaPath.isEmpty()) {
                 RadiometricCalibration::CalibrationMetadata meta;
                 QString metaErr;
-                QMap<int, QString> bandNames;
-                bandNames.insert(1, QStringLiteral("B1"));
+                // Resolve the band's real name from the raster's band
+                // descriptions instead of pinning band 1 = "B1" (#699).
+                const QMap<int, QString> bandNames = bandNamesFromRaster(inputLayer->source());
                 if (RadiometricCalibration::loadMetadata(inputLayer->source(), metaPath, bandNames, &meta, &metaErr)
                     && meta.bands.contains(1)) {
                     const auto &c = meta.bands.value(1);

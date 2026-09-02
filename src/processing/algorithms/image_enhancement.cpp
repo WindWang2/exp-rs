@@ -1198,35 +1198,42 @@ void ImageEnhancement::computeCovarianceMatrix(const std::vector<std::vector<flo
     if (bands <= 0 || n == 0)
         return;
 
-    // Cache-friendly pixel-outer accumulation: loads each pixel's spectrum once.
-    std::vector<std::vector<double>> sum(bands, std::vector<double>(bands, 0.0));
-    std::vector<std::vector<size_t>> validCount(bands, std::vector<size_t>(bands, 0));
+    // Listwise deletion (#700): a pixel is dropped when ANY band is NaN, so
+    // every covariance entry is summed over the SAME pixel set. The previous
+    // pairwise deletion (per-pair valid counts) let different entries see
+    // different sample sets, which can make the matrix non-PSD and diverge
+    // from the file path (processPcaFile/processMnfFile), which already
+    // deletes pixels listwise. With no NaNs the result is identical.
+    std::vector<double> sum(bands * bands, 0.0);
+    size_t validCount = 0;
     std::vector<float> pVal(bands);
 
     for (size_t k = 0; k < n; ++k) {
-        for (int b = 0; b < bands; ++b)
-            pVal[b] = centered[b][k];
-
+        bool pixelValid = true;
+        for (int b = 0; b < bands; ++b) {
+            const float v = centered[b][k];
+            if (std::isnan(v)) {
+                pixelValid = false;
+                break;
+            }
+            pVal[b] = v;
+        }
+        if (!pixelValid)
+            continue;
+        ++validCount;
         for (int i = 0; i < bands; ++i) {
-            const float vi = pVal[i];
-            if (std::isnan(vi))
-                continue;
-            const double dvi = static_cast<double>(vi);
+            const double dvi = static_cast<double>(pVal[i]);
             for (int j = i; j < bands; ++j) {
-                const float vj = pVal[j];
-                if (std::isnan(vj))
-                    continue;
-                sum[i][j] += dvi * static_cast<double>(vj);
-                validCount[i][j]++;
+                const double prod = dvi * static_cast<double>(pVal[j]);
+                sum[static_cast<size_t>(i) * bands + j] += prod;
             }
         }
     }
 
+    const double divisor = (validCount > 1) ? static_cast<double>(validCount - 1) : 1.0;
     for (int i = 0; i < bands; ++i) {
         for (int j = i; j < bands; ++j) {
-            const size_t vc = validCount[i][j];
-            const double divisor = (vc > 1) ? static_cast<double>(vc - 1) : 1.0;
-            const float val = static_cast<float>(sum[i][j] / divisor);
+            const float val = static_cast<float>(sum[static_cast<size_t>(i) * bands + j] / divisor);
             cov[i][j] = val;
             cov[j][i] = val;
         }
@@ -1444,7 +1451,7 @@ ImageEnhancement::PcaResult ImageEnhancement::pca(
 }
 
 ImageEnhancement::MnfResult ImageEnhancement::mnf(
-    const std::vector<std::vector<float>> &input, int numComponents)
+    const std::vector<std::vector<float>> &input, int numComponents, int rasterWidth)
 {
     const int bands = static_cast<int>(input.size());
     if (bands == 0 || input[0].empty()) {
@@ -1478,12 +1485,26 @@ ImageEnhancement::MnfResult ImageEnhancement::mnf(
             centered[b][k] = input[b][k] - means[b];
 
     // 2. Noise covariance estimated from lagged (shift) differences.
-    std::vector<std::vector<float>> noise(bands, std::vector<float>(n - 1));
+    // #700: when the raster width is known, differences at row ends are
+    // skipped — the flat k+1 shift otherwise wraps the last pixel of a row
+    // to the first pixel of the next row, mixing cross-row signal into the
+    // noise estimate (the file path processMnfFile never wraps).
+    const bool rowAware = rasterWidth > 1;
+    std::vector<std::vector<float>> noise(bands, std::vector<float>());
+    std::vector<size_t> noiseIndex(bands, 0);
+    const size_t noiseSlots = rowAware ? n : n - 1;
     for (int b = 0; b < bands; b++)
-        for (size_t k = 0; k + 1 < n; k++)
-            noise[b][k] = centered[b][k + 1] - centered[b][k];
+        noise[b].resize(noiseSlots);
+    for (size_t k = 0; k + 1 < n; k++) {
+        if (rowAware && (k % static_cast<size_t>(rasterWidth)) ==
+                            static_cast<size_t>(rasterWidth) - 1)
+            continue; // k is the last pixel of a row
+        for (int b = 0; b < bands; b++)
+            noise[b][noiseIndex[b]++] = centered[b][k + 1] - centered[b][k];
+    }
+    const size_t noiseSamples = rowAware ? noiseIndex[0] : (n - 1);
     std::vector<std::vector<float>> noiseCov;
-    computeCovarianceMatrix(noise, bands, n - 1, noiseCov);
+    computeCovarianceMatrix(noise, bands, noiseSamples, noiseCov);
     for (int b = 0; b < bands; b++)
         for (int b2 = 0; b2 < bands; b2++)
             noiseCov[b][b2] /= 2.0f;
