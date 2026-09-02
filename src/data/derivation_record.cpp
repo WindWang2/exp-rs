@@ -166,14 +166,22 @@ QStringList findInputPathsInParams( const QVariantMap &params )
       const QString trimmed = candidate.trimmed();
       if ( trimmed.isEmpty() || trimmed.startsWith( QLatin1Char( '$' ) ) )
         continue;
-      if ( !paths.contains( trimmed ) && QFileInfo::exists( trimmed ) )
+      // Only existing FILES identify an input asset; directories and
+      // not-yet-written paths cannot resolve.
+      if ( !paths.contains( trimmed ) && QFileInfo( trimmed ).isFile() )
         paths.append( trimmed );
     }
   };
 
   for ( auto it = params.begin(); it != params.end(); ++it )
   {
-    if ( !it.key().contains( QStringLiteral( "input" ), Qt::CaseInsensitive ) )
+    // The scan is key-agnostic (#718: real inputs ride under "before"/"after",
+    // "pan"/"ms", "postfire", … — an "input"-keyed filter silently dropped
+    // those edges) with one explicit guard: the run's own destination must
+    // never pose as an input, or a re-run over an existing output would
+    // record the output as its own source (the dispatcher's old
+    // outputLayerPath exclusion).
+    if ( it.key().contains( QStringLiteral( "output" ), Qt::CaseInsensitive ) )
       continue;
     collect( it.value() );
   }
@@ -191,7 +199,14 @@ InputLineage resolveInputLineage( DataManager *dataManager, const QStringList &p
   }
   for ( const QString &path : paths )
   {
-    const auto snapshot = dataManager->findByPath( path );
+    // Registered assets store a canonicalized source; compare the canonical
+    // form so symlinked / case-variant parameter paths still resolve (a plain
+    // absoluteFilePath match silently dropped those lineage edges) (#698
+    // review, restored for #718).
+    const QFileInfo fi( path );
+    const QString canonical = fi.canonicalFilePath();
+    const auto snapshot =
+      dataManager->findByPath( canonical.isEmpty() ? path : canonical );
     if ( !snapshot )
     {
       lineage.unresolvedPaths.append( path );

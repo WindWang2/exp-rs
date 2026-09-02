@@ -27,18 +27,25 @@ struct DerivationInput
 };
 
 /// Input-side counterpart of TaskCenter's findOutputPathInParams (#698):
-/// collects parameter values whose key mentions "input" (case-insensitive)
-/// and whose value is an existing file path. Placeholder references
-/// ("$step.output") and non-path strings are ignored — only paths that exist
-/// on disk at commit time can be resolved into lineage records. String,
-/// string-list and variant-list values are all considered. ONE implementation
-/// shared by the tool-call dispatcher and the CLI pipeline runner.
+/// collects parameter values that are existing file paths across ALL parameter
+/// keys — real inputs also ride under names like "before"/"after", "pan"/"ms"
+/// or "postfire", so keying the scan on "input"-like names silently dropped
+/// those lineage edges (#718). The run's own destination is excluded: values
+/// under "output"-like keys never count as inputs (a re-run over an existing
+/// output must not record the output as its own source). Placeholder
+/// references ("$step.output") and non-path strings are ignored — only paths
+/// that exist on disk as files at commit time can be resolved into lineage
+/// records. String, string-list and variant-list values are all considered.
+/// ONE implementation shared by the tool-call dispatcher and the CLI pipeline
+/// runner.
 QStringList findInputPathsInParams( const QVariantMap &params );
 
 /// Resolved input lineage for one run: paths that map to a registered asset
 /// become DerivationInput records (asset id + the revision that was present);
 /// anything else is kept in unresolvedPaths so provenance reports it instead
-/// of dropping it silently.
+/// of dropping it silently. Matching is canonical (symlink-resolving): a
+/// parameter path spelled through a symlink resolves to the registered asset
+/// exactly as the asset's canonicalized source (#698 review, #718).
 struct InputLineage
 {
   QVector<DerivationInput> inputs;
@@ -108,10 +115,16 @@ inline DerivationRecord makeTaskDerivation( const QString &algorithmId,
 {
   DerivationRecord record;
   record.algorithmId = algorithmId;
+  // No per-operator version exists in AlgorithmDescriptor / the registries
+  // yet; stamp the platform algorithm version so exported provenance stops
+  // carrying an empty field (#698), matching the synchronous
+  // asset_index_pipeline commit path.
+  record.algorithmVersion = QStringLiteral( "1.0" );
   record.parameters = parameters;
   record.inputs = std::move( inputs );
   record.unresolvedInputPaths = unresolvedInputPaths;
   record.taskReference = taskReference;
+  record.softwareVersion = QStringLiteral( "SICNU GEO RS 1.0" );
   record.completedAtUtc = QDateTime::currentDateTimeUtc();
   return record;
 }

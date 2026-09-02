@@ -406,7 +406,6 @@ TemporalPreflightReport runPreflight( const TemporalCollection &collection,
   report.commonRadiometricState = anyState ? commonState : QString();
 
   report.scaleOffsetDeclared = declaredScaleScenes > 0;
-  report.uniformScaleOffset = !scaleMismatch;
   if ( declaredScaleScenes > 0 )
   {
     report.uniformScale = commonScale.scale;
@@ -416,6 +415,10 @@ TemporalPreflightReport runPreflight( const TemporalCollection &collection,
   // others do not is a silent-corruption hazard — reject.
   if ( declaredScaleScenes > 0 && declaredScaleScenes < scenes.size() )
     scaleMismatch = true;
+  // Freeze the uniform flag only AFTER the all-or-none check above: a partial
+  // declaration must not report uniform_scale_offset=true next to its blocking
+  // scale/offset issue (clients branch on the flag, not the issue list).
+  report.uniformScaleOffset = !scaleMismatch;
   if ( scaleMismatch && options.requireUniformScaleOffset )
     report.issues.append( { QStringLiteral( "temporal.scale_offset_mismatch" ),
                              QStringLiteral( "scale/offset declarations are inconsistent across "

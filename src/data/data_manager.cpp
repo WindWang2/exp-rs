@@ -1052,9 +1052,16 @@ Result<AssetId> DataManager::createVirtualRaster(
     const Result<void> edge = addStrongDependency( registered.assetId, input );
     if ( !edge )
     {
+      // Compensating rollback. A FAILED unload must not vanish: it would
+      // leave a partially-registered virtual asset (missing edges) behind a
+      // reported failure (#703). Surface the unload diagnostics alongside the
+      // triggering ones so the caller sees both the cause and the leftovers.
       const UnloadPlan plan = planUnload( registered.assetId ).confirmedCascade();
-      ( void ) unload( plan );
-      return Result<AssetId>::failure( edge.diagnostics() );
+      const Result<void> rollback = unload( plan );
+      QVector<Diagnostic> diagnostics = edge.diagnostics();
+      if ( !rollback )
+        diagnostics.append( rollback.diagnostics() );
+      return Result<AssetId>::failure( diagnostics );
     }
   }
 
