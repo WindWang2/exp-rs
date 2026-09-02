@@ -4,9 +4,9 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 
-#include <opencv2/dnn.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include <cstring>
 #include <map>
 #include <QFile>
 #include <QString>
@@ -379,26 +379,68 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   auto flushBatch = [ & ]( int currentTileIndex )
   {
     // One forward pass per batch on the shared (cached) session.
-    // swapRB=false: the tile buffer already holds GDAL band order, and the
-    // manifest band_roles expect channel i == file band i — OpenCV's default
-    // swapRB=true would silently exchange bands 1 and 3.
+    // Manual NCHW pack (#671): blobFromImage(s) asserts channels in
+    // {1,3,4} — multispectral / SAR inference (2, >=5 channels) died with
+    // a raw cv::Exception that also violates the engine's RSOperatorError
+    // contract. The buffer already holds GDAL band order and manifest
+    // band_roles expect channel i == file band i, so we keep that order
+    // (swapRB=false equivalent) without delegating to the imread helper.
+    // The band_roles arity contract is validated up front in run().
     cv::Mat blob;
     try
     {
-      if ( batchMats.size() == 1 )
-        blob = cv::dnn::blobFromImage( batchMats.front(), 1.0, cv::Size(), cv::Scalar(),
-                                       /*swapRB=*/false, /*crop=*/false );
-      else
-        blob = cv::dnn::blobFromImages( batchMats, 1.0, cv::Size(), cv::Scalar(),
-                                        /*swapRB=*/false, /*crop=*/false );
+      const int C = bandCount;
+      const int B = static_cast<int>( batchMats.size() );
+      const int H = batchMats.front().rows;
+      const int W = batchMats.front().cols;
+      // blobFromImages asserted same-size batches (a mixed batch threw);
+      // edge tiles make that reachable whenever raster dims are not a
+      // multiple of the tile size and resizeToInput is off — keep the check
+      // LOUD instead of silently packing garbage.
+      for ( const cv::Mat &m : batchMats )
+      {
+        if ( m.rows != H || m.cols != W )
+          throw RSOperatorError( ErrorCode::InvalidInputData,
+                                 "mixed tile sizes in one inference batch (" + std::to_string( m.cols ) + "x"
+                                   + std::to_string( m.rows ) + " vs " + std::to_string( W ) + "x"
+                                   + std::to_string( H ) + ") - enable resize:to_input or align the raster" );
+      }
+      int dims[4] = { B, C, H, W };
+      blob = cv::Mat( 4, dims, CV_32F );
+      blob.setTo( 0 );
+      for ( int b = 0; b < B; ++b )
+      {
+        std::vector<cv::Mat> channels;
+        cv::split( batchMats[static_cast<std::size_t>( b )], channels );
+        for ( int c = 0; c < C; ++c )
+        {
+          const cv::Mat &ch = channels[static_cast<std::size_t>( c )];
+          // ptr(b, c, 0) is the 3-arg overload (data + b*step0 + c*step1):
+          // the const int* overload reads idx[dims] (a 4th, garbage element)
+          // on a 4-D Mat — an OOB stack read whose damage depends on the
+          // stack garbage.
+          float *dst = blob.ptr<float>( b, c, 0 );
+          for ( int y = 0; y < H; ++y )
+          {
+            std::memcpy( dst + static_cast<std::size_t>( y ) * W, ch.ptr<float>( y ),
+                         static_cast<std::size_t>( W ) * sizeof( float ) );
+          }
+        }
+      }
     }
-    // #671: blob construction used to sit outside the try below, so a
-    // cv::Exception from blobFromImage escaped run() unconverted.
+    catch ( const RSOperatorError & )
+    {
+      throw;
+    }
     catch ( const std::exception &e )
     {
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             std::string( "model input tensor preparation failed (bands fed: " )
+      throw RSOperatorError( ErrorCode::OpenCvError,
+                             std::string( "failed to build inference blob (bands fed: " )
                                + std::to_string( bandCount ) + "): " + e.what() );
+    }
+    catch ( ... )
+    {
+      throw RSOperatorError( ErrorCode::OpenCvError, "failed to build inference blob (unknown)" );
     }
     cv::Mat output;
     try

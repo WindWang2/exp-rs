@@ -84,7 +84,7 @@ Json::Value RsTemporalAnomalyOperator::schema() const
 
   Json::Value outputs( Json::objectValue );
   outputs["output"] = makeOutputParam( "output", "Anomaly GeoTIFF", "tif" );
-  outputs["sceneCount"] = makeIntegerParam( "sceneCount", "Baseline scenes used", 0 );
+  outputs["sceneCount"] = makeIntegerParam( "sceneCount", "Scenes analysed (baseline + target)", 0 );
   Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
   root["required"] = makeRequired( { "output" } );
   return root;
@@ -359,6 +359,9 @@ Json::Value RsTemporalAnomalyOperator::run( const Json::Value &params, RSOperato
   result["output"] = outputPath;
   result["method"] = method.toStdString();
   result["targetTime"] = prepared.collection.scenes().at( targetIndex ).time.iso.toStdString();
+  // Schema-declared output: emit it like every other temporal operator does
+  // (total scenes analysed; the baseline subset stays in baselineCount).
+  result["sceneCount"] = static_cast<Json::Int>( sceneCount );
   result["baselineCount"] = static_cast<Json::Int>( baselineIndices.size() );
   result["baselineInsufficient"] = static_cast<int>( baselineIndices.size() ) < minObservations;
   if ( !prepared.collection.timeRangeStartIso().isEmpty() )

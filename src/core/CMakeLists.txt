@@ -2295,8 +2295,14 @@ if(MSVC)
   )
 else()
   if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND (CMAKE_BUILD_TYPE MATCHES Release OR CMAKE_BUILD_TYPE MATCHES RelWithDebInfo))
-    set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/qgsexpression_texts.cpp PROPERTIES COMPILE_FLAGS "-O1")
+    set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/qgsexpression_texts.cpp PROPERTIES COMPILE_FLAGS "-O1" SKIP_PRECOMPILE_HEADERS TRUE)
     set_source_files_properties(proj/qgscoordinatereferencesystem.cpp PROPERTIES COMPILE_FLAGS "-mllvm -inline-threshold=128")
+    # Same class of pathological clang Release codegen blow-up as
+    # qgsexpression_texts.cpp above: the font substitution tables drive the
+    # clang backend into a multi-hour loop at -O1/-O2 (frontend is fine —
+    # -fsyntax-only completes in seconds). -O0 + no PCH compiles in seconds;
+    # font manager is not a hot path.
+    set_source_files_properties(textrenderer/qgsfontmanager.cpp PROPERTIES COMPILE_FLAGS "-O0" SKIP_PRECOMPILE_HEADERS TRUE)
   endif()
 endif()
 

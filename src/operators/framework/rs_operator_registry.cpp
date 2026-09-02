@@ -9,16 +9,35 @@ namespace opencv { void initBuiltinOpenCvOperators(); }
 #endif
 namespace otb { void initBuiltinOtbOperators(); }
 
+} // namespace sicnu::operators
+
+namespace sicnu::operators::rs {
+/// Published by instance() while its call_once chain runs so family init
+/// functions can register operators without re-entering instance().
+/// Defined in rs_operators_init.cpp.
+extern RSOperatorRegistry *sRegistryUnderConstruction;
+}
+
+namespace sicnu::operators {
+
 RSOperatorRegistry& RSOperatorRegistry::instance() {
     static std::once_flag initFlag;
     static RSOperatorRegistry registry;
     std::call_once(initFlag, []() {
+        // registry's address is constant for the process lifetime; assign it
+        // directly rather than capturing (static locals cannot be captured).
+        // Every family init function registers through this pointer (never
+        // via instance()) — re-entering the same call_once from inside the
+        // chain leaves the init guard unreleased and the next instance()
+        // re-runs registration against a cleared factory map (#707).
+        sicnu::operators::rs::sRegistryUnderConstruction = &registry;
         rs::initBuiltinRsOperators();
         gdal::initBuiltinGdalOperators();
 #ifdef SICNU_HAS_OPENCV
         opencv::initBuiltinOpenCvOperators();
 #endif
         otb::initBuiltinOtbOperators();
+        sicnu::operators::rs::sRegistryUnderConstruction = nullptr;
     });
     return registry;
 }

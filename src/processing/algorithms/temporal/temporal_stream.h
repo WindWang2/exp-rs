@@ -110,16 +110,21 @@ public:
   /// Reads one tile of one band of one scene into @a out (tileWidth()×
   /// tileHeight() floats). Values are normalized per the class contract
   /// (finite-or-NaN). @a skipMasking disables QA masking for this read
-  /// (e.g. when reading the QA band itself).
+  /// (e.g. when reading the QA band itself). @a skipScaleOffset disables the
+  /// uniform scale/offset normalization for this read — required when the
+  /// band is NOT the analysis band (GDAL scale/offset is declared PER BAND,
+  /// so rescaling a raw-DN quality band with the analysis band's factors
+  /// writes it in the wrong units).
   bool readSceneBandTile( int sceneIndex, int band, int tileIndex, float *out,
-                          bool skipMasking = false );
+                          bool skipMasking = false, bool skipScaleOffset = false );
 
   /// Reads an ARBITRARY window (not tile-aligned) of one band of one scene
   /// into @a out (w×h floats) with the identical normalization contract.
   /// Used by ROI extraction (bbox windows). Scratch buffers grow if the
   /// window exceeds the tile size (reflected in peakSlots()).
   bool readSceneBandWindow( int sceneIndex, int band, int xOff, int yOff, int w, int h,
-                            float *out, bool skipMasking = false );
+                            float *out, bool skipMasking = false,
+                            bool skipScaleOffset = false );
 
   /// Reads a single pixel of one band of one scene (point time series).
   /// Same normalization contract as readSceneBandTile().
@@ -140,7 +145,7 @@ public:
 
 private:
   bool normalizeAndMask( int sceneIndex, int band, int x, int y, int w, int h,
-                         float *values, bool skipMasking );
+                         float *values, bool skipMasking, bool skipScaleOffset );
 
   QVector<TemporalSceneRef> m_scenes;
   std::vector<std::unique_ptr<GdalDatasetWrapper>> m_datasets; // owning: member dtors run even when the constructor throws

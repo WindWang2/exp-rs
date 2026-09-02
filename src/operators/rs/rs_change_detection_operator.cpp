@@ -124,7 +124,7 @@ Json::Value RsChangeDetectionOperator::metadata() const {
     meta["prerequisites"].append("Before and after rasters must be co-registered and same size "
                                  "(grid compatibility is preflighted).");
     meta["workflowHints"].append("Apply atmospheric correction to both dates before comparison.");
-    meta["limitations"].append("ratio outputs after/before (NaN where before is 0); "
+    meta["limitations"].append("ratio outputs after/before (NaN where before is <= 0); "
                                "cva and mad stream over 256x256 tiles in O(tile*bands + "
                                "bands^2) memory (mad is multi-pass); makeMask writes a "
                                "UInt8 0/1 mask with manual/Otsu/percentile/statistical "

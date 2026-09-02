@@ -154,7 +154,8 @@ int TemporalTileReader::bandForRole( int sceneIndex, const QString &roleId, int 
 }
 
 bool TemporalTileReader::normalizeAndMask( int sceneIndex, int band, int x, int y, int w, int h,
-                                           float *values, bool skipMasking )
+                                           float *values, bool skipMasking,
+                                           bool skipScaleOffset )
 {
   const GdalDatasetWrapper &ds = *m_datasets.at( sceneIndex );
   const size_t pixels = static_cast<size_t>( w ) * h;
@@ -173,10 +174,13 @@ bool TemporalTileReader::normalizeAndMask( int sceneIndex, int band, int x, int 
   }
 
   // 2) Explicit, preflight-verified scale/offset normalization (never
-  // guessed; belt-and-braces: only scenes that actually declare it).
+  // guessed; belt-and-braces: only scenes that actually declare it). The
+  // factors are the ANALYSIS band's — callers reading any other band (the
+  // composite's quality band) must pass skipScaleOffset, because GDAL
+  // declares scale/offset per band, not per scene.
   const bool sceneDeclaresScale =
       sceneIndex < m_radiometry.size() && m_radiometry.at( sceneIndex ).scaleDefined;
-  if ( m_options.applyScaleOffset && m_report.scaleOffsetDeclared &&
+  if ( m_options.applyScaleOffset && !skipScaleOffset && m_report.scaleOffsetDeclared &&
        m_report.uniformScaleOffset && sceneDeclaresScale )
   {
     const double scale = m_report.uniformScale;
@@ -254,7 +258,8 @@ bool TemporalTileReader::normalizeAndMask( int sceneIndex, int band, int x, int 
 }
 
 bool TemporalTileReader::readSceneBandTile( int sceneIndex, int band, int tileIndex,
-                                            float *out, bool skipMasking )
+                                            float *out, bool skipMasking,
+                                            bool skipScaleOffset )
 {
   if ( sceneIndex < 0 || sceneIndex >= sceneCount() )
     return false;
@@ -264,11 +269,13 @@ bool TemporalTileReader::readSceneBandTile( int sceneIndex, int band, int tileIn
 
   int x = 0, y = 0, w = 0, h = 0;
   tileRect( tileIndex, &x, &y, &w, &h );
-  return readSceneBandWindow( sceneIndex, band, x, y, w, h, out, skipMasking );
+  return readSceneBandWindow( sceneIndex, band, x, y, w, h, out, skipMasking,
+                              skipScaleOffset );
 }
 
 bool TemporalTileReader::readSceneBandWindow( int sceneIndex, int band, int xOff, int yOff,
-                                              int w, int h, float *out, bool skipMasking )
+                                              int w, int h, float *out, bool skipMasking,
+                                              bool skipScaleOffset )
 {
   if ( sceneIndex < 0 || sceneIndex >= sceneCount() )
     return false;
@@ -279,7 +286,8 @@ bool TemporalTileReader::readSceneBandWindow( int sceneIndex, int band, int xOff
     return false;
   if ( !ds.readBandWindow( band, xOff, yOff, w, h, out ) )
     return false;
-  return normalizeAndMask( sceneIndex, band, xOff, yOff, w, h, out, skipMasking );
+  return normalizeAndMask( sceneIndex, band, xOff, yOff, w, h, out, skipMasking,
+                           skipScaleOffset );
 }
 
 bool TemporalTileReader::readSceneBandPixel( int sceneIndex, int band, int x, int y, float *out )
@@ -301,7 +309,12 @@ bool TemporalTileReader::readSceneBandPixel( int sceneIndex, int band, int x, in
     *out = kNan;
     return true;
   }
-  if ( m_options.applyScaleOffset && m_report.scaleOffsetDeclared && m_report.uniformScaleOffset )
+  // Same gate as the tile path (normalizeAndMask): only scenes whose analysis
+  // band actually declares scale/offset are normalized.
+  const bool sceneDeclaresScale =
+      sceneIndex < m_radiometry.size() && m_radiometry.at( sceneIndex ).scaleDefined;
+  if ( m_options.applyScaleOffset && m_report.scaleOffsetDeclared &&
+       m_report.uniformScaleOffset && sceneDeclaresScale )
     v = static_cast<float>( m_report.uniformScale * v + m_report.uniformOffset );
 
   // Per-pixel QA/cloud masking (same kernels, single-sample).
@@ -311,35 +324,39 @@ bool TemporalTileReader::readSceneBandPixel( int sceneIndex, int band, int x, in
     if ( rad.maskBand > 0 && !rad.maskKind.isEmpty() )
     {
       float maskSample = kNan;
-      if ( ds.readPixel( rad.maskBand, x, y, &maskSample ) )
+      if ( !ds.readPixel( rad.maskBand, x, y, &maskSample ) )
       {
-        std::uint8_t flag = 0;
-        if ( rad.maskKind == QLatin1String( "sentinel2_scl" ) )
-        {
-          bool classes[16] = {};
-          for ( int c : temporal_mask_defaults::kSclMaskedClasses )
-            classes[c] = true;
-          std::uint8_t scl = 0;
-          if ( std::isfinite( maskSample ) && maskSample >= 0.0f && maskSample <= 15.0f )
-            scl = static_cast<std::uint8_t>( static_cast<int>( maskSample ) );
-          QaMask::sclMask( &scl, &flag, 1, classes );
-        }
-        else if ( rad.maskKind == QLatin1String( "landsat_qa_pixel" ) )
-        {
-          std::uint16_t qa = 0; // non-finite -> 0 (fill bit set) -> masked
-          if ( std::isfinite( maskSample ) && maskSample >= 0.0f && maskSample < 65536.0f )
-            qa = static_cast<std::uint16_t>( static_cast<int>( maskSample ) );
-          QaMask::landsatQaMask( &qa, &flag, 1, temporal_mask_defaults::kLandsatFlags );
-        }
-        else if ( rad.maskKind == QLatin1String( "explicit" ) )
-        {
-          flag = ( !std::isfinite( maskSample ) || maskSample != 0.0f ) ? 1 : 0;
-        }
-        if ( flag != 0 )
-        {
-          *out = kNan;
-          return true;
-        }
+        // Fail closed, like the tile path: an unreadable mask must not
+        // silently pass clouds.
+        *out = kNan;
+        return true;
+      }
+      std::uint8_t flag = 0;
+      if ( rad.maskKind == QLatin1String( "sentinel2_scl" ) )
+      {
+        bool classes[16] = {};
+        for ( int c : temporal_mask_defaults::kSclMaskedClasses )
+          classes[c] = true;
+        std::uint8_t scl = 0;
+        if ( std::isfinite( maskSample ) && maskSample >= 0.0f && maskSample <= 15.0f )
+          scl = static_cast<std::uint8_t>( static_cast<int>( maskSample ) );
+        QaMask::sclMask( &scl, &flag, 1, classes );
+      }
+      else if ( rad.maskKind == QLatin1String( "landsat_qa_pixel" ) )
+      {
+        std::uint16_t qa = 0; // non-finite -> 0 (fill bit set) -> masked
+        if ( std::isfinite( maskSample ) && maskSample >= 0.0f && maskSample < 65536.0f )
+          qa = static_cast<std::uint16_t>( static_cast<int>( maskSample ) );
+        QaMask::landsatQaMask( &qa, &flag, 1, temporal_mask_defaults::kLandsatFlags );
+      }
+      else if ( rad.maskKind == QLatin1String( "explicit" ) )
+      {
+        flag = ( !std::isfinite( maskSample ) || maskSample != 0.0f ) ? 1 : 0;
+      }
+      if ( flag != 0 )
+      {
+        *out = kNan;
+        return true;
       }
     }
   }

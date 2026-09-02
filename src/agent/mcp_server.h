@@ -126,6 +126,7 @@ protected:
     // MCP Methods — Spatial workflow & spatial tool layer (ADR 0122)
     QVariantMap handleRunWorkflow(const QVariantMap &arguments);
     QVariantMap handleGetWorkflowStatus(long pipelineId);
+    QVariantMap handleResumeWorkflow(const QString &runId);
     QVariantMap handleSpatialToolCall(const QString &toolId, const QVariantMap &parameters);
 
 private:

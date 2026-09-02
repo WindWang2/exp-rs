@@ -95,7 +95,11 @@ bool ratio(const float *before, const float *after, float *out, size_t count)
 
     const float nan = std::numeric_limits<float>::quiet_NaN();
     for (size_t i = 0; i < count; ++i)
-        out[i] = (before[i] == 0.0f) ? nan : after[i] / before[i];
+        // #700: negative `before` (e.g. slightly negative reflectance after
+        // atmospheric correction over water) produced sign-flipped ratios
+        // that downstream Otsu thresholding reads as huge change; the sibling
+        // log-ratio clamps negatives — be consistent and emit NaN instead.
+        out[i] = (before[i] <= 0.0f) ? nan : after[i] / before[i];
 
     return true;
 }
@@ -238,6 +242,11 @@ bool percentileThresholdFromHistogram(double minVal, double maxVal,
         return true;
     }
     const int bins = static_cast<int>(hist.size());
+    // Bin width must match the histogram builder, which bins with
+    // (v - minVal) / range * (bins - 1) — i.e. width range/(bins-1), not
+    // range/bins. The old /bins reconstruction biased every percentile low
+    // by up to one bin (#700).
+    const double binWidth = bins > 1 ? range / (bins - 1) : range;
     const double p = std::clamp(static_cast<double>(percentile), 0.0, 100.0);
     // Nearest-rank index over the sorted finite values (p == 0 -> minimum).
     const double rank = std::max(1.0,
@@ -255,7 +264,7 @@ bool percentileThresholdFromHistogram(double minVal, double maxVal,
                 ? (rank - prev) / (cum - prev)
                 : 0.0;
             *threshold = static_cast<float>(
-                minVal + (static_cast<double>(b) + std::clamp(frac, 0.0, 1.0)) * range / bins);
+                minVal + (static_cast<double>(b) + std::clamp(frac, 0.0, 1.0)) * binWidth);
             return true;
         }
     }

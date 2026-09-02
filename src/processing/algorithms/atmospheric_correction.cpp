@@ -581,9 +581,16 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
 
     bool hasSrcNoData = false;
     const double bandNoData = srcDataset.bandNoDataValue(bandNum, &hasSrcNoData);
-    if (hasSrcNoData) {
-        outDataset.setBandNoDataValue(1, bandNoData);
-    }
+    // #699: the output is float radiance/reflectance — NaN is its NoData
+    // convention (mirroring processFileDos and the QUAC path). Writing the
+    // SOURCE sentinel (typically 0 on DN products) collided with genuine
+    // zero values, and the old 1e-4 sentinel tolerance additionally deleted
+    // genuine near-zero samples. Invalid pixels are now written as NaN, the
+    // output declares NaN, and the sentinel compare is exact in float space
+    // (matching readTileBip / the QUAC writer).
+    const float srcNoDataF = static_cast<float>(bandNoData);
+    const bool maskNodata = hasSrcNoData && std::isfinite(bandNoData);
+    outDataset.setBandNoDataValue(1, std::numeric_limits<double>::quiet_NaN());
 
     constexpr int kTile = 256; // nominal stream tile size (edge-clamped)
     const bool needsDarkLevel = (method == Method::Dos1 || method == Method::Dos2);
@@ -602,7 +609,7 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                     radiance.resize(n);
                     for (size_t i = 0; i < n; ++i) {
                         float v = pixels[i];
-                        if (!std::isfinite(v) || (hasSrcNoData && (!std::isnan(bandNoData) ? std::abs(v - bandNoData) < 1e-4f : std::isnan(v))))
+                        if (!std::isfinite(v) || (maskNodata && v == srcNoDataF))
                             radiance[i] = std::numeric_limits<float>::quiet_NaN();
                         else
                             radiance[i] = gain * v + bias;
@@ -638,8 +645,8 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
             out.resize(n);
             for (size_t i = 0; i < n; ++i) {
                 float v = pixels[i];
-                if (!std::isfinite(v) || (hasSrcNoData && (!std::isnan(bandNoData) ? std::abs(v - bandNoData) < 1e-4f : std::isnan(v)))) {
-                    out[i] = hasSrcNoData ? static_cast<float>(bandNoData) : std::numeric_limits<float>::quiet_NaN();
+                if (!std::isfinite(v) || (maskNodata && v == srcNoDataF)) {
+                    out[i] = std::numeric_limits<float>::quiet_NaN();
                 } else {
                     switch (method) {
                     case Method::DnToRadiance:

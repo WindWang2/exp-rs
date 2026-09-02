@@ -430,7 +430,9 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
   std::thread cancelWatcher;
   if ( cancelFlagPtr )
   {
-    cancelWatcher = std::thread( [&, cancelFlagPtr, handle, &done]() mutable {
+    // Explicit captures only: &done by reference (atomic, non-copyable),
+    // pointer/ handle by value so the watcher never dangles.
+    cancelWatcher = std::thread( [cancelFlagPtr, handle, &done]() mutable {
       while ( !done.load( std::memory_order_acquire ) )
       {
         if ( cancelFlagPtr->load( std::memory_order_acquire ) )
@@ -632,7 +634,7 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
         // Verification failed -> rollback committed asset so no invalid
         // layer remains in the catalog (closed-loop insulator).
         if ( !committedAssetId.empty() )
-          rollbackCommittedAsset( committedAssetId );
+          rollbackCommittedAsset( dataManager, committedAssetId );
         else if ( dataManager && !committedPath.empty() && QFile::exists( QString::fromStdString( committedPath ) ) )
           QFile::remove( QString::fromStdString( committedPath ) );
 
@@ -681,22 +683,50 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
   return result;
 }
 
-bool WorkflowRuntime::rollbackCommittedAsset( const std::string &assetIdStr )
+bool WorkflowRuntime::rollbackCommittedAsset( sicnu::data::DataManager *dataManager,
+                                              const std::string &assetIdStr )
 {
-  if ( !m_dataManager || assetIdStr.empty() )
+  // #702: use the caller's snapshot instead of re-reading m_dataManager
+  // unlocked (setDataManager may race from another thread).
+  if ( !dataManager || assetIdStr.empty() )
     return false;
   const auto idOpt = sicnu::data::AssetId::fromString( QString::fromStdString( assetIdStr ) );
   if ( !idOpt || idOpt->isNull() )
     return false;
-  if ( !m_dataManager->asset( *idOpt ).has_value() )
-    return false;
-  const auto reapRes = m_dataManager->reap( sicnu::data::ReapRequest{ *idOpt } );
-  if ( !reapRes.unloaded )
-  {
-    const auto plan = m_dataManager->planUnload( *idOpt ).confirmedCascade();
-    (void)m_dataManager->unload( plan );
-  }
-  return reapRes.unloaded;
+  const auto id = *idOpt;
+  // DataManager mutations must run on its own (affinity) thread — it has no
+  // internal locking (#702/#703), and this rollback fires from the
+  // verification-failure path of a worker thread. Marshal exactly like the
+  // commit 40 lines up; fail closed (report rollback failed) instead of
+  // racing the affinity thread's container mutations.
+  auto rollback = [dataManager, id]() -> bool {
+    if ( !dataManager->asset( id ).has_value() )
+      return false;
+    const auto reapRes = dataManager->reap( sicnu::data::ReapRequest{ id } );
+    if ( !reapRes.unloaded )
+    {
+      const auto plan = dataManager->planUnload( id ).confirmedCascade();
+      (void)dataManager->unload( plan );
+    }
+    return reapRes.unloaded;
+  };
+  if ( !QCoreApplication::instance() || dataManager->thread() == QThread::currentThread() )
+    return rollback();
+  auto promise = std::make_shared<std::promise<bool>>();
+  auto cancelled = std::make_shared<std::atomic<bool>>( false );
+  auto future = promise->get_future();
+  QMetaObject::invokeMethod(
+    dataManager,
+    [rollback, promise, cancelled]() {
+      if ( cancelled->load() )
+        return; // the caller already failed closed on its timeout
+      promise->set_value( rollback() );
+    },
+    Qt::QueuedConnection );
+  if ( future.wait_for( std::chrono::milliseconds( 10000 ) ) == std::future_status::ready )
+    return future.get();
+  cancelled->store( true );
+  return false;
 }
 
 void WorkflowRuntime::markStepComplete( const std::string &sessionId, const std::string &stepId )

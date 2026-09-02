@@ -33,7 +33,10 @@ public:
 
 private:
   mutable std::mutex mMutex;
-  std::unordered_map<std::string, AgentTool> mTools;
+  // mutable so the const provideTools()/findTool() can live-sync from the
+  // InteractionToolRegistry (#701) — every mutation still happens under
+  // mMutex.
+  mutable std::unordered_map<std::string, AgentTool> mTools;
 };
 
 } // namespace sicnu::agent::tool_catalog

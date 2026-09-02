@@ -702,9 +702,12 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
     // step's "input"-like parameter paths are resolved against the catalog so
     // the record carries real derivedFrom edges (#698); paths that do not
     // resolve are recorded in unresolvedInputPaths, never dropped silently.
+    // The task's registered destination is excluded by value so a re-run over
+    // an existing output cannot gain a self-loop edge.
     const sicnu::data::InputLineage lineage =
       sicnu::data::resolveInputLineage(
-          m_dataManager, sicnu::data::findInputPathsInParams( task.parameterMap ) );
+          m_dataManager,
+          sicnu::data::findInputPathsInParams( task.parameterMap, path ) );
     const sicnu::data::DerivationRecord derivation =
       sicnu::data::makeTaskDerivation( task.algorithmId,
                                        QJsonObject::fromVariantMap( task.parameterMap ),

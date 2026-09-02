@@ -133,9 +133,12 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
       // Input lineage (#698): the task's "input"-like parameters that point at
       // existing files are resolved against the catalog so the derivation
       // record carries real derivedFrom edges (asset id + revision); paths
-      // that do not resolve are preserved in unresolvedInputPaths.
+      // that do not resolve are preserved in unresolvedInputPaths. The task's
+      // own destination is excluded by value so a re-run over an existing
+      // output cannot gain a self-loop edge.
       const sicnu::data::InputLineage lineage = sicnu::data::resolveInputLineage(
-        managerGuard.data(), sicnu::data::findInputPathsInParams( info.parameterMap ) );
+        managerGuard.data(),
+        sicnu::data::findInputPathsInParams( info.parameterMap, info.outputLayerPath ) );
 
       request.derivation = sicnu::data::makeTaskDerivation(
         info.algorithmId,

@@ -222,6 +222,22 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
             maxSeen = (std::max)(maxSeen, (std::max)(from, to));
             ++transitions[(static_cast<uint64_t>(from) << 32) | static_cast<uint32_t>(to)];
         }
+        // #700: bound the sparse map PER BLOCK. Feeding a continuous raster
+        // used to insert millions of map nodes before pass 1 ended and only
+        // then failed the class-range check; the number of distinct classes
+        // is known as soon as a block is read, so bail out early.
+        if (maxSeen >= kMaxClassCount ||
+            (classCountParam > 0 && maxSeen >= classCountParam)) {
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "Observed class " + std::to_string(maxSeen) +
+                    (maxSeen >= kMaxClassCount
+                         ? " exceeds the UInt16 change-code limit (" +
+                               std::to_string(kMaxClassCount - 1) +
+                               "); the input does not look like a thematic classification"
+                         : " but class_count is " + std::to_string(classCountParam) +
+                               "; increase class_count or leave it 0 (auto)"));
+        }
         context.throwIfCancelled();
         context.reportProgress(0.4 * static_cast<double>(y0 + blockH) / height,
                                "Counting class transitions");

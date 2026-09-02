@@ -660,6 +660,11 @@ sicnu_discover_tests(test_agent_tool_catalog)
 # Spatial tool framework tests (ADR 0122)
 sicnu_add_test(test_spatial_tools)
 
+# Shipped-sidecar ↔ descriptor drift gate (#707) — dedicated binary so its
+# RSOperatorRegistry / AtomicAlgorithmRegistry singletons are never polluted
+# by other test cases' reset() calls.
+sicnu_add_test(test_algorithm_meta_drift)
+
 # Output verification for committed agent outputs
 add_executable(test_output_verifier test_output_verifier.cpp)
 target_link_libraries(test_output_verifier PRIVATE
@@ -879,6 +884,40 @@ if(TARGET _sicnu_operators AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bi
         COMMAND ${_sicnu_py} ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bindings.py
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
     set_tests_properties(python_bindings_smoke PROPERTIES TIMEOUT 300)
+endif()
+
+# #706: pi/ (ADR 0122) ships bridge lifecycle regression tests as node --test
+# modules (the #669 respawn/fork-loop family), but like the python-bindings
+# smoke test they ran in no lane. Register them in ctest when a capable node
+# is available: the test imports the .ts bridge directly, which requires
+# type stripping (default-on only on node >= 22.18 / >= 23.6).
+find_program(SICNU_NODE_EXECUTABLE node)
+if(SICNU_NODE_EXECUTABLE AND EXISTS ${CMAKE_SOURCE_DIR}/pi/test/mcp_bridge.test.mjs)
+    execute_process(
+        COMMAND ${SICNU_NODE_EXECUTABLE} --version
+        OUTPUT_VARIABLE _sicnu_node_version
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(_sicnu_node_version MATCHES "^v([0-9]+)\\.([0-9]+)")
+        set(_sicnu_node_major ${CMAKE_MATCH_1})
+        set(_sicnu_node_minor ${CMAKE_MATCH_2})
+        if(_sicnu_node_major GREATER 23
+           OR (_sicnu_node_major EQUAL 23 AND _sicnu_node_minor GREATER_EQUAL 6)
+           OR (_sicnu_node_major EQUAL 22 AND _sicnu_node_minor GREATER_EQUAL 18))
+            add_test(
+                NAME pi_bridge_lifecycle
+                COMMAND ${SICNU_NODE_EXECUTABLE} --test ${CMAKE_SOURCE_DIR}/pi/test
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
+            set_tests_properties(pi_bridge_lifecycle PROPERTIES TIMEOUT 120)
+        else()
+            message(STATUS "node ${_sicnu_node_version} lacks default type stripping — pi bridge lifecycle tests skipped")
+        endif()
+    else()
+        message(STATUS "unparseable node version '${_sicnu_node_version}' — pi bridge lifecycle tests skipped")
+    endif()
+    unset(_sicnu_node_version)
+    unset(_sicnu_node_major)
+    unset(_sicnu_node_minor)
 endif()
 
 

@@ -175,6 +175,19 @@ Json::Value RsInferenceOperator::estimateExecution( const Json::Value &params ) 
     }
 
     const std::uint64_t edge = static_cast<std::uint64_t>( tile + 2 * halo );
+    // #689: with resize "to_input" the engine feeds model.input.width x
+    // .height tensors — the batched tiles, the blob and the per-tile output
+    // planes are all sized by the fixed graph input, not the read window, so
+    // a small tile_size with a large graph input under-estimated RAM by orders
+    // of magnitude. Estimate on the LARGER of the two geometries so neither
+    // the halo window nor the fed tensor is under-counted.
+    std::uint64_t fedW = edge;
+    std::uint64_t fedH = edge;
+    if ( model.preprocess.resize == "to_input" && model.input.width > 0 && model.input.height > 0 )
+    {
+        fedW = std::max( edge, static_cast<std::uint64_t>( model.input.width ) );
+        fedH = std::max( edge, static_cast<std::uint64_t>( model.input.height ) );
+    }
     // Read window + detached tile + blob + output planes ≈ 4 tile-sized sets
     // per batched tile; model weights are the fixed overhead when declared.
     std::uint64_t modelRamBytes =
@@ -192,7 +205,7 @@ Json::Value RsInferenceOperator::estimateExecution( const Json::Value &params ) 
         if ( artifactBytes > 0 )
             modelRamBytes = ( ( artifactBytes + kMiB - 1 ) / kMiB ) * kMiB;
     }
-    Json::Value est = sicnu::processing::makeStreamingEstimate( edge, edge, bands, 4,
+    Json::Value est = sicnu::processing::makeStreamingEstimate( fedW, fedH, bands, 4,
                                                                 batch * 4, /*matrixBytes*/ 0,
                                                                 /*fixedOverhead*/ modelRamBytes + 32 * 1024 * 1024 );
     // VRAM contract surfaces for admission tooling (TaskCenter admits on RAM

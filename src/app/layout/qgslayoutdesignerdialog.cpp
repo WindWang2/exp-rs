@@ -69,6 +69,8 @@
 #include <QSplitter>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 namespace
 {
 
@@ -84,15 +86,29 @@ void ensureItemWidgetsRegistered( QgsMapCanvas *canvas )
 }
 
 // Estimated peak memory for a raster export: page size (mm) × dpi, RGBA,
-// with an extra full-size copy for the encoder stage.
-qint64 estimateImageExportBytes( QgsLayout *layout, double dpi )
+// with an extra full-size copy for the encoder stage. Uses the largest page
+// (and the largest page width/height independently, like the agent-side
+// exportLayout preflight) because QgsLayoutExporter::exportToImage renders
+// all pages by default — sizing the guard from page 0 alone would let a
+// multi-page layout whose first page is small slip past the limits.
+qint64 estimateImageExportBytes( QgsLayout *layout, double dpi, double *widthPx = nullptr, double *heightPx = nullptr )
 {
     if ( !layout || layout->pageCollection()->pageCount() == 0 )
         return 0;
-    const QgsLayoutSize size = layout->pageCollection()->pages().at( 0 )->pageSize();
-    const double widthPx = size.width() / 25.4 * dpi;
-    const double heightPx = size.height() / 25.4 * dpi;
-    return static_cast< qint64 >( widthPx ) * static_cast< qint64 >( heightPx ) * 4 * 2;
+    double maxWmm = 0.0, maxHmm = 0.0;
+    const QList<QgsLayoutItemPage *> pages = layout->pageCollection()->pages();
+    for ( const QgsLayoutItemPage *page : pages )
+    {
+        maxWmm = std::max( maxWmm, page->pageSize().width() );
+        maxHmm = std::max( maxHmm, page->pageSize().height() );
+    }
+    const double wPx = maxWmm / 25.4 * dpi;
+    const double hPx = maxHmm / 25.4 * dpi;
+    if ( widthPx )
+        *widthPx = wPx;
+    if ( heightPx )
+        *heightPx = hPx;
+    return static_cast< qint64 >( wPx ) * static_cast< qint64 >( hPx ) * 4 * 2;
 }
 
 // Hard limits protecting against uncontrolled multi-GB allocations: QImage
@@ -100,6 +116,10 @@ qint64 estimateImageExportBytes( QgsLayout *layout, double dpi )
 constexpr double kMaxImageEdgePixels = 30000.0;
 constexpr qint64 kWarnExportBytes = 1024LL * 1024 * 1024;        // 1 GiB
 constexpr qint64 kMaxExportBytes = 4LL * 1024 * 1024 * 1024;     // 4 GiB
+
+// Marks the "no selection" panel so showItemOptions() can tell an up-to-date
+// placeholder apart from a stale item widget left behind by a destroyed item.
+constexpr char kItemPlaceholderPanel[] = "LayoutItemPlaceholderPanel";
 
 // Returns the DPI to use, or <= 0 if the user aborted / export was rejected.
 double queryExportDpi( QgsLayout *layout, QWidget *parent, bool isRaster )
@@ -112,12 +132,8 @@ double queryExportDpi( QgsLayout *layout, QWidget *parent, bool isRaster )
 
     if ( isRaster )
     {
-        const qint64 bytes = estimateImageExportBytes( layout, dpi );
-        const QgsLayoutSize size = layout->pageCollection()->pageCount() > 0
-                                       ? layout->pageCollection()->pages().at( 0 )->pageSize()
-                                       : QgsLayoutSize( 0, 0 );
-        const double wPx = size.width() / 25.4 * dpi;
-        const double hPx = size.height() / 25.4 * dpi;
+        double wPx = 0.0, hPx = 0.0;
+        const qint64 bytes = estimateImageExportBytes( layout, dpi, &wPx, &hPx );
         if ( wPx > kMaxImageEdgePixels || hPx > kMaxImageEdgePixels )
         {
             QMessageBox::warning( parent, QObject::tr( "Export Too Large" ),
@@ -255,8 +271,16 @@ void QgsLayoutDesignerDialog::showItemOptions(QgsLayoutItem *item, bool bringPan
     // item widgets already refresh themselves incrementally from item signals
     // (sizePositionChanged / changed), so a rebuild here would be both slow
     // and would reset transient widget state on every drag update.
-    if (mCurrentItem == item && mItemsStack->mainPanel())
-        return;
+    if (mCurrentItem == item && mItemsStack->mainPanel()) {
+        if (item || mItemsStack->mainPanel()->objectName() == QLatin1String(kItemPlaceholderPanel))
+            return;
+        // Both null but a real panel is still installed: the item backing the
+        // visible panel was destroyed (agent layout:remove_item, undo/redo of
+        // add/delete). The destroyed() handler cannot distinguish this from
+        // the up-to-date placeholder above (mCurrentItem is a QPointer and is
+        // already null), so fall through and drop the stale panel — it holds
+        // widgets referencing a freed QgsLayoutItem.
+    }
 
     mCurrentItem = item;
     clearItemPanel();
@@ -275,6 +299,7 @@ void QgsLayoutDesignerDialog::showItemOptions(QgsLayoutItem *item, bool bringPan
 
     if (!item || !mLayout) {
         auto *placeholder = new QgsPanelWidget();
+        placeholder->setObjectName(QLatin1String(kItemPlaceholderPanel));
         auto *lay = new QVBoxLayout(placeholder);
         auto *label = new QLabel(tr("Select an item to edit its properties.\n\nPage setup is available via Layout → Page Properties."), placeholder);
         label->setAlignment(Qt::AlignCenter);
@@ -689,32 +714,36 @@ void QgsLayoutDesignerDialog::setupMenus()
 
     mSettingsMenu = menuBar->addMenu(tr("&Settings"));
     if (mLayout) {
-        QgsLayoutSnapper *snapper = &mLayout->snapper();
-        auto *snapGrid = mSettingsMenu->addAction(tr("Snap to Grid"), this, [this, snapper](bool on) {
-            snapper->setSnapToGrid(on);
+        // Do NOT capture the snapper pointer in these lambdas: a project load
+        // (e.g. the agent layout:load_project tool runs QgsProject::read(),
+        // which deletes every layout immediately) invalidates it. mLayout is
+        // a QPointer, so re-derive the snapper on each activation instead.
+        auto *snapGrid = mSettingsMenu->addAction(tr("Snap to Grid"), this, [this](bool on) {
+            if (mLayout) mLayout->snapper().setSnapToGrid(on);
         });
         snapGrid->setCheckable(true);
-        snapGrid->setChecked(snapper->snapToGrid());
+        snapGrid->setChecked(mLayout->snapper().snapToGrid());
 
-        auto *snapGuides = mSettingsMenu->addAction(tr("Snap to Guides"), this, [this, snapper](bool on) {
-            snapper->setSnapToGuides(on);
+        auto *snapGuides = mSettingsMenu->addAction(tr("Snap to Guides"), this, [this](bool on) {
+            if (mLayout) mLayout->snapper().setSnapToGuides(on);
         });
         snapGuides->setCheckable(true);
-        snapGuides->setChecked(snapper->snapToGuides());
+        snapGuides->setChecked(mLayout->snapper().snapToGuides());
 
-        auto *snapItems = mSettingsMenu->addAction(tr("Snap to Items"), this, [this, snapper](bool on) {
-            snapper->setSnapToItems(on);
+        auto *snapItems = mSettingsMenu->addAction(tr("Snap to Items"), this, [this](bool on) {
+            if (mLayout) mLayout->snapper().setSnapToItems(on);
         });
         snapItems->setCheckable(true);
-        snapItems->setChecked(snapper->snapToItems());
+        snapItems->setChecked(mLayout->snapper().snapToItems());
 
-        mSettingsMenu->addAction(tr("Snap Tolerance..."), this, [this, snapper]() {
+        mSettingsMenu->addAction(tr("Snap Tolerance..."), this, [this]() {
+            if (!mLayout) return;
             bool ok = false;
             const int tol = QInputDialog::getInt(mWindow, tr("Snap Tolerance"),
-                                                 tr("Tolerance (pixels):"), snapper->snapTolerance(),
+                                                 tr("Tolerance (pixels):"), mLayout->snapper().snapTolerance(),
                                                  1, 100, 1, &ok);
             if (ok)
-                snapper->setSnapTolerance(tol);
+                mLayout->snapper().setSnapTolerance(tol);
         });
     }
 }

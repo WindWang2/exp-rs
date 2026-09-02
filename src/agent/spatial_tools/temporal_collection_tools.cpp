@@ -258,6 +258,13 @@ SpatialToolResult TemporalCreateCollectionTool::execute( const Json::Value &inpu
         ? QString::fromStdString( input["duplicate_policy"].asString() )
         : QStringLiteral( "keep_all" ),
     &policyOk );
+  // Same rejection as the operator path (rs_temporal_collection_input): an
+  // unparseable duplicate_policy must fail the tool, never coerce to keep_all
+  // and persist a descriptor that silently differs from what was asked.
+  if ( !policyOk || ( input.isMember( "duplicate_policy" ) &&
+                      !input["duplicate_policy"].isString() ) )
+    return SpatialToolResult::failure( "duplicate_policy must be 'keep_all' or 'reject'",
+                                       "INVALID_PARAMETER", "VALIDATION" );
   collection.setDuplicatePolicy( policy );
 
   int missingTimes = 0;

@@ -126,6 +126,14 @@ class LayoutService
     // --- Helpers ---------------------------------------------------------------------
 
     static QString itemTypeToString( QgsLayoutItem *item );
+
+  private:
+    /// Applies `props` to `item` without the undo-macro bracketing or
+    /// exception handling; jsoncpp is built with exceptions, so a wrong-typed
+    /// value makes the mutators throw Json::LogicError. Only call from
+    /// applyItemProperties(), which owns the macro and the catch.
+    bool applyItemPropertiesValues( QgsLayoutItem *item, const Json::Value &props,
+                                    QStringList *applied, QStringList *ignored );
 };
 
 } // namespace sicnu::agent::layout_tools

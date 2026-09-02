@@ -5,6 +5,7 @@
 #include "algorithm_tool_provider.h"
 #include "interaction_tool_provider.h"
 #include "data_tool_provider.h"
+#include "agent/interaction_tool_registry.h"
 #include "agent/spatial_tools/spatial_tool.h"
 #include "agent/spatial_tools/spatial_tool_provider.h"
 
@@ -279,10 +280,23 @@ bool AgentToolCatalog::unregisterCustomTool( const std::string &toolName )
   return mCustomTools.erase( toolName ) > 0;
 }
 
+bool AgentToolCatalog::cacheIsFresh() const
+{
+  if ( !mCacheValid )
+    return false;
+  // #701: the interaction tool set can change after the cache was built
+  // (registerBuiltinTools/registerDataTools run late in some entry points).
+  // The registry's monotonic revision counter detects that cheaply — without
+  // it, tools registered after the first catalog use stayed invisible until
+  // an explicit reset().
+  return mCachedInteractionRevision
+         == sicnu::agent::InteractionToolRegistry::instance().revision();
+}
+
 std::vector<AgentTool> AgentToolCatalog::listTools( std::optional<ToolCategory> category ) const
 {
   std::lock_guard<std::mutex> lock( mMutex );
-  if ( !category && mCacheValid )
+  if ( !category && cacheIsFresh() )
   {
     return mCachedTools;
   }
@@ -306,7 +320,16 @@ std::vector<AgentTool> AgentToolCatalog::listTools( std::optional<ToolCategory> 
   if ( !category )
   {
     mCachedTools = result;
+    mCachedInteractionRevision =
+      sicnu::agent::InteractionToolRegistry::instance().revision();
     mCacheValid = true;
+    // The exported snapshots hold a flattened view of mCachedTools; a
+    // registry tool added since the last export stays invisible in the
+    // cached export until something invalidates mCacheValid. Clear the
+    // snapshots whenever the cache is rebuilt so the next export reflects
+    // every live tool (#701).
+    mCachedOpenAiDefs.clear();
+    mCachedMcpTools.clear();
   }
 
   return result;
@@ -507,12 +530,12 @@ Json::Value AgentToolCatalog::exportOpenAiToolDefinitions( const std::vector<Age
   }
 
   std::lock_guard<std::mutex> lock( mMutex );
-  if ( mCacheValid && !mCachedOpenAiDefs.isNull() && !mCachedOpenAiDefs.empty() )
+  if ( cacheIsFresh() && !mCachedOpenAiDefs.isNull() && !mCachedOpenAiDefs.empty() )
   {
     return mCachedOpenAiDefs;
   }
 
-  if ( !mCacheValid )
+  if ( !cacheIsFresh() )
   {
     mCachedTools.clear();
     for ( const auto &prov : mProviders )
@@ -524,6 +547,8 @@ Json::Value AgentToolCatalog::exportOpenAiToolDefinitions( const std::vector<Age
       }
     }
     appendCustomToolsSorted( mCustomTools, mCachedTools );
+    mCachedInteractionRevision =
+      sicnu::agent::InteractionToolRegistry::instance().revision();
     mCacheValid = true;
   }
 
@@ -549,12 +574,12 @@ Json::Value AgentToolCatalog::exportMcpTools( const std::vector<AgentTool> &tool
   }
 
   std::lock_guard<std::mutex> lock( mMutex );
-  if ( mCacheValid && !mCachedMcpTools.isNull() && !mCachedMcpTools.empty() )
+  if ( cacheIsFresh() && !mCachedMcpTools.isNull() && !mCachedMcpTools.empty() )
   {
     return mCachedMcpTools;
   }
 
-  if ( !mCacheValid )
+  if ( !cacheIsFresh() )
   {
     mCachedTools.clear();
     for ( const auto &prov : mProviders )
@@ -566,6 +591,8 @@ Json::Value AgentToolCatalog::exportMcpTools( const std::vector<AgentTool> &tool
       }
     }
     appendCustomToolsSorted( mCustomTools, mCachedTools );
+    mCachedInteractionRevision =
+      sicnu::agent::InteractionToolRegistry::instance().revision();
     mCacheValid = true;
   }
 

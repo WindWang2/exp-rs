@@ -58,7 +58,7 @@ public:
     std::string group() const override { return "temporal"; }
     std::string description() const override
     {
-        return "Ratio change after / before (NaN where before is 0).";
+        return "Ratio change after / before (NaN where before is <= 0).";
     }
     RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::Streaming; }
     Json::Value schema() const override;

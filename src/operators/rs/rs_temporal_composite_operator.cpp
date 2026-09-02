@@ -224,8 +224,9 @@ Json::Value RsTemporalCompositeOperator::metadata() const
   meta["workflowHints"] = "Pairs with rs:qa_mask / rs:apply_mask when scenes need explicit "
                           "cloud masking; period grouping yields one file per period";
   meta["limitations"] = "Grouped runs write one GeoTIFF per period (suffix = start date); only "
-                        "the first is returned as 'output'; the quality band is read with the "
-                        "scene's declared scale/offset like any other band";
+                        "the first is returned as 'output'; the quality band is read raw — "
+                        "GDAL scale/offset normalization (the analysis band's, per band) is "
+                        "never applied to it";
   return meta;
 }
 
@@ -425,8 +426,14 @@ Json::Value RsTemporalCompositeOperator::run( const Json::Value &params, RSOpera
                                      prepared.collection.scenes().at( s ).path.toStdString() );
         const bool hasQuality =
             method == QLatin1String( "best_pixel" ) && qualityBands[s] > 0;
+        // The quality band is read RAW: GDAL scale/offset is declared per
+        // band, and the reader's uniform factors belong to the analysis band
+        // — rescaling the quality band would write its scores in the wrong
+        // units (best-pixel selection would survive only by the monotone
+        // transform, the stored band would not).
         if ( hasQuality &&
-             !reader.readSceneBandTile( s, qualityBands[s], t, qualityTile.data() ) )
+             !reader.readSceneBandTile( s, qualityBands[s], t, qualityTile.data(),
+                                        /*skipMasking=*/false, /*skipScaleOffset=*/true ) )
           throw RSOperatorError( ErrorCode::GdalError,
                                  "failed reading quality band of " +
                                      prepared.collection.scenes().at( s ).path.toStdString() );

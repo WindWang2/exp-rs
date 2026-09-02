@@ -41,6 +41,11 @@ else()
     endif()
 endif()
 
+# compile_commands.json for clang tooling (#706): the changed-files lint lane
+# (scripts/run_clang_tidy_changed.sh, wired as a non-blocking CI step) and
+# clangd editors consume it. Silently ignored by IDE/VS generators.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(CPACK_PACKAGE_VERSION_MAJOR 1)
 set(CPACK_PACKAGE_VERSION_MINOR 0)
 set(CPACK_PACKAGE_VERSION_PATCH 0)

@@ -424,6 +424,10 @@ void ExecutionResultCache::clear()
 {
   std::lock_guard<std::recursive_mutex> locker( m_mutex );
   m_entries.clear();
+  // A "cache reset" must also drop the output-path store (#720): invalidate()
+  // removes from both, and a clear() that skips m_pathEntries lets
+  // lookupOutputPath() serve pre-clear paths while size()/pathSize() disagree.
+  m_pathEntries.clear();
 }
 
 int ExecutionResultCache::size() const

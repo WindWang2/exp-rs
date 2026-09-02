@@ -317,12 +317,28 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
 
     for (int i = 0; i < inputCount; ++i) {
         const auto& gt = metaList[static_cast<size_t>(i)].geotransform;
-        metaList[static_cast<size_t>(i)].offsetX = static_cast<int64_t>(
-            std::round((gt[0] - unionMinX) / std::abs(refPixelW)));
-        metaList[static_cast<size_t>(i)].offsetY = static_cast<int64_t>(
-            (refPixelH < 0)
-                ? std::round((unionMaxY - gt[3]) / std::abs(refPixelH))
-                : std::round((gt[3] - unionMinY) / std::abs(refPixelH)));
+        const double subX = (gt[0] - unionMinX) / std::abs(refPixelW);
+        const double subY = (refPixelH < 0)
+                                ? (unionMaxY - gt[3]) / std::abs(refPixelH)
+                                : (gt[3] - unionMinY) / std::abs(refPixelH);
+        // #700: non-integer pixel offsets are silently rounded to the
+        // nearest integer (up to half a pixel of misregistration). Grid
+        // placement must be pixel-aligned; surface a warning naming the
+        // input when it is not, instead of shifting it invisibly.
+        constexpr double kSubPixelEps = 1e-6;
+        const double fracX = std::abs(subX - std::round(subX));
+        const double fracY = std::abs(subY - std::round(subY));
+        if (fracX > kSubPixelEps || fracY > kSubPixelEps) {
+            context.logWarning(
+                "Mosaic input " + std::to_string(i + 1) + " (" +
+                metaList[static_cast<size_t>(i)].path + ") is sub-pixel offset against the mosaic "
+                "grid (fractional offsets x=" + std::to_string(fracX) + " px, y=" + std::to_string(fracY) +
+                " px); the offset is snapped to the nearest pixel, causing up to half a pixel of "
+                "misregistration. Re-project/resample the input onto the reference grid for exact "
+                "registration.");
+        }
+        metaList[static_cast<size_t>(i)].offsetX = static_cast<int64_t>(std::round(subX));
+        metaList[static_cast<size_t>(i)].offsetY = static_cast<int64_t>(std::round(subY));
     }
 
     context.reportProgress(0.08, "Creating mosaic output dataset");

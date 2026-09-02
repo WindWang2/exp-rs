@@ -27,6 +27,9 @@
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 
+#include <algorithm>
+#include <functional>
+
 namespace
 {
 
@@ -309,8 +312,17 @@ void TemporalAnalysisDialog::addScenes()
 void TemporalAnalysisDialog::removeSelectedScenes()
 {
   const auto selected = m_sceneTable->selectionModel()->selectedRows();
+  // Remove in DESCENDING row order: removeRow() shifts every row below it, so
+  // a forward pass over the pre-removal indices deletes the wrong scenes (and
+  // a tail index past the shrinking end is a silent no-op that leaves a
+  // selected scene in the table feeding the run).
+  QList<int> rows;
+  rows.reserve( selected.size() );
   for ( const QModelIndex &idx : selected )
-    m_sceneTable->removeRow( idx.row() );
+    rows.append( idx.row() );
+  std::sort( rows.begin(), rows.end(), std::greater<int>() );
+  for ( int row : rows )
+    m_sceneTable->removeRow( row );
   refreshStatusColumn();
 }
 

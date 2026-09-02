@@ -37,7 +37,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential cmake ninja-build \
+            build-essential cmake ninja-build clang-tidy \
             libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev libjsoncpp-dev \
             libprotobuf-dev protobuf-compiler \
             libqca-qt6-dev qtkeychain-qt6-dev \
@@ -58,6 +58,11 @@ jobs:
           arch: 'linux_gcc_64'
           modules: 'qt5compat qtmultimedia'
 
+      - name: Install Node (pi/ bridge lifecycle tests, #706)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Configure CMake
         # ENABLE_LTO=OFF: project default is ON for Release, but LTO links of
         # the QGIS-scale libraries take 1-2 h per target on 4-core runners and
@@ -67,6 +72,16 @@ jobs:
         # pushes/PRs (each later PR in the integration sequence only recompiles
         # its delta).
         run: cmake -B build -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      # #706: the repo's targeted .clang-tidy (12 checks for exactly the
+      # #610-#658 bug classes) was dead config — nothing ever ran it. Lint only
+      # the files changed vs master so no full-tree tidy is needed; the step is
+      # non-blocking while the findings backlog is triaged.
+      - name: Clang-Tidy Lint (changed files, non-blocking)
+        continue-on-error: true
+        run: |
+          git fetch --no-tags --depth=1 origin master
+          ./scripts/run_clang_tidy_changed.sh origin/master build
 
       - name: Compile Core & Test Targets
         run: cmake --build build --parallel $(nproc)

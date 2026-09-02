@@ -38,6 +38,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QProcessEnvironment>
+#include <QRegularExpression>
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
@@ -351,6 +352,13 @@ const MetaToolDef kMetaTools[] = {
       "Get the aggregate status of a workflow submitted with run_workflow: overall "
       "state plus per-step execution ids, statuses, and progress.",
       { { "pipeline_id", "integer", "Pipeline id returned by run_workflow.", true } } },
+    { "resume_workflow",
+      "Resume an interrupted workflow run from its last checkpoint: steps that "
+      "already completed are skipped and the run continues from the first "
+      "non-terminal step. The run_id comes from get_workflow_status "
+      "(run_state = interrupted) after a crash or cancellation. Returns the new "
+      "pipeline id for status polling.",
+      { { "run_id", "string", "Workflow run id of the interrupted run.", true } } },
 };
 
 QVariantMap metaToolInputSchema(const MetaToolDef &def)
@@ -656,6 +664,16 @@ void McpServer::handleRequest(const QVariantMap &request)
         serverInfo[QStringLiteral("version")] = QStringLiteral("1.0.0");
         result[QStringLiteral("serverInfo")] = serverInfo;
 
+        // MCP initialize supports an instructions field (#701): document the
+        // path-resolution rule every tool shares so clients do not have to
+        // discover it from a rejection message.
+        result[QStringLiteral("instructions")] = QStringLiteral(
+            "File path arguments accept absolute paths or paths relative to the "
+            "directory named by the SICNU_MCP_WORKSPACE environment variable; when "
+            "that variable is set, paths resolving outside it are rejected. "
+            "Committed outputs are registered in the data catalog and are listed "
+            "by data:list_layers even when not displayed on a map.");
+
         sendResponse(id, result);
     }
     else if (method == QStringLiteral("notifications/cancelled"))
@@ -892,6 +910,13 @@ void McpServer::handleRequest(const QVariantMap &request)
                 if (!idOk || pipelineId < 0)
                     throw std::runtime_error("Invalid or missing pipeline_id");
                 resultData = handleGetWorkflowStatus(pipelineId);
+            }
+            else if (toolName == QStringLiteral("resume_workflow"))
+            {
+                const QString runId = arguments.value(QStringLiteral("run_id")).toString().trimmed();
+                if (runId.isEmpty())
+                    throw std::runtime_error("Invalid or missing run_id");
+                resultData = handleResumeWorkflow(runId);
             }
             else if (toolName.startsWith(QStringLiteral("spatial:")) ||
                      toolName.startsWith(QStringLiteral("layout:")))
@@ -2267,7 +2292,7 @@ QVariantMap McpServer::handleGetWorkflowStatus(long pipelineId)
 
     // Workflow Engine 2.0 lifecycle (ADR 0123, #662): additive keys — the
     // run aggregate mirrors this pipeline when it exists.
-    if (const auto run = sicnu::TaskCenter::instance().workflowRunForPipeline(pipelineId)) {
+    if (const auto run = sicnu::workflow::WorkflowRunCoordinator::instance().runForPipeline(pipelineId)) {
         result[QStringLiteral("run_id")] = QString::fromStdString(run->runId());
         result[QStringLiteral("run_state")] =
             QString::fromStdString(sicnu::workflow::workflowRunStateToString(run->state()));
@@ -2293,6 +2318,43 @@ QVariantMap McpServer::handleGetWorkflowStatus(long pipelineId)
         steps.append(step);
     }
     result[QStringLiteral("steps")] = steps;
+    return result;
+}
+
+QVariantMap McpServer::handleResumeWorkflow(const QString &runId)
+{
+    // Production trigger for WorkflowRunCoordinator::resumeRun (#697): a
+    // crashed/canceled run becomes resumable from its last checkpoint instead
+    // of being report-only. Step params come from the server-side checkpoint
+    // (already workspace-validated at run_workflow submit time), so no
+    // re-validation of caller input is needed beyond the run id itself.
+    // The run id is interpolated into the checkpoint file path, so restrict
+    // it to run-id characters — a caller-supplied "foo/../../bar" must not
+    // escape the checkpoint directory and load an arbitrary JSON document.
+    static const QRegularExpression kRunIdPattern( QStringLiteral( "^[A-Za-z0-9_.-]+$" ) );
+    if ( !kRunIdPattern.match( runId ).hasMatch() || runId.contains( QStringLiteral( ".." ) ) )
+    {
+        throw McpToolError(
+          QStringLiteral( "resume_workflow: run_id contains invalid characters (allowed: letters, digits, '_', '-', '.')" ),
+          QStringLiteral( "INVALID_PARAMETER" ),
+          QStringLiteral( "validation" ) );
+    }
+    QString error;
+    const long pipelineId =
+        sicnu::workflow::WorkflowRunCoordinator::instance().resumeRun(runId.toStdString(), &error);
+    if (pipelineId < 0) {
+        throw McpToolError(QStringLiteral("resume_workflow: ") + error,
+                           QStringLiteral("RESUME_FAILED"),
+                           QStringLiteral("execution"));
+    }
+
+    QVariantMap result;
+    result[QStringLiteral("run_id")] = runId;
+    result[QStringLiteral("pipeline_id")] = static_cast<qlonglong>(pipelineId);
+    const sicnu::PipelineExecutionInfo info =
+        sicnu::TaskCenter::instance().getPipelineInfo(pipelineId);
+    result[QStringLiteral("step_count")] = static_cast<int>(info.orderedStepIds.size());
+    result[QStringLiteral("status")] = QStringLiteral("resumed");
     return result;
 }
 

@@ -52,6 +52,8 @@
 #include <QMessageBox>
 #include <QFileDialog>
 #include <QFile>
+#include <QFileInfo>
+#include <QDir>
 #include <QStatusBar>
 
 // ---------------------------------------------------------------------------
@@ -519,8 +521,22 @@ void QgisDesktopWindow::openTemporalAnalysisDialog()
     if (dialog.exec() == QDialog::Accepted && dialog.wantsRasterLoad())
     {
         const QString outPath = dialog.outputPath();
-        if (!outPath.isEmpty() && QFile::exists(outPath))
+        if (QFile::exists(outPath))
+        {
             loadRasterLayer(outPath);
+        }
+        else if (!outPath.isEmpty())
+        {
+            // Grouped composites (period != "all") write <base>_<label>.tif per
+            // group instead of the bare output path; load every group output,
+            // name-sorted == chronological (#719).
+            const QFileInfo info(outPath);
+            const QString stem = info.completeBaseName();
+            const QStringList grouped = info.dir().entryList(
+                { stem + QLatin1String("_*.tif") }, QDir::Files, QDir::Name);
+            for (const QString &name : grouped)
+                loadRasterLayer(info.absolutePath() + QLatin1Char('/') + name);
+        }
     }
 }
 

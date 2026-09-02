@@ -1,4 +1,5 @@
 #include <QFileInfo>
+#include <algorithm>
 #include <functional>
 #include "derivation_record.h"
 
@@ -144,9 +145,23 @@ Result<DerivationRecord> DerivationRecord::fromJson( const QJsonObject &json )
 }
 
 
-QStringList findInputPathsInParams( const QVariantMap &params )
+QStringList findInputPathsInParams( const QVariantMap &params, const QString &excludePath )
 {
   QStringList paths;
+  // The run's own destination, in the forms a parameter may spell it: the
+  // exact caller-supplied path plus its canonical resolution, so a re-run
+  // over an existing output cannot record the output as its own source even
+  // when the destination rode under a non-"output"-like key (review of #718:
+  // "result_path"/"modelOut"-style spellings are TaskCenter output
+  // vocabulary but slipped past a key-name-only guard).
+  QStringList excludedForms;
+  if ( !excludePath.isEmpty() )
+  {
+    excludedForms.append( excludePath );
+    const QString canonical = QFileInfo( excludePath ).canonicalFilePath();
+    if ( !canonical.isEmpty() && canonical != excludePath )
+      excludedForms.append( canonical );
+  }
   std::function<void( const QVariant & )> collect = [ & ]( const QVariant &value ) {
     QStringList candidates;
     if ( value.userType() == QMetaType::QStringList )
@@ -166,14 +181,32 @@ QStringList findInputPathsInParams( const QVariantMap &params )
       const QString trimmed = candidate.trimmed();
       if ( trimmed.isEmpty() || trimmed.startsWith( QLatin1Char( '$' ) ) )
         continue;
-      if ( !paths.contains( trimmed ) && QFileInfo::exists( trimmed ) )
+      // Only existing FILES identify an input asset; directories and
+      // not-yet-written paths cannot resolve.
+      if ( !QFileInfo( trimmed ).isFile() )
+        continue;
+      const bool isOwnDestination = std::any_of(
+        excludedForms.cbegin(), excludedForms.cend(), [ &trimmed ]( const QString &form ) {
+          if ( trimmed == form )
+            return true;
+          const QString canonical = QFileInfo( trimmed ).canonicalFilePath();
+          return !canonical.isEmpty() && canonical == form;
+        } );
+      if ( !isOwnDestination && !paths.contains( trimmed ) )
         paths.append( trimmed );
     }
   };
 
   for ( auto it = params.begin(); it != params.end(); ++it )
   {
-    if ( !it.key().contains( QStringLiteral( "input" ), Qt::CaseInsensitive ) )
+    // The scan is key-agnostic (#718: real inputs ride under "before"/"after",
+    // "pan"/"ms", "postfire", … — an "input"-keyed filter silently dropped
+    // those edges) with one explicit guard: the run's own destination must
+    // never pose as an input. "output" AND "result" spellings are both
+    // skipped because that is exactly TaskCenter's findOutputPathInParams
+    // vocabulary — whatever those keys carry is a destination, not a source.
+    if ( it.key().contains( QStringLiteral( "output" ), Qt::CaseInsensitive )
+         || it.key().contains( QStringLiteral( "result" ), Qt::CaseInsensitive ) )
       continue;
     collect( it.value() );
   }
@@ -191,7 +224,14 @@ InputLineage resolveInputLineage( DataManager *dataManager, const QStringList &p
   }
   for ( const QString &path : paths )
   {
-    const auto snapshot = dataManager->findByPath( path );
+    // Registered assets store a canonicalized source; compare the canonical
+    // form so symlinked / case-variant parameter paths still resolve (a plain
+    // absoluteFilePath match silently dropped those lineage edges) (#698
+    // review, restored for #718).
+    const QFileInfo fi( path );
+    const QString canonical = fi.canonicalFilePath();
+    const auto snapshot =
+      dataManager->findByPath( canonical.isEmpty() ? path : canonical );
     if ( !snapshot )
     {
       lineage.unresolvedPaths.append( path );
