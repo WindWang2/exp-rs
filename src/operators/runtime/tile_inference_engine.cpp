@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 
@@ -382,18 +383,43 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     // swapRB=false: the tile buffer already holds GDAL band order, and the
     // manifest band_roles expect channel i == file band i — OpenCV's default
     // swapRB=true would silently exchange bands 1 and 3.
+    // Manual NCHW pack (#671): blobFromImage(s) asserts channels in {1,3,4} —
+    // multispectral / SAR inference (2, >=5 channels) died with a raw
+    // cv::Exception that also violates the engine's RSOperatorError contract.
+    // The buffer already holds GDAL band order and the manifest band_roles
+    // expect channel i == file band i, so the pack keeps that order
+    // (swapRB=false equivalent) without delegating to the imread helper.
     cv::Mat blob;
     try
     {
-      if ( batchMats.size() == 1 )
-        blob = cv::dnn::blobFromImage( batchMats.front(), 1.0, cv::Size(), cv::Scalar(),
-                                       /*swapRB=*/false, /*crop=*/false );
-      else
-        blob = cv::dnn::blobFromImages( batchMats, 1.0, cv::Size(), cv::Scalar(),
-                                        /*swapRB=*/false, /*crop=*/false );
+      const int C = static_cast<int>( bandList.size() );
+      const int B = static_cast<int>( batchMats.size() );
+      const int H = batchMats.front().rows;
+      const int W = batchMats.front().cols;
+      // Single- and multi-channel tiles share the same pack logic — one
+      // explicit path avoids a divergence between the blobFromImage vs
+      // blobFromImages shape conventions.
+      int dims[4] = { B, C, H, W };
+      blob = cv::Mat( 4, dims, CV_32F );
+      blob.setTo( 0 );
+      for ( int b = 0; b < B; ++b )
+      {
+        std::vector<cv::Mat> channels;
+        cv::split( batchMats[static_cast<size_t>( b )], channels );
+        for ( int c = 0; c < C; ++c )
+        {
+          const cv::Mat &ch = channels[static_cast<size_t>( c )];
+          const int idx[3] = { b, c, 0 };
+          float *dst = blob.ptr<float>( idx );
+          for ( int y = 0; y < H; ++y )
+            std::memcpy( dst + y * W, ch.ptr<float>( y ), static_cast<size_t>( W ) * sizeof( float ) );
+        }
+      }
     }
-    // #671: blob construction used to sit outside the try below, so a
-    // cv::Exception from blobFromImage escaped run() unconverted.
+    catch ( const RSOperatorError & )
+    {
+      throw;
+    }
     catch ( const std::exception &e )
     {
       throw RSOperatorError( ErrorCode::InvalidInputData,

@@ -64,7 +64,7 @@ std::optional<BandMathBytecode> BandMathBytecode::compile(
 
 SimdArchitecture Engine::detectOptimalArchitecture()
 {
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(_M_X64))
     if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma")) {
         return SimdArchitecture::AVX2_FMA;
     } else if (__builtin_cpu_supports("sse4.2")) {
@@ -73,6 +73,8 @@ SimdArchitecture Engine::detectOptimalArchitecture()
 #elif defined(__ARM_NEON) || defined(__aarch64__)
     return SimdArchitecture::ARM_NEON;
 #endif
+    // MSVC x64 (and unknown arches): the AVX2 kernel's GCC builtins /
+    // target attributes are unavailable — evaluate via the OpenMP kernel.
     return SimdArchitecture::OpenMP;
 }
 
@@ -238,8 +240,11 @@ void BandMathBytecode::evaluateScalar(
 }
 
 // --- AVX2 Execution Kernel ---
-
-#if defined(__x86_64__) || defined(_M_X64)
+// GCC/Clang only: the kernel relies on __builtin_cpu_supports-style
+// dispatch and __attribute__((target)) multiversioning. MSVC x64 builds
+// evaluate through the OpenMP kernel below, which the compiler auto-
+// vectorizes with its own intrinsics-free pipeline.
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__GNUC__)
 
 // Mask of lanes where x is NaN or Inf: |x| <= FLT_MAX is false for both the
 // unordered NaN compare and Inf, so a single LE compare detects either. The
@@ -842,7 +847,7 @@ void BandMathBytecode::evaluateSimd(
 
     SimdArchitecture arch = Engine::detectOptimalArchitecture();
 
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(_M_X64))
     if (arch == SimdArchitecture::AVX2_FMA) {
         #pragma omp parallel for schedule(static) if (count > 4096)
         for (size_t chunkStart = 0; chunkStart < count; chunkStart += kChunkSize) {

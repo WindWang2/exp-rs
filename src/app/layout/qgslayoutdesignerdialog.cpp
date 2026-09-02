@@ -39,7 +39,7 @@
 #include <gui/layout/qgslayoutviewtoolzoom.h>
 #include <gui/layout/qgslayoutviewtoolmoveitemcontent.h>
 #include <gui/layout/qgslayoutguiutils.h>
-#include <gui/layout/qgslayoutaligner.h>
+#include <qgslayoutaligner.h>
 #include <gui/layout/qgslayoutitemwidget.h>
 #include <gui/layout/qgslayoutpagepropertieswidget.h>
 #include <gui/layout/qgslayoutitemguiregistry.h>
@@ -466,7 +466,7 @@ void QgsLayoutDesignerDialog::setupUndoRedo()
     mActionUndo = undoStack->createUndoAction(this);
     mActionUndo->setShortcut(QKeySequence::Undo);
     mActionRedo = undoStack->createRedoAction(this);
-    mActionRedo->setShortcut(QKeySequence::Shift | Qt::Key_Z);
+    mActionRedo->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Z));
 
     // Prepend undo/redo to the Edit menu (before Delete).
     QAction *first = mEditMenu->actions().isEmpty() ? nullptr : mEditMenu->actions().first();
@@ -634,7 +634,8 @@ void QgsLayoutDesignerDialog::setupMenus()
     mEditMenu->addAction(tr("Unlock Items"), this, [this]() { onLockItems(false); });
     mEditMenu->addAction(tr("Unlock All Items"), this, [this]() {
         if (!mLayout) return;
-        const QList<QgsLayoutItem *> all = mLayout->layoutItems();
+        QList<QgsLayoutItem *> all;
+        mLayout->layoutItems( all );
         for (QgsLayoutItem *item : all)
             item->setLocked(false);
     });
@@ -692,32 +693,35 @@ void QgsLayoutDesignerDialog::setupMenus()
 
     mSettingsMenu = menuBar->addMenu(tr("&Settings"));
     if (mLayout) {
-        QgsLayoutSnapper *snapper = mLayout->snapper();
-        auto *snapGrid = mSettingsMenu->addAction(tr("Snap to Grid"), this, [this, snapper](bool on) {
-            snapper->setSnapToGrid(on);
+        // The snapper is owned by the layout: query it through mLayout inside
+        // each lambda instead of capturing a pointer that could outlive a
+        // layout swap (#721).
+        auto *snapGrid = mSettingsMenu->addAction(tr("Snap to Grid"), this, [this](bool on) {
+            if (mLayout) mLayout->snapper().setSnapToGrid(on);
         });
         snapGrid->setCheckable(true);
-        snapGrid->setChecked(snapper->snapToGrid());
+        snapGrid->setChecked(mLayout->snapper().snapToGrid());
 
-        auto *snapGuides = mSettingsMenu->addAction(tr("Snap to Guides"), this, [this, snapper](bool on) {
-            snapper->setSnapToGuides(on);
+        auto *snapGuides = mSettingsMenu->addAction(tr("Snap to Guides"), this, [this](bool on) {
+            if (mLayout) mLayout->snapper().setSnapToGuides(on);
         });
         snapGuides->setCheckable(true);
-        snapGuides->setChecked(snapper->snapToGuides());
+        snapGuides->setChecked(mLayout->snapper().snapToGuides());
 
-        auto *snapItems = mSettingsMenu->addAction(tr("Snap to Items"), this, [this, snapper](bool on) {
-            snapper->setSnapToItems(on);
+        auto *snapItems = mSettingsMenu->addAction(tr("Snap to Items"), this, [this](bool on) {
+            if (mLayout) mLayout->snapper().setSnapToItems(on);
         });
         snapItems->setCheckable(true);
-        snapItems->setChecked(snapper->snapToItems());
+        snapItems->setChecked(mLayout->snapper().snapToItems());
 
-        mSettingsMenu->addAction(tr("Snap Tolerance..."), this, [this, snapper]() {
+        mSettingsMenu->addAction(tr("Snap Tolerance..."), this, [this]() {
+            if (!mLayout) return;
             bool ok = false;
             const int tol = QInputDialog::getInt(mWindow, tr("Snap Tolerance"),
-                                                 tr("Tolerance (pixels):"), snapper->snapTolerance(),
+                                                 tr("Tolerance (pixels):"), mLayout->snapper().snapTolerance(),
                                                  1, 100, 1, &ok);
             if (ok)
-                snapper->setSnapTolerance(tol);
+                mLayout->snapper().setSnapTolerance(tol);
         });
     }
 }
