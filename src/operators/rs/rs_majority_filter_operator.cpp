@@ -86,13 +86,15 @@ Json::Value RsMajorityFilterOperator::metadata() const {
 }
 
 Json::Value RsMajorityFilterOperator::executionEstimate() const {
-    // FullRaster (base policy): the label raster is loaded into a CV_32S
-    // cv::Mat and the majority filter materializes a second full CV_32S
-    // output, i.e. 2 x 1024 x 1024 x 4 B for a typical 1024x1024 input.
+    // Streaming (#666): row-blocks of <=256 rows with a kernel/2 halo. The
+    // working set is the int label window plus the output block for one
+    // block, i.e. O(width * (blockRows + kernel)) — a few MiB for typical
+    // rasters, independent of raster height. The dtype pre-sweep reuses one
+    // block-sized float buffer.
     Json::Value estimate(Json::objectValue);
-    estimate["tileWidth"] = 0;         // full-raster processing: tiling not applicable
+    estimate["tileWidth"] = 0;         // row-block streaming: tiling not applicable
     estimate["tileHeight"] = 0;
-    estimate["estimatedRamBytes"] = 2 * 1024 * 1024 * 4; // ~8 MiB
+    estimate["estimatedRamBytes"] = 2 * 1024 * (256 + 16) * 4; // ~2 MiB
     return estimate;
 }
 
@@ -140,16 +142,19 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
     // #700: the declared band NoData is a non-voting sentinel alongside the
     // label-0 convention. The threshold-mask output writes NoData=255, and
     // with only label 0 excluded those pixels won majorities and grew into
-    // valid regions.
+    // valid regions. A finite sentinel outside int range (e.g. a Float32
+    // default of -3.4e38) cannot map to a label without UB; those pixels
+    // fall back to the label-0 NoData convention instead.
     bool hasDeclaredNoData = false;
     const double declaredNoData = inDs.bandNoDataValue(1, &hasDeclaredNoData);
-    const bool excludeDeclared = hasDeclaredNoData && std::isfinite(declaredNoData);
+    const bool excludeDeclared = hasDeclaredNoData && std::isfinite(declaredNoData)
+        && declaredNoData >= static_cast<double>(std::numeric_limits<int>::min())
+        && declaredNoData <= static_cast<double>(std::numeric_limits<int>::max());
     const int declaredNoDataLabel =
         excludeDeclared ? static_cast<int>(declaredNoData) : 0;
     const int width = inDs.width();
     const int height = inDs.height();
     const int blockRows = std::max(kernel, std::min(256, height));
-    const int haloRows = std::min(half, height);
 
     // Output dtype: labels pass through unchanged outside the filter, so the
     // value range equals the input's; scan once to apply the ADR-0019-S4
@@ -196,6 +201,20 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
     if (gdt == GDT_Byte) {
         output.setBandColorTable(1, colorTable);
     }
+    // Preserve the declared sentinel in the OUTPUT metadata when it survives
+    // the dtype mapping, so chained consumers (incl. a second
+    // majority_filter pass, which re-reads the declared NoData) keep
+    // excluding it instead of letting it vote as a class (#700 metadata
+    // tail — values were already correct for a single application).
+    if (excludeDeclared) {
+        const double outMax = (gdt == GDT_Byte) ? 255.0
+                            : (gdt == GDT_UInt16) ? 65535.0
+                            : static_cast<double>(std::numeric_limits<int>::max());
+        const double outMin = (gdt == GDT_Int32)
+                            ? static_cast<double>(std::numeric_limits<int>::min()) : 0.0;
+        if (declaredNoData >= outMin && declaredNoData <= outMax)
+            output.setBandNoDataValue(1, declaredNoData);
+    }
 
     // Any failure/cancel must not leave a partial raster at the output path
     // (#647 streaming-output contract).
@@ -220,9 +239,14 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
             }
             for (size_t i = 0; i < readCount; ++i) {
                 const float fv = block[i];
-                // NaN never converts to int (UB); a NaN NoData label acts as
-                // the non-voting 0 sentinel (#700).
-                labels[i] = std::isfinite(fv) ? static_cast<int>(fv) : 0;
+                // NaN and finite values outside int range never convert to
+                // int (UB); both act as the non-voting 0 sentinel (#700) —
+                // class labels from Byte/UInt16/Int32 maps are always
+                // representable, so this only catches float NoData sentinels.
+                labels[i] = (std::isfinite(fv)
+                             && fv >= static_cast<float>(std::numeric_limits<int>::min())
+                             && fv <= static_cast<float>(std::numeric_limits<int>::max()))
+                            ? static_cast<int>(fv) : 0;
             }
         }
 

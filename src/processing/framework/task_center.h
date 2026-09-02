@@ -255,7 +255,7 @@ public:
     /// Cap concurrent Running tasks for @a profile (minimum 1). Used by processNextQueuedTasks.
     void setResourceProfileLimit( ProviderResourceProfile profile, unsigned int maxConcurrent );
     unsigned int resourceProfileLimit( ProviderResourceProfile profile ) const;
-    /// Restore built-in per-profile defaults (InProcess ≈ hardware_concurrency-1, CLI/Python lower).
+    /// Restore built-in per-profile defaults (InProcess tracks JobEngine::maxWorkers(), CLI/Python lower).
     void resetResourceProfileLimits();
     /// Global concurrent Running cap across all profiles (minimum 1).
     void setGlobalConcurrencyLimit( unsigned int maxConcurrent );
@@ -398,7 +398,7 @@ private:
     mutable QMap<long, unsigned int> m_estimateMbCache;
     long m_nextCompletionToken = 1;
     QMap<ProviderResourceProfile, unsigned int> m_profileLimits; ///< empty entry → use defaultLimitForProfile
-    unsigned int m_globalConcurrencyLimit = 0; ///< 0 → hardware_concurrency()-1 (min 1)
+    unsigned int m_globalConcurrencyLimit = 0; ///< 0 → follow JobEngine::maxWorkers() (min 2) each pass
     long m_nextTaskId = 1;
     long m_nextPipelineId = 1;
     ResourceMonitor m_resourceMonitor;

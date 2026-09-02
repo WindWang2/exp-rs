@@ -44,7 +44,9 @@ void AtomicAlgorithmRegistry::setRsOperatorProvider( std::function<void(AtomicAl
   // Only store the provider here: the callback re-enters registerAdapter()
   // which takes mMutex, and some callers (initialize(), reset()) may be
   // invoked with a lock already held on another thread or path. Populating
-  // is deferred to the next initialize()/reset()/findAdapter() miss.
+  // happens on the next initialize()/reset() — findAdapter never invokes
+  // the provider (population via the ctor is what makes a bare test
+  // registry resolve rs:* ids).
   sRsOperatorProvider = std::move( provider );
 }
 
@@ -56,9 +58,10 @@ void AtomicAlgorithmRegistry::reset()
   }
 
   // Provider callbacks re-enter registerAdapter() (same mMutex): never hold
-  // the lock across them — the comment above used to be at this call site
-  // while the lock was still held, deadlocking as soon as any test actually
-  // installed a provider (#707).
+  // the lock across them. The #707 deadlock was the eager provider call in
+  // setRsOperatorProvider() (reachable while the caller already held the
+  // lock); that call is gone — population happens only here and in
+  // initialize(), both lock-free at the call site.
   if ( sRsOperatorProvider )
     sRsOperatorProvider( *this );
 }

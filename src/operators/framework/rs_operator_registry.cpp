@@ -1,11 +1,5 @@
 #include "rs_operator_registry.h"
 
-namespace sicnu::operators::rs {
-/// Set once every operator family has been registered; part of the #707
-/// provider-installation protocol. Defined in rs_operators_init.cpp.
-void markRegistryInitComplete();
-}
-
 namespace sicnu::operators {
 
 namespace rs { void initBuiltinRsOperators(); }
@@ -18,9 +12,9 @@ namespace otb { void initBuiltinOtbOperators(); }
 } // namespace sicnu::operators
 
 namespace sicnu::operators::rs {
-/// Published by instance() while its call_once chain runs so
-/// initBuiltinRsOperators() can register operators without re-entering
-/// instance(). Defined in rs_operators_init.cpp.
+/// Published by instance() while its call_once chain runs so family init
+/// functions can register operators without re-entering instance().
+/// Defined in rs_operators_init.cpp.
 extern RSOperatorRegistry *sRegistryUnderConstruction;
 }
 
@@ -32,6 +26,10 @@ RSOperatorRegistry& RSOperatorRegistry::instance() {
     std::call_once(initFlag, []() {
         // registry's address is constant for the process lifetime; assign it
         // directly rather than capturing (static locals cannot be captured).
+        // Every family init function registers through this pointer (never
+        // via instance()) — re-entering the same call_once from inside the
+        // chain leaves the init guard unreleased and the next instance()
+        // re-runs registration against a cleared factory map (#707).
         sicnu::operators::rs::sRegistryUnderConstruction = &registry;
         rs::initBuiltinRsOperators();
         gdal::initBuiltinGdalOperators();
@@ -40,7 +38,6 @@ RSOperatorRegistry& RSOperatorRegistry::instance() {
 #endif
         otb::initBuiltinOtbOperators();
         sicnu::operators::rs::sRegistryUnderConstruction = nullptr;
-        rs::markRegistryInitComplete();
     });
     return registry;
 }

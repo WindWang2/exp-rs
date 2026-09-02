@@ -1,6 +1,8 @@
 // src/agent/tool_catalog/interaction_tool_provider.cpp
 #include "interaction_tool_provider.h"
 #include <algorithm>
+#include <unordered_set>
+#include <vector>
 
 #include "agent/interaction_tool_registry.h"
 
@@ -35,11 +37,22 @@ Json::Value makeBandChannelProp( const char *description )
 // undiscoverable until an explicit resetDefaults(). Registry-derived entries
 // never overwrite an existing entry: the static factories keep their richer
 // output ports, and explicit registerTool() customizations are preserved.
+// Rebuilds are also REMOVAL-aware: names previously merged from the registry
+// but no longer listed are dropped, so unregisterTool() propagates on the
+// next rebuild instead of serving a stale tool forever (live-sync review
+// tail). Only touched during catalog rebuilds, which AgentToolCatalog
+// serializes under its mutex — no separate guard needed.
 void mergeRegistryToolsInto( std::unordered_map<std::string, AgentTool> &tools )
 {
+  static std::unordered_set<std::string> sRegistrySourcedNames;
   try
   {
-    for ( const auto &def : sicnu::agent::InteractionToolRegistry::instance().listTools() )
+    const std::vector<sicnu::agent::InteractionToolDefinition> defs =
+      sicnu::agent::InteractionToolRegistry::instance().listTools();
+    for ( const auto &name : sRegistrySourcedNames )
+      tools.erase( name );
+    sRegistrySourcedNames.clear();
+    for ( const auto &def : defs )
     {
       if ( def.name.rfind( "data:", 0 ) == 0 )
         continue;
@@ -53,6 +66,7 @@ void mergeRegistryToolsInto( std::unordered_map<std::string, AgentTool> &tools )
       tool.description = def.description;
       tool.inputSchema = def.inputSchema;
       tools[def.name] = std::move( tool );
+      sRegistrySourcedNames.insert( def.name );
     }
   }
   catch ( ... )

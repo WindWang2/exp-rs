@@ -259,8 +259,17 @@ void LlmStreamingClient::emitParsedToolCallOnce()
     bool argsResolved = false;
     if ( accu.arguments.trimmed().isEmpty() )
     {
-      // A tool call with NO arguments is legitimate — treat "" as {} instead
-      // of dropping the call (review P2).
+      if ( m_lastFinishReason == QStringLiteral( "length" ) )
+      {
+        // A token-limit cut right after the function name ends the stream
+        // "cleanly" but the call is truncated: emitting it as a fabricated
+        // zero-argument call would execute the tool with wrong arguments.
+        qWarning() << "[llm] dropping tool call" << accu.name
+                   << "(finish_reason=length cut the call before any arguments)";
+        continue;
+      }
+      // A tool call with NO arguments is legitimate on a clean finish —
+      // treat "" as {} instead of dropping the call (review P2).
       funcObj[QStringLiteral( "arguments" )] = QJsonObject();
       argsResolved = true;
     }

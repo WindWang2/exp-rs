@@ -30,15 +30,19 @@ struct DerivationInput
 /// collects parameter values that are existing file paths across ALL parameter
 /// keys — real inputs also ride under names like "before"/"after", "pan"/"ms"
 /// or "postfire", so keying the scan on "input"-like names silently dropped
-/// those lineage edges (#718). The run's own destination is excluded: values
-/// under "output"-like keys never count as inputs (a re-run over an existing
-/// output must not record the output as its own source). Placeholder
-/// references ("$step.output") and non-path strings are ignored — only paths
-/// that exist on disk as files at commit time can be resolved into lineage
-/// records. String, string-list and variant-list values are all considered.
+/// those lineage edges (#718). The run's own destination is excluded twice:
+/// values under "output"/"result"-like keys (TaskCenter's own output-key
+/// vocabulary — "resultRaster", "modelOut"-style spellings ride there too)
+/// never count as inputs, AND the caller's known output path is excluded by
+/// value, so a re-run over an existing output can never record the output as
+/// its own source regardless of which key carried it. Placeholder references
+/// ("$step.output") and non-path strings are ignored — only paths that exist
+/// on disk as files at commit time can be resolved into lineage records.
+/// String, string-list and variant-list values are all considered.
 /// ONE implementation shared by the tool-call dispatcher and the CLI pipeline
 /// runner.
-QStringList findInputPathsInParams( const QVariantMap &params );
+QStringList findInputPathsInParams( const QVariantMap &params,
+                                    const QString &excludePath = QString() );
 
 /// Resolved input lineage for one run: paths that map to a registered asset
 /// become DerivationInput records (asset id + the revision that was present);

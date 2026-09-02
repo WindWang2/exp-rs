@@ -121,13 +121,6 @@ REGISTER_RS_OPERATOR(RsInferenceOperator, "rs:infer")
 
 void installRsOperatorProvider();
 void markRegistryInitComplete();
-/// True once RSOperatorRegistry::instance()'s call_once chain has fully run
-/// (all operator families registered). installRsOperatorProvider() must not
-/// call RSOperatorRegistry::instance() before this — doing so re-enters the
-/// same call_once and deadlocks (#707).
-bool rsRegistryInitComplete();
-
-void installRsOperatorProvider();
 
 struct AtomicRsOperatorProviderRegistration {
   AtomicRsOperatorProviderRegistration() {
@@ -221,26 +214,13 @@ void initBuiltinRsOperators() {
 #endif
 }
 
-std::atomic<bool> sRegistrationComplete{ false };
-
-void markRegistryInitComplete() {
-  sRegistrationComplete.store( true, std::memory_order_release );
-}
-
-bool rsRegistryInitComplete() {
-  // Instance's call_once has finished once every REGISTER_RS_OPERATOR in this
-  // TU has fired; sentinel set by the call_once lambda itself.
-  return sRegistrationComplete.load( std::memory_order_acquire );
-}
-
 void installRsOperatorProvider() {
-  // Only safe to call after rsRegistryInitComplete() — see the comment there.
-  // instance() is safe here: the call_once chain completed before this
-  // function was called, so the registry object exists and no guard is
-  // acquired. Capture it by reference: the provider callback runs from
-  // AtomicAlgorithmRegistry::initialize()/reset(), which may already be
-  // inside an instance() call_once chain — calling instance() from inside
-  // that callback re-enters the same call_once and deadlocks (#707).
+  // Safe to call from static init or after startup: if this is the first
+  // instance() call it simply RUNS the call_once chain (constructing the
+  // registry); what must never happen is calling instance() from INSIDE
+  // that chain, which would re-enter the same call_once and deadlock
+  // (#707). Capture the registry by reference: the provider callback runs
+  // from AtomicAlgorithmRegistry::initialize()/reset().
   auto *rsRegistry = &RSOperatorRegistry::instance();
   sicnu::processing::AtomicAlgorithmRegistry::setRsOperatorProvider([rsRegistry](sicnu::processing::AtomicAlgorithmRegistry &registry) {
     auto names = rsRegistry->operatorNames();

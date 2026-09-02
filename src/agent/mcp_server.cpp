@@ -38,6 +38,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QProcessEnvironment>
+#include <QRegularExpression>
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
@@ -2327,6 +2328,17 @@ QVariantMap McpServer::handleResumeWorkflow(const QString &runId)
     // of being report-only. Step params come from the server-side checkpoint
     // (already workspace-validated at run_workflow submit time), so no
     // re-validation of caller input is needed beyond the run id itself.
+    // The run id is interpolated into the checkpoint file path, so restrict
+    // it to run-id characters — a caller-supplied "foo/../../bar" must not
+    // escape the checkpoint directory and load an arbitrary JSON document.
+    static const QRegularExpression kRunIdPattern( QStringLiteral( "^[A-Za-z0-9_.-]+$" ) );
+    if ( !kRunIdPattern.match( runId ).hasMatch() || runId.contains( QStringLiteral( ".." ) ) )
+    {
+        throw McpToolError(
+          QStringLiteral( "resume_workflow: run_id contains invalid characters (allowed: letters, digits, '_', '-', '.')" ),
+          QStringLiteral( "INVALID_PARAMETER" ),
+          QStringLiteral( "validation" ) );
+    }
     QString error;
     const long pipelineId =
         sicnu::workflow::WorkflowRunCoordinator::instance().resumeRun(runId.toStdString(), &error);
