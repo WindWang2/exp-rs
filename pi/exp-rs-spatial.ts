@@ -425,7 +425,7 @@ function detectBinary(): string | null {
 
 /** Categories (tool prefixes) to bridge; meta = the protocol-level tools. */
 function wantedCategories(): Set<string> {
-  const raw = process.env.EXP_RS_TOOL_CATEGORIES ?? "meta,spatial,data";
+  const raw = process.env.EXP_RS_TOOL_CATEGORIES ?? "meta,spatial,data,temporal";
   const set = new Set<string>();
   for (const part of raw.split(",")) {
     const trimmed = part.trim().toLowerCase();
@@ -517,7 +517,11 @@ export default async function (pi: ExtensionAPI) {
   };
 
   const registerBridgedTools = async (): Promise<number> => {
-    const list = await bridge.request("tools/list", {});
+    // includeSchemas: the bridge registers Pi tools WITH parameter schemas,
+    // so it explicitly opts into the embedded-schema listing (the #701
+    // default listing is compact; agents discover via search_tools +
+    // get_tool_schema instead).
+    const list = await bridge.request("tools/list", { includeSchemas: true });
     let count = 0;
     for (const tool of list?.tools ?? []) {
       const category = toolCategory(tool.name);
