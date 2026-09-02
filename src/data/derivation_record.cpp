@@ -145,21 +145,25 @@ Result<DerivationRecord> DerivationRecord::fromJson( const QJsonObject &json )
 }
 
 
-QStringList findInputPathsInParams( const QVariantMap &params, const QString &excludePath )
+QStringList findInputPathsInParams( const QVariantMap &params,
+                                    const QStringList &excludePaths )
 {
   QStringList paths;
-  // The run's own destination, in the forms a parameter may spell it: the
-  // exact caller-supplied path plus its canonical resolution, so a re-run
+  // The run's own destinations, in the forms a parameter may spell them: the
+  // exact caller-supplied paths plus their canonical resolutions, so a re-run
   // over an existing output cannot record the output as its own source even
   // when the destination rode under a non-"output"-like key (review of #718:
   // "result_path"/"modelOut"-style spellings are TaskCenter output
   // vocabulary but slipped past a key-name-only guard).
   QStringList excludedForms;
-  if ( !excludePath.isEmpty() )
+  for ( const QString &excludePath : excludePaths )
   {
-    excludedForms.append( excludePath );
+    if ( excludePath.isEmpty() )
+      continue;
+    if ( !excludedForms.contains( excludePath ) )
+      excludedForms.append( excludePath );
     const QString canonical = QFileInfo( excludePath ).canonicalFilePath();
-    if ( !canonical.isEmpty() && canonical != excludePath )
+    if ( !canonical.isEmpty() && !excludedForms.contains( canonical ) )
       excludedForms.append( canonical );
   }
   std::function<void( const QVariant & )> collect = [ & ]( const QVariant &value ) {
@@ -197,14 +201,15 @@ QStringList findInputPathsInParams( const QVariantMap &params, const QString &ex
     }
   };
 
+  // Full scan (#718): lineage edges live on whatever key carries the path
+  // ("input", but also dNBR's "postfire" or fusion's "pan"/"ms"). The run's
+  // own destination must never pose as an input: "output" AND "result"
+  // spellings are both skipped because that is exactly TaskCenter's
+  // findOutputPathInParams vocabulary — whatever those keys carry is a
+  // destination, not a source (and the value-level exclusion above covers a
+  // destination that rode under a non-vocabulary key).
   for ( auto it = params.begin(); it != params.end(); ++it )
   {
-    // The scan is key-agnostic (#718: real inputs ride under "before"/"after",
-    // "pan"/"ms", "postfire", … — an "input"-keyed filter silently dropped
-    // those edges) with one explicit guard: the run's own destination must
-    // never pose as an input. "output" AND "result" spellings are both
-    // skipped because that is exactly TaskCenter's findOutputPathInParams
-    // vocabulary — whatever those keys carry is a destination, not a source.
     if ( it.key().contains( QStringLiteral( "output" ), Qt::CaseInsensitive )
          || it.key().contains( QStringLiteral( "result" ), Qt::CaseInsensitive ) )
       continue;

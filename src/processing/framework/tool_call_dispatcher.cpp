@@ -130,15 +130,16 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
       request.stablePath = stablePath;
       request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
       request.autoLoad = false;
-      // Input lineage (#698): the task's "input"-like parameters that point at
-      // existing files are resolved against the catalog so the derivation
-      // record carries real derivedFrom edges (asset id + revision); paths
-      // that do not resolve are preserved in unresolvedInputPaths. The task's
-      // own destination is excluded by value so a re-run over an existing
-      // output cannot gain a self-loop edge.
+      // Input lineage (#698): the task's parameters that point at existing
+      // files are resolved against the catalog so the derivation record
+      // carries real derivedFrom edges (asset id + revision); paths that do
+      // not resolve are preserved in unresolvedInputPaths. The task's own
+      // output path is excluded so a re-run to an existing output never
+      // becomes its own input (#718).
       const sicnu::data::InputLineage lineage = sicnu::data::resolveInputLineage(
         managerGuard.data(),
-        sicnu::data::findInputPathsInParams( info.parameterMap, info.outputLayerPath ) );
+        sicnu::data::findInputPathsInParams( info.parameterMap,
+                                             { info.outputLayerPath } ) );
 
       request.derivation = sicnu::data::makeTaskDerivation(
         info.algorithmId,

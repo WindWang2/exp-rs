@@ -3381,6 +3381,24 @@ if(TARGET sicnu_operators)
   sicnu_link_jsoncpp(test_temporal_algorithms)
   sicnu_discover_tests(test_temporal_algorithms)
 
+  # Temporal workspace: DataManager records, STAC ingestion, execution cache.
+  add_executable(test_temporal_workspace test_temporal_workspace.cpp)
+  target_link_libraries(test_temporal_workspace PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Xml
+    Sicnu::data
+    sicnu_processing
+    GDAL::GDAL
+  )
+  target_include_directories(test_temporal_workspace PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/processing/algorithms/temporal
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_temporal_workspace)
+  sicnu_discover_tests(test_temporal_workspace)
+
   add_executable(test_temporal_agent_tools test_temporal_agent_tools.cpp)
   target_link_libraries(test_temporal_agent_tools PRIVATE
     Catch2::Catch2WithMain
@@ -5273,6 +5291,28 @@ target_include_directories(test_workflow_run_coordinator PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_workflow_run_coordinator)
+
+add_executable(test_workflow_cache_e2e test_workflow_cache_e2e.cpp)
+target_link_libraries(test_workflow_cache_e2e PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::data
+  sicnu_processing
+  sicnu_task_center
+  sicnu_jobs
+  sicnu_workflow
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_workflow_cache_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_workflow_cache_e2e PRIVATE
+  SICNU_CLI_BINARY="${CMAKE_BINARY_DIR}/sicnu_geo_rs_cli"
+)
+sicnu_link_jsoncpp(test_workflow_cache_e2e)
+sicnu_discover_tests(test_workflow_cache_e2e)
 
 add_executable(test_workflow_artifact_gc test_workflow_artifact_gc.cpp)
 target_link_libraries(test_workflow_artifact_gc PRIVATE

@@ -4,6 +4,7 @@
 #include "rs_pipeline_runner.h"
 
 #include "processing/framework/task_center.h"
+#include "processing/algorithms/temporal/temporal_workspace.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_run_coordinator.h"
@@ -387,6 +388,10 @@ bool RsPipelineRunner::ensurePythonPluginsLoaded()
     m_ownedDataManager = std::make_unique<sicnu::data::DataManager>();
     m_dataManager = m_ownedDataManager.get();
   }
+  // Catalog seam for revision-aware execution caching + provenance (#667):
+  // the runner thread owns the catalog, matching TaskCenter's affinity rule.
+  sicnu::TaskCenter::instance().setCatalog( m_dataManager );
+  sicnu::temporal::setWorkspaceCatalog( m_dataManager );
 
   // Headless plugin stack (ADR 0023, TICKET-14): a view-less ProjectContext, a
   // widget-free SicnuAppInterface, and the sanctioned PluginHost lifecycle owner.
@@ -699,15 +704,14 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
     }
 
     // Provenance is attached after successful registration (ADR 0023). The
-    // step's "input"-like parameter paths are resolved against the catalog so
-    // the record carries real derivedFrom edges (#698); paths that do not
-    // resolve are recorded in unresolvedInputPaths, never dropped silently.
-    // The task's registered destination is excluded by value so a re-run over
-    // an existing output cannot gain a self-loop edge.
+    // step's parameter paths are resolved against the catalog so the record
+    // carries real derivedFrom edges (#698); paths that do not resolve are
+    // recorded in unresolvedInputPaths, never dropped silently. The step's
+    // own output path is excluded (#718).
     const sicnu::data::InputLineage lineage =
       sicnu::data::resolveInputLineage(
           m_dataManager,
-          sicnu::data::findInputPathsInParams( task.parameterMap, path ) );
+          sicnu::data::findInputPathsInParams( task.parameterMap, { path } ) );
     const sicnu::data::DerivationRecord derivation =
       sicnu::data::makeTaskDerivation( task.algorithmId,
                                        QJsonObject::fromVariantMap( task.parameterMap ),
@@ -745,6 +749,106 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromFile( const std::strin
   }
 
   return runFromJson( root );
+}
+
+RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string &runId )
+{
+  PipelineResult result;
+  result.success = false;
+
+  if ( !ensurePythonPluginsLoaded() )
+  {
+    result.errorMessage = "Failed to initialize the headless plugin stack";
+    return result;
+  }
+
+  auto &coordinator = sicnu::workflow::WorkflowRunCoordinator::instance();
+
+  // Startup reconciliation (#668): a checkpoint left Running by a crashed
+  // process must become Interrupted before it is resumable. Idempotent for
+  // runs that already reached a terminal state.
+  const auto recovery = coordinator.recoverAtStartup( /*autoResume=*/false );
+  for ( const QString &note : recovery.errors )
+    reportLog( "warn", "recovery: " + note.toStdString() );
+
+  QString resumeError;
+  const long pipelineId = coordinator.resumeRun( runId, &resumeError );
+  if ( pipelineId < 0 )
+  {
+    result.errorMessage = "Cannot resume run " + runId + ": "
+                          + ( resumeError.isEmpty() ? QStringLiteral( "unknown run" )
+                                                    : resumeError ).toStdString();
+    reportLog( "error", result.errorMessage );
+    return result;
+  }
+  reportLog( "info", "Resuming tracked run " + runId + " (pipeline "
+                     + std::to_string( pipelineId ) + "): completed steps with "
+                     + "existing outputs are resolved from the checkpoint, only "
+                     + "the remaining steps execute" );
+
+  const auto deadline = std::chrono::steady_clock::now() + kPipelineTimeout;
+  for ( ;; )
+  {
+    if ( g_cliInterrupted || cliIsInterrupted() )
+    {
+      sicnu::TaskCenter::instance().cancelPipeline( pipelineId );
+      result.errorMessage = "Resumed run interrupted by signal";
+      reportLog( "error", result.errorMessage );
+      return result;
+    }
+    const auto pipeInfo = sicnu::TaskCenter::instance().waitForPipeline( pipelineId,
+                                                                         kPipelinePollInterval );
+    // py: steps block a worker on a marshaled execution (see runFromJson).
+    QCoreApplication::processEvents();
+
+    if ( pipeInfo.isCompleted || pipeInfo.isFailed )
+    {
+      // Report from the run aggregate: it carries EVERY step (pre-completed
+      // ones resolved from the checkpoint + the freshly executed remainder).
+      const auto run = coordinator.runForPipeline( pipelineId );
+      if ( run )
+      {
+        const auto plans = run->stepPlans();
+        result.steps.reserve( plans.size() );
+        bool anyFailed = false;
+        for ( const auto &plan : plans )
+        {
+          StepResult stepResult;
+          stepResult.operatorName = plan.operatorId;
+          stepResult.success = ( plan.status == "Completed" );
+          anyFailed = anyFailed || !stepResult.success;
+          if ( !stepResult.success )
+            stepResult.errorMessage = plan.status + ( plan.errorMessage.empty()
+                                                        ? "" : ": " + plan.errorMessage );
+          if ( !plan.outputLayerPath.empty() )
+            stepResult.result["output"] = plan.outputLayerPath;
+          result.steps.push_back( stepResult );
+        }
+        result.success = !anyFailed;
+        if ( anyFailed && result.errorMessage.empty() )
+          result.errorMessage = "Resumed run failed";
+        if ( result.success )
+        {
+          if ( m_dataManager )
+            registerStepOutputs( pipelineId );
+          reportLog( "info", "Resumed run completed: " + runId );
+        }
+        return result;
+      }
+      // No aggregate (defensive): fall back to the pipeline verdict.
+      result.success = pipeInfo.isCompleted;
+      result.errorMessage = pipeInfo.errorMessage.toStdString();
+      return result;
+    }
+
+    if ( std::chrono::steady_clock::now() > deadline )
+    {
+      sicnu::TaskCenter::instance().cancelPipeline( pipelineId );
+      result.errorMessage = "Resumed run timed out waiting for TaskCenter";
+      reportLog( "error", result.errorMessage );
+      return result;
+    }
+  }
 }
 
 bool RsPipelineRunner::validatePipelineJson( const Json::Value &pipelineJson,

@@ -244,14 +244,16 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     if ( info.pipelineId < 0 || info.stepId.isEmpty() )
         return;
 
-    std::shared_ptr<WorkflowRun> run;
-    {
-        std::lock_guard<std::mutex> lock( m_mutex );
-        const auto it = m_runsByPipeline.find( info.pipelineId );
-        if ( it == m_runsByPipeline.end() )
-            return;
-        run = it->second;
-    }
+    // The whole fold runs under m_mutex: resumeRun swaps the mapped run
+    // object under the same lock, so a transition either lands entirely
+    // before the swap (visible to its merge) or entirely after (folded into
+    // the swapped-in run) — never into a discarded object (#720).
+    std::lock_guard<std::mutex> lock( m_mutex );
+
+    const auto it = m_runsByPipeline.find( info.pipelineId );
+    if ( it == m_runsByPipeline.end() )
+        return;
+    std::shared_ptr<WorkflowRun> run = it->second;
 
     const std::string stepKey = info.stepId.toStdString();
     std::optional<StepPlan> plan = run->stepPlan( stepKey );
@@ -279,11 +281,6 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     }
     run->updateStepPlan( *plan );
 
-    std::lock_guard<std::mutex> lock( m_mutex );
-    // The map entry is ours for the process lifetime; re-check it survived
-    // (clearCompletedTasks on TaskCenter does not touch our bookkeeping).
-    if ( m_runsByPipeline.count( info.pipelineId ) == 0 )
-        return;
     persistRunLocked( *run );
 
     // Terminal roll-up when every step plan reached a terminal status.
@@ -547,6 +544,8 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
                         }
                     }
                     run->updateStepPlan( *plan );
+                    if ( fresh.status == "Completed" && !fresh.outputLayerPath.empty() )
+                        run->setArtifact( fresh.stepId, fresh.outputLayerPath );
                 }
             }
             m_pipelineByRunId.erase( it->second->runId() );
