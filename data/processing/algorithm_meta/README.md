@@ -1,4 +1,18 @@
-# Algorithm Catalog Sidecars (ADR 0122)
+# Algorithm Catalog Sidecars (ADR 0122) — GENERATED ARTIFACTS
+
+**These files are generated, not hand-maintained (#707).** Every field they
+carry is authored in code on the operator's `metadata()` (task family, GPU,
+notes, tags) and flows into the `AlgorithmDescriptor`'s `AgentMetadata` —
+the single source of truth. Regenerate the whole directory with:
+
+```bash
+sicnu_geo_rs_cli --export-catalog data/processing/algorithm_meta
+```
+
+The shipped files must stay byte-identical to that regeneration; the drift
+gate in `tests/test_algorithm_meta_drift.cpp` fails when a sidecar
+contradicts the descriptor. Do not hand-edit — change the operator metadata
+instead and re-export.
 
 Optional per-algorithm capability manifests consumed by
 `AlgorithmMetaStore` (`src/processing/framework/algorithm_meta_store.*`) and

@@ -5,7 +5,17 @@
 
 #include <qgslayout.h>
 #include <qgslayoutitem.h>
+#include <qgslayoutitemregistry.h>
+#include <qgslayoutitemlabel.h>
+#include <qgslayoutitemlegend.h>
+#include <qgslayoutitemmap.h>
+#include <qgslayoutitemscalebar.h>
+#include <qgspagescollection.h>
+#include <qgslayoutitempage.h>
 #include <qgsprintlayout.h>
+#include <qgsmaplayer.h>
+
+#include <QFont>
 
 #include <QFileInfo>
 #include <QString>
@@ -802,6 +812,273 @@ class LayoutExportTool final : public SpatialTool
 };
 
 
+// ---------------------------------------------------------------------------
+// Cartographic output preflight (goal §10): the compose -> inspect ->
+// PREFLIGHT -> repair -> export loop's gate. One place, shared vocabulary
+// with the GUI export guard, so an agent can self-repair before exporting.
+// ---------------------------------------------------------------------------
+class LayoutPreflightTool final : public SpatialTool
+{
+  public:
+    std::string name() const override { return "layout:preflight"; }
+    std::string displayName() const override { return "Preflight layout for export"; }
+    std::string description() const override
+    {
+      return "Run cartographic output checks on a layout before export: missing title/legend/"
+             "scale bar/north arrow, off-page items, overlapping items, empty maps, broken layer "
+             "references, tiny fonts, legend/map mismatch, extreme export size, missing source "
+             "note. Returns every issue with a severity and the offending item id — repair with "
+             "layout:add_item / layout:set_item_properties, then layout:export.";
+    }
+    std::vector<std::string> tags() const override
+    {
+      return { "layout", "cartography", "preflight", "qa", "export" };
+    }
+    Json::Value inputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      Json::Value props( Json::objectValue );
+      props["layout"] = Json::Value( Json::objectValue );
+      props["layout"]["type"] = "string";
+      props["layout"]["description"] = "Layout name (see layout:list).";
+      props["format"] = Json::Value( Json::objectValue );
+      props["format"]["type"] = "string";
+      props["format"]["description"] = "Export format for the size check: png|jpg|pdf|svg (default png).";
+      props["dpi"] = Json::Value( Json::objectValue );
+      props["dpi"]["type"] = "number";
+      props["dpi"]["description"] = "Export DPI for the size check (default 300).";
+      schema["properties"] = props;
+      schema["required"] = Json::Value( Json::arrayValue );
+      schema["required"].append( "layout" );
+      return schema;
+    }
+    Json::Value outputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      schema["properties"]["passed"] = Json::Value( Json::objectValue );
+      schema["properties"]["issues"] = Json::Value( Json::arrayValue );
+      return schema;
+    }
+    SpatialToolResult execute( const Json::Value &input ) override
+    {
+      std::string err;
+      const QString layoutName = requireString( input, "layout", &err );
+      if ( !err.empty() )
+        return SpatialToolResult::failure( err, "INVALID_PARAMETER", "validation" );
+
+      QgsPrintLayout *layout = LayoutService::instance().findLayout( layoutName );
+      if ( !layout )
+        return SpatialToolResult::failure( "No layout named '" + layoutName.toStdString() + "'",
+                                           "NOT_FOUND", "validation" );
+
+      const QString format = input.isMember( "format" )
+                                 ? QString::fromStdString( input["format"].asString() ).toLower()
+                                 : QStringLiteral( "png" );
+      const double dpi = input.isMember( "dpi" ) && input["dpi"].isNumeric() ? input["dpi"].asDouble()
+                                                                            : 300.0;
+
+      Json::Value issues( Json::arrayValue );
+      const auto addIssue = [&issues]( const char *check, const char *severity, const QString &item,
+                                       const std::string &message ) {
+        Json::Value issue( Json::objectValue );
+        issue["check"] = check;
+        issue["severity"] = severity;
+        if ( !item.isEmpty() )
+          issue["item"] = item.toStdString();
+        issue["message"] = message;
+        issues.append( issue );
+      };
+      const auto itemId = []( const QgsLayoutItem *item ) {
+        const QString id = item->id();
+        return id.isEmpty() ? QStringLiteral( "<unnamed %1>" ).arg( item->stringType() ) : id;
+      };
+
+      // Inventory by item type.
+      QList<QgsLayoutItemLabel *> labels;
+      QList<QgsLayoutItemLegend *> legends;
+      QList<QgsLayoutItemMap *> maps;
+      QList<QgsLayoutItemScaleBar *> scaleBars;
+      QList<QgsLayoutItem *> pictures;
+      const QList<QgsLayoutItem *> items = layout->items();
+      for ( QgsLayoutItem *item : items )
+      {
+        if ( auto *label = dynamic_cast<QgsLayoutItemLabel *>( item ) )
+          labels.append( label );
+        else if ( auto *legend = dynamic_cast<QgsLayoutItemLegend *>( item ) )
+          legends.append( legend );
+        else if ( auto *map = dynamic_cast<QgsLayoutItemMap *>( item ) )
+          maps.append( map );
+        else if ( auto *bar = dynamic_cast<QgsLayoutItemScaleBar *>( item ) )
+          scaleBars.append( bar );
+        else
+          pictures.append( item ); // north-arrow candidates (pictures) — refined below
+      }
+      QList<QgsLayoutItem *> northCandidates;
+      for ( QgsLayoutItem *item : items )
+      {
+        const QString id = item->id().toLower();
+        const QString strType = item->stringType().toLower();
+        if ( id.contains( QStringLiteral( "north" ) ) || strType.contains( QStringLiteral( "arrow" ) )
+             || ( item->type() == QgsLayoutItemRegistry::LayoutPicture
+                  && id.contains( QStringLiteral( "north" ) ) ) )
+          northCandidates.append( item );
+      }
+
+      // --- Empty layout / empty map -------------------------------------
+      if ( items.isEmpty() )
+      {
+        addIssue( "empty_layout", "error", QString(), "The layout has no items at all." );
+        Json::Value out( Json::objectValue );
+        out["passed"] = false;
+        out["issues"] = issues;
+        return SpatialToolResult::ok( out );
+      }
+      if ( maps.isEmpty() )
+        addIssue( "missing_map", "error", QString(), "No map frame on the layout." );
+      for ( const QgsLayoutItemMap *map : maps )
+      {
+        if ( map->layers().isEmpty() )
+          addIssue( "empty_map", "error", itemId( map ),
+                    "Map frame has no layers assigned (nothing will render)." );
+        int broken = 0;
+        for ( const QgsMapLayer *layer : map->layers() )
+          if ( !layer || !layer->isValid() )
+            ++broken;
+        if ( broken > 0 )
+          addIssue( "broken_layer_reference", "error", itemId( map ),
+                    "Map references " + std::to_string( broken )
+                      + " layer(s) that are broken or no longer in the project." );
+      }
+
+      // --- Cartographic furniture (applicable only with a map) -----------
+      if ( !maps.isEmpty() )
+      {
+        bool hasTitle = false;
+        for ( const QgsLayoutItemLabel *label : labels )
+          hasTitle = hasTitle || label->font().pointSizeF() >= 16.0;
+        if ( !hasTitle )
+          addIssue( "missing_title", "warning", QString(),
+                    "No title-like label found (no text item with font >= 16 pt)." );
+        if ( legends.isEmpty() )
+          addIssue( "missing_legend", "warning", QString(), "No legend item on the layout." );
+        if ( scaleBars.isEmpty() )
+          addIssue( "missing_scale_bar", "warning", QString(), "No scale bar on the layout." );
+        if ( northCandidates.isEmpty() )
+          addIssue( "missing_north_arrow", "warning", QString(),
+                    "No north arrow found (item whose id mentions 'north' / an arrow item)." );
+        if ( legends.size() > maps.size() )
+          addIssue( "legend_map_mismatch", "warning", QString(),
+                    "More legends (" + std::to_string( legends.size() ) + ") than maps ("
+                      + std::to_string( maps.size() ) + ")." ) );
+      }
+
+      // --- Source note ----------------------------------------------------
+      bool hasSourceNote = false;
+      for ( const QgsLayoutItemLabel *label : labels )
+      {
+        const QString text = label->text().toLower();
+        if ( text.contains( QStringLiteral( "source" ) ) || text.contains( QStringLiteral( "来源" ) )
+             || text.contains( QStringLiteral( "data source" ) ) )
+          hasSourceNote = true;
+      }
+      if ( !hasSourceNote )
+        addIssue( "missing_source_note", "warning", QString(),
+                  "No source/data-source note found (labels containing 'source' or '来源')." );
+
+      // --- Tiny fonts -----------------------------------------------------
+      for ( const QgsLayoutItemLabel *label : labels )
+      {
+        if ( label->font().pointSizeF() > 0 && label->font().pointSizeF() < 6.0 )
+          addIssue( "tiny_font", "warning", itemId( label ),
+                    "Label font is below 6 pt — likely unreadable at export size." );
+      }
+      for ( const QgsLayoutItemLegend *legend : legends )
+      {
+        const QFont titleFont = legend->style( Qgis::LegendComponent::Title ).font();
+        if ( titleFont.pointSizeF() > 0 && titleFont.pointSizeF() < 5.0 )
+          addIssue( "tiny_font", "warning", itemId( legend ),
+                    "Legend title font is below 5 pt — likely unreadable at export size." );
+      }
+
+      // --- Off-page and overlap --------------------------------------------
+      QgsLayoutItemPage *page = layout->pageCollection()->page( 0 );
+      if ( page )
+      {
+        const QRectF pageRect = page->mapToScene( page->rect() ).boundingRect();
+        for ( QgsLayoutItem *item : items )
+        {
+          if ( item->type() == QgsLayoutItemRegistry::LayoutPage )
+            continue;
+          const QRectF sceneRect = item->mapToScene( item->rect() ).boundingRect();
+          if ( !pageRect.intersects( sceneRect ) )
+            addIssue( "off_page_item", "error", itemId( item ),
+                      "Item lies entirely outside the first page." );
+          else if ( !pageRect.contains( sceneRect ) )
+            addIssue( "off_page_item", "warning", itemId( item ),
+                      "Item partially exceeds the page bounds and may clip." );
+        }
+      }
+      for ( int i = 0; i < items.size(); ++i )
+      {
+        for ( int j = i + 1; j < items.size(); ++j )
+        {
+          QgsLayoutItem *a = items[i];
+          QgsLayoutItem *b = items[j];
+          if ( a->type() == QgsLayoutItemRegistry::LayoutPage || b->type() == QgsLayoutItemRegistry::LayoutPage )
+            continue;
+          // Overlays on top of a map frame are legitimate cartography
+          // (legends/labels/scale bars live ON the map): only flag
+          // non-furniture pairs or furniture overlapping non-map items.
+          const bool aIsMap = a->type() == QgsLayoutItemRegistry::LayoutMap;
+          const bool bIsMap = b->type() == QgsLayoutItemRegistry::LayoutMap;
+          if ( aIsMap || bIsMap )
+            continue;
+          const QRectF ra = a->mapToScene( a->rect() ).boundingRect();
+          const QRectF rb = b->mapToScene( b->rect() ).boundingRect();
+          if ( ra.intersects( rb ) )
+            addIssue( "overlap", "warning", itemId( a ),
+                      "Item overlaps '" + itemId( b ).toStdString()
+                        + "' (both are non-map items)." );
+        }
+      }
+
+      // --- Extreme export size (same hard cap as layout:export) -----------
+      if ( page && ( format == "png" || format == "jpg" ) )
+      {
+        constexpr qint64 kMaxExportBytes = 4LL * 1024 * 1024 * 1024;
+        const double pxW = page->rect().width() / 25.4 * dpi;
+        const double pxH = page->rect().height() / 25.4 * dpi;
+        const qint64 bytes = static_cast<qint64>( pxW ) * static_cast<qint64>( pxH ) * 4;
+        if ( bytes > kMaxExportBytes )
+          addIssue( "extreme_export_size", "error", QString(),
+                    "Raster export at " + std::to_string( static_cast<int>( dpi ) )
+                      + " DPI would need ~"
+                      + std::to_string( bytes / ( 1024 * 1024 ) ) + " MiB (cap "
+                      + std::to_string( kMaxExportBytes / ( 1024 * 1024 ) ) + " MiB)." );
+        else if ( bytes > kMaxExportBytes / 4 )
+          addIssue( "extreme_export_size", "warning", QString(),
+                    "Raster export at this DPI is unusually large (~"
+                      + std::to_string( bytes / ( 1024 * 1024 ) ) + " MiB)." );
+      }
+
+      bool hasError = false;
+      for ( const Json::Value &issue : issues )
+        hasError = hasError || issue["severity"].asString() == "error";
+      Json::Value out( Json::objectValue );
+      out["passed"] = !hasError;
+      out["error_count"] = static_cast<Json::Int>(
+        std::count_if( issues.begin(), issues.end(), []( const Json::Value &issue ) {
+          return issue["severity"].asString() == "error";
+        } ) );
+      out["warning_count"] = static_cast<Json::Int>( issues.size() - out["error_count"].asInt() );
+      out["issues"] = issues;
+      out["layout"] = layoutName.toStdString();
+      return SpatialToolResult::ok( out );
+    }
+};
+
 class LayoutAutoArrangeTool final : public SpatialTool
 {
   public:
@@ -876,6 +1153,7 @@ void registerBuiltinLayoutTools()
     std::make_shared<LayoutTemplateTool>( true ),
     std::make_shared<LayoutTemplateTool>( false ),
     std::make_shared<LayoutAutoArrangeTool>(),
+    std::make_shared<LayoutPreflightTool>(),
     std::make_shared<LayoutExportTool>(),
   };
   auto &registry = sicnu::agent::spatial_tools::SpatialToolRegistry::instance();
