@@ -9,6 +9,7 @@
 #include <QIcon>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPainter>
 #include <QSize>
 #include <QSplitter>
@@ -27,6 +28,8 @@
 
 #include "data/collection_types.h"
 #include "data/data_asset.h"
+#include "processing/algorithms/temporal/temporal_collection.h"
+#include "processing/algorithms/temporal/temporal_workspace.h"
 #include "data/data_manager.h"
 #include "dialogs/dialog_help_catalog.h"
 
@@ -38,6 +41,7 @@ namespace
 
 constexpr int kAssetIdRole = Qt::UserRole;
 constexpr int kCollectionIdRole = Qt::UserRole + 1;
+constexpr int kTemporalCollectionIdRole = Qt::UserRole + 2;
 constexpr int kDisplayNameRole = Qt::UserRole + 2;
 constexpr int kKindLabelRole = Qt::UserRole + 3;
 constexpr int kStatusLabelRole = Qt::UserRole + 4;
@@ -542,6 +546,12 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
              &DataManagerPanel::scheduleCoalescedRefresh );
     connect( m_dataManager, &sicnu::data::DataManager::collectionRemoved, this,
              &DataManagerPanel::scheduleCoalescedRefresh );
+    connect( m_dataManager, &sicnu::data::DataManager::temporalCollectionAdded, this,
+             &DataManagerPanel::scheduleCoalescedRefresh );
+    connect( m_dataManager, &sicnu::data::DataManager::temporalCollectionChanged, this,
+             &DataManagerPanel::scheduleCoalescedRefresh );
+    connect( m_dataManager, &sicnu::data::DataManager::temporalCollectionRemoved, this,
+             &DataManagerPanel::scheduleCoalescedRefresh );
     m_refreshCoalesceTimer = new QTimer( this );
     m_refreshCoalesceTimer->setSingleShot( true );
     m_refreshCoalesceTimer->setInterval( 250 );
@@ -733,6 +743,30 @@ void DataManagerPanel::refresh()
     collectionItem->setExpanded( true );
   }
 
+  // Temporal Collections: workspace records (first-class catalog entities).
+  // Light descriptor summaries only — never raster I/O on the GUI thread.
+  if ( m_dataManager->temporalCollections().size() > 0 )
+  {
+    auto *temporalGroup = new QTreeWidgetItem( m_tree );
+    temporalGroup->setText( 0, tr( "时间相集合" ) );
+    temporalGroup->setText( 1, tr( "工作区记录" ) );
+    temporalGroup->setText( 2, QString::number( m_dataManager->temporalCollections().size() ) );
+    for ( const auto &record : m_dataManager->temporalCollections() )
+    {
+      auto *temporalItem = new QTreeWidgetItem( temporalGroup );
+      configureNameCell( temporalItem,
+                         record.displayName,
+                         tr( "时间相集合" ),
+                         appIcon( "d_t_b_se" ),
+                         tr( "时间相集合（多时相场景集合）" ),
+                         QColor( 0x7c, 0x3a, 0xed ) ); // violet stripe for temporal records
+      temporalItem->setData( 0, kTemporalCollectionIdRole, record.id.toString() );
+      temporalItem->setText( 2, QString::number( record.revision ) );
+      temporalItem->setText( 1, tr( "修订 %1" ).arg( record.revision ) );
+    }
+    temporalGroup->setExpanded( true );
+  }
+
   for ( const sicnu::data::AssetSnapshot &snapshot : m_dataManager->assets() )
   {
     if ( snapshot.parentCollectionId().has_value() )
@@ -777,6 +811,71 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
     m_tree->clearSelection();
     item->setSelected( true );
     m_tree->setCurrentItem( item );
+  }
+
+  // Temporal collection rows: workspace-record actions (no asset ids).
+  if ( item && m_dataManager )
+  {
+    const QString temporalId = item->data( 0, kTemporalCollectionIdRole ).toString();
+    if ( !temporalId.isEmpty() )
+    {
+      const auto recordId = sicnu::data::CollectionId::fromString( temporalId );
+      const auto record = recordId ? m_dataManager->temporalCollection( *recordId ) : std::nullopt;
+      if ( !record )
+        return;
+
+      QMenu menu( this );
+      QAction *describeAction = menu.addAction( tr( "查看集合信息" ) );
+      describeAction->setToolTip( tr( "显示该时间相集合的场景数、时间范围与平台。" ) );
+      QAction *removeAction = menu.addAction( tr( "移除集合记录" ) );
+      removeAction->setToolTip( tr( "从工作区移除该记录（不删除任何场景数据）。" ) );
+      QAction *chosen = menu.exec( m_tree->viewport()->mapToGlobal( pos ) );
+      if ( chosen == describeAction )
+      {
+        QString summary = tr( "名称：%1
+修订：%2" ).arg( record->displayName )
+                            .arg( record->revision );
+        sicnu::temporal::TemporalCollection parsed;
+        QString parseError;
+        if ( sicnu::temporal::collectionFromDescriptorText( record->descriptor, &parsed, &parseError ) )
+        {
+          int bound = 0;
+          QStringList platforms;
+          for ( const auto &scene : parsed.scenes() )
+          {
+            if ( !scene.assetId.isEmpty() )
+              ++bound;
+            if ( !scene.platform.isEmpty() && !platforms.contains( scene.platform ) )
+              platforms.append( scene.platform );
+          }
+          summary += QLatin1Char( '
+' ) + tr( "场景数：%1（已绑定资产 %2）" )
+                       .arg( parsed.sceneCount() ).arg( bound );
+          if ( !parsed.timeRangeStartIso().isEmpty() )
+            summary += QLatin1Char( '
+' ) + tr( "时间范围：%1 … %2" )
+                         .arg( parsed.timeRangeStartIso(), parsed.timeRangeEndIso() );
+          if ( !platforms.isEmpty() )
+            summary += QLatin1Char( '
+' ) + tr( "平台：%1" ).arg( platforms.join( ", " ) );
+        }
+        else
+        {
+          summary += QLatin1Char( '
+' ) + tr( "描述符无效：%1" ).arg( parseError );
+        }
+        QMessageBox::information( this, tr( "时间相集合" ), summary );
+      }
+      else if ( chosen == removeAction )
+      {
+        const auto answer = QMessageBox::question(
+          this, tr( "移除时间相集合" ),
+          tr( "移除集合“%1”？场景数据不会被删除。" ).arg( record->displayName ) );
+        if ( answer == QMessageBox::Yes )
+          m_dataManager->removeTemporalCollection( *recordId ); // signals → coalesced refresh
+      }
+      return;
+    }
   }
 
   const QList<sicnu::data::AssetId> ids = selectedAssetIds();

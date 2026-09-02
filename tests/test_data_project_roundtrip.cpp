@@ -1159,3 +1159,146 @@ TEST_CASE("A duplicated persisted collection child is deduplicated on read-back"
   }
   CHECK(duplicateReported);
 }
+
+TEST_CASE("A temporal collection record round-trips through the project and re-binds",
+          "[project][data_roundtrip][temporal]") {
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore()};
+  auto createdContext = sicnu::app::ProjectContext::create(viewSpec);
+  REQUIRE(createdContext);
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+
+  QTemporaryDir dir;
+  const QString pathA = dir.filePath(QStringLiteral("t_scene_a.tif"));
+  const QString pathB = dir.filePath(QStringLiteral("t_scene_b.tif"));
+  REQUIRE(QFile::copy(fixturePath(QStringLiteral("samples/dem_sample.tif")), pathA));
+  REQUIRE(QFile::copy(fixturePath(QStringLiteral("samples/dem_sample.tif")), pathB));
+
+  sicnu::data::SourceDescriptor sourceA;
+  sourceA.providerKey = QStringLiteral("gdal");
+  sourceA.canonicalSource = pathA;
+  const sicnu::data::RegisterResult assetA =
+      context->dataManager().registerSource({sourceA});
+  REQUIRE_FALSE(assetA.assetId.isNull());
+  sicnu::data::SourceDescriptor sourceB;
+  sourceB.providerKey = QStringLiteral("gdal");
+  sourceB.canonicalSource = pathB;
+  const sicnu::data::RegisterResult assetB =
+      context->dataManager().registerSource({sourceB});
+  REQUIRE_FALSE(assetB.assetId.isNull());
+
+  // Build a tiny descriptor directly (avoids the GdalDatasetWrapper temporal
+  // path that would stamp a wrong acquisition time onto copies of the same
+  // dem_file). The serializer stores the descriptor verbatim, so the content
+  // here directly tests round-trip fidelity.
+  const QString descriptor = QStringLiteral(
+    R"({"version":1,"name":"series-save","scenes":[)"
+    R"({"path":"%1","time":"2024-01-15T10:00:00","platform":"Sentinel-2A","asset_id":"%2","asset_revision":"1"},)"
+    R"({"path":"%3","time":"2024-02-15T10:00:00","platform":"Sentinel-2A","asset_id":"%4","asset_revision":"1"}"
+    R"(]})").arg(pathA, assetA.assetId.toString(), pathB, assetB.assetId.toString());
+
+  const sicnu::data::CollectionId recordId =
+      context->dataManager().restoreTemporalCollection(
+        sicnu::data::CollectionId::generate(), 3,
+        { QStringLiteral("series-save"), descriptor }).collectionId;
+  REQUIRE_FALSE(recordId.isNull());
+
+  sicnu::app::DataProjectSerializer serializer;
+  bool writeSucceeded = false;
+  bool readSucceeded = false;
+  QObject signalReceiver;
+  QObject::connect(project, &QgsProject::writeProject, &signalReceiver,
+                   [&](QDomDocument &document) {
+                     writeSucceeded =
+                         static_cast<bool>(serializer.write(document, *context));
+                   });
+  QObject::connect(project, &QgsProject::readProject, &signalReceiver,
+                   [&](const QDomDocument &document) {
+                     const sicnu::data::Result<void> read =
+                         serializer.read(document, *project, *context);
+                     readSucceeded = static_cast<bool>(read);
+                   });
+
+  QTemporaryDir temporaryDirectory;
+  const QString projectPath =
+      temporaryDirectory.filePath(QStringLiteral("temporal_roundtrip.qgs"));
+  REQUIRE(project->write(projectPath));
+  REQUIRE(writeSucceeded);
+
+  // descriptor stored, not yet cleared — verify the persisted element exists
+  {
+    QFile projectFile(projectPath);
+    REQUIRE(projectFile.open(QIODevice::ReadOnly));
+    QDomDocument document;
+    REQUIRE(document.setContent(&projectFile));
+    const QDomElement temporal =
+        document.documentElement()
+            .firstChildElement(QStringLiteral("sicnuDataManager"))
+            .firstChildElement(QStringLiteral("temporalCollections"));
+    REQUIRE_FALSE(temporal.isNull());
+    const QDomElement record =
+        temporal.firstChildElement(QStringLiteral("temporalCollection"));
+    REQUIRE_FALSE(record.isNull());
+    CHECK(record.attribute(QStringLiteral("name")) == QStringLiteral("series-save"));
+    CHECK(record.attribute(QStringLiteral("revision")) == QStringLiteral("3"));
+    REQUIRE_FALSE(record.firstChildElement(QStringLiteral("descriptor")).isNull());
+  }
+
+  REQUIRE(context->clearProject(*project));
+  REQUIRE(project->read(projectPath));
+  REQUIRE(readSucceeded);
+
+  // Descriptor + identity survived the round-trip (re-binds lazily through
+  // bindCollectionAssets when the temporal layer consumes the record).
+  const auto restored = context->dataManager().temporalCollection(recordId);
+  REQUIRE(restored.has_value());
+  CHECK(restored->displayName == QStringLiteral("series-save"));
+  CHECK(restored->revision == 3);
+  CHECK(restored->descriptor == descriptor);
+  CHECK(context->dataManager().temporalCollections().size() == 1);
+
+  // Bare extension prefix: older projects without <temporalCollections> reload
+  // without failing (nothing to migrate).
+  {
+    bool writeSucceeded2 = false;
+    bool readSucceeded2 = false;
+    QObject signalReceiver2;
+    // Create a new project context without any temporal records and write it
+    // so the next read sees no <temporalCollections> block.
+    project->clear();
+    const sicnu::display::DisplayViewSpec viewSpec2{
+        &canvas, project->layerTreeRoot(), project->layerStore()};
+    auto createdContext2 = sicnu::app::ProjectContext::create(viewSpec2);
+    REQUIRE(createdContext2);
+    std::unique_ptr<sicnu::app::ProjectContext> context2 = createdContext2.take();
+    QObject::connect(project, &QgsProject::writeProject, &signalReceiver2,
+                     [&](QDomDocument &document) {
+                       writeSucceeded2 =
+                           static_cast<bool>(serializer.write(document, *context2));
+                     });
+    QTemporaryDir dir2;
+    const QString projectPath2 = dir2.filePath(QStringLiteral("temporal_empty.qgs"));
+    REQUIRE(project->write(projectPath2));
+    REQUIRE(writeSucceeded2);
+    // Read back into a fresh catalog: missing <temporalCollections> is additive,
+    // not fatal.
+    project->clear();
+    auto createdContext3 = sicnu::app::ProjectContext::create(viewSpec2);
+    REQUIRE(createdContext3);
+    std::unique_ptr<sicnu::app::ProjectContext> context3 = createdContext3.take();
+    QObject signalReceiver3;
+    QObject::connect(project, &QgsProject::readProject, &signalReceiver3,
+                     [&](const QDomDocument &document) {
+                       const sicnu::data::Result<void> read =
+                           serializer.read(document, *project, *context3);
+                       readSucceeded2 = static_cast<bool>(read);
+                     });
+    REQUIRE(project->read(projectPath2));
+    CHECK(readSucceeded2);
+    CHECK(context3->dataManager().temporalCollections().isEmpty());
+  }
+}

@@ -190,8 +190,11 @@ _Avoid_: Node graph window, Flow editor dialog
   1. **Atomic Adapter Seam**: Define `AtomicAlgorithmAdapter` interface and `AlgorithmDescriptor` C++ struct with 12 `DataType` port type enums (`Raster`, `Vector`, `Table`, `Numeric`, `Integer`, `String`, `Boolean`, `Enum`, `BoundingBox`, `Crs`, `Json`, `Any`).
   2. **Heterogeneous Adapter Family**: Provide zero-modification reflection wrappers for `RsOperatorAdapter`, `QgsProcessingAdapter` (QGIS algorithms), and `PythonPluginAdapter` (Python plugins).
   3. **Central Registry Singleton**: Manage all algorithm adapters in a thread-safe `AtomicAlgorithmRegistry` singleton with auto-population on application startup.
+**Temporal Workspace**:
+The DataManager-owned record (`TemporalCollectionRecord`) that makes a temporal scene collection a first-class workspace asset: it carries `CollectionId id`, `quint64 revision`, and the canonical descriptor document (`TemporalCollection::toJson` JSON text, including per-scene `assetId`+`assetRevision` bindings), plus createdAt/updatedAt, and is project-persistent through the `<temporalCollections>` extension block. See ADR 0125.
+
 **Workspace Snapshot**:
-An immutable, serializable C++ value object (`WorkspaceSnapshot`) captured atomically from `DataManager` (Data Asset metadata, paths, band counts, CRS) and `ActiveViewHost` (map canvas extent, scale, active layer). Serves as the single seam for `AgentContextResolver` to generate LLM system prompts without touching live Qt/QGIS GUI widgets.
+An immutable, serializable C++ value object (`WorkspaceSnapshot`) captured atomically from `DataManager` (Data Asset metadata, paths, band counts, CRS, plus `TemporalCollectionRecord` workspace summaries) and `ActiveViewHost` (map canvas extent, scale, active layer). Serves as the single seam for `AgentContextResolver` to generate LLM system prompts without touching live Qt/QGIS GUI widgets.
 _Avoid_: Workspace state map, Context dict, UI state dump
 
 ### ADR 0013: AI Agent Copilot UI & Streaming LLM Client Architecture

@@ -20,7 +20,12 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
   for ( const auto &spatial : SpatialToolRegistry::instance().tools() )
   {
     // layout:* tools join the catalog through their own provider/group.
-    if ( spatial->name().rfind( "spatial:", 0 ) != 0 )
+    // temporal:* tools are first-class catalog entries too: the Copilot's
+    // LLM could never discover collection discovery/preflight otherwise
+    // (they were callable-but-undiscoverable on every agent surface).
+    const bool spatialTool = spatial->name().rfind( "spatial:", 0 ) == 0
+                             || spatial->name().rfind( "temporal:", 0 ) == 0;
+    if ( !spatialTool )
       continue;
 
     AgentTool tool;

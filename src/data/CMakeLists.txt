@@ -42,6 +42,7 @@ qt_add_library(sicnu_data STATIC
   raster_grid_compat.h
   source_descriptor.cpp
   source_descriptor.h
+  temporal_workspace_types.h
   virtual_raster_preflight.cpp
   virtual_raster_preflight.h
   virtual_raster_recipe.cpp

@@ -425,7 +425,7 @@ function detectBinary(): string | null {
 
 /** Categories (tool prefixes) to bridge; meta = the protocol-level tools. */
 function wantedCategories(): Set<string> {
-  const raw = process.env.EXP_RS_TOOL_CATEGORIES ?? "meta,spatial,data";
+  const raw = process.env.EXP_RS_TOOL_CATEGORIES ?? "meta,spatial,data,temporal";
   const set = new Set<string>();
   for (const part of raw.split(",")) {
     const trimmed = part.trim().toLowerCase();

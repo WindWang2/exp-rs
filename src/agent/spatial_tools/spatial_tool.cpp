@@ -5,6 +5,7 @@
 
 #include "model_catalog_tool.h"
 #include "temporal_collection_tools.h"
+#include "temporal_workspace_tools.h"
 #include "raster_inspect_tool.h"
 #include "vector_inspect_tool.h"
 
@@ -87,6 +88,11 @@ void SpatialToolRegistry::registerBuiltinTools()
     std::make_shared<TemporalDescribeCollectionTool>(),
     std::make_shared<TemporalListScenesTool>(),
     std::make_shared<TemporalPreflightCollectionTool>(),
+    std::make_shared<TemporalListCollectionsTool>(),
+    std::make_shared<TemporalGetCollectionTool>(),
+    std::make_shared<TemporalRegisterCollectionTool>(),
+    std::make_shared<TemporalRemoveCollectionTool>(),
+    std::make_shared<TemporalIngestStacTool>(),
   };
   for ( const auto &tool : kBuiltinTools )
     registerTool( tool );

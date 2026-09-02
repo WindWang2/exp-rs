@@ -20,9 +20,14 @@
 #include "jobs/job_types.h"
 #include "resource_monitor.h"
 #include "task_resource_budget.h"
+#include "data/execution_fingerprint.h"
 
 namespace sicnu::operators {
 class RSOperatorContext;
+}
+
+namespace sicnu::data {
+class DataManager;
 }
 
 namespace sicnu::workflow {
@@ -258,6 +263,13 @@ public:
     std::shared_ptr<const sicnu::workflow::WorkflowRun>
     workflowRunForPipeline( long pipelineId ) const;
 
+    /// Catalog seam for revision-aware execution caching (#667): the host
+    /// wires the DataManager instance it owns (GUI / MCP / CLI each construct
+    /// their own); TaskCenter never owns it. Without a catalog, cache
+    /// fingerprinting is disabled — a step whose inputs cannot be
+    /// revision-identified must never be served from cache.
+    void setCatalog( sicnu::data::DataManager *catalog );
+
     /// Cap concurrent Running tasks for @a profile (minimum 1). Used by processNextQueuedTasks.
     void setResourceProfileLimit( ProviderResourceProfile profile, unsigned int maxConcurrent );
     unsigned int resourceProfileLimit( ProviderResourceProfile profile ) const;
@@ -416,28 +428,26 @@ private:
     /// budget resolver (registry estimate + conservative class fallback).
     unsigned int taskEstimateMbLocked( const AlgorithmTaskInfo &task ) const;
 
-    // --- Workflow Engine 2.0 wiring (ADR 0123, #662) -------------------------
-    /// Creates the WorkflowRun aggregate for a pipeline and builds its step
-    /// plans (topological-order fingerprints: operator id + canonical params
-    /// + parent-step derivation revisions). Defensive: failures leave the
-    /// pipeline running on the legacy path only.
-    void attachWorkflowRunLocked( long pipelineId,
-                                  const sicnu::workflow::WorkflowDefinition &def,
-                                  const std::vector<std::string> &orderedStepIds );
-    /// Mirrors a task status transition into the pipeline's run aggregate
-    /// (step plan status, checkpoint save). No-op when the pipeline has no run.
-    void mirrorStepToRunLocked( long pipelineId, const std::string &stepId,
-                                TaskStatus status );
-    /// Transitions the pipeline's run aggregate to its terminal state once
-    /// every step is terminal (Running -> Completed/Failed + final checkpoint).
-    void finalizeWorkflowRunLocked( long pipelineId, bool failed,
-                                    const QString &errorMessage );
-    /// Records a completed step's output path under its plan fingerprint so an
-    /// identical resubmission can skip re-execution (#667). No-op for
-    /// cache-hit steps and steps without a fingerprint.
-    void storePipelineStepOutputLocked( long pipelineId, long taskId );
     /// Task id for a pipeline step id, or -1. Requires m_mutex.
     long taskForStepLocked( long pipelineId, const std::string &stepId ) const;
+
+    // --- Revision-aware execution cache (#667, ADR 0123) ----------------------
+    /// Computes the execution fingerprint for a task whose parameters are
+    /// final (post placeholder substitution). Returns an invalid fingerprint
+    /// when caching is disabled, no catalog is wired, the algorithm is not a
+    /// deterministic registered operator, or any input cannot be
+    /// revision-identified. Requires m_mutex (reads the task map only).
+    sicnu::data::ExecutionFingerprint taskExecutionFingerprintLocked( long taskId ) const;
+    /// Serves a task from the execution cache when a prior identical
+    /// execution produced a still-existing output. Called WITHOUT m_mutex
+    /// (copies files, marks the task terminal). True when served.
+    bool serveFromExecutionCache( long taskId, const sicnu::data::ExecutionFingerprint &fp );
+
+    sicnu::data::DataManager *m_catalog = nullptr;
+    /// Fingerprint of dispatched-but-not-yet-terminal tasks (dispatch order
+    /// → completion store). Entries are removed on every terminal transition
+    /// and on clear/reset.
+    QMap<long, sicnu::data::ExecutionFingerprint> m_taskFingerprints;
 };
 
 } // namespace sicnu

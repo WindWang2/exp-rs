@@ -131,6 +131,7 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("data:"),   // data manager tools
         QStringLiteral("spatial:"), // spatial inspection/catalog tools (ADR 0122)
         QStringLiteral("layout:"),  // cartographic layout tools (Layout Studio)
+        QStringLiteral("temporal:"), // temporal collection discovery/preflight tools
     };
     for (const QString &prefix : kAllowed) {
         if (checkId.startsWith(prefix))
@@ -150,6 +151,51 @@ bool absolutePathOutsideWorkspace(const QString &pathValue, const QString &works
 {
     if (pathValue.isEmpty())
         return false;
+
+    // URL / VSI virtual-path awareness (#722-era remote policy): a network
+    // data reference is NOT a filesystem path — treating one as relative
+    // (QFileInfo::isAbsolute() == false for "https://host/x.tif") wrongly
+    // ALLOWED any URL, while on Linux "/vsicurl/https://..." canonicalized
+    // outside the workspace and was wrongly REJECTED. Policy: remote
+    // http(s) data references (optionally /vsicurl/-prefixed) are allowed
+    // read-only data inputs (bounded by GDAL HTTP timeouts); file:// maps to
+    // its local path and falls through to the workspace check; every other
+    // scheme is rejected. SICNU_MCP_ALLOW_REMOTE=0 restores strict local-only.
+    {
+        const QString trimmed = pathValue.trimmed();
+        const QString lowered = trimmed.toLower();
+        const bool vsiPrefixed = lowered.startsWith(QStringLiteral("/vsicurl/"));
+        const bool vsiOther = lowered.startsWith(QStringLiteral("/vsi")) && !vsiPrefixed;
+        const bool httpUrl = lowered.startsWith(QStringLiteral("http://")) ||
+                             lowered.startsWith(QStringLiteral("https://"));
+        const bool fileUrl = lowered.startsWith(QStringLiteral("file://"));
+        if (vsiOther && !vsiPrefixed) {
+            if (detail)
+                *detail = QStringLiteral("Only /vsicurl/ remote sources are supported: %1").arg(pathValue);
+            return true;
+        }
+        if (httpUrl || vsiPrefixed) {
+            if (!envFlagEnabled("SICNU_MCP_ALLOW_REMOTE")) {
+                if (detail)
+                    *detail = QStringLiteral("Remote data references are disabled "
+                                             "(set SICNU_MCP_ALLOW_REMOTE=1): %1").arg(pathValue);
+                return true;
+            }
+            return false; // scheme-validated remote reference, not a workspace path
+        }
+        if (fileUrl) {
+            const QUrl url(trimmed);
+            // file:///abs/path -> local path; falls through to the workspace check.
+            QString local = url.toLocalFile();
+            if (local.isEmpty())
+                local = trimmed.mid(7);
+            if (!absolutePathOutsideWorkspace(local, workspaceRoot, detail))
+                return false;
+            if (detail && detail->isEmpty())
+                *detail = QStringLiteral("Path outside SICNU_MCP_WORKSPACE: %1").arg(pathValue);
+            return true;
+        }
+    }
 
     QString path = pathValue;
     if (path.startsWith(QLatin1Char('~'))) {
@@ -1409,7 +1455,7 @@ bool McpServer::isToolIdAllowed(const QString &toolId, QString *reason)
     if (reason) {
         *reason = QStringLiteral(
             "Tool id '%1' is not in the MCP allow-list "
-            "(rs:, gdal:, gdal_tools:, otb:, otb_tools:, qgis:, qgis_algorithms:, opencv:, spatial:, layout:).").arg(toolId);
+            "(rs:, gdal:, gdal_tools:, otb:, otb_tools:, qgis:, qgis_algorithms:, opencv:, spatial:, layout:, temporal:).").arg(toolId);
     }
     return false;
 }

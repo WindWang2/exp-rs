@@ -3,11 +3,15 @@
 
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
+#include "processing/algorithms/temporal/temporal_workspace.h"
 
 #include <algorithm>
 #include "operators/framework/rs_operator_error.h"
 
 #include <QFile>
+#include <QUuid>
+
+#include "data/data_manager.h"
 
 namespace sicnu::operators::rs::temporal_input
 {
@@ -156,12 +160,33 @@ TemporalCollection parseCollection( const Json::Value &params )
   else if ( params.isMember( "collection" ) && params["collection"].isString() )
   {
     const QString descriptorPath = QString::fromStdString( params["collection"].asString() );
-    if ( !QFile::exists( descriptorPath ) )
-      throw RSOperatorError( ErrorCode::FileNotFound,
-                             "collection descriptor not found: " + descriptorPath.toStdString() );
-    QString err;
-    if ( !TemporalCollection::load( descriptorPath, &collection, &err ) )
-      throw RSOperatorError( ErrorCode::InvalidInputData, err.toStdString() );
+    // A workspace record id addresses a TemporalCollection registered in the
+    // DataManager (project-persistent, revision-identifiable). It takes
+    // precedence over the file-path reading because it carries provenance
+    // identity; a UUID that does not resolve is a hard error (never a silent
+    // reinterpretation as a relative path).
+    const QUuid workspaceId( descriptorPath.trimmed() );
+    if ( !workspaceId.isNull() )
+    {
+      const auto id = sicnu::data::CollectionId::fromString( descriptorPath.trimmed() );
+      sicnu::data::DataManager *catalog = temporal::workspaceCatalog();
+      if ( !id || !catalog )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "'collection' looks like a workspace id but no workspace "
+                               "catalog is wired" );
+      QString wsErr;
+      if ( !temporal::loadCollectionFromWorkspace( *catalog, *id, &collection, &wsErr ) )
+        throw RSOperatorError( ErrorCode::InvalidInputData, wsErr.toStdString() );
+    }
+    else
+    {
+      if ( !QFile::exists( descriptorPath ) )
+        throw RSOperatorError( ErrorCode::FileNotFound,
+                               "collection descriptor not found: " + descriptorPath.toStdString() );
+      QString err;
+      if ( !TemporalCollection::load( descriptorPath, &collection, &err ) )
+        throw RSOperatorError( ErrorCode::InvalidInputData, err.toStdString() );
+    }
     applyGlobalBandOverrides( collection,
                               params.isMember( "bands" ) ? params["bands"] : Json::Value() );
   }

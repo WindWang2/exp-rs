@@ -103,6 +103,17 @@ class SpatialTool {
     virtual SpatialToolResult execute( const Json::Value &input ) = 0;
 };
 
+inline QString requireStringField( const Json::Value &input, const char *key, std::string *error )
+{
+  if ( !input.isObject() || !input.isMember( key ) || !input[key].isString() )
+  {
+    *error = std::string( "missing string parameter '" ) + key + "'";
+    return {};
+  }
+  return QString::fromStdString( input[key].asString() );
+}
+};
+
 using SpatialToolPtr = std::shared_ptr<SpatialTool>;
 
 /**
