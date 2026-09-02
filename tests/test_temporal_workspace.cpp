@@ -165,7 +165,6 @@ Json::Value stacSearchDoc()
                                "https://example.com/s2/item-02" ) );
     features.append( makeItem( "item-01", "2024-01-15T10:20:30Z", "Sentinel-2B", 3.1,
                                "https://example.com/s2/item-01" ) );
-    doc["features"] = features;
 
     // item-04: no datetime — must be rejected by the parser.
     Json::Value noDate = makeItem( "item-04", "", "Sentinel-2A", 1.0,
@@ -180,6 +179,12 @@ Json::Value stacSearchDoc()
     noAsset["assets"]["metadata"]["href"] = "https://example.com/s2/item-05.xml";
     noAsset["assets"]["metadata"]["type"] = "application/xml";
     features.append( noAsset );
+
+    // Assign AFTER every append: jsoncpp assignment is a deep copy, so an
+    // earlier doc["features"] = features would snapshot only the first three
+    // items and the two rejected ones would silently vanish from the doc
+    // (making the parse-test's features[3]/[4] out-of-range nulls).
+    doc["features"] = features;
 
     return doc;
 }
@@ -328,7 +333,11 @@ TEST_CASE( "A path-only (unbound) scene makes the collection uncacheable", "[tem
 
     TemporalCollection collection = TemporalCollection::fromScenePaths( paths, {}, QStringLiteral( "half" ) );
     bindCollectionAssets( collection, &dm );
-    // Unbind one scene: path-only identity.
+    // Make one scene genuinely identity-less: point it at a file that is NOT
+    // registered in the catalog (the live-resolution contract keys on the
+    // path, so clearing the stored assetId alone would still resolve — the
+    // CURRENT revision is always re-read, never the stale stored snapshot).
+    collection.scenes()[1].path = dir.filePath( QStringLiteral( "unregistered_scene.tif" ) );
     collection.scenes()[1].assetId.clear();
     collection.scenes()[1].assetRevision.clear();
     const auto recordId = saveCollectionToWorkspace( dm, QStringLiteral( "half" ), collection );

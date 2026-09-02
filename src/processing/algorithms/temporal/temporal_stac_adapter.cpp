@@ -255,7 +255,12 @@ QVector<StacItem> filterStacItems( const QVector<StacItem> &items, const QString
     {
       start = parseDt( datetime.trimmed() );
       filterOk = start.isValid();
-      if ( start.isValid() && start.time().isNull() )
+      // A bare date ("2024-03-15") matches the whole calendar day:
+      // the day parsed as 2024-03-15T00:00, so end is the next midnight
+      // (range behaviour reused). Otherwise it is a single instant.
+      bool isSingleDate = datetime.trimmed().indexOf( QLatin1Char( 'T' ) ) < 0
+                          && datetime.trimmed().indexOf( QLatin1Char( ':' ) ) < 0;
+      if ( isSingleDate && start.isValid() )
         end = start.addDays( 1 );
       else
         end = start;
@@ -270,7 +275,9 @@ QVector<StacItem> filterStacItems( const QVector<StacItem> &items, const QString
       QVector<StacItem> byDate;
       for ( const StacItem &item : filtered )
       {
-        const QDateTime t = QDateTime::fromString( item.datetime, Qt::ISODateWithMs );
+        QDateTime t = QDateTime::fromString( item.datetime, Qt::ISODateWithMs );
+        if ( !t.isValid() )
+          t = QDateTime::fromString( item.datetime, Qt::ISODate );
         if ( !t.isValid() )
           continue;
         if ( start.isValid() && t < start )

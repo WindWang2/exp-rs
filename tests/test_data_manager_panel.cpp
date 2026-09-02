@@ -25,6 +25,7 @@
 #include "app/display/qgis_display_manager.h"
 #include "app/panels/data_manager_panel.h"
 #include "data/data_manager.h"
+#include <QThread>
 
 using sicnu::data::AssetId;
 using sicnu::data::AssetState;
@@ -386,10 +387,17 @@ TEST_CASE( "A promoted asset is reflected immediately in the panel",
   REQUIRE( panel.rowText( id, 3 ) == QStringLiteral( "会话临时" ) );
 
   // The shell consumes promoteRequested and calls DataManager::promote. The
-  // panel refreshes automatically via the assetChanged -> refresh connection
-  // wired in its constructor - no project reload, no manual refresh needed.
+  // panel refreshes automatically via the assetChanged ->
+  // scheduleCoalescedRefresh connection wired in its constructor (#704: one
+  // trailing rebuild per signal burst, 250 ms) - no project reload, no
+  // manual refresh needed. Pump the event loop until the coalesced rebuild
+  // lands (bounded; failure surfaces as the CHECK below).
   REQUIRE( dataManager.promote( id ) );
-
+  for ( int i = 0; i < 100 && panel.rowText( id, 3 ) != QStringLiteral( "工程持久" ); ++i )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
+    QThread::msleep( 10 );
+  }
   CHECK( panel.rowText( id, 3 ) == QStringLiteral( "工程持久" ) );
 }
 

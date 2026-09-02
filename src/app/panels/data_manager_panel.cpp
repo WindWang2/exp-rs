@@ -41,11 +41,15 @@ namespace
 
 constexpr int kAssetIdRole = Qt::UserRole;
 constexpr int kCollectionIdRole = Qt::UserRole + 1;
-constexpr int kTemporalCollectionIdRole = Qt::UserRole + 2;
+constexpr int kTemporalCollectionIdRole = Qt::UserRole + 6;
 constexpr int kDisplayNameRole = Qt::UserRole + 2;
 constexpr int kKindLabelRole = Qt::UserRole + 3;
 constexpr int kStatusLabelRole = Qt::UserRole + 4;
 constexpr int kStatusColorRole = Qt::UserRole + 5;
+// kTemporalCollectionIdRole used to collide with kDisplayNameRole (both
+// UserRole+2, ported from #722): configureNameCell stamps the display name
+// on EVERY row, so every asset row read as a "temporal id" whose UUID parse
+// failed and the context menu bailed out before showing anything (review P1).
 
 constexpr int kStatusBarWidth = 4;
 constexpr int kStatusBarGap = 6;
