@@ -142,12 +142,14 @@ private:
     /// resume pre-resolved loop — adversarial review of #724). The workflow
     /// context (when the caller has one) is stamped into the derivation
     /// record's workflowId/workflowRunId/stepId (#727: lineage must carry the
-    /// step relationship, not only a task reference).
+    /// step relationship, not only a task reference). The execution
+    /// fingerprint (#726) rides along for the revision-convergence decision.
     void registerOutputAsset(const QString &path, const QString &algorithmId,
                              const QVariantMap &parameterMap, const QString &taskReference,
                              const QString &workflowId = QString(),
                              const QString &workflowRunId = QString(),
-                             const QString &stepId = QString());
+                             const QString &stepId = QString(),
+                             const QString &executionFingerprint = QString());
     /// Registration order follows the data dependency (#727): checkpoint-served
     /// (pre-crash) assets and derivations first, fresh outputs after — a fresh
     /// downstream step's lineage can only resolve if its checkpoint-served

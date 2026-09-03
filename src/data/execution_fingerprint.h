@@ -23,6 +23,7 @@
 #include "derivation_record.h"
 
 #include <QHash>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <cstddef>
 #include <mutex>
@@ -31,6 +32,20 @@
 
 namespace sicnu::data
 {
+
+/// Version of the fingerprint CONTRACT itself (#726): mixed into the
+/// implementation-version hash by every producer, so any semantic change to
+/// what a fingerprint covers (v2: chained producer identity, key-based
+/// destination exclusion, remote input identity) invalidates every entry
+/// computed under the old contract instead of silently comparing
+/// incomparable digests. Bump together with the platform version below.
+inline constexpr int kExecutionFingerprintContractVersion = 2;
+
+/// Platform software version participating in the implementation identity
+/// (matches the CMake project() version). Deliberately NOT a build path,
+/// timestamp, or VCS hash: those change per machine/commit and would split
+/// the cache without any behavioral meaning.
+inline constexpr const char *kExecutionFingerprintPlatformVersion = "1.0";
 
 /// A deterministic hash of an execution's identity: algorithm + version +
 /// normalized parameters + input asset identities/revisions. Two executions
@@ -75,6 +90,16 @@ struct TaggedDerivationInput
   QStringList bandReferences;
   QString valueDomain;
   QString lazyContentDigest;
+  /// Chained in-pipeline producer identity (#726): for an input that is the
+  /// output of an upstream workflow step, the producer step's own execution
+  /// fingerprint hex. A pipeline-produced intermediate must not key on its
+  /// file's catalog revision (the file is (re-)registered only after the
+  /// producing run finishes, and revision bumps between identical runs would
+  /// defeat convergence); the producer's fingerprint is exactly as strong —
+  /// the determinism gate guarantees identical fingerprint ⇒ byte-identical
+  /// output — and is computable before the producer's file is registered.
+  /// When set, @a assetId/@a revision identify the producer edge, not a file.
+  QString producerFingerprint;
 
   bool operator==( const TaggedDerivationInput & ) const = default;
 };
@@ -147,30 +172,65 @@ public:
   /// Remove one entry (e.g. when an output asset is deleted). No-op when absent.
   void invalidate( const ExecutionFingerprint &fp );
 
-  // --- Output-path cache (#667, Workflow Engine 2.0 wiring) ------------------
+  // --- Execution result cache (#667/#726, Workflow Engine 2.0 wiring) -------
   // Pipeline steps produce plain files, not registered assets, so the
   // AssetId store above has no producer on the pipeline path. This parallel
-  // store maps a fingerprint to the output FILE PATH of an identical prior
-  // step. Same enable gate, LRU bound, and thread-safety as the asset store.
+  // store maps a fingerprint to the full RESULT of an identical prior step
+  // (#726): the declared output path, every produced artifact (multi-output /
+  // grouped shapes ride in the payload), and the JSON result payload itself.
+  // Same enable gate, LRU bound, and thread-safety as the asset store.
 
-  /// Look up the output path of a prior identical execution. Returns nullopt
-  /// when disabled, absent, or the cached file no longer exists on disk
-  /// (self-healing against external deletion: the stale entry is erased).
-  /// Deliberately NON-const: the self-heal erase and the LRU recency touch
-  /// mutate the cache.
-  std::optional<QString> lookupOutputPath( const ExecutionFingerprint &fp );
+  /// One cached execution result. @a producedArtifacts lists every file the
+  /// producing run left behind (declared output + payload-referenced
+  /// artifacts such as grouped period rasters). @a artifactSizes /
+  /// @a artifactMsecs snapshot each produced artifact at store time so a
+  /// lookup can refuse to serve an entry whose files were replaced by a
+  /// different execution. @a resultPayload is the producing run's full
+  /// result document, restored verbatim (with paths rewritten) on a hit.
+  struct CachedExecution
+  {
+    QString declaredOutputPath;
+    QStringList producedArtifacts;
+    QMap<QString, qint64> artifactSizes; // path → byte size
+    QMap<QString, qint64> artifactMsecs; // path → lastModified (ms epoch)
+    /// Chained in-pipeline INPUT paths this execution consumed, with the
+    /// stats observed at store time (#726 review): an intermediate corrupted
+    /// between producer completion and consumer execution must invalidate the
+    /// consumer's entry, exactly like a corrupted output would.
+    QMap<QString, qint64> inputSizes; // path → byte size
+    QMap<QString, qint64> inputMsecs; // path → lastModified (ms epoch)
+    QJsonDocument resultPayload;
+  };
 
-  /// Record the output path of a freshly-completed step. No-op when disabled
-  /// or the path is empty. May evict the least-recently-used path entry.
-  void storeOutputPath( const ExecutionFingerprint &fp, const QString &outputPath );
+  /// Look up a prior identical execution's result. Returns nullopt when
+  /// disabled, absent, or the entry no longer validates (any produced file
+  /// missing, or the declared output's size/mtime no longer match what was
+  /// stored — a stale/poisoned entry self-heals by being erased). Deliberately
+  /// NON-const: the self-heal erase and LRU recency touch mutate the cache.
+  std::optional<CachedExecution> lookupExecution( const ExecutionFingerprint &fp );
 
-  /// Number of cached output paths (diagnostics / tests).
+  /// Record the result of a freshly-completed step. No-op when disabled or
+  /// @a execution has no declared output. Evicting semantics: when another
+  /// fingerprint already claims the same declared output path, that claim is
+  /// removed — a path can only vouch for the bytes most recently written to
+  /// it, so an older fingerprint's claim must never serve after a different
+  /// execution overwrote the file.
+  void storeExecution( const ExecutionFingerprint &fp, const CachedExecution &execution );
+
+  /// Every file currently claimed by cached executions (declared outputs and
+  /// produced artifacts, no particular order). Consumers (ArtifactGC) treat
+  /// these as protected: a cached artifact is what a future identical
+  /// execution reuses.
+  QStringList cachedArtifacts() const;
+
+  /// Number of cached executions (diagnostics / tests).
   int pathSize() const;
 
-  /// Every currently cached output path (no particular order). Consumers
-  /// (e.g. ArtifactGC in TaskCenter) treat these as protected files: a
-  /// cached path is the artifact a future identical execution reuses.
-  QStringList cachedOutputPaths() const;
+  /// Convenience wrappers over the execution store for single-artifact
+  /// callers: store with a bare declared path and empty payload, look up the
+  /// declared path only.
+  void storeOutputPath( const ExecutionFingerprint &fp, const QString &outputPath );
+  std::optional<QString> lookupOutputPath( const ExecutionFingerprint &fp );
 
   /// Clear all entries (test isolation / cache reset).
   void clear();
@@ -187,12 +247,15 @@ private:
   };
   void evictIfNeededLocked();
 
-  struct PathEntry
+  struct ExecutionEntry
   {
-    QString path;
+    CachedExecution execution;
     qint64 lastUsedTick = 0;
   };
-  QHash<QByteArray, PathEntry> m_pathEntries;
+  QHash<QByteArray, ExecutionEntry> m_executions;
+  /// declared-output path → digest currently claiming it (path ownership,
+  /// C7 of the cache contract). At most one claim per path.
+  QHash<QString, QByteArray> m_pathOwners;
 
   mutable std::recursive_mutex m_mutex;
   // mutable: lookup() is logically const but touches LRU recency bookkeeping.

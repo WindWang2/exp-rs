@@ -50,6 +50,15 @@ struct RegisterRequest
   /// structure differs from the snapshot (an externally mutated source), and
   /// otherwise reuses the asset unchanged.
   bool notifyUpdateOnReuse = false;
+  /// Execution fingerprint of the producing run (#726 revision-convergence
+  /// contract): when the dedup hit's attached derivation carries the SAME
+  /// fingerprint and the structure snapshot is unchanged, this registration
+  /// re-publishes the artifact of an unchanged execution — a silent reuse
+  /// (no revision bump, no assetChanged) so repeated identical publications
+  /// do not fabricate revision change and break downstream convergence.
+  /// Anything else (different/absent fingerprint, changed structure) keeps
+  /// the notifyUpdateOnReuse bump semantics.
+  QString executionFingerprint;
 };
 
 struct RegisterResult

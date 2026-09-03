@@ -26,6 +26,14 @@ struct DerivationInput
   friend bool operator==( const DerivationInput &, const DerivationInput & ) = default;
 };
 
+/// True when @a key is platform output vocabulary — the same vocabulary
+/// TaskCenter's findOutputPathInParams uses to LOCATE a destination: keys
+/// containing "output" or "result" case-insensitively. Whatever such a key
+/// carries is a destination, not a source (#726: the fingerprint parameter
+/// filter and the fingerprint input collector share this ONE vocabulary
+/// instead of re-deriving it per call site).
+bool isOutputVocabularyKey( const QString &key );
+
 /// Input-side counterpart of TaskCenter's findOutputPathInParams (#698):
 /// collects parameter values that are existing file paths across ALL parameter
 /// keys — real inputs also ride under names like "before"/"after", "pan"/"ms"
@@ -90,6 +98,13 @@ struct DerivationRecord
   QString taskReference;
   QString softwareVersion;
   QDateTime completedAtUtc;
+  /// Hex execution fingerprint of the producing execution, when the caller
+  /// computed one (#726 revision-convergence contract): re-publishing an
+  /// artifact whose producing execution is unchanged (same fingerprint) is a
+  /// silent registration reuse — no revision bump — while a different
+  /// fingerprint (or a changed structure snapshot) still advances the
+  /// revision. Empty for direct imports without a fingerprint.
+  QString executionFingerprint;
   /// Non-secret authentication configuration reference for the execution
   /// context (e.g. the auth config used to reach remote inputs). Never a
   /// password, token, or other credential material.

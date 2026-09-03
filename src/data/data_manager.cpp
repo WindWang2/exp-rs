@@ -305,7 +305,17 @@ RegisterResult DataManager::registerSource( const RegisterRequest &request )
     // be mutated externally. Reuse silently would leave the snapshot (and any
     // displayed layer) stale while the content moved under it (#687).
     const bool structureDiffers = record.snapshot.structure() != source.structure;
-    if ( !request.notifyUpdateOnReuse && !structureDiffers )
+    // #726 revision convergence: a re-publication whose producing execution is
+    // unchanged (same execution fingerprint on the existing derivation) and
+    // whose structure snapshot still matches IS the same artifact — advancing
+    // the revision would fabricate a change that downstream fingerprints then
+    // chase forever. Any real difference (structure changed, fingerprint
+    // different/absent) keeps the #687 update semantics.
+    const bool sameExecutionRepublished =
+      !structureDiffers && !request.executionFingerprint.isEmpty()
+      && record.derivation.has_value()
+      && record.derivation->executionFingerprint == request.executionFingerprint;
+    if ( sameExecutionRepublished || ( !request.notifyUpdateOnReuse && !structureDiffers ) )
       return RegisterResult{ record.snapshot.id(), true, {} };
 
     // Treat the asset as updated: refresh the snapshot from the fresh
