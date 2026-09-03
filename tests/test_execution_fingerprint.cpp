@@ -11,7 +11,10 @@
 #include "data/derivation_record.h"
 #include "data/asset_types.h"
 
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonObject>
+#include <QTemporaryDir>
 
 using namespace sicnu::data;
 
@@ -250,4 +253,180 @@ TEST_CASE( "ExecutionResultCache: bounded — evicts least-recently-used beyond 
   cache.setEnabled( false );
   cache.clear();
   cache.setMaxEntries( 4096 );
+}
+TEST_CASE( "TaggedDerivationInput chained producer fingerprint changes the digest (#726)",
+           "[cache][fingerprint]" )
+{
+  const AssetId producer = AssetId::generate();
+  sicnu::data::TaggedDerivationInput chained;
+  chained.revision = sicnu::data::AssetRevision::initial();
+  chained.toPort = QStringLiteral( "input" );
+  chained.valueDomain = QStringLiteral( "pipeline_output" );
+  chained.producerFingerprint = producer.toString();
+
+  const QJsonObject params{ { "kernel", 3 } };
+
+  const auto base = sicnu::data::makeExecutionFingerprintV2(
+      "rs:majority_filter", "impl", params, { chained } );
+
+  sicnu::data::TaggedDerivationInput upstream = chained;
+  upstream.producerFingerprint = AssetId::generate().toString();
+  const auto changedUpstream = sicnu::data::makeExecutionFingerprintV2(
+      "rs:majority_filter", "impl", params, { upstream } );
+  // Any change upstream re-keys every downstream step.
+  REQUIRE( base != changedUpstream );
+
+  // Port wiring is part of the identity: the same producer through a
+  // different consuming port hashes differently.
+  sicnu::data::TaggedDerivationInput otherPort = chained;
+  otherPort.toPort = QStringLiteral( "mask" );
+  const auto rewired = sicnu::data::makeExecutionFingerprintV2(
+      "rs:majority_filter", "impl", params, { otherPort } );
+  REQUIRE( base != rewired );
+}
+
+TEST_CASE( "Execution cache stores full results and never serves a replaced path (#726)",
+           "[cache][fingerprint]" )
+{
+  auto &cache = ExecutionResultCache::instance();
+  cache.clear();
+  cache.setEnabled( true );
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString outA = dir.filePath( "out_a.tif" );
+  const QString outB = dir.filePath( "out_b.tif" );
+  { QFile f( outA ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( "A" ); }
+  { QFile f( outB ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( "B" ); }
+
+  const ExecutionFingerprint fp1{ QByteArray( 32, '\x01' ) };
+  const ExecutionFingerprint fp2{ QByteArray( 32, '\x02' ) };
+
+  ExecutionResultCache::CachedExecution execution;
+  execution.declaredOutputPath = outA;
+  execution.producedArtifacts = { outA };
+  execution.artifactSizes.insert( outA, QFileInfo( outA ).size() );
+  execution.artifactMsecs.insert( outA, QFileInfo( outA ).lastModified().toMSecsSinceEpoch() );
+  execution.resultPayload = QJsonDocument( QJsonObject{ { "output", outA } } );
+  cache.storeExecution( fp1, execution );
+
+  const auto served = cache.lookupExecution( fp1 );
+  REQUIRE( served.has_value() );
+  REQUIRE( served->declaredOutputPath == outA );
+  REQUIRE( served->resultPayload.object().value( "output" ).toString() == outA );
+
+  // A DIFFERENT execution writing the same destination evicts the old
+  // fingerprint's claim: the path can only vouch for the newest bytes.
+  ExecutionResultCache::CachedExecution execution2 = execution;
+  execution2.declaredOutputPath = outA;
+  execution2.producedArtifacts = { outA };
+  execution2.artifactSizes.clear();
+  execution2.artifactMsecs.clear();
+  execution2.artifactSizes.insert( outA, QFileInfo( outA ).size() );
+  execution2.artifactMsecs.insert( outA, QFileInfo( outA ).lastModified().toMSecsSinceEpoch() );
+  execution2.resultPayload = QJsonDocument( QJsonObject{ { "output", outA } } );
+  cache.storeExecution( fp2, execution2 );
+  REQUIRE( cache.lookupExecution( fp1 ) == std::nullopt );
+  REQUIRE( cache.lookupExecution( fp2 ).has_value() );
+
+  // Missing artifacts self-heal to a miss.
+  ExecutionResultCache::CachedExecution grouped = execution2;
+  grouped.declaredOutputPath = outB; // grouping convention: never written
+  grouped.producedArtifacts = { outA };
+  cache.storeExecution( fp1, grouped );
+  REQUIRE( cache.lookupExecution( fp1 ).has_value() ); // artifacts alive
+  REQUIRE( QFile::remove( outA ) );
+  REQUIRE( cache.lookupExecution( fp1 ) == std::nullopt ); // self-healed
+
+  // A rewrite with DIFFERENT bytes (same path) is refused by the recorded
+  // size/mtime stats — the core anti-poisoning branch (#726 review).
+  ExecutionResultCache::CachedExecution poisoned = execution2;
+  poisoned.declaredOutputPath = outB;
+  poisoned.producedArtifacts = { outB };
+  poisoned.artifactSizes.clear();
+  poisoned.artifactMsecs.clear();
+  poisoned.artifactSizes.insert( outB, QFileInfo( outB ).size() );
+  poisoned.artifactMsecs.insert( outB, QFileInfo( outB ).lastModified().toMSecsSinceEpoch() );
+  cache.storeExecution( fp2, poisoned );
+  REQUIRE( cache.lookupExecution( fp2 ).has_value() );
+  { QFile f( outB ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( "BBBB" ); }
+  REQUIRE( cache.lookupExecution( fp2 ) == std::nullopt ); // bytes moved ⇒ miss
+
+  // Chained INPUT stats are part of the claim: an intermediate rewritten
+  // out-of-band invalidates the cached consumer (#726 review P1).
+  { QFile f( outA ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( "out" ); }
+  const QString inputA = dir.filePath( "chained_input.tif" );
+  { QFile f( inputA ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( "in1" ); }
+  ExecutionResultCache::CachedExecution consumer;
+  consumer.declaredOutputPath = outA;
+  consumer.producedArtifacts = { outA };
+  consumer.artifactSizes.insert( outA, QFileInfo( outA ).size() );
+  consumer.artifactMsecs.insert( outA, QFileInfo( outA ).lastModified().toMSecsSinceEpoch() );
+  consumer.inputSizes.insert( inputA, QFileInfo( inputA ).size() );
+  consumer.inputMsecs.insert( inputA, QFileInfo( inputA ).lastModified().toMSecsSinceEpoch() );
+  const ExecutionFingerprint fpConsumer{ QByteArray( 32, '\x03' ) };
+  cache.storeExecution( fpConsumer, consumer );
+  REQUIRE( cache.lookupExecution( fpConsumer ).has_value() );
+  { QFile f( inputA ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( "in2-longer" ); }
+  REQUIRE( cache.lookupExecution( fpConsumer ) == std::nullopt );
+
+  cache.clear();
+  cache.setEnabled( false );
+}
+
+TEST_CASE( "Destination value under a non-output key stays hashed (#726)",
+           "[cache][fingerprint]" )
+{
+  // C1 second bullet: {output:O, scratch:O} must not collapse onto
+  // {output:O} — the scratch key is not output vocabulary, so its VALUE (the
+  // destination string) is a hashed parameter.
+  const AssetId a = AssetId::generate();
+  const QJsonObject withScratch{
+      { "output", "/w/o.tif" }, { "scratch", "/w/o.tif" } };
+  const QJsonObject withoutScratch{ { "output", "/w/o.tif" } };
+  const auto f1 = sicnu::data::makeExecutionFingerprintV2(
+      "rs:x", "impl", withScratch, {} );
+  const auto f2 = sicnu::data::makeExecutionFingerprintV2(
+      "rs:x", "impl", withoutScratch, {} );
+  REQUIRE( f1 != f2 );
+
+  // The destination COLLAPSE itself lives one layer up: TaskCenter filters
+  // output-vocabulary keys before hashing (the V2 hash hashes whatever it is
+  // given). Pin the vocabulary that drives the filter — the injectivity of
+  // the whole pipeline depends on it.
+  using sicnu::data::isOutputVocabularyKey;
+  REQUIRE( isOutputVocabularyKey( QStringLiteral( "output" ) ) );
+  REQUIRE( isOutputVocabularyKey( QStringLiteral( "OUTPUT" ) ) );
+  REQUIRE( isOutputVocabularyKey( QStringLiteral( "resultRaster" ) ) );
+  REQUIRE( isOutputVocabularyKey( QStringLiteral( "outputPath" ) ) );
+  REQUIRE( isOutputVocabularyKey( QStringLiteral( "resultRaster" ) ) );
+  // "modelOut" carries neither "output" nor "result" — NOT vocabulary (this
+  // is the platform's historical findOutputPathInParams contract).
+  REQUIRE_FALSE( isOutputVocabularyKey( QStringLiteral( "scratch" ) ) );
+  REQUIRE_FALSE( isOutputVocabularyKey( QStringLiteral( "input" ) ) );
+  REQUIRE_FALSE( isOutputVocabularyKey( QStringLiteral( "kernel" ) ) );
+}
+
+TEST_CASE( "Execution cache fingerprints differ when the contract version differs (#726)",
+           "[cache][fingerprint]" )
+{
+  // Contract-level regression guard: v2 semantics introduced the chained
+  // producer field. A fingerprint computed with (and without) a producer
+  // token must differ — the digest space of the old contract can never be
+  // compared against the new one.
+  const AssetId a = AssetId::generate();
+  const QJsonObject params{ { "input", "x.tif" } };
+  sicnu::data::TaggedDerivationInput plain;
+  plain.assetId = a;
+  plain.revision = AssetRevision::initial();
+  plain.toPort = QStringLiteral( "input" );
+
+  sicnu::data::TaggedDerivationInput chained = plain;
+  chained.producerFingerprint = QStringLiteral( "deadbeef" );
+
+  const auto withoutChain = sicnu::data::makeExecutionFingerprintV2(
+      "rs:spectral_index", "impl", params, { plain } );
+  const auto withChain = sicnu::data::makeExecutionFingerprintV2(
+      "rs:spectral_index", "impl", params, { chained } );
+  REQUIRE( withoutChain != withChain );
 }

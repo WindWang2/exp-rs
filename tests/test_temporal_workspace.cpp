@@ -350,7 +350,7 @@ TEST_CASE( "A path-only (unbound) scene makes the collection uncacheable", "[tem
     QVariantMap params;
     params.insert( QStringLiteral( "collection" ), recordId.toString() );
     QString reason;
-    CHECK_FALSE( fingerprintInputsForOperatorParams( &dm, params, QString(), &inputs, &reason ) );
+    CHECK_FALSE( fingerprintInputsForOperatorParams( &dm, params, &inputs, &reason ) );
     CHECK_FALSE( reason.isEmpty() );
 }
 
@@ -594,4 +594,51 @@ TEST_CASE( "ExecutionResultCache::clear clears the output-path store too (#720)"
     CHECK( cache.size() == 0 );
 
     cache.setEnabled( false );
+}
+
+TEST_CASE( "Remote and VSI inputs resolve or fail conservative — never omit (#726)",
+           "[temporal][workspace][fingerprint][remote]" )
+{
+    ensureApp();
+    sicnu::data::DataManager dm;
+
+    QVector<sicnu::data::TaggedDerivationInput> inputs;
+    QString reason;
+
+    // An unregistered https URL must FAIL the whole policy — silently
+    // dropping it (the old QFileInfo gate) is exactly how false hits are born.
+    QVariantMap params;
+    params.insert( QStringLiteral( "input" ),
+                   QStringLiteral( "https://example.com/unregistered.tif" ) );
+    REQUIRE_FALSE( fingerprintInputsForOperatorParams( &dm, params, &inputs, &reason ) );
+    REQUIRE( reason.contains( QStringLiteral( "https://example.com/unregistered.tif" ) ) );
+
+    // Same for /vsicurl/, /vsis3/ and OGR connection strings.
+    for ( const char *remote : { "/vsicurl/https://example.com/a.tif",
+                                 "/vsis3/bucket/key.tif",
+                                 "PG:dbname=production host=db.example.com" } )
+    {
+        QVariantMap p;
+        p.insert( QStringLiteral( "input" ), QString::fromLatin1( remote ) );
+        INFO( "datasource: " << remote );
+        REQUIRE_FALSE( fingerprintInputsForOperatorParams( &dm, p, &inputs, &reason ) );
+        REQUIRE_FALSE( reason.isEmpty() );
+    }
+
+    // A colon-bearing datasource string the classifier does not know
+    // (GDAL subdataset syntax) must not pass as a scientific parameter either.
+    QVariantMap subdataset;
+    subdataset.insert( QStringLiteral( "input" ),
+                       QStringLiteral( "HDF5:\"/data/timeseries.h5\"://ndvi" ) );
+    REQUIRE_FALSE( fingerprintInputsForOperatorParams( &dm, subdataset, &inputs, &reason ) );
+
+    // Scientific VALUES that merely look stringy are not datasource
+    // candidates and do not fail the policy on their own.
+    QVariantMap scientific;
+    scientific.insert( QStringLiteral( "index" ), QStringLiteral( "NDVI" ) );
+    scientific.insert( QStringLiteral( "kernel" ), 3 );
+    scientific.insert( QStringLiteral( "output" ), QStringLiteral( "/tmp/unused.tif" ) );
+    inputs.clear();
+    REQUIRE( fingerprintInputsForOperatorParams( &dm, scientific, &inputs, &reason ) );
+    REQUIRE( inputs.isEmpty() );
 }

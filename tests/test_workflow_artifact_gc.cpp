@@ -165,6 +165,54 @@ TEST_CASE( "ArtifactGC retains cache-hit intermediates shared with the result ca
   REQUIRE( QFile::exists( step1Out ) );
 }
 
+TEST_CASE( "ArtifactGC protects live execution-cache claims and releases them (#726)",
+           "[workflow][v2][gc][cache]" )
+{
+  QTemporaryDir tmpDir;
+  REQUIRE( tmpDir.isValid() );
+
+  const QString step1Out = tmpDir.filePath( "cache_owned_intermediate.tif" );
+  const QString finalOut = tmpDir.filePath( "final.tif" );
+  QFile( step1Out ).open( QIODevice::WriteOnly );
+  QFile( finalOut ).open( QIODevice::WriteOnly );
+
+  TwoStepRun setup = makeTwoStepRun( step1Out, finalOut );
+  transitionToCompleted( *setup.run );
+
+  // Install the protection provider the way TaskCenter does: the cache's
+  // claimed artifact set. The plan itself does NOT carry cacheHit — the
+  // deprecated flag must no longer be the only protection.
+  ArtifactGC::installProtectedArtifactProvider( [step1Out]() {
+    return QStringList{ step1Out };
+  } );
+
+  ArtifactGC gc;
+  REQUIRE( gc.inspectReapable( *setup.run ).isEmpty() );
+  GCSweepReport report = gc.sweepRun( *setup.run );
+  REQUIRE( report.reapedCount == 0 );
+  REQUIRE( QFile::exists( step1Out ) );
+
+  // Invalidation releases the protection: the intermediate is reapable again
+  // (GC must not leak files the cache no longer holds).
+  ArtifactGC::installProtectedArtifactProvider( []() {
+    return QStringList{};
+  } );
+  const QStringList reapable = gc.inspectReapable( *setup.run );
+  REQUIRE( reapable.contains( step1Out ) );
+
+  // Symlinked spelling of the same file is protected too (canonical match).
+  const QString linkPath = tmpDir.filePath( "link_to_intermediate.tif" );
+  QFile::remove( linkPath );
+  REQUIRE( QFile::link( step1Out, linkPath ) );
+  ArtifactGC::installProtectedArtifactProvider( [step1Out]() {
+    return QStringList{ step1Out };
+  } );
+  REQUIRE( gc.inspectReapable( *setup.run ).isEmpty() );
+  QFile::remove( linkPath );
+
+  ArtifactGC::installProtectedArtifactProvider( {} );
+}
+
 TEST_CASE( "ArtifactGC refuses paths outside the run workspace", "[workflow][v2][gc][gating]" )
 {
   QTemporaryDir workspaceDir;
