@@ -398,6 +398,7 @@ bool temporalCollectionFromStacItems( const QVector<StacItem> &items,
     scene.timeSource = QStringLiteral( "stac" );
     scene.platform = item.platform;
     scene.processingLevel = item.processingLevel;
+    scene.cloudCoverPercent = item.cloudCover;
     scene.originalIndex = index++;
     // eo:bands ride as explicit band-name overrides where the naming maps to
     // the platform's role vocabulary; the shared resolver still warns for

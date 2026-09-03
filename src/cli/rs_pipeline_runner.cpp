@@ -726,15 +726,15 @@ void RsPipelineRunner::registerOutputAsset( const QString &path, const QString &
   // recorded in unresolvedInputPaths, never dropped silently. The step's
   // own output path is excluded (#718).
   const sicnu::data::InputLineage lineage =
-    sicnu::data::resolveInputLineage(
-        m_dataManager,
-        sicnu::data::findInputPathsInParams( parameterMap, { path } ) );
+    sicnu::data::resolveInputLineageForParams( m_dataManager, parameterMap, { path } );
   sicnu::data::DerivationRecord derivation =
     sicnu::data::makeTaskDerivation( algorithmId,
                                      QJsonObject::fromVariantMap( parameterMap ),
                                      taskReference,
                                      lineage.inputs,
-                                     lineage.unresolvedPaths );
+                                     lineage.unresolvedPaths,
+                                     lineage.collectionId,
+                                     lineage.collectionRevision );
   derivation.workflowId = workflowId;
   derivation.workflowRunId = workflowRunId;
   derivation.stepId = stepId;

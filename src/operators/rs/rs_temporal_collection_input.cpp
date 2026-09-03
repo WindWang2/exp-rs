@@ -51,6 +51,13 @@ TemporalCollection fromInlineScenes( const Json::Value &params )
   {
     throw RSOperatorError( ErrorCode::InvalidParameter, err.toStdString() );
   }
+
+  // Normalize inline scenes against workspace catalog when wired (#725)
+  if ( auto *catalog = temporal::workspaceCatalog() )
+  {
+    temporal::bindCollectionAssets( collection, catalog );
+  }
+
   return collection;
 }
 
@@ -75,14 +82,8 @@ TemporalCollection parseCollection( const Json::Value &params )
     throw RSOperatorError( ErrorCode::InvalidParameter, "parameters must be a JSON object" );
 
   TemporalCollection collection;
-  if ( params.isMember( "scenes" ) && params["scenes"].isArray() )
-  {
-    if ( params["scenes"].empty() )
-      throw RSOperatorError( ErrorCode::MissingRequiredParameter,
-                             "'scenes' must contain at least one raster" );
-    collection = fromInlineScenes( params );
-  }
-  else if ( params.isMember( "collection" ) && params["collection"].isString() )
+  // 1. Authoritative workspace collection UUID or descriptor file path takes precedence
+  if ( params.isMember( "collection" ) && params["collection"].isString() )
   {
     const QString descriptorPath = QString::fromStdString( params["collection"].asString() );
     // A workspace record id addresses a TemporalCollection registered in the
@@ -115,10 +116,18 @@ TemporalCollection parseCollection( const Json::Value &params )
     applyGlobalBandOverrides( collection,
                               params.isMember( "bands" ) ? params["bands"] : Json::Value() );
   }
+  // 2. Legacy inline scenes fallback (normalized above)
+  else if ( params.isMember( "scenes" ) && params["scenes"].isArray() )
+  {
+    if ( params["scenes"].empty() )
+      throw RSOperatorError( ErrorCode::MissingRequiredParameter,
+                             "'scenes' must contain at least one raster" );
+    collection = fromInlineScenes( params );
+  }
   else
   {
     throw RSOperatorError( ErrorCode::MissingRequiredParameter,
-                           "provide 'scenes' (array) or 'collection' (descriptor path)" );
+                           "provide 'collection' (authoritative workspace id or descriptor) or 'scenes' (array)" );
   }
 
   const auto policy = parseDuplicatePolicy( params );

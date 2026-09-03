@@ -608,6 +608,7 @@ Json::Value RsChangeLogRatioOperator::metadata() const
 {
     Json::Value meta( Json::objectValue );
     meta["group"] = "temporal";
+    meta["task"] = "change-detection";
     meta["displayName"] = displayName();
     meta["description"] = description();
     meta["tags"].append( "change-detection" );

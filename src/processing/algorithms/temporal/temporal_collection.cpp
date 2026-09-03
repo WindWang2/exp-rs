@@ -331,6 +331,22 @@ bool TemporalSceneRef::parseInline( const Json::Value &entry, int index,
       s.resolutionMeters = entry["resolution_m"].asDouble();
     if ( entry.isMember( "cloud_cover_percent" ) && entry["cloud_cover_percent"].isNumeric() )
       s.cloudCoverPercent = entry["cloud_cover_percent"].asDouble();
+    if ( entry.isMember( "polarizations" ) && entry["polarizations"].isArray() )
+    {
+      for ( const auto &p : entry["polarizations"] )
+      {
+        if ( p.isString() )
+          s.polarizations.append( QString::fromStdString( p.asString() ) );
+      }
+    }
+    if ( entry.isMember( "band_roles" ) && entry["band_roles"].isArray() )
+    {
+      for ( const auto &r : entry["band_roles"] )
+      {
+        if ( r.isString() )
+          s.bandRoles.append( QString::fromStdString( r.asString() ) );
+      }
+    }
   }
   else
   {
