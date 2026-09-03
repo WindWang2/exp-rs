@@ -10,6 +10,9 @@
 #include <string>
 #include <vector>
 
+#include <QString>
+#include <QVariantMap>
+
 namespace sicnu::data { class DataManager; }
 namespace sicnu::app { class ProjectContext; }
 class PluginHost;
@@ -133,8 +136,18 @@ private:
     void reportProgress(int stepIndex, int totalSteps, double stepProgress,
                         const std::string& message) const;
     void reportLog(const std::string& level, const std::string& message) const;
+    /// Registers one completed step's output file as a TaskTemporary asset and
+    /// attaches its derivation record (shared by the fresh-run loop and the
+    /// resume pre-resolved loop — adversarial review of #724).
+    void registerOutputAsset(const QString &path, const QString &algorithmId,
+                             const QVariantMap &parameterMap, const QString &taskReference);
     void registerStepOutputs(long pipelineId);
     bool ensurePythonPluginsLoaded();
+    /// Owns the run's DataManager (unless setAssetRegistry injected one) and
+    /// wires both process-wide catalog seams on the owning thread. Called by
+    /// every run entry point (fresh + resume), independent of the Python
+    /// plugin stack (adversarial review of #724).
+    bool ensureCatalogSeams();
 
     ProgressCallback m_progressCallback;
     LogCallback m_logCallback;

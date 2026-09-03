@@ -1857,6 +1857,14 @@ QVector<CollectionId> DataManager::collections() const
 TemporalCollectionCreateResult
 DataManager::createTemporalCollection( const TemporalCollectionCreateRequest &request )
 {
+  // Affinity FIRST (like every other mutator): the dedup scan below reads
+  // m_impl->temporalCollections, and a foreign-thread caller must get the
+  // clean wrongThreadDiagnostic instead of racing the container (adversarial
+  // review of #724; restoreTemporalCollection's own guard would only fire
+  // after the scan).
+  if ( QThread::currentThread() != thread() )
+    return TemporalCollectionCreateResult{ {}, false, { wrongThreadDiagnostic() } };
+
   // Dedup: re-registering the same collection (e.g. an agent re-registering
   // the same descriptor) returns the existing record instead of spamming
   // identical entries into the workspace.

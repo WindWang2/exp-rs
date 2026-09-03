@@ -484,5 +484,17 @@ TEST_CASE( "CLI process crash mid-pipeline recovers and resumes without re-runni
     REQUIRE( QFileInfo::exists( cPath ) );
     // The completed step was NOT re-executed: its artifact is untouched.
     REQUIRE( QFileInfo( aPath ).lastModified() == aMtimeBefore );
+    // The pre-crash completed step's output was REGISTERED by the resuming
+    // process (registerOutputAsset on checkpoint-served plans — adversarial
+    // review of #724): without it, a resumed run's pre-crash outputs never
+    // became assets and downstream lineage was permanently unresolved. The
+    // DataManager lives in the child process, so we assert on the three
+    // per-step registration log lines (a: checkpoint-served, b/c: fresh).
+    int registeredOutputs = 0;
+    for ( const QString &line : resumeOut.split( '\n' ) )
+        if ( line.contains( QStringLiteral( "Registered step output asset" ) ) )
+            ++registeredOutputs;
+    REQUIRE( registeredOutputs == 3 );
+    REQUIRE( resumeOut.contains( QStringLiteral( "Asset registration failed" ) ) == false );
 }
 #endif // SICNU_CLI_BINARY

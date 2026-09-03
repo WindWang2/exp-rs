@@ -222,12 +222,14 @@ int main(int argc, char *argv[])
                 entry.input = primaryDataKind( desc.inputs );
             if ( entry.output.empty() )
                 entry.output = primaryDataKind( desc.outputs );
-            // Only ship files that carry at least one catalog-worthy fact:
-            // id + defaults alone would be noise for every thin adapter.
-            const bool hasContent = !entry.task.empty() || !entry.notes.empty()
-                                    || !entry.tags.empty() || entry.gpuDeclared
-                                    || entry.accuracy >= 0.0;
-            if (!hasContent)
+            // Catalog membership is a DELIBERATE authoring act: only
+            // algorithms that declare a task family in code (metadata()) —
+            // or in a pre-existing sidecar — get a generated file. Notes or
+            // tags alone would ship a file for nearly every thin adapter,
+            // including provider auto-discovered CLI tools whose ids depend
+            // on the generating machine's installed tools — noise that makes
+            // the catalog irreproducible across machines, not a catalog.
+            if (entry.task.empty())
                 continue;
             // Naming contract from ADR 0122: ':' AND '_' both map to '-'
             // (rs:spectral_index -> rs-spectral-index), matching the
