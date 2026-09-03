@@ -372,6 +372,22 @@ TEST_CASE( "resume resolves pre-crash parents port-aware from their result paylo
     consume.params["input"] = "$infer.output";
     consume.params["mask"] = "$infer.mask"; // port absent from payload → canonical fallback
     consume.params["output"] = "/tmp/" + prefix + "_out.tif";
+    // Nested JSON object placeholder: substitution recurses string leaves
+    // inside objects (#727 port shapes).
+    Json::Value nested( Json::Value( Json::objectValue ) );
+    nested["raster"] = "$infer.output";
+    nested["model"] = "$infer.model";
+    nested["ghost"] = "$ghoststep.output"; // dangling step ref — stays literal
+    consume.params["nested"] = nested;
+    // Array element placeholder: substitution recurses into arrays too.
+    Json::Value list( Json::Value( Json::arrayValue ) );
+    list.append( "$infer.output" );
+    list.append( "$infer.model" );
+    consume.params["list"] = list;
+    // Dangling port reference (step id never declared): parse succeeds, no
+    // parent and no completed step matches — the placeholder stays literal
+    // through resume AND dispatch.
+    consume.params["dangling"] = "$ghoststep.output";
     consume.inputs.push_back( StepConnection{ "infer", "output", "input" } );
 
     StepDef infer;
@@ -417,6 +433,20 @@ TEST_CASE( "resume resolves pre-crash parents port-aware from their result paylo
     // exact port is absent). This is the defined shared semantics: what
     // resume must never do is shadow a port that EXISTS in the payload.
     REQUIRE( params["mask"].toString() == rasterPath );
+    // Nested object: placeholder inside a nested JSON object is substituted
+    // (string-leaf recursion), the dangling ref inside stays literal.
+    const QVariantMap nestedMap = params["nested"].toMap();
+    REQUIRE( nestedMap["raster"].toString() == rasterPath );
+    REQUIRE( nestedMap["model"].toString() == "seg_best.onnx" );
+    REQUIRE( nestedMap["ghost"].toString() == "$ghoststep.output" );
+    // Array: every string element is substituted.
+    const QVariantList listOut = params["list"].toList();
+    REQUIRE( listOut.size() == 2 );
+    REQUIRE( listOut[0].toString() == rasterPath );
+    REQUIRE( listOut[1].toString() == "seg_best.onnx" );
+    // Dangling port reference (no such step, completed or live): stays
+    // literal end-to-end — nothing invents a value for it.
+    REQUIRE( params["dangling"].toString() == "$ghoststep.output" );
 
     // resolvedParams persisted for BOTH sides of the crash boundary: the
     // resubmitted step carries the substituted set...
@@ -425,6 +455,13 @@ TEST_CASE( "resume resolves pre-crash parents port-aware from their result paylo
     REQUIRE( consumePlan->resolvedParams["model"].asString() == "seg_best.onnx" );
     REQUIRE( consumePlan->resolvedParams["input"].asString() == rasterPath.toStdString() );
     REQUIRE( consumePlan->resolvedParams["mask"].asString() == rasterPath.toStdString() );
+    // ... and the nested/array/dangling shapes persist exactly as executed.
+    REQUIRE( consumePlan->resolvedParams["nested"]["raster"].asString() == rasterPath.toStdString() );
+    REQUIRE( consumePlan->resolvedParams["nested"]["model"].asString() == "seg_best.onnx" );
+    REQUIRE( consumePlan->resolvedParams["nested"]["ghost"].asString() == "$ghoststep.output" );
+    REQUIRE( consumePlan->resolvedParams["list"][0].asString() == rasterPath.toStdString() );
+    REQUIRE( consumePlan->resolvedParams["list"][1].asString() == "seg_best.onnx" );
+    REQUIRE( consumePlan->resolvedParams["dangling"].asString() == "$ghoststep.output" );
     // ... and the checkpoint-served step's persisted params are untouched
     // here (they carried no placeholders — the mid-chain substitution case is
     // covered by test_workflow_resume_provenance).
@@ -747,4 +784,121 @@ TEST_CASE( "resumeRun reconciles a still-Running checkpoint inline when it holds
     const auto snapshot = runToTerminal( fx.coordinator, pipelineId );
     REQUIRE( snapshot->state() == WorkflowRunState::Completed );
     REQUIRE( ran.load() );
+}
+
+TEST_CASE( "resume substitutes a step with mixed completed and live parents "
+           "(static at resume + dispatch-time via TaskCenter) (#727)",
+           "[workflow][coordinator][recovery][ports][dag][mixed]" )
+{
+    CoordinatorFixture fx;
+    const std::string prefix = "coord_mixed";
+
+    // combo (declared FIRST) references TWO parents: "done" completed
+    // pre-crash (substituted statically at resume from its checkpoint
+    // payload) and "live" resubmitted (substituted at dispatch from the
+    // live task's payload once it completed). Nested + list shapes ride
+    // along so both substitution paths are exercised inside containers.
+    const QString donePath = fx.checkpointDir.path()
+                             + QStringLiteral("/%1_done.tif").arg( QString::fromStdString( prefix ) );
+    touchFile( donePath );
+    const std::string livePath = "/tmp/" + prefix + "_live.tif";
+    const std::string comboPath = "/tmp/" + prefix + "_combo.tif";
+
+    WorkflowDefinition def;
+    def.id = prefix + "_def";
+
+    StepDef combo;
+    combo.id = "combo";
+    combo.kind = StepKind::Operator;
+    combo.operatorId = prefix + ":combo";
+    combo.params["inDone"] = "$done.output";
+    combo.params["inLive"] = "$live.output";
+    Json::Value nested( Json::Value( Json::objectValue ) );
+    nested["fromDone"] = "$done.output";
+    nested["fromLive"] = "$live.output";
+    combo.params["nested"] = nested;
+    Json::Value list( Json::Value( Json::arrayValue ) );
+    list.append( "$done.output" );
+    list.append( "$live.output" );
+    combo.params["list"] = list;
+    combo.params["output"] = comboPath;
+    combo.inputs.push_back( StepConnection{ "done", "output", "input" } );
+    combo.inputs.push_back( StepConnection{ "live", "output", "input" } );
+
+    StepDef done;
+    done.id = "done";
+    done.kind = StepKind::Operator;
+    done.operatorId = prefix + ":done";
+    done.params["output"] = donePath.toStdString();
+
+    StepDef live;
+    live.id = "live";
+    live.kind = StepKind::Operator;
+    live.operatorId = prefix + ":live";
+    live.params["output"] = livePath;
+
+    def.steps.push_back( combo ); // declared before BOTH parents
+    def.steps.push_back( done );
+    def.steps.push_back( live );
+
+    Json::Value donePayload( Json::Value( Json::objectValue ) );
+    donePayload["output"] = donePath.toStdString();
+    WorkflowRun run;
+    run.setDefinition( def );
+    REQUIRE( run.setRunId( prefix + "_run" ) );
+    run.setStepPlans( { makePlan( "combo", "Pending" ),
+                        makePlan( "done", "Completed", donePath.toStdString(), donePayload,
+                                  prefix + ":done" ),
+                        makePlan( "live", "Pending" ) } );
+    saveInterruptedCheckpoint( fx, run );
+
+    std::atomic_bool doneRan{ false }, liveRan{ false }, comboRan{ false };
+    // The live parent's executor provides a real "output" port payload so
+    // the dispatch-time substitution resolves combo's $live.output.
+    Json::Value livePorts( Json::Value( Json::objectValue ) );
+    livePorts["output"] = livePath;
+    registerCapturingExecutor( prefix + ":done", &doneRan, donePayload );
+    registerCapturingExecutor( prefix + ":live", &liveRan, livePorts );
+    registerCapturingExecutor( prefix + ":combo", &comboRan );
+
+    QString err;
+    const long pipelineId = fx.coordinator.resumeRun( prefix + "_run", &err );
+    INFO( err.toStdString() );
+    REQUIRE( pipelineId > 0 );
+
+    const auto snapshot = runToTerminal( fx.coordinator, pipelineId );
+    REQUIRE( snapshot->state() == WorkflowRunState::Completed );
+    REQUIRE_FALSE( doneRan.load() ); // checkpoint-served, never re-executed
+    REQUIRE( liveRan.load() );
+    REQUIRE( comboRan.load() );
+
+    // Only the LIVE parent is wired as a task parent: the completed one was
+    // consumed by the static substitution.
+    const auto comboPlan = snapshot->stepPlan( "combo" );
+    const auto livePlan = snapshot->stepPlan( "live" );
+    REQUIRE( comboPlan.has_value() );
+    REQUIRE( livePlan.has_value() );
+    const auto comboTask = sicnu::TaskCenter::instance().getTaskInfo( comboPlan->taskId );
+    REQUIRE( comboTask.parentTaskIds.size() == 1 );
+    REQUIRE( comboTask.parentTaskIds.contains( livePlan->taskId ) );
+
+    const QVariantMap params = executedParams( snapshot, "combo" );
+    // Completed parent: substituted statically at resume time.
+    REQUIRE( params["inDone"].toString() == donePath );
+    // Live parent: substituted at dispatch from the live task's payload.
+    REQUIRE( params["inLive"].toString() == livePath );
+    // Both substitution paths work inside nested containers too.
+    const QVariantMap nestedMap = params["nested"].toMap();
+    REQUIRE( nestedMap["fromDone"].toString() == donePath );
+    REQUIRE( nestedMap["fromLive"].toString() == livePath );
+    const QVariantList listOut = params["list"].toList();
+    REQUIRE( listOut.size() == 2 );
+    REQUIRE( listOut[0].toString() == donePath );
+    REQUIRE( listOut[1].toString() == livePath );
+
+    // The persisted plan carries the fully substituted set (raw $refs gone).
+    REQUIRE( comboPlan->resolvedParams["inDone"].asString() == donePath.toStdString() );
+    REQUIRE( comboPlan->resolvedParams["inLive"].asString() == livePath );
+    REQUIRE( comboPlan->resolvedParams["nested"]["fromLive"].asString() == livePath );
+    REQUIRE( comboPlan->resolvedParams["list"][1].asString() == livePath );
 }
