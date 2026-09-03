@@ -22,6 +22,7 @@
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "data/data_manager.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "operators/rs/rs_operators_init.h"
 #include "processing/algorithms/temporal/temporal_collection.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "processing/framework/atomic_algorithm_registry.h"
@@ -411,4 +412,50 @@ TEST_CASE( "temporal:register_collection preserves rich scene semantics and roun
     }
 
     sicnu::temporal::setWorkspaceCatalog( nullptr );
+}
+
+TEST_CASE( "Agent tool discovery finds temporal and SAR change tools via capability facets (#725)",
+           "[agent][search][facets]" )
+{
+    ensureApp();
+    sicnu::operators::rs::installRsOperatorProvider();
+    auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
+    registry.reset();
+    registry.initialize();
+    auto &catalog = sicnu::agent::tool_catalog::AgentToolCatalog::instance();
+    catalog.reset();
+    catalog.initializeDefaults();
+
+    // 1. Search for optical temporal tools
+    {
+        sicnu::agent::tool_catalog::SearchQuery q;
+        q.temporal = true;
+        const auto results = catalog.searchTools( q );
+        REQUIRE_FALSE( results.empty() );
+        bool foundTemporalSummary = false;
+        for ( const auto &t : results )
+        {
+            if ( t.name == "rs:temporal_summary" || t.name == "temporal:describe_collection" )
+                foundTemporalSummary = true;
+        }
+        CHECK( foundTemporalSummary );
+    }
+
+    // 2. Search for SAR change detection tools via capability facets
+    {
+        sicnu::agent::tool_catalog::SearchQuery q;
+        q.taskFamily = "change-detection";
+        q.modalities = { "sar" };
+        q.temporal = true;
+        q.largeRasterSafeOnly = true;
+        const auto results = catalog.searchTools( q );
+        REQUIRE_FALSE( results.empty() );
+        bool foundSarChange = false;
+        for ( const auto &t : results )
+        {
+            if ( t.name == "rs:change_log_ratio" )
+                foundSarChange = true;
+        }
+        CHECK( foundSarChange );
+    }
 }
