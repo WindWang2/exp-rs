@@ -1,0 +1,12 @@
+{
+  "id" : "rs:mosaic",
+  "input" : "",
+  "output" : "raster",
+  "tags" : 
+  [
+    "mosaic",
+    "merge",
+    "composition"
+  ],
+  "task" : ""
+}

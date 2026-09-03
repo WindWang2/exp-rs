@@ -1,0 +1,12 @@
+{
+  "id" : "rs:sam_classify",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "classification",
+    "hyperspectral",
+    "spectral-angle"
+  ],
+  "task" : ""
+}

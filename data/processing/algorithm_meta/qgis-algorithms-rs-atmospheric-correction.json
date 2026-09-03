@@ -1,0 +1,15 @@
+{
+  "id" : "qgis_algorithms:rs_atmospheric_correction",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "atmospheric",
+    "correction",
+    "dos",
+    "radiance",
+    "reflectance",
+    "remote sensing"
+  ],
+  "task" : ""
+}

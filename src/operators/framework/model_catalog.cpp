@@ -167,6 +167,23 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   info.sensors = domainObj.contains( QStringLiteral( "sensors" ) )
                    ? parseStringArray( domainObj, QStringLiteral( "sensors" ) )
                    : parseStringArray( obj, QStringLiteral( "sensors" ) );
+  // Multimodal / temporal contract (goal §9): same domain-object-or-root
+  // fallback vocabulary as sensors.
+  info.modalities = domainObj.contains( QStringLiteral( "modalities" ) )
+                      ? parseStringArray( domainObj, QStringLiteral( "modalities" ) )
+                      : parseStringArray( obj, QStringLiteral( "modalities" ) );
+  info.polarizations = domainObj.contains( QStringLiteral( "polarizations" ) )
+                         ? parseStringArray( domainObj, QStringLiteral( "polarizations" ) )
+                         : parseStringArray( obj, QStringLiteral( "polarizations" ) );
+  info.temporalLength = domainObj.contains( QStringLiteral( "temporal_length" ) )
+                          ? domainObj.value( QStringLiteral( "temporal_length" ) ).toInt()
+                          : obj.value( QStringLiteral( "temporal_length" ) ).toInt();
+  {
+    const QString radiometric = domainObj.contains( QStringLiteral( "radiometric_state" ) )
+                                  ? domainObj.value( QStringLiteral( "radiometric_state" ) ).toString()
+                                  : obj.value( QStringLiteral( "radiometric_state" ) ).toString();
+    info.radiometricState = radiometric.toStdString();
+  }
   std::vector<double> resArr;
   if ( domainObj.contains( QStringLiteral( "resolution_range" ) ) )
     resArr = parseDoubleArray( domainObj, QStringLiteral( "resolution_range" ) );
@@ -341,6 +358,14 @@ Json::Value ModelInfo::toJson() const
     appendJsonArray( out, "sensors", sensors );
   if ( !supportedBandRoles.empty() )
     appendJsonArray( out, "band_roles", supportedBandRoles );
+  if ( !modalities.empty() )
+    appendJsonArray( out, "modalities", modalities );
+  if ( !polarizations.empty() )
+    appendJsonArray( out, "polarizations", polarizations );
+  if ( temporalLength > 0 )
+    out["temporal_length"] = temporalLength;
+  if ( !radiometricState.empty() )
+    out["radiometric_state"] = radiometricState;
   if ( minResolutionMeters >= 0.0 || maxResolutionMeters >= 0.0 )
   {
     Json::Value resRange( Json::arrayValue );

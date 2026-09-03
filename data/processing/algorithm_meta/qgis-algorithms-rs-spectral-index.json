@@ -1,0 +1,18 @@
+{
+  "id" : "qgis_algorithms:rs_spectral_index",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "index",
+    "ndvi",
+    "evi",
+    "savi",
+    "ndwi",
+    "ndbi",
+    "mndwi",
+    "remote sensing"
+  ],
+  "task" : ""
+}

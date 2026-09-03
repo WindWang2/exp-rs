@@ -20,9 +20,14 @@
 #include "jobs/job_types.h"
 #include "resource_monitor.h"
 #include "task_resource_budget.h"
+#include "data/execution_fingerprint.h"
 
 namespace sicnu::operators {
 class RSOperatorContext;
+}
+
+namespace sicnu::data {
+class DataManager;
 }
 
 namespace sicnu::workflow {
@@ -252,6 +257,13 @@ public:
                                             std::chrono::milliseconds timeout = std::chrono::minutes( 30 ),
                                             std::chrono::milliseconds pollInterval = std::chrono::milliseconds( 10 ) ) const;
 
+    /// Catalog seam for revision-aware execution caching (#667): the host
+    /// wires the DataManager instance it owns (GUI / MCP / CLI each construct
+    /// their own); TaskCenter never owns it. Without a catalog, cache
+    /// fingerprinting is disabled — a step whose inputs cannot be
+    /// revision-identified must never be served from cache.
+    void setCatalog( sicnu::data::DataManager *catalog );
+
     /// Cap concurrent Running tasks for @a profile (minimum 1). Used by processNextQueuedTasks.
     void setResourceProfileLimit( ProviderResourceProfile profile, unsigned int maxConcurrent );
     unsigned int resourceProfileLimit( ProviderResourceProfile profile ) const;
@@ -414,7 +426,24 @@ private:
     // WorkflowRunCoordinator (single source of truth for lifecycle state,
     // checkpoints and per-step fingerprints); the never-implemented TaskCenter
     // mirror declarations from the #708 draft were removed (#697).
-};
+
+    // --- Revision-aware execution cache (#667, ADR 0123) ----------------------
+    /// Computes the execution fingerprint for a task whose parameters are
+    /// final (post placeholder substitution). Returns an invalid fingerprint
+    /// when caching is disabled, no catalog is wired, the algorithm is not a
+    /// deterministic registered operator, or any input cannot be
+    /// revision-identified. Requires m_mutex (reads the task map only).
+    sicnu::data::ExecutionFingerprint taskExecutionFingerprintLocked( long taskId ) const;
+    /// Serves a task from the execution cache when a prior identical
+    /// execution produced a still-existing output. Called WITHOUT m_mutex
+    /// (copies files, marks the task terminal). True when served.
+    bool serveFromExecutionCache( long taskId, const sicnu::data::ExecutionFingerprint &fp );
+
+    sicnu::data::DataManager *m_catalog = nullptr;
+    /// Fingerprint of dispatched-but-not-yet-terminal tasks (dispatch order
+    /// → completion store). Entries are removed on every terminal transition
+    /// and on clear/reset.
+    QMap<long, sicnu::data::ExecutionFingerprint> m_taskFingerprints;};
 
 } // namespace sicnu
 

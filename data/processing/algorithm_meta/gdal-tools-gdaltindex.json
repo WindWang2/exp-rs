@@ -1,0 +1,13 @@
+{
+  "id" : "gdal_tools:gdaltindex",
+  "input" : "raster",
+  "output" : "vector",
+  "tags" : 
+  [
+    "gdaltindex",
+    "tile index",
+    "raster",
+    "gdal"
+  ],
+  "task" : ""
+}

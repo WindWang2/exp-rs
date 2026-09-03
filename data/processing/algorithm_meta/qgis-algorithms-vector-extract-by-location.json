@@ -1,0 +1,13 @@
+{
+  "id" : "qgis_algorithms:vector_extract_by_location",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "extract",
+    "location",
+    "spatial",
+    "filter"
+  ],
+  "task" : ""
+}

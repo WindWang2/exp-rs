@@ -1,0 +1,12 @@
+{
+  "id" : "rs:majority_filter",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "classification",
+    "postprocess",
+    "majority_filter"
+  ],
+  "task" : ""
+}

@@ -1,0 +1,12 @@
+{
+  "id" : "qgis_algorithms:vector_buffer",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "buffer",
+    "distance",
+    "polygon"
+  ],
+  "task" : ""
+}

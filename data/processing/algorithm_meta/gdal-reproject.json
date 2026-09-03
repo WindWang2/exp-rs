@@ -1,0 +1,13 @@
+{
+  "id" : "gdal:reproject",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "reproject",
+    "warp",
+    "crs",
+    "geometry"
+  ],
+  "task" : ""
+}

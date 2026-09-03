@@ -1,0 +1,14 @@
+{
+  "id" : "gdal_tools:gdal_fillnodata",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "gdal_fillnodata",
+    "nodata",
+    "interpolation",
+    "fill",
+    "gdal"
+  ],
+  "task" : ""
+}

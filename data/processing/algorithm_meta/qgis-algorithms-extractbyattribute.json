@@ -1,0 +1,13 @@
+{
+  "id" : "qgis_algorithms:extractbyattribute",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "extract",
+    "filter",
+    "select",
+    "attribute"
+  ],
+  "task" : ""
+}

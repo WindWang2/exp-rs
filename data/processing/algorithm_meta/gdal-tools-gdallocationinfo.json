@@ -1,0 +1,12 @@
+{
+  "id" : "gdal_tools:gdallocationinfo",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "gdal",
+    "discovered",
+    "gdallocationinfo"
+  ],
+  "task" : ""
+}

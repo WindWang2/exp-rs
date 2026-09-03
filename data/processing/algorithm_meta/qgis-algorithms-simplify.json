@@ -1,0 +1,12 @@
+{
+  "id" : "qgis_algorithms:simplify",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "simplify",
+    "douglas",
+    "peucker"
+  ],
+  "task" : ""
+}

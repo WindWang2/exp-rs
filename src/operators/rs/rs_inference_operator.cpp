@@ -128,6 +128,7 @@ Json::Value RsInferenceOperator::metadata() const
     meta["tags"].append( "edge-ai" );
     meta["tags"].append( "deep-learning" );
     meta["task"] = "inference";
+    meta["notes"] = "ONNX inference via the model runtime (cv::dnn provider, cached sessions). Accepts a model path or a ModelCatalog name (spatial:list_models); catalog models must be ready (artifact present, checksum verified). Bounded tiled execution with manifest v2 preprocessing/postprocessing contracts; memory policy Streaming.";
     meta["gpu"] = true; // CUDA-capable per model (opencv_dnn_runtime); CPU fallback per manifest
     meta["purpose"] = "Run a pretrained ONNX model on a raster with pure C++ (cv::dnn), tiled with bounded memory.";
     meta["prerequisites"].append( "Model must be loadable by cv::dnn::readNetFromONNX." );

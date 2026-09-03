@@ -1,0 +1,14 @@
+{
+  "id" : "otb_tools:otb_svm_classification",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "svm",
+    "classification",
+    "train",
+    "machine learning",
+    "otb"
+  ],
+  "task" : ""
+}

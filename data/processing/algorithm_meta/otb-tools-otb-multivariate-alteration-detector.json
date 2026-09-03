@@ -1,0 +1,13 @@
+{
+  "id" : "otb_tools:otb_multivariate_alteration_detector",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "mad",
+    "change detection",
+    "multivariate",
+    "otb"
+  ],
+  "task" : ""
+}

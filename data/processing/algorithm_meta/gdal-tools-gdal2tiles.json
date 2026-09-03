@@ -1,0 +1,12 @@
+{
+  "id" : "gdal_tools:gdal2tiles",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "gdal",
+    "discovered",
+    "gdal2tiles"
+  ],
+  "task" : ""
+}

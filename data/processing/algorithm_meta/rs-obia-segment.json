@@ -1,0 +1,11 @@
+{
+  "id" : "rs:obia_segment",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "obia",
+    "segmentation"
+  ],
+  "task" : ""
+}

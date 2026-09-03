@@ -1,0 +1,12 @@
+{
+  "id" : "rs:landsat_import",
+  "input" : "",
+  "output" : "raster",
+  "tags" : 
+  [
+    "landsat",
+    "import",
+    "data-format"
+  ],
+  "task" : ""
+}

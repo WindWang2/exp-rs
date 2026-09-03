@@ -1,0 +1,14 @@
+{
+  "id" : "otb_tools:otb_extract_roi",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "extract",
+    "roi",
+    "crop",
+    "clip",
+    "otb"
+  ],
+  "task" : ""
+}

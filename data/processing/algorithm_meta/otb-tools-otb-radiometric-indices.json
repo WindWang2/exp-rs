@@ -1,0 +1,14 @@
+{
+  "id" : "otb_tools:otb_radiometric_indices",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "radiometric",
+    "indices",
+    "ndvi",
+    "vegetation",
+    "otb"
+  ],
+  "task" : ""
+}

@@ -1,0 +1,12 @@
+{
+  "id" : "rs:ndvi",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "ndvi",
+    "vegetation"
+  ],
+  "task" : ""
+}

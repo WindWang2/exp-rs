@@ -1,0 +1,12 @@
+{
+  "id" : "gdal_tools:gdalcompare",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "gdal",
+    "discovered",
+    "gdalcompare"
+  ],
+  "task" : ""
+}

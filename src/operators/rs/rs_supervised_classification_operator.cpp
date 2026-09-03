@@ -180,6 +180,7 @@ Json::Value RsSupervisedClassificationOperator::metadata() const {
     meta["tags"].append("svm");
     meta["tags"].append("model");
         meta["task"] = "classification";
+        meta["notes"] = "NormalBayes / SVM / KMeans with cross-validation, per-class metrics and probability outputs. Model sidecar records features and validation results for compatibility checks.";
     meta["gpu"] = false;
     meta["purpose"] = "Classify multi-band imagery using labeled polygons or a saved model";
     meta["useCases"] = Json::Value(Json::arrayValue);

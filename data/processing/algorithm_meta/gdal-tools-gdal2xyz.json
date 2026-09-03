@@ -1,0 +1,14 @@
+{
+  "id" : "gdal_tools:gdal2xyz",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "gdal2xyz",
+    "xyz",
+    "ascii",
+    "export",
+    "gdal"
+  ],
+  "task" : ""
+}

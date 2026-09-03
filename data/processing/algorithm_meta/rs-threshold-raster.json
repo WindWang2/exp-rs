@@ -1,0 +1,12 @@
+{
+  "id" : "rs:threshold_raster",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "threshold",
+    "masking",
+    "segmentation"
+  ],
+  "task" : ""
+}

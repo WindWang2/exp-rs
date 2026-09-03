@@ -132,6 +132,7 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("data:"),   // data manager tools
         QStringLiteral("spatial:"), // spatial inspection/catalog tools (ADR 0122)
         QStringLiteral("layout:"),  // cartographic layout tools (Layout Studio)
+        QStringLiteral("temporal:"), // temporal collection discovery/preflight tools
     };
     for (const QString &prefix : kAllowed) {
         if (checkId.startsWith(prefix))
@@ -151,6 +152,51 @@ bool absolutePathOutsideWorkspace(const QString &pathValue, const QString &works
 {
     if (pathValue.isEmpty())
         return false;
+
+    // URL / VSI virtual-path awareness (#722-era remote policy): a network
+    // data reference is NOT a filesystem path — treating one as relative
+    // (QFileInfo::isAbsolute() == false for "https://host/x.tif") wrongly
+    // ALLOWED any URL, while on Linux "/vsicurl/https://..." canonicalized
+    // outside the workspace and was wrongly REJECTED. Policy: remote
+    // http(s) data references (optionally /vsicurl/-prefixed) are allowed
+    // read-only data inputs (bounded by GDAL HTTP timeouts); file:// maps to
+    // its local path and falls through to the workspace check; every other
+    // scheme is rejected. SICNU_MCP_ALLOW_REMOTE=0 restores strict local-only.
+    {
+        const QString trimmed = pathValue.trimmed();
+        const QString lowered = trimmed.toLower();
+        const bool vsiPrefixed = lowered.startsWith(QStringLiteral("/vsicurl/"));
+        const bool vsiOther = lowered.startsWith(QStringLiteral("/vsi")) && !vsiPrefixed;
+        const bool httpUrl = lowered.startsWith(QStringLiteral("http://")) ||
+                             lowered.startsWith(QStringLiteral("https://"));
+        const bool fileUrl = lowered.startsWith(QStringLiteral("file://"));
+        if (vsiOther && !vsiPrefixed) {
+            if (detail)
+                *detail = QStringLiteral("Only /vsicurl/ remote sources are supported: %1").arg(pathValue);
+            return true;
+        }
+        if (httpUrl || vsiPrefixed) {
+            if (!envFlagEnabled("SICNU_MCP_ALLOW_REMOTE")) {
+                if (detail)
+                    *detail = QStringLiteral("Remote data references are disabled "
+                                             "(set SICNU_MCP_ALLOW_REMOTE=1): %1").arg(pathValue);
+                return true;
+            }
+            return false; // scheme-validated remote reference, not a workspace path
+        }
+        if (fileUrl) {
+            const QUrl url(trimmed);
+            // file:///abs/path -> local path; falls through to the workspace check.
+            QString local = url.toLocalFile();
+            if (local.isEmpty())
+                local = trimmed.mid(7);
+            if (!absolutePathOutsideWorkspace(local, workspaceRoot, detail))
+                return false;
+            if (detail && detail->isEmpty())
+                *detail = QStringLiteral("Path outside SICNU_MCP_WORKSPACE: %1").arg(pathValue);
+            return true;
+        }
+    }
 
     QString path = pathValue;
     if (path.startsWith(QLatin1Char('~'))) {
@@ -327,12 +373,24 @@ const MetaToolDef kMetaTools[] = {
         { "limit", "integer", "Max entries per page (offset pagination). 0 = all. Optional.", false },
         { "cursor", "integer", "Offset of the first entry to return; pass nextCursor from the previous page. Optional.", false } } },
     { "search_tools",
-      "Search unified agent tools by free text (e.g. 'show raster', 'roi', 'spectral'), group, tag, or input/output type.",
+      "Search unified agent tools by free text (e.g. 'show raster', 'roi', 'spectral'), group, tag, "
+      "input/output type, or capability facets (task family, modality, band roles, temporal, "
+      "deterministic, large-raster safety, GPU, memory policy, cost class). Ranked by relevance; "
+      "pull a candidate's full schema via get_tool_schema.",
       { { "query", "string", "Free-text filter matched against name, group, purpose, tags, and description.", false },
         { "group", "string", "Exact or substring group filter. Optional.", false },
         { "tag", "string", "Tag filter. Optional.", false },
         { "input_type", "string", "Input data type filter. Optional.", false },
         { "output_type", "string", "Output data type filter. Optional.", false },
+        { "task", "string", "Task-family facet, e.g. 'classification', 'temporal', 'inference'. Optional.", false },
+        { "modality", "string", "Modality facet (matched against the tool's rs-contract dataKind/group), e.g. 'optical'. Optional.", false },
+        { "band_roles", "string", "Comma-separated band roles ('red,nir'); matches when any port declares any role. Optional.", false },
+        { "temporal", "boolean", "Temporal-capability facet (task family or group carries temporal). Optional.", false },
+        { "deterministic", "boolean", "Determinism facet (same inputs imply same outputs). Optional.", false },
+        { "gpu", "boolean", "GPU-acceleration-capable facet. Optional.", false },
+        { "memory_policy", "string", "Exact memory-policy facet: 'streaming', 'multipass_streaming', 'full_raster', ... Optional.", false },
+        { "cost_class", "string", "Cost-class facet substring, e.g. 'O(tile)'. Optional.", false },
+        { "large_raster_safe", "boolean", "Restrict to streaming/multipass tools safe for large rasters. Optional.", false },
         { "compact", "boolean", "Set false to embed per-entry input schemas (default: omitted).", false },
         { "limit", "integer", "Max entries per page (offset pagination). 0 = all. Optional.", false },
         { "cursor", "integer", "Offset of the first entry to return; pass nextCursor from the previous page. Optional.", false } } },
@@ -727,21 +785,37 @@ void McpServer::handleRequest(const QVariantMap &request)
     }
     else if (method == QStringLiteral("tools/list"))
     {
+        // Bounded discovery surface (#701): the DEFAULT listing is compact —
+        // name + description only, so hundreds of full JSON Schemas never
+        // enter an LLM context in one page. Schema detail is deferred to
+        // get_tool_schema. Clients that need embedded schemas (harness
+        // bridges registering tools with parameters) pass
+        // includeSchemas=true; pagination is opt-in via limit/cursor with a
+        // nextCursor continuation (same protocol as the list_tools meta
+        // tool, #643).
+        const bool includeSchemas = params.value(QStringLiteral("includeSchemas")).toBool();
+        const int listLimit = params.value(QStringLiteral("limit")).toInt();
+        int listCursor = 0;
+        const QString rawCursor = params.value(QStringLiteral("cursor")).toString();
+        if (!rawCursor.isEmpty())
+            listCursor = qMax(0, rawCursor.toInt());
+
         QVariantMap result;
         QVariantList tools;
         for (const MetaToolDef &def : kMetaTools) {
             QVariantMap tool;
             tool[QStringLiteral("name")] = QString::fromUtf8(def.name);
             tool[QStringLiteral("description")] = QString::fromUtf8(def.description);
-            tool[QStringLiteral("inputSchema")] = metaToolInputSchema(def);
+            if (includeSchemas)
+                tool[QStringLiteral("inputSchema")] = metaToolInputSchema(def);
             tools.append(tool);
         }
         // ADR 0122: also expose the unified Agent Tool Catalog (algorithms,
-        // interaction, data, spatial tools) with full JSON Schemas so
-        // harness-side bridges (e.g. the Pi extension) enumerate one surface.
-        // Only tools that tools/call can actually dispatch are listed, and
-        // GUI-only interaction tools hidden in headless mode stay hidden here
-        // too (same rule as handleListTools).
+        // interaction, data, spatial tools) so harness-side bridges (e.g. the
+        // Pi extension) enumerate one surface. Only tools that tools/call can
+        // actually dispatch are listed, and GUI-only interaction tools hidden
+        // in headless mode stay hidden here too (same rule as
+        // handleListTools).
         const bool headlessNoGui = sicnu::agent::InteractionToolRegistry::instance().toolCount() == 0
             || sicnu::agent::InteractionToolRegistry::instance().findTool("view:get_state") == std::nullopt;
         for (const auto &catalogTool : sicnu::agent::tool_catalog::AgentToolCatalog::instance().listTools()) {
@@ -758,10 +832,33 @@ void McpServer::handleRequest(const QVariantMap &request)
             QVariantMap tool;
             tool[QStringLiteral("name")] = id;
             tool[QStringLiteral("description")] = QString::fromStdString(catalogTool.description);
-            tool[QStringLiteral("inputSchema")] = sicnu::processing::jsonValueToVariant(catalogTool.inputSchema);
+            if (includeSchemas)
+                tool[QStringLiteral("inputSchema")] = sicnu::processing::jsonValueToVariant(catalogTool.inputSchema);
             tools.append(tool);
         }
-        result[QStringLiteral("tools")] = tools;
+        // The listing is deterministically ordered (meta tools first, then
+        // the catalog's provider order), so a numeric cursor is stable.
+        if (listLimit > 0) {
+            QVariantList page;
+            int nextCursor = -1;
+            for (int i = listCursor; i < tools.size(); ++i) {
+                if (page.size() >= listLimit) {
+                    nextCursor = i;
+                    break;
+                }
+                page.append(tools.at(i));
+            }
+            result[QStringLiteral("tools")] = page;
+            result[QStringLiteral("count")] = page.size();
+            result[QStringLiteral("total")] = tools.size();
+            result[QStringLiteral("cursor")] = listCursor;
+            if (nextCursor >= 0)
+                result[QStringLiteral("nextCursor")] = nextCursor;
+        } else {
+            result[QStringLiteral("tools")] = tools;
+            result[QStringLiteral("count")] = tools.size();
+        }
+        result[QStringLiteral("compact")] = !includeSchemas;
         sendResponse(id, result);
     }
     else if (method == QStringLiteral("tools/call"))
@@ -883,6 +980,32 @@ void McpServer::handleRequest(const QVariantMap &request)
             }
             else if (toolName == QStringLiteral("search_tools"))
             {
+                SearchToolsFacets facets;
+                facets.task = arguments.value(QStringLiteral("task")).toString();
+                facets.modality = arguments.value(QStringLiteral("modality")).toString();
+                facets.bandRoles = arguments.value(QStringLiteral("band_roles")).toString();
+                facets.memoryPolicy = arguments.value(QStringLiteral("memory_policy")).toString();
+                facets.costClass = arguments.value(QStringLiteral("cost_class")).toString();
+                if (arguments.contains(QStringLiteral("deterministic")))
+                {
+                    facets.hasDeterministic = true;
+                    facets.deterministic = arguments.value(QStringLiteral("deterministic")).toBool();
+                }
+                if (arguments.contains(QStringLiteral("gpu")))
+                {
+                    facets.hasGpu = true;
+                    facets.gpu = arguments.value(QStringLiteral("gpu")).toBool();
+                }
+                if (arguments.contains(QStringLiteral("temporal")))
+                {
+                    facets.hasTemporal = true;
+                    facets.temporal = arguments.value(QStringLiteral("temporal")).toBool();
+                }
+                if (arguments.contains(QStringLiteral("large_raster_safe"))
+                    && arguments.value(QStringLiteral("large_raster_safe")).toBool())
+                {
+                    facets.largeRasterSafe = true;
+                }
                 resultData = handleSearchTools(
                     arguments.value(QStringLiteral("query")).toString(),
                     arguments.value(QStringLiteral("group")).toString(),
@@ -893,7 +1016,8 @@ void McpServer::handleRequest(const QVariantMap &request)
                         ? arguments.value(QStringLiteral("compact")).toBool()
                         : true,
                     arguments.value(QStringLiteral("limit")).toInt(),
-                    arguments.value(QStringLiteral("cursor")).toInt());
+                    arguments.value(QStringLiteral("cursor")).toInt(),
+                    facets);
             }
             else if (toolName == QStringLiteral("get_tool_schema"))
             {
@@ -1434,7 +1558,7 @@ bool McpServer::isToolIdAllowed(const QString &toolId, QString *reason)
     if (reason) {
         *reason = QStringLiteral(
             "Tool id '%1' is not in the MCP allow-list "
-            "(rs:, gdal:, gdal_tools:, otb:, otb_tools:, qgis:, qgis_algorithms:, opencv:, spatial:, layout:).").arg(toolId);
+            "(rs:, gdal:, gdal_tools:, otb:, otb_tools:, qgis:, qgis_algorithms:, opencv:, spatial:, layout:, temporal:).").arg(toolId);
     }
     return false;
 }
@@ -2118,7 +2242,8 @@ QVariantMap McpServer::handleListTools(const QString &category, bool compact,
 QVariantMap McpServer::handleSearchTools(const QString &query, const QString &group,
                                         const QString &tag, const QString &inputType,
                                         const QString &outputType, bool compact,
-                                        int limit, int cursor)
+                                        int limit, int cursor,
+                                        const SearchToolsFacets &facets)
 {
     using namespace sicnu::agent::tool_catalog;
     SearchQuery sq;
@@ -2127,6 +2252,19 @@ QVariantMap McpServer::handleSearchTools(const QString &query, const QString &gr
     sq.tag = tag.toStdString();
     sq.inputType = inputType.toStdString();
     sq.outputType = outputType.toStdString();
+    sq.taskFamily = facets.task.toStdString();
+    sq.modality = facets.modality.toStdString();
+    sq.bandRoles = facets.bandRoles.toStdString();
+    sq.memoryPolicy = facets.memoryPolicy.toStdString();
+    sq.costClass = facets.costClass.toStdString();
+    if ( facets.hasDeterministic )
+        sq.deterministic = facets.deterministic;
+    if ( facets.hasGpu )
+        sq.gpu = facets.gpu;
+    if ( facets.hasTemporal )
+        sq.temporal = facets.temporal;
+    if ( facets.largeRasterSafe )
+        sq.largeRasterSafeOnly = true;
 
     const auto tools = AgentToolCatalog::instance().searchTools(sq);
     QVariantList toolList;

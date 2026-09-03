@@ -1,0 +1,12 @@
+{
+  "id" : "opencv:canny",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "opencv",
+    "edge",
+    "canny"
+  ],
+  "task" : ""
+}

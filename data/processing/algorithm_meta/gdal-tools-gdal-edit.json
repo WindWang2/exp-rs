@@ -1,0 +1,14 @@
+{
+  "id" : "gdal_tools:gdal_edit",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "gdal_edit",
+    "metadata",
+    "nodata",
+    "projection",
+    "gdal"
+  ],
+  "task" : ""
+}

@@ -1,0 +1,12 @@
+{
+  "id" : "rs:recode",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "classification",
+    "postprocess",
+    "recode"
+  ],
+  "task" : ""
+}

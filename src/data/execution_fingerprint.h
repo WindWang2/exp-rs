@@ -202,4 +202,9 @@ private:
   mutable qint64 m_clock = 0;
 };
 
+/// True when SICNU_EXECUTION_CACHE requests the execution cache for this
+/// process ("1"/"true"/"yes"/"on"). Applied once, on the cache singleton's
+/// first use; an explicit setEnabled() call always wins over the env (#667).
+bool executionCacheEnabledFromEnv();
+
 } // namespace sicnu::data

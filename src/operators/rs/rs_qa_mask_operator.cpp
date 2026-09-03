@@ -177,6 +177,7 @@ Json::Value RsQaMaskOperator::metadata() const {
     meta["tags"].append("cloud");
     meta["tags"].append("mask");
         meta["task"] = "quality-masking";
+        meta["notes"] = "Landsat QA_PIXEL / Sentinel-2 SCL / generic bitmask to cloud, cloud-shadow, snow masks. Runs before atmospheric correction in the lab.preprocess.optical DAG.";
     meta["gpu"] = false;
     meta["purpose"] = "Derive cloud / cloud-shadow / snow masks from product QA bands.";
     meta["prerequisites"].append("Input must carry a QA band (Landsat QA_PIXEL or Sentinel-2 SCL) or an explicit qa_band.");

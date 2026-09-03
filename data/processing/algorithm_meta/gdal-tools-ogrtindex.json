@@ -1,0 +1,14 @@
+{
+  "id" : "gdal_tools:ogrtindex",
+  "input" : "raster",
+  "output" : "vector",
+  "tags" : 
+  [
+    "ogrtindex",
+    "tile index",
+    "vector",
+    "ogr",
+    "gdal"
+  ],
+  "task" : ""
+}

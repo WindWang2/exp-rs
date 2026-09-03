@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -112,6 +113,18 @@ struct DataManager::Impl
     QVector<AssetId> childAssetIds;
   };
 
+  /// A TemporalCollection catalog record: identity + canonical descriptor
+  /// document (the temporal layer's opaque schema, stored verbatim).
+  struct TemporalCollectionRecord_
+  {
+    CollectionId id;
+    QString displayName;
+    QString descriptor;
+    quint64 revision = 1;
+    QDateTime createdAtUtc = QDateTime::currentDateTimeUtc();
+    QDateTime updatedAtUtc = QDateTime::currentDateTimeUtc();
+  };
+
   /// One strong-dependency edge: `dependent` consumes `input`. Edges form a
   /// DAG (cycle-checked at insertion). Kept as an insertion-ordered list — the
   /// graph is small (one edge per virtual-raster input) and queries are scans.
@@ -130,6 +143,7 @@ struct DataManager::Impl
   QVector<AssetRecord> records;
   QVector<LeaseRecord> leases;
   QVector<CollectionRecord> collections;
+  QVector<TemporalCollectionRecord_> temporalCollections;
   QVector<DependencyEdge> dependencyEdges;
   /// Managed scratch directory for generated virtual-raster artifacts. Lazily
   /// created by createVirtualRaster; the `.vrt` files inside are disposable
@@ -164,6 +178,20 @@ struct DataManager::Impl
     return std::find_if(
       collections.begin(), collections.end(),
       [&]( const CollectionRecord &c ) { return c.id == id; } );
+  }
+
+  QVector<TemporalCollectionRecord_>::iterator findTemporalCollection( CollectionId id )
+  {
+    return std::find_if(
+      temporalCollections.begin(), temporalCollections.end(),
+      [&]( const TemporalCollectionRecord_ &c ) { return c.id == id; } );
+  }
+
+  QVector<TemporalCollectionRecord_>::const_iterator findTemporalCollection( CollectionId id ) const
+  {
+    return std::find_if(
+      temporalCollections.begin(), temporalCollections.end(),
+      [&]( const TemporalCollectionRecord_ &c ) { return c.id == id; } );
   }
 
   QVector<LeaseImpact> leaseImpacts( AssetId id ) const
@@ -565,15 +593,30 @@ std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) cons
   if ( path.trimmed().isEmpty() )
     return std::nullopt;
 
-  const QString absolute = QFileInfo( path ).absoluteFilePath();
+  const QFileInfo fi( path );
+  const QString absolute = fi.absoluteFilePath();
+  // Registered assets store a canonicalized source; compare the canonical
+  // form so symlinked / hardlinked / case-variant parameter paths still
+  // resolve (a plain absoluteFilePath match silently dropped lineage edges,
+  // #718). canonicalFilePath is empty for non-existent files — fall back to
+  // the absolute spelling there.
+  const QString canonicalPath = fi.canonicalFilePath();
   for ( const Impl::AssetRecord &record : m_impl->records )
   {
-    const QString &canonical = record.snapshot.source().canonicalSource;
-    if ( canonical == path )
+    const QString &stored = record.snapshot.source().canonicalSource;
+    if ( stored == path || stored == canonicalPath )
       return record.snapshot;
-    // A relative or differently-spelled path still resolves to the same file.
-    if ( !absolute.isEmpty() && QFileInfo( canonical ).absoluteFilePath() == absolute )
+    const QFileInfo storedFi( stored );
+    const QString storedCanonical = storedFi.canonicalFilePath();
+    if ( !canonicalPath.isEmpty() && !storedCanonical.isEmpty() )
+    {
+      if ( storedCanonical == canonicalPath )
+        return record.snapshot;
+    }
+    else if ( !absolute.isEmpty() && storedFi.absoluteFilePath() == absolute )
+    {
       return record.snapshot;
+    }
   }
   return std::nullopt;
 }
@@ -1809,6 +1852,152 @@ QVector<CollectionId> DataManager::collections() const
   for ( const Impl::CollectionRecord &c : m_impl->collections )
     ids.append( c.id );
   return ids;
+}
+
+TemporalCollectionCreateResult
+DataManager::createTemporalCollection( const TemporalCollectionCreateRequest &request )
+{
+  // Dedup: re-registering the same collection (e.g. an agent re-registering
+  // the same descriptor) returns the existing record instead of spamming
+  // identical entries into the workspace.
+  for ( const Impl::TemporalCollectionRecord_ &existing : m_impl->temporalCollections )
+  {
+    if ( existing.displayName == request.displayName && existing.descriptor == request.descriptor )
+    {
+      TemporalCollectionCreateResult result;
+      result.collectionId = existing.id;
+      result.reusedExisting = true;
+      return result;
+    }
+  }
+  return restoreTemporalCollection( CollectionId::generate(), 1, request );
+}
+
+TemporalCollectionCreateResult
+DataManager::restoreTemporalCollection( CollectionId id, quint64 revision,
+                                        const TemporalCollectionCreateRequest &request )
+{
+  if ( QThread::currentThread() != thread() )
+    return TemporalCollectionCreateResult{ {}, false, { wrongThreadDiagnostic() } };
+
+  if ( request.descriptor.trimmed().isEmpty() )
+  {
+    return TemporalCollectionCreateResult{ {}, false, { Diagnostic{
+      QStringLiteral( "temporal_collection.empty_descriptor" ),
+      QStringLiteral( "The temporal collection descriptor is empty" ),
+      DiagnosticSeverity::Error } } };
+  }
+
+  // Guard against a duplicate id (double project read, stale extension),
+  // mirroring restoreCollection's id-conflict handling.
+  if ( m_impl->findTemporalCollection( id ) != m_impl->temporalCollections.end() )
+  {
+    return TemporalCollectionCreateResult{ {}, false, { Diagnostic{
+      QStringLiteral( "temporal_collection.duplicate_id" ),
+      QStringLiteral( "A temporal collection with this id is already registered" ),
+      DiagnosticSeverity::Error } } };
+  }
+
+  Impl::TemporalCollectionRecord_ record;
+  record.id = id;
+  record.displayName = request.displayName;
+  record.descriptor = request.descriptor;
+  record.revision = revision > 0 ? revision : 1;
+  m_impl->temporalCollections.push_back( std::move( record ) );
+  m_impl->catalogGeneration++;
+  emit temporalCollectionAdded( id );
+  return TemporalCollectionCreateResult{ id, false, {} };
+}
+
+std::optional<TemporalCollectionRecord> DataManager::temporalCollection( CollectionId id ) const
+{
+  const auto it = m_impl->findTemporalCollection( id );
+  if ( it == m_impl->temporalCollections.end() )
+    return std::nullopt;
+  TemporalCollectionRecord snapshot;
+  snapshot.id = it->id;
+  snapshot.displayName = it->displayName;
+  snapshot.descriptor = it->descriptor;
+  snapshot.revision = it->revision;
+  snapshot.createdAtUtc = it->createdAtUtc;
+  snapshot.updatedAtUtc = it->updatedAtUtc;
+  return snapshot;
+}
+
+QVector<TemporalCollectionRecord> DataManager::temporalCollections() const
+{
+  QVector<TemporalCollectionRecord> snapshots;
+  snapshots.reserve( m_impl->temporalCollections.size() );
+  for ( const Impl::TemporalCollectionRecord_ &c : m_impl->temporalCollections )
+  {
+    TemporalCollectionRecord snapshot;
+    snapshot.id = c.id;
+    snapshot.displayName = c.displayName;
+    snapshot.descriptor = c.descriptor;
+    snapshot.revision = c.revision;
+    snapshot.createdAtUtc = c.createdAtUtc;
+    snapshot.updatedAtUtc = c.updatedAtUtc;
+    snapshots.append( snapshot );
+  }
+  return snapshots;
+}
+
+Result<TemporalCollectionRecord>
+DataManager::updateTemporalCollection( CollectionId id, const TemporalCollectionCreateRequest &request )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<TemporalCollectionRecord>::failure( wrongThreadDiagnostic() );
+
+  const auto it = m_impl->findTemporalCollection( id );
+  if ( it == m_impl->temporalCollections.end() )
+  {
+    return Result<TemporalCollectionRecord>::failure(
+      Diagnostic{ QStringLiteral( "temporal_collection.unknown" ),
+                  QStringLiteral( "The temporal collection is not registered" ),
+                  DiagnosticSeverity::Error } );
+  }
+  if ( request.descriptor.trimmed().isEmpty() )
+  {
+    return Result<TemporalCollectionRecord>::failure(
+      Diagnostic{ QStringLiteral( "temporal_collection.empty_descriptor" ),
+                  QStringLiteral( "The temporal collection descriptor is empty" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  it->displayName = request.displayName;
+  it->descriptor = request.descriptor;
+  it->revision += 1;
+  it->updatedAtUtc = QDateTime::currentDateTimeUtc();
+
+  TemporalCollectionRecord snapshot;
+  snapshot.id = it->id;
+  snapshot.displayName = it->displayName;
+  snapshot.descriptor = it->descriptor;
+  snapshot.revision = it->revision;
+  snapshot.createdAtUtc = it->createdAtUtc;
+  snapshot.updatedAtUtc = it->updatedAtUtc;
+
+  emit temporalCollectionChanged( id );
+  return Result<TemporalCollectionRecord>::success( snapshot );
+}
+
+Result<void> DataManager::removeTemporalCollection( CollectionId id )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<void>::failure( wrongThreadDiagnostic() );
+
+  const auto it = m_impl->findTemporalCollection( id );
+  if ( it == m_impl->temporalCollections.end() )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "temporal_collection.unknown" ),
+                  QStringLiteral( "The temporal collection is not registered" ),
+                  DiagnosticSeverity::Error } );
+  }
+  m_impl->temporalCollections.erase( it );
+  m_impl->catalogGeneration++;
+  emit temporalCollectionRemoved( id );
+  return Result<void>::success( {} );
 }
 
 Result<void> DataManager::addChildToCollection( CollectionId collectionId,

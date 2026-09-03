@@ -1,0 +1,14 @@
+{
+  "id" : "otb_tools:otb_kmeans_classification",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "k-means",
+    "clustering",
+    "classification",
+    "unsupervised",
+    "otb"
+  ],
+  "task" : ""
+}

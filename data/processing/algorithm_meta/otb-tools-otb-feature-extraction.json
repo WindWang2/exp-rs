@@ -1,0 +1,13 @@
+{
+  "id" : "otb_tools:otb_feature_extraction",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "feature",
+    "extraction",
+    "texture",
+    "otb"
+  ],
+  "task" : ""
+}

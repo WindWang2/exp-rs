@@ -460,6 +460,85 @@ std::vector<AgentTool> AgentToolCatalog::searchTools( const SearchQuery &query )
       if ( !safe ) continue;
     }
 
+    // Capability facets (#701): each is AND-combined; unset facets pass.
+    if ( !query.taskFamily.empty()
+         && containsIgnoreCase( tool.agentMetadata.taskFamily, query.taskFamily ) == false
+         && containsIgnoreCase( tool.name, query.taskFamily ) == false )
+      continue;
+    if ( query.deterministic.has_value()
+         && tool.agentMetadata.deterministic != *query.deterministic )
+      continue;
+    if ( query.gpu.has_value() && tool.agentMetadata.gpuAccelerated != *query.gpu )
+      continue;
+    if ( query.temporal.has_value() )
+    {
+      const bool isTemporal = containsIgnoreCase( tool.agentMetadata.taskFamily, "temporal" )
+                              || containsIgnoreCase( tool.name, "temporal" )
+                              || containsIgnoreCase( tool.group, "temporal" );
+      if ( isTemporal != *query.temporal )
+        continue;
+    }
+    if ( !query.memoryPolicy.empty() && tool.agentMetadata.memoryPolicy != query.memoryPolicy )
+      continue;
+    if ( !query.costClass.empty()
+         && containsIgnoreCase( tool.agentMetadata.costClass, query.costClass ) == false )
+      continue;
+    if ( !query.modality.empty() )
+    {
+      bool modalityMatch = containsIgnoreCase( tool.name, query.modality )
+                           || containsIgnoreCase( tool.group, query.modality );
+      for ( const auto &port : tool.inputs )
+      {
+        if ( port.rsContract.isObject()
+             && containsIgnoreCase( port.rsContract["dataKind"].asString(), query.modality ) )
+          modalityMatch = true;
+      }
+      if ( !modalityMatch )
+        continue;
+    }
+    if ( !query.bandRoles.empty() )
+    {
+      // Comma-separated role list; a tool matches when ANY of its ports'
+      // rsContract bands declares ANY requested role.
+      std::vector<std::string> wantedRoles;
+      std::string current;
+      for ( const char c : query.bandRoles )
+      {
+        if ( c == ',' )
+        {
+          wantedRoles.push_back( current );
+          current.clear();
+        }
+        else
+          current.push_back( c );
+      }
+      if ( !current.empty() )
+        wantedRoles.push_back( current );
+      bool roleMatch = false;
+      for ( const auto &port : tool.inputs )
+      {
+        if ( !port.rsContract.isObject() || !port.rsContract["bands"].isArray() )
+          continue;
+        for ( const auto &band : port.rsContract["bands"] )
+        {
+          const std::string role = band["role"].asString();
+          for ( const auto &wanted : wantedRoles )
+          {
+            std::string trimmed = wanted;
+            const auto notSpace = []( char ch ) { return !std::isspace( static_cast<unsigned char>( ch ) ); };
+            const auto begin = std::find_if( trimmed.begin(), trimmed.end(), notSpace );
+            const auto end = std::find_if( trimmed.rbegin(), trimmed.rend(), notSpace ).base();
+            if ( begin != trimmed.end() )
+              trimmed = std::string( begin, end );
+            if ( !trimmed.empty() && containsIgnoreCase( role, trimmed ) )
+              roleMatch = true;
+          }
+        }
+      }
+      if ( !roleMatch )
+        continue;
+    }
+
     int score = computeMatchScore( tool, query.text, tokens );
     if ( score > 0 )
     {

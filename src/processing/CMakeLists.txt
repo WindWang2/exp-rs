@@ -38,6 +38,8 @@ add_library(sicnu_processing SHARED
     algorithms/temporal/temporal_time.cpp
     algorithms/temporal/temporal_band_roles.cpp
     algorithms/temporal/temporal_collection.cpp
+    algorithms/temporal/temporal_workspace.cpp
+    algorithms/temporal/temporal_stac_adapter.cpp
     algorithms/temporal/temporal_preflight.cpp
     algorithms/temporal/temporal_stream.cpp
 

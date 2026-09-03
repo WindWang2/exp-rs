@@ -1,0 +1,12 @@
+{
+  "id" : "rs:temporal_index_series",
+  "input" : "",
+  "output" : "raster",
+  "tags" : 
+  [
+    "temporal",
+    "spectral-index",
+    "time-series"
+  ],
+  "task" : ""
+}

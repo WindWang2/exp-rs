@@ -1,9 +1,14 @@
 {
-  "id": "rs:change_detection",
-  "task": "change-detection",
-  "input": "raster",
-  "output": "raster",
-  "gpu": false,
-  "notes": "Difference / ratio / normalized difference / CVA with Otsu, percentile, statistical, or manual thresholds, morphological cleanup, minimum mapping unit, and area statistics. Inputs must share grid and radiometric state.",
-  "tags": ["change", "timeseries", "threshold", "cva"]
+  "gpu" : false,
+  "id" : "rs:change_detection",
+  "input" : "raster",
+  "notes" : "Difference / ratio / normalized difference / CVA with Otsu, percentile, statistical, or manual thresholds, morphological cleanup, minimum mapping unit, and area statistics. Inputs must share grid and radiometric state.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "change-detection",
+    "temporal",
+    "difference"
+  ],
+  "task" : "change-detection"
 }

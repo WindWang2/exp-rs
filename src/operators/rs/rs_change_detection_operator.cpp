@@ -119,6 +119,7 @@ Json::Value RsChangeDetectionOperator::metadata() const {
     meta["tags"].append("temporal");
     meta["tags"].append("difference");
         meta["task"] = "change-detection";
+        meta["notes"] = "Difference / ratio / normalized difference / CVA with Otsu, percentile, statistical, or manual thresholds, morphological cleanup, minimum mapping unit, and area statistics. Inputs must share grid and radiometric state.";
     meta["gpu"] = false;
     meta["purpose"] = "Identify land-cover or surface changes between two dates.";
     meta["prerequisites"].append("Before and after rasters must be co-registered and same size "

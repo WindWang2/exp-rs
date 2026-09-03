@@ -1,0 +1,14 @@
+{
+  "id" : "otb_tools:otb_concatenate_images",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "concatenate",
+    "merge",
+    "stack",
+    "images",
+    "otb"
+  ],
+  "task" : ""
+}

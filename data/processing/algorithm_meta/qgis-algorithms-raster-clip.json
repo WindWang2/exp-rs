@@ -1,0 +1,12 @@
+{
+  "id" : "qgis_algorithms:raster_clip",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "raster",
+    "clip",
+    "extent"
+  ],
+  "task" : ""
+}

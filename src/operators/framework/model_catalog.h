@@ -120,6 +120,14 @@ struct ModelInfo {
   // Extended domain and runtime capabilities (ADR 0122 / Harness deepening)
   std::vector<std::string> sensors;            ///< e.g. ["Sentinel-2", "Landsat-8", "GF-2"]
   std::vector<std::string> supportedBandRoles; ///< e.g. ["Red", "Green", "Blue", "NIR"]
+  // --- Multimodal / temporal data contract (goal §9, aligned with the
+  // TemporalSceneRef forward seam §11). Optional; empty = optical/unknown,
+  // single-scene. Lets "inspect dataset → derive contract → rank model"
+  // filter SAR / time-series models without memorizing names.
+  std::vector<std::string> modalities;        ///< ["optical"] (default) | "sar" | "dem" | "auxiliary"
+  std::vector<std::string> polarizations;     ///< SAR models: ["VV","VH","HH","HV"]
+  int temporalLength = 0;                     ///< Frames per inference (0 = single-scene model)
+  std::string radiometricState;               ///< Expected radiometry: "dn" | "toa_reflectance" | ...
   double minResolutionMeters = -1.0;          ///< Min recommended spatial resolution (m)
   double maxResolutionMeters = -1.0;          ///< Max recommended spatial resolution (m)
   int estimatedVramMb = 0;                     ///< VRAM required/recommended when GPU=true

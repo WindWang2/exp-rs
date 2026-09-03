@@ -1,0 +1,12 @@
+{
+  "id" : "rs:continuum_removal",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "hyperspectral",
+    "spectral",
+    "continuum"
+  ],
+  "task" : ""
+}

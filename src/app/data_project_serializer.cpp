@@ -259,6 +259,29 @@ DataProjectSerializer::write(QDomDocument &document,
   }
   extension.appendChild(virtualsElement);
 
+  // Persist Temporal Collections: identity (id + revision) + the canonical
+  // descriptor document as a single text node (mirrors the <recipe>/<derivation>
+  // payloads). Scene → Data Asset bindings live INSIDE the descriptor
+  // (per-scene assetId/revision); the scene assets themselves are persisted by
+  // the <assets> block above when they are project-persistent.
+  QDomElement temporalElement =
+      document.createElement(QStringLiteral("temporalCollections"));
+  for (const data::TemporalCollectionRecord &record :
+       context.dataManager().temporalCollections()) {
+    QDomElement recordElement =
+        document.createElement(QStringLiteral("temporalCollection"));
+    recordElement.setAttribute(QStringLiteral("id"), record.id.toString());
+    recordElement.setAttribute(QStringLiteral("revision"),
+                               QString::number(record.revision));
+    recordElement.setAttribute(QStringLiteral("name"), record.displayName);
+    QDomElement descriptorElement =
+        document.createElement(QStringLiteral("descriptor"));
+    descriptorElement.appendChild(document.createTextNode(record.descriptor));
+    recordElement.appendChild(descriptorElement);
+    temporalElement.appendChild(recordElement);
+  }
+  extension.appendChild(temporalElement);
+
   root.appendChild(extension);
   return data::Result<void>::success();
 }
@@ -494,6 +517,51 @@ data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
         failed = true;
       }
     }
+  }
+
+  // Restore Temporal Collections (additive block: absent in projects saved
+  // before the temporal workspace existed — the loop simply never runs).
+  // Scene → asset bindings are re-validated lazily by the temporal layer
+  // (bindCollectionAssets) after the scene assets were restored above.
+  const QDomElement temporals =
+      extension.firstChildElement(QStringLiteral("temporalCollections"));
+  for (QDomElement tempRec =
+           temporals.firstChildElement(QStringLiteral("temporalCollection"));
+       !tempRec.isNull();
+       tempRec = tempRec.nextSiblingElement(QStringLiteral("temporalCollection"))) {
+    const std::optional<data::CollectionId> recordId =
+        data::CollectionId::fromString(tempRec.attribute(QStringLiteral("id")));
+    const QDomElement descriptorElement =
+        tempRec.firstChildElement(QStringLiteral("descriptor"));
+    if (!recordId || descriptorElement.isNull() ||
+        descriptorElement.text().trimmed().isEmpty()) {
+      diagnostics.append(projectDiagnostic(
+          QStringLiteral("project.invalid_temporal_collection"),
+          QStringLiteral("A persisted temporal collection description is invalid")));
+      failed = true;
+      continue;
+    }
+
+    bool revisionOk = false;
+    const quint64 revisionValue =
+        tempRec.attribute(QStringLiteral("revision"), QStringLiteral("1"))
+            .toULongLong(&revisionOk);
+    if (!revisionOk) {
+      diagnostics.append(projectDiagnostic(
+          QStringLiteral("project.invalid_temporal_collection"),
+          QStringLiteral("A persisted temporal collection description is invalid")));
+      failed = true;
+      continue;
+    }
+
+    const data::TemporalCollectionCreateResult restored =
+        context.dataManager().restoreTemporalCollection(
+            *recordId, revisionValue,
+            {tempRec.attribute(QStringLiteral("name")),
+             descriptorElement.text()});
+    diagnostics += restored.diagnostics;
+    if (restored.collectionId.isNull())
+      failed = true;
   }
 
   for (QgsMapLayer *layer : orderedProjectLayers(project)) {

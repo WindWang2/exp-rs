@@ -1,0 +1,12 @@
+{
+  "id" : "gdal_tools:ogr_layer_algebra",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "gdal",
+    "discovered",
+    "ogr_layer_algebra"
+  ],
+  "task" : ""
+}

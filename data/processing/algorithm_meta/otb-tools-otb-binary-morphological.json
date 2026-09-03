@@ -1,0 +1,14 @@
+{
+  "id" : "otb_tools:otb_binary_morphological",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "morphological",
+    "binary",
+    "erosion",
+    "dilation",
+    "otb"
+  ],
+  "task" : ""
+}

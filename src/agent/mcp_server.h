@@ -50,6 +50,26 @@ private:
 /// mapping — no execution machinery of its own. Single calls reach the Task
 /// Center through ToolCallDispatcher (rs: operators) or TaskCenter::enqueueTask
 /// (provider algorithms); execution ids are TaskCenter task ids ("task-<id>").
+/// Capability facets for handleSearchTools (#701): string facets are
+/// substring/exact filters, bool facets apply only when their has* flag is
+/// set (tri-state, so an absent parameter never filters). Namespace scope so
+/// it can serve as a default argument of a McpServer member function.
+struct SearchToolsFacets
+{
+    QString task;
+    QString modality;
+    QString bandRoles;
+    QString memoryPolicy;
+    QString costClass;
+    bool hasDeterministic = false;
+    bool deterministic = false;
+    bool hasGpu = false;
+    bool gpu = false;
+    bool hasTemporal = false;
+    bool temporal = false;
+    bool largeRasterSafe = false;
+};
+
 class McpServer : public QObject
 {
     Q_OBJECT
@@ -116,7 +136,8 @@ protected:
     QVariantMap handleSearchTools(const QString &query, const QString &group = QString(),
                                   const QString &tag = QString(), const QString &inputType = QString(),
                                   const QString &outputType = QString(), bool compact = true,
-                                  int limit = 0, int cursor = 0);
+                                  int limit = 0, int cursor = 0,
+                                  const SearchToolsFacets &facets = SearchToolsFacets());
     QVariantMap handleGetToolSchema(const QString &toolId);
 
     // MCP Methods — Agent Interaction Layer

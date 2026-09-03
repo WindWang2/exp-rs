@@ -1,0 +1,14 @@
+{
+  "id" : "gdal_tools:pct2rgb",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "pct2rgb",
+    "palette",
+    "rgb",
+    "color table",
+    "gdal"
+  ],
+  "task" : ""
+}

@@ -81,6 +81,7 @@ Json::Value RsSpectralIndexOperator::metadata() const {
     meta["tags"].append("ndti");
     meta["tags"].append("vegetation");
         meta["task"] = "index-computation";
+        meta["notes"] = "Role-resolved spectral indices (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI). NIR/Red resolve by SICNU_BAND_ROLE when present, otherwise explicit band numbers. First analysis step after preprocessing in most workflows.";
     meta["gpu"] = false;
     meta["purpose"] = "Derive vegetation, water, soil, snow, fire, or built-up indices from multispectral imagery.";
     meta["prerequisites"].append("Input raster must have sufficient bands for the selected index.");

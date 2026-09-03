@@ -1,0 +1,13 @@
+{
+  "id" : "gdal_tools:gdalmanage",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "gdalmanage",
+    "management",
+    "raster",
+    "gdal"
+  ],
+  "task" : ""
+}

@@ -1,0 +1,14 @@
+{
+  "id" : "qgis_algorithms:vector_nearest_neighbor",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "nearest",
+    "neighbor",
+    "distance",
+    "proximity",
+    "closest"
+  ],
+  "task" : ""
+}

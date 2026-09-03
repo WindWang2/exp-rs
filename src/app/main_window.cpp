@@ -2,6 +2,7 @@
 #include "dialogs/dialog_help_catalog.h"
 #include "active_view_host.h"
 #include "project_context.h"
+#include "processing/algorithms/temporal/temporal_workspace.h"
 #include "map_tools/map_tool_manager.h"
 #include "map_tools/rs_roi_spectrum_tool.h"
 #include "app_paths.h"
@@ -112,7 +113,14 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     };
     auto context = sicnu::app::ProjectContext::create( mainViewSpec );
     if ( context )
+    {
         m_projectContext = context.take();
+        // Catalog seam for revision-aware execution caching + provenance
+        // (#667): the project DataManager lives on the GUI thread, matching
+        // TaskCenter's affinity rule.
+        sicnu::TaskCenter::instance().setCatalog( &m_projectContext->dataManager() );
+        sicnu::temporal::setWorkspaceCatalog( &m_projectContext->dataManager() );
+    }
     else
         qCritical() << "Failed to create project data context";
 

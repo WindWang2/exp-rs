@@ -1,0 +1,13 @@
+{
+  "id" : "qgis_algorithms:vector_attribute_query",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "query",
+    "expression",
+    "filter",
+    "select"
+  ],
+  "task" : ""
+}

@@ -1,0 +1,12 @@
+{
+  "id" : "rs:fusion_gram_schmidt",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "fusion",
+    "pan-sharpening",
+    "enhancement"
+  ],
+  "task" : ""
+}

@@ -5,6 +5,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QUrl>
 #include <QString>
 #include <QStringList>
 
@@ -81,13 +82,59 @@ QString resolveEnviDataPath( const QString &path )
   return path;
 }
 
+/// True for network-hosted raster sources that GDAL opens through its /vsi*
+/// virtual-file layer or an http(s) URL directly. Remote identity must never
+/// touch QFileInfo: on Windows a "/vsicurl/..." string is not absolute and
+/// absoluteFilePath() would silently prepend a drive letter, corrupting the
+/// source (the local-existence probe then misclassified it as Missing).
+bool isRemoteRasterSource( const QString &path )
+{
+  if ( path.isEmpty() )
+    return false;
+  if ( path.startsWith( QStringLiteral( "/vsi" ), Qt::CaseInsensitive ) )
+    return true; // /vsicurl/, /vsis3/, /vsigs/, /vsiaz/, /vsihdfs/ ...
+  return path.startsWith( QStringLiteral( "http://" ), Qt::CaseInsensitive ) ||
+         path.startsWith( QStringLiteral( "https://" ), Qt::CaseInsensitive );
+}
+
+/// Remote sources open through /vsicurl/: a bare http(s) href is prefixed.
+QString normalizeRemoteRasterPath( const QString &path )
+{
+  if ( path.startsWith( QStringLiteral( "http://" ), Qt::CaseInsensitive ) ||
+       path.startsWith( QStringLiteral( "https://" ), Qt::CaseInsensitive ) )
+    return QStringLiteral( "/vsicurl/" ) + path;
+  return path;
+}
+
+/// One-time process defaults for remote reads: bounded timeouts/retries so a
+/// dead host fails in seconds, never overriding an explicit user setting.
+void configureRemoteHttpDefaults()
+{
+  static const struct { const char *key; const char *value; } kDefaults[] = {
+    { "GDAL_HTTP_TIMEOUT", "30" },
+    { "GDAL_HTTP_CONNECT_TIMEOUT", "10" },
+    { "GDAL_HTTP_MAX_RETRY", "3" },
+    { "GDAL_HTTP_RETRY_DELAY", "1" },
+    { "GDAL_HTTP_VERSION", "2" },
+  };
+  for ( const auto &d : kDefaults )
+  {
+    if ( !CPLGetConfigOption( d.key, nullptr ) )
+      CPLSetConfigOption( d.key, d.value );
+  }
+}
+
 /// Canonicalize a source path: follow symlinks, collapse `.`/`..`, and rewrite
 /// an ENVI `.hdr` selection to its paired binary data file. This is the identity
-/// that drives SourceKey deduplication.
+/// that drives SourceKey deduplication. Remote sources bypass QFileInfo
+/// entirely (see isRemoteRasterSource).
 QString normalizeRasterPath( const QString &rawPath )
 {
   if ( rawPath.isEmpty() )
     return rawPath;
+
+  if ( isRemoteRasterSource( rawPath ) )
+    return normalizeRemoteRasterPath( rawPath );
 
   const QString enviResolved = resolveEnviDataPath( rawPath );
   const QFileInfo info( enviResolved );
@@ -112,6 +159,12 @@ bool GdalRasterSourceProvider::supports( const SourceDescriptor &source ) const
   if ( rasterExtensions().contains( suffix ) )
     return true;
 
+  // Remote raster sources (STAC COGs etc.): same extension contract, but the
+  // QFileInfo suffix read on a URL string is harmless while the local
+  // existence probe in resolve() is not.
+  if ( isRemoteRasterSource( source.canonicalSource ) )
+    return rasterExtensions().contains( suffix );
+
   // Extensionless ENVI binary (GF_1 + GF_1.HDR) is also a local raster.
   return suffix.isEmpty() && hasEnviHeaderSibling( source.canonicalSource );
 }
@@ -120,24 +173,31 @@ Result<internal::ResolvedSource> GdalRasterSourceProvider::resolve(
   const SourceDescriptor &source ) const
 {
   const QString normalizedPath = normalizeRasterPath( source.canonicalSource );
+  const bool remote = isRemoteRasterSource( normalizedPath );
 
   internal::ResolvedSource resolved;
   resolved.kind = AssetKind::Raster;
-  resolved.storageKind = StorageKind::File;
+  resolved.storageKind = remote ? StorageKind::Remote : StorageKind::File;
   resolved.canonicalSource = normalizedPath;
   resolved.canonicalProviderKey = QStringLiteral( "gdal" );
-  resolved.displayName = QFileInfo( normalizedPath ).completeBaseName();
+  resolved.displayName = remote ? QUrl( normalizedPath ).fileName()
+                                : QFileInfo( normalizedPath ).completeBaseName();
 
-  const QFileInfo info( normalizedPath );
-  if ( !info.exists() || !info.isFile() )
+  if ( !remote )
   {
-    resolved.state = AssetState::Missing;
-    resolved.capabilities = AssetCapability::Relocatable;
-    return Result<internal::ResolvedSource>::success( std::move( resolved ) );
+    const QFileInfo info( normalizedPath );
+    if ( !info.exists() || !info.isFile() )
+    {
+      resolved.state = AssetState::Missing;
+      resolved.capabilities = AssetCapability::Relocatable;
+      return Result<internal::ResolvedSource>::success( std::move( resolved ) );
+    }
   }
 
   // Suppress GDAL's stderr noise during probing; we report Missing/Error ourselves.
   ensureGdalRuntime();
+  if ( remote )
+    configureRemoteHttpDefaults();
 
   CPLPushErrorHandler( CPLQuietErrorHandler );
   GDALDatasetH dataset = GDALOpen( normalizedPath.toUtf8().constData(), GA_ReadOnly );
@@ -145,12 +205,15 @@ Result<internal::ResolvedSource> GdalRasterSourceProvider::resolve(
 
   if ( dataset == nullptr )
   {
-    resolved.state = AssetState::Error;
+    // A remote source that cannot be opened right now is Missing (unreachable
+    // host, expired link), not a hard Error: display re-resolves on demand.
+    resolved.state = remote ? AssetState::Missing : AssetState::Error;
     resolved.capabilities = AssetCapability::Relocatable;
     return Result<internal::ResolvedSource>::success(
       std::move( resolved ),
       { Diagnostic{ QStringLiteral( "source.unreadable" ),
-                    QStringLiteral( "GDAL could not open the raster source" ),
+                    remote ? QStringLiteral( "GDAL could not open the remote raster source" )
+                           : QStringLiteral( "GDAL could not open the raster source" ),
                     DiagnosticSeverity::Warning } } );
   }
 

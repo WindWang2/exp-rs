@@ -1,0 +1,12 @@
+{
+  "id" : "rs:band_math",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "band-math",
+    "spectral",
+    "calculator"
+  ],
+  "task" : ""
+}

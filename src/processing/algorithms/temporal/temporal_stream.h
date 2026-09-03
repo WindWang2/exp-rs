@@ -127,8 +127,10 @@ public:
                             bool skipScaleOffset = false );
 
   /// Reads a single pixel of one band of one scene (point time series).
-  /// Same normalization contract as readSceneBandTile().
-  bool readSceneBandPixel( int sceneIndex, int band, int x, int y, float *out );
+  /// Same normalization contract as readSceneBandTile(). An unreadable mask
+  /// sample fails closed (NaN), matching the window path.
+  bool readSceneBandPixel( int sceneIndex, int band, int x, int y, float *out,
+                           bool skipMasking = false, bool skipScaleOffset = false );
 
   // --- instrumentation (goal §48: buffer accounting, never OOM roulette) ---
   /// Float slots held inside the reader (scratch tile + native QA buffers).

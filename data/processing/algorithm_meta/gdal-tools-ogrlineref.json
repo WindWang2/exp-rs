@@ -1,0 +1,12 @@
+{
+  "id" : "gdal_tools:ogrlineref",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "gdal",
+    "discovered",
+    "ogrlineref"
+  ],
+  "task" : ""
+}

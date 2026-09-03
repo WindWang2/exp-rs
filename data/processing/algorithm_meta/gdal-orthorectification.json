@@ -1,0 +1,13 @@
+{
+  "id" : "gdal:orthorectification",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "orthorectification",
+    "gdal",
+    "rpc",
+    "dem"
+  ],
+  "task" : ""
+}

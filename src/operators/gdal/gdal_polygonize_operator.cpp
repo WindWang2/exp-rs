@@ -62,6 +62,7 @@ Json::Value GdalPolygonizeOperator::metadata() const {
     meta["tags"].append("vectorize");
     meta["tags"].append("segments");
     meta["task"] = "vectorization";
+    meta["notes"] = "Raster-to-vector conversion for segmentation maps and classified rasters. Typical workflow tail: segmentation or classification -> polygonize -> area filtering.";
     meta["gpu"] = false;
     meta["purpose"] = "Export class maps or segment labels as polygon vectors";
     meta["useCases"] = Json::Value(Json::arrayValue);

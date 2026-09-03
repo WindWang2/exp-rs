@@ -1,0 +1,12 @@
+{
+  "id" : "rs:atmospheric_correction",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "atmospheric",
+    "dos",
+    "radiometric"
+  ],
+  "task" : ""
+}

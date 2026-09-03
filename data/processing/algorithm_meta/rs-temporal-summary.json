@@ -1,0 +1,12 @@
+{
+  "id" : "rs:temporal_summary",
+  "input" : "",
+  "output" : "raster",
+  "tags" : 
+  [
+    "temporal",
+    "time-series",
+    "statistics"
+  ],
+  "task" : ""
+}

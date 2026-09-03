@@ -1,0 +1,14 @@
+{
+  "id" : "qgis_algorithms:raster_statistics",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "raster",
+    "statistics",
+    "min",
+    "max",
+    "mean"
+  ],
+  "task" : ""
+}

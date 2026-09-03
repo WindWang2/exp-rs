@@ -1,0 +1,13 @@
+{
+  "id" : "rs:modis_import",
+  "input" : "",
+  "output" : "raster",
+  "tags" : 
+  [
+    "modis",
+    "import",
+    "data-format",
+    "hdf"
+  ],
+  "task" : ""
+}

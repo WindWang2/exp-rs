@@ -1,0 +1,14 @@
+{
+  "id" : "gdal_tools:gdalinfo",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "gdalinfo",
+    "metadata",
+    "raster",
+    "information",
+    "gdal"
+  ],
+  "task" : ""
+}

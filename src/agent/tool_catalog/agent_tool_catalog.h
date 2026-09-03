@@ -23,6 +23,18 @@ struct SearchQuery {
   std::string outputType;                       ///< Port output data type filter
   std::optional<ToolCategory> category;         ///< Category filter (Processing, Interaction, Data, Custom)
   bool largeRasterSafeOnly = false;             ///< Filter to streaming/multipass safe algorithms
+
+  // --- Capability facets (#701): AND-combined with the filters above so an
+  // agent can express "deterministic, large-raster-safe, band-role:red tools"
+  // in one ranked query instead of pulling the whole catalog.
+  std::string taskFamily;                       ///< Substring match on agentMetadata.taskFamily
+  std::optional<bool> deterministic;            ///< agentMetadata.deterministic
+  std::optional<bool> gpu;                      ///< agentMetadata.gpuAccelerated
+  std::optional<bool> temporal;                 ///< taskFamily/name carries temporal capability
+  std::string memoryPolicy;                     ///< agentMetadata.memoryPolicy (e.g. "streaming")
+  std::string costClass;                        ///< Substring on agentMetadata.costClass (e.g. "O(tile)")
+  std::string modality;                         ///< rsContract dataKind / port-name match (e.g. "optical")
+  std::string bandRoles;                        ///< Comma list; ANY role in any port's rsContract bands
 };
 
 /**

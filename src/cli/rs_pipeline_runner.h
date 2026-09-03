@@ -103,6 +103,23 @@ public:
     PipelineResult runFromFile(const std::string& filePath);
 
     /**
+     * \brief Resume an interrupted/crashed tracked run from its checkpoint
+     * (#668 production surface, paired with the CLI --resume flag and the
+     * MCP resume_workflow tool).
+     *
+     * Startup reconciliation runs first: checkpoints left in a Running state
+     * by a crashed process are transitioned to Interrupted (idempotent for
+     * already-terminal runs). Steps whose recorded output still exists on
+     * disk are NOT re-executed; only the remaining steps are resubmitted.
+     * The returned PipelineResult reports every step of the run (pre-completed
+     * steps carry their recorded output).
+     *
+     * @param runId Tracked run id (see --list-runs / checkpoint files).
+     * @return PipelineResult; errorMessage explains an unresumable run.
+     */
+    PipelineResult resumeRun(const std::string& runId);
+
+    /**
      * \brief Validate a pipeline JSON without executing it.
      *
      * @param pipelineJson JSON object to validate.

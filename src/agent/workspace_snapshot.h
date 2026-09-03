@@ -74,10 +74,25 @@ struct MapViewSnapshot
     ActiveRasterDisplay activeRaster;
 };
 
+/// One temporal collection workspace record, summarized for the agent
+/// prompt: identity + a few descriptor-derived facts, no scene dumps.
+struct TemporalCollectionInfo
+{
+    QString id;
+    QString name;
+    int revision = 0;
+    int sceneCount = 0;
+    int scenesBound = 0;
+    QString timeStart;
+    QString timeEnd;
+    QStringList platforms;
+};
+
 struct WorkspaceSnapshot
 {
     quint64 displayRevision = 0;
     QList<DataAssetInfo> assets;
+    QList<TemporalCollectionInfo> temporalCollections;
     MapViewSnapshot mapView;
 
     static WorkspaceSnapshot capture( data::DataManager *dataManager,

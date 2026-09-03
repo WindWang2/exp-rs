@@ -60,6 +60,32 @@ Json::Value TemporalSceneRef::toJson() const
     v["quality_band"] = qualityBand;
   if ( maskBand > 0 )
     v["mask_band"] = maskBand;
+  // Multimodal observation contract (goal §11): optional additive fields,
+  // serialized only when claimed so legacy descriptors stay byte-stable.
+  if ( !modality.isEmpty() )
+    v["modality"] = modality.toStdString();
+  if ( !sensor.isEmpty() )
+    v["sensor"] = sensor.toStdString();
+  if ( !bandRoles.isEmpty() )
+  {
+    Json::Value roles( Json::arrayValue );
+    for ( const QString &role : bandRoles )
+      roles.append( role.toStdString() );
+    v["band_roles"] = roles;
+  }
+  if ( !polarizations.isEmpty() )
+  {
+    Json::Value pol( Json::arrayValue );
+    for ( const QString &p : polarizations )
+      pol.append( p.toStdString() );
+    v["polarizations"] = pol;
+  }
+  if ( resolutionMeters > 0.0 )
+    v["resolution_m"] = resolutionMeters;
+  if ( !radiometricState.isEmpty() )
+    v["radiometric_state"] = radiometricState.toStdString();
+  if ( cloudCoverPercent >= 0.0 )
+    v["cloud_cover_percent"] = cloudCoverPercent;
   v["index"] = originalIndex;
   return v;
 }
@@ -120,7 +146,12 @@ TemporalSceneRef TemporalSceneRef::fromJson( const Json::Value &v, QString *erro
       return s;
     }
     s.time = parseAcquisitionTime( QString::fromStdString( v["time"].asString() ) );
-    s.timeSource = QStringLiteral( "descriptor" );
+    // Preserve a serialized time_source ("metadata"/"explicit"/...): the
+    // descriptor round-trip must be byte-stable or record-vs-file descriptor
+    // comparison (fingerprint identity, project reopen) breaks. "descriptor"
+    // is only the default for documents that did not carry the provenance.
+    if ( s.timeSource.isEmpty() )
+      s.timeSource = QStringLiteral( "descriptor" );
   }
   if ( v.isMember( "bands" ) )
   {
@@ -141,6 +172,59 @@ TemporalSceneRef TemporalSceneRef::fromJson( const Json::Value &v, QString *erro
       }
       s.bandOverrides[QString::fromStdString( it.name() )] = ( *it ).asInt();
     }
+  }
+  // Multimodal observation contract (goal §11): optional additive fields.
+  // Unknown keys are ignored (forward compatibility); known keys are
+  // type-checked so a malformed contract fails loudly instead of silently
+  // degrading to the optical default.
+  if ( !requireStr( "modality", &s.modality ) || !requireStr( "sensor", &s.sensor )
+       || !requireStr( "radiometric_state", &s.radiometricState ) )
+    return s;
+  const auto requireStrList = [&]( const char *key, QStringList *out ) {
+    if ( !v.isMember( key ) )
+      return true;
+    if ( !v[key].isArray() )
+    {
+      if ( error )
+        *error = QStringLiteral( "scene '%1' must be an array of strings" )
+                     .arg( QLatin1String( key ) );
+      return false;
+    }
+    for ( const auto &item : v[key] )
+    {
+      if ( !item.isString() )
+      {
+        if ( error )
+          *error = QStringLiteral( "scene '%1' must be an array of strings" )
+                       .arg( QLatin1String( key ) );
+        return false;
+      }
+      out->append( QString::fromStdString( item.asString() ) );
+    }
+    return true;
+  };
+  if ( !requireStrList( "band_roles", &s.bandRoles )
+       || !requireStrList( "polarizations", &s.polarizations ) )
+    return s;
+  if ( v.isMember( "resolution_m" ) )
+  {
+    if ( !v["resolution_m"].isNumeric() )
+    {
+      if ( error )
+        *error = QStringLiteral( "scene 'resolution_m' must be a number" );
+      return s;
+    }
+    s.resolutionMeters = v["resolution_m"].asDouble();
+  }
+  if ( v.isMember( "cloud_cover_percent" ) )
+  {
+    if ( !v["cloud_cover_percent"].isNumeric() )
+    {
+      if ( error )
+        *error = QStringLiteral( "scene 'cloud_cover_percent' must be a number" );
+      return s;
+    }
+    s.cloudCoverPercent = v["cloud_cover_percent"].asDouble();
   }
   return s;
 }

@@ -1,0 +1,14 @@
+{
+  "id" : "gdal_tools:gdal_sieve",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "gdal_sieve",
+    "sieve",
+    "polygon",
+    "filter",
+    "gdal"
+  ],
+  "task" : ""
+}

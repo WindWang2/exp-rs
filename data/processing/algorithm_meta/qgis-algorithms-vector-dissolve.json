@@ -1,0 +1,12 @@
+{
+  "id" : "qgis_algorithms:vector_dissolve",
+  "input" : "vector",
+  "output" : "vector",
+  "tags" : 
+  [
+    "dissolve",
+    "merge",
+    "combine"
+  ],
+  "task" : ""
+}

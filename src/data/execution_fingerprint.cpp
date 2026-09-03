@@ -272,7 +272,30 @@ ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
 ExecutionResultCache &ExecutionResultCache::instance()
 {
   static ExecutionResultCache cache;
+  // Production gate (#667): the cache is opt-in per process via
+  // SICNU_EXECUTION_CACHE so default runs keep byte-identical execution
+  // semantics; hosts that want incremental hits flip the env (or call
+  // setEnabled directly, e.g. tests and an explicit CLI flag).
+  static bool envApplied = false;
+  if ( !envApplied )
+  {
+    envApplied = true;
+    if ( !cache.isEnabled() && executionCacheEnabledFromEnv() )
+      cache.setEnabled( true );
+  }
   return cache;
+}
+
+bool executionCacheEnabledFromEnv()
+{
+  // Same flag vocabulary as envFlagEnabled (src/agent/env_flag.h), kept local
+  // so the data layer does not depend on the agent module.
+  const QByteArray v = qgetenv( "SICNU_EXECUTION_CACHE" );
+  if ( v.isEmpty() )
+    return false;
+  const QString s = QString::fromUtf8( v ).trimmed().toLower();
+  return s == QLatin1String( "1" ) || s == QLatin1String( "true" )
+         || s == QLatin1String( "yes" ) || s == QLatin1String( "on" );
 }
 
 void ExecutionResultCache::setEnabled( bool on )

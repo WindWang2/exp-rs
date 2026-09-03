@@ -1,0 +1,12 @@
+{
+  "id" : "rs:sentinel2_import",
+  "input" : "",
+  "output" : "raster",
+  "tags" : 
+  [
+    "sentinel-2",
+    "import",
+    "data-format"
+  ],
+  "task" : ""
+}

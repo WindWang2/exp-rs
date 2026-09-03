@@ -1,0 +1,12 @@
+{
+  "id" : "rs:change_cva_angle",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "change-detection",
+    "cva",
+    "directional"
+  ],
+  "task" : ""
+}

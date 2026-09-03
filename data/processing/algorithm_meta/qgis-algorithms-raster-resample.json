@@ -1,0 +1,12 @@
+{
+  "id" : "qgis_algorithms:raster_resample",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "raster",
+    "resample",
+    "resolution"
+  ],
+  "task" : ""
+}

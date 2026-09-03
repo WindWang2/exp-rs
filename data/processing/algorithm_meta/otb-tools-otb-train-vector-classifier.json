@@ -1,0 +1,14 @@
+{
+  "id" : "otb_tools:otb_train_vector_classifier",
+  "input" : "vector",
+  "output" : "",
+  "tags" : 
+  [
+    "train",
+    "classifier",
+    "machine learning",
+    "supervised",
+    "otb"
+  ],
+  "task" : ""
+}

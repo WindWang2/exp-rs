@@ -1,0 +1,12 @@
+{
+  "id" : "rs:fusion_pca",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "fusion",
+    "pan-sharpening",
+    "enhancement"
+  ],
+  "task" : ""
+}

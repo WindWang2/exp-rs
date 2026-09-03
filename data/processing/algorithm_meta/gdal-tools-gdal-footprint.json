@@ -1,0 +1,12 @@
+{
+  "id" : "gdal_tools:gdal_footprint",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "gdal",
+    "discovered",
+    "gdal_footprint"
+  ],
+  "task" : ""
+}

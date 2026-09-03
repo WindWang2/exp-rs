@@ -1,0 +1,13 @@
+{
+  "id" : "opencv:mean_blur",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "opencv",
+    "filter",
+    "mean",
+    "box"
+  ],
+  "task" : ""
+}

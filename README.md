@@ -21,7 +21,8 @@ Professional remote sensing analysis platform built on the QGIS engine. Pure C++
 - **Hyperspectral:** MNF, PCA, SAM/SID classification, spectral unmixing, endmember extraction (PPI), RX anomaly detection, spectral resampling, continuum removal
 - **OBIA:** Object-based image analysis with OTB MeanShift segmentation
 - **Processing Toolbox:** 70+ algorithms (GDAL, OTB, QGIS native) over one shared Processing Registry — the same operators power the GUI, TaskCenter DAGs, CLI, and Agent/MCP
-- **Spatial Intelligence (ADR 0122):** stdio MCP server (`--mcp`) with `spatial:*` inspection tools, algorithm capability sidecars, agent workflow submission (`run_workflow`), a model runtime catalog — and a [Pi](https://pi.dev) extension (`pi/exp-rs-spatial.ts`) bridging it all into an external agent runtime
+- **Temporal Workspace (ADR 0125):** temporal collections as first-class workspace records (`temporal:` agent tools + project persistence + workflow caching + provenance + remote COG data references) — streaming multi-temporal operators (`rs:temporal_summary`, `rs:temporal_composite`, `rs:temporal_index_series`, `rs:temporal_trend`, `rs:temporal_anomaly`, `rs:temporal_extract_series`) with a STAC ingestion seam and bounded `O(tile)` memory
+- **Spatial Intelligence (ADR 0122):** stdio MCP server (`--mcp`) with `spatial:*` and `temporal:*` discovery tools, workspace-aware `temporal:` collection management, remote-COG data references (`/vsicurl/`) — plus a model runtime catalog — and a [Pi](https://pi.dev) extension (`pi/exp-rs-spatial.ts` — categories `meta,spatial,data,temporal` by default)
 - **Provenance:** derived-asset lineage in the Data Manager; every derived raster records source, operator, parameters, and time
 - **Layer Properties:** Raster and vector layer dialogs with statistics
 - **Measurement Tools:** Geodesic distance and area measurement
