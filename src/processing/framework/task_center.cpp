@@ -135,6 +135,13 @@ void TaskCenter::shutdown()
         // family) — nothing can fire it anymore.
         QMutexLocker locker( &m_mutex );
         m_completionCallbacks.clear();
+        // Drop the catalog seam: the host may destroy its DataManager before
+        // this singleton (tests destroy the fixture right after
+        // shutdownForTests; at process exit destruction order is not
+        // guaranteed), and a late worker record would dereference the
+        // dangling pointer in taskExecutionFingerprintLocked (adversarial
+        // review of #724). No execution can follow shutdown().
+        m_catalog = nullptr;
     }
 }
 

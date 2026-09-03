@@ -8,6 +8,7 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_run_coordinator.h"
+#include "processing/framework/json_params_converter.h"
 #include "workflow/workflow_types.h"
 #include "workflow/placeholder_grammar.h"
 
@@ -374,6 +375,25 @@ bool RsPipelineRunner::addPythonPluginDirectory( const std::string &dirPath, std
   return true;
 }
 
+bool RsPipelineRunner::ensureCatalogSeams()
+{
+  // Output registration + provenance + the execution cache are CORE run
+  // concerns, not Python-plugin conveniences: the runner owns a DataManager
+  // whenever no external registry was injected (setAssetRegistry), and wires
+  // both process-wide catalog seams on this (the owning) thread. Before this
+  // split, the catalog was only created inside the SICNU_EMBED_PYTHON plugin
+  // bootstrap — a plain --pipeline / --resume run in an OFF build never
+  // registered step outputs or recorded lineage (adversarial review of #724).
+  if ( !m_dataManager )
+  {
+    m_ownedDataManager = std::make_unique<sicnu::data::DataManager>();
+    m_dataManager = m_ownedDataManager.get();
+  }
+  sicnu::TaskCenter::instance().setCatalog( m_dataManager );
+  sicnu::temporal::setWorkspaceCatalog( m_dataManager );
+  return true;
+}
+
 bool RsPipelineRunner::ensurePythonPluginsLoaded()
 {
   if ( m_pythonPluginDirs.empty() )
@@ -428,6 +448,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
   PipelineResult result;
   result.success = false;
 
+  ensureCatalogSeams();
   if ( !ensurePythonPluginsLoaded() )
   {
     result.errorMessage = "Failed to initialize Python plugins";
@@ -651,6 +672,63 @@ void RsPipelineRunner::setAssetRegistry( sicnu::data::DataManager *dataManager )
   m_dataManager = dataManager;
 }
 
+void RsPipelineRunner::registerOutputAsset( const QString &path, const QString &algorithmId,
+                                            const QVariantMap &parameterMap,
+                                            const QString &taskReference )
+{
+  ensureGdalInit();
+  GDALDatasetH ds = GDALOpenEx( path.toUtf8().constData(),
+                                GDAL_OF_READONLY | GDAL_OF_RASTER | GDAL_OF_VECTOR,
+                                nullptr, nullptr, nullptr );
+  if ( !ds )
+  {
+    reportLog( "warning", "Skipping asset registration; output not openable: " +
+                          path.toStdString() );
+    return;
+  }
+  const bool isRaster = GDALGetRasterCount( ds ) > 0;
+  GDALClose( ds );
+
+  // ADR 0023: user-declared final output paths are registered in place as
+  // TaskTemporary assets — no temp->stable move, no DeletableSource ownership.
+  sicnu::data::SourceDescriptor source;
+  source.providerKey = isRaster ? QStringLiteral( "gdal" ) : QStringLiteral( "ogr" );
+  source.canonicalSource = path;
+
+  sicnu::data::RegisterRequest request;
+  request.source = source;
+  request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
+  // Re-runs replace the bytes at this stable path: bump the revision and
+  // emit assetChanged like OutputCommitter's commit path (#687/#703 review
+  // P2 — a silent dedup here left displayed layers stale).
+  request.notifyUpdateOnReuse = true;
+
+  const auto registered = m_dataManager->registerSource( request );
+  if ( registered.assetId.isNull() )
+  {
+    reportLog( "warning", "Asset registration failed for: " + path.toStdString() );
+    return;
+  }
+  reportLog( "info", "Registered step output asset: " + path.toStdString() );
+
+  // Provenance is attached after successful registration (ADR 0023). The
+  // step's parameter paths are resolved against the catalog so the record
+  // carries real derivedFrom edges (#698); paths that do not resolve are
+  // recorded in unresolvedInputPaths, never dropped silently. The step's
+  // own output path is excluded (#718).
+  const sicnu::data::InputLineage lineage =
+    sicnu::data::resolveInputLineage(
+        m_dataManager,
+        sicnu::data::findInputPathsInParams( parameterMap, { path } ) );
+  const sicnu::data::DerivationRecord derivation =
+    sicnu::data::makeTaskDerivation( algorithmId,
+                                     QJsonObject::fromVariantMap( parameterMap ),
+                                     taskReference,
+                                     lineage.inputs,
+                                     lineage.unresolvedPaths );
+  m_dataManager->attachDerivationRecord( registered.assetId, derivation );
+}
+
 void RsPipelineRunner::registerStepOutputs( long pipelineId )
 {
   if ( !m_dataManager )
@@ -667,58 +745,8 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
     const auto task = taskCenter.getTaskInfo( taskId );
     if ( task.status != sicnu::TaskStatus::Completed || task.outputLayerPath.isEmpty() )
       continue;
-
-    const QString path = task.outputLayerPath;
-    ensureGdalInit();
-    GDALDatasetH ds = GDALOpenEx( path.toUtf8().constData(),
-                                 GDAL_OF_READONLY | GDAL_OF_RASTER | GDAL_OF_VECTOR,
-                                 nullptr, nullptr, nullptr );
-    if ( !ds )
-    {
-      reportLog( "warning", "Skipping asset registration; output not openable: " +
-                            path.toStdString() );
-      continue;
-    }
-    const bool isRaster = GDALGetRasterCount( ds ) > 0;
-    GDALClose( ds );
-
-    // ADR 0023: user-declared final output paths are registered in place as
-    // TaskTemporary assets — no temp->stable move, no DeletableSource ownership.
-    sicnu::data::SourceDescriptor source;
-    source.providerKey = isRaster ? QStringLiteral( "gdal" ) : QStringLiteral( "ogr" );
-    source.canonicalSource = path;
-
-    sicnu::data::RegisterRequest request;
-    request.source = source;
-    request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
-    // Re-runs replace the bytes at this stable path: bump the revision and
-    // emit assetChanged like OutputCommitter's commit path (#687/#703 review
-    // P2 — a silent dedup here left displayed layers stale).
-    request.notifyUpdateOnReuse = true;
-
-    const auto registered = m_dataManager->registerSource( request );
-    if ( registered.assetId.isNull() )
-    {
-      reportLog( "warning", "Asset registration failed for: " + path.toStdString() );
-      continue;
-    }
-
-    // Provenance is attached after successful registration (ADR 0023). The
-    // step's parameter paths are resolved against the catalog so the record
-    // carries real derivedFrom edges (#698); paths that do not resolve are
-    // recorded in unresolvedInputPaths, never dropped silently. The step's
-    // own output path is excluded (#718).
-    const sicnu::data::InputLineage lineage =
-      sicnu::data::resolveInputLineage(
-          m_dataManager,
-          sicnu::data::findInputPathsInParams( task.parameterMap, { path } ) );
-    const sicnu::data::DerivationRecord derivation =
-      sicnu::data::makeTaskDerivation( task.algorithmId,
-                                       QJsonObject::fromVariantMap( task.parameterMap ),
-                                       QString::number( taskId ),
-                                       lineage.inputs,
-                                       lineage.unresolvedPaths );
-    m_dataManager->attachDerivationRecord( registered.assetId, derivation );
+    registerOutputAsset( task.outputLayerPath, task.algorithmId, task.parameterMap,
+                         QString::number( taskId ) );
   }
 }
 
@@ -756,6 +784,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
   PipelineResult result;
   result.success = false;
 
+  ensureCatalogSeams();
   if ( !ensurePythonPluginsLoaded() )
   {
     result.errorMessage = "Failed to initialize the headless plugin stack";
@@ -830,7 +859,36 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
         if ( result.success )
         {
           if ( m_dataManager )
+          {
             registerStepOutputs( pipelineId );
+            // Checkpoint-served steps (completed before the crash) have no
+            // task in the fresh resume pipeline, so registerStepOutputs above
+            // never sees them — yet their outputs were produced by real
+            // executions and the downstream lineage of the resumed chain
+            // references them. Register each from the run aggregate
+            // (adversarial review of #724: without this, a resumed run's
+            // pre-crash outputs never became assets and their provenance
+            // edges were permanently unresolved).
+            const auto freshInfo = sicnu::TaskCenter::instance().getPipelineInfo( pipelineId );
+            for ( const auto &plan : run->stepPlans() )
+            {
+              if ( plan.status != "Completed" || plan.outputLayerPath.empty() )
+                continue;
+              if ( freshInfo.stepToTaskId.contains( plan.stepId ) )
+                continue; // freshly executed: registered above
+              const QString path = QString::fromStdString( plan.outputLayerPath );
+              QVariantMap parameterMap;
+              const QVariant paramsVariant =
+                sicnu::processing::jsonValueToVariant( plan.resolvedParams );
+              if ( paramsVariant.typeId() == QMetaType::Type::QVariantMap )
+                parameterMap = paramsVariant.toMap();
+              registerOutputAsset( path, QString::fromStdString( plan.operatorId ),
+                                   parameterMap,
+                                   QStringLiteral( "resumed:%1:%2" ).arg(
+                                     QString::fromStdString( runId ),
+                                     QString::fromStdString( plan.stepId ) ) );
+            }
+          }
           reportLog( "info", "Resumed run completed: " + runId );
         }
         return result;
