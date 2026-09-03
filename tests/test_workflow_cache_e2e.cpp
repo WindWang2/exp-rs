@@ -22,6 +22,8 @@
 
 #include <atomic>
 #include <chrono>
+
+#include <csignal>
 #include <cmath>
 #include <map>
 #include <thread>
@@ -49,9 +51,27 @@ using namespace sicnu::workflow;
 
 namespace {
 
-void writeTwoBandRaster( const QString &path, int W, int H )
+/// Extracts the "status" value of the StepPlan whose "stepId" follows @a
+/// stepIdToken (format: "stepId" : "<id>", from the checkpoint's indented
+/// JSON). Empty when the step is not in the checkpoint.
+QByteArray statusOf( const QByteArray &text, const char *stepIdToken )
 {
-    ::ensureGdalInit();
+    const QByteArray stepKey = QByteArray( "\"stepId\" : " ) + stepIdToken;
+    const int stepPos = text.indexOf( stepKey );
+    if ( stepPos < 0 )
+        return {};
+    const int statusPos = text.indexOf( "\"status\" : ", stepPos );
+    if ( statusPos < 0 )
+        return {};
+    const int valueStart = statusPos + static_cast<int>( QByteArray( "\"status\" : " ).size() ) + 1;
+    const int valueEnd = text.indexOf( '"', valueStart );
+    if ( valueEnd < 0 )
+        return {};
+    return text.mid( valueStart, valueEnd - valueStart );
+}
+
+void writeTwoBandRaster( const QString &path, int W, int H )
+{    ::ensureGdalInit();
     GDALDriver *drv = GetGDALDriverManager()->GetDriverByName( "GTiff" );
     REQUIRE( drv != nullptr );
     GDALDataset *ds = drv->Create( path.toUtf8().constData(), W, H, 2, GDT_Float32, nullptr );
@@ -444,7 +464,15 @@ TEST_CASE( "CLI process crash mid-pipeline recovers and resumes without re-runni
     QStringList checkpoints = QDir( checkpointDir ).entryList( { QStringLiteral( "checkpoint_*.json" ) } );
     REQUIRE_FALSE( checkpoints.isEmpty() );
 
-    // Phase 2 — a FRESH process lists the run (recovery marks it interrupted).
+    // Phase 2 — a FRESH process lists the run. The listing is strictly
+    // read-only (#727): the stale owner is DISPLAYED as interrupted; the
+    // on-disk checkpoint is reconciled only under the lock on resume.
+    const QString crashedCheckpoint = QDir( checkpointDir ).filePath( checkpoints.front() );
+    QFile cpBefore( crashedCheckpoint );
+    REQUIRE( cpBefore.open( QIODevice::ReadOnly ) );
+    const QByteArray cpBytesBefore = cpBefore.readAll();
+    cpBefore.close();
+
     QProcess lister;
     lister.setProcessEnvironment( cliEnv() );
     lister.start( cliBinary, { QStringLiteral( "--list-runs" ) } );
@@ -453,6 +481,11 @@ TEST_CASE( "CLI process crash mid-pipeline recovers and resumes without re-runni
     CAPTURE( listing.toStdString() );
     REQUIRE( lister.exitCode() == 0 );
     REQUIRE( listing.contains( QStringLiteral( "interrupted" ), Qt::CaseInsensitive ) );
+
+    QFile cpAfter( crashedCheckpoint );
+    REQUIRE( cpAfter.open( QIODevice::ReadOnly ) );
+    REQUIRE( cpAfter.readAll() == cpBytesBefore ); // listing did not mutate
+    cpAfter.close();
 
     // Extract the run id from the listing (first token of its line).
     QString runId;
@@ -496,5 +529,197 @@ TEST_CASE( "CLI process crash mid-pipeline recovers and resumes without re-runni
             ++registeredOutputs;
     REQUIRE( registeredOutputs == 3 );
     REQUIRE( resumeOut.contains( QStringLiteral( "Asset registration failed" ) ) == false );
+}
+
+TEST_CASE( "Cross-process ownership: --list-runs is read-only and --resume "
+           "refuses a live owner (#727)",
+           "[workflow][v2][recovery][ownership][e2e][cli]" )
+{
+    const QString cliBinary = QStringLiteral( SICNU_CLI_BINARY );
+    if ( !QFileInfo::exists( cliBinary ) )
+    {
+        SUCCEED( "CLI binary not built — skipping subprocess ownership E2E" );
+        return;
+    }
+
+    QTemporaryDir homeDir; // HOME override isolates ~/.rs_studio/checkpoints
+    QTemporaryDir workDir;
+    REQUIRE( homeDir.isValid() );
+    REQUIRE( workDir.isValid() );
+
+    const QString inputPath = workDir.filePath( "input.tif" );
+    const QString aPath = workDir.filePath( "a_ndvi.tif" );
+    const QString bPath = workDir.filePath( "b_maj.tif" );
+    const QString cPath = workDir.filePath( "c_maj.tif" );
+    // 2048² makes step B (kernel 49) take several seconds — the ownership
+    // phases (list + refused resume) must fit inside B's runtime window,
+    // which is then also bracketed by the SIGSTOP of P1.
+    writeTwoBandRaster( inputPath, 2048, 2048 );
+
+    // A → B → C: B is deliberately expensive so P1 stays busy until the
+    // test freezes it (SIGSTOP) right after A's completion is checkpointed.
+    Json::Value steps( Json::arrayValue );
+    const auto addStep = [&]( const char *id, const char *op, const Json::Value &params ) {
+        Json::Value s( Json::objectValue );
+        s["id"] = id;
+        s["operator"] = op;
+        s["params"] = params;
+        steps.append( s );
+    };
+    {
+        Json::Value p( Json::objectValue );
+        p["input"] = inputPath.toStdString();
+        p["output"] = aPath.toStdString();
+        p["index"] = "NDVI";
+        p["nir"] = 1;
+        p["red"] = 2;
+        addStep( "a", "rs:spectral_index", p );
+    }
+    {
+        Json::Value p( Json::objectValue );
+        p["input"] = "$a.output";
+        p["output"] = bPath.toStdString();
+        p["kernel"] = 49;
+        addStep( "b", "rs:majority_filter", p );
+    }
+    {
+        Json::Value p( Json::objectValue );
+        p["input"] = "$b.output";
+        p["output"] = cPath.toStdString();
+        p["kernel"] = 3;
+        addStep( "c", "rs:majority_filter", p );
+    }
+    Json::Value pipeline( Json::objectValue );
+    pipeline["title"] = "ownership e2e";
+    pipeline["steps"] = steps;
+
+    const QString pipelinePath = workDir.filePath( "pipeline.json" );
+    {
+        QFile f( pipelinePath );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        Json::StreamWriterBuilder w;
+        f.write( Json::writeString( w, pipeline ).c_str() );
+    }
+
+    const auto cliEnv = [&homeDir]() {
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert( "HOME", homeDir.path() );
+        env.insert( "QT_QPA_PLATFORM", "offscreen" );
+        env.remove( "SICNU_EXECUTION_CACHE" );
+        return env;
+    };
+
+    const QString checkpointDir = homeDir.filePath( ".rs_studio/checkpoints" );
+
+    // Phase 1 — P1 starts the run. Deterministic marker: the checkpoint shows
+    // step "a" checkpointed-completed while "b" has not finished yet; P1 is
+    // then SIGSTOPed. A stopped process is ALIVE (its open descriptors keep
+    // the run lock held) but makes no progress, so the ownership assertions
+    // below race against nothing.
+    QProcess p1;
+    p1.setProcessEnvironment( cliEnv() );
+    p1.start( cliBinary, { QStringLiteral( "--pipeline" ), pipelinePath } );
+    REQUIRE( p1.waitForStarted( 10000 ) );
+
+    QString checkpointFile;
+    QString checkpointBefore;
+    const auto markerDeadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds( SICNU_TEST_TIME_LIMIT_S );
+    while ( std::chrono::steady_clock::now() < markerDeadline )
+    {
+        if ( p1.state() != QProcess::Running )
+            FAIL( "P1 exited before its run checkpoint appeared" );
+        const QStringList files = QDir( checkpointDir ).entryList(
+            { QStringLiteral( "checkpoint_*.json" ) } );
+        for ( const QString &file : files )
+        {
+            const QString full = QDir( checkpointDir ).filePath( file );
+            QFile f( full );
+            if ( !f.open( QIODevice::ReadOnly ) )
+                continue;
+            const QByteArray text = f.readAll();
+            // Marker: "a" checkpointed-completed, "b" NOT yet completed (read
+            // atomically: checkpoint saves are atomic renames). Splitting the
+            // statuses per step keeps the check independent of step order in
+            // the JSON.
+            const QByteArray aStatus = statusOf( text, "\"a\"" );
+            const QByteArray bStatus = statusOf( text, "\"b\"" );
+            if ( aStatus.contains( "Completed" ) && !bStatus.contains( "Completed" )
+                 && text.contains( "\"state\" : \"Running\"" ) )
+            {
+                checkpointFile = full;
+                checkpointBefore = QString::fromUtf8( text );
+                break;
+            }
+        }
+        if ( !checkpointFile.isEmpty() )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+    }
+    INFO( "checkpoint: " << checkpointFile.toStdString() );
+    REQUIRE_FALSE( checkpointFile.isEmpty() );
+    ::kill( p1.processId(), SIGSTOP ); // freeze P1: alive, lock held, no progress
+    const QString runId = QFileInfo( checkpointFile ).fileName().mid(
+        QStringLiteral( "checkpoint_" ).size(),
+        QFileInfo( checkpointFile ).fileName().size()
+            - QStringLiteral( "checkpoint_" ).size()
+            - QStringLiteral( ".json" ).size() );
+    REQUIRE_FALSE( runId.isEmpty() );
+
+    // Phase 2 — P2 --list-runs must be strictly READ-ONLY: the live run is
+    // shown running (with its owner pid) and its checkpoint bytes are never
+    // rewritten to Interrupted by a listing.
+    QProcess lister;
+    lister.setProcessEnvironment( cliEnv() );
+    lister.start( cliBinary, { QStringLiteral( "--list-runs" ) } );
+    REQUIRE( lister.waitForFinished( 60000 ) );
+    const QString listing = QString::fromUtf8( lister.readAllStandardOutput() );
+    CAPTURE( listing.toStdString() );
+    REQUIRE( lister.exitCode() == 0 );
+    REQUIRE( listing.contains( runId ) );
+    REQUIRE( listing.contains( QStringLiteral( "(alive)" ) ) );
+    REQUIRE_FALSE( listing.contains( QStringLiteral( "interrupted" ), Qt::CaseInsensitive ) );
+
+    QFile afterList( checkpointFile );
+    REQUIRE( afterList.open( QIODevice::ReadOnly ) );
+    REQUIRE( QString::fromUtf8( afterList.readAll() ) == checkpointBefore );
+    afterList.close();
+
+    // Phase 3 — P3 --resume of the LIVE run is refused; P1 is unaffected.
+    QProcess resumer;
+    resumer.setProcessEnvironment( cliEnv() );
+    resumer.start( cliBinary, { QStringLiteral( "--resume" ), runId } );
+    REQUIRE( resumer.waitForFinished( SICNU_TEST_TIME_LIMIT_S * 1000 ) );
+    const QString resumeErr = QString::fromUtf8( resumer.readAllStandardError() );
+    CAPTURE( resumeErr.toStdString() );
+    REQUIRE( resumer.exitCode() != 0 );
+    REQUIRE( ( resumeErr.contains( QStringLiteral( "Running" ) )
+               || resumeErr.contains( QStringLiteral( "owned" ) ) ) );
+    REQUIRE( p1.state() != QProcess::NotRunning ); // P1 (stopped) still owns the run
+
+    QFile afterRefusedResume( checkpointFile );
+    REQUIRE( afterRefusedResume.open( QIODevice::ReadOnly ) );
+    REQUIRE( QString::fromUtf8( afterRefusedResume.readAll() ) == checkpointBefore );
+    afterRefusedResume.close();
+
+    // Phase 4 — P1 (stopped) is SIGKILLed: the lock drops with the process,
+    // the run becomes stale, and a fresh process may resume it.
+    const QDateTime aMtimeBefore = QFileInfo( aPath ).lastModified();
+    p1.kill();
+    REQUIRE( p1.waitForFinished( 10000 ) );
+    REQUIRE( p1.exitStatus() == QProcess::CrashExit );
+
+    QProcess rescuer;
+    rescuer.setProcessEnvironment( cliEnv() );
+    rescuer.start( cliBinary, { QStringLiteral( "--resume" ), runId } );
+    REQUIRE( rescuer.waitForFinished( SICNU_TEST_TIME_LIMIT_S * 1000 ) );
+    const QString rescueOut = QString::fromUtf8( rescuer.readAllStandardOutput() );
+    const QString rescueErr = QString::fromUtf8( rescuer.readAllStandardError() );
+    CAPTURE( rescueOut.toStdString() );
+    CAPTURE( rescueErr.toStdString() );
+    REQUIRE( rescuer.exitCode() == 0 );
+    REQUIRE( QFileInfo::exists( cPath ) );
+    // The pre-crash completed step was NOT re-executed.
+    REQUIRE( QFileInfo( aPath ).lastModified() == aMtimeBefore );
 }
 #endif // SICNU_CLI_BINARY
