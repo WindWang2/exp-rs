@@ -8,6 +8,8 @@
 #include "processing/gdal/gdal_grid_compat.h"
 #include "data/raster_grid_compat.h"
 #include "processing/algorithms/temporal/temporal_preflight.h"
+#include "processing/algorithms/temporal/temporal_workspace.h"
+#include "data/data_manager.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QCheckBox>
@@ -513,10 +515,97 @@ bool TemporalAnalysisDialog::validateInputs()
   return true;
 }
 
+sicnu::data::DataManager *TemporalAnalysisDialog::dataManager() const
+{
+  if ( m_dataManager )
+    return m_dataManager;
+  return sicnu::temporal::workspaceCatalog();
+}
+
+bool TemporalAnalysisDialog::loadCollection( const sicnu::data::CollectionId &id )
+{
+  auto *dm = dataManager();
+  if ( !dm )
+    return false;
+  sicnu::temporal::TemporalCollection col;
+  QString err;
+  if ( !sicnu::temporal::loadCollectionFromWorkspace( *dm, id, &col, &err ) )
+    return false;
+
+  m_activeCollectionId = id;
+  m_sceneTable->setRowCount( 0 );
+  for ( const auto &scene : col.scenes() )
+  {
+    const int row = m_sceneTable->rowCount();
+    m_sceneTable->insertRow( row );
+    m_sceneTable->setItem( row, ColPath, new QTableWidgetItem( scene.path ) );
+    m_sceneTable->setItem( row, ColTime, new QTableWidgetItem( scene.time.toIso() ) );
+    m_sceneTable->setItem( row, ColPlatform, new QTableWidgetItem( scene.platform ) );
+    m_sceneTable->setItem( row, ColStatus, new QTableWidgetItem( tr( "已加载" ) ) );
+  }
+  refreshStatusColumn();
+  return true;
+}
+
+sicnu::temporal::TemporalCollection TemporalAnalysisDialog::buildCollectionFromUi() const
+{
+  sicnu::temporal::TemporalCollection col;
+  for ( int row = 0; row < m_sceneTable->rowCount(); ++row )
+  {
+    const QString path = m_sceneTable->item( row, ColPath ) ? m_sceneTable->item( row, ColPath )->text().trimmed() : QString();
+    if ( path.isEmpty() )
+      continue;
+    const QString timeStr = m_sceneTable->item( row, ColTime ) ? m_sceneTable->item( row, ColTime )->text().trimmed() : QString();
+    const QString platform = m_sceneTable->item( row, ColPlatform ) ? m_sceneTable->item( row, ColPlatform )->text().trimmed() : QString();
+
+    sicnu::temporal::TemporalSceneRef scene;
+    scene.path = path;
+    if ( !timeStr.isEmpty() )
+    {
+      scene.time = sicnu::temporal::parseAcquisitionTime( timeStr );
+      scene.timeSource = QStringLiteral( "explicit" );
+    }
+    else
+    {
+      QString inspectErr;
+      sicnu::temporal::inspectScene( path, QString(), &scene, &inspectErr );
+    }
+    if ( !platform.isEmpty() )
+      scene.platform = platform;
+    scene.originalIndex = row;
+    col.scenes().push_back( std::move( scene ) );
+  }
+  col.sortScenes();
+  return col;
+}
+
 void TemporalAnalysisDialog::onRun()
 {
   Json::Value params( Json::objectValue );
-  params["scenes"] = buildScenesJson();
+  auto *dm = dataManager();
+  const auto collection = buildCollectionFromUi();
+
+  if ( dm && !collection.empty() )
+  {
+    QString colName = tr( "时序分析集合 %1" ).arg( QDateTime::currentDateTime().toString( QStringLiteral( "yyyy-MM-dd hh:mm" ) ) );
+    sicnu::data::CollectionId existingId = m_activeCollectionId.value_or( sicnu::data::CollectionId() );
+    QString saveErr;
+    const sicnu::data::CollectionId colId = sicnu::temporal::saveCollectionToWorkspace( *dm, colName, collection, existingId, &saveErr );
+    if ( !colId.isNull() )
+    {
+      m_activeCollectionId = colId;
+      params["collection"] = colId.toString().toStdString();
+    }
+    else
+    {
+      params["scenes"] = buildScenesJson();
+    }
+  }
+  else
+  {
+    params["scenes"] = buildScenesJson();
+  }
+
   params["output"] = outputPath().toStdString();
   const QString role = m_bandRoleCombo->currentData().toString();
   if ( !role.isEmpty() )

@@ -518,6 +518,8 @@ void QgisDesktopWindow::openMosaicDialog()
 void QgisDesktopWindow::openTemporalAnalysisDialog()
 {
     TemporalAnalysisDialog dialog(this);
+    if (m_projectContext)
+        dialog.setDataManager(&m_projectContext->dataManager());
     if (dialog.exec() == QDialog::Accepted && dialog.wantsRasterLoad())
     {
         // Load every produced raster: grouped composite runs write one file

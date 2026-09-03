@@ -32,6 +32,8 @@
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "data/data_manager.h"
 #include "dialogs/dialog_help_catalog.h"
+#include "dialogs/temporal_analysis_dialog.h"
+#include "processing/algorithms/temporal/temporal_preflight.h"
 
 namespace sicnu
 {
@@ -829,12 +831,47 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
         return;
 
       QMenu menu( this );
+      QAction *analyzeAction = menu.addAction( tr( "时间序列分析…" ) );
+      analyzeAction->setToolTip( tr( "在时间序列分析对话框中打开并处理该集合。" ) );
+      QAction *preflightAction = menu.addAction( tr( "预检集合" ) );
+      preflightAction->setToolTip( tr( "检查该集合场景的栅格对齐、时间与平台一致性。" ) );
+      menu.addSeparator();
       QAction *describeAction = menu.addAction( tr( "查看集合信息" ) );
       describeAction->setToolTip( tr( "显示该时间相集合的场景数、时间范围与平台。" ) );
       QAction *removeAction = menu.addAction( tr( "移除集合记录" ) );
       removeAction->setToolTip( tr( "从工作区移除该记录（不删除任何场景数据）。" ) );
       QAction *chosen = menu.exec( m_tree->viewport()->mapToGlobal( pos ) );
-      if ( chosen == describeAction )
+      if ( chosen == analyzeAction )
+      {
+        TemporalAnalysisDialog dialog( this );
+        dialog.setDataManager( m_dataManager );
+        dialog.loadCollection( *recordId );
+        dialog.exec();
+      }
+      else if ( chosen == preflightAction )
+      {
+        sicnu::temporal::TemporalCollection parsed;
+        QString parseError;
+        if ( sicnu::temporal::collectionFromDescriptorText( record->descriptor, &parsed, &parseError ) )
+        {
+          sicnu::temporal::PreflightOptions opts;
+          const auto report = sicnu::temporal::runPreflight( parsed, opts );
+          QString repText = tr( "预检结果：%1\n场景总数：%2\n有效时间：%3\n" )
+                              .arg( report.ok ? tr( "通过" ) : tr( "未通过" ) )
+                              .arg( report.sceneCount )
+                              .arg( report.validTimeCount );
+          if ( !report.errors.isEmpty() )
+            repText += tr( "\n错误：\n- " ) + report.errors.join( QStringLiteral( "\n- " ) );
+          if ( !report.warnings.isEmpty() )
+            repText += tr( "\n警告：\n- " ) + report.warnings.join( QStringLiteral( "\n- " ) );
+          QMessageBox::information( this, tr( "集合预检报告" ), repText );
+        }
+        else
+        {
+          QMessageBox::warning( this, tr( "预检失败" ), tr( "无法解析集合描述符：%1" ).arg( parseError ) );
+        }
+      }
+      else if ( chosen == describeAction )
       {
         QString summary = tr( "名称：%1\n修订：%2" ).arg( record->displayName )
                             .arg( record->revision );
