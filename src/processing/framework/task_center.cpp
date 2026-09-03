@@ -14,12 +14,17 @@
 #include "jobs/job_engine.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/placeholder_grammar.h"
+#include "workflow/artifact_gc.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "data/data_manager.h"
 
 #include <QCryptographicHash>
+#include <QDirIterator>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QThread>
 
@@ -56,8 +61,10 @@ static QString findOutputPathInParams( const QVariantMap &params )
     }
     for ( auto it = params.begin(); it != params.end(); ++it )
     {
-        if ( it.key().contains( QStringLiteral( "OUTPUT" ), Qt::CaseInsensitive )
-             || it.key().contains( QStringLiteral( "RESULT" ), Qt::CaseInsensitive ) )
+        // ONE shared vocabulary (sicnu::data::isOutputVocabularyKey, #726) so
+        // output detection and the fingerprint's output-key filter cannot
+        // drift apart.
+        if ( sicnu::data::isOutputVocabularyKey( it.key() ) )
         {
             const QString path = pathIfValid( it.value() );
             if ( !path.isEmpty() )
@@ -120,6 +127,9 @@ void TaskCenter::shutdown()
                                               : QStringLiteral( "Canceled: application is shutting down" );
             info.endTime = QDateTime::currentDateTimeUtc();
             info.logBuffer.append( info.errorMessage );
+            m_taskFingerprints.remove( id );
+            m_taskFingerprintParams.remove( id );
+            m_taskChainedEdges.remove( id );
             updatePipelineForTaskLocked( id );
             queueTaskUpdatedLocked( id );
             toFinalize.append( id );
@@ -167,6 +177,10 @@ void TaskCenter::cancelAllForShutdown()
 TaskCenter::~TaskCenter()
 {
     shutdown();
+    // Process teardown: the provider lambda calls into ExecutionResultCache
+    // (a separate TU's singleton whose destruction order is unspecified) —
+    // stop GC sweeps from reaching it once TaskCenter is gone.
+    sicnu::workflow::ArtifactGC::installProtectedArtifactProvider( {} );
 }
 
 void TaskCenter::shutdownForTests()
@@ -187,6 +201,8 @@ void TaskCenter::shutdownForTests()
         m_estimateMbCache.clear(); // task ids restart at 1: stale estimates must not leak across tests
         m_completionCallbacks.clear();
         m_taskFingerprints.clear();
+        m_taskFingerprintParams.clear();
+        m_taskChainedEdges.clear();
         m_nextTaskId = 1;
         m_nextPipelineId = 1;
         m_waitCondition.wakeAll();
@@ -205,6 +221,14 @@ TaskCenter::TaskCenter()
     // Default the RAM budget to the RSS watermark so the new resource-aware gate
     // is consistent with (not independent of) the existing memory-pressure gate.
     m_resourceBudget.setBudgetMb( m_resourceMonitor.memoryLimitMb() );
+    // Cache↔GC lifecycle contract (#726): artifacts the execution cache still
+    // holds are protected from ArtifactGC sweeps. TaskCenter is the process
+    // singleton every execution path touches, so installing here (instead of
+    // per-host) keeps the seam alive for GUI, MCP, CLI and tests alike.
+    sicnu::workflow::ArtifactGC::installProtectedArtifactProvider(
+        []() {
+            return sicnu::data::ExecutionResultCache::instance().cachedArtifacts();
+        } );
 }
 
 ProviderResourceProfile TaskCenter::resolveResourceProfile( const QString &algorithmId ) const
@@ -805,6 +829,39 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         m_tasks[id] = info;
         queueTaskAddedLocked( id );
 
+        // Submission-time execution fingerprint (#726): computed ONCE here on
+        // the submitting thread (catalog affinity holds), so downstream /
+        // re-admitted tasks never fingerprint on JobEngine worker threads. A
+        // placeholder reference to a parent task chains the parent's
+        // fingerprint as the input identity.
+        const QList<long> fingerprintParents = info.parentTaskIds;
+        UpstreamResolver resolver =
+            [this, fingerprintParents]( const sicnu::workflow::PlaceholderRef &ref,
+                                        const QString & ) -> UpstreamResolution {
+            for ( long parentId : fingerprintParents )
+            {
+                const auto parentIt = m_tasks.constFind( parentId );
+                if ( parentIt == m_tasks.constEnd() )
+                    continue;
+                const AlgorithmTaskInfo &parent = parentIt.value();
+                bool isMatch = false;
+                if ( !parent.stepId.isEmpty() && ref.stepId == parent.stepId.toStdString() )
+                    isMatch = true;
+                else if ( ref.parentTaskId == parentId || ref.isParentKeyword )
+                    isMatch = true;
+                if ( !isMatch )
+                    continue;
+                UpstreamResolution upstream;
+                upstream.producerTaskId = parentId;
+                upstream.declaredOutputPath = findOutputPathInParams( parent.parameterMap );
+                if ( upstream.declaredOutputPath.isEmpty() )
+                    upstream.declaredOutputPath = parent.outputLayerPath;
+                return upstream;
+            }
+            return {};
+        };
+        computeAndRecordSubmissionFingerprintLocked( id, resolver );
+
         processNextQueuedTasks();
     }
     flushPendingLaunches();
@@ -1118,6 +1175,13 @@ void TaskCenter::processNextQueuedTasks()
 
         applyPlaceholdersForTask( id );
 
+        // Dispatch-time verification (#726): the submission-time fingerprint
+        // was computed over statically-resolved parameters; if the real
+        // substitution diverged, the fingerprint no longer describes this
+        // execution — drop it (conservative miss). Pure in-memory comparison:
+        // safe on worker threads, no catalog access.
+        verifyDispatchFingerprintLocked( id );
+
         if ( !m_tasks[id].autoDispatch )
             continue;
         if ( !m_tasks[id].jobId.empty() )
@@ -1170,17 +1234,12 @@ void TaskCenter::processNextQueuedTasks()
             continue;
         }
 
-        // Revision-aware execution fingerprint (#667): computed while the
-        // params are final (post placeholder substitution) and BEFORE
-        // admission, so flushPendingLaunches can serve an identical prior
-        // execution instead of submitting. Invalid ⇒ not cacheable.
-        {
-            const sicnu::data::ExecutionFingerprint fp = taskExecutionFingerprintLocked( id );
-            if ( fp.isValid() )
-                m_taskFingerprints[id] = fp;
-            else
-                m_taskFingerprints.remove( id );
-        }
+        // Execution fingerprint (#667/#726): computed once at SUBMISSION time
+        // and verified above after placeholder substitution. Admission never
+        // touches the catalog, so downstream steps admitted on JobEngine
+        // worker threads keep their recorded fingerprint (a cold chained
+        // pipeline acquires a usable identity for every deterministic step in
+        // its first run).
 
         m_tasks[id].status = TaskStatus::Dispatching;
         m_tasks[id].logBuffer.append(
@@ -1445,17 +1504,20 @@ void TaskCenter::markTaskCompleted( long taskId,
         if ( !m_tasks[taskId].jobId.empty() )
             m_taskByJobId.remove( m_tasks[taskId].jobId );
 
-        // Execution-cache store (#667): the output of a completed
+        // Execution-cache store (#667/#726): the output of a completed
         // revision-identified task is reusable by a future identical run.
-        if ( !m_tasks[taskId].outputLayerPath.isEmpty() )
+        // The fingerprint hex is stamped into the payload first so consumers
+        // (CLI asset registration, provenance) can bind the produced asset to
+        // the exact producing execution.
         {
             const auto fpIt = m_taskFingerprints.constFind( taskId );
-            if ( fpIt != m_taskFingerprints.constEnd() )
+            if ( fpIt != m_taskFingerprints.constEnd() && fpIt->isValid()
+                 && m_tasks[taskId].resultPayload.isObject()
+                 && !m_tasks[taskId].resultPayload.isMember( "executionFingerprint" ) )
             {
-                sicnu::data::ExecutionResultCache::instance().storeOutputPath(
-                    *fpIt, m_tasks[taskId].outputLayerPath );
-                m_taskFingerprints.erase( fpIt );
+                m_tasks[taskId].resultPayload["executionFingerprint"] = fpIt->toHex().toStdString();
             }
+            storeExecutionResultLocked( taskId );
         }
 
         updatePipelineForTaskLocked( taskId );
@@ -1600,6 +1662,8 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         if ( !rootJobId.empty() )
             jobCancelTargets.emplace_back( rootJobId, taskId );
         m_taskFingerprints.remove( taskId );
+        m_taskFingerprintParams.remove( taskId );
+        m_taskChainedEdges.remove( taskId );
         m_tasks[taskId].status = TaskStatus::Failed;
         m_tasks[taskId].errorMessage = error;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
@@ -1646,6 +1710,8 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
         if ( !rootJobId.empty() )
             jobCancelTargets.emplace_back( rootJobId, taskId );
         m_taskFingerprints.remove( taskId );
+        m_taskFingerprintParams.remove( taskId );
+        m_taskChainedEdges.remove( taskId );
         m_tasks[taskId].status = TaskStatus::Canceled;
         m_tasks[taskId].errorMessage = reason;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
@@ -1927,6 +1993,8 @@ void TaskCenter::clearCompletedTasks()
             m_estimateMbCache.remove( id ); // keep the per-task estimate cache bounded
             m_completionCallbacks.remove( id ); // defense (#702): stale registrations
             m_taskFingerprints.remove( id );
+            m_taskFingerprintParams.remove( id );
+            m_taskChainedEdges.remove( id );
         }
         for ( auto it = m_taskByJobId.begin(); it != m_taskByJobId.end(); )
         {
@@ -1962,6 +2030,7 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
         pipeInfo.orderedStepIds = ordered;
 
         QMap<std::string, long> stepToTaskId;
+        QMap<QString, QString> declaredOutputByStepId; // step id → declared output path (#726 chained identity)
 
         for ( const auto &stepId : ordered )
         {
@@ -2020,6 +2089,39 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
             pipeInfo.stepStatuses[stepId] = TaskStatus::Queued;
 
             queueTaskAddedLocked( taskId );
+
+            // Submission-time execution fingerprint (#726): computed in
+            // topological order on the submitting thread, so each step's
+            // chained inputs can key on its producers' already-computed
+            // fingerprints — a cold pipeline records a usable cache identity
+            // for EVERY deterministic step during its first run, and
+            // worker-thread admission never needs the catalog.
+            {
+                QMap<std::string, long> declaredTaskByStepId;
+                for ( auto dIt = declaredOutputByStepId.constBegin();
+                      dIt != declaredOutputByStepId.constEnd(); ++dIt )
+                    declaredTaskByStepId.insert( dIt.key().toStdString(),
+                                                 stepToTaskId.value( dIt.key().toStdString(), -1 ) );
+                UpstreamResolver resolver =
+                    [this, declaredTaskByStepId, declaredOutputByStepId](
+                        const sicnu::workflow::PlaceholderRef &ref,
+                        const QString & ) -> UpstreamResolution {
+                    if ( ref.stepId.empty() )
+                        return {};
+                    const QString stepKey = QString::fromStdString( ref.stepId );
+                    const auto outIt = declaredOutputByStepId.constFind( stepKey );
+                    if ( outIt == declaredOutputByStepId.constEnd() )
+                        return {};
+                    UpstreamResolution upstream;
+                    upstream.producerTaskId = declaredTaskByStepId.value( stepKey.toStdString(), -1 );
+                    upstream.declaredOutputPath = outIt.value();
+                    return upstream;
+                };
+                computeAndRecordSubmissionFingerprintLocked( taskId, resolver );
+            }
+
+            declaredOutputByStepId.insert( QString::fromStdString( stepId ),
+                                           findOutputPathInParams( params ) );
         }
 
         if ( pipeInfo.stepToTaskId.isEmpty() )
@@ -2147,24 +2249,27 @@ void TaskCenter::setCatalog( sicnu::data::DataManager *catalog )
     m_catalog = catalog;
 }
 
-sicnu::data::ExecutionFingerprint
-TaskCenter::taskExecutionFingerprintLocked( long taskId ) const
+void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
+                                                              const UpstreamResolver &resolver )
 {
     // Disabled cache ⇒ no fingerprint at all (also skips the operator
-    // lookup/hash work for every dispatch in default configurations).
+    // lookup/hash work for every submission in default configurations).
     if ( !sicnu::data::ExecutionResultCache::instance().isEnabled() )
-        return {};
+        return;
     if ( !m_catalog )
-        return {};
+        return;
     // The catalog is single-thread-affine by contract (its mutators enforce
     // it); identity resolution from a foreign thread would race concurrent
-    // mutations — conservatively refuse to fingerprint there.
+    // mutations — conservatively refuse to fingerprint there. Computing at
+    // SUBMISSION time (this call) keeps the affinity check on the submitting
+    // thread, so downstream steps admitted later on JobEngine worker threads
+    // reuse the recorded fingerprint without any catalog access (#726).
     if ( QThread::currentThread() != m_catalog->thread() )
-        return {};
+        return;
 
     const auto it = m_tasks.constFind( taskId );
     if ( it == m_tasks.constEnd() )
-        return {};
+        return;
     const AlgorithmTaskInfo &info = it.value();
 
     // Only registered RSOperators carry the schema/metadata contract needed
@@ -2173,14 +2278,7 @@ TaskCenter::taskExecutionFingerprintLocked( long taskId ) const
     const auto op = sicnu::operators::RSOperatorRegistry::instance().create(
         info.algorithmId.toStdString() );
     if ( !op )
-        return {};
-
-    // Implementation version proxy: the operator's schema document. A schema
-    // change (new params, changed defaults) implies a behavior change; the
-    // hash keeps the fingerprint honest without a hand-maintained version.
-    Json::StreamWriterBuilder schemaWriter;
-    schemaWriter["indentation"] = "";
-    const std::string schemaText = Json::writeString( schemaWriter, op->schema() );
+        return;
 
     // Determinism gate — two equivalent opt-in surfaces:
     //   1. metadata()["deterministic"] == true (explicit, e.g. temporal ops);
@@ -2194,45 +2292,499 @@ TaskCenter::taskExecutionFingerprintLocked( long taskId ) const
         ( meta.isMember( "deterministic" ) && meta["deterministic"].asBool() )
         || op->determinismGrade() == "bit-exact";
     if ( !deterministicOptIn )
-        return {};
+        return;
 
+    // Implementation/version identity (#726): the operator's schema document
+    // PLUS the explicit execution-cache contract version and the platform
+    // version. A schema change (new params, changed defaults) implies a
+    // behavior change; the contract version additionally invalidates every
+    // entry computed under an older fingerprint SEMANTICS (a behavior fix
+    // that leaves the schema untouched must not serve stale artifacts).
+    Json::StreamWriterBuilder schemaWriter;
+    schemaWriter["indentation"] = "";
+    const std::string schemaText = Json::writeString( schemaWriter, op->schema() );
+    const std::string implIdentity = schemaText + "|contract="
+      + std::to_string( sicnu::data::kExecutionFingerprintContractVersion )
+      + "|platform=" + sicnu::data::kExecutionFingerprintPlatformVersion;
     const QString versionHash = QString::fromUtf8(
-        QCryptographicHash::hash( QByteArray::fromStdString( schemaText ),
+        QCryptographicHash::hash( QByteArray::fromStdString( implIdentity ),
                                   QCryptographicHash::Sha256 ).toHex() );
 
-    // Exclude the destination from identity: two runs differing only in
-    // output path produce identical bytes (the served run copies the cached
-    // artifact onto its own output path).
-    QJsonObject params = QJsonObject::fromVariantMap( info.parameterMap );
-    const QString outputPath = info.outputLayerPath;
-    if ( !outputPath.isEmpty() )
-    {
-        for ( auto pit = params.begin(); pit != params.end(); )
+    // Statically resolve placeholder references against the DECLARED upstream
+    // outputs (#726): the resolved map is what the fingerprint hashes, and the
+    // dispatch-time verification compares it against the actually-substituted
+    // parameters. Output-vocabulary keys are excluded from the hashed params
+    // by KEY — never by string-value equality, which collided
+    // {input:x,output:x} with {input:y,output:y} and made the fingerprint
+    // non-injective. A destination value under any OTHER key stays hashed.
+    QVariantMap resolvedAll;   // full statically-resolved map (dispatch verification)
+    QJsonObject hashedParams;  // output-vocabulary keys excluded (identity)
+    QString currentParamKey;
+    QMap<QString, long> chainedProducers; // param key → upstream producer task
+    auto resolveRef = [this, taskId, &resolver, &chainedProducers, &currentParamKey](
+                          const sicnu::workflow::PlaceholderRef &ref ) -> std::string {
+        if ( resolver )
         {
-            if ( pit.value().isString() && pit.value().toString() == outputPath )
-                pit = params.erase( pit );
-            else
-                ++pit;
+            const UpstreamResolution upstream = resolver( ref, currentParamKey );
+            if ( upstream.producerTaskId > 0 && !upstream.declaredOutputPath.isEmpty() )
+            {
+                if ( !currentParamKey.isEmpty() )
+                    chainedProducers.insert( currentParamKey, upstream.producerTaskId );
+                return upstream.declaredOutputPath.toStdString();
+            }
         }
+        return ref.rawRef; // unresolved: dispatch verification fails closed
+    };
+    for ( auto pIt = info.parameterMap.begin(); pIt != info.parameterMap.end(); ++pIt )
+    {
+        currentParamKey = pIt.key();
+        const QVariant substituted = substituteVariantRecursive( pIt.value(), resolveRef );
+        resolvedAll.insert( pIt.key(), substituted );
+        if ( !sicnu::data::isOutputVocabularyKey( pIt.key() ) )
+            hashedParams.insert( pIt.key(), QJsonValue::fromVariant( substituted ) );
     }
 
-    // Revision-aware input identity (registered path inputs + inline scenes
-    // + workspace-bound temporal collections). ANY unidentifiable input ⇒
-    // not cacheable — the conservative verdict that keeps hits honest.
+    // Revision-aware input identity (#726): registered local/remote assets +
+    // inline scenes + workspace-bound temporal collections. ANY unidentifiable
+    // input ⇒ not cacheable — the conservative verdict that keeps hits honest.
+    // Chained producer edges are excluded by PARAMETER KEY (their identity is
+    // the producer fingerprint added below, not the file's registration
+    // revision); a literal key that merely carries the same path stays
+    // scanned and revision-stamped.
+    QStringList chainedKeys;
+    for ( auto cIt = chainedProducers.constBegin(); cIt != chainedProducers.constEnd(); ++cIt )
+        chainedKeys.append( cIt.key() );
     QVector<sicnu::data::TaggedDerivationInput> inputs;
     QString reason;
     if ( !sicnu::temporal::fingerprintInputsForOperatorParams(
-             m_catalog, info.parameterMap, outputPath, &inputs, &reason ) )
+             m_catalog, resolvedAll, &inputs, &reason, chainedKeys ) )
     {
-        return {};
+        return;
     }
-    return sicnu::data::makeExecutionFingerprintV2( info.algorithmId, versionHash,
-                                                    params, inputs );
+
+    // Chained in-pipeline producer identity: an input produced by an upstream
+    // step of the same submission is keyed on the producer's own execution
+    // fingerprint, not on the file's catalog revision (the file is registered
+    // only after the producing run finishes; keying on it would both miss the
+    // first cold run and chase spurious revision bumps). The determinism gate
+    // makes "same producer fingerprint" ⇒ "same output bytes", so the chained
+    // identity is as strong as a revision stamp. An upstream step without a
+    // valid fingerprint fails this step closed.
+    for ( auto cIt = chainedProducers.constBegin(); cIt != chainedProducers.constEnd(); ++cIt )
+    {
+        const auto producerFp = m_taskFingerprints.constFind( cIt.value() );
+        if ( producerFp == m_taskFingerprints.constEnd() || !producerFp->isValid() )
+            return;
+        sicnu::data::TaggedDerivationInput input;
+        input.revision = sicnu::data::AssetRevision::initial();
+        input.toPort = cIt.key();
+        input.valueDomain = QStringLiteral( "pipeline_output" );
+        input.producerFingerprint = producerFp->toHex();
+        inputs.append( input );
+    }
+
+    const sicnu::data::ExecutionFingerprint fp =
+        sicnu::data::makeExecutionFingerprintV2( info.algorithmId, versionHash,
+                                                 hashedParams, inputs );
+
+    if ( fp.isValid() )
+    {
+        m_taskFingerprints[taskId] = fp;
+        m_taskFingerprintParams[taskId] = resolvedAll;
+        QVector<ChainedEdge> edges;
+        for ( auto cIt = chainedProducers.constBegin(); cIt != chainedProducers.constEnd(); ++cIt )
+        {
+            const auto producerFp = m_taskFingerprints.constFind( cIt.value() );
+            if ( producerFp == m_taskFingerprints.constEnd() || !producerFp->isValid() )
+                continue;
+            const QVariant value = resolvedAll.value( cIt.key() );
+            if ( value.typeId() != QMetaType::QString )
+                continue;
+            ChainedEdge edge;
+            edge.paramKey = cIt.key();
+            edge.producerPath = value.toString();
+            edge.producerTaskId = cIt.value();
+            edge.producerFingerprintHex = producerFp->toHex();
+            edges.append( edge );
+        }
+        m_taskChainedEdges[taskId] = edges;
+    }
+    else
+    {
+        m_taskFingerprints.remove( taskId );
+        m_taskFingerprintParams.remove( taskId );
+        m_taskChainedEdges.remove( taskId );
+    }
+}
+
+void TaskCenter::verifyDispatchFingerprintLocked( long taskId )
+{
+    const auto fpIt = m_taskFingerprints.constFind( taskId );
+    if ( fpIt == m_taskFingerprints.constEnd() )
+    {
+        m_taskFingerprintParams.remove( taskId );
+        return;
+    }
+    const auto snapIt = m_taskFingerprintParams.constFind( taskId );
+    if ( snapIt == m_taskFingerprintParams.constEnd()
+         || snapIt.value() != m_tasks[taskId].parameterMap )
+    {
+        // The parameters that will actually execute diverge from the snapshot
+        // the fingerprint was computed over (placeholder resolved differently,
+        // mutated params): the fingerprint no longer describes this execution.
+        // Drop it — a real execution is the safe outcome.
+        m_taskFingerprints.remove( taskId );
+        m_taskFingerprintParams.remove( taskId );
+        m_taskChainedEdges.remove( taskId );
+        return;
+    }
+    // Re-verify each chained producer edge: the producer's stamped payload
+    // fingerprint must equal the hex this consumer's identity was keyed on
+    // (#726 review). Absent stamps are tolerated only for producers without
+    // an execution identity — but such producers never yield a valid consumer
+    // fingerprint at submission time, so a missing stamp here means the edge
+    // is unverifiable ⇒ drop.
+    const auto edgesIt = m_taskChainedEdges.constFind( taskId );
+    if ( edgesIt != m_taskChainedEdges.constEnd() )
+    {
+        for ( const ChainedEdge &edge : edgesIt.value() )
+        {
+            const auto producerIt = m_tasks.constFind( edge.producerTaskId );
+            if ( producerIt == m_tasks.constEnd()
+                 || !producerIt->resultPayload.isObject()
+                 || !producerIt->resultPayload.isMember( "executionFingerprint" )
+                 || !producerIt->resultPayload["executionFingerprint"].isString()
+                 || producerIt->resultPayload["executionFingerprint"].asString()
+                        != edge.producerFingerprintHex.toStdString() )
+            {
+                // The producer's payload no longer vouches for the execution
+                // identity this consumer was keyed on.
+                m_taskFingerprints.remove( taskId );
+                m_taskFingerprintParams.remove( taskId );
+                m_taskChainedEdges.remove( taskId );
+                return;
+            }
+        }
+    }
+    // Keep the snapshot and edges until the terminal transition consumes them.
+}
+
+namespace
+{
+QByteArray compactJsonBytes( const Json::Value &value )
+{
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    return QByteArray::fromStdString( Json::writeString( builder, value ) );
+}
+
+Json::Value jsonValueFromQJson( const QJsonValue &value )
+{
+    switch ( value.type() )
+    {
+      case QJsonValue::Null:
+        return Json::Value();
+      case QJsonValue::Bool:
+        return Json::Value( value.toBool() );
+      case QJsonValue::Double:
+      {
+        const double d = value.toDouble();
+        if ( d == static_cast<qint64>( d ) && std::fabs( d ) < 9.0e18 )
+            return Json::Value( static_cast<Json::Int64>( d ) );
+        return Json::Value( d );
+      }
+      case QJsonValue::String:
+        return Json::Value( value.toString().toStdString() );
+      case QJsonValue::Array:
+      {
+        Json::Value out( Json::arrayValue );
+        const QJsonArray array = value.toArray();
+        for ( const QJsonValue &entry : array )
+            out.append( jsonValueFromQJson( entry ) );
+        return out;
+      }
+      case QJsonValue::Object:
+      {
+        Json::Value out( Json::objectValue );
+        const QJsonObject object = value.toObject();
+        for ( auto it = object.begin(); it != object.end(); ++it )
+            out[it.key().toStdString()] = jsonValueFromQJson( it.value() );
+        return out;
+      }
+      case QJsonValue::Undefined:
+        break;
+    }
+    return Json::Value();
+}
+
+/// Recursively collects the files an execution PRODUCED, from the result
+/// payload (#726). Two guards keep echoed inputs out of the produced set
+/// (an input claimed as an artifact would hijack the producing run's cache
+/// claim): the string must ride under an output-vocabulary key
+/// ("output"/"outputs[*].output"/...), and it must be the declared output or
+/// live beside it (the run's output workspace). Single-output steps whose
+/// payload carries no such key are still covered — the declared output is
+/// added by the caller when it exists.
+void collectProducedPayloadPaths( const Json::Value &value, const QString &keyContext,
+                                  const QString &declared, QStringList &out )
+{
+    if ( value.isObject() )
+    {
+        for ( const auto &name : value.getMemberNames() )
+            collectProducedPayloadPaths( value[name], QString::fromStdString( name ),
+                                         declared, out );
+    }
+    else if ( value.isArray() )
+    {
+        for ( const auto &entry : value )
+            collectProducedPayloadPaths( entry, keyContext, declared, out );
+    }
+    else if ( value.isString() )
+    {
+        const QString candidate = QString::fromStdString( value.asString() ).trimmed();
+        if ( candidate.isEmpty() || !QFile::exists( candidate )
+             || out.contains( candidate )
+             || !sicnu::data::isOutputVocabularyKey( keyContext ) )
+            return;
+        if ( candidate == declared
+             || QFileInfo( candidate ).absolutePath() == QFileInfo( declared ).absolutePath() )
+        {
+            out.append( candidate );
+        }
+    }
+}
+
+/// Maps a producing run's artifact path onto the serving run's destination
+/// space (#726): the declared output maps onto the new declared output; a
+/// sibling artifact (grouped period raster) maps to the new destination's
+/// directory with the producer's base name stem substituted — the same
+/// convention operators use to derive sibling names (`<base>_<label>.tif`).
+/// Unmappable paths are returned unchanged (byte-identical under the
+/// determinism gate, so serving the original location stays correct).
+QString mapProducedPath( const QString &cachedPath, const QString &cachedDeclared,
+                         const QString &servingDeclared )
+{
+    if ( cachedPath.isEmpty() || cachedDeclared.isEmpty() || cachedPath == cachedDeclared )
+    {
+        return servingDeclared.isEmpty() ? cachedPath : servingDeclared;
+    }
+    const QFileInfo declaredFi( cachedDeclared );
+    const QFileInfo servingFi( servingDeclared );
+    const QString cachedDir = declaredFi.absolutePath();
+    if ( !cachedPath.startsWith( cachedDir + QLatin1Char( '/' ) ) )
+        return cachedPath;
+    const QString relative = cachedPath.mid( cachedDir.size() + 1 );
+    const QString cachedStem = declaredFi.completeBaseName();
+    const QString servingStem = servingFi.completeBaseName();
+    QString mapped = relative;
+    if ( !cachedStem.isEmpty() && cachedStem != servingStem
+         && relative.startsWith( cachedStem + QLatin1Char( '_' ) ) )
+    {
+        // Operator sibling convention: <declared-stem>_<label>.<ext>. Prefix
+        // (not substring) matching — a file whose name merely CONTAINS the
+        // stem is not a sibling artifact, and a sibling can never map onto
+        // the declared destination itself (it keeps a suffix after the stem).
+        mapped = servingStem + relative.mid( cachedStem.size() );
+    }
+    return servingFi.absolutePath() + QLatin1Char( '/' ) + mapped;
+}
+
+/// Recursively rewrites every payload string that references a producing
+/// run's path onto the serving run's destination space, so a served payload
+/// is exactly what a real run at this destination would have returned.
+void rewriteJsonPaths( QJsonValue &value, const QMap<QString, QString> &pathMap )
+{
+    if ( value.isObject() )
+    {
+        QJsonObject object = value.toObject();
+        for ( auto it = object.begin(); it != object.end(); ++it )
+        {
+            QJsonValue rewritten = it.value();
+            rewriteJsonPaths( rewritten, pathMap );
+            it.value() = rewritten;
+        }
+        value = object;
+    }
+    else if ( value.isArray() )
+    {
+        QJsonArray array = value.toArray();
+        for ( int i = 0; i < array.size(); ++i )
+        {
+            QJsonValue rewritten = array.at( i );
+            rewriteJsonPaths( rewritten, pathMap );
+            array.replace( i, rewritten );
+        }
+        value = array;
+    }
+    else if ( value.isString() )
+    {
+        const auto mapped = pathMap.constFind( value.toString() );
+        if ( mapped != pathMap.constEnd() )
+            value = mapped.value();
+    }
+}
+
+struct ServeTransfer
+{
+    QString src; // cached artifact
+    QString dst; // this run's destination
+    QString tmp; // same-directory staging name (atomic rename source)
+};
+
+/// Expected identity of a staged source file, so the serve can detect that
+/// the cached artifact was rewritten between lookup and materialization
+/// (lookup validation alone has a TOCTOU window against a concurrent
+/// execution overwriting the same stable path).
+struct SourceExpectation
+{
+    qint64 size = -1;
+    qint64 msecs = 0;
+};
+
+/// Transactional materialization (cache contract C7): stage EVERY transfer as
+/// a same-directory temp copy first (so a partial stage never touches a
+/// destination), then atomically rename each into place. Any staging failure
+/// aborts with all temps removed and destinations untouched; a rename
+/// failure aborts the serve — the subsequent real execution rewrites every
+/// destination, so no half-served state survives. Cross-filesystem safe (the
+/// temp lives beside its destination).
+bool materializeCachedArtifacts( const QList<ServeTransfer> &transfers,
+                                 const QStringList &staleSidecars,
+                                 const QString &isolationToken,
+                                 const QMap<QString, SourceExpectation> &expected )
+{
+    QList<ServeTransfer> staged;
+    auto cleanupStaged = [ &staged ]() {
+        for ( const ServeTransfer &transfer : staged )
+            QFile::remove( transfer.tmp );
+    };
+    // The staging name is isolated per serving execution (fingerprint prefix):
+    // two serves targeting the same destination must not consume each other's
+    // temp file mid-flight. Identical fingerprints stage identical bytes, but
+    // a distinct fingerprint serving the same destination is a legitimate
+    // (last-writer-wins) user sequence, and its temp must stay its own.
+    const QString stagingSuffix = isolationToken.isEmpty()
+        ? QStringLiteral( ".cacheserve.tmp" )
+        : QStringLiteral( ".%1.cacheserve.tmp" ).arg( isolationToken );
+    for ( const ServeTransfer &transfer : transfers )
+    {
+        ServeTransfer stagedTransfer = transfer;
+        stagedTransfer.tmp = transfer.dst + stagingSuffix;
+        QFile::remove( stagedTransfer.tmp );
+        if ( !QFile::copy( transfer.src, stagedTransfer.tmp ) )
+        {
+            cleanupStaged();
+            return false;
+        }
+        staged.append( stagedTransfer );
+    }
+    // Post-stage source revalidation (closes the lookup→copy TOCTOU): if any
+    // cached source changed size or mtime while being copied, the staged copy
+    // may not be what this fingerprint vouches for — abort the serve and fall
+    // through to a real execution. Never rename questionable bytes.
+    for ( const ServeTransfer &transfer : staged )
+    {
+        const auto expectation = expected.constFind( transfer.src );
+        if ( expectation == expected.constEnd() )
+            continue; // sidecars have no recorded expectation
+        const QFileInfo info( transfer.src );
+        if ( !info.isFile() || info.size() != expectation->size
+             || info.lastModified().toMSecsSinceEpoch() != expectation->msecs )
+        {
+            cleanupStaged();
+            return false;
+        }
+    }
+    // Stale sidecars of the destinations that the cached execution does not
+    // carry (e.g. an .aux.xml from an unrelated earlier run) must not survive
+    // the replacement.
+    for ( const QString &stale : staleSidecars )
+        QFile::remove( stale );
+    for ( const ServeTransfer &transfer : staged )
+    {
+        // POSIX rename replaces atomically; on Windows rename fails when the
+        // destination exists — fall back to remove-then-rename there (the
+        // non-atomic window is a platform limitation, the old naked
+        // remove+copy had it on every platform).
+        if ( !QFile::rename( transfer.tmp, transfer.dst ) )
+        {
+            QFile::remove( transfer.dst );
+            if ( !QFile::rename( transfer.tmp, transfer.dst ) )
+            {
+                cleanupStaged();
+                return false;
+            }
+        }
+    }
+    return true;
+}
+} // namespace
+
+void TaskCenter::storeExecutionResultLocked( long taskId )
+{
+    const auto fpIt = m_taskFingerprints.constFind( taskId );
+    if ( fpIt == m_taskFingerprints.constEnd() || !fpIt->isValid() )
+    {
+        m_taskFingerprintParams.remove( taskId );
+        return;
+    }
+    const sicnu::data::ExecutionFingerprint fp = *fpIt;
+    m_taskFingerprints.erase( fpIt );
+    m_taskFingerprintParams.remove( taskId );
+    const QVector<ChainedEdge> edges = m_taskChainedEdges.value( taskId );
+    m_taskChainedEdges.remove( taskId );
+
+    const auto taskIt = m_tasks.constFind( taskId );
+    if ( taskIt == m_tasks.constEnd() )
+        return;
+    const QString declared = taskIt->outputLayerPath;
+    if ( declared.isEmpty() )
+        return;
+
+    sicnu::data::ExecutionResultCache::CachedExecution execution;
+    execution.declaredOutputPath = declared;
+
+    QStringList produced;
+    collectProducedPayloadPaths( taskIt->resultPayload, QString(), declared, produced );
+    if ( QFile::exists( declared ) && !produced.contains( declared ) )
+        produced.append( declared );
+    execution.producedArtifacts = produced;
+
+    // Stat every produced artifact so a lookup can refuse an entry whose
+    // files were replaced by a different execution (destination reuse
+    // poisoning, #726).
+    for ( const QString &artifact : produced )
+    {
+        const QFileInfo info( artifact );
+        if ( !info.isFile() )
+            continue;
+        execution.artifactSizes.insert( artifact, info.size() );
+        execution.artifactMsecs.insert( artifact, info.lastModified().toMSecsSinceEpoch() );
+    }
+    if ( execution.artifactSizes.isEmpty() )
+        return; // nothing materialized to vouch for — never store a claim
+    // Bind the consumer's entry to the chained input bytes it actually read:
+    // an intermediate rewritten out-of-band must invalidate this entry on the
+    // next lookup, or the producer's self-heal would silently mask the
+    // poisoning (#726 review).
+    for ( const ChainedEdge &edge : edges )
+    {
+        const QFileInfo info( edge.producerPath );
+        if ( !info.isFile() )
+            continue;
+        execution.inputSizes.insert( edge.producerPath, info.size() );
+        execution.inputMsecs.insert( edge.producerPath,
+                                     info.lastModified().toMSecsSinceEpoch() );
+    }
+
+    execution.resultPayload = QJsonDocument::fromJson( compactJsonBytes( taskIt->resultPayload ) );
+    sicnu::data::ExecutionResultCache::instance().storeExecution( fp, execution );
 }
 
 bool TaskCenter::serveFromExecutionCache( long taskId, const sicnu::data::ExecutionFingerprint &fp )
 {
-    const auto cached = sicnu::data::ExecutionResultCache::instance().lookupOutputPath( fp );
+    const auto cached =
+        sicnu::data::ExecutionResultCache::instance().lookupExecution( fp );
     if ( !cached )
         return false;
 
@@ -2247,21 +2799,87 @@ bool TaskCenter::serveFromExecutionCache( long taskId, const sicnu::data::Execut
     if ( outputPath.isEmpty() )
         return false;
 
-    if ( *cached != outputPath )
+    // Map the producing run's artifacts onto this run's destination space
+    // (cache contract C6): the declared output onto the declared output, a
+    // grouped/period sibling onto its mapped sibling name. Artifacts at the
+    // exact producing location (the common identical-resubmission case) need
+    // no transfer.
+    QMap<QString, QString> pathMap; // producing path → serving path
+    QList<ServeTransfer> transfers;
+    QStringList staleSidecars;
+    for ( const QString &artifact : cached->producedArtifacts )
     {
-        // Materialize the cached artifact on this run's declared output path
-        // so downstream consumers and the result payload see the requested
-        // file. Failure falls through to a real execution.
-        QFile::remove( outputPath );
-        if ( !QFile::copy( *cached, outputPath ) )
-            return false;
+        if ( artifact.isEmpty() )
+            continue;
+        const QString mapped = ( artifact == cached->declaredOutputPath )
+                                   ? outputPath
+                                   : mapProducedPath( artifact, cached->declaredOutputPath,
+                                                      outputPath );
+        pathMap.insert( artifact, mapped );
+        if ( QFileInfo( artifact ).absoluteFilePath() == QFileInfo( mapped ).absoluteFilePath() )
+            continue; // same file — nothing to materialize
+        // Sidecar contract: sidecars present beside the cached artifact are
+        // carried over; destination sidecars the cached execution does not
+        // carry are stale (from an unrelated earlier run) and must not
+        // survive the replacement.
+        for ( const QString &suffix : sicnu::workflow::ArtifactGC::sidecarSuffixes() )
+        {
+            if ( QFile::exists( artifact + suffix ) )
+            {
+                pathMap.insert( artifact + suffix, mapped + suffix );
+                transfers.append( { artifact + suffix, mapped + suffix, QString() } );
+            }
+            else if ( QFile::exists( mapped + suffix ) )
+            {
+                staleSidecars.append( mapped + suffix );
+            }
+        }
+        transfers.append( { artifact, mapped, QString() } );
+    }
+    // The declared output itself is never written by grouped executions; only
+    // the produced artifact set is materialized and only produced paths land
+    // in the payload, so a served run never creates a file the producing run
+    // did not declare.
+    QMap<QString, SourceExpectation> expected;
+    const auto recordExpectation = [ &expected ]( const QString &path,
+                                                  const QMap<QString, qint64> &sizes,
+                                                  const QMap<QString, qint64> &msecs ) {
+        const auto sizeIt = sizes.constFind( path );
+        if ( sizeIt == sizes.constEnd() )
+            return;
+        SourceExpectation e;
+        e.size = sizeIt.value();
+        const auto msecsIt = msecs.constFind( path );
+        e.msecs = msecsIt == msecs.constEnd() ? 0 : msecsIt.value();
+        expected.insert( path, e );
+    };
+    for ( const ServeTransfer &transfer : transfers )
+    {
+        recordExpectation( transfer.src, cached->artifactSizes, cached->artifactMsecs );
+    }
+    if ( ( !transfers.isEmpty() || !staleSidecars.isEmpty() )
+         && !materializeCachedArtifacts( transfers, staleSidecars, fp.toHex().left( 16 ),
+                                         expected ) )
+        return false; // fall through to a real execution (cache contract C7)
+
+    // Restore the producing run's full result payload with this run's paths,
+    // so GUI auto-load, agents and workflow placeholder resolution see
+    // exactly what a real execution at this destination returns.
+    QJsonDocument restored = cached->resultPayload;
+    if ( restored.isObject() )
+    {
+        QJsonValue payloadValue( restored.object() );
+        rewriteJsonPaths( payloadValue, pathMap );
+        QJsonObject payloadObject = payloadValue.toObject();
+        payloadObject.insert( QStringLiteral( "cache" ), QStringLiteral( "hit" ) );
+        payloadObject.insert( QStringLiteral( "cachedFrom" ),
+                              cached->declaredOutputPath );
+        payloadObject.insert( QStringLiteral( "executionFingerprint" ), fp.toHex() );
+        restored = QJsonDocument( payloadObject );
     }
 
+    const Json::Value payload = jsonValueFromQJson( QJsonValue( restored.object() ) );
     QVariantMap results{ { QStringLiteral( "output" ), outputPath } };
-    Json::Value payload;
-    payload["output"] = outputPath.toStdString();
-    payload["cache"] = "hit";
-    payload["cachedFrom"] = cached->toStdString();
     markTaskCompleted( taskId, results, payload );
     return true;
 }

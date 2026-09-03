@@ -21,6 +21,7 @@
 #include "resource_monitor.h"
 #include "task_resource_budget.h"
 #include "data/execution_fingerprint.h"
+#include "workflow/placeholder_grammar.h"
 
 namespace sicnu::operators {
 class RSOperatorContext;
@@ -427,23 +428,81 @@ private:
     // checkpoints and per-step fingerprints); the never-implemented TaskCenter
     // mirror declarations from the #708 draft were removed (#697).
 
-    // --- Revision-aware execution cache (#667, ADR 0123) ----------------------
-    /// Computes the execution fingerprint for a task whose parameters are
-    /// final (post placeholder substitution). Returns an invalid fingerprint
-    /// when caching is disabled, no catalog is wired, the algorithm is not a
-    /// deterministic registered operator, or any input cannot be
-    /// revision-identified. Requires m_mutex (reads the task map only).
-    sicnu::data::ExecutionFingerprint taskExecutionFingerprintLocked( long taskId ) const;
+    // --- Revision-aware execution cache (#667, #726; ADR 0123) ----------------
+    /// Resolves a placeholder reference to its upstream producer's DECLARED
+    /// output path at submission time (the actual dispatch-time substitution
+    /// resolves from the producer's result payload; the dispatch verification
+    /// below fails closed when the two ever diverge). The producer task id is
+    /// reported for chained identity; -1 when the reference does not address
+    /// a known upstream producer.
+    struct UpstreamResolution
+    {
+        long producerTaskId = -1;
+        QString declaredOutputPath;
+    };
+    using UpstreamResolver = std::function<UpstreamResolution( const sicnu::workflow::PlaceholderRef &ref,
+                                                              const QString &paramKey )>;
+
+    /// Computes and records the SUBMISSION-TIME execution fingerprint for
+    /// @a taskId (#726): the params are statically placeholder-resolved via
+    /// @a resolver, destination keys are excluded from the hashed parameters
+    /// by KEY (platform output vocabulary, never string-value equality), and
+    /// every input is resolved into identity — registered assets via the
+    /// catalog, in-pipeline producer outputs via the producer's own
+    /// fingerprint (chained identity). Any unidentifiable input, a
+    /// non-deterministic operator, an off-affinity submitting thread, or a
+    /// missing catalog records NO fingerprint (uncacheable — conservative).
+    /// Must be called with m_mutex held, once per task at enqueue/submit
+    /// time, so downstream steps admitted on JobEngine worker threads never
+    /// need the catalog.
+    void computeAndRecordSubmissionFingerprintLocked( long taskId, const UpstreamResolver &resolver );
+
+    /// Dispatch-time verification (#726): the stored fingerprint was computed
+    /// over statically-resolved parameters; once the real placeholder
+    /// substitution has run, any divergence between the two means the
+    /// fingerprint does not describe what will actually execute ⇒ drop it
+    /// (conservative miss). Cheap QVariantMap comparison — no catalog access,
+    /// safe on worker threads. Must be called with m_mutex held, after
+    /// applyPlaceholdersForTask.
+    void verifyDispatchFingerprintLocked( long taskId );
     /// Serves a task from the execution cache when a prior identical
-    /// execution produced a still-existing output. Called WITHOUT m_mutex
-    /// (copies files, marks the task terminal). True when served.
+    /// execution produced a still-valid result. Materializes the cached
+    /// artifacts transactionally (temp copy + atomic rename) onto this run's
+    /// declared output path(s) and restores the producing run's full result
+    /// payload (multi-output shapes included). Called WITHOUT m_mutex
+    /// (file copies, terminal transition). True when served; every failure
+    /// mode falls through to a real execution.
     bool serveFromExecutionCache( long taskId, const sicnu::data::ExecutionFingerprint &fp );
+    /// Must be called with m_mutex held. Consumes the task's submission-time
+    /// fingerprint (if any) and records the execution result for it in the
+    /// process cache: declared output, produced artifacts (existing files
+    /// referenced by the stamped result payload) and the payload itself, each
+    /// artifact stat'ed so a later lookup can refuse a replaced file. Called
+    /// on the Completed transition; the payload carries the fingerprint hex.
+    void storeExecutionResultLocked( long taskId );
 
     sicnu::data::DataManager *m_catalog = nullptr;
-    /// Fingerprint of dispatched-but-not-yet-terminal tasks (dispatch order
-    /// → completion store). Entries are removed on every terminal transition
-    /// and on clear/reset.
-    QMap<long, sicnu::data::ExecutionFingerprint> m_taskFingerprints;};
+    /// Submission-time fingerprints (dispatch order → completion store).
+    /// Entries are removed on every terminal transition and on clear/reset.
+    QMap<long, sicnu::data::ExecutionFingerprint> m_taskFingerprints;
+    /// The statically-resolved parameter snapshot each stored fingerprint was
+    /// computed over (#726); dispatch-time verification compares it against
+    /// the actually-substituted parameterMap and drops the fingerprint on
+    /// divergence.
+    QMap<long, QVariantMap> m_taskFingerprintParams;
+    /// One chained in-pipeline producer edge: the consuming parameter key,
+    /// the producer's declared output path (statted into the consumer's cache
+    /// entry so a corrupted intermediate invalidates it), and the producer
+    /// task (whose stamped payload fingerprint re-verifies the edge at
+    /// dispatch).
+    struct ChainedEdge
+    {
+        QString paramKey;
+        QString producerPath;
+        QString producerFingerprintHex; // what this consumer's identity was keyed on
+        long producerTaskId = -1;
+    };
+    QMap<long, QVector<ChainedEdge>> m_taskChainedEdges;};
 
 } // namespace sicnu
 

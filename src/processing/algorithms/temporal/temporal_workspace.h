@@ -105,9 +105,31 @@ bool fingerprintInputsForCollectionParam( sicnu::data::DataManager *dataManager,
 /// cannot be revision-identified — the conservative uncacheable verdict that
 /// keeps the execution cache honest (a cache that cannot prove input
 /// identity must never serve a hit). Appends to @a out on success.
+///
+/// Identity classes (#726): a value classified by QgsDataSourceResolver as a
+/// plain local file must exist AND resolve to a registered asset; a remote /
+/// VSI / OGR-connection datasource (/vsicurl/, /vsis3/, https://, PG:, …)
+/// must resolve to a registered asset through its registered canonical
+/// source. ANY unresolvable datasource fails the whole step — remote inputs
+/// are never silently omitted the way a QFileInfo existence gate used to.
+/// Parameter keys in the platform output vocabulary ("output"/"result"-like)
+/// are destinations, not inputs, and are skipped by KEY — the destination
+/// value under any other key stays an input (an in-place run
+/// {input:x, output:x} fingerprints with x's revision). In-pipeline producer
+/// outputs are not visible here: their PARAMETER KEYS are passed via
+/// @a chainedProducerKeys so the datasource scan never double-keys them by
+/// file revision — an intermediate's real identity is the producer's
+/// fingerprint, not its registration revision. Excluding by KEY (not by
+/// value) keeps a literal parameter that merely carries a producer path
+/// inside the scanned identity. A string that LOOKS like an unclassified
+/// GDAL datasource (identifier-prefix + colon, e.g. HDF5:/netcdf: subdataset
+/// syntax) must resolve to a registered asset like any remote input — it is
+/// never treated as a plain scientific parameter.
 bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
-                                         const QVariantMap &params, const QString &outputPath,
+                                         const QVariantMap &params,
                                          QVector<sicnu::data::TaggedDerivationInput> *out,
-                                         QString *reason = nullptr );
+                                         QString *reason = nullptr,
+                                         const QStringList &chainedProducerKeys
+                                           = QStringList() );
 
 } // namespace sicnu::temporal
