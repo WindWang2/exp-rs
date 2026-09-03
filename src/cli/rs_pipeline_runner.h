@@ -15,6 +15,7 @@
 
 namespace sicnu::data { class DataManager; }
 namespace sicnu::app { class ProjectContext; }
+namespace sicnu::workflow { class WorkflowRun; }
 class PluginHost;
 class SicnuAppInterface;
 
@@ -138,9 +139,22 @@ private:
     void reportLog(const std::string& level, const std::string& message) const;
     /// Registers one completed step's output file as a TaskTemporary asset and
     /// attaches its derivation record (shared by the fresh-run loop and the
-    /// resume pre-resolved loop — adversarial review of #724).
+    /// resume pre-resolved loop — adversarial review of #724). The workflow
+    /// context (when the caller has one) is stamped into the derivation
+    /// record's workflowId/workflowRunId/stepId (#727: lineage must carry the
+    /// step relationship, not only a task reference).
     void registerOutputAsset(const QString &path, const QString &algorithmId,
-                             const QVariantMap &parameterMap, const QString &taskReference);
+                             const QVariantMap &parameterMap, const QString &taskReference,
+                             const QString &workflowId = QString(),
+                             const QString &workflowRunId = QString(),
+                             const QString &stepId = QString());
+    /// Registration order follows the data dependency (#727): checkpoint-served
+    /// (pre-crash) assets and derivations first, fresh outputs after — a fresh
+    /// downstream step's lineage can only resolve if its checkpoint-served
+    /// input is already a registered asset. Registers every completed plan of
+    /// @a run that has no task in the current (resume) pipeline.
+    void registerCheckpointServedOutputs(const sicnu::workflow::WorkflowRun *run);
+    /// Registers the FRESH pipeline's completed outputs (post-execution loop).
     void registerStepOutputs(long pipelineId);
     bool ensurePythonPluginsLoaded();
     /// Owns the run's DataManager (unless setAssetRegistry injected one) and

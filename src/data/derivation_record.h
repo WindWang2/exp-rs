@@ -36,9 +36,12 @@ struct DerivationInput
 /// never count as inputs, AND the caller's known output path(s) are excluded
 /// by value, so a re-run over an existing output can never record the output
 /// as its own source regardless of which key carried it. Placeholder
-/// references ("$step.output") and non-path strings are ignored — only paths
-/// that exist on disk as files at commit time can be resolved into lineage
-/// records. String, string-list and variant-list values are all considered.
+/// references that STILL start with '$' after substitution are collected as
+/// unresolved input references (#727) — they cannot resolve to an asset, so
+/// they surface in unresolvedPaths instead of vanishing from provenance.
+/// Non-path strings are ignored — only paths that exist on disk as files at
+/// commit time can be resolved into lineage records. String, string-list and
+/// variant-list values are all considered.
 /// ONE implementation shared by the tool-call dispatcher and the CLI pipeline
 /// runner.
 QStringList findInputPathsInParams( const QVariantMap &params,

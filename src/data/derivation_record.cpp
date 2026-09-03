@@ -183,8 +183,21 @@ QStringList findInputPathsInParams( const QVariantMap &params,
     for ( const QString &candidate : candidates )
     {
       const QString trimmed = candidate.trimmed();
-      if ( trimmed.isEmpty() || trimmed.startsWith( QLatin1Char( '$' ) ) )
+      if ( trimmed.isEmpty() )
         continue;
+      // A surviving placeholder reference IS an input reference (#727):
+      // after substitution it should have become a real path; if it still
+      // starts with '$' the substitution failed (e.g. the parent's port was
+      // missing). Collect it — it cannot resolve to an asset, so
+      // resolveInputLineage reports it in unresolvedPaths instead of the
+      // reference vanishing from provenance (the silent
+      // inputs=[]/unresolvedInputPaths=[] state).
+      if ( trimmed.startsWith( QLatin1Char( '$' ) ) )
+      {
+        if ( !paths.contains( trimmed ) )
+          paths.append( trimmed );
+        continue;
+      }
       // Only existing FILES identify an input asset; directories and
       // not-yet-written paths cannot resolve.
       if ( !QFileInfo( trimmed ).isFile() )

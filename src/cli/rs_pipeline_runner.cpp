@@ -674,7 +674,10 @@ void RsPipelineRunner::setAssetRegistry( sicnu::data::DataManager *dataManager )
 
 void RsPipelineRunner::registerOutputAsset( const QString &path, const QString &algorithmId,
                                             const QVariantMap &parameterMap,
-                                            const QString &taskReference )
+                                            const QString &taskReference,
+                                            const QString &workflowId,
+                                            const QString &workflowRunId,
+                                            const QString &stepId )
 {
   ensureGdalInit();
   GDALDatasetH ds = GDALOpenEx( path.toUtf8().constData(),
@@ -720,12 +723,15 @@ void RsPipelineRunner::registerOutputAsset( const QString &path, const QString &
     sicnu::data::resolveInputLineage(
         m_dataManager,
         sicnu::data::findInputPathsInParams( parameterMap, { path } ) );
-  const sicnu::data::DerivationRecord derivation =
+  sicnu::data::DerivationRecord derivation =
     sicnu::data::makeTaskDerivation( algorithmId,
                                      QJsonObject::fromVariantMap( parameterMap ),
                                      taskReference,
                                      lineage.inputs,
                                      lineage.unresolvedPaths );
+  derivation.workflowId = workflowId;
+  derivation.workflowRunId = workflowRunId;
+  derivation.stepId = stepId;
   m_dataManager->attachDerivationRecord( registered.assetId, derivation );
 }
 
@@ -737,6 +743,11 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
   auto &taskCenter = sicnu::TaskCenter::instance();
   const auto pipeInfo = taskCenter.getPipelineInfo( pipelineId );
 
+  // Workflow context for the derivation records (#727): the tracked run
+  // aggregate (null for untracked submissions — context fields stay empty).
+  const auto trackedRun =
+    sicnu::workflow::WorkflowRunCoordinator::instance().runForPipeline( pipelineId );
+
   for ( const auto &stepId : pipeInfo.orderedStepIds )
   {
     if ( !pipeInfo.stepToTaskId.contains( stepId ) )
@@ -746,7 +757,46 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
     if ( task.status != sicnu::TaskStatus::Completed || task.outputLayerPath.isEmpty() )
       continue;
     registerOutputAsset( task.outputLayerPath, task.algorithmId, task.parameterMap,
-                         QString::number( taskId ) );
+                         QString::number( taskId ),
+                         trackedRun ? QString::fromStdString( trackedRun->workflowId() )
+                                    : QString(),
+                         trackedRun ? QString::fromStdString( trackedRun->runId() )
+                                    : QString(),
+                         task.stepId );
+  }
+}
+
+void RsPipelineRunner::registerCheckpointServedOutputs( const sicnu::workflow::WorkflowRun *run )
+{
+  // Called BEFORE registerStepOutputs (#727 RC3): fresh steps consume
+  // checkpoint-served outputs, so the checkpointed side of the crash
+  // boundary must already be registered — asset AND derivation — when the
+  // fresh side resolves its lineage.
+  if ( !m_dataManager || !run )
+    return;
+
+  const auto freshInfo = sicnu::TaskCenter::instance().getPipelineInfo(
+    sicnu::workflow::WorkflowRunCoordinator::instance().pipelineIdForRun( run->runId() ) );
+
+  const QString workflowId = QString::fromStdString( run->workflowId() );
+  const QString runId = QString::fromStdString( run->runId() );
+  for ( const auto &plan : run->stepPlans() )
+  {
+    if ( plan.status != "Completed" || plan.outputLayerPath.empty() )
+      continue;
+    if ( freshInfo.stepToTaskId.contains( plan.stepId ) )
+      continue; // freshly executed: registered by registerStepOutputs
+    const QString path = QString::fromStdString( plan.outputLayerPath );
+    QVariantMap parameterMap;
+    const QVariant paramsVariant =
+      sicnu::processing::jsonValueToVariant( plan.resolvedParams );
+    if ( paramsVariant.typeId() == QMetaType::Type::QVariantMap )
+      parameterMap = paramsVariant.toMap();
+    registerOutputAsset( path, QString::fromStdString( plan.operatorId ),
+                         parameterMap,
+                         QStringLiteral( "resumed:%1:%2" ).arg( runId,
+                           QString::fromStdString( plan.stepId ) ),
+                         workflowId, runId, QString::fromStdString( plan.stepId ) );
   }
 }
 
@@ -860,34 +910,16 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
         {
           if ( m_dataManager )
           {
+            // Registration order follows the data dependency (#727 RC3):
+            // checkpoint-served (pre-crash) outputs are registered — asset
+            // AND derivation — BEFORE the fresh resume pipeline's outputs,
+            // because fresh steps consume them. The resuming process's
+            // DataManager is brand-new, so the old order (fresh first)
+            // built fresh derivations while the checkpoint-served input was
+            // not yet an asset, stranding those edges in
+            // unresolvedInputPaths forever.
+            registerCheckpointServedOutputs( run.get() );
             registerStepOutputs( pipelineId );
-            // Checkpoint-served steps (completed before the crash) have no
-            // task in the fresh resume pipeline, so registerStepOutputs above
-            // never sees them — yet their outputs were produced by real
-            // executions and the downstream lineage of the resumed chain
-            // references them. Register each from the run aggregate
-            // (adversarial review of #724: without this, a resumed run's
-            // pre-crash outputs never became assets and their provenance
-            // edges were permanently unresolved).
-            const auto freshInfo = sicnu::TaskCenter::instance().getPipelineInfo( pipelineId );
-            for ( const auto &plan : run->stepPlans() )
-            {
-              if ( plan.status != "Completed" || plan.outputLayerPath.empty() )
-                continue;
-              if ( freshInfo.stepToTaskId.contains( plan.stepId ) )
-                continue; // freshly executed: registered above
-              const QString path = QString::fromStdString( plan.outputLayerPath );
-              QVariantMap parameterMap;
-              const QVariant paramsVariant =
-                sicnu::processing::jsonValueToVariant( plan.resolvedParams );
-              if ( paramsVariant.typeId() == QMetaType::Type::QVariantMap )
-                parameterMap = paramsVariant.toMap();
-              registerOutputAsset( path, QString::fromStdString( plan.operatorId ),
-                                   parameterMap,
-                                   QStringLiteral( "resumed:%1:%2" ).arg(
-                                     QString::fromStdString( runId ),
-                                     QString::fromStdString( plan.stepId ) ) );
-            }
           }
           reportLog( "info", "Resumed run completed: " + runId );
         }
