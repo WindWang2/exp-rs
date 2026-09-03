@@ -34,6 +34,7 @@ struct SearchQuery {
   std::string memoryPolicy;                     ///< agentMetadata.memoryPolicy (e.g. "streaming")
   std::string costClass;                        ///< Substring on agentMetadata.costClass (e.g. "O(tile)")
   std::string modality;                         ///< rsContract dataKind / port-name match (e.g. "optical")
+  std::vector<std::string> modalities;          ///< Multiple modality filters (e.g. ["sar"])
   std::string bandRoles;                        ///< Comma list; ANY role in any port's rsContract bands
 };
 
