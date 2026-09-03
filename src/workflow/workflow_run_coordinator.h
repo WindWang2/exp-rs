@@ -24,6 +24,7 @@
 #include "workflow_checkpoint.h"
 #include "workflow_definition.h"
 #include "workflow_run.h"
+#include "workflow_run_lock.h"
 
 namespace sicnu {
 
@@ -79,6 +80,9 @@ class WorkflowRunCoordinator : public QObject {
     /// handed out directly; its internal locking keeps concurrent reads safe.
     std::shared_ptr<WorkflowRun> runForPipeline( long pipelineId ) const;
 
+    /// Current TaskCenter pipeline id tracked for @a runId (-1 when none).
+    long pipelineIdForRun( const std::string &runId ) const;
+
     /// All runs tracked by this process (live + terminal).
     std::vector<std::shared_ptr<WorkflowRun>> runs() const;
 
@@ -112,6 +116,9 @@ class WorkflowRunCoordinator : public QObject {
     std::map<long, std::shared_ptr<WorkflowRun>> m_runsByPipeline;
     std::map<std::string, long> m_pipelineByRunId;
     std::set<std::string> m_resuming; ///< concurrent resumeRun guard
+    /// Cross-process run ownership (#727): one held lock per executing run,
+    /// released at finalize / resume swap / submission failure.
+    std::map<std::string, std::shared_ptr<WorkflowRunLock>> m_locksByRunId;
     bool m_connected = false;
 };
 
