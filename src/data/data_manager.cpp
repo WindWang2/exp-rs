@@ -720,6 +720,34 @@ QVector<AssetId> DataManager::derivedOutputsOf( AssetId id ) const
   return result;
 }
 
+QVector<AssetId> DataManager::derivedOutputsOfCollection( CollectionId id ) const
+{
+  QVector<AssetId> result;
+  const auto colAssetId = AssetId::fromString( id.toString() );
+  for ( const auto &record : m_impl->records )
+  {
+    if ( !record.derivation )
+      continue;
+    if ( record.derivation->collectionId && *record.derivation->collectionId == id )
+    {
+      result.append( record.snapshot.id() );
+      continue;
+    }
+    if ( colAssetId )
+    {
+      for ( const DerivationInput &input : record.derivation->inputs )
+      {
+        if ( input.assetId == *colAssetId )
+        {
+          result.append( record.snapshot.id() );
+          break;
+        }
+      }
+    }
+  }
+  return result;
+}
+
 Result<void> DataManager::attachDerivationRecord( AssetId id,
                                                   const DerivationRecord &derivation )
 {

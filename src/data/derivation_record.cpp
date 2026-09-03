@@ -5,7 +5,9 @@
 
 #include "data_manager.h"
 
+#include <QFile>
 #include <QJsonArray>
+#include <QJsonDocument>
 
 namespace sicnu::data
 {
@@ -98,6 +100,13 @@ QJsonObject DerivationRecord::toJson() const
   json.insert( QStringLiteral( "workflowId" ), workflowId );
   json.insert( QStringLiteral( "workflowRunId" ), workflowRunId );
   json.insert( QStringLiteral( "stepId" ), stepId );
+  if ( collectionId )
+  {
+    json.insert( QStringLiteral( "collectionId" ), collectionId->toString() );
+    json.insert( QStringLiteral( "collectionRevision" ), static_cast<qint64>( collectionRevision ) );
+  }
+  if ( cacheHit )
+    json.insert( QStringLiteral( "cacheHit" ), true );
   return json;
 }
 
@@ -144,6 +153,20 @@ Result<DerivationRecord> DerivationRecord::fromJson( const QJsonObject &json )
   record.workflowId = json.value( QStringLiteral( "workflowId" ) ).toString();
   record.workflowRunId = json.value( QStringLiteral( "workflowRunId" ) ).toString();
   record.stepId = json.value( QStringLiteral( "stepId" ) ).toString();
+  if ( json.contains( QStringLiteral( "collectionId" ) ) )
+  {
+    const QString colIdStr = json.value( QStringLiteral( "collectionId" ) ).toString();
+    if ( !colIdStr.isEmpty() )
+    {
+      const auto parsedId = CollectionId::fromString( colIdStr );
+      if ( parsedId )
+        record.collectionId = *parsedId;
+    }
+    if ( json.contains( QStringLiteral( "collectionRevision" ) ) )
+      record.collectionRevision = json.value( QStringLiteral( "collectionRevision" ) ).toVariant().toULongLong();
+  }
+  if ( json.contains( QStringLiteral( "cacheHit" ) ) )
+    record.cacheHit = json.value( QStringLiteral( "cacheHit" ) ).toBool();
   return Result<DerivationRecord>::success( record );
 }
 
@@ -268,6 +291,203 @@ InputLineage resolveInputLineage( DataManager *dataManager, const QStringList &p
     input.revision = snapshot->revision();
     lineage.inputs.append( input );
   }
+  return lineage;
+}
+
+InputLineage resolveInputLineageForParams( DataManager *dataManager,
+                                          const QVariantMap &params,
+                                          const QStringList &excludePaths )
+{
+  // 1. Resolve standard parameter file paths
+  const QStringList genericPaths = findInputPathsInParams( params, excludePaths );
+  InputLineage lineage = resolveInputLineage( dataManager, genericPaths );
+
+  if ( !dataManager )
+    return lineage;
+
+  // 2. Resolve temporal collection parameter when present
+  if ( params.contains( QStringLiteral( "collection" ) ) )
+  {
+    const QString colParam = params.value( QStringLiteral( "collection" ) ).toString().trimmed();
+    if ( !colParam.isEmpty() )
+    {
+      std::optional<CollectionId> colId = CollectionId::fromString( colParam );
+      std::optional<TemporalCollectionRecord> colRecord;
+      if ( colId )
+      {
+        colRecord = dataManager->temporalCollection( *colId );
+      }
+      else
+      {
+        if ( QFile::exists( colParam ) )
+        {
+          QFile f( colParam );
+          if ( f.open( QIODevice::ReadOnly | QIODevice::Text ) )
+          {
+            const QString content = QString::fromUtf8( f.readAll() );
+            for ( const auto &rec : dataManager->temporalCollections() )
+            {
+              if ( rec.descriptor == content )
+              {
+                colRecord = rec;
+                colId = rec.id;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      if ( colRecord )
+      {
+        lineage.collectionId = colRecord->id;
+        lineage.collectionRevision = colRecord->revision;
+
+        const auto colAssetId = AssetId::fromString( colRecord->id.toString() );
+        if ( colAssetId )
+        {
+          DerivationInput colInput;
+          colInput.assetId = *colAssetId;
+          colInput.revision = AssetRevision::fromValue( colRecord->revision );
+          colInput.valueDomain = QStringLiteral( "temporal_collection" );
+          if ( !lineage.inputs.contains( colInput ) )
+            lineage.inputs.append( colInput );
+        }
+
+        const QByteArray jsonBytes = colRecord->descriptor.toUtf8();
+        const QJsonDocument doc = QJsonDocument::fromJson( jsonBytes );
+        if ( doc.isObject() )
+        {
+          const QJsonArray scenesArr = doc.object().value( QStringLiteral( "scenes" ) ).toArray();
+          for ( const QJsonValue &scVal : scenesArr )
+          {
+            if ( !scVal.isObject() )
+              continue;
+            const QJsonObject scObj = scVal.toObject();
+            const QString scenePath = scObj.value( QStringLiteral( "path" ) ).toString();
+            bool sceneResolved = false;
+
+            if ( !scenePath.isEmpty() )
+            {
+              const QFileInfo fi( scenePath );
+              const QString canonical = fi.canonicalFilePath();
+              const auto snapshot = dataManager->findByPath( canonical.isEmpty() ? scenePath : canonical );
+              if ( snapshot )
+              {
+                DerivationInput scIn;
+                scIn.assetId = snapshot->id();
+                scIn.revision = snapshot->revision();
+                scIn.valueDomain = QStringLiteral( "raster" );
+                if ( !lineage.inputs.contains( scIn ) )
+                  lineage.inputs.append( scIn );
+                sceneResolved = true;
+              }
+            }
+            if ( !sceneResolved && scObj.contains( QStringLiteral( "asset_id" ) ) )
+            {
+              const auto aid = AssetId::fromString( scObj.value( QStringLiteral( "asset_id" ) ).toString() );
+              if ( aid )
+              {
+                const auto snapshot = dataManager->asset( *aid );
+                if ( snapshot )
+                {
+                  DerivationInput scIn;
+                  scIn.assetId = snapshot->id();
+                  scIn.revision = snapshot->revision();
+                  scIn.valueDomain = QStringLiteral( "raster" );
+                  if ( !lineage.inputs.contains( scIn ) )
+                    lineage.inputs.append( scIn );
+                  sceneResolved = true;
+                }
+              }
+            }
+            if ( !sceneResolved && !scenePath.isEmpty() )
+            {
+              if ( !lineage.unresolvedPaths.contains( scenePath ) )
+                lineage.unresolvedPaths.append( scenePath );
+            }
+          }
+        }
+      }
+      else
+      {
+        if ( !lineage.unresolvedPaths.contains( colParam ) )
+          lineage.unresolvedPaths.append( colParam );
+      }
+    }
+  }
+
+  // 3. Resolve inline scenes parameter when present
+  if ( params.contains( QStringLiteral( "scenes" ) ) )
+  {
+    const QVariant scVar = params.value( QStringLiteral( "scenes" ) );
+    QVariantList scList;
+    if ( scVar.userType() == QMetaType::QStringList )
+    {
+      for ( const QString &s : scVar.toStringList() )
+        scList.append( s );
+    }
+    else if ( scVar.userType() == QMetaType::QVariantList )
+    {
+      scList = scVar.toList();
+    }
+    for ( const QVariant &entry : scList )
+    {
+      QString scPath;
+      QString assetIdStr;
+      if ( entry.userType() == QMetaType::QString )
+      {
+        scPath = entry.toString();
+      }
+      else if ( entry.userType() == QMetaType::QVariantMap )
+      {
+        const QVariantMap m = entry.toMap();
+        scPath = m.value( QStringLiteral( "path" ) ).toString();
+        assetIdStr = m.value( QStringLiteral( "asset_id" ) ).toString();
+      }
+      bool resolved = false;
+      if ( !scPath.isEmpty() )
+      {
+        const QFileInfo fi( scPath );
+        const QString canonical = fi.canonicalFilePath();
+        const auto snapshot = dataManager->findByPath( canonical.isEmpty() ? scPath : canonical );
+        if ( snapshot )
+        {
+          DerivationInput scIn;
+          scIn.assetId = snapshot->id();
+          scIn.revision = snapshot->revision();
+          scIn.valueDomain = QStringLiteral( "raster" );
+          if ( !lineage.inputs.contains( scIn ) )
+            lineage.inputs.append( scIn );
+          resolved = true;
+        }
+      }
+      if ( !resolved && !assetIdStr.isEmpty() )
+      {
+        const auto aid = AssetId::fromString( assetIdStr );
+        if ( aid )
+        {
+          const auto snapshot = dataManager->asset( *aid );
+          if ( snapshot )
+          {
+            DerivationInput scIn;
+            scIn.assetId = snapshot->id();
+            scIn.revision = snapshot->revision();
+            scIn.valueDomain = QStringLiteral( "raster" );
+            if ( !lineage.inputs.contains( scIn ) )
+              lineage.inputs.append( scIn );
+            resolved = true;
+          }
+        }
+      }
+      if ( !resolved && !scPath.isEmpty() )
+      {
+        if ( !lineage.unresolvedPaths.contains( scPath ) )
+          lineage.unresolvedPaths.append( scPath );
+      }
+    }
+  }
+
   return lineage;
 }
 

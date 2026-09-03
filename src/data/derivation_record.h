@@ -7,7 +7,10 @@
 #include <QVariantMap>
 #include <QVector>
 
+#include <optional>
+
 #include "asset_types.h"
+#include "collection_types.h"
 #include "data_result.h"
 
 namespace sicnu::data
@@ -65,9 +68,19 @@ struct InputLineage
 {
   QVector<DerivationInput> inputs;
   QStringList unresolvedPaths;
+  std::optional<CollectionId> collectionId;
+  quint64 collectionRevision = 0;
 };
 
 InputLineage resolveInputLineage( class DataManager *dataManager, const QStringList &paths );
+
+/// Parameter-aware input lineage resolution: resolves standard file paths,
+/// plus temporal collections (`collection` UUID or descriptor path) and
+/// inline scenes (`scenes` array) into authoritative `DerivationInput`
+/// records, preserving collection identity and scene-level revisions.
+InputLineage resolveInputLineageForParams( class DataManager *dataManager,
+                                          const QVariantMap &params,
+                                          const QStringList &excludePaths = QStringList() );
 
 /// Structured, serializable record describing how a derived Data Asset was
 /// produced: algorithm ID and version, a snapshot of the parameters, the input
@@ -112,6 +125,13 @@ struct DerivationRecord
   QString workflowId;
   QString workflowRunId;
   QString stepId;
+  /// Authoritative workspace temporal collection identity when the run consumed
+  /// a registered TemporalCollectionRecord.
+  std::optional<CollectionId> collectionId;
+  quint64 collectionRevision = 0;
+  /// Set to true when the result was served from the ExecutionResultCache
+  /// rather than newly computed.
+  bool cacheHit = false;
 
   QJsonObject toJson() const;
 
@@ -133,7 +153,10 @@ inline DerivationRecord makeTaskDerivation( const QString &algorithmId,
                                             const QJsonObject &parameters,
                                             const QString &taskReference,
                                             QVector<DerivationInput> inputs = {},
-                                            const QStringList &unresolvedInputPaths = {} )
+                                            const QStringList &unresolvedInputPaths = {},
+                                            std::optional<CollectionId> collectionId = std::nullopt,
+                                            quint64 collectionRevision = 0,
+                                            bool cacheHit = false )
 {
   DerivationRecord record;
   record.algorithmId = algorithmId;
@@ -148,6 +171,9 @@ inline DerivationRecord makeTaskDerivation( const QString &algorithmId,
   record.taskReference = taskReference;
   record.softwareVersion = QStringLiteral( "SICNU GEO RS 1.0" );
   record.completedAtUtc = QDateTime::currentDateTimeUtc();
+  record.collectionId = collectionId;
+  record.collectionRevision = collectionRevision;
+  record.cacheHit = cacheHit;
   return record;
 }
 
@@ -160,7 +186,10 @@ inline DerivationRecord makeWorkflowDerivation( const QString &algorithmId,
                                                 const QString &stepId,
                                                 const QString &taskReference = QString(),
                                                 QVector<DerivationInput> inputs = {},
-                                                const QStringList &unresolvedInputPaths = {} )
+                                                const QStringList &unresolvedInputPaths = {},
+                                                std::optional<CollectionId> collectionId = std::nullopt,
+                                                quint64 collectionRevision = 0,
+                                                bool cacheHit = false )
 {
   DerivationRecord record;
   record.algorithmId = algorithmId;
@@ -172,6 +201,9 @@ inline DerivationRecord makeWorkflowDerivation( const QString &algorithmId,
   record.inputs = std::move( inputs );
   record.unresolvedInputPaths = unresolvedInputPaths;
   record.completedAtUtc = QDateTime::currentDateTimeUtc();
+  record.collectionId = collectionId;
+  record.collectionRevision = collectionRevision;
+  record.cacheHit = cacheHit;
   return record;
 }
 
