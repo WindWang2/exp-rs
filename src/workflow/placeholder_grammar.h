@@ -33,6 +33,22 @@ struct PlaceholderRef
 std::vector<PlaceholderRef> parsePlaceholders( const std::string &text );
 
 /**
+ * Resolves the port a placeholder references against ONE completed step's
+ * result payload and canonical output path. This is the single port
+ * resolution policy for both fresh dispatch (TaskCenter) and crash resume
+ * (WorkflowRunCoordinator) — they must never drift (#727):
+ *   1. resultPayload[portName] (exact key, string, non-empty);
+ *   2. the canonical/default output: @p canonicalOutputPath when non-empty,
+ *      else resultPayload["output"];
+ *   3. case-insensitive portName scan of the payload's string values.
+ * Returns an empty string when nothing matches — the caller leaves the
+ * placeholder unresolved, identical on both paths.
+ */
+std::string resolvePlaceholderPort( const Json::Value &resultPayload,
+                                    const std::string &canonicalOutputPath,
+                                    const std::string &portName );
+
+/**
  * Replaces placeholders in text using a resolver callback.
  */
 std::string substitutePlaceholders( const std::string &text,

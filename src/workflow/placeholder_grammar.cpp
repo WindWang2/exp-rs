@@ -1,6 +1,8 @@
 // src/workflow/placeholder_grammar.cpp — Unified placeholder grammar module
 #include "placeholder_grammar.h"
 
+#include <QString>
+
 #include <cctype>
 #include <regex>
 
@@ -170,6 +172,47 @@ std::vector<PlaceholderRef> parsePlaceholders( const std::string &text )
   }
 
   return results;
+}
+
+std::string resolvePlaceholderPort( const Json::Value &resultPayload,
+                                    const std::string &canonicalOutputPath,
+                                    const std::string &portName )
+{
+  // 1. Exact port key, string, non-empty.
+  if ( resultPayload.isObject() && resultPayload.isMember( portName )
+       && resultPayload[portName].isString() )
+  {
+    const std::string s = resultPayload[portName].asString();
+    if ( !s.empty() )
+      return s;
+  }
+  // 2. Canonical/default output: the task's detected output path when the
+  //    caller has one, else the payload's "output" convention.
+  if ( !canonicalOutputPath.empty() )
+    return canonicalOutputPath;
+  if ( resultPayload.isObject() && resultPayload.isMember( "output" )
+       && resultPayload["output"].isString() )
+  {
+    const std::string s = resultPayload["output"].asString();
+    if ( !s.empty() )
+      return s;
+  }
+  // 3. Case-insensitive portName scan of the payload.
+  if ( resultPayload.isObject() )
+  {
+    for ( const auto &name : resultPayload.getMemberNames() )
+    {
+      if ( QString::fromStdString( name ).compare( QString::fromStdString( portName ),
+                                                   Qt::CaseInsensitive ) == 0
+           && resultPayload[name].isString() )
+      {
+        const std::string s = resultPayload[name].asString();
+        if ( !s.empty() )
+          return s;
+      }
+    }
+  }
+  return std::string();
 }
 
 std::string substitutePlaceholders( const std::string &text,
