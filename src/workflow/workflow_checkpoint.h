@@ -32,11 +32,21 @@ public:
 
   /// Recover interrupted runs: transitions any active non-terminal run (Running, Planning, WaitingResource, Cancelling)
   /// to Interrupted state, resets step plans stuck in Running/Cancelling back
-  /// to Pending, and saves the updated checkpoint back to disk. Runs whose
-  /// re-save fails are not reported as recovered (disk state is unchanged, so
-  /// the next recovery pass retries them). Orphaned .tmp files from crashed
-  /// saves are swept. Corrupt/unreadable checkpoints are skipped with a warning.
+  /// to Pending, and saves the updated checkpoint back to disk. Ownership-aware
+  /// (#727): a run whose lock is held by a live process is skipped untouched
+  /// (never reconciled, never reported); acquiring a run's lock proves its
+  /// previous owner is gone. Runs whose re-save fails are not reported as
+  /// recovered (disk state is unchanged, so the next recovery pass retries
+  /// them). Orphaned .tmp files from crashed saves are swept. Corrupt/
+  /// unreadable checkpoints are skipped with a warning.
   std::vector<std::shared_ptr<WorkflowRun>> recoverInterruptedRuns( const QString &directoryPath = QString() );
+
+  /// In-memory reconciliation shared by recoverInterruptedRuns and resumeRun
+  /// (#727): force-sets an active state (Running/Planning/WaitingResource/
+  /// Cancelling) to Interrupted and resets steps stuck in Running/Cancelling
+  /// to Pending. Returns false when @a run is not in an active state (nothing
+  /// to reconcile). Callers are responsible for persisting afterwards.
+  static bool reconcileToInterrupted( WorkflowRun &run );
 
   /// Default directory for workflow checkpoints.
   static QString defaultCheckpointDirectory();

@@ -11,6 +11,7 @@
 #include "data/execution_fingerprint.h"
 #include "workflow/workflow_run_coordinator.h"
 #include "workflow/workflow_checkpoint.h"
+#include "workflow/workflow_run_lock.h"
 #include "processing/framework/algorithm_meta_store.h"
 
 #include <QCoreApplication>
@@ -255,12 +256,14 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    // List checkpointed runs (--list-runs, #668): recover-then-list so a
-    // checkpoint left Running by a crashed process shows as interrupted.
+    // List checkpointed runs (--list-runs, #668): strictly READ-ONLY (#727).
+    // A run being executed by a live process holds its run lock — it is
+    // shown as running and its checkpoint is never rewritten to Interrupted
+    // by a listing. A stale Running checkpoint (owner process gone, lock
+    // free) is DISPLAYED as interrupted; the actual reconciliation to
+    // Interrupted happens on the next recovery/resume pass, under the lock.
     if (parser.isSet(listRunsOption)) {
-        auto &coordinator = sicnu::workflow::WorkflowRunCoordinator::instance();
-        const auto recovery = coordinator.recoverAtStartup(/*autoResume=*/false);
-        const QString dir = coordinator.checkpointDirectory();
+        const QString dir = sicnu::workflow::WorkflowRunCoordinator::instance().checkpointDirectory();
         std::cout << "Checkpointed runs in " << dir.toStdString() << ":\n";
         const QStringList checkpoints =
             sicnu::workflow::WorkflowCheckpointManager().listCheckpoints(dir);
@@ -282,14 +285,31 @@ int main(int argc, char *argv[])
             int completed = 0;
             for (const auto &plan : plans)
                 completed += (plan.status == "Completed") ? 1 : 0;
-            std::cout << "  " << run->runId() << "  state="
-                      << sicnu::workflow::workflowRunStateToString(run->state())
+            std::string stateText = sicnu::workflow::workflowRunStateToString(run->state());
+            const auto st = run->state();
+            if (st == sicnu::workflow::WorkflowRunState::Running
+                || st == sicnu::workflow::WorkflowRunState::Planning
+                || st == sicnu::workflow::WorkflowRunState::WaitingResource
+                || st == sicnu::workflow::WorkflowRunState::Cancelling) {
+                const auto probe = sicnu::workflow::WorkflowRunLock::probeOwner(
+                    sicnu::workflow::WorkflowRunLock::lockPathForRun(dir, run->runId()));
+                if (probe.state == sicnu::workflow::WorkflowRunLock::OwnerProbe::State::LiveOwner) {
+                    std::cout << "  " << run->runId() << "  state=" << stateText
+                              << "  owner=pid " << probe.pid << " (alive)";
+                } else {
+                    // Stale: the owner is gone; resume/recovery reconciles
+                    // this to Interrupted under the lock.
+                    std::cout << "  " << run->runId() << "  state=interrupted"
+                              << "  (stale — owner pid " << probe.pid
+                              << " is gone; resume reconciles)";
+                }
+                std::cout << "  steps=" << plans.size() << " (completed " << completed
+                          << ")  workflow=" << run->workflowId() << "\n";
+                continue;
+            }
+            std::cout << "  " << run->runId() << "  state=" << stateText
                       << "  steps=" << plans.size() << " (completed " << completed
                       << ")  workflow=" << run->workflowId() << "\n";
-        }
-        if (!recovery.errors.isEmpty()) {
-            for (const QString &note : recovery.errors)
-                std::cerr << "recovery warning: " << note.toStdString() << "\n";
         }
         return 0;
     }

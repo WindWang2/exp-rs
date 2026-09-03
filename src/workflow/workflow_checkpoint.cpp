@@ -1,5 +1,7 @@
 #include "workflow_checkpoint.h"
 
+#include "workflow_run_lock.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -157,6 +159,31 @@ QStringList WorkflowCheckpointManager::listCheckpoints( const QString &directory
   return result;
 }
 
+bool WorkflowCheckpointManager::reconcileToInterrupted( WorkflowRun &run )
+{
+  const WorkflowRunState st = run.state();
+  if ( st != WorkflowRunState::Running
+       && st != WorkflowRunState::Planning
+       && st != WorkflowRunState::WaitingResource
+       && st != WorkflowRunState::Cancelling )
+  {
+    return false;
+  }
+
+  run.forceSetState( WorkflowRunState::Interrupted );
+  run.setErrorMessage( "Execution interrupted by system shutdown/restart." );
+
+  // Reconcile step plans: a crash may have left steps marked as actively
+  // executing; a resumed run must treat them as not yet run.
+  const std::vector<StepPlan> plans = run.stepPlans();
+  for ( const StepPlan &plan : plans )
+  {
+    if ( plan.status == "Running" || plan.status == "Cancelling" )
+      run.setStepStatus( plan.stepId, "Pending" );
+  }
+  return true;
+}
+
 std::vector<std::shared_ptr<WorkflowRun>> WorkflowCheckpointManager::recoverInterruptedRuns( const QString &directoryPath )
 {
   const QString dir = directoryPath.isEmpty() ? defaultCheckpointDirectory() : directoryPath;
@@ -194,17 +221,27 @@ std::vector<std::shared_ptr<WorkflowRun>> WorkflowCheckpointManager::recoverInte
          || st == WorkflowRunState::WaitingResource
          || st == WorkflowRunState::Cancelling )
     {
-      run->forceSetState( WorkflowRunState::Interrupted );
-      run->setErrorMessage( "Execution interrupted by system shutdown/restart." );
-
-      // Reconcile step plans: a crash may have left steps marked as actively
-      // executing; a resumed run must treat them as not yet run.
-      const std::vector<StepPlan> plans = run->stepPlans();
-      for ( const StepPlan &plan : plans )
+      // Cross-process ownership (#727): a run held by a LIVE process is left
+      // exactly as it is — never reconciled, never rewritten, not reported.
+      // Acquiring the run lock proves the previous owner is gone (the kernel
+      // released its flock on death), which is what makes reconciliation safe.
+      WorkflowRunLock runLock( WorkflowRunLock::lockPathForRun( dir, run->runId() ) );
+      QString heldByPid;
+      const WorkflowRunLock::TryResult acquired = runLock.tryAcquire( &heldByPid );
+      if ( acquired == WorkflowRunLock::TryResult::HeldByLiveOwner )
       {
-        if ( plan.status == "Running" || plan.status == "Cancelling" )
-          run->setStepStatus( plan.stepId, "Pending" );
+        qInfo( "WorkflowCheckpointManager: run %s is owned by a live process (pid %s); not recovered",
+               run->runId().c_str(), qPrintable( heldByPid ) );
+        continue;
       }
+      if ( acquired == WorkflowRunLock::TryResult::Error )
+      {
+        qWarning( "WorkflowCheckpointManager: cannot lock run %s; not recovered",
+                  run->runId().c_str() );
+        continue;
+      }
+
+      ( void )reconcileToInterrupted( *run );
 
       const QString resavedPath = saveCheckpoint( *run, dir );
       if ( resavedPath.isEmpty() )
@@ -216,6 +253,7 @@ std::vector<std::shared_ptr<WorkflowRun>> WorkflowCheckpointManager::recoverInte
         continue;
       }
       recovered.push_back( std::shared_ptr<WorkflowRun>( std::move( run ) ) );
+      runLock.release(); // resumable again by whoever acquires the lock next
     }
   }
 

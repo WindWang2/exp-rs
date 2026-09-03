@@ -21,6 +21,7 @@ set(SICNU_WORKFLOW_CORE_SOURCES
   placeholder_grammar.cpp
   workflow_run.cpp
   workflow_checkpoint.cpp
+  workflow_run_lock.cpp
 )
 set(SICNU_WORKFLOW_RUNTIME_SOURCES
   workflow_runtime.cpp
