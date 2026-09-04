@@ -4354,6 +4354,11 @@ add_executable(test_data_manager_panel
   ${CMAKE_SOURCE_DIR}/src/app/panels/data_manager_panel.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/temporal_analysis_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
 )
 target_link_libraries(test_data_manager_panel PRIVATE
   Catch2::Catch2WithMain
@@ -4364,6 +4369,10 @@ target_link_libraries(test_data_manager_panel PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_jobs
+  sicnu_operators
   Sicnu::qgis_display
 )
 target_include_directories(test_data_manager_panel PRIVATE
@@ -5326,6 +5335,7 @@ if(SICNU_EMBED_PYTHON)
     ${CMAKE_SOURCE_DIR}/src/core/plugin_host.cpp
     ${CMAKE_SOURCE_DIR}/src/app/python/sicnu_app_interface.cpp
   )
+  target_link_libraries(test_workflow_resume_provenance PRIVATE sicnu_python_isolated)
   target_include_directories(test_workflow_resume_provenance PRIVATE
     ${CMAKE_SOURCE_DIR}/src/core
     ${CMAKE_SOURCE_DIR}/src/app
@@ -5488,6 +5498,9 @@ add_executable(test_m3_stress
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/temporal_analysis_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
 )
 target_link_libraries(test_m3_stress PRIVATE
   Catch2::Catch2WithMain
