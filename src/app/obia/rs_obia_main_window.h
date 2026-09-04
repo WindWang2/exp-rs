@@ -57,6 +57,18 @@ class RsObiaMainWindow : public QMainWindow
     /// id, or -1 if busy. Feature extraction chains automatically.
     long startSegmentationTask( const SegmentOptions &opts );
 
+    /// Two-level hierarchy via rs:obia_hierarchy. Returns the task id, or -1
+    /// if busy / no raster. Feature extraction chains automatically off the
+    /// fine labels raster once the build completes.
+    long startHierarchyTask( int spatialRadius, double rangeRadius, int minRegionSize,
+                             double watershedThreshold = 0.01 );
+
+    /// Object-feature extraction via rs:obia_features. `level < 0` uses the
+    /// flat segmentation labels. When `afterHierarchyBuild` is true, labels
+    /// come from the pending hierarchy fine raster even before the hierarchy
+    /// has been applied to the window. Returns the task id, or -1.
+    long startFeaturesTask( int level, bool afterHierarchyBuild );
+
     /// Load a raster into the session canvas (test-friendly path behind the
     /// Load Raster file dialog).
     bool loadRasterFile( const QString &path );
@@ -131,7 +143,6 @@ class RsObiaMainWindow : public QMainWindow
                                int activeLevel,
                                QMap<quint32, RsSegmentFeatures::SegmentStat> stats );
     void setActiveLevelMap( int level );
-    long startFeaturesTask( int level, bool afterHierarchyBuild );
     void applyLevelFeaturesResult( int level, QMap<quint32, RsSegmentFeatures::SegmentStat> stats );
     QVector<int> allBandIndices() const;
     RsFeatureSelection featureSelection() const;

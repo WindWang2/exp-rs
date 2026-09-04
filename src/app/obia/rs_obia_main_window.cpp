@@ -883,7 +883,17 @@ void RsObiaMainWindow::onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
             }
             m_pendingHierarchy = std::move( hierarchy );
             m_pendingFeaturesLevel = 0;
-            startFeaturesTask( 0, /*afterHierarchyBuild=*/true );
+            if ( startFeaturesTask( 0, /*afterHierarchyBuild=*/true ) < 0 )
+            {
+                const QString err = tr( "Could not start object-feature extraction on the hierarchy labels (%1)." )
+                                        .arg( m_hierarchyFinePath.isEmpty()
+                                                  ? tr( "no fine labels raster" )
+                                                  : m_hierarchyFinePath );
+                SICNU_LOG_ERROR( SicnuLogTags::OBIA, err );
+                QMessageBox::warning( this, tr( "Error" ), err );
+                m_pendingHierarchy.clear();
+                updateStatusLabel();
+            }
             return;
         }
 
@@ -1126,9 +1136,13 @@ long RsObiaMainWindow::startFeaturesTask( int level, bool afterHierarchyBuild )
 {
     if ( isBusy() )
         return -1;
-    // level < 0 = flat segmentation labels; otherwise the hierarchy level
-    // raster written by rs:obia_hierarchy's build mode.
-    const QString labelsPath = level < 0 ? m_segLabelsPath : levelLabelsPath( level );
+    // level < 0 = flat segmentation labels. The hierarchy-build chain
+    // calls this with afterHierarchyBuild=true before applyHierarchyResult
+    // sets mHasHierarchy, so levelLabelsPath(0) would still return the
+    // (possibly empty) flat seg_labels path — use the fine raster directly.
+    const QString labelsPath = afterHierarchyBuild
+                                   ? m_hierarchyFinePath
+                                   : ( level < 0 ? m_segLabelsPath : levelLabelsPath( level ) );
     if ( labelsPath.isEmpty() || mRasterPath.isEmpty() )
         return -1;
 
@@ -1265,12 +1279,18 @@ void RsObiaMainWindow::runHierarchicalSegmentation()
     const double rangeRadius = rangeSpin ? rangeSpin->value() : 15.0;
     const int minRegionSize = minRegionSpin ? minRegionSpin->value() : 100;
 
-    if ( isBusy() )
+    if ( startHierarchyTask( spatialRadius, rangeRadius, minRegionSize ) < 0 )
     {
         QMessageBox::information( this, tr( "OBIA" ),
                                   tr( "An OBIA task is already running." ) );
-        return;
     }
+}
+
+long RsObiaMainWindow::startHierarchyTask( int spatialRadius, double rangeRadius, int minRegionSize,
+                                           double watershedThreshold )
+{
+    if ( isBusy() || mRasterPath.isEmpty() )
+        return -1;
 
     m_hierarchyFinePath = scratchPath( QStringLiteral( "hier_fine.tif" ) );
     m_hierarchyCoarsePath = scratchPath( QStringLiteral( "hier_coarse.tif" ) );
@@ -1290,9 +1310,9 @@ void RsObiaMainWindow::runHierarchicalSegmentation()
 
     const Json::Value params = RsObiaOperatorAdapter::buildHierarchyBuildParams(
         mRasterPath, m_hierarchyFinePath, m_hierarchyCoarsePath, m_hierarchyParentsPath,
-        spatialRadius, rangeRadius, minRegionSize, /*watershedThreshold=*/0.01 );
-    submitOperatorTask( QStringLiteral( "rs:obia_hierarchy" ), params,
-                        tr( "OBIA hierarchical segment" ) );
+        spatialRadius, rangeRadius, minRegionSize, watershedThreshold );
+    return submitOperatorTask( QStringLiteral( "rs:obia_hierarchy" ), params,
+                               tr( "OBIA hierarchical segment" ) );
 }
 
 void RsObiaMainWindow::onActiveLevelChanged( int level )

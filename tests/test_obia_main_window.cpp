@@ -21,6 +21,7 @@
 #include <QComboBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QFileInfo>
 #include <QSpinBox>
 #include <QTemporaryDir>
 #include <QToolBar>
@@ -93,6 +94,29 @@ QString createTestRaster( const QString &dir )
     }
     GDALClose( ds );
     return path;
+}
+
+// Matching-size UInt32 labels at an explicit path so rs:obia_features cannot
+// fail-fast on a missing file before the dispatch pin inspects the job.
+bool createLabelRaster( const QString &path, int w, int h )
+{
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    if ( !driver )
+        return false;
+    GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), w, h, 1,
+                                  GDT_UInt32, nullptr );
+    if ( !ds )
+        return false;
+    QVector<quint32> row( w );
+    for ( int r = 0; r < h; ++r )
+    {
+        for ( int c = 0; c < w; ++c )
+            row[c] = static_cast<quint32>( ( r * w + c ) % 17 + 1 );
+        GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, r, w, 1,
+                      row.data(), w, 1, GDT_UInt32, 0, 0 );
+    }
+    GDALClose( ds );
+    return true;
 }
 
 } // namespace
@@ -240,6 +264,55 @@ TEST_CASE( "ObiaMainWindow: busy gate rejects concurrent tasks", "[obia][ui][dis
 
     RsObiaMainWindow::SegmentOptions second = opts;
     REQUIRE( window.startSegmentationTask( second ) == -1 );
+
+    window.cancelActiveTask();
+    REQUIRE( !window.isBusy() );
+}
+
+TEST_CASE( "ObiaMainWindow: hierarchy-chain features uses the fine labels raster", "[obia][ui][dispatch]" )
+{
+    ensureApp();
+
+    RsObiaMainWindow window;
+
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString raster = createLargeTestRaster( tmp.path() );
+    REQUIRE( !raster.isEmpty() );
+    REQUIRE( window.loadRasterFile( raster ) );
+
+    // Stage hierarchy outputs the same way the Hierarchy button does, then
+    // cancel before the operator finishes — mHasHierarchy is still false,
+    // which is the chain-time state inside PendingOp::Hierarchy.
+    const long hierId = window.startHierarchyTask( 5, 15.0, 10 );
+    REQUIRE( hierId > 0 );
+    REQUIRE( window.pendingOp() == RsObiaMainWindow::PendingOp::Hierarchy );
+
+    const auto hierInfo = sicnu::TaskCenter::instance().getTaskInfo( hierId );
+    REQUIRE( hierInfo.algorithmId == QStringLiteral( "rs:obia_hierarchy" ) );
+    const QString finePath = QString::fromStdString(
+        hierInfo.jobRequest.params["outputFine"].asString() );
+    REQUIRE( QFileInfo( finePath ).fileName() == QStringLiteral( "hier_fine.tif" ) );
+
+    window.cancelActiveTask();
+    REQUIRE( !window.isBusy() );
+
+    REQUIRE( createLabelRaster( finePath, 2048, 2048 ) );
+
+    // The chained call PendingOp::Hierarchy makes after rehydrate:
+    // startFeaturesTask( 0, /*afterHierarchyBuild=*/true ). Labels must be
+    // the hierarchy fine raster, not empty / not the flat seg_labels.tif.
+    const long featId = window.startFeaturesTask( 0, /*afterHierarchyBuild=*/true );
+    REQUIRE( featId > 0 );
+    REQUIRE( window.pendingOp() == RsObiaMainWindow::PendingOp::HierarchyFeatures );
+
+    const auto featInfo = sicnu::TaskCenter::instance().getTaskInfo( featId );
+    REQUIRE( featInfo.algorithmId == QStringLiteral( "rs:obia_features" ) );
+    const QString labels = QString::fromStdString(
+        featInfo.jobRequest.params["labels"].asString() );
+    REQUIRE( labels == finePath );
+    REQUIRE( QFileInfo( labels ).fileName() == QStringLiteral( "hier_fine.tif" ) );
+    REQUIRE( !labels.contains( QStringLiteral( "seg_labels.tif" ) ) );
 
     window.cancelActiveTask();
     REQUIRE( !window.isBusy() );
