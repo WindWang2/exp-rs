@@ -29,9 +29,28 @@ struct TileInferenceStats
   int tilesPlanned = 0;
   int tilesProcessed = 0;
   int tilesSkippedNoData = 0; ///< tiles whose forward pass was skipped (all core pixels nodata, #705)
-  int outBands = 0;       ///< model output channels written
+  int outBands = 0;       ///< model output channels written (all heads + uncertainty)
   int outWidth = 0;       ///< output raster width (== input width)
   int outHeight = 0;      ///< output raster height (== input height)
+  /// Channel count per output head in band order (Platform 3.0 multi-head
+  /// layout; the uncertainty band, when any, is counted in its head's entry).
+  std::vector<int> headChannels;
+};
+
+/// Optional knobs for one engine run (Platform 3.0, goal §10).
+enum class TtaMode
+{
+  None,    ///< single forward pass per tile
+  HFlip,   ///< average logits with the horizontal flip
+  HVFlip,  ///< average logits with horizontal + vertical flips
+};
+
+struct TileInferenceRunOptions
+{
+  TtaMode tta = TtaMode::None;
+  /// Hard cap on the batch size (0 = budget-aware auto sizing). Tests and the
+  /// operator surface use this to pin memory behavior.
+  int batchSizeOverride = 0;
 };
 
 class TileInferenceEngine
@@ -52,10 +71,34 @@ class TileInferenceEngine
     TileInferenceStats run( const std::string &inputPath, const std::vector<int> &bands,
                             const std::string &outputPath, RSOperatorContext &context );
 
+    /// Same contract with Platform-3.0 knobs (TTA, batch cap).
+    TileInferenceStats run( const std::string &inputPath, const std::vector<int> &bands,
+                            const std::string &outputPath, RSOperatorContext &context,
+                            const TileInferenceRunOptions &options );
+
     /// Effective tile geometry for a raster (manifest tiling contract +
     /// fixed graph input size fallback, engine floor of 16 px).
     static int effectiveTileSize( const ModelInfo &model );
     static int effectiveHalo( const ModelInfo &model );
+
+    /// Platform 3.0: budget-aware batch size. Clamps the manifest batch by the
+    /// VRAM budget (GPU) / a conservative RAM share (CPU) given the per-sample
+    /// working set; never returns < 1.
+    static int effectiveBatchSize( const ModelInfo &model,
+                                   const ModelHardwareCapabilities &hw,
+                                   int tilePx, int fedChannels );
+
+    /// The declared uncertainty method for output heads ("" = none); one of
+    /// "entropy" | "margin" (manifest output.uncertainty).
+    static std::string uncertaintyMethod( const ModelInfo &model );
+
+    /// Platform 3.0: uncertainty band for one tile's class-probability head.
+    /// @a classPlanes are the head's C channel planes (already stitched to the
+    /// core tile, logits or probabilities — softmax is applied here for
+    /// entropy). "entropy" → softmax entropy in [0, ln C]; "margin" →
+    /// top1 − top2 probability gap. Returns an empty Mat for C < 2.
+    static cv::Mat headUncertainty( const std::vector<cv::Mat> &classPlanes,
+                                    const std::string &method );
 
     // --- Manifest contract validators (#690 / #705) ---------------------------
     // Pure functions shared by run() and the unit tests: they return an empty

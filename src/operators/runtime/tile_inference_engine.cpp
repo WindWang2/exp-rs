@@ -202,20 +202,41 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                                              const std::string &outputPath,
                                              RSOperatorContext &context )
 {
+  return run( inputPath, bands, outputPath, context, TileInferenceRunOptions{} );
+}
+
+TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
+                                             const std::vector<int> &bands,
+                                             const std::string &outputPath,
+                                             RSOperatorContext &context,
+                                             const TileInferenceRunOptions &options )
+{
   if ( !m_runtime )
     throw RSOperatorError( ErrorCode::ComputationError, "tile inference engine has no runtime session" );
 
   // Manifest output.tensor_names contract (#705): every declared name must
   // exist in the loaded graph; the first declared name selects the head the
   // engine consumes. Skipped when the runtime cannot enumerate its outputs.
-  std::string outputTensorName;
+  // Platform 3.0 multi-head: when the runtime can enumerate its outputs, ALL
+  // declared tensor names are consumed and their channels stacked in manifest
+  // order. Without enumeration the contract stays advisory and only the first
+  // declared name (or the default head) is used — the historical behavior.
+  std::vector<std::string> headNames;
   if ( !m_model.output.tensorNames.empty() )
   {
-    outputTensorName = m_model.output.tensorNames.front();
     if ( const std::string missing = missingOutputTensor( m_model, m_runtime->outputTensorNames() );
          !missing.empty() )
       throw RSOperatorError( ErrorCode::InvalidInputData, missing );
+    if ( m_runtime->outputTensorNames().empty() )
+      headNames = { m_model.output.tensorNames.front() };
+    else
+      headNames = m_model.output.tensorNames;
   }
+  else
+  {
+    headNames = { std::string() };
+  }
+  const std::string uncertainty = uncertaintyMethod( m_model );
 
   GdalDatasetWrapper ds;
   if ( !ds.open( QString::fromStdString( inputPath ) ) )
@@ -280,7 +301,10 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
 
   const int tileSize = std::min( effectiveTileSize( m_model ), std::max( rasterW, rasterH ) );
   const int halo = std::max( 0, effectiveHalo( m_model ) );
-  const int batchSize = std::max( 1, m_model.tiling.batchSize );
+  int batchSize = effectiveBatchSize( m_model, ModelRuntimeRegistry::instance().hardware(),
+                                      tileSize, bandCount );
+  if ( options.batchSizeOverride > 0 )
+    batchSize = options.batchSizeOverride;
   const bool resizeToInput = pre.resize == "to_input" && m_model.input.width > 0 && m_model.input.height > 0;
   const int modelW = resizeToInput ? m_model.input.width : 0;
   const int modelH = resizeToInput ? m_model.input.height : 0;
@@ -442,131 +466,232 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     {
       throw RSOperatorError( ErrorCode::OpenCvError, "failed to build inference blob (unknown)" );
     }
-    cv::Mat output;
-    try
+    // TTA helper: average the head logits over horizontal/vertical flips so
+    // the result stays on the original orientation (Platform 3.0 goal §10;
+    // opt-in via run options — compute doubles, honest default off).
+    auto forwardHead = [ & ]( const std::string &headName ) -> cv::Mat {
+      auto forwardOnce = [ & ]( const cv::Mat &b ) -> cv::Mat {
+        try
+        {
+          return headName.empty() ? m_runtime->infer( b ) : m_runtime->infer( b, headName );
+        }
+        catch ( const RSOperatorError & )
+        {
+          throw;
+        }
+        catch ( const std::exception &e )
+        {
+          throw RSOperatorError( ErrorCode::ComputationError,
+                                 std::string( "inference forward pass failed: " ) + e.what() );
+        }
+      };
+      cv::Mat output = forwardOnce( blob );
+      if ( options.tta == TtaMode::None )
+        return output;
+      cv::Mat flipped;
+      cv::flip( blob, flipped, 1 );
+      cv::Mat outH = forwardOnce( flipped );
+      cv::flip( outH, outH, 1 );
+      output += outH;
+      if ( options.tta == TtaMode::HVFlip )
+      {
+        cv::flip( blob, flipped, 0 );
+        cv::Mat outV = forwardOnce( flipped );
+        cv::flip( outV, outV, 0 );
+        output += outV;
+        cv::flip( blob, flipped, -1 );
+        cv::Mat outHV = forwardOnce( flipped );
+        cv::flip( outHV, outHV, -1 );
+        output += outHV;
+        output *= 0.25;
+      }
+      else
+      {
+        output *= 0.5;
+      }
+      return output;
+    };
+
+    // Forward every declared head (multi-head = one forward per head; the
+    // shared session serializes them). Heads are validated with the same
+    // contracts as the historical single-head path.
+    std::vector<cv::Mat> headOutputs( headNames.size() );
+    for ( std::size_t h = 0; h < headNames.size(); ++h )
     {
-      output = outputTensorName.empty() ? m_runtime->infer( blob )
-                                        : m_runtime->infer( blob, outputTensorName );
+      const std::string &headName = headNames[h];
+      cv::Mat output = forwardHead( headName );
+      if ( output.dims != 4 || output.size[0] != static_cast<int>( batchMats.size() ) )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "model output is not a 4-D NCHW batch matching the input tiles (got dims="
+                                 + std::to_string( output.dims ) + ", N=" + std::to_string( output.size[0] ) + ")" );
+      if ( const std::string typeError = outputTypeMismatch( output.type(), headName );
+           !typeError.empty() )
+        throw RSOperatorError( ErrorCode::InvalidInputData, typeError );
+      if ( output.size[1] <= 0 )
+        throw RSOperatorError( ErrorCode::ComputationError, "model output has no channels" );
+      if ( const std::string classesError = classesChannelMismatch( m_model, output.size[1], headName );
+           !classesError.empty() )
+        throw RSOperatorError( ErrorCode::InvalidInputData, classesError );
+      headOutputs[h] = output;
     }
-    catch ( const std::exception &e )
+
+    // Band layout: every head's channels in declaration order, plus one
+    // uncertainty band after the first head with >= 2 channels when the
+    // manifest declares output.uncertainty (classification/segmentation
+    // semantics).
+    const bool addUncertainty = !uncertainty.empty();
+    int totalBands = 0;
+    std::vector<int> headChannelList( headOutputs.size() );
+    int uncertaintyHeadIndex = -1;
+    for ( std::size_t h = 0; h < headOutputs.size(); ++h )
     {
-      throw RSOperatorError( ErrorCode::ComputationError,
-                             std::string( "inference forward pass failed: " ) + e.what() );
+      headChannelList[h] = headOutputs[h].size[1];
+      totalBands += headChannelList[h];
+      if ( addUncertainty && uncertaintyHeadIndex < 0 && headChannelList[h] >= 2 )
+        uncertaintyHeadIndex = static_cast<int>( h );
     }
-    if ( output.dims != 4 || output.size[0] != static_cast<int>( batchMats.size() ) )
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "model output is not a 4-D NCHW batch matching the input tiles (got dims="
-                               + std::to_string( output.dims ) + ", N=" + std::to_string( output.size[0] ) + ")" );
-    // #690: the writer emits GDT_Float32 and planes are written via
-    // ptr<float>() — any other output depth would be bit-cast into garbage
-    // on disk.
-    if ( const std::string typeError = outputTypeMismatch( output.type(), outputTensorName );
-         !typeError.empty() )
-      throw RSOperatorError( ErrorCode::InvalidInputData, typeError );
-    const int outChannels = output.size[1];
-    const int outH = output.size[2];
-    const int outW = output.size[3];
-    if ( outChannels <= 0 )
-      throw RSOperatorError( ErrorCode::ComputationError, "model output has no channels" );
-    // #705: a declared classes count is a shape contract on the class-
-    // index/probability head (one channel per class).
-    if ( const std::string classesError = classesChannelMismatch( m_model, outChannels, outputTensorName );
-         !classesError.empty() )
-      throw RSOperatorError( ErrorCode::InvalidInputData, classesError );
+    const int uncertaintyBandOffset = uncertaintyHeadIndex >= 0 ? totalBands : -1;
+    if ( uncertaintyHeadIndex >= 0 )
+      ++totalBands;
 
     if ( !writer )
     {
       writer = std::make_unique<GdalStreamingOutput>( QString::fromStdString( outputPath ),
-                                                      rasterW, rasterH, outChannels, /*GDT_Float32*/ 6,
+                                                      rasterW, rasterH, totalBands, /*GDT_Float32*/ 6,
                                                       geoTransform, projection );
       if ( !writer->isOpen() )
         throw RSOperatorError( ErrorCode::FileNotWritable, "failed to create output raster: " + outputPath );
       writer->setNoDataValue( std::numeric_limits<double>::quiet_NaN() );
-      stats.outBands = outChannels;
+      stats.outBands = totalBands;
+      stats.headChannels = headChannelList;
+      if ( uncertaintyHeadIndex >= 0 )
+        stats.headChannels[static_cast<std::size_t>( uncertaintyHeadIndex )] += 1;
+      // Record the head layout so downstream consumers can split the stack.
+      {
+        QString layout;
+        for ( std::size_t h = 0; h < headNames.size(); ++h )
+        {
+          if ( h )
+            layout += QLatin1Char( ',' );
+          const QString name = headNames[h].empty() ? QStringLiteral( "default" )
+                                                    : QString::fromStdString( headNames[h] );
+          layout += QString( "%1:%2" ).arg( name ).arg( headChannelList[h] );
+        }
+        if ( uncertaintyHeadIndex >= 0 )
+          layout += QString( ",uncertainty:%1" ).arg( uncertainty );
+        writer->setMetadataItem( QStringLiteral( "SICNU_OUTPUT_HEADS" ), layout );
+      }
     }
-    else if ( outChannels != stats.outBands )
+    else if ( totalBands != stats.outBands )
     {
       throw RSOperatorError( ErrorCode::ComputationError,
                              "model output channel count changed mid-run (" + std::to_string( stats.outBands )
-                               + " → " + std::to_string( outChannels ) + ")" );
+                               + " → " + std::to_string( totalBands ) + ")" );
     }
 
     // The writer exists now, so NoData tiles deferred by earlier all-nodata
     // batches can go straight to disk.
     flushDeferredNoData( currentTileIndex );
 
-    const cv::Mat flat = output.reshape( 1, std::vector<int>{ static_cast<int>( batchMats.size() ) * outChannels,
-                                                             outH * outW } );
-    for ( std::size_t bi = 0; bi < batchMats.size(); ++bi )
+    int bandOffset = 0;
+    for ( std::size_t h = 0; h < headOutputs.size(); ++h )
     {
-      const CoreTile &bt = batchCores[bi];
-      const int fedW = batchFedSize[bi].first;
-      const int fedH = batchFedSize[bi].second;
-      for ( int c = 0; c < outChannels; ++c )
+      const cv::Mat &output = headOutputs[h];
+      const std::string &headName = headNames[h];
+      const int outChannels = output.size[1];
+      const int outH = output.size[2];
+      const int outW = output.size[3];
+      const bool isUncertaintyHead = ( uncertaintyHeadIndex == static_cast<int>( h ) );
+      const cv::Mat flat = output.reshape( 1, std::vector<int>{ static_cast<int>( batchMats.size() ) * outChannels,
+                                                               outH * outW } );
+      for ( std::size_t bi = 0; bi < batchMats.size(); ++bi )
       {
-        cv::Mat plane = flat.row( static_cast<int>( bi ) * outChannels + c )
-                          .reshape( 1, outH )
-                          .clone(); // (outH, outW) CV_32F
-        // Map the output plane back onto the core tile. Grid-preserving
-        // models (out == fed spatial size): CROP the halo margin away — the
-        // core pixels are [halo, halo+core) so overlapping windows never
-        // shift or duplicate output. Models that change the spatial dims
-        // (strided heads): resample back to the core size.
-        if ( outW == fedW && outH == fedH )
+        const CoreTile &bt = batchCores[bi];
+        const int fedW = batchFedSize[bi].first;
+        const int fedH = batchFedSize[bi].second;
+        // Stitched (core-size) planes of this tile for the uncertainty pass.
+        std::vector<cv::Mat> headPlanes;
+        if ( isUncertaintyHead && !uncertainty.empty() )
+          headPlanes.reserve( static_cast<std::size_t>( outChannels ) );
+        for ( int c = 0; c < outChannels; ++c )
         {
-          if ( resizeToInput )
+          cv::Mat plane = flat.row( static_cast<int>( bi ) * outChannels + c )
+                            .reshape( 1, outH )
+                            .clone(); // (outH, outW) CV_32F
+          // Map the output plane back onto the core tile. Grid-preserving
+          // models (out == fed spatial size): CROP the halo margin away — the
+          // core pixels are [halo, halo+core) so overlapping windows never
+          // shift or duplicate output. Models that change the spatial dims
+          // (strided heads): resample back to the core size.
+          if ( outW == fedW && outH == fedH )
           {
-            // The window was resampled to the fixed model input before the
-            // forward pass; scale the core rect accordingly.
-            const double sxF = static_cast<double>( outW ) / std::max( 1, bt.w + 2 * halo );
-            const double syF = static_cast<double>( outH ) / std::max( 1, bt.h + 2 * halo );
-            int cx = static_cast<int>( std::lround( halo * sxF ) );
-            int cy = static_cast<int>( std::lround( halo * syF ) );
-            int cw = std::max( 1, static_cast<int>( std::lround( bt.w * sxF ) ) );
-            int ch = std::max( 1, static_cast<int>( std::lround( bt.h * syF ) ) );
-            cx = std::clamp( cx, 0, std::max( 0, outW - 1 ) );
-            cy = std::clamp( cy, 0, std::max( 0, outH - 1 ) );
-            cw = std::min( cw, outW - cx );
-            ch = std::min( ch, outH - cy );
-            plane = plane( cv::Range( cy, cy + ch ), cv::Range( cx, cx + cw ) ).clone();
-            if ( plane.cols != bt.w || plane.rows != bt.h )
-              cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, interp );
+            if ( resizeToInput )
+            {
+              // The window was resampled to the fixed model input before the
+              // forward pass; scale the core rect accordingly.
+              const double sxF = static_cast<double>( outW ) / std::max( 1, bt.w + 2 * halo );
+              const double syF = static_cast<double>( outH ) / std::max( 1, bt.h + 2 * halo );
+              int cx = static_cast<int>( std::lround( halo * sxF ) );
+              int cy = static_cast<int>( std::lround( halo * syF ) );
+              int cw = std::max( 1, static_cast<int>( std::lround( bt.w * sxF ) ) );
+              int ch = std::max( 1, static_cast<int>( std::lround( bt.h * syF ) ) );
+              cx = std::clamp( cx, 0, std::max( 0, outW - 1 ) );
+              cy = std::clamp( cy, 0, std::max( 0, outH - 1 ) );
+              cw = std::min( cw, outW - cx );
+              ch = std::min( ch, outH - cy );
+              plane = plane( cv::Range( cy, cy + ch ), cv::Range( cx, cx + cw ) ).clone();
+              if ( plane.cols != bt.w || plane.rows != bt.h )
+                cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, interp );
+            }
+            else if ( halo > 0 && outW == fedW && outH == fedH )
+            {
+              // Grid-preserving with halo: crop the halo border away.
+              plane = plane( cv::Range( halo, halo + bt.h ), cv::Range( halo, halo + bt.w ) ).clone();
+            }
           }
-          else if ( halo > 0 && outW == fedW && outH == fedH )
+          else if ( outW != bt.w || outH != bt.h )
           {
-            // Grid-preserving with halo: crop the halo border away.
-            plane = plane( cv::Range( halo, halo + bt.h ), cv::Range( halo, halo + bt.w ) ).clone();
+            cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, interp );
           }
-        }
-        else if ( outW != bt.w || outH != bt.h )
-        {
-          cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, interp );
-        }
-        if ( m_model.postprocess.maskThreshold >= 0.0 )
-        {
-          const float thr = static_cast<float>( m_model.postprocess.maskThreshold );
-          cv::Mat mask = plane >= thr; // NaN ≥ thr is false → 0, restored below
-          mask.convertTo( plane, CV_32F, 1.0 / 255.0 );
-        }
-        // Restore nodata on core pixels whose every input band was invalid.
-        const cv::Mat &tileMask = batchMasks[bi];
-        for ( int row = 0; row < bt.h; ++row )
-        {
-          const uchar *maskRow = tileMask.ptr<uchar>( row );
-          float *outRow = plane.ptr<float>( row );
-          for ( int col = 0; col < bt.w; ++col )
+          if ( m_model.postprocess.maskThreshold >= 0.0 )
           {
-            if ( maskRow[col] )
-              outRow[col] = std::numeric_limits<float>::quiet_NaN();
+            const float thr = static_cast<float>( m_model.postprocess.maskThreshold );
+            cv::Mat mask = plane >= thr; // NaN ≥ thr is false → 0, restored below
+            mask.convertTo( plane, CV_32F, 1.0 / 255.0 );
           }
+          // Restore nodata on core pixels whose every input band was invalid.
+          const cv::Mat &tileMask = batchMasks[bi];
+          for ( int row = 0; row < bt.h; ++row )
+          {
+            const uchar *maskRow = tileMask.ptr<uchar>( row );
+            float *outRow = plane.ptr<float>( row );
+            for ( int col = 0; col < bt.w; ++col )
+            {
+              if ( maskRow[col] )
+                outRow[col] = std::numeric_limits<float>::quiet_NaN();
+            }
+          }
+          if ( isUncertaintyHead )
+            headPlanes.push_back( plane );
+          const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
+                                                 currentTileIndex, totalTiles };
+          if ( !writer->writeTile( bandOffset + c + 1, writeTile, plane.ptr<float>() ) )
+            throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write output tile at ("
+                                   + std::to_string( bt.x ) + ", " + std::to_string( bt.y ) + ")" );
         }
-        const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
-                                               currentTileIndex, totalTiles };
-        if ( !writer->writeTile( c + 1, writeTile, plane.ptr<float>() ) )
-          throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write output tile at ("
-                                 + std::to_string( bt.x ) + ", " + std::to_string( bt.y ) + ")" );
+        if ( isUncertaintyHead && uncertaintyBandOffset >= 0 )
+        {
+          cv::Mat unc = headUncertainty( headPlanes, uncertainty );
+          const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
+                                                 currentTileIndex, totalTiles };
+          if ( !writer->writeTile( uncertaintyBandOffset + 1, writeTile, unc.ptr<float>() ) )
+            throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write uncertainty tile" );
+        }
+        // Tiles are counted once (on the first head); heads share one tile.
+        if ( h == 0 )
+          ++done;
       }
-      ++done;
+      bandOffset += outChannels;
     }
     batchMats.clear();
     batchMasks.clear();
@@ -757,6 +882,118 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   context.reportProgressForced( 1.0, "Tiled inference complete" );
   stats.tilesProcessed = done;
   return stats;
+}
+
+int TileInferenceEngine::effectiveBatchSize( const ModelInfo &model,
+                                             const ModelHardwareCapabilities &hw,
+                                             int tilePx, int fedChannels )
+{
+  // Manifest request first; the budget can only lower it.
+  int batch = std::max( 1, model.tiling.batchSize );
+  const int tile = std::max( kMinTileSize, tilePx );
+  // Per-sample working set: input blob + output planes + halo overhead.
+  const unsigned long long perSampleBytes =
+    4ULL * static_cast<unsigned long long>( tile ) * tile
+      * static_cast<unsigned long long>( std::max( 1, fedChannels ) ) * 4ULL;
+  // The GPU budget is a hard ceiling; the CPU share is conservative (the
+  // host's task admission owns the real RAM budget, this only stops a
+  // manifest-declared batch from absurdly overshooting a small budget).
+  unsigned long long budgetBytes = 0;
+  if ( model.runtime.gpu && hw.vramBudgetMb > 0 )
+    budgetBytes = static_cast<unsigned long long>( hw.vramBudgetMb ) * 1024ULL * 1024ULL;
+  else if ( hw.vramBudgetMb > 0 && model.runtime.estimatedVramMb > 0 )
+    budgetBytes = static_cast<unsigned long long>( hw.vramBudgetMb ) * 1024ULL * 1024ULL;
+  if ( budgetBytes > 0 && perSampleBytes > 0 )
+  {
+    const int budgetBatch = static_cast<int>( std::max<unsigned long long>(
+      1, budgetBytes / std::max<unsigned long long>( perSampleBytes, 1 ) ) );
+    batch = std::min( batch, budgetBatch );
+  }
+  return std::max( 1, batch );
+}
+
+std::string TileInferenceEngine::uncertaintyMethod( const ModelInfo &model )
+{
+  const std::string &u = model.output.uncertainty;
+  if ( u.empty() || u == "none" )
+    return {};
+  if ( u == "entropy" || u == "margin" )
+    return u;
+  return {}; // unknown tokens are rejected at manifest parse
+}
+
+cv::Mat TileInferenceEngine::headUncertainty( const std::vector<cv::Mat> &classPlanes,
+                                              const std::string &method )
+{
+  const int channels = static_cast<int>( classPlanes.size() );
+  if ( channels < 2 || classPlanes.front().empty() )
+    return cv::Mat();
+  const int rows = classPlanes.front().rows;
+  const int cols = classPlanes.front().cols;
+  cv::Mat result( rows, cols, CV_32F );
+
+  if ( method == "margin" )
+  {
+    // Probabilities via softmax first, then top1 − top2 gap.
+    for ( int r = 0; r < rows; ++r )
+    {
+      float *outRow = result.ptr<float>( r );
+      for ( int c = 0; c < cols; ++c )
+      {
+        float maxLogit = -std::numeric_limits<float>::infinity();
+        for ( const cv::Mat &plane : classPlanes )
+          maxLogit = std::max( maxLogit, plane.at<float>( r, c ) );
+        double sum = 0.0;
+        double top1 = 0.0;
+        double top2 = 0.0;
+        for ( const cv::Mat &plane : classPlanes )
+        {
+          const double p = std::exp( static_cast<double>( plane.at<float>( r, c ) ) - maxLogit );
+          sum += p;
+        }
+        for ( const cv::Mat &plane : classPlanes )
+        {
+          const double p = std::exp( static_cast<double>( plane.at<float>( r, c ) ) - maxLogit ) / sum;
+          if ( p > top1 )
+          {
+            top2 = top1;
+            top1 = p;
+          }
+          else if ( p > top2 )
+          {
+            top2 = p;
+          }
+        }
+        outRow[c] = static_cast<float>( top1 - top2 );
+      }
+    }
+    return result;
+  }
+
+  // Default: softmax entropy in [0, ln C].
+  const double logC = std::log( static_cast<double>( channels ) );
+  for ( int r = 0; r < rows; ++r )
+  {
+    float *outRow = result.ptr<float>( r );
+    for ( int c = 0; c < cols; ++c )
+    {
+      float maxLogit = -std::numeric_limits<float>::infinity();
+      for ( const cv::Mat &plane : classPlanes )
+        maxLogit = std::max( maxLogit, plane.at<float>( r, c ) );
+      double sum = 0.0;
+      for ( const cv::Mat &plane : classPlanes )
+        sum += std::exp( static_cast<double>( plane.at<float>( r, c ) ) - maxLogit );
+      double entropy = 0.0;
+      for ( const cv::Mat &plane : classPlanes )
+      {
+        const double p = std::exp( static_cast<double>( plane.at<float>( r, c ) ) - maxLogit ) / sum;
+        if ( p > 0.0 )
+          entropy -= p * std::log( p );
+      }
+      outRow[c] = static_cast<float>( entropy / logC ); // normalized [0, 1]
+    }
+  }
+  return result;
 }
 
 } // namespace sicnu::operators::runtime
