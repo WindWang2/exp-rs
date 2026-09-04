@@ -1,0 +1,22 @@
+{
+  "manifest_version": 1,
+  "id": "org.example.ui-dock-demo",
+  "name": "Demo UI Dock Plugin",
+  "version": "1.0.0",
+  "api_version": "3.0",
+  "abi_version": 1,
+  "description": "Contributes one dock widget and a settings page through the versioned UI surface. Build-locked to the host application (Qt Widgets).",
+  "vendor": "ExpRS Examples",
+  "license": "BSD-2-Clause",
+  "entrypoint": "libui_dock_demo.so",
+  "entrypoint_kind": "native",
+  "capabilities": ["ui"],
+  "permissions": [],
+  "ui": {
+    "dock": true,
+    "dock_title": "Demo Plugin",
+    "menu_actions": false,
+    "settings_page": true,
+    "settings_page_title": "Demo Plugin"
+  }
+}

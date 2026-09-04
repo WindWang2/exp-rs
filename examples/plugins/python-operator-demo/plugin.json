@@ -1,0 +1,32 @@
+{
+  "manifest_version": 1,
+  "id": "org.example.python-operator-demo",
+  "name": "Demo Python Operator Plugin",
+  "version": "1.0.0",
+  "api_version": "3.0",
+  "abi_version": 1,
+  "description": "Python operator authored with the exprs SDK: demo:py_norm computes (value - min) / (max - min) over a numeric array. Runs inside the isolated Python worker, never in the host process.",
+  "vendor": "ExpRS Examples",
+  "license": "BSD-2-Clause",
+  "entrypoint_kind": "python",
+  "python": {
+    "module": "demo_python_plugin",
+    "package": "python"
+  },
+  "capabilities": ["operator", "python_processing"],
+  "permissions": ["python"],
+  "operators": [
+    {
+      "id": "demo:py_norm",
+      "display_name": "Demo Python Normalize",
+      "group": "python",
+      "description": "Min-max normalizes the numeric array parameter 'values'.",
+      "memory_policy": "full_raster",
+      "determinism_grade": "bit_exact",
+      "inputs": [
+        { "name": "values", "type": "json", "required": true, "description": "Numbers to normalize" }
+      ],
+      "outputs": []
+    }
+  ]
+}

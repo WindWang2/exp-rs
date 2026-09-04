@@ -1,0 +1,23 @@
+{
+  "manifest_version": 1,
+  "id": "org.example.model-runtime-demo",
+  "name": "Demo Model Runtime Plugin",
+  "version": "1.0.0",
+  "api_version": "3.0",
+  "abi_version": 1,
+  "description": "Registers the 'demo-null' model runtime framework (identity backend). Extends the existing ModelRuntimeRegistry; no new model catalog is created.",
+  "vendor": "ExpRS Examples",
+  "license": "BSD-2-Clause",
+  "entrypoint": "libmodel_runtime_demo.so",
+  "entrypoint_kind": "native",
+  "capabilities": ["model_runtime"],
+  "permissions": ["filesystem_read"],
+  "model_runtimes": [
+    {
+      "framework": "demo-null",
+      "display_name": "Demo Null Runtime",
+      "description": "Identity backend for integration tests and conformance runs.",
+      "gpu": false
+    }
+  ]
+}

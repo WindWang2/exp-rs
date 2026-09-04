@@ -1,0 +1,39 @@
+{
+  "manifest_version": 1,
+  "id": "org.example.agent-tool-demo",
+  "name": "Demo Agent Tool Plugin",
+  "version": "1.0.0",
+  "api_version": "3.0",
+  "abi_version": 1,
+  "description": "Contributes one structured, bounded agent tool: demo:uniform_sample returns uniform random samples in a range.",
+  "vendor": "ExpRS Examples",
+  "license": "BSD-2-Clause",
+  "entrypoint": "libagent_tool_demo.so",
+  "entrypoint_kind": "native",
+  "capabilities": ["agent_tool"],
+  "permissions": [],
+  "agent_tools": [
+    {
+      "id": "demo:uniform_sample",
+      "display_name": "Uniform Sample",
+      "category": "Custom",
+      "description": "Returns 'count' uniform random samples in [low, high] (bounded: count <= 1000).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "count": { "type": "integer", "description": "Number of samples (1-1000)" },
+          "low": { "type": "number", "description": "Lower bound (default 0)" },
+          "high": { "type": "number", "description": "Upper bound (default 1)" }
+        },
+        "required": ["count"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "samples": { "type": "array", "items": { "type": "number" } }
+        }
+      }
+    }
+  ]
+}

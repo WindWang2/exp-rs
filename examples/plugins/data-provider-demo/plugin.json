@@ -1,0 +1,24 @@
+{
+  "manifest_version": 1,
+  "id": "org.example.data-provider-demo",
+  "name": "Demo Data Provider Plugin",
+  "version": "1.0.0",
+  "api_version": "3.0",
+  "abi_version": 1,
+  "description": "Tiny demo-catalog:// data provider backed by a bundled JSON index. Demonstrates discover/inspect/open without touching credentials.",
+  "vendor": "ExpRS Examples",
+  "license": "BSD-2-Clause",
+  "entrypoint": "libdata_provider_demo.so",
+  "entrypoint_kind": "native",
+  "capabilities": ["data_provider"],
+  "permissions": ["filesystem_read"],
+  "data_providers": [
+    {
+      "id": "demo:catalog",
+      "display_name": "Demo Catalog",
+      "description": "In-repository demo catalog with two static entries.",
+      "schemes": ["demo-catalog://"],
+      "capabilities": { "maxPageSize": 50, "auth": "none" }
+    }
+  ]
+}

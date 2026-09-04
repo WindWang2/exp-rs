@@ -5625,6 +5625,50 @@ target_include_directories(test_final_challenger_2_empirical PRIVATE
 set_target_properties(test_final_challenger_2_empirical PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_final_challenger_2_empirical)
 
+###############################################################################
+# ExpRS Developer Platform 3.0 — plugin/SDK/CLI test matrix
+###############################################################################
+add_library(hello_plugin MODULE fixtures/hello_plugin/hello_plugin.cpp)
+target_include_directories(hello_plugin PRIVATE
+  ${CMAKE_SOURCE_DIR}/src/sdk
+  ${CMAKE_SOURCE_DIR}/src
+)
+target_link_libraries(hello_plugin PRIVATE sicnu_operators_core jsoncpp)
+set_target_properties(hello_plugin PROPERTIES
+  LIBRARY_OUTPUT_NAME hello_plugin
+  PREFIX "lib"
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin
+)
+
+sicnu_add_test(test_plugin_manifest)
+target_link_libraries(test_plugin_manifest PRIVATE sicnu_sdk)
+
+sicnu_add_test(test_exprs_plugin_system)
+target_link_libraries(test_exprs_plugin_system PRIVATE sicnu_sdk)
+
+sicnu_add_test(test_exprs_plugin_loader)
+target_link_libraries(test_exprs_plugin_loader PRIVATE sicnu_sdk)
+target_compile_definitions(test_exprs_plugin_loader PRIVATE
+  SICNU_TEST_HELLO_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin"
+)
+
+sicnu_add_test(test_exprs_external_process)
+target_link_libraries(test_exprs_external_process PRIVATE sicnu_sdk)
+
+sicnu_add_test(test_exprs_workflow_schema)
+target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
+
+sicnu_add_test(test_cli_commands_json)
+target_link_libraries(test_cli_commands_json PRIVATE sicnu_sdk sicnu_plugins_framework)
+target_compile_definitions(test_cli_commands_json PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+
+# The plugins host runtime: registry bridging + external tool operator.
+sicnu_add_test(test_plugins_runtime_host)
+target_link_libraries(test_plugins_runtime_host PRIVATE sicnu_plugins_framework sicnu_sdk sicnu_workflow_runtime)
+
+
 # Last TEST_INCLUDE_FILES entry: stamp PYTHONHOME / LD_LIBRARY_PATH / QT_IM_MODULE
 # onto every test after Catch PRE_TEST discovery has registered them (#730).
 sicnu_register_test_env_applier()

@@ -15,6 +15,11 @@ callbacks = {}
 loaded_plugins = {}
 algo_executors = {}
 
+# Worker protocol version (Python side). Bumped on incompatible message
+# changes; hosts compare against their own constant to gate, and older hosts
+# ignore the field (tolerant handshake, see docs/python/runtime.md).
+PYTHON_WORKER_PROTOCOL_VERSION = 1
+
 
 def _mount_shm_array(key, width, height, bands, dtype_code):
     """ADR 0064 - attach to a POSIX shared-memory segment created by the C++
@@ -243,7 +248,25 @@ class SicnuPythonIface:
         }
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
 
+def _add_bundled_sdk_path():
+    """Make the bundled `exprs` SDK importable inside the worker.
+
+    Installed layout: share/sicnu_geo_rs/scripts/worker_daemon.py puts
+    share/sicnu_geo_rs/python on sys.path. Source-tree runs fall back to
+    src/python/sdk relative to this file.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.normpath(os.path.join(here, "..", "python")),
+        os.path.normpath(os.path.join(here, "..", "..", "python", "sdk")),
+    ]
+    for candidate in candidates:
+        if os.path.isdir(candidate) and candidate not in sys.path:
+            sys.path.append(candidate)
+
+
 def main():
+    _add_bundled_sdk_path()
     import tempfile
     parser = argparse.ArgumentParser(description="SICNU GEO RS Python Worker Daemon")
     parser.add_argument("--socket", required=True, help="Socket name / path for IPC")
@@ -338,7 +361,8 @@ def main():
                         resp = {
                             "jsonrpc": "2.0",
                             "id": req_id,
-                            "result": {"status": "pong", "pid": os.getpid()}
+                            "result": {"status": "pong", "pid": os.getpid(),
+                                       "protocol": PYTHON_WORKER_PROTOCOL_VERSION}
                         }
                     elif method == "load_plugin":
                         plugin_dir = params.get("plugin_dir")

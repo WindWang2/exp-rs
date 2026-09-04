@@ -1,0 +1,30 @@
+{
+  "manifest_version": 1,
+  "id": "org.example.cpp-operator-demo",
+  "name": "Demo C++ Operator Plugin",
+  "version": "1.0.0",
+  "api_version": "3.0",
+  "abi_version": 1,
+  "description": "Minimal third-party operator plugin: demo:stats aggregates numeric values. Serves as the SDK out-of-tree consumer and conformance fixture.",
+  "vendor": "ExpRS Examples",
+  "license": "BSD-2-Clause",
+  "entrypoint": "libcpp_operator_demo.so",
+  "entrypoint_kind": "native",
+  "capabilities": ["operator"],
+  "permissions": [],
+  "operators": [
+    {
+      "id": "demo:stats",
+      "display_name": "Demo Statistics",
+      "group": "demo",
+      "description": "Aggregates the 'values' parameter into count/sum/mean/min/max.",
+      "memory_policy": "full_raster",
+      "determinism_grade": "bit_exact",
+      "inputs": [
+        { "name": "values", "type": "json", "required": true, "description": "Numbers to aggregate" },
+        { "name": "label", "type": "string", "required": false, "description": "Optional label" }
+      ],
+      "outputs": []
+    }
+  ]
+}
