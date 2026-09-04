@@ -880,6 +880,16 @@ sicnu_discover_tests(test_gdal_multiband_block_stream)
 # ctest (small sizes) or directly with SICNU_BENCH_LARGE=1 for nightly profiling.
 # Uses the standard sicnu_add_test link set (operators + task_center + resource_monitor).
 sicnu_add_test(test_perf_benchmarks TIMEOUT 300 RUN_SERIAL TRUE)
+
+# Execution & Data Plane 3.0 benchmark harness (Phase A of the execution-data-
+# plane-3 epic): in-process workloads through TaskCenter/JobEngine/operators
+# with JSON output (SICNU_EXEC_BENCH_OUT=<dir>) merged by scripts/perf_report.py.
+# RUN_SERIAL: measures peak RSS deltas and IO counters of this process.
+sicnu_add_test(test_execution_benchmarks TIMEOUT 600 RUN_SERIAL TRUE)
+
+# Phase B chunk execution graph contracts (Qt-free; links sicnu_runtime only).
+sicnu_add_test(test_chunk_graph TIMEOUT 120)
+target_link_libraries(test_chunk_graph PRIVATE sicnu_runtime)
 # #706: the python-bindings smoke test existed but was registered nowhere —
 # it silently never ran in any lane. Guarded on the bindings target existing.
 if(TARGET _sicnu_operators AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bindings.py)
