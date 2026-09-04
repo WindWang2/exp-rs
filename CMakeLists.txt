@@ -673,8 +673,10 @@ if(ENABLE_TESTS)
     # reported as leaks; ctest must suppress them for test discovery too.
     # Written unconditionally (#706): previously only the sanitizer branch
     # wrote it, so non-sanitizer lanes relied on CI exporting LSAN_OPTIONS.
-    file(WRITE "${CMAKE_BINARY_DIR}/CTestCustom.cmake"
-      "set(ENV{LSAN_OPTIONS} \"detect_leaks=0\")\n")
+    # #730: also pin PYTHONHOME, LD_LIBRARY_PATH=/usr/lib, and QT_IM_MODULE so
+    # the documented ctest command is not red for environment reasons.
+    include(SicnuTestEnv)
+    sicnu_configure_test_harness_env()
     FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git

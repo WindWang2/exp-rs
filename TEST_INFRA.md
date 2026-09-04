@@ -3,6 +3,7 @@
 ## Test Philosophy
 - Opaque-box & Unit/Integration UI Verification.
 - Offscreen Headless Qt 6 / Catch2 test execution (`QT_QPA_PLATFORM=offscreen`, `LD_LIBRARY_PATH=/usr/lib`).
+- CTest itself pins that environment (see Environment governance below); developers should not need a hand-rolled `LD_PRELOAD` / `PYTHONHOME` soup.
 - Systematic Verification Tiers:
   - Tier 1: Feature Coverage (Widget instantiation, layout initialization, default parameter validity).
   - Tier 2: Boundary & Corner Cases (Invalid input range handling, empty input file checks, reset behavior, High-DPI minimumSizeHint).
@@ -49,8 +50,9 @@
 - Invocation:
   ```bash
   cmake --build build -j$(nproc)
-  LD_LIBRARY_PATH=/usr/lib QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+  QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest --test-dir build --output-on-failure -j$(nproc)
   ```
+  CTestCustom.cmake (generated into the build tree) already applies these plus `PYTHONHOME` / `PYTHONPATH` and `QT_IM_MODULE=compose`. The exports above are belt-and-suspenders for shells that run test binaries **directly** (bypassing ctest). Do **not** use `LD_PRELOAD=/usr/lib/libxml2.so` as the primary workaround; if you still need it, `PYTHONHOME` must match the CMake-discovered interpreter (CTestCustom sets it).
 - Standard Test Structure:
   1. Offscreen `QApplication` initialization with `app.processEvents()`.
   2. Dialog construction and parent hierarchy inspection.
@@ -66,3 +68,25 @@ Non-Catch2 lanes registered in CTest so they run in the same `ctest` invocation:
 - `pi_bridge_lifecycle` — pi/ bridge lifecycle regression tests (`node --test pi/test`, #669 respawn/fork-loop family), guarded on node >= 22.18 / >= 23.6 (default type stripping of the `.ts` bridge import); TIMEOUT 120.
 
 Lint lane (non-blocking CI step, Tier 1): `scripts/run_clang_tidy_changed.sh <base-ref> <build-dir>` runs the repo's targeted `.clang-tidy` over only the C++ files changed vs `<base-ref>`, using the build tree's `compile_commands.json` (exported by default on GCC/Clang generators).
+
+## Environment governance (#730)
+
+Host layouts that mix a system GIS stack with a conda/miniconda Python (this project's default CMake `find_package(Python)` on many workstations) need an explicit library and interpreter policy. CMake writes it into `build/CTestCustom.cmake` and stamps the same mods onto every CTest test (`cmake/SicnuTestEnv.cmake`).
+
+| Variable | Policy | Why |
+|---|---|---|
+| `LD_LIBRARY_PATH` | **Prepend `/usr/lib`** (do not leave conda first) | Test binaries' RUNPATH often starts with `$CONDA_PREFIX/lib`. That conda `libxml2` has no `xmlNanoHTTPCleanup`, so `/usr/lib/libspatialite.so.8` dies at load (`symbol lookup error`). `LD_PRELOAD=/usr/lib/libxml2.so` was the old hammer; `/usr/lib` first is the actual policy. Conda `libpython` still resolves via the binary RUNPATH. |
+| `PYTHONHOME` | **Set to `sys.base_prefix` of `Python_EXECUTABLE`** | Embedded `Py_Initialize()` in Catch binaries uses `argv[0]` (the test executable), not `python3`. A stale `PYTHONHOME=/usr` (system 3.14 vs conda 3.13) or a prefix computed from the test binary yields `Fatal Python error: No module named 'encodings'` — including under `LD_PRELOAD`. |
+| `PYTHONPATH` | **Prepend CMake `Python_STDLIB` / `STDARCH` / `SITELIB`** | Extra guarantee that `encodings` and site-packages of the linked interpreter are importable. |
+| `SICNU_PYTHON_EXECUTABLE` / `PYTHONEXECUTABLE` | **Set to `Python_EXECUTABLE`** | `PythonWorkerProcess` otherwise prefers `/usr/bin/python3`. That binary must not run under a conda `PYTHONHOME` (encodings mismatch). Pin the worker to the same interpreter CMake linked. |
+| `QT_QPA_PLATFORM` | **`offscreen`** | Headless Catch UI tests. |
+| `QT_IM_MODULE` | **`compose`** (bundled qtbase plugin) | Desktop `QT_IM_MODULE=fcitx` loads `libfcitx5platforminputcontextplugin.so`. QSS theme stress (`#2132`) passes all assertions, then SIGSEGVs at `__cxa_finalize` during plugin teardown. |
+| `XMODIFIERS` | **`@im=none`** | Stop IM auto-detect from re-selecting fcitx. |
+| `QT_PLUGIN_PATH` | **Set to Qt's `QT_INSTALL_PLUGINS`** | Isolates extra desktop plugin trees. Distro Qt may still ship fcitx next to compose; `QT_IM_MODULE` is what actually avoids loading it. Overriding the whole plugin path to an empty sandbox would break `platforms/offscreen` and imageformats. |
+| `LSAN_OPTIONS` | `detect_leaks=0` | QGIS/Qt/GDAL process-lifetime singletons (#706). |
+
+Do not skip or disable the embedded-Python tests or the QSS stress test to go green. If a new host still fails:
+
+1. `ldd tests/test_python_engine | grep libxml2` — must be `/usr/lib/libxml2.so*`, not `$CONDA_PREFIX/lib`.
+2. `PYTHONHOME` in the ctest environment must equal the prefix of the `libpython` the binary actually loads (`ldd | grep libpython`).
+3. `QT_IM_MODULE` must not be `fcitx` for any `QApplication` test.
