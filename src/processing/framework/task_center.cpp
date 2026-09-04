@@ -18,6 +18,8 @@
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
+#include "framework/fused_chain.h"
+#include "runtime/observability/execution_telemetry.h"
 #include "data/data_manager.h"
 
 #include <QCryptographicHash>
@@ -1349,8 +1351,17 @@ void TaskCenter::flushPendingLaunches()
             QMutexLocker lock( &m_mutex );
             fp = m_taskFingerprints.take( launch.taskId );
         }
-        if ( fp.isValid() && serveFromExecutionCache( launch.taskId, fp ) )
-            continue;
+        if ( fp.isValid() )
+        {
+            using sicnu::runtime::observability::ExecutionTelemetry;
+            using sicnu::runtime::observability::Counter;
+            if ( serveFromExecutionCache( launch.taskId, fp ) )
+            {
+                ExecutionTelemetry::instance().increment( Counter::CacheHits );
+                continue;
+            }
+            ExecutionTelemetry::instance().increment( Counter::CacheMisses );
+        }
         if ( fp.isValid() )
         {
             QMutexLocker lock( &m_mutex );
@@ -1465,6 +1476,8 @@ void TaskCenter::markTaskCompleted( long taskId,
             return;
         m_tasks[taskId].status = TaskStatus::Completed;
         m_tasks[taskId].resultPayload = resultPayload;
+        sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
+            sicnu::runtime::observability::Counter::TasksCompleted );
         m_tasks[taskId].progressPercentage = 1.0;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] Task completed successfully." ) )
@@ -1524,6 +1537,25 @@ void TaskCenter::markTaskCompleted( long taskId,
         queueTaskUpdatedLocked( taskId );
         processNextQueuedTasks();
     }
+
+    // Phase C: a fused-chain head completes its members with the tail payload
+    // (members never dispatch; see submitPipeline). The tail member's declared
+    // output exists, so its own cache store succeeds; intermediate declared
+    // outputs deliberately do not exist and the store refuses them
+    // (fail-closed). Runs outside m_mutex via the public re-entry.
+    QList<long> fusedMembers;
+    {
+        QMutexLocker locker( &m_mutex );
+        const auto bindingIt = m_fusedChains.constFind( taskId );
+        if ( bindingIt != m_fusedChains.constEnd() )
+        {
+            fusedMembers = bindingIt->memberTaskIds;
+            m_fusedChains.erase( bindingIt );
+        }
+    }
+    for ( long memberTaskId : fusedMembers )
+        markTaskCompleted( memberTaskId, results, resultPayload );
+
     flushPendingLaunches();
     flushPendingSignals();
     fireTaskCompletionCallbacks( taskId );
@@ -2020,10 +2052,25 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
     if ( !sicnu::workflow::topologicalSortSteps( def, ordered, sortError ) )
         return -1;
 
+    // Phase C (intermediate materialization elimination): when enabled, plan
+    // a fused elementwise chain so its member steps never dispatch to the
+    // engine individually — the head executes them as one streaming tile
+    // pipeline and members complete with the tail payload. Identity is
+    // preserved (per-step tasks + fingerprints; see fused_chain.h).
+    const bool fusedChainsEnabled = [] {
+        const char *env = std::getenv( "SICNU_FUSED_CHAIN" );
+        return env && ( env[0] == '1' || env[0] == 't' || env[0] == 'T' );
+    }();
+    sicnu::processing::FusedChainPlan fusedPlan;
+    if ( fusedChainsEnabled )
+        fusedPlan = sicnu::processing::planFusedChain( def );
+
     long pipelineId = -1;
     {
         QMutexLocker locker( &m_mutex );
         pipelineId = m_nextPipelineId++;
+        sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
+            sicnu::runtime::observability::Counter::TasksSubmitted );
         PipelineExecutionInfo pipeInfo;
         pipeInfo.pipelineId = pipelineId;
         pipeInfo.definitionId = QString::fromStdString( def.id );
@@ -2076,6 +2123,32 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
             info.stepId = QString::fromStdString( stepId );
             info.pipelineId = pipelineId;
 
+            // Fused-chain wiring (Phase C): head dispatches the fused executor;
+            // members never dispatch and complete with the tail payload.
+            if ( fusedPlan.stepIds.size() >= 2
+                 && ( stepId == fusedPlan.headStepId || stepId == fusedPlan.tailStepId ) )
+            {
+                if ( stepId == fusedPlan.headStepId )
+                {
+                    const sicnu::processing::FusedChainPlan plan = fusedPlan;
+                    info.jobExecutor = [plan]( const sicnu::jobs::JobRequest &,
+                                               sicnu::operators::RSOperatorContext &ctx ) {
+                        return sicnu::processing::executeFusedChain( plan, ctx );
+                    };
+                    // hasJobRequest flips the staged launch to executor mode;
+                    // the staged request re-derives params/priority from the
+                    // task, but the identity fields must be present here.
+                    info.jobRequest.algorithmId = info.algorithmId.toStdString();
+                    info.jobRequest.title = info.algorithmName.toStdString();
+                    info.hasJobRequest = true;
+                }
+                else
+                {
+                    info.autoDispatch = false;
+                    info.fusedMember = true;
+                }
+            }
+
             info.outputLayerPath = findOutputPathInParams( params );
 
             info.logBuffer.append( QString( QStringLiteral( "[%1] Pipeline step %2 queued." ) )
@@ -2122,6 +2195,27 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
 
             declaredOutputByStepId.insert( QString::fromStdString( stepId ),
                                            findOutputPathInParams( params ) );
+        }
+
+        // Phase C: bind the fused head to its member tasks so completion of
+        // the head completes the members with the tail payload.
+        if ( fusedPlan.stepIds.size() >= 2 )
+        {
+            FusedChainBinding binding;
+            for ( const auto &memberStepId : fusedPlan.stepIds )
+            {
+                if ( memberStepId == fusedPlan.headStepId )
+                    continue;
+                const long memberTaskId = stepToTaskId.value( memberStepId, -1 );
+                if ( memberTaskId > 0 )
+                    binding.memberTaskIds.append( memberTaskId );
+            }
+            if ( !binding.memberTaskIds.isEmpty() )
+            {
+                const long headTaskId = stepToTaskId.value( fusedPlan.headStepId, -1 );
+                if ( headTaskId > 0 )
+                    m_fusedChains[headTaskId] = binding;
+            }
         }
 
         if ( pipeInfo.stepToTaskId.isEmpty() )
@@ -2807,24 +2901,31 @@ bool TaskCenter::serveFromExecutionCache( long taskId, const sicnu::data::Execut
     QMap<QString, QString> pathMap; // producing path → serving path
     QList<ServeTransfer> transfers;
     QStringList staleSidecars;
+    // Phase E: when the entry was reconstructed from the persistent
+    // content-addressed tier, bytes are copied from the pool object (digest
+    // verified at lookup) while payload mapping keeps the original paths.
+    const bool fromPool = !cached->sourceOverrides.isEmpty();
     for ( const QString &artifact : cached->producedArtifacts )
     {
         if ( artifact.isEmpty() )
             continue;
+        const QString copySource = cached->sourceOverrides.value( artifact, artifact );
         const QString mapped = ( artifact == cached->declaredOutputPath )
                                    ? outputPath
                                    : mapProducedPath( artifact, cached->declaredOutputPath,
                                                       outputPath );
         pathMap.insert( artifact, mapped );
-        if ( QFileInfo( artifact ).absoluteFilePath() == QFileInfo( mapped ).absoluteFilePath() )
-            continue; // same file — nothing to materialize
+        if ( QFileInfo( artifact ).absoluteFilePath() == QFileInfo( mapped ).absoluteFilePath()
+             && QFile::exists( mapped ) )
+            continue; // same file, still in place — nothing to materialize
         // Sidecar contract: sidecars present beside the cached artifact are
         // carried over; destination sidecars the cached execution does not
         // carry are stale (from an unrelated earlier run) and must not
-        // survive the replacement.
+        // survive the replacement. Pool objects carry no sidecars — a served
+        // execution therefore clears stale destination sidecars.
         for ( const QString &suffix : sicnu::workflow::ArtifactGC::sidecarSuffixes() )
         {
-            if ( QFile::exists( artifact + suffix ) )
+            if ( !fromPool && QFile::exists( artifact + suffix ) )
             {
                 pathMap.insert( artifact + suffix, mapped + suffix );
                 transfers.append( { artifact + suffix, mapped + suffix, QString() } );
@@ -2834,7 +2935,7 @@ bool TaskCenter::serveFromExecutionCache( long taskId, const sicnu::data::Execut
                 staleSidecars.append( mapped + suffix );
             }
         }
-        transfers.append( { artifact, mapped, QString() } );
+        transfers.append( { copySource, mapped, QString() } );
     }
     // The declared output itself is never written by grouped executions; only
     // the produced artifact set is materialized and only produced paths land
