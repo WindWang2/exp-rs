@@ -538,7 +538,7 @@ bool TemporalAnalysisDialog::loadCollection( const sicnu::data::CollectionId &id
     const int row = m_sceneTable->rowCount();
     m_sceneTable->insertRow( row );
     m_sceneTable->setItem( row, ColPath, new QTableWidgetItem( scene.path ) );
-    m_sceneTable->setItem( row, ColTime, new QTableWidgetItem( scene.time.toIso() ) );
+    m_sceneTable->setItem( row, ColTime, new QTableWidgetItem( scene.time.valid ? scene.time.iso : QString() ) );
     m_sceneTable->setItem( row, ColPlatform, new QTableWidgetItem( scene.platform ) );
     m_sceneTable->setItem( row, ColStatus, new QTableWidgetItem( tr( "已加载" ) ) );
   }
