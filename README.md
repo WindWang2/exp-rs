@@ -101,7 +101,7 @@ make -j$(nproc)
 mkdir build-tests && cd build-tests
 cmake .. -DENABLE_TESTS=ON
 make -j$(nproc)
-QT_QPA_PLATFORM=offscreen ctest --output-on-failure
+QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest --output-on-failure
 ```
 
 **1,800+ Catch2 test cases** (see `ctest -N` for the live count) covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, TaskCenter DAG execution, the processing framework, and the spatial tool / MCP agent surface.
@@ -112,7 +112,7 @@ Headless CLI binary built at `sicnu_geo_rs_cli` with `--list` operator discovery
 Processing Toolbox Phase 1 registers algorithms against a manifest-driven CI gate:
 
 ```bash
-QT_QPA_PLATFORM=offscreen ctest -R test_toolbox_coverage --output-on-failure
+QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest -R test_toolbox_coverage --output-on-failure
 ```
 
 Manifest: `data/processing/toolbox_manifest.json`. Generic CLI long-tail tools ship from `data/tools/custom/`.

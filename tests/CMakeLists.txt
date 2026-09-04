@@ -9,22 +9,30 @@ endif()
 # are enabled, suppressing known singleton leaks (QgsExpression functions,
 # QgsNumericFormatRegistry, Nvidia EGL driver). Callers may pass extra
 # test PROPERTIES (e.g. RUN_SERIAL TRUE) after the NAME.
+#
+# DL_PATHS prepends /usr/lib for both PRE_TEST discovery and the tests
+# themselves (#730): Catch discovery execute_process does not inherit
+# per-test ENVIRONMENT_MODIFICATION, and conda RUNPATH otherwise shadows
+# system libxml2. CTestCustom.cmake (sicnu_configure_test_harness_env)
+# still pins PYTHONHOME / QT_IM_MODULE for the ctest process.
 function(sicnu_discover_tests NAME)
   set(_discovery_props "")
   if(ENABLE_SANITIZERS)
-    # PRE_TEST mode runs test discovery at ctest time (not build time), so
-    # ENVIRONMENT_MODIFICATION is applied to the discovery process.
-    # This prevents ASAN leak reports from failing test discovery.
     list(APPEND _discovery_props "ENVIRONMENT_MODIFICATION" "LSAN_OPTIONS=set:detect_leaks=0")
   endif()
   if(ARGN)
     # ARGN is a flat list of key/value test properties (RUN_SERIAL TRUE, ...).
     list(APPEND _discovery_props ${ARGN})
   endif()
+  set(_dl_paths "")
+  if(SICNU_TEST_DL_PATHS)
+    set(_dl_paths DL_PATHS ${SICNU_TEST_DL_PATHS})
+  endif()
   # PRE_TEST avoids race conditions in parallel builds where discovery
   # tries to run the test executable before it is linked.
   catch_discover_tests(${NAME}
     DISCOVERY_MODE PRE_TEST
+    ${_dl_paths}
     PROPERTIES ${_discovery_props})
 endfunction()
 
@@ -884,6 +892,7 @@ if(TARGET _sicnu_operators AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bi
         COMMAND ${_sicnu_py} ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bindings.py
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
     set_tests_properties(python_bindings_smoke PROPERTIES TIMEOUT 300)
+    sicnu_set_test_env(python_bindings_smoke)
 endif()
 
 # #706: pi/ (ADR 0122) ships bridge lifecycle regression tests as node --test
@@ -909,6 +918,7 @@ if(SICNU_NODE_EXECUTABLE AND EXISTS ${CMAKE_SOURCE_DIR}/pi/test/mcp_bridge.test.
                 COMMAND ${SICNU_NODE_EXECUTABLE} --test ${CMAKE_SOURCE_DIR}/pi/test
                 WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
             set_tests_properties(pi_bridge_lifecycle PROPERTIES TIMEOUT 120)
+            sicnu_set_test_env(pi_bridge_lifecycle)
         else()
             message(STATUS "node ${_sicnu_node_version} lacks default type stripping — pi bridge lifecycle tests skipped")
         endif()
@@ -5601,5 +5611,9 @@ target_include_directories(test_final_challenger_2_empirical PRIVATE
 )
 set_target_properties(test_final_challenger_2_empirical PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_final_challenger_2_empirical)
+
+# Last TEST_INCLUDE_FILES entry: stamp PYTHONHOME / LD_LIBRARY_PATH / QT_IM_MODULE
+# onto every test after Catch PRE_TEST discovery has registered them (#730).
+sicnu_register_test_env_applier()
 
 
