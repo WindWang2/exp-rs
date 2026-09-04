@@ -856,14 +856,23 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
         {
           sicnu::temporal::PreflightOptions opts;
           const auto report = sicnu::temporal::runPreflight( parsed, opts );
+          QStringList errors;
+          QStringList warnings;
+          for ( const auto &issue : report.issues )
+          {
+            if ( issue.blocking )
+              errors.append( issue.message );
+            else
+              warnings.append( issue.message );
+          }
           QString repText = tr( "预检结果：%1\n场景总数：%2\n有效时间：%3\n" )
-                              .arg( report.ok ? tr( "通过" ) : tr( "未通过" ) )
+                              .arg( report.ok() ? tr( "通过" ) : tr( "未通过" ) )
                               .arg( report.sceneCount )
-                              .arg( report.validTimeCount );
-          if ( !report.errors.isEmpty() )
-            repText += tr( "\n错误：\n- " ) + report.errors.join( QStringLiteral( "\n- " ) );
-          if ( !report.warnings.isEmpty() )
-            repText += tr( "\n警告：\n- " ) + report.warnings.join( QStringLiteral( "\n- " ) );
+                              .arg( report.scenesWithTime );
+          if ( !errors.isEmpty() )
+            repText += tr( "\n错误：\n- " ) + errors.join( QStringLiteral( "\n- " ) );
+          if ( !warnings.isEmpty() )
+            repText += tr( "\n警告：\n- " ) + warnings.join( QStringLiteral( "\n- " ) );
           QMessageBox::information( this, tr( "集合预检报告" ), repText );
         }
         else

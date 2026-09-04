@@ -23,6 +23,7 @@
 #include "data/data_manager.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/rs/rs_operators_init.h"
+#include "operators/rs/rs_temporal_collection_input.h"
 #include "processing/algorithms/temporal/temporal_collection.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "processing/framework/atomic_algorithm_registry.h"
@@ -458,4 +459,54 @@ TEST_CASE( "Agent tool discovery finds temporal and SAR change tools via capabil
         }
         CHECK( foundSarChange );
     }
+}
+
+TEST_CASE( "parseCollection prefers workspace collection over inline scenes",
+           "[temporal][collection]" )
+{
+    ensureApp();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString scene1 = dir.filePath( QStringLiteral( "s1.tif" ) );
+    const QString scene2 = dir.filePath( QStringLiteral( "s2.tif" ) );
+    const QString decoy = dir.filePath( QStringLiteral( "decoy.tif" ) );
+    REQUIRE( writeTinyScene( scene1, QStringLiteral( "2025-01-01T00:00:00" ), 1.0f ) );
+    REQUIRE( writeTinyScene( scene2, QStringLiteral( "2025-02-01T00:00:00" ), 2.0f ) );
+    REQUIRE( writeTinyScene( decoy, QStringLiteral( "2024-01-01T00:00:00" ), 9.0f ) );
+
+    sicnu::data::DataManager dm;
+    sicnu::temporal::setWorkspaceCatalog( &dm );
+
+    sicnu::temporal::TemporalCollection col;
+    sicnu::temporal::TemporalSceneRef ref1;
+    ref1.path = scene1;
+    ref1.time = sicnu::temporal::parseAcquisitionTime( QStringLiteral( "2025-01-01T00:00:00" ) );
+    ref1.timeSource = QStringLiteral( "explicit" );
+    ref1.originalIndex = 0;
+    sicnu::temporal::TemporalSceneRef ref2;
+    ref2.path = scene2;
+    ref2.time = sicnu::temporal::parseAcquisitionTime( QStringLiteral( "2025-02-01T00:00:00" ) );
+    ref2.timeSource = QStringLiteral( "explicit" );
+    ref2.originalIndex = 1;
+    col.scenes() = { ref1, ref2 };
+
+    QString saveErr;
+    const sicnu::data::CollectionId colId =
+        sicnu::temporal::saveCollectionToWorkspace( dm, QStringLiteral( "AuthoritativeCol" ), col, {}, &saveErr );
+    REQUIRE( !colId.isNull() );
+    REQUIRE( saveErr.isEmpty() );
+
+    Json::Value params( Json::objectValue );
+    params["collection"] = colId.toString().toStdString();
+    Json::Value scenes( Json::arrayValue );
+    scenes.append( decoy.toStdString() );
+    params["scenes"] = scenes;
+
+    const auto parsed = sicnu::operators::rs::temporal_input::parseCollection( params );
+    REQUIRE( parsed.sceneCount() == 2 );
+    CHECK( parsed.scenes().at( 0 ).path == scene1 );
+    CHECK( parsed.scenes().at( 1 ).path == scene2 );
+
+    sicnu::temporal::setWorkspaceCatalog( nullptr );
 }

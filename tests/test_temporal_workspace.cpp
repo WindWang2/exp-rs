@@ -1036,6 +1036,31 @@ TEST_CASE( "Multimodal observations and STAC cloud cover round-trip cleanly (#72
     CHECK( parsed.polarizations == s.polarizations );
     CHECK( parsed.bandRoles == s.bandRoles );
 
+    Json::Value inlineScene( Json::objectValue );
+    inlineScene["path"] = "/data/sar/s1_2025.tif";
+    inlineScene["modality"] = "sar";
+    inlineScene["sensor"] = "Sentinel-1";
+    inlineScene["radiometric_state"] = "gamma0";
+    inlineScene["resolution_m"] = 10.0;
+    inlineScene["cloud_cover_percent"] = 0.0;
+    Json::Value polarizations( Json::arrayValue );
+    polarizations.append( "VV" );
+    polarizations.append( "VH" );
+    inlineScene["polarizations"] = polarizations;
+    Json::Value bandRoles( Json::arrayValue );
+    bandRoles.append( "vv" );
+    bandRoles.append( "vh" );
+    inlineScene["band_roles"] = bandRoles;
+    TemporalSceneRef parsedInline;
+    QString inlineErr;
+    REQUIRE( TemporalSceneRef::parseInline( inlineScene, 0, &parsedInline, &inlineErr, false ) );
+    CHECK( inlineErr.isEmpty() );
+    CHECK( parsedInline.modality == QStringLiteral( "sar" ) );
+    CHECK( parsedInline.sensor == QStringLiteral( "Sentinel-1" ) );
+    CHECK( parsedInline.radiometricState == QStringLiteral( "gamma0" ) );
+    CHECK( parsedInline.polarizations == s.polarizations );
+    CHECK( parsedInline.bandRoles == s.bandRoles );
+
     // STAC cloud cover is transferred to scene
     StacItem item;
     item.id = QStringLiteral( "test_item" );

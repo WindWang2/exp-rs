@@ -12,9 +12,8 @@
 #include "data/data_manager.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <QDateTime>
 #include <QCheckBox>
-#include <algorithm>
-#include <functional>
 #include <QComboBox>
 #include <QFileDialog>
 #include <QGridLayout>
@@ -585,7 +584,7 @@ void TemporalAnalysisDialog::onRun()
   auto *dm = dataManager();
   const auto collection = buildCollectionFromUi();
 
-  if ( dm && !collection.empty() )
+  if ( dm && collection.sceneCount() > 0 )
   {
     QString colName = tr( "时序分析集合 %1" ).arg( QDateTime::currentDateTime().toString( QStringLiteral( "yyyy-MM-dd hh:mm" ) ) );
     sicnu::data::CollectionId existingId = m_activeCollectionId.value_or( sicnu::data::CollectionId() );

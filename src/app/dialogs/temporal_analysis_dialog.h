@@ -17,12 +17,15 @@ class QCheckBox;
 class QComboBox;
 class QTableWidget;
 class QStackedWidget;
+class QLabel;
+class QLineEdit;
+
 #include "data/collection_types.h"
+#include "processing/algorithms/temporal/temporal_collection.h"
 
 #include <optional>
 
 namespace sicnu::data { class DataManager; }
-namespace sicnu::temporal { class TemporalCollection; }
 
 /**
  * Multi-date analysis workflow: inspect scenes (acquisition time / platform /
