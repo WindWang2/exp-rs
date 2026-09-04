@@ -10,6 +10,7 @@
 #include <QtGlobal>
 
 #include <atomic>
+#include <cstdio>
 #include <filesystem>
 #include <string>
 
@@ -184,6 +185,80 @@ bool WorkflowCheckpointManager::reconcileToInterrupted( WorkflowRun &run )
   return true;
 }
 
+bool WorkflowCheckpointManager::archiveCompletedRun( const QString &checkpointPath,
+                                                     const QString &directoryPath, int keep )
+{
+  QFile source( checkpointPath );
+  if ( !source.exists() )
+    return false;
+  QDir dir( directoryPath );
+  if ( !dir.mkpath( QStringLiteral( "history" ) ) )
+    return false;
+  const QString historyDir = dir.filePath( QStringLiteral( "history" ) );
+  const QString target = QDir( historyDir ).filePath( QFileInfo( checkpointPath ).fileName() );
+  QFile::remove( target );
+  if ( !source.rename( target ) )
+    return false;
+
+  // Bound the archive: newest first, prune the rest.
+  QDir history( historyDir );
+  const QStringList entries =
+      history.entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files,
+                         QDir::Time );
+  for ( int i = keep; i < entries.size(); ++i )
+    QFile::remove( history.filePath( entries.at( i ) ) );
+  return true;
+}
+
+int WorkflowCheckpointManager::electCheckpoints( const QString &directoryPath )
+{
+  QDir dir( directoryPath );
+  if ( !dir.exists() )
+    return 0;
+  // Group checkpoint files by runId; a runId appearing both as the original
+  // checkpoint and as a `_resume` ghost means a crash landed between the
+  // fresh submission's persist and the ghost delete. Exactly one may live.
+  QMultiMap<QString, QFileInfo> byRunId;
+  const QStringList entries = dir.entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) },
+                                             QDir::Files );
+  for ( const QString &entry : entries )
+  {
+    QString runId = entry;
+    runId.remove( QLatin1String( "checkpoint_" ) );
+    runId.remove( QLatin1String( ".json" ) );
+    QString canonical = runId;
+    const bool isGhost = canonical.endsWith( QLatin1String( "_resume" ) );
+    if ( isGhost )
+      canonical.chop( QStringLiteral( "_resume" ).size() );
+    byRunId.insert( canonical, QFileInfo( dir.filePath( entry ) ) );
+  }
+  int quarantined = 0;
+  // uniqueKeys(): QMultiMap iteration visits (key, value) PAIRS, so a plain
+  // iterator would re-run the election once per file and double-count.
+  const QStringList canonicalRunIds = byRunId.uniqueKeys();
+  for ( const QString &canonical : canonicalRunIds )
+  {
+    const QList<QFileInfo> group = byRunId.values( canonical );
+    if ( group.size() < 2 )
+      continue;
+    // Keep the newest mtime; quarantine the rest (rename, never delete — the
+    // bytes stay available for forensics and are outside checkpoint listing).
+    QFileInfo newest;
+    for ( const QFileInfo &info : group )
+      if ( newest.filePath().isEmpty() || info.lastModified() > newest.lastModified() )
+        newest = info;
+    for ( const QFileInfo &info : group )
+    {
+      if ( info.absoluteFilePath() == newest.absoluteFilePath() )
+        continue;
+      if ( QFile::rename( info.absoluteFilePath(),
+                          info.absoluteFilePath() + QLatin1String( ".orphaned" ) ) )
+        ++quarantined;
+    }
+  }
+  return quarantined;
+}
+
 std::vector<std::shared_ptr<WorkflowRun>> WorkflowCheckpointManager::recoverInterruptedRuns( const QString &directoryPath )
 {
   const QString dir = directoryPath.isEmpty() ? defaultCheckpointDirectory() : directoryPath;
@@ -200,6 +275,11 @@ std::vector<std::shared_ptr<WorkflowRun>> WorkflowCheckpointManager::recoverInte
         QFile::remove( d.absoluteFilePath( orphan ) );
     }
   }
+
+  // Phase J (W3): crash-election between a run checkpoint and its post-resume
+  // ghost BEFORE loading — resuming both would double-execute the remaining
+  // steps.
+  electCheckpoints( dir );
 
   const QStringList checkpointFiles = listCheckpoints( dir );
 
