@@ -1,4 +1,5 @@
 #include "rs_pipeline_runner.h"
+#include "cli_commands.h"
 
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -14,6 +15,8 @@
 #include "workflow/workflow_run_lock.h"
 #include "processing/framework/algorithm_meta_store.h"
 #include "processing/framework/algorithm_descriptor_validator.h"
+#include "exprs/plugin_registry.h"
+#include "plugins/framework/plugin_runtime_host.h"
 
 #include <QCoreApplication>
 #include <QCommandLineParser>
@@ -44,6 +47,9 @@ void handleSignal( int )
 
 struct ShutdownGuard {
     ~ShutdownGuard() {
+        // Unload plugin binaries while every host-side registry is alive:
+        // contributions are revoked, then dlclose runs — never the reverse.
+        exprs::PluginRegistry::instance().unloadAll();
         sicnu::TaskCenter::instance().shutdown();
         sicnu::jobs::JobEngine::instance().shutdown();
         QgsApplication::exitQgis();
@@ -119,7 +125,12 @@ int main(int argc, char *argv[])
         "dir");
     parser.addOption(exportCatalogOption);
 
-    parser.process(app);
+    // CLI 3.0 commands carry their own parsers and global flags (--json etc.);
+    // the legacy parser below must not see them.
+    const bool commandMode = app.arguments().size() > 1
+                             && sicnu::cli::isCliCommand( app.arguments().at( 1 ) );
+    if ( !commandMode )
+        parser.process(app);
 
     if (parser.isSet(noCacheOption)) {
         sicnu::data::ExecutionResultCache::instance().setEnabled(false);
@@ -150,6 +161,26 @@ int main(int argc, char *argv[])
             return adapter->execute( req.params, progressBridge,
                                      [&ctx]() { return ctx.isCancelled(); } );
         } );
+
+    // ExpRS Developer Platform 3.0: bootstrap the plugin subsystem before any
+    // command runs. Discovery is manifest-only (no dlopen), so this is cheap.
+    {
+        exprs::PluginRegistryOptions pluginOptions;
+        pluginOptions.appDir = QCoreApplication::applicationDirPath().toStdString();
+        pluginOptions.installDataDir = ( AppPaths::prefixPath() + "/share/exp-rs" ).toStdString();
+        sicnu::plugins::PluginRuntimeHost::instance().bootstrap( pluginOptions );
+    }
+
+    // CLI 3.0 subcommand routing: `sicnu_geo_rs_cli <command> ...`.
+    const QStringList arguments = app.arguments();
+    if ( arguments.size() > 1 && sicnu::cli::isCliCommand( arguments.at( 1 ) ) ) {
+        sicnu::cli::CliIO io;
+        io.json = arguments.contains("--json");
+        io.jsonLines = arguments.contains("--json-lines");
+        io.quiet = arguments.contains("--quiet");
+        io.progressJson = arguments.contains("--progress-json");
+        return sicnu::cli::dispatchCliCommand( arguments.mid(1), io );
+    }
 
     // List operators
     if (parser.isSet(listOption)) {

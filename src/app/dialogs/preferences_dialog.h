@@ -2,12 +2,17 @@
 #define PREFERENCES_DIALOG_H
 
 #include <QDialog>
+#include <QMap>
+#include <QString>
+
+#include <vector>
 
 class QTabWidget;
 class QComboBox;
 class QLineEdit;
 class QLabel;
 class QCheckBox;
+class QWidget;
 
 class PreferencesDialog : public QDialog
 {
@@ -15,6 +20,11 @@ class PreferencesDialog : public QDialog
 
 public:
     explicit PreferencesDialog(QWidget *parent = nullptr);
+
+    /// ExpRS Developer Platform 3.0: pages contributed by UI plugins. Pages
+    /// are registered while plugins load (before the dialog is opened) and
+    /// appended as tabs; the dialog takes ownership for its lifetime.
+    static void registerExternalPage( const QString &title, QWidget *page );
 
     QString theme() const;
     void setTheme(const QString &theme);

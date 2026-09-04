@@ -52,6 +52,22 @@ void applyDefaultCrsToProject( const QString &crsStr )
 
 #include "dialog_utils.h"
 
+namespace {
+/// Plugin-contributed settings pages, collected before the dialog opens.
+QMap<QString, QWidget *> &externalPages()
+{
+    static QMap<QString, QWidget *> pages;
+    return pages;
+}
+} // namespace
+
+void PreferencesDialog::registerExternalPage( const QString &title, QWidget *page )
+{
+    if ( title.isEmpty() || !page )
+        return;
+    externalPages()[title] = page;
+}
+
 PreferencesDialog::PreferencesDialog(QWidget *parent)
     : QDialog(parent)
 {
@@ -70,6 +86,10 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     setupGeneralTab();
     setupToolsTab();
     setupAboutTab();
+    // Plugin-contributed pages last (ExpRS Developer Platform 3.0).
+    const QMap<QString, QWidget *> pages = externalPages();
+    for ( auto it = pages.constBegin(); it != pages.constEnd(); ++it )
+        m_tabWidget->addTab( it.value(), it.key() );
 
     auto *buttonBox = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply | QDialogButtonBox::Help, this );
