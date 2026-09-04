@@ -57,6 +57,7 @@
 #include "app/main_window.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "agent/mcp_server.h"
+#include "agent/workspace_state.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "agent/interaction_tool_registry.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
