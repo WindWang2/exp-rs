@@ -3,8 +3,11 @@
 #include <algorithm>
 #include <array>
 
+#include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QThread>
 #include <QUrl>
 #include <QString>
 #include <QStringList>
@@ -97,13 +100,67 @@ bool isRemoteRasterSource( const QString &path )
          path.startsWith( QStringLiteral( "https://" ), Qt::CaseInsensitive );
 }
 
-/// Remote sources open through /vsicurl/: a bare http(s) href is prefixed.
-QString normalizeRemoteRasterPath( const QString &path )
+/// File-extension of a raster source, ignoring VSI wrappers, query strings,
+/// and URL fragments. `scene.tif?X-Amz-Signature=…` therefore yields `tif`.
+QString rasterSuffix( const QString &source )
 {
-  if ( path.startsWith( QStringLiteral( "http://" ), Qt::CaseInsensitive ) ||
-       path.startsWith( QStringLiteral( "https://" ), Qt::CaseInsensitive ) )
-    return QStringLiteral( "/vsicurl/" ) + path;
-  return path;
+  QString path = source.trimmed();
+  if ( path.isEmpty() )
+    return {};
+
+  while ( path.startsWith( QLatin1String( "/vsi" ), Qt::CaseInsensitive ) )
+  {
+    const int slash = path.indexOf( QLatin1Char( '/' ), 1 );
+    if ( slash < 0 )
+      break;
+    path = path.mid( slash + 1 );
+  }
+
+  if ( path.startsWith( QLatin1String( "http://" ), Qt::CaseInsensitive ) ||
+       path.startsWith( QLatin1String( "https://" ), Qt::CaseInsensitive ) )
+  {
+    path = QUrl( path ).path();
+  }
+  else
+  {
+    const int query = path.indexOf( QLatin1Char( '?' ) );
+    if ( query >= 0 )
+      path = path.left( query );
+    const int fragment = path.indexOf( QLatin1Char( '#' ) );
+    if ( fragment >= 0 )
+      path = path.left( fragment );
+  }
+  return QFileInfo( path ).suffix().toLower();
+}
+
+/// Network-backed rasters (HTTP and cloud VSI). Local /vsimem/ and /vsizip/
+/// of files are remote-identity sources but must still GDALOpen locally.
+bool isNetworkRasterSource( const QString &path )
+{
+  if ( path.startsWith( QLatin1String( "http://" ), Qt::CaseInsensitive ) ||
+       path.startsWith( QLatin1String( "https://" ), Qt::CaseInsensitive ) )
+    return true;
+  static const char *const kNetworkVsi[] = {
+    "/vsicurl/", "/vsicurl_streaming/", "/vsis3/", "/vsigs/", "/vsiaz/",
+    "/vsiadls/", "/vsihdfs/", "/vsioss/", "/vsiswift/",
+  };
+  for ( const char *prefix : kNetworkVsi )
+  {
+    if ( path.startsWith( QLatin1String( prefix ), Qt::CaseInsensitive ) )
+      return true;
+  }
+  return false;
+}
+
+/// Catalog resolve must not GDALOpen a network source on the application
+/// thread (project restore, DataManager mutations). No QCoreApplication
+/// means there is no worker to marshal onto — still skip the hang.
+bool shouldDeferNetworkRasterOpen()
+{
+  const QCoreApplication *app = QCoreApplication::instance();
+  if ( !app )
+    return true;
+  return QThread::currentThread() == app->thread();
 }
 
 /// One-time process defaults for remote reads: bounded timeouts/retries so a
@@ -134,7 +191,7 @@ QString normalizeRasterPath( const QString &rawPath )
     return rawPath;
 
   if ( isRemoteRasterSource( rawPath ) )
-    return normalizeRemoteRasterPath( rawPath );
+    return GdalRasterSourceProvider::normalizeRemoteRasterSource( rawPath );
 
   const QString enviResolved = resolveEnviDataPath( rawPath );
   const QFileInfo info( enviResolved );
@@ -143,6 +200,14 @@ QString normalizeRasterPath( const QString &rawPath )
 }
 
 } // namespace
+
+QString GdalRasterSourceProvider::normalizeRemoteRasterSource( const QString &path )
+{
+  if ( path.startsWith( QLatin1String( "http://" ), Qt::CaseInsensitive ) ||
+       path.startsWith( QLatin1String( "https://" ), Qt::CaseInsensitive ) )
+    return QStringLiteral( "/vsicurl/" ) + path;
+  return path;
+}
 
 bool GdalRasterSourceProvider::supports( const SourceDescriptor &source ) const
 {
@@ -154,16 +219,15 @@ bool GdalRasterSourceProvider::supports( const SourceDescriptor &source ) const
     return false;
   }
 
-  const QFileInfo info( source.canonicalSource );
-  const QString suffix = info.suffix().toLower();
+  const QString suffix = rasterSuffix( source.canonicalSource );
   if ( rasterExtensions().contains( suffix ) )
     return true;
 
-  // Remote raster sources (STAC COGs etc.): same extension contract, but the
-  // QFileInfo suffix read on a URL string is harmless while the local
-  // existence probe in resolve() is not.
+  // Remote raster sources (STAC COGs, presigned URLs, extension-less asset
+  // endpoints): skip the local ENVI-sibling existence probe and admit the
+  // source so resolve() can content-probe (or defer the network open).
   if ( isRemoteRasterSource( source.canonicalSource ) )
-    return rasterExtensions().contains( suffix );
+    return true;
 
   // Extensionless ENVI binary (GF_1 + GF_1.HDR) is also a local raster.
   return suffix.isEmpty() && hasEnviHeaderSibling( source.canonicalSource );
@@ -180,8 +244,19 @@ Result<internal::ResolvedSource> GdalRasterSourceProvider::resolve(
   resolved.storageKind = remote ? StorageKind::Remote : StorageKind::File;
   resolved.canonicalSource = normalizedPath;
   resolved.canonicalProviderKey = QStringLiteral( "gdal" );
-  resolved.displayName = remote ? QUrl( normalizedPath ).fileName()
-                                : QFileInfo( normalizedPath ).completeBaseName();
+  if ( remote )
+  {
+    QString urlText = normalizedPath;
+    if ( urlText.startsWith( QLatin1String( "/vsicurl/" ), Qt::CaseInsensitive ) )
+      urlText = urlText.mid( QStringLiteral( "/vsicurl/" ).size() );
+    resolved.displayName = QUrl( urlText ).fileName();
+    if ( resolved.displayName.isEmpty() )
+      resolved.displayName = QFileInfo( QUrl( urlText ).path() ).completeBaseName();
+  }
+  else
+  {
+    resolved.displayName = QFileInfo( normalizedPath ).completeBaseName();
+  }
 
   if ( !remote )
   {
@@ -192,6 +267,21 @@ Result<internal::ResolvedSource> GdalRasterSourceProvider::resolve(
       resolved.capabilities = AssetCapability::Relocatable;
       return Result<internal::ResolvedSource>::success( std::move( resolved ) );
     }
+  }
+
+  // Project restore and other DataManager mutations run on the application
+  // thread. A sync GDALOpen of a dead/expired host costs tens of seconds per
+  // asset there (GDAL_HTTP_TIMEOUT + retries). Display re-opens on demand;
+  // workers (STAC browser validation) still GDALOpen off-thread.
+  if ( remote && isNetworkRasterSource( normalizedPath ) && shouldDeferNetworkRasterOpen() )
+  {
+    resolved.state = AssetState::Missing;
+    resolved.capabilities = AssetCapability::Relocatable;
+    return Result<internal::ResolvedSource>::success(
+      std::move( resolved ),
+      { Diagnostic{ QStringLiteral( "source.deferred_remote_open" ),
+                    QStringLiteral( "Remote raster open deferred off the application thread" ),
+                    DiagnosticSeverity::Warning } } );
   }
 
   // Suppress GDAL's stderr noise during probing; we report Missing/Error ourselves.

@@ -3,6 +3,7 @@
 #include <memory>
 #include <thread>
 #include <type_traits>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryFile>
@@ -37,6 +38,7 @@ using sicnu::data::RasterStructure;
 using sicnu::data::RegisterRequest;
 using sicnu::data::RegisterResult;
 using sicnu::data::RelocateRequest;
+using sicnu::data::RestoreRequest;
 using sicnu::data::Result;
 using sicnu::data::SourceDescriptor;
 using sicnu::data::StorageKind;
@@ -1116,6 +1118,47 @@ TEST_CASE( "findByPath resolves an asset by canonical and absolute path",
 
   CHECK_FALSE( manager->findByPath( QStringLiteral( "unregistered" ) ).has_value() );
   CHECK_FALSE( manager->findByPath( QString() ).has_value() );
+}
+
+TEST_CASE( "findByPath matches https hrefs against /vsicurl-canonical assets",
+           "[data_manager][lookup]" )
+{
+  const auto manager = makeDataManager();
+
+  RegisterRequest request;
+  request.source = memoryRaster( QStringLiteral( "/vsicurl/https://example.com/s2/a.tif" ) );
+  const auto registered = manager->registerSource( request );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+
+  const auto byHttps = manager->findByPath( QStringLiteral( "https://example.com/s2/a.tif" ) );
+  REQUIRE( byHttps.has_value() );
+  CHECK( byHttps->id() == registered.assetId );
+
+  const auto byVsi =
+    manager->findByPath( QStringLiteral( "/vsicurl/https://example.com/s2/a.tif" ) );
+  REQUIRE( byVsi.has_value() );
+  CHECK( byVsi->id() == registered.assetId );
+}
+
+TEST_CASE( "restoreSource of a remote raster does not block on the application thread",
+           "[data_manager][remote]" )
+{
+  DataManager manager;
+  RestoreRequest request;
+  request.id = AssetId::generate();
+  request.source.providerKey = QStringLiteral( "gdal" );
+  request.source.canonicalSource = QStringLiteral( "https://198.51.100.1/issue-728.tif" );
+
+  QElapsedTimer timer;
+  timer.start();
+  const auto restored = manager.restoreSource( request );
+  CHECK( timer.elapsed() < 2000 );
+  REQUIRE( restored );
+  const auto asset = manager.asset( restored.value() );
+  REQUIRE( asset.has_value() );
+  CHECK( asset->state() == AssetState::Missing );
+  CHECK( asset->source().canonicalSource ==
+         QStringLiteral( "/vsicurl/https://198.51.100.1/issue-728.tif" ) );
 }
 
 TEST_CASE( "Re-registering an updated source with the update flag advances the "

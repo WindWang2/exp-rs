@@ -2,8 +2,8 @@
 #include "temporal_workspace.h"
 
 #include "data/data_manager.h"
-
 #include "data/derivation_record.h"
+#include "data/providers/gdal_raster_source_provider.h"
 
 #include <qgsdatasourceresolver.h>
 
@@ -88,9 +88,17 @@ int bindCollectionAssets( TemporalCollection &collection, sicnu::data::DataManag
   int bound = 0;
   for ( TemporalSceneRef &scene : collection.scenes() )
   {
-    const auto snapshot = dataManager->findByPath( scene.path );
+    const QString lookup =
+      sicnu::data::providers::GdalRasterSourceProvider::normalizeRemoteRasterSource( scene.path );
+    auto snapshot = dataManager->findByPath( lookup );
+    if ( !snapshot && lookup != scene.path )
+      snapshot = dataManager->findByPath( scene.path );
     if ( !snapshot )
+    {
+      scene.assetId.clear();
+      scene.assetRevision.clear();
       continue;
+    }
     scene.assetId = snapshot->id().toString();
     scene.assetRevision = QString::number( snapshot->revision().value() );
     ++bound;

@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 
@@ -452,4 +454,64 @@ TEST_CASE( "Raster structure surfaces semantic band roles from product metadata"
   REQUIRE( structure->bands.size() == 2 );
   CHECK( structure->bands[0].role == sicnu::data::BandRole::Red );
   CHECK( structure->bands[1].role == sicnu::data::BandRole::NIR );
+}
+
+TEST_CASE( "Remote raster supports() accepts query-string and extension-less URLs",
+           "[data_source_providers][remote]" )
+{
+  const GdalRasterSourceProvider provider;
+
+  SourceDescriptor signedCog;
+  signedCog.canonicalSource = QStringLiteral(
+    "https://example.com/scene.tif?X-Amz-Signature=abc&X-Amz-Expires=3600" );
+  CHECK( provider.supports( signedCog ) );
+
+  SourceDescriptor vsicurlSigned;
+  vsicurlSigned.canonicalSource = QStringLiteral(
+    "/vsicurl/https://example.com/scene.tif?X-Amz-Signature=abc" );
+  CHECK( provider.supports( vsicurlSigned ) );
+
+  SourceDescriptor extensionless;
+  extensionless.canonicalSource = QStringLiteral( "https://example.com/cog-endpoint" );
+  CHECK( provider.supports( extensionless ) );
+
+  SourceDescriptor vsicurlBare;
+  vsicurlBare.canonicalSource = QStringLiteral( "/vsicurl/https://example.com/cog-endpoint" );
+  CHECK( provider.supports( vsicurlBare ) );
+
+  SourceDescriptor localTxt;
+  localTxt.canonicalSource = QStringLiteral( "/tmp/notes.txt" );
+  CHECK_FALSE( provider.supports( localTxt ) );
+}
+
+TEST_CASE( "Remote raster resolve on the application thread does not GDALOpen the network",
+           "[data_source_providers][remote]" )
+{
+  static int argc = 1;
+  static char argv0[] = "test_data_source_providers";
+  static char *argv[] = { argv0, nullptr };
+  if ( !QCoreApplication::instance() )
+    new QCoreApplication( argc, argv );
+
+  const GdalRasterSourceProvider provider;
+  SourceDescriptor source;
+  source.canonicalSource = QStringLiteral( "https://198.51.100.1/issue-728-missing.tif" );
+
+  QElapsedTimer timer;
+  timer.start();
+  const auto resolved = provider.resolve( source );
+  CHECK( timer.elapsed() < 2000 );
+
+  REQUIRE( resolved );
+  CHECK( resolved.value().state == AssetState::Missing );
+  CHECK( resolved.value().storageKind == StorageKind::Remote );
+  CHECK( resolved.value().canonicalSource ==
+         QStringLiteral( "/vsicurl/https://198.51.100.1/issue-728-missing.tif" ) );
+  bool sawDeferred = false;
+  for ( const auto &diagnostic : resolved.diagnostics() )
+  {
+    if ( diagnostic.code == QStringLiteral( "source.deferred_remote_open" ) )
+      sawDeferred = true;
+  }
+  CHECK( sawDeferred );
 }
