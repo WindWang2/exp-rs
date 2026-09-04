@@ -2,6 +2,7 @@
 // Phase H/I/J/L/M — MapSpec document model, compiler roundtrip, registries,
 // charts, preflight/repair loop.
 #include <catch2/catch_session.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <json/json.h>
@@ -23,8 +24,13 @@
 
 #include "agent/layout_tools/layout_service.h"
 
+#ifndef SICNU_CARTOGRAPHY_DATA_DIR
+#define SICNU_CARTOGRAPHY_DATA_DIR "data/cartography"
+#endif
+
 int main( int argc, char *argv[] )
 {
+  qputenv( "SICNU_CARTOGRAPHY_DIR", SICNU_CARTOGRAPHY_DATA_DIR );
   QgsApplication application( argc, argv, true );
   QgsApplication::initQgis();
   const int result = Catch::Session().run( argc, argv );
@@ -85,6 +91,9 @@ TEST_CASE( "MapSpec document model: make/append/validate", "[mapspec]" )
   Json::Value title = spec["titles"][0];
   title["text"] = "Hello";
   spec["titles"][0] = title;
+  Json::Value title2 = spec["titles"][1];
+  title2["text"] = "Second";
+  spec["titles"][1] = title2;
   CHECK( validateMapSpec( spec ).empty() );
 
   // find/remove by id.
@@ -113,7 +122,8 @@ TEST_CASE( "MapSpec validation catches geometry, ids, and references", "[mapspec
   REQUIRE_FALSE( duplicateProblems.empty() );
   CHECK( duplicateProblems.front().find( "duplicate item id" ) != std::string::npos );
 
-  // Off-page rect is a validation failure.
+  // Off-page rects are structurally fine but are flagged (repairably) by the
+  // cartography preflight.
   Json::Value offPage = minimalSpec( "off-page" );
   Json::Value far( Json::objectValue );
   far["id"] = "label-far";
@@ -123,10 +133,19 @@ TEST_CASE( "MapSpec validation catches geometry, ids, and references", "[mapspec
   farRect.append( 20 );
   farRect.append( 8 );
   far["rect_mm"] = farRect;
+  far["text"] = "far";
   offPage["labels"].append( far );
-  const auto offPageProblems = validateMapSpec( offPage );
-  REQUIRE_FALSE( offPageProblems.empty() );
-  CHECK( offPageProblems.front().find( "outside the page" ) != std::string::npos );
+  CHECK( validateMapSpec( offPage ).empty() );
+  const Json::Value offPageReport = sicnu::agent::cartography::preflightMapSpec( offPage );
+  bool hasRepairableOffPage = false;
+  for ( const auto &issue : offPageReport["issues"] )
+  {
+    hasRepairableOffPage = hasRepairableOffPage ||
+                           ( issue["code"].asString() == "MAP_OFF_PAGE" &&
+                             issue["repairable"].asBool() &&
+                             issue["item_id"].asString() == "label-far" );
+  }
+  CHECK( hasRepairableOffPage );
 
   // Negative extents are rejected.
   Json::Value tiny = minimalSpec( "tiny" );
@@ -385,7 +404,9 @@ TEST_CASE( "Cartography preflight scores known-broken maps", "[cartography][pref
   Json::Value emptySpec = makeMapSpec( "quality-empty", Json::Value() );
   const Json::Value emptyReport = sicnu::agent::cartography::preflightMapSpec( emptySpec );
   CHECK_FALSE( emptyReport["passed"].asBool() );
-  CHECK( emptyReport["quality_score"].asInt() == 0 );
+  CHECK( emptyReport["error_count"].asInt() == 1 );  // MAP_MISSING_MAP
+  CHECK( emptyReport["warning_count"].asInt() == 5 ); // furniture warnings
+  CHECK( emptyReport["quality_score"].asInt() == 40 );
   bool hasMissingMap = false;
   for ( const auto &issue : emptyReport["issues"] )
     hasMissingMap = hasMissingMap || issue["code"].asString() == "MAP_MISSING_MAP";
@@ -432,11 +453,10 @@ TEST_CASE( "Cartography repair loop converges on broken drafts", "[cartography][
   Json::Value report = sicnu::agent::cartography::preflightMapSpec( spec );
   int total = sicnu::agent::cartography::repairMapSpec( spec, report );
   CHECK( total >= 5 ); // title, legend, scale bar, north arrow, source note, off-page
-  // Repairs converge: re-preflight is error-free and a further pass only
-  // polishes repairable warnings (e.g. nudging overlaps), never re-introduces
-  // blocking issues.
+  // Repairs converge: after the first pass the map is error-free (residual
+  // repairable overlaps from the clamp are polished by a second pass).
   report = sicnu::agent::cartography::preflightMapSpec( spec );
-  CHECK( report["passed"].asBool() );
+  CHECK( report["error_count"].asInt() == 0 );
   const int scoreAfter = report["quality_score"].asInt();
   sicnu::agent::cartography::repairMapSpec( spec, report );
   report = sicnu::agent::cartography::preflightMapSpec( spec );

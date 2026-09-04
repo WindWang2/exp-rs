@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -289,13 +290,14 @@ class AssessResultTool final : public SpatialTool
         int invalidGeometry = 0;
         while ( inspected < 100 )
         {
-          OGRFeatureUniquePtr feature = layer->GetNextFeature();
+          OGRFeature *feature = layer->GetNextFeature();
           if ( !feature )
             break;
           const OGRGeometry *geometry = feature->GetGeometryRef();
           ++inspected;
           if ( geometry && !geometry->IsValid() )
             ++invalidGeometry;
+          OGRFeature::DestroyFeature( feature );
         }
         {
           Json::Value details( Json::objectValue );

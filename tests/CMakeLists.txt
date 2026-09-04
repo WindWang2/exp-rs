@@ -340,6 +340,9 @@ sicnu_discover_tests(test_agent_tools_3)
 qt_add_executable(test_mapspec
   test_mapspec.cpp
 )
+target_compile_definitions(test_mapspec PRIVATE
+  SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
+)
 target_link_libraries(test_mapspec PRIVATE
   Catch2::Catch2
   Qt6::Core
@@ -786,6 +789,7 @@ qt_add_executable(test_spatial_scientist_benchmark
 )
 target_compile_definitions(test_spatial_scientist_benchmark PRIVATE
   SICNU_BENCHMARK_TASKS_JSON="${CMAKE_SOURCE_DIR}/data/benchmarks/spatial_scientist_tasks.json"
+  SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
 )
 target_link_libraries(test_spatial_scientist_benchmark PRIVATE
   Catch2::Catch2

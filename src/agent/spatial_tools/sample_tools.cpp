@@ -354,11 +354,11 @@ class SampleFeaturesTool final : public SpatialTool
       Json::Value features( Json::arrayValue );
       while ( static_cast<int>( features.size() ) < limit )
       {
-        OGRFeatureUniquePtr feature = layer->GetNextFeature();
+        OGRFeature *feature = layer->GetNextFeature();
         if ( !feature )
           break;
         Json::Value f( Json::objectValue );
-        f["id"] = feature->GetFID();
+        f["id"] = static_cast<Json::Int64>( feature->GetFID() );
         Json::Value attrs( Json::objectValue );
         for ( int idx : fieldIndices )
         {
@@ -400,6 +400,7 @@ class SampleFeaturesTool final : public SpatialTool
           f["bbox"] = bbox;
         }
         features.append( f );
+        OGRFeature::DestroyFeature( feature );
       }
 
       Json::Value out( Json::objectValue );

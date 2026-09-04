@@ -1,5 +1,6 @@
 // tests/test_spatial_contracts.cpp
 // Phase A — Spatial Reasoning Contract document tests (ADR 0128).
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <json/json.h>
@@ -95,10 +96,12 @@ TEST_CASE( "CapabilityCandidate validates compatibility bounds", "[agent][contra
                                                                      Json::Value(), Json::Value(),
                                                                      Json::Value() ) )
                  .empty() );
-  CHECK_FALSE( validateCapabilityCandidate( makeCapabilityCandidate( "x", "algorithm", 1.5,
-                                                                     Json::Value(), Json::Value(),
-                                                                     Json::Value() ) )
-                 .empty() );
+  // The builder clamps out-of-range scores; the validator still rejects
+  // documents that arrive with them (e.g. round-tripped from an agent).
+  Json::Value outOfRange = makeCapabilityCandidate( "x", "algorithm", 1.0, Json::Value(),
+                                                    Json::Value(), Json::Value() );
+  outOfRange["compatibility"] = 1.5;
+  CHECK_FALSE( validateCapabilityCandidate( outOfRange ).empty() );
   CHECK_FALSE( validateCapabilityCandidate( makeCapabilityCandidate( "x", "alien", 0.5,
                                                                      Json::Value(), Json::Value(),
                                                                      Json::Value() ) )
@@ -123,7 +126,7 @@ TEST_CASE( "PreflightResult verdict derivation", "[agent][contracts]" )
   const Json::Value doc = makePreflightResult( "wf-1", "blocked", issues, Json::Value( Json::arrayValue ) );
   CHECK( validatePreflightResult( doc ).empty() );
   CHECK( doc["issues"][0]["code"].asString() == "WF_UNKNOWN_OPERATOR" );
-  CHECK_FALSE( doc["issues"][0].isMember( "item_id" ) );
+  CHECK( doc["issues"][0]["item_id"].asString() == "step1" );
 
   // Issue with suggested action and item id round-trips.
   Json::Value withFix( Json::arrayValue );

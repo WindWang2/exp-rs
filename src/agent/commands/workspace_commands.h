@@ -13,8 +13,10 @@
 
 #include <json/json.h>
 
+#include <QMap>
 #include <QMutex>
 #include <QString>
+#include <vector>
 
 #include <deque>
 #include <functional>

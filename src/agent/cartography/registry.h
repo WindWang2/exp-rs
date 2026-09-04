@@ -20,6 +20,8 @@
 
 #include <json/json.h>
 
+#include <QMap>
+#include <QMutex>
 #include <QString>
 #include <QStringList>
 
@@ -57,7 +59,7 @@ class ComponentRegistry
     mutable QMutex mMutex;
     mutable bool mLoaded = false;
     QString mDirectory;
-    QMap<QString, Json::Value> mComponents; // id -> descriptor
+    mutable QMap<QString, Json::Value> mComponents; // id -> descriptor
 };
 
 class TemplateRegistry
@@ -92,7 +94,7 @@ class TemplateRegistry
     mutable QMutex mMutex;
     mutable bool mLoaded = false;
     QString mDirectory;
-    QMap<QString, Json::Value> mTemplates; // id -> descriptor
+    mutable QMap<QString, Json::Value> mTemplates; // id -> descriptor
 };
 
 } // namespace sicnu::agent::cartography

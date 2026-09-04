@@ -16,6 +16,10 @@
 namespace sicnu::agent::cartography {
 
 using namespace sicnu::agent::contracts;
+using sicnu::agent::spatial_tools::SpatialTool;
+using sicnu::agent::spatial_tools::SpatialToolRegistry;
+using sicnu::agent::spatial_tools::SpatialToolResult;
+using sicnu::agent::spatial_tools::requireStringField;
 
 namespace {
 
@@ -234,18 +238,24 @@ Json::Value preflightMapSpec( const Json::Value &spec, const Json::Value &compil
 
   int errorCount = 0;
   int warningCount = 0;
+  int repairableCount = 0;
   for ( const auto &i : issues )
   {
     if ( i["severity"].asString() == "error" )
       ++errorCount;
     else
       ++warningCount;
+    if ( i.get( "repairable", false ).asBool() )
+      ++repairableCount;
   }
   const int score = std::max( 0, 100 - 20 * errorCount - 8 * warningCount );
 
   Json::Value body( Json::objectValue );
   body["quality_score"] = score;
-  body["passed"] = errorCount == 0;
+  // The pass gate drives the repair loop: blocking errors OR unresolved
+  // repairable findings (missing furniture, off-page items) keep a map from
+  // passing; non-repairable warnings (e.g. empty map frame) are advisory.
+  body["passed"] = errorCount == 0 && repairableCount == 0;
   Json::Value issuesArr( Json::arrayValue );
   for ( const auto &i : issues )
     issuesArr.append( i );
@@ -310,7 +320,7 @@ int repairMapSpec( Json::Value &spec, const Json::Value &report )
     {
       Json::Value arrow( Json::objectValue );
       arrow["semantic_role"] = "north_arrow.primary";
-      arrow["rect_mm"] = rect( pageW - 26, 26, 12, 12 );
+      arrow["rect_mm"] = rect( pageW - 16, 6, 12, 12 );
       if ( !mapRef.empty() )
         arrow["map_ref"] = mapRef;
       mapspec::appendMapSpecItem( spec, "north_arrows", arrow );
@@ -368,16 +378,53 @@ int repairMapSpec( Json::Value &spec, const Json::Value &report )
       Json::Value &found = spec[location["collection"].asString()][location["index"].asInt()];
       if ( !found.isMember( "rect_mm" ) || found["rect_mm"].size() != 4 )
         continue;
-      // Nudge the offending item to the next free lane below/right.
-      double y = found["rect_mm"][1].asDouble();
+      // Deterministic relocation: try the classic anchor slots in a fixed
+      // order and take the first that neither leaves the page nor collides
+      // with any other item. Convergence > cleverness for agent repair.
+      const double w = found["rect_mm"][2].asDouble();
       const double h = found["rect_mm"][3].asDouble();
-      const double overlapAmount = std::max( 6.0, h * 0.25 );
-      if ( y + h + overlapAmount + h <= pageH )
-        y += overlapAmount + h * 0.5;
-      else
-        y = std::max( 0.0, pageH - h );
-      found["rect_mm"][1] = y;
-      ++applied;
+      const double m = 6.0;
+      struct Slot { double x; double y; };
+      const Slot candidates[] = {
+        { pageW - m - w, m },   { m, m },               { m, pageH - m - h },
+        { pageW - m - w, pageH - m - h }, { m, ( pageH - h ) / 2.0 },
+        { pageW - m - w, ( pageH - h ) / 2.0 }, { ( pageW - w ) / 2.0, pageH - m - h },
+      };
+      // Collect every other furniture rect — the same collections the
+      // overlap detector scans, so a relocated item never re-triggers
+      // MAP_OVERLAP. Map frames are overlays, not obstacles.
+      const char *overlappable[] = { "titles",   "labels",    "legends",
+                                     "scale_bars", "north_arrows", "source_notes",
+                                     "annotations", "charts",  "colorbars" };
+      std::vector<Json::Value> others;
+      for ( const char *collection : overlappable )
+      {
+        if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+          continue;
+        for ( const auto &other : spec[collection] )
+        {
+          if ( !other.isObject() || !other.isMember( "id" ) || other["id"].asString() == id )
+            continue;
+          if ( other.isMember( "rect_mm" ) && other["rect_mm"].isArray() &&
+               other["rect_mm"].size() == 4 )
+            others.push_back( other["rect_mm"] );
+        }
+      }
+      for ( const auto &candidate : candidates )
+      {
+        if ( candidate.x < 0 || candidate.y < 0 || candidate.x + w > pageW ||
+             candidate.y + h > pageH )
+          continue;
+        bool free = true;
+        for ( const auto &other : others )
+          free = free && !rectsIntersect( rect( candidate.x, candidate.y, w, h ), other );
+        if ( free )
+        {
+          found["rect_mm"] = rect( candidate.x, candidate.y, w, h );
+          ++applied;
+          break;
+        }
+      }
     }
   }
   return applied;

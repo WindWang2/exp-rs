@@ -13,6 +13,7 @@
 #include <qgsmaplayer.h>
 
 #include <algorithm>
+#include <cctype>
 #include <map>
 #include <set>
 #include <string>
@@ -529,7 +530,7 @@ class SelectModelTool final : public SpatialTool
         if ( model.estimatedVramMb > 0 )
           cost["estimated_vram_mb"] = model.estimatedVramMb;
         if ( !model.readinessReason.empty() )
-          warnings.push_back( "readiness: " + model.readinessReason );
+          warnings.append( "readiness: " + model.readinessReason );
 
         Json::Value entry = makeCapabilityCandidate( model.name, "model", candidate.score, reasons,
                                                      warnings, cost );

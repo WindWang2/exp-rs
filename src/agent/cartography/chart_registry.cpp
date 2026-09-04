@@ -5,7 +5,9 @@
 #include <QPainter>
 #include <QPainterPath>
 
+#include <qgsbarchartplot.h>
 #include <qgslayoutitemchart.h>
+#include <qgslinechartplot.h>
 #include <qgsplot.h>
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>

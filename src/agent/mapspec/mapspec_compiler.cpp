@@ -17,10 +17,10 @@
 #include <qgslayoutmanager.h>
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
+#include <qgslayoutitempage.h>
 #include <qgslayoutpagecollection.h>
 #include <qgslayoutsize.h>
 #include <qgslayoutpoint.h>
-#include <qgslayoutframeitem.h>
 
 #include <QDir>
 
@@ -233,11 +233,11 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &spec, QString *erro
       if ( item )
       {
         auto *nativeChart = qobject_cast<QgsLayoutItemChart *>( item );
-        if ( nativeChart && !chart_registry::bindNativeChart( nativeChart, chart, &chartError ) )
+        if ( nativeChart && !sicnu::agent::cartography::bindNativeChart( nativeChart, chart, &chartError ) )
         {
           // Fall through to the inline path so a bad binding never kills the
           // whole composition; the placeholder documents the failure.
-          props["text_placeholder"] = chartError;
+          props["text_placeholder"] = chartError.toStdString();
           QgsLayoutItem *fallback =
             compileItem( layout, "picture", chartItem["id"].asString() + "-placeholder", props, nullptr );
           Q_UNUSED( fallback );
@@ -250,7 +250,7 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &spec, QString *erro
       // file, then land as picture items.
       chartPath = QDir::temp().filePath( QStringLiteral( "sicnu-chart-%1.png" )
                                            .arg( QString::fromStdString( chartItem["id"].asString() ) ) );
-      if ( chart_registry::renderChartToFile( chart, chartPath, &chartError ) )
+      if ( sicnu::agent::cartography::renderChartToFile( chart, chartPath, &chartError ) )
       {
         props["path"] = chartPath.toStdString();
         compileItem( layout, "picture", chartItem["id"].asString(), props, nullptr );
@@ -269,7 +269,7 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &spec, QString *erro
   {
     const QString path = QDir::temp().filePath( QStringLiteral( "sicnu-colorbar-%1.png" )
                                                   .arg( QString::fromStdString( colorbar["id"].asString() ) ) );
-    if ( chart_registry::renderColorbarToFile( colorbar, path ) )
+    if ( sicnu::agent::cartography::renderColorbarToFile( colorbar, path ) )
     {
       Json::Value props = rectToProps( colorbar["rect_mm"] );
       props["path"] = path.toStdString();
@@ -353,8 +353,7 @@ Json::Value MapSpecCompiler::extract( QgsPrintLayout *layout )
     }
     else if ( auto *picture = qobject_cast<QgsLayoutItemPicture *>( item ) )
     {
-      collection = picture->picturePath().contains( QLatin1String( "north_arrows" ) ) ||
-                           picture->northMode() != QgsLayoutItemPicture::DefaultNorth
+      collection = picture->picturePath().contains( QLatin1String( "north_arrows" ) )
                      ? "north_arrows"
                      : "annotations";
       if ( std::string( collection ) == "annotations" )

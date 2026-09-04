@@ -10,6 +10,7 @@
 
 #include <json/reader.h>
 
+#include <sstream>
 #include <vector>
 
 namespace sicnu::agent::cartography {
@@ -36,15 +37,15 @@ bool parseJsonFile( const QString &path, Json::Value *out, QString *error )
     return false;
   }
   const QByteArray bytes = file.readAll();
+  std::istringstream stream( bytes.toStdString() );
   Json::CharReaderBuilder builder;
   std::string parseErrors;
-  if ( !Json::parseFromStream( builder, file, out, &parseErrors ) )
+  if ( !Json::parseFromStream( builder, stream, out, &parseErrors ) )
   {
     if ( error )
       *error = QStringLiteral( "%1: %2" ).arg( path, QString::fromStdString( parseErrors ) );
     return false;
   }
-  Q_UNUSED( bytes );
   return true;
 }
 
@@ -110,8 +111,8 @@ Json::Value embeddedTemplates()
   Json::Value tmpl( Json::objectValue );
   tmpl["id"] = "remote-sensing-result";
   tmpl["description"] = "Generic continuous remote-sensing result.";
-  Json::Value slots( Json::arrayValue );
-  const auto slot = [ &slots = slots ]( const char *role, const char *collection, double x,
+  Json::Value slotList( Json::arrayValue );
+  const auto appendSlot = [ &slotList ]( const char *role, const char *collection, double x,
                                         double y, double w, double h ) {
     Json::Value s( Json::objectValue );
     s["role"] = role;
@@ -122,14 +123,14 @@ Json::Value embeddedTemplates()
     rect.append( w );
     rect.append( h );
     s["rect_mm"] = rect;
-    slots.append( s );
+    slotList.append( s );
   };
-  slot( "map.main", "map_frames", 12, 24, 190, 160 );
-  slot( "title.main", "titles", 12, 6, 200, 14 );
-  slot( "colorbar.primary", "colorbars", 60, 190, 90, 8 );
-  slot( "scalebar.primary", "scale_bars", 14, 188, 60, 8 );
-  slot( "source.primary", "source_notes", 170, 190, 110, 8 );
-  tmpl["required_slots"] = slots;
+  appendSlot( "map.main", "map_frames", 12, 24, 190, 160 );
+  appendSlot( "title.main", "titles", 12, 6, 200, 14 );
+  appendSlot( "colorbar.primary", "colorbars", 60, 190, 90, 8 );
+  appendSlot( "scalebar.primary", "scale_bars", 14, 188, 60, 8 );
+  appendSlot( "source.primary", "source_notes", 170, 190, 110, 8 );
+  tmpl["required_slots"] = slotList;
   list.append( tmpl );
   return list;
 }
@@ -460,9 +461,11 @@ Json::Value TemplateRegistry::instantiateTemplate( const QString &id, const Json
       item["source_component"] = component["id"];
       if ( collection == "north_arrows" )
       {
+        // Top-right margin strip: clear of the title band (left-anchored) and
+        // of the right legend rail (which starts lower).
         Json::Value rect( Json::arrayValue );
-        rect.append( spec["page"]["width_mm"].asDouble() - 24.0 );
-        rect.append( 26.0 );
+        rect.append( spec["page"]["width_mm"].asDouble() - 16.0 );
+        rect.append( 6.0 );
         rect.append( 12.0 );
         rect.append( 12.0 );
         item["rect_mm"] = rect;

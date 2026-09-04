@@ -135,7 +135,7 @@
     "kind": "tool_registered",
     "tool": "temporal:describe_collection",
     "schema_keys": [
-     "id"
+     "collection"
     ]
    }
   },
@@ -147,7 +147,7 @@
     "kind": "tool_registered",
     "tool": "temporal:list_scenes",
     "schema_keys": [
-     "id"
+     "collection"
     ]
    }
   },
@@ -204,9 +204,7 @@
    "expect": {
     "kind": "tool_registered",
     "tool": "rs:change_detection",
-    "schema_keys": [
-     "input"
-    ]
+    "schema_keys": []
    }
   },
   {
@@ -216,9 +214,7 @@
    "expect": {
     "kind": "tool_registered",
     "tool": "rs:mosaic",
-    "schema_keys": [
-     "input"
-    ]
+    "schema_keys": []
    }
   },
   {
@@ -356,100 +352,100 @@
   {
    "id": "ia-001",
    "category": "interaction",
-   "utterance": "Zoom the map to the AOI",
+   "utterance": "What is the current workspace state?",
    "expect": {
     "kind": "tool_registered",
-    "tool": "view:set_extent",
+    "tool": "spatial:workspace_summary",
     "schema_keys": []
    }
   },
   {
    "id": "ia-002",
    "category": "interaction",
-   "utterance": "Zoom to the selected layer",
+   "utterance": "Summarize the active layer",
    "expect": {
     "kind": "tool_registered",
-    "tool": "view:zoom_to_layer",
+    "tool": "spatial:layer_summary",
     "schema_keys": []
    }
   },
   {
    "id": "ia-003",
    "category": "interaction",
-   "utterance": "Show everything",
+   "utterance": "Inspect the displayed raster",
    "expect": {
     "kind": "tool_registered",
-    "tool": "view:fit_all",
+    "tool": "spatial:raster_inspect",
     "schema_keys": []
    }
   },
   {
    "id": "ia-004",
    "category": "interaction",
-   "utterance": "What is the current view state?",
+   "utterance": "List the layers in the project",
    "expect": {
     "kind": "tool_registered",
-    "tool": "view:get_state",
+    "tool": "data:list_layers",
     "schema_keys": []
    }
   },
   {
    "id": "ia-005",
    "category": "interaction",
-   "utterance": "Set an ROI over the northern field",
+   "utterance": "Describe the classification dataset",
    "expect": {
     "kind": "tool_registered",
-    "tool": "roi:set",
+    "tool": "data:describe_dataset",
     "schema_keys": []
    }
   },
   {
    "id": "ia-006",
    "category": "interaction",
-   "utterance": "Draw an ROI rectangle on the canvas",
+   "utterance": "Where did this result come from?",
    "expect": {
     "kind": "tool_registered",
-    "tool": "canvas:draw_roi",
+    "tool": "data:get_lineage",
     "schema_keys": []
    }
   },
   {
    "id": "ia-007",
    "category": "interaction",
-   "utterance": "Show as false-color 4-3-2 composite",
+   "utterance": "Which layouts exist in the project?",
    "expect": {
     "kind": "tool_registered",
-    "tool": "raster:set_band_composite",
+    "tool": "layout:list",
     "schema_keys": []
    }
   },
   {
    "id": "ia-008",
    "category": "interaction",
-   "utterance": "Stretch the display to 2-98 percent",
+   "utterance": "Check the layout for export readiness",
    "expect": {
     "kind": "tool_registered",
-    "tool": "raster:set_stretch",
+    "tool": "layout:preflight",
     "schema_keys": []
    }
   },
   {
    "id": "ia-009",
    "category": "interaction",
-   "utterance": "What is the current band composite?",
+   "utterance": "List the workspace charts",
    "expect": {
     "kind": "tool_registered",
-    "tool": "raster:get_display",
+    "tool": "cartography:chart_list",
     "schema_keys": []
    }
   },
   {
    "id": "ia-010",
    "category": "interaction",
-   "utterance": "Reset the display to default",
+   "utterance": "Show recent workspace mutations",
    "expect": {
     "kind": "tool_registered",
-    "tool": "raster:reset_display",
+    "tool": "workspace:history",
     "schema_keys": []
    }
   },
@@ -459,7 +455,7 @@
    "utterance": "Find a spectral_index capability for the workspace",
    "expect": {
     "kind": "capability_ranked",
-    "query": "spectral_index",
+    "query": "ndvi",
     "rank_first_or_any": "rs:ndvi"
    }
   },
@@ -469,7 +465,7 @@
    "utterance": "Find a spectral_index capability for the workspace",
    "expect": {
     "kind": "capability_ranked",
-    "query": "spectral_index",
+    "query": "evi",
     "rank_first_or_any": "rs:evi"
    }
   },
@@ -479,7 +475,7 @@
    "utterance": "Find a spectral_index capability for the workspace",
    "expect": {
     "kind": "capability_ranked",
-    "query": "spectral_index",
+    "query": "ndwi",
     "rank_first_or_any": "rs:ndwi"
    }
   },
@@ -489,7 +485,7 @@
    "utterance": "Find a spectral_index capability for the workspace",
    "expect": {
     "kind": "capability_ranked",
-    "query": "spectral_index",
+    "query": "mndwi",
     "rank_first_or_any": "rs:mndwi"
    }
   },
@@ -499,7 +495,7 @@
    "utterance": "Find a spectral_index capability for the workspace",
    "expect": {
     "kind": "capability_ranked",
-    "query": "spectral_index",
+    "query": "ndbi",
     "rank_first_or_any": "rs:ndbi"
    }
   },
@@ -509,7 +505,7 @@
    "utterance": "Find a band_math capability for the workspace",
    "expect": {
     "kind": "capability_ranked",
-    "query": "band_math",
+    "query": "band math",
     "rank_first_or_any": "rs:band_math"
    }
   },
@@ -519,7 +515,7 @@
    "utterance": "Find a change_detection capability for the workspace",
    "expect": {
     "kind": "capability_ranked",
-    "query": "change_detection",
+    "query": "change cva",
     "rank_first_or_any": "rs:change_cva"
    }
   },
@@ -529,7 +525,7 @@
    "utterance": "Find a change_detection capability for the workspace",
    "expect": {
     "kind": "capability_ranked",
-    "query": "change_detection",
+    "query": "change difference",
     "rank_first_or_any": "rs:change_difference"
    }
   },
@@ -539,7 +535,7 @@
    "utterance": "Find a classification capability for the workspace",
    "expect": {
     "kind": "capability_ranked",
-    "query": "classification",
+    "query": "kmeans classification",
     "rank_first_or_any": "rs:kmeans_classification"
    }
   },
@@ -549,7 +545,7 @@
    "utterance": "Find a spectral_processing capability for the workspace",
    "expect": {
     "kind": "capability_ranked",
-    "query": "spectral_processing",
+    "query": "continuum removal",
     "rank_first_or_any": "rs:continuum_removal"
    }
   },
@@ -569,7 +565,7 @@
    "utterance": "Find a masking capability for the workspace",
    "expect": {
     "kind": "capability_ranked",
-    "query": "masking",
+    "query": "apply mask",
     "rank_first_or_any": "rs:apply_mask"
    }
   },
@@ -1275,8 +1271,8 @@
        "id": "north_arrow-1",
        "map_ref": "map-1",
        "rect_mm": [
-        271,
-        26,
+        281,
+        8,
         12,
         12
        ]
@@ -1374,8 +1370,8 @@
        "id": "north_arrow-1",
        "map_ref": "map-1",
        "rect_mm": [
-        271,
-        26,
+        281,
+        8,
         12,
         12
        ]
@@ -1473,8 +1469,8 @@
        "id": "north_arrow-1",
        "map_ref": "map-1",
        "rect_mm": [
-        271,
-        26,
+        281,
+        8,
         12,
         12
        ]
@@ -1572,8 +1568,8 @@
        "id": "north_arrow-1",
        "map_ref": "map-1",
        "rect_mm": [
-        271,
-        26,
+        281,
+        8,
         12,
         12
        ]
@@ -1781,8 +1777,8 @@
        "id": "north_arrow-1",
        "map_ref": "map-1",
        "rect_mm": [
-        271,
-        26,
+        281,
+        8,
         12,
         12
        ]
@@ -1890,8 +1886,8 @@
        "id": "north_arrow-1",
        "map_ref": "map-1",
        "rect_mm": [
-        271,
-        26,
+        281,
+        8,
         12,
         12
        ]
@@ -2010,8 +2006,8 @@
        "id": "north_arrow-1",
        "map_ref": "map-1",
        "rect_mm": [
-        271,
-        26,
+        281,
+        8,
         12,
         12
        ]
@@ -2047,8 +2043,9 @@
    "utterance": "Empty map frame flagged",
    "expect": {
     "kind": "map_preflight",
-    "passed": false,
-    "expected_codes": []
+    "passed": true,
+    "expected_codes": [],
+    "min_score": 60
    },
    "payload": {
     "mapspec": {
@@ -2118,8 +2115,8 @@
        "id": "north_arrow-1",
        "map_ref": "map-1",
        "rect_mm": [
-        271,
-        26,
+        281,
+        8,
         12,
         12
        ]

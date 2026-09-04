@@ -16,6 +16,8 @@
 #include <qgsrectangle.h>
 
 #include "contracts/spatial_contracts.h"
+#include "data/asset_types.h"
+#include "data/band_role.h"
 #include "data/data_manager.h"
 #include "operators/framework/model_catalog.h"
 #include "processing/framework/task_center.h"
@@ -98,11 +100,10 @@ void WorkspaceEntityRegistry::loadPersisted( const QString &kind )
   QgsProject *project = QgsProject::instance();
   if ( !project )
     return;
-  const QVariantList entries =
+  const QStringList entries =
     project->readListEntry( QStringLiteral( "sicnu" ), QStringLiteral( "entityIds/%1" ).arg( kind ) );
-  for ( const QVariant &entry : entries )
+  for ( const QString &encoded : entries )
   {
-    const QString encoded = entry.toString();
     const int sep = encoded.indexOf( QStringLiteral( "|" ) );
     if ( sep <= 0 )
       continue;
@@ -124,7 +125,7 @@ void WorkspaceEntityRegistry::persist( const QString &kind )
   QgsProject *project = QgsProject::instance();
   if ( !project )
     return;
-  QVariantList entries;
+  QStringList entries;
   const QString prefix = kind + QChar( '\1' );
   for ( auto it = mIdByKey.constBegin(); it != mIdByKey.constEnd(); ++it )
   {
@@ -281,7 +282,7 @@ Json::Value buildWorkspaceState( data::DataManager *dataManager, QgsMapCanvas *c
   {
     for ( const QgsMapLayer *layer : canvas->layers() )
       if ( layer )
-        visibleLayerIds.insert( layer->uuid() );
+        visibleLayerIds.insert( layer->id() );
   }
   if ( project )
   {
@@ -294,11 +295,11 @@ Json::Value buildWorkspaceState( data::DataManager *dataManager, QgsMapCanvas *c
         continue;
       ++count;
       Json::Value l( Json::objectValue );
-      l["id"] = entities.idFor( QStringLiteral( "layer" ), layer->uuid() ).toStdString();
+      l["id"] = entities.idFor( QStringLiteral( "layer" ), layer->id() ).toStdString();
       l["name"] = layer->name().toStdString();
       const bool isRaster = qobject_cast<const QgsRasterLayer *>( layer ) != nullptr;
       l["type"] = isRaster ? "raster" : "vector";
-      l["visible"] = visibleLayerIds.contains( layer->uuid() ) ||
+      l["visible"] = visibleLayerIds.contains( layer->id() ) ||
                      visibleLayerIds.isEmpty(); // headless: no canvas → all "visible"
       l["is_active"] = layer->name() == activeLayerName ||
                        ( canvas && canvas->currentLayer() == layer );
@@ -324,7 +325,7 @@ Json::Value buildWorkspaceState( data::DataManager *dataManager, QgsMapCanvas *c
   const QgsMapLayer *currentLayer = canvas ? canvas->currentLayer() : nullptr;
   if ( currentLayer )
   {
-    active["layer_id"] = entities.idFor( QStringLiteral( "layer" ), currentLayer->uuid() ).toStdString();
+    active["layer_id"] = entities.idFor( QStringLiteral( "layer" ), currentLayer->id() ).toStdString();
     active["layer_name"] = currentLayer->name().toStdString();
   }
   else if ( !activeLayerName.isEmpty() )
@@ -437,7 +438,7 @@ Json::Value buildWorkspaceState( data::DataManager *dataManager, QgsMapCanvas *c
   Json::Value workflowRuns( Json::arrayValue );
   if ( workflowRunsProviderSlot() )
   {
-    Json::Value provided = workflowRunsProviderSlot();
+    Json::Value provided = workflowRunsProviderSlot()();
     if ( provided.isArray() )
     {
       const int runLimit = std::min<int>( provided.size(), kMaxWorkflowRuns );

@@ -7,6 +7,7 @@
 #include <json/json.h>
 
 #include "agent/commands/workspace_commands.h"
+#include "agent/contracts/spatial_contracts.h"
 #include "agent/spatial_tools/spatial_tool.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
 
@@ -110,7 +111,7 @@ TEST_CASE( "Capability ranking returns bounded candidates with reasons", "[agent
   REQUIRE( result.success );
   CHECK( result.output["candidates"].isArray() );
   CHECK( result.output["candidates"].size() <= 5 );
-  CHECK( result.output["next_offset"].asInt() == -1 );
+  CHECK( result.output["total"].asInt() >= result.output["candidates"].size() );
   CHECK( result.output["context"].isObject() );
 
   // Every candidate conforms to the CapabilityCandidate contract.

@@ -28,8 +28,13 @@
 #include <iostream>
 #include <map>
 
+#ifndef SICNU_CARTOGRAPHY_DATA_DIR
+#define SICNU_CARTOGRAPHY_DATA_DIR "data/cartography"
+#endif
+
 int main( int argc, char *argv[] )
 {
+  qputenv( "SICNU_CARTOGRAPHY_DIR", SICNU_CARTOGRAPHY_DATA_DIR );
   QgsApplication application( argc, argv, true );
   QgsApplication::initQgis();
   const int result = Catch::Session().run( argc, argv );
@@ -45,7 +50,7 @@ Json::Value loadTasks()
 {
   std::vector<std::string> candidates;
   if ( qEnvironmentVariableIsSet( "SICNU_BENCHMARK_TASKS" ) )
-    candidates.push_back( qEnvironmentVariable( "SICNU_BENCHMARK_TASKS" ) );
+    candidates.push_back( qEnvironmentVariable( "SICNU_BENCHMARK_TASKS" ).toStdString() );
 #ifdef SICNU_BENCHMARK_TASKS_JSON
   candidates.push_back( SICNU_BENCHMARK_TASKS_JSON );
 #endif
@@ -232,7 +237,17 @@ GraderResult runTask( const Json::Value &task, Json::Value &evidence )
     if ( !quality.success )
       return { false, "preflight failed on draft" };
     if ( !quality.output["passed"].asBool() )
-      return { false, "template draft has blocking issues" };
+    {
+      std::string issueCodes;
+      for ( const auto &issue : quality.output["issues"] )
+        issueCodes += issue["code"].asString() + "/" +
+                      issue.get( "item_id", "-" ).asString() + "/" +
+                      issue.get( "message", "" ).asString() + " ";
+      issueCodes += "| errors=" + std::to_string( quality.output["error_count"].asInt() ) +
+                    " warnings=" + std::to_string( quality.output["warning_count"].asInt() ) +
+                    " passed=" + ( quality.output["passed"].asBool() ? "true" : "false" );
+      return { false, "template draft not passing: " + issueCodes };
+    }
     if ( quality.output["quality_score"].asInt() < 60 )
       return { false, "template draft quality below 60" };
     return { true, "" };
@@ -249,12 +264,15 @@ GraderResult runTask( const Json::Value &task, Json::Value &evidence )
     const auto result = ( *tool )->execute( input );
     if ( !result.success )
       return { false, "cartography:repair failed: " + result.error };
+    std::string issueCodes;
+    for ( const auto &issue : result.output["quality"]["issues"] )
+      issueCodes += issue["code"].asString() + " ";
     const int repairs = result.output["repairs_applied"].asInt();
     evidence["repairs_applied"] = repairs;
     const int minRepairs = expect.isMember( "min_repairs" ) ? expect["min_repairs"].asInt() : 1;
     if ( repairs < minRepairs )
       return { false, "expected at least " + std::to_string( minRepairs ) + " repairs, got " +
-                        std::to_string( repairs ) };
+                        std::to_string( repairs ) + "; issues: " + issueCodes };
     if ( !result.output["quality"]["passed"].asBool() )
       return { false, "repaired map still has blocking issues" };
     return { true, "" };

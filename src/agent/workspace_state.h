@@ -81,7 +81,7 @@ class WorkspaceEntityRegistry
     void loadPersisted( const QString &kind );
     void persist( const QString &kind );
 
-    QMutex mMutex;
+    mutable QMutex mMutex;
     QMap<QString, QString> mIdByKey;   // "kind\u0001key" -> id
     QMap<QString, QString> mKeyById;   // id -> "kind\u0001key"
     QMap<QString, int> mNextCounter;   // kind -> next ordinal

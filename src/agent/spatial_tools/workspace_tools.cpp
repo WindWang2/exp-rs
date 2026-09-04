@@ -27,6 +27,25 @@ using sicnu::agent::AgentServices;
 
 namespace {
 
+/// Geometry type label without depending on fork-specific helpers.
+QString geometryTypeLabel( Qgis::GeometryType type )
+{
+  switch ( type )
+  {
+    case Qgis::GeometryType::Point:
+      return QStringLiteral( "Point" );
+    case Qgis::GeometryType::Line:
+      return QStringLiteral( "Line" );
+    case Qgis::GeometryType::Polygon:
+      return QStringLiteral( "Polygon" );
+    case Qgis::GeometryType::Null:
+      return QStringLiteral( "Null" );
+    case Qgis::GeometryType::Unknown:
+      break;
+  }
+  return QStringLiteral( "Unknown" );
+}
+
 /// Resolves a target (workspace entity id, asset id, canonical path, or
 /// display name) to a project layer. Null when unresolved.
 QgsMapLayer *resolveLayer( const QString &target )
@@ -236,7 +255,7 @@ class LayerSummaryTool final : public SpatialTool
         out["resolved"] = "layer";
         out["entity_id"] =
           sicnu::agent::WorkspaceEntityRegistry::instance()
-            .idFor( QStringLiteral( "layer" ), layer->uuid() )
+            .idFor( QStringLiteral( "layer" ), layer->id() )
             .toStdString();
         out["name"] = layer->name().toStdString();
         out["crs"] = layer->crs().authid().toStdString();
@@ -262,7 +281,7 @@ class LayerSummaryTool final : public SpatialTool
         {
           out["kind"] = "vector";
           out["feature_count"] = static_cast<Json::Int64>( vector->featureCount() );
-          out["geometry_type"] = vector->geometryTypeString().toStdString();
+          out["geometry_type"] = geometryTypeLabel( vector->geometryType() ).toStdString();
           out["selected_features"] = vector->selectedFeatureCount();
           Json::Value fields( Json::arrayValue );
           const int fieldLimit = std::min( vector->fields().count(), 64 );

@@ -1,14 +1,67 @@
 {
-  "id": "heatmap",
-  "description": "Density/heatmap result with sequential color bar.",
-  "page": { "width_mm": 297, "height_mm": 210 },
-  "required_slots": [
-    { "role": "map.main", "accepts": "map_frames", "rect_mm": [12, 24, 190, 160] },
-    { "role": "title.main", "accepts": "titles", "rect_mm": [12, 6, 200, 14] },
-    { "role": "colorbar.primary", "accepts": "colorbars", "rect_mm": [60, 190, 90, 8] },
-    { "role": "scalebar.primary", "accepts": "scale_bars", "rect_mm": [14, 188, 60, 8] },
-    { "role": "source.primary", "accepts": "source_notes", "rect_mm": [170, 190, 110, 8] }
-  ],
-  "recommended_components": ["north-arrow/minimal"],
-  "suitable_tasks": ["heatmap", "distribution"]
+ "id": "heatmap",
+ "description": "Density/heatmap result with sequential color bar.",
+ "page": {
+  "width_mm": 297,
+  "height_mm": 210
+ },
+ "required_slots": [
+  {
+   "role": "map.main",
+   "accepts": "map_frames",
+   "rect_mm": [
+    12,
+    24,
+    190,
+    160
+   ]
+  },
+  {
+   "role": "title.main",
+   "accepts": "titles",
+   "rect_mm": [
+    12,
+    6,
+    200,
+    14
+   ]
+  },
+  {
+   "role": "colorbar.primary",
+   "accepts": "colorbars",
+   "rect_mm": [
+    90,
+    190,
+    90,
+    8
+   ]
+  },
+  {
+   "role": "scalebar.primary",
+   "accepts": "scale_bars",
+   "rect_mm": [
+    14,
+    188,
+    60,
+    8
+   ]
+  },
+  {
+   "role": "source.primary",
+   "accepts": "source_notes",
+   "rect_mm": [
+    186,
+    190,
+    96,
+    8
+   ]
+  }
+ ],
+ "recommended_components": [
+  "north-arrow/minimal"
+ ],
+ "suitable_tasks": [
+  "heatmap",
+  "distribution"
+ ]
 }

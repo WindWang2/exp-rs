@@ -115,6 +115,9 @@ TEST_CASE( "WorkspaceEntityRegistry assigns stable short ids", "[agent][workspac
 TEST_CASE( "buildWorkspaceState produces a structured workspace document",
            "[agent][workspace_state]" )
 {
+  // Drop both the in-process cache and the project-persisted mappings the
+  // previous test case wrote (persistence is the feature under test).
+  QgsProject::instance()->clear();
   sicnu::agent::WorkspaceEntityRegistry::instance().clearInProcess();
 
   SourceProviderRegistry providers;

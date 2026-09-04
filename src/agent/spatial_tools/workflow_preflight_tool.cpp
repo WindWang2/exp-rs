@@ -39,7 +39,7 @@ Json::Value operatorSchema( const std::string &operatorId )
 {
   if ( auto op = sicnu::operators::RSOperatorRegistry::instance().create( operatorId ) )
     return op->schema();
-  if ( const auto *adapter =
+  if ( const auto adapter =
          sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( operatorId ) )
     return adapter->descriptor().toInputSchema();
   return Json::Value();
@@ -134,6 +134,16 @@ class WorkflowPreflightTool final : public SpatialTool
                                                                        : "workflow";
 
       // --- 1. Structural parse ------------------------------------------------
+      if ( !workflowJson.isMember( "steps" ) || !workflowJson["steps"].isArray() )
+      {
+        issues.push_back( makeIssue( "WF_SCHEMA_INVALID", "error",
+                                     "Workflow definition needs a 'steps' array", false, "",
+                                     makeRepairSuggestion( "fix_schema", Json::Value() ) ) );
+        addCheck( "schema", false, "WF_SCHEMA_INVALID", Json::Value() );
+        Json::Value issuesJson0 = toJsonArray( issues );
+        return SpatialToolResult::ok(
+          makePreflightResult( subject, "blocked", issuesJson0, toJsonArray( checks ) ) );
+      }
       sicnu::workflow::WorkflowDefinition definition;
       std::string parseError;
       Json::Value schemaChecks( Json::objectValue );

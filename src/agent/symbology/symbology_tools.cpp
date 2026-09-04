@@ -11,7 +11,10 @@
 #include <qgscategorizedsymbolrenderer.h>
 #include <qgsgraduatedsymbolrenderer.h>
 #include <qgsvectorlayer.h>
+#include <qgsfeatureiterator.h>
 #include <qgsproject.h>
+#include <qgsrastershader.h>
+#include <qgscolorrampshader.h>
 #include <qgssymbol.h>
 #include <qgsrendererregistry.h>
 #include <qgsrasterrendererregistry.h>
@@ -24,7 +27,12 @@
 
 namespace sicnu::agent::symbology {
 
+using sicnu::agent::commands::WorkspaceCommand;
 using sicnu::agent::commands::WorkspaceCommandStack;
+using sicnu::agent::spatial_tools::SpatialTool;
+using sicnu::agent::spatial_tools::SpatialToolRegistry;
+using sicnu::agent::spatial_tools::SpatialToolResult;
+using sicnu::agent::spatial_tools::requireStringField;
 
 namespace {
 
@@ -64,14 +72,16 @@ Json::Value rendererSummary( QgsMapLayer *layer )
       if ( auto *categorized = dynamic_cast<const QgsCategorizedSymbolRenderer *>( renderer ) )
       {
         summary["field"] = categorized->classAttribute().toStdString();
-        summary["categories"] = static_cast<Json::Int>(
-          std::min( categorized->categories().size(), static_cast<int>( kMaxCategories ) ) );
+        summary["categories"] =
+          static_cast<Json::Int>( std::min<qsizetype>( categorized->categories().size(),
+                                                       static_cast<qsizetype>( kMaxCategories ) ) );
       }
       else if ( auto *graduated = dynamic_cast<const QgsGraduatedSymbolRenderer *>( renderer ) )
       {
         summary["field"] = graduated->classAttribute().toStdString();
-        summary["classes"] = static_cast<Json::Int>(
-          std::min( graduated->ranges().size(), static_cast<int>( kMaxCategories ) ) );
+        summary["classes"] =
+          static_cast<Json::Int>( std::min<qsizetype>( graduated->ranges().size(),
+                                                       static_cast<qsizetype>( kMaxCategories ) ) );
       }
     }
   }
@@ -534,8 +544,9 @@ class ApplyRasterRampTool final : public SpatialTool
       {
         // Bounded decimated scan via the band statistics interface (cached when
         // available, approximate otherwise) — never a full-res GDAL sweep.
-        QgsRasterBandStats stats = raster->dataProvider()->bandStatistics(
-          band, QgsRasterBandStats::Min | QgsRasterBandStats::Max, QgsRectangle(), 512 * 512 );
+        const QgsRasterBandStats stats = raster->dataProvider()->bandStatistics(
+          band, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max, QgsRectangle(),
+          512 * 512 );
         minValue = stats.minimumValue;
         maxValue = stats.maximumValue;
         if ( !std::isfinite( minValue ) || !std::isfinite( maxValue ) )

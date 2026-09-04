@@ -3,6 +3,8 @@
 
 #include "../contracts/spatial_contracts.h"
 
+#include <QtGlobal>
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -74,13 +76,10 @@ void checkRect( const Json::Value &item, const std::string &id, double pageW, do
   const double h = rect[3].asDouble();
   if ( w <= 0 || h <= 0 )
     problems.push_back( id + ": rect_mm width/height must be positive" );
-  if ( pageW > 0 && pageH > 0 )
-  {
-    // Fully outside the page is a spec error; partial clipping is a preflight
-    // concern (checked against the rendered layout there).
-    if ( x >= pageW || y >= pageH || x + w <= 0 || y + h <= 0 )
-      problems.push_back( id + ": rect_mm lies entirely outside the page" );
-  }
+  Q_UNUSED( pageW );
+  Q_UNUSED( pageH );
+  // Page-bounds violations are cartography-preflight findings (MAP_OFF_PAGE,
+  // repairable), not structural validation failures.
 }
 
 } // namespace
