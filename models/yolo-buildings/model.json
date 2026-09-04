@@ -1,15 +1,30 @@
 {
   "name": "yolo-buildings",
   "task": "detection",
-  "input": "raster",
+  "input": {
+    "dtype": "float32",
+    "layout": "NCHW",
+    "band_roles": [
+      "red",
+      "green",
+      "blue"
+    ]
+  },
   "output": "vector",
   "framework": "onnx",
   "path": "",
   "gpu": false,
   "accuracy": 0.84,
   "domain": {
-    "sensors": ["Sentinel-2", "Landsat-8", "PlanetScope"],
-    "resolution_range": [3.0, 30.0]
+    "sensors": [
+      "Sentinel-2",
+      "Landsat-8",
+      "PlanetScope"
+    ],
+    "resolution_range": [
+      3.0,
+      30.0
+    ]
   },
   "runtime": {
     "gpu": false,
@@ -18,5 +33,9 @@
     "supports_tiling": true
   },
   "description": "Template manifest: building footprint detection (YOLO-derived).",
-  "tags": ["buildings", "detection", "template"]
+  "tags": [
+    "buildings",
+    "detection",
+    "template"
+  ]
 }

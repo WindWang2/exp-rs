@@ -1,0 +1,80 @@
+{
+  "name": "unet-generic-binary",
+  "task": "segmentation",
+  "framework": "onnx",
+  "path": "",
+  "gpu": false,
+  "accuracy": -1.0,
+  "domain": {
+    "sensors": [
+      "Sentinel-2",
+      "PlanetScope"
+    ],
+    "resolution_range": [
+      0.5,
+      20.0
+    ],
+    "modalities": [
+      "optical"
+    ]
+  },
+  "artifact": {
+    "path": "",
+    "checksum": "",
+    "size_bytes": 0,
+    "note": "weights are not distributed with the repository; download from the reference, place beside the manifest, fill path + sha256 checksum"
+  },
+  "input": {
+    "dtype": "float32",
+    "layout": "NCHW",
+    "band_roles": [
+      "red",
+      "green",
+      "blue"
+    ]
+  },
+  "preprocess": {
+    "normalize": "mean_std",
+    "mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "scale": 1.0
+  },
+  "tiling": {
+    "supported": true,
+    "tile_size": 256,
+    "overlap": 32,
+    "batch_size": 2
+  },
+  "output": {
+    "type": "raster",
+    "classes": [
+      "background",
+      "target"
+    ]
+  },
+  "postprocess": {
+    "mask_threshold": -1.0
+  },
+  "runtime": {
+    "gpu": false,
+    "cpu_fallback": true,
+    "estimated_vram_mb": 0,
+    "estimated_ram_mb": 1024,
+    "supports_tiling": true
+  },
+  "reference": "https://github.com/template/unet-generic",
+  "description": "Generic 3-band binary segmentation U-Net (fine-tune template for custom single-class targets).",
+  "tags": [
+    "generic",
+    "unet",
+    "template"
+  ]
+}

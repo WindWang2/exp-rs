@@ -1,0 +1,76 @@
+{
+  "name": "unet-water-s2",
+  "task": "segmentation",
+  "framework": "onnx",
+  "path": "",
+  "gpu": false,
+  "accuracy": 0.93,
+  "domain": {
+    "sensors": [
+      "Sentinel-2"
+    ],
+    "resolution_range": [
+      10.0,
+      20.0
+    ],
+    "modalities": [
+      "optical"
+    ]
+  },
+  "artifact": {
+    "path": "",
+    "checksum": "",
+    "size_bytes": 0,
+    "note": "weights are not distributed with the repository; download from the reference, place beside the manifest, fill path + sha256 checksum"
+  },
+  "input": {
+    "dtype": "float32",
+    "layout": "NCHW",
+    "band_roles": [
+      "green",
+      "nir"
+    ]
+  },
+  "preprocess": {
+    "normalize": "mean_std",
+    "mean": [
+      0.1684,
+      0.2306
+    ],
+    "std": [
+      0.2144,
+      0.2183
+    ],
+    "scale": 1.0
+  },
+  "tiling": {
+    "supported": true,
+    "tile_size": 256,
+    "overlap": 32,
+    "batch_size": 4
+  },
+  "output": {
+    "type": "raster",
+    "classes": [
+      "dry",
+      "water"
+    ]
+  },
+  "postprocess": {
+    "mask_threshold": -1.0
+  },
+  "runtime": {
+    "gpu": false,
+    "cpu_fallback": true,
+    "estimated_vram_mb": 0,
+    "estimated_ram_mb": 1024,
+    "supports_tiling": true
+  },
+  "reference": "https://github.com/template/water-segmentation",
+  "description": "Surface water segmentation on Sentinel-2 (NDWI-assisted U-Net).",
+  "tags": [
+    "water",
+    "unet",
+    "sentinel-2"
+  ]
+}
