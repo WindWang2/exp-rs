@@ -10,8 +10,7 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 qt_add_library(qgis_app_obia STATIC
-    rs_obia_segmentation.cpp
-    rs_obia_task.cpp
+    rs_obia_operator_adapter.cpp
     rs_segment_select_tool.cpp
     rs_segment_info_dock.cpp
     rs_obia_main_window.cpp
@@ -37,6 +36,7 @@ target_link_libraries(qgis_app_obia PUBLIC
     qgis_analysis
     qgis_core
     qgis_gui
+    sicnu_operators
     sicnu_processing
     sicnu_jobs
     sicnu_task_center

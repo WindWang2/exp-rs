@@ -1,4 +1,12 @@
-// rs_obia_main_window.h — OBIA window (flat + hierarchical V1).
+// rs_obia_main_window.h — OBIA window (flat + hierarchical), operator client (#663).
+//
+// Thin client over the rs:obia_* operator seam: every processing flow
+// (segmentation, feature extraction, ROI labeling, flat/hierarchy
+// classification, vector export) is submitted to the Task Center as a real
+// operator id. In-memory state (segment map, stats, labels, hierarchy) is
+// presentation cache rehydrated from operator file outputs. The one
+// documented exception is the interactive hierarchy-consolidation on label
+// maps (RsHierarchyClassConsolidator — no operator yet, ADR 0126 debt).
 #pragma once
 
 #include <QMainWindow>
@@ -8,8 +16,7 @@
 #include "rs_segment_features.h"
 #include "rs_segment_info_dock.h"
 #include "rs_segment_select_tool.h"
-#include "rs_obia_segmentation.h"
-#include "rs_obia_task.h"
+#include "rs_obia_operator_adapter.h"
 #include "rs_accuracy_assessment.h"
 
 #include "processing/framework/task_center.h"
@@ -21,10 +28,10 @@
 #include <QHash>
 #include <QMap>
 #include <QTableWidget>
+#include <QTemporaryDir>
 #include <QTreeWidget>
 #include <QToolBar>
 
-#include <atomic>
 #include <memory>
 
 class QgsLayerTree;
@@ -43,33 +50,28 @@ class RsObiaMainWindow : public QMainWindow
     /// Session map stack (Wave E secondary Display View host).
     RsSessionMapWorkspace *sessionMap() const { return m_sessionMap; }
 
-    /// Flat OBIA segmentation via Task Center. Returns task id, or -1 if busy.
-    long startSegmentationTask( const RsObiaSegmentationConfig &segCfg,
-                                const QVector<int> &bandIndices );
+    /// Segmentation options collected from the toolbar (schema defaults).
+    using SegmentOptions = RsObiaOperatorAdapter::SegmentOptions;
 
-    /// Two-level hierarchy build via Task Center. Returns task id, or -1 if busy.
-    long startHierarchyTask( int spatialRadius, double rangeRadius, int minRegionSize,
-                             double watershedThreshold = 0.01 );
+    /// Flat segmentation via the rs:obia_segment operator. Returns the task
+    /// id, or -1 if busy. Feature extraction chains automatically.
+    long startSegmentationTask( const SegmentOptions &opts );
 
-    /// Hierarchy-level classify + paint via Task Center.
-    long startHierarchyClassifyTask( int clsLevel, const QString &outputPath,
-                                     std::shared_ptr<RsClassifierBackend> backend,
-                                     const QVector<int> &bandIndices,
-                                     const QHash<int, QColor> &classColors,
-                                     const QMap<quint32, int> &trainLabels );
-
-    /// Flat classify via Task Center (owns the RsObiaTask until terminal).
-    long startFlatClassifyTask( RsObiaTask *task, const QString &outputPath,
-                                const QString &algoName );
+    /// Load a raster into the session canvas (test-friendly path behind the
+    /// Load Raster file dialog).
+    bool loadRasterFile( const QString &path );
 
     enum class PendingOp
     {
       None,
-      Segmentation,
-      Hierarchy,
-      HierarchyClassify,
-      FlatClassify,
-      LevelFeatures,
+      Segmentation,       // rs:obia_segment in flight
+      SegmentFeatures,    // chained rs:obia_features after segmentation
+      Hierarchy,          // rs:obia_hierarchy build in flight
+      HierarchyFeatures,  // chained / on-demand rs:obia_features (level L)
+      HierarchyClassify,  // rs:obia_hierarchy classify leg
+      FlatClassify,       // rs:obia_classify
+      LabelImport,        // rs:obia_label
+      Export,             // gdal:polygonize
     };
 
     bool isBusy() const { return m_pendingTaskId >= 0; }
@@ -129,7 +131,7 @@ class RsObiaMainWindow : public QMainWindow
                                int activeLevel,
                                QMap<quint32, RsSegmentFeatures::SegmentStat> stats );
     void setActiveLevelMap( int level );
-    long startLevelFeaturesTask( int level );
+    long startFeaturesTask( int level, bool afterHierarchyBuild );
     void applyLevelFeaturesResult( int level, QMap<quint32, RsSegmentFeatures::SegmentStat> stats );
     QVector<int> allBandIndices() const;
     RsFeatureSelection featureSelection() const;
@@ -138,6 +140,20 @@ class RsObiaMainWindow : public QMainWindow
     int currentClassifyLevel() const;
     void finishPendingUi();
     void loadClassifiedRaster( const QString &outputPath );
+
+    /// Common Task Center submission of an operator job (single-flight gate
+    /// is enforced by the callers via isBusy()).
+    long submitOperatorTask( const QString &operatorId,
+                             const Json::Value &params,
+                             const QString &title );
+    void watchProgressDialog( QProgressDialog *progress, long taskId );
+    void pollIfAlreadyTerminal( long taskId );
+
+    /// Session scratch directory for operator file outputs (label rasters,
+    /// feature/label/uncertainty CSVs). Created lazily.
+    QString scratchPath( const QString &fileName );
+    /// Label raster path for a hierarchy level (or the flat segmentation).
+    QString levelLabelsPath( int level ) const;
 
     // Map canvas + session workspace (not the main project catalog)
     QgsMapCanvas *mCanvas = nullptr;
@@ -159,9 +175,26 @@ class RsObiaMainWindow : public QMainWindow
     RsAccuracyAssessment::Result mLastAccuracy;
     bool mHasAccuracy = false;
 
+    // Operator file outputs backing the session state (#663)
+    std::unique_ptr<QTemporaryDir> m_scratch;
+    QString m_segLabelsPath;                   // flat segmentation labels
+    QString m_hierarchyFinePath;               // hierarchy level 0 labels
+    QString m_hierarchyCoarsePath;             // hierarchy level 1 labels
+    QString m_hierarchyParentsPath;            // fine→parent CSV
+    QString m_pendingFeaturesCsv;              // features CSV being produced
+    QString m_pendingUncertaintyCsv;           // entropy CSV being produced
+    RsSegmentMap m_pendingSegMap;              // rehydrated during the chain
+    bool m_pendingSegUsedOtb = false;
+    int m_pendingFeaturesLevel = 0;
+    RsObjectHierarchy m_pendingHierarchy;      // rehydrated during the build chain
+    QMap<quint32, int> m_pendingRoiLabels;     // rs:obia_label merge input
+
     void rememberClassification( const QString &outputPath,
                                  const RsAccuracyAssessment::Result &accuracy );
     QHash<int, QString> classNameMap() const;
+
+    /// Classifier choice + hyperparameters (schema defaults via the adapter).
+    RsObiaOperatorAdapter::ClassifierOptions classifierOptions() const;
 
   public:
     struct ClassDef
@@ -175,8 +208,8 @@ class RsObiaMainWindow : public QMainWindow
     QVector<ClassDef> mClassDefs;
     int mCurrentClassId = 1;
     int mRfNumTrees = 100;
-    int mRfMaxDepth = 20;
-    int mRfMinSampleCount = 1;
+    int mRfMaxDepth = 10;
+    int mRfMinSampleCount = 5;
     int mMlpHiddenLayerSize = 16;
     int mMlpMaxIter = 500;
 
@@ -198,48 +231,7 @@ class RsObiaMainWindow : public QMainWindow
     int mBandCount = 0;
     int mSelectedClassRow = 0;
 
-    // Shared Task Center pending state (#30 + #31).
-    struct PendingSegWork
-    {
-        RsObiaSegmentationResult seg;
-        QMap<quint32, RsSegmentFeatures::SegmentStat> stats;
-    };
-    struct PendingHierWork
-    {
-        bool ok = false;
-        QString error;
-        RsObjectHierarchy hierarchy;
-        QMap<quint32, RsSegmentFeatures::SegmentStat> stats;
-    };
-    struct PendingHierClsWork
-    {
-        bool ok = false;
-        QString error;
-        QString outputPath;
-        int clsLevel = 0;
-        RsAccuracyAssessment::Result accuracy;
-    };
-    struct PendingLevelWork
-    {
-        int level = 0;
-        QMap<quint32, RsSegmentFeatures::SegmentStat> stats;
-        bool ok = false;
-        QString error;
-    };
-
     PendingOp m_pendingOp = PendingOp::None;
     long m_pendingTaskId = -1;
-    std::shared_ptr<std::atomic<bool>> m_pendingCanceled;
     QProgressDialog *m_pendingProgress = nullptr;
-
-    std::shared_ptr<PendingSegWork> m_pendingSegWork;
-    std::shared_ptr<PendingHierWork> m_pendingHierWork;
-    std::shared_ptr<PendingHierClsWork> m_pendingHierClsWork;
-    std::shared_ptr<PendingLevelWork> m_pendingLevelWork;
-    /// #626: shared ownership with a deleteLater deleter - cancelling or
-    /// closing while the JobEngine executor is still inside run() resets our
-    /// reference without destroying the object under it; the final release
-    /// (whichever thread it happens on) queues deletion on the GUI thread.
-    std::shared_ptr<RsObiaTask> m_pendingFlatTask;
-    QString m_pendingFlatOutputPath;
 };
