@@ -193,4 +193,98 @@ std::optional<AlgorithmMetaEntry> AlgorithmMetaStore::resolveAgainstDescriptor(
     return entry;
 }
 
+std::string AlgorithmMetaStore::idToFileName( const std::string &id )
+{
+    std::string name = id;
+    for ( char &c : name )
+    {
+        if ( c == ':' || c == '_' )
+            c = '-';
+    }
+    return name + ".json";
+}
+
+std::string AlgorithmMetaStore::primaryDataKind( const std::vector<PortDescriptor> &ports )
+{
+    for ( const auto &port : ports )
+    {
+        const std::string kind = dataTypeToString( port.type );
+        if ( kind == "Raster" )
+            return "raster";
+        if ( kind == "Vector" )
+            return "vector";
+    }
+    return "";
+}
+
+AlgorithmMetaEntry AlgorithmMetaStore::entryFromDescriptor( const AlgorithmDescriptor &desc )
+{
+    AlgorithmMetaEntry entry;
+    entry.id = desc.id;
+    entry.task = desc.agentMetadata.taskFamily;
+    entry.notes = desc.agentMetadata.notes;
+    entry.tags = desc.agentMetadata.tags;
+    if ( desc.agentMetadata.gpuDeclared )
+    {
+        entry.gpu = desc.agentMetadata.gpuAccelerated;
+        entry.gpuDeclared = true;
+    }
+    if ( desc.agentMetadata.accuracy >= 0.0 )
+    {
+        entry.accuracy = desc.agentMetadata.accuracy;
+    }
+    entry.input = primaryDataKind( desc.inputs );
+    entry.output = primaryDataKind( desc.outputs );
+    return entry;
+}
+
+std::string AlgorithmMetaStore::serializeEntry( const AlgorithmMetaEntry &entry )
+{
+    Json::StreamWriterBuilder w;
+    w["indentation"] = "  ";
+    return Json::writeString( w, entry.toJson() );
+}
+
+std::map<std::string, std::string> AlgorithmMetaStore::generateCatalog(
+    const std::vector<AlgorithmDescriptor> &descriptors )
+{
+    std::map<std::string, std::string> catalog;
+    for ( const auto &desc : descriptors )
+    {
+        if ( desc.agentMetadata.taskFamily.empty() )
+            continue;
+        const AlgorithmMetaEntry entry = entryFromDescriptor( desc );
+        const std::string filename = idToFileName( desc.id );
+        catalog[filename] = serializeEntry( entry );
+    }
+    return catalog;
+}
+
+int AlgorithmMetaStore::exportCatalog( const std::string &outDir,
+                                      const std::vector<AlgorithmDescriptor> &descriptors,
+                                      std::string *error )
+{
+    const QDir dir( QString::fromStdString( outDir ) );
+    if ( !dir.exists() && !QDir().mkpath( QString::fromStdString( outDir ) ) )
+    {
+        if ( error )
+            *error = "Cannot create directory: " + outDir;
+        return -1;
+    }
+
+    const auto catalog = generateCatalog( descriptors );
+    for ( const auto &[filename, content] : catalog )
+    {
+        QFile file( dir.filePath( QString::fromStdString( filename ) ) );
+        if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+        {
+            if ( error )
+                *error = "Cannot write " + file.fileName().toStdString();
+            return -1;
+        }
+        file.write( content.c_str(), static_cast<qint64>( content.size() ) );
+    }
+    return static_cast<int>( catalog.size() );
+}
+
 } // namespace sicnu::processing

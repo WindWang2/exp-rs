@@ -5,6 +5,7 @@
 
 #include "algorithm_descriptor.h"
 
+#include <map>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -71,6 +72,28 @@ class AlgorithmMetaStore {
         const std::string &id,
         const AgentMetadata &descriptor,
         std::vector<std::string> *drift = nullptr ) const;
+
+    /// Converts an algorithm ID to canonical sidecar filename, e.g. "rs:spectral_index" -> "rs-spectral-index.json"
+    static std::string idToFileName( const std::string &id );
+
+    /// Infers primary data kind ("raster" | "vector" | "") from port list
+    static std::string primaryDataKind( const std::vector<PortDescriptor> &ports );
+
+    /// Constructs a canonical AlgorithmMetaEntry directly from an AlgorithmDescriptor (single source of truth)
+    static AlgorithmMetaEntry entryFromDescriptor( const AlgorithmDescriptor &desc );
+
+    /// Serializes an entry to formatted JSON string with deterministic 2-space indentation
+    static std::string serializeEntry( const AlgorithmMetaEntry &entry );
+
+    /// Generates canonical catalog files in memory: filename -> formatted JSON text
+    /// Only algorithms with non-empty taskFamily are included.
+    static std::map<std::string, std::string> generateCatalog(
+        const std::vector<AlgorithmDescriptor> &descriptors );
+
+    /// Writes generated catalog to target directory on disk. Returns written count or -1 on error.
+    static int exportCatalog( const std::string &outDir,
+                              const std::vector<AlgorithmDescriptor> &descriptors,
+                              std::string *error = nullptr );
 
   private:
     AlgorithmMetaStore() = default;
