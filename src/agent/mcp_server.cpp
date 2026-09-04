@@ -1065,7 +1065,11 @@ void McpServer::handleRequest(const QVariantMap &request)
                 resultData = handleResumeWorkflow(runId);
             }
             else if (toolName.startsWith(QStringLiteral("spatial:")) ||
-                     toolName.startsWith(QStringLiteral("layout:")))
+                     toolName.startsWith(QStringLiteral("layout:")) ||
+                     toolName.startsWith(QStringLiteral("cartography:")) ||
+                     toolName.startsWith(QStringLiteral("symbology:")) ||
+                     toolName.startsWith(QStringLiteral("workflow:")) ||
+                     toolName.startsWith(QStringLiteral("workspace:")))
             {
                 resultData = handleSpatialToolCall(toolName, arguments);
             }
