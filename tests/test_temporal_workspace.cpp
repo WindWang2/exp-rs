@@ -447,7 +447,8 @@ TEST_CASE( "STAC item parsing: asset selection, cloud metadata, platform",
     CHECK( item.platform == QStringLiteral( "Sentinel-2A" ) );
     CHECK( item.cloudCover == Catch::Approx( 12.5 ) );
     // The TIFF asset wins over the JPEG thumbnail (type-based pass).
-    CHECK( item.rasterHref == QStringLiteral( "https://example.com/s2/item-03_B03.tif" ) );
+    CHECK( item.rasterHref ==
+           QStringLiteral( "/vsicurl/https://example.com/s2/item-03_B03.tif" ) );
     CHECK( item.rasterAssetKey == QStringLiteral( "green" ) );
     CHECK( item.rasterBands.contains( QStringLiteral( "green" ) ) );
     CHECK( item.hasGeometry );
@@ -479,7 +480,7 @@ TEST_CASE( "STAC search ingestion: chronological order + warnings for bad items"
     CHECK( collection.scenes().first().platform == QStringLiteral( "Sentinel-2B" ) );
     CHECK( collection.scenes().first().timeSource == QStringLiteral( "stac" ) );
     CHECK( collection.scenes().first().path ==
-           QStringLiteral( "https://example.com/s2/item-01_B03.tif" ) );
+           QStringLiteral( "/vsicurl/https://example.com/s2/item-01_B03.tif" ) );
     // Both invalid items produced warnings.
     CHECK( warnings.size() == 2 );
 }
@@ -534,6 +535,124 @@ TEST_CASE( "STAC filters: datetime range, bbox, property, limit",
     QVector<StacItem> limited = filterStacItems( items, QString(), QString(), 2, QString(), nullptr );
     CHECK( limited.size() == 2 );
     CHECK( limited.first().id == "item-01" ); // still chronological
+}
+
+TEST_CASE( "STAC datetime range treats a date-only end bound as inclusive",
+           "[temporal][stac]" )
+{
+    ensureApp();
+    StacItem onEnd;
+    onEnd.id = QStringLiteral( "on-end" );
+    onEnd.datetime = QStringLiteral( "2024-02-28T10:30:00Z" );
+    StacItem afterEnd;
+    afterEnd.id = QStringLiteral( "after-end" );
+    afterEnd.datetime = QStringLiteral( "2024-03-01T00:00:01Z" );
+    StacItem beforeStart;
+    beforeStart.id = QStringLiteral( "before-start" );
+    beforeStart.datetime = QStringLiteral( "2024-01-31T23:59:59Z" );
+
+    const QVector<StacItem> items{ onEnd, afterEnd, beforeStart };
+    const QVector<StacItem> feb =
+      filterStacItems( items, QString(), QStringLiteral( "2024-02-01/2024-02-28" ), -1, QString(),
+                       nullptr );
+    REQUIRE( feb.size() == 1 );
+    CHECK( feb.first().id == QStringLiteral( "on-end" ) );
+}
+
+TEST_CASE( "STAC datetime range rejects malformed bounds instead of treating them as open",
+           "[temporal][stac]" )
+{
+    ensureApp();
+    const Json::Value doc = stacSearchDoc();
+    QVector<StacItem> items;
+    for ( const Json::Value &feature : doc["features"] )
+    {
+        StacItem item;
+        if ( parseStacItem( feature, &item, nullptr ) )
+            items.append( item );
+    }
+    REQUIRE( items.size() == 3 );
+
+    QStringList warnings;
+    const QVector<StacItem> garbageEnd =
+      filterStacItems( items, QString(), QStringLiteral( "2024-02-01/not-a-date" ), -1, QString(),
+                       &warnings );
+    REQUIRE_FALSE( warnings.isEmpty() );
+    CHECK( warnings.join( QLatin1Char( ' ' ) ).contains( QStringLiteral( "malformed datetime" ) ) );
+    CHECK( garbageEnd.size() == items.size() );
+
+    warnings.clear();
+    const QVector<StacItem> garbageStart =
+      filterStacItems( items, QString(), QStringLiteral( "nope/2024-02-28" ), -1, QString(),
+                       &warnings );
+    REQUIRE_FALSE( warnings.isEmpty() );
+    CHECK( garbageStart.size() == items.size() );
+}
+
+TEST_CASE( "STAC numeric properties round-trip at full precision", "[temporal][stac]" )
+{
+    ensureApp();
+    Json::Value feature( Json::objectValue );
+    feature["id"] = "precise";
+    feature["type"] = "Feature";
+    feature["properties"]["datetime"] = "2024-02-15T10:20:30Z";
+    feature["properties"]["eo:cloud_cover"] = 12.345678;
+    feature["assets"]["green"]["href"] = "https://example.com/s2/precise.tif";
+    feature["assets"]["green"]["type"] = "image/tiff; application=geotiff";
+
+    StacItem item;
+    REQUIRE( parseStacItem( feature, &item, nullptr ) );
+    bool storedOk = false;
+    CHECK( item.properties[QStringLiteral( "eo:cloud_cover" )].toDouble( &storedOk ) == 12.345678 );
+    CHECK( storedOk );
+
+    const QVector<StacItem> matched =
+      filterStacItems( { item }, QString(), QString(), -1, QStringLiteral( "eo:cloud_cover=12.345678" ),
+                       nullptr );
+    REQUIRE( matched.size() == 1 );
+    CHECK( matched.first().id == QStringLiteral( "precise" ) );
+}
+
+TEST_CASE( "bindCollectionAssets binds https STAC hrefs to /vsicurl-canonical assets",
+           "[temporal][stac][workspace]" )
+{
+    ensureApp();
+    sicnu::data::DataManager dm;
+    const QString href1 = QStringLiteral( "https://example.com/s2/item-01_B03.tif" );
+    const QString href2 = QStringLiteral( "https://example.com/s2/item-02_B03.tif" );
+    QList<sicnu::data::AssetId> ids;
+    for ( const QString &href : { href1, href2 } )
+    {
+        sicnu::data::SourceDescriptor source;
+        source.providerKey = QStringLiteral( "gdal" );
+        source.canonicalSource = href;
+        const auto registered = dm.registerSource( sicnu::data::RegisterRequest{ source } );
+        REQUIRE_FALSE( registered.assetId.isNull() );
+        ids.append( registered.assetId );
+        const auto asset = dm.asset( registered.assetId );
+        REQUIRE( asset.has_value() );
+        CHECK( asset->source().canonicalSource == QStringLiteral( "/vsicurl/" ) + href );
+    }
+
+    TemporalCollection collection;
+    collection.setName( QStringLiteral( "remote-cogs" ) );
+    TemporalSceneRef a;
+    a.path = href1;
+    TemporalSceneRef b;
+    b.path = href2;
+    collection.scenes().push_back( a );
+    collection.scenes().push_back( b );
+
+    CHECK( bindCollectionAssets( collection, &dm ) == 2 );
+    CHECK( collection.scenes()[0].assetId == ids[0].toString() );
+    CHECK( collection.scenes()[1].assetId == ids[1].toString() );
+    CHECK_FALSE( collection.scenes()[0].assetRevision.isEmpty() );
+
+    collection.scenes()[0].path = QStringLiteral( "https://example.com/not-registered.tif" );
+    CHECK( bindCollectionAssets( collection, &dm ) == 1 );
+    CHECK( collection.scenes()[0].assetId.isEmpty() );
+    CHECK( collection.scenes()[0].assetRevision.isEmpty() );
+    CHECK( collection.scenes()[1].assetId == ids[1].toString() );
 }
 
 TEST_CASE( "STAC ingestion refuses fewer than two scenes", "[temporal][stac]" )

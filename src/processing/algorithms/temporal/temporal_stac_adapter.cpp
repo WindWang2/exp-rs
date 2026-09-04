@@ -1,8 +1,11 @@
 // src/processing/algorithms/temporal/temporal_stac_adapter.cpp
 #include "temporal_stac_adapter.h"
 
+#include "data/providers/gdal_raster_source_provider.h"
+
 #include <QDate>
 #include <QDateTime>
+#include <QTime>
 
 #include <algorithm>
 #include <functional>
@@ -122,7 +125,8 @@ bool parseStacItem( const Json::Value &feature, StacItem *out, QString *error )
   item.cloudCover = propertiesDouble( feature["properties"], "eo:cloud_cover" );
   item.rasterAssetKey = pick.key;
   item.rasterBands = pick.bands;
-  item.rasterHref = pick.href;
+  item.rasterHref =
+    sicnu::data::providers::GdalRasterSourceProvider::normalizeRemoteRasterSource( pick.href );
 
   // Footprint bounds + stringified properties (for client-side filters).
   const std::function<void( const Json::Value & )> walk = [&]( const Json::Value &node ) {
@@ -158,7 +162,8 @@ bool parseStacItem( const Json::Value &feature, StacItem *out, QString *error )
       if ( v.isString() )
         item.properties[QString::fromStdString( key )] = QString::fromStdString( v.asString() );
       else if ( v.isNumeric() )
-        item.properties[QString::fromStdString( key )] = QString::number( v.asDouble() );
+        item.properties[QString::fromStdString( key )] =
+          QString::number( v.asDouble(), 'g', 17 );
       else if ( v.isBool() )
         item.properties[QString::fromStdString( key )] = v.asBool() ? QStringLiteral( "true" )
                                                                      : QStringLiteral( "false" );
@@ -224,15 +229,33 @@ QVector<StacItem> filterStacItems( const QVector<StacItem> &items, const QString
   // instant / date (a bare date matches that calendar day).
   if ( !datetime.trimmed().isEmpty() )
   {
-    const auto parseDt = []( const QString &text ) {
-      QDateTime t = QDateTime::fromString( text, Qt::ISODateWithMs );
-      if ( !t.isValid() )
+    struct ParsedBound
+    {
+      QDateTime dt;
+      bool wholeDay = false;
+    };
+    // Date-only inputs are flagged from the *text* (no 'T', no ':'). QTime(0,0)
+    // is valid and non-null, so time().isNull() cannot detect a date-only bound.
+    const auto parseBound = []( const QString &text ) {
+      ParsedBound out;
+      if ( text.isEmpty() || text == QLatin1String( ".." ) )
+        return out;
+      const bool dateOnly = text.indexOf( QLatin1Char( 'T' ) ) < 0
+                            && text.indexOf( QLatin1Char( ':' ) ) < 0;
+      if ( dateOnly )
       {
         const QDate d = QDate::fromString( text, Qt::ISODate );
         if ( d.isValid() )
-          t = QDateTime( d, QTime( 0, 0 ), Qt::UTC );
+        {
+          out.dt = QDateTime( d, QTime( 0, 0 ), Qt::UTC );
+          out.wholeDay = true;
+        }
+        return out;
       }
-      return t;
+      out.dt = QDateTime::fromString( text, Qt::ISODateWithMs );
+      if ( !out.dt.isValid() )
+        out.dt = QDateTime::fromString( text, Qt::ISODate );
+      return out;
     };
     const int sep = datetime.indexOf( QLatin1Char( '/' ) );
     QDateTime start, end;
@@ -241,29 +264,33 @@ QVector<StacItem> filterStacItems( const QVector<StacItem> &items, const QString
     {
       const QString startText = datetime.left( sep ).trimmed();
       const QString endText = datetime.mid( sep + 1 ).trimmed();
-      if ( !startText.isEmpty() && startText != QLatin1String( ".." ) )
-        start = parseDt( startText );
-      if ( !endText.isEmpty() && endText != QLatin1String( ".." ) )
+      const bool startSpecified = !startText.isEmpty() && startText != QLatin1String( ".." );
+      const bool endSpecified = !endText.isEmpty() && endText != QLatin1String( ".." );
+      if ( startSpecified )
       {
-        end = parseDt( endText );
-        if ( end.isValid() && end.time().isNull() )
-          end = end.addDays( 1 ); // end date is inclusive
+        const ParsedBound parsed = parseBound( startText );
+        if ( !parsed.dt.isValid() )
+          filterOk = false;
+        else
+          start = parsed.dt;
       }
-      filterOk = ( start.isNull() || start.isValid() ) && ( end.isNull() || end.isValid() );
+      if ( endSpecified )
+      {
+        const ParsedBound parsed = parseBound( endText );
+        if ( !parsed.dt.isValid() )
+          filterOk = false;
+        else
+          // A date-only end bound includes that whole calendar day
+          // (half-open [start, next-midnight], matching the single-date path).
+          end = parsed.wholeDay ? parsed.dt.addDays( 1 ) : parsed.dt;
+      }
     }
     else
     {
-      start = parseDt( datetime.trimmed() );
-      filterOk = start.isValid();
-      // A bare date ("2024-03-15") matches the whole calendar day:
-      // the day parsed as 2024-03-15T00:00, so end is the next midnight
-      // (range behaviour reused). Otherwise it is a single instant.
-      bool isSingleDate = datetime.trimmed().indexOf( QLatin1Char( 'T' ) ) < 0
-                          && datetime.trimmed().indexOf( QLatin1Char( ':' ) ) < 0;
-      if ( isSingleDate && start.isValid() )
-        end = start.addDays( 1 );
-      else
-        end = start;
+      const ParsedBound parsed = parseBound( datetime.trimmed() );
+      filterOk = parsed.dt.isValid();
+      start = parsed.dt;
+      end = parsed.wholeDay ? parsed.dt.addDays( 1 ) : parsed.dt;
     }
     if ( !filterOk )
     {

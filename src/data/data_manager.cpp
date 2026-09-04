@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QPointer>
+#include <QStringList>
 #include <QTemporaryDir>
 #include <QThread>
 
@@ -62,6 +63,35 @@ QVector<Diagnostic> leasedRefusalDiagnostics( const QString &codePrefix,
                   DiagnosticSeverity::Info } );
   }
   return diagnostics;
+}
+
+bool isVirtualOrRemotePath( const QString &path )
+{
+  return path.startsWith( QLatin1String( "/vsi" ), Qt::CaseInsensitive ) ||
+         path.startsWith( QLatin1String( "http://" ), Qt::CaseInsensitive ) ||
+         path.startsWith( QLatin1String( "https://" ), Qt::CaseInsensitive );
+}
+
+/// Additive aliases so a raw STAC https href and the provider's /vsicurl/
+/// spelling resolve to the same catalog record. Local files are unchanged.
+QStringList virtualPathAliases( const QString &path )
+{
+  QStringList aliases;
+  aliases.append( path );
+  const QString prefix = QStringLiteral( "/vsicurl/" );
+  if ( path.startsWith( QLatin1String( "http://" ), Qt::CaseInsensitive ) ||
+       path.startsWith( QLatin1String( "https://" ), Qt::CaseInsensitive ) )
+  {
+    aliases.append( prefix + path );
+  }
+  else if ( path.startsWith( prefix, Qt::CaseInsensitive ) )
+  {
+    const QString rest = path.mid( prefix.size() );
+    if ( rest.startsWith( QLatin1String( "http://" ), Qt::CaseInsensitive ) ||
+         rest.startsWith( QLatin1String( "https://" ), Qt::CaseInsensitive ) )
+      aliases.append( rest );
+  }
+  return aliases;
 }
 
 } // namespace
@@ -603,18 +633,34 @@ std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) cons
   if ( path.trimmed().isEmpty() )
     return std::nullopt;
 
+  const QStringList queryAliases = virtualPathAliases( path );
+  const bool queryVirtual = isVirtualOrRemotePath( path );
+
   const QFileInfo fi( path );
-  const QString absolute = fi.absoluteFilePath();
-  // Registered assets store a canonicalized source; compare the canonical
-  // form so symlinked / hardlinked / case-variant parameter paths still
-  // resolve (a plain absoluteFilePath match silently dropped lineage edges,
-  // #718). canonicalFilePath is empty for non-existent files — fall back to
-  // the absolute spelling there.
-  const QString canonicalPath = fi.canonicalFilePath();
+  // QFileInfo mangles non-local strings (empty canonicalFilePath; absolute
+  // prepends cwd or a drive letter). Remote/VSI identity is string+alias only.
+  const QString absolute = queryVirtual ? QString() : fi.absoluteFilePath();
+  const QString canonicalPath = queryVirtual ? QString() : fi.canonicalFilePath();
   for ( const Impl::AssetRecord &record : m_impl->records )
   {
     const QString &stored = record.snapshot.source().canonicalSource;
-    if ( stored == path || stored == canonicalPath )
+    const QStringList storedAliases = virtualPathAliases( stored );
+    bool aliasHit = false;
+    for ( const QString &alias : queryAliases )
+    {
+      if ( storedAliases.contains( alias ) )
+      {
+        aliasHit = true;
+        break;
+      }
+    }
+    if ( aliasHit )
+      return record.snapshot;
+
+    if ( queryVirtual || isVirtualOrRemotePath( stored ) )
+      continue;
+
+    if ( stored == canonicalPath && !canonicalPath.isEmpty() )
       return record.snapshot;
     const QFileInfo storedFi( stored );
     const QString storedCanonical = storedFi.canonicalFilePath();

@@ -99,8 +99,9 @@ class DataManager : public QObject
     /// The asset whose source descriptor's canonical path is @p path, if any.
     /// Matches the descriptor's canonicalSource first and falls back to an
     /// absolute-path comparison (relative spellings of the same file resolve to
-    /// the same asset). Read-only lookup over the catalog — the commit pipeline
-    /// uses it to stamp derivation input lineage (#698).
+    /// the same asset). Remote http(s) hrefs also match the provider's
+    /// `/vsicurl/` spelling (and vice versa). Read-only lookup over the catalog
+    /// — the commit pipeline uses it to stamp derivation input lineage (#698).
     std::optional<AssetSnapshot> findByPath( const QString &path ) const;
 
     /// Structured provenance attached to an asset, if any. Algorithm-produced

@@ -16,6 +16,11 @@ class GdalRasterSourceProvider final : public internal::SourceProvider
   public:
     bool supports( const SourceDescriptor &source ) const override;
     Result<internal::ResolvedSource> resolve( const SourceDescriptor &source ) const override;
+
+    /// Catalog identity for a remote raster: prefixes a bare http(s) href with
+    /// `/vsicurl/`. Other spellings (already-prefixed VSI paths, local files)
+    /// are returned unchanged.
+    static QString normalizeRemoteRasterSource( const QString &path );
 };
 
 } // namespace sicnu::data::providers
