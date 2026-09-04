@@ -98,6 +98,30 @@ void appendJsonArray( Json::Value &out, const char *key, const std::vector<std::
   out[key] = arr;
 }
 
+/// Parses one input object: the manifest v2 `input` section or, since v3,
+/// one entry of the `inputs` array. Same keys for both: name, data_type,
+/// dtype, layout, band_roles, width, height, temporal_length, temporal_collapse.
+ModelInputContract parseModelInputContract( const QJsonObject &inputObj )
+{
+  ModelInputContract input;
+  input.name = inputObj.value( QStringLiteral( "name" ) ).toString().toStdString();
+  input.dataType = inputObj.value( QStringLiteral( "data_type" ) ).toString().toStdString();
+  input.dtype = inputObj.value( QStringLiteral( "dtype" ) ).toString().toStdString();
+  input.layout = inputObj.value( QStringLiteral( "layout" ) ).toString().toStdString();
+  if ( input.layout.empty() )
+    input.layout = "NCHW";
+  input.bandRoles = parseStringArray( inputObj, QStringLiteral( "band_roles" ) );
+  const int inW = inputObj.value( QStringLiteral( "width" ) ).toInt( 0 );
+  const int inH = inputObj.value( QStringLiteral( "height" ) ).toInt( 0 );
+  input.width = inW > 0 ? inW : 0;
+  input.height = inH > 0 ? inH : 0;
+  input.temporalLength = inputObj.value( QStringLiteral( "temporal_length" ) ).toInt( 0 );
+  input.temporalCollapse = inputObj.value( QStringLiteral( "temporal_collapse" ) ).toString().toStdString();
+  if ( input.temporalCollapse.empty() )
+    input.temporalCollapse = "channels"; // documented default
+  return input;
+}
+
 ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
 {
   ModelInfo info;
@@ -126,27 +150,39 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   if ( artifactSize.isDouble() && artifactSize.toDouble() >= 0.0 )
     info.artifact.sizeBytes = static_cast<unsigned long long>( artifactSize.toDouble() );
 
-  // --- Manifest v2: input contract ------------------------------------------
+  // --- Manifest v2/v3: input contract(s) --------------------------------------
+  // v3: `inputs` is an array of input objects, parsed in declaration order.
+  // v1/v2: the `input` object (or legacy string) fills inputs[0]. When BOTH
+  // keys exist, `inputs` wins; the legacy single-input mirror always reflects
+  // inputs[0] so v2 consumers (engine, tests) see no change.
   const QJsonValue inputVal = obj.value( QStringLiteral( "input" ) );
-  const QJsonObject inputObj = inputVal.isObject() ? inputVal.toObject() : QJsonObject();
-  if ( inputVal.isObject() )
+  const QJsonValue inputsVal = obj.value( QStringLiteral( "inputs" ) );
+  bool inputsMalformed = false; // declared but not a usable array-of-objects
+  if ( inputsVal.isArray() )
   {
-    info.input.dataType = inputObj.value( QStringLiteral( "data_type" ) ).toString().toStdString();
-    info.input.dtype = inputObj.value( QStringLiteral( "dtype" ) ).toString().toStdString();
-    info.input.layout = inputObj.value( QStringLiteral( "layout" ) ).toString().toStdString();
-    if ( info.input.layout.empty() )
-      info.input.layout = "NCHW";
-    info.input.bandRoles = parseStringArray( inputObj, QStringLiteral( "band_roles" ) );
-    const int inW = inputObj.value( QStringLiteral( "width" ) ).toInt( 0 );
-    const int inH = inputObj.value( QStringLiteral( "height" ) ).toInt( 0 );
-    info.input.width = inW > 0 ? inW : 0;
-    info.input.height = inH > 0 ? inH : 0;
+    for ( const auto &entry : inputsVal.toArray() )
+    {
+      if ( entry.isObject() )
+        info.inputs.push_back( parseModelInputContract( entry.toObject() ) );
+      else
+        inputsMalformed = true;
+    }
   }
+  else if ( !inputsVal.isUndefined() && !inputsVal.isNull() )
+  {
+    inputsMalformed = true; // catalog-scan safety: wrong type must not crash the scan
+  }
+  if ( info.inputs.empty() && inputVal.isObject() )
+    info.inputs.push_back( parseModelInputContract( inputVal.toObject() ) );
+  if ( info.inputs.empty() && inputVal.isString() )
+    info.inputs.push_back( ModelInputContract{} ); // v1 string form: default contract
+  // Legacy flat band_roles next to the manifest root (v1/v2 fallback).
+  if ( !info.inputs.empty() && info.inputs.front().bandRoles.empty() )
+    info.inputs.front().bandRoles = parseStringArray( obj, QStringLiteral( "band_roles" ) );
+  // Legacy single-input mirror: input = inputs.empty() ? default : inputs[0].
+  info.input = info.inputs.empty() ? ModelInputContract{} : info.inputs.front();
   if ( info.inputType.empty() )
     info.inputType = info.input.dataType.empty() ? "raster" : info.input.dataType;
-  // Legacy flat band_roles next to the manifest root.
-  if ( info.input.bandRoles.empty() )
-    info.input.bandRoles = parseStringArray( obj, QStringLiteral( "band_roles" ) );
   info.supportedBandRoles = info.input.bandRoles;
 
   // --- Manifest v2: output contract -----------------------------------------
@@ -158,6 +194,9 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     info.output.tensorNames = parseStringArray( outputObj, QStringLiteral( "tensor_names" ) );
     info.output.classes = parseStringArray( outputObj, QStringLiteral( "classes" ) );
     info.output.threshold = outputObj.value( QStringLiteral( "threshold" ) ).toDouble( -1.0 );
+    info.output.uncertainty = outputObj.value( QStringLiteral( "uncertainty" ) ).toString().toStdString();
+    if ( info.output.uncertainty.empty() )
+      info.output.uncertainty = "none"; // documented default
   }
   if ( info.outputType.empty() )
     info.outputType = info.output.type;
@@ -322,6 +361,40 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   if ( info.output.threshold >= 0.0 )
     markInvalid( "output.threshold is declared but not executed (use postprocess.mask_threshold, which the runtime enforces)" );
 
+  // --- Manifest v3 contract validation (additive; v1/v2 unaffected) -----------
+  if ( inputsMalformed )
+    markInvalid( "'inputs' must be an array of input objects" );
+  if ( info.inputs.size() > 1 )
+  {
+    // Every declared input needs a unique non-empty name so the engine can
+    // bind blobs unambiguously.
+    for ( size_t i = 0; i < info.inputs.size(); ++i )
+    {
+      const ModelInputContract &in = info.inputs[i];
+      if ( in.name.empty() )
+        markInvalid( "multi-input manifests need a unique name per input (input "
+                     + std::to_string( i ) + " has no name)" );
+      for ( size_t j = 0; j < i; ++j )
+      {
+        if ( !in.name.empty() && in.name == info.inputs[j].name )
+          markInvalid( "multi-input manifests need a unique name per input ('"
+                       + in.name + "' is declared twice)" );
+      }
+    }
+  }
+  for ( const ModelInputContract &in : info.inputs )
+  {
+    if ( in.temporalLength < 0 )
+      markInvalid( "input.temporal_length must be >= 0 (got " + std::to_string( in.temporalLength ) + ")" );
+    if ( in.temporalCollapse != "channels" )
+      markInvalid( "unsupported input.temporal_collapse '" + in.temporalCollapse
+                   + "' (only 'channels' is executed)" );
+  }
+  if ( info.output.uncertainty != "none" && info.output.uncertainty != "entropy"
+       && info.output.uncertainty != "margin" )
+    markInvalid( "unsupported output.uncertainty '" + info.output.uncertainty
+                 + "' (supported: none, entropy, margin)" );
+
   // --- Artifact path resolution (manifest-dir relative — never CWD) -----------
   if ( !info.artifact.path.empty() )
   {
@@ -416,6 +489,36 @@ Json::Value ModelInfo::toJson() const
       inputJson["height"] = input.height;
     out["input_contract"] = inputJson;
   }
+  // Manifest v3 surface: every declared input, in order (the flat
+  // "input_contract" above stays the inputs[0] mirror for v2 consumers).
+  if ( !inputs.empty() )
+  {
+    Json::Value inputsJson( Json::arrayValue );
+    for ( const ModelInputContract &in : inputs )
+    {
+      Json::Value inJson( Json::objectValue );
+      if ( !in.name.empty() )
+        inJson["name"] = in.name;
+      if ( !in.dataType.empty() )
+        inJson["data_type"] = in.dataType;
+      if ( !in.dtype.empty() )
+        inJson["dtype"] = in.dtype;
+      if ( !in.layout.empty() )
+        inJson["layout"] = in.layout;
+      if ( !in.bandRoles.empty() )
+        appendJsonArray( inJson, "band_roles", in.bandRoles );
+      if ( in.width > 0 )
+        inJson["width"] = in.width;
+      if ( in.height > 0 )
+        inJson["height"] = in.height;
+      if ( in.temporalLength > 0 )
+        inJson["temporal_length"] = in.temporalLength;
+      if ( !in.temporalCollapse.empty() && in.temporalCollapse != "channels" )
+        inJson["temporal_collapse"] = in.temporalCollapse;
+      inputsJson.append( inJson );
+    }
+    out["inputs"] = inputsJson;
+  }
   if ( !preprocess.normalize.empty() || !preprocess.mean.empty() || !preprocess.stdv.empty()
        || preprocess.scale != 1.0 || !preprocess.resize.empty() )
   {
@@ -460,7 +563,8 @@ Json::Value ModelInfo::toJson() const
       t["batch_size"] = tiling.batchSize;
     out["tiling"] = t;
   }
-  if ( !output.tensorNames.empty() || !output.classes.empty() || output.threshold >= 0.0 )
+  if ( !output.tensorNames.empty() || !output.classes.empty() || output.threshold >= 0.0
+       || output.uncertainty != "none" )
   {
     Json::Value o( Json::objectValue );
     if ( !output.type.empty() )
@@ -471,6 +575,8 @@ Json::Value ModelInfo::toJson() const
       appendJsonArray( o, "classes", output.classes );
     if ( output.threshold >= 0.0 )
       o["threshold"] = output.threshold;
+    if ( !output.uncertainty.empty() && output.uncertainty != "none" )
+      o["uncertainty"] = output.uncertainty;
     out["output_contract"] = o;
   }
   if ( postprocess.nms || postprocess.maskThreshold >= 0.0 || postprocess.polygonize

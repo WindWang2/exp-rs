@@ -49,6 +49,7 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         # ONNX provider, bounded tile inference engine.
         runtime/model_runtime.cpp
         runtime/opencv_dnn_runtime.cpp
+        runtime/onnxruntime_provider.cpp
         runtime/tile_inference_engine.cpp
     )
     message(STATUS "OpenCV operators enabled (imgproc found)")
@@ -92,9 +93,20 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_atmospheric_aliases.cpp
     rs/rs_radiometric_calibration_operator.cpp
     rs/rs_change_detection_operator.cpp
+    rs/rs_feature_stack_operator.cpp
+    rs/rs_feature_normalize_operator.cpp
+    rs/rs_feature_select_operator.cpp
     rs/rs_change_streaming.cpp
     rs/rs_change_primitives.cpp
     rs/rs_threshold_raster_operator.cpp
+    rs/rs_sar_calibrate_operator.cpp
+    rs/rs_sar_backscatter_operator.cpp
+    rs/rs_sar_terrain_flatten_operator.cpp
+    rs/rs_sar_terrain_correction_operator.cpp
+    rs/rs_sar_speckle_operator.cpp
+    rs/rs_sar_ratio_operator.cpp
+    rs/rs_sar_texture_operator.cpp
+    rs/rs_sar_change_operator.cpp
     rs/rs_post_classification_change_operator.cpp
     rs/rs_image_fusion_operator.cpp
     rs/rs_fusion_aliases.cpp
@@ -110,6 +122,12 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_temporal_composite_operator.cpp
     rs/rs_temporal_index_operator.cpp
     rs/rs_temporal_trend_operator.cpp
+    rs/rs_temporal_smooth_operator.cpp
+    rs/rs_temporal_gap_fill_operator.cpp
+    rs/rs_temporal_harmonic_fit_operator.cpp
+    rs/rs_temporal_phenology_operator.cpp
+    rs/rs_temporal_breakpoints_operator.cpp
+    rs/rs_temporal_decompose_operator.cpp
     rs/rs_temporal_anomaly_operator.cpp
     rs/rs_temporal_extract_series_operator.cpp
     rs/rs_landsat_import_operator.cpp
@@ -162,6 +180,12 @@ target_link_libraries(sicnu_operators
         ${JSONCPP_LIBRARIES}
         Sicnu::data
 )
+
+if(SICNU_WITH_ONNX_RUNTIME AND ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
+    target_include_directories(sicnu_operators PRIVATE ${ONNXRUNTIME_INCLUDE_DIR}/onnxruntime ${ONNXRUNTIME_INCLUDE_DIR})
+    target_compile_definitions(sicnu_operators PRIVATE SICNU_WITH_ONNX_RUNTIME=1)
+    target_link_libraries(sicnu_operators PRIVATE ${ONNXRUNTIME_LIBRARY})
+endif()
 
 if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
     target_include_directories(sicnu_operators PUBLIC ${OpenCV_INCLUDE_DIRS})
