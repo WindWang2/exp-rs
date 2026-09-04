@@ -1,33 +1,25 @@
-// test_obia_integration.cpp — Phase 10B Task 10B.6
+// test_obia_integration.cpp — OBIA operator pipeline end-to-end (#663).
 //
-// End-to-end OBIA pipeline and GDAL output validation.
+// The pipeline that used to run inside the GUI-owned RsObiaTask (segment →
+// features → train → predict → paint) is now the rs:obia_classify labels +
+// segmentClasses contract; these tests pin its output at the GDAL level
+// (palette, dtype, georeference, class ids) exactly as the old in-app task
+// was pinned.
 #include <catch2/catch_test_macros.hpp>
 
 #ifdef SICNU_HAS_OPENCV
 
-#include "app/obia/rs_obia_task.h"
-#include "analysis/classification/rs_classifier_normalbayes.h"
 #include "operators/rs/rs_obia_classify_operator.h"
 #include "operators/framework/rs_operator_error.h"
+
+#include "analysis/segmentation/rs_segment_map.h"
 
 #include <gdal.h>
 #include <cpl_error.h>
 
-#include <QApplication>
 #include <QColor>
 #include <QFile>
 #include <QTemporaryDir>
-
-static int fake_argc = 1;
-static char fake_argv0[] = "test_obia_integration";
-static char *fake_argv[] = { fake_argv0, nullptr };
-
-static QApplication *ensureApp()
-{
-    if ( !QApplication::instance() )
-        return new QApplication( fake_argc, fake_argv );
-    return static_cast<QApplication *>( QApplication::instance() );
-}
 
 static bool g_gdalInit = ( GDALAllRegister(), true );
 
@@ -58,7 +50,7 @@ static QString createTestRaster( const QString &dir, int w, int h, int nBands )
     return path;
 }
 
-static RsSegmentMap createTwoSegmentMap( int w, int h )
+static QString createTwoSegmentLabels( const QString &dir, int w, int h )
 {
     QVector<quint32> labels( w * h );
     for ( int r = 0; r < h; ++r )
@@ -66,55 +58,41 @@ static RsSegmentMap createTwoSegmentMap( int w, int h )
         for ( int c = 0; c < w; ++c )
             labels[r * w + c] = ( c < w / 2 ) ? 1u : 2u;
     }
-    return RsSegmentMap( labels, w, h );
+    RsSegmentMap segMap( labels, w, h );
+    const QString ref = createTestRaster( dir, w, h, 1 );
+    const QString path = dir + "/labels.tif";
+    QString err;
+    REQUIRE( segMap.toGeoTIFF( path, ref, &err ) );
+    return path;
 }
 
-static bool runObiaPipeline( const QString &inputPath, const QString &outputPath, RsObiaTask::Result &outResult )
+static Json::Value runClassifyPipeline( const QString &inputPath, const QString &labelsPath,
+                                        const QString &outputPath )
 {
-    RsObiaTask::Config cfg;
-    cfg.sourceRaster = inputPath;
-    cfg.outputRaster = outputPath;
-    cfg.bandIndices = { 1, 2, 3 };
-    cfg.useOtb = false;
-    cfg.existingSegMap = createTwoSegmentMap( 16, 16 );
-    cfg.segmentLabels = { { 1, 1 }, { 2, 2 } };
-    cfg.classColors = { { 1, QColor( 255, 0, 0 ) }, { 2, QColor( 0, 255, 0 ) } };
-    cfg.backend = std::make_unique<RsClassifierNormalBayes>();
-    cfg.algoName = "NormalBayes";
+    using namespace sicnu::operators::rs;
+    RsObiaClassifyOperator op;
+    sicnu::operators::RSOperatorContext ctx;
 
-    RsObiaTask task( std::move( cfg ) );
-    if ( !task.run() )
-        return false;
+    Json::Value params( Json::objectValue );
+    params["input"] = inputPath.toStdString();
+    params["labels"] = labelsPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["method"] = "normal_bayes";
+    params["features"] = "full";
+    Json::Value segmentClasses( Json::objectValue );
+    segmentClasses["1"] = 1;
+    segmentClasses["2"] = 2;
+    params["segmentClasses"] = segmentClasses;
+    Json::Value colors( Json::objectValue );
+    colors["1"] = "#ff0000";
+    colors["2"] = "#00ff00";
+    params["classColors"] = colors;
 
-    outResult = task.result();
-    return outResult.ok;
+    return op.run( params, ctx );
 }
 
-TEST_CASE( "OBIA integration: segment features to classification pipeline", "[obia][integration]" )
+TEST_CASE( "OBIA integration: labels + segmentClasses pipeline", "[obia][integration]" )
 {
-    ensureApp();
-
-    QTemporaryDir tempDir;
-    REQUIRE( tempDir.isValid() );
-
-    const QString inputPath = createTestRaster( tempDir.path(), 16, 16, 3 );
-    REQUIRE( !inputPath.isEmpty() );
-
-    const QString outputPath = tempDir.path() + "/obia_classified.tif";
-    RsObiaTask::Result result;
-    REQUIRE( runObiaPipeline( inputPath, outputPath, result ) );
-
-    REQUIRE( result.totalSegments == 2 );
-    REQUIRE( result.labeledSegments == 2 );
-    REQUIRE( result.totalPixels == 16 * 16 );
-    REQUIRE( result.durationMs >= 0 );
-    REQUIRE( QFile::exists( outputPath ) );
-}
-
-TEST_CASE( "OBIA integration: output GeoTIFF GDAL validation", "[obia][integration][gdal]" )
-{
-    ensureApp();
-
     QTemporaryDir tempDir;
     REQUIRE( tempDir.isValid() );
 
@@ -122,10 +100,32 @@ TEST_CASE( "OBIA integration: output GeoTIFF GDAL validation", "[obia][integrati
     const int h = 16;
     const QString inputPath = createTestRaster( tempDir.path(), w, h, 3 );
     REQUIRE( !inputPath.isEmpty() );
-
+    const QString labelsPath = createTwoSegmentLabels( tempDir.path(), w, h );
     const QString outputPath = tempDir.path() + "/obia_classified.tif";
-    RsObiaTask::Result result;
-    REQUIRE( runObiaPipeline( inputPath, outputPath, result ) );
+
+    const Json::Value result = runClassifyPipeline( inputPath, labelsPath, outputPath );
+    REQUIRE( result["segments"].asInt() == 2 );
+    REQUIRE( result["labeledSegments"].asInt() == 2 );
+    REQUIRE( result["trainSamples"].asInt() == 2 );
+    REQUIRE( result["classes"].asInt() == 2 );
+    REQUIRE( result["width"].asInt() == w );
+    REQUIRE( result["height"].asInt() == h );
+    REQUIRE( result["labels"].asString() == labelsPath.toStdString() );
+    REQUIRE( QFile::exists( outputPath ) );
+}
+
+TEST_CASE( "OBIA integration: output GeoTIFF GDAL validation", "[obia][integration][gdal]" )
+{
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+
+    const int w = 16;
+    const int h = 16;
+    const QString inputPath = createTestRaster( tempDir.path(), w, h, 3 );
+    REQUIRE( !inputPath.isEmpty() );
+    const QString labelsPath = createTwoSegmentLabels( tempDir.path(), w, h );
+    const QString outputPath = tempDir.path() + "/obia_classified.tif";
+    REQUIRE_NOTHROW( runClassifyPipeline( inputPath, labelsPath, outputPath ) );
 
     GDALDatasetH ds = GDALOpen( outputPath.toUtf8().constData(), GA_ReadOnly );
     REQUIRE( ds != nullptr );

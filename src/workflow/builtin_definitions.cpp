@@ -347,6 +347,10 @@ void registerBuiltinWorkflows( WorkflowRuntime &runtime )
                       "rs:obia_segment", "input", "请选择输入栅格" );
   registerAtomicTool( runtime, "tool.rs.obia_classify", "面向对象分类",
                       "rs:obia_classify", "input", "请选择输入栅格" );
+  registerAtomicTool( runtime, "tool.rs.obia_features", "对象特征统计 (OBIA)",
+                      "rs:obia_features", "input", "请选择输入栅格" );
+  registerAtomicTool( runtime, "tool.rs.obia_label", "对象 ROI 标注 (OBIA)",
+                      "rs:obia_label", "input", "请选择输入栅格" );
   registerAtomicTool( runtime, "tool.rs.radiometric_calibration", "辐射定标",
                       "rs:radiometric_calibration", "input", "请选择输入栅格" );
   registerAtomicTool( runtime, "tool.rs.spectral_index", "光谱指数",

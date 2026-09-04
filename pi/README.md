@@ -41,7 +41,7 @@ pi -e pi/exp-rs-spatial.ts
 |---|---|---|
 | `EXP_RS_MCP_BIN` | auto-detect (`build/sicnu_geo_rs`, `build-dev/…`) | Binary launched with `--mcp` |
 | `EXP_RS_MCP_ARGS` | — | Extra CLI args for the server |
-| `EXP_RS_TOOL_CATEGORIES` | `meta,spatial,data` | Tool prefixes to bridge (case-insensitive; add `rs,gdal,gdal_tools,otb_tools,qgis_algorithms,opencv,view,raster` for direct algorithm tools — matching the MCP allow-list prefixes) |
+| `EXP_RS_TOOL_CATEGORIES` | `meta,spatial,data,temporal` | Tool prefixes to bridge (case-insensitive; add `rs,gdal,gdal_tools,otb_tools,qgis_algorithms,opencv,view,raster` for direct algorithm tools — matching the MCP allow-list prefixes) |
 | `SICNU_MCP_WORKSPACE` | — | Restrict server file access to this root |
 | `SICNU_MODELS_DIR` | `<repo>/models` | Model manifest catalog root |
 

@@ -14,9 +14,14 @@
 QMap<quint32, RsSegmentFeatures::SegmentStat>
 RsSegmentFeatures::extract( const QString &rasterPath,
                             const RsSegmentMap &segMap,
-                            const QVector<int> &bandIndices )
+                            const QVector<int> &bandIndices,
+                            const std::function<bool()> &isCanceled,
+                            const std::function<void( float )> &onProgress )
 {
     QMap<quint32, SegmentStat> result;
+    if ( isCanceled && isCanceled() )
+        return result;
+    if ( onProgress ) onProgress( 0.0f );
     if ( segMap.isEmpty() || bandIndices.isEmpty() )
     {
         SICNU_LOG_ERROR( SicnuLogTags::Segmentation, "Feature extraction: empty segment map or band indices" );
@@ -70,6 +75,8 @@ RsSegmentFeatures::extract( const QString &rasterPath,
     // Pass 1: mark invalid where any band is NaN or NoData sentinel
     for ( int r0 = 0; r0 < h; r0 += blockRows )
     {
+        if ( isCanceled && isCanceled() )
+            return QMap<quint32, SegmentStat>();
         const int rows = std::min( blockRows, h - r0 );
         const size_t base = static_cast<size_t>( r0 ) * w;
         for ( int b = 0; b < nBands; ++b )
@@ -93,6 +100,8 @@ RsSegmentFeatures::extract( const QString &rasterPath,
     }
 
     const auto labels = segMap.labels();
+
+    if ( onProgress ) onProgress( 0.3f );
 
     quint32 maxLabel = 0;
     for ( size_t i = 0; i < nPixels; ++i )
@@ -207,6 +216,8 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         GDALRasterBandH band = GDALGetRasterBand( ds, bandIndices[b] );
         for ( int r0 = 0; r0 < h; r0 += blockRows )
         {
+        if ( isCanceled && isCanceled() )
+            return QMap<quint32, SegmentStat>();
         const int rows = std::min( blockRows, h - r0 );
         const size_t base = static_cast<size_t>( r0 ) * w;
         CPLErr err = GDALRasterIO( band, GF_Read, 0, r0, w, rows,
@@ -283,6 +294,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
     // stack-local histogram accumulated across the segment's chunks; pair
     // anchors (r,c) are unique, so chunking cannot duplicate or drop pairs
     // (fuzz-verified over 857 randomized segment maps: chunked == full).
+    if ( onProgress ) onProgress( 0.6f );
     bool glcmReadFailed = false;
     for ( int b = 0; b < nBands; ++b )
     {
@@ -290,6 +302,8 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         {
             return result;
         }
+        if ( isCanceled && isCanceled() )
+            return QMap<quint32, SegmentStat>();
         GDALRasterBandH band = GDALGetRasterBand( ds, bandIndices[b] );
 
         // For each segment, build GLCM for this band
@@ -418,6 +432,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
     }
 
     // Build final stats
+    if ( onProgress ) onProgress( 0.95f );
     auto buildStat = [&]( quint32 segId, const Acc &acc, const SegBBox &box, int perimeter ) {
         if ( acc.count == 0 )
             return;
@@ -473,6 +488,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
     }
 
     SICNU_LOG_SUCCESS( SicnuLogTags::Segmentation, QString( "Feature extraction complete: %1 segment stats computed" ).arg( result.size() ) );
+    if ( onProgress ) onProgress( 1.0f );
     return result;
 }
 

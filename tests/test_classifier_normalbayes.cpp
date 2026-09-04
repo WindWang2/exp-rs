@@ -43,3 +43,27 @@ TEST_CASE( "NormalBayes: 3 Gaussians separable, accuracy >= 0.9",
       ++correct;
   REQUIRE( static_cast<double>( correct ) / pred.rows >= 0.9 );
 }
+
+// Re-homed from the deleted GUI-owned test_obia_task.cpp (#663): the
+// single-class posterior normalization is backend behavior, not GUI
+// behavior — the pin follows the code it protects.
+TEST_CASE( "NormalBayes predictProbabilities normalizes single-class posterior to 1.0 (#474)",
+           "[classify][backend][normalbayes][474]" )
+{
+  RsClassifierNormalBayes nb;
+  cv::Mat X = ( cv::Mat_<float>( 4, 2 ) << 1.0f, 2.0f,
+              1.1f, 2.1f,
+              0.9f, 1.9f,
+              1.05f, 2.05f );
+  cv::Mat y = ( cv::Mat_<int>( 4, 1 ) << 1, 1, 1, 1 );
+  REQUIRE( nb.fit( X, y ) );
+
+  cv::Mat probs = nb.predictProbabilities( X );
+  REQUIRE( !probs.empty() );
+  REQUIRE( probs.rows == 4 );
+  REQUIRE( probs.cols == 1 );
+  for ( int i = 0; i < 4; ++i )
+  {
+    CHECK( probs.at<float>( i, 0 ) == 1.0f );
+  }
+}

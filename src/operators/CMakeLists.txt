@@ -127,6 +127,9 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         rs/rs_obia_segment_operator.cpp
         rs/rs_obia_classify_operator.cpp
         rs/rs_obia_hierarchy_operator.cpp
+        rs/rs_obia_features_operator.cpp
+        rs/rs_obia_label_operator.cpp
+        rs/rs_obia_common.cpp
         rs/rs_segment_stats_operator.cpp
         rs/rs_segmentation_utils.cpp
         rs/rs_majority_filter_operator.cpp

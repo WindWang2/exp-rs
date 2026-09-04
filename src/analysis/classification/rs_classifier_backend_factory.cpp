@@ -10,11 +10,19 @@
 std::unique_ptr<RsClassifierBackend> RsClassifierBackendFactory::create(
   const QString &methodName )
 {
+  return create( methodName, RsClassifierBackendParams{} );
+}
+
+std::unique_ptr<RsClassifierBackend> RsClassifierBackendFactory::create(
+  const QString &methodName,
+  const RsClassifierBackendParams &params )
+{
   const QString m = methodName.trimmed().toLower();
   if ( m.contains( QStringLiteral( "mlp" ) ) || m.contains( QStringLiteral( "ann" ) ) || m.contains( QStringLiteral( "neural" ) ) )
-    return std::make_unique<RsMlpBackend>();
+    return std::make_unique<RsMlpBackend>( params.mlpHiddenLayerSize, params.mlpMaxIter );
   if ( m.contains( QStringLiteral( "rf" ) ) || m.contains( QStringLiteral( "forest" ) ) || m.contains( QStringLiteral( "rtrees" ) ) )
-    return std::make_unique<RsRandomForestBackend>();
+    return std::make_unique<RsRandomForestBackend>(
+      params.rfNumTrees, params.rfMaxDepth, params.rfMinSampleCount );
   if ( m.contains( QStringLiteral( "bayes" ) ) )
     return std::make_unique<RsClassifierNormalBayes>();
   if ( m.contains( QStringLiteral( "kmeans" ) ) )

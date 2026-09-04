@@ -44,6 +44,8 @@
 #include "rs_obia_segment_operator.h"
 #include "rs_obia_classify_operator.h"
 #include "rs_obia_hierarchy_operator.h"
+#include "rs_obia_features_operator.h"
+#include "rs_obia_label_operator.h"
 #include "rs_segment_stats_operator.h"
 #include "rs_majority_filter_operator.h"
 #include "rs_recode_operator.h"
@@ -113,6 +115,8 @@ REGISTER_RS_OPERATOR(RsSupervisedClassificationOperator, "rs:supervised_classifi
 REGISTER_RS_OPERATOR(RsObiaSegmentOperator, "rs:obia_segment")
 REGISTER_RS_OPERATOR(RsObiaClassifyOperator, "rs:obia_classify")
 REGISTER_RS_OPERATOR(RsObiaHierarchyOperator, "rs:obia_hierarchy")
+REGISTER_RS_OPERATOR(RsObiaFeaturesOperator, "rs:obia_features")
+REGISTER_RS_OPERATOR(RsObiaLabelOperator, "rs:obia_label")
 REGISTER_RS_OPERATOR(RsSegmentStatsOperator, "rs:segment_stats")
 REGISTER_RS_OPERATOR(RsMajorityFilterOperator, "rs:majority_filter")
 REGISTER_RS_OPERATOR(RsRecodeOperator, "rs:recode")
@@ -207,6 +211,8 @@ void initBuiltinRsOperators() {
   add( "rs:obia_segment", [] { return std::make_unique<RsObiaSegmentOperator>(); } );
   add( "rs:obia_classify", [] { return std::make_unique<RsObiaClassifyOperator>(); } );
   add( "rs:obia_hierarchy", [] { return std::make_unique<RsObiaHierarchyOperator>(); } );
+  add( "rs:obia_features", [] { return std::make_unique<RsObiaFeaturesOperator>(); } );
+  add( "rs:obia_label", [] { return std::make_unique<RsObiaLabelOperator>(); } );
   add( "rs:segment_stats", [] { return std::make_unique<RsSegmentStatsOperator>(); } );
   add( "rs:majority_filter", [] { return std::make_unique<RsMajorityFilterOperator>(); } );
   add( "rs:recode", [] { return std::make_unique<RsRecodeOperator>(); } );
