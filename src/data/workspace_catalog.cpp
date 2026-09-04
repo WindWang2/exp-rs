@@ -300,9 +300,9 @@ Result<void> WorkspaceCatalog::removeAsset( const QString &assetId )
                                                        QStringLiteral( "prepare failed" ) ) );
         m_impl->exec( "BEGIN IMMEDIATE" );
         a.bind( 1, assetId ); a.step();
+        const bool removed = sqlite3_changes( m_impl->db ) > 0;
         al.bind( 1, assetId ); al.step();
         t.bind( 1, assetId ); t.step();
-        const bool removed = sqlite3_changes( m_impl->db ) > 0;
         m_impl->exec( "COMMIT" );
         if ( !removed )
             return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.unknown" ),
@@ -366,6 +366,7 @@ CatalogPage WorkspaceCatalog::page( const CatalogQuery &query, qint64 offset, qi
     const QString prefix = query.textPrefix.isEmpty()
                                ? QString()
                                : QString( query.textPrefix )
+                                     .replace( QLatin1Char( '\\' ), QLatin1String( "\\\\" ) )
                                      .replace( QLatin1Char( '%' ), QLatin1String( "\\%" ) )
                                      .replace( QLatin1Char( '_' ), QLatin1String( "\\_" ) ) + "%";
 

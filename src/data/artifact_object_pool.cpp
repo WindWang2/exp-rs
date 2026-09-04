@@ -180,12 +180,18 @@ bool ArtifactObjectPool::recordExecution( const QString &fingerprintHex,
         QJsonObject meta = encodeExecutionMeta( execution );
         meta[ QStringLiteral( "declaredRole" ) ] = object.declared;
         meta[ QStringLiteral( "objectOriginal" ) ] = object.originalPath;
+        // Completeness marker: every record carries the expected set size, so
+        // a partially-recorded execution is refused at lookup (never served).
+        meta[ QStringLiteral( "objectCount" ) ] = static_cast<int>( execution.objects.size() );
         reg.metadata = meta;
         const auto result = m_store.registerArtifact( reg );
         if ( !result )
             return false;
     }
-    return true;
+    // Completeness proof: re-read the records and require the full set.
+    const auto verify = lookupExecution( fingerprintHex );
+    return verify && static_cast<int>( verify->objects.size() )
+        == static_cast<int>( execution.objects.size() );
 }
 
 std::optional<PoolExecution> ArtifactObjectPool::lookupExecution( const QString &fingerprintHex )
@@ -247,10 +253,25 @@ std::optional<PoolExecution> ArtifactObjectPool::lookupExecution( const QString 
         object.declared = meta.value( QStringLiteral( "declaredRole" ) ).toBool();
         execution.objects.append( object );
     }
-    // Completeness contract: the declared object must be present.
+    // Completeness contract: declared object present AND recorded set size
+    // matches the declared count (a partial record set from a mid-set crash
+    // is refused, never partially served).
     const bool hasDeclared = std::any_of( execution.objects.cbegin(), execution.objects.cend(),
                                           []( const PoolObject &o ) { return o.declared; } );
     if ( !hasDeclared )
+        return std::nullopt;
+    qint64 expectedCount = -1;
+    for ( const ArtifactRecord &record : records )
+    {
+        const QJsonObject meta = record.metadata;
+        if ( meta.value( QStringLiteral( "declaredOriginal" ) ).toString() != declaredOriginal )
+            continue;
+        expectedCount = meta.value( QStringLiteral( "objectCount" ) ).toInt( -1 );
+        if ( expectedCount >= 0 )
+            break;
+    }
+    if ( expectedCount < 0
+         || static_cast<qint64>( execution.objects.size() ) != expectedCount )
         return std::nullopt;
     return execution;
 }
@@ -259,9 +280,12 @@ bool ArtifactObjectPool::forgetExecution( const QString &fingerprintHex )
 {
     if ( !m_enabled || fingerprintHex.isEmpty() )
         return false;
+    // Trash-state instead of hard forget: rows survive until eviction
+    // physically removes the objects; trash + zero refs is exactly what
+    // reapable() returns, which is what makes the eviction budget real.
     const QVector<ArtifactRecord> records = m_store.byProducerFingerprint( fingerprintHex );
     for ( const ArtifactRecord &record : records )
-        m_store.forget( record.artifactId );
+        m_store.markTrash( record.artifactId );
     return true;
 }
 
@@ -276,7 +300,11 @@ qint64 ArtifactObjectPool::totalObjectBytes() const
     {
         const QDir prefixDir( m_objectsDir + QLatin1Char( '/' ) + prefix );
         for ( const QString &object : prefixDir.entryList( QDir::Files ) )
+        {
+            if ( object.endsWith( QStringLiteral( ".puttmp" ) ) )
+                continue; // in-flight staging, not usage
             total += QFileInfo( prefixDir.filePath( object ) ).size();
+        }
     }
     return total;
 }
@@ -295,15 +323,17 @@ qint64 ArtifactObjectPool::evictToBytes( qint64 maxBytes )
                []( const ArtifactRecord &a, const ArtifactRecord &b ) {
                    return a.lastTouchMs < b.lastTouchMs;
                } );
+    qint64 totalNow = totalObjectBytes(); // hoisted: was O(n²) in-loop
     for ( const ArtifactRecord &record : reapable )
     {
-        if ( totalObjectBytes() - freed <= maxBytes )
+        if ( totalNow - freed <= maxBytes )
             break;
         const QFileInfo objectInfo( record.storagePath );
         const qint64 size = objectInfo.size();
         if ( QFile::remove( record.storagePath ) )
         {
             freed += size;
+            totalNow -= size;
             m_store.forget( record.artifactId );
         }
     }

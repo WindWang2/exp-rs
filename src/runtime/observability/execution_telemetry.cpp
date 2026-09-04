@@ -16,6 +16,25 @@ int64_t nowMs()
                std::chrono::system_clock::now().time_since_epoch() ).count();
 }
 
+std::string jsonEscape( const std::string &text )
+{
+    std::string out;
+    out.reserve( text.size() );
+    for ( const char ch : text )
+    {
+        switch ( ch )
+        {
+        case '"': out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default: out += ch;
+        }
+    }
+    return out;
+}
+
 const char *counterName( Counter counter )
 {
     switch ( counter )
@@ -91,9 +110,6 @@ void ExecutionTelemetry::increment( Counter counter )
     if ( counter == Counter::_Count )
         return;
     m_counters[static_cast<size_t>( counter )].fetch_add( 1, std::memory_order_relaxed );
-    // Every counter increment is also observable as an event when enabled.
-    if ( m_enabled.load( std::memory_order_relaxed ) )
-        recordSimple( EventKind::ExecutionEnd, -1, 0, counterName( counter ) );
 }
 
 std::map<std::string, uint64_t> ExecutionTelemetry::counters() const
@@ -141,9 +157,9 @@ std::string ExecutionTelemetry::dumpJson() const
         json += ",\"pipelineId\":" + std::to_string( event.pipelineId );
         json += ",\"value\":" + std::to_string( event.valueNanos );
         if ( !event.subject.empty() )
-            json += ",\"subject\":\"" + event.subject + "\"";
+            json += ",\"subject\":\"" + jsonEscape( event.subject ) + "\"";
         if ( !event.detail.empty() )
-            json += ",\"detail\":\"" + event.detail + "\"";
+            json += ",\"detail\":\"" + jsonEscape( event.detail ) + "\"";
         json += "}";
     }
     json += "]}";

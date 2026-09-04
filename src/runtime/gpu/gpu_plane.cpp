@@ -43,6 +43,12 @@ ModelSessionPool::~ModelSessionPool()
 {
     if ( !m_impl )
         return;
+    if ( !m_impl->backend )
+    {
+        delete m_impl;
+        m_impl = nullptr;
+        return;
+    }
     // Free all VRAM accounting before teardown.
     for ( const auto &live : m_impl->sessions )
         m_impl->backend->freeVram( live.session->deviceId, live.vramMb );
@@ -209,8 +215,12 @@ void ModelSessionPool::evictStale( const std::string &modelId,
     std::lock_guard<std::mutex> lock( m_impl->mutex );
     for ( auto it = m_impl->sessions.begin(); it != m_impl->sessions.end(); )
     {
+        // Only WARM (released) sessions may be recycled: freeing VRAM under a
+        // session an operator is actively using would pull device memory out
+        // from under a live inference. In-use stale sessions are evicted by
+        // releaseSession on their return (identity check re-run at acquire).
         if ( it->session->model.modelId == modelId
-             && it->session->model.signature != currentSignature )
+             && it->session->model.signature != currentSignature && it->released )
         {
             m_impl->backend->freeVram( it->session->deviceId, it->vramMb );
             it = m_impl->sessions.erase( it );

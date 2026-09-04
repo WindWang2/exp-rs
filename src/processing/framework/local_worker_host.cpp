@@ -23,8 +23,13 @@ bool writeLine( QProcess &process, const std::string &line )
 
 /// Reads one protocol frame with a deadline. Returns false on EOF/crash
 /// (@p workerCrashed set) or timeout.
+/// As readFrame, but gives up waiting after @p softDeadlineMs without
+/// treating it as an error (@p softTimedOut set) so the caller can poll
+/// cancellation even while the worker emits no frames.
 bool readFrame( QProcess &process, std::chrono::steady_clock::time_point deadline,
-                Json::Value &frame, bool &workerCrashed )
+                Json::Value &frame, bool &workerCrashed,
+                std::chrono::steady_clock::time_point softDeadline,
+                bool &softTimedOut )
 {
     workerCrashed = false;
     while ( true )
@@ -44,8 +49,14 @@ bool readFrame( QProcess &process, std::chrono::steady_clock::time_point deadlin
             workerCrashed = true;
             return false;
         }
-        if ( std::chrono::steady_clock::now() >= deadline )
+        const auto now = std::chrono::steady_clock::now();
+        if ( now >= deadline )
             return false;
+        if ( now >= softDeadline )
+        {
+            softTimedOut = true;
+            return false;
+        }
         if ( !process.waitForReadyRead( 100 ) && process.state() != QProcess::Running )
         {
             workerCrashed = true;
@@ -79,7 +90,9 @@ Json::Value runInLocalWorker( const QString &workerProgram,
     // Handshake: first frame must be ready/v1.
     Json::Value frame;
     bool crashed = false;
-    if ( !readFrame( process, deadline, frame, crashed ) || frame["op"].asString() != "ready" )
+    bool softTimedOut = false;
+    if ( !readFrame( process, deadline, frame, crashed, deadline, softTimedOut )
+         || frame["op"].asString() != "ready" )
         throw std::runtime_error( crashed ? "worker crashed: no ready handshake"
                                           : "worker protocol: bad handshake" );
 
@@ -87,12 +100,16 @@ Json::Value runInLocalWorker( const QString &workerProgram,
         throw std::runtime_error( "worker protocol: cannot send run request" );
 
     bool cancelRequested = false;
-    auto cancelDeadline = std::chrono::steady_clock::now() + cancelGraceMs;
+    std::chrono::steady_clock::time_point cancelDeadline{};
     while ( true )
     {
         if ( isCancelled && isCancelled() && !cancelRequested )
         {
             cancelRequested = true;
+            // The grace period starts when the cancel is REQUESTED, not when
+            // the job started (any job longer than the grace must still get
+            // its grace).
+            cancelDeadline = std::chrono::steady_clock::now() + cancelGraceMs;
             writeLine( process, sicnu::runtime::worker::makeCancelRequest( jobId ) );
             process.terminate();
         }
@@ -103,17 +120,26 @@ Json::Value runInLocalWorker( const QString &workerProgram,
             throw std::runtime_error( "worker cancelled" );
         }
         frame = Json::Value();
-        if ( !readFrame( process, deadline, frame, crashed ) )
+        const auto soft = std::chrono::steady_clock::now() + std::chrono::milliseconds( 250 );
+        if ( !readFrame( process, deadline, frame, crashed, soft, softTimedOut ) )
         {
+            if ( softTimedOut )
+                continue; // re-check cancellation, keep waiting
             if ( crashed )
                 throw std::runtime_error( "worker crashed: process died without a reply" );
+            if ( cancelRequested )
+                throw std::runtime_error( "worker cancelled" );
             throw std::runtime_error( "worker timeout: no reply within the deadline" );
         }
         const std::string op = frame["op"].asString();
         if ( op == "progress" )
             continue; // operators' progress callback bridge stays simple: ignored
         if ( op == "error" && frame["jobId"].asString() == jobId )
+        {
+            if ( cancelRequested && frame["message"].asString() == "cancelled" )
+                throw std::runtime_error( "worker cancelled" );
             throw std::runtime_error( "worker error: " + frame["message"].asString() );
+        }
         if ( op == "result" && frame["jobId"].asString() == jobId )
         {
             const Json::Value payload = frame["payload"];

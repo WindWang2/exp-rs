@@ -236,6 +236,21 @@ FusedChainPlan planFusedChain( const sicnu::workflow::WorkflowDefinition &def )
             continue;
         }
 
+        // Extend: plane arity must line up — the previous stage's output
+        // plane count is exactly what this stage's kernel consumes (an
+        // NDVI-after-threshold chain would read planes that do not exist).
+        // Adapters express consumption as headInputBands.size() when they are
+        // a head stage; for extension the requirement equals that count.
+        const int requiredInputPlanes =
+            static_cast<int>( stage->headInputBands.size() );
+        if ( !plan.stages.empty() &&
+             plan.stages.back().outputBands != requiredInputPlanes )
+        {
+            if ( plan.stepIds.size() >= 2 )
+                return plan;
+            plan = FusedChainPlan{};
+            continue;
+        }
         // Extend: this step must consume ONLY the previous chain tail.
         const std::string &tailId = plan.stepIds.back();
         const auto producers = producersOf( def, stepId );
@@ -284,14 +299,16 @@ void runPipeline( const FusedChainPlan &plan,
     std::atomic<bool> cancelFlag{ false };
 
     // Producer: read the head stage's bands per tile, apply the operator's
-    // nodata conditioning, and hand over a band-major buffer.
-    auto producer = [&source, &plan, width, height]( TilePayload &out ) -> bool {
-        static int next = 0;
-        const auto tiles =
-            buildTileGrid( width, height, kFusedTileDim, kFusedTileDim, 0, 1 );
-        if ( next >= static_cast<int>( tiles.size() ) )
+    // nodata conditioning, and hand over a band-major buffer. The grid and
+    // cursor are PER-EXECUTION state captured here — a function-scope static
+    // would make a second fused run start where the previous one ended
+    // (silently writing zero tiles).
+    const auto grid = buildTileGrid( width, height, kFusedTileDim, kFusedTileDim, 0, 1 );
+    auto producer = [&source, &plan, width, height, grid, next = 0](
+                        TilePayload &out ) mutable -> bool {
+        if ( next >= static_cast<int>( grid.size() ) )
             return false;
-        const TileSpec &t = tiles[static_cast<size_t>( next++ )];
+        const TileSpec &t = grid[static_cast<size_t>( next++ )];
         const int bands = static_cast<int>( plan.stages.front().headInputBands.size() );
         TileSpec spec = t;
         spec.bands = bands;

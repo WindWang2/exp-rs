@@ -192,6 +192,7 @@ void TaskCenter::shutdownForTests()
         QMutexLocker locker( &m_mutex );
         m_isShuttingDown.store( false );
         m_tasks.clear();
+    m_fusedChains.clear();
         m_pipelines.clear();
         m_pendingLaunches.clear();
         m_pendingTaskAdded.clear();
@@ -2915,7 +2916,12 @@ bool TaskCenter::serveFromExecutionCache( long taskId, const sicnu::data::Execut
                                    : mapProducedPath( artifact, cached->declaredOutputPath,
                                                       outputPath );
         pathMap.insert( artifact, mapped );
-        if ( QFileInfo( artifact ).absoluteFilePath() == QFileInfo( mapped ).absoluteFilePath()
+        // In-place serving is only safe when the bytes are the ones the
+        // in-memory entry validated. A pool-reconstructed entry vouches for
+        // the POOL object, never for whatever currently sits at the original
+        // path — always transfer in that case.
+        if ( !fromPool
+             && QFileInfo( artifact ).absoluteFilePath() == QFileInfo( mapped ).absoluteFilePath()
              && QFile::exists( mapped ) )
             continue; // same file, still in place — nothing to materialize
         // Sidecar contract: sidecars present beside the cached artifact are

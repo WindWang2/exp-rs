@@ -236,6 +236,9 @@ bool ArtifactStore::open( const QString &dbPath, QString *errorOut )
     }
     // Forward-compat guard: refuse a database written by a NEWER schema.
     {
+        // A fresh database has no store_meta yet — that is not an error.
+        if ( errorOut )
+            errorOut->clear();
         Stmt v( m_impl->db, "SELECT value FROM store_meta WHERE key='schema_version'", errorOut );
         if ( v && v.stepRow() && v.text( 0 ).toInt() > QString( kCurrentSchemaVersion ).toInt() )
         {
@@ -388,11 +391,17 @@ Result<void> ArtifactStore::updateContentDigest( const QString &artifactId, cons
     if ( !isOpen() || artifactId.isEmpty() || digest.isEmpty() )
         return Result<void>::failure( diag( QStringLiteral( "artifact.invalid" ), QStringLiteral( "missing id/digest" ) ) );
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
-    Stmt s( m_impl->db, "UPDATE artifacts SET content_digest=? WHERE artifact_id=?", nullptr );
+    // Latest version only: artifact_id is shared across versions, and only
+    // the head may claim the freshly computed digest.
+    Stmt s( m_impl->db,
+            "UPDATE artifacts SET content_digest=? WHERE artifact_id=?"
+            " AND version=(SELECT MAX(version) FROM artifacts WHERE artifact_id=?)",
+            nullptr );
     if ( !s )
         return Result<void>::failure( diag( QStringLiteral( "artifact.db" ), lastError( m_impl->db ) ) );
     s.bind( 1, digest );
     s.bind( 2, artifactId );
+    s.bind( 3, artifactId );
     if ( !s.step() )
         return Result<void>::failure( diag( QStringLiteral( "artifact.db" ), lastError( m_impl->db ) ) );
     if ( sqlite3_changes( m_impl->db ) == 0 )
@@ -436,7 +445,7 @@ std::optional<ArtifactRecord> ArtifactStore::latestByPath( const QString &storag
         return std::nullopt;
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
     Stmt s( m_impl->db,
-            recordSelectSql( "WHERE storage_path=? ORDER BY created_at_ms DESC, version DESC LIMIT 1" )
+            recordSelectSql( "WHERE storage_path=? ORDER BY created_at_ms DESC, rowid DESC LIMIT 1" )
                 .c_str(),
             nullptr );
     if ( !s )

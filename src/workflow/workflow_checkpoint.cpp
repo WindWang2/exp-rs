@@ -223,12 +223,16 @@ int WorkflowCheckpointManager::electCheckpoints( const QString &directoryPath )
                                              QDir::Files );
   for ( const QString &entry : entries )
   {
-    QString runId = entry;
-    runId.remove( QLatin1String( "checkpoint_" ) );
-    runId.remove( QLatin1String( ".json" ) );
+    // Exact prefix/suffix stripping: QString::remove would strip EVERY
+    // occurrence, collapsing distinct runIds (e.g. "checkpoint_a" and "a")
+    // into one election group and orphaning a valid resume handle.
+    if ( !entry.startsWith( QLatin1String( "checkpoint_" ) )
+         || !entry.endsWith( QLatin1String( ".json" ) ) )
+      continue;
+    QString runId = entry.mid( QStringLiteral( "checkpoint_" ).size() );
+    runId.chop( QStringLiteral( ".json" ).size() );
     QString canonical = runId;
-    const bool isGhost = canonical.endsWith( QLatin1String( "_resume" ) );
-    if ( isGhost )
+    if ( canonical.endsWith( QLatin1String( "_resume" ) ) )
       canonical.chop( QStringLiteral( "_resume" ).size() );
     byRunId.insert( canonical, QFileInfo( dir.filePath( entry ) ) );
   }
