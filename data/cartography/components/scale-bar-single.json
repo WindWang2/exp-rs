@@ -1,0 +1,15 @@
+{
+  "id": "scale-bar/single",
+  "category": "scale-bar",
+  "semantic_roles": ["scalebar.primary"],
+  "description": "Single-division scale bar with rounded caps.",
+  "parameters": { "style": "Single Box", "units": "km", "segments": 2 },
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": ["bottom-left", "bottom-center"],
+    "margin_mm": 8,
+    "max_count_per_page": 1
+  },
+  "compatibility": { "requires_map_frame": true, "crs_requirements": "projected_preferred" },
+  "preview": { "placeholder": true }
+}

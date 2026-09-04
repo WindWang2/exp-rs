@@ -1,0 +1,14 @@
+{
+  "id": "time-series",
+  "description": "Map + trend chart composition for temporal analysis results.",
+  "page": { "width_mm": 297, "height_mm": 210 },
+  "required_slots": [
+    { "role": "map.main", "accepts": "map_frames", "rect_mm": [12, 24, 190, 130] },
+    { "role": "title.main", "accepts": "titles", "rect_mm": [12, 6, 200, 14] },
+    { "role": "chart.trend", "accepts": "charts", "rect_mm": [210, 30, 74, 90] },
+    { "role": "scalebar.primary", "accepts": "scale_bars", "rect_mm": [14, 160, 60, 8] },
+    { "role": "source.primary", "accepts": "source_notes", "rect_mm": [150, 190, 130, 8] }
+  ],
+  "recommended_components": ["north-arrow/minimal"],
+  "suitable_tasks": ["time-series", "comparison"]
+}

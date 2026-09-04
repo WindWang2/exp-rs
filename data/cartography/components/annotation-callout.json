@@ -1,0 +1,15 @@
+{
+  "id": "annotation/callout",
+  "category": "annotation",
+  "semantic_roles": ["annotation.secondary"],
+  "description": "Free text annotation for remarks inside or beside the map.",
+  "parameters": { "font": { "size_pt": 9 } },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [],
+    "margin_mm": 4,
+    "max_count_per_page": 8
+  },
+  "compatibility": { "requires_map_frame": false },
+  "preview": { "placeholder": true }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "source-note/default",
+  "category": "source-note",
+  "semantic_roles": ["source.primary"],
+  "description": "Data source and processing provenance note.",
+  "parameters": { "font": { "size_pt": 7 } },
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": ["bottom-left", "bottom-right"],
+    "margin_mm": 6,
+    "max_count_per_page": 1
+  },
+  "compatibility": { "requires_map_frame": false },
+  "preview": { "placeholder": true }
+}

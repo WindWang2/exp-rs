@@ -1,0 +1,15 @@
+{
+  "id": "north-arrow/minimal",
+  "category": "north-arrow",
+  "semantic_roles": ["north_arrow.primary"],
+  "description": "Simple grid-north arrow for clean thematic layouts.",
+  "parameters": { "size_mm": 10, "north_mode": "grid" },
+  "layout_constraints": {
+    "anchor": "corner",
+    "preferred_positions": ["top-right", "bottom-left"],
+    "margin_mm": 6,
+    "max_count_per_page": 1
+  },
+  "compatibility": { "requires_map_frame": true },
+  "preview": { "placeholder": true }
+}

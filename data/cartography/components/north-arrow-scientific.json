@@ -1,0 +1,15 @@
+{
+  "id": "north-arrow/scientific",
+  "category": "north-arrow",
+  "semantic_roles": ["north_arrow.primary"],
+  "description": "True-north arrow with full styling for publication-grade layouts.",
+  "parameters": { "size_mm": 14, "north_mode": "true" },
+  "layout_constraints": {
+    "anchor": "corner",
+    "preferred_positions": ["top-right"],
+    "margin_mm": 8,
+    "max_count_per_page": 1
+  },
+  "compatibility": { "requires_map_frame": true },
+  "preview": { "placeholder": true }
+}

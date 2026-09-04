@@ -1,0 +1,14 @@
+{
+  "id": "land-use",
+  "description": "Land-use / land-cover inventory map.",
+  "page": { "width_mm": 297, "height_mm": 210 },
+  "required_slots": [
+    { "role": "map.main", "accepts": "map_frames", "rect_mm": [12, 24, 190, 160] },
+    { "role": "title.main", "accepts": "titles", "rect_mm": [12, 6, 200, 14] },
+    { "role": "legend.primary", "accepts": "legends", "rect_mm": [210, 30, 70, 96] },
+    { "role": "scalebar.primary", "accepts": "scale_bars", "rect_mm": [14, 188, 60, 8] },
+    { "role": "source.primary", "accepts": "source_notes", "rect_mm": [150, 190, 130, 8] }
+  ],
+  "recommended_components": ["north-arrow/minimal", "grid/graticule"],
+  "suitable_tasks": ["land-use", "classification", "tourism"]
+}
