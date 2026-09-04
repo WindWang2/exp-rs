@@ -2,6 +2,19 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-04
+
+### 🛰️ Multimodal SpatioTemporal RS Platform 3.0 (goal series)
+- **SpatioTemporal observation contracts**: typed `Modality` vocabulary + `ObservationContract` view over `TemporalCollection` (`spatiotemporal_contracts.h`, alias `SpatioTemporalCollection`); STAC ingest now maps SAR (`sar:polarizations`, `sar:instrument_mode`, `eo:gsd`) and DEM products; `inspectScene` populates modality/sensor/polarizations/radiometric state from product metadata (explicit inline claims always win); `ModalityProfile` preflight facts with new gates `temporal.modality_mismatch`, `temporal.polarization_mismatch`, `temporal.polarization_partial`, `temporal.dem_unit_undeclared`.
+- **SAR operator family**: kernels in `processing/algorithms/sar/` (calibration σ0=(DN²−noise)/A², backscatter conversions, DEM plane-fit terrain flattening with layover/shadow mask, speckle incl. refined-Lee + multitemporal, GLCM texture, ratio/log-ratio) behind 8 unified operators: `rs:sar_calibrate`, `rs:sar_backscatter`, `rs:sar_terrain_flatten`, `rs:sar_terrain_correction`, `rs:sar_speckle`, `rs:sar_ratio`, `rs:sar_texture`, `rs:sar_change`. The speckle dialog is now a thin client over `rs:sar_speckle` (GUI executes no kernels).
+- **Temporal Analysis 2.0**: pure fit kernels (`temporal_fit.h`: Savitzky–Golay, Whittaker banded solve, harmonic regression w/ IRLS, phenology metrics, greedy piecewise-linear breakpoints, seasonal decomposition) behind `rs:temporal_smooth`, `rs:temporal_gap_fill`, `rs:temporal_harmonic_fit`, `rs:temporal_phenology`, `rs:temporal_breakpoints`, `rs:temporal_decompose`.
+- **Multimodal Feature Cube**: self-describing feature stacks (`processing/features/feature_cube.*`, dataset metadata + sidecar) behind `rs:feature_stack`, `rs:feature_normalize`, `rs:feature_select`; model-input matching for `rs:infer` preflight.
+- **Model Runtime 3.0**: manifest v3 `inputs[]` (named multi-input), per-input `temporal_length`/`temporal_collapse`, `output.uncertainty` (entropy/margin); `IModelRuntime::inferMulti` with named-input OpenCV DNN support; optional ONNX Runtime provider behind `SICNU_WITH_ONNX_RUNTIME` (graceful stub without the dependency).
+- **Tile Inference Engine 2.0**: multi-head output stacking with `SICNU_OUTPUT_HEADS` layout metadata, softmax-entropy/margin uncertainty bands, flip-TTA averaging, VRAM/RAM-budget-aware batch sizing.
+- **Agent surfaces**: `WorkspaceSnapshot` collection info + `temporal:*` tools expose modalities/sensors/polarizations.
+- **Model library**: 24 new high-quality manifest templates (buildings/roads/water/landcover/crops/forest/change/cloud/ship/airplane, UNet/SAM/YOLO/SegFormer/Swin/Siamese/temporal families, optical-SAR fusion, SAR water/flood/ship) with a catalog validation test (`test_model_library_manifests`).
+- **Baseline repair**: regenerated `algorithm_meta` sidecars for the #738 taskFamily drift (7 sidecars, drift test updated from the pinned 6).
+
 ## [Unreleased] - 2026-08-24
 
 ### 🚀 Pi-Based Spatial Intelligence Layer (ADR 0122)
