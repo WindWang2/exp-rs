@@ -10,6 +10,7 @@
 // Included before sar_speckle.h, which references GdalBlockStream::Tile in
 // the refinedLeeTile declaration without including its own header.
 #include "processing/gdal/gdal_block_stream.h"
+#include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/algorithms/sar/sar_speckle.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
@@ -31,12 +32,19 @@ const std::vector<std::string> s_methods = { "lee", "enhanced_lee", "frost", "ku
                                              "gamma_map", "refined_lee",
                                              "multitemporal" };
 
+Json::Value makeSarInputContract() {
+    Json::Value c(Json::objectValue);
+    c["modality"] = "sar";
+    return c;
+}
+
 } // anonymous namespace
 
 Json::Value RsSarSpeckleOperator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
     props["input"] = makeRasterParam("input", "Input SAR intensity raster (calibrated sigma0 recommended)");
+    props["input"]["x-rs-contract"] = makeSarInputContract();
     props["output"] = makeOutputParam("output", "Output despeckled raster (Float32)", "tif");
     props["band"] = makeIntegerParam("band", "1-based input band to filter (0 = all bands)", 1);
     props["method"] = makeEnumParam("method", "Speckle filter kernel", s_methods, "lee");
@@ -167,6 +175,11 @@ Json::Value RsSarSpeckleOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::InvalidInputData,
                               "Cannot open input raster: " + inputPath);
     }
+    const QString declaredDomain = sicnu::sar::readDomain( src );
+    if ( declaredDomain == QLatin1String( "db" ) )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "input declares SICNU_SAR_DOMAIN=db; these filters operate on "
+                               "linear power — convert with rs:sar_backscatter (or rs:sar_calibrate) first" );
     const int bandCount = band > 0 ? 1 : src.bandCount();
     const int firstBand = band > 0 ? band : 1;
     if (firstBand < 1 || firstBand > src.bandCount()) {

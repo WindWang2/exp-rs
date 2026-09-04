@@ -35,10 +35,22 @@ SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,
   const double b = dem[i - bufferWidth] * demUnitScale;
   const double c = dem[i - bufferWidth + 1] * demUnitScale;
   const double d = dem[i - 1] * demUnitScale;
+  const double e = dem[i] * demUnitScale;
   const double f = dem[i + 1] * demUnitScale;
   const double g = dem[i + bufferWidth - 1] * demUnitScale;
   const double h = dem[i + bufferWidth] * demUnitScale;
   const double k = dem[i + bufferWidth + 1] * demUnitScale;
+
+  // A NoData/NaN hole in the 3×3 window makes every Horn derivative garbage
+  // (a -9999 sentinel reads as a cliff): the facet is invalid, not steep.
+  for ( const double v : { a, b, c, d, e, f, g, h, k } )
+  {
+    if ( !std::isfinite( v ) )
+    {
+      out.valid = false;
+      return out;
+    }
+  }
 
   // Horn's method: dz/dx, dz/dy over the 3×3 window.
   const double dzdx = ( ( c + 2.0 * f + k ) - ( a + 2.0 * d + g ) ) / ( 8.0 * cellSizeMeters );
@@ -97,14 +109,43 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
   if ( sigma0Ds.width() != demDs.width() || sigma0Ds.height() != demDs.height() )
     return false;
 
+  // Same-size is not same-grid: a shifted/scaled DEM silently misregisters
+  // every pixel. Compare geotransforms (small tolerance for serialization
+  // round-trips) and projections before streaming.
+  {
+    const std::array<double, 6> dataGt = sigma0Ds.geoTransform();
+    const std::array<double, 6> demGtLocal = demDs.geoTransform();
+    for ( int i = 0; i < 6; ++i )
+    {
+      if ( std::fabs( dataGt[i] - demGtLocal[i] ) > 1e-9 *
+             std::max( 1.0, std::fabs( dataGt[i] ) ) )
+        return false;
+    }
+    const QString dataProj = sigma0Ds.projection();
+    const QString demProj = demDs.projection();
+    if ( !dataProj.isEmpty() && !demProj.isEmpty() && dataProj != demProj )
+      return false;
+  }
+
   // DEM cell size in meters from the geotransform (north-up rasters; rotated
-  // grids are rejected upstream by the grid-compatibility layer).
+  // grids are rejected upstream by the grid-compatibility layer). Degree
+  // cells (geographic DEMs) are rejected: the Horn denominators would be
+  // ~10^4x too small and every facet would read as a vertical cliff.
   const std::array<double, 6> demGt = demDs.geoTransform();
   const double cellX = std::fabs( demGt[1] );
   const double cellY = std::fabs( demGt[5] );
   if ( cellX <= 0.0 || cellY <= 0.0 )
     return false;
+  if ( demDs.projection().contains( QLatin1String( "deg" ), Qt::CaseInsensitive ) )
+    return false; // geographic DEM units are angles, not meters
   const double cellMeters = 0.5 * ( cellX + cellY );
+
+  // Map the DEM's declared sentinel to NaN so Horn statistics cannot see it.
+  bool demHasNodata = false;
+  const double demNodata = demDs.bandNoDataValue( 1, &demHasNodata );
+  const float demSentinel =
+    demHasNodata && std::isfinite( demNodata ) ? static_cast<float>( demNodata )
+                                               : std::numeric_limits<float>::quiet_NaN();
 
   const int halo = 1; // Horn needs the 8-neighborhood
   const int gammaBand = 1;
@@ -119,6 +160,11 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
       if ( !readClampedWindow( demDs, 1, tile.xOffset, tile.yOffset, tile.width, tile.height,
                                halo, demTile ) )
         return false;
+      for ( float &v : demTile )
+      {
+        if ( !std::isfinite( v ) || v == demSentinel )
+          v = kNan;
+      }
 
       std::vector<float> gamma( static_cast<size_t>( tile.width ) * tile.height );
       std::vector<float> incidence( static_cast<size_t>( tile.width ) * tile.height );
@@ -140,6 +186,14 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
           }
           const SlopeAspect sa = slopeAspectAt( demTile.data(), tile.bufferWidth, x + halo,
                                                 y + halo, cellMeters, options.demUnitScale );
+          if ( !sa.valid )
+          {
+            // DEM hole: no meaningful incidence or flattening.
+            gamma[idx] = kNan;
+            incidence[idx] = kNan;
+            validity[idx] = 0;
+            continue;
+          }
           incidence[idx] = static_cast<float>(
             localIncidenceAngle( sa.slopeDeg, sa.aspectDeg, options.incidenceDeg,
                                  options.headingDeg ) );

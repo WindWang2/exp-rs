@@ -31,12 +31,19 @@ const std::vector<std::string> s_states = { "sigma0", "gamma0", "beta0" };
 const std::vector<std::string> s_fromStates = { "sigma0", "gamma0", "beta0", "dn" };
 constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
 
+Json::Value makeSarInputContract() {
+    Json::Value c(Json::objectValue);
+    c["modality"] = "sar";
+    return c;
+}
+
 } // anonymous namespace
 
 Json::Value RsSarBackscatterOperator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
     props["input"] = makeRasterParam("input", "Input SAR raster (sigma0/gamma0/beta0, linear power or dB)");
+    props["input"]["x-rs-contract"] = makeSarInputContract();
     props["output"] = makeOutputParam("output", "Output converted raster (Float32)", "tif");
     props["band"] = makeIntegerParam("band", "1-based input band", 1);
     props["fromCalibration"] = makeEnumParam("fromCalibration", "Radiometric state of the input", s_fromStates, "sigma0");

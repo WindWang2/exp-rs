@@ -260,6 +260,20 @@ Json::Value RsFeatureSelectOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "failed to create output: " + outErr.toStdString());
     }
+    // RAII partial-output guard: an unexpected unwind (cancellation between
+    // bands, GDAL exception) must not leave a truncated success-looking .tif.
+    struct OutputCleanup {
+        GdalDatasetWrapper &out;
+        const std::string &path;
+        bool armed = true;
+        ~OutputCleanup() {
+            if ( armed ) {
+                out.closeWithError( nullptr );
+                QFile::remove( QString::fromStdString( path ) );
+            }
+        }
+    } outputCleanup{out, outputPath};
+
 
     // --- Subset contract ------------------------------------------------------
     if (contract.normalization.isObject() && !contract.normalization.empty()) {
@@ -343,6 +357,8 @@ Json::Value RsFeatureSelectOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::GdalError,
                               "failed to write the feature cube contract onto " + outputPath);
     }
+
+    outputCleanup.armed = false; // committed cleanly below
 
     QString closeErr;
     if (!out.closeWithError(&closeErr)) {

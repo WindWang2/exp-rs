@@ -85,7 +85,7 @@ Modality inferModalityFromClues( const QString &platform,
        combined.contains( QLatin1String( "GAOFEN-3" ) ) || combined.contains( QLatin1String( "GF-3" ) ) ||
        combined.contains( QLatin1String( "LT-1" ) ) )
     return Modality::Sar;
-  if ( combined.contains( QLatin1String( "DEM" ) ) || combined.contains( QLatin1String( "COPERNICUS" ) ) ||
+  if ( combined.contains( QLatin1String( "DEM" ) ) || combined.contains( QLatin1String( "COPERNICUS DEM" ) ) ||
        combined.contains( QLatin1String( "SRTM" ) ) || combined.contains( QLatin1String( "ASTER GDEM" ) ) ||
        combined.contains( QLatin1String( "ALOS WORLD 3D" ) ) || combined.contains( QLatin1String( "AW3D" ) ) ||
        combined.contains( QLatin1String( "NASADEM" ) ) )

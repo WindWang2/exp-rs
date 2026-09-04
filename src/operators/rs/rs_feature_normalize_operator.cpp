@@ -398,6 +398,20 @@ Json::Value RsFeatureNormalizeOperator::run(const Json::Value& params,
     normalization["applied"] = !inverse;
     contract.normalization = normalization;
 
+    // The stored values no longer carry the ORIGINAL physical scaling: the
+    // cube contract claims physical = stored*scale + offset, which the
+    // normalized (or inverse-applied) raster would violate. Reset the
+    // per-band scale/offset — normalized units ARE the stored units now
+    // (inverse restores the original physical values through the stats).
+    for (auto &band : contract.bands) {
+        if (band.scale != 1.0 || band.offset != 0.0) {
+            context.logWarning("Band '" + band.id.toStdString() +
+                               "' scale/offset reset to 1/0: normalized units");
+            band.scale = 1.0;
+            band.offset = 0.0;
+        }
+    }
+
     // --- Create the output cube ---------------------------------------------
     context.reportProgressForced(0.45, inverse ? "Inverting normalization"
                                                : "Applying normalization");
@@ -409,6 +423,20 @@ Json::Value RsFeatureNormalizeOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "failed to create output: " + outErr.toStdString());
     }
+    // RAII partial-output guard: an unexpected unwind (cancellation between
+    // bands, GDAL exception) must not leave a truncated success-looking .tif.
+    struct OutputCleanup {
+        GdalDatasetWrapper &out;
+        const std::string &path;
+        bool armed = true;
+        ~OutputCleanup() {
+            if ( armed ) {
+                out.closeWithError( nullptr );
+                QFile::remove( QString::fromStdString( path ) );
+            }
+        }
+    } outputCleanup{out, outputPath};
+
     for (int b = 0; b < bandCount; ++b) {
         out.setBandNoDataValue(b + 1, hasNodata[b] ? nodataRaw[b]
                                                    : std::numeric_limits<double>::quiet_NaN());
@@ -475,6 +503,8 @@ Json::Value RsFeatureNormalizeOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::GdalError,
                               "failed to write the feature cube contract onto " + outputPath);
     }
+
+    outputCleanup.armed = false; // committed cleanly below
 
     QString closeErr;
     if (!out.closeWithError(&closeErr)) {

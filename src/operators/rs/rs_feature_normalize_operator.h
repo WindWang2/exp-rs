@@ -31,6 +31,7 @@ public:
     }
     RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::MultiPassStreaming; }
     std::string determinismGrade() const override { return "tolerance"; }
+    RSOperatorDeterminism determinism() const override { return RSOperatorDeterminism::Tolerance; }
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;

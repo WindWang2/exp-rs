@@ -27,13 +27,21 @@ const std::vector<std::string> s_output_types = { "ratio", "log_ratio", "log_dif
 
 const std::vector<std::string> s_domains = { "linear_power", "db" };
 
+Json::Value makeSarInputContract() {
+    Json::Value c(Json::objectValue);
+    c["modality"] = "sar";
+    return c;
+}
+
 } // anonymous namespace
 
 Json::Value RsSarRatioOperator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
     props["inputA"] = makeRasterParam("inputA", "First SAR scene (co-registered)");
+    props["inputA"]["x-rs-contract"] = makeSarInputContract();
     props["inputB"] = makeRasterParam("inputB", "Second SAR scene (co-registered)");
+    props["inputB"]["x-rs-contract"] = makeSarInputContract();
     props["output"] = makeOutputParam("output", "Output pair-metric raster (Float32)", "tif");
     props["bandA"] = makeIntegerParam("bandA", "1-based band on inputA", 1);
     props["bandB"] = makeIntegerParam("bandB", "1-based band on inputB", 1);

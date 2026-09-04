@@ -27,6 +27,7 @@ public:
   std::string description() const override;
   // The Whittaker trend solve is tolerance-grade (ADR 0124).
   std::string determinismGrade() const override { return "tolerance"; }
+    RSOperatorDeterminism determinism() const override { return RSOperatorDeterminism::Tolerance; }
   RSOperatorMemoryPolicy memoryPolicy() const override
   {
     return RSOperatorMemoryPolicy::MultiPassStreaming;

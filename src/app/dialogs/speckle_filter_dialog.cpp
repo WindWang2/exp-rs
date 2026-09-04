@@ -2,11 +2,7 @@
 #include "speckle_filter_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
-#include "processing/algorithms/image_enhancement.h"
 #include "processing/algorithms/image_enhancement_streaming.h"
-#include "processing/gdal/gdal_dataset_wrapper.h"
-#include "processing/gdal/gdal_multiband_block_stream.h"
-#include "processing/gdal/gdal_safe_call.h"
 #include "widgets/raster_layer_combo.h"
 
 #include <raster/qgsrasterlayer.h>
@@ -21,8 +17,6 @@
 #include <qgsmessagelog.h>
 #include <qgis.h>
 
-#include <gdal.h>
-#include <cpl_error.h>
 
 SpeckleFilterDialog::SpeckleFilterDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )

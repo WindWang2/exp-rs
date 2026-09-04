@@ -26,15 +26,30 @@ namespace {
 
 const std::vector<std::string> s_demUnits = { "meters", "feet", "decimeters" };
 
+Json::Value makeSarInputContract() {
+    Json::Value c(Json::objectValue);
+    c["modality"] = "sar";
+    return c;
+}
+
+Json::Value makeDemInputContract() {
+    Json::Value c(Json::objectValue);
+    c["modality"] = "dem";
+    c["gridRelation"] = "same-grid";
+    return c;
+}
+
 } // anonymous namespace
 
 Json::Value RsSarTerrainFlattenOperator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
     props["input"] = makeRasterParam("input", "Input sigma0 raster (linear power)");
+    props["input"]["x-rs-contract"] = makeSarInputContract();
     props["output"] = makeOutputParam("output", "Output terrain-flattened gamma0 raster (Float32)", "tif");
     props["band"] = makeIntegerParam("band", "1-based input band", 1);
     props["dem"] = makeRasterParam("dem", "Co-registered DEM covering the exact same grid (radar geometry)");
+    props["dem"]["x-rs-contract"] = makeDemInputContract();
     props["incidenceDeg"] = makeNumberParam("incidenceDeg", "Scene incidence angle θ0 in degrees (near-range center)", 30.0);
     props["headingDeg"] = makeNumberParam("headingDeg", "Platform heading / look azimuth φ in degrees", 0.0);
     props["demUnit"] = makeEnumParam("demUnit", "DEM elevation unit (a declared SICNU_DEM_UNIT metadata on the DEM overrides it)", s_demUnits, "meters");
@@ -127,6 +142,11 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::InvalidInputData,
                               "Cannot open input raster: " + inputPath);
     }
+    const QString declaredDomain = sicnu::sar::readDomain( src );
+    if ( declaredDomain == QLatin1String( "db" ) )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "input declares SICNU_SAR_DOMAIN=db; these filters operate on "
+                               "linear power — convert with rs:sar_backscatter (or rs:sar_calibrate) first" );
     if (band < 1 || band > src.bandCount()) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "band out of range: " + std::to_string(band));

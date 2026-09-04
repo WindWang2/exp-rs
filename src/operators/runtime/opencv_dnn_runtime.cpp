@@ -81,7 +81,11 @@ cv::Mat OpenCvDnnRuntime::infer( const cv::Mat &nchwBlob, const std::string &out
   cv::Mat output = outputName.empty() ? m_net.forward() : m_net.forward( outputName );
   if ( output.empty() )
     throw std::runtime_error( "inference produced an empty output" );
-  return output;
+  // forward() returns a header onto the net's internal output blob: the next
+  // forward() overwrites it. TTA averaging and multi-head stacking hold the
+  // result across further forwards, so detach (one tile-sized copy,
+  // negligible next to the forward pass itself).
+  return output.clone();
 }
 
 std::vector<cv::Mat> OpenCvDnnRuntime::inferMulti( const std::vector<NamedBlob> &namedBlobs )
@@ -124,6 +128,9 @@ std::vector<cv::Mat> OpenCvDnnRuntime::inferMulti( const std::vector<NamedBlob> 
 
 std::vector<std::string> OpenCvDnnRuntime::outputTensorNames() const
 {
+  // cv::dnn::Net is not thread-safe: serialize against concurrent forward
+  // passes on the shared cached session.
+  std::lock_guard<std::mutex> lock( *const_cast<std::mutex *>( &m_inferMutex ) );
   std::vector<std::string> names;
   if ( !m_loaded )
     return names;

@@ -36,12 +36,19 @@ const std::vector<sicnu::sar::GlcmMeasure> s_allMeasures = {
     sicnu::sar::GlcmMeasure::StdDev,      sicnu::sar::GlcmMeasure::Correlation,
 };
 
+Json::Value makeSarInputContract() {
+    Json::Value c(Json::objectValue);
+    c["modality"] = "sar";
+    return c;
+}
+
 } // anonymous namespace
 
 Json::Value RsSarTextureOperator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
     props["input"] = makeRasterParam("input", "Input SAR intensity raster (calibrated sigma0 recommended)");
+    props["input"]["x-rs-contract"] = makeSarInputContract();
     props["output"] = makeOutputParam("output", "Output texture raster, one Float32 band per measure", "tif");
     props["band"] = makeIntegerParam("band", "1-based input band to analyze", 1);
     Json::Value windowSize = makeIntegerParam("windowSize", "Odd GLCM window size", 5);

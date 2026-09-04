@@ -28,6 +28,7 @@ public:
   // Whittaker's banded solver is tolerance-grade (ADR 0124); the schema grade
   // covers the whole operator so one declaration stays method-insensitive.
   std::string determinismGrade() const override { return "tolerance"; }
+    RSOperatorDeterminism determinism() const override { return RSOperatorDeterminism::Tolerance; }
   RSOperatorMemoryPolicy memoryPolicy() const override
   {
     return RSOperatorMemoryPolicy::MultiPassStreaming;

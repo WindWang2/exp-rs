@@ -303,8 +303,12 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   const int halo = std::max( 0, effectiveHalo( m_model ) );
   int batchSize = effectiveBatchSize( m_model, ModelRuntimeRegistry::instance().hardware(),
                                       tileSize, bandCount );
+  // batchCap is a CAP, never an upgrade: it can only lower the effective
+  // batch (memory-pinned runs), keeping the manifest/budget verdict as the
+  // upper bound that estimateExecution also admitted on.
   if ( options.batchSizeOverride > 0 )
-    batchSize = options.batchSizeOverride;
+    batchSize = std::min( batchSize, options.batchSizeOverride );
+  batchSize = std::max( 1, batchSize );
   const bool resizeToInput = pre.resize == "to_input" && m_model.input.width > 0 && m_model.input.height > 0;
   const int modelW = resizeToInput ? m_model.input.width : 0;
   const int modelH = resizeToInput ? m_model.input.height : 0;
@@ -488,28 +492,49 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       cv::Mat output = forwardOnce( blob );
       if ( options.tta == TtaMode::None )
         return output;
-      cv::Mat flipped;
-      cv::flip( blob, flipped, 1 );
-      cv::Mat outH = forwardOnce( flipped );
-      cv::flip( outH, outH, 1 );
-      output += outH;
+      // cv::flip only supports 2-D; the batch blob is 4-D NCHW, so flips run
+      // on the W axis (3) / H axis (2) via flipND. Every forward returns a
+      // freshly detached Mat (the runtime clones its output), so the
+      // accumulator is safe from aliasing.
+      auto flipH = []( const cv::Mat &b ) {
+        cv::Mat out;
+        cv::flipND( b, out, 3 );
+        return out;
+      };
+      auto flipV = []( const cv::Mat &b ) {
+        cv::Mat out;
+        cv::flipND( b, out, 2 );
+        return out;
+      };
+      auto forwardUnflippedH = [ & ]( ) {
+        cv::Mat m = forwardOnce( flipH( blob ) );
+        cv::flipND( m, m, 3 );
+        return m;
+      };
+      auto forwardUnflippedHV = [ & ]( ) {
+        cv::Mat m = forwardOnce( flipH( flipV( blob ) ) );
+        cv::flipND( m, m, 2 );
+        cv::flipND( m, m, 3 );
+        return m;
+      };
+      cv::Mat acc = output.clone();
+      acc += forwardUnflippedH();
       if ( options.tta == TtaMode::HVFlip )
       {
-        cv::flip( blob, flipped, 0 );
-        cv::Mat outV = forwardOnce( flipped );
-        cv::flip( outV, outV, 0 );
-        output += outV;
-        cv::flip( blob, flipped, -1 );
-        cv::Mat outHV = forwardOnce( flipped );
-        cv::flip( outHV, outHV, -1 );
-        output += outHV;
-        output *= 0.25;
+        auto forwardUnflippedV = [ & ]( ) {
+          cv::Mat m = forwardOnce( flipV( blob ) );
+          cv::flipND( m, m, 2 );
+          return m;
+        };
+        acc += forwardUnflippedV();
+        acc += forwardUnflippedHV();
+        acc *= 0.25;
       }
       else
       {
-        output *= 0.5;
+        acc *= 0.5;
       }
-      return output;
+      return acc;
     };
 
     // Forward every declared head (multi-head = one forward per head; the
@@ -653,11 +678,17 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           {
             cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, interp );
           }
+          // Uncertainty statistics need the PRE-threshold class planes:
+          // entropy/margin over binarized {0,1} planes would be meaningless.
+          cv::Mat thresholded;
+          if ( isUncertaintyHead )
+            headPlanes.push_back( plane );
           if ( m_model.postprocess.maskThreshold >= 0.0 )
           {
             const float thr = static_cast<float>( m_model.postprocess.maskThreshold );
             cv::Mat mask = plane >= thr; // NaN ≥ thr is false → 0, restored below
-            mask.convertTo( plane, CV_32F, 1.0 / 255.0 );
+            mask.convertTo( thresholded, CV_32F, 1.0 / 255.0 );
+            plane = thresholded;
           }
           // Restore nodata on core pixels whose every input band was invalid.
           const cv::Mat &tileMask = batchMasks[bi];
@@ -671,8 +702,6 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                 outRow[col] = std::numeric_limits<float>::quiet_NaN();
             }
           }
-          if ( isUncertaintyHead )
-            headPlanes.push_back( plane );
           const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
                                                  currentTileIndex, totalTiles };
           if ( !writer->writeTile( bandOffset + c + 1, writeTile, plane.ptr<float>() ) )
@@ -895,13 +924,12 @@ int TileInferenceEngine::effectiveBatchSize( const ModelInfo &model,
   const unsigned long long perSampleBytes =
     4ULL * static_cast<unsigned long long>( tile ) * tile
       * static_cast<unsigned long long>( std::max( 1, fedChannels ) ) * 4ULL;
-  // The GPU budget is a hard ceiling; the CPU share is conservative (the
-  // host's task admission owns the real RAM budget, this only stops a
-  // manifest-declared batch from absurdly overshooting a small budget).
+  // GPU VRAM budget (when reported via SICNU_MODEL_VRAM_MB) is the only
+  // enforced ceiling here; CPU-side RAM admission is owned by TaskCenter's
+  // resource budget fed by estimateExecution — this function deliberately
+  // does not guess a RAM share.
   unsigned long long budgetBytes = 0;
-  if ( model.runtime.gpu && hw.vramBudgetMb > 0 )
-    budgetBytes = static_cast<unsigned long long>( hw.vramBudgetMb ) * 1024ULL * 1024ULL;
-  else if ( hw.vramBudgetMb > 0 && model.runtime.estimatedVramMb > 0 )
+  if ( hw.vramBudgetMb > 0 )
     budgetBytes = static_cast<unsigned long long>( hw.vramBudgetMb ) * 1024ULL * 1024ULL;
   if ( budgetBytes > 0 && perSampleBytes > 0 )
   {

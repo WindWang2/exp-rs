@@ -28,6 +28,7 @@ public:
     // Per-window quantization/accumulation differs from a full-frame pass at
     // last-ULP level (ADR 0124).
     std::string determinismGrade() const override { return "tolerance"; }
+    RSOperatorDeterminism determinism() const override { return RSOperatorDeterminism::Tolerance; }
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;

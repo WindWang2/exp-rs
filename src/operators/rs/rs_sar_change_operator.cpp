@@ -12,7 +12,6 @@
 #include "processing/gdal/gdal_multiband_block_stream.h"
 #include "rs_change_streaming.h"
 
-#include <QFile>
 #include <QString>
 
 #include <limits>
@@ -33,16 +32,27 @@ const std::vector<std::string> s_cleanups = {
     "none", "erode", "dilate", "open", "close"
 };
 
+const std::vector<std::string> s_domains = { "linear_power", "db" };
+
+Json::Value makeSarInputContract() {
+    Json::Value c(Json::objectValue);
+    c["modality"] = "sar";
+    return c;
+}
+
 } // anonymous namespace
 
 Json::Value RsSarChangeOperator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
     props["inputA"] = makeRasterParam("inputA", "First SAR scene (before, co-registered)");
+    props["inputA"]["x-rs-contract"] = makeSarInputContract();
     props["inputB"] = makeRasterParam("inputB", "Second SAR scene (after, co-registered)");
+    props["inputB"]["x-rs-contract"] = makeSarInputContract();
     props["output"] = makeOutputParam("output", "Output binary change mask raster (UInt8)", "tif");
     props["bandA"] = makeIntegerParam("bandA", "1-based band on inputA", 1);
     props["bandB"] = makeIntegerParam("bandB", "1-based band on inputB", 1);
+    props["inputDomain"] = makeEnumParam("inputDomain", "Numeric domain of both inputs", s_domains, "linear_power");
     props["thresholdMethod"] = makeEnumParam("thresholdMethod", "Threshold strategy", s_threshold_methods, "otsu");
     props["threshold"] = makeNumberParam("threshold", "Manual threshold in dB (thresholdMethod=manual): pixels with dB change >= threshold are changed", 0.0);
     props["percentile"] = makeNumberParam("percentile", "Percentile for thresholdMethod=percentile (0-100)", 90.0);
@@ -50,7 +60,6 @@ Json::Value RsSarChangeOperator::schema() const {
     props["cleanup"] = makeEnumParam("cleanup", "Morphological mask cleanup", s_cleanups, "none");
     props["cleanupIterations"] = makeIntegerParam("cleanupIterations", "Cleanup iterations", 1);
     props["minAreaPixels"] = makeIntegerParam("minAreaPixels", "Minimum mapping unit: drop components smaller than this (pixels); 0 disables", 0);
-    props["magnitudeOutput"] = makeRasterParam("magnitudeOutput", "Optional path to also store the dB log-ratio magnitude raster (Float32)", false);
     props["polarizations"] = makeStringParam("polarizations", "Comma-separated polarizations (e.g. VV,VH) recorded on the outputs", "");
     props["sensor"] = makeStringParam("sensor", "Sensor/instrument id recorded on the outputs", "");
 
@@ -61,7 +70,6 @@ Json::Value RsSarChangeOperator::schema() const {
     outputs["evaluatedPixels"] = makeIntegerParam("evaluatedPixels", "Evaluated pixels", 0);
     outputs["changedPercent"] = makeNumberParam("changedPercent", "Changed pixel percentage", 0.0);
     outputs["magnitudeDomain"] = makeStringParam("magnitudeDomain", "Numeric domain of the magnitude raster (always dB)");
-    outputs["magnitudeOutput"] = makeRasterParam("magnitudeOutput", "Magnitude raster path (when requested)", false);
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
     root["required"] = makeRequired({"inputA", "inputB", "output"});
@@ -82,8 +90,6 @@ Json::Value RsSarChangeOperator::metadata() const {
     meta["workflowHints"].append("thresholdMethod=manual marks pixels with dB change >= "
                                  "threshold (default 0 dB); otsu / percentile / "
                                  "statistical adapt the threshold to the data.");
-    meta["workflowHints"].append("Set magnitudeOutput to keep the dB magnitude raster "
-                                 "for inspection or re-thresholding with rs:threshold_raster.");
     meta["limitations"].append("Incoherent change only — no coherent/interferometric "
                                "phase analysis.");
     meta["limitations"].append("Scenes must be co-registered; no hidden resampling is applied.");
@@ -120,7 +126,7 @@ Json::Value RsSarChangeOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::FileNotFound,
                               "Input raster not found: " + pathB);
     }
-    const std::string magnitudeOutput = getString(params, "magnitudeOutput", "");
+    const std::string inputDomainStr = getEnum(params, "inputDomain", s_domains, "linear_power");
 
     const int bandA = getInt(params, "bandA", 1);
     const int bandB = getInt(params, "bandB", 1);
@@ -129,7 +135,7 @@ Json::Value RsSarChangeOperator::run(const Json::Value& params,
     const QString sensor = QString::fromStdString( getString( params, "sensor", "" ) );
 
     // Stage 1: log-difference magnitude (dB) streamed into a work-dir
-    // temporary; the mask stage re-reads it. Kept only when requested.
+    // temporary; the mask stage re-reads it.
     context.reportProgress(0.05, "Computing SAR log-ratio magnitude");
     const std::string tempMagPath = context.tempPath("sar_change_mag.tif");
 
@@ -174,7 +180,7 @@ Json::Value RsSarChangeOperator::run(const Json::Value& params,
 
     sicnu::sar::RatioParams ratioParams;
     ratioParams.output = sicnu::sar::RatioOutput::LogDifference;
-    ratioParams.inputIsDb = false;
+    ratioParams.inputIsDb = inputDomainStr == "db";
 
     GdalStreamingOutput mag(QString::fromStdString(tempMagPath), srcA.width(), srcA.height(),
                             1, GDT_Float32, srcA.geoTransform(), srcA.projection());
@@ -216,19 +222,6 @@ Json::Value RsSarChangeOperator::run(const Json::Value& params,
 
     const MaskDerivation derived = thresholdRasterToMask(tempMagPath, opts, context);
 
-    // Stage 3: optionally keep the magnitude raster.
-    if (!magnitudeOutput.empty()) {
-        const QString magnitudePath = QString::fromStdString(magnitudeOutput);
-        if (QFile::exists(magnitudePath)) {
-            QFile::remove(magnitudePath);
-        }
-        if (!QFile::copy(QString::fromStdString(tempMagPath), magnitudePath)) {
-            throw RSOperatorError(ErrorCode::GdalError,
-                                  "Failed to copy SAR change magnitude raster to: " +
-                                      magnitudeOutput);
-        }
-    }
-
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;
     result["thresholdUsed"] = derived.thresholdUsed;
@@ -238,9 +231,6 @@ Json::Value RsSarChangeOperator::run(const Json::Value& params,
         ? 0.0
         : 100.0 * static_cast<double>(derived.changed) / static_cast<double>(derived.evaluated);
     result["magnitudeDomain"] = "db";
-    if (!magnitudeOutput.empty()) {
-        result["magnitudeOutput"] = magnitudeOutput;
-    }
     context.reportProgress(1.0, "SAR change detection complete");
     return result;
 }

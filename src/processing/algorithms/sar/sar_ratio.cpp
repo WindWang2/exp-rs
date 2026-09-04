@@ -117,8 +117,11 @@ bool ratioRaster( const GdalDatasetWrapper &a, int bandA, const GdalDatasetWrapp
         return false;
     }
   }
-  writeSarOutputMetadata( dst, QString(), QStringLiteral( "linear_power" ), polarizations,
-                          sensor, 0.0, 0.0 );
+  // Log-domain outputs are dB; only the plain power ratio stays linear.
+  const QString domain = params.output == RatioOutput::Ratio
+                           ? QStringLiteral( "linear_power" )
+                           : QStringLiteral( "db" );
+  writeSarOutputMetadata( dst, QString(), domain, polarizations, sensor, 0.0, 0.0 );
   dst.setMetadataItem( QStringLiteral( "SICNU_SAR_RATIO_OUTPUT" ),
                        ratioOutputToString( params.output ) );
   return true;

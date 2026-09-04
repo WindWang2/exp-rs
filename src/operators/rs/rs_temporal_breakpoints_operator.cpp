@@ -97,6 +97,15 @@ Json::Value RsTemporalBreakpointsOperator::schema() const
   Json::Value outputs( Json::objectValue );
   outputs["output"] = makeOutputParam( "output", "Breakpoints GeoTIFF", "tif" );
   outputs["sceneCount"] = makeIntegerParam( "sceneCount", "Dates in the series", 0 );
+  outputs["maxBreaks"] = makeIntegerParam( "maxBreaks", "Maximum breaks allowed in the segmentation", 0 );
+  outputs["bands"] = makeIntegerParam( "bands", "Output band count (break_count [, break dates,] slopes, rmse)", 0 );
+  outputs["brokenPixelFraction"] = makeNumberParam( "brokenPixelFraction",
+                                                    "Pixels with at least one detected break / total pixels", 0.0 );
+  outputs["timeStart"] = makeStringParam( "timeStart", "First acquisition date in the series (ISO)", "" );
+  outputs["timeEnd"] = makeStringParam( "timeEnd", "Last acquisition date in the series (ISO)", "" );
+  Json::Value memory = makeStringParam( "memory", "Streaming working-set summary (tile size and estimated bytes)" );
+  memory["type"] = "object";
+  outputs["memory"] = memory;
   Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
   root["required"] = makeRequired( { "output" } );
   return root;
@@ -193,6 +202,15 @@ Json::Value RsTemporalBreakpointsOperator::run( const Json::Value &params, RSOpe
     bool fallback = false;
     const int band = reader.bandForRole( s, bandRole, bandOverride, &fallback );
     // documented default: explicit band > role > positional fallback > band 1
+    // An EXPLICIT band_role that resolves nowhere is a caller error: silently
+    // falling back to band 1 would analyze a different band than requested
+    // (e.g. "vh" advertised but absent → VV analyzed instead).
+    if ( band <= 0 && !bandRole.isEmpty() && bandOverride <= 0 )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "band_role '" + bandRole.toStdString() +
+                                 "' cannot be resolved in scene " +
+                                 prepared.collection.scenes().at( s ).path.toStdString() +
+                                 "; pass an explicit band or fix the scene metadata" );
     analysisBands[s] = band > 0 ? band : 1;
     anyFallback = anyFallback || fallback;
   }
@@ -220,18 +238,22 @@ Json::Value RsTemporalBreakpointsOperator::run( const Json::Value &params, RSOpe
                  : 0;
   }
 
-  // minSegmentDays → a minimum SEGMENT SAMPLE COUNT: roughly regular sampling
-  // puts about totalSpan/minSegmentDays scenes inside any window of that
-  // span. Simplest correct conversion (documented):
-  //   minSegment = clamp( floor(totalSpan / minSegmentDays), 1, sceneCount )
-  // e.g. a 90-day minimum over a 720-day span → 8 samples per segment. The
-  // kernel additionally floors this at 3 and requires 2·minSegment samples to
-  // consider a split at all.
+  // minSegmentDays → a minimum SEGMENT SAMPLE COUNT: with roughly regular
+  // sampling, one 90-day segment holds about
+  //   minSegmentDays / medianSpacing  scenes,  spacing = totalSpan/(N-1).
+  // e.g. monthly scenes (spacing ≈ 30 days) → a 90-day segment is ~3 scenes;
+  // the inverted expression totalSpan/minSegmentDays would have demanded 8
+  // (≈ 240 days) and silently suppressed every break inside 8-month windows.
+  // The kernel additionally floors this at 3 and requires 2·minSegment
+  // samples on either side of a split.
   const double totalSpan = tDays.back() - tDays.front();
   int minSegment = 1;
-  if ( totalSpan > 0.0 )
-    minSegment =
-      std::clamp( static_cast<int>( std::floor( totalSpan / minSegmentDays ) ), 1, sceneCount );
+  if ( totalSpan > 0.0 && sceneCount > 1 )
+  {
+    const double spacing = totalSpan / static_cast<double>( sceneCount - 1 );
+    minSegment = std::clamp(
+      static_cast<int>( std::lround( minSegmentDays / spacing ) ), 1, sceneCount / 2 );
+  }
 
   const int dateBands = outputBreakDates ? maxBreaks : 0;
   const int bandCount = 1 + dateBands + ( maxBreaks + 1 ) + 1; // default 2 breaks + dates → 7
@@ -268,7 +290,23 @@ Json::Value RsTemporalBreakpointsOperator::run( const Json::Value &params, RSOpe
   GDALSetDescription( GDALGetRasterBand( static_cast<GDALDatasetH>( out.dataset() ), b++ ), "rmse" );
 
   const int tiles = reader.totalTileCount();
-  const size_t tilePixels = static_cast<size_t>( tileSize ) * tileSize;
+  // Guard against a nominal tile_size parameter pretending the working set is
+  // bounded: allocations size the LARGEST CLAMPED tile rect (edge tiles are
+  // smaller), and a series gathering that would exceed ~2 GB is rejected up
+  // front with guidance instead of being attempted (OOM guard).
+  const size_t maxTilePixels =
+      static_cast<size_t>( std::min( tileSize, width ) ) *
+      static_cast<size_t>( std::min( tileSize, height ) );
+  constexpr size_t kMaxSeriesBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
+  if ( static_cast<size_t>( sceneCount ) * maxTilePixels * sizeof( float ) >
+       kMaxSeriesBytes )
+    throw RSOperatorError(
+        ErrorCode::InvalidParameter,
+        "tile_size " + std::to_string( tileSize ) + " x " +
+            std::to_string( sceneCount ) +
+            " scenes exceeds the 2 GiB series-gathering budget; reduce tile_size "
+        "(or scene count)" );
+  const size_t tilePixels = maxTilePixels;
 
   std::vector<float> tile( tilePixels );
   std::vector<float> series( static_cast<size_t>( sceneCount ) * tilePixels );

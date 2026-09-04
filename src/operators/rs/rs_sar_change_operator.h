@@ -13,9 +13,8 @@ namespace sicnu::operators::rs {
  * derives a binary change mask from it via a manual / Otsu / percentile /
  * statistical threshold with optional morphological cleanup and minimum
  * mapping unit filtering (stage 2, the shared change-streaming mask
- * machinery behind rs:threshold_raster). Optionally keeps the dB magnitude
- * raster. Statistical thresholds adapt to the data, hence the tolerance
- * determinism grade.
+ * machinery behind rs:threshold_raster). Statistical thresholds adapt to
+ * the data, hence the tolerance determinism grade.
  */
 class RsSarChangeOperator : public RSOperator
 {
@@ -31,6 +30,7 @@ public:
     }
     RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::MultiPassStreaming; }
     std::string determinismGrade() const override { return "tolerance"; }
+    RSOperatorDeterminism determinism() const override { return RSOperatorDeterminism::Tolerance; }
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;

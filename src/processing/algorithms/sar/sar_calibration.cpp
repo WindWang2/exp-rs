@@ -119,12 +119,19 @@ bool convertBackscatterRaster( const GdalDatasetWrapper &src, int band,
   // Per-pixel incidence source (optional).
   GdalDatasetWrapper incidenceDs;
   bool useRasterIncidence = false;
+  float incidenceSentinel = std::numeric_limits<float>::quiet_NaN();
   if ( options.constantIncidenceDeg <= 0.0 && !options.incidenceRasterPath.isEmpty() )
   {
     if ( !incidenceDs.open( options.incidenceRasterPath ) )
       return false;
     if ( incidenceDs.width() != src.width() || incidenceDs.height() != src.height() )
       return false;
+    // A declared sentinel must not reach cos() as a raw angle (a -9999 hole
+    // would produce garbage geometry, not an error).
+    bool hasSentinel = false;
+    const double nd = incidenceDs.bandNoDataValue( 1, &hasSentinel );
+    if ( hasSentinel && std::isfinite( nd ) )
+      incidenceSentinel = static_cast<float>( nd );
     useRasterIncidence = true;
   }
   else if ( options.constantIncidenceDeg <= 0.0 )
@@ -142,6 +149,14 @@ bool convertBackscatterRaster( const GdalDatasetWrapper &src, int band,
          readIncidenceTile( incidenceDs, tile.xOffset, tile.yOffset, tile.width, tile.height,
                             incidenceTile ) != 1.0f )
       return false;
+    if ( useRasterIncidence && std::isfinite( incidenceSentinel ) )
+    {
+      for ( float &v : incidenceTile )
+      {
+        if ( v == incidenceSentinel )
+          v = std::numeric_limits<float>::quiet_NaN();
+      }
+    }
 
     std::vector<float> out( static_cast<size_t>( tile.width ) * tile.height );
     for ( int y = 0; y < tile.height; ++y )

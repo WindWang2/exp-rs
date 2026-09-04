@@ -25,12 +25,19 @@ namespace {
 
 const std::vector<std::string> s_domains = { "linear_power", "db" };
 
+Json::Value makeSarInputContract() {
+    Json::Value c(Json::objectValue);
+    c["modality"] = "sar";
+    return c;
+}
+
 } // anonymous namespace
 
 Json::Value RsSarCalibrateOperator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
     props["input"] = makeRasterParam("input", "Input SAR raster (DN or amplitude)");
+    props["input"]["x-rs-contract"] = makeSarInputContract();
     props["output"] = makeOutputParam("output", "Output calibrated sigma0 raster (Float32)", "tif");
     props["band"] = makeIntegerParam("band", "1-based input band (0 = all bands calibrated independently)", 1);
     props["calibrationA"] = makeNumberParam("calibrationA", "Calibration constant A (sigma0 = DN²/A²; use the product's A value)", 1.0);

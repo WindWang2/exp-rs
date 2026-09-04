@@ -281,11 +281,16 @@ TemporalPreflightReport runPreflight( const TemporalCollection &collection,
       if ( !polSeen )
       {
         commonPol = c.polarizations;
+        commonPol.sort();
         polSeen = true;
       }
-      else if ( commonPol != c.polarizations )
+      else
       {
-        report.modality.polarizationUniform = false;
+        // Sets, not sequences: [VV,VH] and [VH,VV] are the same observation.
+        QStringList sorted = c.polarizations;
+        sorted.sort();
+        if ( commonPol != sorted )
+          report.modality.polarizationUniform = false;
       }
     }
     report.modality.polarizationPartial = polPartial;

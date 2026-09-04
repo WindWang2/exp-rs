@@ -275,13 +275,18 @@ Json::Value RsFeatureStackOperator::run(const Json::Value& params,
         if (refProjection.isEmpty()) {
             context.logWarning("Inputs carry no CRS; co-registration cannot be verified");
         }
+        // A differing geotransform (same dims/CRS — the typical pre-reproject
+        // failure) would stack MISALIGNED pixels into a model-ready cube;
+        // every downstream consumer would train/predict on spatially wrong
+        // features. Blocking error, never a warning.
         const std::array<double, 6> gt = src.geoTransform();
         for (int k = 0; k < 6; ++k) {
             if (std::fabs(gt[k] - refTransform[k]) > kGeoTransformEpsilon) {
-                context.logWarning("features[" + std::to_string(i) + "] geotransform differs "
-                                   "from the " + gridName + " (dimensions and CRS agree); "
-                                   "continuing without resampling");
-                break;
+                throw RSOperatorError(
+                    ErrorCode::InvalidParameter,
+                    "features[" + std::to_string(i) + "] '" + sources[i].input +
+                        "' geotransform differs from the " + gridName +
+                        " (dimensions and CRS agree) — align inputs first (gdal:reproject)" );
             }
         }
     }
@@ -304,6 +309,20 @@ Json::Value RsFeatureStackOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "failed to create output: " + outErr.toStdString());
     }
+    // RAII partial-output guard: an unexpected unwind (cancellation between
+    // bands, GDAL exception) must not leave a truncated success-looking .tif.
+    struct OutputCleanup {
+        GdalDatasetWrapper &out;
+        const std::string &path;
+        bool armed = true;
+        ~OutputCleanup() {
+            if ( armed ) {
+                out.closeWithError( nullptr );
+                QFile::remove( QString::fromStdString( path ) );
+            }
+        }
+    } outputCleanup{out, outputPath};
+
     for (int b = 0; b < bandCount; ++b) {
         out.setBandNoDataValue(b + 1, hasNodata[b] ? nodataRaw[b]
                                                    : std::numeric_limits<double>::quiet_NaN());
@@ -413,6 +432,8 @@ Json::Value RsFeatureStackOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::GdalError,
                               "failed to write the feature cube contract onto " + outputPath);
     }
+
+    outputCleanup.armed = false; // committed cleanly below
 
     QString closeErr;
     if (!out.closeWithError(&closeErr)) {

@@ -51,6 +51,7 @@ struct SlopeAspect
 {
   double slopeDeg = 0.0;
   double aspectDeg = 0.0;
+  bool valid = true;   ///< false when a DEM neighbor is NoData/NaN
 };
 
 SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,

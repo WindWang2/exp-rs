@@ -138,6 +138,11 @@ Json::Value RsTemporalSmoothOperator::schema() const
   outputs["sceneCount"] = makeIntegerParam( "sceneCount", "Scenes in the series", 0 );
   outputs["method"] = makeStringParam( "method", "Smoothing method applied", "" );
   outputs["bands"] = makeIntegerParam( "bands", "Output band count (= sceneCount)", 0 );
+  outputs["timeStart"] = makeStringParam( "timeStart", "First acquisition date in the series (ISO)", "" );
+  outputs["timeEnd"] = makeStringParam( "timeEnd", "Last acquisition date in the series (ISO)", "" );
+  Json::Value memory = makeStringParam( "memory", "Streaming working-set summary (tile size and estimated bytes)" );
+  memory["type"] = "object";
+  outputs["memory"] = memory;
   Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
   root["required"] = makeRequired( { "output" } );
   return root;
@@ -158,7 +163,8 @@ Json::Value RsTemporalSmoothOperator::metadata() const
   meta["prerequisites"] = "Common grid, acquisition times, consistent radiometric state "
                           "(temporal preflight); at least 3 scenes";
   meta["memoryPolicy"] = memoryPolicyName( memoryPolicy() );
-  meta["deterministic"] = true;
+  // tolerance-grade: deterministic flag stays false so the execution
+  // cache never serves these artifacts (task_center cache gate).
   meta["supportsCancellation"] = true;
   meta["largeRasterSafe"] = true;
   meta["costClass"] = "O(tile × scenes × window²)";
@@ -251,6 +257,15 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
     bool fallback = false;
     const int band = reader.bandForRole( s, bandRole, bandOverride, &fallback );
     // documented default: explicit band > role > positional fallback > band 1
+    // An EXPLICIT band_role that resolves nowhere is a caller error: silently
+    // falling back to band 1 would analyze a different band than requested
+    // (e.g. "vh" advertised but absent → VV analyzed instead).
+    if ( band <= 0 && !bandRole.isEmpty() && bandOverride <= 0 )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "band_role '" + bandRole.toStdString() +
+                                 "' cannot be resolved in scene " +
+                                 prepared.collection.scenes().at( s ).path.toStdString() +
+                                 "; pass an explicit band or fix the scene metadata" );
     analysisBands[s] = band > 0 ? band : 1;
     anyFallback = anyFallback || fallback;
   }
@@ -284,7 +299,23 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
   }
 
   const int tiles = reader.totalTileCount();
-  const size_t tilePixels = static_cast<size_t>( tileSize ) * tileSize;
+  // Guard against a nominal tile_size parameter pretending the working set is
+  // bounded: allocations size the LARGEST CLAMPED tile rect (edge tiles are
+  // smaller), and a series gathering that would exceed ~2 GB is rejected up
+  // front with guidance instead of being attempted (OOM guard).
+  const size_t maxTilePixels =
+      static_cast<size_t>( std::min( tileSize, width ) ) *
+      static_cast<size_t>( std::min( tileSize, height ) );
+  constexpr size_t kMaxSeriesBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
+  if ( static_cast<size_t>( sceneCount ) * maxTilePixels * sizeof( float ) >
+       kMaxSeriesBytes )
+    throw RSOperatorError(
+        ErrorCode::InvalidParameter,
+        "tile_size " + std::to_string( tileSize ) + " x " +
+            std::to_string( sceneCount ) +
+            " scenes exceeds the 2 GiB series-gathering budget; reduce tile_size "
+        "(or scene count)" );
+  const size_t tilePixels = maxTilePixels;
 
   // Column-major per-pixel series: series[s * tilePixels + i] — the smoothed
   // values are written back in place, so no second T-tile buffer is needed.

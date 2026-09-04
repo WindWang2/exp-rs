@@ -213,8 +213,23 @@ Json::Value RsInferenceOperator::estimateExecution( const Json::Value &params ) 
         if ( artifactBytes > 0 )
             modelRamBytes = ( ( artifactBytes + kMiB - 1 ) / kMiB ) * kMiB;
     }
+    // Multi-head/uncertainty amplification (review 3): flushBatch retains
+    // every declared head's output planes alongside the input blob. Count the
+    // DECLARED channels (classes x tensor_names + optional uncertainty band);
+    // undeclared heads keep the historical input-sized allowance.
+    std::uint64_t declaredOutChannels = 0;
+    if ( !model.output.classes.empty() )
+        declaredOutChannels +=
+            model.output.classes.size() *
+            std::max<std::size_t>( 1, model.output.tensorNames.size() );
+    else if ( !model.output.tensorNames.empty() )
+        declaredOutChannels = model.output.tensorNames.size();
+    if ( model.output.uncertainty == "entropy" || model.output.uncertainty == "margin" )
+        declaredOutChannels += 1;
+    const std::uint64_t perTileSets = batch * ( 4 + declaredOutChannels );
+
     Json::Value est = sicnu::processing::makeStreamingEstimate( fedW, fedH, bands, 4,
-                                                                batch * 4, /*matrixBytes*/ 0,
+                                                                perTileSets, /*matrixBytes*/ 0,
                                                                 /*fixedOverhead*/ modelRamBytes + 32 * 1024 * 1024 );
     // VRAM contract surfaces for admission tooling (TaskCenter admits on RAM
     // today; GPU-aware admission is a documented follow-up).
@@ -261,6 +276,16 @@ Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorConte
     // Platform 3.0 contract gates: multi-input manifests are ranking-ready
     // but their engine execution lands in the next iteration — fail loudly
     // rather than silently feeding one raster to a two-tensor model.
+    for ( const auto &input : model.inputs )
+    {
+        if ( input.temporalLength > 0 )
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "Model '" + model.name + "' declares temporal_length=" +
+                    std::to_string( input.temporalLength ) +
+                    "; temporal (T-frame) inference is not wired into the tile "
+                    "engine yet — the graph would silently run on a single frame" );
+    }
     if ( model.inputs.size() > 1 )
         throw RSOperatorError(
             ErrorCode::InvalidInputData,
