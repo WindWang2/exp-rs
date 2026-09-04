@@ -176,79 +176,14 @@ int main(int argc, char *argv[])
     // Regenerate the algorithm catalog sidecars from descriptors (#707).
     if (parser.isSet(exportCatalogOption)) {
         const QString outDir = parser.value(exportCatalogOption);
-        if (!QDir().mkpath(outDir)) {
-            std::cerr << "Cannot create output directory: " << outDir.toStdString() << "\n";
-            return 1;
-        }
-        auto &store = sicnu::processing::AlgorithmMetaStore::instance();
-        store.loadDefaults();
         const auto descriptors =
             sicnu::processing::AtomicAlgorithmRegistry::instance().listDescriptors();
-        int written = 0;
-        for (const auto &desc : descriptors) {
-            sicnu::processing::AlgorithmMetaEntry entry =
-                store.resolveAgainstDescriptor(desc.id, desc.agentMetadata, nullptr)
-                    .value_or(sicnu::processing::AlgorithmMetaEntry{});
-            entry.id = desc.id;
-            // Fill entry fields from the descriptor when the sidecar overlay
-            // left them unset: the generated artifact is the descriptor's
-            // resolved truth, not a copy of the previous file.
-            if (entry.task.empty())
-                entry.task = desc.agentMetadata.taskFamily;
-            if (entry.notes.empty())
-                entry.notes = desc.agentMetadata.notes;
-            if (entry.tags.empty())
-                entry.tags = desc.agentMetadata.tags;
-            if (desc.agentMetadata.gpuDeclared) {
-                entry.gpu = desc.agentMetadata.gpuAccelerated;
-                entry.gpuDeclared = true;
-            }
-            // Primary input/output contract: the first RASTER/VECTOR port
-            // (schema property order puts scalars like band numbers first —
-            // dataTypeToString of those would claim "Integer" as the data
-            // contract). Empty when no data port exists.
-            const auto primaryDataKind = []( const std::vector<sicnu::processing::PortDescriptor> &ports ) {
-                for ( const auto &port : ports )
-                {
-                    const std::string kind = sicnu::processing::dataTypeToString( port.type );
-                    if ( kind == "Raster" )
-                        return std::string( "raster" );
-                    if ( kind == "Vector" )
-                        return std::string( "vector" );
-                }
-                return std::string();
-            };
-            if ( entry.input.empty() )
-                entry.input = primaryDataKind( desc.inputs );
-            if ( entry.output.empty() )
-                entry.output = primaryDataKind( desc.outputs );
-            // Catalog membership is a DELIBERATE authoring act: only
-            // algorithms that declare a task family in code (metadata()) —
-            // or in a pre-existing sidecar — get a generated file. Notes or
-            // tags alone would ship a file for nearly every thin adapter,
-            // including provider auto-discovered CLI tools whose ids depend
-            // on the generating machine's installed tools — noise that makes
-            // the catalog irreproducible across machines, not a catalog.
-            if (entry.task.empty())
-                continue;
-            // Naming contract from ADR 0122: ':' AND '_' both map to '-'
-            // (rs:spectral_index -> rs-spectral-index), matching the
-            // hand-authored files this generator replaces.
-            const QString fileName =
-                QString::fromStdString(desc.id)
-                    .replace(QLatin1Char(':'), QLatin1Char('-'))
-                    .replace(QLatin1Char('_'), QLatin1Char('-'))
-                + QStringLiteral(".json");
-            QFile f(QDir(outDir).filePath(fileName));
-            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-                std::cerr << "Cannot write " << f.fileName().toStdString() << "\n";
-                return 1;
-            }
-            Json::StreamWriterBuilder w;
-            w["indentation"] = "  ";
-            const std::string text = Json::writeString(w, entry.toJson());
-            f.write(text.c_str());
-            ++written;
+        std::string error;
+        const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
+            outDir.toStdString(), descriptors, &error );
+        if (written < 0) {
+            std::cerr << "Failed to export catalog: " << error << "\n";
+            return 1;
         }
         std::cout << "Generated " << written << " catalog sidecars in "
                   << outDir.toStdString() << "\n";

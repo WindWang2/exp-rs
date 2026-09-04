@@ -1,6 +1,7 @@
 // src/agent/tool_catalog/agent_tool.cpp
 #include "agent_tool.h"
 #include <algorithm>
+#include <stdexcept>
 
 namespace sicnu::agent::tool_catalog {
 
@@ -80,19 +81,7 @@ Json::Value AgentTool::toOpenAiToolDefinition() const
   }
 
   funcObj["description"] = fullDesc;
-
-  if ( inputSchema.isObject() && !inputSchema.isNull() && !inputSchema.empty() )
-  {
-    funcObj["parameters"] = inputSchema;
-  }
-  else
-  {
-    Json::Value emptyParams( Json::objectValue );
-    emptyParams["type"] = "object";
-    emptyParams["properties"] = Json::Value( Json::objectValue );
-    funcObj["parameters"] = emptyParams;
-  }
-
+  funcObj["parameters"] = normalizedInputSchema();
   root["function"] = funcObj;
   return root;
 }
@@ -103,20 +92,48 @@ Json::Value AgentTool::toMcpToolDefinition() const
   root["category"] = toolCategoryToString( category );
   root["name"] = name;
   root["description"] = description.empty() ? displayName : description;
+  root["schema"] = normalizedInputSchema();
+  return root;
+}
 
-  if ( inputSchema.isObject() && !inputSchema.isNull() && !inputSchema.empty() )
-  {
-    root["schema"] = inputSchema;
-  }
-  else
+Json::Value AgentTool::normalizedInputSchema() const
+{
+  if ( inputSchema.isNull() || ( inputSchema.isObject() && inputSchema.empty() ) )
   {
     Json::Value emptySchema( Json::objectValue );
     emptySchema["type"] = "object";
     emptySchema["properties"] = Json::Value( Json::objectValue );
-    root["schema"] = emptySchema;
+    return emptySchema;
   }
 
-  return root;
+  if ( !inputSchema.isObject() )
+  {
+    throw std::invalid_argument(
+      "AgentTool '" + name + "': inputSchema root must be a JSON object" );
+  }
+
+  Json::Value normalized = inputSchema;
+
+  if ( normalized.isMember( "type" ) )
+  {
+    if ( !normalized["type"].isString() || normalized["type"].asString() != "object" )
+    {
+      throw std::invalid_argument(
+        "AgentTool '" + name + "': inputSchema root type must be 'object', but found '" +
+        ( normalized["type"].isString() ? normalized["type"].asString() : "<non-string>" ) + "'" );
+    }
+  }
+  else
+  {
+    normalized["type"] = "object";
+  }
+
+  if ( !normalized.isMember( "properties" ) || !normalized["properties"].isObject() )
+  {
+    normalized["properties"] = Json::Value( Json::objectValue );
+  }
+
+  return normalized;
 }
 
 Json::Value AgentTool::toJson() const

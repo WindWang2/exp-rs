@@ -2205,7 +2205,7 @@ QVariantMap McpServer::handleListTools(const QString &category, bool compact,
         toolMap[QStringLiteral("name")] = QString::fromStdString(t.name);
         toolMap[QStringLiteral("description")] = QString::fromStdString(t.description.empty() ? t.displayName : t.description);
         if (!compact)
-            toolMap[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(t.inputSchema);
+            toolMap[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(t.normalizedInputSchema());
         toolList.append(toolMap);
     }
 
@@ -2287,7 +2287,7 @@ QVariantMap McpServer::handleSearchTools(const QString &query, const QString &gr
         toolMap[QStringLiteral("name")] = QString::fromStdString(t.name);
         toolMap[QStringLiteral("description")] = QString::fromStdString(t.description.empty() ? t.displayName : t.description);
         if (!compact)
-            toolMap[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(t.inputSchema);
+            toolMap[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(t.normalizedInputSchema());
         toolList.append(toolMap);
     }
 
@@ -2334,7 +2334,7 @@ QVariantMap McpServer::handleGetToolSchema(const QString &toolId)
     result[QStringLiteral("name")] = QString::fromStdString(tool->name);
     result[QStringLiteral("displayName")] = QString::fromStdString(tool->displayName);
     result[QStringLiteral("description")] = QString::fromStdString(tool->description);
-    result[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(tool->inputSchema);
+    result[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(tool->normalizedInputSchema());
     return result;
 }
 

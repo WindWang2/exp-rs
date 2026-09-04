@@ -370,7 +370,7 @@ Json::Value AgentToolCatalog::getSchema( const std::string &toolName ) const
   auto tool = findTool( toolName );
   if ( tool )
   {
-    return tool->inputSchema;
+    return tool->normalizedInputSchema();
   }
   return Json::Value( Json::nullValue );
 }

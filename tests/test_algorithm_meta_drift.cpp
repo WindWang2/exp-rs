@@ -1,10 +1,10 @@
 // Shipped algorithm_meta sidecars must agree with the in-code
 // AlgorithmDescriptor — the descriptor is the single source of truth for
-// capability facts (#707). This runs in its own binary because the drift
-// gate depends on RSOperatorRegistry / AtomicAlgorithmRegistry singletons
-// staying in their freshly-initialized state; sharing a process with the
-// spatial-tools suite's reset() calls leaves those singletons in a stale
-// state that makes rs:infer (and every OpenCV-block operator) unresolvable.
+// capability facts (#707, #729). This test enforces:
+// 1. Exact bidirectional membership: descriptor task-declaring set == shipped sidecars
+// 2. Byte-for-byte reproducibility: generateCatalog output == disk files
+// 3. No unresolvable shipped IDs (hard failure, not advisory warning)
+// 4. Clean exportCatalog roundtrip to temporary directory
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -13,50 +13,75 @@
 #include "processing/framework/algorithm_meta_store.h"
 #include "processing/framework/atomic_algorithm_adapter.h"
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/runtime_paths.h"
 
-TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors (#707)",
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
+#include <set>
+
+TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors (#707, #729)",
            "[agent][spatial][meta][drift]" )
 {
     // Trigger the call_once chain so every built-in operator is registered.
     sicnu::operators::RSOperatorRegistry::instance();
-    // installRsOperatorProvider() is safe to call now: the chain completed
-    // above. initialize() re-runs the provider outside any lock.
     sicnu::operators::rs::installRsOperatorProvider();
     sicnu::processing::AtomicAlgorithmRegistry::instance().initialize();
 
     auto &store = sicnu::processing::AlgorithmMetaStore::instance();
     REQUIRE( store.loadDefaults() >= 6 );
 
-    const auto entries = store.entries();
-    REQUIRE_FALSE( entries.empty() );
+    const auto descriptors =
+        sicnu::processing::AtomicAlgorithmRegistry::instance().listDescriptors();
+    REQUIRE_FALSE( descriptors.empty() );
 
-    auto kindClaimedBy = []( const std::vector<sicnu::processing::PortDescriptor> &ports,
-                             const std::string &kind ) {
-        if ( kind.empty() )
-            return true;
-        sicnu::processing::DataType wanted = sicnu::processing::DataType::Any;
-        if ( kind == "raster" )
-            wanted = sicnu::processing::DataType::Raster;
-        else if ( kind == "vector" )
-            wanted = sicnu::processing::DataType::Vector;
-        for ( const auto &port : ports )
-        {
-            if ( port.type == wanted || port.type == sicnu::processing::DataType::Any )
-                return true;
-        }
-        return false;
-    };
+    const auto expectedCatalog =
+        sicnu::processing::AlgorithmMetaStore::generateCatalog( descriptors );
 
-    for ( const auto &entry : entries )
+    // Baseline truth: exactly 6 operators declare a taskFamily in code.
+    REQUIRE( expectedCatalog.size() == 6 );
+
+    const QString metaDir =
+        sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "data/processing/algorithm_meta" ) );
+    const QDir dir( metaDir );
+    REQUIRE( dir.exists() );
+
+    // 1. Directory hygiene: verify only expected sidecar JSONs and README.md exist
+    const QStringList diskJsonFiles = dir.entryList( QStringList{ QStringLiteral( "*.json" ) }, QDir::Files, QDir::Name );
+    REQUIRE( diskJsonFiles.size() == static_cast<int>( expectedCatalog.size() ) );
+
+    for ( const QString &entryName : dir.entryList( QDir::Files | QDir::NoDotAndDotDot ) )
     {
-        DYNAMIC_SECTION( "sidecar " << entry.id )
+        if ( entryName != QStringLiteral( "README.md" ) )
         {
-            // Registry resolution is best-effort in this binary: static
-            // operator registration from shared libraries is link-order
-            // fragile (#707 notes the known issue), and this gate's real
-            // subject is sidecar ↔ descriptor agreement, not registry state.
-            // A missing adapter skips the port-kind checks below (the
-            // descriptor is unavailable) but never masks drift.
+            CHECK( entryName.endsWith( QStringLiteral( ".json" ) ) );
+        }
+    }
+
+    // 2. Exact bidirectional membership & byte-for-byte reproducibility
+    for ( const auto &[filename, expectedContent] : expectedCatalog )
+    {
+        DYNAMIC_SECTION( "reproducibility: " << filename )
+        {
+            const QString filePath = dir.filePath( QString::fromStdString( filename ) );
+            QFile file( filePath );
+            INFO( "Expected sidecar file must exist: " << filePath.toStdString() );
+            REQUIRE( file.exists() );
+            REQUIRE( file.open( QIODevice::ReadOnly | QIODevice::Text ) );
+            const std::string diskContent = file.readAll().toStdString();
+            file.close();
+
+            INFO( "Sidecar content on disk drifted from in-code descriptor generation." );
+            INFO( "Regenerate with: sicnu_geo_rs_cli --export-catalog data/processing/algorithm_meta" );
+            CHECK( diskContent == expectedContent );
+        }
+    }
+
+    // 3. Hard failure on unresolvable sidecar IDs and capability drift
+    for ( const auto &entry : store.entries() )
+    {
+        DYNAMIC_SECTION( "resolution: " << entry.id )
+        {
             auto adapter =
                 sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( entry.id );
             if ( !adapter )
@@ -68,22 +93,40 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
                     sicnu::processing::AtomicAlgorithmRegistry::instance().registerAdapter( adapter );
                 }
             }
-            if ( !adapter )
-            {
-                WARN( "sidecar id does not resolve in AtomicAlgorithmRegistry (skipped port checks): " << entry.id );
-                continue;
-            }
+
+            INFO( "Sidecar id must resolve in AtomicAlgorithmRegistry: " << entry.id );
+            REQUIRE( adapter != nullptr );
 
             const auto &descriptor = adapter->descriptor();
-            CHECK( kindClaimedBy( descriptor.inputs, entry.input ) );
-            CHECK( kindClaimedBy( descriptor.outputs, entry.output ) );
-
             std::vector<std::string> drift;
             const auto resolved = store.resolveAgainstDescriptor( entry.id, descriptor.agentMetadata, &drift );
             REQUIRE( resolved.has_value() );
             for ( const auto &d : drift )
                 INFO( "capability drift: " << d );
             CHECK( drift.empty() );
+        }
+    }
+
+    // 4. Export-catalog roundtrip verification to a temporary directory
+    SECTION( "exportCatalog produces byte-identical files in temp directory" )
+    {
+        QTemporaryDir tempDir;
+        REQUIRE( tempDir.isValid() );
+
+        std::string exportErr;
+        const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
+            tempDir.path().toStdString(), descriptors, &exportErr );
+        REQUIRE( written == 6 );
+        REQUIRE( exportErr.empty() );
+
+        const QDir tempQDir( tempDir.path() );
+        for ( const auto &[filename, expectedContent] : expectedCatalog )
+        {
+            QFile tempFile( tempQDir.filePath( QString::fromStdString( filename ) ) );
+            REQUIRE( tempFile.exists() );
+            REQUIRE( tempFile.open( QIODevice::ReadOnly | QIODevice::Text ) );
+            const std::string generated = tempFile.readAll().toStdString();
+            CHECK( generated == expectedContent );
         }
     }
 }

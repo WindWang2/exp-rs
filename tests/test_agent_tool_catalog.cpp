@@ -243,6 +243,9 @@ TEST_CASE( "AgentToolCatalog: Schema Merge and Export", "[agent][tool_catalog][e
     bool foundDrawRoi = false;
     bool foundListLayers = false;
 
+    bool foundTemporalRegister = false;
+    bool foundTemporalList = false;
+
     for ( const auto &item : openAiTools )
     {
       REQUIRE( item.isObject() );
@@ -253,16 +256,21 @@ TEST_CASE( "AgentToolCatalog: Schema Merge and Export", "[agent][tool_catalog][e
       REQUIRE( fn.isMember( "description" ) );
       REQUIRE( fn.isMember( "parameters" ) );
       CHECK( fn["parameters"]["type"].asString() == "object" );
+      CHECK( fn["parameters"]["properties"].isObject() );
 
       const std::string name = fn["name"].asString();
       if ( name == "rs_spectral_index" ) foundSpectral = true;
       if ( name == "canvas_draw_roi" ) foundDrawRoi = true;
       if ( name == "data_list_layers" ) foundListLayers = true;
+      if ( name == "temporal_register_collection" ) foundTemporalRegister = true;
+      if ( name == "temporal_list_collections" ) foundTemporalList = true;
     }
 
     REQUIRE( foundSpectral );
     REQUIRE( foundDrawRoi );
     REQUIRE( foundListLayers );
+    REQUIRE( foundTemporalRegister );
+    REQUIRE( foundTemporalList );
   }
 
   SECTION( "exportMcpTools produces { category, name, description, schema } format" )
@@ -279,6 +287,7 @@ TEST_CASE( "AgentToolCatalog: Schema Merge and Export", "[agent][tool_catalog][e
       CHECK( item.isMember( "description" ) );
       CHECK( item.isMember( "schema" ) );
       CHECK( item["schema"]["type"].asString() == "object" );
+      CHECK( item["schema"]["properties"].isObject() );
     }
   }
 
@@ -455,4 +464,71 @@ TEST_CASE( "AgentToolCatalog picks up interaction tools registered after first u
 
   registry.reset();
   catalog.reset();
+}
+
+TEST_CASE( "AgentTool: Schema Normalization and Fail-Fast Validation", "[agent][tool_catalog][schema]" )
+{
+  AgentTool tool;
+  tool.name = "test:schema_tool";
+  tool.displayName = "Schema Test Tool";
+  tool.category = ToolCategory::Data;
+
+  SECTION( "Empty or null schema normalizes safely to object schema" )
+  {
+    tool.inputSchema = Json::Value(); // null
+    const auto normNull = tool.normalizedInputSchema();
+    CHECK( normNull.isObject() );
+    CHECK( normNull["type"].asString() == "object" );
+    CHECK( normNull["properties"].isObject() );
+
+    tool.inputSchema = Json::Value( Json::objectValue ); // empty object
+    const auto normEmpty = tool.normalizedInputSchema();
+    CHECK( normEmpty.isObject() );
+    CHECK( normEmpty["type"].asString() == "object" );
+    CHECK( normEmpty["properties"].isObject() );
+  }
+
+  SECTION( "Object schema without type acquires type: object" )
+  {
+    Json::Value schema( Json::objectValue );
+    Json::Value props( Json::objectValue );
+    props["param1"] = Json::Value( Json::objectValue );
+    props["param1"]["type"] = "string";
+    schema["properties"] = props;
+    tool.inputSchema = schema;
+
+    const auto norm = tool.normalizedInputSchema();
+    CHECK( norm["type"].asString() == "object" );
+    CHECK( norm["properties"].isMember( "param1" ) );
+
+    const auto openAi = tool.toOpenAiToolDefinition();
+    CHECK( openAi["function"]["parameters"]["type"].asString() == "object" );
+    const auto mcp = tool.toMcpToolDefinition();
+    CHECK( mcp["schema"]["type"].asString() == "object" );
+  }
+
+  SECTION( "Non-object schema throws std::invalid_argument fail-fast" )
+  {
+    Json::Value arr( Json::arrayValue );
+    arr.append( "not-an-object" );
+    tool.inputSchema = arr;
+
+    CHECK_THROWS_AS( tool.normalizedInputSchema(), std::invalid_argument );
+    CHECK_THROWS_AS( tool.toOpenAiToolDefinition(), std::invalid_argument );
+    CHECK_THROWS_AS( tool.toMcpToolDefinition(), std::invalid_argument );
+
+    tool.inputSchema = Json::Value( 42 );
+    CHECK_THROWS_AS( tool.normalizedInputSchema(), std::invalid_argument );
+  }
+
+  SECTION( "Illegal root type throws std::invalid_argument fail-fast" )
+  {
+    Json::Value schema( Json::objectValue );
+    schema["type"] = "string"; // explicitly invalid for tool input
+    tool.inputSchema = schema;
+
+    CHECK_THROWS_AS( tool.normalizedInputSchema(), std::invalid_argument );
+    CHECK_THROWS_AS( tool.toOpenAiToolDefinition(), std::invalid_argument );
+    CHECK_THROWS_AS( tool.toMcpToolDefinition(), std::invalid_argument );
+  }
 }

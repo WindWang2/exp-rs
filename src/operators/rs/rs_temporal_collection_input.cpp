@@ -41,91 +41,16 @@ void applyGlobalBandOverrides( TemporalCollection &collection, const Json::Value
 
 TemporalCollection fromInlineScenes( const Json::Value &params )
 {
-  const Json::Value &scenesJson = params["scenes"];
   TemporalCollection collection;
-  collection.setName( "inline" );
-  const int sceneCount = static_cast<int>( scenesJson.size() );
-  QVector<TemporalSceneRef> scenes;
-  scenes.reserve( sceneCount );
-
-  for ( int i = 0; i < sceneCount; ++i )
+  QString err;
+  if ( !TemporalCollection::fromInlineScenes(
+         params["scenes"], &collection, &err,
+         params.isMember( "times" ) ? params["times"] : Json::Value(),
+         params.isMember( "bands" ) ? params["bands"] : Json::Value(),
+         QStringLiteral( "inline" ) ) )
   {
-    const Json::Value &entry = scenesJson[i];
-    QString path;
-    QString explicitTime;
-    TemporalSceneRef s;
-
-    if ( entry.isString() )
-    {
-      path = QString::fromStdString( entry.asString() );
-    }
-    else if ( entry.isObject() && entry.isMember( "path" ) && entry["path"].isString() )
-    {
-      path = QString::fromStdString( entry["path"].asString() );
-      if ( entry.isMember( "time" ) && entry["time"].isString() )
-        explicitTime = QString::fromStdString( entry["time"].asString() );
-      if ( entry.isMember( "bands" ) && entry["bands"].isObject() )
-      {
-        for ( auto it = entry["bands"].begin(); it != entry["bands"].end(); ++it )
-          s.bandOverrides[QString::fromStdString( it.name() )] = ( *it ).asInt();
-      }
-      if ( entry.isMember( "quality_band" ) )
-        s.qualityBand = entry["quality_band"].asInt();
-      if ( entry.isMember( "mask_band" ) )
-        s.maskBand = entry["mask_band"].asInt();
-      if ( entry.isMember( "asset_id" ) && entry["asset_id"].isString() )
-        s.assetId = QString::fromStdString( entry["asset_id"].asString() );
-      if ( entry.isMember( "asset_revision" ) && entry["asset_revision"].isString() )
-        s.assetRevision = QString::fromStdString( entry["asset_revision"].asString() );
-    }
-    else
-    {
-      throw RSOperatorError( ErrorCode::TypeMismatch,
-                             "scenes[" + std::to_string( i ) +
-                                 "] must be a path string or an object with 'path'" );
-    }
-
-    if ( !fileExists( path.toStdString() ) )
-      throw RSOperatorError( ErrorCode::FileNotFound,
-                             "scene not found: " + path.toStdString() );
-
-    QString err;
-    if ( !temporal::inspectScene( path, explicitTime, &s, &err ) )
-      throw RSOperatorError( ErrorCode::GdalError, err.toStdString() );
-    if ( !s.time.valid && !explicitTime.isEmpty() )
-      throw RSOperatorError( ErrorCode::InvalidParameter,
-                             "invalid explicit time '" + explicitTime.toStdString() +
-                                 "' for " + path.toStdString() );
-    s.originalIndex = i;
-    scenes.push_back( std::move( s ) );
+    throw RSOperatorError( ErrorCode::InvalidParameter, err.toStdString() );
   }
-
-  // Optional parallel time list for the bare-path shorthand.
-  if ( params.isMember( "times" ) && params["times"].isArray() && !params["times"].empty() )
-  {
-    if ( static_cast<int>( params["times"].size() ) != sceneCount )
-      throw RSOperatorError( ErrorCode::InvalidParameter,
-                             "'times' length must match 'scenes' length" );
-    for ( int i = 0; i < sceneCount; ++i )
-    {
-      const Json::Value &t = params["times"][i];
-      if ( !t.isString() )
-        throw RSOperatorError( ErrorCode::TypeMismatch, "times[] entries must be strings" );
-      const QString iso = QString::fromStdString( t.asString() );
-      if ( iso.isEmpty() )
-        continue;
-      scenes[i].time = temporal::parseAcquisitionTime( iso );
-      scenes[i].timeSource = QStringLiteral( "explicit" );
-      if ( !scenes[i].time.valid )
-        throw RSOperatorError( ErrorCode::InvalidParameter,
-                               "invalid time '" + iso.toStdString() + "' for scene " +
-                                   std::to_string( i ) );
-    }
-  }
-
-  collection.scenes() = scenes;
-  collection.sortScenes();
-  applyGlobalBandOverrides( collection, params.isMember( "bands" ) ? params["bands"] : Json::Value() );
   return collection;
 }
 

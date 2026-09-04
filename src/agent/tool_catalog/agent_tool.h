@@ -45,6 +45,10 @@ struct AgentTool {
 
   sicnu::processing::AgentMetadata agentMetadata;         ///< Execution hints, memory policy, and planning metadata
 
+  /// Returns a normalized, validated copy of inputSchema guaranteed to have root type "object".
+  /// Throws std::invalid_argument if inputSchema is malformed (non-object or illegal type).
+  Json::Value normalizedInputSchema() const;
+
   /// Converts this tool to OpenAI / Qwen Function Calling format:
   /// { "type": "function", "function": { "name": "...", "description": "...", "parameters": { ... } } }
   Json::Value toOpenAiToolDefinition() const;

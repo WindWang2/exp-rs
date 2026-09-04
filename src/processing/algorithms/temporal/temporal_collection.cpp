@@ -275,6 +275,190 @@ bool inspectScene( const QString &path, const QString &explicitTime,
   return true; // opened fine; time missing is a preflight issue, not an open failure
 }
 
+bool TemporalSceneRef::parseInline( const Json::Value &entry, int index,
+                                    TemporalSceneRef *out, QString *error,
+                                    bool inspectRaster )
+{
+  if ( !out )
+    return false;
+
+  QString path;
+  QString explicitTime;
+  TemporalSceneRef s;
+  s.originalIndex = index;
+
+  if ( entry.isString() )
+  {
+    path = QString::fromStdString( entry.asString() );
+  }
+  else if ( entry.isObject() && entry.isMember( "path" ) && entry["path"].isString() )
+  {
+    path = QString::fromStdString( entry["path"].asString() );
+    if ( entry.isMember( "time" ) && entry["time"].isString() )
+      explicitTime = QString::fromStdString( entry["time"].asString() );
+
+    if ( entry.isMember( "bands" ) && entry["bands"].isObject() )
+    {
+      for ( auto it = entry["bands"].begin(); it != entry["bands"].end(); ++it )
+      {
+        if ( !( *it ).isNumeric() )
+        {
+          if ( error )
+            *error = QStringLiteral( "scene 'bands.%1' must be an integer" )
+                       .arg( QString::fromStdString( it.name() ) );
+          return false;
+        }
+        s.bandOverrides[QString::fromStdString( it.name() )] = ( *it ).asInt();
+      }
+    }
+
+    if ( entry.isMember( "quality_band" ) && entry["quality_band"].isNumeric() )
+      s.qualityBand = entry["quality_band"].asInt();
+    if ( entry.isMember( "mask_band" ) && entry["mask_band"].isNumeric() )
+      s.maskBand = entry["mask_band"].asInt();
+    if ( entry.isMember( "asset_id" ) && entry["asset_id"].isString() )
+      s.assetId = QString::fromStdString( entry["asset_id"].asString() );
+    if ( entry.isMember( "asset_revision" ) && entry["asset_revision"].isString() )
+      s.assetRevision = QString::fromStdString( entry["asset_revision"].asString() );
+
+    if ( entry.isMember( "modality" ) && entry["modality"].isString() )
+      s.modality = QString::fromStdString( entry["modality"].asString() );
+    if ( entry.isMember( "sensor" ) && entry["sensor"].isString() )
+      s.sensor = QString::fromStdString( entry["sensor"].asString() );
+    if ( entry.isMember( "radiometric_state" ) && entry["radiometric_state"].isString() )
+      s.radiometricState = QString::fromStdString( entry["radiometric_state"].asString() );
+    if ( entry.isMember( "resolution_m" ) && entry["resolution_m"].isNumeric() )
+      s.resolutionMeters = entry["resolution_m"].asDouble();
+    if ( entry.isMember( "cloud_cover_percent" ) && entry["cloud_cover_percent"].isNumeric() )
+      s.cloudCoverPercent = entry["cloud_cover_percent"].asDouble();
+  }
+  else
+  {
+    if ( error )
+      *error = QStringLiteral( "scene entry must be a path string or object with 'path'" );
+    return false;
+  }
+
+  if ( path.trimmed().isEmpty() )
+  {
+    if ( error )
+      *error = QStringLiteral( "scene 'path' must not be empty" );
+    return false;
+  }
+
+  if ( inspectRaster )
+  {
+    QString inspectErr;
+    if ( !inspectScene( path, explicitTime, &s, &inspectErr ) )
+    {
+      if ( error )
+        *error = inspectErr;
+      return false;
+    }
+    if ( !s.time.valid && !explicitTime.isEmpty() )
+    {
+      if ( error )
+        *error = QStringLiteral( "invalid explicit time '%1' for %2" ).arg( explicitTime, path );
+      return false;
+    }
+  }
+  else
+  {
+    s.path = path;
+    if ( !explicitTime.isEmpty() )
+    {
+      s.time = parseAcquisitionTime( explicitTime );
+      s.timeSource = QStringLiteral( "explicit" );
+    }
+  }
+
+  *out = std::move( s );
+  return true;
+}
+
+bool TemporalCollection::fromInlineScenes( const Json::Value &scenesJson,
+                                          TemporalCollection *out,
+                                          QString *error,
+                                          const Json::Value &timesJson,
+                                          const Json::Value &globalBandsJson,
+                                          const QString &name,
+                                          bool inspectRasters )
+{
+  if ( !scenesJson.isArray() || scenesJson.empty() )
+  {
+    if ( error )
+      *error = QStringLiteral( "'scenes' must be a non-empty array" );
+    return false;
+  }
+
+  TemporalCollection collection;
+  collection.setName( name );
+  const int sceneCount = static_cast<int>( scenesJson.size() );
+  collection.scenes().reserve( sceneCount );
+
+  for ( int i = 0; i < sceneCount; ++i )
+  {
+    TemporalSceneRef s;
+    QString itemErr;
+    if ( !TemporalSceneRef::parseInline( scenesJson[i], i, &s, &itemErr, inspectRasters ) )
+    {
+      if ( error )
+        *error = QStringLiteral( "scenes[%1]: %2" ).arg( i ).arg( itemErr );
+      return false;
+    }
+    collection.scenes().push_back( std::move( s ) );
+  }
+
+  if ( timesJson.isArray() && !timesJson.empty() )
+  {
+    if ( static_cast<int>( timesJson.size() ) != sceneCount )
+    {
+      if ( error )
+        *error = QStringLiteral( "'times' length (%1) must match 'scenes' length (%2)" )
+                   .arg( timesJson.size() ).arg( sceneCount );
+      return false;
+    }
+    for ( int i = 0; i < sceneCount; ++i )
+    {
+      const auto &t = timesJson[i];
+      if ( !t.isString() )
+      {
+        if ( error )
+          *error = QStringLiteral( "times[%1] must be a string" ).arg( i );
+        return false;
+      }
+      const QString iso = QString::fromStdString( t.asString() );
+      if ( iso.isEmpty() )
+        continue;
+      collection.scenes()[i].time = parseAcquisitionTime( iso );
+      collection.scenes()[i].timeSource = QStringLiteral( "explicit" );
+      if ( !collection.scenes()[i].time.valid )
+      {
+        if ( error )
+          *error = QStringLiteral( "invalid time '%1' for scene %2" ).arg( iso ).arg( i );
+        return false;
+      }
+    }
+  }
+
+  if ( globalBandsJson.isObject() && !globalBandsJson.empty() )
+  {
+    for ( TemporalSceneRef &s : collection.scenes() )
+    {
+      for ( auto it = globalBandsJson.begin(); it != globalBandsJson.end(); ++it )
+      {
+        if ( ( *it ).isNumeric() && ( *it ).asInt() > 0 )
+          s.bandOverrides[QString::fromStdString( it.name() )] = ( *it ).asInt();
+      }
+    }
+  }
+
+  collection.sortScenes();
+  if ( out )
+    *out = std::move( collection );
+  return true;
+}
+
 TemporalCollection TemporalCollection::fromScenePaths( const QStringList &paths,
                                                        const QStringList &explicitTimes,
                                                        const QString &name )
