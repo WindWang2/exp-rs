@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <QStringList>
+#include <functional>
 
 #include "workflow_run.h"
 
@@ -18,6 +19,21 @@ class ArtifactGC {
 public:
   ArtifactGC() = default;
 
+  /// Files the execution cache still holds and can serve again (#726).
+  /// Installed once by the host seam (TaskCenter's constructor); queried by
+  /// every sweep. Returning an empty list (no provider installed) keeps the
+  /// legacy behavior — sweeps are never BLOCKED by the seam's absence, and a
+  /// provider failure cannot nominate files for deletion.
+  using ProtectedArtifactProvider = std::function<QStringList()>;
+  static void installProtectedArtifactProvider( ProtectedArtifactProvider provider );
+  /// The union of every provider-reported path (empty when none installed).
+  static QStringList protectedArtifacts();
+
+  /// The platform's sidecar vocabulary (".tfw", ".aux.xml", …), shared with
+  /// the cache-serve materialization so ONE definition decides which files
+  /// accompany a raster/vector artifact.
+  static const QStringList &sidecarSuffixes();
+
   /// Inspect files from a workflow run that are eligible for reaping.
   ///
   /// Gating rules (all must hold):
@@ -25,8 +41,10 @@ public:
   ///   runs keep everything: resume and retry depend on their intermediates);
   /// - the step's status is "Completed" (only reap what was actually produced
   ///   and consumed downstream);
-  /// - the step was NOT served from the result cache (cache-hit outputs are
-  ///   shared assets owned by ExecutionResultCache);
+  /// - the step was NOT served from the result cache (checkpoint-era flag)
+  ///   AND the output path is not currently claimed by the execution result
+  ///   cache (cache-served artifacts are what a future identical execution
+  ///   reuses — #726 lifecycle contract);
   /// - the output is neither a DAG leaf (nothing consumes it) nor a declared
   ///   workflow artifact, when retainFinalOutputs is true;
   /// - the output path lies in the same directory as (or below) a retained

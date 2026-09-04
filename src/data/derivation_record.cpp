@@ -93,6 +93,8 @@ QJsonObject DerivationRecord::toJson() const
   json.insert( kSoftwareVersion, softwareVersion );
   json.insert( kCompletedAt, completedAtUtc.toString( Qt::ISODateWithMs ) );
   json.insert( kAuthConfigId, authConfigId );
+  if ( !executionFingerprint.isEmpty() )
+    json.insert( QStringLiteral( "executionFingerprint" ), executionFingerprint );
   json.insert( QStringLiteral( "workflowId" ), workflowId );
   json.insert( QStringLiteral( "workflowRunId" ), workflowRunId );
   json.insert( QStringLiteral( "stepId" ), stepId );
@@ -138,12 +140,19 @@ Result<DerivationRecord> DerivationRecord::fromJson( const QJsonObject &json )
     }
   }
   record.authConfigId = json.value( kAuthConfigId ).toString();
+  record.executionFingerprint = json.value( QStringLiteral( "executionFingerprint" ) ).toString();
   record.workflowId = json.value( QStringLiteral( "workflowId" ) ).toString();
   record.workflowRunId = json.value( QStringLiteral( "workflowRunId" ) ).toString();
   record.stepId = json.value( QStringLiteral( "stepId" ) ).toString();
   return Result<DerivationRecord>::success( record );
 }
 
+
+bool isOutputVocabularyKey( const QString &key )
+{
+  return key.contains( QStringLiteral( "output" ), Qt::CaseInsensitive )
+         || key.contains( QStringLiteral( "result" ), Qt::CaseInsensitive );
+}
 
 QStringList findInputPathsInParams( const QVariantMap &params,
                                     const QStringList &excludePaths )
@@ -223,8 +232,7 @@ QStringList findInputPathsInParams( const QVariantMap &params,
   // destination that rode under a non-vocabulary key).
   for ( auto it = params.begin(); it != params.end(); ++it )
   {
-    if ( it.key().contains( QStringLiteral( "output" ), Qt::CaseInsensitive )
-         || it.key().contains( QStringLiteral( "result" ), Qt::CaseInsensitive ) )
+    if ( isOutputVocabularyKey( it.key() ) )
       continue;
     collect( it.value() );
   }

@@ -5,8 +5,12 @@
 
 #include "data/derivation_record.h"
 
+#include <qgsdatasourceresolver.h>
+
+#include <QFileInfo>
 #include <QUuid>
 
+#include <functional>
 #include <sstream>
 
 namespace sicnu::temporal
@@ -248,10 +252,102 @@ bool fingerprintInputsForCollectionParam( sicnu::data::DataManager *dataManager,
   return fail( QStringLiteral( "descriptor does not match any workspace record" ) );
 }
 
+namespace
+{
+/// Fingerprint-side datasource collector (#726). Unlike the LINEAGE
+/// collector (findInputPathsInParams) this does NOT lose remote inputs:
+///  - an existing local file is a candidate (must resolve to a registered
+///    asset, or the step is uncacheable);
+///  - a remote / VSI / OGR-classified value is ALWAYS a candidate even
+///    though QFileInfo says it is no file — /vsicurl/, /vsis3/, https://,
+///    PG: connection strings are exactly what a plain existence gate used
+///    to drop, and a dropped input is how false hits are born;
+///  - anything else (thresholds, band names, mode strings) is a scientific
+///    parameter, not a datasource.
+/// Placeholder references ($step.port) are in-pipeline producer edges: the
+/// caller resolves them into chained producer fingerprints.
+/// True for strings shaped like a GDAL/OGR datasource that
+/// QgsDataSourceResolver does not classify away: subdataset / driver
+/// connection syntax carries an identifier prefix and a colon —
+/// `HDF5:"/d/f.h5"://band`, `netcdf:/d/f.nc:band`, `GTIFF_DIR:1:/d`,
+/// `file:///d/x.tif`. Scientific values do not ("NDVI", "3", "mean" have no
+/// colon; ISO datetimes fail the letter-prefix test). The classifier's
+/// LocalFile fallback must never silently swallow these: an input that
+/// escapes identity is how false hits are born (#726 review P0).
+bool looksLikeHiddenDatasource( const QString &value )
+{
+  const qsizetype colon = value.indexOf( ':' );
+  if ( colon <= 0 )
+    return false;
+  const QString prefix = value.left( colon );
+  if ( prefix.isEmpty() || !prefix.at( 0 ).isLetter() )
+    return false;
+  for ( const QChar &c : prefix )
+  {
+    if ( !c.isLetterOrNumber() && c != QLatin1Char( '_' )
+         && c != QLatin1Char( '-' ) && c != QLatin1Char( '.' ) )
+      return false;
+  }
+  return true;
+}
+
+void collectIdentityPathCandidates( const QVariantMap &params,
+                                    const QStringList &skipKeys, QStringList &out )
+{
+  std::function<void( const QVariant & )> collect =
+    [&]( const QVariant &value ) {
+      if ( value.userType() == QMetaType::QStringList )
+      {
+        for ( const QString &entry : value.toStringList() )
+          collect( entry );
+      }
+      else if ( value.userType() == QMetaType::QVariantList )
+      {
+        for ( const QVariant &item : value.toList() )
+          collect( item );
+      }
+      else if ( value.userType() == QMetaType::QVariantMap )
+      {
+        const QVariantMap nested = value.toMap();
+        for ( auto it = nested.begin(); it != nested.end(); ++it )
+        {
+          if ( sicnu::data::isOutputVocabularyKey( it.key() ) )
+            continue;
+          collect( it.value() );
+        }
+      }
+      else if ( value.userType() == QMetaType::QString )
+      {
+        const QString trimmed = value.toString().trimmed();
+        if ( trimmed.isEmpty() || trimmed.startsWith( QLatin1Char( '$' ) ) )
+          return;
+        const bool existingFile = QFileInfo( trimmed ).isFile();
+        const bool nonLocalDatasource =
+          QgsDataSourceResolver::classify( trimmed ) != QgsDataSourceKind::LocalFile;
+        const bool hiddenDatasource =
+          !existingFile && !nonLocalDatasource && looksLikeHiddenDatasource( trimmed );
+        if ( ( existingFile || nonLocalDatasource || hiddenDatasource )
+             && !out.contains( trimmed ) )
+          out.append( trimmed );
+      }
+    };
+
+  for ( auto it = params.begin(); it != params.end(); ++it )
+  {
+    if ( sicnu::data::isOutputVocabularyKey( it.key() ) )
+      continue; // destination vocabulary — never an input identity
+    if ( skipKeys.contains( it.key() ) )
+      continue; // in-pipeline producer edge — keyed by the producer's fingerprint
+    collect( it.value() );
+  }
+}
+} // namespace
+
 bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
-                                         const QVariantMap &params, const QString &outputPath,
+                                         const QVariantMap &params,
                                          QVector<sicnu::data::TaggedDerivationInput> *out,
-                                         QString *reason )
+                                         QString *reason,
+                                         const QStringList &chainedProducerKeys )
 {
   auto fail = [reason]( const QString &message ) {
     if ( reason )
@@ -291,24 +387,49 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
   }
   scenePaths.removeAll( QString() );
 
-  // Exclusions: the destination (not identity), the collection parameter
-  // (resolved through the workspace below) and the inline scene paths
-  // (resolved explicitly below).
+  // The collection parameter is resolved through the workspace records below
+  // and the scene paths explicitly; both must not double-resolve in the
+  // generic scan. The destination is NOT excluded by value (#726): its key
+  // is output vocabulary (skipped above by the collector), so an in-place
+  // run {input:x, output:x} keeps x's revision in its identity.
   QStringList exclude;
-  if ( !outputPath.isEmpty() )
-    exclude.append( outputPath );
   if ( !collectionParam.isEmpty() )
-    exclude.append( collectionParam );
+    exclude.append( collectionParam.trimmed() );
   exclude.append( scenePaths );
 
-  // 1) Generic string/list path parameters — every one must resolve to a
-  //    registered asset, or the step is not cacheable.
-  const QStringList paths = sicnu::data::findInputPathsInParams( params, exclude );
-  for ( const QString &path : paths )
+  // 1) Generic datasource parameters — every candidate must resolve to a
+  //    registered asset, or the step is not cacheable. Classification goes
+  //    through QgsDataSourceResolver: a local file must exist and be
+  //    registered; a remote / VSI / OGR datasource resolves through its
+  //    registered canonical source or FAILS — it is never omitted.
+  QStringList candidates;
   {
-    const auto snapshot = dataManager->findByPath( path );
+    QVariantMap scanned = params;
+    scanned.remove( QStringLiteral( "scenes" ) );
+    if ( !collectionParam.isEmpty() )
+      scanned.remove( QStringLiteral( "collection" ) );
+    collectIdentityPathCandidates( scanned, chainedProducerKeys, candidates );
+  }
+  for ( QString path : candidates )
+  {
+    if ( exclude.contains( path ) )
+      continue;
+    const QgsDataSourceKind kind = QgsDataSourceResolver::classify( path );
+    QString lookupPath = path;
+    if ( kind == QgsDataSourceKind::LocalFile )
+    {
+      if ( !QFileInfo( path ).isFile() )
+        return fail( QStringLiteral( "unidentifiable local input (missing file): %1" ).arg( path ) );
+      // Registered assets store a canonicalized source; compare canonically
+      // so a symlinked/relative spelling still resolves (as lineage does).
+      const QString canonical = QFileInfo( path ).canonicalFilePath();
+      if ( !canonical.isEmpty() )
+        lookupPath = canonical;
+    }
+    const auto snapshot = dataManager->findByPath( lookupPath );
     if ( !snapshot )
-      return fail( QStringLiteral( "unresolved input path: %1" ).arg( path ) );
+      return fail( QStringLiteral( "unresolved input (%1): %2" )
+                     .arg( QgsDataSourceResolver::kindToString( kind ), path ) );
     sicnu::data::TaggedDerivationInput input;
     input.assetId = snapshot->id();
     input.revision = snapshot->revision();
@@ -317,12 +438,24 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
     out->append( input );
   }
 
-  // 2) Inline scene entries — same rule.
-  for ( const QString &path : scenePaths )
+  // 2) Inline scene entries — same rule (local files; a remote scene must be
+  //    registered to be identifiable).
+  for ( QString path : scenePaths )
   {
-    const auto snapshot = dataManager->findByPath( path );
+    if ( path.trimmed().isEmpty() )
+      continue;
+    QString lookupPath = path.trimmed();
+    if ( QgsDataSourceResolver::requiresLocalExistenceCheck( lookupPath ) )
+    {
+      if ( !QFileInfo( lookupPath ).isFile() )
+        return fail( QStringLiteral( "unidentifiable scene input (missing file): %1" ).arg( lookupPath ) );
+      const QString canonical = QFileInfo( lookupPath ).canonicalFilePath();
+      if ( !canonical.isEmpty() )
+        lookupPath = canonical;
+    }
+    const auto snapshot = dataManager->findByPath( lookupPath );
     if ( !snapshot )
-      return fail( QStringLiteral( "unresolved scene path: %1" ).arg( path ) );
+      return fail( QStringLiteral( "unresolved scene input: %1" ).arg( lookupPath ) );
     sicnu::data::TaggedDerivationInput input;
     input.assetId = snapshot->id();
     input.revision = snapshot->revision();

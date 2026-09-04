@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QSet>
+#include <mutex>
 #include <unordered_set>
 
 namespace sicnu::workflow {
@@ -16,6 +17,41 @@ const QStringList kSidecarSuffixes = {
   QStringLiteral( ".qix" ), QStringLiteral( ".shp.xml" ), QStringLiteral( ".tfw" ),
   QStringLiteral( ".aux" ), QStringLiteral( ".aux.xml" )
 };
+
+std::mutex &protectionMutex()
+{
+  static std::mutex mutex;
+  return mutex;
+}
+
+ArtifactGC::ProtectedArtifactProvider &protectionProvider()
+{
+  static ArtifactGC::ProtectedArtifactProvider provider;
+  return provider;
+}
+
+} // namespace
+
+void ArtifactGC::installProtectedArtifactProvider( ProtectedArtifactProvider provider )
+{
+  std::lock_guard<std::mutex> locker( protectionMutex() );
+  protectionProvider() = std::move( provider );
+}
+
+QStringList ArtifactGC::protectedArtifacts()
+{
+  std::lock_guard<std::mutex> locker( protectionMutex() );
+  if ( !protectionProvider() )
+    return QStringList();
+  return protectionProvider()();
+}
+
+const QStringList &ArtifactGC::sidecarSuffixes()
+{
+  return kSidecarSuffixes;
+}
+
+namespace {
 
 /// Remove a single existing file via a two-phase rename-then-delete. Returns
 /// the path on success, an empty string on failure (with the reason appended
@@ -127,6 +163,25 @@ QStringList ArtifactGC::inspectReapable( const sicnu::workflow::WorkflowRun &run
   // cache hit and the file lies inside the workspace. Note that "final" is a
   // DAG property here (leaf / artifact), not array position: plan order is
   // not guaranteed to survive a checkpoint round-trip.
+  // Cache lifecycle (#726): a file the execution result cache still claims is
+  // what a future identical execution reuses — it must outlive this run's
+  // finalization. The claim set is canonical-path matched so symlinked or
+  // relative spellings of the same file are protected too.
+  QSet<QString> cacheProtected;
+  for ( const QString &protectedPath : protectedArtifacts() )
+  {
+    if ( protectedPath.isEmpty() )
+      continue;
+    const QString canonicalProtected = QFileInfo( protectedPath ).canonicalFilePath();
+    cacheProtected.insert( canonicalProtected.isEmpty() ? QFileInfo( protectedPath ).absoluteFilePath()
+                                                        : canonicalProtected );
+  }
+  auto isCacheProtected = [ &cacheProtected ]( const QString &path ) {
+    const QString canonical = QFileInfo( path ).canonicalFilePath();
+    return cacheProtected.contains( canonical.isEmpty() ? QFileInfo( path ).absoluteFilePath()
+                                                        : canonical );
+  };
+
   QStringList reapable;
   for ( const auto &plan : plans )
   {
@@ -143,7 +198,10 @@ QStringList ArtifactGC::inspectReapable( const sicnu::workflow::WorkflowRun &run
       continue; // not (fully) produced - retry may need it
 
     if ( plan.cacheHit )
-      continue; // shared asset owned by the execution result cache
+      continue; // checkpoint-era flag: shared asset owned by the execution result cache
+
+    if ( isCacheProtected( outPath ) )
+      continue; // live cache claim (#726): the cache can still serve this artifact
 
     const QString canonical = QFileInfo( outPath ).canonicalFilePath();
     if ( canonical.isEmpty() || !isPathUnderAnyRoot( canonical, workspaceRoots ) )

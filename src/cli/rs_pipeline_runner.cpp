@@ -677,7 +677,8 @@ void RsPipelineRunner::registerOutputAsset( const QString &path, const QString &
                                             const QString &taskReference,
                                             const QString &workflowId,
                                             const QString &workflowRunId,
-                                            const QString &stepId )
+                                            const QString &stepId,
+                                            const QString &executionFingerprint )
 {
   ensureGdalInit();
   GDALDatasetH ds = GDALOpenEx( path.toUtf8().constData(),
@@ -703,8 +704,13 @@ void RsPipelineRunner::registerOutputAsset( const QString &path, const QString &
   request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
   // Re-runs replace the bytes at this stable path: bump the revision and
   // emit assetChanged like OutputCommitter's commit path (#687/#703 review
-  // P2 — a silent dedup here left displayed layers stale).
+  // P2 — a silent dedup here left displayed layers stale). The exception is
+  // the #726 convergence contract: a re-publication whose producing
+  // execution is unchanged (same executionFingerprint) is a silent reuse —
+  // the DataManager decides, by comparing against the registered
+  // derivation's fingerprint.
   request.notifyUpdateOnReuse = true;
+  request.executionFingerprint = executionFingerprint;
 
   const auto registered = m_dataManager->registerSource( request );
   if ( registered.assetId.isNull() )
@@ -732,6 +738,7 @@ void RsPipelineRunner::registerOutputAsset( const QString &path, const QString &
   derivation.workflowId = workflowId;
   derivation.workflowRunId = workflowRunId;
   derivation.stepId = stepId;
+  derivation.executionFingerprint = executionFingerprint;
   m_dataManager->attachDerivationRecord( registered.assetId, derivation );
 }
 
@@ -756,13 +763,22 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
     const auto task = taskCenter.getTaskInfo( taskId );
     if ( task.status != sicnu::TaskStatus::Completed || task.outputLayerPath.isEmpty() )
       continue;
+    // The execution fingerprint rides the stamped result payload (#726); it
+    // binds the registration (and its revision-convergence decision) to the
+    // exact producing execution.
+    const QString executionFingerprint = task.resultPayload.isObject()
+        && task.resultPayload.isMember( "executionFingerprint" )
+        && task.resultPayload["executionFingerprint"].isString()
+      ? QString::fromStdString( task.resultPayload["executionFingerprint"].asString() )
+      : QString();
     registerOutputAsset( task.outputLayerPath, task.algorithmId, task.parameterMap,
                          QString::number( taskId ),
                          trackedRun ? QString::fromStdString( trackedRun->workflowId() )
                                     : QString(),
                          trackedRun ? QString::fromStdString( trackedRun->runId() )
                                     : QString(),
-                         task.stepId );
+                         task.stepId,
+                         executionFingerprint );
   }
 }
 

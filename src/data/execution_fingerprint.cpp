@@ -2,6 +2,7 @@
 #include "execution_fingerprint.h"
 
 #include <QFile>
+#include <QFileInfo>
 
 #include <QCryptographicHash>
 #include <QJsonDocument>
@@ -227,7 +228,10 @@ ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
     const QString bBands = joinedBands( b.bandReferences );
     if ( aBands != bBands ) return aBands < bBands;
     if ( a.valueDomain != b.valueDomain ) return a.valueDomain < b.valueDomain;
-    if ( a.lazyContentDigest != b.lazyContentDigest ) return a.lazyContentDigest < b.lazyContentDigest;
+    if ( a.lazyContentDigest != b.lazyContentDigest )
+      return a.lazyContentDigest < b.lazyContentDigest;
+    if ( a.producerFingerprint != b.producerFingerprint )
+      return a.producerFingerprint < b.producerFingerprint;
     return false;
   } );
 
@@ -263,6 +267,14 @@ ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
     {
       out.append( ";digest=" );
       out.append( framingLiteral( in.lazyContentDigest ) );
+    }
+    if ( !in.producerFingerprint.isEmpty() )
+    {
+      // Chained in-pipeline producer identity (#726, contract v2): the
+      // producer step's execution fingerprint is this input's identity, so a
+      // change anywhere upstream re-keys every downstream step.
+      out.append( ";pfp=" );
+      out.append( framingLiteral( in.producerFingerprint ) );
     }
   }
 
@@ -371,15 +383,24 @@ void ExecutionResultCache::evictIfNeededLocked()
     }
     m_entries.erase( lruIt );
   }
-  while ( static_cast<size_t>( m_pathEntries.size() ) > m_maxEntries )
+  while ( static_cast<size_t>( m_executions.size() ) > m_maxEntries )
   {
-    QHash<QByteArray, PathEntry>::iterator lruIt = m_pathEntries.begin();
-    for ( QHash<QByteArray, PathEntry>::iterator it = m_pathEntries.begin(); it != m_pathEntries.end(); ++it )
+    QHash<QByteArray, ExecutionEntry>::iterator lruIt = m_executions.begin();
+    for ( QHash<QByteArray, ExecutionEntry>::iterator it = m_executions.begin();
+          it != m_executions.end(); ++it )
     {
       if ( it->lastUsedTick < lruIt->lastUsedTick )
         lruIt = it;
     }
-    m_pathEntries.erase( lruIt );
+    QStringList claims = lruIt->execution.producedArtifacts
+                         << lruIt->execution.declaredOutputPath;
+    for ( const QString &claimPath : claims )
+    {
+      const auto ownerIt = m_pathOwners.constFind( claimPath );
+      if ( ownerIt != m_pathOwners.constEnd() && ownerIt.value() == lruIt.key() )
+        m_pathOwners.remove( claimPath );
+    }
+    m_executions.erase( lruIt );
   }
 }
 
@@ -387,70 +408,213 @@ void ExecutionResultCache::invalidate( const ExecutionFingerprint &fp )
 {
   std::lock_guard<std::recursive_mutex> locker( m_mutex );
   m_entries.remove( fp.digest );
-  m_pathEntries.remove( fp.digest );
+  const auto execIt = m_executions.find( fp.digest );
+  if ( execIt != m_executions.end() )
+  {
+    QStringList claims = execIt->execution.producedArtifacts
+                         << execIt->execution.declaredOutputPath;
+    for ( const QString &claimPath : claims )
+    {
+      const auto ownerIt = m_pathOwners.constFind( claimPath );
+      if ( ownerIt != m_pathOwners.constEnd() && ownerIt.value() == fp.digest )
+        m_pathOwners.remove( claimPath );
+    }
+    m_executions.erase( execIt );
+  }
 }
 
-std::optional<QString> ExecutionResultCache::lookupOutputPath( const ExecutionFingerprint &fp )
+namespace
+{
+bool declaredOutputStillValid( const ExecutionResultCache::CachedExecution &execution )
+{
+  if ( execution.declaredOutputPath.isEmpty() )
+    return false;
+  // Every stat'ed artifact must still exist with the recorded size and
+  // mtime: a destination rewritten by a DIFFERENT execution (or reaped
+  // externally) can never vouch for this fingerprint's result. Size+mtime is
+  // the cheap proxy; per-path ownership eviction in storeExecution() closes
+  // the realistic overwrite path (a fingerprinted execution publishing onto
+  // the same path).
+  for ( auto it = execution.artifactSizes.constBegin();
+        it != execution.artifactSizes.constEnd(); ++it )
+  {
+    const QFileInfo info( it.key() );
+    if ( !info.isFile() || info.size() != it.value() )
+      return false;
+    const auto msecs = execution.artifactMsecs.constFind( it.key() );
+    if ( msecs != execution.artifactMsecs.constEnd()
+         && info.lastModified().toMSecsSinceEpoch() != msecs.value() )
+      return false;
+  }
+  // The chained inputs the producing run consumed are part of the claim too:
+  // an intermediate rewritten out-of-band invalidates every cached consumer
+  // whose recorded input stats no longer match (fail-closed ⇒ miss).
+  for ( auto it = execution.inputSizes.constBegin();
+        it != execution.inputSizes.constEnd(); ++it )
+  {
+    const QFileInfo info( it.key() );
+    if ( !info.isFile() || info.size() != it.value() )
+      return false;
+    const auto msecs = execution.inputMsecs.constFind( it.key() );
+    if ( msecs != execution.inputMsecs.constEnd()
+         && info.lastModified().toMSecsSinceEpoch() != msecs.value() )
+      return false;
+  }
+  if ( execution.producedArtifacts.isEmpty() )
+    return false;
+  // The declared output is either a produced artifact (validated above) or a
+  // grouping convention the producing run never wrote (grouped composites);
+  // requiring its existence would invalidate every grouped entry.
+  return true;
+}
+} // namespace
+
+std::optional<ExecutionResultCache::CachedExecution>
+ExecutionResultCache::lookupExecution( const ExecutionFingerprint &fp )
 {
   std::lock_guard<std::recursive_mutex> locker( m_mutex );
   if ( !m_enabled )
     return std::nullopt;
-  auto it = m_pathEntries.find( fp.digest );
-  if ( it == m_pathEntries.end() )
+  auto it = m_executions.find( fp.digest );
+  if ( it == m_executions.end() )
     return std::nullopt;
-  if ( !QFile::exists( it->path ) )
+  if ( !declaredOutputStillValid( it->execution ) )
   {
-    // The cached artifact vanished (GC, manual cleanup): a stale entry must
-    // never be served, so drop it and report a miss.
-    m_pathEntries.erase( it );
+    // The cached result vanished or was replaced (GC, external write, manual
+    // cleanup): a stale entry must never be served, so drop it and report a
+    // miss. A future identical execution re-stores a fresh result.
+    QStringList claims = it->execution.producedArtifacts
+                         << it->execution.declaredOutputPath;
+    for ( const QString &claimPath : claims )
+    {
+      const auto ownerIt = m_pathOwners.constFind( claimPath );
+      if ( ownerIt != m_pathOwners.constEnd() && ownerIt.value() == fp.digest )
+        m_pathOwners.remove( claimPath );
+    }
+    m_executions.erase( it );
     return std::nullopt;
   }
   it->lastUsedTick = ++m_clock;
-  return it->path;
+  return it->execution;
 }
 
-void ExecutionResultCache::storeOutputPath( const ExecutionFingerprint &fp, const QString &outputPath )
+void ExecutionResultCache::storeExecution( const ExecutionFingerprint &fp,
+                                           const CachedExecution &execution )
 {
-  if ( outputPath.isEmpty() )
+  if ( execution.declaredOutputPath.isEmpty() )
     return;
   std::lock_guard<std::recursive_mutex> locker( m_mutex );
   if ( !m_enabled )
     return;
-  auto it = m_pathEntries.find( fp.digest );
-  if ( it != m_pathEntries.end() )
+
+  // Path ownership (cache contract C7): a produced path can only vouch for
+  // the most recent execution that wrote it. When a different fingerprint
+  // claims any of the same paths, drop that claim BEFORE recording ours, so
+  // the older fingerprint can never serve the newer execution's bytes.
+  const QStringList claimPaths =
+    QStringList( execution.producedArtifacts ) << execution.declaredOutputPath;
+  for ( const QString &claimPath : claimPaths )
   {
-    it->path = outputPath;
-    it->lastUsedTick = ++m_clock;
-    return;
+    if ( claimPath.isEmpty() )
+      continue;
+    const auto ownerIt = m_pathOwners.constFind( claimPath );
+    if ( ownerIt != m_pathOwners.constEnd() && ownerIt.value() != fp.digest )
+      m_executions.remove( ownerIt.value() );
   }
-  m_pathEntries.insert( fp.digest, PathEntry{ outputPath, ++m_clock } );
+
+  const qint64 tick = ++m_clock;
+  auto it = m_executions.find( fp.digest );
+  if ( it != m_executions.end() )
+  {
+    // Re-claim: release the previous artifact claims that are not re-claimed.
+    QStringList previous = it->execution.producedArtifacts
+                           << it->execution.declaredOutputPath;
+    for ( const QString &previousPath : previous )
+    {
+      const auto ownerIt = m_pathOwners.constFind( previousPath );
+      if ( ownerIt != m_pathOwners.constEnd() && ownerIt.value() == fp.digest
+           && !claimPaths.contains( previousPath ) )
+      {
+        m_pathOwners.remove( previousPath );
+      }
+    }
+    it->execution = execution;
+    it->lastUsedTick = tick;
+  }
+  else
+  {
+    m_executions.insert( fp.digest, ExecutionEntry{ execution, tick } );
+  }
+  for ( const QString &claimPath : claimPaths )
+  {
+    if ( !claimPath.isEmpty() )
+      m_pathOwners.insert( claimPath, fp.digest );
+  }
   evictIfNeededLocked();
+}
+
+QStringList ExecutionResultCache::cachedArtifacts() const
+{
+  std::lock_guard<std::recursive_mutex> locker( m_mutex );
+  QStringList paths;
+  paths.reserve( m_executions.size() * 2 );
+  for ( auto it = m_executions.begin(); it != m_executions.end(); ++it )
+  {
+    if ( !it->execution.declaredOutputPath.isEmpty() )
+      paths.append( it->execution.declaredOutputPath );
+    for ( const QString &artifact : it->execution.producedArtifacts )
+    {
+      if ( !artifact.isEmpty() )
+        paths.append( artifact );
+    }
+  }
+  return paths;
 }
 
 int ExecutionResultCache::pathSize() const
 {
   std::lock_guard<std::recursive_mutex> locker( m_mutex );
-  return m_pathEntries.size();
+  return m_executions.size();
 }
 
-QStringList ExecutionResultCache::cachedOutputPaths() const
+void ExecutionResultCache::storeOutputPath( const ExecutionFingerprint &fp,
+                                            const QString &outputPath )
 {
-  std::lock_guard<std::recursive_mutex> locker( m_mutex );
-  QStringList paths;
-  paths.reserve( m_pathEntries.size() );
-  for ( auto it = m_pathEntries.begin(); it != m_pathEntries.end(); ++it )
-    paths.append( it->path );
-  return paths;
+  if ( outputPath.isEmpty() )
+    return;
+  CachedExecution execution;
+  execution.declaredOutputPath = outputPath;
+  execution.producedArtifacts.append( outputPath );
+  // Stat the artifact so the entry participates in the same size/mtime
+  // validation as storeExecution()-recorded results (a wrapper-stored entry
+  // must not bypass the replaced-file check).
+  const QFileInfo info( outputPath );
+  if ( info.isFile() )
+  {
+    execution.artifactSizes.insert( outputPath, info.size() );
+    execution.artifactMsecs.insert( outputPath, info.lastModified().toMSecsSinceEpoch() );
+  }
+  storeExecution( fp, execution );
+}
+
+std::optional<QString> ExecutionResultCache::lookupOutputPath( const ExecutionFingerprint &fp )
+{
+  const auto execution = lookupExecution( fp );
+  if ( !execution )
+    return std::nullopt;
+  return execution->declaredOutputPath;
 }
 
 void ExecutionResultCache::clear()
 {
   std::lock_guard<std::recursive_mutex> locker( m_mutex );
   m_entries.clear();
-  // A "cache reset" must also drop the output-path store (#720): invalidate()
-  // removes from both, and a clear() that skips m_pathEntries lets
-  // lookupOutputPath() serve pre-clear paths while size()/pathSize() disagree.
-  m_pathEntries.clear();
+  // A "cache reset" must also drop the execution store (#720, #726): stale
+  // entries would let lookupExecution() serve pre-clear results while
+  // size()/pathSize() disagree, and their artifacts would stay GC-protected
+  // forever.
+  m_executions.clear();
+  m_pathOwners.clear();
 }
 
 int ExecutionResultCache::size() const

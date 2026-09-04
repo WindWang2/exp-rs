@@ -1157,6 +1157,64 @@ TEST_CASE( "Re-registering an updated source with the update flag advances the "
   CHECK( manager->asset( first.assetId )->revision() == AssetRevision::initial().next() );
 }
 
+TEST_CASE( "Re-publication with an unchanged execution fingerprint does not bump the revision (#726)",
+           "[data_manager][recommit][cache]" )
+{
+  const auto manager = makeDataManager();
+
+  RegisterRequest firstRequest;
+  // The drift-raster provider reads g_driftRasterWidth so the test can model
+  // the bytes behind a stable path genuinely changing structure.
+  firstRequest.source = memorySource( QStringLiteral( "memory-drift-raster" ),
+                                      QStringLiteral( "scene" ) );
+  firstRequest.notifyUpdateOnReuse = true;
+  const auto first = manager->registerSource( firstRequest );
+  REQUIRE_FALSE( first.assetId.isNull() );
+  REQUIRE( manager->asset( first.assetId )->revision() == AssetRevision::initial() );
+
+  sicnu::data::DerivationRecord derivation;
+  derivation.algorithmId = QStringLiteral( "rs:spectral_index" );
+  derivation.executionFingerprint = QStringLiteral( "aa55" );
+  REQUIRE( manager->attachDerivationRecord( first.assetId, derivation ) );
+
+  int changeEvents = 0;
+  QObject::connect( manager.get(), &DataManager::assetChanged,
+                    [&]( AssetId ) { ++changeEvents; } );
+
+  // The identical execution re-publishes the artifact after a cache-hit run:
+  // same fingerprint, unchanged structure ⇒ silent reuse, no revision bump,
+  // no assetChanged. Downstream revision-keyed consumers keep converging.
+  RegisterRequest sameExecution = firstRequest;
+  sameExecution.executionFingerprint = QStringLiteral( "aa55" );
+  const auto republished = manager->registerSource( sameExecution );
+  CHECK( republished.assetId == first.assetId );
+  CHECK( republished.reusedExisting );
+  CHECK( manager->asset( first.assetId )->revision() == AssetRevision::initial() );
+  CHECK( changeEvents == 0 );
+
+  // A DIFFERENT execution fingerprint (real overwrite: inputs or params
+  // changed) must still advance the revision and emit assetChanged (#687).
+  RegisterRequest changedExecution = firstRequest;
+  changedExecution.executionFingerprint = QStringLiteral( "bb66" );
+  const auto overwritten = manager->registerSource( changedExecution );
+  CHECK( overwritten.assetId == first.assetId );
+  CHECK( overwritten.reusedExisting );
+  CHECK( manager->asset( first.assetId )->revision() == AssetRevision::initial().next() );
+  CHECK( changeEvents == 1 );
+
+  // A structure change bumps even under an unchanged fingerprint — the bytes
+  // behind the identity visibly changed shape.
+  g_driftRasterWidth = 140;
+  RegisterRequest drifted = firstRequest;
+  drifted.executionFingerprint = QStringLiteral( "aa55" );
+  const auto driftedResult = manager->registerSource( drifted );
+  CHECK( driftedResult.assetId == first.assetId );
+  CHECK( manager->asset( first.assetId )->revision()
+         == AssetRevision::initial().next().next() );
+  CHECK( changeEvents == 2 );
+  g_driftRasterWidth = 100;
+}
+
 TEST_CASE( "Re-registering a source whose structure drifted advances the "
            "revision without the flag",
            "[data_manager][recommit]" )
