@@ -133,6 +133,10 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("spatial:"), // spatial inspection/catalog tools (ADR 0122)
         QStringLiteral("layout:"),  // cartographic layout tools (Layout Studio)
         QStringLiteral("temporal:"), // temporal collection discovery/preflight tools
+        QStringLiteral("cartography:"), // MapSpec compose/preflight/repair, components, charts (ADR 0127/0128)
+        QStringLiteral("symbology:"),   // structured symbology apply/rollback (ADR 0128)
+        QStringLiteral("workflow:"),    // static workflow preflight (ADR 0128)
+        QStringLiteral("workspace:"),   // workspace command/undo tools (ADR 0128)
     };
     for (const QString &prefix : kAllowed) {
         if (checkId.startsWith(prefix))
