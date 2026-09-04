@@ -62,11 +62,28 @@ struct TemporalSceneRef
 
   Json::Value toJson() const;
   static TemporalSceneRef fromJson( const Json::Value &v, QString *error );
+
+  /// Parses an inline scene representation: either a bare path string or a JSON object
+  /// with { path, time?, bands?, mask_band?, quality_band?, asset_id?, asset_revision?, ... }.
+  /// If @a inspectRaster is true, calls inspectScene to resolve missing metadata/time via GDAL.
+  static bool parseInline( const Json::Value &v, int index, TemporalSceneRef *out,
+                           QString *error, bool inspectRaster = true );
 };
 
 class TemporalCollection
 {
 public:
+  /// Unified parser for an inline "scenes" JSON array (strings and/or objects),
+  /// with optional parallel "times" array and global "bands" role overrides.
+  /// Used identically by Agent temporal tools and operator inputs.
+  static bool fromInlineScenes( const Json::Value &scenesJson,
+                                TemporalCollection *out,
+                                QString *error,
+                                const Json::Value &timesJson = Json::Value(),
+                                const Json::Value &globalBandsJson = Json::Value(),
+                                const QString &name = QString(),
+                                bool inspectRasters = true );
+
   /// Assembles a collection from scene paths. Times are resolved per scene:
   /// explicit entry in @a explicitTimes wins, then SICNU_ACQUISITION_DATE
   /// product metadata, then a conservative filename parse. Scenes whose time

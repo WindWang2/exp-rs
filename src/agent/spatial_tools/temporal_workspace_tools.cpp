@@ -129,6 +129,7 @@ std::vector<std::string> TemporalListCollectionsTool::tags() const
 Json::Value TemporalListCollectionsTool::inputSchema() const
 {
   Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
   Json::Value props( Json::objectValue );
   Json::Value offset( Json::objectValue );
   offset["type"] = "integer";
@@ -145,10 +146,17 @@ Json::Value TemporalListCollectionsTool::inputSchema() const
 Json::Value TemporalListCollectionsTool::outputSchema() const
 {
   Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
   Json::Value props( Json::objectValue );
-  props["collections"] = Json::Value( Json::arrayValue );
-  props["total"] = Json::Value( Json::intValue );
-  props["next_offset"] = Json::Value( Json::intValue );
+  Json::Value collections( Json::objectValue );
+  collections["type"] = "array";
+  props["collections"] = collections;
+  Json::Value total( Json::objectValue );
+  total["type"] = "integer";
+  props["total"] = total;
+  Json::Value nextOffset( Json::objectValue );
+  nextOffset["type"] = "integer";
+  props["next_offset"] = nextOffset;
   schema["properties"] = props;
   return schema;
 }
@@ -206,6 +214,7 @@ std::vector<std::string> TemporalGetCollectionTool::tags() const
 Json::Value TemporalGetCollectionTool::inputSchema() const
 {
   Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
   Json::Value props( Json::objectValue );
   Json::Value collection( Json::objectValue );
   collection["type"] = "string";
@@ -221,8 +230,11 @@ Json::Value TemporalGetCollectionTool::inputSchema() const
 Json::Value TemporalGetCollectionTool::outputSchema() const
 {
   Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
   Json::Value props( Json::objectValue );
-  props["collection"] = Json::Value( Json::objectValue );
+  Json::Value collection( Json::objectValue );
+  collection["type"] = "object";
+  props["collection"] = collection;
   schema["properties"] = props;
   return schema;
 }
@@ -284,6 +296,7 @@ std::vector<std::string> TemporalRegisterCollectionTool::tags() const
 Json::Value TemporalRegisterCollectionTool::inputSchema() const
 {
   Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
   Json::Value props( Json::objectValue );
   Json::Value descriptor( Json::objectValue );
   descriptor["type"] = "string";
@@ -303,11 +316,20 @@ Json::Value TemporalRegisterCollectionTool::inputSchema() const
 Json::Value TemporalRegisterCollectionTool::outputSchema() const
 {
   Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
   Json::Value props( Json::objectValue );
-  props["collection_id"] = Json::Value( Json::stringValue );
-  props["scene_count"] = Json::Value( Json::intValue );
-  props["scenes_bound"] = Json::Value( Json::intValue );
-  props["reused_existing"] = Json::Value( Json::booleanValue );
+  Json::Value cid( Json::objectValue );
+  cid["type"] = "string";
+  props["collection_id"] = cid;
+  Json::Value sc( Json::objectValue );
+  sc["type"] = "integer";
+  props["scene_count"] = sc;
+  Json::Value sb( Json::objectValue );
+  sb["type"] = "integer";
+  props["scenes_bound"] = sb;
+  Json::Value reused( Json::objectValue );
+  reused["type"] = "boolean";
+  props["reused_existing"] = reused;
   schema["properties"] = props;
   return schema;
 }
@@ -328,35 +350,17 @@ SpatialToolResult TemporalRegisterCollectionTool::execute( const Json::Value &in
   }
   else if ( input.isMember( "scenes" ) && input["scenes"].isArray() )
   {
-    // Inline scene build (same entry shapes as temporal:create_collection).
-    QStringList paths;
-    QStringList times;
-    for ( const Json::Value &entry : input["scenes"] )
+    QString err;
+    if ( !TemporalCollection::fromInlineScenes(
+           input["scenes"], &collection, &err,
+           input.isMember( "times" ) ? input["times"] : Json::Value(),
+           input.isMember( "bands" ) ? input["bands"] : Json::Value(),
+           input.isMember( "name" ) && input["name"].isString()
+             ? QString::fromStdString( input["name"].asString() )
+             : QString() ) )
     {
-      if ( entry.isString() )
-      {
-        paths.append( QString::fromStdString( entry.asString() ) );
-        times.append( QString() );
-      }
-      else if ( entry.isObject() && entry.isMember( "path" ) && entry["path"].isString() )
-      {
-        paths.append( QString::fromStdString( entry["path"].asString() ) );
-        times.append( entry.isMember( "time" ) && entry["time"].isString()
-                        ? QString::fromStdString( entry["time"].asString() )
-                        : QString() );
-      }
-      else
-      {
-        return SpatialToolResult::failure(
-          "scenes[] entries must be path strings or {path, time?} objects",
-          "INVALID_PARAMETER", "VALIDATION" );
-      }
+      return SpatialToolResult::failure( err.toStdString(), "INVALID_PARAMETER", "VALIDATION" );
     }
-    collection = TemporalCollection::fromScenePaths(
-      paths, times,
-      input.isMember( "name" ) && input["name"].isString()
-        ? QString::fromStdString( input["name"].asString() )
-        : QString() );
   }
   else
   {
@@ -417,6 +421,7 @@ std::vector<std::string> TemporalRemoveCollectionTool::tags() const
 Json::Value TemporalRemoveCollectionTool::inputSchema() const
 {
   Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
   Json::Value props( Json::objectValue );
   Json::Value collection( Json::objectValue );
   collection["type"] = "string";
@@ -432,8 +437,11 @@ Json::Value TemporalRemoveCollectionTool::inputSchema() const
 Json::Value TemporalRemoveCollectionTool::outputSchema() const
 {
   Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
   Json::Value props( Json::objectValue );
-  props["removed"] = Json::Value( Json::booleanValue );
+  Json::Value rem( Json::objectValue );
+  rem["type"] = "boolean";
+  props["removed"] = rem;
   schema["properties"] = props;
   return schema;
 }
@@ -480,6 +488,7 @@ std::vector<std::string> TemporalIngestStacTool::tags() const
 Json::Value TemporalIngestStacTool::inputSchema() const
 {
   Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
   Json::Value props( Json::objectValue );
   Json::Value result( Json::objectValue );
   result["type"] = "string";
@@ -523,11 +532,20 @@ Json::Value TemporalIngestStacTool::inputSchema() const
 Json::Value TemporalIngestStacTool::outputSchema() const
 {
   Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
   Json::Value props( Json::objectValue );
-  props["scene_count"] = Json::Value( Json::intValue );
-  props["collection_id"] = Json::Value( Json::stringValue );
-  props["scenes"] = Json::Value( Json::arrayValue );
-  props["warnings"] = Json::Value( Json::arrayValue );
+  Json::Value sc( Json::objectValue );
+  sc["type"] = "integer";
+  props["scene_count"] = sc;
+  Json::Value cid( Json::objectValue );
+  cid["type"] = "string";
+  props["collection_id"] = cid;
+  Json::Value scenes( Json::objectValue );
+  scenes["type"] = "array";
+  props["scenes"] = scenes;
+  Json::Value warns( Json::objectValue );
+  warns["type"] = "array";
+  props["warnings"] = warns;
   schema["properties"] = props;
   return schema;
 }

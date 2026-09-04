@@ -36,99 +36,17 @@ bool collectionFromInput( const Json::Value &input, TemporalCollection *out,
     *error = "provide 'collection' (descriptor path) or a non-empty 'scenes' array";
     return false;
   }
-  struct Extra
+  QString qErr;
+  if ( !TemporalCollection::fromInlineScenes(
+         input["scenes"], out, &qErr,
+         input.isMember( "times" ) ? input["times"] : Json::Value(),
+         input.isMember( "bands" ) ? input["bands"] : Json::Value(),
+         input.isMember( "name" ) && input["name"].isString()
+           ? QString::fromStdString( input["name"].asString() )
+           : QString() ) )
   {
-    std::map<QString, int> bands;
-    int qualityBand = 0;
-    int maskBand = 0;
-  };
-  QStringList paths;
-  QStringList times;
-  std::vector<Extra> extras;
-  for ( const Json::Value &entry : input["scenes"] )
-  {
-    Extra extra;
-    if ( entry.isString() )
-    {
-      paths.push_back( QString::fromStdString( entry.asString() ) );
-      times.push_back( {} );
-    }
-    else if ( entry.isObject() && entry.isMember( "path" ) && entry["path"].isString() )
-    {
-      paths.push_back( QString::fromStdString( entry["path"].asString() ) );
-      times.push_back( entry.isMember( "time" ) && entry["time"].isString()
-                           ? QString::fromStdString( entry["time"].asString() )
-                           : QString() );
-      if ( entry.isMember( "bands" ) && entry["bands"].isObject() )
-      {
-        for ( auto it = entry["bands"].begin(); it != entry["bands"].end(); ++it )
-        {
-          if ( !( *it ).isNumeric() )
-          {
-            *error = "scenes[].bands values must be integers";
-            return false;
-          }
-          extra.bands[QString::fromStdString( it.name() )] = ( *it ).asInt();
-        }
-      }
-      if ( entry.isMember( "quality_band" ) )
-      {
-        if ( !entry["quality_band"].isNumeric() )
-        {
-          *error = "scenes[].quality_band must be an integer";
-          return false;
-        }
-        extra.qualityBand = entry["quality_band"].asInt();
-      }
-      if ( entry.isMember( "mask_band" ) )
-      {
-        if ( !entry["mask_band"].isNumeric() )
-        {
-          *error = "scenes[].mask_band must be an integer";
-          return false;
-        }
-        extra.maskBand = entry["mask_band"].asInt();
-      }
-    }
-    else
-    {
-      *error = "scenes[] entries must be path strings or {path, time?} objects";
-      return false;
-    }
-    extras.push_back( std::move( extra ) );
-  }
-  for ( const QString &p : paths )
-  {
-    // Remote COG hrefs (http(s), optionally /vsicurl/-prefixed) are valid
-    // scene references: GDAL validates them at open time under bounded HTTP
-    // timeouts. A local existence probe would wrongly reject them.
-    const QString trimmed = p.trimmed();
-    const bool remote = trimmed.startsWith( QLatin1String( "http://" ), Qt::CaseInsensitive ) ||
-                        trimmed.startsWith( QLatin1String( "https://" ), Qt::CaseInsensitive ) ||
-                        trimmed.startsWith( QLatin1String( "/vsicurl/" ), Qt::CaseInsensitive );
-    if ( !remote && !QFile::exists( p ) )
-    {
-      *error = "scene not found: " + p.toStdString();
-      return false;
-    }
-  }
-  *out = TemporalCollection::fromScenePaths( paths, times,
-                                             input.isMember( "name" ) && input["name"].isString()
-                                                 ? QString::fromStdString( input["name"].asString() )
-                                                 : QString() );
-  // fromScenePaths sorts; re-attach per-scene extras via the original index.
-  for ( int i = 0; i < static_cast<int>( extras.size() ); ++i )
-  {
-    for ( auto &scene : out->scenes() )
-    {
-      if ( scene.originalIndex == i )
-      {
-        scene.bandOverrides = extras[i].bands;
-        scene.qualityBand = extras[i].qualityBand;
-        scene.maskBand = extras[i].maskBand;
-        break;
-      }
-    }
+    *error = qErr.toStdString();
+    return false;
   }
   return true;
 }
@@ -198,11 +116,6 @@ Json::Value TemporalCreateCollectionTool::inputSchema() const
   Json::Value scenes( Json::objectValue );
   scenes["type"] = "array";
   scenes["description"] = "Scene entries: path strings or {path, time?, bands?, mask_band?, quality_band?}";
-  {
-    Json::Value items( Json::objectValue );
-    items["type"] = "string";
-    scenes["items"] = items;
-  }
   props["scenes"] = scenes;
   Json::Value output( Json::objectValue );
   output["type"] = "string";
