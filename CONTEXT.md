@@ -576,3 +576,5 @@ ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision
 - **ADR 0122**: Pi-Based Spatial Intelligence Layer
 - **ADR 0123**: Workflow Engine 2.0 (State Lifecycle, Deterministic Cache, Recovery, and Artifact GC)
 - **ADR 0124**: Per-Operator Determinism Grades for Parallel Execution
+- **ADR 0125**: Temporal Workspace
+- **ADR 0126**: OBIA GUI Operator Convergence (issue #663 — one execution path for OBIA segmentation/features/labeling/classification; engine policy, full features, interactive labels and hyperparameters move into the rs:obia_* contracts)

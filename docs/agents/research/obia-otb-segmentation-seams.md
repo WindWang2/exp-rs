@@ -1,3 +1,10 @@
+> **SUPERSEDED (2026-09, ADR 0126 / issue #663):** the `module:obia:*` GUI
+> lambda seam, `RsObiaSegmentation` and `RsObiaTask` described below were
+> deleted; the OBIA window now dispatches the `rs:obia_*` operators
+> (engine policy, full features, interactive labels and the hierarchy
+> rehydrate path all live in the operator contracts). Kept for history —
+> do not plan new work against this document.
+
 # Research: OBIA & OTB segmentation seams
 
 **Ticket:** GitHub issue #8 — Inventory OBIA / OTB segmentation seams  

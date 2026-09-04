@@ -1,0 +1,45 @@
+{
+  "name": "obia_full_chain_lab",
+  "description": "Full object-based chain: OTB-preferred segmentation (teaching fallback), full object features, interactive-style classification from segment labels, polygonized objects",
+  "steps": [
+    {
+      "operator": "rs:obia_segment",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "output": "/tmp/sicnu_obia/labels.tif",
+        "engine": "auto",
+        "minRegionSize": 50
+      }
+    },
+    {
+      "operator": "rs:obia_features",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "labels": "/tmp/sicnu_obia/labels.tif",
+        "output": "/tmp/sicnu_obia/features.csv"
+      }
+    },
+    {
+      "operator": "rs:obia_classify",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "labels": "/tmp/sicnu_obia/labels.tif",
+        "output": "/tmp/sicnu_obia/classified.tif",
+        "training": "data/samples/obia_training.gpkg",
+        "method": "random_forest",
+        "features": "full",
+        "rfNumTrees": 100,
+        "outputUncertainty": "/tmp/sicnu_obia/uncertainty.csv"
+      }
+    },
+    {
+      "operator": "gdal:polygonize",
+      "params": {
+        "input": "/tmp/sicnu_obia/labels.tif",
+        "output": "/tmp/sicnu_obia/objects.shp",
+        "field": "SEG_ID",
+        "connected8": true
+      }
+    }
+  ]
+}
