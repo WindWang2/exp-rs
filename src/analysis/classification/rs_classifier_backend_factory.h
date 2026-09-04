@@ -13,6 +13,19 @@
 
 #include <memory>
 
+/// Optional per-method hyperparameters (ADR 0061 extension). Fields irrelevant
+/// to the resolved method are ignored; the in-struct defaults are the backend
+/// constructor defaults and the single source of truth for operator schemas
+/// and GUI parameter dialogs.
+struct QGIS_ANALYSIS_EXPORT RsClassifierBackendParams
+{
+  int rfNumTrees = 100;
+  int rfMaxDepth = 10;
+  int rfMinSampleCount = 5;
+  int mlpHiddenLayerSize = 16;
+  int mlpMaxIter = 500;
+};
+
 class QGIS_ANALYSIS_EXPORT RsClassifierBackendFactory
 {
   public:
@@ -27,6 +40,15 @@ class QGIS_ANALYSIS_EXPORT RsClassifierBackendFactory
     /// fallback SVM); K-Means has no load(), so a predict-only reload still
     /// fails cleanly with Error::ModelOpenFailed.
     static std::unique_ptr<RsClassifierBackend> create( const QString &methodName );
+
+    /// Same name resolution with explicit hyperparameters (RandomForest /
+    /// MLP). Callers that tune backends (operator schema params, the OBIA
+    /// GUI Params dialog) must come through this overload so backend
+    /// construction stays in one place — no direct backend constructors at
+    /// call sites.
+    static std::unique_ptr<RsClassifierBackend> create(
+      const QString &methodName,
+      const RsClassifierBackendParams &params );
 
     /// K-Means with an explicit cluster count (operator path).
     static std::unique_ptr<RsClassifierBackend> createKMeans( int k );

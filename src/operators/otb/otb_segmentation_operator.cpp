@@ -46,11 +46,15 @@ Json::Value OtbSegmentationOperator::schema() const {
     props["maxIterations"] = makeIntegerParam("maxIterations",
                                               "MeanShift maximum iterations", 100);
     setRange(props["maxIterations"], 1, 10000);
-    // threshold is shared: meanshift convergence (default 0.1) and watershed (default 0.01)
-    // Keep 0.01 as advertised default so watershed validation matches code fallback 0.01;
-    // meanshift callers may override to 0.1 explicitly.
-    props["threshold"] = makeNumberParam("threshold",
-                                         "MeanShift/watershed threshold", 0.01);
+    // threshold is shared: meanshift convergence (default 0.1) and watershed
+    // (default 0.01). One schema default cannot express both — the declared
+    // 0.01 matches the watershed fallback; the meanshift fallback is 0.1.
+    // The description states both so agents do not infer a wrong default.
+    props["threshold"] = makeNumberParam(
+        "threshold",
+        "MeanShift convergence / watershed level threshold "
+        "(when omitted: meanshift 0.1, watershed 0.01)",
+        0.01);
     setRange(props["threshold"], 0.0001, 1.0);
     props["threshold"]["required"] = false;
 

@@ -1,12 +1,16 @@
 /***************************************************************************
- * rs_obia_segment_operator.cpp  —  teaching segmenter over the analysis layer
+ * rs_obia_segment_operator.cpp  —  OBIA segmentation over the analysis layer
  *
- * ADR 0060 — the operator delegates to RsSimpleSegmenter (analysis, the
+ * ADR 0060 — the simple engine delegates to RsSimpleSegmenter (analysis, the
  * single teaching segmenter) and writes labels via RsSegmentMap::toGeoTIFF
- * (ADR 0054). The segutil cv::Mat stack is retired.
+ * (ADR 0054). Issue #663 — the OTB MeanShift engine (and the prefer-OTB /
+ * teaching-fallback `auto` policy, ADR 0058) that the OBIA GUI used to own
+ * in src/app now lives here behind the operator seam; frontends select an
+ * engine, they do not call segmenters.
  ***************************************************************************/
 #include "rs_obia_segment_operator.h"
 
+#include "analysis/segmentation/rs_otb_segmenter.h"
 #include "analysis/segmentation/rs_simple_segmenter.h"
 
 #include "operators/framework/rs_json_params.h"
@@ -23,14 +27,29 @@ namespace sicnu::operators::rs {
 
 using namespace params;
 
+namespace {
+
+const std::vector<std::string> s_engines = {"simple", "otb", "auto"};
+
+} // namespace
+
 Json::Value RsObiaSegmentOperator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
     props["input"] = makeRasterParam("input", "Input raster to segment");
     props["output"] = makeOutputParam("output", "Output label raster (UInt32)", "tif");
-    props["smoothKernel"] = makeIntegerParam("smoothKernel", "Gaussian kernel size (odd)", 5);
-    props["quantizeBins"] = makeIntegerParam("quantizeBins", "Intensity quantization levels", 32);
-    props["minRegionSize"] = makeIntegerParam("minRegionSize", "Merge regions smaller than this", 50);
+    props["engine"] = makeEnumParam(
+        "engine",
+        "Segmentation engine: simple (teaching, default), otb (MeanShift, fail-closed), "
+        "auto (prefer OTB, fall back to teaching)",
+        s_engines, "simple");
+    props["smoothKernel"] = makeIntegerParam("smoothKernel", "Gaussian kernel size (odd, simple engine)", 5);
+    props["quantizeBins"] = makeIntegerParam("quantizeBins", "Intensity quantization levels (simple engine)", 32);
+    props["minRegionSize"] = makeIntegerParam("minRegionSize", "Merge regions smaller than this (both engines)", 50);
+    props["spatialRadius"] = makeIntegerParam("spatialRadius", "MeanShift spatial radius (otb engine)", 5);
+    props["rangeRadius"] = makeNumberParam("rangeRadius", "MeanShift range radius (otb engine)", 15.0);
+    props["maxIterations"] = makeIntegerParam("maxIterations", "MeanShift iteration cap (otb engine)", 100);
+    props["threshold"] = makeNumberParam("threshold", "MeanShift convergence threshold (otb engine)", 0.1);
 
     Json::Value bands = makeStringParam("bands", "Optional 1-based band indices for mean intensity", "");
     bands["type"] = "array";
@@ -42,6 +61,7 @@ Json::Value RsObiaSegmentOperator::schema() const {
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeOutputParam("output", "Label map", "tif");
     outputs["segments"] = makeIntegerParam("segments", "Number of segments", 0);
+    outputs["engine"] = makeEnumParam("engine", "Engine that produced the output", s_engines, "simple");
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
     root["required"] = makeRequired({"input", "output"});
@@ -55,8 +75,17 @@ Json::Value RsObiaSegmentOperator::metadata() const {
     meta["tags"] = Json::Value(Json::arrayValue);
     meta["tags"].append("obia");
     meta["tags"].append("segmentation");
-    meta["purpose"] = "Create object primitives for OBIA teaching workflows";
-    meta["limitations"] = "Teaching segmenter; not a substitute for OTB MeanShift";
+    meta["purpose"] = "Create object primitives for OBIA workflows (teaching or OTB MeanShift quality)";
+    meta["limitations"] =
+        "engine=simple is a teaching segmenter (not OTB MeanShift quality); engine=otb/auto "
+        "requires the OTB Segmentation CLI (SICNU_OTB_PATH) — otb fails closed, auto falls back";
+    Json::Value useCases(Json::arrayValue);
+    useCases.append("Object primitives for rs:obia_features / rs:obia_classify chains");
+    useCases.append("Interactive OBIA window segmentation (engine=auto)");
+    meta["useCases"] = useCases;
+    Json::Value hints(Json::arrayValue);
+    hints.append("Chain with rs:obia_features (labels = this output) then rs:obia_classify");
+    meta["workflowHints"] = hints;
     return meta;
 }
 
@@ -64,34 +93,25 @@ Json::Value RsObiaSegmentOperator::executionEstimate() const
 {
     // FullRaster (default policy): input bands plus the segmenter working set —
     // per-band smoothed/quantized copies, the composite key grid and the UInt32
-    // label map are all resident simultaneously.
+    // label map are all resident simultaneously. The OTB engine runs as an
+    // external CLI (its RAM is outside this process) and writes a temp label
+    // raster before rehydration.
     Json::Value est(Json::objectValue);
     est["tileWidth"] = 0;
     est["tileHeight"] = 0;
     est["estimatedRamBytes"] = 67108864; // ~16 x 1024x1024 working buffers (64 MiB)
+    est["temporaryDiskBytes"] = 8388608; // OTB temp label raster (otb/auto engines)
     return est;
 }
 
-Json::Value RsObiaSegmentOperator::run(const Json::Value& params, RSOperatorContext& context) {
-    const std::string inputPath = requireString(params, "input");
-    const std::string outputPath = requireString(params, "output");
-    const int smoothKernel = getInt(params, "smoothKernel", 5);
-    const int quantizeBins = getInt(params, "quantizeBins", 32);
-    const int minRegionSize = getInt(params, "minRegionSize", 50);
+namespace {
 
-    if (!fileExists(inputPath)) {
-        throw RSOperatorError(ErrorCode::FileNotFound, "Input not found: " + inputPath);
-    }
-
-    ensureGdalInit();
-    GdalDatasetWrapper ds;
-    if (!ds.open(QString::fromStdString(inputPath))) {
-        throw RSOperatorError(ErrorCode::GdalError, "Failed to open input");
-    }
-
-    const int width = ds.width();
-    const int height = ds.height();
-    const std::vector<int> bands = parseBands(params, ds.bandCount());
+/// Teaching engine: band reads → RsSimpleSegmenter (ADR 0060 single stack).
+RsSegmentMap runSimpleEngine(const std::string& inputPath,
+                             const std::vector<int>& bands,
+                             int smoothKernel, int quantizeBins, int minRegionSize,
+                             RSOperatorContext& context,
+                             GdalDatasetWrapper& ds, int width, int height) {
     const int nBands = static_cast<int>(bands.size());
     const size_t nPix = static_cast<size_t>(width) * static_cast<size_t>(height);
 
@@ -125,10 +145,133 @@ Json::Value RsObiaSegmentOperator::run(const Json::Value& params, RSOperatorCont
 
     // ADR 0060: single teaching segmenter (analysis layer); cancel + progress
     // are plumbed through RSOperatorContext hooks.
-    const RsSegmentMap segMap = RsSimpleSegmenter::segmentMultiBand(
+    RsSegmentMap segMap = RsSimpleSegmenter::segmentMultiBand(
         bandPtrs.data(), nBands, width, height, nodata, segParams,
         [&context]() { return context.isCancelled(); },
         [&context](float f) { context.reportProgress(0.15 + 0.7 * f, "Segmenting"); });
+    context.throwIfCancelled();
+    return segMap;
+}
+
+/// OTB MeanShift engine: the analysis-layer OTB adapter (ADR 0058 raster
+/// dialect, one CLI dialect for all OBIA paths).
+RsSegmentMap runOtbEngine(const std::string& inputPath,
+                          int spatialRadius, double rangeRadius, int minRegionSize,
+                          int maxIterations, double threshold,
+                          RSOperatorContext& context) {
+    RsLevelSpec spec;
+    spec.filter = RsLevelSpec::Filter::MeanShift;
+    spec.spatialRadius = spatialRadius;
+    spec.rangeRadius = rangeRadius;
+    spec.minRegionSize = minRegionSize;
+    spec.maxIterations = maxIterations;
+    spec.threshold = threshold;
+
+    context.reportProgress(0.1, "OTB MeanShift segmentation");
+    RsSegmenterResult otb = RsOtbSegmenter{}.segment(
+        QString::fromStdString(inputPath), spec,
+        [&context]() { return context.isCancelled(); });
+    context.throwIfCancelled();
+    if (!otb.ok)
+        throw RSOperatorError(ErrorCode::OtbError, otb.errorMessage.toStdString());
+    return otb.segMap;
+}
+
+} // namespace
+
+Json::Value RsObiaSegmentOperator::run(const Json::Value& params, RSOperatorContext& context) {
+    const std::string inputPath = requireString(params, "input");
+    const std::string outputPath = requireString(params, "output");
+    const std::string engine = getEnum(params, "engine", s_engines, "simple");
+    const int smoothKernel = getInt(params, "smoothKernel", 5);
+    const int quantizeBins = getInt(params, "quantizeBins", 32);
+    const int minRegionSize = getInt(params, "minRegionSize", 50);
+    const int spatialRadius = getInt(params, "spatialRadius", 5);
+    const double rangeRadius = getDouble(params, "rangeRadius", 15.0);
+    const int maxIterations = getInt(params, "maxIterations", 100);
+    const double threshold = getDouble(params, "threshold", 0.1);
+
+    if (!fileExists(inputPath)) {
+        throw RSOperatorError(ErrorCode::FileNotFound, "Input not found: " + inputPath);
+    }
+
+    // Validate only the parameters the selected engine(s) can execute —
+    // `auto` may run either engine, so both sets must be valid there.
+    const bool mayRunSimple = engine == "simple" || engine == "auto";
+    const bool mayRunOtb = engine == "otb" || engine == "auto";
+    if (mayRunSimple) {
+        if (smoothKernel <= 0 || smoothKernel % 2 == 0)
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "smoothKernel must be an odd positive integer");
+        if (quantizeBins <= 0 || quantizeBins > 256)
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "quantizeBins must be between 1 and 256");
+    }
+    if (minRegionSize < 0)
+        throw RSOperatorError(ErrorCode::InvalidParameter, "minRegionSize must be >= 0");
+    if (mayRunOtb) {
+        if (spatialRadius <= 0)
+            throw RSOperatorError(ErrorCode::InvalidParameter, "spatialRadius must be > 0");
+        if (rangeRadius <= 0.0)
+            throw RSOperatorError(ErrorCode::InvalidParameter, "rangeRadius must be > 0");
+        if (maxIterations <= 0)
+            throw RSOperatorError(ErrorCode::InvalidParameter, "maxIterations must be > 0");
+        if (threshold <= 0.0)
+            throw RSOperatorError(ErrorCode::InvalidParameter, "threshold must be > 0");
+    }
+
+    ensureGdalInit();
+
+    RsSegmentMap segMap;
+    std::string usedEngine;
+
+    if (engine == "otb") {
+        if (!RsOtbSegmenter::isAvailable())
+            throw RSOperatorError(
+                ErrorCode::OtbError,
+                "OTB Segmentation CLI not found — set SICNU_OTB_PATH or install OTB "
+                "(engine=otb fails closed; use engine=auto for the teaching fallback)");
+        segMap = runOtbEngine(inputPath, spatialRadius, rangeRadius, minRegionSize,
+                              maxIterations, threshold, context);
+        usedEngine = "otb";
+    } else if (engine == "auto") {
+        // ADR 0058 policy, now owned by the operator: prefer OTB, fall back to
+        // the teaching segmenter when OTB is missing or fails — the OBIA task
+        // must still produce an acceptable result on machines without OTB.
+        if (RsOtbSegmenter::isAvailable()) {
+            try {
+                segMap = runOtbEngine(inputPath, spatialRadius, rangeRadius, minRegionSize,
+                                      maxIterations, threshold, context);
+                usedEngine = "otb";
+            } catch (const RSOperatorError& e) {
+                if (e.code() == ErrorCode::Cancelled)
+                    throw;
+                context.logWarning("OTB segmentation failed, falling back to the teaching "
+                                   "segmenter: " + e.message());
+            }
+        }
+        if (segMap.isEmpty() && usedEngine.empty()) {
+            if (!RsOtbSegmenter::isAvailable())
+                context.logWarning("OTB Segmentation CLI not found (SICNU_OTB_PATH); "
+                                   "using the teaching segmenter");
+            GdalDatasetWrapper ds;
+            if (!ds.open(QString::fromStdString(inputPath)))
+                throw RSOperatorError(ErrorCode::GdalError, "Failed to open input");
+            const std::vector<int> bands = parseBands(params, ds.bandCount());
+            segMap = runSimpleEngine(inputPath, bands, smoothKernel, quantizeBins,
+                                     minRegionSize, context, ds, ds.width(), ds.height());
+            usedEngine = "simple";
+        }
+    } else { // simple
+        GdalDatasetWrapper ds;
+        if (!ds.open(QString::fromStdString(inputPath)))
+            throw RSOperatorError(ErrorCode::GdalError, "Failed to open input");
+        const std::vector<int> bands = parseBands(params, ds.bandCount());
+        segMap = runSimpleEngine(inputPath, bands, smoothKernel, quantizeBins,
+                                 minRegionSize, context, ds, ds.width(), ds.height());
+        usedEngine = "simple";
+    }
+
     context.throwIfCancelled();
     if (segMap.isEmpty())
         throw RSOperatorError(ErrorCode::ComputationError,
@@ -146,8 +289,9 @@ Json::Value RsObiaSegmentOperator::run(const Json::Value& params, RSOperatorCont
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;
     result["segments"] = segMap.segmentCount();
-    result["width"] = width;
-    result["height"] = height;
+    result["engine"] = usedEngine;
+    result["width"] = segMap.width();
+    result["height"] = segMap.height();
     return result;
 }
 

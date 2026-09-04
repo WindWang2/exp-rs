@@ -12,6 +12,8 @@
 #include <QMap>
 #include <QVector>
 
+#include <functional>
+
 #ifdef SICNU_HAS_OPENCV
 #include <opencv2/core.hpp>
 #endif
@@ -77,10 +79,16 @@ class QGIS_ANALYSIS_EXPORT RsSegmentFeatures
 
     /// Extract features for all segments from a raster.
     /// bandIndices: 1-based GDAL band numbers to read.
+    /// \a isCanceled is polled at pass/block boundaries; on cancel the call
+    /// returns an empty map (the RsSimpleSegmenter sentinel convention —
+    /// callers map it to their cancellation error).
+    /// \a onProgress receives a [0,1] fraction across the extraction passes.
     static QMap<quint32, SegmentStat> extract(
         const QString &rasterPath,
         const RsSegmentMap &segMap,
-        const QVector<int> &bandIndices );
+        const QVector<int> &bandIndices,
+        const std::function<bool()> &isCanceled = {},
+        const std::function<void( float )> &onProgress = {} );
 
 #ifdef SICNU_HAS_OPENCV
     /// Convert segment stats to a feature matrix (rows = segments, cols = features).

@@ -1,5 +1,5 @@
 /***************************************************************************
- * rs_obia_classify_operator.h  —  Object-based classification (teaching OBIA)
+ * rs_obia_classify_operator.h  —  Object-based classification (OBIA)
  ***************************************************************************/
 #pragma once
 
@@ -10,24 +10,42 @@ namespace sicnu::operators::rs {
 /**
  * rs:obia_classify
  *
- * End-to-end teaching OBIA pipeline (no OTB required):
- *   1. Segment (smooth → quantize → connected components → merge small)
- *   2. Extract per-segment mean spectral features
- *   3. Label segments by majority vote from training polygons
- *   4. Train SVM / NormalBayes on labeled segments
- *   5. Predict all segments and burn class IDs to output raster
+ * Object-based classification with two training sources and two feature
+ * models (issue #663: the OBIA GUI's interactive classify flow —
+ * precomputed objects, hand-labeled segments, full feature set, classifier
+ * hyperparameters, training accuracy — is now expressible through this
+ * contract instead of a GUI-owned kernel pipeline):
  *
- * Parameters:
- *   input, training, output  (required)
- *   method: svm | normal_bayes (default svm)
- *   classField (default class_id)
- *   segmentMethod: grid (default) | quantize
- *   cellSize (grid mode, default 16)
- *   smoothKernel, quantizeBins, minRegionSize  (quantize mode)
- *   minLabelPixels (default 3)
- *   bands (optional 1-based)
+ *   Training source (exactly one):
+ *     training      — vector polygons; segments labeled by pixel majority
+ *                     (RsRoiLabeler, ADR 0060)
+ *     segmentClasses — {segmentId: classId} map over a provided `labels`
+ *                     raster (interactive sessions, rs:obia_label output)
  *
- * Returns: output, segments, labeledSegments, trainSamples, classes, method
+ *   Segment geometry:
+ *     labels        — existing label raster (skip internal segmentation;
+ *                     REQUIRED with segmentClasses, optional with training)
+ *     otherwise     — internal segmentation: segmentMethod grid (default)
+ *                     or quantize (RsSimpleSegmenter, ADR 0060)
+ *
+ *   Feature model:
+ *     features=mean (default) — per-band mean spectra (historical behavior)
+ *     features=full           — RsSegmentFeatures spectral+GLCM+shape with a
+ *                               per-family `featureSelection` mask (the
+ *                               interactive GUI feature tree)
+ *
+ *   Classifier: svm | normal_bayes | random_forest | kmeans | mlp
+ *   (RsClassifierBackendFactory, ADR 0061 — hyperparameters rfNumTrees /
+ *   rfMaxDepth / rfMinSampleCount / mlpHiddenLayerSize / mlpMaxIter).
+ *
+ *   Output: class-id GeoTIFF via RsClassRaster::paint (palette when
+ *   classColors given, dtype escalation, NoData=0, ADR 0054/0055), optional
+ *   per-segment entropy CSV (outputUncertainty), training-set accuracy in
+ *   the result.
+ *
+ * Returns: output, method, segments, labeledSegments, trainSamples, classes,
+ * features, width, height, accuracy{overallAccuracy,kappa,classes,confusion,
+ * producer,user,f1}?, uncertaintyOutput?
  */
 class RsObiaClassifyOperator : public RSOperator {
 public:
@@ -35,7 +53,7 @@ public:
     std::string displayName() const override { return "OBIA Classification"; }
     std::string group() const override { return "obia"; }
     std::string description() const override {
-        return "Segment image, train on ROI-labeled objects, classify all objects.";
+        return "Classify objects from polygon training or pre-labeled segments.";
     }
 
     Json::Value schema() const override;
