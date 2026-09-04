@@ -243,10 +243,11 @@ TEST_CASE( "Builtin workflows registered", "[workflow]" )
   // registerBuiltinWorkflows (builtin_definitions.cpp) registers 16 atomic
   // tools + 6 compound workflows (preprocess_optical, change_detection_align,
   // classify_supervised, georef_image_to_map, obia,
-  // classification_postprocess_merge) = 22. The individual hasDefinition
-  // assertions above cover the actual set; keep this count in sync with
+  // classification_postprocess_merge) = 24 (#663 added tool.rs.obia_features
+  // and tool.rs.obia_label). The individual hasDefinition assertions above
+  // cover the actual set; keep this count in sync with
   // registerBuiltinWorkflows.
-  REQUIRE( rt.registeredDefinitionIds().size() == 22 );
+  REQUIRE( rt.registeredDefinitionIds().size() == 24 );
 
   const auto *d = rt.findDefinition( "tool.rs.spectral_index" );
   REQUIRE( d );

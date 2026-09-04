@@ -5,10 +5,6 @@
 #include "analysis/segmentation/rs_segment_features.h"
 #include "analysis/segmentation/rs_segment_map.h"
 
-#ifdef SICNU_HAS_OPENCV
-#include "app/obia/rs_obia_segmentation.h"
-#endif
-
 #include <gdal.h>
 
 #include <QTemporaryDir>
@@ -526,99 +522,6 @@ TEST_CASE( "RsMultiresSegmenter: Performance & scalability (256x256 multi-band r
     CHECK( elapsedMs < 5000 );
 }
 
-// ---------------------------------------------------------------------------
-// Existing Legacy Helper Tests
-// ---------------------------------------------------------------------------
-
-#ifdef SICNU_HAS_OPENCV
-
-TEST_CASE( "ObiaSegmentation: isOtbAvailable is callable", "[obia][segmentation]" )
-{
-    // Smoke-only by design (#571): availability is environment-dependent, so
-    // the assertion pins the CONTRACT (a callable returning true/false), not
-    // a specific availability outcome.
-    const bool available = RsObiaSegmentation::isOtbAvailable();
-    REQUIRE( ( available == true || available == false ) );
-}
-
-TEST_CASE( "ObiaSegmentation: built-in segmenter produces segments", "[obia][segmentation]" )
-{
-    QTemporaryDir tempDir;
-    REQUIRE( tempDir.isValid() );
-
-    const QString inputPath = createTestRaster( tempDir.path(), 16, 16 );
-    REQUIRE( !inputPath.isEmpty() );
-
-    RsObiaSegmentationConfig cfg;
-    cfg.rasterPath = inputPath;
-    cfg.bandIndices = { 1 };
-    cfg.preferOtb = false;
-    cfg.smoothKernel = 3;
-    cfg.quantizeBins = 4;
-    cfg.minRegionSize = 10;
-
-    const RsObiaSegmentationResult result = RsObiaSegmentation::run( cfg );
-    REQUIRE( result.ok );
-    REQUIRE( !result.usedOtb );
-    REQUIRE( result.segMap.segmentCount() > 0 );
-}
-
-TEST_CASE( "ObiaSegmentation: preferOtb falls back when OTB unavailable", "[obia][segmentation]" )
-{
-    QTemporaryDir tempDir;
-    REQUIRE( tempDir.isValid() );
-
-    const QString inputPath = createTestRaster( tempDir.path(), 16, 16 );
-    REQUIRE( !inputPath.isEmpty() );
-
-    RsObiaSegmentationConfig cfg;
-    cfg.rasterPath = inputPath;
-    cfg.bandIndices = { 1 };
-    cfg.preferOtb = true;
-    cfg.smoothKernel = 3;
-    cfg.quantizeBins = 4;
-    cfg.minRegionSize = 10;
-
-    const RsObiaSegmentationResult result = RsObiaSegmentation::run( cfg );
-    REQUIRE( result.ok );
-    REQUIRE( result.segMap.segmentCount() > 0 );
-
-    if ( !RsObiaSegmentation::isOtbAvailable() )
-        REQUIRE( !result.usedOtb );
-}
-
-TEST_CASE( "ObiaSegmentation: cancel probe plumbed through OTB delegate", "[obia][segmentation]" )
-{
-    QTemporaryDir tempDir;
-    REQUIRE( tempDir.isValid() );
-
-    const QString inputPath = createTestRaster( tempDir.path(), 16, 16 );
-    REQUIRE( !inputPath.isEmpty() );
-
-    int cancelCalls = 0;
-    auto isCanceled = [&]() {
-        ++cancelCalls;
-        return true;
-    };
-
-    RsObiaSegmentationConfig cfg;
-    cfg.rasterPath = inputPath;
-    cfg.bandIndices = { 1 };
-    cfg.preferOtb = true;
-    cfg.smoothKernel = 3;
-    cfg.quantizeBins = 4;
-    cfg.minRegionSize = 10;
-    const RsObiaSegmentationResult result = RsObiaSegmentation::run( cfg, isCanceled );
-    REQUIRE( result.ok );
-    REQUIRE( result.segMap.segmentCount() > 0 );
-
-    if ( !RsObiaSegmentation::isOtbAvailable() )
-    {
-        REQUIRE( cancelCalls == 0 );
-        REQUIRE( !result.usedOtb );
-    }
-}
-
 TEST_CASE( "OBIA segment features 64-bit label indexing safety (#472)", "[obia][segmentation][features][472]" )
 {
     QTemporaryDir tempDir;
@@ -639,5 +542,3 @@ TEST_CASE( "OBIA segment features 64-bit label indexing safety (#472)", "[obia][
     CHECK( features[1].area == 32.0 );
     CHECK( features[2].area == 32.0 );
 }
-
-#endif // SICNU_HAS_OPENCV

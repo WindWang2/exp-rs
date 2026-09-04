@@ -3042,6 +3042,7 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
   # #30 — OBIA flat segmentation Task Center seam
   add_executable(test_obia_task_center test_obia_task_center.cpp)
   target_link_libraries(test_obia_task_center PRIVATE
+    sicnu_operators
     Catch2::Catch2WithMain
     Qt6::Core
     Qt6::Gui
@@ -3065,33 +3066,42 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
   set_target_properties(test_obia_task_center PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(test_obia_task_center)
 
-  add_executable(test_obia_task
-    test_obia_task.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
-  )
-  target_link_libraries(test_obia_task PRIVATE
+  # #663 — rs:obia_* operator contract tests (engine matrix, CSV interchange,
+  # interactive classify, hierarchy rehydrate).
+  add_executable(test_obia_operators test_obia_operators.cpp)
+  target_link_libraries(test_obia_operators PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
     Qt6::Gui
-    Qt6::Widgets
     qgis_core
-    qgis_gui
     qgis_analysis
     qgis_app_obia
+    sicnu_operators
+    sicnu_task_center
     GDAL::GDAL
-    ${OpenCV_LIBS}
+    ${OpenCV_LIBRARIES}
   )
-  target_include_directories(test_obia_task PRIVATE
+  target_include_directories(test_obia_operators PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/analysis
-    ${CMAKE_SOURCE_DIR}/src/analysis/classification
     ${CMAKE_SOURCE_DIR}/src/analysis/segmentation
-    ${CMAKE_SOURCE_DIR}/src/app/obia
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
     ${OpenCV_INCLUDE_DIRS}
     ${CMAKE_BINARY_DIR}
   )
-  set_target_properties(test_obia_task PROPERTIES AUTOMOC ON)
-  sicnu_discover_tests(test_obia_task)
+  sicnu_discover_tests(test_obia_operators)
+
+  # #663 architectural guardrail: OBIA GUI stays an operator client.
+  add_executable(test_obia_architecture test_obia_architecture.cpp)
+  target_link_libraries(test_obia_architecture PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+  )
+  target_compile_definitions(test_obia_architecture PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+  sicnu_discover_tests(test_obia_architecture)
 
   # Phase 10B.6 — OBIA end-to-end integration tests
   add_executable(test_obia_integration
@@ -3099,6 +3109,7 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   )
   target_link_libraries(test_obia_integration PRIVATE
+    sicnu_operators
     Catch2::Catch2WithMain
     Qt6::Core
     Qt6::Gui
@@ -3128,6 +3139,7 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   )
   target_link_libraries(test_obia_main_window PRIVATE
+    sicnu_operators
     Catch2::Catch2WithMain
     Qt6::Core
     Qt6::Gui

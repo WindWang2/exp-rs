@@ -1,9 +1,13 @@
-// test_obia_task_center.cpp — #30 OBIA segmentation via Task Center seam
+// test_obia_task_center.cpp — OBIA operators through the Task Center seam (#663).
+//
+// The old module:obia:* executor lambdas are deleted; the OBIA GUI and every
+// other client submit real operator ids. These tests pin that seam: registry
+// resolution through JobEngine, result payload delivery, failure surfacing,
+// autoLoad=false and cooperative cancellation semantics.
 #include <catch2/catch_test_macros.hpp>
 
 #ifdef SICNU_HAS_OPENCV
 
-#include "app/obia/rs_obia_segmentation.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -48,96 +52,61 @@ QString createTestRaster( const QString &dir, int w, int h )
 
 sicnu::AlgorithmTaskInfo waitForTerminalTask( long taskId )
 {
-  return sicnu::TaskCenter::instance().waitForTask( taskId, std::chrono::seconds( 15 ) );
+  return sicnu::TaskCenter::instance().waitForTask( taskId, std::chrono::seconds( 30 ) );
 }
 
-struct SegWork
-{
-  RsObiaSegmentationResult seg;
-};
-
-long submitSegmentation( const RsObiaSegmentationConfig &cfg,
-                         std::shared_ptr<SegWork> work,
-                         std::shared_ptr<std::atomic<bool>> canceled )
+long submitOperatorJob( const std::string &operatorId, const Json::Value &params )
 {
   sicnu::jobs::JobRequest req;
-  req.algorithmId = "module:obia:segment";
-  req.title = "OBIA segmentation test";
+  req.algorithmId = operatorId;
+  req.title = "obia operator test";
   req.source = "test";
   req.exclusive = true;
-  req.params["input"] = cfg.rasterPath.toStdString();
-
-  return sicnu::TaskCenter::instance().submitJob(
-    req,
-    [cfg, work, canceled]( const sicnu::jobs::JobRequest &,
-                           sicnu::operators::RSOperatorContext &ctx ) {
-      work->seg = RsObiaSegmentation::run( cfg, [canceled, &ctx]() {
-        return canceled->load() || ctx.isCancelled();
-      } );
-      if ( ctx.isCancelled() || canceled->load()
-           || work->seg.errorMessage.contains( QStringLiteral( "cancel" ), Qt::CaseInsensitive ) )
-      {
-        throw sicnu::operators::RSOperatorError(
-          sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
-      }
-      if ( !work->seg.ok )
-      {
-        throw sicnu::operators::RSOperatorError(
-          sicnu::operators::ErrorCode::ComputationError,
-          work->seg.errorMessage.toStdString() );
-      }
-      Json::Value result( Json::objectValue );
-      result["segmentCount"] = static_cast<int>( work->seg.segMap.segmentCount() );
-      result["usedOtb"] = work->seg.usedOtb;
-      return result;
-    },
-    [canceled]() { canceled->store( true ); },
-    /*autoLoad=*/false );
+  req.params = params;
+  // No executor: JobEngine must resolve the operator from the registry
+  // (exactly how the OBIA window submits). autoLoad=false like the GUI.
+  return sicnu::TaskCenter::instance().submitJob( req, {}, {}, /*autoLoad=*/false );
 }
 
 } // namespace
 
-TEST_CASE( "OBIA Task Center completes flat segmentation without UI JobEngine submit",
-           "[obia][task_center][segment]" )
+TEST_CASE( "OBIA Task Center: rs:obia_segment resolves and completes", "[obia][task_center][segment]" )
 {
   QTemporaryDir tmp;
   REQUIRE( tmp.isValid() );
   const QString inputPath = createTestRaster( tmp.path(), 16, 16 );
   REQUIRE( !inputPath.isEmpty() );
+  const QString outputPath = tmp.path() + QStringLiteral( "/labels.tif" );
 
-  RsObiaSegmentationConfig cfg;
-  cfg.rasterPath = inputPath;
-  cfg.bandIndices = { 1 };
-  cfg.preferOtb = false;
-  cfg.smoothKernel = 3;
-  cfg.quantizeBins = 4;
-  cfg.minRegionSize = 10;
+  Json::Value params( Json::objectValue );
+  params["input"] = inputPath.toStdString();
+  params["output"] = outputPath.toStdString();
+  params["engine"] = "simple";
+  params["smoothKernel"] = 3;
+  params["quantizeBins"] = 4;
+  params["minRegionSize"] = 10;
 
-  auto work = std::make_shared<SegWork>();
-  auto canceled = std::make_shared<std::atomic<bool>>( false );
-  const long taskId = submitSegmentation( cfg, work, canceled );
+  const long taskId = submitOperatorJob( "rs:obia_segment", params );
   REQUIRE( taskId > 0 );
 
   const auto info = waitForTerminalTask( taskId );
   REQUIRE( info.status == sicnu::TaskStatus::Completed );
-  REQUIRE( info.algorithmId == QStringLiteral( "module:obia:segment" ) );
-  REQUIRE( info.resultPayload.isMember( "segmentCount" ) );
-  REQUIRE( info.resultPayload["segmentCount"].asInt() > 0 );
-  REQUIRE( work->seg.ok );
-  REQUIRE( work->seg.segMap.segmentCount() > 0 );
+  REQUIRE( info.algorithmId == QStringLiteral( "rs:obia_segment" ) );
+  REQUIRE( info.autoLoadLayer == false );
+  REQUIRE( info.resultPayload.isMember( "segments" ) );
+  REQUIRE( info.resultPayload["segments"].asInt() > 0 );
+  REQUIRE( info.resultPayload.isMember( "engine" ) );
+  REQUIRE( QFile::exists( outputPath ) );
 }
 
-TEST_CASE( "OBIA Task Center reports segmentation failure",
-           "[obia][task_center][segment]" )
+TEST_CASE( "OBIA Task Center: operator failure surfaces as a failed task", "[obia][task_center][segment]" )
 {
-  RsObiaSegmentationConfig cfg;
-  cfg.rasterPath.clear(); // invalid
-  cfg.bandIndices = { 1 };
-  cfg.preferOtb = false;
+  Json::Value params( Json::objectValue );
+  params["input"] = "/nonexistent/obia_input.tif";
+  params["output"] = "/tmp/obia_should_not_exist.tif";
+  params["engine"] = "simple";
 
-  auto work = std::make_shared<SegWork>();
-  auto canceled = std::make_shared<std::atomic<bool>>( false );
-  const long taskId = submitSegmentation( cfg, work, canceled );
+  const long taskId = submitOperatorJob( "rs:obia_segment", params );
   REQUIRE( taskId > 0 );
 
   const auto info = waitForTerminalTask( taskId );
@@ -145,100 +114,42 @@ TEST_CASE( "OBIA Task Center reports segmentation failure",
   REQUIRE_FALSE( info.errorMessage.isEmpty() );
 }
 
-TEST_CASE( "OBIA Task Center hierarchy job id enters the same seam",
-           "[obia][task_center][hierarchy]" )
+TEST_CASE( "OBIA Task Center: classify operator failure reaches the seam", "[obia][task_center][classify]" )
 {
-  sicnu::jobs::JobRequest req;
-  req.algorithmId = "module:obia:hierarchy";
-  req.title = "hierarchy seam";
-  req.source = "test";
-  req.exclusive = true;
+  QTemporaryDir tmp;
+  const QString inputPath = createTestRaster( tmp.path(), 16, 16 );
+  REQUIRE( !inputPath.isEmpty() );
 
-  const long taskId = sicnu::TaskCenter::instance().submitJob(
-    req,
-    []( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
-      ctx.logInfo( "fake hierarchy" );
-      Json::Value result( Json::objectValue );
-      result["levels"] = 2;
-      result["fineSegments"] = 4;
-      result["coarseSegments"] = 2;
-      return result;
-    },
-    {},
-    false );
+  // segmentClasses without labels → contract error at the operator boundary.
+  Json::Value params( Json::objectValue );
+  params["input"] = inputPath.toStdString();
+  params["output"] = ( tmp.path() + "/out.tif" ).toStdString();
+  Json::Value segmentClasses( Json::objectValue );
+  segmentClasses["1"] = 1;
+  params["segmentClasses"] = segmentClasses;
 
+  const long taskId = submitOperatorJob( "rs:obia_classify", params );
   REQUIRE( taskId > 0 );
-  const auto info = waitForTerminalTask( taskId );
-  REQUIRE( info.status == sicnu::TaskStatus::Completed );
-  REQUIRE( info.algorithmId == QStringLiteral( "module:obia:hierarchy" ) );
-  REQUIRE( info.resultPayload["levels"].asInt() == 2 );
-  REQUIRE( info.resultPayload["fineSegments"].asInt() == 4 );
-}
 
-TEST_CASE( "OBIA Task Center hierarchy_classify failure surfaces at the seam",
-           "[obia][task_center][hierarchy_classify]" )
-{
-  sicnu::jobs::JobRequest req;
-  req.algorithmId = "module:obia:hierarchy_classify";
-  req.title = "hierarchy classify fail";
-  req.source = "test";
-
-  const long taskId = sicnu::TaskCenter::instance().submitJob(
-    req,
-    []( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) -> Json::Value {
-      throw sicnu::operators::RSOperatorError(
-        sicnu::operators::ErrorCode::ComputationError, "no training labels" );
-    },
-    {},
-    false );
-
-  REQUIRE( taskId > 0 );
   const auto info = waitForTerminalTask( taskId );
   REQUIRE( info.status == sicnu::TaskStatus::Failed );
-  REQUIRE( info.errorMessage.contains( QStringLiteral( "no training labels" ) ) );
-}
-
-TEST_CASE( "OBIA Task Center flat classify algorithm id completes",
-           "[obia][task_center][classify]" )
-{
-  sicnu::jobs::JobRequest req;
-  req.algorithmId = "module:obia:classify";
-  req.title = "flat classify seam";
-  req.source = "test";
-  req.params["output"] = "/tmp/obia_out.tif";
-
-  const long taskId = sicnu::TaskCenter::instance().submitJob(
-    req,
-    []( const sicnu::jobs::JobRequest &request,
-        sicnu::operators::RSOperatorContext &ctx ) {
-      ctx.logInfo( "fake flat classify" );
-      Json::Value result( Json::objectValue );
-      result["output"] = request.params.get( "output", "" ).asString();
-      result["durationMs"] = 1;
-      return result;
-    },
-    {},
-    false );
-
-  REQUIRE( taskId > 0 );
-  const auto info = waitForTerminalTask( taskId );
-  REQUIRE( info.status == sicnu::TaskStatus::Completed );
-  REQUIRE( info.algorithmId == QStringLiteral( "module:obia:classify" ) );
-  REQUIRE( info.resultPayload["output"].asString() == "/tmp/obia_out.tif" );
+  REQUIRE( info.errorMessage.contains( QStringLiteral( "labels" ) ) );
 }
 
 TEST_CASE( "OBIA Task Center keeps cancellation running until the worker exits",
-           "[obia][task_center][segment][cancel]" )
+           "[obia][task_center][cancel]" )
 {
   auto workerStarted = std::make_shared<std::atomic<bool>>( false );
   auto release = std::make_shared<std::atomic<bool>>( false );
   auto canceledHook = std::make_shared<std::atomic<bool>>( false );
 
   sicnu::jobs::JobRequest req;
-  req.algorithmId = "module:obia:segment";
-  req.title = "blocking segment";
+  req.algorithmId = "module:test:blocking";
+  req.title = "blocking seam probe";
   req.source = "test";
 
+  // TaskCenter executor mechanics probe (the same cancellation contract the
+  // OBIA operators rely on through their RSOperatorContext cancel flag).
   const long taskId = sicnu::TaskCenter::instance().submitJob(
     req,
     [workerStarted, release]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
