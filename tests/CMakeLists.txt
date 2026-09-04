@@ -890,6 +890,41 @@ sicnu_add_test(test_execution_benchmarks TIMEOUT 600 RUN_SERIAL TRUE)
 # Phase B chunk execution graph contracts (Qt-free; links sicnu_runtime only).
 sicnu_add_test(test_chunk_graph TIMEOUT 120)
 target_link_libraries(test_chunk_graph PRIVATE sicnu_runtime)
+
+# Phase D artifact identity store (Phase D of the epic). SQLite link for the
+# schema-guard test's direct DB surgery; sicnu_data keeps its own PRIVATE link.
+sicnu_add_test(test_artifact_store TIMEOUT 120)
+target_link_libraries(test_artifact_store PRIVATE SQLite::SQLite3)
+
+# Phase C fused-chain equivalence (links through sicnu_task_center which
+# carries fused_chain.cpp; needs the standard set only).
+sicnu_add_test(test_fused_chain TIMEOUT 300)
+
+# Phase F remote COG caching layer (network-free data layer; POSIX sockets
+# provide the fake remote endpoint).
+sicnu_add_test(test_remote_source_cache TIMEOUT 180)
+target_include_directories(test_remote_source_cache PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(test_execution_benchmarks PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Phase G scheduler contracts (header-only budget2 + tests).
+sicnu_add_test(test_scheduler3 TIMEOUT 120)
+
+# Phase H GPU session plane (Qt-free; fake backend).
+sicnu_add_test(test_gpu_plane TIMEOUT 120)
+target_link_libraries(test_gpu_plane PRIVATE sicnu_runtime)
+
+# Phase K worker isolation (executes the real sicnu_worker binary; RUN_SERIAL
+# so SIGKILL/kill escalation never disturbs neighboring tests).
+sicnu_add_test(test_worker_host TIMEOUT 300 RUN_SERIAL TRUE)
+target_compile_definitions(test_worker_host PRIVATE
+    SICNU_WORKER_EXE="$<TARGET_FILE:sicnu_worker>"
+)
+
+# Phase I persistent workspace catalog.
+sicnu_add_test(test_workspace_catalog TIMEOUT 300)
+
+# Phase M fault injection / chaos matrix (fork + kill semantics; serial).
+sicnu_add_test(test_fault_injection TIMEOUT 300 RUN_SERIAL TRUE)
 # #706: the python-bindings smoke test existed but was registered nowhere —
 # it silently never ran in any lane. Guarded on the bindings target existing.
 if(TARGET _sicnu_operators AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bindings.py)
