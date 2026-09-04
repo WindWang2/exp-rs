@@ -47,11 +47,12 @@ void handleSignal( int )
 
 struct ShutdownGuard {
     ~ShutdownGuard() {
-        // Unload plugin binaries while every host-side registry is alive:
-        // contributions are revoked, then dlclose runs — never the reverse.
-        exprs::PluginRegistry::instance().unloadAll();
+        // Drain the executor pools FIRST — a worker may still be running
+        // plugin code. Then unload plugin binaries while every host-side
+        // registry is alive (contributions revoked, then dlclose).
         sicnu::TaskCenter::instance().shutdown();
         sicnu::jobs::JobEngine::instance().shutdown();
+        exprs::PluginRegistry::instance().unloadAll();
         QgsApplication::exitQgis();
     }
 };

@@ -888,6 +888,12 @@ if(TARGET _sicnu_operators AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bi
         set(_sicnu_py python3)
     endif()
     add_test(
+        NAME python_sdk_unit
+        COMMAND ${_sicnu_py} ${CMAKE_CURRENT_SOURCE_DIR}/test_python_sdk_unit.py
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    set_tests_properties(python_sdk_unit PROPERTIES TIMEOUT 120)
+    sicnu_set_test_env(python_sdk_unit)
+    add_test(
         NAME python_bindings_smoke
         COMMAND ${_sicnu_py} ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bindings.py
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
