@@ -286,6 +286,83 @@ target_include_directories(test_workspace_snapshot PRIVATE
 )
 sicnu_discover_tests(test_workspace_snapshot)
 
+# Workspace Understanding 3.0 — stable entity ids + WorkspaceState contract.
+qt_add_executable(test_workspace_state
+  test_workspace_state.cpp
+)
+target_link_libraries(test_workspace_state PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  sicnu_data
+  sicnu_agent
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_workspace_state PRIVATE jsoncpp)
+endif()
+target_include_directories(test_workspace_state PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_workspace_state)
+
+# Spatial Scientist 3.0 tool-level tests (capability/workflow/symbology/commands).
+qt_add_executable(test_agent_tools_3
+  test_agent_tools_3.cpp
+)
+target_link_libraries(test_agent_tools_3 PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  sicnu_processing
+  sicnu_task_center
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_agent_tools_3 PRIVATE jsoncpp)
+endif()
+target_include_directories(test_agent_tools_3 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_agent_tools_3)
+
+# MapSpec + cartography libraries (compiler roundtrip, registries, charts,
+# preflight/repair loop).
+qt_add_executable(test_mapspec
+  test_mapspec.cpp
+)
+target_link_libraries(test_mapspec PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  sicnu_processing
+  sicnu_task_center
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_mapspec PRIVATE jsoncpp)
+endif()
+target_include_directories(test_mapspec PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_mapspec)
+
 # #35 — UI callers must not bypass Task Center; task views are projections.
 add_executable(test_ui_task_center_contract
   test_ui_task_center_contract.cpp
@@ -687,6 +764,51 @@ target_include_directories(test_output_verifier PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_output_verifier)
+
+# Spatial Scientist 3.0 contract documents (ADR 0128) — light target, no QGIS GUI.
+add_executable(test_spatial_contracts test_spatial_contracts.cpp)
+target_link_libraries(test_spatial_contracts PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_agent
+)
+sicnu_link_jsoncpp(test_spatial_contracts)
+target_include_directories(test_spatial_contracts PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spatial_contracts)
+
+# Spatial Scientist 3.0 benchmark harness (Phase Q) — 100+ structured tasks.
+qt_add_executable(test_spatial_scientist_benchmark
+  test_spatial_scientist_benchmark.cpp
+)
+target_compile_definitions(test_spatial_scientist_benchmark PRIVATE
+  SICNU_BENCHMARK_TASKS_JSON="${CMAKE_SOURCE_DIR}/data/benchmarks/spatial_scientist_tasks.json"
+)
+target_link_libraries(test_spatial_scientist_benchmark PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  sicnu_processing
+  sicnu_task_center
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_spatial_scientist_benchmark PRIVATE jsoncpp)
+endif()
+target_include_directories(test_spatial_scientist_benchmark PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spatial_scientist_benchmark)
 
 
 # Model catalog v2 contracts: readiness states, checksums, ranking gates

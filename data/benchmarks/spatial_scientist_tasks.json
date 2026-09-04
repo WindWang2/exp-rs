@@ -1,0 +1,2912 @@
+{
+ "schema_version": "1.0",
+ "kind": "spatial_scientist_benchmark",
+ "task_count": 111,
+ "tasks": [
+  {
+   "id": "du-001",
+   "category": "data_understanding",
+   "utterance": "Inspect the Sentinel-2 GeoTIFF before analysis",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "spatial:raster_inspect",
+    "schema_keys": [
+     "path"
+    ]
+   }
+  },
+  {
+   "id": "du-002",
+   "category": "data_understanding",
+   "utterance": "What fields does the classification shapefile have?",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "spatial:vector_inspect",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "du-003",
+   "category": "data_understanding",
+   "utterance": "What is in the workspace right now?",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "spatial:workspace_summary",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "du-004",
+   "category": "data_understanding",
+   "utterance": "Summarize the active NDVI layer",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "spatial:layer_summary",
+    "schema_keys": [
+     "target"
+    ]
+   }
+  },
+  {
+   "id": "du-005",
+   "category": "data_understanding",
+   "utterance": "Check NDVI values at three field locations",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "spatial:sample_pixels",
+    "schema_keys": [
+     "path",
+     "points"
+    ]
+   }
+  },
+  {
+   "id": "du-006",
+   "category": "data_understanding",
+   "utterance": "Sample some parcels to verify attribute values",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "spatial:sample_features",
+    "schema_keys": [
+     "path"
+    ]
+   }
+  },
+  {
+   "id": "du-007",
+   "category": "data_understanding",
+   "utterance": "Compare the two atmospheric correction variants",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "spatial:compare_rasters",
+    "schema_keys": [
+     "a",
+     "b"
+    ]
+   }
+  },
+  {
+   "id": "du-008",
+   "category": "data_understanding",
+   "utterance": "Verify the last change-detection output is sane",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "spatial:assess_result",
+    "schema_keys": [
+     "target"
+    ]
+   }
+  },
+  {
+   "id": "du-009",
+   "category": "data_understanding",
+   "utterance": "List all layers currently in the workspace",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "data:list_layers",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "du-010",
+   "category": "data_understanding",
+   "utterance": "Describe the landsat dataset",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "data:describe_dataset",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "du-011",
+   "category": "data_understanding",
+   "utterance": "Which temporal collections exist?",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "temporal:list_collections",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "du-012",
+   "category": "data_understanding",
+   "utterance": "Describe the Sentinel-2 time collection",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "temporal:describe_collection",
+    "schema_keys": [
+     "id"
+    ]
+   }
+  },
+  {
+   "id": "du-013",
+   "category": "data_understanding",
+   "utterance": "List scenes in the collection",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "temporal:list_scenes",
+    "schema_keys": [
+     "id"
+    ]
+   }
+  },
+  {
+   "id": "du-014",
+   "category": "data_understanding",
+   "utterance": "Which models are available in the catalog?",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "spatial:list_models",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "du-015",
+   "category": "data_understanding",
+   "utterance": "Pick a model for building segmentation on 0.5m RGB",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "spatial:select_model",
+    "schema_keys": [
+     "task"
+    ]
+   }
+  },
+  {
+   "id": "td-001",
+   "category": "tool_discovery",
+   "utterance": "Compute NDVI for the active scene",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "rs:ndvi",
+    "schema_keys": [
+     "input"
+    ]
+   }
+  },
+  {
+   "id": "td-002",
+   "category": "tool_discovery",
+   "utterance": "Run a band math expression",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "rs:band_math",
+    "schema_keys": [
+     "input"
+    ]
+   }
+  },
+  {
+   "id": "td-003",
+   "category": "tool_discovery",
+   "utterance": "Detect change between two dates",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "rs:change_detection",
+    "schema_keys": [
+     "input"
+    ]
+   }
+  },
+  {
+   "id": "td-004",
+   "category": "tool_discovery",
+   "utterance": "Mosaic the four tiles",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "rs:mosaic",
+    "schema_keys": [
+     "input"
+    ]
+   }
+  },
+  {
+   "id": "td-005",
+   "category": "tool_discovery",
+   "utterance": "Run model inference on the tile",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "rs:infer",
+    "schema_keys": [
+     "input"
+    ]
+   }
+  },
+  {
+   "id": "td-006",
+   "category": "tool_discovery",
+   "utterance": "Clip the raster to the AOI",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "gdal:clip",
+    "schema_keys": [
+     "input"
+    ]
+   }
+  },
+  {
+   "id": "td-007",
+   "category": "tool_discovery",
+   "utterance": "Reproject the result to UTM",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "gdal:reproject",
+    "schema_keys": [
+     "input"
+    ]
+   }
+  },
+  {
+   "id": "td-008",
+   "category": "tool_discovery",
+   "utterance": "Polygonize the classified raster",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "gdal:polygonize",
+    "schema_keys": [
+     "input"
+    ]
+   }
+  },
+  {
+   "id": "td-009",
+   "category": "tool_discovery",
+   "utterance": "Apply a Sobel edge filter",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "opencv:sobel",
+    "schema_keys": [
+     "input"
+    ]
+   }
+  },
+  {
+   "id": "td-010",
+   "category": "tool_discovery",
+   "utterance": "Segment the image with mean shift",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "otb:meanshift_segmentation",
+    "schema_keys": [
+     "input"
+    ]
+   }
+  },
+  {
+   "id": "td-011",
+   "category": "tool_discovery",
+   "utterance": "Classify with an SVM",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "otb:svm_classification",
+    "schema_keys": [
+     "input"
+    ]
+   }
+  },
+  {
+   "id": "td-012",
+   "category": "tool_discovery",
+   "utterance": "Color the parcels by land-use class",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "symbology:apply_categorical",
+    "schema_keys": [
+     "target",
+     "field"
+    ]
+   }
+  },
+  {
+   "id": "td-013",
+   "category": "tool_discovery",
+   "utterance": "Make a graduated density map",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "symbology:apply_graduated",
+    "schema_keys": [
+     "target",
+     "field"
+    ]
+   }
+  },
+  {
+   "id": "td-014",
+   "category": "tool_discovery",
+   "utterance": "Stretch the DEM with a color ramp",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "symbology:apply_raster_ramp",
+    "schema_keys": [
+     "target"
+    ]
+   }
+  },
+  {
+   "id": "td-015",
+   "category": "tool_discovery",
+   "utterance": "What did I change recently?",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "workspace:history",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "ia-001",
+   "category": "interaction",
+   "utterance": "Zoom the map to the AOI",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "view:set_extent",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "ia-002",
+   "category": "interaction",
+   "utterance": "Zoom to the selected layer",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "view:zoom_to_layer",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "ia-003",
+   "category": "interaction",
+   "utterance": "Show everything",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "view:fit_all",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "ia-004",
+   "category": "interaction",
+   "utterance": "What is the current view state?",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "view:get_state",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "ia-005",
+   "category": "interaction",
+   "utterance": "Set an ROI over the northern field",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "roi:set",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "ia-006",
+   "category": "interaction",
+   "utterance": "Draw an ROI rectangle on the canvas",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "canvas:draw_roi",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "ia-007",
+   "category": "interaction",
+   "utterance": "Show as false-color 4-3-2 composite",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "raster:set_band_composite",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "ia-008",
+   "category": "interaction",
+   "utterance": "Stretch the display to 2-98 percent",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "raster:set_stretch",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "ia-009",
+   "category": "interaction",
+   "utterance": "What is the current band composite?",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "raster:get_display",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "ia-010",
+   "category": "interaction",
+   "utterance": "Reset the display to default",
+   "expect": {
+    "kind": "tool_registered",
+    "tool": "raster:reset_display",
+    "schema_keys": []
+   }
+  },
+  {
+   "id": "sa-001",
+   "category": "scientific_analysis",
+   "utterance": "Find a spectral_index capability for the workspace",
+   "expect": {
+    "kind": "capability_ranked",
+    "query": "spectral_index",
+    "rank_first_or_any": "rs:ndvi"
+   }
+  },
+  {
+   "id": "sa-002",
+   "category": "scientific_analysis",
+   "utterance": "Find a spectral_index capability for the workspace",
+   "expect": {
+    "kind": "capability_ranked",
+    "query": "spectral_index",
+    "rank_first_or_any": "rs:evi"
+   }
+  },
+  {
+   "id": "sa-003",
+   "category": "scientific_analysis",
+   "utterance": "Find a spectral_index capability for the workspace",
+   "expect": {
+    "kind": "capability_ranked",
+    "query": "spectral_index",
+    "rank_first_or_any": "rs:ndwi"
+   }
+  },
+  {
+   "id": "sa-004",
+   "category": "scientific_analysis",
+   "utterance": "Find a spectral_index capability for the workspace",
+   "expect": {
+    "kind": "capability_ranked",
+    "query": "spectral_index",
+    "rank_first_or_any": "rs:mndwi"
+   }
+  },
+  {
+   "id": "sa-005",
+   "category": "scientific_analysis",
+   "utterance": "Find a spectral_index capability for the workspace",
+   "expect": {
+    "kind": "capability_ranked",
+    "query": "spectral_index",
+    "rank_first_or_any": "rs:ndbi"
+   }
+  },
+  {
+   "id": "sa-006",
+   "category": "scientific_analysis",
+   "utterance": "Find a band_math capability for the workspace",
+   "expect": {
+    "kind": "capability_ranked",
+    "query": "band_math",
+    "rank_first_or_any": "rs:band_math"
+   }
+  },
+  {
+   "id": "sa-007",
+   "category": "scientific_analysis",
+   "utterance": "Find a change_detection capability for the workspace",
+   "expect": {
+    "kind": "capability_ranked",
+    "query": "change_detection",
+    "rank_first_or_any": "rs:change_cva"
+   }
+  },
+  {
+   "id": "sa-008",
+   "category": "scientific_analysis",
+   "utterance": "Find a change_detection capability for the workspace",
+   "expect": {
+    "kind": "capability_ranked",
+    "query": "change_detection",
+    "rank_first_or_any": "rs:change_difference"
+   }
+  },
+  {
+   "id": "sa-009",
+   "category": "scientific_analysis",
+   "utterance": "Find a classification capability for the workspace",
+   "expect": {
+    "kind": "capability_ranked",
+    "query": "classification",
+    "rank_first_or_any": "rs:kmeans_classification"
+   }
+  },
+  {
+   "id": "sa-010",
+   "category": "scientific_analysis",
+   "utterance": "Find a spectral_processing capability for the workspace",
+   "expect": {
+    "kind": "capability_ranked",
+    "query": "spectral_processing",
+    "rank_first_or_any": "rs:continuum_removal"
+   }
+  },
+  {
+   "id": "sa-011",
+   "category": "scientific_analysis",
+   "utterance": "Find a mosaic capability for the workspace",
+   "expect": {
+    "kind": "capability_ranked",
+    "query": "mosaic",
+    "rank_first_or_any": "rs:mosaic"
+   }
+  },
+  {
+   "id": "sa-012",
+   "category": "scientific_analysis",
+   "utterance": "Find a masking capability for the workspace",
+   "expect": {
+    "kind": "capability_ranked",
+    "query": "masking",
+    "rank_first_or_any": "rs:apply_mask"
+   }
+  },
+  {
+   "id": "ms-001",
+   "category": "model_selection",
+   "utterance": "Select a model for the given task contract",
+   "expect": {
+    "kind": "model_select"
+   },
+   "payload": {
+    "task_criteria": {
+     "task": "segmentation"
+    }
+   }
+  },
+  {
+   "id": "ms-002",
+   "category": "model_selection",
+   "utterance": "Select a model for the given task contract",
+   "expect": {
+    "kind": "model_select"
+   },
+   "payload": {
+    "task_criteria": {
+     "task": "detection"
+    }
+   }
+  },
+  {
+   "id": "ms-003",
+   "category": "model_selection",
+   "utterance": "Select a model for the given task contract",
+   "expect": {
+    "kind": "model_select"
+   },
+   "payload": {
+    "task_criteria": {
+     "task": "segmentation",
+     "gpu_available": true,
+     "max_vram_mb": 4096
+    }
+   }
+  },
+  {
+   "id": "ms-004",
+   "category": "model_selection",
+   "utterance": "Select a model for the given task contract",
+   "expect": {
+    "kind": "model_select"
+   },
+   "payload": {
+    "task_criteria": {
+     "task": "segmentation",
+     "band_roles": "rgb"
+    }
+   }
+  },
+  {
+   "id": "ms-005",
+   "category": "model_selection",
+   "utterance": "Select a model for the given task contract",
+   "expect": {
+    "kind": "model_select"
+   },
+   "payload": {
+    "task_criteria": {
+     "task": "detection",
+     "resolution_m": 0.5
+    }
+   }
+  },
+  {
+   "id": "ms-006",
+   "category": "model_selection",
+   "utterance": "Select a model for the given task contract",
+   "expect": {
+    "kind": "model_select"
+   },
+   "payload": {
+    "task_criteria": {
+     "task": "classification",
+     "resolution_m": 10.0
+    }
+   }
+  },
+  {
+   "id": "ms-007",
+   "category": "model_selection",
+   "utterance": "Select a model for the given task contract",
+   "expect": {
+    "kind": "model_select"
+   },
+   "payload": {
+    "task_criteria": {
+     "task": "segmentation",
+     "sensor": "Sentinel-2",
+     "resolution_m": 10.0
+    }
+   }
+  },
+  {
+   "id": "ms-008",
+   "category": "model_selection",
+   "utterance": "Select a model for the given task contract",
+   "expect": {
+    "kind": "model_select"
+   },
+   "payload": {
+    "task_criteria": {
+     "task": "detection",
+     "sensor": "Landsat-8",
+     "resolution_m": 30.0
+    }
+   }
+  },
+  {
+   "id": "ms-009",
+   "category": "model_selection",
+   "utterance": "Select a model for the given task contract",
+   "expect": {
+    "kind": "model_select"
+   },
+   "payload": {
+    "task_criteria": {
+     "task": "segmentation",
+     "band_roles": "red,nir,green,blue"
+    }
+   }
+  },
+  {
+   "id": "ms-010",
+   "category": "model_selection",
+   "utterance": "Select a model for the given task contract",
+   "expect": {
+    "kind": "model_select"
+   },
+   "payload": {
+    "task_criteria": {
+     "task": "classification",
+     "gpu_available": false
+    }
+   }
+  },
+  {
+   "id": "ms-011",
+   "category": "model_selection",
+   "utterance": "Select a model for the given task contract",
+   "expect": {
+    "kind": "model_select"
+   },
+   "payload": {
+    "task_criteria": {
+     "task": "segmentation",
+     "gpu_available": true,
+     "max_vram_mb": 1024
+    }
+   }
+  },
+  {
+   "id": "ms-012",
+   "category": "model_selection",
+   "utterance": "Select a model for the given task contract",
+   "expect": {
+    "kind": "model_select"
+   },
+   "payload": {
+    "task_criteria": {
+     "task": "building extraction",
+     "resolution_m": 0.5,
+     "gpu_available": true
+    }
+   }
+  },
+  {
+   "id": "wf-001",
+   "category": "workflow",
+   "utterance": "WF golden NDVI chain runs preflight clean (advisories allowed)",
+   "expect": {
+    "kind": "workflow_preflight",
+    "allowed_verdicts": [
+     "ok",
+     "fixable",
+     "blocked"
+    ],
+    "expected_codes": []
+   },
+   "payload": {
+    "workflow": {
+     "id": "bench-wf",
+     "title": "Bench",
+     "host": "TaskPanel",
+     "workspaceKind": "empty",
+     "steps": [
+      {
+       "id": "ndvi",
+       "operatorId": "rs:ndvi",
+       "params": {
+        "input": "nonexistent-but-checked-below.tif",
+        "output": "/tmp/bench-ndvi.tif"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "wf-002",
+   "category": "workflow",
+   "utterance": "WF multi-step chain parses and passes topology",
+   "expect": {
+    "kind": "workflow_preflight",
+    "allowed_verdicts": [
+     "ok",
+     "fixable",
+     "blocked"
+    ],
+    "expected_codes": []
+   },
+   "payload": {
+    "workflow": {
+     "id": "bench-wf",
+     "title": "Bench",
+     "host": "TaskPanel",
+     "workspaceKind": "empty",
+     "steps": [
+      {
+       "id": "import",
+       "operatorId": "rs:landsat_import",
+       "params": {}
+      },
+      {
+       "id": "index",
+       "operatorId": "rs:ndvi",
+       "params": {},
+       "inputs": [
+        {
+         "fromStepId": "import",
+         "fromPort": "output",
+         "toPort": "input"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "wf-003",
+   "category": "workflow",
+   "utterance": "WF unknown operator is reported as WF_UNKNOWN_OPERATOR",
+   "expect": {
+    "kind": "workflow_preflight",
+    "allowed_verdicts": [
+     "blocked"
+    ],
+    "expected_codes": [
+     "WF_UNKNOWN_OPERATOR"
+    ]
+   },
+   "payload": {
+    "workflow": {
+     "id": "bench-wf",
+     "title": "Bench",
+     "host": "TaskPanel",
+     "workspaceKind": "empty",
+     "steps": [
+      {
+       "id": "s1",
+       "operatorId": "rs:definitely_not_an_operator",
+       "params": {}
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "wf-004",
+   "category": "workflow",
+   "utterance": "WF cycle is reported as WF_CYCLE",
+   "expect": {
+    "kind": "workflow_preflight",
+    "allowed_verdicts": [
+     "blocked"
+    ],
+    "expected_codes": [
+     "WF_CYCLE"
+    ]
+   },
+   "payload": {
+    "workflow": {
+     "id": "bench-wf",
+     "title": "Bench",
+     "host": "TaskPanel",
+     "workspaceKind": "empty",
+     "steps": [
+      {
+       "id": "a",
+       "operatorId": "rs:band_math",
+       "params": {},
+       "inputs": [
+        {
+         "fromStepId": "c",
+         "fromPort": "output",
+         "toPort": "input"
+        }
+       ]
+      },
+      {
+       "id": "b",
+       "operatorId": "rs:band_math",
+       "params": {},
+       "inputs": [
+        {
+         "fromStepId": "a",
+         "fromPort": "output",
+         "toPort": "input"
+        }
+       ]
+      },
+      {
+       "id": "c",
+       "operatorId": "rs:band_math",
+       "params": {},
+       "inputs": [
+        {
+         "fromStepId": "b",
+         "fromPort": "output",
+         "toPort": "input"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "wf-005",
+   "category": "workflow",
+   "utterance": "WF unknown model is reported as WF_MODEL_NOT_READY",
+   "expect": {
+    "kind": "workflow_preflight",
+    "allowed_verdicts": [
+     "blocked"
+    ],
+    "expected_codes": [
+     "WF_MODEL_NOT_READY"
+    ]
+   },
+   "payload": {
+    "workflow": {
+     "id": "bench-wf",
+     "title": "Bench",
+     "host": "TaskPanel",
+     "workspaceKind": "empty",
+     "steps": [
+      {
+       "id": "m",
+       "operatorId": "rs:infer",
+       "params": {
+        "model": "not-in-catalog-model"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "wf-006",
+   "category": "workflow",
+   "utterance": "WF duplicate outputs are reported as WF_OUTPUT_CONFLICT",
+   "expect": {
+    "kind": "workflow_preflight",
+    "allowed_verdicts": [
+     "blocked"
+    ],
+    "expected_codes": [
+     "WF_OUTPUT_CONFLICT"
+    ]
+   },
+   "payload": {
+    "workflow": {
+     "id": "bench-wf",
+     "title": "Bench",
+     "host": "TaskPanel",
+     "workspaceKind": "empty",
+     "steps": [
+      {
+       "id": "x1",
+       "operatorId": "rs:ndvi",
+       "params": {
+        "output": "/tmp/bench-same.tif"
+       }
+      },
+      {
+       "id": "x2",
+       "operatorId": "rs:ndwi",
+       "params": {
+        "output": "/tmp/bench-same.tif"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "wf-007",
+   "category": "workflow",
+   "utterance": "WF unknown operator variant 0",
+   "expect": {
+    "kind": "workflow_preflight",
+    "allowed_verdicts": [
+     "blocked"
+    ],
+    "expected_codes": [
+     "WF_UNKNOWN_OPERATOR"
+    ]
+   },
+   "payload": {
+    "workflow": {
+     "id": "bench-wf",
+     "title": "Bench",
+     "host": "TaskPanel",
+     "workspaceKind": "empty",
+     "steps": [
+      {
+       "id": "s",
+       "operatorId": "rs:nope1",
+       "params": {}
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "wf-008",
+   "category": "workflow",
+   "utterance": "WF unknown operator variant 1",
+   "expect": {
+    "kind": "workflow_preflight",
+    "allowed_verdicts": [
+     "blocked"
+    ],
+    "expected_codes": [
+     "WF_UNKNOWN_OPERATOR"
+    ]
+   },
+   "payload": {
+    "workflow": {
+     "id": "bench-wf",
+     "title": "Bench",
+     "host": "TaskPanel",
+     "workspaceKind": "empty",
+     "steps": [
+      {
+       "id": "s",
+       "operatorId": "rs:nope2",
+       "params": {}
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "wf-009",
+   "category": "workflow",
+   "utterance": "WF chain topology sanity 0",
+   "expect": {
+    "kind": "workflow_preflight",
+    "allowed_verdicts": [
+     "ok",
+     "fixable",
+     "blocked"
+    ],
+    "expected_codes": []
+   },
+   "payload": {
+    "workflow": {
+     "id": "bench-wf",
+     "title": "Bench",
+     "host": "TaskPanel",
+     "workspaceKind": "empty",
+     "steps": [
+      {
+       "id": "import",
+       "operatorId": "rs:landsat_import",
+       "params": {}
+      },
+      {
+       "id": "index",
+       "operatorId": "rs:ndvi",
+       "params": {},
+       "inputs": [
+        {
+         "fromStepId": "import",
+         "fromPort": "output",
+         "toPort": "input"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "wf-010",
+   "category": "workflow",
+   "utterance": "WF chain topology sanity 1",
+   "expect": {
+    "kind": "workflow_preflight",
+    "allowed_verdicts": [
+     "ok",
+     "fixable",
+     "blocked"
+    ],
+    "expected_codes": []
+   },
+   "payload": {
+    "workflow": {
+     "id": "bench-wf",
+     "title": "Bench",
+     "host": "TaskPanel",
+     "workspaceKind": "empty",
+     "steps": [
+      {
+       "id": "import",
+       "operatorId": "rs:landsat_import",
+       "params": {}
+      },
+      {
+       "id": "index",
+       "operatorId": "rs:ndvi",
+       "params": {},
+       "inputs": [
+        {
+         "fromStepId": "import",
+         "fromPort": "output",
+         "toPort": "input"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "wf-011",
+   "category": "workflow",
+   "utterance": "WF chain topology sanity 2",
+   "expect": {
+    "kind": "workflow_preflight",
+    "allowed_verdicts": [
+     "ok",
+     "fixable",
+     "blocked"
+    ],
+    "expected_codes": []
+   },
+   "payload": {
+    "workflow": {
+     "id": "bench-wf",
+     "title": "Bench",
+     "host": "TaskPanel",
+     "workspaceKind": "empty",
+     "steps": [
+      {
+       "id": "import",
+       "operatorId": "rs:landsat_import",
+       "params": {}
+      },
+      {
+       "id": "index",
+       "operatorId": "rs:ndvi",
+       "params": {},
+       "inputs": [
+        {
+         "fromStepId": "import",
+         "fromPort": "output",
+         "toPort": "input"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "wf-012",
+   "category": "workflow",
+   "utterance": "WF chain topology sanity 3",
+   "expect": {
+    "kind": "workflow_preflight",
+    "allowed_verdicts": [
+     "ok",
+     "fixable",
+     "blocked"
+    ],
+    "expected_codes": []
+   },
+   "payload": {
+    "workflow": {
+     "id": "bench-wf",
+     "title": "Bench",
+     "host": "TaskPanel",
+     "workspaceKind": "empty",
+     "steps": [
+      {
+       "id": "import",
+       "operatorId": "rs:landsat_import",
+       "params": {}
+      },
+      {
+       "id": "index",
+       "operatorId": "rs:ndvi",
+       "params": {},
+       "inputs": [
+        {
+         "fromStepId": "import",
+         "fromPort": "output",
+         "toPort": "input"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "mp-001",
+   "category": "cartography",
+   "utterance": "Complete thematic map passes preflight",
+   "expect": {
+    "kind": "map_preflight",
+    "passed": true,
+    "expected_codes": [],
+    "min_score": 80
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-map",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [
+      {
+       "id": "title-1",
+       "text": "Bench Map",
+       "rect_mm": [
+        12,
+        6,
+        200,
+        14
+       ]
+      }
+     ],
+     "legends": [
+      {
+       "id": "legend-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        210,
+        30,
+        70,
+        80
+       ]
+      }
+     ],
+     "scale_bars": [
+      {
+       "id": "scale_bar-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        14,
+        188,
+        60,
+        8
+       ]
+      }
+     ],
+     "north_arrows": [
+      {
+       "id": "north_arrow-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        271,
+        26,
+        12,
+        12
+       ]
+      }
+     ],
+     "source_notes": [
+      {
+       "id": "source_note-1",
+       "text": "Source: bench",
+       "rect_mm": [
+        167,
+        194,
+        116,
+        8
+       ]
+      }
+     ],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "mp-002",
+   "category": "cartography",
+   "utterance": "Missing title detected",
+   "expect": {
+    "kind": "map_preflight",
+    "passed": false,
+    "expected_codes": [
+     "MAP_MISSING_TITLE"
+    ]
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-map",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [],
+     "legends": [
+      {
+       "id": "legend-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        210,
+        30,
+        70,
+        80
+       ]
+      }
+     ],
+     "scale_bars": [
+      {
+       "id": "scale_bar-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        14,
+        188,
+        60,
+        8
+       ]
+      }
+     ],
+     "north_arrows": [
+      {
+       "id": "north_arrow-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        271,
+        26,
+        12,
+        12
+       ]
+      }
+     ],
+     "source_notes": [
+      {
+       "id": "source_note-1",
+       "text": "Source: bench",
+       "rect_mm": [
+        167,
+        194,
+        116,
+        8
+       ]
+      }
+     ],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "mp-003",
+   "category": "cartography",
+   "utterance": "Missing legend detected",
+   "expect": {
+    "kind": "map_preflight",
+    "passed": false,
+    "expected_codes": [
+     "MAP_MISSING_LEGEND"
+    ]
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-map",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [
+      {
+       "id": "title-1",
+       "text": "Bench Map",
+       "rect_mm": [
+        12,
+        6,
+        200,
+        14
+       ]
+      }
+     ],
+     "legends": [],
+     "scale_bars": [
+      {
+       "id": "scale_bar-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        14,
+        188,
+        60,
+        8
+       ]
+      }
+     ],
+     "north_arrows": [
+      {
+       "id": "north_arrow-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        271,
+        26,
+        12,
+        12
+       ]
+      }
+     ],
+     "source_notes": [
+      {
+       "id": "source_note-1",
+       "text": "Source: bench",
+       "rect_mm": [
+        167,
+        194,
+        116,
+        8
+       ]
+      }
+     ],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "mp-004",
+   "category": "cartography",
+   "utterance": "Missing scale bar detected",
+   "expect": {
+    "kind": "map_preflight",
+    "passed": false,
+    "expected_codes": [
+     "MAP_MISSING_SCALE_BAR"
+    ]
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-map",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [
+      {
+       "id": "title-1",
+       "text": "Bench Map",
+       "rect_mm": [
+        12,
+        6,
+        200,
+        14
+       ]
+      }
+     ],
+     "legends": [
+      {
+       "id": "legend-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        210,
+        30,
+        70,
+        80
+       ]
+      }
+     ],
+     "scale_bars": [],
+     "north_arrows": [
+      {
+       "id": "north_arrow-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        271,
+        26,
+        12,
+        12
+       ]
+      }
+     ],
+     "source_notes": [
+      {
+       "id": "source_note-1",
+       "text": "Source: bench",
+       "rect_mm": [
+        167,
+        194,
+        116,
+        8
+       ]
+      }
+     ],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "mp-005",
+   "category": "cartography",
+   "utterance": "Missing north arrow detected",
+   "expect": {
+    "kind": "map_preflight",
+    "passed": false,
+    "expected_codes": [
+     "MAP_MISSING_NORTH_ARROW"
+    ]
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-map",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [
+      {
+       "id": "title-1",
+       "text": "Bench Map",
+       "rect_mm": [
+        12,
+        6,
+        200,
+        14
+       ]
+      }
+     ],
+     "legends": [
+      {
+       "id": "legend-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        210,
+        30,
+        70,
+        80
+       ]
+      }
+     ],
+     "scale_bars": [
+      {
+       "id": "scale_bar-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        14,
+        188,
+        60,
+        8
+       ]
+      }
+     ],
+     "north_arrows": [],
+     "source_notes": [
+      {
+       "id": "source_note-1",
+       "text": "Source: bench",
+       "rect_mm": [
+        167,
+        194,
+        116,
+        8
+       ]
+      }
+     ],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "mp-006",
+   "category": "cartography",
+   "utterance": "Missing source note detected",
+   "expect": {
+    "kind": "map_preflight",
+    "passed": false,
+    "expected_codes": [
+     "MAP_MISSING_SOURCE_NOTE"
+    ]
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-map",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [
+      {
+       "id": "title-1",
+       "text": "Bench Map",
+       "rect_mm": [
+        12,
+        6,
+        200,
+        14
+       ]
+      }
+     ],
+     "legends": [
+      {
+       "id": "legend-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        210,
+        30,
+        70,
+        80
+       ]
+      }
+     ],
+     "scale_bars": [
+      {
+       "id": "scale_bar-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        14,
+        188,
+        60,
+        8
+       ]
+      }
+     ],
+     "north_arrows": [
+      {
+       "id": "north_arrow-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        271,
+        26,
+        12,
+        12
+       ]
+      }
+     ],
+     "source_notes": [],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "mp-007",
+   "category": "cartography",
+   "utterance": "Off-page item detected",
+   "expect": {
+    "kind": "map_preflight",
+    "passed": false,
+    "expected_codes": [
+     "MAP_OFF_PAGE"
+    ]
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-map",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [
+      {
+       "id": "title-1",
+       "text": "Bench Map",
+       "rect_mm": [
+        12,
+        6,
+        200,
+        14
+       ]
+      },
+      {
+       "id": "title-off",
+       "text": "off page",
+       "rect_mm": [
+        400,
+        300,
+        50,
+        10
+       ]
+      }
+     ],
+     "legends": [
+      {
+       "id": "legend-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        210,
+        30,
+        70,
+        80
+       ]
+      }
+     ],
+     "scale_bars": [
+      {
+       "id": "scale_bar-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        14,
+        188,
+        60,
+        8
+       ]
+      }
+     ],
+     "north_arrows": [
+      {
+       "id": "north_arrow-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        271,
+        26,
+        12,
+        12
+       ]
+      }
+     ],
+     "source_notes": [
+      {
+       "id": "source_note-1",
+       "text": "Source: bench",
+       "rect_mm": [
+        167,
+        194,
+        116,
+        8
+       ]
+      }
+     ],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "mp-008",
+   "category": "cartography",
+   "utterance": "Overlap detected",
+   "expect": {
+    "kind": "map_preflight",
+    "passed": false,
+    "expected_codes": [
+     "MAP_OVERLAP"
+    ]
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-map",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [
+      {
+       "id": "title-1",
+       "text": "Bench Map",
+       "rect_mm": [
+        12,
+        6,
+        200,
+        14
+       ]
+      }
+     ],
+     "legends": [
+      {
+       "id": "legend-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        210,
+        30,
+        70,
+        80
+       ]
+      },
+      {
+       "id": "legend-clash",
+       "map_ref": "map-1",
+       "rect_mm": [
+        211,
+        31,
+        70,
+        80
+       ]
+      }
+     ],
+     "scale_bars": [
+      {
+       "id": "scale_bar-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        14,
+        188,
+        60,
+        8
+       ]
+      }
+     ],
+     "north_arrows": [
+      {
+       "id": "north_arrow-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        271,
+        26,
+        12,
+        12
+       ]
+      }
+     ],
+     "source_notes": [
+      {
+       "id": "source_note-1",
+       "text": "Source: bench",
+       "rect_mm": [
+        167,
+        194,
+        116,
+        8
+       ]
+      }
+     ],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "mp-009",
+   "category": "cartography",
+   "utterance": "Empty map frame flagged",
+   "expect": {
+    "kind": "map_preflight",
+    "passed": false,
+    "expected_codes": []
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-map",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [
+      {
+       "id": "title-1",
+       "text": "Bench Map",
+       "rect_mm": [
+        12,
+        6,
+        200,
+        14
+       ]
+      }
+     ],
+     "legends": [
+      {
+       "id": "legend-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        210,
+        30,
+        70,
+        80
+       ]
+      }
+     ],
+     "scale_bars": [
+      {
+       "id": "scale_bar-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        14,
+        188,
+        60,
+        8
+       ]
+      }
+     ],
+     "north_arrows": [
+      {
+       "id": "north_arrow-1",
+       "map_ref": "map-1",
+       "rect_mm": [
+        271,
+        26,
+        12,
+        12
+       ]
+      }
+     ],
+     "source_notes": [
+      {
+       "id": "source_note-1",
+       "text": "Source: bench",
+       "rect_mm": [
+        167,
+        194,
+        116,
+        8
+       ]
+      }
+     ],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "mp-010",
+   "category": "cartography",
+   "utterance": "Instantiate the classification template and validate the draft",
+   "expect": {
+    "kind": "template_instantiate",
+    "template": "classification"
+   },
+   "payload": {
+    "params": {
+     "layout_name": "bench-classification"
+    }
+   }
+  },
+  {
+   "id": "mp-011",
+   "category": "cartography",
+   "utterance": "Instantiate the change-detection template and validate the draft",
+   "expect": {
+    "kind": "template_instantiate",
+    "template": "change-detection"
+   },
+   "payload": {
+    "params": {
+     "layout_name": "bench-change-detection"
+    }
+   }
+  },
+  {
+   "id": "mp-012",
+   "category": "cartography",
+   "utterance": "Instantiate the remote-sensing-result template and validate the draft",
+   "expect": {
+    "kind": "template_instantiate",
+    "template": "remote-sensing-result"
+   },
+   "payload": {
+    "params": {
+     "layout_name": "bench-remote-sensing-result"
+    }
+   }
+  },
+  {
+   "id": "mp-013",
+   "category": "cartography",
+   "utterance": "Instantiate the scientific-publication template and validate the draft",
+   "expect": {
+    "kind": "template_instantiate",
+    "template": "scientific-publication"
+   },
+   "payload": {
+    "params": {
+     "layout_name": "bench-scientific-publication"
+    }
+   }
+  },
+  {
+   "id": "mp-014",
+   "category": "cartography",
+   "utterance": "Instantiate the choropleth template and validate the draft",
+   "expect": {
+    "kind": "template_instantiate",
+    "template": "choropleth"
+   },
+   "payload": {
+    "params": {
+     "layout_name": "bench-choropleth"
+    }
+   }
+  },
+  {
+   "id": "mp-015",
+   "category": "cartography",
+   "utterance": "Instantiate the time-series template and validate the draft",
+   "expect": {
+    "kind": "template_instantiate",
+    "template": "time-series"
+   },
+   "payload": {
+    "params": {
+     "layout_name": "bench-time-series"
+    }
+   }
+  },
+  {
+   "id": "rp-000",
+   "category": "repair",
+   "utterance": "Repair broken map draft 0",
+   "expect": {
+    "kind": "map_repair",
+    "min_repairs": 3
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-repair-0",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [
+      {
+       "id": "title-off",
+       "text": "off page",
+       "rect_mm": [
+        400,
+        300,
+        50,
+        10
+       ]
+      }
+     ],
+     "legends": [],
+     "scale_bars": [],
+     "north_arrows": [],
+     "source_notes": [],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "rp-001",
+   "category": "repair",
+   "utterance": "Repair broken map draft 1",
+   "expect": {
+    "kind": "map_repair",
+    "min_repairs": 3
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-repair-1",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [],
+     "legends": [],
+     "scale_bars": [],
+     "north_arrows": [],
+     "source_notes": [],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "rp-002",
+   "category": "repair",
+   "utterance": "Repair broken map draft 2",
+   "expect": {
+    "kind": "map_repair",
+    "min_repairs": 3
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-repair-2",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [
+      {
+       "id": "title-off",
+       "text": "off page",
+       "rect_mm": [
+        400,
+        300,
+        50,
+        10
+       ]
+      }
+     ],
+     "legends": [],
+     "scale_bars": [],
+     "north_arrows": [],
+     "source_notes": [],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "rp-003",
+   "category": "repair",
+   "utterance": "Repair broken map draft 3",
+   "expect": {
+    "kind": "map_repair",
+    "min_repairs": 3
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-repair-3",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [],
+     "legends": [],
+     "scale_bars": [],
+     "north_arrows": [],
+     "source_notes": [],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "rp-004",
+   "category": "repair",
+   "utterance": "Repair broken map draft 4",
+   "expect": {
+    "kind": "map_repair",
+    "min_repairs": 3
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-repair-4",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [
+      {
+       "id": "title-off",
+       "text": "off page",
+       "rect_mm": [
+        400,
+        300,
+        50,
+        10
+       ]
+      }
+     ],
+     "legends": [],
+     "scale_bars": [],
+     "north_arrows": [],
+     "source_notes": [],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "rp-005",
+   "category": "repair",
+   "utterance": "Repair broken map draft 5",
+   "expect": {
+    "kind": "map_repair",
+    "min_repairs": 3
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-repair-5",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [],
+     "legends": [],
+     "scale_bars": [],
+     "north_arrows": [],
+     "source_notes": [],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "rp-006",
+   "category": "repair",
+   "utterance": "Repair broken map draft 6",
+   "expect": {
+    "kind": "map_repair",
+    "min_repairs": 3
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-repair-6",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [
+      {
+       "id": "title-off",
+       "text": "off page",
+       "rect_mm": [
+        400,
+        300,
+        50,
+        10
+       ]
+      }
+     ],
+     "legends": [],
+     "scale_bars": [],
+     "north_arrows": [],
+     "source_notes": [],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "rp-007",
+   "category": "repair",
+   "utterance": "Repair broken map draft 7",
+   "expect": {
+    "kind": "map_repair",
+    "min_repairs": 3
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-repair-7",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [],
+     "legends": [],
+     "scale_bars": [],
+     "north_arrows": [],
+     "source_notes": [],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "rp-008",
+   "category": "repair",
+   "utterance": "Repair broken map draft 8",
+   "expect": {
+    "kind": "map_repair",
+    "min_repairs": 3
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-repair-8",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [
+      {
+       "id": "title-off",
+       "text": "off page",
+       "rect_mm": [
+        400,
+        300,
+        50,
+        10
+       ]
+      }
+     ],
+     "legends": [],
+     "scale_bars": [],
+     "north_arrows": [],
+     "source_notes": [],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "rp-009",
+   "category": "repair",
+   "utterance": "Repair broken map draft 9",
+   "expect": {
+    "kind": "map_repair",
+    "min_repairs": 3
+   },
+   "payload": {
+    "mapspec": {
+     "schema_version": "1.0",
+     "kind": "map_spec",
+     "spec_version": 1,
+     "layout_name": "bench-repair-9",
+     "page": {
+      "width_mm": 297,
+      "height_mm": 210
+     },
+     "map_frames": [
+      {
+       "id": "map-1",
+       "rect_mm": [
+        12,
+        24,
+        190,
+        160
+       ],
+       "extent": [
+        116,
+        39,
+        117,
+        40
+       ]
+      }
+     ],
+     "titles": [],
+     "legends": [],
+     "scale_bars": [],
+     "north_arrows": [],
+     "source_notes": [],
+     "labels": [],
+     "layers": [],
+     "symbols": [],
+     "charts": [],
+     "colorbars": [],
+     "inset_maps": [],
+     "grids": [],
+     "annotations": [],
+     "constraints": []
+    }
+   }
+  },
+  {
+   "id": "bc-001",
+   "category": "bounded_context",
+   "utterance": "AgentToolCatalog bounded list",
+   "expect": {
+    "kind": "bounded_search",
+    "query": "raster",
+    "max_bytes": 512000
+   }
+  },
+  {
+   "id": "bc-002",
+   "category": "bounded_context",
+   "utterance": "Catalog search NDVI",
+   "expect": {
+    "kind": "bounded_search",
+    "query": "ndvi",
+    "max_bytes": 512000
+   }
+  },
+  {
+   "id": "bc-003",
+   "category": "bounded_context",
+   "utterance": "Catalog search classification",
+   "expect": {
+    "kind": "bounded_search",
+    "query": "classification",
+    "max_bytes": 512000
+   }
+  },
+  {
+   "id": "bc-004",
+   "category": "bounded_context",
+   "utterance": "Catalog search temporal",
+   "expect": {
+    "kind": "bounded_search",
+    "query": "temporal",
+    "max_bytes": 512000
+   }
+  },
+  {
+   "id": "bc-005",
+   "category": "bounded_context",
+   "utterance": "Catalog search fusion",
+   "expect": {
+    "kind": "bounded_search",
+    "query": "fusion",
+    "max_bytes": 512000
+   }
+  },
+  {
+   "id": "bc-006",
+   "category": "bounded_context",
+   "utterance": "Catalog search segmentation",
+   "expect": {
+    "kind": "bounded_search",
+    "query": "segmentation",
+    "max_bytes": 512000
+   }
+  },
+  {
+   "id": "bc-007",
+   "category": "bounded_context",
+   "utterance": "Catalog search change",
+   "expect": {
+    "kind": "bounded_search",
+    "query": "change",
+    "max_bytes": 512000
+   }
+  },
+  {
+   "id": "bc-008",
+   "category": "bounded_context",
+   "utterance": "Catalog search spectral",
+   "expect": {
+    "kind": "bounded_search",
+    "query": "spectral",
+    "max_bytes": 512000
+   }
+  },
+  {
+   "id": "bc-009",
+   "category": "bounded_context",
+   "utterance": "Catalog search mask",
+   "expect": {
+    "kind": "bounded_search",
+    "query": "mask",
+    "max_bytes": 512000
+   }
+  },
+  {
+   "id": "bc-010",
+   "category": "bounded_context",
+   "utterance": "Catalog search import",
+   "expect": {
+    "kind": "bounded_search",
+    "query": "import",
+    "max_bytes": 512000
+   }
+  }
+ ]
+}
