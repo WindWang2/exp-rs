@@ -464,12 +464,36 @@ int commandWorkflow( QStringList args, const CliIO &io )
         }
 
         // run: convert the public document to pipeline JSON and execute it
-        // through the TaskCenter DAG (RsPipelineRunner).
+        // through the TaskCenter DAG (RsPipelineRunner). Headless runs
+        // operator steps only: interactive/review/composite steps are
+        // session constructs and are refused with a clear diagnostic rather
+        // than silently demoted; gates are GUI-session admission hints and
+        // are reported as ignored.
         Json::Value pipeline( Json::objectValue );
         pipeline["name"] = document.get( "title", document.get( "id", "workflow" ).asString() ).asString();
         Json::Value steps( Json::arrayValue );
+        Json::Value ignored( Json::arrayValue );
         for ( const Json::Value &step : document["steps"] )
         {
+            std::string kind = "operator";
+            if ( step.isMember( "kind" ) && step["kind"].isString() )
+                kind = step["kind"].asString();
+            if ( kind != "operator" )
+            {
+                Json::Value entry( Json::objectValue );
+                entry["step"] = step.get( "id", "" ).asString();
+                entry["kind"] = kind;
+                ignored.append( entry );
+                continue;
+            }
+            if ( step.isMember( "gates" ) && step["gates"].isArray()
+                 && !step["gates"].empty() )
+            {
+                Json::Value entry( Json::objectValue );
+                entry["step"] = step.get( "id", "" ).asString();
+                entry["field"] = "gates";
+                ignored.append( entry );
+            }
             Json::Value pipelineStep( Json::objectValue );
             pipelineStep["id"] = step.get( "id", "" ).asString();
             pipelineStep["operator"] = step.isMember( "operator" )
@@ -483,6 +507,13 @@ int commandWorkflow( QStringList args, const CliIO &io )
             }
             pipelineStep["params"] = params;
             steps.append( pipelineStep );
+        }
+        if ( steps.empty() )
+        {
+            return io.finish( false, "workflow", {},
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure ),
+                              {}, "no operator steps to run headless "
+                                  "(interactive/review/composite steps require the GUI session)" );
         }
         pipeline["steps"] = steps;
 
@@ -503,6 +534,8 @@ int commandWorkflow( QStringList args, const CliIO &io )
         Json::Value data( Json::objectValue );
         data["workflow"] = document.get( "id", "" ).asString();
         data["steps"] = static_cast<Json::Int>( result.steps.size() );
+        if ( !ignored.empty() )
+            data["ignored_steps"] = ignored;
         return io.finish( true, "workflow", data, 0 );
     }
 

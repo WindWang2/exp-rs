@@ -55,12 +55,14 @@ For every `*V1` interface (`PluginV1`, `ContributionContextV1`,
 ## Compatibility gate mechanics
 
 The gate runs on the manifest (a JSON file), so incompatible plugins are
-identified **without executing any plugin code**:
+identified **without loading any plugin binary** (the `plugin doctor`
+symbol probe dlopens the library and therefore runs its ELF initializers —
+that probe is a diagnostic, not the gate):
 
 ```
 plugin record: Validated → (api/abi/platform checks) → loadable | Incompatible (E2001/E2002/E2004)
 ```
 
-`exprs::isPluginApiVersionCompatible(host, declared)` in `exprs/version.h`
+`exprs::isPluginApiCompatible(host, declared)` in `exprs/version.h`
 is the single decision function — the CLI `plugin doctor` command and the
 conformance kit call the same code the loader calls.

@@ -16,9 +16,12 @@ risk instead of pretending:
 
 1. **Trust classification** (see permissions.md): builtin → third-party →
    untrusted origins.
-2. **Load before use, never at startup**: binaries are dlopened only when a
-   contribution is actually executed or the user asks for it. A broken
-   plugin delays nothing and corrupts nothing at boot.
+2. **Lazy by default, explicit when eager**: the CLI and every catalog
+   surface (Processing, MCP, Workflow) work purely from manifests and dlopen
+   a binary only when a contribution actually executes. The GUI shell is the
+   one deliberate exception — it eagerly loads validated native plugins so
+   docks/menu contributions exist at boot; loading remains
+   diagnostics-gated and policy-gated.
 3. **`SICNU_PLUGIN_DISABLE_NATIVE_THIRD_PARTY=1`**: hard kill-switch to run
    third-party-free sessions (used by the conformance kit and support
    diagnostics).

@@ -108,7 +108,9 @@ PluginRuntimeHost::resolveOperatorFactory( const std::string &operatorId ) const
     std::lock_guard<std::mutex> lock( mMutex );
     auto iterator = mOperators.find( operatorId );
     if ( iterator == mOperators.end() )
+    {
         return nullptr;
+    }
     return iterator->second.factory;
 }
 
@@ -137,6 +139,7 @@ void PluginRuntimeHost::installPluginModelRuntimes( const exprs::PluginRecord &r
         // Reserve the framework key; the executable factory arrives through
         // registerModelRuntime() when the plugin actually loads.
         mModelRuntimeFactories[runtime.framework] = nullptr;
+        mModelRuntimeOwners[runtime.framework] = record.id();
 #if defined( SICNU_HAS_OPENCV )
         registerPluginModelRuntime( runtime.framework, record.id() );
 #endif
@@ -164,8 +167,21 @@ void PluginRuntimeHost::revokePluginContributions( const std::string &pluginId )
             ++iterator;
         }
     }
-    for ( const auto &entry : mModelRuntimeFactories )
-        clearPluginModelRuntimeFactory( entry.first );
+    for ( auto iterator = mModelRuntimeFactories.begin();
+          iterator != mModelRuntimeFactories.end(); )
+    {
+        const auto owner = mModelRuntimeOwners.find( iterator->first );
+        if ( owner != mModelRuntimeOwners.end() && owner->second == pluginId )
+        {
+            clearPluginModelRuntimeFactory( iterator->first );
+            mModelRuntimeOwners.erase( owner );
+            iterator = mModelRuntimeFactories.erase( iterator );
+        }
+        else
+        {
+            ++iterator;
+        }
+    }
     PluginAgentToolProvider::unregisterPluginExecutors( pluginId );
     DataProviderRegistry::instance().unregisterPlugin( pluginId );
     mRegisteredAgentToolIds.erase(

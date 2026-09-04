@@ -33,7 +33,10 @@ exprs::PluginState incompatibleStateFor( const std::string &pluginId,
 namespace exprs {
 
 namespace {
-std::mutex gRegistryMutex;
+// Recursive: locked public accessors (record/records/...) are also used
+// internally from paths that already hold the lock.
+std::recursive_mutex gRegistryMutex;
+bool gDestructing = false;
 
 const LoadedPlugin *findLoaded( const std::vector<LoadedPlugin> &loaded,
                                 const std::string &pluginId )
@@ -55,7 +58,9 @@ PluginRegistry &PluginRegistry::instance()
 
 PluginRegistry::~PluginRegistry()
 {
-    // Never call virtual sinks from static destruction.
+    // Static destruction: drain executor handles but never issue virtual
+    // calls into a possibly-destroyed sink.
+    gDestructing = true;
     try
     {
         unloadAll();
@@ -63,11 +68,12 @@ PluginRegistry::~PluginRegistry()
     catch ( ... )
     {
     }
+    gDestructing = false;
 }
 
 void PluginRegistry::configure( const PluginRegistryOptions &options )
 {
-    std::lock_guard<std::mutex> lock( gRegistryMutex );
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     mOptions = options;
     if ( mOptions.roots.empty() )
         mOptions.roots = PluginDiscovery::defaultRoots( mOptions.appDir, mOptions.installDataDir );
@@ -87,12 +93,18 @@ void PluginRegistry::configure( const PluginRegistryOptions &options )
         mOptions.tempDirectory, mOptions.workspaceRoot, mOptions.dataDirectory,
         mOptions.logSink );
     loadUserIndex();
-    refresh();
+    refreshUnlocked();
 }
 
 void PluginRegistry::refresh()
 {
-    // Caller holds gRegistryMutex (configure/lock-free internal use only).
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+    refreshUnlocked();
+}
+
+void PluginRegistry::refreshUnlocked()
+{
+    // Caller holds gRegistryMutex.
     mDiagnostics.clear();
 
     PluginDiscoveryOptions discoveryOptions;
@@ -132,6 +144,7 @@ void PluginRegistry::refresh()
 
 const PluginRecord *PluginRegistry::record( const std::string &pluginId ) const
 {
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     for ( const PluginRecord &entry : mRecords )
     {
         if ( entry.id() == pluginId )
@@ -142,6 +155,7 @@ const PluginRecord *PluginRegistry::record( const std::string &pluginId ) const
 
 PluginRecord *PluginRegistry::record( const std::string &pluginId )
 {
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     for ( PluginRecord &entry : mRecords )
     {
         if ( entry.id() == pluginId )
@@ -152,6 +166,7 @@ PluginRecord *PluginRegistry::record( const std::string &pluginId )
 
 std::vector<std::string> PluginRegistry::pluginIds() const
 {
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     std::vector<std::string> ids;
     ids.reserve( mRecords.size() );
     for ( const PluginRecord &entry : mRecords )
@@ -201,6 +216,35 @@ void PluginRegistry::applyPolicyAndIndex()
             continue;
         }
 
+        if ( mOptions.policy.mode == PluginPolicyMode::Enforce )
+        {
+            for ( const std::string &capability : record.manifest.capabilities )
+            {
+                for ( PluginPermission permission :
+                      requiredPermissionsForCapability( capability ) )
+                {
+                    if ( std::find( record.manifest.permissions.begin(),
+                                    record.manifest.permissions.end(), permission )
+                         == record.manifest.permissions.end() )
+                    {
+                        record.state = PluginState::Blocked;
+                        record.diagnostics.add(
+                            PluginDiagnosticCode::PermissionDenied,
+                            PluginDiagnosticSeverity::Error,
+                            "enforce policy: capability '" + capability
+                                + "' requires undeclared permission '"
+                                + pluginPermissionName( permission ) + "'",
+                            id );
+                        break;
+                    }
+                }
+                if ( record.state == PluginState::Blocked )
+                    break;
+            }
+            if ( record.state == PluginState::Blocked )
+                continue;
+        }
+
         if ( std::find( mDisabledIds.begin(), mDisabledIds.end(), id ) != mDisabledIds.end() )
         {
             record.state = PluginState::Disabled;
@@ -213,7 +257,7 @@ void PluginRegistry::applyPolicyAndIndex()
 
 bool PluginRegistry::load( const std::string &pluginId )
 {
-    std::lock_guard<std::mutex> lock( gRegistryMutex );
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     return loadUnlocked( pluginId );
 }
 
@@ -245,11 +289,25 @@ bool PluginRegistry::loadUnlocked( const std::string &pluginId )
                           "plugin is disabled by the user", pluginId );
         return false;
     }
-    if ( entry->manifest.entrypointKind != PluginEntrypointKind::Native )
+    if ( entry->manifest.entrypointKind == PluginEntrypointKind::Python )
     {
-        // Python/manifest plugins are hosted elsewhere (worker pool /
-        // external tools); the registry tracks them as loaded without a
-        // binary handle so isLoaded/unload semantics stay uniform.
+        // Python plugins are hosted by the Python worker host (PluginHost /
+        // PythonPluginHost, metadata.txt + classFactory), which owns the
+        // out-of-process pool. The manifest is the discovery/doctor index;
+        // pretending to "load" here would hide the real hosting path.
+        mDiagnostics.add( PluginDiagnosticCode::EntrypointMissing,
+                          PluginDiagnosticSeverity::Warning,
+                          "python plugins are hosted by the Python worker host "
+                          "(PluginHost); registry load is a no-op",
+                          pluginId );
+        entry->state = PluginState::Validated;
+        return false;
+    }
+    if ( entry->manifest.entrypointKind == PluginEntrypointKind::Manifest )
+    {
+        // Manifest-kind plugins: every contribution is pure-manifest
+        // (external tools); nothing to dlopen, so loading is a host-side
+        // bookkeeping op.
         LoadedPlugin hosted;
         hosted.pluginId = pluginId;
         mLoaded.push_back( std::move( hosted ) );
@@ -284,7 +342,7 @@ bool PluginRegistry::loadUnlocked( const std::string &pluginId )
 
 std::vector<std::string> PluginRegistry::loadAllValidated()
 {
-    std::lock_guard<std::mutex> lock( gRegistryMutex );
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     std::vector<std::string> loadedIds;
     for ( PluginRecord &entry : mRecords )
     {
@@ -298,7 +356,7 @@ std::vector<std::string> PluginRegistry::loadAllValidated()
 
 std::vector<std::string> PluginRegistry::loadedPluginIds() const
 {
-    std::lock_guard<std::mutex> lock( gRegistryMutex );
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     std::vector<std::string> ids;
     for ( const LoadedPlugin &entry : mLoaded )
         ids.push_back( entry.pluginId );
@@ -307,13 +365,13 @@ std::vector<std::string> PluginRegistry::loadedPluginIds() const
 
 const LoadedPlugin *PluginRegistry::loaded( const std::string &pluginId ) const
 {
-    std::lock_guard<std::mutex> lock( gRegistryMutex );
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     return findLoaded( mLoaded, pluginId );
 }
 
 bool PluginRegistry::unload( const std::string &pluginId )
 {
-    std::lock_guard<std::mutex> lock( gRegistryMutex );
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     auto iterator = std::find_if( mLoaded.begin(), mLoaded.end(),
                                   [&]( const LoadedPlugin &entry ) {
                                       return entry.pluginId == pluginId;
@@ -336,12 +394,12 @@ bool PluginRegistry::unload( const std::string &pluginId )
 
 void PluginRegistry::unloadAll()
 {
-    std::lock_guard<std::mutex> lock( gRegistryMutex );
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     if ( !mLoader )
         return;
     for ( LoadedPlugin &entry : mLoaded )
     {
-        if ( mSink )
+        if ( mSink && !gDestructing )
             mSink->revokePlugin( entry.pluginId );
     }
     for ( LoadedPlugin &entry : mLoaded )
@@ -356,7 +414,7 @@ void PluginRegistry::unloadAll()
 
 bool PluginRegistry::ensureLoaded( const std::string &pluginId )
 {
-    std::lock_guard<std::mutex> lock( gRegistryMutex );
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     if ( findLoaded( mLoaded, pluginId ) )
         return true;
     return loadUnlocked( pluginId );
@@ -364,7 +422,7 @@ bool PluginRegistry::ensureLoaded( const std::string &pluginId )
 
 bool PluginRegistry::isLoaded( const std::string &pluginId ) const
 {
-    std::lock_guard<std::mutex> lock( gRegistryMutex );
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     return findLoaded( mLoaded, pluginId ) != nullptr;
 }
 
@@ -420,7 +478,7 @@ void PluginRegistry::saveUserIndex() const
 
 bool PluginRegistry::setEnabled( const std::string &pluginId, bool enabled )
 {
-    std::lock_guard<std::mutex> lock( gRegistryMutex );
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     if ( !record( pluginId ) )
         return false;
     auto position = std::find( mDisabledIds.begin(), mDisabledIds.end(), pluginId );
@@ -457,7 +515,7 @@ bool PluginRegistry::setEnabled( const std::string &pluginId, bool enabled )
 
 bool PluginRegistry::isEnabled( const std::string &pluginId ) const
 {
-    std::lock_guard<std::mutex> lock( gRegistryMutex );
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     const PluginRecord *entry = record( pluginId );
     if ( !entry )
         return false;

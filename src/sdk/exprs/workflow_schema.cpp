@@ -101,7 +101,18 @@ bool validateWorkflowDocument( const Json::Value &document, PluginDiagnosticLog 
             ok = false;
         }
 
-        const std::string kind = step.get( "kind", "operator" ).asString();
+        std::string kind = "operator";
+        if ( step.isMember( "kind" ) )
+        {
+            if ( !step["kind"].isString() )
+            {
+                addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
+                          "step '" + stepId + "' 'kind' must be a string", "steps[].kind" );
+                ok = false;
+                continue;
+            }
+            kind = step["kind"].asString();
+        }
         if ( !isValidStepKind( kind ) )
         {
             addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
@@ -110,11 +121,15 @@ bool validateWorkflowDocument( const Json::Value &document, PluginDiagnosticLog 
         }
         if ( kind.empty() || kind == "operator" )
         {
-            const std::string operatorId = step.isMember( "operator" )
-                                               ? step["operator"].asString()
-                                               : ( step.isMember( "operatorId" )
-                                                       ? step["operatorId"].asString()
-                                                       : step.get( "name", "" ).asString() );
+            const auto readStringField = [&step]( const char *key ) -> std::string {
+                return step.isMember( key ) && step[key].isString() ? step[key].asString()
+                                                                    : std::string();
+            };
+            const std::string operatorId =
+                readStringField( "operator" ).empty()
+                    ? ( readStringField( "operatorId" ).empty() ? readStringField( "name" )
+                                                                : readStringField( "operatorId" ) )
+                    : readStringField( "operator" );
             if ( operatorId.empty() )
             {
                 addError( diagnostics, PluginDiagnosticCode::ManifestMissingField,

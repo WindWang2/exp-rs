@@ -197,6 +197,7 @@ std::vector<PluginRecord> PluginDiscovery::scan( const PluginDiscoveryOptions &o
     std::vector<PluginRecord> records;
     std::map<std::string, size_t> idOwner; // plugin id -> records index (first root wins)
 
+    const std::string userRoot = userPluginRoot();
     for ( size_t rootIndex = 0; rootIndex < options.roots.size(); ++rootIndex )
     {
         const std::string &root = options.roots[rootIndex];
@@ -216,7 +217,8 @@ std::vector<PluginRecord> PluginDiscovery::scan( const PluginDiscoveryOptions &o
             PluginRecord record;
             record.directory = dir;
             record.manifestPath = manifestPath;
-            record.origin = originForRootIndex( rootIndex, static_cast<size_t>( -1 ) );
+            record.origin = root == userRoot ? PluginOrigin::User
+                                             : originForRootIndex( rootIndex, static_cast<size_t>( -1 ) );
 
             bool parsed = false;
             if ( options.useCache && tryCachedManifest( indexCache, dir, manifestPath,

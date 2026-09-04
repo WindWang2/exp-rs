@@ -94,3 +94,6 @@ benchmarks/
 # un-ignore them again (last match wins).
 __pycache__/
 *.pyc
+
+# Plugin discovery manifest index cache
+.exprs-manifest-index.json

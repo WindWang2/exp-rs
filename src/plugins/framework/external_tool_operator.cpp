@@ -200,7 +200,7 @@ Json::Value ExternalToolOperator::run( const Json::Value &params,
     }
     if ( processResult.timedOut )
     {
-        throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::NotInitialized,
+        throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::ExternalProcessTimeout,
                                                  processResult.error );
     }
     if ( !processResult.exitedCleanly() )
@@ -213,7 +213,7 @@ Json::Value ExternalToolOperator::run( const Json::Value &params,
             detail = processResult.error;
         else if ( !processResult.stdErr.empty() )
             detail += ": " + processResult.stdErr.substr( 0, 1000 );
-        throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::FileNotWritable,
+        throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::ExternalProcessFailed,
                                                  "external tool failed (" + detail + ")" );
     }
 

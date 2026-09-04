@@ -98,6 +98,8 @@ private:
     ~PluginRegistry();
 
     void applyPolicyAndIndex();
+    /// Scan+validate+policy pass; caller must hold the registry mutex.
+    void refreshUnlocked();
     /// Core load path; caller must hold the registry mutex.
     bool loadUnlocked( const std::string &pluginId );
     std::string userIndexPath() const;

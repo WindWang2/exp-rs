@@ -90,6 +90,7 @@ private:
     mutable std::mutex mMutex;
     std::map<std::string, OperatorEntry> mOperators;      ///< operatorId -> entry
     std::map<std::string, exprs::PluginModelRuntimeFactoryV1> mModelRuntimeFactories;
+    std::map<std::string, std::string> mModelRuntimeOwners; ///< framework -> pluginId
     std::vector<std::string> mRegisteredAgentToolIds;
     bool mBootstrapped = false;
 };

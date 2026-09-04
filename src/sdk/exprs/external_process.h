@@ -63,8 +63,10 @@ public:
     /// Synchronous run. Always reaps the child before returning.
     static ExternalProcessResult run( const ExternalProcessRequest &request );
 
-    /// Validates that argv[0] resolves in PATH (or is an existing absolute
-    /// path) and does not contain shell-only constructs we reject up-front.
+    /// Diagnostics helper: verifies argv[0] is an existing absolute path or
+    /// resolves in the PARENT's PATH. Advisory only — resolution at exec
+    /// time uses the CHILD environment (a manifest may override PATH); the
+    /// security boundary is argv-only spawn, never this check.
     static bool validateArgv( const std::vector<std::string> &argv, std::string &error );
 };
 

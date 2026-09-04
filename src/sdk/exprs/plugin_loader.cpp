@@ -208,16 +208,20 @@ PluginLoader::~PluginLoader()
 
 bool PluginLoader::probeEntrypoint( const std::string &libraryPath, std::string &error )
 {
+    // NOTE: dlopen runs the library's ELF initializers — "probe" means no
+    // entrypoint invocation, not zero code execution. The abi/API gate above
+    // is the pre-execution boundary; see docs/plugins/isolation.md.
     void *handle = ::dlopen( libraryPath.c_str(), RTLD_LAZY | RTLD_LOCAL );
     if ( !handle )
     {
-        error = ::dlerror() ? ::dlerror() : "dlopen failed";
+        const char *message = ::dlerror();
+        error = message ? message : "dlopen failed";
         return false;
     }
     void *symbol = ::dlsym( handle, kPluginEntryPointV1 );
     const char *symbolError = ::dlerror();
     ::dlclose( handle );
-    if ( !symbol || symbolError )
+    if ( !symbol )
     {
         error = "entrypoint symbol '" + std::string( kPluginEntryPointV1 ) + "' not found";
         return false;

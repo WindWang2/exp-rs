@@ -144,6 +144,15 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
     if ( !PluginManifestValidator::validate( manifest, request, log ) )
         return false;
 
+    if ( !PluginManifestValidator::isValidPluginId( manifest.id ) )
+    {
+        PluginDiagnostic failure;
+        failure.code = PluginDiagnosticCode::ManifestInvalidField;
+        failure.pluginId = manifest.id;
+        failure.message = "invalid plugin id — refused";
+        log.add( failure );
+        return false;
+    }
     const std::string userRoot = PluginDiscovery::userPluginRoot();
     const std::string target = userRoot + "/" + manifest.id;
 
@@ -222,8 +231,29 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
 
 bool PluginPackage::uninstall( const std::string &pluginId, PluginDiagnosticLog &log )
 {
+    // The id comes from the CLI/SDK surface and becomes a path: gate it on
+    // the manifest id grammar BEFORE any path arithmetic, and verify the
+    // result stays inside the user root (defence in depth against '..').
+    if ( !PluginManifestValidator::isValidPluginId( pluginId ) )
+    {
+        PluginDiagnostic failure;
+        failure.code = PluginDiagnosticCode::ManifestInvalidField;
+        failure.pluginId = pluginId;
+        failure.message = "invalid plugin id — refused";
+        log.add( failure );
+        return false;
+    }
     const std::string userRoot = PluginDiscovery::userPluginRoot();
     const std::string target = userRoot + "/" + pluginId;
+    if ( !contained( userRoot, target ) )
+    {
+        PluginDiagnostic failure;
+        failure.code = PluginDiagnosticCode::ManifestInvalidField;
+        failure.pluginId = pluginId;
+        failure.message = "resolved path escapes the user plugin root — refused";
+        log.add( failure );
+        return false;
+    }
     if ( !isDirectory( target ) )
     {
         PluginDiagnostic failure;

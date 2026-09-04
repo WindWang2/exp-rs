@@ -80,6 +80,44 @@ public:
 };
 } // namespace
 
+TEST_CASE( "registry load of a native plugin registers a working factory",
+           "[plugin][loader][regression]" )
+{
+    // Guards against the dead-code regression where the native load path was
+    // unreachable: registry reported Loaded but the sink never received the
+    // operator factory ("operator factory returned nullptr" at execute).
+    writeManifest( SICNU_TEST_HELLO_PLUGIN_DIR, "libhello_plugin.so", pluginAbiVersion() );
+
+    exprs::PluginRegistryOptions options;
+    // Discovery scans subdirectories of each root — the root is the fixture
+    // PARENT (scan() skips the root directory itself).
+    options.roots = { std::string( SICNU_TEST_HELLO_PLUGIN_DIR ) + "/.." };
+    options.policy.allowThirdPartyNative = true;
+    exprs::PluginRegistry &registry = exprs::PluginRegistry::instance();
+    RecordingSink sink;
+    registry.setContributionSink( &sink );
+    registry.configure( options );
+    registry.setEnabled( "org.exprs.test.hello-plugin", true );
+
+    REQUIRE( registry.load( "org.exprs.test.hello-plugin" ) );
+    REQUIRE( registry.isLoaded( "org.exprs.test.hello-plugin" ) );
+    REQUIRE( sink.factories.count( "test:hello" ) == 1 );
+
+    {
+        // Operator objects live inside the plugin library: destroy them
+        // BEFORE unloading the library (same contract as production code).
+        auto instance = sink.factories.at( "test:hello" )();
+        REQUIRE( instance != nullptr );
+        sicnu::operators::RSOperatorContext context;
+        Json::Value result = instance->run( Json::Value( Json::objectValue ), context );
+        REQUIRE( result.get( "success", false ).asBool() );
+    }
+
+    REQUIRE( registry.unload( "org.exprs.test.hello-plugin" ) );
+    REQUIRE( sink.factories.empty() ); // revoked before dlclose
+    registry.setContributionSink( nullptr );
+}
+
 TEST_CASE( "manifest gate rejects ABI mismatch before dlopen", "[plugin][loader]" )
 {
     writeManifest( SICNU_TEST_HELLO_PLUGIN_DIR, "libhello_plugin.so", 999 );

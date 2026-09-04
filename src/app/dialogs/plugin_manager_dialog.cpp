@@ -58,8 +58,8 @@ PluginManagerDialog::PluginManagerDialog( QWidget *parent )
     buttons->addWidget( closeBox );
     layout->addLayout( buttons );
 
-    connect( mEnableButton, &QPushButton::clicked, this, &PluginManagerDialog::toggleEnabled );
-    connect( mDisableButton, &QPushButton::clicked, this, &PluginManagerDialog::toggleEnabled );
+    connect( mEnableButton, &QPushButton::clicked, this, [this]() { applyEnabled( true ); } );
+    connect( mDisableButton, &QPushButton::clicked, this, [this]() { applyEnabled( false ); } );
     connect( refreshButton, &QPushButton::clicked, this, &PluginManagerDialog::refresh );
     connect( closeBox, &QDialogButtonBox::accepted, this, &QDialog::accept );
     connect( closeBox, &QDialogButtonBox::rejected, this, &QDialog::reject );
@@ -104,17 +104,19 @@ void PluginManagerDialog::populate()
                            .arg( problem ) );
 }
 
-void PluginManagerDialog::toggleEnabled()
+void PluginManagerDialog::applyEnabled( bool enable )
 {
     const auto selection = mTable->selectedItems();
     if ( selection.isEmpty() )
         return;
-    const QString pluginId = mTable->item( selection.first()->row(), 0 )->data( Qt::UserRole ).toString();
-    const auto *record = exprs::PluginRegistry::instance().record( pluginId.toStdString() );
-    if ( !record )
-        return;
-    const bool enable = record->state != exprs::PluginState::Validated
-                        && record->state != exprs::PluginState::Loaded;
+    const QString pluginId =
+        mTable->item( selection.first()->row(), 0 )->data( Qt::UserRole ).toString();
+    if ( !enable )
+    {
+        // Disabling a loaded native plugin also unloads it, so the state the
+        // user sees matches the persisted index.
+        exprs::PluginRegistry::instance().unload( pluginId.toStdString() );
+    }
     exprs::PluginRegistry::instance().setEnabled( pluginId.toStdString(), enable );
     populate();
 }

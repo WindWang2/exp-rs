@@ -11,6 +11,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <map>
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
@@ -29,19 +30,29 @@ std::vector<std::string> childEnvironment( const ExternalProcessRequest &request
 {
     if ( request.inheritEnvironment )
     {
-        std::vector<std::string> envp;
+        // Explicit entries REPLACE same-named inherited variables (glibc
+        // honours the first occurrence, so appending would be a silent
+        // no-op and contradict the documented override contract).
+        std::map<std::string, std::string> merged;
         for ( char **current = environ; current && *current; ++current )
-            envp.push_back( *current );
+        {
+            const std::string entry( *current );
+            const size_t equals = entry.find( '=' );
+            if ( equals != std::string::npos )
+                merged[entry.substr( 0, equals )] = entry.substr( equals + 1 );
+        }
         if ( request.environment.isObject() )
         {
             for ( const std::string &name : request.environment.getMemberNames() )
             {
                 const Json::Value &value = request.environment[name];
-                if ( !value.isString() )
-                    continue;
-                envp.push_back( name + "=" + value.asString() );
+                if ( value.isString() )
+                    merged[name] = value.asString();
             }
         }
+        std::vector<std::string> envp;
+        for ( const auto &entry : merged )
+            envp.push_back( entry.first + "=" + entry.second );
         return envp;
     }
 

@@ -86,10 +86,17 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     setupGeneralTab();
     setupToolsTab();
     setupAboutTab();
-    // Plugin-contributed pages last (ExpRS Developer Platform 3.0).
-    const QMap<QString, QWidget *> pages = externalPages();
-    for ( auto it = pages.constBegin(); it != pages.constEnd(); ++it )
-        m_tabWidget->addTab( it.value(), it.key() );
+    // Plugin-contributed pages last (ExpRS Developer Platform 3.0). The map
+    // is CONSUMED: addTab reparents (and the dialog eventually deletes) each
+    // page, so a cached pointer here would dangle on the next open. Plugins
+    // re-contribute through PluginUiHost whenever they (re)load.
+    QMap<QString, QWidget *> pages = externalPages();
+    for ( auto it = pages.begin(); it != pages.end(); ++it )
+    {
+        if ( it.value() )
+            m_tabWidget->addTab( it.value(), it.key() );
+    }
+    externalPages().clear();
 
     auto *buttonBox = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply | QDialogButtonBox::Help, this );

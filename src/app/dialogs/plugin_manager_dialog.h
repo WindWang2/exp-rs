@@ -23,8 +23,10 @@ public:
 
 private slots:
     void refresh();
-    void toggleEnabled();
     void showDiagnostics();
+
+private:
+    void applyEnabled( bool enable );
 
 private:
     void populate();

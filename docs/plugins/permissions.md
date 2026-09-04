@@ -36,7 +36,7 @@ a **warning** diagnostic at validation time.
 |---|---|---|
 | `builtin` (application payload) | trusted | in-process allowed |
 | `system` / `user` | third-party | in-process, gated by policy |
-| external dirs (`SICNU_PLUGIN_PATH`) | untrusted | validate/doctor only |
+| external dirs (`SICNU_PLUGIN_PATH`) | third-party | load-gated like system roots; review before adding |
 
 ## Credentials
 
