@@ -1,6 +1,7 @@
 // src/agent/spatial_tools/temporal_collection_tools.cpp
 #include "temporal_collection_tools.h"
 
+#include "processing/algorithms/temporal/spatiotemporal_contracts.h"
 #include "processing/algorithms/temporal/temporal_preflight.h"
 
 #include <QFile>
@@ -73,6 +74,40 @@ Json::Value compactSummary( const TemporalCollection &collection,
     for ( const QString &p : platforms )
       arr.append( p.toStdString() );
     v["platforms"] = arr;
+  }
+  // Platform 3.0 multimodal facts (additive keys only).
+  {
+    const auto contracts = sicnu::temporal::contractsOf( collection );
+    const QStringList modalities = sicnu::temporal::distinctModalities( contracts );
+    if ( !modalities.isEmpty() && modalities != QStringList{ QStringLiteral( "unknown" ) } )
+    {
+      Json::Value arr( Json::arrayValue );
+      for ( const QString &m : modalities )
+        arr.append( m.toStdString() );
+      v["modalities"] = arr;
+    }
+    int sarCount = 0;
+    QStringList pols;
+    for ( const auto &c : contracts )
+    {
+      if ( c.modality != sicnu::temporal::Modality::Sar )
+        continue;
+      ++sarCount;
+      for ( const QString &pol : c.polarizations )
+        if ( !pols.contains( pol ) )
+          pols.push_back( pol );
+    }
+    if ( sarCount > 0 )
+    {
+      v["sar_scene_count"] = sarCount;
+      if ( !pols.isEmpty() )
+      {
+        Json::Value arr( Json::arrayValue );
+        for ( const QString &pol : pols )
+          arr.append( pol.toStdString() );
+        v["polarizations"] = arr;
+      }
+    }
   }
   v["grid_compatible"] = report.gridCompatible;
   v["radiometric_state"] = report.commonRadiometricState.toStdString();
@@ -364,6 +399,21 @@ SpatialToolResult TemporalListScenesTool::execute( const Json::Value &input )
       entry["platform"] = s.platform.toStdString();
     if ( !s.processingLevel.isEmpty() )
       entry["processing_level"] = s.processingLevel.toStdString();
+    // Multimodal observation contract (additive; empty = unclaimed).
+    {
+      const auto contract = sicnu::temporal::ObservationContract::fromSceneRef( s );
+      if ( contract.modality != sicnu::temporal::Modality::Unknown )
+        entry["modality"] = sicnu::temporal::modalityToString( contract.modality ).toStdString();
+      if ( !s.sensor.isEmpty() )
+        entry["sensor"] = s.sensor.toStdString();
+      if ( !contract.polarizations.isEmpty() )
+      {
+        Json::Value pols( Json::arrayValue );
+        for ( const QString &pol : contract.polarizations )
+          pols.append( pol.toStdString() );
+        entry["polarizations"] = pols;
+      }
+    }
     if ( !s.assetId.isEmpty() )
       entry["asset_id"] = s.assetId.toStdString();
     list.append( entry );

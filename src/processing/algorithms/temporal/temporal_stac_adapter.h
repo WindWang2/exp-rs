@@ -42,6 +42,12 @@ struct StacItem
     QString rasterAssetKey;  ///< the STAC asset key it came from
     /// Band names from the raster asset's eo:bands (best effort).
     QStringList rasterBands;
+    /// Multimodal observation attributes (Platform 3.0, goal §5). Empty/0 =
+    /// unclaimed; the spatiotemporal contracts layer interprets them.
+    QString modality;          ///< "optical" | "sar" | "dem" ("" = unknown)
+    QString sensor;            ///< finest instrument attribute (e.g. sar:instrument_mode)
+    QStringList polarizations; ///< sar:polarizations, normalized upper case
+    double gsd = 0.0;          ///< eo:gsd (nominal resolution, meters); 0 = unreported
     /// Footprint bounds extracted from geometry (hasGeometry = false when the
     /// item carries no geometry; bbox filters then keep the item).
     bool hasGeometry = false;

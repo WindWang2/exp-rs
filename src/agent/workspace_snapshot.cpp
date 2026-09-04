@@ -1,6 +1,8 @@
 // src/agent/workspace_snapshot.cpp
 #include "workspace_snapshot.h"
 
+#include "processing/algorithms/temporal/spatiotemporal_contracts.h"
+
 #include <QSet>
 
 #include <algorithm>
@@ -182,15 +184,22 @@ WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager,
         info.timeStart = parsed.timeRangeStartIso();
         info.timeEnd = parsed.timeRangeEndIso();
         QSet<QString> platforms;
+        QSet<QString> sensors;
         for ( const auto &scene : parsed.scenes() )
         {
           if ( !scene.assetId.isEmpty() )
             ++info.scenesBound;
           if ( !scene.platform.isEmpty() )
             platforms.insert( scene.platform );
+          if ( !scene.sensor.isEmpty() )
+            sensors.insert( scene.sensor );
         }
         info.platforms = QStringList( platforms.cbegin(), platforms.cend() );
         std::sort( info.platforms.begin(), info.platforms.end() );
+        info.sensors = QStringList( sensors.cbegin(), sensors.cend() );
+        std::sort( info.sensors.begin(), info.sensors.end() );
+        info.modalities = sicnu::temporal::distinctModalities(
+          sicnu::temporal::contractsOf( parsed ) );
       }
       snapshot.temporalCollections.append( info );
     }
@@ -339,6 +348,10 @@ QString WorkspaceSnapshot::toSystemPromptHeader() const
         prompt += QString( ", %1 … %2" ).arg( collection.timeStart, collection.timeEnd );
       if ( !collection.platforms.isEmpty() )
         prompt += QString( ", platform: %1" ).arg( collection.platforms.join( "/" ) );
+      if ( !collection.modalities.isEmpty() && collection.modalities != QStringList{ QStringLiteral( "unknown" ) } )
+        prompt += QString( ", modality: %1" ).arg( collection.modalities.join( "/" ) );
+      if ( !collection.sensors.isEmpty() )
+        prompt += QString( ", sensor: %1" ).arg( collection.sensors.join( "/" ) );
       prompt += QLatin1Char( '\n' );
     }
   }

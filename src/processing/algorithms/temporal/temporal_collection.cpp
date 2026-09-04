@@ -1,6 +1,7 @@
 // src/processing/algorithms/temporal/temporal_collection.cpp
 #include "temporal_collection.h"
 
+#include "spatiotemporal_contracts.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QDateTime>
@@ -244,6 +245,40 @@ bool inspectScene( const QString &path, const QString &explicitTime,
   out->path = path;
   out->platform = datasetMetadataItem( ds, "SICNU_SPACECRAFT" );
   out->processingLevel = datasetMetadataItem( ds, "SICNU_PROCESSING_LEVEL" );
+
+  // Multimodal observation contract (Platform 3.0): product metadata fills the
+  // multimodal fields ONLY when the caller did not claim them inline, so an
+  // explicit scene declaration always wins and legacy descriptors are stable.
+  if ( out->sensor.isEmpty() )
+    out->sensor = datasetMetadataItem( ds, "SICNU_SENSOR" );
+  if ( out->radiometricState.isEmpty() )
+    out->radiometricState = datasetMetadataItem( ds, "SICNU_RADIOMETRIC_STATE" );
+  if ( out->polarizations.isEmpty() )
+  {
+    const QString pol = datasetMetadataItem( ds, "SICNU_POLARIZATIONS" );
+    if ( !pol.isEmpty() )
+    {
+      const QStringList tokens =
+        pol.split( ',', Qt::SkipEmptyParts );
+      for ( const QString &t : tokens )
+        out->polarizations << t.trimmed();
+    }
+  }
+  if ( out->modality.isEmpty() )
+  {
+    const QString declared = datasetMetadataItem( ds, "SICNU_MODALITY" );
+    if ( !declared.isEmpty() )
+    {
+      out->modality = declared;
+    }
+    else
+    {
+      const Modality inferred = inferModalityFromClues(
+        out->platform, out->sensor, out->radiometricState, out->bandRoles );
+      if ( inferred != Modality::Unknown )
+        out->modality = modalityToString( inferred );
+    }
+  }
 
   if ( !explicitTime.isEmpty() )
   {

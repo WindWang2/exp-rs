@@ -86,6 +86,10 @@ struct TemporalCollectionInfo
     QString timeStart;
     QString timeEnd;
     QStringList platforms;
+    /// Platform 3.0 multimodal summary (additive): distinct observation
+    /// modalities + sensors claimed by the collection's scenes.
+    QStringList modalities;
+    QStringList sensors;
 };
 
 struct WorkspaceSnapshot
