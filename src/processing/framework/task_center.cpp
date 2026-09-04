@@ -663,32 +663,17 @@ void TaskCenter::applyPlaceholdersForTask( long taskId )
 
             if ( isMatch )
             {
-                // Port-aware: try resultPayload[portName] first (376).
-                const Json::Value &payload = m_tasks[parentId].resultPayload;
-                if ( payload.isObject() && payload.isMember( ref.portName ) && payload[ref.portName].isString() )
-                {
-                    const std::string s = payload[ref.portName].asString();
-                    if ( !s.empty() ) return s;
-                }
-                // Also check case where portName is the generic "output" but payload uses another key;
-                // fallback to outputLayerPath / outputPathFromResult for single-output steps.
-                QString pOut = m_tasks[parentId].outputLayerPath;
-                if ( pOut.isEmpty() )
-                    pOut = outputPathFromResult( payload );
-                // If still empty and portName != "output", try payload[portName] via variant map results stored earlier.
-                if ( pOut.isEmpty() && payload.isObject() )
-                {
-                    for ( const auto &name : payload.getMemberNames() )
-                    {
-                        if ( QString::fromStdString( name ).compare( QString::fromStdString( ref.portName ), Qt::CaseInsensitive ) == 0
-                             && payload[name].isString() )
-                        {
-                            const std::string s = payload[name].asString();
-                            if ( !s.empty() ) return s;
-                        }
-                    }
-                }
-                return pOut.toStdString();
+                // Port-aware resolution shared with the resume path (#727):
+                // exact resultPayload[portName] -> canonical output ->
+                // case-insensitive port scan; empty leaves the placeholder
+                // unresolved on both paths.
+                const std::string resolved = sicnu::workflow::resolvePlaceholderPort(
+                    m_tasks[parentId].resultPayload,
+                    m_tasks[parentId].outputLayerPath.toStdString(),
+                    ref.portName );
+                if ( !resolved.empty() )
+                    return resolved;
+                return ref.rawRef;
             }
         }
         return ref.rawRef;

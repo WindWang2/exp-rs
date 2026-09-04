@@ -5285,6 +5285,47 @@ target_include_directories(test_workflow_recovery PRIVATE
 )
 sicnu_discover_tests(test_workflow_recovery)
 
+add_executable(test_workflow_resume_provenance test_workflow_resume_provenance.cpp
+  ${CMAKE_SOURCE_DIR}/src/cli/rs_pipeline_runner.cpp
+)
+target_link_libraries(test_workflow_resume_provenance PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  sicnu_operators
+  sicnu_processing
+  sicnu_task_center
+  sicnu_jobs
+  sicnu_workflow
+  sicnu_workflow_runtime
+  Sicnu::qgis_display
+  Sicnu::data
+  qgis_core
+  GDAL::GDAL
+)
+target_include_directories(test_workflow_resume_provenance PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/cli
+  ${CMAKE_BINARY_DIR}
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_workflow_resume_provenance PRIVATE jsoncpp)
+endif()
+if(SICNU_EMBED_PYTHON)
+  target_sources(test_workflow_resume_provenance PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/core/plugin_host.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/python/sicnu_app_interface.cpp
+  )
+  target_include_directories(test_workflow_resume_provenance PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/core
+    ${CMAKE_SOURCE_DIR}/src/app
+  )
+  target_compile_definitions(test_workflow_resume_provenance PRIVATE SICNU_EMBED_PYTHON=1)
+endif()
+sicnu_link_jsoncpp(test_workflow_resume_provenance)
+set_target_properties(test_workflow_resume_provenance PROPERTIES RUN_SERIAL TRUE)
+sicnu_discover_tests(test_workflow_resume_provenance)
+
 add_executable(test_workflow_run_coordinator test_workflow_run_coordinator.cpp)
 target_link_libraries(test_workflow_run_coordinator PRIVATE
   Catch2::Catch2WithMain
