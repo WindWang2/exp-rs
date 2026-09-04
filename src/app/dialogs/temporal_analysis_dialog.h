@@ -20,6 +20,13 @@ class QStackedWidget;
 class QLabel;
 class QLineEdit;
 
+#include "data/collection_types.h"
+#include "processing/algorithms/temporal/temporal_collection.h"
+
+#include <optional>
+
+namespace sicnu::data { class DataManager; }
+
 /**
  * Multi-date analysis workflow: inspect scenes (acquisition time / platform /
  * grid / QA status), preflight the collection, pick a temporal algorithm
@@ -42,6 +49,18 @@ public:
     /// plus, for grouped composites, each period file), in production order.
     /// Empty until a run completes; the shell loads these on accept (#719).
     QStringList producedOutputs() const { return m_producedOutputs; }
+
+    void setDataManager( sicnu::data::DataManager *dataManager ) { m_dataManager = dataManager; }
+    sicnu::data::DataManager *dataManager() const;
+
+    /// Loads an existing workspace temporal collection into the dialog scenes table.
+    bool loadCollection( const sicnu::data::CollectionId &id );
+
+    /// Returns the active collection ID if the run executed against a workspace collection.
+    std::optional<sicnu::data::CollectionId> activeCollectionId() const { return m_activeCollectionId; }
+
+    /// Builds the structured TemporalCollection from the current UI state.
+    sicnu::temporal::TemporalCollection buildCollectionFromUi() const;
 
 protected:
     QString toolName() const override { return QStringLiteral( "temporal_analysis" ); }
@@ -77,5 +96,7 @@ private:
     QCheckBox *m_medianCheck = nullptr;
     QLineEdit *m_pointEdit = nullptr;
     QLineEdit *m_polygonEdit = nullptr;
+    sicnu::data::DataManager *m_dataManager = nullptr;
+    std::optional<sicnu::data::CollectionId> m_activeCollectionId;
     QStringList m_producedOutputs;
 };

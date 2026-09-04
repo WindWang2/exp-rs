@@ -2,10 +2,11 @@
 // Shared parameter parsing for every temporal operator: ONE canonical entry
 // point that turns operator parameters into a validated TemporalCollection.
 //
-// Accepted inputs (either, not both required — "scenes" wins when present):
-//   "collection": "<path to a temporal collection descriptor JSON>"
+// Accepted inputs ("collection" is authoritative when both are present):
+//   "collection": workspace UUID or descriptor JSON path
 //   "scenes": [ {"path": "...", "time": "2025-04-03", "bands": {"nir": 4},
-//                "quality_band": 9, "mask_band": 8}, ... ]
+//                "quality_band": 9, "mask_band": 8, "modality": "sar",
+//                "polarizations": ["VV","VH"], "band_roles": ["vv","vh"], ...}, ... ]
 //   "scenes": ["path1.tif", "path2.tif"]          // bare-path shorthand
 //   "times":  ["2025-01-01", "2025-02-01", ...]    // parallel to bare paths
 //   "bands":  {"nir": 4, "red": 3}                 // global role overrides

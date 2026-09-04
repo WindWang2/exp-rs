@@ -13,6 +13,7 @@
 #include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run_lock.h"
 #include "processing/framework/algorithm_meta_store.h"
+#include "processing/framework/algorithm_descriptor_validator.h"
 
 #include <QCoreApplication>
 #include <QCommandLineParser>
@@ -179,6 +180,20 @@ int main(int argc, char *argv[])
         const QString outDir = parser.value(exportCatalogOption);
         const auto descriptors =
             sicnu::processing::AtomicAlgorithmRegistry::instance().listDescriptors();
+        const auto catReport = sicnu::processing::AlgorithmDescriptorValidator::validateCatalog(descriptors, false);
+        if (!catReport.ok) {
+            for (const auto &err : catReport.globalErrors)
+                std::cerr << "Catalog validation warning: " << err << "\n";
+        }
+        for (const auto &desc : descriptors) {
+            const auto valReport = sicnu::processing::AlgorithmDescriptorValidator::validateDescriptor(desc, false);
+            if (!valReport.ok) {
+                for (const auto &issue : valReport.issues) {
+                    if (issue.severity == sicnu::processing::ValidationIssue::Severity::Error)
+                        std::cerr << "Descriptor validation warning [" << desc.id << "]: " << issue.message << "\n";
+                }
+            }
+        }
         std::string error;
         const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
             outDir.toStdString(), descriptors, &error );

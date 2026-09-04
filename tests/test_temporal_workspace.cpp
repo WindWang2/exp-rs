@@ -19,10 +19,12 @@
 #include <cpl_conv.h>
 
 #include "data/data_manager.h"
+#include "data/derivation_record.h"
 #include "data/execution_fingerprint.h"
 #include "processing/algorithms/temporal/temporal_collection.h"
 #include "processing/algorithms/temporal/temporal_stac_adapter.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
+#include "processing/framework/algorithm_descriptor_validator.h"
 
 using namespace sicnu::temporal;
 
@@ -760,4 +762,316 @@ TEST_CASE( "Remote and VSI inputs resolve or fail conservative — never omit (#
     inputs.clear();
     REQUIRE( fingerprintInputsForOperatorParams( &dm, scientific, &inputs, &reason ) );
     REQUIRE( inputs.isEmpty() );
+}
+
+// ---------------------------------------------------------------------------
+// Temporal Provenance Contract (#725)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Temporal provenance records collection identity, revision, and constituent scenes (#725)",
+           "[temporal][provenance]" )
+{
+    ensureApp();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    sicnu::data::DataManager dm;
+
+    const QString p1 = dir.filePath( QStringLiteral( "s1.tif" ) );
+    const QString p2 = dir.filePath( QStringLiteral( "s2.tif" ) );
+    REQUIRE( writeScene( p1, QStringLiteral( "2025-01-01" ), 1.0f ) );
+    REQUIRE( writeScene( p2, QStringLiteral( "2025-01-15" ), 2.0f ) );
+
+    // Register scenes in DataManager
+    const auto id1 = sicnu::data::AssetId::generate();
+    const auto id2 = sicnu::data::AssetId::generate();
+    sicnu::data::SourceDescriptor src1;
+    src1.providerKey = QStringLiteral( "gdal" );
+    src1.canonicalSource = p1;
+    sicnu::data::SourceDescriptor src2;
+    src2.providerKey = QStringLiteral( "gdal" );
+    src2.canonicalSource = p2;
+    REQUIRE( dm.restoreSource( sicnu::data::RestoreRequest{ id1, sicnu::data::AssetRevision::initial(), src1, sicnu::data::PersistencePolicy::ProjectPersistent } ) );
+    REQUIRE( dm.restoreSource( sicnu::data::RestoreRequest{ id2, sicnu::data::AssetRevision::initial(), src2, sicnu::data::PersistencePolicy::ProjectPersistent } ) );
+
+    // Create TemporalCollection and save to workspace DataManager
+    TemporalCollection col;
+    TemporalSceneRef ref1;
+    ref1.path = p1;
+    ref1.time = parseAcquisitionTime( QStringLiteral( "2025-01-01" ) );
+    ref1.timeSource = QStringLiteral( "metadata" );
+    ref1.originalIndex = 0;
+    TemporalSceneRef ref2;
+    ref2.path = p2;
+    ref2.time = parseAcquisitionTime( QStringLiteral( "2025-01-15" ) );
+    ref2.timeSource = QStringLiteral( "metadata" );
+    ref2.originalIndex = 1;
+    col.scenes() = { ref1, ref2 };
+
+    QString saveErr;
+    const sicnu::data::CollectionId colId =
+        sicnu::temporal::saveCollectionToWorkspace( dm, QStringLiteral( "TestCol" ), col, {}, &saveErr );
+    REQUIRE( !colId.isNull() );
+    REQUIRE( saveErr.isEmpty() );
+
+    // Verify resolveInputLineageForParams resolves collection identity and constituent scenes
+    QVariantMap params;
+    params[QStringLiteral( "collection" )] = colId.toString();
+    const sicnu::data::InputLineage lineage =
+        sicnu::data::resolveInputLineageForParams( &dm, params );
+
+    REQUIRE( lineage.collectionId.has_value() );
+    CHECK( *lineage.collectionId == colId );
+    CHECK( lineage.collectionRevision == 1 );
+    CHECK( lineage.unresolvedPaths.isEmpty() );
+
+    // Inputs should contain: 1 for the collection node, and 1 for each constituent scene
+    bool hasColInput = false;
+    bool hasScene1 = false;
+    bool hasScene2 = false;
+    for ( const auto &in : lineage.inputs )
+    {
+        if ( in.valueDomain == QStringLiteral( "temporal_collection" ) )
+        {
+            hasColInput = true;
+            CHECK( in.revision == sicnu::data::AssetRevision::fromValue( 1 ) );
+        }
+        else if ( in.assetId == id1 )
+        {
+            hasScene1 = true;
+            CHECK( in.revision == sicnu::data::AssetRevision::initial() );
+        }
+        else if ( in.assetId == id2 )
+        {
+            hasScene2 = true;
+            CHECK( in.revision == sicnu::data::AssetRevision::initial() );
+        }
+    }
+    CHECK( hasColInput );
+    CHECK( hasScene1 );
+    CHECK( hasScene2 );
+
+    // Register a derived output asset and attach derivation
+    const QString outPath = dir.filePath( QStringLiteral( "composite.tif" ) );
+    REQUIRE( writeScene( outPath, QStringLiteral( "2025-01-01" ), 1.5f ) );
+    const auto outAssetId = sicnu::data::AssetId::generate();
+    sicnu::data::SourceDescriptor outSrc;
+    outSrc.providerKey = QStringLiteral( "gdal" );
+    outSrc.canonicalSource = outPath;
+    REQUIRE( dm.restoreSource( sicnu::data::RestoreRequest{ outAssetId, sicnu::data::AssetRevision::initial(), outSrc, sicnu::data::PersistencePolicy::ProjectPersistent } ) );
+
+    const sicnu::data::DerivationRecord deriv =
+        sicnu::data::makeTaskDerivation( QStringLiteral( "rs:temporal_composite" ),
+                                         QJsonObject::fromVariantMap( params ),
+                                         QStringLiteral( "task-101" ),
+                                         lineage.inputs,
+                                         lineage.unresolvedPaths,
+                                         lineage.collectionId,
+                                         lineage.collectionRevision,
+                                         false );
+    dm.attachDerivationRecord( outAssetId, deriv );
+
+    // Lineage queries
+    const auto prov = dm.provenance( outAssetId );
+    REQUIRE( prov.has_value() );
+    CHECK( prov->algorithmId == QStringLiteral( "rs:temporal_composite" ) );
+    REQUIRE( prov->collectionId.has_value() );
+    CHECK( *prov->collectionId == colId );
+    CHECK( prov->collectionRevision == 1 );
+    CHECK( prov->cacheHit == false );
+
+    // derivedOutputsOfCollection should find the output
+    const auto outputs = dm.derivedOutputsOfCollection( colId );
+    REQUIRE( outputs.size() == 1 );
+    CHECK( outputs.first() == outAssetId );
+
+    // derivedFrom should include input assets
+    const auto sources = dm.derivedFrom( outAssetId );
+    CHECK( sources.contains( id1 ) );
+    CHECK( sources.contains( id2 ) );
+
+    // Cache hit derivation serialization roundtrip
+    sicnu::data::DerivationRecord hitDeriv = deriv;
+    hitDeriv.cacheHit = true;
+    const QJsonObject json = hitDeriv.toJson();
+    CHECK( json.value( QStringLiteral( "cacheHit" ) ).toBool() == true );
+    CHECK( json.value( QStringLiteral( "collectionId" ) ).toString() == colId.toString() );
+    CHECK( json.value( QStringLiteral( "collectionRevision" ) ).toInt() == 1 );
+
+    const auto roundtrip = sicnu::data::DerivationRecord::fromJson( json );
+    REQUIRE( bool( roundtrip ) );
+    CHECK( roundtrip.value().cacheHit == true );
+    REQUIRE( roundtrip.value().collectionId.has_value() );
+    CHECK( *roundtrip.value().collectionId == colId );
+    CHECK( roundtrip.value().collectionRevision == 1 );
+
+    // Scene revision sensitivity: updating scene 1 bumps revision and changes lineage input
+    REQUIRE( dm.notifyExternalContentChange( id1 ) );
+    const sicnu::data::InputLineage lineage2 =
+        sicnu::data::resolveInputLineageForParams( &dm, params );
+    for ( const auto &in : lineage2.inputs )
+    {
+        if ( in.assetId == id1 )
+            CHECK( in.revision == sicnu::data::AssetRevision::fromValue( 2 ) );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Descriptor / Catalog Validator Contract (#725)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "AlgorithmDescriptorValidator enforces descriptor and catalog contracts (#725)",
+           "[descriptor][validator]" )
+{
+    using namespace sicnu::processing;
+
+    // 1. Valid descriptor passes
+    AlgorithmDescriptor valid;
+    valid.id = "rs:test_op";
+    valid.displayName = "Test Operator";
+    valid.agentMetadata.taskFamily = "temporal";
+    valid.agentMetadata.memoryPolicy = "streaming";
+    valid.agentMetadata.costClass = "O(tile)";
+    valid.agentMetadata.determinismGrade = "bit_exact";
+    valid.agentMetadata.largeRasterSafe = true;
+
+    PortDescriptor inPort;
+    inPort.name = "collection";
+    inPort.type = DataType::String;
+    valid.inputs.push_back( inPort );
+
+    PortDescriptor outPort;
+    outPort.name = "output";
+    outPort.type = DataType::Raster;
+    valid.outputs.push_back( outPort );
+
+    auto rep = AlgorithmDescriptorValidator::validateDescriptor( valid, true );
+    CHECK( rep.ok );
+    CHECK( rep.issues.empty() );
+
+    // 2. Empty ID fails
+    AlgorithmDescriptor badId = valid;
+    badId.id = "";
+    CHECK_FALSE( AlgorithmDescriptorValidator::validateDescriptor( badId ).ok );
+
+    // 3. Missing namespace fails
+    AlgorithmDescriptor badNs = valid;
+    badNs.id = "unprefixed_op";
+    CHECK_FALSE( AlgorithmDescriptorValidator::validateDescriptor( badNs ).ok );
+
+    // 4. Exposed without task family fails
+    AlgorithmDescriptor emptyTask = valid;
+    emptyTask.agentMetadata.taskFamily = "";
+    CHECK_FALSE( AlgorithmDescriptorValidator::validateDescriptor( emptyTask, true ).ok );
+
+    // 5. Unknown task family fails
+    AlgorithmDescriptor badTask = valid;
+    badTask.agentMetadata.taskFamily = "flying_car_navigation";
+    CHECK_FALSE( AlgorithmDescriptorValidator::validateDescriptor( badTask ).ok );
+
+    // 6. Contradictory largeRasterSafe with unsupported policy fails
+    AlgorithmDescriptor badPolicy = valid;
+    badPolicy.agentMetadata.memoryPolicy = "unsupported_for_large_raster";
+    badPolicy.agentMetadata.largeRasterSafe = true;
+    CHECK_FALSE( AlgorithmDescriptorValidator::validateDescriptor( badPolicy ).ok );
+
+    // 7. GPU accelerated without gpuDeclared fails
+    AlgorithmDescriptor badGpu = valid;
+    badGpu.agentMetadata.gpuAccelerated = true;
+    badGpu.agentMetadata.gpuDeclared = false;
+    CHECK_FALSE( AlgorithmDescriptorValidator::validateDescriptor( badGpu ).ok );
+
+    // 8. Non-O notation cost class fails
+    AlgorithmDescriptor badCost = valid;
+    badCost.agentMetadata.costClass = "linear";
+    CHECK_FALSE( AlgorithmDescriptorValidator::validateDescriptor( badCost ).ok );
+
+    // 9. Deterministic serialization check
+    CHECK( AlgorithmDescriptorValidator::isDeterministic( valid ) );
+
+    // 10. Catalog uniqueness check
+    AlgorithmDescriptor duplicate = valid;
+    const auto catRep = AlgorithmDescriptorValidator::validateCatalog( { valid, duplicate } );
+    CHECK_FALSE( catRep.ok );
+    CHECK_FALSE( catRep.globalErrors.empty() );
+}
+
+// ---------------------------------------------------------------------------
+// Multimodal contract fidelity & STAC cloud cover (#725)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Multimodal observations and STAC cloud cover round-trip cleanly (#725)",
+           "[temporal][multimodal]" )
+{
+    // TemporalSceneRef multimodal fields round-trip through JSON
+    TemporalSceneRef s;
+    s.path = QStringLiteral( "/data/sar/s1_2025.tif" );
+    s.modality = QStringLiteral( "sar" );
+    s.sensor = QStringLiteral( "Sentinel-1" );
+    s.polarizations = { QStringLiteral( "VV" ), QStringLiteral( "VH" ) };
+    s.bandRoles = { QStringLiteral( "vv" ), QStringLiteral( "vh" ) };
+    s.resolutionMeters = 10.0;
+    s.radiometricState = QStringLiteral( "gamma0" );
+    s.cloudCoverPercent = 0.0;
+    s.originalIndex = 0;
+
+    const Json::Value json = s.toJson();
+    CHECK( json["modality"].asString() == "sar" );
+    CHECK( json["sensor"].asString() == "Sentinel-1" );
+    CHECK( json["radiometric_state"].asString() == "gamma0" );
+    CHECK( json["resolution_m"].asDouble() == Catch::Approx( 10.0 ) );
+    CHECK( json["cloud_cover_percent"].asDouble() == Catch::Approx( 0.0 ) );
+    REQUIRE( json["polarizations"].isArray() );
+    CHECK( json["polarizations"].size() == 2 );
+
+    QString err;
+    const TemporalSceneRef parsed = TemporalSceneRef::fromJson( json, &err );
+    REQUIRE( err.isEmpty() );
+    CHECK( parsed.path == s.path );
+    CHECK( parsed.modality == QStringLiteral( "sar" ) );
+    CHECK( parsed.sensor == QStringLiteral( "Sentinel-1" ) );
+    CHECK( parsed.radiometricState == QStringLiteral( "gamma0" ) );
+    CHECK( parsed.resolutionMeters == Catch::Approx( 10.0 ) );
+    CHECK( parsed.cloudCoverPercent == Catch::Approx( 0.0 ) );
+    CHECK( parsed.polarizations == s.polarizations );
+    CHECK( parsed.bandRoles == s.bandRoles );
+
+    Json::Value inlineScene( Json::objectValue );
+    inlineScene["path"] = "/data/sar/s1_2025.tif";
+    inlineScene["modality"] = "sar";
+    inlineScene["sensor"] = "Sentinel-1";
+    inlineScene["radiometric_state"] = "gamma0";
+    inlineScene["resolution_m"] = 10.0;
+    inlineScene["cloud_cover_percent"] = 0.0;
+    Json::Value polarizations( Json::arrayValue );
+    polarizations.append( "VV" );
+    polarizations.append( "VH" );
+    inlineScene["polarizations"] = polarizations;
+    Json::Value bandRoles( Json::arrayValue );
+    bandRoles.append( "vv" );
+    bandRoles.append( "vh" );
+    inlineScene["band_roles"] = bandRoles;
+    TemporalSceneRef parsedInline;
+    QString inlineErr;
+    REQUIRE( TemporalSceneRef::parseInline( inlineScene, 0, &parsedInline, &inlineErr, false ) );
+    CHECK( inlineErr.isEmpty() );
+    CHECK( parsedInline.modality == QStringLiteral( "sar" ) );
+    CHECK( parsedInline.sensor == QStringLiteral( "Sentinel-1" ) );
+    CHECK( parsedInline.radiometricState == QStringLiteral( "gamma0" ) );
+    CHECK( parsedInline.polarizations == s.polarizations );
+    CHECK( parsedInline.bandRoles == s.bandRoles );
+
+    // STAC cloud cover is transferred to scene
+    StacItem item;
+    item.id = QStringLiteral( "test_item" );
+    item.datetime = QStringLiteral( "2025-05-01T10:00:00Z" );
+    item.platform = QStringLiteral( "Sentinel-2A" );
+    item.rasterHref = QStringLiteral( "/data/s2.tif" );
+    item.cloudCover = 12.5;
+
+    TemporalCollection col;
+    QString colErr;
+    REQUIRE( temporalCollectionFromStacItems( { item, item }, QStringLiteral( "stac_col" ), &col, &colErr ) );
+    REQUIRE( col.sceneCount() == 2 );
+    CHECK( col.scenes().first().cloudCoverPercent == Catch::Approx( 12.5 ) );
 }

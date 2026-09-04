@@ -130,23 +130,28 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
       request.stablePath = stablePath;
       request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
       request.autoLoad = false;
-      // Input lineage (#698): the task's parameters that point at existing
-      // files are resolved against the catalog so the derivation record
-      // carries real derivedFrom edges (asset id + revision); paths that do
-      // not resolve are preserved in unresolvedInputPaths. The task's own
-      // output path is excluded so a re-run to an existing output never
-      // becomes its own input (#718).
-      const sicnu::data::InputLineage lineage = sicnu::data::resolveInputLineage(
+      // Input lineage (#698, #725): parameter-aware resolution resolves
+      // file paths, temporal collections (collectionId + revision), and
+      // constituent scene revisions so the derivation record carries true
+      // lineage edges.
+      const bool isCacheHit = info.resultPayload.isObject()
+                              && info.resultPayload.isMember( "cache" )
+                              && info.resultPayload["cache"].asString() == "hit";
+
+      const sicnu::data::InputLineage lineage = sicnu::data::resolveInputLineageForParams(
         managerGuard.data(),
-        sicnu::data::findInputPathsInParams( info.parameterMap,
-                                             { info.outputLayerPath } ) );
+        info.parameterMap,
+        { info.outputLayerPath } );
 
       request.derivation = sicnu::data::makeTaskDerivation(
         info.algorithmId,
         QJsonObject::fromVariantMap( info.parameterMap ),
         QString::number( info.taskId ),
         lineage.inputs,
-        lineage.unresolvedPaths );
+        lineage.unresolvedPaths,
+        lineage.collectionId,
+        lineage.collectionRevision,
+        isCacheHit );
 
       const auto commitResult = committer.commit( request );
 

@@ -983,6 +983,28 @@ void McpServer::handleRequest(const QVariantMap &request)
                 SearchToolsFacets facets;
                 facets.task = arguments.value(QStringLiteral("task")).toString();
                 facets.modality = arguments.value(QStringLiteral("modality")).toString();
+                if (arguments.contains(QStringLiteral("modalities")))
+                {
+                    const auto modVal = arguments.value(QStringLiteral("modalities"));
+                    if (modVal.typeId() == QMetaType::QVariantList)
+                    {
+                        for (const auto &m : modVal.toList())
+                        {
+                            const QString trimmed = m.toString().trimmed();
+                            if (!trimmed.isEmpty())
+                                facets.modalities.append(trimmed);
+                        }
+                    }
+                    else if (modVal.typeId() == QMetaType::QString)
+                    {
+                        for (const auto &m : modVal.toString().split(QLatin1Char(',')))
+                        {
+                            const QString trimmed = m.trimmed();
+                            if (!trimmed.isEmpty())
+                                facets.modalities.append(trimmed);
+                        }
+                    }
+                }
                 facets.bandRoles = arguments.value(QStringLiteral("band_roles")).toString();
                 facets.memoryPolicy = arguments.value(QStringLiteral("memory_policy")).toString();
                 facets.costClass = arguments.value(QStringLiteral("cost_class")).toString();
@@ -2254,6 +2276,8 @@ QVariantMap McpServer::handleSearchTools(const QString &query, const QString &gr
     sq.outputType = outputType.toStdString();
     sq.taskFamily = facets.task.toStdString();
     sq.modality = facets.modality.toStdString();
+    for ( const QString &m : facets.modalities )
+        sq.modalities.push_back( m.toStdString() );
     sq.bandRoles = facets.bandRoles.toStdString();
     sq.memoryPolicy = facets.memoryPolicy.toStdString();
     sq.costClass = facets.costClass.toStdString();

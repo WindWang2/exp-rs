@@ -58,6 +58,7 @@ struct SearchToolsFacets
 {
     QString task;
     QString modality;
+    QStringList modalities;
     QString bandRoles;
     QString memoryPolicy;
     QString costClass;

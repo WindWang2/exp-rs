@@ -22,6 +22,8 @@
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "data/data_manager.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "operators/rs/rs_operators_init.h"
+#include "operators/rs/rs_temporal_collection_input.h"
 #include "processing/algorithms/temporal/temporal_collection.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "processing/framework/atomic_algorithm_registry.h"
@@ -409,6 +411,102 @@ TEST_CASE( "temporal:register_collection preserves rich scene semantics and roun
         CHECK_FALSE( resMissing.success );
         CHECK( resMissing.errorCode == "INVALID_PARAMETER" );
     }
+
+    sicnu::temporal::setWorkspaceCatalog( nullptr );
+}
+
+TEST_CASE( "Agent tool discovery finds temporal and SAR change tools via capability facets (#725)",
+           "[agent][search][facets]" )
+{
+    ensureApp();
+    sicnu::operators::rs::installRsOperatorProvider();
+    auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
+    registry.reset();
+    registry.initialize();
+    auto &catalog = sicnu::agent::tool_catalog::AgentToolCatalog::instance();
+    catalog.reset();
+    catalog.initializeDefaults();
+
+    // 1. Search for optical temporal tools
+    {
+        sicnu::agent::tool_catalog::SearchQuery q;
+        q.temporal = true;
+        const auto results = catalog.searchTools( q );
+        REQUIRE_FALSE( results.empty() );
+        bool foundTemporalSummary = false;
+        for ( const auto &t : results )
+        {
+            if ( t.name == "rs:temporal_summary" || t.name == "temporal:describe_collection" )
+                foundTemporalSummary = true;
+        }
+        CHECK( foundTemporalSummary );
+    }
+
+    // 2. Search for SAR change detection tools via capability facets
+    {
+        sicnu::agent::tool_catalog::SearchQuery q;
+        q.taskFamily = "change-detection";
+        q.modalities = { "sar" };
+        q.temporal = true;
+        q.largeRasterSafeOnly = true;
+        const auto results = catalog.searchTools( q );
+        REQUIRE_FALSE( results.empty() );
+        bool foundSarChange = false;
+        for ( const auto &t : results )
+        {
+            if ( t.name == "rs:change_log_ratio" )
+                foundSarChange = true;
+        }
+        CHECK( foundSarChange );
+    }
+}
+
+TEST_CASE( "parseCollection prefers workspace collection over inline scenes",
+           "[temporal][collection]" )
+{
+    ensureApp();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString scene1 = dir.filePath( QStringLiteral( "s1.tif" ) );
+    const QString scene2 = dir.filePath( QStringLiteral( "s2.tif" ) );
+    const QString decoy = dir.filePath( QStringLiteral( "decoy.tif" ) );
+    REQUIRE( writeTinyScene( scene1, QStringLiteral( "2025-01-01T00:00:00" ), 1.0f ) );
+    REQUIRE( writeTinyScene( scene2, QStringLiteral( "2025-02-01T00:00:00" ), 2.0f ) );
+    REQUIRE( writeTinyScene( decoy, QStringLiteral( "2024-01-01T00:00:00" ), 9.0f ) );
+
+    sicnu::data::DataManager dm;
+    sicnu::temporal::setWorkspaceCatalog( &dm );
+
+    sicnu::temporal::TemporalCollection col;
+    sicnu::temporal::TemporalSceneRef ref1;
+    ref1.path = scene1;
+    ref1.time = sicnu::temporal::parseAcquisitionTime( QStringLiteral( "2025-01-01T00:00:00" ) );
+    ref1.timeSource = QStringLiteral( "explicit" );
+    ref1.originalIndex = 0;
+    sicnu::temporal::TemporalSceneRef ref2;
+    ref2.path = scene2;
+    ref2.time = sicnu::temporal::parseAcquisitionTime( QStringLiteral( "2025-02-01T00:00:00" ) );
+    ref2.timeSource = QStringLiteral( "explicit" );
+    ref2.originalIndex = 1;
+    col.scenes() = { ref1, ref2 };
+
+    QString saveErr;
+    const sicnu::data::CollectionId colId =
+        sicnu::temporal::saveCollectionToWorkspace( dm, QStringLiteral( "AuthoritativeCol" ), col, {}, &saveErr );
+    REQUIRE( !colId.isNull() );
+    REQUIRE( saveErr.isEmpty() );
+
+    Json::Value params( Json::objectValue );
+    params["collection"] = colId.toString().toStdString();
+    Json::Value scenes( Json::arrayValue );
+    scenes.append( decoy.toStdString() );
+    params["scenes"] = scenes;
+
+    const auto parsed = sicnu::operators::rs::temporal_input::parseCollection( params );
+    REQUIRE( parsed.sceneCount() == 2 );
+    CHECK( parsed.scenes().at( 0 ).path == scene1 );
+    CHECK( parsed.scenes().at( 1 ).path == scene2 );
 
     sicnu::temporal::setWorkspaceCatalog( nullptr );
 }

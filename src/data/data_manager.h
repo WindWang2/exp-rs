@@ -116,6 +116,10 @@ class DataManager : public QObject
     /// derived from it). Empty when nothing was derived from it.
     QVector<AssetId> derivedOutputsOf( AssetId id ) const;
 
+    /// Assets whose derivation records were produced from the specified temporal
+    /// collection @p id (either via collectionId or a collection input).
+    QVector<AssetId> derivedOutputsOfCollection( CollectionId id ) const;
+
     quint64 catalogGeneration() const;
 
     Result<AssetLease> acquire( const AssetRef &asset, const AssetUse &use );

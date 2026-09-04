@@ -472,9 +472,19 @@ std::vector<AgentTool> AgentToolCatalog::searchTools( const SearchQuery &query )
       continue;
     if ( query.temporal.has_value() )
     {
-      const bool isTemporal = containsIgnoreCase( tool.agentMetadata.taskFamily, "temporal" )
-                              || containsIgnoreCase( tool.name, "temporal" )
-                              || containsIgnoreCase( tool.group, "temporal" );
+      bool isTemporal = containsIgnoreCase( tool.agentMetadata.taskFamily, "temporal" )
+                        || containsIgnoreCase( tool.name, "temporal" )
+                        || containsIgnoreCase( tool.group, "temporal" );
+      for ( const auto &in : tool.inputs )
+      {
+        if ( in.name == "scenes" || in.name == "collection" || in.name == "before" || in.name == "after" )
+          isTemporal = true;
+      }
+      for ( const auto &t : tool.agentMetadata.tags )
+      {
+        if ( containsIgnoreCase( t, "temporal" ) || containsIgnoreCase( t, "change" ) )
+          isTemporal = true;
+      }
       if ( isTemporal != *query.temporal )
         continue;
     }
@@ -483,17 +493,53 @@ std::vector<AgentTool> AgentToolCatalog::searchTools( const SearchQuery &query )
     if ( !query.costClass.empty()
          && containsIgnoreCase( tool.agentMetadata.costClass, query.costClass ) == false )
       continue;
+
+    std::vector<std::string> wantedModalities = query.modalities;
     if ( !query.modality.empty() )
     {
-      bool modalityMatch = containsIgnoreCase( tool.name, query.modality )
-                           || containsIgnoreCase( tool.group, query.modality );
-      for ( const auto &port : tool.inputs )
+      if ( std::find( wantedModalities.begin(), wantedModalities.end(), query.modality ) == wantedModalities.end() )
+        wantedModalities.push_back( query.modality );
+    }
+
+    if ( !wantedModalities.empty() )
+    {
+      bool allMatched = true;
+      for ( const auto &wanted : wantedModalities )
       {
-        if ( port.rsContract.isObject()
-             && containsIgnoreCase( port.rsContract["dataKind"].asString(), query.modality ) )
-          modalityMatch = true;
+        bool modMatch = containsIgnoreCase( tool.name, wanted )
+                        || containsIgnoreCase( tool.group, wanted )
+                        || containsIgnoreCase( tool.agentMetadata.purpose, wanted )
+                        || containsIgnoreCase( tool.description, wanted );
+        for ( const auto &t : tool.agentMetadata.tags )
+        {
+          if ( containsIgnoreCase( t, wanted ) )
+            modMatch = true;
+        }
+        for ( const auto &port : tool.inputs )
+        {
+          if ( port.rsContract.isObject() )
+          {
+            if ( containsIgnoreCase( port.rsContract["dataKind"].asString(), wanted ) )
+              modMatch = true;
+            if ( containsIgnoreCase( port.rsContract["modality"].asString(), wanted ) )
+              modMatch = true;
+            if ( port.rsContract["modalities"].isArray() )
+            {
+              for ( const auto &m : port.rsContract["modalities"] )
+              {
+                if ( containsIgnoreCase( m.asString(), wanted ) )
+                  modMatch = true;
+              }
+            }
+          }
+        }
+        if ( !modMatch )
+        {
+          allMatched = false;
+          break;
+        }
       }
-      if ( !modalityMatch )
+      if ( !allMatched )
         continue;
     }
     if ( !query.bandRoles.empty() )
