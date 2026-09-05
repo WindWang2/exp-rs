@@ -16,11 +16,59 @@
 #include <cstring>
 #include <algorithm>
 
+// POSIX environ — not always declared in headers on macOS/BSD.
+extern char **environ;
+
 namespace exprs {
 
 namespace {
 
 constexpr int kTerminateGraceMs = 2000;
+
+#if defined( __APPLE__ ) || defined( __FreeBSD__ ) || defined( __OpenBSD__ ) || defined( __NetBSD__ )
+/// Darwin/BSD lack execvpe(3). Resolve PATH from envp then execve.
+int execvpeCompat( const char *file, char *const argv[], char *const envp[] )
+{
+    if ( !file || !file[0] )
+    {
+        errno = ENOENT;
+        return -1;
+    }
+    if ( std::strchr( file, '/' ) )
+        return ::execve( file, argv, envp );
+
+    const char *pathVal = nullptr;
+    for ( char *const *entry = envp; entry && *entry; ++entry )
+    {
+        if ( std::strncmp( *entry, "PATH=", 5 ) == 0 )
+        {
+            pathVal = *entry + 5;
+            break;
+        }
+    }
+    if ( !pathVal || !pathVal[0] )
+        pathVal = "/usr/bin:/bin";
+
+    std::string pathCopy( pathVal );
+    char *save = nullptr;
+    for ( char *dir = strtok_r( pathCopy.data(), ":", &save ); dir;
+          dir = strtok_r( nullptr, ":", &save ) )
+    {
+        std::string candidate = std::string( dir ) + "/" + file;
+        ::execve( candidate.c_str(), argv, envp );
+        if ( errno != ENOENT && errno != ENOTDIR )
+            return -1;
+    }
+    errno = ENOENT;
+    return -1;
+}
+#else
+int execvpeCompat( const char *file, char *const argv[], char *const envp[] )
+{
+    return ::execvpe( file, argv, envp );
+}
+#endif
+
 
 /// Builds the final child environment: minimal baseline (PATH, HOME, TMPDIR,
 /// LANG) + explicit entries, or the full parent environment when
@@ -260,7 +308,7 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
             (void)ignored;
             ::_exit( 126 );
         }
-        ::execvpe( argvPointers[0], argvPointers.data(), envPointers.data() );
+        execvpeCompat( argvPointers[0], argvPointers.data(), envPointers.data() );
         const int execError = errno;
         ssize_t ignored = ::write( errorPipe[1], &execError, sizeof( execError ) );
         (void)ignored;
