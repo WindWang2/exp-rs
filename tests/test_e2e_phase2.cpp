@@ -30,6 +30,7 @@
 #include <limits>
 #include <numeric>
 #include <string>
+#include <atomic>
 #include <thread>
 #include <vector>
 
@@ -1035,14 +1036,20 @@ TEST_CASE("Tier 2 - Subsystem: Thread-safe concurrent workflow definition querie
     WorkflowRuntime runtime(true);
     constexpr int THREADS = 4;
     std::vector<std::thread> workers;
+    // Catch2 assertion macros are main-thread-only: a CHECK from a worker
+    // thread routed a failure through the output redirect and aborted the
+    // whole binary (assert 'redirect is already active'). Count violations
+    // atomically and assert from the main thread instead.
+    std::atomic<int> missingDefinitions{0};
 
     for (int t = 0; t < THREADS; ++t) {
-        workers.emplace_back([&runtime, t]() {
+        workers.emplace_back([&runtime, t, &missingDefinitions]() {
             for (int i = 0; i < 50; ++i) {
                 WorkflowDefinition def;
                 def.id = "def_" + std::to_string(t) + "_" + std::to_string(i);
                 runtime.registerDefinition(def);
-                CHECK(runtime.hasDefinition(def.id));
+                if (!runtime.hasDefinition(def.id))
+                    ++missingDefinitions;
                 std::string sess = runtime.open(def.id);
                 if (!sess.empty()) {
                     runtime.close(sess);
@@ -1054,6 +1061,7 @@ TEST_CASE("Tier 2 - Subsystem: Thread-safe concurrent workflow definition querie
     for (auto &th : workers) {
         th.join();
     }
+    CHECK(missingDefinitions.load() == 0);
 }
 
 // ============================================================================

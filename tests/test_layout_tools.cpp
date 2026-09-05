@@ -5,6 +5,8 @@
 // QgsLayoutItem setters + undo commands as the GUI inspector), alignment,
 // template round-trip, export with memory preflight, and project persistence.
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
+#include <catch2/reporters/catch_reporter_registrars.hpp>
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -46,11 +48,20 @@ using sicnu::agent::spatial_tools::SpatialToolRegistry;
 
 namespace
 {
-
-void cleanupQgisAtExit()
+// Full QGIS teardown at process exit is a destruction-order minefield (see
+// test_layout_designer.cpp): report results, then leave via _Exit before any
+// static destructor runs.
+class FastExitListener : public Catch::EventListenerBase
 {
-  QgsApplication::exitQgis();
+  public:
+    using Catch::EventListenerBase::EventListenerBase;
+    void testRunEnded( const Catch::TestRunStats &stats ) override
+    {
+      std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
+    }
+};
 }
+CATCH_REGISTER_LISTENER( FastExitListener )
 
 void ensureQgisApplication()
 {
@@ -62,11 +73,6 @@ void ensureQgisApplication()
   static auto *application = new QgsApplication( argc, argv, true );
   ( void ) application;
   QgsApplication::initQgis();
-  static const bool registered = [] {
-    std::atexit( cleanupQgisAtExit );
-    return true;
-  }();
-  (void)registered;
 }
 
 void cleanupProject()

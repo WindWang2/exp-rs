@@ -1,5 +1,7 @@
 // test_layout_designer.cpp — Verification suite for Layout Designer and Tools
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
+#include <catch2/reporters/catch_reporter_registrars.hpp>
 
 #include <QApplication>
 #include <QMainWindow>
@@ -35,15 +37,26 @@
 
 namespace
 {
-void cleanupQgisAtExit()
+// Full QGIS teardown at process exit is a destruction-order minefield: the
+// atexit exitQgis() variant ran after the Q_GLOBAL_STATIC cache guards were
+// already torn down (null-lock SEGV), and with the caches guarded it hung
+// instead (exitQgis waits on the global thread pool). Mirror the
+// FastExitListener pattern from test_classification_window: report results,
+// then leave via _Exit before any static destructor runs.
+class FastExitListener : public Catch::EventListenerBase
 {
-  // Invalidate PROJ caches while libproj is still alive: otherwise the static
-  // QgsCoordinateTransform cache is destroyed after exit() has freed PROJ
-  // internals (heap-use-after-free in freeProj()->proj_context_create, and a
-  // plain SEGFAULT without sanitizers). exitQgis() also tears down providers.
-  QgsApplication::exitQgis();
+  public:
+    using Catch::EventListenerBase::EventListenerBase;
+    void testRunEnded( const Catch::TestRunStats &stats ) override
+    {
+      std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
+    }
+};
 }
+CATCH_REGISTER_LISTENER( FastExitListener )
 
+namespace
+{
 QApplication *ensureApp()
 {
   static int argc = 1;
@@ -56,11 +69,6 @@ QApplication *ensureApp()
   static auto *app = new QgsApplication( argc, v, true );
   QgsApplication::initQgis();
   QgsGui::instance(); // ensure the layout item GUI registry exists
-  static const bool registered = [] {
-    std::atexit( cleanupQgisAtExit );
-    return true;
-  }();
-  (void)registered;
   (void)app;
   return app;
 }

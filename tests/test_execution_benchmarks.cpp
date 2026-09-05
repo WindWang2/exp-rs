@@ -288,9 +288,13 @@ struct BenchFixture
             width = 3072;
             height = 3072;
         }
-        int argc = 1;
+        // argc/argv must outlive the app: QCoreApplicationPrivate keeps
+        // REFERENCES to them, and a worker thread lazily building
+        // QgsApplication::members() reads them via applicationFilePath()
+        // (ASan heap-use-after-free when they lived on this stack frame).
+        static int argc = 1;
         static char arg0[] = "test_execution_benchmarks";
-        char *argv[] = { arg0, nullptr };
+        static char *argv[] = { arg0, nullptr };
         if ( !QCoreApplication::instance() )
             new QCoreApplication( argc, argv );
 

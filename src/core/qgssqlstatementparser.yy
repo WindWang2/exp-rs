@@ -164,7 +164,7 @@ struct sqlstatement_parser_context
 %type <boolVal> select_type;
 
 // debugging
-%define parse.error verbose
+%error-verbose
 
 //
 // operator precedence

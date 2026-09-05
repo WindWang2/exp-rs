@@ -145,7 +145,7 @@ void addParserLocation(YYLTYPE* yyloc, QgsExpressionNode *node)
 %type <namednode> named_node
 
 // debugging
-%define parse.error verbose
+%error-verbose
 
 //
 // operator precedence
