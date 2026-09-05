@@ -578,3 +578,6 @@ ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision
 - **ADR 0124**: Per-Operator Determinism Grades for Parallel Execution
 - **ADR 0125**: Temporal Workspace
 - **ADR 0126**: OBIA GUI Operator Convergence (issue #663 — one execution path for OBIA segmentation/features/labeling/classification; engine policy, full features, interactive labels and hyperparameters move into the rs:obia_* contracts)
+- **ADR 0127**: MapSpec Declarative Cartography
+- **ADR 0128**: Spatial Scientist Contracts
+- **ADR 0129**: Project Workspace, Data Governance & Reproducibility Platform 3.0
