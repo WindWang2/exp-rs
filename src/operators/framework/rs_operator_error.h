@@ -49,6 +49,8 @@ enum class ErrorCode : int {
     Cancelled = 4000,
     AlreadyRunning,
     NotInitialized,
+    ExternalProcessTimeout = 4100,  ///< external process exceeded its budget (append-only)
+    ExternalProcessFailed = 4101,   ///< external process failed (append-only)
 
     Unknown = 9999
 };

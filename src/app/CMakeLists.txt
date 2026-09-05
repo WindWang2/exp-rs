@@ -128,6 +128,7 @@ add_executable(sicnu_geo_rs
     dialogs/product_import_dialog.cpp
     dialogs/crs_preset_dialog.cpp
     dialogs/preferences_dialog.cpp
+    dialogs/plugin_manager_dialog.cpp
     dialogs/contrast_stretch_dialog.cpp
     dialogs/spatial_filter_dialog.cpp
     dialogs/speckle_filter_dialog.cpp
@@ -273,6 +274,7 @@ add_executable(sicnu_geo_rs
 
 target_include_directories(sicnu_geo_rs PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/sdk
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/dialogs
     ${CMAKE_CURRENT_SOURCE_DIR}/map_tools
@@ -285,6 +287,8 @@ target_include_directories(sicnu_geo_rs PRIVATE
 )
 
 target_link_libraries(sicnu_geo_rs PRIVATE
+    sicnu_plugins_framework
+    sicnu_sdk
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets

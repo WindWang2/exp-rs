@@ -8,6 +8,7 @@ endif()
 
 add_executable(sicnu_geo_rs_cli
     main_cli.cpp
+    cli_commands.cpp
     rs_pipeline_runner.cpp
 )
 
@@ -40,6 +41,8 @@ target_include_directories(sicnu_geo_rs_cli PRIVATE
 target_link_libraries(sicnu_geo_rs_cli PRIVATE
     Qt6::Core
     Sicnu::data
+    sicnu_plugins_framework
+    sicnu_sdk
     sicnu_python_isolated
     Sicnu::qgis_display
     sicnu_operators

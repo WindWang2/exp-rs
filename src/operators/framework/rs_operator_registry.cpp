@@ -47,6 +47,11 @@ void RSOperatorRegistry::registerOperator(const std::string& name, FactoryFn fac
     m_factories[name] = std::move(factory);
 }
 
+bool RSOperatorRegistry::unregisterOperator(const std::string& name) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_factories.erase(name) > 0;
+}
+
 bool RSOperatorRegistry::hasOperator(const std::string& name) const {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_factories.find(name) != m_factories.end();

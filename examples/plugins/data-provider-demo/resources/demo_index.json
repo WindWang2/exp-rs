@@ -1,0 +1,14 @@
+[
+  {
+    "name": "demo-raster",
+    "type": "raster",
+    "description": "Example catalog entry pointing at a GeoTIFF on disk",
+    "path": "/path/to/demo.tif"
+  },
+  {
+    "name": "demo-vector",
+    "type": "vector",
+    "description": "Example catalog entry pointing at a GeoPackage",
+    "path": "/path/to/demo.gpkg"
+  }
+]

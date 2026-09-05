@@ -9,7 +9,12 @@ add_library(sicnu_operators_core STATIC
     framework/rs_operator_context.cpp
     framework/rs_operator_error.cpp
 )
-target_include_directories(sicnu_operators_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
+# BUILD_INTERFACE keeps in-tree consumption unchanged; INSTALL_INTERFACE makes
+# the leaf exportable as part of the ExpRS SDK package (src/sdk/CMakeLists.txt).
+target_include_directories(sicnu_operators_core PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:include>
+)
 # rs_operator_error.h (a public header) includes <json/json.h>, so the leaf
 # needs the same jsoncpp resolution as its consumers: the canonical jsoncpp
 # target when defined, else pkg-config include dirs + libs. Missing this is

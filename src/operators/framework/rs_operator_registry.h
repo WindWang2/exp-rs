@@ -35,6 +35,12 @@ public:
     void registerOperator(const std::string& name, FactoryFn factory);
 
     /**
+     * Removes a registration. Returns true when a factory was removed.
+     * Used by the plugin runtime to revoke contributions on unload.
+     */
+    bool unregisterOperator(const std::string& name);
+
+    /**
      * Returns true if an operator with the given name is registered.
      */
     bool hasOperator(const std::string& name) const;
