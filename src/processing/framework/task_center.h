@@ -121,6 +121,11 @@ struct AlgorithmTaskInfo {
     /// estimateResolved is set; 0 otherwise.
     unsigned int resolvedEstimateMb = 0;
     bool estimateResolved = false;
+    /// Fused-chain member (Phase C): the step's work is executed by its HEAD
+    /// step's fused executor; this task never dispatches to JobEngine and is
+    /// marked Completed with the chain's tail payload when the head completes
+    /// (Canceled via the normal upstream-failure cascade when the head fails).
+    bool fusedMember = false;
 };
 
 struct PipelineExecutionInfo {
@@ -386,6 +391,14 @@ private:
         CancelHook onCancel;
     };
 
+    /// Fused-chain binding (Phase C): head task → member tasks. When the head
+    /// completes, members are completed with the chain's tail payload; when
+    /// the head fails/cancels, members are canceled by the standard upstream
+    /// cascade (they are DAG children of the head).
+    struct FusedChainBinding {
+        QList<long> memberTaskIds;
+    };
+
     struct PendingLog {
         long taskId = -1;
         QString message;
@@ -401,6 +414,7 @@ private:
     QList<AlgorithmTaskInfo> m_pendingTaskUpdated;
     QList<PendingLog> m_pendingLogs;
     QMap<std::string, long> m_taskByJobId; ///< jobId → taskId, listener dispatch (ADR 0051)
+    QMap<long, FusedChainBinding> m_fusedChains; ///< head taskId → members (Phase C)
     QMap<long, std::size_t> m_forwardedLogCounts; ///< per-task log dedup key (logLines.size())
     QMap<long, double> m_lastForwardedProgress; ///< per-task progress dedup
     QMap<long, QMap<long, TaskCompletionCallback>> m_completionCallbacks; ///< per-task terminal callbacks

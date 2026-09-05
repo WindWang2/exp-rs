@@ -168,6 +168,15 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
 
     auto &center = TaskCenter::instance();
 
+    // Phase J (resume hardening W1): persist the run BEFORE dispatch so a
+    // crash during submitPipeline leaves a recoverable checkpoint instead of
+    // real side effects with no on-disk run. The post-submission persist
+    // below adds task ids and current step statuses.
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        persistRunLocked( *run );
+    }
+
     // Seed the step plans with the pipeline's task ids so the checkpoint
     // written BEFORE dispatch already maps steps to tasks (crash during
     // submit still leaves a resumable picture).
@@ -360,10 +369,16 @@ void WorkflowRunCoordinator::finalizeRunLocked( long pipelineId, WorkflowRun &ru
         // field would mislabel a completed run, so they are logged only.
         ArtifactGC gc;
         gc.sweepRun( run, /*retainFinalOutputs=*/true );
-        // The run is finished and its outputs are committed assets; the
-        // checkpoint has served its purpose. Failed/Canceled/Interrupted
-        // checkpoints are KEPT — they are the resume handle.
-        QFile::remove( checkpointPathLocked( run.runId() ) );
+        // The run is finished and its outputs are committed assets. Phase J
+        // (run history): the checkpoint is ARCHIVED instead of deleted, so
+        // past outcomes stay inspectable; the archive is bounded (oldest
+        // pruned). Failed/Canceled/Interrupted checkpoints are KEPT in place —
+        // they are the resume handle.
+        // checkpointDirectoryLocked(): finalize holds m_mutex — the public
+        // checkpointDirectory() would self-deadlock (caught by the
+        // coordinator's own persistence test).
+        WorkflowCheckpointManager::archiveCompletedRun(
+            checkpointPathLocked( run.runId() ), checkpointDirectoryLocked() );
     }
     // The run is terminal: whoever acquires the run lock next may resume or
     // reconcile it. (Erasing the shared_ptr releases the flock.)
@@ -514,7 +529,11 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
     {
         if ( plan.status != "Completed" || plan.outputLayerPath.empty() )
             continue;
-        if ( QFileInfo::exists( QString::fromStdString( plan.outputLayerPath ) ) )
+        // Phase J (W2): a mere existence check once served a truncated
+        // crash-era intermediate to downstream steps. Require a real,
+        // non-empty file — a rewrite mid-crash fails this and is re-executed.
+        const QFileInfo outputInfo( QString::fromStdString( plan.outputLayerPath ) );
+        if ( outputInfo.isFile() && outputInfo.size() > 0 )
             completedResults[plan.stepId] = { plan.resultPayload, plan.outputLayerPath };
     }
 

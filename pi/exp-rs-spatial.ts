@@ -15,7 +15,7 @@
  *   EXP_RS_MCP_BIN        binary to launch (default: auto-detect build dir)
  *   EXP_RS_MCP_ARGS       extra CLI args appended to --mcp
  *   EXP_RS_TOOL_CATEGORIES comma-separated tool prefixes to bridge
- *                         (default: "meta,spatial,data,temporal"; e.g. add "rs,gdal,otb")
+ *                         (default: "meta,spatial,data,temporal,cartography,symbology,workflow,workspace"; e.g. add "rs,gdal,otb")
  *   SICNU_MCP_WORKSPACE   passed through to restrict server file access
  *   SICNU_MODELS_DIR      passed through to locate model manifests
  */
@@ -425,7 +425,9 @@ function detectBinary(): string | null {
 
 /** Categories (tool prefixes) to bridge; meta = the protocol-level tools. */
 function wantedCategories(): Set<string> {
-  const raw = process.env.EXP_RS_TOOL_CATEGORIES ?? "meta,spatial,data,temporal";
+  const raw =
+    process.env.EXP_RS_TOOL_CATEGORIES ??
+    "meta,spatial,data,temporal,cartography,symbology,workflow,workspace";
   const set = new Set<string>();
   for (const part of raw.split(",")) {
     const trimmed = part.trim().toLowerCase();

@@ -57,6 +57,7 @@
 #include "app/main_window.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "agent/mcp_server.h"
+#include "agent/workspace_state.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "agent/interaction_tool_registry.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
@@ -206,6 +207,24 @@ int main(int argc, char *argv[])
         // GUI-only view/roi/canvas/raster tools stay unregistered headlessly
         // and are filtered from tools/list (see McpServer::handleListTools).
         sicnu::agent::InteractionToolRegistry::instance().registerDataTools( mcpDataManager.get() );
+        // Workspace Understanding 3.0: spatial tools read the workspace via
+        // AgentServices; workflow-run summaries flow through the provider seam
+        // (agent layer must not link the workflow engine).
+        sicnu::agent::AgentServices::instance().setDataManager( mcpDataManager.get() );
+        sicnu::agent::setWorkflowRunsProvider( [] {
+          Json::Value runs( Json::arrayValue );
+          for ( const auto &run : sicnu::workflow::WorkflowRunCoordinator::instance().runs() )
+          {
+            if ( !run )
+              continue;
+            Json::Value entry( Json::objectValue );
+            entry["run_id"] = run->runId();
+            entry["state"] = sicnu::workflow::workflowRunStateToString( run->state() );
+            entry["progress"] = run->progress();
+            runs.append( entry );
+          }
+          return runs;
+        } );
         // Crash recovery (#697): mark interrupted runs resumable before any
         // new work is accepted. No silent auto-resume headlessly — an agent
         // can resume explicitly once it discovers the runs.

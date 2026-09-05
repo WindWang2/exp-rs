@@ -8,13 +8,26 @@
 #include <QString>
 #include <QStringList>
 
+#include <cpl_vsi.h>
+
 #include <algorithm>
 #include <cctype>
 
 namespace sicnu::operators::params {
 
 bool fileExists(const std::string& path) {
-    return QFile::exists(QString::fromStdString(path));
+    const QString p = QString::fromStdString(path);
+    if (QFile::exists(p))
+        return true;
+    // GDAL VSI paths (/vsicurl/, /vsis3/, /vsizip/…) are not Qt files; ask
+    // GDAL's VSI layer so remote COG inputs pass the same precheck as local
+    // ones (execution-data-plane-3 Phase F).
+    if (p.startsWith(QStringLiteral("/vsi")))
+    {
+        VSIStatBufL statBuf;
+        return VSIStatL(p.toUtf8().constData(), &statBuf) == 0;
+    }
+    return false;
 }
 
 std::string requireString(const Json::Value& params, const std::string& key) {

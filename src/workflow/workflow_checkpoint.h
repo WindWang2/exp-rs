@@ -13,6 +13,19 @@ class WorkflowCheckpointManager {
 public:
   WorkflowCheckpointManager() = default;
 
+  /// Phase J (run history): move a COMPLETED run's checkpoint into
+  /// <dir>/history/ and prune the archive to the newest @p keep entries
+  /// (default 50). Returns false when the file could not be archived (it is
+  /// then left in place rather than lost).
+  static bool archiveCompletedRun( const QString &checkpointPath,
+                                   const QString &directoryPath, int keep = 50 );
+
+  /// Phase J (W3): when BOTH a run checkpoint and its post-resume ghost
+  /// (`<runId>_resume`) exist, keep the NEWER file and quarantine the older
+  /// one (renamed to *.orphaned) so resuming both can never re-execute the
+  /// remaining steps twice. Returns the number of quarantined files.
+  static int electCheckpoints( const QString &directoryPath );
+
   /// Atomically save the workflow run checkpoint to disk. The payload is
   /// written to a per-save unique .tmp file, fsync'd, then moved onto the final
   /// .json path with an atomic replace (POSIX rename / MoveFileEx), so a crash

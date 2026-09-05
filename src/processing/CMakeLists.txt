@@ -235,6 +235,9 @@ set_target_properties(sicnu_processing PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 # and resolves symbols when final targets also link sicnu_task_center.
 add_library(sicnu_task_center STATIC
     framework/task_center.cpp
+    # Phase C fused-chain execution (intermediate materialization elimination)
+    framework/fused_chain.cpp
+    framework/local_worker_host.cpp
     framework/resource_monitor.cpp
     framework/task_resource_budget.cpp
     framework/agent_workflow_executor.cpp
@@ -263,6 +266,9 @@ target_link_libraries(sicnu_task_center PUBLIC
     # Workflow Engine 2.0 wiring (#662): task_center.cpp fingerprints pipeline
     # steps via makeExecutionFingerprintV2 and AssetRevision.
     Sicnu::data
+    # Phase C fused-chain executor streams tiles via sicnu_runtime's
+    # ChunkPipeline (bounded queues, cancel/failure propagation).
+    sicnu_runtime
 )
 set_target_properties(sicnu_task_center PROPERTIES
     POSITION_INDEPENDENT_CODE ON

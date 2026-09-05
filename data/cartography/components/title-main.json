@@ -1,0 +1,16 @@
+{
+  "id": "title/main",
+  "category": "title",
+  "semantic_roles": ["title.main"],
+  "description": "Primary map title, bold 18pt.",
+  "parameters": { "font": { "size_pt": 18, "bold": true } },
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": ["top-center", "top-left"],
+    "margin_mm": 8,
+    "min_font_pt": 12,
+    "max_count_per_page": 1
+  },
+  "compatibility": { "requires_map_frame": false },
+  "preview": { "placeholder": true }
+}

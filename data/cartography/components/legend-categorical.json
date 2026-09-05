@@ -1,0 +1,15 @@
+{
+  "id": "legend/categorical",
+  "category": "legend",
+  "semantic_roles": ["legend.primary"],
+  "description": "Class-based legend for categorical rasters and vectors.",
+  "parameters": { "title": "图例", "columns": 1 },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": ["right-rail", "bottom-rail"],
+    "margin_mm": 6,
+    "max_count_per_page": 2
+  },
+  "compatibility": { "requires_map_frame": true },
+  "preview": { "placeholder": true }
+}

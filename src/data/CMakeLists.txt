@@ -1,6 +1,10 @@
 
 
 qt_add_library(sicnu_data STATIC
+  artifact_object_pool.cpp
+  artifact_object_pool.h
+  artifact_store.cpp
+  artifact_store.h
   asset_types.cpp
   asset_types.h
   band_role.h
@@ -23,6 +27,10 @@ qt_add_library(sicnu_data STATIC
   providers/gdal_raster_source_provider.cpp
   providers/gdal_raster_source_provider.h
   providers/ogr_vector_source_provider.cpp
+  providers/remote_source_cache.cpp
+  workspace_catalog.cpp
+  workspace_catalog.h
+  providers/remote_source_cache.h
   providers/ogr_vector_source_provider.h
   providers/remote_map_provider_common.cpp
   providers/remote_map_provider_common.h
@@ -60,6 +68,11 @@ target_link_libraries(sicnu_data
   PUBLIC
     Qt6::Core
     GDAL::GDAL
+  # ArtifactStore (Data Plane 3.0) uses the SQLite C API directly for its
+  # metadata database; PRIVATE keeps the dependency out of the data layer's
+  # public interface (headers stay Qt-only).
+  PRIVATE
+    SQLite::SQLite3
 )
 
 get_target_property(SICNU_DATA_DIRECT_LINKS sicnu_data LINK_LIBRARIES)

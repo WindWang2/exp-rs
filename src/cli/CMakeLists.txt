@@ -73,3 +73,30 @@ set_target_properties(sicnu_geo_rs_cli PROPERTIES
 install(TARGETS sicnu_geo_rs_cli
     RUNTIME DESTINATION bin
 )
+
+# Isolated local worker (Data Plane 3.0, Phase K): a minimal operator host
+# speaking worker_protocol v1 over stdin/stdout. Crash in here never takes a
+# host application down — that is the isolation boundary.
+add_executable(sicnu_worker
+    sicnu_worker_main.cpp
+)
+target_include_directories(sicnu_worker PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(sicnu_worker PRIVATE
+    Qt6::Core
+    Sicnu::data
+    sicnu_operators
+    GDAL::GDAL
+)
+if(TARGET jsoncpp)
+    target_link_libraries(sicnu_worker PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+    target_include_directories(sicnu_worker PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(sicnu_worker PRIVATE ${JSONCPP_LIBRARIES})
+endif()
+set_target_properties(sicnu_worker PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    OUTPUT_NAME "sicnu_worker"
+)

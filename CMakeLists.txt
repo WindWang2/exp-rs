@@ -648,6 +648,9 @@ endif()
 
 add_subdirectory(src/core)
 add_subdirectory(src/data)
+# Execution & Data Plane 3.0 runtime services (chunk graph, GPU plane, worker
+# host, telemetry). Qt-free leaf; must precede processing (fused-chain executor).
+add_subdirectory(src/runtime)
 add_subdirectory(src/analysis)
 add_subdirectory(src/app/georeferencer)
 add_subdirectory(src/app/classification)

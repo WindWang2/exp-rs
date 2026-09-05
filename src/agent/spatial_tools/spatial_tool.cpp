@@ -8,6 +8,14 @@
 #include "temporal_workspace_tools.h"
 #include "raster_inspect_tool.h"
 #include "vector_inspect_tool.h"
+#include "workspace_tools.h"
+#include "sample_tools.h"
+#include "result_assessment_tool.h"
+#include "capability_tools.h"
+#include "workflow_preflight_tool.h"
+#include "../cartography/cartography_tools.h"
+#include "../symbology/symbology_tools.h"
+#include "../commands/workspace_commands.h"
 
 namespace sicnu::agent::spatial_tools {
 
@@ -99,6 +107,17 @@ void SpatialToolRegistry::registerBuiltinTools()
   // Cartographic layout tools (Cartographic Layout Studio); layout:* tools
   // mutate layout state and must register alongside the spatial tool surface.
   layout_tools::registerBuiltinLayoutTools();
+  // Spatial Scientist 3.0 surfaces (ADR 0128): workspace understanding,
+  // bounded sampling/compare, result assessment, capability ranking, model
+  // selection, and static workflow preflight.
+  registerWorkspaceTools();
+  registerSampleTools();
+  registerResultAssessmentTool();
+  registerCapabilityTools();
+  registerWorkflowPreflightTool();
+  cartography::registerCartographyTools();
+  symbology::registerSymbologyTools();
+  commands::registerWorkspaceCommandTools();
 }
 
 void SpatialToolRegistry::reset()

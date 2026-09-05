@@ -1,0 +1,27 @@
+{
+	"cache" : 
+	{
+		"hits" : 0,
+		"misses" : 0
+	},
+	"cpu_ms" : 8043.5420000000004,
+	"extra" : 
+	{
+		"found" : 200,
+		"per_probe_ms" : 38.928830410000003,
+		"probes" : 200
+	},
+	"generated_at" : "2026-09-04T20:04:09Z",
+	"hardware" : 
+	{
+		"build_type" : "Release",
+		"cores" : 16,
+		"cpu_model" : "AMD Ryzen 9 5900HX with Radeon Graphics"
+	},
+	"peak_rss_mb" : 0,
+	"read_bytes" : 0,
+	"schema" : "execution-bench/1",
+	"wall_ms" : 7785.7660820000001,
+	"workload" : "data_manager_find_by_path",
+	"write_bytes" : 0
+}

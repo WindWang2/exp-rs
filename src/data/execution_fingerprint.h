@@ -200,6 +200,11 @@ public:
     QMap<QString, qint64> inputSizes; // path → byte size
     QMap<QString, qint64> inputMsecs; // path → lastModified (ms epoch)
     QJsonDocument resultPayload;
+    /// Persistent-tier source override (Phase E): original producing path →
+    /// content-addressed pool object. Empty for in-memory entries. When set,
+    /// the serve copies FROM the pool object (digest-verified at lookup) while
+    /// payload/path mapping keeps using the original paths.
+    QMap<QString, QString> sourceOverrides;
   };
 
   /// Look up a prior identical execution's result. Returns nullopt when
@@ -240,12 +245,21 @@ public:
 
 private:
   ExecutionResultCache() = default;
+  /// Defined out-of-line: m_persistent (unique_ptr to an incomplete class)
+  /// requires the destructor to see the complete type.
+  ~ExecutionResultCache();
   struct Entry
   {
     AssetId asset;
     qint64 lastUsedTick = 0;
   };
   void evictIfNeededLocked();
+  /// Phase E: optional persistent content-addressed tier. Null unless enabled
+  /// via env (SICNU_ARTIFACT_CACHE=1, root SICNU_ARTIFACT_CACHE_DIR). Lives
+  /// behind a lazy pointer so the default cache carries zero new state.
+  void ensurePersistentTierLocked();
+  std::unique_ptr<class ArtifactObjectPool> m_persistent;
+  bool m_persistentInitTried = false;
 
   struct ExecutionEntry
   {
