@@ -1,6 +1,8 @@
 // src/data/execution_fingerprint.cpp
 #include "execution_fingerprint.h"
 
+#include "artifact_object_pool.h"
+
 #include <QFile>
 #include <QFileInfo>
 
@@ -8,9 +10,12 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QDir>
 #include <QHash>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <memory>
 #include <mutex>
 
 namespace sicnu::data
@@ -469,6 +474,14 @@ bool declaredOutputStillValid( const ExecutionResultCache::CachedExecution &exec
 }
 } // namespace
 
+// Objects larger than this are not pooled (conservative cap).
+namespace
+{
+constexpr qint64 kMaxPooledObjectBytes = 2LL << 30; // 2 GiB
+} // namespace
+
+ExecutionResultCache::~ExecutionResultCache() = default;
+
 std::optional<ExecutionResultCache::CachedExecution>
 ExecutionResultCache::lookupExecution( const ExecutionFingerprint &fp )
 {
@@ -477,7 +490,39 @@ ExecutionResultCache::lookupExecution( const ExecutionFingerprint &fp )
     return std::nullopt;
   auto it = m_executions.find( fp.digest );
   if ( it == m_executions.end() )
+  {
+    // Phase E: in-memory miss → persistent content-addressed tier. The pool
+    // re-verifies every object digest (conservative default), so corruption
+    // self-heals into a miss and a real execution re-runs.
+    ensurePersistentTierLocked();
+    if ( m_persistent )
+    {
+      const auto pooled = m_persistent->lookupExecution( fp.toHex() );
+      if ( pooled )
+      {
+        CachedExecution reconstructed;
+        reconstructed.declaredOutputPath = pooled->declaredOriginal;
+        reconstructed.resultPayload = QJsonDocument::fromJson( pooled->payloadJson );
+        reconstructed.inputSizes = pooled->inputSizes;
+        reconstructed.inputMsecs = pooled->inputMsecs;
+        for ( const sicnu::data::PoolObject &object : pooled->objects )
+        {
+          reconstructed.producedArtifacts.append( object.originalPath );
+          // The serve copies FROM the pool object; expectations must describe
+          // the pool object (the copy source), not the original path.
+          reconstructed.artifactSizes.insert( object.poolPath, object.size );
+          reconstructed.artifactMsecs.insert( object.poolPath, object.msecs );
+          reconstructed.sourceOverrides.insert( object.originalPath, object.poolPath );
+        }
+        // Trust gate: in-memory entries validate the producing file's
+        // size/mtime. Pool objects are immutable and digest-verified at this
+        // lookup; original paths may legitimately be gone, so the size/mtime
+        // check is deliberately replaced by the digest check above.
+        return reconstructed;
+      }
+    }
     return std::nullopt;
+  }
   if ( !declaredOutputStillValid( it->execution ) )
   {
     // The cached result vanished or was replaced (GC, external write, manual
@@ -551,6 +596,61 @@ void ExecutionResultCache::storeExecution( const ExecutionFingerprint &fp,
       m_pathOwners.insert( claimPath, fp.digest );
   }
   evictIfNeededLocked();
+
+  // Phase E: persist into the content-addressed tier. Conservative: the
+  // execution is recorded only when EVERY produced artifact pools cleanly;
+  // a partial failure records nothing (a lookup never serves a half-cached
+  // execution). Per-object size cap avoids pathological copies.
+  ensurePersistentTierLocked();
+  if ( m_persistent )
+  {
+    sicnu::data::PoolExecution pooledExecution;
+    pooledExecution.declaredOriginal = execution.declaredOutputPath;
+    pooledExecution.payloadJson = execution.resultPayload.toJson();
+    pooledExecution.inputSizes = execution.inputSizes;
+    pooledExecution.inputMsecs = execution.inputMsecs;
+    bool complete = true;
+    for ( const QString &artifact : execution.producedArtifacts )
+    {
+      const bool declared = artifact == execution.declaredOutputPath;
+      auto object = m_persistent->put( artifact, declared );
+      if ( !object || object->size > kMaxPooledObjectBytes )
+      {
+        complete = false;
+        break;
+      }
+      pooledExecution.objects.append( *object );
+    }
+    if ( complete && !pooledExecution.objects.isEmpty() )
+    {
+      m_persistent->recordExecution( fp.toHex(), pooledExecution );
+      const qint64 cap = qEnvironmentVariableIntValue( "SICNU_ARTIFACT_CACHE_MAX_GB" );
+      m_persistent->evictToBytes( ( cap > 0 ? cap : 8 ) * ( 1024LL << 30 ) );
+    }
+    else
+    {
+      m_persistent->forgetExecution( fp.toHex() );
+    }
+  }
+}
+
+void ExecutionResultCache::ensurePersistentTierLocked()
+{
+  if ( m_persistentInitTried )
+    return;
+  m_persistentInitTried = true;
+  const char *env = std::getenv( "SICNU_ARTIFACT_CACHE" );
+  const bool enabled = env && ( env[0] == '1' || env[0] == 't' || env[0] == 'T' );
+  if ( !enabled )
+    return;
+  QString root;
+  if ( const char *rootEnv = std::getenv( "SICNU_ARTIFACT_CACHE_DIR" ) )
+    root = QString::fromUtf8( rootEnv );
+  else
+    root = QDir::home().filePath( QStringLiteral( ".rs_studio/artifact-cache" ) );
+  auto pool = std::make_unique<sicnu::data::ArtifactObjectPool>();
+  if ( pool->enable( root ) )
+    m_persistent = std::move( pool );
 }
 
 QStringList ExecutionResultCache::cachedArtifacts() const
