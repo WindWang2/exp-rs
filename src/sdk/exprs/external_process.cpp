@@ -40,6 +40,8 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
 #include <map>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <vector>
 #include <algorithm>
 
 #if defined( __APPLE__ ) || defined( __FreeBSD__ ) || defined( __OpenBSD__ ) || defined( __NetBSD__ )
