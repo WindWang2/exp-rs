@@ -504,6 +504,19 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
     return out;
   }
 
+  if ( pixelClass.isEmpty() )
+  {
+    out.error = RsTrainingDataResult::Error::NoValidPixels;
+    out.errorMessage =
+      QStringLiteral( "No valid training pixels extracted (featuresRead=%1, geometries=%2, raster=%3x%4)" )
+        .arg( out.featuresRead )
+        .arg( geometries.size() )
+        .arg( W )
+        .arg( H );
+    GDALClose( ds );
+    return out;
+  }
+
   buildMatrices( ds, bands, pixelClass, pixelGroup, options, progress, out );
   GDALClose( ds );
   return out;

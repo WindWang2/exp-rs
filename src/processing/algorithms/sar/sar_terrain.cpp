@@ -136,8 +136,19 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
   const double cellY = std::fabs( demGt[5] );
   if ( cellX <= 0.0 || cellY <= 0.0 )
     return false;
-  if ( demDs.projection().contains( QLatin1String( "deg" ), Qt::CaseInsensitive ) )
-    return false; // geographic DEM units are angles, not meters
+  // Geographic DEMs (angular units) are rejected: Horn denominators would be
+  // ~1e4x too small. Detect a geographic CRS (GEOGCS without PROJCS), not via
+  // substring "deg": projected WKT (e.g. UTM) embeds a GEOGCS subunit with
+  // UNIT["degree",...] and must not be rejected.
+  {
+      const QString proj = demDs.projection();
+      const bool hasGeog = proj.contains( QLatin1String( "GEOGCS" ), Qt::CaseInsensitive )
+                        || proj.contains( QLatin1String( "GEODCRS" ), Qt::CaseInsensitive );
+      const bool hasProj = proj.contains( QLatin1String( "PROJCS" ), Qt::CaseInsensitive )
+                        || proj.contains( QLatin1String( "PROJCRS" ), Qt::CaseInsensitive );
+      if ( hasGeog && !hasProj )
+        return false;
+  }
   const double cellMeters = 0.5 * ( cellX + cellY );
 
   // Map the DEM's declared sentinel to NaN so Horn statistics cannot see it.

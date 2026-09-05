@@ -88,7 +88,8 @@ const std::vector<std::string> s_methods = {"svm", "normal_bayes", "rf", "mlp"};
             throw RSOperatorError(ErrorCode::InvalidParameter, msg);
         case E::NoValidPixels:
             throw RSOperatorError(ErrorCode::InvalidInputData,
-                                  "No valid training pixels extracted (check CRS overlap and classField)");
+                                  "No valid training pixels extracted (" + msg
+                                    + "; check CRS overlap and classField)");
         case E::InsufficientSamples:
             throw RSOperatorError(ErrorCode::InvalidInputData, "Insufficient training samples");
         case E::ModelOpenFailed:
