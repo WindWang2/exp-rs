@@ -649,6 +649,15 @@ std::string ModelCatalog::defaultModelsDirectory()
       return appModels.absolutePath().toStdString();
   }
 
+#ifdef SICNU_SOURCE_DIR
+  {
+      const QDir sourceModels(
+          QDir( QString::fromUtf8( SICNU_SOURCE_DIR ) ).filePath( QStringLiteral( "models" ) ) );
+      if ( sourceModels.exists() )
+        return sourceModels.absolutePath().toStdString();
+  }
+#endif
+
   return QDir::current().filePath( QStringLiteral( "models" ) ).toStdString();
 }
 

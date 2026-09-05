@@ -506,12 +506,13 @@ TEST_CASE("Failed re-commit preserves the previous stable output (#617)", "[outp
     // skips the earlier cases whose fixtures registered GDAL drivers.
     GDALAllRegister();
 
-    // Multi-pair publish that fails on the SECOND file: the stable dir lives
-    // on a different filesystem than the temp dir (rename fails -> copy
-    // fallback), and the temp sidecar is unreadable (copy fails). The old
-    // sequence removed the stable files before moving replacements in, and
-    // its rollback deleted only the newly published names - the last good
-    // output was destroyed. Publish-then-swap must restore the originals.
+    // Multi-pair publish that fails on the SECOND file. The original test
+    // assumed /tmp is a different filesystem than the build dir (rename fails
+    // -> copy fallback) plus an unreadable temp sidecar (copy fails). On CI
+    // runners /tmp and the workspace share one filesystem, so rename succeeds
+    // regardless of file permissions and the commit wrongly succeeds. Make the
+    // failure deterministic: the stable dir is made unwritable, so staging the
+    // backup always fails and rollback must preserve the originals.
     QTemporaryDir tempDir; // tmpfs
     REQUIRE(tempDir.isValid());
 
@@ -521,7 +522,12 @@ TEST_CASE("Failed re-commit preserves the previous stable output (#617)", "[outp
     struct DirCleaner
     {
         QString path;
-        ~DirCleaner() { QDir(path).removeRecursively(); }
+        ~DirCleaner()
+        {
+            QFile::setPermissions( path, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                             | QFileDevice::ExeOwner );
+            QDir( path ).removeRecursively();
+        }
     } cleaner{stableDir};
 
     const QString stable = stableDir + "/stable.tif";
@@ -550,9 +556,11 @@ TEST_CASE("Failed re-commit preserves the previous stable output (#617)", "[outp
         REQUIRE(f2.open(QIODevice::WriteOnly));
         f2.write("NEW-SIDECAR");
     }
-    // Unreadable temp sidecar: the cross-filesystem copy fails on the second
-    // publish pair while the first (readable primary) still succeeds.
+    // Unreadable temp sidecar (cross-filesystem copy path) plus an unwritable
+    // stable dir (same-filesystem rename path): either way the publish must
+    // fail and the previous output must survive.
     QFile::setPermissions(tempSidecar, QFileDevice::Permissions());
+    QFile::setPermissions( stableDir, QFileDevice::ReadOwner | QFileDevice::ExeOwner );
 
     DataManager manager;
     OutputCommitter committer(&manager);
@@ -561,6 +569,8 @@ TEST_CASE("Failed re-commit preserves the previous stable output (#617)", "[outp
     request.stablePath = stable;
 
     const CommitResult result = committer.commit(request);
+    QFile::setPermissions( stableDir, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                        | QFileDevice::ExeOwner );
     REQUIRE_FALSE(result);
 
     // The previous good output must survive: still openable, sidecar intact.

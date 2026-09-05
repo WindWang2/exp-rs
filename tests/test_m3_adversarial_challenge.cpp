@@ -20,6 +20,7 @@
 #include <QDialogButtonBox>
 #include <QMouseEvent>
 #include <QFile>
+#include <QDir>
 #include <QSettings>
 #include <QTest>
 #include <QPointer>
@@ -266,8 +267,13 @@ TEST_CASE( "QSS theme files validity and switching stress", "[m3][qss][theme]" )
 {
     ensureApp();
 
-    QString lightPath = QStringLiteral( "/home/kevin/projects/rs-studio/main/resources/styles.qss" );
-    QString darkPath = QStringLiteral( "/home/kevin/projects/rs-studio/main/resources/styles-dark.qss" );
+#ifdef CMAKE_SOURCE_DIR
+    const QString repoRoot = QString::fromUtf8( CMAKE_SOURCE_DIR );
+#else
+    const QString repoRoot = QDir::currentPath();
+#endif
+    QString lightPath = QDir( repoRoot ).filePath( QStringLiteral( "resources/styles.qss" ) );
+    QString darkPath = QDir( repoRoot ).filePath( QStringLiteral( "resources/styles-dark.qss" ) );
 
     QFile fl( lightPath );
     REQUIRE( fl.open( QIODevice::ReadOnly | QIODevice::Text ) );

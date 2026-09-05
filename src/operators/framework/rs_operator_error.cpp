@@ -26,6 +26,8 @@ const char* errorCodeToString(ErrorCode code) noexcept {
         case ErrorCode::Cancelled: return "Cancelled";
         case ErrorCode::AlreadyRunning: return "AlreadyRunning";
         case ErrorCode::NotInitialized: return "NotInitialized";
+        case ErrorCode::ExternalProcessTimeout: return "ExternalProcessTimeout";
+        case ErrorCode::ExternalProcessFailed: return "ExternalProcessFailed";
         case ErrorCode::Unknown: return "Unknown";
     }
     return "Unknown";

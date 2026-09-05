@@ -26,6 +26,7 @@
 #include <qgslayoutitemmap.h>
 #include <qgslayoutitemlegend.h>
 #include <qgslayoutitemscalebar.h>
+#include <cstdlib>
 #include <gui/layout/qgslayoutviewtoolselect.h>
 #include <gui/layout/qgslayoutviewtoolpan.h>
 #include <gui/layout/qgslayoutviewtoolzoom.h>
@@ -34,6 +35,15 @@
 
 namespace
 {
+void cleanupQgisAtExit()
+{
+  // Invalidate PROJ caches while libproj is still alive: otherwise the static
+  // QgsCoordinateTransform cache is destroyed after exit() has freed PROJ
+  // internals (heap-use-after-free in freeProj()->proj_context_create, and a
+  // plain SEGFAULT without sanitizers). exitQgis() also tears down providers.
+  QgsApplication::exitQgis();
+}
+
 QApplication *ensureApp()
 {
   static int argc = 1;
@@ -46,6 +56,12 @@ QApplication *ensureApp()
   static auto *app = new QgsApplication( argc, v, true );
   QgsApplication::initQgis();
   QgsGui::instance(); // ensure the layout item GUI registry exists
+  static const bool registered = [] {
+    std::atexit( cleanupQgisAtExit );
+    return true;
+  }();
+  (void)registered;
+  (void)app;
   return app;
 }
 

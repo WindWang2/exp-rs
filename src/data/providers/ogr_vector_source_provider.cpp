@@ -160,7 +160,9 @@ Result<internal::ResolvedSource> OgrVectorSourceProvider::resolve(
     }
 
     OGREnvelope envelope;
-    if ( OGR_L_GetExtent( layer, &envelope, false ) == OGRERR_NONE )
+    // bForce=true: drivers like GeoJSON do not cache extents; a full scan is
+    // cheap for provider resolution and required on GDAL 3.8 (CI).
+    if ( OGR_L_GetExtent( layer, &envelope, true ) == OGRERR_NONE )
     {
       layerStructure.extent = SpatialExtent{ envelope.MinX,
                                              envelope.MinY,
