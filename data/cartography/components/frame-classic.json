@@ -1,0 +1,15 @@
+{
+  "id": "frame/classic",
+  "category": "frame",
+  "semantic_roles": ["frame.primary"],
+  "description": "Classic thin frame around the main map.",
+  "parameters": { "frame_width_mm": 0.4, "frame_color": "#404040" },
+  "layout_constraints": {
+    "anchor": "map-frame",
+    "preferred_positions": [],
+    "margin_mm": 0,
+    "max_count_per_page": 1
+  },
+  "compatibility": { "requires_map_frame": true },
+  "preview": { "placeholder": true }
+}

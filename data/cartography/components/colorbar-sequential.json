@@ -1,0 +1,15 @@
+{
+  "id": "colorbar/sequential",
+  "category": "color-bar",
+  "semantic_roles": ["colorbar.primary"],
+  "description": "Sequential gradient strip with min/max labels for continuous rasters.",
+  "parameters": { "ramp": "sequential", "width_mm": 60, "height_mm": 8 },
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": ["bottom-center", "right-rail"],
+    "margin_mm": 8,
+    "max_count_per_page": 2
+  },
+  "compatibility": { "requires_map_frame": true },
+  "preview": { "placeholder": true }
+}

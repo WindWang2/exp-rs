@@ -1,0 +1,14 @@
+{
+  "id": "scientific-publication",
+  "description": "Publication-grade composition with graticule and true-north arrow.",
+  "page": { "width_mm": 297, "height_mm": 210 },
+  "required_slots": [
+    { "role": "map.main", "accepts": "map_frames", "rect_mm": [14, 26, 186, 156] },
+    { "role": "title.main", "accepts": "titles", "rect_mm": [14, 8, 190, 14] },
+    { "role": "legend.primary", "accepts": "legends", "rect_mm": [208, 34, 74, 84] },
+    { "role": "scalebar.primary", "accepts": "scale_bars", "rect_mm": [16, 186, 58, 8] },
+    { "role": "source.primary", "accepts": "source_notes", "rect_mm": [150, 188, 132, 8] }
+  ],
+  "recommended_components": ["north-arrow/scientific", "grid/graticule", "frame/classic"],
+  "suitable_tasks": ["publication", "comparison"]
+}

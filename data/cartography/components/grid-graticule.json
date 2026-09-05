@@ -1,0 +1,15 @@
+{
+  "id": "grid/graticule",
+  "category": "grid",
+  "semantic_roles": ["grid.primary"],
+  "description": "Latitude/longitude graticule over the map frame.",
+  "parameters": { "interval_deg": 1.0 },
+  "layout_constraints": {
+    "anchor": "map-frame",
+    "preferred_positions": [],
+    "margin_mm": 0,
+    "max_count_per_page": 1
+  },
+  "compatibility": { "requires_map_frame": true, "crs_requirements": "geographic_preferred" },
+  "preview": { "placeholder": true }
+}

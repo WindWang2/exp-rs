@@ -4,6 +4,7 @@
 #include "llm_settings_dialog.h"
 #include "output_verifier.h"
 #include "workspace_snapshot.h"
+#include "workspace_state.h"
 
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
@@ -167,6 +168,11 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapC
 {
   m_dataManager = dataManager;
   m_canvas = canvas;
+  // Workspace Understanding 3.0 seam: stateless spatial tools (workspace
+  // summary, capability ranking, symbology) read the workspace through
+  // AgentServices instead of per-tool pointers.
+  sicnu::agent::AgentServices::instance().setDataManager( dataManager );
+  sicnu::agent::AgentServices::instance().setMapCanvas( canvas );
   m_workflowExecutor.setDataManager( dataManager );
   m_toolCallDispatcher.setSourceTag( QStringLiteral( "agent" ) );
   m_toolCallDispatcher.setDataManager( dataManager );

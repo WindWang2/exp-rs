@@ -22,14 +22,25 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
     // layout:* tools join the catalog through their own provider/group.
     const bool isSpatial = ( spatial->name().rfind( "spatial:", 0 ) == 0 );
     const bool isTemporal = ( spatial->name().rfind( "temporal:", 0 ) == 0 );
-    if ( !isSpatial && !isTemporal )
+    // Spatial Scientist 3.0 namespaces share the registry surface (#ADR 0128).
+    const bool isCartography = ( spatial->name().rfind( "cartography:", 0 ) == 0 );
+    const bool isSymbology = ( spatial->name().rfind( "symbology:", 0 ) == 0 );
+    const bool isWorkflow = ( spatial->name().rfind( "workflow:", 0 ) == 0 );
+    const bool isWorkspaceCommand = ( spatial->name().rfind( "workspace:", 0 ) == 0 );
+    if ( !isSpatial && !isTemporal && !isCartography && !isSymbology && !isWorkflow &&
+         !isWorkspaceCommand )
       continue;
 
     AgentTool tool;
     tool.name = spatial->name();
     tool.displayName = spatial->displayName();
     tool.category = ToolCategory::Data;
-    tool.group = isTemporal ? "temporal" : "spatial";
+    tool.group = isTemporal    ? "temporal"
+                 : isCartography ? "cartography"
+                 : isSymbology   ? "symbology"
+                 : isWorkflow    ? "workflow"
+                 : isWorkspaceCommand ? "workspace"
+                                      : "spatial";
     tool.description = spatial->description();
     tool.tags = spatial->tags();
     tool.inputSchema = spatial->inputSchema();

@@ -33,6 +33,12 @@ data/*
 !data/tools/**
 !data/schemas/
 !data/schemas/**
+# Cartographic component/template library and the spatial-scientist benchmark
+# task set are tracked config, not local rasters.
+!data/cartography/
+!data/cartography/**
+!data/benchmarks/
+!data/benchmarks/**
 !data/pipelines/
 !data/pipelines/**
 
@@ -88,7 +94,8 @@ vcpkg_installed/
 run_sicnu_geo_rs.bat
 
 # Agent-session planning artifacts (audit leftovers) must not be committed at the repo root.
-benchmarks/
+# Root-anchored so data/benchmarks/ (tracked benchmark task sets) is unaffected.
+/benchmarks/
 
 # Re-ignore Python caches: the "!tests/data/**" negation above would otherwise
 # un-ignore them again (last match wins).
