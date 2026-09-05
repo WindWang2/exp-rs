@@ -121,7 +121,11 @@ DataProjectSerializer::write(QDomDocument &document,
   // Format v3 (Workspace Governance 3.0): the legacy v1 blocks below stay
   // byte-compatible; the governed workspace state is ADDED as an extra block.
   // A store-less context keeps writing plain v1 (backward compatible always).
-  const bool writeV3 = context.workspaceService().isStoreOpen();
+  // Downgrade guard (review P0): with the store unavailable but a governed
+  // document cached from a previous read, re-persist THAT instead of silently
+  // dropping all governed state by rewriting a v1 file.
+  const bool writeV3 = context.workspaceService().isStoreOpen()
+                       || context.workspaceService().hasCachedProjectJson();
   extension.setAttribute(QStringLiteral("version"),
                          writeV3 ? QStringLiteral("3")
                                  : QString::fromLatin1(extensionVersion));
@@ -294,7 +298,9 @@ DataProjectSerializer::write(QDomDocument &document,
   // the <derivation>/<recipe>/<descriptor> payload pattern above.
   if (writeV3) {
     const QJsonObject workspaceDocument =
-        context.workspaceService().toProjectJson();
+        context.workspaceService().isStoreOpen()
+            ? context.workspaceService().toProjectJson()
+            : context.workspaceService().cachedProjectJson();
     QDomElement workspaceElement =
         document.createElement(QStringLiteral("workspace"));
     workspaceElement.setAttribute(QStringLiteral("schemaVersion"),
@@ -669,6 +675,12 @@ data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
         const QVector<data::Diagnostic> restoreDiagnostics =
             workspace.fromProjectJson(parsed.object());
         diagnostics += restoreDiagnostics;
+      } else {
+        diagnostics.append(data::Diagnostic{
+            QStringLiteral("workspace.block_unparseable"),
+            QStringLiteral("the v3 workspace block could not be parsed and "
+                           "was skipped; governed state was NOT restored"),
+            data::DiagnosticSeverity::Warning});
       }
     }
     // Assets mirror last so governed state (datasets etc.) sees stable rows.

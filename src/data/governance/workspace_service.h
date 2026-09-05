@@ -65,7 +65,7 @@ class WorkspaceService : public QObject
     sicnu::data::DataManager *dataManager() const { return m_dataManager; }
     /// Bulk mirror of every current asset (+ lineage). Used after project open
     /// / migration. Returns number of mirrored rows.
-    qint64 mirrorAllAssets();
+    qint64 mirrorAllAssets( bool reconcileGhosts = false );
 
     /// Re-derives the GovernedAsset row (and lineage edges) for one asset.
     /// Returns false when the asset is unknown to the DataManager.
@@ -151,6 +151,11 @@ class WorkspaceService : public QObject
     QVector<GovernanceStore::AuditEntry> auditTail( qint64 limit = 100 ) const { return m_store.auditTail( limit ); }
 
     // --- project document (Phase B) ---------------------------------------------------
+    /// True when a governed snapshot is cached from a previous read/write and
+    /// can be re-persisted even with the store unavailable (downgrade guard).
+    bool hasCachedProjectJson() const { return !m_cachedProjectJson.isEmpty(); }
+    /// The last serialized (or restored) governed document.
+    QJsonObject cachedProjectJson() const { return m_cachedProjectJson; }
     /// Serializes the governed (non-asset) workspace state for the v3 DOM block.
     QJsonObject toProjectJson() const;
     /// Restores governed state from the v3 DOM block. Unknown sections are
@@ -164,11 +169,18 @@ class WorkspaceService : public QObject
     void onAssetAdded( const sicnu::data::AssetId &id );
     void onAssetChanged( const sicnu::data::AssetId &id );
     void onAssetRemoved( const sicnu::data::AssetId &id );
+    std::optional<GovernedAsset> governedRowForSnapshot( const sicnu::data::AssetSnapshot &snapshot ) const;
     bool mirrorSnapshot( const sicnu::data::AssetSnapshot &snapshot );
     void syncDerivationLineage( const sicnu::data::AssetSnapshot &snapshot );
-    void bumpMetaRevision();
+    void collectDerivationLineage( const sicnu::data::AssetSnapshot &snapshot,
+                                   QVector<GovernanceStore::LineageEdge> &edges );
+    void syncRunAnchors( const sicnu::data::DerivationRecord &record );
 
     GovernanceStore m_store;
+    /// Last serialized workspace document — the downgrade guard (review P0):
+    /// a project opened as v3 and saved with a broken/unavailable store keeps
+    /// its governed state instead of being silently rewritten as v1.
+    mutable QJsonObject m_cachedProjectJson;
     sicnu::data::DataManager *m_dataManager = nullptr;
     QMetaObject::Connection m_assetAddedConn;
     QMetaObject::Connection m_assetChangedConn;

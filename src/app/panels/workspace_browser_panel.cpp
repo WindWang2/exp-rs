@@ -15,6 +15,7 @@
 #include <QStringList>
 #include <QTableView>
 #include <QTextEdit>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace sicnu::app
@@ -262,6 +263,13 @@ WorkspaceBrowserPanel::WorkspaceBrowserPanel( QWidget *parent )
     footer->addWidget( m_healthButton );
     layout->addLayout( footer );
 
+    // Review P2-17: coalesce store-refresh churn during bulk import instead
+    // of one full re-query per asset.
+    m_refreshCoalescer = new QTimer( this );
+    m_refreshCoalescer->setSingleShot( true );
+    m_refreshCoalescer->setInterval( 300 );
+    connect( m_refreshCoalescer, &QTimer::timeout, this, &WorkspaceBrowserPanel::refresh );
+
     connect( m_search, &QLineEdit::textChanged, this, &WorkspaceBrowserPanel::refresh );
     connect( m_entitySet, &QComboBox::currentIndexChanged, this, &WorkspaceBrowserPanel::refresh );
     connect( m_kind, &QComboBox::currentIndexChanged, this, &WorkspaceBrowserPanel::refresh );
@@ -281,8 +289,8 @@ void WorkspaceBrowserPanel::setWorkspaceService( WorkspaceService *service )
     if ( service )
     {
         // Batched refresh on any governed mutation (assets mirrored, tags, …).
-        connect( service, &WorkspaceService::entityChanged, this, &WorkspaceBrowserPanel::refresh,
-                 Qt::QueuedConnection );
+        connect( service, &WorkspaceService::entityChanged, m_refreshCoalescer,
+                 qOverload<>(&QTimer::start), Qt::QueuedConnection );
     }
     refresh();
 }

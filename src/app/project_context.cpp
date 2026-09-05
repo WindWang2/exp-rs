@@ -159,19 +159,19 @@ ProjectContext::workspaceService() const {
 bool ProjectContext::openWorkspaceStore( const QString &projectFile ) {
   const QString storePath =
       sicnu::workspace::WorkspaceService::defaultStorePathFor( projectFile );
-  if ( m_workspaceService.isStoreOpen() ) {
-    // Reopening the same store is a no-op; a path change (Save As) closes the
-    // previous store first so governed state never bleeds across projects.
-    return true;
-  }
   QString error;
   const bool opened = m_workspaceService.openStore( storePath, &error );
   if ( opened ) {
     m_workspaceService.store().setMeta(
         QStringLiteral( "db_path" ), storePath );
-    m_workspaceService.mirrorAllAssets();
+    m_workspaceService.mirrorAllAssets( /*reconcileGhosts=*/true );
   }
   return opened;
+}
+
+bool ProjectContext::reopenWorkspaceStore( const QString &projectFile ) {
+  m_workspaceService.closeStore();
+  return openWorkspaceStore( projectFile );
 }
 
 display::QgisDisplayManager &ProjectContext::displayManager() {

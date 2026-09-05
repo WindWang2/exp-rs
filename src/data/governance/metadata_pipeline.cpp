@@ -84,6 +84,7 @@ GdalFacts readGdalFacts( const QString &path )
 MetadataPipeline::MetadataPipeline( WorkspaceService &service, QObject *parent )
     : QObject( parent )
     , m_service( service )
+    , m_pool( this )
 {
     qRegisterMetaType<MetadataPipeline::Summary>();
 }
@@ -91,6 +92,8 @@ MetadataPipeline::MetadataPipeline( WorkspaceService &service, QObject *parent )
 MetadataPipeline::~MetadataPipeline()
 {
     cancel();
+    m_pool.clear();
+    m_pool.waitForDone( 30000 );
 }
 
 void MetadataPipeline::cancel()
@@ -137,7 +140,7 @@ bool MetadataPipeline::start( const Config &config )
     }
 
     const Config passConfig = config;
-    QThreadPool::globalInstance()->start( [ this, passConfig, work ]() mutable {
+    m_pool.start( [ this, passConfig, work ]() mutable {
         runPass( passConfig, work );
     } );
     return true;

@@ -68,6 +68,8 @@ public:
   /// reopened. Returns false on failure (service keeps running memory-only —
   /// governed state then persists through the project DOM only).
   bool openWorkspaceStore( const QString &projectFile );
+  /// Closes any open store and reopens at @p projectFile (Save As path).
+  bool reopenWorkspaceStore( const QString &projectFile );
 
   display::QgisDisplayManager &displayManager();
   const display::QgisDisplayManager &displayManager() const;

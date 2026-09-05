@@ -11,6 +11,7 @@
 #include <QAbstractTableModel>
 #include <QWidget>
 
+class QTimer;
 class QLabel;
 class QLineEdit;
 class QComboBox;
@@ -87,6 +88,7 @@ class WorkspaceBrowserPanel : public QWidget
     QTextEdit *m_details = nullptr;
     QLabel *m_status = nullptr;
     QPushButton *m_healthButton = nullptr;
+    QTimer *m_refreshCoalescer = nullptr;
 };
 
 } // namespace sicnu::app

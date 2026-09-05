@@ -94,6 +94,8 @@ ValidationReport WorkspaceValidator::validateProject( const ValidationOptions &o
     // 3. Collections: member presence.
     for ( const CollectionId &collectionId : m_dataManager.collections() )
     {
+        if ( report.diagnostics.size() >= options.maxDiagnostics )
+            break;
         const std::optional<CollectionSnapshot> collectionSnapshot = m_dataManager.collection( collectionId );
         if ( !collectionSnapshot )
             continue;
@@ -116,6 +118,8 @@ ValidationReport WorkspaceValidator::validateProject( const ValidationOptions &o
     // 4. Datasets: member presence.
     for ( const DatasetRecord &dataset : m_service.datasets() )
     {
+        if ( report.diagnostics.size() >= options.maxDiagnostics )
+            break;
         for ( const QString &member : dataset.memberAssetIds )
         {
             if ( !m_service.store().assetById( member ) )
@@ -135,6 +139,8 @@ ValidationReport WorkspaceValidator::validateProject( const ValidationOptions &o
     // 5. Results: artifact existence, orphans, producer anchors.
     for ( const ResultRecord &result : m_service.results() )
     {
+        if ( report.diagnostics.size() >= options.maxDiagnostics )
+            break;
         for ( const ResultArtifact &artifact : result.artifacts )
         {
             if ( !artifact.path.isEmpty() && !QFileInfo::exists( artifact.path ) )
@@ -194,7 +200,18 @@ void WorkspaceValidator::checkAsset( const QString &assetId, const ValidationOpt
     const std::optional<AssetSnapshot> snapshot =
         m_dataManager.asset( sicnu::data::AssetId::fromString( assetId ).value_or( sicnu::data::AssetId() ) );
     if ( !snapshot )
+    {
+        // Store-only id (ghost row): the DiagnosticKind::StaleCatalog
+        // vocabulary exists precisely for this; a silent "healthy" report
+        // would hide drift between the runtime authority and the index.
+        report.diagnostics.append( makeDiag(
+            DiagnosticKind::StaleCatalog, DiagnosticSeverity::Warning,
+            QStringLiteral( "asset.store_only" ), QStringLiteral( "asset" ), assetId,
+            QStringLiteral( "%1 exists in the governance index but not in the runtime catalog" ).arg( assetId ),
+            QStringLiteral( "Rebuild the index (project:rebuild-index) or remove the stale row." ) ) );
+        report.summary.add( report.diagnostics.last() );
         return;
+    }
     const QString path = snapshot->source().canonicalSource;
     const std::optional<GovernedAsset> row = m_service.store().assetById( assetId );
 

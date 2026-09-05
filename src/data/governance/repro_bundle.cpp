@@ -124,15 +124,24 @@ ReproBundleReport ReproBundleExporter::exportBundle( const ReproBundleOptions &o
                                          ? QStringLiteral( "data/unhashed_%1" ).arg( inputArray.size() )
                                          : QStringLiteral( "data/%1.%2" ).arg( digest, suffix.isEmpty() ? QStringLiteral( "bin" ) : suffix );
             const QString destination = QDir( options.outputDir ).filePath( relative );
-            if ( QDir().mkpath( QFileInfo( destination ).absolutePath() )
-                 && QFile::copy( snapshot.source().canonicalSource, destination ) )
+            const bool exists = QFileInfo::exists( destination );  // same digest = same content
+            if ( exists || ( QDir().mkpath( QFileInfo( destination ).absolutePath() )
+                             && QFile::copy( snapshot.source().canonicalSource, destination ) ) )
             {
-                const qint64 bytes = QFileInfo( destination ).size();
-                copiedBytes += bytes;
-                ++report.copiedCount;
+                if ( !exists )
+                {
+                    const qint64 bytes = QFileInfo( destination ).size();
+                    copiedBytes += bytes;
+                    ++report.copiedCount;
+                    if ( copiedBytes > options.portableMaxBytes )
+                    {
+                        report.warnings.append(
+                            QStringLiteral( "portable copy budget exceeded; remaining inputs are references" ) );
+                        // Stop copying; the rest degrade to reference-only entries.
+                        const_cast<ReproBundleOptions &>( options ).mode = ReproBundleOptions::Mode::MetadataOnly;
+                    }
+                }
                 input.insert( QStringLiteral( "bundlePath" ), relative );
-                if ( copiedBytes > options.portableMaxBytes )
-                    report.warnings.append( QStringLiteral( "portable copy budget exceeded; remaining inputs are references" ) );
             }
             else
                 report.warnings.append( QStringLiteral( "copy failed for %1" ).arg( snapshot.source().canonicalSource ) );

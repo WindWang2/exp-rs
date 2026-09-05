@@ -11,6 +11,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
+#include <QThreadPool>
 #include <QVector>
 
 #include <atomic>
@@ -74,6 +75,10 @@ class MetadataPipeline : public QObject
     sicnu::data::DataManager *m_dataManager = nullptr;
     std::atomic_bool m_running{ false };
     std::atomic_bool m_cancel{ false };
+    /// Own pool: the destructor drains exactly this pipeline's workers, so
+    /// destroy-while-running can never leave a worker touching dead members
+    /// (review P1-27) nor hang on the global pool.
+    QThreadPool m_pool;
 };
 
 } // namespace sicnu::workspace

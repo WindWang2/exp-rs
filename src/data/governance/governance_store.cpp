@@ -776,6 +776,20 @@ QVector<GovernedAsset> GovernanceStore::allAssets( qint64 limit ) const
     return out;
 }
 
+QVector<QString> GovernanceStore::assetIds() const
+{
+    QVector<QString> out;
+    if ( !m_impl )
+        return out;
+    std::lock_guard<std::mutex> lock( m_impl->mutex );
+    Stmt s( m_impl->db, "SELECT asset_id FROM assets" );
+    if ( !s )
+        return out;
+    while ( s.stepRow() )
+        out.append( s.text( 0 ) );
+    return out;
+}
+
 qint64 GovernanceStore::assetCount() const
 {
     if ( !m_impl )
@@ -998,11 +1012,16 @@ QVector<DatasetRecord> GovernanceStore::datasets( qint64 limit ) const
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    Stmt s( m_impl->db, "SELECT dataset_id, kind, name, revision, status, metadata_json, created_ms, updated_ms"
-                        " FROM datasets ORDER BY updated_ms DESC, dataset_id LIMIT ?" );
+    const bool bounded = limit > 0;
+    Stmt s( m_impl->db, bounded
+            ? "SELECT dataset_id, kind, name, revision, status, metadata_json, created_ms, updated_ms"
+              " FROM datasets ORDER BY updated_ms DESC, dataset_id LIMIT ?"
+            : "SELECT dataset_id, kind, name, revision, status, metadata_json, created_ms, updated_ms"
+              " FROM datasets ORDER BY updated_ms DESC, dataset_id" );
     if ( !s )
         return out;
-    s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
+    if ( bounded )
+        s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
     while ( s.stepRow() )
         out.append( m_impl->readDataset( s ) );
     return out;
@@ -1138,13 +1157,20 @@ QVector<ResultRecord> GovernanceStore::results( qint64 limit ) const
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    Stmt s( m_impl->db, "SELECT result_id, semantic_type, name, status, revision, producer_json, run_id,"
-                        " metrics_json, quality_json, metadata_json, tags_json, superseded_by,"
-                        " validation_notes, created_ms, updated_ms FROM results"
-                        " ORDER BY updated_ms DESC, result_id LIMIT ?" );
+    const bool bounded = limit > 0;
+    Stmt s( m_impl->db, bounded
+            ? "SELECT result_id, semantic_type, name, status, revision, producer_json, run_id,"
+              " metrics_json, quality_json, metadata_json, tags_json, superseded_by,"
+              " validation_notes, created_ms, updated_ms FROM results"
+              " ORDER BY updated_ms DESC, result_id LIMIT ?"
+            : "SELECT result_id, semantic_type, name, status, revision, producer_json, run_id,"
+              " metrics_json, quality_json, metadata_json, tags_json, superseded_by,"
+              " validation_notes, created_ms, updated_ms FROM results"
+              " ORDER BY updated_ms DESC, result_id" );
     if ( !s )
         return out;
-    s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
+    if ( bounded )
+        s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
     while ( s.stepRow() )
         out.append( m_impl->readResult( s ) );
     return out;
@@ -1164,6 +1190,33 @@ QVector<ResultRecord> GovernanceStore::resultsDependingOnAsset( const QString &a
     if ( !s )
         return out;
     s.bind( 1, assetId );
+    while ( s.stepRow() )
+        out.append( m_impl->readResult( s ) );
+    return out;
+}
+
+QVector<ResultRecord> GovernanceStore::resultsDependingOnAssets( const QStringList &assetIds ) const
+{
+    QVector<ResultRecord> out;
+    if ( !m_impl || assetIds.isEmpty() )
+        return out;
+    std::lock_guard<std::mutex> lock( m_impl->mutex );
+    // IN-lists are chunked at 500 (SQLite var limit headroom) — the caller
+    // passes a bounded downstream set (depth-capped).
+    QStringList placeholders;
+    for ( int i = 0; i < assetIds.size(); ++i )
+        placeholders.append( QStringLiteral( "?" ) );
+    Stmt s( m_impl->db,
+            QStringLiteral( "SELECT DISTINCT r.result_id, r.semantic_type, r.name, r.status, r.revision,"
+                            " r.producer_json, r.run_id, r.metrics_json, r.quality_json, r.metadata_json,"
+                            " r.tags_json, r.superseded_by, r.validation_notes, r.created_ms, r.updated_ms"
+                            " FROM results r JOIN result_inputs i ON i.result_id=r.result_id"
+                            " WHERE i.asset_id IN (%1)" ).arg( placeholders.join( QLatin1Char( ',' ) ) ) );
+    if ( !s )
+        return out;
+    int idx = 1;
+    for ( const QString &id : assetIds )
+        s.bind( idx++, id );
     while ( s.stepRow() )
         out.append( m_impl->readResult( s ) );
     return out;
@@ -1256,15 +1309,46 @@ QVector<RunRecord> GovernanceStore::runs( qint64 limit ) const
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    Stmt s( m_impl->db, "SELECT run_id, workflow_id, state, name, started_ms, finished_ms, definition_json,"
-                        " summary_json, metadata_json, tags_json, updated_ms FROM runs"
-                        " ORDER BY updated_ms DESC, run_id LIMIT ?" );
+    const bool bounded = limit > 0;
+    Stmt s( m_impl->db, bounded
+            ? "SELECT run_id, workflow_id, state, name, started_ms, finished_ms, definition_json,"
+              " summary_json, metadata_json, tags_json, updated_ms FROM runs"
+              " ORDER BY updated_ms DESC, run_id LIMIT ?"
+            : "SELECT run_id, workflow_id, state, name, started_ms, finished_ms, definition_json,"
+              " summary_json, metadata_json, tags_json, updated_ms FROM runs"
+              " ORDER BY updated_ms DESC, run_id" );
     if ( !s )
         return out;
-    s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
+    if ( bounded )
+        s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
     while ( s.stepRow() )
         out.append( m_impl->readRun( s ) );
     return out;
+}
+
+Result<void> GovernanceStore::addRunOutputs( const QVector<QPair<QString, QString>> &pairs )
+{
+    if ( !m_impl || m_impl->readOnly )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
+    std::lock_guard<std::mutex> lock( m_impl->mutex );
+    m_impl->exec( "BEGIN IMMEDIATE" );
+    {
+        Stmt s( m_impl->db, "INSERT OR IGNORE INTO run_outputs(run_id, asset_id) VALUES(?,?)" );
+        if ( !s )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ), QStringLiteral( "run outputs prepare failed" ) ) );
+        }
+        for ( const QPair<QString, QString> &pair : pairs )
+        {
+            s.reset();
+            s.bind( 1, pair.first );
+            s.bind( 2, pair.second );
+            s.step();
+        }
+    }
+    m_impl->exec( "COMMIT" );
+    return Result<void>::success();
 }
 
 void GovernanceStore::linkRunOutput( const QString &runId, const QString &assetId )
@@ -1393,11 +1477,16 @@ QVector<ExperimentRecord> GovernanceStore::experiments( qint64 limit ) const
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    Stmt s( m_impl->db, "SELECT experiment_id, name, objective, metadata_json, tags_json, created_ms, updated_ms"
-                        " FROM experiments ORDER BY updated_ms DESC, experiment_id LIMIT ?" );
+    const bool bounded = limit > 0;
+    Stmt s( m_impl->db, bounded
+            ? "SELECT experiment_id, name, objective, metadata_json, tags_json, created_ms, updated_ms"
+              " FROM experiments ORDER BY updated_ms DESC, experiment_id LIMIT ?"
+            : "SELECT experiment_id, name, objective, metadata_json, tags_json, created_ms, updated_ms"
+              " FROM experiments ORDER BY updated_ms DESC, experiment_id" );
     if ( !s )
         return out;
-    s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
+    if ( bounded )
+        s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
     while ( s.stepRow() )
         out.append( m_impl->readExperiment( s ) );
     return out;
@@ -1654,11 +1743,16 @@ QVector<ExportRecord> GovernanceStore::exports( qint64 limit ) const
     if ( !m_impl )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    Stmt s( m_impl->db, "SELECT export_id, kind, target, result_id, name, metadata_json, created_ms, updated_ms"
-                        " FROM exports ORDER BY created_ms DESC LIMIT ?" );
+    const bool bounded = limit > 0;
+    Stmt s( m_impl->db, bounded
+            ? "SELECT export_id, kind, target, result_id, name, metadata_json, created_ms, updated_ms"
+              " FROM exports ORDER BY created_ms DESC LIMIT ?"
+            : "SELECT export_id, kind, target, result_id, name, metadata_json, created_ms, updated_ms"
+              " FROM exports ORDER BY created_ms DESC" );
     if ( !s )
         return out;
-    s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
+    if ( bounded )
+        s.bind( 1, std::clamp<qint64>( limit, 1, kMaxPageSize ) );
     while ( s.stepRow() )
         out.append( m_impl->readExport( s ) );
     return out;
@@ -1731,13 +1825,13 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
             where << QStringLiteral( "a.asset_id IN (SELECT asset_id FROM dataset_members WHERE dataset_id=?)" );
             textBinds << query.datasetId;
         }
-        if ( query.acquiredFromMs > 0 ) { where << QStringLiteral( "a.acquisition_ms>=?" ); intBinds << query.acquiredFromMs; }
-        if ( query.acquiredToMs > 0 ) { where << QStringLiteral( "a.acquisition_ms<=?" ); intBinds << query.acquiredToMs; }
         if ( !query.tag.isEmpty() )
         {
             where << QStringLiteral( "a.asset_id IN (SELECT entity_id FROM tags WHERE entity_kind='asset' AND tag=?)" );
             textBinds << query.tag;
         }
+        if ( query.acquiredFromMs > 0 ) { where << QStringLiteral( "a.acquisition_ms>=?" ); intBinds << query.acquiredFromMs; }
+        if ( query.acquiredToMs > 0 ) { where << QStringLiteral( "a.acquisition_ms<=?" ); intBinds << query.acquiredToMs; }
     }
     else if ( query.set == EntitySet::Results )
     {
@@ -1834,11 +1928,7 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
         }
     }
 
-    QString orderBy = QStringLiteral( "updated_ms DESC" );
-    if ( query.sortBy == QLatin1String( "name" ) )
-        orderBy = QStringLiteral( "name COLLATE NOCASE ASC" );
-    else if ( query.sortBy == QLatin1String( "acquisition" ) )
-        orderBy = QStringLiteral( "acquisition_ms DESC" );
+    QString orderBy = QStringLiteral( "updated_ms DESC" );  // per-entity default; entity-specific keys below
 
     QString from;
     QString cols;

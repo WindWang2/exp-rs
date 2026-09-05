@@ -3632,16 +3632,27 @@ bool QgsProject::writeProjectFile( const QString &filename )
     projectFileStream.flush();
     ok &= tempFile.flush();
     // fsync the payload so the rename cannot publish unflushed pages.
+#ifdef Q_OS_WIN
+    ok &= ::_commit( tempFile.handle() ) == 0;
+#else
     ok &= ::fsync( tempFile.handle() ) == 0;
+#endif
     tempFile.close();
   }
 
   if ( ok )
   {
+    // ::rename(2) atomically REPLACES the target (QFile::rename refuses an
+    // existing destination, and remove-then-rename would leave a crash window
+    // with no project file at all). Windows has no atomic replace via rename:
+    // fall back to MoveFileEx semantics through QFile (remove + rename).
+#ifdef Q_OS_WIN
     QFile::remove( filename );
-    // POSIX rename(2): atomic replacement when both paths share a filesystem
-    // (guaranteed here — the temp file lives in the target's directory).
     ok = QFile::rename( tempFile.fileName(), filename );
+#else
+    ok = ::rename( QFile::encodeName( tempFile.fileName() ).constData(),
+                   QFile::encodeName( filename ).constData() ) == 0;
+#endif
     if ( ok )
     {
       // fsync the directory so the rename itself is durable.
@@ -3654,7 +3665,11 @@ bool QgsProject::writeProjectFile( const QString &filename )
       int dfd = ::open( targetDir.absolutePath().toUtf8().constData(), dirFlags );
       if ( dfd >= 0 )
       {
+#ifdef Q_OS_WIN
+        ::_commit( dfd );
+#else
         ::fsync( dfd );
+#endif
         ::close( dfd );
       }
     }

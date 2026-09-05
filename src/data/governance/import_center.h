@@ -12,6 +12,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <QThreadPool>
+
 #include <atomic>
 
 class QJsonObject;
@@ -42,7 +44,8 @@ struct ImportScanReport
     int duplicates = 0;
     int skipped = 0;
     int failed = 0;
-    bool cancelled = false;
+    bool cancelled = false;   ///< user-initiated cancellation only
+    bool truncated = false;   ///< discovery bound exceeded (not a cancellation)
     QJsonObject toJson() const;
 };
 
@@ -73,6 +76,8 @@ class ImportCenter : public QObject
     sicnu::data::DataManager *m_dataManager = nullptr;
     std::atomic_bool m_running{ false };
     std::atomic_bool m_cancel{ false };
+    /// Own pool (see MetadataPipeline): bounded lifetime, drained in dtor.
+    QThreadPool m_pool;
 };
 
 } // namespace sicnu::workspace

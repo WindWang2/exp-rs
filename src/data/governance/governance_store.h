@@ -17,6 +17,7 @@
 
 #include "governance_types.h"
 
+#include <QPair>
 #include <QString>
 #include <QVector>
 
@@ -86,6 +87,8 @@ class GovernanceStore
     /// Assets whose stored fingerprint equals @p digest (relink lookup).
     QVector<GovernedAsset> assetsByFingerprint( const QString &digest, qint64 limit = 32 ) const;
     QVector<GovernedAsset> allAssets( qint64 limit = -1 ) const;  // bounded callers only
+    /// Lightweight id scan for ghost reconciliation (no hydration).
+    QVector<QString> assetIds() const;
     qint64 assetCount() const;
 
     // --- tags (any entity kind) ---------------------------------------------
@@ -107,6 +110,8 @@ class GovernanceStore
     Result<void> upsertDataset( const DatasetRecord &dataset );
     Result<void> removeDataset( const QString &datasetId );
     std::optional<DatasetRecord> datasetById( const QString &datasetId ) const;
+    /// limit<=0 = unbounded — reserved for the project-save serialization
+    /// path; every interactive caller must keep the kMaxPageSize bound.
     QVector<DatasetRecord> datasets( qint64 limit = kMaxPageSize ) const;
 
     // --- results ------------------------------------------------------------
@@ -116,6 +121,8 @@ class GovernanceStore
     QVector<ResultRecord> results( qint64 limit = kMaxPageSize ) const;
     /// Results consuming @p assetId as an input (impact analysis seed).
     QVector<ResultRecord> resultsDependingOnAsset( const QString &assetId ) const;
+    /// Results consuming ANY of @p assetIds (single join; impact analysis).
+    QVector<ResultRecord> resultsDependingOnAssets( const QStringList &assetIds ) const;
     /// Results without any live producing run/artifact anchor (orphans).
     QVector<ResultRecord> orphanResults() const;
 
@@ -124,6 +131,8 @@ class GovernanceStore
     std::optional<RunRecord> runById( const QString &runId ) const;
     QVector<RunRecord> runs( qint64 limit = kMaxPageSize ) const;
     void linkRunOutput( const QString &runId, const QString &assetId );
+    /// Batched run->output links (one transaction; bulk mirror path).
+    Result<void> addRunOutputs( const QVector<QPair<QString, QString>> &pairs );
 
     // --- experiments --------------------------------------------------------
     Result<void> upsertExperiment( const ExperimentRecord &experiment );

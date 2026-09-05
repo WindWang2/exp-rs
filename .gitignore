@@ -104,3 +104,9 @@ __pycache__/
 
 # Plugin discovery manifest index cache
 .exprs-manifest-index.json
+
+# Workspace Governance 3.0: per-project governance index (SQLite, regenerable)
+*.governance.db
+*.governance.db-*
+*.governance.db.wal
+*.governance.db.shm

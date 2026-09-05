@@ -10,6 +10,8 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QHash>
+#include <QSet>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -111,6 +113,8 @@ WorkspaceService::~WorkspaceService()
 
 bool WorkspaceService::openStore( const QString &dbPath, QString *errorOut )
 {
+    if ( m_store.isOpen() && m_store.meta( QStringLiteral( "db_path" ) ) != dbPath )
+        m_store.close();  // path change: never bleed governed state across projects
     if ( !m_store.open( dbPath, errorOut ) )
         return false;
     m_store.setMeta( QStringLiteral( "opened_at" ),
@@ -153,17 +157,89 @@ void WorkspaceService::bindDataManager( DataManager *manager )
                                   &WorkspaceService::onAssetRemoved );
 }
 
-qint64 WorkspaceService::mirrorAllAssets()
+qint64 WorkspaceService::mirrorAllAssets( bool reconcileGhosts )
 {
     if ( !m_dataManager )
         return 0;
     const QVector<AssetSnapshot> snapshots = m_dataManager->assets();
     qint64 mirrored = 0;
+    // Review-3 (N+1): batch store writes — one transaction per 256-row chunk
+    // keeps bulk mirroring of large catalogs fast and memory bounded.
+    constexpr int kBatchSize = 256;
+    QVector<GovernedAsset> batch;
+    QVector<GovernanceStore::LineageEdge> edgeBatch;
+    QVector<QPair<QString, QString>> runOutputBatch;
+    QHash<QString, RunRecord> runBatch;
+    batch.reserve( kBatchSize );
+    auto flush = [ & ]() {
+        if ( !batch.isEmpty() )
+        {
+            ( void ) m_store.upsertAssets( batch );
+            batch.clear();
+        }
+        if ( !edgeBatch.isEmpty() )
+        {
+            ( void ) m_store.addLineageEdges( edgeBatch );
+            edgeBatch.clear();
+        }
+        for ( auto it = runBatch.constBegin(); it != runBatch.constEnd(); ++it )
+            ( void ) m_store.upsertRun( it.value() );  // runs are few; deduped per mirror
+        runBatch.clear();
+        if ( !runOutputBatch.isEmpty() )
+        {
+            ( void ) m_store.addRunOutputs( runOutputBatch );
+            runOutputBatch.clear();
+        }
+    };
     for ( const AssetSnapshot &snapshot : snapshots )
     {
-        if ( mirrorSnapshot( snapshot ) )
+        const std::optional<GovernedAsset> row = governedRowForSnapshot( snapshot );
+        if ( row )
+        {
             ++mirrored;
-        syncDerivationLineage( snapshot );
+            batch.append( *row );
+        }
+        // Run anchors collected into the same batch (review P1-13: per-asset
+        // transactions defeated the bulk path).
+        if ( m_dataManager )
+        {
+            const std::optional<sicnu::data::DerivationRecord> record =
+                m_dataManager->provenance( snapshot.id() );
+            if ( record && !record->workflowRunId.isEmpty() )
+            {
+                RunRecord run;
+                run.id = record->workflowRunId;
+                run.workflowId = record->workflowId;
+                run.state = QStringLiteral( "Completed" );
+                if ( record->completedAtUtc.isValid() )
+                    run.finishedMs = record->completedAtUtc.toMSecsSinceEpoch();
+                run.header.name = record->workflowId.isEmpty() ? record->workflowRunId : record->workflowId;
+                runBatch.insert( run.id, run );
+                runOutputBatch.append( qMakePair( record->workflowRunId, snapshot.id().toString() ) );
+            }
+        }
+        if ( batch.size() >= kBatchSize )
+        {
+            flush();
+            batch.reserve( kBatchSize );
+        }
+    }
+    flush();
+
+    // Review P2-6: reconcile ghost rows — assets removed while the service
+    // was unbound would otherwise live forever in the durable index. Row-only
+    // deletion; opt-in so a shared headless store never loses other sessions.
+    if ( reconcileGhosts )
+    {
+        QSet<QString> liveIds;
+        liveIds.reserve( snapshots.size() );
+        for ( const AssetSnapshot &snapshot : snapshots )
+            liveIds.insert( snapshot.id().toString() );
+        for ( const QString &storedId : m_store.assetIds() )
+        {
+            if ( !liveIds.contains( storedId ) )
+                ( void ) m_store.removeAsset( storedId );
+        }
     }
     return mirrored;
 }
@@ -200,6 +276,14 @@ void WorkspaceService::onAssetRemoved( const AssetId &id )
 }
 
 bool WorkspaceService::mirrorSnapshot( const AssetSnapshot &snapshot )
+{
+    const std::optional<GovernedAsset> row = governedRowForSnapshot( snapshot );
+    if ( !row )
+        return false;
+    return m_store.upsertAsset( *row ).operator bool();
+}
+
+std::optional<GovernedAsset> WorkspaceService::governedRowForSnapshot( const AssetSnapshot &snapshot ) const
 {
     GovernedAsset row;
     row.assetId = snapshot.id().toString();
@@ -264,11 +348,11 @@ bool WorkspaceService::mirrorSnapshot( const AssetSnapshot &snapshot )
         row.crs = row.crs.isEmpty() ? existing->crs : row.crs;
     }
 
-    const sicnu::data::Result<void> result = m_store.upsertAsset( row );
-    return result.operator bool();
+    return row;
 }
 
-void WorkspaceService::syncDerivationLineage( const AssetSnapshot &snapshot )
+void WorkspaceService::collectDerivationLineage( const AssetSnapshot &snapshot,
+                                                 QVector<GovernanceStore::LineageEdge> &edges )
 {
     if ( !m_dataManager )
         return;
@@ -277,7 +361,6 @@ void WorkspaceService::syncDerivationLineage( const AssetSnapshot &snapshot )
     if ( !record || record->inputs.isEmpty() )
         return;
 
-    QVector<GovernanceStore::LineageEdge> edges;
     for ( const sicnu::data::DerivationInput &input : record->inputs )
     {
         GovernanceStore::LineageEdge edge;
@@ -290,21 +373,37 @@ void WorkspaceService::syncDerivationLineage( const AssetSnapshot &snapshot )
         edge.fingerprint = record->executionFingerprint;
         edges.append( edge );
     }
-    ( void ) m_store.addLineageEdges( edges );
-
-    // Producer anchor: workflow/run bookkeeping.
+    // Run anchors are recorded by the caller: batched in mirrorAllAssets,
+    // direct in syncDerivationLineage.
     if ( !record->workflowRunId.isEmpty() )
-    {
-        RunRecord run;
-        run.id = record->workflowRunId;
-        run.workflowId = record->workflowId;
-        run.state = QStringLiteral( "Completed" );
-        if ( record->completedAtUtc.isValid() )
-            run.finishedMs = record->completedAtUtc.toMSecsSinceEpoch();
-        run.header.name = record->workflowId.isEmpty() ? record->workflowRunId : record->workflowId;
-        ( void ) m_store.upsertRun( run );
-        m_store.linkRunOutput( record->workflowRunId, snapshot.id().toString() );
-    }
+        syncRunAnchors( *record );
+}
+
+void WorkspaceService::syncDerivationLineage( const AssetSnapshot &snapshot )
+{
+    if ( !m_dataManager )
+        return;
+    QVector<GovernanceStore::LineageEdge> edges;
+    collectDerivationLineage( snapshot, edges );
+    if ( edges.isEmpty() )
+        return;
+    ( void ) m_store.addLineageEdges( edges );
+}
+
+void WorkspaceService::syncRunAnchors( const sicnu::data::DerivationRecord &record )
+{
+    // Producer anchor: workflow/run bookkeeping.
+    if ( record.workflowRunId.isEmpty() )
+        return;
+    RunRecord run;
+    run.id = record.workflowRunId;
+    run.workflowId = record.workflowId;
+    run.state = QStringLiteral( "Completed" );
+    if ( record.completedAtUtc.isValid() )
+        run.finishedMs = record.completedAtUtc.toMSecsSinceEpoch();
+    run.header.name = record.workflowId.isEmpty() ? record.workflowRunId : record.workflowId;
+    ( void ) m_store.upsertRun( run );
+    m_store.linkRunOutput( record.workflowRunId, record.outputAssetId.toString() );
 }
 
 // --- asset enrichment ----------------------------------------------------------
@@ -349,17 +448,22 @@ bool WorkspaceService::noteAssetVerified( const QString &assetId, const QString 
     const bool contentChanged = !row->contentFingerprint.isEmpty()
                                 && !fingerprint.isEmpty()
                                 && row->contentFingerprint != fingerprint;
+    const QString previousFingerprint = row->contentFingerprint;
     row->contentFingerprint = fingerprint.isEmpty() ? row->contentFingerprint : fingerprint;
     row->sizeBytes = sizeBytes;
     row->mtimeMs = mtimeMs;
     row->verifiedMs = QDateTime::currentMSecsSinceEpoch();
-    // Content change invalidates the freshness stamp (revision contract).
+    // Content change invalidates the freshness stamp and ADVANCES the asset
+    // revision (identity contract: observed change => new revision).
     row->availability = contentChanged ? QStringLiteral( "stale" ) : QStringLiteral( "fresh" );
+    if ( contentChanged )
+        row->revision = row->revision + 1;
     const bool ok = m_store.upsertAsset( *row ).operator bool();
     if ( ok && contentChanged )
         audit( QStringLiteral( "system" ), QStringLiteral( "asset.content_changed" ),
                QStringLiteral( "asset" ), assetId,
-               QJsonObject{ { QLatin1String( "previousFingerprint" ), row->contentFingerprint } } );
+               QJsonObject{ { QLatin1String( "previousFingerprint" ), previousFingerprint },
+                            { QLatin1String( "newFingerprint" ), row->contentFingerprint } } );
     return ok;
 }
 
@@ -584,19 +688,20 @@ QVariantMap WorkspaceService::impactAnalysis( const QString &assetId, int maxDep
     for ( const QVariantMap &row : downstream )
         affectedAssets.append( row.value( QStringLiteral( "assetId" ) ).toString() );
 
-    QVariantList affectedResults;
-    for ( const ResultRecord &result : m_store.resultsDependingOnAsset( assetId ) )
-        affectedResults.append( result.id.toString() );
+    // Single join over the affected set (review P2-16: the per-asset query +
+    // linear dedup loop stalled the store mutex on hub assets).
+    QStringList affectedList;
     for ( const QString &asset : affectedAssets )
+        affectedList.append( asset );
+    QVariantList affectedResults;
+    QSet<QString> seen;
+    for ( const ResultRecord &result : m_store.resultsDependingOnAssets( affectedList ) )
     {
-        for ( const ResultRecord &result : m_store.resultsDependingOnAsset( asset ) )
+        const QString id = result.id.toString();
+        if ( !seen.contains( id ) )
         {
-            const QString id = result.id.toString();
-            bool present = false;
-            for ( const QVariant &v : affectedResults )
-                present |= v.toString() == id;
-            if ( !present )
-                affectedResults.append( id );
+            seen.insert( id );
+            affectedResults.append( id );
         }
     }
     out.insert( QStringLiteral( "assetId" ), assetId );
@@ -645,7 +750,7 @@ QJsonObject WorkspaceService::toProjectJson() const
     root.insert( QStringLiteral( "schemaVersion" ), 1 );
 
     QJsonArray datasetArray;
-    for ( const DatasetRecord &ds : m_store.datasets( GovernanceStore::kMaxPageSize ) )
+    for ( const DatasetRecord &ds : m_store.datasets( -1 ) )
     {
         QJsonObject o;
         o.insert( QStringLiteral( "id" ), ds.id.toString() );
@@ -663,7 +768,7 @@ QJsonObject WorkspaceService::toProjectJson() const
     root.insert( QStringLiteral( "datasets" ), datasetArray );
 
     QJsonArray resultArray;
-    for ( const ResultRecord &r : m_store.results( GovernanceStore::kMaxPageSize ) )
+    for ( const ResultRecord &r : m_store.results( -1 ) )
     {
         QJsonObject o;
         o.insert( QStringLiteral( "id" ), r.id.toString() );
@@ -704,7 +809,7 @@ QJsonObject WorkspaceService::toProjectJson() const
     root.insert( QStringLiteral( "results" ), resultArray );
 
     QJsonArray runArray;
-    for ( const RunRecord &r : m_store.runs( GovernanceStore::kMaxPageSize ) )
+    for ( const RunRecord &r : m_store.runs( -1 ) )
     {
         QJsonObject o;
         o.insert( QStringLiteral( "id" ), r.id );
@@ -723,7 +828,7 @@ QJsonObject WorkspaceService::toProjectJson() const
     root.insert( QStringLiteral( "runs" ), runArray );
 
     QJsonArray experimentArray;
-    for ( const ExperimentRecord &e : m_store.experiments( GovernanceStore::kMaxPageSize ) )
+    for ( const ExperimentRecord &e : m_store.experiments( -1 ) )
     {
         QJsonObject o;
         o.insert( QStringLiteral( "id" ), e.id.toString() );
@@ -765,7 +870,7 @@ QJsonObject WorkspaceService::toProjectJson() const
     root.insert( QStringLiteral( "smartCollections" ), smartArray );
 
     QJsonArray exportArray;
-    for ( const ExportRecord &e : m_store.exports( GovernanceStore::kMaxPageSize ) )
+    for ( const ExportRecord &e : m_store.exports( -1 ) )
     {
         QJsonObject o;
         o.insert( QStringLiteral( "id" ), e.id.toString() );
@@ -799,12 +904,33 @@ QJsonObject WorkspaceService::toProjectJson() const
     }
     root.insert( QStringLiteral( "pathMappings" ), mappingArray );
 
+    // Downgrade guard (review P0): remember the last serialized document so a
+    // later save with the store unavailable can re-persist governed state.
+    m_cachedProjectJson = root;
     return root;
 }
 
 QVector<Diagnostic> WorkspaceService::fromProjectJson( const QJsonObject &root )
 {
     QVector<Diagnostic> diagnostics;
+    // The project document is authoritative on read: stale local entity rows
+    // (deleted elsewhere, DB restored from backup) must not resurrect.
+    m_cachedProjectJson = root;
+
+    // Review P2-12: unknown top-level sections are reported, then skipped —
+    // forward tolerance is explicit, not silent.
+    static const QStringList kKnownSections = {
+        QStringLiteral( "schemaVersion" ), QStringLiteral( "datasets" ), QStringLiteral( "results" ),
+        QStringLiteral( "runs" ), QStringLiteral( "experiments" ), QStringLiteral( "smartCollections" ),
+        QStringLiteral( "exports" ), QStringLiteral( "pathMappings" ), QStringLiteral( "tags" ),
+    };
+    for ( const QString &key : root.keys() )
+    {
+        if ( !kKnownSections.contains( key ) )
+            diagnostics.append( Diagnostic{ QStringLiteral( "workspace.unknown_section" ),
+                                            QStringLiteral( "skipped unknown workspace section '%1'" ).arg( key ),
+                                            DiagnosticSeverity::Warning } );
+    }
 
     auto skipUnknown = [ & ]( const QString &section ) {
         diagnostics.append( Diagnostic{ QStringLiteral( "workspace.unknown_section" ),

@@ -60,6 +60,7 @@ bool vectorSuffix( const QString &path )
 ImportCenter::ImportCenter( WorkspaceService &service, QObject *parent )
     : QObject( parent )
     , m_service( service )
+    , m_pool( this )
 {
     qRegisterMetaType<ImportScanReport>();
 }
@@ -67,6 +68,8 @@ ImportCenter::ImportCenter( WorkspaceService &service, QObject *parent )
 ImportCenter::~ImportCenter()
 {
     cancel();
+    m_pool.clear();
+    m_pool.waitForDone( 30000 );
 }
 
 void ImportCenter::cancel()
@@ -81,7 +84,8 @@ QJsonObject ImportScanReport::toJson() const
                         { QLatin1String( "duplicates" ), duplicates },
                         { QLatin1String( "skipped" ), skipped },
                         { QLatin1String( "failed" ), failed },
-                        { QLatin1String( "cancelled" ), cancelled } };
+                        { QLatin1String( "cancelled" ), cancelled },
+                        { QLatin1String( "truncated" ), truncated } };
 }
 
 bool ImportCenter::startScan( const ImportScanOptions &options )
@@ -101,7 +105,7 @@ bool ImportCenter::startScan( const ImportScanOptions &options )
         opts.extensions = defaultExtensions();
 
     QPointer<ImportCenter> guard( this );
-    QThreadPool::globalInstance()->start( [ this, guard, opts ]() mutable {
+    m_pool.start( [ this, guard, opts ]() mutable {
         ImportScanReport report;
 
         // ---- discover + detect + validate (worker) ---------------------------
@@ -140,7 +144,10 @@ bool ImportCenter::startScan( const ImportScanOptions &options )
                 ++report.discovered;
                 if ( report.discovered > opts.maxFiles )
                 {
-                    report.cancelled = true;
+                    // Bound exceeded: stop DISCOVERY only — collected
+                    // candidates still register (review P1-28: never conflate
+                    // the discovery bound with a user cancellation).
+                    report.truncated = true;
                     break;
                 }
                 candidates.append( path );
@@ -149,7 +156,7 @@ bool ImportCenter::startScan( const ImportScanOptions &options )
 
         // ---- deduplicate against the durable index, chunked ------------------
         const int batch = qMax( 1, opts.registrationBatch );
-        for ( int offset = 0; offset < candidates.size() && !report.cancelled; offset += batch )
+        for ( int offset = 0; offset < candidates.size(); offset += batch )
         {
             if ( m_cancel.load() )
                 report.cancelled = true;

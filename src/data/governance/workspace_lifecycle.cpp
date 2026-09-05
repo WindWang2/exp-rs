@@ -123,8 +123,11 @@ CleanupReport CleanupService::plan( const CleanupOptions &options ) const
                                   && !row.canonicalSource.startsWith( QLatin1String( "/vsi" ) )
                                   && !row.canonicalSource.startsWith( QLatin1String( "http" ) )
                                   && !QFileInfo::exists( row.canonicalSource );
+        // Protection direction (review P1-19): a row is referenced when its
+        // DERIVED outputs exist — edges where the asset is the INPUT (the
+        // outgoing flag queries the asset's own provenance, not consumers).
         const bool referenced =
-            !m_service.store().directEdges( row.assetId, true ).isEmpty()
+            !m_service.store().directEdges( row.assetId, false ).isEmpty()
             || !m_service.resultsDependingOnAsset( row.assetId ).isEmpty();
 
         if ( localMissing && referenced )
@@ -136,7 +139,7 @@ CleanupReport CleanupService::plan( const CleanupOptions &options ) const
             d.code = QStringLiteral( "cleanup.protected_missing" );
             d.entityKind = QStringLiteral( "asset" );
             d.entityId = row.assetId;
-            d.message = QStringLiteral( "payload missing but %1 downstream references keep it protected" );
+            d.message = QStringLiteral( "payload missing but downstream references keep it protected" );
             report.candidates.append( d );
             ++report.protectedCount;
         }
@@ -186,6 +189,12 @@ int CleanupReport::execute( WorkspaceService &service )
     {
         if ( candidate.code != QLatin1String( "cleanup.orphan_row" )
              && candidate.code != QLatin1String( "cleanup.orphan_result" ) )
+            continue;
+        // Re-validate at execution time: a reference created after plan()
+        // must abort the removal (stale candidate protection).
+        if ( candidate.entityKind == QLatin1String( "asset" )
+             && ( !service.store().directEdges( candidate.entityId, false ).isEmpty()
+                  || !service.resultsDependingOnAsset( candidate.entityId ).isEmpty() ) )
             continue;
         if ( candidate.entityKind == QLatin1String( "asset" ) )
         {

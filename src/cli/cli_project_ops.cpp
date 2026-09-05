@@ -189,13 +189,19 @@ int sicnu::cli::runProjectGovernanceCommand( const QString &sub, QStringList arg
             bool writeOk = false;
             QObject::connect( &loaded.project, &QgsProject::writeProject, &loaded.project,
                               [ & ]( QDomDocument &document ) {
-                                  writeOk = static_cast<bool>( serializer.write( document, *loaded.context ) );
+                                  const sicnu::data::Result<void> result =
+                                      serializer.write( document, *loaded.context );
+                                  writeOk = static_cast<bool>( result );
                               } );
-            if ( !writeOk || !loaded.project.write( path ) )
+            const bool wrote = loaded.project.write( path );
+            if ( !writeOk || !wrote )
             {
+                const std::string detail = writeOk
+                    ? ( "cannot write project: " + loaded.project.error().toStdString() )
+                    : "serializer refused the v3 workspace block";
                 return io.finish( false, "project.migrate", data,
                                   exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError ),
-                                  {}, "failed to persist migrated project" );
+                                  {}, detail );
             }
             data["persisted"] = true;
         }

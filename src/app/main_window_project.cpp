@@ -105,6 +105,12 @@ void QgisDesktopWindow::openProject()
             return;
         }
 
+        // Workspace Governance 3.0: the store must be open BEFORE the read so
+        // the serializer can restore governed state from a v3 document (or run
+        // the in-memory v1 migration into it).
+        if ( !m_projectContext->openWorkspaceStore( filePath ) )
+            statusBar()->showMessage( tr( "治理存储不可用：工作区状态将以仅内存模式运行" ), 5000 );
+
         if ( !QgsProject::instance()->read(filePath) )
         {
             QMessageBox::warning(
@@ -138,6 +144,10 @@ void QgisDesktopWindow::saveProjectAs()
         tr("QGIS 工程文件 (*.qgs);;所有文件 (*.*)")
     );
     if (!filePath.isEmpty()) {
+        // Reopen the governance store against the new project file so governed
+        // state follows Save As instead of bleeding across projects.
+        if ( m_projectContext )
+            m_projectContext->reopenWorkspaceStore( filePath );
         QgsProject::instance()->write(filePath);
         statusBar()->showMessage(tr("工程已保存至：%1").arg(filePath), 3000);
     }
