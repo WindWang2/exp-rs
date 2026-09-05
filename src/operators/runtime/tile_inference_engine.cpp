@@ -492,39 +492,42 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       cv::Mat output = forwardOnce( blob );
       if ( options.tta == TtaMode::None )
         return output;
-      // cv::flip only supports 2-D; the batch blob is 4-D NCHW, so flips run
-      // on the W axis (3) / H axis (2) via flipND. Every forward returns a
-      // freshly detached Mat (the runtime clones its output), so the
-      // accumulator is safe from aliasing.
-      auto flipH = []( const cv::Mat &b ) {
-        cv::Mat out;
-        cv::flipND( b, out, 3 );
-        return out;
+
+      // cv::flipND needs OpenCV 4.5+; CI images may lack it. For NCHW 4-D
+      // tensors, flip H (axis 2) / W (axis 3) via per-(n,c) 2-D cv::flip.
+      auto flipNCHWAxis = []( const cv::Mat &src, int axis ) {
+        CV_Assert( src.dims == 4 && ( axis == 2 || axis == 3 ) );
+        const int sizes[4] = { src.size[0], src.size[1], src.size[2], src.size[3] };
+        cv::Mat dst( 4, sizes, src.type() );
+        const int N = sizes[0], C = sizes[1], H = sizes[2], W = sizes[3];
+        for ( int n = 0; n < N; ++n )
+        {
+          for ( int c = 0; c < C; ++c )
+          {
+            // ptr(n,c) yields the contiguous HxW plane for continuous NCHW.
+            cv::Mat srcPlane( H, W, src.type(), const_cast<uchar *>( src.ptr( n, c ) ) );
+            cv::Mat dstPlane( H, W, dst.type(), dst.ptr( n, c ) );
+            cv::flip( srcPlane, dstPlane, axis == 3 ? 1 : 0 );
+          }
+        }
+        return dst;
       };
-      auto flipV = []( const cv::Mat &b ) {
-        cv::Mat out;
-        cv::flipND( b, out, 2 );
-        return out;
-      };
+      // Every forward returns a freshly detached Mat (the runtime clones its
+      // output), so the accumulator is safe from aliasing.
+      auto flipH = [ & ]( const cv::Mat &b ) { return flipNCHWAxis( b, 3 ); };
+      auto flipV = [ & ]( const cv::Mat &b ) { return flipNCHWAxis( b, 2 ); };
       auto forwardUnflippedH = [ & ]( ) {
-        cv::Mat m = forwardOnce( flipH( blob ) );
-        cv::flipND( m, m, 3 );
-        return m;
+        return flipNCHWAxis( forwardOnce( flipH( blob ) ), 3 );
       };
       auto forwardUnflippedHV = [ & ]( ) {
-        cv::Mat m = forwardOnce( flipH( flipV( blob ) ) );
-        cv::flipND( m, m, 2 );
-        cv::flipND( m, m, 3 );
-        return m;
+        return flipNCHWAxis( flipNCHWAxis( forwardOnce( flipH( flipV( blob ) ) ), 2 ), 3 );
       };
       cv::Mat acc = output.clone();
       acc += forwardUnflippedH();
       if ( options.tta == TtaMode::HVFlip )
       {
         auto forwardUnflippedV = [ & ]( ) {
-          cv::Mat m = forwardOnce( flipV( blob ) );
-          cv::flipND( m, m, 2 );
-          return m;
+          return flipNCHWAxis( forwardOnce( flipV( blob ) ), 2 );
         };
         acc += forwardUnflippedV();
         acc += forwardUnflippedHV();
@@ -603,7 +606,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           layout += QString( "%1:%2" ).arg( name ).arg( headChannelList[h] );
         }
         if ( uncertaintyHeadIndex >= 0 )
-          layout += QString( ",uncertainty:%1" ).arg( uncertainty );
+          layout += QString( ",uncertainty:%1" ).arg( QString::fromStdString( uncertainty ) );
         writer->setMetadataItem( QStringLiteral( "SICNU_OUTPUT_HEADS" ), layout );
       }
     }
