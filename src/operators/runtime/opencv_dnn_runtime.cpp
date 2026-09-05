@@ -3,6 +3,7 @@
 
 #include <QFile>
 
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
@@ -80,11 +81,56 @@ cv::Mat OpenCvDnnRuntime::infer( const cv::Mat &nchwBlob, const std::string &out
   cv::Mat output = outputName.empty() ? m_net.forward() : m_net.forward( outputName );
   if ( output.empty() )
     throw std::runtime_error( "inference produced an empty output" );
-  return output;
+  // forward() returns a header onto the net's internal output blob: the next
+  // forward() overwrites it. TTA averaging and multi-head stacking hold the
+  // result across further forwards, so detach (one tile-sized copy,
+  // negligible next to the forward pass itself).
+  return output.clone();
+}
+
+std::vector<cv::Mat> OpenCvDnnRuntime::inferMulti( const std::vector<NamedBlob> &namedBlobs )
+{
+  if ( !m_loaded )
+    throw std::runtime_error( "runtime session is not loaded" );
+  if ( namedBlobs.empty() )
+    throw std::runtime_error( "multi-input inference needs at least one input blob" );
+  for ( const NamedBlob &nb : namedBlobs )
+  {
+    if ( nb.second.empty() || nb.second.dims != 4 )
+      throw std::runtime_error( "multi-input inference blobs must be 4-D NCHW (input '" +
+                                nb.first + "')" );
+  }
+
+  std::lock_guard<std::mutex> lock( m_inferMutex );
+  for ( const NamedBlob &nb : namedBlobs )
+  {
+    if ( nb.first.empty() )
+      m_net.setInput( nb.second );
+    else
+      m_net.setInput( nb.second, nb.first );
+  }
+  std::vector<cv::Mat> outputs;
+  try
+  {
+    m_net.forward( outputs, m_net.getUnconnectedOutLayersNames() );
+  }
+  catch ( const cv::Exception &e )
+  {
+    throw std::runtime_error( std::string( "multi-input forward pass failed: " ) + e.what() );
+  }
+  outputs.erase( std::remove_if( outputs.begin(), outputs.end(),
+                                 []( const cv::Mat &m ) { return m.empty(); } ),
+                 outputs.end() );
+  if ( outputs.empty() )
+    throw std::runtime_error( "multi-input inference produced no usable output" );
+  return outputs;
 }
 
 std::vector<std::string> OpenCvDnnRuntime::outputTensorNames() const
 {
+  // cv::dnn::Net is not thread-safe: serialize against concurrent forward
+  // passes on the shared cached session.
+  std::lock_guard<std::mutex> lock( *const_cast<std::mutex *>( &m_inferMutex ) );
   std::vector<std::string> names;
   if ( !m_loaded )
     return names;

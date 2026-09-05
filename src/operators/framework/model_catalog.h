@@ -23,17 +23,21 @@ struct ModelArtifactContract
 };
 
 /**
- * Model input contract — manifest v2 `input` section (object form). The legacy
- * string form ("input": "raster") only fills dataType.
+ * Model input contract — manifest v2 `input` section (object form) and, since
+ * v3, one entry of the `inputs` array. The legacy string form
+ * ("input": "raster") only fills ModelInfo::inputType.
  */
 struct ModelInputContract
 {
+  std::string name;        ///< Blob/input name for multi-input models ("" = default single input)
   std::string dataType;    ///< "raster" (only supported kind today)
   std::string dtype;       ///< Expected tensor dtype, e.g. "float32" ("" = unspecified)
   std::string layout;      ///< "NCHW" (default) — the blob layout fed to the model
   std::vector<std::string> bandRoles; ///< e.g. ["Red","Green","Blue","NIR"]
   int width = 0;           ///< Fixed input width when the graph requires one (0 = dynamic)
   int height = 0;          ///< Fixed input height (0 = dynamic)
+  int temporalLength = 0;  ///< Frames per inference for THIS input (0 = single frame)
+  std::string temporalCollapse = "channels"; ///< How T frames collapse: "channels" feeds N,(T·C),H,W
 };
 
 /**
@@ -74,6 +78,7 @@ struct ModelOutputContract
   std::vector<std::string> tensorNames;
   std::vector<std::string> classes;
   double threshold = -1.0;  ///< Detection/confidence threshold (<0 = none)
+  std::string uncertainty = "none"; ///< "none" | "entropy" | "margin" — adds a confidence band computed from that head's channels
 };
 
 /**
@@ -136,7 +141,11 @@ struct ModelInfo {
 
   // Manifest v2 inference contracts (all optional; absent sections keep defaults)
   ModelArtifactContract artifact;
-  ModelInputContract input;
+  ModelInputContract input;  ///< Legacy single-input mirror — always kept in sync with inputs[0]
+  /// Manifest v3: ALL declared inputs in order. v1/v2 manifests parse their
+  /// `input` section into inputs[0]; when both `inputs` and `input` are
+  /// declared, `inputs` wins and the mirror above is filled from inputs[0].
+  std::vector<ModelInputContract> inputs;
   ModelPreprocessContract preprocess;
   ModelTilingContract tiling;
   ModelOutputContract output;

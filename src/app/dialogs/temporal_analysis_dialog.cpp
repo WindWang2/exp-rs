@@ -4,6 +4,7 @@
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
 
+#include "processing/algorithms/temporal/spatiotemporal_contracts.h"
 #include "processing/algorithms/temporal/temporal_collection.h"
 #include "processing/gdal/gdal_grid_compat.h"
 #include "data/raster_grid_compat.h"
@@ -56,6 +57,7 @@ enum SceneColumns
     ColPath = 0,
     ColTime,
     ColPlatform,
+    ColModality,
     ColStatus,
     ColCount
 };
@@ -84,7 +86,7 @@ void TemporalAnalysisDialog::setupUi()
 
   m_sceneTable = new QTableWidget( 0, ColCount, inputGroup );
   m_sceneTable->setObjectName( QStringLiteral( "temporalSceneTable" ) );
-  m_sceneTable->setHorizontalHeaderLabels( { tr( "文件" ), tr( "时间 (ISO)" ), tr( "平台" ), tr( "状态" ) } );
+  m_sceneTable->setHorizontalHeaderLabels( { tr( "文件" ), tr( "时间 (ISO)" ), tr( "平台" ), tr( "模态" ), tr( "状态" ) } );
   m_sceneTable->horizontalHeader()->setSectionResizeMode( ColPath, QHeaderView::Stretch );
   m_sceneTable->horizontalHeader()->setSectionResizeMode( ColTime, QHeaderView::ResizeToContents );
   m_sceneTable->horizontalHeader()->setSectionResizeMode( ColPlatform, QHeaderView::ResizeToContents );
@@ -301,6 +303,15 @@ void TemporalAnalysisDialog::addScenes()
     auto *platformItem = new QTableWidgetItem( scene.platform );
     platformItem->setFlags( platformItem->flags() & ~Qt::ItemIsEditable );
     m_sceneTable->setItem( row, ColPlatform, platformItem );
+    // Platform 3.0: show the observation modality (declared or inferred) so
+    // mixed-modality mistakes are visible before the preflight runs.
+    const auto contract = sicnu::temporal::ObservationContract::fromSceneRef( scene );
+    const QString modalityText = contract.modality == sicnu::temporal::Modality::Unknown
+                                   ? QString()
+                                   : sicnu::temporal::modalityToString( contract.modality );
+    auto *modalityItem = new QTableWidgetItem( modalityText );
+    modalityItem->setFlags( modalityItem->flags() & ~Qt::ItemIsEditable );
+    m_sceneTable->setItem( row, ColModality, modalityItem );
     auto *statusItem = new QTableWidgetItem();
     statusItem->setFlags( statusItem->flags() & ~Qt::ItemIsEditable );
     m_sceneTable->setItem( row, ColStatus, statusItem );
@@ -540,6 +551,13 @@ bool TemporalAnalysisDialog::loadCollection( const sicnu::data::CollectionId &id
     m_sceneTable->setItem( row, ColPath, new QTableWidgetItem( scene.path ) );
     m_sceneTable->setItem( row, ColTime, new QTableWidgetItem( scene.time.valid ? scene.time.iso : QString() ) );
     m_sceneTable->setItem( row, ColPlatform, new QTableWidgetItem( scene.platform ) );
+    {
+      const auto contract = sicnu::temporal::ObservationContract::fromSceneRef( scene );
+      const QString modalityText = contract.modality == sicnu::temporal::Modality::Unknown
+                                     ? QString()
+                                     : sicnu::temporal::modalityToString( contract.modality );
+      m_sceneTable->setItem( row, ColModality, new QTableWidgetItem( modalityText ) );
+    }
     m_sceneTable->setItem( row, ColStatus, new QTableWidgetItem( tr( "已加载" ) ) );
   }
   refreshStatusColumn();

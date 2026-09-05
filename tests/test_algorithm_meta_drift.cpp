@@ -38,8 +38,9 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     const auto expectedCatalog =
         sicnu::processing::AlgorithmMetaStore::generateCatalog( descriptors );
 
-    // Baseline truth: exactly 6 operators declare a taskFamily in code.
-    REQUIRE( expectedCatalog.size() == 6 );
+    // Baseline truth: exactly 7 operators declare a taskFamily in code
+    // (#738 registered the change-detection taskFamily on RsChangeLogRatioOperator).
+    REQUIRE( expectedCatalog.size() == 7 );
 
     const QString metaDir =
         sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "data/processing/algorithm_meta" ) );
@@ -116,7 +117,7 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
         std::string exportErr;
         const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
             tempDir.path().toStdString(), descriptors, &exportErr );
-        REQUIRE( written == 6 );
+        REQUIRE( written == 7 );
         REQUIRE( exportErr.empty() );
 
         const QDir tempQDir( tempDir.path() );

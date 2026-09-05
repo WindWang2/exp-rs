@@ -108,6 +108,49 @@ them with the readiness explanation.
 }
 ```
 
+### v3 additions (multi-input, temporal inputs, uncertainty — strictly additive)
+
+v1/v2 manifests parse unchanged. Three additive knobs:
+
+- **`inputs`** — array of input objects for multi-input graphs. Each entry has
+  the same keys as the v2 `input` object plus `name`; every input in a
+  multi-input manifest needs a **unique non-empty `name`** (blob binding).
+  When both `inputs` and the legacy `input` are declared, `inputs` wins and
+  the single-input mirror is filled from `inputs[0]`.
+- **`input.temporal_length` / `input.temporal_collapse`** — frames per
+  inference for THIS input (0 = single frame). Only `"channels"` collapse is
+  executed today: the T frames are stacked channel-wise, feeding
+  `N,(T·C),H,W`.
+- **`output.uncertainty`** — `"none"` (default) | `"entropy"` | `"margin"`:
+  adds a confidence band computed from that output head's channels.
+
+The `preprocess` section stays a single top-level section and is applied per
+input; when `mean`/`std` and an input's `band_roles` are both declared, the
+arity must match that input's role count.
+
+```json
+{
+  "name": "change-detection",
+  "task": "segmentation",
+  "inputs": [
+    {
+      "name": "before",
+      "data_type": "raster",
+      "band_roles": ["Red", "Green", "Blue", "NIR"],
+      "temporal_length": 4,
+      "temporal_collapse": "channels"
+    },
+    {
+      "name": "after",
+      "data_type": "raster",
+      "band_roles": ["Red", "Green", "Blue", "NIR"]
+    }
+  ],
+  "preprocess": { "normalize": "mean_std", "mean": [0.485, 0.456, 0.406, 0.5], "std": [0.229, 0.224, 0.225, 0.5] },
+  "output": { "type": "raster", "uncertainty": "entropy" }
+}
+```
+
 ## Registered templates
 
 | Name | Task | Contract | Framework | Weights |

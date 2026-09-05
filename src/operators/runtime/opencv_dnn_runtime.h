@@ -39,6 +39,11 @@ class OpenCvDnnRuntime final : public IModelRuntime
     cv::Mat infer( const cv::Mat &nchwBlob ) override;
     cv::Mat infer( const cv::Mat &nchwBlob, const std::string &outputName ) override;
 
+    // Platform 3.0: named multi-input forward passes (cv::dnn setInput by
+    // blob name, one forward over all inputs).
+    bool supportsMultiInput() const override { return true; }
+    std::vector<cv::Mat> inferMulti( const std::vector<NamedBlob> &namedBlobs ) override;
+
     /// The ONNX graph's unconnected output layer names (empty before load or
     /// when enumeration fails — consumers treat that as "unknown", #705).
     std::vector<std::string> outputTensorNames() const override;

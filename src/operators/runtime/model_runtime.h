@@ -92,6 +92,29 @@ class IModelRuntime
       ( void )outputName;
       return infer( nchwBlob );
     }
+
+    // --- Platform 3.0: multi-input models (goal §9) --------------------------
+    /**
+     * True when this runtime can feed several named input blobs in one forward
+     * pass (inferMulti). Multi-input manifests are invalid on runtimes that
+     * report false.
+     */
+    virtual bool supportsMultiInput() const { return false; }
+
+    /// One named input blob: (input name from the manifest contract, NCHW blob).
+    using NamedBlob = std::pair<std::string, cv::Mat>;
+
+    /**
+     * Run one forward pass with several named inputs. The default refuses —
+     * single-input runtimes never silently drop inputs. Implementations must
+     * produce outputs in the graph's own head order; throws
+     * std::runtime_error on the same conditions as infer().
+     */
+    virtual std::vector<cv::Mat> inferMulti( const std::vector<NamedBlob> &namedBlobs )
+    {
+      ( void )namedBlobs;
+      throw std::runtime_error( "runtime does not support multi-input models" );
+    }
 };
 
 using ModelRuntimePtr = std::shared_ptr<IModelRuntime>;

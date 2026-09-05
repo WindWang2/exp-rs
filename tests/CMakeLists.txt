@@ -3541,6 +3541,41 @@ if(TARGET sicnu_operators)
 
   # Temporal (multi-date) remote sensing: core semantics, scientific operator
   # correctness, agent/registry integration.
+  # Platform 3.0 SAR kernel numeric references (goal §6/§12).
+  sicnu_add_test(test_sar_kernels)
+
+  # Platform 3.0 SAR operator end-to-end (synthetic fixtures).
+  sicnu_add_test(test_sar_operators)
+
+  # Platform 3.0 feature cube contract.
+  sicnu_add_test(test_feature_cube)
+
+  # Platform 3.0 temporal fit numeric references (goal §7/§12).
+  sicnu_add_test(test_temporal_fit)
+
+  # Platform 3.0 model library gate: every shipped manifest parses cleanly,
+  # names uniquely, and carries honest template readiness.
+  sicnu_add_test(test_model_library_manifests)
+
+  # Platform 3.0 spatiotemporal observation contracts: modality vocabulary,
+  # STAC multimodal ingest, product metadata population, modality preflight.
+  add_executable(test_spatiotemporal_contracts test_spatiotemporal_contracts.cpp)
+  target_link_libraries(test_spatiotemporal_contracts PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    Sicnu::data
+    sicnu_processing
+    GDAL::GDAL
+  )
+  target_include_directories(test_spatiotemporal_contracts PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/processing/algorithms/temporal
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_spatiotemporal_contracts)
+  sicnu_discover_tests(test_spatiotemporal_contracts)
+
   add_executable(test_temporal_core test_temporal_core.cpp)
   target_link_libraries(test_temporal_core PRIVATE
     Catch2::Catch2WithMain

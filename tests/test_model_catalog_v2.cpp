@@ -575,3 +575,331 @@ TEST_CASE( "resolveArtifactPath resolves files, names, and explains failures", "
   CHECK_FALSE( unknown.has_value() );
   CHECK( error.find( "neither an existing file nor a catalog name" ) != std::string::npos );
 }
+
+TEST_CASE( "v2 manifests mirror their input contract into the v3 inputs list", "[models][catalog][v3]" )
+{
+  QTemporaryDir dir;
+  writeManifest( dir, QStringLiteral( "v2-mirror" ), R"({
+      "name": "v2-mirror",
+      "task": "segmentation",
+      "framework": "onnx",
+      "artifact": { "path": "weights.onnx" },
+      "input": {
+          "data_type": "raster",
+          "band_roles": ["Red", "Green", "Blue"],
+          "dtype": "float32",
+          "layout": "NCHW",
+          "width": 256,
+          "height": 256
+      }
+  })", QByteArray( "v2" ) );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  const auto model = catalog.find( "v2-mirror" );
+  REQUIRE( model.has_value() );
+  CHECK( model->readiness == ModelReadiness::Ready );
+  CHECK( model->readinessReason.empty() );
+  REQUIRE( model->inputs.size() == 1 );
+  // The legacy single-input member and the v3 list stay in sync, field by field.
+  CHECK( model->inputs[0].dataType == model->input.dataType );
+  CHECK( model->inputs[0].dtype == model->input.dtype );
+  CHECK( model->inputs[0].layout == model->input.layout );
+  CHECK( model->inputs[0].bandRoles == model->input.bandRoles );
+  CHECK( model->inputs[0].width == model->input.width );
+  CHECK( model->inputs[0].height == model->input.height );
+  CHECK( model->inputs[0].name.empty() );  // single input: default (unnamed)
+  CHECK( model->inputs[0].temporalLength == 0 );
+  CHECK( model->inputs[0].temporalCollapse == "channels" );
+  CHECK( model->supportedBandRoles.size() == 3 );
+}
+
+TEST_CASE( "v3 multi-input manifests parse every declared input in order", "[models][catalog][v3]" )
+{
+  QTemporaryDir dir;
+  writeManifest( dir, QStringLiteral( "bitemporal" ), R"({
+      "name": "bitemporal",
+      "task": "segmentation",
+      "framework": "onnx",
+      "artifact": { "path": "weights.onnx" },
+      "inputs": [
+          {
+              "name": "before",
+              "data_type": "raster",
+              "band_roles": ["Red", "Green", "Blue", "NIR"],
+              "dtype": "float32",
+              "temporal_length": 4,
+              "temporal_collapse": "channels"
+          },
+          {
+              "name": "after",
+              "data_type": "raster",
+              "band_roles": ["Red", "Green", "Blue", "NIR"],
+              "dtype": "float32"
+          }
+      ]
+  })", QByteArray( "v3" ) );
+  // Precedence: when both `inputs` and `input` exist, `inputs` wins and the
+  // legacy mirror is filled from inputs[0] — the `input` section is ignored.
+  writeManifest( dir, QStringLiteral( "both-keys" ), R"({
+      "name": "both-keys",
+      "task": "segmentation",
+      "framework": "onnx",
+      "artifact": { "path": "weights.onnx" },
+      "input": {
+          "band_roles": ["Blue"],
+          "width": 999,
+          "height": 999
+      },
+      "inputs": [
+          { "name": "before", "band_roles": ["Red", "Green"], "width": 256, "height": 256 },
+          { "name": "after", "band_roles": ["Red", "Green"] }
+      ]
+  })", QByteArray( "v3" ) );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  const auto model = catalog.find( "bitemporal" );
+  REQUIRE( model.has_value() );
+  CHECK( model->readiness == ModelReadiness::Ready );
+  CHECK( model->readinessReason.empty() );
+  REQUIRE( model->inputs.size() == 2 );
+  CHECK( model->inputs[0].name == "before" );
+  CHECK( model->inputs[0].dtype == "float32" );
+  CHECK( model->inputs[0].temporalLength == 4 );
+  CHECK( model->inputs[0].temporalCollapse == "channels" );
+  REQUIRE( model->inputs[0].bandRoles.size() == 4 );
+  CHECK( model->inputs[1].name == "after" );
+  CHECK( model->inputs[1].temporalLength == 0 );
+  CHECK( model->inputs[1].temporalCollapse == "channels" );
+  // Legacy mirror: always inputs[0].
+  CHECK( model->input.name == "before" );
+  CHECK( model->input.bandRoles == model->inputs[0].bandRoles );
+  CHECK( model->supportedBandRoles.size() == 4 );
+
+  const auto both = catalog.find( "both-keys" );
+  REQUIRE( both.has_value() );
+  CHECK( both->readiness == ModelReadiness::Ready );
+  REQUIRE( both->inputs.size() == 2 );
+  CHECK( both->inputs[0].name == "before" );
+  CHECK( both->inputs[0].width == 256 );
+  // `inputs` wins: the legacy `input` section (Blue, 999) is ignored.
+  CHECK( both->input.name == "before" );
+  CHECK( both->input.width == 256 );
+  CHECK( both->supportedBandRoles.size() == 2 );
+}
+
+TEST_CASE( "multi-input manifests need a unique name per input", "[models][catalog][v3]" )
+{
+  QTemporaryDir dir;
+  writeManifest( dir, QStringLiteral( "unnamed-second" ), R"({
+      "name": "unnamed-second",
+      "framework": "onnx",
+      "inputs": [
+          { "name": "before", "band_roles": ["Red"] },
+          { "band_roles": ["Green"] }
+      ]
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "duplicate-names" ), R"({
+      "name": "duplicate-names",
+      "framework": "onnx",
+      "inputs": [
+          { "name": "band", "band_roles": ["Red"] },
+          { "name": "band", "band_roles": ["Green"] }
+      ]
+  })", QByteArray( "w" ) );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  const auto unnamed = catalog.find( "unnamed-second" );
+  REQUIRE( unnamed.has_value() );
+  CHECK( unnamed->readiness == ModelReadiness::InvalidManifest );
+  CHECK( unnamed->readinessReason.find( "name" ) != std::string::npos );
+
+  const auto duplicated = catalog.find( "duplicate-names" );
+  REQUIRE( duplicated.has_value() );
+  CHECK( duplicated->readiness == ModelReadiness::InvalidManifest );
+  CHECK( duplicated->readinessReason.find( "name" ) != std::string::npos );
+}
+
+TEST_CASE( "per-input temporal contracts parse or fail loudly", "[models][catalog][v3]" )
+{
+  QTemporaryDir dir;
+  writeManifest( dir, QStringLiteral( "temporal-ok" ), R"({
+      "name": "temporal-ok",
+      "framework": "onnx",
+      "path": "weights.onnx",
+      "input": { "band_roles": ["Red", "Green", "Blue"], "temporal_length": 4 }
+  })", QByteArray( "fake-weights" ) );
+  writeManifest( dir, QStringLiteral( "temporal-negative" ), R"({
+      "name": "temporal-negative",
+      "framework": "onnx",
+      "input": { "temporal_length": -1 }
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "collapse-bogus" ), R"({
+      "name": "collapse-bogus",
+      "framework": "onnx",
+      "input": { "temporal_collapse": "bogus" }
+  })", QByteArray( "w" ) );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  const auto ok = catalog.find( "temporal-ok" );
+  REQUIRE( ok.has_value() );
+  CHECK( ok->readiness == ModelReadiness::Ready );
+  REQUIRE( ok->inputs.size() == 1 );
+  CHECK( ok->inputs[0].temporalLength == 4 );
+  CHECK( ok->inputs[0].temporalCollapse == "channels" );
+  CHECK( ok->input.temporalLength == 4 );
+
+  const auto negative = catalog.find( "temporal-negative" );
+  REQUIRE( negative.has_value() );
+  CHECK( negative->readiness == ModelReadiness::InvalidManifest );
+  CHECK( negative->readinessReason.find( "temporal_length" ) != std::string::npos );
+
+  const auto collapse = catalog.find( "collapse-bogus" );
+  REQUIRE( collapse.has_value() );
+  CHECK( collapse->readiness == ModelReadiness::InvalidManifest );
+  CHECK( collapse->readinessReason.find( "temporal_collapse" ) != std::string::npos );
+}
+
+TEST_CASE( "output.uncertainty parses or is rejected", "[models][catalog][v3]" )
+{
+  QTemporaryDir dir;
+  writeManifest( dir, QStringLiteral( "uncertainty-entropy" ), R"({
+      "name": "uncertainty-entropy",
+      "framework": "onnx",
+      "path": "weights.onnx",
+      "output": { "type": "raster", "uncertainty": "entropy" }
+  })", QByteArray( "fake-weights" ) );
+  writeManifest( dir, QStringLiteral( "uncertainty-margin" ), R"({
+      "name": "uncertainty-margin",
+      "framework": "onnx",
+      "path": "weights.onnx",
+      "output": { "type": "raster", "uncertainty": "margin" }
+  })", QByteArray( "fake-weights" ) );
+  writeManifest( dir, QStringLiteral( "uncertainty-bogus" ), R"({
+      "name": "uncertainty-bogus",
+      "framework": "onnx",
+      "output": { "type": "raster", "uncertainty": "bogus" }
+  })", QByteArray( "w" ) );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  const auto entropy = catalog.find( "uncertainty-entropy" );
+  REQUIRE( entropy.has_value() );
+  CHECK( entropy->readiness == ModelReadiness::Ready );
+  CHECK( entropy->output.uncertainty == "entropy" );
+
+  const auto margin = catalog.find( "uncertainty-margin" );
+  REQUIRE( margin.has_value() );
+  CHECK( margin->readiness == ModelReadiness::Ready );
+  CHECK( margin->output.uncertainty == "margin" );
+
+  const auto bogus = catalog.find( "uncertainty-bogus" );
+  REQUIRE( bogus.has_value() );
+  CHECK( bogus->readiness == ModelReadiness::InvalidManifest );
+  CHECK( bogus->readinessReason.find( "uncertainty" ) != std::string::npos );
+}
+
+TEST_CASE( "toJson serializes the v3 inputs surface for re-parse", "[models][catalog][v3]" )
+{
+  QTemporaryDir dir;
+  const QByteArray artifactBytes = "v3-weights";
+  writeManifest( dir, QStringLiteral( "v3-rt" ), R"({
+      "name": "v3-rt",
+      "task": "segmentation",
+      "framework": "onnx",
+      "artifact": { "path": "weights.onnx" },
+      "inputs": [
+          {
+              "name": "before",
+              "data_type": "raster",
+              "band_roles": ["Red", "Green", "Blue", "NIR"],
+              "dtype": "float32",
+              "width": 256,
+              "height": 256,
+              "temporal_length": 4
+          },
+          {
+              "name": "after",
+              "data_type": "raster",
+              "band_roles": ["Red", "Green", "Blue", "NIR"]
+          }
+      ],
+      "preprocess": {
+          "normalize": "mean_std",
+          "mean": [0.1, 0.2, 0.3, 0.4],
+          "std": [0.1, 0.1, 0.1, 0.1]
+      },
+      "output": { "type": "raster", "uncertainty": "entropy" }
+  })", artifactBytes );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  const auto model = catalog.find( "v3-rt" );
+  REQUIRE( model.has_value() );
+  CHECK( model->readiness == ModelReadiness::Ready );
+
+  const Json::Value json = model->toJson();
+  REQUIRE( json.isMember( "inputs" ) );
+  REQUIRE( json["inputs"].size() == 2 );
+  CHECK( json["inputs"][0]["name"].asString() == "before" );
+  CHECK( json["inputs"][0]["temporal_length"].asInt() == 4 );
+  CHECK( json["inputs"][0]["width"].asInt() == 256 );
+  CHECK( json["inputs"][1]["name"].asString() == "after" );
+  CHECK( json["inputs"][1]["band_roles"].size() == 4 );
+  // Legacy flat mirror stays for v2 consumers.
+  CHECK( json.isMember( "input_contract" ) );
+  CHECK( json["input_contract"]["band_roles"].size() == 4 );
+  REQUIRE( json.isMember( "output_contract" ) );
+  CHECK( json["output_contract"]["uncertainty"].asString() == "entropy" );
+
+  // Round trip: the serialized surface is itself a valid manifest — feed it
+  // back through the catalog and the v3 fields survive. The echo needs its
+  // own unique name (the catalog refuses duplicate ids).
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "";
+  Json::Value echoJson = json;
+  echoJson["name"] = "v3-rt-echo";
+  echoJson["artifact"]["path"] = "weights.onnx";
+  const std::string serialized = Json::writeString( builder, echoJson );
+  writeManifest( dir, QStringLiteral( "v3-rt-echo" ), QByteArray( serialized.c_str() ), artifactBytes );
+  catalog.reload();
+  const auto echoed = catalog.find( "v3-rt-echo" );
+  REQUIRE( echoed.has_value() );
+  CHECK( echoed->readiness == ModelReadiness::Ready );
+  REQUIRE( echoed->inputs.size() == 2 );
+  CHECK( echoed->inputs[0].name == "before" );
+  CHECK( echoed->inputs[0].temporalLength == 4 );
+  CHECK( echoed->inputs[0].width == 256 );
+  CHECK( echoed->inputs[1].name == "after" );
+  CHECK( echoed->input.name == "before" );
+  CHECK( echoed->input.bandRoles == echoed->inputs[0].bandRoles );
+}
+
+TEST_CASE( "a non-array inputs key is rejected safely", "[models][catalog][v3]" )
+{
+  QTemporaryDir dir;
+  writeManifest( dir, QStringLiteral( "inputs-object" ), R"({
+      "name": "inputs-object",
+      "framework": "onnx",
+      "inputs": { "name": "before" }
+  })", QByteArray( "w" ) );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  // Wrong-typed `inputs` must invalidate the manifest, not crash the scan.
+  const auto model = catalog.find( "inputs-object" );
+  REQUIRE( model.has_value() );
+  CHECK( model->readiness == ModelReadiness::InvalidManifest );
+  CHECK( model->readinessReason.find( "inputs" ) != std::string::npos );
+  CHECK( model->inputs.empty() );
+}

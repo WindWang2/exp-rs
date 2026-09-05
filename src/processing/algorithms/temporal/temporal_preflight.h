@@ -49,6 +49,32 @@ struct PreflightOptions
   bool requireUniformScaleOffset = true;
   /// Detect QA/SCL bands for masking; warns when absent (non-blocking).
   bool expectQualityBands = false;
+  /// Platform 3.0 modality gates: a temporal FOLD across modalities (optical
+  /// + SAR in one time series) is a scientific error, not a convenience.
+  /// Explicitly multimodal consumers (feature stacking) turn this off.
+  bool requireUniformModality = true;
+  /// SAR collections: mixing polarizations (VV vs VH) in one series is a
+  /// blocking error unless the caller explicitly declares the series is
+  /// polarization-aware (set true only for operators that track polarization
+  /// per scene).
+  bool allowMixedPolarization = false;
+};
+
+/// Modality facts gathered from the scene contracts (Platform 3.0, goal §5).
+struct ModalityProfile
+{
+  /// Distinct claimed modalities in vocabulary order; "unknown" only when
+  /// nothing else was claimed anywhere.
+  QStringList modalities;
+  bool mixed = false;                 ///< more than one distinct modality
+  /// Normalized polarization set shared by every SAR scene ("" when none /
+  /// not uniform).
+  QString commonPolarizationSet;
+  bool polarizationUniform = true;
+  /// Some SAR scenes declare polarizations, others do not.
+  bool polarizationPartial = false;
+  int sarSceneCount = 0;
+  int demSceneCount = 0;
 };
 
 /// Per-scene radiometric facts gathered during preflight (reused by the
@@ -80,6 +106,7 @@ struct TemporalPreflightReport
   double uniformOffset = 0.0;
   bool scaleOffsetDeclared = false;     ///< false = no scene declares scale/offset (raw values)
   QVector<SceneRadiometry> radiometry;  ///< per scene (chronological order)
+  ModalityProfile modality;             ///< Platform 3.0 multimodal facts
 
   bool ok() const;
   PreflightIssue firstBlocking() const;

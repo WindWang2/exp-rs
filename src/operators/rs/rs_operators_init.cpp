@@ -16,11 +16,22 @@
 #include "rs_change_detection_operator.h"
 #include "rs_change_primitives.h"
 #include "rs_threshold_raster_operator.h"
+#include "rs_sar_calibrate_operator.h"
+#include "rs_sar_backscatter_operator.h"
+#include "rs_sar_change_operator.h"
+#include "rs_sar_ratio_operator.h"
+#include "rs_sar_speckle_operator.h"
+#include "rs_sar_terrain_correction_operator.h"
+#include "rs_sar_terrain_flatten_operator.h"
+#include "rs_sar_texture_operator.h"
 #include "rs_post_classification_change_operator.h"
 #include "rs_qa_mask_operator.h"
 #include "rs_apply_mask_operator.h"
 #include "rs_image_fusion_operator.h"
 #include "rs_fusion_aliases.h"
+#include "rs_feature_stack_operator.h"
+#include "rs_feature_normalize_operator.h"
+#include "rs_feature_select_operator.h"
 #include "rs_terrain_analysis_operator.h"
 #include "rs_pca_operator.h"
 #include "rs_mnf_operator.h"
@@ -30,6 +41,12 @@
 #include "rs_temporal_index_operator.h"
 #include "rs_temporal_trend_operator.h"
 #include "rs_temporal_anomaly_operator.h"
+#include "rs_temporal_breakpoints_operator.h"
+#include "rs_temporal_decompose_operator.h"
+#include "rs_temporal_gap_fill_operator.h"
+#include "rs_temporal_harmonic_fit_operator.h"
+#include "rs_temporal_phenology_operator.h"
+#include "rs_temporal_smooth_operator.h"
 #include "rs_temporal_extract_series_operator.h"
 #include "rs_landsat_import_operator.h"
 #include "rs_sentinel2_import_operator.h"
@@ -85,6 +102,14 @@ REGISTER_RS_OPERATOR(RsChangeLogRatioOperator, "rs:change_log_ratio")
 REGISTER_RS_OPERATOR(RsChangeMadOperator, "rs:change_mad")
 REGISTER_RS_OPERATOR(RsChangeIrMadOperator, "rs:change_irmad")
 REGISTER_RS_OPERATOR(RsThresholdRasterOperator, "rs:threshold_raster")
+REGISTER_RS_OPERATOR(RsSarCalibrateOperator, "rs:sar_calibrate")
+REGISTER_RS_OPERATOR(RsSarBackscatterOperator, "rs:sar_backscatter")
+REGISTER_RS_OPERATOR(RsSarTerrainFlattenOperator, "rs:sar_terrain_flatten")
+REGISTER_RS_OPERATOR(RsSarTerrainCorrectionOperator, "rs:sar_terrain_correction")
+REGISTER_RS_OPERATOR(RsSarSpeckleOperator, "rs:sar_speckle")
+REGISTER_RS_OPERATOR(RsSarRatioOperator, "rs:sar_ratio")
+REGISTER_RS_OPERATOR(RsSarTextureOperator, "rs:sar_texture")
+REGISTER_RS_OPERATOR(RsSarChangeOperator, "rs:sar_change")
 REGISTER_RS_OPERATOR(RsPostClassificationChangeOperator, "rs:post_classification_change")
 REGISTER_RS_OPERATOR(RsQaMaskOperator, "rs:qa_mask")
 REGISTER_RS_OPERATOR(RsApplyMaskOperator, "rs:apply_mask")
@@ -94,6 +119,9 @@ REGISTER_RS_OPERATOR(RsFusionBroveyOperator, "rs:fusion_brovey")
 REGISTER_RS_OPERATOR(RsFusionPcaOperator, "rs:fusion_pca")
 REGISTER_RS_OPERATOR(RsFusionIhsOperator, "rs:fusion_ihs")
 REGISTER_RS_OPERATOR(RsFusionGramSchmidtOperator, "rs:fusion_gram_schmidt")
+REGISTER_RS_OPERATOR(RsFeatureStackOperator, "rs:feature_stack")
+REGISTER_RS_OPERATOR(RsFeatureNormalizeOperator, "rs:feature_normalize")
+REGISTER_RS_OPERATOR(RsFeatureSelectOperator, "rs:feature_select")
 REGISTER_RS_OPERATOR(RsTerrainAnalysisOperator, "rs:terrain_analysis")
 REGISTER_RS_OPERATOR(RsPcaOperator, "rs:pca")
 REGISTER_RS_OPERATOR(RsMnfOperator, "rs:mnf")
@@ -102,6 +130,12 @@ REGISTER_RS_OPERATOR(RsTemporalSummaryOperator, "rs:temporal_summary")
 REGISTER_RS_OPERATOR(RsTemporalCompositeOperator, "rs:temporal_composite")
 REGISTER_RS_OPERATOR(RsTemporalIndexSeriesOperator, "rs:temporal_index_series")
 REGISTER_RS_OPERATOR(RsTemporalTrendOperator, "rs:temporal_trend")
+REGISTER_RS_OPERATOR(RsTemporalSmoothOperator, "rs:temporal_smooth")
+REGISTER_RS_OPERATOR(RsTemporalGapFillOperator, "rs:temporal_gap_fill")
+REGISTER_RS_OPERATOR(RsTemporalHarmonicFitOperator, "rs:temporal_harmonic_fit")
+REGISTER_RS_OPERATOR(RsTemporalPhenologyOperator, "rs:temporal_phenology")
+REGISTER_RS_OPERATOR(RsTemporalBreakpointsOperator, "rs:temporal_breakpoints")
+REGISTER_RS_OPERATOR(RsTemporalDecomposeOperator, "rs:temporal_decompose")
 REGISTER_RS_OPERATOR(RsTemporalAnomalyOperator, "rs:temporal_anomaly")
 REGISTER_RS_OPERATOR(RsTemporalExtractSeriesOperator, "rs:temporal_extract_series")
 REGISTER_RS_OPERATOR(RsLandsatImportOperator, "rs:landsat_import")
@@ -182,6 +216,14 @@ void initBuiltinRsOperators() {
   add( "rs:change_mad", [] { return std::make_unique<RsChangeMadOperator>(); } );
   add( "rs:change_irmad", [] { return std::make_unique<RsChangeIrMadOperator>(); } );
   add( "rs:threshold_raster", [] { return std::make_unique<RsThresholdRasterOperator>(); } );
+  add( "rs:sar_calibrate", [] { return std::make_unique<RsSarCalibrateOperator>(); } );
+  add( "rs:sar_backscatter", [] { return std::make_unique<RsSarBackscatterOperator>(); } );
+  add( "rs:sar_terrain_flatten", [] { return std::make_unique<RsSarTerrainFlattenOperator>(); } );
+  add( "rs:sar_terrain_correction", [] { return std::make_unique<RsSarTerrainCorrectionOperator>(); } );
+  add( "rs:sar_speckle", [] { return std::make_unique<RsSarSpeckleOperator>(); } );
+  add( "rs:sar_ratio", [] { return std::make_unique<RsSarRatioOperator>(); } );
+  add( "rs:sar_texture", [] { return std::make_unique<RsSarTextureOperator>(); } );
+  add( "rs:sar_change", [] { return std::make_unique<RsSarChangeOperator>(); } );
   add( "rs:post_classification_change", [] { return std::make_unique<RsPostClassificationChangeOperator>(); } );
   add( "rs:qa_mask", [] { return std::make_unique<RsQaMaskOperator>(); } );
   add( "rs:apply_mask", [] { return std::make_unique<RsApplyMaskOperator>(); } );
@@ -191,6 +233,9 @@ void initBuiltinRsOperators() {
   add( "rs:fusion_pca", [] { return std::make_unique<RsFusionPcaOperator>(); } );
   add( "rs:fusion_ihs", [] { return std::make_unique<RsFusionIhsOperator>(); } );
   add( "rs:fusion_gram_schmidt", [] { return std::make_unique<RsFusionGramSchmidtOperator>(); } );
+  add( "rs:feature_stack", [] { return std::make_unique<RsFeatureStackOperator>(); } );
+  add( "rs:feature_normalize", [] { return std::make_unique<RsFeatureNormalizeOperator>(); } );
+  add( "rs:feature_select", [] { return std::make_unique<RsFeatureSelectOperator>(); } );
   add( "rs:terrain_analysis", [] { return std::make_unique<RsTerrainAnalysisOperator>(); } );
   add( "rs:pca", [] { return std::make_unique<RsPcaOperator>(); } );
   add( "rs:mnf", [] { return std::make_unique<RsMnfOperator>(); } );
@@ -199,6 +244,12 @@ void initBuiltinRsOperators() {
   add( "rs:temporal_composite", [] { return std::make_unique<RsTemporalCompositeOperator>(); } );
   add( "rs:temporal_index_series", [] { return std::make_unique<RsTemporalIndexSeriesOperator>(); } );
   add( "rs:temporal_trend", [] { return std::make_unique<RsTemporalTrendOperator>(); } );
+  add( "rs:temporal_smooth", [] { return std::make_unique<RsTemporalSmoothOperator>(); } );
+  add( "rs:temporal_gap_fill", [] { return std::make_unique<RsTemporalGapFillOperator>(); } );
+  add( "rs:temporal_harmonic_fit", [] { return std::make_unique<RsTemporalHarmonicFitOperator>(); } );
+  add( "rs:temporal_phenology", [] { return std::make_unique<RsTemporalPhenologyOperator>(); } );
+  add( "rs:temporal_breakpoints", [] { return std::make_unique<RsTemporalBreakpointsOperator>(); } );
+  add( "rs:temporal_decompose", [] { return std::make_unique<RsTemporalDecomposeOperator>(); } );
   add( "rs:temporal_anomaly", [] { return std::make_unique<RsTemporalAnomalyOperator>(); } );
   add( "rs:temporal_extract_series", [] { return std::make_unique<RsTemporalExtractSeriesOperator>(); } );
   add( "rs:landsat_import", [] { return std::make_unique<RsLandsatImportOperator>(); } );

@@ -1,0 +1,93 @@
+{
+  "name": "unet-deeplabv3-landcover",
+  "task": "segmentation",
+  "framework": "onnx",
+  "path": "",
+  "gpu": false,
+  "accuracy": 0.75,
+  "domain": {
+    "sensors": [
+      "Landsat-8",
+      "Landsat-9"
+    ],
+    "resolution_range": [
+      15.0,
+      30.0
+    ],
+    "modalities": [
+      "optical"
+    ]
+  },
+  "artifact": {
+    "path": "",
+    "checksum": "",
+    "size_bytes": 0,
+    "note": "weights are not distributed with the repository; download from the reference, place beside the manifest, fill path + sha256 checksum"
+  },
+  "input": {
+    "dtype": "float32",
+    "layout": "NCHW",
+    "band_roles": [
+      "blue",
+      "green",
+      "red",
+      "nir",
+      "swir1",
+      "swir2"
+    ]
+  },
+  "preprocess": {
+    "normalize": "mean_std",
+    "mean": [
+      0.1768,
+      0.1684,
+      0.1462,
+      0.2306,
+      0.2537,
+      0.1826
+    ],
+    "std": [
+      0.2103,
+      0.2144,
+      0.2374,
+      0.2183,
+      0.2295,
+      0.2189
+    ],
+    "scale": 1.0
+  },
+  "tiling": {
+    "supported": true,
+    "tile_size": 256,
+    "overlap": 32,
+    "batch_size": 2
+  },
+  "output": {
+    "type": "raster",
+    "classes": [
+      "background",
+      "cropland",
+      "forest",
+      "urban",
+      "water",
+      "barren"
+    ]
+  },
+  "postprocess": {
+    "mask_threshold": -1.0
+  },
+  "runtime": {
+    "gpu": false,
+    "cpu_fallback": true,
+    "estimated_vram_mb": 0,
+    "estimated_ram_mb": 1024,
+    "supports_tiling": true
+  },
+  "reference": "https://github.com/template/deeplab-lc",
+  "description": "DeepLabV3+ land-cover segmentation on Landsat-8/9 surface reflectance.",
+  "tags": [
+    "landcover",
+    "deeplabv3",
+    "landsat"
+  ]
+}

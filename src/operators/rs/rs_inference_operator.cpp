@@ -11,10 +11,12 @@
 #include "operators/runtime/model_runtime.h"
 #include "operators/runtime/tile_inference_engine.h"
 
+#include "processing/features/feature_cube.h"
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QFileInfo>
+#include <QStringList>
 
 #include <algorithm>
 #include <string>
@@ -100,6 +102,11 @@ Json::Value RsInferenceOperator::schema() const
     items["minimum"] = 1;
     bandsParam["items"] = items;
     props["bands"] = bandsParam;
+    // Platform 3.0 knobs (goal §10): flip test-time augmentation and a hard
+    // batch cap for memory-pinned runs.
+    props["tta"] = makeEnumParam( "tta", "Test-time augmentation (flip averaging)",
+                                  { "none", "hflip", "hvflip" }, "none" );
+    props["batchCap"] = makeIntegerParam( "batchCap", "Hard cap on tiles per forward pass (0 = manifest/budget default)", 0 );
 
     Json::Value outputs( Json::objectValue );
     outputs["output"] = makeRasterParam( "output", "Output raster path" );
@@ -206,8 +213,23 @@ Json::Value RsInferenceOperator::estimateExecution( const Json::Value &params ) 
         if ( artifactBytes > 0 )
             modelRamBytes = ( ( artifactBytes + kMiB - 1 ) / kMiB ) * kMiB;
     }
+    // Multi-head/uncertainty amplification (review 3): flushBatch retains
+    // every declared head's output planes alongside the input blob. Count the
+    // DECLARED channels (classes x tensor_names + optional uncertainty band);
+    // undeclared heads keep the historical input-sized allowance.
+    std::uint64_t declaredOutChannels = 0;
+    if ( !model.output.classes.empty() )
+        declaredOutChannels +=
+            model.output.classes.size() *
+            std::max<std::size_t>( 1, model.output.tensorNames.size() );
+    else if ( !model.output.tensorNames.empty() )
+        declaredOutChannels = model.output.tensorNames.size();
+    if ( model.output.uncertainty == "entropy" || model.output.uncertainty == "margin" )
+        declaredOutChannels += 1;
+    const std::uint64_t perTileSets = batch * ( 4 + declaredOutChannels );
+
     Json::Value est = sicnu::processing::makeStreamingEstimate( fedW, fedH, bands, 4,
-                                                                batch * 4, /*matrixBytes*/ 0,
+                                                                perTileSets, /*matrixBytes*/ 0,
                                                                 /*fixedOverhead*/ modelRamBytes + 32 * 1024 * 1024 );
     // VRAM contract surfaces for admission tooling (TaskCenter admits on RAM
     // today; GPU-aware admission is a documented follow-up).
@@ -251,6 +273,50 @@ Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorConte
         throw RSOperatorError( ErrorCode::InvalidInputData,
                                "Model '" + model.name + "' cannot execute: " + runtimeReason );
 
+    // Platform 3.0 contract gates: multi-input manifests are ranking-ready
+    // but their engine execution lands in the next iteration — fail loudly
+    // rather than silently feeding one raster to a two-tensor model.
+    for ( const auto &input : model.inputs )
+    {
+        if ( input.temporalLength > 0 )
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "Model '" + model.name + "' declares temporal_length=" +
+                    std::to_string( input.temporalLength ) +
+                    "; temporal (T-frame) inference is not wired into the tile "
+                    "engine yet — the graph would silently run on a single frame" );
+    }
+    if ( model.inputs.size() > 1 )
+        throw RSOperatorError(
+            ErrorCode::InvalidInputData,
+            "Model '" + model.name + "' declares " + std::to_string( model.inputs.size() )
+              + " named inputs; multi-input execution is not wired into the tile "
+                "engine yet — pick a single-input model or run each branch "
+                "separately" );
+
+    // Feature-cube preflight: when the input carries a feature cube contract,
+    // the model's declared band roles must be covered (goal §8 train/inference
+    // consistency). Plain rasters skip this check.
+    {
+        sicnu::features::FeatureCubeContract cube;
+        if ( sicnu::features::readFeatureCubeMetadata( QString::fromStdString( inputPath ),
+                                                       &cube ) )
+        {
+            const QStringList roles = [ & ] {
+                QStringList out;
+                for ( const auto &role : model.input.bandRoles )
+                    out << QString::fromStdString( role );
+                return out;
+            }();
+            const sicnu::features::ModelInputMatch match = sicnu::features::matchesModelInput(
+                cube, roles, 0 /* band count validated by the engine */, QString() );
+            if ( !match.ok )
+                throw RSOperatorError( ErrorCode::InvalidInputData,
+                                       "feature cube does not match the model input contract: "
+                                         + match.problems.join( QLatin1String( "; " ) ).toStdString() );
+        }
+    }
+
     context.reportProgress( 0.05, "Acquiring model runtime session" );
     std::string loadError;
     const auto session = registry.acquire( model, &loadError );
@@ -273,7 +339,15 @@ Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorConte
     context.reportProgressForced( 0.1, "Running tiled inference" );
 
     TileInferenceEngine engine( model, session );
-    const runtime::TileInferenceStats stats = engine.run( inputPath, bands, outputPath, context );
+    runtime::TileInferenceRunOptions options;
+    const std::string tta = getEnum( params, "tta", { "none", "hflip", "hvflip" }, "none" );
+    if ( tta == "hflip" )
+        options.tta = runtime::TtaMode::HFlip;
+    else if ( tta == "hvflip" )
+        options.tta = runtime::TtaMode::HVFlip;
+    options.batchSizeOverride = std::max( 0, getInt( params, "batchCap", 0 ) );
+    const runtime::TileInferenceStats stats =
+        engine.run( inputPath, bands, outputPath, context, options );
 
     Json::Value result( Json::objectValue );
     result["output"] = outputPath;

@@ -1,0 +1,69 @@
+{
+  "name": "yolo-building-detection",
+  "task": "detection",
+  "framework": "onnx",
+  "path": "",
+  "gpu": false,
+  "accuracy": 0.88,
+  "domain": {
+    "sensors": [
+      "GF-2",
+      "WorldView-2"
+    ],
+    "resolution_range": [
+      0.5,
+      2.0
+    ],
+    "modalities": [
+      "optical"
+    ]
+  },
+  "artifact": {
+    "path": "",
+    "checksum": "",
+    "size_bytes": 0,
+    "note": "weights are not distributed with the repository; download from the reference, place beside the manifest, fill path + sha256 checksum"
+  },
+  "input": {
+    "dtype": "float32",
+    "layout": "NCHW",
+    "band_roles": [
+      "red",
+      "green",
+      "blue"
+    ]
+  },
+  "preprocess": {
+    "normalize": "linear",
+    "scale": 0.00392156862745098
+  },
+  "tiling": {
+    "supported": true,
+    "tile_size": 640,
+    "overlap": 64,
+    "batch_size": 4
+  },
+  "output": {
+    "type": "vector",
+    "classes": [
+      "building"
+    ]
+  },
+  "postprocess": {
+    "mask_threshold": -1.0
+  },
+  "runtime": {
+    "gpu": false,
+    "cpu_fallback": true,
+    "estimated_vram_mb": 0,
+    "estimated_ram_mb": 1024,
+    "supports_tiling": true
+  },
+  "reference": "https://github.com/template/yolo-buildings",
+  "description": "YOLO-family building detection on aerial imagery (template).",
+  "tags": [
+    "buildings",
+    "yolo",
+    "detection"
+  ]
+}

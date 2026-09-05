@@ -1,0 +1,73 @@
+{
+  "name": "unet-water-sar",
+  "task": "segmentation",
+  "framework": "onnx",
+  "path": "",
+  "gpu": false,
+  "accuracy": 0.9,
+  "domain": {
+    "sensors": [
+      "Sentinel-1"
+    ],
+    "resolution_range": [
+      10.0,
+      40.0
+    ],
+    "modalities": [
+      "sar"
+    ],
+    "polarizations": [
+      "VV",
+      "VH"
+    ],
+    "radiometric_state": "sigma0"
+  },
+  "artifact": {
+    "path": "",
+    "checksum": "",
+    "size_bytes": 0,
+    "note": "weights are not distributed with the repository; download from the reference, place beside the manifest, fill path + sha256 checksum"
+  },
+  "input": {
+    "dtype": "float32",
+    "layout": "NCHW",
+    "band_roles": [
+      "vv",
+      "vh"
+    ]
+  },
+  "preprocess": {
+    "normalize": "none"
+  },
+  "tiling": {
+    "supported": true,
+    "tile_size": 256,
+    "overlap": 32,
+    "batch_size": 4
+  },
+  "output": {
+    "type": "raster",
+    "classes": [
+      "land",
+      "water",
+      "shadow"
+    ]
+  },
+  "postprocess": {
+    "mask_threshold": -1.0
+  },
+  "runtime": {
+    "gpu": false,
+    "cpu_fallback": true,
+    "estimated_vram_mb": 0,
+    "estimated_ram_mb": 1024,
+    "supports_tiling": true
+  },
+  "reference": "https://github.com/template/sar-water",
+  "description": "SAR water segmentation (Sentinel-1 VV+VH); robust to cloud cover, expects sigma0 linear power (calibrate with rs:sar_calibrate).",
+  "tags": [
+    "water",
+    "sar",
+    "sentinel-1"
+  ]
+}

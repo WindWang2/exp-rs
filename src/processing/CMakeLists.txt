@@ -7,6 +7,7 @@ add_library(sicnu_processing SHARED
     gdal/gdal_grid_compat.cpp
     gdal/gdal_block_stream.cpp
     gdal/gdal_multiband_block_stream.cpp
+    gdal/gdal_window_read.cpp
     gdal/gdal_error_handler.cpp
 
     algorithms/spectral_indices.cpp
@@ -38,10 +39,21 @@ add_library(sicnu_processing SHARED
     algorithms/temporal/temporal_time.cpp
     algorithms/temporal/temporal_band_roles.cpp
     algorithms/temporal/temporal_collection.cpp
+    algorithms/temporal/spatiotemporal_contracts.cpp
     algorithms/temporal/temporal_workspace.cpp
     algorithms/temporal/temporal_stac_adapter.cpp
+    algorithms/temporal/temporal_fit.cpp
     algorithms/temporal/temporal_preflight.cpp
     algorithms/temporal/temporal_stream.cpp
+
+    algorithms/sar/sar_metadata.cpp
+    algorithms/sar/sar_calibration.cpp
+    algorithms/sar/sar_terrain.cpp
+    algorithms/sar/sar_speckle.cpp
+    algorithms/sar/sar_texture.cpp
+    algorithms/sar/sar_ratio.cpp
+
+    features/feature_cube.cpp
 
     framework/input_validator.cpp
     framework/algorithm_engine.cpp

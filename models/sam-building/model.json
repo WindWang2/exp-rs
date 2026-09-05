@@ -1,15 +1,30 @@
 {
   "name": "sam-building",
   "task": "segmentation",
-  "input": "raster",
+  "input": {
+    "dtype": "float32",
+    "layout": "NCHW",
+    "band_roles": [
+      "red",
+      "green",
+      "blue"
+    ]
+  },
   "output": "polygon",
   "framework": "onnx",
   "path": "",
   "gpu": true,
   "accuracy": 0.89,
   "domain": {
-    "sensors": ["Sentinel-2", "WorldView-3", "GF-2"],
-    "resolution_range": [0.3, 10.0]
+    "sensors": [
+      "Sentinel-2",
+      "WorldView-3",
+      "GF-2"
+    ],
+    "resolution_range": [
+      0.3,
+      10.0
+    ]
   },
   "runtime": {
     "gpu": true,
@@ -18,5 +33,9 @@
     "supports_tiling": true
   },
   "description": "Template manifest: building extraction model (SAM-derived). Chain with gdal:polygonize for vector output.",
-  "tags": ["buildings", "segmentation", "template"]
+  "tags": [
+    "buildings",
+    "segmentation",
+    "template"
+  ]
 }

@@ -307,6 +307,28 @@ if(WITH_INTERNAL_LAZPERF)
 endif()
 
 # ─── SICNU_BUILD_OTB: vendored ITK + OTB algorithm libraries ───────────
+# Platform 3.0: optional ONNX Runtime model execution provider. OFF (or a
+# missing dependency) compiles the graceful-degradation stub: models declaring
+# framework "onnxruntime" surface runtime_unavailable, nothing else changes.
+option(SICNU_WITH_ONNX_RUNTIME "Enable the ONNX Runtime inference provider" OFF)
+
+# ONNX Runtime discovery (only meaningful with SICNU_WITH_ONNX_RUNTIME=ON):
+# provide ONNXRUNTIME_ROOT_DIR pointing at the installation, or rely on
+# standard prefix search for onnxruntime/onnxruntime_cxx_api.h.
+if(SICNU_WITH_ONNX_RUNTIME)
+    find_path(ONNXRUNTIME_INCLUDE_DIR onnxruntime/onnxruntime_cxx_api.h
+              HINTS "${ONNXRUNTIME_ROOT_DIR}" ENV ONNXRUNTIME_ROOT_DIR
+              PATH_SUFFIXES include)
+    find_library(ONNXRUNTIME_LIBRARY NAMES onnxruntime onnxruntime_shared
+                 HINTS "${ONNXRUNTIME_ROOT_DIR}" ENV ONNXRUNTIME_ROOT_DIR
+                 PATH_SUFFIXES lib lib64)
+    if(ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
+        message(STATUS "ONNX Runtime provider enabled (${ONNXRUNTIME_LIBRARY})")
+    else()
+        message(STATUS "ONNX Runtime requested but not found; provider compiled as a stub")
+    endif()
+endif()
+
 option(SICNU_BUILD_OTB "Build vendored OTB + ITK algorithm libraries" OFF)
 if(SICNU_BUILD_OTB)
     message(STATUS "SICNU_BUILD_OTB=ON — configuring vendored ITK + OTB")

@@ -3,6 +3,7 @@
 
 #include "data/raster_grid_compat.h"
 #include "processing/algorithms/satellite_products.h"
+#include "processing/algorithms/temporal/spatiotemporal_contracts.h"
 #include "processing/algorithms/temporal/temporal_band_roles.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_grid_compat.h"
@@ -16,6 +17,15 @@ namespace sicnu::temporal
 
 namespace
 {
+
+QString datasetMetadataItem( const GdalDatasetWrapper &ds, const char *key )
+{
+  if ( !ds.isValid() )
+    return QString();
+  const char *value = GDALGetMetadataItem( static_cast<GDALDatasetH>( ds.dataset() ),
+                                           key, nullptr );
+  return value ? QString::fromUtf8( value ) : QString();
+}
 
 struct BandScaleOffset
 {
@@ -137,6 +147,22 @@ Json::Value TemporalPreflightReport::toJson() const
     v["scale"] = uniformScale;
     v["offset"] = uniformOffset;
   }
+  // Platform 3.0 multimodal facts (additive keys only).
+  Json::Value modalityJson( Json::objectValue );
+  {
+    Json::Value list( Json::arrayValue );
+    for ( const QString &m : modality.modalities )
+      list.append( m.toStdString() );
+    modalityJson["modalities"] = list;
+    modalityJson["mixed"] = modality.mixed;
+    modalityJson["polarization_uniform"] = modality.polarizationUniform;
+    modalityJson["polarization_partial"] = modality.polarizationPartial;
+    modalityJson["sar_scene_count"] = modality.sarSceneCount;
+    modalityJson["dem_scene_count"] = modality.demSceneCount;
+    if ( !modality.commonPolarizationSet.isEmpty() )
+      modalityJson["common_polarizations"] = modality.commonPolarizationSet.toStdString();
+  }
+  v["modality"] = modalityJson;
   Json::Value issueList( Json::arrayValue );
   for ( const PreflightIssue &issue : issues )
   {
@@ -217,6 +243,79 @@ TemporalPreflightReport runPreflight( const TemporalCollection &collection,
   }
   report.timeRangeStartIso = collection.timeRangeStartIso();
   report.timeRangeEndIso = collection.timeRangeEndIso();
+
+  // ---- modality (Platform 3.0 contracts) ----
+  // A temporal fold across modalities mixes incomparable measurements
+  // (reflectance time series vs backscatter vs elevation) — the fold operators
+  // treat that as blocking; explicitly multimodal consumers opt out.
+  const QVector<ObservationContract> contracts = contractsOf( collection );
+  {
+    report.modality.modalities = distinctModalities( contracts );
+    int distinctClaimed = 0;
+    for ( const QString &m : report.modality.modalities )
+    {
+      if ( m != QLatin1String( "unknown" ) )
+        ++distinctClaimed;
+    }
+    report.modality.mixed = distinctClaimed > 1;
+    // SAR polarization uniformity: every SAR scene's normalized set must
+    // match; partial declarations warn (comparability cannot be verified).
+    QStringList commonPol;
+    bool polSeen = false;
+    bool polPartial = false;
+    for ( int i = 0; i < scenes.size(); ++i )
+    {
+      const ObservationContract &c = contracts[i];
+      const bool isSar = c.modality == Modality::Sar;
+      if ( isSar )
+        ++report.modality.sarSceneCount;
+      else if ( c.modality == Modality::Dem )
+        ++report.modality.demSceneCount;
+      if ( !isSar )
+        continue;
+      if ( c.polarizations.isEmpty() )
+      {
+        polPartial = true;
+        continue;
+      }
+      if ( !polSeen )
+      {
+        commonPol = c.polarizations;
+        commonPol.sort();
+        polSeen = true;
+      }
+      else
+      {
+        // Sets, not sequences: [VV,VH] and [VH,VV] are the same observation.
+        QStringList sorted = c.polarizations;
+        sorted.sort();
+        if ( commonPol != sorted )
+          report.modality.polarizationUniform = false;
+      }
+    }
+    report.modality.polarizationPartial = polPartial;
+    if ( polSeen )
+      report.modality.commonPolarizationSet = commonPol.join( QLatin1Char( ',' ) );
+    if ( report.modality.mixed && options.requireUniformModality )
+      report.issues.append( { QStringLiteral( "temporal.modality_mismatch" ),
+                              QStringLiteral( "collection mixes modalities (%1); a time series "
+                                              "fold requires one observation modality — split "
+                                              "the collection per modality or use the "
+                                              "multimodal feature operators" )
+                                  .arg( report.modality.modalities.join( QLatin1String( "/" ) ) ),
+                              true, {} } );
+    if ( !report.modality.polarizationUniform && !options.allowMixedPolarization )
+      report.issues.append( { QStringLiteral( "temporal.polarization_mismatch" ),
+                              QStringLiteral( "SAR scenes mix polarizations; a fold across VV/VH "
+                                              "(or HH/HV) is not a physically consistent series" ),
+                              true, {} } );
+    if ( report.modality.polarizationPartial && report.modality.sarSceneCount > 0 )
+      report.issues.append( { QStringLiteral( "temporal.polarization_partial" ),
+                              QStringLiteral( "some SAR scenes declare polarizations and others "
+                                              "do not; polarization comparability cannot be "
+                                              "verified" ),
+                              false, {} } );
+  }
 
   // ---- spatial (grid) ----
   if ( options.requireSameGrid )
@@ -395,6 +494,18 @@ TemporalPreflightReport runPreflight( const TemporalCollection &collection,
     ds.bandNoDataValue( 1, &hasNodata );
     if ( hasNodata )
       anyNodataDeclared = true;
+
+    // DEM scenes: an undeclared vertical unit is a silent-units hazard
+    // (meters vs feet/decimeters changes every derived metric).
+    if ( contracts.at( i ).modality == Modality::Dem &&
+         datasetMetadataItem( ds, "SICNU_DEM_UNIT" ).isEmpty() )
+      report.issues.append( { QStringLiteral( "temporal.dem_unit_undeclared" ),
+                              QStringLiteral( "DEM scene %1 declares no SICNU_DEM_UNIT; "
+                                              "elevation values are treated as meters "
+                                              "(set the metadata or import with an explicit "
+                                              "unit)" )
+                                  .arg( s.path ),
+                              false, s.path } );
   }
 
   if ( stateMismatch && options.requireRadiometricConsistency )

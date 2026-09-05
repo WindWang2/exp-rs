@@ -1,6 +1,7 @@
 // src/processing/algorithms/temporal/temporal_stac_adapter.cpp
 #include "temporal_stac_adapter.h"
 
+#include "spatiotemporal_contracts.h"
 #include "data/providers/gdal_raster_source_provider.h"
 
 #include <QDate>
@@ -25,6 +26,8 @@ struct AssetPick
     QString key;
     QString href;
     QString type;
+    QString title;
+    QStringList roles;
     QStringList bands;
 };
 
@@ -56,6 +59,17 @@ AssetPick pickRasterAsset( const Json::Value &assets )
         pick.key = QString::fromStdString( key );
         pick.href = href;
         pick.type = type;
+        if ( asset.isMember( "title" ) && asset["title"].isString() )
+          pick.title = QString::fromStdString( asset["title"].asString() );
+        const Json::Value &roles = asset["roles"];
+        if ( roles.isArray() )
+        {
+          for ( const Json::Value &r : roles )
+          {
+            if ( r.isString() )
+              pick.roles << QString::fromStdString( r.asString() );
+          }
+        }
         const Json::Value &bands = asset["eo:bands"];
         if ( bands.isArray() )
         {
@@ -86,6 +100,76 @@ double propertiesDouble( const Json::Value &properties, const char *key )
   if ( properties.isMember( key ) && properties[key].isNumeric() )
     return properties[key].asDouble();
   return -1.0;
+}
+
+QStringList propertiesStringArray( const Json::Value &properties, const char *key )
+{
+  QStringList out;
+  if ( properties.isMember( key ) && properties[key].isArray() )
+  {
+    for ( const Json::Value &v : properties[key] )
+    {
+      if ( v.isString() )
+        out << QString::fromStdString( v.asString() );
+    }
+  }
+  return out;
+}
+
+/// Multimodal STAC → observation vocabulary (Platform 3.0). Deterministic,
+/// documented precedence:
+///   1. sar:polarizations present                      → "sar"
+///   2. platform/sensor/id matches the SAR vocabulary  → "sar"
+///   3. properties.data_type == "dem", the selected asset advertises a DEM
+///      token (key/title/type/roles), or the platform/id matches the DEM
+///      vocabulary                                    → "dem"
+///   4. platform matches the optical vocabulary        → "optical"
+///   5. else "" (unknown — contracts may still infer from scene clues)
+QString inferStacModality( const StacItem &item, const AssetPick &pick,
+                           const Json::Value &properties )
+{
+  const QString platform = item.platform;
+  const QString combined = QStringLiteral( "%1 %2 %3" ).arg( platform, item.sensor, item.id );
+  const bool sarTokens =
+    combined.contains( QLatin1String( "SENTINEL-1" ), Qt::CaseInsensitive ) ||
+    combined.contains( QLatin1String( "SENTINEL 1" ), Qt::CaseInsensitive ) ||
+    combined.contains( QLatin1String( "ALOS" ), Qt::CaseInsensitive ) ||
+    combined.contains( QLatin1String( "TERRASAR" ), Qt::CaseInsensitive ) ||
+    combined.contains( QLatin1String( "RADARSAT" ), Qt::CaseInsensitive ) ||
+    combined.contains( QLatin1String( "GAOFEN-3" ), Qt::CaseInsensitive );
+  if ( !item.polarizations.isEmpty() )
+    return QStringLiteral( "sar" );
+  if ( sarTokens )
+    return QStringLiteral( "sar" );
+  const QString assetText = QStringLiteral( "%1 %2 %3 %4" )
+                              .arg( pick.key, pick.title, pick.type, pick.roles.join( QLatin1Char( ' ' ) ) );
+  const bool demAsset = assetText.contains( QLatin1String( "dem" ), Qt::CaseInsensitive ) ||
+                        assetText.contains( QLatin1String( "elevation" ), Qt::CaseInsensitive );
+  const bool demProperties =
+    ( properties.isMember( "data_type" ) && properties["data_type"].isString() &&
+      QString::fromStdString( properties["data_type"].asString() ).compare( QLatin1String( "dem" ),
+                                                                            Qt::CaseInsensitive ) == 0 );
+  const bool demPlatform =
+    combined.contains( QLatin1String( "COPERNICUS DEM" ), Qt::CaseInsensitive ) ||
+    combined.contains( QLatin1String( "SRTM" ), Qt::CaseInsensitive ) ||
+    combined.contains( QLatin1String( "NASADEM" ), Qt::CaseInsensitive ) ||
+    combined.contains( QLatin1String( "GDEM" ), Qt::CaseInsensitive ) ||
+    combined.contains( QLatin1String( "AW3D" ), Qt::CaseInsensitive );
+  if ( demAsset || demProperties || demPlatform )
+    return QStringLiteral( "dem" );
+  if ( platform.contains( QLatin1String( "SENTINEL-2" ), Qt::CaseInsensitive ) ||
+       platform.contains( QLatin1String( "SENTINEL 2" ), Qt::CaseInsensitive ) ||
+       platform.contains( QLatin1String( "LANDSAT" ), Qt::CaseInsensitive ) ||
+       platform.contains( QLatin1String( "MODIS" ), Qt::CaseInsensitive ) ||
+       platform.contains( QLatin1String( "PLANET" ), Qt::CaseInsensitive ) ||
+       platform.contains( QLatin1String( "WORLDVIEW" ), Qt::CaseInsensitive ) ||
+       platform.contains( QLatin1String( "GF-1" ), Qt::CaseInsensitive ) ||
+       platform.contains( QLatin1String( "GF-2" ), Qt::CaseInsensitive ) ||
+       platform.contains( QLatin1String( "GF-6" ), Qt::CaseInsensitive ) ||
+       platform.contains( QLatin1String( "ZY-3" ), Qt::CaseInsensitive ) ||
+       platform.contains( QLatin1String( "SENTINEL-3" ), Qt::CaseInsensitive ) )
+    return QStringLiteral( "optical" );
+  return QString();
 }
 
 } // namespace
@@ -125,6 +209,16 @@ bool parseStacItem( const Json::Value &feature, StacItem *out, QString *error )
   item.cloudCover = propertiesDouble( feature["properties"], "eo:cloud_cover" );
   item.rasterAssetKey = pick.key;
   item.rasterBands = pick.bands;
+  // Multimodal observation attributes (Platform 3.0): sar:polarizations,
+  // sar:instrument_mode, eo:gsd, then modality via the documented precedence.
+  item.polarizations = normalizePolarizations(
+    propertiesStringArray( feature["properties"], "sar:polarizations" ) );
+  item.sensor = propertiesString( feature["properties"], "sar:instrument_mode" );
+  if ( item.sensor.isEmpty() )
+    item.sensor = propertiesString( feature["properties"], "sar:frequency_band" );
+  const double gsd = propertiesDouble( feature["properties"], "eo:gsd" );
+  item.gsd = gsd > 0.0 ? gsd : 0.0;
+  item.modality = inferStacModality( item, pick, feature["properties"] );
   item.rasterHref =
     sicnu::data::providers::GdalRasterSourceProvider::normalizeRemoteRasterSource( pick.href );
 
@@ -399,6 +493,12 @@ bool temporalCollectionFromStacItems( const QVector<StacItem> &items,
     scene.platform = item.platform;
     scene.processingLevel = item.processingLevel;
     scene.cloudCoverPercent = item.cloudCover;
+    // Multimodal observation contract: STAC-declared attributes ride on the
+    // scene ref (serialized only-when-claimed, descriptor stays v1-stable).
+    scene.modality = item.modality;
+    scene.sensor = item.sensor;
+    scene.polarizations = item.polarizations;
+    scene.resolutionMeters = item.gsd;
     scene.originalIndex = index++;
     // eo:bands ride as explicit band-name overrides where the naming maps to
     // the platform's role vocabulary; the shared resolver still warns for

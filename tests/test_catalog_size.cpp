@@ -27,9 +27,15 @@ TEST_CASE( "Tool catalog export stays within the context budget", "[agent][catal
     builder["indentation"] = "";
     const std::string full = Json::writeString( builder, tools );
 
-    // ~4 chars per token; budget 100 KiB ≈ 25k tokens — a hard regression
-    // ceiling so adding atomic operators cannot silently blow the LLM context.
-    const size_t budgetBytes = 100 * 1024;
+    // ~4 chars per token; budget ≈ tokens — a hard regression ceiling so
+    // adding atomic operators cannot silently blow the LLM context.
+    // Platform 3.0 (2026-09): the catalog grew from ~65 to ~82 algorithms with
+    // the SAR / temporal-2.0 / feature families (17 new rs: operators, each
+    // with full JSON-Schema contracts). The ceiling was raised 100 → 160 KiB
+    // to fit the platform scope; discovery stays progressive — agents search
+    // and shortlist (compact layer below) before injecting any full schema,
+    // so the whole-catalog export is a listing envelope, not the common path.
+    const size_t budgetBytes = 160 * 1024;
     REQUIRE( full.size() < budgetBytes );
 
     // Compact discovery layer (id/name/group/purpose only) must be meaningfully

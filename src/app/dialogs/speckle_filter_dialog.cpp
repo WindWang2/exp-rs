@@ -2,11 +2,7 @@
 #include "speckle_filter_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
-#include "processing/algorithms/image_enhancement.h"
 #include "processing/algorithms/image_enhancement_streaming.h"
-#include "processing/gdal/gdal_dataset_wrapper.h"
-#include "processing/gdal/gdal_multiband_block_stream.h"
-#include "processing/gdal/gdal_safe_call.h"
 #include "widgets/raster_layer_combo.h"
 
 #include <raster/qgsrasterlayer.h>
@@ -21,8 +17,6 @@
 #include <qgsmessagelog.h>
 #include <qgis.h>
 
-#include <gdal.h>
-#include <cpl_error.h>
 
 SpeckleFilterDialog::SpeckleFilterDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
@@ -137,7 +131,9 @@ void SpeckleFilterDialog::onFilterTypeChanged( int index )
 
 void SpeckleFilterDialog::onRun()
 {
-  QString sourcePath = m_rasterLayer->source();
+  if ( !m_rasterLayer || !m_rasterLayer->isValid() )
+    return;
+
   int kernelSize = 3;
   switch ( m_kernelSizeCombo->currentIndex() )
   {
@@ -145,77 +141,31 @@ void SpeckleFilterDialog::onRun()
     case 1: kernelSize = 5; break;
     case 2: kernelSize = 7; break;
   }
-  int filterIndex = m_filterTypeCombo->currentIndex();
-  float noiseVar = static_cast<float>( m_noiseVarSpin->value() );
-  float damping = static_cast<float>( m_dampingSpin->value() );
+  const int filterIndex = m_filterTypeCombo->currentIndex();
+  const double noiseVar = m_noiseVarSpin->value();
+  const double damping = m_dampingSpin->value();
 
-  runGdalTask( [sourcePath, outputPath = outputPath(), kernelSize, filterIndex,
-                noiseVar, damping]() -> QString {
-    try
-    {
-      GdalDatasetWrapper srcDataset;
-      if ( !srcDataset.open( sourcePath ) )
-        return QString();
-      const int width = srcDataset.width();
-      const int height = srcDataset.height();
-      const int bandCount = srcDataset.bandCount();
+  // Thin client (Platform 3.0): the dialog only serializes parameters; the
+  // execution flows through the unified rs:sar_speckle operator (TaskCenter →
+  // JobEngine → RSOperator → the same streaming kernels the dialog used to
+  // embed). Method names follow the operator's schema vocabulary.
+  QString method;
+  switch ( filterIndex )
+  {
+    case 1: method = QStringLiteral( "frost" ); break;
+    case 2: method = QStringLiteral( "kuan" ); break;
+    case 3: method = QStringLiteral( "gamma_map" ); break;
+    default: method = QStringLiteral( "lee" ); break;
+  }
 
-      // Streaming conversion (#691): the previous body materialized
-      // outputBands[B] + bandData (B+1 full frames) plus a whole-raster
-      // IntegralImage SAT (20 B/px). Now each band is streamed through halo
-      // tiles (halo = kernel radius) and written tile-by-tile; the tile
-      // kernels in image_enhancement_streaming accumulate the window
-      // statistics directly and replicate the lee/frost/kuan/gamma-map
-      // formulas of ImageEnhancement's full-frame kernels.
-      GdalStreamingOutput dst( outputPath, width, height, bandCount, GDT_Float32,
-                               srcDataset.geoTransform(), srcDataset.projection() );
-      if ( !dst.isOpen() )
-        return QString();
+  Json::Value params( Json::objectValue );
+  params["input"] = m_rasterLayer->source().toStdString();
+  params["output"] = outputPath().toStdString();
+  params["method"] = method.toStdString();
+  params["kernelSize"] = kernelSize;
+  params["noiseVariance"] = noiseVar;
+  params["dampingFactor"] = damping;
+  params["band"] = 0; // every band, matching the legacy dialog behavior
 
-      const int halo = kernelSize / 2;
-      for ( int b = 1; b <= bandCount; ++b )
-      {
-        ImageEnhancementStreaming::WindowedTileFn kernel;
-        switch ( filterIndex )
-        {
-          case 0:
-            kernel = [&]( const GdalBlockStream::Tile &tile, const float *buf, float *core ) {
-              ImageEnhancementStreaming::speckleTileLee( tile, buf, core, kernelSize, noiseVar );
-            };
-            break;
-          case 1:
-            kernel = [&]( const GdalBlockStream::Tile &tile, const float *buf, float *core ) {
-              ImageEnhancementStreaming::speckleTileFrost( tile, buf, core, kernelSize, damping );
-            };
-            break;
-          case 2:
-            kernel = [&]( const GdalBlockStream::Tile &tile, const float *buf, float *core ) {
-              ImageEnhancementStreaming::speckleTileKuan( tile, buf, core, kernelSize, noiseVar );
-            };
-            break;
-          case 3:
-            kernel = [&]( const GdalBlockStream::Tile &tile, const float *buf, float *core ) {
-              ImageEnhancementStreaming::speckleTileGammaMap( tile, buf, core, kernelSize, noiseVar );
-            };
-            break;
-        }
-        if ( !ImageEnhancementStreaming::streamBandWindowed( srcDataset, b, dst,
-                                                             ImageEnhancementStreaming::kTileDim,
-                                                             halo, kernel ) )
-        {
-          // Abandon: the destructor/close removes the partial output (#647).
-          dst.abandon();
-          return QString();
-        }
-      }
-      QString error;
-      if ( !dst.closeWithError( &error ) )
-        return QString();
-      return outputPath;
-    }
-    catch ( const std::runtime_error & )
-    {
-      return QString();
-    }
-  } );
+  runOperatorTask( QStringLiteral( "rs:sar_speckle" ), params );
 }

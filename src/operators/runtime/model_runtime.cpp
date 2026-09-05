@@ -2,6 +2,7 @@
 #include "operators/runtime/model_runtime.h"
 
 #include "operators/runtime/opencv_dnn_runtime.h"
+#include "operators/runtime/onnxruntime_provider.h"
 
 #include <QProcessEnvironment>
 
@@ -99,6 +100,11 @@ ModelRuntimeRegistry::ModelRuntimeRegistry()
                         return nullptr;
                       return session;
                     } );
+
+  // Platform 3.0: the optional ONNX Runtime provider registers itself when
+  // compiled in (SICNU_WITH_ONNX_RUNTIME); otherwise this is a no-op stub and
+  // models declaring framework "onnxruntime" surface runtime_unavailable.
+  registerOnnxRuntimeProvider();
 }
 
 ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, std::string *errorMessage )
