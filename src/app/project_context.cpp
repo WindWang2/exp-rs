@@ -69,6 +69,7 @@ ProjectContext::ProjectContext()
   , m_dataManager( m_probe.get() )
   , m_displayManager( &m_dataManager )
 {
+  m_workspaceService.bindDataManager( &m_dataManager );
 }
 
 ProjectContext::ProjectContext( const data::internal::NetworkProbe *probe )
@@ -78,6 +79,7 @@ ProjectContext::ProjectContext( const data::internal::NetworkProbe *probe )
   : m_dataManager( probe )
   , m_displayManager( &m_dataManager )
 {
+  m_workspaceService.bindDataManager( &m_dataManager );
 }
 
 ProjectContext::~ProjectContext() {
@@ -94,6 +96,7 @@ ProjectContext::~ProjectContext() {
               "teardown and was not reaped",
               qPrintable( id.toString() ) );
   }
+  m_workspaceService.closeStore();
 }
 
 data::Result<std::unique_ptr<ProjectContext>>
@@ -141,6 +144,34 @@ data::DataManager &ProjectContext::dataManager() { return m_dataManager; }
 
 const data::DataManager &ProjectContext::dataManager() const {
   return m_dataManager;
+}
+
+sicnu::workspace::WorkspaceService &
+ProjectContext::workspaceService() {
+  return m_workspaceService;
+}
+
+const sicnu::workspace::WorkspaceService &
+ProjectContext::workspaceService() const {
+  return m_workspaceService;
+}
+
+bool ProjectContext::openWorkspaceStore( const QString &projectFile ) {
+  const QString storePath =
+      sicnu::workspace::WorkspaceService::defaultStorePathFor( projectFile );
+  if ( m_workspaceService.isStoreOpen() ) {
+    // Reopening the same store is a no-op; a path change (Save As) closes the
+    // previous store first so governed state never bleeds across projects.
+    return true;
+  }
+  QString error;
+  const bool opened = m_workspaceService.openStore( storePath, &error );
+  if ( opened ) {
+    m_workspaceService.store().setMeta(
+        QStringLiteral( "db_path" ), storePath );
+    m_workspaceService.mirrorAllAssets();
+  }
+  return opened;
 }
 
 display::QgisDisplayManager &ProjectContext::displayManager() {
@@ -331,6 +362,11 @@ data::Result<void> ProjectContext::clearProject(QgsProject &project) {
       m_dataManager.temporalCollections();
   for (const data::TemporalCollectionRecord &record : temporalRecords)
     m_dataManager.removeTemporalCollection(record.id);
+
+  // Governed workspace state is project-scoped: a cleared project starts with
+  // a cleared governance index (catalog rows only — no payload is touched).
+  if ( m_workspaceService.isStoreOpen() )
+    m_workspaceService.store().clearAll();
 
   project.clear();
   return data::Result<void>::success();

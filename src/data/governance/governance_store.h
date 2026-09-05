@@ -55,6 +55,8 @@ struct GovernedAsset
     QString modality;             ///< optical|sar|dem|...
     QString availability;         ///< fresh|stale|unverified
     QStringList tags;             ///< governance tags (entity_kind='asset')
+    qint64 createdAtMs = 0;
+    qint64 updatedAtMs = 0;
 };
 
 class GovernanceStore
@@ -90,6 +92,14 @@ class GovernanceStore
     Result<void> setTags( const QString &entityKind, const QString &entityId, const QStringList &tags );
     Result<void> addTag( const QString &entityKind, const QString &entityId, const QString &tag );
     QStringList tagsOf( const QString &entityKind, const QString &entityId ) const;
+    /// Every tag row (entityKind, entityId, tag) — project save serialization.
+    struct TagRow
+    {
+        QString entityKind;
+        QString entityId;
+        QString tag;
+    };
+    QVector<TagRow> allTags() const;
     /// Bulk tag inside one transaction; returns number of rows touched.
     Result<qint64> bulkTag( const QVector<QString> &entityIds, const QString &entityKind, const QString &tag );
 
@@ -143,6 +153,7 @@ class GovernanceStore
     // --- smart collections --------------------------------------------------
     Result<void> upsertSmartCollection( const SmartCollectionRecord &collection );
     Result<void> removeSmartCollection( const QString &collectionId );
+    std::optional<SmartCollectionRecord> smartCollectionById( const QString &collectionId ) const;
     QVector<SmartCollectionRecord> smartCollections() const;
 
     // --- exports / mappings -------------------------------------------------

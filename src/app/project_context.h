@@ -5,6 +5,7 @@
 #include <QVector>
 
 #include "data/data_manager.h"
+#include "data/governance/workspace_service.h"
 #include "display/network_probe.h"
 #include "display/qgis_display_manager.h"
 
@@ -54,6 +55,19 @@ public:
 
   data::DataManager &dataManager();
   const data::DataManager &dataManager() const;
+
+  /// Workspace Governance 3.0 service (persistent governed state: datasets,
+  /// results, runs, experiments, smart collections, tags, audit, lineage
+  /// index). The service mirrors the DataManager; its store is opened against
+  /// the project file via openWorkspaceStore().
+  sicnu::workspace::WorkspaceService &workspaceService();
+  const sicnu::workspace::WorkspaceService &workspaceService() const;
+
+  /// Opens (creating if needed) the governance store next to @p projectFile.
+  /// Safe to call repeatedly; a store open at a DIFFERENT path is closed and
+  /// reopened. Returns false on failure (service keeps running memory-only —
+  /// governed state then persists through the project DOM only).
+  bool openWorkspaceStore( const QString &projectFile );
 
   display::QgisDisplayManager &displayManager();
   const display::QgisDisplayManager &displayManager() const;
@@ -132,6 +146,9 @@ private:
   /// Secondary view ids in creation order. The main view is tracked separately
   /// (m_mainViewId) because of its QGIS-interop role and removeView refusal.
   QVector<display::DisplayViewId> m_secondaryViews;
+  /// Governance service: declared last so it outlives nothing but is destroyed
+  /// first (its mirroring connections must die with the DataManager in scope).
+  sicnu::workspace::WorkspaceService m_workspaceService;
 };
 
 } // namespace sicnu::app

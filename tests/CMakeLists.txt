@@ -1051,6 +1051,7 @@ sicnu_add_test(test_workspace_catalog TIMEOUT 300)
 
 # Workspace Governance 3.0 — persistent governance store.
 sicnu_add_test(test_governance_store TIMEOUT 300)
+sicnu_add_test(test_workspace_services TIMEOUT 600)
 
 # Phase M fault injection / chaos matrix (fork + kill semantics; serial).
 sicnu_add_test(test_fault_injection TIMEOUT 300 RUN_SERIAL TRUE)
@@ -4562,6 +4563,23 @@ target_include_directories(test_data_project_roundtrip PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_data_project_roundtrip)
+
+# Workspace Governance 3.0 — project format v3 (roundtrip, migration,
+# forward tolerance, atomic-save hygiene).
+qt_add_executable(test_workspace_project_v3
+  test_workspace_project_v3.cpp
+)
+target_link_libraries(test_workspace_project_v3 PRIVATE
+  Catch2::Catch2
+  Qt6::Core  Qt6::Gui  Qt6::Widgets  Qt6::Xml
+  qgis_core  qgis_gui
+  Sicnu::qgis_display
+)
+target_include_directories(test_workspace_project_v3 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_workspace_project_v3)
 
 # Data Manager panel tests — asset catalog projection, separate from layer tree
 add_executable(test_data_manager_panel

@@ -352,6 +352,8 @@ struct GovernanceStore::Impl
             while ( tg.stepRow() )
                 a.tags.append( tg.text( 0 ) );
         }
+        a.createdAtMs = s.i64( 22 );
+        a.updatedAtMs = s.i64( 23 );
         return a;
     }
 
@@ -849,6 +851,20 @@ QStringList GovernanceStore::tagsOf( const QString &entityKind, const QString &e
     s.bind( 2, entityId );
     while ( s.stepRow() )
         out.append( s.text( 0 ) );
+    return out;
+}
+
+QVector<GovernanceStore::TagRow> GovernanceStore::allTags() const
+{
+    QVector<TagRow> out;
+    if ( !m_impl )
+        return out;
+    std::lock_guard<std::mutex> lock( m_impl->mutex );
+    Stmt s( m_impl->db, "SELECT entity_kind, entity_id, tag FROM tags ORDER BY entity_kind, entity_id, tag" );
+    if ( !s )
+        return out;
+    while ( s.stepRow() )
+        out.append( TagRow{ s.text( 0 ), s.text( 1 ), s.text( 2 ) } );
     return out;
 }
 
@@ -1567,6 +1583,21 @@ Result<void> GovernanceStore::removeSmartCollection( const QString &collectionId
         return Result<void>::failure( govDiag( QStringLiteral( "store.unknown_smart" ),
                                                QStringLiteral( "no smart collection %1" ).arg( collectionId ) ) );
     return Result<void>::success();
+}
+
+std::optional<SmartCollectionRecord> GovernanceStore::smartCollectionById( const QString &collectionId ) const
+{
+    if ( !m_impl || collectionId.isEmpty() )
+        return std::nullopt;
+    std::lock_guard<std::mutex> lock( m_impl->mutex );
+    Stmt s( m_impl->db, "SELECT collection_id, name, predicate_json, metadata_json, created_ms, updated_ms"
+                        " FROM smart_collections WHERE collection_id=?" );
+    if ( !s )
+        return std::nullopt;
+    s.bind( 1, collectionId );
+    if ( !s.stepRow() )
+        return std::nullopt;
+    return m_impl->readSmart( s );
 }
 
 QVector<SmartCollectionRecord> GovernanceStore::smartCollections() const

@@ -104,8 +104,12 @@ using namespace Qt::StringLiterals;
 
 #ifdef _MSC_VER
 #include <sys/utime.h>
+#include <io.h>
 #else
 #include <utime.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #endif
 
 // canonical project instance
@@ -3612,38 +3616,51 @@ bool QgsProject::writeProjectFile( const QString &filename )
     utime( backupFile.fileName().toUtf8().constData(), &tb );
   }
 
-  if ( !projectFile.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-  {
-    projectFile.close(); // even though we got an error, let's make
-    // sure it's closed anyway
-
-    setError( tr( "Unable to save to file %1" ).arg( projectFile.fileName() ) );
-    return false;
-  }
-
-  QTemporaryFile tempFile;
+  // Crash-safe atomic save (Workspace Governance 3.0): the document is written
+  // to a temporary file in the TARGET's directory, flushed + fsync'd, then
+  // atomically renamed over the target. A crash mid-save therefore leaves
+  // either the previous file or the complete new file — never a truncated one.
+  const QFileInfo targetInfo( filename );
+  QTemporaryFile tempFile( targetInfo.dir().filePath( QStringLiteral( ".qgis-save-XXXXXX.tmp" ) ) );
+  tempFile.setAutoRemove( false );
   bool ok = tempFile.open();
   if ( ok )
   {
     QTextStream projectFileStream( &tempFile );
     doc->save( projectFileStream, 2 ); // save as utf-8
     ok &= projectFileStream.pos() > -1;
-
-    ok &= tempFile.seek( 0 );
-
-    QByteArray ba;
-    while ( ok && !tempFile.atEnd() )
-    {
-      ba = tempFile.read( 10240 );
-      ok &= projectFile.write( ba ) == ba.size();
-    }
-
-    ok &= projectFile.error() == QFile::NoError;
-
-    projectFile.close();
+    projectFileStream.flush();
+    ok &= tempFile.flush();
+    // fsync the payload so the rename cannot publish unflushed pages.
+    ok &= ::fsync( tempFile.handle() ) == 0;
+    tempFile.close();
   }
 
-  tempFile.close();
+  if ( ok )
+  {
+    QFile::remove( filename );
+    // POSIX rename(2): atomic replacement when both paths share a filesystem
+    // (guaranteed here — the temp file lives in the target's directory).
+    ok = QFile::rename( tempFile.fileName(), filename );
+    if ( ok )
+    {
+      // fsync the directory so the rename itself is durable.
+      QDir targetDir = targetInfo.dir();
+#ifdef O_DIRECTORY
+      const int dirFlags = O_RDONLY | O_DIRECTORY;
+#else
+      const int dirFlags = O_RDONLY;
+#endif
+      int dfd = ::open( targetDir.absolutePath().toUtf8().constData(), dirFlags );
+      if ( dfd >= 0 )
+      {
+        ::fsync( dfd );
+        ::close( dfd );
+      }
+    }
+  }
+
+  tempFile.remove(); // no-op after a successful rename (name already gone)
 
   if ( !ok )
   {

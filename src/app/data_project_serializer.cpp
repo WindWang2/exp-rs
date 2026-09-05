@@ -16,6 +16,8 @@
 
 #include "project_context.h"
 
+#include "data/governance/governance_types.h"
+
 namespace sicnu::app {
 
 namespace {
@@ -116,8 +118,13 @@ DataProjectSerializer::write(QDomDocument &document,
 
   QDomElement extension =
       document.createElement(QString::fromLatin1(extensionName));
+  // Format v3 (Workspace Governance 3.0): the legacy v1 blocks below stay
+  // byte-compatible; the governed workspace state is ADDED as an extra block.
+  // A store-less context keeps writing plain v1 (backward compatible always).
+  const bool writeV3 = context.workspaceService().isStoreOpen();
   extension.setAttribute(QStringLiteral("version"),
-                         QString::fromLatin1(extensionVersion));
+                         writeV3 ? QStringLiteral("3")
+                                 : QString::fromLatin1(extensionVersion));
   QDomElement assetsElement = document.createElement(QStringLiteral("assets"));
 
   for (const data::AssetSnapshot &asset : context.dataManager().assets()) {
@@ -282,6 +289,24 @@ DataProjectSerializer::write(QDomDocument &document,
   }
   extension.appendChild(temporalElement);
 
+  // Governed workspace state (v3): datasets/results/runs/experiments/smart
+  // collections/exports/mappings. One JSON document, one text node — mirrors
+  // the <derivation>/<recipe>/<descriptor> payload pattern above.
+  if (writeV3) {
+    const QJsonObject workspaceDocument =
+        context.workspaceService().toProjectJson();
+    QDomElement workspaceElement =
+        document.createElement(QStringLiteral("workspace"));
+    workspaceElement.setAttribute(QStringLiteral("schemaVersion"),
+                                  QStringLiteral("1"));
+    QDomElement documentElement =
+        document.createElement(QStringLiteral("document"));
+    documentElement.appendChild(document.createTextNode(QString::fromUtf8(
+        QJsonDocument(workspaceDocument).toJson(QJsonDocument::Compact))));
+    workspaceElement.appendChild(documentElement);
+    extension.appendChild(workspaceElement);
+  }
+
   root.appendChild(extension);
   return data::Result<void>::success();
 }
@@ -293,10 +318,18 @@ data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
       QString::fromLatin1(extensionName));
   QVector<data::Diagnostic> diagnostics;
   bool failed = false;
+  bool isV1 = false;
+  bool isV3 = false;
 
   if (!extension.isNull()) {
-    if (extension.attribute(QStringLiteral("version")) !=
-        QString::fromLatin1(extensionVersion)) {
+    // Version dispatch: "1" (legacy) and "3" (Workspace Governance) are
+    // accepted; "3" is a strict superset of "1". Anything else refuses the
+    // custom-data restore (QGIS layers still load) — same failure contract
+    // as before, now with two supported versions.
+    const QString versionText = extension.attribute(QStringLiteral("version"));
+    isV1 = versionText == QString::fromLatin1(extensionVersion);
+    isV3 = versionText == QStringLiteral("3");
+    if (!isV1 && !isV3) {
       return data::Result<void>::failure(projectDiagnostic(
           QStringLiteral("project.unsupported_data_version"),
           QStringLiteral("The SICNU Data extension version is unsupported")));
@@ -607,6 +640,51 @@ data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
     diagnostics += adopted.diagnostics();
     if (!adopted)
       failed = true;
+  }
+
+  // Workspace Governance state: v3 restores the governed entities; a v1 file
+  // migrates in memory (M1) by mirroring the restored assets into the
+  // governance store — the original file is never rewritten during read.
+  // Projects without the SICNU extension element never touch this path.
+  sicnu::workspace::WorkspaceService &workspace = context.workspaceService();
+  if (extension.isNull()) {
+    return failed ? data::Result<void>::failure( std::move( diagnostics ) )
+                  : data::Result<void>::success( std::move( diagnostics ) );
+  }
+  if (!workspace.isStoreOpen()) {
+    diagnostics.append(data::Diagnostic{
+        QStringLiteral("workspace.store_unavailable"),
+        QStringLiteral("governance store is not open; governed state was not "
+                       "restored and the project stays legacy v1 on next save"),
+        data::DiagnosticSeverity::Warning});
+  } else if (isV3) {
+    const QDomElement workspaceElement =
+        extension.firstChildElement(QStringLiteral("workspace"));
+    if (!workspaceElement.isNull()) {
+      const QDomElement documentElement =
+          workspaceElement.firstChildElement(QStringLiteral("document"));
+      const QJsonDocument parsed =
+          QJsonDocument::fromJson(documentElement.text().toUtf8());
+      if (!parsed.object().isEmpty()) {
+        const QVector<data::Diagnostic> restoreDiagnostics =
+            workspace.fromProjectJson(parsed.object());
+        diagnostics += restoreDiagnostics;
+      }
+    }
+    // Assets mirror last so governed state (datasets etc.) sees stable rows.
+    workspace.mirrorAllAssets();
+  } else if (isV1) {
+    const qint64 mirrored = workspace.mirrorAllAssets();
+    diagnostics.append(data::Diagnostic{
+        QStringLiteral("workspace.migrated_from_v1"),
+        QStringLiteral("project migrated to workspace format v3 in memory "
+                       "(%1 assets indexed; the file upgrades on next save)")
+            .arg(mirrored),
+        data::DiagnosticSeverity::Info});
+    workspace.audit(QStringLiteral("migration"),
+                    QStringLiteral("project.migrate_v1_v3"),
+                    QStringLiteral("workspace"), QString(),
+                    QJsonObject{{QStringLiteral("mirroredAssets"), mirrored}});
   }
 
   if (failed)
