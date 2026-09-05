@@ -9,6 +9,7 @@
 #include "raster_inspect_tool.h"
 #include "vector_inspect_tool.h"
 #include "workspace_tools.h"
+#include "governance_tools.h"
 #include "sample_tools.h"
 #include "result_assessment_tool.h"
 #include "capability_tools.h"
@@ -118,6 +119,9 @@ void SpatialToolRegistry::registerBuiltinTools()
   cartography::registerCartographyTools();
   symbology::registerSymbologyTools();
   commands::registerWorkspaceCommandTools();
+  // Workspace Governance 3.0 (Platform 3.0): bounded project/asset/lineage/
+  // result/run surfaces over the WorkspaceService.
+  registerGovernanceTools();
 }
 
 void SpatialToolRegistry::reset()

@@ -1052,6 +1052,8 @@ sicnu_add_test(test_workspace_catalog TIMEOUT 300)
 # Workspace Governance 3.0 — persistent governance store.
 sicnu_add_test(test_governance_store TIMEOUT 300)
 sicnu_add_test(test_workspace_services TIMEOUT 600)
+# Workspace Governance 3.0 — scale contract (SICNU_WS3_STRESS=1 -> 100k).
+sicnu_add_test(test_workspace_stress TIMEOUT 900 RUN_SERIAL TRUE)
 
 # Phase M fault injection / chaos matrix (fork + kill semantics; serial).
 sicnu_add_test(test_fault_injection TIMEOUT 300 RUN_SERIAL TRUE)

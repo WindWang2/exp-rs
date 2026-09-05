@@ -137,6 +137,12 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("symbology:"),   // structured symbology apply/rollback (ADR 0128)
         QStringLiteral("workflow:"),    // static workflow preflight (ADR 0128)
         QStringLiteral("workspace:"),   // workspace command/undo tools (ADR 0128)
+        QStringLiteral("project:"),     // workspace governance summary/search/health (Platform 3.0)
+        QStringLiteral("asset:"),       // governed asset inspect/validate/relink (Platform 3.0)
+        QStringLiteral("collection:"),  // governed datasets + smart collections (Platform 3.0)
+        QStringLiteral("lineage:"),     // transitive lineage queries (Platform 3.0)
+        QStringLiteral("result:"),      // governed result records (Platform 3.0)
+        QStringLiteral("run:"),         // workflow run comparison (Platform 3.0)
     };
     for (const QString &prefix : kAllowed) {
         if (checkId.startsWith(prefix))
@@ -1073,7 +1079,13 @@ void McpServer::handleRequest(const QVariantMap &request)
                      toolName.startsWith(QStringLiteral("cartography:")) ||
                      toolName.startsWith(QStringLiteral("symbology:")) ||
                      toolName.startsWith(QStringLiteral("workflow:")) ||
-                     toolName.startsWith(QStringLiteral("workspace:")))
+                     toolName.startsWith(QStringLiteral("workspace:")) ||
+                     toolName.startsWith(QStringLiteral("project:")) ||
+                     toolName.startsWith(QStringLiteral("asset:")) ||
+                     toolName.startsWith(QStringLiteral("collection:")) ||
+                     toolName.startsWith(QStringLiteral("lineage:")) ||
+                     toolName.startsWith(QStringLiteral("result:")) ||
+                     toolName.startsWith(QStringLiteral("run:")))
             {
                 resultData = handleSpatialToolCall(toolName, arguments);
             }
