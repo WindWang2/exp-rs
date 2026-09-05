@@ -5,6 +5,7 @@
 #include "active_view_host.h"
 #include "log_panel.h"
 #include "panels/data_manager_panel.h"
+#include "panels/workspace_browser_panel.h"
 #include "project_context.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
@@ -18,6 +19,7 @@
 #include "workflow/pipeline_editor_dock.h"
 #include "workflow/workflow_definition.h"
 #include "agent/agent_copilot_dock_widget.h"
+#include "agent/workspace_state.h"
 #include "widgets/spectral_profile_widget.h"
 #include "widgets/guided_workflow_widget.h"
 #include "widgets/histogram_stretch_widget.h"
@@ -359,6 +361,19 @@ void QgisDesktopWindow::setupDataManagerPanel()
     if ( !m_projectContext || m_dataManagerPanel )
         return;
 
+    // Workspace Governance 3.0 browser (Platform 3.0 Phase S): paged,
+    // virtualized view over the governance index — no per-asset widgets.
+    auto *workspaceBrowser = new sicnu::app::WorkspaceBrowserPanel( this );
+    m_workspaceBrowserDock = new QDockWidget( tr( "工作区治理" ), this );
+    m_workspaceBrowserDock->setWidget( workspaceBrowser );
+    m_workspaceBrowserDock->setObjectName( QStringLiteral( "workspaceBrowserDock" ) );
+    addDockWidget( Qt::LeftDockWidgetArea, m_workspaceBrowserDock );
+    if ( m_dataManagerPanel )
+        tabifyDockWidget( m_dataManagerPanel, m_workspaceBrowserDock );
+    else if ( m_layersDock )
+        tabifyDockWidget( m_layersDock, m_workspaceBrowserDock );
+    m_workspaceBrowserDock->hide();
+
     m_dataManagerPanel =
         new sicnu::DataManagerPanel( &m_projectContext->dataManager(), this );
     m_dataManagerPanel->setWindowTitle( tr( "数据管理" ) );
@@ -574,8 +589,14 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     auto *agentCopilotDock = new sicnu::agent::AgentCopilotDockWidget( this );
     addDockWidget( Qt::RightDockWidgetArea, agentCopilotDock );
     if ( m_projectContext )
+    {
         agentCopilotDock->setContext( &m_projectContext->dataManager(),
                                       m_activeViewHost->mapCanvas() );
+        // Workspace Governance 3.0 seam: governance tools read the
+        // project-scoped WorkspaceService through AgentServices.
+        sicnu::agent::AgentServices::instance().setWorkspaceService(
+            &m_projectContext->workspaceService() );
+    }
     agentCopilotDock->hide();
 
     // Committed tool-call outputs are loaded by QgisDisplayManager auto-display

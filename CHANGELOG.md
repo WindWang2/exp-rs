@@ -2,6 +2,19 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-05
+
+### 🗂️ Project Workspace, Data Governance & Reproducibility Platform 3.0 (goal series, ADR 0129)
+- **Stable domain identities**: `sicnu::workspace` strong ids (Workspace/Dataset/Result/Experiment/SmartCollection/Export) with entity revisions and lifecycle vocabularies (legal result transitions draft→validated→approved/superseded/archived); paths are storage locators, never identity (`data/governance/governance_types.h`).
+- **Governance store**: single SQLite WAL index (`<project>.governance.db`, schema v1, forward read-only tolerance) mirroring DataManager assets with enrichment (SHA-256 content fingerprint, sensor, modality, CRS, band roles, availability), plus datasets, results+inputs+artifacts, runs, experiments, cycle-safe recursive-CTE lineage edges, smart collections, exports, path mappings, paged faceted queries and an append-only audit log (`data/governance/governance_store.*`).
+- **Project Format v3**: `<sicnuDataManager version="3">` keeps v1 blocks byte-compatible and adds one `<workspace>` JSON block; v1 files migrate in memory (full mirror, non-destructive read) and upgrade on next save; unknown sections reported then skipped; a downgrade guard re-persists the cached document when the store is unavailable (`app/data_project_serializer.*`).
+- **Atomic crash-safe save**: `QgsProject::writeProjectFile` writes a temp file in the target directory, fsyncs and POSIX-replaces the target — a crash leaves the old or the new file, never a truncated one (`core/project/qgsproject.cpp`).
+- **Workspace services**: `WorkspaceService` facade (mirroring, tagging, datasets, result lifecycle, runs, experiments, smart collections, impact analysis, producer lookup, audit) plus RelinkService (root moves + fingerprint-verified relink), WorkspaceValidator (machine-readable diagnostics with repair suggestions), MetadataPipeline (bounded incremental async verify/enrich with GDAL structure refresh), ImportCenter (bounded incremental scan + durable dedup), ReproBundleExporter (reference-only/metadata-only/portable), SnapshotService (collision-proof project+DB snapshots with pruning), CleanupService (protected/orphan plan, rows-only execution), WorkspaceTransactionStack (undo/redo) (`data/governance/*`).
+- **Agent surfaces (Phase T)**: 11 bounded structured tools — `project:summary/search/health`, `asset:inspect/validate/relink`, `collection:query`, `lineage:upstream/downstream`, `result:inspect`, `run:compare` — every listing paged (≤100), MCP namespaces registered.
+- **CLI (Phase U)**: `project validate|health|search|migrate|relink|lineage|export-manifest|audit` drive the same service layer headlessly (JSON envelope, stable exit codes).
+- **Workspace UI (Phase S)**: 工作区治理 dock with paged `QAbstractTableModel` (fetchMore, 200/page), text/kind/state/sensor facets, governed details pane and bounded health check — no per-asset widgets.
+- **Scale contract**: 100k assets (SICNU_WS3_STRESS=1): ingest 1.0s, paged query 84ms, facet 5–21ms, 1000 indexed point lookups 42ms, 10k bulk tag 14ms, depth-64 lineage <1ms (`benchmarks/workspace-governance-3-100k.json`).
+
 ## [Unreleased] - 2026-09-04
 
 ### 🛰️ Multimodal SpatioTemporal RS Platform 3.0 (goal series)

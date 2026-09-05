@@ -4,6 +4,7 @@
 #include "cli_commands.h"
 
 #include "rs_pipeline_runner.h"
+#include "cli_project_ops.h"
 
 #include "exprs/exit_codes.h"
 #include "exprs/external_process.h"
@@ -730,6 +731,10 @@ int commandProject( QStringList args, const CliIO &io )
 {
     extractGlobalFlags( args );
     const QString sub = args.isEmpty() ? "info" : args.takeFirst();
+    // Workspace Governance 3.0 (Phase U): governance subcommands delegate to
+    // the shared service layer — the CLI never re-parses project state.
+    if ( sub != "info" && !args.isEmpty() )
+        return runProjectGovernanceCommand( sub, args, io );
     if ( sub != "info" || args.isEmpty() )
     {
         return io.finish( false, "project", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),

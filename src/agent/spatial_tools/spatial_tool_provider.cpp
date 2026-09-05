@@ -27,8 +27,13 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
     const bool isSymbology = ( spatial->name().rfind( "symbology:", 0 ) == 0 );
     const bool isWorkflow = ( spatial->name().rfind( "workflow:", 0 ) == 0 );
     const bool isWorkspaceCommand = ( spatial->name().rfind( "workspace:", 0 ) == 0 );
+    // Workspace Governance 3.0 namespaces (Platform 3.0).
+    const bool isGovernance =
+        ( spatial->name().rfind( "project:", 0 ) == 0 || spatial->name().rfind( "asset:", 0 ) == 0
+          || spatial->name().rfind( "lineage:", 0 ) == 0 || spatial->name().rfind( "result:", 0 ) == 0
+          || spatial->name().rfind( "run:", 0 ) == 0 || spatial->name().rfind( "collection:", 0 ) == 0 );
     if ( !isSpatial && !isTemporal && !isCartography && !isSymbology && !isWorkflow &&
-         !isWorkspaceCommand )
+         !isWorkspaceCommand && !isGovernance )
       continue;
 
     AgentTool tool;
@@ -40,6 +45,7 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
                  : isSymbology   ? "symbology"
                  : isWorkflow    ? "workflow"
                  : isWorkspaceCommand ? "workspace"
+                 : isGovernance      ? "governance"
                                       : "spatial";
     tool.description = spatial->description();
     tool.tags = spatial->tags();

@@ -172,6 +172,8 @@ add_executable(sicnu_geo_rs
     widgets/guided_workflow_widget.cpp
     widgets/rs_empty_state_widget.cpp
     panels/data_manager_panel.cpp
+    panels/workspace_browser_panel.cpp
+    panels/workspace_browser_panel.h
     panels/task_center_dock.cpp
     panels/mosaic_panel.cpp
 

@@ -9,6 +9,7 @@ endif()
 add_executable(sicnu_geo_rs_cli
     main_cli.cpp
     cli_commands.cpp
+    cli_project_ops.cpp
     rs_pipeline_runner.cpp
 )
 

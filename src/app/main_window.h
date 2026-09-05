@@ -128,6 +128,10 @@ class CustomIdentifyTool : public QgsMapToolIdentify
     QgsPointXY m_lastClickedPoint;
 };
 
+namespace sicnu::app {
+class WorkspaceBrowserPanel;
+}
+
 class QgisDesktopWindow : public QMainWindow
 {
     Q_OBJECT
@@ -437,6 +441,7 @@ private:
     QgsDockWidget *m_taskPanelDock = nullptr;
 
     sicnu::DataManagerPanel *m_dataManagerPanel = nullptr;
+    QDockWidget *m_workspaceBrowserDock = nullptr;
     TaskPanelHost *m_taskPanel = nullptr;
     WorkflowSessionController *m_sessionController = nullptr;
     sicnu::workflow::gui::PipelineEditorDock *m_pipelineDock = nullptr;

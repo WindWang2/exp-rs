@@ -19,6 +19,24 @@ qt_add_library(sicnu_data STATIC
   derivation_record.h
   execution_fingerprint.cpp
   execution_fingerprint.h
+  governance/governance_store.cpp
+  governance/governance_store.h
+  governance/governance_types.cpp
+  governance/governance_types.h
+  governance/workspace_service.cpp
+  governance/workspace_service.h
+  governance/relink_service.cpp
+  governance/relink_service.h
+  governance/workspace_validator.cpp
+  governance/workspace_validator.h
+  governance/metadata_pipeline.cpp
+  governance/metadata_pipeline.h
+  governance/import_center.cpp
+  governance/import_center.h
+  governance/repro_bundle.cpp
+  governance/repro_bundle.h
+  governance/workspace_lifecycle.cpp
+  governance/workspace_lifecycle.h
   internal/source_provider.h
   internal/source_provider_registry.cpp
   internal/source_provider_registry.h

@@ -22,6 +22,7 @@
 #include <QString>
 
 class QgsMapCanvas;
+namespace sicnu::workspace { class WorkspaceService; }
 
 namespace sicnu::data
 {
@@ -47,9 +48,16 @@ class AgentServices
     void setMapCanvas( QgsMapCanvas *canvas ) { mMapCanvas = canvas; }
     QgsMapCanvas *mapCanvas() const { return mMapCanvas; }
 
+    /// Workspace Governance 3.0 seam (Platform 3.0). The host (GUI shell or
+    /// the --mcp main()) wires the project-scoped WorkspaceService here at
+    /// startup; governance tools tolerate a null pointer.
+    void setWorkspaceService( sicnu::workspace::WorkspaceService *service ) { mWorkspaceService = service; }
+    sicnu::workspace::WorkspaceService *workspaceService() const { return mWorkspaceService; }
+
   private:
     data::DataManager *mDataManager = nullptr;
     QgsMapCanvas *mMapCanvas = nullptr;
+    sicnu::workspace::WorkspaceService *mWorkspaceService = nullptr;
 };
 
 /**

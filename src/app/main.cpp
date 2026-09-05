@@ -29,6 +29,7 @@
 #include <memory>
 
 #include "data/data_manager.h"
+#include "data/governance/workspace_service.h"
 #include "processing/framework/atomic_algorithm_adapter.h"
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -199,6 +200,19 @@ int main(int argc, char *argv[])
         // Bare DataManager gives the MCP tool-call dispatcher its asset
         // authority headlessly (same idiom as RsPipelineRunner, TICKET-23).
         auto mcpDataManager = std::make_unique<sicnu::data::DataManager>();
+        // Workspace Governance 3.0: governance tools read project state through
+        // this service. The store lives under the workspace root (or temp when
+        // unset) so governed state survives MCP sessions per workspace.
+        auto mcpWorkspaceService = std::make_unique<sicnu::workspace::WorkspaceService>();
+        {
+          const QString wsRoot = qEnvironmentVariable( "SICNU_MCP_WORKSPACE" );
+          const QString storeDir = wsRoot.isEmpty()
+              ? QDir::temp().filePath( QStringLiteral( "exp-rs-governance" ) )
+              : QDir( wsRoot ).filePath( QStringLiteral( ".exp-rs-governance" ) );
+          QDir().mkpath( storeDir );
+          mcpWorkspaceService->openStore( QDir( storeDir ).filePath( QStringLiteral( "mcp.governance.db" ) ) );
+          mcpWorkspaceService->bindDataManager( mcpDataManager.get() );
+        }
         // Revision-aware execution cache + provenance identity (#667): the
         // TaskCenter reads the catalog read-only, on this (owner) thread.
         sicnu::TaskCenter::instance().setCatalog( mcpDataManager.get() );
@@ -211,6 +225,7 @@ int main(int argc, char *argv[])
         // AgentServices; workflow-run summaries flow through the provider seam
         // (agent layer must not link the workflow engine).
         sicnu::agent::AgentServices::instance().setDataManager( mcpDataManager.get() );
+        sicnu::agent::AgentServices::instance().setWorkspaceService( mcpWorkspaceService.get() );
         sicnu::agent::setWorkflowRunsProvider( [] {
           Json::Value runs( Json::arrayValue );
           for ( const auto &run : sicnu::workflow::WorkflowRunCoordinator::instance().runs() )
