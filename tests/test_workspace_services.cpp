@@ -283,6 +283,29 @@ TEST_CASE( "ImportCenter scans, dedupes and registers a folder", "[workspace][im
     second.exec();
 }
 
+TEST_CASE( "ImportCenter registers remote locators without network access", "[workspace][import][remote]" )
+{
+    Fixture fx;
+    const QStringList urls = {
+        QStringLiteral( "https://example.org/cog-a.tif" ),
+        QStringLiteral( "https://example.org/cog-b.tif" ),
+        QStringLiteral( "https://example.org/cog-a.tif" ),  // duplicate
+    };
+    const ImportScanReport report = fx.importer.importRemote( urls );
+    REQUIRE( report.registered == 2 );
+    REQUIRE( report.duplicates == 1 );
+    REQUIRE( report.failed == 0 );
+    // Remote rows are governed and searchable immediately.
+    WorkspaceQuery q;
+    q.set = EntitySet::Assets;
+    q.text = QStringLiteral( "example.org" );
+    REQUIRE( fx.service.query( q ).total == 2 );
+    // A repeat pass is a no-op (durable dedup).
+    const ImportScanReport second = fx.importer.importRemote( urls );
+    REQUIRE( second.registered == 0 );
+    REQUIRE( second.duplicates == 3 );
+}
+
 TEST_CASE( "ReproBundleExporter writes manifest with mode-dependent content", "[workspace][bundle]" )
 {
     Fixture fx;

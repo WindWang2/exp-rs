@@ -179,7 +179,7 @@ qint64 WorkspaceService::mirrorAllAssets( bool reconcileGhosts )
         }
         if ( !edgeBatch.isEmpty() )
         {
-            ( void ) m_store.addLineageEdges( edgeBatch );
+            ( void ) m_store.addLineageEdges( edgeBatch, /*replaceOutgoing=*/true );
             edgeBatch.clear();
         }
         for ( auto it = runBatch.constBegin(); it != runBatch.constEnd(); ++it )
@@ -387,7 +387,7 @@ void WorkspaceService::syncDerivationLineage( const AssetSnapshot &snapshot )
     collectDerivationLineage( snapshot, edges );
     if ( edges.isEmpty() )
         return;
-    ( void ) m_store.addLineageEdges( edges );
+    ( void ) m_store.addLineageEdges( edges, /*replaceOutgoing=*/true );
 }
 
 void WorkspaceService::syncRunAnchors( const sicnu::data::DerivationRecord &record )
@@ -915,6 +915,9 @@ QVector<Diagnostic> WorkspaceService::fromProjectJson( const QJsonObject &root )
     QVector<Diagnostic> diagnostics;
     // The project document is authoritative on read: stale local entity rows
     // (deleted elsewhere, DB restored from backup) must not resurrect.
+    // Document-owned tables are cleared; the derived asset mirror and lineage
+    // edges are kept (they are rebuilt from the DataManager, not the doc).
+    ( void ) m_store.clearDocumentEntities();
     m_cachedProjectJson = root;
 
     // Review P2-12: unknown top-level sections are reported, then skipped —

@@ -88,6 +88,51 @@ QJsonObject ImportScanReport::toJson() const
                         { QLatin1String( "truncated" ), truncated } };
 }
 
+ImportScanReport ImportCenter::importRemote( const QStringList &urls )
+{
+    ImportScanReport report;
+    if ( !m_dataManager )
+        return report;
+    for ( const QString &rawUrl : urls )
+    {
+        const QString url = rawUrl.trimmed();
+        if ( url.isEmpty() )
+            continue;
+        // The GDAL provider normalizes http(s) to /vsicurl/ at resolve time,
+        // so the durable alias carries the NORMALIZED spelling — check both
+        // plus the runtime authority before treating a URL as new.
+        const QString normalized = url.startsWith( QLatin1String( "http" ) )
+                                       ? QStringLiteral( "/vsicurl/" ) + url
+                                       : url;
+        const bool known = m_service.store().assetByPath( url ).has_value()
+                           || m_service.store().assetByPath( normalized ).has_value()
+                           || m_dataManager->findByPath( url ).has_value();
+        if ( known )
+        {
+            ++report.duplicates;
+            continue;
+        }
+        sicnu::data::RegisterRequest request;
+        request.source.providerKey = QStringLiteral( "gdal" );
+        request.source.canonicalSource = url;
+        const sicnu::data::RegisterResult result = m_dataManager->registerSource( request );
+        if ( result.assetId.isNull() )
+            ++report.failed;
+        else if ( result.reusedExisting )
+            ++report.duplicates;  // runtime dedup caught what the index missed
+        else
+        {
+            ++report.registered;
+            ++report.discovered;
+        }
+    }
+    m_service.audit( QStringLiteral( "import" ), QStringLiteral( "import.remote" ),
+                     QStringLiteral( "workspace" ), QString(),
+                     QJsonObject{ { QLatin1String( "registered" ), report.registered },
+                                  { QLatin1String( "duplicates" ), report.duplicates } } );
+    return report;
+}
+
 bool ImportCenter::startScan( const ImportScanOptions &options )
 {
     bool expected = false;

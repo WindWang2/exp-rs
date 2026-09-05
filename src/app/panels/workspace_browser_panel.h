@@ -7,6 +7,7 @@
 #pragma once
 
 #include "data/governance/governance_types.h"
+#include "data/governance/import_center.h"
 
 #include <QAbstractTableModel>
 #include <QWidget>
@@ -75,6 +76,8 @@ class WorkspaceBrowserPanel : public QWidget
     void refreshSensorFacet();
     void runHealthCheck();
     void showDetails( const QModelIndex &index );
+    void scanFolder();
+    void importRemoteUrls();
 
   private:
     sicnu::workspace::WorkspaceService *m_service = nullptr;
@@ -89,6 +92,9 @@ class WorkspaceBrowserPanel : public QWidget
     QLabel *m_status = nullptr;
     QPushButton *m_healthButton = nullptr;
     QTimer *m_refreshCoalescer = nullptr;
+    QPushButton *m_scanButton = nullptr;
+    QPushButton *m_remoteButton = nullptr;
+    sicnu::workspace::ImportCenter *m_importCenter = nullptr;
 };
 
 } // namespace sicnu::app

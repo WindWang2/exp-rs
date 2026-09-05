@@ -15,6 +15,7 @@
 #include "app/project_context.h"
 #include "data/governance/governance_types.h"
 #include "data/governance/relink_service.h"
+#include "data/governance/import_center.h"
 #include "data/governance/repro_bundle.h"
 #include "data/governance/workspace_service.h"
 #include "data/governance/workspace_validator.h"
@@ -98,7 +99,7 @@ Json::Value qJsonObjectToJson( const QJsonObject &object )
 int sicnu::cli::runProjectGovernanceCommand( const QString &sub, QStringList args, const CliIO &io )
 {
     const QString usage = QStringLiteral(
-        "usage: project <info|validate|health|search|migrate|relink|lineage|export-manifest|audit> <file.qgz|.qgs> [options]" );
+        "usage: project <info|validate|health|search|migrate|relink|lineage|import|export-manifest|audit> <file.qgz|.qgs> [options]" );
 
     if ( sub == QLatin1String( "info" ) )
         return -1;  // handled by the caller (legacy path)
@@ -290,6 +291,35 @@ int sicnu::cli::runProjectGovernanceCommand( const QString &sub, QStringList arg
         Json::Value data = qJsonObjectToJson( report.toJson() );
         return io.finish( report.ok, "project.export-manifest", data,
                           report.ok ? 0 : exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError ) );
+    }
+
+    if ( sub == QLatin1String( "import" ) )
+    {
+        // Remote import (Phase R): direct COG/http(s) URLs or pre-resolved
+        // STAC asset hrefs, one per --remote flag. STAC item -> href
+        // resolution stays host-side (StacClient), keeping src/data
+        // network-free.
+        QStringList remoteUrls;
+        for ( const QString &arg : args )
+        {
+            if ( arg.startsWith( QStringLiteral( "--remote=" ) ) )
+            {
+                for ( const QString &u : arg.mid( 9 ).split( QLatin1Char( ',' ) ) )
+                {
+                    if ( !u.trimmed().isEmpty() )
+                        remoteUrls.append( u.trimmed() );
+                }
+            }
+        }
+        if ( remoteUrls.isEmpty() )
+            return io.finish( false, "project.import", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                              {}, "pass one or more --remote=<url> flags" );
+        sicnu::workspace::ImportCenter importer( workspace );
+        importer.bindDataManager( &loaded.context->dataManager() );
+        const sicnu::workspace::ImportScanReport report = importer.importRemote( remoteUrls );
+        Json::Value data = qJsonObjectToJson( report.toJson() );
+        return io.finish( report.failed == 0, "project.import", data,
+                          report.failed == 0 ? 0 : exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError ) );
     }
 
     if ( sub == QLatin1String( "audit" ) )

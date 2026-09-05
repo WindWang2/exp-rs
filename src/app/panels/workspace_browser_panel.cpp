@@ -5,6 +5,8 @@
 #include "data/governance/workspace_validator.h"
 
 #include <QComboBox>
+#include <QFileDialog>
+#include <QInputDialog>
 #include <QDateTime>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -261,6 +263,10 @@ WorkspaceBrowserPanel::WorkspaceBrowserPanel( QWidget *parent )
     footer->addWidget( m_status, 1 );
     m_healthButton = new QPushButton( tr( "Health check" ), this );
     footer->addWidget( m_healthButton );
+    m_scanButton = new QPushButton( tr( "扫描文件夹…" ), this );
+    footer->addWidget( m_scanButton );
+    m_remoteButton = new QPushButton( tr( "导入远程 URL…" ), this );
+    footer->addWidget( m_remoteButton );
     layout->addLayout( footer );
 
     // Review P2-17: coalesce store-refresh churn during bulk import instead
@@ -276,6 +282,8 @@ WorkspaceBrowserPanel::WorkspaceBrowserPanel( QWidget *parent )
     connect( m_state, &QComboBox::currentIndexChanged, this, &WorkspaceBrowserPanel::refresh );
     connect( m_sensor, &QComboBox::currentIndexChanged, this, &WorkspaceBrowserPanel::refresh );
     connect( m_healthButton, &QPushButton::clicked, this, &WorkspaceBrowserPanel::runHealthCheck );
+    connect( m_scanButton, &QPushButton::clicked, this, &WorkspaceBrowserPanel::scanFolder );
+    connect( m_remoteButton, &QPushButton::clicked, this, &WorkspaceBrowserPanel::importRemoteUrls );
     connect( m_table->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
              &WorkspaceBrowserPanel::showDetails );
 }
@@ -285,6 +293,19 @@ void WorkspaceBrowserPanel::setWorkspaceService( WorkspaceService *service )
     if ( m_service )
         disconnect( m_service, &WorkspaceService::entityChanged, this, &WorkspaceBrowserPanel::refresh );
     m_service = service;
+    if ( m_importCenter )
+    {
+        disconnect( m_importCenter, &ImportCenter::finished, this, &WorkspaceBrowserPanel::refresh );
+        m_importCenter = nullptr;
+    }
+    if ( service )
+    {
+        // Phase R: the panel owns the import entry point (folder scan +
+        // remote URLs); registration lands on this thread via the center.
+        m_importCenter = new ImportCenter( *service, this );
+        m_importCenter->bindDataManager( service->dataManager() );
+        connect( m_importCenter, &ImportCenter::finished, this, &WorkspaceBrowserPanel::refresh );
+    }
     m_model->setWorkspaceService( service );
     if ( service )
     {
@@ -389,6 +410,51 @@ void WorkspaceBrowserPanel::showDetails( const QModelIndex &index )
     const QVector<QVariantMap> downstream = m_service->lineageDownstream( id, 5 );
     lines << tr( "Downstream (≤5): %1" ).arg( downstream.size() );
     m_details->setPlainText( lines.join( QLatin1Char( '\n' ) ) );
+}
+
+void WorkspaceBrowserPanel::scanFolder()
+{
+    if ( !m_service || !m_service->dataManager() || !m_importCenter )
+        return;
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, tr( "选择要导入的文件夹" ) );
+    if ( dir.isEmpty() )
+        return;
+    sicnu::workspace::ImportScanOptions options;
+    options.root = dir;
+    options.recursive = true;
+    if ( !m_importCenter->startScan( options ) )
+        m_details->setPlainText( tr( "已有导入任务在运行中。" ) );
+    else
+        m_details->setPlainText( tr( "正在后台扫描 %1 …" ).arg( dir ) );
+}
+
+void WorkspaceBrowserPanel::importRemoteUrls()
+{
+    if ( !m_service || !m_service->dataManager() || !m_importCenter )
+        return;
+    const QString text = QInputDialog::getMultiLineText(
+        this, tr( "导入远程数据" ),
+        tr( "每行一个远程 COG/URL（例如 STAC 资产 href）：" ) );
+    if ( text.isEmpty() )
+        return;
+    QStringList urls;
+    for ( const QString &line : text.split( QLatin1Char( '\n' ) ) )
+    {
+        const QString trimmed = line.trimmed();
+        if ( !trimmed.isEmpty() )
+            urls.append( trimmed );
+    }
+    if ( urls.isEmpty() )
+        return;
+    // Remote registration defers network opens off this thread (provider
+    // contract), so a synchronous pass is safe here.
+    const sicnu::workspace::ImportScanReport report = m_importCenter->importRemote( urls );
+    m_details->setPlainText( tr( "远程导入完成：注册 %1，重复 %2，失败 %3" )
+                                 .arg( report.registered )
+                                 .arg( report.duplicates )
+                                 .arg( report.failed ) );
+    refresh();
 }
 
 } // namespace sicnu::app

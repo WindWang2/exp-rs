@@ -61,6 +61,11 @@ class ImportCenter : public QObject
 
     bool startScan( const ImportScanOptions &options );
     bool startScan() { return startScan( ImportScanOptions() ); }
+    /// Registers remote locators (COG/http(s) URLs, pre-resolved STAC asset
+    /// hrefs) as governed remote assets. Registration is cheap by design —
+    /// the GDAL provider defers network opens off the calling thread — so
+    /// this runs synchronously on the owning thread.
+    ImportScanReport importRemote( const QStringList &urls );
     void cancel();
     bool isRunning() const { return m_running.load(); }
 

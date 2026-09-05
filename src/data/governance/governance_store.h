@@ -18,6 +18,7 @@
 #include "governance_types.h"
 
 #include <QPair>
+#include <QSet>
 #include <QString>
 #include <QVector>
 
@@ -151,7 +152,9 @@ class GovernanceStore
         QString stepId;
         QString fingerprint;
     };
-    Result<void> addLineageEdges( const QVector<LineageEdge> &edges );  // one transaction
+    /// one transaction; @p replaceOutgoing first drops the named outputs'
+    /// existing outgoing edges (re-derivation reconciliation).
+    Result<void> addLineageEdges( const QVector<LineageEdge> &edges, bool replaceOutgoing = false );
     /// Transitive upstream (inputs) of @p assetId, breadth-ordered, cycle-safe.
     QVector<QVariantMap> lineageUpstream( const QString &assetId, int maxDepth = 25 ) const;
     /// Transitive downstream (outputs depending on @p assetId).
@@ -198,6 +201,15 @@ class GovernanceStore
     GovernanceDiagnostic integrityCheck() const;
     /// Wipes all rows (schema retained) — used by rebuild-from-DOM recovery.
     Result<void> clearAll();
+    /// Clears the DOCUMENT-owned governed entities (datasets, results, runs,
+    /// experiments, smart collections, exports, mappings, tags) while keeping
+    /// the derived asset mirror and lineage edges — the authoritative restore
+    /// path for v3 reads (review P2-10: stale local rows must not resurrect
+    /// entities deleted elsewhere).
+    Result<void> clearDocumentEntities();
+    /// Removes existing OUTGOING lineage edges of one output (re-derivation
+    /// reconciliation, review P2-21: superseded edges must not accumulate).
+    Result<void> clearOutgoingLineage( const QString &outputAssetId );
 
   private:
     struct Impl;

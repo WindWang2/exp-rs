@@ -585,6 +585,7 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
     if ( m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.read_only" ), QStringLiteral( "store opened read-only (newer schema)" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    QVector<QPair<QString, QString>> collisions;
     m_impl->exec( "BEGIN IMMEDIATE" );
     {
         Stmt up( m_impl->db,
@@ -646,6 +647,15 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
             delAlias.reset();
             delAlias.bind( 1, asset.assetId );
             delAlias.step();
+            // Alias ownership is single-writer; a collision (two assets, one
+            // canonical source) is surfaced as a diagnostic instead of a
+            // silent last-writer-wins (review P2-4).
+            {
+                Stmt owner( m_impl->db, "SELECT asset_id FROM aliases WHERE path=?" );
+                owner.bind( 1, asset.canonicalSource );
+                if ( owner.stepRow() && owner.text( 0 ) != asset.assetId )
+                    collisions.append( qMakePair( asset.canonicalSource, owner.text( 0 ) ) );
+            }
             insAlias.reset();
             insAlias.bind( 1, asset.canonicalSource );
             insAlias.bind( 2, asset.assetId );
@@ -662,7 +672,14 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
         }
     }
     m_impl->exec( "COMMIT" );
-    return Result<void>::success();
+    QVector<Diagnostic> diagnostics;
+    for ( const QPair<QString, QString> &collision : collisions )
+        diagnostics.append( govDiag(
+            QStringLiteral( "store.alias_collision" ),
+            QStringLiteral( "%1 is already owned by asset %2; the alias now points to the new row" )
+                .arg( collision.first, collision.second ),
+            DiagnosticSeverity::Warning ) );
+    return Result<void>::success( diagnostics );
 }
 
 Result<void> GovernanceStore::removeAsset( const QString &assetId )
@@ -1494,13 +1511,29 @@ QVector<ExperimentRecord> GovernanceStore::experiments( qint64 limit ) const
 
 // --- lineage ----------------------------------------------------------------
 
-Result<void> GovernanceStore::addLineageEdges( const QVector<LineageEdge> &edges )
+Result<void> GovernanceStore::addLineageEdges( const QVector<LineageEdge> &edges, bool replaceOutgoing )
 {
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
     m_impl->exec( "BEGIN IMMEDIATE" );
     {
+        if ( replaceOutgoing )
+        {
+            // Re-derivation reconciliation: an output's provenance is exactly
+            // its current record, so superseded outgoing edges are removed in
+            // the same transaction instead of accumulating (review P2-21).
+            QSet<QString> outputs;
+            for ( const LineageEdge &edge : edges )
+                outputs.insert( edge.outputAssetId );
+            Stmt del( m_impl->db, "DELETE FROM lineage_edges WHERE output_asset_id=?" );
+            for ( const QString &output : outputs )
+            {
+                del.reset();
+                del.bind( 1, output );
+                del.step();
+            }
+        }
         Stmt ins( m_impl->db,
             "INSERT OR IGNORE INTO lineage_edges(output_asset_id, input_asset_id, input_revision,"
             " operator_id, run_id, step_id, fingerprint) VALUES(?,?,?,?,?,?,?)" );
@@ -2118,6 +2151,38 @@ GovernanceDiagnostic GovernanceStore::integrityCheck() const
         return d;
     }
     return d;
+}
+
+Result<void> GovernanceStore::clearDocumentEntities()
+{
+    if ( !m_impl || m_impl->readOnly )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
+    std::lock_guard<std::mutex> lock( m_impl->mutex );
+    const char *tables[] = {
+        "datasets", "dataset_members", "results", "result_inputs", "result_artifacts",
+        "runs", "run_outputs", "experiments", "experiment_variants", "experiment_runs",
+        "smart_collections", "exports", "path_mappings", "tags",
+    };
+    m_impl->exec( "BEGIN IMMEDIATE" );
+    for ( const char *table : tables )
+        m_impl->exec( ( QStringLiteral( "DELETE FROM " ) + table ).toUtf8().constData() );
+    m_impl->exec( "COMMIT" );
+    return Result<void>::success();
+}
+
+Result<void> GovernanceStore::clearOutgoingLineage( const QString &outputAssetId )
+{
+    if ( !m_impl || m_impl->readOnly )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
+    std::lock_guard<std::mutex> lock( m_impl->mutex );
+    Stmt s( m_impl->db, "DELETE FROM lineage_edges WHERE output_asset_id=?" );
+    if ( !s )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ), QStringLiteral( "lineage clear prepare failed" ) ) );
+    s.bind( 1, outputAssetId );
+    m_impl->exec( "BEGIN IMMEDIATE" );
+    s.step();
+    m_impl->exec( "COMMIT" );
+    return Result<void>::success();
 }
 
 Result<void> GovernanceStore::clearAll()

@@ -16,6 +16,7 @@
  *                     [--depth=N]
  *   project export-manifest <file> --out=DIR [--mode=reference_only|
  *                     metadata_only|portable]   (reproducibility bundle)
+ *   project import    <file> --remote=URL[,URL…]   (COG/STAC hrefs)
  *   project audit     <file> [--limit=N]
  *
  * All subcommands drive the SAME service layer as the GUI and the agent
