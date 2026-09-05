@@ -563,13 +563,16 @@ void QgsRuntimeProfiler::setupConnections()
 {
   mInitialized = true;
 
-  Q_ASSERT( sMainProfiler );
+  // A worker thread can create its thread-local profiler before the main
+  // thread ever touches profiling, so sMainProfiler may legitimately be null
+  // here (threadLocalInstance only assigns it from the app thread). Nothing
+  // to cross-connect in that case; the main profiler will wire itself up
+  // later and this profiler's signals simply have no late subscriber.
+  if ( !sMainProfiler || sMainProfiler == this )
+    return;
 
-  if ( sMainProfiler != this )
-  {
-    connect( this, &QgsRuntimeProfiler::started, sMainProfiler, &QgsRuntimeProfiler::otherProfilerStarted );
-    connect( this, &QgsRuntimeProfiler::ended, sMainProfiler, &QgsRuntimeProfiler::otherProfilerEnded );
-  }
+  connect( this, &QgsRuntimeProfiler::started, sMainProfiler, &QgsRuntimeProfiler::otherProfilerStarted );
+  connect( this, &QgsRuntimeProfiler::ended, sMainProfiler, &QgsRuntimeProfiler::otherProfilerEnded );
 }
 
 QgsRuntimeProfilerNode *QgsRuntimeProfiler::pathToNode( const QString &group, const QString &path ) const

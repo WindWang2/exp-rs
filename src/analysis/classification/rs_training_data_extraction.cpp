@@ -410,14 +410,26 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
     const char *rasWkt = GDALGetProjectionRef( rasDs );
     if ( rasWkt && std::strlen( rasWkt ) > 0 && vecSrs )
     {
+      // Pin both CRSs to traditional GIS axis order (x/lon, y/lat): GDAL 3+
+      // defaults to authority-compliant order, so an EPSG:4326 raster would
+      // axis-swap transformed coordinates behind the GeoTransform's back.
+      // A GPKG layer written without an SRS reports the undefined geographic
+      // SRS (srs_id 0); PROJ still "transforms" between it and EPSG:4326 and
+      // silently moves training polygons outside the raster footprint, which
+      // extracted zero training pixels. Mirrors rs_roi_labeler.
+      OGRSpatialReferenceH vecSrsClone = OSRClone( vecSrs );
       OGRSpatialReferenceH rasSrs = OSRNewSpatialReference( nullptr );
-      if ( OSRImportFromWkt( rasSrs, const_cast<char **>( &rasWkt ) ) == OGRERR_NONE )
+      if ( vecSrsClone && rasSrs
+           && OSRImportFromWkt( rasSrs, const_cast<char **>( &rasWkt ) ) == OGRERR_NONE )
       {
-        if ( !OSRIsSame( vecSrs, rasSrs ) )
+        OSRSetAxisMappingStrategy( vecSrsClone, OAMS_TRADITIONAL_GIS_ORDER );
+        OSRSetAxisMappingStrategy( rasSrs, OAMS_TRADITIONAL_GIS_ORDER );
+        if ( !OSRIsSame( vecSrsClone, rasSrs ) )
         {
-          coordTrans = OCTNewCoordinateTransformation( vecSrs, rasSrs );
+          coordTrans = OCTNewCoordinateTransformation( vecSrsClone, rasSrs );
         }
       }
+      OSRDestroySpatialReference( vecSrsClone );
       OSRDestroySpatialReference( rasSrs );
     }
     GDALClose( rasDs );

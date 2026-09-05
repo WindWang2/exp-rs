@@ -1286,8 +1286,12 @@ TEST_CASE( "Re-registering a source whose structure drifted advances the "
   CHECK( changeEvents == 1 );
 
   // The refreshed snapshot carries the new structure.
-  const auto structure =
-    std::get_if<RasterStructure>( &manager->asset( first.assetId )->structure() );
+  // asset() returns the snapshot by value: bind it to a local, or the
+  // structure pointer would reference the dead temporary (ASan
+  // stack-use-after-scope).
+  const auto snapshot = manager->asset( first.assetId );
+  REQUIRE( snapshot.has_value() );
+  const auto structure = std::get_if<RasterStructure>( &snapshot->structure() );
   REQUIRE( structure != nullptr );
   CHECK( structure->width == 200 );
 }

@@ -220,12 +220,14 @@ TEST_CASE( "temporal_summary: exact median with include_median", "[temporal][ope
     Fixture fx;
     // pixel 0 series: 10, 20, -9999 -> valid {10,20} -> median 15
     // pixel 1 series: -9999, 20, 30 -> valid {20,30} -> median 25
+    // writeBand reads width*height floats: declare a 2x1 raster or the 2
+    // floats per scene overflow the 2x2 default (ASan heap-buffer-overflow).
     REQUIRE( writeTestScene( makeTestScene( fx.filePath( "a.tif" ), QStringLiteral( "2025-01-01" ),
-                                            { 10, -9999 } ) ) );
+                                            { 10, -9999 }, 2, 1 ) ) );
     REQUIRE( writeTestScene( makeTestScene( fx.filePath( "b.tif" ), QStringLiteral( "2025-01-02" ),
-                                            { 20, 20 } ) ) );
+                                            { 20, 20 }, 2, 1 ) ) );
     REQUIRE( writeTestScene( makeTestScene( fx.filePath( "c.tif" ), QStringLiteral( "2025-01-03" ),
-                                            { -9999, 30 } ) ) );
+                                            { -9999, 30 }, 2, 1 ) ) );
     Json::Value params( Json::objectValue );
     Json::Value scenes( Json::arrayValue );
     for ( const char *p : { "a.tif", "b.tif", "c.tif" } )
@@ -371,8 +373,9 @@ TEST_CASE( "temporal_composite: period grouping produces per-period files", "[te
 {
     ensureApp();
     Fixture fx;
-    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "m1.tif" ), QStringLiteral( "2025-01-15" ), { 1.0f } ) ) );
-    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "m2.tif" ), QStringLiteral( "2025-02-10" ), { 2.0f } ) ) );
+    // One pixel per scene: declare 1x1 or writeBand overflows the buffer.
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "m1.tif" ), QStringLiteral( "2025-01-15" ), { 1.0f }, 1, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "m2.tif" ), QStringLiteral( "2025-02-10" ), { 2.0f }, 1, 1 ) ) );
     Json::Value params( Json::objectValue );
     Json::Value scenes( Json::arrayValue );
     scenes.append( fx.filePath( "m1.tif" ).toStdString() );

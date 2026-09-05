@@ -71,7 +71,10 @@ jobs:
         # Ninja + ccache: faster scheduling and incremental rebuilds across
         # pushes/PRs (each later PR in the integration sequence only recompiles
         # its delta).
-        run: cmake -B build -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        # Python_EXECUTABLE: FindPython picks the hostedtoolcache python from
+        # PATH, which has no numpy — the python_bindings_smoke test imports
+        # numpy, so pin the system interpreter (python3-numpy via apt).
+        run: cmake -B build -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DPython_EXECUTABLE=/usr/bin/python3 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       # #706: the repo's targeted .clang-tidy (12 checks for exactly the
       # #610-#658 bug classes) was dead config — nothing ever ran it. Lint only
@@ -143,7 +146,9 @@ jobs:
           modules: 'qt5compat qtmultimedia'
 
       - name: Configure CMake with Sanitizers
-        run: cmake -B build-sanitizer -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        # Python_EXECUTABLE: see the Tier 1 configure note (numpy lives on the
+        # system python, not the hostedtoolcache one FindPython picks up).
+        run: cmake -B build-sanitizer -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DPython_EXECUTABLE=/usr/bin/python3 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build Sanitizer Test Targets
         run: cmake --build build-sanitizer --parallel $(nproc)

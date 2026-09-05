@@ -1231,10 +1231,32 @@ TEST_CASE( "ResourceMonitor default sampler reports current (not peak) RSS",
             break;
         std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
     }
-    // Current-RSS contract: RSS falls once the block is freed. Peak RSS
-    // (ru_maxrss) is monotonic and could never satisfy this.
     INFO( "baseline=" << baseline << " highWater=" << highWater << " after=" << after );
-    REQUIRE( after < highWater );
+
+    // Current-RSS contract: residency falls once the block is freed, so a
+    // second identical alloc/touch/free cycle must NOT ratchet the reported
+    // value up by another block. A peak-RSS (ru_maxrss) sampler is monotonic
+    // and would grow by ~BLOCK each cycle. The direct "after < highWater"
+    // check is informational only: ASan's allocator keeps freed pages
+    // quarantined longer and concurrent activity can push a CURRENT reading
+    // a few MB above any earlier sample, which made the strict comparison
+    // flaky under sanitizers.
+    constexpr unsigned int BLOCK_MB = static_cast<unsigned int>( BLOCK / ( 1024u * 1024u ) );
+    std::vector<unsigned char> block2( BLOCK );
+    for ( size_t i = 0; i < BLOCK; i += 4096 )
+        sink = block2[i];
+    block2.clear();
+    block2.shrink_to_fit();
+    unsigned int after2 = after;
+    for ( int attempt = 0; attempt < 60; ++attempt )
+    {
+        after2 = monitor.currentRssMb();
+        if ( after2 < after + BLOCK_MB / 2 )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+    }
+    INFO( "after2=" << after2 );
+    REQUIRE( after2 < after + BLOCK_MB / 2 );
 }
 
 TEST_CASE("TaskCenter - Progress and markRunning never regress terminal states", "[processing][task_center][terminal]") {

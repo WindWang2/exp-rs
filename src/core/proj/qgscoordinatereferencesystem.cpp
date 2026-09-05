@@ -3325,59 +3325,82 @@ void QgsCoordinateReferenceSystem::clearRecentCoordinateReferenceSystems()
 
 void QgsCoordinateReferenceSystem::invalidateCache( bool disableCache )
 {
-  sSrIdCacheLock()->lockForWrite();
-  if ( !sDisableSrIdCache )
+  // The cache guards are Q_GLOBAL_STATICs: their accessors return nullptr
+  // once destroyed. A teardown path (e.g. an atexit handler calling
+  // exitQgis() after the guards were already torn down in LIFO order) then
+  // dereferences null — and a destroyed cache has nothing left to
+  // invalidate anyway, so each already-destroyed block is skipped.
+  if ( QReadWriteLock *sSrIdCacheLockPtr = sSrIdCacheLock() )
   {
-    if ( disableCache )
-      sDisableSrIdCache = true;
-    sSrIdCache()->clear();
+    sSrIdCacheLockPtr->lockForWrite();
+    if ( !sDisableSrIdCache )
+    {
+      if ( disableCache )
+        sDisableSrIdCache = true;
+      sSrIdCache()->clear();
+    }
+    sSrIdCacheLockPtr->unlock();
   }
-  sSrIdCacheLock()->unlock();
 
-  sOgcLock()->lockForWrite();
-  if ( !sDisableOgcCache )
+  if ( QReadWriteLock *sOgcLockPtr = sOgcLock() )
   {
-    if ( disableCache )
-      sDisableOgcCache = true;
-    sOgcCache()->clear();
+    sOgcLockPtr->lockForWrite();
+    if ( !sDisableOgcCache )
+    {
+      if ( disableCache )
+        sDisableOgcCache = true;
+      sOgcCache()->clear();
+    }
+    sOgcLockPtr->unlock();
   }
-  sOgcLock()->unlock();
 
-  sProj4CacheLock()->lockForWrite();
-  if ( !sDisableProjCache )
+  if ( QReadWriteLock *sProj4CacheLockPtr = sProj4CacheLock() )
   {
-    if ( disableCache )
-      sDisableProjCache = true;
-    sProj4Cache()->clear();
+    sProj4CacheLockPtr->lockForWrite();
+    if ( !sDisableProjCache )
+    {
+      if ( disableCache )
+        sDisableProjCache = true;
+      sProj4Cache()->clear();
+    }
+    sProj4CacheLockPtr->unlock();
   }
-  sProj4CacheLock()->unlock();
 
-  sCRSWktLock()->lockForWrite();
-  if ( !sDisableWktCache )
+  if ( QReadWriteLock *sCRSWktLockPtr = sCRSWktLock() )
   {
-    if ( disableCache )
-      sDisableWktCache = true;
-    sWktCache()->clear();
+    sCRSWktLockPtr->lockForWrite();
+    if ( !sDisableWktCache )
+    {
+      if ( disableCache )
+        sDisableWktCache = true;
+      sWktCache()->clear();
+    }
+    sCRSWktLockPtr->unlock();
   }
-  sCRSWktLock()->unlock();
 
-  sCRSSrsIdLock()->lockForWrite();
-  if ( !sDisableSrsIdCache )
+  if ( QReadWriteLock *sCRSSrsIdLockPtr = sCRSSrsIdLock() )
   {
-    if ( disableCache )
-      sDisableSrsIdCache = true;
-    sSrsIdCache()->clear();
+    sCRSSrsIdLockPtr->lockForWrite();
+    if ( !sDisableSrsIdCache )
+    {
+      if ( disableCache )
+        sDisableSrsIdCache = true;
+      sSrsIdCache()->clear();
+    }
+    sCRSSrsIdLockPtr->unlock();
   }
-  sCRSSrsIdLock()->unlock();
 
-  sCrsStringLock()->lockForWrite();
-  if ( !sDisableStringCache )
+  if ( QReadWriteLock *sCrsStringLockPtr = sCrsStringLock() )
   {
-    if ( disableCache )
-      sDisableStringCache = true;
-    sStringCache()->clear();
+    sCrsStringLockPtr->lockForWrite();
+    if ( !sDisableStringCache )
+    {
+      if ( disableCache )
+        sDisableStringCache = true;
+      sStringCache()->clear();
+    }
+    sCrsStringLockPtr->unlock();
   }
-  sCrsStringLock()->unlock();
 }
 
 // invalid < regular < user

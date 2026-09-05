@@ -137,7 +137,14 @@ TEST_CASE( "WorkspaceCatalog stays fast at 100k records", "[workspace_catalog][p
     const auto lookupMs = std::chrono::duration<double, std::milli>(
                               std::chrono::steady_clock::now() - lookupStart ).count();
     INFO( "200 path lookups ms: " << lookupMs );
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    // Sanitizer instrumentation roughly doubles the per-row SQLite cost; the
+    // contracts stay proportional (the O(N)-scan alternative is orders of
+    // magnitude away either way).
+    REQUIRE( lookupMs < 400.0 ); // 2 ms each would still be 100x too slow
+#else
     REQUIRE( lookupMs < 200.0 ); // 1 ms each would already be 100x too slow
+#endif
 
     // Paged listing never materializes the whole set.
     CatalogQuery all;
@@ -151,5 +158,9 @@ TEST_CASE( "WorkspaceCatalog stays fast at 100k records", "[workspace_catalog][p
     const auto pageMs = std::chrono::duration<double, std::milli>(
                             std::chrono::steady_clock::now() - pageStart ).count();
     INFO( "20 pages ms: " << pageMs );
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    REQUIRE( pageMs < 1500.0 );
+#else
     REQUIRE( pageMs < 500.0 );
+#endif
 }

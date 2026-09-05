@@ -136,6 +136,9 @@ TEST_CASE( "Capability ranking returns bounded candidates with reasons", "[agent
 
 TEST_CASE( "Model selection surfaces ranked candidates", "[agent3][models]" )
 {
+  // catch_discover_tests runs every CASE in its own process: registration
+  // from other cases never happened here, so register before calling.
+  SpatialToolRegistry::instance().registerBuiltinTools();
 #ifdef CMAKE_SOURCE_DIR
   {
       const QDir sourceModels(

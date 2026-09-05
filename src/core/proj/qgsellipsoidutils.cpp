@@ -344,14 +344,30 @@ QList<QgsCelestialBody> QgsEllipsoidUtils::celestialBodies()
 
 void QgsEllipsoidUtils::invalidateCache( bool disableCache )
 {
-  const QgsReadWriteLocker locker1( *sEllipsoidCacheLock(), QgsReadWriteLocker::Write );
-  const QgsReadWriteLocker locker2( *sDefinitionCacheLock(), QgsReadWriteLocker::Write );
+  // Q_GLOBAL_STATIC accessors return nullptr once their guard has been
+  // destroyed at exit (teardown-order dependent, e.g. an atexit handler
+  // running exitQgis() after these guards were torn down). Skip destroyed
+  // caches instead of dereferencing null — same rationale as
+  // QgsCoordinateReferenceSystem::invalidateCache.
+  const bool clearNow = !sDisableCache;
+  if ( disableCache )
+    sDisableCache = true;
+  if ( !clearNow )
+    return;
 
-  if ( !sDisableCache )
+  if ( QReadWriteLock *lock = sEllipsoidCacheLock() )
   {
-    if ( disableCache )
-      sDisableCache = true;
-    sEllipsoidCache()->clear();
-    sDefinitionCache()->clear();
+    lock->lockForWrite();
+    if ( EllipsoidParamCache *cache = sEllipsoidCache() )
+      cache->clear();
+    lock->unlock();
+  }
+
+  if ( QReadWriteLock *lock = sDefinitionCacheLock() )
+  {
+    lock->lockForWrite();
+    if ( EllipsoidDefinitionCache *cache = sDefinitionCache() )
+      cache->clear();
+    lock->unlock();
   }
 }

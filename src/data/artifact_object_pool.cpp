@@ -8,7 +8,11 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <vector>
@@ -114,7 +118,12 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
         // Stage-and-verify: copy to a pool-private temp, re-hash the STAGED
         // bytes, and only then rename into the content address. A partial
         // copy or a concurrent source rewrite can never become an object.
-        const QString tmp = objectPath + QStringLiteral( ".%1.puttmp" ).arg( ::getpid() );
+        const QString tmp = objectPath + QStringLiteral( ".%1.puttmp" )
+#ifdef _WIN32
+                              .arg( static_cast<int>( ::_getpid() ) );
+#else
+                              .arg( ::getpid() );
+#endif
         QFile::remove( tmp );
         if ( !QFile::copy( filePath, tmp ) )
         {
