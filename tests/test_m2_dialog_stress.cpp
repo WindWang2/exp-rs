@@ -19,6 +19,9 @@
 #include <QTextBrowser>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 
 #include "app/dialogs/raster_processing_dialog_base.h"
 #include "app/dialogs/dialog_utils.h"
@@ -57,6 +60,30 @@
 #include "app/georeferencer/rs_template_match_dialog.h"
 
 namespace {
+
+QString repoTestInputPath()
+{
+#ifdef CMAKE_SOURCE_DIR
+    const QString candidate =
+        QDir( QString::fromUtf8( CMAKE_SOURCE_DIR ) ).filePath( QStringLiteral( "CMakeLists.txt" ) );
+    if ( QFileInfo::exists( candidate ) )
+        return candidate;
+#endif
+    return QDir::tempPath() + QStringLiteral( "/m2_dialog_test_input.txt" );
+}
+
+void ensureRepoTestInputExists()
+{
+    const QString path = repoTestInputPath();
+    if ( !QFileInfo::exists( path ) )
+    {
+        QFile f( path );
+        if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) )
+        {
+            f.write( "m2-dialog-test-input\n" );
+        }
+    }
+}
 
 void verifyProcessingDialogStructure(RasterProcessingDialogBase *dlg, const QString &expectedTitle)
 {
@@ -473,7 +500,8 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
             RsPostProcessDialog::Algorithm::Polygonize
         };
 
-        const QString testInputPath = QStringLiteral("/home/kevin/projects/rs-studio/main/CMakeLists.txt");
+        ensureRepoTestInputExists();
+        const QString testInputPath = repoTestInputPath();
 
         for (auto algo : algos)
         {
@@ -503,7 +531,8 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
 
     SECTION("RsPostProcessDialog Recode Validation")
     {
-        const QString testInputPath = QStringLiteral("/home/kevin/projects/rs-studio/main/CMakeLists.txt");
+        ensureRepoTestInputExists();
+        const QString testInputPath = repoTestInputPath();
         RsPostProcessDialog dlg(RsPostProcessDialog::Algorithm::Recode);
         dlg.setDefaultInputPath(testInputPath);
 

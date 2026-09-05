@@ -120,6 +120,9 @@ function(sicnu_add_dialog_test NAME)
     ${CMAKE_BINARY_DIR}
     ${ARG_EXTRA_INCLUDES}
   )
+  target_compile_definitions(${NAME} PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
   sicnu_link_jsoncpp(${NAME})
   sicnu_discover_tests(${NAME})
 endfunction()
@@ -1092,7 +1095,7 @@ if(SICNU_NODE_EXECUTABLE AND EXISTS ${CMAKE_SOURCE_DIR}/pi/test/mcp_bridge.test.
            OR (_sicnu_node_major EQUAL 22 AND _sicnu_node_minor GREATER_EQUAL 18))
             add_test(
                 NAME pi_bridge_lifecycle
-                COMMAND ${SICNU_NODE_EXECUTABLE} --test ${CMAKE_SOURCE_DIR}/pi/test
+                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/mcp_bridge.test.mjs
                 WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
             set_tests_properties(pi_bridge_lifecycle PROPERTIES TIMEOUT 120)
             sicnu_set_test_env(pi_bridge_lifecycle)
@@ -5773,6 +5776,9 @@ target_include_directories(test_m3_adversarial_challenge PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_m3_adversarial_challenge PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 set_target_properties(test_m3_adversarial_challenge PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_m3_adversarial_challenge)

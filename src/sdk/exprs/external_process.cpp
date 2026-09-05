@@ -3,6 +3,32 @@
  ***************************************************************************/
 #include "exprs/external_process.h"
 
+#ifdef _WIN32
+// Windows MSVC build seam (Tier 3): POSIX fork/exec is unavailable. Provide a
+// stub so the compilation guard passes; external tools are unsupported here.
+namespace exprs
+{
+bool ExternalProcess::validateArgv( const std::vector<std::string> &argv, std::string &error )
+{
+    if ( argv.empty() || argv.front().empty() )
+    {
+        error = "argv must start with a program name";
+        return false;
+    }
+    error = "external process execution is not supported on Windows builds";
+    return false;
+}
+
+ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &request )
+{
+    ExternalProcessResult result;
+    (void)request;
+    result.error = "external process execution is not supported on Windows builds";
+    return result;
+}
+} // namespace exprs
+#else
+
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
@@ -16,8 +42,10 @@
 #include <cstring>
 #include <algorithm>
 
-// POSIX environ — not always declared in headers on macOS/BSD.
+#if defined( __APPLE__ ) || defined( __FreeBSD__ ) || defined( __OpenBSD__ ) || defined( __NetBSD__ )
+// POSIX environ — not declared by <unistd.h> on macOS/BSD.
 extern char **environ;
+#endif
 
 namespace exprs {
 
@@ -501,3 +529,5 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
 }
 
 } // namespace exprs
+
+#endif // !_WIN32

@@ -265,7 +265,9 @@ OutputVerification OutputVerifier::verifyVector( const QString &path )
     addIssue( report, QStringLiteral( "Vector layer CRS is missing" ) );
 
   OGREnvelope extent;
-  const OGRErr extentErr = OGR_L_GetExtent( layer, &extent, 0 );
+  // bForce=1: GeoJSON and other drivers do not precompute extents; without a
+  // full scan GetExtent fails (GDAL 3.8 CI) and healthy vectors are rejected.
+  const OGRErr extentErr = OGR_L_GetExtent( layer, &extent, 1 );
   if ( featureCount > 0 )
   {
     if ( extentErr != OGRERR_NONE

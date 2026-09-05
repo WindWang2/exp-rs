@@ -186,6 +186,12 @@ target_link_libraries(sicnu_operators
         Sicnu::data
 )
 
+# Compiled-in source root so ModelCatalog finds <repo>/models when tests
+# run from build dirs and SICNU_MODELS_DIR is unset (CI ctest).
+target_compile_definitions(sicnu_operators PUBLIC
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
 if(SICNU_WITH_ONNX_RUNTIME AND ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
     target_include_directories(sicnu_operators PRIVATE ${ONNXRUNTIME_INCLUDE_DIR}/onnxruntime ${ONNXRUNTIME_INCLUDE_DIR})
     target_compile_definitions(sicnu_operators PRIVATE SICNU_WITH_ONNX_RUNTIME=1)

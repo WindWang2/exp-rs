@@ -516,6 +516,13 @@ TEST_CASE( "Preflight keeps single-modality SAR series clean",
     REQUIRE_FALSE( hasIssue( report, "temporal.modality_mismatch", true ) );
     REQUIRE_FALSE( hasIssue( report, "temporal.polarization_mismatch", true ) );
     REQUIRE_FALSE( hasIssue( report, "temporal.polarization_partial", false ) );
-    REQUIRE( report.modality.commonPolarizationSet == "VV,VH" );
+    // Canonical set form is sorted (VH,VV); accept either order.
+    {
+        const QStringList parts =
+            report.modality.commonPolarizationSet.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+        REQUIRE( parts.size() == 2 );
+        CHECK( parts.contains( QStringLiteral( "VV" ) ) );
+        CHECK( parts.contains( QStringLiteral( "VH" ) ) );
+    }
     REQUIRE( report.modality.sarSceneCount == 2 );
 }

@@ -42,7 +42,7 @@ jobs:
             libprotobuf-dev protobuf-compiler \
             libqca-qt6-dev qtkeychain-qt6-dev \
             bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev \
-            libopencv-dev \
+            libopencv-dev python3-dev python3-pip python3-numpy \
             libfontconfig1 libgl1 libegl1 libxkbcommon0 libdbus-1-3
 
       # Qt 6.8 via aqtinstall: Ubuntu 24.04's distro Qt (6.4.2) is too old for
@@ -92,6 +92,8 @@ jobs:
           # Synthetic fixture is deterministic; Linux tiers share one GDAL build,
           # so the golden SHA must match exactly. Drift is a real regression here.
           REQUIRE_STRICT_RPC_SHA: '1'
+          # ModelCatalog fallback when tests run from build dirs.
+          SICNU_MODELS_DIR: ${{ github.workspace }}/models
         run: ctest --test-dir build --output-on-failure
 
       - name: Verify Installation Rule Execution
@@ -158,6 +160,7 @@ jobs:
           # heap/UB detection, so ODR detection is disabled.
           ASAN_OPTIONS: "halt_on_error=1:detect_leaks=0:detect_odr_violation=0"
           QT_QPA_PLATFORM: offscreen
+          SICNU_MODELS_DIR: ${{ github.workspace }}/models
         run: ctest --test-dir build-sanitizer --output-on-failure
 
   # =========================================================================
@@ -175,6 +178,22 @@ jobs:
 
       - name: Setup MSVC & Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Free disk space for vcpkg source builds
+        # opencv+gdal from source need ~15GB in C:\vcpkg\buildtrees; the
+        # windows-latest image ships Android/dotnet/Haskell toolchains that
+        # otherwise leave C: full mid-build ("No space left on device" on
+        # opencv PDB copy). Reclaim ~20GB before vcpkg runs.
+        shell: pwsh
+        run: |
+          Get-PSDrive C | Select-Object Used,Free
+          foreach ($p in @("C:\Android", "C:\Program Files\dotnet", "C:\Program Files (x86)\Android", "$env:AGENT_TOOLSDIRECTORY\..\..")) { if (Test-Path $p) { echo "keep $p" } }
+          # Aggressive but safe on GH runners: drop large preinstalled SDKs.
+          if (Test-Path "C:\Android") { Remove-Item -Recurse -Force "C:\Android" }
+          if (Test-Path "C:\Program Files\dotnet") { Remove-Item -Recurse -Force "C:\Program Files\dotnet" }
+          $haskell = Get-ChildItem "C:\ghcup" -ErrorAction SilentlyContinue; if ($haskell) { Remove-Item -Recurse -Force "C:\ghcup" }
+          $codeql = Get-ChildItem "C:\Program Files\CodeQL" -ErrorAction SilentlyContinue; if ($codeql) { Remove-Item -Recurse -Force "C:\Program Files\CodeQL" }
+          Get-PSDrive C | Select-Object Used,Free
 
       - name: Install Qt 6 on Windows
         uses: jurplel/install-qt-action@v4
@@ -197,13 +216,17 @@ jobs:
         # to the pinned builtin-baseline in vcpkg.json (must match exactly or
         # transitive versions like expat/hdf5/opencv4 miss the version DB).
         # Checkout that baseline commit; do not use an unrelated tip.
+        # x-gha binary cache + --clean-after-build keep C: from filling on the
+        # opencv/gdal source builds and make later runs hit binaries.
         shell: pwsh
+        env:
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
         run: |
           git -C C:\vcpkg fetch origin
           if ($LASTEXITCODE -ne 0) { exit 1 }
           git -C C:\vcpkg checkout 7f3781e19cc7d4e4882a4caec01668c6f7b5c163
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          C:\vcpkg\vcpkg install --triplet x64-windows
+          C:\vcpkg\vcpkg install --triplet x64-windows --clean-after-build
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Build qca + qtkeychain against installed Qt

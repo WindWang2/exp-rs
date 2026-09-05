@@ -19,6 +19,11 @@
 #include <qgsfield.h>
 #include <qgsgeometry.h>
 
+#include <QCoreApplication>
+#include <QDir>
+
+#include "operators/framework/model_catalog.h"
+
 int main( int argc, char *argv[] )
 {
   QgsApplication application( argc, argv, true );
@@ -131,6 +136,15 @@ TEST_CASE( "Capability ranking returns bounded candidates with reasons", "[agent
 
 TEST_CASE( "Model selection surfaces ranked candidates", "[agent3][models]" )
 {
+#ifdef CMAKE_SOURCE_DIR
+  {
+      const QDir sourceModels(
+          QDir( QString::fromUtf8( CMAKE_SOURCE_DIR ) ).filePath( QStringLiteral( "models" ) ) );
+      if ( sourceModels.exists() )
+          sicnu::operators::ModelCatalog::instance().setDirectory(
+              sourceModels.absolutePath().toStdString() );
+  }
+#endif
   const auto result = callTool( "spatial:select_model", [] {
     Json::Value input( Json::objectValue );
     input["task"] = "segmentation";

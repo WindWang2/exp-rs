@@ -13,6 +13,8 @@
 
 #include <QApplication>
 
+#include <cstdlib>
+
 #include <gdal_priv.h>
 
 #include <qgsapplication.h>
@@ -45,6 +47,11 @@ using sicnu::agent::spatial_tools::SpatialToolRegistry;
 namespace
 {
 
+void cleanupQgisAtExit()
+{
+  QgsApplication::exitQgis();
+}
+
 void ensureQgisApplication()
 {
   if ( QApplication::instance() )
@@ -55,6 +62,11 @@ void ensureQgisApplication()
   static auto *application = new QgsApplication( argc, argv, true );
   ( void ) application;
   QgsApplication::initQgis();
+  static const bool registered = [] {
+    std::atexit( cleanupQgisAtExit );
+    return true;
+  }();
+  (void)registered;
 }
 
 void cleanupProject()

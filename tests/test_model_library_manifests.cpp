@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QCoreApplication>
+#include <QDir>
 
 #include "operators/framework/model_catalog.h"
 
@@ -32,6 +33,19 @@ struct LibraryGuard
     {
         if ( !QCoreApplication::instance() )
             new QCoreApplication( appArgc(), appArgv );
+#ifdef CMAKE_SOURCE_DIR
+        {
+            const QDir sourceModels(
+                QDir( QString::fromUtf8( CMAKE_SOURCE_DIR ) ).filePath( QStringLiteral( "models" ) ) );
+            if ( sourceModels.exists() )
+            {
+                ModelCatalog::instance().setDirectory(
+                    sourceModels.absolutePath().toStdString() );
+                ModelCatalog::instance().reload();
+                return;
+            }
+        }
+#endif
         ModelCatalog::instance().setDirectory( ModelCatalog::defaultModelsDirectory() );
         ModelCatalog::instance().reload();
     }
