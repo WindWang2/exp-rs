@@ -194,14 +194,14 @@ jobs:
 
       - name: Install GDAL/PROJ/GEOS/Protobuf via vcpkg (preinstalled)
         # windows-latest ships a maintained vcpkg checkout at C:\vcpkg. Sync it
-        # to the pinned baseline first (libaec's gitlab.dkrz.de source 429s
-        # GitHub runners; newer vcpkg uses a GitHub mirror). Update C:\vcpkg is
-        # NOT done — we checkout the exact baseline commit.
+        # to the pinned builtin-baseline in vcpkg.json (must match exactly or
+        # transitive versions like expat/hdf5/opencv4 miss the version DB).
+        # Checkout that baseline commit; do not use an unrelated tip.
         shell: pwsh
         run: |
           git -C C:\vcpkg fetch origin
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          git -C C:\vcpkg checkout ea1a7396b05637a53bf23c078647ecc0edee4b80
+          git -C C:\vcpkg checkout 7f3781e19cc7d4e4882a4caec01668c6f7b5c163
           if ($LASTEXITCODE -ne 0) { exit 1 }
           C:\vcpkg\vcpkg install --triplet x64-windows
           if ($LASTEXITCODE -ne 0) { exit 1 }
