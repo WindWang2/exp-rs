@@ -18,8 +18,10 @@
 #include <QVariantMap>
 
 #include <json/json.h>
+#include <json/reader.h>
 
 #include <algorithm>
+#include <sstream>
 #include <string>
 
 namespace sicnu::agent::spatial_tools
@@ -62,7 +64,14 @@ qint64 clampOffset( const Json::Value &input )
 
 Json::Value jsonFromQt( const QJsonObject &object )
 {
-    return Json::Value( QJsonDocument( object ).toJson( QJsonDocument::Compact ).toStdString() );
+    const QByteArray raw = QJsonDocument( object ).toJson( QJsonDocument::Compact );
+    Json::Value parsed;
+    Json::CharReaderBuilder builder;
+    std::string errors;
+    std::istringstream stream( raw.toStdString() );
+    if ( Json::parseFromStream( builder, stream, &parsed, &errors ) )
+        return parsed;
+    return Json::Value( Json::objectValue );
 }
 
 Json::Value parseJsonText( const QJsonObject &object, const QString &key )
@@ -99,8 +108,8 @@ Json::Value pageToJson( const WorkspacePage &page )
     return out;
 }
 
-std::string schemaForObject( const std::vector<std::pair<std::string, std::string>> &properties,
-                             const std::vector<std::string> &required )
+Json::Value schemaForObject( const std::vector<std::pair<std::string, std::string>> &properties,
+                            const std::vector<std::string> &required )
 {
     Json::Value schema( Json::objectValue );
     schema["type"] = "object";
@@ -116,7 +125,7 @@ std::string schemaForObject( const std::vector<std::pair<std::string, std::strin
     for ( const std::string &r : required )
         req.append( r );
     schema["required"] = req;
-    return Json::writeString( Json::StreamWriterBuilder(), schema );
+    return schema;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,11 +166,11 @@ class ProjectSummaryTool final : public SpatialTool
     std::vector<std::string> tags() const override { return { "workspace", "governance", "summary" }; }
     Json::Value inputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "auditLimit", "integer" } }, {} ) );
+        return schemaForObject( { { "auditLimit", "integer" } }, {} );
     }
     Json::Value outputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "counts", "object" }, { "facets", "object" } }, {} ) );
+        return schemaForObject( { { "counts", "object" }, { "facets", "object" } }, {} );
     }
 
     SpatialToolResult execute( const Json::Value &input ) override
@@ -229,16 +238,16 @@ class ProjectSearchTool final : public SpatialTool
     std::vector<std::string> tags() const override { return { "workspace", "governance", "search" }; }
     Json::Value inputSchema() const override
     {
-        return Json::Value( schemaForObject(
+        return schemaForObject(
             { { "set", "string" }, { "text", "string" }, { "kind", "string" }, { "state", "string" },
               { "sensor", "string" }, { "modality", "string" }, { "crs", "string" }, { "tag", "string" },
               { "runId", "string" }, { "offset", "integer" }, { "limit", "integer" }, { "facetField", "string" },
               { "sortBy", "string" } },
-            {} ) );
+            {} );
     }
     Json::Value outputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "total", "integer" }, { "items", "array" } }, {} ) );
+        return schemaForObject( { { "total", "integer" }, { "items", "array" } }, {} );
     }
 
     SpatialToolResult execute( const Json::Value &input ) override
@@ -298,11 +307,11 @@ class ProjectHealthTool final : public SpatialTool
     std::vector<std::string> tags() const override { return { "workspace", "governance", "health" }; }
     Json::Value inputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "fingerprints", "boolean" }, { "maxDiagnostics", "integer" } }, {} ) );
+        return schemaForObject( { { "fingerprints", "boolean" }, { "maxDiagnostics", "integer" } }, {} );
     }
     Json::Value outputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "errors", "integer" }, { "warnings", "integer" } }, {} ) );
+        return schemaForObject( { { "errors", "integer" }, { "warnings", "integer" } }, {} );
     }
 
     SpatialToolResult execute( const Json::Value &input ) override
@@ -341,11 +350,11 @@ class AssetInspectTool final : public SpatialTool
     std::vector<std::string> tags() const override { return { "workspace", "governance", "asset" }; }
     Json::Value inputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "assetId", "string" } }, { "assetId" } ) );
+        return schemaForObject( { { "assetId", "string" } }, { "assetId" } );
     }
     Json::Value outputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "assetId", "string" } }, { "assetId" } ) );
+        return schemaForObject( { { "assetId", "string" } }, { "assetId" } );
     }
 
     SpatialToolResult execute( const Json::Value &input ) override
@@ -407,12 +416,12 @@ class AssetValidateTool final : public SpatialTool
     std::vector<std::string> tags() const override { return { "workspace", "governance", "asset" }; }
     Json::Value inputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "assetId", "string" }, { "fingerprints", "boolean" } },
-                                             { "assetId" } ) );
+        return schemaForObject( { { "assetId", "string" }, { "fingerprints", "boolean" } },
+                                             { "assetId" } );
     }
     Json::Value outputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "ok", "boolean" } }, { "ok" } ) );
+        return schemaForObject( { { "ok", "boolean" } }, { "ok" } );
     }
 
     SpatialToolResult execute( const Json::Value &input ) override
@@ -449,13 +458,13 @@ class AssetRelinkTool final : public SpatialTool
     std::vector<std::string> tags() const override { return { "workspace", "governance", "asset" }; }
     Json::Value inputSchema() const override
     {
-        return Json::Value( schemaForObject(
+        return schemaForObject(
             { { "assetId", "string" }, { "newPath", "string" }, { "verifyFingerprint", "boolean" } },
-            { "assetId", "newPath" } ) );
+            { "assetId", "newPath" } );
     }
     Json::Value outputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "relinked", "boolean" } }, { "relinked" } ) );
+        return schemaForObject( { { "relinked", "boolean" } }, { "relinked" } );
     }
 
     SpatialToolResult execute( const Json::Value &input ) override
@@ -506,12 +515,12 @@ class CollectionQueryTool final : public SpatialTool
     std::vector<std::string> tags() const override { return { "workspace", "governance", "collection" }; }
     Json::Value inputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "smartCollectionId", "string" }, { "offset", "integer" },
-                                               { "limit", "integer" } }, {} ) );
+        return schemaForObject( { { "smartCollectionId", "string" }, { "offset", "integer" },
+                                               { "limit", "integer" } }, {} );
     }
     Json::Value outputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "datasets", "array" }, { "smartCollections", "array" } }, {} ) );
+        return schemaForObject( { { "datasets", "array" }, { "smartCollections", "array" } }, {} );
     }
 
     SpatialToolResult execute( const Json::Value &input ) override
@@ -560,12 +569,12 @@ class LineageToolBase : public SpatialTool
   public:
     Json::Value inputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "assetId", "string" }, { "maxDepth", "integer" } },
-                                             { "assetId" } ) );
+        return schemaForObject( { { "assetId", "string" }, { "maxDepth", "integer" } },
+                                             { "assetId" } );
     }
     Json::Value outputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "nodes", "array" } }, { "nodes" } ) );
+        return schemaForObject( { { "nodes", "array" } }, { "nodes" } );
     }
     SpatialToolResult execute( const Json::Value &input ) override
     {
@@ -645,11 +654,11 @@ class ResultInspectTool final : public SpatialTool
     std::vector<std::string> tags() const override { return { "workspace", "governance", "result" }; }
     Json::Value inputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "resultId", "string" } }, { "resultId" } ) );
+        return schemaForObject( { { "resultId", "string" } }, { "resultId" } );
     }
     Json::Value outputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "resultId", "string" } }, { "resultId" } ) );
+        return schemaForObject( { { "resultId", "string" } }, { "resultId" } );
     }
 
     SpatialToolResult execute( const Json::Value &input ) override
@@ -714,12 +723,12 @@ class RunCompareTool final : public SpatialTool
     std::vector<std::string> tags() const override { return { "workspace", "governance", "run" }; }
     Json::Value inputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "runIdA", "string" }, { "runIdB", "string" } },
-                                             { "runIdA", "runIdB" } ) );
+        return schemaForObject( { { "runIdA", "string" }, { "runIdB", "string" } },
+                                             { "runIdA", "runIdB" } );
     }
     Json::Value outputSchema() const override
     {
-        return Json::Value( schemaForObject( { { "runA", "object" }, { "runB", "object" } }, {} ) );
+        return schemaForObject( { { "runA", "object" }, { "runB", "object" } }, {} );
     }
 
     SpatialToolResult execute( const Json::Value &input ) override
