@@ -19,6 +19,10 @@ qt_add_library(sicnu_data STATIC
   derivation_record.h
   execution_fingerprint.cpp
   execution_fingerprint.h
+  governance/governance_store.cpp
+  governance/governance_store.h
+  governance/governance_types.cpp
+  governance/governance_types.h
   internal/source_provider.h
   internal/source_provider_registry.cpp
   internal/source_provider_registry.h
