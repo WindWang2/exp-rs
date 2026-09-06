@@ -1,0 +1,33 @@
+{
+  "id": "publication/panel-image",
+  "version": 1,
+  "category": "publication",
+  "semantic_roles": [
+    "publication.panel"
+  ],
+  "description": "Photo/panel image frame for report pages (scene thumbnail, field photo).",
+  "parameters": {
+    "width_mm": 80,
+    "height_mm": 60
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [],
+    "margin_mm": 6,
+    "max_count_per_page": 4,
+    "min_size_mm": [
+      20,
+      20
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false
+  },
+  "data_bindings": [
+    {
+      "name": "image_path",
+      "source": "params.image_path",
+      "required": true
+    }
+  ]
+}

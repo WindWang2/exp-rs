@@ -6,6 +6,8 @@
 #include "../mapspec/mapspec_compiler.h"
 #include "../spatial_tools/spatial_tool.h"
 #include "chart_registry.h"
+#include "composition.h"
+#include "design_tokens.h"
 #include "registry.h"
 
 #include <qgsprintlayout.h>
@@ -21,414 +23,8 @@ using sicnu::agent::spatial_tools::SpatialToolRegistry;
 using sicnu::agent::spatial_tools::SpatialToolResult;
 using sicnu::agent::spatial_tools::requireStringField;
 
-namespace {
-
-Json::Value rect( double x, double y, double w, double h )
-{
-  Json::Value r( Json::arrayValue );
-  r.append( x );
-  r.append( y );
-  r.append( w );
-  r.append( h );
-  return r;
-}
-
-bool rectsIntersect( const Json::Value &a, const Json::Value &b )
-{
-  if ( !a.isArray() || !b.isArray() || a.size() != 4 || b.size() != 4 )
-    return false;
-  const double ax = a[0].asDouble();
-  const double ay = a[1].asDouble();
-  const double aw = a[2].asDouble();
-  const double ah = a[3].asDouble();
-  const double bx = b[0].asDouble();
-  const double by = b[1].asDouble();
-  const double bw = b[2].asDouble();
-  const double bh = b[3].asDouble();
-  return ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah;
-}
-
-/// First map frame id (or empty).
-std::string mainMapRef( const Json::Value &spec )
-{
-  if ( spec.isMember( "map_frames" ) && spec["map_frames"].isArray() &&
-       !spec["map_frames"].empty() && spec["map_frames"][0].isMember( "id" ) )
-    return spec["map_frames"][0]["id"].asString();
-  return std::string();
-}
-
-Json::Value issue( const std::string &code, const std::string &severity, const std::string &message,
-                   bool repairable, const std::string &itemId, const char *action )
-{
-  Json::Value suggestion = action ? makeRepairSuggestion( action, Json::Value() ) : Json::Value();
-  return makeIssue( code, severity, message, repairable, itemId, suggestion );
-}
-
-} // namespace
-
-Json::Value preflightMapSpec( const Json::Value &spec, const Json::Value &compiledReport )
-{
-  std::vector<Json::Value> issues;
-
-  const auto specProblems = mapspec::validateMapSpec( spec );
-  if ( !specProblems.empty() )
-  {
-    for ( const auto &problem : specProblems )
-      issues.push_back( issue( "MAPSPEC_INVALID", "error", problem, false, "", nullptr ) );
-    Json::Value checksArr( Json::arrayValue );
-    Json::Value issuesArr( Json::arrayValue );
-    for ( const auto &i : issues )
-      issuesArr.append( i );
-    Json::Value body( Json::objectValue );
-    body["quality_score"] = 0;
-    body["passed"] = false;
-    body["issues"] = issuesArr;
-    body["checks"] = checksArr;
-    return makeEnvelope( "map_quality_report", body );
-  }
-
-  const double pageW = spec["page"]["width_mm"].asDouble();
-  const double pageH = spec["page"]["height_mm"].asDouble();
-  const std::string mapRef = mainMapRef( spec );
-
-  const auto hasNonEmpty = [ &spec ]( const char *collection ) {
-    return spec.isMember( collection ) && spec[collection].isArray() && !spec[collection].empty();
-  };
-
-  // --- map frame presence & content ----------------------------------------
-  if ( !hasNonEmpty( "map_frames" ) )
-  {
-    issues.push_back( issue( "MAP_MISSING_MAP", "error", "No map frame in the MapSpec.", false, "",
-                             nullptr ) );
-  }
-  else
-  {
-    for ( const auto &frame : spec["map_frames"] )
-    {
-      const std::string id = frame["id"].asString();
-      const bool hasLayers = frame.isMember( "layers" ) && frame["layers"].isArray() &&
-                             !frame["layers"].empty();
-      const bool hasExtent = frame.isMember( "extent" ) && frame["extent"].isArray() &&
-                             frame["extent"].size() == 4;
-      if ( !hasLayers && !hasExtent )
-      {
-        issues.push_back( issue(
-          "MAP_EMPTY_MAP", "warning",
-          "Map frame '" + id + "' has neither layers nor extent — it will render blank.", false,
-          id, nullptr ) );
-      }
-    }
-  }
-
-  // --- cartographic furniture -----------------------------------------------
-  if ( !hasNonEmpty( "titles" ) )
-    issues.push_back( issue( "MAP_MISSING_TITLE", "warning", "No title item.", true, "",
-                             "add_title" ) );
-  if ( !hasNonEmpty( "legends" ) )
-    issues.push_back( issue( "MAP_MISSING_LEGEND", "warning", "No legend item.", true, "",
-                             "add_legend" ) );
-  if ( !hasNonEmpty( "scale_bars" ) )
-    issues.push_back( issue( "MAP_MISSING_SCALE_BAR", "warning", "No scale bar.", true, "",
-                             "add_scale_bar" ) );
-  if ( !hasNonEmpty( "north_arrows" ) )
-    issues.push_back( issue( "MAP_MISSING_NORTH_ARROW", "warning", "No north arrow.", true, "",
-                             "add_north_arrow" ) );
-  if ( !hasNonEmpty( "source_notes" ) )
-    issues.push_back( issue( "MAP_MISSING_SOURCE_NOTE", "warning", "No data-source note.", true,
-                             "", "add_source_note" ) );
-
-  // --- per-item geometry & style ----------------------------------------------
-  Json::Value page( Json::objectValue );
-  page["width_mm"] = pageW;
-  page["height_mm"] = pageH;
-  for ( int c = 0; c < mapspec::kCollectionCount; ++c )
-  {
-    const char *collection = mapspec::kCollections[c];
-    if ( !spec.isMember( collection ) || !spec[collection].isArray() )
-      continue;
-    for ( const auto &item : spec[collection] )
-    {
-      if ( !item.isObject() || !item.isMember( "id" ) )
-        continue;
-      const std::string id = item["id"].asString();
-      if ( item.isMember( "rect_mm" ) && item["rect_mm"].isArray() && item["rect_mm"].size() == 4 )
-      {
-        const Json::Value &r = item["rect_mm"];
-        const double x = r[0].asDouble();
-        const double y = r[1].asDouble();
-        const double w = r[2].asDouble();
-        const double h = r[3].asDouble();
-        if ( w <= 0 || h <= 0 )
-          issues.push_back( issue( "MAP_INVALID_RECT", "error",
-                                   id + ": rect width/height must be positive", false, id,
-                                   nullptr ) );
-        else if ( x < -0.5 || y < -0.5 || x + w > pageW + 0.5 || y + h > pageH + 0.5 )
-          issues.push_back( issue( "MAP_OFF_PAGE", "error",
-                                   id + ": rect exceeds the page bounds", true, id,
-                                   "move_in_page" ) );
-      }
-      if ( ( std::string( collection ) == "titles" || std::string( collection ) == "labels" ||
-             std::string( collection ) == "source_notes" ) &&
-           item.isMember( "font" ) && item["font"].isObject() &&
-           item["font"].isMember( "size_pt" ) && item["font"]["size_pt"].isNumeric() &&
-           item["font"]["size_pt"].asDouble() < 6.0 )
-        issues.push_back( issue( "MAP_TINY_FONT", "warning",
-                                 id + ": font below 6 pt is unreadable at export size", true, id,
-                                 "bump_font" ) );
-      if ( ( std::string( collection ) == "legends" || std::string( collection ) == "scale_bars" ||
-             std::string( collection ) == "north_arrows" || std::string( collection ) == "charts" ) &&
-           ( !item.isMember( "map_ref" ) || !item["map_ref"].isString() ) && !mapRef.empty() )
-      {
-        // Non-fatal: the compiler falls back to the first map. Advisory only.
-      }
-    }
-  }
-
-  // --- pairwise overlap between non-map items ---------------------------------
-  const char *overlappable[] = { "titles", "labels", "legends", "scale_bars", "north_arrows",
-                                 "source_notes", "annotations", "charts", "colorbars" };
-  for ( int i = 0; i < 9; ++i )
-  {
-    if ( !spec.isMember( overlappable[i] ) )
-      continue;
-    for ( const auto &a : spec[overlappable[i]] )
-    {
-      if ( !a.isObject() || !a.isMember( "rect_mm" ) )
-        continue;
-      for ( int j = i; j < 9; ++j )
-      {
-        if ( !spec.isMember( overlappable[j] ) )
-          continue;
-        for ( const auto &b : spec[overlappable[j]] )
-        {
-          if ( !b.isObject() || !b.isMember( "rect_mm" ) )
-            continue;
-          if ( i == j && a == b )
-            continue;
-          if ( a["id"] == b["id"] )
-            continue;
-          if ( rectsIntersect( a["rect_mm"], b["rect_mm"] ) )
-          {
-            issues.push_back( issue(
-              "MAP_OVERLAP", "warning",
-              a["id"].asString() + " overlaps " + b["id"].asString(), true, a["id"].asString(),
-              "reposition" ) );
-          }
-        }
-      }
-    }
-  }
-
-  // --- merge compiled-layout findings (layout:preflight report) ---------------
-  if ( compiledReport.isObject() && compiledReport.isMember( "issues" ) &&
-       compiledReport["issues"].isArray() )
-  {
-    for ( const auto &layoutIssue : compiledReport["issues"] )
-    {
-      if ( !layoutIssue.isObject() )
-        continue;
-      Json::Value merged = makeIssue( "LAYOUT_" + layoutIssue.get( "check", "unknown" ).asString(),
-                                      layoutIssue.get( "severity", "warning" ).asString(),
-                                      layoutIssue.get( "message", "" ).asString(),
-                                      false,
-                                      layoutIssue.get( "item", "" ).asString(), Json::Value() );
-      issues.push_back( merged );
-    }
-  }
-
-  int errorCount = 0;
-  int warningCount = 0;
-  int repairableCount = 0;
-  for ( const auto &i : issues )
-  {
-    if ( i["severity"].asString() == "error" )
-      ++errorCount;
-    else
-      ++warningCount;
-    if ( i.get( "repairable", false ).asBool() )
-      ++repairableCount;
-  }
-  const int score = std::max( 0, 100 - 20 * errorCount - 8 * warningCount );
-
-  Json::Value body( Json::objectValue );
-  body["quality_score"] = score;
-  // The pass gate drives the repair loop: blocking errors OR unresolved
-  // repairable findings (missing furniture, off-page items) keep a map from
-  // passing; non-repairable warnings (e.g. empty map frame) are advisory.
-  body["passed"] = errorCount == 0 && repairableCount == 0;
-  Json::Value issuesArr( Json::arrayValue );
-  for ( const auto &i : issues )
-    issuesArr.append( i );
-  body["issues"] = issuesArr;
-  body["error_count"] = errorCount;
-  body["warning_count"] = warningCount;
-  return makeEnvelope( "map_quality_report", body );
-}
-
-int repairMapSpec( Json::Value &spec, const Json::Value &report )
-{
-  int applied = 0;
-  if ( !report.isObject() || !report.isMember( "issues" ) )
-    return 0;
-  const double pageW = spec["page"]["width_mm"].asDouble();
-  const double pageH = spec["page"]["height_mm"].asDouble();
-  const std::string mapRef = mainMapRef( spec );
-
-  for ( const auto &item : report["issues"] )
-  {
-    if ( !item.isObject() || !item.get( "repairable", false ).asBool() )
-      continue;
-    const std::string code = item.get( "code", "" ).asString();
-    const Json::Value &action = item.get( "suggested_action", Json::Value() );
-
-    if ( code == "MAP_MISSING_TITLE" && action.isMember( "action" ) &&
-         action["action"].asString() == "add_title" )
-    {
-      Json::Value title( Json::objectValue );
-      title["semantic_role"] = "title.main";
-      title["text"] = "地图标题";
-      title["rect_mm"] = rect( 12, 6, 200, 14 );
-      title["font"] = Json::Value( Json::objectValue );
-      title["font"]["size_pt"] = 18;
-      mapspec::appendMapSpecItem( spec, "titles", title );
-      ++applied;
-    }
-    else if ( code == "MAP_MISSING_LEGEND" )
-    {
-      Json::Value legend( Json::objectValue );
-      legend["semantic_role"] = "legend.primary";
-      legend["title"] = "图例";
-      legend["rect_mm"] = rect( pageW - 80, 30, 66, 80 );
-      if ( !mapRef.empty() )
-        legend["map_ref"] = mapRef;
-      mapspec::appendMapSpecItem( spec, "legends", legend );
-      ++applied;
-    }
-    else if ( code == "MAP_MISSING_SCALE_BAR" )
-    {
-      Json::Value scaleBar( Json::objectValue );
-      scaleBar["semantic_role"] = "scalebar.primary";
-      scaleBar["style"] = "Single Box";
-      scaleBar["units"] = "km";
-      scaleBar["rect_mm"] = rect( 14, pageH - 20, 60, 8 );
-      if ( !mapRef.empty() )
-        scaleBar["map_ref"] = mapRef;
-      mapspec::appendMapSpecItem( spec, "scale_bars", scaleBar );
-      ++applied;
-    }
-    else if ( code == "MAP_MISSING_NORTH_ARROW" )
-    {
-      Json::Value arrow( Json::objectValue );
-      arrow["semantic_role"] = "north_arrow.primary";
-      arrow["rect_mm"] = rect( pageW - 16, 6, 12, 12 );
-      if ( !mapRef.empty() )
-        arrow["map_ref"] = mapRef;
-      mapspec::appendMapSpecItem( spec, "north_arrows", arrow );
-      ++applied;
-    }
-    else if ( code == "MAP_MISSING_SOURCE_NOTE" )
-    {
-      Json::Value note( Json::objectValue );
-      note["semantic_role"] = "source.primary";
-      note["text"] = "数据来源: SICNU GEO RS / exp-rs";
-      note["rect_mm"] = rect( pageW - 130, pageH - 16, 116, 8 );
-      note["font"] = Json::Value( Json::objectValue );
-      note["font"]["size_pt"] = 7;
-      mapspec::appendMapSpecItem( spec, "source_notes", note );
-      ++applied;
-    }
-    else if ( code == "MAP_OFF_PAGE" || code == "MAP_INVALID_RECT" )
-    {
-      const std::string id = item.get( "item_id", "" ).asString();
-      const Json::Value location = mapspec::findMapSpecItem( spec, id );
-      if ( location.isNull() )
-        continue;
-      Json::Value &found = spec[location["collection"].asString()][location["index"].asInt()];
-      if ( !found.isMember( "rect_mm" ) || found["rect_mm"].size() != 4 )
-        continue;
-      double x = found["rect_mm"][0].asDouble();
-      double y = found["rect_mm"][1].asDouble();
-      double w = found["rect_mm"][2].asDouble();
-      double h = found["rect_mm"][3].asDouble();
-      w = std::clamp( w, 1.0, pageW );
-      h = std::clamp( h, 1.0, pageH );
-      x = std::clamp( x, 0.0, std::max( 0.0, pageW - w ) );
-      y = std::clamp( y, 0.0, std::max( 0.0, pageH - h ) );
-      found["rect_mm"] = rect( x, y, w, h );
-      ++applied;
-    }
-    else if ( code == "MAP_TINY_FONT" )
-    {
-      const std::string id = item.get( "item_id", "" ).asString();
-      const Json::Value location = mapspec::findMapSpecItem( spec, id );
-      if ( location.isNull() )
-        continue;
-      Json::Value &found = spec[location["collection"].asString()][location["index"].asInt()];
-      if ( !found.isMember( "font" ) || !found["font"].isObject() )
-        found["font"] = Json::Value( Json::objectValue );
-      found["font"]["size_pt"] = 8;
-      ++applied;
-    }
-    else if ( code == "MAP_OVERLAP" )
-    {
-      const std::string id = item.get( "item_id", "" ).asString();
-      const Json::Value location = mapspec::findMapSpecItem( spec, id );
-      if ( location.isNull() )
-        continue;
-      Json::Value &found = spec[location["collection"].asString()][location["index"].asInt()];
-      if ( !found.isMember( "rect_mm" ) || found["rect_mm"].size() != 4 )
-        continue;
-      // Deterministic relocation: try the classic anchor slots in a fixed
-      // order and take the first that neither leaves the page nor collides
-      // with any other item. Convergence > cleverness for agent repair.
-      const double w = found["rect_mm"][2].asDouble();
-      const double h = found["rect_mm"][3].asDouble();
-      const double m = 6.0;
-      struct Slot { double x; double y; };
-      const Slot candidates[] = {
-        { pageW - m - w, m },   { m, m },               { m, pageH - m - h },
-        { pageW - m - w, pageH - m - h }, { m, ( pageH - h ) / 2.0 },
-        { pageW - m - w, ( pageH - h ) / 2.0 }, { ( pageW - w ) / 2.0, pageH - m - h },
-      };
-      // Collect every other furniture rect — the same collections the
-      // overlap detector scans, so a relocated item never re-triggers
-      // MAP_OVERLAP. Map frames are overlays, not obstacles.
-      const char *overlappable[] = { "titles",   "labels",    "legends",
-                                     "scale_bars", "north_arrows", "source_notes",
-                                     "annotations", "charts",  "colorbars" };
-      std::vector<Json::Value> others;
-      for ( const char *collection : overlappable )
-      {
-        if ( !spec.isMember( collection ) || !spec[collection].isArray() )
-          continue;
-        for ( const auto &other : spec[collection] )
-        {
-          if ( !other.isObject() || !other.isMember( "id" ) || other["id"].asString() == id )
-            continue;
-          if ( other.isMember( "rect_mm" ) && other["rect_mm"].isArray() &&
-               other["rect_mm"].size() == 4 )
-            others.push_back( other["rect_mm"] );
-        }
-      }
-      for ( const auto &candidate : candidates )
-      {
-        if ( candidate.x < 0 || candidate.y < 0 || candidate.x + w > pageW ||
-             candidate.y + h > pageH )
-          continue;
-        bool free = true;
-        for ( const auto &other : others )
-          free = free && !rectsIntersect( rect( candidate.x, candidate.y, w, h ), other );
-        if ( free )
-        {
-          found["rect_mm"] = rect( candidate.x, candidate.y, w, h );
-          ++applied;
-          break;
-        }
-      }
-    }
-  }
-  return applied;
-}
+using sicnu::agent::cartography::preflightMapSpec;
+using sicnu::agent::cartography::repairMapSpec;
 
 // ---------------------------------------------------------------------------
 // Tools
@@ -697,20 +293,28 @@ class ComposeTool final : public SpatialTool
       if ( !input.isMember( "mapspec" ) || !input["mapspec"].isObject() )
         return SpatialToolResult::failure( "Missing required parameter: mapspec (object)",
                                            "INVALID_PARAMETER", "validation" );
+      // Pre-compile composition pass: anchors, size bounds, and constraints
+      // resolve into concrete rects; the resolved document is echoed back so
+      // agents see the geometry they got.
+      Json::Value spec = input["mapspec"];
+      const double marginDefault = tokenNumber( resolveTokenSet( spec ), "spacing.margin_mm", 12.0 );
+      const Json::Value composition = resolveComposition( spec, marginDefault ).toJson();
+
       QString error;
-      QgsPrintLayout *layout = mapspec::MapSpecCompiler::compile( input["mapspec"], &error );
-      Json::Value report = preflightMapSpec( input["mapspec"] );
+      QgsPrintLayout *layout = mapspec::MapSpecCompiler::compile( spec, &error );
+      Json::Value report = preflightMapSpec( spec );
+      Json::Value out( Json::objectValue );
+      out["mapspec"] = spec;
+      out["composition"] = composition;
       if ( !layout )
       {
-        Json::Value out( Json::objectValue );
         out["compiled"] = false;
         out["error"] = error.toStdString();
         out["quality"] = report;
         return SpatialToolResult::failure( error.toStdString(), "COMPILE_FAILED", "validation" );
       }
-      Json::Value out( Json::objectValue );
       out["compiled"] = true;
-      out["layout_name"] = input["mapspec"]["layout_name"].asString();
+      out["layout_name"] = spec["layout_name"].asString();
       out["quality"] = report;
       return SpatialToolResult::ok( out );
     }
@@ -724,9 +328,12 @@ class PreflightTool final : public SpatialTool
     std::string description() const override
     {
       return "Cartographic quality gate for a MapSpec (runs inside cartography:compose too): "
-             "missing title/legend/scale bar/north arrow/source note, empty map frames, "
-             "off-page items, item overlaps, tiny fonts. Issues carry code/severity/item_id/"
-             "repairable/suggested_action; a 0-100 quality_score summarizes. Input: {mapspec}.";
+             "missing furniture, empty map frames, off-page/margin violations, tiny fonts, "
+             "title/note text overflow, legend density, duplicate furniture, invalid chart "
+             "bindings, unbalanced multi-map frames, inset placement, unresolvable component "
+             "references, unsatisfiable constraints, overlaps. Issues carry code/severity/"
+             "item_id/repairable/suggested_action; a 0-100 quality_score summarizes. Evaluates "
+             "the resolved composition and echoes it as `mapspec`. Input: {mapspec}.";
     }
     std::vector<std::string> tags() const override
     {
@@ -758,7 +365,13 @@ class PreflightTool final : public SpatialTool
       if ( !input.isMember( "mapspec" ) || !input["mapspec"].isObject() )
         return SpatialToolResult::failure( "Missing required parameter: mapspec (object)",
                                            "INVALID_PARAMETER", "validation" );
-      return SpatialToolResult::ok( preflightMapSpec( input["mapspec"] ) );
+      // Preflight evaluates the *resolved* composition (anchors, size
+      // bounds, constraints), echoing the resolved document back.
+      Json::Value spec = input["mapspec"];
+      resolveComposition( spec, tokenNumber( resolveTokenSet( spec ), "spacing.margin_mm", 12.0 ) );
+      Json::Value out = preflightMapSpec( spec );
+      out["mapspec"] = spec;
+      return SpatialToolResult::ok( out );
     }
 };
 
@@ -813,6 +426,8 @@ class RepairTool final : public SpatialTool
                             : 3;
 
       Json::Value spec = input["mapspec"];
+      // Solve once before the repair loop (see repairMapSpec contract).
+      resolveComposition( spec, tokenNumber( resolveTokenSet( spec ), "spacing.margin_mm", 12.0 ) );
       int totalRepairs = 0;
       int iterations = 0;
       Json::Value quality = preflightMapSpec( spec );
@@ -832,6 +447,236 @@ class RepairTool final : public SpatialTool
       out["iterations"] = iterations;
       out["quality"] = quality;
       return SpatialToolResult::ok( out );
+    }
+};
+
+// --- design token tools --------------------------------------------------------
+
+class ListTokenSetsTool final : public SpatialTool
+{
+  public:
+    std::string name() const override { return "cartography:list_token_sets"; }
+    std::string displayName() const override { return "List design token sets"; }
+    std::string description() const override
+    {
+      return "Catalog of design token sets (typography, spacing, colors, palettes, chart "
+             "defaults) with the resolved medium variants. Default: scientific-light. "
+             "Input: {} (compact list).";
+    }
+    std::vector<std::string> tags() const override
+    {
+      return { "cartography", "tokens", "style" };
+    }
+    Json::Value inputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      return schema;
+    }
+    Json::Value outputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      schema["properties"]["items"] = Json::Value( Json::objectValue );
+      return schema;
+    }
+    SpatialToolResult execute( const Json::Value & ) override
+    {
+      Json::Value items( Json::arrayValue );
+      for ( const auto &set : TokenSetRegistry::instance().tokenSets() )
+      {
+        Json::Value compact( Json::objectValue );
+        compact["id"] = set["id"];
+        compact["version"] = set["version"];
+        compact["description"] = set["description"];
+        if ( set.isMember( "variants" ) && set["variants"].isObject() )
+        {
+          Json::Value mediums( Json::arrayValue );
+          mediums.append( "print" ); // print always resolvable (base document)
+          for ( const auto &medium : set["variants"].getMemberNames() )
+            if ( medium != "print" )
+              mediums.append( medium );
+          compact["mediums"] = mediums;
+        }
+        items.append( compact );
+      }
+      Json::Value out( Json::objectValue );
+      out["items"] = items;
+      out["total"] = static_cast<Json::Int>( items.size() );
+      out["default"] = kDefaultTokenSetId;
+      return SpatialToolResult::ok( out );
+    }
+};
+
+class GetTokenSetTool final : public SpatialTool
+{
+  public:
+    std::string name() const override { return "cartography:get_token_set"; }
+    std::string displayName() const override { return "Get resolved design tokens"; }
+    std::string description() const override
+    {
+      return "Effective (resolved) token document for a token set + medium + overrides: "
+             "typography hierarchy, spacing, line weights, colors, palettes, furniture "
+             "metrics, chart defaults. Input: {token_set?, medium?, overrides?}.";
+    }
+    std::vector<std::string> tags() const override
+    {
+      return { "cartography", "tokens", "style" };
+    }
+    Json::Value inputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      Json::Value props( Json::objectValue );
+      Json::Value tokenSet( Json::objectValue );
+      tokenSet["type"] = "string";
+      props["token_set"] = tokenSet;
+      Json::Value medium( Json::objectValue );
+      medium["type"] = "string";
+      medium["description"] = "print (default) or screen";
+      props["medium"] = medium;
+      Json::Value overrides( Json::objectValue );
+      overrides["type"] = "object";
+      props["overrides"] = overrides;
+      schema["properties"] = props;
+      return schema;
+    }
+    Json::Value outputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      return schema;
+    }
+    SpatialToolResult execute( const Json::Value &input ) override
+    {
+      Json::Value style( Json::objectValue );
+      if ( input.isMember( "token_set" ) && input["token_set"].isString() )
+        style["token_set"] = input["token_set"];
+      if ( input.isMember( "medium" ) && input["medium"].isString() )
+        style["medium"] = input["medium"];
+      if ( input.isMember( "overrides" ) && input["overrides"].isObject() )
+        style["overrides"] = input["overrides"];
+      return SpatialToolResult::ok( resolveTokenSet( style ) );
+    }
+};
+
+class ValidateTool final : public SpatialTool
+{
+  public:
+    std::string name() const override { return "cartography:validate"; }
+    std::string displayName() const override { return "Validate MapSpec"; }
+    std::string description() const override
+    {
+      return "Structural MapSpec validation without compiling: envelope, ids, geometry, "
+             "references, collection rules. Returns one human-readable problem per entry; "
+             "empty list means valid. Input: {mapspec}.";
+    }
+    std::vector<std::string> tags() const override
+    {
+      return { "cartography", "validate", "mapspec" };
+    }
+    Json::Value inputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      Json::Value props( Json::objectValue );
+      Json::Value mapspecProp( Json::objectValue );
+      mapspecProp["type"] = "object";
+      props["mapspec"] = mapspecProp;
+      schema["properties"] = props;
+      Json::Value required( Json::arrayValue );
+      required.append( "mapspec" );
+      schema["required"] = required;
+      return schema;
+    }
+    Json::Value outputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      schema["properties"]["problems"] = Json::Value( Json::objectValue );
+      return schema;
+    }
+    SpatialToolResult execute( const Json::Value &input ) override
+    {
+      if ( !input.isMember( "mapspec" ) || !input["mapspec"].isObject() )
+        return SpatialToolResult::failure( "Missing required parameter: mapspec (object)",
+                                           "INVALID_PARAMETER", "validation" );
+      Json::Value out( Json::objectValue );
+      Json::Value problems( Json::arrayValue );
+      for ( const auto &problem : mapspec::validateMapSpec( input["mapspec"] ) )
+        problems.append( problem );
+      out["problems"] = problems;
+      out["valid"] = problems.empty();
+      return SpatialToolResult::ok( out );
+    }
+};
+
+class RuleCatalogTool final : public SpatialTool
+{
+  public:
+    std::string name() const override { return "cartography:list_rules"; }
+    std::string displayName() const override { return "List preflight rules"; }
+    std::string description() const override
+    {
+      return "Catalog of cartography preflight rule codes with severity, repairability and "
+             "repair behavior. Input: {}.";
+    }
+    std::vector<std::string> tags() const override
+    {
+      return { "cartography", "preflight", "quality", "catalog" };
+    }
+    Json::Value inputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      return schema;
+    }
+    Json::Value outputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      schema["properties"]["rules"] = Json::Value( Json::objectValue );
+      return schema;
+    }
+    SpatialToolResult execute( const Json::Value & ) override
+    {
+      Json::Value out( Json::objectValue );
+      out["rules"] = preflightRuleCatalog();
+      out["total"] = out["rules"].size();
+      return SpatialToolResult::ok( out );
+    }
+};
+
+class CatalogIndexTool final : public SpatialTool
+{
+  public:
+    std::string name() const override { return "cartography:catalog_index"; }
+    std::string displayName() const override { return "Cartography catalog index"; }
+    std::string description() const override
+    {
+      return "Generated machine index of the shipped design system: token sets, components "
+             "(with variants), and templates (with slot roles, page family, product type). "
+             "Use for gallery/documentation sync and offline discovery. Input: {}.";
+    }
+    std::vector<std::string> tags() const override
+    {
+      return { "cartography", "catalog", "index" };
+    }
+    Json::Value inputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      return schema;
+    }
+    Json::Value outputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      return schema;
+    }
+    SpatialToolResult execute( const Json::Value & ) override
+    {
+      return SpatialToolResult::ok( buildCatalogIndex() );
     }
 };
 
@@ -1014,8 +859,13 @@ void registerCartographyTools()
     registry.registerTool( std::make_shared<GetComponentTool>() );
     registry.registerTool( std::make_shared<ListTemplatesTool>() );
     registry.registerTool( std::make_shared<InstantiateTemplateTool>() );
+    registry.registerTool( std::make_shared<ListTokenSetsTool>() );
+    registry.registerTool( std::make_shared<GetTokenSetTool>() );
+    registry.registerTool( std::make_shared<ValidateTool>() );
     registry.registerTool( std::make_shared<ComposeTool>() );
     registry.registerTool( std::make_shared<PreflightTool>() );
+    registry.registerTool( std::make_shared<RuleCatalogTool>() );
+    registry.registerTool( std::make_shared<CatalogIndexTool>() );
     registry.registerTool( std::make_shared<RepairTool>() );
     registry.registerTool( std::make_shared<ChartCreateTool>() );
     registry.registerTool( std::make_shared<ChartGetTool>() );

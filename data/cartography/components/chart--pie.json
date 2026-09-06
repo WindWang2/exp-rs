@@ -1,0 +1,61 @@
+{
+  "id": "chart/pie",
+  "version": 1,
+  "category": "chart",
+  "semantic_roles": [
+    "chart.composition"
+  ],
+  "description": "Share-of-total chart.",
+  "parameters": {
+    "kind": "pie"
+  },
+  "defaults": {
+    "chart": {
+      "kind": "pie",
+      "binding": {
+        "mode": "inline",
+        "data": []
+      }
+    }
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "bottom-rail",
+      "right-rail"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 4,
+    "min_size_mm": [
+      30,
+      25
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "classification",
+      "composition"
+    ],
+    "note": "use only when shares of a whole are the message"
+  },
+  "data_bindings": [
+    {
+      "name": "data",
+      "source": "params.chart_data",
+      "required": true,
+      "description": "inline [{label, value}] or vector_expression {layer, x_expression, y_expression}."
+    }
+  ],
+  "variants": [
+    {
+      "id": "pie"
+    },
+    {
+      "id": "donut",
+      "parameters": {
+        "donut": true
+      }
+    }
+  ]
+}

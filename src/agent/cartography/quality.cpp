@@ -1,0 +1,919 @@
+// src/agent/cartography/quality.cpp
+#include "quality.h"
+
+#include "../contracts/spatial_contracts.h"
+#include "../mapspec/mapspec.h"
+#include "chart_registry.h"
+#include "composition.h"
+#include "design_tokens.h"
+#include "registry.h"
+
+#include <algorithm>
+#include <cmath>
+#include <set>
+
+namespace sicnu::agent::cartography {
+
+using namespace sicnu::agent::contracts;
+
+namespace {
+
+Json::Value rect( double x, double y, double w, double h )
+{
+  Json::Value r( Json::arrayValue );
+  r.append( x );
+  r.append( y );
+  r.append( w );
+  r.append( h );
+  return r;
+}
+
+bool rectsIntersect( const Json::Value &a, const Json::Value &b )
+{
+  if ( !a.isArray() || !b.isArray() || a.size() != 4 || b.size() != 4 )
+    return false;
+  const double ax = a[0].asDouble();
+  const double ay = a[1].asDouble();
+  const double aw = a[2].asDouble();
+  const double ah = a[3].asDouble();
+  const double bx = b[0].asDouble();
+  const double by = b[1].asDouble();
+  const double bw = b[2].asDouble();
+  const double bh = b[3].asDouble();
+  return ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah;
+}
+
+/// First map frame id (or empty).
+std::string mainMapRef( const Json::Value &spec )
+{
+  if ( spec.isMember( "map_frames" ) && spec["map_frames"].isArray() &&
+       !spec["map_frames"].empty() && spec["map_frames"][0].isMember( "id" ) )
+    return spec["map_frames"][0]["id"].asString();
+  return std::string();
+}
+
+Json::Value issue( const std::string &code, const std::string &severity, const std::string &message,
+                   bool repairable, const std::string &itemId, const char *action )
+{
+  Json::Value suggestion = action ? makeRepairSuggestion( action, Json::Value() ) : Json::Value();
+  return makeIssue( code, severity, message, repairable, itemId, suggestion );
+}
+
+/// Declared page margin (page.margin_mm); 0 when undeclared.
+double declaredMargin( const Json::Value &spec )
+{
+  if ( spec.isMember( "page" ) && spec["page"].isObject() &&
+       spec["page"].isMember( "margin_mm" ) && spec["page"]["margin_mm"].isNumeric() )
+    return std::max( 0.0, spec["page"]["margin_mm"].asDouble() );
+  return 0.0;
+}
+
+/// Deterministic overflow verdict: estimated single-line text width vs the
+/// item rect (5% tolerance). Returns 0 when clean, else the needed width.
+double overflowAmountMm( const Json::Value &item, const char *collection )
+{
+  const std::string collectionName( collection );
+  if ( collectionName != "titles" && collectionName != "labels" &&
+       collectionName != "source_notes" && collectionName != "annotations" )
+    return 0.0;
+  if ( !item.isMember( "text" ) || !item["text"].isString() || !item.isMember( "rect_mm" ) ||
+       !item["rect_mm"].isArray() || item["rect_mm"].size() != 4 )
+    return 0.0;
+  // Non-positive declared sizes are MAP_INVALID_RECT's business, not ours.
+  if ( item["rect_mm"][2].asDouble() <= 0 )
+    return 0.0;
+  double sizePt = 9.0;
+  if ( item.isMember( "font" ) && item["font"].isObject() && item["font"].isMember( "size_pt" ) &&
+       item["font"]["size_pt"].isNumeric() )
+    sizePt = item["font"]["size_pt"].asDouble();
+  const double needed = estimateTextWidthMm( item["text"].asString(), sizePt );
+  const double available = item["rect_mm"][2].asDouble();
+  return needed > available * 1.05 ? needed - available : 0.0;
+}
+
+struct ItemRef
+{
+    const char *collection;
+    Json::Value *item;
+};
+
+/// Mutable item lookup across collections.
+ItemRef findItemMutable( Json::Value &spec, const std::string &id )
+{
+  for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+  {
+    const char *collection = mapspec::kCollections[c];
+    if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+      continue;
+    for ( Json::Value::ArrayIndex i = 0; i < spec[collection].size(); ++i )
+    {
+      Json::Value &item = spec[collection][i];
+      if ( item.isObject() && item.isMember( "id" ) && item["id"].asString() == id )
+        return { collection, &item };
+    }
+  }
+  return { nullptr, nullptr };
+}
+
+/// Widen the text rect to fit, shift left-edge if needed, and shrink the
+/// font as the last resort (floor 12pt titles / 8pt others). Deterministic.
+bool repairTextOverflow( Json::Value &item, double pageW, const std::string &collection )
+{
+  if ( !item.isMember( "text" ) || !item["text"].isString() || !item.isMember( "rect_mm" ) ||
+       item["rect_mm"].size() != 4 )
+    return false;
+  double sizePt = item.isMember( "font" ) && item["font"].isObject() &&
+                          item["font"].isMember( "size_pt" ) && item["font"]["size_pt"].isNumeric()
+                    ? item["font"]["size_pt"].asDouble()
+                    : 9.0;
+  if ( sizePt <= 0 )
+    return false; // MAP_TINY_FONT / content errors own this case
+  const double needed = estimateTextWidthMm( item["text"].asString(), sizePt );
+  const double margin = 12.0;
+  const double maxW = std::max( 10.0, pageW - 2 * margin );
+  double x = item["rect_mm"][0].asDouble();
+  double y = item["rect_mm"][1].asDouble();
+  double w = item["rect_mm"][2].asDouble();
+  double h = item["rect_mm"][3].asDouble();
+
+  if ( needed <= maxW )
+  {
+    // Fits the page: widen from the item's left edge, shifting into the
+    // margin box when the right edge would overflow.
+    w = needed;
+    if ( x + w > pageW - margin )
+      x = std::max( margin, pageW - margin - w );
+    item["rect_mm"] = rect( x, y, w, h );
+    return true;
+  }
+  // Does not fit the page at any position: shrink the font to fit.
+  const double floorPt = collection == "titles" ? 12.0 : 8.0;
+  const double shrunk = std::max( floorPt, sizePt * maxW / needed );
+  if ( item.isMember( "font" ) && item["font"].isObject() )
+    item["font"]["size_pt"] = shrunk;
+  else
+  {
+    Json::Value font( Json::objectValue );
+    font["size_pt"] = shrunk;
+    item["font"] = font;
+  }
+  item["rect_mm"] = rect( std::max( margin, x ), y, maxW, h );
+  return true;
+}
+
+} // namespace
+
+double estimateTextWidthMm( const std::string &text, double sizePt )
+{
+  const double kPtToMm = 0.352778;
+  double maxWidthEm = 0.0;
+  double lineEm = 0.0;
+  for ( const unsigned char byte : text )
+  {
+    if ( byte == '\n' )
+    {
+      maxWidthEm = std::max( maxWidthEm, lineEm );
+      lineEm = 0.0;
+      continue;
+    }
+    if ( ( byte & 0xC0 ) == 0x80 )
+      continue; // UTF-8 continuation byte: absorbed into its lead character
+    if ( byte >= 0xE0 )
+      lineEm += 1.0; // three-byte lead: CJK/fullwidth ranges count one em
+    else if ( byte == ' ' )
+      lineEm += 0.35;
+    else
+      lineEm += 0.55; // Latin/digits/punctuation (two-byte leads included)
+  }
+  maxWidthEm = std::max( maxWidthEm, lineEm );
+  return maxWidthEm * sizePt * kPtToMm;
+}
+
+Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &compiledReport )
+{
+  std::vector<Json::Value> issues;
+
+  // All rules evaluate the *resolved* composition: anchors, size bounds and
+  // constraints are solved on a local copy first, so standalone preflight
+  // calls see exactly what the compile-time solver would produce. Content
+  // fields are identical; only geometry can differ.
+  Json::Value spec = specIn;
+  const CompositionResult solvedResult = resolveComposition(
+    spec, tokenNumber( resolveTokenSet( spec ), "spacing.margin_mm", 12.0 ) );
+
+  const auto specProblems = mapspec::validateMapSpec( spec );
+  if ( !specProblems.empty() )
+  {
+    for ( const auto &problem : specProblems )
+      issues.push_back( issue( "MAPSPEC_INVALID", "error", problem, false, "", nullptr ) );
+    Json::Value issuesArr( Json::arrayValue );
+    for ( const auto &i : issues )
+      issuesArr.append( i );
+    Json::Value body( Json::objectValue );
+    body["quality_score"] = 0;
+    body["passed"] = false;
+    body["issues"] = issuesArr;
+    body["checks"] = Json::Value( Json::arrayValue );
+    return makeEnvelope( "map_quality_report", body );
+  }
+
+  const double pageW = spec["page"]["width_mm"].asDouble();
+  const double pageH = spec["page"]["height_mm"].asDouble();
+  const std::string mapRef = mainMapRef( spec );
+  const double margin = declaredMargin( spec );
+
+  const auto hasNonEmpty = [ &spec ]( const char *collection ) {
+    return spec.isMember( collection ) && spec[collection].isArray() && !spec[collection].empty();
+  };
+
+  // --- map frame presence & content ----------------------------------------
+  if ( !hasNonEmpty( "map_frames" ) )
+  {
+    issues.push_back( issue( "MAP_MISSING_MAP", "error", "No map frame in the MapSpec.", false, "",
+                             nullptr ) );
+  }
+  else
+  {
+    for ( const auto &frame : spec["map_frames"] )
+    {
+      const std::string id = frame["id"].asString();
+      const bool hasLayers = frame.isMember( "layers" ) && frame["layers"].isArray() &&
+                             !frame["layers"].empty();
+      const bool hasExtent = frame.isMember( "extent" ) && frame["extent"].isArray() &&
+                             frame["extent"].size() == 4;
+      if ( !hasLayers && !hasExtent )
+      {
+        issues.push_back( issue(
+          "MAP_EMPTY_MAP", "warning",
+          "Map frame '" + id + "' has neither layers nor extent — it will render blank.", false,
+          id, nullptr ) );
+      }
+    }
+    // --- multi-map frame balance ------------------------------------------
+    if ( spec["map_frames"].size() >= 2 )
+    {
+      double firstH = 0.0;
+      for ( const auto &frame : spec["map_frames"] )
+      {
+        if ( !frame.isObject() || !frame.isMember( "rect_mm" ) || frame["rect_mm"].size() != 4 )
+          continue;
+        const double h = frame["rect_mm"][3].asDouble();
+        if ( firstH <= 0 )
+        {
+          firstH = h;
+          continue;
+        }
+        if ( std::fabs( h - firstH ) > 0.15 * std::max( firstH, h ) )
+        {
+          issues.push_back( issue( "MAP_UNBALANCED_FRAMES", "warning",
+                                   "Map frame '" + frame["id"].asString() +
+                                     "' height deviates >15% from the first frame",
+                                   true, frame["id"].asString(), "balance_frames" ) );
+        }
+      }
+    }
+  }
+
+  // --- cartographic furniture -----------------------------------------------
+  if ( !hasNonEmpty( "titles" ) )
+    issues.push_back( issue( "MAP_MISSING_TITLE", "warning", "No title item.", true, "",
+                             "add_title" ) );
+  if ( !hasNonEmpty( "legends" ) )
+    issues.push_back( issue( "MAP_MISSING_LEGEND", "warning", "No legend item.", true, "",
+                             "add_legend" ) );
+  if ( !hasNonEmpty( "scale_bars" ) )
+    issues.push_back( issue( "MAP_MISSING_SCALE_BAR", "warning", "No scale bar.", true, "",
+                             "add_scale_bar" ) );
+  if ( !hasNonEmpty( "north_arrows" ) )
+    issues.push_back( issue( "MAP_MISSING_NORTH_ARROW", "warning", "No north arrow.", true, "",
+                             "add_north_arrow" ) );
+  if ( !hasNonEmpty( "source_notes" ) )
+    issues.push_back( issue( "MAP_MISSING_SOURCE_NOTE", "warning", "No data-source note.", true,
+                             "", "add_source_note" ) );
+
+  // --- per-item geometry, style, text and bindings --------------------------
+  for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+  {
+    const char *collection = mapspec::kCollections[c];
+    if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+      continue;
+    for ( const auto &item : spec[collection] )
+    {
+      if ( !item.isObject() || !item.isMember( "id" ) )
+        continue;
+      const std::string id = item["id"].asString();
+      const std::string collectionName( collection );
+      if ( item.isMember( "rect_mm" ) && item["rect_mm"].isArray() && item["rect_mm"].size() == 4 )
+      {
+        const Json::Value &r = item["rect_mm"];
+        const double x = r[0].asDouble();
+        const double y = r[1].asDouble();
+        const double w = r[2].asDouble();
+        const double h = r[3].asDouble();
+        if ( w <= 0 || h <= 0 )
+          issues.push_back( issue( "MAP_INVALID_RECT", "error",
+                                   id + ": rect width/height must be positive", false, id,
+                                   nullptr ) );
+        else if ( x < -0.5 || y < -0.5 || x + w > pageW + 0.5 || y + h > pageH + 0.5 )
+          issues.push_back( issue( "MAP_OFF_PAGE", "error",
+                                   id + ": rect exceeds the page bounds", true, id,
+                                   "move_in_page" ) );
+        else if ( margin > 0 && collectionName != "map_frames" && collectionName != "inset_maps" &&
+                  ( x < margin - 0.5 || y < margin - 0.5 || x + w > pageW - margin + 0.5 ||
+                    y + h > pageH - margin + 0.5 ) )
+          issues.push_back( issue( "MAP_MARGIN_VIOLATION", "warning",
+                                   id + ": item violates the declared page margin "
+                                        "(page.margin_mm)",
+                                   true, id, "move_in_margins" ) );
+      }
+      if ( ( collectionName == "titles" || collectionName == "labels" ||
+             collectionName == "source_notes" ) &&
+           item.isMember( "font" ) && item["font"].isObject() &&
+           item["font"].isMember( "size_pt" ) && item["font"]["size_pt"].isNumeric() &&
+           item["font"]["size_pt"].asDouble() < 6.0 )
+        issues.push_back( issue( "MAP_TINY_FONT", "warning",
+                                 id + ": font below 6 pt is unreadable at export size", true, id,
+                                 "bump_font" ) );
+
+      // --- text overflow (title / source-note clipping / labels) -----------
+      const double overflow = overflowAmountMm( item, collection );
+      if ( overflow > 0 )
+      {
+        const char *code = collectionName == "titles"        ? "MAP_TITLE_OVERFLOW"
+                           : collectionName == "source_notes" ? "MAP_SOURCE_NOTE_CLIPPING"
+                                                              : "MAP_TEXT_OVERFLOW";
+        issues.push_back( issue( code, "warning",
+                                 id + ": text likely overflows its rect by " +
+                                   std::to_string( static_cast<int>( std::ceil( overflow ) ) ) +
+                                   " mm",
+                                 true, id, "widen_or_shrink" ) );
+      }
+
+      // --- legend density (declared max_entries) ---------------------------
+      if ( collectionName == "legends" && item.isMember( "max_entries" ) &&
+           item["max_entries"].isIntegral() && item.isMember( "rect_mm" ) &&
+           item["rect_mm"].size() == 4 )
+      {
+        const int entries = item["max_entries"].asInt();
+        double lineH = 4.5;
+        const Json::Value tokens = resolveTokenSet( spec );
+        lineH = tokenNumber( tokens, "furniture.legend_line_height_mm", 4.5 );
+        const double requiredH = 8.0 + entries * lineH;
+        if ( item["rect_mm"][3].asDouble() + 0.5 < requiredH )
+          issues.push_back( issue( "MAP_LEGEND_DENSITY", "warning",
+                                   id + ": legend may need ~" +
+                                     std::to_string( static_cast<int>( std::ceil( requiredH ) ) ) +
+                                     " mm for " + std::to_string( entries ) + " entries",
+                                   true, id, "grow_legend" ) );
+      }
+
+      // --- chart bindings ---------------------------------------------------
+      if ( collectionName == "charts" )
+      {
+        bool validBinding = item.isMember( "chart" ) && item["chart"].isObject() &&
+                            item["chart"].isMember( "binding" );
+        if ( validBinding )
+        {
+          const Json::Value &chart = item["chart"];
+          const std::string mode = chart["binding"].isMember( "mode" ) &&
+                                             chart["binding"]["mode"].isString()
+                                       ? chart["binding"]["mode"].asString()
+                                       : "inline";
+          if ( mode == "inline" && item["chart"].isMember( "chart_id" ) )
+          {
+            // Legacy style: a chart entity reference must resolve.
+            validBinding = !ChartRegistry::instance()
+                              .find( QString::fromStdString(
+                                chart["chart_id"].asString() ) )
+                              .isNull();
+          }
+          if ( mode == "vector_expression" )
+            validBinding = chart["binding"].isMember( "layer" ) &&
+                           chart["binding"]["layer"].isString();
+        }
+        if ( !validBinding )
+          issues.push_back( issue( "MAP_INVALID_BINDING", "warning",
+                                   id + ": chart binding does not resolve (inline data or a "
+                                        "layer reference required)",
+                                   false, id, nullptr ) );
+      }
+
+      // --- component references --------------------------------------------
+      if ( item.isMember( "source_component" ) )
+      {
+        Json::Value probe = item;
+        QString error;
+        if ( !applyComponentDefaults( probe, &error ) )
+          issues.push_back( issue( "MAP_UNKNOWN_COMPONENT", "warning",
+                                   id + ": " + error.toStdString(), true, id,
+                                   "strip_component_ref" ) );
+      }
+    }
+  }
+
+  // --- duplicate furniture (same semantic role twice) -------------------------
+  const char *roleCollections[] = { "titles", "legends", "scale_bars",
+                                    "north_arrows", "source_notes" };
+  for ( const char *collection : roleCollections )
+  {
+    if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+      continue;
+    std::set<std::string> seenRoles;
+    for ( const auto &item : spec[collection] )
+    {
+      if ( !item.isObject() || !item.isMember( "semantic_role" ) ||
+           !item["semantic_role"].isString() )
+        continue;
+      const std::string role = item["semantic_role"].asString();
+      if ( !seenRoles.insert( role ).second )
+        issues.push_back( issue( "MAP_DUPLICATE_FURNITURE", "warning",
+                                 item["id"].asString() + ": duplicate semantic_role '" + role +
+                                   "' in " + collection,
+                                 true, item["id"].asString(), "dedupe_identical" ) );
+    }
+  }
+
+  // --- inset placement ---------------------------------------------------------
+  if ( hasNonEmpty( "inset_maps" ) && hasNonEmpty( "map_frames" ) )
+  {
+    for ( const auto &inset : spec["inset_maps"] )
+    {
+      if ( !inset.isObject() || !inset.isMember( "rect_mm" ) )
+        continue;
+      bool insideAnyFrame = false;
+      for ( const auto &frame : spec["map_frames"] )
+        insideAnyFrame =
+          insideAnyFrame ||
+          ( frame.isObject() && frame.isMember( "rect_mm" ) &&
+            rectsIntersect( inset["rect_mm"], frame["rect_mm"] ) );
+      if ( !insideAnyFrame )
+        issues.push_back( issue( "MAP_INSET_PLACEMENT", "warning",
+                                 inset["id"].asString() +
+                                   ": inset does not overlap any map frame (locators belong "
+                                   "inside the main map)",
+                                 true, inset["id"].asString(), "place_inset" ) );
+    }
+  }
+
+  // --- composition solver leftovers (from the same resolved copy) -------------
+  for ( const auto &note : solvedResult.unsatisfied )
+    issues.push_back(
+      issue( "MAP_CONSTRAINT_UNSATISFIABLE", "warning", note, false, "", nullptr ) );
+
+  // --- pairwise overlap between non-map items ---------------------------------
+  const char *overlappable[] = { "titles", "labels", "legends", "scale_bars", "north_arrows",
+                                 "source_notes", "annotations", "charts", "colorbars" };
+  for ( int i = 0; i < 9; ++i )
+  {
+    if ( !spec.isMember( overlappable[i] ) || !spec[overlappable[i]].isArray() )
+      continue;
+    for ( Json::Value::ArrayIndex ai = 0; ai < spec[overlappable[i]].size(); ++ai )
+    {
+      const Json::Value &a = spec[overlappable[i]][ai];
+      if ( !a.isObject() || !a.isMember( "rect_mm" ) )
+        continue;
+      for ( int j = i; j < 9; ++j )
+      {
+        if ( !spec.isMember( overlappable[j] ) || !spec[overlappable[j]].isArray() )
+          continue;
+        for ( Json::Value::ArrayIndex bi = 0; bi < spec[overlappable[j]].size(); ++bi )
+        {
+          const Json::Value &b = spec[overlappable[j]][bi];
+          if ( !b.isObject() || !b.isMember( "rect_mm" ) )
+            continue;
+          if ( i == j && bi <= ai ) // each pair once, in a stable order
+            continue;
+          if ( a["id"] == b["id"] )
+            continue;
+          if ( rectsIntersect( a["rect_mm"], b["rect_mm"] ) )
+          {
+            issues.push_back( issue(
+              "MAP_OVERLAP", "warning",
+              a["id"].asString() + " overlaps " + b["id"].asString(), true, a["id"].asString(),
+              "reposition" ) );
+          }
+        }
+      }
+    }
+  }
+
+  // --- merge compiled-layout findings (layout:preflight report) ---------------
+  if ( compiledReport.isObject() && compiledReport.isMember( "issues" ) &&
+       compiledReport["issues"].isArray() )
+  {
+    for ( const auto &layoutIssue : compiledReport["issues"] )
+    {
+      if ( !layoutIssue.isObject() )
+        continue;
+      Json::Value merged = makeIssue( "LAYOUT_" + layoutIssue.get( "check", "unknown" ).asString(),
+                                      layoutIssue.get( "severity", "warning" ).asString(),
+                                      layoutIssue.get( "message", "" ).asString(),
+                                      false,
+                                      layoutIssue.get( "item", "" ).asString(), Json::Value() );
+      issues.push_back( merged );
+    }
+  }
+
+  int errorCount = 0;
+  int warningCount = 0;
+  int repairableCount = 0;
+  for ( const auto &i : issues )
+  {
+    if ( i["severity"].asString() == "error" )
+      ++errorCount;
+    else
+      ++warningCount;
+    if ( i.get( "repairable", false ).asBool() )
+      ++repairableCount;
+  }
+  const int score = std::max( 0, 100 - 20 * errorCount - 8 * warningCount );
+
+  Json::Value body( Json::objectValue );
+  body["quality_score"] = score;
+  // The pass gate drives the repair loop: blocking errors OR unresolved
+  // repairable findings keep a map from passing; non-repairable warnings
+  // (e.g. empty map frame) are advisory.
+  body["passed"] = errorCount == 0 && repairableCount == 0;
+  Json::Value issuesArr( Json::arrayValue );
+  for ( const auto &i : issues )
+    issuesArr.append( i );
+  body["issues"] = issuesArr;
+  body["error_count"] = errorCount;
+  body["warning_count"] = warningCount;
+  return makeEnvelope( "map_quality_report", body );
+}
+
+int repairMapSpec( Json::Value &spec, const Json::Value &report )
+{
+  int applied = 0;
+  if ( !report.isObject() || !report.isMember( "issues" ) )
+    return 0;
+  // Callers (cartography:repair, composeRepairLoop helpers) run the
+  // composition solver once BEFORE looping repairs — re-solving anchored
+  // geometry every pass would un-do MAP_OFF_PAGE/MARGIN clamps and prevent
+  // convergence. Anchor outcomes the solver could not satisfy in-page are
+  // reported and skipped, so their rects stay untouched.
+  const double pageW = spec["page"]["width_mm"].asDouble();
+  const double pageH = spec["page"]["height_mm"].asDouble();
+  const std::string mapRef = mainMapRef( spec );
+
+  for ( const auto &item : report["issues"] )
+  {
+    if ( !item.isObject() || !item.get( "repairable", false ).asBool() )
+      continue;
+    const std::string code = item.get( "code", "" ).asString();
+    const Json::Value &action = item.get( "suggested_action", Json::Value() );
+
+    if ( code == "MAP_MISSING_TITLE" && action.isMember( "action" ) &&
+         action["action"].asString() == "add_title" )
+    {
+      Json::Value title( Json::objectValue );
+      title["semantic_role"] = "title.main";
+      title["text"] = "地图标题";
+      title["rect_mm"] = rect( 12, 6, 200, 14 );
+      title["font"] = Json::Value( Json::objectValue );
+      title["font"]["size_pt"] = 18;
+      mapspec::appendMapSpecItem( spec, "titles", title );
+      ++applied;
+    }
+    else if ( code == "MAP_MISSING_LEGEND" )
+    {
+      Json::Value legend( Json::objectValue );
+      legend["semantic_role"] = "legend.primary";
+      legend["title"] = "图例";
+      legend["rect_mm"] = rect( pageW - 80, 30, 66, 80 );
+      if ( !mapRef.empty() )
+        legend["map_ref"] = mapRef;
+      mapspec::appendMapSpecItem( spec, "legends", legend );
+      ++applied;
+    }
+    else if ( code == "MAP_MISSING_SCALE_BAR" )
+    {
+      Json::Value scaleBar( Json::objectValue );
+      scaleBar["semantic_role"] = "scalebar.primary";
+      scaleBar["style"] = "Single Box";
+      scaleBar["units"] = "km";
+      scaleBar["rect_mm"] = rect( 14, pageH - 20, 60, 8 );
+      if ( !mapRef.empty() )
+        scaleBar["map_ref"] = mapRef;
+      mapspec::appendMapSpecItem( spec, "scale_bars", scaleBar );
+      ++applied;
+    }
+    else if ( code == "MAP_MISSING_NORTH_ARROW" )
+    {
+      Json::Value arrow( Json::objectValue );
+      arrow["semantic_role"] = "north_arrow.primary";
+      arrow["rect_mm"] = rect( pageW - 16, 6, 12, 12 );
+      if ( !mapRef.empty() )
+        arrow["map_ref"] = mapRef;
+      mapspec::appendMapSpecItem( spec, "north_arrows", arrow );
+      ++applied;
+    }
+    else if ( code == "MAP_MISSING_SOURCE_NOTE" )
+    {
+      Json::Value note( Json::objectValue );
+      note["semantic_role"] = "source.primary";
+      note["text"] = "数据来源: SICNU GEO RS / exp-rs";
+      note["rect_mm"] = rect( pageW - 130, pageH - 16, 116, 8 );
+      note["font"] = Json::Value( Json::objectValue );
+      note["font"]["size_pt"] = 7;
+      mapspec::appendMapSpecItem( spec, "source_notes", note );
+      ++applied;
+    }
+    else if ( code == "MAP_OFF_PAGE" || code == "MAP_INVALID_RECT" )
+    {
+      const std::string id = item.get( "item_id", "" ).asString();
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item )
+        continue;
+      if ( !found.item->isMember( "rect_mm" ) || ( *found.item )["rect_mm"].size() != 4 )
+        continue;
+      Json::Value &foundItem = *found.item;
+      double x = foundItem["rect_mm"][0].asDouble();
+      double y = foundItem["rect_mm"][1].asDouble();
+      double w = foundItem["rect_mm"][2].asDouble();
+      double h = foundItem["rect_mm"][3].asDouble();
+      w = std::clamp( w, 1.0, pageW );
+      h = std::clamp( h, 1.0, pageH );
+      x = std::clamp( x, 0.0, std::max( 0.0, pageW - w ) );
+      y = std::clamp( y, 0.0, std::max( 0.0, pageH - h ) );
+      foundItem["rect_mm"] = rect( x, y, w, h );
+      ++applied;
+    }
+    else if ( code == "MAP_TINY_FONT" )
+    {
+      const std::string id = item.get( "item_id", "" ).asString();
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item )
+        continue;
+      Json::Value &foundItem = *found.item;
+      if ( !foundItem.isMember( "font" ) || !foundItem["font"].isObject() )
+        foundItem["font"] = Json::Value( Json::objectValue );
+      foundItem["font"]["size_pt"] = 8;
+      ++applied;
+    }
+    else if ( code == "MAP_TITLE_OVERFLOW" || code == "MAP_SOURCE_NOTE_CLIPPING" ||
+              code == "MAP_TEXT_OVERFLOW" )
+    {
+      const std::string id = item.get( "item_id", "" ).asString();
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item )
+        continue;
+      if ( repairTextOverflow( *found.item, pageW, found.collection ) )
+        ++applied;
+    }
+    else if ( code == "MAP_MARGIN_VIOLATION" )
+    {
+      const std::string id = item.get( "item_id", "" ).asString();
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item || !found.item->isMember( "rect_mm" ) ||
+           ( *found.item )["rect_mm"].size() != 4 )
+        continue;
+      Json::Value &foundItem = *found.item;
+      const double m = declaredMargin( spec ) > 0 ? declaredMargin( spec ) : 12.0;
+      const double boxW = pageW - 2 * m;
+      const double boxH = pageH - 2 * m;
+      if ( boxW <= 0 || boxH <= 0 )
+        continue; // degenerate margin box: leave the item, rule stays reported
+      double x = foundItem["rect_mm"][0].asDouble();
+      double y = foundItem["rect_mm"][1].asDouble();
+      double w = foundItem["rect_mm"][2].asDouble();
+      double h = foundItem["rect_mm"][3].asDouble();
+      w = std::min( w, boxW );
+      h = std::min( h, boxH );
+      x = std::clamp( x, m, std::max( m, pageW - m - w ) );
+      y = std::clamp( y, m, std::max( m, pageH - m - h ) );
+      foundItem["rect_mm"] = rect( x, y, w, h );
+      ++applied;
+    }
+    else if ( code == "MAP_LEGEND_DENSITY" )
+    {
+      const std::string id = item.get( "item_id", "" ).asString();
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item || !found.item->isMember( "rect_mm" ) ||
+           ( *found.item )["rect_mm"].size() != 4 )
+        continue;
+      Json::Value &foundItem = *found.item;
+      const int entries = foundItem.isMember( "max_entries" ) && foundItem["max_entries"].isIntegral()
+                            ? foundItem["max_entries"].asInt()
+                            : 0;
+      const Json::Value tokens = resolveTokenSet( spec );
+      const double lineH = tokenNumber( tokens, "furniture.legend_line_height_mm", 4.5 );
+      const double requiredH = 8.0 + entries * lineH;
+      const double currentH = foundItem["rect_mm"][3].asDouble();
+      // Same margin contract as MAP_MARGIN_VIOLATION, so growing here can
+      // never fight the margin repair on the next pass.
+      const double margin = declaredMargin( spec ) > 0 ? declaredMargin( spec ) : 12.0;
+      const double y = foundItem["rect_mm"][1].asDouble();
+      if ( y + requiredH <= pageH - margin )
+      {
+        foundItem["rect_mm"][3] = requiredH; // grow downward inside the margin
+        ++applied;
+      }
+      else if ( currentH > 1.0 )
+      {
+        // Page-bound: spread entries across columns instead (capped —
+        // legends needing more than 6 columns stay reported for the agent).
+        const int columns = static_cast<int>( std::ceil( requiredH / std::max( 1.0, currentH ) ) );
+        if ( columns > 1 && columns <= 6 )
+        {
+          foundItem["columns"] = columns;
+          ++applied;
+        }
+      }
+    }
+    else if ( code == "MAP_DUPLICATE_FURNITURE" )
+    {
+      // Remove only byte-identical duplicates (content-safe deletion).
+      // Preflight reports within-collection duplicates, so the scan is
+      // confined to the reported item's collection; both items are copied
+      // BEFORE any removal because removeMapSpecItem rebuilds the array
+      // (any held Json::Value* would dangle).
+      const std::string id = item.get( "item_id", "" ).asString();
+      const Json::Value location = mapspec::findMapSpecItem( spec, id );
+      if ( location.isNull() )
+        continue;
+      const char *collection = nullptr;
+      for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+        if ( std::string( mapspec::kCollections[c] ) == location["collection"].asString() )
+          collection = mapspec::kCollections[c];
+      if ( !collection || !spec.isMember( collection ) || !spec[collection].isArray() )
+        continue;
+      const Json::Value self = spec[location["collection"].asString()][location["index"].asInt()];
+      const std::string role = self.get( "semantic_role", "" ).asString();
+      for ( const auto &other : spec[collection] )
+      {
+        if ( !other.isObject() || !other.isMember( "id" ) || other["id"].asString() == id )
+          continue;
+        if ( other.get( "semantic_role", "" ).asString() != role )
+          continue;
+        Json::Value a = other;
+        Json::Value b = self;
+        a.removeMember( "id" );
+        b.removeMember( "id" );
+        if ( a.toStyledString() == b.toStyledString() )
+        {
+          mapspec::removeMapSpecItem( spec, id );
+          ++applied;
+        }
+        break; // compare against the first same-role candidate only
+      }
+    }
+    else if ( code == "MAP_INSET_PLACEMENT" )
+    {
+      const std::string id = item.get( "item_id", "" ).asString();
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item || !found.item->isMember( "rect_mm" ) ||
+           ( *found.item )["rect_mm"].size() != 4 || !spec.isMember( "map_frames" ) ||
+           spec["map_frames"].empty() || !spec["map_frames"][0].isMember( "rect_mm" ) )
+        continue;
+      Json::Value &inset = *found.item;
+      const Json::Value &frameRect = spec["map_frames"][0]["rect_mm"];
+      const double insetW = inset["rect_mm"][2].asDouble();
+      const double insetH = inset["rect_mm"][3].asDouble();
+      const double frameX = frameRect[0].asDouble();
+      const double frameY = frameRect[1].asDouble();
+      const double frameW = frameRect[2].asDouble();
+      const double frameH = frameRect[3].asDouble();
+      double x = frameX + frameW - insetW - 4.0;
+      double y = frameY + frameH - insetH - 4.0;
+      // An inset larger than its frame still lands on the page (the frame
+      // itself stays the next pass's problem — never both at once).
+      x = std::clamp( x, 0.0, std::max( 0.0, pageW - insetW ) );
+      y = std::clamp( y, 0.0, std::max( 0.0, pageH - insetH ) );
+      inset["rect_mm"] = rect( x, y, insetW, insetH );
+      ++applied;
+    }
+    else if ( code == "MAP_UNKNOWN_COMPONENT" )
+    {
+      // The reference resolved to nothing — stripping it loses no content.
+      const std::string id = item.get( "item_id", "" ).asString();
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item )
+        continue;
+      ( *found.item ).removeMember( "source_component" );
+      ++applied;
+    }
+    else if ( code == "MAP_UNBALANCED_FRAMES" )
+    {
+      const std::string id = item.get( "item_id", "" ).asString();
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item || !found.item->isMember( "rect_mm" ) ||
+           ( *found.item )["rect_mm"].size() != 4 || !spec.isMember( "map_frames" ) ||
+           spec["map_frames"].empty() || !spec["map_frames"][0].isMember( "rect_mm" ) )
+        continue;
+      Json::Value &frame = *found.item;
+      frame["rect_mm"][3] = spec["map_frames"][0]["rect_mm"][3];
+      ++applied;
+    }
+    else if ( code == "MAP_OVERLAP" )
+    {
+      const std::string id = item.get( "item_id", "" ).asString();
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item )
+        continue;
+      Json::Value &foundItem = *found.item;
+      if ( !foundItem.isMember( "rect_mm" ) || foundItem["rect_mm"].size() != 4 )
+        continue;
+      // Deterministic relocation: try the classic anchor slots in a fixed
+      // order and take the first that neither leaves the page nor collides
+      // with any other item. Convergence > cleverness for agent repair.
+      const double w = foundItem["rect_mm"][2].asDouble();
+      const double h = foundItem["rect_mm"][3].asDouble();
+      const double m = 6.0;
+      struct Slot { double x; double y; };
+      const Slot candidates[] = {
+        { pageW - m - w, m },   { m, m },               { m, pageH - m - h },
+        { pageW - m - w, pageH - m - h }, { m, ( pageH - h ) / 2.0 },
+        { pageW - m - w, ( pageH - h ) / 2.0 }, { ( pageW - w ) / 2.0, pageH - m - h },
+      };
+      // Collect every other furniture rect — the same collections the
+      // overlap detector scans, so a relocated item never re-triggers
+      // MAP_OVERLAP. Map frames are overlays, not obstacles.
+      const char *overlappable[] = { "titles",   "labels",    "legends",
+                                     "scale_bars", "north_arrows", "source_notes",
+                                     "annotations", "charts",  "colorbars" };
+      std::vector<Json::Value> others;
+      for ( const char *collection : overlappable )
+      {
+        if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+          continue;
+        for ( const auto &other : spec[collection] )
+        {
+          if ( !other.isObject() || !other.isMember( "id" ) || other["id"].asString() == id )
+            continue;
+          if ( other.isMember( "rect_mm" ) && other["rect_mm"].isArray() &&
+               other["rect_mm"].size() == 4 )
+            others.push_back( other["rect_mm"] );
+        }
+      }
+      for ( const auto &candidate : candidates )
+      {
+        if ( candidate.x < 0 || candidate.y < 0 || candidate.x + w > pageW ||
+             candidate.y + h > pageH )
+          continue;
+        bool free = true;
+        for ( const auto &other : others )
+          free = free && !rectsIntersect( rect( candidate.x, candidate.y, w, h ), other );
+        if ( free )
+        {
+          foundItem["rect_mm"] = rect( candidate.x, candidate.y, w, h );
+          ++applied;
+          break;
+        }
+      }
+    }
+  }
+  return applied;
+}
+
+Json::Value preflightRuleCatalog()
+{
+  struct Rule
+  {
+      const char *code;
+      const char *severity;
+      bool repairable;
+      const char *description;
+  };
+  static const Rule kRules[] = {
+    { "MAPSPEC_INVALID", "error", false, "Structural validation problem (see validateMapSpec)." },
+    { "MAP_MISSING_MAP", "error", false, "No map frame in the document." },
+    { "MAP_EMPTY_MAP", "warning", false, "Map frame has neither layers nor extent; renders blank." },
+    { "MAP_MISSING_TITLE", "warning", true, "No title item." },
+    { "MAP_MISSING_LEGEND", "warning", true, "No legend item." },
+    { "MAP_MISSING_SCALE_BAR", "warning", true, "No scale bar." },
+    { "MAP_MISSING_NORTH_ARROW", "warning", true, "No north arrow." },
+    { "MAP_MISSING_SOURCE_NOTE", "warning", true, "No data-source note." },
+    { "MAP_INVALID_RECT", "error", false, "rect_mm width/height not positive." },
+    { "MAP_OFF_PAGE", "error", true, "Item rect exceeds the page bounds." },
+    { "MAP_MARGIN_VIOLATION", "warning", true, "Item violates a declared page.margin_mm." },
+    { "MAP_TINY_FONT", "warning", true, "Font below 6 pt." },
+    { "MAP_TITLE_OVERFLOW", "warning", true, "Title text likely overflows its rect." },
+    { "MAP_SOURCE_NOTE_CLIPPING", "warning", true, "Source-note text likely clipped." },
+    { "MAP_TEXT_OVERFLOW", "warning", true, "Label/annotation text likely overflows its rect." },
+    { "MAP_LEGEND_DENSITY", "warning", true, "Legend rect too small for the declared max_entries." },
+    { "MAP_DUPLICATE_FURNITURE", "warning", true,
+      "Same semantic_role twice; identical duplicates are removed by repair." },
+    { "MAP_INVALID_BINDING", "warning", false, "Chart binding does not resolve." },
+    { "MAP_UNBALANCED_FRAMES", "warning", true, "Multi-map frame heights deviate >15%." },
+    { "MAP_INSET_PLACEMENT", "warning", true, "Locator inset does not overlap any map frame." },
+    { "MAP_UNKNOWN_COMPONENT", "warning", true, "source_component reference does not resolve." },
+    { "MAP_CONSTRAINT_UNSATISFIABLE", "warning", false, "Composition solver could not satisfy a constraint." },
+    { "MAP_OVERLAP", "warning", true, "Two furniture items overlap." },
+    { "LAYOUT_*", "warning", false, "Findings merged from the compiled layout preflight." },
+  };
+  Json::Value catalog( Json::arrayValue );
+  for ( const auto &rule : kRules )
+  {
+    Json::Value entry( Json::objectValue );
+    entry["code"] = rule.code;
+    entry["severity"] = rule.severity;
+    entry["repairable"] = rule.repairable;
+    entry["description"] = rule.description;
+    catalog.append( entry );
+  }
+  return catalog;
+}
+
+} // namespace sicnu::agent::cartography

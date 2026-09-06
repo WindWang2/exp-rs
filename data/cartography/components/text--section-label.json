@@ -1,0 +1,31 @@
+{
+  "id": "text/section-label",
+  "version": 1,
+  "category": "text",
+  "semantic_roles": [
+    "text.section"
+  ],
+  "description": "Short section label ('A', 'Study area', '方法') introducing a map panel or figure group.",
+  "parameters": {
+    "font": {
+      "size_pt": 11,
+      "bold": true
+    }
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [],
+    "margin_mm": 4,
+    "max_count_per_page": 12
+  },
+  "compatibility": {
+    "requires_map_frame": false
+  },
+  "data_bindings": [
+    {
+      "name": "text",
+      "source": "params.text",
+      "required": true
+    }
+  ]
+}

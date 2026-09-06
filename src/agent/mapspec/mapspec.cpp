@@ -14,6 +14,10 @@ namespace sicnu::agent::mapspec {
 
 using namespace sicnu::agent::contracts;
 
+// Defined below the collection tables; used by the v2 item checks.
+bool isAnchorEdge( const std::string &edge );
+bool isConstraintKind( const std::string &kind );
+
 namespace {
 
 struct CollectionInfo
@@ -52,8 +56,8 @@ const CollectionInfo *collectionInfo( const std::string &name )
   return nullptr;
 }
 
-/// Validates one rect_mm value against the page; appends problems.
-void checkRect( const Json::Value &item, const std::string &id, double pageW, double pageH,
+/// Validates one rect_mm value; appends problems.
+void checkRect( const Json::Value &item, const std::string &id,
                 std::vector<std::string> &problems )
 {
   const Json::Value &rect = item["rect_mm"];
@@ -76,10 +80,58 @@ void checkRect( const Json::Value &item, const std::string &id, double pageW, do
   const double h = rect[3].asDouble();
   if ( w <= 0 || h <= 0 )
     problems.push_back( id + ": rect_mm width/height must be positive" );
-  Q_UNUSED( pageW );
-  Q_UNUSED( pageH );
   // Page-bounds violations are cartography-preflight findings (MAP_OFF_PAGE,
   // repairable), not structural validation failures.
+}
+
+bool isPositiveSizeArray( const Json::Value &value )
+{
+  return value.isArray() && value.size() == 2 && value[0].isNumeric() && value[1].isNumeric() &&
+         value[0].asDouble() > 0 && value[1].asDouble() > 0;
+}
+
+/// v2 per-item shape checks (anchor, min/max size, z_index, page, binding,
+/// component reference). Appends problems.
+void checkV2ItemFields( const Json::Value &item, const std::string &id,
+                        std::vector<std::string> &problems )
+{
+  if ( item.isMember( "anchor" ) )
+  {
+    const Json::Value &anchor = item["anchor"];
+    if ( !anchor.isObject() )
+      problems.push_back( id + ": anchor must be an object" );
+    else
+    {
+      if ( anchor.isMember( "edge" ) &&
+           ( !anchor["edge"].isString() ||
+             !isAnchorEdge( anchor["edge"].asString() ) ) )
+        problems.push_back( id + ": anchor.edge must be one of top-left|top-center|top-right|"
+                                   "center-left|center|center-right|bottom-left|bottom-center|"
+                                   "bottom-right" );
+      if ( anchor.isMember( "margin_mm" ) &&
+           ( !anchor["margin_mm"].isNumeric() || anchor["margin_mm"].asDouble() < 0 ) )
+        problems.push_back( id + ": anchor.margin_mm must be a non-negative number" );
+    }
+  }
+  for ( const char *member : { "min_size_mm", "max_size_mm" } )
+    if ( item.isMember( member ) && !isPositiveSizeArray( item[member] ) )
+      problems.push_back( id + ": " + member + " must be [width_mm, height_mm] with positive values" );
+  if ( item.isMember( "z_index" ) && !item["z_index"].isIntegral() )
+    problems.push_back( id + ": z_index must be an integer" );
+  if ( item.isMember( "page" ) &&
+       ( !item["page"].isIntegral() || item["page"].asInt() < 0 ) )
+    problems.push_back( id + ": page must be a non-negative integer index" );
+  if ( item.isMember( "binding" ) && !item["binding"].isObject() )
+    problems.push_back( id + ": binding must be an object" );
+  if ( item.isMember( "source_component" ) )
+  {
+    const Json::Value &reference = item["source_component"];
+    const bool valid =
+      reference.isString() ||
+      ( reference.isObject() && reference.isMember( "id" ) && reference["id"].isString() );
+    if ( !valid )
+      problems.push_back( id + ": source_component must be an id string or {id, variant}" );
+  }
 }
 
 } // namespace
@@ -89,6 +141,27 @@ const char *const kCollections[] = { "map_frames", "layers", "symbols", "legends
                                      "charts", "colorbars", "inset_maps", "grids",
                                      "annotations", "source_notes", "constraints" };
 const int kCollectionCount = static_cast<int>( sizeof( kCollections ) / sizeof( kCollections[0] ) );
+
+bool isAnchorEdge( const std::string &edge )
+{
+  static const char *const kEdges[] = { "top-left", "top-center", "top-right",
+                                        "center-left", "center", "center-right",
+                                        "bottom-left", "bottom-center", "bottom-right" };
+  for ( const char *candidate : kEdges )
+    if ( edge == candidate )
+      return true;
+  return false;
+}
+
+bool isConstraintKind( const std::string &kind )
+{
+  static const char *const kKinds[] = { "align", "match_width", "match_height", "stack",
+                                        "distribute" };
+  for ( const char *candidate : kKinds )
+    if ( kind == candidate )
+      return true;
+  return false;
+}
 
 bool isCollection( const std::string &name )
 {
@@ -222,6 +295,10 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
     return problems;
   }
 
+  if ( !spec.isMember( "layout_name" ) || !spec["layout_name"].isString() ||
+       spec["layout_name"].asString().empty() )
+    problems.push_back( "missing non-empty string field 'layout_name'" );
+
   double pageW = 0.0;
   double pageH = 0.0;
   if ( !spec.isMember( "page" ) || !spec["page"].isObject() ||
@@ -282,7 +359,7 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
       // rect_mm is optional (the compiler applies component/defaults
       // geometry); when present it must be well-formed and on-page.
       if ( info->requiresRect && item.isMember( "rect_mm" ) )
-        checkRect( item, id, pageW, pageH, problems );
+        checkRect( item, id, problems );
 
       if ( info->mayReferenceMap && item.isMember( "map_ref" ) && item["map_ref"].isString() )
       {
@@ -299,6 +376,163 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
       if ( std::string( info->name ) == "charts" &&
            ( !item.isMember( "chart" ) || !item["chart"].isObject() ) )
         problems.push_back( id + ": chart needs a 'chart' object" );
+
+      // v2 composition fields.
+      checkV2ItemFields( item, id, problems );
+    }
+  }
+
+  // --- v2: style block ------------------------------------------------------
+  if ( spec.isMember( "style" ) )
+  {
+    const Json::Value &style = spec["style"];
+    if ( !style.isObject() )
+      problems.push_back( "style must be an object" );
+    else
+    {
+      if ( style.isMember( "token_set" ) && !style["token_set"].isString() )
+        problems.push_back( "style.token_set must be a string" );
+      if ( style.isMember( "medium" ) && style["medium"].isString() &&
+           style["medium"].asString() != "print" && style["medium"].asString() != "screen" )
+        problems.push_back( "style.medium must be print|screen" );
+      if ( style.isMember( "overrides" ) && !style["overrides"].isObject() )
+        problems.push_back( "style.overrides must be an object" );
+    }
+  }
+
+  // --- v2: slots (role → item bindings) -------------------------------------
+  if ( spec.isMember( "slots" ) )
+  {
+    const Json::Value &slotList = spec["slots"]; // not `slots` — Qt moc macro
+    if ( !slotList.isArray() )
+    {
+      problems.push_back( "slots must be an array" );
+    }
+    else
+    {
+      std::set<std::string> roles;
+      for ( const auto &slot : slotList )
+      {
+        if ( !slot.isObject() || !slot.isMember( "role" ) || !slot["role"].isString() ||
+             !slot.isMember( "item" ) || !slot["item"].isString() )
+        {
+          problems.push_back( "every slot needs string role and item" );
+          continue;
+        }
+        const std::string role = slot["role"].asString();
+        if ( !roles.insert( role ).second )
+          problems.push_back( "duplicate slot role '" + role + "'" );
+        if ( findMapSpecItem( spec, slot["item"].asString() ).isNull() )
+          problems.push_back( "slot '" + role + "' references unknown item '" +
+                              slot["item"].asString() + "'" );
+      }
+    }
+  }
+
+  // --- v2: solver-enforced constraints --------------------------------------
+  if ( spec.isMember( "constraints" ) && spec["constraints"].isArray() )
+  {
+    for ( const auto &constraint : spec["constraints"] )
+    {
+      if ( !constraint.isObject() || !constraint.isMember( "id" ) )
+        continue; // structural item checks above handle malformed entries
+      const std::string cid = constraint["id"].asString();
+      if ( constraint.isMember( "kind" ) && constraint["kind"].isString() )
+      {
+        const std::string kind = constraint["kind"].asString();
+        if ( !isConstraintKind( kind ) )
+        {
+          // "frame_style" is the legacy v1 frame-decoration item; other
+          // kinds are rejected so typos cannot silently no-op.
+          if ( kind != "frame_style" )
+            problems.push_back( cid + ": unknown constraint kind '" + kind +
+                                "' (align|match_width|match_height|stack|distribute|"
+                                "frame_style)" );
+          continue;
+        }
+        if ( !constraint.isMember( "items" ) || !constraint["items"].isArray() ||
+             constraint["items"].size() < 2 )
+        {
+          problems.push_back( cid + ": constraint needs an items array with at least 2 ids" );
+          continue;
+        }
+        for ( const auto &reference : constraint["items"] )
+        {
+          if ( !reference.isString() )
+            continue;
+          if ( findMapSpecItem( spec, reference.asString() ).isNull() )
+            problems.push_back( cid + ": constraint item '" + reference.asString() +
+                                "' does not resolve" );
+        }
+        if ( kind == "align" &&
+             ( !constraint.isMember( "edge" ) || !constraint["edge"].isString() ) )
+          problems.push_back( cid + ": align constraint needs edge (top|bottom|left|right)" );
+        if ( kind == "stack" &&
+             ( !constraint.isMember( "direction" ) || !constraint["direction"].isString() ) )
+          problems.push_back( cid + ": stack constraint needs direction "
+                                       "(below|above|left_of|right_of)" );
+        if ( kind == "distribute" &&
+             ( !constraint.isMember( "direction" ) || !constraint["direction"].isString() ) )
+          problems.push_back( cid + ": distribute constraint needs direction "
+                                       "(horizontal|vertical)" );
+      }
+    }
+  }
+
+  // --- v2: pages + item page indices ----------------------------------------
+  if ( spec.isMember( "pages" ) )
+  {
+    const Json::Value &pages = spec["pages"];
+    if ( !pages.isArray() )
+      problems.push_back( "pages must be an array" );
+    else if ( pages.size() > 10 )
+      problems.push_back( "pages capped at 10 per document" );
+    else
+    {
+      for ( const auto &pageEntry : pages )
+      {
+        if ( !pageEntry.isObject() || !pageEntry.isMember( "width_mm" ) ||
+             !pageEntry["width_mm"].isNumeric() || !pageEntry.isMember( "height_mm" ) ||
+             !pageEntry["height_mm"].isNumeric() || pageEntry["width_mm"].asDouble() <= 0 ||
+             pageEntry["height_mm"].asDouble() <= 0 )
+        {
+          problems.push_back( "every page needs positive width_mm/height_mm" );
+        }
+      }
+    }
+  }
+  const int maxPageIndex =
+    spec.isMember( "pages" ) && spec["pages"].isArray() ? static_cast<int>( spec["pages"].size() ) : 0;
+  for ( int i = 0; i < kCollectionCount; ++i )
+  {
+    if ( !spec.isMember( kCollectionInfos[i].name ) || !spec[kCollectionInfos[i].name].isArray() )
+      continue;
+    for ( const auto &item : spec[kCollectionInfos[i].name] )
+    {
+      if ( !item.isObject() || !item.isMember( "id" ) || !item.isMember( "page" ) )
+        continue;
+      if ( item["page"].isIntegral() && item["page"].asInt() > maxPageIndex )
+        problems.push_back( item["id"].asString() + ": page index " +
+                            std::to_string( item["page"].asInt() ) +
+                            " exceeds declared pages (" + std::to_string( maxPageIndex ) +
+                            " additional)" );
+    }
+  }
+
+  // --- v2: atlas hook ---------------------------------------------------------
+  if ( spec.isMember( "page" ) && spec["page"].isObject() && spec["page"].isMember( "atlas" ) )
+  {
+    const Json::Value &atlas = spec["page"]["atlas"];
+    if ( !atlas.isObject() )
+      problems.push_back( "page.atlas must be an object" );
+    else
+    {
+      if ( atlas.isMember( "enabled" ) && !atlas["enabled"].isBool() )
+        problems.push_back( "page.atlas.enabled must be a boolean" );
+      if ( atlas.isMember( "coverage_layer" ) && !atlas["coverage_layer"].isString() )
+        problems.push_back( "page.atlas.coverage_layer must be a layer reference string" );
+      if ( atlas.isMember( "filename_expression" ) && !atlas["filename_expression"].isString() )
+        problems.push_back( "page.atlas.filename_expression must be a string" );
     }
   }
 
@@ -307,34 +541,41 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
 
 Json::Value upgradeMapSpec( const Json::Value &doc )
 {
+  Json::Value upgraded = doc;
   // v0 (pre-release drafts): {layout, page, items: [...]} — items carried a
   // "kind" discriminator instead of collections.
-  if ( !doc.isObject() || !doc.isMember( "items" ) || !doc["items"].isArray() ||
-       doc.isMember( "map_frames" ) )
-    return doc;
-
-  const std::string layoutName =
-    doc.isMember( "layout_name" ) && doc["layout_name"].isString() ? doc["layout_name"].asString()
-                                                                   : std::string( "mapspec" );
-  Json::Value upgraded = makeMapSpec( layoutName, doc.get( "page", Json::Value( Json::objectValue ) ) );
-  const std::map<std::string, std::string> kindToCollection = {
-    { "map", "map_frames" },   { "legend", "legends" },   { "scale_bar", "scale_bars" },
-    { "scalebar", "scale_bars" }, { "north_arrow", "north_arrows" }, { "title", "titles" },
-    { "label", "labels" },     { "chart", "charts" },     { "colorbar", "colorbars" },
-    { "inset_map", "inset_maps" }, { "grid", "grids" },   { "annotation", "annotations" },
-    { "source_note", "source_notes" }, { "constraint", "constraints" },
-  };
-  for ( const auto &item : doc["items"] )
+  const bool isV0 = doc.isObject() && doc.isMember( "items" ) && doc["items"].isArray() &&
+                    !doc.isMember( "map_frames" );
+  if ( isV0 )
   {
-    if ( !item.isObject() || !item.isMember( "kind" ) )
-      continue;
-    const auto it = kindToCollection.find( item["kind"].asString() );
-    if ( it == kindToCollection.end() )
-      continue;
-    Json::Value migrated = item;
-    migrated.removeMember( "kind" );
-    appendMapSpecItem( upgraded, it->second, std::move( migrated ) );
+    const std::string layoutName =
+      doc.isMember( "layout_name" ) && doc["layout_name"].isString() ? doc["layout_name"].asString()
+                                                                     : std::string( "mapspec" );
+    upgraded = makeMapSpec( layoutName, doc.get( "page", Json::Value( Json::objectValue ) ) );
+    const std::map<std::string, std::string> kindToCollection = {
+      { "map", "map_frames" },   { "legend", "legends" },   { "scale_bar", "scale_bars" },
+      { "scalebar", "scale_bars" }, { "north_arrow", "north_arrows" }, { "title", "titles" },
+      { "label", "labels" },     { "chart", "charts" },     { "colorbar", "colorbars" },
+      { "inset_map", "inset_maps" }, { "grid", "grids" },   { "annotation", "annotations" },
+      { "source_note", "source_notes" }, { "constraint", "constraints" },
+    };
+    for ( const auto &item : doc["items"] )
+    {
+      if ( !item.isObject() || !item.isMember( "kind" ) )
+        continue;
+      const auto it = kindToCollection.find( item["kind"].asString() );
+      if ( it == kindToCollection.end() )
+        continue;
+      Json::Value migrated = item;
+      migrated.removeMember( "kind" );
+      appendMapSpecItem( upgraded, it->second, std::move( migrated ) );
+    }
   }
+  // v1 → v2: every v2 field is optional, so the upgrade is a version bump.
+  // Idempotent: v2 documents and non-envelope inputs pass through unchanged.
+  const std::string env = checkEnvelope( upgraded, "map_spec" );
+  if ( env.empty() && upgraded["spec_version"].asInt() < kMapSpecCurrentVersion )
+    upgraded["spec_version"] = kMapSpecCurrentVersion;
   return upgraded;
 }
 

@@ -1,0 +1,63 @@
+{
+  "id": "chart/bar",
+  "version": 1,
+  "category": "chart",
+  "semantic_roles": [
+    "chart.statistics"
+  ],
+  "description": "Category bar chart (class areas, counts).",
+  "parameters": {
+    "kind": "bar"
+  },
+  "defaults": {
+    "chart": {
+      "kind": "bar",
+      "binding": {
+        "mode": "inline",
+        "data": []
+      }
+    }
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "bottom-rail",
+      "right-rail"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 4,
+    "min_size_mm": [
+      30,
+      25
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "classification",
+      "land_cover",
+      "categorical"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "data",
+      "source": "params.chart_data",
+      "required": true,
+      "description": "inline [{label, value}] or vector_expression {layer, x_expression, y_expression}."
+    }
+  ],
+  "variants": [
+    {
+      "id": "grouped",
+      "description": "Side-by-side category bars (default)."
+    },
+    {
+      "id": "stacked",
+      "description": "Stacked bars; data entries carry {label, parts: [{label, value}]}.",
+      "parameters": {
+        "kind": "stacked_bar"
+      }
+    }
+  ]
+}

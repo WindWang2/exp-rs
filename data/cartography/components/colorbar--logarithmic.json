@@ -1,0 +1,43 @@
+{
+  "id": "colorbar/logarithmic",
+  "version": 1,
+  "category": "color-bar",
+  "semantic_roles": [
+    "colorbar.primary"
+  ],
+  "description": "Log-scaled strip for skewed variables (backscatter proxies, density); label ticks are decades.",
+  "parameters": {
+    "ramp": "sequential",
+    "width_mm": 60,
+    "height_mm": 8,
+    "scale": "log10"
+  },
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": [
+      "bottom-center"
+    ],
+    "margin_mm": 8,
+    "max_count_per_page": 2,
+    "min_size_mm": [
+      40,
+      6
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": true,
+    "map_types": [
+      "raster"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "range",
+      "source": "raster.statistics",
+      "required": true
+    }
+  ],
+  "validation": {
+    "min_positive_min": true
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "id": "colorbar/discrete",
+  "version": 1,
+  "category": "color-bar",
+  "semantic_roles": [
+    "colorbar.primary"
+  ],
+  "description": "Discrete class strip for qualitative rasters; uses an explicit color stop list.",
+  "parameters": {
+    "width_mm": 60,
+    "height_mm": 8
+  },
+  "data_bindings": [
+    {
+      "name": "classes",
+      "source": "params.classes",
+      "required": true,
+      "description": "Ordered [{label, color}] rendered as hard stops."
+    }
+  ],
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": [
+      "bottom-center"
+    ],
+    "margin_mm": 8,
+    "max_count_per_page": 2,
+    "min_size_mm": [
+      40,
+      6
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": true,
+    "map_types": [
+      "raster"
+    ]
+  }
+}

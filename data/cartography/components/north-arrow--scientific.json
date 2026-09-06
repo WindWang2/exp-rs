@@ -1,0 +1,31 @@
+{
+  "id": "north-arrow/scientific",
+  "version": 1,
+  "category": "north-arrow",
+  "semantic_roles": [
+    "north_arrow.primary"
+  ],
+  "description": "Publication-grade true-north arrow.",
+  "parameters": {
+    "size_mm": 14,
+    "north_mode": "true"
+  },
+  "defaults": {
+    "svg": ":/images/north_arrows/layout_default_north_arrow.svg"
+  },
+  "layout_constraints": {
+    "anchor": "corner",
+    "preferred_positions": [
+      "top-right"
+    ],
+    "margin_mm": 8,
+    "max_count_per_page": 1,
+    "min_size_mm": [
+      8,
+      8
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": true
+  }
+}
