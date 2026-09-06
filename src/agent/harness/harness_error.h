@@ -43,6 +43,11 @@ inline constexpr const char *kTransientFailure = "TRANSIENT_FAILURE";
 inline constexpr const char *kPathOutsideWorkspace = "PATH_OUTSIDE_WORKSPACE";
 inline constexpr const char *kWorkflowNotFound = "WORKFLOW_NOT_FOUND";
 inline constexpr const char *kToolNotFound = "TOOL_NOT_FOUND";
+inline constexpr const char *kTimeOrderInvalid = "TIME_ORDER_INVALID";
+inline constexpr const char *kModalityMismatch = "MODALITY_MISMATCH";
+inline constexpr const char *kPolarizationMismatch = "POLARIZATION_MISMATCH";
+inline constexpr const char *kCalibrationMismatch = "CALIBRATION_MISMATCH";
+inline constexpr const char *kTrainingInvalid = "TRAINING_INVALID";
 inline constexpr const char *kNotSupported = "NOT_SUPPORTED";
 } // namespace error_codes
 

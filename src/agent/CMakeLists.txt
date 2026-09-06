@@ -30,6 +30,22 @@ add_library(sicnu_agent SHARED
   harness/tool_manifest.h
   harness/harness_tools.cpp
   harness/harness_tools.h
+  harness/entity_resolver.cpp
+  harness/entity_resolver.h
+  harness/grounding_tools.cpp
+  harness/grounding_tools.h
+  harness/agent_plan.cpp
+  harness/agent_plan.h
+  harness/scientific_preflight.cpp
+  harness/scientific_preflight.h
+  harness/harness_verification.cpp
+  harness/harness_verification.h
+  harness/plan_tools.cpp
+  harness/plan_tools.h
+  harness/recipe_catalog.cpp
+  harness/recipe_catalog.h
+  harness/recipe_tools.cpp
+  harness/recipe_tools.h
   tool_catalog/agent_tool.cpp
   tool_catalog/agent_tool.h
   tool_catalog/tool_provider.h

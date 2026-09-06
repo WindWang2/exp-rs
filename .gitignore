@@ -41,6 +41,9 @@ data/*
 !data/benchmarks/**
 !data/pipelines/
 !data/pipelines/**
+# Harness 4.0 scientific recipes are tracked metadata, not local data.
+!data/agent/
+!data/agent/**
 
 # Test golden data always tracked
 !tests/data/

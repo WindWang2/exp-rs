@@ -43,6 +43,11 @@ const CodeInfo *codeInfo( const std::string &code )
     { "PATH_OUTSIDE_WORKSPACE",  { "validation", RetryClass::None } },
     { "WORKFLOW_NOT_FOUND",      { "validation", RetryClass::None } },
     { "TOOL_NOT_FOUND",          { "validation", RetryClass::None } },
+    { "TIME_ORDER_INVALID",      { "validation", RetryClass::None } },
+    { "MODALITY_MISMATCH",       { "validation", RetryClass::None } },
+    { "POLARIZATION_MISMATCH",   { "validation", RetryClass::None } },
+    { "CALIBRATION_MISMATCH",    { "validation", RetryClass::None } },
+    { "TRAINING_INVALID",        { "validation", RetryClass::None } },
     { "NOT_SUPPORTED",           { "runtime", RetryClass::None } },
   };
   static const Entry *kBegin = kEntries;

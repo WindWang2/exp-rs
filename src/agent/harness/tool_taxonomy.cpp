@@ -34,6 +34,7 @@ constexpr std::array<Override, 90> kOverrides = { {
   { "data:describe_dataset", "data", "inspect" },
   { "data:get_lineage", "provenance", "inspect" },
   // spatial: inspection & sampling
+  { "spatial:understand", "data", "inspect" },
   { "spatial:raster_inspect", "raster", "inspect" },
   { "spatial:vector_inspect", "data", "inspect" },
   { "spatial:sample_pixels", "raster", "sample" },

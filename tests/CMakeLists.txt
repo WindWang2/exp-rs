@@ -5920,6 +5920,16 @@ sicnu_add_test(test_harness_catalog)
 sicnu_link_jsoncpp(test_harness_catalog)
 
 
+sicnu_add_test(test_harness_grounding)
+sicnu_link_jsoncpp(test_harness_grounding)
+
+
+# Harness 4.0 evals: six deterministic RS scenarios + anti-hallucination +
+# token budgets (mission Phases 18-20).
+sicnu_add_test(test_harness_evals)
+sicnu_link_jsoncpp(test_harness_evals)
+
+
 # Last TEST_INCLUDE_FILES entry: stamp PYTHONHOME / LD_LIBRARY_PATH / QT_IM_MODULE
 # onto every test after Catch PRE_TEST discovery has registered them (#730).
 sicnu_register_test_env_applier()
