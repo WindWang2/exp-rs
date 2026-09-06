@@ -24,8 +24,6 @@
 #include <qgsrasterlayer.h>
 
 #include "widgets/rs_empty_state_widget.h"
-#include "panels/mosaic_panel.h"
-#include "panels/task_center_dock.h"
 #include "log_panel.h"
 #include "panels/data_manager_panel.h"
 #include "data/data_manager.h"
@@ -261,89 +259,6 @@ TEST_CASE( "LogPanel - Dynamic Stack Switching and Rapid Log/Clear Cycles", "[m3
         REQUIRE( stack->currentIndex() == 1 );
         REQUIRE( logPanel.messageCount() == 0 );
     }
-}
-
-TEST_CASE( "MosaicPanel - Dynamic Stack Switching on Rapid Input Changes", "[m3][mosaic_panel][stack]" )
-{
-    ensureQgisApp();
-
-    MosaicPanel mosaic;
-    auto *stack = mosaic.findChild<QStackedWidget *>( QStringLiteral( "rsMosaicInputStack" ) );
-    auto *list = mosaic.findChild<QListWidget *>();
-    REQUIRE( stack != nullptr );
-    REQUIRE( list != nullptr );
-
-    // Initial state: Empty state page (Index 1)
-    REQUIRE( stack->currentIndex() == 1 );
-    REQUIRE( list->count() == 0 );
-    REQUIRE( mosaic.inputFiles().isEmpty() );
-
-    // Add items directly to list and verify stack index logic
-    const QString f1 = createDummyRaster( QStringLiteral( "mosaic_test_1" ) );
-    const QString f2 = createDummyRaster( QStringLiteral( "mosaic_test_2" ) );
-
-    list->addItem( f1 );
-    stack->setCurrentIndex( list->count() > 0 ? 0 : 1 );
-    REQUIRE( stack->currentIndex() == 0 );
-    REQUIRE( mosaic.inputFiles().size() == 1 );
-
-    list->addItem( f2 );
-    stack->setCurrentIndex( list->count() > 0 ? 0 : 1 );
-    REQUIRE( stack->currentIndex() == 0 );
-    REQUIRE( mosaic.inputFiles().size() == 2 );
-
-    // Clear all items -> Index 1
-    list->clear();
-    stack->setCurrentIndex( list->count() > 0 ? 0 : 1 );
-    REQUIRE( stack->currentIndex() == 1 );
-    REQUIRE( mosaic.inputFiles().isEmpty() );
-
-    // Rapid add/remove cycles (200 iterations)
-    for ( int i = 0; i < 200; ++i )
-    {
-        list->addItem( f1 );
-        stack->setCurrentIndex( list->count() > 0 ? 0 : 1 );
-        REQUIRE( stack->currentIndex() == 0 );
-
-        delete list->takeItem( 0 );
-        stack->setCurrentIndex( list->count() > 0 ? 0 : 1 );
-        REQUIRE( stack->currentIndex() == 1 );
-    }
-}
-
-TEST_CASE( "TaskCenterDock - Dynamic Stack Switching and Task Lifecycle", "[m3][task_center][stack]" )
-{
-    ensureQgisApp();
-
-    sicnu::TaskCenterDock taskDock;
-    auto *stack = taskDock.findChild<QStackedWidget *>( QStringLiteral( "rsTaskCenterTreeStack" ) );
-    auto *tree = taskDock.findChild<QTreeWidget *>();
-    REQUIRE( stack != nullptr );
-    REQUIRE( tree != nullptr );
-
-    // Initial state: Empty state page (Index 1)
-    taskDock.refreshTaskList();
-    REQUIRE( stack->currentIndex() == 1 );
-
-    // Enqueue a task
-    QVariantMap params;
-    params.insert( QStringLiteral( "input" ), QStringLiteral( "/test/dem.tif" ) );
-    long taskId = sicnu::TaskCenter::instance().enqueueTask( QStringLiteral( "stress_test_algo" ), params, false );
-    REQUIRE( taskId > 0 );
-
-    taskDock.refreshTaskList();
-    QCoreApplication::processEvents();
-
-    // Stack should now be on Index 0 (Tree)
-    REQUIRE( stack->currentIndex() == 0 );
-    REQUIRE( tree->topLevelItemCount() >= 1 );
-
-    // Cancel task and refresh
-    sicnu::TaskCenter::instance().cancelTask( taskId );
-    taskDock.refreshTaskList();
-    QCoreApplication::processEvents();
-
-    REQUIRE( stack->currentIndex() == 0 ); // Still shows cancelled task record in history
 }
 
 TEST_CASE( "DataManagerPanel - Dynamic Stack Switching with Asset Registrations", "[m3][data_manager][stack]" )

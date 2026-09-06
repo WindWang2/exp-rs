@@ -23,7 +23,6 @@
 #include "widgets/spectral_profile_widget.h"
 #include "widgets/guided_workflow_widget.h"
 #include "widgets/histogram_stretch_widget.h"
-#include "widgets/band_composition_rail.h"
 #include "widgets/rs_toolbar_flow_host.h"
 #include "widgets/rs_empty_state_widget.h"
 
@@ -39,6 +38,7 @@
 #include <QEvent>
 #include <QHash>
 #include <QStatusBar>
+#include <QSettings>
 #include <QToolBar>
 #include <QSizePolicy>
 
@@ -363,9 +363,16 @@ void QgisDesktopWindow::setupDataManagerPanel()
 
     // Workspace Governance 3.0 browser (Platform 3.0 Phase S): paged,
     // virtualized view over the governance index — no per-asset widgets.
-    auto *workspaceBrowser = new sicnu::app::WorkspaceBrowserPanel( this );
+    // Backed by the ProjectContext WorkspaceService (Data vs Results/History
+    // split: raw assets live in DataManagerPanel; governed entities here).
+    m_workspaceBrowserPanel = new sicnu::app::WorkspaceBrowserPanel( this );
+    m_workspaceBrowserPanel->setWorkspaceService(
+        &m_projectContext->workspaceService() );
     m_workspaceBrowserDock = new QDockWidget( tr( "工作区治理" ), this );
-    m_workspaceBrowserDock->setWidget( workspaceBrowser );
+    m_workspaceBrowserDock->setWidget( m_workspaceBrowserPanel );
+    // Governance rows open on the map through the Data/Display seam.
+    connect( m_workspaceBrowserPanel, &sicnu::app::WorkspaceBrowserPanel::openPathRequested,
+             this, [this]( const QString &path ) { loadRasterLayer( path ); } );
     m_workspaceBrowserDock->setObjectName( QStringLiteral( "workspaceBrowserDock" ) );
     addDockWidget( Qt::LeftDockWidgetArea, m_workspaceBrowserDock );
     if ( m_dataManagerPanel )
@@ -568,7 +575,6 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
         m_windowMenu->addAction( m_taskPanelDock->toggleViewAction() );
 
     // Single Task Center UI is the bottom RsJobPanel (rsJobPanelDock).
-    // Do not also create TaskCenterDock — that duplicated the same projection.
     connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::layerAutoLoadRequested,
              this, [this]( const QString &path ) {
                  // Generic path open → DataManager + main Display View.
@@ -666,6 +672,12 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
              this, &QgisDesktopWindow::openWorkflowTool );
     connect( m_ribbonController, &RibbonController::ribbonCollapsedChanged,
              this, &QgisDesktopWindow::layoutToolbarsUnderRibbon );
+    // Restore the persisted collapse state (setter persists toggles).
+    {
+        QSettings settings;
+        if ( settings.value( QStringLiteral( "ribbon/collapsed" ), false ).toBool() )
+            m_ribbonController->setRibbonCollapsed( true );
+    }
 
     auto *chrome = new QWidget;
     chrome->setObjectName( QStringLiteral( "rsTopChrome" ) );
@@ -679,13 +691,6 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     chromeLay->setContentsMargins( 0, 0, 0, 0 );
     chromeLay->setSpacing( 0 );
     chromeLay->addWidget( m_ribbonBar );
-
-    // Keep BandCompositionRail instance for layer-sync code paths, but do not
-    // show it in the top chrome (Ribbon already exposes band composition).
-    m_bandRail = new BandCompositionRail( chrome );
-    m_bandRail->setFixedHeight( 0 );
-    m_bandRail->setMaximumHeight( 0 );
-    m_bandRail->hide();
 
     // Adaptive 1–2 row toolbar flow under the ribbon (draggable, resizable).
     m_toolbarStrip = new QWidget( chrome );
@@ -924,11 +929,6 @@ void QgisDesktopWindow::applyProductShellLayout()
     // Open via Ribbon 任务 → 任务中心, or panel context menu.
     hideDock( m_jobPanel );
 
-    // Legacy right-side TaskCenterDock is no longer created; hide if any stale
-    // widget/object still appears (old binaries / accidental construction).
-    if ( QDockWidget *legacyTc = findChild<QDockWidget *>( QStringLiteral( "TaskCenterDock" ) ) )
-        legacyTc->hide();
-
     // Left: Data Manager is the elevated catalog; view layer tree is secondary tab.
     // Browser stays hidden until needed.
     if ( m_browserDock )
@@ -966,13 +966,6 @@ void QgisDesktopWindow::applyProductShellLayout()
     layoutToolbarsUnderRibbon();
     if ( m_ribbonBar )
         m_ribbonBar->show();
-    // Band rail is retired from product chrome (Ribbon has band composition).
-    if ( m_bandRail )
-    {
-        m_bandRail->hide();
-        m_bandRail->setFixedHeight( 0 );
-        m_bandRail->setMaximumHeight( 0 );
-    }
 
     // Keep the detached action-host menubar hidden (never install it).
     if ( m_hiddenMenuBar )

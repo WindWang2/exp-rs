@@ -1,9 +1,11 @@
 // main_window_misc.cpp — Settings, help, processing UI, and panel layout
 #include "main_window.h"
+#include "design_tokens.h"
 
 #include "app_paths.h"
 #include "dialogs/help_viewer_dialog.h"
 #include "dialogs/preferences_dialog.h"
+#include "panels/workspace_browser_panel.h"
 #include "processing/tools/tool_path_manager.h"
 
 #include <QApplication>
@@ -55,22 +57,24 @@ bool loadThemeQss( const QString &relativePath )
 
 void QgisDesktopWindow::applyDarkPalette()
 {
-    // Fusion base palette aligned with Canopy Lab Night surfaces
+    // Fusion base palette aligned with Canopy Lab Night surfaces — values come
+    // from the shared token layer (Milestone F), not local literals.
+    using namespace SicnuUi::Tokens::Dark;
     QPalette darkPalette;
-    darkPalette.setColor( QPalette::Window, QColor( 0x1A, 0x1D, 0x23 ) );
-    darkPalette.setColor( QPalette::WindowText, QColor( 0xE8, 0xEC, 0xF1 ) );
-    darkPalette.setColor( QPalette::Base, QColor( 0x1E, 0x22, 0x29 ) );
-    darkPalette.setColor( QPalette::AlternateBase, QColor( 0x25, 0x2A, 0x33 ) );
-    darkPalette.setColor( QPalette::ToolTipBase, QColor( 0x25, 0x2A, 0x33 ) );
-    darkPalette.setColor( QPalette::ToolTipText, QColor( 0xE8, 0xEC, 0xF1 ) );
-    darkPalette.setColor( QPalette::Text, QColor( 0xE8, 0xEC, 0xF1 ) );
-    darkPalette.setColor( QPalette::Button, QColor( 0x25, 0x2A, 0x33 ) );
-    darkPalette.setColor( QPalette::ButtonText, QColor( 0xE8, 0xEC, 0xF1 ) );
-    darkPalette.setColor( QPalette::BrightText, QColor( 0xF0, 0x71, 0x67 ) );
-    darkPalette.setColor( QPalette::Link, QColor( 0x4D, 0xA3, 0xE0 ) );
-    darkPalette.setColor( QPalette::Highlight, QColor( 0x2B, 0xB6, 0x73 ) );
-    darkPalette.setColor( QPalette::HighlightedText, QColor( 0x1A, 0x1D, 0x23 ) );
-    darkPalette.setColor( QPalette::PlaceholderText, QColor( 0xA8, 0xB0, 0xBC ) );
+    darkPalette.setColor( QPalette::Window, canvas );
+    darkPalette.setColor( QPalette::WindowText, inkPrimary );
+    darkPalette.setColor( QPalette::Base, panel );
+    darkPalette.setColor( QPalette::AlternateBase, raised );
+    darkPalette.setColor( QPalette::ToolTipBase, raised );
+    darkPalette.setColor( QPalette::ToolTipText, inkPrimary );
+    darkPalette.setColor( QPalette::Text, inkPrimary );
+    darkPalette.setColor( QPalette::Button, raised );
+    darkPalette.setColor( QPalette::ButtonText, inkPrimary );
+    darkPalette.setColor( QPalette::BrightText, err );
+    darkPalette.setColor( QPalette::Link, mapSelect );
+    darkPalette.setColor( QPalette::Highlight, accent );
+    darkPalette.setColor( QPalette::HighlightedText, canvas );
+    darkPalette.setColor( QPalette::PlaceholderText, inkSecondary );
     qApp->setPalette( darkPalette );
 }
 
@@ -236,7 +240,7 @@ void QgisDesktopWindow::restorePanelState()
     // and a crowded right dock stack that fought the new chrome.
     // v7: full-width top ribbon dock (setCorner Top*→TopDock) — drop prior states.
     // v8: toolbars hosted in chrome strip under ribbon (not TopToolBarArea).
-    // v9: hide empty Task Center by default; drop dual TaskCenterDock layouts.
+    // v9/v12: hide empty Task Center by default; single task projection.
     // v10: remove band composition rail from top chrome; content-width toolbars.
     // v11: view-oriented shell — Data Manager raised; Layers retitled 视图图层.
     constexpr int kShellLayoutVersion = 11;
@@ -419,6 +423,25 @@ void QgisDesktopWindow::resetPanelLayout()
     layoutToolbarsUnderRibbon();
     statusBar()->showMessage(
       tr( "布局已重置为 Ribbon 模式（工具栏可选；任务中心默认收起）" ), 3000 );
+}
+
+void QgisDesktopWindow::updateWindowTitle()
+{
+    const QString fileName = QgsProject::instance()->fileName();
+    const QString project = fileName.isEmpty()
+                                ? tr( "未命名工程" )
+                                : QFileInfo( fileName ).completeBaseName();
+    const QString dirtyMarker = m_projectDirty ? QStringLiteral( "*" ) : QString();
+    setWindowTitle( tr( "%1%2 — SICNU GEO RS 遥感分析平台" ).arg( dirtyMarker, project ) );
+}
+
+void QgisDesktopWindow::refreshWorkspaceBrowser()
+{
+    // Governance content follows the project store; the panel also refreshes
+    // itself on entityChanged, but a store open/reopen replaces the backing
+    // index, so the shell re-queries explicitly.
+    if ( m_workspaceBrowserPanel )
+        m_workspaceBrowserPanel->refresh();
 }
 
 void QgisDesktopWindow::savePanelState()
