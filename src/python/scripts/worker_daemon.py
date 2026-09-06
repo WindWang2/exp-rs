@@ -148,6 +148,9 @@ class SicnuPythonIface:
         self._s = socket_conn
         self._canvas_proxy = SicnuMapCanvasProxy(socket_conn)
         self._message_bar_proxy = SicnuMessageBarProxy(socket_conn)
+        # Algorithm ids this plugin registered via registerProcessingAlgorithm
+        # (issue #755: popped from algo_executors on unload_plugin).
+        self.registered_algo_ids = []
 
     def addPluginToMenu(self, title, action):
         cb_id = f"cb_{id(action)}"
@@ -235,6 +238,8 @@ class SicnuPythonIface:
     def registerProcessingAlgorithm(self, algo_id, name="", group="Python Plugins", description="", execute_fn=None):
         if execute_fn is not None:
             algo_executors[algo_id] = execute_fn
+        if algo_id not in self.registered_algo_ids:
+            self.registered_algo_ids.append(algo_id)
         req_msg = {
             "jsonrpc": "2.0",
             "method": "processing.register_algorithm",
@@ -375,6 +380,8 @@ def main():
                         if hasattr(mod, "classFactory"):
                             iface_obj = SicnuPythonIface(s)
                             plugin_obj = mod.classFactory(iface_obj)
+                            # Owner evidence for unload-time executor cleanup.
+                            setattr(plugin_obj, "_exprs_iface", iface_obj)
                             if hasattr(plugin_obj, "initGui"):
                                 plugin_obj.initGui()
                             loaded_plugins[package_name] = plugin_obj
@@ -387,8 +394,17 @@ def main():
                         package_name = params.get("package_name")
                         if package_name in loaded_plugins:
                             plugin_obj = loaded_plugins.pop(package_name)
-                            if hasattr(plugin_obj, "unload"):
-                                plugin_obj.unload()
+                            try:
+                                if hasattr(plugin_obj, "unload"):
+                                    plugin_obj.unload()
+                            finally:
+                                # #755 backstop: drop this plugin's algorithm
+                                # executors so a stale py: id cannot execute in
+                                # the reused worker after unload — even when
+                                # plugin unload() raises.
+                                iface_obj = getattr(plugin_obj, "_exprs_iface", None)
+                                for algo_id in getattr(iface_obj, "registered_algo_ids", []):
+                                    algo_executors.pop(algo_id, None)
                         resp = {
                             "jsonrpc": "2.0",
                             "id": req_id,
