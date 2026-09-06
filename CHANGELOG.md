@@ -2,6 +2,21 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-06
+
+### 🛡️ Data Plane, Runtime, Governance & Reproducibility Reliability 4.0 (goal series, ADR 0130)
+- **Governed-state data-loss invariants (#746)**: a v3 project can no longer be silently rewritten as v1 — the governed document is cached on read (even with the governance store unavailable) and re-persisted on save; a save probes store integrity (`PRAGMA quick_check`) and falls back to the cache when the store is corrupt; the cached document and v3-seen mark are cleared on project transitions (no cross-project bleed); a state that cannot produce the governed document fails the save with `workspace.downgrade_refused` instead of dropping state silently.
+- **Snapshot consistency (#751)**: `GovernanceStore::checkpointForBackup()` folds the WAL (`PRAGMA wal_checkpoint(TRUNCATE)`) before the copy; a snapshot refuses with a checkpoint diagnostic when the checkpoint fails; sidecars are copied only defensively; `busy_timeout=5000` now applies to every connection (read-only ones included).
+- **Explicit restore diagnostics (#752)**: `fromProjectJson` aggregates every failed upsert into `workspace.restore_failed` with per-entity counts; read-only (newer-schema) stores surface `workspace.store_read_only`; the project document wins on the next save.
+- **SQLite store hardening (#758 1–4)**: every `COMMIT` checked with rollback-on-failure; unchecked single-statement writers (`addTag`, `linkRunOutput` → `Result<void>`, `upsertPathMapping`, `clearOutgoingLineage`) verify `step()` and report typed failures; alias ownership is collision-checked symmetrically (`store.alias_collision`, existing owner kept); `project:summary` reports real `COUNT(*)` totals (`entityCounts()`); bulk read paths reuse prepare-once statements (100k mirror no longer pays 2–3 prepares per row).
+- **Reference-safe artifact identity (#758 5–7)**: pool eviction keeps content-addressed objects that live records still reference; incremental storage accounting removes the per-store objects-dir tree walk; asset removal deletes only the removed asset's own lineage edges (downstream provenance survives); `ReproBundleExporter` no longer const-mutates caller options.
+- **Cache correctness under external mutation (#749)**: registered (non-chained) inputs are stat-bound into cache entries and re-validated at lookup; small registered inputs carry a content digest in the execution fingerprint (contract-v2 `lazyContentDigest`, `SICNU_CACHE_INPUT_DIGEST_MAX_MB` budget, default 64 MiB) so same-size/same-mtime rewrites miss; a bounded `DataManager` file watcher (`SICNU_DATA_WATCH_LIMIT`, default 4096) advances revisions through `notifyExternalContentChange`.
+- **Crash-resume artifact identity (#750)**: step checkpoints record a completion identity (size+mtime always, SHA-256 within `SICNU_RESUME_DIGEST_MAX_MB`, default 256 MiB); the resume gate re-verifies and re-executes mismatched or unverifiable (legacy) outputs — foreign bytes are never fed downstream as a resumed result.
+- **Truthful governance run states (#754)**: `WorkflowRunCoordinator` exposes a run-state observer (Running/Completed/Failed/Canceled/Interrupted) bound by `ProjectContext` to `WorkspaceService::recordRun`; the mirror stops fabricating `state="Completed"`; orphan results include outputs anchored only by failed/canceled/interrupted runs.
+- **ImportCenter cancellation (#753)**: cancel now stops registration at the next batch boundary with a truthful partial tally.
+- **Worker runtime**: `LocalWorkerPool` — bounded warm pool of isolated operator workers (handshake health checks, per-job timeout, cancel escalation, crash → typed error + replacement, lifetime recycling, telemetry, safe shutdown); `runInLocalWorker` job ids made collision-free.
+- **Fault matrix**: `docs/architecture/FAULT_MATRIX_4.md` — 24 failure rows (corrupt DB, hot WAL, failed COMMIT, killed worker/workflow, stale checkpoint, external replacement, cancellation, project switch, …) with expected safe behavior + covering tests; 100k scale contract re-verified after hardening (ingest ~1.1 s, paged query 76 ms, facet 5–22 ms, 1000 lookups 39 ms, 10k bulk tag 15 ms).
+
 ## [Unreleased] - 2026-09-05
 
 ### 🗂️ Project Workspace, Data Governance & Reproducibility Platform 3.0 (goal series, ADR 0129)

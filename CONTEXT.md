@@ -24,6 +24,16 @@ _Avoid_: Async job, Processing item, Worker unit
 A directed acyclic graph (DAG) of dependent `AlgorithmTask` nodes where output dataset paths automatically flow as inputs into downstream algorithm nodes.
 _Avoid_: Workflow graph, Execution chain, Process tree
 
+**Worker Pool**:
+The opt-in bounded pool of warm isolated operator-worker processes
+(`LocalWorkerPool`, `src/processing/framework/local_worker_pool.*`) built on
+worker protocol v1: spawn-time ready-handshake health checks, per-job timeout
+and cancel escalation, crash detection with typed errors plus transparent
+replacement for future jobs, lifetime recycling (job count and idle age), and
+safe shutdown. It is an executor-side resource that Task Center/Job Engine
+callers may route work through - never a second scheduler.
+_Avoid_: Job manager, Process monitor, Scheduler (scheduling stays with the Task Center/Resource Throttler)
+
 **Workflow Session**:
 The interactive, wizard-mode execution surface for a WorkflowDefinition (`WorkflowSession`): a **human** schedules it — navigating step by step (`gotoStep`), setting parameters per step, and re-running steps made dirty by parameter changes — while each executed step still runs through the Task Center seam. Distinct from the Task Pipeline, where the **engine** owns scheduling of the whole DAG up front. A session is never auto-parallelized across steps; its steps may run out of definition order or not at all.
 _Avoid_: Pipeline run, Batch workflow (a Session is human-scheduled; a Pipeline is engine-scheduled)
@@ -581,3 +591,4 @@ ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision
 - **ADR 0127**: MapSpec Declarative Cartography
 - **ADR 0128**: Spatial Scientist Contracts
 - **ADR 0129**: Project Workspace, Data Governance & Reproducibility Platform 3.0
+- **ADR 0130**: Data Plane, Runtime, Governance & Reproducibility Reliability 4.0 (document-authority/downgrade guard, WAL-consistent snapshots, checked store writes, reference-safe CAS eviction, external-mutation cache invalidation, crash-resume completion identity, truthful run states, bounded warm worker pool; fault matrix in `docs/architecture/FAULT_MATRIX_4.md`)
