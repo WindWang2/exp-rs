@@ -22,6 +22,14 @@ add_library(sicnu_agent SHARED
   llm_streaming_client.h
   contracts/spatial_contracts.cpp
   contracts/spatial_contracts.h
+  harness/harness_error.cpp
+  harness/harness_error.h
+  harness/tool_taxonomy.cpp
+  harness/tool_taxonomy.h
+  harness/tool_manifest.cpp
+  harness/tool_manifest.h
+  harness/harness_tools.cpp
+  harness/harness_tools.h
   tool_catalog/agent_tool.cpp
   tool_catalog/agent_tool.h
   tool_catalog/tool_provider.h

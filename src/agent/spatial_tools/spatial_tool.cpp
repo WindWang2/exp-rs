@@ -17,6 +17,7 @@
 #include "../cartography/cartography_tools.h"
 #include "../symbology/symbology_tools.h"
 #include "../commands/workspace_commands.h"
+#include "../harness/harness_tools.h"
 
 namespace sicnu::agent::spatial_tools {
 
@@ -122,6 +123,8 @@ void SpatialToolRegistry::registerBuiltinTools()
   // Workspace Governance 3.0 (Platform 3.0): bounded project/asset/lineage/
   // result/run surfaces over the WorkspaceService.
   registerGovernanceTools();
+  // Harness 4.0: error taxonomy + tool manifest catalog surfaces.
+  harness::registerHarnessTools();
 }
 
 void SpatialToolRegistry::reset()

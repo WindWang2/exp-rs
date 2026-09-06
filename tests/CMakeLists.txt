@@ -5911,6 +5911,15 @@ sicnu_add_test(test_plugins_runtime_host)
 target_link_libraries(test_plugins_runtime_host PRIVATE sicnu_plugins_framework sicnu_sdk sicnu_workflow_runtime)
 
 
+# — Harness 4.0 (Pi Spatial Scientist & Agent Harness) —
+# Error taxonomy (Phase 12) and canonical tool manifest/taxonomy (Phases 1/2).
+sicnu_add_test(test_harness_error)
+sicnu_link_jsoncpp(test_harness_error)
+
+sicnu_add_test(test_harness_catalog)
+sicnu_link_jsoncpp(test_harness_catalog)
+
+
 # Last TEST_INCLUDE_FILES entry: stamp PYTHONHOME / LD_LIBRARY_PATH / QT_IM_MODULE
 # onto every test after Catch PRE_TEST discovery has registered them (#730).
 sicnu_register_test_env_applier()
