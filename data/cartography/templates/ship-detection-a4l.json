@@ -1,0 +1,125 @@
+{
+  "id": "ship-detection-a4l",
+  "version": 1,
+  "description": "SAR ship-detection result with detection chart and navigation furniture.",
+  "page": {
+    "width_mm": 297,
+    "height_mm": 210
+  },
+  "style": {
+    "token_set": "scientific-light",
+    "medium": "print"
+  },
+  "slots": [
+    {
+      "role": "map.main",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        30.0,
+        203.0,
+        144.0
+      ]
+    },
+    {
+      "role": "title.main",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        12.0,
+        273.0,
+        12.0
+      ]
+    },
+    {
+      "role": "legend.primary",
+      "accepts": "legends",
+      "rect_mm": [
+        215.0,
+        30.0,
+        70.0,
+        94.0
+      ],
+      "content": {
+        "title": "图例"
+      }
+    },
+    {
+      "role": "scalebar.primary",
+      "accepts": "scale_bars",
+      "rect_mm": [
+        14.0,
+        182.0,
+        48,
+        10
+      ]
+    },
+    {
+      "role": "north_arrow.primary",
+      "accepts": "north_arrows",
+      "rect_mm": [
+        68.0,
+        182.0,
+        12,
+        12
+      ]
+    },
+    {
+      "role": "source.primary",
+      "accepts": "source_notes",
+      "rect_mm": [
+        88.0,
+        184.0,
+        177.0,
+        8
+      ]
+    },
+    {
+      "role": "chart.counts",
+      "accepts": "charts",
+      "rect_mm": [
+        215.0,
+        130.0,
+        70.0,
+        44.0
+      ],
+      "content": {
+        "chart": {
+          "kind": "bar",
+          "binding": {
+            "mode": "inline",
+            "data": [
+              {
+                "label": "forest",
+                "value": 42
+              },
+              {
+                "label": "crop",
+                "value": 27
+              },
+              {
+                "label": "water",
+                "value": 12
+              },
+              {
+                "label": "built",
+                "value": 9
+              }
+            ]
+          }
+        },
+        "title": "目标统计"
+      }
+    }
+  ],
+  "suitable_tasks": [
+    "sar",
+    "ship",
+    "detection"
+  ],
+  "product_type": "detection",
+  "recommended_components": [
+    "north-arrow/navigation",
+    "grid/metric"
+  ]
+}
