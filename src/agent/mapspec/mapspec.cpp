@@ -324,6 +324,19 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
   }
 
   std::set<std::string> allIds;
+  int totalItems = 0;
+  for ( int i = 0; i < kCollectionCount; ++i )
+    if ( spec.isMember( kCollectionInfos[i].name ) && spec[kCollectionInfos[i].name].isArray() )
+      totalItems += static_cast<int>( spec[kCollectionInfos[i].name].size() );
+  // Bounded-document contract: preflight/repair are synchronous agent tools,
+  // so the document size they may be handed is capped up front.
+  static constexpr int kMaxItemsPerDocument = 2000;
+  if ( totalItems > kMaxItemsPerDocument )
+  {
+    problems.push_back( "document exceeds " + std::to_string( kMaxItemsPerDocument ) +
+                        " items (" + std::to_string( totalItems ) + ")" );
+    return problems;
+  }
   for ( int i = 0; i < kCollectionCount; ++i )
   {
     const CollectionInfo *info = &kCollectionInfos[i];

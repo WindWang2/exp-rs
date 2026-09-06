@@ -12,6 +12,13 @@ Text-overflow rules use a platform-independent width estimator (CJK glyphs
 one em, others 0.55 em, spaces 0.35 em; 1 pt = 0.3528 mm; single line, 5%
 tolerance) — deliberately not local font metrics.
 
+## Bounded-resource contract
+
+Documents are capped at 2000 items (`MAPSPEC_INVALID` beyond that) and
+issue lists at 500 entries (truncation reported as
+`MAPSPEC_ISSUES_TRUNCATED`) — preflight/repair are synchronous agent tools
+and must stay bounded on hostile input.
+
 ## Catalog
 
 | code | severity | repairable | repair behavior |
@@ -39,6 +46,7 @@ tolerance) — deliberately not local font metrics.
 | `MAP_UNKNOWN_COMPONENT` | warning | yes | strips a `source_component` reference that resolved to nothing |
 | `MAP_CONSTRAINT_UNSATISFIABLE` | warning | no | composition-solver leftovers (unknown items, unsolvable directions) |
 | `MAP_OVERLAP` | warning | yes | relocates through seven fixed anchor slots, first collision-free candidate wins |
+| `MAPSPEC_ISSUES_TRUNCATED` | warning | no | issue lists cap at 500 entries; fix the reported findings and re-run |
 | `LAYOUT_*` | warning | no | findings merged from the compiled-layout preflight |
 
 ## Repair loop contract

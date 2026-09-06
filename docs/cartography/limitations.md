@@ -34,6 +34,10 @@ divergences or deferred capabilities, not hidden gaps.
 
 ## Charts
 
+- Rendered chart/colorbar PNGs are written per compile to a session temp
+  directory (`$TMPDIR/sicnu-cartography-<layout>/`), layout-scoped so
+  layouts cannot clobber each other's pictures; the OS tmpdir reaper bounds
+  accumulation, exp-rs does not garbage-collect them itself.
 - Inline charts render through a QPainter path (no QtCharts):
   `bar | line | pie | histogram | area | scatter | stacked_bar | matrix |
   metric`. Native `QgsLayoutItemChart` (vector_expression) supports the

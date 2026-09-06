@@ -258,8 +258,9 @@ class ComposeTool final : public SpatialTool
     std::string description() const override
     {
       return "Compiles a MapSpec document into a QGIS print layout (created/replaced under "
-             "spec.layout_name) and returns the spec-level quality report. Follow with "
-             "cartography:repair until quality passes, then layout:export.";
+             "spec.layout_name), resolves anchors/constraints, and returns the quality report. "
+             "On success follow with cartography:repair until quality passes, then layout:export; "
+             "on COMPILE_FAILED call cartography:preflight for the structural report.";
     }
     std::vector<std::string> tags() const override
     {
@@ -333,7 +334,8 @@ class PreflightTool final : public SpatialTool
              "bindings, unbalanced multi-map frames, inset placement, unresolvable component "
              "references, unsatisfiable constraints, overlaps. Issues carry code/severity/"
              "item_id/repairable/suggested_action; a 0-100 quality_score summarizes. Evaluates "
-             "the resolved composition and echoes it as `mapspec`. Input: {mapspec}.";
+             "the resolved composition and echoes it as the report's `mapspec` member (issue "
+             "lists cap at 500 entries). Input: {mapspec}.";
     }
     std::vector<std::string> tags() const override
     {
@@ -689,7 +691,8 @@ class ChartCreateTool final : public SpatialTool
     std::string displayName() const override { return "Create chart"; }
     std::string description() const override
     {
-      return "Registers a workspace chart entity (bar|line|pie|histogram|area|scatter). "
+      return "Registers a workspace chart entity (bar|line|pie|histogram|area|scatter|"
+             "stacked_bar|matrix|metric). "
              "Binding: inline {data: [{label, value}]} or vector_expression {layer, "
              "x_expression, y_expression, filter?}. The chart id is a stable referent for "
              "MapSpec chart components (charts[].chart = this spec).";

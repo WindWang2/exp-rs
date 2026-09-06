@@ -198,8 +198,9 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
   // calls see exactly what the compile-time solver would produce. Content
   // fields are identical; only geometry can differ.
   Json::Value spec = specIn;
+  const Json::Value tokens = resolveTokenSet( spec );
   const CompositionResult solvedResult = resolveComposition(
-    spec, tokenNumber( resolveTokenSet( spec ), "spacing.margin_mm", 12.0 ) );
+    spec, tokenNumber( tokens, "spacing.margin_mm", 12.0 ) );
 
   const auto specProblems = mapspec::validateMapSpec( spec );
   if ( !specProblems.empty() )
@@ -355,9 +356,7 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
            item["rect_mm"].size() == 4 )
       {
         const int entries = item["max_entries"].asInt();
-        double lineH = 4.5;
-        const Json::Value tokens = resolveTokenSet( spec );
-        lineH = tokenNumber( tokens, "furniture.legend_line_height_mm", 4.5 );
+        const double lineH = tokenNumber( tokens, "furniture.legend_line_height_mm", 4.5 );
         const double requiredH = 8.0 + entries * lineH;
         if ( item["rect_mm"][3].asDouble() + 0.5 < requiredH )
           issues.push_back( issue( "MAP_LEGEND_DENSITY", "warning",
@@ -461,6 +460,14 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
       issue( "MAP_CONSTRAINT_UNSATISFIABLE", "warning", note, false, "", nullptr ) );
 
   // --- pairwise overlap between non-map items ---------------------------------
+  // Bounded output: issue lists are capped so a pathological (but capped-
+  // input) spec cannot flood the agent context; the truncation is reported.
+  static constexpr int kMaxIssues = 500;
+  const auto pushIssue = [ &issues ]( Json::Value value ) {
+    if ( static_cast<int>( issues.size() ) < kMaxIssues )
+      issues.push_back( std::move( value ) );
+  };
+
   const char *overlappable[] = { "titles", "labels", "legends", "scale_bars", "north_arrows",
                                  "source_notes", "annotations", "charts", "colorbars" };
   for ( int i = 0; i < 9; ++i )
@@ -487,7 +494,7 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
             continue;
           if ( rectsIntersect( a["rect_mm"], b["rect_mm"] ) )
           {
-            issues.push_back( issue(
+            pushIssue( issue(
               "MAP_OVERLAP", "warning",
               a["id"].asString() + " overlaps " + b["id"].asString(), true, a["id"].asString(),
               "reposition" ) );
@@ -513,6 +520,12 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
       issues.push_back( merged );
     }
   }
+
+  if ( static_cast<int>( issues.size() ) >= kMaxIssues )
+    issues.push_back( issue( "MAPSPEC_ISSUES_TRUNCATED", "warning",
+                             "issue list truncated at " + std::to_string( kMaxIssues ) +
+                               " entries — fix the reported findings and re-run",
+                             false, "", nullptr ) );
 
   int errorCount = 0;
   int warningCount = 0;
@@ -901,6 +914,8 @@ Json::Value preflightRuleCatalog()
     { "MAP_UNKNOWN_COMPONENT", "warning", true, "source_component reference does not resolve." },
     { "MAP_CONSTRAINT_UNSATISFIABLE", "warning", false, "Composition solver could not satisfy a constraint." },
     { "MAP_OVERLAP", "warning", true, "Two furniture items overlap." },
+    { "MAPSPEC_ISSUES_TRUNCATED", "warning", false,
+      "Issue list capped at 500 entries; fix reported findings and re-run." },
     { "LAYOUT_*", "warning", false, "Findings merged from the compiled layout preflight." },
   };
   Json::Value catalog( Json::arrayValue );

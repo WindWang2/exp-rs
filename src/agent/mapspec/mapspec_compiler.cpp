@@ -424,6 +424,12 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
   }
 
   // --- charts ---------------------------------------------------------------
+  // Rendered chart/colorbar PNGs are layout-scoped so two layouts cannot
+  // clobber each other's pictures when item ids coincide. Files live in a
+  // session temp subdir (the OS tmpdir reaper bounds accumulation).
+  const QString tempDirPath = QDir::temp().filePath(
+    QStringLiteral( "sicnu-cartography-%1" ).arg( QString::fromStdString( spec["layout_name"].asString() ) ) );
+  QDir().mkpath( tempDirPath );
   QString chartError;
   QString chartPath;
   for ( const auto &chartItem : itemsOf( "charts" ) )
@@ -499,8 +505,10 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
     {
       // Inline charts render through the QPainter path into a stable session
       // file, then land as picture items.
-      chartPath = QDir::temp().filePath( QStringLiteral( "sicnu-chart-%1.png" )
-                                           .arg( QString::fromStdString( chartItem["id"].asString() ) ) );
+      chartPath = QDir( tempDirPath ).filePath(
+        QStringLiteral( "sicnu-chart-%1-%2.png" )
+          .arg( QString::fromStdString( spec["layout_name"].asString() ),
+                QString::fromStdString( chartItem["id"].asString() ) ) );
       if ( sicnu::agent::cartography::renderChartToFile( chart, chartPath, &chartError ) )
       {
         props["path"] = chartPath.toStdString();
@@ -540,8 +548,10 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
     if ( !colorbar.isMember( "font_pt" ) )
       colorbar["font_pt"] = sicnu::agent::cartography::tokenNumber( tokens,
         "typography.styles.caption.size_pt", 8.0 );
-    const QString path = QDir::temp().filePath( QStringLiteral( "sicnu-colorbar-%1.png" )
-                                                  .arg( QString::fromStdString( colorbar["id"].asString() ) ) );
+    const QString path = QDir( tempDirPath ).filePath(
+      QStringLiteral( "sicnu-colorbar-%1-%2.png" )
+        .arg( QString::fromStdString( spec["layout_name"].asString() ),
+              QString::fromStdString( colorbar["id"].asString() ) ) );
     if ( sicnu::agent::cartography::renderColorbarToFile( colorbar, path ) )
     {
       Json::Value props = rectToProps( colorbar["rect_mm"] );
