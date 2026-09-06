@@ -9,8 +9,12 @@
 
 1. **In memory, missing = NaN.** Kernels operate on `float` buffers where NaN
    means "no observation". Declared GDAL NoData sentinels and non-finite values
-   are normalized to NaN at read time (e.g. `TemporalTileReader`,
-   `GdalDatasetWrapper::readBandMasked`).
+   are normalized to NaN where data is read — e.g.
+   `TemporalTileReader::normalizeAndMask` for the temporal family, and the
+   per-block reads of the streaming operators that inline the same
+   normalization (`GdalDatasetWrapper::readBandMasked` is the reference
+   implementation of that normalization, exercised by tests; production paths
+   currently re-inline it rather than calling it).
 2. **Declared sentinel resolution is centralized** in
    `src/processing/algorithms/nodata_utils.h`:
    - `bandNoDataSentinel(ds, band)` → the declared sentinel cast to float, NaN
@@ -47,7 +51,7 @@ Both conventions exist by design; the contract is which one, where:
 | Convention | Denominator | Used by |
 |---|---|---|
 | **Population** (÷N) | descriptive spread of the observed samples | `MathUtils::computeStats*`, streaming magnitude stats (`StreamingMagnitudeStats`), temporal summary stddev |
-| **Sample** (÷N−1) | unbiased estimate for inference/uncertainty | RX anomaly covariance (`spectral_anomaly.cpp`), regression RMSE with df correction (`OnlineRegression::rmse` ÷(N−2)), feature normalization scaler |
+| **Sample** (÷N−1) | unbiased estimate for inference/uncertainty | RX anomaly covariance (`spectral_anomaly.cpp`), `rs:temporal_anomaly` baseline z-score (`sampleStddev`), regression RMSE with df correction (`OnlineRegression::rmse` ÷(N−2)), feature normalization scaler |
 
 Rules:
 

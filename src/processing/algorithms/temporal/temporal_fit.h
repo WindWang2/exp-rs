@@ -7,8 +7,9 @@
 // Numeric contract: all fits treat NaN samples as absent (never as zero),
 // produce NaN for series with fewer valid samples than the model requires,
 // and are deterministic (single-threaded, fixed order — bit-exact regression
-// anchors; only the banded Whittaker solver is tolerance-grade with a locked
-// 1e-5 relative bound documented in the tests).
+// anchors; only the banded Whittaker solver is tolerance-grade — its tests
+// assert behavioral bounds at 1e-4 margins; a formal relative-ε lock is
+// pending and tracked in docs/processing/validation-policy.md).
 #pragma once
 
 #include <cstddef>
@@ -114,6 +115,13 @@ BreakpointResult piecewiseLinearTrend( const std::vector<float> &y,
 /// when fewer than 3 valid observations exist (no meaningful test) or when no
 /// strictly time-ordered pair exists. Deterministic: fixed evaluation order,
 /// bit-exact grade.
+///
+/// Caveat: var(S) is Gilbert's formula for one observation per instant. With
+/// same-day duplicates (collection `duplicate_policy = keep_all`) the
+/// denominator over-counts pairs that can never enter S, which biases |z|
+/// toward 0 — the test is conservative, never anti-conservative. Pass
+/// `duplicate_policy = reject` (or pre-aggregate) for exact inference.
+/// Inputs must be in non-decreasing time order (the operator seam sorts).
 struct SenTrendResult
 {
   double slope = 0.0;      ///< Sen's slope per day (median pairwise slope)

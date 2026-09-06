@@ -1,6 +1,7 @@
 // src/processing/algorithms/sar/sar_calibration.cpp
 #include "sar_calibration.h"
 
+#include "core/sicnu_logging.h"
 #include "data/raster_grid_compat.h"
 #include "processing/algorithms/nodata_utils.h"
 #include "processing/algorithms/sar/sar_metadata.h"
@@ -129,12 +130,21 @@ bool convertBackscatterRaster( const GdalDatasetWrapper &src, int band,
       return false;
     // Shared grid preflight (Foundation 4.0): a CRS- or geotransform-
     // mismatched incidence raster must refuse, not silently attach angles
-    // from the wrong locations. The caller surfaces the refusal as a
-    // calibration failure.
-    if ( !sicnu::data::compareGrids( sicnu::processing::gridFromDataset( src ),
-                                     sicnu::processing::gridFromDataset( incidenceDs ) )
-            .compatible() )
+    // from the wrong locations. The refusal reason is logged (the boolean
+    // return alone is indistinguishable from an I/O failure at the operator
+    // seam); the operator surfaces it as a calibration failure.
+    const sicnu::data::GridCompatReport incidenceGridReport =
+        sicnu::data::compareGrids( sicnu::processing::gridFromDataset( src ),
+                                   sicnu::processing::gridFromDataset( incidenceDs ) );
+    if ( !incidenceGridReport.compatible() )
+    {
+      if ( const std::optional<sicnu::data::GridCompatIssue> blocking =
+               incidenceGridReport.primaryBlocking() )
+        SICNU_LOG_WARN( SicnuLogTags::Algorithms,
+                        QStringLiteral( "SAR incidence raster rejected: %1" )
+                            .arg( blocking->message ) );
       return false;
+    }
     // A declared sentinel must not reach cos() as a raw angle (a -9999 hole
     // would produce garbage geometry, not an error). Bands without a finite
     // declared sentinel resolve to NaN, which the exact-equality pass below

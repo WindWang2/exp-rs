@@ -467,7 +467,11 @@ BreakpointResult piecewiseLinearTrend( const std::vector<float> &y,
   BreakpointResult result;
   const int n = static_cast<int>( y.size() );
   if ( n < 2 || static_cast<int>( tDays.size() ) != n )
+  {
+    // No series to fit: the error is undefined, never zero (#759 contract).
+    result.rmse = kNan;
     return result;
+  }
 
   // Cumulative sums for O(1) segment OLS: Σ1, Σy, Σy², Σt, Σt², Σty.
   std::vector<double> c1( n + 1, 0.0 ), cy( n + 1, 0.0 ), cy2( n + 1, 0.0 );

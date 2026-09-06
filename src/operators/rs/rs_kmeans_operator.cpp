@@ -182,6 +182,11 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     auto isPixelValid = [&]( const float *pixelFeatures ) -> bool {
         for ( size_t i = 0; i < static_cast<size_t>( nFeat ); ++i )
         {
+            // Non-finite values (±inf included) never train — NaN alone is
+            // not enough: kmeans reads unmasked windows, so inf must be
+            // refused here or it poisons the centroid sums.
+            if ( !std::isfinite( pixelFeatures[i] ) )
+                return false;
             // Exact sentinel equality (platform policy): an epsilon here
             // silently dropped legitimate values near the sentinel.
             if ( sicnu::rs::isNoDataValue( pixelFeatures[i], noDataPerBand[i] ) )

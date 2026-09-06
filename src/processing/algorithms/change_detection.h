@@ -29,7 +29,8 @@ ChangeStats statistics(const float *diff, size_t count);
  * [minVal, minVal+range]. Shared binning convention for every histogram
  * consumer (Otsu, Kittler, percentile thresholds, streaming change masks):
  * bin = (v - minVal) / range * (bins - 1), clamped to [0, bins-1].
- * Callers must pass finite @p v and range > 0.
+ * Callers must pass finite @p v, range > 0, and bins >= 1 (all current call
+ * sites clamp bins to [16, 1024] or use a constant >= 16).
  */
 inline int histogramBin(double v, double minVal, double range, int bins)
 {

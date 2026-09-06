@@ -20,13 +20,17 @@ Policy:
 
 1. **CRS mismatch / missing CRS on a referenced input is a blocking refusal**
    where pixels are combined arithmetically (change detection, dNBR, apply
-   mask, SAR incidence geometry). The refusal is a typed `RSOperatorError`;
-   the message names the blocking issue and the fix (pre-align via the
-   grid-harmonization seam, ADR 0091).
-2. **Two unreferenced rasters** (no CRS at all) fall back to the dimension
-   check and pass as compatible — they carry no contradicting geolocation.
-   This is the documented exception, not a loophole: a user who georeferences
-   one of the two inputs gets the refusal immediately.
+   mask, SAR incidence geometry). The refusal is a typed `RSOperatorError`
+   whose message names the blocking issue (dNBR), or the kernel logs the
+   issue and fails the conversion which the operator reports as a typed
+   error (SAR incidence). The fix is the same either way: pre-align via the
+   grid-harmonization seam (ADR 0091).
+2. **Two unreferenced rasters** (no CRS **and** no geotransform on either
+   side) fall back to the dimension check and pass as compatible — they
+   carry no contradicting geolocation. Rasters without CRS but with
+   geotransforms still go through the pixel-size/origin/extent checks and
+   can be refused. This is the documented exception, not a loophole: a user
+   who georeferences one of the two inputs gets the refusal immediately.
 3. **Same-CRS grid differences** (size/origin/resolution) are auto-alignable
    where the operator documents it (apply mask's nearest-neighbor alignment);
    algorithms that cannot align refuse. Never introduce hidden resampling:
@@ -62,9 +66,13 @@ Policy:
 Band resolution for role-aware operators is delegated to the shared temporal
 resolver (`sicnu::temporal::resolveBand`, `findBandWithRole`): explicit band
 parameter > `SICNU_BAND_ROLE` metadata > documented cross-fallback >
-positional default, with a logged warning on any fallback. An *explicit*
-`band_role` that resolves nowhere is a caller error (typed refusal), never a
-silent fallback to another band.
+positional default, with a logged warning on any fallback. Because the
+positional defaults always resolve for the documented role vocabulary, an
+explicit `band_role` that matches no metadata currently falls back
+positionally (with the warning) rather than refusing — the typed refusal
+branch exists at the operator seam for role ids the resolver cannot place at
+all. Pin roles with `SICNU_BAND_ROLE` metadata or an explicit `band`
+parameter when the positional convention is not enough.
 
 ## 4. Output publication
 

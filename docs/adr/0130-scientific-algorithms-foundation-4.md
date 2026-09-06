@@ -14,7 +14,8 @@ shared scientific semantics were enforced by convention rather than by code:
 
 - The declared-NoData resolution idiom was re-implemented ~20× with real
   divergences (a 1e-4 epsilon in `rs:kmeans` that silently dropped legitimate
-  near-sentinel values; an undeclared `-9999` default).
+  near-sentinel values; an inert `-9999` default behind a `hasNoData` flag
+  that suggested undeclared bands were filtered when they were not).
 - Variance conventions were contradictory across streaming statistics
   (population vs sample, undocumented per site).
 - Grid compatibility checks were bypassed in places (dNBR's dims-only check
@@ -95,5 +96,7 @@ shared scientific semantics were enforced by convention rather than by code:
 - `tests/test_change_detection.cpp` — BIP equivalence + NaN propagation,
   bin-convention edges, dNBR grid refusal, threshold known answers.
 - `tests/test_sar_kernels.cpp` — IEEE NaN/domain-edge contracts.
+- `tests/test_sar_operators.cpp` — grid-incompatible incidence-raster refusal
+  (one-sided CRS → typed failure, no output left behind).
 - `tests/test_endmember_extraction.cpp` — streaming-vs-kernel agreement.
 - `tests/test_temporal_algorithms.cpp` — `rs:temporal_sen_trend` E2E.

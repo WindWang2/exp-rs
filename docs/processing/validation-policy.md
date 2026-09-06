@@ -18,7 +18,7 @@ the same distinction):
 |---|---|---|---|
 | **exact** | Integer/deterministic-discrete outputs; identical bits for identical inputs | `REQUIRE(v == expected)` | class maps, masks (`rs:qa_mask`, `rs:recode`, `rs:threshold_raster`), break indices |
 | **bit-exact float** | Fixed-order float evaluation, no parallel reduction; deterministic down to the last bit | `REQUIRE(v == Approx(expected).margin(1e-12))` against hand-derived closed forms, or `compareRastersBitExact` between two execution paths of the same kernel | OLS fits, Sen slope medians, normalized differences, PPI counts |
-| **tolerance** | Iterative or order-sensitive float algorithm with a locked relative bound | `REQUIRE(v == Approx(expected).epsilon(1e-5..1e-3))` with the bound stated in the test header | Whittaker banded solve (1e-5), refined-Lee speckle, IR-MAD iterations |
+| **tolerance** | Iterative or order-sensitive float algorithm with a locked relative bound | `REQUIRE(v == Approx(expected).epsilon(1e-5..1e-3))` with the bound stated in the test | Whittaker banded solve (currently asserted with behavioral bounds at 1e-4 margins in `tests/test_temporal_fit.cpp`; a formal ε-lock is pending — see `temporal_fit.h`), refined-Lee speckle, IR-MAD iterations |
 
 Rules:
 
@@ -27,8 +27,11 @@ Rules:
    same PR.
 2. Exact/bit-exact assertions are used *only* where the implementation truly
    guarantees them (single-threaded, fixed order, no fast-math reassociation).
-   Streaming code that must stay bit-identical to a serial reference is pinned
-   with `tests/raster_bit_compare.h` (`compareRastersBitExact`).
+   Streaming code that must stay identical to a serial reference is pinned
+   against it — bit-exactly via `tests/raster_bit_compare.h`
+   (`compareRastersBitExact`, e.g. the spectral-index streaming path) or,
+   where the kernel's grade is tolerance, with NaN-aware toleranced
+   comparisons (e.g. the change-detection streaming atoms, 1e-6).
 3. Hand-derived fixtures state their derivation in a comment (see the
    `sqrt(3)` RMSE case in `tests/test_temporal_fit.cpp` or the `6/15 = 40%`
    case in `tests/test_change_detection.cpp`). A reviewer must be able to
@@ -69,10 +72,12 @@ cover, where applicable to the family:
 Maintained in the epic planning dossier; the durable summary:
 
 - Temporal: kernel numeric references with locked tolerances
-  (`tests/test_temporal_fit.cpp`), operator-level E2E including NaN-gap RMSE
-  (#759 regression), Sen/Mann-Kendall hand-derived cases.
-- Change detection: hand-derived atoms, streaming-vs-full-frame bit-exact
-  equivalence across 256-px tile boundaries, grid-refusal contract.
+  (`tests/test_temporal_fit.cpp` — including the kernel-level #759 NaN-gap
+  RMSE regression and Sen/Mann-Kendall hand-derived cases), operator-level
+  E2E for the family (`tests/test_temporal_algorithms.cpp`).
+- Change detection: hand-derived atoms, streaming-vs-full-frame equivalence
+  (NaN-aware, 1e-6/1e-7; IR-MAD 1e-3/1e-4) across 256-px tile boundaries,
+  grid-refusal contract, threshold valid-observation counting.
 - SAR: hand-derived calibration/texture/terrain formulas, IEEE NaN/domain-edge
   contracts for pure conversions, operator-level NaN + typed refusal coverage.
 - Spectral: hand-derived indices, SAM/SID known answers, RX anomaly,

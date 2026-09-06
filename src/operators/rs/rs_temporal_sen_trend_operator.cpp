@@ -124,7 +124,11 @@ Json::Value RsTemporalSenTrendOperator::metadata() const
                         "detrend via rs:temporal_decompose first when a strong "
                         "seasonal cycle exists); the normal-approximation "
                         "p-value is approximate below ~10 valid observations; "
-                        "ties are handled with the Gilbert (1987) correction";
+                        "ties are handled with the Gilbert (1987) correction; "
+                        "var(S) presumes distinct acquisition instants — "
+                        "same-day duplicates under duplicate_policy=keep_all "
+                        "make the test conservative (use reject for exact "
+                        "inference)";
   return meta;
 }
 
