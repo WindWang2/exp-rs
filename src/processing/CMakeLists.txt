@@ -238,6 +238,8 @@ add_library(sicnu_task_center STATIC
     # Phase C fused-chain execution (intermediate materialization elimination)
     framework/fused_chain.cpp
     framework/local_worker_host.cpp
+    framework/local_worker_pool.h
+    framework/local_worker_pool.cpp
     framework/resource_monitor.cpp
     framework/task_resource_budget.cpp
     framework/agent_workflow_executor.cpp
