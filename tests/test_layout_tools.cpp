@@ -63,6 +63,11 @@ class FastExitListener : public Catch::EventListenerBase
 }
 CATCH_REGISTER_LISTENER( FastExitListener )
 
+// Helpers below are file-local; HEAD missing this anonymous-namespace opener
+// breaks the build (the stray closer at the bottom was left over from it).
+namespace
+{
+
 void ensureQgisApplication()
 {
   if ( QApplication::instance() )
