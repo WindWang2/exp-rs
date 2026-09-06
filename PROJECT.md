@@ -1,48 +1,65 @@
-# Project: PR Integration, Build Verification & Repository Cleanup
+# Project: SICNU GEO RS (exp-rs) — Living Project State
 
-## Architecture
-- Repository: `exp-rs` (C++20 / Qt 6.8+ / GDAL / PROJ / GEOS / OpenCV 5 / Catch2 v3.7.1)
-- Main Branch: `master`
-- Integration Workflow: Sequential squash-and-merge of 5 open PRs (#708 -> #709 -> #710 -> #711 -> #712)
-- Build System: CMake (Release + Ninja in `build/`)
-- Test Runner: CTest with Catch2 (`QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest --test-dir build --output-on-failure -j$(nproc)`). CTestCustom.cmake also pins `PYTHONHOME`/`PYTHONPATH` and `QT_IM_MODULE=compose` (see TEST_INFRA.md). `LD_PRELOAD=/usr/lib/libxml2.so` is not the documented policy; if used, `PYTHONHOME` must match the CMake-discovered interpreter.
-- Secondary Worktrees: Cleaned up (0 secondary worktrees remaining)
+> Living project-state document. Transient counts (open PRs, worktrees, test
+> tallies) are recorded only as dated evidence, never as current-state claims.
 
-## Feature Inventory
-| # | Feature | Description | Milestone | Source |
-|---|---------|-------------|-----------|--------|
-| 1 | PR #708 Integration | Merge `perf/operator-ization` (20 commits, determinism grades, cache hits, TaskCenter GC). Resolve 5 conflicts with master by accepting HEAD. | M1 | ORIGINAL_REQUEST §R1 |
-| 2 | PR #709 Integration | Merge `zcode/resolve-all-open-issues-20260830` (33 commits, 39 bugfixes). Resolve conflicts by accepting HEAD. | M1 | ORIGINAL_REQUEST §R1 |
-| 3 | PR #710 Integration | Merge `feat/cartography-layout-studio` (10 commits, layout studio). Clean merge. | M1 | ORIGINAL_REQUEST §R1 |
-| 4 | PR #711 Integration | Merge `feat/spatial-execution-platform` (48 commits, spatial platform 1.0 convergence). | M1 | ORIGINAL_REQUEST §R1 |
-| 5 | PR #712 Integration | Merge `feat/temporal-rs-analysis` (7 commits, multi-temporal RS engine). Combine temporal resolver and numeric scale in rs_spectral_index_operator. | M1 | ORIGINAL_REQUEST §R1 |
-| 6 | CMake Build Verification | Build master with `cmake --build build` (zero compilation/linking errors). | M2 | ORIGINAL_REQUEST §R2 |
-| 7 | Catch2 Test Verification | Historical "2126 tests / 2123 passed / 3 skipped / 0 failed" figure is stale (suite size moved; #730 showed 16/2147 red on the old `LD_PRELOAD` command, 15 of them environment). Documented runner is now `QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest --test-dir build --output-on-failure -j$(nproc)` with CTestCustom env pins. Do not treat "100% green" as a current claim without a fresh `ctest` log. | M2 | ORIGINAL_REQUEST §R2 |
-| 8 | Secondary Worktree Cleanup | Kill background processes in worktree and remove 4 secondary worktrees with `git worktree remove --force`. | M3 | ORIGINAL_REQUEST §R3 |
-| 9 | Branch Cleanup | Prune and remove local and remote feature branches (`git branch -D`, `git push origin --delete`, `git remote prune origin`). | M3 | ORIGINAL_REQUEST §R3 |
-| 10 | Final Audit & Verification | Forensic audit, review, and verification against all acceptance criteria. | M4 | ORIGINAL_REQUEST §Acceptance Criteria |
+## What this repository is
 
-## Milestones
-| # | Name | Scope | Dependencies | Status |
-|---|------|-------|-------------|--------|
-| M0 | Repository Survey | Inspect PR details, branch status, worktree paths, and CMake test configuration | None | DONE |
-| M1 | Sequential PR Squash-Merge | Merge PRs #708, #709, #710, #711, #712 into master with conflict resolution | M0 | DONE |
-| M2 | Build & Catch2 Test Verification | Full CMake build and Catch2 test run on master | M1 | DONE |
-| M3 | Worktree & Branch Cleanup | Remove 4 secondary worktrees and delete local/remote branches | M1 | DONE |
-| M4 | Final Integrity Audit & Verification | Forensic audit and final verification against acceptance criteria | M2, M3 | IN_PROGRESS |
+`exp-rs` / **SICNU GEO RS**: a pure C++20 remote-sensing analysis platform on
+a vendored QGIS engine (Qt 6.8+, GDAL/PROJ/GEOS, OpenCV 5, Catch2 v3.7.1),
+shipped as a desktop application (`sicnu_geo_rs`) and a headless CLI
+(`sicnu_geo_rs_cli`), with an MCP server, an agent copilot, a plugin/SDK
+ecosystem (`sicnu_sdk`, `exprs`), an out-of-process Python plugin host, and a
+Pi agent-runtime bridge (`pi/`).
 
-## Interface Contracts
-- Git branch integration: All feature branches squash-merged into `master`.
-- GitHub PR status: All 5 PRs merged and closed (`gh pr list` shows 0 open PRs).
-- Build target: `cmake --build build` succeeds with 0 errors.
-- Test runner: `QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest --test-dir build --output-on-failure -j$(nproc)`. CTestCustom.cmake pins `PYTHONHOME`, prepends `/usr/lib`, and sets `QT_IM_MODULE=compose`. The old `LD_PRELOAD=/usr/lib/libxml2.so` + "100% green / 0 failed" line was stale as of #730.
-- Worktree state: `git worktree list` outputs only `/home/kevin/projects/rs-studio/main`.
-- Branch state: No secondary local or remote feature branches remain.
+## Architecture map (stable seams)
 
-## Code Layout
-- Repository root: `/home/kevin/projects/rs-studio/main`
-- Build directory: `build`
-- Core libraries: `src/core`, `src/gui`, `src/data`, `src/processing`, `src/operators`, `src/workflow`, `src/jobs`, `src/agent`
-- Applications: `src/app` (`sicnu_geo_rs`), `src/cli` (`sicnu_geo_rs_cli`)
-- Tests: `tests/` (Catch2 test executables)
-- Agent metadata: `.agents/`
+- Execution: `TaskCenter` (single owner of algorithm task lifecycle) ←
+  `ToolCallDispatcher` (agent tool calls) ← MCP server / Copilot / CLI.
+  `JobEngine` is the worker pool under TaskCenter.
+- Algorithms: `AtomicAlgorithmRegistry` (uniform adapter catalog) fed by
+  providers (QGIS/GDAL/OTB/Generic-CLI/Python) and the Operator Registry
+  (`rs:` operators, determinism-graded, ADR 0124).
+- Data: `DataManager` asset authority (assets/collections/leases/revisions),
+  workspace governance store (ADR 0129), project format v3.
+- Display: `ActiveViewHost` facade over the map canvas; Display View/Layer
+  separation (ADR 0015).
+- Plugins: `exprs::PluginRegistry` lifecycle owner (ADR 0130: barrier-drained
+  unload, UI reverse ownership, path containment, workspace effect policy);
+  Python plugins out-of-process (ADR 0014); conformance via
+  `sicnu_geo_rs_cli plugin test`.
+- Agent: spatial tools (ADR 0122), spatial-scientist contracts (ADR 0128),
+  MapSpec cartography (ADR 0127), Pi bridge.
+
+Full directory map: `docs/repo-layout.md`. Domain vocabulary: `CONTEXT.md`.
+Decision log: `docs/adr/0001`–`0131+`.
+
+## Build & test (authoritative commands)
+
+- Configure: `cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=ON
+  -DSICNU_EMBED_PYTHON=ON -S . -B build`
+- Build: `cmake --build build` (honor `CMAKE_BUILD_PARALLEL_LEVEL`).
+- Test: `QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure`
+  (CTestCustom.cmake pins PYTHONHOME/LD_LIBRARY_PATH/QT_IM_MODULE; see
+  TEST_INFRA.md). Catch2 tests are discovered PRE_TEST by testcase name.
+- Platform status: Linux validated locally; macOS via CI seam; Windows
+  compiles the SDK targets (Win32 loader path), external-process execution is
+  a typed refusal there — see docs/plugins/external-process.md.
+
+## Current focus (as of 2026-09)
+
+Goal-series epics running as separate worktrees/branches, each landing one PR:
+plugin SDK lifecycle/isolation 4.0 (ADR 0130), scientific algorithms
+foundation, workspace governance 3.0 hardening, desktop UX, cartography,
+data runtime. Completed series: Extensibility/Plugin SDK 3.0 (#743), Project
+Workspace & Governance 3.0 (#745), multimodal spatiotemporal platform,
+Pi spatial-scientist layer.
+
+## Known open defect clusters (issue-tracker truth at read time)
+
+- Governance store hardening (#746, #750–#754, #758) — owned by the
+  governance epic.
+- Temporal RMSE NaN denominator (#759); stale PROJECT.md (#760 — this
+  rewrite addresses it).
+- Plugin/SDK lifecycle & security cluster (#747, #748, #755, #756, #757) —
+  owned by the plugin SDK 4.0 epic (ADR 0130).

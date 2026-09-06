@@ -581,3 +581,4 @@ ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision
 - **ADR 0127**: MapSpec Declarative Cartography
 - **ADR 0128**: Spatial Scientist Contracts
 - **ADR 0129**: Project Workspace, Data Governance & Reproducibility Platform 3.0
+- **ADR 0130**: Plugin Lifecycle, Unload Safety & Path Containment (barrier-protected unload with drain-or-refuse; owner-scoped execution leases; UI reverse ownership via a shell sink; Python `py:` revocation; entrypoint containment at validation and load; `SICNU_MCP_WORKSPACE` effect policy for external tools; std::filesystem/Win32 SDK portability; `plugin test` conformance kit)

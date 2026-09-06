@@ -2,6 +2,20 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-06
+
+### 🔌 Plugin SDK, Isolation & Extension Ecosystem 4.0 (ADR 0130)
+- **Safe unload lifecycle (#747)**: one ordered unload seam — arm the execution-barrier drain (new dispatch refused with a typed failure), bounded wait for in-flight executions (`SICNU_PLUGIN_UNLOAD_TIMEOUT_MS`, default 30 s, shared deadline at shutdown; timeout refuses with `E4005 PluginInUse` and keeps the plugin loaded), release UI contributions through a shell sink, revoke registrations (including cached model-runtime sessions), `shutdown()`, delete, `dlclose` last. Owner-scoped RAII execution leases cover operator run, agent-tool execute, model-runtime factory/infer paths, and the direct RSOperatorRegistry path (JobEngine/workflow) through lease-holding operator wrappers; after unload the barrier entry stays closed under a bumped generation so stale handles refuse instead of calling unmapped code. GUI exit unloads plugins before QApplication destruction (CLI `ShutdownGuard` parity); `unloadAll` leaves a still-busy plugin mapped for process exit instead of forcing it out.
+- **UI reverse ownership (#747)**: plugin docks/menu actions/preferences pages attach and release through `ExprsPluginShellUi`; plugin-created widgets/actions are detached AND deleted while the binary is still mapped, including detaching a settings page from an open Preferences dialog.
+- **Real enable/disable round-trip (#755)**: disable = unload (+ `setEnabled(false)` only when the unload succeeded); enable = load + re-attach — no restart. A fresh load reopens the plugin's execution-barrier entry under a new generation (pre-unload handles stay invalid) and reinstalls manifest-declared contributions, including the atomic-catalog adapters revoke removed; the CLI `plugin enable/disable` implements the same contract. `py:` algorithms are revoked on Python plugin unload (host bridge removes catalog/registry entries; the worker daemon pops the plugin's executors); reload re-registers cleanly with no dead entries or duplicates.
+- **Entrypoint containment (#756)**: `exprs::PathPolicy` — manifest `entrypoint` must resolve to a regular file inside the canonical plugin root; absolute paths, `..` components and symlink escapes rejected at validation (`E3007`) AND re-checked immediately before mapping (validation→load TOCTOU closed).
+- **Workspace effect policy (#757)**: with `SICNU_MCP_WORKSPACE` set, `ExternalProcess::run` refuses before spawn (`E5005 workspace_escape`) when the resolved working directory, an argv path (except argv[0], resolved against the child's working directory), or a manifest env value escapes the workspace; the owning plugin's directory and the operator temp work directory are accepted extra roots. Declared output publish targets are gated at the operator layer. Documented honestly as a path policy, not an OS sandbox.
+- **SDK portability by design (#748)**: `sicnu_sdk` is `std::filesystem`-based (discovery, package, validator, registry index); the loader uses `LoadLibraryW/GetProcAddress/FreeLibrary` on Windows and `dlopen` elsewhere. `ExternalProcess` on Windows is a typed "not supported" refusal — documented limitation, no untested claims.
+- **Conformance kit (milestone J)**: `sicnu_geo_rs_cli plugin test <dir>` — PT_MANIFEST / PT_COMPAT / PT_CONTAINMENT / PT_LOAD / PT_REGISTER / PT_REVOKE / PT_ROUNDTRIP with structured JSON output.
+- **Scaffolding (milestone I)**: `scripts/exprs_new_plugin.py` generates conformance-shaped plugins for all seven contribution kinds.
+- **New state**: `Quiescing` appears in plugin records while an unload drains; refusal restores `Loaded`.
+- **Tests**: barrier suite, unload-refusal integration, containment (validator + loader TOCTOU + swap-after-validate), sandbox policy matrix, python register→unload→absent→reload round-trip.
+
 ## [Unreleased] - 2026-09-05
 
 ### 🗂️ Project Workspace, Data Governance & Reproducibility Platform 3.0 (goal series, ADR 0129)
