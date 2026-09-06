@@ -22,6 +22,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include "rs_classification_pipeline.h"
@@ -172,27 +173,18 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     context.reportProgress(0.05, "Reading bands");
     context.throwIfCancelled();
 
-    // Collect per-band NoData values to filter invalid/sentinel pixels during training
-    std::vector<float> noDataPerBand( static_cast<size_t>( nFeat ), -9999.0f );
-    std::vector<bool> hasNoDataPerBand( static_cast<size_t>( nFeat ), false );
+    // Collect per-band NoData sentinels to filter invalid pixels during
+    // training (NaN when a band declares no finite sentinel).
+    std::vector<float> noDataPerBand( static_cast<size_t>( nFeat ) );
     for ( size_t i = 0; i < static_cast<size_t>( nFeat ); ++i )
-    {
-        bool hasNd = false;
-        double ndVal = ds.bandNoDataValue( bands[i], &hasNd );
-        if ( hasNd && std::isfinite( ndVal ) )
-        {
-            noDataPerBand[i] = static_cast<float>( ndVal );
-            hasNoDataPerBand[i] = true;
-        }
-    }
+        noDataPerBand[i] = sicnu::rs::bandNoDataSentinel( ds, bands[i] );
 
     auto isPixelValid = [&]( const float *pixelFeatures ) -> bool {
         for ( size_t i = 0; i < static_cast<size_t>( nFeat ); ++i )
         {
-            const float v = pixelFeatures[i];
-            if ( !std::isfinite( v ) )
-                return false;
-            if ( hasNoDataPerBand[i] && std::abs( v - noDataPerBand[i] ) < 1e-4f )
+            // Exact sentinel equality (platform policy): an epsilon here
+            // silently dropped legitimate values near the sentinel.
+            if ( sicnu::rs::isNoDataValue( pixelFeatures[i], noDataPerBand[i] ) )
                 return false;
         }
         return true;
