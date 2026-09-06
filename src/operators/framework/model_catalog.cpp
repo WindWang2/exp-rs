@@ -348,7 +348,10 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
       shapeVersion = 3;
     else if ( inputDeclaredAsObject )
       shapeVersion = 2;
-    if ( info.manifestVersion > 0 && info.manifestVersion != shapeVersion )
+    // Version 4 is the v3 shape plus the 4.0 vocabulary (identity fields,
+    // output.format / output.detection) - it validates against shape 3.
+    const int effectiveDeclared = info.manifestVersion == 4 ? 3 : info.manifestVersion;
+    if ( effectiveDeclared > 0 && effectiveDeclared != shapeVersion )
       markInvalid( "declared manifest_version " + std::to_string( info.manifestVersion )
                    + " but the manifest shape is version " + std::to_string( shapeVersion )
                    + ( shapeVersion == 3 ? " ('inputs' array)" : shapeVersion == 2 ? " ('input' object)"
@@ -971,6 +974,16 @@ std::vector<ModelInfo> ModelCatalog::models() const
   std::lock_guard<std::mutex> lock( catalogMutex() );
   ensureLoadedLocked();
   std::vector<ModelInfo> combined = mModels;
+  // A registered entry shadows scanned manifests with the same stable id.
+  combined.erase( std::remove_if( combined.begin(), combined.end(),
+                                  [ this ]( const ModelInfo &model ) {
+                                    return std::any_of(
+                                      mRegistered.begin(), mRegistered.end(),
+                                      [ & ]( const ModelInfo &registered ) {
+                                        return registered.stableId() == model.stableId();
+                                      } );
+                                  } ),
+                  combined.end() );
   combined.insert( combined.end(), mRegistered.begin(), mRegistered.end() );
   // unregister() hides entries (scanned ones reappear on reload).
   combined.erase( std::remove_if( combined.begin(), combined.end(),
@@ -991,7 +1004,11 @@ std::vector<ModelInfo> ModelCatalog::modelsByTask( const std::string &task ) con
   std::vector<ModelInfo> result;
   for ( const auto &model : mModels )
   {
-    if ( model.task == task )
+    const bool shadowed = std::any_of(
+      mRegistered.begin(), mRegistered.end(), [ & ]( const ModelInfo &registered ) {
+        return registered.stableId() == model.stableId();
+      } );
+    if ( !shadowed && model.task == task )
       result.push_back( model );
   }
   for ( const auto &model : mRegistered )
@@ -1063,6 +1080,21 @@ std::vector<ModelCandidate> ModelCatalog::rankModels( const ModelQueryCriteria &
   std::lock_guard<std::mutex> lock( catalogMutex() );
   ensureLoadedLocked();
   std::vector<ModelInfo> combined = mModels;
+  combined.erase( std::remove_if( combined.begin(), combined.end(),
+                                  [ this ]( const ModelInfo &model ) {
+                                    const bool shadowed = std::any_of(
+                                      mRegistered.begin(), mRegistered.end(),
+                                      [ & ]( const ModelInfo &registered ) {
+                                        return registered.stableId() == model.stableId();
+                                      } );
+                                    const bool removed =
+                                      std::find( mUnregistered.begin(), mUnregistered.end(),
+                                                 model.stableId() ) != mUnregistered.end()
+                                      || std::find( mUnregistered.begin(), mUnregistered.end(),
+                                                    model.name ) != mUnregistered.end();
+                                    return shadowed || removed;
+                                  } ),
+                  combined.end() );
   combined.insert( combined.end(), mRegistered.begin(), mRegistered.end() );
   combined.erase( std::remove_if( combined.begin(), combined.end(),
                                   [ this ]( const ModelInfo &model ) {

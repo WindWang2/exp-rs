@@ -920,6 +920,7 @@ TEST_CASE( "manifest 4.0 identity fields parse with documented defaults", "[mode
       "manifest_version": 2,
       "task": "segmentation",
       "framework": "onnx",
+      "input": { "dtype": "float32", "band_roles": ["red", "green", "blue", "nir"] },
       "artifact": { "path": "weights.onnx" }
   })",
                  artifactBytes );
@@ -968,6 +969,28 @@ TEST_CASE( "manifests without 4.0 identity fields keep historical identity", "[m
   CHECK( model->manifestVersion == 0 );
   // Even without a declared checksum the bytes are hashed for identity.
   CHECK( model->contentDigest == sha256( QByteArray( "w" ) ).toStdString() );
+}
+
+TEST_CASE( "manifest_version 4 accepts the v3 shape plus 4.0 vocabulary", "[models][catalog][identity]" )
+{
+  QTemporaryDir dir;
+  writeManifest( dir, QStringLiteral( "version-four" ), R"({
+      "name": "version-four",
+      "id": "acme/v4",
+      "manifest_version": 4,
+      "task": "segmentation",
+      "framework": "onnx",
+      "inputs": [ { "name": "scene", "dtype": "float32" } ],
+      "output": { "type": "raster", "format": "labels", "classes": ["a", "b"] }
+  })" );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  const auto model = catalog.find( "acme/v4" );
+  REQUIRE( model.has_value() );
+  CHECK( model->readiness == ModelReadiness::Ready );
+  CHECK( model->manifestVersion == 4 );
 }
 
 TEST_CASE( "a declared manifest_version must agree with the manifest shape", "[models][catalog][identity]" )

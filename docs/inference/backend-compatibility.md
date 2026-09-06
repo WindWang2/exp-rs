@@ -17,8 +17,13 @@
 
 Notes:
 
-- The matrix is a contract, not a claim: every "yes" is exercised by a test
-  named above or in `TEST_MATRIX` (`.planning/model-runtime-ai-platform-4/`).
+- The matrix is a contract, not a claim: the built-in backend's
+  warmup/health/memoryEstimate surface is exercised by
+  `tests/test_model_failure_matrix.cpp` ("the runtime contract surface");
+  provider-specific rows describe the provider's own responsibility.
+- The opencv_dnn `auto` device selection prefers cuda:0 when it fits; picking
+  a different index on multi-GPU hosts is a documented follow-up (explicit
+  `cuda:N` requests work for index-capable providers).
 - A single forward pass is uninterruptible on every backend — cancellation
   lands at checkpoints (between tiles/batches and at forward entry). This is
   the documented cost of not requiring a specific ONNX Runtime build.

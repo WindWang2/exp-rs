@@ -586,8 +586,41 @@ TEST_CASE( "the session pool stays bounded under concurrent acquires", "[models]
   CHECK( failures.load() == 0 );
   CHECK( registry.cachedSessionCount() <= registry.maxCachedSessions() );
   const auto stats = registry.poolStats();
-  CHECK( stats.totalLoads == stats.cacheMisses );
+  // A losing loader returns the winner's session without counting a load,
+  // so totalLoads can legitimately trail cacheMisses under contention.
+  CHECK( stats.totalLoads <= stats.cacheMisses );
   CHECK( stats.evictions > 0 );
+}
+
+TEST_CASE( "the runtime contract surface: warmup, health, memory estimate", "[models][contract]" )
+{
+  QTemporaryDir dir;
+  const QString artifact = dir.filePath( QStringLiteral( "identity.onnx" ) );
+  REQUIRE( QFile::copy( identityModelPath(), artifact ) );
+  ModelInfo model;
+  model.name = "contract-model";
+  model.framework = "onnx";
+  model.readiness = ModelReadiness::Ready;
+  model.resolvedArtifactPath = artifact.toStdString();
+
+  RegistryReset reset;
+  auto session = ModelRuntimeRegistry::instance().acquire( model );
+  REQUIRE( session );
+
+  // Warmup must never break the session (fixed-shape graphs may reject the
+  // probe; the outcome lands in health, not in a failure).
+  session->warmup();
+  const auto health = session->health();
+  CHECK( health.ok );
+  const auto memory = session->memoryEstimate();
+  CHECK( memory.weightsMb >= 1 ); // the 136-byte fixture rounds up to 1 MiB
+  CHECK( memory.workingSetMb == 0 ); // honest unknown for opencv_dnn
+
+  // Cooperative cancel: request, observe, clear.
+  session->requestCancel();
+  CHECK( session->health().ok == false );
+  session->clearCancel();
+  CHECK( session->health().ok );
 }
 
 TEST_CASE( "idle eviction and per-key release unload sessions", "[models][pool]" )

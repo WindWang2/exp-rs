@@ -79,8 +79,11 @@
       pipeline (ADR 0019) stays an independent deep module (single predict
       path, no duplicated tiling).
 - Consequences:
-  - Detection manifests (4 shipped YOLO templates) can now execute to their
-    declared vector contract once weights are installed.
+  - Detection models with an `output.detection` contract can now execute to
+    their declared vector contract; the shipped `yolo-ship-detection`
+    template carries the contract as the reference example (the other three
+    YOLO templates still need theirs authored — they keep parsing but are
+    rejected loudly at detection run time until then).
   - Failure behavior is testable property-by-property (corrupt bytes, OOM
     ladder, cancel latency, partial-write atomicity, unwritable paths,
     removed artifacts) — see `tests/test_model_failure_matrix.cpp`.

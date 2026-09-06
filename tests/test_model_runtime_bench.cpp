@@ -16,6 +16,7 @@
 
 #include <gdal_priv.h>
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -24,6 +25,7 @@
 #include <QJsonObject>
 #include <QTemporaryDir>
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <string>
@@ -144,15 +146,20 @@ TEST_CASE( "model runtime benchmark (SICNU_MODEL_BENCH=1)", "[.] [model_bench]" 
   const double pixelsPerSec = tilesPerSec * stats.tileSize * stats.tileSize;
 
   // --- Cancel latency -------------------------------------------------------
+  QTemporaryDir cancelDir;
+  std::atomic<bool> cancelFlag{ false };
+  cancelFlag.store( true ); // armed pre-run: the first check point throws
   RSOperatorContext cancelContext;
+  cancelContext.setCancelFlag( &cancelFlag );
   TileInferenceEngine cancelEngine( model, session );
-  cancelContext.throwIfCancelled(); // armed pre-run: the first check point throws
+  cancelContext.throwIfCancelled();
   const auto cancelStart = std::chrono::steady_clock::now();
   bool canceled = false;
   try
   {
-    cancelEngine.run( input.toStdString(), {}, dir.filePath( QStringLiteral( "cancel.tif" ) ).toStdString(),
-                      cancelContext );
+    cancelEngine.run( input.toStdString(), {},
+                    cancelDir.filePath( QStringLiteral( "cancel.tif" ) ).toStdString(),
+                    cancelContext );
   }
   catch ( const sicnu::operators::RSOperatorError & )
   {

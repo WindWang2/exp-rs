@@ -60,20 +60,36 @@ std::string contentDigestFor( const ModelInfo &model )
   const unsigned long long sizeBytes = static_cast<unsigned long long>( info.size() );
   const qint64 mtimeMs = info.lastModified().toMSecsSinceEpoch();
 
-  std::lock_guard<std::mutex> lock( digestMemoMutex() );
-  auto &memo = digestMemo();
-  for ( const auto &entry : memo )
   {
-    if ( entry.path == model.resolvedArtifactPath && entry.sizeBytes == sizeBytes
-         && entry.mtimeMs == mtimeMs )
-      return entry.digest;
+    // Memo hit path is lock-scoped; the hash itself (potentially GBs) runs
+    // OUTSIDE the mutex so concurrent acquires of other models never wait
+    // behind a first hash.
+    std::lock_guard<std::mutex> lock( digestMemoMutex() );
+    auto &memo = digestMemo();
+    for ( const auto &entry : memo )
+    {
+      if ( entry.path == model.resolvedArtifactPath && entry.sizeBytes == sizeBytes
+           && entry.mtimeMs == mtimeMs )
+        return entry.digest;
+    }
   }
   const std::string digest = sicnu::operators::artifactSha256Hex( model.resolvedArtifactPath );
   if ( digest.empty() )
     return std::string(); // unreadable artifact — caller falls back
-  if ( memo.size() > 64 )
-    memo.clear();
-  memo.push_back( DigestMemoEntry{ model.resolvedArtifactPath, sizeBytes, mtimeMs, digest } );
+  {
+    std::lock_guard<std::mutex> lock( digestMemoMutex() );
+    auto &memo = digestMemo();
+    // Re-check: another thread may have hashed the same state meanwhile.
+    for ( const auto &entry : memo )
+    {
+      if ( entry.path == model.resolvedArtifactPath && entry.sizeBytes == sizeBytes
+           && entry.mtimeMs == mtimeMs )
+        return entry.digest;
+    }
+    if ( memo.size() > 64 )
+      memo.clear();
+    memo.push_back( DigestMemoEntry{ model.resolvedArtifactPath, sizeBytes, mtimeMs, digest } );
+  }
   return digest;
 }
 
@@ -284,7 +300,7 @@ InferenceFailureKind classifyInferenceError( const std::string &message )
 
   if ( contains( "cancel" ) )
     return InferenceFailureKind::Canceled;
-  if ( contains( "out of memory" ) || contains( "oom" ) || contains( "bad_alloc" )
+  if ( contains( "out of memory" ) || contains( "bad_alloc" )
        || contains( "cuda_error_out_of_memory" ) || contains( "cudamalloc" )
        || contains( "alloc failed" ) || contains( "allocation failure" ) )
     return InferenceFailureKind::OutOfMemory;
@@ -418,13 +434,25 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     digest.empty() ? identityFallbackFor( model ) : digest;
 
   std::unique_lock<std::mutex> lock( m_mutex );
-  const auto provider = m_providers.find( framework );
-  if ( provider == m_providers.end() )
+  // Idle eviction runs once per acquire attempt, BEFORE the cache lookup —
+  // a stale entry must be dropped, not served (contract: "dropped on the
+  // next acquire"). Cheap when the idle window is disabled.
+  evictExpiredLocked( QDateTime::currentMSecsSinceEpoch() );
+  // Copy the provider entry out: the factory runs OUTSIDE the lock, where a
+  // concurrent registerProvider could otherwise invalidate the iterator.
+  ModelRuntimeFactory factory;
+  ProviderTraits traits;
   {
-    lock.unlock();
-    if ( errorMessage )
-      *errorMessage = "no runtime provider available for framework '" + framework + "' in this build";
-    return nullptr;
+    const auto provider = m_providers.find( framework );
+    if ( provider == m_providers.end() )
+    {
+      lock.unlock();
+      if ( errorMessage )
+        *errorMessage = "no runtime provider available for framework '" + framework + "' in this build";
+      return nullptr;
+    }
+    factory = provider->second.factory;
+    traits = provider->second.traits;
   }
 
   // Platform 4.0 device resolution (deterministic pure function). The
@@ -433,7 +461,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   ResolvedDevice device;
   std::string deviceWhy;
   if ( !resolveDevice( request, hw, model.runtime.gpu, model.runtime.estimatedVramMb,
-                       provider->second.traits.maxAddressableCudaIndex, model.runtime.cpuFallback,
+                       traits.maxAddressableCudaIndex, model.runtime.cpuFallback,
                        &device, &deviceWhy ) )
   {
     lock.unlock();
@@ -463,7 +491,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   ModelInfo effective = model;
   effective.runtime.gpu = device.gpu;
   std::string error;
-  ModelRuntimePtr session = provider->second.factory( effective, hw, &error );
+  ModelRuntimePtr session = factory( effective, hw, &error );
   if ( !session )
   {
     if ( errorMessage )
@@ -472,8 +500,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   }
 
   lock.lock();
-  // Idle eviction runs once per acquire attempt (cheap when disabled).
-  evictExpiredLocked( QDateTime::currentMSecsSinceEpoch() );
+  // Re-run idle eviction: time passed while the weights were loading.
   // Another thread may have loaded the same key meanwhile; prefer theirs and
   // let ours be released, keeping the cache size invariant simple.
   const auto raced = m_cache.find( key );
@@ -533,8 +560,13 @@ void ModelRuntimeRegistry::release( const std::string &framework, const std::str
   for ( auto it = m_cache.begin(); it != m_cache.end(); )
   {
     const std::string &key = it->first;
-    if ( key.rfind( prefix, 0 ) == 0 && key.size() > prefix.size() && identity.size() <= key.size()
-         && key.compare( key.size() - identity.size(), identity.size(), identity ) == 0 )
+    // Exact final-segment match: the identity must be the WHOLE text after
+    // the last '|', not a suffix of it (fallback identities can be suffixes
+    // of one another; digests cannot, but the contract is uniform).
+    const std::string::size_type lastSep = key.rfind( '|' );
+    if ( lastSep != std::string::npos && key.size() - lastSep - 1 == identity.size()
+         && key.compare( lastSep + 1, identity.size(), identity ) == 0
+         && key.compare( 0, prefix.size(), prefix ) == 0 )
       it = m_cache.erase( it );
     else
       ++it;

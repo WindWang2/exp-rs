@@ -233,13 +233,33 @@ Json::Value RsDetectOperator::schema() const
     using namespace schema;
     Json::Value props( Json::objectValue );
     addCommonProps( props );
-    props["conf"] = makeStringParam( "conf", "Confidence threshold override [0,1] (default: manifest)", "" );
-    props["nms_iou"] = makeStringParam( "nms_iou", "NMS IoU threshold override (0,1] (default: manifest)", "" );
+    {
+      Json::Value conf( Json::objectValue );
+      conf["name"] = "conf";
+      conf["type"] = "number";
+      conf["minimum"] = 0.0;
+      conf["maximum"] = 1.0;
+      conf["description"] = "Confidence threshold override (default: manifest conf_threshold)";
+      props["conf"] = conf;
+      Json::Value iou( Json::objectValue );
+      iou["name"] = "nms_iou";
+      iou["type"] = "number";
+      iou["minimum"] = 0.0;
+      iou["maximum"] = 1.0;
+      iou["description"] = "Whole-raster NMS IoU override (default: manifest nms_iou)";
+      props["nms_iou"] = iou;
+    }
     Json::Value outputs( Json::objectValue );
     addCommonOutputs( outputs, "Output vector path (.gpkg | .geojson | .shp)" );
     outputs["detections"] = makeIntegerParam( "detections", "Detections kept after NMS/dedup", 0 );
     outputs["rawDetections"] = makeIntegerParam( "rawDetections", "Detections decoded before NMS/dedup", 0 );
-    outputs["classes"] = makeStringParam( "classes", "Class names from the manifest", "" );
+    {
+      Json::Value classes( Json::objectValue );
+      classes["name"] = "classes";
+      classes["type"] = "array";
+      classes["description"] = "Class names from the detection contract";
+      outputs["classes"] = classes;
+    }
     Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
     root["required"] = makeRequired( { "input", "model", "output" } );
     return root;
@@ -275,9 +295,6 @@ Json::Value RsDetectOperator::run( const Json::Value &params, RSOperatorContext 
     if ( !params.isObject() )
         throw RSOperatorError( ErrorCode::InvalidParameter,
                                "Operator parameters must be a JSON object" );
-    // Fail loudly when the model cannot run as detection (before opening the
-    // input): the service re-checks, but the operator names the knob.
-    const std::string modelRef = requireString( params, "model" );
     ModelExecutionRequest request;
     fillCommonRequest( request, params, context );
     request.asDetection = true;

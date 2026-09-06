@@ -1125,15 +1125,28 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   }
   // Atomic publish: only a fully written, closed raster is renamed onto the
   // caller's path (same directory — same volume). Windows rename does not
-  // overwrite, so a previous result is removed first; a failure here cleans
-  // the stage and leaves the OLD output untouched rather than a torn one.
-  QFile::remove( QString::fromStdString( outputPath ) );
-  if ( !QFile::rename( stagePath, QString::fromStdString( outputPath ) ) )
+  // overwrite, so the previous result moves to a .prev~ backup first; a
+  // failure at ANY step restores it — the caller's output path ends up with
+  // either the NEW raster or the OLD one, never nothing and never a torn one.
+  const QString finalPath = QString::fromStdString( outputPath );
+  const QString backupPath = finalPath + QStringLiteral( ".prev~" );
+  QFile::remove( backupPath );
+  const bool hadExisting = QFile::exists( finalPath );
+  if ( hadExisting && !QFile::rename( finalPath, backupPath ) )
   {
     QFile::remove( stagePath );
     throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "failed to back up the previous output before publishing: " + outputPath );
+  }
+  if ( !QFile::rename( stagePath, finalPath ) )
+  {
+    QFile::remove( stagePath );
+    if ( hadExisting )
+      QFile::rename( backupPath, finalPath ); // best-effort restore of the old result
+    throw RSOperatorError( ErrorCode::FileNotWritable,
                            "failed to publish output raster to: " + outputPath );
   }
+  QFile::remove( backupPath );
   context.reportProgressForced( 1.0, "Tiled inference complete" );
   stats.tilesProcessed = done;
   return stats;

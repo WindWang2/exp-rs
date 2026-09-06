@@ -12,6 +12,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QStringList>
 #include <QFileInfo>
 
 #include <algorithm>
@@ -182,23 +183,31 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
   {
     cv::Mat blob;
     const int B = static_cast<int>( batchMats.size() );
-    const int H = batchMats.front().rows;
-    const int W = batchMats.front().cols;
-    int dims[4] = { B, bandCount, H, W };
-    blob = cv::Mat( 4, dims, CV_32F );
-    blob.setTo( 0 );
-    for ( int b = 0; b < B; ++b )
+    try
     {
-      std::vector<cv::Mat> channels;
-      cv::split( batchMats[static_cast<std::size_t>( b )], channels );
-      for ( int c = 0; c < bandCount; ++c )
+      const int H = batchMats.front().rows;
+      const int W = batchMats.front().cols;
+      int dims[4] = { B, bandCount, H, W };
+      blob = cv::Mat( 4, dims, CV_32F );
+      blob.setTo( 0 );
+      for ( int b = 0; b < B; ++b )
       {
-        float *dst = blob.ptr<float>( b, c, 0 );
-        const cv::Mat &ch = channels[static_cast<std::size_t>( c )];
-        for ( int y = 0; y < H; ++y )
-          std::memcpy( dst + static_cast<std::size_t>( y ) * W, ch.ptr<float>( y ),
-                       static_cast<std::size_t>( W ) * sizeof( float ) );
+        std::vector<cv::Mat> channels;
+        cv::split( batchMats[static_cast<std::size_t>( b )], channels );
+        for ( int c = 0; c < bandCount; ++c )
+        {
+          float *dst = blob.ptr<float>( b, c, 0 );
+          const cv::Mat &ch = channels[static_cast<std::size_t>( c )];
+          for ( int y = 0; y < H; ++y )
+            std::memcpy( dst + static_cast<std::size_t>( y ) * W, ch.ptr<float>( y ),
+                         static_cast<std::size_t>( W ) * sizeof( float ) );
+        }
       }
+    }
+    catch ( const cv::Exception &e )
+    {
+      throw RSOperatorError( ErrorCode::OpenCvError,
+                             std::string( "failed to build detection blob: " ) + e.what() );
     }
 
     cv::Mat output;
@@ -220,6 +229,12 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
                              "detection head output must be a 3-D tensor (got dims="
                                + std::to_string( output.dims ) + ")" );
 
+    if ( output.size[0] < B )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "detection head returned " + std::to_string( output.size[0] )
+                               + " samples for a batch of " + std::to_string( B )
+                               + " — the export fixes the batch dimension; use batch_size=1" );
+
     // Per-sample slice: the decode consumes a (1, C, N) tensor per tile.
     for ( int bi = 0; bi < B; ++bi )
     {
@@ -227,14 +242,32 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
       const int sampleSizes[3] = { 1, output.size[1], output.size[2] };
       cv::Mat sample( 3, sampleSizes, output.type(),
                       output.ptr( bi ) ); // header onto sample bi's plane
-      // The window was resized to the fixed model input:
-      // fedPx * (windowPx/modelPx) maps the boxes back to raster pixels.
-      const double scaleX = static_cast<double>( win[2] ) / std::max( 1, output.size[2] );
-      const double scaleY = static_cast<double>( win[3] ) / std::max( 1, output.size[3] );
+      // The window was resized to the fixed model input (contract-checked):
+      // fedPx * (windowPx / modelInputPx) maps the boxes back to raster
+      // pixels. The MODEL's declared input size is the scale reference —
+      // never the tensor's candidate axis.
+      const double scaleX = static_cast<double>( win[2] ) / std::max( 1, m_model.input.width );
+      const double scaleY = static_cast<double>( win[3] ) / std::max( 1, m_model.input.height );
+      const std::size_t countBefore = detections.size();
       const std::string decodeError =
         decodeDetections( sample, det, win[0], win[1], scaleX, scaleY, rasterW, rasterH, detections );
       if ( !decodeError.empty() )
         throw RSOperatorError( ErrorCode::ComputationError, decodeError );
+      // Center-in-core seam rule (this tile's NEW boxes only): overlap
+      // windows re-detect objects near the seams; keep a detection only when
+      // its CENTER lies in this tile's core rect, so every object is owned
+      // by exactly one tile (the whole-raster NMS then handles residual
+      // near-duplicates).
+      const CoreTile &owner = batchCores[static_cast<std::size_t>( bi )];
+      for ( std::size_t k = detections.size(); k > countBefore; )
+      {
+        --k;
+        const DetectionBox &box = detections[k];
+        const float cx = box.x + box.w * 0.5f;
+        const float cy = box.y + box.h * 0.5f;
+        if ( cx < owner.x || cy < owner.y || cx > owner.x + owner.w || cy > owner.y + owner.h )
+          detections.erase( detections.begin() + static_cast<std::ptrdiff_t>( k ) );
+      }
     }
     stats.tilesProcessed += B;
     batchMats.clear();
@@ -495,22 +528,76 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
   }
   GDALClose( outDs );
 
-  // Publish: replace any previous output, then rename temp → final.
-  removeVectorFiles( QString::fromStdString( outputPath ) );
-  if ( !QFile::rename( workPath, QString::fromStdString( outputPath ) ) )
+  // Publish: back up any previous output, rename the stage files onto the
+  // caller's path (sidecars checked — a shapefile without .shx is invalid),
+  // and restore the backup if any step fails.
+  const QString finalPath = QString::fromStdString( outputPath );
+  const bool isShp = outFi.suffix().toLower() == QLatin1String( "shp" );
+  auto sidecarPaths = [ & ]( const QString &main ) {
+    const QFileInfo fi( main );
+    const QString base = fi.path() + QLatin1Char( '/' ) + fi.completeBaseName();
+    QStringList paths;
+    if ( isShp )
+      for ( const char *ext : { ".dbf", ".shx", ".prj", ".cpg" } )
+        paths << base + QString::fromLatin1( ext );
+    return paths;
+  };
+  const QStringList finalSidecars = sidecarPaths( finalPath );
+  const QStringList workSidecars = sidecarPaths( workPath );
+
+  auto publishAll = [ & ]() -> bool {
+    if ( !QFile::rename( workPath, finalPath ) )
+      return false;
+    for ( int i = 0; i < workSidecars.size(); ++i )
+    {
+      if ( QFile::exists( workSidecars[i] )
+           && !QFile::rename( workSidecars[i], finalSidecars[i] ) )
+        return false;
+    }
+    return true;
+  };
+
+  // Move the previous output (main + sidecars) aside.
+  const QString backupPath = finalPath + QStringLiteral( ".prev~" );
+  QStringList backupSidecars;
+  for ( const QString &sidecar : finalSidecars )
+    backupSidecars << sidecar + QStringLiteral( ".prev~" );
+  const bool hadExisting = QFile::exists( finalPath );
+  if ( hadExisting )
+  {
+    removeVectorFiles( backupPath );
+    if ( !QFile::rename( finalPath, backupPath ) )
+    {
+      removeVectorFiles( workPath );
+      throw RSOperatorError( ErrorCode::FileNotWritable,
+                             "failed to back up the previous detection output: " + outputPath );
+    }
+    for ( int i = 0; i < finalSidecars.size(); ++i )
+    {
+      if ( QFile::exists( finalSidecars[i] ) )
+        QFile::rename( finalSidecars[i], backupSidecars[i] );
+    }
+  }
+
+  if ( !publishAll() )
   {
     removeVectorFiles( workPath );
+    removeVectorFiles( finalPath ); // a partial publish must not look like a result
+    if ( hadExisting )
+    {
+      QFile::rename( backupPath, finalPath );
+      for ( int i = 0; i < backupSidecars.size(); ++i )
+      {
+        if ( QFile::exists( backupSidecars[i] ) )
+          QFile::rename( backupSidecars[i], finalSidecars[i] );
+      }
+    }
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "failed to publish detection output to: " + outputPath );
   }
-  if ( outFi.suffix().toLower() == QLatin1String( "shp" ) )
-  {
-    const QString workBase = QFileInfo( workPath ).path() + QLatin1Char( '/' )
-                             + QFileInfo( workPath ).completeBaseName();
-    const QString outBase = outFi.path() + QLatin1Char( '/' ) + outFi.completeBaseName();
-    for ( const char *ext : { ".dbf", ".shx", ".prj", ".cpg" } )
-      QFile::rename( workBase + QString::fromLatin1( ext ), outBase + QString::fromLatin1( ext ) );
-  }
+  removeVectorFiles( backupPath );
+  for ( const QString &sidecar : backupSidecars )
+    QFile::remove( sidecar );
 
   context.reportProgressForced( 1.0, "Tiled detection complete" );
   return stats;
