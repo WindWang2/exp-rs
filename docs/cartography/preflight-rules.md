@@ -1,0 +1,61 @@
+# Cartographic Preflight Rule Catalog (Design System 4.0)
+
+`preflightMapSpec` evaluates a MapSpec's *resolved* composition and returns
+a `map_quality_report` envelope: issues with `code`, `severity`, `message`,
+`repairable`, `item_id`, and (for repairable findings) a `suggested_action`
+with `action` — plus `quality_score` (0–100 = 100 − 20·errors − 8·warnings),
+`passed` (no errors **and** no repairable findings), and issue counts.
+
+The machine-readable catalog is exposed by `preflightRuleCatalog()` and the
+`cartography:list_rules` tool; the table below is the human companion.
+Text-overflow rules use a platform-independent width estimator (CJK glyphs
+one em, others 0.55 em, spaces 0.35 em; 1 pt = 0.3528 mm; single line, 5%
+tolerance) — deliberately not local font metrics.
+
+## Catalog
+
+| code | severity | repairable | repair behavior |
+|------|----------|------------|-----------------|
+| `MAPSPEC_INVALID` | error | no | short-circuits the report with score 0 |
+| `MAP_MISSING_MAP` | error | no | a map-less spec cannot pass |
+| `MAP_EMPTY_MAP` | warning | no | frame has neither layers nor extent (renders blank) |
+| `MAP_MISSING_TITLE` | warning | yes | adds a `title.main` draft |
+| `MAP_MISSING_LEGEND` | warning | yes | adds a `legend.primary` draft linked to the first frame |
+| `MAP_MISSING_SCALE_BAR` | warning | yes | adds a `scalebar.primary` draft |
+| `MAP_MISSING_NORTH_ARROW` | warning | yes | adds a `north_arrow.primary` draft |
+| `MAP_MISSING_SOURCE_NOTE` | warning | yes | adds a `source.primary` draft |
+| `MAP_INVALID_RECT` | error | no | non-positive rect size is a content error |
+| `MAP_OFF_PAGE` | error | yes | clamps the rect into the page |
+| `MAP_MARGIN_VIOLATION` | warning | yes | moves/clamps the item into the `page.margin_mm` box (furniture only; maps may bleed) |
+| `MAP_TINY_FONT` | warning | yes | raises the font to 8 pt |
+| `MAP_TITLE_OVERFLOW` | warning | yes | widens the rect to the estimated width; if the page cannot fit it, shrinks the font (floor 12 pt) |
+| `MAP_SOURCE_NOTE_CLIPPING` | warning | yes | same strategy (font floor 8 pt) |
+| `MAP_TEXT_OVERFLOW` | warning | yes | same strategy for labels/annotations |
+| `MAP_LEGEND_DENSITY` | warning | yes | grows the legend height for the declared `max_entries`; when page-bound, spreads entries over `columns` (capped at 6 — beyond that the finding stays reported) |
+| `MAP_DUPLICATE_FURNITURE` | warning | yes | removes **byte-identical** duplicates only; distinct content with a repeated role is kept and reported |
+| `MAP_INVALID_BINDING` | warning | no | chart binding does not resolve (inline data required or layer reference missing) — fabricating data is not a repair |
+| `MAP_UNBALANCED_FRAMES` | warning | yes | matches deviant frame heights (>15%) to the first frame |
+| `MAP_INSET_PLACEMENT` | warning | yes | pins a frame-less locator inset into the first frame's bottom-right corner (4 mm gap) |
+| `MAP_UNKNOWN_COMPONENT` | warning | yes | strips a `source_component` reference that resolved to nothing |
+| `MAP_CONSTRAINT_UNSATISFIABLE` | warning | no | composition-solver leftovers (unknown items, unsolvable directions) |
+| `MAP_OVERLAP` | warning | yes | relocates through seven fixed anchor slots, first collision-free candidate wins |
+| `LAYOUT_*` | warning | no | findings merged from the compiled-layout preflight |
+
+## Repair loop contract
+
+- `repairMapSpec(spec, report)` runs the **composition solver first**, then
+  applies one deterministic pass per repairable issue.
+- The `cartography:repair` tool loops preflight→repair up to
+  `max_iterations` (clamped 1–10, default 3) and stops early when no repair
+  applies — remaining non-repairable issues stay listed in the report.
+- Repairs never delete meaningful content. The only removals are
+  byte-identical duplicates and dangling component references that resolved
+  to nothing.
+- Determinism: the same broken spec + the same report produce a
+  byte-identical repaired spec (pinned by tests).
+
+## Non-repairable ≠ failure
+
+Non-repairable warnings (empty frame, invalid binding, solver leftovers)
+are advisory: they keep `passed` true when nothing repairable remains, so
+the agent decides — the loop never thrashes on findings it cannot fix.

@@ -194,6 +194,7 @@ Full map: [docs/repo-layout.md](docs/repo-layout.md).
 - **MathUtils** (`src/processing/algorithms/math_utils.h`): Safe division, statistics computation, normalized difference — see [docs/math-utils.md](docs/math-utils.md)
 - **GDAL I/O** (`src/processing/gdal/gdal_dataset_wrapper.h`): Dataset wrapper, GeoInfo extraction, batch output writing — see [docs/gdal-utils.md](docs/gdal-utils.md)
 - **Dialog Base** (`src/app/dialogs/raster_processing_dialog_base.h`): Common UI for raster processing dialogs — see [docs/dialog-base-class.md](docs/dialog-base-class.md)
+- **Cartography Design System** (`src/agent/mapspec`, `src/agent/cartography`): MapSpec 2.0 declarative map composition with design tokens, component/template libraries and compose → preflight → repair — see [docs/cartography/](docs/cartography/) (ADR 0130/0131)
 
 ### Vendored Libraries
 
