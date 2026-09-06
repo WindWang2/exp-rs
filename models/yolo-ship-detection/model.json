@@ -32,11 +32,14 @@
       "green",
       "blue",
       "nir"
-    ]
+    ],
+    "width": 640,
+    "height": 640
   },
   "preprocess": {
     "normalize": "linear",
-    "scale": 0.00392156862745098
+    "scale": 0.00392156862745098,
+    "resize": "to_input"
   },
   "tiling": {
     "supported": true,
@@ -48,7 +51,17 @@
     "type": "vector",
     "classes": [
       "ship"
-    ]
+    ],
+    "detection": {
+      "layout": "xywh_objectness",
+      "tensor_layout": "auto",
+      "conf_threshold": 0.25,
+      "nms_iou": 0.45,
+      "max_detections": 100000,
+      "classes": [
+        "ship"
+      ]
+    }
   },
   "postprocess": {
     "mask_threshold": -1.0
@@ -66,5 +79,9 @@
     "ship",
     "yolo",
     "detection"
-  ]
+  ],
+  "id": "rs/yolo-ship-detection",
+  "model_version": "1.0.0",
+  "license": "unspecified",
+  "source": "https://github.com/template/yolo-ship"
 }

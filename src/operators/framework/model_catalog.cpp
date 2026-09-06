@@ -401,6 +401,14 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   {
     markInvalid( "tiling.halo/overlap declared but tiling.tile_size is not" );
   }
+  // Platform 4.0 follow-up vocabulary is NOT implemented yet; declaring it
+  // must fail loudly instead of being silently ignored (#646 discipline).
+  for ( const char *unimplemented : { "pad", "clamp" } )
+  {
+    if ( preObj.contains( QLatin1String( unimplemented ) ) )
+      markInvalid( std::string( "preprocess." ) + unimplemented
+                   + " is declared but not implemented by any runtime" );
+  }
   if ( info.preprocess.scale != 1.0
        && info.preprocess.normalize != "linear" && info.preprocess.normalize != "mean_std" )
     markInvalid( "preprocess.scale is declared but normalize is neither linear nor mean_std - "

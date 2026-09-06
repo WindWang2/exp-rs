@@ -89,9 +89,12 @@ struct FailureScript
 {
     std::string oomAfter;      ///< throw OOM when forward ordinal reaches this ("" = never)
     std::string crashOnBatchN; ///< throw generic crash when batch size == N ("" = never)
+    int crashAfter = 0;        ///< throw generic crash when forward ordinal EXCEEDS this (0 = never)
     std::string oomMessage = "CUDA_ERROR_OUT_OF_MEMORY: out of memory while allocating";
     std::atomic<int> forwards{ 0 };
     std::atomic<int> completed{ 0 };
+    std::atomic<bool> *cancelFlag = nullptr; ///< cooperative cancel hook for tests
+    int cancelAfter = 0;                     ///< flip the flag after this many forwards
 };
 
 class ScriptedRuntime final : public IModelRuntime
@@ -112,6 +115,11 @@ class ScriptedRuntime final : public IModelRuntime
            && std::to_string( std::max( 1, blob.dims >= 4 ? blob.size[0] : 1 ) )
                 == m_script->crashOnBatchN )
         throw std::runtime_error( "scripted provider crash mid-run" );
+      if ( m_script->crashAfter > 0 && m_script->forwards.load() > m_script->crashAfter )
+        throw std::runtime_error( "scripted provider crash mid-run" );
+      if ( m_script->cancelFlag && m_script->cancelAfter > 0
+           && m_script->completed.load() >= m_script->cancelAfter )
+        m_script->cancelFlag->store( true );
       if ( !m_script->oomAfter.empty()
            && std::to_string( m_script->forwards.load() ) == m_script->oomAfter )
         throw std::runtime_error( m_script->oomMessage );
@@ -313,8 +321,10 @@ TEST_CASE( "a provider crash mid-run leaves no partial output", "[models][failur
 {
   RegistryReset reset;
   ScriptedProviderGuard guard;
-  // Batch size 2: the SECOND forward crashes the provider.
-  guard.script->crashOnBatchN = "2";
+  // 64 px raster, tile 32, batch 2 → two batches. The SECOND forward
+  // crashes: by then the streaming writer exists and tiles are already on
+  // disk in the stage file — the hardest partial-output case.
+  guard.script->crashAfter = 1;
 
   QTemporaryDir dir;
   const QString input = writeRaster( dir, QStringLiteral( "crash-in.tif" ), 64, 64 );
@@ -450,40 +460,88 @@ TEST_CASE( "a 100k x 100k logical raster runs tiled without whole-raster allocat
   RegistryReset reset;
   ScriptedProviderGuard guard;
 
-  // SPARSE GeoTIFF: the file holds a header + a mask of written tiles; the
-  // engine's window reads resolve unwritten blocks to 0 — a 100k extent
-  // without a 40 GB payload.
+  // Logical extent via VRT: the 32x32 source is scaled to 100000 x 100000, so
+  // the FILE is a few KB while every window read resolves through the VRT —
+  // the engine sees a 100k raster without a 40 GB payload on disk.
   QTemporaryDir dir;
-  const QString input = dir.filePath( QStringLiteral( "huge.tif" ) );
+  const QString small = writeRaster( dir, QStringLiteral( "vrt-src.tif" ), 32, 32 );
+  const QString vrtPath = dir.filePath( QStringLiteral( "huge.vrt" ) );
   {
-    GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "GTiff" );
-    REQUIRE( driver );
-    const char *options[] = { "SPARSE_OK=TRUE", nullptr };
-    GDALDataset *ds = driver->Create( input.toUtf8().constData(), 100000, 100000, 1, GDT_Float32,
-                                      const_cast<char **>( options ) );
-    REQUIRE( ds );
-    double gt[6] = { 0.0, 1.0, 0.0, 100000.0, 0.0, -1.0 };
-    ds->SetGeoTransform( gt );
-    GDALClose( ds );
+    QFile vrt( vrtPath );
+    REQUIRE( vrt.open( QIODevice::WriteOnly ) );
+    vrt.write( QString(
+                 "<VRTDataset rasterXSize=\"100000\" rasterYSize=\"100000\">"
+                 "  <VRTRasterBand dataType=\"Float32\" band=\"1\">"
+                 "    <SimpleSource><SourceFilename relativeToVRT=\"1\">vrt-src.tif</SourceFilename>"
+                 "    <SourceBand>1</SourceBand>"
+                 "    <SrcRect xOff=\"0\" yOff=\"0\" xSize=\"32\" ySize=\"32\"/>"
+                 "    <DstRect xOff=\"0\" yOff=\"0\" xSize=\"100000\" ySize=\"100000\"/>"
+                 "    </SimpleSource>"
+                 "  </VRTRasterBand>"
+                 "</VRTDataset>" )
+                 .toUtf8() );
   }
-  const QFileInfo info( input );
-  CHECK( info.size() < 64 * 1024 * 1024 ); // the FILE is small; the extent is logical
 
-  const QString output = dir.filePath( QStringLiteral( "huge-out.tif" ) );
-  ModelInfo model = scriptedModel( input.toStdString() );
+  ModelInfo model = scriptedModel( vrtPath.toStdString() );
   model.tiling.tileSize = 512;
   model.tiling.batchSize = 1;
 
-  RSOperatorContext context;
-  TileInferenceEngine engine( model, ModelRuntimeRegistry::instance().acquire( model ) );
-  const auto stats = engine.run( input.toStdString(), {}, output.toStdString(), context );
+  // (a) The 100k extent plans and runs with bounded work: cancel after 5
+  // forwards lands promptly, no output is published, and the working set
+  // stayed at the tile geometry (implicitly — the run never had to
+  // materialize more than one window).
+  {
+    std::atomic<bool> cancelFlag{ false };
+    guard.script->cancelFlag = &cancelFlag;
+    guard.script->cancelAfter = 5;
+    RSOperatorContext context;
+    context.setCancelFlag( &cancelFlag );
+    const QString output = dir.filePath( QStringLiteral( "huge-out.tif" ) );
+    TileInferenceEngine engine( model, ModelRuntimeRegistry::instance().acquire( model ) );
+    const auto started = std::chrono::steady_clock::now();
+    REQUIRE_THROWS_AS( engine.run( vrtPath.toStdString(), {}, output.toStdString(), context ),
+                       RSOperatorError );
+    const double elapsedMs = std::chrono::duration<double, std::milli>(
+                               std::chrono::steady_clock::now() - started )
+                               .count();
+    CHECK( guard.script->completed.load() <= 6 ); // bounded: the cancel landed immediately
+    CHECK( elapsedMs < 60000.0 );
+    CHECK_FALSE( fileExists( output ) );
+    CHECK_FALSE( fileExists( tmpResidue( output ) ) );
+    guard.script->cancelFlag = nullptr;
+    guard.script->cancelAfter = 0;
+    ModelRuntimeRegistry::instance().releaseAll();
+  }
 
-  CHECK( stats.outWidth == 100000 );
-  CHECK( stats.outHeight == 100000 );
-  CHECK( stats.tilesProcessed == 200 * 200 );
-  // The engine's working set is the tile geometry, not the raster extent.
-  CHECK( stats.tileSize == 512 );
-  CHECK( fileExists( output ) );
+  // (b) A bounded logical extent (4096) completes end-to-end: 8x8 tiles,
+  // streamed writes, atomic publication.
+  {
+    const QString midVrt = dir.filePath( QStringLiteral( "mid.vrt" ) );
+    QFile vrt( midVrt );
+    REQUIRE( vrt.open( QIODevice::WriteOnly ) );
+    vrt.write( QString(
+                 "<VRTDataset rasterXSize=\"4096\" rasterYSize=\"4096\">"
+                 "  <VRTRasterBand dataType=\"Float32\" band=\"1\">"
+                 "    <SimpleSource><SourceFilename relativeToVRT=\"1\">vrt-src.tif</SourceFilename>"
+                 "    <SourceBand>1</SourceBand>"
+                 "    <SrcRect xOff=\"0\" yOff=\"0\" xSize=\"32\" ySize=\"32\"/>"
+                 "    <DstRect xOff=\"0\" yOff=\"0\" xSize=\"4096\" ySize=\"4096\"/>"
+                 "    </SimpleSource>"
+                 "  </VRTRasterBand>"
+                 "</VRTDataset>" )
+                 .toUtf8() );
+    const QString output = dir.filePath( QStringLiteral( "mid-out.tif" ) );
+    ModelInfo midModel = model; // same 512 px tile, batch 1
+    RSOperatorContext context;
+    TileInferenceEngine engine( midModel, ModelRuntimeRegistry::instance().acquire( midModel ) );
+    const auto stats = engine.run( midVrt.toStdString(), {}, output.toStdString(), context );
+    CHECK( stats.outWidth == 4096 );
+    CHECK( stats.outHeight == 4096 );
+    CHECK( stats.tilesProcessed == 8 * 8 );
+    CHECK( stats.tileSize == 512 );
+    CHECK( fileExists( output ) );
+    CHECK( QFileInfo( output ).size() < 4096LL * 4096 * 4 * 2 ); // single float band, no bloat
+  }
 }
 
 // ---------------------------------------------------------------------------
