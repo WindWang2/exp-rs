@@ -169,7 +169,7 @@ jobs:
         run: ctest --test-dir build-sanitizer --output-on-failure
 
   # =========================================================================
-  # Tier 3 — Cross-Platform Verification (Windows & macOS)
+  # Tier 3 — Cross-Platform Verification (Windows; macOS seam removed 2026-09)
   # =========================================================================
   tier3-platform-windows:
     name: Tier 3 - Windows MSVC Build Verification
@@ -199,6 +199,21 @@ jobs:
           $haskell = Get-ChildItem "C:\ghcup" -ErrorAction SilentlyContinue; if ($haskell) { Remove-Item -Recurse -Force "C:\ghcup" }
           $codeql = Get-ChildItem "C:\Program Files\CodeQL" -ErrorAction SilentlyContinue; if ($codeql) { Remove-Item -Recurse -Force "C:\Program Files\CodeQL" }
           Get-PSDrive C | Select-Object Used,Free
+
+      - name: Expose GitHub Actions cache service to vcpkg (x-gha provider)
+        # The x-gha binary-cache provider needs ACTIONS_CACHE_URL and
+        # ACTIONS_RUNTIME_TOKEN, which GitHub does not export to plain steps.
+        # Without them vcpkg silently runs with NO binary cache and rebuilds
+        # gdal/opencv/abseil from source twice per run (the pre-install step
+        # AND the toolchain's manifest install during CMake configure) — that
+        # alone blew the 6h runner cap. github-script sees both variables and
+        # exports them at job level so every later step (and the configure
+        # toolchain) restores/hits binaries from the Actions cache.
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - name: Install Qt 6 on Windows
         uses: jurplel/install-qt-action@v4
