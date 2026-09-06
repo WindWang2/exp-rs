@@ -157,6 +157,46 @@ TEST_CASE("ChangeDetection cvaMagnitude sums squared band deltas", "[processing]
     CHECK(out[2] == Approx(1.0f)); // sqrt(1+0)
 }
 
+TEST_CASE("ChangeDetection cvaMagnitudeBip matches the per-band kernel and propagates NaN",
+          "[processing][change_detection][cva]") {
+    // Same fixture as the per-band cvaMagnitude test, interleaved BIP layout.
+    const float beforeBip[] = {0, 0,   0, 0,   0, 0};
+    const float afterBip[]  = {3, 4,   4, 0,   1, 0};
+    float out[3] = {};
+    REQUIRE(cvaMagnitudeBip(beforeBip, afterBip, 2, 3, out));
+    CHECK(out[0] == Approx(5.0f));
+    CHECK(out[1] == Approx(4.0f));
+    CHECK(out[2] == Approx(1.0f));
+
+    // A NaN delta in any band of a pixel propagates to that pixel only.
+    const float qnan = std::numeric_limits<float>::quiet_NaN();
+    const float beforeNan[] = {0, 0,  0, 0,  0, 0};
+    const float afterNan[]  = {3, 4,  qnan, 0,  1, 0};
+    float outNan[3] = {};
+    REQUIRE(cvaMagnitudeBip(beforeNan, afterNan, 2, 3, outNan));
+    CHECK(outNan[0] == Approx(5.0f));
+    CHECK(std::isnan(outNan[1]));
+    CHECK(outNan[2] == Approx(1.0f));
+
+    float dummy = 0.0f;
+    REQUIRE_FALSE(cvaMagnitudeBip(nullptr, afterBip, 2, 3, &dummy));
+    REQUIRE_FALSE(cvaMagnitudeBip(beforeBip, afterBip, 0, 3, &dummy));
+    REQUIRE_FALSE(cvaMagnitudeBip(beforeBip, afterBip, 2, 0, &dummy));
+}
+
+TEST_CASE("ChangeDetection histogramBin shares the fixed-range binning convention",
+          "[processing][change_detection][c1]") {
+    // bin = (v - min)/range*(bins-1), clamped — the one convention used by
+    // Otsu/Kittler/percentile thresholds and the streaming change masks.
+    CHECK(histogramBin(0.0, 0.0, 10.0, 11) == 0);
+    CHECK(histogramBin(10.0, 0.0, 10.0, 11) == 10);
+    CHECK(histogramBin(5.0, 0.0, 10.0, 11) == 5);
+    CHECK(histogramBin(5.0, 0.0, 10.0, 256) == 127); // 0.5 * (256-1) = 127.5 → 127
+    // Out-of-range values clamp into the end bins (callers pre-filter NaN).
+    CHECK(histogramBin(-3.0, 0.0, 10.0, 11) == 0);
+    CHECK(histogramBin(99.0, 0.0, 10.0, 11) == 10);
+}
+
 TEST_CASE("ChangeDetection otsuThreshold separates a bimodal scene", "[processing][change_detection][c1]") {
     // Two clusters with spread: ~50 values near 1, ~50 values near 10.
     std::vector<float> values;
@@ -852,6 +892,45 @@ TEST_CASE("RsSpectralIndexOperator supports extended indices (NBR, dNBR, BSI, ND
     testIndex("CI", "ci.tif");
     testIndex("NDSI", "ndsi.tif");
     testIndex("NDTI", "ndti.tif");
+}
+
+TEST_CASE("dNBR refuses a grid-incompatible post-fire raster", "[operators][spectral_index][grid]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    ensureGdalInit();
+
+    constexpr int W = 4, H = 4, B = 6;
+    const QString prePath = tmp.path() + "/dnbr_pre_32648.tif";
+    const QString postPath = tmp.path() + "/dnbr_post_4326.tif";
+
+    // Same dimensions, different CRS: the pre-foundation dims-only check
+    // passed this pair and silently sampled the wrong post-fire locations.
+    const auto makeReferencedRaster = [&](const QString &path, const char *crs,
+                                          const std::array<double, 6> &gt) {
+        std::vector<std::vector<float>> bands(B, std::vector<float>(W * H));
+        for (int b = 0; b < B; ++b)
+            for (size_t i = 0; i < W * H; ++i)
+                bands[b][i] = (b + 1) * 10.0f;
+        QString err;
+        REQUIRE(writeGdalOutput(path, W, H, bands, gt, crs, &err));
+    };
+    makeReferencedRaster(prePath, "EPSG:32648",
+                         {500000.0, 30.0, 0.0, 4500000.0, 0.0, -30.0});
+    makeReferencedRaster(postPath, "EPSG:4326",
+                         {100.0, 0.001, 0.0, 40.0, 0.0, -0.001});
+
+    sicnu::operators::rs::RsSpectralIndexOperator op;
+    sicnu::operators::RSOperatorContext ctx;
+    Json::Value params(Json::objectValue);
+    params["input"] = prePath.toStdString();
+    params["output"] = (tmp.path() + "/dnbr_out.tif").toStdString();
+    params["index"] = "dNBR";
+    params["nir"] = 4;
+    params["swir2"] = 6;
+    params["postfire"] = postPath.toStdString();
+
+    REQUIRE_THROWS_AS(op.run(params, ctx), sicnu::operators::RSOperatorError);
 }
 
 TEST_CASE("New change primitive operators execute and output valid rasters", "[operators][change_primitives]") {
