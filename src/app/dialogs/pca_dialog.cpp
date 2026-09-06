@@ -34,10 +34,12 @@ void PcaDialog::setupUi()
 
     m_componentsSpin = new QSpinBox( paramGroup );
     m_componentsSpin->setObjectName( QStringLiteral( "pcaComponentsSpin" ) );
-    m_componentsSpin->setRange( 1, 100 );
-    m_componentsSpin->setValue( 3 );
+    m_componentsSpin->setRange( 0, 100 );
+    // Schema default is the single source of truth (rs:pca: 0 = all bands);
+    // the dialog must not invent its own default.
+    m_componentsSpin->setValue( 0 );
     SicnuDialogHelp::tip( m_componentsSpin, tr(
-      "输出主成分个数，必须 ≤ 输入波段数。"
+      "输出主成分个数，0 = 全部波段；必须 ≤ 输入波段数。"
       "前几个 PC 通常含大部分方差，用于波段去相关与降维压缩。" ) );
     form->addRow( tr( "主成分个数" ), m_componentsSpin );
 
@@ -54,7 +56,8 @@ void PcaDialog::onRun()
     }
 
     const int numComponents = m_componentsSpin->value();
-    if (numComponents > m_rasterLayer->bandCount()) {
+    // 0 = all bands (operator schema default); only a positive count must fit.
+    if ( numComponents > 0 && numComponents > m_rasterLayer->bandCount() ) {
         QMessageBox::warning(this, dialogTitle(),
                              tr("指定的主成分数 (%1) 超出输入栅格的波段总数 (%2)。")
                                  .arg(numComponents).arg(m_rasterLayer->bandCount()));

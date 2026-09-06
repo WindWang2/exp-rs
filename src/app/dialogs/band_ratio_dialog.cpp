@@ -2,9 +2,6 @@
 #include "band_ratio_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
-#include "processing/algorithms/image_enhancement.h"
-#include "processing/gdal/gdal_dataset_wrapper.h"
-#include "processing/gdal/gdal_safe_call.h"
 #include "widgets/band_role_combo.h"
 #include "widgets/raster_layer_combo.h"
 
@@ -16,9 +13,6 @@
 #include <QLabel>
 #include <QComboBox>
 #include <QMessageBox>
-
-#include <gdal.h>
-#include <cpl_error.h>
 
 BandRatioDialog::BandRatioDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
@@ -204,77 +198,23 @@ void BandRatioDialog::onRun()
     }
   }
 
-  runGdalTask( [sourcePath, outputPath = outputPath(), modeIndex, band1Num, band2Num,
-                redNum, greenNum, blueNum]() -> QString {
-    try
-    {
-      GdalDatasetWrapper srcDataset;
-      if ( !srcDataset.open( sourcePath ) )
-        return QString();
-
-      int width = srcDataset.width();
-      int height = srcDataset.height();
-      size_t pixelCount = static_cast<size_t>( width ) * static_cast<size_t>( height );
-      int outBandCount = ( modeIndex == 0 ) ? 1 : 3;
-
-      if ( pixelCount > 500000000ULL || ( static_cast<uint64_t>( outBandCount + 3 ) * pixelCount * sizeof( float ) ) > 2000000000ULL )
-        return QString();
-
-      auto readBand = [&]( int bandNum ) -> std::vector<float> {
-        std::vector<float> buffer( pixelCount );
-        if ( !srcDataset.readBandData( bandNum, buffer.data(), width, height ) )
-          return {};
-        return buffer;
-      };
-
-      std::vector<std::vector<float>> outputBands( outBandCount, std::vector<float>( pixelCount ) );
-
-      if ( modeIndex == 0 )
-      {
-        std::vector<float> b1 = readBand( band1Num );
-        std::vector<float> b2 = readBand( band2Num );
-        if ( b1.empty() || b2.empty() )
-          return QString();
-        ImageEnhancement::bandRatio( b1.data(), b2.data(), outputBands[0].data(), pixelCount );
-      }
-      else
-      {
-        std::vector<float> r = readBand( redNum );
-        std::vector<float> g = readBand( greenNum );
-        std::vector<float> b = readBand( blueNum );
-        if ( r.empty() || g.empty() || b.empty() )
-          return QString();
-        for ( size_t i = 0; i < pixelCount; ++i )
-        {
-          float ii, h, s;
-          ImageEnhancement::rgbToIhs( r[i], g[i], b[i], ii, h, s );
-          outputBands[0][i] = ii;
-          outputBands[1][i] = h;
-          outputBands[2][i] = s;
-        }
-      }
-
-      QString error;
-      GdalDatasetGuard dst( createOutputTiff( outputPath, width, height, outBandCount,
-                                              GDT_Float32, srcDataset.geoTransform(),
-                                              srcDataset.projection(), &error ) );
-      if ( !dst )
-        return QString();
-
-      for ( int b = 0; b < outBandCount; ++b )
-      {
-        GDALRasterBandH band = GDALGetRasterBand( dst.get(), b + 1 );
-        if ( !band )
-          return QString();
-        GDAL_SAFE_CALL( GDALRasterIO( band, GF_Write, 0, 0, width, height,
-                                      outputBands[b].data(), width, height, GDT_Float32, 0, 0 ),
-                        "Failed to write output band" );
-      }
-      return outputPath;
-    }
-    catch ( const std::runtime_error & )
-    {
-      return QString();
-    }
-  } );
+  // Thin client: the kernel runs as the rs:band_ratio operator through the
+  // Task Center — same execution path as CLI/MCP.
+  Json::Value params( Json::objectValue );
+  params["input"] = sourcePath.toStdString();
+  params["output"] = outputPath().toStdString();
+  if ( modeIndex == 0 )
+  {
+    params["mode"] = "ratio";
+    params["numeratorBand"] = band1Num;
+    params["denominatorBand"] = band2Num;
+  }
+  else
+  {
+    params["mode"] = "ihs";
+    params["redBand"] = redNum;
+    params["greenBand"] = greenNum;
+    params["blueBand"] = blueNum;
+  }
+  runOperatorTask( QStringLiteral( "rs:band_ratio" ), params );
 }

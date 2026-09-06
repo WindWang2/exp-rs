@@ -4,6 +4,8 @@
 #include "rs_spectral_index_operator.h"
 #include "rs_spectral_index_aliases.h"
 #include "rs_band_math_operator.h"
+#include "rs_band_tools_operators.h"
+#include "rs_image_enhancement_operator.h"
 #include "rs_sam_classify_operator.h"
 #include "rs_spectral_unmixing_operator.h"
 #include "rs_rx_anomaly_operator.h"
@@ -79,6 +81,10 @@ REGISTER_RS_OPERATOR(RsSaviOperator, "rs:savi")
 REGISTER_RS_OPERATOR(RsNdbiOperator, "rs:ndbi")
 REGISTER_RS_OPERATOR(RsMndwiOperator, "rs:mndwi")
 REGISTER_RS_OPERATOR(RsBandMathOperator, "rs:band_math")
+REGISTER_RS_OPERATOR(RsBandRatioOperator, "rs:band_ratio")
+REGISTER_RS_OPERATOR(RsExtractBandsOperator, "rs:extract_bands")
+REGISTER_RS_OPERATOR(RsContrastStretchOperator, "rs:contrast_stretch")
+REGISTER_RS_OPERATOR(RsImageEnhancementOperator, "rs:image_enhancement")
 REGISTER_RS_OPERATOR(RsSamClassifyOperator, "rs:sam_classify")
 REGISTER_RS_OPERATOR(RsSpectralUnmixingOperator, "rs:spectral_unmixing")
 REGISTER_RS_OPERATOR(RsRxAnomalyOperator, "rs:rx_anomaly")
@@ -193,6 +199,10 @@ void initBuiltinRsOperators() {
   add( "rs:ndbi", [] { return std::make_unique<RsNdbiOperator>(); } );
   add( "rs:mndwi", [] { return std::make_unique<RsMndwiOperator>(); } );
   add( "rs:band_math", [] { return std::make_unique<RsBandMathOperator>(); } );
+  add( "rs:band_ratio", [] { return std::make_unique<RsBandRatioOperator>(); } );
+  add( "rs:extract_bands", [] { return std::make_unique<RsExtractBandsOperator>(); } );
+  add( "rs:contrast_stretch", [] { return std::make_unique<RsContrastStretchOperator>(); } );
+  add( "rs:image_enhancement", [] { return std::make_unique<RsImageEnhancementOperator>(); } );
   add( "rs:sam_classify", [] { return std::make_unique<RsSamClassifyOperator>(); } );
   add( "rs:spectral_unmixing", [] { return std::make_unique<RsSpectralUnmixingOperator>(); } );
   add( "rs:rx_anomaly", [] { return std::make_unique<RsRxAnomalyOperator>(); } );
