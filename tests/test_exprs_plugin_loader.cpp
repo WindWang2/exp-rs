@@ -9,10 +9,11 @@
 
 #include "operators/framework/rs_operator_context.h"
 
+#include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <string>
-#include <sys/stat.h>
 
 using namespace exprs;
 
@@ -180,4 +181,89 @@ TEST_CASE( "loader drives the full native plugin lifecycle", "[plugin][loader]" 
         REQUIRE_FALSE( failingLoader.load( bogus, *services, failingSink, failureLog ) );
         REQUIRE( failureLog.hasErrors() );
     }
+}
+
+TEST_CASE( "loader re-checks entrypoint containment at load time (issue #756)",
+           "[plugin][loader][containment]" )
+{
+    // Validation and load read the filesystem at different times; the loader
+    // must refuse a record whose entrypoint escapes (or stopped being inside)
+    // the plugin root, independently of the validator verdict.
+    namespace fs = std::filesystem;
+    const std::string root = "/tmp/exprs_test_loader_escape";
+    fs::remove_all( root );
+    fs::create_directories( root + "/org.test.escape" );
+    const std::string pluginDir = root + "/org.test.escape";
+    // A real file OUTSIDE the plugin dir (the escape target exists — the
+    // refusal must not be a mere missing-file accident).
+    { std::ofstream output( root + "/liboutside.so", std::ios::binary ); output << "outside"; }
+    // And a legal file inside, later swapped for an escaping symlink.
+    { std::ofstream output( pluginDir + "/liblegal.so", std::ios::binary ); output << "legal"; }
+
+    auto makeRecord = []( const std::string &entrypoint ) {
+        PluginRecord record;
+        record.directory = "/tmp/exprs_test_loader_escape/org.test.escape";
+        record.manifestPath = record.directory + "/plugin.json";
+        record.manifest.manifestVersion = 1;
+        record.manifest.id = "org.test.escape";
+        record.manifest.name = "Escape";
+        record.manifest.version = "1.0.0";
+        record.manifest.apiVersion = std::string( EXP_RS_PLUGIN_API_VERSION );
+        record.manifest.abiVersion = pluginAbiVersion();
+        record.manifest.entrypoint = entrypoint;
+        record.manifest.entrypointKind = PluginEntrypointKind::Native;
+        record.state = PluginState::Validated;
+        return record;
+    };
+
+    auto services = PluginLoader::createDefaultHostServices( "/tmp", {}, {} );
+
+    SECTION( ".. entrypoint refused before dlopen" )
+    {
+        PluginRecord record = makeRecord( "../liboutside.so" );
+        PluginLoader loader;
+        RecordingSink sink;
+        PluginDiagnosticLog log;
+        REQUIRE_FALSE( loader.load( record, *services, sink, log ) );
+        REQUIRE( log.hasErrors() );
+        bool sawEscape = false;
+        for ( const auto &item : log.items() )
+            sawEscape = sawEscape || item.code == PluginDiagnosticCode::EntrypointOutsideRoot;
+        REQUIRE( sawEscape );
+        REQUIRE( sink.factories.empty() );
+    }
+    SECTION( "absolute entrypoint refused before dlopen" )
+    {
+        PluginRecord record =
+            makeRecord( "/tmp/exprs_test_loader_escape/liboutside.so" );
+        PluginLoader loader;
+        RecordingSink sink;
+        PluginDiagnosticLog log;
+        REQUIRE_FALSE( loader.load( record, *services, sink, log ) );
+        REQUIRE( log.hasErrors() );
+    }
+    SECTION( "file swapped to symlink escape after validation is refused" )
+    {
+        // Simulates the validation→load TOCTOU: the record was validated when
+        // liblegal.so was a regular file inside the root; by load time it is
+        // a symlink to a library outside.
+        std::error_code linkError;
+        fs::create_symlink( "/tmp/exprs_test_loader_escape/liboutside.so",
+                            fs::path( pluginDir + "/liblegal.so" ), linkError );
+        if ( linkError )
+        {
+            fs::remove_all( root );
+            return;
+        }
+        PluginRecord record = makeRecord( "liblegal.so" );
+        PluginLoader loader;
+        RecordingSink sink;
+        PluginDiagnosticLog log;
+        REQUIRE_FALSE( loader.load( record, *services, sink, log ) );
+        bool sawEscape = false;
+        for ( const auto &item : log.items() )
+            sawEscape = sawEscape || item.code == PluginDiagnosticCode::EntrypointOutsideRoot;
+        REQUIRE( sawEscape );
+    }
+    fs::remove_all( root );
 }
