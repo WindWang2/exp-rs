@@ -269,6 +269,8 @@ void RsJobPanel::setupUi()
   // status/metrics/artifacts instead of raw JSON only.
   m_resultSummary = new RsResultSummary( m_detailTabs );
   m_detailTabs->addTab( m_resultSummary, tr( "结果" ) );
+  connect( m_resultSummary, &RsResultSummary::openPathRequested,
+           this, &RsJobPanel::resultOpenRequested );
 
   m_logView = new QPlainTextEdit( m_detailTabs );
   m_logView->setObjectName( QStringLiteral( "rsJobLogView" ) );
@@ -443,12 +445,9 @@ void RsJobPanel::refreshAll()
 
   auto tasks = sicnu::TaskCenter::instance().allTasks();
   // Grouped view: pipeline children nest under their parent task row.
-  // Pass A: id → info plus the set of tasks that are someone's parent.
-  QHash<long, sicnu::AlgorithmTaskInfo> byId;
   QSet<long> parentIds;
   for ( const sicnu::AlgorithmTaskInfo &info : tasks )
   {
-    byId.insert( info.taskId, info );
     for ( long parent : info.parentTaskIds )
       parentIds.insert( parent );
   }

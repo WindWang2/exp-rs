@@ -95,11 +95,12 @@ Json::Value RsBandRatioOperator::run(const Json::Value& params,
 
     QString errorMessage;
     bool ok = false;
+    const auto cancelled = [&context] { return context.isCancelled(); };
     if (mode == "ihs") {
         ok = BandTools::processRgbToIhsFile(
             QString::fromStdString(inputPath), QString::fromStdString(outputPath),
             getInt(params, "redBand", 1), getInt(params, "greenBand", 2),
-            getInt(params, "blueBand", 3), &errorMessage);
+            getInt(params, "blueBand", 3), &errorMessage, cancelled);
     } else {
         const int numerator = getInt(params, "numeratorBand", 1);
         const int denominator = getInt(params, "denominatorBand", 2);
@@ -109,9 +110,12 @@ Json::Value RsBandRatioOperator::run(const Json::Value& params,
         }
         ok = BandTools::processBandRatioFile(
             QString::fromStdString(inputPath), QString::fromStdString(outputPath),
-            numerator, denominator, &errorMessage);
+            numerator, denominator, &errorMessage, cancelled);
     }
     if (!ok) {
+        if (cancelled()) {
+            throw RSOperatorError(ErrorCode::Cancelled, "Band ratio/IHS cancelled");
+        }
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Band ratio/IHS failed: " + errorMessage.toStdString());
     }
@@ -207,7 +211,11 @@ Json::Value RsExtractBandsOperator::run(const Json::Value& params,
     QString errorMessage;
     if (!BandTools::processExtractBandsFile(QString::fromStdString(inputPath),
                                             QString::fromStdString(outputPath),
-                                            bands, &errorMessage)) {
+                                            bands, &errorMessage,
+                                            [&context] { return context.isCancelled(); })) {
+        if (context.isCancelled()) {
+            throw RSOperatorError(ErrorCode::Cancelled, "Band extraction cancelled");
+        }
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Band extraction failed: " + errorMessage.toStdString());
     }
@@ -328,7 +336,11 @@ Json::Value RsContrastStretchOperator::run(const Json::Value& params,
     QString errorMessage;
     if (!BandTools::processContrastStretchFile(QString::fromStdString(inputPath),
                                                QString::fromStdString(outputPath),
-                                               spec, &errorMessage)) {
+                                               spec, &errorMessage,
+                                               [&context] { return context.isCancelled(); })) {
+        if (context.isCancelled()) {
+            throw RSOperatorError(ErrorCode::Cancelled, "Contrast stretch cancelled");
+        }
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Contrast stretch failed: " + errorMessage.toStdString());
     }

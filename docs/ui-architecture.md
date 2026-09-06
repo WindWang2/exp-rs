@@ -18,8 +18,8 @@ Bottom: 任务中心 (RsJobPanel) | 系统日志
 
 The visible surface is the **Ribbon**; the "menu bar" is a detached, hidden
 QMenuBar used purely as the QAction/shortcut host. Capabilities with multiple
-entry points (menu, ribbon tab, toolbar) share **one** QAction — a capability
-must never have two divergent code paths.
+entry points (menu, ribbon tab, toolbar) share **one handler slot** — a single
+code path per capability, never two divergent implementations.
 
 ### Concept model
 
@@ -86,8 +86,10 @@ the operator schema, or (b) justify why no schema-driven form fits.
 Authoritative path: `UI → TaskCenter → JobEngine → RSOperator → kernel`.
 
 - Dialogs submit operators through `RasterProcessingDialogBase::runOperatorTask`.
-  Inline raster kernels (`runGdalTask`/`callable:` lambdas) in dialogs are
-  banned — enforced by `tests/test_ui_task_center_contract.cpp` source scan.
+  Inline raster kernels in dialogs are banned — the 21 processing dialogs
+  listed in `tests/test_ui_task_center_contract.cpp` are source-scanned (no
+  `runGdalTask(`, no pixel I/O; read-only `GDALOpen` metadata probes are
+  allowed). New dialog files must be added to that list.
 - Kernel promotion pattern: file-level orchestration lives in
   `src/processing/algorithms/` (e.g. `band_tools.cpp`), wrapped by thin JSON
   operators in `src/operators/`. GUI keeps only parameter collection.
@@ -106,7 +108,9 @@ Authoritative path: `UI → TaskCenter → JobEngine → RSOperator → kernel`.
 ## 5. Task / result UX contract
 
 - Status vocabulary: the nine `TaskStatus` states render once, from
-  `SicnuUi::Tokens::status*` colors (see §6), in RsJobPanel and TaskPanelHost.
+  `SicnuUi::Tokens::status*` colors (see §6), in RsJobPanel (and the
+  georeferencer task list); TaskPanelHost delegates result status to
+  `RsResultSummary`.
 - Cancellation: Run morphs to Stop in TaskPanelHost; RsJobPanel offers
   Stop/取消 with confirmation and renders `Cancelling` truthfully.
 - Results: one shared renderer `RsResultSummary`
@@ -152,8 +156,7 @@ and type sizes. `themeIsDark()` is the single theme probe.
   shell converged on RsJobPanel and the mosaic dialog; capabilities live in
   任务中心 and 栅格 > 预处理/镶嵌). Their tests were removed with them.
 - Removed: `BandCompositionRail` zombie chrome (height-0 since the ribbon's
-  地图 tab absorbed band composition). CLAUDE.md's "signature chrome" note
-  refers to history; the live band UI is the ribbon tab.
+  地图 tab absorbed band composition). The live band UI is the ribbon tab.
 - Menu dedup: product-level preprocessing (辐射定标/QA 掩膜/应用掩膜/大气校正/
   正射纠正) is reachable once under 遥感 > 产品与预处理; 分析 keeps only its
   unique entries (时间序列分析, 分类). Ribbon remains the visible surface.

@@ -16,10 +16,11 @@
      asserts the C++ constants and the QSS token headers stay in sync for both
      themes. Change QSS and tokens in the same commit.
   3. **Convergent consumers**: RsJobPanel's `statusColor`, the georeferencer
-     task list, and `applyDarkPalette` read tokens. The pipeline editor is a
-     documented exception — a deliberately dark slate graphics scene in both
-     themes with its own vibrant badge palette; its colors must not leak into
-     panel/table code (asserted by the same test).
+     task list, and `applyDarkPalette` read tokens (the known consumers are
+     pinned by the parity test). The pipeline editor is a documented
+     exception — a deliberately dark slate graphics scene in both themes with
+     its own vibrant badge palette; by convention its colors must not leak
+     into panel/table code (review-enforced, not test-enforced).
   4. **Keyboard hygiene**: the shell action host may not claim the same key
      sequence twice (`test_shortcut_conflicts.cpp`); conflicts need an
      explicit, commented whitelist entry.

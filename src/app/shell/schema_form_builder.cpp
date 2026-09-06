@@ -177,6 +177,7 @@ SchemaFormBuilder::SchemaFormBuilder( QWidget *parent )
 void SchemaFormBuilder::clearFields()
 {
   m_fields.clear();
+  m_validationLabel = nullptr; // deleteLater'd with the layout below
   while ( QLayoutItem *item = m_root->takeAt( 0 ) )
   {
     if ( QWidget *w = item->widget() )
@@ -935,8 +936,12 @@ QString SchemaFormBuilder::readFieldValue( const Field &field ) const
           return text;
         }
         const QVariant data = field.combo->currentData();
+        // Non-editable combos (asset/model) carry a placeholder row with
+        // empty data — that must read as "no value", never as its label.
         if ( data.isValid() && !data.toString().isEmpty() )
           return data.toString();
+        if ( field.kind == FieldKind::AssetCombo || field.kind == FieldKind::ModelCombo )
+          return QString();
         return field.combo->currentText();
       }
       break;
@@ -1169,7 +1174,20 @@ Json::Value SchemaFormBuilder::values() const
         break;
       case FieldKind::Json:
         if ( field.plainEdit )
-          out[key] = field.plainEdit->toPlainText().toStdString();
+        {
+          // Schema declares type:object — submit the parsed document, not
+          // the raw text (validate() flags unparsable bodies).
+          const std::string body = field.plainEdit->toPlainText().toStdString();
+          Json::Value parsed;
+          Json::CharReaderBuilder builder;
+          std::string errors;
+          std::istringstream stream( body );
+          if ( !body.empty()
+               && Json::parseFromStream( builder, stream, &parsed, &errors ) )
+            out[key] = parsed;
+          else
+            out[key] = body;
+        }
         break;
     }
   }
@@ -1197,6 +1215,10 @@ void SchemaFormBuilder::setValues( const Json::Value &params )
       field.spin->blockSignals( true );
     if ( field.check )
       field.check->blockSignals( true );
+    if ( field.plainEdit )
+      field.plainEdit->blockSignals( true );
+    if ( field.crsSelector )
+      field.crsSelector->blockSignals( true );
 
     writeFieldValue( field, params[key] );
 
@@ -1210,6 +1232,10 @@ void SchemaFormBuilder::setValues( const Json::Value &params )
       field.spin->blockSignals( false );
     if ( field.check )
       field.check->blockSignals( false );
+    if ( field.plainEdit )
+      field.plainEdit->blockSignals( false );
+    if ( field.crsSelector )
+      field.crsSelector->blockSignals( false );
   }
 }
 
@@ -1335,9 +1361,13 @@ void SchemaFormBuilder::applyValidationMarks( const QList<ValidationIssue> &issu
         break;
       }
     }
+    const bool hadError = field.widget->property( "errorState" ).toBool();
     field.widget->setProperty( "errorState", hasError );
-    field.widget->style()->unpolish( field.widget );
-    field.widget->style()->polish( field.widget );
+    if ( hadError != hasError )
+    {
+      field.widget->style()->unpolish( field.widget );
+      field.widget->style()->polish( field.widget );
+    }
     if ( hasError )
     {
       for ( const ValidationIssue &issue : issues )
@@ -1348,6 +1378,12 @@ void SchemaFormBuilder::applyValidationMarks( const QList<ValidationIssue> &issu
           break;
         }
       }
+    }
+    else if ( hadError )
+    {
+      // Clearing an error restores the schema description tooltip.
+      const QString desc = memberString( field.prop, "description" );
+      field.widget->setToolTip( desc );
     }
   }
 

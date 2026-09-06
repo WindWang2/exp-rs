@@ -105,10 +105,34 @@ Json::Value GdalPanSharpenOperator::run(const Json::Value& params,
                               "Failed to start gdal_pansharpen.py: " + proc.errorString().toStdString());
     }
 
+    // Graceful cancel ladder (ports the OtbOperatorBase pattern): terminate()
+    // first so large GDAL writes can flush, then kill() after a grace period.
+    const auto terminateGracefully = [&proc]() {
+        proc.terminate();
+        if (!proc.waitForFinished(5000))
+            proc.kill();
+        proc.waitForFinished(2000);
+    };
+    // Watchdog: a hung subprocess must not pin the JobEngine worker forever.
+    QElapsedTimer watchdog;
+    watchdog.start();
+    const qint64 maxRuntimeMs = 60 * 60 * 1000;
+
     // Cooperative cancellation: poll in short waits so a Task Center cancel
     // terminates the subprocess instead of orphaning it.
     while (proc.state() == QProcess::Running) {
-        context.throwIfCancelled();
+        try {
+            context.throwIfCancelled();
+        } catch (...) {
+            terminateGracefully();
+            throw;
+        }
+        if (watchdog.elapsed() > maxRuntimeMs) {
+            terminateGracefully();
+            throw RSOperatorError(ErrorCode::ComputationError,
+                                  "gdal_pansharpen.py exceeded the maximum runtime (3600 s)"
+                                  " and was terminated.");
+        }
         if (proc.waitForFinished(200)) {
             break;
         }

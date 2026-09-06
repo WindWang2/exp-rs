@@ -94,6 +94,11 @@ RsResultSummary::RsResultSummary( QWidget *parent )
 void RsResultSummary::setContext( const QString &operatorId, qint64 elapsedMs,
                                   bool fromCache )
 {
+    // Skip the rebuild when nothing changed (progress ticks re-feed the same
+    // context before a result exists).
+    if ( m_operatorId == operatorId && m_elapsedMs == elapsedMs
+         && m_fromCache == fromCache )
+        return;
     m_operatorId = operatorId;
     m_elapsedMs = elapsedMs;
     m_fromCache = fromCache;

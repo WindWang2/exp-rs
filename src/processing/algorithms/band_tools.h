@@ -18,6 +18,7 @@
 #include <QString>
 #include <QVector>
 
+#include <functional>
 #include <utility>
 #include <vector>
 
@@ -38,27 +39,38 @@ class BandTools
     /// Bands are 1-based. Fails when the bands are equal or out of range.
     static bool processBandRatioFile( const QString &sourcePath, const QString &outputPath,
                                       int numeratorBand, int denominatorBand,
-                                      QString *errorMessage = nullptr );
+                                      QString *errorMessage = nullptr,
+                                      const std::function<bool()> &isCancelled = {} );
 
     /// RGB -> IHS decomposition -> three-band Float32 raster (I, H, S).
     /// A NaN source pixel or a pixel equal to its band's declared sentinel
     /// yields NaN in all three components (panel #380 semantics).
     static bool processRgbToIhsFile( const QString &sourcePath, const QString &outputPath,
                                      int redBand, int greenBand, int blueBand,
-                                     QString *errorMessage = nullptr );
+                                     QString *errorMessage = nullptr,
+                                     const std::function<bool()> &isCancelled = {} );
 
     /// Extract the listed (1-based, in-range, non-empty) bands into a
     /// multi-band Float32 raster with copied georeference. Order is preserved.
     static bool processExtractBandsFile( const QString &sourcePath, const QString &outputPath,
                                          const QVector<int> &bands,
-                                         QString *errorMessage = nullptr );
+                                         QString *errorMessage = nullptr,
+                                         const std::function<bool()> &isCancelled = {} );
 
     /// Streaming two-pass contrast stretch of every band (per-band declared
     /// NoData is masked; undeclared bands use NaN). O(tile) memory.
     static bool processContrastStretchFile( const QString &sourcePath, const QString &outputPath,
                                             const StretchSpec &spec,
-                                            QString *errorMessage = nullptr );
+                                            QString *errorMessage = nullptr,
+                                            const std::function<bool()> &isCancelled = {} );
   private:
     /// Resolves band @a b's declared NoData (float-cast; NaN when undeclared).
     static float bandNodata( class GdalDatasetWrapper &src, int b );
+
+    /// True when the caller's cancel predicate fired (checked per tile/band
+    /// so huge scenes abort promptly instead of running to completion).
+    static bool cancelled( const std::function<bool()> &isCancelled )
+    {
+        return isCancelled && isCancelled();
+    }
 };

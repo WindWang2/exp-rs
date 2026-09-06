@@ -14,8 +14,8 @@
      after any store open/reopen (`refreshWorkspaceBrowser`). A source-scan
      test (`test_workspace_browser_wiring.cpp`) pins this.
   2. **Project context is visible**: the window title mirrors
-     `<project-file> — SICNU GEO RS` with a `*` dirty marker, driven by
-     `QgsProject::isDirtyChanged` and the new/open/save lifecycle.
+     `[·]<project> — SICNU GEO RS` (a `*` dirty marker is prepended), driven
+     by `QgsProject::isDirtyChanged` and the new/open/save lifecycle.
   3. **Dead UI is deleted, not hidden**: `TaskCenterDock`, `MosaicPanel`,
      `BandCompositionRail` and their tests/debug probes were removed after
      their unique capabilities were ported to living surfaces (pipeline
@@ -29,4 +29,5 @@
      dock-layout state.
 - Consequences: no silent empty panels; project identity is always visible;
   the action registry shrinks; menus stop contradicting the ADR 0099 surface;
-  ~525 lines of dead panel code and their test suites are gone.
+  ~890 lines of dead panel/chrome code plus ~330 lines of their tests are
+  gone.

@@ -281,6 +281,8 @@ void QgisDesktopWindow::setupDockWidgets()
     // Unified Task Center projection panel (Bottom, tabified with Log).
     // Hidden by default — open from Ribbon 任务 → 任务中心 when needed.
     m_jobPanel = new RsJobPanel( this );
+    connect( m_jobPanel, &RsJobPanel::resultOpenRequested,
+             this, &QgisDesktopWindow::loadRasterLayer );
     addDockWidget( Qt::BottomDockWidgetArea, m_jobPanel );
     tabifyDockWidget( m_logDock, m_jobPanel );
     m_jobPanel->hide();
@@ -657,6 +659,9 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
                  else if ( kind == QLatin1String( "classify" ) )
                      openClassificationWindow();
              } );
+    // Result artifacts open on the map through the Data/Display seam.
+    connect( m_taskPanel, &TaskPanelHost::resultOpenRequested,
+             this, &QgisDesktopWindow::loadRasterLayer );
     connect( m_taskPanel, &TaskPanelHost::closeClicked, this, [this]() {
         if ( m_taskPanelDock )
             m_taskPanelDock->hide();

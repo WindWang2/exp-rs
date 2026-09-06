@@ -101,9 +101,8 @@ TEST_CASE( "Shortcuts: no duplicate key sequences in the shell action host",
     }
 
     INFO( conflicts.join( QStringLiteral( "; " ) ).toStdString() );
-    // UX 4.0 baseline: menus declare each binding once. Note the same
-    // capability may appear on several surfaces (menu + ribbon), but they
-    // share one QAction, so a repeated literal here means two competing
-    // actions — exactly what this test pins down.
+    // UX 4.0 baseline: menus declare each binding once. Surfaces may share a
+    // handler slot, but a repeated literal here means two competing actions —
+    // exactly what this test pins down.
     REQUIRE( conflicts.isEmpty() );
 }

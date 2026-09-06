@@ -1,7 +1,10 @@
 /*
  * SICNU GEO RS — Dark Theme QSS (Canopy Lab Night)
  * Mirrors light token roles with inverted surfaces and brighter accents.
- * accent #2BB673 · ink #E8ECF1 · surface #1A1D23 / #1E2229
+ * surface.canvas #1A1D23 · surface.panel #1E2229 · surface.raised #252A33
+ * ink.primary #E8ECF1 · ink.secondary #A8B0BC
+ * accent #2BB673 · mapSelect #4DA3E0
+ * state ok/warn/err #3DCF6A / #E0A458 / #F07167
  */
 /* ============ Global ============ */
 QWidget {

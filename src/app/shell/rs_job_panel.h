@@ -44,6 +44,11 @@ class RsJobPanel : public QgsDockWidget
   public:
     explicit RsJobPanel( QWidget *parent = nullptr );
 
+  signals:
+    /// User double-clicked an output artifact in the structured result view.
+    /// The shell routes it through the Data/Display seam (loadRasterLayer).
+    void resultOpenRequested( const QString &path );
+
   public slots:
     void onTaskAdded( const sicnu::AlgorithmTaskInfo &info );
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );

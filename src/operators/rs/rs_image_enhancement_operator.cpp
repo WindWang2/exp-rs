@@ -178,6 +178,26 @@ Json::Value RsImageEnhancementOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "IHS transform requires at least 3 bands");
     }
+    // Band numbers are validated, never silently clamped (a clamped pair can
+    // alias one band and produce a wrong product without any error).
+    if (methodIndex == 2) {
+        for (int b : { band1, band2 }) {
+            if (b < 1 || b > bands) {
+                throw RSOperatorError(ErrorCode::InvalidParameter,
+                                      "band number out of range (1.." + std::to_string(bands)
+                                          + "): " + std::to_string(b));
+            }
+        }
+        if (ratioType == 1 && (band3 < 1 || band3 > bands)) {
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "band number out of range (1.." + std::to_string(bands)
+                                      + "): " + std::to_string(band3));
+        }
+        if (ratioType == 0 && band1 == band2) {
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "Numerator and denominator bands must differ");
+        }
+    }
 
     // Resolve each band's declared NoData (float-cast; NaN when undeclared)
     // so stretches mask the real sentinel instead of a fabricated -9999 (#445).
@@ -214,6 +234,7 @@ Json::Value RsImageEnhancementOperator::run(const Json::Value& params,
         stretch.clipPercent = static_cast<float>(clipPercent);
         stretch.stddevK = static_cast<float>(stddevMult);
         for (int b = 1; b <= bands && ok; ++b) {
+            context.throwIfCancelled();
             ok = streamBandStretch(src, b, bandNodata[b - 1], stretch, dst, kTileDim);
             context.reportProgress(static_cast<double>(b) / bands, "Stretching bands");
         }
@@ -222,6 +243,7 @@ Json::Value RsImageEnhancementOperator::run(const Json::Value& params,
         // Sobel/Laplacian edge filters use a fixed 3×3 window).
         const int half = (filterType == 3 || filterType == 4) ? 1 : kernelSize / 2;
         for (int b = 1; b <= bands && ok; ++b) {
+            context.throwIfCancelled();
             WindowedTileFn kernel;
             switch (filterType) {
             case 0: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
@@ -247,7 +269,7 @@ Json::Value RsImageEnhancementOperator::run(const Json::Value& params,
         // Band ratio / IHS — stream only the involved bands (band-pair or
         // band-triple BIP tiles), never the whole band stack.
         if (ratioType == 0) {
-            const std::vector<int> pair = { std::min(band1, bands), std::min(band2, bands) };
+            const std::vector<int> pair = { band1, band2 };
             GdalMultibandBlockStream stream(src, pair, kTileDim, kTileDim);
             std::vector<float> band1Buf(static_cast<size_t>(kTileDim) * kTileDim);
             std::vector<float> band2Buf(static_cast<size_t>(kTileDim) * kTileDim);
@@ -264,8 +286,7 @@ Json::Value RsImageEnhancementOperator::run(const Json::Value& params,
         } else {
             // IHS decomposition — true I/H/S components (panel-side fix for
             // #380), applied per band-triple tile with NaN masking.
-            const std::vector<int> triple = { std::min(band1, bands), std::min(band2, bands),
-                                              std::min(band3, bands) };
+            const std::vector<int> triple = { band1, band2, band3 };
             const float ndR = bandNodata[triple[0] - 1];
             const float ndG = bandNodata[triple[1] - 1];
             const float ndB = bandNodata[triple[2] - 1];
@@ -286,6 +307,7 @@ Json::Value RsImageEnhancementOperator::run(const Json::Value& params,
         // dialog (halo = kernel radius).
         const int half = speckleKernel / 2;
         for (int b = 1; b <= bands && ok; ++b) {
+            context.throwIfCancelled();
             WindowedTileFn kernel;
             switch (speckleType) {
             case 0: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {

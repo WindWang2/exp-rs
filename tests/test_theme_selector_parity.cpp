@@ -172,6 +172,7 @@ TEST_CASE( "Theme: C++ design tokens mirror the QSS design tokens", "[theme][tok
   {
     INFO( hex.toStdString() );
     REQUIRE( tokens.contains( hex, Qt::CaseInsensitive ) );
+    REQUIRE( qssHeaderContainsToken( darkQss, hex ) );
   }
 
   // The pipeline editor's canvas badge palette is the single documented

@@ -33,7 +33,8 @@ float BandTools::bandNodata( GdalDatasetWrapper &src, int b )
 
 bool BandTools::processBandRatioFile( const QString &sourcePath, const QString &outputPath,
                                       int numeratorBand, int denominatorBand,
-                                      QString *errorMessage )
+                                      QString *errorMessage,
+                                      const std::function<bool()> &isCancelled )
 {
     if ( numeratorBand == denominatorBand )
         return fail( errorMessage, QStringLiteral( "分子波段与分母波段不能相同。" ) );
@@ -61,6 +62,8 @@ bool BandTools::processBandRatioFile( const QString &sourcePath, const QString &
     std::vector<float> out( static_cast<size_t>( kTileDim ) * kTileDim );
 
     const bool ok = stream.forEach( [&]( const GdalBlockStream::Tile & tile, const float *bip ) {
+        if ( cancelled( isCancelled ) )
+            return false;
         const size_t n = static_cast<size_t>( tile.width ) * tile.height;
         for ( size_t i = 0; i < n; ++i )
         {
@@ -71,6 +74,10 @@ bool BandTools::processBandRatioFile( const QString &sourcePath, const QString &
                                                   out.data(), n );
         return dst.writeTile( 1, tile, out.data() );
     } );
+    if ( !ok && cancelled( isCancelled ) )
+        dst.abandon();
+    if ( cancelled( isCancelled ) )
+        return fail( errorMessage, QStringLiteral( "已取消" ) );
     if ( !ok )
     {
         dst.abandon();
@@ -85,7 +92,8 @@ bool BandTools::processBandRatioFile( const QString &sourcePath, const QString &
 
 bool BandTools::processRgbToIhsFile( const QString &sourcePath, const QString &outputPath,
                                      int redBand, int greenBand, int blueBand,
-                                     QString *errorMessage )
+                                     QString *errorMessage,
+                                     const std::function<bool()> &isCancelled )
 {
     GdalDatasetWrapper src;
     if ( !src.open( sourcePath ) )
@@ -114,6 +122,8 @@ bool BandTools::processRgbToIhsFile( const QString &sourcePath, const QString &o
     std::vector<float> outS( static_cast<size_t>( kTileDim ) * kTileDim );
 
     const bool ok = stream.forEach( [&]( const GdalBlockStream::Tile & tile, const float *bip ) {
+        if ( cancelled( isCancelled ) )
+            return false;
         const size_t n = static_cast<size_t>( tile.width ) * tile.height;
         ImageEnhancementStreaming::ihsTransformTile( bip, ndR, ndG, ndB,
                                                      outI.data(), outH.data(), outS.data(), n );
@@ -121,6 +131,10 @@ bool BandTools::processRgbToIhsFile( const QString &sourcePath, const QString &o
                && dst.writeTile( 2, tile, outH.data() )
                && dst.writeTile( 3, tile, outS.data() );
     } );
+    if ( !ok && cancelled( isCancelled ) )
+        dst.abandon();
+    if ( cancelled( isCancelled ) )
+        return fail( errorMessage, QStringLiteral( "已取消" ) );
     if ( !ok )
     {
         dst.abandon();
@@ -135,7 +149,8 @@ bool BandTools::processRgbToIhsFile( const QString &sourcePath, const QString &o
 
 bool BandTools::processExtractBandsFile( const QString &sourcePath, const QString &outputPath,
                                          const QVector<int> &bands,
-                                         QString *errorMessage )
+                                         QString *errorMessage,
+                                         const std::function<bool()> &isCancelled )
 {
     if ( bands.isEmpty() )
         return fail( errorMessage, QStringLiteral( "请至少选择一个波段。" ) );
@@ -165,8 +180,15 @@ bool BandTools::processExtractBandsFile( const QString &sourcePath, const QStrin
         ++outBand;
         GdalBlockStream stream( src, b, kTileDim, kTileDim );
         const bool ok = stream.forEach( [&]( const GdalBlockStream::Tile & tile, const float *pixels ) {
+            if ( cancelled( isCancelled ) )
+                return false;
             return dst.writeTile( outBand, tile, pixels );
         } );
+        if ( !ok && cancelled( isCancelled ) )
+        {
+            dst.abandon();
+            return fail( errorMessage, QStringLiteral( "已取消" ) );
+        }
         if ( !ok )
         {
             dst.abandon();
@@ -182,7 +204,8 @@ bool BandTools::processExtractBandsFile( const QString &sourcePath, const QStrin
 
 bool BandTools::processContrastStretchFile( const QString &sourcePath, const QString &outputPath,
                                             const StretchSpec &spec,
-                                            QString *errorMessage )
+                                            QString *errorMessage,
+                                            const std::function<bool()> &isCancelled )
 {
     GdalDatasetWrapper src;
     if ( !src.open( sourcePath ) )
@@ -202,6 +225,11 @@ bool BandTools::processContrastStretchFile( const QString &sourcePath, const QSt
 
     for ( int b = 1; b <= bandCount; ++b )
     {
+        if ( cancelled( isCancelled ) )
+        {
+            dst.abandon();
+            return fail( errorMessage, QStringLiteral( "已取消" ) );
+        }
         QString bandError;
         if ( !ImageEnhancementStreaming::streamBandStretch( src, b, bandNodata( src, b ), params,
                                                             dst, kTileDim, &bandError ) )
