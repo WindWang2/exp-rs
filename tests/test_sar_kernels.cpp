@@ -61,6 +61,35 @@ TEST_CASE( "DN calibration applies sigma0 = (DN² - noise) / A²",
     REQUIRE( linearToDb( calibrateDn( 4.0, 2.0, 0.0 ) ) == Approx( 6.0206 ).margin( 1e-3 ) );
 }
 
+TEST_CASE( "Calibration and backscatter conversions propagate NaN and domain edges",
+           "[sar][calibration][nodata]" )
+{
+    ensureApp();
+    const double qnan = std::numeric_limits<double>::quiet_NaN();
+
+    // NaN input propagates through every pure conversion (never 0, no throw):
+    // the raster kernels rely on IEEE propagation to reach the NaN output
+    // NoData convention.
+    REQUIRE( std::isnan( calibrateDn( qnan, 2.0, 0.0 ) ) );
+    REQUIRE( std::isnan( calibrateDn( 4.0, qnan, 0.0 ) ) );
+    REQUIRE( std::isnan( linearToDb( qnan ) ) );
+    REQUIRE( std::isnan( dbToLinear( qnan ) ) );
+    REQUIRE( std::isnan( sigma0ToGamma0( qnan, 30.0 ) ) );
+    REQUIRE( std::isnan( sigma0ToGamma0( 2.0, qnan ) ) );
+    REQUIRE( std::isnan( sigma0ToBeta0( 2.0, qnan ) ) );
+
+    // log10 domain edges are IEEE values, not exceptions: 0 power → -inf dB,
+    // negative power → NaN dB.
+    REQUIRE( std::isinf( linearToDb( 0.0 ) ) );
+    REQUIRE( linearToDb( 0.0 ) < 0.0 );
+    REQUIRE( std::isnan( linearToDb( -4.0 ) ) );
+
+    // cos(90°) underflows to ~6.1e-17, so an exactly-vertical look direction
+    // yields a huge-but-finite gamma0, not a pole: document the value class
+    // downstream code must clamp (finishValue → output NoData).
+    REQUIRE( sigma0ToGamma0( 2.0, 90.0 ) > 1e15 );
+}
+
 TEST_CASE( "Backscatter conversions use the local incidence angle",
            "[sar][backscatter]" )
 {

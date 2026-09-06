@@ -8,6 +8,7 @@
 #include "operators/rs/rs_spectral_index_operator.h"
 #include "operators/rs/rs_change_primitives.h"
 #include "operators/rs/rs_change_detection_operator.h"
+#include "operators/rs/rs_threshold_raster_operator.h"
 #include "operators/framework/rs_operator_context.h"
 
 #include <QTemporaryDir>
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <vector>
 
@@ -931,6 +933,87 @@ TEST_CASE("dNBR refuses a grid-incompatible post-fire raster", "[operators][spec
     params["postfire"] = postPath.toStdString();
 
     REQUIRE_THROWS_AS(op.run(params, ctx), sicnu::operators::RSOperatorError);
+}
+
+TEST_CASE("threshold_raster: hand-derived manual and Otsu known answers", "[operators][threshold]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+
+    constexpr int W = 4, H = 4;
+    const QString inputPath = tmp.path() + "/thr_input.tif";
+    {
+        GDALDatasetH ds = GDALCreate(driver, inputPath.toUtf8().constData(), W, H, 1,
+                                     GDT_Float32, nullptr);
+        REQUIRE(ds != nullptr);
+        const float qnan = std::numeric_limits<float>::quiet_NaN();
+        // 6 pixels >= 5 (5, 9, 5, 10, 7, 5), one NaN, the rest below.
+        const float values[W * H] = {0, 3, 5, 9,
+                                     2, 5, 10, 1,
+                                     4, 4, 4, 4,
+                                     qnan, 7, 0, 5};
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H,
+                             const_cast<float *>(values), W, H, GDT_Float32, 0, 0) == CE_None);
+        GDALClose(ds);
+    }
+
+    sicnu::operators::rs::RsThresholdRasterOperator op;
+    sicnu::operators::RSOperatorContext ctx;
+
+    // Manual threshold: "at/above" semantics, NaN becomes 255 NoData.
+    {
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = (tmp.path() + "/thr_manual.tif").toStdString();
+        params["thresholdMethod"] = "manual";
+        params["threshold"] = 5.0;
+        const Json::Value res = op.run(params, ctx);
+        REQUIRE(res["thresholdUsed"].asDouble() == Approx(5.0));
+        REQUIRE(res["maskedPixels"].asInt() == 6);
+        // "Evaluated" = valid observations only: the NaN pixel is excluded.
+        REQUIRE(res["totalPixels"].asInt() == W * H - 1);
+        REQUIRE(res["maskedPercent"].asDouble() == Approx(40.0)); // 6 / 15
+
+        GDALDatasetH outDs = GDALOpen((tmp.path() + "/thr_manual.tif").toUtf8().constData(),
+                                      GA_ReadOnly);
+        REQUIRE(outDs != nullptr);
+        std::vector<std::uint8_t> mask(W * H, 0);
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(outDs, 1), GF_Read, 0, 0, W, H,
+                             mask.data(), W, H, GDT_Byte, 0, 0) == CE_None);
+        const std::uint8_t expected[W * H] = {0, 0, 1, 1,
+                                              0, 1, 1, 0,
+                                              0, 0, 0, 0,
+                                              255, 1, 0, 1};
+        for (int i = 0; i < W * H; ++i)
+            REQUIRE(mask[i] == expected[i]);
+        GDALClose(outDs);
+    }
+
+    // Otsu on a clearly bimodal scene: the threshold must separate the modes.
+    {
+        GDALDatasetH ds = GDALCreate(driver, inputPath.toUtf8().constData(), W, H, 1,
+                                     GDT_Float32, nullptr);
+        REQUIRE(ds != nullptr);
+        std::vector<float> values(W * H);
+        for (int i = 0; i < W * H; ++i)
+            values[i] = (i % 2 == 0) ? 1.0f : 10.0f;
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H,
+                             values.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+        GDALClose(ds);
+
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = (tmp.path() + "/thr_otsu.tif").toStdString();
+        params["thresholdMethod"] = "otsu";
+        const Json::Value res = op.run(params, ctx);
+        const double t = res["thresholdUsed"].asDouble();
+        REQUIRE(t > 1.0);
+        REQUIRE(t < 10.0);
+        REQUIRE(res["maskedPixels"].asInt() == 8); // exactly the 10.0 pixels
+    }
 }
 
 TEST_CASE("New change primitive operators execute and output valid rasters", "[operators][change_primitives]") {
