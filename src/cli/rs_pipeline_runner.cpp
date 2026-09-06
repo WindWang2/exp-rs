@@ -921,7 +921,25 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
         }
         result.success = !anyFailed;
         if ( anyFailed && result.errorMessage.empty() )
-          result.errorMessage = "Resumed run failed";
+        {
+          // Carry the per-step verdicts: a plan can be non-Completed with
+          // no errorMessage at all (Skipped or a still-non-terminal state
+          // folded after the verdict), and "Resumed run failed" alone tells
+          // the operator nothing about which step or why.
+          std::string detail;
+          for ( const auto &stepResult : result.steps )
+          {
+            if ( stepResult.success )
+              continue;
+            if ( !detail.empty() )
+              detail += "; ";
+            detail += stepResult.operatorName
+                      + ( stepResult.errorMessage.empty() ? " (no detail recorded)"
+                                                          : ": " + stepResult.errorMessage );
+          }
+          result.errorMessage = "Resumed run failed"
+                                + ( detail.empty() ? std::string() : " [" + detail + "]" );
+        }
         if ( result.success )
         {
           if ( m_dataManager )
