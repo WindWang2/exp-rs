@@ -1,9 +1,13 @@
 /***************************************************************************
- * schema_form_builder.cpp  —  schema JSON → Qt form widgets for task panel
+ * schema_form_builder.cpp  —  schema JSON → validated Qt form widgets
  ***************************************************************************/
 #include "schema_form_builder.h"
 
+#include "widgets/crs_selector.h"
+
 #include <QCheckBox>
+#include <QColor>
+#include <QColorDialog>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
@@ -13,14 +17,17 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMetaType>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSizePolicy>
 #include <QSpinBox>
+#include <QStyle>
 #include <QVBoxLayout>
 
 #include <algorithm>
 #include <limits>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -160,6 +167,11 @@ SchemaFormBuilder::SchemaFormBuilder( QWidget *parent )
   m_root = new QVBoxLayout( this );
   m_root->setContentsMargins( 0, 0, 0, 0 );
   m_root->setSpacing( 10 );
+
+  // Live validation: every value change re-runs the schema checks and
+  // refreshes the inline marks + summary line.
+  connect( this, &SchemaFormBuilder::valuesChanged,
+           this, &SchemaFormBuilder::updateValidationUi );
 }
 
 void SchemaFormBuilder::clearFields()
@@ -207,6 +219,29 @@ SchemaFormBuilder::classifyGroup( const QString &name, const Json::Value &prop )
 SchemaFormBuilder::FieldKind
 SchemaFormBuilder::classifyKind( const QString &name, const Json::Value &prop )
 {
+  // x-ui-type hints (AlgorithmDescriptor ports emit raster/vector/table/
+  // bbox/crs; workflows may add asset/model/color/expression/json) — the
+  // authoritative mapping from data contract to editor kind.
+  const QString uiType = memberString( prop, "x-ui-type" ).toLower();
+  if ( uiType == QLatin1String( "raster" ) )
+    return FieldKind::RasterCombo;
+  if ( uiType == QLatin1String( "vector" ) || uiType == QLatin1String( "table" ) )
+    return FieldKind::VectorCombo;
+  if ( uiType == QLatin1String( "crs" ) )
+    return FieldKind::Crs;
+  if ( uiType == QLatin1String( "bbox" ) )
+    return FieldKind::Array;
+  if ( uiType == QLatin1String( "asset" ) )
+    return FieldKind::AssetCombo;
+  if ( uiType == QLatin1String( "model" ) )
+    return FieldKind::ModelCombo;
+  if ( uiType == QLatin1String( "color" ) )
+    return FieldKind::Color;
+  if ( uiType == QLatin1String( "expression" ) )
+    return FieldKind::String;
+  if ( uiType == QLatin1String( "json" ) )
+    return FieldKind::Json;
+
   const QString widget = memberString( prop, "x-ui-widget" ).toLower();
   if ( widget == QLatin1String( "array" ) )
     return FieldKind::Array;
@@ -218,6 +253,18 @@ SchemaFormBuilder::classifyKind( const QString &name, const Json::Value &prop )
   }
   if ( widget == QLatin1String( "layer-raster" ) )
     return FieldKind::RasterCombo;
+  if ( widget == QLatin1String( "layer-vector" ) )
+    return FieldKind::VectorCombo;
+  if ( widget == QLatin1String( "asset" ) )
+    return FieldKind::AssetCombo;
+  if ( widget == QLatin1String( "model" ) )
+    return FieldKind::ModelCombo;
+  if ( widget == QLatin1String( "crs" ) )
+    return FieldKind::Crs;
+  if ( widget == QLatin1String( "color" ) )
+    return FieldKind::Color;
+  if ( widget == QLatin1String( "json" ) )
+    return FieldKind::Json;
   if ( widget == QLatin1String( "enum" ) )
     return FieldKind::Enum;
   if ( widget == QLatin1String( "number" ) )
@@ -243,6 +290,8 @@ SchemaFormBuilder::classifyKind( const QString &name, const Json::Value &prop )
     return FieldKind::Integer;
   if ( type == QLatin1String( "number" ) )
     return FieldKind::Double;
+  if ( type == QLatin1String( "object" ) )
+    return FieldKind::Json;
 
   if ( isOutputRole( prop ) || nameLooksLikeOutput( name ) )
     return FieldKind::OutputPath;
@@ -313,6 +362,102 @@ SchemaFormBuilder::buildField( const QString &name, const Json::Value &prop )
         combo->setToolTip( tip );
       field.combo = combo;
       field.widget = combo;
+      break;
+    }
+    case FieldKind::VectorCombo:
+    {
+      auto *combo = new QComboBox( this );
+      combo->setEditable( true );
+      combo->setInsertPolicy( QComboBox::NoInsert );
+      combo->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+      if ( !tip.isEmpty() )
+        combo->setToolTip( tip );
+      field.combo = combo;
+      field.widget = combo;
+      break;
+    }
+    case FieldKind::AssetCombo:
+    {
+      // Governed Data Assets: stable ids as item data (context actions must
+      // act on ids, never row positions).
+      auto *combo = new QComboBox( this );
+      combo->setEditable( false );
+      combo->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+      combo->addItem( tr( "选择数据资产…" ), QString() );
+      if ( !tip.isEmpty() )
+        combo->setToolTip( tip );
+      field.combo = combo;
+      field.widget = combo;
+      break;
+    }
+    case FieldKind::ModelCombo:
+    {
+      auto *combo = new QComboBox( this );
+      combo->setEditable( false );
+      combo->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+      combo->addItem( tr( "选择模型…" ), QString() );
+      if ( !tip.isEmpty() )
+        combo->setToolTip( tip );
+      field.combo = combo;
+      field.widget = combo;
+      break;
+    }
+    case FieldKind::Crs:
+    {
+      auto *selector = new CrsSelector( this );
+      if ( !tip.isEmpty() )
+        selector->setToolTip( tip );
+      if ( prop.isMember( "default" ) && prop["default"].isString() )
+        selector->setCrsString( QString::fromStdString( prop["default"].asString() ) );
+      field.crsSelector = selector;
+      field.widget = selector;
+      break;
+    }
+    case FieldKind::Json:
+    {
+      // Advanced JSON object editor (collapsed with the advanced section;
+      // never invisible by contract).
+      auto *edit = new QPlainTextEdit( this );
+      edit->setMaximumHeight( 96 );
+      QFont mono = edit->font();
+      mono.setFamily( QStringLiteral( "IBM Plex Mono" ) );
+      mono.setStyleHint( QFont::Monospace );
+      edit->setFont( mono );
+      edit->setPlaceholderText( tr( "{ \u2026 } JSON 对象" ) );
+      if ( prop.isMember( "default" ) && prop["default"].isString() )
+        edit->setPlainText( QString::fromStdString( prop["default"].asString() ) );
+      if ( !tip.isEmpty() )
+        edit->setToolTip( tip );
+      field.plainEdit = edit;
+      field.widget = edit;
+      break;
+    }
+    case FieldKind::Color:
+    {
+      auto *row = new QWidget( this );
+      auto *hl = new QHBoxLayout( row );
+      hl->setContentsMargins( 0, 0, 0, 0 );
+      hl->setSpacing( 6 );
+      auto *edit = new QLineEdit( row );
+      if ( prop.isMember( "default" ) && prop["default"].isString() )
+        edit->setText( QString::fromStdString( prop["default"].asString() ) );
+      edit->setPlaceholderText( QStringLiteral( "#RRGGBB" ) );
+      auto *pick = new QPushButton( tr( "…" ), row );
+      pick->setObjectName( QStringLiteral( "rsTaskPanelColorPick" ) );
+      hl->addWidget( edit, 1 );
+      hl->addWidget( pick );
+      connect( pick, &QPushButton::clicked, this, [this, edit]()
+      {
+        const QColor chosen = QColorDialog::getColor(
+          QColor( edit->text() ), this, tr( "选择颜色" ) );
+        if ( chosen.isValid() )
+        {
+          edit->setText( chosen.name( QColor::HexRgb ) );
+          emit valuesChanged();
+        }
+      } );
+      field.lineEdit = edit;
+      field.widget = row;
       break;
     }
     case FieldKind::OutputPath:
@@ -532,11 +677,22 @@ void SchemaFormBuilder::connectValueSignals( Field &field )
     connect( field.check, &QCheckBox::toggled,
              this, &SchemaFormBuilder::valuesChanged );
   }
+  if ( field.plainEdit )
+  {
+    connect( field.plainEdit, &QPlainTextEdit::textChanged,
+             this, &SchemaFormBuilder::valuesChanged );
+  }
+  if ( field.crsSelector )
+  {
+    connect( field.crsSelector, &CrsSelector::crsChanged,
+             this, &SchemaFormBuilder::valuesChanged );
+  }
 }
 
 void SchemaFormBuilder::rebuild( const Json::Value &schema )
 {
   clearFields();
+  m_schema = schema;
 
   const Json::Value *props = propertiesObject( schema );
   if ( !props || !props->isObject() )
@@ -613,6 +769,12 @@ void SchemaFormBuilder::rebuild( const Json::Value &schema )
       continue;
 
     const QString label = fieldLabel( e.name, e.prop );
+    // Accessible names for screen readers / keyboard navigation (Milestone G):
+    // every labeled control carries its schema label.
+    field.widget->setAccessibleName( label );
+    const QString fieldDesc = memberString( e.prop, "description" );
+    if ( !fieldDesc.isEmpty() )
+      field.widget->setAccessibleDescription( fieldDesc );
     if ( field.kind == FieldKind::Boolean && field.check )
     {
       field.check->setText( label );
@@ -622,6 +784,7 @@ void SchemaFormBuilder::rebuild( const Json::Value &schema )
     {
       auto *lab = new QLabel( label, box );
       lab->setObjectName( QStringLiteral( "rsTaskPanelFieldLabel" ) );
+      lab->setBuddy( field.widget );
       form->addRow( lab, field.widget );
     }
     m_fields.push_back( field );
@@ -649,16 +812,30 @@ void SchemaFormBuilder::rebuild( const Json::Value &schema )
   addSection( paramsBox );
   addSection( advancedBox );
 
+  // Inline validation summary (always present once a schema is built).
+  m_validationLabel = new QLabel( this );
+  m_validationLabel->setObjectName( QStringLiteral( "rsSchemaValidation" ) );
+  m_validationLabel->setWordWrap( true );
+  m_root->addWidget( m_validationLabel );
+
   m_root->addStretch( 1 );
 
-  refreshRasterCombos();
+  refreshChoices();
+  updateValidationUi();
 }
 
 void SchemaFormBuilder::refreshRasterCombos()
 {
+  refreshComboChoices( FieldKind::RasterCombo, m_layerIds, m_layerNames );
+}
+
+void SchemaFormBuilder::refreshComboChoices( FieldKind kind,
+                                             const QStringList &ids,
+                                             const QStringList &names )
+{
   for ( Field &field : m_fields )
   {
-    if ( field.kind != FieldKind::RasterCombo || !field.combo )
+    if ( field.kind != kind || !field.combo )
       continue;
 
     const QString currentText = field.combo->currentText();
@@ -668,29 +845,40 @@ void SchemaFormBuilder::refreshRasterCombos()
 
     field.combo->blockSignals( true );
     field.combo->clear();
-    const int n = std::min( m_layerIds.size(), m_layerNames.size() );
+    if ( kind == FieldKind::AssetCombo || kind == FieldKind::ModelCombo )
+      field.combo->addItem( kind == FieldKind::AssetCombo ? tr( "选择数据资产…" )
+                                                          : tr( "选择模型…" ),
+                            QString() );
+    const int n = std::min( ids.size(), names.size() );
     for ( int i = 0; i < n; ++i )
-      field.combo->addItem( m_layerNames.at( i ), m_layerIds.at( i ) );
+      field.combo->addItem( names.at( i ), ids.at( i ) );
 
     int idx = -1;
     if ( !currentData.isEmpty() )
       idx = field.combo->findData( currentData );
     if ( idx < 0 && !currentText.isEmpty() )
       idx = field.combo->findText( currentText );
-    if ( idx >= 0 )
+    if ( idx >= 0 && idx != 0 )
     {
       field.combo->setCurrentIndex( idx );
     }
-    else if ( !currentText.isEmpty() )
+    else if ( kind == FieldKind::RasterCombo || kind == FieldKind::VectorCombo )
     {
-      field.combo->setEditText( currentText );
-    }
-    else if ( !currentData.isEmpty() )
-    {
-      field.combo->setEditText( currentData );
+      if ( !currentText.isEmpty() )
+        field.combo->setEditText( currentText );
+      else if ( !currentData.isEmpty() )
+        field.combo->setEditText( currentData );
     }
     field.combo->blockSignals( false );
   }
+}
+
+void SchemaFormBuilder::refreshChoices()
+{
+  refreshComboChoices( FieldKind::RasterCombo, m_layerIds, m_layerNames );
+  refreshComboChoices( FieldKind::VectorCombo, m_vectorIds, m_vectorNames );
+  refreshComboChoices( FieldKind::AssetCombo, m_assetIds, m_assetNames );
+  refreshComboChoices( FieldKind::ModelCombo, m_modelNames, m_modelNames );
 }
 
 void SchemaFormBuilder::setRasterLayerChoices( const QStringList &layerIds,
@@ -698,7 +886,29 @@ void SchemaFormBuilder::setRasterLayerChoices( const QStringList &layerIds,
 {
   m_layerIds = layerIds;
   m_layerNames = layerNames;
-  refreshRasterCombos();
+  refreshComboChoices( FieldKind::RasterCombo, layerIds, layerNames );
+}
+
+void SchemaFormBuilder::setVectorLayerChoices( const QStringList &layerIds,
+                                               const QStringList &layerNames )
+{
+  m_vectorIds = layerIds;
+  m_vectorNames = layerNames;
+  refreshComboChoices( FieldKind::VectorCombo, layerIds, layerNames );
+}
+
+void SchemaFormBuilder::setAssetChoices( const QStringList &assetIds,
+                                         const QStringList &assetNames )
+{
+  m_assetIds = assetIds;
+  m_assetNames = assetNames;
+  refreshComboChoices( FieldKind::AssetCombo, assetIds, assetNames );
+}
+
+void SchemaFormBuilder::setModelChoices( const QStringList &modelNames )
+{
+  m_modelNames = modelNames;
+  refreshComboChoices( FieldKind::ModelCombo, modelNames, modelNames );
 }
 
 QString SchemaFormBuilder::readFieldValue( const Field &field ) const
@@ -706,6 +916,9 @@ QString SchemaFormBuilder::readFieldValue( const Field &field ) const
   switch ( field.kind )
   {
     case FieldKind::RasterCombo:
+    case FieldKind::VectorCombo:
+    case FieldKind::AssetCombo:
+    case FieldKind::ModelCombo:
     case FieldKind::Enum:
       if ( field.combo )
       {
@@ -730,8 +943,13 @@ QString SchemaFormBuilder::readFieldValue( const Field &field ) const
     case FieldKind::Array:
     case FieldKind::OutputPath:
     case FieldKind::String:
+    case FieldKind::Color:
       if ( field.lineEdit )
         return field.lineEdit->text();
+      break;
+    case FieldKind::Crs:
+      if ( field.crsSelector )
+        return field.crsSelector->crsString();
       break;
     case FieldKind::Double:
       if ( field.doubleSpin )
@@ -755,6 +973,7 @@ void SchemaFormBuilder::writeFieldValue( Field &field, const Json::Value &value 
   switch ( field.kind )
   {
     case FieldKind::RasterCombo:
+    case FieldKind::VectorCombo:
       if ( field.combo )
       {
         QString s;
@@ -773,6 +992,8 @@ void SchemaFormBuilder::writeFieldValue( Field &field, const Json::Value &value 
           field.combo->setEditText( s );
       }
       break;
+    case FieldKind::AssetCombo:
+    case FieldKind::ModelCombo:
     case FieldKind::Enum:
       if ( field.combo )
       {
@@ -822,10 +1043,22 @@ void SchemaFormBuilder::writeFieldValue( Field &field, const Json::Value &value 
       break;
     case FieldKind::OutputPath:
     case FieldKind::String:
+    case FieldKind::Color:
       if ( field.lineEdit && value.isString() )
         field.lineEdit->setText( QString::fromStdString( value.asString() ) );
       else if ( field.lineEdit && value.isNumeric() )
         field.lineEdit->setText( QString::number( value.asDouble(), 'g', 16 ) );
+      break;
+    case FieldKind::Crs:
+      if ( field.crsSelector && value.isString() )
+        field.crsSelector->setCrsString( QString::fromStdString( value.asString() ) );
+      break;
+    case FieldKind::Json:
+      if ( field.plainEdit && value.isString() )
+        field.plainEdit->setPlainText( QString::fromStdString( value.asString() ) );
+      else if ( field.plainEdit && ( value.isObject() || value.isArray() ) )
+        field.plainEdit->setPlainText(
+          QString::fromStdString( Json::StyledWriter().write( value ) ) );
       break;
     case FieldKind::Double:
       if ( field.doubleSpin && value.isNumeric() )
@@ -924,10 +1157,19 @@ Json::Value SchemaFormBuilder::values() const
         break;
       }
       case FieldKind::RasterCombo:
+      case FieldKind::VectorCombo:
+      case FieldKind::AssetCombo:
+      case FieldKind::ModelCombo:
       case FieldKind::OutputPath:
       case FieldKind::String:
+      case FieldKind::Color:
+      case FieldKind::Crs:
       default:
         out[key] = readFieldValue( field ).toStdString();
+        break;
+      case FieldKind::Json:
+        if ( field.plainEdit )
+          out[key] = field.plainEdit->toPlainText().toStdString();
         break;
     }
   }
@@ -969,4 +1211,201 @@ void SchemaFormBuilder::setValues( const Json::Value &params )
     if ( field.check )
       field.check->blockSignals( false );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Validation (Desktop Workbench UX 4.0, Milestone B)
+// ---------------------------------------------------------------------------
+
+QList<SchemaFormBuilder::ValidationIssue> SchemaFormBuilder::validate() const
+{
+  QList<ValidationIssue> issues;
+
+  // The schema root's "required" list is the source of truth.
+  QStringList required;
+  if ( m_schema.isObject() && m_schema.isMember( "required" )
+       && m_schema["required"].isArray() )
+  {
+    for ( const Json::Value &r : m_schema["required"] )
+    {
+      if ( r.isString() )
+        required << QString::fromStdString( r.asString() );
+    }
+  }
+
+  for ( const Field &field : m_fields )
+  {
+    const bool isRequired = required.contains( field.name );
+    const QString text = readFieldValue( field );
+
+    switch ( field.kind )
+    {
+      case FieldKind::RasterCombo:
+      case FieldKind::VectorCombo:
+      case FieldKind::OutputPath:
+      case FieldKind::String:
+      case FieldKind::Crs:
+        if ( isRequired && text.trimmed().isEmpty() )
+          issues.append( { field.name,
+                           tr( "必填参数“%1”不能为空" ).arg( field.name ), true } );
+        break;
+      case FieldKind::AssetCombo:
+      case FieldKind::ModelCombo:
+        if ( isRequired && ( !field.combo || field.combo->currentIndex() <= 0 ) )
+          issues.append( { field.name,
+                           tr( "必填参数“%1”未选择" ).arg( field.name ), true } );
+        break;
+      case FieldKind::Color:
+        if ( !text.trimmed().isEmpty() && !QColor( text ).isValid() )
+          issues.append( { field.name,
+                           tr( "“%1”不是有效颜色（#RRGGBB）" ).arg( field.name ), true } );
+        break;
+      case FieldKind::Json:
+      {
+        if ( !field.plainEdit )
+          break;
+        const std::string body = field.plainEdit->toPlainText().toStdString();
+        if ( body.empty() )
+          break;
+        Json::Value parsed;
+        Json::CharReaderBuilder builder;
+        std::string errors;
+        std::istringstream stream( body );
+        if ( !Json::parseFromStream( builder, stream, &parsed, &errors ) )
+          issues.append( { field.name,
+                           tr( "“%1”不是有效 JSON：%2" )
+                               .arg( field.name,
+                                     QString::fromStdString( errors ).section( QLatin1Char( '\n' ), 0, 0 ) ),
+                           true } );
+        break;
+      }
+      case FieldKind::Array:
+      {
+        if ( isRequired && text.trimmed().isEmpty() )
+          issues.append( { field.name,
+                           tr( "必填参数“%1”不能为空" ).arg( field.name ), true } );
+        if ( field.prop.isObject() && field.prop.isMember( "minItems" )
+             && field.prop["minItems"].isNumeric() )
+        {
+          const QStringList tokens = text.split(
+            QRegularExpression( QStringLiteral( "[,;\\n]+" ) ), Qt::SkipEmptyParts );
+          const int minItems = field.prop["minItems"].asInt();
+          if ( tokens.size() < minItems )
+            issues.append( { field.name,
+                             tr( "“%1”至少需要 %2 个值" ).arg( field.name ).arg( minItems ),
+                             true } );
+        }
+        break;
+      }
+      case FieldKind::Double:
+      case FieldKind::Integer:
+      case FieldKind::Enum:
+      case FieldKind::Boolean:
+        // Spin boxes clamp to the schema range; enum combos constrain values
+        // by construction — no further inline check needed.
+        break;
+    }
+  }
+
+  return issues;
+}
+
+bool SchemaFormBuilder::hasErrors() const
+{
+  for ( const ValidationIssue &issue : validate() )
+  {
+    if ( issue.isError )
+      return true;
+  }
+  return false;
+}
+
+void SchemaFormBuilder::applyValidationMarks( const QList<ValidationIssue> &issues )
+{
+  for ( const Field &field : m_fields )
+  {
+    if ( !field.widget )
+      continue;
+    bool hasError = false;
+    for ( const ValidationIssue &issue : issues )
+    {
+      if ( issue.isError && issue.fieldName == field.name )
+      {
+        hasError = true;
+        break;
+      }
+    }
+    field.widget->setProperty( "errorState", hasError );
+    field.widget->style()->unpolish( field.widget );
+    field.widget->style()->polish( field.widget );
+    if ( hasError )
+    {
+      for ( const ValidationIssue &issue : issues )
+      {
+        if ( issue.isError && issue.fieldName == field.name )
+        {
+          field.widget->setToolTip( issue.message );
+          break;
+        }
+      }
+    }
+  }
+
+  if ( m_validationLabel )
+  {
+    int errors = 0;
+    int warnings = 0;
+    QString firstError;
+    for ( const ValidationIssue &issue : issues )
+    {
+      if ( issue.isError )
+      {
+        ++errors;
+        if ( firstError.isEmpty() )
+          firstError = issue.message;
+      }
+      else
+      {
+        ++warnings;
+      }
+    }
+    if ( errors > 0 )
+    {
+      m_validationLabel->setProperty( "state", QStringLiteral( "error" ) );
+      m_validationLabel->setText( tr( "⚠ %1 处参数无效：%2" ).arg( errors ).arg( firstError ) );
+    }
+    else if ( warnings > 0 )
+    {
+      m_validationLabel->setProperty( "state", QStringLiteral( "warn" ) );
+      m_validationLabel->setText( tr( "△ %1 条提示" ).arg( warnings ) );
+    }
+    else
+    {
+      m_validationLabel->setProperty( "state", QStringLiteral( "ok" ) );
+      m_validationLabel->setText( tr( "✓ 参数有效" ) );
+    }
+    m_validationLabel->style()->unpolish( m_validationLabel );
+    m_validationLabel->style()->polish( m_validationLabel );
+  }
+}
+
+void SchemaFormBuilder::clearValidationMarks()
+{
+  applyValidationMarks( {} );
+}
+
+void SchemaFormBuilder::updateValidationUi()
+{
+  const QList<ValidationIssue> issues = validate();
+  applyValidationMarks( issues );
+  bool blocking = false;
+  for ( const ValidationIssue &issue : issues )
+  {
+    if ( issue.isError )
+    {
+      blocking = true;
+      break;
+    }
+  }
+  emit validationChanged( blocking );
 }

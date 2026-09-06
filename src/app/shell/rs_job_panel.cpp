@@ -3,6 +3,9 @@
  ***************************************************************************/
 #include "rs_job_panel.h"
 
+#include "design_tokens.h"
+#include "widgets/rs_result_summary.h"
+
 #include "main_window.h"
 
 #include <QAbstractItemView>
@@ -113,44 +116,27 @@ bool isActiveStatus( sicnu::TaskStatus status )
 
 static bool isDarkTheme( const QWidget *w )
 {
-  if ( w )
-    return w->palette().color( QPalette::Window ).lightness() < 128;
-  return qApp ? qApp->palette().color( QPalette::Window ).lightness() < 128 : false;
+  // Single owner for theme detection (Milestone F): SicnuUi::Tokens.
+  return SicnuUi::Tokens::themeIsDark( w );
 }
 
 QColor statusColor( sicnu::TaskStatus status, bool isDark )
 {
-  if ( isDark )
+  // Single owner for task-state colors: SicnuUi::Tokens (Milestone F).
+  using sicnu::TaskStatus;
+  switch ( status )
   {
-    switch ( status )
-    {
-      case sicnu::TaskStatus::Running:   return QColor( 0x4d, 0xa3, 0xe0 ); // blue
-      case sicnu::TaskStatus::Completed: return QColor( 0x3d, 0xcf, 0x6a ); // green
-      case sicnu::TaskStatus::Failed:    return QColor( 0xf0, 0x71, 0x67 ); // red
-      case sicnu::TaskStatus::Paused:    return QColor( 0xe0, 0xa8, 0x2e ); // amber
-      case sicnu::TaskStatus::WaitingResource: return QColor( 0xb0, 0x8a, 0xd0 ); // violet
-      case sicnu::TaskStatus::Dispatching: return QColor( 0x6f, 0xa8, 0xdc ); // light blue
-      case sicnu::TaskStatus::Cancelling: return QColor( 0xd9, 0x7b, 0x0f ); // deep amber
-      case sicnu::TaskStatus::Queued:
-      case sicnu::TaskStatus::Canceled:  return QColor( 0xa8, 0xb0, 0xbc ); // gray
-    }
+    case TaskStatus::Running:          return SicnuUi::Tokens::statusRunning( isDark );
+    case TaskStatus::Completed:        return SicnuUi::Tokens::statusOk( isDark );
+    case TaskStatus::Failed:           return SicnuUi::Tokens::statusError( isDark );
+    case TaskStatus::Paused:           return SicnuUi::Tokens::statusWarn( isDark );
+    case TaskStatus::WaitingResource:  return SicnuUi::Tokens::statusWaiting( isDark );
+    case TaskStatus::Dispatching:      return SicnuUi::Tokens::statusDispatching( isDark );
+    case TaskStatus::Cancelling:       return SicnuUi::Tokens::statusCancelling( isDark );
+    case TaskStatus::Queued:
+    case TaskStatus::Canceled:         return SicnuUi::Tokens::statusIdle( isDark );
   }
-  else
-  {
-    switch ( status )
-    {
-      case sicnu::TaskStatus::Running:   return QColor( 0x09, 0x69, 0xda ); // blue
-      case sicnu::TaskStatus::Completed: return QColor( 0x1a, 0x7f, 0x37 ); // green
-      case sicnu::TaskStatus::Failed:    return QColor( 0xcf, 0x22, 0x2e ); // red
-      case sicnu::TaskStatus::Paused:    return QColor( 0x8c, 0x5b, 0x00 ); // amber
-      case sicnu::TaskStatus::WaitingResource: return QColor( 0x6f, 0x42, 0xc1 ); // violet
-      case sicnu::TaskStatus::Dispatching: return QColor( 0x54, 0x8c, 0xd7 ); // light blue
-      case sicnu::TaskStatus::Cancelling: return QColor( 0xbf, 0x68, 0x00 ); // deep amber
-      case sicnu::TaskStatus::Queued:
-      case sicnu::TaskStatus::Canceled:  return QColor( 0x5a, 0x65, 0x73 ); // gray
-    }
-  }
-  return isDark ? QColor( 0xa8, 0xb0, 0xbc ) : QColor( 0x5a, 0x65, 0x73 );
+  return SicnuUi::Tokens::statusIdle( isDark );
 }
 
 QString taskTitle( const sicnu::AlgorithmTaskInfo &info )
@@ -278,6 +264,11 @@ void RsJobPanel::setupUi()
   m_detailView->setReadOnly( true );
   m_detailView->setPlaceholderText( tr( "选择任务查看方法、参数、输入输出…" ) );
   m_detailTabs->addTab( m_detailView, tr( "详情" ) );
+
+  // Structured result view (UX 4.0): operator result JSON rendered as
+  // status/metrics/artifacts instead of raw JSON only.
+  m_resultSummary = new RsResultSummary( m_detailTabs );
+  m_detailTabs->addTab( m_resultSummary, tr( "结果" ) );
 
   m_logView = new QPlainTextEdit( m_detailTabs );
   m_logView->setObjectName( QStringLiteral( "rsJobLogView" ) );
@@ -451,20 +442,36 @@ void RsJobPanel::refreshAll()
   m_jobTree->clear();
 
   auto tasks = sicnu::TaskCenter::instance().allTasks();
-  std::sort( tasks.begin(), tasks.end(), []( const sicnu::AlgorithmTaskInfo &a,
-                                             const sicnu::AlgorithmTaskInfo &b ) {
-    return a.taskId > b.taskId;
-  } );
+  // Grouped view: pipeline children nest under their parent task row.
+  // Pass A: id → info plus the set of tasks that are someone's parent.
+  QHash<long, sicnu::AlgorithmTaskInfo> byId;
+  QSet<long> parentIds;
+  for ( const sicnu::AlgorithmTaskInfo &info : tasks )
+  {
+    byId.insert( info.taskId, info );
+    for ( long parent : info.parentTaskIds )
+      parentIds.insert( parent );
+  }
 
   QTreeWidgetItem *selectItem = nullptr;
   const bool dark = isDarkTheme( this );
+  QList<QTreeWidgetItem *> topRows;
+
+  // Pass B: create parents before children (ascending age), then insert the
+  // top rows newest-first below.
+  std::sort( tasks.begin(), tasks.end(), []( const sicnu::AlgorithmTaskInfo &a,
+                                             const sicnu::AlgorithmTaskInfo &b ) {
+    return a.taskId < b.taskId;
+  } );
+
+  QHash<long, QTreeWidgetItem *> items;
   for ( const sicnu::AlgorithmTaskInfo &info : tasks )
   {
     const QString state = statusToString( info.status );
     if ( !passesFilter( state ) )
       continue;
 
-    auto *item = new QTreeWidgetItem( m_jobTree );
+    auto *item = new QTreeWidgetItem();
     item->setText( ColTitle, taskTitle( info ) );
     item->setText( ColState, state );
     item->setForeground( ColState, statusColor( info.status, dark ) );
@@ -479,9 +486,40 @@ void RsJobPanel::refreshAll()
                         .arg( info.taskId )
                         .arg( info.algorithmId ) );
     item->setToolTip( ColLoad, tr( "勾选后任务成功时自动加载输出到主程序" ) );
+    items.insert( info.taskId, item );
+
+    QTreeWidgetItem *parentItem = nullptr;
+    for ( long parent : info.parentTaskIds )
+    {
+      if ( items.contains( parent ) )
+      {
+        parentItem = items.value( parent );
+        break;
+      }
+    }
+    if ( parentItem )
+    {
+      parentItem->addChild( item );
+    }
+    else
+    {
+      topRows.prepend( item );
+    }
+
     if ( info.taskId == keepId )
       selectItem = item;
   }
+
+  for ( QTreeWidgetItem *row : topRows )
+    m_jobTree->addTopLevelItem( row );
+
+  // Expand grouped pipeline parents so children stay visible by default.
+  for ( long parentId : parentIds )
+  {
+    if ( QTreeWidgetItem *parentItem = items.value( parentId ) )
+      parentItem->setExpanded( true );
+  }
+
   m_blockItemChanged = false;
 
   if ( selectItem )
@@ -501,11 +539,21 @@ void RsJobPanel::refreshAll()
 
 QTreeWidgetItem *RsJobPanel::findTaskItem( long taskId ) const
 {
-  for ( int i = 0; i < m_jobTree->topLevelItemCount(); ++i )
+  return findTaskItemRecursive( m_jobTree->invisibleRootItem(), taskId );
+}
+
+QTreeWidgetItem *RsJobPanel::findTaskItemRecursive( QTreeWidgetItem *parent, long taskId )
+{
+  for ( int i = 0; i < parent->childCount(); ++i )
   {
-    QTreeWidgetItem *item = m_jobTree->topLevelItem( i );
+    QTreeWidgetItem *item = parent->child( i );
     if ( item && item->data( ColTitle, RoleTaskId ).toLongLong() == taskId )
       return item;
+    if ( item )
+    {
+      if ( QTreeWidgetItem *nested = findTaskItemRecursive( item, taskId ) )
+        return nested;
+    }
   }
   return nullptr;
 }
@@ -538,7 +586,24 @@ void RsJobPanel::upsertTaskRow( const sicnu::AlgorithmTaskInfo &info )
   if ( !found )
   {
     found = new QTreeWidgetItem();
-    m_jobTree->insertTopLevelItem( 0, found );
+    // Pipeline children nest under their parent when it is already visible;
+    // otherwise the row lands top-level until the next full refresh.
+    QTreeWidgetItem *parentRow = nullptr;
+    for ( long parent : info.parentTaskIds )
+    {
+      parentRow = findTaskItem( parent );
+      if ( parentRow )
+        break;
+    }
+    if ( parentRow )
+    {
+      parentRow->insertChild( 0, found );
+      parentRow->setExpanded( true );
+    }
+    else
+    {
+      m_jobTree->insertTopLevelItem( 0, found );
+    }
     found->setFlags( found->flags() | Qt::ItemIsUserCheckable );
     found->setCheckState( ColLoad, loadToMainPreference( taskId ) ? Qt::Checked : Qt::Unchecked );
   }
@@ -637,7 +702,18 @@ void RsJobPanel::fillDetailsForTask( long taskId )
   if ( info.taskId != taskId )
   {
     m_detailView->setPlainText( tr( "(任务不存在)" ) );
+    m_resultSummary->clear();
     return;
+  }
+  if ( m_resultSummary )
+  {
+    // Surface the operator result document (structured when it matches the
+    // known shape; raw JSON remains one click away inside the widget).
+    m_resultSummary->setContext( info.algorithmId );
+    if ( !info.resultPayload.isNull() && info.resultPayload.isObject() )
+      m_resultSummary->setResult( info.resultPayload );
+    else
+      m_resultSummary->clear();
   }
 
   QStringList lines;

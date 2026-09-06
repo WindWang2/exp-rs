@@ -64,6 +64,7 @@ class RsJobPanel : public QgsDockWidget
     void refreshAll();
     void upsertTaskRow( const sicnu::AlgorithmTaskInfo &info );
     QTreeWidgetItem *findTaskItem( long taskId ) const;
+    static QTreeWidgetItem *findTaskItemRecursive( QTreeWidgetItem *parent, long taskId );
     void fillLogForTask( long taskId );
     void fillDetailsForTask( long taskId );
     void updateActionEnabled();
@@ -90,6 +91,7 @@ class RsJobPanel : public QgsDockWidget
     QTabWidget *m_detailTabs = nullptr;
     QPlainTextEdit *m_detailView = nullptr;
     QPlainTextEdit *m_logView = nullptr;
+    class RsResultSummary *m_resultSummary = nullptr;
     QPushButton *m_cancelBtn = nullptr;
     QPushButton *m_loadBtn = nullptr;
     QPushButton *m_clearFinishedBtn = nullptr;
