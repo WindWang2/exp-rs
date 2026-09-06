@@ -2,6 +2,17 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-06
+
+### 🖥️ Desktop Workbench & Unified UX 4.0 (goal series, ADR 0130–0133)
+- **Unified shell**: 工作区治理 dock is now wired to the project `WorkspaceService` (previously created inert) and refreshes on store open/reopen; window title shows `<project> — SICNU GEO RS` with a dirty marker; ribbon collapse state persists; 遥感 (ADR 0099) is the single menu entry for product preprocessing/spectral/change/fusion/terrain — 栅格/分析 keep only unique entries; dead `TaskCenterDock`/`MosaicPanel` panels and the zombie `BandCompositionRail` chrome removed with their tests.
+- **Schema-driven operator UI**: `SchemaFormBuilder` gains schema-validated forms (required/range/minItems/color/JSON checks, inline error marks + summary line, Run gating), new field kinds (vector, governed-asset selector with stable ids, ModelCatalog selector, CRS via `CrsSelector`, color picker, JSON editor), accessible names from schema labels, and advanced sections that collapse but stay reachable. Operator schema defaults are the single source of truth (e.g. rs:pca dialog now defaults to the schema's 0 = all bands instead of a hardcoded 3).
+- **Thin-client convergence**: dialog kernels promoted verbatim to operators — `rs:band_ratio` (ratio | IHS), `rs:extract_bands`, `rs:contrast_stretch`, `rs:image_enhancement` (stretch/filter/ratio-IHS/speckle, tile-streamed), `otb:bundle_to_perfect_sensor`, `gdal:pansharpen`; the band-ratio/extract/contrast-stretch dialogs, the enhancement panel and the fusion CLI paths now submit through the Task Center seam; batch processing resolves `rs:` ids through `RSOperatorRegistry` (adapter bypass removed); a source-scan guardrail bans inline raster kernels in dialogs. IHS outputs now mask NoData to NaN (panel #380 semantics shared with the new operator).
+- **Task/result UX**: `RsJobPanel` groups pipeline steps under their parent task (expanded by default) and gains a structured 结果 tab; the shared `RsResultSummary` widget renders status/context, key metrics, warnings and double-click-to-map artifacts in `TaskPanelHost` and the job panel; 工作区治理 rows open on the map via the Data/Display seam.
+- **Design tokens**: `src/app/design_tokens.h` (`SicnuUi::Tokens`) becomes the single C++ owner of semantic/status colors, spacing, icon and type sizes; RsJobPanel, the georef task list and `applyDarkPalette` converge on it; `test_theme_selector_parity` now enforces QSS↔C++ token sync.
+- **Keyboard/a11y**: `test_shortcut_conflicts` pins that no two actions in the shell action host claim the same key sequence.
+- New docs: `docs/ui-architecture.md` (information architecture, form contract, task/result contract, extension rules); tests: `test_workspace_browser_wiring`, `test_rs_band_tools_operators`, `test_schema_form_builder_v2`, `test_rs_result_summary`, `test_shortcut_conflicts`.
+
 ## [Unreleased] - 2026-09-05
 
 ### 🗂️ Project Workspace, Data Governance & Reproducibility Platform 3.0 (goal series, ADR 0129)

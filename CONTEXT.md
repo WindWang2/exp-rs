@@ -172,6 +172,14 @@ _Avoid_: GUI proxy, QgisInterface IPC shim
 The visual DAG editor canvas (`PipelineCanvasWidget` using Qt Graphics View) for constructing, editing, and monitoring processing task pipelines. Spatial metadata $(X,Y)$ is embedded in `WorkflowDefinition` JSON.
 _Avoid_: Node graph window, Flow editor dialog
 
+**Schema Form Builder (v2)**:
+The form-generation layer (`SchemaFormBuilder`, `src/app/shell/`) that converts an authoritative operator schema (or `AlgorithmDescriptor::toInputSchema()`) into validated parameter editors. The schema is the single source of truth for defaults, ranges, required fields and editor kind (`x-ui-type` hints); validation marks are inline and gate the Run button; advanced fields collapse but stay reachable.
+_Avoid_: Generated form code, Dialog builder (it is schema-driven; dialogs keep identity and help)
+
+**Design Tokens**:
+The C++ design-system constants (`SicnuUi::Tokens`, `src/app/design_tokens.h`): semantic colors per theme, the shared task-status palette, spacing/icon/type scales, and the single `themeIsDark()` probe. Values mirror the QSS token headers; `test_theme_selector_parity` enforces sync.
+_Avoid_: Color helper, Theme singleton (it is a constants namespace plus one probe)
+
 ## Architectural Decision Records (ADRs)
 
 ### ADR 0011: Task Pipeline & Workflow Editor UI Architecture
@@ -581,3 +589,7 @@ ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision
 - **ADR 0127**: MapSpec Declarative Cartography
 - **ADR 0128**: Spatial Scientist Contracts
 - **ADR 0129**: Project Workspace, Data Governance & Reproducibility Platform 3.0
+- **ADR 0130**: Unified Application Shell (workspace dock wiring, project-context title, dead-panel removal, menu dedup)
+- **ADR 0131**: Schema-Driven Operator UI & Thin-Client Continuance (validated schema forms; band tools/pan-sharpen operator promotions; batch registry fix)
+- **ADR 0132**: Unified Task & Result Surface (pipeline grouping in RsJobPanel; shared RsResultSummary; Data vs Results concept contract)
+- **ADR 0133**: Design Token Layer & QSS Parity Contract (SicnuUi::Tokens; single status palette; shortcut conflict guardrail)

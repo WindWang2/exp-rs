@@ -1,48 +1,79 @@
-# Project: PR Integration, Build Verification & Repository Cleanup
+# SICNU GEO RS (exp-rs) — Project State
 
-## Architecture
-- Repository: `exp-rs` (C++20 / Qt 6.8+ / GDAL / PROJ / GEOS / OpenCV 5 / Catch2 v3.7.1)
-- Main Branch: `master`
-- Integration Workflow: Sequential squash-and-merge of 5 open PRs (#708 -> #709 -> #710 -> #711 -> #712)
-- Build System: CMake (Release + Ninja in `build/`)
-- Test Runner: CTest with Catch2 (`QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest --test-dir build --output-on-failure -j$(nproc)`). CTestCustom.cmake also pins `PYTHONHOME`/`PYTHONPATH` and `QT_IM_MODULE=compose` (see TEST_INFRA.md). `LD_PRELOAD=/usr/lib/libxml2.so` is not the documented policy; if used, `PYTHONHOME` must match the CMake-discovered interpreter.
-- Secondary Worktrees: Cleaned up (0 secondary worktrees remaining)
+Living project-state document. Claims here must be provable from the code and
+tests at HEAD; do not hardcode transient counts (PRs, worktrees, test tallies)
+— record those as dated evidence in planning dossiers instead.
 
-## Feature Inventory
-| # | Feature | Description | Milestone | Source |
-|---|---------|-------------|-----------|--------|
-| 1 | PR #708 Integration | Merge `perf/operator-ization` (20 commits, determinism grades, cache hits, TaskCenter GC). Resolve 5 conflicts with master by accepting HEAD. | M1 | ORIGINAL_REQUEST §R1 |
-| 2 | PR #709 Integration | Merge `zcode/resolve-all-open-issues-20260830` (33 commits, 39 bugfixes). Resolve conflicts by accepting HEAD. | M1 | ORIGINAL_REQUEST §R1 |
-| 3 | PR #710 Integration | Merge `feat/cartography-layout-studio` (10 commits, layout studio). Clean merge. | M1 | ORIGINAL_REQUEST §R1 |
-| 4 | PR #711 Integration | Merge `feat/spatial-execution-platform` (48 commits, spatial platform 1.0 convergence). | M1 | ORIGINAL_REQUEST §R1 |
-| 5 | PR #712 Integration | Merge `feat/temporal-rs-analysis` (7 commits, multi-temporal RS engine). Combine temporal resolver and numeric scale in rs_spectral_index_operator. | M1 | ORIGINAL_REQUEST §R1 |
-| 6 | CMake Build Verification | Build master with `cmake --build build` (zero compilation/linking errors). | M2 | ORIGINAL_REQUEST §R2 |
-| 7 | Catch2 Test Verification | Historical "2126 tests / 2123 passed / 3 skipped / 0 failed" figure is stale (suite size moved; #730 showed 16/2147 red on the old `LD_PRELOAD` command, 15 of them environment). Documented runner is now `QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest --test-dir build --output-on-failure -j$(nproc)` with CTestCustom env pins. Do not treat "100% green" as a current claim without a fresh `ctest` log. | M2 | ORIGINAL_REQUEST §R2 |
-| 8 | Secondary Worktree Cleanup | Kill background processes in worktree and remove 4 secondary worktrees with `git worktree remove --force`. | M3 | ORIGINAL_REQUEST §R3 |
-| 9 | Branch Cleanup | Prune and remove local and remote feature branches (`git branch -D`, `git push origin --delete`, `git remote prune origin`). | M3 | ORIGINAL_REQUEST §R3 |
-| 10 | Final Audit & Verification | Forensic audit, review, and verification against all acceptance criteria. | M4 | ORIGINAL_REQUEST §Acceptance Criteria |
+## What this is
 
-## Milestones
-| # | Name | Scope | Dependencies | Status |
-|---|------|-------|-------------|--------|
-| M0 | Repository Survey | Inspect PR details, branch status, worktree paths, and CMake test configuration | None | DONE |
-| M1 | Sequential PR Squash-Merge | Merge PRs #708, #709, #710, #711, #712 into master with conflict resolution | M0 | DONE |
-| M2 | Build & Catch2 Test Verification | Full CMake build and Catch2 test run on master | M1 | DONE |
-| M3 | Worktree & Branch Cleanup | Remove 4 secondary worktrees and delete local/remote branches | M1 | DONE |
-| M4 | Final Integrity Audit & Verification | Forensic audit and final verification against acceptance criteria | M2, M3 | IN_PROGRESS |
+A pure C++20 remote-sensing analysis workbench built on the QGIS engine
+(Qt 6.8+, GDAL/PROJ/GEOS, OpenCV 5, Catch2 v3). One desktop application
+(`src/app`, `sicnu_geo_rs`), one headless CLI (`src/cli`), an MCP server and
+Pi agent adapter over the same Task Center seam.
 
-## Interface Contracts
-- Git branch integration: All feature branches squash-merged into `master`.
-- GitHub PR status: All 5 PRs merged and closed (`gh pr list` shows 0 open PRs).
-- Build target: `cmake --build build` succeeds with 0 errors.
-- Test runner: `QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest --test-dir build --output-on-failure -j$(nproc)`. CTestCustom.cmake pins `PYTHONHOME`, prepends `/usr/lib`, and sets `QT_IM_MODULE=compose`. The old `LD_PRELOAD=/usr/lib/libxml2.so` + "100% green / 0 failed" line was stale as of #730.
-- Worktree state: `git worktree list` outputs only `/home/kevin/projects/rs-studio/main`.
-- Branch state: No secondary local or remote feature branches remain.
+## Architecture map
 
-## Code Layout
-- Repository root: `/home/kevin/projects/rs-studio/main`
-- Build directory: `build`
-- Core libraries: `src/core`, `src/gui`, `src/data`, `src/processing`, `src/operators`, `src/workflow`, `src/jobs`, `src/agent`
-- Applications: `src/app` (`sicnu_geo_rs`), `src/cli` (`sicnu_geo_rs_cli`)
-- Tests: `tests/` (Catch2 test executables)
-- Agent metadata: `.agents/`
+- `src/core`, `src/gui` — QGIS engine (layers, rendering, CRS, canvas).
+- `src/processing` — algorithm engine, providers, Task Center, Tool Call
+  Dispatcher, kernels in `algorithms/`.
+- `src/operators` — RSOperator framework + `rs:`/`gdal:`/`otb:`/`opencv:`
+  families (JSON parameter/result seam, registry, determinism grades).
+- `src/jobs` — JobEngine (execution workers, listeners, retention).
+- `src/data` — DataManager (asset authority) + governance store/services.
+- `src/analysis` — classification pipeline, segmentation, georeferencing.
+- `src/workflow` — workflow runtime, session, pipeline editor canvas.
+- `src/app` — desktop shell: ribbon workbench, panels (data / governance /
+  layers), dialogs, task center UI, schema form builder, design tokens
+  (`design_tokens.h`). See `docs/ui-architecture.md` for the information
+  architecture and extension rules.
+- `src/agent` — copilot, MCP, spatial tools, agent contracts; `pi/` bridge.
+- `docs/adr/` — decision ledger (0001–0133); `CONTEXT.md` — domain vocabulary.
+
+## Current state (2026-09-06)
+
+- **Desktop Workbench & Unified UX 4.0** (branch `zcode/desktop-workbench-ux-4`,
+  ADR 0130–0133): unified shell (wired governance dock, project-context title,
+  dead-panel removal, menu dedup), schema-validated operator forms, thin-client
+  operator promotions (band tools, enhancement, pan-sharpen), grouped pipeline
+  tasks + shared result renderer, C++ design-token layer, keyboard guardrail.
+- **Project Workspace, Data Governance & Reproducibility Platform 3.0**
+  (ADR 0129): governance store, workspace services, project format v3,
+  crash-safe saves, workspace UI.
+- **Multimodal SpatioTemporal RS Platform 3.0**: SAR operator family, temporal
+  fit kernels, feature cube, model runtime 3.0, tile inference 2.0.
+- **Pi Spatial Scientist & Cartography Workbench 3.0** (ADR 0127/0128): spatial
+  reasoning contracts, MapSpec cartography, symbology intelligence, benchmarks.
+- **Pi-Based Spatial Intelligence Layer** (ADR 0122): spatial tools, MCP
+  catalog, model catalog, algorithm sidecars.
+
+## Contracts that outlive any single PR
+
+- Execution seam: `UI → TaskCenter → JobEngine → RSOperator → kernel`. GUI
+  code must not run raster kernels inline (`test_ui_task_center_contract`).
+- Data/Display seam: `DataManager` owns assets; canvas presentation goes
+  through `ActiveViewHost`/`QgisDisplayManager`.
+- Schema form contract: operator schemas are the single source of truth for
+  defaults/ranges/required in any generated parameter UI.
+- Design tokens: `SicnuUi::Tokens` mirrors the QSS token headers; the parity
+  test fails on drift.
+- Scale: workspace browsing stays model/view and paged (100k assets,
+  fetchMore, 200/page); no per-row widget explosion.
+
+## Build & test
+
+- Configure: `cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=ON` in
+  a build dir (host note: use `/usr/bin/cmake`; `~/.local/bin/cmake` is a
+  broken shim).
+- Build: `cmake --build build` (bounded parallelism on shared hosts).
+- Tests: `QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest
+  --test-dir build` (CTestCustom pins Python/Qt env; see `TEST_INFRA.md`).
+
+## Known limitations / open threads
+
+- `module:classify:*` and `module:georef:*` flows are TaskCenter-tracked but
+  not `rs:` operators (interactive sessions; documented in
+  `docs/ui-architecture.md` §4).
+- Pipeline editor keeps its slate-canvas badge palette (documented design
+  exception to the token layer).
+- The historical "2126 tests / 100% green" style figures are stale evidence;
+  never claim suite health without a fresh `ctest` log.
