@@ -578,11 +578,109 @@ BreakpointResult piecewiseLinearTrend( const std::vector<float> &y,
     totalSse += segmentRss( seg.first, seg.second, &slope, &intercept );
     result.slopes.push_back( slope );
     result.intercepts.push_back( intercept );
-    totalValid += seg.second - seg.first;
+    // Count finite observations only, via the same weighted cumsum that feeds
+    // the RSS numerator — NaN slots must not inflate the denominator (#759).
+    totalValid += static_cast<long>( c1[seg.second] - c1[seg.first] );
   }
   result.breakIndices = breaks;
-  result.rmse = totalValid > 0 ? std::sqrt( totalSse / totalValid ) : 0.0;
+  result.validCount = totalValid;
+  // Zero valid observations: the fit error is undefined, not zero.
+  result.rmse = totalValid > 0 ? std::sqrt( totalSse / totalValid ) : kNan;
   return result;
+}
+
+SenTrendResult mannKendallSenSlope( const std::vector<float> &y,
+                                    const std::vector<double> &tDays )
+{
+  SenTrendResult out;
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  out.slope = out.intercept = out.z = out.pValue = out.variance = nan;
+
+  const int n = static_cast<int>( y.size() );
+  if ( n < 2 || static_cast<int>( tDays.size() ) != n )
+    return out;
+
+  // Valid (finite) samples, in time order.
+  std::vector<int> idx;
+  idx.reserve( n );
+  for ( int i = 0; i < n; ++i )
+    if ( std::isfinite( y[i] ) )
+      idx.push_back( i );
+  out.validCount = static_cast<int>( idx.size() );
+  if ( out.validCount < 3 ) // no meaningful MK test below 3 observations
+    return out;
+
+  // S statistic and Sen slope pairs, over strictly time-ordered pairs.
+  double s = 0.0;
+  std::vector<double> pairwiseSlopes;
+  pairwiseSlopes.reserve( static_cast<size_t>( out.validCount ) *
+                          ( out.validCount - 1 ) / 2 );
+  for ( size_t a = 0; a < idx.size(); ++a )
+  {
+    for ( size_t b = a + 1; b < idx.size(); ++b )
+    {
+      const int i = idx[a];
+      const int j = idx[b];
+      if ( !( tDays[j] > tDays[i] ) )
+        continue; // equal or inverted instants: no direction, skip entirely
+      const double dy = y[j] - y[i];
+      s += dy > 0.0 ? 1.0 : ( dy < 0.0 ? -1.0 : 0.0 );
+      pairwiseSlopes.push_back( dy / ( tDays[j] - tDays[i] ) );
+    }
+  }
+  if ( pairwiseSlopes.empty() ) // all valid samples share one instant
+    return out;
+
+  // Sen slope: median of the pairwise slopes; intercept: median residual.
+  std::sort( pairwiseSlopes.begin(), pairwiseSlopes.end() );
+  const size_t m = pairwiseSlopes.size();
+  out.slope = m % 2 == 1
+                  ? pairwiseSlopes[m / 2]
+                  : 0.5 * ( pairwiseSlopes[m / 2 - 1] + pairwiseSlopes[m / 2] );
+
+  std::vector<double> residuals;
+  residuals.reserve( idx.size() );
+  for ( int i : idx )
+    residuals.push_back( y[i] - out.slope * tDays[i] );
+  std::sort( residuals.begin(), residuals.end() );
+  const size_t rn = residuals.size();
+  out.intercept = rn % 2 == 1 ? residuals[rn / 2]
+                              : 0.5 * ( residuals[rn / 2 - 1] + residuals[rn / 2] );
+
+  // Mann-Kendall test: tie-corrected variance of S (Gilbert 1987 eq. 16.5),
+  // continuity-corrected z, two-sided normal-tail p-value.
+  std::vector<double> sorted( idx.size() );
+  for ( size_t a = 0; a < idx.size(); ++a )
+    sorted[a] = y[idx[a]];
+  std::sort( sorted.begin(), sorted.end() );
+
+  const double nn = static_cast<double>( out.validCount );
+  double variance = nn * ( nn - 1.0 ) * ( 2.0 * nn + 5.0 );
+  for ( size_t a = 0; a < sorted.size(); )
+  {
+    size_t b = a;
+    while ( b < sorted.size() && sorted[b] == sorted[a] )
+      ++b;
+    const double t = static_cast<double>( b - a );
+    if ( t > 1.0 )
+      variance -= t * ( t - 1.0 ) * ( 2.0 * t + 5.0 );
+    a = b;
+  }
+  variance /= 18.0;
+  out.variance = variance;
+
+  if ( variance <= 0.0 )
+  {
+    out.z = 0.0;
+    out.pValue = 1.0;
+  }
+  else
+  {
+    const double sd = std::sqrt( variance );
+    out.z = s > 0.0 ? ( s - 1.0 ) / sd : ( s < 0.0 ? ( s + 1.0 ) / sd : 0.0 );
+    out.pValue = std::erfc( std::fabs( out.z ) / std::sqrt( 2.0 ) );
+  }
+  return out;
 }
 
 DecompositionResult seasonalDecompose( const std::vector<float> &y,

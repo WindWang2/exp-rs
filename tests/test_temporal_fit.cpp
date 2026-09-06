@@ -247,6 +247,141 @@ TEST_CASE( "Piecewise linear trend rejects flat series improvements below thresh
     REQUIRE( r.slopes.front() == Approx( 1.0 / 3.0 ).margin( 1e-9 ) );
 }
 
+TEST_CASE( "Piecewise linear trend RMSE divides by valid observations only (#759)",
+           "[temporal][breakpoints]" )
+{
+    ensureApp();
+    // 10 samples, NaN gaps at indices 4 and 5 → 8 valid observations.
+    // Valid values: y[3] = y[6] = 4, all other valid samples 0, t = 0..9.
+    // Mean t over the valid set {0,1,2,3,6,7,8,9} is 4.5 and both outliers sit
+    // at distance 1.5 with the same deviation, so the OLS slope stays 0 and the
+    // fitted value is the mean 1 everywhere. Hand-derived SSE:
+    //   6*(0-1)^2 + 2*(4-1)^2 = 24 → RMSE = sqrt(24/8) = sqrt(3) ≈ 1.7320508.
+    // The pre-#759 denominator counted all 10 slots → sqrt(24/10) ≈ 1.5491933.
+    std::vector<float> y( 10, 0.0f );
+    y[3] = 4.f;
+    y[6] = 4.f;
+    y[4] = kNan;
+    y[5] = kNan;
+    std::vector<double> t( 10 );
+    for ( int i = 0; i < 10; ++i )
+        t[i] = i;
+    const BreakpointResult r = piecewiseLinearTrend( y, t, 0, 3, 0.5 );
+    REQUIRE( r.validCount == 8 );
+    REQUIRE( r.rmse == Approx( std::sqrt( 3.0 ) ).epsilon( 1e-12 ) );
+}
+
+TEST_CASE( "Piecewise linear trend reports undefined RMSE for an all-NaN series",
+           "[temporal][breakpoints]" )
+{
+    ensureApp();
+    std::vector<float> y( 12, kNan );
+    std::vector<double> t( 12 );
+    for ( int i = 0; i < 12; ++i )
+        t[i] = i * 16.0;
+    const BreakpointResult r = piecewiseLinearTrend( y, t, 2, 3, 0.5 );
+    REQUIRE( r.validCount == 0 );
+    REQUIRE( std::isnan( r.rmse ) );
+}
+
+TEST_CASE( "Piecewise linear trend keeps exact zero RMSE on gapped perfect lines",
+           "[temporal][breakpoints]" )
+{
+    ensureApp();
+    // y = 2t with two NaN gaps: the SSE over the 8 valid samples is exactly 0,
+    // so the corrected denominator must not turn a perfect fit into nonzero.
+    std::vector<float> y( 10 );
+    std::vector<double> t( 10 );
+    for ( int i = 0; i < 10; ++i )
+    {
+        t[i] = i;
+        y[i] = static_cast<float>( 2 * i );
+    }
+    y[4] = kNan;
+    y[5] = kNan;
+    const BreakpointResult r = piecewiseLinearTrend( y, t, 0, 3, 0.5 );
+    REQUIRE( r.validCount == 8 );
+    REQUIRE( r.rmse == Approx( 0.0 ).margin( 1e-9 ) );
+}
+
+TEST_CASE( "Mann-Kendall/Sen recovers a perfect monotonic trend", "[temporal][sen]" )
+{
+    ensureApp();
+    const std::vector<float> y = { 1, 2, 3, 4, 5 };
+    const std::vector<double> t = { 0, 1, 2, 3, 4 };
+    const SenTrendResult r = mannKendallSenSlope( y, t );
+    REQUIRE( r.validCount == 5 );
+    // All 10 pairwise slopes are 1; the median residual set is exactly 1.
+    REQUIRE( r.slope == Approx( 1.0 ).margin( 1e-12 ) );
+    REQUIRE( r.intercept == Approx( 1.0 ).margin( 1e-12 ) );
+    // S = 10, var(S) = n(n-1)(2n+5)/18 = 5·4·15/18, z = (S-1)/sqrt(var).
+    const double expectedVar = 5.0 * 4.0 * 15.0 / 18.0;
+    REQUIRE( r.variance == Approx( expectedVar ).epsilon( 1e-12 ) );
+    const double expectedZ = ( 10.0 - 1.0 ) / std::sqrt( expectedVar );
+    REQUIRE( r.z == Approx( expectedZ ).epsilon( 1e-12 ) );
+    REQUIRE( r.pValue == Approx( std::erfc( expectedZ / std::sqrt( 2.0 ) ) )
+                 .epsilon( 1e-12 ) );
+    REQUIRE( r.pValue < 0.05 );
+}
+
+TEST_CASE( "Mann-Kendall handles ties with the corrected variance", "[temporal][sen]" )
+{
+    ensureApp();
+    // y = [1,1,2]: S = 0 + 1 + 1 = 2; tie group {1,1} removes 2·1·9 from the
+    // raw 3·2·11, so var = (66 − 18)/18; pairwise slopes {0, 1, 0.5} → 0.5.
+    const std::vector<float> y = { 1, 1, 2 };
+    const std::vector<double> t = { 0, 1, 2 };
+    const SenTrendResult r = mannKendallSenSlope( y, t );
+    REQUIRE( r.validCount == 3 );
+    REQUIRE( r.slope == Approx( 0.5 ).margin( 1e-12 ) );
+    // Residuals y − 0.5·t = {1, 0.5, 1} → median 1.
+    REQUIRE( r.intercept == Approx( 1.0 ).margin( 1e-12 ) );
+    REQUIRE( r.variance == Approx( 48.0 / 18.0 ).epsilon( 1e-12 ) );
+    REQUIRE( r.z == Approx( 1.0 / std::sqrt( 48.0 / 18.0 ) ).epsilon( 1e-12 ) );
+}
+
+TEST_CASE( "Sen slope is robust to an extreme outlier that drags OLS", "[temporal][sen]" )
+{
+    ensureApp();
+    // y = [1,2,3,-100]: pairwise slopes sorted are {-103, -51, -101/3, 1, 1, 1},
+    // median (−101/3 + 1)/2 = −49/3. S = 0 → z = 0, p = 1 (no significant
+    // monotonic trend), while an OLS slope would be dragged strongly negative.
+    const std::vector<float> y = { 1, 2, 3, -100 };
+    const std::vector<double> t = { 0, 1, 2, 3 };
+    const SenTrendResult r = mannKendallSenSlope( y, t );
+    REQUIRE( r.validCount == 4 );
+    REQUIRE( r.slope == Approx( -49.0 / 3.0 ).epsilon( 1e-12 ) );
+    REQUIRE( r.z == Approx( 0.0 ).margin( 1e-12 ) );
+    REQUIRE( r.pValue == 1.0 );
+}
+
+TEST_CASE( "Mann-Kendall/Sen NaN and duplicate-time contracts", "[temporal][sen]" )
+{
+    ensureApp();
+    const double qnan = std::numeric_limits<double>::quiet_NaN();
+
+    // Fewer than 3 valid observations → undefined test, NaN everywhere.
+    SenTrendResult r = mannKendallSenSlope( { 1, kNan, 3 }, { 0, 1, 2 } );
+    REQUIRE( r.validCount == 2 );
+    REQUIRE( std::isnan( r.slope ) );
+    REQUIRE( std::isnan( r.pValue ) );
+
+    // Duplicate instants: strictly-ordered-time pairs only. t = [0,0,1,2],
+    // y = [1,2,3,4] keeps 5 ordered pairs: slopes {1,1,1,1.5,2} → 1;
+    // S = 5 over those pairs; var = 4·3·13/18.
+    r = mannKendallSenSlope( { 1, 2, 3, 4 }, { 0, 0, 1, 2 } );
+    REQUIRE( r.validCount == 4 );
+    REQUIRE( r.slope == Approx( 1.0 ).margin( 1e-12 ) );
+    REQUIRE( r.intercept == Approx( 2.0 ).margin( 1e-12 ) );
+    const double expectedVar = 4.0 * 3.0 * 13.0 / 18.0;
+    REQUIRE( r.variance == Approx( expectedVar ).epsilon( 1e-12 ) );
+    const double expectedZ = ( 5.0 - 1.0 ) / std::sqrt( expectedVar );
+    REQUIRE( r.z == Approx( expectedZ ).epsilon( 1e-12 ) );
+    REQUIRE( r.pValue == Approx( std::erfc( expectedZ / std::sqrt( 2.0 ) ) )
+                 .epsilon( 1e-12 ) );
+    (void)qnan;
+}
+
 TEST_CASE( "Seasonal decomposition recovers trend and climatology", "[temporal][decompose]" )
 {
     ensureApp();
