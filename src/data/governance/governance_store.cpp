@@ -116,6 +116,10 @@ QString likeContains( const QString &raw )
                  .replace( QLatin1Char( '_' ), QLatin1String( "\\_" ) ) );
 }
 
+// Run states that no longer intentionally anchor their outputs; shared by
+// orphanResults() and entityCounts() so the two can never drift.
+#define GOV_ORPHAN_RUN_STATES "'Failed','Canceled','Interrupted'"
+
 QStringList splitRoles( const QString &joined )
 {
     QStringList out;
@@ -680,13 +684,19 @@ bool GovernanceStore::checkpointForBackup()
         return false;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
     // TRUNCATE folds the WAL into the DB file and resets the log, so the DB
-    // file alone is a consistent snapshot (issue #751: the snapshot path used
-    // to copy a hot WAL database with the log discarded). PASSIVE is the
-    // fallback for a read-only connection; if neither completes, the DB file
-    // alone is NOT safe to copy and the caller must refuse.
-    if ( m_impl->exec( "PRAGMA wal_checkpoint(TRUNCATE)" ) )
-        return true;
-    return m_impl->exec( "PRAGMA wal_checkpoint(PASSIVE)" );
+    // file alone is a consistent snapshot (issue #751). sqlite3_exec is NOT
+    // enough: the checkpoint reports blockedness in its result ROW (busy /
+    // log pages / checkpointed pages), not as an error, and a blocked or
+    // partial checkpoint leaves recent commits in the WAL. Step the statement
+    // and require busy == 0; anything else refuses the DB-alone copy. (There
+    // is deliberately no PASSIVE fallback — PASSIVE commonly completes zero
+    // frames under contention and would silently re-open the torn-copy hole.)
+    Stmt s( m_impl->db, "PRAGMA wal_checkpoint(TRUNCATE)" );
+    if ( !s )
+        return false;
+    if ( !s.stepRow() )
+        return false;
+    return s.i64( 0 ) == 0; // 0 = no reader/writer blocked the reset
 }
 
 Result<void> GovernanceStore::upsertAsset( const GovernedAsset &asset )
@@ -702,7 +712,8 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
         return Result<void>::failure( govDiag( QStringLiteral( "store.read_only" ), QStringLiteral( "store opened read-only (newer schema)" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
     QVector<QPair<QString, QString>> collisions;
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt up( m_impl->db,
             "INSERT INTO assets(" GOV_ASSET_COLS ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
@@ -770,8 +781,13 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
             // steal between sibling assets.
             {
                 StmtView owner( m_impl->cached( "SELECT asset_id FROM aliases WHERE path=?" ) );
-                owner.bind( 1, asset.canonicalSource );
-                if ( owner.stepRow() && owner.text( 0 ) != asset.assetId )
+                bool foreign = false;
+                if ( owner )
+                {
+                    owner.bind( 1, asset.canonicalSource );
+                    foreign = owner.stepRow() && owner.text( 0 ) != asset.assetId;
+                }
+                if ( foreign )
                     collisions.append( qMakePair( asset.canonicalSource, owner.text( 0 ) ) );
                 else
                 {
@@ -786,8 +802,13 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
                 if ( alias == asset.canonicalSource || alias.isEmpty() )
                     continue;
                 StmtView owner( m_impl->cached( "SELECT asset_id FROM aliases WHERE path=?" ) );
-                owner.bind( 1, alias );
-                if ( owner.stepRow() && owner.text( 0 ) != asset.assetId )
+                bool foreign = false;
+                if ( owner )
+                {
+                    owner.bind( 1, alias );
+                    foreign = owner.stepRow() && owner.text( 0 ) != asset.assetId;
+                }
+                if ( foreign )
                 {
                     collisions.append( qMakePair( alias, owner.text( 0 ) ) );
                     continue;
@@ -820,7 +841,8 @@ Result<void> GovernanceStore::removeAsset( const QString &assetId )
     if ( m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.read_only" ), QStringLiteral( "store opened read-only" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt a( m_impl->db, "DELETE FROM assets WHERE asset_id=?" );
         Stmt al( m_impl->db, "DELETE FROM aliases WHERE asset_id=?" );
@@ -970,7 +992,7 @@ GovernanceStore::EntityCounts GovernanceStore::entityCounts() const
             " (SELECT COUNT(*) FROM exports),"
             " (SELECT COUNT(*) FROM results r LEFT JOIN runs ru ON ru.run_id=r.run_id"
             "   WHERE r.run_id<>'' AND (ru.run_id IS NULL OR ru.state IN"
-            "   ('Failed','Canceled','Interrupted')))" );
+            "   (" GOV_ORPHAN_RUN_STATES ")))" );
     if ( s.stepRow() )
     {
         counts.assets = s.i64( 0 );
@@ -994,7 +1016,8 @@ Result<void> GovernanceStore::setTags( const QString &entityKind, const QString 
     if ( m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.read_only" ), QStringLiteral( "store opened read-only" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt del( m_impl->db, "DELETE FROM tags WHERE entity_kind=? AND entity_id=?" );
         Stmt ins( m_impl->db, "INSERT OR IGNORE INTO tags(entity_kind, entity_id, tag) VALUES(?,?,?)" );
@@ -1090,7 +1113,8 @@ Result<qint64> GovernanceStore::bulkTag( const QVector<QString> &entityIds, cons
     if ( tag.isEmpty() )
         return Result<qint64>::failure( govDiag( QStringLiteral( "store.empty_tag" ), QStringLiteral( "tag must not be empty" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<qint64>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     qint64 touched = 0;
     {
         Stmt ins( m_impl->db, "INSERT OR IGNORE INTO tags(entity_kind, entity_id, tag) VALUES(?,?,?)" );
@@ -1129,7 +1153,8 @@ Result<void> GovernanceStore::upsertDataset( const DatasetRecord &dataset )
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const QString idText = dataset.id.toString();
@@ -1187,7 +1212,8 @@ Result<void> GovernanceStore::removeDataset( const QString &datasetId )
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt d( m_impl->db, "DELETE FROM datasets WHERE dataset_id=?" );
         Stmt m( m_impl->db, "DELETE FROM dataset_members WHERE dataset_id=?" );
@@ -1250,7 +1276,8 @@ Result<void> GovernanceStore::upsertResult( const ResultRecord &result )
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const QString idText = result.id.toString();
@@ -1334,7 +1361,8 @@ Result<void> GovernanceStore::removeResult( const QString &resultId )
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt r( m_impl->db, "DELETE FROM results WHERE result_id=?" );
         Stmt i( m_impl->db, "DELETE FROM result_inputs WHERE result_id=?" );
@@ -1460,7 +1488,7 @@ QVector<ResultRecord> GovernanceStore::orphanResults() const
             " r.validation_notes, r.created_ms, r.updated_ms FROM results r"
             " LEFT JOIN runs ru ON ru.run_id=r.run_id"
             " WHERE r.run_id<>'' AND (ru.run_id IS NULL OR ru.state IN"
-            " ('Failed','Canceled','Interrupted'))"
+            " (" GOV_ORPHAN_RUN_STATES "))"
             " ORDER BY r.updated_ms DESC" );
     if ( !s )
         return out;
@@ -1476,7 +1504,8 @@ Result<void> GovernanceStore::upsertRun( const RunRecord &run )
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         Stmt up( m_impl->db,
@@ -1559,7 +1588,8 @@ Result<void> GovernanceStore::addRunOutputs( const QVector<QPair<QString, QStrin
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt s( m_impl->db, "INSERT OR IGNORE INTO run_outputs(run_id, asset_id) VALUES(?,?)" );
         if ( !s )
@@ -1611,7 +1641,8 @@ Result<void> GovernanceStore::upsertExperiment( const ExperimentRecord &experime
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const QString idText = experiment.id.toString();
@@ -1677,7 +1708,8 @@ Result<void> GovernanceStore::removeExperiment( const QString &experimentId )
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt e( m_impl->db, "DELETE FROM experiments WHERE experiment_id=?" );
         Stmt v( m_impl->db, "DELETE FROM experiment_variants WHERE experiment_id=?" );
@@ -1743,7 +1775,8 @@ Result<void> GovernanceStore::addLineageEdges( const QVector<LineageEdge> &edges
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         if ( replaceOutgoing )
         {
@@ -1910,7 +1943,8 @@ Result<void> GovernanceStore::upsertSmartCollection( const SmartCollectionRecord
     s.bind( 4, jsonToText( collection.header.metadata ) );
     s.bind( 5, now );
     s.bind( 6, now );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     const bool ok = s.step();
     if ( !m_impl->commit() )
         return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
@@ -1930,10 +1964,19 @@ Result<void> GovernanceStore::removeSmartCollection( const QString &collectionId
     if ( !s )
         return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ), QStringLiteral( "smart collection prepare failed" ) ) );
     s.bind( 1, collectionId );
-    m_impl->exec( "BEGIN IMMEDIATE" );
-    s.step();
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
+    const bool stepped = s.step();
     const bool removed = sqlite3_changes( m_impl->db ) > 0;
-    m_impl->commit();
+    if ( !stepped || !m_impl->commit() )
+    {
+        m_impl->exec( "ROLLBACK" );
+        return Result<void>::failure( govDiag( QStringLiteral( "store.remove_smart" ),
+                                               QStringLiteral( "smart collection remove failed: %1" )
+                                                   .arg( m_impl->lastError.isEmpty()
+                                                             ? QStringLiteral( "step failed" )
+                                                             : m_impl->lastError ) ) );
+    }
     if ( !removed )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unknown_smart" ),
                                                QStringLiteral( "no smart collection %1" ).arg( collectionId ) ) );
@@ -1995,7 +2038,8 @@ Result<void> GovernanceStore::upsertExport( const ExportRecord &record )
     s.bind( 6, jsonToText( record.header.metadata ) );
     s.bind( 7, now );
     s.bind( 8, now );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     const bool ok = s.step();
     if ( !m_impl->commit() )
         return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
@@ -2300,7 +2344,8 @@ Result<void> GovernanceStore::appendAudit( const QString &actor, const QString &
     s.bind( 4, entityKind );
     s.bind( 5, entityId );
     s.bind( 6, jsonToText( detail ) );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     const bool ok = s.step();
     if ( !m_impl->commit() )
         return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
@@ -2414,9 +2459,18 @@ Result<void> GovernanceStore::clearDocumentEntities()
         "runs", "run_outputs", "experiments", "experiment_variants", "experiment_runs",
         "smart_collections", "exports", "path_mappings", "tags",
     };
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     for ( const char *table : tables )
-        m_impl->exec( ( QStringLiteral( "DELETE FROM " ) + table ).toUtf8().constData() );
+    {
+        if ( !m_impl->exec( ( QStringLiteral( "DELETE FROM " ) + table ).toUtf8().constData() ) )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.clear" ),
+                                                   QStringLiteral( "clear failed on %1: %2" )
+                                                       .arg( table, m_impl->lastError ) ) );
+        }
+    }
     if ( !m_impl->commit() )
         return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
                                                m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
@@ -2459,9 +2513,18 @@ Result<void> GovernanceStore::clearAll()
         "experiment_variants", "experiment_runs", "lineage_edges", "smart_collections",
         "exports", "path_mappings", "audit_log",
     };
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     for ( const char *table : tables )
-        m_impl->exec( ( QStringLiteral( "DELETE FROM " ) + table ).toUtf8().constData() );
+    {
+        if ( !m_impl->exec( ( QStringLiteral( "DELETE FROM " ) + table ).toUtf8().constData() ) )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.clear" ),
+                                                   QStringLiteral( "clear failed on %1: %2" )
+                                                       .arg( table, m_impl->lastError ) ) );
+        }
+    }
     if ( !m_impl->commit() )
         return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
                                                m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )

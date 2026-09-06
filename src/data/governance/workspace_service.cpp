@@ -115,13 +115,11 @@ bool WorkspaceService::openStore( const QString &dbPath, QString *errorOut )
 {
     if ( m_store.isOpen() && m_store.meta( QStringLiteral( "db_path" ) ) != dbPath )
         m_store.close();  // path change: never bleed governed state across projects
+    const bool pathChanged = dbPath != m_storePath;
+    if ( pathChanged )
+        clearCachedDocument(); // a cached document belongs to ITS project only
     if ( !m_store.open( dbPath, errorOut ) )
     {
-        // A failed open for a DIFFERENT project must not keep this session's
-        // cached governed document alive — the next save would re-persist it
-        // into the other project's file (issue #746 cross-project bleed).
-        if ( dbPath != m_storePath )
-            clearCachedDocument();
         m_storePath = dbPath;
         return false;
     }
@@ -149,8 +147,23 @@ bool WorkspaceService::storeIntegrityOk() const
 {
     if ( !m_store.isOpen() || m_store.isReadOnly() )
         return false;
+    // A passing quick_check walks every b-tree — hundreds of ms per save at
+    // 100k entities, on the saving (GUI) thread. A positive probe is trusted
+    // for a short window (kProbeCacheMs); a failing probe is never cached.
+    // Corruption that appears inside the window still fails the store's own
+    // writes (checked COMMIT contract) and the NEXT save's probe.
+    static constexpr qint64 kProbeCacheMs = 2000;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if ( m_lastIntegrityOkMs >= 0 && now - m_lastIntegrityOkMs < kProbeCacheMs )
+        return true;
     const GovernanceDiagnostic probe = m_store.integrityCheck();
-    return probe.severity != DiagnosticSeverity::Error;
+    if ( probe.severity != DiagnosticSeverity::Error )
+    {
+        m_lastIntegrityOkMs = now;
+        return true;
+    }
+    m_lastIntegrityOkMs = -1;
+    return false;
 }
 
 QString WorkspaceService::defaultStorePathFor( const QString &projectFile )
@@ -456,8 +469,23 @@ void WorkspaceService::syncRunAnchors( const sicnu::data::DerivationRecord &reco
         run.header.name = record.workflowId.isEmpty() ? record.workflowRunId : record.workflowId;
     if ( run.finishedMs == 0 && record.completedAtUtc.isValid() )
         run.finishedMs = record.completedAtUtc.toMSecsSinceEpoch();
-    ( void ) m_store.upsertRun( run );
-    ( void ) m_store.linkRunOutput( record.workflowRunId, record.outputAssetId.toString() );
+    // Anchor write failures are surfaced through the durable audit channel —
+    // silently dropping them would recreate the exact defect class the
+    // checked-writer hardening (issue #758-1) removed from the store.
+    const auto upserted = m_store.upsertRun( run );
+    const auto linked = m_store.linkRunOutput( record.workflowRunId, record.outputAssetId.toString() );
+    if ( !upserted || !linked )
+    {
+        qWarning( "WorkspaceService: run anchor write failed for %s (upsert=%s link=%s)",
+                  qPrintable( record.workflowRunId ),
+                  upserted ? "ok" : "failed",
+                  linked ? "ok" : "failed" );
+        audit( QStringLiteral( "system" ), QStringLiteral( "run.anchor_failed" ),
+               QStringLiteral( "run" ), record.workflowRunId,
+               QJsonObject{ { QLatin1String( "upsert" ), upserted.operator bool() },
+                            { QLatin1String( "link" ), linked.operator bool() },
+                            { QLatin1String( "asset" ), record.outputAssetId.toString() } } );
+    }
 }
 
 // --- asset enrichment ----------------------------------------------------------
@@ -615,7 +643,32 @@ QVector<ResultRecord> WorkspaceService::orphanResults() const
 
 void WorkspaceService::recordRun( const RunRecord &run )
 {
-    ( void ) m_store.upsertRun( run );
+    // Mirror merge (issue #754): a lifecycle transition carries the run's
+    // identity and state, not its whole document — everything the transition
+    // did not state is preserved from the stored row, so a terminal update
+    // can never zero out started_ms or wipe definition/summary/metadata/tags
+    // (including data restored from the v3 project document).
+    RunRecord effective = run;
+    if ( const std::optional<RunRecord> existing = m_store.runById( run.id ) )
+    {
+        if ( effective.startedMs == 0 )
+            effective.startedMs = existing->startedMs;
+        if ( effective.finishedMs == 0 )
+            effective.finishedMs = existing->finishedMs;
+        if ( effective.workflowId.isEmpty() )
+            effective.workflowId = existing->workflowId;
+        if ( effective.header.name.isEmpty() )
+            effective.header.name = existing->header.name;
+        if ( effective.definition.isEmpty() )
+            effective.definition = existing->definition;
+        if ( effective.summary.isEmpty() )
+            effective.summary = existing->summary;
+        if ( effective.header.metadata.isEmpty() )
+            effective.header.metadata = existing->header.metadata;
+        if ( effective.header.tags.isEmpty() )
+            effective.header.tags = existing->header.tags;
+    }
+    ( void ) m_store.upsertRun( effective );
     emit entityChanged( QStringLiteral( "run" ), run.id );
 }
 

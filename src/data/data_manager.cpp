@@ -15,6 +15,8 @@
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTimer>
+#include <QSet>
 
 #include "internal/source_provider_registry.h"
 #include "internal/network_probe.h"
@@ -321,7 +323,12 @@ void DataManager::watchAssetSource( const QString &canonicalPath )
     return; // remote/virtual sources use validator identity, not file watching
   if ( m_watchedContentStats.contains( canonicalPath ) )
     return;
-  if ( m_watchedContentStats.size() >= m_watchLimit )
+  static const qint64 watchLimit = []() {
+    bool ok = false;
+    const qint64 fromEnv = qEnvironmentVariableIntValue( "SICNU_DATA_WATCH_LIMIT", &ok );
+    return ( ok && fromEnv > 0 ) ? fromEnv : 4096;
+  }();
+  if ( m_watchedContentStats.size() >= watchLimit )
     return; // bounded: very large catalogs fall back to stat-guarded caching
   const QFileInfo info( canonicalPath );
   m_watchedContentStats.insert( canonicalPath,
@@ -343,19 +350,69 @@ void DataManager::onSourceFileChanged( const QString &path )
   auto it = m_watchedContentStats.find( path );
   if ( it == m_watchedContentStats.end() )
     return;
-  // QFileSystemWatcher drops replaced files: re-arm the watch on every fire.
-  if ( m_contentWatcher )
-    m_contentWatcher->addPath( path );
+  // QFileSystemWatcher drops REPLACED files: re-arm the watch on every fire.
+  // addPath returns false both when the path is still watched (an in-place
+  // write never dropped it — the normal case) and when arming genuinely
+  // failed, so the authoritative check is the watcher's own file list; a
+  // path that is neither watched nor re-armable gets bounded retries
+  // (issue #749 follow-up review).
+  if ( m_contentWatcher && !m_contentWatcher->files().contains( path ) )
+  {
+    if ( !m_contentWatcher->addPath( path ) || !QFileInfo( path ).isFile() )
+    {
+      scheduleWatchRearm( path );
+      return;
+    }
+  }
   if ( !QFileInfo( path ).isFile() )
-    return; // transient replacement window; the next change event re-checks
+  {
+    scheduleWatchRearm( path );
+    return;
+  }
   const QFileInfo info( path );
   const std::pair<qint64, qint64> observed{ info.size(), info.lastModified().toMSecsSinceEpoch() };
   if ( observed == it.value() )
     return; // redundant fire-up: identity unchanged
   it.value() = observed;
-  const auto snapshot = findByPath( path );
-  if ( snapshot )
-    notifyExternalContentChange( snapshot->id() );
+  // Deferred so a synchronous assetChanged handler cannot re-enter (and
+  // mutate) the QFileSystemWatcher mid-emission.
+  if ( const auto snapshot = findByPath( path ) )
+  {
+    const AssetId id = snapshot->id();
+    QMetaObject::invokeMethod(
+      this,
+      [ this, id ]() { notifyExternalContentChange( id ); },
+      Qt::QueuedConnection );
+  }
+}
+
+void DataManager::scheduleWatchRearm( const QString &path )
+{
+  const int attempt = m_watchRearmAttempts.value( path, 0 ) + 1;
+  m_watchRearmAttempts.insert( path, attempt );
+  if ( attempt > 60 )
+  {
+    // ~1 minute without the file coming back: give up and drop the stale
+    // entry so the bounded watch budget is not burned on a dead path (the
+    // asset re-watches on its next registration/relocation).
+    m_watchRearmAttempts.remove( path );
+    unwatchAssetSource( path );
+    return;
+  }
+  if ( !m_watchRearmTimer )
+  {
+    m_watchRearmTimer = new QTimer( this );
+    m_watchRearmTimer->setSingleShot( true );
+    connect( m_watchRearmTimer, &QTimer::timeout, this, [ this ]() {
+      const QStringList pending = m_watchRearmPending.values();
+      m_watchRearmPending.clear();
+      for ( const QString &path : pending )
+        onSourceFileChanged( path );
+    } );
+  }
+  m_watchRearmPending.insert( path );
+  if ( !m_watchRearmTimer->isActive() )
+    m_watchRearmTimer->start( 1000 );
 }
 
 RegisterResult DataManager::registerSource( const RegisterRequest &request )

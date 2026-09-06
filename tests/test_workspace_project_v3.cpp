@@ -545,3 +545,58 @@ TEST_CASE( "Newer-schema store surfaces restore failure and the document wins on
 
   context->workspaceService().closeStore();
 }
+
+TEST_CASE( "Save with an unusable store falls back to the cached document loudly (#746)",
+           "[project][workspace_v3][fault][issue746][stale_warning]" )
+{
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString projectPath = dir.filePath( QStringLiteral( "corruptopen.qgs" ) );
+  const QString dbPath = dir.filePath( QStringLiteral( "corruptopen.governance.db" ) );
+
+  sicnu::data::Result<std::unique_ptr<sicnu::app::ProjectContext>> created =
+      sicnu::app::ProjectContext::createHeadless();
+  REQUIRE( created.operator bool() );
+  std::unique_ptr<sicnu::app::ProjectContext> context = created.take();
+  REQUIRE( context->openWorkspaceStore( projectPath ) );
+  REQUIRE( !context->workspaceService()
+                .createDataset( QStringLiteral( "corruptopen-ds" ), DatasetKind::Training )
+                .isNull() );
+
+  sicnu::app::DataProjectSerializer serializer;
+  sicnu::data::Result<void> writeResult = sicnu::data::Result<void>::success();
+  QObject signalReceiver;
+  QObject::connect( project, &QgsProject::writeProject, &signalReceiver,
+                    [&]( QDomDocument &document ) {
+                      writeResult = serializer.write( document, *context );
+                    } );
+
+  // First save establishes the v3 document cache.
+  REQUIRE( project->write( projectPath ) );
+
+  // The store becomes unusable mid-session: closing it simulates the state
+  // after a fatal store failure (the corrupt-while-open variant is
+  // best-effort — SQLite's page cache serves small DBs from cache, so its
+  // probe cannot fail deterministically). The save must fall back to the
+  // cached document AND say so — never a silent success over a dead store.
+  context->workspaceService().closeStore();
+
+  REQUIRE( project->write( projectPath ) );
+  REQUIRE( writeResult.operator bool() );
+  bool staleWarning = false;
+  for ( const sicnu::data::Diagnostic &d : writeResult.diagnostics() )
+    staleWarning |= d.code == QLatin1String( "workspace.stale_document_repersisted" );
+  REQUIRE( staleWarning );
+
+  QFile saved( projectPath );
+  REQUIRE( saved.open( QIODevice::ReadOnly ) );
+  const QString xml = QString::fromUtf8( saved.readAll() );
+  saved.close();
+  REQUIRE( xml.contains( QStringLiteral( "version=\"3\"" ) ) );
+  REQUIRE( xml.contains( QStringLiteral( "corruptopen-ds" ) ) );
+
+  context->workspaceService().closeStore();
+}

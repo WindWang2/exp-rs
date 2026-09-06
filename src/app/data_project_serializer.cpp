@@ -313,10 +313,24 @@ DataProjectSerializer::write(QDomDocument &document,
   // Governed workspace state (v3): datasets/results/runs/experiments/smart
   // collections/exports/mappings. One JSON document, one text node — mirrors
   // the <derivation>/<recipe>/<descriptor> payload pattern above.
+  QVector<data::Diagnostic> writeDiagnostics;
   if (writeV3) {
     const QJsonObject workspaceDocument = liveStore
         ? workspaceService.toProjectJson()
         : workspaceService.cachedProjectJson();
+    if (!liveStore) {
+      // The store could not be serialized from (closed, read-only, or
+      // corrupt): the save re-persists the LAST KNOWN document, which may
+      // not include governed changes made after it was cached. Loud, not
+      // silent (issue #746/#752 follow-up).
+      writeDiagnostics.append(data::Diagnostic{
+          QStringLiteral("workspace.stale_document_repersisted"),
+          QStringLiteral("governance store unavailable; re-persisting the "
+                         "last known governed document — governed changes "
+                         "made since the store became unavailable are not in "
+                         "this save"),
+          data::DiagnosticSeverity::Warning});
+    }
     QDomElement workspaceElement =
         document.createElement(QStringLiteral("workspace"));
     workspaceElement.setAttribute(QStringLiteral("schemaVersion"),
@@ -330,6 +344,8 @@ DataProjectSerializer::write(QDomDocument &document,
   }
 
   root.appendChild(extension);
+  if (!writeDiagnostics.isEmpty())
+    return data::Result<void>::success(std::move(writeDiagnostics));
   return data::Result<void>::success();
 }
 
@@ -680,6 +696,10 @@ data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
   if (isV3) {
     const QDomElement workspaceElement =
         extension.firstChildElement(QStringLiteral("workspace"));
+    // The v3 marker alone pins the session: even when the block is missing
+    // or unparseable, a later save must not silently rewrite the project as
+    // v1 (issue #746 defense-in-depth).
+    workspace.markV3Seen();
     if (!workspaceElement.isNull()) {
       const QDomElement documentElement =
           workspaceElement.firstChildElement(QStringLiteral("document"));

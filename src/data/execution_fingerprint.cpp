@@ -500,6 +500,24 @@ ExecutionResultCache::lookupExecution( const ExecutionFingerprint &fp )
       const auto pooled = m_persistent->lookupExecution( fp.toHex() );
       if ( pooled )
       {
+        // Input-byte trust gate (issue #749, pool tier): the pool verifies
+        // its OBJECT digests but never saw the inputs. A pooled entry whose
+        // recorded input stats no longer match the filesystem (chained
+        // intermediate or registered input rewritten out-of-band, watcher
+        // missed) must demote to a miss — a restart must not resurrect a
+        // result computed from foreign bytes.
+        for ( auto inputIt = pooled->inputSizes.constBegin();
+              inputIt != pooled->inputSizes.constEnd(); ++inputIt )
+        {
+          const QFileInfo inputInfo( inputIt.key() );
+          if ( !inputInfo.isFile() || inputInfo.size() != inputIt.value() )
+            return std::nullopt;
+          const auto msecsIt = pooled->inputMsecs.constFind( inputIt.key() );
+          if ( msecsIt != pooled->inputMsecs.constEnd()
+               && inputInfo.lastModified().toMSecsSinceEpoch() != msecsIt.value() )
+            return std::nullopt;
+        }
+
         CachedExecution reconstructed;
         reconstructed.declaredOutputPath = pooled->declaredOriginal;
         reconstructed.resultPayload = QJsonDocument::fromJson( pooled->payloadJson );

@@ -90,7 +90,9 @@ SnapshotReport SnapshotService::createSnapshot( const QString &projectFile, cons
             {
                 // Refuse rather than copy a database whose recent writes may
                 // still live only in the WAL (snapshot would lose them, and a
-                // concurrent writer could tear the copy).
+                // concurrent writer could tear the copy). A read-only store
+                // cannot run TRUNCATE either — snapshots need a writable
+                // governance store by contract.
                 report.error = QStringLiteral(
                     "governance store WAL could not be checkpointed; refusing "
                     "an inconsistent snapshot (retry with no active writers)" );
@@ -98,16 +100,10 @@ SnapshotReport SnapshotService::createSnapshot( const QString &projectFile, cons
                 return report;
             }
             QFile::copy( dbPath, QDir( destination ).filePath( QFileInfo( dbPath ).fileName() ) );
-            // After a TRUNCATE checkpoint the log is folded into the main DB
-            // file. Sidecars are copied only defensively if a concurrent
-            // writer recreated them between checkpoint and copy.
-            const QFileInfo dbInfo( dbPath );
-            const QString walPath = dbPath + QStringLiteral( "-wal" );
-            const QString shmPath = dbPath + QStringLiteral( "-shm" );
-            if ( QFileInfo::exists( walPath ) )
-                QFile::copy( walPath, QDir( destination ).filePath( dbInfo.fileName() + QStringLiteral( "-wal" ) ) );
-            if ( QFileInfo::exists( shmPath ) )
-                QFile::copy( shmPath, QDir( destination ).filePath( dbInfo.fileName() + QStringLiteral( "-shm" ) ) );
+            // After a successful TRUNCATE the log is folded into the main DB
+            // file and reset — copying the DB file alone is the consistency
+            // contract (issue #751). The -shm sidecar is never copied:
+            // SQLite rebuilds and validates it, and it mutates under readers.
         }
     }
 

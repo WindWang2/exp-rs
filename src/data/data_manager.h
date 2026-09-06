@@ -15,8 +15,10 @@
 
 #include <QHash>
 #include <QPair>
+#include <QSet>
 
 class QFileSystemWatcher;
+class QTimer;
 
 namespace sicnu::data
 {
@@ -382,7 +384,12 @@ class DataManager : public QObject
 
     QFileSystemWatcher *m_contentWatcher = nullptr;
     QHash<QString, QPair<qint64, qint64>> m_watchedContentStats; // path → {size, mtime}
-    qint64 m_watchLimit = 4096;
+    /// Bounded re-arm bookkeeping for watches that failed to re-arm after an
+    /// atomic replacement (1 s retries, ~1 min before the entry is dropped).
+    QTimer *m_watchRearmTimer = nullptr;
+    QSet<QString> m_watchRearmPending;
+    QHash<QString, int> m_watchRearmAttempts;
+    void scheduleWatchRearm( const QString &path );
 };
 
 } // namespace sicnu::data

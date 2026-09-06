@@ -132,6 +132,7 @@ void TaskCenter::shutdown()
             m_taskFingerprints.remove( id );
             m_taskFingerprintParams.remove( id );
             m_taskChainedEdges.remove( id );
+            m_taskRegisteredInputStats.remove( id );
             updatePipelineForTaskLocked( id );
             queueTaskUpdatedLocked( id );
             toFinalize.append( id );
@@ -1697,6 +1698,7 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         m_taskFingerprints.remove( taskId );
         m_taskFingerprintParams.remove( taskId );
         m_taskChainedEdges.remove( taskId );
+        m_taskRegisteredInputStats.remove( taskId );
         m_tasks[taskId].status = TaskStatus::Failed;
         m_tasks[taskId].errorMessage = error;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
@@ -1745,6 +1747,7 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
         m_taskFingerprints.remove( taskId );
         m_taskFingerprintParams.remove( taskId );
         m_taskChainedEdges.remove( taskId );
+        m_taskRegisteredInputStats.remove( taskId );
         m_tasks[taskId].status = TaskStatus::Canceled;
         m_tasks[taskId].errorMessage = reason;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
@@ -2028,6 +2031,7 @@ void TaskCenter::clearCompletedTasks()
             m_taskFingerprints.remove( id );
             m_taskFingerprintParams.remove( id );
             m_taskChainedEdges.remove( id );
+            m_taskRegisteredInputStats.remove( id );
         }
         for ( auto it = m_taskByJobId.begin(); it != m_taskByJobId.end(); )
         {
@@ -2539,6 +2543,7 @@ void TaskCenter::verifyDispatchFingerprintLocked( long taskId )
         m_taskFingerprints.remove( taskId );
         m_taskFingerprintParams.remove( taskId );
         m_taskChainedEdges.remove( taskId );
+        m_taskRegisteredInputStats.remove( taskId );
         return;
     }
     // Re-verify each chained producer edge: the producer's stamped payload
@@ -2565,6 +2570,7 @@ void TaskCenter::verifyDispatchFingerprintLocked( long taskId )
                 m_taskFingerprints.remove( taskId );
                 m_taskFingerprintParams.remove( taskId );
                 m_taskChainedEdges.remove( taskId );
+                m_taskRegisteredInputStats.remove( taskId );
                 return;
             }
         }
@@ -2836,7 +2842,8 @@ void TaskCenter::storeExecutionResultLocked( long taskId )
     m_taskFingerprintParams.remove( taskId );
     const QVector<ChainedEdge> edges = m_taskChainedEdges.value( taskId );
     m_taskChainedEdges.remove( taskId );
-    // Registered-input stat bindings captured at submission (issue #749).
+    // Registered-input stat bindings captured at submission (issue #749) —
+    // read BEFORE the cleanup removes them.
     const QPair<QMap<QString, qint64>, QMap<QString, qint64>> registeredStats =
         m_taskRegisteredInputStats.value( taskId );
     m_taskRegisteredInputStats.remove( taskId );

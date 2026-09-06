@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <thread>
+#include <algorithm>
 #include <vector>
 
 #include <gdal.h>
@@ -559,4 +560,74 @@ TEST_CASE( "ImportCenter cancel stops registration at a batch boundary",
 
     REQUIRE( report.cancelled );
     REQUIRE( report.registered < kFiles );
+}
+
+TEST_CASE( "Run mirror records truthful states and preserves run documents (#754)",
+           "[workspace][runs][issue754]" )
+{
+    Fixture fx;
+
+    // The workflow-runtime observer records the run while it is Running.
+    RunRecord running;
+    running.id = QStringLiteral( "run-42" );
+    running.workflowId = QStringLiteral( "cache_e2e" );
+    running.state = QStringLiteral( "Running" );
+    running.startedMs = 1234567;
+    running.definition = QJsonObject{ { QLatin1String( "steps" ), 2 } };
+    running.header.tags = QStringList{ QStringLiteral( "nightly" ) };
+    fx.service.recordRun( running );
+
+    // Terminal transition: real state, no start stamp — the merge must keep
+    // the recorded startedMs, the definition and the tags, and store the
+    // truthful terminal state.
+    RunRecord finished;
+    finished.id = QStringLiteral( "run-42" );
+    finished.state = QStringLiteral( "Failed" );
+    finished.finishedMs = 1239999;
+    fx.service.recordRun( finished );
+
+    const RunRecord stored = fx.service.run( QStringLiteral( "run-42" ) ).value();
+    REQUIRE( stored.state == QLatin1String( "Failed" ) );
+    REQUIRE( stored.startedMs == 1234567 );
+    REQUIRE( stored.finishedMs == 1239999 );
+    REQUIRE( stored.definition == QJsonObject{ { QLatin1String( "steps" ), 2 } } );
+    REQUIRE( stored.header.tags.contains( QLatin1String( "nightly" ) ) );
+
+    // A brand-new anchor (mirror path) starts Unknown, never fabricated
+    // Completed.
+    RunRecord anchor;
+    anchor.id = QStringLiteral( "run-43" );
+    anchor.state = QStringLiteral( "Unknown" );
+    fx.service.recordRun( anchor );
+    REQUIRE( fx.service.run( QStringLiteral( "run-43" ) )->state == QLatin1String( "Unknown" ) );
+
+    // A result anchored only by a FAILED run is an orphan (its partial
+    // output was not an intentional product). The results table anchors via
+    // producer JSON's runId.
+    ResultRecord partial;
+    partial.id = ResultId::generate();
+    partial.semanticType = ResultSemanticType::Classification;
+    partial.header.name = QStringLiteral( "partial" );
+    partial.producer = QJsonObject{ { QLatin1String( "operator" ), QStringLiteral( "rs:test" ) },
+                                    { QLatin1String( "runId" ), QLatin1String( "run-42" ) } };
+    REQUIRE( fx.service.store().upsertResult( partial ).operator bool() );
+    const QVector<ResultRecord> orphans = fx.service.orphanResults();
+    const bool failedRunResultIsOrphan =
+        std::any_of( orphans.cbegin(), orphans.cend(),
+                     [ & ]( const ResultRecord &r ) { return r.id == partial.id; } );
+    REQUIRE( failedRunResultIsOrphan );
+
+    // The same result under a Completed run is NOT an orphan.
+    RunRecord done;
+    done.id = QStringLiteral( "run-44" );
+    done.state = QStringLiteral( "Completed" );
+    fx.service.recordRun( done );
+    ResultRecord intentional;
+    intentional.id = ResultId::generate();
+    intentional.header.name = QStringLiteral( "intentional" );
+    intentional.producer = QJsonObject{ { QLatin1String( "runId" ), QLatin1String( "run-44" ) } };
+    REQUIRE( fx.service.store().upsertResult( intentional ).operator bool() );
+    const QVector<ResultRecord> orphansAfter = fx.service.orphanResults();
+    REQUIRE( std::none_of( orphansAfter.cbegin(), orphansAfter.cend(),
+                           [ & ]( const ResultRecord &r ) { return r.id == intentional.id; } ) );
 }

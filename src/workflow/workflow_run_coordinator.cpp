@@ -35,24 +35,44 @@ qint64 resumeDigestBudgetBytes()
     return budget;
 }
 
-/// Records the completion identity of a step's produced output: the stat
-/// stamp is the minimum proof; the content digest is added when the output
-/// fits the verification budget. A Completed step's checkpoint is only
-/// trustworthy at resume when the on-disk file still matches this identity.
-void stampCompletionIdentity( StepPlan &plan, const QString &outputPath )
+/// Completion identity of a step's produced output: the stat stamp is the
+/// minimum proof; the content digest is added when the output fits the
+/// verification budget.
+struct CompletionIdentity
+{
+    long long sizeBytes = 0;
+    long long mtimeMs = 0;
+    std::string digest;
+};
+
+/// Computes the identity for @a outputPath. Deliberately lock-free: the
+/// digest can read up to the verification budget, and onTaskUpdated folds
+/// under the coordinator mutex — hashing there would stall every tracked run
+/// (review P1). The caller applies the result to the plan under the lock.
+std::optional<CompletionIdentity> computeCompletionIdentity( const QString &outputPath )
 {
     const QFileInfo info( outputPath );
     if ( !info.isFile() )
-        return;
-    plan.outputSizeBytes = info.size();
-    plan.outputMtimeMs = info.lastModified().toMSecsSinceEpoch();
+        return std::nullopt;
+    CompletionIdentity identity;
+    identity.sizeBytes = info.size();
+    identity.mtimeMs = info.lastModified().toMSecsSinceEpoch();
     if ( info.size() > 0 && info.size() <= resumeDigestBudgetBytes() )
     {
         QString digestError;
-        plan.outputDigest = sicnu::data::artifactContentDigest( outputPath, &digestError ).toStdString();
+        identity.digest = sicnu::data::artifactContentDigest( outputPath, &digestError ).toStdString();
         if ( !digestError.isEmpty() )
-            plan.outputDigest.clear();
+            identity.digest.clear();
     }
+    return identity;
+}
+
+/// Applies a pre-computed identity to @a plan (under the coordinator mutex).
+void stampCompletionIdentity( StepPlan &plan, const CompletionIdentity &identity )
+{
+    plan.outputSizeBytes = identity.sizeBytes;
+    plan.outputMtimeMs = identity.mtimeMs;
+    plan.outputDigest = identity.digest;
 }
 
 QString stepStatusForTaskStatus( sicnu::TaskStatus status )
@@ -155,22 +175,24 @@ QString WorkflowRunCoordinator::checkpointPathFor( const std::string &runId ) co
     return checkpointPathLocked( runId );
 }
 
-void WorkflowRunCoordinator::setRunStateObserver( RunStateObserver observer )
-{
-    std::lock_guard<std::mutex> lock( m_mutex );
-    m_runStateObserver = std::move( observer );
-}
-
 void WorkflowRunCoordinator::notifyRunStateLocked( const WorkflowRun &run,
                                                    qint64 startedMs, qint64 finishedMs )
 {
-    if ( !m_runStateObserver )
-        return;
-    const QString state =
-        QString::fromStdString( workflowRunStateToString( run.state() ) );
-    m_runStateObserver( QString::fromStdString( run.runId() ),
-                        QString::fromStdString( run.workflowId() ),
-                        state, startedMs, finishedMs );
+    qint64 effectiveStart = startedMs;
+    if ( effectiveStart <= 0 )
+    {
+        // The run's creation stamp is the truthful start when the caller has
+        // no better one (terminal/Interrupted transitions): never mirror a
+        // zeroed started_ms over the value recorded at start (issue #754).
+        const QDateTime createdAt =
+            QDateTime::fromString( QString::fromStdString( run.createdAt() ), Qt::ISODate );
+        if ( createdAt.isValid() )
+            effectiveStart = createdAt.toMSecsSinceEpoch();
+    }
+    emit runStateChanged( QString::fromStdString( run.runId() ),
+                          QString::fromStdString( run.workflowId() ),
+                          QString::fromStdString( workflowRunStateToString( run.state() ) ),
+                          effectiveStart, finishedMs );
 }
 
 void WorkflowRunCoordinator::persistRunLocked( WorkflowRun &run )
@@ -333,6 +355,12 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     if ( info.pipelineId < 0 || info.stepId.isEmpty() )
         return;
 
+    // Hash OUTSIDE the fold lock (review P1): the digest may read up to the
+    // verification budget, and this fold runs under m_mutex.
+    std::optional<CompletionIdentity> completionIdentity;
+    if ( info.status == sicnu::TaskStatus::Completed && !info.outputLayerPath.isEmpty() )
+        completionIdentity = computeCompletionIdentity( info.outputLayerPath );
+
     // The whole fold runs under m_mutex: resumeRun swaps the mapped run
     // object under the same lock, so a transition either lands entirely
     // before the swap (visible to its merge) or entirely after (folded into
@@ -369,7 +397,8 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
         {
             plan->outputLayerPath = info.outputLayerPath.toStdString();
             run->setArtifact( stepKey, plan->outputLayerPath );
-            stampCompletionIdentity( *plan, info.outputLayerPath );
+            if ( completionIdentity )
+                stampCompletionIdentity( *plan, *completionIdentity );
         }
     }
     else if ( info.status == sicnu::TaskStatus::Failed )
@@ -377,7 +406,6 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
         plan->errorMessage = info.errorMessage.toStdString();
     }
     run->updateStepPlan( *plan );
-
     persistRunLocked( *run );
 
     // Terminal roll-up when every step plan reached a terminal status.
@@ -610,13 +638,17 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
         if ( plan.outputSizeBytes != outputInfo.size()
              || plan.outputMtimeMs != outputInfo.lastModified().toMSecsSinceEpoch() )
             continue;
-        if ( !plan.outputDigest.empty() && plan.outputSizeBytes <= resumeDigestBudgetBytes() )
+        if ( !plan.outputDigest.empty() )
         {
+            // A recorded digest MUST re-verify: an unreadable file, a digest
+            // error, or any budget change between stamp and resume demotes to
+            // re-execution — never a stat-only pass on bytes a digest was
+            // supposed to vouch for (fail-closed, issue #750).
             QString digestError;
             const QString actualDigest =
                 sicnu::data::artifactContentDigest( QString::fromStdString( plan.outputLayerPath ),
                                                     &digestError );
-            if ( digestError.isEmpty() && actualDigest.toStdString() != plan.outputDigest )
+            if ( !digestError.isEmpty() || actualDigest.toStdString() != plan.outputDigest )
                 continue;
         }
         completedResults[plan.stepId] = { plan.resultPayload, plan.outputLayerPath };
@@ -767,7 +799,19 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
                             {
                                 plan->outputLayerPath = info.outputLayerPath.toStdString();
                                 run->setArtifact( fresh.stepId, plan->outputLayerPath );
-                                stampCompletionIdentity( *plan, info.outputLayerPath );
+                                // Missed-window fold (rare path): this runs
+                                // inside the swap's m_mutex, so only the cheap
+                                // stat stamp lands here — hashing would stall
+                                // all coordinator traffic. Digest-bearing
+                                // identity is stamped by the normal onTaskUpdated
+                                // fold; a stat-only checkpoint still fails the
+                                // resume gate on any byte drift it can see.
+                                const QFileInfo stamped( info.outputLayerPath );
+                                if ( stamped.isFile() )
+                                {
+                                    plan->outputSizeBytes = stamped.size();
+                                    plan->outputMtimeMs = stamped.lastModified().toMSecsSinceEpoch();
+                                }
                             }
                         }
                         else if ( plan->status != "Completed" )

@@ -171,6 +171,10 @@ class WorkspaceService : public QObject
     /// project transitions (clearProject) so governed state cached for one
     /// project can never bleed into another project's file.
     void clearCachedDocument();
+    /// Records that the project file carried a v3 marker even when its
+    /// workspace block was missing or unparseable (defense-in-depth for the
+    /// downgrade guard: such a session must not silently save as v1).
+    void markV3Seen() { m_v3Seen = true; }
     /// The last serialized (or restored) governed document.
     QJsonObject cachedProjectJson() const { return m_cachedProjectJson; }
     /// Serializes the governed (non-asset) workspace state for the v3 DOM block.
@@ -202,6 +206,9 @@ class WorkspaceService : public QObject
     /// Set when a v3 governed document was read or written in this session;
     /// cleared with the cache on project transitions.
     mutable bool m_v3Seen = false;
+    /// Epoch ms of the last PASSING integrity probe (-1 = none/stale); lets
+    /// storeIntegrityOk throttle the per-save quick_check walk.
+    mutable qint64 m_lastIntegrityOkMs = -1;
     sicnu::data::DataManager *m_dataManager = nullptr;
     QMetaObject::Connection m_assetAddedConn;
     QMetaObject::Connection m_assetChangedConn;
