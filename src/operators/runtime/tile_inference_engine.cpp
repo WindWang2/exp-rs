@@ -4,11 +4,15 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 
+#include "rs_classification_utils.h"
+
 #include <opencv2/imgproc.hpp>
 
 #include <cstring>
 #include <map>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QString>
 
 #include <algorithm>
@@ -238,6 +242,56 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   }
   const std::string uncertainty = uncertaintyMethod( m_model );
 
+  // Platform 4.0 derived output modes. Conflicts fail loudly BEFORE any
+  // compute: derived modes collapse head 0's class planes, so multi-head
+  // models and uncertainty bands (which need the full class stack on disk)
+  // refuse them.
+  const RasterOutputMode mode = options.outputMode != RasterOutputMode::Probability
+                                  ? options.outputMode
+                                  : rasterOutputMode( m_model );
+  int writeBands = 0;      // resolved when the writer is created
+  int writeType = 6;       // GDT_Float32; Labels/Mask write Byte/UInt16
+  float writeNoData = std::numeric_limits<float>::quiet_NaN();
+  if ( mode != RasterOutputMode::Probability )
+  {
+    if ( !uncertainty.empty() )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "output.uncertainty requires the full probability stack — "
+                             "remove output.format or output.uncertainty" );
+    if ( m_model.output.tensorNames.size() > 1 )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "derived output.format applies to single-head models; this "
+                             "manifest declares " + std::to_string( m_model.output.tensorNames.size() )
+                               + " tensor heads" );
+    if ( mode == RasterOutputMode::Labels && m_model.postprocess.maskThreshold >= 0.0 )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "postprocess.mask_threshold is meaningless with output.format=labels "
+                             "(argmax never thresholds) — remove one of the two" );
+    switch ( mode )
+    {
+      case RasterOutputMode::Labels:
+      {
+        const int classCount = static_cast<int>( m_model.output.classes.size() );
+        writeBands = 1;
+        writeType = classCount <= 255 ? /*GDT_Byte*/ 1 : /*GDT_UInt16*/ 2;
+        writeNoData = classCount <= 255 ? 255.0f : 65535.0f;
+        break;
+      }
+      case RasterOutputMode::Mask:
+        writeBands = 1;
+        writeType = /*GDT_Byte*/ 1;
+        writeNoData = 255.0f;
+        break;
+      case RasterOutputMode::Confidence:
+        writeBands = 1;
+        writeType = /*GDT_Float32*/ 6;
+        writeNoData = std::numeric_limits<float>::quiet_NaN();
+        break;
+      case RasterOutputMode::Probability:
+        break; // unreachable: handled above
+    }
+  }
+
   GdalDatasetWrapper ds;
   if ( !ds.open( QString::fromStdString( inputPath ) ) )
     throw RSOperatorError( ErrorCode::GdalError, "failed to open input raster: " + inputPath );
@@ -361,6 +415,9 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   std::vector<CoreTile> deferredNoData;
 
   std::unique_ptr<GdalStreamingOutput> writer;
+  // Staging path for the atomic publish (assigned when the writer is created;
+  // empty until then — the publish step runs only on full success).
+  QString stagePath;
   // Any failure after the writer exists must not leave a truncated GeoTIFF at
   // the caller's output path looking like a result (#647): the catch below
   // abandons the writer so its destructor removes the partial file.
@@ -386,12 +443,14 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       return;
     for ( const CoreTile &dt : deferredNoData )
     {
-      cv::Mat nanPlane( dt.h, dt.w, CV_32FC1, cv::Scalar( std::numeric_limits<float>::quiet_NaN() ) );
+      // NoData fill uses the WRITER's sentinel (NaN for float stacks, 255/65535
+      // for derived label/mask rasters — a NaN bit-cast into Byte is garbage).
+      cv::Mat nodataPlane( dt.h, dt.w, CV_32FC1, cv::Scalar( writeNoData ) );
       for ( int c = 0; c < stats.outBands; ++c )
       {
         const GdalBlockStream::Tile writeTile{ dt.x, dt.y, dt.w, dt.h, 0, dt.w, dt.h,
                                                currentTileIndex, totalTiles };
-        if ( !writer->writeTile( c + 1, writeTile, nanPlane.ptr<float>() ) )
+        if ( !writer->writeTile( c + 1, writeTile, nodataPlane.ptr<float>() ) )
           throw RSOperatorError( ErrorCode::FileNotWritable,
                                  "failed to write output tile at ("
                                    + std::to_string( dt.x ) + ", " + std::to_string( dt.y ) + ")" );
@@ -584,13 +643,22 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
 
     if ( !writer )
     {
-      writer = std::make_unique<GdalStreamingOutput>( QString::fromStdString( outputPath ),
-                                                      rasterW, rasterH, totalBands, /*GDT_Float32*/ 6,
+      // Atomic publication (Platform 4.0): the streaming writer stages into a
+      // same-directory temp file; on success it is renamed onto the caller's
+      // path, so the output path only ever holds a COMPLETE raster — a crash
+      // or failure leaves no truncated file that could look like a result.
+      const QFileInfo outFi( QString::fromStdString( outputPath ) );
+      stagePath = QString::fromStdString( outputPath ) + QStringLiteral( ".tmp~" );
+      QDir().mkpath( outFi.absolutePath() );
+      QFile::remove( stagePath );
+      const int writerBands = mode == RasterOutputMode::Probability ? totalBands : writeBands;
+      writer = std::make_unique<GdalStreamingOutput>( stagePath,
+                                                      rasterW, rasterH, writerBands, writeType,
                                                       geoTransform, projection );
       if ( !writer->isOpen() )
         throw RSOperatorError( ErrorCode::FileNotWritable, "failed to create output raster: " + outputPath );
-      writer->setNoDataValue( std::numeric_limits<double>::quiet_NaN() );
-      stats.outBands = totalBands;
+      writer->setNoDataValue( static_cast<double>( writeNoData ) );
+      stats.outBands = writerBands;
       stats.headChannels = headChannelList;
       if ( uncertaintyHeadIndex >= 0 )
         stats.headChannels[static_cast<std::size_t>( uncertaintyHeadIndex )] += 1;
@@ -607,19 +675,46 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
         }
         if ( uncertaintyHeadIndex >= 0 )
           layout += QString( ",uncertainty:%1" ).arg( QString::fromStdString( uncertainty ) );
+        if ( mode == RasterOutputMode::Labels )
+        {
+          layout = QStringLiteral( "labels:1" );
+          // Deterministic palette (analysis-layer convention, ADR 0061) so
+          // label rasters render meaningfully without a lookup sidecar.
+          QString palette;
+          QString names;
+          for ( int classId = 0; classId < static_cast<int>( m_model.output.classes.size() ); ++classId )
+          {
+            const QColor color = rsSynthesizedClassColor( classId );
+            if ( classId )
+            {
+              palette += QLatin1Char( ';' );
+              names += QLatin1Char( ';' );
+            }
+            palette += QString( "%1:%2,%3,%4" ).arg( classId ).arg( color.red() )
+                         .arg( color.green() ).arg( color.blue() );
+            names += QString::fromStdString( m_model.output.classes[static_cast<std::size_t>( classId )] );
+          }
+          writer->setMetadataItem( QStringLiteral( "SICNU_CLASS_PALETTE" ), palette );
+          writer->setMetadataItem( QStringLiteral( "SICNU_CLASS_NAMES" ), names );
+        }
         writer->setMetadataItem( QStringLiteral( "SICNU_OUTPUT_HEADS" ), layout );
       }
     }
-    else if ( totalBands != stats.outBands )
+    else if ( mode == RasterOutputMode::Probability && totalBands != stats.outBands )
     {
       throw RSOperatorError( ErrorCode::ComputationError,
                              "model output channel count changed mid-run (" + std::to_string( stats.outBands )
-                               + " → " + std::to_string( totalBands ) + ")" );
+                               + " → " + std::to_string( totalBands) + ")" );
     }
 
     // The writer exists now, so NoData tiles deferred by earlier all-nodata
     // batches can go straight to disk.
     flushDeferredNoData( currentTileIndex );
+
+    // Per-tile class planes of head 0, collected for the derived output
+    // modes (labels/mask/confidence) and written as ONE band per tile.
+    std::vector<std::vector<cv::Mat>> derivedPlanes(
+      batchMats.size() );
 
     int bandOffset = 0;
     for ( std::size_t h = 0; h < headOutputs.size(); ++h )
@@ -686,7 +781,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           cv::Mat thresholded;
           if ( isUncertaintyHead )
             headPlanes.push_back( plane );
-          if ( m_model.postprocess.maskThreshold >= 0.0 )
+          if ( mode == RasterOutputMode::Probability && m_model.postprocess.maskThreshold >= 0.0 )
           {
             const float thr = static_cast<float>( m_model.postprocess.maskThreshold );
             cv::Mat mask = plane >= thr; // NaN ≥ thr is false → 0, restored below
@@ -705,11 +800,79 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                 outRow[col] = std::numeric_limits<float>::quiet_NaN();
             }
           }
+          if ( mode == RasterOutputMode::Probability )
+          {
+            const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
+                                                   currentTileIndex, totalTiles };
+            if ( !writer->writeTile( bandOffset + c + 1, writeTile, plane.ptr<float>() ) )
+              throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write output tile at ("
+                                     + std::to_string( bt.x ) + ", " + std::to_string( bt.y ) + ")" );
+          }
+          else if ( h == 0 )
+          {
+            // Derived modes keep the class planes in memory; ONE derived band
+            // is written after the channel loop below.
+            derivedPlanes[bi].push_back( std::move( plane ) );
+          }
+        }
+        if ( mode != RasterOutputMode::Probability && h == 0 )
+        {
+          // Argmax/threshold derivation (Platform 4.0): collapse the class
+          // planes of head 0 into one band. Invalid (NaN-restored) pixels
+          // stay at the writer's NoData sentinel.
+          const std::vector<cv::Mat> &planes = derivedPlanes[bi];
+          const int channels = static_cast<int>( planes.size() );
+          cv::Mat derived( bt.h, bt.w, CV_32FC1, cv::Scalar( writeNoData ) );
+          const float maskThr = m_model.postprocess.maskThreshold >= 0.0
+                                  ? static_cast<float>( m_model.postprocess.maskThreshold )
+                                  : 0.5f;
+          for ( int row = 0; row < bt.h; ++row )
+          {
+            float *outRow = derived.ptr<float>( row );
+            for ( int col = 0; col < bt.w; ++col )
+            {
+              bool invalid = false;
+              int best = 0;
+              float bestv = -std::numeric_limits<float>::infinity();
+              for ( int c = 0; c < channels; ++c )
+              {
+                const float v = planes[static_cast<std::size_t>( c )].ptr<float>( row )[col];
+                if ( !std::isfinite( v ) )
+                {
+                  invalid = true;
+                  break;
+                }
+                if ( v > bestv )
+                {
+                  bestv = v;
+                  best = c;
+                }
+              }
+              if ( invalid )
+                continue; // stays NoData
+              switch ( mode )
+              {
+                case RasterOutputMode::Labels:
+                  outRow[col] = static_cast<float>( best );
+                  break;
+                case RasterOutputMode::Confidence:
+                  outRow[col] = bestv;
+                  break;
+                case RasterOutputMode::Mask:
+                  outRow[col] = channels == 1 ? ( bestv >= maskThr ? 1.0f : 0.0f )
+                                              : ( best != 0 ? 1.0f : 0.0f );
+                  break;
+                case RasterOutputMode::Probability:
+                  break; // unreachable
+              }
+            }
+          }
           const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
                                                  currentTileIndex, totalTiles };
-          if ( !writer->writeTile( bandOffset + c + 1, writeTile, plane.ptr<float>() ) )
+          if ( !writer->writeTile( 1, writeTile, derived.ptr<float>() ) )
             throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write output tile at ("
-                                   + std::to_string( bt.x ) + ", " + std::to_string( bt.y ) + ")" );
+                                     + std::to_string( bt.x ) + ", " + std::to_string( bt.y ) + ")" );
+          derivedPlanes[bi].clear();
         }
         if ( isUncertaintyHead && uncertaintyBandOffset >= 0 )
         {
@@ -869,7 +1032,56 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       continue;
     }
 
-    flushBatch( tileIndex );
+    // OOM ladder (Platform 4.0, goal §3): an over-budget batch is retried
+    // tile-by-tile — per-tile semantics never change, so the scientific
+    // contract holds (only the batching shrinks). At batch=1 an OOM is final
+    // and carries the diagnostic. The engine NEVER responds to OOM by
+    // shrinking tiles, changing resolution, or altering model semantics.
+    try
+    {
+      flushBatch( tileIndex );
+    }
+    catch ( const RSOperatorError &e )
+    {
+      if ( classifyInferenceError( e.what() ) != InferenceFailureKind::OutOfMemory
+           || batchMats.size() <= 1 )
+        throw;
+      ++stats.batchReductions;
+      // Serial retry: hold the pending batch, flush one tile per forward.
+      const std::vector<cv::Mat> pending = std::move( batchMats );
+      const std::vector<cv::Mat> pendingMasks = std::move( batchMasks );
+      const std::vector<std::pair<int, int>> pendingFed = std::move( batchFedSize );
+      const std::vector<CoreTile> pendingCores = std::move( batchCores );
+      const std::vector<int> pendingValid = std::move( batchValidPixels );
+      batchMats.clear();
+      batchMasks.clear();
+      batchFedSize.clear();
+      batchCores.clear();
+      batchValidPixels.clear();
+      for ( std::size_t i = 0; i < pending.size(); ++i )
+      {
+        batchMats.assign( 1, pending[i] );
+        batchMasks.assign( 1, pendingMasks[i] );
+        batchFedSize.assign( 1, pendingFed[i] );
+        batchCores.assign( 1, pendingCores[i] );
+        batchValidPixels.assign( 1, pendingValid[i] );
+        try
+        {
+          flushBatch( tileIndex );
+        }
+        catch ( const RSOperatorError &inner )
+        {
+          if ( classifyInferenceError( inner.what() ) == InferenceFailureKind::OutOfMemory )
+            throw RSOperatorError(
+              ErrorCode::ComputationError,
+              "inference ran out of memory even at batch=1 (tile " + std::to_string( tileSize )
+                + " px): free memory or use a smaller model — the engine never alters spatial "
+                  "resolution or model semantics to fit memory. Original error: "
+                + inner.what() );
+          throw;
+        }
+      }
+    }
     context.reportProgress( static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
                             "Tiled inference: " + std::to_string( done + skipped ) + "/"
                               + std::to_string( totalTiles ) );
@@ -911,6 +1123,17 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "failed to finalize output raster: " + writeError.toStdString() );
   }
+  // Atomic publish: only a fully written, closed raster is renamed onto the
+  // caller's path (same directory — same volume). Windows rename does not
+  // overwrite, so a previous result is removed first; a failure here cleans
+  // the stage and leaves the OLD output untouched rather than a torn one.
+  QFile::remove( QString::fromStdString( outputPath ) );
+  if ( !QFile::rename( stagePath, QString::fromStdString( outputPath ) ) )
+  {
+    QFile::remove( stagePath );
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "failed to publish output raster to: " + outputPath );
+  }
   context.reportProgressForced( 1.0, "Tiled inference complete" );
   stats.tilesProcessed = done;
   return stats;
@@ -951,6 +1174,23 @@ std::string TileInferenceEngine::uncertaintyMethod( const ModelInfo &model )
   if ( u == "entropy" || u == "margin" )
     return u;
   return {}; // unknown tokens are rejected at manifest parse
+}
+
+RasterOutputMode TileInferenceEngine::rasterOutputMode( const ModelInfo &model )
+{
+  const std::string &f = model.output.format;
+  if ( f.empty() || f == "probability" )
+    return RasterOutputMode::Probability;
+  if ( f == "labels" )
+    return RasterOutputMode::Labels;
+  if ( f == "mask" )
+    return RasterOutputMode::Mask;
+  if ( f == "confidence" )
+    return RasterOutputMode::Confidence;
+  // Unknown formats are rejected at manifest parse; this is defense in depth.
+  throw RSOperatorError( ErrorCode::InvalidInputData,
+                         "unsupported output.format '" + f
+                           + "' (supported: probability, labels, mask, confidence)" );
 }
 
 cv::Mat TileInferenceEngine::headUncertainty( const std::vector<cv::Mat> &classPlanes,

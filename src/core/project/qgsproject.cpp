@@ -105,6 +105,7 @@ using namespace Qt::StringLiterals;
 #ifdef _MSC_VER
 #include <sys/utime.h>
 #include <io.h>
+#include <fcntl.h> // O_RDONLY — the durable-rename fsync path (ADR 0129) uses it on MSVC too
 #else
 #include <utime.h>
 #include <unistd.h>

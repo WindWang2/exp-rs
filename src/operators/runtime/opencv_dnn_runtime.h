@@ -12,6 +12,7 @@
 
 #include <opencv2/dnn.hpp>
 
+#include <atomic>
 #include <mutex>
 #include <string>
 
@@ -22,7 +23,7 @@ class OpenCvDnnRuntime final : public IModelRuntime
   public:
     /**
      * @param artifactPath  ONNX weight file (absolute)
-     * @param modelWantsGpu manifest runtime.gpu
+     * @param modelWantsGpu manifest runtime.gpu (already device-resolved by the registry)
      * @param hw            detected host capabilities
      */
     OpenCvDnnRuntime( std::string artifactPath, bool modelWantsGpu,
@@ -48,6 +49,19 @@ class OpenCvDnnRuntime final : public IModelRuntime
     /// when enumeration fails — consumers treat that as "unknown", #705).
     std::vector<std::string> outputTensorNames() const override;
 
+    // --- Platform 4.0 unified contract -------------------------------------
+    /// One throwaway 1x3x64x64 forward pass. Non-fatal: fixed-shape graphs
+    /// may reject the probe; the outcome lands in health(), never in load().
+    void warmup() override;
+
+    /// Cooperative cancel: the NEXT checkpointed forward throws; a forward
+    /// already handed to cv::dnn runs to completion (documented limitation).
+    void requestCancel() override { m_cancelRequested.store( true, std::memory_order_relaxed ); }
+    void clearCancel() override { m_cancelRequested.store( false, std::memory_order_relaxed ); }
+
+    SessionHealth health() const override;
+    SessionMemoryEstimate memoryEstimate() const override;
+
   private:
     std::string m_artifactPath;
     bool m_modelWantsGpu;
@@ -56,6 +70,15 @@ class OpenCvDnnRuntime final : public IModelRuntime
     std::string m_deviceName = "cpu";
     std::mutex m_inferMutex;
     bool m_loaded = false;
+
+    // Platform 4.0 health/cancel state (atomics: health() never takes the
+    // inference lock, so a stuck forward cannot block the probe).
+    std::atomic<bool> m_cancelRequested{ false };
+    std::atomic<std::uint64_t> m_forwards{ 0 };
+    std::atomic<std::uint64_t> m_failures{ 0 };
+    mutable std::mutex m_healthMutex; // guards lastError/lastForwardMs only
+    double m_lastForwardMs = 0.0;
+    std::string m_lastError;
 };
 
 } // namespace sicnu::operators::runtime

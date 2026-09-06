@@ -67,6 +67,7 @@
 #include "rs_majority_filter_operator.h"
 #include "rs_recode_operator.h"
 #include "rs_inference_operator.h"
+#include "rs_model_task_operators.h"
 #endif
 
 namespace sicnu::operators::rs {
@@ -155,6 +156,9 @@ REGISTER_RS_OPERATOR(RsSegmentStatsOperator, "rs:segment_stats")
 REGISTER_RS_OPERATOR(RsMajorityFilterOperator, "rs:majority_filter")
 REGISTER_RS_OPERATOR(RsRecodeOperator, "rs:recode")
 REGISTER_RS_OPERATOR(RsInferenceOperator, "rs:infer")
+REGISTER_RS_OPERATOR(RsSegmentOperator, "rs:segment")
+REGISTER_RS_OPERATOR(RsDetectOperator, "rs:detect")
+REGISTER_RS_OPERATOR(RsEmbeddingOperator, "rs:embedding")
 #endif
 
 void installRsOperatorProvider();
@@ -268,6 +272,9 @@ void initBuiltinRsOperators() {
   add( "rs:majority_filter", [] { return std::make_unique<RsMajorityFilterOperator>(); } );
   add( "rs:recode", [] { return std::make_unique<RsRecodeOperator>(); } );
   add( "rs:infer", [] { return std::make_unique<RsInferenceOperator>(); } );
+  add( "rs:segment", [] { return std::make_unique<RsSegmentOperator>(); } );
+  add( "rs:detect", [] { return std::make_unique<RsDetectOperator>(); } );
+  add( "rs:embedding", [] { return std::make_unique<RsEmbeddingOperator>(); } );
 #endif
 }
 

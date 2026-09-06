@@ -69,6 +69,33 @@ struct ModelTilingContract
 };
 
 /**
+ * Detection decode contract — manifest v4 `output.detection` section
+ * (Platform 4.0). Declares how the engine decodes a raw detection head
+ * tensor into georeferenced vector output; its presence is what marks a
+ * model as detection-executable (enabling NMS/threshold vocabulary that
+ * stays rejected for non-detection models).
+ */
+struct ModelDetectionContract
+{
+  /// Head layout vocabulary:
+  ///  - "xywh_objectness": per candidate (cx, cy, w, h, obj, cls0..clsK-1)
+  ///    (YOLOv5-style export; final score = obj * max(cls)).
+  ///  - "xywh_class_scores": per candidate (cx, cy, w, h, cls0..clsK-1)
+  ///    (YOLOv8-style export; final score = max(cls)).
+  std::string layout = "xywh_objectness";
+  /// Tensor shape vocabulary: "channels_first" (1, C, N), "channels_last"
+  /// (1, N, C), or "auto" (C <= N heuristic, documented, deterministic).
+  std::string tensorLayout = "auto";
+  double confThreshold = 0.25;  ///< score gate (detection kept when >=)
+  double nmsIou = 0.45;         ///< whole-raster NMS / tile-dedup IoU, (0, 1]
+  int maxDetections = 100000;   ///< bounded accumulation guard across tiles
+  std::vector<std::string> classes;
+
+  /// Vocabulary + range validation (empty = ok).
+  std::string validate() const;
+};
+
+/**
  * Output contract — manifest v2 `output` section (object form). The legacy
  * string form only fills type.
  */
@@ -79,6 +106,15 @@ struct ModelOutputContract
   std::vector<std::string> classes;
   double threshold = -1.0;  ///< Detection/confidence threshold (<0 = none)
   std::string uncertainty = "none"; ///< "none" | "entropy" | "margin" — adds a confidence band computed from that head's channels
+  /// Platform 4.0 output format for RASTER tasks (segmentation/regression/
+  /// embedding); empty = the historical probability-stack behavior:
+  ///  - "" | "probability": float32 per-class stack (default)
+  ///  - "labels": argmax → byte label raster + palette
+  ///  - "mask": threshold → binary 0/1 raster
+  ///  - "confidence": top-1 probability band (argmax tasks)
+  std::string format;
+  bool detectionDeclared = false;    ///< true when `output.detection` is present
+  ModelDetectionContract detection;  ///< meaningful only when detectionDeclared
 };
 
 /**
@@ -102,6 +138,9 @@ struct ModelRuntimeContract
   bool cpuFallback = true;
   int estimatedRamMb = 0;
   int estimatedVramMb = 0;
+  /// Platform 4.0 device token: "cpu" | "cuda" | "cuda:N" | "auto".
+  /// Empty = "auto" (legacy behavior: cuda when gpu && available, else cpu).
+  std::string device;
 };
 
 /**
@@ -111,6 +150,22 @@ struct ModelRuntimeContract
  */
 struct ModelInfo {
   std::string name;        ///< Unique id, e.g. "sam-building"
+  // --- Platform 4.0 identity (manifest `id` / `model_version` / `license` /
+  // `source` / `manifest_version`). All optional; absent fields keep the
+  // documented defaults, so every v1/v2/v3 manifest parses unchanged.
+  std::string id;          ///< Stable catalog identity. Empty = @p name. Callers
+                           ///< (GUI/CLI/Workflow/Pi/SDK) reference models by this id,
+                           ///< never by weight file path. Unique within the catalog.
+  std::string modelVersion;///< Model version string. Empty = "0".
+  std::string license;     ///< SPDX expression or license name. Empty = unspecified.
+  std::string source;      ///< Provenance origin (download source / URL).
+  int manifestVersion = 0; ///< Declared `manifest_version` (1..4); 0 = not declared,
+                           ///< the effective version is inferred from manifest shape.
+  std::string contentDigest; ///< SHA-256 hex of the resolved artifact BYTES, computed
+                             ///< at catalog load (or acquire for ad-hoc models) whether
+                             ///< or not a checksum is declared. "" = no artifact. This
+                             ///< is the session-identity anchor: same path with different
+                             ///< bytes yields a different digest and never shares a session.
   std::string task;        ///< Task family: segmentation | classification | detection | ...
   std::string inputType;   ///< Input contract, e.g. "raster"
   std::string outputType;  ///< Output contract, e.g. "polygon" | "raster"
@@ -161,6 +216,12 @@ struct ModelInfo {
   ModelReadiness readiness = ModelReadiness::Ready;
   std::string readinessReason;      ///< Human-readable explanation when not Ready
   std::string resolvedArtifactPath; ///< Absolute artifact path (manifest-dir resolved)
+
+  /// Effective stable identity: the declared `id`, falling back to `name`
+  /// (manifests without an id keep their historical identity).
+  std::string stableId() const { return id.empty() ? name : id; }
+  /// "id@version" identity tag for payloads and logs (version defaults to "0").
+  std::string identityTag() const;
 
   Json::Value toJson() const;
 };
@@ -242,9 +303,52 @@ class ModelCatalog {
     static std::optional<std::string> resolveArtifactPath( const std::string &modelReference,
                                                            std::string *error = nullptr );
 
+    // --- Platform 4.0: authoritative registry surface -------------------------
+    // The file scan (models/<name>/model.json) stays the DISCOVERY channel;
+    // these calls make the catalog a full registry: programmatic registration
+    // (plugins/tests), de-registration, inspection, pure validation, version
+    // resolution and health. GUI/CLI/Workflow/Pi/SDK reference models by
+    // stable id through find()/resolve() — never by weight path.
+
+    /// Register a manifest document programmatically (session-scoped, not
+    /// written to disk). The entry shadows scanned manifests with the same
+    /// id/name until unregister() or process end. @a error receives the parse
+    /// or validation failure. Returns false without registering on error.
+    bool registerManifestJson( const std::string &json, const std::string &source,
+                               std::string *error = nullptr );
+
+    /// Remove a registered entry (programmatic or scanned). For scanned
+    /// manifests the removal lasts until the next reload(). Returns false
+    /// when no such model exists.
+    bool unregister( const std::string &idOrName );
+
+    /// Full registry record for one model: manifest JSON (as parsed, with
+    /// identity/readiness/digest), plus health block. Empty Json on miss.
+    Json::Value inspect( const std::string &idOrName ) const;
+
+    /// Pure manifest validation WITHOUT registering: returns the issue list
+    /// (empty = valid). Checks JSON well-formedness, required fields and the
+    /// full contract sanity (the same checks a scan applies).
+    std::vector<std::string> validateManifestJson( const std::string &json ) const;
+
+    /// Resolve "id" or "id@version" (Platform 4.0 identity reference).
+    /// "id" matches the sole entry with that id (nullopt with @a error set
+    /// when several versions exist); "id@version" matches exactly; an empty
+    /// version part ("id@") resolves the lexicographically latest version.
+    std::optional<ModelInfo> resolve( const std::string &idVersionRef,
+                                      std::string *error = nullptr ) const;
+
+    /// Runtime health for one model: readiness, content digest availability,
+    /// provider presence and the device verdict. Never throws; "ok" mirrors
+    /// the overall verdict. Empty Json on unknown id.
+    Json::Value health( const std::string &idOrName ) const;
+
   private:
     ModelCatalog() = default;
     void ensureLoadedLocked() const;
+    /// find() helper over registered-then-scanned entries honoring
+    /// unregister(). Caller holds the catalog mutex.
+    std::optional<ModelInfo> findLocked( const std::string &idOrName ) const;
     struct VerifiedArtifact;
     bool verifyArtifactLocked( ModelInfo &info ) const;
 
@@ -253,6 +357,11 @@ class ModelCatalog {
     mutable std::vector<ModelInfo> mModels;
     mutable std::vector<ModelCatalogIssue> mIssues;
     mutable std::vector<VerifiedArtifact> mVerified; ///< checksum cache (path, size, mtime)
+    /// Platform 4.0 registry overlay: programmatic entries (registerManifestJson)
+    /// shadow scanned manifests with the same id/name for this session.
+    std::vector<ModelInfo> mRegistered;
+    /// Ids/names removed via unregister() (scanned entries reappear on reload).
+    std::vector<std::string> mUnregistered;
 };
 
 } // namespace sicnu::operators

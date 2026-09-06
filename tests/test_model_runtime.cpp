@@ -199,6 +199,74 @@ TEST_CASE( "runtime registry evicts LRU beyond the cache bound", "[models][runti
   registry.setMaxCachedSessions( 2 ); // restore the default-ish bound for later cases
 }
 
+// --- Platform 4.0 session identity: content digests key sessions ------------
+
+TEST_CASE( "same artifact path with different bytes gets a fresh session", "[models][runtime][identity]" )
+{
+  auto &registry = ModelRuntimeRegistry::instance();
+  FakeProviderGuard guard;
+  registry.releaseAll();
+  registry.resetLoadCount();
+  registry.setMaxCachedSessions( 4 );
+
+  QTemporaryDir dir;
+  const QString artifact = dir.filePath( QStringLiteral( "weights.onnx" ) );
+  {
+    QFile f( artifact );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( QByteArray( "weights-version-1" ) );
+  }
+
+  ModelInfo model = fakeModel( artifact.toStdString() );
+  const auto first = registry.acquire( model );
+  REQUIRE( first );
+  CHECK( guard.loadCount->load() == 1 );
+
+  // Swap the bytes under the SAME path (different length so no mtime
+  // granularity can mask the change).
+  {
+    QFile f( artifact );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( QByteArray( "weights-version-2-swapped-bytes" ) );
+  }
+
+  const auto second = registry.acquire( model );
+  REQUIRE( second );
+  CHECK( second.get() != first.get() );      // new identity → new session
+  CHECK( guard.loadCount->load() == 2 );     // not served from the cache
+  // The first holder keeps its loaded session alive (unloaded ≠ dangling).
+  CHECK( first->artifactPath() == model.resolvedArtifactPath );
+
+  registry.releaseAll();
+}
+
+TEST_CASE( "equal bytes at different paths share one session", "[models][runtime][identity]" )
+{
+  auto &registry = ModelRuntimeRegistry::instance();
+  FakeProviderGuard guard;
+  registry.releaseAll();
+  registry.resetLoadCount();
+  registry.setMaxCachedSessions( 4 );
+
+  QTemporaryDir dir;
+  const QByteArray payload = QByteArray( "identical-weight-bytes" );
+  for ( const QString &name : { QStringLiteral( "copy-a.onnx" ), QStringLiteral( "copy-b.onnx" ) } )
+  {
+    QFile f( dir.filePath( name ) );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( payload );
+  }
+
+  const auto a = registry.acquire( fakeModel( dir.filePath( QStringLiteral( "copy-a.onnx" ) ).toStdString() ) );
+  const auto b = registry.acquire( fakeModel( dir.filePath( QStringLiteral( "copy-b.onnx" ) ).toStdString() ) );
+  REQUIRE( a );
+  REQUIRE( b );
+  CHECK( a.get() == b.get() );               // same content → one session
+  CHECK( guard.loadCount->load() == 1 );
+
+  registry.releaseAll();
+}
+
 TEST_CASE( "registry surfaces provider load failures", "[models][runtime]" )
 {
   auto &registry = ModelRuntimeRegistry::instance();

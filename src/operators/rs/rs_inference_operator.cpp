@@ -8,6 +8,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "operators/framework/model_catalog.h"
+#include "operators/runtime/model_execution_service.h"
 #include "operators/runtime/model_runtime.h"
 #include "operators/runtime/tile_inference_engine.h"
 
@@ -28,58 +29,6 @@ using runtime::ModelRuntimeRegistry;
 using runtime::TileInferenceEngine;
 
 namespace {
-
-/**
- * Resolve the `model` parameter to a catalog ModelInfo ready for execution.
- * Direct file references build an ad-hoc contract (default preprocessing,
- * default tiling); catalog names go through the full readiness pipeline.
- * The returned info's readiness signals resolution success/failure.
- */
-ModelInfo resolveModel( const std::string &modelReference, std::string *errorDetail )
-{
-  const QFileInfo direct( QString::fromStdString( modelReference ) );
-  if ( direct.exists() && direct.isFile() )
-  {
-    ModelInfo info;
-    info.name = modelReference;
-    info.task = "inference";
-    info.framework = "onnx";
-    info.readiness = ModelReadiness::Ready;
-    info.resolvedArtifactPath = direct.absoluteFilePath().toStdString();
-    info.path = modelReference;
-    return info;
-  }
-
-  // Catalog lookup: lazy-loads on first use so run_workflow / direct operator
-  // calls resolve names without a prior spatial:list_models call. A miss
-  // triggers ONE refresh so newly installed models are found without paying
-  // a directory rescan on every run.
-  auto model = ModelCatalog::instance().find( modelReference );
-  if ( !model )
-  {
-    ModelCatalog::instance().reload();
-    model = ModelCatalog::instance().find( modelReference );
-  }
-  if ( !model )
-  {
-    if ( errorDetail )
-      *errorDetail = "Model file not found and not a catalog name: " + modelReference
-                     + " (catalog directory: " + ModelCatalog::instance().directory() + ")";
-    ModelInfo missing;
-    missing.readiness = ModelReadiness::MissingArtifact;
-    return missing;
-  }
-  if ( model->readiness != ModelReadiness::Ready )
-  {
-    if ( errorDetail )
-      *errorDetail = "Model '" + model->name + "' is not ready ("
-                     + modelReadinessName( model->readiness ) + "): "
-                     + ( model->readinessReason.empty() ? std::string( "unavailable" )
-                                                        : model->readinessReason );
-    return *model; // readiness != Ready signals the failure
-  }
-  return *model;
-}
 
 } // namespace
 
@@ -166,7 +115,7 @@ Json::Value RsInferenceOperator::estimateExecution( const Json::Value &params ) 
 
     // Contract lookup for estimation must not require readiness (a missing
     // artifact still carries parseable tiling/runtime contracts).
-    const ModelInfo model = resolveModel( modelReference, nullptr );
+    const ModelInfo model = runtime::resolveModelReference( modelReference, nullptr );
 
     const int tile = TileInferenceEngine::effectiveTileSize( model );
     const int halo = TileInferenceEngine::effectiveHalo( model );
@@ -244,123 +193,40 @@ Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorConte
         throw RSOperatorError( ErrorCode::InvalidParameter,
                                "Operator parameters must be a JSON object" );
 
-    const std::string inputPath = requireString( params, "input" );
-    const std::string modelReference = requireString( params, "model" );
-    const std::string outputPath = requireString( params, "output" );
-
-    if ( !fileExists( inputPath ) )
-        throw RSOperatorError( ErrorCode::FileNotFound,
-                               "Input raster not found: " + inputPath );
-
-    // Resolve catalog name or direct path to a ready model contract.
-    std::string errorDetail;
-    const ModelInfo model = resolveModel( modelReference, &errorDetail );
-    if ( model.readiness != ModelReadiness::Ready )
+    runtime::ModelExecutionRequest request;
+    request.inputPath = requireString( params, "input" );
+    request.modelReference = requireString( params, "model" );
+    request.outputPath = requireString( params, "output" );
+    // Free token, not an enum: explicit cuda:N references must pass through.
+    if ( params.isObject() && params.isMember( "device" ) )
     {
-        const ErrorCode code = model.readiness == ModelReadiness::MissingArtifact
-                                   ? ErrorCode::FileNotFound
-                                   : ErrorCode::InvalidInputData;
-        throw RSOperatorError( code, errorDetail.empty() ? "model is not ready" : errorDetail );
+      if ( !params["device"].isString() )
+        throw RSOperatorError( ErrorCode::InvalidParameter, "device must be a string" );
+      request.deviceToken = params["device"].asString();
     }
-
-    // Runtime-layer verdict: provider availability + GPU/VRAM contract.
-    auto &registry = ModelRuntimeRegistry::instance();
-    const runtime::ModelHardwareCapabilities hw = registry.hardware();
-    std::string runtimeReason;
-    const ModelReadiness runtimeReadiness =
-        runtime::evaluateRuntimeReadiness( model, hw, &runtimeReason );
-    if ( runtimeReadiness != ModelReadiness::Ready )
-        throw RSOperatorError( ErrorCode::InvalidInputData,
-                               "Model '" + model.name + "' cannot execute: " + runtimeReason );
-
-    // Platform 3.0 contract gates: multi-input manifests are ranking-ready
-    // but their engine execution lands in the next iteration — fail loudly
-    // rather than silently feeding one raster to a two-tensor model.
-    for ( const auto &input : model.inputs )
-    {
-        if ( input.temporalLength > 0 )
-            throw RSOperatorError(
-                ErrorCode::InvalidInputData,
-                "Model '" + model.name + "' declares temporal_length=" +
-                    std::to_string( input.temporalLength ) +
-                    "; temporal (T-frame) inference is not wired into the tile "
-                    "engine yet — the graph would silently run on a single frame" );
-    }
-    if ( model.inputs.size() > 1 )
-        throw RSOperatorError(
-            ErrorCode::InvalidInputData,
-            "Model '" + model.name + "' declares " + std::to_string( model.inputs.size() )
-              + " named inputs; multi-input execution is not wired into the tile "
-                "engine yet — pick a single-input model or run each branch "
-                "separately" );
-
-    // Feature-cube preflight: when the input carries a feature cube contract,
-    // the model's declared band roles must be covered (goal §8 train/inference
-    // consistency). Plain rasters skip this check.
-    {
-        sicnu::features::FeatureCubeContract cube;
-        if ( sicnu::features::readFeatureCubeMetadata( QString::fromStdString( inputPath ),
-                                                       &cube ) )
-        {
-            const QStringList roles = [ & ] {
-                QStringList out;
-                for ( const auto &role : model.input.bandRoles )
-                    out << QString::fromStdString( role );
-                return out;
-            }();
-            const sicnu::features::ModelInputMatch match = sicnu::features::matchesModelInput(
-                cube, roles, 0 /* band count validated by the engine */, QString() );
-            if ( !match.ok )
-                throw RSOperatorError( ErrorCode::InvalidInputData,
-                                       "feature cube does not match the model input contract: "
-                                         + match.problems.join( QLatin1String( "; " ) ).toStdString() );
-        }
-    }
-
-    context.reportProgress( 0.05, "Acquiring model runtime session" );
-    std::string loadError;
-    const auto session = registry.acquire( model, &loadError );
-    if ( !session )
-        throw RSOperatorError( ErrorCode::ComputationError,
-                               "Failed to load model session: " + loadError );
 
     const int bandCount = [ & ] {
-        GdalDatasetWrapper ds;
-        if ( !ds.open( QString::fromStdString( inputPath ) ) )
-            throw RSOperatorError( ErrorCode::GdalError, "Failed to open input raster: " + inputPath );
-        return ds.bandCount();
+      GdalDatasetWrapper ds;
+      if ( !ds.open( QString::fromStdString( request.inputPath ) ) )
+        throw RSOperatorError( ErrorCode::GdalError,
+                               "Failed to open input raster: " + request.inputPath );
+      return ds.bandCount();
     }();
     if ( bandCount <= 0 )
-        throw RSOperatorError( ErrorCode::GdalError,
-                               "Failed to read band count from input raster" );
-    const std::vector<int> bands = parseBands( params, bandCount );
+      throw RSOperatorError( ErrorCode::GdalError,
+                             "Failed to read band count from input raster" );
+    request.bands = parseBands( params, bandCount );
 
-    context.throwIfCancelled();
-    context.reportProgressForced( 0.1, "Running tiled inference" );
-
-    TileInferenceEngine engine( model, session );
-    runtime::TileInferenceRunOptions options;
     const std::string tta = getEnum( params, "tta", { "none", "hflip", "hvflip" }, "none" );
     if ( tta == "hflip" )
-        options.tta = runtime::TtaMode::HFlip;
+      request.tta = runtime::TtaMode::HFlip;
     else if ( tta == "hvflip" )
-        options.tta = runtime::TtaMode::HVFlip;
-    options.batchSizeOverride = std::max( 0, getInt( params, "batchCap", 0 ) );
-    const runtime::TileInferenceStats stats =
-        engine.run( inputPath, bands, outputPath, context, options );
+      request.tta = runtime::TtaMode::HVFlip;
+    request.batchSizeOverride = std::max( 0, getInt( params, "batchCap", 0 ) );
 
-    Json::Value result( Json::objectValue );
-    result["output"] = outputPath;
-    result["backend"] = session->backendName();
-    result["device"] = session->deviceName();
-    result["model"] = model.name;
-    result["outBands"] = stats.outBands;
-    result["width"] = stats.outWidth;
-    result["height"] = stats.outHeight;
-    result["tileSize"] = stats.tileSize;
-    result["tiles"] = stats.tilesProcessed;
-    result["tilesSkippedNoData"] = stats.tilesSkippedNoData;
-    return result;
+    const runtime::ModelExecutionResult result =
+      runtime::runModelInference( request, context );
+    return result.payload;
 }
 
 } // namespace sicnu::operators::rs

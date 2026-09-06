@@ -41,6 +41,7 @@ set(SICNU_OPERATORS_SOURCES
     framework/rs_json_params.cpp
     framework/asset_index_pipeline.cpp
     framework/model_catalog.cpp
+    framework/artifact_digest.cpp
 )
 
 # OpenCV-based operators (only when OpenCV imgproc is available)
@@ -56,6 +57,9 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         runtime/opencv_dnn_runtime.cpp
         runtime/onnxruntime_provider.cpp
         runtime/tile_inference_engine.cpp
+        runtime/detection_postprocess.cpp
+        runtime/detection_tile_engine.cpp
+        runtime/model_execution_service.cpp
     )
     message(STATUS "OpenCV operators enabled (imgproc found)")
 else()
@@ -158,6 +162,7 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         rs/rs_majority_filter_operator.cpp
         rs/rs_recode_operator.cpp
         rs/rs_inference_operator.cpp
+        rs/rs_model_task_operators.cpp
     )
     message(STATUS "RS classification/OBIA operators enabled")
 endif()

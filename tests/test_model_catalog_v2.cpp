@@ -903,3 +903,142 @@ TEST_CASE( "a non-array inputs key is rejected safely", "[models][catalog][v3]" 
   CHECK( model->readinessReason.find( "inputs" ) != std::string::npos );
   CHECK( model->inputs.empty() );
 }
+
+// --- Platform 4.0 identity (manifest_version / id / model_version / license /
+// source / contentDigest) -----------------------------------------------------
+
+TEST_CASE( "manifest 4.0 identity fields parse with documented defaults", "[models][catalog][identity]" )
+{
+  QTemporaryDir dir;
+  const QByteArray artifactBytes( "identity-weights-v1" );
+  writeManifest( dir, QStringLiteral( "ident40" ), R"({
+      "name": "ident40",
+      "id": "acme/landcover-unet",
+      "model_version": "2.1.0",
+      "license": "CC-BY-4.0",
+      "source": "https://example.com/models/landcover-unet",
+      "manifest_version": 2,
+      "task": "segmentation",
+      "framework": "onnx",
+      "artifact": { "path": "weights.onnx" }
+  })",
+                 artifactBytes );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  const auto model = catalog.find( "acme/landcover-unet" );
+  REQUIRE( model.has_value() );
+  CHECK( model->readiness == ModelReadiness::Ready );
+  CHECK( model->id == "acme/landcover-unet" );
+  CHECK( model->name == "ident40" ); // name stays the display name
+  CHECK( model->stableId() == "acme/landcover-unet" );
+  CHECK( model->modelVersion == "2.1.0" );
+  CHECK( model->identityTag() == "acme/landcover-unet@2.1.0" );
+  CHECK( model->license == "CC-BY-4.0" );
+  CHECK( model->source == "https://example.com/models/landcover-unet" );
+  CHECK( model->manifestVersion == 2 );
+  // The content digest is the SHA-256 of the artifact bytes, always computed.
+  CHECK( model->contentDigest == sha256( artifactBytes ).toStdString() );
+  // Lookup by bare name still works.
+  REQUIRE( catalog.find( "ident40" ).has_value() );
+}
+
+TEST_CASE( "manifests without 4.0 identity fields keep historical identity", "[models][catalog][identity]" )
+{
+  QTemporaryDir dir;
+  writeManifest( dir, QStringLiteral( "legacy" ), R"({
+      "name": "legacy",
+      "task": "segmentation",
+      "framework": "onnx",
+      "path": "weights.onnx"
+  })",
+                 QByteArray( "w" ) );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  const auto model = catalog.find( "legacy" );
+  REQUIRE( model.has_value() );
+  CHECK( model->id.empty() );
+  CHECK( model->stableId() == "legacy" );
+  CHECK( model->identityTag() == "legacy@0" );
+  CHECK( model->modelVersion.empty() );
+  CHECK( model->license.empty() );
+  CHECK( model->manifestVersion == 0 );
+  // Even without a declared checksum the bytes are hashed for identity.
+  CHECK( model->contentDigest == sha256( QByteArray( "w" ) ).toStdString() );
+}
+
+TEST_CASE( "a declared manifest_version must agree with the manifest shape", "[models][catalog][identity]" )
+{
+  QTemporaryDir dir;
+  // Declares 3 but only carries the v2 `input` object shape.
+  writeManifest( dir, QStringLiteral( "shape-mismatch" ), R"({
+      "name": "shape-mismatch",
+      "manifest_version": 3,
+      "task": "segmentation",
+      "framework": "onnx",
+      "input": { "dtype": "float32" }
+  })" );
+  writeManifest( dir, QStringLiteral( "version-range" ), R"({
+      "name": "version-range",
+      "manifest_version": 7,
+      "task": "segmentation",
+      "framework": "onnx"
+  })" );
+  writeManifest( dir, QStringLiteral( "version-type" ), R"({
+      "name": "version-type",
+      "manifest_version": "two",
+      "task": "segmentation",
+      "framework": "onnx"
+  })" );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  const auto mismatch = catalog.find( "shape-mismatch" );
+  REQUIRE( mismatch.has_value() );
+  CHECK( mismatch->readiness == ModelReadiness::InvalidManifest );
+  CHECK( mismatch->readinessReason.find( "shape is version 2" ) != std::string::npos );
+
+  const auto range = catalog.find( "version-range" );
+  REQUIRE( range.has_value() );
+  CHECK( range->readiness == ModelReadiness::InvalidManifest );
+  CHECK( range->readinessReason.find( "unsupported" ) != std::string::npos );
+
+  const auto badType = catalog.find( "version-type" );
+  REQUIRE( badType.has_value() );
+  CHECK( badType->readiness == ModelReadiness::InvalidManifest );
+  CHECK( badType->readinessReason.find( "must be an integer" ) != std::string::npos );
+}
+
+TEST_CASE( "duplicate explicit ids are rejected like duplicate names", "[models][catalog][identity]" )
+{
+  QTemporaryDir dir;
+  const char *manifestBody = R"({
+      "name": "%1",
+      "id": "shared/id",
+      "task": "segmentation",
+      "framework": "onnx"
+  })";
+  writeManifest( dir, QStringLiteral( "first" ),
+                 QString( manifestBody ).arg( "first" ).toUtf8() );
+  writeManifest( dir, QStringLiteral( "second" ),
+                 QString( manifestBody ).arg( "second" ).toUtf8() );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  const auto first = catalog.find( "first" );
+  REQUIRE( first.has_value() );
+  // The first manifest wins; the duplicate id never enters the catalog.
+  CHECK( catalog.find( "second" ) == std::nullopt );
+  bool reportedIssue = false;
+  for ( const auto &issue : catalog.issues() )
+  {
+    if ( issue.message.find( "duplicate model id 'shared/id'" ) != std::string::npos )
+      reportedIssue = true;
+  }
+  CHECK( reportedIssue );
+}

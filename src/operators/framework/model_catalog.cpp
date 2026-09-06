@@ -1,6 +1,8 @@
 // src/operators/framework/model_catalog.cpp
 #include "model_catalog.h"
 
+#include "artifact_digest.h"
+
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -33,26 +35,6 @@ QString normalizedChecksum( const std::string &declared )
     s.remove( 0, 7 );
   s.remove( ' ' );
   return s.toLower();
-}
-
-/// SHA-256 hex digest of a file, streamed in 1 MiB chunks. Empty on I/O error.
-QString sha256File( const QString &path )
-{
-  QFile file( path );
-  if ( !file.open( QIODevice::ReadOnly ) )
-    return QString();
-  QCryptographicHash hash( QCryptographicHash::Sha256 );
-  std::vector<char> buffer( 1024 * 1024 );
-  while ( true )
-  {
-    const qint64 read = file.read( buffer.data(), static_cast<qint64>( buffer.size() ) );
-    if ( read < 0 )
-      return QString();
-    if ( read == 0 )
-      break;
-    hash.addData( QByteArrayView( buffer.data(), static_cast<qsizetype>( read ) ) );
-  }
-  return QString::fromLatin1( hash.result().toHex() );
 }
 
 std::vector<std::string> parseStringArray( const QJsonObject &obj, const QString &key )
@@ -140,6 +122,12 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   info.tags = parseStringArray( obj, QStringLiteral( "tags" ) );
   info.sourceManifest = source;
 
+  // --- Platform 4.0 identity -------------------------------------------------
+  info.id = obj.value( QStringLiteral( "id" ) ).toString().toStdString();
+  info.modelVersion = obj.value( QStringLiteral( "model_version" ) ).toString().toStdString();
+  info.license = obj.value( QStringLiteral( "license" ) ).toString().toStdString();
+  info.source = obj.value( QStringLiteral( "source" ) ).toString().toStdString();
+
   // --- Manifest v2: artifact ------------------------------------------------
   const QJsonObject artifactObj = obj.value( QStringLiteral( "artifact" ) ).toObject();
   info.artifact.path = artifactObj.value( QStringLiteral( "path" ) ).toString().toStdString();
@@ -155,8 +143,14 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   // v1/v2: the `input` object (or legacy string) fills inputs[0]. When BOTH
   // keys exist, `inputs` wins; the legacy single-input mirror always reflects
   // inputs[0] so v2 consumers (engine, tests) see no change.
+  bool detConfDeclared = false; // output.detection.conf_threshold explicitly present
   const QJsonValue inputVal = obj.value( QStringLiteral( "input" ) );
   const QJsonValue inputsVal = obj.value( QStringLiteral( "inputs" ) );
+  // Manifest-shape version (for manifest_version cross-checking): an `inputs`
+  // array is the v3 shape, an `input` object the v2 shape, only legacy flat
+  // fields the v1 shape.
+  const bool inputsDeclaredAsArray = inputsVal.isArray();
+  const bool inputDeclaredAsObject = inputVal.isObject();
   bool inputsMalformed = false; // declared but not a usable array-of-objects
   if ( inputsVal.isArray() )
   {
@@ -197,6 +191,31 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     info.output.uncertainty = outputObj.value( QStringLiteral( "uncertainty" ) ).toString().toStdString();
     if ( info.output.uncertainty.empty() )
       info.output.uncertainty = "none"; // documented default
+    // Platform 4.0: raster-task output format + detection decode contract.
+    info.output.format = outputObj.value( QStringLiteral( "format" ) ).toString().toStdString();
+    const QJsonObject detectionObj = outputObj.value( QStringLiteral( "detection" ) ).toObject();
+    if ( outputObj.contains( QStringLiteral( "detection" ) )
+         && outputObj.value( QStringLiteral( "detection" ) ).isObject() )
+    {
+      info.output.detectionDeclared = true;
+      auto &det = info.output.detection;
+      det.layout = detectionObj.value( QStringLiteral( "layout" ) ).toString().toStdString();
+      if ( det.layout.empty() )
+        det.layout = "xywh_objectness";
+      det.tensorLayout = detectionObj.value( QStringLiteral( "tensor_layout" ) ).toString().toStdString();
+      if ( det.tensorLayout.empty() )
+        det.tensorLayout = "auto";
+      const double conf = detectionObj.value( QStringLiteral( "conf_threshold" ) ).toDouble( 0.25 );
+      det.confThreshold = conf;
+      detConfDeclared = detectionObj.contains( QStringLiteral( "conf_threshold" ) );
+      const double iou = detectionObj.value( QStringLiteral( "nms_iou" ) ).toDouble( 0.45 );
+      det.nmsIou = iou;
+      det.maxDetections = detectionObj.value( QStringLiteral( "max_detections" ) ).toInt( 100000 );
+      det.classes = parseStringArray( detectionObj, QStringLiteral( "classes" ) );
+      // Detection classes default to the output-level classes list.
+      if ( det.classes.empty() )
+        det.classes = info.output.classes;
+    }
   }
   if ( info.outputType.empty() )
     info.outputType = info.output.type;
@@ -277,6 +296,9 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     obj.value( QStringLiteral( "estimated_ram_mb" ) ).toInt( 0 ) ) );
   info.runtime.estimatedVramMb = std::max( 0, runtimeObj.value( QStringLiteral( "estimated_vram_mb" ) ).toInt(
     obj.value( QStringLiteral( "estimated_vram_mb" ) ).toInt( 0 ) ) );
+  // Platform 4.0 device token; validated at acquire time (registry knows the
+  // backend traits), so a bad token fails the run, not the catalog scan.
+  info.runtime.device = runtimeObj.value( QStringLiteral( "device" ) ).toString().toStdString();
 
   // Tiling support flag: nested tiling.supported, legacy supports_tiling, in that order.
   info.supportsTiling = runtimeObj.contains( QStringLiteral( "supports_tiling" ) )
@@ -302,6 +324,37 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     else
       info.readinessReason += "; " + reason;
   };
+
+  // Platform 4.0 manifest_version: declared values must be 1..4 and must agree
+  // with the manifest's actual shape — a declared version is a contract claim,
+  // and a wrong claim means the author expects different parsing semantics
+  // than the shape delivers.
+  {
+    const QJsonValue declaredVersion = obj.value( QStringLiteral( "manifest_version" ) );
+    if ( declaredVersion.isDouble() )
+    {
+      const int v = declaredVersion.toInt();
+      if ( v < 1 || v > 4 )
+        markInvalid( "manifest_version " + std::to_string( v ) + " is unsupported (1..4)" );
+      else
+        info.manifestVersion = v;
+    }
+    else if ( !declaredVersion.isNull() && !declaredVersion.isUndefined() )
+    {
+      markInvalid( "manifest_version must be an integer (1..4)" );
+    }
+    int shapeVersion = 1;
+    if ( inputsDeclaredAsArray )
+      shapeVersion = 3;
+    else if ( inputDeclaredAsObject )
+      shapeVersion = 2;
+    if ( info.manifestVersion > 0 && info.manifestVersion != shapeVersion )
+      markInvalid( "declared manifest_version " + std::to_string( info.manifestVersion )
+                   + " but the manifest shape is version " + std::to_string( shapeVersion )
+                   + ( shapeVersion == 3 ? " ('inputs' array)" : shapeVersion == 2 ? " ('input' object)"
+                                                                                   : " (legacy flat fields)" ) );
+  }
+
   if ( !info.input.layout.empty() && info.input.layout != "NCHW" && info.input.layout != "nchw" )
     markInvalid( "unsupported input layout '" + info.input.layout + "' (only NCHW is executed)" );
   if ( info.preprocess.normalize == "mean_std"
@@ -352,14 +405,47 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
        && info.preprocess.normalize != "linear" && info.preprocess.normalize != "mean_std" )
     markInvalid( "preprocess.scale is declared but normalize is neither linear nor mean_std - "
                  "the scale would silently not execute; set normalize or remove the scale" );
-  if ( info.postprocess.nms )
-    markInvalid( "postprocess.nms is declared but not implemented by any runtime - remove it or implement NMS" );
+  // Platform 4.0: detection decode contract. With `output.detection`
+  // declared, the NMS and threshold vocabulary EXECUTES (decode → threshold
+  // → whole-raster NMS/tile dedup → georeferenced vector), so those fields
+  // are no longer declared-but-unenforced. Without it, the historical
+  // rejections stand (declared-but-unimplemented = loud failure, #646).
+  if ( info.output.detectionDeclared )
+  {
+    if ( const std::string detectionError = info.output.detection.validate(); !detectionError.empty() )
+      markInvalid( detectionError );
+    if ( info.postprocess.nms )
+    {
+      // The legacy spelling folds into the detection contract (its nms_iou
+      // governs suppression); nothing is left unenforced.
+      info.postprocess.nms = false;
+    }
+    if ( info.output.threshold >= 0.0 )
+    {
+      // Legacy `output.threshold` acts as the confidence gate when the
+      // detection contract did not declare its own.
+      if ( !detConfDeclared )
+        info.output.detection.confThreshold = info.output.threshold;
+      info.output.threshold = -1.0;
+    }
+  }
+  else
+  {
+    if ( info.postprocess.nms )
+      markInvalid( "postprocess.nms is declared but not implemented by any runtime - remove it, or declare an output.detection contract" );
+    if ( info.output.threshold >= 0.0 )
+      markInvalid( "output.threshold is declared but not executed (use postprocess.mask_threshold, which the runtime enforces)" );
+  }
   if ( info.postprocess.polygonize )
     markInvalid( "postprocess.polygonize is declared but not implemented by any runtime - remove it or implement mask->polygon chaining" );
   if ( info.postprocess.simplify > 0.0 )
     markInvalid( "postprocess.simplify is declared but not implemented by any runtime" );
-  if ( info.output.threshold >= 0.0 )
-    markInvalid( "output.threshold is declared but not executed (use postprocess.mask_threshold, which the runtime enforces)" );
+  // Platform 4.0 raster-task output format vocabulary.
+  if ( !info.output.format.empty() && info.output.format != "probability"
+       && info.output.format != "labels" && info.output.format != "mask"
+       && info.output.format != "confidence" )
+    markInvalid( "unsupported output.format '" + info.output.format
+                 + "' (supported: probability, labels, mask, confidence)" );
 
   // --- Manifest v3 contract validation (additive; v1/v2 unaffected) -----------
   if ( inputsMalformed )
@@ -410,10 +496,47 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
 
 } // namespace
 
+std::string ModelDetectionContract::validate() const
+{
+  if ( layout != "xywh_objectness" && layout != "xywh_class_scores" )
+    return "output.detection.layout '" + layout
+             + "' is unsupported (supported: xywh_objectness, xywh_class_scores)";
+  if ( tensorLayout != "auto" && tensorLayout != "channels_first" && tensorLayout != "channels_last" )
+    return "output.detection.tensor_layout '" + tensorLayout
+             + "' is unsupported (supported: auto, channels_first, channels_last)";
+  if ( confThreshold < 0.0 || confThreshold > 1.0 )
+    return "output.detection.conf_threshold must be in [0, 1]";
+  if ( nmsIou <= 0.0 || nmsIou > 1.0 )
+    return "output.detection.nms_iou must be in (0, 1]";
+  if ( maxDetections < 1 )
+    return "output.detection.max_detections must be >= 1";
+  if ( classes.empty() )
+    return "output.detection.classes must declare at least one class name";
+  return {};
+}
+
+std::string ModelInfo::identityTag() const
+{
+  const std::string idPart = stableId();
+  const std::string &versionPart = modelVersion.empty() ? std::string( "0" ) : modelVersion;
+  return idPart + "@" + versionPart;
+}
+
 Json::Value ModelInfo::toJson() const
 {
   Json::Value out( Json::objectValue );
   out["name"] = name;
+  // Platform 4.0 identity surface (additive).
+  out["id"] = stableId();
+  out["model_version"] = modelVersion.empty() ? "0" : modelVersion;
+  if ( !license.empty() )
+    out["license"] = license;
+  if ( !source.empty() )
+    out["source"] = source;
+  if ( manifestVersion > 0 )
+    out["manifest_version"] = manifestVersion;
+  if ( !contentDigest.empty() )
+    out["content_digest"] = contentDigest;
   out["task"] = task;
   out["input"] = inputType;
   out["output"] = outputType;
@@ -452,6 +575,8 @@ Json::Value ModelInfo::toJson() const
   runtimeJson["supports_tiling"] = supportsTiling;
   runtimeJson["cpu_fallback"] = runtime.cpuFallback;
   runtimeJson["estimated_ram_mb"] = runtime.estimatedRamMb;
+  if ( !runtime.device.empty() )
+    runtimeJson["device"] = runtime.device;
   out["runtime"] = runtimeJson;
 
   // Manifest v2 surface (additive; PART B consumers ignore unknown keys).
@@ -564,7 +689,7 @@ Json::Value ModelInfo::toJson() const
     out["tiling"] = t;
   }
   if ( !output.tensorNames.empty() || !output.classes.empty() || output.threshold >= 0.0
-       || output.uncertainty != "none" )
+       || output.uncertainty != "none" || !output.format.empty() || output.detectionDeclared )
   {
     Json::Value o( Json::objectValue );
     if ( !output.type.empty() )
@@ -577,6 +702,19 @@ Json::Value ModelInfo::toJson() const
       o["threshold"] = output.threshold;
     if ( !output.uncertainty.empty() && output.uncertainty != "none" )
       o["uncertainty"] = output.uncertainty;
+    if ( !output.format.empty() )
+      o["format"] = output.format;
+    if ( output.detectionDeclared )
+    {
+      Json::Value d( Json::objectValue );
+      d["layout"] = output.detection.layout;
+      d["tensor_layout"] = output.detection.tensorLayout;
+      d["conf_threshold"] = output.detection.confThreshold;
+      d["nms_iou"] = output.detection.nmsIou;
+      d["max_detections"] = output.detection.maxDetections;
+      appendJsonArray( d, "classes", output.detection.classes );
+      o["detection"] = d;
+    }
     out["output_contract"] = o;
   }
   if ( postprocess.nms || postprocess.maskThreshold >= 0.0 || postprocess.polygonize
@@ -621,7 +759,7 @@ struct ModelCatalog::VerifiedArtifact
   QString path;
   unsigned long long sizeBytes = 0;
   qint64 mtimeMs = 0;
-  QString checksumHex;
+  std::string checksumHex;
 };
 
 ModelCatalog &ModelCatalog::instance()
@@ -697,16 +835,14 @@ bool ModelCatalog::verifyArtifactLocked( ModelInfo &info ) const
                  "artifact size mismatch: manifest declares " + std::to_string( info.artifact.sizeBytes )
                    + " bytes, file has "
                    + std::to_string( static_cast<unsigned long long>( artifactInfo.size() ) ) );
-  if ( info.artifact.checksum.empty() )
-    return true; // present, no digest declared → trust it
 
-  const QString expected = normalizedChecksum( info.artifact.checksum );
-  if ( expected.size() != 64 )
-    return fail( ModelReadiness::InvalidManifest,
-                 "artifact checksum is not a valid SHA-256 hex digest" );
+  // Platform 4.0 identity: ALWAYS hash the artifact bytes (declared checksum
+  // or not). The digest is the session-identity anchor — same path with
+  // different bytes must never share a runtime session. Bounded
+  // (path, size, mtime) memo so unchanged weights are hashed once.
   const qint64 mtimeMs = artifactInfo.lastModified().toMSecsSinceEpoch();
   const unsigned long long sizeBytes = static_cast<unsigned long long>( artifactInfo.size() );
-  QString actual;
+  std::string actual;
   for ( const auto &verified : mVerified )
   {
     if ( verified.path == resolved && verified.sizeBytes == sizeBytes && verified.mtimeMs == mtimeMs )
@@ -715,20 +851,29 @@ bool ModelCatalog::verifyArtifactLocked( ModelInfo &info ) const
       break;
     }
   }
-  if ( actual.isEmpty() )
+  if ( actual.empty() )
   {
-    actual = sha256File( resolved );
-    if ( actual.isEmpty() )
+    actual = artifactSha256Hex( resolved.toStdString() );
+    if ( actual.empty() )
       return fail( ModelReadiness::ChecksumMismatch,
-                   "artifact unreadable while verifying checksum: " + info.resolvedArtifactPath );
+                   "artifact unreadable while computing content digest: " + info.resolvedArtifactPath );
     if ( mVerified.size() > 64 )
       mVerified.clear(); // bounded cache; re-hashing is only a cost, never a correctness issue
     mVerified.push_back( VerifiedArtifact{ resolved, sizeBytes, mtimeMs, actual } );
   }
-  if ( actual != expected )
+  info.contentDigest = actual;
+
+  if ( info.artifact.checksum.empty() )
+    return true; // digest recorded for identity; no declared digest to enforce
+
+  const QString expected = normalizedChecksum( info.artifact.checksum );
+  if ( expected.size() != 64 )
+    return fail( ModelReadiness::InvalidManifest,
+                 "artifact checksum is not a valid SHA-256 hex digest" );
+  if ( QString::fromStdString( actual ) != expected )
     return fail( ModelReadiness::ChecksumMismatch,
                  "artifact checksum mismatch: expected " + expected.toStdString()
-                   + ", computed " + actual.toStdString() );
+                   + ", computed " + actual );
   return true;
 }
 
@@ -743,6 +888,7 @@ void ModelCatalog::ensureLoadedLocked() const
   if ( dir.exists() )
   {
     std::vector<std::string> seenNames;
+    std::vector<std::string> seenIds;
     const auto entries = dir.entryInfoList( QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name );
     for ( const auto &entry : entries )
     {
@@ -777,6 +923,15 @@ void ModelCatalog::ensureLoadedLocked() const
         continue;
       }
       seenNames.push_back( info.name );
+      // Platform 4.0 identity: an explicit `id` is also a uniqueness contract.
+      const std::string stable = info.stableId();
+      if ( std::find( seenIds.begin(), seenIds.end(), stable ) != seenIds.end() )
+      {
+        mIssues.push_back( { manifestPath.toStdString(),
+                             "duplicate model id '" + stable + "' (first manifest wins)" } );
+        continue;
+      }
+      seenIds.push_back( stable );
 
       // Catalog-static readiness: contract errors parsed above already set
       // InvalidManifest; otherwise verify the artifact itself (which sets
@@ -807,7 +962,18 @@ std::vector<ModelInfo> ModelCatalog::models() const
 {
   std::lock_guard<std::mutex> lock( catalogMutex() );
   ensureLoadedLocked();
-  return mModels;
+  std::vector<ModelInfo> combined = mModels;
+  combined.insert( combined.end(), mRegistered.begin(), mRegistered.end() );
+  // unregister() hides entries (scanned ones reappear on reload).
+  combined.erase( std::remove_if( combined.begin(), combined.end(),
+                                  [ this ]( const ModelInfo &model ) {
+                                    return std::find( mUnregistered.begin(), mUnregistered.end(),
+                                                      model.stableId() ) != mUnregistered.end()
+                                           || std::find( mUnregistered.begin(), mUnregistered.end(),
+                                                         model.name ) != mUnregistered.end();
+                                  } ),
+                  combined.end() );
+  return combined;
 }
 
 std::vector<ModelInfo> ModelCatalog::modelsByTask( const std::string &task ) const
@@ -820,16 +986,58 @@ std::vector<ModelInfo> ModelCatalog::modelsByTask( const std::string &task ) con
     if ( model.task == task )
       result.push_back( model );
   }
+  for ( const auto &model : mRegistered )
+  {
+    if ( model.task == task )
+      result.push_back( model );
+  }
+  // unregister() hides entries (scanned ones reappear on reload).
+  result.erase( std::remove_if( result.begin(), result.end(),
+                                [ this ]( const ModelInfo &model ) {
+                                  return std::find( mUnregistered.begin(), mUnregistered.end(),
+                                                    model.stableId() ) != mUnregistered.end()
+                                         || std::find( mUnregistered.begin(), mUnregistered.end(),
+                                                       model.name ) != mUnregistered.end();
+                                } ),
+                result.end() );
   return result;
 }
 
 std::optional<ModelInfo> ModelCatalog::find( const std::string &name ) const
 {
   std::lock_guard<std::mutex> lock( catalogMutex() );
+  return findLocked( name );
+}
+
+std::optional<ModelInfo> ModelCatalog::findLocked( const std::string &idOrName ) const
+{
   ensureLoadedLocked();
+  auto isUnregistered = [ & ]( const ModelInfo &model ) {
+    const std::string &stable = model.stableId();
+    return std::find( mUnregistered.begin(), mUnregistered.end(), model.name ) != mUnregistered.end()
+           || std::find( mUnregistered.begin(), mUnregistered.end(), stable ) != mUnregistered.end();
+  };
+  // 1) programmatic entries shadow scanned manifests;
+  // 2) stable id beats name;
+  // 3) name is the historical fallback.
+  for ( const auto &model : mRegistered )
+  {
+    if ( !isUnregistered( model ) && !model.id.empty() && model.id == idOrName )
+      return model;
+  }
   for ( const auto &model : mModels )
   {
-    if ( model.name == name )
+    if ( !isUnregistered( model ) && !model.id.empty() && model.id == idOrName )
+      return model;
+  }
+  for ( const auto &model : mRegistered )
+  {
+    if ( !isUnregistered( model ) && model.name == idOrName )
+      return model;
+  }
+  for ( const auto &model : mModels )
+  {
+    if ( !isUnregistered( model ) && model.name == idOrName )
       return model;
   }
   return std::nullopt;
@@ -846,11 +1054,21 @@ std::vector<ModelCandidate> ModelCatalog::rankModels( const ModelQueryCriteria &
 {
   std::lock_guard<std::mutex> lock( catalogMutex() );
   ensureLoadedLocked();
+  std::vector<ModelInfo> combined = mModels;
+  combined.insert( combined.end(), mRegistered.begin(), mRegistered.end() );
+  combined.erase( std::remove_if( combined.begin(), combined.end(),
+                                  [ this ]( const ModelInfo &model ) {
+                                    return std::find( mUnregistered.begin(), mUnregistered.end(),
+                                                      model.stableId() ) != mUnregistered.end()
+                                           || std::find( mUnregistered.begin(), mUnregistered.end(),
+                                                         model.name ) != mUnregistered.end();
+                                  } ),
+                  combined.end() );
 
   std::vector<ModelCandidate> candidates;
-  candidates.reserve( mModels.size() );
+  candidates.reserve( combined.size() );
 
-  for ( const auto &model : mModels )
+  for ( const auto &model : combined )
   {
     ModelCandidate cand;
     cand.model = model;
@@ -1075,6 +1293,203 @@ std::optional<std::string> ModelCatalog::resolveArtifactPath( const std::string 
     return std::nullopt;
   }
   return model->resolvedArtifactPath;
+}
+
+
+// --- Platform 4.0: authoritative registry surface ----------------------------
+
+bool ModelCatalog::registerManifestJson( const std::string &json, const std::string &source,
+                                         std::string *error )
+{
+  QJsonParseError parseError{};
+  const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( json ), &parseError );
+  if ( parseError.error != QJsonParseError::NoError || !doc.isObject() )
+  {
+    if ( error )
+      *error = "manifest is not valid JSON: " + parseError.errorString().toStdString();
+    return false;
+  }
+  ModelInfo info = parseManifest( doc.object(), source );
+  if ( info.name.empty() )
+  {
+    if ( error )
+      *error = "manifest has no 'name'";
+    return false;
+  }
+  if ( info.readiness == ModelReadiness::InvalidManifest )
+  {
+    if ( error )
+      *error = "manifest contract invalid: " + info.readinessReason;
+    return false;
+  }
+  std::lock_guard<std::mutex> lock( catalogMutex() );
+  // Artifact verification (sets Ready / MissingArtifact / ChecksumMismatch).
+  // A not-ready entry still registers — the registry mirrors reality; runs
+  // refuse non-ready models at execution time.
+  verifyArtifactLocked( info );
+  if ( info.readiness == ModelReadiness::Ready )
+    info.readinessReason.clear();
+  const std::string stable = info.stableId();
+  mUnregistered.erase( std::remove_if( mUnregistered.begin(), mUnregistered.end(),
+                                       [ & ]( const std::string &gone ) {
+                                         return gone == stable || gone == info.name;
+                                       } ),
+                       mUnregistered.end() );
+  mRegistered.erase( std::remove_if( mRegistered.begin(), mRegistered.end(),
+                                     [ & ]( const ModelInfo &existing ) {
+                                       return existing.stableId() == stable
+                                              || existing.name == info.name;
+                                     } ),
+                     mRegistered.end() );
+  mRegistered.push_back( std::move( info ) );
+  return true;
+}
+
+bool ModelCatalog::unregister( const std::string &idOrName )
+{
+  std::lock_guard<std::mutex> lock( catalogMutex() );
+  // Registered overlay entries are removed outright; scanned entries are
+  // shadowed until the next reload().
+  const std::size_t before = mRegistered.size();
+  mRegistered.erase( std::remove_if( mRegistered.begin(), mRegistered.end(),
+                                     [ & ]( const ModelInfo &existing ) {
+                                       return existing.stableId() == idOrName
+                                              || existing.name == idOrName;
+                                     } ),
+                     mRegistered.end() );
+  if ( mRegistered.size() != before )
+    return true;
+  if ( findLocked( idOrName ) )
+  {
+    if ( std::find( mUnregistered.begin(), mUnregistered.end(), idOrName ) == mUnregistered.end() )
+      mUnregistered.push_back( idOrName );
+    return true;
+  }
+  return false;
+}
+
+namespace {
+
+/// Catalog-level health report without re-locking (caller holds the mutex).
+Json::Value healthReportLocked( const ModelInfo &model )
+{
+  Json::Value out( Json::objectValue );
+  out["id"] = model.stableId();
+  out["identity_tag"] = model.identityTag();
+  out["readiness"] = modelReadinessName( model.readiness );
+  out["ok"] = model.readiness == ModelReadiness::Ready;
+  if ( !model.readinessReason.empty() )
+    out["readiness_reason"] = model.readinessReason;
+  out["artifact_present"] =
+    !model.resolvedArtifactPath.empty()
+    && QFileInfo( QString::fromStdString( model.resolvedArtifactPath ) ).isFile();
+  out["content_digest"] = model.contentDigest;
+  out["framework"] = model.framework;
+  out["runtime_device"] = model.runtime.device.empty() ? "auto" : model.runtime.device;
+  out["source_manifest"] = model.sourceManifest;
+  return out;
+}
+
+} // namespace
+
+Json::Value ModelCatalog::inspect( const std::string &idOrName ) const
+{
+  std::lock_guard<std::mutex> lock( catalogMutex() );
+  const auto model = findLocked( idOrName );
+  if ( !model )
+    return Json::Value( Json::nullValue );
+  Json::Value out = model->toJson();
+  out["identity_tag"] = model->identityTag();
+  out["stable_id"] = model->stableId();
+  out["health"] = healthReportLocked( *model );
+  return out;
+}
+
+std::vector<std::string> ModelCatalog::validateManifestJson( const std::string &json ) const
+{
+  std::vector<std::string> issues;
+  QJsonParseError parseError{};
+  const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( json ), &parseError );
+  if ( parseError.error != QJsonParseError::NoError || !doc.isObject() )
+  {
+    issues.push_back( "manifest is not valid JSON: " + parseError.errorString().toStdString() );
+    return issues;
+  }
+  ModelInfo info = parseManifest( doc.object(), std::string() );
+  if ( info.name.empty() )
+    issues.push_back( "manifest has no 'name'" );
+  if ( info.readiness == ModelReadiness::InvalidManifest && !info.readinessReason.empty() )
+    issues.push_back( info.readinessReason );
+  return issues;
+}
+
+std::optional<ModelInfo> ModelCatalog::resolve( const std::string &idVersionRef,
+                                                std::string *error ) const
+{
+  std::lock_guard<std::mutex> lock( catalogMutex() );
+  const std::string::size_type at = idVersionRef.rfind( '@' );
+  const std::string id = at == std::string::npos ? idVersionRef : idVersionRef.substr( 0, at );
+  const std::string version = at == std::string::npos ? std::string() : idVersionRef.substr( at + 1 );
+
+  std::vector<ModelInfo> matches;
+  for ( const auto &model : mRegistered )
+  {
+    if ( model.stableId() == id )
+      matches.push_back( model );
+  }
+  for ( const auto &model : mModels )
+  {
+    if ( model.stableId() == id )
+      matches.push_back( model );
+  }
+  if ( matches.empty() )
+  {
+    if ( error )
+      *error = "no model with id '" + id + "' in the registry";
+    return std::nullopt;
+  }
+
+  auto effectiveVersion = []( const ModelInfo &model ) {
+    return model.modelVersion.empty() ? std::string( "0" ) : model.modelVersion;
+  };
+
+  if ( version.empty() )
+  {
+    if ( matches.size() == 1 )
+      return matches.front();
+    // Bare-id ambiguity: resolve to the lexicographically latest version
+    // (deterministic, documented) instead of failing a valid reference.
+    const ModelInfo *latest = &matches.front();
+    for ( const auto &candidate : matches )
+    {
+      if ( effectiveVersion( candidate ) > effectiveVersion( *latest ) )
+        latest = &candidate;
+    }
+    return *latest;
+  }
+
+  for ( const auto &candidate : matches )
+  {
+    if ( effectiveVersion( candidate ) == version )
+      return candidate;
+  }
+  if ( error )
+  {
+    std::string available;
+    for ( const auto &candidate : matches )
+      available += ( available.empty() ? "" : ", " ) + effectiveVersion( candidate );
+    *error = "model '" + id + "' has no version '" + version + "' (available: " + available + ")";
+  }
+  return std::nullopt;
+}
+
+Json::Value ModelCatalog::health( const std::string &idOrName ) const
+{
+  std::lock_guard<std::mutex> lock( catalogMutex() );
+  const auto model = findLocked( idOrName );
+  if ( !model )
+    return Json::Value( Json::nullValue );
+  return healthReportLocked( *model );
 }
 
 } // namespace sicnu::operators
