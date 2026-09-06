@@ -68,6 +68,17 @@ void PreferencesDialog::registerExternalPage( const QString &title, QWidget *pag
     externalPages()[title] = page;
 }
 
+QWidget *PreferencesDialog::unregisterExternalPage( const QString &title )
+{
+    auto &pages = externalPages();
+    const auto it = pages.constFind( title );
+    if ( it == pages.constEnd() )
+        return nullptr;
+    QWidget *page = it.value();
+    pages.erase( it );
+    return page;
+}
+
 PreferencesDialog::PreferencesDialog(QWidget *parent)
     : QDialog(parent)
 {

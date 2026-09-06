@@ -23,6 +23,9 @@ enum class PluginState
     Blocked,      ///< blocked by host policy (allow/block list, trust)
     Loading,
     Loaded,
+    /// Unload in progress: dispatch refused, in-flight executions draining.
+    /// Transient — ends in Unloaded (drained) or back in Loaded (refused).
+    Quiescing,
     Failed,       ///< load/initialize/registration failed at runtime
     Unloaded,     ///< was loaded, then unloaded cleanly
 };

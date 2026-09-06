@@ -36,6 +36,7 @@
 #include "jobs/job_engine.h"
 #include "workflow/workflow_run_coordinator.h"
 #include "operators/framework/rs_operator_context.h"
+#include "exprs/plugin_registry.h"
 
 // QGIS C++ includes
 #include <qgsapplication.h>
@@ -579,6 +580,14 @@ int main(int argc, char *argv[])
     // singleton, checkpoint saves are atomic).
     sicnu::TaskCenter::instance().shutdown();
     sicnu::jobs::JobEngine::instance().shutdown();
+    // Plugin shutdown BEFORE widget/app destruction (#747, CLI ShutdownGuard
+    // parity): drain executor pools first (above), then quiesce + revoke +
+    // dlclose every exprs plugin while the full Qt/widget world is alive —
+    // plugin UI contributions are released through the window's shell sink,
+    // and plugin shutdown()/destructors never run after QApplication died.
+    // Without this, plugins unload in the registry static destructor after
+    // `delete app`, executing plugin code in a dead-Qt process.
+    exprs::PluginRegistry::instance().unloadAll();
     window.reset();
     delete logFile;
     delete app;

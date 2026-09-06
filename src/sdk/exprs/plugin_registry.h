@@ -78,8 +78,12 @@ public:
     std::vector<std::string> loadedPluginIds() const;
     /// Loaded handle for a plugin (nullptr when not loaded).
     const LoadedPlugin *loaded( const std::string &pluginId ) const;
-    /// Unloads a loaded plugin (calls shutdown + dlclose).
-    bool unload( const std::string &pluginId );
+    /// Unloads a loaded plugin (quiesce → revoke contributions → shutdown →
+    /// dlclose). Waits up to @p timeoutMs (0 = SICNU_PLUGIN_UNLOAD_TIMEOUT_MS,
+    /// default 30 s) for in-flight executions; a busy plugin is REFUSED with
+    /// a PluginInUse diagnostic and stays loaded. Returns false when the
+    /// plugin was not loaded or the unload was refused.
+    bool unload( const std::string &pluginId, int timeoutMs = 0 );
     /// Unloads every loaded plugin (host shutdown path).
     void unloadAll();
     /// Loads the plugin if not loaded yet; returns true when loaded.
@@ -90,6 +94,11 @@ public:
     /// Persists enable/disable in the user plugin index. Returns false when
     /// the plugin is unknown.
     bool setEnabled( const std::string &pluginId, bool enabled );
+    /// Snapshot of the persisted disabled-id list (conformance kit uses it
+    /// to run round-trip checks without mutating the user's choices).
+    std::vector<std::string> userDisabledIds() const;
+    /// Replaces the persisted disabled-id list (restore counterpart).
+    bool setUserDisabledIds( const std::vector<std::string> &ids );
     /// True when the plugin is neither user-disabled nor policy-blocked.
     bool isEnabled( const std::string &pluginId ) const;
 
