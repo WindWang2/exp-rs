@@ -19,6 +19,7 @@
 #include "app/project_context.h"
 #include <gdal.h>
 #include <cpl_conv.h>
+#include <sqlite3.h>
 
 #include "data/data_asset.h"
 #include "data/data_manager.h"
@@ -296,6 +297,251 @@ TEST_CASE( "Unknown workspace sections and fields are skipped, not fatal",
                       static_cast<void>( serializer.read( document, *project, *context ) );
                     } );
   REQUIRE( project->read( projectPath ) );
+
+  context->workspaceService().closeStore();
+}
+
+TEST_CASE( "Corrupt governance DB never silently downgrades a v3 project",
+           "[project][workspace_v3][fault][issue746]" )
+{
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString projectPath = dir.filePath( QStringLiteral( "fault.qgs" ) );
+  const QString dbPath = dir.filePath( QStringLiteral( "fault.governance.db" ) );
+
+  // ---- author a v3 project with governed state -------------------------------
+  {
+    sicnu::data::Result<std::unique_ptr<sicnu::app::ProjectContext>> created =
+        sicnu::app::ProjectContext::createHeadless();
+    REQUIRE( created.operator bool() );
+    std::unique_ptr<sicnu::app::ProjectContext> context = created.take();
+    REQUIRE( context->openWorkspaceStore( projectPath ) );
+    const RegisterResult registered =
+        context->dataManager().registerSource( RegisterRequest{ rasterSource() } );
+    REQUIRE( !registered.assetId.isNull() );
+    REQUIRE( !context->workspaceService()
+                  .createDataset( QStringLiteral( "fault-ds" ), DatasetKind::Training,
+                                  QStringList{ registered.assetId.toString() } )
+                  .isNull() );
+
+    sicnu::app::DataProjectSerializer serializer;
+    QObject signalReceiver;
+    QObject::connect( project, &QgsProject::writeProject, &signalReceiver,
+                      [&]( QDomDocument &document ) {
+                        static_cast<void>( serializer.write( document, *context ) );
+                      } );
+    REQUIRE( project->write( projectPath ) );
+    context->workspaceService().closeStore();
+  }
+
+  // ---- corrupt the governance DB on disk -------------------------------------
+  {
+    QFile db( dbPath );
+    REQUIRE( db.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    db.write( "this is not a sqlite database, just garbage bytes" );
+    db.close();
+  }
+
+  // ---- reopen with a failed store open: governed state must survive ----------
+  sicnu::data::Result<std::unique_ptr<sicnu::app::ProjectContext>> created =
+      sicnu::app::ProjectContext::createHeadless();
+  REQUIRE( created.operator bool() );
+  std::unique_ptr<sicnu::app::ProjectContext> context = created.take();
+  QString openError;
+  REQUIRE_FALSE( context->workspaceService().openStore( dbPath, &openError ) );
+
+  sicnu::app::DataProjectSerializer serializer;
+  QVector<sicnu::data::Diagnostic> readDiagnostics;
+  bool writeSucceeded = false;
+  QObject signalReceiver;
+  QObject::connect( project, &QgsProject::readProject, &signalReceiver,
+                    [&]( const QDomDocument &document ) {
+                      const sicnu::data::Result<void> result =
+                          serializer.read( document, *project, *context );
+                      readDiagnostics = result.diagnostics();
+                    } );
+  QObject::connect( project, &QgsProject::writeProject, &signalReceiver,
+                    [&]( QDomDocument &document ) {
+                      writeSucceeded = static_cast<bool>( serializer.write( document, *context ) );
+                    } );
+  REQUIRE( project->read( projectPath ) );
+
+  // The unavailable store is surfaced, and the document is cached as the
+  // last known governed state.
+  bool unavailableReported = false;
+  for ( const sicnu::data::Diagnostic &d : readDiagnostics )
+    unavailableReported |= d.code == QLatin1String( "workspace.store_unavailable" );
+  REQUIRE( unavailableReported );
+  REQUIRE( context->workspaceService().hasCachedProjectJson() );
+
+  // The save re-persists the cached governed document as v3 — never a v1
+  // downgrade that would permanently destroy the governed state.
+  REQUIRE( project->write( projectPath ) );
+  REQUIRE( writeSucceeded );
+  {
+    QFile saved( projectPath );
+    REQUIRE( saved.open( QIODevice::ReadOnly ) );
+    const QString xml = QString::fromUtf8( saved.readAll() );
+    saved.close();
+    REQUIRE( xml.contains( QStringLiteral( "version=\"3\"" ) ) );
+    REQUIRE( xml.contains( QStringLiteral( "<workspace" ) ) );
+    REQUIRE( xml.contains( QStringLiteral( "fault-ds" ) ) );
+  }
+
+  context->workspaceService().closeStore();
+}
+
+TEST_CASE( "Project switch never carries cached governed state across projects",
+           "[project][workspace_v3][fault][issue746]" )
+{
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString pathA = dir.filePath( QStringLiteral( "a.qgs" ) );
+  const QString pathB = dir.filePath( QStringLiteral( "b.qgs" ) );
+  const QString dbB = dir.filePath( QStringLiteral( "b.governance.db" ) );
+
+  sicnu::data::Result<std::unique_ptr<sicnu::app::ProjectContext>> created =
+      sicnu::app::ProjectContext::createHeadless();
+  REQUIRE( created.operator bool() );
+  std::unique_ptr<sicnu::app::ProjectContext> context = created.take();
+
+  // ---- project A: governed v3 -------------------------------------------------
+  REQUIRE( context->openWorkspaceStore( pathA ) );
+  REQUIRE( !context->workspaceService()
+                .createDataset( QStringLiteral( "project-a-ds" ), DatasetKind::Training )
+                .isNull() );
+  sicnu::app::DataProjectSerializer serializer;
+  QObject signalReceiver;
+  QObject::connect( project, &QgsProject::writeProject, &signalReceiver,
+                    [&]( QDomDocument &document ) {
+                      static_cast<void>( serializer.write( document, *context ) );
+                    } );
+  REQUIRE( project->write( pathA ) );
+  REQUIRE( context->workspaceService().hasCachedProjectJson() );
+
+  // ---- switch to project B whose governance store is corrupt ------------------
+  {
+    QFile db( dbB );
+    REQUIRE( db.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    db.write( "garbage" );
+    db.close();
+  }
+  REQUIRE( context->clearProject( *project ) );
+  // The transition must drop the cached document: project A's governed state
+  // must never bleed into project B's file.
+  REQUIRE_FALSE( context->workspaceService().hasCachedProjectJson() );
+  REQUIRE_FALSE( context->workspaceService().isV3Seen() );
+  REQUIRE_FALSE( context->workspaceService().openStore( dbB ) );
+
+  {
+    QFile projectBTemplate( pathB );
+    REQUIRE( projectBTemplate.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    projectBTemplate.close();
+  }
+  REQUIRE( project->write( pathB ) );
+  QFile savedB( pathB );
+  REQUIRE( savedB.open( QIODevice::ReadOnly ) );
+  const QString xmlB = QString::fromUtf8( savedB.readAll() );
+  savedB.close();
+  REQUIRE_FALSE( xmlB.contains( QStringLiteral( "project-a-ds" ) ) );
+  REQUIRE_FALSE( xmlB.contains( QStringLiteral( "version=\"3\"" ) ) );
+
+  context->workspaceService().closeStore();
+}
+
+TEST_CASE( "Newer-schema store surfaces restore failure and the document wins on save",
+           "[project][workspace_v3][fault][issue752]" )
+{
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString projectPath = dir.filePath( QStringLiteral( "readonly.qgs" ) );
+  const QString dbPath = dir.filePath( QStringLiteral( "readonly.governance.db" ) );
+
+  {
+    sicnu::data::Result<std::unique_ptr<sicnu::app::ProjectContext>> created =
+        sicnu::app::ProjectContext::createHeadless();
+    REQUIRE( created.operator bool() );
+    std::unique_ptr<sicnu::app::ProjectContext> context = created.take();
+    REQUIRE( context->openWorkspaceStore( projectPath ) );
+    REQUIRE( !context->workspaceService()
+                  .createDataset( QStringLiteral( "ro-ds" ), DatasetKind::Training )
+                  .isNull() );
+    sicnu::app::DataProjectSerializer serializer;
+    QObject signalReceiver;
+    QObject::connect( project, &QgsProject::writeProject, &signalReceiver,
+                      [&]( QDomDocument &document ) {
+                        static_cast<void>( serializer.write( document, *context ) );
+                      } );
+    REQUIRE( project->write( projectPath ) );
+    context->workspaceService().closeStore();
+  }
+
+  // Simulate a future schema: the store opens read-only (forward tolerance).
+  {
+    sqlite3 *raw = nullptr;
+    REQUIRE( sqlite3_open_v2( dbPath.toUtf8().constData(), &raw,
+                              SQLITE_OPEN_READWRITE, nullptr ) == SQLITE_OK );
+    char *err = nullptr;
+    REQUIRE( sqlite3_exec( raw, "UPDATE gov_meta SET value='2' WHERE key='schema_version'",
+                           nullptr, nullptr, &err ) == SQLITE_OK );
+    if ( err )
+      sqlite3_free( err );
+    sqlite3_close( raw );
+  }
+
+  sicnu::data::Result<std::unique_ptr<sicnu::app::ProjectContext>> created =
+      sicnu::app::ProjectContext::createHeadless();
+  REQUIRE( created.operator bool() );
+  std::unique_ptr<sicnu::app::ProjectContext> context = created.take();
+  REQUIRE( context->openWorkspaceStore( projectPath ) );
+  REQUIRE( context->workspaceService().store().isReadOnly() );
+
+  sicnu::app::DataProjectSerializer serializer;
+  QVector<sicnu::data::Diagnostic> readDiagnostics;
+  bool writeSucceeded = false;
+  QObject signalReceiver;
+  QObject::connect( project, &QgsProject::readProject, &signalReceiver,
+                    [&]( const QDomDocument &document ) {
+                      const sicnu::data::Result<void> result =
+                          serializer.read( document, *project, *context );
+                      readDiagnostics = result.diagnostics();
+                    } );
+  QObject::connect( project, &QgsProject::writeProject, &signalReceiver,
+                    [&]( QDomDocument &document ) {
+                      writeSucceeded = static_cast<bool>( serializer.write( document, *context ) );
+                    } );
+  REQUIRE( project->read( projectPath ) );
+
+  // The read-only condition and the failed restore are explicit diagnostics,
+  // never a silent no-op.
+  bool readOnlyReported = false;
+  bool restoreFailedReported = false;
+  for ( const sicnu::data::Diagnostic &d : readDiagnostics )
+  {
+    readOnlyReported |= d.code == QLatin1String( "workspace.store_read_only" );
+    restoreFailedReported |= d.code == QLatin1String( "workspace.restore_failed" );
+  }
+  REQUIRE( readOnlyReported );
+  REQUIRE( restoreFailedReported );
+
+  // Save: the document state (not the stale store rows) wins on the next save.
+  REQUIRE( project->write( projectPath ) );
+  REQUIRE( writeSucceeded );
+  QFile saved( projectPath );
+  REQUIRE( saved.open( QIODevice::ReadOnly ) );
+  const QString xml = QString::fromUtf8( saved.readAll() );
+  saved.close();
+  REQUIRE( xml.contains( QStringLiteral( "version=\"3\"" ) ) );
+  REQUIRE( xml.contains( QStringLiteral( "ro-ds" ) ) );
 
   context->workspaceService().closeStore();
 }

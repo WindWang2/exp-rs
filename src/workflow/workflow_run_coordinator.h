@@ -11,6 +11,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -91,6 +92,19 @@ class WorkflowRunCoordinator : public QObject {
     void setCheckpointDirectory( const QString &directory );
     QString checkpointDirectory() const;
 
+    /// Truthful run-state mirror (issue #754): the observer receives the run
+    /// identity and its ACTUAL lifecycle state at the meaningful transitions
+    /// — Running when a tracked pipeline starts, the real terminal state
+    /// (Completed/Failed/Canceled) at finalize, and Interrupted when crash
+    /// recovery reconciles the run. Governance (WorkspaceService::recordRun)
+    /// subscribes here so the runs index stops fabricating states. The
+    /// observer runs on the coordinator's thread with m_mutex held: it must
+    /// be cheap and non-reentrant.
+    using RunStateObserver =
+        std::function<void( const QString &runId, const QString &workflowId,
+                            const QString &state, qint64 startedMs, qint64 finishedMs )>;
+    void setRunStateObserver( RunStateObserver observer );
+
   private slots:
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
@@ -109,6 +123,9 @@ class WorkflowRunCoordinator : public QObject {
     QString checkpointDirectoryLocked() const;
     QString checkpointPathLocked( const std::string &runId ) const;
     QString checkpointPathFor( const std::string &runId ) const;
+    /// Invokes the run-state observer with @a run's current state. m_mutex
+    /// must be held (mirrors persistRunLocked's contract).
+    void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
 
     mutable std::mutex m_mutex;
     WorkflowCheckpointManager m_checkpoints;
@@ -120,6 +137,7 @@ class WorkflowRunCoordinator : public QObject {
     /// released at finalize / resume swap / submission failure.
     std::map<std::string, std::shared_ptr<WorkflowRunLock>> m_locksByRunId;
     bool m_connected = false;
+    RunStateObserver m_runStateObserver;
 };
 
 } // namespace workflow

@@ -193,6 +193,9 @@ Json::Value StepPlan::toJson() const
   root["taskId"] = static_cast<Json::Int64>( taskId );
   root["resultPayload"] = resultPayload;
   root["outputLayerPath"] = outputLayerPath;
+  root["outputSizeBytes"] = static_cast<Json::Int64>( outputSizeBytes );
+  root["outputMtimeMs"] = static_cast<Json::Int64>( outputMtimeMs );
+  root["outputDigest"] = outputDigest;
   root["errorMessage"] = errorMessage;
   root["startTime"] = startTime;
   root["endTime"] = endTime;
@@ -258,6 +261,12 @@ StepPlan StepPlan::fromJson( const Json::Value &json, std::string *error )
     plan.resultPayload = json["resultPayload"];
   if ( json.isMember( "outputLayerPath" ) && json["outputLayerPath"].isString() )
     plan.outputLayerPath = json["outputLayerPath"].asString();
+  if ( json.isMember( "outputSizeBytes" ) && json["outputSizeBytes"].isInt64() )
+    plan.outputSizeBytes = json["outputSizeBytes"].asInt64();
+  if ( json.isMember( "outputMtimeMs" ) && json["outputMtimeMs"].isInt64() )
+    plan.outputMtimeMs = json["outputMtimeMs"].asInt64();
+  if ( json.isMember( "outputDigest" ) && json["outputDigest"].isString() )
+    plan.outputDigest = json["outputDigest"].asString();
   if ( json.isMember( "errorMessage" ) && json["errorMessage"].isString() )
     plan.errorMessage = json["errorMessage"].asString();
   if ( json.isMember( "startTime" ) && json["startTime"].isString() )

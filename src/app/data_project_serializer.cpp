@@ -121,11 +121,28 @@ DataProjectSerializer::write(QDomDocument &document,
   // Format v3 (Workspace Governance 3.0): the legacy v1 blocks below stay
   // byte-compatible; the governed workspace state is ADDED as an extra block.
   // A store-less context keeps writing plain v1 (backward compatible always).
-  // Downgrade guard (review P0): with the store unavailable but a governed
-  // document cached from a previous read, re-persist THAT instead of silently
-  // dropping all governed state by rewriting a v1 file.
-  const bool writeV3 = context.workspaceService().isStoreOpen()
-                       || context.workspaceService().hasCachedProjectJson();
+  // Downgrade guard (review P0 + issue #746): a save may never silently
+  // destroy governed state it cannot currently verify. Preference order:
+  //   1. live writable store  -> serialize from the store;
+  //   2. cached document      -> re-persist the last known governed state
+  //      (store closed, corrupt, or read-only);
+  //   3. v3 seen but no document recoverable -> refuse: report failure instead
+  //      of rewriting a v3 project as v1 (the GUI surfaces the diagnostic;
+  //      the on-disk state is stale but the loss is loud, not silent).
+  const sicnu::workspace::WorkspaceService &workspaceService =
+      context.workspaceService();
+  const bool liveStore = workspaceService.storeIntegrityOk();
+  const bool hasCache = workspaceService.hasCachedProjectJson();
+  const bool writeV3 = liveStore || hasCache || workspaceService.isV3Seen();
+  if (writeV3 && !liveStore && !hasCache) {
+    return data::Result<void>::failure(projectDiagnostic(
+        QStringLiteral("workspace.downgrade_refused"),
+        QStringLiteral("governed state was previously written as v3 but the "
+                       "governance store is unavailable and no cached "
+                       "document exists; refusing to downgrade the project "
+                       "to v1 because that would permanently destroy the "
+                       "governed state")));
+  }
   extension.setAttribute(QStringLiteral("version"),
                          writeV3 ? QStringLiteral("3")
                                  : QString::fromLatin1(extensionVersion));
@@ -297,10 +314,9 @@ DataProjectSerializer::write(QDomDocument &document,
   // collections/exports/mappings. One JSON document, one text node — mirrors
   // the <derivation>/<recipe>/<descriptor> payload pattern above.
   if (writeV3) {
-    const QJsonObject workspaceDocument =
-        context.workspaceService().isStoreOpen()
-            ? context.workspaceService().toProjectJson()
-            : context.workspaceService().cachedProjectJson();
+    const QJsonObject workspaceDocument = liveStore
+        ? workspaceService.toProjectJson()
+        : workspaceService.cachedProjectJson();
     QDomElement workspaceElement =
         document.createElement(QStringLiteral("workspace"));
     workspaceElement.setAttribute(QStringLiteral("schemaVersion"),
@@ -652,18 +668,16 @@ data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
   // migrates in memory (M1) by mirroring the restored assets into the
   // governance store — the original file is never rewritten during read.
   // Projects without the SICNU extension element never touch this path.
+  // Issue #746: the v3 document is parsed and cached EVEN when the store is
+  // unavailable, so a later save re-persists the governed state instead of
+  // silently downgrading the project to v1 (fromProjectJson owns the
+  // store_unavailable / store_read_only / restore_failed diagnostics).
   sicnu::workspace::WorkspaceService &workspace = context.workspaceService();
   if (extension.isNull()) {
     return failed ? data::Result<void>::failure( std::move( diagnostics ) )
                   : data::Result<void>::success( std::move( diagnostics ) );
   }
-  if (!workspace.isStoreOpen()) {
-    diagnostics.append(data::Diagnostic{
-        QStringLiteral("workspace.store_unavailable"),
-        QStringLiteral("governance store is not open; governed state was not "
-                       "restored and the project stays legacy v1 on next save"),
-        data::DiagnosticSeverity::Warning});
-  } else if (isV3) {
+  if (isV3) {
     const QDomElement workspaceElement =
         extension.firstChildElement(QStringLiteral("workspace"));
     if (!workspaceElement.isNull()) {
@@ -684,7 +698,8 @@ data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
       }
     }
     // Assets mirror last so governed state (datasets etc.) sees stable rows.
-    workspace.mirrorAllAssets();
+    if (workspace.isStoreOpen())
+      workspace.mirrorAllAssets();
   } else if (isV1) {
     const qint64 mirrored = workspace.mirrorAllAssets();
     diagnostics.append(data::Diagnostic{

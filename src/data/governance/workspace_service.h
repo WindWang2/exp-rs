@@ -51,6 +51,15 @@ class WorkspaceService : public QObject
     bool openStore( const QString &dbPath, QString *errorOut = nullptr );
     void closeStore();
     bool isStoreOpen() const { return m_store.isOpen(); }
+    /// True when the store can be trusted as a serialization source right
+    /// now: open, writable, and passing an integrity probe. A corrupt store
+    /// must never feed a save — the cached document is used instead
+    /// (issue #746: corrupt-DB-while-open data-loss route).
+    bool storeIntegrityOk() const;
+    /// Path the store was opened from (empty when never opened). Remembered
+    /// even when the open failed or the store is read-only, so the snapshot
+    /// and diagnostics paths can locate the DB file.
+    QString storePath() const { return m_storePath; }
     GovernanceStore &store() { return m_store; }
     const GovernanceStore &store() const { return m_store; }
 
@@ -154,6 +163,14 @@ class WorkspaceService : public QObject
     /// True when a governed snapshot is cached from a previous read/write and
     /// can be re-persisted even with the store unavailable (downgrade guard).
     bool hasCachedProjectJson() const { return !m_cachedProjectJson.isEmpty(); }
+    /// True once a v3 workspace document has been read or serialized in this
+    /// session. When set, a save may never silently rewrite the project as v1
+    /// (issue #746 downgrade guard).
+    bool isV3Seen() const { return m_v3Seen; }
+    /// Drops the cached governed document and the v3-seen mark. Called on
+    /// project transitions (clearProject) so governed state cached for one
+    /// project can never bleed into another project's file.
+    void clearCachedDocument();
     /// The last serialized (or restored) governed document.
     QJsonObject cachedProjectJson() const { return m_cachedProjectJson; }
     /// Serializes the governed (non-asset) workspace state for the v3 DOM block.
@@ -177,10 +194,14 @@ class WorkspaceService : public QObject
     void syncRunAnchors( const sicnu::data::DerivationRecord &record );
 
     GovernanceStore m_store;
+    QString m_storePath;
     /// Last serialized workspace document — the downgrade guard (review P0):
     /// a project opened as v3 and saved with a broken/unavailable store keeps
     /// its governed state instead of being silently rewritten as v1.
     mutable QJsonObject m_cachedProjectJson;
+    /// Set when a v3 governed document was read or written in this session;
+    /// cleared with the cache on project transitions.
+    mutable bool m_v3Seen = false;
     sicnu::data::DataManager *m_dataManager = nullptr;
     QMetaObject::Connection m_assetAddedConn;
     QMetaObject::Connection m_assetChangedConn;

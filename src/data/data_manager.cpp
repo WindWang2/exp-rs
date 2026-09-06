@@ -9,6 +9,7 @@
 #include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QJsonDocument>
 #include <QPointer>
 #include <QStringList>
@@ -303,6 +304,60 @@ DataManager::DataManager( std::unique_ptr<internal::SourceProviderRegistry> prov
 
 DataManager::~DataManager() = default;
 
+// --- external content watcher (issue #749) ------------------------------------
+
+void DataManager::ensureContentWatcher()
+{
+  if ( m_contentWatcher )
+    return;
+  m_contentWatcher = new QFileSystemWatcher( this );
+  connect( m_contentWatcher, &QFileSystemWatcher::fileChanged, this,
+           &DataManager::onSourceFileChanged );
+}
+
+void DataManager::watchAssetSource( const QString &canonicalPath )
+{
+  if ( canonicalPath.isEmpty() || !QFileInfo( canonicalPath ).isFile() )
+    return; // remote/virtual sources use validator identity, not file watching
+  if ( m_watchedContentStats.contains( canonicalPath ) )
+    return;
+  if ( m_watchedContentStats.size() >= m_watchLimit )
+    return; // bounded: very large catalogs fall back to stat-guarded caching
+  const QFileInfo info( canonicalPath );
+  m_watchedContentStats.insert( canonicalPath,
+                                qMakePair( info.size(), info.lastModified().toMSecsSinceEpoch() ) );
+  ensureContentWatcher();
+  m_contentWatcher->addPath( canonicalPath );
+}
+
+void DataManager::unwatchAssetSource( const QString &canonicalPath )
+{
+  if ( !m_watchedContentStats.remove( canonicalPath ) )
+    return;
+  if ( m_contentWatcher )
+    m_contentWatcher->removePath( canonicalPath );
+}
+
+void DataManager::onSourceFileChanged( const QString &path )
+{
+  auto it = m_watchedContentStats.find( path );
+  if ( it == m_watchedContentStats.end() )
+    return;
+  // QFileSystemWatcher drops replaced files: re-arm the watch on every fire.
+  if ( m_contentWatcher )
+    m_contentWatcher->addPath( path );
+  if ( !QFileInfo( path ).isFile() )
+    return; // transient replacement window; the next change event re-checks
+  const QFileInfo info( path );
+  const std::pair<qint64, qint64> observed{ info.size(), info.lastModified().toMSecsSinceEpoch() };
+  if ( observed == it.value() )
+    return; // redundant fire-up: identity unchanged
+  it.value() = observed;
+  const auto snapshot = findByPath( path );
+  if ( snapshot )
+    notifyExternalContentChange( snapshot->id() );
+}
+
 RegisterResult DataManager::registerSource( const RegisterRequest &request )
 {
   if ( QThread::currentThread() != thread() )
@@ -346,7 +401,10 @@ RegisterResult DataManager::registerSource( const RegisterRequest &request )
       && record.derivation.has_value()
       && record.derivation->executionFingerprint == request.executionFingerprint;
     if ( sameExecutionRepublished || ( !request.notifyUpdateOnReuse && !structureDiffers ) )
+    {
+      watchAssetSource( record.snapshot.source().canonicalSource );
       return RegisterResult{ record.snapshot.id(), true, {} };
+    }
 
     // Treat the asset as updated: refresh the snapshot from the fresh
     // resolution, advance the revision one step (mirroring relocate), and
@@ -371,6 +429,7 @@ RegisterResult DataManager::registerSource( const RegisterRequest &request )
     m_impl->catalogGeneration++;
 
     emit assetChanged( existingId );
+    watchAssetSource( record.snapshot.source().canonicalSource );
     return RegisterResult{ existingId, true, resolved.diagnostics() };
   }
 
@@ -392,6 +451,7 @@ RegisterResult DataManager::registerSource( const RegisterRequest &request )
   m_impl->catalogGeneration++;
 
   emit assetAdded( id );
+  watchAssetSource( normalizedDescriptor.canonicalSource );
   return RegisterResult{ id, false, resolved.diagnostics() };
 }
 
@@ -460,6 +520,7 @@ Result<AssetId> DataManager::restoreSource( const RestoreRequest &request )
     Impl::AssetRecord{ sourceKey, std::move( snapshot ) } );
   m_impl->catalogGeneration++;
   emit assetAdded( request.id );
+  watchAssetSource( normalizedDescriptor.canonicalSource );
   return Result<AssetId>::success( request.id, resolved.diagnostics() );
 }
 
@@ -545,6 +606,8 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
   recordIt->sourceKey = newSourceKey;
   recordIt->snapshot = std::move( updated );
   m_impl->catalogGeneration++;
+  unwatchAssetSource( current.source().canonicalSource );
+  watchAssetSource( recordIt->snapshot.source().canonicalSource );
 
   // Regenerate dependent virtual rasters: their recipes reference this asset
   // by AssetId, so a relocation must rewrite the generated VRT against the new
@@ -1463,6 +1526,7 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
         continue;
       for ( const LeaseImpact &impact : m_impl->leaseImpacts( dependentId ) )
         revokeLease( impact.lease );
+      unwatchAssetSource( dependentIt->snapshot.source().canonicalSource );
       m_impl->records.erase( dependentIt );
       pruneChildFromCollections( dependentId );
       pruneDependencyEdgesOf( dependentId );
@@ -1502,7 +1566,9 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
                   QStringLiteral( "The asset is no longer registered" ),
                   DiagnosticSeverity::Error } );
   }
+  const QString unloadedSourcePath = eraseIt->snapshot.source().canonicalSource;
   m_impl->records.erase( eraseIt );
+  unwatchAssetSource( unloadedSourcePath );
   pruneChildFromCollections( confirmedPlan.assetId() );
   pruneDependencyEdgesOf( confirmedPlan.assetId() );
   m_impl->catalogGeneration++;
@@ -1602,6 +1668,7 @@ ReapResult DataManager::reap( const ReapRequest &request )
     freshIt->snapshot.capabilities().testFlag( AssetCapability::DeletableSource );
 
   m_impl->records.erase( freshIt );
+  unwatchAssetSource( sourcePath );
   pruneChildFromCollections( request.id );
   pruneDependencyEdgesOf( request.id );
   m_impl->catalogGeneration++;
