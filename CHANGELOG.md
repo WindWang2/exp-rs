@@ -2,7 +2,69 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
-## [Unreleased] - 2026-09-07
+## [Unreleased] - 2026-09-08
+
+### 🛰️ Remote Sensing I/O, Sensor Product & Interoperability Foundation 5.0 (goal series, ADR 0134–0141)
+
+Extends the I/O Foundation 4.0 core (`src/geospatial`, Qt-free) with the
+resource URI model, the probe contract, per-dataset capabilities, the sensor
+product registry, bounded remote access and the Pi/CLI surfaces. All
+foundational contracts (canonical metadata, CRS policy, windowed raster /
+batched vector I/O, atomic publication, COG presets + validator, STAC Item
+mapping, multidim slices, certified format profiles) land on the current
+master baseline.
+
+- **Resource URI & identity (ADR 0135)**: one strict classifier for every
+  source string (local file/dir, directory product, http(s), VSI
+  remote/virtual, subdataset selector, virtual dataset, STAC asset,
+  in-memory); identity vs display — percent-decoded, credential-redacted
+  (`X-Amz-Signature`, tokens, userinfo) for logs/UI; `..`-traversal
+  containment in `resolveAgainst`; Windows drive/UNC/long-path/Unicode
+  (UTF-8) coverage (`test_io_uri`).
+- **Probe contract & capabilities (ADR 0136)**: `probeResource` pipeline
+  (URI → bounded signature → GDAL identify/open → product adapter → lazy
+  metadata); content outranks the file name; COG detection is structural;
+  typed failures (NotFound/OpenFailed/CorruptData);
+  `resolveDatasetCapabilities` answers what *this dataset* supports
+  (window/block/multiband/multidim/subdataset/georef/crs/nodata/mask/
+  overviews/remote-range/streaming/vector/attributes/transactions).
+- **Bounded raster access**: `blockSize`/`readBlock`, planned tile walks
+  (`planTileWalk`/`iterateTiles`) with per-tile cancellation, overview
+  introspection + explicit `OverviewPolicy` (Exact default — a silently
+  sampled overview is a wrong-answer factory), and `readWindowResampled` as
+  the only resampling entry point (caller-declared size/level/kernel,
+  upsampling refused).
+- **Sensor product adapters (ADR 0137)**: `ProductAdapterRegistry` (Landsat
+  MTL / Sentinel-2 SAFE / Sentinel-1 SAFE / MODIS / GenericRaster fallback)
+  enumerates constituents (measurements/masks/annotations/metadata/browse)
+  with native band names, canonical lowercase band roles (+ SAR vv/vh/hh/hv),
+  wavelengths and declared resolutions; Sentinel-2 resolution groups stay
+  distinct (no silent resample); typed completeness verdicts (Complete /
+  PartialReadable / Invalid / UnsupportedVersion) listing exactly what is
+  missing (`test_io_product_registry`).
+- **Multidimensional policy (ADR 0138)**: slices address dimensions by name
+  with a cell budget; CF honesty (unlabeled time axes stay unlabeled);
+  Zarr/GeoParquet capability-gated with explicit `unavailable_in_build` — no
+  new runtime dependency.
+- **Remote I/O (ADR 0139)**: bounded `probeRemote` (reachable/size/
+  range-capable) over CPL HTTP with timeout/retry/MAX_SIZE bounds and
+  credential-safe reporting; local HTTP range fixture with byte accounting +
+  failure injection proves a `/vsicurl/` window read stays far below the full
+  payload and that rangeless origins are detected before pixel access
+  (`test_io_remote_range`).
+- **I/O error model (ADR 0141)**: `GeoError` taxonomy extended (NotFound,
+  PermissionDenied, UnsupportedFormat/Product, InvalidMetadata, CorruptData,
+  NetworkError, Timeout, ResourceExhausted, Incompatible) with stable string
+  names and scoped CPL error hygiene.
+- **Surfaces**: CLI `data probe|capabilities|product describe|stac` joins
+  `inspect|doctor`; Pi/MCP gains read-only `io:probe`, `io:capabilities`,
+  `io:product` tools (thin wrappers — no parsing in tool code).
+- **Windows fix**: sdk plugin_loader routed its UI-contribution lookup
+  through the platform symbol seam (direct `::dlsym` broke the Win32 build).
+- **Docs**: docs/io/foundation-5-audit.md, docs/io/examples.md,
+  docs/products/product-adapters.md, docs/interoperability/format-matrix.md +
+  product-matrix.md; ADR 0134–0141.
+
 
 ### 🤖 Model Runtime & AI Inference Platform 4.0 (goal series, ADR 0130)
 - **Manifest 4.0 identity**: `id`/`model_version`/`license`/`source`/`manifest_version` fields; the artifact's SHA-256 content digest is always computed and anchors session identity (same path, different bytes never share a session); `runtime.device` token (`cpu`|`cuda`|`cuda:N`|`auto`).
