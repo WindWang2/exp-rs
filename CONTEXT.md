@@ -65,8 +65,16 @@ The process-wide singleton (`SpatialToolRegistry`, `src/agent/spatial_tools/`) o
 _Avoid_: Tool catalog (that is the unified AgentToolCatalog), Interaction Tool Registry
 
 **Model Catalog**:
-The model-runtime manifest registry (`ModelCatalog`, `src/operators/framework/`) scanning `models/*/model.json` (name, task, input/output contract, framework, GPU, accuracy, weight path). `rs:infer` resolves a catalog name to its weight path; `spatial:list_models` exposes it to agents. Weights are never committed — manifests document pluggable runtimes.
+The model-runtime manifest registry (`ModelCatalog`, `src/operators/framework/`) scanning `models/*/model.json` (identity: stable id + version + SHA-256 content digest; contracts: input/preprocess/tiling/output/runtime/device, Platform 4.0). Surfaces reference models by stable id (`resolve(id@version)`); programming interface: register/unregister/inspect/validate/health. Weights are never committed — manifests document pluggable runtimes.
 _Avoid_: Model zoo, Weight manager, Inference backend
+
+**Model Execution Seam**:
+The single model execution path (`runModelInference`, `src/operators/runtime/model_execution_service.*`): resolve → contract gates → runtime verdict → device-aware session acquire → tile engine → atomic publish. Served by `rs:infer` (generic raster), `rs:segment`, `rs:detect` (vector output via the detection decode contract), `rs:embedding` — thin adapters with no engine, session or preprocess code of their own. All of CLI / Workflow / TaskCenter / MCP / Pi / GUI task helpers execute models through it.
+_Avoid_: Per-model inference loop, Second runtime path
+
+**Model Session Pool**:
+The bounded session cache owned by `ModelRuntimeRegistry`: keyed by (framework, resolved device, artifact content digest), LRU-bounded with optional idle eviction, per-key release and pool statistics. Unload means no longer handed out; live sessions stay valid until dropped.
+_Avoid_: Unbounded cache, Path-keyed sessions
 
 **Algorithm Capability Sidecar**:
 An optional per-algorithm JSON manifest under `data/processing/algorithm_meta/` (task, input, output, gpu, accuracy, notes, tags) loaded by the `AlgorithmMetaStore` overlay and attached to MCP discovery responses as a `catalog` object. Descriptors stay untouched — the sidecar is pure capability documentation for agent task→algorithm matching.
@@ -580,4 +588,6 @@ ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision
 - **ADR 0126**: OBIA GUI Operator Convergence (issue #663 — one execution path for OBIA segmentation/features/labeling/classification; engine policy, full features, interactive labels and hyperparameters move into the rs:obia_* contracts)
 - **ADR 0127**: MapSpec Declarative Cartography
 - **ADR 0128**: Spatial Scientist Contracts
+- **ADR 0130**: Model Runtime & AI Inference Platform 4.0
+- **ADR 0130**: Model Runtime & AI Inference Platform 4.0
 - **ADR 0129**: Project Workspace, Data Governance & Reproducibility Platform 3.0

@@ -2,6 +2,19 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-07
+
+### Model Runtime & AI Inference Platform 4.0 (goal series, ADR 0130)
+- **Manifest 4.0 identity**: `id`/`model_version`/`license`/`source`/`manifest_version` fields; the artifact's SHA-256 content digest is always computed and anchors session identity (same path, different bytes never share a session); `runtime.device` token (`cpu`|`cuda`|`cuda:N`|`auto`).
+- **Unified runtime contract**: `IModelRuntime` gains warmup/cancel/health/memory-estimate; deterministic device resolution (`auto` = lowest fitting CUDA device, else CPU); structured failure classification (OOM/cancel/shape/corrupt) driving the OOM ladder.
+- **Authoritative tiler**: atomic publish (same-dir stage + previous-output backup + restore on failure) for raster and vector outputs; OOM retries batches tile-by-tile (batch=1 is terminal with a diagnostic); memory stays O(batch x tile); a 100k x 100k logical raster runs as bounded windows.
+- **Declarative postprocess**: `output.format` (`labels` argmax raster + palette / `mask` / `confidence`); `output.detection` decode contract (v5/v8 layouts, NMS tile dedup, georeferenced GPKG/GeoJSON/SHP); unimplemented knobs keep failing loudly.
+- **Authoritative registry**: `registerManifestJson`/`unregister`/`inspect`/`validateManifestJson`/`resolve(id@version)`/`health` on `ModelCatalog`; all surfaces reference models by stable id.
+- **One execution seam**: `runModelInference` serves `rs:infer` (unchanged payload keys), `rs:segment`, `rs:detect`, `rs:embedding`; bounded session pool (LRU + idle eviction + per-key release + stats).
+- **Failure matrix + benchmark**: 14 dedicated failure/device/pool/registry tests (corrupt bytes, OOM ladder, mid-run cancel/crash, disk-full, removed artifact, 100k logical extent, concurrent pool bounds); env-gated benchmark (cold/warm load, tiles/s, pixels/s, RSS, cancel latency -> benchmarks/model-runtime-4.json).
+- **Docs**: docs/models/model-manifest.md, docs/inference/ (runtime architecture, tiled inference, device & memory policy, backend compatibility, pre/post reference, authoring guide), ADR 0130.
+- **Windows baseline fixes (master)**: MSVC fcntl.h for the durable-rename path; AUTOMOC listing for the HTML/JS/JSON lexer stub headers (+ dropped hand-written moc aliases); gmtime_s; forward-declaration tag alignment (AssetSnapshot, AlgorithmTaskInfo).
+
 ## [Unreleased] - 2026-09-05
 
 ### 🗂️ Project Workspace, Data Governance & Reproducibility Platform 3.0 (goal series, ADR 0129)
