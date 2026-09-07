@@ -1,0 +1,14 @@
+{
+  "gpu" : true,
+  "id" : "rs:embedding",
+  "input" : "raster",
+  "notes" : "Writes the model's feature stack as float32 bands (NaN = invalid pixels). aggregate=mean adds a bounded per-scene mean vector to the result payload; the stack itself is never materialized whole.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "inference",
+    "embedding",
+    "deep-learning"
+  ],
+  "task" : "embedding"
+}

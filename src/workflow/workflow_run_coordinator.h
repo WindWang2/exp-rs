@@ -94,6 +94,13 @@ class WorkflowRunCoordinator : public QObject {
   private slots:
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
+  signals:
+    /// Emitted on every tracked-run state transition (issue #754): the
+    /// workflow id, the new state name, and the effective start/finish
+    /// stamps (epoch ms; finishedMs is 0 until a terminal state).
+    void runStateChanged( const QString &runId, const QString &workflowId,
+                          const QString &state, qint64 startedMs, qint64 finishedMs );
+
   private:
     WorkflowRunCoordinator();
     ~WorkflowRunCoordinator() override;
@@ -105,6 +112,10 @@ class WorkflowRunCoordinator : public QObject {
     /// Terminal roll-up + ArtifactGC + checkpoint retention. Called with
     /// m_mutex held when the last step of a tracked run went terminal.
     void finalizeRunLocked( long pipelineId, WorkflowRun &run );
+    /// Emits the run-state change and refreshes the checkpoint's state stamp.
+    /// Called with m_mutex held (the *_Locked convention); effectiveStart
+    /// falls back to the run's creation stamp when <= 0 (issue #754).
+    void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
     /// m_mutex-free directory read for call paths that already hold it.
     QString checkpointDirectoryLocked() const;
     QString checkpointPathLocked( const std::string &runId ) const;

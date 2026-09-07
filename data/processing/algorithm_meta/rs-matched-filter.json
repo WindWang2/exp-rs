@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:matched_filter",
+  "input" : "raster",
+  "notes" : "Three-pass streaming detection (background mean, covariance, score) over the same valid-pixel predicate as rs:rx_anomaly; bit-exact grade. Signed scores: threshold downstream.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "detection",
+    "target"
+  ],
+  "task" : "target-detection"
+}

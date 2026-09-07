@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:ace",
+  "input" : "raster",
+  "notes" : "Three-pass streaming detection sharing the matched filter's background pipeline; scores in [0,1] (1 = whitened spectrum parallel to the target); bit-exact grade.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "detection",
+    "target"
+  ],
+  "task" : "target-detection"
+}
