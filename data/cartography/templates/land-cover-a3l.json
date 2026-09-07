@@ -1,0 +1,125 @@
+{
+  "id": "land-cover-a3l",
+  "version": 1,
+  "extends": "land-cover-a4l",
+  "description": "Land-cover product map with locator inset, class-area chart and standard furniture.",
+  "page": {
+    "width_mm": 420,
+    "height_mm": 297
+  },
+  "slots": [
+    {
+      "role": "map.main",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        30.0,
+        326.0,
+        231.0
+      ]
+    },
+    {
+      "role": "map.locator",
+      "accepts": "inset_maps",
+      "rect_mm": [
+        276.0,
+        213.0,
+        56.0,
+        42.0
+      ],
+      "content": {
+        "size_fraction": 0.25
+      }
+    },
+    {
+      "role": "title.main",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        12.0,
+        396.0,
+        12.0
+      ]
+    },
+    {
+      "role": "legend.primary",
+      "accepts": "legends",
+      "rect_mm": [
+        338.0,
+        30.0,
+        70.0,
+        183.0
+      ],
+      "content": {
+        "title": "图例"
+      }
+    },
+    {
+      "role": "chart.class-area",
+      "accepts": "charts",
+      "rect_mm": [
+        338.0,
+        219.0,
+        70.0,
+        42.0
+      ],
+      "content": {
+        "chart": {
+          "kind": "bar",
+          "binding": {
+            "mode": "inline",
+            "data": [
+              {
+                "label": "forest",
+                "value": 42
+              },
+              {
+                "label": "crop",
+                "value": 27
+              },
+              {
+                "label": "water",
+                "value": 12
+              },
+              {
+                "label": "built",
+                "value": 9
+              }
+            ]
+          }
+        },
+        "title": "类面积"
+      }
+    },
+    {
+      "role": "scalebar.primary",
+      "accepts": "scale_bars",
+      "rect_mm": [
+        14.0,
+        269.0,
+        48,
+        10
+      ]
+    },
+    {
+      "role": "north_arrow.primary",
+      "accepts": "north_arrows",
+      "rect_mm": [
+        320.0,
+        34.0,
+        12,
+        12
+      ]
+    },
+    {
+      "role": "source.primary",
+      "accepts": "source_notes",
+      "rect_mm": [
+        88.0,
+        271.0,
+        300.0,
+        8
+      ]
+    }
+  ]
+}

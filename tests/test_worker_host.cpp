@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "processing/framework/local_worker_host.h"
+#include "processing/framework/local_worker_pool.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QCoreApplication>
@@ -22,6 +23,8 @@
 #endif
 
 using sicnu::processing::runInLocalWorker;
+using sicnu::processing::LocalWorkerPool;
+using sicnu::processing::LocalWorkerPoolConfig;
 
 namespace
 {
@@ -125,4 +128,103 @@ TEST_CASE( "worker host cancel path terminates an unresponsive worker",
     }
     canceller.join();
     REQUIRE( typedFailure );
+}
+
+TEST_CASE( "worker pool reuses a warm worker across jobs and reports health",
+           "[worker_pool][warm_reuse]" )
+{
+    LocalWorkerPoolConfig config;
+    config.workerProgram = QStringLiteral( SICNU_WORKER_EXE );
+    config.maxWorkers = 1;
+    config.minWarmWorkers = 1;
+    LocalWorkerPool pool;
+    QString error;
+    REQUIRE( pool.start( config, &error ) );
+
+    // The raster must outlive the run: build it in a stable temp dir.
+    static QTemporaryDir stableDir;
+    const QString input = stableDir.filePath( "pool-labels.tif" );
+    writeLabelRaster( input );
+    Json::Value params;
+    params["input"] = input.toStdString();
+    params["output"] = stableDir.filePath( "pool-a.tif" ).toStdString();
+    params["recode_map"] = "{\"1\":5,\"2\":4,\"3\":3,\"4\":2,\"5\":1}";
+
+    const auto first = pool.run( "rs:recode", params );
+    REQUIRE( first.isObject() );
+    REQUIRE( pool.health().totalRuns == 1 );
+
+    const auto second = pool.run( "rs:recode", params );
+    REQUIRE( second.isObject() );
+    const auto health = pool.health();
+    REQUIRE( health.totalRuns == 2 );
+    // Warm reuse: one worker served both jobs (no spawn churn between them).
+    REQUIRE( health.aliveWorkers <= 1 );
+    REQUIRE( health.healthy() );
+    pool.shutdown();
+    REQUIRE_FALSE( pool.isRunning() );
+}
+
+TEST_CASE( "worker pool refuses jobs after shutdown", "[worker_pool][shutdown]" )
+{
+    LocalWorkerPoolConfig config;
+    config.workerProgram = QStringLiteral( SICNU_WORKER_EXE );
+    LocalWorkerPool pool;
+    REQUIRE( pool.start( config ) );
+    pool.shutdown();
+    bool typedRefusal = false;
+    try
+    {
+        (void)pool.run( "rs:recode", Json::Value( Json::objectValue ) );
+    }
+    catch ( const std::runtime_error &e )
+    {
+        typedRefusal = std::string( e.what() ).find( "worker pool" ) != std::string::npos;
+    }
+    REQUIRE( typedRefusal );
+}
+
+TEST_CASE( "worker pool recycles a worker past its lifetime budget",
+           "[worker_pool][recycle]" )
+{
+    LocalWorkerPoolConfig config;
+    config.workerProgram = QStringLiteral( SICNU_WORKER_EXE );
+    config.maxWorkers = 1;
+    config.maxJobsPerWorker = 1; // memory recycling: a new worker every job
+    LocalWorkerPool pool;
+    REQUIRE( pool.start( config ) );
+
+    static QTemporaryDir stableDir;
+    const QString input = stableDir.filePath( "recycle-labels.tif" );
+    writeLabelRaster( input );
+    Json::Value params;
+    params["input"] = input.toStdString();
+    params["output"] = stableDir.filePath( "recycle-out.tif" ).toStdString();
+    params["recode_map"] = "{\"1\":5,\"2\":4,\"3\":3,\"4\":2,\"5\":1}";
+    REQUIRE( pool.run( "rs:recode", params ).isObject() );
+    REQUIRE( pool.run( "rs:recode", params ).isObject() );
+    REQUIRE( pool.health().totalRecycles >= 1 );
+    pool.shutdown();
+}
+
+TEST_CASE( "worker pool reports a typed failure for a broken worker program",
+           "[worker_pool][crash]" )
+{
+    LocalWorkerPoolConfig config;
+    config.workerProgram = QStringLiteral( "/bin/true" ); // dies pre-handshake
+    LocalWorkerPool pool;
+    REQUIRE( pool.start( config ) );
+    bool typedFailure = false;
+    try
+    {
+        (void)pool.run( "rs:recode", Json::Value( Json::objectValue ) );
+    }
+    catch ( const std::runtime_error &e )
+    {
+        const std::string what = e.what();
+        typedFailure = what.find( "worker" ) != std::string::npos;
+    }
+    REQUIRE( typedFailure );
+    REQUIRE( pool.health().totalCrashes >= 0 ); // health stays queryable
+    pool.shutdown();
 }

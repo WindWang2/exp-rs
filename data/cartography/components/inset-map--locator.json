@@ -1,0 +1,35 @@
+{
+  "id": "inset-map/locator",
+  "version": 1,
+  "category": "inset-map",
+  "semantic_roles": [
+    "map.locator"
+  ],
+  "description": "Overview locator: small-frame extent outline of the main map's coverage.",
+  "parameters": {
+    "size_fraction": 0.25
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "bottom-right",
+      "top-left"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 1,
+    "min_size_mm": [
+      25,
+      25
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": true
+  },
+  "data_bindings": [
+    {
+      "name": "main_map",
+      "source": "map_ref",
+      "required": true
+    }
+  ]
+}

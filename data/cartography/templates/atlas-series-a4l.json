@@ -1,0 +1,92 @@
+{
+  "id": "atlas-series-a4l",
+  "version": 1,
+  "description": "Map-series sheet with the atlas hook enabled (per-feature coverage and file names).",
+  "page": {
+    "width_mm": 297,
+    "height_mm": 210,
+    "atlas": {
+      "enabled": true,
+      "coverage_layer": "admin_regions",
+      "filename_expression": "'sheet_' || $id"
+    }
+  },
+  "style": {
+    "token_set": "scientific-light",
+    "medium": "print"
+  },
+  "slots": [
+    {
+      "role": "map.main",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        30.0,
+        203.0,
+        144.0
+      ]
+    },
+    {
+      "role": "title.main",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        12.0,
+        273.0,
+        12.0
+      ]
+    },
+    {
+      "role": "legend.primary",
+      "accepts": "legends",
+      "rect_mm": [
+        215.0,
+        30.0,
+        70.0,
+        144.0
+      ],
+      "content": {
+        "title": "图例"
+      }
+    },
+    {
+      "role": "scalebar.primary",
+      "accepts": "scale_bars",
+      "rect_mm": [
+        14.0,
+        182.0,
+        48,
+        10
+      ]
+    },
+    {
+      "role": "north_arrow.primary",
+      "accepts": "north_arrows",
+      "rect_mm": [
+        68.0,
+        182.0,
+        12,
+        12
+      ]
+    },
+    {
+      "role": "source.primary",
+      "accepts": "source_notes",
+      "rect_mm": [
+        88.0,
+        184.0,
+        177.0,
+        8
+      ]
+    }
+  ],
+  "suitable_tasks": [
+    "atlas",
+    "series"
+  ],
+  "product_type": "atlas",
+  "recommended_components": [
+    "north-arrow/minimal",
+    "grid/graticule"
+  ]
+}

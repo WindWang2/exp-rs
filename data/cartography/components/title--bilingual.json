@@ -1,0 +1,49 @@
+{
+  "id": "title/bilingual",
+  "version": 1,
+  "category": "title",
+  "semantic_roles": [
+    "title.main"
+  ],
+  "description": "Two-line bilingual title (CJK primary line, Latin secondary line) rendered as one label block.",
+  "parameters": {
+    "font": {
+      "size_pt": 18,
+      "bold": true
+    }
+  },
+  "defaults": {
+    "semantic_role": "title.main",
+    "text": "标题\nTitle"
+  },
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": [
+      "top-center",
+      "top-left"
+    ],
+    "margin_mm": 8,
+    "max_count_per_page": 1,
+    "min_size_mm": [
+      60,
+      14
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "publication",
+      "report"
+    ]
+  },
+  "validation": {
+    "min_font_pt": 10
+  },
+  "data_bindings": [
+    {
+      "name": "text",
+      "source": "params.title",
+      "required": true
+    }
+  ]
+}

@@ -16,11 +16,13 @@ namespace sicnu::workspace
 // Need WAL checkpoint access before copying the DB file.
 namespace
 {
+// Snapshot consistency contract (issue #751): the WAL is folded into the main
+// DB file before the copy so the DB file alone is consistent. A failed
+// checkpoint makes the caller refuse the DB copy (fail-conservative) instead
+// of copying a hot WAL database with the log discarded.
 bool checkpointStore( GovernanceStore &store )
 {
-    // GovernanceStore exposes integrity/clear; the checkpoint runs through a
-    // best-effort sqlite call guarded by store state (open/read-only).
-    return store.isOpen();
+    return store.checkpointForBackup();
 }
 
 void pruneSnapshots( const QString &snapshotDir, const QString &base, int keep, int *pruned )
@@ -71,8 +73,6 @@ SnapshotReport SnapshotService::createSnapshot( const QString &projectFile, cons
         return report;
     }
 
-    checkpointStore( m_service.store() );
-
     // Project file (and any sidecar .governance.db).
     const QString projectCopy = QDir( destination ).filePath( projectInfo.fileName() );
     if ( !QFile::copy( projectFile, projectCopy ) )
@@ -83,12 +83,27 @@ SnapshotReport SnapshotService::createSnapshot( const QString &projectFile, cons
     }
     if ( m_service.isStoreOpen() )
     {
-        const QString dbPath = m_service.store().meta( QStringLiteral( "db_path" ) );
+        const QString dbPath = m_service.store().storePath();
         if ( !dbPath.isEmpty() && QFileInfo::exists( dbPath ) )
         {
+            if ( !checkpointStore( m_service.store() ) )
+            {
+                // Refuse rather than copy a database whose recent writes may
+                // still live only in the WAL (snapshot would lose them, and a
+                // concurrent writer could tear the copy). A read-only store
+                // cannot run TRUNCATE either — snapshots need a writable
+                // governance store by contract.
+                report.error = QStringLiteral(
+                    "governance store WAL could not be checkpointed; refusing "
+                    "an inconsistent snapshot (retry with no active writers)" );
+                QDir( destination ).removeRecursively();
+                return report;
+            }
             QFile::copy( dbPath, QDir( destination ).filePath( QFileInfo( dbPath ).fileName() ) );
-            // WAL/SHM sidecars are intentionally not copied; the checkpoint
-            // already folded the log into the main DB file.
+            // After a successful TRUNCATE the log is folded into the main DB
+            // file and reset — copying the DB file alone is the consistency
+            // contract (issue #751). The -shm sidecar is never copied:
+            // SQLite rebuilds and validates it, and it mutates under readers.
         }
     }
 

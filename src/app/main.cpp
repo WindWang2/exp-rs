@@ -366,26 +366,10 @@ int main(int argc, char *argv[])
             QDockWidget *ribbonDock = safeWindow->findChild<QDockWidget *>( QStringLiteral( "rsRibbonDock" ) );
             QToolBar *mapTb = safeWindow->findChild<QToolBar *>( QStringLiteral( "mapToolsToolBar" ) );
             QToolBar *digTb = safeWindow->findChild<QToolBar *>( QStringLiteral( "digitizeToolBar" ) );
-            QWidget *band = safeWindow->findChild<QWidget *>( QStringLiteral( "rsBandRail" ) );
-            if ( !band )
-            {
-                // BandCompositionRail may use different object name
-                const auto all = safeWindow->findChildren<QWidget *>();
-                for ( QWidget *w : all )
-                {
-                    if ( w && w->metaObject()->className()
-                         && QString::fromLatin1( w->metaObject()->className() ).contains( QLatin1String( "BandComposition" ) ) )
-                    {
-                        band = w;
-                        break;
-                    }
-                }
-            }
 
             dumpW( "window", safeWindow.data() );
             dumpW( "ribbonDock", ribbonDock );
             dumpW( "chrome", chrome );
-            dumpW( "band", band );
             dumpW( "strip", strip );
             dumpW( "mapTools", mapTb );
             dumpW( "digitize", digTb );
@@ -473,12 +457,6 @@ int main(int argc, char *argv[])
                           << " (height=" << ribbonDock->height() << ", expect>=158)\n";
                 ok = false;
             }
-            // Band composition rail must stay out of product chrome.
-            if ( band && band->isVisible() && band->height() > 2 )
-            {
-                std::cerr << "[DEBUG-tb] FAIL: band composition rail still visible\n";
-                ok = false;
-            }
             // Flow host: map tools should live under rsToolbarFlowHost when visible.
             if ( mapTb && mapTb->isVisible() )
             {
@@ -528,20 +506,12 @@ int main(int argc, char *argv[])
 
             // Product shell: empty Task Center should not be open by default.
             QDockWidget *jobDock = safeWindow->findChild<QDockWidget *>( QStringLiteral( "rsJobPanelDock" ) );
-            QDockWidget *legacyTc = safeWindow->findChild<QDockWidget *>( QStringLiteral( "TaskCenterDock" ) );
             dumpW( "jobPanel", jobDock );
-            dumpW( "legacyTaskCenterDock", legacyTc );
             if ( jobDock && jobDock->isVisible() )
             {
                 std::cerr << "[DEBUG-tb] FAIL: rsJobPanelDock should be hidden by default\n";
                 ok = false;
             }
-            if ( legacyTc && legacyTc->isVisible() )
-            {
-                std::cerr << "[DEBUG-tb] FAIL: legacy TaskCenterDock is visible\n";
-                ok = false;
-            }
-
             if ( ok )
                 std::cerr << "[DEBUG-tb] PASS: under-ribbon toolbar + task chrome defaults OK\n";
             else

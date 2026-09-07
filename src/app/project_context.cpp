@@ -8,6 +8,9 @@
 #include <qgsproject.h>
 #include <qgsproviderregistry.h>
 
+#include "data/governance/governance_types.h"
+#include "workflow/workflow_run_coordinator.h"
+
 namespace sicnu::app {
 
 namespace {
@@ -96,6 +99,9 @@ ProjectContext::~ProjectContext() {
               "teardown and was not reaped",
               qPrintable( id.toString() ) );
   }
+  // The run-state mirror connection uses m_workspaceService as its context
+  // object, so it dies with the service member — the coordinator singleton
+  // can never invoke into destroyed state.
   m_workspaceService.closeStore();
 }
 
@@ -162,9 +168,32 @@ bool ProjectContext::openWorkspaceStore( const QString &projectFile ) {
   QString error;
   const bool opened = m_workspaceService.openStore( storePath, &error );
   if ( opened ) {
-    m_workspaceService.store().setMeta(
-        QStringLiteral( "db_path" ), storePath );
     m_workspaceService.mirrorAllAssets( /*reconcileGhosts=*/true );
+    // Truthful run-state mirror (issue #754): workflow lifecycle transitions
+    // land in the governance runs index through this queued connection, so
+    // project:summary / search / bundles report what actually happened
+    // instead of a fabricated "Completed". The WorkspaceService member is
+    // the connection context: the binding dies with it, so the singleton
+    // coordinator can never invoke into destroyed state.
+    sicnu::workflow::WorkflowRunCoordinator &coordinator =
+        sicnu::workflow::WorkflowRunCoordinator::instance();
+    // QueuedConnection: the coordinator emits with its mutex held — the
+    // governance write must run after the coordinator lock is released, never
+    // inside it.
+    QObject::connect( &coordinator, &sicnu::workflow::WorkflowRunCoordinator::runStateChanged,
+                      &m_workspaceService,
+                      [ this ]( const QString &runId, const QString &workflowId,
+                                const QString &state, qint64 startedMs, qint64 finishedMs ) {
+                        sicnu::workspace::RunRecord run;
+                        run.id = runId;
+                        run.workflowId = workflowId;
+                        run.state = state;
+                        run.startedMs = startedMs;
+                        run.finishedMs = finishedMs;
+                        run.header.name = workflowId.isEmpty() ? runId : workflowId;
+                        m_workspaceService.recordRun( run );
+                      },
+                      Qt::QueuedConnection );
   }
   return opened;
 }
@@ -365,8 +394,12 @@ data::Result<void> ProjectContext::clearProject(QgsProject &project) {
 
   // Governed workspace state is project-scoped: a cleared project starts with
   // a cleared governance index (catalog rows only — no payload is touched).
+  // The cached governed document and v3-seen mark are dropped too: they belong
+  // to the closing project and must never bleed into the next one's file
+  // (issue #746 cross-project contamination).
   if ( m_workspaceService.isStoreOpen() )
     m_workspaceService.store().clearAll();
+  m_workspaceService.clearCachedDocument();
 
   project.clear();
   return data::Result<void>::success();

@@ -13,6 +13,13 @@
 #include "temporal_workspace_types.h"
 #include "virtual_raster_recipe.h"
 
+#include <QHash>
+#include <QPair>
+#include <QSet>
+
+class QFileSystemWatcher;
+class QTimer;
+
 namespace sicnu::data
 {
 
@@ -363,6 +370,26 @@ class DataManager : public QObject
     /// by `restoreVirtualRaster` and its idempotent re-restore path.
     void restoreVirtualRasterEdges( const RestoreVirtualRasterRequest &request,
                                     QVector<Diagnostic> &diagnostics );
+
+    // --- external content watcher (issue #749) -------------------------------
+    // Bounded QFileSystemWatcher over local-file asset sources: an
+    // out-of-band rewrite now advances the asset revision through
+    // notifyExternalContentChange instead of staying invisible. Baseline
+    // stats filter redundant fire-ups; the watcher bound caps memory and
+    // inotify pressure (SICNU_DATA_WATCH_LIMIT, default 4096).
+    void ensureContentWatcher();
+    void watchAssetSource( const QString &canonicalPath );
+    void unwatchAssetSource( const QString &canonicalPath );
+    void onSourceFileChanged( const QString &path );
+
+    QFileSystemWatcher *m_contentWatcher = nullptr;
+    QHash<QString, QPair<qint64, qint64>> m_watchedContentStats; // path → {size, mtime}
+    /// Bounded re-arm bookkeeping for watches that failed to re-arm after an
+    /// atomic replacement (1 s retries, ~1 min before the entry is dropped).
+    QTimer *m_watchRearmTimer = nullptr;
+    QSet<QString> m_watchRearmPending;
+    QHash<QString, int> m_watchRearmAttempts;
+    void scheduleWatchRearm( const QString &path );
 };
 
 } // namespace sicnu::data

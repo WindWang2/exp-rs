@@ -117,3 +117,73 @@ TEST_CASE( "Theme: Light and Dark stylesheets exist and have selector parity", "
     REQUIRE( darkSelectors.contains( sel ) );
   }
 }
+
+// ---------------------------------------------------------------------------
+// UX 4.0 Milestone F: the C++ token layer (src/app/design_tokens.h) must stay in
+// sync with the QSS design-token headers. The QSS header comments are the
+// human-facing contract; the C++ constants are what runtime code reads.
+// Changing one without the other silently splits the design system in two.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+bool qssHeaderContainsToken( const QString &qss, const QString &tokenHex )
+{
+    // The token header comment sits at the top of each QSS file.
+    const QString head = qss.left( 1200 );
+    return head.contains( tokenHex, Qt::CaseInsensitive );
+}
+
+} // namespace
+
+TEST_CASE( "Theme: C++ design tokens mirror the QSS design tokens", "[theme][tokens][ux4]" )
+{
+  const QString lightQss = readSource( QStringLiteral( "resources/styles.qss" ) );
+  const QString darkQss = readSource( QStringLiteral( "resources/styles-dark.qss" ) );
+  const QString tokens = readSource( QStringLiteral( "src/app/design_tokens.h" ) );
+
+  REQUIRE_FALSE( lightQss.isEmpty() );
+  REQUIRE_FALSE( darkQss.isEmpty() );
+  REQUIRE_FALSE( tokens.isEmpty() );
+
+  // QSS header tokens ↔ C++ light-theme constants.
+  const QStringList lightTokens = {
+    QStringLiteral( "#F4F6F8" ), QStringLiteral( "#FFFFFF" ),
+    QStringLiteral( "#1C2430" ), QStringLiteral( "#5A6573" ),
+    QStringLiteral( "#0B6E4F" ), QStringLiteral( "#1A7F37" ),
+    QStringLiteral( "#B58100" ), QStringLiteral( "#C9372C" ),
+    QStringLiteral( "#6E56CF" ),
+  };
+  for ( const QString &hex : lightTokens )
+  {
+    INFO( hex.toStdString() );
+    REQUIRE( qssHeaderContainsToken( lightQss, hex ) );
+    REQUIRE( tokens.contains( hex, Qt::CaseInsensitive ) );
+  }
+
+  // QSS dark tokens ↔ C++ dark-theme constants.
+  const QStringList darkTokens = {
+    QStringLiteral( "#1A1D23" ), QStringLiteral( "#1E2229" ),
+    QStringLiteral( "#E8ECF1" ), QStringLiteral( "#A8B0BC" ),
+    QStringLiteral( "#2BB673" ), QStringLiteral( "#3DCF6A" ),
+    QStringLiteral( "#F07167" ), QStringLiteral( "#4DA3E0" ),
+  };
+  for ( const QString &hex : darkTokens )
+  {
+    INFO( hex.toStdString() );
+    REQUIRE( tokens.contains( hex, Qt::CaseInsensitive ) );
+    REQUIRE( qssHeaderContainsToken( darkQss, hex ) );
+  }
+
+  // The pipeline editor's canvas badge palette is the single documented
+  // exception: a deliberately dark slate graphics scene in both themes
+  // (docs/ui-architecture.md#exceptions). Its colors must not leak into
+  // panel/table code — a broader statusColor re-definition there would
+  // reintroduce the pre-4.0 divergence.
+  const QString jobPanel = readSource( QStringLiteral( "src/app/shell/rs_job_panel.cpp" ) );
+  REQUIRE( jobPanel.contains( QStringLiteral( "SicnuUi::Tokens::statusOk" ) ) );
+  REQUIRE( jobPanel.contains( QStringLiteral( "SicnuUi::Tokens::themeIsDark" ) ) );
+  const QString georefList =
+    readSource( QStringLiteral( "src/app/georeferencer/rs_georef_task_list.cpp" ) );
+  REQUIRE( georefList.contains( QStringLiteral( "SicnuUi::Tokens::statusOk" ) ) );
+}

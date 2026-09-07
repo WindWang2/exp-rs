@@ -44,6 +44,11 @@
 | 28 | Classification & Post-Process Dialogs | R1/R2, M2 | 5 | 5 | ✓ | ✓ |
 | 29 | Docking Panels & Empty States | R3, M3 | 5 | 5 | ✓ | ✓ |
 | 30 | UI Sanity & Layout Standards (QGroupBox/ButtonBox/Hints) | R1/R2, M4 | 10 | 10 | ✓ | ✓ |
+| 31 | Workspace Browser Wiring (governance dock contract) | UX4-A/D, M1 | ✓ | ✓ | ✓ | ✓ |
+| 32 | Band Tool Operators (rs:band_ratio / extract_bands / contrast_stretch) | UX4-C, M1 | ✓ | ✓ | ✓ | ✓ |
+| 33 | Schema Form Builder v2 (validation, x-ui-type editors) | UX4-B, M1 | ✓ | ✓ | ✓ | ✓ |
+| 34 | RsResultSummary (shared structured result view) | UX4-E, M1 | ✓ | ✓ | ✓ | ✓ |
+| 35 | Shortcut Conflicts (shell action host) | UX4-G, M1 | ✓ | ✓ | ✓ | ✓ |
 
 ## Test Architecture
 - Test Runner: CTest & Catch2 test executables.

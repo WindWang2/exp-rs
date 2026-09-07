@@ -201,6 +201,20 @@ struct ProvenanceFixture
         if ( done >= 2 )
             pb.resultPayload = port( bPath );
         pc.status = "Running";
+        // Completion identity stamps (issue #750): production folds these at
+        // the Completed transition; the seeded pre-crash checkpoint carries
+        // the same stat identity so the resume gate accepts the surviving
+        // artifacts it can verify.
+        const auto stampIdentity = []( StepPlan &plan, const QString &path ) {
+            const QFileInfo info( path );
+            if ( plan.status == "Completed" && info.isFile() )
+            {
+                plan.outputSizeBytes = info.size();
+                plan.outputMtimeMs = info.lastModified().toMSecsSinceEpoch();
+            }
+        };
+        stampIdentity( pa, aPath );
+        stampIdentity( pb, bPath );
         plans = { pa, pb, pc };
         run.setStepPlans( plans );
 

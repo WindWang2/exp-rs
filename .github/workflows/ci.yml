@@ -341,5 +341,10 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Verify macOS Build
+        # -j2, NOT --parallel (all cores): macOS runners have 7GB RAM and 3-4
+        # clang processes on QGIS-scale translation units (~2-3GB each) OOM
+        # the runner itself — it dies mid-compile with "lost communication
+        # with the server" (observed 3x in a row at 1-3h in). Two jobs keep
+        # peak RSS inside the budget; ccache absorbs the extra wall time.
         run: |
-          cmake --build build-mac --parallel
+          cmake --build build-mac --parallel 2

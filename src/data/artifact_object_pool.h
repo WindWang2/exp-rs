@@ -85,12 +85,22 @@ class ArtifactObjectPool
     /// (oldest lastTouch first). Returns bytes freed.
     qint64 evictToBytes( qint64 maxBytes );
 
+    /// Eviction age-out grace for trash records (production default: 60 s).
+    /// Exposed so fault-injection harnesses can exercise eviction
+    /// deterministically without real-time waits.
+    void setEvictionGraceMs( qint64 graceMs ) { m_evictionGraceMs = graceMs; }
+
   private:
     struct Counters;
     bool m_enabled = false;
     QString m_root;
     QString m_objectsDir;
     ArtifactStore m_store;
+    qint64 m_evictionGraceMs = 60 * 1000;
+    /// Incremental storage accounting (issue #758-5): -1 = unknown; otherwise
+    /// the last known objects-dir total, maintained by put() additions and
+    /// eviction removals so the under-budget fast path skips the tree walk.
+    mutable qint64 m_cachedTotalBytes = -1;
 };
 
 } // namespace sicnu::data

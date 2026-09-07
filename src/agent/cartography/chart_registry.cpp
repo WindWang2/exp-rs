@@ -20,7 +20,8 @@ namespace sicnu::agent::cartography {
 
 namespace {
 
-const char *const kChartKinds[] = { "bar", "line", "pie", "histogram", "area", "scatter" };
+const char *const kChartKinds[] = { "bar", "line", "pie", "histogram", "area", "scatter",
+                                    "stacked_bar", "matrix", "metric" };
 
 bool isKnownKind( const std::string &kind )
 {
@@ -72,11 +73,26 @@ std::vector<std::pair<QString, double>> inlineData( const Json::Value &chart, bo
   return points;
 }
 
-void drawAxes( QPainter &painter, const QRectF &plotRect, double maxValue )
+QColor styleTextColor( const Json::Value &style )
+{
+  if ( style.isObject() && style.isMember( "text_color" ) && style["text_color"].isString() )
+  {
+    const QString hex = QString::fromStdString( style["text_color"].asString() );
+    if ( QColor::isValidColor( hex ) )
+      return QColor( hex );
+  }
+  return QColor( 0x20, 0x20, 0x20 );
+}
+
+void drawAxes( QPainter &painter, const QRectF &plotRect, double maxValue, bool showGrid = true,
+               const QColor &textColor = QColor( 0x20, 0x20, 0x20 ) )
 {
   painter.setPen( QPen( QColor( 0x90, 0x90, 0x90 ), 1 ) );
   painter.drawLine( plotRect.bottomLeft(), plotRect.bottomRight() );
   painter.drawLine( plotRect.bottomLeft(), plotRect.topLeft() );
+  if ( !showGrid )
+    return;
+  painter.setPen( textColor );
   for ( int tick = 0; tick <= 4; ++tick )
   {
     const double y = plotRect.bottom() - plotRect.height() * tick / 4.0;
@@ -90,26 +106,13 @@ void drawAxes( QPainter &painter, const QRectF &plotRect, double maxValue )
 bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSizeF &size,
                         QString *error )
 {
-  bool dataOk = false;
-  const std::vector<std::pair<QString, double>> points = inlineData( chart, &dataOk );
-  if ( !dataOk || points.empty() )
-  {
-    if ( error )
-      *error = QStringLiteral( "inline chart needs binding.data with at least one entry" );
-    return false;
-  }
-
   const std::string kind = chart.get( "kind", "bar" ).asString();
   const QString title = QString::fromStdString( chart.get( "title", "" ).asString() );
-
-  double maxValue = 0.0;
-  for ( const auto &[ label, value ] : points )
-  {
-    Q_UNUSED( label );
-    maxValue = std::max( maxValue, std::fabs( value ) );
-  }
-  if ( maxValue <= 0 )
-    maxValue = 1.0;
+  const QColor textColor = styleTextColor( chart["style"] );
+  bool showGrid = true;
+  if ( chart.isMember( "style" ) && chart["style"].isMember( "show_grid" ) &&
+       chart["style"]["show_grid"].isBool() )
+    showGrid = chart["style"]["show_grid"].asBool();
 
   QFont font = painter.font();
   int fontPt = 10;
@@ -118,6 +121,186 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     fontPt = std::clamp( chart["style"]["font_pt"].asInt(), 6, 36 );
   font.setPointSizeF( fontPt );
   painter.setFont( font );
+
+  bool dataOk = false;
+  const std::vector<std::pair<QString, double>> points = inlineData( chart, &dataOk );
+  // matrix/metric branches validate their own binding shapes below; the
+  // generic two-value scale (points) only gates the remaining kinds.
+  const bool genericKind = kind != "matrix" && kind != "metric";
+  if ( !dataOk || points.empty() )
+  {
+    if ( genericKind )
+    {
+      if ( error )
+        *error = QStringLiteral( "inline chart needs binding.data with at least one entry" );
+      return false;
+    }
+  }
+
+  // --- matrix charts: labeled value grid (confusion/change matrices) -------
+  if ( kind == "matrix" )
+  {
+    const Json::Value &binding = chart["binding"];
+    const Json::Value &matrix = binding.get( "matrix", Json::Value() );
+    if ( !matrix.isObject() || !matrix.isMember( "labels" ) || !matrix["labels"].isArray() ||
+         !matrix.isMember( "rows" ) || !matrix["rows"].isArray() || matrix["rows"].empty() ||
+         matrix["rows"].size() != matrix["labels"].size() )
+    {
+      if ( error )
+        *error = QStringLiteral( "matrix chart needs binding.matrix {labels: [n], rows: [n][n]}" );
+      return false;
+    }
+    const int n = static_cast<int>( matrix["labels"].size() );
+    if ( n > 24 )
+    {
+      if ( error )
+        *error = QStringLiteral( "matrix chart capped at 24 classes" );
+      return false;
+    }
+    double maxCell = 0.0;
+    for ( const auto &row : matrix["rows"] )
+    {
+      if ( !row.isArray() || static_cast<int>( row.size() ) != n )
+      {
+        if ( error )
+          *error = QStringLiteral( "matrix rows must be n×n numeric" );
+        return false;
+      }
+      for ( const auto &cell : row )
+        if ( cell.isNumeric() )
+          maxCell = std::max( maxCell, cell.asDouble() );
+    }
+    const bool diagonalEmphasis = chart["style"].get( "diagonal_emphasis", false ).asBool();
+    const qreal labelW = painter.fontMetrics().horizontalAdvance( QStringLiteral( "8888" ) ) + 12;
+    const qreal headerH = painter.fontMetrics().height() + 6;
+    const qreal cellW = ( size.width() - labelW - 8 ) / n;
+    const qreal cellH = ( size.height() - headerH - 26 ) / n;
+    // Matrix cell fill: light→dark ramp over style.palette (token-driven).
+    QColor rampFrom( 0xed, 0xf2, 0xf9 );
+    QColor rampTo( 0x21, 0x71, 0xb5 );
+    if ( chart.isMember( "style" ) && chart["style"].isMember( "palette" ) &&
+         chart["style"]["palette"].isArray() && chart["style"]["palette"].size() >= 2 )
+    {
+      const QString fromHex =
+        QString::fromStdString( chart["style"]["palette"][0].asString() );
+      const QString toHex = QString::fromStdString(
+        chart["style"]["palette"][chart["style"]["palette"].size() - 1].asString() );
+      if ( QColor::isValidColor( fromHex ) && QColor::isValidColor( toHex ) )
+      {
+        rampFrom = QColor( fromHex );
+        rampTo = QColor( toHex );
+      }
+    }
+    painter.setPen( textColor );
+    for ( int c = 0; c < n; ++c )
+      painter.drawText( QRectF( labelW + c * cellW, 24, cellW, headerH ), Qt::AlignCenter,
+                        QString::fromStdString( matrix["labels"][c].asString() ) );
+    for ( int r = 0; r < n; ++r )
+    {
+      painter.drawText( QRectF( 4, 24 + headerH + r * cellH, labelW - 8, cellH ),
+                        Qt::AlignVCenter | Qt::AlignRight,
+                        QString::fromStdString( matrix["labels"][r].asString() ) );
+      for ( int c = 0; c < n; ++c )
+      {
+        const Json::Value &cell = matrix["rows"][r][c];
+        const double value = cell.isNumeric() ? cell.asDouble() : 0.0;
+        const double t = maxCell > 0 ? value / maxCell : 0.0;
+        QColor fill = rampFrom;
+        if ( !( diagonalEmphasis && r == c ) )
+        {
+          fill.setRedF( rampFrom.redF() + ( rampTo.redF() - rampFrom.redF() ) * t );
+          fill.setGreenF( rampFrom.greenF() + ( rampTo.greenF() - rampFrom.greenF() ) * t );
+          fill.setBlueF( rampFrom.blueF() + ( rampTo.blueF() - rampFrom.blueF() ) * t );
+        }
+        else
+        {
+          fill = rampTo;
+        }
+        painter.fillRect( QRectF( labelW + c * cellW, 24 + headerH + r * cellH, cellW, cellH ),
+                          fill );
+        painter.setPen( t > 0.5 ? Qt::white : textColor );
+        painter.drawText( QRectF( labelW + c * cellW, 24 + headerH + r * cellH, cellW, cellH ),
+                          Qt::AlignCenter, QString::number( value, 'g', 3 ) );
+      }
+    }
+    if ( !title.isEmpty() )
+    {
+      painter.setPen( textColor );
+      painter.drawText( QRectF( 0, 4, size.width(), 20 ), Qt::AlignCenter, title );
+    }
+    return true;
+  }
+
+  // --- metric cards: big-value strips (OA / Kappa / F1) ---------------------
+  if ( kind == "metric" )
+  {
+    bool metricsOk = false;
+    const std::vector<std::pair<QString, double>> metrics = inlineData( chart, &metricsOk );
+    if ( !metricsOk || metrics.empty() )
+    {
+      if ( error )
+        *error = QStringLiteral( "metric chart needs binding.data with at least one entry" );
+      return false;
+    }
+    double valueScale = 2.0;
+    if ( chart.isMember( "style" ) && chart["style"].isMember( "value_font_scale" ) &&
+         chart["style"]["value_font_scale"].isNumeric() )
+      valueScale = std::clamp( chart["style"]["value_font_scale"].asDouble(), 1.0, 4.0 );
+    const int n = static_cast<int>( metrics.size() );
+    const qreal cardW = size.width() / n;
+    QFont valueFont = font;
+    valueFont.setPointSizeF( std::clamp( fontPt * valueScale, 8.0, 72.0 ) );
+    for ( int i = 0; i < n; ++i )
+    {
+      const QRectF card( i * cardW + 4, 26, cardW - 8, size.height() - 46 );
+      painter.setPen( QPen( paletteColor( chart["style"], i ), 2 ) );
+      painter.drawRect( card );
+      painter.setFont( valueFont );
+      painter.setPen( textColor );
+      painter.drawText( card.adjusted( 0, card.height() * 0.15, 0, 0 ), Qt::AlignHCenter,
+                        QString::number( metrics[i].second, 'g', 4 ) );
+      painter.setFont( font );
+      painter.drawText( QRectF( card.left(), card.bottom() + 4, card.width(), 16 ),
+                        Qt::AlignHCenter, metrics[i].first );
+    }
+    if ( !title.isEmpty() )
+    {
+      painter.setPen( textColor );
+      painter.drawText( QRectF( 0, 4, size.width(), 20 ), Qt::AlignCenter, title );
+    }
+    return true;
+  }
+
+  if ( points.empty() ) // re-check for the generic kinds (matrix/metric returned above)
+  {
+    if ( error )
+      *error = QStringLiteral( "inline chart needs binding.data with at least one entry" );
+    return false;
+  }
+
+  double maxValue = 0.0;
+  for ( int i = 0; i < static_cast<int>( points.size() ); ++i )
+  {
+    double magnitude = std::fabs( points[i].second );
+    // Stacked entries scale by the sum of their parts.
+    if ( kind == "stacked_bar" && chart.isMember( "binding" ) &&
+         chart["binding"].isMember( "data" ) && chart["binding"]["data"].isArray() &&
+         i < static_cast<int>( chart["binding"]["data"].size() ) )
+    {
+      const Json::Value &entry = chart["binding"]["data"][i];
+      if ( entry.isObject() && entry.isMember( "parts" ) && entry["parts"].isArray() )
+      {
+        double sum = 0.0;
+        for ( const auto &part : entry["parts"] )
+          if ( part.isObject() && part.isMember( "value" ) && part["value"].isNumeric() )
+            sum += std::fabs( part["value"].asDouble() );
+        magnitude = sum;
+      }
+    }
+    maxValue = std::max( maxValue, magnitude );
+  }
+  if ( maxValue <= 0 )
+    maxValue = 1.0;
 
   QRectF plotRect( 44.0, 30.0, size.width() - 54.0, size.height() - 56.0 );
 
@@ -141,22 +324,68 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
       startAngle -= span;
     }
   }
-  else if ( kind == "bar" || kind == "histogram" )
+  else if ( kind == "bar" || kind == "histogram" || kind == "stacked_bar" )
   {
-    drawAxes( painter, plotRect, maxValue );
+    drawAxes( painter, plotRect, maxValue, showGrid, textColor );
     const int n = static_cast<int>( points.size() );
     const double barWidth = plotRect.width() / std::max( 1, n );
     for ( int i = 0; i < n; ++i )
     {
-      const double h = plotRect.height() * std::fabs( points[i].second ) / maxValue;
-      const QRectF bar( plotRect.left() + i * barWidth + 1, plotRect.bottom() - h,
-                        std::max( 2.0, barWidth - 2.0 ), h );
-      painter.setBrush( paletteColor( chart["style"], i ) );
-      painter.setPen( Qt::NoPen );
-      painter.drawRect( bar );
+      if ( kind == "stacked_bar" )
+      {
+        // Entries may carry {label, parts: [{label, value}]}; plain
+        // {label, value} renders as a single segment.
+        const Json::Value &entry =
+          chart["binding"].isMember( "data" ) && chart["binding"]["data"].isArray() &&
+              i < static_cast<Json::Value::ArrayIndex>( chart["binding"]["data"].size() ) &&
+              chart["binding"]["data"][i].isObject()
+            ? chart["binding"]["data"][i]
+            : Json::Value::nullSingleton();
+        const Json::Value &parts =
+          entry.isObject() && entry.isMember( "parts" ) && entry["parts"].isArray()
+            ? entry["parts"]
+            : Json::Value();
+        double bottom = plotRect.bottom();
+        if ( parts.isArray() && !parts.empty() )
+        {
+          int segment = 0;
+          for ( const auto &part : parts )
+          {
+            const double value =
+              part.isObject() && part.isMember( "value" ) && part["value"].isNumeric()
+                ? part["value"].asDouble()
+                : 0.0;
+            const double h = plotRect.height() * std::fabs( value ) / maxValue;
+            painter.setBrush( paletteColor( chart["style"], segment ) );
+            painter.setPen( Qt::NoPen );
+            painter.drawRect(
+              QRectF( plotRect.left() + i * barWidth + 1, bottom - h,
+                      std::max( 2.0, barWidth - 2.0 ), h ) );
+            bottom -= h;
+            ++segment;
+          }
+        }
+        else
+        {
+          const double h = plotRect.height() * std::fabs( points[i].second ) / maxValue;
+          painter.setBrush( paletteColor( chart["style"], i ) );
+          painter.setPen( Qt::NoPen );
+          painter.drawRect( QRectF( plotRect.left() + i * barWidth + 1, bottom - h,
+                                    std::max( 2.0, barWidth - 2.0 ), h ) );
+        }
+      }
+      else
+      {
+        const double h = plotRect.height() * std::fabs( points[i].second ) / maxValue;
+        const QRectF bar( plotRect.left() + i * barWidth + 1, plotRect.bottom() - h,
+                          std::max( 2.0, barWidth - 2.0 ), h );
+        painter.setBrush( paletteColor( chart["style"], i ) );
+        painter.setPen( Qt::NoPen );
+        painter.drawRect( bar );
+      }
       if ( !points[i].first.isEmpty() && barWidth > 12 )
       {
-        painter.setPen( QColor( 0x40, 0x40, 0x40 ) );
+        painter.setPen( textColor );
         painter.drawText( QRectF( plotRect.left() + i * barWidth, plotRect.bottom() + 4, barWidth, 18 ),
                           Qt::AlignCenter, points[i].first );
       }
@@ -164,7 +393,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
   }
   else // line / area / scatter
   {
-    drawAxes( painter, plotRect, maxValue );
+    drawAxes( painter, plotRect, maxValue, showGrid, textColor );
     const int n = static_cast<int>( points.size() );
     const double stepX = n > 1 ? plotRect.width() / ( n - 1 ) : 0.0;
     QPainterPath path;
@@ -204,7 +433,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
 
   if ( !title.isEmpty() )
   {
-    painter.setPen( QColor( 0x20, 0x20, 0x20 ) );
+    painter.setPen( textColor );
     painter.drawText( QRectF( 0, 4, size.width(), 24 ), Qt::AlignCenter, title );
   }
   return true;
@@ -224,7 +453,8 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
                              ? chart["kind"].asString()
                              : "";
   if ( !isKnownKind( kind ) )
-    problems.push_back( "kind must be one of bar|line|pie|histogram|area|scatter" );
+    problems.push_back(
+      "kind must be one of bar|line|pie|histogram|area|scatter|stacked_bar|matrix|metric" );
   if ( !chart.isMember( "binding" ) || !chart["binding"].isObject() )
   {
     problems.push_back( "chart needs a binding object" );
@@ -236,7 +466,14 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
                              : "inline";
   if ( mode != "inline" && mode != "vector_expression" )
     problems.push_back( "binding.mode must be inline|vector_expression" );
-  if ( mode == "inline" )
+  if ( mode == "inline" && kind == "matrix" )
+  {
+    const Json::Value &matrix = binding.get( "matrix", Json::Value() );
+    if ( !matrix.isObject() || !matrix.isMember( "labels" ) || !matrix["labels"].isArray() ||
+         !matrix.isMember( "rows" ) || !matrix["rows"].isArray() )
+      problems.push_back( "matrix charts need binding.matrix {labels, rows}" );
+  }
+  else if ( mode == "inline" )
   {
     if ( !binding.isMember( "data" ) || !binding["data"].isArray() || binding["data"].empty() )
       problems.push_back( "inline binding needs non-empty data array" );
@@ -376,8 +613,9 @@ bool renderChartToFile( const Json::Value &chart, const QString &path, QString *
 
 bool renderColorbarToFile( const Json::Value &colorbar, const QString &path, QString *error )
 {
-  // Sequential-ish default ramp; named ramps map to a small built-in set so
-  // no QGIS style DB is required headless.
+  // Two sources of ramp geometry: an explicit `colors` stop array (hex, 2+,
+  // evenly spread across the bar — the token-driven path) or a named built-in
+  // two-color ramp so headless runs need no QGIS style DB.
   static const struct
   {
     const char *name;
@@ -399,18 +637,53 @@ bool renderColorbarToFile( const Json::Value &colorbar, const QString &path, QSt
     matched = matched || ( ramp == candidate.name && ( from = candidate.from, to = candidate.to, true ) );
   Q_UNUSED( matched );
 
+  QList<QColor> stops;
+  if ( colorbar.isMember( "colors" ) && colorbar["colors"].isArray() &&
+       colorbar["colors"].size() >= 2 )
+  {
+    for ( const auto &stop : colorbar["colors"] )
+    {
+      if ( !stop.isString() )
+        continue;
+      const QString hex = QString::fromStdString( stop.asString() );
+      if ( QColor::isValidColor( hex ) )
+        stops << QColor( hex );
+    }
+  }
+  if ( stops.size() < 2 )
+  {
+    stops.clear();
+    stops << from << to;
+  }
+
+  QColor textColor( 0x60, 0x60, 0x60 );
+  if ( colorbar.isMember( "text_color" ) && colorbar["text_color"].isString() )
+  {
+    const QString hex = QString::fromStdString( colorbar["text_color"].asString() );
+    if ( QColor::isValidColor( hex ) )
+      textColor = QColor( hex );
+  }
+  double fontPt = 8.0;
+  if ( colorbar.isMember( "font_pt" ) && colorbar["font_pt"].isNumeric() )
+    fontPt = std::clamp( colorbar["font_pt"].asDouble(), 4.0, 24.0 );
+
   const int width = 320;
   const int height = 40;
   QImage image( width, height, QImage::Format_ARGB32_Premultiplied );
   image.fill( Qt::white );
   QPainter painter( &image );
   const QRectF bar( 8, 6, width - 16, height - 26 );
+  const double span = 1.0 / static_cast<double>( stops.size() - 1 );
   QLinearGradient gradient( bar.topLeft(), bar.topRight() );
-  gradient.setColorAt( 0.0, from );
-  gradient.setColorAt( 1.0, to );
+  for ( int i = 0; i < stops.size(); ++i )
+    gradient.setColorAt( std::clamp( i * span, 0.0, 1.0 ), stops[i] );
   painter.fillRect( bar, gradient );
   painter.setPen( QColor( 0x60, 0x60, 0x60 ) );
   painter.drawRect( bar );
+  QFont font = painter.font();
+  font.setPointSizeF( fontPt );
+  painter.setFont( font );
+  painter.setPen( textColor );
   const std::string minLabel = colorbar.isMember( "min" ) ? colorbar["min"].asString() : "min";
   const std::string maxLabel = colorbar.isMember( "max" ) ? colorbar["max"].asString() : "max";
   painter.drawText( QRectF( 8, height - 18, width / 2 - 8, 16 ), Qt::AlignLeft,

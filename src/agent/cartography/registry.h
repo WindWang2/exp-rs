@@ -25,7 +25,33 @@
 #include <QString>
 #include <QStringList>
 
+#include <string>
+#include <vector>
+
 namespace sicnu::agent::cartography {
+
+/// Descriptor-level validation shared by the loader and registerComponent.
+/// Checks schema v2: id, category, version, variants, defaults,
+/// data_bindings, validation, compatibility, layout_constraints shapes.
+/// Empty returned vector = valid.
+std::vector<std::string> validateComponentDescriptor( const Json::Value &descriptor );
+
+/// Resolves component `id` with an optional `variant` applied: the returned
+/// copy carries parameters/default = base deep-merged with
+/// variants[variant].parameters/default. Null when id (or variant) is
+/// unknown.
+Json::Value resolveComponent( const QString &id, const QString &variant = QString() );
+
+/// Resolves a MapSpec item's `source_component` reference (string id or
+/// {id, variant}) and deep-merges the component's `defaults` and variant
+/// parameters *under* the item's explicit fields (ADR 0130 precedence:
+/// item > variant > component defaults). Unknown references leave the item
+/// untouched and set *error.
+bool applyComponentDefaults( Json::Value &item, QString *error = nullptr );
+
+/// The MapSpec collection a component category instantiates into.
+/// Empty string for unknown categories.
+std::string collectionForCategory( const std::string &category );
 
 class ComponentRegistry
 {
@@ -75,6 +101,10 @@ class TemplateRegistry
 
     bool registerTemplate( Json::Value descriptor, QString *error = nullptr );
 
+    /// Problems recorded while resolving `extends` chains at load time
+    /// (cycles, unknown parents). Empty on a healthy catalog.
+    QStringList loadProblems() const;
+
     void reload();
 
     /// Instantiates a template into a MapSpec draft:
@@ -94,7 +124,13 @@ class TemplateRegistry
     mutable QMutex mMutex;
     mutable bool mLoaded = false;
     QString mDirectory;
-    mutable QMap<QString, Json::Value> mTemplates; // id -> descriptor
+    mutable QMap<QString, Json::Value> mTemplates; // id -> resolved descriptor
+    mutable QStringList mLoadProblems;
 };
+
+/// Builds the deterministic machine catalog index (token sets, components,
+/// templates) behind the gallery docs and the docs-drift test. Iteration
+/// order is id-sorted, so identical catalogs produce identical output.
+Json::Value buildCatalogIndex();
 
 } // namespace sicnu::agent::cartography

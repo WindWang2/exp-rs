@@ -13,7 +13,11 @@
 #include <QJsonObject>
 #include <QTimer>
 #include <QTemporaryDir>
+#include <QThread>
 
+#include <atomic>
+#include <thread>
+#include <algorithm>
 #include <vector>
 
 #include <gdal.h>
@@ -357,6 +361,94 @@ TEST_CASE( "SnapshotService snapshots project metadata and prunes old copies", "
     REQUIRE( snapshotCount == 2 );
 }
 
+TEST_CASE( "Snapshot preserves governed writes that live only in the WAL", "[workspace][snapshot][wal][issue751]" )
+{
+    Fixture fx;
+    QTemporaryDir dir;
+    const QString projectFile = dir.filePath( QStringLiteral( "wal.qgs" ) );
+    REQUIRE( QFile( projectFile ).open( QIODevice::WriteOnly ) );
+    const QString snapshotDir = dir.filePath( QStringLiteral( "snapshots" ) );
+
+    // Governed writes with synchronous=NORMAL may sit only in the WAL at
+    // snapshot time; the checkpoint must fold them into the DB copy.
+    GovernedAsset tagged;
+    tagged.assetId = QStringLiteral( "wal-asset-1" );
+    tagged.canonicalSource = QStringLiteral( "/data/wal-asset-1.tif" );
+    tagged.kind = QStringLiteral( "raster" );
+    REQUIRE( fx.service.store().upsertAsset( tagged ).operator bool() );
+    REQUIRE( fx.service.setAssetTags( QStringLiteral( "wal-asset-1" ),
+                                      QStringList{ QStringLiteral( "wal-tag" ) } ) );
+
+    const SnapshotReport report = fx.snapshots.createSnapshot( projectFile, snapshotDir, 2 );
+    INFO( report.error.toStdString() );
+    REQUIRE( report.ok );
+
+    // Restore simulation: open the SNAPSHOT's DB copy (without sidecars, per
+    // the restore contract) and verify every governed write is present.
+    const QString snapshotDb = QDir( report.snapshotPath ).filePath( QStringLiteral( "gov.db" ) );
+    REQUIRE( QFileInfo::exists( snapshotDb ) );
+    WorkspaceService restored;
+    REQUIRE( restored.openStore( snapshotDb ) );
+    REQUIRE( restored.store().assetById( QStringLiteral( "wal-asset-1" ) ).has_value() );
+    REQUIRE( restored.store().tagsOf( QStringLiteral( "asset" ), QStringLiteral( "wal-asset-1" ) )
+                 .contains( QStringLiteral( "wal-tag" ) ) );
+    restored.closeStore();
+}
+
+TEST_CASE( "Snapshot under a concurrent writer stays openable and consistent",
+           "[workspace][snapshot][wal][concurrency]" )
+{
+    Fixture fx;
+    QTemporaryDir dir;
+    const QString projectFile = dir.filePath( QStringLiteral( "conc.qgs" ) );
+    REQUIRE( QFile( projectFile ).open( QIODevice::WriteOnly ) );
+    const QString snapshotDir = dir.filePath( QStringLiteral( "snapshots" ) );
+
+    // A writer committing governed rows while the snapshot runs; the
+    // checkpoint + copy must never produce a structurally broken DB.
+    std::atomic<bool> stopWriter{ false };
+    qint64 writerErrors = 0;
+    std::thread writer( [&] {
+        qint64 i = 0;
+        while ( !stopWriter.load() )
+        {
+            GovernedAsset row;
+            row.assetId = QStringLiteral( "writer-%1" ).arg( ++i );
+            row.canonicalSource = QStringLiteral( "/data/%1.tif" ).arg( i );
+            row.kind = QStringLiteral( "raster" );
+            // The store is mutex-guarded; contention failures are counted,
+            // never fatal (busy_timeout retries first).
+            if ( !fx.service.store().upsertAsset( row ).operator bool() )
+                ++writerErrors;
+            QThread::msleep( 1 );
+        }
+    } );
+
+    SnapshotReport report;
+    for ( int i = 0; i < 4 && report.error.isEmpty(); ++i )
+        report = fx.snapshots.createSnapshot( projectFile, snapshotDir, 4 );
+    stopWriter.store( true );
+    writer.join();
+
+    INFO( report.error.toStdString() );
+    if ( report.ok )
+    {
+        const QString snapshotDb = QDir( report.snapshotPath ).filePath( QStringLiteral( "gov.db" ) );
+        WorkspaceService restored;
+        REQUIRE( restored.openStore( snapshotDb ) );
+        const GovernanceDiagnostic integrity = restored.store().integrityCheck();
+        INFO( integrity.message.toStdString() );
+        REQUIRE( integrity.severity != DiagnosticSeverity::Error );
+        restored.closeStore();
+    }
+    else
+    {
+        // Fail-conservative refusal is acceptable under a hot writer, but the
+        // reason must name the checkpoint, never a silent torn copy.
+        REQUIRE( report.error.contains( QLatin1String( "checkpoint" ) ) );
+    }
+}
+
 TEST_CASE( "CleanupService protects referenced rows and removes orphans only", "[workspace][cleanup]" )
 {
     Fixture fx;
@@ -400,4 +492,142 @@ TEST_CASE( "Workspace transactions undo and redo governance mutations", "[worksp
     REQUIRE( fx.transactions.undo() );
     REQUIRE( fx.service.dataset( datasetId.toString() )->memberAssetIds
                  .contains( QStringLiteral( "m-1" ) ) );
+}
+
+TEST_CASE( "DataManager advances the asset revision on out-of-band content change",
+           "[workspace][external_change][issue749]" )
+{
+    testApp();
+    DataManager manager;
+    const QString path = makeRaster( QStringLiteral( "external_change_%1.tif" )
+                                         .arg( QCoreApplication::applicationPid() ) );
+    const auto registered = registerFile( manager, path );
+    REQUIRE( !registered.assetId.isNull() );
+    const quint64 revisionBefore = manager.asset( registered.assetId )->revision().value();
+
+    // Out-of-band rewrite by an external tool (any content change).
+    {
+        QFile file( path );
+        REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        file.write( "externally replaced bytes" );
+        file.close();
+    }
+
+    // The bounded watcher fires on the manager's thread: spin the event loop
+    // until the revision advances (bounded wait, never a fixed sleep).
+    const auto deadline = QDateTime::currentMSecsSinceEpoch() + 10000;
+    while ( manager.asset( registered.assetId )->revision().value() == revisionBefore
+            && QDateTime::currentMSecsSinceEpoch() < deadline )
+    {
+        QEventLoop spin;
+        QTimer::singleShot( 50, &spin, &QEventLoop::quit );
+        spin.exec();
+    }
+    REQUIRE( manager.asset( registered.assetId )->revision().value() > revisionBefore );
+}
+
+TEST_CASE( "ImportCenter cancel stops registration at a batch boundary",
+           "[workspace][import][cancel][issue753]" )
+{
+    Fixture fx;
+    QTemporaryDir dir;
+    QDir( dir.path() ).mkpath( QStringLiteral( "tree" ) );
+    const QString raster = makeRaster( QStringLiteral( "imp-cancel-src.tif" ) );
+    constexpr int kFiles = 40;
+    for ( int i = 0; i < kFiles; ++i )
+        REQUIRE( QFile::copy( raster,
+                              QDir( dir.filePath( QStringLiteral( "tree" ) ) )
+                                  .filePath( QStringLiteral( "f%1.tif" ).arg( i ) ) ) );
+
+    ImportScanOptions options;
+    options.root = dir.path();
+    options.registrationBatch = 1; // small chunks: cancel lands mid-registration
+
+    ImportScanReport report;
+    QEventLoop loop;
+    QObject::connect( &fx.importer, &ImportCenter::finished, &loop,
+                      [ & ]( const sicnu::workspace::ImportScanReport &r ) {
+                          report = r;
+                          loop.quit();
+                      } );
+    QTimer::singleShot( 30000, &loop, &QEventLoop::quit );
+    REQUIRE( fx.importer.startScan( options ) );
+    // Cancel as soon as the event loop starts processing: the scan must stop
+    // at the next batch boundary with a truthful partial tally (issue #753),
+    // not register the whole set behind a cancelled=true label.
+    QTimer::singleShot( 0, &fx.importer, [ & ] { fx.importer.cancel(); } );
+    loop.exec();
+
+    REQUIRE( report.cancelled );
+    REQUIRE( report.registered < kFiles );
+}
+
+TEST_CASE( "Run mirror records truthful states and preserves run documents (#754)",
+           "[workspace][runs][issue754]" )
+{
+    Fixture fx;
+
+    // The workflow-runtime observer records the run while it is Running.
+    RunRecord running;
+    running.id = QStringLiteral( "run-42" );
+    running.workflowId = QStringLiteral( "cache_e2e" );
+    running.state = QStringLiteral( "Running" );
+    running.startedMs = 1234567;
+    running.definition = QJsonObject{ { QLatin1String( "steps" ), 2 } };
+    running.header.tags = QStringList{ QStringLiteral( "nightly" ) };
+    fx.service.recordRun( running );
+
+    // Terminal transition: real state, no start stamp — the merge must keep
+    // the recorded startedMs, the definition and the tags, and store the
+    // truthful terminal state.
+    RunRecord finished;
+    finished.id = QStringLiteral( "run-42" );
+    finished.state = QStringLiteral( "Failed" );
+    finished.finishedMs = 1239999;
+    fx.service.recordRun( finished );
+
+    const RunRecord stored = fx.service.run( QStringLiteral( "run-42" ) ).value();
+    REQUIRE( stored.state == QLatin1String( "Failed" ) );
+    REQUIRE( stored.startedMs == 1234567 );
+    REQUIRE( stored.finishedMs == 1239999 );
+    REQUIRE( stored.definition == QJsonObject{ { QLatin1String( "steps" ), 2 } } );
+    REQUIRE( stored.header.tags.contains( QLatin1String( "nightly" ) ) );
+
+    // A brand-new anchor (mirror path) starts Unknown, never fabricated
+    // Completed.
+    RunRecord anchor;
+    anchor.id = QStringLiteral( "run-43" );
+    anchor.state = QStringLiteral( "Unknown" );
+    fx.service.recordRun( anchor );
+    REQUIRE( fx.service.run( QStringLiteral( "run-43" ) )->state == QLatin1String( "Unknown" ) );
+
+    // A result anchored only by a FAILED run is an orphan (its partial
+    // output was not an intentional product). The results table anchors via
+    // producer JSON's runId.
+    ResultRecord partial;
+    partial.id = ResultId::generate();
+    partial.semanticType = ResultSemanticType::Classification;
+    partial.header.name = QStringLiteral( "partial" );
+    partial.producer = QJsonObject{ { QLatin1String( "operator" ), QStringLiteral( "rs:test" ) },
+                                    { QLatin1String( "runId" ), QLatin1String( "run-42" ) } };
+    REQUIRE( fx.service.store().upsertResult( partial ).operator bool() );
+    const QVector<ResultRecord> orphans = fx.service.orphanResults();
+    const bool failedRunResultIsOrphan =
+        std::any_of( orphans.cbegin(), orphans.cend(),
+                     [ & ]( const ResultRecord &r ) { return r.id == partial.id; } );
+    REQUIRE( failedRunResultIsOrphan );
+
+    // The same result under a Completed run is NOT an orphan.
+    RunRecord done;
+    done.id = QStringLiteral( "run-44" );
+    done.state = QStringLiteral( "Completed" );
+    fx.service.recordRun( done );
+    ResultRecord intentional;
+    intentional.id = ResultId::generate();
+    intentional.header.name = QStringLiteral( "intentional" );
+    intentional.producer = QJsonObject{ { QLatin1String( "runId" ), QLatin1String( "run-44" ) } };
+    REQUIRE( fx.service.store().upsertResult( intentional ).operator bool() );
+    const QVector<ResultRecord> orphansAfter = fx.service.orphanResults();
+    REQUIRE( std::none_of( orphansAfter.cbegin(), orphansAfter.cend(),
+                           [ & ]( const ResultRecord &r ) { return r.id == intentional.id; } ) );
 }

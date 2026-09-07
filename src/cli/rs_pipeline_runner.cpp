@@ -36,6 +36,7 @@
 #include <QTextStream>
 
 #include <chrono>
+#include <thread>
 #include <cstdlib>
 #include <csignal>
 #include <regex>
@@ -898,6 +899,29 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
 
     if ( pipeInfo.isCompleted || pipeInfo.isFailed )
     {
+      // The coordinator folds terminal task updates through the event loop,
+      // so a poll can observe the pipeline terminal a beat before the run
+      // aggregate absorbs the last fold. Drain (bounded) so the aggregate we
+      // report from reflects every terminal outcome — never a mid-fold
+      // snapshot where the final step still reads "Running".
+      for ( int drain = 0; drain < 100; ++drain )
+      {
+        const auto aggregateNow = coordinator.runForPipeline( pipelineId );
+        if ( !aggregateNow )
+          break;
+        const auto aggregatePlans = aggregateNow->stepPlans();
+        const bool aggregateTerminal =
+          !aggregatePlans.empty()
+          && std::all_of( aggregatePlans.begin(), aggregatePlans.end(),
+                          []( const sicnu::workflow::StepPlan &p ) {
+                            return p.status == "Completed" || p.status == "Failed"
+                                   || p.status == "Canceled" || p.status == "Skipped";
+                          } );
+        if ( aggregateTerminal )
+          break;
+        QCoreApplication::processEvents();
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+      }
       // Report from the run aggregate: it carries EVERY step (pre-completed
       // ones resolved from the checkpoint + the freshly executed remainder).
       const auto run = coordinator.runForPipeline( pipelineId );

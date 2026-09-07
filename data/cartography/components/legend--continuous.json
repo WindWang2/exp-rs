@@ -1,0 +1,38 @@
+{
+  "id": "legend/continuous",
+  "version": 1,
+  "category": "legend",
+  "semantic_roles": [
+    "legend.primary"
+  ],
+  "description": "Gradient legend body for continuous rasters (paired with a colorbar).",
+  "parameters": {
+    "title": "图例"
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "right-rail"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 1
+  },
+  "compatibility": {
+    "requires_map_frame": true,
+    "map_types": [
+      "raster"
+    ],
+    "result_types": [
+      "continuous",
+      "index",
+      "terrain"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "renderer",
+      "source": "map_ref.renderer",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "id": "scale-bar/dual-unit",
+  "version": 1,
+  "category": "scale-bar",
+  "semantic_roles": [
+    "scalebar.primary"
+  ],
+  "description": "Metric scale bar paired with a secondary unit label line (km + miles) for international reports.",
+  "parameters": {
+    "style": "Line Ticks Down",
+    "units": "km",
+    "secondary_units": "mi"
+  },
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": [
+      "bottom-left"
+    ],
+    "margin_mm": 8,
+    "max_count_per_page": 1,
+    "min_size_mm": [
+      30,
+      8
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": true,
+    "crs_requirements": "projected_preferred"
+  },
+  "data_bindings": [
+    {
+      "name": "secondary_label",
+      "source": "params.secondary_units",
+      "required": false
+    }
+  ]
+}

@@ -16,6 +16,7 @@
 #include <gdal.h>
 
 #include "data/band_role.h"
+#include "data/providers/remote_source_cache.h"
 #include "gdal_runtime.h"
 
 namespace sicnu::data::providers
@@ -165,16 +166,16 @@ bool shouldDeferNetworkRasterOpen()
 
 /// One-time process defaults for remote reads: bounded timeouts/retries so a
 /// dead host fails in seconds, never overriding an explicit user setting.
+/// Single source of truth (Reliability 4.0): the shared HTTP retry/timeout/
+/// cache keys live in configureRemoteCachingDefaults(); this wrapper only
+/// adds the provider-specific HTTP/2 preference on top.
 void configureRemoteHttpDefaults()
 {
-  static const struct { const char *key; const char *value; } kDefaults[] = {
-    { "GDAL_HTTP_TIMEOUT", "30" },
-    { "GDAL_HTTP_CONNECT_TIMEOUT", "10" },
-    { "GDAL_HTTP_MAX_RETRY", "3" },
-    { "GDAL_HTTP_RETRY_DELAY", "1" },
+  configureRemoteCachingDefaults();
+  static const struct { const char *key; const char *value; } kProviderDefaults[] = {
     { "GDAL_HTTP_VERSION", "2" },
   };
-  for ( const auto &d : kDefaults )
+  for ( const auto &d : kProviderDefaults )
   {
     if ( !CPLGetConfigOption( d.key, nullptr ) )
       CPLSetConfigOption( d.key, d.value );

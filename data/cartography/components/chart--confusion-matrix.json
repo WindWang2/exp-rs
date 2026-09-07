@@ -1,0 +1,61 @@
+{
+  "id": "chart/confusion-matrix",
+  "version": 1,
+  "category": "chart",
+  "semantic_roles": [
+    "chart.accuracy"
+  ],
+  "description": "Confusion/change matrix rendered as a labeled grid; diagonal emphasized.",
+  "parameters": {
+    "kind": "matrix"
+  },
+  "defaults": {
+    "chart": {
+      "kind": "matrix",
+      "binding": {
+        "mode": "inline",
+        "data": []
+      },
+      "style": {
+        "diagonal_emphasis": true
+      }
+    }
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "bottom-rail",
+      "right-rail"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 4,
+    "min_size_mm": [
+      30,
+      25
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "accuracy",
+      "change"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "matrix",
+      "source": "params.confusion_matrix",
+      "required": true,
+      "description": "{labels: [], rows: [[count,...],...]}."
+    }
+  ],
+  "variants": [
+    {
+      "id": "confusion"
+    },
+    {
+      "id": "change-matrix",
+      "description": "From→To transition matrix."
+    }
+  ]
+}

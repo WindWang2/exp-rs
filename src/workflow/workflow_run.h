@@ -60,6 +60,16 @@ struct StepPlan {
   long taskId = -1;
   Json::Value resultPayload;
   std::string outputLayerPath;
+  /// Completion identity (issue #750): a stat stamp (and, when affordable, a
+  /// SHA-256 content digest) of the produced output captured at the moment
+  /// the step transitioned to Completed. Resume verifies the on-disk file
+  /// against this identity — a mismatch re-executes the step instead of
+  /// feeding foreign bytes downstream. Zero values / empty digest on a
+  /// legacy checkpoint mean "unverifiable" and fail the resume gate
+  /// (fail-conservative; the step re-runs).
+  long long outputSizeBytes = 0;
+  long long outputMtimeMs = 0;
+  std::string outputDigest;
   std::string errorMessage;
   std::string startTime;
   std::string endTime;

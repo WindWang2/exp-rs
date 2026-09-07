@@ -2,22 +2,25 @@
 #pragma once
 
 //
-// Charts as first-class map components (Phase L).
+// Charts as first-class map components (Phase L, extended in 4.0).
 //
 // ChartSpec JSON (workspace entity + MapSpec component):
-//   { id: "chart-1", kind: bar|line|pie|histogram|area|scatter, title,
+//   { id: "chart-1", kind: bar|line|pie|histogram|area|scatter|stacked_bar|
+//     matrix|metric, title,
 //     binding: { mode: "inline" | "vector_expression",
-//                data: [{label, value}]?                       (inline)
-//                layer?: <workspace layer ref|name>,           (vector_expression)
+//                data: [{label, value}]?                      (inline)
+//                matrix: {labels: [n], rows: [n][n]}?         (inline matrix)
+//                layer?: <workspace layer ref|name>,          (vector_expression)
 //                x_expression?, y_expression?, filter?, series_name? },
-//     style: { palette?: [...], show_legend?: true, font_pt?: 10 },
+//     style: { palette?: [...], text_color?, show_grid?, font_pt?, ... },
 //     width_px: 480, height_px: 320 }
 //
 // Binding modes map to the two QGIS-native paths:
-//   inline            → ChartRenderer paints a PNG (QPainter, no QtCharts);
-//                       compile places it as a picture item.
-//   vector_expression → QgsLayoutItemChart (QGIS-native plot: bar/line/pie)
-//                       bound to the layer with feature expressions.
+//   inline            -> ChartRenderer paints a PNG (QPainter, no QtCharts);
+//                        compile places it as a picture item and
+//                        materializes token-driven style defaults first.
+//   vector_expression -> QgsLayoutItemChart (QGIS-native plot: bar/line)
+//                        bound to the layer with feature expressions.
 //
 
 #include <json/json.h>

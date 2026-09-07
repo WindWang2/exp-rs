@@ -1,0 +1,37 @@
+{
+  "id": "text/disclaimer",
+  "version": 1,
+  "category": "text",
+  "semantic_roles": [
+    "text.disclaimer"
+  ],
+  "description": "Legal or interpretation disclaimer rendered in the secondary text color.",
+  "parameters": {
+    "font": {
+      "size_pt": 7
+    }
+  },
+  "defaults": {
+    "font": {
+      "color": "token:colors.text_secondary"
+    }
+  },
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": [
+      "bottom-center"
+    ],
+    "margin_mm": 4,
+    "max_count_per_page": 1
+  },
+  "compatibility": {
+    "requires_map_frame": false
+  },
+  "data_bindings": [
+    {
+      "name": "text",
+      "source": "params.disclaimer",
+      "required": true
+    }
+  ]
+}

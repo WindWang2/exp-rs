@@ -322,10 +322,9 @@ MaskDerivation writeMaskFromMagnitude( const std::string &magPath, const GdalDat
                     if ( !std::isfinite( v ) )
                         continue;
                     ++histFinite;
-                    int bin = static_cast<int>( ( v - magStats.minVal ) / magRange
-                                                * ( kMaskHistogramBins - 1 ) );
-                    bin = std::clamp( bin, 0, kMaskHistogramBins - 1 );
-                    hist[static_cast<size_t>( bin )] += 1.0;
+                    // Shared binning convention (ChangeDetection::histogramBin).
+                    ++hist[static_cast<size_t>( ChangeDetection::histogramBin(
+                        v, magStats.minVal, magRange, kMaskHistogramBins ) )];
                 }
             }
         }
@@ -617,22 +616,13 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
                 {
                     // CVA magnitude: a NaN delta in any band propagates to a
                     // NaN pixel; otherwise sqrt(sum of squared deltas).
-                    for ( size_t p = 0; p < n; ++p )
+                    // Shared BIP kernel (Foundation 4.0) — same definition as
+                    // the per-band cvaMagnitude, one NaN-policy owner.
+                    if ( !ChangeDetection::cvaMagnitudeBip( beforeBip.data(), afterBip.data(),
+                                                            bandCount, n, tileOut.data() ) )
                     {
-                        double sumSq = 0.0;
-                        bool hasNan = false;
-                        for ( int b = 0; b < bandCount; ++b )
-                        {
-                            const float d = afterBip[p * B + static_cast<size_t>( b )]
-                                          - beforeBip[p * B + static_cast<size_t>( b )];
-                            if ( std::isnan( d ) )
-                            {
-                                hasNan = true;
-                                break;
-                            }
-                            sumSq += static_cast<double>( d ) * static_cast<double>( d );
-                        }
-                        tileOut[p] = hasNan ? nan : static_cast<float>( std::sqrt( sumSq ) );
+                        throw RSOperatorError( ErrorCode::ComputationError,
+                                               "CVA magnitude failed on tile" );
                     }
                     break;
                 }

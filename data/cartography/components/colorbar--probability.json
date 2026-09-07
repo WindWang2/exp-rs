@@ -1,0 +1,35 @@
+{
+  "id": "colorbar/probability",
+  "version": 1,
+  "category": "color-bar",
+  "semantic_roles": [
+    "colorbar.primary"
+  ],
+  "description": "Probability/confidence strip fixed to [0,1] with percent labels.",
+  "parameters": {
+    "ramp": "uncertainty",
+    "width_mm": 60,
+    "height_mm": 8,
+    "min": "0",
+    "max": "1"
+  },
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": [
+      "bottom-center"
+    ],
+    "margin_mm": 8,
+    "max_count_per_page": 2,
+    "min_size_mm": [
+      40,
+      6
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": true,
+    "result_types": [
+      "probability",
+      "uncertainty"
+    ]
+  }
+}

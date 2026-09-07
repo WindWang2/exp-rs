@@ -94,7 +94,7 @@
 QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     : QMainWindow(parent)
 {
-    setWindowTitle( tr( "SICNU GEO RS — 遥感分析平台" ) );
+    setWindowTitle( tr( "未命名工程 — SICNU GEO RS 遥感分析平台" ) );
     setToolTip( SicnuDialogHelp::shortForTool( QStringLiteral( "main_window" ), windowTitle() ) );
     setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "main_window" ), windowTitle() ) );
     setStatusTip( toolTip() );
