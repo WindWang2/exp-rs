@@ -25,6 +25,7 @@
 #include <qgsrasterrenderer.h>
 
 #include <QDir>
+#include <QTemporaryDir>
 #include <QFile>
 #include <QStringList>
 
@@ -968,4 +969,35 @@ TEST_CASE( "Eval: preflight packs route the Platform 5.0 intents deterministical
 
   // 8. Unknown context intent string is not in the closed vocabulary.
   CHECK_FALSE( isKnownIntent( "warp" ) );
+}
+
+TEST_CASE( "Solution registry reload invalidates on directory change (no stale cache)",
+           "[platform5][solution][scale]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  SolutionRegistry &registry = SolutionRegistry::instance();
+  registry.setDirectory( dir.path() );
+
+  const Json::Value doc = makeMinimalSolution( "solution.test.reload" );
+  {
+    QFile out( dir.filePath( "solution.test.reload.json" ) );
+    REQUIRE( out.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    const std::string serialized = doc.toStyledString();
+    out.write( serialized.data(), static_cast<qint64>( serialized.size() ) );
+  }
+  // Fresh load caches the first document.
+  CHECK( registry.find( "solution.test.reload" ).isNull() == false );
+
+  // A new file is invisible until the explicit reload — then it is found.
+  Json::Value second = makeMinimalSolution( "solution.test.reload2" );
+  {
+    QFile out2( dir.filePath( "solution.test.reload2.json" ) );
+    REQUIRE( out2.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    const std::string serialized2 = second.toStyledString();
+    out2.write( serialized2.data(), static_cast<qint64>( serialized2.size() ) );
+  } // close (flush) before reloading
+  CHECK( registry.find( "solution.test.reload2" ).isNull() ); // cache is stable
+  registry.reload();
+  CHECK_FALSE( registry.find( "solution.test.reload2" ).isNull() );
 }
