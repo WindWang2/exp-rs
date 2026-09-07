@@ -13,6 +13,10 @@ add_executable(sicnu_geo_rs_cli
     rs_pipeline_runner.cpp
 )
 
+# Headless CLI embeds no QML; skip Qt's configure-time qmlimportscanner pass
+# (unreliable on Windows hosts — see the tail of tests/CMakeLists.txt).
+set_target_properties(sicnu_geo_rs_cli PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
+
 # Headless plugin hosting (ADR 0023): the runner composes PluginHost with a
 # view-less ProjectContext and a widget-free SicnuAppInterface. Compiled in
 # only when embedded-Python support is enabled, mirroring the
@@ -42,6 +46,7 @@ target_include_directories(sicnu_geo_rs_cli PRIVATE
 target_link_libraries(sicnu_geo_rs_cli PRIVATE
     Qt6::Core
     Sicnu::data
+    Sicnu::Geospatial
     sicnu_plugins_framework
     sicnu_sdk
     sicnu_python_isolated
@@ -94,6 +99,7 @@ target_link_libraries(sicnu_worker PRIVATE
     sicnu_operators
     GDAL::GDAL
 )
+set_target_properties(sicnu_worker PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
 if(TARGET jsoncpp)
     target_link_libraries(sicnu_worker PRIVATE jsoncpp)
 elseif(JSONCPP_LIBRARIES)

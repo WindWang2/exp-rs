@@ -648,6 +648,9 @@ endif()
 
 add_subdirectory(src/core)
 add_subdirectory(src/data)
+# Geospatial I/O Foundation 4.0 (Qt-free leaf: canonical metadata, CRS policy,
+# raster/vector I/O contracts, format profiles, COG, STAC, multidim, doctor).
+add_subdirectory(src/geospatial)
 # Execution & Data Plane 3.0 runtime services (chunk graph, GPU plane, worker
 # host, telemetry). Qt-free leaf; must precede processing (fused-chain executor).
 add_subdirectory(src/runtime)
