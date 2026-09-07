@@ -152,7 +152,7 @@ TEST_CASE( "model runtime benchmark (SICNU_MODEL_BENCH=1)", "[.] [model_bench]" 
   RSOperatorContext cancelContext;
   cancelContext.setCancelFlag( &cancelFlag );
   TileInferenceEngine cancelEngine( model, session );
-  cancelContext.throwIfCancelled();
+  // The flag is armed: the engine's first checkpoint throws inside run().
   const auto cancelStart = std::chrono::steady_clock::now();
   bool canceled = false;
   try
@@ -188,7 +188,12 @@ TEST_CASE( "model runtime benchmark (SICNU_MODEL_BENCH=1)", "[.] [model_bench]" 
   bench["peak_rss_mb"] = static_cast<qint64>( peakRssMb() );
   bench["cancel_latency_ms"] = cancelLatencyMs;
 
-  const QString outPath = QStringLiteral( "benchmarks/model-runtime-4.json" );
+  const QString outPath =
+#ifdef SICNU_SOURCE_DIR
+    QString::fromUtf8( SICNU_SOURCE_DIR ) + QStringLiteral( "/benchmarks/model-runtime-4.json" );
+#else
+    QStringLiteral( "benchmarks/model-runtime-4.json" );
+#endif
   QFile outFile( outPath );
   if ( outFile.open( QIODevice::WriteOnly ) )
   {
