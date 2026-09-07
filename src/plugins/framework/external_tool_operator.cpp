@@ -289,7 +289,7 @@ Json::Value ExternalToolOperator::run( const Json::Value &params,
         result["stdout_truncated"] = true;
     if ( processResult.truncatedStderr )
         result["stderr_truncated"] = true;
-    result["duration_ms"] = processResult.durationMs;
+    result["duration_ms"] = static_cast<Json::Int64>( processResult.durationMs );
     return result;
 }
 
