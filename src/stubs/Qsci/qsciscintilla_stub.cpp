@@ -37,15 +37,7 @@ QsciAPIs::~QsciAPIs() {}
 // lexer subclasses are indistinguishable. Safe only while the stub lexers
 // have no virtual behavior and nobody qobject_casts to a subclass; if these
 // classes are ever really enabled, give each its own Q_OBJECT meta-object.
-const QMetaObject *QsciLexerHTML::metaObject() const { return &QsciLexer::staticMetaObject; }
-void *QsciLexerHTML::qt_metacast( const char *c ) { return QsciLexer::qt_metacast( c ); }
-int QsciLexerHTML::qt_metacall( QMetaObject::Call c, int id, void **a ) { return QsciLexer::qt_metacall( c, id, a ); }
-
-const QMetaObject *QsciLexerJavaScript::metaObject() const { return &QsciLexer::staticMetaObject; }
-void *QsciLexerJavaScript::qt_metacast( const char *c ) { return QsciLexer::qt_metacast( c ); }
-int QsciLexerJavaScript::qt_metacall( QMetaObject::Call c, int id, void **a ) { return QsciLexer::qt_metacall( c, id, a ); }
-
-const QMetaObject *QsciLexerJSON::metaObject() const { return &QsciLexer::staticMetaObject; }
-void *QsciLexerJSON::qt_metacast( const char *c ) { return QsciLexer::qt_metacast( c ); }
-int QsciLexerJSON::qt_metacall( QMetaObject::Call c, int id, void **a ) { return QsciLexer::qt_metacall( c, id, a ); }
-
+// HTML / JavaScript / JSON: their headers ARE listed for AUTOMOC (see
+// src/gui/CMakeLists.txt), so the generated moc provides real per-class
+// meta-objects (metaObject/qt_metacast/qt_metacall/staticMetaObject/tr).
+// No hand-written aliases here - they would collide (LNK2005).
