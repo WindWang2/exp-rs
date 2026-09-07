@@ -20,11 +20,19 @@
 #include "geospatial/common.h"
 #include "geospatial/metadata/canonical_metadata.h"
 
+#include <json/json.h>
+
+#include <map>
 #include <string>
 #include <vector>
 
 namespace sicnu::geo
 {
+
+/// Parses a Landsat MTL (key = value) file into an uppercase-key map.
+/// Empty when the file cannot be read (MTL is the Collection-1/2 metadata
+/// sidecar; used by the adapter and the asset registry).
+std::map<std::string, std::string> parseLandsatMtlKeys( const std::string &mtlPath );
 
 /// Product-level semantics extracted from sidecar/metadata files.
 struct ProductMetadata
@@ -59,6 +67,12 @@ enum class ProductKind
     ModisContainer,
     GenericRaster
 };
+
+/// Stable lowercase identifier ("landsat_mtl", "sentinel2_safe", ...).
+const char *productKindName( ProductKind kind );
+
+/// Human family name ("Landsat MTL scene", "Sentinel-2 SAFE product", ...).
+std::string productKindDisplayName( ProductKind kind );
 
 /// Detects what a path (dataset, sidecar or product directory) most likely
 /// is. Never throws.

@@ -376,19 +376,24 @@ struct BandRoleMapping
   double wavelengthNm;
 };
 
+// Roles use the canonical lowercase vocabulary of src/data/band_role.h
+// ("coastal", "blue", ..., "qa", "scene_classification"); SAR polarizations
+// extend the same string vocabulary ("vv"/"vh"/"hh"/"hv") rather than
+// inventing a sensor-specific enum (ADR 0137).
 const BandRoleMapping kSentinel2Bands[] = {
-  { "B01", "Coastal", 443.0 }, { "B02", "Blue", 490.0 }, { "B03", "Green", 560.0 },
-  { "B04", "Red", 665.0 }, { "B05", "RedEdge", 705.0 }, { "B06", "RedEdge", 740.0 },
-  { "B07", "RedEdge", 783.0 }, { "B08", "NIR", 842.0 }, { "B8A", "NarrowNIR", 865.0 },
-  { "B09", "NIR", 945.0 }, { "B10", "Cirrus", 1375.0 }, { "B11", "SWIR1", 1610.0 },
-  { "B12", "SWIR2", 2190.0 },
+  { "B01", "coastal", 443.0 }, { "B02", "blue", 490.0 }, { "B03", "green", 560.0 },
+  { "B04", "red", 665.0 }, { "B05", "red_edge", 705.0 }, { "B06", "red_edge", 740.0 },
+  { "B07", "red_edge", 783.0 }, { "B08", "nir", 842.0 }, { "B8A", "narrow_nir", 865.0 },
+  { "B09", "nir", 945.0 }, { "B10", "cirrus", 1375.0 }, { "B11", "swir1", 1610.0 },
+  { "B12", "swir2", 2190.0 }, { "SCL", "scene_classification", 0.0 },
+  { "VV", "vv", 0.0 }, { "VH", "vh", 0.0 }, { "HH", "hh", 0.0 }, { "HV", "hv", 0.0 },
 };
 
 const BandRoleMapping kLandsatBands[] = {
-  { "B1", "Coastal", 443.0 }, { "B2", "Blue", 482.0 }, { "B3", "Green", 561.0 },
-  { "B4", "Red", 655.0 }, { "B5", "NIR", 865.0 }, { "B6", "SWIR1", 1610.0 },
-  { "B7", "SWIR2", 2200.0 }, { "B8", "Panchromatic", 590.0 }, { "B9", "Cirrus", 1375.0 },
-  { "B10", "Thermal", 10895.0 }, { "B11", "Thermal", 12005.0 },
+  { "B1", "coastal", 443.0 }, { "B2", "blue", 482.0 }, { "B3", "green", 561.0 },
+  { "B4", "red", 655.0 }, { "B5", "nir", 865.0 }, { "B6", "swir1", 1610.0 },
+  { "B7", "swir2", 2200.0 }, { "B8", "panchromatic", 590.0 }, { "B9", "cirrus", 1375.0 },
+  { "B10", "thermal", 10895.0 }, { "B11", "thermal", 12005.0 }, { "QA", "qa", 0.0 },
 };
 
 template <std::size_t N>
@@ -404,6 +409,14 @@ const BandRoleMapping *findBand( const BandRoleMapping ( &table )[N], const std:
 }
 
 } // namespace
+
+std::map<std::string, std::string> parseLandsatMtlKeys( const std::string &mtlPath )
+{
+  std::string text;
+  if ( !readFileText( mtlPath, text ) )
+    return {};
+  return parseMtlKeyValues( text );
+}
 
 Json::Value ProductMetadata::toJson() const
 {
@@ -453,6 +466,34 @@ ProductKind detectProductKind( const std::string &path )
        || upper.find( "MYD0" ) != std::string::npos )
     return ProductKind::ModisContainer;
   return ProductKind::GenericRaster;
+}
+
+const char *productKindName( ProductKind kind )
+{
+  switch ( kind )
+  {
+    case ProductKind::LandsatMtl: return "landsat_mtl";
+    case ProductKind::Sentinel2Safe: return "sentinel2_safe";
+    case ProductKind::Sentinel1Safe: return "sentinel1_safe";
+    case ProductKind::ModisContainer: return "modis_container";
+    case ProductKind::GenericRaster: return "generic_raster";
+    case ProductKind::Unknown: break;
+  }
+  return "unknown";
+}
+
+std::string productKindDisplayName( ProductKind kind )
+{
+  switch ( kind )
+  {
+    case ProductKind::LandsatMtl: return "Landsat MTL scene";
+    case ProductKind::Sentinel2Safe: return "Sentinel-2 SAFE product";
+    case ProductKind::Sentinel1Safe: return "Sentinel-1 SAFE product";
+    case ProductKind::ModisContainer: return "MODIS HDF container";
+    case ProductKind::GenericRaster: return "Generic raster";
+    case ProductKind::Unknown: break;
+  }
+  return "Unknown";
 }
 
 ProductMetadata readProductMetadata( const std::string &path, ProductKind kind )
@@ -556,8 +597,8 @@ bool productBandWavelengthNm( ProductKind kind, const std::string &bandName, dou
     mapping = findBand( kSentinel2Bands, bandName );
   else if ( kind == ProductKind::LandsatMtl )
     mapping = findBand( kLandsatBands, bandName );
-  if ( !mapping )
-    return false;
+  if ( !mapping || mapping->wavelengthNm <= 0.0 )
+    return false; // roles without a declared centre wavelength carry none
   wavelengthNm = mapping->wavelengthNm;
   return true;
 }
