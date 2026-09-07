@@ -141,6 +141,10 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
             QFile::remove( tmp );
             return std::nullopt;
         }
+        // New object bytes landed: keep the incremental storage accounting
+        // accurate without a full-tree re-walk (issue #758-5).
+        if ( m_cachedTotalBytes >= 0 )
+            m_cachedTotalBytes += QFileInfo( objectPath ).size();
     }
     else
     {
@@ -315,29 +319,56 @@ qint64 ArtifactObjectPool::totalObjectBytes() const
             total += QFileInfo( prefixDir.filePath( object ) ).size();
         }
     }
+    m_cachedTotalBytes = total;
     return total;
 }
 
 qint64 ArtifactObjectPool::evictToBytes( qint64 maxBytes )
 {
-    if ( !m_enabled || totalObjectBytes() <= maxBytes )
+    if ( !m_enabled )
+        return 0;
+    // Incremental accounting (issue #758-5): the under-budget fast path must
+    // not full-tree-walk the objects dir on every cache store. The cached
+    // total is maintained by put() (additions) and here (removals); a full
+    // walk runs only when the budget is exceeded or the total is unknown.
+    if ( m_cachedTotalBytes >= 0 && m_cachedTotalBytes <= maxBytes )
         return 0;
     // Conservative eviction: whole executions whose records are trash-state
     // and unreferenced (the ArtifactStore reap rules), oldest first. Live
     // executions are never evicted — only explicit forgetEntry/age-out.
     qint64 freed = 0;
-    const qint64 cutoff = QDateTime::currentMSecsSinceEpoch() - 60 * 1000; // 1 min grace
+    const qint64 cutoff = QDateTime::currentMSecsSinceEpoch() - m_evictionGraceMs;
     QVector<ArtifactRecord> reapable = m_store.reapable( cutoff );
     std::sort( reapable.begin(), reapable.end(),
                []( const ArtifactRecord &a, const ArtifactRecord &b ) {
                    return a.lastTouchMs < b.lastTouchMs;
                } );
-    qint64 totalNow = totalObjectBytes(); // hoisted: was O(n²) in-loop
+    qint64 totalNow = totalObjectBytes(); // budget exceeded: walk is warranted
     for ( const ArtifactRecord &record : reapable )
     {
         if ( totalNow - freed <= maxBytes )
             break;
+        // Reference-safe CAS eviction (issue #758-5): byte-identical outputs
+        // of different fingerprints dedup onto ONE data/<digest> object. When
+        // a live record still references the digest, drop only this trash
+        // record's row (a cache miss for the evicted execution) and keep the
+        // shared object bytes for the live user.
+        const std::optional<ArtifactRecord> liveUser =
+            m_store.liveByContentDigest( record.contentDigest );
+        if ( !record.contentDigest.isEmpty() && liveUser
+             && liveUser->artifactId != record.artifactId )
+        {
+            m_store.forget( record.artifactId );
+            continue;
+        }
         const QFileInfo objectInfo( record.storagePath );
+        if ( !objectInfo.isFile() )
+        {
+            // Orphaned metadata row (bytes already gone): drop the row so a
+            // dead record cannot spin in every future eviction pass.
+            m_store.forget( record.artifactId );
+            continue;
+        }
         const qint64 size = objectInfo.size();
         if ( QFile::remove( record.storagePath ) )
         {
@@ -346,6 +377,7 @@ qint64 ArtifactObjectPool::evictToBytes( qint64 maxBytes )
             m_store.forget( record.artifactId );
         }
     }
+    m_cachedTotalBytes = totalNow;
     return freed;
 }
 

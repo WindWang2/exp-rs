@@ -32,6 +32,10 @@ Pi agent adapter over the same Task Center seam.
 
 ## Current state (2026-09-06)
 
+- **Data Plane, Runtime, Governance & Reproducibility Reliability 4.0** (ADR 0130):
+  document-authority/downgrade guard, WAL-consistent snapshots, checked store writes,
+  reference-safe CAS eviction, external-mutation cache invalidation, crash-resume
+  completion identity, truthful run states, bounded warm worker pool (`docs/architecture/FAULT_MATRIX_4.md`).
 - **Cartography Design System 4.0** (ADR 0130/0131): design tokens,
   component/template library expansion, MapSpec 2.0 compositional
   constraints, composition solver, preflight/repair rule catalog, and the

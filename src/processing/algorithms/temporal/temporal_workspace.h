@@ -25,6 +25,7 @@
 #include "data/data_result.h"
 #include "data/execution_fingerprint.h"
 
+#include <QMap>
 #include <QString>
 
 #include <json/json.h>
@@ -130,6 +131,8 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
                                          QVector<sicnu::data::TaggedDerivationInput> *out,
                                          QString *reason = nullptr,
                                          const QStringList &chainedProducerKeys
-                                           = QStringList() );
+                                           = QStringList(),
+                                         QMap<QString, qint64> *inputSizes = nullptr,
+                                         QMap<QString, qint64> *inputMsecs = nullptr );
 
 } // namespace sicnu::temporal

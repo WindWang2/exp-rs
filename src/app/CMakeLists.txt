@@ -40,6 +40,11 @@ target_link_libraries(sicnu_qgis_display
         Qt6::Network
         qgis_core
         qgis_gui
+        # ProjectContext mirrors workflow run states into the governance
+        # service (issue #754): the coordinator lives in the task-center
+        # library. PRIVATE on a static lib still propagates via LINK_ONLY,
+        # so consumers (GUI shell + headless tests) resolve the symbols.
+        sicnu_task_center
 )
 set_target_properties(sicnu_qgis_display PROPERTIES
     CXX_STANDARD 20

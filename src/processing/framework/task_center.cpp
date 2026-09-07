@@ -132,6 +132,7 @@ void TaskCenter::shutdown()
             m_taskFingerprints.remove( id );
             m_taskFingerprintParams.remove( id );
             m_taskChainedEdges.remove( id );
+            m_taskRegisteredInputStats.remove( id );
             updatePipelineForTaskLocked( id );
             queueTaskUpdatedLocked( id );
             toFinalize.append( id );
@@ -1697,6 +1698,7 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         m_taskFingerprints.remove( taskId );
         m_taskFingerprintParams.remove( taskId );
         m_taskChainedEdges.remove( taskId );
+        m_taskRegisteredInputStats.remove( taskId );
         m_tasks[taskId].status = TaskStatus::Failed;
         m_tasks[taskId].errorMessage = error;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
@@ -1745,6 +1747,7 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
         m_taskFingerprints.remove( taskId );
         m_taskFingerprintParams.remove( taskId );
         m_taskChainedEdges.remove( taskId );
+        m_taskRegisteredInputStats.remove( taskId );
         m_tasks[taskId].status = TaskStatus::Canceled;
         m_tasks[taskId].errorMessage = reason;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
@@ -2028,6 +2031,7 @@ void TaskCenter::clearCompletedTasks()
             m_taskFingerprints.remove( id );
             m_taskFingerprintParams.remove( id );
             m_taskChainedEdges.remove( id );
+            m_taskRegisteredInputStats.remove( id );
         }
         for ( auto it = m_taskByJobId.begin(); it != m_taskByJobId.end(); )
         {
@@ -2451,8 +2455,13 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
         chainedKeys.append( cIt.key() );
     QVector<sicnu::data::TaggedDerivationInput> inputs;
     QString reason;
+    // Registered-input stat binding (issue #749): captured at submission so
+    // the store path can vouch for the exact input bytes this step read.
+    QMap<QString, qint64> registeredInputSizes;
+    QMap<QString, qint64> registeredInputMsecs;
     if ( !sicnu::temporal::fingerprintInputsForOperatorParams(
-             m_catalog, resolvedAll, &inputs, &reason, chainedKeys ) )
+             m_catalog, resolvedAll, &inputs, &reason, chainedKeys,
+             &registeredInputSizes, &registeredInputMsecs ) )
     {
         return;
     }
@@ -2486,6 +2495,8 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
     {
         m_taskFingerprints[taskId] = fp;
         m_taskFingerprintParams[taskId] = resolvedAll;
+        m_taskRegisteredInputStats[taskId] =
+            qMakePair( registeredInputSizes, registeredInputMsecs );
         QVector<ChainedEdge> edges;
         for ( auto cIt = chainedProducers.constBegin(); cIt != chainedProducers.constEnd(); ++cIt )
         {
@@ -2509,6 +2520,7 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
         m_taskFingerprints.remove( taskId );
         m_taskFingerprintParams.remove( taskId );
         m_taskChainedEdges.remove( taskId );
+        m_taskRegisteredInputStats.remove( taskId );
     }
 }
 
@@ -2531,6 +2543,7 @@ void TaskCenter::verifyDispatchFingerprintLocked( long taskId )
         m_taskFingerprints.remove( taskId );
         m_taskFingerprintParams.remove( taskId );
         m_taskChainedEdges.remove( taskId );
+        m_taskRegisteredInputStats.remove( taskId );
         return;
     }
     // Re-verify each chained producer edge: the producer's stamped payload
@@ -2557,6 +2570,7 @@ void TaskCenter::verifyDispatchFingerprintLocked( long taskId )
                 m_taskFingerprints.remove( taskId );
                 m_taskFingerprintParams.remove( taskId );
                 m_taskChainedEdges.remove( taskId );
+                m_taskRegisteredInputStats.remove( taskId );
                 return;
             }
         }
@@ -2828,6 +2842,11 @@ void TaskCenter::storeExecutionResultLocked( long taskId )
     m_taskFingerprintParams.remove( taskId );
     const QVector<ChainedEdge> edges = m_taskChainedEdges.value( taskId );
     m_taskChainedEdges.remove( taskId );
+    // Registered-input stat bindings captured at submission (issue #749) —
+    // read BEFORE the cleanup removes them.
+    const QPair<QMap<QString, qint64>, QMap<QString, qint64>> registeredStats =
+        m_taskRegisteredInputStats.value( taskId );
+    m_taskRegisteredInputStats.remove( taskId );
 
     const auto taskIt = m_tasks.constFind( taskId );
     if ( taskIt == m_tasks.constEnd() )
@@ -2870,6 +2889,21 @@ void TaskCenter::storeExecutionResultLocked( long taskId )
         execution.inputSizes.insert( edge.producerPath, info.size() );
         execution.inputMsecs.insert( edge.producerPath,
                                      info.lastModified().toMSecsSinceEpoch() );
+    }
+    // Bind registered (non-chained) inputs to the bytes observed at
+    // submission (issue #749) — the same moment the fingerprint identity was
+    // computed, so stat + identity describe one provable state. An
+    // out-of-band rewrite of a registered input now invalidates this entry
+    // at lookup, exactly like a chained intermediate rewrite always did.
+    for ( auto it = registeredStats.first.constBegin();
+          it != registeredStats.first.constEnd(); ++it )
+    {
+        execution.inputSizes.insert( it.key(), it.value() );
+    }
+    for ( auto it = registeredStats.second.constBegin();
+          it != registeredStats.second.constEnd(); ++it )
+    {
+        execution.inputMsecs.insert( it.key(), it.value() );
     }
 
     execution.resultPayload = QJsonDocument::fromJson( compactJsonBytes( taskIt->resultPayload ) );

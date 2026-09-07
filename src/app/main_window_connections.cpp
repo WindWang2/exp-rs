@@ -311,6 +311,20 @@ void QgisDesktopWindow::onProjectRead(const QDomDocument &doc)
                     .arg( formatProjectDiagnostics(
                         restored.diagnostics() ) ) );
         }
+        else if ( !restored.diagnostics().isEmpty() )
+        {
+            // Non-fatal governance diagnostics (store unavailable/read-only,
+            // failed upserts, v1 migration) surface as a status message —
+            // they are warnings on a successful read, and silencing them hid
+            // partial restores (issue #752).
+            statusBar()->showMessage(
+                tr( "Project data: %1 governance notice(s) — see logs" )
+                    .arg( restored.diagnostics().size() ),
+                8000 );
+            for ( const sicnu::data::Diagnostic &d : restored.diagnostics() )
+                qWarning( "workspace restore notice: %s: %s",
+                          qPrintable( d.code ), qPrintable( d.message ) );
+        }
     }
     refreshCanvasLayers();
     updateCrsDisplay();

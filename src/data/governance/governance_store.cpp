@@ -85,6 +85,29 @@ class Stmt
     sqlite3_stmt *m_stmt = nullptr;
 };
 
+// Non-owning statement view over the Impl prepare-once cache: same read API
+// as Stmt without the per-call prepare/finalize cost.
+class StmtView
+{
+  public:
+    explicit StmtView( sqlite3_stmt *stmt ) : m_stmt( stmt ) {}
+    explicit operator bool() const { return m_stmt != nullptr; }
+    bool stepRow() const { return sqlite3_step( m_stmt ) == SQLITE_ROW; }
+    void bind( int idx, const QString &v ) const
+    {
+        sqlite3_bind_text( m_stmt, idx, v.toUtf8().constData(), -1, SQLITE_TRANSIENT );
+    }
+    QString text( int col ) const
+    {
+        const unsigned char *p = sqlite3_column_text( m_stmt, col );
+        return p ? QString::fromUtf8( reinterpret_cast<const char *>( p ) ) : QString();
+    }
+    qint64 i64( int col ) const { return sqlite3_column_int64( m_stmt, col ); }
+
+  private:
+    sqlite3_stmt *m_stmt = nullptr;
+};
+
 QString likeContains( const QString &raw )
 {
     return ( QString( raw )
@@ -92,6 +115,10 @@ QString likeContains( const QString &raw )
                  .replace( QLatin1Char( '%' ), QLatin1String( "\\%" ) )
                  .replace( QLatin1Char( '_' ), QLatin1String( "\\_" ) ) );
 }
+
+// Run states that no longer intentionally anchor their outputs; shared by
+// orphanResults() and entityCounts() so the two can never drift.
+#define GOV_ORPHAN_RUN_STATES "'Failed','Canceled','Interrupted'"
 
 QStringList splitRoles( const QString &joined )
 {
@@ -113,19 +140,59 @@ struct GovernanceStore::Impl
     mutable std::mutex mutex;
     QString schemaVersion;
     bool readOnly = false;
+    // Text of the last failing sqlite call (empty when nothing failed); lets
+    // writers build actionable diagnostics instead of opaque failures.
+    mutable QString lastError;
 
     bool exec( const char *sql ) const
     {
         char *err = nullptr;
         if ( sqlite3_exec( db, sql, nullptr, nullptr, &err ) != SQLITE_OK )
         {
+            lastError = err ? QString::fromUtf8( err ) : QStringLiteral( "unknown sqlite error" );
             sqlite3_free( err );
             return false;
         }
+        lastError.clear();
         return true;
     }
 
     bool exec( const QString &sql ) const { return exec( sql.toUtf8().constData() ); }
+
+    // Checked COMMIT (issue #758-1): a failed commit used to be discarded,
+    // leaving the connection inside an open transaction — every later
+    // BEGIN IMMEDIATE then failed with "cannot start a transaction within a
+    // transaction", cascading through the whole session. A failed commit now
+    // rolls back and reports failure.
+    bool commit() const
+    {
+        if ( exec( "COMMIT" ) )
+            return true;
+        exec( "ROLLBACK" );
+        return false;
+    }
+
+    // Prepare-once statement cache for the per-row sub-SELECTs in the read
+    // hot paths (issue #758-4: a 100k mirror used to pay ~2-3 prepares per
+    // row). Reused strictly under the connection mutex; reset + clear
+    // bindings before every use.
+    sqlite3_stmt *cached( const char *sql ) const
+    {
+        const auto it = stmtCache.constFind( QLatin1String( sql ) );
+        if ( it != stmtCache.constEnd() )
+        {
+            sqlite3_reset( it.value() );
+            sqlite3_clear_bindings( it.value() );
+            return it.value();
+        }
+        sqlite3_stmt *stmt = nullptr;
+        if ( sqlite3_prepare_v2( db, sql, -1, &stmt, nullptr ) != SQLITE_OK )
+            return nullptr;
+        stmtCache.insert( QLatin1String( sql ), stmt );
+        return stmt;
+    }
+
+    mutable QHash<QString, sqlite3_stmt *> stmtCache;
 
     bool createSchema()
     {
@@ -343,14 +410,20 @@ struct GovernanceStore::Impl
         a.modality = s.text( 20 );
         a.availability = s.text( 21 );
         {
-            Stmt al( db, "SELECT path FROM aliases WHERE asset_id=?" );
-            al.bind( 1, a.assetId );
-            while ( al.stepRow() )
-                a.aliases.append( al.text( 0 ) );
-            Stmt tg( db, "SELECT tag FROM tags WHERE entity_kind='asset' AND entity_id=?" );
-            tg.bind( 1, a.assetId );
-            while ( tg.stepRow() )
-                a.tags.append( tg.text( 0 ) );
+            StmtView al( cached( "SELECT path FROM aliases WHERE asset_id=?" ) );
+            if ( al )
+            {
+                al.bind( 1, a.assetId );
+                while ( al.stepRow() )
+                    a.aliases.append( al.text( 0 ) );
+            }
+            StmtView tg( cached( "SELECT tag FROM tags WHERE entity_kind='asset' AND entity_id=?" ) );
+            if ( tg )
+            {
+                tg.bind( 1, a.assetId );
+                while ( tg.stepRow() )
+                    a.tags.append( tg.text( 0 ) );
+            }
         }
         a.createdAtMs = s.i64( 22 );
         a.updatedAtMs = s.i64( 23 );
@@ -368,14 +441,20 @@ struct GovernanceStore::Impl
         d.header.createdAtMs = s.i64( 6 );
         d.header.updatedAtMs = s.i64( 7 );
         {
-            Stmt m( db, "SELECT asset_id FROM dataset_members WHERE dataset_id=? ORDER BY position" );
-            m.bind( 1, d.id.toString() );
-            while ( m.stepRow() )
-                d.memberAssetIds.append( m.text( 0 ) );
-            Stmt tg( db, "SELECT tag FROM tags WHERE entity_kind='dataset' AND entity_id=?" );
-            tg.bind( 1, d.id.toString() );
-            while ( tg.stepRow() )
-                d.header.tags.append( tg.text( 0 ) );
+            StmtView m( cached( "SELECT asset_id FROM dataset_members WHERE dataset_id=? ORDER BY position" ) );
+            if ( m )
+            {
+                m.bind( 1, d.id.toString() );
+                while ( m.stepRow() )
+                    d.memberAssetIds.append( m.text( 0 ) );
+            }
+            StmtView tg( cached( "SELECT tag FROM tags WHERE entity_kind='dataset' AND entity_id=?" ) );
+            if ( tg )
+            {
+                tg.bind( 1, d.id.toString() );
+                while ( tg.stepRow() )
+                    d.header.tags.append( tg.text( 0 ) );
+            }
         }
         return d;
     }
@@ -398,26 +477,32 @@ struct GovernanceStore::Impl
         r.header.createdAtMs = s.i64( 13 );
         r.header.updatedAtMs = s.i64( 14 );
         {
-            Stmt i( db, "SELECT asset_id, revision, role FROM result_inputs WHERE result_id=?" );
-            i.bind( 1, r.id.toString() );
-            while ( i.stepRow() )
+            StmtView i( cached( "SELECT asset_id, revision, role FROM result_inputs WHERE result_id=?" ) );
+            if ( i )
             {
-                ResultInput in;
-                in.assetId = i.text( 0 );
-                in.revision = static_cast<quint64>( i.i64( 1 ) );
-                in.role = i.text( 2 );
-                r.inputs.append( in );
+                i.bind( 1, r.id.toString() );
+                while ( i.stepRow() )
+                {
+                    ResultInput in;
+                    in.assetId = i.text( 0 );
+                    in.revision = static_cast<quint64>( i.i64( 1 ) );
+                    in.role = i.text( 2 );
+                    r.inputs.append( in );
+                }
             }
-            Stmt a( db, "SELECT path, role, digest, size_bytes FROM result_artifacts WHERE result_id=?" );
-            a.bind( 1, r.id.toString() );
-            while ( a.stepRow() )
+            StmtView a( cached( "SELECT path, role, digest, size_bytes FROM result_artifacts WHERE result_id=?" ) );
+            if ( a )
             {
-                ResultArtifact art;
-                art.path = a.text( 0 );
-                art.role = a.text( 1 );
-                art.contentDigest = a.text( 2 );
-                art.sizeBytes = a.i64( 3 );
-                r.artifacts.append( art );
+                a.bind( 1, r.id.toString() );
+                while ( a.stepRow() )
+                {
+                    ResultArtifact art;
+                    art.path = a.text( 0 );
+                    art.role = a.text( 1 );
+                    art.contentDigest = a.text( 2 );
+                    art.sizeBytes = a.i64( 3 );
+                    r.artifacts.append( art );
+                }
             }
         }
         return r;
@@ -438,10 +523,13 @@ struct GovernanceStore::Impl
         r.header.tags = splitRoles( s.text( 9 ) );
         r.header.updatedAtMs = s.i64( 10 );
         {
-            Stmt o( db, "SELECT asset_id FROM run_outputs WHERE run_id=?" );
-            o.bind( 1, r.id );
-            while ( o.stepRow() )
-                r.outputAssetIds.append( o.text( 0 ) );
+            StmtView o( cached( "SELECT asset_id FROM run_outputs WHERE run_id=?" ) );
+            if ( o )
+            {
+                o.bind( 1, r.id );
+                while ( o.stepRow() )
+                    r.outputAssetIds.append( o.text( 0 ) );
+            }
         }
         return r;
     }
@@ -457,19 +545,25 @@ struct GovernanceStore::Impl
         e.header.createdAtMs = s.i64( 5 );
         e.header.updatedAtMs = s.i64( 6 );
         {
-            Stmt v( db, "SELECT variant_key, variant_json FROM experiment_variants WHERE experiment_id=?" );
-            v.bind( 1, e.id.toString() );
-            while ( v.stepRow() )
+            StmtView v( cached( "SELECT variant_key, variant_json FROM experiment_variants WHERE experiment_id=?" ) );
+            if ( v )
             {
-                ExperimentVariant variant;
-                variant.key = v.text( 0 );
-                variant.value = textToJson( v.text( 1 ) );
-                e.variants.append( variant );
+                v.bind( 1, e.id.toString() );
+                while ( v.stepRow() )
+                {
+                    ExperimentVariant variant;
+                    variant.key = v.text( 0 );
+                    variant.value = textToJson( v.text( 1 ) );
+                    e.variants.append( variant );
+                }
             }
-            Stmt r( db, "SELECT run_id FROM experiment_runs WHERE experiment_id=?" );
-            r.bind( 1, e.id.toString() );
-            while ( r.stepRow() )
-                e.runIds.append( r.text( 0 ) );
+            StmtView r( cached( "SELECT run_id FROM experiment_runs WHERE experiment_id=?" ) );
+            if ( r )
+            {
+                r.bind( 1, e.id.toString() );
+                while ( r.stepRow() )
+                    e.runIds.append( r.text( 0 ) );
+            }
         }
         return e;
     }
@@ -512,6 +606,7 @@ GovernanceStore::~GovernanceStore()
 bool GovernanceStore::open( const QString &dbPath, QString *errorOut )
 {
     close();
+    m_storePath = dbPath;
     m_impl = new Impl;
     if ( sqlite3_open_v2( dbPath.toUtf8().constData(), &m_impl->db,
                           SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr ) != SQLITE_OK )
@@ -521,6 +616,11 @@ bool GovernanceStore::open( const QString &dbPath, QString *errorOut )
         close();
         return false;
     }
+    // Busy policy applies to EVERY connection from the first statement on —
+    // the read-only path below skips createSchema(), which used to be the only
+    // place busy_timeout was set (issue #752: concurrent access degraded from
+    // a 5 s retry to an immediate SQLITE_BUSY there).
+    m_impl->exec( "PRAGMA busy_timeout=5000" );
     // Forward tolerance: a newer schema opens read-only, never auto-deleted.
     {
         Stmt v( m_impl->db, "SELECT value FROM gov_meta WHERE key='schema_version'" );
@@ -556,11 +656,16 @@ void GovernanceStore::close()
         return;
     {
         std::lock_guard<std::mutex> lock( m_impl->mutex );
+        // Finalize cached statements before the connection close.
+        for ( sqlite3_stmt *stmt : m_impl->stmtCache )
+            sqlite3_finalize( stmt );
+        m_impl->stmtCache.clear();
         if ( m_impl->db )
             sqlite3_close_v2( m_impl->db );
     }
     delete m_impl;
     m_impl = nullptr;
+    m_storePath.clear();
 }
 
 bool GovernanceStore::isReadOnly() const
@@ -571,6 +676,27 @@ bool GovernanceStore::isReadOnly() const
 QString GovernanceStore::schemaVersion() const
 {
     return m_impl ? m_impl->schemaVersion : QString();
+}
+
+bool GovernanceStore::checkpointForBackup()
+{
+    if ( !m_impl )
+        return false;
+    std::lock_guard<std::mutex> lock( m_impl->mutex );
+    // TRUNCATE folds the WAL into the DB file and resets the log, so the DB
+    // file alone is a consistent snapshot (issue #751). sqlite3_exec is NOT
+    // enough: the checkpoint reports blockedness in its result ROW (busy /
+    // log pages / checkpointed pages), not as an error, and a blocked or
+    // partial checkpoint leaves recent commits in the WAL. Step the statement
+    // and require busy == 0; anything else refuses the DB-alone copy. (There
+    // is deliberately no PASSIVE fallback — PASSIVE commonly completes zero
+    // frames under contention and would silently re-open the torn-copy hole.)
+    Stmt s( m_impl->db, "PRAGMA wal_checkpoint(TRUNCATE)" );
+    if ( !s )
+        return false;
+    if ( !s.stepRow() )
+        return false;
+    return s.i64( 0 ) == 0; // 0 = no reader/writer blocked the reset
 }
 
 Result<void> GovernanceStore::upsertAsset( const GovernedAsset &asset )
@@ -586,7 +712,8 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
         return Result<void>::failure( govDiag( QStringLiteral( "store.read_only" ), QStringLiteral( "store opened read-only (newer schema)" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
     QVector<QPair<QString, QString>> collisions;
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt up( m_impl->db,
             "INSERT INTO assets(" GOV_ASSET_COLS ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
@@ -647,23 +774,45 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
             delAlias.reset();
             delAlias.bind( 1, asset.assetId );
             delAlias.step();
-            // Alias ownership is single-writer; a collision (two assets, one
-            // canonical source) is surfaced as a diagnostic instead of a
-            // silent last-writer-wins (review P2-4).
+            // Alias ownership is single-writer for canonical paths AND
+            // secondary aliases (issue #758-2 symmetry): a collision (two
+            // assets claiming one path) is surfaced as a diagnostic and the
+            // existing owner is kept, instead of a silent INSERT OR REPLACE
+            // steal between sibling assets.
             {
-                Stmt owner( m_impl->db, "SELECT asset_id FROM aliases WHERE path=?" );
-                owner.bind( 1, asset.canonicalSource );
-                if ( owner.stepRow() && owner.text( 0 ) != asset.assetId )
+                StmtView owner( m_impl->cached( "SELECT asset_id FROM aliases WHERE path=?" ) );
+                bool foreign = false;
+                if ( owner )
+                {
+                    owner.bind( 1, asset.canonicalSource );
+                    foreign = owner.stepRow() && owner.text( 0 ) != asset.assetId;
+                }
+                if ( foreign )
                     collisions.append( qMakePair( asset.canonicalSource, owner.text( 0 ) ) );
+                else
+                {
+                    insAlias.reset();
+                    insAlias.bind( 1, asset.canonicalSource );
+                    insAlias.bind( 2, asset.assetId );
+                    insAlias.step();
+                }
             }
-            insAlias.reset();
-            insAlias.bind( 1, asset.canonicalSource );
-            insAlias.bind( 2, asset.assetId );
-            insAlias.step();
             for ( const QString &alias : asset.aliases )
             {
                 if ( alias == asset.canonicalSource || alias.isEmpty() )
                     continue;
+                StmtView owner( m_impl->cached( "SELECT asset_id FROM aliases WHERE path=?" ) );
+                bool foreign = false;
+                if ( owner )
+                {
+                    owner.bind( 1, alias );
+                    foreign = owner.stepRow() && owner.text( 0 ) != asset.assetId;
+                }
+                if ( foreign )
+                {
+                    collisions.append( qMakePair( alias, owner.text( 0 ) ) );
+                    continue;
+                }
                 insAlias.reset();
                 insAlias.bind( 1, alias );
                 insAlias.bind( 2, asset.assetId );
@@ -671,12 +820,15 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
             }
         }
     }
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     QVector<Diagnostic> diagnostics;
     for ( const QPair<QString, QString> &collision : collisions )
         diagnostics.append( govDiag(
             QStringLiteral( "store.alias_collision" ),
-            QStringLiteral( "%1 is already owned by asset %2; the alias now points to the new row" )
+            QStringLiteral( "%1 is already owned by asset %2; ownership was kept for %2" )
                 .arg( collision.first, collision.second ),
             DiagnosticSeverity::Warning ) );
     return Result<void>::success( diagnostics );
@@ -689,14 +841,20 @@ Result<void> GovernanceStore::removeAsset( const QString &assetId )
     if ( m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.read_only" ), QStringLiteral( "store opened read-only" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt a( m_impl->db, "DELETE FROM assets WHERE asset_id=?" );
         Stmt al( m_impl->db, "DELETE FROM aliases WHERE asset_id=?" );
         Stmt t( m_impl->db, "DELETE FROM tags WHERE entity_kind='asset' AND entity_id=?" );
-        Stmt li( m_impl->db, "DELETE FROM lineage_edges WHERE input_asset_id=?" );
+        // Direction-aware lineage deletion (issue #758-6): only the removed
+        // asset's OWN outgoing provenance (edges where it is the output) is
+        // dropped. Edges where it is an input belong to SURVIVING downstream
+        // consumers — deleting those truncated their provenance (the
+        // DataManager DerivationRecord still explained it; the store and
+        // repro bundles no longer did).
         Stmt lo( m_impl->db, "DELETE FROM lineage_edges WHERE output_asset_id=?" );
-        if ( !a || !al || !t || !li || !lo )
+        if ( !a || !al || !t || !lo )
         {
             m_impl->exec( "ROLLBACK" );
             return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ), QStringLiteral( "remove prepare failed" ) ) );
@@ -708,11 +866,12 @@ Result<void> GovernanceStore::removeAsset( const QString &assetId )
         al.step();
         t.bind( 1, assetId );
         t.step();
-        li.bind( 1, assetId );
-        li.step();
         lo.bind( 1, assetId );
         lo.step();
-        m_impl->exec( "COMMIT" );
+        if ( !m_impl->commit() )
+            return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                                   m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                               : m_impl->lastError ) );
         if ( !removed )
             return Result<void>::failure( govDiag( QStringLiteral( "store.unknown_asset" ),
                                                    QStringLiteral( "no asset %1" ).arg( assetId ) ) );
@@ -816,6 +975,38 @@ qint64 GovernanceStore::assetCount() const
     return s.stepRow() ? s.i64( 0 ) : 0;
 }
 
+GovernanceStore::EntityCounts GovernanceStore::entityCounts() const
+{
+    EntityCounts counts;
+    if ( !m_impl )
+        return counts;
+    std::lock_guard<std::mutex> lock( m_impl->mutex );
+    // One row of real totals; the orphan condition mirrors orphanResults().
+    Stmt s( m_impl->db,
+            "SELECT (SELECT COUNT(*) FROM assets),"
+            " (SELECT COUNT(*) FROM datasets),"
+            " (SELECT COUNT(*) FROM results),"
+            " (SELECT COUNT(*) FROM runs),"
+            " (SELECT COUNT(*) FROM experiments),"
+            " (SELECT COUNT(*) FROM smart_collections),"
+            " (SELECT COUNT(*) FROM exports),"
+            " (SELECT COUNT(*) FROM results r LEFT JOIN runs ru ON ru.run_id=r.run_id"
+            "   WHERE r.run_id<>'' AND (ru.run_id IS NULL OR ru.state IN"
+            "   (" GOV_ORPHAN_RUN_STATES ")))" );
+    if ( s.stepRow() )
+    {
+        counts.assets = s.i64( 0 );
+        counts.datasets = s.i64( 1 );
+        counts.results = s.i64( 2 );
+        counts.runs = s.i64( 3 );
+        counts.experiments = s.i64( 4 );
+        counts.smartCollections = s.i64( 5 );
+        counts.exports = s.i64( 6 );
+        counts.orphanResults = s.i64( 7 );
+    }
+    return counts;
+}
+
 // --- tags -------------------------------------------------------------------
 
 Result<void> GovernanceStore::setTags( const QString &entityKind, const QString &entityId, const QStringList &tags )
@@ -825,7 +1016,8 @@ Result<void> GovernanceStore::setTags( const QString &entityKind, const QString 
     if ( m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.read_only" ), QStringLiteral( "store opened read-only" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt del( m_impl->db, "DELETE FROM tags WHERE entity_kind=? AND entity_id=?" );
         Stmt ins( m_impl->db, "INSERT OR IGNORE INTO tags(entity_kind, entity_id, tag) VALUES(?,?,?)" );
@@ -848,7 +1040,10 @@ Result<void> GovernanceStore::setTags( const QString &entityKind, const QString 
             ins.step();
         }
     }
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     return Result<void>::success();
 }
 
@@ -863,9 +1058,21 @@ Result<void> GovernanceStore::addTag( const QString &entityKind, const QString &
     ins.bind( 1, entityKind );
     ins.bind( 2, entityId );
     ins.bind( 3, tag );
-    m_impl->exec( "BEGIN IMMEDIATE" );
-    ins.step();
-    m_impl->exec( "COMMIT" );
+    // Checked write (issue #758-1): the insert is verified, not just the
+    // commit — a silent step failure used to report success while dropping
+    // the user's tag.
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
+    if ( !ins.step() )
+    {
+        m_impl->exec( "ROLLBACK" );
+        return Result<void>::failure( govDiag( QStringLiteral( "store.add_tag" ),
+                                               QStringLiteral( "tag write failed: %1" ).arg( m_impl->lastError ) ) );
+    }
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     return Result<void>::success();
 }
 
@@ -906,7 +1113,8 @@ Result<qint64> GovernanceStore::bulkTag( const QVector<QString> &entityIds, cons
     if ( tag.isEmpty() )
         return Result<qint64>::failure( govDiag( QStringLiteral( "store.empty_tag" ), QStringLiteral( "tag must not be empty" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<qint64>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     qint64 touched = 0;
     {
         Stmt ins( m_impl->db, "INSERT OR IGNORE INTO tags(entity_kind, entity_id, tag) VALUES(?,?,?)" );
@@ -921,11 +1129,20 @@ Result<qint64> GovernanceStore::bulkTag( const QVector<QString> &entityIds, cons
             ins.bind( 1, entityKind );
             ins.bind( 2, id );
             ins.bind( 3, tag );
-            ins.step();
+            if ( !ins.step() )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<qint64>::failure( govDiag( QStringLiteral( "store.bulk_tag" ),
+                                                         QStringLiteral( "bulk tag failed for %1: %2" )
+                                                             .arg( id, m_impl->lastError ) ) );
+            }
             touched += sqlite3_changes( m_impl->db );
         }
     }
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->commit() )
+        return Result<qint64>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                                 m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                             : m_impl->lastError ) );
     return Result<qint64>::success( touched );
 }
 
@@ -936,7 +1153,8 @@ Result<void> GovernanceStore::upsertDataset( const DatasetRecord &dataset )
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const QString idText = dataset.id.toString();
@@ -982,7 +1200,10 @@ Result<void> GovernanceStore::upsertDataset( const DatasetRecord &dataset )
             ins.step();
         }
     }
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     return Result<void>::success();
 }
 
@@ -991,7 +1212,8 @@ Result<void> GovernanceStore::removeDataset( const QString &datasetId )
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt d( m_impl->db, "DELETE FROM datasets WHERE dataset_id=?" );
         Stmt m( m_impl->db, "DELETE FROM dataset_members WHERE dataset_id=?" );
@@ -1000,7 +1222,10 @@ Result<void> GovernanceStore::removeDataset( const QString &datasetId )
         const bool removed = sqlite3_changes( m_impl->db ) > 0;
         m.bind( 1, datasetId );
         m.step();
-        m_impl->exec( "COMMIT" );
+        if ( !m_impl->commit() )
+            return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                                   m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                               : m_impl->lastError ) );
         if ( !removed )
             return Result<void>::failure( govDiag( QStringLiteral( "store.unknown_dataset" ),
                                                    QStringLiteral( "no dataset %1" ).arg( datasetId ) ) );
@@ -1051,7 +1276,8 @@ Result<void> GovernanceStore::upsertResult( const ResultRecord &result )
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const QString idText = result.id.toString();
@@ -1123,7 +1349,10 @@ Result<void> GovernanceStore::upsertResult( const ResultRecord &result )
             insArt.step();
         }
     }
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     return Result<void>::success();
 }
 
@@ -1132,7 +1361,8 @@ Result<void> GovernanceStore::removeResult( const QString &resultId )
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt r( m_impl->db, "DELETE FROM results WHERE result_id=?" );
         Stmt i( m_impl->db, "DELETE FROM result_inputs WHERE result_id=?" );
@@ -1144,7 +1374,10 @@ Result<void> GovernanceStore::removeResult( const QString &resultId )
         i.step();
         a.bind( 1, resultId );
         a.step();
-        m_impl->exec( "COMMIT" );
+        if ( !m_impl->commit() )
+            return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                                   m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                               : m_impl->lastError ) );
         if ( !removed )
             return Result<void>::failure( govDiag( QStringLiteral( "store.unknown_result" ),
                                                    QStringLiteral( "no result %1" ).arg( resultId ) ) );
@@ -1242,7 +1475,9 @@ QVector<ResultRecord> GovernanceStore::resultsDependingOnAssets( const QStringLi
 QVector<ResultRecord> GovernanceStore::orphanResults() const
 {
     // An orphan result has neither a producing run row nor a registered
-    // producing operator anchor in its producer JSON.
+    // producing operator anchor in its producer JSON — and, truthfully
+    // (issue #754), a run that FAILED/CANCELED/INTERRUPTED no longer
+    // intentionally anchors its partial outputs either.
     QVector<ResultRecord> out;
     if ( !m_impl )
         return out;
@@ -1252,7 +1487,8 @@ QVector<ResultRecord> GovernanceStore::orphanResults() const
             " r.run_id, r.metrics_json, r.quality_json, r.metadata_json, r.tags_json, r.superseded_by,"
             " r.validation_notes, r.created_ms, r.updated_ms FROM results r"
             " LEFT JOIN runs ru ON ru.run_id=r.run_id"
-            " WHERE r.run_id<>'' AND ru.run_id IS NULL"
+            " WHERE r.run_id<>'' AND (ru.run_id IS NULL OR ru.state IN"
+            " (" GOV_ORPHAN_RUN_STATES "))"
             " ORDER BY r.updated_ms DESC" );
     if ( !s )
         return out;
@@ -1268,7 +1504,8 @@ Result<void> GovernanceStore::upsertRun( const RunRecord &run )
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         Stmt up( m_impl->db,
@@ -1301,7 +1538,10 @@ Result<void> GovernanceStore::upsertRun( const RunRecord &run )
             return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_run" ), QStringLiteral( "run upsert failed" ) ) );
         }
     }
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     return Result<void>::success();
 }
 
@@ -1348,7 +1588,8 @@ Result<void> GovernanceStore::addRunOutputs( const QVector<QPair<QString, QStrin
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt s( m_impl->db, "INSERT OR IGNORE INTO run_outputs(run_id, asset_id) VALUES(?,?)" );
         if ( !s )
@@ -1364,23 +1605,33 @@ Result<void> GovernanceStore::addRunOutputs( const QVector<QPair<QString, QStrin
             s.step();
         }
     }
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     return Result<void>::success();
 }
 
-void GovernanceStore::linkRunOutput( const QString &runId, const QString &assetId )
+Result<void> GovernanceStore::linkRunOutput( const QString &runId, const QString &assetId )
 {
     if ( !m_impl || m_impl->readOnly || runId.isEmpty() || assetId.isEmpty() )
-        return;
+        return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
     Stmt s( m_impl->db, "INSERT OR IGNORE INTO run_outputs(run_id, asset_id) VALUES(?,?)" );
     if ( !s )
-        return;
+        return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ), QStringLiteral( "run output link prepare failed" ) ) );
     s.bind( 1, runId );
     s.bind( 2, assetId );
-    m_impl->exec( "BEGIN IMMEDIATE" );
-    s.step();
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
+    if ( !s.step() || !m_impl->commit() )
+    {
+        m_impl->exec( "ROLLBACK" );
+        return Result<void>::failure( govDiag( QStringLiteral( "store.link_run_output" ),
+                                               QStringLiteral( "run output link failed: %1" )
+                                                   .arg( m_impl->lastError.isEmpty() ? QStringLiteral( "step failed" ) : m_impl->lastError ) ) );
+    }
+    return Result<void>::success();
 }
 
 // --- experiments ------------------------------------------------------------
@@ -1390,7 +1641,8 @@ Result<void> GovernanceStore::upsertExperiment( const ExperimentRecord &experime
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const QString idText = experiment.id.toString();
@@ -1444,7 +1696,10 @@ Result<void> GovernanceStore::upsertExperiment( const ExperimentRecord &experime
             insR.step();
         }
     }
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     return Result<void>::success();
 }
 
@@ -1453,7 +1708,8 @@ Result<void> GovernanceStore::removeExperiment( const QString &experimentId )
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         Stmt e( m_impl->db, "DELETE FROM experiments WHERE experiment_id=?" );
         Stmt v( m_impl->db, "DELETE FROM experiment_variants WHERE experiment_id=?" );
@@ -1465,7 +1721,10 @@ Result<void> GovernanceStore::removeExperiment( const QString &experimentId )
         v.step();
         r.bind( 1, experimentId );
         r.step();
-        m_impl->exec( "COMMIT" );
+        if ( !m_impl->commit() )
+            return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                                   m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                               : m_impl->lastError ) );
         if ( !removed )
             return Result<void>::failure( govDiag( QStringLiteral( "store.unknown_experiment" ),
                                                    QStringLiteral( "no experiment %1" ).arg( experimentId ) ) );
@@ -1516,7 +1775,8 @@ Result<void> GovernanceStore::addLineageEdges( const QVector<LineageEdge> &edges
     if ( !m_impl || m_impl->readOnly )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unavailable" ), QStringLiteral( "store not writable" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
         if ( replaceOutgoing )
         {
@@ -1555,7 +1815,10 @@ Result<void> GovernanceStore::addLineageEdges( const QVector<LineageEdge> &edges
             ins.step();
         }
     }
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     return Result<void>::success();
 }
 
@@ -1680,9 +1943,13 @@ Result<void> GovernanceStore::upsertSmartCollection( const SmartCollectionRecord
     s.bind( 4, jsonToText( collection.header.metadata ) );
     s.bind( 5, now );
     s.bind( 6, now );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     const bool ok = s.step();
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     if ( !ok )
         return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_smart" ), QStringLiteral( "smart collection upsert failed" ) ) );
     return Result<void>::success();
@@ -1697,10 +1964,19 @@ Result<void> GovernanceStore::removeSmartCollection( const QString &collectionId
     if ( !s )
         return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ), QStringLiteral( "smart collection prepare failed" ) ) );
     s.bind( 1, collectionId );
-    m_impl->exec( "BEGIN IMMEDIATE" );
-    s.step();
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
+    const bool stepped = s.step();
     const bool removed = sqlite3_changes( m_impl->db ) > 0;
-    m_impl->exec( "COMMIT" );
+    if ( !stepped || !m_impl->commit() )
+    {
+        m_impl->exec( "ROLLBACK" );
+        return Result<void>::failure( govDiag( QStringLiteral( "store.remove_smart" ),
+                                               QStringLiteral( "smart collection remove failed: %1" )
+                                                   .arg( m_impl->lastError.isEmpty()
+                                                             ? QStringLiteral( "step failed" )
+                                                             : m_impl->lastError ) ) );
+    }
     if ( !removed )
         return Result<void>::failure( govDiag( QStringLiteral( "store.unknown_smart" ),
                                                QStringLiteral( "no smart collection %1" ).arg( collectionId ) ) );
@@ -1762,9 +2038,13 @@ Result<void> GovernanceStore::upsertExport( const ExportRecord &record )
     s.bind( 6, jsonToText( record.header.metadata ) );
     s.bind( 7, now );
     s.bind( 8, now );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     const bool ok = s.step();
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     if ( !ok )
         return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_export" ), QStringLiteral( "export upsert failed" ) ) );
     return Result<void>::success();
@@ -1804,9 +2084,18 @@ Result<void> GovernanceStore::upsertPathMapping( const PathMapping &mapping )
     s.bind( 1, mapping.kind );
     s.bind( 2, mapping.fromPath );
     s.bind( 3, mapping.toPath );
-    m_impl->exec( "BEGIN IMMEDIATE" );
-    s.step();
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
+    if ( !s.step() )
+    {
+        m_impl->exec( "ROLLBACK" );
+        return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_path_mapping" ),
+                                               QStringLiteral( "path mapping write failed: %1" ).arg( m_impl->lastError ) ) );
+    }
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     return Result<void>::success();
 }
 
@@ -2055,9 +2344,13 @@ Result<void> GovernanceStore::appendAudit( const QString &actor, const QString &
     s.bind( 4, entityKind );
     s.bind( 5, entityId );
     s.bind( 6, jsonToText( detail ) );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     const bool ok = s.step();
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     if ( !ok )
         return Result<void>::failure( govDiag( QStringLiteral( "store.audit" ), QStringLiteral( "audit append failed" ) ) );
     return Result<void>::success();
@@ -2101,9 +2394,12 @@ void GovernanceStore::setMeta( const QString &key, const QString &value )
         return;
     s.bind( 1, key );
     s.bind( 2, value );
-    m_impl->exec( "BEGIN IMMEDIATE" );
-    s.step();
-    m_impl->exec( "COMMIT" );
+    // Meta rows are advisory (opened_at/db_path), but the transaction is
+    // rolled back on failure so a dangling transaction cannot cascade.
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return;
+    if ( !s.step() || !m_impl->commit() )
+        m_impl->exec( "ROLLBACK" );
 }
 
 QString GovernanceStore::meta( const QString &key ) const
@@ -2163,10 +2459,22 @@ Result<void> GovernanceStore::clearDocumentEntities()
         "runs", "run_outputs", "experiments", "experiment_variants", "experiment_runs",
         "smart_collections", "exports", "path_mappings", "tags",
     };
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     for ( const char *table : tables )
-        m_impl->exec( ( QStringLiteral( "DELETE FROM " ) + table ).toUtf8().constData() );
-    m_impl->exec( "COMMIT" );
+    {
+        if ( !m_impl->exec( ( QStringLiteral( "DELETE FROM " ) + table ).toUtf8().constData() ) )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.clear" ),
+                                                   QStringLiteral( "clear failed on %1: %2" )
+                                                       .arg( table, m_impl->lastError ) ) );
+        }
+    }
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     return Result<void>::success();
 }
 
@@ -2179,9 +2487,18 @@ Result<void> GovernanceStore::clearOutgoingLineage( const QString &outputAssetId
     if ( !s )
         return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ), QStringLiteral( "lineage clear prepare failed" ) ) );
     s.bind( 1, outputAssetId );
-    m_impl->exec( "BEGIN IMMEDIATE" );
-    s.step();
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
+    if ( !s.step() )
+    {
+        m_impl->exec( "ROLLBACK" );
+        return Result<void>::failure( govDiag( QStringLiteral( "store.clear_lineage" ),
+                                               QStringLiteral( "lineage clear failed: %1" ).arg( m_impl->lastError ) ) );
+    }
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     return Result<void>::success();
 }
 
@@ -2196,10 +2513,22 @@ Result<void> GovernanceStore::clearAll()
         "experiment_variants", "experiment_runs", "lineage_edges", "smart_collections",
         "exports", "path_mappings", "audit_log",
     };
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     for ( const char *table : tables )
-        m_impl->exec( ( QStringLiteral( "DELETE FROM " ) + table ).toUtf8().constData() );
-    m_impl->exec( "COMMIT" );
+    {
+        if ( !m_impl->exec( ( QStringLiteral( "DELETE FROM " ) + table ).toUtf8().constData() ) )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.clear" ),
+                                                   QStringLiteral( "clear failed on %1: %2" )
+                                                       .arg( table, m_impl->lastError ) ) );
+        }
+    }
+    if ( !m_impl->commit() )
+        return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
+                                               m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                           : m_impl->lastError ) );
     return Result<void>::success();
 }
 
