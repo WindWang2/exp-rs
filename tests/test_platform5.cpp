@@ -17,6 +17,7 @@
 #include "agent/cartography/style_compiler.h"
 #include "agent/cartography/style_spec.h"
 #include "agent/harness/agent_plan.h"
+#include "agent/spatial_tools/spatial_tool.h"
 #include "agent/harness/scientific_preflight.h"
 #include "agent/harness/recipe_catalog.h"
 #include "agent/mapspec/mapspec.h"
@@ -1000,4 +1001,63 @@ TEST_CASE( "Solution registry reload invalidates on directory change (no stale c
   CHECK( registry.find( "solution.test.reload2" ).isNull() ); // cache is stable
   registry.reload();
   CHECK_FALSE( registry.find( "solution.test.reload2" ).isNull() );
+}
+
+TEST_CASE( "Solution and style tools register and answer through the shared registry",
+           "[platform5][tools]" )
+{
+  sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerBuiltinTools();
+  auto &registry = sicnu::agent::spatial_tools::SpatialToolRegistry::instance();
+
+  SolutionRegistry::instance().setDirectory(
+    QString::fromStdString( ( sourceDir() / "data/agent/solutions" ).string() ) );
+  RecipeCatalog::instance().setDirectory( ( sourceDir() / "data/agent/recipes" ).string() );
+  RecipeCatalog::instance().reload();
+  StyleRegistry::instance().setDirectory(
+    QString::fromStdString( ( sourceDir() / "data/cartography" ).string() ) );
+  TemplateRegistry::instance().setDirectory(
+    QString::fromStdString( ( sourceDir() / "data/cartography" ).string() ) );
+
+  const auto search = registry.find( "solution:search" );
+  REQUIRE( search.has_value() );
+  Json::Value query( Json::objectValue );
+  query["task"] = "flood";
+  query["modality"] = "sar";
+  const auto result = ( *search )->execute( query );
+  REQUIRE( result.success );
+  CHECK( result.output["items"].size() >= 2 );
+  CHECK( result.output["total"].asInt() >= 2 );
+
+  const auto describe = registry.find( "solution:describe" );
+  REQUIRE( describe.has_value() );
+  Json::Value id( Json::objectValue );
+  id["id"] = "solution.flood.sar-extent";
+  const auto described = ( *describe )->execute( id );
+  REQUIRE( described.success );
+  CHECK( described.output["solution"]["analysis_recipe"].asString() == "harness.sar_flood" );
+
+  const auto styleList = registry.find( "style:list" );
+  REQUIRE( styleList.has_value() );
+  Json::Value semantics( Json::objectValue );
+  semantics["semantics"] = "flood";
+  const auto styles = ( *styleList )->execute( semantics );
+  REQUIRE( styles.success );
+  CHECK( styles.output["total"].asInt() >= 2 );
+
+  // Instantiate enforces the contract check with a typed missing-slot error.
+  const auto instantiate = registry.find( "solution:instantiate" );
+  REQUIRE( instantiate.has_value() );
+  Json::Value request( Json::objectValue );
+  request["id"] = "solution.flood.sar-extent";
+  request["bindings"] = Json::Value( Json::objectValue );
+  const auto failed = ( *instantiate )->execute( request );
+  CHECK_FALSE( failed.success );
+  CHECK( failed.error.find( "reference" ) != std::string::npos );
+
+  // Lint tool answers on the full catalog.
+  const auto lint = registry.find( "cartography:lint_catalog" );
+  REQUIRE( lint.has_value() );
+  const auto linted = ( *lint )->execute( Json::Value( Json::objectValue ) );
+  REQUIRE( linted.success );
+  CHECK( linted.output["problem_count"].asInt() == 0 );
 }
