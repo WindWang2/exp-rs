@@ -1,24 +1,45 @@
 /***************************************************************************
- * schema_form_builder.h  —  schema JSON → Qt form widgets for task panel
+ * schema_form_builder.h  —  schema JSON → validated Qt form widgets
+ *
+ * Desktop Workbench UX 4.0 (Milestone B): the form-generation layer converts
+ * the authoritative operator schema (or an AlgorithmDescriptor's
+ * toInputSchema()) into parameter editors with inline validation. The schema
+ * is the single source of truth for defaults, ranges and required fields —
+ * the builder never invents its own defaults.
+ *
+ * Contract:
+ *   rebuild(schema) → user edits → validate() issues → run/cancel decision
+ *   values() collects a JSON object matching the schema; advanced fields
+ *   (x-ui-advanced) collapse but stay reachable.
+ *
+ * Recognized x-ui-type hints (AlgorithmDescriptor ports emit these):
+ *   raster | vector | table | bbox | crs | asset | model | color |
+ *   expression | json — plus x-ui-widget / type/enum fallbacks.
  ***************************************************************************/
 #pragma once
 
 #include <QWidget>
 #include <QStringList>
+#include <QList>
 #include <json/json.h>
 
 class QVBoxLayout;
+class QLabel;
+class QPlainTextEdit;
+class CrsSelector;
 
-/**
- * Builds a parameter form from an RSOperator::schema() root object.
- *
- * Sections (order): 输入 / 输出 / 参数 / 高级 (x-ui-advanced).
- * Heuristics map property type/format/name → appropriate Qt controls.
- */
 class SchemaFormBuilder : public QWidget
 {
     Q_OBJECT
   public:
+    /** One schema-violation found by validate(). */
+    struct ValidationIssue
+    {
+      QString fieldName;
+      QString message;
+      bool isError = true;  // false = warning (does not block run)
+    };
+
     explicit SchemaFormBuilder( QWidget *parent = nullptr );
 
     /** Build controls from RSOperator::schema() root object. */
@@ -31,19 +52,53 @@ class SchemaFormBuilder : public QWidget
     void setValues( const Json::Value &params );
 
     /**
-     * Populate raster combos with layer id/name pairs.
-     * Stores layer id (or path) as item userData; combo remains editable for paths.
+     * Validate current values against the schema: required fields, numeric
+     * ranges, enum membership, minimum item counts. Inline marks update via
+     * updateValidationUi(); errors block submission, warnings do not.
+     */
+    QList<ValidationIssue> validate() const;
+    bool hasErrors() const;
+
+    /**
+     * Populate raster/vector combos with layer id/name pairs.
+     * Stores layer id (or path) as item userData; raster combo remains
+     * editable for paths.
      */
     void setRasterLayerChoices( const QStringList &layerIds,
                                 const QStringList &layerNames );
+    void setVectorLayerChoices( const QStringList &layerIds,
+                                const QStringList &layerNames );
+
+    /** Governed Data Asset choices (stable asset ids as item data). */
+    void setAssetChoices( const QStringList &assetIds, const QStringList &assetNames );
+
+    /** Registered model names (ModelCatalog). */
+    void setModelChoices( const QStringList &modelNames );
+
+    /** Re-populate all choice-based combos from the current choice sets. */
+    void refreshChoices();
+
+    /** Paint per-field error marks + the summary line for @p issues. */
+    void applyValidationMarks( const QList<ValidationIssue> &issues );
+    void clearValidationMarks();
 
   signals:
     void valuesChanged();
+    /** Emitted after any re-validation with hasErrors(). */
+    void validationChanged( bool hasBlockingErrors );
+
+  public slots:
+    /** Re-validate and refresh inline marks (already wired to valuesChanged). */
+    void updateValidationUi();
 
   private:
     enum class FieldKind
     {
       RasterCombo,
+      VectorCombo,
+      AssetCombo,
+      ModelCombo,
+      Crs,
       OutputPath,
       Enum,
       Double,
@@ -51,6 +106,8 @@ class SchemaFormBuilder : public QWidget
       Boolean,
       String,
       Array,
+      Json,
+      Color,
     };
 
     enum class FieldGroup
@@ -72,6 +129,8 @@ class SchemaFormBuilder : public QWidget
       class QDoubleSpinBox *doubleSpin = nullptr;
       class QSpinBox *spin = nullptr;
       class QCheckBox *check = nullptr;
+      QPlainTextEdit *plainEdit = nullptr;
+      CrsSelector *crsSelector = nullptr;
       Json::Value prop; // original schema property for array item typing
     };
 
@@ -82,11 +141,20 @@ class SchemaFormBuilder : public QWidget
     static QString fieldLabel( const QString &name, const Json::Value &prop );
     void connectValueSignals( Field &field );
     void refreshRasterCombos();
+    void refreshComboChoices( FieldKind kind, const QStringList &ids,
+                              const QStringList &names );
     QString readFieldValue( const Field &field ) const;
     void writeFieldValue( Field &field, const Json::Value &value );
 
     QVBoxLayout *m_root = nullptr;
     QList<Field> m_fields;
+    Json::Value m_schema;
     QStringList m_layerIds;
     QStringList m_layerNames;
+    QStringList m_vectorIds;
+    QStringList m_vectorNames;
+    QStringList m_assetIds;
+    QStringList m_assetNames;
+    QStringList m_modelNames;
+    QLabel *m_validationLabel = nullptr;
 };

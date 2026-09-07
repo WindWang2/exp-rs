@@ -7,6 +7,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/algorithms/sar/sar_terrain.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -185,10 +186,7 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     }
 
     // Sentinel declared on the analysis band (NaN when undeclared).
-    bool hasNodata = false;
-    const double nodataRaw = src.bandNoDataValue(band, &hasNodata);
-    const float nodata = hasNodata ? static_cast<float>(nodataRaw)
-                                   : std::numeric_limits<float>::quiet_NaN();
+    const float nodata = sicnu::rs::bandNoDataSentinel(src, band);
 
     sicnu::sar::TerrainCorrectionOptions options;
     options.incidenceDeg = incidenceDeg;

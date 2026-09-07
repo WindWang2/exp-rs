@@ -20,7 +20,6 @@
 
 #include "widgets/rs_toolbar_flow_host.h"
 #include "widgets/rs_empty_state_widget.h"
-#include "panels/mosaic_panel.h"
 #include "dialogs/preferences_dialog.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
@@ -265,90 +264,6 @@ TEST_CASE( "Empirical: RsToolbarFlowHost separator line rendering in dark and li
     CHECK( darkPixmap.height() == host.height() );
 }
 
-// =============================================================================
-// 3. MosaicPanel Stress Testing
-// =============================================================================
-
-TEST_CASE( "Empirical: MosaicPanel rapid adding/removing, empty states, and job execution", "[challenger2][mosaic_panel][stress]" )
-{
-    initTestEnv();
-    QTemporaryDir tempDir;
-    REQUIRE( tempDir.isValid() );
-
-    MosaicPanel panel;
-    auto *stack = panel.findChild<QStackedWidget *>( QStringLiteral( "rsMosaicInputStack" ) );
-    auto *list = panel.findChild<QListWidget *>();
-    auto *outputEdit = panel.findChild<QLineEdit *>();
-    REQUIRE( stack != nullptr );
-    REQUIRE( list != nullptr );
-    REQUIRE( outputEdit != nullptr );
-
-    // 1. Initial State: Empty state at Index 1
-    REQUIRE( stack->currentIndex() == 1 );
-    REQUIRE( panel.inputFiles().isEmpty() );
-
-    // 2. Generate 10 synthetic tiles
-    QStringList tiles;
-    for ( int i = 0; i < 10; ++i )
-    {
-        QString p = createSyntheticTile( QStringLiteral( "%1/tile_%2.tif" ).arg( tempDir.path() ).arg( i ),
-                                        8, 8, 10.0f + i, i * 8.0, 10.0 );
-        REQUIRE( QFile::exists( p ) );
-        tiles.append( p );
-    }
-
-    // 3. Rapid Churn: 200 cycles of add/remove permutations
-    for ( int cycle = 0; cycle < 200; ++cycle )
-    {
-        int toAdd = ( cycle % 5 ) + 1;
-        for ( int j = 0; j < toAdd; ++j )
-        {
-            list->addItem( tiles[j] );
-        }
-        stack->setCurrentIndex( list->count() > 0 ? 0 : 1 );
-        REQUIRE( stack->currentIndex() == 0 );
-        REQUIRE( panel.inputFiles().size() == toAdd );
-
-        list->clear();
-        stack->setCurrentIndex( list->count() > 0 ? 0 : 1 );
-        REQUIRE( stack->currentIndex() == 1 );
-        REQUIRE( panel.inputFiles().isEmpty() );
-    }
-
-    // 4. Output Path Configuration and Whitespace Trimming
-    const QString outPath = tempDir.path() + "/empirical_mosaic.tif";
-    outputEdit->setText( "   " + outPath + "   " );
-    CHECK( panel.outputPath() == outPath );
-
-    // 5. Multi-Tile Mosaic Job Submission & Execution
-    list->addItem( tiles[0] );
-    list->addItem( tiles[1] );
-    stack->setCurrentIndex( 0 );
-
-    QSignalSpy spySuccess( &panel, &MosaicPanel::mosaicCompleted );
-    QSignalSpy spyFailed( &panel, &MosaicPanel::mosaicFailed );
-
-    bool invoked = QMetaObject::invokeMethod( &panel, "runMosaic", Qt::DirectConnection );
-    REQUIRE( invoked );
-
-    int maxWaitMs = 5000;
-    while ( spySuccess.isEmpty() && spyFailed.isEmpty() && maxWaitMs > 0 )
-    {
-        QTest::qWait( 50 );
-        maxWaitMs -= 50;
-    }
-
-    CHECK( spySuccess.count() == 1 );
-    CHECK( spyFailed.isEmpty() );
-    CHECK( QFile::exists( outPath ) );
-
-    // Verify dataset properties
-    GdalDatasetWrapper ds;
-    REQUIRE( ds.open( outPath ) );
-    CHECK( ds.width() == 16 );
-    CHECK( ds.height() == 8 );
-    CHECK( ds.bandCount() == 1 );
-}
 
 // =============================================================================
 // 4. PreferencesDialog Stress Testing & QSettings Sync

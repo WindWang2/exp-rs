@@ -319,10 +319,10 @@ TEST_CASE( "Template registry instantiates valid MapSpec drafts",
   params["layout_name"] = "draft-from-template";
   params["title"] = "Bench title";
   const Json::Value draft = registry.instantiateTemplate(
-    QLatin1String( "remote-sensing-result" ), params, &error );
+    QLatin1String( "remote-sensing-result-a4l" ), params, &error );
   REQUIRE( !draft.isNull() );
   CHECK( draft["layout_name"].asString() == "draft-from-template" );
-  CHECK( draft["template"].asString() == "remote-sensing-result" );
+  CHECK( draft["template"].asString() == "remote-sensing-result-a4l" );
   REQUIRE( draft["map_frames"].size() == 1 );
   REQUIRE( draft["titles"].size() == 1 );
   CHECK( draft["titles"][0]["semantic_role"].asString() == "title.main" );

@@ -63,6 +63,8 @@ class FastExitListener : public Catch::EventListenerBase
 }
 CATCH_REGISTER_LISTENER( FastExitListener )
 
+namespace
+{
 void ensureQgisApplication()
 {
   if ( QApplication::instance() )

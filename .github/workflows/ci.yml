@@ -200,6 +200,21 @@ jobs:
           $codeql = Get-ChildItem "C:\Program Files\CodeQL" -ErrorAction SilentlyContinue; if ($codeql) { Remove-Item -Recurse -Force "C:\Program Files\CodeQL" }
           Get-PSDrive C | Select-Object Used,Free
 
+      - name: Expose GitHub Actions cache service to vcpkg (x-gha provider)
+        # The x-gha binary-cache provider needs ACTIONS_CACHE_URL and
+        # ACTIONS_RUNTIME_TOKEN, which GitHub does not export to plain steps.
+        # Without them vcpkg silently runs with NO binary cache and rebuilds
+        # gdal/opencv/abseil from source twice per run (the pre-install step
+        # AND the toolchain's manifest install during CMake configure) — that
+        # alone blew the 6h runner cap. github-script sees both variables and
+        # exports them at job level so every later step (and the configure
+        # toolchain) restores/hits binaries from the Actions cache.
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
       - name: Install Qt 6 on Windows
         uses: jurplel/install-qt-action@v4
         id: qt
@@ -281,6 +296,55 @@ jobs:
       - name: Verify MSVC Compilation Guard & Headers
         run: cmake --build build-win --config Release --parallel
 
-  # macOS build seam disabled (2026-09): macOS is not a target platform and
-  # the job kept dying on runner infrastructure (lost communication / 6h job
-  # cap) rather than on code. Reintroduce from git history when needed.
+  tier3-platform-macos:
+    name: Tier 3 - macOS Clang Configure & Build Seam
+    runs-on: macos-latest
+    timeout-minutes: 540
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ci-ccache-${{ runner.os }}
+          max-size: 4G
+
+      - name: Install macOS Dependencies via Homebrew
+        run: |
+          brew update
+          brew install qt@6 qca qtkeychain gdal proj geos libzip gsl bison flex pcre2 cmake protobuf jsoncpp opencv
+
+      - name: Configure CMake for macOS
+        # Homebrew's bison (>= 3.8) and flex are keg-only; macOS ships bison 2.x
+        # which cannot parse %define api.pure / %locations in our .yy grammars.
+        # Prepend the keg-only bins so CMake's find_package(BISON) picks them up.
+        # ENABLE_TESTS=OFF keeps this tier a true cross-platform BUILD SEAM like
+        # the Windows tier: full test coverage already runs on Linux (Tier 1/2),
+        # and compiling the ~100 Catch2 test executables plus running all 1406
+        # tests pushes the macOS job past GitHub's 360-minute job cap.
+        run: |
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+          export PATH="$(brew --prefix bison)/bin:$(brew --prefix flex)/bin:$PATH"
+          bison --version | head -1
+          cmake -B build-mac -S . \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6);$(brew --prefix)" \
+            -DBISON_EXECUTABLE="$(brew --prefix bison)/bin/bison" \
+            -DFLEX_EXECUTABLE="$(brew --prefix flex)/bin/flex" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_LTO=OFF \
+            -DENABLE_TESTS=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Verify macOS Build
+        # -j2, NOT --parallel (all cores): macOS runners have 7GB RAM and 3-4
+        # clang processes on QGIS-scale translation units (~2-3GB each) OOM
+        # the runner itself — it dies mid-compile with "lost communication
+        # with the server" (observed 3x in a row at 1-3h in). Two jobs keep
+        # peak RSS inside the budget; ccache absorbs the extra wall time.
+        run: |
+          cmake --build build-mac --parallel 2

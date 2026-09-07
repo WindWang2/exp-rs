@@ -1,0 +1,101 @@
+{
+  "id": "forest-cover-a4l",
+  "version": 1,
+  "description": "Forest cover / change map with sequential-green colorbar and class chart.",
+  "page": {
+    "width_mm": 297,
+    "height_mm": 210
+  },
+  "style": {
+    "token_set": "scientific-light",
+    "medium": "print"
+  },
+  "slots": [
+    {
+      "role": "map.main",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        30.0,
+        203.0,
+        144.0
+      ]
+    },
+    {
+      "role": "title.main",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        12.0,
+        273.0,
+        12.0
+      ]
+    },
+    {
+      "role": "legend.primary",
+      "accepts": "legends",
+      "rect_mm": [
+        215.0,
+        30.0,
+        70.0,
+        128.0
+      ],
+      "content": {
+        "title": "图例"
+      }
+    },
+    {
+      "role": "scalebar.primary",
+      "accepts": "scale_bars",
+      "rect_mm": [
+        14.0,
+        182.0,
+        48,
+        10
+      ]
+    },
+    {
+      "role": "north_arrow.primary",
+      "accepts": "north_arrows",
+      "rect_mm": [
+        68.0,
+        182.0,
+        12,
+        12
+      ]
+    },
+    {
+      "role": "source.primary",
+      "accepts": "source_notes",
+      "rect_mm": [
+        88.0,
+        184.0,
+        177.0,
+        8
+      ]
+    },
+    {
+      "role": "colorbar.cover",
+      "accepts": "colorbars",
+      "rect_mm": [
+        215.0,
+        164.0,
+        70.0,
+        10.0
+      ],
+      "content": {
+        "ramp": "sequential_green",
+        "min": "0",
+        "max": "100%"
+      }
+    }
+  ],
+  "suitable_tasks": [
+    "forest"
+  ],
+  "product_type": "forest",
+  "recommended_components": [
+    "north-arrow/minimal",
+    "grid/graticule"
+  ]
+}

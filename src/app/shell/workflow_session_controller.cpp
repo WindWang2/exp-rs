@@ -491,6 +491,14 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
     return;
   }
 
+  // Structured result: surface the operator result JSON in the shared
+  // summary view (UX 4.0 task/result contract).
+  if ( m_panel && isSingleJob && info.resultPayload.isObject()
+       && !info.resultPayload.empty() )
+  {
+    m_panel->showResult( info.resultPayload, info.algorithmId );
+  }
+
   const std::string sessionId = m_activeSession.toStdString();
   const std::string stepIdStr = targetStepId.toStdString();
   if ( !sessionId.empty() && !stepIdStr.empty() )

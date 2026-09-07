@@ -1,0 +1,76 @@
+{
+  "id": "scientific-dark",
+  "version": 1,
+  "description": "Dark style for screen delivery (slide decks, dashboards, agent previews). Print export with this set is supported but documented as experimental: paper is reflective white, so dark pages waste toner and most journals reject them.",
+  "typography": {
+    "font_family": "Arial",
+    "cjk_fallbacks": ["Noto Sans CJK SC", "WenQuanYi Zen Hei", "Microsoft YaHei", "PingFang SC", "sans-serif"],
+    "styles": {
+      "title": { "size_pt": 20, "weight": "bold" },
+      "subtitle": { "size_pt": 13, "weight": "normal" },
+      "section": { "size_pt": 11, "weight": "bold" },
+      "body": { "size_pt": 9, "weight": "normal" },
+      "caption": { "size_pt": 8, "weight": "normal" },
+      "annotation": { "size_pt": 8, "weight": "normal" },
+      "source_note": { "size_pt": 7, "weight": "normal" },
+      "figure_label": { "size_pt": 10, "weight": "bold" },
+      "chart": { "size_pt": 9, "weight": "normal" }
+    }
+  },
+  "spacing": {
+    "margin_mm": 12,
+    "gutter_mm": 6,
+    "furniture_gap_mm": 4,
+    "padding_mm": 2
+  },
+  "lines": {
+    "hairline_mm": 0.2,
+    "frame_mm": 0.5,
+    "grid_mm": 0.3
+  },
+  "colors": {
+    "text": "#eceff4",
+    "text_secondary": "#a8b1bd",
+    "background": "#1e2126",
+    "panel": "#2a2e35",
+    "frame": "#d8dee9",
+    "grid": "#4c566a",
+    "water": "#5e81ac",
+    "accent": "#88c0d0",
+    "success": "#a3be8c",
+    "warning": "#ebcb8b",
+    "error": "#bf616a",
+    "uncertainty": "#b48ead"
+  },
+  "palettes": {
+    "qualitative": ["#88c0d0", "#ebcb8b", "#a3be8c", "#d08770", "#b48ead", "#8fbcbb", "#d8dee9", "#eceff4"],
+    "land_cover": ["#a3be8c", "#ebcb8b", "#d08770", "#81a1c1", "#b48ead", "#ecec8c", "#8fbcbb", "#616e7c"],
+    "sequential": ["#2e3440", "#3b5368", "#4c7391", "#5e93ba", "#81a1c1", "#88c0d0", "#8fbcbb", "#a5d8cf", "#eceff4"],
+    "sequential_green": ["#2e3440", "#3b5642", "#467352", "#4f9163", "#5aa873", "#74c476", "#8fd694", "#b2e5b8", "#e5f5e0"],
+    "diverging": ["#bf616a", "#d08770", "#e2b08c", "#f3d9c0", "#eceff4", "#c8dadf", "#8fbcbb", "#5e9e9a", "#2e5f5c"],
+    "uncertainty": ["#2e3440", "#434657", "#5e5a78", "#7d6a96", "#b48ead"]
+  },
+  "furniture": {
+    "density": "standard",
+    "north_arrow_size_mm": 12,
+    "scale_bar_height_mm": 8,
+    "legend_line_height_mm": 4.5,
+    "inset_size_fraction": 0.25,
+    "colorbar_height_mm": 8
+  },
+  "chart": {
+    "font_pt": 9,
+    "palette": "qualitative",
+    "show_grid": true,
+    "width_px": 480,
+    "height_px": 320
+  },
+  "variants": {
+    "print": {
+      "colors": {
+        "background": "#ffffff",
+        "text": "#1a1a1a"
+      }
+    }
+  }
+}

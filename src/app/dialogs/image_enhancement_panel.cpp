@@ -3,12 +3,6 @@
 #include "image_enhancement_panel.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
-#include "async_gdal_runner.h"
-#include "processing/algorithms/image_enhancement.h"
-#include "processing/algorithms/image_enhancement_streaming.h"
-#include "processing/gdal/gdal_dataset_wrapper.h"
-#include "processing/gdal/gdal_multiband_block_stream.h"
-#include "processing/gdal/gdal_safe_call.h"
 
 #include <raster/qgsrasterlayer.h>
 #include <qgsproject.h>
@@ -30,9 +24,6 @@
 #include <QMessageBox>
 #include <QFileInfo>
 
-#include <gdal.h>
-#include <cpl_conv.h>
-#include <cpl_string.h>
 #include <cmath>
 
 ImageEnhancementPanel::ImageEnhancementPanel( QWidget *parent )
@@ -336,7 +327,6 @@ void ImageEnhancementPanel::onRun()
     int filterType = m_filterTypeCombo->currentIndex();
     int kernelSize = m_kernelSizeCombo->currentData().toInt();
     double sigma = m_sigmaSpin->value();
-    QString customKernelStr = m_customKernelEdit->text();
     int ratioType = m_ratioTypeCombo->currentIndex();
     int band1 = m_band1Combo->currentData().toInt();
     int band2 = m_band2Combo->currentData().toInt();
@@ -368,176 +358,61 @@ void ImageEnhancementPanel::onRun()
         }
     }
 
-    runGdalTask([sourcePath, outPath, method, stretchType, clipPercent, stddevMult,
-                    filterType, kernelSize, sigma, customKernelStr, ratioType, band1, band2, band3,
-                    speckleType, speckleKernel, noiseVar, damping]() -> QString {
-    using namespace ImageEnhancementStreaming;
-    try {
-        // Open source
-        GdalDatasetWrapper src;
-        if (!src.open(sourcePath)) return QString();
-
-        const int w = src.width();
-        const int h = src.height();
-        const int bands = src.bandCount();
-
-        // Band-count guards (worker-side backstop for the panel-side checks).
-        if (method == 2 && ratioType == 0 && bands < 2) {
-            return RasterProcessingDialogBase::gdalErrorMarker() +
-                   QStringLiteral( "Band ratio requires at least 2 bands" );
+    // Thin client: the streaming enhancement dispatch runs as the
+    // rs:image_enhancement operator through the Task Center — the same
+    // execution path as CLI/MCP. The panel keeps only parameter collection.
+    Json::Value params(Json::objectValue);
+    params["input"] = sourcePath.toStdString();
+    params["output"] = outPath.toStdString();
+    switch (method) {
+    case 1: {
+        params["method"] = "filter";
+        switch (filterType) {
+        case 1: params["filterType"] = "gaussian"; break;
+        case 2: params["filterType"] = "median"; break;
+        case 3: params["filterType"] = "sobel"; break;
+        case 4: params["filterType"] = "laplacian"; break;
+        default: params["filterType"] = "mean"; break;
         }
-        if (method == 2 && ratioType == 1 && bands < 3) {
-            return RasterProcessingDialogBase::gdalErrorMarker() +
-                   QStringLiteral( "IHS transform requires at least 3 bands" );
-        }
-
-        // Resolve each band's declared NoData (float-cast; NaN when undeclared)
-        // so stretches mask the real sentinel instead of a fabricated -9999 (#445).
-        std::vector<float> bandNodata(bands, std::numeric_limits<float>::quiet_NaN());
-        for (int b = 0; b < bands; ++b) {
-            bool hasNd = false;
-            const double nd = src.bandNoDataValue(b + 1, &hasNd);
-            if (hasNd && std::isfinite(nd))
-                bandNodata[b] = static_cast<float>(nd);
-        }
-
-        // Streaming conversion (#691): every path below runs as tile loops over
-        // GdalBlockStream / GdalMultibandBlockStream writing through
-        // GdalStreamingOutput — O(tile) memory instead of the previous
-        // inputBands + outputBands full-raster frames. The former 2 GiB soft
-        // cap (which silently rejected large scenes with an empty return) is
-        // gone: no path materializes a full frame any more.
-        int outBands = bands;
-        if (method == 2)
-            outBands = (ratioType == 0) ? 1 : 3;
-        GdalStreamingOutput dst(outPath, w, h, outBands, GDT_Float32,
-                                src.geoTransform(), src.projection());
-        if (!dst.isOpen()) return QString();
-        QString closeError;
-
-        if (method == 0) {
-            // Contrast stretch: streaming statistics pass + streaming apply
-            // pass per band (exact replica of the stretch kernels).
-            StretchParams params;
-            switch (stretchType) {
-            case 1: params.kind = StretchKind::PercentClip; break;
-            case 2: params.kind = StretchKind::StdDev; break;
-            case 3: params.kind = StretchKind::HistogramEqualize; break;
-            default: params.kind = StretchKind::Linear; break;
-            }
-            params.clipPercent = static_cast<float>(clipPercent);
-            params.stddevK = static_cast<float>(stddevMult);
-            for (int b = 1; b <= bands; ++b) {
-                if (!streamBandStretch(src, b, bandNodata[b - 1], params, dst, kTileDim)) {
-                    dst.abandon();
-                    return QString();
-                }
-            }
-        } else if (method == 1) {
-            // Spatial filter: halo tiles per band (halo = kernel radius; the
-            // Sobel/Laplacian edge filters use a fixed 3×3 window).
-            const int half = (filterType == 3 || filterType == 4) ? 1 : kernelSize / 2;
-            for (int b = 1; b <= bands; ++b) {
-                WindowedTileFn kernel;
-                switch (filterType) {
-                case 0: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
-                            convolveTileMean(tile, buf, core, kernelSize); }; break;
-                case 1: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
-                            convolveTileGaussian(tile, buf, core, kernelSize, static_cast<float>(sigma)); }; break;
-                case 2: {
-                    // Full-frame medianFilter clamps the kernel to 7x7 — keep
-                    // the streamed path behaviorally identical (review P2).
-                    const int medianKernel = std::min(kernelSize, 7);
-                    kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
-                            convolveTileMedian(tile, buf, core, medianKernel); }; break;
-                }
-                case 3: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
-                            convolveTileSobel(tile, buf, core); }; break;
-                case 4: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
-                            convolveTileLaplacian(tile, buf, core); }; break;
-                }
-                if (!streamBandWindowed(src, b, dst, kTileDim, half, kernel)) {
-                    dst.abandon();
-                    return QString();
-                }
-            }
-        } else if (method == 2) {
-            // Band ratio / IHS — stream only the involved bands (band-pair or
-            // band-triple BIP tiles), never the whole band stack.
-            if (ratioType == 0) {
-                const std::vector<int> pair = { std::min(band1, bands), std::min(band2, bands) };
-                GdalMultibandBlockStream stream(src, pair, kTileDim, kTileDim);
-                std::vector<float> band1Buf(static_cast<size_t>(kTileDim) * kTileDim);
-                std::vector<float> band2Buf(static_cast<size_t>(kTileDim) * kTileDim);
-                std::vector<float> out(static_cast<size_t>(kTileDim) * kTileDim);
-                const bool ok = stream.forEach([&](const GdalBlockStream::Tile &tile, const float *bip) {
-                    const size_t n = static_cast<size_t>(tile.width) * tile.height;
-                    for (size_t i = 0; i < n; ++i) {
-                        band1Buf[i] = bip[i * 2];
-                        band2Buf[i] = bip[i * 2 + 1];
-                    }
-                    bandRatioTile(band1Buf.data(), band2Buf.data(), out.data(), n);
-                    return dst.writeTile(1, tile, out.data());
-                });
-                if (!ok) {
-                    dst.abandon();
-                    return QString();
-                }
-            } else {
-                // IHS decomposition — true I/H/S components (panel-side fix for #380),
-                // applied per band-triple tile with the panel's NaN masking.
-                const std::vector<int> triple = { std::min(band1, bands), std::min(band2, bands),
-                                                  std::min(band3, bands) };
-                const float ndR = bandNodata[triple[0] - 1];
-                const float ndG = bandNodata[triple[1] - 1];
-                const float ndB = bandNodata[triple[2] - 1];
-                GdalMultibandBlockStream stream(src, triple, kTileDim, kTileDim);
-                std::vector<float> outI(static_cast<size_t>(kTileDim) * kTileDim);
-                std::vector<float> outH(static_cast<size_t>(kTileDim) * kTileDim);
-                std::vector<float> outS(static_cast<size_t>(kTileDim) * kTileDim);
-                const bool ok = stream.forEach([&](const GdalBlockStream::Tile &tile, const float *bip) {
-                    const size_t n = static_cast<size_t>(tile.width) * tile.height;
-                    ihsTransformTile(bip, ndR, ndG, ndB, outI.data(), outH.data(), outS.data(), n);
-                    return dst.writeTile(1, tile, outI.data())
-                        && dst.writeTile(2, tile, outH.data())
-                        && dst.writeTile(3, tile, outS.data());
-                });
-                if (!ok) {
-                    dst.abandon();
-                    return QString();
-                }
-            }
-        } else if (method == 3) {
-            // Speckle filter: the same tile-window kernels as the speckle
-            // dialog (halo = kernel radius).
-            const int half = speckleKernel / 2;
-            for (int b = 1; b <= bands; ++b) {
-                WindowedTileFn kernel;
-                switch (speckleType) {
-                case 0: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
-                            speckleTileLee(tile, buf, core, speckleKernel, static_cast<float>(noiseVar)); }; break;
-                case 1: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
-                            speckleTileFrost(tile, buf, core, speckleKernel, static_cast<float>(damping)); }; break;
-                case 2: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
-                            speckleTileKuan(tile, buf, core, speckleKernel, static_cast<float>(noiseVar)); }; break;
-                case 3: kernel = [&](const GdalBlockStream::Tile &tile, const float *buf, float *core) {
-                            speckleTileGammaMap(tile, buf, core, speckleKernel, static_cast<float>(noiseVar)); }; break;
-                }
-                if (!streamBandWindowed(src, b, dst, kTileDim, half, kernel)) {
-                    dst.abandon();
-                    return QString();
-                }
-            }
-        }
-
-        if (!dst.closeWithError(&closeError))
-            return QString();
-
-        return outPath;
-    } catch (const std::exception &) {
-        return QString();
+        params["kernelSize"] = kernelSize;
+        params["sigma"] = sigma;
+        break;
     }
-    });
+    case 2: {
+        params["method"] = "ratio_ihs";
+        params["transform"] = ratioType == 0 ? "ratio" : "ihs";
+        params["band1"] = band1;
+        params["band2"] = band2;
+        params["band3"] = band3;
+        break;
+    }
+    case 3: {
+        params["method"] = "speckle";
+        switch (speckleType) {
+        case 1: params["speckleType"] = "frost"; break;
+        case 2: params["speckleType"] = "kuan"; break;
+        case 3: params["speckleType"] = "gamma_map"; break;
+        default: params["speckleType"] = "lee"; break;
+        }
+        params["kernelSize"] = speckleKernel;
+        params["noiseVariance"] = noiseVar;
+        params["damping"] = damping;
+        break;
+    }
+    default: {
+        params["method"] = "stretch";
+        switch (stretchType) {
+        case 1: params["stretchType"] = "percent_clip"; break;
+        case 2: params["stretchType"] = "stddev"; break;
+        case 3: params["stretchType"] = "histogram_equalize"; break;
+        default: params["stretchType"] = "linear"; break;
+        }
+        params["clipPercent"] = clipPercent;
+        params["stddevK"] = stddevMult;
+        break;
+    }
+    }
+    runOperatorTask(QStringLiteral("rs:image_enhancement"), params);
 }
 
 

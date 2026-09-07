@@ -6,6 +6,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include <QCoreApplication>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include <json/json.h>
@@ -209,6 +210,49 @@ TEST_CASE( "rs:sar_backscatter converts sigma0 to gamma0 with constant incidence
     REQUIRE( values.size() == 4 );
     for ( float v : values )
         REQUIRE( v == Approx( 0.5f ).margin( 1e-6 ) );
+}
+
+TEST_CASE( "rs:sar_backscatter refuses a grid-incompatible incidence raster",
+           "[sar][operator][grid]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString input = tmp.filePath( "sigma0.tif" );
+    const QString output = tmp.filePath( "gamma0.tif" );
+    REQUIRE( writeRaster( input, std::vector<float>( 4, 0.25f ), 2, 2 ) );
+
+    // Incidence raster: same dimensions but NO CRS (the input carries
+    // EPSG:32648) — a one-sided georeference is a blocking grid issue, not
+    // something to silently attach angles from.
+    const QString incidence = tmp.filePath( "incidence_nocrs.tif" );
+    {
+        ensureGdalInit();
+        GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+        REQUIRE( driver != nullptr );
+        GDALDatasetH ds = GDALCreate( driver, incidence.toUtf8().constData(), 2, 2, 1,
+                                      GDT_Float32, nullptr );
+        REQUIRE( ds != nullptr );
+        const double gt[6] = { 500000, 10, 0, 4500000, 0, -10 };
+        GDALSetGeoTransform( ds, const_cast<double *>( gt ) );
+        std::vector<float> angles( 4, 60.0f );
+        REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, 2, 2,
+                               angles.data(), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+        GDALClose( ds );
+    }
+
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_backscatter" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = input.toStdString();
+    params["output"] = output.toStdString();
+    params["fromCalibration"] = "sigma0";
+    params["toCalibration"] = "gamma0";
+    params["incidenceRaster"] = incidence.toStdString();
+
+    RSOperatorContext ctx;
+    REQUIRE_THROWS_AS( op->run( params, ctx ), RSOperatorError );
+    REQUIRE_FALSE( QFileInfo::exists( output ) );
 }
 
 TEST_CASE( "rs:sar_backscatter refuses geometry-free state conversions",

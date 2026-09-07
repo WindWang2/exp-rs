@@ -2,6 +2,9 @@
 #include "mapspec_compiler.h"
 
 #include "../cartography/chart_registry.h"
+#include "../cartography/composition.h"
+#include "../cartography/design_tokens.h"
+#include "../cartography/registry.h"
 #include "../layout_tools/layout_service.h"
 #include "../workspace_state.h"
 #include "mapspec.h"
@@ -21,8 +24,13 @@
 #include <qgslayoutpagecollection.h>
 #include <qgslayoutsize.h>
 #include <qgslayoutpoint.h>
+#include <qgslayoutatlas.h>
+#include <qgsvectorlayer.h>
+#include <qgsmaplayer.h>
 
 #include <QDir>
+#include <QVariant>
+#include <QVector>
 
 #include <algorithm>
 
@@ -64,10 +72,77 @@ QgsLayoutItem *compileItem( QgsPrintLayout *layout, const QString &type, const s
   return LayoutService::instance().addItem( layout, type, props, error );
 }
 
+/// Materializes token-based text styling for a label-ish item. Explicit item
+/// font fields win over the token set (ADR 0130 precedence chain).
+void applyTokenTextStyle( Json::Value &props, const Json::Value &item, const Json::Value &tokens,
+                          const std::string &style, double fallbackPt )
+{
+  using sicnu::agent::cartography::tokenString;
+  using sicnu::agent::cartography::tokenTextStyle;
+  using sicnu::agent::cartography::tokenValue;
+  const Json::Value tokenStyle = tokenTextStyle( tokens, style, fallbackPt );
+  double fontPt = tokenStyle["size_pt"].asDouble();
+  bool bold = tokenStyle.get( "weight", "normal" ).asString() == "bold";
+  if ( item.isMember( "font" ) && item["font"].isObject() )
+  {
+    const Json::Value &font = item["font"];
+    if ( font.isMember( "size_pt" ) && font["size_pt"].isNumeric() )
+      fontPt = font["size_pt"].asDouble();
+    if ( font.isMember( "bold" ) && font["bold"].isBool() )
+      bold = font["bold"].asBool();
+    if ( font.isMember( "color" ) && font["color"].isString() )
+      props["color"] = font["color"];
+  }
+  // Style-level token color: a color-name reference into colors.*.
+  if ( !props.isMember( "color" ) )
+  {
+    const std::string colorName = tokenString( tokenStyle, "color" );
+    if ( !colorName.empty() )
+    {
+      const Json::Value color = tokenValue( tokens, "colors." + colorName );
+      if ( color.isString() )
+        props["color"] = color;
+    }
+  }
+  props["font_size"] = fontPt;
+  props["bold"] = bold;
+}
+
+/// Applies the token font family to a compiled label item (QGIS has no
+/// label font-family property in LayoutService's surface; QFont handles
+/// CJK degradation through the registered substitutions).
+void applyTokenFontFamily( QgsLayoutItem *item, const Json::Value &tokens )
+{
+  auto *label = qobject_cast<QgsLayoutItemLabel *>( item );
+  if ( !label )
+    return;
+  const std::string family =
+    sicnu::agent::cartography::tokenString( tokens, "typography.font_family" );
+  if ( family.empty() )
+    return;
+  QFont font = label->font();
+  font.setFamily( QString::fromStdString( family ) );
+  label->setFont( font );
+}
+
+/// compileItem + token font family for the label-backed collections.
+QgsLayoutItem *compileTextItem( QgsPrintLayout *layout, const QString &type,
+                                const std::string &itemId, Json::Value props,
+                                const Json::Value &tokens )
+{
+  QgsLayoutItem *item = compileItem( layout, type, itemId, props, nullptr );
+  applyTokenFontFamily( item, tokens );
+  return item;
+}
+
 } // namespace
 
-QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &spec, QString *error )
+QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *error )
 {
+  // Mutable working copy (the input document is never modified). Validation
+  // runs on the draft as provided; component defaults then resolve before
+  // any item is materialized.
+  Json::Value spec = specIn;
   const auto problems = validateMapSpec( spec );
   if ( !problems.empty() )
   {
@@ -95,6 +170,78 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &spec, QString *erro
                                           Qgis::LayoutUnit::Millimeters ) );
     layout->pageCollection()->endPageSizeChange();
   }
+
+  // --- v2 multi-page: additional declared pages ------------------------------
+  if ( spec.isMember( "pages" ) && spec["pages"].isArray() )
+  {
+    for ( const auto &pageSpec : spec["pages"] )
+    {
+      auto *extraPage = new QgsLayoutItemPage( layout );
+      extraPage->setPageSize( QgsLayoutSize( pageSpec["width_mm"].asDouble(),
+                                             pageSpec["height_mm"].asDouble(),
+                                             Qgis::LayoutUnit::Millimeters ) );
+      layout->pageCollection()->addPage( extraPage );
+    }
+  }
+
+  // --- v2 atlas hook ----------------------------------------------------------
+  if ( page.isMember( "atlas" ) && page["atlas"].isObject() )
+  {
+    const Json::Value &atlasSpec = page["atlas"];
+    if ( QgsLayoutAtlas *atlas = layout->atlas() )
+    {
+      if ( atlasSpec.isMember( "enabled" ) && atlasSpec["enabled"].isBool() )
+        atlas->setEnabled( atlasSpec["enabled"].asBool() );
+      if ( atlasSpec.isMember( "coverage_layer" ) && atlasSpec["coverage_layer"].isString() )
+      {
+        const QString layerRef = QString::fromStdString( atlasSpec["coverage_layer"].asString() );
+        const QString naturalKey =
+          WorkspaceEntityRegistry::instance().naturalKeyFor( layerRef );
+        QgsMapLayer *layer = nullptr;
+        if ( QgsProject *project = QgsProject::instance() )
+        {
+          const QString key = naturalKey.isEmpty() ? layerRef : naturalKey;
+          const QList<QgsMapLayer *> matches = project->mapLayersByName( key );
+          if ( !matches.isEmpty() )
+            layer = matches.first();
+          else
+            layer = project->mapLayer( key );
+        }
+        if ( auto *vector = qobject_cast<QgsVectorLayer *>( layer ) )
+          atlas->setCoverageLayer( vector );
+      }
+      if ( atlasSpec.isMember( "filename_expression" ) && atlasSpec["filename_expression"].isString() )
+      {
+        QString expressionError;
+        atlas->setFilenameExpression(
+          QString::fromStdString( atlasSpec["filename_expression"].asString() ), expressionError );
+      }
+    }
+  }
+
+  // --- design tokens (ADR 0130): resolved once, applied as defaults --------
+  const Json::Value tokens = sicnu::agent::cartography::resolveTokenSet( spec );
+  sicnu::agent::cartography::applyTokenFontFallbacks( tokens );
+
+  // --- component defaults (Design System 4.0): source_component references
+  // are resolved and merged under the items' explicit fields; unknown
+  // references are advisory (preflight reports them) and never fatal.
+  for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+  {
+    const char *collection = mapspec::kCollections[c];
+    if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+      continue;
+    for ( Json::Value::ArrayIndex i = 0; i < spec[collection].size(); ++i )
+    {
+      Json::Value &item = spec[collection][i];
+      if ( item.isObject() && item.isMember( "source_component" ) )
+        sicnu::agent::cartography::applyComponentDefaults( item, nullptr );
+    }
+  }
+
+  // --- composition solver (ADR 0131): anchors, size bounds, constraints ----
+  sicnu::agent::cartography::resolveComposition(
+    spec, sicnu::agent::cartography::tokenNumber( tokens, "spacing.margin_mm", 12.0 ) );
 
   const auto itemsOf = [ &spec ]( const char *collection ) -> Json::Value {
     return spec.get( collection, Json::Value( Json::arrayValue ) );
@@ -125,9 +272,57 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &spec, QString *erro
     {
       if ( error )
         *error = QStringLiteral( "map frame '%1': %2" ).arg( QString::fromStdString( id ), itemError );
+      // Never leave a half-built layout registered: the previous layout was
+      // already replaced, so a failed compile yields no layout at all.
+      LayoutService::instance().deleteLayout( QString::fromStdString( spec["layout_name"].asString() ) );
       return nullptr;
     }
     mapFrameIds.push_back( id );
+  }
+
+  // --- inset maps compile as secondary map frames --------------------------
+  // Locator semantics (extent outline of the main map) are drawn at render
+  // time by referencing the same layers; the inset carries its own extent.
+  for ( const auto &inset : itemsOf( "inset_maps" ) )
+  {
+    Json::Value props = rectToProps( inset["rect_mm"] );
+    // Inset extent: explicit, else inherit the referenced (or first) frame's.
+    if ( inset.isMember( "extent" ) && inset["extent"].isArray() && inset["extent"].size() == 4 )
+    {
+      props["extent"] = inset["extent"];
+    }
+    else
+    {
+      const Json::Value frames = itemsOf( "map_frames" );
+      const Json::Value *source = nullptr;
+      if ( inset.isMember( "map_ref" ) && inset["map_ref"].isString() )
+      {
+        const std::string ref = inset["map_ref"].asString();
+        for ( const auto &frame : frames )
+          if ( frame.isObject() && frame.isMember( "id" ) && frame["id"].asString() == ref )
+            source = &frame;
+      }
+      if ( !source && frames.isArray() && !frames.empty() )
+        source = &frames[0];
+      if ( source && ( *source ).isMember( "extent" ) )
+        props["extent"] = ( *source )["extent"];
+    }
+    if ( inset.isMember( "layers" ) && inset["layers"].isArray() )
+    {
+      Json::Value layerRefs( Json::arrayValue );
+      for ( const auto &ref : inset["layers"] )
+        if ( ref.isString() )
+          layerRefs.append( resolveLayerRef( ref.asString() ).toStdString() );
+      props["layers"] = layerRefs;
+    }
+    const std::string id = inset["id"].asString();
+    if ( !compileItem( layout, "map", id, props, &itemError ) )
+    {
+      if ( error )
+        *error = QStringLiteral( "inset map '%1': %2" ).arg( QString::fromStdString( id ), itemError );
+      LayoutService::instance().deleteLayout( QString::fromStdString( spec["layout_name"].asString() ) );
+      return nullptr;
+    }
   }
 
   // --- grids attach to map frames ------------------------------------------
@@ -148,34 +343,27 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &spec, QString *erro
     map->grid()->setEnabled( true );
   }
 
-  // --- text furniture -------------------------------------------------------
+  // --- text furniture (token-styled; item font overrides tokens) -----------
   for ( const auto &title : itemsOf( "titles" ) )
   {
     Json::Value props = rectToProps( title["rect_mm"] );
     props["text"] = title.get( "text", "" );
-    double fontPt = 18.0;
-    if ( title.isMember( "font" ) && title["font"].isObject() &&
-         title["font"].isMember( "size_pt" ) && title["font"]["size_pt"].isNumeric() )
-      fontPt = title["font"]["size_pt"].asDouble();
-    props["font_size"] = fontPt;
-    props["bold"] = true;
-    compileItem( layout, "title", title["id"].asString(), props, nullptr );
+    applyTokenTextStyle( props, title, tokens, "title", 18.0 );
+    compileTextItem( layout, "title", title["id"].asString(), props, tokens );
   }
   for ( const auto &label : itemsOf( "labels" ) )
   {
     Json::Value props = rectToProps( label["rect_mm"] );
     props["text"] = label.get( "text", "" );
-    if ( label.isMember( "font" ) && label["font"].isObject() &&
-         label["font"].isMember( "size_pt" ) )
-      props["font_size"] = label["font"]["size_pt"];
-    compileItem( layout, "label", label["id"].asString(), props, nullptr );
+    applyTokenTextStyle( props, label, tokens, "body", 9.0 );
+    compileTextItem( layout, "label", label["id"].asString(), props, tokens );
   }
   for ( const auto &note : itemsOf( "source_notes" ) )
   {
     Json::Value props = rectToProps( note["rect_mm"] );
     props["text"] = note.get( "text", "" );
-    props["font_size"] = 7.0;
-    compileItem( layout, "label", note["id"].asString(), props, nullptr );
+    applyTokenTextStyle( props, note, tokens, "source_note", 7.0 );
+    compileTextItem( layout, "label", note["id"].asString(), props, tokens );
   }
   for ( const auto &annotation : itemsOf( "annotations" ) )
   {
@@ -183,7 +371,8 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &spec, QString *erro
       continue; // extracted placeholder for a non-mappable QGIS item — leave it
     Json::Value props = rectToProps( annotation["rect_mm"] );
     props["text"] = annotation.get( "text", "" );
-    compileItem( layout, "label", annotation["id"].asString(), props, nullptr );
+    applyTokenTextStyle( props, annotation, tokens, "annotation", 8.0 );
+    compileTextItem( layout, "label", annotation["id"].asString(), props, tokens );
   }
 
   // --- legends / scale bars / north arrows (link to map frames) -------------
@@ -194,7 +383,20 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &spec, QString *erro
       props["title"] = legend["title"];
     if ( legend.isMember( "map_ref" ) )
       props["linked_map"] = legend["map_ref"];
-    compileItem( layout, "legend", legend["id"].asString(), props, nullptr );
+    QgsLayoutItem *item = compileItem( layout, "legend", legend["id"].asString(), props, nullptr );
+    // Explicit column counts take the legend out of auto-update mode (the
+    // agent owns the entries from that point on) — QGIS semantics.
+    if ( auto *legendItem = qobject_cast<QgsLayoutItemLegend *>( item ) )
+    {
+      if ( legend.isMember( "columns" ) && legend["columns"].isIntegral() &&
+           legend["columns"].asInt() > 1 )
+      {
+        // setAutoUpdateModel is the update toggle this QGIS exposes (the
+        // renamed setter does not exist here); deprecation is intentional.
+        legendItem->setAutoUpdateModel( false );
+        legendItem->setColumnCount( legend["columns"].asInt() );
+      }
+    }
   }
   for ( const auto &scaleBar : itemsOf( "scale_bars" ) )
   {
@@ -203,6 +405,8 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &spec, QString *erro
       props["style"] = scaleBar["style"];
     if ( scaleBar.isMember( "units" ) && scaleBar["units"].isString() )
       props["unit_label"] = scaleBar["units"];
+    if ( scaleBar.isMember( "units_per_segment" ) && scaleBar["units_per_segment"].isNumeric() )
+      props["units_per_segment"] = scaleBar["units_per_segment"];
     if ( scaleBar.isMember( "map_ref" ) )
       props["linked_map"] = scaleBar["map_ref"];
     compileItem( layout, "scalebar", scaleBar["id"].asString(), props, nullptr );
@@ -212,21 +416,74 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &spec, QString *erro
     Json::Value props = rectToProps( arrow["rect_mm"] );
     if ( arrow.isMember( "svg" ) && arrow["svg"].isString() )
       props["path"] = arrow["svg"];
+    if ( arrow.isMember( "north_mode" ) && arrow["north_mode"].isString() )
+      props["north_mode"] = arrow["north_mode"];
     if ( arrow.isMember( "map_ref" ) )
       props["linked_map"] = arrow["map_ref"];
     compileItem( layout, "northarrow", arrow["id"].asString(), props, nullptr );
   }
 
   // --- charts ---------------------------------------------------------------
+  // Rendered chart/colorbar PNGs are layout-scoped so two layouts cannot
+  // clobber each other's pictures when item ids coincide. Files live in a
+  // session temp subdir (the OS tmpdir reaper bounds accumulation).
+  const QString tempDirPath = QDir::temp().filePath(
+    QStringLiteral( "sicnu-cartography-%1" ).arg( QString::fromStdString( spec["layout_name"].asString() ) ) );
+  QDir().mkpath( tempDirPath );
   QString chartError;
   QString chartPath;
   for ( const auto &chartItem : itemsOf( "charts" ) )
   {
-    const Json::Value &chart = chartItem["chart"];
+    // Token defaults are materialized into a mutable copy; explicit chart
+    // fields always win.
+    Json::Value chart = chartItem["chart"];
+    using sicnu::agent::cartography::tokenBool;
+    using sicnu::agent::cartography::tokenNumber;
+    using sicnu::agent::cartography::tokenPalette;
+    using sicnu::agent::cartography::tokenValue;
+    if ( !chart.isMember( "style" ) || !chart["style"].isObject() )
+      chart["style"] = Json::Value( Json::objectValue );
+    if ( !chart["style"].isMember( "font_pt" ) )
+      chart["style"]["font_pt"] = tokenNumber( tokens, "chart.font_pt", 10 );
+    if ( !chart["style"].isMember( "show_grid" ) )
+      chart["style"]["show_grid"] = tokenBool( tokens, "chart.show_grid", true );
+    if ( !chart["style"].isMember( "text_color" ) )
+    {
+      const Json::Value textColor = tokenValue( tokens, "colors.text" );
+      if ( textColor.isString() )
+        chart["style"]["text_color"] = textColor;
+    }
+    // style.palette may name a token palette; resolve it to hex stops.
+    if ( chart["style"].isMember( "palette" ) && chart["style"]["palette"].isString() )
+    {
+      const Json::Value palette = tokenPalette( tokens, chart["style"]["palette"].asString() );
+      if ( !palette.empty() )
+        chart["style"]["palette"] = palette;
+    }
+    else if ( !chart["style"].isMember( "palette" ) )
+    {
+      const Json::Value palette =
+        tokenPalette( tokens, sicnu::agent::cartography::tokenString( tokens, "chart.palette" ) );
+      if ( !palette.empty() )
+        chart["style"]["palette"] = palette;
+    }
+    Json::Value props = rectToProps( chartItem["rect_mm"] );
+    if ( !chartItem.isMember( "rect_mm" ) || !chartItem["rect_mm"].isArray() )
+    {
+      // Rect-less charts (component defaults carry pixel canvases): place at
+      // the bottom-left margin, sized from the token chart canvas.
+      const double widthMm = tokenNumber( tokens, "chart.width_px", 480 ) * 25.4 / 96.0;
+      const double heightMm = tokenNumber( tokens, "chart.height_px", 320 ) * 25.4 / 96.0;
+      props["x"] = sicnu::agent::cartography::tokenNumber( tokens, "spacing.margin_mm", 12.0 );
+      props["y"] = page["height_mm"].asDouble() -
+                   sicnu::agent::cartography::tokenNumber( tokens, "spacing.margin_mm", 12.0 ) -
+                   heightMm;
+      props["width"] = widthMm;
+      props["height"] = heightMm;
+    }
     const std::string mode = chart.isMember( "binding" ) && chart["binding"].isMember( "mode" )
                                ? chart["binding"]["mode"].asString()
                                : "inline";
-    Json::Value props = rectToProps( chartItem["rect_mm"] );
     if ( mode == "vector_expression" )
     {
       QgsLayoutItem *item = compileItem( layout, "chart", chartItem["id"].asString(), props, nullptr );
@@ -248,8 +505,10 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &spec, QString *erro
     {
       // Inline charts render through the QPainter path into a stable session
       // file, then land as picture items.
-      chartPath = QDir::temp().filePath( QStringLiteral( "sicnu-chart-%1.png" )
-                                           .arg( QString::fromStdString( chartItem["id"].asString() ) ) );
+      chartPath = QDir( tempDirPath ).filePath(
+        QStringLiteral( "sicnu-chart-%1-%2.png" )
+          .arg( QString::fromStdString( spec["layout_name"].asString() ),
+                QString::fromStdString( chartItem["id"].asString() ) ) );
       if ( sicnu::agent::cartography::renderChartToFile( chart, chartPath, &chartError ) )
       {
         props["path"] = chartPath.toStdString();
@@ -265,15 +524,95 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &spec, QString *erro
   }
 
   // --- colorbars --------------------------------------------------------------
-  for ( const auto &colorbar : itemsOf( "colorbars" ) )
+  for ( const auto &colorbarItem : itemsOf( "colorbars" ) )
   {
-    const QString path = QDir::temp().filePath( QStringLiteral( "sicnu-colorbar-%1.png" )
-                                                  .arg( QString::fromStdString( colorbar["id"].asString() ) ) );
+    // Ramp names resolve through the token palette table when available;
+    // explicit `colors` stops always win.
+    Json::Value colorbar = colorbarItem;
+    if ( !colorbar.isMember( "colors" ) || !colorbar["colors"].isArray() )
+    {
+      const std::string ramp = colorbar.isMember( "ramp" ) && colorbar["ramp"].isString()
+                                 ? colorbar["ramp"].asString()
+                                 : "sequential";
+      const Json::Value palette =
+        sicnu::agent::cartography::tokenValue( tokens, "palettes." + ramp );
+      if ( palette.isArray() && palette.size() >= 2 )
+        colorbar["colors"] = palette;
+    }
+    if ( !colorbar.isMember( "text_color" ) )
+    {
+      const Json::Value textColor = sicnu::agent::cartography::tokenValue( tokens, "colors.text" );
+      if ( textColor.isString() )
+        colorbar["text_color"] = textColor;
+    }
+    if ( !colorbar.isMember( "font_pt" ) )
+      colorbar["font_pt"] = sicnu::agent::cartography::tokenNumber( tokens,
+        "typography.styles.caption.size_pt", 8.0 );
+    const QString path = QDir( tempDirPath ).filePath(
+      QStringLiteral( "sicnu-colorbar-%1-%2.png" )
+        .arg( QString::fromStdString( spec["layout_name"].asString() ),
+              QString::fromStdString( colorbar["id"].asString() ) ) );
     if ( sicnu::agent::cartography::renderColorbarToFile( colorbar, path ) )
     {
       Json::Value props = rectToProps( colorbar["rect_mm"] );
+      if ( !colorbar.isMember( "rect_mm" ) || !colorbar["rect_mm"].isArray() )
+      {
+        // Rect-less colorbars: bottom margin strip sized from descriptor
+        // defaults merged into the item, placed inside the token margin.
+        const double widthMm = colorbar.isMember( "width_mm" ) && colorbar["width_mm"].isNumeric()
+                                 ? colorbar["width_mm"].asDouble()
+                                 : 60.0;
+        const double heightMm = colorbar.isMember( "height_mm" ) && colorbar["height_mm"].isNumeric()
+                                  ? colorbar["height_mm"].asDouble()
+                                  : 8.0;
+        props["x"] = sicnu::agent::cartography::tokenNumber( tokens, "spacing.margin_mm", 12.0 );
+        props["y"] = page["height_mm"].asDouble() - heightMm -
+                     sicnu::agent::cartography::tokenNumber( tokens, "spacing.margin_mm", 12.0 );
+        props["width"] = widthMm;
+        props["height"] = heightMm;
+      }
       props["path"] = path.toStdString();
       compileItem( layout, "picture", colorbar["id"].asString(), props, nullptr );
+    }
+  }
+
+  // --- v2 post-pass: page placement, z-order, semantic-role stamping --------
+  for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+  {
+    const char *collection = mapspec::kCollections[c];
+    if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+      continue;
+    for ( const auto &item : spec[collection] )
+    {
+      if ( !item.isObject() || !item.isMember( "id" ) )
+        continue;
+      const int pageIndex =
+        item.isMember( "page" ) && item["page"].isIntegral() ? item["page"].asInt() : 0;
+      const bool hasZ = item.isMember( "z_index" ) && item["z_index"].isIntegral();
+      const bool hasRole = item.isMember( "semantic_role" ) && item["semantic_role"].isString();
+      if ( pageIndex <= 0 && !hasZ && !hasRole )
+        continue;
+      QgsLayoutItem *compiled =
+        LayoutService::instance().findItem( layout, QString::fromStdString( item["id"].asString() ) );
+      if ( !compiled )
+        continue;
+      if ( pageIndex > 0 )
+      {
+        double x = compiled->pagePos().x();
+        double y = compiled->pagePos().y();
+        if ( item.isMember( "rect_mm" ) && item["rect_mm"].isArray() && item["rect_mm"].size() == 4 )
+        {
+          x = item["rect_mm"][0].asDouble();
+          y = item["rect_mm"][1].asDouble();
+        }
+        compiled->attemptMove( QgsLayoutPoint( x, y, Qgis::LayoutUnit::Millimeters ), true, false,
+                               pageIndex );
+      }
+      if ( hasZ )
+        compiled->setZValue( item["z_index"].asInt() );
+      if ( hasRole )
+        compiled->setProperty( "mapspec_role",
+                               QVariant( QString::fromStdString( item["semantic_role"].asString() ) ) );
     }
   }
 
@@ -293,11 +632,22 @@ Json::Value MapSpecCompiler::extract( QgsPrintLayout *layout )
   }
 
   const auto classifyLabel = []( const QgsLayoutItemLabel *label ) -> const char * {
+    // Stamped semantic roles (compile-time custom property) are authoritative;
+    // the geometric heuristic only serves foreign labels.
+    const QString role = label->property( "mapspec_role" ).toString();
+    if ( role == QLatin1String( "source.primary" ) )
+      return "source_notes";
+    if ( role.startsWith( QLatin1String( "title." ) ) )
+      return "titles";
+    if ( role.startsWith( QLatin1String( "text." ) ) )
+      return "labels";
+    if ( role.startsWith( QLatin1String( "annotation." ) ) )
+      return "annotations";
     const QString text = label->text().toLower();
     if ( text.contains( QLatin1String( "source" ) ) ||
          label->text().contains( QStringLiteral( "来源" ) ) )
       return "source_notes";
-    if ( label->font().pointSizeF() >= 16.0 || label->font().bold() )
+    if ( label->font().pointSizeF() >= 16.0 )
       return "titles";
     return "labels";
   };
@@ -319,6 +669,9 @@ Json::Value MapSpecCompiler::extract( QgsPrintLayout *layout )
     rectJson.append( rect.width() );
     rectJson.append( rect.height() );
     entry["rect_mm"] = rectJson;
+    const QString stampedRole = item->property( "mapspec_role" ).toString();
+    if ( !stampedRole.isEmpty() )
+      entry["semantic_role"] = stampedRole.toStdString();
 
     const char *collection = "annotations";
     if ( auto *map = qobject_cast<QgsLayoutItemMap *>( item ) )

@@ -1,0 +1,148 @@
+{
+  "id": "accuracy-assessment-a4l",
+  "version": 1,
+  "description": "Accuracy assessment page: map, confusion matrix, metric cards and legend.",
+  "page": {
+    "width_mm": 297,
+    "height_mm": 210
+  },
+  "style": {
+    "token_set": "scientific-light",
+    "medium": "print"
+  },
+  "slots": [
+    {
+      "role": "map.main",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        30.0,
+        203.0,
+        144.0
+      ]
+    },
+    {
+      "role": "title.main",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        12.0,
+        273.0,
+        12.0
+      ]
+    },
+    {
+      "role": "legend.primary",
+      "accepts": "legends",
+      "rect_mm": [
+        215.0,
+        30.0,
+        70.0,
+        78.0
+      ],
+      "content": {
+        "title": "图例"
+      }
+    },
+    {
+      "role": "scalebar.primary",
+      "accepts": "scale_bars",
+      "rect_mm": [
+        14.0,
+        182.0,
+        48,
+        10
+      ]
+    },
+    {
+      "role": "north_arrow.primary",
+      "accepts": "north_arrows",
+      "rect_mm": [
+        68.0,
+        182.0,
+        12,
+        12
+      ]
+    },
+    {
+      "role": "source.primary",
+      "accepts": "source_notes",
+      "rect_mm": [
+        88.0,
+        184.0,
+        177.0,
+        8
+      ]
+    },
+    {
+      "role": "chart.matrix",
+      "accepts": "charts",
+      "rect_mm": [
+        215.0,
+        114.0,
+        70.0,
+        60.0
+      ],
+      "content": {
+        "chart": {
+          "kind": "matrix",
+          "binding": {
+            "mode": "inline",
+            "data": [],
+            "matrix": {
+              "labels": [
+                "forest",
+                "crop",
+                "water",
+                "built"
+              ],
+              "rows": [
+                [
+                  38,
+                  4,
+                  0,
+                  0
+                ],
+                [
+                  5,
+                  21,
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  0,
+                  12,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0,
+                  8
+                ]
+              ]
+            }
+          },
+          "style": {
+            "diagonal_emphasis": true
+          }
+        },
+        "title": "混淆矩阵"
+      }
+    }
+  ],
+  "suitable_tasks": [
+    "accuracy",
+    "validation"
+  ],
+  "product_type": "accuracy",
+  "recommended_components": [
+    "north-arrow/scientific",
+    "grid/graticule",
+    {
+      "id": "frame/classic",
+      "variant": "scientific"
+    }
+  ]
+}

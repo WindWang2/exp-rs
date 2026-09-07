@@ -1,0 +1,42 @@
+{
+  "id": "legend/grouped",
+  "version": 1,
+  "category": "legend",
+  "semantic_roles": [
+    "legend.primary"
+  ],
+  "description": "Legend with grouped headings (e.g. land cover groups, scenario groups).",
+  "parameters": {
+    "title": "图例",
+    "groups": []
+  },
+  "variants": [
+    {
+      "id": "flat",
+      "description": "Explicit group table provided via data_bindings."
+    },
+    {
+      "id": "hierarchical",
+      "description": "Nested subgroups with indented children."
+    }
+  ],
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "right-rail"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 1
+  },
+  "compatibility": {
+    "requires_map_frame": true
+  },
+  "data_bindings": [
+    {
+      "name": "groups",
+      "source": "params.legend_groups",
+      "required": true,
+      "description": "Ordered [{heading, entries: [{label, color}]}]."
+    }
+  ]
+}

@@ -13,6 +13,7 @@ add_library(sicnu_processing SHARED
     algorithms/spectral_indices.cpp
     algorithms/spectral_classification.cpp
     algorithms/band_math.cpp
+    algorithms/band_tools.cpp
     algorithms/band_math_simd.cpp
     algorithms/atmospheric_correction.cpp
     algorithms/radiometric_calibration.cpp
@@ -20,6 +21,7 @@ add_library(sicnu_processing SHARED
     algorithms/post_classification.cpp
     algorithms/qa_mask.cpp
     algorithms/math_utils.cpp
+    algorithms/nodata_utils.cpp
     algorithms/mosaic.cpp
     algorithms/image_enhancement.cpp
     algorithms/image_enhancement_streaming.cpp

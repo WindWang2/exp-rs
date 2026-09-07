@@ -7,6 +7,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "processing/algorithms/sar/sar_calibration.h"
 #include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -135,10 +136,7 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
     }
 
     // Sentinel declared on the analysis band (NaN when undeclared).
-    bool hasNodata = false;
-    const double nodataRaw = src.bandNoDataValue(firstBand, &hasNodata);
-    const float nodata = hasNodata ? static_cast<float>(nodataRaw)
-                                   : std::numeric_limits<float>::quiet_NaN();
+    const float nodata = sicnu::rs::bandNoDataSentinel(src, firstBand);
 
     context.reportProgress(0.05, "Calibrating SAR raster");
     GdalStreamingOutput dst(QString::fromStdString(outputPath), src.width(), src.height(),
