@@ -2953,6 +2953,23 @@ sicnu_add_test(test_layout_tools)
   )
   sicnu_discover_tests(test_classifier_svm)
 
+  # Foundation 5.0 Milestone H — kNN + statistical backends + factory mapping.
+  add_executable(test_classifier_foundation5 test_classifier_foundation5.cpp)
+  target_link_libraries(test_classifier_foundation5 PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classifier_foundation5 PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_classifier_foundation5)
+
   # Phase 10A Task 10.8 — KMeans backend cluster-centre test.
   add_executable(test_classifier_kmeans test_classifier_kmeans.cpp)
   target_link_libraries(test_classifier_kmeans PRIVATE
