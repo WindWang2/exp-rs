@@ -38,6 +38,8 @@
 
 #include <qgslayout.h>
 #include <qgslayoutmanager.h>
+#include <qgslayoutitemmap.h>
+#include <qgslayoutitemmapoverview.h>
 #include <qgslayoutpagecollection.h>
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
@@ -1060,4 +1062,63 @@ TEST_CASE( "Solution and style tools register and answer through the shared regi
   const auto linted = ( *lint )->execute( Json::Value( Json::objectValue ) );
   REQUIRE( linted.success );
   CHECK( linted.output["problem_count"].asInt() == 0 );
+}
+
+TEST_CASE( "Nested locators and dynamic atlas text survive validation and compile",
+           "[platform5][locator][atlas]" )
+{
+  // Nested locator foundation: an inset may target another inset (both are
+  // compiled map items); depth is authored explicitly in the document.
+  Json::Value spec = makeSpec();
+  Json::Value frame = rectItem( "map-1", 12, 30, 200, 140 );
+  spec["map_frames"].append( frame );
+  Json::Value insetA = rectItem( "inset_map-1", 220, 30, 60, 45 );
+  Json::Value locatorA( Json::objectValue );
+  locatorA["target"] = "map-1";
+  locatorA["style"] = "outline";
+  insetA["locator"] = locatorA;
+  spec["inset_maps"].append( insetA );
+  Json::Value insetB = rectItem( "inset_map-2", 220, 90, 60, 45 );
+  Json::Value locatorB( Json::objectValue );
+  locatorB["target"] = "inset_map-1"; // locator-of-locator
+  locatorB["style"] = "region";
+  insetB["locator"] = locatorB;
+  spec["inset_maps"].append( insetB );
+  const auto problems = validateMapSpec( spec );
+  if ( !problems.empty() )
+    FAIL( problems.front() );
+  QString error;
+  QgsPrintLayout *layout = MapSpecCompiler::compile( spec, &error );
+  REQUIRE( layout != nullptr );
+  CHECK( layout->pageCollection()->pageCount() >= 1 );
+  // Both insets compiled with their overviews attached.
+  int overviewMaps = 0;
+  const QList<QGraphicsItem *> items = layout->items();
+  for ( QGraphicsItem *sceneItem : items )
+  {
+    auto *map = dynamic_cast<QgsLayoutItemMap *>( sceneItem );
+    if ( map && map->overviews() && !map->overviews()->asList().isEmpty() )
+      ++overviewMaps;
+  }
+  CHECK( overviewMaps >= 2 );
+  QgsProject::instance()->layoutManager()->clear();
+}
+
+TEST_CASE( "Atlas dynamic text passes through verbatim and validates structurally",
+           "[platform5][atlas]" )
+{
+  const Json::Value appendix = TemplateRegistry::instance().instantiateTemplate(
+    "report-atlas-appendix-a4l", Json::Value( Json::objectValue ), nullptr );
+  REQUIRE_FALSE( appendix.isNull() );
+  bool sawExpression = false;
+  for ( const auto &title : appendix["titles"] )
+    if ( title.isMember( "text" ) &&
+         title["text"].asString().find( "[% \"name\" %]" ) != std::string::npos )
+      sawExpression = true;
+  CHECK( sawExpression );
+  CHECK( appendix["page"]["atlas"]["enabled"].asBool() );
+  CHECK( appendix["page"]["atlas"]["sort_order"].asString() == "asc" );
+  const auto problems = validateMapSpec( appendix );
+  if ( !problems.empty() )
+    FAIL( problems.front() );
 }

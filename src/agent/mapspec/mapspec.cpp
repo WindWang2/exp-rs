@@ -139,6 +139,7 @@ void checkV2ItemFields( const Json::Value &item, const std::string &id,
 /// inset locator descriptors. Appends problems.
 void checkV3ItemFields( const Json::Value &item, const std::string &id, const std::string &collection,
                         const std::set<std::string> &mapFrameIds,
+                        const std::set<std::string> &insetIds,
                         std::vector<std::string> &problems )
 {
   for ( const char *member : { "visible_if", "content_if" } )
@@ -171,10 +172,13 @@ void checkV3ItemFields( const Json::Value &item, const std::string &id, const st
       {
         problems.push_back( id + ": locator.target must name the referenced map frame" );
       }
-      else if ( !mapFrameIds.count( locator["target"].asString() ) )
+      else if ( !mapFrameIds.count( locator["target"].asString() ) &&
+                !insetIds.count( locator["target"].asString() ) )
       {
+        // Nested locators are legal: an inset may target another (earlier)
+        // inset; the compiler attaches the overview to whichever map item.
         problems.push_back( id + ": locator.target '" + locator["target"].asString() +
-                            "' does not resolve to a map frame" );
+                            "' does not resolve to a map frame or inset" );
       }
       if ( locator.isMember( "style" ) )
       {
@@ -392,6 +396,14 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
       if ( frame.isObject() && frame.isMember( "id" ) )
         mapFrameIds.insert( frame["id"].asString() );
   }
+  // Inset ids: locator targets may reference another (earlier-declared) inset.
+  std::set<std::string> insetIds;
+  if ( spec.isMember( "inset_maps" ) && spec["inset_maps"].isArray() )
+  {
+    for ( const auto &inset : spec["inset_maps"] )
+      if ( inset.isObject() && inset.isMember( "id" ) )
+        insetIds.insert( inset["id"].asString() );
+  }
 
   std::set<std::string> allIds;
   int totalItems = 0;
@@ -463,7 +475,7 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
       // v2 composition fields.
       checkV2ItemFields( item, id, problems );
       // v3 knowledge-platform fields.
-      checkV3ItemFields( item, id, info->name, mapFrameIds, problems );
+      checkV3ItemFields( item, id, info->name, mapFrameIds, insetIds, problems );
     }
   }
 
