@@ -12,10 +12,12 @@
 
 #include <gdal.h>
 #include <gdal_priv.h>
+#include <gdalwarper.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <utility>
 
 namespace sicnu::geo
@@ -73,6 +75,46 @@ bool clampWindowToRaster( const RasterMetadata &metadata, RasterWindow &window )
   window.width = x1 - x0;
   window.height = y1 - y0;
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// 5.0: tile walk planning
+// ---------------------------------------------------------------------------
+
+TileSlice TilePlan::slice( int tileX, int tileY ) const
+{
+  TileSlice slice;
+  slice.tileX = tileX;
+  slice.tileY = tileY;
+  slice.xOff = window.xOff + tileX * tileWidth;
+  slice.yOff = window.yOff + tileY * tileHeight;
+  slice.width = std::min( tileWidth, window.xOff + window.width - slice.xOff );
+  slice.height = std::min( tileHeight, window.yOff + window.height - slice.yOff );
+  return slice;
+}
+
+TilePlan planTileWalk( const RasterMetadata &metadata, const RasterWindow &requestedWindow,
+                       int tileWidth, int tileHeight )
+{
+  if ( tileWidth <= 0 || tileHeight <= 0 )
+    throw GeoError( ErrorCode::InvalidArgument, "planTileWalk: tile sizes must be positive" );
+
+  RasterWindow window = requestedWindow;
+  if ( !clampWindowToRaster( metadata, window ) )
+  {
+    Json::Value details;
+    details["window_xoff"] = requestedWindow.xOff;
+    details["window_yoff"] = requestedWindow.yOff;
+    throw GeoError( ErrorCode::InvalidArgument, "planTileWalk: window does not intersect the raster", details );
+  }
+
+  TilePlan plan;
+  plan.tileWidth = tileWidth;
+  plan.tileHeight = tileHeight;
+  plan.window = window;
+  plan.tilesX = ( window.width + tileWidth - 1 ) / tileWidth;
+  plan.tilesY = ( window.height + tileHeight - 1 ) / tileHeight;
+  return plan;
 }
 
 RasterReader RasterReader::open( const std::string &path )
@@ -280,6 +322,230 @@ void *RasterReader::bandHandle( int bandIndex1Based ) const
   if ( !mHandle || bandIndex1Based < 1 || bandIndex1Based > mMetadata.bandCount )
     return nullptr;
   return GDALGetRasterBand( datasetOf( mHandle ), bandIndex1Based );
+}
+
+// ---------------------------------------------------------------------------
+// 5.0: block / tile / overview contracts
+// ---------------------------------------------------------------------------
+
+std::pair<int, int> RasterReader::blockSize( int bandIndex1Based ) const
+{
+  if ( !mHandle || bandIndex1Based < 1 || bandIndex1Based > mMetadata.bandCount )
+    return { 0, 0 };
+  int blockX = 0;
+  int blockY = 0;
+  GDALGetBlockSize( GDALGetRasterBand( datasetOf( mHandle ), bandIndex1Based ), &blockX, &blockY );
+  return { blockX, blockY };
+}
+
+std::vector<double> RasterReader::readBlock( int bandIndex1Based, int blockX, int blockY ) const
+{
+  const std::pair<int, int> size = blockSize( bandIndex1Based );
+  if ( size.first <= 0 || size.second <= 0 )
+    throw GeoError( ErrorCode::InvalidArgument, "readBlock: band out of range or closed reader" );
+
+  // Clamp block coordinates against the raster's block grid.
+  const int blocksX = ( mMetadata.width + size.first - 1 ) / size.first;
+  const int blocksY = ( mMetadata.height + size.second - 1 ) / size.second;
+  if ( blockX < 0 || blockY < 0 || blockX >= blocksX || blockY >= blocksY )
+  {
+    Json::Value details;
+    details["block_x"] = blockX;
+    details["block_y"] = blockY;
+    details["blocks_x"] = blocksX;
+    details["blocks_y"] = blocksY;
+    throw GeoError( ErrorCode::InvalidArgument, "readBlock: block coordinates out of range", details );
+  }
+
+  const int winX = blockX * size.first;
+  const int winY = blockY * size.second;
+  const int winW = std::min( size.first, mMetadata.width - winX );
+  const int winH = std::min( size.second, mMetadata.height - winY );
+
+  RasterWindow window;
+  window.xOff = winX;
+  window.yOff = winY;
+  window.width = winW;
+  window.height = winH;
+
+  // A block edge is smaller than the native block at raster edges; route
+  // through the strict window read (stored values, validated geometry).
+  return readWindow( { bandIndex1Based }, window );
+}
+
+void RasterReader::iterateTiles( const TilePlan &plan, const std::vector<int> &bands,
+                                 const std::function<void( const TileSlice &, const std::vector<double> & )> &sink,
+                                 const std::function<bool()> &cancelled ) const
+{
+  if ( !sink )
+    throw GeoError( ErrorCode::InvalidArgument, "iterateTiles: missing sink" );
+
+  for ( int tileY = 0; tileY < plan.tilesY; ++tileY )
+  {
+    for ( int tileX = 0; tileX < plan.tilesX; ++tileX )
+    {
+      if ( cancelled && cancelled() )
+        throw GeoError( ErrorCode::Cancelled, "iterateTiles: cancelled by the caller" );
+      const TileSlice slice = plan.slice( tileX, tileY );
+      const std::vector<double> values = readWindow( bands, { slice.xOff, slice.yOff, slice.width, slice.height } );
+      sink( slice, values );
+    }
+  }
+}
+
+int RasterReader::overviewCount( int bandIndex1Based ) const
+{
+  if ( !mHandle || bandIndex1Based < 1 || bandIndex1Based > mMetadata.bandCount )
+    return 0;
+  return GDALGetOverviewCount( GDALGetRasterBand( datasetOf( mHandle ), bandIndex1Based ) );
+}
+
+std::vector<int> RasterReader::overviewDimensions( int bandIndex1Based ) const
+{
+  std::vector<int> sizes;
+  if ( !mHandle || bandIndex1Based < 1 || bandIndex1Based > mMetadata.bandCount )
+    return sizes;
+  GDALRasterBandH band = GDALGetRasterBand( datasetOf( mHandle ), bandIndex1Based );
+  const int count = GDALGetOverviewCount( band );
+  sizes.reserve( static_cast<std::size_t>( count ) * 2 );
+  for ( int level = 0; level < count; ++level )
+  {
+    GDALRasterBandH overview = GDALGetOverview( band, level );
+    if ( overview == nullptr )
+      continue;
+    sizes.push_back( GDALGetRasterBandXSize( overview ) );
+    sizes.push_back( GDALGetRasterBandYSize( overview ) );
+  }
+  return sizes;
+}
+
+int RasterReader::selectOverview( int bandIndex1Based, int targetWidth, int targetHeight,
+                                  OverviewPolicy policy ) const
+{
+  if ( policy == OverviewPolicy::Auto || policy == OverviewPolicy::Exact )
+    return 0; // Exact reads native; Auto defers the level choice to GDAL at IO time
+
+  if ( targetWidth <= 0 || targetHeight <= 0 )
+    throw GeoError( ErrorCode::InvalidArgument, "selectOverview: target size must be positive" );
+
+  GDALRasterBandH band = bandHandle( bandIndex1Based ) ? static_cast<GDALRasterBandH>( bandHandle( bandIndex1Based ) )
+                                                       : nullptr;
+  if ( band == nullptr )
+    return 0;
+
+  // Nearest: the smallest overview still covering the request — never a
+  // level that would upscale beyond the target.
+  const int count = GDALGetOverviewCount( band );
+  int selected = 0;
+  for ( int level = 0; level < count; ++level )
+  {
+    GDALRasterBandH overview = GDALGetOverview( band, level );
+    if ( overview == nullptr )
+      break;
+    const int w = GDALGetRasterBandXSize( overview );
+    const int h = GDALGetRasterBandYSize( overview );
+    if ( w >= targetWidth && h >= targetHeight )
+      selected = level + 1; // 1-based overview level
+    else
+      break;
+  }
+  return selected;
+}
+
+std::vector<double> RasterReader::readWindowResampled( const std::vector<int> &bands, const RasterWindow &window,
+                                                       int dstWidth, int dstHeight, int overviewLevel,
+                                                       OverviewPolicy policy, const std::string &resampling ) const
+{
+  std::string validationError;
+  if ( !validateWindow( mMetadata, window, &validationError ) )
+    throw GeoError( ErrorCode::InvalidArgument, "readWindowResampled: " + validationError );
+  if ( dstWidth <= 0 || dstHeight <= 0 )
+    throw GeoError( ErrorCode::InvalidArgument, "readWindowResampled: destination size must be positive" );
+  if ( dstWidth > window.width || dstHeight > window.height )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "readWindowResampled: upsampling is refused (declare a higher-resolution source instead)" );
+
+  std::vector<int> effectiveBands = bands;
+  if ( effectiveBands.empty() )
+  {
+    effectiveBands.resize( mMetadata.bandCount );
+    for ( int i = 0; i < mMetadata.bandCount; ++i )
+      effectiveBands[i] = i + 1;
+  }
+
+  GDALDatasetH dataset = datasetOf( mHandle );
+  GDALRasterBandH firstBand = GDALGetRasterBand( dataset, effectiveBands.front() );
+  if ( firstBand == nullptr )
+    throw GeoError( ErrorCode::InvalidArgument, "readWindowResampled: band out of range" );
+
+  int level = overviewLevel;
+  if ( policy == OverviewPolicy::Nearest && level == 0 )
+    level = selectOverview( effectiveBands.front(), dstWidth, dstHeight, OverviewPolicy::Nearest );
+
+  GDALRasterBandH readBand = firstBand;
+  if ( level > 0 )
+  {
+    readBand = GDALGetOverview( firstBand, level - 1 );
+    if ( readBand == nullptr )
+    {
+      Json::Value details;
+      details["level"] = level;
+      details["overview_count"] = GDALGetOverviewCount( firstBand );
+      throw GeoError( ErrorCode::Unsupported, "readWindowResampled: overview level does not exist", details );
+    }
+  }
+
+  GDALRIOResampleAlg alg = GRIORA_NearestNeighbour;
+  if ( resampling == "bilinear" )
+    alg = GRIORA_Bilinear;
+  else if ( resampling == "cubic" )
+    alg = GRIORA_Cubic;
+  else if ( resampling == "average" )
+    alg = GRIORA_Average;
+  else if ( resampling == "mode" )
+    alg = GRIORA_Mode;
+  else if ( !resampling.empty() && resampling != "nearest" )
+    throw GeoError( ErrorCode::InvalidArgument, "readWindowResampled: unknown resampling method: " + resampling );
+
+  GDALRasterIOExtraArg extra;
+  INIT_RASTERIO_EXTRA_ARG( extra );
+  extra.eResampleAlg = alg;
+
+  const std::size_t pixels = static_cast<std::size_t>( dstWidth ) * static_cast<std::size_t>( dstHeight );
+  std::vector<double> out( pixels * effectiveBands.size() );
+
+  ensureGdalRegistered();
+  QuietCplErrors quiet;
+  for ( std::size_t b = 0; b < effectiveBands.size(); ++b )
+  {
+    GDALRasterBandH band = effectiveBands[b] == effectiveBands.front()
+                              ? readBand
+                              : GDALGetRasterBand( dataset, effectiveBands[b] );
+    if ( band == nullptr )
+      throw GeoError( ErrorCode::InvalidArgument, "readWindowResampled: band out of range" );
+    requireRealDataType( band, effectiveBands[b] );
+
+    // Overview windows are the window scaled into the level's grid.
+    const int srcX = level > 0 ? static_cast<int>( static_cast<double>( window.xOff ) * GDALGetRasterBandXSize( band ) / mMetadata.width ) : window.xOff;
+    const int srcY = level > 0 ? static_cast<int>( static_cast<double>( window.yOff ) * GDALGetRasterBandYSize( band ) / mMetadata.height ) : window.yOff;
+    const int srcW = level > 0 ? static_cast<int>( static_cast<double>( window.width ) * GDALGetRasterBandXSize( band ) / mMetadata.width ) : window.width;
+    const int srcH = level > 0 ? static_cast<int>( static_cast<double>( window.height ) * GDALGetRasterBandYSize( band ) / mMetadata.height ) : window.height;
+
+    double *dst = out.data() + b * pixels;
+    const CPLErr error = GDALRasterIOEx( band, GF_Read, srcX, srcY, std::max( srcW, 1 ), std::max( srcH, 1 ),
+                                         dst, dstWidth, dstHeight, GDT_Float64, 0, 0, &extra );
+    if ( error != CE_None )
+    {
+      Json::Value details;
+      details["band"] = effectiveBands[b];
+      details["overview_level"] = level;
+      const char *lastError = CPLGetLastErrorMsg();
+      if ( lastError && *lastError )
+        details["gdal_error"] = lastError;
+      throw GeoError( ErrorCode::IoError, "readWindowResampled: scaled read failed", details );
+    }
+  }
+  return out;
 }
 
 } // namespace sicnu::geo

@@ -21,6 +21,8 @@
 #include "geospatial/metadata/canonical_metadata.h"
 
 #include <cstdint>
+#include <functional>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -45,6 +47,51 @@ inline bool operator==( const RasterWindow &a, const RasterWindow &b )
 /// Restricts a window to the raster extent. Returns false when the window does
 /// not intersect the raster at all (out of bounds on any side).
 bool clampWindowToRaster( const RasterMetadata &metadata, RasterWindow &window );
+
+/// Overview selection policy (5.0). Algorithms default to `Exact` — a
+/// silently-sampled overview is a wrong-answer factory. Preview/UI surfaces
+/// may opt into `Nearest` explicitly; `Auto` defers to the driver.
+enum class OverviewPolicy
+{
+  Exact,   ///< ignore overviews; read at native resolution (default)
+  Nearest, ///< smallest overview whose dimensions still cover the request
+  Auto,    ///< driver-chosen level for the request (GDAL default behavior)
+};
+
+/// One tile of a caller-planned tile walk (absolute pixel coordinates,
+/// clamped at the requested window's edges).
+struct TileSlice
+{
+  int xOff = 0;              ///< absolute pixel column of the tile origin
+  int yOff = 0;              ///< absolute pixel row of the tile origin
+  int width = 0;
+  int height = 0;
+  int tileX = 0;             ///< tile column index in the plan
+  int tileY = 0;             ///< tile row index in the plan
+};
+
+/// A planned tile walk: `tilesX × tilesY` bounded slices over a window.
+struct TilePlan
+{
+  int tilesX = 0;
+  int tilesY = 0;
+  int tileWidth = 0;
+  int tileHeight = 0;
+  RasterWindow window; ///< the covered window (already clamped to the raster)
+
+  std::size_t tileCount() const
+  {
+    return static_cast<std::size_t>( tilesX ) * static_cast<std::size_t>( tilesY );
+  }
+  TileSlice slice( int tileX, int tileY ) const;
+};
+
+/// Plans a bounded tile walk over `window` (pass a full-extent window for a
+/// whole-raster walk). Tile sizes must be positive; the last column/row is
+/// clamped. Throws GeoError(InvalidArgument) on bad input; an empty window
+/// intersection throws rather than planning a zero-tile walk.
+TilePlan planTileWalk( const RasterMetadata &metadata, const RasterWindow &window,
+                       int tileWidth, int tileHeight );
 
 class RasterReader
 {
@@ -98,6 +145,50 @@ class RasterReader
     /// GDAL band handle for advanced/expert access (overviews, RAT, ...).
     /// The reader remains the owner. Null when closed or index out of range.
     void *bandHandle( int bandIndex1Based ) const;
+
+    // --- 5.0: block / tile / overview contracts ---------------------------
+
+    /// Native block size of a band {width, height}. {0,0} for a closed reader
+    /// or out-of-range band (never throws — callers plan with it).
+    std::pair<int, int> blockSize( int bandIndex1Based ) const;
+
+    /// Reads one native block of one band (block coordinates, not pixels).
+    /// Stored values, band-sequential layout of blockSize() elements.
+    /// Throws GeoError(InvalidArgument) for out-of-range arguments.
+    std::vector<double> readBlock( int bandIndex1Based, int blockX, int blockY ) const;
+
+    /// Walks `plan` tile by tile, handing each bounded slice's stored values
+    /// (band-sequential) to `sink`. Never materializes more than one tile ×
+    /// bands at a time — that is the bounded-memory point of the walk.
+    /// `cancelled` is polled before each tile; returning true stops the walk
+    /// with GeoError(Cancelled) (tiles already delivered stay delivered).
+    void iterateTiles( const TilePlan &plan, const std::vector<int> &bands,
+                       const std::function<void( const TileSlice &, const std::vector<double> & )> &sink,
+                       const std::function<bool()> &cancelled = {} ) const;
+
+    /// Overview introspection for the band: count, and per-level dimensions
+    /// (flattened {w0,h0,w1,h1,...} at native level, index = level-1).
+    int overviewCount( int bandIndex1Based ) const;
+    std::vector<int> overviewDimensions( int bandIndex1Based ) const;
+
+    /// Chooses an overview level under `policy` for a target reading size.
+    /// Returns 0 (= native) for Exact; the smallest level whose dimensions
+    /// still cover (targetWidth,targetHeight) for Nearest; the driver-decided
+    /// level for Auto (GDAL picks during IO). Throws nothing; level is a
+    /// 1-based overview index, 0 when none selected / none exist.
+    int selectOverview( int bandIndex1Based, int targetWidth, int targetHeight,
+                        OverviewPolicy policy ) const;
+
+    /// Explicitly downsampled window read. This is the ONLY resampling entry
+    /// point: dstWidth/dstHeight are the caller's choice, `level` is the
+    /// overview to read from (0 = native), `method` is the resample kernel.
+    /// Nothing about this call is implicit — the returned buffer is exactly
+    /// dstWidth × dstHeight per band, and a missing overview level with
+    /// policy-exact expectations is a structured error, never a silent native
+    /// read. Stored values; GeoError(InvalidArgument) on bad geometry.
+    std::vector<double> readWindowResampled( const std::vector<int> &bands, const RasterWindow &window,
+                                             int dstWidth, int dstHeight, int overviewLevel,
+                                             OverviewPolicy policy, const std::string &resampling ) const;
 
   private:
     void *mHandle = nullptr; // GDALDatasetH, kept void* to contain gdal headers

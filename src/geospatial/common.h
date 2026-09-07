@@ -36,6 +36,18 @@ enum class ErrorCode
   Unsupported,       ///< operation not supported by driver/profile/dataset
   Cancelled,         ///< caller-requested cancellation
   IoError,           ///< filesystem/OS level failure (permissions, disk full, ...)
+
+  // 5.0 additions (ADR 0141) — remote, corruption and taxonomy semantics.
+  NotFound,          ///< resource (file/URL/selector) does not exist
+  PermissionDenied,  ///< OS/driver refused access
+  UnsupportedFormat, ///< recognizable-but-unservable format in this build
+  UnsupportedProduct,///< product family/version this layer does not understand
+  InvalidMetadata,   ///< sidecar/metadata present but unparseable
+  CorruptData,       ///< signature ok / structure broken (truncated, bad IFD...)
+  NetworkError,      ///< remote fetch failed (DNS, connect, reset, HTTP error)
+  Timeout,           ///< remote fetch/transform exceeded its declared budget
+  ResourceExhausted, ///< declared byte/cell/feature budget exceeded
+  Incompatible,      ///< source and target grids/datatypes cannot be reconciled
 };
 
 /// Error with structured code + message + optional JSON details.
@@ -76,6 +88,16 @@ class GeoError : public std::runtime_error
         case ErrorCode::Unsupported: return "unsupported";
         case ErrorCode::Cancelled: return "cancelled";
         case ErrorCode::IoError: return "io_error";
+        case ErrorCode::NotFound: return "not_found";
+        case ErrorCode::PermissionDenied: return "permission_denied";
+        case ErrorCode::UnsupportedFormat: return "unsupported_format";
+        case ErrorCode::UnsupportedProduct: return "unsupported_product";
+        case ErrorCode::InvalidMetadata: return "invalid_metadata";
+        case ErrorCode::CorruptData: return "corrupt_data";
+        case ErrorCode::NetworkError: return "network_error";
+        case ErrorCode::Timeout: return "timeout";
+        case ErrorCode::ResourceExhausted: return "resource_exhausted";
+        case ErrorCode::Incompatible: return "incompatible";
       }
       return "unknown";
     }
