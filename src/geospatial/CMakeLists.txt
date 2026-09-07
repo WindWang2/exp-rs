@@ -12,6 +12,14 @@ set(SICNU_GEOSPATIAL_SOURCES
     vector/vector_reader.cpp
     vector/vector_writer.cpp
     util/atomic_fs.cpp
+    formats/format_profiles.cpp
+    cog/cog_presets.cpp
+    cog/cog_validator.cpp
+    convert/raster_convert.cpp
+    stac/stac_mapper.cpp
+    products/product_adapters.cpp
+    doctor/data_doctor.cpp
+    multidim/multidim_view.cpp
 )
 
 qt_add_library(sicnu_geospatial STATIC ${SICNU_GEOSPATIAL_SOURCES})
