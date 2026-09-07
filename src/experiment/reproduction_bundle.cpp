@@ -390,13 +390,56 @@ ReproductionValidation ReproductionBundleExporter::validateBundle(
         }
     }
 
-    // 5. Artifacts present.
+    // 0. Integrity first: verify checksums.txt against the bundle contents
+    // before trusting any of the documents above (a tampered bundle must
+    // not be able to talk its way into a better verdict).
+    {
+        bool checksumOk = false;
+        const QJsonObject manifestJson =
+            loadBundleJson( bundleDir, QStringLiteral( "manifest.json" ), &checksumOk );
+        Q_UNUSED( manifestJson );
+        QFile checksumFile( QDir( bundleDir ).filePath( QStringLiteral( "checksums.txt" ) ) );
+        if ( !checksumFile.open( QIODevice::ReadOnly ) )
+        {
+            validation.reasons.append( QStringLiteral( "checksums.txt missing" ) );
+            validation.level = dataset::ReproductionLevel::Impossible;
+            return validation;
+        }
+        const QStringList lines = QString::fromUtf8( checksumFile.readAll() )
+                                      .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
+        for ( const QString &line : lines )
+        {
+            const int split = line.indexOf( QStringLiteral( "  " ) );
+            if ( split <= 0 )
+                continue;
+            const QString digest = line.left( split );
+            const QString name = line.mid( split + 2 );
+            QFile member( QDir( bundleDir ).filePath( name ) );
+            if ( !member.open( QIODevice::ReadOnly ) ||
+                 QString::fromUtf8(
+                     QCryptographicHash::hash( member.readAll(), QCryptographicHash::Sha256 )
+                         .toHex() ) != digest )
+            {
+                validation.reasons.append(
+                    QStringLiteral( "checksum mismatch: %1" ).arg( name ) );
+                validation.level = dataset::ReproductionLevel::Impossible;
+                return validation;
+            }
+        }
+        validation.reasons.append( QStringLiteral( "bundle checksums verified" ) );
+    }
+
+    // 5. Artifacts present — an UNWIRED artifact hook is a checked-nothing
+    // outcome and caps the verdict at BestEffort (the header contract: unwired
+    // hooks never fabricate Exact).
     bool artifactsOk = true;
+    bool artifactsChecked = false;
     {
         const auto runRecord = m_experimentStore.runById(
             runConfig.value( QStringLiteral( "run_id" ) ).toString() );
         if ( runRecord && hooks.artifactAvailable )
         {
+            artifactsChecked = true;
             for ( const ExperimentRun::Artifact &artifact : runRecord->artifacts() )
             {
                 if ( !hooks.artifactAvailable( artifact.path, artifact.sizeBytes ) )
@@ -409,10 +452,9 @@ ReproductionValidation ReproductionBundleExporter::validateBundle(
         }
     }
 
-    // 6. Environment compatibility: exact equality → Exact candidate;
-    // otherwise Compatible-with-notes. Determinism note participates: a
-    // non-strict run can never claim Exact.
-    bool environmentExact = false;
+    // 6. Environment compatibility: the honest check compares the recorded
+    // run environment against the CURRENT machine, not against itself.
+    bool environmentIdentical = false;
     {
         const auto runRecord = m_experimentStore.runById(
             runConfig.value( QStringLiteral( "run_id" ) ).toString() );
@@ -421,16 +463,20 @@ ReproductionValidation ReproductionBundleExporter::validateBundle(
             loadBundleJson( bundleDir, QStringLiteral( "environment.json" ), &envOk );
         if ( runRecord && envOk )
         {
-            environmentExact = environmentJson == runRecord->environment().toJson();
-            validation.reasons.append( environmentExact
-                                           ? QStringLiteral( "environment identical" )
-                                           : QStringLiteral( "environment differs (compatible mode)" ) );
+            environmentIdentical =
+                environmentJson == runRecord->environment().toJson() &&
+                runRecord->environment() == RunEnvironment::captureCurrent();
+            validation.reasons.append( environmentIdentical
+                                           ? QStringLiteral( "environment identical to this machine"
+                                                             " and the recording run" )
+                                           : QStringLiteral( "environment differs from this machine"
+                                                             " or the recording run" ) );
         }
     }
 
     const bool strictRun = runConfig.value( QStringLiteral( "determinism" ) ).toString() ==
                            QStringLiteral( "strict" );
-    if ( artifactsOk && environmentExact && strictRun )
+    if ( artifactsOk && artifactsChecked && environmentIdentical && strictRun && modelChecked )
         validation.level = dataset::ReproductionLevel::Exact;
     else if ( artifactsOk && modelChecked )
         validation.level = dataset::ReproductionLevel::Compatible;

@@ -59,6 +59,9 @@ struct RunExecutionIdentity
     QString splitFingerprint;
     QString modelDigest;       ///< model catalog content digest ("" = n/a)
     quint64 seed = 0;
+    /// Platform software revision — two builds with different code are NOT
+    /// the same execution even when every pin above matches.
+    QString softwareRevision;
 
     friend bool operator==( const RunExecutionIdentity &, const RunExecutionIdentity & ) = default;
 };

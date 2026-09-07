@@ -63,14 +63,23 @@ AuditSample auditFrom( const SplitInput &input, SplitRole role, int fold = -1 )
 TEST_CASE( "deterministic random is platform-stable and seed-derived",
            "[dataset][random]" )
 {
-    // Same seed → identical sequence (the actual VALUES are pinned here so a
-    // change to the PRNG is a visible, deliberate contract change).
+    // Same seed → identical sequence; the first draws are GOLDEN CONSTANTS
+    // so any change to the PRNG is a visible, deliberate contract change
+    // (self-consistency alone would not catch a generator swap). The values
+    // below were generated once from the in-tree generator; changing them on
+    // purpose is how a PRNG/derivation change gets reviewed.
     DeterministicRandom first( 42 );
     DeterministicRandom second( 42 );
-    for ( int i = 0; i < 8; ++i )
+    quint32 golden[5] = {};
+    for ( int i = 0; i < 5; ++i )
+        golden[i] = first.uniform( 100000 );
+    for ( int i = 0; i < 5; ++i )
+        CHECK( golden[i] == second.uniform( 100000 ) );
+    const quint32 expected[5] = { 23541u, 4824u, 10024u, 33894u, 11298u };
+    for ( int i = 0; i < 5; ++i )
     {
-        const quint32 draw = first.uniform( 100000 );
-        CHECK( draw == second.uniform( 100000 ) );
+        INFO( "golden draw " << i );
+        CHECK( golden[i] == expected[i] );
     }
 
     // Textual seeds hash deterministically; derivation is purpose-namespaced.
@@ -226,6 +235,140 @@ TEST_CASE( "spatial block split keeps blocks atomic", "[dataset][split]" )
     noBounds.first().validBounds = false;
     const auto refused = SplitEngine::generate( config, QStringLiteral( "v" ), noBounds );
     CHECK( !refused.has_value() );
+}
+
+TEST_CASE( "spatial_buffer split keeps accepted test picks, vetoes buffer"
+           " neighbors, and splits the remainder",
+           "[dataset][split]" )
+{
+    SplitConfig config;
+    config.method = SplitMethod::SpatialBuffer;
+    config.seed = 21;
+    config.bufferDistance = 50.0;
+    config.testRatio = 0.25;
+    config.trainRatio = 0.5625;
+    config.validationRatio = 0.1875;
+    QVector<SplitInput> inputs;
+    // Two clusters: 4 samples near x=0 (2 accepted test candidates + close
+    // neighbors) and 12 samples far away around x=1000.
+    for ( int i = 0; i < 4; ++i )
+    {
+        SplitInput input = makeInput( QStringLiteral( "near-%1" ).arg( i ) );
+        input.validBounds = true;
+        input.minX = i * 10.0;
+        input.maxX = input.minX + 2.0;
+        input.minY = 0.0;
+        input.maxY = 2.0;
+        inputs.append( input );
+    }
+    for ( int i = 0; i < 12; ++i )
+    {
+        SplitInput input = makeInput( QStringLiteral( "far-%1" ).arg( i ) );
+        input.validBounds = true;
+        input.minX = 1000.0 + i * 10.0;
+        input.maxX = input.minX + 2.0;
+        input.minY = 0.0;
+        input.maxY = 2.0;
+        inputs.append( input );
+    }
+    const auto manifest = SplitEngine::generate( config, QStringLiteral( "v" ), inputs );
+    REQUIRE( manifest.has_value() );
+    CHECK( manifest->assignments().size() == inputs.size() );
+    // Guarantee 1: accepted Test picks are mutually >= bufferDistance apart.
+    // (Near-cluster samples MAY be picked; the first accepted pick vetoes the
+    // rest of its cluster.)
+    QVector<SplitInput> byId;
+    for ( const SplitInput &input : inputs )
+    {
+        if ( manifest->assignmentOf( input.sampleId ).value_or( SplitAssignment{} ).role ==
+             SplitRole::Test )
+            byId.append( input );
+    }
+    for ( int a = 0; a < byId.size(); ++a )
+    {
+        for ( int b = a + 1; b < byId.size(); ++b )
+        {
+            const double dx = ( byId.at( a ).minX + byId.at( a ).maxX ) / 2.0 -
+                              ( byId.at( b ).minX + byId.at( b ).maxX ) / 2.0;
+            CHECK( std::abs( dx ) >= config.bufferDistance );
+        }
+    }
+    // Guarantee 2: near-cluster samples that are not Test sit in the buffer
+    // zone (Unassigned), never in Train against their near-duplicate.
+    for ( const SplitAssignment &assignment : manifest->assignments() )
+    {
+        if ( assignment.sampleId.startsWith( QLatin1String( "near-" ) ) &&
+             assignment.role != SplitRole::Test )
+            CHECK( assignment.role == SplitRole::Unassigned );
+    }
+    // Determinism replay.
+    const auto replay = SplitEngine::generate( config, QStringLiteral( "v" ), inputs );
+    REQUIRE( replay.has_value() );
+    CHECK( replay->fingerprint() == manifest->fingerprint() );
+}
+
+TEST_CASE( "leakage spatial checks catch pairs whose centers straddle a"
+           " bucket boundary",
+           "[dataset][leakage]" )
+{
+    // Regression for the single-bucket scan: centers 4.9 and 5.1 with
+    // cell size 1.0 land in adjacent buckets and must still be compared.
+    LeakageAuditConfig config;
+    config.checks = { QStringLiteral( "distance_below_threshold" ) };
+    config.distanceThreshold = 1.0;
+    AuditSample a = auditFrom( makeInput( QStringLiteral( "straddle-a" ) ), SplitRole::Train );
+    a.input.minX = 4.0;
+    a.input.maxX = 5.8;
+    a.input.minY = 0.0;
+    a.input.maxY = 2.0;
+    AuditSample b = auditFrom( makeInput( QStringLiteral( "straddle-b" ) ), SplitRole::Test );
+    b.input.minX = 4.0;
+    b.input.maxX = 5.8;
+    b.input.minY = 0.0;
+    b.input.maxY = 2.0;
+    // Shift b so its CENTER (5.3) crosses the 5.0 boundary while distance
+    // between centers stays tiny.
+    b.input.minX = 4.2;
+    b.input.maxX = 6.4;
+    const auto report = LeakageAuditor::audit(
+        QStringLiteral( "v" ), QStringLiteral( "sp" ),
+        QVector<AuditSample>{ a, b }, config );
+    REQUIRE( report.has_value() );
+    CHECK( std::any_of( report->findings().cbegin(), report->findings().cend(),
+                        []( const LeakageFinding &finding ) {
+                            return finding.kind == LeakageKind::DistanceBelowThreshold;
+                        } ) );
+}
+
+TEST_CASE( "leakage over fully-overlapping far-apart windows reports nothing"
+           " when distance check is off",
+           "[dataset][leakage]" )
+{
+    // Overlap detection no longer requires coincident centers.
+    LeakageAuditConfig config;
+    config.checks = { QStringLiteral( "overlapping_patch" ) };
+    AuditSample a = auditFrom( makeInput( QStringLiteral( "ov-a" ) ), SplitRole::Train );
+    a.input.minX = 0.0;
+    a.input.maxX = 256.0;
+    a.input.minY = 0.0;
+    a.input.maxY = 256.0;
+    a.windowWidth = 256;
+    a.windowHeight = 256;
+    AuditSample b = auditFrom( makeInput( QStringLiteral( "ov-b" ) ), SplitRole::Test );
+    b.input.minX = 128.0;
+    b.input.maxX = 384.0;
+    b.input.minY = 0.0;
+    b.input.maxY = 256.0;
+    b.windowWidth = 256;
+    b.windowHeight = 256;
+    const auto report = LeakageAuditor::audit(
+        QStringLiteral( "v" ), QStringLiteral( "sp" ),
+        QVector<AuditSample>{ a, b }, config );
+    REQUIRE( report.has_value() );
+    CHECK( std::any_of( report->findings().cbegin(), report->findings().cend(),
+                        []( const LeakageFinding &finding ) {
+                            return finding.kind == LeakageKind::OverlappingPatch;
+                        } ) );
 }
 
 TEST_CASE( "k-fold assigns disjoint folds and materialization works",
@@ -552,6 +695,24 @@ TEST_CASE( "patch generator policies produce honest provenance", "[dataset][patc
         }
     }
     CHECK( sawInvalidFraction );
+
+    // MaxNoDataFraction keeps patches whose NODATA share is within budget
+    // (validFraction >= 1 - threshold) and drops the rest.
+    PatchGeneratorConfig nodataCap = config;
+    nodataCap.noDataMode = NoDataMode::MaxNoDataFraction;
+    nodataCap.noDataThreshold = 0.5;
+    const auto capped = PatchGenerator::generate(
+        nodataCap, 100, 100, transform,
+        []( const PixelWindow &window ) {
+            return window.x >= 64 ? 0.1 : 0.9; // right column: 90% nodata
+        } );
+    REQUIRE( capped.has_value() );
+    for ( const GeneratedPatch &patch : capped.value() )
+    {
+        if ( patch.dropped || patch.window.x < 64 )
+            continue;
+        CHECK( !patch.validityFlag ); // 90% nodata > 50% budget → dropped
+    }
 
     // Random strategy replays identically under one seed.
     PatchGeneratorConfig random = config;

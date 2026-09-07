@@ -129,9 +129,9 @@ bool SimplePolygon::intersects( const SimplePolygon &other ) const
     if ( !isValid() || !other.isValid() )
         return false;
     // Conservative, cheap audit predicate: bounding boxes overlap AND some
-    // vertex of either ring is inside the other. Edge-crossing-only cases
-    // (no shared vertices) are rare in patch/ROI audits and are caught by
-    // the bounding-box test itself.
+    // vertex of either ring is inside the other. KNOWN LIMITATION: polygons
+    // whose edges cross without any vertex containment are missed - prefer
+    // window/patch samples (audited by window algebra) for edge cases.
     if ( maxX() < other.minX() || other.maxX() < minX() ||
          maxY() < other.minY() || other.maxY() < minY() )
         return false;

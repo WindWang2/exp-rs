@@ -85,8 +85,13 @@ sicnu::data::Result<AnnotationRecord> AnnotationRecord::fromJson( const QJsonObj
     annotation.m_confidence = json.value( QStringLiteral( "confidence" ) ).toDouble( -1.0 );
     const auto review = annotationReviewStatusFromString(
         json.value( QStringLiteral( "review_status" ) ).toString() );
-    if ( review )
-        annotation.m_reviewStatus = *review;
+    if ( !review )
+    {
+        return Result::failure( Diagnostic{ QStringLiteral( "dataset.annotation_invalid" ),
+                                            QStringLiteral( "annotation review_status unknown" ),
+                                            DiagnosticSeverity::Error } );
+    }
+    annotation.m_reviewStatus = *review;
     annotation.m_reason = json.value( QStringLiteral( "reason" ) ).toString();
     annotation.m_authorRole = json.value( QStringLiteral( "author_role" ) ).toString();
     annotation.m_createdAtUtc = QDateTime::fromString(

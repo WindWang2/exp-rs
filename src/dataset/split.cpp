@@ -20,6 +20,12 @@ namespace sicnu::dataset
 namespace
 {
 
+/// Internal control-flow signal for degenerate grouped/temporal walks;
+/// caught at the generate() boundary and converted to a typed diagnostic.
+struct SplitRoleDegenerate
+{
+};
+
 Diagnostic splitError( const QString &message )
 {
     return Diagnostic{ QStringLiteral( "dataset.split_invalid" ), message,
@@ -40,7 +46,7 @@ struct IdOrder
 };
 
 /// Deterministic role assignment by ratio over an already-shuffled list:
-/// counts are computed once (floor + remainder to the earlier roles) so the
+/// counts are computed once (floor; the remainder lands in Test) so the
 /// assignment depends on the LIST CONTENT AND ORDER, never on accumulation
 /// drift.
 void assignByRatio( const QVector<int> &indices, double train, double validation,
@@ -82,6 +88,31 @@ QMap<QString, QVector<int>> keyTable( const QVector<SplitInput> &inputs,
 /// budget is still open (train, then validation, then the rest). Greedy and
 /// deterministic - a group that straddles a budget boundary stays whole
 /// (atomicity beats exact ratios, which is the point of grouping).
+/// Degenerate-group guard: when a ratio is non-zero but its role ended up
+/// empty (one giant group swallows everything), the split is REFUSED instead
+/// of producing a silently unusable manifest.
+void requireNonEmptyRoles( const QVector<SplitAssignment> &assignments,
+                           const SplitConfig &config, int total )
+{
+    auto hasRole = [&]( SplitRole role ) {
+        for ( const SplitAssignment &assignment : assignments )
+        {
+            if ( assignment.role == role )
+                return true;
+        }
+        return false;
+    };
+    const int trainTarget = int( std::floor( config.trainRatio * total ) );
+    const int validationTarget = int( std::floor( config.validationRatio * total ) );
+    const int testTarget = int( std::floor( config.testRatio * total ) );
+    if ( trainTarget > 0 && !hasRole( SplitRole::Train ) )
+        throw SplitRoleDegenerate{};
+    if ( validationTarget > 0 && !hasRole( SplitRole::Validation ) )
+        throw SplitRoleDegenerate{};
+    if ( testTarget > 0 && !hasRole( SplitRole::Test ) )
+        throw SplitRoleDegenerate{};
+}
+
 QVector<SplitAssignment> walkGroupsInOrder( const QStringList &order,
                                             const QMap<QString, QVector<int>> &table,
                                             const QVector<SplitInput> &inputs,
@@ -90,23 +121,88 @@ QVector<SplitAssignment> walkGroupsInOrder( const QStringList &order,
     const int total = inputs.size();
     const int trainTarget = int( std::floor( config.trainRatio * total ) );
     const int validationTarget = trainTarget + int( std::floor( config.validationRatio * total ) );
-    QVector<SplitAssignment> out;
+
+    // Greedy walk first: each group takes the role whose budget is open.
+    struct GroupInfo
+    {
+        QString key;
+        int size = 0;
+        SplitRole role = SplitRole::Test;
+    };
+    QVector<GroupInfo> groups;
     int used = 0;
     for ( const QString &key : order )
     {
-        SplitRole role = SplitRole::Test;
+        GroupInfo info;
+        info.key = key;
+        info.size = int( table.value( key ).size() );
         if ( used < trainTarget )
-            role = SplitRole::Train;
+            info.role = SplitRole::Train;
         else if ( used < validationTarget )
-            role = SplitRole::Validation;
-        for ( const int index : table.value( key ) )
+            info.role = SplitRole::Validation;
+        groups.append( info );
+        used += info.size;
+    }
+
+    // Degenerate repair: a non-zero-ratio role that ended up EMPTY steals the
+    // LAST group of the role with the largest overshoot (deterministic, keeps
+    // every group atomic). One giant group still refuses via the caller's
+    // guard when nothing can be donated.
+    auto roleCount = [&]( SplitRole role ) {
+        int n = 0;
+        for ( const GroupInfo &info : groups )
+        {
+            if ( info.role == role )
+                n += info.size;
+        }
+        return n;
+    };
+    struct RoleSpec
+    {
+        SplitRole role;
+        int target;
+    };
+    const RoleSpec specs[3] = { { SplitRole::Test, int( std::floor( config.testRatio * total ) ) },
+                                { SplitRole::Validation,
+                                  int( std::floor( config.validationRatio * total ) ) },
+                                { SplitRole::Train, trainTarget } };
+    for ( const RoleSpec &spec : specs )
+    {
+        if ( spec.target <= 0 || roleCount( spec.role ) > 0 )
+            continue;
+        int donorIndex = -1;
+        int donorExcess = std::numeric_limits<int>::min();
+        for ( int i = groups.size() - 1; i >= 0; --i )
+        {
+            const GroupInfo &info = groups.at( i );
+            if ( info.role == spec.role )
+                continue;
+            const int target = info.role == SplitRole::Train
+                                   ? trainTarget
+                                   : ( info.role == SplitRole::Validation
+                                           ? int( std::floor( config.validationRatio * total ) )
+                                           : int( std::floor( config.testRatio * total ) ) );
+            const int excess = roleCount( info.role ) - info.size - target;
+            if ( excess >= donorExcess )
+            {
+                donorExcess = excess;
+                donorIndex = i;
+            }
+        }
+        if ( donorIndex >= 0 )
+            groups[donorIndex].role = spec.role;
+    }
+
+    QVector<SplitAssignment> out;
+    for ( const GroupInfo &info : groups )
+    {
+        for ( const int index : table.value( info.key ) )
         {
             SplitAssignment assignment;
             assignment.sampleId = inputs.at( index ).sampleId;
-            assignment.role = role;
+            assignment.role = info.role;
             out.append( assignment );
         }
-        used += int( table.value( key ).size() );
     }
     return out;
 }
@@ -139,7 +235,7 @@ QJsonObject SplitConfig::toJson() const
     json.insert( QStringLiteral( "train_ratio" ), trainRatio );
     json.insert( QStringLiteral( "validation_ratio" ), validationRatio );
     json.insert( QStringLiteral( "test_ratio" ), testRatio );
-    json.insert( QStringLiteral( "seed" ), qint64( seed ) );
+    json.insert( QStringLiteral( "seed_hex" ), QString::number( seed, 16 ) );
     if ( foldCount > 0 )
         json.insert( QStringLiteral( "fold_count" ), foldCount );
     if ( blockSizeX != 0.0 || blockSizeY != 0.0 )
@@ -168,7 +264,16 @@ sicnu::data::Result<SplitConfig> SplitConfig::fromJson( const QJsonObject &json 
     config.trainRatio = json.value( QStringLiteral( "train_ratio" ) ).toDouble( 0.7 );
     config.validationRatio = json.value( QStringLiteral( "validation_ratio" ) ).toDouble( 0.15 );
     config.testRatio = json.value( QStringLiteral( "test_ratio" ) ).toDouble( 0.15 );
-    config.seed = quint64( qMax<qint64>( 0, json.value( QStringLiteral( "seed" ) ).toInteger() ) );
+    {
+        const QString seedHex = json.value( QStringLiteral( "seed_hex" ) ).toString();
+        if ( !seedHex.isEmpty() )
+        {
+            bool ok = false;
+            config.seed = seedHex.toULongLong( &ok, 16 );
+            if ( !ok )
+                return Result::failure( splitError( QStringLiteral( "seed_hex malformed" ) ) );
+        }
+    }
     config.foldCount = json.value( QStringLiteral( "fold_count" ) ).toInt( 5 );
     config.blockSizeX = json.value( QStringLiteral( "block_size_x" ) ).toDouble();
     config.blockSizeY = json.value( QStringLiteral( "block_size_y" ) ).toDouble();
@@ -404,8 +509,18 @@ sicnu::data::Result<SplitManifest> SplitEngine::generate( const SplitConfig &con
     manifest.setDeterminism( DeterminismGrade::Strict );
     manifest.setCreatedAtUtc( QDateTime::currentDateTimeUtc() );
 
-    return SplitEngine::methodUsesFolds( config.method ) ? generateFolds( manifest, inputs )
-                                            : generatePlain( manifest, inputs );
+    try
+    {
+        return SplitEngine::methodUsesFolds( config.method )
+                   ? generateFolds( manifest, inputs )
+                   : generatePlain( manifest, inputs );
+    }
+    catch ( const SplitRoleDegenerate & )
+    {
+        return Result::failure( splitError(
+            QStringLiteral( "grouped/temporal split left a non-zero-ratio role empty"
+                            " (a single group covers all samples); split refused" ) ) );
+    }
 }
 
 sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest manifest,
@@ -456,6 +571,7 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
             QStringList groupNames = table.keys();
             random.shuffle( groupNames );
             assignments = walkGroupsInOrder( groupNames, table, inputs, config );
+            requireNonEmptyRoles( assignments, config, inputs.size() );
             break;
         }
         case SplitMethod::SpatialBlock:
@@ -491,14 +607,16 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
         case SplitMethod::SpatialBuffer:
         {
             // Greedy test selection in shuffled order with an exclusion
-            // radius around every accepted test sample; excluded neighbors
-            // stay out of TEST but still split into train/validation.
+            // radius around every accepted test sample. Three outcomes per
+            // sample: accepted → Test; within the buffer of a test pick →
+            // Unassigned (may not train against a near-duplicate test
+            // sample); everything else → Train/Validation by ratio.
             QVector<int> order( inputs.size() );
             for ( int i = 0; i < inputs.size(); ++i )
                 order[i] = i;
             random.shuffle( order );
-            QVector<int> testIndices;
-            QVector<int> excluded;
+            QSet<int> accepted;
+            QSet<int> excluded;
             const int targetTest = int( std::floor( config.testRatio * inputs.size() ) );
             for ( const int candidate : order )
             {
@@ -508,9 +626,9 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
                 const double centerX = ( input.minX + input.maxX ) / 2.0;
                 const double centerY = ( input.minY + input.maxY ) / 2.0;
                 bool tooClose = false;
-                for ( const int accepted : testIndices )
+                for ( const int testIndex : qAsConst( accepted ) )
                 {
-                    const SplitInput &test = inputs.at( accepted );
+                    const SplitInput &test = inputs.at( testIndex );
                     const double dx = centerX - ( test.minX + test.maxX ) / 2.0;
                     const double dy = centerY - ( test.minY + test.maxY ) / 2.0;
                     if ( std::sqrt( dx * dx + dy * dy ) < config.bufferDistance )
@@ -519,32 +637,42 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
                         break;
                     }
                 }
-                if ( !tooClose && testIndices.size() < targetTest )
-                    testIndices.append( candidate );
+                if ( !tooClose && accepted.size() < targetTest )
+                    accepted.insert( candidate );
                 else if ( tooClose )
-                    excluded.append( candidate );
+                    excluded.insert( candidate );
             }
+            // Remainder (accepted/excluded removed) splits Train/Validation
+            // by the train:validation share of the config ratios.
             QVector<int> remaining;
             for ( const int candidate : order )
             {
-                if ( !testIndices.contains( candidate ) )
+                if ( !accepted.contains( candidate ) )
                     remaining.append( candidate );
             }
-            // Roles: accepted → Test; buffer-zone neighbors → Unassigned
-            // (they may not train against a near-duplicate test sample);
-            // everything else splits train/validation.
-            assignByRatio( remaining, config.trainRatio + config.validationRatio, 0.0,
-                           assignments, inputs );
-            QHash<QString, SplitRole> roles;
-            for ( const int accepted : testIndices )
-                roles.insert( inputs.at( accepted ).sampleId, SplitRole::Test );
-            for ( const int excludedIndex : excluded )
-                roles.insert( inputs.at( excludedIndex ).sampleId, SplitRole::Unassigned );
-            for ( SplitAssignment &assignment : assignments )
+            const double ratioSum = config.trainRatio + config.validationRatio;
+            const double trainShare = ratioSum > 0.0 ? config.trainRatio / ratioSum : 1.0;
+            const int trainCount = int( std::floor( trainShare * remaining.size() ) );
+            int position = 0;
+            for ( const int candidate : order )
             {
-                const auto it = roles.constFind( assignment.sampleId );
-                if ( it != roles.constEnd() )
-                    assignment.role = *it;
+                SplitAssignment assignment;
+                assignment.sampleId = inputs.at( candidate ).sampleId;
+                if ( accepted.contains( candidate ) )
+                {
+                    assignment.role = SplitRole::Test;
+                }
+                else if ( excluded.contains( candidate ) )
+                {
+                    assignment.role = SplitRole::Unassigned;
+                }
+                else
+                {
+                    assignment.role =
+                        position < trainCount ? SplitRole::Train : SplitRole::Validation;
+                    ++position;
+                }
+                assignments.append( assignment );
             }
             break;
         }
@@ -569,6 +697,7 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
                            return a < b;
                        } );
             assignments = walkGroupsInOrder( groupNames, table, inputs, config );
+            requireNonEmptyRoles( assignments, config, inputs.size() );
             break;
         }
         case SplitMethod::KFold:

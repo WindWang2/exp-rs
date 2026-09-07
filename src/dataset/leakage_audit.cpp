@@ -157,6 +157,8 @@ QJsonObject LeakageReport::summary() const
     summary.insert( QStringLiteral( "finding_count" ), qint64( m_findings.size() ) );
     summary.insert( QStringLiteral( "audited_checks" ),
                     QJsonArray::fromStringList( m_auditedChecks ) );
+    if ( m_sampleCount > 0 && m_digestUnknownCount >= 0 )
+        summary.insert( QStringLiteral( "digest_unknown_count" ), m_digestUnknownCount );
     QJsonObject byKind;
     QJsonObject bySeverity;
     for ( const LeakageFinding &finding : m_findings )
@@ -243,9 +245,19 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
                                             return sample.fold >= 0;
                                         } );
 
+    const int count = samples.size();
+
     LeakageReport report;
     report.setDatasetVersionId( datasetVersionId );
     report.setSplitManifestId( splitManifestId );
+    report.setSampleCount( count );
+    int digestUnknown = 0;
+    for ( const AuditSample &sample : samples )
+    {
+        if ( sample.contentDigest.isEmpty() )
+            ++digestUnknown;
+    }
+    report.setDigestUnknownCount( digestUnknown );
 
     // The checks the evidence could support; a named-but-unrunnable check is
     // dropped from auditedChecks (the report never claims it ran).
@@ -256,21 +268,29 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
     {
         // Temporal future leakage is defined against final train/test roles;
         // fold manifests materialize per fold, so this check would need a
-        // per-fold audit — it is NOT claimed here (goal §19 honesty rule).
+        // per-fold audit. It is removed from the supported set even when
+        // explicitly configured — running it on Unassigned roles would emit
+        // findings of a kind the report does not claim.
         supported.removeAll( QStringLiteral( "temporal_future_leakage" ) );
     }
+    // The audited set is the INTERSECTION of the evidence-supported checks
+    // and the requested ones; a named-but-unsupported check is dropped from
+    // the claims (and therefore from execution) rather than run on invalid
+    // preconditions.
     QStringList audited;
     for ( const QString &name : supported )
     {
-        if ( checkEnabled( config, name, supported ) )
+        if ( config.checks.isEmpty() || config.checks.contains( name ) )
             audited.append( name );
     }
     report.setAuditedChecks( audited );
+    const auto enabled = [ &audited ]( const QString &name ) {
+        return audited.contains( name );
+    };
 
-    const int count = samples.size();
 
     // --- exact duplicates (hash map) ---------------------------------------
-    if ( checkEnabled( config, QStringLiteral( "exact_duplicate" ), supported ) )
+    if ( enabled( QStringLiteral( "exact_duplicate" ) ) )
     {
         QHash<QString, QVector<int>> byDigest;
         for ( int i = 0; i < count; ++i )
@@ -327,19 +347,19 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
         }
     };
 
-    if ( checkEnabled( config, QStringLiteral( "same_parent_polygon" ), supported ) )
+    if ( enabled( QStringLiteral( "same_parent_polygon" ) ) )
         hashKeyedCheck( LeakageKind::SameParentPolygon,
                         []( const AuditSample &s ) { return s.parentPolygonId; } );
-    if ( checkEnabled( config, QStringLiteral( "same_source_object" ), supported ) )
+    if ( enabled( QStringLiteral( "same_source_object" ) ) )
         hashKeyedCheck( LeakageKind::SameSourceObject,
                         []( const AuditSample &s ) { return s.sourceObjectId; } );
-    if ( checkEnabled( config, QStringLiteral( "same_source_scene" ), supported ) )
+    if ( enabled( QStringLiteral( "same_source_scene" ) ) )
         hashKeyedCheck( LeakageKind::SameSourceScene,
                         []( const AuditSample &s ) { return s.sceneId; } );
-    if ( checkEnabled( config, QStringLiteral( "same_event_crossing" ), supported ) )
+    if ( enabled( QStringLiteral( "same_event_crossing" ) ) )
         hashKeyedCheck( LeakageKind::SameEventCrossing,
                         []( const AuditSample &s ) { return s.eventGroup; } );
-    if ( checkEnabled( config, QStringLiteral( "same_temporal_group_crossing" ), supported ) )
+    if ( enabled( QStringLiteral( "same_temporal_group_crossing" ) ) )
         hashKeyedCheck( LeakageKind::SameTemporalGroupCrossing,
                         []( const AuditSample &s ) { return s.input.groupId; } );
 
@@ -369,15 +389,15 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
             addFinding( report, kind, sample, parent, evidence, foldBased );
         }
     };
-    if ( checkEnabled( config, QStringLiteral( "augmentation_parent_leakage" ), supported ) )
+    if ( enabled( QStringLiteral( "augmentation_parent_leakage" ) ) )
         parentLeakCheck( QStringLiteral( "augmentation_parent_leakage" ),
                          LeakageKind::AugmentationParentLeakage, false );
-    if ( checkEnabled( config, QStringLiteral( "pseudo_label_parent_leakage" ), supported ) )
+    if ( enabled( QStringLiteral( "pseudo_label_parent_leakage" ) ) )
         parentLeakCheck( QStringLiteral( "pseudo_label_parent_leakage" ),
                          LeakageKind::PseudoLabelParentLeakage, true );
 
     // --- pre/post pair leakage -------------------------------------------------
-    if ( checkEnabled( config, QStringLiteral( "pre_post_pair_leakage" ), supported ) )
+    if ( enabled( QStringLiteral( "pre_post_pair_leakage" ) ) )
     {
         QHash<QString, int> byId;
         for ( int i = 0; i < count; ++i )
@@ -401,14 +421,16 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
     }
 
     // --- temporal future leakage -------------------------------------------------
-    if ( checkEnabled( config, QStringLiteral( "temporal_future_leakage" ), supported ) )
+    if ( enabled( QStringLiteral( "temporal_future_leakage" ) ) )
     {
-        // Same group where a TRAIN sample is observed at/after a TEST sample:
-        // the model would train on the future of a test-series.
+        // Same (non-empty) group where a TRAIN sample is observed at/after
+        // a TEST sample: the model would train on the future of a
+        // test-series. Only Train-vs-Test pairs count; fold manifests are
+        // excluded upstream (the check is removed from the supported list).
         QHash<QString, QVector<int>> byGroup;
         for ( int i = 0; i < count; ++i )
         {
-            if ( samples.at( i ).input.timeMs > 0 )
+            if ( samples.at( i ).input.timeMs > 0 && !samples.at( i ).input.groupId.isEmpty() )
                 byGroup[samples.at( i ).input.groupId].append( i );
         }
         for ( auto it = byGroup.constBegin(); it != byGroup.constEnd(); ++it )
@@ -420,12 +442,15 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
                 {
                     const AuditSample &left = samples.at( indices.at( a ) );
                     const AuditSample &right = samples.at( indices.at( b ) );
-                    if ( !crossSplit( left, right, foldBased ) )
+                    // Strictly Train-vs-Test: Validation pairs carry no
+                    // future-leakage semantics.
+                    const bool leftTrain = left.role == SplitRole::Train;
+                    const bool rightTrain = right.role == SplitRole::Train;
+                    if ( !( ( leftTrain && right.role == SplitRole::Test ) ||
+                            ( rightTrain && left.role == SplitRole::Test ) ) )
                         continue;
-                    const AuditSample &trainSample =
-                        left.role == SplitRole::Train ? left : right;
-                    const AuditSample &testSample =
-                        left.role == SplitRole::Train ? right : left;
+                    const AuditSample &trainSample = leftTrain ? left : right;
+                    const AuditSample &testSample = leftTrain ? right : left;
                     if ( trainSample.input.timeMs < testSample.input.timeMs )
                         continue;
                     QJsonObject evidence;
@@ -441,41 +466,91 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
 
     // --- spatial pair checks (bucketed) --------------------------------------
     const bool overlapCheck =
-        checkEnabled( config, QStringLiteral( "overlapping_patch" ), supported );
+        enabled( QStringLiteral( "overlapping_patch" ) );
     const bool distanceCheck =
         config.distanceThreshold > 0.0 &&
-        checkEnabled( config, QStringLiteral( "distance_below_threshold" ), supported );
+        enabled( QStringLiteral( "distance_below_threshold" ) );
     const bool bufferCheck =
         config.bufferDistance > 0.0 &&
-        checkEnabled( config, QStringLiteral( "buffer_overlap" ), supported );
+        enabled( QStringLiteral( "buffer_overlap" ) );
+    double minBoundX = 0.0;
+    double maxBoundX = 0.0;
+    bool boundsSeen = false;
     if ( overlapCheck || distanceCheck || bufferCheck )
     {
-        const double cell = qMax( 1.0, qMax( config.distanceThreshold, config.bufferDistance ) );
+        for ( const AuditSample &sample : samples )
+        {
+            if ( !sample.input.validBounds )
+                continue;
+            minBoundX = boundsSeen ? qMin( minBoundX, sample.input.minX ) : sample.input.minX;
+            maxBoundX = boundsSeen ? qMax( maxBoundX, sample.input.maxX ) : sample.input.maxX;
+            boundsSeen = true;
+        }
+    }
+    if ( overlapCheck || distanceCheck || bufferCheck )
+    {
+        // 2-D grid with a 3x3 neighborhood. For distance/buffer the cell must
+        // cover the configured radius; for patch overlap the cell must cover
+        // HALF the largest window extent (two windows overlap only if their
+        // centers are within half a window of each other), otherwise large
+        // overlapping windows land in far-apart cells and are never compared.
+        double overlapCell = 1.0;
+        for ( const AuditSample &sample : samples )
+        {
+            overlapCell = qMax( overlapCell, sample.windowWidth / 2.0 );
+            overlapCell = qMax( overlapCell, sample.windowHeight / 2.0 );
+        }
+        const double cell = qMax( qMax( 1.0, qMax( config.distanceThreshold,
+                                                   config.bufferDistance ) ),
+                                  overlapCheck ? overlapCell : 1.0 );
+        const qint64 xSpan = qMax<qint64>(
+            1, qint64( std::ceil( ( maxBoundX - minBoundX ) / cell ) ) + 1 );
         QHash<qint64, QVector<int>> buckets;
         for ( int i = 0; i < count; ++i )
         {
             const AuditSample &sample = samples.at( i );
             if ( sample.input.validBounds )
-                buckets[bucketOf( ( sample.input.minX + sample.input.maxX ) / 2.0, cell )]
-                    .append( i );
+            {
+                const qint64 cx = bucketOf( ( sample.input.minX + sample.input.maxX ) / 2.0, cell );
+                const qint64 cy = bucketOf( ( sample.input.minY + sample.input.maxY ) / 2.0, cell );
+                buckets[cy * xSpan + cx].append( i );
+            }
         }
         for ( auto it = buckets.constBegin(); it != buckets.constEnd(); ++it )
         {
-            const QVector<int> &bucketIndices = it.value();
+            const qint64 cellKey = it.key();
+            const qint64 cx = cellKey % xSpan;
+            const qint64 cy = cellKey / xSpan;
+            QVector<int> bucketIndices = it.value();
+            // Self-cell + right/lower neighbors (each unordered pair once).
+            for ( qint64 dy = 0; dy <= 1; ++dy )
+            {
+                for ( qint64 dx = ( dy == 0 ? 0 : -1 ); dx <= 1; ++dx )
+                {
+                    if ( dx == 0 && dy == 0 )
+                        continue;
+                    const auto neighbor = buckets.constFind( ( cy + dy ) * xSpan + ( cx + dx ) );
+                    if ( neighbor != buckets.constEnd() )
+                        bucketIndices += neighbor.value();
+                }
+            }
             for ( int a = 0; a < bucketIndices.size(); ++a )
             {
                 for ( int b = a + 1; b < bucketIndices.size(); ++b )
                 {
                     const AuditSample &left = samples.at( bucketIndices.at( a ) );
                     const AuditSample &right = samples.at( bucketIndices.at( b ) );
+                    if ( left.input.sampleId == right.input.sampleId )
+                        continue; // neighbor scan can repeat the self cell
                     if ( config.crossSplitOnly && !crossSplit( left, right, foldBased ) )
                         continue;
-                    const double distance = qMax(
-                        0.0,
-                        qMax( qMax( left.input.minX - right.input.maxX,
-                                    right.input.minX - left.input.maxX ),
-                              qMax( left.input.minY - right.input.maxY,
-                                    right.input.minY - left.input.maxY ) ) );
+                    const double distance = std::sqrt(
+                        std::pow( ( left.input.minX + left.input.maxX ) / 2.0 -
+                                      ( right.input.minX + right.input.maxX ) / 2.0,
+                                  2 ) +
+                        std::pow( ( left.input.minY + left.input.maxY ) / 2.0 -
+                                      ( right.input.minY + right.input.maxY ) / 2.0,
+                                  2 ) );
                     if ( distanceCheck && distance < config.distanceThreshold )
                     {
                         QJsonObject evidence;
@@ -491,8 +566,7 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
                         addFinding( report, LeakageKind::BufferOverlap, left, right, evidence,
                                     foldBased );
                     }
-                    if ( overlapCheck && distance <= 0.0 && left.windowWidth > 0.0 &&
-                         left.windowHeight > 0.0 )
+                    if ( overlapCheck && left.windowWidth > 0.0 && left.windowHeight > 0.0 )
                     {
                         // Overlap fraction on the ground bounds relative to
                         // the smaller footprint area.

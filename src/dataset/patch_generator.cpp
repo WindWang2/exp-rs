@@ -193,10 +193,13 @@ bool applyNoData( const PatchGeneratorConfig &config,
         }
         case NoDataMode::MaxNoDataFraction:
         {
+            // Contract: drop when the NODATA fraction exceeds the threshold.
+            // validFraction is the VALID share, so the nodata share is
+            // 1 - validFraction.
             if ( !reader )
                 return true;
             patch.validFraction = reader( patch.window );
-            patch.validityFlag = patch.validFraction <= config.noDataThreshold;
+            patch.validityFlag = ( 1.0 - patch.validFraction ) <= config.noDataThreshold;
             return patch.validityFlag;
         }
     }

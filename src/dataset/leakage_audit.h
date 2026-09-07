@@ -56,7 +56,8 @@ struct LeakageAuditConfig
     /// Check names (dataset_types LeakageKind strings). Empty = all checks
     /// applicable to the provided evidence.
     QStringList checks;
-    /// Center distance under this (CRS units) is a finding (0 = check off).
+    /// Euclidean CENTER distance under this (CRS units) is a finding
+    /// (0 = check off). Same metric as the spatial_buffer split engine.
     double distanceThreshold = 0.0;
     /// Window-overlap fraction at or above this is a finding (0 = any
     /// positive overlap counts; patches of a grid naturally overlap only if
@@ -102,6 +103,14 @@ class LeakageReport
     const QStringList &auditedChecks() const { return m_auditedChecks; }
     void setAuditedChecks( const QStringList &checks ) { m_auditedChecks = checks; }
 
+    /// Sample count and how many carried NO content digest - "exact_duplicate
+    /// clean" over samples with unknown digests is weaker evidence, so the
+    /// gap is quantified instead of hidden.
+    void setSampleCount( qint64 count ) { m_sampleCount = count; }
+    void setDigestUnknownCount( int count ) { m_digestUnknownCount = count; }
+    qint64 sampleCount() const { return m_sampleCount; }
+    int digestUnknownCount() const { return m_digestUnknownCount; }
+
     bool isClean() const { return m_findings.isEmpty(); }
 
     /// Counts by kind and severity + audited checks; embedded into split
@@ -116,6 +125,8 @@ class LeakageReport
     QString m_splitManifestId;
     QStringList m_auditedChecks;
     QVector<LeakageFinding> m_findings;
+    qint64 m_sampleCount = 0;
+    int m_digestUnknownCount = -1; // -1 = not computed
 };
 
 class LeakageAuditor

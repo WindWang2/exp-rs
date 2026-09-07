@@ -406,15 +406,58 @@ Result<double> boundaryFScore( const QVector<qint64> &truthBoundary,
         return false;
     };
 
-    qint64 matched = 0;
+    qint64 truthMatched = 0;
     for ( const qint64 index : truthBoundary )
     {
         if ( nearMatch( index ) )
-            ++matched;
+            ++truthMatched;
     }
-    const double precision = safeDivide( double( matched ),
+    // Precision needs the REVERSE direction: how many PREDICTED boundary
+    // pixels lie near some truth pixel. Counting truth matches only would
+    // reward spraying predictions.
+    const qint64 predictedCellSize = qMax<qint64>( 1, radius );
+    QHash<qint64, QVector<qint64>> truthCells;
+    for ( const qint64 index : truthBoundary )
+    {
+        const qint64 x = index % imageWidth;
+        const qint64 y = index / imageWidth;
+        truthCells[( y / predictedCellSize ) * 1000003 + ( x / predictedCellSize )]
+            .append( index );
+    }
+    auto nearTruth = [&]( qint64 index ) {
+        const qint64 x = index % imageWidth;
+        const qint64 y = index / imageWidth;
+        const qint64 cx = x / cellSize;
+        const qint64 cy = y / cellSize;
+        const double tolerance2 = tolerancePx * tolerancePx;
+        for ( qint64 dy = -1; dy <= 1; ++dy )
+        {
+            for ( qint64 dx = -1; dx <= 1; ++dx )
+            {
+                const auto it = truthCells.constFind( ( cy + dy ) * 1000003 + ( cx + dx ) );
+                if ( it == truthCells.constEnd() )
+                    continue;
+                for ( const qint64 candidate : it.value() )
+                {
+                    const double px = double( candidate % imageWidth );
+                    const double py = double( candidate / imageWidth );
+                    const double dist2 = ( px - x ) * ( px - x ) + ( py - y ) * ( py - y );
+                    if ( dist2 <= tolerance2 )
+                        return true;
+                }
+            }
+        }
+        return false;
+    };
+    qint64 predictedMatched = 0;
+    for ( const qint64 index : predictedBoundary )
+    {
+        if ( nearTruth( index ) )
+            ++predictedMatched;
+    }
+    const double precision = safeDivide( double( predictedMatched ),
                                          double( predictedBoundary.size() ) );
-    const double recall = safeDivide( double( matched ), double( truthBoundary.size() ) );
+    const double recall = safeDivide( double( truthMatched ), double( truthBoundary.size() ) );
     return ResultT::success( precision + recall > 0.0
                                  ? 2.0 * precision * recall / ( precision + recall )
                                  : 0.0 );
@@ -443,13 +486,29 @@ double averagePrecision( const QVector<DetectionBox> &sortedDetections,
     qint64 truePositives = 0;
     double precisionSum = 0.0;
     int rank = 0;
-    for ( const DetectionBox &box : sortedDetections )
+    int index = 0;
+    const int total = sortedDetections.size();
+    while ( index < total )
     {
-        ++rank;
-        if ( box.isTruePositive )
+        // Confidence ties share ONE operating point: the whole tie block is
+        // evaluated at its LAST rank, so an arbitrary input order inside the
+        // block cannot swing the score.
+        const double confidence = sortedDetections.at( index ).confidence;
+        const int blockStart = index;
+        qint64 blockTruePositives = 0;
+        while ( index < total && sortedDetections.at( index ).confidence == confidence )
         {
-            ++truePositives;
-            precisionSum += double( truePositives ) / double( rank );
+            if ( sortedDetections.at( index ).isTruePositive )
+                ++blockTruePositives;
+            ++index;
+        }
+        rank += index - blockStart;
+        truePositives += blockTruePositives;
+        if ( blockTruePositives > 0 )
+        {
+            const double blockPrecision =
+                double( truePositives ) / double( rank );
+            precisionSum += blockPrecision * double( blockTruePositives );
         }
     }
     return double( precisionSum ) / double( groundTruthCount );

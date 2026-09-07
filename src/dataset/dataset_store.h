@@ -17,7 +17,7 @@
 // Version lifecycle (ADR 0134): `createDraftVersion` → (mutate draft) →
 // `stageVersion` (validate + write canonical manifest, still Draft) →
 // `commitVersion` (one atomic transaction: status → Committed + fingerprint
-// stamp). A crash can only ever leave a Draft; `recoverStaleStaging()`
+// stamp). A crash can only ever leave a Draft; `staleStagedDrafts()`
 // reports drafts left staged-but-uncommitted by an interrupted process.
 #pragma once
 

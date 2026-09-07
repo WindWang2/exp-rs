@@ -41,6 +41,8 @@ const char *const kSecretValuePatterns[] = {
     "\\bghp_[A-Za-z0-9]{36}\\b",   // GitHub personal access token
     "\\bxox[baprs]-",              // Slack tokens
     "\\bsk-[A-Za-z0-9]{20,}\\b",   // sk- style API keys
+    "\\beyJ[A-Za-z0-9_-]{10,}\\.", // JWT header segment
+    "\\bgithub_pat_[A-Za-z0-9_]{20,}\\b",
 };
 
 bool nameLooksSecret( const QString &name )
@@ -122,7 +124,8 @@ QString runExecutionFingerprint( const RunExecutionIdentity &identity )
     json.insert( QStringLiteral( "split_manifest_id" ), identity.splitManifestId );
     json.insert( QStringLiteral( "split_fingerprint" ), identity.splitFingerprint );
     json.insert( QStringLiteral( "model_digest" ), identity.modelDigest );
-    json.insert( QStringLiteral( "seed" ), qint64( identity.seed ) );
+    json.insert( QStringLiteral( "seed_hex" ), QString::number( identity.seed, 16 ) );
+    json.insert( QStringLiteral( "software_revision" ), identity.softwareRevision );
     return hashCanonical( json );
 }
 
@@ -299,6 +302,7 @@ RunExecutionIdentity ExperimentRun::executionIdentity() const
     identity.splitFingerprint = m_splitFingerprint;
     identity.modelDigest = m_modelDigest;
     identity.seed = m_seed;
+    identity.softwareRevision = m_softwareRevision;
     return identity;
 }
 
@@ -328,7 +332,7 @@ QJsonObject ExperimentRun::toJson() const
         json.insert( QStringLiteral( "model_id" ), m_modelId );
     if ( !m_modelDigest.isEmpty() )
         json.insert( QStringLiteral( "model_digest" ), m_modelDigest );
-    json.insert( QStringLiteral( "seed" ), qint64( m_seed ) );
+    json.insert( QStringLiteral( "seed_hex" ), QString::number( m_seed, 16 ) );
     json.insert( QStringLiteral( "determinism" ),
                  dataset::determinismGradeToString( m_determinism ) );
     if ( !m_determinismNote.isEmpty() )
@@ -399,7 +403,22 @@ Result<ExperimentRun> ExperimentRun::fromJson( const QJsonObject &json )
     run.m_splitFingerprint = json.value( QStringLiteral( "split_fingerprint" ) ).toString();
     run.m_modelId = json.value( QStringLiteral( "model_id" ) ).toString();
     run.m_modelDigest = json.value( QStringLiteral( "model_digest" ) ).toString();
-    run.m_seed = quint64( qMax<qint64>( 0, json.value( QStringLiteral( "seed" ) ).toInteger() ) );
+    {
+        const QString seedHex = json.value( QStringLiteral( "seed_hex" ) ).toString();
+        if ( seedHex.isEmpty() )
+            run.m_seed = 0;
+        else
+        {
+            bool ok = false;
+            run.m_seed = seedHex.toULongLong( &ok, 16 );
+            if ( !ok )
+            {
+                return ResultT::failure( Diagnostic{ QStringLiteral( "experiment.invalid" ),
+                                                     QStringLiteral( "seed_hex malformed" ),
+                                                     DiagnosticSeverity::Error } );
+            }
+        }
+    }
     const auto determinism = dataset::determinismGradeFromString(
         json.value( QStringLiteral( "determinism" ) ).toString() );
     if ( !determinism )

@@ -28,7 +28,8 @@ QJsonObject encodeSourceAsset( const SourceAssetRef &ref )
     if ( !ref.role.isEmpty() )
         json.insert( QStringLiteral( "role" ), ref.role );
     if ( !ref.bandReferences.isEmpty() )
-        json.insert( QStringLiteral( "bands" ), ref.bandReferences.join( QLatin1Char( ',' ) ) );
+        json.insert( QStringLiteral( "bands" ),
+                     QJsonArray::fromStringList( ref.bandReferences ) );
     return json;
 }
 
@@ -43,9 +44,8 @@ std::optional<SourceAssetRef> decodeSourceAsset( const QJsonObject &json, QStrin
     }
     ref.revision = quint64( qMax<qint64>( 0, json.value( QStringLiteral( "revision" ) ).toInteger() ) );
     ref.role = json.value( QStringLiteral( "role" ) ).toString();
-    const QString bands = json.value( QStringLiteral( "bands" ) ).toString();
-    if ( !bands.isEmpty() )
-        ref.bandReferences = bands.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+    ref.bandReferences =
+        json.value( QStringLiteral( "bands" ) ).toVariant().toStringList();
     return ref;
 }
 
@@ -115,7 +115,8 @@ QJsonObject DatasetManifest::toJson() const
     if ( !m_schema.crs.isEmpty() )
         schema.insert( QStringLiteral( "crs" ), m_schema.crs );
     if ( !m_schema.bandRoles.isEmpty() )
-        schema.insert( QStringLiteral( "band_roles" ), m_schema.bandRoles.join( QLatin1Char( ',' ) ) );
+        schema.insert( QStringLiteral( "band_roles" ),
+                       QJsonArray::fromStringList( m_schema.bandRoles ) );
     if ( m_schema.resolutionX != 0.0 || m_schema.resolutionY != 0.0 )
     {
         QJsonObject resolution;
@@ -253,9 +254,8 @@ sicnu::data::Result<DatasetManifest> DatasetManifest::fromJson( const QJsonObjec
     manifest.m_schema.modality = schema.value( QStringLiteral( "modality" ) ).toString();
     manifest.m_schema.sensor = schema.value( QStringLiteral( "sensor" ) ).toString();
     manifest.m_schema.crs = schema.value( QStringLiteral( "crs" ) ).toString();
-    const QString bandRoles = schema.value( QStringLiteral( "band_roles" ) ).toString();
-    if ( !bandRoles.isEmpty() )
-        manifest.m_schema.bandRoles = bandRoles.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+    manifest.m_schema.bandRoles =
+        schema.value( QStringLiteral( "band_roles" ) ).toVariant().toStringList();
     const QJsonObject resolution = schema.value( QStringLiteral( "resolution" ) ).toObject();
     manifest.m_schema.resolutionX = resolution.value( QStringLiteral( "x" ) ).toDouble();
     manifest.m_schema.resolutionY = resolution.value( QStringLiteral( "y" ) ).toDouble();

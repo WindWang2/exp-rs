@@ -369,6 +369,17 @@ sicnu::data::Result<void> DatasetStore::deleteDataset( const DatasetId &datasetI
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_read_only" ),
                                            QStringLiteral( "store is read-only" ) ) );
 
+    {
+        Stmt exists( m_impl->db, QStringLiteral( "SELECT 1 FROM datasets WHERE id=?" ) );
+        if ( !exists )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               exists.error( m_impl->db ) ) );
+        exists.bind( 1, datasetId.toString() );
+        if ( !exists.stepRow() )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
+                                               QStringLiteral( "dataset %1 does not exist" )
+                                                   .arg( datasetId.toString() ) ) );
+    }
     // A dataset with non-draft versions is never row-deleted: references from
     // runs/lineage outlive the caller's intention. Deprecate instead.
     {
@@ -389,28 +400,34 @@ sicnu::data::Result<void> DatasetStore::deleteDataset( const DatasetId &datasetI
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
                                            QStringLiteral( "cannot begin transaction" ) ) );
     {
+        // Draft rows of this dataset may carry samples and annotations; a
+        // header-only delete would strand them forever (no FKs by design).
+        Stmt samples( m_impl->db, QStringLiteral(
+            "DELETE FROM samples WHERE dataset_version_id IN"
+            " (SELECT id FROM dataset_versions WHERE dataset_id=?)" ) );
+        Stmt annotations( m_impl->db, QStringLiteral(
+            "DELETE FROM annotations WHERE dataset_version_id IN"
+            " (SELECT id FROM dataset_versions WHERE dataset_id=?)" ) );
         Stmt versions( m_impl->db, QStringLiteral(
             "DELETE FROM dataset_versions WHERE dataset_id=?" ) );
         Stmt header( m_impl->db, QStringLiteral( "DELETE FROM datasets WHERE id=?" ) );
-        if ( !versions || !header )
+        if ( !samples || !annotations || !versions || !header )
         {
             m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                               versions ? header.error( m_impl->db )
-                                                        : versions.error( m_impl->db ) ) );
+                                               QStringLiteral( "statement prepare failed" ) ) );
         }
+        samples.bind( 1, datasetId.toString() );
+        annotations.bind( 1, datasetId.toString() );
         versions.bind( 1, datasetId.toString() );
         header.bind( 1, datasetId.toString() );
-        if ( !versions.step() || !header.step() )
+        if ( !samples.step() || !annotations.step() || !versions.step() || !header.step() )
         {
             m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
                                                header.error( m_impl->db ) ) );
         }
     }
-    if ( !m_impl->commit( nullptr ) )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                           QStringLiteral( "commit failed" ) ) );
     return Result::success();
 }
 
@@ -584,15 +601,43 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::commitVersion(
     if ( current->status() != DatasetVersionStatus::Draft )
         return Result::failure( storeDiag( QStringLiteral( "dataset.not_draft" ),
                                            QStringLiteral( "only draft versions can be committed" ) ) );
+    // Commit REQUIRES a staged draft: staging is where the manifest is
+    // validated under exactly the reader contract consumers use. Committing
+    // an unstaged (never-validated) document would freeze unreadable content
+    // into an immutable version - a fake success.
+    {
+        Stmt stagedCheck( m_impl->db, QStringLiteral(
+            "SELECT 1 FROM dataset_versions WHERE id=? AND staged=1 AND status='draft'" ) );
+        if ( !stagedCheck )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               stagedCheck.error( m_impl->db ) ) );
+        stagedCheck.bind( 1, current->versionId() );
+        if ( !stagedCheck.stepRow() )
+            return Result::failure( storeDiag(
+                QStringLiteral( "dataset.not_staged" ),
+                QStringLiteral( "version %1 must be staged (validated) before commit" )
+                    .arg( current->versionId() ) ) );
+    }
 
+    // Second gate, defense-in-depth: the staged document must still parse
+    // under the strict reader (a foreign writer could have touched the row).
     const QJsonObject stagedManifest = textToJson( current->manifestJson() );
     if ( stagedManifest.isEmpty() )
         return Result::failure( storeDiag( QStringLiteral( "dataset.manifest_invalid" ),
                                            QStringLiteral( "draft manifest is not staged JSON" ) ) );
+    const auto validated = DatasetManifest::fromJson( stagedManifest );
+    if ( !validated )
+        return Result::failure( validated.diagnostics() );
 
-    // The fingerprint covers the manifest WITHOUT the fingerprint field.
-    const QString fingerprint = makeDatasetFingerprint( stagedManifest ).toHex();
-    QJsonObject committedJson = stagedManifest;
+    // Fingerprint covers the CANONICAL re-serialization of the validated
+    // manifest (without the fingerprint field): the committed document is
+    // byte-identical to what was validated.
+    DatasetManifest canonical = validated.value();
+    canonical.setFingerprint( QString() );
+    const QJsonObject canonicalJson = canonical.toJson();
+    const QString canonicalText = jsonToText( canonicalJson );
+    const QString fingerprint = makeDatasetFingerprint( canonicalJson ).toHex();
+    QJsonObject committedJson = canonicalJson;
     committedJson.insert( QStringLiteral( "fingerprint" ), fingerprint );
     const QString committedText = jsonToText( committedJson );
 

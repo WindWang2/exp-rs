@@ -229,13 +229,27 @@ QVector<LabelQualityFinding> labelQualityAudit( const QVector<LabelQaItem> &item
                                  .arg( area )
                                  .arg( config.tinyPolygonArea ) );
                     }
-                    if ( config.hasRasterExtent &&
-                         ( shape.maxX() < config.rasterMinX || shape.minX() > config.rasterMaxX ||
-                           shape.maxY() < config.rasterMinY || shape.minY() > config.rasterMaxY ) )
+                    if ( config.hasRasterExtent )
                     {
-                        add( DiagnosticSeverity::Error, QStringLiteral( "label.outside_raster" ),
-                             item.sampleId, annotationId,
-                             QStringLiteral( "geometry outside the raster extent" ) );
+                        const bool fullyOutside =
+                            shape.maxX() < config.rasterMinX || shape.minX() > config.rasterMaxX ||
+                            shape.maxY() < config.rasterMinY || shape.minY() > config.rasterMaxY;
+                        const bool fullyInside =
+                            shape.minX() >= config.rasterMinX &&
+                            shape.maxX() <= config.rasterMaxX &&
+                            shape.minY() >= config.rasterMinY &&
+                            shape.maxY() <= config.rasterMaxY;
+                        if ( fullyOutside || !fullyInside )
+                        {
+                            // Both fully-outside and PARTIALLY-outside label
+                            // geometry are QA failures (the common real-world
+                            // case is a polygon hanging over the edge).
+                            add( DiagnosticSeverity::Error,
+                                 QStringLiteral( "label.outside_raster" ), item.sampleId,
+                                 annotationId,
+                                 fullyOutside ? QStringLiteral( "geometry outside the raster extent" )
+                                              : QStringLiteral( "geometry extends beyond the raster extent" ) );
+                        }
                     }
                     // Duplicate detection: same class + geometry signature.
                     const QString signature = classCode + QLatin1Char( '|' ) + wkt;
