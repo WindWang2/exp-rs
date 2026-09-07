@@ -629,8 +629,14 @@ PreflightOutcome runScientificPreflight( const std::string &intent,
     bandRatioRules( inputs, outcome, "NDSI", { { "Green", BandRequirement::Green },
                                                { "SWIR", BandRequirement::Swir } } );
   else if ( intent == "nbr" || intent == "dnbr" )
+  {
     bandRatioRules( inputs, outcome, intent, { { "NIR", BandRequirement::Nir },
                                                { "SWIR", BandRequirement::Swir } } );
+    if ( intent == "dnbr" && inputs.size() < 2 )
+      addBlocker( outcome, error_codes::kInvalidParameter,
+                  "dNBR needs pre- and post-fire epochs; got one", "harness.plan",
+                  Json::Value() );
+  }
   else if ( intent == "ndbi" )
     bandRatioRules( inputs, outcome, "NDBI", { { "SWIR", BandRequirement::Swir },
                                                { "NIR", BandRequirement::Nir } } );

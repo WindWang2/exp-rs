@@ -17,6 +17,7 @@
 #include "agent/cartography/style_compiler.h"
 #include "agent/cartography/style_spec.h"
 #include "agent/harness/agent_plan.h"
+#include "agent/harness/scientific_preflight.h"
 #include "agent/harness/recipe_catalog.h"
 #include "agent/mapspec/mapspec.h"
 #include "agent/mapspec/mapspec_conditions.h"
@@ -853,4 +854,118 @@ TEST_CASE( "Multi-page report templates compile with page roles and conditional 
   REQUIRE( layout != nullptr );
   CHECK( layout->pageCollection()->pageCount() == 3 );
   QgsProject::instance()->layoutManager()->clear();
+}
+
+// ---------------------------------------------------------------------------
+// Milestone L2: deterministic eval tasks — preflight pack routing across the
+// new recipe families, no model calls, no I/O (understanding docs inlined).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+sicnu::agent::harness::PreflightInput evalInput( const std::string &name, const char *modality,
+                                                 const Json::Value &bands, const char *radiometry )
+{
+  Json::Value understanding( Json::objectValue );
+  understanding["path"] = "/eval/" + name + ".tif";
+  understanding["modality"] = modality;
+  understanding["radiometric_state"] = radiometry;
+  understanding["bands"] = bands;
+  understanding["crs"] = "EPSG:32650";
+  sicnu::agent::harness::PreflightInput input;
+  input.name = name;
+  input.reference = "/eval/" + name + ".tif";
+  input.understanding = understanding;
+  return input;
+}
+
+Json::Value band( const char *role, double wavelengthNm )
+{
+  Json::Value b( Json::objectValue );
+  b["role"] = role;
+  b["wavelength"] = wavelengthNm;
+  return b;
+}
+
+bool hasIssueCode( const sicnu::agent::harness::PreflightOutcome &outcome, const char *needle )
+{
+  for ( const auto &issue : outcome.issues )
+    if ( issue["message"].asString().find( needle ) != std::string::npos )
+      return true;
+  return false;
+}
+
+} // namespace
+
+TEST_CASE( "Eval: preflight packs route the Platform 5.0 intents deterministically",
+           "[platform5][eval][preflight]" )
+{
+  using sicnu::agent::harness::PreflightInput;
+  using sicnu::agent::harness::runScientificPreflight;
+
+  const Json::Value opticalBands = [] {
+    Json::Value arr = Json::Value( Json::arrayValue );
+    arr.append( band( "blue", 490 ) );
+    arr.append( band( "green", 560 ) );
+    arr.append( band( "red", 665 ) );
+    arr.append( band( "nir", 842 ) );
+    arr.append( band( "swir", 1610 ) );
+    return arr;
+  }();
+
+  // 1. ndwi on a full optical stack: ok.
+  const auto ok1 = runScientificPreflight(
+    "ndwi", { evalInput( "primary", "optical", opticalBands, "surface_reflectance" ) } );
+  CHECK( ok1.verdict == "ok" );
+
+  // 2. ndwi missing SWIR is fine (needs green+nir), but NDBI without SWIR blocks.
+  const Json::Value noSwir = [] {
+    Json::Value arr = Json::Value( Json::arrayValue );
+    arr.append( band( "green", 560 ) );
+    arr.append( band( "nir", 842 ) );
+    return arr;
+  }();
+  const auto blocked = runScientificPreflight(
+    "ndbi", { evalInput( "primary", "optical", noSwir, "surface_reflectance" ) } );
+  CHECK( blocked.verdict == "blocked" );
+  CHECK( hasIssueCode( blocked, "SWIR" ) );
+
+  // 3. dnbr is a pair intent: single input blocks; two NIR+SWIR stacks pass.
+  const auto oneEpoch = runScientificPreflight(
+    "dnbr", { evalInput( "pre", "optical", opticalBands, "surface_reflectance" ) } );
+  CHECK( oneEpoch.verdict == "blocked" );
+  const auto twoEpochs = runScientificPreflight(
+    "dnbr", { evalInput( "pre", "optical", opticalBands, "surface_reflectance" ),
+              evalInput( "post", "optical", opticalBands, "surface_reflectance" ) } );
+  CHECK( twoEpochs.verdict == "ok" );
+
+  // 4. Raw DN warns (non-blocking): the verdict stays ok with a warning.
+  const auto rawDn = runScientificPreflight(
+    "ndsi", { evalInput( "primary", "optical", opticalBands, "dn" ) } );
+  CHECK( rawDn.verdict == "ok" );
+  CHECK( hasIssueCode( rawDn, "raw DN" ) );
+
+  // 5. SAR single-input pack: optical data on a sar intent blocks.
+  const auto notSar = runScientificPreflight(
+    "sar_water", { evalInput( "primary", "optical", opticalBands, "sigma0" ) } );
+  CHECK( notSar.verdict == "blocked" );
+
+  // 6. terrain: geographic CRS warns, projected passes.
+  Json::Value dem = evalInput( "primary", "terrain", opticalBands, "" ).understanding;
+  dem["crs"] = "EPSG:4326";
+  PreflightInput demInput;
+  demInput.name = "primary";
+  demInput.reference = "/eval/dem.tif";
+  demInput.understanding = dem;
+  const auto geographic = runScientificPreflight( "terrain", { demInput } );
+  CHECK( geographic.verdict == "ok" ); // warning, not a blocker
+  CHECK( hasIssueCode( geographic, "projected CRS" ) );
+
+  // 7. accuracy with a single input blocks (needs map + reference).
+  const auto accuracyOne = runScientificPreflight(
+    "accuracy", { evalInput( "primary", "model", opticalBands, "" ) } );
+  CHECK( accuracyOne.verdict == "blocked" );
+
+  // 8. Unknown context intent string is not in the closed vocabulary.
+  CHECK_FALSE( isKnownIntent( "warp" ) );
 }
