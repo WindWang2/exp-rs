@@ -266,7 +266,7 @@ ArtifactVerification verifyArtifact( const std::string &path,
           Json::Value fractions;
           fractions["finite_fraction"] = finiteFraction;
           fractions["nodata_fraction"] = noDataFraction;
-          fractions["sampled"] = total;
+          fractions["sampled"] = static_cast<Json::Int64>( total );
           addCheck( result.checks, "finite_fraction",
                     finiteFraction >= expectations.minFiniteFraction,
                     error_codes::kOutputInvalid, "info", fractions );

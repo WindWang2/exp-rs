@@ -100,7 +100,7 @@ class StyleRegistry
   private:
     StyleRegistry() = default;
     void ensureLoadedLocked() const;
-    void loadEmbeddedDefaults();
+    void loadEmbeddedDefaults() const;
 
     mutable QMutex mMutex;
     mutable bool mLoaded = false;

@@ -66,11 +66,15 @@ std::string lowered( std::string text )
 
 /// Band-role extraction with the wavelength fallback: a band without an
 /// explicit role is *not* guessed from position — but a declared wavelength
-/// in the NIR/RED window is a documented physical fact, not a guess.
+/// in a documented window is a physical fact, not a guess.
 struct BandFacts {
   std::vector<std::string> roles;
   bool hasNir = false;
   bool hasRed = false;
+  bool hasGreen = false;
+  bool hasBlue = false;
+  bool hasSwir = false;    ///< any SWIR window (1550-1750 or 2080-2350 nm)
+  bool hasRedEdge = false; ///< 700-740 nm red-edge window
   bool nirByWavelength = false;
   bool redByWavelength = false;
   int bandCount = 0;
@@ -80,6 +84,18 @@ BandFacts bandFacts( const Json::Value &understanding )
 {
   BandFacts facts;
   facts.bandCount = understanding.get( "band_count", 0 ).asInt();
+  auto window = []( const Json::Value &band, double &wavelengthNm ) {
+    if ( band.isMember( "wavelength" ) && band["wavelength"].isNumeric() )
+    {
+      wavelengthNm = band["wavelength"].asDouble();
+      const std::string units = lowered( band.get( "wavelengthUnits", "nm" ).asString() );
+      if ( units == "µm" || units == "um" )
+        wavelengthNm *= 1000.0;
+    }
+  };
+  auto inWindow = []( double wavelengthNm, double low, double high ) {
+    return wavelengthNm >= low && wavelengthNm <= high;
+  };
   if ( understanding.isMember( "bands" ) && understanding["bands"].isArray() )
   {
     for ( const auto &band : understanding["bands"] )
@@ -88,18 +104,11 @@ BandFacts bandFacts( const Json::Value &understanding )
       const std::string role = lowered( band.get( "role", "" ).asString() );
       if ( !role.empty() )
         facts.roles.push_back( role );
+      double wavelengthNm = -1;
+      window( band, wavelengthNm );
       const bool isNirRole = role == "nir";
       const bool isRedRole = role == "red";
-      double wavelengthNm = -1;
-      if ( band.isMember( "wavelength" ) && band["wavelength"].isNumeric() )
-      {
-        wavelengthNm = band["wavelength"].asDouble();
-        const std::string units = lowered( band.get( "wavelengthUnits", "nm" ).asString() );
-        if ( units == "µm" || units == "um" )
-          wavelengthNm *= 1000.0;
-      }
-      if ( isNirRole ||
-           ( wavelengthNm >= 700.0 && wavelengthNm <= 1100.0 ) )
+      if ( isNirRole || inWindow( wavelengthNm, 750.0, 1100.0 ) )
       {
         facts.hasNir = true;
         facts.nirByWavelength = isNirRole ? facts.nirByWavelength : true;
@@ -109,6 +118,15 @@ BandFacts bandFacts( const Json::Value &understanding )
         facts.hasRed = true;
         facts.redByWavelength = isRedRole ? facts.redByWavelength : true;
       }
+      if ( role == "green" || inWindow( wavelengthNm, 500.0, 600.0 ) )
+        facts.hasGreen = true;
+      if ( role == "blue" || inWindow( wavelengthNm, 430.0, 520.0 ) )
+        facts.hasBlue = true;
+      if ( role == "swir" || role == "swir1" || role == "swir2" ||
+           inWindow( wavelengthNm, 1550.0, 1750.0 ) || inWindow( wavelengthNm, 2080.0, 2350.0 ) )
+        facts.hasSwir = true;
+      if ( role == "red_edge" || role == "rededge" || inWindow( wavelengthNm, 700.0, 745.0 ) )
+        facts.hasRedEdge = true;
     }
   }
   else if ( understanding.isMember( "band_roles" ) && understanding["band_roles"].isArray() )
@@ -124,6 +142,14 @@ BandFacts bandFacts( const Json::Value &understanding )
           facts.hasNir = true;
         if ( r == "red" )
           facts.hasRed = true;
+        if ( r == "green" )
+          facts.hasGreen = true;
+        if ( r == "blue" )
+          facts.hasBlue = true;
+        if ( r == "swir" || r == "swir1" || r == "swir2" )
+          facts.hasSwir = true;
+        if ( r == "red_edge" || r == "rededge" )
+          facts.hasRedEdge = true;
       }
     }
   }
@@ -260,35 +286,98 @@ bool sharedRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &o
 
 // --- rule packs ------------------------------------------------------------
 
-void ndviRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &outcome )
+/// Spectral-window requirement for a band-ratio index preflight.
+enum class BandRequirement
+{
+  Nir,
+  Red,
+  Green,
+  Blue,
+  Swir,
+  RedEdge,
+};
+
+bool bandPresent( const BandFacts &facts, BandRequirement requirement )
+{
+  switch ( requirement )
+  {
+    case BandRequirement::Nir:
+      return facts.hasNir;
+    case BandRequirement::Red:
+      return facts.hasRed;
+    case BandRequirement::Green:
+      return facts.hasGreen;
+    case BandRequirement::Blue:
+      return facts.hasBlue;
+    case BandRequirement::Swir:
+      return facts.hasSwir;
+    case BandRequirement::RedEdge:
+      return facts.hasRedEdge;
+  }
+  return false;
+}
+
+/// Window description for blocker messages.
+std::string bandWindowLabel( BandRequirement requirement )
+{
+  switch ( requirement )
+  {
+    case BandRequirement::Nir:
+      return "NIR (role or 750-1100nm)";
+    case BandRequirement::Red:
+      return "Red (role or 600-700nm)";
+    case BandRequirement::Green:
+      return "Green (role or 500-600nm)";
+    case BandRequirement::Blue:
+      return "Blue (role or 430-520nm)";
+    case BandRequirement::Swir:
+      return "SWIR (role or 1550-1750/2080-2350nm)";
+    case BandRequirement::RedEdge:
+      return "Red edge (role or 700-745nm)";
+  }
+  return "band";
+}
+
+/// Generalized band-ratio rule pack (Platform 5.0): the NDVI checks applied
+/// to an arbitrary index's band requirements. `indexLabel` names the index
+/// in messages. Refuse-on-missing bands (blockers), warn on raw DN.
+void bandRatioRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &outcome,
+                     const std::string &indexLabel,
+                     const std::vector<std::pair<std::string, BandRequirement>> &requirements )
 {
   for ( const PreflightInput &input : inputs )
   {
     if ( !input.resolved() )
       continue;
     const BandFacts facts = bandFacts( input.understanding );
-    if ( !facts.hasNir )
-      addBlocker( outcome, error_codes::kBandRoleUnresolved,
-                  "Input '" + input.name + "' has no NIR band (role or 700-1100nm wavelength)",
-                  "inspect_bands", Json::Value() );
-    if ( !facts.hasRed )
-      addBlocker( outcome, error_codes::kBandRoleUnresolved,
-                  "Input '" + input.name + "' has no Red band (role or 600-700nm wavelength)",
-                  "inspect_bands", Json::Value() );
+    for ( const auto &[ roleLabel, requirement ] : requirements )
+    {
+      if ( !bandPresent( facts, requirement ) )
+        addBlocker( outcome, error_codes::kBandRoleUnresolved,
+                    "Input '" + input.name + "' has no " + bandWindowLabel( requirement ) +
+                      " band required for " + indexLabel,
+                    "inspect_bands", Json::Value() );
+    }
     const std::string radiometry = radiometricState( input.understanding );
     if ( radiometry.empty() )
       addWarning( outcome, "INVALID_RADIOMETRY",
-                  "Input '" + input.name + "' declares no radiometric state; NDVI quality "
-                  "cannot be guaranteed" );
+                  "Input '" + input.name + "' declares no radiometric state; " + indexLabel +
+                    " quality cannot be guaranteed" );
     else if ( radiometry.find( "dn" ) != std::string::npos &&
               radiometry.find( "reflectance" ) == std::string::npos )
       addWarning( outcome, "INVALID_RADIOMETRY",
                   "Input '" + input.name + "' is raw DN; consider calibration to reflectance "
-                  "for comparable NDVI" );
+                  "for comparable " + indexLabel );
     addInfo( outcome, "nodata_declared", input.understanding.isMember( "nodata" ) ||
                                            input.understanding.isMember( "bands" ),
              "INVALID_RADIOMETRY" );
   }
+}
+
+void ndviRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &outcome )
+{
+  bandRatioRules( inputs, outcome, "index", { { "NIR", BandRequirement::Nir },
+                                              { "Red", BandRequirement::Red } } );
 }
 
 void opticalChangeRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &outcome )
@@ -464,7 +553,58 @@ Json::Value PreflightOutcome::toJson( const std::string &subject ) const
 
 bool intentRequiresPair( const std::string &intent )
 {
-  return intent == "change" || intent == "sar_change";
+  return intent == "change" || intent == "sar_change" || intent == "dnbr" ||
+         intent == "accuracy" || intent == "sar_flood";
+}
+
+/// Single-input SAR rule pack (Platform 5.0): modality + calibration checks
+/// without the epoch pairing of sar_change.
+void sarSingleRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &outcome )
+{
+  for ( const PreflightInput &input : inputs )
+  {
+    if ( !input.resolved() )
+      continue;
+    const std::string modality = modalityOf( input.understanding );
+    if ( !modality.empty() && modality != "sar" && modality != "unknown" )
+      addBlocker( outcome, error_codes::kModalityMismatch,
+                  "Input '" + input.name + "' is " + modality + ", not SAR",
+                  "check_dataset", Json::Value() );
+    const SarFacts facts = sarFacts( input.understanding );
+    if ( !facts.calibrationDeclared )
+      addWarning( outcome, "INVALID_RADIOMETRY",
+                  "Input '" + input.name +
+                    "' declares no SAR calibration domain; calibrate (sigma0/gamma0) before "
+                    "thresholding or comparing scenes" );
+    if ( facts.polarization.empty() )
+      addWarning( outcome, "POLARIZATION_MISMATCH",
+                  "Input '" + input.name +
+                    "' declares no polarization; cross-pol comparisons will silently degrade" );
+  }
+}
+
+/// Terrain rule pack: single raster expected, CRS must be declared (slope/
+/// aspect in a geographic CRS is a physical error, not a style problem).
+void terrainRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &outcome )
+{
+  for ( const PreflightInput &input : inputs )
+  {
+    if ( !input.resolved() )
+      continue;
+    const GridFacts grid = gridFacts( input.understanding );
+    if ( grid.crs.empty() )
+      addWarning( outcome, "CRS_MISMATCH",
+                  "Input '" + input.name + "' declares no CRS; terrain products need a "
+                  "projected CRS with metric units" );
+    else if ( grid.crs.find( "EPSG:4326" ) != std::string::npos )
+      addWarning( outcome, "CRS_MISMATCH",
+                  "Input '" + input.name +
+                    "' is in a geographic CRS; slope/aspect need a projected CRS" );
+    if ( input.understanding.isMember( "band_count" ) && input.understanding["band_count"].isInt() &&
+         input.understanding["band_count"].asInt() < 1 )
+      addBlocker( outcome, error_codes::kDatasetNotFound,
+                  "Input '" + input.name + "' has no bands", "check_dataset", Json::Value() );
+  }
 }
 
 PreflightOutcome runScientificPreflight( const std::string &intent,
@@ -477,16 +617,53 @@ PreflightOutcome runScientificPreflight( const std::string &intent,
     return outcome;
   }
 
-  if ( intent == "ndvi" )
+  if ( intent == "ndvi" || intent == "evi" || intent == "savi" || intent == "ndre" )
     ndviRules( inputs, outcome );
+  else if ( intent == "ndwi" || intent == "water" || intent == "flood" )
+    bandRatioRules( inputs, outcome, intent, { { "Green", BandRequirement::Green },
+                                               { "NIR", BandRequirement::Nir } } );
+  else if ( intent == "mndwi" )
+    bandRatioRules( inputs, outcome, "MNDWI", { { "Green", BandRequirement::Green },
+                                                { "SWIR", BandRequirement::Swir } } );
+  else if ( intent == "ndsi" )
+    bandRatioRules( inputs, outcome, "NDSI", { { "Green", BandRequirement::Green },
+                                               { "SWIR", BandRequirement::Swir } } );
+  else if ( intent == "nbr" || intent == "dnbr" )
+    bandRatioRules( inputs, outcome, intent, { { "NIR", BandRequirement::Nir },
+                                               { "SWIR", BandRequirement::Swir } } );
+  else if ( intent == "ndbi" )
+    bandRatioRules( inputs, outcome, "NDBI", { { "SWIR", BandRequirement::Swir },
+                                               { "NIR", BandRequirement::Nir } } );
+  else if ( intent == "bsi" )
+    bandRatioRules( inputs, outcome, "BSI", { { "Blue", BandRequirement::Blue },
+                                              { "Red", BandRequirement::Red },
+                                              { "NIR", BandRequirement::Nir },
+                                              { "SWIR", BandRequirement::Swir } } );
   else if ( intent == "change" )
     opticalChangeRules( inputs, outcome );
-  else if ( intent == "sar_change" )
+  else if ( intent == "sar_change" || intent == "sar_flood" )
     sarChangeRules( inputs, outcome );
+  else if ( intent == "sar" || intent == "ship" || intent == "sar_water" )
+    sarSingleRules( inputs, outcome );
   else if ( intent == "classify" )
     classifyRules( inputs, outcome );
-  else if ( intent == "phenology" )
+  else if ( intent == "accuracy" )
+  {
+    classifyRules( inputs, outcome );
+    if ( inputs.size() < 2 )
+      addBlocker( outcome, error_codes::kInvalidParameter,
+                  "Accuracy assessment needs the classified map and a reference input",
+                  "harness.plan", Json::Value() );
+  }
+  else if ( intent == "phenology" || intent == "temporal" )
     phenologyRules( inputs, outcome );
+  else if ( intent == "terrain" )
+    terrainRules( inputs, outcome );
+  else if ( intent == "qa" || intent == "preprocess" || intent == "inference" )
+  {
+    // Shared rules only: mask/preprocess/model intents have no physical band
+    // demands beyond resolvability.
+  }
 
   const bool blocked = std::any_of(
     outcome.issues.begin(), outcome.issues.end(),

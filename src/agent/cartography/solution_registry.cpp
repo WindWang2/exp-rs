@@ -348,21 +348,20 @@ Json::Value compactSolutionSummary( const Json::Value &solution )
   return out;
 }
 
-Json::Value searchSolutions( const QMap<QString, Json::Value> &solutions, const SolutionQuery &query )
+Json::Value searchSolutions( const Json::Value &solutions, const SolutionQuery &query )
 {
   std::vector<Json::Value> hits;
   const std::string task = query.task;
   const std::string modality = query.modality;
   const std::string sensor = query.sensor;
-  const std::string keyword = query.keyword;
+  std::string keyword = query.keyword;
   std::transform( keyword.begin(), keyword.end(), keyword.begin(),
                   []( unsigned char c ) { return std::tolower( c ); } );
   const std::string quality = query.quality;
   const std::string family = query.family;
 
-  for ( auto it = solutions.constBegin(); it != solutions.constEnd(); ++it )
+  for ( const Json::Value &doc : solutions )
   {
-    const Json::Value &doc = it.value();
     if ( !task.empty() )
     {
       bool match = false;
@@ -507,7 +506,7 @@ void SolutionRegistry::ensureLoadedLocked() const
     loadEmbeddedDefaults();
 }
 
-void SolutionRegistry::loadEmbeddedDefaults()
+void SolutionRegistry::loadEmbeddedDefaults() const
 {
   // Headless safety net: one minimal water/NDWI optical solution so search and
   // instantiation surfaces never face an empty catalog.

@@ -1,0 +1,197 @@
+{
+ "id": "report-multipage-a4p",
+ "version": 1,
+ "description": "Portrait three-page report variant for document-style deliverables (cover, map, statistics).",
+ "page": {
+  "width_mm": 210,
+  "height_mm": 297
+ },
+ "pages": [
+  {
+   "width_mm": 210,
+   "height_mm": 297,
+   "role": "map"
+  },
+  {
+   "width_mm": 210,
+   "height_mm": 297,
+   "role": "report",
+   "page_if": "has(statistics)"
+  }
+ ],
+ "style": {
+  "token_set": "scientific-light",
+  "medium": "print"
+ },
+ "product_type": "report",
+ "suitable_tasks": [
+  "report",
+  "operations"
+ ],
+ "slots": [
+  {
+   "role": "title.cover",
+   "accepts": "titles",
+   "rect_mm": [
+    15,
+    120,
+    180,
+    20
+   ],
+   "content": {
+    "text": "遥感监测报告",
+    "page": 0,
+    "font": {
+     "size_pt": 22,
+     "bold": true
+    }
+   }
+  },
+  {
+   "role": "source.cover",
+   "accepts": "source_notes",
+   "rect_mm": [
+    15,
+    272,
+    180,
+    8
+   ],
+   "content": {
+    "page": 0
+   }
+  },
+  {
+   "role": "map.main",
+   "accepts": "map_frames",
+   "rect_mm": [
+    15,
+    30,
+    180,
+    180
+   ],
+   "content": {
+    "page": 1
+   }
+  },
+  {
+   "role": "title.main",
+   "accepts": "titles",
+   "rect_mm": [
+    15,
+    12,
+    180,
+    12
+   ],
+   "content": {
+    "page": 1
+   }
+  },
+  {
+   "role": "legend.primary",
+   "accepts": "legends",
+   "rect_mm": [
+    15,
+    216,
+    180,
+    56
+   ],
+   "content": {
+    "content": {
+     "title": "图例"
+    }
+   },
+   "page": 1
+  },
+  {
+   "role": "scalebar.primary",
+   "accepts": "scale_bars",
+   "rect_mm": [
+    15,
+    278,
+    44,
+    8
+   ],
+   "page": 1
+  },
+  {
+   "role": "source.main",
+   "accepts": "source_notes",
+   "rect_mm": [
+    70,
+    278,
+    125,
+    8
+   ],
+   "page": 1
+  },
+  {
+   "role": "chart.distribution",
+   "accepts": "charts",
+   "rect_mm": [
+    15,
+    30,
+    180,
+    80
+   ],
+   "content": {
+    "page": 2
+   },
+   "component": "chart/bar"
+  },
+  {
+   "role": "table.summary",
+   "accepts": "charts",
+   "rect_mm": [
+    15,
+    116,
+    180,
+    90
+   ],
+   "content": {
+    "chart": {
+     "kind": "topn_table",
+     "binding": {
+      "mode": "inline",
+      "data": []
+     },
+     "style": {
+      "top_n": 8
+     }
+    },
+    "page": 2
+   },
+   "component": "chart/topn-table"
+  },
+  {
+   "role": "notes.methodology",
+   "accepts": "annotations",
+   "rect_mm": [
+    15,
+    212,
+    180,
+    24
+   ],
+   "content": {
+    "text": "方法说明 Methodology: 处理链与参数记录于工作区快照。",
+    "page": 2
+   }
+  },
+  {
+   "role": "provenance.block",
+   "accepts": "source_notes",
+   "rect_mm": [
+    15,
+    270,
+    180,
+    10
+   ],
+   "content": {
+    "text": "数据来源 Data: | CRS: EPSG:32650 | 处理 Processing: exp-rs 5.0",
+    "page": 2
+   }
+  }
+ ],
+ "recommended_components": [
+  "north-arrow/minimal"
+ ]
+}

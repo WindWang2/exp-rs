@@ -82,9 +82,8 @@ struct SolutionQuery
 };
 
 /// Result envelope: {items: [compact summaries], total, page, page_size,
-/// next_page|null}.
-Json::Value searchSolutions( const QMap<QString, Json::Value> &solutions,
-                             const SolutionQuery &query );
+/// next_page|null}. `solutions` is an id-ordered JSON array (registry order).
+Json::Value searchSolutions( const Json::Value &solutions, const SolutionQuery &query );
 
 class SolutionRegistry
 {
@@ -113,7 +112,7 @@ class SolutionRegistry
   private:
     SolutionRegistry() = default;
     void ensureLoadedLocked() const;
-    void loadEmbeddedDefaults();
+    void loadEmbeddedDefaults() const;
 
     mutable QMutex mMutex;
     mutable bool mLoaded = false;

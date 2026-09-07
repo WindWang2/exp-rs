@@ -179,8 +179,18 @@ void checkRaster( const Json::Value &raster, std::vector<std::string> &problems 
                                  : "discrete";
       if ( mode != "discrete" && mode != "continuous" )
         problems.push_back( "raster.classification.mode must be discrete|continuous" );
-      if ( classification.isMember( "ramp" ) && !classification["ramp"].isString() )
-        problems.push_back( "raster.classification.ramp must be a string (name or token reference)" );
+      if ( classification.isMember( "ramp" ) )
+      {
+        // Ramp: a palette name / token reference string, or a token-resolved
+        // array of hex stops (what resolveStyleTokens leaves behind).
+        const Json::Value &ramp = classification["ramp"];
+        if ( !( ramp.isString() ||
+                ( ramp.isArray() &&
+                  std::all_of( ramp.begin(), ramp.end(),
+                               []( const Json::Value &stop ) { return stop.isString(); } ) ) ) )
+          problems.push_back( "raster.classification.ramp must be a string or an array of "
+                              "color strings" );
+      }
       if ( classification.isMember( "classes" ) )
       {
         if ( !classification["classes"].isArray() )
@@ -458,7 +468,7 @@ void StyleRegistry::ensureLoadedLocked() const
     loadEmbeddedDefaults();
 }
 
-void StyleRegistry::loadEmbeddedDefaults()
+void StyleRegistry::loadEmbeddedDefaults() const
 {
   // Minimal safety set: a discrete land-cover palette and a diverging change
   // style so headless runs can render something meaningful without the data dir.

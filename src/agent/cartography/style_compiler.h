@@ -25,6 +25,7 @@
 #include <QStringList>
 
 class QgsMapLayer;
+class QgsRasterRenderer;
 
 namespace sicnu::agent::cartography {
 
@@ -38,7 +39,6 @@ bool applyStyleSpecToLayer( QgsMapLayer *layer, const Json::Value &styleSpec, QS
 
 /// Builds a QGIS renderer for the raster block alone (no layer mutation).
 /// Returns null with *error when the block is invalid/unsupported.
-class QgsRasterRenderer;
 QgsRasterRenderer *buildRasterRenderer( const Json::Value &rasterBlock, int bandCount,
                                         QString *error = nullptr );
 

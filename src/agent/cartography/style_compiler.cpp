@@ -62,7 +62,7 @@ Json::Value rampStops( const Json::Value &rampEntry, const Json::Value &tokenSet
 }
 
 QgsSymbol *buildSymbol( const Json::Value &entry, const QString &colorFallback,
-                        QgsWkbTypes::GeometryType geometry )
+                        Qgis::GeometryType geometry )
 {
   const QColor color( colorString( entry.get( "color", Json::Value() ), colorFallback ) );
   const Json::Value symbol = entry.get( "symbol", Json::Value() );
@@ -74,21 +74,21 @@ QgsSymbol *buildSymbol( const Json::Value &entry, const QString &colorFallback,
                               : "circle";
   switch ( geometry )
   {
-    case QgsWkbTypes::LineGeometry:
+    case Qgis::GeometryType::Line:
     {
       QVariantMap props;
       props[QStringLiteral( "color" )] = color.name();
       props[QStringLiteral( "width" )] = QString::number( widthMm );
       props[QStringLiteral( "width_unit" )] = QStringLiteral( "MM" );
-      return QgsLineSymbol::createSimple( props );
+      return QgsLineSymbol::createSimple( props ).release();
     }
-    case QgsWkbTypes::PointGeometry:
+    case Qgis::GeometryType::Point:
     {
       QVariantMap props;
       props[QStringLiteral( "name" )] = QString::fromStdString( shape );
       props[QStringLiteral( "color" )] = color.name();
       props[QStringLiteral( "outline_color" )] = color.darker( 130 ).name();
-      return QgsMarkerSymbol::createSimple( props );
+      return QgsMarkerSymbol::createSimple( props ).release();
     }
     default:
     {
@@ -97,7 +97,7 @@ QgsSymbol *buildSymbol( const Json::Value &entry, const QString &colorFallback,
       props[QStringLiteral( "outline_color" )] = color.darker( 130 ).name();
       props[QStringLiteral( "outline_width" )] = QString::number( widthMm );
       props[QStringLiteral( "width_unit" )] = QStringLiteral( "MM" );
-      return QgsFillSymbol::createSimple( props );
+      return QgsFillSymbol::createSimple( props ).release();
     }
   }
 }
@@ -225,12 +225,14 @@ bool applyRasterBlock( QgsRasterLayer *raster, const Json::Value &rasterBlock,
                    .arg( paletteClasses.size() );
       return true;
     }
-    QgsColorRampShader shader;
-    shader.setColorRampType( mode == "continuous" ? QgsColorRampShader::Interpolated
-                                                  : QgsColorRampShader::Discrete );
-    shader.setColorRampItemList( rampShaderItems( rasterBlock, tokenSet, mode ) );
+    // setRasterShaderFunction takes ownership (SIP_TRANSFER): the function
+    // must be heap-allocated or the shader dangles after this scope.
+    auto *shader = new QgsColorRampShader();
+    shader->setColorRampType( mode == "continuous" ? Qgis::ShaderInterpolationMethod::Linear
+                                                   : Qgis::ShaderInterpolationMethod::Discrete );
+    shader->setColorRampItemList( rampShaderItems( rasterBlock, tokenSet, mode ) );
     auto *rampShader = new QgsRasterShader();
-    rampShader->setRasterShaderFunction( &shader );
+    rampShader->setRasterShaderFunction( shader );
     raster->setRenderer(
       new QgsSingleBandPseudoColorRenderer( raster->dataProvider(), band, rampShader ) );
     applied << QStringLiteral( "raster:singleband_pseudocolor(band=%1,mode=%2)" )
@@ -298,9 +300,8 @@ void applyLabels( QgsVectorLayer *layer, const Json::Value &labels, const Json::
         sizePt = resolved.asDouble();
     }
   }
-  QFont font = tokenString( tokenSet, "typography.font_family" ).isEmpty()
-                 ? QFont()
-                 : QFont( QString::fromStdString( tokenString( tokenSet, "typography.font_family" ) ) );
+  const std::string fontFamily = tokenString( tokenSet, "typography.font_family" );
+  QFont font = fontFamily.empty() ? QFont() : QFont( QString::fromStdString( fontFamily ) );
   format.setFont( font );
   format.setSize( sizePt );
   format.setSizeUnit( Qgis::RenderUnit::Points );
@@ -323,6 +324,19 @@ void applyLabels( QgsVectorLayer *layer, const Json::Value &labels, const Json::
                .arg( sizePt );
 }
 
+Qgis::GeometryType layerGeometry( const QgsVectorLayer *layer )
+{
+  switch ( layer->geometryType() )
+  {
+    case Qgis::GeometryType::Line:
+      return Qgis::GeometryType::Line;
+    case Qgis::GeometryType::Point:
+      return Qgis::GeometryType::Point;
+    default:
+      return Qgis::GeometryType::Polygon;
+  }
+}
+
 bool applyVectorBlock( QgsVectorLayer *vector, const Json::Value &vectorBlock,
                        const Json::Value &tokenSet, QStringList &applied, QStringList &problems )
 {
@@ -334,15 +348,15 @@ bool applyVectorBlock( QgsVectorLayer *vector, const Json::Value &vectorBlock,
     tokenString( tokenSet, "colors.accent" ).empty()
       ? QStringLiteral( "#0072b2" )
       : QString::fromStdString( tokenString( tokenSet, "colors.accent" ) );
-  const QgsWkbTypes::GeometryType geometry = layerGeometry( vector );
+  const Qgis::GeometryType geometry = layerGeometry( vector );
 
   if ( renderertype == "simple" )
   {
     Json::Value entry( Json::objectValue );
     entry["color"] = vectorBlock.get( "color", Json::Value() );
     entry["symbol"] = vectorBlock.get( "symbols", Json::Value() );
-    vector->setRenderer( QgsSingleSymbolRenderer::create(
-      std::unique_ptr<QgsSymbol>( buildSymbol( entry, defaultColor, geometry ) ) ) );
+    vector->setRenderer( new QgsSingleSymbolRenderer(
+      buildSymbol( entry, defaultColor, geometry ) ) );
     applied << QStringLiteral( "vector:simple" );
   }
   else if ( renderertype == "categorized" )
@@ -499,11 +513,11 @@ QgsRasterRenderer *buildRasterRenderer( const Json::Value &rasterBlock, int band
     return new QgsMultiBandColorRenderer( nullptr, 3, 2, 1 );
   if ( renderertype == "singleband_pseudocolor" || renderertype == "paletted" )
   {
-    QgsColorRampShader shader;
-    shader.setColorRampType( QgsColorRampShader::Discrete );
-    shader.setColorRampItemList( rampShaderItems( rasterBlock, Json::Value(), "discrete" ) );
+    auto *shader = new QgsColorRampShader();
+    shader->setColorRampType( Qgis::ShaderInterpolationMethod::Discrete );
+    shader->setColorRampItemList( rampShaderItems( rasterBlock, Json::Value(), "discrete" ) );
     auto *rampShader = new QgsRasterShader();
-    rampShader->setRasterShaderFunction( &shader );
+    rampShader->setRasterShaderFunction( shader );
     return new QgsSingleBandPseudoColorRenderer( nullptr, band, rampShader );
   }
   if ( error )

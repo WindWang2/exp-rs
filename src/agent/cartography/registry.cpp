@@ -817,6 +817,10 @@ Json::Value TemplateRegistry::instantiateTemplate( const QString &id, const Json
   // Template style (token set + medium) travels into the draft.
   if ( tmpl.isMember( "style" ) && tmpl["style"].isObject() )
     spec["style"] = tmpl["style"];
+  // Platform 5.0: multi-page templates declare their additional pages; page
+  // roles (cover|map|report|appendix) ride along for compiler/preflight.
+  if ( tmpl.isMember( "pages" ) && tmpl["pages"].isArray() )
+    spec["pages"] = tmpl["pages"];
 
   // Slots may be declared as `slots` (v2) or `required_slots` (v1 compat).
   // NB: the local is not named `slots` — Qt's moc keyword macro would eat it.
@@ -839,6 +843,9 @@ Json::Value TemplateRegistry::instantiateTemplate( const QString &id, const Json
     item["semantic_role"] = slot["role"];
     if ( slot.isMember( "rect_mm" ) )
       item["rect_mm"] = slot["rect_mm"];
+    // Multi-page slot placement (1-based page index).
+    if ( slot.isMember( "page" ) && slot["page"].isIntegral() )
+      item["page"] = slot["page"];
     const std::string collection = slot["accepts"].asString();
 
     // Slot content draft (v2): item-shaped fields deep-merged under the role.

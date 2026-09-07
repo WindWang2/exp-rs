@@ -101,6 +101,32 @@
 			"category" : "chart",
 			"compatibility" : 
 			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"classification",
+					"change",
+					"statistics"
+				]
+			},
+			"description" : "Grouped bar chart: side-by-side series per label with a compact series legend (real multi-series rendering).",
+			"id" : "chart/grouped-bar",
+			"semantic_roles" : 
+			[
+				"chart.statistics",
+				"chart.trend"
+			],
+			"variants" : 
+			[
+				"paired",
+				"multi"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
 				"requires_map_frame" : true
 			},
 			"description" : "Histogram of values (band statistics, index distribution).",
@@ -199,6 +225,70 @@
 				"requires_map_frame" : false,
 				"result_types" : 
 				[
+					"temporal",
+					"statistics"
+				]
+			},
+			"description" : "Axes-free compact trend line with a dashed baseline; the series-extraction companion for report blocks.",
+			"id" : "chart/sparkline",
+			"semantic_roles" : 
+			[
+				"chart.trend"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"statistics",
+					"accuracy"
+				]
+			},
+			"description" : "Summary table with an n/mean and sum/min-max header block above the rows.",
+			"id" : "chart/summary-table",
+			"semantic_roles" : 
+			[
+				"chart.statistics"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"classification",
+					"land_cover",
+					"categorical",
+					"statistics"
+				]
+			},
+			"description" : "Two-column label/value table (class areas, counts, metrics); deterministic 64-row cap with an overflow row.",
+			"id" : "chart/table",
+			"semantic_roles" : 
+			[
+				"chart.statistics"
+			],
+			"variants" : 
+			[
+				"zebra",
+				"plain"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
 					"time_series",
 					"phenology"
 				]
@@ -208,6 +298,31 @@
 			"semantic_roles" : 
 			[
 				"chart.trend"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"classification",
+					"statistics",
+					"change"
+				]
+			},
+			"description" : "Top-N table: rows sorted by value descending, capped at style.top_n (default 10) with a rank column.",
+			"id" : "chart/topn-table",
+			"semantic_roles" : 
+			[
+				"chart.statistics"
+			],
+			"variants" : 
+			[
+				"top-5",
+				"top-10"
 			],
 			"version" : 1
 		},
@@ -861,6 +976,1632 @@
 	],
 	"index_version" : 1,
 	"kind" : "cartography_catalog_index",
+	"solutions" : 
+	[
+		{
+			"analysis_recipe" : "harness.classify_accuracy_report",
+			"id" : "solution.accuracy.assessment",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				},
+				{
+					"kind" : "vector",
+					"name" : "training",
+					"required" : true
+				}
+			],
+			"map_template" : "accuracy-assessment-a4l",
+			"modalities" : 
+			[
+				"model"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"accuracy",
+				"landcover"
+			],
+			"title" : "Classification accuracy assessment",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.sar_flood",
+			"id" : "solution.flood.atlas-series",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "reference",
+					"required" : true
+				},
+				{
+					"kind" : "vector",
+					"name" : "aoi",
+					"required" : true
+				}
+			],
+			"map_template" : "atlas-series-a4l",
+			"modalities" : 
+			[
+				"sar"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-1"
+			],
+			"tasks" : 
+			[
+				"flood",
+				"water"
+			],
+			"title" : "Regional flood atlas series",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.sar_optical_fused_flood",
+			"id" : "solution.flood.fused-sar-optical",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "sar_scene",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "optical_scene",
+					"required" : true
+				}
+			],
+			"map_template" : "multi-panel-a4l",
+			"modalities" : 
+			[
+				"multimodal"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-1",
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"flood",
+				"water"
+			],
+			"title" : "Fused SAR + optical flood mapping",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.optical_flood_ndwi",
+			"id" : "solution.flood.optical-ndwi",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "qa",
+					"required" : false
+				},
+				{
+					"kind" : "raster",
+					"name" : "dem",
+					"required" : false
+				}
+			],
+			"map_template" : "water-flood-a4l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"landsat-8",
+				"landsat-9"
+			],
+			"tasks" : 
+			[
+				"flood",
+				"water"
+			],
+			"title" : "Optical flood extent mapping (NDWI)",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.sar_flood",
+			"id" : "solution.flood.sar-extent",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "reference",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "dem",
+					"required" : false
+				}
+			],
+			"map_template" : "water-flood-a4l",
+			"modalities" : 
+			[
+				"sar"
+			],
+			"quality_grade" : "certified",
+			"sensors" : 
+			[
+				"sentinel-1"
+			],
+			"tasks" : 
+			[
+				"flood",
+				"water"
+			],
+			"title" : "SAR flood extent mapping",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.sar_flood",
+			"id" : "solution.flood.sar-screen",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "reference",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "dem",
+					"required" : false
+				}
+			],
+			"map_template" : "presentation-screen-dark",
+			"modalities" : 
+			[
+				"sar"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-1"
+			],
+			"tasks" : 
+			[
+				"flood",
+				"water"
+			],
+			"title" : "SAR flood monitoring sheet (screen)",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.temporal_forest_disturbance",
+			"id" : "solution.forest.disturbance-series",
+			"inputs" : 
+			[
+				{
+					"kind" : "collection",
+					"name" : "collection",
+					"required" : true
+				}
+			],
+			"map_template" : "change-detection-a4l",
+			"modalities" : 
+			[
+				"temporal"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"landsat"
+			],
+			"tasks" : 
+			[
+				"forest",
+				"temporal"
+			],
+			"title" : "Forest disturbance monitoring",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.optical_dnbr",
+			"id" : "solution.forest.dnbr",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "pre",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "post",
+					"required" : true
+				}
+			],
+			"map_template" : "burned-area-a4l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "certified",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"landsat-8"
+			],
+			"tasks" : 
+			[
+				"burn",
+				"forest"
+			],
+			"title" : "Burn severity mapping (dNBR)",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.classify_detect",
+			"id" : "solution.inference.building-extraction",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "urban-building-a4l",
+			"modalities" : 
+			[
+				"model"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"urban",
+				"model"
+			],
+			"title" : "Building footprint inference",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.classify_feature_cube",
+			"id" : "solution.inference.featurecube",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "multi-panel-a4l",
+			"modalities" : 
+			[
+				"model"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"sentinel-1"
+			],
+			"tasks" : 
+			[
+				"model",
+				"preprocessing"
+			],
+			"title" : "Feature cube preparation",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.classify_inference",
+			"id" : "solution.inference.road-extraction",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "road-transport-a4l",
+			"modalities" : 
+			[
+				"model"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"road",
+				"model"
+			],
+			"title" : "Road extraction inference",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.classify_supervised",
+			"id" : "solution.landcover.a3-poster",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				},
+				{
+					"kind" : "vector",
+					"name" : "training",
+					"required" : true
+				}
+			],
+			"map_template" : "classification-a3l",
+			"modalities" : 
+			[
+				"model"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"landcover",
+				"classification"
+			],
+			"title" : "Land-cover classification (A3 poster)",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.classify_kmeans",
+			"id" : "solution.landcover.kmeans",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "classification-a4l",
+			"modalities" : 
+			[
+				"model"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"landcover",
+				"classification"
+			],
+			"title" : "Unsupervised land-cover clustering",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.classify_obia",
+			"id" : "solution.landcover.obia",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "classification-a4l",
+			"modalities" : 
+			[
+				"model"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"landcover",
+				"classification"
+			],
+			"title" : "Object-based land-cover mapping",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.classify_supervised",
+			"id" : "solution.landcover.supervised",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				},
+				{
+					"kind" : "vector",
+					"name" : "training",
+					"required" : true
+				}
+			],
+			"map_template" : "classification-a4l",
+			"modalities" : 
+			[
+				"model"
+			],
+			"quality_grade" : "certified",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"landsat-8"
+			],
+			"tasks" : 
+			[
+				"landcover",
+				"classification"
+			],
+			"title" : "Supervised land-cover classification",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.optical_ndvi",
+			"id" : "solution.operational.ndvi-sheet",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "qa",
+					"required" : false
+				}
+			],
+			"map_template" : "operational-sheet-a4l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"vegetation",
+				"operations"
+			],
+			"title" : "Operational monitoring sheet: NDVI",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.optical_change_cva",
+			"id" : "solution.opticalchange.cva",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "before",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "after",
+					"required" : true
+				}
+			],
+			"map_template" : "change-detection-a4l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"change"
+			],
+			"title" : "Optical change vector analysis",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.optical_change_difference",
+			"id" : "solution.opticalchange.difference",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "before",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "after",
+					"required" : true
+				}
+			],
+			"map_template" : "change-detection-a4l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"landsat-8"
+			],
+			"tasks" : 
+			[
+				"change"
+			],
+			"title" : "Optical bi-temporal change (difference)",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.classify_change_post",
+			"id" : "solution.opticalchange.post-classification",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "before",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "after",
+					"required" : true
+				}
+			],
+			"map_template" : "change-before-after-a4l",
+			"modalities" : 
+			[
+				"model"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"change",
+				"landcover"
+			],
+			"title" : "Post-classification change",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.temporal_evi_season",
+			"id" : "solution.phenology.crop-evi",
+			"inputs" : 
+			[
+				{
+					"kind" : "collection",
+					"name" : "collection",
+					"required" : true
+				}
+			],
+			"map_template" : "time-series-phenology-a4l",
+			"modalities" : 
+			[
+				"temporal"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"modis",
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"phenology",
+				"crop"
+			],
+			"title" : "Crop season EVI profile",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.temporal_ndvi_phenology",
+			"id" : "solution.phenology.crop-ndvi",
+			"inputs" : 
+			[
+				{
+					"kind" : "collection",
+					"name" : "collection",
+					"required" : true
+				}
+			],
+			"map_template" : "time-series-phenology-a4l",
+			"modalities" : 
+			[
+				"temporal"
+			],
+			"quality_grade" : "certified",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"modis"
+			],
+			"tasks" : 
+			[
+				"phenology",
+				"crop"
+			],
+			"title" : "Crop phenology metrics (NDVI)",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.temporal_double_cropping",
+			"id" : "solution.phenology.double-cropping",
+			"inputs" : 
+			[
+				{
+					"kind" : "collection",
+					"name" : "collection",
+					"required" : true
+				}
+			],
+			"map_template" : "time-series-phenology-a4l",
+			"modalities" : 
+			[
+				"temporal"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"phenology",
+				"crop"
+			],
+			"title" : "Double-cropping detection",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.classify_supervised",
+			"id" : "solution.publication.classification-figure",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				},
+				{
+					"kind" : "vector",
+					"name" : "training",
+					"required" : true
+				}
+			],
+			"map_template" : "scientific-publication-a4l",
+			"modalities" : 
+			[
+				"model"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"landcover",
+				"publication"
+			],
+			"title" : "Publication figure: land cover",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.optical_ndvi",
+			"id" : "solution.publication.ndvi-figure",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "qa",
+					"required" : false
+				}
+			],
+			"map_template" : "scientific-publication-a3l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"landsat-8"
+			],
+			"tasks" : 
+			[
+				"vegetation",
+				"publication"
+			],
+			"title" : "Publication figure: vegetation index",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.qa_scene_report",
+			"id" : "solution.qa.cloud-report",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "qa",
+					"required" : true
+				}
+			],
+			"map_template" : "cloud-cover-a4l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"landsat-8"
+			],
+			"tasks" : 
+			[
+				"qa"
+			],
+			"title" : "Cloud/QA coverage report",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.sar_coherent_change",
+			"id" : "solution.sarchange.dual-channel",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "before",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "after",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "dem",
+					"required" : false
+				}
+			],
+			"map_template" : "sar-change-a4l",
+			"modalities" : 
+			[
+				"sar"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-1"
+			],
+			"tasks" : 
+			[
+				"change",
+				"sar"
+			],
+			"title" : "SAR coherent dual-channel change",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.sar_change_log_ratio",
+			"id" : "solution.sarchange.log-ratio",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "before",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "after",
+					"required" : true
+				}
+			],
+			"map_template" : "sar-change-a4l",
+			"modalities" : 
+			[
+				"sar"
+			],
+			"quality_grade" : "certified",
+			"sensors" : 
+			[
+				"sentinel-1"
+			],
+			"tasks" : 
+			[
+				"change",
+				"sar"
+			],
+			"title" : "SAR log-ratio change detection",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.sar_change_ratio",
+			"id" : "solution.sarchange.ratio",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "before",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "after",
+					"required" : true
+				}
+			],
+			"map_template" : "sar-change-a4l",
+			"modalities" : 
+			[
+				"sar"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-1"
+			],
+			"tasks" : 
+			[
+				"change",
+				"sar"
+			],
+			"title" : "SAR ratio change detection",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.sar_ship_detection_prep",
+			"id" : "solution.ship.sar-detection-prep",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "ship-detection-a4l",
+			"modalities" : 
+			[
+				"sar"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-1"
+			],
+			"tasks" : 
+			[
+				"ship",
+				"maritime"
+			],
+			"title" : "SAR ship detection preparation",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.optical_ndsi",
+			"id" : "solution.snow.ndsi-cover",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "qa",
+					"required" : false
+				}
+			],
+			"map_template" : "snow-cover-a4l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"landsat-8"
+			],
+			"tasks" : 
+			[
+				"snow"
+			],
+			"title" : "Snow cover mapping (NDSI)",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.optical_bsi",
+			"id" : "solution.soil.baresoil-map",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "soil-moisture-a4l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"soil"
+			],
+			"title" : "Bare soil exposure mapping",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.terrain_elevation_zones",
+			"id" : "solution.terrain.elevation-zones",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "slope-aspect-a4l",
+			"modalities" : 
+			[
+				"terrain"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"dem"
+			],
+			"tasks" : 
+			[
+				"terrain"
+			],
+			"title" : "Slope/elevation zoning",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.terrain_hillshade",
+			"id" : "solution.terrain.hillshade-visualization",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "terrain-dem-a4l",
+			"modalities" : 
+			[
+				"terrain"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"dem"
+			],
+			"tasks" : 
+			[
+				"terrain"
+			],
+			"title" : "Terrain hillshade visualization",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.terrain_watershed_foundation",
+			"id" : "solution.terrain.slope-aspect",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "terrain-dem-a4l",
+			"modalities" : 
+			[
+				"terrain"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"dem"
+			],
+			"tasks" : 
+			[
+				"terrain"
+			],
+			"title" : "Slope & aspect terrain products",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.uncertainty_rx_anomaly",
+			"id" : "solution.uncertainty.confidence-map",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "model-uncertainty-a4l",
+			"modalities" : 
+			[
+				"model"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"uncertainty",
+				"model"
+			],
+			"title" : "Model uncertainty visualization",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.temporal_urban_growth",
+			"id" : "solution.urban.growth-series",
+			"inputs" : 
+			[
+				{
+					"kind" : "collection",
+					"name" : "collection",
+					"required" : true
+				}
+			],
+			"map_template" : "urban-building-a4l",
+			"modalities" : 
+			[
+				"temporal"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"urban",
+				"temporal"
+			],
+			"title" : "Urban growth temporal series",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.optical_ndbi",
+			"id" : "solution.urban.ndbi-expansion",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "urban-building-a4l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"landsat-8"
+			],
+			"tasks" : 
+			[
+				"urban"
+			],
+			"title" : "Urban expansion mapping (NDBI)",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.temporal_vegetation_anomaly",
+			"id" : "solution.vegetation.anomaly-screen",
+			"inputs" : 
+			[
+				{
+					"kind" : "collection",
+					"name" : "collection",
+					"required" : true
+				}
+			],
+			"map_template" : "crop-monitoring-a4l",
+			"modalities" : 
+			[
+				"temporal"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"modis"
+			],
+			"tasks" : 
+			[
+				"vegetation",
+				"temporal"
+			],
+			"title" : "Vegetation anomaly screening",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.optical_evi",
+			"id" : "solution.vegetation.evi-map",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "vegetation-index-a4l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"modis",
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"vegetation"
+			],
+			"title" : "EVI vegetation index map",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.optical_ndvi",
+			"id" : "solution.vegetation.ndvi-locator",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "inset-locator-a4l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2"
+			],
+			"tasks" : 
+			[
+				"vegetation"
+			],
+			"title" : "NDVI map with locator inset",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.optical_water_dynamics",
+			"id" : "solution.water.dynamics",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "before",
+					"required" : true
+				},
+				{
+					"kind" : "raster",
+					"name" : "after",
+					"required" : true
+				}
+			],
+			"map_template" : "change-before-after-a4l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"landsat-8"
+			],
+			"tasks" : 
+			[
+				"water",
+				"change"
+			],
+			"title" : "Surface water change dynamics",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.optical_water_mndwi",
+			"id" : "solution.water.optical-mndwi",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "water-flood-a4l",
+			"modalities" : 
+			[
+				"optical"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"landsat-8",
+				"landsat-9"
+			],
+			"tasks" : 
+			[
+				"water"
+			],
+			"title" : "Surface water mapping (MNDWI)",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.sar_water",
+			"id" : "solution.water.sar-open-water",
+			"inputs" : 
+			[
+				{
+					"kind" : "raster",
+					"name" : "primary",
+					"required" : true
+				}
+			],
+			"map_template" : "water-flood-a4l",
+			"modalities" : 
+			[
+				"sar"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-1"
+			],
+			"tasks" : 
+			[
+				"water"
+			],
+			"title" : "SAR open-water mapping",
+			"version" : 1
+		},
+		{
+			"analysis_recipe" : "harness.temporal_water_seasonal",
+			"id" : "solution.water.seasonal-dynamics",
+			"inputs" : 
+			[
+				{
+					"kind" : "collection",
+					"name" : "collection",
+					"required" : true
+				}
+			],
+			"map_template" : "time-series-phenology-a4l",
+			"modalities" : 
+			[
+				"temporal"
+			],
+			"quality_grade" : "reviewed",
+			"sensors" : 
+			[
+				"sentinel-2",
+				"modis"
+			],
+			"tasks" : 
+			[
+				"water",
+				"temporal"
+			],
+			"title" : "Seasonal water persistence",
+			"version" : 1
+		}
+	],
+	"styles" : 
+	[
+		{
+			"applies_to" : "vector",
+			"description" : "AOI/region boundary overlay: dashed accent line with optional label.",
+			"id" : "style.aoi-boundary",
+			"renderer" : "simple",
+			"semantics" : 
+			[
+				"aoi",
+				"boundary"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "Bare Soil Index continuous ramp (vegetated to exposed soil).",
+			"id" : "style.bare-soil",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"soil",
+				"bare-soil"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "dNBR burn severity: unburned to high-severity, USGS-inspired class breaks.",
+			"id" : "style.burn-severity",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"burn",
+				"fire",
+				"change"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "Discrete change map: loss, stable, gain with colorblind-safe diverging colors.",
+			"id" : "style.change-gain-loss",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"change"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "DEM elevation with sequential ramp; pair with hillshade blend (blend knowledge for the map layer).",
+			"id" : "style.dem-hillshade",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"dem",
+				"terrain",
+				"elevation"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "Flood event extent classes: normal channel, flooded, receding.",
+			"id" : "style.flood-extent",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"flood",
+				"water"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "Flood probability 0-1 as a continuous uncertainty ramp.",
+			"id" : "style.flood-probability",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"flood",
+				"probability",
+				"uncertainty"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "Discrete land-cover classes bound to the land_cover token palette.",
+			"id" : "style.landcover-classes",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"landcover",
+				"classification"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "NDVI continuous ramp from bare/monitoring minimum to dense canopy.",
+			"id" : "style.ndvi",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"vegetation",
+				"ndvi"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "NDWI continuous water-index ramp (negative land to positive water).",
+			"id" : "style.ndwi",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"water",
+				"ndwi"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "SAR backscatter in dB as a gray stretch with documented percentile bounds.",
+			"id" : "style.sar-backscatter",
+			"renderer" : "singleband_gray",
+			"semantics" : 
+			[
+				"sar",
+				"backscatter"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "SAR log-ratio change: diverging ramp around 0 dB (loss/deposition).",
+			"id" : "style.sar-change",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"sar",
+				"change"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "Slope classes for terrain analysis (flat to very steep).",
+			"id" : "style.slope-classes",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"slope",
+				"terrain"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "NDSI snow cover: snow, snow-free, cloud/QA.",
+			"id" : "style.snow-cover",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"snow",
+				"ice"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "Model confidence 0-1 on the uncertainty ramp; low confidence darkens.",
+			"id" : "style.uncertainty-confidence",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"uncertainty",
+				"confidence",
+				"model"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "Built-up density from bare to dense urban fabric.",
+			"id" : "style.urban-builtup",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"urban",
+				"built-up"
+			],
+			"version" : 1
+		},
+		{
+			"applies_to" : "raster",
+			"description" : "Binary surface-water extent (0 dry, 1 water) with a token-linked water color and transparent dry class.",
+			"id" : "style.water-extent",
+			"renderer" : "singleband_pseudocolor",
+			"semantics" : 
+			[
+				"water",
+				"flood"
+			],
+			"version" : 1
+		}
+	],
 	"templates" : 
 	[
 		{
@@ -1626,6 +3367,36 @@
 			]
 		},
 		{
+			"description" : "A0 portrait poster foundation: hero map, section rails for charts/tables/methodology (content slots intentionally unconstrained).",
+			"id" : "poster-a0-foundation",
+			"page" : 
+			{
+				"height_mm" : 1189,
+				"width_mm" : 841
+			},
+			"product_type" : "poster",
+			"slot_roles" : 
+			[
+				"title.main",
+				"map.hero",
+				"legend.primary",
+				"chart.left",
+				"table.right",
+				"notes.methodology",
+				"source.main"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"poster",
+				"publication"
+			]
+		},
+		{
 			"description" : "16:9 presentation map for screen delivery (screen tokens, larger type).",
 			"id" : "presentation-screen",
 			"page" : 
@@ -1746,6 +3517,112 @@
 			]
 		},
 		{
+			"description" : "Atlas appendix page: per-feature statistics table, top-N ranking and trend sparkline; designed for the atlas page sequence.",
+			"id" : "report-atlas-appendix-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "report",
+			"slot_roles" : 
+			[
+				"title.main",
+				"map.context",
+				"table.features",
+				"chart.topn",
+				"trend.sparkline",
+				"provenance.block",
+				"legend.context",
+				"scalebar.primary",
+				"north.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"atlas",
+				"report"
+			]
+		},
+		{
+			"description" : "Three-page operational report: cover with title block, main map page, and a statistics page with tables, metrics and methodology notes. Page roles drive conditional assembly.",
+			"id" : "report-multipage-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "report",
+			"slot_roles" : 
+			[
+				"title.cover",
+				"subtitle.cover",
+				"source.cover",
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north.primary",
+				"source.main",
+				"chart.distribution",
+				"table.summary",
+				"metrics.accuracy",
+				"trend.sparkline",
+				"notes.methodology",
+				"notes.uncertainty",
+				"provenance.block"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"report",
+				"operations",
+				"monitoring"
+			]
+		},
+		{
+			"description" : "Portrait three-page report variant for document-style deliverables (cover, map, statistics).",
+			"id" : "report-multipage-a4p",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 210
+			},
+			"product_type" : "report",
+			"slot_roles" : 
+			[
+				"title.cover",
+				"source.cover",
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"source.main",
+				"chart.distribution",
+				"table.summary",
+				"notes.methodology",
+				"provenance.block"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"report",
+				"operations"
+			]
+		},
+		{
 			"description" : "A4 portrait report page with section label, map, charts, metadata and disclaimer.",
 			"extends" : "report-page-a4p",
 			"id" : "report-page-a4l",
@@ -1808,6 +3685,63 @@
 			"suitable_tasks" : 
 			[
 				"report"
+			]
+		},
+		{
+			"description" : "A3 landscape scientific paper page: large map panel with figure caption, provenance and uncertainty note for journal submissions.",
+			"id" : "report-scientific-a3l",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 420
+			},
+			"product_type" : "publication",
+			"slot_roles" : 
+			[
+				"map.main",
+				"legend.primary",
+				"colorbar.primary",
+				"scalebar.primary",
+				"north.primary",
+				"caption.figure"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"publication",
+				"scientific"
+			]
+		},
+		{
+			"description" : "16:9 screen briefing page (dark tokens): map with headline metric cards for presentations.",
+			"id" : "report-screen-16x9",
+			"page" : 
+			{
+				"height_mm" : 167,
+				"width_mm" : 297
+			},
+			"product_type" : "report",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"metrics.key",
+				"source.main"
+			],
+			"style" : 
+			{
+				"medium" : "screen",
+				"token_set" : "scientific-dark"
+			},
+			"suitable_tasks" : 
+			[
+				"report",
+				"presentation"
 			]
 		},
 		{

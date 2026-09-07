@@ -399,7 +399,7 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
             regionProps[QStringLiteral( "outline_width" )] = QStringLiteral( "0.4" );
             regionProps[QStringLiteral( "width_unit" )] = QStringLiteral( "MM" );
             overview->setFrameSymbol(
-              QgsFillSymbol::createSimple( regionProps ) );
+              QgsFillSymbol::createSimple( regionProps ).release() );
             overview->setBlendMode( QPainter::CompositionMode_SourceOver );
           }
           else if ( style == "frame" )
@@ -413,7 +413,7 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
                                     : 0.8;
             frameProps[QStringLiteral( "outline_width" )] = QString::number( stroke );
             frameProps[QStringLiteral( "width_unit" )] = QStringLiteral( "MM" );
-            overview->setFrameSymbol( QgsFillSymbol::createSimple( frameProps ) );
+            overview->setFrameSymbol( QgsFillSymbol::createSimple( frameProps ).release() );
           }
           else
           {
@@ -429,7 +429,7 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
             outlineProps[QStringLiteral( "outline_color" )] = QStringLiteral( "#333333" );
             outlineProps[QStringLiteral( "outline_width" )] = QString::number( stroke );
             outlineProps[QStringLiteral( "width_unit" )] = QStringLiteral( "MM" );
-            overview->setFrameSymbol( QgsFillSymbol::createSimple( outlineProps ) );
+            overview->setFrameSymbol( QgsFillSymbol::createSimple( outlineProps ).release() );
           }
           insetMap->overviews()->addOverview( overview );
           insetMap->update();

@@ -21,6 +21,7 @@
 #include "../harness/grounding_tools.h"
 #include "../harness/plan_tools.h"
 #include "../harness/recipe_tools.h"
+#include "../harness/solution_tools.h"
 
 namespace sicnu::agent::spatial_tools {
 
@@ -135,6 +136,8 @@ void SpatialToolRegistry::registerBuiltinTools()
   harness::registerPlanTools();
   // Harness 4.0 scientific recipes (metadata under data/agent/recipes).
   harness::registerRecipeTools();
+  // Platform 5.0 solution knowledge: solution:search/describe/validate/instantiate.
+  harness::registerSolutionTools();
 }
 
 void SpatialToolRegistry::reset()
