@@ -95,6 +95,7 @@ struct FailureScript
     std::atomic<int> completed{ 0 };
     std::atomic<bool> *cancelFlag = nullptr; ///< cooperative cancel hook for tests
     int cancelAfter = 0;                     ///< flip the flag after this many forwards
+    int sleepPerForwardMs = 0;               ///< deterministic pacing for cancel tests
 };
 
 class ScriptedRuntime final : public IModelRuntime
@@ -111,6 +112,9 @@ class ScriptedRuntime final : public IModelRuntime
     cv::Mat infer( const cv::Mat &blob ) override
     {
       ++m_script->forwards;
+      if ( m_script->sleepPerForwardMs > 0 )
+        std::this_thread::sleep_for(
+          std::chrono::milliseconds( m_script->sleepPerForwardMs ) );
       if ( !m_script->crashOnBatchN.empty()
            && std::to_string( std::max( 1, blob.dims >= 4 ? blob.size[0] : 1 ) )
                 == m_script->crashOnBatchN )
@@ -425,8 +429,7 @@ TEST_CASE( "cancel between batches lands with bounded delay and no output", "[mo
   ScriptedProviderGuard guard;
 
   QTemporaryDir dir;
-  // 256 px at tile 32 / batch 1 = 64 forwards: the canceler cannot miss the
-  // first tile (the 96 px raster finished inside the 1 ms poll quantum).
+  guard.script->sleepPerForwardMs = 2; // deterministic pacing: 64 forwards x 2 ms
   const QString input = writeRaster( dir, QStringLiteral( "cancel-in.tif" ), 256, 256 );
   const QString output = dir.filePath( QStringLiteral( "cancel-out.tif" ) );
 
