@@ -22,10 +22,10 @@
 #include "qgis_sip.h"
 #include "qgscolorramp.h"
 #include "qgsrasterrenderer.h"
+#include "qgsrastershader.h"
 #include "qgsrectangle.h"
 
 class QDomElement;
-class QgsRasterShader;
 
 /**
  * \ingroup core

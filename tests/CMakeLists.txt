@@ -1011,7 +1011,11 @@ sicnu_add_test(test_perf_benchmarks TIMEOUT 300 RUN_SERIAL TRUE)
 # plane-3 epic): in-process workloads through TaskCenter/JobEngine/operators
 # with JSON output (SICNU_EXEC_BENCH_OUT=<dir>) merged by scripts/perf_report.py.
 # RUN_SERIAL: measures peak RSS deltas and IO counters of this process.
+# The remote-source fixtures (tests/support/mini_cog_server.h) use plain
+# blocking POSIX sockets; Windows lane skips these two targets (see REVIEW_LOG).
+if(NOT WIN32)
 sicnu_add_test(test_execution_benchmarks TIMEOUT 600 RUN_SERIAL TRUE)
+endif()
 
 # Phase B chunk execution graph contracts (Qt-free; links sicnu_runtime only).
 sicnu_add_test(test_chunk_graph TIMEOUT 120)
@@ -1028,9 +1032,13 @@ sicnu_add_test(test_fused_chain TIMEOUT 300)
 
 # Phase F remote COG caching layer (network-free data layer; POSIX sockets
 # provide the fake remote endpoint).
+if(NOT WIN32)
 sicnu_add_test(test_remote_source_cache TIMEOUT 180)
+endif()
+if(NOT WIN32)
 target_include_directories(test_remote_source_cache PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(test_execution_benchmarks PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
 
 # Phase G scheduler contracts (header-only budget2 + tests).
 sicnu_add_test(test_scheduler3 TIMEOUT 120)
@@ -1057,7 +1065,10 @@ sicnu_add_test(test_workspace_stress TIMEOUT 900 RUN_SERIAL TRUE)
 sicnu_add_test(test_governance_tools TIMEOUT 300)
 
 # Phase M fault injection / chaos matrix (fork + kill semantics; serial).
+# fork()/waitpid()-based crash-injection fixture is POSIX-only.
+if(NOT WIN32)
 sicnu_add_test(test_fault_injection TIMEOUT 300 RUN_SERIAL TRUE)
+endif()
 # #706: the python-bindings smoke test existed but was registered nowhere —
 # it silently never ran in any lane. Guarded on the bindings target existing.
 if(TARGET _sicnu_operators AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bindings.py)
@@ -2564,6 +2575,7 @@ if(TARGET qgis_app_classify)
     Qt6::Widgets
     Qt6::Test
     sicnu_processing
+    sicnu_data
     qgis_core
     qgis_gui
   )
@@ -5690,6 +5702,8 @@ target_include_directories(test_workflow_run_coordinator PRIVATE
 )
 sicnu_discover_tests(test_workflow_run_coordinator)
 
+# SIGSTOP/SIGCONT process-freezing race fixture is POSIX-only.
+if(NOT WIN32)
 add_executable(test_workflow_cache_e2e test_workflow_cache_e2e.cpp)
 target_link_libraries(test_workflow_cache_e2e PRIVATE
   Catch2::Catch2WithMain
@@ -5711,6 +5725,7 @@ target_compile_definitions(test_workflow_cache_e2e PRIVATE
 )
 sicnu_link_jsoncpp(test_workflow_cache_e2e)
 sicnu_discover_tests(test_workflow_cache_e2e)
+endif()
 
 add_executable(test_workflow_artifact_gc test_workflow_artifact_gc.cpp)
 target_link_libraries(test_workflow_artifact_gc PRIVATE
@@ -5954,7 +5969,9 @@ target_include_directories(hello_plugin PRIVATE
   ${CMAKE_SOURCE_DIR}/src/sdk
   ${CMAKE_SOURCE_DIR}/src
 )
-target_link_libraries(hello_plugin PRIVATE sicnu_operators_core jsoncpp)
+# RSOperator's out-of-line virtuals live in the shared sicnu_operators target;
+# Windows MODULE links must resolve them (Linux allows undefined).
+target_link_libraries(hello_plugin PRIVATE sicnu_operators sicnu_operators_core jsoncpp)
 set_target_properties(hello_plugin PROPERTIES
   LIBRARY_OUTPUT_NAME hello_plugin
   PREFIX "lib"
@@ -5964,8 +5981,11 @@ set_target_properties(hello_plugin PROPERTIES
 sicnu_add_test(test_plugin_manifest)
 target_link_libraries(test_plugin_manifest PRIVATE sicnu_sdk)
 
+# Plugin packaging e2e uses rm -rf /tmp, symlink(2) and /etc — POSIX-only.
+if(NOT WIN32)
 sicnu_add_test(test_exprs_plugin_system)
 target_link_libraries(test_exprs_plugin_system PRIVATE sicnu_sdk)
+endif()
 
 sicnu_add_test(test_exprs_plugin_loader)
 target_link_libraries(test_exprs_plugin_loader PRIVATE sicnu_sdk)
@@ -5979,11 +5999,14 @@ target_link_libraries(test_exprs_external_process PRIVATE sicnu_sdk)
 sicnu_add_test(test_exprs_workflow_schema)
 target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
 
+# popen()/WEXITSTATUS CLI-spawn fixture is POSIX-only.
+if(NOT WIN32)
 sicnu_add_test(test_cli_commands_json)
 target_link_libraries(test_cli_commands_json PRIVATE sicnu_sdk sicnu_plugins_framework)
 target_compile_definitions(test_cli_commands_json PRIVATE
   SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
 )
+endif()
 
 # The plugins host runtime: registry bridging + external tool operator.
 sicnu_add_test(test_plugins_runtime_host)
@@ -5992,6 +6015,25 @@ target_link_libraries(test_plugins_runtime_host PRIVATE sicnu_plugins_framework 
 # Owner-scoped unload barrier (#747).
 sicnu_add_test(test_plugin_execution_barrier)
 target_link_libraries(test_plugin_execution_barrier PRIVATE sicnu_plugins_framework sicnu_sdk)
+
+
+# — Harness 4.0 (Pi Spatial Scientist & Agent Harness) —
+# Error taxonomy (Phase 12) and canonical tool manifest/taxonomy (Phases 1/2).
+sicnu_add_test(test_harness_error)
+sicnu_link_jsoncpp(test_harness_error)
+
+sicnu_add_test(test_harness_catalog)
+sicnu_link_jsoncpp(test_harness_catalog)
+
+
+sicnu_add_test(test_harness_grounding)
+sicnu_link_jsoncpp(test_harness_grounding)
+
+
+# Harness 4.0 evals: six deterministic RS scenarios + anti-hallucination +
+# token budgets (mission Phases 18-20).
+sicnu_add_test(test_harness_evals)
+sicnu_link_jsoncpp(test_harness_evals)
 
 
 # Last TEST_INCLUDE_FILES entry: stamp PYTHONHOME / LD_LIBRARY_PATH / QT_IM_MODULE

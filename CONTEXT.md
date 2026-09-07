@@ -547,7 +547,49 @@ _Avoid_: Workspace state map, Context dict, UI state dump
   5. **New remap test** trains K-Means with permuted label ids (5/9) and asserts predictions map to the training labels in the accuracy path and the written class map, with a lowercase `"kmeans"` methodName to pin the trap removal.
 - **Consequences**: one construction path, color formula, sampling policy and NoData discovery; remap semantics observably unchanged (identity when no table; the unsupervised operator's all-zero dummy trainY keeps raw 1..K cluster ids); `"kmeans"` strings now construct K-Means instead of falling back to SVM — only reachable via sidecar predict-only, which still fails cleanly (K-Means has no `load()`).
 
-### ADR 0062–0124: Index
+
+**Harness**:
+The ExpRS-side agent harness (`src/agent/harness/`, ADR 0130): error taxonomy,
+tool manifests/taxonomy, entity resolution, typed context, scientific
+preflight, plan compilation, verification, and recipes. Pi owns the generic
+agent loop; the harness owns everything spatial/scientific.
+_Avoid_: Agent framework, agent runtime, Pi backend
+
+**Tool Manifest**:
+The bounded per-tool metadata block (taxonomy, risk class, side effects,
+resource hints, cancellability, preconditions, expected artifacts) derived
+from AgentMetadata / the namespace risk table and serialized in catalog
+responses.
+_Avoid_: Tool docs, description string
+
+**Entity Resolution**:
+Authoritative lookup of dataset references (asset-N id, governed UUID, path,
+display name) behind agent tools; unknown/ambiguous are typed failures with
+candidates, never silent picks.
+_Avoid_: Fuzzy matching, name guessing
+
+**Scientific Preflight**:
+Deterministic intent rule packs (ndvi/change/sar_change/classify/phenology)
+over inspected facts; `blocked` vetoes plan execution.
+_Avoid_: Validation (that is the DAG-schema check), sanity check
+
+**AgentPlan v2**:
+The versioned plan document (goal/intent/inputs/steps/outputs/verification/
+map_output) that compiles to WorkflowDefinition — the only plan-to-engine
+bridge.
+_Avoid_: Pipeline JSON (that is the compiled WorkflowDefinition)
+
+**Verification Verdict**:
+The tri-state PASS / PASS_WITH_WARNINGS / FAIL per artifact and per run;
+FAIL forces run status `failed`.
+_Avoid_: ok flag, success boolean
+
+**Scientific Recipe**:
+A metadata document under `data/agent/recipes/` that orchestrates existing
+operators into an AgentPlan via slot bindings; recipes carry no kernels.
+_Avoid_: Macro, script, workflow copy
+
+### ADR 0062–0130: Index
 
 ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision, and consequences in each file). Titles for orientation:
 
@@ -622,6 +664,7 @@ ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision
 - **ADR 0130 (Algorithms)**: Scientific Algorithms & Processing Foundation 4.0 (shared NoData/statistics/grid/histogram kernels, #759 fix, `rs:temporal_sen_trend`, validation-policy docs under `docs/processing/`)
 - **ADR 0130 (Cartography)**: Cartography Design Tokens & Component/Template Schema v2
 - **ADR 0130 (Governance)**: Data Plane, Runtime, Governance & Reproducibility Reliability 4.0 (document-authority/downgrade guard, WAL-consistent snapshots, checked store writes, reference-safe CAS eviction, external-mutation cache invalidation, crash-resume completion identity, truthful run states, bounded warm worker pool; fault matrix in `docs/architecture/FAULT_MATRIX_4.md`)
+- **ADR 0130 (Harness)**: Pi Spatial Scientist & Agent Harness 4.0
 - **ADR 0130 (SDK)**: Plugin Lifecycle, Unload Safety & Path Containment (barrier-protected unload with drain-or-refuse; owner-scoped execution leases; UI reverse ownership via a shell sink; Python `py:` revocation; entrypoint containment at validation and load; `SICNU_MCP_WORKSPACE` effect policy for external tools; std::filesystem/Win32 SDK portability; `plugin test` conformance kit)
 - **ADR 0130 (UI)**: Unified Application Shell (workspace dock wiring, project-context title, dead-panel removal, menu dedup)
 - **ADR 0131 (Cartography)**: MapSpec 2.0 — Compositional Constraints, Composition Solver & Visual Regression
@@ -641,4 +684,3 @@ scale/offset, band-role resolution, output publication), and
 `docs/processing/temporal.md` (per-operator denominators, time-axis handling,
 references). A PR that changes one of these contracts updates the page in the
 same PR.
->>>>>>> master

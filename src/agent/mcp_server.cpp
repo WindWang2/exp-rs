@@ -143,6 +143,7 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("lineage:"),     // transitive lineage queries (Platform 3.0)
         QStringLiteral("result:"),      // governed result records (Platform 3.0)
         QStringLiteral("run:"),         // workflow run comparison (Platform 3.0)
+        QStringLiteral("harness:"),     // Harness 4.0: taxonomy/manifest/preflight/plan/verify/recipe
     };
     for (const QString &prefix : kAllowed) {
         if (checkId.startsWith(prefix))
@@ -1085,6 +1086,7 @@ void McpServer::handleRequest(const QVariantMap &request)
                      toolName.startsWith(QStringLiteral("collection:")) ||
                      toolName.startsWith(QStringLiteral("lineage:")) ||
                      toolName.startsWith(QStringLiteral("result:")) ||
+                     toolName.startsWith(QStringLiteral("harness:")) ||
                      toolName.startsWith(QStringLiteral("run:")))
             {
                 resultData = handleSpatialToolCall(toolName, arguments);

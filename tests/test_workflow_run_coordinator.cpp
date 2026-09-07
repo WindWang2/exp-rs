@@ -397,13 +397,13 @@ TEST_CASE( "resume resolves pre-crash parents port-aware from their result paylo
     consume.params["output"] = "/tmp/" + prefix + "_out.tif";
     // Nested JSON object placeholder: substitution recurses string leaves
     // inside objects (#727 port shapes).
-    Json::Value nested( Json::Value( Json::objectValue ) );
+    Json::Value nested( Json::objectValue );
     nested["raster"] = "$infer.output";
     nested["model"] = "$infer.model";
     nested["ghost"] = "$ghoststep.output"; // dangling step ref — stays literal
     consume.params["nested"] = nested;
     // Array element placeholder: substitution recurses into arrays too.
-    Json::Value list( Json::Value( Json::arrayValue ) );
+    Json::Value list( Json::arrayValue );
     list.append( "$infer.output" );
     list.append( "$infer.model" );
     consume.params["list"] = list;
@@ -836,11 +836,11 @@ TEST_CASE( "resume substitutes a step with mixed completed and live parents "
     combo.operatorId = prefix + ":combo";
     combo.params["inDone"] = "$done.output";
     combo.params["inLive"] = "$live.output";
-    Json::Value nested( Json::Value( Json::objectValue ) );
+    Json::Value nested( Json::objectValue );
     nested["fromDone"] = "$done.output";
     nested["fromLive"] = "$live.output";
     combo.params["nested"] = nested;
-    Json::Value list( Json::Value( Json::arrayValue ) );
+    Json::Value list( Json::arrayValue );
     list.append( "$done.output" );
     list.append( "$live.output" );
     combo.params["list"] = list;
@@ -864,7 +864,7 @@ TEST_CASE( "resume substitutes a step with mixed completed and live parents "
     def.steps.push_back( done );
     def.steps.push_back( live );
 
-    Json::Value donePayload( Json::Value( Json::objectValue ) );
+    Json::Value donePayload( Json::objectValue );
     donePayload["output"] = donePath.toStdString();
     WorkflowRun run;
     run.setDefinition( def );
@@ -878,7 +878,7 @@ TEST_CASE( "resume substitutes a step with mixed completed and live parents "
     std::atomic_bool doneRan{ false }, liveRan{ false }, comboRan{ false };
     // The live parent's executor provides a real "output" port payload so
     // the dispatch-time substitution resolves combo's $live.output.
-    Json::Value livePorts( Json::Value( Json::objectValue ) );
+    Json::Value livePorts( Json::objectValue );
     livePorts["output"] = livePath;
     registerCapturingExecutor( prefix + ":done", &doneRan, donePayload );
     registerCapturingExecutor( prefix + ":live", &liveRan, livePorts );

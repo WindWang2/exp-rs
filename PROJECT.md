@@ -30,12 +30,20 @@ Pi agent adapter over the same Task Center seam.
   layers), dialogs, task center UI, schema form builder, design tokens
   (`design_tokens.h`). See `docs/ui-architecture.md` for the information
   architecture and extension rules.
-- `src/agent` — copilot, MCP, spatial tools, agent contracts; `pi/` bridge;
-  MapSpec cartography (`src/agent/mapspec`, `src/agent/cartography`, `data/cartography`).
+- `src/agent` — copilot, MCP, spatial tools, agent contracts, harness
+  (`src/agent/harness`); `pi/` bridge; MapSpec cartography
+  (`src/agent/mapspec`, `src/agent/cartography`, `data/cartography`).
 - `docs/adr/` — decision ledger (0001–0133); `CONTEXT.md` — domain vocabulary.
 
-## Current state (2026-09-06)
+## Current state (2026-09-07)
 
+- **Pi Spatial Scientist & Agent Harness 4.0** (ADR 0130):
+  error taxonomy (`harness_error.h`), tool manifests with risk/preconditions/artifacts,
+  dataset grounding (`EntityResolver`), typed spatial context with content-hashed revisions,
+  deterministic scientific preflight rule packs (NDVI/change/SAR/classify/phenology),
+  AgentPlan v2 compiled to `WorkflowDefinition` JSON, automatic output verification (`PASS/PASS_WITH_WARNINGS/FAIL`),
+  final map confirmation loop, structured run results + single-resume retry, scientific recipes (`data/agent/recipes/`),
+  Pi subagents (`pi/roles/`), deterministic evaluation harness (`test_harness_evals`).
 - **Plugin SDK, Isolation & Extension Ecosystem 4.0** (ADR 0130):
   barrier-protected unload with drain-or-refuse (`SICNU_PLUGIN_UNLOAD_TIMEOUT_MS`),
   owner-scoped execution leases, UI reverse ownership via shell sink, Python `py:`

@@ -37,6 +37,12 @@ QsciAPIs::~QsciAPIs() {}
 // lexer subclasses are indistinguishable. Safe only while the stub lexers
 // have no virtual behavior and nobody qobject_casts to a subclass; if these
 // classes are ever really enabled, give each its own Q_OBJECT meta-object.
+// MSVC odr-uses staticMetaObject through the Q_OBJECT-generated inline tr();
+// provide definitions so the DLL links (the stubs never use them at runtime).
+const QMetaObject QsciLexerHTML::staticMetaObject = QMetaObject();
+const QMetaObject QsciLexerJavaScript::staticMetaObject = QMetaObject();
+const QMetaObject QsciLexerJSON::staticMetaObject = QMetaObject();
+
 const QMetaObject *QsciLexerHTML::metaObject() const { return &QsciLexer::staticMetaObject; }
 void *QsciLexerHTML::qt_metacast( const char *c ) { return QsciLexer::qt_metacast( c ); }
 int QsciLexerHTML::qt_metacall( QMetaObject::Call c, int id, void **a ) { return QsciLexer::qt_metacall( c, id, a ); }

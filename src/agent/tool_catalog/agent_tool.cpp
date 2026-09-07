@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include "agent/harness/tool_manifest.h"
+#include "agent/harness/tool_taxonomy.h"
+
 namespace sicnu::agent::tool_catalog {
 
 std::string toolCategoryToString( ToolCategory category )
@@ -93,6 +96,28 @@ Json::Value AgentTool::toMcpToolDefinition() const
   root["name"] = name;
   root["description"] = description.empty() ? displayName : description;
   root["schema"] = normalizedInputSchema();
+  if ( !outputSchema.isNull() && outputSchema.isObject() && !outputSchema.empty() )
+    root["outputSchema"] = outputSchema;
+
+  // Harness 4.0: bounded, machine-readable manifest block (risk class, side
+  // effects, resource hints, cancellability, preconditions, expected
+  // artifacts, taxonomy). Derived from the id + AgentMetadata — never prose.
+  sicnu::agent::harness::ToolManifest manifest =
+    sicnu::agent::harness::manifestForToolId( name );
+  const auto &meta = agentMetadata;
+  if ( !meta.memoryPolicy.empty() )
+    manifest.memoryPolicy = meta.memoryPolicy;
+  if ( !meta.determinismGrade.empty() )
+    manifest.determinismGrade = meta.determinismGrade;
+  if ( !meta.costClass.empty() )
+    manifest.costClass = meta.costClass;
+  manifest.largeRasterSafe = manifest.largeRasterSafe || meta.largeRasterSafe;
+  manifest.gpuAccelerated = manifest.gpuAccelerated || meta.gpuAccelerated;
+  manifest.cancellable = manifest.cancellable || meta.supportsCancellation;
+  manifest.sideEffects = manifest.sideEffects || meta.sideEffects;
+  manifest.idempotent = !manifest.sideEffects && meta.idempotent;
+  manifest.producesProvenance = manifest.producesProvenance || meta.producesProvenance;
+  root["harness"] = manifest.toJson();
   return root;
 }
 

@@ -17,7 +17,15 @@
 #include <fstream>
 
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <cstdlib> // _exit
+
+#ifdef _WIN32
+#include "exprs/msvc_posix_shim.h"
+#endif
+#else
 #include <unistd.h>
+#endif
 
 using namespace exprs;
 

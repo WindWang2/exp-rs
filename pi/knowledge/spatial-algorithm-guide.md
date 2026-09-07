@@ -35,6 +35,23 @@ The desktop ships this chain as the `lab.preprocess.optical` DAG;
 | Terrain | `rs:terrain_analysis` (slope/aspect/hillshade/TRI/TPI; geographic DEMs auto-converted) or `gdal_tools:gdaldem` | needs an elevation raster |
 | Pan-sharpening | fusion (Brovey/IHS/PCA) | grid preflight runs automatically in dialogs |
 
+## Harness 4.0 fast path (plan lifecycle)
+
+When the task matches a sanctioned recipe, prefer the harness plan lifecycle
+over hand-authoring pipeline JSON:
+
+```
+harness:context          (typed workspace snapshot, revision-stamped)
+  → spatial:understand   (typed dataset facts; never guess bands/CRS/modality)
+  → harness:search_recipes → harness:instantiate_recipe
+  → harness:preflight    (deterministic; blocked = fix inputs, not retry)
+  → harness:execute_plan (compiles to the authoritative workflow engine)
+  → harness:run_status   (real run state; PASS/PASS_WITH_WARNINGS/FAIL)
+```
+
+A FAIL verification is final: report failure, never success. Error codes
+(`harness:error_codes`) are stable — read them instead of parsing logs.
+
 ## Planning rules
 
 1. **Inspect before you plan**: `spatial:raster_inspect` reveals CRS,
