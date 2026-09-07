@@ -28,7 +28,7 @@
 
 namespace sicnu {
 
-class AlgorithmTaskInfo;
+struct AlgorithmTaskInfo; // match task_center.h definition tag (MSVC mangles class/struct differently)
 
 namespace workflow {
 
