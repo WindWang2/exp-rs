@@ -247,6 +247,12 @@ bool resolveDevice( const RequestedDevice &request,
       return answer( cpu );
     case RequestedDevice::Kind::Cuda:
     {
+      // A model that prefers CPU never lands on a GPU: the manifest's GPU
+      // flag expresses where the weights were designed to run, and an
+      // explicit cuda request for a CPU-only model is a configuration error
+      // that must fail loudly (silently running on CPU would mislead).
+      if ( !modelWantsGpu )
+        return refuse( "model is not GPU-capable (manifest runtime.gpu is false)" );
       if ( !hw.cudaAvailable )
         return refuse( "CUDA is unavailable on this host" );
       if ( !cudaAvailable( request.cudaIndex ) )

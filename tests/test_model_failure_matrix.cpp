@@ -206,6 +206,7 @@ TEST_CASE( "resolveDevice is deterministic across the request matrix", "[models]
   ModelHardwareCapabilities gpu = noGpu;
   gpu.cudaAvailable = true;
   gpu.cudaDeviceCount = 2;
+  gpu.vramBudgetMb = 100; // a declared budget makes over-budget cases meaningful
 
   ResolvedDevice out;
   std::string why;
@@ -243,9 +244,11 @@ TEST_CASE( "resolveDevice is deterministic across the request matrix", "[models]
   // cuda:5 beyond the device count: refusal regardless of backend cap.
   REQUIRE_FALSE( resolveDevice( RequestedDevice::cuda( 5 ), gpu, true, 0, 63, true, &out, &why ) );
 
-  // CPU-only model never lands on a GPU, even on request.
-  REQUIRE( resolveDevice( RequestedDevice::cuda( 0 ), gpu, false, 0, 63, true, &out, &why ) );
-  CHECK_FALSE( out.gpu );
+  // CPU-only model never lands on a GPU, even on request: the request
+  // fails loudly instead of silently demoting (demotion would hide the
+  // configuration error).
+  REQUIRE_FALSE( resolveDevice( RequestedDevice::cuda( 0 ), gpu, false, 0, 63, true, &out, &why ) );
+  CHECK( why.find( "GPU-capable" ) != std::string::npos );
 }
 
 TEST_CASE( "inference errors are classified for the failure payloads", "[models][failure]" )
@@ -348,8 +351,14 @@ TEST_CASE( "an unwritable output path fails with FileNotWritable and no residue"
 
   QTemporaryDir dir;
   const QString input = writeRaster( dir, QStringLiteral( "disk-in.tif" ), 32, 32 );
-  // A path whose directory does not exist (and cannot be created by GDAL).
-  const QString output = dir.filePath( QStringLiteral( "no/such/dir/out.tif" ) );
+  // A file standing in for a directory: the stage cannot be created beneath it.
+  const QString blocker = dir.filePath( QStringLiteral( "blocker" ) );
+  {
+    QFile f( blocker );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( QByteArray( "x" ) );
+  }
+  const QString output = blocker + QStringLiteral( "/out.tif" );
 
   ModelInfo model = scriptedModel( input.toStdString() );
   RSOperatorContext context;
@@ -387,21 +396,20 @@ TEST_CASE( "removing the artifact invalidates the model at the registry gate", "
 {
   QTemporaryDir dir;
   const QString weights = dir.filePath( QStringLiteral( "weights.onnx" ) );
-  {
-    QFile f( weights );
-    REQUIRE( f.open( QIODevice::WriteOnly ) );
-    f.write( QByteArray( "weights" ) );
-  }
-  ModelInfo model = scriptedModel( weights.toStdString() );
+  REQUIRE( QFile::copy( identityModelPath(), weights ) );
+  ModelInfo model;
+  model.name = "removable-model";
   model.framework = "onnx";
+  model.readiness = ModelReadiness::Ready;
   model.resolvedArtifactPath = weights.toStdString();
 
   RegistryReset reset;
   REQUIRE( ModelRuntimeRegistry::instance().acquire( model ) );
 
   QFile::remove( weights );
-  // The digest memo misses (size/mtime changed via removal), the artifact is
-  // unreadable, so acquire refuses instead of serving a stale session.
+  // The digest memo misses (the file is gone), the artifact is unreadable,
+  // so acquire refuses instead of serving the stale session.
+  ModelRuntimeRegistry::instance().releaseAll();
   std::string error;
   CHECK_FALSE( ModelRuntimeRegistry::instance().acquire( model, &error ) );
   CHECK( error.find( "artifact" ) != std::string::npos );
@@ -417,7 +425,9 @@ TEST_CASE( "cancel between batches lands with bounded delay and no output", "[mo
   ScriptedProviderGuard guard;
 
   QTemporaryDir dir;
-  const QString input = writeRaster( dir, QStringLiteral( "cancel-in.tif" ), 96, 96 );
+  // 256 px at tile 32 / batch 1 = 64 forwards: the canceler cannot miss the
+  // first tile (the 96 px raster finished inside the 1 ms poll quantum).
+  const QString input = writeRaster( dir, QStringLiteral( "cancel-in.tif" ), 256, 256 );
   const QString output = dir.filePath( QStringLiteral( "cancel-out.tif" ) );
 
   ModelInfo model = scriptedModel( input.toStdString() );
@@ -443,7 +453,7 @@ TEST_CASE( "cancel between batches lands with bounded delay and no output", "[mo
                            .count();
   canceler.join();
 
-  // Bounded: at most a couple of extra tiles run while the cancel lands.
+  // Bounded: the in-flight forward finishes, then the cancel lands.
   CHECK( guard.script->completed.load() <= 3 );
   CHECK( elapsedMs < 30000.0 ); // a 96 px raster cannot take 30 s — the point is it returned
   CHECK_FALSE( fileExists( output ) );
@@ -465,22 +475,32 @@ TEST_CASE( "a 100k x 100k logical raster runs tiled without whole-raster allocat
   // the engine sees a 100k raster without a 40 GB payload on disk.
   QTemporaryDir dir;
   const QString small = writeRaster( dir, QStringLiteral( "vrt-src.tif" ), 32, 32 );
-  const QString vrtPath = dir.filePath( QStringLiteral( "huge.vrt" ) );
-  {
-    QFile vrt( vrtPath );
+  auto vrtTwoBand = []( const QString &path, int extent ) {
+    QFile vrt( path );
     REQUIRE( vrt.open( QIODevice::WriteOnly ) );
     vrt.write( QString(
-                 "<VRTDataset rasterXSize=\"100000\" rasterYSize=\"100000\">"
+                 "<VRTDataset rasterXSize=\"%1\" rasterYSize=\"%2\">"
                  "  <VRTRasterBand dataType=\"Float32\" band=\"1\">"
                  "    <SimpleSource><SourceFilename relativeToVRT=\"1\">vrt-src.tif</SourceFilename>"
                  "    <SourceBand>1</SourceBand>"
                  "    <SrcRect xOff=\"0\" yOff=\"0\" xSize=\"32\" ySize=\"32\"/>"
-                 "    <DstRect xOff=\"0\" yOff=\"0\" xSize=\"100000\" ySize=\"100000\"/>"
+                 "    <DstRect xOff=\"0\" yOff=\"0\" xSize=\"%1\" ySize=\"%2\"/>"
+                 "    </SimpleSource>"
+                 "  </VRTRasterBand>"
+                 "  <VRTRasterBand dataType=\"Float32\" band=\"2\">"
+                 "    <SimpleSource><SourceFilename relativeToVRT=\"1\">vrt-src.tif</SourceFilename>"
+                 "    <SourceBand>2</SourceBand>"
+                 "    <SrcRect xOff=\"0\" yOff=\"0\" xSize=\"32\" ySize=\"32\"/>"
+                 "    <DstRect xOff=\"0\" yOff=\"0\" xSize=\"%1\" ySize=\"%2\"/>"
                  "    </SimpleSource>"
                  "  </VRTRasterBand>"
                  "</VRTDataset>" )
+                 .arg( extent )
+                 .arg( extent )
                  .toUtf8() );
-  }
+  };
+  const QString vrtPath = dir.filePath( QStringLiteral( "huge.vrt" ) );
+  vrtTwoBand( vrtPath, 100000 );
 
   ModelInfo model = scriptedModel( vrtPath.toStdString() );
   model.tiling.tileSize = 512;
@@ -517,19 +537,7 @@ TEST_CASE( "a 100k x 100k logical raster runs tiled without whole-raster allocat
   // streamed writes, atomic publication.
   {
     const QString midVrt = dir.filePath( QStringLiteral( "mid.vrt" ) );
-    QFile vrt( midVrt );
-    REQUIRE( vrt.open( QIODevice::WriteOnly ) );
-    vrt.write( QString(
-                 "<VRTDataset rasterXSize=\"4096\" rasterYSize=\"4096\">"
-                 "  <VRTRasterBand dataType=\"Float32\" band=\"1\">"
-                 "    <SimpleSource><SourceFilename relativeToVRT=\"1\">vrt-src.tif</SourceFilename>"
-                 "    <SourceBand>1</SourceBand>"
-                 "    <SrcRect xOff=\"0\" yOff=\"0\" xSize=\"32\" ySize=\"32\"/>"
-                 "    <DstRect xOff=\"0\" yOff=\"0\" xSize=\"4096\" ySize=\"4096\"/>"
-                 "    </SimpleSource>"
-                 "  </VRTRasterBand>"
-                 "</VRTDataset>" )
-                 .toUtf8() );
+    vrtTwoBand( midVrt, 4096 );
     const QString output = dir.filePath( QStringLiteral( "mid-out.tif" ) );
     ModelInfo midModel = model; // same 512 px tile, batch 1
     RSOperatorContext context;

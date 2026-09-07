@@ -254,7 +254,9 @@ TEST_CASE( "regression models run through the same engine as continuous rasters"
   model.tiling.tileSize = 32;
   RSOperatorContext context;
   TileInferenceEngine engine( model, ModelRuntimeRegistry::instance().acquire( model ) );
-  const auto stats = engine.run( input.toStdString(), {}, output.toStdString(), context );
+  // Feed band 1 only: the runtime mirrors the fed channels (C'=1) so the
+  // continuous single-channel raster is unambiguous.
+  const auto stats = engine.run( input.toStdString(), { 1 }, output.toStdString(), context );
 
   CHECK( stats.outBands == 1 );
   int w = 0, h = 0;
@@ -299,13 +301,24 @@ TEST_CASE( "detection decode maps v5 and v8 layouts to raster boxes", "[models][
   REQUIRE( boxes.size() == 1 );
   CHECK( boxes[0].confidence == Catch::Approx( 0.8f ) );
 
-  // Scale mapping: fed tensor was a 2x downsample of a 64 px window.
-  contract.tensorLayout = "channels_first";
+  // Scale mapping: fed tensor was a 2x downsample of a 64 px window
+  // (the v8 tensor above keeps its channels_last layout).
+  boxes.clear();
+  REQUIRE( decodeDetections( t8, contract, 0, 0, 2.0, 2.0, 64, 32, boxes ).empty() );
+  REQUIRE( boxes.size() == 1 );
+  CHECK( boxes[0].x == Catch::Approx( 24.0f ) );
+  CHECK( boxes[0].w == Catch::Approx( 16.0f ) );
+  // Raster-bounds clamp: a window straddling the raster edge keeps the
+  // in-raster slice (56..64) as a clipped box; a fully outside candidate is
+  // dropped (no zero-area boxes).
   boxes.clear();
   REQUIRE( decodeDetections( t8, contract, 32, 0, 2.0, 2.0, 64, 32, boxes ).empty() );
   REQUIRE( boxes.size() == 1 );
-  CHECK( boxes[0].x == Catch::Approx( 32.0f + 12.0f * 2.0 ) );
-  CHECK( boxes[0].w == Catch::Approx( 16.0f ) );
+  CHECK( boxes[0].x == Catch::Approx( 56.0f ) );
+  CHECK( boxes[0].w == Catch::Approx( 8.0f ) );
+  boxes.clear();
+  REQUIRE( decodeDetections( t8, contract, 100, 0, 2.0, 2.0, 64, 32, boxes ).empty() );
+  CHECK( boxes.empty() );
 }
 
 TEST_CASE( "NMS is deterministic and resolves tile-overlap duplicates", "[models][detect]" )
@@ -324,7 +337,9 @@ TEST_CASE( "NMS is deterministic and resolves tile-overlap duplicates", "[models
   boxes.push_back( DetectionBox{ 80, 80, 5, 5, 1, 0.5f } );
 
   const auto kept = nonMaxSuppression( boxes, 0.45 );
-  REQUIRE( kept.size() == 3 );
+  // The 0.7 shifted duplicate (IoU 0.68 with the winner) is suppressed; the
+  // bit-equal twin collapses; the three non-overlapping 0.5 boxes survive.
+  REQUIRE( kept.size() == 4 );
   CHECK( kept[0].confidence == Catch::Approx( 0.9f ) );          // strongest first
   CHECK( kept[0].x == Catch::Approx( 10.0f ) );
   bool hasDistinct = false, hasTieFirst = false;

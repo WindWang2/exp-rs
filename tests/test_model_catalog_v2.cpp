@@ -868,6 +868,7 @@ TEST_CASE( "toJson serializes the v3 inputs surface for re-parse", "[models][cat
   builder["indentation"] = "";
   Json::Value echoJson = json;
   echoJson["name"] = "v3-rt-echo";
+  echoJson["id"] = "v3-rt-echo"; // replayed manifests must keep the id unique too
   echoJson["artifact"]["path"] = "weights.onnx";
   const std::string serialized = Json::writeString( builder, echoJson );
   writeManifest( dir, QStringLiteral( "v3-rt-echo" ), QByteArray( serialized.c_str() ), artifactBytes );
@@ -974,6 +975,7 @@ TEST_CASE( "manifests without 4.0 identity fields keep historical identity", "[m
 TEST_CASE( "manifest_version 4 accepts the v3 shape plus 4.0 vocabulary", "[models][catalog][identity]" )
 {
   QTemporaryDir dir;
+  const QByteArray v4Weights = "v4-weights";
   writeManifest( dir, QStringLiteral( "version-four" ), R"({
       "name": "version-four",
       "id": "acme/v4",
@@ -981,8 +983,10 @@ TEST_CASE( "manifest_version 4 accepts the v3 shape plus 4.0 vocabulary", "[mode
       "task": "segmentation",
       "framework": "onnx",
       "inputs": [ { "name": "scene", "dtype": "float32" } ],
-      "output": { "type": "raster", "format": "labels", "classes": ["a", "b"] }
-  })" );
+      "output": { "type": "raster", "format": "labels", "classes": ["a", "b"] },
+      "artifact": { "path": "weights.onnx" }
+  })",
+                 v4Weights );
 
   auto &catalog = ModelCatalog::instance();
   catalog.setDirectory( dir.path().toStdString() );

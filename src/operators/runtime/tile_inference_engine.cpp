@@ -1043,9 +1043,16 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     }
     catch ( const RSOperatorError &e )
     {
-      if ( classifyInferenceError( e.what() ) != InferenceFailureKind::OutOfMemory
-           || batchMats.size() <= 1 )
+      if ( classifyInferenceError( e.what() ) != InferenceFailureKind::OutOfMemory )
         throw;
+      if ( batchMats.size() <= 1 )
+        throw RSOperatorError(
+          ErrorCode::ComputationError,
+          std::string( "inference ran out of memory even at batch=1 (tile " )
+            + std::to_string( tileSize )
+            + " px): free memory or use a smaller model - the engine never alters spatial "
+              "resolution or model semantics to fit memory. Original error: "
+            + e.what() );
       ++stats.batchReductions;
       // Serial retry: hold the pending batch, flush one tile per forward.
       const std::vector<cv::Mat> pending = std::move( batchMats );
