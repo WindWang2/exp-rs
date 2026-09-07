@@ -708,6 +708,10 @@ bool TerrainAnalysis::hillshadeMultidirectional( const float *dem, float *out, i
     if ( !dem || !out || width <= 0 || height <= 0 )
         return false;
     std::vector<float> shade( static_cast<size_t>( width ) * height, 0.0f );
+    // Accumulating mean: the output must start from zero — streaming callers
+    // reuse one product buffer across tiles, so a pre-zeroed assumption would
+    // silently mix previous tiles into the result.
+    std::fill( out, out + static_cast<size_t>( width ) * height, 0.0f );
     for ( int k = 0; k < 8; ++k )
     {
         const float azimuth = 45.0f * k;

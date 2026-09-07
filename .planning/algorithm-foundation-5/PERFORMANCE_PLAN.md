@@ -27,4 +27,21 @@ results; see `benchmarks/spectral_index_streaming.json` for shape).
 
 ## Results
 
-(appended per milestone with date + build type)
+2026-09-08, Release build, Ninja -j2, AMD Ryzen 9 5900HX (16 cores, 62 GB).
+Collected via the execution-bench harness (SICNU_EXEC_BENCH_OUT; 512²
+default sizes, single in-process TaskCenter run each; benchmarks report,
+never gate):
+
+| Workload | wall ms | cpu ms | peak RSS delta MB |
+|---|---|---|---|
+| focal_stats_streaming (3x3 mean) | 126 | 130 | 15 |
+| proximity_edt | 50 | 52 | 16 |
+| spectral_derivative (order 1, 4 bands) | 209 | 215 | 24 |
+| topographic_correction (2 bands, C) | 281 | 288 | 12 |
+| terrain_curvature (profile) | 109 | 112 | 86 |
+
+Larger sizes (4096², SICNU_BENCH_LARGE=1) are wired through the same
+harness; the recorded default sizes keep ctest-friendly runtimes.
+peak-RSS deltas for the full-frame families (curvature 86 MB at 512² = the
+documented 3-frame full-frame contract; per-op JSONs in benchmarks/) match
+their declared estimates.

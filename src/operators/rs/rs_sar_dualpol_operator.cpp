@@ -71,7 +71,7 @@ Json::Value RsSarDualPolOperator::metadata() const {
                       "ratio change inputs) from dual-pol backscatter.";
     meta["prerequisites"].append( "Input should be radiometrically calibrated backscatter (rs:sar_calibrate)." );
     meta["workflowHints"].append( "Chain rs:sar_change or rs:temporal_* over rvi/normalized_difference series for vegetation monitoring." );
-    meta["limitations"].append( "rvi is the dual-pol Sentinel-1 approximation 4VV/(VV+VH), NOT the quad-pol RVI (needs a cross-pol-plus channel this platform does not model)." );
+    meta["limitations"].append( "rvi is the dual-pol Sentinel-1 approximation 4VH/(VV+VH), NOT the quad-pol RVI (needs a second cross-pol channel this platform does not model)." );
     meta["limitations"].append( "Nonpositive linear-power values are outside the SAR domain and yield NaN, never clamped." );
     return meta;
 }
@@ -218,9 +218,12 @@ Json::Value RsSarDualPolOperator::run( const Json::Value &params, RSOperatorCont
     // Provenance: keep the SAR contract truthful about the derived output.
     out.setMetadataItem( QLatin1String( sicnu::sar::kModalityKey ), QLatin1String( "sar" ) );
     out.setMetadataItem( QLatin1String( "SICNU_SAR_FEATURE" ), QString::fromStdString( featureToken ) );
+    // dB inputs are converted to linear power before the kernel, so span is
+    // linear power regardless of the input domain; the other features are
+    // dimensionless.
     out.setMetadataItem( QLatin1String( sicnu::sar::kDomainKey ),
-                         ( feature == DualPolFeature::Span && !inputIsDb ) ? QLatin1String( "linear_power" )
-                                                                           : QLatin1String( "dimensionless" ) );
+                         feature == DualPolFeature::Span ? QLatin1String( "linear_power" )
+                                                         : QLatin1String( "dimensionless" ) );
     if ( const QString pols = sicnu::sar::datasetMeta( ds, sicnu::sar::kPolarizationsKey ); !pols.isEmpty() )
         out.setMetadataItem( QLatin1String( sicnu::sar::kPolarizationsKey ), pols );
 

@@ -88,7 +88,8 @@ class RasterHistogram
 
     /// Nearest-rank percentile (0..100) from the current counts, linearly
     /// interpolated inside the rank's bin. Returns false when no finite
-    /// value was binned. p == 0 yields minVal, p == 100 yields maxVal.
+    /// value was binned. p == 0 yields exactly minVal; p == 100 approaches
+    /// maxVal (a histogram estimate interpolated inside the top bin).
     bool quantile( double percentile, double *out ) const;
 
     /// Mean and population stddev over the binned values (histogram

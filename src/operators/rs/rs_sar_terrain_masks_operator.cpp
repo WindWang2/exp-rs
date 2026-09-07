@@ -104,8 +104,8 @@ Json::Value RsSarTerrainMasksOperator::schema() const {
     props["dem"] = makeRasterParam( "dem", "DEM raster" );
     props["output"] = makeOutputParam( "output", "Output raster path", "tif" );
     props["product"] = makeEnumParam( "product", "Terrain geometry product", s_products, "layover_shadow_mask" );
-    props["incidence"] = makeNumberParam( "incidence", "Incidence angle in degrees from vertical (0, 90); required when the scene carries no SICNU_SAR_INCIDENCE_DEG metadata", 35.0 );
-    props["heading"] = makeNumberParam( "heading", "Look azimuth in degrees clockwise from north [0, 360); required when the scene carries no SICNU_SAR_HEADING_DEG metadata", 0.0 );
+    props["incidence"] = makeNumberParam( "incidence", "Incidence angle in degrees from vertical (0, 90); required — no scene-metadata fallback is consulted", 35.0 );
+    props["heading"] = makeNumberParam( "heading", "Look azimuth in degrees clockwise from north [0, 360); required — no scene-metadata fallback is consulted", 0.0 );
 
     Json::Value outputs( Json::objectValue );
     outputs["output"] = makeRasterParam( "output", "Output raster path" );

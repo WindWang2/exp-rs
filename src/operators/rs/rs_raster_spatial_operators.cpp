@@ -352,7 +352,8 @@ Json::Value runWindowOp( const std::string &opName, const Json::Value &params,
         }
     }
 
-    GdalBlockStream stream( ds, band, kTileDim, kTileDim, radius );
+    const int tileSize = std::clamp( getInt( params, "tile_size", kTileDim ), 16, 4096 );
+    GdalBlockStream stream( ds, band, tileSize, tileSize, radius );
     GdalStreamingOutput out( QString::fromStdString( outputPath ), width, height, 1, GDT_Float32,
                              ds.geoTransform(), ds.projection() );
     if ( !out.isOpen() )

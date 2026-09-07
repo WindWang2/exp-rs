@@ -26,8 +26,10 @@ namespace sicnu::operators::rs {
  *   output    (string, required) Output raster path
  *   product   (string, required) local_incidence (deg, Float32) |
  *             layover_shadow_mask (Byte: 0 normal, 1 layover, 2 shadow, 255 NoData)
- *   incidence (number, required unless SICNU_SAR_INCIDENCE_DEG declared) deg from vertical, (0, 90)
- *   heading   (number, required unless SICNU_SAR_HEADING_DEG declared) look azimuth deg from north, [0, 360)
+ *   incidence (number, required) deg from vertical, (0, 90) — callers take it
+ *             from the SAR scene's declared geometry; no metadata fallback is
+ *             consulted here
+ *   heading   (number, required) look azimuth deg from north, [0, 360)
  */
 class RsSarTerrainMasksOperator : public RSOperator {
 public:

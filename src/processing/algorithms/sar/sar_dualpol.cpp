@@ -59,7 +59,7 @@ double dualPolFeature( DualPolFeature feature, double vv, double vh )
         case DualPolFeature::Rvi:
         {
             const double denom = vv + vh;
-            return ( denom > 0.0 ) ? 4.0 * vv / denom : kNaN;
+            return ( denom > 0.0 ) ? 4.0 * vh / denom : kNaN;
         }
         case DualPolFeature::Span:
             return vv + vh;

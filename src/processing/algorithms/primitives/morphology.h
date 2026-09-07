@@ -53,7 +53,7 @@ void open( uint8_t *mask, uint8_t *scratch, int width, int height,
 void close( uint8_t *mask, uint8_t *scratch, int width, int height,
             Connectivity conn = Connectivity::Eight );
 
-/// In-place iterations helpers (odd @a iterations are invalid → false).
+/// In-place iteration helpers (negative @a iterations are invalid → false).
 bool erodeN( uint8_t *mask, uint8_t *scratch, int width, int height, int iterations,
              Connectivity conn = Connectivity::Eight );
 bool dilateN( uint8_t *mask, uint8_t *scratch, int width, int height, int iterations,

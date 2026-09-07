@@ -90,4 +90,37 @@ Verification: known-answer E2E green (fit recovers (a,b) to 1e-6; every
 
 ## Round 2 — (pending: after Milestones C–I)
 
-## Final round — (pending: before PR)
+## Final round — independent adversarial review (subagent B, read-only) + remediation
+
+Reviewer scope: full branch diff vs 93a7fb0bbd, all five lenses, formulas
+re-derived independently; dual-pol RVI cross-checked against the Copernicus
+openEO / Sentinel Hub references. 10 findings, all verified real, all fixed
+in this round (commit "fix(review)"): P0=0, P1=2, P2=3, P3=5 -> P0=0, P1=0,
+P2=0, P3=0 (all fixed; none accepted as debt).
+
+| ID | Sev | Summary | Fix verification |
+|---|---|---|---|
+| R-F1 | P1 | dual-pol RVI numerator inverted (4VV/(VV+VH); the S1 convention is 4VH/(VV+VH)) | kernel+header+operator text+tests updated; 0.4/0.1 -> 0.8, VH=0 -> 0 |
+| R-F2 | P1 | hillshadeMultidirectional accumulated into a non-zeroed buffer reused across streaming tiles | std::fill at entry; tile-multiple DEMs now safe |
+| R-F3 | P2 | sar_terrain_masks schema claimed a scene-metadata fallback that the code never reads | schema/header reworded to "required; no fallback consulted" |
+| R-F4 | P2 | Minnaert with a degenerate fit silently applied k=1 | refusal extended to Minnaert (matches the declared kernel contract) |
+| R-F5 | P2 | temporal_monitor working-set estimate ignored the per-tile scene stack | working set now includes 5 B/px/scene; tile size auto-clamped with a warning |
+| R-F6 | P3 | profile-curvature citation: directional-derivative normalization, not ZT's (zx²+zy²)^1.5 | header states the Esri-style normalization explicitly |
+| R-F7 | P3 | morphology erodeN/dilateN comment described a non-existent odd-iteration rejection | comment corrected (negative rejected) |
+| R-F8 | P3 | histogram quantile doc overclaimed "p == 100 yields maxVal" | reworded (approaches maxVal, in-bin interpolation) |
+| R-F9 | P3 | extrema/focal estimates scaled with a tile_size that run() ignored | runWindowOp now consumes the clamped tile_size |
+| R-F10 | P3 | dual-pol span output domain stamped "dimensionless" for dB inputs | stamped linear_power for span in both input domains |
+
+Reviewer-confirmed non-issues (no action): the ChangeDetection -> primitives
+delegation is bit-identical to baseline; FH-EDT, Otsu tie averaging,
+quantile interpolation, priority-flood, D8 codes, Kahn accumulation, Horn
+gradients, illumination cosine, Minnaert/C fits, MF/ACE, seasonal-MK
+variance/ties, Mahalanobis df all correct per their declared conventions;
+both baseline repairs match the pre-existing .cpp usages.
+
+Parallel-sweep note: 3 of 2581 ctest cases failed at -j4 —
+ebench terrain_curvature (real, fixed above: bench DEM geotransform placed
+the scene-centre latitude at -256 deg, so the #612 metres conversion
+produced a negative cell size and the kernel correctly refused), plus two
+timing-sensitive cases (crash-resume lineage #727, toolbar DnD empirical)
+that pass consistently when run alone and are unrelated to this branch.

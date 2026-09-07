@@ -72,9 +72,12 @@ class TerrainAnalysis
 
     // --- Foundation 5.0 (Milestone F) products ------------------------------
     // Curvature conventions (convexity-positive): a bowl z = (x²+y²)/2
-    // yields profile = plan = total = +1. Formulas are the
-    // Zevenbergen-Thorne (1987) surface-fit second derivatives over the
-    // 3×3 stencil (a b c / d e f / g h i, row-major):
+    // yields profile = plan = total = +1. The second derivatives come from
+    // the Zevenbergen-Thorne (1987) surface fit over the 3×3 stencil
+    // (a b c / d e f / g h i, row-major); profile curvature uses the
+    // directional-second-derivative normalization (Esri-style, denominator
+    // zx²+zy²) rather than ZT's (zx²+zy²)^1.5 — the formula is declared
+    // here and pinned by the analytic tests either way:
     //   zxx = (d+f−2e)/csx², zyy = (b+h−2e)/csy², zxy = (g+i−a−c)/(4 csx csy)
     //   zx = (f−d)/(2 csx), zy = (h−b)/(2 csy)
     //   profile = (zx²·zxx + 2 zx·zy·zxy + zy²·zyy)/(zx²+zy²)

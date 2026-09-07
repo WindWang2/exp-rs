@@ -142,9 +142,25 @@ Json::Value RsTemporalMonitorOperator::run( const Json::Value &params, RSOperato
     for ( int s = 0; s < sceneCount; ++s )
         seasonIds[static_cast<size_t>( s )] = seasonOfMonth( prepared.collection.scenes().at( s ).time.dateString() );
 
+    // The per-tile scene stack (stack + validity ~= 5 bytes/pixel/scene) is
+    // resident; keep the working set bounded and say so in the estimate.
+    const qint64 perPixelBytes = 5LL * sceneCount;
+    const qint64 maxWorkingSetBytes = 2LL * 1024 * 1024 * 1024;
+    const int maxTile = static_cast<int>(
+        std::sqrt( static_cast<double>( maxWorkingSetBytes ) /
+                   static_cast<double>( std::max<qint64>( 1, perPixelBytes ) ) ) );
+    int effectiveTile = std::clamp( tileSize, 16, 4096 );
+    if ( effectiveTile > maxTile )
+    {
+        effectiveTile = std::max( 16, maxTile );
+        context.logWarning( "tile_size reduced to " + std::to_string( effectiveTile ) +
+                            " to keep the per-tile scene stack under the working-set bound "
+                            "(5 bytes/pixel/scene x " + std::to_string( sceneCount ) + " scenes)" );
+    }
+
     temporal::TemporalStreamOptions streamOptions;
-    streamOptions.tileWidth = tileSize;
-    streamOptions.tileHeight = tileSize;
+    streamOptions.tileWidth = effectiveTile;
+    streamOptions.tileHeight = effectiveTile;
     streamOptions.applyQaMasking = applyQaMasking;
 
     QString readerError;
@@ -201,7 +217,7 @@ Json::Value RsTemporalMonitorOperator::run( const Json::Value &params, RSOperato
     }
 
     const int tiles = reader.totalTileCount();
-    const size_t tilePixels = static_cast<size_t>( tileSize ) * tileSize;
+    const size_t tilePixels = static_cast<size_t>( effectiveTile ) * effectiveTile;
     std::vector<float> sceneTile( tilePixels );
     // Full scene stack per tile: values + validity, then per-pixel stats.
     std::vector<float> stack( static_cast<size_t>( sceneCount ) * tilePixels );
@@ -355,10 +371,12 @@ Json::Value RsTemporalMonitorOperator::run( const Json::Value &params, RSOperato
         result["timeEnd"] = prepared.collection.timeRangeEndIso().toStdString();
     }
     Json::Value memory( Json::objectValue );
-    memory["tileWidth"] = tileSize;
-    memory["tileHeight"] = tileSize;
+    memory["tileWidth"] = effectiveTile;
+    memory["tileHeight"] = effectiveTile;
     memory["workingSetEstimateBytes"] = Json::Value::UInt64(
-        TemporalTileReader::estimateWorkingSetBytes( tileSize, tileSize, 3, 6 ) );
+        TemporalTileReader::estimateWorkingSetBytes( effectiveTile, effectiveTile, 3, 6 ) +
+        static_cast<std::uint64_t>( perPixelBytes ) *
+            static_cast<std::uint64_t>( effectiveTile ) * effectiveTile );
     result["memory"] = memory;
     context.reportProgress( 1.0, "Temporal monitor complete" );
     return result;

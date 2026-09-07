@@ -404,7 +404,7 @@ Json::Value RsTopographicCorrectionOperator::run( const Json::Value &params, RSO
     std::vector<TopographicCorrection::BandFit> fits( bandCount );
     for ( int b = 0; b < bandCount; ++b )
         fits[b] = TopographicCorrection::fitBand( method, solarZenith, ols[b], minnaert[b] );
-    if ( method == Method::CCorrection )
+    if ( method == Method::CCorrection || method == Method::Minnaert )
     {
         std::string unusable;
         for ( int b = 0; b < bandCount; ++b )
@@ -413,9 +413,11 @@ Json::Value RsTopographicCorrectionOperator::run( const Json::Value &params, RSO
         if ( !unusable.empty() )
             throw RSOperatorError(
                 ErrorCode::InvalidInputData,
-                "C-correction regression degenerate (|b| < 1e-6 or < 2 valid illumination pairs) for band(s): "
-                    + unusable + ". The scene carries no usable illumination signal for this model; "
-                                 "choose 'cosine' or 'minnaert', or use a larger scene." );
+                method == Method::CCorrection
+                    ? "C-correction regression degenerate (|b| < 1e-6 or < 2 valid illumination pairs) for band(s): "
+                    : "Minnaert log-log fit degenerate (< 2 valid (cos_i > 0, L > 0) pairs or non-positive exponent) for band(s): "
+                          + unusable + ". The scene carries no usable illumination signal for this model; "
+                                       "choose 'cosine', or use a larger scene." );
     }
 
     // ---- Pass 2: apply + stream out ------------------------------------------

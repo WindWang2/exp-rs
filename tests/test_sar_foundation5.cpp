@@ -41,7 +41,7 @@ TEST_CASE( "Dual-pol features: closed forms in linear power", "[sar][dualpol]" )
            Catch::Approx( 0.6 ).margin( 1e-12 ) );
   REQUIRE( dualPolFeature( DualPolFeature::LogRatio, vv, vh ) ==
            Catch::Approx( 10.0 * std::log10( 4.0 ) ).margin( 1e-12 ) );
-  REQUIRE( dualPolFeature( DualPolFeature::Rvi, vv, vh ) == Catch::Approx( 3.2 ).margin( 1e-12 ) );
+  REQUIRE( dualPolFeature( DualPolFeature::Rvi, vv, vh ) == Catch::Approx( 0.8 ).margin( 1e-12 ) );
   REQUIRE( dualPolFeature( DualPolFeature::Span, vv, vh ) == Catch::Approx( 0.5 ).margin( 1e-12 ) );
 
   // Zero VH: ratio/log_ratio divide by zero → NaN; ND saturates to +1;
@@ -50,7 +50,7 @@ TEST_CASE( "Dual-pol features: closed forms in linear power", "[sar][dualpol]" )
   REQUIRE( std::isnan( dualPolFeature( DualPolFeature::LogRatio, vv, 0.0 ) ) );
   REQUIRE( dualPolFeature( DualPolFeature::NormalizedDifference, vv, 0.0 ) ==
            Catch::Approx( 1.0 ).margin( 1e-12 ) );
-  REQUIRE( dualPolFeature( DualPolFeature::Rvi, vv, 0.0 ) == Catch::Approx( 4.0 ).margin( 1e-12 ) );
+  REQUIRE( dualPolFeature( DualPolFeature::Rvi, vv, 0.0 ) == Catch::Approx( 0.0 ).margin( 1e-12 ) );
 
   // Domain violations: negative power is never clamped.
   REQUIRE( std::isnan( dualPolFeature( DualPolFeature::Ratio, -0.4, vh ) ) );
@@ -129,7 +129,7 @@ TEST_CASE( "rs:sar_dualpol_features E2E: linear and dB domains agree", "[sar][du
   std::vector<float> rvi( static_cast<size_t>( kW ) * kH );
   REQUIRE( outDs.readBandData( 1, rvi.data(), kW, kH ) );
   for ( const float v : rvi )
-    REQUIRE( v == Catch::Approx( 3.2f ).margin( 1e-6f ) );
+    REQUIRE( v == Catch::Approx( 0.8f ).margin( 1e-6f ) );
 }
 
 TEST_CASE( "rs:sar_terrain_masks E2E: layover ramp and incidence product",

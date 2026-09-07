@@ -10,11 +10,12 @@
 //   ratio                = VV / VH
 //   normalized_difference = (VV − VH) / (VV + VH)      ∈ [−1, 1]
 //   log_ratio            = 10·log10(VV / VH)           (dB)
-//   rvi                  = 4·VV / (VV + VH)
+//   rvi                  = 4·VH / (VV + VH)
 //       Dual-pol Radar Vegetation Index — the common Sentinel-1 dual-pol
-//       APPROXIMATION. Not the quad-pol RVI (4σ/(σVV+σVH+2σHV)), which needs
-//       a cross-pol channel this platform does not model; docs must not
-//       claim quad-pol capability.
+//       form (cross-pol numerator: the index RISES with vegetation, which
+//       raises VH). Not the quad-pol RVI (4σ/(σVV+σVH+2σHV)), which needs
+//       a second cross-pol channel this platform does not model; docs must
+//       not claim quad-pol capability.
 //   span                 = VV + VH  (dual-pol total-power approximation)
 // Zero denominators (VV+VH == 0) are NaN; VH == 0 makes ratio/log_ratio NaN.
 #pragma once
