@@ -136,6 +136,31 @@ bool cvaMagnitude(const float *const *beforeBands, const float *const *afterBand
     return true;
 }
 
+bool cvaMagnitudeBip(const float *beforeBip, const float *afterBip,
+                     int bandCount, size_t pixels, float *out)
+{
+    if (!beforeBip || !afterBip || !out || bandCount <= 0 || pixels == 0)
+        return false;
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    for (size_t p = 0; p < pixels; ++p) {
+        const float *bRow = beforeBip + static_cast<size_t>(p) * bandCount;
+        const float *aRow = afterBip + static_cast<size_t>(p) * bandCount;
+        double sumSq = 0.0;
+        bool hasNan = false;
+        for (int b = 0; b < bandCount; ++b) {
+            const float d = aRow[b] - bRow[b];
+            if (std::isnan(d)) {
+                hasNan = true;
+                break;
+            }
+            sumSq += static_cast<double>(d) * static_cast<double>(d);
+        }
+        out[p] = hasNan ? nan : static_cast<float>(std::sqrt(sumSq));
+    }
+    return true;
+}
+
 bool otsuThreshold(const float *values, size_t count, float *threshold, int bins)
 {
     if (!values || !threshold || count == 0)
@@ -167,9 +192,7 @@ bool otsuThreshold(const float *values, size_t count, float *threshold, int bins
         const double v = values[i];
         if (!std::isfinite(v))
             continue;
-        int bin = static_cast<int>((v - minVal) / range * (bins - 1));
-        bin = std::clamp(bin, 0, bins - 1);
-        hist[static_cast<size_t>(bin)] += 1.0;
+        ++hist[static_cast<size_t>(histogramBin(v, minVal, range, bins))];
     }
 
     return otsuThresholdFromHistogram(minVal, maxVal, hist, finite, threshold);
@@ -926,9 +949,7 @@ bool kittlerIllingworthThreshold(const float *values, size_t count, float *thres
         const double v = values[i];
         if (!std::isfinite(v))
             continue;
-        int bin = static_cast<int>((v - minVal) / range * (bins - 1));
-        bin = std::clamp(bin, 0, bins - 1);
-        hist[static_cast<size_t>(bin)] += 1.0;
+        ++hist[static_cast<size_t>(histogramBin(v, minVal, range, bins))];
     }
 
     return kittlerIllingworthThresholdFromHistogram(minVal, maxVal, hist, finite, threshold);

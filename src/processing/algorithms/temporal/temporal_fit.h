@@ -7,8 +7,9 @@
 // Numeric contract: all fits treat NaN samples as absent (never as zero),
 // produce NaN for series with fewer valid samples than the model requires,
 // and are deterministic (single-threaded, fixed order — bit-exact regression
-// anchors; only the banded Whittaker solver is tolerance-grade with a locked
-// 1e-5 relative bound documented in the tests).
+// anchors; only the banded Whittaker solver is tolerance-grade — its tests
+// assert behavioral bounds at 1e-4 margins; a formal relative-ε lock is
+// pending and tracked in docs/processing/validation-policy.md).
 #pragma once
 
 #include <cstddef>
@@ -87,13 +88,52 @@ struct BreakpointResult
   std::vector<int> breakIndices;   ///< segment start indices of segments 2..k
   std::vector<double> slopes;      ///< per-day slopes per segment
   std::vector<double> intercepts;  ///< at t = 0 (series epoch)
-  double rmse = 0.0;
+  double rmse = 0.0;               ///< sqrt( RSS / valid observations ); NaN when none
+  long validCount = 0;             ///< finite observations across all segments
 };
 
 BreakpointResult piecewiseLinearTrend( const std::vector<float> &y,
                                        const std::vector<double> &tDays,
                                        int maxBreaks, int minSegment,
                                        double minImprovement );
+
+/// Non-parametric monotonic trend: Sen's median slope with the Mann-Kendall
+/// test (Gilbert 1987, chapter 16; supporting references in
+/// docs/processing/temporal.md). Robust to outliers and free of the OLS
+/// normality assumption; suited to noisy vegetation-index series.
+///
+/// Definitions (t = @a tDays, valid = finite y):
+///   S        = Σ_{i<j, t_i<t_j} sign(y_j − y_i)
+///   var(S)   = [n(n−1)(2n+5) − Σ t_p(t_p−1)(2t_p+5)] / 18   (tie-corrected,
+///              t_p = multiplicity of tied value groups)
+///   z        = (S ∓ 1)/√var(S) with the ±1 continuity correction, 0 when S = 0
+///   p        = erfc(|z|/√2)          (two-sided standard-normal tail)
+///   slope    = median of pairwise (y_j − y_i)/(t_j − t_i) over t_i < t_j
+///   intercept = median of (y_i − slope·t_i)
+/// Pairs with equal times are skipped for the slope; both samples still take
+/// part in S only through strictly-ordered-time pairs. All outputs are NaN
+/// when fewer than 3 valid observations exist (no meaningful test) or when no
+/// strictly time-ordered pair exists. Deterministic: fixed evaluation order,
+/// bit-exact grade.
+///
+/// Caveat: var(S) is Gilbert's formula for one observation per instant. With
+/// same-day duplicates (collection `duplicate_policy = keep_all`) the
+/// denominator over-counts pairs that can never enter S, which biases |z|
+/// toward 0 — the test is conservative, never anti-conservative. Pass
+/// `duplicate_policy = reject` (or pre-aggregate) for exact inference.
+/// Inputs must be in non-decreasing time order (the operator seam sorts).
+struct SenTrendResult
+{
+  double slope = 0.0;      ///< Sen's slope per day (median pairwise slope)
+  double intercept = 0.0;  ///< median of (y_i − slope·t_i)
+  double z = 0.0;          ///< Mann-Kendall standardized statistic
+  double pValue = 1.0;     ///< two-sided significance (small = significant trend)
+  double variance = 0.0;   ///< tie-corrected var(S), for reference
+  int validCount = 0;      ///< finite observations
+};
+
+SenTrendResult mannKendallSenSlope( const std::vector<float> &y,
+                                    const std::vector<double> &tDays );
 
 /// Additive decomposition: trend (Whittaker with @a trendLambda), seasonal
 /// (mean of detrended values grouped by day-of-year, circularly smoothed by

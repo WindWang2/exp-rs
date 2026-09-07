@@ -536,6 +536,21 @@ target_include_directories(test_spectral_indices PRIVATE
 )
 sicnu_discover_tests(test_spectral_indices)
 
+# Shared NoData sentinel policy (Scientific Algorithms Foundation 4.0)
+add_executable(test_nodata_utils test_nodata_utils.cpp)
+target_link_libraries(test_nodata_utils PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_nodata_utils PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_nodata_utils)
+
 # Spectral classification (SAM + Continuum Removal) kernel tests
 add_executable(test_spectral_classification test_spectral_classification.cpp)
 target_link_libraries(test_spectral_classification PRIVATE

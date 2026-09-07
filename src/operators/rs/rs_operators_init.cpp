@@ -44,6 +44,7 @@
 #include "rs_temporal_trend_operator.h"
 #include "rs_temporal_anomaly_operator.h"
 #include "rs_temporal_breakpoints_operator.h"
+#include "rs_temporal_sen_trend_operator.h"
 #include "rs_temporal_decompose_operator.h"
 #include "rs_temporal_gap_fill_operator.h"
 #include "rs_temporal_harmonic_fit_operator.h"
@@ -141,6 +142,7 @@ REGISTER_RS_OPERATOR(RsTemporalGapFillOperator, "rs:temporal_gap_fill")
 REGISTER_RS_OPERATOR(RsTemporalHarmonicFitOperator, "rs:temporal_harmonic_fit")
 REGISTER_RS_OPERATOR(RsTemporalPhenologyOperator, "rs:temporal_phenology")
 REGISTER_RS_OPERATOR(RsTemporalBreakpointsOperator, "rs:temporal_breakpoints")
+REGISTER_RS_OPERATOR(RsTemporalSenTrendOperator, "rs:temporal_sen_trend")
 REGISTER_RS_OPERATOR(RsTemporalDecomposeOperator, "rs:temporal_decompose")
 REGISTER_RS_OPERATOR(RsTemporalAnomalyOperator, "rs:temporal_anomaly")
 REGISTER_RS_OPERATOR(RsTemporalExtractSeriesOperator, "rs:temporal_extract_series")
@@ -259,6 +261,7 @@ void initBuiltinRsOperators() {
   add( "rs:temporal_harmonic_fit", [] { return std::make_unique<RsTemporalHarmonicFitOperator>(); } );
   add( "rs:temporal_phenology", [] { return std::make_unique<RsTemporalPhenologyOperator>(); } );
   add( "rs:temporal_breakpoints", [] { return std::make_unique<RsTemporalBreakpointsOperator>(); } );
+  add( "rs:temporal_sen_trend", [] { return std::make_unique<RsTemporalSenTrendOperator>(); } );
   add( "rs:temporal_decompose", [] { return std::make_unique<RsTemporalDecomposeOperator>(); } );
   add( "rs:temporal_anomaly", [] { return std::make_unique<RsTemporalAnomalyOperator>(); } );
   add( "rs:temporal_extract_series", [] { return std::make_unique<RsTemporalExtractSeriesOperator>(); } );

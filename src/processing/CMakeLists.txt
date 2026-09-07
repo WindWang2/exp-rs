@@ -21,6 +21,7 @@ add_library(sicnu_processing SHARED
     algorithms/post_classification.cpp
     algorithms/qa_mask.cpp
     algorithms/math_utils.cpp
+    algorithms/nodata_utils.cpp
     algorithms/mosaic.cpp
     algorithms/image_enhancement.cpp
     algorithms/image_enhancement_streaming.cpp

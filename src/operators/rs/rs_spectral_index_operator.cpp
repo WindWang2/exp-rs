@@ -13,6 +13,8 @@
 #include "processing/algorithms/math_utils.h"
 #include "processing/algorithms/temporal/temporal_band_roles.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "data/raster_grid_compat.h"
+#include "processing/gdal/gdal_grid_compat.h"
 #include "processing/gdal/gdal_multiband_block_stream.h" // GdalStreamingOutput + Tile
 
 #include <QString>
@@ -399,6 +401,20 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             }
             if (postDs.width() != width || postDs.height() != height) {
                 throw RSOperatorError(ErrorCode::InvalidInputData, "Pre-fire and post-fire rasters must have identical dimensions");
+            }
+            // Shared grid preflight (Foundation 4.0): the dimension check above
+            // alone let CRS/geotransform-mismatched pairs combine silently —
+            // sampling the wrong post-fire location. Blocking grid issues are a
+            // typed refusal; pre-align via the grid-harmonization seam.
+            {
+                const sicnu::data::GridCompatReport nbrGridReport = sicnu::data::compareGrids(
+                    sicnu::processing::gridFromDataset(ds),
+                    sicnu::processing::gridFromDataset(postDs));
+                for (const sicnu::data::GridCompatIssue &issue : nbrGridReport.issues) {
+                    if (issue.blocking)
+                        throw RSOperatorError(ErrorCode::InvalidInputData,
+                                              "dNBR grid mismatch: " + issue.message.toStdString());
+                }
             }
             validateBand(nirBand, "NIR (pre-fire)");
             validateBand(swir2Band, "SWIR2 (pre-fire)");

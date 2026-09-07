@@ -31,11 +31,14 @@ Pi agent adapter over the same Task Center seam.
 
 ## Current state (2026-09-06)
 
-- **Desktop Workbench & Unified UX 4.0** (branch `zcode/desktop-workbench-ux-4`,
-  ADR 0130–0133): unified shell (wired governance dock, project-context title,
-  dead-panel removal, menu dedup), schema-validated operator forms, thin-client
-  operator promotions (band tools, enhancement, pan-sharpen), grouped pipeline
-  tasks + shared result renderer, C++ design-token layer, keyboard guardrail.
+- **Desktop Workbench & Unified UX 4.0** (ADR 0130–0133): unified shell
+  (wired governance dock, project-context title, dead-panel removal, menu dedup),
+  schema-validated operator forms, thin-client operator promotions (band tools,
+  enhancement, pan-sharpen), grouped pipeline tasks + shared result renderer,
+  C++ design-token layer, keyboard guardrail.
+- **Scientific Algorithms & Processing Foundation 4.0** (ADR 0130):
+  shared NoData/statistics/grid/histogram kernels, #759 fix, `rs:temporal_sen_trend`,
+  validation policies (`docs/processing/`).
 - **Project Workspace, Data Governance & Reproducibility Platform 3.0**
   (ADR 0129): governance store, workspace services, project format v3,
   crash-safe saves, workspace UI.
@@ -59,14 +62,16 @@ Pi agent adapter over the same Task Center seam.
 - Scale: workspace browsing stays model/view and paged (100k assets,
   fetchMore, 200/page); no per-row widget explosion.
 
-## Build & test
+## Build & test contract
 
 - Configure: `cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=ON` in
-  a build dir (host note: use `/usr/bin/cmake`; `~/.local/bin/cmake` is a
-  broken shim).
+  a build dir (presets in `CMakePresets.json`: `dev-default`, `ci-fast`, `ci-full`,
+  `sanitizer-debug`, `release-package`).
 - Build: `cmake --build build` (bounded parallelism on shared hosts).
-- Tests: `QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest
-  --test-dir build` (CTestCustom pins Python/Qt env; see `TEST_INFRA.md`).
+- Tests: `QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest --test-dir build --output-on-failure`
+  (CTestCustom pins Python/Qt env; see `TEST_INFRA.md`). Treat "fully green" claims as valid only with a fresh ctest log.
+- Scientific validation policy and tolerance grades for algorithm kernels:
+  `docs/processing/validation-policy.md`.
 
 ## Known limitations / open threads
 

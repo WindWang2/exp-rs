@@ -8,6 +8,7 @@
 #include "operators/rs/rs_spectral_index_operator.h"
 #include "operators/rs/rs_change_primitives.h"
 #include "operators/rs/rs_change_detection_operator.h"
+#include "operators/rs/rs_threshold_raster_operator.h"
 #include "operators/framework/rs_operator_context.h"
 
 #include <QTemporaryDir>
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <vector>
 
@@ -155,6 +157,46 @@ TEST_CASE("ChangeDetection cvaMagnitude sums squared band deltas", "[processing]
     CHECK(out[0] == Approx(5.0f)); // sqrt(9+16)
     CHECK(out[1] == Approx(4.0f)); // sqrt(16+0)
     CHECK(out[2] == Approx(1.0f)); // sqrt(1+0)
+}
+
+TEST_CASE("ChangeDetection cvaMagnitudeBip matches the per-band kernel and propagates NaN",
+          "[processing][change_detection][cva]") {
+    // Same fixture as the per-band cvaMagnitude test, interleaved BIP layout.
+    const float beforeBip[] = {0, 0,   0, 0,   0, 0};
+    const float afterBip[]  = {3, 4,   4, 0,   1, 0};
+    float out[3] = {};
+    REQUIRE(cvaMagnitudeBip(beforeBip, afterBip, 2, 3, out));
+    CHECK(out[0] == Approx(5.0f));
+    CHECK(out[1] == Approx(4.0f));
+    CHECK(out[2] == Approx(1.0f));
+
+    // A NaN delta in any band of a pixel propagates to that pixel only.
+    const float qnan = std::numeric_limits<float>::quiet_NaN();
+    const float beforeNan[] = {0, 0,  0, 0,  0, 0};
+    const float afterNan[]  = {3, 4,  qnan, 0,  1, 0};
+    float outNan[3] = {};
+    REQUIRE(cvaMagnitudeBip(beforeNan, afterNan, 2, 3, outNan));
+    CHECK(outNan[0] == Approx(5.0f));
+    CHECK(std::isnan(outNan[1]));
+    CHECK(outNan[2] == Approx(1.0f));
+
+    float dummy = 0.0f;
+    REQUIRE_FALSE(cvaMagnitudeBip(nullptr, afterBip, 2, 3, &dummy));
+    REQUIRE_FALSE(cvaMagnitudeBip(beforeBip, afterBip, 0, 3, &dummy));
+    REQUIRE_FALSE(cvaMagnitudeBip(beforeBip, afterBip, 2, 0, &dummy));
+}
+
+TEST_CASE("ChangeDetection histogramBin shares the fixed-range binning convention",
+          "[processing][change_detection][c1]") {
+    // bin = (v - min)/range*(bins-1), clamped — the one convention used by
+    // Otsu/Kittler/percentile thresholds and the streaming change masks.
+    CHECK(histogramBin(0.0, 0.0, 10.0, 11) == 0);
+    CHECK(histogramBin(10.0, 0.0, 10.0, 11) == 10);
+    CHECK(histogramBin(5.0, 0.0, 10.0, 11) == 5);
+    CHECK(histogramBin(5.0, 0.0, 10.0, 256) == 127); // 0.5 * (256-1) = 127.5 → 127
+    // Out-of-range values clamp into the end bins (callers pre-filter NaN).
+    CHECK(histogramBin(-3.0, 0.0, 10.0, 11) == 0);
+    CHECK(histogramBin(99.0, 0.0, 10.0, 11) == 10);
 }
 
 TEST_CASE("ChangeDetection otsuThreshold separates a bimodal scene", "[processing][change_detection][c1]") {
@@ -852,6 +894,126 @@ TEST_CASE("RsSpectralIndexOperator supports extended indices (NBR, dNBR, BSI, ND
     testIndex("CI", "ci.tif");
     testIndex("NDSI", "ndsi.tif");
     testIndex("NDTI", "ndti.tif");
+}
+
+TEST_CASE("dNBR refuses a grid-incompatible post-fire raster", "[operators][spectral_index][grid]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    ensureGdalInit();
+
+    constexpr int W = 4, H = 4, B = 6;
+    const QString prePath = tmp.path() + "/dnbr_pre_32648.tif";
+    const QString postPath = tmp.path() + "/dnbr_post_4326.tif";
+
+    // Same dimensions, different CRS: the pre-foundation dims-only check
+    // passed this pair and silently sampled the wrong post-fire locations.
+    const auto makeReferencedRaster = [&](const QString &path, const char *crs,
+                                          const std::array<double, 6> &gt) {
+        std::vector<std::vector<float>> bands(B, std::vector<float>(W * H));
+        for (int b = 0; b < B; ++b)
+            for (size_t i = 0; i < W * H; ++i)
+                bands[b][i] = (b + 1) * 10.0f;
+        QString err;
+        REQUIRE(writeGdalOutput(path, W, H, bands, gt, crs, &err));
+    };
+    makeReferencedRaster(prePath, "EPSG:32648",
+                         {500000.0, 30.0, 0.0, 4500000.0, 0.0, -30.0});
+    makeReferencedRaster(postPath, "EPSG:4326",
+                         {100.0, 0.001, 0.0, 40.0, 0.0, -0.001});
+
+    sicnu::operators::rs::RsSpectralIndexOperator op;
+    sicnu::operators::RSOperatorContext ctx;
+    Json::Value params(Json::objectValue);
+    params["input"] = prePath.toStdString();
+    params["output"] = (tmp.path() + "/dnbr_out.tif").toStdString();
+    params["index"] = "dNBR";
+    params["nir"] = 4;
+    params["swir2"] = 6;
+    params["postfire"] = postPath.toStdString();
+
+    REQUIRE_THROWS_AS(op.run(params, ctx), sicnu::operators::RSOperatorError);
+}
+
+TEST_CASE("threshold_raster: hand-derived manual and Otsu known answers", "[operators][threshold]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+
+    constexpr int W = 4, H = 4;
+    const QString inputPath = tmp.path() + "/thr_input.tif";
+    {
+        GDALDatasetH ds = GDALCreate(driver, inputPath.toUtf8().constData(), W, H, 1,
+                                     GDT_Float32, nullptr);
+        REQUIRE(ds != nullptr);
+        const float qnan = std::numeric_limits<float>::quiet_NaN();
+        // 6 pixels >= 5 (5, 9, 5, 10, 7, 5), one NaN, the rest below.
+        const float values[W * H] = {0, 3, 5, 9,
+                                     2, 5, 10, 1,
+                                     4, 4, 4, 4,
+                                     qnan, 7, 0, 5};
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H,
+                             const_cast<float *>(values), W, H, GDT_Float32, 0, 0) == CE_None);
+        GDALClose(ds);
+    }
+
+    sicnu::operators::rs::RsThresholdRasterOperator op;
+    sicnu::operators::RSOperatorContext ctx;
+
+    // Manual threshold: "at/above" semantics, NaN becomes 255 NoData.
+    {
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = (tmp.path() + "/thr_manual.tif").toStdString();
+        params["thresholdMethod"] = "manual";
+        params["threshold"] = 5.0;
+        const Json::Value res = op.run(params, ctx);
+        REQUIRE(res["thresholdUsed"].asDouble() == Approx(5.0));
+        REQUIRE(res["maskedPixels"].asInt() == 6);
+        // "Evaluated" = valid observations only: the NaN pixel is excluded.
+        REQUIRE(res["totalPixels"].asInt() == W * H - 1);
+        REQUIRE(res["maskedPercent"].asDouble() == Approx(40.0)); // 6 / 15
+
+        GDALDatasetH outDs = GDALOpen((tmp.path() + "/thr_manual.tif").toUtf8().constData(),
+                                      GA_ReadOnly);
+        REQUIRE(outDs != nullptr);
+        std::vector<std::uint8_t> mask(W * H, 0);
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(outDs, 1), GF_Read, 0, 0, W, H,
+                             mask.data(), W, H, GDT_Byte, 0, 0) == CE_None);
+        const std::uint8_t expected[W * H] = {0, 0, 1, 1,
+                                              0, 1, 1, 0,
+                                              0, 0, 0, 0,
+                                              255, 1, 0, 1};
+        for (int i = 0; i < W * H; ++i)
+            REQUIRE(mask[i] == expected[i]);
+        GDALClose(outDs);
+    }
+
+    // Otsu on a clearly bimodal scene: the threshold must separate the modes.
+    {
+        GDALDatasetH ds = GDALCreate(driver, inputPath.toUtf8().constData(), W, H, 1,
+                                     GDT_Float32, nullptr);
+        REQUIRE(ds != nullptr);
+        std::vector<float> values(W * H);
+        for (int i = 0; i < W * H; ++i)
+            values[i] = (i % 2 == 0) ? 1.0f : 10.0f;
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H,
+                             values.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+        GDALClose(ds);
+
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = (tmp.path() + "/thr_otsu.tif").toStdString();
+        params["thresholdMethod"] = "otsu";
+        const Json::Value res = op.run(params, ctx);
+        const double t = res["thresholdUsed"].asDouble();
+        REQUIRE(t > 1.0);
+        REQUIRE(t < 10.0);
+        REQUIRE(res["maskedPixels"].asInt() == 8); // exactly the 10.0 pixels
+    }
 }
 
 TEST_CASE("New change primitive operators execute and output valid rasters", "[operators][change_primitives]") {
