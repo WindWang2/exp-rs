@@ -10,6 +10,14 @@
 // honest hardware capability detection plus the runtime-layer readiness
 // verdicts (UnsupportedRuntime / IncompatibleHardware).
 //
+// Session identity (Platform 4.0): the cache key is
+//   framework | device | sha256(artifact bytes)
+// so the same path with different bytes never shares a session — the content
+// digest differs and the stale entry only leaves through LRU eviction. Bytes
+// that are equal at different paths share one session (weights dominate the
+// memory cost). Ad-hoc (non-catalog) models get their digest computed at
+// acquire time, memoized per (path, size, mtime).
+//
 // This translation unit requires OpenCV (cv::Mat is the tensor type); it is
 // compiled only under SICNU_HAS_OPENCV. Without OpenCV no model runtime
 // exists and rs:infer is disabled, exactly as before.
@@ -21,6 +29,7 @@
 #include <opencv2/core.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -34,16 +43,120 @@ namespace sicnu::operators::runtime {
  * Host capabilities relevant to model execution. Detection combines
  * cv::dnn's backend/target enumeration with explicit environment overrides
  * for testability:
- *   SICNU_MODEL_GPU=0|1   force cudaAvailable
- *   SICNU_MODEL_VRAM_MB=N force the VRAM budget
+ *   SICNU_MODEL_GPU=0|1        force cudaAvailable
+ *   SICNU_MODEL_VRAM_MB=N      force the VRAM budget
+ *   SICNU_MODEL_CUDA_DEVICES=N force cudaDeviceCount (multi-GPU hosts; the
+ *                              opencv_dnn backend can only address index 0)
  */
 struct ModelHardwareCapabilities
 {
   bool cudaAvailable = false;
   bool openclAvailable = false;
   int vramBudgetMb = 0; ///< 0 = unknown / not enforced
+  int cudaDeviceCount = 0; ///< addressable CUDA devices (0 = none; >=1 with CUDA)
 
   static ModelHardwareCapabilities detect();
+};
+
+/// Requested execution device (Platform 4.0): the manifest's
+/// `runtime.device` token ("cpu" | "cuda" | "cuda:N" | "auto") or an explicit
+/// operator override. Parsing is strict — unknown tokens are a contract error,
+/// never a silent fallback.
+struct RequestedDevice
+{
+  enum class Kind
+  {
+    Auto,  ///< deterministic: lowest-index fitting CUDA device, else CPU
+    Cpu,
+    Cuda
+  };
+  Kind kind = Kind::Auto;
+  int cudaIndex = 0; ///< meaningful only when kind == Cuda ("cuda:N")
+
+  static RequestedDevice autoDetect() { return {}; }
+  static RequestedDevice cpu() { return RequestedDevice{ Kind::Cpu, 0 }; }
+  static RequestedDevice cuda( int index ) { return RequestedDevice{ Kind::Cuda, index }; }
+
+  /// Parses the manifest/parameter token. Returns false on garbage (callers
+  /// must fail loudly, not fall back).
+  static bool parse( const std::string &token, RequestedDevice *out );
+  std::string toString() const;
+};
+
+/// The device a session actually runs on (after auto resolution and any
+/// demotion). Rendered as "cpu" or "cuda:<index>".
+struct ResolvedDevice
+{
+  bool gpu = false;
+  int cudaIndex = 0;
+
+  std::string toString() const
+  {
+    return gpu ? "cuda:" + std::to_string( cudaIndex ) : "cpu";
+  }
+};
+
+/// Deterministic device resolution — a pure function of the request, the
+/// detected capabilities, the model's GPU preference and its VRAM estimate:
+///   Auto:   cuda:0 (lowest addressable index) when CUDA is available, the
+///           model tolerates GPU and the estimate fits the budget; otherwise
+///           cpu. Equal inputs always yield equal outputs. When the model
+///           forbids CPU fallback, an unresolvable auto request fails rather
+///           than silently running where it must not.
+///   Cpu:    always cpu.
+///   Cuda:N: cuda:N when N is addressable (<= @p maxAddressableCudaIndex —
+///           the opencv_dnn backend exposes only 0) and the estimate fits;
+///           with @p allowCpuFallback a non-fitting budget demotes to cpu,
+///           otherwise the request fails.
+/// Returns false with @p why when the request cannot be honored — callers
+/// must fail loudly, never silently run elsewhere.
+bool resolveDevice( const RequestedDevice &request,
+                    const ModelHardwareCapabilities &hw,
+                    bool modelWantsGpu, int estimatedVramMb,
+                    int maxAddressableCudaIndex, bool allowCpuFallback,
+                    ResolvedDevice *out, std::string *why = nullptr );
+
+/// Backend capabilities the registry needs beyond the factory itself
+/// (Platform 4.0). Defaults describe the historical built-in provider.
+struct ProviderTraits
+{
+  /// Highest CUDA device index this backend can address (opencv_dnn: 0;
+  /// multi-device runtimes: deviceCount-1). Index selection beyond this
+  /// fails loudly instead of silently running on another card.
+  int maxAddressableCudaIndex = 0;
+};
+
+/// Structured failure classification for forward-pass / load errors
+/// (Platform 4.0): drives the OOM ladder and error payloads. Classification
+/// is message-based over exception types we actually see (cv::Exception,
+/// std::bad_alloc, runtime_error) — honest pattern matching, not a guarantee.
+enum class InferenceFailureKind
+{
+  Unknown,
+  OutOfMemory,
+  Canceled,
+  ShapeMismatch,
+  CorruptModel,
+  NotLoaded
+};
+InferenceFailureKind classifyInferenceError( const std::string &message );
+
+/// Liveness/statistics probe for one loaded session (Platform 4.0).
+struct SessionHealth
+{
+  bool ok = false;                    ///< session usable (loaded, not canceled, no fatal error)
+  std::uint64_t forwardsCompleted = 0;
+  std::uint64_t failures = 0;
+  double lastForwardMs = 0.0;
+  std::string lastError;              ///< most recent failure message ("" when none)
+};
+
+/// Memory estimate for one loaded session, in MiB (Platform 4.0). Values of 0
+/// mean "unknown" — estimates are reported honestly, never invented.
+struct SessionMemoryEstimate
+{
+  int weightsMb = 0;    ///< serialized weight bytes on disk, rounded up
+  int workingSetMb = 0; ///< estimated peak per-forward working set (0 = unknown)
 };
 
 /**
@@ -115,6 +228,31 @@ class IModelRuntime
       ( void )namedBlobs;
       throw std::runtime_error( "runtime does not support multi-input models" );
     }
+
+    // --- Platform 4.0 unified contract ---------------------------------------
+    /**
+     * Best-effort warmup: one throwaway forward pass so the first real tile
+     * does not pay lazy graph compilation. MUST NOT fail the session — a
+     * warmup mismatch (e.g. a fixed-shape graph) is recorded in health and
+     * swallowed; execution correctness never depends on warmup.
+     */
+    virtual void warmup() {}
+
+    /**
+     * Cooperative cancellation: ask the session to stop feeding forward
+     * passes. A forward pass ALREADY RUNNING cannot be interrupted (honest
+     * limitation, backend-compatibility doc); the next check point throws.
+     * Cleared with clearCancel() — pooled sessions are reusable after a
+     * canceled run.
+     */
+    virtual void requestCancel() {}
+    virtual void clearCancel() {}
+
+    /// Statistics/liveness probe. Never throws.
+    virtual SessionHealth health() const { return SessionHealth{}; }
+
+    /// Memory estimate (0 = unknown). Never throws.
+    virtual SessionMemoryEstimate memoryEstimate() const { return {}; }
 };
 
 using ModelRuntimePtr = std::shared_ptr<IModelRuntime>;
@@ -133,26 +271,60 @@ ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
                                          std::string *reason = nullptr );
 
 /**
- * Process-wide session cache. Keyed by (framework, artifact, device) so the
- * same weights are loaded once and reused. LRU-bounded (default 2 sessions —
- * weights are the dominant memory cost), thread-safe, evictable via
- * releaseAll() for shutdown and tests.
+ * Process-wide bounded model session pool (Platform 4.0 naming: ModelSessionPool).
+ * Keyed by (framework, resolved device, artifact content digest) so the same
+ * weights are loaded once and reused — and so the same path with different
+ * bytes never shares a session. LRU-bounded (default 2 sessions — weights are
+ * the dominant memory cost), thread-safe, evictable via releaseAll() for
+ * shutdown and tests. Providers register per framework id; the built-in "onnx"
+ * provider (OpenCV DNN) is installed at construction, and plugin runtimes
+ * register through the same seam.
  */
 class ModelRuntimeRegistry
 {
   public:
     static ModelRuntimeRegistry &instance();
 
-    /// Acquire a session for the model, loading it on first use.
+    /// Acquire a session for the model, loading it on first use. The device
+    /// comes from the manifest contract (runtime.device, default auto).
     /// @a errorMessage receives the load failure reason when nullptr is returned.
     ModelRuntimePtr acquire( const ModelInfo &model, std::string *errorMessage = nullptr );
+
+    /// Acquire with an explicit device request (operator override), e.g.
+    /// RequestedDevice::cpu() or cuda(1). Same session cache.
+    ModelRuntimePtr acquire( const ModelInfo &model, const RequestedDevice &request,
+                             std::string *errorMessage = nullptr );
 
     /// Drop all cached sessions (running callers keep their shared_ptrs).
     void releaseAll();
 
+    /// Drop the cached session for one identity (Platform 4.0 unload). Later
+    /// acquires reload; callers holding shared_ptrs keep the session alive
+    /// until they drop it — unload means "no longer handed out", never
+    /// "invalidates live pointers".
+    void release( const std::string &framework, const std::string &identity );
+
+    /// LRU capacity bound (minimum 1).
     void setMaxCachedSessions( std::size_t maxSessions );
     std::size_t maxCachedSessions() const;
     std::size_t cachedSessionCount() const;
+
+    /// Idle eviction (Platform 4.0): sessions untouched for longer than
+    /// @p idleMs are dropped on the next acquire/inspect. 0 disables (default).
+    void setIdleEvictionMs( std::uint64_t idleMs );
+    std::uint64_t idleEvictionMs() const;
+
+    /// Pool statistics snapshot (Platform 4.0 observability + benchmarks).
+    struct PoolStats
+    {
+      std::size_t cachedSessions = 0;
+      std::size_t maxSessions = 0;
+      std::uint64_t totalLoads = 0;    ///< successful session loads
+      std::uint64_t cacheHits = 0;
+      std::uint64_t cacheMisses = 0;
+      std::uint64_t evictions = 0;     ///< LRU/idle evictions (not releaseAll)
+    };
+    PoolStats poolStats() const;
 
     /// Cumulative successful session loads (test metric for reuse checks).
     std::size_t totalSessionsLoaded() const;
@@ -160,9 +332,14 @@ class ModelRuntimeRegistry
 
     /// Register/replace a provider factory for a framework id. The built-in
     /// "onnx" provider (OpenCV DNN) is installed at construction; tests may
-    /// override it or add fake frameworks.
-    void registerProvider( const std::string &framework, ModelRuntimeFactory factory );
+    /// override it or add fake frameworks. Traits declare the backend's
+    /// device-addressing capability for explicit cuda:N requests.
+    void registerProvider( const std::string &framework, ModelRuntimeFactory factory,
+                           const ProviderTraits &traits = ProviderTraits{} );
     bool hasProvider( const std::string &framework ) const;
+    /// Traits for a registered framework (nullopt when unregistered) — used by
+    /// readiness evaluation so cuda:N readiness matches what acquire enforces.
+    std::optional<ProviderTraits> providerTraits( const std::string &framework ) const;
 
     /// Current hardware capabilities (env-overridable detection, cached).
     ModelHardwareCapabilities hardware() const;
@@ -172,19 +349,32 @@ class ModelRuntimeRegistry
   private:
     ModelRuntimeRegistry();
 
+    /// LRU/idle eviction shared by acquire paths. Caller holds m_mutex.
+    void evictExpiredLocked( std::int64_t nowMs );
+
     struct CacheEntry
     {
       ModelRuntimePtr session;
-      std::uint64_t lastUsed = 0;
+      std::uint64_t lastUsed = 0; ///< LRU tick (monotonic counter)
+      std::int64_t lastUsedMs = 0; ///< wall clock, for idle eviction
     };
 
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, CacheEntry> m_cache;
-    std::unordered_map<std::string, ModelRuntimeFactory> m_providers;
+    struct ProviderEntry
+    {
+      ModelRuntimeFactory factory;
+      ProviderTraits traits;
+    };
+    std::unordered_map<std::string, ProviderEntry> m_providers;
     std::optional<ModelHardwareCapabilities> m_hardwareOverride;
     std::size_t m_maxSessions = 2;
     std::size_t m_totalLoaded = 0;
     std::uint64_t m_useCounter = 0;
+    std::uint64_t m_idleEvictionMs = 0;
+    std::uint64_t m_cacheHits = 0;
+    std::uint64_t m_cacheMisses = 0;
+    std::uint64_t m_evictions = 0;
 };
 
 } // namespace sicnu::operators::runtime

@@ -18,6 +18,9 @@ Pi agent adapter over the same Task Center seam.
   Dispatcher, kernels in `algorithms/`.
 - `src/operators` — RSOperator framework + `rs:`/`gdal:`/`otb:`/`opencv:`
   families (JSON parameter/result seam, registry, determinism grades).
+- `src/operators/runtime`, `src/operators/framework` — Model runtime 4.0
+  (`IModelRuntime`, `ModelCatalog`, device policy, bounded session pool,
+  tiled inference engine).
 - `src/jobs` — JobEngine (execution workers, listeners, retention).
 - `src/data` — DataManager (asset authority) + governance store/services.
 - `src/analysis` — classification pipeline, segmentation, georeferencing.
@@ -37,6 +40,12 @@ Pi agent adapter over the same Task Center seam.
 
 ## Current state (2026-09-07)
 
+- **Model Runtime & AI Inference Platform 4.0** (ADR 0130):
+  manifest 4.0 identity (`runtime.device`, digest anchor), unified runtime contract
+  (device resolution, failure classification, OOM ladder), atomic tiled publisher
+  (bounded windowing, batch retry), declarative postprocess (labels/mask/confidence,
+  YOLO detection decode), authoritative model catalog, single execution seam
+  (`rs:infer`, `rs:segment`, `rs:detect`, `rs:embedding`), 14 failure-matrix tests.
 - **Pi Spatial Scientist & Agent Harness 4.0** (ADR 0130):
   error taxonomy (`harness_error.h`), tool manifests with risk/preconditions/artifacts,
   dataset grounding (`EntityResolver`), typed spatial context with content-hashed revisions,

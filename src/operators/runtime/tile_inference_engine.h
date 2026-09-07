@@ -29,12 +29,24 @@ struct TileInferenceStats
   int tilesPlanned = 0;
   int tilesProcessed = 0;
   int tilesSkippedNoData = 0; ///< tiles whose forward pass was skipped (all core pixels nodata, #705)
+  int batchReductions = 0;    ///< OOM ladder splits (batch halved, same tiles retried)
   int outBands = 0;       ///< model output channels written (all heads + uncertainty)
   int outWidth = 0;       ///< output raster width (== input width)
   int outHeight = 0;      ///< output raster height (== input height)
   /// Channel count per output head in band order (Platform 3.0 multi-head
   /// layout; the uncertainty band, when any, is counted in its head's entry).
   std::vector<int> headChannels;
+};
+
+/// Raster-task output mode (Platform 4.0, manifest `output.format`).
+/// Probability keeps the historical float32 per-class stack; the derived
+/// modes collapse the class planes of the FIRST head into ONE band.
+enum class RasterOutputMode
+{
+  Probability, ///< "" | "probability": float32 class stack (default; the regression/embedding path)
+  Labels,      ///< "labels": argmax → label raster (Byte ≤255 classes, else UInt16) + palette metadata
+  Mask,        ///< "mask": binary 0/1 Byte (C==1: plane ≥ threshold; C>1: argmax ≠ 0)
+  Confidence   ///< "confidence": float32 top-1 probability band
 };
 
 /// Optional knobs for one engine run (Platform 3.0, goal §10).
@@ -51,6 +63,8 @@ struct TileInferenceRunOptions
   /// Hard cap on the batch size (0 = budget-aware auto sizing). Tests and the
   /// operator surface use this to pin memory behavior.
   int batchSizeOverride = 0;
+  /// Derived-output selection; Probability = historical manifest behavior.
+  RasterOutputMode outputMode = RasterOutputMode::Probability;
 };
 
 class TileInferenceEngine
@@ -91,6 +105,12 @@ class TileInferenceEngine
     /// The declared uncertainty method for output heads ("" = none); one of
     /// "entropy" | "margin" (manifest output.uncertainty).
     static std::string uncertaintyMethod( const ModelInfo &model );
+
+    /// Platform 4.0: manifest output.format → RasterOutputMode. Conflicts
+    /// (uncertainty + derived mode, mask_threshold + labels, multi-head +
+    /// derived mode) throw RSOperatorError with a loud reason — a silently
+    /// ignored knob is the #646 failure class.
+    static RasterOutputMode rasterOutputMode( const ModelInfo &model );
 
     /// Platform 3.0: uncertainty band for one tile's class-probability head.
     /// @a classPlanes are the head's C channel planes (already stitched to the

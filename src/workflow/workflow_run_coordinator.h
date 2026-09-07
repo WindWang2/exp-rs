@@ -28,7 +28,7 @@
 
 namespace sicnu {
 
-struct AlgorithmTaskInfo;
+struct AlgorithmTaskInfo; // match task_center.h definition tag (MSVC mangles class/struct differently)
 
 namespace workflow {
 
@@ -91,19 +91,6 @@ class WorkflowRunCoordinator : public QObject {
     void setCheckpointDirectory( const QString &directory );
     QString checkpointDirectory() const;
 
-  signals:
-    /// Truthful run-state mirror (issue #754): emitted at the meaningful
-    /// lifecycle transitions — Running when a tracked pipeline starts, the
-    /// real terminal state (Completed/Failed/Canceled) at finalize, and
-    /// Interrupted when crash recovery reconciles the run. Governance
-    /// (WorkspaceService::recordRun) subscribes so the runs index reflects
-    /// what actually happened instead of fabricating states. Delivery is a
-    /// Qt signal (lifetime-managed, queueable) because the coordinator may
-    /// emit with its internal mutex held: receivers must not call back into
-    /// the coordinator synchronously.
-    void runStateChanged( const QString &runId, const QString &workflowId,
-                          const QString &state, qint64 startedMs, qint64 finishedMs );
-
   private slots:
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
@@ -122,10 +109,6 @@ class WorkflowRunCoordinator : public QObject {
     QString checkpointDirectoryLocked() const;
     QString checkpointPathLocked( const std::string &runId ) const;
     QString checkpointPathFor( const std::string &runId ) const;
-    /// Emits runStateChanged() with @a run's current state (start time taken
-    /// from the run's creation stamp when @a startedMs is 0). m_mutex must be
-    /// held (mirrors persistRunLocked's contract).
-    void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
 
     mutable std::mutex m_mutex;
     WorkflowCheckpointManager m_checkpoints;

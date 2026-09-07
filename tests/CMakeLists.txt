@@ -839,6 +839,66 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     sicnu_discover_tests(test_model_runtime)
 endif()
 
+# Platform 4.0: failure matrix + device/pool/registry contracts
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+    add_executable(test_model_failure_matrix test_model_failure_matrix.cpp)
+    target_link_libraries(test_model_failure_matrix PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_model_failure_matrix)
+    target_include_directories(test_model_failure_matrix PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_model_failure_matrix)
+
+    add_executable(test_model_tasks test_model_tasks.cpp)
+    target_link_libraries(test_model_tasks PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_model_tasks)
+    target_include_directories(test_model_tasks PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_model_tasks)
+endif()
+
+# Platform 4.0: model runtime benchmark (env-gated: SICNU_MODEL_BENCH=1)
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+    add_executable(test_model_runtime_bench test_model_runtime_bench.cpp)
+    target_link_libraries(test_model_runtime_bench PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_model_runtime_bench)
+    target_include_directories(test_model_runtime_bench PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_model_runtime_bench)
+endif()
+
 # Unified datasource resolver contract (GH #560)
 sicnu_add_test(test_datasource_resolver)
 

@@ -177,6 +177,9 @@ set(QGIS_GUI_SRCS
   ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qscilexercss.h
   ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qscilexersql.h
   ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qscilexerpython.h
+  ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qscilexerhtml.h
+  ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qscilexerjavascript.h
+  ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qscilexerjson.h
   ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qsciapis.h
 
   devtools/qgsdevtoolsmodelnode.cpp

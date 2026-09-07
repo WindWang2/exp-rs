@@ -195,7 +195,9 @@ bool onnxRuntimeProviderAvailable()
 
 void registerOnnxRuntimeProvider()
 {
-  ModelRuntimeRegistry::instance().registerProvider( "onnxruntime", makeOnnxRuntime );
+  ModelRuntimeRegistry::instance().registerProvider(
+    "onnxruntime", makeOnnxRuntime,
+    ProviderTraits{ /*maxAddressableCudaIndex*/ 63 } );
 }
 
 std::string onnxRuntimeUnavailableReason()

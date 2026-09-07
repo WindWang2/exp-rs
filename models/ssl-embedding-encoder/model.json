@@ -75,5 +75,8 @@
     "embedding",
     "ssl",
     "features"
-  ]
+  ],
+  "id": "rs/ssl-embedding-encoder",
+  "model_version": "1.0.0",
+  "license": "unspecified"
 }
