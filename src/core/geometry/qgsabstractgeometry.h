@@ -37,7 +37,7 @@ class QgsCurve;
 class QgsMultiCurve;
 class QgsMultiPoint;
 
-class QgsVertexId;
+struct QgsVertexId;
 class QgsVertexIterator;
 class QPainter;
 class QDomDocument;

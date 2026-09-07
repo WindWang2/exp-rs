@@ -39,7 +39,7 @@
 
 class QgsAbstractGeometry;
 class QgsPoint;
-class QgsVertexId;
+struct QgsVertexId;
 
 /**
  * \ingroup gui
