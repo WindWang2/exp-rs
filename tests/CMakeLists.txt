@@ -627,6 +627,24 @@ target_include_directories(test_spectral_detection PRIVATE
 )
 sicnu_discover_tests(test_spectral_detection)
 
+# SAR foundation (Foundation 5.0 Milestone D): dual-pol features + terrain
+# geometry closed forms, operator E2E, geometry refusals.
+add_executable(test_sar_foundation5 test_sar_foundation5.cpp)
+target_link_libraries(test_sar_foundation5 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_sar_foundation5)
+target_include_directories(test_sar_foundation5 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_foundation5)
+
 # Spectral classification (SAM + Continuum Removal) kernel tests
 add_executable(test_spectral_classification test_spectral_classification.cpp)
 target_link_libraries(test_spectral_classification PRIVATE

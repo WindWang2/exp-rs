@@ -129,6 +129,8 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_topographic_correction_operator.cpp
     rs/rs_spectral_derivative_operator.cpp
     rs/rs_spectral_detection_operators.cpp
+    rs/rs_sar_dualpol_operator.cpp
+    rs/rs_sar_terrain_masks_operator.cpp
     rs/rs_pca_operator.cpp
     rs/rs_mnf_operator.cpp
     rs/rs_mosaic_operator.cpp
