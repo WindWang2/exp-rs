@@ -11,6 +11,7 @@
 
 #include "agent/cartography/composition.h"
 #include "agent/cartography/design_tokens.h"
+#include "agent/cartography/quality.h"
 #include "agent/cartography/registry.h"
 #include "agent/cartography/solution_registry.h"
 #include "agent/cartography/style_compiler.h"
@@ -26,10 +27,19 @@
 #include <QFile>
 #include <QStringList>
 
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <functional>
 #include <set>
+
+#include <qgslayout.h>
+#include <qgslayoutmanager.h>
+#include <qgslayoutpagecollection.h>
+#include <qgsprintlayout.h>
+#include <qgsproject.h>
+
+#include "agent/mapspec/mapspec_compiler.h"
 
 #ifndef CMAKE_SOURCE_DIR
 #define CMAKE_SOURCE_DIR "."
@@ -728,4 +738,119 @@ TEST_CASE( "Style application reports per-entry problems and applies what it can
   Json::Value bad = raster;
   bad["band"] = 9;
   CHECK( buildRasterRenderer( bad, 1 ) == nullptr );
+}
+
+// ---------------------------------------------------------------------------
+// Milestone SCALE: bounded-catalog performance gates + Milestone F compile
+// coverage for multi-page reports.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Scale gates: catalog load, facet search and the solution pipeline stay bounded",
+           "[platform5][scale]" )
+{
+  using tclock = std::chrono::steady_clock;
+  auto msOf = []( tclock::time_point a, tclock::time_point b ) {
+    return std::chrono::duration<double, std::milli>( b - a ).count();
+  };
+
+  TemplateRegistry::instance().setDirectory(
+    QString::fromStdString( ( sourceDir() / "data/cartography" ).string() ) );
+  TemplateRegistry::instance().reload();
+  StyleRegistry::instance().setDirectory(
+    QString::fromStdString( ( sourceDir() / "data/cartography" ).string() ) );
+  StyleRegistry::instance().reload();
+  SolutionRegistry::instance().setDirectory(
+    QString::fromStdString( ( sourceDir() / "data/agent/solutions" ).string() ) );
+  SolutionRegistry::instance().reload();
+  RecipeCatalog::instance().setDirectory( ( sourceDir() / "data/agent/recipes" ).string() );
+  RecipeCatalog::instance().reload();
+
+  const Json::Value solutions = SolutionRegistry::instance().solutions();
+  const Json::Value templates = TemplateRegistry::instance().templates();
+  const Json::Value recipes = RecipeCatalog::instance().listRecipes();
+  REQUIRE( solutions.size() >= 40 );
+  REQUIRE( templates.size() >= 55 );
+  REQUIRE( recipes.size() >= 70 );
+
+  // Facet search over the full catalog.
+  const auto searchStart = tclock::now();
+  int totalHits = 0;
+  for ( int i = 0; i < 50; ++i )
+  {
+    SolutionQuery query;
+    query.task = "flood";
+    query.modality = i % 2 ? "sar" : "";
+    query.page = i % 5;
+    totalHits += searchSolutions( solutions, query )["total"].asInt();
+  }
+  const double searchMs = msOf( searchStart, tclock::now() ) / 50.0;
+  CHECK( totalHits > 0 );
+  CHECK( searchMs < 20.0 );
+
+  // Compact search responses stay inside the token budget. Measured:
+  // a full compact summary serializes to ~440 chars, so gate the per-hit
+  // cost (500) and the family page (all 5 flood solutions) at 2500.
+  SolutionQuery flood;
+  flood.task = "flood";
+  const Json::Value page = searchSolutions( solutions, flood );
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "";
+  const std::string serialized = Json::writeString( builder, page );
+  const int hits = static_cast<int>( page["items"].size() );
+  REQUIRE( hits > 0 );
+  CHECK( serialized.size() / hits <= 500u );
+  CHECK( serialized.size() <= 2500 );
+
+  // Instantiation pipeline: contract check + recipe compile + template draft.
+  const auto instStart = tclock::now();
+  sicnu::agent::harness::HarnessError error;
+  Json::Value bindings( Json::objectValue );
+  Json::Value slotRefs( Json::objectValue ); // NB: not `slots` — Qt moc macro
+  slotRefs["primary"] = "unbound-ref";
+  bindings["slots"] = slotRefs;
+  const Json::Value plan =
+    RecipeCatalog::instance().instantiateRecipe( "harness.optical_ndvi", bindings, error );
+  const double instMs = msOf( instStart, tclock::now() );
+  CHECK( instMs < 50.0 );
+
+  // Whole-catalog preflight of a representative A4 draft.
+  Json::Value draft = TemplateRegistry::instance().instantiateTemplate(
+    "water-flood-a4l", Json::Value( Json::objectValue ), nullptr );
+  REQUIRE_FALSE( draft.isNull() );
+  const double margin = tokenNumber( resolveTokenSet( draft ), "spacing.margin_mm", 12.0 );
+  const auto preflightStart = tclock::now();
+  resolveComposition( draft, margin );
+  const Json::Value quality = preflightMapSpec( draft );
+  const double preflightMs = msOf( preflightStart, tclock::now() );
+  CHECK( preflightMs < 50.0 );
+  CHECK( quality["issues"].isArray() );
+}
+
+TEST_CASE( "Multi-page report templates compile with page roles and conditional pages",
+           "[platform5][mapspec][multipage]" )
+{
+  TemplateRegistry::instance().setDirectory(
+    QString::fromStdString( ( sourceDir() / "data/cartography" ).string() ) );
+  Json::Value draft = TemplateRegistry::instance().instantiateTemplate(
+    "report-multipage-a4l", Json::Value( Json::objectValue ), nullptr );
+  REQUIRE_FALSE( draft.isNull() );
+  REQUIRE( draft["pages"].isArray() );
+  REQUIRE( draft["pages"].size() == 2 );
+  CHECK( draft["pages"][0]["role"].asString() == "map" );
+  CHECK( draft["pages"][1]["role"].asString() == "report" );
+  CHECK( draft["pages"][1]["page_if"].asString() == "has(statistics)" );
+
+  // Items carry their page placement.
+  int onPage = 0;
+  for ( const auto &item : draft["titles"] )
+    if ( item.isMember( "page" ) && item["page"].isIntegral() && item["page"].asInt() > 0 )
+      ++onPage;
+  CHECK( onPage >= 1 );
+
+  // The compile path accepts the multi-page draft and builds all pages.
+  QString error;
+  QgsPrintLayout *layout = MapSpecCompiler::compile( draft, &error );
+  REQUIRE( layout != nullptr );
+  CHECK( layout->pageCollection()->pageCount() == 3 );
+  QgsProject::instance()->layoutManager()->clear();
 }
