@@ -47,6 +47,13 @@ class SearchRecipesTool final : public SpatialTool
       return objectSchema( std::move( props ), Json::Value() );
     }
 
+    Json::Value outputSchema() const override
+    {
+      Json::Value props( Json::objectValue );
+      props["recipes"] = Json::Value( Json::arrayValue );
+      return objectSchema( std::move( props ), Json::Value() );
+    }
+
     SpatialToolResult execute( const Json::Value &input ) override
     {
       auto &catalog = RecipeCatalog::instance();
@@ -92,6 +99,13 @@ class DescribeRecipeTool final : public SpatialTool
       Json::Value required( Json::arrayValue );
       required.append( "recipe_id" );
       return objectSchema( std::move( props ), std::move( required ) );
+    }
+
+    Json::Value outputSchema() const override
+    {
+      Json::Value props( Json::objectValue );
+      props["recipe"] = Json::Value( Json::objectValue );
+      return objectSchema( std::move( props ), Json::Value() );
     }
 
     SpatialToolResult execute( const Json::Value &input ) override
@@ -145,6 +159,14 @@ class InstantiateRecipeTool final : public SpatialTool
       return objectSchema( std::move( props ), std::move( required ) );
     }
 
+    Json::Value outputSchema() const override
+    {
+      Json::Value props( Json::objectValue );
+      props["plan"] = Json::Value( Json::objectValue );
+      props["estimates"] = Json::Value( Json::objectValue );
+      return objectSchema( std::move( props ), Json::Value() );
+    }
+
     SpatialToolResult execute( const Json::Value &input ) override
     {
       const std::string recipeId = input.get( "recipe_id", "" ).asString();
@@ -182,10 +204,6 @@ class InstantiateRecipeTool final : public SpatialTool
 
 void registerRecipeTools()
 {
-  static bool registered = false;
-  if ( registered )
-    return;
-  registered = true;
   auto &registry = SpatialToolRegistry::instance();
   registry.registerTool( std::make_shared<SearchRecipesTool>() );
   registry.registerTool( std::make_shared<DescribeRecipeTool>() );

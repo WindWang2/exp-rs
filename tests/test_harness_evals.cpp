@@ -20,8 +20,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <QFile>
 #include <QTemporaryDir>
 
+#include "agent/contracts/spatial_contracts.h"
 #include "agent/harness/agent_plan.h"
 #include "agent/harness/harness_error.h"
 #include "agent/harness/harness_verification.h"
@@ -30,8 +32,9 @@
 #include "agent/harness/scientific_preflight.h"
 #include "agent/harness/tool_manifest.h"
 #include "agent/spatial_tools/spatial_tool.h"
-#include "operators/framework/atomic_algorithm_registry.h"
+#include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/task_center.h"
+#include "workflow/workflow_definition.h"
 #include "workflow/workflow_run.h"
 #include "workflow/workflow_run_coordinator.h"
 
@@ -62,12 +65,21 @@ struct GdalInit
 };
 static GdalInit s_gdalInit;
 
+struct Registries
+{
+    Registries() { sicnu::processing::AtomicAlgorithmRegistry::instance().initialize(); }
+};
+static Registries s_registries;
+
+/// 4-band optical product fixture (Blue/Red/NIR/SWIR order, NIR=4 and RED=3
+/// matching the spectral-index operator's positional defaults for real
+/// products; roles are declared on every band).
 std::string writeOpticalRaster( const QString &path, int width = 16, int height = 16,
                                 float seed = 1.0f )
 {
     GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "GTiff" );
     REQUIRE( driver != nullptr );
-    GDALDataset *ds = driver->Create( path.toUtf8().constData(), width, height, 2,
+    GDALDataset *ds = driver->Create( path.toUtf8().constData(), width, height, 4,
                                       GDT_Float32, nullptr );
     REQUIRE( ds != nullptr );
     double gt[6] = { 500000.0, 30.0, 0.0, 5000000.0, 0.0, -30.0 };
@@ -78,8 +90,10 @@ std::string writeOpticalRaster( const QString &path, int width = 16, int height 
     srs.exportToWkt( &wkt );
     ds->SetProjection( wkt );
     CPLFree( wkt );
-    ds->GetRasterBand( 1 )->SetMetadataItem( "SICNU_BAND_ROLE", "NIR", nullptr );
-    ds->GetRasterBand( 2 )->SetMetadataItem( "SICNU_BAND_ROLE", "RED", nullptr );
+    ds->GetRasterBand( 1 )->SetMetadataItem( "SICNU_BAND_ROLE", "BLUE", nullptr );
+    ds->GetRasterBand( 2 )->SetMetadataItem( "SICNU_BAND_ROLE", "GREEN", nullptr );
+    ds->GetRasterBand( 3 )->SetMetadataItem( "SICNU_BAND_ROLE", "RED", nullptr );
+    ds->GetRasterBand( 4 )->SetMetadataItem( "SICNU_BAND_ROLE", "NIR", nullptr );
     std::vector<float> row( static_cast<size_t>( width ) );
     for ( int y = 0; y < height; ++y )
     {
@@ -88,9 +102,13 @@ std::string writeOpticalRaster( const QString &path, int width = 16, int height 
               0.1f + seed * 0.01f * static_cast<float>( ( y * width + x ) % 32 );
         ds->GetRasterBand( 1 )->RasterIO( GF_Write, 0, y, width, 1, row.data(), width, 1,
                                           GDT_Float32, 0, 0 );
+        ds->GetRasterBand( 2 )->RasterIO( GF_Write, 0, y, width, 1, row.data(), width, 1,
+                                          GDT_Float32, 0, 0 );
         for ( int x = 0; x < width; ++x )
             row[static_cast<size_t>( x )] *= 0.8f;
-        ds->GetRasterBand( 2 )->RasterIO( GF_Write, 0, y, width, 1, row.data(), width, 1,
+        ds->GetRasterBand( 3 )->RasterIO( GF_Write, 0, y, width, 1, row.data(), width, 1,
+                                          GDT_Float32, 0, 0 );
+        ds->GetRasterBand( 4 )->RasterIO( GF_Write, 0, y, width, 1, row.data(), width, 1,
                                           GDT_Float32, 0, 0 );
     }
     GDALClose( ds );
@@ -140,18 +158,28 @@ Json::Value parseJson( const std::string &text )
 
 bool waitForTerminal( const std::string &runId, int timeoutMs = 60000 )
 {
-    auto &coordinator = sicnu::workflow::WorkflowRunCoordinator::instance();
+    // NOTE: poll through the harness:run_status TOOL, not the coordinator
+    // singleton — sicnu_task_center is a static library linked into both the
+    // test exe and sicnu_agent.dll, so each holds its own singletons. The
+    // tool surface (which is what the eval drives) is self-consistent.
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds( timeoutMs );
+    std::string lastState = "?";
     while ( std::chrono::steady_clock::now() < deadline )
     {
-        if ( auto run = coordinator.runForPipeline( coordinator.pipelineIdForRun( runId ) ) )
+        Json::Value statusInput;
+        statusInput["run_id"] = runId;
+        const SpatialToolResult status = callTool( "harness:run_status", statusInput );
+        if ( status.success )
         {
-            if ( sicnu::workflow::isTerminalRunState( run->state() ) )
+            lastState = status.output["state"].asString();
+            if ( lastState == "Completed" || lastState == "Failed" ||
+                 lastState == "Canceled" || lastState == "Interrupted" )
                 return true;
         }
-        std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+        std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
     }
+    FAIL( "run did not go terminal: state=" << lastState );
     return false;
 }
 
@@ -168,8 +196,10 @@ Json::Value executePlanToTerminal( const Json::Value &plan )
         failure["status"] = "submission_failed";
         failure["code"] = submitted.errorCode;
         failure["error"] = submitted.error;
+        FAIL( "submission failed: " << submitted.error );
         return failure;
     }
+
     if ( !submitted.output.get( "executed", false ).asBool() )
         return submitted.output; // preflight refusal document
     const std::string runId = submitted.output["run_id"].asString();
@@ -189,7 +219,7 @@ Json::Value executePlanToTerminal( const Json::Value &plan )
 // Tier A: contract scenarios (grounding, preflight, plan compile, estimates)
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "Eval: optical vegetation (NDVI) full pipeline", "[harness][eval][ndvi]" )
+TEST_CASE( "Eval: optical vegetation NDVI full pipeline", "[harness][eval][ndvi]" )
 {
     QTemporaryDir tmp;
     REQUIRE( tmp.isValid() );
@@ -205,7 +235,7 @@ TEST_CASE( "Eval: optical vegetation (NDVI) full pipeline", "[harness][eval][ndv
     const SpatialToolResult understood = callTool( "spatial:understand", understandInput );
     REQUIRE( understood.success );
     CHECK( understood.output["dataset_understanding"]["modality"].asString() == "optical" );
-    CHECK( understood.output["dataset_understanding"]["band_count"].asInt() == 2 );
+    CHECK( understood.output["dataset_understanding"]["band_count"].asInt() == 4 );
 
     // 2. Instantiate the sanctioned recipe.
     Json::Value bindings;
@@ -248,6 +278,12 @@ TEST_CASE( "Eval: optical vegetation (NDVI) full pipeline", "[harness][eval][ndv
     CHECK( !workflow["steps"][0]["params"]["input"].asString().empty() );
 
     // 5. Execute through the authoritative engine and verify.
+    {
+        sicnu::workflow::WorkflowDefinition def;
+        std::string defErr;
+        REQUIRE( sicnu::workflow::workflowDefinitionFromJson( parseJson( workflowJson ), def,
+                                                              defErr ) );
+    }
     const Json::Value status = executePlanToTerminal( plan );
     CHECK( status["state"].asString() == "Completed" );
     CHECK( status["status"].asString() == "completed" );
@@ -286,7 +322,7 @@ TEST_CASE( "Eval: optical bi-temporal change full pipeline", "[harness][eval][ch
     CHECK( status["verification"]["verdict"].asString() == "PASS" );
 }
 
-TEST_CASE( "Eval: SAR change — preflight blocks modality/polarization mismatches",
+TEST_CASE( "Eval: SAR change preflight blocks modality and polarization mismatches",
            "[harness][eval][sar]" )
 {
     QTemporaryDir tmp;
@@ -356,7 +392,7 @@ TEST_CASE( "Eval: SAR change — preflight blocks modality/polarization mismatch
     CHECK( compilePlanToWorkflowJson( parsed, error ).size() > 0 );
 }
 
-TEST_CASE( "Eval: land-cover classification plan contract", "[harness][eval][classify]" )
+TEST_CASE( "Eval: land cover classification plan contract", "[harness][eval][classify]" )
 {
     QTemporaryDir tmp;
     REQUIRE( tmp.isValid() );
@@ -447,7 +483,7 @@ TEST_CASE( "Eval: paper figure plan declares map output", "[harness][eval][figur
 // Anti-hallucination contract (Phase 19): unknown/ambiguous -> typed failure.
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "Eval: anti-hallucination — unknown and ambiguous references fail typed",
+TEST_CASE( "Eval: anti-hallucination unknown and ambiguous references fail typed",
            "[harness][eval][antihallucination]" )
 {
     SpatialToolRegistry::instance().registerBuiltinTools();
@@ -493,7 +529,7 @@ TEST_CASE( "Eval: anti-hallucination — unknown and ambiguous references fail t
 // disappears forces the run status to failed.
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "Eval: FAIL verification cannot be reported as success",
+TEST_CASE( "Eval: FAIL verification is never reported as success",
            "[harness][eval][verification]" )
 {
     const std::string missing = "/nonexistent/harness_eval_output.tif";
@@ -508,12 +544,12 @@ TEST_CASE( "Eval: FAIL verification cannot be reported as success",
 // Token budget contract (Phase 20): staged discovery stays bounded.
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "Eval: token budgets — manifests, error catalog, context",
+TEST_CASE( "Eval: token budgets manifests error catalog and context",
            "[harness][eval][tokens]" )
 {
     SpatialToolRegistry::instance().registerBuiltinTools();
 
-    const size_t budgetBytes = []( Json::Value doc ) {
+    auto budgetBytes = []( const Json::Value &doc ) {
         Json::StreamWriterBuilder builder;
         builder["indentation"] = "";
         return Json::writeString( builder, doc ).size();
@@ -534,5 +570,35 @@ TEST_CASE( "Eval: token budgets — manifests, error catalog, context",
     // The typed context stays under 256 KiB even with a busy workspace.
     const SpatialToolResult context = callTool( "harness:context", Json::Value() );
     REQUIRE( context.success );
-    CHECK( budgetBytes( context.output ) < 256 * 1024 );
+    const size_t contextBytes = budgetBytes( context.output );
+    CHECK( contextBytes < 256 * 1024 );
+
+    // Optional benchmark dump (Phase 20): SICNU_BENCH_OUT=<file> records the
+    // measured sizes alongside the caps.
+    if ( const char *benchOut = std::getenv( "SICNU_BENCH_OUT" ) )
+    {
+        Json::Value bench( Json::objectValue );
+        bench["schema_version"] = "1.0";
+        bench["kind"] = "harness_token_budgets";
+        Json::Value measured( Json::objectValue );
+        measured["harness_error_codes_bytes"] = static_cast<Json::UInt64>( budgetBytes( codes.output ) );
+        measured["harness_tool_manifest_page_50_bytes"] =
+          static_cast<Json::UInt64>( budgetBytes( manifests.output ) );
+        measured["harness_context_bytes"] = static_cast<Json::UInt64>( contextBytes );
+        bench["measured"] = measured;
+        Json::Value caps( Json::objectValue );
+        caps["error_catalog_max_bytes"] = 8 * 1024;
+        caps["manifest_page_max_bytes"] = 64 * 1024;
+        caps["context_max_bytes"] = 256 * 1024;
+        caps["registry_tool_output_cap_bytes"] = static_cast<Json::UInt64>( sicnu::agent::contracts::kMaxToolOutputBytes );
+        bench["caps"] = caps;
+        Json::StreamWriterBuilder benchWriter;
+        benchWriter["indentation"] = "  ";
+        QFile out( QString::fromUtf8( benchOut ) );
+        if ( out.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+        {
+            out.write( QByteArray::fromStdString( Json::writeString( benchWriter, bench ) ) );
+            out.close();
+        }
+    }
 }

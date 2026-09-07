@@ -329,10 +329,6 @@ std::string inferModality( const Json::Value &rasterInspect )
 
 void registerGroundingTools()
 {
-  static bool registered = false;
-  if ( registered )
-    return;
-  registered = true;
   auto &registry = SpatialToolRegistry::instance();
   registry.registerTool( std::make_shared<UnderstandTool>() );
   registry.registerTool( std::make_shared<ContextTool>() );

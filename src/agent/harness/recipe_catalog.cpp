@@ -1,6 +1,7 @@
 // src/agent/harness/recipe_catalog.cpp
 #include "recipe_catalog.h"
 
+#include "agent_plan.h"
 #include "entity_resolver.h"
 
 #include <QCoreApplication>
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <set>
 
 namespace sicnu::agent::harness {
 
@@ -101,10 +103,10 @@ Json::Value RecipeCatalog::listRecipes() const
     summary["title"] = recipe.get( "title", "" ).asString();
     summary["intent"] = recipe.get( "intent", "" ).asString();
     summary["step_count"] = static_cast<Json::Int>( recipe.get( "steps", Json::Value( Json::arrayValue ) ).size() );
-    Json::Value slots( Json::arrayValue );
+    Json::Value slotNames( Json::arrayValue );
     for ( const auto &slot : recipe.get( "slots", Json::Value( Json::arrayValue ) ) )
-      slots.append( slot.get( "name", "" ).asString() );
-    summary["slots"] = slots;
+      slotNames.append( slot.get( "name", "" ).asString() );
+    summary["slots"] = slotNames;
     summaries.append( summary );
   }
   return summaries;
@@ -137,7 +139,11 @@ std::string substituteToken( const std::string &value, const Json::Value &slotPa
   }
   if ( value.rfind( "$", 0 ) == 0 )
   {
-    const std::string slot = value.substr( 1 );
+    // "$<slot>.path" — the only slot field; the slot key itself has no dot.
+    std::string slot = value.substr( 1 );
+    const size_t dot = slot.find( '.' );
+    if ( dot != std::string::npos )
+      slot = slot.substr( 0, dot );
     return slotPaths.get( slot, "" ).asString();
   }
   return value;
@@ -312,9 +318,34 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
                  : step.get( "params", Json::Value( Json::objectValue ) );
     planStep["params"] =
       substituteParams( templateParams, slotPaths, outputPaths, paramBindings );
+    // Declared dependencies gate execution order in the engine — carry them.
+    if ( step.isMember( "inputs" ) && step["inputs"].isArray() && !step["inputs"].empty() )
+      planStep["inputs"] = step["inputs"];
     if ( step.isMember( "verification" ) && step["verification"].isString() )
       planStep["verification"] = step["verification"];
     planSteps.append( planStep );
+  }
+
+  // Drop wiring that references steps the gates removed (the surviving step's
+  // concrete params already carry its real inputs), and rewrite surviving
+  // inputs whose upstream switched to concrete paths.
+  std::set<std::string> emittedIds;
+  for ( const Json::Value &emitted : planSteps )
+    emittedIds.insert( emitted.get( "id", "" ).asString() );
+  for ( Json::Value &emitted : planSteps )
+  {
+    if ( !emitted.isMember( "inputs" ) )
+      continue;
+    Json::Value filtered( Json::arrayValue );
+    for ( const Json::Value &conn : emitted["inputs"] )
+    {
+      if ( emittedIds.count( conn.get( "step", "" ).asString() ) )
+        filtered.append( conn );
+    }
+    if ( filtered.empty() )
+      emitted.removeMember( "inputs" );
+    else
+      emitted["inputs"] = filtered;
   }
 
   Json::Value plan( Json::objectValue );

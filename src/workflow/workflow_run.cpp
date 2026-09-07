@@ -22,7 +22,11 @@ std::string currentIsoTimestamp()
   std::tm tmBuf{};
   // gmtime returns a shared static buffer - not safe when two runs are
   // touched from different threads (checkpoint recovery vs. background run).
+#ifdef _WIN32
+  gmtime_s( &tmBuf, &itt );
+#else
   gmtime_r( &itt, &tmBuf );
+#endif
   std::ostringstream ss;
   ss << std::put_time( &tmBuf, "%Y-%m-%dT%H:%M:%SZ" );
   return ss.str();

@@ -16,6 +16,7 @@
 
 #include <cpl_vsi.h>
 #include <gdal_priv.h>
+#include <ogr_spatialref.h>
 
 #include <json/json.h>
 
@@ -48,6 +49,12 @@ std::string createTestRaster( const QString &path )
 
     double geoTransform[6] = { 500000.0, 30.0, 0.0, 5000000.0, 0.0, -30.0 };
     ds->SetGeoTransform( geoTransform );
+    OGRSpatialReference srs;
+    srs.importFromEPSG( 32650 );
+    char *wkt = nullptr;
+    srs.exportToWkt( &wkt );
+    ds->SetProjection( wkt );
+    CPLFree( wkt );
     ds->GetRasterBand( 1 )->SetMetadataItem( "SICNU_BAND_ROLE", "NIR", nullptr );
     ds->GetRasterBand( 1 )->SetMetadataItem( "WAVELENGTH", "842", nullptr );
     ds->GetRasterBand( 1 )->SetMetadataItem( "WAVELENGTH_UNITS", "nm", nullptr );
@@ -148,6 +155,7 @@ TEST_CASE( "Entity resolution never guesses", "[harness][grounding]" )
 
 TEST_CASE( "spatial:understand returns a typed grounding document", "[harness][grounding]" )
 {
+    SpatialToolRegistry::instance().registerBuiltinTools();
     registerGroundingTools();
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
@@ -168,7 +176,7 @@ TEST_CASE( "spatial:understand returns a typed grounding document", "[harness][g
     CHECK( doc["modality"].asString() == "optical" );
     CHECK( doc["band_count"].asInt() == 2 );
     CHECK( doc["band_roles"][0].asString() == "NIR" );
-    CHECK( doc["crs"].asString().find( "32650" ) != std::string::npos );
+    CHECK( doc["crs"]["authid"].asString() == "EPSG:32650" );
     CHECK( doc["entity"].isMember( "asset_entity_id" ) );
 
     SECTION( "unknown references produce typed failures, not prose guesses" )
@@ -188,6 +196,7 @@ TEST_CASE( "spatial:understand returns a typed grounding document", "[harness][g
 
 TEST_CASE( "harness:context is revision-stamped and refresh-aware", "[harness][context]" )
 {
+    SpatialToolRegistry::instance().registerBuiltinTools();
     registerGroundingTools();
     auto tool = SpatialToolRegistry::instance().find( "harness:context" );
     REQUIRE( tool.has_value() );

@@ -32,7 +32,7 @@ namespace sicnu::data
 {
 class DataManager;
 class AssetId;
-struct AssetSnapshot;
+class AssetSnapshot;
 struct DerivationRecord;
 }
 

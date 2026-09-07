@@ -9,7 +9,7 @@
 // read-only, bounded, and deterministic like every SpatialTool (ADR 0122).
 //
 
-#include "spatial_tools/spatial_tool.h"
+#include "../spatial_tools/spatial_tool.h"
 
 namespace sicnu::agent::harness {
 

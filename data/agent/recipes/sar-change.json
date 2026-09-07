@@ -96,11 +96,23 @@
       "id": "change",
       "operator_id": "rs:sar_change",
       "params": {
-        "inputA": "$outputs.reference_sp",
-        "inputB": "$outputs.observation_sp",
+        "inputA": "$speckle_reference.output",
+        "inputB": "$speckle_observation.output",
         "output": "$outputs.change_map"
       },
-      "verification": "raster"
+      "verification": "raster",
+      "inputs": [
+        {
+          "step": "speckle_reference",
+          "port": "output",
+          "to_port": "inputA"
+        },
+        {
+          "step": "speckle_observation",
+          "port": "output",
+          "to_port": "inputB"
+        }
+      ]
     }
   ],
   "outputs": [

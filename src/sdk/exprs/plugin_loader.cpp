@@ -3,7 +3,11 @@
  ***************************************************************************/
 #include "exprs/plugin_loader.h"
 
+#ifdef _WIN32
+#include "exprs/msvc_posix_shim.h"
+#else
 #include <dlfcn.h>
+#endif
 
 #include <set>
 

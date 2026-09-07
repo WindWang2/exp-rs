@@ -1,7 +1,7 @@
 // src/agent/harness/grounding_tools.h
 #pragma once
 
-#include "spatial_tools/spatial_tool.h"
+#include "../spatial_tools/spatial_tool.h"
 
 namespace sicnu::agent::harness {
 

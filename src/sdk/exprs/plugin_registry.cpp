@@ -13,6 +13,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#ifdef _WIN32
+#include "exprs/msvc_posix_shim.h"
+#endif
+
 #include "exprs/plugin_validator.h"
 
 namespace {

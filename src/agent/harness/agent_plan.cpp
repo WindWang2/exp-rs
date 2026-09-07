@@ -1,8 +1,10 @@
 // src/agent/harness/agent_plan.cpp
 #include "agent_plan.h"
 
-#include "operators/framework/atomic_algorithm_registry.h"
-#include "operators/framework/algorithm_descriptor.h"
+#include "operators/framework/rs_operator.h"
+#include "operators/framework/rs_operator_registry.h"
+#include "processing/framework/algorithm_descriptor.h"
+#include "processing/framework/atomic_algorithm_registry.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_registry.h"
 

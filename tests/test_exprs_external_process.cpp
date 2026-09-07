@@ -4,7 +4,11 @@
 #include "exprs/external_process.h"
 
 #include <fstream>
+#ifdef _WIN32
+#include <cstdlib> // _exit
+#else
 #include <unistd.h>
+#endif
 
 using namespace exprs;
 

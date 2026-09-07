@@ -28,7 +28,7 @@ struct Override {
 
 /// Explicit classifications for tools whose name alone does not determine the
 /// taxonomy. Prefix rules handle the rest (see classifyByPrefix).
-constexpr std::array<Override, 90> kOverrides = { {
+constexpr std::array<Override, 84> kOverrides = { {
   // data:
   { "data:list_layers", "data", "inspect" },
   { "data:describe_dataset", "data", "inspect" },
@@ -213,7 +213,7 @@ ToolTaxonomy taxonomyForTool( const std::string &toolId )
 {
   for ( const Override &override : kOverrides )
   {
-    if ( toolId == override.toolId )
+    if ( override.toolId && toolId == override.toolId )
       return { override.domain, override.action };
   }
   return classifyByPrefix( toolId );

@@ -2,6 +2,89 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-07
+
+### 🧭 Pi Spatial Scientist & Agent Harness 4.0 (goal series, ADR 0130)
+
+Pi stays the generic agent foundation (ADR 0122); this series makes ExpRS the
+complete geospatial harness around it: stable contracts instead of prose,
+deterministic science gates instead of LLM judgment, one authoritative engine.
+
+- **Harness module (`src/agent/harness/`)**: error taxonomy, tool taxonomy +
+  manifests, entity resolution, typed context, scientific preflight, plan
+  model/compiler/estimates, verification, plan runner, recipes — all exposed
+  as `harness:*` tools through the unified catalog (MCP allow-list and the Pi
+  bridge categories extended).
+- **Stable error taxonomy**: closed code table (`DATASET_NOT_FOUND`,
+  `BAND_ROLE_UNRESOLVED`, `CRS_MISMATCH`, `GRID_MISMATCH`,
+  `INVALID_RADIOMETRY`, `INSUFFICIENT_MEMORY`, `MODEL_INCOMPATIBLE`,
+  `EXECUTION_FAILED`, `CANCELLED`, `OUTPUT_INVALID`, `MAP_PREFLIGHT_FAILED`,
+  + harness-internal codes) with category / retry class / recoverable /
+  suggested actions; legacy codes normalize into it.
+- **Tool manifests (Phases 1/2/14)**: every catalog entry carries a bounded
+  `harness` block — taxonomy `domain.action`, risk class, side effects,
+  resource hints, cancellability, preconditions, expected artifacts — derived
+  from `AgentMetadata` + a namespace risk table; `outputSchema` now reaches
+  `tools/list` / `get_tool_schema`.
+- **Dataset grounding (Phases 4/19)**: `EntityResolver` resolves `asset-N` /
+  governed UUID / path / display name against authoritative registries;
+  ambiguity returns `ENTITY_AMBIGUOUS` with candidates, unknown returns
+  `DATASET_NOT_FOUND`. `spatial:understand` returns a typed
+  DatasetUnderstanding document with deterministic single-scene modality
+  inference (sar / optical / dem).
+- **Typed spatial context (Phase 3)**: `harness:context` with content-hashed
+  revisions — unchanged revisions short-circuit to `{unchanged:true}`.
+- **Deterministic scientific preflight (Phase 5)**: intent rule packs —
+  `ndvi` (NIR/Red by role or wavelength window, radiometry, NoData), `change`
+  (CRS/grid/size/resolution/radiometry), `sar_change` (modality,
+  polarization, calibration domain, grid), `classify` (training slots),
+  `phenology` (ordering/roles) — over inspected facts; `blocked` vetoes
+  execution and cannot be overridden by the model.
+- **Plan lifecycle (Phases 6/7/8)**: AgentPlan v2 (goal/intent/inputs/steps/
+  outputs/verification/map_output; v1 accepted) validates with typed issues
+  and compiles to WorkflowDefinition JSON — the single bridge into
+  `WorkflowRunCoordinator` -> `TaskCenter`; per-step + aggregate RAM
+  estimates before submission; recipe step gates (`when_slot` /
+  `when_param`) compile to engine DAG dependencies.
+- **Automatic output verification (Phase 9)**: `PASS / PASS_WITH_WARNINGS /
+  FAIL` per artifact (existence, openability, CRS, dimensions, finite/NoData
+  fractions, class domain, non-empty, provenance) and for the whole run;
+  FAIL forces run status `failed` — there is no false-success path.
+- **Final map confirmation (Phase 10)**: map-producing plans get layout
+  presence checks and a MapSpec compose -> preflight -> bounded repair loop
+  through the existing cartography seams; export only on non-FAIL.
+- **Structured run results + bounded retry (Phases 11/13)**:
+  `harness:run_status` reports the real engine state, per-step results, and
+  verification verdicts; a transient failure may auto-resume exactly once via
+  the engine's own resume (completed steps never re-run).
+- **Scientific recipes (Phase 16)**: five metadata recipes under
+  `data/agent/recipes/` (optical vegetation, optical change, SAR change,
+  land cover, phenology) instantiate plans from bound slots; operators stay
+  the only algorithms.
+- **Pi subagents (Phase 17)**: role cards in `pi/roles/` (data-inspector,
+  remote-sensing-planner, scientific-reviewer, cartography-reviewer,
+  result-verifier) with a single-writer rule; bridge default categories now
+  include `harness,layout`.
+- **Harness evals (Phases 18-20)**: `tests/test_harness_evals.cpp` — nine
+  deterministic cases covering six RS scenarios (NDVI and optical change
+  executed end-to-end through the real engine on synthetic GeoTIFFs; SAR /
+  classification / phenology / paper-figure contract grades), typed-failure
+  anti-hallucination checks, FAIL-never-success, and token budgets (measured:
+  context 2411 B / cap 256 KiB, error catalog 1729 B / cap 8 KiB,
+  50-tool manifest page 12501 B / cap 64 KiB;
+  `benchmarks/harness-token-budgets.json`).
+- **Docs**: `docs/agent/` gains spatial-scientist-architecture,
+  tool-contracts, scientific-preflight, result-verification,
+  evaluation-suite, workflow-integration, pi-adapter; ADR 0130.
+- **Cross-platform repairs (pre-existing master defects, required for any
+  Windows build)**: POSIX-only directory fsync in `qgsproject.cpp`;
+  `S_ISREG` / `dirent.h` / `dlfcn.h` / `mkdir` / `chmod` in the plugin SDK
+  (new `msvc_posix_shim.h`); `class`/`struct` forward-declaration mismatches
+  that MSVC name-mangling distinguishes (`AlgorithmTaskInfo`,
+  `AssetSnapshot`); QScintilla stub `staticMetaObject` definitions;
+  `gmtime_r` -> `gmtime_s`; incomplete-type `unique_ptr<QgsRasterShader>`
+  member.
+
 ## [Unreleased] - 2026-09-05
 
 ### 🗂️ Project Workspace, Data Governance & Reproducibility Platform 3.0 (goal series, ADR 0129)

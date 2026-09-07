@@ -3,9 +3,15 @@
  ***************************************************************************/
 #include "exprs/plugin_package.h"
 
+#ifdef _WIN32
+#include "exprs/msvc_posix_shim.h"
+#else
 #include <dirent.h>
+#endif
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <fstream>

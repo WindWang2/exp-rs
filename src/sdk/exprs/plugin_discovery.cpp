@@ -3,7 +3,11 @@
  ***************************************************************************/
 #include "exprs/plugin_discovery.h"
 
+#ifdef _WIN32
+#include "exprs/msvc_posix_shim.h"
+#else
 #include <dirent.h>
+#endif
 #include <sys/stat.h>
 
 #include <algorithm>

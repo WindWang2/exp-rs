@@ -12,7 +12,11 @@
 #ifdef _WIN32
 #include <cstdlib>  // _exit
 #else
-#include <unistd.h>  // _exit
+#ifdef _WIN32
+#include <cstdlib> // _exit
+#else
+#include <unistd.h>
+#endif
 #endif
 
 #include <QApplication>

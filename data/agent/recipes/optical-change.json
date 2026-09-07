@@ -24,15 +24,22 @@
       "id": "align_before",
       "operator_id": "gdal:reproject",
       "when_param": "align",
-      "params": { "INPUT": "$before.path", "OUTPUT": "$outputs.before_aligned" },
+      "params": {
+        "INPUT": "$before.path",
+        "OUTPUT": "$outputs.before_aligned"
+      },
       "verification": "raster"
     },
     {
       "id": "align_after",
       "operator_id": "gdal:reproject",
       "when_param": "align",
-      "params": { "INPUT": "$after.path", "OUTPUT": "$outputs.after_aligned" },
-      "verification": "raster"
+      "params": {
+        "INPUT": "$after.path",
+        "OUTPUT": "$outputs.after_aligned"
+      },
+      "verification": "raster",
+      "inputs": []
     },
     {
       "id": "difference",
@@ -47,19 +54,37 @@
         "after": "$after.path",
         "output": "$outputs.difference"
       },
-      "verification": "raster"
+      "verification": "raster",
+      "inputs": []
     },
     {
       "id": "threshold",
       "operator_id": "rs:threshold_raster",
-      "params": { "input": "$outputs.difference", "output": "$outputs.change_map" },
-      "verification": "raster"
+      "params": {
+        "input": "$outputs.difference",
+        "output": "$outputs.change_map"
+      },
+      "verification": "raster",
+      "inputs": [
+        {
+          "step": "difference",
+          "port": "output",
+          "to_port": "input"
+        }
+      ]
     }
   ],
   "outputs": [
-    { "name": "change_map", "from_step": "threshold", "port": "output", "kind": "raster" }
+    {
+      "name": "change_map",
+      "from_step": "threshold",
+      "port": "output",
+      "kind": "raster"
+    }
   ],
-  "verification": { "enabled": true },
+  "verification": {
+    "enabled": true
+  },
   "map_output": {
     "from_step": "threshold",
     "renderer_hint": "categorized"

@@ -235,8 +235,8 @@ ArtifactVerification verifyArtifact( const std::string &path,
         const int samplesY = std::min( height, kMaxProbeSamples );
         std::vector<float> buffer( static_cast<size_t>( samplesX ) * samplesY );
         const CPLErr err = band->RasterIO( GF_Read, 0, 0, width, height, buffer.data(),
-                                           samplesX, samplesY, GDT_Float32, sizeof( float ),
-                                           sizeof( float ) * samplesX, nullptr, nullptr );
+                                           samplesX, samplesY, GDT_Float32, 0,
+                                           sizeof( float ) * samplesX );
         if ( err == CE_None )
         {
           int hasNoData = 0;

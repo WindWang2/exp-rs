@@ -131,6 +131,11 @@ set_target_properties(sicnu_agent PROPERTIES
   WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
+# Harness 4.0: recipe catalog source-tree fallback (same policy as ModelCatalog).
+target_compile_definitions(sicnu_agent PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
 install(TARGETS sicnu_agent
   RUNTIME DESTINATION ${QGIS_BIN_DIR}
   LIBRARY DESTINATION ${QGIS_LIB_DIR}

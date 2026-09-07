@@ -95,7 +95,7 @@ std::string riskClassForToolId( const std::string &toolId )
 {
   for ( const MutatingTool &entry : kMutating )
   {
-    if ( toolId == entry.toolId )
+    if ( entry.toolId && toolId == entry.toolId )
       return entry.riskClass;
   }
   if ( isExecutionId( toolId ) )

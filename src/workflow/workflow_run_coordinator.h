@@ -28,7 +28,7 @@
 
 namespace sicnu {
 
-class AlgorithmTaskInfo;
+struct AlgorithmTaskInfo;
 
 namespace workflow {
 

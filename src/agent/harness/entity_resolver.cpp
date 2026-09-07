@@ -173,7 +173,7 @@ std::optional<ResolvedDataset> resolveDatasetRef( const QString &rawRef, Harness
         r.assetId = snapshot->id().toString();
         r.displayName = snapshot->displayName();
         r.revision = static_cast<long long>( snapshot->revision().value() );
-        r.assetEntityId = ref.startsWith( QLatin1Char( "asset-" ) )
+        r.assetEntityId = ref.startsWith( QLatin1String( "asset-" ) )
                             ? ref
                             : WorkspaceEntityRegistry::instance().idFor(
                                 QStringLiteral( "asset" ), r.canonicalPath );

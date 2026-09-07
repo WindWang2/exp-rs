@@ -160,6 +160,16 @@ class PlanTool final : public SpatialTool
       return objectSchema( std::move( props ), std::move( required ) );
     }
 
+    Json::Value outputSchema() const override
+    {
+      Json::Value props( Json::objectValue );
+      props["plan"] = Json::Value( Json::objectValue );
+      props["compilable"] = Json::Value( Json::objectValue );
+      props["workflow_json"] = Json::Value( Json::objectValue );
+      props["estimates"] = Json::Value( Json::objectValue );
+      return objectSchema( std::move( props ), Json::Value() );
+    }
+
     SpatialToolResult execute( const Json::Value &input ) override
     {
       if ( !input.isMember( "plan" ) || !input["plan"].isObject() )
@@ -232,6 +242,16 @@ class ExecutePlanTool final : public SpatialTool
       Json::Value required( Json::arrayValue );
       required.append( "plan" );
       return objectSchema( std::move( props ), std::move( required ) );
+    }
+
+    Json::Value outputSchema() const override
+    {
+      Json::Value props( Json::objectValue );
+      props["executed"] = Json::Value( Json::objectValue );
+      props["run_id"] = Json::Value( Json::objectValue );
+      props["pipeline_id"] = Json::Value( Json::objectValue );
+      props["preflight"] = Json::Value( Json::objectValue );
+      return objectSchema( std::move( props ), Json::Value() );
     }
 
     SpatialToolResult execute( const Json::Value &input ) override
@@ -326,6 +346,17 @@ class RunStatusTool final : public SpatialTool
       return objectSchema( std::move( props ), std::move( required ) );
     }
 
+    Json::Value outputSchema() const override
+    {
+      Json::Value props( Json::objectValue );
+      props["run_id"] = Json::Value( Json::objectValue );
+      props["state"] = Json::Value( Json::objectValue );
+      props["status"] = Json::Value( Json::objectValue );
+      props["steps"] = Json::Value( Json::arrayValue );
+      props["verification"] = Json::Value( Json::objectValue );
+      return objectSchema( std::move( props ), Json::Value() );
+    }
+
     SpatialToolResult execute( const Json::Value &input ) override
     {
       const std::string runId = input.get( "run_id", "" ).asString();
@@ -377,8 +408,11 @@ class RunStatusTool final : public SpatialTool
           {
             retry["resumed_pipeline_id"] = static_cast<Json::Int64>( resumed );
             doc["auto_resume"] = retry;
-            doc = runResultDocument( coordinator.runForPipeline( resumed ), plan ? &*plan : nullptr );
-            doc["auto_resumed"] = true;
+            if ( auto resumedRun = coordinator.runForPipeline( resumed ) )
+            {
+              doc = runResultDocument( resumedRun, plan ? &*plan : nullptr );
+              doc["auto_resumed"] = true;
+            }
           }
           else
           {
@@ -469,10 +503,9 @@ Json::Value confirmMapOutput( const AgentPlan &plan, const Json::Value &stepsDoc
   confirmation["layout"] = layout;
 
   // 1. The plan step that produced the map output must have completed.
-  const std::string fromStep = mapOutput.get( "from_step", plan.outputs.isArray() &&
-                                                          plan.outputs.size() > 0
-                                                        ? plan.outputs[0].get( "from_step", "" ).asString()
-                                                        : std::string() );
+  std::string fromStep = mapOutput.get( "from_step", "" ).asString();
+  if ( fromStep.empty() && plan.outputs.isArray() && plan.outputs.size() > 0 )
+    fromStep = plan.outputs[0].get( "from_step", "" ).asString();
   bool stepCompleted = false;
   for ( const auto &step : stepsDoc )
   {
@@ -578,10 +611,6 @@ Json::Value confirmMapOutput( const AgentPlan &plan, const Json::Value &stepsDoc
 
 void registerPlanTools()
 {
-  static bool registered = false;
-  if ( registered )
-    return;
-  registered = true;
   auto &registry = SpatialToolRegistry::instance();
   registry.registerTool( std::make_shared<PreflightTool>() );
   registry.registerTool( std::make_shared<PlanTool>() );

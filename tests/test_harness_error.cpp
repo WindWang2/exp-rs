@@ -7,6 +7,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <json/json.h>
 
+#include <string>
+
 #include "agent/harness/harness_error.h"
 
 using namespace sicnu::agent::harness;
@@ -38,15 +40,15 @@ TEST_CASE( "Error categories and retry classes are stable", "[harness][errors]" 
 {
   // Validation failures never retry automatically.
   CHECK( errorCategoryForCode( "DATASET_NOT_FOUND" ) == "validation" );
-  CHECK( retryClassToString( retryClassForCode( "DATASET_NOT_FOUND" ) ) == "none" );
+  CHECK( std::string( retryClassToString( retryClassForCode( "DATASET_NOT_FOUND" ) ) ) == "none" );
   CHECK( errorCategoryForCode( "CRS_MISMATCH" ) == "validation" );
   CHECK( errorCategoryForCode( "INSUFFICIENT_MEMORY" ) == "environment" );
-  CHECK( retryClassToString( retryClassForCode( "INSUFFICIENT_MEMORY" ) ) == "manual" );
+  CHECK( std::string( retryClassToString( retryClassForCode( "INSUFFICIENT_MEMORY" ) ) ) == "manual" );
   // Only transient-class codes auto-retry (PlanRunner policy, Phase 13).
-  CHECK( retryClassToString( retryClassForCode( "TRANSIENT_FAILURE" ) ) == "transient" );
-  CHECK( retryClassToString( retryClassForCode( "IO_ERROR" ) ) == "transient" );
-  CHECK( retryClassToString( retryClassForCode( "EXECUTION_FAILED" ) ) == "manual" );
-  CHECK( retryClassToString( retryClassForCode( "NO_SUCH_CODE" ) ) == "manual" );
+  CHECK( std::string( retryClassToString( retryClassForCode( "TRANSIENT_FAILURE" ) ) ) == "transient" );
+  CHECK( std::string( retryClassToString( retryClassForCode( "IO_ERROR" ) ) ) == "transient" );
+  CHECK( std::string( retryClassToString( retryClassForCode( "EXECUTION_FAILED" ) ) ) == "manual" );
+  CHECK( std::string( retryClassToString( retryClassForCode( "NO_SUCH_CODE" ) ) ) == "manual" );
 }
 
 TEST_CASE( "HarnessError JSON envelope carries all Phase-12 fields", "[harness][errors]" )

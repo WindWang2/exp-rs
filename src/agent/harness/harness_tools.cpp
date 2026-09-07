@@ -207,10 +207,8 @@ class ErrorCodesTool final : public SpatialTool
 
 void registerHarnessTools()
 {
-  static bool registered = false;
-  if ( registered )
-    return;
-  registered = true;
+  // Plain registration: registerTool() rejects duplicates, so this is
+  // idempotent — and re-registers correctly after registry reset().
   auto &registry = SpatialToolRegistry::instance();
   registry.registerTool( std::make_shared<ToolManifestTool>() );
   registry.registerTool( std::make_shared<ErrorCodesTool>() );

@@ -509,7 +509,49 @@ _Avoid_: Workspace state map, Context dict, UI state dump
   5. **New remap test** trains K-Means with permuted label ids (5/9) and asserts predictions map to the training labels in the accuracy path and the written class map, with a lowercase `"kmeans"` methodName to pin the trap removal.
 - **Consequences**: one construction path, color formula, sampling policy and NoData discovery; remap semantics observably unchanged (identity when no table; the unsupervised operator's all-zero dummy trainY keeps raw 1..K cluster ids); `"kmeans"` strings now construct K-Means instead of falling back to SVM — only reachable via sidecar predict-only, which still fails cleanly (K-Means has no `load()`).
 
-### ADR 0062–0124: Index
+
+**Harness**:
+The ExpRS-side agent harness (`src/agent/harness/`, ADR 0130): error taxonomy,
+tool manifests/taxonomy, entity resolution, typed context, scientific
+preflight, plan compilation, verification, and recipes. Pi owns the generic
+agent loop; the harness owns everything spatial/scientific.
+_Avoid_: Agent framework, agent runtime, Pi backend
+
+**Tool Manifest**:
+The bounded per-tool metadata block (taxonomy, risk class, side effects,
+resource hints, cancellability, preconditions, expected artifacts) derived
+from AgentMetadata / the namespace risk table and serialized in catalog
+responses.
+_Avoid_: Tool docs, description string
+
+**Entity Resolution**:
+Authoritative lookup of dataset references (asset-N id, governed UUID, path,
+display name) behind agent tools; unknown/ambiguous are typed failures with
+candidates, never silent picks.
+_Avoid_: Fuzzy matching, name guessing
+
+**Scientific Preflight**:
+Deterministic intent rule packs (ndvi/change/sar_change/classify/phenology)
+over inspected facts; `blocked` vetoes plan execution.
+_Avoid_: Validation (that is the DAG-schema check), sanity check
+
+**AgentPlan v2**:
+The versioned plan document (goal/intent/inputs/steps/outputs/verification/
+map_output) that compiles to WorkflowDefinition — the only plan-to-engine
+bridge.
+_Avoid_: Pipeline JSON (that is the compiled WorkflowDefinition)
+
+**Verification Verdict**:
+The tri-state PASS / PASS_WITH_WARNINGS / FAIL per artifact and per run;
+FAIL forces run status `failed`.
+_Avoid_: ok flag, success boolean
+
+**Scientific Recipe**:
+A metadata document under `data/agent/recipes/` that orchestrates existing
+operators into an AgentPlan via slot bindings; recipes carry no kernels.
+_Avoid_: Macro, script, workflow copy
+
+### ADR 0062–0130: Index
 
 ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision, and consequences in each file). Titles for orientation:
 
@@ -581,3 +623,4 @@ ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision
 - **ADR 0127**: MapSpec Declarative Cartography
 - **ADR 0128**: Spatial Scientist Contracts
 - **ADR 0129**: Project Workspace, Data Governance & Reproducibility Platform 3.0
+- **ADR 0130**: Pi Spatial Scientist & Agent Harness 4.0

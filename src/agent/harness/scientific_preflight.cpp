@@ -138,10 +138,22 @@ struct GridFacts {
   Json::Int height = 0;
 };
 
+/// The inspect tools emit CRS as a string (vectors) or as {authid, wkt}
+/// (rasters); normalize both to the authid (or the raw string).
+std::string crsOf( const Json::Value &understanding )
+{
+  const Json::Value &crs = understanding.get( "crs", Json::Value() );
+  if ( crs.isString() )
+    return crs.asString();
+  if ( crs.isObject() )
+    return crs.get( "authid", "" ).asString();
+  return "";
+}
+
 GridFacts gridFacts( const Json::Value &understanding )
 {
   GridFacts facts;
-  facts.crs = understanding.get( "crs", "" ).asString();
+  facts.crs = crsOf( understanding );
   if ( understanding.isMember( "pixel_size" ) && understanding["pixel_size"].isArray() &&
        understanding["pixel_size"].size() == 2 )
   {
