@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "task_panel_host.h"
 
+#include "widgets/rs_result_summary.h"
+
 #include <QCheckBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -36,6 +38,12 @@ TaskPanelHost::TaskPanelHost( QWidget *parent )
   m_form->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Expanding );
   root->addWidget( m_form, /*stretch=*/1 );
 
+  m_estimate = new QLabel( this );
+  m_estimate->setObjectName( QStringLiteral( "rsTaskPanelEstimate" ) );
+  m_estimate->setWordWrap( true );
+  m_estimate->hide();
+  root->addWidget( m_estimate );
+
   m_progress = new QProgressBar( this );
   m_progress->setObjectName( QStringLiteral( "rsTaskPanelProgress" ) );
   m_progress->setRange( 0, 0 ); // indeterminate while running
@@ -48,6 +56,12 @@ TaskPanelHost::TaskPanelHost( QWidget *parent )
   m_hint->setWordWrap( true );
   m_hint->setProperty( "error", false );
   root->addWidget( m_hint );
+
+  m_resultSummary = new RsResultSummary( this );
+  m_resultSummary->hide();
+  root->addWidget( m_resultSummary );
+  connect( m_resultSummary, &RsResultSummary::openPathRequested,
+           this, &TaskPanelHost::resultOpenRequested );
 
   auto *actions = new QHBoxLayout();
   actions->setSpacing( 8 );
@@ -66,6 +80,7 @@ TaskPanelHost::TaskPanelHost( QWidget *parent )
   m_runBtn = new QPushButton( tr( "运行" ), this );
   m_runBtn->setObjectName( QStringLiteral( "rsTaskPanelRun" ) );
   m_runBtn->setProperty( "primary", true );
+  m_runBtn->setAccessibleName( tr( "运行当前工具" ) );
   actions->addWidget( m_runBtn );
 
   m_closeBtn = new QPushButton( tr( "关闭" ), this );
@@ -79,6 +94,13 @@ TaskPanelHost::TaskPanelHost( QWidget *parent )
   connect( m_runBtn, &QPushButton::clicked, this, &TaskPanelHost::onActionButtonClicked );
   connect( m_helpBtn, &QPushButton::clicked, this, &TaskPanelHost::helpClicked );
   connect( m_closeBtn, &QPushButton::clicked, this, &TaskPanelHost::closeClicked );
+
+  // Validation gating: blocking schema errors disable Run until fixed.
+  connect( m_form, &SchemaFormBuilder::validationChanged, this,
+           [this]( bool blocked ) {
+             m_validationBlocked = blocked;
+             updateRunButtonState();
+           } );
 }
 
 void TaskPanelHost::showTool( const QString &title, const QString &helpSummary, const Json::Value &schema )
@@ -87,7 +109,12 @@ void TaskPanelHost::showTool( const QString &title, const QString &helpSummary, 
   m_help->setText( helpSummary );
   m_form->rebuild( schema );
   m_progress->setVisible( false );
+  m_estimate->hide();
+  m_resultSummary->clear();
+  m_resultSummary->hide();
+  m_validationBlocked = m_form->hasErrors();
   m_runBtn->setEnabled( true );
+  updateRunButtonState();
   m_form->setEnabled( true );
   m_hint->clear();
   applyHintStyle( false );
@@ -96,6 +123,21 @@ void TaskPanelHost::showTool( const QString &title, const QString &helpSummary, 
 void TaskPanelHost::setRasterLayerChoices( const QStringList &ids, const QStringList &names )
 {
   m_form->setRasterLayerChoices( ids, names );
+}
+
+void TaskPanelHost::setVectorLayerChoices( const QStringList &ids, const QStringList &names )
+{
+  m_form->setVectorLayerChoices( ids, names );
+}
+
+void TaskPanelHost::setAssetChoices( const QStringList &ids, const QStringList &names )
+{
+  m_form->setAssetChoices( ids, names );
+}
+
+void TaskPanelHost::setModelChoices( const QStringList &names )
+{
+  m_form->setModelChoices( names );
 }
 
 void TaskPanelHost::setHints( const QStringList &hints )
@@ -110,12 +152,45 @@ void TaskPanelHost::setHints( const QStringList &hints )
   applyHintStyle( true );
 }
 
+void TaskPanelHost::setEstimate( const QString &estimate )
+{
+  if ( estimate.isEmpty() )
+  {
+    m_estimate->hide();
+    return;
+  }
+  m_estimate->setText( estimate );
+  m_estimate->show();
+}
+
+void TaskPanelHost::showResult( const Json::Value &result, const QString &operatorId,
+                                qint64 elapsedMs, bool fromCache )
+{
+  m_resultSummary->setContext( operatorId, elapsedMs, fromCache );
+  m_resultSummary->setResult( result );
+  m_resultSummary->show();
+}
+
 void TaskPanelHost::onActionButtonClicked()
 {
   if ( m_running )
     emit stopClicked();
   else
     emit runClicked();
+}
+
+void TaskPanelHost::updateRunButtonState()
+{
+  if ( m_running )
+  {
+    // Stop stays clickable while running.
+    m_runBtn->setEnabled( true );
+    return;
+  }
+  m_runBtn->setEnabled( !m_validationBlocked );
+  m_runBtn->setToolTip( m_validationBlocked
+                          ? tr( "请先修正表单中标红的参数" )
+                          : QString() );
 }
 
 void TaskPanelHost::setRunning( bool running )
@@ -133,7 +208,8 @@ void TaskPanelHost::setRunning( bool running )
   else
   {
     m_runBtn->setText( tr( "运行" ) );
-    m_runBtn->setEnabled( true );
+    m_validationBlocked = m_form->hasErrors();
+    updateRunButtonState();
   }
   m_form->setEnabled( !running );
   m_helpBtn->setEnabled( !running );

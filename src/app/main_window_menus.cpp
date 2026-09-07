@@ -367,7 +367,10 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     QMenu *rasterMenu = makeMenu( appMenuBar()->addMenu( tr( "栅格(&R)" ) ) );
 
-    // 预处理（几何/辐射准备：配准、大气、镶嵌、波段）
+    // 预处理（几何/波段准备：配准、镶嵌、波段）
+    // 产品级预处理 (辐射定标 / QA 掩膜 / 应用掩膜 / 大气校正 / 正射纠正) lives
+    // once, under 遥感 > 产品与预处理 (ADR 0099 task-centric surface) — no
+    // duplicated menu actions for the same capability.
     QMenu *preprocessMenu = makeMenu( rasterMenu->addMenu( tr( "预处理" ) ) );
     setMenuIcon( preprocessMenu, ic( "geocorrection" ) );
 
@@ -385,22 +388,6 @@ void QgisDesktopWindow::setupMenu()
          tr( "源影像 + 主工程地图取点；支持 RPC Physical。" ) );
     preprocessMenu->addSeparator();
 
-    tip( preprocessMenu->addAction( ic( "geocorrection" ), tr( "正射纠正 (RPC/GCP)..." ),
-                                    this, &QgisDesktopWindow::openOrthorectificationDialog ),
-         tr( "基于 RPC/GCP 与可选 DEM 对影像做地形纠正（gdal:orthorectification）。" ) );
-
-    tip( preprocessMenu->addAction( ic( "at_os_corr" ), tr( "大气校正..." ),
-                                    this, &QgisDesktopWindow::openAtmosphericCorrectionDialog ),
-         tr( "大气校正：DN→辐射、DOS1/DOS2。" ) );
-    tip( preprocessMenu->addAction( ic( "qa_mask" ), tr( "辐射定标..." ),
-                                    this, &QgisDesktopWindow::openRadiometricCalibrationDialog ),
-         tr( "DN→辐射亮度 / TOA 反射率 / 亮温；传感器元数据自动探测。" ) );
-    tip( preprocessMenu->addAction( ic( "qa_mask" ), tr( "QA 掩膜（云/云影/雪）..." ),
-                                    this, &QgisDesktopWindow::openQaMaskDialog ),
-         tr( "从 Landsat QA_PIXEL / Sentinel-2 SCL 生成云/云影/雪二值掩膜。" ) );
-    tip( preprocessMenu->addAction( ic( "qa_mask" ), tr( "应用掩膜..." ),
-                                    this, &QgisDesktopWindow::openApplyMaskDialog ),
-         tr( "把掩膜应用到产品：被遮挡像元置为 NoData，得到分析就绪影像。" ) );
     tip( preprocessMenu->addAction( ic( "mos_ic" ), tr( "镶嵌..." ),
                                     this, &QgisDesktopWindow::openMosaicDialog ),
          tr( "多景栅格镶嵌为连续影像。" ) );
@@ -450,34 +437,15 @@ void QgisDesktopWindow::setupMenu()
          tr( "主成分分析：降维与去相关。" ) );
 
     // ------------------------------------------------------------------
-    // 分析 Analysis — 配准、指数、变化、分类、地形、融合（专题）
+    // 分析 Analysis — 保留 0099 遥感菜单之外的高价值分析入口
+    // （光谱指数 / 光谱分析 / 变化检测 / 融合 / 地形 once under 遥感 > 分析；
+    //   这里仅保留其独有条目，避免同一能力重复的菜单动作。）
     // ------------------------------------------------------------------
     QMenu *analysisMenu = makeMenu( appMenuBar()->addMenu( tr( "分析(&A)" ) ) );
 
-    tip( analysisMenu->addAction( ic( "veget_tion_index" ), tr( "光谱指数..." ),
-                                  this, &QgisDesktopWindow::openSpectralIndexDialog ),
-         tr( "NDVI / EVI / SAVI / NDWI / NDBI / MNDWI。" ) );
-
-    QMenu *spectralMenu = makeMenu( analysisMenu->addMenu( tr( "光谱分析" ) ) );
-    setMenuIcon( spectralMenu, ic( "su_ervised" ) );
-    tip( spectralMenu->addAction( ic( "su_ervised" ), tr( "光谱库匹配..." ),
-                                  this, &QgisDesktopWindow::openSpectralLibraryDialog ),
-         tr( "把光谱剖面面板采集的像元谱与光谱库匹配（SAM 角 + SID），并可将当前谱保存入库。" ) );
-    tip( spectralMenu->addAction( ic( "sel_tool" ), tr( "ROI 均值谱..." ),
-                                  this, &QgisDesktopWindow::activateRoiSpectrumTool ),
-         tr( "在地图上画多边形 ROI，把区域内像元的均值谱显示到光谱剖面面板，供库匹配使用。" ) );
-    tip( analysisMenu->addAction( ic( "ch_nge_detect" ), tr( "变化检测..." ),
-                                  this, &QgisDesktopWindow::openChangeDetectionDialog ),
-         tr( "双时相：差值 / 归一化差值 / 变化掩膜。" ) );
     tip( analysisMenu->addAction( ic( "veget_tion_index" ), tr( "时间序列分析..." ),
                                       this, &QgisDesktopWindow::openTemporalAnalysisDialog ),
          tr( "多时相统计 / 合成 / 指数时序 / 趋势 / 异常 / 点与 ROI 序列（含科学预检）。" ) );
-    tip( analysisMenu->addAction( ic( "p_nsh_r_en" ), tr( "影像融合..." ),
-                                  this, &QgisDesktopWindow::openFusionDialog ),
-         tr( "全色锐化：Linear / Brovey / IHS / PCA 或 OTB/GDAL。" ) );
-    tip( analysisMenu->addAction( ic( "dem" ), tr( "地形分析..." ),
-                                  this, &QgisDesktopWindow::openTerrainDialog ),
-         tr( "DEM：坡度 / 坡向 / 山体阴影 / 粗糙度等。" ) );
 
     analysisMenu->addSeparator();
     QMenu *classifyMenu = makeMenu( analysisMenu->addMenu( tr( "分类" ) ) );
@@ -502,8 +470,9 @@ void QgisDesktopWindow::setupMenu()
 #endif
 
     // ------------------------------------------------------------------
-    // 遥感 Remote Sensing — 任务导向入口（C5）：不暴露 provider 名称，
-    // 按领域工作流分组，复用与菜单栏各功能相同的对话框/运算符。
+    // 遥感 Remote Sensing — 任务导向入口（C5 / ADR 0099）：不暴露 provider
+    // 名称，按领域工作流分组，是产品级预处理与光谱/变化/融合/地形能力的
+    // 唯一菜单入口（栅格/分析菜单仅保留其独有条目）。
     // ------------------------------------------------------------------
     QMenu *rsMenu = makeMenu( appMenuBar()->addMenu( tr( "遥感(&S)" ) ) );
 

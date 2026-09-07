@@ -4,6 +4,15 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - 2026-09-06
 
+### 🖥️ Desktop Workbench & Unified UX 4.0 (goal series, ADR 0130–0133)
+- **Unified shell**: 工作区治理 dock is now wired to the project `WorkspaceService` (previously created inert) and refreshes on store open/reopen; window title shows `<project> — SICNU GEO RS` with a dirty marker; ribbon collapse state persists; 遥感 (ADR 0099) is the single menu entry for product preprocessing/spectral/change/fusion/terrain — 栅格/分析 keep only unique entries; dead `TaskCenterDock`/`MosaicPanel` panels and the zombie `BandCompositionRail` chrome removed with their tests.
+- **Schema-driven operator UI**: `SchemaFormBuilder` gains schema-validated forms (required/range/minItems/color/JSON checks, inline error marks + summary line, Run gating), new field kinds (vector, governed-asset selector with stable ids, ModelCatalog selector, CRS via `CrsSelector`, color picker, JSON editor), accessible names from schema labels, and advanced sections that collapse but stay reachable. Operator schema defaults are the single source of truth (e.g. rs:pca dialog now defaults to the schema's 0 = all bands instead of a hardcoded 3).
+- **Thin-client convergence**: dialog kernels promoted verbatim to operators — `rs:band_ratio` (ratio | IHS), `rs:extract_bands`, `rs:contrast_stretch`, `rs:image_enhancement` (stretch/filter/ratio-IHS/speckle, tile-streamed), `otb:bundle_to_perfect_sensor`, `gdal:pansharpen`; the band-ratio/extract/contrast-stretch dialogs, the enhancement panel and the fusion CLI paths now submit through the Task Center seam; batch processing resolves `rs:` ids through `RSOperatorRegistry` (adapter bypass removed); a source-scan guardrail bans inline raster kernels in dialogs. IHS outputs now mask NoData to NaN (panel #380 semantics shared with the new operator).
+- **Task/result UX**: `RsJobPanel` groups pipeline steps under their parent task (expanded by default) and gains a structured 结果 tab; the shared `RsResultSummary` widget renders status/context, key metrics, warnings and double-click-to-map artifacts in `TaskPanelHost` and the job panel; 工作区治理 rows open on the map via the Data/Display seam.
+- **Design tokens**: `src/app/design_tokens.h` (`SicnuUi::Tokens`) becomes the single C++ owner of semantic/status colors, spacing, icon and type sizes; RsJobPanel, the georef task list and `applyDarkPalette` converge on it; `test_theme_selector_parity` now enforces QSS↔C++ token sync.
+- **Keyboard/a11y**: `test_shortcut_conflicts` pins that no two actions in the shell action host claim the same key sequence.
+- New docs: `docs/ui-architecture.md` (information architecture, form contract, task/result contract, extension rules); tests: `test_workspace_browser_wiring`, `test_rs_band_tools_operators`, `test_schema_form_builder_v2`, `test_rs_result_summary`, `test_shortcut_conflicts`.
+
 ### 🔬 Scientific Algorithms & Processing Foundation 4.0 (goal series, ADR 0130)
 - **Issue #759 fixed**: `rs:temporal_breakpoints` RMSE now divides the segment RSS by valid (finite) observations only — NaN gaps no longer understate the error; `BreakpointResult` exposes `validCount`, and an all-NaN series reports NaN instead of a fictitious `0.0`. Hand-derived regression tests (√3 case) pin it (`temporal_fit.*`).
 - **Non-parametric trend**: new `rs:temporal_sen_trend` operator — Sen's median pairwise day slope with the tie-corrected Mann-Kendall test (Gilbert 1987; continuity-corrected z, two-sided erfc p-value), NaN contracts for < 3 valid observations and duplicate instants, bit-exact grade; writes slope/intercept/z/p_value/n bands plus `significantPixelFraction` (`temporal_fit.h`, `rs_temporal_sen_trend_operator.*`).
@@ -89,4 +98,5 @@ All notable changes to the `exp-rs` project will be documented in this file.
 - **Skill Suites**: Installed `karpathy-guidelines` and the full `gstack` 59-skill suite for automated PR reviews, security auditing, and performance benchmarking.
 
 ---
-*Verified against full Catch2 test suite (1,138/1,138 assertions passing).*
+*Historical per-sprint assertion counts above are dated evidence from their
+own entries; see PROJECT.md for the current verification policy.*

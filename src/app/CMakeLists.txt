@@ -160,7 +160,7 @@ add_executable(sicnu_geo_rs
     widgets/roi_statistics_widget.cpp
     widgets/histogram_widget.cpp
     widgets/histogram_stretch_widget.cpp
-    widgets/band_composition_rail.cpp
+    widgets/rs_result_summary.cpp
     widgets/rs_toolbar_flow_host.cpp
     widgets/spectral_profile_widget.cpp
     widgets/band_role_combo.cpp
@@ -174,8 +174,6 @@ add_executable(sicnu_geo_rs
     panels/data_manager_panel.cpp
     panels/workspace_browser_panel.cpp
     panels/workspace_browser_panel.h
-    panels/task_center_dock.cpp
-    panels/mosaic_panel.cpp
 
     # QgisApp facade
     qgis_app_facade.cpp

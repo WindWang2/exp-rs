@@ -2,8 +2,6 @@
 
 #include "widgets/rs_toolbar_flow_host.h"
 #include "widgets/rs_empty_state_widget.h"
-#include "panels/task_center_dock.h"
-#include "panels/mosaic_panel.h"
 #include "log_panel.h"
 
 #include <QApplication>
@@ -497,19 +495,6 @@ TEST_CASE( "Host panel empty state transitions and interactions", "[m3][panels][
 {
     ensureApp();
 
-    SECTION( "TaskCenterDock empty state initialization" )
-    {
-        sicnu::TaskCenterDock taskDock;
-        auto *stack = taskDock.findChild<QStackedWidget *>( QStringLiteral( "rsTaskCenterTreeStack" ) );
-        REQUIRE( stack != nullptr );
-        REQUIRE( stack->currentIndex() == 1 );
-
-        auto *emptyWidget = taskDock.findChild<sicnu::RsEmptyStateWidget *>();
-        REQUIRE( emptyWidget != nullptr );
-        REQUIRE( emptyWidget->title() == QStringLiteral( "暂无任务" ) );
-        REQUIRE_FALSE( emptyWidget->isActionVisible() );
-    }
-
     SECTION( "LogPanel empty state initialization and message filter inspection" )
     {
         LogPanel logPanel;
@@ -523,17 +508,4 @@ TEST_CASE( "Host panel empty state transitions and interactions", "[m3][panels][
         REQUIRE( emptyWidget->title() == QStringLiteral( "暂无系统日志" ) );
     }
 
-    SECTION( "MosaicPanel empty state and CTA button integration" )
-    {
-        MosaicPanel mosaicPanel;
-        auto *stack = mosaicPanel.findChild<QStackedWidget *>( QStringLiteral( "rsMosaicInputStack" ) );
-        REQUIRE( stack != nullptr );
-        REQUIRE( stack->currentIndex() == 1 );
-
-        auto *emptyWidget = mosaicPanel.findChild<sicnu::RsEmptyStateWidget *>();
-        REQUIRE( emptyWidget != nullptr );
-        REQUIRE( emptyWidget->title() == QStringLiteral( "暂无镶嵌输入影像" ) );
-        REQUIRE( emptyWidget->isActionVisible() );
-        REQUIRE( emptyWidget->actionText() == QStringLiteral( "添加影像..." ) );
-    }
 }

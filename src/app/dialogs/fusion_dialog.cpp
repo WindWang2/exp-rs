@@ -3,8 +3,6 @@
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
 
-#include "processing/tools/tool_path_manager.h"
-
 #include <qgsrasterlayer.h>
 #include <qgsproject.h>
 
@@ -19,7 +17,6 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QVBoxLayout>
-#include <QProcess>
 
 FusionDialog::FusionDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
@@ -244,44 +241,19 @@ void FusionDialog::onRun()
         }
     }
 
-    // External CLI methods stay on the process path (not in rs:image_fusion).
+    // External CLI methods run as operators too (thin client): the dialogs
+    // never spawn subprocesses — otb_btps → otb:bundle_to_perfect_sensor,
+    // gdal_pansharp → gdal:pansharpen.
     if ( method == QStringLiteral( "otb_btps" ) || method == QStringLiteral( "gdal_pansharp" ) )
     {
-        runGdalTask( [method, panPath, msPath, outPath]() -> QString {
-            QString program;
-            QStringList args;
-            if ( method == QStringLiteral( "otb_btps" ) )
-            {
-                program = ToolPathManager::instance().otbToolPath( QStringLiteral( "BundleToPerfectSensor" ) );
-                if ( program.isEmpty() )
-                    return QString();
-                args << QStringLiteral( "-in" ) << msPath
-                     << QStringLiteral( "-inp" ) << panPath
-                     << QStringLiteral( "-out" ) << outPath;
-            }
-            else
-            {
-                // gdal_pansharpen.py pan_dataset spectral_dataset out_dataset
-                program = ToolPathManager::instance().gdalToolPath( QStringLiteral( "gdal_pansharpen.py" ) );
-                if ( program.isEmpty() )
-                    return QString();
-                args << panPath << msPath << outPath
-                     << QStringLiteral( "-r" ) << QStringLiteral( "bilinear" )
-                     << QStringLiteral( "-of" ) << QStringLiteral( "GTiff" )
-                     << QStringLiteral( "-co" ) << QStringLiteral( "COMPRESS=LZW" );
-            }
-
-            QProcess proc;
-            proc.setProcessChannelMode( QProcess::MergedChannels );
-            proc.start( program, args );
-            // waitForFinished returns bool (true = finished); do not compare to 0.
-            if ( !proc.waitForStarted( 5000 )
-                 || !proc.waitForFinished( -1 )
-                 || proc.exitCode() != 0
-                 || proc.exitStatus() != QProcess::NormalExit )
-                return QString();
-            return outPath;
-        } );
+        Json::Value cliParams( Json::objectValue );
+        cliParams["pan"] = panPath.toStdString();
+        cliParams["ms"] = msPath.toStdString();
+        cliParams["output"] = outPath.toStdString();
+        const QString operatorId = ( method == QStringLiteral( "otb_btps" ) )
+                                       ? QStringLiteral( "otb:bundle_to_perfect_sensor" )
+                                       : QStringLiteral( "gdal:pansharpen" );
+        runOperatorTask( operatorId, cliParams );
         return;
     }
 

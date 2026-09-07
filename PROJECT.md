@@ -1,52 +1,84 @@
-# Project: SICNU GEO RS (exp-rs)
+# SICNU GEO RS (exp-rs) — Project State
 
-Pure C++20 remote-sensing analysis platform built on the QGIS engine. One
-execution seam for every frontend: GUI, headless CLI, Workflow DAGs, MCP/Pi
-agents, and third-party SDK plugins all reach algorithms through the
-`RSOperator` registry and Task Center.
+Living project-state document. Claims here must be provable from the code and
+tests at HEAD; do not hardcode transient counts (PRs, worktrees, test tallies)
+— record those as dated evidence in planning dossiers instead.
 
-## Status (living view — details live in CONTEXT.md, docs/adr/, CHANGELOG.md)
+## What this is
 
-- **Processing & algorithms**: `rs:` operator family (raster math, spectral
-  indices/analysis, classification, OBIA, change detection, SAR, temporal,
-  feature engineering, terrain, fusion, product import, model inference) over
-  GUI-free kernels in `src/processing/algorithms/`. Shared scientific
-  semantics (NoData, valid-observation statistics, grid preflight,
-  radiometric scale/offset, histogram/threshold binning) are centralized
-  primitives; per-operator determinism grades follow ADR 0124. Scientific
-  policies: `docs/processing/`.
-- **Temporal**: collection model, STAC ingestion, streaming operators
-  (summary/composite/trend/OLS+Sen/harmonic/phenology/breakpoints/decompose/
-  anomaly/gap-fill/smooth/extract) with real-acquisition-time semantics.
-- **Agent surfaces**: MCP server, unified tool catalog, spatial inspection
-  tools, MapSpec cartography, workflow preflight/repair — ADR 0120–0128.
-- **Governance**: workspace identity, SQLite governance store, project format
-  v3, atomic project save, lineage, smart collections — ADR 0129.
-- **SDK/plugins**: C++/Python plugin hosts, headless automation, plugin SDK.
+A pure C++20 remote-sensing analysis workbench built on the QGIS engine
+(Qt 6.8+, GDAL/PROJ/GEOS, OpenCV 5, Catch2 v3). One desktop application
+(`src/app`, `sicnu_geo_rs`), one headless CLI (`src/cli`), an MCP server and
+Pi agent adapter over the same Task Center seam.
 
-## Architecture
+## Architecture map
 
-- Repository: `exp-rs` (C++20 / Qt 6.8+ / GDAL / PROJ / GEOS / OpenCV 5 /
-  Catch2 v3.7.1); default branch `master`.
-- Libraries: `src/core` (QGIS core), `src/gui` (QGIS GUI), `src/data`,
-  `src/processing` (algorithms, GDAL wrappers, Tool Call Dispatcher, Task
-  Center), `src/operators` (RSOperator framework + `rs:`/`gdal:`/`otb:`/
-  `opencv:` families), `src/analysis` (classification, segmentation,
-  georeferencing), `src/workflow`, `src/jobs`, `src/agent`.
-- Applications: `src/app` (`sicnu_geo_rs` desktop), `src/cli`
-  (`sicnu_geo_rs_cli` headless).
-- Layout map: `docs/repo-layout.md`; domain vocabulary + ADR index:
-  `CONTEXT.md`; ADR records: `docs/adr/`.
+- `src/core`, `src/gui` — QGIS engine (layers, rendering, CRS, canvas).
+- `src/processing` — algorithm engine, providers, Task Center, Tool Call
+  Dispatcher, kernels in `algorithms/`.
+- `src/operators` — RSOperator framework + `rs:`/`gdal:`/`otb:`/`opencv:`
+  families (JSON parameter/result seam, registry, determinism grades).
+- `src/jobs` — JobEngine (execution workers, listeners, retention).
+- `src/data` — DataManager (asset authority) + governance store/services.
+- `src/analysis` — classification pipeline, segmentation, georeferencing.
+- `src/workflow` — workflow runtime, session, pipeline editor canvas.
+- `src/app` — desktop shell: ribbon workbench, panels (data / governance /
+  layers), dialogs, task center UI, schema form builder, design tokens
+  (`design_tokens.h`). See `docs/ui-architecture.md` for the information
+  architecture and extension rules.
+- `src/agent` — copilot, MCP, spatial tools, agent contracts; `pi/` bridge.
+- `docs/adr/` — decision ledger (0001–0133); `CONTEXT.md` — domain vocabulary.
+
+## Current state (2026-09-06)
+
+- **Desktop Workbench & Unified UX 4.0** (ADR 0130–0133): unified shell
+  (wired governance dock, project-context title, dead-panel removal, menu dedup),
+  schema-validated operator forms, thin-client operator promotions (band tools,
+  enhancement, pan-sharpen), grouped pipeline tasks + shared result renderer,
+  C++ design-token layer, keyboard guardrail.
+- **Scientific Algorithms & Processing Foundation 4.0** (ADR 0130):
+  shared NoData/statistics/grid/histogram kernels, #759 fix, `rs:temporal_sen_trend`,
+  validation policies (`docs/processing/`).
+- **Project Workspace, Data Governance & Reproducibility Platform 3.0**
+  (ADR 0129): governance store, workspace services, project format v3,
+  crash-safe saves, workspace UI.
+- **Multimodal SpatioTemporal RS Platform 3.0**: SAR operator family, temporal
+  fit kernels, feature cube, model runtime 3.0, tile inference 2.0.
+- **Pi Spatial Scientist & Cartography Workbench 3.0** (ADR 0127/0128): spatial
+  reasoning contracts, MapSpec cartography, symbology intelligence, benchmarks.
+- **Pi-Based Spatial Intelligence Layer** (ADR 0122): spatial tools, MCP
+  catalog, model catalog, algorithm sidecars.
+
+## Contracts that outlive any single PR
+
+- Execution seam: `UI → TaskCenter → JobEngine → RSOperator → kernel`. GUI
+  code must not run raster kernels inline (`test_ui_task_center_contract`).
+- Data/Display seam: `DataManager` owns assets; canvas presentation goes
+  through `ActiveViewHost`/`QgisDisplayManager`.
+- Schema form contract: operator schemas are the single source of truth for
+  defaults/ranges/required in any generated parameter UI.
+- Design tokens: `SicnuUi::Tokens` mirrors the QSS token headers; the parity
+  test fails on drift.
+- Scale: workspace browsing stays model/view and paged (100k assets,
+  fetchMore, 200/page); no per-row widget explosion.
 
 ## Build & test contract
 
-- Build: `cmake --build build` (Release + Ninja; presets in
-  `CMakePresets.json`: `dev-default`, `ci-fast`, `ci-full`, `sanitizer-debug`,
-  `release-package`).
-- Test runner: `QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest
-  --test-dir build --output-on-failure` — CTestCustom.cmake pins
-  `PYTHONHOME`/`PYTHONPATH` and `QT_IM_MODULE=compose`; see `TEST_INFRA.md`
-  for the environment policy and the history of the stale `LD_PRELOAD`
-  workaround. Treat "fully green" claims as valid only with a fresh ctest log.
+- Configure: `cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=ON` in
+  a build dir (presets in `CMakePresets.json`: `dev-default`, `ci-fast`, `ci-full`,
+  `sanitizer-debug`, `release-package`).
+- Build: `cmake --build build` (bounded parallelism on shared hosts).
+- Tests: `QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest --test-dir build --output-on-failure`
+  (CTestCustom pins Python/Qt env; see `TEST_INFRA.md`). Treat "fully green" claims as valid only with a fresh ctest log.
 - Scientific validation policy and tolerance grades for algorithm kernels:
   `docs/processing/validation-policy.md`.
+
+## Known limitations / open threads
+
+- `module:classify:*` and `module:georef:*` flows are TaskCenter-tracked but
+  not `rs:` operators (interactive sessions; documented in
+  `docs/ui-architecture.md` §4).
+- Pipeline editor keeps its slate-canvas badge palette (documented design
+  exception to the token layer).
+- The historical "2126 tests / 100% green" style figures are stale evidence;
+  never claim suite health without a fresh `ctest` log.

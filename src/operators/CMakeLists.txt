@@ -67,6 +67,7 @@ endif()
 list(APPEND SICNU_OPERATORS_SOURCES
     otb/otb_operator_base.cpp
     otb/otb_segmentation_operator.cpp
+    otb/otb_bundle_to_perfect_sensor_operator.cpp
     otb/otb_svm_classification_operator.cpp
     otb/otb_compute_images_statistics_operator.cpp
     otb/otb_operators_init.cpp
@@ -80,6 +81,7 @@ list(APPEND SICNU_OPERATORS_SOURCES
     gdal/gdal_reproject_operator.cpp
     gdal/gdal_clip_operator.cpp
     gdal/gdal_polygonize_operator.cpp
+    gdal/gdal_pansharpen_operator.cpp
     gdal/gdal_operators_init.cpp
 )
 message(STATUS "GDAL operators enabled")
@@ -88,6 +90,8 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_spectral_index_operator.cpp
     rs/rs_spectral_index_aliases.cpp
     rs/rs_band_math_operator.cpp
+    rs/rs_band_tools_operators.cpp
+    rs/rs_image_enhancement_operator.cpp
     rs/rs_sam_classify_operator.cpp
     rs/rs_spectral_unmixing_operator.cpp
     rs/rs_rx_anomaly_operator.cpp

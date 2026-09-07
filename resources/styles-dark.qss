@@ -1,7 +1,10 @@
 /*
  * SICNU GEO RS — Dark Theme QSS (Canopy Lab Night)
  * Mirrors light token roles with inverted surfaces and brighter accents.
- * accent #2BB673 · ink #E8ECF1 · surface #1A1D23 / #1E2229
+ * surface.canvas #1A1D23 · surface.panel #1E2229 · surface.raised #252A33
+ * ink.primary #E8ECF1 · ink.secondary #A8B0BC
+ * accent #2BB673 · mapSelect #4DA3E0
+ * state ok/warn/err #3DCF6A / #E0A458 / #F07167
  */
 /* ============ Global ============ */
 QWidget {
@@ -1012,63 +1015,27 @@ QPushButton#rsTaskPanelRun[primary="true"]:disabled {
 #rsTaskPanelHint[error="true"] {
   color: #F07167;
 }
+/* Schema form inline validation (UX 4.0) */
+#rsSchemaValidation[state="error"] {
+  color: #F07167;
+  font-size: 12px;
+}
+#rsSchemaValidation[state="warn"] {
+  color: #E0A458;
+  font-size: 12px;
+}
+#rsSchemaValidation[state="ok"] {
+  color: #3DCF6A;
+  font-size: 12px;
+}
+QLineEdit[errorState="true"],
+QComboBox[errorState="true"],
+QPlainTextEdit[errorState="true"] {
+  border: 1px solid #F07167;
+}
 
 
 
-/* ============ Band Composition Rail (signature chrome) ============ */
-#rsBandCompositionRail {
-    background: #252A33;
-    border: none;
-    border-bottom: 1px solid #343B46;
-    min-height: 26px;
-    max-height: 28px;
-}
-#rsBandCompositionRail QLabel {
-    color: #A8B0BC;
-    font-size: 11px;
-    padding: 0 4px;
-}
-#rsBandChip {
-    border-radius: 3px;
-    min-width: 22px;
-    max-width: 36px;
-    min-height: 16px;
-    max-height: 16px;
-    font-size: 10px;
-    font-weight: 700;
-    color: #FFFFFF;
-    qproperty-alignment: AlignCenter;
-}
-#rsBandChip[role="R"] { background: #F07167; }
-#rsBandChip[role="G"] { background: #3DCF6A; }
-#rsBandChip[role="B"] { background: #4DA3E0; }
-#rsBandChip[role="NIR"] { background: #8B3A3A; }
-#rsBandChip[role="Gray"] { background: #A8B0BC; }
-#rsBandRangeLabel {
-    font-family: 'IBM Plex Mono', 'SF Mono', monospace;
-    font-size: 11px;
-    color: #E8ECF1;
-}
-#rsBandMetaLabel {
-    font-family: 'IBM Plex Mono', 'SF Mono', monospace;
-    font-size: 11px;
-    color: #A8B0BC;
-}
-#rsBandTaskPill {
-    background: rgba(43, 182, 115, 0.10);
-    border: 1px solid rgba(43, 182, 115, 0.35);
-    border-radius: 10px;
-    color: #2BB673;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 1px 10px;
-}
-#rsBandTaskPill[idle="true"] {
-    background: transparent;
-    border: 1px solid #4A5260;
-    color: #A8B0BC;
-    font-weight: 400;
-}
 
 /* ============ Histogram instrument window ============ */
 #rsHistogramChart {
@@ -1141,15 +1108,6 @@ QTreeView::item:selected, QTreeWidget::item:selected, QListView::item:selected {
     color: #2BB673;
     border-left: 2px solid #2BB673;
 }
-
-#rsBandRailHost {
-    background: #252A33;
-    border: none;
-    border-bottom: 1px solid #343B46;
-    spacing: 0;
-    padding: 0;
-}
-#rsBandRailHost::separator { width: 0; background: transparent; }
 
 #rsTopChrome {
     background: #1E2229;
