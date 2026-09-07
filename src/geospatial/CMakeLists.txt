@@ -12,12 +12,16 @@ set(SICNU_GEOSPATIAL_SOURCES
     vector/vector_reader.cpp
     vector/vector_writer.cpp
     util/atomic_fs.cpp
+    util/resource_uri.cpp
+    probe/probe.cpp
+    remote/probe_remote.cpp
     formats/format_profiles.cpp
     cog/cog_presets.cpp
     cog/cog_validator.cpp
     convert/raster_convert.cpp
     stac/stac_mapper.cpp
     products/product_adapters.cpp
+    products/product_registry.cpp
     doctor/data_doctor.cpp
     multidim/multidim_view.cpp
 )

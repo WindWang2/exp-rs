@@ -187,6 +187,16 @@ sicnu_add_io_test(test_io_doctor)
 sicnu_add_io_test(test_io_atomic_failures)
 sicnu_add_io_test(test_io_fidelity)
 sicnu_add_io_test(test_io_paths)
+sicnu_add_io_test(test_io_uri)
+sicnu_add_io_test(test_io_product_registry)
+sicnu_add_io_test(test_io_probe)
+
+# Remote range harness (ADR 0139): local HTTP fixture with byte accounting.
+sicnu_add_io_test(test_io_remote_range)
+target_sources(test_io_remote_range PRIVATE support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_remote_range PRIVATE ws2_32)
+endif()
 
 # io:* operator family suite — rides the operator chain (Qt + sicnu_operators).
 sicnu_add_io_test(test_io_operators)
