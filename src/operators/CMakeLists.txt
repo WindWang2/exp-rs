@@ -79,6 +79,15 @@ list(APPEND SICNU_OPERATORS_SOURCES
 message(STATUS "OTB CLI operators enabled (runtime external tools)")
 
 # GDAL-based operators (direct GDAL C API; always available when GDAL is found)
+# Geospatial I/O Foundation 4.0: authoritative conversion/inspection operators
+# over the Qt-free sicnu_geospatial core (translate/warp/clip/reproject/
+# convert_format/build_overviews/make_cog/vector_convert/inspect/doctor).
+list(APPEND SICNU_OPERATORS_SOURCES
+    io/io_operators.cpp
+    io/io_operators_init.cpp
+)
+message(STATUS "I/O operators enabled")
+
 list(APPEND SICNU_OPERATORS_SOURCES
     gdal/gdal_operator_utils.cpp
     gdal/gdal_orthorectification_operator.cpp
