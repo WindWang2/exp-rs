@@ -9,11 +9,16 @@
 #include "geospatial/formats/format_profiles.h"
 
 #include "geospatial/gdal_guard.h"
+#include "geospatial/util/resource_uri.h"
 
+#include <cpl_conv.h>
+#include <cpl_string.h>
 #include <gdal.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <cstring>
 
 namespace sicnu::geo
 {
@@ -269,6 +274,218 @@ std::vector<FormatProfile> buildDeclaredProfiles()
 }
 
 } // namespace
+
+// ---------------------------------------------------------------------------
+// Dataset-level capability resolution (5.0)
+// ---------------------------------------------------------------------------
+
+DataCapability operator|( DataCapability a, DataCapability b )
+{
+  return static_cast<DataCapability>( static_cast<std::uint64_t>( a ) |
+                                      static_cast<std::uint64_t>( b ) );
+}
+
+DataCapability &operator|=( DataCapability &value, DataCapability flag )
+{
+  value = value | flag;
+  return value;
+}
+
+bool hasCapability( DataCapability value, DataCapability flag )
+{
+  return ( static_cast<std::uint64_t>( value ) & static_cast<std::uint64_t>( flag ) ) != 0;
+}
+
+std::vector<std::string> capabilityNames( DataCapability caps )
+{
+  static const struct
+  {
+    DataCapability flag;
+    const char *name;
+  } kNames[] = {
+    { DataCapability::Read, "read" },
+    { DataCapability::Write, "write" },
+    { DataCapability::Update, "update" },
+    { DataCapability::WindowRead, "window_read" },
+    { DataCapability::BlockRead, "block_read" },
+    { DataCapability::RandomAccess, "random_access" },
+    { DataCapability::Multiband, "multiband" },
+    { DataCapability::Multidim, "multidim" },
+    { DataCapability::Subdataset, "subdataset" },
+    { DataCapability::Georeferencing, "georeferencing" },
+    { DataCapability::Crs, "crs" },
+    { DataCapability::NoData, "nodata" },
+    { DataCapability::Mask, "mask" },
+    { DataCapability::Overviews, "overviews" },
+    { DataCapability::Metadata, "metadata" },
+    { DataCapability::RemoteRange, "remote_range" },
+    { DataCapability::Streaming, "streaming" },
+    { DataCapability::Vector, "vector" },
+    { DataCapability::Attributes, "attributes" },
+    { DataCapability::Transactions, "transactions" },
+  };
+  std::vector<std::string> names;
+  for ( const auto &entry : kNames )
+  {
+    if ( hasCapability( caps, entry.flag ) )
+      names.push_back( entry.name );
+  }
+  return names;
+}
+
+Json::Value ResolvedCapabilities::toJson() const
+{
+  Json::Value json;
+  Json::Value list( Json::arrayValue );
+  for ( const std::string &name : capabilityNames( caps ) )
+    list.append( name );
+  json["capabilities"] = list;
+  json["profile_id"] = profileId;
+  json["driver"] = driver;
+  json["remote"] = remote;
+  json["is_cog"] = isCog;
+  json["notes"] = notes;
+  return json;
+}
+
+ResolvedCapabilities resolveDatasetCapabilities( const std::string &path )
+{
+  ensureGdalRegistered();
+  const ResourceUri uri = ResourceUri::parse( path );
+  if ( uri.kind == ResourceKind::Invalid )
+    throw GeoError( ErrorCode::NotFound, "resource does not exist: " + uri.display() );
+
+  ResolvedCapabilities resolved;
+  resolved.remote = uri.isRemote();
+  const FormatRegistry &registry = FormatRegistry::instance();
+  if ( const FormatProfile *profile = registry.profileForPath( uri.canonical() ) )
+    resolved.profileId = profile->id;
+
+  QuietCplErrors quiet;
+  const std::string gdalPath = uri.canonical();
+  GDALDatasetH dataset =
+    GDALOpenEx( gdalPath.c_str(), GDAL_OF_RASTER | GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr );
+  if ( dataset == nullptr )
+    throw GeoError( ErrorCode::OpenFailed, "dataset could not be opened: " + uri.display() );
+  GdalDatasetGuard guard( dataset );
+
+  if ( GDALDriverH driver = GDALGetDatasetDriver( dataset ) )
+    resolved.driver = GDALGetDriverShortName( driver );
+
+  if ( resolved.driver == "COG" )
+    resolved.isCog = true;
+
+  const int bandCount = GDALGetRasterCount( dataset );
+  const bool isRaster = bandCount > 0 || GDALGetRasterXSize( dataset ) > 0;
+
+  if ( isRaster )
+  {
+    resolved.caps |= DataCapability::Read | DataCapability::WindowRead | DataCapability::BlockRead |
+                     DataCapability::RandomAccess;
+    if ( bandCount > 1 )
+      resolved.caps |= DataCapability::Multiband;
+
+    // Metadata domains: SUBDATASETS is its own capability; any other custom
+    // domain beyond the structural defaults marks rich metadata.
+    if ( char **domainList = GDALGetMetadataDomainList( dataset ) )
+    {
+      for ( char **entry = domainList; *entry; ++entry )
+      {
+        if ( std::strcmp( *entry, "SUBDATASETS" ) == 0 )
+          resolved.caps |= DataCapability::Subdataset;
+        else if ( std::strcmp( *entry, "IMAGE_STRUCTURE" ) != 0 &&
+                  std::strcmp( *entry, "DERIVED_SUBDATASETS" ) != 0 )
+          resolved.caps |= DataCapability::Metadata;
+      }
+      CSLDestroy( domainList );
+    }
+
+    // Georeferencing + CRS.
+    double geotransform[6] = { 0, 1, 0, 0, 0, 1 };
+    const bool hasGeotransform = GDALGetGeoTransform( dataset, geotransform ) == CE_None;
+    const bool hasGcps = GDALGetGCPCount( dataset ) > 0;
+    if ( hasGeotransform || hasGcps )
+      resolved.caps |= DataCapability::Georeferencing;
+    const std::string wkt = GDALGetProjectionRef( dataset ) ? GDALGetProjectionRef( dataset ) : "";
+    if ( !wkt.empty() )
+      resolved.caps |= DataCapability::Crs;
+
+    // Per-band: NoData / mask presence.
+    bool anyNoData = false;
+    bool anyMask = false;
+    for ( int bandNumber = 1; bandNumber <= bandCount; ++bandNumber )
+    {
+      GDALRasterBandH band = GDALGetRasterBand( dataset, bandNumber );
+      if ( band == nullptr )
+        continue;
+      int hasNoData = 0;
+      GDALGetRasterNoDataValue( band, &hasNoData );
+      if ( hasNoData )
+        anyNoData = true;
+      const int maskFlags = GDALGetMaskFlags( band );
+      if ( maskFlags & ( GMF_PER_DATASET | GMF_ALPHA ) )
+        anyMask = true;
+    }
+    if ( anyNoData )
+      resolved.caps |= DataCapability::NoData;
+    if ( anyMask )
+      resolved.caps |= DataCapability::Mask;
+
+    GDALRasterBandH firstBand = GDALGetRasterBand( dataset, 1 );
+    if ( firstBand != nullptr )
+    {
+      const int overviewCount = GDALGetOverviewCount( firstBand );
+      if ( overviewCount > 0 )
+        resolved.caps |= DataCapability::Overviews;
+      else
+        resolved.notes["overviews"] = "none present";
+    }
+
+    // Multidim API present?
+    if ( GDALDatasetGetRootGroup( dataset ) != nullptr )
+      resolved.caps |= DataCapability::Multidim;
+
+    // Remote range: remote sources through range-capable drivers inherit the
+    // remote support; full-file drivers (e.g. remote shapefiles) do not.
+    if ( resolved.remote && ( resolved.driver == "GTiff" || resolved.driver == "COG" ||
+                              resolved.driver == "netCDF" || resolved.driver == "HDF5" ) )
+      resolved.caps |= DataCapability::RemoteRange;
+    resolved.caps |= DataCapability::Streaming;
+  }
+
+  const int layerCount = GDALDatasetGetLayerCount( dataset );
+  if ( layerCount > 0 )
+  {
+    resolved.caps |= DataCapability::Vector | DataCapability::Read;
+    OGRLayerH layer = GDALDatasetGetLayer( dataset, 0 );
+    if ( layer != nullptr )
+    {
+      if ( OGR_L_GetLayerDefn( layer ) != nullptr )
+        resolved.caps |= DataCapability::Attributes;
+      if ( OGR_L_TestCapability( layer, OLCSequentialWrite ) )
+        resolved.caps |= DataCapability::Write;
+      if ( OGR_L_TestCapability( layer, OLCTransactions ) )
+        resolved.caps |= DataCapability::Transactions;
+      if ( OGR_L_TestCapability( layer, OLCRandomRead ) )
+        resolved.caps |= DataCapability::RandomAccess;
+    }
+    if ( resolved.remote )
+      resolved.notes["remote_vector"] = "remote vector access is stream-only; not range-verified";
+  }
+
+  // Multidim-only stores (no raster bands, no layers, but a root group).
+  if ( !isRaster && layerCount == 0 && GDALDatasetGetRootGroup( dataset ) != nullptr )
+  {
+    resolved.caps |= DataCapability::Read | DataCapability::Multidim | DataCapability::Streaming;
+    if ( resolved.remote )
+      resolved.caps |= DataCapability::RemoteRange;
+  }
+
+  if ( resolved.profileId.empty() )
+    resolved.notes["profile"] = "no certified profile matches this extension";
+
+  return resolved;
+}
 
 Json::Value FormatProfile::toJson( bool driverAvailable ) const
 {
