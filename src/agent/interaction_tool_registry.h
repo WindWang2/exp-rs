@@ -14,7 +14,7 @@
 
 namespace sicnu::data {
 class DataManager;
-struct AssetSnapshot;
+class AssetSnapshot;
 }
 
 namespace sicnu::agent {

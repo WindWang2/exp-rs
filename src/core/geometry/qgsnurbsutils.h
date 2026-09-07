@@ -23,7 +23,7 @@
 
 class QgsAbstractGeometry;
 class QgsNurbsCurve;
-struct QgsVertexId;
+class QgsVertexId;
 
 /**
  * \ingroup core
