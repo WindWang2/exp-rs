@@ -307,6 +307,10 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
       if ( static_cast<int>( rows.size() ) > topN )
         rows.resize( topN );
     }
+    // Every kind honors the 64-row render budget; the overflow row reports
+    // what was left out (review fix: plain tables silently dropped rows).
+    if ( static_cast<int>( rows.size() ) > kMaxTableRows )
+      rows.resize( kMaxTableRows );
     const int hidden =
       static_cast<int>( points.size() ) - static_cast<int>( rows.size() );
     const bool withSummary = kind == "summary_table";

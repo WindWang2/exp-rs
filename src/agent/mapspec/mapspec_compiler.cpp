@@ -197,13 +197,17 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
 
   // --- v2/v3 atlas hook --------------------------------------------------------
   double atlasMarginFraction = -1.0;
+  bool atlasEnabled = false;
   if ( page.isMember( "atlas" ) && page["atlas"].isObject() )
   {
     const Json::Value &atlasSpec = page["atlas"];
     if ( QgsLayoutAtlas *atlas = layout->atlas() )
     {
       if ( atlasSpec.isMember( "enabled" ) && atlasSpec["enabled"].isBool() )
+      {
         atlas->setEnabled( atlasSpec["enabled"].asBool() );
+        atlasEnabled = atlasSpec["enabled"].asBool();
+      }
       if ( atlasSpec.isMember( "coverage_layer" ) && atlasSpec["coverage_layer"].isString() )
       {
         const QString layerRef = QString::fromStdString( atlasSpec["coverage_layer"].asString() );
@@ -317,9 +321,15 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       LayoutService::instance().deleteLayout( QString::fromStdString( spec["layout_name"].asString() ) );
       return nullptr;
     }
-    if ( atlasMarginFraction >= 0.0 )
-      if ( auto *compiledMap = qobject_cast<QgsLayoutItemMap *>( frameItem ) )
+    if ( auto *compiledMap = qobject_cast<QgsLayoutItemMap *>( frameItem ) )
+    {
+      // QGIS only iterates feature extents for maps marked atlas-driven —
+      // without this every atlas page renders the same extent.
+      if ( atlasEnabled )
+        compiledMap->setAtlasDriven( true );
+      if ( atlasMarginFraction >= 0.0 )
         compiledMap->setAtlasMargin( atlasMarginFraction );
+    }
     mapFrameIds.push_back( id );
   }
 

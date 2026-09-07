@@ -28,6 +28,12 @@
    "kind": "raster",
    "description": "Optional DEM for radiometric terrain flattening.",
    "required": false
+  },
+  {
+   "name": "aoi",
+   "kind": "vector",
+   "description": "Optional AOI/coverage layer context (atlas series).",
+   "required": false
   }
  ],
  "steps": [

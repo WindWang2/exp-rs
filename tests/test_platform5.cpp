@@ -1122,3 +1122,27 @@ TEST_CASE( "Atlas dynamic text passes through verbatim and validates structurall
   if ( !problems.empty() )
     FAIL( problems.front() );
 }
+
+TEST_CASE( "Atlas-enabled maps are compiled atlas-driven (feature extents iterate)",
+           "[platform5][atlas][regression]" )
+{
+  // Review R2-L3 P1: the atlas surface configured QgsLayoutAtlas but never
+  // marked the map frames atlas-driven, so every page rendered the same
+  // extent and margin_fraction was dead code.
+  Json::Value draft = TemplateRegistry::instance().instantiateTemplate(
+    "report-atlas-appendix-a4l", Json::Value( Json::objectValue ), nullptr );
+  REQUIRE_FALSE( draft.isNull() );
+  QString error;
+  QgsPrintLayout *layout = MapSpecCompiler::compile( draft, &error );
+  REQUIRE( layout != nullptr );
+  bool sawDrivenMap = false;
+  const QList<QGraphicsItem *> items = layout->items();
+  for ( QGraphicsItem *sceneItem : items )
+  {
+    auto *map = dynamic_cast<QgsLayoutItemMap *>( sceneItem );
+    if ( map && map->atlasDriven() )
+      sawDrivenMap = true;
+  }
+  CHECK( sawDrivenMap );
+  QgsProject::instance()->layoutManager()->clear();
+}

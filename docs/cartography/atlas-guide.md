@@ -47,8 +47,10 @@ QGIS evaluates inline expressions in label text at render time:
 
 Page numbering: `[% @atlas_feature_number %] / [% @atlas_total_features %]`.
 `feature_variables` documents which feature fields the template expects;
-`solution:instantiate` passes the coverage layer through, and preflight
-checks the atlas block's completeness.
+The coverage layer is bound like any other input: the atlas-series
+solution declares it in its input contracts and the authoring template
+ships a placeholder name. Preflight checks the atlas block's
+completeness (enabled ⇒ coverage layer set, sort key present).
 
 ## End-to-end (agent flow)
 

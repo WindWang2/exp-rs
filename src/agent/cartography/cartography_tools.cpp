@@ -306,6 +306,13 @@ class ComposeTool final : public SpatialTool
       // resolve into concrete rects; the resolved document is echoed back so
       // agents see the geometry they got.
       Json::Value spec = input["mapspec"];
+      // Mirror the compiler: v3 conditions resolve BEFORE composition and
+      // preflight so hidden items cannot produce false positives.
+      if ( spec.isObject() && spec.isMember( "condition_context" ) )
+      {
+        std::vector<std::string> conditionErrors;
+        mapspec::resolveMapSpecConditions( spec, spec["condition_context"], &conditionErrors );
+      }
       const double marginDefault = tokenNumber( resolveTokenSet( spec ), "spacing.margin_mm", 12.0 );
       const Json::Value composition = resolveComposition( spec, marginDefault ).toJson();
 

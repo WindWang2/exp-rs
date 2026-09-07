@@ -178,7 +178,9 @@ bool applyRasterBlock( QgsRasterLayer *raster, const Json::Value &rasterBlock,
     if ( stretch.isMember( "min" ) && stretch["min"].isNumeric() && stretch.isMember( "max" ) &&
          stretch["max"].isNumeric() )
     {
-      auto *enhancement = new QgsContrastEnhancement( Qgis::DataType::Float32 );
+      const Qgis::DataType bandType =
+        raster->dataProvider() ? raster->dataProvider()->dataType( band ) : Qgis::DataType::Float32;
+      auto *enhancement = new QgsContrastEnhancement( bandType );
       enhancement->setMinimumValue( stretch["min"].asDouble() );
       enhancement->setMaximumValue( stretch["max"].asDouble() );
       enhancement->setContrastEnhancementAlgorithm( QgsContrastEnhancement::StretchToMinimumMaximum );
@@ -525,7 +527,7 @@ QgsRasterRenderer *buildRasterRenderer( const Json::Value &rasterBlock, int band
   return nullptr;
 }
 
-bool applyStyleSpecToLayer( QgsMapLayer *layer, const Json::Value &styleSpec, QString *error,
+bool applyStyleSpecToLayer( QgsMapLayer *layer, const Json::Value &styleSpecIn, QString *error,
                             QStringList *problemsOut )
 {
   QStringList applied;
@@ -539,9 +541,17 @@ bool applyStyleSpecToLayer( QgsMapLayer *layer, const Json::Value &styleSpec, QS
   // StyleSpecs name their token set through token_set_ref (resolveTokenSet
   // reads style.token_set), so repackage the reference for resolution.
   Json::Value styleObject( Json::objectValue );
-  if ( styleSpec.isMember( "token_set_ref" ) && styleSpec["token_set_ref"].isString() )
-    styleObject["token_set"] = styleSpec["token_set_ref"];
+  if ( styleSpecIn.isMember( "token_set_ref" ) && styleSpecIn["token_set_ref"].isString() )
+    styleObject["token_set"] = styleSpecIn["token_set_ref"];
   const Json::Value tokenSet = resolveTokenSet( styleObject );
+
+  // Platform 5.0 review fix: the apply path must see RESOLVED token values.
+  // Raw "token:*" ramps previously fell back to the qualitative palette and
+  // "token:colors.*" class colors became invalid QColors — silently wrong.
+  std::vector<std::string> tokenProblems;
+  const Json::Value styleSpec = resolveStyleTokens( styleSpecIn, tokenSet, &tokenProblems );
+  for ( const std::string &problem : tokenProblems )
+    problems << QString::fromStdString( problem );
 
   bool appliedAny = false;
   if ( styleSpec.isMember( "raster" ) && styleSpec["raster"].isObject() )

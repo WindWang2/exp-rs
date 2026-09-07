@@ -72,7 +72,9 @@ missing windows block the plan. Pair intents (`change`, `sar_change`, `dnbr`,
 2. Slots referenced by steps are declared; gates reference declared
    slots/params; outputs reference existing steps.
 3. Facets present; `intent` routes to the right preflight pack.
-4. `cartography:lint_catalog` stays clean and, if the recipe backs a
-   solution, `solution:validate` resolves every reference.
+4. `cartography:lint_catalog` stays clean (it validates the
+   cartography-side references; recipe-internal checks run in
+   `harness:instantiate_recipe` and the CI cross-check), and if the recipe
+   backs a solution, `solution:validate` resolves every reference.
 5. Deterministic map_output renderer hint consistent with the StyleSpec id
    used by the consuming solution.

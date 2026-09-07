@@ -13,9 +13,9 @@ honest QGIS/toolchain boundaries.
 - **Locator insets are real now**: `inset_maps[].locator.target` compiles to
   the QGIS map-overview extent indicator (outline/region/frame styles) with
   an optional caption. *Remaining nuance:* connector lines from the inset to
-  the main map are not drawn; nested locators resolve breadth-first with a
-  depth cap of 2 (`locator` of an inset that itself is another inset's
-  target is supported, deeper chains are ignored).
+  the main map are not drawn; nested locators (an inset targeting another
+  inset) validate and compile — nesting depth is author-declared and not
+  capped by exp-rs, so absurd chains render as absurd chains.
 - **Atlas is usable**: coverage layer, filter, sort, filename expression,
   margin fraction and page numbering compile to `QgsLayoutAtlas` (see
   atlas-guide.md). *Remaining nuance:* per-feature **symbology overrides**
