@@ -648,6 +648,9 @@ endif()
 
 add_subdirectory(src/core)
 add_subdirectory(src/data)
+# Scientific dataset & experiment foundation 5.0 (ADR 0134-0138).
+add_subdirectory(src/dataset)
+add_subdirectory(src/experiment)
 # Execution & Data Plane 3.0 runtime services (chunk graph, GPU plane, worker
 # host, telemetry). Qt-free leaf; must precede processing (fused-chain executor).
 add_subdirectory(src/runtime)
