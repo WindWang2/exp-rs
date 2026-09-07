@@ -47,18 +47,21 @@ enum class PluginDiagnosticCode
     DependencyCycle = 3004,
     ResourceMissing = 3005,
     ContributionIdConflict = 3006,
+    EntrypointOutsideRoot = 3007,
 
     // E4xxx — runtime
     SymbolMissing = 4001,
     LibraryLoadFailed = 4002,
     InitializationFailed = 4003,
     RegistrationFailed = 4004,
+    PluginInUse = 4005,
 
     // E5xxx — policy
     PermissionDenied = 5001,
     TrustRejected = 5002,
     PluginDisabled = 5003,
     PolicyBlocklisted = 5004,
+    WorkspaceEscape = 5005,
 };
 
 enum class PluginDiagnosticSeverity

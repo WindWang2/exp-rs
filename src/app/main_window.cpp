@@ -82,6 +82,7 @@
 #include <dialogs/preferences_dialog.h>
 #include <plugins/framework/plugin_runtime_host.h>
 #include <plugins/framework/plugin_ui_host.h>
+#include "plugin_shell_ui.h"
 
 #ifdef SICNU_EMBED_PYTHON
 #include "python/qgis_python.h"
@@ -203,7 +204,6 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
         exprsPluginOptions.installDataDir =
             ( QCoreApplication::applicationDirPath() + "/../share/exp-rs" ).toStdString();
         sicnu::plugins::bootstrapPluginRuntime( exprsPluginOptions );
-        const auto exprsLoaded = exprs::PluginRegistry::instance().loadAllValidated();
         auto *uiHost = sicnu::plugins::PluginUiHost::instance();
         // Reuse the EMBED-created 插件 menu when present so the bar never
         // ends up with two menus of the same title.
@@ -216,34 +216,20 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
         }
         if ( !exprsPluginMenu )
             exprsPluginMenu = appMenuBar()->addMenu( tr( "插件" ) );
+        // Reverse-ownership sink (issue #747): plugin docks/actions/pages are
+        // attached and released THROUGH the shell, so unload can detach and
+        // delete them while the plugin binary is still mapped.
+        m_exprsShellUi = new ExprsPluginShellUi( this, exprsPluginMenu );
+        uiHost->setShellSink( m_exprsShellUi );
+        const auto exprsLoaded = exprs::PluginRegistry::instance().loadAllValidated();
         for ( const std::string &pluginIdStd : exprsLoaded ) {
             const QString pluginId = QString::fromStdString( pluginIdStd );
             const exprs::LoadedPlugin *loaded =
                 exprs::PluginRegistry::instance().loaded( pluginIdStd );
             if ( !loaded || !loaded->uiContribution )
                 continue;
-            uiHost->collectFromPlugin(
+            uiHost->attachCollectedUi(
                 pluginId, static_cast<exprs::UiContributionV1 *>( loaded->uiContribution ) );
-        }
-        for ( const auto &record : uiHost->records() ) {
-            if ( QWidget *dockContent = uiHost->takeDockWidget( record.pluginId ) ) {
-                auto *dock = new QgsDockWidget( record.dockTitle.isEmpty()
-                                                    ? record.pluginId
-                                                    : record.dockTitle,
-                                                this );
-                dock->setObjectName( QStringLiteral( "exprs_plugin_%1" )
-                                         .arg( record.pluginId.toLower().replace( " ", "_" ) ) );
-                dock->setWidget( dockContent );
-                addDockWidget( Qt::RightDockWidgetArea, dock );
-                m_windowMenu->addAction( dock->toggleViewAction() );
-            }
-            const QList<QAction *> actions = uiHost->takeMenuActions( record.pluginId );
-            if ( !actions.isEmpty() ) {
-                exprsPluginMenu->addActions( actions );
-            }
-            if ( QWidget *page = uiHost->takeSettingsPage( record.pluginId ) ) {
-                PreferencesDialog::registerExternalPage( record.settingsPageTitle, page );
-            }
         }
         // Plugin Manager entry point.
         exprsPluginMenu->addSeparator();

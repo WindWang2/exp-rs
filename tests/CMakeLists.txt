@@ -5989,6 +5989,10 @@ target_compile_definitions(test_cli_commands_json PRIVATE
 sicnu_add_test(test_plugins_runtime_host)
 target_link_libraries(test_plugins_runtime_host PRIVATE sicnu_plugins_framework sicnu_sdk sicnu_workflow_runtime)
 
+# Owner-scoped unload barrier (#747).
+sicnu_add_test(test_plugin_execution_barrier)
+target_link_libraries(test_plugin_execution_barrier PRIVATE sicnu_plugins_framework sicnu_sdk)
+
 
 # Last TEST_INCLUDE_FILES entry: stamp PYTHONHOME / LD_LIBRARY_PATH / QT_IM_MODULE
 # onto every test after Catch PRE_TEST discovery has registered them (#730).

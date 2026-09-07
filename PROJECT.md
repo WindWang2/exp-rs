@@ -22,6 +22,10 @@ Pi agent adapter over the same Task Center seam.
 - `src/data` — DataManager (asset authority) + governance store/services.
 - `src/analysis` — classification pipeline, segmentation, georeferencing.
 - `src/workflow` — workflow runtime, session, pipeline editor canvas.
+- `src/plugins`, `sicnu_sdk` — `exprs::PluginRegistry` lifecycle owner
+  (ADR 0130: barrier-drained unload, UI reverse ownership, path containment,
+  workspace effect policy); Python plugins out-of-process (ADR 0014); conformance
+  via `sicnu_geo_rs_cli plugin test`.
 - `src/app` — desktop shell: ribbon workbench, panels (data / governance /
   layers), dialogs, task center UI, schema form builder, design tokens
   (`design_tokens.h`). See `docs/ui-architecture.md` for the information
@@ -32,6 +36,11 @@ Pi agent adapter over the same Task Center seam.
 
 ## Current state (2026-09-06)
 
+- **Plugin SDK, Isolation & Extension Ecosystem 4.0** (ADR 0130):
+  barrier-protected unload with drain-or-refuse (`SICNU_PLUGIN_UNLOAD_TIMEOUT_MS`),
+  owner-scoped execution leases, UI reverse ownership via shell sink, Python `py:`
+  revocation, manifest entrypoint containment (`exprs::PathPolicy`), workspace effect
+  policy (`SICNU_MCP_WORKSPACE`), Win32/POSIX loader abstraction, CLI conformance test kit (`sicnu_geo_rs_cli plugin test`).
 - **Data Plane, Runtime, Governance & Reproducibility Reliability 4.0** (ADR 0130):
   document-authority/downgrade guard, WAL-consistent snapshots, checked store writes,
   reference-safe CAS eviction, external-mutation cache invalidation, crash-resume
@@ -81,6 +90,9 @@ Pi agent adapter over the same Task Center seam.
   (CTestCustom pins Python/Qt env; see `TEST_INFRA.md`). Treat "fully green" claims as valid only with a fresh ctest log.
 - Scientific validation policy and tolerance grades for algorithm kernels:
   `docs/processing/validation-policy.md`.
+- Platform status: Linux validated locally; macOS via CI seam; Windows
+  compiles the SDK targets (Win32 loader path), external-process execution is
+  a typed refusal there — see docs/plugins/external-process.md.
 
 ## Known limitations / open threads
 

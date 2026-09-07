@@ -132,6 +132,8 @@ namespace sicnu::app {
 class WorkspaceBrowserPanel;
 }
 
+class ExprsPluginShellUi;
+
 class QgisDesktopWindow : public QMainWindow
 {
     Q_OBJECT
@@ -161,6 +163,10 @@ public:
     QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
     QgsMapLayer *activeLayer();
     QList<QgsMapLayer*> selectedLayers();
+
+    /// The panel/toolbar visibility menu (exprs plugin docks add their
+    /// toggle actions here; used by ExprsPluginShellUi).
+    QMenu *windowMenu() const { return m_windowMenu; }
     /**
      * Load a local raster/vector source through the project Data Context
      * (registers a Data Asset and adds a main-view Display Layer). Returns true
@@ -533,6 +539,9 @@ private:
 #endif
 
     std::unique_ptr<class PluginHost> m_pluginHost;
+    /// exprs UI reverse-ownership sink (issue #747): owns the shell side of
+    /// plugin dock/menu/settings attachments; lives as long as the window.
+    ExprsPluginShellUi *m_exprsShellUi = nullptr;
 
     // Lazy-loaded modules
 #ifdef SICNU_EMBED_PYTHON

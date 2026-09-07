@@ -240,6 +240,10 @@ void PythonPluginAdapter::unload()
     QObject::disconnect( m_workerCrashedConnection );
     if ( m_bridge )
     {
+        // #755: revoke this plugin's py: algorithm registrations BEFORE the
+        // bridge (and its worker bindings) go away, so the agent catalog and
+        // the atomic registry never keep dead py: entries across unload.
+        m_bridge->unregisterRegisteredAlgorithms();
         m_bridge.reset();
     }
 

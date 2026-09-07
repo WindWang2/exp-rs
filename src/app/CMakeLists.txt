@@ -97,6 +97,7 @@ add_executable(sicnu_geo_rs
     main_window.cpp
     main_window_menus.cpp
     main_window_docks.cpp
+    plugin_shell_ui.cpp
     main_window_connections.cpp
     main_window_vector.cpp
     main_window_project.cpp

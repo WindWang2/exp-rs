@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "plugin_agent_tool_provider.h"
 
+#include "plugin_execution_barrier.h"
+
 namespace sicnu::plugins {
 
 namespace {
@@ -113,6 +115,7 @@ Json::Value PluginAgentToolProvider::execute( const std::string &toolId,
                                               const Json::Value &params )
 {
     std::shared_ptr<exprs::IPluginAgentToolV1> tool;
+    std::string ownerPluginId;
     {
         std::lock_guard<std::mutex> lock( mutex() );
         auto iterator = executors().find( toolId );
@@ -130,6 +133,30 @@ Json::Value PluginAgentToolProvider::execute( const std::string &toolId,
             return failure;
         }
         tool = iterator->second;
+        const auto owner = executorOwners().find( toolId );
+        if ( owner != executorOwners().end() )
+            ownerPluginId = owner->second;
+    }
+    // Execution barrier (#747): refuse (typed) while the owning plugin is
+    // draining/unloaded instead of entering plugin code that may be gone.
+    // The lease covers the whole tool->execute window.
+    PluginExecutionBarrier::LeasePtr lease;
+    if ( !ownerPluginId.empty() )
+    {
+        lease = PluginExecutionBarrier::instance().acquire( ownerPluginId );
+        if ( !lease )
+        {
+            Json::Value failure( Json::objectValue );
+            failure["success"] = false;
+            Json::Value error( Json::objectValue );
+            error["message"] = "plugin agent tool '" + toolId
+                               + "' is unavailable (plugin is unloading or was unloaded)";
+            error["code"] = "PLUGIN_UNAVAILABLE";
+            error["category"] = "runtime";
+            error["retryable"] = false;
+            failure["error"] = error;
+            return failure;
+        }
     }
     try
     {

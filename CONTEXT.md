@@ -622,6 +622,7 @@ ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision
 - **ADR 0130 (Algorithms)**: Scientific Algorithms & Processing Foundation 4.0 (shared NoData/statistics/grid/histogram kernels, #759 fix, `rs:temporal_sen_trend`, validation-policy docs under `docs/processing/`)
 - **ADR 0130 (Cartography)**: Cartography Design Tokens & Component/Template Schema v2
 - **ADR 0130 (Governance)**: Data Plane, Runtime, Governance & Reproducibility Reliability 4.0 (document-authority/downgrade guard, WAL-consistent snapshots, checked store writes, reference-safe CAS eviction, external-mutation cache invalidation, crash-resume completion identity, truthful run states, bounded warm worker pool; fault matrix in `docs/architecture/FAULT_MATRIX_4.md`)
+- **ADR 0130 (SDK)**: Plugin Lifecycle, Unload Safety & Path Containment (barrier-protected unload with drain-or-refuse; owner-scoped execution leases; UI reverse ownership via a shell sink; Python `py:` revocation; entrypoint containment at validation and load; `SICNU_MCP_WORKSPACE` effect policy for external tools; std::filesystem/Win32 SDK portability; `plugin test` conformance kit)
 - **ADR 0130 (UI)**: Unified Application Shell (workspace dock wiring, project-context title, dead-panel removal, menu dedup)
 - **ADR 0131 (Cartography)**: MapSpec 2.0 — Compositional Constraints, Composition Solver & Visual Regression
 - **ADR 0131 (UI)**: Schema-Driven Operator UI & Thin-Client Continuance (validated schema forms; band tools/pan-sharpen operator promotions; batch registry fix)
@@ -640,3 +641,4 @@ scale/offset, band-role resolution, output publication), and
 `docs/processing/temporal.md` (per-operator denominators, time-axis handling,
 references). A PR that changes one of these contracts updates the page in the
 same PR.
+>>>>>>> master
