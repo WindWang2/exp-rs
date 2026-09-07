@@ -1,51 +1,89 @@
-# SICNU GEO RS (`exp-rs`) — Project State
+# SICNU GEO RS (exp-rs) — Project State
 
-A pure C++ remote-sensing analysis platform built on the QGIS engine, with
-an agent surface (MCP/Pi/CLI/GUI) over one unified execution seam. This
-document is the living project-state overview; per-sprint history lives in
-git history, ADRs (`docs/adr/`), and `CHANGELOG.md`.
+Living project-state document. Claims here must be provable from the code and
+tests at HEAD; do not hardcode transient counts (PRs, worktrees, test tallies)
+— record those as dated evidence in planning dossiers instead.
 
-## Architecture
+## What this is
 
-- Repository: `exp-rs` (C++20 / Qt 6.8+ / GDAL / PROJ / GEOS / OpenCV 5 / Catch2 v3.7.1)
-- Main branch: `master`; work flows through short-lived feature branches and PRs.
-- Build system: CMake (Release + Ninja in `build/`); ccache recommended.
-- Test runner: CTest with Catch2 (`QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib
-  ctest --test-dir build --output-on-failure`). `CTestCustom.cmake` pins
-  `PYTHONHOME`/`PYTHONPATH` and `QT_IM_MODULE=compose` (see TEST_INFRA.md).
-  Never claim "suite green" without a fresh `ctest` log.
+A pure C++20 remote-sensing analysis workbench built on the QGIS engine
+(Qt 6.8+, GDAL/PROJ/GEOS, OpenCV 5, Catch2 v3). One desktop application
+(`src/app`, `sicnu_geo_rs`), one headless CLI (`src/cli`), an MCP server and
+Pi agent adapter over the same Task Center seam.
 
-## Subsystem map
+## Architecture map
 
-| Subsystem | Home | State |
-|-----------|------|-------|
-| QGIS core/GUI libraries | `src/core`, `src/gui` | vendored/forked, builds on Linux/Windows CI tiers |
-| Processing framework + Task Center | `src/processing`, `src/jobs` | unified algorithm registry, DAG pipelines, tool-call dispatcher |
-| Operators (`rs:`/`gdal:`/`otb:`/`opencv:`) | `src/operators` | operator-ization + determinism grades |
-| Workflow engine 2.0 | `src/workflow` | lifecycle, deterministic cache, recovery, GC |
-| Agent infrastructure | `src/agent` | MCP server, spatial tools, contracts, MapSpec cartography, workspace state |
-| Data governance & reproducibility | `data/governance` | workspace identities, governance store, project format v3 |
-| Cartography design system | `src/agent/mapspec`, `src/agent/cartography`, `data/cartography` | MapSpec 2.0, design tokens, component/template libraries, compose→preflight→repair (ADR 0130/0131; docs in `docs/cartography/`) |
-| Applications | `src/app` (`sicnu_geo_rs`), `src/cli` (`sicnu_geo_rs_cli`) | desktop shell + headless CLI |
-| Pi bridge | `pi/` | external TypeScript adapter (ADR 0122), never compiled into the app |
+- `src/core`, `src/gui` — QGIS engine (layers, rendering, CRS, canvas).
+- `src/processing` — algorithm engine, providers, Task Center, Tool Call
+  Dispatcher, kernels in `algorithms/`.
+- `src/operators` — RSOperator framework + `rs:`/`gdal:`/`otb:`/`opencv:`
+  families (JSON parameter/result seam, registry, determinism grades).
+- `src/jobs` — JobEngine (execution workers, listeners, retention).
+- `src/data` — DataManager (asset authority) + governance store/services.
+- `src/analysis` — classification pipeline, segmentation, georeferencing.
+- `src/workflow` — workflow runtime, session, pipeline editor canvas.
+- `src/app` — desktop shell: ribbon workbench, panels (data / governance /
+  layers), dialogs, task center UI, schema form builder, design tokens
+  (`design_tokens.h`). See `docs/ui-architecture.md` for the information
+  architecture and extension rules.
+- `src/agent` — copilot, MCP, spatial tools, agent contracts; `pi/` bridge;
+  MapSpec cartography (`src/agent/mapspec`, `src/agent/cartography`, `data/cartography`).
+- `docs/adr/` — decision ledger (0001–0133); `CONTEXT.md` — domain vocabulary.
 
-## Current focus
+## Current state (2026-09-06)
 
 - **Cartography Design System 4.0** (ADR 0130/0131): design tokens,
   component/template library expansion, MapSpec 2.0 compositional
   constraints, composition solver, preflight/repair rule catalog, and the
-  deterministic visual-regression harness.
+  deterministic visual-regression harness (`docs/cartography/`).
+- **Desktop Workbench & Unified UX 4.0** (ADR 0130–0133): unified shell
+  (wired governance dock, project-context title, dead-panel removal, menu dedup),
+  schema-validated operator forms, thin-client operator promotions (band tools,
+  enhancement, pan-sharpen), grouped pipeline tasks + shared result renderer,
+  C++ design-token layer, keyboard guardrail.
+- **Scientific Algorithms & Processing Foundation 4.0** (ADR 0130):
+  shared NoData/statistics/grid/histogram kernels, #759 fix, `rs:temporal_sen_trend`,
+  validation policies (`docs/processing/`).
+- **Project Workspace, Data Governance & Reproducibility Platform 3.0**
+  (ADR 0129): governance store, workspace services, project format v3,
+  crash-safe saves, workspace UI.
+- **Multimodal SpatioTemporal RS Platform 3.0**: SAR operator family, temporal
+  fit kernels, feature cube, model runtime 3.0, tile inference 2.0.
+- **Pi Spatial Scientist & Cartography Workbench 3.0** (ADR 0127/0128): spatial
+  reasoning contracts, MapSpec cartography, symbology intelligence, benchmarks.
+- **Pi-Based Spatial Intelligence Layer** (ADR 0122): spatial tools, MCP
+  catalog, model catalog, algorithm sidecars.
 
-## Code layout
+## Contracts that outlive any single PR
 
-- Repository checkouts live under `~/projects/rs-studio/` (one primary
-  checkout; epic work may use dedicated git worktrees, removed after merge).
-- Build directory: `build/` inside the active checkout.
-- Tests: `tests/` (Catch2 executables, discovered via CTest).
-- Agent guidance: `CLAUDE.md`, `CONTEXT.md`, `.agents/skills/`, `docs/agents/`.
+- Execution seam: `UI → TaskCenter → JobEngine → RSOperator → kernel`. GUI
+  code must not run raster kernels inline (`test_ui_task_center_contract`).
+- Data/Display seam: `DataManager` owns assets; canvas presentation goes
+  through `ActiveViewHost`/`QgisDisplayManager`.
+- Schema form contract: operator schemas are the single source of truth for
+  defaults/ranges/required in any generated parameter UI.
+- Design tokens: `SicnuUi::Tokens` mirrors the QSS token headers; the parity
+  test fails on drift.
+- Scale: workspace browsing stays model/view and paged (100k assets,
+  fetchMore, 200/page); no per-row widget explosion.
 
-## Historical notes
+## Build & test contract
 
-The 2026-07 integration sprint (PRs #708–#712) completed: sequential
-squash-merges, build verification, worktree/branch cleanup. Those sprint
-tables were removed here — see git history and the ADR ledger for details.
+- Configure: `cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=ON` in
+  a build dir (presets in `CMakePresets.json`: `dev-default`, `ci-fast`, `ci-full`,
+  `sanitizer-debug`, `release-package`).
+- Build: `cmake --build build` (bounded parallelism on shared hosts).
+- Tests: `QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib ctest --test-dir build --output-on-failure`
+  (CTestCustom pins Python/Qt env; see `TEST_INFRA.md`). Treat "fully green" claims as valid only with a fresh ctest log.
+- Scientific validation policy and tolerance grades for algorithm kernels:
+  `docs/processing/validation-policy.md`.
+
+## Known limitations / open threads
+
+- `module:classify:*` and `module:georef:*` flows are TaskCenter-tracked but
+  not `rs:` operators (interactive sessions; documented in
+  `docs/ui-architecture.md` §4).
+- Pipeline editor keeps its slate-canvas badge palette (documented design
+  exception to the token layer).
+- The historical "2126 tests / 100% green" style figures are stale evidence;
+  never claim suite health without a fresh `ctest` log.

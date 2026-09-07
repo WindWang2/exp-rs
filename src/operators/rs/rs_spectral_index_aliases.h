@@ -28,6 +28,10 @@ public:
         return RSOperatorMemoryPolicy::Streaming; // delegates to the streaming core (#664)
     }
 
+    // Same streaming kernel as the rs:spectral_index facade — same ADR 0124
+    // grade; the inherited "tolerance" default understated reproducibility.
+    std::string determinismGrade() const override { return "bit-exact"; }
+
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
@@ -50,6 +54,10 @@ public:
     {
         return RSOperatorMemoryPolicy::Streaming; // delegates to the streaming core (#664)
     }
+
+    // Same streaming kernel as the rs:spectral_index facade — same ADR 0124
+    // grade; the inherited "tolerance" default understated reproducibility.
+    std::string determinismGrade() const override { return "bit-exact"; }
 
     Json::Value schema() const override;
     Json::Value metadata() const override;
@@ -74,6 +82,10 @@ public:
         return RSOperatorMemoryPolicy::Streaming; // delegates to the streaming core (#664)
     }
 
+    // Same streaming kernel as the rs:spectral_index facade — same ADR 0124
+    // grade; the inherited "tolerance" default understated reproducibility.
+    std::string determinismGrade() const override { return "bit-exact"; }
+
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
@@ -96,6 +108,10 @@ public:
     {
         return RSOperatorMemoryPolicy::Streaming; // delegates to the streaming core (#664)
     }
+
+    // Same streaming kernel as the rs:spectral_index facade — same ADR 0124
+    // grade; the inherited "tolerance" default understated reproducibility.
+    std::string determinismGrade() const override { return "bit-exact"; }
 
     Json::Value schema() const override;
     Json::Value metadata() const override;
@@ -120,6 +136,10 @@ public:
         return RSOperatorMemoryPolicy::Streaming; // delegates to the streaming core (#664)
     }
 
+    // Same streaming kernel as the rs:spectral_index facade — same ADR 0124
+    // grade; the inherited "tolerance" default understated reproducibility.
+    std::string determinismGrade() const override { return "bit-exact"; }
+
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
@@ -142,6 +162,10 @@ public:
     {
         return RSOperatorMemoryPolicy::Streaming; // delegates to the streaming core (#664)
     }
+
+    // Same streaming kernel as the rs:spectral_index facade — same ADR 0124
+    // grade; the inherited "tolerance" default understated reproducibility.
+    std::string determinismGrade() const override { return "bit-exact"; }
 
     Json::Value schema() const override;
     Json::Value metadata() const override;

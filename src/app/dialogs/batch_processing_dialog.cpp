@@ -7,6 +7,8 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/task_center.h"
 #include "jobs/job_engine.h"
+#include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_registry.h"
 
 #include <json/json.h>
 
@@ -852,6 +854,16 @@ bool runBatchItemImpl(const QString &algorithmId,
                       const QVariantMap &paramOverrides)
 {
     if (algorithmId.startsWith(QStringLiteral("rs:"))) {
+        // Thin client (UX 4.0): execution goes through the authoritative
+        // RSOperatorRegistry. The AtomicAlgorithmRegistry adapter contributes
+        // only its descriptor-driven parameter mapping — it is no longer an
+        // execution path (that bypassed operator-level logging/schema).
+        auto op = sicnu::operators::RSOperatorRegistry::instance().create(algorithmId.toStdString());
+        if (!op) {
+            if (errorMessage)
+                *errorMessage = BatchProcessingDialog::tr("RS operator not found: %1").arg(algorithmId);
+            return false;
+        }
         const auto adapter = AtomicAlgorithmRegistry::instance().findAdapter(algorithmId.toStdString());
         if (!adapter) {
             if (errorMessage)
@@ -888,7 +900,8 @@ bool runBatchItemImpl(const QString &algorithmId,
                 else
                     params[key] = value.toString().toStdString();
             }
-            const Json::Value result = adapter->execute(params);
+            sicnu::operators::RSOperatorContext context;
+            const Json::Value result = op->run(params, context);
             const bool ok = result.isObject() && result.isMember("output")
                             && result["output"].isString()
                             && !result["output"].asString().empty();

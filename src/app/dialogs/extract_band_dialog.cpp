@@ -2,7 +2,6 @@
 #include "extract_band_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
-#include "processing/gdal/gdal_dataset_wrapper.h"
 #include "widgets/band_role_combo.h"
 #include "widgets/raster_layer_combo.h"
 
@@ -18,12 +17,6 @@
 
 #include <qgsmessagelog.h>
 #include <qgis.h>
-
-#include <gdal.h>
-#include <gdal_priv.h>
-#include <cpl_conv.h>
-
-#include "processing/gdal/gdal_safe_call.h"
 
 ExtractBandDialog::ExtractBandDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
@@ -171,37 +164,13 @@ void ExtractBandDialog::onRun()
   }
 
   setRasterLayer( rl );
-  QString sourcePath = rl->source();
 
-  runGdalTask( [sourcePath, bandIndex, outPath]() -> QString {
-    try
-    {
-      GdalDatasetGuard srcGuard( GDALOpen( sourcePath.toUtf8().constData(), GA_ReadOnly ) );
-      if ( !srcGuard )
-        return QString();
-
-      int w = GDALGetRasterXSize( srcGuard.get() );
-      int h = GDALGetRasterYSize( srcGuard.get() );
-
-      GDALRasterBandH srcBand = GDALGetRasterBand( srcGuard.get(), bandIndex );
-      if ( !srcBand )
-        return QString();
-
-      std::vector<float> buf( static_cast<size_t>( w ) * h );
-      GDAL_SAFE_CALL( GDALRasterIO( srcBand, GF_Read, 0, 0, w, h, buf.data(), w, h, GDT_Float32, 0, 0 ),
-                      "Failed to read band data" );
-
-      GeoInfo geo = extractGeoInfo( srcGuard.get() );
-      std::vector<std::vector<float>> bands = { buf };
-      QString error;
-      if ( !writeGdalOutput( outPath, w, h, bands, geo.geoTransform, geo.projection, &error ) )
-        return QString();
-
-      return outPath;
-    }
-    catch ( const std::runtime_error & )
-    {
-      return QString();
-    }
-  } );
+  // Thin client: extraction runs as the rs:extract_bands operator through the
+  // Task Center — same execution path as CLI/MCP.
+  Json::Value params( Json::objectValue );
+  params["input"] = rl->source().toStdString();
+  params["output"] = outPath.toStdString();
+  params["bands"] = Json::Value( Json::arrayValue );
+  params["bands"].append( bandIndex );
+  runOperatorTask( QStringLiteral( "rs:extract_bands" ), params );
 }

@@ -286,6 +286,18 @@ WorkspaceBrowserPanel::WorkspaceBrowserPanel( QWidget *parent )
     connect( m_remoteButton, &QPushButton::clicked, this, &WorkspaceBrowserPanel::importRemoteUrls );
     connect( m_table->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
              &WorkspaceBrowserPanel::showDetails );
+    // Double-click routes the row's artifact through the shell (ActiveViewHost)
+    // via a plain path signal — the panel itself never touches the canvas.
+    connect( m_table, &QTableView::doubleClicked, this, [this]( const QModelIndex &index ) {
+        if ( !m_service || !index.isValid() )
+            return;
+        const QString id = m_model->entityId( index.row() );
+        if ( id.isEmpty() )
+            return;
+        const std::optional<GovernedAsset> asset = m_service->store().assetById( id );
+        if ( asset && !asset->canonicalSource.isEmpty() )
+            emit openPathRequested( asset->canonicalSource );
+    } );
 }
 
 void WorkspaceBrowserPanel::setWorkspaceService( WorkspaceService *service )

@@ -568,6 +568,69 @@ TEST_CASE( "temporal_trend: partially valid series and NoData propagation", "[te
     REQUIRE( n[0] == Approx( 2 ) );
 }
 
+TEST_CASE( "temporal_sen_trend: hand-derived Sen slope and Mann-Kendall p-value",
+           "[temporal][operators][sen]" )
+{
+    ensureApp();
+    Fixture fx;
+    // y = [1, 2, 6] at days 0, 2, 10: all three pairwise day slopes are 0.5,
+    // so Sen's slope = 0.5 and the residual set y − 0.5·t = {1, 1, 1} gives
+    // intercept 1. S = 3 (strictly increasing); var(S) = 3·2·11/18 = 66/18
+    // (no ties); z = (S−1)/sqrt(var) with the continuity correction.
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "s0.tif" ), QStringLiteral( "2025-01-01" ), { 1.0f }, 1, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "s2.tif" ), QStringLiteral( "2025-01-03" ), { 2.0f }, 1, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "s10.tif" ), QStringLiteral( "2025-01-11" ), { 6.0f }, 1, 1 ) ) );
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    scenes.append( fx.filePath( "s0.tif" ).toStdString() );
+    scenes.append( fx.filePath( "s2.tif" ).toStdString() );
+    scenes.append( fx.filePath( "s10.tif" ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["output"] = fx.filePath( QStringLiteral( "sen.tif" ) ).toStdString();
+    const Json::Value result = runOp( "rs:temporal_sen_trend", params );
+    REQUIRE( result["bands"].asInt() == 5 );
+
+    const auto slope = readBand( fx.filePath( QStringLiteral( "sen.tif" ) ), 1 );
+    const auto intercept = readBand( fx.filePath( QStringLiteral( "sen.tif" ) ), 2 );
+    const auto z = readBand( fx.filePath( QStringLiteral( "sen.tif" ) ), 3 );
+    const auto p = readBand( fx.filePath( QStringLiteral( "sen.tif" ) ), 4 );
+    const auto n = readBand( fx.filePath( QStringLiteral( "sen.tif" ) ), 5 );
+    REQUIRE( slope[0] == Approx( 0.5 ) );
+    REQUIRE( intercept[0] == Approx( 1.0 ) );
+    const double expectedVar = 66.0 / 18.0;
+    REQUIRE( z[0] == Approx( ( 3.0 - 1.0 ) / std::sqrt( expectedVar ) ).epsilon( 1e-6 ) );
+    REQUIRE( p[0] == Approx( std::erfc( ( ( 3.0 - 1.0 ) / std::sqrt( expectedVar ) ) / std::sqrt( 2.0 ) ) )
+                 .epsilon( 1e-6 ) );
+    REQUIRE( n[0] == Approx( 3 ) );
+}
+
+TEST_CASE( "temporal_sen_trend: too few valid observations yield NaN, not zero",
+           "[temporal][operators][sen]" )
+{
+    ensureApp();
+    Fixture fx;
+    // valid = {0 at day 0, 1 at day 4}: validCount 2 < 3 → all metrics NaN.
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "q0.tif" ), QStringLiteral( "2025-01-01" ), { 0.0f }, 1, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "q2.tif" ), QStringLiteral( "2025-01-03" ), { -9999.0f }, 1, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "q4.tif" ), QStringLiteral( "2025-01-05" ), { 1.0f }, 1, 1 ) ) );
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( const char *p : { "q0.tif", "q2.tif", "q4.tif" } )
+        scenes.append( fx.filePath( p ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["output"] = fx.filePath( QStringLiteral( "sen2.tif" ) ).toStdString();
+    runOp( "rs:temporal_sen_trend", params );
+    const auto slope = readBand( fx.filePath( QStringLiteral( "sen2.tif" ) ), 1 );
+    const auto p = readBand( fx.filePath( QStringLiteral( "sen2.tif" ) ), 4 );
+    const auto n = readBand( fx.filePath( QStringLiteral( "sen2.tif" ) ), 5 );
+    REQUIRE( std::isnan( slope[0] ) );
+    REQUIRE( std::isnan( p[0] ) );
+    REQUIRE( n[0] == Approx( 2 ) );
+}
+
 // ------------------------------------------------------------- anomaly ----
 
 TEST_CASE( "temporal_anomaly: z-score against known baseline (§24)", "[temporal][operators][anomaly]" )

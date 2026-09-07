@@ -2,6 +2,7 @@
  * otb_operators_init.cpp  —  Static registration of OTB CLI operators
  ***************************************************************************/
 #include "otb_compute_images_statistics_operator.h"
+#include "otb_bundle_to_perfect_sensor_operator.h"
 #include "otb_segmentation_operator.h"
 #include "otb_svm_classification_operator.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -17,6 +18,7 @@ namespace sicnu::operators::otb {
 REGISTER_RS_OPERATOR(OtbSegmentationOperator, "otb:meanshift_segmentation")
 REGISTER_RS_OPERATOR(OtbSvmClassificationOperator, "otb:svm_classification")
 REGISTER_RS_OPERATOR(OtbComputeImagesStatisticsOperator, "otb:compute_images_statistics")
+REGISTER_RS_OPERATOR(OtbBundleToPerfectSensorOperator, "otb:bundle_to_perfect_sensor")
 
 void initBuiltinOtbOperators() {
   // Runs inside RSOperatorRegistry::instance()'s call_once chain. The
@@ -33,6 +35,7 @@ void initBuiltinOtbOperators() {
   add("otb:meanshift_segmentation", [] { return std::make_unique<OtbSegmentationOperator>(); });
   add("otb:svm_classification", [] { return std::make_unique<OtbSvmClassificationOperator>(); });
   add("otb:compute_images_statistics", [] { return std::make_unique<OtbComputeImagesStatisticsOperator>(); });
+  add("otb:bundle_to_perfect_sensor", [] { return std::make_unique<OtbBundleToPerfectSensorOperator>(); });
 }
 
 } // namespace sicnu::operators::otb

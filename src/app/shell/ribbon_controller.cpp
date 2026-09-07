@@ -15,6 +15,7 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QKeySequence>
+#include <QSettings>
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
@@ -987,7 +988,7 @@ QWidget *RibbonController::createRibbonBar()
                                     tr( "队列、进度与日志" ) ) )
     {
       connect( btn, &QToolButton::clicked, m_window, [this]() {
-        // Sole product task list: bottom RsJobPanel (not the old right TaskCenterDock).
+        // Sole product task list: bottom RsJobPanel.
         if ( auto *dock = m_window->findChild<QDockWidget *>( QStringLiteral( "rsJobPanelDock" ) ) )
         {
           dock->show();
@@ -1155,6 +1156,9 @@ void RibbonController::setRibbonCollapsed( bool collapsed )
     m_collapseBtn->setArrowType( collapsed ? Qt::DownArrow : Qt::UpArrow );
     m_collapseBtn->setToolTip( collapsed ? tr( "展开功能区 (Ctrl+F1)" ) : tr( "收起功能区 (Ctrl+F1)" ) );
   }
+  // Persist alongside the dock-layout state (restored in setupRibbonAndTaskPanel).
+  QSettings settings;
+  settings.setValue( QStringLiteral( "ribbon/collapsed" ), collapsed );
   emit ribbonCollapsedChanged( collapsed );
 }
 

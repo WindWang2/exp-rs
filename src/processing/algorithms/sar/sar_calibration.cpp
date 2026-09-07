@@ -1,9 +1,13 @@
 // src/processing/algorithms/sar/sar_calibration.cpp
 #include "sar_calibration.h"
 
+#include "core/sicnu_logging.h"
+#include "data/raster_grid_compat.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_grid_compat.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 
 #include <gdal.h>
@@ -124,14 +128,28 @@ bool convertBackscatterRaster( const GdalDatasetWrapper &src, int band,
   {
     if ( !incidenceDs.open( options.incidenceRasterPath ) )
       return false;
-    if ( incidenceDs.width() != src.width() || incidenceDs.height() != src.height() )
+    // Shared grid preflight (Foundation 4.0): a CRS- or geotransform-
+    // mismatched incidence raster must refuse, not silently attach angles
+    // from the wrong locations. The refusal reason is logged (the boolean
+    // return alone is indistinguishable from an I/O failure at the operator
+    // seam); the operator surfaces it as a calibration failure.
+    const sicnu::data::GridCompatReport incidenceGridReport =
+        sicnu::data::compareGrids( sicnu::processing::gridFromDataset( src ),
+                                   sicnu::processing::gridFromDataset( incidenceDs ) );
+    if ( !incidenceGridReport.compatible() )
+    {
+      if ( const std::optional<sicnu::data::GridCompatIssue> blocking =
+               incidenceGridReport.primaryBlocking() )
+        SICNU_LOG_WARN( SicnuLogTags::Algorithms,
+                        QStringLiteral( "SAR incidence raster rejected: %1" )
+                            .arg( blocking->message ) );
       return false;
+    }
     // A declared sentinel must not reach cos() as a raw angle (a -9999 hole
-    // would produce garbage geometry, not an error).
-    bool hasSentinel = false;
-    const double nd = incidenceDs.bandNoDataValue( 1, &hasSentinel );
-    if ( hasSentinel && std::isfinite( nd ) )
-      incidenceSentinel = static_cast<float>( nd );
+    // would produce garbage geometry, not an error). Bands without a finite
+    // declared sentinel resolve to NaN, which the exact-equality pass below
+    // never matches.
+    incidenceSentinel = sicnu::rs::bandNoDataSentinel( incidenceDs, 1 );
     useRasterIncidence = true;
   }
   else if ( options.constantIncidenceDeg <= 0.0 )

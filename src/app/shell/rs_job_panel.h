@@ -44,6 +44,11 @@ class RsJobPanel : public QgsDockWidget
   public:
     explicit RsJobPanel( QWidget *parent = nullptr );
 
+  signals:
+    /// User double-clicked an output artifact in the structured result view.
+    /// The shell routes it through the Data/Display seam (loadRasterLayer).
+    void resultOpenRequested( const QString &path );
+
   public slots:
     void onTaskAdded( const sicnu::AlgorithmTaskInfo &info );
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
@@ -64,6 +69,7 @@ class RsJobPanel : public QgsDockWidget
     void refreshAll();
     void upsertTaskRow( const sicnu::AlgorithmTaskInfo &info );
     QTreeWidgetItem *findTaskItem( long taskId ) const;
+    static QTreeWidgetItem *findTaskItemRecursive( QTreeWidgetItem *parent, long taskId );
     void fillLogForTask( long taskId );
     void fillDetailsForTask( long taskId );
     void updateActionEnabled();
@@ -90,6 +96,7 @@ class RsJobPanel : public QgsDockWidget
     QTabWidget *m_detailTabs = nullptr;
     QPlainTextEdit *m_detailView = nullptr;
     QPlainTextEdit *m_logView = nullptr;
+    class RsResultSummary *m_resultSummary = nullptr;
     QPushButton *m_cancelBtn = nullptr;
     QPushButton *m_loadBtn = nullptr;
     QPushButton *m_clearFinishedBtn = nullptr;

@@ -70,9 +70,19 @@ class WorkspaceBrowserPanel : public QWidget
   public:
     explicit WorkspaceBrowserPanel( QWidget *parent = nullptr );
     void setWorkspaceService( sicnu::workspace::WorkspaceService *service );
+    /// Re-queries the governance index (shell calls this after a project's
+    /// store is opened/reopened; mutations refresh via entityChanged).
+    void refresh();
+
+  signals:
+    /**
+     * User asked to open a governed artifact (asset row, result artifact).
+     * Carries the canonical path — the shell routes it through
+     * ActiveViewHost so the Data/Display seam stays intact.
+     */
+    void openPathRequested( const QString &path );
 
   private slots:
-    void refresh();
     void refreshSensorFacet();
     void runHealthCheck();
     void showDetails( const QModelIndex &index );

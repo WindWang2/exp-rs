@@ -55,6 +55,8 @@ void QgisDesktopWindow::newProject()
     updateCanvasEmptyState();
     updateLayersEmptyState();
     updateEditingUI(nullptr);
+    updateWindowTitle();
+    refreshWorkspaceBrowser();
     statusBar()->showMessage(tr("已新建工程"), 3000);
 }
 
@@ -123,6 +125,8 @@ void QgisDesktopWindow::openProject()
         updateLayersEmptyState();
         updateCrsDisplay();
         updateEditingUI(currentVectorLayer());
+        updateWindowTitle();
+        refreshWorkspaceBrowser();
         statusBar()->showMessage(tr("已打开工程：%1").arg(filePath), 3000);
     }
 }
@@ -133,6 +137,7 @@ void QgisDesktopWindow::saveProject()
         saveProjectAs();
     } else {
         QgsProject::instance()->write();
+        updateWindowTitle();
         statusBar()->showMessage(tr("工程已保存"), 3000);
     }
 }
@@ -149,6 +154,8 @@ void QgisDesktopWindow::saveProjectAs()
         if ( m_projectContext )
             m_projectContext->reopenWorkspaceStore( filePath );
         QgsProject::instance()->write(filePath);
+        updateWindowTitle();
+        refreshWorkspaceBrowser();
         statusBar()->showMessage(tr("工程已保存至：%1").arg(filePath), 3000);
     }
 }

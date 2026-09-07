@@ -61,11 +61,14 @@ Additional vendor skills (see `.agents/vendor/` for provenance):
 * **Qt AI skills** ([TheQtCompanyRnD/agent-skills](https://github.com/TheQtCompanyRnD/agent-skills)): `qt-cpp-review`, `qt-qml-review`, `qt-qml`, `qt-ui-design`, `qt-cmake-project`, `qt-cpp-docs`, `qt-qml-docs`, `qt-qml-test`, `qt-qml-test-run`, `qt-qml-profiler`, `qt-figma-token-extraction`, `qt-figma-component-generation`.
 * **frontend-design** ([anthropics/claude-code](https://github.com/anthropics/claude-code) plugin): distinctive UI/visual design guidance.
 
-## UI theme (Canopy Lab)
+## UI theme & desktop architecture (Canopy Lab)
 
 * Light: `resources/styles.qss` (default, Fusion + QSS).
 * Dark: `resources/styles-dark.qss` (Preferences → Theme, or `preferences/theme=dark`).
-* Signature chrome: `BandCompositionRail` under the ribbon (band chips + Real Data Range).
+* Desktop information architecture, schema-form contract, task/result UX
+  contract and extension rules: [docs/ui-architecture.md](docs/ui-architecture.md).
+* C++ design tokens: `src/app/design_tokens.h` (`SicnuUi::Tokens`) — keep in
+  sync with the QSS token headers (`test_theme_selector_parity` enforces it).
 
 ## Agent skills
 
