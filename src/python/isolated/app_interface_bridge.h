@@ -81,6 +81,17 @@ class AppInterfaceBridge : public QObject
 
     int registeredActionCount() const;
 
+    /// Algorithm ids this bridge registered into the host catalog
+    /// (processing.register_algorithm). Owner evidence for unload (#755).
+    QStringList registeredAlgorithmIds() const;
+    /// Revokes every catalog registration made through this bridge:
+    /// PythonProcessingProviderAdapter::removeAlgorithm (which also
+    /// unregisters from AtomicAlgorithmRegistry) or a direct
+    /// AtomicAlgorithmRegistry unregister for the no-provider path.
+    /// Called by PythonPluginAdapter::unload() BEFORE the plugin library
+    /// (worker bindings) go away.
+    void unregisterRegisteredAlgorithms();
+
     ActiveLayerSummary getActiveLayerSummary() const;
     QgsMapLayer *activeLayer() const;
 
@@ -125,6 +136,7 @@ class AppInterfaceBridge : public QObject
     sicnu::data::AssetId m_activeAssetId;
     AlgorithmRegisterHandler m_algoRegisterHandler;
     QMap<QString, QAction *> m_registeredActions;
+    QStringList m_registeredAlgorithmIds;
 };
 
 } // namespace sicnu::python::isolated

@@ -1,0 +1,30 @@
+{
+  "id": "annotation/callout",
+  "version": 1,
+  "category": "annotation",
+  "semantic_roles": [
+    "annotation.secondary"
+  ],
+  "description": "Free annotation with optional leader hint; anchored anywhere.",
+  "parameters": {
+    "font": {
+      "size_pt": 9
+    }
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [],
+    "margin_mm": 4,
+    "max_count_per_page": 8
+  },
+  "compatibility": {
+    "requires_map_frame": false
+  },
+  "data_bindings": [
+    {
+      "name": "text",
+      "source": "params.annotation",
+      "required": true
+    }
+  ]
+}

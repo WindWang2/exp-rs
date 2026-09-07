@@ -6,11 +6,10 @@
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_error.h"
 #include "exprs/external_process.h"
+#include "exprs/path_policy.h"
 
+#include <filesystem>
 #include <fstream>
-
-#include <sys/stat.h>
-#include <sys/types.h>
 
 namespace sicnu::plugins {
 
@@ -80,19 +79,8 @@ void ensureParentDirectory( const std::string &path )
     const std::string parent = path.substr( 0, slash );
     if ( parent.empty() )
         return;
-    // Recursive mkdir (3 levels is plenty for output locations).
-    std::string current;
-    size_t start = 0;
-    while ( start <= parent.size() )
-    {
-        const size_t next = parent.find( '/', start );
-        current = parent.substr( 0, next == std::string::npos ? parent.size() : next );
-        if ( !current.empty() )
-            ::mkdir( current.c_str(), 0755 );
-        if ( next == std::string::npos )
-            break;
-        start = next + 1;
-    }
+    std::error_code error;
+    std::filesystem::create_directories( parent, error );
 }
 
 } // namespace
@@ -173,6 +161,14 @@ Json::Value ExternalToolOperator::run( const Json::Value &params,
     request.stdoutLimitBytes = mDeclaration.external.stdoutLimitBytes;
     request.stderrLimitBytes = mDeclaration.external.stderrLimitBytes;
     request.isCancelled = [&context]() { return context.isCancelled(); };
+    // The plugin's own directory is a second containment root: external
+    // tools legitimately read bundled payloads via ${plugin_dir} (#757).
+    if ( !mPluginDir.empty() )
+        request.additionalAllowedRoots.push_back( mPluginDir );
+    // Declared outputs are redirected into the operator context's temp work
+    // directory and later published to the final path — the child writes
+    // there legitimately, so it is a containment root too (P1 review fix).
+    request.additionalAllowedRoots.push_back( context.workDir() );
     if ( !mDeclaration.external.workingDirectoryParam.empty() )
     {
         // Accepts an absolute path or the name of a params key holding one.
@@ -198,6 +194,13 @@ Json::Value ExternalToolOperator::run( const Json::Value &params,
         throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
                                                  processResult.error );
     }
+    if ( processResult.refusedByPolicy )
+    {
+        // Workspace effect policy refused the spawn before any process
+        // existed (issue #757). Nothing ran, nothing was published.
+        throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::ExternalProcessFailed,
+                                                 processResult.error );
+    }
     if ( processResult.timedOut )
     {
         throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::ExternalProcessTimeout,
@@ -218,6 +221,8 @@ Json::Value ExternalToolOperator::run( const Json::Value &params,
     }
 
     // Transactional publish: temp -> final for every declared output.
+    // Output targets come from parameters and are written by the host (not
+    // the child), so the workspace effect policy gates them here too (#757).
     Json::Value published( Json::objectValue );
     for ( const auto &entry : outputMoves )
     {
@@ -229,6 +234,20 @@ Json::Value ExternalToolOperator::run( const Json::Value &params,
             throw sicnu::operators::RSOperatorError(
                 sicnu::operators::ErrorCode::FileNotWritable,
                 "external tool did not produce declared output '" + entry.first + "'" );
+        }
+        if ( !exprs::PathPolicy::workspaceRoot().empty() )
+        {
+            bool contained = exprs::PathPolicy::resolvesInsideRoot(
+                exprs::PathPolicy::workspaceRoot(), finalPath );
+            if ( !contained && !mPluginDir.empty() )
+                contained = exprs::PathPolicy::resolvesInsideRoot( mPluginDir, finalPath );
+            if ( !contained )
+            {
+                std::filesystem::remove( tempPath, ec );
+                throw sicnu::operators::RSOperatorError(
+                    sicnu::operators::ErrorCode::FileNotWritable,
+                    "output path escapes the workspace policy: " + finalPath );
+            }
         }
         ensureParentDirectory( finalPath );
         // Copy+remove instead of rename when crossing filesystems.

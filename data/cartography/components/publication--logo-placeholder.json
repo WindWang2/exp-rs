@@ -1,0 +1,32 @@
+{
+  "id": "publication/logo-placeholder",
+  "version": 1,
+  "category": "publication",
+  "semantic_roles": [
+    "publication.logo"
+  ],
+  "description": "Institution logo placeholder box; swap the picture path at composition time.",
+  "parameters": {
+    "width_mm": 18,
+    "height_mm": 12
+  },
+  "layout_constraints": {
+    "anchor": "corner",
+    "preferred_positions": [
+      "top-left",
+      "top-right"
+    ],
+    "margin_mm": 8,
+    "max_count_per_page": 2
+  },
+  "compatibility": {
+    "requires_map_frame": false
+  },
+  "data_bindings": [
+    {
+      "name": "logo_path",
+      "source": "params.logo_path",
+      "required": false
+    }
+  ]
+}

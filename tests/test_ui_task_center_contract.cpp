@@ -76,7 +76,6 @@ TEST_CASE( "UI contract inventory: no direct JobEngine submit in migrated caller
   ensureApp();
 
   const QStringList submitCallers = {
-    QStringLiteral( "src/app/panels/mosaic_panel.cpp" ),
     QStringLiteral( "src/app/dialogs/sicnu_algorithm_dialog.cpp" ),
     QStringLiteral( "src/app/shell/rs_job_runner.cpp" ),
     QStringLiteral( "src/app/dialogs/raster_processing_dialog_base.cpp" ),
@@ -246,4 +245,70 @@ TEST_CASE( "UI contract: AsyncAlgorithmRunner destructor marks TaskCenter task c
   const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
   REQUIRE( info.taskId == taskId );
   REQUIRE( info.status == sicnu::TaskStatus::Canceled );
+}
+
+// ---------------------------------------------------------------------------
+// Desktop Workbench UX 4.0 (thin-client guardrail)
+// ---------------------------------------------------------------------------
+// The dialogs' inline-kernel escape hatch (runGdalTask / callable:gdal_task)
+// had twelve-plus callers, all migrated onto registered operators (Milestone
+// C). This scan keeps them closed: any new runGdalTask( or direct GDAL
+// read/write loop in a dialog is a new bypass of
+// UI → TaskCenter → JobEngine → RSOperator → kernel and must fail review.
+
+TEST_CASE( "Thin-client guardrail: no inline raster kernels in dialogs",
+           "[task_center][contract][thin-client]" )
+{
+  ensureApp();
+
+  const QStringList dialogSources = {
+    QStringLiteral( "src/app/dialogs/apply_mask_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/atmospheric_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/band_math_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/band_ratio_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/batch_processing_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/change_detection_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/contrast_stretch_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/extract_band_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/fusion_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/image_enhancement_panel.cpp" ),
+    QStringLiteral( "src/app/dialogs/mosaic_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/orthorectification_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/pca_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/post_classification_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/qa_mask_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/radiometric_calibration_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/spatial_filter_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/speckle_filter_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/spectral_index_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/temporal_analysis_dialog.cpp" ),
+    QStringLiteral( "src/app/dialogs/terrain_dialog.cpp" ),
+  };
+
+  for ( const QString &relative : dialogSources )
+  {
+    const QString text = readSource( relative );
+    INFO( relative.toStdString() );
+    REQUIRE_FALSE( text.isEmpty() );
+    // No inline-kernel escape hatch and no pixel I/O in dialogs:
+    // computation belongs to operators behind the Task Center. (GDALOpen
+    // stays allowed for read-only metadata probes such as the
+    // orthorectification dialog's RPC/GCP capability check.)
+    REQUIRE_FALSE( text.contains( QStringLiteral( "runGdalTask(" ) ) );
+    REQUIRE_FALSE( text.contains( QStringLiteral( "GDALRasterIO(" ) ) );
+    REQUIRE_FALSE( text.contains( QStringLiteral( "readBandData(" ) ) );
+    // Operator ids reach the Task Center through the shared adapters.
+    const bool submitsThroughSeam =
+        text.contains( QStringLiteral( "runOperatorTask(" ) )
+        || text.contains( QStringLiteral( "TaskCenter::instance().submitJob" ) )
+        || text.contains( QStringLiteral( "submitJob(" ) );
+    REQUIRE( submitsThroughSeam );
+  }
+
+  // The batch dialog must not re-route rs: ids around the authoritative
+  // operator registry (it used to execute through the atomic-registry adapter).
+  const QString batch = readSource( QStringLiteral( "src/app/dialogs/batch_processing_dialog.cpp" ) );
+  REQUIRE_FALSE( batch.isEmpty() );
+  REQUIRE( batch.contains( QStringLiteral( "RSOperatorRegistry::instance().create" ) ) );
+  REQUIRE_FALSE( batch.contains( QStringLiteral( "adapter->execute" ) ) );
 }

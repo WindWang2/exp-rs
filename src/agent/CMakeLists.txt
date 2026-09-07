@@ -22,6 +22,30 @@ add_library(sicnu_agent SHARED
   llm_streaming_client.h
   contracts/spatial_contracts.cpp
   contracts/spatial_contracts.h
+  harness/harness_error.cpp
+  harness/harness_error.h
+  harness/tool_taxonomy.cpp
+  harness/tool_taxonomy.h
+  harness/tool_manifest.cpp
+  harness/tool_manifest.h
+  harness/harness_tools.cpp
+  harness/harness_tools.h
+  harness/entity_resolver.cpp
+  harness/entity_resolver.h
+  harness/grounding_tools.cpp
+  harness/grounding_tools.h
+  harness/agent_plan.cpp
+  harness/agent_plan.h
+  harness/scientific_preflight.cpp
+  harness/scientific_preflight.h
+  harness/harness_verification.cpp
+  harness/harness_verification.h
+  harness/plan_tools.cpp
+  harness/plan_tools.h
+  harness/recipe_catalog.cpp
+  harness/recipe_catalog.h
+  harness/recipe_tools.cpp
+  harness/recipe_tools.h
   tool_catalog/agent_tool.cpp
   tool_catalog/agent_tool.h
   tool_catalog/tool_provider.h
@@ -61,6 +85,12 @@ add_library(sicnu_agent SHARED
   cartography/cartography_tools.h
   cartography/chart_registry.cpp
   cartography/chart_registry.h
+  cartography/composition.cpp
+  cartography/composition.h
+  cartography/design_tokens.cpp
+  cartography/design_tokens.h
+  cartography/quality.cpp
+  cartography/quality.h
   cartography/registry.cpp
   cartography/registry.h
   symbology/symbology_tools.cpp
@@ -105,6 +135,11 @@ target_include_directories(sicnu_agent
 set_target_properties(sicnu_agent PROPERTIES
   AUTOMOC ON
   WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+
+# Harness 4.0: recipe catalog source-tree fallback (same policy as ModelCatalog).
+target_compile_definitions(sicnu_agent PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 install(TARGETS sicnu_agent

@@ -17,10 +17,14 @@ PluginUiHost::~PluginUiHost()
 {
     for ( UiContributionRecord &record : mRecords )
     {
-        // Widgets created by plugins are owned here unless the shell took
-        // them (via takeDockWidget); delete what is still ours.
-        delete record.dockWidget;
-        delete record.settingsPage;
+        // Widgets created by plugins are owned here unless the shell sink
+        // took them (attached records are the shell's to retire); delete
+        // what is still ours.
+        if ( !record.attached )
+        {
+            delete record.dockWidget;
+            delete record.settingsPage;
+        }
     }
 }
 
@@ -91,63 +95,71 @@ void PluginUiHost::collectFromPlugin( const QString &pluginId,
                               page );
 }
 
-QWidget *PluginUiHost::takeDockWidget( const QString &pluginId )
+void PluginUiHost::attachCollectedUi( const QString &pluginId,
+                                      exprs::UiContributionV1 *contribution )
 {
-    for ( UiContributionRecord &record : mRecords )
-    {
-        if ( record.pluginId == pluginId )
-        {
-            QWidget *widget = record.dockWidget;
-            record.dockWidget = nullptr;
-            return widget;
-        }
-    }
-    return nullptr;
+    collectFromPlugin( pluginId, contribution );
+    attachPluginUi( pluginId );
 }
 
-QWidget *PluginUiHost::takeSettingsPage( const QString &pluginId )
+void PluginUiHost::attachPluginUi( const QString &pluginId )
 {
+    if ( !mShellSink )
+    {
+        // Honest no-op: without the shell the contributions can never
+        // appear (nor be released) — surface it instead of silently eating
+        // them (P3 review finding).
+        showMessage( QStringLiteral( "warning" ),
+                     QStringLiteral( "plugin UI contributions for %1 cannot attach: "
+                                     "no shell UI sink installed" )
+                         .arg( pluginId ) );
+        return;
+    }
     for ( UiContributionRecord &record : mRecords )
     {
-        if ( record.pluginId == pluginId )
-        {
-            QWidget *widget = record.settingsPage;
-            record.settingsPage = nullptr;
-            return widget;
-        }
+        if ( record.pluginId != pluginId || record.attached )
+            continue;
+        if ( record.dockWidget )
+            mShellSink->attachDock( record.pluginId, record.dockTitle, record.dockWidget );
+        if ( !record.menuActions.isEmpty() )
+            mShellSink->attachMenuActions( record.pluginId, record.menuActions );
+        if ( record.settingsPage )
+            mShellSink->attachSettingsPage( record.pluginId, record.settingsPageTitle,
+                                            record.settingsPage );
+        record.attached = true;
     }
-    return nullptr;
-}
-
-QList<QAction *> PluginUiHost::takeMenuActions( const QString &pluginId )
-{
-    for ( UiContributionRecord &record : mRecords )
-    {
-        if ( record.pluginId == pluginId )
-        {
-            const QList<QAction *> actions = record.menuActions;
-            record.menuActions.clear();
-            return actions;
-        }
-    }
-    return {};
+    emit contributionChanged();
 }
 
 void PluginUiHost::releasePluginUi( const QString &pluginId )
 {
+    bool changed = false;
     for ( UiContributionRecord &record : mRecords )
     {
         if ( record.pluginId != pluginId )
             continue;
-        delete record.dockWidget;
-        delete record.settingsPage;
+        // Attached objects go back through the shell sink, which detaches
+        // and deletes them (menu, dock, preferences page). This runs before
+        // the plugin binary is unmapped, so plugin-side destructors and
+        // vtables are still valid.
+        if ( record.attached && mShellSink )
+            mShellSink->releaseUi( pluginId );
+        else
+        {
+            // Never attached: the host still owns the widgets.
+            delete record.dockWidget;
+            delete record.settingsPage;
+        }
         record.dockWidget = nullptr;
         record.settingsPage = nullptr;
         record.dockTitle.clear();
         record.settingsPageTitle.clear();
         record.menuActions.clear();
+        record.attached = false;
+        changed = true;
     }
-    emit contributionChanged();
+    if ( changed )
+        emit contributionChanged();
 }
 
 } // namespace sicnu::plugins

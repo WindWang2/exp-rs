@@ -1,0 +1,50 @@
+{
+  "id": "chart/metric-card",
+  "version": 1,
+  "category": "chart",
+  "semantic_roles": [
+    "chart.metric"
+  ],
+  "description": "Compact metric card (OA, Kappa, F1) with big value + label, for accuracy strips.",
+  "parameters": {
+    "kind": "metric"
+  },
+  "defaults": {
+    "chart": {
+      "kind": "metric",
+      "binding": {
+        "mode": "inline",
+        "data": []
+      },
+      "style": {
+        "value_font_scale": 2.0
+      }
+    }
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "bottom-rail"
+    ],
+    "margin_mm": 4,
+    "max_count_per_page": 6,
+    "min_size_mm": [
+      18,
+      14
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "accuracy"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "data",
+      "source": "params.chart_data",
+      "required": true,
+      "description": "inline [{label, value}] or vector_expression {layer, x_expression, y_expression}."
+    }
+  ]
+}

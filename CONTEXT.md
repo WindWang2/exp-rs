@@ -24,6 +24,16 @@ _Avoid_: Async job, Processing item, Worker unit
 A directed acyclic graph (DAG) of dependent `AlgorithmTask` nodes where output dataset paths automatically flow as inputs into downstream algorithm nodes.
 _Avoid_: Workflow graph, Execution chain, Process tree
 
+**Worker Pool**:
+The opt-in bounded pool of warm isolated operator-worker processes
+(`LocalWorkerPool`, `src/processing/framework/local_worker_pool.*`) built on
+worker protocol v1: spawn-time ready-handshake health checks, per-job timeout
+and cancel escalation, crash detection with typed errors plus transparent
+replacement for future jobs, lifetime recycling (job count and idle age), and
+safe shutdown. It is an executor-side resource that Task Center/Job Engine
+callers may route work through - never a second scheduler.
+_Avoid_: Job manager, Process monitor, Scheduler (scheduling stays with the Task Center/Resource Throttler)
+
 **Workflow Session**:
 The interactive, wizard-mode execution surface for a WorkflowDefinition (`WorkflowSession`): a **human** schedules it — navigating step by step (`gotoStep`), setting parameters per step, and re-running steps made dirty by parameter changes — while each executed step still runs through the Task Center seam. Distinct from the Task Pipeline, where the **engine** owns scheduling of the whole DAG up front. A session is never auto-parallelized across steps; its steps may run out of definition order or not at all.
 _Avoid_: Pipeline run, Batch workflow (a Session is human-scheduled; a Pipeline is engine-scheduled)
@@ -180,7 +190,35 @@ _Avoid_: GUI proxy, QgisInterface IPC shim
 The visual DAG editor canvas (`PipelineCanvasWidget` using Qt Graphics View) for constructing, editing, and monitoring processing task pipelines. Spatial metadata $(X,Y)$ is embedded in `WorkflowDefinition` JSON.
 _Avoid_: Node graph window, Flow editor dialog
 
+**Schema Form Builder (v2)**:
+The form-generation layer (`SchemaFormBuilder`, `src/app/shell/`) that converts an authoritative operator schema (or `AlgorithmDescriptor::toInputSchema()`) into validated parameter editors. The schema is the single source of truth for defaults, ranges, required fields and editor kind (`x-ui-type` hints); validation marks are inline and gate the Run button; advanced fields collapse but stay reachable.
+_Avoid_: Generated form code, Dialog builder (it is schema-driven; dialogs keep identity and help)
+
+**Design Tokens**:
+The C++ design-system constants (`SicnuUi::Tokens`, `src/app/design_tokens.h`): semantic colors per theme, the shared task-status palette, spacing/icon/type scales, and the single `themeIsDark()` probe. Values mirror the QSS token headers; `test_theme_selector_parity` enforces sync.
+_Avoid_: Color helper, Theme singleton (it is a constants namespace plus one probe)
+
 ## Architectural Decision Records (ADRs)
+
+**Design Token Set**:
+The versioned style source for MapSpec cartography (ADR 0130): typography hierarchy with CJK fallbacks, spacing, colors, colorblind-safe palettes, furniture metrics and chart defaults, with `print`/`screen` medium variants. Resolution (`resolveTokenSet`) is total and pure — registry set → medium variant deep-merge → spec overrides; the compiler maps tokens onto QGIS layout properties. QGIS stays the rendering engine; tokens never form a second styling engine.
+_Avoid_: CSS theme, QSS style, symbology (layer renderers live in the symbology domain)
+
+**Component Descriptor (v2)**:
+A validated JSON descriptor in `data/cartography/components/` declaring one cartographic furniture family (category, semantic roles, parameters, item-shaped defaults, `variants[]`, data bindings, compatibility). A MapSpec item's `source_component` reference resolves at compile time and its defaults merge under the item's explicit fields (item > variant > defaults > slot content > tokens > built-in).
+_Avoid_: template (a template composes slots; a component parameterizes one item family), renderer
+
+**Semantic Slot**:
+A named, typed placeholder (`role` + `accepts` collection + optional content draft) in a template or MapSpec `slots[]` through which agents bind content without raw coordinates. Duplicate roles are a validation error; role→item bindings are integrity-checked.
+_Avoid_: layer name, placeholder text, widget
+
+**Composition Solver**:
+The deterministic pre-compile pass (`resolveComposition`, ADR 0131) that resolves item anchors, size bounds and typed constraints (align/match/stack/distribute) into concrete rects — one bounded pass per constraint in declared order, geometry-only mutations, unsatisfiable outcomes reported (`MAP_CONSTRAINT_UNSATISFIABLE`), never content moved silently. Runs inside `MapSpecCompiler::compile` and `repairMapSpec`.
+_Avoid_: layout engine (QGIS Layout remains the only renderer), auto-arrange
+
+**Preflight Rule Catalog**:
+The machine-readable catalog (`preflightRuleCatalog()`, `cartography:list_rules`) of cartographic quality rules with severity, repairability and repair behavior — presence, geometry, margins, text overflow (CJK-aware estimator), legend density, duplicates, bindings, frame balance, inset placement, overlaps. Repairs are deterministic, bounded, and never delete meaningful content.
+_Avoid_: lint list, error log (each rule carries a contract, not a message string)
 
 ### ADR 0011: Task Pipeline & Workflow Editor UI Architecture
 
@@ -517,7 +555,49 @@ _Avoid_: Workspace state map, Context dict, UI state dump
   5. **New remap test** trains K-Means with permuted label ids (5/9) and asserts predictions map to the training labels in the accuracy path and the written class map, with a lowercase `"kmeans"` methodName to pin the trap removal.
 - **Consequences**: one construction path, color formula, sampling policy and NoData discovery; remap semantics observably unchanged (identity when no table; the unsupervised operator's all-zero dummy trainY keeps raw 1..K cluster ids); `"kmeans"` strings now construct K-Means instead of falling back to SVM — only reachable via sidecar predict-only, which still fails cleanly (K-Means has no `load()`).
 
-### ADR 0062–0124: Index
+
+**Harness**:
+The ExpRS-side agent harness (`src/agent/harness/`, ADR 0130): error taxonomy,
+tool manifests/taxonomy, entity resolution, typed context, scientific
+preflight, plan compilation, verification, and recipes. Pi owns the generic
+agent loop; the harness owns everything spatial/scientific.
+_Avoid_: Agent framework, agent runtime, Pi backend
+
+**Tool Manifest**:
+The bounded per-tool metadata block (taxonomy, risk class, side effects,
+resource hints, cancellability, preconditions, expected artifacts) derived
+from AgentMetadata / the namespace risk table and serialized in catalog
+responses.
+_Avoid_: Tool docs, description string
+
+**Entity Resolution**:
+Authoritative lookup of dataset references (asset-N id, governed UUID, path,
+display name) behind agent tools; unknown/ambiguous are typed failures with
+candidates, never silent picks.
+_Avoid_: Fuzzy matching, name guessing
+
+**Scientific Preflight**:
+Deterministic intent rule packs (ndvi/change/sar_change/classify/phenology)
+over inspected facts; `blocked` vetoes plan execution.
+_Avoid_: Validation (that is the DAG-schema check), sanity check
+
+**AgentPlan v2**:
+The versioned plan document (goal/intent/inputs/steps/outputs/verification/
+map_output) that compiles to WorkflowDefinition — the only plan-to-engine
+bridge.
+_Avoid_: Pipeline JSON (that is the compiled WorkflowDefinition)
+
+**Verification Verdict**:
+The tri-state PASS / PASS_WITH_WARNINGS / FAIL per artifact and per run;
+FAIL forces run status `failed`.
+_Avoid_: ok flag, success boolean
+
+**Scientific Recipe**:
+A metadata document under `data/agent/recipes/` that orchestrates existing
+operators into an AgentPlan via slot bindings; recipes carry no kernels.
+_Avoid_: Macro, script, workflow copy
+
+### ADR 0062–0130: Index
 
 ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision, and consequences in each file). Titles for orientation:
 
@@ -591,3 +671,26 @@ ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision
 - **ADR 0130**: Model Runtime & AI Inference Platform 4.0
 - **ADR 0130**: Model Runtime & AI Inference Platform 4.0
 - **ADR 0129**: Project Workspace, Data Governance & Reproducibility Platform 3.0
+- **ADR 0130 (Algorithms)**: Scientific Algorithms & Processing Foundation 4.0 (shared NoData/statistics/grid/histogram kernels, #759 fix, `rs:temporal_sen_trend`, validation-policy docs under `docs/processing/`)
+- **ADR 0130 (Cartography)**: Cartography Design Tokens & Component/Template Schema v2
+- **ADR 0130 (Governance)**: Data Plane, Runtime, Governance & Reproducibility Reliability 4.0 (document-authority/downgrade guard, WAL-consistent snapshots, checked store writes, reference-safe CAS eviction, external-mutation cache invalidation, crash-resume completion identity, truthful run states, bounded warm worker pool; fault matrix in `docs/architecture/FAULT_MATRIX_4.md`)
+- **ADR 0130 (Harness)**: Pi Spatial Scientist & Agent Harness 4.0
+- **ADR 0130 (SDK)**: Plugin Lifecycle, Unload Safety & Path Containment (barrier-protected unload with drain-or-refuse; owner-scoped execution leases; UI reverse ownership via a shell sink; Python `py:` revocation; entrypoint containment at validation and load; `SICNU_MCP_WORKSPACE` effect policy for external tools; std::filesystem/Win32 SDK portability; `plugin test` conformance kit)
+- **ADR 0130 (UI)**: Unified Application Shell (workspace dock wiring, project-context title, dead-panel removal, menu dedup)
+- **ADR 0131 (Cartography)**: MapSpec 2.0 — Compositional Constraints, Composition Solver & Visual Regression
+- **ADR 0131 (UI)**: Schema-Driven Operator UI & Thin-Client Continuance (validated schema forms; band tools/pan-sharpen operator promotions; batch registry fix)
+- **ADR 0132**: Unified Task & Result Surface (pipeline grouping in RsJobPanel; shared RsResultSummary; Data vs Results concept contract)
+- **ADR 0133**: Design Token Layer & QSS Parity Contract (SicnuUi::Tokens; single status palette; shortcut conflict guardrail)
+
+## Scientific Processing Policies (Foundation 4.0)
+
+The processing layer's scientific semantics are documented policy, not
+convention — `docs/processing/validation-policy.md` (tolerance grades tied to
+ADR 0124, fixture taxonomy), `docs/processing/nodata-and-statistics.md`
+(missing-value representation, valid-observation denominator rule, sample vs
+population variance table), `docs/processing/grid-and-radiometric-policy.md`
+(shared grid preflight with typed refusals, declarative radiometric
+scale/offset, band-role resolution, output publication), and
+`docs/processing/temporal.md` (per-operator denominators, time-axis handling,
+references). A PR that changes one of these contracts updates the page in the
+same PR.

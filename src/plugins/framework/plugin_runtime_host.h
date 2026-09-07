@@ -47,6 +47,11 @@ public:
     /// or a failed state transition).
     void revokePluginContributions( const std::string &pluginId );
 
+    /// (Re)installs the manifest-declared contributions of one plugin
+    /// record. Used by bootstrap for every record and by pluginLoaded for a
+    /// reload after unload (#755). Idempotent.
+    void installManifestContributionsFor( const std::string &pluginId );
+
     /// True when @p operatorId belongs to a manifest-declared plugin
     /// operator (validated record present).
     bool isPluginOperator( const std::string &operatorId ) const;
@@ -71,6 +76,10 @@ public:
     bool registerAgentTool( const std::string &pluginId, const std::string &toolId,
                             std::shared_ptr<exprs::IPluginAgentToolV1> tool ) override;
     void revokePlugin( const std::string &pluginId ) override;
+    void beginPluginDrain( const std::string &pluginId ) override;
+    bool waitPluginIdle( const std::string &pluginId, int timeoutMs ) override;
+    void cancelPluginDrain( const std::string &pluginId ) override;
+    void pluginLoaded( const std::string &pluginId ) override;
 
 private:
     PluginRuntimeHost() = default;

@@ -10,14 +10,17 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include <atomic>
 #include <chrono>
 #include <thread>
 
+#include "data/artifact_store.h"
 #include "jobs/job_engine.h"
 #include "processing/framework/task_center.h"
 #include "workflow/workflow_checkpoint.h"
@@ -172,6 +175,18 @@ StepPlan makePlan( const std::string &stepId, const std::string &status,
     plan.outputLayerPath = outputPath;
     plan.resultPayload = payload;
     plan.operatorId = operatorId;
+    // The coordinator records this completion identity at the Completed fold
+    // (issue #750); hand-seeded completed plans whose artifact exists on disk
+    // carry the same proof so the resume gate accepts them.
+    if ( plan.status == "Completed" && !plan.outputLayerPath.empty() )
+    {
+        const QFileInfo info( QString::fromStdString( plan.outputLayerPath ) );
+        if ( info.isFile() )
+        {
+            plan.outputSizeBytes = info.size();
+            plan.outputMtimeMs = info.lastModified().toMSecsSinceEpoch();
+        }
+    }
     return plan;
 }
 
@@ -242,6 +257,14 @@ TEST_CASE( "interrupted run recovers at startup and resumes remaining steps (#69
     firstPlan.operatorId = prefix + ":first";
     firstPlan.status = "Completed";
     firstPlan.outputLayerPath = outputPath.toStdString();
+    // Completion identity (issue #750): production stamps it at the fold;
+    // the seeded checkpoint carries the same proof for the resume gate.
+    {
+        const QFileInfo info( outputPath );
+        REQUIRE( info.isFile() );
+        firstPlan.outputSizeBytes = info.size();
+        firstPlan.outputMtimeMs = info.lastModified().toMSecsSinceEpoch();
+    }
     StepPlan secondPlan;
     secondPlan.stepId = "second";
     secondPlan.operatorId = prefix + ":second";
@@ -374,13 +397,13 @@ TEST_CASE( "resume resolves pre-crash parents port-aware from their result paylo
     consume.params["output"] = "/tmp/" + prefix + "_out.tif";
     // Nested JSON object placeholder: substitution recurses string leaves
     // inside objects (#727 port shapes).
-    Json::Value nested( Json::Value( Json::objectValue ) );
+    Json::Value nested( Json::objectValue );
     nested["raster"] = "$infer.output";
     nested["model"] = "$infer.model";
     nested["ghost"] = "$ghoststep.output"; // dangling step ref — stays literal
     consume.params["nested"] = nested;
     // Array element placeholder: substitution recurses into arrays too.
-    Json::Value list( Json::Value( Json::arrayValue ) );
+    Json::Value list( Json::arrayValue );
     list.append( "$infer.output" );
     list.append( "$infer.model" );
     consume.params["list"] = list;
@@ -813,11 +836,11 @@ TEST_CASE( "resume substitutes a step with mixed completed and live parents "
     combo.operatorId = prefix + ":combo";
     combo.params["inDone"] = "$done.output";
     combo.params["inLive"] = "$live.output";
-    Json::Value nested( Json::Value( Json::objectValue ) );
+    Json::Value nested( Json::objectValue );
     nested["fromDone"] = "$done.output";
     nested["fromLive"] = "$live.output";
     combo.params["nested"] = nested;
-    Json::Value list( Json::Value( Json::arrayValue ) );
+    Json::Value list( Json::arrayValue );
     list.append( "$done.output" );
     list.append( "$live.output" );
     combo.params["list"] = list;
@@ -841,7 +864,7 @@ TEST_CASE( "resume substitutes a step with mixed completed and live parents "
     def.steps.push_back( done );
     def.steps.push_back( live );
 
-    Json::Value donePayload( Json::Value( Json::objectValue ) );
+    Json::Value donePayload( Json::objectValue );
     donePayload["output"] = donePath.toStdString();
     WorkflowRun run;
     run.setDefinition( def );
@@ -855,7 +878,7 @@ TEST_CASE( "resume substitutes a step with mixed completed and live parents "
     std::atomic_bool doneRan{ false }, liveRan{ false }, comboRan{ false };
     // The live parent's executor provides a real "output" port payload so
     // the dispatch-time substitution resolves combo's $live.output.
-    Json::Value livePorts( Json::Value( Json::objectValue ) );
+    Json::Value livePorts( Json::objectValue );
     livePorts["output"] = livePath;
     registerCapturingExecutor( prefix + ":done", &doneRan, donePayload );
     registerCapturingExecutor( prefix + ":live", &liveRan, livePorts );
@@ -901,4 +924,74 @@ TEST_CASE( "resume substitutes a step with mixed completed and live parents "
     REQUIRE( comboPlan->resolvedParams["inLive"].asString() == livePath );
     REQUIRE( comboPlan->resolvedParams["nested"]["fromLive"].asString() == livePath );
     REQUIRE( comboPlan->resolvedParams["list"][1].asString() == livePath );
+}
+
+TEST_CASE( "resume re-executes a completed step whose output was replaced out-of-band (#750)",
+           "[workflow][coordinator][recovery][issue750]" )
+{
+    CoordinatorFixture fx;
+    const std::string prefix = "coord_identity";
+    const QString outputPath = fx.checkpointDir.path() + "/coord_identity_first.tif";
+    touchFile( outputPath ); // "artifact" (8 bytes)
+    const QDateTime originalMtime = QFileInfo( outputPath ).lastModified();
+
+    WorkflowRun run;
+    auto def = twoStepDefinition( prefix );
+    run.setDefinition( def );
+    REQUIRE( run.setRunId( "coord_identity_crashed" ) );
+    run.forceSetState( WorkflowRunState::Running );
+    StepPlan firstPlan = makePlan( "first", "Completed", outputPath.toStdString(),
+                                   Json::Value( Json::objectValue ), prefix + ":first" );
+    REQUIRE( firstPlan.outputSizeBytes > 0 );
+    REQUIRE( firstPlan.outputMtimeMs > 0 );
+    // Strongest identity: the content digest production stamps for outputs
+    // within the verification budget.
+    firstPlan.outputDigest = sicnu::data::artifactContentDigest( outputPath ).toStdString();
+    REQUIRE_FALSE( firstPlan.outputDigest.empty() );
+    StepPlan secondPlan;
+    secondPlan.stepId = "second";
+    secondPlan.operatorId = prefix + ":second";
+    secondPlan.status = "Running";
+    run.setStepPlans( { firstPlan, secondPlan } );
+    saveInterruptedCheckpoint( fx, run );
+
+    // The crash-window attack (issue #750): another execution writes foreign
+    // bytes to the recorded path — SAME size, SAME mtime, so no stat proxy
+    // can tell them apart. Only the content digest can.
+    {
+        QFile f( outputPath );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        REQUIRE( f.write( "ar7ifact" ) == 8 );
+        f.close();
+    }
+    {
+        QFile restoreTime( outputPath );
+        REQUIRE( restoreTime.open( QIODevice::ReadOnly ) );
+        REQUIRE( restoreTime.setFileTime( originalMtime,
+                                          QFileDevice::FileModificationTime ) );
+    }
+
+    std::atomic_bool firstRan{ false }, secondRan{ false };
+    registerTwoStepExecutors( prefix, &firstRan, &secondRan );
+    QString err;
+    const long pipelineId = fx.coordinator.resumeRun( "coord_identity_crashed", &err );
+    INFO( err.toStdString() );
+    REQUIRE( pipelineId > 0 );
+
+    std::shared_ptr<WorkflowRun> snapshot;
+    for ( int attempt = 0; attempt < 600; ++attempt )
+    {
+        snapshot = fx.coordinator.runForPipeline( pipelineId );
+        REQUIRE( snapshot != nullptr );
+        if ( snapshot->state() == WorkflowRunState::Completed
+             || snapshot->state() == WorkflowRunState::Failed
+             || snapshot->state() == WorkflowRunState::Canceled )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    }
+    REQUIRE( snapshot->state() == WorkflowRunState::Completed );
+    // The identity mismatch re-executed the step: the foreign bytes are never
+    // fed downstream as a successful resumed output.
+    REQUIRE( firstRan.load() );
+    REQUIRE( secondRan.load() );
 }

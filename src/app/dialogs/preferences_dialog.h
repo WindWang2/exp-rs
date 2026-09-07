@@ -25,6 +25,10 @@ public:
     /// are registered while plugins load (before the dialog is opened) and
     /// appended as tabs; the dialog takes ownership for its lifetime.
     static void registerExternalPage( const QString &title, QWidget *page );
+    /// Drops a cached plugin page registration (reverse path of
+    /// registerExternalPage, used when a plugin unloads before the dialog
+    /// consumed the page). Returns the widget when it was still cached.
+    static QWidget *unregisterExternalPage( const QString &title );
 
     QString theme() const;
     void setTheme(const QString &theme);

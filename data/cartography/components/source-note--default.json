@@ -1,0 +1,37 @@
+{
+  "id": "source-note/default",
+  "version": 1,
+  "category": "source-note",
+  "semantic_roles": [
+    "source.primary"
+  ],
+  "description": "Data source and processing provenance note (token style 'source_note').",
+  "parameters": {
+    "font": {
+      "size_pt": 7
+    }
+  },
+  "defaults": {
+    "text": "数据来源: SICNU GEO RS / exp-rs",
+    "semantic_role": "source.primary"
+  },
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": [
+      "bottom-left",
+      "bottom-right"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 1
+  },
+  "compatibility": {
+    "requires_map_frame": false
+  },
+  "data_bindings": [
+    {
+      "name": "text",
+      "source": "params.source_note",
+      "required": true
+    }
+  ]
+}

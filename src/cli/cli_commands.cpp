@@ -33,6 +33,9 @@
 #include "workflow/workflow_run_coordinator.h"
 #include "workflow/workflow_run_lock.h"
 
+#include <filesystem>
+#include <vector>
+
 #include <QCoreApplication>
 #include <QFileInfo>
 
@@ -623,11 +626,41 @@ int commandPlugin( QStringList args, const CliIO &io )
             return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency ),
                               {}, "unknown plugin: " + pluginId );
         }
-        const bool ok = registry.setEnabled( pluginId, sub == "enable" );
+        // Same round-trip contract as the GUI Plugin Manager (ADR 0130):
+        // disable unloads (refused with E4005 while executing, persisted
+        // flag untouched), enable re-loads and re-attaches — no restart.
+        bool ok = false;
+        std::string error;
+        if ( sub == "disable" )
+        {
+            const bool unloaded = registry.unload( pluginId );
+            const bool stillLoaded = registry.isLoaded( pluginId );
+            if ( !unloaded && stillLoaded )
+            {
+                for ( const auto &item : registry.diagnostics().forPlugin( pluginId ) )
+                {
+                    if ( item.code == exprs_ns::PluginDiagnosticCode::PluginInUse )
+                        error = item.message;
+                }
+                if ( error.empty() )
+                    error = "plugin is in use; disable refused";
+            }
+            else
+            {
+                ok = registry.setEnabled( pluginId, false );
+            }
+        }
+        else
+        {
+            ok = registry.setEnabled( pluginId, true ) && registry.load( pluginId );
+            if ( !ok )
+                error = "enabled, but the plugin failed to load (see plugin doctor)";
+        }
         Json::Value data( Json::objectValue );
         data["id"] = pluginId;
         data["enabled"] = sub == "enable";
-        return io.finish( ok, "plugin", data, ok ? 0 : 1 );
+        data["loaded"] = registry.isLoaded( pluginId );
+        return io.finish( ok, "plugin", data, ok ? 0 : 1, registry.diagnostics().toJson(), error );
     }
 
     if ( sub == "install" )
@@ -685,8 +718,169 @@ int commandPlugin( QStringList args, const CliIO &io )
         return io.finish( true, "plugin", data, 0 );
     }
 
+    if ( sub == "test" )
+    {
+        // Conformance kit (epic 4.0): exercises a third-party plugin the way
+        // the host would — manifest schema, containment, compatibility, load,
+        // contribution registration, unload revocation, and the enable
+        // round-trip. Structured PT_* checks; exit code reflects the verdict.
+        if ( args.isEmpty() )
+        {
+            return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                              {}, "usage: plugin test <plugin-dir>" );
+        }
+        const std::string directory = args.takeFirst().toStdString();
+
+        Json::Value checks( Json::arrayValue );
+        auto addCheck = [&checks]( const char *code, bool ok, const std::string &detail ) {
+            Json::Value check( Json::objectValue );
+            check["code"] = code;
+            check["ok"] = ok;
+            check["detail"] = detail;
+            checks.append( check );
+            return ok;
+        };
+
+        exprs_ns::PluginDiagnosticLog diagnostics;
+        exprs_ns::PluginRecord record = exprs_ns::PluginDiscovery::inspectDirectory( directory, diagnostics );
+        const std::string pluginId = record.manifest.id;
+
+        // PT_MANIFEST: parse + structural validity.
+        if ( !addCheck( "PT_MANIFEST", record.state != exprs_ns::PluginState::Broken,
+                        record.state == exprs_ns::PluginState::Broken
+                            ? "manifest unreadable or structurally invalid"
+                            : "manifest parsed" ) )
+        {
+            Json::Value data( Json::objectValue );
+            data["directory"] = directory;
+            data["checks"] = checks;
+            data["diagnostics"] = diagnostics.toJson();
+            return io.finish( false, "plugin", data,
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure ),
+                              diagnostics.toJson(), "PT_MANIFEST failed" );
+        }
+
+        // PT_COMPAT + PT_CONTAINMENT: classify validator errors by group.
+        exprs_ns::PluginDiagnosticLog validationLog;
+        exprs_ns::PluginValidationRequest request;
+        request.pluginDir = directory;
+        const bool valid =
+            exprs_ns::PluginManifestValidator::validate( record.manifest, request, validationLog );
+        bool compatErrors = false;
+        bool containmentErrors = false;
+        for ( const auto &item : validationLog.items() )
+        {
+            if ( item.severity != exprs_ns::PluginDiagnosticSeverity::Error )
+                continue;
+            if ( item.code >= exprs_ns::PluginDiagnosticCode::ApiVersionMismatch
+                 && item.code <= exprs_ns::PluginDiagnosticCode::PlatformUnsupported )
+                compatErrors = true;
+            if ( item.code == exprs_ns::PluginDiagnosticCode::EntrypointOutsideRoot
+                 || item.code == exprs_ns::PluginDiagnosticCode::EntrypointNotLibrary )
+                containmentErrors = true;
+        }
+        addCheck( "PT_COMPAT", !compatErrors,
+                  compatErrors ? "API/ABI/platform gate failed" : "compatible with this host" );
+        addCheck( "PT_CONTAINMENT", !containmentErrors,
+                  containmentErrors ? "entrypoint escapes the plugin directory"
+                                    : "entrypoint contained" );
+
+        // Host the plugin in a registry scope rooted at its parent directory
+        // and drive load → revoke → reload the way the shell would.
+        exprs_ns::PluginRegistryOptions options;
+        options.roots = { std::filesystem::path( directory ).parent_path().generic_string() };
+        options.policy.allowThirdPartyNative = true;
+        sicnu::plugins::PluginRuntimeHost::instance().bootstrap( options );
+
+        exprs_ns::PluginRegistry &registry = exprs_ns::PluginRegistry::instance();
+        // Conformance must not mutate the user's persisted enable/disable
+        // choices: snapshot, clear the target, restore afterwards (P2 review
+        // finding).
+        const std::vector<std::string> savedDisabled = registry.userDisabledIds();
+        std::vector<std::string> runDisabled = savedDisabled;
+        runDisabled.erase( std::remove( runDisabled.begin(), runDisabled.end(), pluginId ),
+                           runDisabled.end() );
+        registry.setUserDisabledIds( runDisabled );
+        const bool loadOk = registry.load( pluginId );
+        addCheck( "PT_LOAD", loadOk,
+                  loadOk ? "plugin loaded and contributions registered"
+                         : "plugin failed to load (see diagnostics)" );
+
+        bool registrationsOk = true;
+        std::string offendingOperator;
+        for ( const exprs_ns::ManifestOperator &op : record.manifest.operators )
+        {
+            if ( !sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( op.id ) )
+            {
+                registrationsOk = false;
+                offendingOperator = op.id;
+                break;
+            }
+        }
+        addCheck( "PT_REGISTER", registrationsOk,
+                  registrationsOk ? "all declared operators registered"
+                                  : "operator not registered after load: " + offendingOperator );
+
+        const bool unloadOk = registry.unload( pluginId );
+        bool revocationOk = unloadOk;
+        for ( const exprs_ns::ManifestOperator &op : record.manifest.operators )
+        {
+            if ( sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( op.id ) )
+            {
+                revocationOk = false;
+                offendingOperator = op.id;
+                break;
+            }
+        }
+        addCheck( "PT_REVOKE", revocationOk,
+                  revocationOk ? "unload revoked every contribution"
+                               : "contributions survived unload: " + offendingOperator );
+
+        const bool roundTripOk =
+            registry.setEnabled( pluginId, true ) && registry.load( pluginId );
+        // Verify the round-trip restored the actual contributions, not just
+        // the record state (P0 review finding).
+        bool roundTripRegistrations = roundTripOk;
+        for ( const exprs_ns::ManifestOperator &op : record.manifest.operators )
+        {
+            if ( !sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( op.id ) )
+            {
+                roundTripRegistrations = false;
+                break;
+            }
+        }
+        addCheck( "PT_ROUNDTRIP", roundTripRegistrations,
+                  roundTripRegistrations
+                      ? "enable → load round-trip restored contributions without restart"
+                      : "enable-after-unload did not restore the plugin" );
+        registry.unload( pluginId );
+        registry.setUserDisabledIds( savedDisabled );
+
+        diagnostics.merge( validationLog );
+        Json::Value data( Json::objectValue );
+        data["directory"] = directory;
+        data["plugin"] = pluginId;
+        data["checks"] = checks;
+        data["diagnostics"] = diagnostics.toJson();
+        Json::Value summary( Json::objectValue );
+        int passed = 0;
+        for ( const Json::Value &check : checks )
+        {
+            if ( check["ok"].asBool() )
+                ++passed;
+        }
+        summary["passed"] = passed;
+        summary["total"] = checks.size();
+        data["summary"] = summary;
+        const bool ok =
+            valid && loadOk && registrationsOk && revocationOk && roundTripRegistrations;
+        return io.finish( ok, "plugin", data,
+                          ok ? 0 : exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure ),
+                          diagnostics.toJson(), ok ? "" : "plugin conformance failed" );
+    }
+
     return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                      {}, "usage: plugin list|validate|doctor|enable|disable|install|uninstall|inspect ..." );
+                      {}, "usage: plugin list|validate|doctor|test|enable|disable|install|uninstall|inspect ..." );
 }
 
 // ---------------------------------------------------------------------------

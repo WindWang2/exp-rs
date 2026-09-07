@@ -342,6 +342,11 @@ sicnu_discover_tests(test_agent_tools_3)
 # preflight/repair loop).
 qt_add_executable(test_mapspec
   test_mapspec.cpp
+  test_cartography_tokens.cpp
+  test_cartography_library.cpp
+  test_cartography_quality.cpp
+  test_cartography_templates.cpp
+  test_cartography_visual.cpp
 )
 target_compile_definitions(test_mapspec PRIVATE
   SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
@@ -373,8 +378,7 @@ sicnu_discover_tests(test_mapspec)
 add_executable(test_ui_task_center_contract
   test_ui_task_center_contract.cpp
   # AsyncAlgorithmRunner's implementation is compiled directly into the test
-  # (it is a deprecated legacy type not built into any library; same pattern as
-  # test_task_center_dock compiling its panel source). async_runner_base.cpp is
+  # (a deprecated legacy type not built into any library). async_runner_base.cpp is
   # the out-of-line TU that forces the base class's moc (signals) into the link.
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_algorithm_runner.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_runner_base.cpp
@@ -431,28 +435,6 @@ target_compile_definitions(test_theme_selector_parity PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 sicnu_discover_tests(test_theme_selector_parity)
-
-add_executable(test_task_center_dock
-    test_task_center_dock.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/panels/task_center_dock.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
-)
-target_link_libraries(test_task_center_dock PRIVATE
-    Catch2::Catch2WithMain
-    Qt6::Core
-    Qt6::Gui
-    Qt6::Widgets
-    qgis_core
-    qgis_gui
-    sicnu_processing
-    sicnu_task_center
-)
-target_include_directories(test_task_center_dock PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/app
-    ${CMAKE_BINARY_DIR}
-)
-sicnu_discover_tests(test_task_center_dock)
 
 qt_add_executable(test_data_manager
   test_data_manager.cpp
@@ -558,6 +540,21 @@ target_include_directories(test_spectral_indices PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_spectral_indices)
+
+# Shared NoData sentinel policy (Scientific Algorithms Foundation 4.0)
+add_executable(test_nodata_utils test_nodata_utils.cpp)
+target_link_libraries(test_nodata_utils PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_nodata_utils PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_nodata_utils)
 
 # Spectral classification (SAM + Continuum Removal) kernel tests
 add_executable(test_spectral_classification test_spectral_classification.cpp)
@@ -1074,7 +1071,11 @@ sicnu_add_test(test_perf_benchmarks TIMEOUT 300 RUN_SERIAL TRUE)
 # plane-3 epic): in-process workloads through TaskCenter/JobEngine/operators
 # with JSON output (SICNU_EXEC_BENCH_OUT=<dir>) merged by scripts/perf_report.py.
 # RUN_SERIAL: measures peak RSS deltas and IO counters of this process.
+# The remote-source fixtures (tests/support/mini_cog_server.h) use plain
+# blocking POSIX sockets; Windows lane skips these two targets (see REVIEW_LOG).
+if(NOT WIN32)
 sicnu_add_test(test_execution_benchmarks TIMEOUT 600 RUN_SERIAL TRUE)
+endif()
 
 # Phase B chunk execution graph contracts (Qt-free; links sicnu_runtime only).
 sicnu_add_test(test_chunk_graph TIMEOUT 120)
@@ -1091,9 +1092,13 @@ sicnu_add_test(test_fused_chain TIMEOUT 300)
 
 # Phase F remote COG caching layer (network-free data layer; POSIX sockets
 # provide the fake remote endpoint).
+if(NOT WIN32)
 sicnu_add_test(test_remote_source_cache TIMEOUT 180)
+endif()
+if(NOT WIN32)
 target_include_directories(test_remote_source_cache PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(test_execution_benchmarks PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
 
 # Phase G scheduler contracts (header-only budget2 + tests).
 sicnu_add_test(test_scheduler3 TIMEOUT 120)
@@ -1120,7 +1125,10 @@ sicnu_add_test(test_workspace_stress TIMEOUT 900 RUN_SERIAL TRUE)
 sicnu_add_test(test_governance_tools TIMEOUT 300)
 
 # Phase M fault injection / chaos matrix (fork + kill semantics; serial).
+# fork()/waitpid()-based crash-injection fixture is POSIX-only.
+if(NOT WIN32)
 sicnu_add_test(test_fault_injection TIMEOUT 300 RUN_SERIAL TRUE)
+endif()
 # #706: the python-bindings smoke test existed but was registered nowhere —
 # it silently never ran in any lane. Guarded on the bindings target existing.
 if(TARGET _sicnu_operators AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bindings.py)
@@ -1515,38 +1523,6 @@ target_include_directories(test_mosaic PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_mosaic)
-
-# Mosaic panel UI tests
-add_executable(test_mosaic_panel
-  test_mosaic_panel.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/panels/mosaic_panel.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
-)
-target_link_libraries(test_mosaic_panel PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  Qt6::Test
-  qgis_core
-  qgis_gui
-  sicnu_processing
-  sicnu_task_center
-  sicnu_data
-  sicnu_jobs
-  sicnu_operators
-  GDAL::GDAL
-)
-target_include_directories(test_mosaic_panel PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/app
-  ${CMAKE_BINARY_DIR}
-)
-set_target_properties(test_mosaic_panel PROPERTIES AUTOMOC ON)
-sicnu_discover_tests(test_mosaic_panel)
 
 # Processing integration tests
 add_executable(test_processing_integration test_processing_integration.cpp)
@@ -2659,6 +2635,7 @@ if(TARGET qgis_app_classify)
     Qt6::Widgets
     Qt6::Test
     sicnu_processing
+    sicnu_data
     qgis_core
     qgis_gui
   )
@@ -3532,6 +3509,26 @@ if(TARGET sicnu_operators)
   sicnu_link_jsoncpp(test_rs_operators)
   sicnu_discover_tests(test_rs_operators)
 
+  # Desktop Workbench UX 4.0 — band tool operator promotions (Milestone C)
+  add_executable(test_rs_band_tools_operators test_rs_band_tools_operators.cpp)
+  target_link_libraries(test_rs_band_tools_operators PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    sicnu_processing
+    sicnu_operators
+    GDAL::GDAL
+  )
+  target_include_directories(test_rs_band_tools_operators PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_rs_band_tools_operators)
+  sicnu_discover_tests(test_rs_band_tools_operators)
+
   # OTB operator tests
   add_executable(test_otb_operators test_otb_operators.cpp)
   target_link_libraries(test_otb_operators PRIVATE
@@ -4288,6 +4285,8 @@ qt_add_executable(test_workflow_session_controller
   ${CMAKE_SOURCE_DIR}/src/app/shell/workflow_session_controller.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/task_panel_host.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_port_item.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_connection_item.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_node_item.cpp
@@ -4681,6 +4680,36 @@ target_include_directories(test_data_manager_panel PRIVATE
 )
 set_target_properties(test_data_manager_panel PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_data_manager_panel)
+
+# Desktop Workbench UX 4.0 — 工作区治理 panel wiring contract (Milestone A)
+add_executable(test_workspace_browser_wiring
+  test_workspace_browser_wiring.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/workspace_browser_panel.cpp
+)
+target_link_libraries(test_workspace_browser_wiring PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_jobs
+  sicnu_operators
+)
+target_include_directories(test_workspace_browser_wiring PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_workspace_browser_wiring PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_workspace_browser_wiring PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_workspace_browser_wiring)
 
 # Adoption safety net — legacy QGIS layers adopted into the Data Manager
 add_executable(test_layer_adoption_safety_net
@@ -5112,6 +5141,72 @@ target_include_directories(test_crs_selector PRIVATE
 )
 sicnu_discover_tests(test_crs_selector)
 
+# Schema-driven Operator UI (UX 4.0 Milestone B)
+add_executable(test_schema_form_builder_v2
+  test_schema_form_builder_v2.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
+)
+target_link_libraries(test_schema_form_builder_v2 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_operators
+  sicnu_data
+  GDAL::GDAL
+)
+target_include_directories(test_schema_form_builder_v2 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_schema_form_builder_v2)
+set_target_properties(test_schema_form_builder_v2 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_schema_form_builder_v2)
+
+# Shared RsResultSummary widget (UX 4.0 Milestone E)
+add_executable(test_rs_result_summary
+  test_rs_result_summary.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
+)
+target_link_libraries(test_rs_result_summary PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_rs_result_summary PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_rs_result_summary)
+set_target_properties(test_rs_result_summary PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_rs_result_summary)
+
+# Keyboard conflict guardrail (UX 4.0 Milestone G)
+add_executable(test_shortcut_conflicts
+  test_shortcut_conflicts.cpp
+)
+target_link_libraries(test_shortcut_conflicts PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_shortcut_conflicts PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_shortcut_conflicts PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_shortcut_conflicts)
+
 # Spectral index dialog — role-based band preselection via BandRoleCombo (C5)
 sicnu_add_dialog_test(test_spectral_index_dialog
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/spectral_index_dialog.cpp
@@ -5407,6 +5502,8 @@ qt_add_executable(test_workflow_pipeline_ui
   ${CMAKE_SOURCE_DIR}/src/app/shell/workflow_session_controller.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/task_panel_host.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
 )
 target_link_libraries(test_workflow_pipeline_ui PRIVATE
   Catch2::Catch2WithMain
@@ -5665,6 +5762,8 @@ target_include_directories(test_workflow_run_coordinator PRIVATE
 )
 sicnu_discover_tests(test_workflow_run_coordinator)
 
+# SIGSTOP/SIGCONT process-freezing race fixture is POSIX-only.
+if(NOT WIN32)
 add_executable(test_workflow_cache_e2e test_workflow_cache_e2e.cpp)
 target_link_libraries(test_workflow_cache_e2e PRIVATE
   Catch2::Catch2WithMain
@@ -5686,6 +5785,7 @@ target_compile_definitions(test_workflow_cache_e2e PRIVATE
 )
 sicnu_link_jsoncpp(test_workflow_cache_e2e)
 sicnu_discover_tests(test_workflow_cache_e2e)
+endif()
 
 add_executable(test_workflow_artifact_gc test_workflow_artifact_gc.cpp)
 target_link_libraries(test_workflow_artifact_gc PRIVATE
@@ -5790,8 +5890,6 @@ sicnu_discover_tests(test_rs_empty_state_widget)
 add_executable(test_m3_stress
   test_m3_stress.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/panels/mosaic_panel.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/panels/task_center_dock.cpp
   ${CMAKE_SOURCE_DIR}/src/app/log_panel.cpp
   ${CMAKE_SOURCE_DIR}/src/app/panels/data_manager_panel.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
@@ -5833,8 +5931,6 @@ add_executable(test_m3_adversarial_challenge
   test_m3_adversarial_challenge.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_toolbar_flow_host.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/panels/mosaic_panel.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/panels/task_center_dock.cpp
   ${CMAKE_SOURCE_DIR}/src/app/log_panel.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
@@ -5895,8 +5991,6 @@ add_executable(test_final_challenger_2_empirical
   test_final_challenger_2_empirical.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_toolbar_flow_host.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/panels/mosaic_panel.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/panels/task_center_dock.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/preferences_dialog.cpp
@@ -5935,7 +6029,9 @@ target_include_directories(hello_plugin PRIVATE
   ${CMAKE_SOURCE_DIR}/src/sdk
   ${CMAKE_SOURCE_DIR}/src
 )
-target_link_libraries(hello_plugin PRIVATE sicnu_operators_core jsoncpp)
+# RSOperator's out-of-line virtuals live in the shared sicnu_operators target;
+# Windows MODULE links must resolve them (Linux allows undefined).
+target_link_libraries(hello_plugin PRIVATE sicnu_operators sicnu_operators_core jsoncpp)
 set_target_properties(hello_plugin PROPERTIES
   LIBRARY_OUTPUT_NAME hello_plugin
   PREFIX "lib"
@@ -5945,8 +6041,11 @@ set_target_properties(hello_plugin PROPERTIES
 sicnu_add_test(test_plugin_manifest)
 target_link_libraries(test_plugin_manifest PRIVATE sicnu_sdk)
 
+# Plugin packaging e2e uses rm -rf /tmp, symlink(2) and /etc — POSIX-only.
+if(NOT WIN32)
 sicnu_add_test(test_exprs_plugin_system)
 target_link_libraries(test_exprs_plugin_system PRIVATE sicnu_sdk)
+endif()
 
 sicnu_add_test(test_exprs_plugin_loader)
 target_link_libraries(test_exprs_plugin_loader PRIVATE sicnu_sdk)
@@ -5960,15 +6059,41 @@ target_link_libraries(test_exprs_external_process PRIVATE sicnu_sdk)
 sicnu_add_test(test_exprs_workflow_schema)
 target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
 
+# popen()/WEXITSTATUS CLI-spawn fixture is POSIX-only.
+if(NOT WIN32)
 sicnu_add_test(test_cli_commands_json)
 target_link_libraries(test_cli_commands_json PRIVATE sicnu_sdk sicnu_plugins_framework)
 target_compile_definitions(test_cli_commands_json PRIVATE
   SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
 )
+endif()
 
 # The plugins host runtime: registry bridging + external tool operator.
 sicnu_add_test(test_plugins_runtime_host)
 target_link_libraries(test_plugins_runtime_host PRIVATE sicnu_plugins_framework sicnu_sdk sicnu_workflow_runtime)
+
+# Owner-scoped unload barrier (#747).
+sicnu_add_test(test_plugin_execution_barrier)
+target_link_libraries(test_plugin_execution_barrier PRIVATE sicnu_plugins_framework sicnu_sdk)
+
+
+# — Harness 4.0 (Pi Spatial Scientist & Agent Harness) —
+# Error taxonomy (Phase 12) and canonical tool manifest/taxonomy (Phases 1/2).
+sicnu_add_test(test_harness_error)
+sicnu_link_jsoncpp(test_harness_error)
+
+sicnu_add_test(test_harness_catalog)
+sicnu_link_jsoncpp(test_harness_catalog)
+
+
+sicnu_add_test(test_harness_grounding)
+sicnu_link_jsoncpp(test_harness_grounding)
+
+
+# Harness 4.0 evals: six deterministic RS scenarios + anti-hallucination +
+# token budgets (mission Phases 18-20).
+sicnu_add_test(test_harness_evals)
+sicnu_link_jsoncpp(test_harness_evals)
 
 
 # Last TEST_INCLUDE_FILES entry: stamp PYTHONHOME / LD_LIBRARY_PATH / QT_IM_MODULE

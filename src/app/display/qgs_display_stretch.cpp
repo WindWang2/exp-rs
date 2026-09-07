@@ -31,7 +31,7 @@ static bool bandRange( QgsRasterDataProvider *provider, int band,
     return false;
   // Sample-capped statistics (#634): the uncapped call computed a full
   // first-time scan per band on the GUI thread from slider events; the
-  // 250k sample cap matches BandCompositionRail's established pattern.
+  // 250k sample cap matches the established band-stats sampling pattern.
   const QgsRasterBandStats stats = provider->bandStatistics(
     band, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max,
     QgsRectangle(), 250000 );

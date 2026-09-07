@@ -3,7 +3,12 @@
  ***************************************************************************/
 #include "exprs/plugin_validator.h"
 
-#include <sys/stat.h>
+#include "exprs/path_policy.h"
+
+// MSVC's <sys/stat.h> exposes _S_IFREG but not the POSIX S_ISREG macro.
+#if defined( _WIN32 ) && !defined( S_ISREG )
+#define S_ISREG( m ) ( ( ( m ) & _S_IFMT ) == _S_IFREG )
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -12,12 +17,6 @@
 namespace exprs {
 
 namespace {
-
-bool fileExists( const std::string &path )
-{
-    struct stat info {};
-    return ::stat( path.c_str(), &info ) == 0 && S_ISREG( info.st_mode );
-}
 
 bool isLibraryPath( const std::string &fileName )
 {
@@ -287,17 +286,49 @@ bool PluginManifestValidator::validate( const PluginManifest &manifest,
         {
             fail( PluginDiagnosticCode::ManifestMissingField, "entrypoint",
                   "native plugin is missing 'entrypoint'" );
+            break;
         }
-        else if ( !isLibraryPath( manifest.entrypoint ) )
+        if ( !isLibraryPath( manifest.entrypoint ) )
         {
             fail( PluginDiagnosticCode::EntrypointNotLibrary, "entrypoint",
                   "entrypoint '" + manifest.entrypoint + "' is not a shared library" );
+            break;
         }
-        else if ( !request.pluginDir.empty()
-                  && !fileExists( request.pluginDir + "/" + manifest.entrypoint ) )
+        if ( request.pluginDir.empty() )
+            break; // host had no directory context (manifest-only check)
+
+        // Containment invariant (#756): the entrypoint must resolve to a
+        // regular file inside the plugin root. Absolute paths and ".."
+        // components are rejected lexically; symlink escapes are rejected by
+        // canonical resolution. Re-checked at load time (plugin_loader).
+        std::string resolved;
+        const PathPolicyRejection rejection =
+            PathPolicy::checkPayloadInsideRoot( request.pluginDir, manifest.entrypoint, resolved );
+        switch ( rejection )
         {
+        case PathPolicyRejection::Accepted:
+            break;
+        case PathPolicyRejection::Missing:
             fail( PluginDiagnosticCode::EntrypointMissing, "entrypoint",
                   "entrypoint file not found: " + request.pluginDir + "/" + manifest.entrypoint );
+            break;
+        case PathPolicyRejection::NotRegularFile:
+            fail( PluginDiagnosticCode::EntrypointOutsideRoot, "entrypoint",
+                  "entrypoint '" + manifest.entrypoint + "' is not a regular file" );
+            break;
+        case PathPolicyRejection::Absolute:
+            fail( PluginDiagnosticCode::EntrypointOutsideRoot, "entrypoint",
+                  "entrypoint must be relative to the plugin directory, not an absolute path" );
+            break;
+        case PathPolicyRejection::DotDot:
+            fail( PluginDiagnosticCode::EntrypointOutsideRoot, "entrypoint",
+                  "entrypoint must not contain '..' path components" );
+            break;
+        default:
+            fail( PluginDiagnosticCode::EntrypointOutsideRoot, "entrypoint",
+                  "entrypoint '" + manifest.entrypoint + "' escapes the plugin directory '"
+                      + request.pluginDir + "'" );
+            break;
         }
         break;
     }
@@ -305,6 +336,13 @@ bool PluginManifestValidator::validate( const PluginManifest &manifest,
         if ( manifest.python.module.empty() )
             fail( PluginDiagnosticCode::ManifestMissingField, "python.module",
                   "python plugin is missing python.module" );
+        if ( !manifest.python.package.empty()
+             && PathPolicy::checkRelativeLexically( manifest.python.package )
+                    != PathPolicyRejection::Accepted )
+        {
+            fail( PluginDiagnosticCode::EntrypointOutsideRoot, "python.package",
+                  "python.package must be a relative path inside the plugin directory" );
+        }
         break;
     case PluginEntrypointKind::Manifest:
         if ( manifest.entrypoint.empty() )

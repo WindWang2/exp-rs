@@ -115,8 +115,16 @@ bool WorkspaceService::openStore( const QString &dbPath, QString *errorOut )
 {
     if ( m_store.isOpen() && m_store.meta( QStringLiteral( "db_path" ) ) != dbPath )
         m_store.close();  // path change: never bleed governed state across projects
+    const bool pathChanged = dbPath != m_storePath;
+    if ( pathChanged )
+        clearCachedDocument(); // a cached document belongs to ITS project only
     if ( !m_store.open( dbPath, errorOut ) )
+    {
+        m_storePath = dbPath;
         return false;
+    }
+    m_storePath = dbPath;
+    m_store.setMeta( QStringLiteral( "db_path" ), dbPath );
     m_store.setMeta( QStringLiteral( "opened_at" ),
                      QString::number( QDateTime::currentMSecsSinceEpoch() ) );
     return true;
@@ -127,6 +135,35 @@ void WorkspaceService::closeStore()
     if ( m_dataManager )
         bindDataManager( nullptr );
     m_store.close();
+}
+
+void WorkspaceService::clearCachedDocument()
+{
+    m_cachedProjectJson = QJsonObject();
+    m_v3Seen = false;
+}
+
+bool WorkspaceService::storeIntegrityOk() const
+{
+    if ( !m_store.isOpen() || m_store.isReadOnly() )
+        return false;
+    // A passing quick_check walks every b-tree — hundreds of ms per save at
+    // 100k entities, on the saving (GUI) thread. A positive probe is trusted
+    // for a short window (kProbeCacheMs); a failing probe is never cached.
+    // Corruption that appears inside the window still fails the store's own
+    // writes (checked COMMIT contract) and the NEXT save's probe.
+    static constexpr qint64 kProbeCacheMs = 2000;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if ( m_lastIntegrityOkMs >= 0 && now - m_lastIntegrityOkMs < kProbeCacheMs )
+        return true;
+    const GovernanceDiagnostic probe = m_store.integrityCheck();
+    if ( probe.severity != DiagnosticSeverity::Error )
+    {
+        m_lastIntegrityOkMs = now;
+        return true;
+    }
+    m_lastIntegrityOkMs = -1;
+    return false;
 }
 
 QString WorkspaceService::defaultStorePathFor( const QString &projectFile )
@@ -200,7 +237,9 @@ qint64 WorkspaceService::mirrorAllAssets( bool reconcileGhosts )
             batch.append( *row );
         }
         // Run anchors collected into the same batch (review P1-13: per-asset
-        // transactions defeated the bulk path).
+        // transactions defeated the bulk path). Truthful state policy
+        // (issue #754): existing rows keep the observer-recorded state; new
+        // rows start Unknown — the mirror never fabricates "Completed".
         if ( m_dataManager )
         {
             const std::optional<sicnu::data::DerivationRecord> record =
@@ -208,12 +247,29 @@ qint64 WorkspaceService::mirrorAllAssets( bool reconcileGhosts )
             if ( record && !record->workflowRunId.isEmpty() )
             {
                 RunRecord run;
-                run.id = record->workflowRunId;
-                run.workflowId = record->workflowId;
-                run.state = QStringLiteral( "Completed" );
-                if ( record->completedAtUtc.isValid() )
+                if ( const auto existing = runBatch.constFind( record->workflowRunId );
+                     existing != runBatch.constEnd() )
+                {
+                    run = existing.value();
+                }
+                else if ( const std::optional<RunRecord> stored =
+                              m_store.runById( record->workflowRunId ) )
+                {
+                    run = *stored;
+                }
+                else
+                {
+                    run.id = record->workflowRunId;
+                    run.state = QStringLiteral( "Unknown" );
+                }
+                if ( run.workflowId.isEmpty() )
+                    run.workflowId = record->workflowId;
+                if ( run.header.name.isEmpty() )
+                    run.header.name = record->workflowId.isEmpty()
+                                          ? record->workflowRunId
+                                          : record->workflowId;
+                if ( run.finishedMs == 0 && record->completedAtUtc.isValid() )
                     run.finishedMs = record->completedAtUtc.toMSecsSinceEpoch();
-                run.header.name = record->workflowId.isEmpty() ? record->workflowRunId : record->workflowId;
                 runBatch.insert( run.id, run );
                 runOutputBatch.append( qMakePair( record->workflowRunId, snapshot.id().toString() ) );
             }
@@ -392,18 +448,44 @@ void WorkspaceService::syncDerivationLineage( const AssetSnapshot &snapshot )
 
 void WorkspaceService::syncRunAnchors( const sicnu::data::DerivationRecord &record )
 {
-    // Producer anchor: workflow/run bookkeeping.
+    // Producer anchor: workflow/run bookkeeping. The run STATE is owned by
+    // the workflow runtime (mirrored through the coordinator's run-state
+    // observer); this asset-side anchor never fabricates one (issue #754):
+    // an existing row keeps its recorded state, a brand-new row starts
+    // "Unknown" until a real state arrives.
     if ( record.workflowRunId.isEmpty() )
         return;
     RunRecord run;
-    run.id = record.workflowRunId;
-    run.workflowId = record.workflowId;
-    run.state = QStringLiteral( "Completed" );
-    if ( record.completedAtUtc.isValid() )
+    if ( const std::optional<RunRecord> existing = m_store.runById( record.workflowRunId ) )
+        run = *existing;
+    else
+    {
+        run.id = record.workflowRunId;
+        run.state = QStringLiteral( "Unknown" );
+    }
+    if ( run.workflowId.isEmpty() )
+        run.workflowId = record.workflowId;
+    if ( run.header.name.isEmpty() )
+        run.header.name = record.workflowId.isEmpty() ? record.workflowRunId : record.workflowId;
+    if ( run.finishedMs == 0 && record.completedAtUtc.isValid() )
         run.finishedMs = record.completedAtUtc.toMSecsSinceEpoch();
-    run.header.name = record.workflowId.isEmpty() ? record.workflowRunId : record.workflowId;
-    ( void ) m_store.upsertRun( run );
-    m_store.linkRunOutput( record.workflowRunId, record.outputAssetId.toString() );
+    // Anchor write failures are surfaced through the durable audit channel —
+    // silently dropping them would recreate the exact defect class the
+    // checked-writer hardening (issue #758-1) removed from the store.
+    const auto upserted = m_store.upsertRun( run );
+    const auto linked = m_store.linkRunOutput( record.workflowRunId, record.outputAssetId.toString() );
+    if ( !upserted || !linked )
+    {
+        qWarning( "WorkspaceService: run anchor write failed for %s (upsert=%s link=%s)",
+                  qPrintable( record.workflowRunId ),
+                  upserted ? "ok" : "failed",
+                  linked ? "ok" : "failed" );
+        audit( QStringLiteral( "system" ), QStringLiteral( "run.anchor_failed" ),
+               QStringLiteral( "run" ), record.workflowRunId,
+               QJsonObject{ { QLatin1String( "upsert" ), upserted.operator bool() },
+                            { QLatin1String( "link" ), linked.operator bool() },
+                            { QLatin1String( "asset" ), record.outputAssetId.toString() } } );
+    }
 }
 
 // --- asset enrichment ----------------------------------------------------------
@@ -561,7 +643,32 @@ QVector<ResultRecord> WorkspaceService::orphanResults() const
 
 void WorkspaceService::recordRun( const RunRecord &run )
 {
-    ( void ) m_store.upsertRun( run );
+    // Mirror merge (issue #754): a lifecycle transition carries the run's
+    // identity and state, not its whole document — everything the transition
+    // did not state is preserved from the stored row, so a terminal update
+    // can never zero out started_ms or wipe definition/summary/metadata/tags
+    // (including data restored from the v3 project document).
+    RunRecord effective = run;
+    if ( const std::optional<RunRecord> existing = m_store.runById( run.id ) )
+    {
+        if ( effective.startedMs == 0 )
+            effective.startedMs = existing->startedMs;
+        if ( effective.finishedMs == 0 )
+            effective.finishedMs = existing->finishedMs;
+        if ( effective.workflowId.isEmpty() )
+            effective.workflowId = existing->workflowId;
+        if ( effective.header.name.isEmpty() )
+            effective.header.name = existing->header.name;
+        if ( effective.definition.isEmpty() )
+            effective.definition = existing->definition;
+        if ( effective.summary.isEmpty() )
+            effective.summary = existing->summary;
+        if ( effective.header.metadata.isEmpty() )
+            effective.header.metadata = existing->header.metadata;
+        if ( effective.header.tags.isEmpty() )
+            effective.header.tags = existing->header.tags;
+    }
+    ( void ) m_store.upsertRun( effective );
     emit entityChanged( QStringLiteral( "run" ), run.id );
 }
 
@@ -907,18 +1014,61 @@ QJsonObject WorkspaceService::toProjectJson() const
     // Downgrade guard (review P0): remember the last serialized document so a
     // later save with the store unavailable can re-persist governed state.
     m_cachedProjectJson = root;
+    m_v3Seen = true;
     return root;
 }
 
 QVector<Diagnostic> WorkspaceService::fromProjectJson( const QJsonObject &root )
 {
     QVector<Diagnostic> diagnostics;
-    // The project document is authoritative on read: stale local entity rows
-    // (deleted elsewhere, DB restored from backup) must not resurrect.
-    // Document-owned tables are cleared; the derived asset mirror and lineage
-    // edges are kept (they are rebuilt from the DataManager, not the doc).
-    ( void ) m_store.clearDocumentEntities();
+    // A parsed v3 document marks the session: a later save must never silently
+    // downgrade this project to v1 (issue #746), even when the store below is
+    // unavailable — the cached document is re-persisted instead.
+    m_v3Seen = true;
     m_cachedProjectJson = root;
+
+    // Failure channel (issue #752): every store write is checked and
+    // aggregated into a workspace.restore_failed diagnostic. Forward
+    // tolerance stays explicit — a closed store degrades the restore to a
+    // cached-document-only read; a read-only store attempts the writes so
+    // the failures are counted and reported, never silent.
+    const bool storeOpen = m_store.isOpen();
+    if ( !storeOpen )
+    {
+        diagnostics.append( Diagnostic{
+            QStringLiteral( "workspace.store_unavailable" ),
+            QStringLiteral( "governance store is not open; governed state was cached "
+                            "from the document and was NOT restored into the store" ),
+            DiagnosticSeverity::Warning } );
+    }
+    else if ( m_store.isReadOnly() )
+    {
+        diagnostics.append( Diagnostic{
+            QStringLiteral( "workspace.store_read_only" ),
+            QStringLiteral( "governance store is read-only (newer schema); governed "
+                            "state cannot be restored into the store" ),
+            DiagnosticSeverity::Warning } );
+    }
+    else
+    {
+        // The project document is authoritative on read: stale local entity
+        // rows (deleted elsewhere, DB restored from backup) must not
+        // resurrect. Document-owned tables are cleared; the derived asset
+        // mirror and lineage edges are kept (they are rebuilt from the
+        // DataManager, not the doc).
+        const Result<void> cleared = m_store.clearDocumentEntities();
+        if ( !cleared )
+            diagnostics.append( Diagnostic{
+                QStringLiteral( "workspace.restore_failed" ),
+                QStringLiteral( "could not clear stale governed rows before restore: %1" )
+                    .arg( cleared.diagnostics().isEmpty()
+                              ? QStringLiteral( "unknown store error" )
+                              : cleared.diagnostics().first().message ),
+                DiagnosticSeverity::Warning } );
+    }
+
+    qint64 failedDatasets = 0, failedResults = 0, failedRuns = 0, failedExperiments = 0,
+           failedSmart = 0, failedExports = 0, failedMappings = 0, failedTags = 0;
 
     // Review P2-12: unknown top-level sections are reported, then skipped —
     // forward tolerance is explicit, not silent.
@@ -963,7 +1113,8 @@ QVector<Diagnostic> WorkspaceService::fromProjectJson( const QJsonObject &root )
         ds.header.metadata = o.value( QLatin1String( "metadata" ) ).toObject();
         for ( const QJsonValue &m : o.value( QLatin1String( "members" ) ).toArray() )
             ds.memberAssetIds.append( m.toString() );
-        ( void ) m_store.upsertDataset( ds );
+        if ( storeOpen && !m_store.upsertDataset( ds ) )
+            ++failedDatasets;
     }
 
     // Results.
@@ -1012,7 +1163,8 @@ QVector<Diagnostic> WorkspaceService::fromProjectJson( const QJsonObject &root )
             art.sizeBytes = ao.value( QLatin1String( "size" ) ).toInt( -1 );
             r.artifacts.append( art );
         }
-        ( void ) m_store.upsertResult( r );
+        if ( storeOpen && !m_store.upsertResult( r ) )
+            ++failedResults;
     }
 
     // Runs.
@@ -1029,7 +1181,8 @@ QVector<Diagnostic> WorkspaceService::fromProjectJson( const QJsonObject &root )
         run.startedMs = o.value( QLatin1String( "startedMs" ) ).toInt( 0 );
         run.finishedMs = o.value( QLatin1String( "finishedMs" ) ).toInt( 0 );
         run.summary = o.value( QLatin1String( "summary" ) ).toObject();
-        ( void ) m_store.upsertRun( run );
+        if ( storeOpen && !m_store.upsertRun( run ) )
+            ++failedRuns;
     }
 
     // Experiments.
@@ -1052,7 +1205,8 @@ QVector<Diagnostic> WorkspaceService::fromProjectJson( const QJsonObject &root )
         }
         for ( const QJsonValue &rv : o.value( QLatin1String( "runs" ) ).toArray() )
             e.runIds.append( rv.toString() );
-        ( void ) m_store.upsertExperiment( e );
+        if ( storeOpen && !m_store.upsertExperiment( e ) )
+            ++failedExperiments;
     }
 
     // Smart collections.
@@ -1069,11 +1223,12 @@ QVector<Diagnostic> WorkspaceService::fromProjectJson( const QJsonObject &root )
         for ( const QJsonValue &pv : o.value( QLatin1String( "predicates" ) ).toArray() )
         {
             const QJsonObject po = pv.toObject();
-            c.predicates.append( SmartPredicate{ po.value( QLatin1String( "field" ) ).toString(),
-                                                  po.value( QLatin1String( "op" ) ).toString(),
-                                                  po.value( QLatin1String( "value" ) ).toString() } );
+                c.predicates.append( SmartPredicate{ po.value( QLatin1String( "field" ) ).toString(),
+                                                     po.value( QLatin1String( "op" ) ).toString(),
+                                                     po.value( QLatin1String( "value" ) ).toString() } );
         }
-        ( void ) m_store.upsertSmartCollection( c );
+        if ( storeOpen && !m_store.upsertSmartCollection( c ) )
+            ++failedSmart;
     }
 
     // Exports.
@@ -1089,7 +1244,8 @@ QVector<Diagnostic> WorkspaceService::fromProjectJson( const QJsonObject &root )
         e.target = o.value( QLatin1String( "target" ) ).toString();
         e.resultId = o.value( QLatin1String( "resultId" ) ).toString();
         e.header.name = o.value( QLatin1String( "name" ) ).toString();
-        ( void ) m_store.upsertExport( e );
+        if ( storeOpen && !m_store.upsertExport( e ) )
+            ++failedExports;
     }
 
     // Path mappings.
@@ -1101,7 +1257,10 @@ QVector<Diagnostic> WorkspaceService::fromProjectJson( const QJsonObject &root )
         m.fromPath = o.value( QLatin1String( "from" ) ).toString();
         m.toPath = o.value( QLatin1String( "to" ) ).toString();
         if ( !m.fromPath.isEmpty() )
-            ( void ) m_store.upsertPathMapping( m );
+        {
+            if ( storeOpen && !m_store.upsertPathMapping( m ) )
+                ++failedMappings;
+        }
     }
 
     // Tags of every entity kind.
@@ -1113,10 +1272,33 @@ QVector<Diagnostic> WorkspaceService::fromProjectJson( const QJsonObject &root )
         const QString tag = o.value( QLatin1String( "value" ) ).toString();
         if ( entityKind.isEmpty() || entityId.isEmpty() || tag.isEmpty() )
             continue;
-        ( void ) m_store.addTag( entityKind, entityId, tag );
+        if ( storeOpen && !m_store.addTag( entityKind, entityId, tag ) )
+            ++failedTags;
     }
 
     Q_UNUSED( skipUnknown );
+    {
+        const qint64 failedTotal = failedDatasets + failedResults + failedRuns + failedExperiments
+                                   + failedSmart + failedExports + failedMappings + failedTags;
+        if ( failedTotal > 0 )
+        {
+            diagnostics.append( Diagnostic{
+                QStringLiteral( "workspace.restore_failed" ),
+                QStringLiteral( "%1 governed entit(y/ies) could not be restored into the "
+                                "store (datasets=%2 results=%3 runs=%4 experiments=%5 "
+                                "smartCollections=%6 exports=%7 pathMappings=%8 tags=%9)" )
+                    .arg( failedTotal )
+                    .arg( failedDatasets )
+                    .arg( failedResults )
+                    .arg( failedRuns )
+                    .arg( failedExperiments )
+                    .arg( failedSmart )
+                    .arg( failedExports )
+                    .arg( failedMappings )
+                    .arg( failedTags ),
+                DiagnosticSeverity::Warning } );
+        }
+    }
     return diagnostics;
 }
 

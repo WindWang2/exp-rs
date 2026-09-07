@@ -1,0 +1,40 @@
+{
+  "id": "map-frame/small-multiples",
+  "version": 1,
+  "category": "map-frame",
+  "semantic_roles": [
+    "map.multiple"
+  ],
+  "description": "N synchronized small-multiple frames (temporal steps, scenarios) declared with a count and grid.",
+  "parameters": {
+    "count": 4,
+    "arrangement": "row",
+    "match": "all"
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "center"
+    ],
+    "margin_mm": 12,
+    "max_count_per_page": 1,
+    "min_size_mm": [
+      30,
+      30
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "time_series",
+      "scenario"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "per_frame_layers",
+      "source": "params.frame_layers",
+      "required": true
+    }
+  ]
+}

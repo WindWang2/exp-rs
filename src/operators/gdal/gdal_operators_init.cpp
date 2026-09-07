@@ -5,6 +5,7 @@
 #include "gdal_reproject_operator.h"
 #include "gdal_clip_operator.h"
 #include "gdal_polygonize_operator.h"
+#include "gdal_pansharpen_operator.h"
 #include "operators/framework/rs_operator_registry.h"
 
 namespace sicnu::operators::rs {
@@ -19,6 +20,7 @@ REGISTER_RS_OPERATOR(GdalOrthorectificationOperator, "gdal:orthorectification")
 REGISTER_RS_OPERATOR(GdalReprojectOperator, "gdal:reproject")
 REGISTER_RS_OPERATOR(GdalClipOperator, "gdal:clip")
 REGISTER_RS_OPERATOR(GdalPolygonizeOperator, "gdal:polygonize")
+REGISTER_RS_OPERATOR(GdalPanSharpenOperator, "gdal:pansharpen")
 
 void initBuiltinGdalOperators() {
   // Runs inside RSOperatorRegistry::instance()'s call_once chain (the
@@ -38,6 +40,7 @@ void initBuiltinGdalOperators() {
   add("gdal:reproject", [] { return std::make_unique<GdalReprojectOperator>(); });
   add("gdal:clip", [] { return std::make_unique<GdalClipOperator>(); });
   add("gdal:polygonize", [] { return std::make_unique<GdalPolygonizeOperator>(); });
+  add("gdal:pansharpen", [] { return std::make_unique<GdalPanSharpenOperator>(); });
 }
 
 } // namespace sicnu::operators::gdal

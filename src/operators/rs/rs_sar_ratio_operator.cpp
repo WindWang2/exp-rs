@@ -7,6 +7,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "processing/algorithms/sar/sar_ratio.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
@@ -166,14 +167,8 @@ Json::Value RsSarRatioOperator::run(const Json::Value& params,
     }
 
     // Declared sentinels on the analysis bands (NaN when undeclared).
-    bool hasNodataA = false;
-    const double nodataRawA = srcA.bandNoDataValue(bandA, &hasNodataA);
-    const float nodataA = hasNodataA ? static_cast<float>(nodataRawA)
-                                     : std::numeric_limits<float>::quiet_NaN();
-    bool hasNodataB = false;
-    const double nodataRawB = srcB.bandNoDataValue(bandB, &hasNodataB);
-    const float nodataB = hasNodataB ? static_cast<float>(nodataRawB)
-                                     : std::numeric_limits<float>::quiet_NaN();
+    const float nodataA = sicnu::rs::bandNoDataSentinel(srcA, bandA);
+    const float nodataB = sicnu::rs::bandNoDataSentinel(srcB, bandB);
 
     context.reportProgress(0.05, "Computing SAR pair metric");
     GdalStreamingOutput dst(QString::fromStdString(outputPath), srcA.width(), srcA.height(),

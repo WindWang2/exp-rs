@@ -3,11 +3,14 @@
 
 #include "exprs/plugin_diagnostics.h"
 #include "exprs/plugin_registry.h"
+#include "exprs/plugin_ui.h"
+#include "plugins/framework/plugin_ui_host.h"
 
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTextEdit>
@@ -111,13 +114,50 @@ void PluginManagerDialog::applyEnabled( bool enable )
         return;
     const QString pluginId =
         mTable->item( selection.first()->row(), 0 )->data( Qt::UserRole ).toString();
+    const std::string id = pluginId.toStdString();
+    exprs::PluginRegistry &registry = exprs::PluginRegistry::instance();
     if ( !enable )
     {
-        // Disabling a loaded native plugin also unloads it, so the state the
-        // user sees matches the persisted index.
-        exprs::PluginRegistry::instance().unload( pluginId.toStdString() );
+        // Disabling a loaded plugin also unloads it, so the state the user
+        // sees matches the persisted index. A refused unload (plugin still
+        // executing) must NOT flip the persisted flag either — the plugin
+        // stays loaded AND enabled, with the diagnostic surfaced.
+        if ( !registry.unload( id ) && registry.isLoaded( id ) )
+        {
+            QString inUse;
+            for ( const auto &item : registry.diagnostics().forPlugin( id ) )
+            {
+                if ( item.code == exprs::PluginDiagnosticCode::PluginInUse )
+                    inUse = QString::fromStdString( item.message );
+            }
+            QMessageBox::warning( this, tr( "插件正在使用中" ),
+                                  inUse.isEmpty() ? tr( "插件正在执行，无法禁用。" ) : inUse );
+            populate();
+            return;
+        }
+        registry.setEnabled( id, false );
     }
-    exprs::PluginRegistry::instance().setEnabled( pluginId.toStdString(), enable );
+    else
+    {
+        registry.setEnabled( id, true );
+        // Full round-trip (#755): re-run the same load + attach path the
+        // startup shell used, instead of only flipping the persisted state.
+        if ( registry.load( id ) )
+        {
+            auto *uiHost = sicnu::plugins::PluginUiHost::instance();
+            const exprs::LoadedPlugin *loaded = registry.loaded( id );
+            if ( loaded && loaded->uiContribution )
+                uiHost->attachCollectedUi(
+                    pluginId,
+                    static_cast<exprs::UiContributionV1 *>( loaded->uiContribution ) );
+        }
+        else if ( registry.record( id )
+                  && registry.record( id )->state == exprs::PluginState::Failed )
+        {
+            QMessageBox::warning( this, tr( "插件加载失败" ),
+                                  tr( "启用已保存，但插件加载失败——查看诊断信息。" ) );
+        }
+    }
     populate();
 }
 

@@ -9,6 +9,7 @@
 #include "python_ipc_server.h"
 #include "python_plugin_host.h"
 #include "python_worker_process_pool.h"
+#include "processing/framework/atomic_algorithm_registry.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -22,6 +23,16 @@
 static QString fixturePath( const QString &relPath )
 {
     return QDir( QStringLiteral( TEST_DATA_DIR ) ).filePath( relPath );
+}
+
+/// Pumps the event loop so async worker→host IPC (e.g. the
+/// processing.register_algorithm the daemon sends when an algorithm is
+/// registered) is delivered before assertions observe the C++ catalog.
+static void pumpLoop( int ms )
+{
+    QEventLoop loop;
+    QTimer::singleShot( ms, &loop, &QEventLoop::quit );
+    loop.exec();
 }
 
 int main( int argc, char *argv[] )
@@ -64,6 +75,11 @@ TEST_CASE( "PluginHost loads plugins headlessly without GUI widgets", "[core][pl
 
     CHECK( host.isPluginLoaded( QStringLiteral( "Sample Python Plugin" ) ) );
     CHECK( host.loadedPlugins().contains( QStringLiteral( "Sample Python Plugin" ) ) );
+    pumpLoop( 400 );
+    // Registered through the plugin's own bridge at classFactory time.
+    CHECK( sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(
+               QStringLiteral( "py:sample_echo" ).toStdString() )
+           != nullptr );
 
     SicnuPluginInterface *plugin = host.plugin( QStringLiteral( "Sample Python Plugin" ) );
     REQUIRE( plugin != nullptr );
@@ -96,6 +112,9 @@ TEST_CASE( "PluginHost loads plugins headlessly without GUI widgets", "[core][pl
                                                 QJsonObject(), regResult, regIsError, 10000 )
              == sicnu::python::isolated::AwaitStatus::Ok );
     REQUIRE( !regIsError );
+    // NOTE: this manual pool-node hook registers in the worker daemon only;
+    // its server has no bridge bound, so it intentionally does not touch the
+    // host catalog. The bridge path is covered by py:sample_echo below.
 
     QJsonObject execParams;
     execParams[QStringLiteral( "id" )] = QStringLiteral( "py:echo_test" );
@@ -116,6 +135,45 @@ TEST_CASE( "PluginHost loads plugins headlessly without GUI widgets", "[core][pl
     host.unloadAll();
     CHECK_FALSE( host.isPluginLoaded( QStringLiteral( "Sample Python Plugin" ) ) );
     CHECK( host.loadedPlugins().isEmpty() );
+    pumpLoop( 400 );
+    CHECK( sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(
+               QStringLiteral( "py:sample_echo" ).toStdString() )
+           == nullptr );
+
+    // Issue #755: the py: registration the plugin made through the IPC
+    // bridge must be revoked by unload — the catalog keeps no dead executor.
+    CHECK( sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(
+               QStringLiteral( "py:echo_test" ).toStdString() )
+           == nullptr );
+
+    // Full round-trip: reload -> the py: algorithm is registered again
+    // through the new bridge and actually executes; unload -> absent again.
+    // No restart, no dead entries, no duplicates.
+    host.loadPlugins( pluginDir );
+    CHECK( host.isPluginLoaded( QStringLiteral( "Sample Python Plugin" ) ) );
+    pumpLoop( 400 );
+    const auto reRegisteredAdapter =
+        sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(
+            QStringLiteral( "py:sample_echo" ).toStdString() );
+    REQUIRE( reRegisteredAdapter != nullptr );
+    {
+        Json::Value params;
+        params["value"] = 41;
+        const Json::Value result = reRegisteredAdapter->execute( params, nullptr, nullptr );
+        CHECK( result.isObject() );
+        // The adapter surfaces the IPC envelope: {status, result:{echo:{...}}}.
+        CHECK( result.get( "result", Json::Value( Json::objectValue ) )
+                  .get( "echo", Json::Value( Json::objectValue ) )
+                  .get( "value", 0 )
+                  .asInt()
+              == 41 );
+    }
+
+    host.unloadAll();
+    pumpLoop( 400 );
+    CHECK( sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(
+               QStringLiteral( "py:sample_echo" ).toStdString() )
+           == nullptr );
 #endif
 }
 

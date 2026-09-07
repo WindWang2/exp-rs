@@ -1,0 +1,35 @@
+{
+  "id": "legend/change-transition",
+  "version": 1,
+  "category": "legend",
+  "semantic_roles": [
+    "legend.change"
+  ],
+  "description": "From→To transition legend for change products (paired rows colored by transition class).",
+  "parameters": {
+    "title": "变化类型",
+    "arrow": "→"
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "right-rail"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 1
+  },
+  "compatibility": {
+    "requires_map_frame": true,
+    "result_types": [
+      "change",
+      "transition"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "transitions",
+      "source": "params.transitions",
+      "required": true
+    }
+  ]
+}

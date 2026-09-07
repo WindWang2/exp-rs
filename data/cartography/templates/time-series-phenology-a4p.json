@@ -1,0 +1,142 @@
+{
+  "id": "time-series-phenology-a4p",
+  "version": 1,
+  "extends": "time-series-phenology-a4l",
+  "description": "Phenology small multiples (2×2 temporal steps) with shared legend and series chart.",
+  "page": {
+    "width_mm": 210,
+    "height_mm": 297
+  },
+  "slots": [
+    {
+      "role": "title.main",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        12.0,
+        186.0,
+        12.0
+      ]
+    },
+    {
+      "role": "map.t1",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        30.0,
+        55.0,
+        94.5
+      ]
+    },
+    {
+      "role": "map.t2",
+      "accepts": "map_frames",
+      "rect_mm": [
+        73.0,
+        30.0,
+        55.0,
+        94.5
+      ]
+    },
+    {
+      "role": "map.t3",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        130.5,
+        55.0,
+        94.5
+      ]
+    },
+    {
+      "role": "map.t4",
+      "accepts": "map_frames",
+      "rect_mm": [
+        73.0,
+        130.5,
+        55.0,
+        94.5
+      ]
+    },
+    {
+      "role": "legend.primary",
+      "accepts": "legends",
+      "rect_mm": [
+        128.0,
+        30.0,
+        70.0,
+        189.0
+      ],
+      "content": {
+        "title": "图例"
+      }
+    },
+    {
+      "role": "chart.series",
+      "accepts": "charts",
+      "rect_mm": [
+        12.0,
+        225.0,
+        96,
+        40
+      ],
+      "content": {
+        "chart": {
+          "kind": "line",
+          "binding": {
+            "mode": "inline",
+            "data": [
+              {
+                "label": "1月",
+                "value": 0.31
+              },
+              {
+                "label": "4月",
+                "value": 0.55
+              },
+              {
+                "label": "7月",
+                "value": 0.78
+              },
+              {
+                "label": "10月",
+                "value": 0.44
+              }
+            ]
+          }
+        },
+        "title": "时序曲线"
+      }
+    },
+    {
+      "role": "scalebar.primary",
+      "accepts": "scale_bars",
+      "rect_mm": [
+        12.0,
+        273.0,
+        44,
+        9
+      ]
+    },
+    {
+      "role": "north_arrow.primary",
+      "accepts": "north_arrows",
+      "rect_mm": [
+        62.0,
+        272.0,
+        12,
+        12
+      ]
+    },
+    {
+      "role": "source.primary",
+      "accepts": "source_notes",
+      "rect_mm": [
+        88.0,
+        274.0,
+        110,
+        8
+      ]
+    }
+  ]
+}

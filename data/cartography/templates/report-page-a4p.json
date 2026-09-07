@@ -1,0 +1,197 @@
+{
+  "id": "report-page-a4p",
+  "version": 1,
+  "description": "A4 portrait report page with section label, map, charts, metadata and disclaimer.",
+  "page": {
+    "width_mm": 210,
+    "height_mm": 297
+  },
+  "style": {
+    "token_set": "scientific-light",
+    "medium": "print"
+  },
+  "slots": [
+    {
+      "role": "title.main",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        12.0,
+        186.0,
+        14
+      ]
+    },
+    {
+      "role": "text.section",
+      "accepts": "labels",
+      "rect_mm": [
+        12.0,
+        28.0,
+        186.0,
+        7
+      ],
+      "content": {
+        "text": "1 · 研究区与数据",
+        "font": {
+          "size_pt": 11,
+          "bold": true
+        }
+      }
+    },
+    {
+      "role": "map.main",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        38.0,
+        186.0,
+        118.8
+      ]
+    },
+    {
+      "role": "legend.primary",
+      "accepts": "legends",
+      "rect_mm": [
+        138.0,
+        42.0,
+        60.0,
+        110.8
+      ],
+      "content": {
+        "title": "图例"
+      }
+    },
+    {
+      "role": "chart.statistics",
+      "accepts": "charts",
+      "rect_mm": [
+        12.0,
+        162.8,
+        120,
+        84.2
+      ],
+      "content": {
+        "chart": {
+          "kind": "bar",
+          "binding": {
+            "mode": "inline",
+            "data": [
+              {
+                "label": "forest",
+                "value": 42
+              },
+              {
+                "label": "crop",
+                "value": 27
+              },
+              {
+                "label": "water",
+                "value": 12
+              },
+              {
+                "label": "built",
+                "value": 9
+              }
+            ]
+          }
+        },
+        "title": "类面积"
+      }
+    },
+    {
+      "role": "chart.metrics",
+      "accepts": "charts",
+      "rect_mm": [
+        138.0,
+        162.8,
+        60.0,
+        34.0
+      ],
+      "content": {
+        "chart": {
+          "kind": "metric",
+          "binding": {
+            "mode": "inline",
+            "data": [
+              {
+                "label": "OA",
+                "value": 0.91
+              },
+              {
+                "label": "Kappa",
+                "value": 0.87
+              },
+              {
+                "label": "F1",
+                "value": 0.89
+              }
+            ]
+          }
+        },
+        "title": "精度"
+      }
+    },
+    {
+      "role": "text.metadata",
+      "accepts": "labels",
+      "rect_mm": [
+        12.0,
+        267.0,
+        186.0,
+        8
+      ],
+      "content": {
+        "text": "Sensor: -- · Date: -- · CRS: --\nProcessing: --",
+        "font": {
+          "size_pt": 7,
+          "bold": false
+        }
+      }
+    },
+    {
+      "role": "scalebar.primary",
+      "accepts": "scale_bars",
+      "rect_mm": [
+        14.0,
+        255.0,
+        44,
+        9
+      ]
+    },
+    {
+      "role": "north_arrow.primary",
+      "accepts": "north_arrows",
+      "rect_mm": [
+        64.0,
+        253.0,
+        12,
+        12
+      ]
+    },
+    {
+      "role": "text.disclaimer",
+      "accepts": "labels",
+      "rect_mm": [
+        12.0,
+        278.0,
+        186.0,
+        5
+      ],
+      "content": {
+        "text": "本图仅供研究使用 / For research use only.",
+        "font": {
+          "size_pt": 7,
+          "color": "text_secondary"
+        }
+      }
+    }
+  ],
+  "suitable_tasks": [
+    "report"
+  ],
+  "product_type": "report",
+  "recommended_components": [
+    "north-arrow/minimal",
+    "grid/graticule"
+  ]
+}

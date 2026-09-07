@@ -1,0 +1,124 @@
+{
+  "id": "crop-monitoring-a4l",
+  "version": 1,
+  "description": "Crop monitoring map with phenology time-series chart and class legend.",
+  "page": {
+    "width_mm": 297,
+    "height_mm": 210
+  },
+  "style": {
+    "token_set": "scientific-light",
+    "medium": "print"
+  },
+  "slots": [
+    {
+      "role": "map.main",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        30.0,
+        203.0,
+        144.0
+      ]
+    },
+    {
+      "role": "title.main",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        12.0,
+        273.0,
+        12.0
+      ]
+    },
+    {
+      "role": "legend.primary",
+      "accepts": "legends",
+      "rect_mm": [
+        215.0,
+        30.0,
+        70.0,
+        94.0
+      ],
+      "content": {
+        "title": "图例"
+      }
+    },
+    {
+      "role": "scalebar.primary",
+      "accepts": "scale_bars",
+      "rect_mm": [
+        14.0,
+        182.0,
+        48,
+        10
+      ]
+    },
+    {
+      "role": "north_arrow.primary",
+      "accepts": "north_arrows",
+      "rect_mm": [
+        68.0,
+        182.0,
+        12,
+        12
+      ]
+    },
+    {
+      "role": "source.primary",
+      "accepts": "source_notes",
+      "rect_mm": [
+        88.0,
+        184.0,
+        177.0,
+        8
+      ]
+    },
+    {
+      "role": "chart.series",
+      "accepts": "charts",
+      "rect_mm": [
+        215.0,
+        130.0,
+        70.0,
+        44.0
+      ],
+      "content": {
+        "chart": {
+          "kind": "line",
+          "binding": {
+            "mode": "inline",
+            "data": [
+              {
+                "label": "1月",
+                "value": 0.31
+              },
+              {
+                "label": "4月",
+                "value": 0.55
+              },
+              {
+                "label": "7月",
+                "value": 0.78
+              },
+              {
+                "label": "10月",
+                "value": 0.44
+              }
+            ]
+          }
+        },
+        "title": "物候曲线"
+      }
+    }
+  ],
+  "suitable_tasks": [
+    "crop",
+    "agriculture"
+  ],
+  "product_type": "crop",
+  "recommended_components": [
+    "north-arrow/minimal",
+    "grid/graticule"
+  ]
+}

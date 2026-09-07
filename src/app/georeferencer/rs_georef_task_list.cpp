@@ -1,5 +1,7 @@
 #include "rs_georef_task_list.h"
 
+#include "design_tokens.h"
+
 #include <QAbstractItemView>
 #include <QColor>
 #include <QItemSelectionModel>
@@ -323,18 +325,23 @@ QString RsGeorefTaskList::statusLabel( Status s )
 
 QColor RsGeorefTaskList::statusColor( Status s )
 {
+  // Shared task-state palette (Milestone F): the token layer owns these
+  // values; RsJobPanel renders the same roles from the same source.
+  // Static method: probe the application palette (applyDarkPalette keeps it
+  // in sync with the active theme).
+  const bool dark = SicnuUi::Tokens::themeIsDark( nullptr );
   switch ( s )
   {
     case Status::Running:
-      return QColor( QStringLiteral( "#0969da" ) );
+      return SicnuUi::Tokens::statusRunning( dark );
     case Status::Success:
-      return QColor( QStringLiteral( "#1a7f37" ) );
+      return SicnuUi::Tokens::statusOk( dark );
     case Status::Failed:
-      return QColor( QStringLiteral( "#cf222e" ) );
+      return SicnuUi::Tokens::statusError( dark );
     case Status::Cancelled:
-      return QColor( QStringLiteral( "#6e7781" ) );
+      return SicnuUi::Tokens::statusIdle( dark );
   }
-  return Qt::black;
+  return SicnuUi::Tokens::statusIdle( dark );
 }
 
 void RsGeorefTaskList::rebuildTable()

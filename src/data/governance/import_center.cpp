@@ -203,8 +203,15 @@ bool ImportCenter::startScan( const ImportScanOptions &options )
         const int batch = qMax( 1, opts.registrationBatch );
         for ( int offset = 0; offset < candidates.size(); offset += batch )
         {
+            // Cancel is a control-flow signal at every batch boundary, not a
+            // report label (issue #753): a cancelled scan stops registering
+            // and keeps a truthful partial tally, mirroring the discovery
+            // loop above.
             if ( m_cancel.load() )
+            {
                 report.cancelled = true;
+                break;
+            }
             QStringList chunk;
             const int end = qMin( offset + batch, candidates.size() );
             for ( int i = offset; i < end; ++i )

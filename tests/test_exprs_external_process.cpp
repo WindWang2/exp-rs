@@ -3,8 +3,13 @@
 
 #include "exprs/external_process.h"
 
+#include <filesystem>
 #include <fstream>
+#ifdef _WIN32
+#include <cstdlib> // _exit
+#else
 #include <unistd.h>
+#endif
 
 using namespace exprs;
 
@@ -99,4 +104,108 @@ TEST_CASE( "external process reports exec failures", "[sdk][external]" )
     const auto result = ExternalProcess::run( request );
     REQUIRE_FALSE( result.exitedCleanly() );
     REQUIRE_FALSE( result.error.empty() );
+}
+
+TEST_CASE( "workspace effect policy contains resolved execution effects (issue #757)",
+           "[sdk][external][policy]" )
+{
+    // Env var is process-global: save/restore around the whole test.
+    const char *saved = ::getenv( "SICNU_MCP_WORKSPACE" );
+    const std::string savedValue = saved ? saved : "";
+    auto setWorkspace = []( const char *value ) {
+        if ( value )
+            ::setenv( "SICNU_MCP_WORKSPACE", value, 1 );
+        else
+            ::unsetenv( "SICNU_MCP_WORKSPACE" );
+    };
+    struct Restore
+    {
+        ~Restore()
+        {
+            if ( !savedValue.empty() )
+                ::setenv( "SICNU_MCP_WORKSPACE", savedValue.c_str(), 1 );
+            else
+                ::unsetenv( "SICNU_MCP_WORKSPACE" );
+        }
+        const char *saved;
+        const std::string &savedValue;
+    } restore{ saved, savedValue };
+
+    namespace fs = std::filesystem;
+    const std::string root = "/tmp/exprs_test_ws_root";
+    const std::string outside = "/tmp/exprs_test_ws_outside";
+    fs::remove_all( root );
+    fs::remove_all( outside );
+    fs::create_directories( root + "/inside" );
+    fs::create_directories( outside );
+    setWorkspace( root.c_str() );
+
+    auto runEcho = []( const std::string &cwd, std::vector<std::string> extraArgs = {},
+                       std::vector<std::string> allowedRoots = {} ) {
+        ExternalProcessRequest request;
+        request.argv = { "/bin/echo", "-n", "ok" };
+        for ( const std::string &argument : extraArgs )
+            request.argv.push_back( argument );
+        request.workingDirectory = cwd;
+        request.additionalAllowedRoots = allowedRoots;
+        return ExternalProcess::run( request );
+    };
+
+    SECTION( "no workspace policy: escapes are none of the policy's business" )
+    {
+        setWorkspace( nullptr );
+        const auto result = runEcho( outside );
+        REQUIRE( result.exitedCleanly() );
+        REQUIRE_FALSE( result.refusedByPolicy );
+    }
+    SECTION( "working directory inside the root runs" )
+    {
+        const auto result = runEcho( root + "/inside" );
+        REQUIRE( result.exitedCleanly() );
+        REQUIRE_FALSE( result.refusedByPolicy );
+    }
+    SECTION( "manifest-constant working directory outside the root is refused before spawn" )
+    {
+        const auto result = runEcho( outside );
+        REQUIRE_FALSE( result.started );
+        REQUIRE( result.refusedByPolicy );
+        REQUIRE( result.error.find( "workspace_escape" ) != std::string::npos );
+    }
+    SECTION( "argv path outside the root is refused" )
+    {
+        const auto result = runEcho( root, { "--output", outside + "/x.txt" } );
+        REQUIRE_FALSE( result.started );
+        REQUIRE( result.refusedByPolicy );
+    }
+    SECTION( "argv path inside the root passes" )
+    {
+        const auto result = runEcho( root, { "--output", root + "/inside/x.txt" } );
+        REQUIRE( result.exitedCleanly() );
+    }
+    SECTION( "additional allowed root (plugin dir) passes" )
+    {
+        const auto result =
+            runEcho( root, { "--payload", outside + "/payload.bin" }, { outside } );
+        REQUIRE( result.exitedCleanly() );
+    }
+    SECTION( "env value pointing outside the root is refused" )
+    {
+        ExternalProcessRequest request;
+        request.argv = { "/bin/echo", "-n", "ok" };
+        request.workingDirectory = root;
+        request.environment["HOME"] = outside;
+        const auto result = ExternalProcess::run( request );
+        REQUIRE_FALSE( result.started );
+        REQUIRE( result.refusedByPolicy );
+        REQUIRE( result.error.find( "environment" ) != std::string::npos );
+    }
+    SECTION( "relative .. argument escaping the contained cwd is refused" )
+    {
+        const auto result = runEcho( root + "/inside", { "../../../etc/passwd" } );
+        REQUIRE_FALSE( result.started );
+        REQUIRE( result.refusedByPolicy );
+    }
+
+    fs::remove_all( root );
+    fs::remove_all( outside );
 }

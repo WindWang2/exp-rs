@@ -6,6 +6,7 @@
 #include <QProcess>
 #include <QString>
 
+#include <atomic>
 #include <thread>
 
 namespace sicnu::processing
@@ -13,6 +14,10 @@ namespace sicnu::processing
 namespace
 {
 constexpr int kProtocolVersion = 1;
+
+// Process-unique job id: two hosts starting in the same clock tick used to
+// collide on the timestamp-only id.
+std::atomic<long> g_hostJobSeq{ 0 };
 
 bool writeLine( QProcess &process, const std::string &line )
 {
@@ -73,8 +78,8 @@ Json::Value runInLocalWorker( const QString &workerProgram,
                               std::chrono::milliseconds timeout,
                               std::chrono::milliseconds cancelGraceMs )
 {
-    const std::string jobId =
-        "w-" + std::to_string( std::chrono::steady_clock::now().time_since_epoch().count() );
+    const std::string jobId = "w-" + std::to_string( ++g_hostJobSeq ) + "-"
+                              + std::to_string( std::chrono::steady_clock::now().time_since_epoch().count() );
 
     QProcess process;
     process.setProgram( workerProgram );

@@ -3656,7 +3656,11 @@ bool QgsProject::writeProjectFile( const QString &filename )
 #endif
     if ( ok )
     {
-      // fsync the directory so the rename itself is durable.
+      // fsync the directory so the rename itself is durable. POSIX-only:
+      // Windows has no directory-fd equivalent (::open on a directory +
+      // _commit is undefined), and MoveFileWriteThrough-style durability
+      // for the containing directory is not available through the CRT.
+#ifndef Q_OS_WIN
       QDir targetDir = targetInfo.dir();
 #ifdef O_DIRECTORY
       const int dirFlags = O_RDONLY | O_DIRECTORY;
@@ -3666,13 +3670,10 @@ bool QgsProject::writeProjectFile( const QString &filename )
       int dfd = ::open( targetDir.absolutePath().toUtf8().constData(), dirFlags );
       if ( dfd >= 0 )
       {
-#ifdef Q_OS_WIN
-        ::_commit( dfd );
-#else
         ::fsync( dfd );
-#endif
         ::close( dfd );
       }
+#endif
     }
   }
 

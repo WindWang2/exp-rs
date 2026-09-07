@@ -1,0 +1,81 @@
+{
+  "id": "scientific-light",
+  "version": 1,
+  "description": "Default light scientific style for print-quality remote-sensing map products. Colorblind-safe qualitative palette (Okabe-Ito); ColorBrewer sequential/diverging ramps.",
+  "typography": {
+    "font_family": "Arial",
+    "cjk_fallbacks": ["Noto Sans CJK SC", "WenQuanYi Zen Hei", "Microsoft YaHei", "PingFang SC", "sans-serif"],
+    "styles": {
+      "title": { "size_pt": 20, "weight": "bold" },
+      "subtitle": { "size_pt": 13, "weight": "normal" },
+      "section": { "size_pt": 11, "weight": "bold" },
+      "body": { "size_pt": 9, "weight": "normal" },
+      "caption": { "size_pt": 8, "weight": "normal" },
+      "annotation": { "size_pt": 8, "weight": "normal" },
+      "source_note": { "size_pt": 7, "weight": "normal" },
+      "figure_label": { "size_pt": 10, "weight": "bold" },
+      "chart": { "size_pt": 9, "weight": "normal" }
+    }
+  },
+  "spacing": {
+    "margin_mm": 12,
+    "gutter_mm": 6,
+    "furniture_gap_mm": 4,
+    "padding_mm": 2
+  },
+  "lines": {
+    "hairline_mm": 0.2,
+    "frame_mm": 0.5,
+    "grid_mm": 0.25
+  },
+  "colors": {
+    "text": "#1a1a1a",
+    "text_secondary": "#595959",
+    "background": "#ffffff",
+    "panel": "#f2f2f2",
+    "frame": "#333333",
+    "grid": "#b3b3b3",
+    "water": "#a6cee3",
+    "accent": "#2c7fb8",
+    "success": "#2e7d32",
+    "warning": "#e08214",
+    "error": "#b2182b",
+    "uncertainty": "#762a83"
+  },
+  "palettes": {
+    "qualitative": ["#0072b2", "#e69f00", "#009e73", "#d55e00", "#cc79a7", "#56b4e9", "#f0e442", "#000000"],
+    "land_cover": ["#009e73", "#e69f00", "#d55e00", "#0072b2", "#cc79a7", "#f0e442", "#56b4e9", "#999999"],
+    "sequential": ["#f7fbff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#08519c", "#08306b"],
+    "sequential_green": ["#f7fcf5", "#e5f5e0", "#c7e9c0", "#a1d99b", "#74c476", "#41ab5d", "#238b45", "#006d2c", "#00441b"],
+    "diverging": ["#67001f", "#d6604d", "#f4a582", "#fddbc7", "#f7f7f7", "#d1e5f0", "#92c5de", "#4393c3", "#2166ac"],
+    "uncertainty": ["#fefefe", "#e0ecf4", "#a6bddb", "#7b8aa3", "#762a83"]
+  },
+  "furniture": {
+    "density": "standard",
+    "north_arrow_size_mm": 12,
+    "scale_bar_height_mm": 8,
+    "legend_line_height_mm": 4.5,
+    "inset_size_fraction": 0.25,
+    "colorbar_height_mm": 8
+  },
+  "chart": {
+    "font_pt": 9,
+    "palette": "qualitative",
+    "show_grid": true,
+    "width_px": 480,
+    "height_px": 320
+  },
+  "variants": {
+    "screen": {
+      "typography": {
+        "styles": {
+          "title": { "size_pt": 22 },
+          "source_note": { "size_pt": 9 },
+          "chart": { "size_pt": 11 }
+        }
+      },
+      "lines": { "frame_mm": 0.8 },
+      "chart": { "font_pt": 11, "width_px": 640, "height_px": 400 }
+    }
+  }
+}

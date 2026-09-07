@@ -6,8 +6,10 @@
 #include "data_provider_registry.h"
 #include "external_tool_operator.h"
 #include "plugin_agent_tool_provider.h"
+#include "plugin_execution_barrier.h"
 #include "plugin_model_runtime_bridge.h"
 #include "plugin_operator_adapter.h"
+#include "plugin_ui_host.h"
 
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -50,11 +52,19 @@ void PluginRuntimeHost::installManifestContributions()
     {
         if ( record.state != exprs::PluginState::Validated && record.state != exprs::PluginState::Loaded )
             continue;
-        for ( const exprs::ManifestOperator &op : record.manifest.operators )
-            installPluginOperator( record.id(), op );
-        installPluginAgentTools( record );
-        installPluginModelRuntimes( record );
+        installManifestContributionsFor( record.id() );
     }
+}
+
+void PluginRuntimeHost::installManifestContributionsFor( const std::string &pluginId )
+{
+    const exprs::PluginRecord *record = exprs::PluginRegistry::instance().record( pluginId );
+    if ( !record )
+        return;
+    for ( const exprs::ManifestOperator &op : record->manifest.operators )
+        installPluginOperator( pluginId, op );
+    installPluginAgentTools( *record );
+    installPluginModelRuntimes( *record );
 }
 
 void PluginRuntimeHost::installPluginOperator( const std::string &pluginId,
@@ -78,12 +88,25 @@ void PluginRuntimeHost::installPluginOperator( const std::string &pluginId,
     mOperators[op.id] = entry;
 
     // Lazy RSOperatorRegistry factory: registry consumers (JobEngine direct
-    // path) instantiate without touching AtomicAlgorithmRegistry.
+    // path) instantiate without touching AtomicAlgorithmRegistry. The direct
+    // path bypasses the adapter, so the wrapper acquires the execution lease
+    // at CREATE time and holds it for the operator instance's lifetime
+    // (created → run → destroyed), keeping the drain honest for #747.
     if ( entry.factory )
     {
         auto factory = entry.factory;
         sicnu::operators::RSOperatorRegistry::instance().registerOperator(
-            op.id, [factory]() { return factory(); } );
+            op.id,
+            [pluginId, factory]() -> std::unique_ptr<sicnu::operators::RSOperator> {
+                auto lease = PluginExecutionBarrier::instance().acquire( pluginId );
+                if ( !lease )
+                    return nullptr; // plugin unloading/unloaded: clean refusal
+                auto inner = factory();
+                if ( !inner )
+                    return nullptr;
+                return std::make_unique<LeaseHoldingOperator>( std::move( inner ),
+                                                               std::move( lease ) );
+            } );
     }
 
     // Lazy AtomicAlgorithmRegistry adapter: descriptor from manifest, binary
@@ -98,7 +121,7 @@ void PluginRuntimeHost::installPluginOperator( const std::string &pluginId,
             auto factory = PluginRuntimeHost::instance().resolveOperatorFactory( opId );
             return factory ? factory() : nullptr;
         };
-    auto adapter = std::make_shared<PluginOperatorAdapter>( op, lazyFactory, ensureLoaded );
+    auto adapter = std::make_shared<PluginOperatorAdapter>( op, pluginId, lazyFactory, ensureLoaded );
     sicnu::processing::AtomicAlgorithmRegistry::instance().registerAdapter( adapter );
 }
 
@@ -151,8 +174,39 @@ void PluginRuntimeHost::revokePlugin( const std::string &pluginId )
     revokePluginContributions( pluginId );
 }
 
+void PluginRuntimeHost::beginPluginDrain( const std::string &pluginId )
+{
+    PluginExecutionBarrier::instance().beginDrain( pluginId );
+}
+
+bool PluginRuntimeHost::waitPluginIdle( const std::string &pluginId, int timeoutMs )
+{
+    return PluginExecutionBarrier::instance().waitIdle( pluginId, timeoutMs );
+}
+
+void PluginRuntimeHost::cancelPluginDrain( const std::string &pluginId )
+{
+    PluginExecutionBarrier::instance().cancelDrain( pluginId );
+}
+
+void PluginRuntimeHost::pluginLoaded( const std::string &pluginId )
+{
+    // Fresh load after unload/refusal: reopen the barrier entry (new
+    // generation — pre-unload handles stay invalid) and restore the
+    // manifest-declared contributions the previous revoke removed (#755).
+    PluginExecutionBarrier::instance().open( pluginId );
+    std::lock_guard<std::mutex> lock( mMutex );
+    installManifestContributionsFor( pluginId );
+}
+
 void PluginRuntimeHost::revokePluginContributions( const std::string &pluginId )
 {
+    // Contract (issue #747): runs while the plugin library is still mapped,
+    // after the execution barrier drained. Order matters — UI contributions
+    // first (widgets/actions created by the plugin are destroyed here while
+    // its code can still service destructors and vtables), then registries.
+    PluginUiHost::instance()->releasePluginUi( QString::fromStdString( pluginId ) );
+
     std::lock_guard<std::mutex> lock( mMutex );
     for ( auto iterator = mOperators.begin(); iterator != mOperators.end(); )
     {
@@ -187,6 +241,16 @@ void PluginRuntimeHost::revokePluginContributions( const std::string &pluginId )
     mRegisteredAgentToolIds.erase(
         std::remove( mRegisteredAgentToolIds.begin(), mRegisteredAgentToolIds.end(), pluginId ),
         mRegisteredAgentToolIds.end() );
+    // Model runtime sessions cache PluginModelRuntimeAdapter instances that
+    // own raw plugin objects: release them BEFORE the library is unmapped
+    // (P0 review finding — cached sessions would otherwise outlive dlclose).
+#if defined( SICNU_HAS_OPENCV )
+    sicnu::operators::runtime::ModelRuntimeRegistry::instance().releaseAll();
+#endif
+    // Permanent close: stale adapters/executors held elsewhere must fail
+    // with a typed refusal, never call into the unmapped library. A later
+    // successful load reopens the entry with a fresh generation.
+    PluginExecutionBarrier::instance().close( pluginId );
 }
 
 bool PluginRuntimeHost::isPluginOperator( const std::string &operatorId ) const
@@ -237,15 +301,75 @@ bool PluginRuntimeHost::registerOperatorFactory(
         newEntry.pluginId = pluginId;
         newEntry.factory = factory;
         mOperators[operatorId] = std::move( newEntry );
-        sicnu::operators::RSOperatorRegistry::instance().registerOperator( operatorId,
-                                                                           mOperators[operatorId].factory );
+        auto wrappedFactory = mOperators[operatorId].factory;
+        const std::string owner = pluginId;
+        sicnu::operators::RSOperatorRegistry::instance().registerOperator(
+            operatorId,
+            [owner, wrappedFactory]() -> std::unique_ptr<sicnu::operators::RSOperator> {
+                auto lease = PluginExecutionBarrier::instance().acquire( owner );
+                if ( !lease )
+                    return nullptr;
+                auto inner = wrappedFactory();
+                if ( !inner )
+                    return nullptr;
+                return std::make_unique<LeaseHoldingOperator>( std::move( inner ),
+                                                               std::move( lease ) );
+            } );
         sicnu::processing::AtomicAlgorithmRegistry::instance().registerAdapter(
-            std::make_shared<PluginOperatorAdapter>( std::move( descriptor ), factory, nullptr ) );
+            std::make_shared<PluginOperatorAdapter>( std::move( descriptor ), pluginId, factory,
+                                                     nullptr ) );
         return true;
     }
     entry->second.factory = factory;
-    sicnu::operators::RSOperatorRegistry::instance().registerOperator( operatorId,
-                                                                       entry->second.factory );
+    // Lease-holding wrapper for the direct RSOperatorRegistry path (#747):
+    // same contract as installPluginOperator above.
+    {
+        auto wrappedFactory = entry->second.factory;
+        const std::string owner = pluginId;
+        sicnu::operators::RSOperatorRegistry::instance().registerOperator(
+            operatorId,
+            [owner, wrappedFactory]() -> std::unique_ptr<sicnu::operators::RSOperator> {
+                auto lease = PluginExecutionBarrier::instance().acquire( owner );
+                if ( !lease )
+                    return nullptr;
+                auto inner = wrappedFactory();
+                if ( !inner )
+                    return nullptr;
+                return std::make_unique<LeaseHoldingOperator>( std::move( inner ),
+                                                               std::move( lease ) );
+            } );
+    }
+    // A reload (enable round-trip, #755) re-registers through the sink AFTER
+    // unload revoked the catalog adapter: restore it so the atomic catalog
+    // reflects the contribution again.
+    if ( !sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( operatorId ) )
+    {
+        sicnu::processing::AlgorithmDescriptor descriptor;
+        if ( entry->second.manifest.id.empty() )
+        {
+            try
+            {
+                auto probe = factory();
+                if ( probe )
+                    descriptor = sicnu::processing::AlgorithmDescriptorBuilder::buildFromRsOperator( *probe );
+            }
+            catch ( ... )
+            {
+                return false;
+            }
+            if ( descriptor.id.empty() )
+                descriptor.id = operatorId;
+            sicnu::processing::AtomicAlgorithmRegistry::instance().registerAdapter(
+                std::make_shared<PluginOperatorAdapter>( std::move( descriptor ), pluginId,
+                                                         entry->second.factory, nullptr ) );
+        }
+        else
+        {
+            sicnu::processing::AtomicAlgorithmRegistry::instance().registerAdapter(
+                std::make_shared<PluginOperatorAdapter>( entry->second.manifest, pluginId,
+                                                         entry->second.factory, nullptr ) );
+        }
+    }
     return true;
 }
 

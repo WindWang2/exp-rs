@@ -1,5 +1,13 @@
 // tests/test_exprs_plugin_system.cpp — discovery, registry, policy, package
 #include <catch2/catch_test_macros.hpp>
+#ifdef _WIN32
+#include "exprs/msvc_posix_shim.h"
+static void portableSetenv(const char *key, const char *value)
+{
+    _putenv((std::string(key) + "=" + value).c_str());
+}
+#define setenv(k, v, o) portableSetenv(k, v)
+#endif
 #include <catch2/catch_approx.hpp>
 
 #include "exprs/external_process.h"
@@ -13,7 +21,11 @@
 #include <fstream>
 
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <cstdlib> // _exit
+#else
 #include <unistd.h>
+#endif
 
 using namespace exprs;
 

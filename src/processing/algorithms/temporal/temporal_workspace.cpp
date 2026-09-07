@@ -3,6 +3,7 @@
 
 #include "data/data_manager.h"
 #include "data/derivation_record.h"
+#include "data/artifact_store.h"
 #include "data/providers/gdal_raster_source_provider.h"
 
 #include <qgsdatasourceresolver.h>
@@ -351,11 +352,65 @@ void collectIdentityPathCandidates( const QVariantMap &params,
 }
 } // namespace
 
+namespace
+{
+
+// External-mutation guard (issue #749): registered (non-chained) inputs get
+// a store-time stat binding so a lookup refuses a cached entry whose input
+// bytes changed out-of-band. These helpers are shared by the input scan.
+void recordInputStat( const QString &path, QMap<QString, qint64> *inputSizes,
+                      QMap<QString, qint64> *inputMsecs )
+{
+  if ( !inputSizes || !inputMsecs || path.isEmpty() )
+    return;
+  const QFileInfo info( path );
+  if ( !info.isFile() )
+    return;
+  inputSizes->insert( path, info.size() );
+  inputMsecs->insert( path, info.lastModified().toMSecsSinceEpoch() );
+}
+
+// Content identity for registered inputs within a cost budget: small local
+// files are digested and the digest enters the fingerprint (contract v2
+// `lazyContentDigest` field), so a same-size/same-mtime rewrite within the
+// filesystem timestamp granularity still invalidates. Large files stay on
+// stat identity + the DataManager external-change watcher. 0 disables.
+qint64 inputDigestBudgetBytes()
+{
+  static const qint64 budget = []() {
+    const QString raw = qEnvironmentVariable( "SICNU_CACHE_INPUT_DIGEST_MAX_MB" );
+    if ( raw.isEmpty() )
+      return 64LL * 1024 * 1024;
+    bool ok = false;
+    const qint64 mb = raw.toLongLong( &ok );
+    return ( ok && mb >= 0 ) ? mb * 1024 * 1024 : 64LL * 1024 * 1024;
+  }();
+  return budget;
+}
+
+void applyContentIdentity( const QString &lookupPath, sicnu::data::TaggedDerivationInput *input,
+                           QMap<QString, qint64> *inputSizes, QMap<QString, qint64> *inputMsecs )
+{
+  recordInputStat( lookupPath, inputSizes, inputMsecs );
+  if ( !input || lookupPath.isEmpty() )
+    return;
+  static const qint64 budget = inputDigestBudgetBytes();
+  if ( budget <= 0 )
+    return;
+  const QFileInfo info( lookupPath );
+  if ( !info.isFile() || info.size() > budget )
+    return;
+  input->lazyContentDigest = sicnu::data::artifactContentDigest( lookupPath );
+}
+} // namespace
+
 bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
                                          const QVariantMap &params,
                                          QVector<sicnu::data::TaggedDerivationInput> *out,
                                          QString *reason,
-                                         const QStringList &chainedProducerKeys )
+                                         const QStringList &chainedProducerKeys,
+                                         QMap<QString, qint64> *inputSizes,
+                                         QMap<QString, qint64> *inputMsecs )
 {
   auto fail = [reason]( const QString &message ) {
     if ( reason )
@@ -443,6 +498,7 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
     input.revision = snapshot->revision();
     input.toPort = QStringLiteral( "input" );
     input.valueDomain = QStringLiteral( "raster" );
+    applyContentIdentity( lookupPath, &input, inputSizes, inputMsecs );
     out->append( input );
   }
 
@@ -469,6 +525,7 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
     input.revision = snapshot->revision();
     input.toPort = QStringLiteral( "scene" );
     input.valueDomain = QStringLiteral( "raster" );
+    applyContentIdentity( lookupPath, &input, inputSizes, inputMsecs );
     out->append( input );
   }
 

@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "exprs/external_process.h"
 
+#include "exprs/path_policy.h"
+
 #ifdef _WIN32
 // Windows MSVC build seam (Tier 3): POSIX fork/exec is unavailable. Provide a
 // stub so the compilation guard passes; external tools are unsupported here.
@@ -36,6 +38,7 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
 #include <unistd.h>
 
 #include <cerrno>
+#include <filesystem>
 #include <chrono>
 #include <map>
 #include <cstdlib>
@@ -229,6 +232,70 @@ bool drainFd( int fd, BoundedSink &sink )
     }
 }
 
+/// Issue #757: workspace effect policy. Validates the RESOLVED execution
+/// effects (working directory, argv paths, env-value paths) against the
+/// active workspace root — independent of who supplied the value (request
+/// parameter or manifest constant). Empty string = policy inactive/allowed.
+std::string workspaceEffectEscape( const ExternalProcessRequest &request )
+{
+    const std::string root = PathPolicy::workspaceRoot();
+    if ( root.empty() )
+        return {};
+    const auto allowed = [&]( const std::string &path ) {
+        if ( PathPolicy::resolvesInsideRoot( root, path ) )
+            return true;
+        for ( const std::string &extra : request.additionalAllowedRoots )
+        {
+            if ( !extra.empty() && PathPolicy::resolvesInsideRoot( extra, path ) )
+                return true;
+        }
+        return false;
+    };
+    if ( !request.workingDirectory.empty() && !allowed( request.workingDirectory ) )
+        return "working directory escapes the workspace policy: " + request.workingDirectory;
+    // The child resolves relative paths against ITS working directory
+    // (chdir before exec) — policy checks must use the same base, not the
+    // host process cwd.
+    const std::string base =
+        !request.workingDirectory.empty()
+            ? ( PathPolicy::isAbsolute( request.workingDirectory )
+                    ? request.workingDirectory
+                    : std::filesystem::current_path().generic_string() + "/"
+                          + request.workingDirectory )
+            : std::filesystem::current_path().generic_string();
+    for ( size_t index = 1; index < request.argv.size(); ++index )
+    {
+        const std::string &argument = request.argv[index];
+        if ( argument.empty() )
+            continue;
+        // Absolute arguments and relative arguments containing ".." name
+        // filesystem locations; both are policy-checked. Plain relative
+        // arguments resolve inside the (contained) working directory.
+        bool pathish = PathPolicy::isAbsolute( argument );
+        if ( !pathish && argument.find( ".." ) != std::string::npos )
+        {
+            pathish = true;
+            if ( !allowed( base + "/" + argument ) )
+                return "argument path escapes the workspace policy: " + argument;
+            continue;
+        }
+        if ( pathish && !allowed( argument ) )
+            return "argument path escapes the workspace policy: " + argument;
+    }
+    if ( request.environment.isObject() )
+    {
+        for ( const std::string &key : request.environment.getMemberNames() )
+        {
+            const Json::Value &value = request.environment[key];
+            if ( value.isString() && PathPolicy::isAbsolute( value.asString() )
+                 && !allowed( value.asString() ) )
+                return "environment value escapes the workspace policy: " + key + "="
+                       + value.asString();
+        }
+    }
+    return {};
+}
+
 } // namespace
 
 bool ExternalProcess::validateArgv( const std::vector<std::string> &argv, std::string &error )
@@ -285,6 +352,20 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     {
         result.error = programError;
         return result;
+    }
+
+    // Workspace effect policy (#757): refuses BEFORE spawning anything when
+    // a resolved effect escapes SICNU_MCP_WORKSPACE (or the declared extra
+    // roots). Manifest constants cannot bypass it — the resolved values are
+    // what get checked.
+    {
+        const std::string escape = workspaceEffectEscape( request );
+        if ( !escape.empty() )
+        {
+            result.refusedByPolicy = true;
+            result.error = "workspace_escape (E5005): " + escape;
+            return result;
+        }
     }
 
     int stdoutPipe[2] = { -1, -1 };

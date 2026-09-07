@@ -1,6 +1,28 @@
 // tests/test_placeholder_grammar.cpp
 #include <catch2/catch_test_macros.hpp>
 
+#ifdef _WIN32
+#include <cstdlib>
+static void portableSetenv(const char *key, const char *value)
+{
+    _putenv((std::string(key) + "=" + value).c_str());
+}
+static void portableUnsetenv(const char *key)
+{
+    _putenv((std::string(key) + "=").c_str());
+}
+#else
+#include <cstdlib>
+static void portableSetenv(const char *key, const char *value)
+{
+    setenv(key, value, 1);
+}
+static void portableUnsetenv(const char *key)
+{
+    unsetenv(key);
+}
+#endif
+
 #include "workflow/placeholder_grammar.h"
 
 #ifdef _WIN32
@@ -84,11 +106,11 @@ TEST_CASE("Placeholder Grammar - Parsing all supported syntax variants", "[workf
 
 TEST_CASE("Placeholder Grammar - Substitution and edge inference", "[workflow][grammar]") {
     SECTION("substitutePlaceholders replaces resolved tokens and environment variables") {
-        setenv("TEST_EXP_RS_WORK", "/tmp/exp_rs_workspace", 1);
+        portableSetenv("TEST_EXP_RS_WORK", "/tmp/exp_rs_workspace");
         // Scope guard: the variable was leaked into every later test in this
         // process (cross-test env pollution, #656).
         struct EnvGuard {
-            ~EnvGuard() { unsetenv("TEST_EXP_RS_WORK"); }
+            ~EnvGuard() { portableUnsetenv("TEST_EXP_RS_WORK"); }
         } envGuard;
         std::string input = "Process ${step1.output} with ${task.5.output} in ${TEST_EXP_RS_WORK}";
         std::string resolved = substitutePlaceholders(input, [](const PlaceholderRef &ref) {

@@ -12,6 +12,7 @@ set( EXPRS_FRAMEWORK_SOURCES
   external_tool_operator.cpp
   data_provider_registry.cpp
   plugin_agent_tool_provider.cpp
+  plugin_execution_barrier.cpp
   plugin_model_runtime_bridge.cpp
   plugin_runtime_host.cpp
   plugin_ui_host.cpp

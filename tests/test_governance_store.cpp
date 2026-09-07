@@ -247,6 +247,87 @@ TEST_CASE( "GovernanceStore datasets, results, runs, experiments round-trip", "[
     REQUIRE( store.experiments().isEmpty() );
 }
 
+TEST_CASE( "GovernanceStore asset removal keeps downstream lineage edges",
+           "[governance][store][lineage][issue758]" )
+{
+    QTemporaryDir dir;
+    GovernanceStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "gov.db" ) ) ) );
+
+    auto edge = [ & ]( const QString &out, const QString &in ) {
+        GovernanceStore::LineageEdge e;
+        e.outputAssetId = out;
+        e.inputAssetId = in;
+        e.operatorId = QStringLiteral( "rs:test" );
+        return e;
+    };
+    // Chain: raw -> inter (intermediate) -> final.
+    REQUIRE( store.addLineageEdges( { edge( "inter", "raw" ), edge( "final", "inter" ) } ).operator bool() );
+    REQUIRE( store.upsertAsset( makeAsset( "raw", "raw" ) ).operator bool() );
+    REQUIRE( store.upsertAsset( makeAsset( "inter", "inter" ) ).operator bool() );
+    REQUIRE( store.upsertAsset( makeAsset( "final", "final" ) ).operator bool() );
+
+    // Unload the intermediate: its own provenance goes with it, but the
+    // SURVIVING consumer (final) keeps the edge that explains its input
+    // (issue #758-6: both-direction deletion truncated downstream provenance).
+    REQUIRE( store.removeAsset( QStringLiteral( "inter" ) ).operator bool() );
+
+    // "final" still explains where it came from: the edge (final ← inter)
+    // survives even though the inter row is gone (upstream traversal returns
+    // the recorded input id).
+    const QVector<QVariantMap> upstream = store.lineageUpstream( QStringLiteral( "final" ) );
+    bool finalProvenanceSurvives = false;
+    for ( const QVariantMap &row : upstream )
+        finalProvenanceSurvives |= row.value( QStringLiteral( "assetId" ) ).toString() == QLatin1String( "inter" );
+    REQUIRE( finalProvenanceSurvives );
+    REQUIRE( store.directEdges( QStringLiteral( "final" ), true ).size() == 1 );
+}
+
+TEST_CASE( "GovernanceStore alias ownership is collision-checked symmetrically",
+           "[governance][store][assets][issue758]" )
+{
+    QTemporaryDir dir;
+    GovernanceStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "gov.db" ) ) ) );
+
+    GovernedAsset first = makeAsset( "a1", "one" );
+    first.aliases = QStringList{ QStringLiteral( "/data/shared-alias.tif" ) };
+    const auto firstResult = store.upsertAsset( first );
+    REQUIRE( firstResult.operator bool() );
+
+    // Second asset claims the SAME secondary alias: no silent steal — the
+    // existing owner keeps the alias and a diagnostic is surfaced.
+    GovernedAsset second = makeAsset( "a2", "two" );
+    second.aliases = QStringList{ QStringLiteral( "/data/shared-alias.tif" ) };
+    const auto secondResult = store.upsertAsset( second );
+    REQUIRE( secondResult.operator bool() );
+    bool collisionReported = false;
+    for ( const Diagnostic &d : secondResult.diagnostics() )
+        collisionReported |= d.code == QLatin1String( "store.alias_collision" );
+    REQUIRE( collisionReported );
+    REQUIRE( store.assetByPath( QStringLiteral( "/data/shared-alias.tif" ) )->assetId
+             == QLatin1String( "a1" ) );
+}
+
+TEST_CASE( "GovernanceStore entityCounts reports real totals past the page size",
+           "[governance][store][counts][issue758]" )
+{
+    QTemporaryDir dir;
+    GovernanceStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "gov.db" ) ) ) );
+
+    QVector<GovernedAsset> batch;
+    for ( int i = 0; i < GovernanceStore::kMaxPageSize + 37; ++i )
+        batch.append( makeAsset( QStringLiteral( "big%1" ).arg( i ), QStringLiteral( "b%1" ).arg( i ) ) );
+    REQUIRE( store.upsertAssets( batch ).operator bool() );
+
+    // Page-bounded listing clamps at the page size; entityCounts must not.
+    REQUIRE( store.allAssets( GovernanceStore::kMaxPageSize ).size()
+             == GovernanceStore::kMaxPageSize );
+    const GovernanceStore::EntityCounts counts = store.entityCounts();
+    REQUIRE( counts.assets == GovernanceStore::kMaxPageSize + 37 );
+}
+
 TEST_CASE( "GovernanceStore lineage queries are transitive and cycle-safe", "[governance][store][lineage]" )
 {
     QTemporaryDir dir;

@@ -77,15 +77,18 @@ ReproBundleExporter::ReproBundleExporter( sicnu::data::DataManager &dataManager,
 
 ReproBundleReport ReproBundleExporter::exportBundle( const ReproBundleOptions &options ) const
 {
+    // Local, mutable copy: the budget degradation below is bundle-scoped and
+    // must never mutate the caller's options struct (issue #758-7 const_cast UB).
+    ReproBundleOptions bundleOptions = options;
     ReproBundleReport report;
-    if ( options.outputDir.isEmpty() )
+    if ( bundleOptions.outputDir.isEmpty() )
     {
         report.warnings.append( QStringLiteral( "output directory is empty" ) );
         return report;
     }
-    if ( !QDir().mkpath( options.outputDir ) )
+    if ( !QDir().mkpath( bundleOptions.outputDir ) )
     {
-        report.warnings.append( QStringLiteral( "cannot create %1" ).arg( options.outputDir ) );
+        report.warnings.append( QStringLiteral( "cannot create %1" ).arg( bundleOptions.outputDir ) );
         return report;
     }
 
@@ -106,7 +109,7 @@ ReproBundleReport ReproBundleExporter::exportBundle( const ReproBundleOptions &o
         const std::optional<GovernedAsset> row = m_service.store().assetById( snapshot.id().toString() );
         if ( row )
         {
-            if ( options.mode != ReproBundleOptions::Mode::ReferenceOnly )
+            if ( bundleOptions.mode != ReproBundleOptions::Mode::ReferenceOnly )
                 input.insert( QStringLiteral( "contentFingerprint" ), row->contentFingerprint );
             if ( row->sizeBytes >= 0 )
                 input.insert( QStringLiteral( "sizeBytes" ), row->sizeBytes );
@@ -115,7 +118,7 @@ ReproBundleReport ReproBundleExporter::exportBundle( const ReproBundleOptions &o
             if ( !row->modality.isEmpty() )
                 input.insert( QStringLiteral( "modality" ), row->modality );
         }
-        if ( options.mode == ReproBundleOptions::Mode::Portable
+        if ( bundleOptions.mode == ReproBundleOptions::Mode::Portable
              && snapshot.storageKind() == sicnu::data::StorageKind::File )
         {
             const QString digest = WorkspaceService::contentFingerprint( snapshot.source().canonicalSource );
@@ -123,7 +126,7 @@ ReproBundleReport ReproBundleExporter::exportBundle( const ReproBundleOptions &o
             const QString relative = digest.isEmpty()
                                          ? QStringLiteral( "data/unhashed_%1" ).arg( inputArray.size() )
                                          : QStringLiteral( "data/%1.%2" ).arg( digest, suffix.isEmpty() ? QStringLiteral( "bin" ) : suffix );
-            const QString destination = QDir( options.outputDir ).filePath( relative );
+            const QString destination = QDir( bundleOptions.outputDir ).filePath( relative );
             const bool exists = QFileInfo::exists( destination );  // same digest = same content
             if ( exists || ( QDir().mkpath( QFileInfo( destination ).absolutePath() )
                              && QFile::copy( snapshot.source().canonicalSource, destination ) ) )
@@ -133,12 +136,12 @@ ReproBundleReport ReproBundleExporter::exportBundle( const ReproBundleOptions &o
                     const qint64 bytes = QFileInfo( destination ).size();
                     copiedBytes += bytes;
                     ++report.copiedCount;
-                    if ( copiedBytes > options.portableMaxBytes )
+                    if ( copiedBytes > bundleOptions.portableMaxBytes )
                     {
                         report.warnings.append(
                             QStringLiteral( "portable copy budget exceeded; remaining inputs are references" ) );
                         // Stop copying; the rest degrade to reference-only entries.
-                        const_cast<ReproBundleOptions &>( options ).mode = ReproBundleOptions::Mode::MetadataOnly;
+                        bundleOptions.mode = ReproBundleOptions::Mode::MetadataOnly;
                     }
                 }
                 input.insert( QStringLiteral( "bundlePath" ), relative );
@@ -149,7 +152,7 @@ ReproBundleReport ReproBundleExporter::exportBundle( const ReproBundleOptions &o
         inputArray.append( input );
         ++report.inputCount;
     }
-    writeJson( QDir( options.outputDir ).filePath( QStringLiteral( "inputs.json" ) ),
+    writeJson( QDir( bundleOptions.outputDir ).filePath( QStringLiteral( "inputs.json" ) ),
                QJsonObject{ { QLatin1String( "inputs" ), inputArray } }, &report.warnings );
 
     // ---- workflows ------------------------------------------------------------
@@ -166,7 +169,7 @@ ReproBundleReport ReproBundleExporter::exportBundle( const ReproBundleOptions &o
         workflowArray.append( runJson );
         ++report.workflowCount;
     }
-    writeJson( QDir( options.outputDir ).filePath( QStringLiteral( "workflows.json" ) ),
+    writeJson( QDir( bundleOptions.outputDir ).filePath( QStringLiteral( "workflows.json" ) ),
                QJsonObject{ { QLatin1String( "runs" ), workflowArray } }, &report.warnings );
 
     // ---- results --------------------------------------------------------------
@@ -200,7 +203,7 @@ ReproBundleReport ReproBundleExporter::exportBundle( const ReproBundleOptions &o
         resultArray.append( resultJson );
         ++report.resultCount;
     }
-    writeJson( QDir( options.outputDir ).filePath( QStringLiteral( "results.json" ) ),
+    writeJson( QDir( bundleOptions.outputDir ).filePath( QStringLiteral( "results.json" ) ),
                QJsonObject{ { QLatin1String( "results" ), resultArray } }, &report.warnings );
 
     // ---- provenance slice ------------------------------------------------------
@@ -220,31 +223,31 @@ ReproBundleReport ReproBundleExporter::exportBundle( const ReproBundleOptions &o
             edgeArray.append( edgeJson );
         }
     }
-    writeJson( QDir( options.outputDir ).filePath( QStringLiteral( "provenance.json" ) ),
+    writeJson( QDir( bundleOptions.outputDir ).filePath( QStringLiteral( "provenance.json" ) ),
                QJsonObject{ { QLatin1String( "edges" ), edgeArray } }, &report.warnings );
 
     // ---- manifest ---------------------------------------------------------------
     QJsonObject manifest;
     manifest.insert( QStringLiteral( "formatVersion" ), 1 );
     manifest.insert( QStringLiteral( "kind" ), QStringLiteral( "exp_rs_repro_bundle" ) );
-    manifest.insert( QStringLiteral( "mode" ), modeToString( options.mode ) );
+    manifest.insert( QStringLiteral( "mode" ), modeToString( bundleOptions.mode ) );
     manifest.insert( QStringLiteral( "createdAtUtc" ),
                      QDateTime::currentDateTimeUtc().toString( Qt::ISODateWithMs ) );
     manifest.insert( QStringLiteral( "projectId" ), m_service.store().meta( QStringLiteral( "project_id" ) ) );
     manifest.insert( QStringLiteral( "softwareVersion" ), QStringLiteral( "SICNU GEO RS workspace-3.0" ) );
-    if ( options.includeEnvironment )
+    if ( bundleOptions.includeEnvironment )
         manifest.insert( QStringLiteral( "environment" ), environmentSummary() );
     manifest.insert( QStringLiteral( "inputs" ), report.inputCount );
     manifest.insert( QStringLiteral( "workflows" ), report.workflowCount );
     manifest.insert( QStringLiteral( "results" ), report.resultCount );
-    writeJson( QDir( options.outputDir ).filePath( QStringLiteral( "manifest.json" ) ), manifest, &report.warnings );
+    writeJson( QDir( bundleOptions.outputDir ).filePath( QStringLiteral( "manifest.json" ) ), manifest, &report.warnings );
 
-    report.manifestPath = QDir( options.outputDir ).filePath( QStringLiteral( "manifest.json" ) );
+    report.manifestPath = QDir( bundleOptions.outputDir ).filePath( QStringLiteral( "manifest.json" ) );
     report.copiedBytes = copiedBytes;
     report.ok = report.warnings.isEmpty();
     m_service.audit( QStringLiteral( "export" ), QStringLiteral( "project.repro_bundle" ),
                      QStringLiteral( "workspace" ), QString(),
-                     QJsonObject{ { QLatin1String( "mode" ), modeToString( options.mode ) },
+                     QJsonObject{ { QLatin1String( "mode" ), modeToString( bundleOptions.mode ) },
                                   { QLatin1String( "inputs" ), report.inputCount } } );
     return report;
 }

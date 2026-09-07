@@ -15,6 +15,14 @@
  *     timeout/cancel the SIGTERM->SIGKILL ladder kills the process group.
  *   - No zombie leakage: every spawn is reaped via waitpid before run()
  *     returns.
+ *   - Workspace effect policy (issue #757): while SICNU_MCP_WORKSPACE is
+ *     set, the resolved working directory, every absolute/escaping path in
+ *     argv (except argv[0]) and every absolute path in manifest env values
+ *     must resolve inside the workspace root or additionalAllowedRoots —
+ *     otherwise run() refuses with refusedByPolicy=true BEFORE any spawn.
+ *     This is a PATH policy, not an OS sandbox: the executable resolved via
+ *     PATH is not confined, and an allowed-but-malicious tool can still
+ *     write inside the workspace.
  ***************************************************************************/
 #pragma once
 
@@ -39,6 +47,10 @@ struct ExternalProcessRequest
     std::function<bool()> isCancelled;
     /// Optional progress sink receiving stdout chunk offsets (bytes so far).
     std::function<void( long stdoutBytes, long stderrBytes )> onOutput;
+    /// Additional containment roots accepted beside the workspace root
+    /// (e.g. the owning plugin's own directory for bundled payloads). Only
+    /// consulted while the workspace policy is active (SICNU_MCP_WORKSPACE).
+    std::vector<std::string> additionalAllowedRoots;
 };
 
 struct ExternalProcessResult
@@ -49,6 +61,9 @@ struct ExternalProcessResult
     bool exitedCleanly() const { return started && exitSignal == 0 && exitCode == 0; }
     bool timedOut = false;
     bool cancelled = false;
+    /// True when the workspace-effect policy refused the spawn (E5005,
+    /// issue #757): nothing was executed. @p error carries the reason.
+    bool refusedByPolicy = false;
     bool truncatedStdout = false;
     bool truncatedStderr = false;
     std::string stdOut;        ///< bounded capture

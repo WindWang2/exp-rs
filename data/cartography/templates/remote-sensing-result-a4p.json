@@ -1,0 +1,88 @@
+{
+  "id": "remote-sensing-result-a4p",
+  "version": 1,
+  "extends": "remote-sensing-result-a4l",
+  "description": "Generic continuous remote-sensing result with sequential colorbar.",
+  "page": {
+    "width_mm": 210,
+    "height_mm": 297
+  },
+  "slots": [
+    {
+      "role": "map.main",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        30.0,
+        116.0,
+        231.0
+      ]
+    },
+    {
+      "role": "title.main",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        12.0,
+        186.0,
+        12.0
+      ]
+    },
+    {
+      "role": "legend.primary",
+      "accepts": "legends",
+      "rect_mm": [
+        128.0,
+        30.0,
+        70.0,
+        215.0
+      ],
+      "content": {
+        "title": "图例"
+      }
+    },
+    {
+      "role": "scalebar.primary",
+      "accepts": "scale_bars",
+      "rect_mm": [
+        14.0,
+        269.0,
+        48,
+        10
+      ]
+    },
+    {
+      "role": "north_arrow.primary",
+      "accepts": "north_arrows",
+      "rect_mm": [
+        68.0,
+        269.0,
+        12,
+        12
+      ]
+    },
+    {
+      "role": "source.primary",
+      "accepts": "source_notes",
+      "rect_mm": [
+        88.0,
+        271.0,
+        90.0,
+        8
+      ]
+    },
+    {
+      "role": "colorbar.primary",
+      "accepts": "colorbars",
+      "rect_mm": [
+        128.0,
+        251.0,
+        70.0,
+        10.0
+      ],
+      "content": {
+        "ramp": "sequential"
+      }
+    }
+  ]
+}

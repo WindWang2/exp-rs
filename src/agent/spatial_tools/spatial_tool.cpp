@@ -17,6 +17,10 @@
 #include "../cartography/cartography_tools.h"
 #include "../symbology/symbology_tools.h"
 #include "../commands/workspace_commands.h"
+#include "../harness/harness_tools.h"
+#include "../harness/grounding_tools.h"
+#include "../harness/plan_tools.h"
+#include "../harness/recipe_tools.h"
 
 namespace sicnu::agent::spatial_tools {
 
@@ -122,6 +126,15 @@ void SpatialToolRegistry::registerBuiltinTools()
   // Workspace Governance 3.0 (Platform 3.0): bounded project/asset/lineage/
   // result/run surfaces over the WorkspaceService.
   registerGovernanceTools();
+  // Harness 4.0: error taxonomy + tool manifest catalog surfaces.
+  harness::registerHarnessTools();
+  // Harness 4.0 grounding: data:understand + revision-stamped harness:context.
+  harness::registerGroundingTools();
+  // Harness 4.0 plan lifecycle: scientific preflight, plan compile, execute,
+  // run status with automatic verification and map confirmation.
+  harness::registerPlanTools();
+  // Harness 4.0 scientific recipes (metadata under data/agent/recipes).
+  harness::registerRecipeTools();
 }
 
 void SpatialToolRegistry::reset()

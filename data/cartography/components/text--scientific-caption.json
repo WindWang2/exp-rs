@@ -1,0 +1,35 @@
+{
+  "id": "text/scientific-caption",
+  "version": 1,
+  "category": "text",
+  "semantic_roles": [
+    "text.caption"
+  ],
+  "description": "Figure caption with number, e.g. 'Fig. 1 — Land cover 2024'. Styled from token 'caption'.",
+  "parameters": {
+    "font": {
+      "size_pt": 8
+    }
+  },
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": [
+      "bottom-center"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 6
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "publication"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "text",
+      "source": "params.caption",
+      "required": true
+    }
+  ]
+}

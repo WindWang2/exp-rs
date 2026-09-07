@@ -405,12 +405,6 @@ const QHash<QString, Entry> &catalog()
             "• SID (Spectral Information Divergence)：光谱信息散度\n"
             "【匹配 Match】对当前画布采集的像元光谱曲线与库内标准地物进行相似度排序。\n"
             "【导出/追加 Save】将当前像元光谱曲线以自定义名称和类别保存至光谱库。" } },
-        { QStringLiteral( "mosaic_panel" ),
-          { "影像镶嵌面板：多景栅格无缝拼接与重叠区融合",
-            "【文件列表】添加参与镶嵌的栅格数据，支持上下调整优先级。\n"
-            "【融合策略 Blend Mode】Last（覆盖）、First、Average（平均值）、Max/Min。\n"
-            "【色彩平衡 Color Balance】自动匹配相邻景的直方图，消除接缝反差。\n"
-            "【羽化 Feathering】重叠区边缘平滑过渡。" } },
         { QStringLiteral( "task_center" ),
           { "任务中心：异步任务进度监控与结果管理",
             "【任务列表】展示当前后台运行及排队的算法任务状态、实时进度条与耗时。\n"

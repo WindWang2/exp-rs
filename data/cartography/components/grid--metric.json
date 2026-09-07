@@ -1,0 +1,25 @@
+{
+  "id": "grid/metric",
+  "version": 1,
+  "category": "grid",
+  "semantic_roles": [
+    "grid.primary"
+  ],
+  "description": "Metric coordinate grid (meters) for projected frames (UTM/Gauss-Krüger sheets).",
+  "parameters": {
+    "interval_m": 10000
+  },
+  "layout_constraints": {
+    "anchor": "map-frame",
+    "preferred_positions": [],
+    "margin_mm": 0,
+    "max_count_per_page": 1
+  },
+  "compatibility": {
+    "requires_map_frame": true,
+    "crs_requirements": "projected"
+  },
+  "defaults": {
+    "interval": 10000
+  }
+}

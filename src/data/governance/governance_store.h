@@ -78,6 +78,14 @@ class GovernanceStore
     bool isOpen() const { return m_impl != nullptr; }
     bool isReadOnly() const;
     QString schemaVersion() const;
+    /// Path the store was opened with (remembered independently of the
+    /// writable gov_meta table so read-only stores report it too).
+    QString storePath() const { return m_storePath; }
+    /// Folds the WAL into the main DB file (PRAGMA wal_checkpoint(TRUNCATE))
+    /// so the DB file alone is safe to copy (backup/snapshot contract).
+    /// Returns false when the store is closed or the checkpoint could not be
+    /// completed — callers must then refuse to copy the DB alone.
+    bool checkpointForBackup();
 
     // --- assets -------------------------------------------------------------
     Result<void> upsertAsset( const GovernedAsset &asset );
@@ -91,6 +99,20 @@ class GovernanceStore
     /// Lightweight id scan for ghost reconciliation (no hydration).
     QVector<QString> assetIds() const;
     qint64 assetCount() const;
+    /// Real COUNT(*) totals for every entity family (issue #758-3: summary
+    /// counts derived from page-bounded listings clamped at the page size).
+    struct EntityCounts
+    {
+        qint64 assets = 0;
+        qint64 datasets = 0;
+        qint64 results = 0;
+        qint64 runs = 0;
+        qint64 experiments = 0;
+        qint64 smartCollections = 0;
+        qint64 exports = 0;
+        qint64 orphanResults = 0;
+    };
+    EntityCounts entityCounts() const;
 
     // --- tags (any entity kind) ---------------------------------------------
     Result<void> setTags( const QString &entityKind, const QString &entityId, const QStringList &tags );
@@ -131,7 +153,9 @@ class GovernanceStore
     Result<void> upsertRun( const RunRecord &run );
     std::optional<RunRecord> runById( const QString &runId ) const;
     QVector<RunRecord> runs( qint64 limit = kMaxPageSize ) const;
-    void linkRunOutput( const QString &runId, const QString &assetId );
+    /// Checked single link (issue #758-1): reports failure instead of dropping
+    /// the provenance anchor silently.
+    Result<void> linkRunOutput( const QString &runId, const QString &assetId );
     /// Batched run->output links (one transaction; bulk mirror path).
     Result<void> addRunOutputs( const QVector<QPair<QString, QString>> &pairs );
 
@@ -214,6 +238,7 @@ class GovernanceStore
   private:
     struct Impl;
     Impl *m_impl = nullptr;
+    QString m_storePath;
 };
 
 } // namespace sicnu::workspace

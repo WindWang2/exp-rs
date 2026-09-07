@@ -1,0 +1,67 @@
+{
+  "id": "scale-bar/single",
+  "version": 1,
+  "category": "scale-bar",
+  "semantic_roles": [
+    "scalebar.primary"
+  ],
+  "description": "Scale bar for projected maps; style variants map to QGIS scale bar renderers.",
+  "parameters": {
+    "style": "Single Box",
+    "units": "km",
+    "units_per_segment": 2
+  },
+  "defaults": {
+    "semantic_role": "scalebar.primary",
+    "units_per_segment": 2
+  },
+  "variants": [
+    {
+      "id": "single-box",
+      "parameters": {
+        "style": "Single Box"
+      }
+    },
+    {
+      "id": "double-box",
+      "parameters": {
+        "style": "Double Box"
+      }
+    },
+    {
+      "id": "line-ticks-up",
+      "parameters": {
+        "style": "Line Ticks Up"
+      }
+    },
+    {
+      "id": "line-ticks-down",
+      "parameters": {
+        "style": "Line Ticks Down"
+      }
+    },
+    {
+      "id": "stepped-line",
+      "parameters": {
+        "style": "Stepped Line"
+      }
+    }
+  ],
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": [
+      "bottom-left",
+      "bottom-center"
+    ],
+    "margin_mm": 8,
+    "max_count_per_page": 1,
+    "min_size_mm": [
+      30,
+      5
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": true,
+    "crs_requirements": "projected_preferred"
+  }
+}
