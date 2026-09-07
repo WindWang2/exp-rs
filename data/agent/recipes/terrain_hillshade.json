@@ -1,0 +1,48 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.terrain_hillshade",
+ "title": "Hillshade rendering base",
+ "intent": "terrain",
+ "family": "terrain",
+ "modality": "terrain",
+ "sensors": [
+  "dem"
+ ],
+ "description": "Hillshade for cartographic blending and terrain visualization.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Hydrologically consistent DEM (projected CRS).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "terrain",
+   "operator_id": "rs:terrain_analysis",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.hillshade",
+    "product": "hillshade"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "hillshade",
+   "from_step": "terrain",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "terrain",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

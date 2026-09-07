@@ -1,0 +1,70 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.sar_water",
+ "title": "SAR open-water mapping",
+ "intent": "sar_water",
+ "family": "water",
+ "modality": "sar",
+ "sensors": [
+  "sentinel-1"
+ ],
+ "description": "Calibrate -> speckle -> threshold dark water. Single-scene; sar pack warns on missing calibration.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "SAR GRD scene.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "calibrate",
+   "operator_id": "rs:sar_calibrate",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.calibrated"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "speckle",
+   "operator_id": "rs:sar_speckle",
+   "params": {
+    "input": "$outputs.calibrated",
+    "output": "$outputs.filtered",
+    "method": "lee",
+    "looks": 2
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "water",
+   "operator_id": "rs:threshold_raster",
+   "params": {
+    "input": "$outputs.filtered",
+    "output": "$outputs.water_extent",
+    "thresholdMethod": "statistical",
+    "statisticalK": 1.5,
+    "cleanup": "majority"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "water_extent",
+   "from_step": "water",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "water",
+  "renderer_hint": "categorized"
+ }
+}

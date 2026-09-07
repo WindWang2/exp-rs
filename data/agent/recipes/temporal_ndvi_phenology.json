@@ -1,26 +1,34 @@
 {
  "schema_version": "1.0",
  "kind": "harness_recipe",
- "recipe_id": "harness.phenology",
- "title": "One-year vegetation phenology analysis",
+ "recipe_id": "harness.temporal_ndvi_phenology",
+ "title": "Crop phenology metrics (NDVI series)",
  "intent": "phenology",
- "description": "collection -> QA -> index series -> smoothing -> phenology metrics -> summary/chart. Works on a temporal collection (workspace UUID or descriptor path); the 'phenology' preflight rule pack warns when scene ordering or NIR/Red roles cannot be verified.",
+ "family": "temporal",
+ "modality": "temporal",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9",
+  "modis"
+ ],
+ "description": "NDVI index series -> smoothing -> phenology metrics -> summary report. The canonical phenology chain.",
  "slots": [
   {
    "name": "collection",
    "kind": "collection",
-   "description": "Temporal collection reference: workspace UUID or descriptor JSON path covering at least one full growing cycle.",
+   "description": "Registered temporal collection (spatial:temporal tools).",
    "required": true
   }
  ],
  "steps": [
   {
-   "id": "index_series",
+   "id": "series",
    "operator_id": "rs:temporal_index_series",
    "params": {
     "collection": "$collection.path",
     "index": "NDVI",
-    "output": "$outputs.index_series"
+    "output": "$outputs.ndvi_series"
    },
    "verification": "raster"
   },
@@ -29,7 +37,8 @@
    "operator_id": "rs:temporal_smooth",
    "params": {
     "collection": "$collection.path",
-    "band_role": "nir",
+    "band_role": "ndvi",
+    "method": "savgol",
     "output": "$outputs.smoothed"
    },
    "verification": "raster"
@@ -39,7 +48,7 @@
    "operator_id": "rs:temporal_phenology",
    "params": {
     "collection": "$collection.path",
-    "band_role": "nir",
+    "band_role": "ndvi",
     "output": "$outputs.phenology"
    },
    "verification": "raster"
@@ -49,13 +58,21 @@
    "operator_id": "rs:temporal_summary",
    "params": {
     "collection": "$collection.path",
-    "band_role": "nir",
-    "output": "$outputs.summary"
+    "band_role": "ndvi",
+    "include_median": true,
+    "output": "$outputs.summary",
+    "verification": "report"
    },
    "verification": "raster"
   }
  ],
  "outputs": [
+  {
+   "name": "ndvi_series",
+   "from_step": "series",
+   "port": "output",
+   "kind": "raster"
+  },
   {
    "name": "phenology",
    "from_step": "phenology",
@@ -73,13 +90,7 @@
   "enabled": true
  },
  "map_output": {
-  "from_step": "phenology",
+  "from_step": "series",
   "renderer_hint": "singleband_pseudocolor"
- },
- "family": "temporal",
- "modality": "temporal",
- "sensors": [
-  "sentinel-2",
-  "modis"
- ]
+ }
 }

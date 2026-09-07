@@ -1,0 +1,73 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.sar_terrain_correction",
+ "title": "SAR terrain correction product",
+ "intent": "sar",
+ "family": "sar",
+ "modality": "sar",
+ "sensors": [
+  "sentinel-1"
+ ],
+ "description": "Calibrate -> terrain correction with DEM -> speckle. Produces analysis-ready geometry.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "SAR scene.",
+   "required": true
+  },
+  {
+   "name": "dem",
+   "kind": "raster",
+   "description": "DEM for correction.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "calibrate",
+   "operator_id": "rs:sar_calibrate",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.calibrated"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "correct",
+   "operator_id": "rs:sar_terrain_correction",
+   "params": {
+    "input": "$outputs.calibrated",
+    "output": "$outputs.corrected",
+    "dem": "$dem.path"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "speckle",
+   "operator_id": "rs:sar_speckle",
+   "params": {
+    "input": "$outputs.corrected",
+    "output": "$outputs.filtered",
+    "method": "lee"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "filtered",
+   "from_step": "speckle",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "speckle",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

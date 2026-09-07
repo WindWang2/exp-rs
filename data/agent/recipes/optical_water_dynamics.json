@@ -1,0 +1,112 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.optical_water_dynamics",
+ "title": "Water change dynamics (two epochs)",
+ "intent": "water",
+ "family": "water-dynamics",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "MNDWI water masks for two dates -> change_difference -> gain/loss thresholding.",
+ "slots": [
+  {
+   "name": "before",
+   "kind": "raster",
+   "description": "Before-date optical scene (Green + SWIR).",
+   "required": true
+  },
+  {
+   "name": "after",
+   "kind": "raster",
+   "description": "After-date optical scene (Green + SWIR).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "mndwi_before",
+   "operator_id": "rs:spectral_index",
+   "params": {
+    "input": "$before.path",
+    "index": "MNDWI",
+    "output": "$outputs.mndwi_before"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "water_before",
+   "operator_id": "rs:threshold_raster",
+   "params": {
+    "input": "$outputs.mndwi_before",
+    "output": "$outputs.water_before",
+    "thresholdMethod": "manual",
+    "threshold": 0.0,
+    "cleanup": "majority"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "mndwi_after",
+   "operator_id": "rs:spectral_index",
+   "params": {
+    "input": "$after.path",
+    "index": "MNDWI",
+    "output": "$outputs.mndwi_after"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "water_after",
+   "operator_id": "rs:threshold_raster",
+   "params": {
+    "input": "$outputs.mndwi_after",
+    "output": "$outputs.water_after",
+    "thresholdMethod": "manual",
+    "threshold": 0.0,
+    "cleanup": "majority"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "dynamics",
+   "operator_id": "rs:change_difference",
+   "params": {
+    "before": "$outputs.water_before",
+    "after": "$outputs.water_after",
+    "output": "$outputs.water_change"
+   },
+   "verification": "raster",
+   "inputs": [
+    {
+     "step": "water_before",
+     "port": "output",
+     "to_port": "before"
+    },
+    {
+     "step": "water_after",
+     "port": "output",
+     "to_port": "after"
+    }
+   ]
+  }
+ ],
+ "outputs": [
+  {
+   "name": "water_change",
+   "from_step": "dynamics",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "dynamics",
+  "renderer_hint": "categorized"
+ }
+}

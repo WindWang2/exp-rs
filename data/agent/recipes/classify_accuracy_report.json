@@ -1,0 +1,74 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.classify_accuracy_report",
+ "title": "Accuracy assessment workflow",
+ "intent": "accuracy",
+ "family": "classification",
+ "modality": "model",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "Supervised classification with a held-out test split emits overallAccuracy/kappa/confusionMatrix; the assessment variant compares against an independent reference via post-classification change primitives.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Feature raster.",
+   "required": true
+  },
+  {
+   "name": "training",
+   "kind": "vector",
+   "description": "Training samples.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "classify",
+   "operator_id": "rs:supervised_classification",
+   "params": {
+    "input": "$primary.path",
+    "training": "$training.path",
+    "output": "$outputs.classification",
+    "method": "random_forest",
+    "testSplit": 0.3
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "clean",
+   "operator_id": "rs:majority_filter",
+   "params": {
+    "input": "$outputs.classification",
+    "output": "$outputs.classification_clean",
+    "kernel": 3
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "classification",
+   "from_step": "classify",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "classification_clean",
+   "from_step": "clean",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "classify",
+  "renderer_hint": "categorized"
+ }
+}

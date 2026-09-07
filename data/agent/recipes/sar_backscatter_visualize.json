@@ -1,0 +1,57 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.sar_backscatter_visualize",
+ "title": "SAR backscatter visualization product",
+ "intent": "sar",
+ "family": "sar",
+ "modality": "sar",
+ "sensors": [
+  "sentinel-1"
+ ],
+ "description": "Calibrate -> speckle -> dB conversion via log-ratio against a constant? No: direct backscatter product for visualization.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "SAR scene (SLC or GRD).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "backscatter",
+   "operator_id": "rs:sar_backscatter",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.backscatter"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "speckle",
+   "operator_id": "rs:sar_speckle",
+   "params": {
+    "input": "$outputs.backscatter",
+    "output": "$outputs.filtered",
+    "method": "refined_lee"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "filtered",
+   "from_step": "speckle",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "speckle",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

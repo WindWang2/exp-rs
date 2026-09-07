@@ -1,0 +1,64 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.preprocess_dn_to_reflectance",
+ "title": "DN to surface reflectance calibration",
+ "intent": "preprocess",
+ "family": "preprocessing",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "DN -> radiance -> reflectance calibration chain; the entry step for any radiometric comparison.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Input raster product.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "dn_to_radiance",
+   "operator_id": "rs:dn_to_radiance",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.radiance"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "reflectance",
+   "operator_id": "rs:radiometric_calibration",
+   "params": {
+    "input": "$outputs.radiance",
+    "output": "$outputs.reflectance"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "radiance",
+   "from_step": "dn_to_radiance",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "reflectance",
+   "from_step": "reflectance",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "dn_to_radiance",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

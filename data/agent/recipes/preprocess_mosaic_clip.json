@@ -1,0 +1,75 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.preprocess_mosaic_clip",
+ "title": "Mosaic + clip preprocessing",
+ "intent": "preprocess",
+ "family": "preprocessing",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "Mosaic adjacent tiles then clip to the AOI for consistent analysis extents.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "First tile (mosaic anchor).",
+   "required": true
+  },
+  {
+   "name": "secondary",
+   "kind": "raster",
+   "description": "Second tile to merge.",
+   "required": false
+  }
+ ],
+ "steps": [
+  {
+   "id": "mosaic",
+   "operator_id": "rs:mosaic",
+   "params": {
+    "input": "$primary.path",
+    "input2": "$secondary.path",
+    "output": "$outputs.mosaic"
+   },
+   "verification": "raster",
+   "when_slot": "secondary",
+   "params_when_skipped": {
+    "input": "$primary.path",
+    "output": "$outputs.mosaic"
+   }
+  },
+  {
+   "id": "clip",
+   "operator_id": "gdal:clip",
+   "params": {
+    "input": "$outputs.mosaic",
+    "output": "$outputs.clipped"
+   },
+   "verification": "raster",
+   "when_param": "aoi",
+   "params_when_skipped": {
+    "input": "$outputs.mosaic",
+    "output": "$outputs.clipped"
+   }
+  }
+ ],
+ "outputs": [
+  {
+   "name": "clipped",
+   "from_step": "clip",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "clip",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}
