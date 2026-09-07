@@ -9,6 +9,7 @@ endif()
 add_executable(sicnu_geo_rs_cli
     main_cli.cpp
     cli_commands.cpp
+    cli_dataset_commands.cpp
     cli_project_ops.cpp
     rs_pipeline_runner.cpp
 )
@@ -42,6 +43,8 @@ target_include_directories(sicnu_geo_rs_cli PRIVATE
 target_link_libraries(sicnu_geo_rs_cli PRIVATE
     Qt6::Core
     Sicnu::data
+    Sicnu::dataset
+    Sicnu::experiment
     sicnu_plugins_framework
     sicnu_sdk
     sicnu_python_isolated
