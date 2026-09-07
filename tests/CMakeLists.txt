@@ -342,6 +342,11 @@ sicnu_discover_tests(test_agent_tools_3)
 # preflight/repair loop).
 qt_add_executable(test_mapspec
   test_mapspec.cpp
+  test_cartography_tokens.cpp
+  test_cartography_library.cpp
+  test_cartography_quality.cpp
+  test_cartography_templates.cpp
+  test_cartography_visual.cpp
 )
 target_compile_definitions(test_mapspec PRIVATE
   SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"

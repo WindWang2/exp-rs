@@ -1,0 +1,69 @@
+{
+  "id": "colorbar/sequential",
+  "version": 1,
+  "category": "color-bar",
+  "semantic_roles": [
+    "colorbar.primary"
+  ],
+  "description": "Sequential gradient strip with min/max labels; ramp resolves through the token palette table.",
+  "parameters": {
+    "ramp": "sequential",
+    "width_mm": 60,
+    "height_mm": 8
+  },
+  "defaults": {
+    "semantic_role": "colorbar.primary",
+    "font_pt": 8
+  },
+  "variants": [
+    {
+      "id": "blue",
+      "parameters": {
+        "ramp": "sequential"
+      }
+    },
+    {
+      "id": "green",
+      "parameters": {
+        "ramp": "sequential_green"
+      }
+    },
+    {
+      "id": "heat",
+      "parameters": {
+        "ramp": "heat"
+      }
+    }
+  ],
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": [
+      "bottom-center",
+      "right-rail"
+    ],
+    "margin_mm": 8,
+    "max_count_per_page": 2,
+    "min_size_mm": [
+      40,
+      6
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": true,
+    "map_types": [
+      "raster"
+    ],
+    "result_types": [
+      "continuous",
+      "index",
+      "terrain"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "range",
+      "source": "raster.statistics",
+      "required": true
+    }
+  ]
+}

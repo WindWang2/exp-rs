@@ -1,0 +1,32 @@
+{
+  "id": "north-arrow/navigation",
+  "version": 1,
+  "category": "north-arrow",
+  "semantic_roles": [
+    "north_arrow.secondary"
+  ],
+  "description": "Operational/navigation north arrow for mission sheets and quick looks.",
+  "parameters": {
+    "size_mm": 12,
+    "north_mode": "grid"
+  },
+  "defaults": {
+    "svg": ":/images/north_arrows/gpsarrow.svg"
+  },
+  "layout_constraints": {
+    "anchor": "corner",
+    "preferred_positions": [
+      "top-right",
+      "top-left"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 2,
+    "min_size_mm": [
+      6,
+      6
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": true
+  }
+}

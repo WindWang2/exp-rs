@@ -28,7 +28,14 @@
 
 namespace sicnu::agent::mapspec {
 
-inline constexpr int kMapSpecCurrentVersion = 1;
+// spec_version history:
+//   0 — pre-release drafts: {layout, page, items: [{kind, …}]}.
+//   1 — collections + stable ids (ADR 0127).
+//   2 — compositional constraints (Design System 4.0, ADR 0131): style block
+//       (token_set/medium/overrides), item anchors/min/max sizes/z_index/page
+//       index/binding, slots, typed constraints, multi-page + atlas hook.
+//       v2 is a strict superset of v1: every new field is optional.
+inline constexpr int kMapSpecCurrentVersion = 2;
 
 /// Ordered item collection names of a MapSpec document.
 extern const char *const kCollections[];
@@ -39,6 +46,14 @@ bool isCollection( const std::string &name );
 
 /// Short id prefix for a collection ("map_frames" → "map", "titles" → "title").
 std::string idPrefixFor( const std::string &collection );
+
+/// True when `edge` is a valid anchor edge ("top-left", "top-center", …,
+/// "bottom-right").
+bool isAnchorEdge( const std::string &edge );
+
+/// True when `kind` is a solver-enforced constraint kind (align,
+/// match_width, match_height, stack, distribute).
+bool isConstraintKind( const std::string &kind );
 
 /// Creates an empty MapSpec with a page. `page` may carry width_mm/height_mm
 /// (defaults: A4 landscape 297×210).
@@ -56,8 +71,10 @@ Json::Value findMapSpecItem( const Json::Value &spec, const std::string &id );
 bool removeMapSpecItem( Json::Value &spec, const std::string &id );
 
 /// Full validation: envelope, page geometry, per-item required fields,
-/// id uniqueness, rect bounds, reference integrity (map_ref → map_frames).
-/// Returns one human-readable problem per entry; empty means valid.
+/// id uniqueness, rect bounds, reference integrity (map_ref → map_frames),
+/// and the v2 composition surfaces (style, anchors, sizes, z_index, page
+/// index, slots, constraints, pages, atlas). Returns one human-readable
+/// problem per entry; empty means valid.
 std::vector<std::string> validateMapSpec( const Json::Value &spec );
 
 /// Migrates older documents to kMapSpecCurrentVersion. Returns the upgraded

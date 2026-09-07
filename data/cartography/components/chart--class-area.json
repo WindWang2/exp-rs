@@ -1,0 +1,49 @@
+{
+  "id": "chart/class-area",
+  "version": 1,
+  "category": "chart",
+  "semantic_roles": [
+    "chart.statistics"
+  ],
+  "description": "Class-area bar chart bound to classification statistics (hectares or percent).",
+  "parameters": {
+    "kind": "bar"
+  },
+  "defaults": {
+    "chart": {
+      "kind": "bar",
+      "binding": {
+        "mode": "inline",
+        "data": []
+      }
+    }
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "bottom-rail",
+      "right-rail"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 4,
+    "min_size_mm": [
+      30,
+      25
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": true,
+    "result_types": [
+      "classification",
+      "land_cover"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "data",
+      "source": "params.chart_data",
+      "required": true,
+      "description": "inline [{label, value}] or vector_expression {layer, x_expression, y_expression}."
+    }
+  ]
+}

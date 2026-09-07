@@ -1,0 +1,216 @@
+{
+  "id": "scientific-publication-a3l",
+  "version": 1,
+  "extends": "scientific-publication-a4l",
+  "description": "Two-panel scientific publication page with captions, confusion matrix, metric cards and metadata.",
+  "page": {
+    "width_mm": 420,
+    "height_mm": 297
+  },
+  "slots": [
+    {
+      "role": "map.figure",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        40.0,
+        195.0,
+        117.5
+      ]
+    },
+    {
+      "role": "map.reference",
+      "accepts": "map_frames",
+      "rect_mm": [
+        213.0,
+        40.0,
+        195.0,
+        117.5
+      ]
+    },
+    {
+      "role": "scalebar.primary",
+      "accepts": "scale_bars",
+      "rect_mm": [
+        217.0,
+        144.5,
+        44,
+        9
+      ]
+    },
+    {
+      "role": "title.main",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        12.0,
+        396.0,
+        14
+      ]
+    },
+    {
+      "role": "title.subtitle",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        26.0,
+        396.0,
+        8
+      ],
+      "content": {
+        "text": "Study area, Region / 研究区",
+        "font": {
+          "size_pt": 13,
+          "bold": false
+        }
+      }
+    },
+    {
+      "role": "caption.figure",
+      "accepts": "labels",
+      "rect_mm": [
+        12.0,
+        153.5,
+        195.0,
+        4
+      ],
+      "content": {
+        "text": "Fig. 1 — classification result (left) vs reference (right)",
+        "font": {
+          "size_pt": 8,
+          "bold": false
+        }
+      }
+    },
+    {
+      "role": "chart.accuracy",
+      "accepts": "charts",
+      "rect_mm": [
+        12.0,
+        163.5,
+        96,
+        111.5
+      ],
+      "content": {
+        "chart": {
+          "kind": "matrix",
+          "binding": {
+            "mode": "inline",
+            "data": [],
+            "matrix": {
+              "labels": [
+                "forest",
+                "crop",
+                "water",
+                "built"
+              ],
+              "rows": [
+                [
+                  38,
+                  4,
+                  0,
+                  0
+                ],
+                [
+                  5,
+                  21,
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  0,
+                  12,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0,
+                  8
+                ]
+              ]
+            }
+          },
+          "style": {
+            "diagonal_emphasis": true
+          }
+        },
+        "title": "Confusion matrix"
+      }
+    },
+    {
+      "role": "chart.metrics",
+      "accepts": "charts",
+      "rect_mm": [
+        114.0,
+        163.5,
+        84,
+        61.3
+      ],
+      "content": {
+        "chart": {
+          "kind": "metric",
+          "binding": {
+            "mode": "inline",
+            "data": [
+              {
+                "label": "OA",
+                "value": 0.91
+              },
+              {
+                "label": "Kappa",
+                "value": 0.87
+              },
+              {
+                "label": "F1",
+                "value": 0.89
+              }
+            ]
+          }
+        },
+        "title": "Accuracy"
+      }
+    },
+    {
+      "role": "legend.primary",
+      "accepts": "legends",
+      "rect_mm": [
+        346.0,
+        163.5,
+        62,
+        111.5
+      ],
+      "content": {
+        "title": "Legend"
+      }
+    },
+    {
+      "role": "metadata.block",
+      "accepts": "labels",
+      "rect_mm": [
+        12.0,
+        275.0,
+        318.0,
+        8
+      ],
+      "content": {
+        "text": "Sensor: S2 · Date: 2025-06 · CRS: EPSG:4326 · Level: L2A",
+        "font": {
+          "size_pt": 7,
+          "bold": false
+        }
+      }
+    },
+    {
+      "role": "source.primary",
+      "accepts": "source_notes",
+      "rect_mm": [
+        336.0,
+        275.0,
+        72,
+        8
+      ]
+    }
+  ]
+}

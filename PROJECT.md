@@ -26,11 +26,16 @@ Pi agent adapter over the same Task Center seam.
   layers), dialogs, task center UI, schema form builder, design tokens
   (`design_tokens.h`). See `docs/ui-architecture.md` for the information
   architecture and extension rules.
-- `src/agent` — copilot, MCP, spatial tools, agent contracts; `pi/` bridge.
+- `src/agent` — copilot, MCP, spatial tools, agent contracts; `pi/` bridge;
+  MapSpec cartography (`src/agent/mapspec`, `src/agent/cartography`, `data/cartography`).
 - `docs/adr/` — decision ledger (0001–0133); `CONTEXT.md` — domain vocabulary.
 
 ## Current state (2026-09-06)
 
+- **Cartography Design System 4.0** (ADR 0130/0131): design tokens,
+  component/template library expansion, MapSpec 2.0 compositional
+  constraints, composition solver, preflight/repair rule catalog, and the
+  deterministic visual-regression harness (`docs/cartography/`).
 - **Desktop Workbench & Unified UX 4.0** (ADR 0130–0133): unified shell
   (wired governance dock, project-context title, dead-panel removal, menu dedup),
   schema-validated operator forms, thin-client operator promotions (band tools,

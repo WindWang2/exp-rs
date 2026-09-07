@@ -1,0 +1,231 @@
+{
+  "id": "scientific-publication-a4l",
+  "version": 1,
+  "description": "Two-panel scientific publication page with captions, confusion matrix, metric cards and metadata.",
+  "page": {
+    "width_mm": 297,
+    "height_mm": 210
+  },
+  "style": {
+    "token_set": "scientific-light",
+    "medium": "print"
+  },
+  "slots": [
+    {
+      "role": "map.figure",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        40.0,
+        133.5,
+        74.0
+      ]
+    },
+    {
+      "role": "map.reference",
+      "accepts": "map_frames",
+      "rect_mm": [
+        151.5,
+        40.0,
+        133.5,
+        74.0
+      ]
+    },
+    {
+      "role": "scalebar.primary",
+      "accepts": "scale_bars",
+      "rect_mm": [
+        155.5,
+        101.0,
+        44,
+        9
+      ]
+    },
+    {
+      "role": "title.main",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        12.0,
+        273.0,
+        14
+      ]
+    },
+    {
+      "role": "title.subtitle",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        26.0,
+        273.0,
+        8
+      ],
+      "content": {
+        "text": "Study area, Region / 研究区",
+        "font": {
+          "size_pt": 13,
+          "bold": false
+        }
+      }
+    },
+    {
+      "role": "caption.figure",
+      "accepts": "labels",
+      "rect_mm": [
+        12.0,
+        110.0,
+        133.5,
+        4
+      ],
+      "content": {
+        "text": "Fig. 1 — classification result (left) vs reference (right)",
+        "font": {
+          "size_pt": 8,
+          "bold": false
+        }
+      }
+    },
+    {
+      "role": "chart.accuracy",
+      "accepts": "charts",
+      "rect_mm": [
+        12.0,
+        120.0,
+        96,
+        68.0
+      ],
+      "content": {
+        "chart": {
+          "kind": "matrix",
+          "binding": {
+            "mode": "inline",
+            "data": [],
+            "matrix": {
+              "labels": [
+                "forest",
+                "crop",
+                "water",
+                "built"
+              ],
+              "rows": [
+                [
+                  38,
+                  4,
+                  0,
+                  0
+                ],
+                [
+                  5,
+                  21,
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  0,
+                  12,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0,
+                  8
+                ]
+              ]
+            }
+          },
+          "style": {
+            "diagonal_emphasis": true
+          }
+        },
+        "title": "Confusion matrix"
+      }
+    },
+    {
+      "role": "chart.metrics",
+      "accepts": "charts",
+      "rect_mm": [
+        114.0,
+        120.0,
+        84,
+        37.4
+      ],
+      "content": {
+        "chart": {
+          "kind": "metric",
+          "binding": {
+            "mode": "inline",
+            "data": [
+              {
+                "label": "OA",
+                "value": 0.91
+              },
+              {
+                "label": "Kappa",
+                "value": 0.87
+              },
+              {
+                "label": "F1",
+                "value": 0.89
+              }
+            ]
+          }
+        },
+        "title": "Accuracy"
+      }
+    },
+    {
+      "role": "legend.primary",
+      "accepts": "legends",
+      "rect_mm": [
+        223.0,
+        120.0,
+        62,
+        68.0
+      ],
+      "content": {
+        "title": "Legend"
+      }
+    },
+    {
+      "role": "metadata.block",
+      "accepts": "labels",
+      "rect_mm": [
+        12.0,
+        188.0,
+        195.0,
+        8
+      ],
+      "content": {
+        "text": "Sensor: S2 · Date: 2025-06 · CRS: EPSG:4326 · Level: L2A",
+        "font": {
+          "size_pt": 7,
+          "bold": false
+        }
+      }
+    },
+    {
+      "role": "source.primary",
+      "accepts": "source_notes",
+      "rect_mm": [
+        213.0,
+        188.0,
+        72,
+        8
+      ]
+    }
+  ],
+  "suitable_tasks": [
+    "publication"
+  ],
+  "product_type": "publication",
+  "recommended_components": [
+    "north-arrow/scientific",
+    "grid/graticule",
+    {
+      "id": "frame/classic",
+      "variant": "scientific"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "id": "text/metadata-block",
+  "version": 1,
+  "category": "text",
+  "semantic_roles": [
+    "text.metadata"
+  ],
+  "description": "Multi-line metadata block (sensor, date, CRS, processing level) for the map margin.",
+  "parameters": {
+    "font": {
+      "size_pt": 7
+    }
+  },
+  "defaults": {
+    "text": "Sensor: --\nDate: --\nCRS: --"
+  },
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": [
+      "bottom-left",
+      "bottom-right"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 2
+  },
+  "compatibility": {
+    "requires_map_frame": false
+  },
+  "data_bindings": [
+    {
+      "name": "text",
+      "source": "params.metadata",
+      "required": true
+    }
+  ]
+}

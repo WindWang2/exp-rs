@@ -1,0 +1,36 @@
+{
+  "id": "legend/raster-class",
+  "version": 1,
+  "category": "legend",
+  "semantic_roles": [
+    "legend.primary"
+  ],
+  "description": "Fixed raster class legend (class id, label, color) that does not depend on the live renderer.",
+  "parameters": {
+    "title": "图例",
+    "classes": []
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "right-rail",
+      "bottom-rail"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 2
+  },
+  "compatibility": {
+    "requires_map_frame": true,
+    "map_types": [
+      "raster"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "classes",
+      "source": "params.classes",
+      "required": true,
+      "description": "Ordered [{id, label, color}]."
+    }
+  ]
+}

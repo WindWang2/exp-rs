@@ -1,0 +1,2432 @@
+{
+	"components" : 
+	[
+		{
+			"category" : "annotation",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false
+			},
+			"description" : "Free annotation with optional leader hint; anchored anywhere.",
+			"id" : "annotation/callout",
+			"semantic_roles" : 
+			[
+				"annotation.secondary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true
+			},
+			"description" : "Area chart (cumulative composition).",
+			"id" : "chart/area",
+			"semantic_roles" : 
+			[
+				"chart.trend"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"classification",
+					"land_cover",
+					"categorical"
+				]
+			},
+			"description" : "Category bar chart (class areas, counts).",
+			"id" : "chart/bar",
+			"semantic_roles" : 
+			[
+				"chart.statistics"
+			],
+			"variants" : 
+			[
+				"grouped",
+				"stacked"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true,
+				"result_types" : 
+				[
+					"classification",
+					"land_cover"
+				]
+			},
+			"description" : "Class-area bar chart bound to classification statistics (hectares or percent).",
+			"id" : "chart/class-area",
+			"semantic_roles" : 
+			[
+				"chart.statistics"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"accuracy",
+					"change"
+				]
+			},
+			"description" : "Confusion/change matrix rendered as a labeled grid; diagonal emphasized.",
+			"id" : "chart/confusion-matrix",
+			"semantic_roles" : 
+			[
+				"chart.accuracy"
+			],
+			"variants" : 
+			[
+				"confusion",
+				"change-matrix"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true
+			},
+			"description" : "Histogram of values (band statistics, index distribution).",
+			"id" : "chart/histogram",
+			"semantic_roles" : 
+			[
+				"chart.distribution"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"time_series",
+					"continuous"
+				]
+			},
+			"description" : "Line chart (profiles, trends).",
+			"id" : "chart/line",
+			"semantic_roles" : 
+			[
+				"chart.trend"
+			],
+			"variants" : 
+			[
+				"single-series",
+				"multi-series"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"accuracy"
+				]
+			},
+			"description" : "Compact metric card (OA, Kappa, F1) with big value + label, for accuracy strips.",
+			"id" : "chart/metric-card",
+			"semantic_roles" : 
+			[
+				"chart.metric"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"note" : "use only when shares of a whole are the message",
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"classification",
+					"composition"
+				]
+			},
+			"description" : "Share-of-total chart.",
+			"id" : "chart/pie",
+			"semantic_roles" : 
+			[
+				"chart.composition"
+			],
+			"variants" : 
+			[
+				"pie",
+				"donut"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true
+			},
+			"description" : "Scatter plot (feature relationships).",
+			"id" : "chart/scatter",
+			"semantic_roles" : 
+			[
+				"chart.relationship"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"time_series",
+					"phenology"
+				]
+			},
+			"description" : "Time-anchored line chart with date labels (phenology, NDVI trajectory, water level).",
+			"id" : "chart/time-series",
+			"semantic_roles" : 
+			[
+				"chart.trend"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "color-bar",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true
+			},
+			"description" : "Asymmetric diverging strip where the neutral point is off-center (declared min/mid/max).",
+			"id" : "colorbar/asymmetric",
+			"semantic_roles" : 
+			[
+				"colorbar.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "color-bar",
+			"compatibility" : 
+			{
+				"map_types" : 
+				[
+					"raster"
+				],
+				"requires_map_frame" : true
+			},
+			"description" : "Discrete class strip for qualitative rasters; uses an explicit color stop list.",
+			"id" : "colorbar/discrete",
+			"semantic_roles" : 
+			[
+				"colorbar.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "color-bar",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true,
+				"result_types" : 
+				[
+					"change",
+					"anomaly",
+					"index"
+				]
+			},
+			"description" : "Diverging ramp centered on a neutral midpoint (anomalies, change magnitude, NDVI anomalies).",
+			"id" : "colorbar/diverging",
+			"semantic_roles" : 
+			[
+				"colorbar.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "color-bar",
+			"compatibility" : 
+			{
+				"map_types" : 
+				[
+					"raster"
+				],
+				"requires_map_frame" : true
+			},
+			"description" : "Log-scaled strip for skewed variables (backscatter proxies, density); label ticks are decades.",
+			"id" : "colorbar/logarithmic",
+			"semantic_roles" : 
+			[
+				"colorbar.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "color-bar",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true,
+				"result_types" : 
+				[
+					"probability",
+					"uncertainty"
+				]
+			},
+			"description" : "Probability/confidence strip fixed to [0,1] with percent labels.",
+			"id" : "colorbar/probability",
+			"semantic_roles" : 
+			[
+				"colorbar.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "color-bar",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true,
+				"result_types" : 
+				[
+					"sar",
+					"backscatter"
+				]
+			},
+			"description" : "SAR backscatter strip in dB with negative-value ticks (typically -25\u20260 dB).",
+			"id" : "colorbar/sar-db",
+			"semantic_roles" : 
+			[
+				"colorbar.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "color-bar",
+			"compatibility" : 
+			{
+				"map_types" : 
+				[
+					"raster"
+				],
+				"requires_map_frame" : true,
+				"result_types" : 
+				[
+					"continuous",
+					"index",
+					"terrain"
+				]
+			},
+			"description" : "Sequential gradient strip with min/max labels; ramp resolves through the token palette table.",
+			"id" : "colorbar/sequential",
+			"semantic_roles" : 
+			[
+				"colorbar.primary"
+			],
+			"variants" : 
+			[
+				"blue",
+				"green",
+				"heat"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "frame",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true
+			},
+			"description" : "Map frame border style applied to the primary map frame.",
+			"id" : "frame/classic",
+			"semantic_roles" : 
+			[
+				"frame.primary"
+			],
+			"variants" : 
+			[
+				"thin",
+				"scientific"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "grid",
+			"compatibility" : 
+			{
+				"crs_requirements" : "geographic_preferred",
+				"requires_map_frame" : true
+			},
+			"description" : "Latitude/longitude graticule over the map frame.",
+			"id" : "grid/graticule",
+			"semantic_roles" : 
+			[
+				"grid.primary"
+			],
+			"variants" : 
+			[
+				"degree-1",
+				"degree-05",
+				"degree-01"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "grid",
+			"compatibility" : 
+			{
+				"crs_requirements" : "projected",
+				"requires_map_frame" : true
+			},
+			"description" : "Metric coordinate grid (meters) for projected frames (UTM/Gauss-Kr\u00fcger sheets).",
+			"id" : "grid/metric",
+			"semantic_roles" : 
+			[
+				"grid.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "inset-map",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true
+			},
+			"description" : "Overview locator: small-frame extent outline of the main map's coverage.",
+			"id" : "inset-map/locator",
+			"semantic_roles" : 
+			[
+				"map.locator"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "legend",
+			"compatibility" : 
+			{
+				"map_types" : 
+				[
+					"raster",
+					"vector"
+				],
+				"requires_map_frame" : true,
+				"result_types" : 
+				[
+					"classification",
+					"land_cover",
+					"categorical"
+				]
+			},
+			"description" : "Class-based legend for categorical rasters and vectors.",
+			"id" : "legend/categorical",
+			"semantic_roles" : 
+			[
+				"legend.primary"
+			],
+			"variants" : 
+			[
+				"single-column",
+				"multi-column",
+				"compact"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "legend",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true,
+				"result_types" : 
+				[
+					"change",
+					"transition"
+				]
+			},
+			"description" : "From\u2192To transition legend for change products (paired rows colored by transition class).",
+			"id" : "legend/change-transition",
+			"semantic_roles" : 
+			[
+				"legend.change"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "legend",
+			"compatibility" : 
+			{
+				"map_types" : 
+				[
+					"raster"
+				],
+				"requires_map_frame" : true,
+				"result_types" : 
+				[
+					"continuous",
+					"index",
+					"terrain"
+				]
+			},
+			"description" : "Gradient legend body for continuous rasters (paired with a colorbar).",
+			"id" : "legend/continuous",
+			"semantic_roles" : 
+			[
+				"legend.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "legend",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true
+			},
+			"description" : "Legend with grouped headings (e.g. land cover groups, scenario groups).",
+			"id" : "legend/grouped",
+			"semantic_roles" : 
+			[
+				"legend.primary"
+			],
+			"variants" : 
+			[
+				"flat",
+				"hierarchical"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "legend",
+			"compatibility" : 
+			{
+				"map_types" : 
+				[
+					"raster"
+				],
+				"requires_map_frame" : true
+			},
+			"description" : "Fixed raster class legend (class id, label, color) that does not depend on the live renderer.",
+			"id" : "legend/raster-class",
+			"semantic_roles" : 
+			[
+				"legend.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "legend",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true,
+				"result_types" : 
+				[
+					"uncertainty",
+					"probability"
+				]
+			},
+			"description" : "Uncertainty/hatching legend for probability or confidence products; uses the token uncertainty palette.",
+			"id" : "legend/uncertainty",
+			"semantic_roles" : 
+			[
+				"legend.uncertainty"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "map-frame",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"change",
+					"before_after"
+				]
+			},
+			"description" : "Paired before/after frames declared with equal size and aligned tops for change products.",
+			"id" : "map-frame/comparison",
+			"semantic_roles" : 
+			[
+				"map.before",
+				"map.after"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "map-frame",
+			"compatibility" : 
+			{
+				"map_types" : 
+				[
+					"raster",
+					"vector"
+				],
+				"requires_map_frame" : false
+			},
+			"description" : "Primary map frame with declared extent, scale, rotation, and layer set.",
+			"id" : "map-frame/primary",
+			"semantic_roles" : 
+			[
+				"map.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "map-frame",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"time_series",
+					"scenario"
+				]
+			},
+			"description" : "N synchronized small-multiple frames (temporal steps, scenarios) declared with a count and grid.",
+			"id" : "map-frame/small-multiples",
+			"semantic_roles" : 
+			[
+				"map.multiple"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "north-arrow",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true
+			},
+			"description" : "Simple grid-north arrow for clean thematic layouts.",
+			"id" : "north-arrow/minimal",
+			"semantic_roles" : 
+			[
+				"north_arrow.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "north-arrow",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true
+			},
+			"description" : "Operational/navigation north arrow for mission sheets and quick looks.",
+			"id" : "north-arrow/navigation",
+			"semantic_roles" : 
+			[
+				"north_arrow.secondary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "north-arrow",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true
+			},
+			"description" : "Publication-grade true-north arrow.",
+			"id" : "north-arrow/scientific",
+			"semantic_roles" : 
+			[
+				"north_arrow.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "publication",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"publication"
+				]
+			},
+			"description" : "Figure label ('\u56fe1', 'Figure 2') in the token figure_label style.",
+			"id" : "publication/figure-label",
+			"semantic_roles" : 
+			[
+				"text.figure_label"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "publication",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false
+			},
+			"description" : "Institution logo placeholder box; swap the picture path at composition time.",
+			"id" : "publication/logo-placeholder",
+			"semantic_roles" : 
+			[
+				"publication.logo"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "publication",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false
+			},
+			"description" : "Photo/panel image frame for report pages (scene thumbnail, field photo).",
+			"id" : "publication/panel-image",
+			"semantic_roles" : 
+			[
+				"publication.panel"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "scale-bar",
+			"compatibility" : 
+			{
+				"crs_requirements" : "projected_preferred",
+				"requires_map_frame" : true
+			},
+			"description" : "Metric scale bar paired with a secondary unit label line (km + miles) for international reports.",
+			"id" : "scale-bar/dual-unit",
+			"semantic_roles" : 
+			[
+				"scalebar.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "scale-bar",
+			"compatibility" : 
+			{
+				"crs_requirements" : "projected_preferred",
+				"requires_map_frame" : true
+			},
+			"description" : "Scale bar for projected maps; style variants map to QGIS scale bar renderers.",
+			"id" : "scale-bar/single",
+			"semantic_roles" : 
+			[
+				"scalebar.primary"
+			],
+			"variants" : 
+			[
+				"single-box",
+				"double-box",
+				"line-ticks-up",
+				"line-ticks-down",
+				"stepped-line"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "source-note",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false
+			},
+			"description" : "Data source and processing provenance note (token style 'source_note').",
+			"id" : "source-note/default",
+			"semantic_roles" : 
+			[
+				"source.primary"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "subtitle",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false
+			},
+			"description" : "Secondary line under the main title: product, region, or date context.",
+			"id" : "subtitle/standard",
+			"semantic_roles" : 
+			[
+				"title.subtitle"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "text",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false
+			},
+			"description" : "Legal or interpretation disclaimer rendered in the secondary text color.",
+			"id" : "text/disclaimer",
+			"semantic_roles" : 
+			[
+				"text.disclaimer"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "text",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false
+			},
+			"description" : "Multi-line metadata block (sensor, date, CRS, processing level) for the map margin.",
+			"id" : "text/metadata-block",
+			"semantic_roles" : 
+			[
+				"text.metadata"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "text",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"publication"
+				]
+			},
+			"description" : "Figure caption with number, e.g. 'Fig. 1 \u2014 Land cover 2024'. Styled from token 'caption'.",
+			"id" : "text/scientific-caption",
+			"semantic_roles" : 
+			[
+				"text.caption"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "text",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false
+			},
+			"description" : "Short section label ('A', 'Study area', '\u65b9\u6cd5') introducing a map panel or figure group.",
+			"id" : "text/section-label",
+			"semantic_roles" : 
+			[
+				"text.section"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "title",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"publication",
+					"report"
+				]
+			},
+			"description" : "Two-line bilingual title (CJK primary line, Latin secondary line) rendered as one label block.",
+			"id" : "title/bilingual",
+			"semantic_roles" : 
+			[
+				"title.main"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "title",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false
+			},
+			"description" : "Primary map title. Token style 'title' (20pt bold by default); one per page.",
+			"id" : "title/main",
+			"semantic_roles" : 
+			[
+				"title.main"
+			],
+			"variants" : 
+			[
+				"standard",
+				"compact"
+			],
+			"version" : 1
+		}
+	],
+	"index_version" : 1,
+	"kind" : "cartography_catalog_index",
+	"templates" : 
+	[
+		{
+			"description" : "Accuracy assessment page: map, confusion matrix, metric cards and legend.",
+			"id" : "accuracy-assessment-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "accuracy",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"chart.matrix"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"accuracy",
+				"validation"
+			]
+		},
+		{
+			"description" : "Map-series sheet with the atlas hook enabled (per-feature coverage and file names).",
+			"id" : "atlas-series-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "atlas",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"atlas",
+				"series"
+			]
+		},
+		{
+			"description" : "Burned-area product with severity colorbar and class chart.",
+			"id" : "burned-area-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "burned_area",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"colorbar.severity"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"fire",
+				"burned-area"
+			]
+		},
+		{
+			"description" : "Before/after synchronized dual map page with transition legend, change matrix and uncertainty note.",
+			"id" : "change-before-after-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "change",
+			"slot_roles" : 
+			[
+				"map.before",
+				"map.after",
+				"title.main",
+				"legend.change",
+				"chart.change",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"note.uncertainty"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"change",
+				"before-after"
+			]
+		},
+		{
+			"description" : "Before/after synchronized dual map page with transition legend, change matrix and uncertainty note.",
+			"extends" : "change-before-after-a4l",
+			"id" : "change-before-after-a4p",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 210
+			},
+			"product_type" : "change",
+			"slot_roles" : 
+			[
+				"map.before",
+				"map.after",
+				"title.main",
+				"legend.change",
+				"chart.change",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"note.uncertainty"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"change",
+				"before-after"
+			]
+		},
+		{
+			"description" : "Post-classification change map with transition legend, change matrix and uncertainty note.",
+			"id" : "change-detection-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "change",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.change",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"chart.change"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"change",
+				"change-detection"
+			]
+		},
+		{
+			"description" : "Choropleth of region statistics with diverging colorbar.",
+			"id" : "choropleth-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "choropleth",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"colorbar.diverging"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"choropleth",
+				"statistics"
+			]
+		},
+		{
+			"description" : "Categorical classification result map with legend, class-area chart, scale bar, north arrow and source note.",
+			"extends" : "classification-a4l",
+			"id" : "classification-a3l",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 420
+			},
+			"product_type" : "classification",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"classification",
+				"obia"
+			]
+		},
+		{
+			"description" : "Categorical classification result map with legend, class-area chart, scale bar, north arrow and source note.",
+			"id" : "classification-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "classification",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"classification",
+				"obia"
+			]
+		},
+		{
+			"description" : "Categorical classification result map with legend, class-area chart, scale bar, north arrow and source note.",
+			"extends" : "classification-a4l",
+			"id" : "classification-a4p",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 210
+			},
+			"product_type" : "classification",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"classification",
+				"obia"
+			]
+		},
+		{
+			"description" : "QA cloud/shadow mask overview with class legend and coverage chart.",
+			"id" : "cloud-cover-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "qa",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"chart.coverage"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"qa",
+				"cloud",
+				"mask"
+			]
+		},
+		{
+			"description" : "Crop monitoring map with phenology time-series chart and class legend.",
+			"id" : "crop-monitoring-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "crop",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"chart.series"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"crop",
+				"agriculture"
+			]
+		},
+		{
+			"description" : "Forest cover / change map with sequential-green colorbar and class chart.",
+			"id" : "forest-cover-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "forest",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"colorbar.cover"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"forest"
+			]
+		},
+		{
+			"description" : "Kernel-density / heatmap product with heat colorbar.",
+			"id" : "heatmap-density-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "density",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"colorbar.density"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"heatmap",
+				"density"
+			]
+		},
+		{
+			"description" : "Main map with locator inset, class-area chart and full furniture.",
+			"id" : "inset-locator-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "locator",
+			"slot_roles" : 
+			[
+				"map.main",
+				"map.locator",
+				"title.main",
+				"legend.primary",
+				"chart.class-area",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"locator",
+				"overview"
+			]
+		},
+		{
+			"description" : "Land-cover product map with locator inset, class-area chart and standard furniture.",
+			"extends" : "land-cover-a4l",
+			"id" : "land-cover-a3l",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 420
+			},
+			"product_type" : "land_cover",
+			"slot_roles" : 
+			[
+				"map.main",
+				"map.locator",
+				"title.main",
+				"legend.primary",
+				"chart.class-area",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"land-cover",
+				"land-use"
+			]
+		},
+		{
+			"description" : "Land-cover product map with locator inset, class-area chart and standard furniture.",
+			"id" : "land-cover-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "land_cover",
+			"slot_roles" : 
+			[
+				"map.main",
+				"map.locator",
+				"title.main",
+				"legend.primary",
+				"chart.class-area",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"land-cover",
+				"land-use"
+			]
+		},
+		{
+			"description" : "Land-use / zoning map with multi-column legend for wide class sets.",
+			"id" : "land-use-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "land_use",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"land-use",
+				"zoning"
+			]
+		},
+		{
+			"description" : "Land-use / zoning map with multi-column legend for wide class sets.",
+			"extends" : "land-use-a4l",
+			"id" : "land-use-a4p",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 210
+			},
+			"product_type" : "land_use",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"land-use",
+				"zoning"
+			]
+		},
+		{
+			"description" : "Model uncertainty map with uncertainty palette colorbar and accuracy metric cards.",
+			"id" : "model-uncertainty-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "uncertainty",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"chart.metrics"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"uncertainty",
+				"quality"
+			]
+		},
+		{
+			"description" : "Four-panel comparison sheet (small multiples) with shared legend.",
+			"extends" : "multi-panel-a4l",
+			"id" : "multi-panel-a3l",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 420
+			},
+			"product_type" : "multi_panel",
+			"slot_roles" : 
+			[
+				"title.main",
+				"map.t1",
+				"map.t2",
+				"map.t3",
+				"map.t4",
+				"legend.primary",
+				"chart.series",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"multi-panel",
+				"comparison"
+			]
+		},
+		{
+			"description" : "Four-panel comparison sheet (small multiples) with shared legend.",
+			"id" : "multi-panel-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "multi_panel",
+			"slot_roles" : 
+			[
+				"title.main",
+				"map.t1",
+				"map.t2",
+				"map.t3",
+				"map.t4",
+				"legend.primary",
+				"chart.series",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"multi-panel",
+				"comparison"
+			]
+		},
+		{
+			"description" : "Nighttime lights continuous product with diverging colorbar (change years).",
+			"id" : "night-lights-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "night_lights",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"colorbar.diverging"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"urban",
+				"night-lights"
+			]
+		},
+		{
+			"description" : "Operational map sheet: metric grid, dual-unit scale bar, navigation arrow and disclaimer.",
+			"extends" : "operational-sheet-a4l",
+			"id" : "operational-sheet-a3l",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 420
+			},
+			"product_type" : "operational",
+			"slot_roles" : 
+			[
+				"label.status",
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"operational",
+				"mission"
+			]
+		},
+		{
+			"description" : "Operational map sheet: metric grid, dual-unit scale bar, navigation arrow and disclaimer.",
+			"id" : "operational-sheet-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "operational",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"label.status"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"operational",
+				"mission"
+			]
+		},
+		{
+			"description" : "16:9 presentation map for screen delivery (screen tokens, larger type).",
+			"id" : "presentation-screen",
+			"page" : 
+			{
+				"height_mm" : 190.5,
+				"width_mm" : 338.69999999999999
+			},
+			"product_type" : "presentation",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "screen",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"presentation",
+				"screen"
+			]
+		},
+		{
+			"description" : "16:9 presentation map on the dark token set for dashboards.",
+			"id" : "presentation-screen-dark",
+			"page" : 
+			{
+				"height_mm" : 190.5,
+				"width_mm" : 338.69999999999999
+			},
+			"product_type" : "presentation",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "screen",
+				"token_set" : "scientific-dark"
+			},
+			"suitable_tasks" : 
+			[
+				"presentation",
+				"dashboard",
+				"dark"
+			]
+		},
+		{
+			"description" : "Generic continuous remote-sensing result with sequential colorbar.",
+			"id" : "remote-sensing-result-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "continuous",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"colorbar.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"continuous",
+				"result"
+			]
+		},
+		{
+			"description" : "Generic continuous remote-sensing result with sequential colorbar.",
+			"extends" : "remote-sensing-result-a4l",
+			"id" : "remote-sensing-result-a4p",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 210
+			},
+			"product_type" : "continuous",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"colorbar.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"continuous",
+				"result"
+			]
+		},
+		{
+			"description" : "A4 portrait report page with section label, map, charts, metadata and disclaimer.",
+			"extends" : "report-page-a4p",
+			"id" : "report-page-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "report",
+			"slot_roles" : 
+			[
+				"title.main",
+				"text.section",
+				"map.main",
+				"legend.primary",
+				"chart.statistics",
+				"chart.metrics",
+				"text.metadata",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"text.disclaimer"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"report"
+			]
+		},
+		{
+			"description" : "A4 portrait report page with section label, map, charts, metadata and disclaimer.",
+			"id" : "report-page-a4p",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 210
+			},
+			"product_type" : "report",
+			"slot_roles" : 
+			[
+				"title.main",
+				"text.section",
+				"map.main",
+				"legend.primary",
+				"chart.statistics",
+				"chart.metrics",
+				"text.metadata",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"text.disclaimer"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"report"
+			]
+		},
+		{
+			"description" : "Road / transport network map with section label and furniture.",
+			"id" : "road-transport-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "transport",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"label.section"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"road",
+				"transport"
+			]
+		},
+		{
+			"description" : "SAR backscatter (dB) continuous map with dB colorbar and histogram.",
+			"extends" : "sar-backscatter-a4l",
+			"id" : "sar-backscatter-a3l",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 420
+			},
+			"product_type" : "sar",
+			"slot_roles" : 
+			[
+				"chart.distribution",
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"sar",
+				"backscatter"
+			]
+		},
+		{
+			"description" : "SAR backscatter (dB) continuous map with dB colorbar and histogram.",
+			"id" : "sar-backscatter-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "sar",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"chart.distribution"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"sar",
+				"backscatter"
+			]
+		},
+		{
+			"description" : "SAR ratio/log-ratio change page: before/after frames with transition legend and uncertainty note.",
+			"id" : "sar-change-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "sar",
+			"slot_roles" : 
+			[
+				"map.before",
+				"map.after",
+				"title.main",
+				"legend.change",
+				"chart.change",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"note.uncertainty"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"sar",
+				"change"
+			]
+		},
+		{
+			"description" : "Two-panel scientific publication page with captions, confusion matrix, metric cards and metadata.",
+			"extends" : "scientific-publication-a4l",
+			"id" : "scientific-publication-a3l",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 420
+			},
+			"product_type" : "publication",
+			"slot_roles" : 
+			[
+				"map.figure",
+				"map.reference",
+				"scalebar.primary",
+				"title.main",
+				"title.subtitle",
+				"caption.figure",
+				"chart.accuracy",
+				"chart.metrics",
+				"legend.primary",
+				"metadata.block",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"publication"
+			]
+		},
+		{
+			"description" : "Two-panel scientific publication page with captions, confusion matrix, metric cards and metadata.",
+			"id" : "scientific-publication-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "publication",
+			"slot_roles" : 
+			[
+				"map.figure",
+				"map.reference",
+				"scalebar.primary",
+				"title.main",
+				"title.subtitle",
+				"caption.figure",
+				"chart.accuracy",
+				"chart.metrics",
+				"legend.primary",
+				"metadata.block",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"publication"
+			]
+		},
+		{
+			"description" : "SAR ship-detection result with detection chart and navigation furniture.",
+			"id" : "ship-detection-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "detection",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"chart.counts"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"sar",
+				"ship",
+				"detection"
+			]
+		},
+		{
+			"description" : "Slope/aspect paired small multiples with shared legend and distribution chart.",
+			"id" : "slope-aspect-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "terrain",
+			"slot_roles" : 
+			[
+				"title.main",
+				"map.t1",
+				"map.t2",
+				"map.t3",
+				"map.t4",
+				"legend.primary",
+				"chart.series",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"terrain",
+				"slope"
+			]
+		},
+		{
+			"description" : "Snow-cover extent map with probability colorbar and furniture.",
+			"id" : "snow-cover-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "snow",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"colorbar.probability"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"snow",
+				"cryosphere"
+			]
+		},
+		{
+			"description" : "Soil-moisture product (SAR-derived) with sequential colorbar and series chart.",
+			"id" : "soil-moisture-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "soil_moisture",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"chart.series"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"soil",
+				"agriculture",
+				"sar"
+			]
+		},
+		{
+			"description" : "Terrain DEM product with elevation colorbar and furniture.",
+			"id" : "terrain-dem-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "terrain",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"colorbar.elevation"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"terrain",
+				"dem"
+			]
+		},
+		{
+			"description" : "Terrain DEM product with elevation colorbar and furniture.",
+			"extends" : "terrain-dem-a4l",
+			"id" : "terrain-dem-a4p",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 210
+			},
+			"product_type" : "terrain",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"colorbar.elevation"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"terrain",
+				"dem"
+			]
+		},
+		{
+			"description" : "Phenology small multiples (2\u00d72 temporal steps) with shared legend and series chart.",
+			"id" : "time-series-phenology-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "time_series",
+			"slot_roles" : 
+			[
+				"title.main",
+				"map.t1",
+				"map.t2",
+				"map.t3",
+				"map.t4",
+				"legend.primary",
+				"chart.series",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"time-series",
+				"phenology"
+			]
+		},
+		{
+			"description" : "Phenology small multiples (2\u00d72 temporal steps) with shared legend and series chart.",
+			"extends" : "time-series-phenology-a4l",
+			"id" : "time-series-phenology-a4p",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 210
+			},
+			"product_type" : "time_series",
+			"slot_roles" : 
+			[
+				"title.main",
+				"map.t1",
+				"map.t2",
+				"map.t3",
+				"map.t4",
+				"legend.primary",
+				"chart.series",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"time-series",
+				"phenology"
+			]
+		},
+		{
+			"description" : "Urban / building footprint density map with class chart.",
+			"id" : "urban-building-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "urban",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"chart.density"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"urban",
+				"building"
+			]
+		},
+		{
+			"description" : "Vegetation index (NDVI/EVI) continuous map with sequential colorbar and profile chart.",
+			"extends" : "vegetation-index-a4l",
+			"id" : "vegetation-index-a3l",
+			"page" : 
+			{
+				"height_mm" : 297,
+				"width_mm" : 420
+			},
+			"product_type" : "vegetation",
+			"slot_roles" : 
+			[
+				"chart.profile",
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"vegetation",
+				"ndvi",
+				"index"
+			]
+		},
+		{
+			"description" : "Vegetation index (NDVI/EVI) continuous map with sequential colorbar and profile chart.",
+			"id" : "vegetation-index-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "vegetation",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"chart.profile"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"vegetation",
+				"ndvi",
+				"index"
+			]
+		},
+		{
+			"description" : "Water / flood extent map with probability colorbar and uncertainty note.",
+			"extends" : "water-flood-a4l",
+			"id" : "water-flood-a3p",
+			"page" : 
+			{
+				"height_mm" : 420,
+				"width_mm" : 297
+			},
+			"product_type" : "water",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"colorbar.probability"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"water",
+				"flood"
+			]
+		},
+		{
+			"description" : "Water / flood extent map with probability colorbar and uncertainty note.",
+			"id" : "water-flood-a4l",
+			"page" : 
+			{
+				"height_mm" : 210,
+				"width_mm" : 297
+			},
+			"product_type" : "water",
+			"slot_roles" : 
+			[
+				"map.main",
+				"title.main",
+				"legend.primary",
+				"scalebar.primary",
+				"north_arrow.primary",
+				"source.primary",
+				"colorbar.probability"
+			],
+			"style" : 
+			{
+				"medium" : "print",
+				"token_set" : "scientific-light"
+			},
+			"suitable_tasks" : 
+			[
+				"water",
+				"flood"
+			]
+		}
+	],
+	"token_sets" : 
+	[
+		{
+			"description" : "Dark style for screen delivery (slide decks, dashboards, agent previews). Print export with this set is supported but documented as experimental: paper is reflective white, so dark pages waste toner and most journals reject them.",
+			"id" : "scientific-dark",
+			"mediums" : 
+			[
+				"print"
+			],
+			"version" : 1
+		},
+		{
+			"description" : "Default light scientific style for print-quality remote-sensing map products. Colorblind-safe qualitative palette (Okabe-Ito); ColorBrewer sequential/diverging ramps.",
+			"id" : "scientific-light",
+			"mediums" : 
+			[
+				"print",
+				"screen"
+			],
+			"version" : 1
+		}
+	]
+}

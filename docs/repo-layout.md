@@ -65,6 +65,7 @@ Runtime resolvers try `refs/qgis` first, then legacy `qgis_ref` and install `sha
 | `src/app/panels/data_manager_panel.*` | Data Manager asset-catalog dock, a read-only projection of asset snapshots, separate from the layer tree. |
 | `src/app/active_view_host.*` | Active Display View host: open path / display asset on the active view (ex-LayerManager). |
 | `src/agent/spatial_tools/` | Spatial Tool framework (ADR 0122): `SpatialTool` contract + registry + `spatial:` inspection/catalog tools; bridged into the Agent Tool Catalog by `SpatialToolProvider`. |
+| `src/agent/mapspec/`, `src/agent/cartography/`, `data/cartography/` | MapSpec declarative cartography (ADR 0127/0130/0131): MapSpec 2.0 document model + compiler, design tokens, component/template registries, composition solver, preflight/repair quality gates; descriptors in `data/cartography/{tokens,components,templates}` (machine index `index.json`), docs in `docs/cartography/`. |
 | `src/operators/framework/model_catalog.*` | Model runtime catalog (`ModelCatalog`) scanning `models/*/model.json`; `rs:infer` resolves catalog names. |
 | `src/processing/framework/algorithm_meta_store.*` | Algorithm capability sidecar store (`AlgorithmMetaStore`) over `data/processing/algorithm_meta/*.json`. |
 

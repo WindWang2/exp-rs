@@ -1,0 +1,44 @@
+{
+  "id": "map-frame/primary",
+  "version": 1,
+  "category": "map-frame",
+  "semantic_roles": [
+    "map.primary"
+  ],
+  "description": "Primary map frame with declared extent, scale, rotation, and layer set.",
+  "parameters": {},
+  "defaults": {
+    "semantic_role": "map.primary"
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "center"
+    ],
+    "margin_mm": 12,
+    "max_count_per_page": 2,
+    "min_size_mm": [
+      50,
+      50
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "map_types": [
+      "raster",
+      "vector"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "layers",
+      "source": "workspace.layers",
+      "required": false
+    },
+    {
+      "name": "extent",
+      "source": "workspace.extent",
+      "required": false
+    }
+  ]
+}
