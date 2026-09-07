@@ -41,6 +41,7 @@
 #include "rs_sar_terrain_masks_operator.h"
 #include "rs_temporal_monitor_operator.h"
 #include "rs_terrain_flow_operator.h"
+#include "rs_raster_spatial_operators.h"
 #include "rs_terrain_analysis_operator.h"
 #include "rs_pca_operator.h"
 #include "rs_mnf_operator.h"
@@ -146,6 +147,13 @@ REGISTER_RS_OPERATOR(RsSarDualPolOperator, "rs:sar_dualpol_features")
 REGISTER_RS_OPERATOR(RsSarTerrainMasksOperator, "rs:sar_terrain_masks")
 REGISTER_RS_OPERATOR(RsTemporalMonitorOperator, "rs:temporal_monitor")
 REGISTER_RS_OPERATOR(RsTerrainFlowOperator, "rs:terrain_flow")
+REGISTER_RS_OPERATOR(RsMorphologyOperator, "rs:morphology")
+REGISTER_RS_OPERATOR(RsConnectedComponentsOperator, "rs:connected_components")
+REGISTER_RS_OPERATOR(RsFillHolesOperator, "rs:fill_holes")
+REGISTER_RS_OPERATOR(RsSieveOperator, "rs:sieve")
+REGISTER_RS_OPERATOR(RsProximityOperator, "rs:proximity")
+REGISTER_RS_OPERATOR(RsLocalExtremaOperator, "rs:local_extrema")
+REGISTER_RS_OPERATOR(RsFocalStatsOperator, "rs:focal_stats")
 REGISTER_RS_OPERATOR(RsPcaOperator, "rs:pca")
 REGISTER_RS_OPERATOR(RsMnfOperator, "rs:mnf")
 REGISTER_RS_OPERATOR(RsMosaicOperator, "rs:mosaic")
@@ -276,6 +284,13 @@ void initBuiltinRsOperators() {
   add( "rs:sar_terrain_masks", [] { return std::make_unique<RsSarTerrainMasksOperator>(); } );
   add( "rs:temporal_monitor", [] { return std::make_unique<RsTemporalMonitorOperator>(); } );
   add( "rs:terrain_flow", [] { return std::make_unique<RsTerrainFlowOperator>(); } );
+  add( "rs:morphology", [] { return std::make_unique<RsMorphologyOperator>(); } );
+  add( "rs:connected_components", [] { return std::make_unique<RsConnectedComponentsOperator>(); } );
+  add( "rs:fill_holes", [] { return std::make_unique<RsFillHolesOperator>(); } );
+  add( "rs:sieve", [] { return std::make_unique<RsSieveOperator>(); } );
+  add( "rs:proximity", [] { return std::make_unique<RsProximityOperator>(); } );
+  add( "rs:local_extrema", [] { return std::make_unique<RsLocalExtremaOperator>(); } );
+  add( "rs:focal_stats", [] { return std::make_unique<RsFocalStatsOperator>(); } );
   add( "rs:pca", [] { return std::make_unique<RsPcaOperator>(); } );
   add( "rs:mnf", [] { return std::make_unique<RsMnfOperator>(); } );
   add( "rs:mosaic", [] { return std::make_unique<RsMosaicOperator>(); } );

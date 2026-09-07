@@ -663,6 +663,24 @@ target_include_directories(test_terrain_foundation5 PRIVATE
 )
 sicnu_discover_tests(test_terrain_foundation5)
 
+# Raster spatial operators (Foundation 5.0 Milestone G): morphology, labeling,
+# sieve, fill holes, proximity, extrema, focal stats (operator E2E).
+add_executable(test_raster_spatial5 test_raster_spatial5.cpp)
+target_link_libraries(test_raster_spatial5 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_raster_spatial5)
+target_include_directories(test_raster_spatial5 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_raster_spatial5)
+
 # Spectral classification (SAM + Continuum Removal) kernel tests
 add_executable(test_spectral_classification test_spectral_classification.cpp)
 target_link_libraries(test_spectral_classification PRIVATE
