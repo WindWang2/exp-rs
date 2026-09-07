@@ -132,6 +132,7 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_temporal_harmonic_fit_operator.cpp
     rs/rs_temporal_phenology_operator.cpp
     rs/rs_temporal_breakpoints_operator.cpp
+    rs/rs_temporal_sen_trend_operator.cpp
     rs/rs_temporal_decompose_operator.cpp
     rs/rs_temporal_anomaly_operator.cpp
     rs/rs_temporal_extract_series_operator.cpp

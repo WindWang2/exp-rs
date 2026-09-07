@@ -10,6 +10,7 @@
 // Included before sar_speckle.h, which references GdalBlockStream::Tile in
 // the refinedLeeTile declaration without including its own header.
 #include "processing/gdal/gdal_block_stream.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/algorithms/sar/sar_speckle.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -188,10 +189,7 @@ Json::Value RsSarSpeckleOperator::run(const Json::Value& params,
     }
 
     // Sentinel declared on the analysis band (NaN when undeclared).
-    bool hasNodata = false;
-    const double nodataRaw = src.bandNoDataValue(firstBand, &hasNodata);
-    const float nodata = hasNodata ? static_cast<float>(nodataRaw)
-                                   : std::numeric_limits<float>::quiet_NaN();
+    const float nodata = sicnu::rs::bandNoDataSentinel(src, firstBand);
 
     context.throwIfCancelled();
     context.reportProgress(0.05, "Filtering SAR speckle");

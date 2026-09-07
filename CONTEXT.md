@@ -581,3 +581,17 @@ ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision
 - **ADR 0127**: MapSpec Declarative Cartography
 - **ADR 0128**: Spatial Scientist Contracts
 - **ADR 0129**: Project Workspace, Data Governance & Reproducibility Platform 3.0
+- **ADR 0130**: Scientific Algorithms & Processing Foundation 4.0 (shared NoData/statistics/grid/histogram kernels, #759 fix, `rs:temporal_sen_trend`, validation-policy docs under `docs/processing/`)
+
+## Scientific Processing Policies (Foundation 4.0)
+
+The processing layer's scientific semantics are documented policy, not
+convention — `docs/processing/validation-policy.md` (tolerance grades tied to
+ADR 0124, fixture taxonomy), `docs/processing/nodata-and-statistics.md`
+(missing-value representation, valid-observation denominator rule, sample vs
+population variance table), `docs/processing/grid-and-radiometric-policy.md`
+(shared grid preflight with typed refusals, declarative radiometric
+scale/offset, band-role resolution, output publication), and
+`docs/processing/temporal.md` (per-operator denominators, time-axis handling,
+references). A PR that changes one of these contracts updates the page in the
+same PR.
