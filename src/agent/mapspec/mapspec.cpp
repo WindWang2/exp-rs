@@ -1,6 +1,7 @@
 // src/agent/mapspec/mapspec.cpp
 #include "mapspec.h"
 
+#include "mapspec_conditions.h"
 #include "../contracts/spatial_contracts.h"
 
 #include <QtGlobal>
@@ -134,6 +135,63 @@ void checkV2ItemFields( const Json::Value &item, const std::string &id,
   }
 }
 
+/// v3 per-item checks: bounded conditional expressions, style references and
+/// inset locator descriptors. Appends problems.
+void checkV3ItemFields( const Json::Value &item, const std::string &id, const std::string &collection,
+                        const std::set<std::string> &mapFrameIds,
+                        std::vector<std::string> &problems )
+{
+  for ( const char *member : { "visible_if", "content_if" } )
+  {
+    if ( !item.isMember( member ) )
+      continue;
+    if ( !item[member].isString() )
+    {
+      problems.push_back( id + ": " + member + " must be a condition string" );
+      continue;
+    }
+    std::vector<std::string> conditionProblems;
+    if ( !mapspec::validateConditionSyntax( item[member].asString(), &conditionProblems ) )
+      for ( const auto &problem : conditionProblems )
+        problems.push_back( id + ": " + member + ": " + problem );
+  }
+  if ( item.isMember( "style_ref" ) && !item["style_ref"].isString() )
+    problems.push_back( id + ": style_ref must be a style id string" );
+  if ( collection == "inset_maps" && item.isMember( "locator" ) )
+  {
+    const Json::Value &locator = item["locator"];
+    if ( !locator.isObject() )
+    {
+      problems.push_back( id + ": locator must be an object" );
+    }
+    else
+    {
+      if ( !locator.isMember( "target" ) || !locator["target"].isString() ||
+           locator["target"].asString().empty() )
+      {
+        problems.push_back( id + ": locator.target must name the referenced map frame" );
+      }
+      else if ( !mapFrameIds.count( locator["target"].asString() ) )
+      {
+        problems.push_back( id + ": locator.target '" + locator["target"].asString() +
+                            "' does not resolve to a map frame" );
+      }
+      if ( locator.isMember( "style" ) )
+      {
+        const std::string style = locator["style"].isString() ? locator["style"].asString() : "";
+        if ( style != "outline" && style != "region" && style != "frame" )
+          problems.push_back( id + ": locator.style must be outline|region|frame" );
+      }
+      for ( const char *member : { "stroke_mm", "label_size_pt" } )
+        if ( locator.isMember( member ) &&
+             ( !locator[member].isNumeric() || locator[member].asDouble() <= 0 ) )
+          problems.push_back( id + ": locator." + member + " must be positive" );
+      if ( locator.isMember( "label" ) && !locator["label"].isString() )
+        problems.push_back( id + ": locator.label must be a string" );
+    }
+  }
+}
+
 } // namespace
 
 const char *const kCollections[] = { "map_frames", "layers", "symbols", "legends",
@@ -156,7 +214,19 @@ bool isAnchorEdge( const std::string &edge )
 bool isConstraintKind( const std::string &kind )
 {
   static const char *const kKinds[] = { "align", "match_width", "match_height", "stack",
-                                        "distribute" };
+                                        "distribute", "above", "below", "left_of",
+                                        "right_of", "inside", "keep_with",
+                                        "avoid_overlap", "fit_content" };
+  for ( const char *candidate : kKinds )
+    if ( kind == candidate )
+      return true;
+  return false;
+}
+
+bool isRelativeConstraintKind( const std::string &kind )
+{
+  static const char *const kKinds[] = { "above", "below", "left_of", "right_of", "inside",
+                                        "keep_with", "avoid_overlap", "fit_content" };
   for ( const char *candidate : kKinds )
     if ( kind == candidate )
       return true;
@@ -392,6 +462,8 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
 
       // v2 composition fields.
       checkV2ItemFields( item, id, problems );
+      // v3 knowledge-platform fields.
+      checkV3ItemFields( item, id, info->name, mapFrameIds, problems );
     }
   }
 
@@ -460,7 +532,39 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
           if ( kind != "frame_style" )
             problems.push_back( cid + ": unknown constraint kind '" + kind +
                                 "' (align|match_width|match_height|stack|distribute|"
-                                "frame_style)" );
+                                "above|below|left_of|right_of|inside|keep_with|"
+                                "avoid_overlap|fit_content|frame_style)" );
+          continue;
+        }
+        if ( isRelativeConstraintKind( kind ) )
+        {
+          // v3 relative constraints: fit_content resizes one declared item;
+          // all others pair exactly one target with one follower.
+          const int expectedItems = kind == "fit_content" ? 1 : 2;
+          if ( !constraint.isMember( "items" ) || !constraint["items"].isArray() ||
+               static_cast<int>( constraint["items"].size() ) != expectedItems )
+          {
+            problems.push_back( cid + ": constraint '" + kind + "' needs an items array with exactly " +
+                                std::to_string( expectedItems ) + " id(s)" );
+            continue;
+          }
+          for ( const auto &reference : constraint["items"] )
+          {
+            if ( !reference.isString() )
+              continue;
+            if ( findMapSpecItem( spec, reference.asString() ).isNull() )
+              problems.push_back( cid + ": constraint item '" + reference.asString() +
+                                  "' does not resolve" );
+          }
+          if ( kind == "fit_content" )
+          {
+            const Json::Value &content = constraint.get( "content_mm", Json::Value() );
+            if ( !isPositiveSizeArray( content ) )
+              problems.push_back( cid + ": fit_content needs content_mm [width_mm, height_mm]" );
+          }
+          if ( constraint.isMember( "gap_mm" ) &&
+               ( !constraint["gap_mm"].isNumeric() || constraint["gap_mm"].asDouble() < 0 ) )
+            problems.push_back( cid + ": gap_mm must be a non-negative number" );
           continue;
         }
         if ( !constraint.isMember( "items" ) || !constraint["items"].isArray() ||
@@ -510,6 +614,29 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
              pageEntry["height_mm"].asDouble() <= 0 )
         {
           problems.push_back( "every page needs positive width_mm/height_mm" );
+          continue;
+        }
+        // v3: page roles and feature-gated pages.
+        if ( pageEntry.isMember( "role" ) )
+        {
+          const std::string role = pageEntry["role"].isString() ? pageEntry["role"].asString() : "";
+          if ( role != "cover" && role != "map" && role != "report" && role != "appendix" )
+            problems.push_back( "page.role must be cover|map|report|appendix" );
+        }
+        if ( pageEntry.isMember( "page_if" ) )
+        {
+          if ( !pageEntry["page_if"].isString() )
+          {
+            problems.push_back( "page.page_if must be a condition string" );
+          }
+          else
+          {
+            std::vector<std::string> conditionProblems;
+            if ( !mapspec::validateConditionSyntax( pageEntry["page_if"].asString(),
+                                                    &conditionProblems ) )
+              for ( const auto &problem : conditionProblems )
+                problems.push_back( std::string( "page_if: " ) + problem );
+          }
         }
       }
     }
@@ -532,7 +659,7 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
     }
   }
 
-  // --- v2: atlas hook ---------------------------------------------------------
+  // --- v2/v3: atlas hook -------------------------------------------------------
   if ( spec.isMember( "page" ) && spec["page"].isObject() && spec["page"].isMember( "atlas" ) )
   {
     const Json::Value &atlas = spec["page"]["atlas"];
@@ -546,6 +673,46 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
         problems.push_back( "page.atlas.coverage_layer must be a layer reference string" );
       if ( atlas.isMember( "filename_expression" ) && !atlas["filename_expression"].isString() )
         problems.push_back( "page.atlas.filename_expression must be a string" );
+      // v3 surface: filter/sort/margins/expressions/feature variables. QGIS
+      // expression strings are passed through verbatim (QGIS validates them
+      // at atlas preparation); structure is checked here.
+      for ( const char *member : { "filter_expression", "filename_expression",
+                                   "page_number_expression", "sort_expression" } )
+        if ( atlas.isMember( member ) && !atlas[member].isString() )
+          problems.push_back( std::string( "page.atlas." ) + member + " must be a string" );
+      if ( atlas.isMember( "sort_by" ) && !atlas["sort_by"].isString() )
+        problems.push_back( "page.atlas.sort_by must be a field name string" );
+      if ( atlas.isMember( "sort_order" ) )
+      {
+        const std::string order = atlas["sort_order"].isString() ? atlas["sort_order"].asString() : "";
+        if ( order != "asc" && order != "desc" )
+          problems.push_back( "page.atlas.sort_order must be asc|desc" );
+      }
+      if ( atlas.isMember( "margins_mm" ) )
+      {
+        const Json::Value &margins = atlas["margins_mm"];
+        if ( !margins.isArray() || margins.size() != 4 )
+          problems.push_back( "page.atlas.margins_mm must be [left, right, top, bottom]" );
+        else
+          for ( const auto &margin : margins )
+            if ( !margin.isNumeric() || margin.asDouble() < 0 )
+              problems.push_back( "page.atlas.margins_mm entries must be non-negative numbers" );
+      }
+      if ( atlas.isMember( "margin_fraction" ) )
+      {
+        const Json::Value &fraction = atlas["margin_fraction"];
+        if ( !fraction.isNumeric() || fraction.asDouble() < 0 || fraction.asDouble() >= 1 )
+          problems.push_back( "page.atlas.margin_fraction must be within [0, 1)" );
+      }
+      if ( atlas.isMember( "feature_variables" ) )
+      {
+        if ( !atlas["feature_variables"].isArray() )
+          problems.push_back( "page.atlas.feature_variables must be an array" );
+        else if ( atlas["feature_variables"].size() > 32 )
+          problems.push_back( "page.atlas.feature_variables capped at 32 entries" );
+      }
+      if ( atlas.isMember( "filter" ) && !atlas["filter"].isString() )
+        problems.push_back( "page.atlas.filter must be a QGIS expression string" );
     }
   }
 
@@ -584,8 +751,9 @@ Json::Value upgradeMapSpec( const Json::Value &doc )
       appendMapSpecItem( upgraded, it->second, std::move( migrated ) );
     }
   }
-  // v1 → v2: every v2 field is optional, so the upgrade is a version bump.
-  // Idempotent: v2 documents and non-envelope inputs pass through unchanged.
+  // v1 → v2 → v3: every newer-version field is optional, so the upgrade is a
+  // version bump. Idempotent: current-version documents and non-envelope
+  // inputs pass through unchanged.
   const std::string env = checkEnvelope( upgraded, "map_spec" );
   if ( env.empty() && upgraded["spec_version"].asInt() < kMapSpecCurrentVersion )
     upgraded["spec_version"] = kMapSpecCurrentVersion;
@@ -655,6 +823,190 @@ bool applyMapSpecPatches( Json::Value &spec, const Json::Value &patches, std::st
       return false;
   }
   return true;
+}
+
+Json::Value resolveMapSpecConditions( Json::Value &spec, const Json::Value &context,
+                                      std::vector<std::string> *errors )
+{
+  Json::Value ledger( Json::arrayValue );
+  if ( !spec.isObject() || !spec.isMember( "condition_context" ) )
+    return ledger;
+  if ( !context.isObject() && !context.isNull() )
+  {
+    if ( errors )
+      errors->push_back( "condition context must be an object" );
+    return ledger;
+  }
+
+  auto record = [ &ledger ]( const std::string &id, const std::string &field,
+                             const std::string &condition, bool visible, const std::string &error ) {
+    Json::Value entry( Json::objectValue );
+    entry["id"] = id;
+    entry["field"] = field;
+    entry["condition"] = condition;
+    entry["outcome"] = visible ? "visible" : "hidden";
+    if ( !error.empty() )
+      entry["error"] = error;
+    ledger.append( entry );
+  };
+
+  const Json::Value &ctx = context;
+
+  // 1. Items: visible_if prunes whole items; content_if strips content.
+  std::set<std::string> removedIds;
+  for ( int c = 0; c < kCollectionCount; ++c )
+  {
+    const char *collection = kCollections[c];
+    if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+      continue;
+    Json::Value kept( Json::arrayValue );
+    for ( const auto &item : spec[collection] )
+    {
+      if ( !item.isObject() || ( !item.isMember( "visible_if" ) && !item.isMember( "content_if" ) ) )
+      {
+        kept.append( item );
+        continue;
+      }
+      const std::string id = item.isMember( "id" ) && item["id"].isString()
+                               ? item["id"].asString()
+                               : std::string( "?" );
+      bool keep = true;
+      if ( item.isMember( "visible_if" ) && item["visible_if"].isString() )
+      {
+        const std::string condition = item["visible_if"].asString();
+        std::string evalError;
+        bool value = false;
+        if ( mapspec::evaluateCondition( condition, ctx, &value, &evalError ) )
+        {
+          keep = value;
+          record( id, "visible_if", condition, value, std::string() );
+        }
+        else
+        {
+          // Conservative: an unevaluable condition keeps the content.
+          keep = true;
+          record( id, "visible_if", condition, true, evalError );
+          if ( errors )
+            errors->push_back( id + ": visible_if: " + evalError );
+        }
+      }
+      if ( !keep )
+      {
+        removedIds.insert( id );
+        continue;
+      }
+      if ( item.isMember( "content_if" ) && item["content_if"].isString() )
+      {
+        const std::string condition = item["content_if"].asString();
+        std::string evalError;
+        bool value = true;
+        if ( mapspec::evaluateCondition( condition, ctx, &value, &evalError ) && !value )
+        {
+          Json::Value pruned = item;
+          pruned.removeMember( "content" );
+          pruned.removeMember( "content_if" );
+          const bool emptyWithoutContent = !pruned.isMember( "text" ) &&
+                                           !pruned.isMember( "chart" ) && !pruned.isMember( "colors" );
+          record( id, "content_if", condition, false, std::string() );
+          if ( emptyWithoutContent )
+          {
+            removedIds.insert( id );
+            continue; // slot furniture without content: drop entirely
+          }
+          kept.append( pruned );
+          continue;
+        }
+        if ( !evalError.empty() )
+        {
+          if ( errors )
+            errors->push_back( id + ": content_if: " + evalError );
+          record( id, "content_if", condition, true, evalError );
+        }
+      }
+      kept.append( item );
+    }
+    spec[collection] = kept;
+  }
+
+  // 2. Pages: page_if prunes pages; items on pruned pages are removed and
+  // surviving page indices remap compactly.
+  if ( spec.isMember( "pages" ) && spec["pages"].isArray() )
+  {
+    std::vector<int> keptPages;
+    for ( int index = 0; index < static_cast<int>( spec["pages"].size() ); ++index )
+    {
+      const Json::Value &pageEntry = spec["pages"][index];
+      if ( !pageEntry.isObject() || !pageEntry.isMember( "page_if" ) ||
+           !pageEntry["page_if"].isString() )
+      {
+        keptPages.push_back( index );
+        continue;
+      }
+      const std::string condition = pageEntry["page_if"].asString();
+      std::string evalError;
+      bool value = true;
+      if ( mapspec::evaluateCondition( condition, ctx, &value, &evalError ) && !value )
+      {
+        record( "page-" + std::to_string( index + 1 ), "page_if", condition, false, std::string() );
+        continue;
+      }
+      if ( !evalError.empty() )
+      {
+        if ( errors )
+          errors->push_back( std::string( "page_if: " ) + evalError );
+        record( "page-" + std::to_string( index + 1 ), "page_if", condition, true, evalError );
+      }
+      keptPages.push_back( index );
+    }
+    if ( keptPages.size() != static_cast<size_t>( spec["pages"].size() ) )
+    {
+      std::map<int, int> remap;
+      Json::Value pages( Json::arrayValue );
+      for ( int newIndex = 0; newIndex < static_cast<int>( keptPages.size() ); ++newIndex )
+      {
+        remap[keptPages[newIndex] + 1] = newIndex + 1; // item page indices are 1-based
+        pages.append( spec["pages"][keptPages[newIndex]] );
+      }
+      spec["pages"] = pages;
+      for ( int c = 0; c < kCollectionCount; ++c )
+      {
+        const char *collection = kCollections[c];
+        if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+          continue;
+        Json::Value remapped( Json::arrayValue );
+        for ( const auto &item : spec[collection] )
+        {
+          if ( !item.isObject() || !item.isMember( "page" ) || !item["page"].isIntegral() )
+          {
+            remapped.append( item );
+            continue;
+          }
+          const int oldPage = item["page"].asInt();
+          if ( removedIds.count( item.isMember( "id" ) && item["id"].isString()
+                                   ? item["id"].asString()
+                                   : std::string() ) )
+            continue;
+          if ( oldPage > 0 && remap.count( oldPage ) )
+          {
+            Json::Value moved = item;
+            moved["page"] = remap[oldPage];
+            remapped.append( moved );
+          }
+          else if ( oldPage == 0 )
+          {
+            remapped.append( item );
+          }
+          // oldPage > 0 without a remap target: the page was pruned; drop the item.
+        }
+        spec[collection] = remapped;
+      }
+    }
+  }
+
+  // The context is consumed: clear it so repeated compiles stay deterministic
+  // and the ledger (not the context) documents the outcome.
+  spec.removeMember( "condition_context" );
+  return ledger;
 }
 
 } // namespace sicnu::agent::mapspec

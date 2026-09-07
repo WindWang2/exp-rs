@@ -25,6 +25,9 @@
 #include <qgslayoutsize.h>
 #include <qgslayoutpoint.h>
 #include <qgslayoutatlas.h>
+#include <qgslayoutitemmapoverview.h>
+#include <qgssymbol.h>
+#include <qgsfillsymbol.h>
 #include <qgsvectorlayer.h>
 #include <qgsmaplayer.h>
 
@@ -139,10 +142,18 @@ QgsLayoutItem *compileTextItem( QgsPrintLayout *layout, const QString &type,
 
 QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *error )
 {
-  // Mutable working copy (the input document is never modified). Validation
-  // runs on the draft as provided; component defaults then resolve before
-  // any item is materialized.
+  // Mutable working copy (the input document is never modified). v3
+  // conditional fields resolve first (when the caller stamped a
+  // condition_context), then validation runs on what will actually compile.
   Json::Value spec = specIn;
+  if ( spec.isObject() && spec.isMember( "condition_context" ) )
+  {
+    std::vector<std::string> conditionErrors;
+    resolveMapSpecConditions( spec, spec["condition_context"], &conditionErrors );
+    // Evaluation errors are advisory: unevaluable conditions kept their
+    // content, and the caller's preflight reports them.
+    Q_UNUSED( conditionErrors );
+  }
   const auto problems = validateMapSpec( spec );
   if ( !problems.empty() )
   {
@@ -184,7 +195,8 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
     }
   }
 
-  // --- v2 atlas hook ----------------------------------------------------------
+  // --- v2/v3 atlas hook --------------------------------------------------------
+  double atlasMarginFraction = -1.0;
   if ( page.isMember( "atlas" ) && page["atlas"].isObject() )
   {
     const Json::Value &atlasSpec = page["atlas"];
@@ -215,6 +227,33 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         QString expressionError;
         atlas->setFilenameExpression(
           QString::fromStdString( atlasSpec["filename_expression"].asString() ), expressionError );
+      }
+      // v3 atlas surface: filter, sort, per-feature margin fraction.
+      if ( atlasSpec.isMember( "filter" ) && atlasSpec["filter"].isString() &&
+           !atlasSpec["filter"].asString().empty() )
+      {
+        QString filterError;
+        if ( atlas->setFilterExpression(
+               QString::fromStdString( atlasSpec["filter"].asString() ), filterError ) )
+          atlas->setFilterFeatures( true );
+      }
+      std::string sortExpression;
+      if ( atlasSpec.isMember( "sort_expression" ) && atlasSpec["sort_expression"].isString() )
+        sortExpression = atlasSpec["sort_expression"].asString();
+      else if ( atlasSpec.isMember( "sort_by" ) && atlasSpec["sort_by"].isString() )
+        sortExpression = atlasSpec["sort_by"].asString();
+      if ( !sortExpression.empty() )
+      {
+        atlas->setSortExpression( QString::fromStdString( sortExpression ) );
+        atlas->setSortFeatures( true );
+        atlas->setSortAscending(
+          !( atlasSpec.isMember( "sort_order" ) && atlasSpec["sort_order"].isString() &&
+             atlasSpec["sort_order"].asString() == "desc" ) );
+      }
+      if ( atlasSpec.isMember( "margin_fraction" ) && atlasSpec["margin_fraction"].isNumeric() )
+      {
+        // Applied per map item below (QGIS keeps the atlas margin on the map).
+        atlasMarginFraction = atlasSpec["margin_fraction"].asDouble();
       }
     }
   }
@@ -268,7 +307,8 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       props["layers"] = layerRefs;
     }
     const std::string id = frame["id"].asString();
-    if ( !compileItem( layout, "map", id, props, &itemError ) )
+    QgsLayoutItem *frameItem = compileItem( layout, "map", id, props, &itemError );
+    if ( !frameItem )
     {
       if ( error )
         *error = QStringLiteral( "map frame '%1': %2" ).arg( QString::fromStdString( id ), itemError );
@@ -277,6 +317,9 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       LayoutService::instance().deleteLayout( QString::fromStdString( spec["layout_name"].asString() ) );
       return nullptr;
     }
+    if ( atlasMarginFraction >= 0.0 )
+      if ( auto *compiledMap = qobject_cast<QgsLayoutItemMap *>( frameItem ) )
+        compiledMap->setAtlasMargin( atlasMarginFraction );
     mapFrameIds.push_back( id );
   }
 
@@ -322,6 +365,93 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         *error = QStringLiteral( "inset map '%1': %2" ).arg( QString::fromStdString( id ), itemError );
       LayoutService::instance().deleteLayout( QString::fromStdString( spec["layout_name"].asString() ) );
       return nullptr;
+    }
+
+    // v3 locator extent indicator: the inset draws the referenced frame's
+    // extent through the QGIS-native overview mechanism (a real layout
+    // primitive — no screenshot hacks).
+    if ( inset.isMember( "locator" ) && inset["locator"].isObject() )
+    {
+      const Json::Value &locator = inset["locator"];
+      if ( locator.isMember( "target" ) && locator["target"].isString() )
+      {
+        auto *insetMap = qobject_cast<QgsLayoutItemMap *>(
+          LayoutService::instance().findItem( layout, QString::fromStdString( id ) ) );
+        auto *targetMap = qobject_cast<QgsLayoutItemMap *>(
+          LayoutService::instance().findItem( layout,
+                                              QString::fromStdString( locator["target"].asString() ) ) );
+        if ( insetMap && targetMap )
+        {
+          const std::string style =
+            locator.isMember( "style" ) && locator["style"].isString() ? locator["style"].asString()
+                                                                      : "outline";
+          auto *overview = new QgsLayoutItemMapOverview(
+            QStringLiteral( "locator-%1" ).arg( QString::fromStdString( id ) ), insetMap );
+          overview->setLinkedMap( targetMap );
+          overview->setEnabled( true );
+          if ( style == "region" )
+          {
+            // Region highlight: translucent accent fill over the extent.
+            QVariantMap regionProps;
+            regionProps[QStringLiteral( "color" )] = QStringLiteral( "#0072b2" );
+            regionProps[QStringLiteral( "style" )] = QStringLiteral( "solid" );
+            regionProps[QStringLiteral( "outline_color" )] = QStringLiteral( "#004488" );
+            regionProps[QStringLiteral( "outline_width" )] = QStringLiteral( "0.4" );
+            regionProps[QStringLiteral( "width_unit" )] = QStringLiteral( "MM" );
+            overview->setFrameSymbol(
+              QgsFillSymbol::createSimple( regionProps ) );
+            overview->setBlendMode( QPainter::CompositionMode_SourceOver );
+          }
+          else if ( style == "frame" )
+          {
+            // Transparent fill, heavier stroke only.
+            QVariantMap frameProps;
+            frameProps[QStringLiteral( "style" )] = QStringLiteral( "no" );
+            frameProps[QStringLiteral( "outline_color" )] = QStringLiteral( "#222222" );
+            const double stroke = locator.isMember( "stroke_mm" ) && locator["stroke_mm"].isNumeric()
+                                    ? locator["stroke_mm"].asDouble()
+                                    : 0.8;
+            frameProps[QStringLiteral( "outline_width" )] = QString::number( stroke );
+            frameProps[QStringLiteral( "width_unit" )] = QStringLiteral( "MM" );
+            overview->setFrameSymbol( QgsFillSymbol::createSimple( frameProps ) );
+          }
+          else
+          {
+            // Default QGIS overview frame: inverted shading outside the extent.
+            const bool inverted = !( locator.isMember( "inverted" ) && locator["inverted"].isBool() &&
+                                     !locator["inverted"].asBool() );
+            overview->setInverted( inverted );
+            const double stroke = locator.isMember( "stroke_mm" ) && locator["stroke_mm"].isNumeric()
+                                    ? locator["stroke_mm"].asDouble()
+                                    : 0.4;
+            QVariantMap outlineProps;
+            outlineProps[QStringLiteral( "style" )] = QStringLiteral( "no" );
+            outlineProps[QStringLiteral( "outline_color" )] = QStringLiteral( "#333333" );
+            outlineProps[QStringLiteral( "outline_width" )] = QString::number( stroke );
+            outlineProps[QStringLiteral( "width_unit" )] = QStringLiteral( "MM" );
+            overview->setFrameSymbol( QgsFillSymbol::createSimple( outlineProps ) );
+          }
+          insetMap->overviews()->addOverview( overview );
+          insetMap->update();
+          if ( locator.isMember( "label" ) && locator["label"].isString() &&
+               inset.isMember( "rect_mm" ) && inset["rect_mm"].isArray() &&
+               inset["rect_mm"].size() == 4 )
+          {
+            // Caption under the inset (label size from tokens unless given).
+            Json::Value labelProps( Json::objectValue );
+            labelProps["x"] = inset["rect_mm"][0];
+            labelProps["y"] = inset["rect_mm"][1].asDouble() + inset["rect_mm"][3].asDouble() + 1.0;
+            labelProps["width"] = inset["rect_mm"][2];
+            labelProps["height"] = 6.0;
+            labelProps["text"] = locator["label"];
+            if ( locator.isMember( "label_size_pt" ) && locator["label_size_pt"].isNumeric() )
+              labelProps["font_size"] = locator["label_size_pt"];
+            else
+              applyTokenTextStyle( labelProps, locator, tokens, "caption", 8.0 );
+            compileTextItem( layout, "label", id + "-locator-label", labelProps, tokens );
+          }
+        }
+      }
     }
   }
 
