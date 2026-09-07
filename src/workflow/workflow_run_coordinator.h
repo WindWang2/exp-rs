@@ -105,6 +105,9 @@ class WorkflowRunCoordinator : public QObject {
     /// Terminal roll-up + ArtifactGC + checkpoint retention. Called with
     /// m_mutex held when the last step of a tracked run went terminal.
     void finalizeRunLocked( long pipelineId, WorkflowRun &run );
+    /// Emits runStateChanged with effective timestamps. Requires m_mutex
+    /// held (reads the run, callers serialize state transitions).
+    void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
     /// m_mutex-free directory read for call paths that already hold it.
     QString checkpointDirectoryLocked() const;
     QString checkpointPathLocked( const std::string &runId ) const;
