@@ -27,10 +27,39 @@ Install root: `~/.local/share/sicnu_geo_rs/plugins/<plugin-id>`.
    stay inside source and destination (zip-slip style checks).
 4. Re-installing the same id replaces the previous payload (read-modify of
    other plugins is never required).
+5. **Entrypoint containment is re-checked at load time** (`E3007`): a
+   manifest whose `entrypoint` is absolute, contains `..`, or resolves
+   through a symlink outside the plugin root is refused at validation AND
+   immediately before the library is mapped — install-time validation alone
+   is never trusted (issue #756; see ADR 0130).
 
 ## Enable/disable
 
 `plugins.index.json` next to the user plugin root records disabled ids.
 Disabled is a registry state (`E5003` in diagnostics), distinct from
 broken (`E1xxx`) or incompatible (`E2xxx`) — the Plugin Manager and
-`plugin list` show all three.
+`plugin list` show all three. Disable unloads a loaded plugin (refused with
+`E4005 PluginInUse` while it is still executing); enable re-loads and
+re-attaches its contributions — no restart (ADR 0130).
+
+## Conformance
+
+```bash
+sicnu_geo_rs_cli plugin test ./my-plugin    # PT_* checks, JSON with --json
+```
+
+Exercises manifest schema (PT_MANIFEST), API/ABI/platform compatibility
+(PT_COMPAT), entrypoint containment (PT_CONTAINMENT), load (PT_LOAD),
+operator registration (PT_REGISTER), unload revocation (PT_REVOKE) and the
+enable round-trip (PT_ROUNDTRIP); non-zero exit when any check fails.
+
+## Scaffolding
+
+```bash
+python3 scripts/exprs_new_plugin.py --kind external_tool \
+    --id org.acme.ndvi-tool --name "NDVI Tool" --out ~/plugins
+```
+
+Generates a minimal conformance-shaped plugin for one of: `cpp_operator`,
+`python_operator`, `external_tool`, `model_runtime`, `data_provider`,
+`agent_tool`, `ui_contribution`.

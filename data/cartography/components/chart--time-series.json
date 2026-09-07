@@ -1,0 +1,52 @@
+{
+  "id": "chart/time-series",
+  "version": 1,
+  "category": "chart",
+  "semantic_roles": [
+    "chart.trend"
+  ],
+  "description": "Time-anchored line chart with date labels (phenology, NDVI trajectory, water level).",
+  "parameters": {
+    "kind": "line"
+  },
+  "defaults": {
+    "chart": {
+      "kind": "line",
+      "binding": {
+        "mode": "inline",
+        "data": []
+      },
+      "style": {
+        "x_is_time": true
+      }
+    }
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "bottom-rail",
+      "right-rail"
+    ],
+    "margin_mm": 6,
+    "max_count_per_page": 4,
+    "min_size_mm": [
+      30,
+      25
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "time_series",
+      "phenology"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "data",
+      "source": "params.chart_data",
+      "required": true,
+      "description": "inline [{label, value}] or vector_expression {layer, x_expression, y_expression}."
+    }
+  ]
+}

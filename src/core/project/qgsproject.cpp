@@ -3655,9 +3655,10 @@ bool QgsProject::writeProjectFile( const QString &filename )
 #endif
     if ( ok )
     {
-      // fsync the directory so the rename itself is durable. POSIX only:
-      // Windows cannot ::open() a directory (and _commit on a directory fd
-      // is meaningless), so the fallback above carries durability there.
+      // fsync the directory so the rename itself is durable. POSIX-only:
+      // Windows has no directory-fd equivalent (::open on a directory +
+      // _commit is undefined), and MoveFileWriteThrough-style durability
+      // for the containing directory is not available through the CRT.
 #ifndef Q_OS_WIN
       QDir targetDir = targetInfo.dir();
 #ifdef O_DIRECTORY

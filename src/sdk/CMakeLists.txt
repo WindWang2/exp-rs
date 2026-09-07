@@ -18,6 +18,7 @@
 ###############################################################################
 
 set( EXPRS_SDK_SOURCES
+  exprs/path_policy.cpp
   exprs/plugin_diagnostics.cpp
   exprs/plugin_manifest.cpp
   exprs/plugin_permissions.cpp
@@ -64,6 +65,7 @@ add_library( ExpRS::SDK ALIAS exprs_sdk )
 
 set( EXPRS_SDK_INCLUDE_HEADERS
   exprs/version.h
+  exprs/path_policy.h
   exprs/plugin_diagnostics.h
   exprs/plugin_manifest.h
   exprs/plugin_permissions.h

@@ -3,17 +3,8 @@
  ***************************************************************************/
 #include "exprs/plugin_package.h"
 
-#ifdef _WIN32
-#include "exprs/msvc_posix_shim.h"
-#else
-#include <dirent.h>
-#endif
-#include <sys/stat.h>
-#ifndef _WIN32
-#include <unistd.h>
-#endif
-
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 
 #include "exprs/plugin_discovery.h"
@@ -23,10 +14,14 @@ namespace exprs {
 
 namespace {
 
+namespace fs = std::filesystem;
+
+/// Directory test that does NOT follow symlinks (install payloads must not
+/// gain directories through symlink hops).
 bool isDirectory( const std::string &path )
 {
-    struct stat info {};
-    return ::lstat( path.c_str(), &info ) == 0 && S_ISDIR( info.st_mode );
+    std::error_code error;
+    return fs::symlink_status( fs::path( path ), error ).type() == fs::file_type::directory;
 }
 
 /// True when @p candidate is strictly inside @p root (lexical containment,
@@ -44,24 +39,27 @@ bool contained( const std::string &root, const std::string &candidate )
 
 bool copyTree( const std::string &source, const std::string &target, std::string &error )
 {
-    DIR *dir = ::opendir( source.c_str() );
-    if ( !dir )
+    std::error_code iteratorError;
+    fs::directory_iterator iterator( fs::path( source ), iteratorError );
+    if ( iteratorError )
     {
         error = "cannot open " + source;
         return false;
     }
-    if ( ::mkdir( target.c_str(), 0755 ) != 0 && errno != EEXIST )
+    std::error_code createError;
+    fs::create_directory( fs::path( target ), createError );
+    if ( createError && !fs::is_directory( fs::path( target ) ) )
     {
         error = "cannot create " + target;
-        ::closedir( dir );
         return false;
     }
     bool ok = true;
-    struct dirent *entry = nullptr;
-    while ( ok && ( entry = ::readdir( dir ) ) != nullptr )
+    for ( const fs::directory_entry &entry : iterator )
     {
-        const std::string name( entry->d_name );
-        if ( name == "." || name == ".." || name.empty() || name.front() == '.' )
+        if ( !ok )
+            break;
+        const std::string name = entry.path().filename().generic_string();
+        if ( name.empty() || name.front() == '.' )
             continue; // skip cache indexes and hidden files
         const std::string childSource = source + "/" + name;
         const std::string childTarget = target + "/" + name;
@@ -71,18 +69,20 @@ bool copyTree( const std::string &source, const std::string &target, std::string
             ok = false;
             break;
         }
-        struct stat info {};
-        if ( ::lstat( childSource.c_str(), &info ) != 0 )
+        // symlink_status: symlinks/devices/fifos are refused, not followed.
+        std::error_code statusError;
+        const fs::file_status status = fs::symlink_status( entry.path(), statusError );
+        if ( statusError )
         {
             error = "cannot stat " + childSource;
             ok = false;
             break;
         }
-        if ( S_ISDIR( info.st_mode ) )
+        if ( status.type() == fs::file_type::directory )
         {
             ok = copyTree( childSource, childTarget, error );
         }
-        else if ( S_ISREG( info.st_mode ) )
+        else if ( status.type() == fs::file_type::regular )
         {
             std::ifstream input( childSource, std::ios::binary );
             std::ofstream output( childTarget, std::ios::binary | std::ios::trunc );
@@ -93,42 +93,28 @@ bool copyTree( const std::string &source, const std::string &target, std::string
                 break;
             }
             output << input.rdbuf();
-            ::chmod( childTarget.c_str(), info.st_mode & 0777 );
+            // Preserve the source mode where the platform supports it.
+            std::error_code permissionsError;
+            fs::permissions( fs::path( childTarget ), status.permissions(),
+                             fs::perm_options::replace, permissionsError );
+            (void)permissionsError;
         }
         else
         {
-            // Symlinks/devices/fifos are refused, not followed.
             error = "refusing non-regular entry in package: " + childSource;
             ok = false;
             break;
         }
     }
-    ::closedir( dir );
     return ok;
 }
 
 bool removeTree( const std::string &path )
 {
-    DIR *dir = ::opendir( path.c_str() );
-    if ( !dir )
-        return ::remove( path.c_str() ) == 0;
-    bool ok = true;
-    while ( struct dirent *entry = ::readdir( dir ) )
-    {
-        const std::string name( entry->d_name );
-        if ( name == "." || name == ".." )
-            continue;
-        const std::string child = path + "/" + name;
-        struct stat info {};
-        if ( ::lstat( child.c_str(), &info ) != 0 )
-            continue;
-        if ( S_ISDIR( info.st_mode ) )
-            ok = removeTree( child ) && ok;
-        else
-            ok = ( ::unlink( child.c_str() ) == 0 ) && ok;
-    }
-    ::closedir( dir );
-    return ::rmdir( path.c_str() ) == 0 && ok;
+    std::error_code error;
+    // remove_all on a symlink removes the link itself, not the target.
+    fs::remove_all( fs::path( path ), error );
+    return !error && !fs::exists( fs::path( path ) );
 }
 
 } // namespace
@@ -179,17 +165,16 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
     }
 
     // Create the user root chain.
-    std::string current;
-    size_t start = 0;
-    while ( start <= userRoot.size() )
+    std::error_code createError;
+    fs::create_directories( fs::path( userRoot ), createError );
+    if ( createError && !fs::is_directory( fs::path( userRoot ) ) )
     {
-        const size_t next = userRoot.find( '/', start );
-        current = userRoot.substr( 0, next == std::string::npos ? userRoot.size() : next );
-        if ( !current.empty() )
-            ::mkdir( current.c_str(), 0755 );
-        if ( next == std::string::npos )
-            break;
-        start = next + 1;
+        PluginDiagnostic failure;
+        failure.code = PluginDiagnosticCode::ResourceMissing;
+        failure.pluginId = manifest.id;
+        failure.message = "cannot create user plugin root " + userRoot;
+        log.add( failure );
+        return false;
     }
 
     // Refresh the install: remove our previous payload first.
@@ -297,20 +282,21 @@ std::vector<std::string> PluginPackage::installedIds()
 {
     std::vector<std::string> ids;
     const std::string userRoot = PluginDiscovery::userPluginRoot();
-    DIR *dir = ::opendir( userRoot.c_str() );
-    if ( !dir )
+    std::error_code error;
+    fs::directory_iterator iterator( fs::path( userRoot ), error );
+    if ( error )
         return ids;
-    while ( struct dirent *entry = ::readdir( dir ) )
+    for ( const fs::directory_entry &entry : iterator )
     {
-        const std::string name( entry->d_name );
+        const std::string name = entry.path().filename().generic_string();
         if ( name.empty() || name.front() == '.' )
             continue;
-        PluginDiagnostic error;
+        PluginDiagnostic manifestError;
         PluginManifest manifest;
-        if ( loadManifestFromFile( userRoot + "/" + name + "/plugin.json", manifest, error ) )
+        if ( loadManifestFromFile( userRoot + "/" + name + "/plugin.json", manifest,
+                                   manifestError ) )
             ids.push_back( manifest.id );
     }
-    ::closedir( dir );
     std::sort( ids.begin(), ids.end() );
     return ids;
 }

@@ -1,0 +1,45 @@
+{
+  "id": "map-frame/comparison",
+  "version": 1,
+  "category": "map-frame",
+  "semantic_roles": [
+    "map.before",
+    "map.after"
+  ],
+  "description": "Paired before/after frames declared with equal size and aligned tops for change products.",
+  "parameters": {
+    "pair": "before-after",
+    "match": "height"
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "preferred_positions": [
+      "center"
+    ],
+    "margin_mm": 12,
+    "max_count_per_page": 1,
+    "min_size_mm": [
+      40,
+      40
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "change",
+      "before_after"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "before_layers",
+      "source": "params.before_layers",
+      "required": true
+    },
+    {
+      "name": "after_layers",
+      "source": "params.after_layers",
+      "required": true
+    }
+  ]
+}

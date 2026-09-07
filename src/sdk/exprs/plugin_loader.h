@@ -1,11 +1,12 @@
 /***************************************************************************
  * exprs/plugin_loader.h — native plugin binary loading (ABI-gated)
  *
- * The loader resolves and dlopens a plugin shared library and drives the
- * PluginV1 lifecycle. It never runs manifest validation itself — the
- * registry guarantees records handed here are Validated. Qt-free: raw
- * dlopen/dlsym (POSIX) with LoadLibrary on Windows so the SDK core stays
- * independent of the Qt build.
+ * The loader resolves and maps a plugin shared library (dlopen on POSIX,
+ * LoadLibraryW on Windows) and drives the PluginV1 lifecycle. It never runs
+ * manifest validation itself — the registry guarantees records handed here
+ * are Validated; it does re-enforce entrypoint containment at load time
+ * (exprs/path_policy.h) to close the validation→load TOCTOU window.
+ * Qt-free: the SDK core stays independent of the Qt build.
  ***************************************************************************/
 #pragma once
 
@@ -43,6 +44,29 @@ public:
     /// callable survives the unmapping of its code. Appended in V1.0 with a
     /// no-op default.
     virtual void revokePlugin( const std::string &pluginId ) { (void)pluginId; }
+
+    // -- quiescence barrier (appended with the lifecycle work, #747) --------
+    // The registry drives the unload sequence through these hooks; the host
+    // runtime implements them over its execution barrier so in-flight plugin
+    // executions drain (or the unload is refused) BEFORE revoke+dlclose.
+
+    /// Arms the drain for @p pluginId: host-side dispatch must start failing
+    /// with a typed refusal. Called before waitPluginIdle.
+    virtual void beginPluginDrain( const std::string &pluginId ) { (void)pluginId; }
+    /// Bounded wait until no execution is inside @p pluginId's code.
+    /// Returns false when still busy after @p timeoutMs.
+    virtual bool waitPluginIdle( const std::string &pluginId, int timeoutMs )
+    {
+        (void)pluginId;
+        (void)timeoutMs;
+        return true;
+    }
+    /// Cancels an armed drain (unload refused; the plugin stays usable).
+    virtual void cancelPluginDrain( const std::string &pluginId ) { (void)pluginId; }
+    /// The plugin ended up Loaded again (fresh load after unload/refusal).
+    /// The host reopens its execution-barrier entry and re-installs
+    /// manifest-declared contributions revoked by a previous unload (#755).
+    virtual void pluginLoaded( const std::string &pluginId ) { (void)pluginId; }
 };
 
 /// A loaded plugin instance plus its library handle.

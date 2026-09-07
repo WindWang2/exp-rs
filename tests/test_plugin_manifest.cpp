@@ -7,6 +7,7 @@
 #include "exprs/plugin_validator.h"
 #include "exprs/version.h"
 
+#include <filesystem>
 #include <fstream>
 
 using namespace exprs;
@@ -229,4 +230,99 @@ TEST_CASE( "api compatibility rule", "[plugin][version]" )
     REQUIRE( isPluginApiCompatible( { 3, 1 }, { 3, 0 } ) );
     REQUIRE_FALSE( isPluginApiCompatible( { 3, 0 }, { 3, 1 } ) );
     REQUIRE_FALSE( isPluginApiCompatible( { 3, 0 }, { 4, 0 } ) );
+}
+
+TEST_CASE( "entrypoint containment (issue #756)", "[plugin][validator][containment]" )
+{
+    namespace fs = std::filesystem;
+    const std::string root = "/tmp/exprs_test_containment";
+    fs::remove_all( root );
+    fs::create_directories( root + "/org.test.containment/sub" );
+    const std::string pluginDir = root + "/org.test.containment";
+
+    // A legal payload inside the plugin dir, and a decoy outside it.
+    { std::ofstream output( pluginDir + "/sub/libreal.so", std::ios::binary ); output << "payload"; }
+    { std::ofstream output( root + "/libescape.so", std::ios::binary ); output << "escape"; }
+    std::error_code linkError;
+    fs::create_symlink( root + "/libescape.so", fs::path( pluginDir + "/sub/liblink.so" ),
+                        linkError );
+
+    auto manifestWithEntrypoint = []( const std::string &entrypoint ) {
+        // Minimal native-kind manifest struct (not parsed from JSON).
+        PluginManifest manifest;
+        manifest.manifestVersion = 1;
+        manifest.id = "org.test.containment";
+        manifest.name = "Containment";
+        manifest.version = "1.0.0";
+        manifest.apiVersion = std::string( EXP_RS_PLUGIN_API_VERSION );
+        manifest.abiVersion = pluginAbiVersion();
+        manifest.entrypoint = entrypoint;
+        manifest.entrypointKind = PluginEntrypointKind::Native;
+        return manifest;
+    };
+
+    auto validateInDir = []( const PluginManifest &manifest ) {
+        PluginValidationRequest request;
+        request.pluginDir = "/tmp/exprs_test_containment/org.test.containment";
+        PluginDiagnosticLog log;
+        const bool ok = PluginManifestValidator::validate( manifest, request, log );
+        return std::make_tuple( ok, log );
+    };
+
+    auto hasCode = []( const PluginDiagnosticLog &log, PluginDiagnosticCode code ) {
+        for ( const auto &item : log.items() )
+        {
+            if ( item.code == code && item.severity == PluginDiagnosticSeverity::Error )
+                return true;
+        }
+        return false;
+    };
+
+    SECTION( "nested legal path validates and resolves inside the root" )
+    {
+        auto [ok, log] = validateInDir( manifestWithEntrypoint( "sub/libreal.so" ) );
+        REQUIRE( ok );
+        REQUIRE_FALSE( hasCode( log, PluginDiagnosticCode::EntrypointOutsideRoot ) );
+    }
+    SECTION( ".. escape is rejected" )
+    {
+        auto [ok, log] = validateInDir( manifestWithEntrypoint( "../libescape.so" ) );
+        REQUIRE_FALSE( ok );
+        REQUIRE( hasCode( log, PluginDiagnosticCode::EntrypointOutsideRoot ) );
+    }
+    SECTION( "absolute path is rejected" )
+    {
+        auto [ok, log] =
+            validateInDir( manifestWithEntrypoint( "/tmp/exprs_test_containment/libescape.so" ) );
+        REQUIRE_FALSE( ok );
+        REQUIRE( hasCode( log, PluginDiagnosticCode::EntrypointOutsideRoot ) );
+    }
+    SECTION( "symlink escape is rejected" )
+    {
+        if ( linkError )
+        {
+            WARN( "symlinks unsupported on this platform; section skipped" );
+            return;
+        }
+        auto [ok, log] = validateInDir( manifestWithEntrypoint( "sub/liblink.so" ) );
+        REQUIRE_FALSE( ok );
+        REQUIRE( hasCode( log, PluginDiagnosticCode::EntrypointOutsideRoot ) );
+    }
+    SECTION( "missing file is reported as missing, not an escape" )
+    {
+        auto [ok, log] = validateInDir( manifestWithEntrypoint( "sub/libabsent.so" ) );
+        REQUIRE_FALSE( ok );
+        REQUIRE( hasCode( log, PluginDiagnosticCode::EntrypointMissing ) );
+    }
+    SECTION( "python.package lexical escape is rejected" )
+    {
+        PluginManifest manifest = manifestWithEntrypoint( {} );
+        manifest.entrypointKind = PluginEntrypointKind::Python;
+        manifest.python.module = "some_module";
+        manifest.python.package = "../../outside";
+        auto [ok, log] = validateInDir( manifest );
+        REQUIRE_FALSE( ok );
+        REQUIRE( hasCode( log, PluginDiagnosticCode::EntrypointOutsideRoot ) );
+    }
+    fs::remove_all( root );
 }

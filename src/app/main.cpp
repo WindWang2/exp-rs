@@ -36,6 +36,7 @@
 #include "jobs/job_engine.h"
 #include "workflow/workflow_run_coordinator.h"
 #include "operators/framework/rs_operator_context.h"
+#include "exprs/plugin_registry.h"
 
 // QGIS C++ includes
 #include <qgsapplication.h>
@@ -365,26 +366,10 @@ int main(int argc, char *argv[])
             QDockWidget *ribbonDock = safeWindow->findChild<QDockWidget *>( QStringLiteral( "rsRibbonDock" ) );
             QToolBar *mapTb = safeWindow->findChild<QToolBar *>( QStringLiteral( "mapToolsToolBar" ) );
             QToolBar *digTb = safeWindow->findChild<QToolBar *>( QStringLiteral( "digitizeToolBar" ) );
-            QWidget *band = safeWindow->findChild<QWidget *>( QStringLiteral( "rsBandRail" ) );
-            if ( !band )
-            {
-                // BandCompositionRail may use different object name
-                const auto all = safeWindow->findChildren<QWidget *>();
-                for ( QWidget *w : all )
-                {
-                    if ( w && w->metaObject()->className()
-                         && QString::fromLatin1( w->metaObject()->className() ).contains( QLatin1String( "BandComposition" ) ) )
-                    {
-                        band = w;
-                        break;
-                    }
-                }
-            }
 
             dumpW( "window", safeWindow.data() );
             dumpW( "ribbonDock", ribbonDock );
             dumpW( "chrome", chrome );
-            dumpW( "band", band );
             dumpW( "strip", strip );
             dumpW( "mapTools", mapTb );
             dumpW( "digitize", digTb );
@@ -472,12 +457,6 @@ int main(int argc, char *argv[])
                           << " (height=" << ribbonDock->height() << ", expect>=158)\n";
                 ok = false;
             }
-            // Band composition rail must stay out of product chrome.
-            if ( band && band->isVisible() && band->height() > 2 )
-            {
-                std::cerr << "[DEBUG-tb] FAIL: band composition rail still visible\n";
-                ok = false;
-            }
             // Flow host: map tools should live under rsToolbarFlowHost when visible.
             if ( mapTb && mapTb->isVisible() )
             {
@@ -527,20 +506,12 @@ int main(int argc, char *argv[])
 
             // Product shell: empty Task Center should not be open by default.
             QDockWidget *jobDock = safeWindow->findChild<QDockWidget *>( QStringLiteral( "rsJobPanelDock" ) );
-            QDockWidget *legacyTc = safeWindow->findChild<QDockWidget *>( QStringLiteral( "TaskCenterDock" ) );
             dumpW( "jobPanel", jobDock );
-            dumpW( "legacyTaskCenterDock", legacyTc );
             if ( jobDock && jobDock->isVisible() )
             {
                 std::cerr << "[DEBUG-tb] FAIL: rsJobPanelDock should be hidden by default\n";
                 ok = false;
             }
-            if ( legacyTc && legacyTc->isVisible() )
-            {
-                std::cerr << "[DEBUG-tb] FAIL: legacy TaskCenterDock is visible\n";
-                ok = false;
-            }
-
             if ( ok )
                 std::cerr << "[DEBUG-tb] PASS: under-ribbon toolbar + task chrome defaults OK\n";
             else
@@ -579,6 +550,14 @@ int main(int argc, char *argv[])
     // singleton, checkpoint saves are atomic).
     sicnu::TaskCenter::instance().shutdown();
     sicnu::jobs::JobEngine::instance().shutdown();
+    // Plugin shutdown BEFORE widget/app destruction (#747, CLI ShutdownGuard
+    // parity): drain executor pools first (above), then quiesce + revoke +
+    // dlclose every exprs plugin while the full Qt/widget world is alive —
+    // plugin UI contributions are released through the window's shell sink,
+    // and plugin shutdown()/destructors never run after QApplication died.
+    // Without this, plugins unload in the registry static destructor after
+    // `delete app`, executing plugin code in a dead-Qt process.
+    exprs::PluginRegistry::instance().unloadAll();
     window.reset();
     delete logFile;
     delete app;

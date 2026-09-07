@@ -1,0 +1,45 @@
+{
+  "id": "grid/graticule",
+  "version": 1,
+  "category": "grid",
+  "semantic_roles": [
+    "grid.primary"
+  ],
+  "description": "Latitude/longitude graticule over the map frame.",
+  "parameters": {
+    "interval_deg": 1.0
+  },
+  "variants": [
+    {
+      "id": "degree-1",
+      "parameters": {
+        "interval_deg": 1.0
+      }
+    },
+    {
+      "id": "degree-05",
+      "parameters": {
+        "interval_deg": 0.5
+      }
+    },
+    {
+      "id": "degree-01",
+      "parameters": {
+        "interval_deg": 0.1
+      }
+    }
+  ],
+  "layout_constraints": {
+    "anchor": "map-frame",
+    "preferred_positions": [],
+    "margin_mm": 0,
+    "max_count_per_page": 1
+  },
+  "compatibility": {
+    "requires_map_frame": true,
+    "crs_requirements": "geographic_preferred"
+  },
+  "defaults": {
+    "interval": 1.0
+  }
+}

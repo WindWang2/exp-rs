@@ -7,6 +7,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "processing/algorithms/sar/sar_texture.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
@@ -200,10 +201,7 @@ Json::Value RsSarTextureOperator::run(const Json::Value& params,
     }
 
     // Sentinel declared on the analysis band (NaN when undeclared).
-    bool hasNodata = false;
-    const double nodataRaw = src.bandNoDataValue(band, &hasNodata);
-    const float nodata = hasNodata ? static_cast<float>(nodataRaw)
-                                   : std::numeric_limits<float>::quiet_NaN();
+    const float nodata = sicnu::rs::bandNoDataSentinel(src, band);
 
     context.throwIfCancelled();
     context.reportProgress(0.05, "Computing GLCM texture measures");

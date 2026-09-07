@@ -132,6 +132,8 @@ namespace sicnu::app {
 class WorkspaceBrowserPanel;
 }
 
+class ExprsPluginShellUi;
+
 class QgisDesktopWindow : public QMainWindow
 {
     Q_OBJECT
@@ -161,6 +163,10 @@ public:
     QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
     QgsMapLayer *activeLayer();
     QList<QgsMapLayer*> selectedLayers();
+
+    /// The panel/toolbar visibility menu (exprs plugin docks add their
+    /// toggle actions here; used by ExprsPluginShellUi).
+    QMenu *windowMenu() const { return m_windowMenu; }
     /**
      * Load a local raster/vector source through the project Data Context
      * (registers a Data Asset and adds a main-view Display Layer). Returns true
@@ -341,6 +347,10 @@ private:
     void resetPanelLayout();
     /** Hide chrome that duplicates the Ribbon + Task panel product shell. */
     void applyProductShellLayout();
+    /** Window title reflects the current project file (or 未命名工程). */
+    void updateWindowTitle();
+    /** Re-query the governance panel after a project store open/reopen. */
+    void refreshWorkspaceBrowser();
 
     bool confirmSaveEdits(QgsVectorLayer *vl);
     bool checkUnsavedChanges();
@@ -442,6 +452,7 @@ private:
 
     sicnu::DataManagerPanel *m_dataManagerPanel = nullptr;
     QDockWidget *m_workspaceBrowserDock = nullptr;
+    sicnu::app::WorkspaceBrowserPanel *m_workspaceBrowserPanel = nullptr;
     TaskPanelHost *m_taskPanel = nullptr;
     WorkflowSessionController *m_sessionController = nullptr;
     sicnu::workflow::gui::PipelineEditorDock *m_pipelineDock = nullptr;
@@ -461,16 +472,16 @@ private:
     // Identify results display
     QTextBrowser *m_identifyResults = nullptr;
 
+    /** Project dirty state, mirrored into the window title marker. */
+    bool m_projectDirty = false;
+
     // Spectral profile display
     SpectralProfileWidget *m_spectralProfile = nullptr;
 
     // Histogram stretch display
     class HistogramStretchWidget *m_histogramStretch = nullptr;
 
-    // Signature chrome: band composition rail under ribbon
-    class BandCompositionRail *m_bandRail = nullptr;
-
-    // Status bar widgets (session meta — not on band rail)
+    // Status bar widgets (session meta)
     QLabel *m_readyLabel = nullptr;
     QLabel *m_crsLabel = nullptr;
     QLabel *m_coordinatesLabel = nullptr;
@@ -528,6 +539,9 @@ private:
 #endif
 
     std::unique_ptr<class PluginHost> m_pluginHost;
+    /// exprs UI reverse-ownership sink (issue #747): owns the shell side of
+    /// plugin dock/menu/settings attachments; lives as long as the window.
+    ExprsPluginShellUi *m_exprsShellUi = nullptr;
 
     // Lazy-loaded modules
 #ifdef SICNU_EMBED_PYTHON

@@ -29,6 +29,8 @@ const char *pluginStateName( PluginState state )
         return "loading";
     case PluginState::Loaded:
         return "loaded";
+    case PluginState::Quiescing:
+        return "quiescing";
     case PluginState::Failed:
         return "failed";
     case PluginState::Unloaded:
@@ -49,6 +51,7 @@ bool pluginStateFromName( const std::string &name, PluginState &out )
         { PluginState::Incompatible, "incompatible" }, { PluginState::Broken, "broken" },
         { PluginState::Disabled, "disabled" },         { PluginState::Blocked, "blocked" },
         { PluginState::Loading, "loading" },           { PluginState::Loaded, "loaded" },
+        { PluginState::Quiescing, "quiescing" },
         { PluginState::Failed, "failed" },             { PluginState::Unloaded, "unloaded" },
     };
     for ( const Entry &entry : kStates )

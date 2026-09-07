@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "plugin_operator_adapter.h"
 
+#include "plugin_execution_barrier.h"
+
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 
@@ -44,9 +46,10 @@ sicnu::processing::PortDescriptor manifestPortToPortDescriptor( const exprs::Man
 }
 
 PluginOperatorAdapter::PluginOperatorAdapter( exprs::ManifestOperator manifestOperator,
-                                              OperatorFactory lazyFactory,
+                                              std::string pluginId, OperatorFactory lazyFactory,
                                               std::function<bool()> ensurePluginLoaded )
     : mManifest( std::move( manifestOperator ) )
+    , mPluginId( std::move( pluginId ) )
     , mFactory( std::move( lazyFactory ) )
     , mEnsureLoaded( std::move( ensurePluginLoaded ) )
 {
@@ -54,9 +57,10 @@ PluginOperatorAdapter::PluginOperatorAdapter( exprs::ManifestOperator manifestOp
 }
 
 PluginOperatorAdapter::PluginOperatorAdapter(
-    sicnu::processing::AlgorithmDescriptor precomputedDescriptor, OperatorFactory lazyFactory,
-    std::function<bool()> ensurePluginLoaded )
-    : mFactory( std::move( lazyFactory ) )
+    sicnu::processing::AlgorithmDescriptor precomputedDescriptor, std::string pluginId,
+    OperatorFactory lazyFactory, std::function<bool()> ensurePluginLoaded )
+    : mPluginId( std::move( pluginId ) )
+    , mFactory( std::move( lazyFactory ) )
     , mEnsureLoaded( std::move( ensurePluginLoaded ) )
 {
     mDescriptorCache = std::move( precomputedDescriptor );
@@ -102,6 +106,24 @@ Json::Value PluginOperatorAdapter::execute( const Json::Value &params,
                                             sicnu::processing::ProgressCallback progressCb,
                                             std::function<bool()> isCancelledFn )
 {
+    // Execution barrier (#747): hold an owner-scoped lease for the whole
+    // factory+run window. While the plugin drains (unload in progress) or
+    // after it unloaded, acquisition fails and the call is refused with a
+    // typed failure instead of entering plugin code.
+    PluginExecutionBarrier::LeasePtr lease;
+    if ( !mPluginId.empty() )
+    {
+        lease = PluginExecutionBarrier::instance().acquire( mPluginId );
+        if ( !lease )
+        {
+            Json::Value failure( Json::objectValue );
+            failure["success"] = false;
+            failure["error"] = "plugin operator '" + mManifest.id
+                               + "' is unavailable (plugin is unloading or was unloaded)";
+            return failure;
+        }
+    }
+
     if ( !mFactory || !mEnsureLoaded || !mEnsureLoaded() )
     {
         Json::Value failure( Json::objectValue );

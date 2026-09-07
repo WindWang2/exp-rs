@@ -85,6 +85,12 @@ add_library(sicnu_agent SHARED
   cartography/cartography_tools.h
   cartography/chart_registry.cpp
   cartography/chart_registry.h
+  cartography/composition.cpp
+  cartography/composition.h
+  cartography/design_tokens.cpp
+  cartography/design_tokens.h
+  cartography/quality.cpp
+  cartography/quality.h
   cartography/registry.cpp
   cartography/registry.h
   symbology/symbology_tools.cpp

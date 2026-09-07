@@ -93,6 +93,41 @@ TEST_CASE( "a truncated cache file is not pooled as valid content", "[fault][par
     REQUIRE_FALSE( fx.pool.lookupExecution( "fp-truncated" ) );
 }
 
+TEST_CASE( "eviction never deletes a shared content-addressed object",
+           "[fault][cas_eviction][issue758]" )
+{
+    PooledExecutionFixture fx;
+    fx.pool.setEvictionGraceMs( 0 );
+
+    // Two executions produced byte-identical output: ONE object, TWO records.
+    sicnu::data::PoolExecution first, second;
+    first.declaredOriginal = second.declaredOriginal = fx.payload;
+    auto firstObject = fx.pool.put( fx.payload, true );
+    REQUIRE( firstObject );
+    first.objects.append( *firstObject );
+    first.payloadJson = "{\"output\":\"/a.tif\"}";
+    REQUIRE( fx.pool.recordExecution( "fp-shared-a", first ) );
+
+    auto secondObject = fx.pool.put( fx.payload, true );
+    REQUIRE( secondObject );
+    REQUIRE( secondObject->poolPath == firstObject->poolPath );  // dedup hit
+    second.objects.append( *secondObject );
+    second.payloadJson = "{\"output\":\"/b.tif\"}";
+    REQUIRE( fx.pool.recordExecution( "fp-shared-b", second ) );
+
+    // Evict execution A while B stays live.
+    REQUIRE( fx.pool.forgetExecution( "fp-shared-a" ) );
+    fx.pool.evictToBytes( 0 );
+
+    // B must still resolve: the shared object survives (a deleted shared
+    // object would silently defeat the persistent tier exactly when content
+    // dedups — issue #758-5).
+    const auto served = fx.pool.lookupExecution( "fp-shared-b" );
+    REQUIRE( served );
+    REQUIRE( served->objects.size() == 1 );
+    REQUIRE( QFile::exists( served->objects.first().poolPath ) );
+}
+
 TEST_CASE( "a corrupt checkpoint is skipped, not fatal", "[fault][checkpoint_corruption]" )
 {
     QTemporaryDir dir;

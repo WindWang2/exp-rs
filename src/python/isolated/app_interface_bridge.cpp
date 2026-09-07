@@ -298,6 +298,36 @@ int AppInterfaceBridge::registeredActionCount() const
   return m_registeredActions.size();
 }
 
+QStringList AppInterfaceBridge::registeredAlgorithmIds() const
+{
+  return m_registeredAlgorithmIds;
+}
+
+void AppInterfaceBridge::unregisterRegisteredAlgorithms()
+{
+  if ( m_registeredAlgorithmIds.isEmpty() )
+    return;
+  auto providers = sicnu::AlgorithmEngine::instance().registeredProviders();
+  std::shared_ptr<sicnu::PythonProcessingProviderAdapter> pythonProvider;
+  for ( const auto &provider : providers )
+  {
+    if ( provider && provider->providerId() == QStringLiteral( "python_plugins" ) )
+    {
+      pythonProvider = std::dynamic_pointer_cast<sicnu::PythonProcessingProviderAdapter>( provider );
+      break;
+    }
+  }
+  for ( const QString &algoId : m_registeredAlgorithmIds )
+  {
+    if ( pythonProvider )
+      pythonProvider->removeAlgorithm( algoId );
+    else
+      sicnu::processing::AtomicAlgorithmRegistry::instance().unregisterAdapter(
+        algoId.toStdString() );
+  }
+  m_registeredAlgorithmIds.clear();
+}
+
 void AppInterfaceBridge::setupDefaultAlgorithmHandler()
 {
   setAlgorithmRegisterHandler( [this]( const QString &algoId, const QString &name, const QString &group, const QString &desc ) -> bool {
@@ -664,6 +694,8 @@ bool AppInterfaceBridge::dispatchIpcMessage( const QJsonObject &message, QJsonOb
         {
           registered = m_algoRegisterHandler( algoId, name, group, desc );
         }
+        if ( registered && !m_registeredAlgorithmIds.contains( algoId ) )
+          m_registeredAlgorithmIds.append( algoId );
         r[QStringLiteral( "status" )] = registered ? QStringLiteral( "registered" ) : QStringLiteral( "failed" );
         r[QStringLiteral( "id" )] = algoId;
       } }

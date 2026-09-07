@@ -40,6 +40,11 @@ target_link_libraries(sicnu_qgis_display
         Qt6::Network
         qgis_core
         qgis_gui
+        # ProjectContext mirrors workflow run states into the governance
+        # service (issue #754): the coordinator lives in the task-center
+        # library. PRIVATE on a static lib still propagates via LINK_ONLY,
+        # so consumers (GUI shell + headless tests) resolve the symbols.
+        sicnu_task_center
 )
 set_target_properties(sicnu_qgis_display PROPERTIES
     CXX_STANDARD 20
@@ -92,6 +97,7 @@ add_executable(sicnu_geo_rs
     main_window.cpp
     main_window_menus.cpp
     main_window_docks.cpp
+    plugin_shell_ui.cpp
     main_window_connections.cpp
     main_window_vector.cpp
     main_window_project.cpp
@@ -160,7 +166,7 @@ add_executable(sicnu_geo_rs
     widgets/roi_statistics_widget.cpp
     widgets/histogram_widget.cpp
     widgets/histogram_stretch_widget.cpp
-    widgets/band_composition_rail.cpp
+    widgets/rs_result_summary.cpp
     widgets/rs_toolbar_flow_host.cpp
     widgets/spectral_profile_widget.cpp
     widgets/band_role_combo.cpp
@@ -174,8 +180,6 @@ add_executable(sicnu_geo_rs
     panels/data_manager_panel.cpp
     panels/workspace_browser_panel.cpp
     panels/workspace_browser_panel.h
-    panels/task_center_dock.cpp
-    panels/mosaic_panel.cpp
 
     # QgisApp facade
     qgis_app_facade.cpp

@@ -3,19 +3,118 @@
  ***************************************************************************/
 #include "exprs/plugin_loader.h"
 
-#ifdef _WIN32
-#include "exprs/msvc_posix_shim.h"
+#include "exprs/path_policy.h"
+#include "exprs/plugin_diagnostics.h"
+
+#if defined( _WIN32 )
+#include <windows.h>
+#include <filesystem>
 #else
 #include <dlfcn.h>
 #endif
 
 #include <set>
 
-#include "exprs/plugin_diagnostics.h"
-
 namespace exprs {
 
 namespace {
+
+// Platform library-loading seam. POSIX: dlopen/dlsym/dlclose. Windows:
+// LoadLibraryW/GetProcAddress/FreeLibrary (wide paths via std::filesystem).
+#if defined( _WIN32 )
+
+std::string lastWindowsError()
+{
+    const DWORD code = ::GetLastError();
+    LPWSTR buffer = nullptr;
+    const DWORD size = ::FormatMessageW(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr, code, MAKELANGID( LANG_NEUTRAL, SUBLANG_DEFAULT ),
+        reinterpret_cast<LPWSTR>( &buffer ), 0, nullptr );
+    std::string message;
+    if ( size && buffer )
+    {
+        const int bytes = ::WideCharToMultiByte( CP_UTF8, 0, buffer, static_cast<int>( size ),
+                                                 nullptr, 0, nullptr, nullptr );
+        message.resize( bytes );
+        ::WideCharToMultiByte( CP_UTF8, 0, buffer, static_cast<int>( size ), message.data(), bytes,
+                               nullptr, nullptr );
+        ::LocalFree( buffer );
+    }
+    while ( !message.empty() && ( message.back() == '\r' || message.back() == '\n' ) )
+        message.pop_back();
+    if ( message.empty() )
+        message = "error " + std::to_string( code );
+    return message;
+}
+
+void *openLibrary( const std::string &libraryPath, std::string &error )
+{
+    const std::wstring wide = std::filesystem::path( libraryPath ).wstring();
+    HMODULE handle = ::LoadLibraryW( wide.c_str() );
+    if ( !handle )
+    {
+        error = "LoadLibraryW failed: " + lastWindowsError();
+        return nullptr;
+    }
+    return handle;
+}
+
+void *findSymbol( void *handle, const char *name )
+{
+    return reinterpret_cast<void *>( ::GetProcAddress( reinterpret_cast<HMODULE>( handle ), name ) );
+}
+
+bool closeLibrary( void *handle )
+{
+    return ::FreeLibrary( reinterpret_cast<HMODULE>( handle ) ) != 0;
+}
+
+// Windows has no lazy-load equivalent; probing loads fully.
+void *openLibraryLazy( const std::string &libraryPath, std::string &error )
+{
+    return openLibrary( libraryPath, error );
+}
+
+#else
+
+void *openLibrary( const std::string &libraryPath, std::string &error )
+{
+    void *handle = ::dlopen( libraryPath.c_str(), RTLD_NOW | RTLD_LOCAL );
+    if ( !handle )
+    {
+        const char *message = ::dlerror();
+        error = message ? message : "dlopen failed";
+        return nullptr;
+    }
+    return handle;
+}
+
+void *openLibraryLazy( const std::string &libraryPath, std::string &error )
+{
+    // NOTE: dlopen runs the library's ELF initializers — "probe" means no
+    // entrypoint invocation, not zero code execution. See docs/plugins.
+    void *handle = ::dlopen( libraryPath.c_str(), RTLD_LAZY | RTLD_LOCAL );
+    if ( !handle )
+    {
+        const char *message = ::dlerror();
+        error = message ? message : "dlopen failed";
+        return nullptr;
+    }
+    return handle;
+}
+
+void *findSymbol( void *handle, const char *name )
+{
+    return ::dlsym( handle, name );
+}
+
+bool closeLibrary( void *handle )
+{
+    return ::dlclose( handle ) == 0;
+}
+
+#endif
 
 PluginDiagnostic makeError( PluginDiagnosticCode code, const std::string &pluginId,
                             const std::string &message, const std::string &field = {},
@@ -207,24 +306,16 @@ PluginLoader::~PluginLoader()
         }
     }
     if ( mLoaded.libraryHandle )
-        ::dlclose( mLoaded.libraryHandle );
+        closeLibrary( mLoaded.libraryHandle );
 }
 
 bool PluginLoader::probeEntrypoint( const std::string &libraryPath, std::string &error )
 {
-    // NOTE: dlopen runs the library's ELF initializers — "probe" means no
-    // entrypoint invocation, not zero code execution. The abi/API gate above
-    // is the pre-execution boundary; see docs/plugins/isolation.md.
-    void *handle = ::dlopen( libraryPath.c_str(), RTLD_LAZY | RTLD_LOCAL );
+    void *handle = openLibraryLazy( libraryPath, error );
     if ( !handle )
-    {
-        const char *message = ::dlerror();
-        error = message ? message : "dlopen failed";
         return false;
-    }
-    void *symbol = ::dlsym( handle, kPluginEntryPointV1 );
-    const char *symbolError = ::dlerror();
-    ::dlclose( handle );
+    void *symbol = findSymbol( handle, kPluginEntryPointV1 );
+    closeLibrary( handle );
     if ( !symbol )
     {
         error = "entrypoint symbol '" + std::string( kPluginEntryPointV1 ) + "' not found";
@@ -259,26 +350,43 @@ bool PluginLoader::loadImpl( const PluginRecord &record, HostServicesV1 &service
         return false;
     }
 
+    // Load-time containment re-check (#756): validation and load read the
+    // filesystem at different times, so the entrypoint is re-canonicalized
+    // and re-confined immediately before the library is mapped. Fail closed.
+    {
+        std::string resolvedLibrary;
+        const PathPolicyRejection rejection = PathPolicy::checkPayloadInsideRoot(
+            record.directory, record.manifest.entrypoint, resolvedLibrary );
+        if ( rejection != PathPolicyRejection::Accepted )
+        {
+            log.add( makeError( PluginDiagnosticCode::EntrypointOutsideRoot, record.id(),
+                                "entrypoint '" + record.manifest.entrypoint
+                                    + "' rejected at load time: "
+                                    + pathPolicyRejectionName( rejection ),
+                                "entrypoint", record.directory + "/" + record.manifest.entrypoint ) );
+            return false;
+        }
+    }
+
     const std::string libraryPath = record.directory + "/" + record.manifest.entrypoint;
-    void *handle = ::dlopen( libraryPath.c_str(), RTLD_NOW | RTLD_LOCAL );
+    std::string loadError;
+    void *handle = openLibrary( libraryPath, loadError );
     if ( !handle )
     {
-        const char *message = ::dlerror();
-        log.add( makeError( PluginDiagnosticCode::LibraryLoadFailed, record.id(),
-                            message ? message : "dlopen failed", "entrypoint", libraryPath ) );
+        log.add( makeError( PluginDiagnosticCode::LibraryLoadFailed, record.id(), loadError,
+                            "entrypoint", libraryPath ) );
         return false;
     }
 
     using CreateFn = PluginV1 *( * )();
-    void *symbol = ::dlsym( handle, kPluginEntryPointV1 );
-    const char *symbolError = ::dlerror();
-    if ( !symbol || symbolError )
+    void *symbol = findSymbol( handle, kPluginEntryPointV1 );
+    if ( !symbol )
     {
         log.add( makeError( PluginDiagnosticCode::SymbolMissing, record.id(),
                             "entrypoint symbol '" + std::string( kPluginEntryPointV1 )
                                 + "' not found",
                             kPluginEntryPointV1, libraryPath ) );
-        ::dlclose( handle );
+        closeLibrary( handle );
         return false;
     }
 
@@ -291,21 +399,21 @@ bool PluginLoader::loadImpl( const PluginRecord &record, HostServicesV1 &service
     {
         log.add( makeError( PluginDiagnosticCode::LibraryLoadFailed, record.id(),
                             std::string( "entrypoint threw: " ) + exception.what() ) );
-        ::dlclose( handle );
+        closeLibrary( handle );
         return false;
     }
     catch ( ... )
     {
         log.add( makeError( PluginDiagnosticCode::LibraryLoadFailed, record.id(),
                             "entrypoint threw an unknown exception" ) );
-        ::dlclose( handle );
+        closeLibrary( handle );
         return false;
     }
     if ( !instance )
     {
         log.add( makeError( PluginDiagnosticCode::LibraryLoadFailed, record.id(),
                             "entrypoint returned nullptr" ) );
-        ::dlclose( handle );
+        closeLibrary( handle );
         return false;
     }
 
@@ -315,7 +423,7 @@ bool PluginLoader::loadImpl( const PluginRecord &record, HostServicesV1 &service
                             "plugin reports id '" + instance->pluginId()
                                 + "' but the manifest declares '" + record.manifest.id + "'" ) );
         delete instance;
-        ::dlclose( handle );
+        closeLibrary( handle );
         return false;
     }
 
@@ -334,7 +442,7 @@ bool PluginLoader::loadImpl( const PluginRecord &record, HostServicesV1 &service
                                 "plugin initialize() returned false" ) );
             delete instance;
             mLoaded = LoadedPlugin{};
-            ::dlclose( handle );
+            closeLibrary( handle );
             return false;
         }
         mLoaded.initialized = true;
@@ -381,7 +489,7 @@ bool PluginLoader::loadImpl( const PluginRecord &record, HostServicesV1 &service
         }
         delete instance;
         mLoaded = LoadedPlugin{};
-        ::dlclose( handle );
+        closeLibrary( handle );
         return false;
     }
     return true;
@@ -416,7 +524,7 @@ bool PluginLoader::unload( LoadedPlugin &plugin, PluginDiagnosticLog &log )
     // it while the library is still mapped, before dlclose.
     delete plugin.instance;
     plugin.instance = nullptr;
-    const bool closed = ::dlclose( plugin.libraryHandle ) == 0;
+    const bool closed = closeLibrary( plugin.libraryHandle );
     if ( !closed )
     {
         log.add( makeError( PluginDiagnosticCode::LibraryLoadFailed, plugin.pluginId,

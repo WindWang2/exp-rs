@@ -3,16 +3,10 @@
  ***************************************************************************/
 #include "exprs/plugin_discovery.h"
 
-#ifdef _WIN32
-#include "exprs/msvc_posix_shim.h"
-#else
-#include <dirent.h>
-#endif
-#include <sys/stat.h>
-
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -23,34 +17,47 @@ namespace exprs {
 
 namespace {
 
+namespace fs = std::filesystem;
+
 bool isDirectory( const std::string &path )
 {
-    struct stat info {};
-    return ::stat( path.c_str(), &info ) == 0 && S_ISDIR( info.st_mode );
+    std::error_code error;
+    return fs::is_directory( fs::path( path ), error );
 }
 
 bool isRegularFile( const std::string &path )
 {
-    struct stat info {};
-    return ::stat( path.c_str(), &info ) == 0 && S_ISREG( info.st_mode );
+    std::error_code error;
+    return fs::is_regular_file( fs::path( path ), error );
+}
+
+/// Modification time of @p path as a stable counter for the manifest index
+/// cache (nanosecond tick count; only equality across two runs matters).
+long long modificationTicks( const std::string &path )
+{
+    std::error_code error;
+    const fs::file_time_type time = fs::last_write_time( fs::path( path ), error );
+    if ( error )
+        return 0;
+    return time.time_since_epoch().count();
 }
 
 std::vector<std::string> listSubdirectories( const std::string &root )
 {
     std::vector<std::string> result;
-    DIR *dir = ::opendir( root.c_str() );
-    if ( !dir )
+    std::error_code error;
+    fs::directory_iterator iterator( fs::path( root ), error );
+    if ( error )
         return result;
-    while ( struct dirent *entry = ::readdir( dir ) )
+    for ( const fs::directory_entry &entry : iterator )
     {
-        const std::string name( entry->d_name );
+        const std::string name = entry.path().filename().generic_string();
         if ( name.empty() || name.front() == '.' )
             continue; // skip hidden + . / ..
-        const std::string full = root + "/" + name;
-        if ( isDirectory( full ) )
-            result.push_back( full );
+        std::error_code entryError;
+        if ( entry.is_directory( entryError ) && !entryError )
+            result.push_back( entry.path().generic_string() );
     }
-    ::closedir( dir );
     std::sort( result.begin(), result.end() );
     return result;
 }
@@ -108,10 +115,7 @@ bool tryCachedManifest( const Json::Value &index, const std::string &dir,
     const Json::Value &entry = index[dir];
     if ( !entry.isObject() || !entry.isMember( "mtime" ) || !entry.isMember( "manifest" ) )
         return false;
-    struct stat info {};
-    if ( ::stat( manifestPath.c_str(), &info ) != 0 )
-        return false;
-    if ( static_cast<long long>( info.st_mtime ) != entry["mtime"].asInt64() )
+    if ( modificationTicks( manifestPath ) != entry["mtime"].asInt64() )
         return false;
     PluginDiagnostic ignored;
     return manifestFromIndexValue( entry["manifest"], out, ignored );
@@ -120,11 +124,11 @@ bool tryCachedManifest( const Json::Value &index, const std::string &dir,
 void appendToIndex( Json::Value &index, const std::string &dir, const std::string &manifestPath,
                     const PluginManifest &manifest )
 {
-    struct stat info {};
-    if ( ::stat( manifestPath.c_str(), &info ) != 0 )
+    const long long ticks = modificationTicks( manifestPath );
+    if ( ticks == 0 )
         return;
     Json::Value entry( Json::objectValue );
-    entry["mtime"] = static_cast<Json::Int64>( info.st_mtime );
+    entry["mtime"] = static_cast<Json::Int64>( ticks );
     entry["manifest"] = manifest.toJson();
     index[dir] = entry;
 }
@@ -161,9 +165,17 @@ std::string PluginDiscovery::userPluginRoot()
     const char *overrideRoot = std::getenv( "SICNU_PLUGIN_USER_ROOT" );
     if ( overrideRoot && *overrideRoot )
         return overrideRoot;
+    // Per-platform home directory; falls back to the temp directory when no
+    // home is available (headless/service contexts).
+#if defined( _WIN32 )
+    const char *home = std::getenv( "USERPROFILE" );
+    std::string homeDir = home ? home : ".";
+    return homeDir + "/sicnu_geo_rs/plugins";
+#else
     const char *home = std::getenv( "HOME" );
     const std::string homeDir = home ? home : "/tmp";
     return homeDir + "/.local/share/sicnu_geo_rs/plugins";
+#endif
 }
 
 std::vector<std::string> PluginDiscovery::defaultRoots( const std::string &appDir,
@@ -178,11 +190,16 @@ std::vector<std::string> PluginDiscovery::defaultRoots( const std::string &appDi
     const char *extra = std::getenv( "SICNU_PLUGIN_PATH" );
     if ( extra )
     {
+#if defined( _WIN32 )
+        const char separator = ';';
+#else
+        const char separator = ':';
+#endif
         std::string text( extra );
         size_t start = 0;
         while ( start <= text.size() )
         {
-            const size_t colon = text.find( ':', start );
+            const size_t colon = text.find( separator, start );
             const size_t end = colon == std::string::npos ? text.size() : colon;
             const std::string candidate = text.substr( start, end - start );
             if ( !candidate.empty() )

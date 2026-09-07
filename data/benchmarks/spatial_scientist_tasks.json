@@ -2152,7 +2152,7 @@
    "utterance": "Instantiate the classification template and validate the draft",
    "expect": {
     "kind": "template_instantiate",
-    "template": "classification"
+    "template": "classification-a4l"
    },
    "payload": {
     "params": {
@@ -2166,7 +2166,7 @@
    "utterance": "Instantiate the change-detection template and validate the draft",
    "expect": {
     "kind": "template_instantiate",
-    "template": "change-detection"
+    "template": "change-detection-a4l"
    },
    "payload": {
     "params": {
@@ -2180,7 +2180,7 @@
    "utterance": "Instantiate the remote-sensing-result template and validate the draft",
    "expect": {
     "kind": "template_instantiate",
-    "template": "remote-sensing-result"
+    "template": "remote-sensing-result-a4l"
    },
    "payload": {
     "params": {
@@ -2194,7 +2194,7 @@
    "utterance": "Instantiate the scientific-publication template and validate the draft",
    "expect": {
     "kind": "template_instantiate",
-    "template": "scientific-publication"
+    "template": "scientific-publication-a4l"
    },
    "payload": {
     "params": {
@@ -2208,7 +2208,7 @@
    "utterance": "Instantiate the choropleth template and validate the draft",
    "expect": {
     "kind": "template_instantiate",
-    "template": "choropleth"
+    "template": "choropleth-a4l"
    },
    "payload": {
     "params": {
@@ -2222,7 +2222,7 @@
    "utterance": "Instantiate the time-series template and validate the draft",
    "expect": {
     "kind": "template_instantiate",
-    "template": "time-series"
+    "template": "time-series-phenology-a4l"
    },
    "payload": {
     "params": {

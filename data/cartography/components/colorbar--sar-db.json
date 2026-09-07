@@ -1,0 +1,41 @@
+{
+  "id": "colorbar/sar-db",
+  "version": 1,
+  "category": "color-bar",
+  "semantic_roles": [
+    "colorbar.primary"
+  ],
+  "description": "SAR backscatter strip in dB with negative-value ticks (typically -25…0 dB).",
+  "parameters": {
+    "ramp": "sequential",
+    "width_mm": 60,
+    "height_mm": 8,
+    "unit": "dB"
+  },
+  "layout_constraints": {
+    "anchor": "edge",
+    "preferred_positions": [
+      "bottom-center"
+    ],
+    "margin_mm": 8,
+    "max_count_per_page": 2,
+    "min_size_mm": [
+      40,
+      6
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": true,
+    "result_types": [
+      "sar",
+      "backscatter"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "range",
+      "source": "raster.statistics",
+      "required": true
+    }
+  ]
+}

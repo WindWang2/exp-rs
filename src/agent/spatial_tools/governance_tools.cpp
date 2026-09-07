@@ -180,14 +180,18 @@ class ProjectSummaryTool final : public SpatialTool
             return unavailable();
 
         Json::Value out( Json::objectValue );
+        // Real COUNT(*) totals (issue #758-3): page-bounded listing sizes
+        // clamped at the page size and misreported a 100k-entity workspace
+        // as "500".
+        const sicnu::workspace::GovernanceStore::EntityCounts totals = ws->store().entityCounts();
         Json::Value counts( Json::objectValue );
-        counts["assets"] = ( Json::Int64 ) ws->store().assetCount();
-        counts["datasets"] = ( Json::Int64 ) ws->datasets().size();
-        counts["results"] = ( Json::Int64 ) ws->results().size();
-        counts["runs"] = ( Json::Int64 ) ws->runs().size();
-        counts["experiments"] = ( Json::Int64 ) ws->experiments().size();
-        counts["smartCollections"] = ( Json::Int64 ) ws->smartCollections().size();
-        counts["orphanResults"] = ( Json::Int64 ) ws->orphanResults().size();
+        counts["assets"] = ( Json::Int64 ) totals.assets;
+        counts["datasets"] = ( Json::Int64 ) totals.datasets;
+        counts["results"] = ( Json::Int64 ) totals.results;
+        counts["runs"] = ( Json::Int64 ) totals.runs;
+        counts["experiments"] = ( Json::Int64 ) totals.experiments;
+        counts["smartCollections"] = ( Json::Int64 ) totals.smartCollections;
+        counts["orphanResults"] = ( Json::Int64 ) totals.orphanResults;
         out["counts"] = counts;
 
         Json::Value facets( Json::objectValue );

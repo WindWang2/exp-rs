@@ -33,14 +33,17 @@ const CodeEntry kCodeTable[] = {
     { PluginDiagnosticCode::DependencyCycle, "E3004" },
     { PluginDiagnosticCode::ResourceMissing, "E3005" },
     { PluginDiagnosticCode::ContributionIdConflict, "E3006" },
+    { PluginDiagnosticCode::EntrypointOutsideRoot, "E3007" },
     { PluginDiagnosticCode::SymbolMissing, "E4001" },
     { PluginDiagnosticCode::LibraryLoadFailed, "E4002" },
     { PluginDiagnosticCode::InitializationFailed, "E4003" },
     { PluginDiagnosticCode::RegistrationFailed, "E4004" },
+    { PluginDiagnosticCode::PluginInUse, "E4005" },
     { PluginDiagnosticCode::PermissionDenied, "E5001" },
     { PluginDiagnosticCode::TrustRejected, "E5002" },
     { PluginDiagnosticCode::PluginDisabled, "E5003" },
     { PluginDiagnosticCode::PolicyBlocklisted, "E5004" },
+    { PluginDiagnosticCode::WorkspaceEscape, "E5005" },
 };
 } // namespace
 

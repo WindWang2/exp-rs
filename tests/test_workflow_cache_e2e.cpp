@@ -122,7 +122,7 @@ bool waitUntilProcessStopped( qint64 pid, std::chrono::milliseconds timeout )
     return false;
 }
 
-void writeTwoBandRaster( const QString &path, int W, int H )
+void writeTwoBandRaster( const QString &path, int W, int H, float valueOffset = 0.f )
 {    ::ensureGdalInit();
     GDALDriver *drv = GetGDALDriverManager()->GetDriverByName( "GTiff" );
     REQUIRE( drv != nullptr );
@@ -136,8 +136,8 @@ void writeTwoBandRaster( const QString &path, int W, int H )
                 // A deterministic vegetation-like gradient: NIR high on the
                 // diagonal, RED lower — NDVI stays in a sane numeric range.
                 band[static_cast<size_t>( r ) * W + c] =
-                    b == 1 ? 2000.f + 40.f * ( ( r + c ) % 64 )
-                           : 1000.f + 30.f * ( ( r * 2 + c ) % 64 );
+                    b == 1 ? 2000.f + valueOffset + 40.f * ( ( r + c ) % 64 )
+                           : 1000.f + valueOffset + 30.f * ( ( r * 2 + c ) % 64 );
         GDALRasterBand *rb = ds->GetRasterBand( b );
         rb->RasterIO( GF_Write, 0, 0, W, H, band.data(), W, H, GDT_Float32, 0, 0 );
     }
@@ -1139,3 +1139,45 @@ TEST_CASE( "Cross-process ownership: --list-runs is read-only and --resume "
     REQUIRE( QFileInfo( aPath ).lastModified() == aMtimeBefore );
 }
 #endif // SICNU_CLI_BINARY
+
+TEST_CASE( "Out-of-band same-size rewrite of a registered input invalidates the cache (#749)",
+           "[workflow][v2][cache][external_mutation][issue749]" )
+{
+    CacheE2eFixture fx;
+    const auto def = twoStepPipeline( fx.inputPath, fx.aPath, fx.bPath, /*kernel=*/3 );
+
+    // Run 1: cold execution; run 2: identical — both steps must be hits, so
+    // the only variable below is the input content.
+    auto first = runPipelineAndWait( def );
+    REQUIRE( first.size() == 2 );
+    REQUIRE( first["a"].status == sicnu::TaskStatus::Completed );
+    registerPipelineOutputs( fx, first );
+    auto second = runPipelineAndWait( def );
+    REQUIRE( second.size() == 2 );
+    REQUIRE( second["a"].status == sicnu::TaskStatus::Completed );
+    REQUIRE( servedFromCache( second["a"] ) );
+
+    // Out-of-band rewrite: different content, SAME size, mtime restored to
+    // its original value — the same-size/same-mtime collision window the
+    // #726 chained-input stat guard cannot see. The fingerprint's content
+    // identity (small-input digest) must produce a MISS instead of serving
+    // stale bytes as a hit.
+    const QDateTime originalMtime = QFileInfo( fx.inputPath ).lastModified();
+    const qint64 originalSize = QFileInfo( fx.inputPath ).size();
+    writeTwoBandRaster( fx.inputPath, 64, 64, /*valueOffset=*/500.f );
+    REQUIRE( QFileInfo( fx.inputPath ).size() == originalSize );  // same-size replacement
+    {
+        QFile restoreTime( fx.inputPath );
+        REQUIRE( restoreTime.open( QIODevice::ReadOnly ) );
+        REQUIRE( restoreTime.setFileTime( originalMtime,
+                                          QFileDevice::FileModificationTime ) );
+    }
+
+    auto third = runPipelineAndWait( def );
+    REQUIRE( third.size() == 2 );
+    REQUIRE( third["a"].status == sicnu::TaskStatus::Completed );
+    INFO( "cache flag: " << ( third["a"].resultPayload.isObject()
+                                  && third["a"].resultPayload.isMember( "cache" )
+                                  ? third["a"].resultPayload["cache"].asString() : "<none>" ) );
+    REQUIRE_FALSE( servedFromCache( third["a"] ) );
+}

@@ -3,6 +3,7 @@
 
 #include "artifact_gc.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -12,10 +13,67 @@
 #include "jobs/job_types.h"
 #include "placeholder_grammar.h"
 #include "processing/framework/task_center.h"
+#include "data/artifact_store.h"
 
 namespace sicnu::workflow {
 
 namespace {
+
+/// Digest budget for resume completion identity (issue #750): outputs above
+/// this size keep stat-only identity (SICNU_RESUME_DIGEST_MAX_MB, default 256;
+/// 0 disables digesting entirely).
+qint64 resumeDigestBudgetBytes()
+{
+    static const qint64 budget = []() {
+        const QString raw = qEnvironmentVariable( "SICNU_RESUME_DIGEST_MAX_MB" );
+        if ( raw.isEmpty() )
+            return 256LL * 1024 * 1024;
+        bool ok = false;
+        const qint64 mb = raw.toLongLong( &ok );
+        return ( ok && mb >= 0 ) ? mb * 1024 * 1024 : 256LL * 1024 * 1024;
+    }();
+    return budget;
+}
+
+/// Completion identity of a step's produced output: the stat stamp is the
+/// minimum proof; the content digest is added when the output fits the
+/// verification budget.
+struct CompletionIdentity
+{
+    long long sizeBytes = 0;
+    long long mtimeMs = 0;
+    std::string digest;
+};
+
+/// Computes the identity for @a outputPath. Deliberately lock-free: the
+/// digest can read up to the verification budget, and onTaskUpdated folds
+/// under the coordinator mutex — hashing there would stall every tracked run
+/// (review P1). The caller applies the result to the plan under the lock.
+std::optional<CompletionIdentity> computeCompletionIdentity( const QString &outputPath )
+{
+    const QFileInfo info( outputPath );
+    if ( !info.isFile() )
+        return std::nullopt;
+    CompletionIdentity identity;
+    identity.sizeBytes = info.size();
+    identity.mtimeMs = info.lastModified().toMSecsSinceEpoch();
+    if ( info.size() > 0 && info.size() <= resumeDigestBudgetBytes() )
+    {
+        QString digestError;
+        identity.digest = sicnu::data::artifactContentDigest( outputPath, &digestError ).toStdString();
+        if ( !digestError.isEmpty() )
+            identity.digest.clear();
+    }
+    return identity;
+}
+
+/// Applies a pre-computed identity to @a plan (under the coordinator mutex).
+void stampCompletionIdentity( StepPlan &plan, const CompletionIdentity &identity )
+{
+    plan.outputSizeBytes = identity.sizeBytes;
+    plan.outputMtimeMs = identity.mtimeMs;
+    plan.outputDigest = identity.digest;
+}
 
 QString stepStatusForTaskStatus( sicnu::TaskStatus status )
 {
@@ -117,6 +175,26 @@ QString WorkflowRunCoordinator::checkpointPathFor( const std::string &runId ) co
     return checkpointPathLocked( runId );
 }
 
+void WorkflowRunCoordinator::notifyRunStateLocked( const WorkflowRun &run,
+                                                   qint64 startedMs, qint64 finishedMs )
+{
+    qint64 effectiveStart = startedMs;
+    if ( effectiveStart <= 0 )
+    {
+        // The run's creation stamp is the truthful start when the caller has
+        // no better one (terminal/Interrupted transitions): never mirror a
+        // zeroed started_ms over the value recorded at start (issue #754).
+        const QDateTime createdAt =
+            QDateTime::fromString( QString::fromStdString( run.createdAt() ), Qt::ISODate );
+        if ( createdAt.isValid() )
+            effectiveStart = createdAt.toMSecsSinceEpoch();
+    }
+    emit runStateChanged( QString::fromStdString( run.runId() ),
+                          QString::fromStdString( run.workflowId() ),
+                          QString::fromStdString( workflowRunStateToString( run.state() ) ),
+                          effectiveStart, finishedMs );
+}
+
 void WorkflowRunCoordinator::persistRunLocked( WorkflowRun &run )
 {
     // Best-effort persistence: a failed save never aborts the pipeline — the
@@ -172,9 +250,11 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     // crash during submitPipeline leaves a recoverable checkpoint instead of
     // real side effects with no on-disk run. The post-submission persist
     // below adds task ids and current step statuses.
+    const qint64 startedMs = QDateTime::currentMSecsSinceEpoch();
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         persistRunLocked( *run );
+        notifyRunStateLocked( *run, startedMs, 0 ); // state Running (issue #754)
     }
 
     // Seed the step plans with the pipeline's task ids so the checkpoint
@@ -188,6 +268,8 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
         {
             std::lock_guard<std::mutex> lock( m_mutex );
             persistRunLocked( *run );
+            notifyRunStateLocked( *run, startedMs,
+                                  QDateTime::currentMSecsSinceEpoch() );
         }
         return -1; // the local runLock shared_ptr releases the flock here
     }
@@ -273,6 +355,12 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     if ( info.pipelineId < 0 || info.stepId.isEmpty() )
         return;
 
+    // Hash OUTSIDE the fold lock (review P1): the digest may read up to the
+    // verification budget, and this fold runs under m_mutex.
+    std::optional<CompletionIdentity> completionIdentity;
+    if ( info.status == sicnu::TaskStatus::Completed && !info.outputLayerPath.isEmpty() )
+        completionIdentity = computeCompletionIdentity( info.outputLayerPath );
+
     // The whole fold runs under m_mutex: resumeRun swaps the mapped run
     // object under the same lock, so a transition either lands entirely
     // before the swap (visible to its merge) or entirely after (folded into
@@ -309,6 +397,8 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
         {
             plan->outputLayerPath = info.outputLayerPath.toStdString();
             run->setArtifact( stepKey, plan->outputLayerPath );
+            if ( completionIdentity )
+                stampCompletionIdentity( *plan, *completionIdentity );
         }
     }
     else if ( info.status == sicnu::TaskStatus::Failed )
@@ -316,7 +406,6 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
         plan->errorMessage = info.errorMessage.toStdString();
     }
     run->updateStepPlan( *plan );
-
     persistRunLocked( *run );
 
     // Terminal roll-up when every step plan reached a terminal status.
@@ -360,6 +449,7 @@ void WorkflowRunCoordinator::finalizeRunLocked( long pipelineId, WorkflowRun &ru
         run.transitionTo( WorkflowRunState::Completed );
     }
     persistRunLocked( run );
+    notifyRunStateLocked( run, 0, QDateTime::currentMSecsSinceEpoch() );
 
     if ( run.state() == WorkflowRunState::Completed )
     {
@@ -503,6 +593,7 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         persistRunLocked( *run );
+        notifyRunStateLocked( *run, 0, QDateTime::currentMSecsSinceEpoch() ); // Interrupted
     }
     if ( run->state() != WorkflowRunState::Interrupted && run->state() != WorkflowRunState::Failed
          && run->state() != WorkflowRunState::Canceled )
@@ -533,8 +624,34 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
         // crash-era intermediate to downstream steps. Require a real,
         // non-empty file — a rewrite mid-crash fails this and is re-executed.
         const QFileInfo outputInfo( QString::fromStdString( plan.outputLayerPath ) );
-        if ( outputInfo.isFile() && outputInfo.size() > 0 )
-            completedResults[plan.stepId] = { plan.resultPayload, plan.outputLayerPath };
+        if ( !outputInfo.isFile() || outputInfo.size() <= 0 )
+            continue;
+        // Completion identity gate (issue #750): the checkpoint must prove
+        // the bytes at the recorded path are the ones the step completed
+        // with. Stat identity (size + mtime) is checked when recorded; the
+        // content digest is additionally verified when the checkpoint
+        // carries one. A legacy checkpoint without any identity — or any
+        // mismatch — re-executes the step: resume stays semantically
+        // equivalent to fresh execution (#731), never serving foreign bytes.
+        if ( plan.outputSizeBytes <= 0 )
+            continue;
+        if ( plan.outputSizeBytes != outputInfo.size()
+             || plan.outputMtimeMs != outputInfo.lastModified().toMSecsSinceEpoch() )
+            continue;
+        if ( !plan.outputDigest.empty() )
+        {
+            // A recorded digest MUST re-verify: an unreadable file, a digest
+            // error, or any budget change between stamp and resume demotes to
+            // re-execution — never a stat-only pass on bytes a digest was
+            // supposed to vouch for (fail-closed, issue #750).
+            QString digestError;
+            const QString actualDigest =
+                sicnu::data::artifactContentDigest( QString::fromStdString( plan.outputLayerPath ),
+                                                    &digestError );
+            if ( !digestError.isEmpty() || actualDigest.toStdString() != plan.outputDigest )
+                continue;
+        }
+        completedResults[plan.stepId] = { plan.resultPayload, plan.outputLayerPath };
     }
 
     WorkflowDefinition def = run->definition();
@@ -662,6 +779,9 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
                         plan->outputLayerPath = fresh.outputLayerPath;
                         plan->resultPayload = fresh.resultPayload;
                         plan->errorMessage = fresh.errorMessage;
+                        plan->outputSizeBytes = fresh.outputSizeBytes;
+                        plan->outputMtimeMs = fresh.outputMtimeMs;
+                        plan->outputDigest = fresh.outputDigest;
                         if ( !plan->outputLayerPath.empty() )
                             run->setArtifact( fresh.stepId, plan->outputLayerPath );
                     }
@@ -679,6 +799,19 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
                             {
                                 plan->outputLayerPath = info.outputLayerPath.toStdString();
                                 run->setArtifact( fresh.stepId, plan->outputLayerPath );
+                                // Missed-window fold (rare path): this runs
+                                // inside the swap's m_mutex, so only the cheap
+                                // stat stamp lands here — hashing would stall
+                                // all coordinator traffic. Digest-bearing
+                                // identity is stamped by the normal onTaskUpdated
+                                // fold; a stat-only checkpoint still fails the
+                                // resume gate on any byte drift it can see.
+                                const QFileInfo stamped( info.outputLayerPath );
+                                if ( stamped.isFile() )
+                                {
+                                    plan->outputSizeBytes = stamped.size();
+                                    plan->outputMtimeMs = stamped.lastModified().toMSecsSinceEpoch();
+                                }
                             }
                         }
                         else if ( plan->status != "Completed" )

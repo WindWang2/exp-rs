@@ -516,7 +516,12 @@ private:
         QString producerFingerprintHex; // what this consumer's identity was keyed on
         long producerTaskId = -1;
     };
-    QMap<long, QVector<ChainedEdge>> m_taskChainedEdges;};
+    QMap<long, QVector<ChainedEdge>> m_taskChainedEdges;
+    /// Registered (non-chained) input stat bindings captured at submission
+    /// (issue #749): merged into the cache entry at store time so an
+    /// out-of-band rewrite of a registered input invalidates it at lookup.
+    QMap<long, QPair<QMap<QString, qint64>, QMap<QString, qint64>>> m_taskRegisteredInputStats;
+};
 
 } // namespace sicnu
 

@@ -3,6 +3,7 @@
  ***************************************************************************/
 #include "cli_project_ops.h"
 
+#include <cstdio>
 #include <QDomDocument>
 #include <QDir>
 #include <QFileInfo>
@@ -57,7 +58,15 @@ bool loadGovernedProject( const QString &path, GovernedProject &out, QString *er
     sicnu::app::DataProjectSerializer serializer;
     QObject::connect( &out.project, &QgsProject::readProject, &out.project,
                       [ & ]( const QDomDocument &document ) {
-                          ( void ) serializer.read( document, out.project, *out.context );
+                          // Restore diagnostics (store unavailable/read-only,
+                          // failed upserts, unknown sections) are warnings on
+                          // a SUCCESSFUL read: print them — dropping them
+                          // made the governance restore silently lossy.
+                          const sicnu::data::Result<void> restored =
+                              serializer.read( document, out.project, *out.context );
+                          for ( const sicnu::data::Diagnostic &d : restored.diagnostics() )
+                              std::fprintf( stderr, "[workspace] %s: %s\n",
+                                            qPrintable( d.code ), qPrintable( d.message ) );
                       } );
     out.readOk = out.project.read( path );
     if ( !out.readOk )

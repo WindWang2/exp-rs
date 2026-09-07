@@ -1026,63 +1026,27 @@ QPushButton#rsTaskPanelRun[primary="true"]:disabled {
 #rsTaskPanelHint[error="true"] {
   color: #C9372C;
 }
+/* Schema form inline validation (UX 4.0) */
+#rsSchemaValidation[state="error"] {
+  color: #C9372C;
+  font-size: 12px;
+}
+#rsSchemaValidation[state="warn"] {
+  color: #B58100;
+  font-size: 12px;
+}
+#rsSchemaValidation[state="ok"] {
+  color: #1A7F37;
+  font-size: 12px;
+}
+QLineEdit[errorState="true"],
+QComboBox[errorState="true"],
+QPlainTextEdit[errorState="true"] {
+  border: 1px solid #C9372C;
+}
 
 
 
-/* ============ Band Composition Rail (signature chrome) ============ */
-#rsBandCompositionRail {
-    background: #EEF1F4;
-    border: none;
-    border-bottom: 1px solid #E2E6EB;
-    min-height: 26px;
-    max-height: 28px;
-}
-#rsBandCompositionRail QLabel {
-    color: #5A6573;
-    font-size: 11px;
-    padding: 0 4px;
-}
-#rsBandChip {
-    border-radius: 3px;
-    min-width: 22px;
-    max-width: 36px;
-    min-height: 16px;
-    max-height: 16px;
-    font-size: 10px;
-    font-weight: 700;
-    color: #FFFFFF;
-    qproperty-alignment: AlignCenter;
-}
-#rsBandChip[role="R"] { background: #C9372C; }
-#rsBandChip[role="G"] { background: #2F9E44; }
-#rsBandChip[role="B"] { background: #1B6CA8; }
-#rsBandChip[role="NIR"] { background: #8B3A3A; }
-#rsBandChip[role="Gray"] { background: #5A6573; }
-#rsBandRangeLabel {
-    font-family: 'IBM Plex Mono', 'SF Mono', monospace;
-    font-size: 11px;
-    color: #1C2430;
-}
-#rsBandMetaLabel {
-    font-family: 'IBM Plex Mono', 'SF Mono', monospace;
-    font-size: 11px;
-    color: #5A6573;
-}
-#rsBandTaskPill {
-    background: rgba(11, 110, 79, 0.10);
-    border: 1px solid rgba(11, 110, 79, 0.35);
-    border-radius: 10px;
-    color: #0B6E4F;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 1px 10px;
-}
-#rsBandTaskPill[idle="true"] {
-    background: transparent;
-    border: 1px solid #C5CDD6;
-    color: #5A6573;
-    font-weight: 400;
-}
 
 /* ============ Histogram instrument window ============ */
 #rsHistogramChart {
@@ -1154,15 +1118,6 @@ QTreeView::item:selected, QTreeWidget::item:selected, QListView::item:selected {
     color: #0B6E4F;
     border-left: 2px solid #0B6E4F;
 }
-
-#rsBandRailHost {
-    background: #EEF1F4;
-    border: none;
-    border-bottom: 1px solid #E2E6EB;
-    spacing: 0;
-    padding: 0;
-}
-#rsBandRailHost::separator { width: 0; background: transparent; }
 
 /* Top chrome: ribbon + full-width band rail (pinned top dock, full window width) */
 #rsTopChrome {

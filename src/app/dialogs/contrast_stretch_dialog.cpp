@@ -2,13 +2,6 @@
 #include "contrast_stretch_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
-#include "async_gdal_runner.h"
-#include "processing/algorithms/image_enhancement.h"
-#include "processing/algorithms/image_enhancement_streaming.h"
-#include "processing/gdal/gdal_dataset_wrapper.h"
-#include "processing/gdal/gdal_multiband_block_stream.h"
-#include "processing/gdal/gdal_safe_call.h"
-#include "processing/framework/task_center.h"
 #include "app/widgets/histogram_stretch_widget.h"
 #include "widgets/raster_layer_combo.h"
 
@@ -21,11 +14,7 @@
 #include <QLabel>
 #include <QComboBox>
 #include <QDoubleSpinBox>
-
-#include <gdal.h>
-#include <cpl_error.h>
-
-#include <limits>
+#include <QMessageBox>
 
 ContrastStretchDialog::ContrastStretchDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
@@ -150,94 +139,52 @@ void ContrastStretchDialog::onRun()
   if ( !m_rasterLayer )
     return;
 
-  QString sourcePath = m_rasterLayer->source();
   int methodIndex = m_methodCombo->currentIndex();
   double clipValue = m_clipSpin->value();
   double stddevValue = m_stddevSpin->value();
 
-  QVector<QPointF> piecewisePoints = m_stretchWidget ? m_stretchWidget->piecewisePoints() : QVector<QPointF>();
-  std::vector<std::pair<float, float>> stdPoints;
-  for ( const auto &pt : piecewisePoints )
+  // Thin client: the streaming stretch kernel runs as the rs:contrast_stretch
+  // operator through the Task Center — same execution path as CLI/MCP.
+  Json::Value params( Json::objectValue );
+  params["input"] = m_rasterLayer->source().toStdString();
+  params["output"] = outputPath().toStdString();
+  switch ( methodIndex )
   {
-    stdPoints.emplace_back( static_cast<float>( pt.x() ), static_cast<float>( pt.y() ) );
-  }
-
-  // Single task per run: runGdalTask submits one callable:gdal_task to the
-  // JobEngine (the executed + tracked task). The previous code additionally
-  // enqueueTask()'d an orphan "gdal:contrast_stretch" tracking record that was
-  // never executed and manually driven from the lambda — two tasks for one user
-  // action (perf/architecture goal 2026-08-08: de-duplicate the execution seam).
-  // runGdalTask/GuiJobHandle now own the task-panel lifecycle (Running on
-  // dispatch, Completed/Failed on the lambda's return/throw).
-  runGdalTask( [sourcePath, outputPath = outputPath(), methodIndex, clipValue, stddevValue, stdPoints]() -> QString {
-    GdalDatasetWrapper srcDataset;
-    if ( !srcDataset.open( sourcePath ) )
-      return QStringLiteral( "\x01SICNU_ERR\x01" "Failed to open GDAL dataset" );
-
-    const int width = srcDataset.width();
-    const int height = srcDataset.height();
-    const int bandCount = srcDataset.bandCount();
-
-    // Streaming conversion (#691): the previous body materialized allBands +
-    // outputBands (2×B full-raster frames) and rejected rasters above 2 GiB
-    // with a typed error. Each band now runs through a streaming statistics
-    // pass and a streaming apply pass (ImageEnhancementStreaming::
-    // streamBandStretch — a behavioural replica of the ImageEnhancement
-    // stretch kernels) and is written tile-by-tile, so peak memory is O(tile)
-    // for any raster size.
-    GdalStreamingOutput dst( outputPath, width, height, bandCount, GDT_Float32,
-                             srcDataset.geoTransform(), srcDataset.projection() );
-    if ( !dst.isOpen() )
-      return QStringLiteral( "\x01SICNU_ERR\x01" "Failed to create output raster" );
-
-    for ( int b = 1; b <= bandCount; ++b )
+    case 0:
     {
-      // Resolve the band's declared NoData (float-cast; NaN when undeclared)
-      // so stretches mask the real sentinel instead of a fabricated -9999 (#445).
-      bool hasNd = false;
-      const double nd = srcDataset.bandNoDataValue( b, &hasNd );
-      const float ndF = ( hasNd && std::isfinite( nd ) )
-                          ? static_cast<float>( nd )
-                          : std::numeric_limits<float>::quiet_NaN();
-
-      ImageEnhancementStreaming::StretchParams params;
-      switch ( methodIndex )
+      QVector<QPointF> piecewisePoints = m_stretchWidget ? m_stretchWidget->piecewisePoints()
+                                                         : QVector<QPointF>();
+      if ( piecewisePoints.size() < 2 )
       {
-        case 0:
-          params.kind = ImageEnhancementStreaming::StretchKind::Piecewise;
-          params.piecewisePoints = stdPoints;
-          break;
-        case 1:
-          params.kind = ImageEnhancementStreaming::StretchKind::Linear;
-          break;
-        case 2:
-          params.kind = ImageEnhancementStreaming::StretchKind::PercentClip;
-          params.clipPercent = static_cast<float>( clipValue );
-          break;
-        case 3:
-          params.kind = ImageEnhancementStreaming::StretchKind::StdDev;
-          params.stddevK = static_cast<float>( stddevValue );
-          break;
-        case 4:
-          params.kind = ImageEnhancementStreaming::StretchKind::HistogramEqualize;
-          break;
+        QMessageBox::warning( this, dialogTitle(),
+                              tr( "自定义色阶至少需要两个控制点，请改用预设方法。" ) );
+        return;
       }
-
-      QString bandError;
-      if ( !ImageEnhancementStreaming::streamBandStretch( srcDataset, b, ndF, params, dst,
-                                                          ImageEnhancementStreaming::kTileDim,
-                                                          &bandError ) )
+      params["method"] = "piecewise";
+      params["piecewisePoints"] = Json::Value( Json::arrayValue );
+      for ( const auto &pt : piecewisePoints )
       {
-        // Abandon: the close below removes the partial output (#647).
-        dst.abandon();
-        return QStringLiteral( "\x01SICNU_ERR\x01" ) + bandError;
+        Json::Value pair( Json::arrayValue );
+        pair.append( pt.x() );
+        pair.append( pt.y() );
+        params["piecewisePoints"].append( pair );
       }
+      break;
     }
-
-    QString error;
-    if ( !dst.closeWithError( &error ) )
-      return QStringLiteral( "\x01SICNU_ERR\x01" ) + error;
-
-    return outputPath;
-  } );
+    case 2:
+      params["method"] = "percent_clip";
+      params["clipPercent"] = clipValue;
+      break;
+    case 3:
+      params["method"] = "stddev";
+      params["stddevK"] = stddevValue;
+      break;
+    case 4:
+      params["method"] = "histogram_equalize";
+      break;
+    default:
+      params["method"] = "linear";
+      break;
+  }
+  runOperatorTask( QStringLiteral( "rs:contrast_stretch" ), params );
 }

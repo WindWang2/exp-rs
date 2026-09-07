@@ -1,0 +1,87 @@
+{
+  "id": "presentation-screen",
+  "version": 1,
+  "description": "16:9 presentation map for screen delivery (screen tokens, larger type).",
+  "page": {
+    "width_mm": 338.7,
+    "height_mm": 190.5
+  },
+  "style": {
+    "token_set": "scientific-light",
+    "medium": "screen"
+  },
+  "slots": [
+    {
+      "role": "map.main",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        30.0,
+        244.7,
+        124.5
+      ]
+    },
+    {
+      "role": "title.main",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        12.0,
+        314.7,
+        12.0
+      ]
+    },
+    {
+      "role": "legend.primary",
+      "accepts": "legends",
+      "rect_mm": [
+        256.7,
+        30.0,
+        70.0,
+        124.5
+      ],
+      "content": {
+        "title": "图例"
+      }
+    },
+    {
+      "role": "scalebar.primary",
+      "accepts": "scale_bars",
+      "rect_mm": [
+        14.0,
+        162.5,
+        48,
+        10
+      ]
+    },
+    {
+      "role": "north_arrow.primary",
+      "accepts": "north_arrows",
+      "rect_mm": [
+        68.0,
+        162.5,
+        12,
+        12
+      ]
+    },
+    {
+      "role": "source.primary",
+      "accepts": "source_notes",
+      "rect_mm": [
+        88.0,
+        164.5,
+        218.7,
+        8
+      ]
+    }
+  ],
+  "suitable_tasks": [
+    "presentation",
+    "screen"
+  ],
+  "product_type": "presentation",
+  "recommended_components": [
+    "north-arrow/minimal",
+    "grid/graticule"
+  ]
+}

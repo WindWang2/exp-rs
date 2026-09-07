@@ -6,7 +6,6 @@
 #include "layer_tree_menu.h"
 #include "project_context.h"
 #include "widgets/histogram_stretch_widget.h"
-#include "widgets/band_composition_rail.h"
 #include "processing/framework/task_center.h"
 
 #include <QStatusBar>
@@ -58,21 +57,10 @@ void QgisDesktopWindow::setupConnections()
             this, &QgisDesktopWindow::updateExtents);
     connect(m_mapCanvas, &QgsMapCanvas::renderComplete,
             this, &QgisDesktopWindow::onRenderComplete);
-    // Band rail + status bar: follow active map layer.
-    auto syncActiveLayerChrome = [this]( QgsMapLayer *layer ) {
-        syncStatusBarLayer( layer );
-        if ( !m_bandRail )
-            return;
-        if ( auto *rl = qobject_cast<QgsRasterLayer *>( layer ) )
-            m_bandRail->setRasterLayer( rl );
-        else
-            m_bandRail->setRasterLayer( nullptr );
-    };
+    // Status bar: follow active map layer.
     connect( m_mapCanvas, &QgsMapCanvas::currentLayerChanged,
-             this, [syncActiveLayerChrome]( QgsMapLayer *layer ) {
-                 syncActiveLayerChrome( layer );
-             } );
-    connect( m_mapCanvas, &QgsMapCanvas::layersChanged, this, [this, syncActiveLayerChrome]() {
+             this, &QgisDesktopWindow::syncStatusBarLayer );
+    connect( m_mapCanvas, &QgsMapCanvas::layersChanged, this, [this]() {
         if ( !m_mapCanvas )
             return;
         QgsMapLayer *layer = m_mapCanvas->currentLayer();
@@ -85,25 +73,6 @@ void QgisDesktopWindow::setupConnections()
                     layer = l;
                     break;
                 }
-            }
-        }
-        // Prefer raster for band rail when current is not raster.
-        if ( m_bandRail )
-        {
-            if ( auto *rl = qobject_cast<QgsRasterLayer *>( layer ) )
-                m_bandRail->setRasterLayer( rl );
-            else
-            {
-                QgsRasterLayer *firstRaster = nullptr;
-                for ( QgsMapLayer *l : m_mapCanvas->layers() )
-                {
-                    if ( auto *rl = qobject_cast<QgsRasterLayer *>( l ) )
-                    {
-                        firstRaster = rl;
-                        break;
-                    }
-                }
-                m_bandRail->setRasterLayer( firstRaster );
             }
         }
         syncStatusBarLayer( layer );
@@ -144,6 +113,14 @@ void QgisDesktopWindow::setupConnections()
             this, &QgisDesktopWindow::onProjectRead);
     connect(QgsProject::instance(), &QgsProject::writeProject,
             this, &QgisDesktopWindow::onProjectWrite);
+    // Window title mirrors project identity + dirty state.
+    connect(QgsProject::instance(), &QgsProject::isDirtyChanged,
+            this, [this]( bool dirty ) {
+                if ( m_projectDirty == dirty )
+                    return;
+                m_projectDirty = dirty;
+                updateWindowTitle();
+            });
 }
 
 void QgisDesktopWindow::initLayerTree()
@@ -334,6 +311,20 @@ void QgisDesktopWindow::onProjectRead(const QDomDocument &doc)
                     .arg( formatProjectDiagnostics(
                         restored.diagnostics() ) ) );
         }
+        else if ( !restored.diagnostics().isEmpty() )
+        {
+            // Non-fatal governance diagnostics (store unavailable/read-only,
+            // failed upserts, v1 migration) surface as a status message —
+            // they are warnings on a successful read, and silencing them hid
+            // partial restores (issue #752).
+            statusBar()->showMessage(
+                tr( "Project data: %1 governance notice(s) — see logs" )
+                    .arg( restored.diagnostics().size() ),
+                8000 );
+            for ( const sicnu::data::Diagnostic &d : restored.diagnostics() )
+                qWarning( "workspace restore notice: %s: %s",
+                          qPrintable( d.code ), qPrintable( d.message ) );
+        }
     }
     refreshCanvasLayers();
     updateCrsDisplay();
@@ -415,13 +406,6 @@ void QgisDesktopWindow::onLayerTreeClicked(const QModelIndex &index)
                     m_histogramStretchDock->setWindowTitle(
                       tr( "显示拉伸 — %1" ).arg( rl->name() ) );
             }
-        }
-        if ( m_bandRail )
-        {
-            if ( auto *rl = qobject_cast<QgsRasterLayer *>( layer ) )
-                m_bandRail->setRasterLayer( rl );
-            else
-                m_bandRail->setRasterLayer( nullptr );
         }
         syncStatusBarLayer( layer );
     }

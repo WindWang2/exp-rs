@@ -25,6 +25,20 @@ bool changeMask(const float *diff, uint8_t *mask, size_t count, float threshold)
 ChangeStats statistics(const float *diff, size_t count);
 
 /**
+ * Bin index for @p v in a fixed-range histogram with @p bins bins over
+ * [minVal, minVal+range]. Shared binning convention for every histogram
+ * consumer (Otsu, Kittler, percentile thresholds, streaming change masks):
+ * bin = (v - minVal) / range * (bins - 1), clamped to [0, bins-1].
+ * Callers must pass finite @p v, range > 0, and bins >= 1 (all current call
+ * sites clamp bins to [16, 1024] or use a constant >= 16).
+ */
+inline int histogramBin(double v, double minVal, double range, int bins)
+{
+    int bin = static_cast<int>((v - minVal) / range * (bins - 1));
+    return bin < 0 ? 0 : (bin > bins - 1 ? bins - 1 : bin);
+}
+
+/**
  * Ratio change: out[i] = after[i] / before[i]. Pixels where before <= 0
  * become NaN (guarded, matching the NaN convention of the other kernels and
  * the log-ratio treatment of non-positive reflectance, #700).
@@ -40,6 +54,15 @@ bool ratio(const float *before, const float *after, float *out, size_t count);
 bool cvaMagnitude(const float *const *beforeBands, const float *const *afterBands,
                   int bandCount, size_t pixels, float *out,
                   QString *errorMessage = nullptr);
+
+/**
+ * Band-interleaved (BIP) layout variant of cvaMagnitude — identical math and
+ * NaN policy (any NaN band delta propagates to the pixel), one owner of the
+ * definition so the streaming and per-band paths cannot drift.
+ * @param beforeBip / afterBip  @p pixels * @p bandCount floats, band-major per pixel
+ */
+bool cvaMagnitudeBip(const float *beforeBip, const float *afterBip,
+                     int bandCount, size_t pixels, float *out);
 
 /**
  * Multivariate Alteration Detection (MAD) change magnitude across @p bandCount bands.

@@ -1,0 +1,75 @@
+{
+  "id": "sar-backscatter-a3l",
+  "version": 1,
+  "extends": "sar-backscatter-a4l",
+  "description": "SAR backscatter (dB) continuous map with dB colorbar and histogram.",
+  "page": {
+    "width_mm": 420,
+    "height_mm": 297
+  },
+  "slots": [
+    {
+      "role": "map.main",
+      "accepts": "map_frames",
+      "rect_mm": [
+        12.0,
+        30.0,
+        326.0,
+        231.0
+      ]
+    },
+    {
+      "role": "title.main",
+      "accepts": "titles",
+      "rect_mm": [
+        12.0,
+        12.0,
+        396.0,
+        12.0
+      ]
+    },
+    {
+      "role": "legend.primary",
+      "accepts": "legends",
+      "rect_mm": [
+        338.0,
+        30.0,
+        70.0,
+        231.0
+      ],
+      "content": {
+        "title": "图例"
+      }
+    },
+    {
+      "role": "scalebar.primary",
+      "accepts": "scale_bars",
+      "rect_mm": [
+        14.0,
+        269.0,
+        48,
+        10
+      ]
+    },
+    {
+      "role": "north_arrow.primary",
+      "accepts": "north_arrows",
+      "rect_mm": [
+        68.0,
+        269.0,
+        12,
+        12
+      ]
+    },
+    {
+      "role": "source.primary",
+      "accepts": "source_notes",
+      "rect_mm": [
+        88.0,
+        271.0,
+        300.0,
+        8
+      ]
+    }
+  ]
+}

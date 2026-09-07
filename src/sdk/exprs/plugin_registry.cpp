@@ -4,18 +4,13 @@
 #include "exprs/plugin_registry.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <sstream>
-
-#include <sys/stat.h>
-#include <sys/types.h>
-
-#ifdef _WIN32
-#include "exprs/msvc_posix_shim.h"
-#endif
 
 #include "exprs/plugin_validator.h"
 
@@ -31,6 +26,18 @@ exprs::PluginState incompatibleStateFor( const std::string &pluginId,
             return exprs::PluginState::Incompatible;
     }
     return exprs::PluginState::Broken;
+}
+
+/// Bounded wait for the quiescence barrier (issue #747): unload must drain
+/// in-flight plugin executions or refuse — never unmap code under a running
+/// thread. Overridable for tests and time-constrained callers.
+int unloadTimeoutMs()
+{
+    const char *raw = std::getenv( "SICNU_PLUGIN_UNLOAD_TIMEOUT_MS" );
+    if ( !raw || !*raw )
+        return 30000;
+    const long parsed = std::strtol( raw, nullptr, 10 );
+    return parsed > 0 ? static_cast<int>( std::min<long>( parsed, 600000 ) ) : 30000;
 }
 } // namespace
 
@@ -311,7 +318,10 @@ bool PluginRegistry::loadUnlocked( const std::string &pluginId )
     {
         // Manifest-kind plugins: every contribution is pure-manifest
         // (external tools); nothing to dlopen, so loading is a host-side
-        // bookkeeping op.
+        // bookkeeping op. The host (re)installs the manifest contributions
+        // here — unload revoked them, so a reload must restore them (#755).
+        if ( mSink )
+            mSink->pluginLoaded( pluginId );
         LoadedPlugin hosted;
         hosted.pluginId = pluginId;
         mLoaded.push_back( std::move( hosted ) );
@@ -333,6 +343,9 @@ bool PluginRegistry::loadUnlocked( const std::string &pluginId )
     {
         mLoaded.push_back( mLoader->take() );
         entry->state = PluginState::Loaded;
+        // Reopen the execution barrier for the fresh load (a previous unload
+        // closed it) and let the host refresh manifest contributions (#755).
+        mSink->pluginLoaded( pluginId );
     }
     else
     {
@@ -373,18 +386,70 @@ const LoadedPlugin *PluginRegistry::loaded( const std::string &pluginId ) const
     return findLoaded( mLoaded, pluginId );
 }
 
-bool PluginRegistry::unload( const std::string &pluginId )
+bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
 {
+    // Unload sequence (issue #747), in order:
+    //   1. arm the drain (new dispatch refused) and mark the record Quiescing;
+    //   2. wait bounded for in-flight executions — refusing (state restored)
+    //      on timeout; the registry lock is NOT held while waiting, because
+    //      draining executors may still call back into the registry;
+    //   3. revoke host-side contributions (UI release, operator/tool/model/
+    //      data-provider unregistration) while the code is still mapped;
+    //   4. shutdown + delete the plugin instance, then dlclose LAST.
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        auto iterator = std::find_if( mLoaded.begin(), mLoaded.end(),
+                                      [&]( const LoadedPlugin &entry ) {
+                                          return entry.pluginId == pluginId;
+                                      } );
+        if ( iterator == mLoaded.end() )
+            return false;
+        if ( PluginRecord *entry = record( pluginId ) )
+            entry->state = PluginState::Quiescing;
+    }
+
+    const int budget = timeoutMs > 0 ? timeoutMs : unloadTimeoutMs();
+    if ( mSink )
+        mSink->beginPluginDrain( pluginId );
+    const bool idle = mSink ? mSink->waitPluginIdle( pluginId, budget ) : true;
+    if ( !idle )
+    {
+        if ( mSink )
+            mSink->cancelPluginDrain( pluginId );
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        // A concurrent unloader may have completed the unload while we
+        // waited: only restore when the entry is still loaded.
+        const bool stillLoaded =
+            std::find_if( mLoaded.begin(), mLoaded.end(), [&]( const LoadedPlugin &e ) {
+                return e.pluginId == pluginId;
+            } ) != mLoaded.end();
+        if ( stillLoaded )
+        {
+            if ( PluginRecord *entry = record( pluginId ) )
+            {
+                if ( entry->state == PluginState::Quiescing )
+                    entry->state = PluginState::Loaded;
+            }
+        }
+        mDiagnostics.add( PluginDiagnosticCode::PluginInUse, PluginDiagnosticSeverity::Error,
+                          "unload refused: plugin is in use (execution still active after "
+                              + std::to_string( budget ) + " ms); stop the running task first",
+                          pluginId );
+        return false;
+    }
+
     std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     auto iterator = std::find_if( mLoaded.begin(), mLoaded.end(),
                                   [&]( const LoadedPlugin &entry ) {
                                       return entry.pluginId == pluginId;
                                   } );
     if ( iterator == mLoaded.end() )
-        return false;
+        return true; // drained, then unloaded by a concurrent caller
     // Revoke host-side contributions BEFORE dlclose: std::function targets,
     // executors and providers created by the plugin must be released while
-    // its code is still mapped.
+    // its code is still mapped. The host closes its barrier entry here so
+    // stale adapters fail with a typed refusal instead of calling into
+    // unmapped code.
     if ( mSink )
         mSink->revokePlugin( pluginId );
     if ( !mLoader )
@@ -398,21 +463,105 @@ bool PluginRegistry::unload( const std::string &pluginId )
 
 void PluginRegistry::unloadAll()
 {
+    // Shutdown path: drain every loaded plugin first (so a worker running
+    // plugin code finishes against mapped code), then unload the drained
+    // ones. A plugin that does not drain within the budget is left loaded —
+    // its mapping is reclaimed by process exit; revoking/dlclosing it would
+    // unmap code under a running thread.
+    std::vector<std::string> ids;
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        for ( LoadedPlugin &entry : mLoaded )
+            ids.push_back( entry.pluginId );
+        for ( const std::string &id : ids )
+        {
+            if ( PluginRecord *entry = record( id ) )
+                entry->state = PluginState::Quiescing;
+        }
+    }
+    if ( mSink )
+    {
+        for ( const std::string &id : ids )
+            mSink->beginPluginDrain( id );
+    }
+
+    std::vector<std::string> drained;
+    // Shared deadline: shutdown latency is bounded ONCE, not per busy plugin
+    // (P3 review finding — several busy plugins must not multiply the wait).
+    const int budget = unloadTimeoutMs();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds( budget );
+    for ( const std::string &id : ids )
+    {
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now() );
+        const bool idle =
+            mSink ? mSink->waitPluginIdle( id, static_cast<int>( remaining.count() ) ) : true;
+        if ( idle )
+            drained.push_back( id );
+        else if ( remaining.count() <= 0 )
+            break;
+    }
+
     std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     if ( !mLoader )
+    {
+        // No native load ever happened; manifest-kind bookkeeping entries
+        // have no library to unload, but their sink contributions still
+        // need the revoke pass for symmetry.
+        for ( const std::string &id : ids )
+        {
+            auto iterator = std::find_if( mLoaded.begin(), mLoaded.end(),
+                                          [&]( const LoadedPlugin &entry ) {
+                                              return entry.pluginId == id;
+                                          } );
+            if ( iterator == mLoaded.end() )
+                continue;
+            if ( mSink && !gDestructing )
+                mSink->revokePlugin( id );
+            mLoaded.erase( iterator );
+            if ( PluginRecord *entry = record( id ) )
+                entry->state = PluginState::Unloaded;
+        }
         return;
-    for ( LoadedPlugin &entry : mLoaded )
-    {
-        if ( mSink && !gDestructing )
-            mSink->revokePlugin( entry.pluginId );
     }
-    for ( LoadedPlugin &entry : mLoaded )
-        mLoader->unload( entry, mDiagnostics );
-    mLoaded.clear();
-    for ( PluginRecord &entry : mRecords )
+    for ( const std::string &id : drained )
     {
-        if ( entry.state == PluginState::Loaded )
-            entry.state = PluginState::Unloaded;
+        auto iterator = std::find_if( mLoaded.begin(), mLoaded.end(),
+                                      [&]( const LoadedPlugin &entry ) {
+                                          return entry.pluginId == id;
+                                      } );
+        if ( iterator == mLoaded.end() )
+            continue;
+        if ( mSink && !gDestructing )
+            mSink->revokePlugin( id );
+        mLoader->unload( *iterator, mDiagnostics );
+        mLoaded.erase( iterator );
+        if ( PluginRecord *entry = record( id ) )
+            entry->state = PluginState::Unloaded;
+    }
+    for ( const std::string &id : ids )
+    {
+        const bool stillLoaded =
+            std::find_if( mLoaded.begin(), mLoaded.end(), [&]( const LoadedPlugin &entry ) {
+                return entry.pluginId == id;
+            } ) != mLoaded.end();
+        if ( !stillLoaded )
+            continue;
+        if ( mSink )
+            mSink->cancelPluginDrain( id );
+        if ( PluginRecord *entry = record( id ) )
+        {
+            if ( entry->state == PluginState::Quiescing )
+                entry->state = PluginState::Loaded;
+            if ( !gDestructing )
+            {
+                entry->diagnostics.add( PluginDiagnosticCode::PluginInUse,
+                                        PluginDiagnosticSeverity::Error,
+                                        "unload skipped: plugin is in use at shutdown; its "
+                                        "library stays mapped until process exit",
+                                        id );
+            }
+        }
     }
 }
 
@@ -462,7 +611,8 @@ void PluginRegistry::saveUserIndex() const
     if ( slash != std::string::npos )
     {
         const std::string parent = path.substr( 0, slash );
-        ::mkdir( parent.c_str(), 0755 );
+        std::error_code error;
+        std::filesystem::create_directories( parent, error );
     }
     const std::string temp = path + ".tmp";
     {
@@ -477,7 +627,10 @@ void PluginRegistry::saveUserIndex() const
         Json::StyledWriter writer;
         output << writer.write( root );
     }
-    std::rename( temp.c_str(), path.c_str() );
+    std::error_code renameError;
+    std::filesystem::rename( temp, path, renameError );
+    if ( renameError )
+        std::remove( temp.c_str() );
 }
 
 bool PluginRegistry::setEnabled( const std::string &pluginId, bool enabled )
@@ -514,6 +667,21 @@ bool PluginRegistry::setEnabled( const std::string &pluginId, bool enabled )
         }
     }
     saveUserIndex();
+    return true;
+}
+
+std::vector<std::string> PluginRegistry::userDisabledIds() const
+{
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+    return mDisabledIds;
+}
+
+bool PluginRegistry::setUserDisabledIds( const std::vector<std::string> &ids )
+{
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+    mDisabledIds = ids;
+    saveUserIndex();
+    applyPolicyAndIndex();
     return true;
 }
 
