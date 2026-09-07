@@ -1,0 +1,55 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.qa.cloud-report",
+ "version": 1,
+ "title": "Cloud/QA coverage report",
+ "description": "QA mask + masked product for acquisition-quality reporting.",
+ "tasks": [
+  "qa"
+ ],
+ "modalities": [
+  "optical"
+ ],
+ "sensors": [
+  "sentinel-2",
+  "landsat-8"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Reflectance product."
+  },
+  {
+   "name": "qa",
+   "kind": "raster",
+   "required": true,
+   "description": "QA band product."
+  }
+ ],
+ "analysis_recipe": "harness.qa_scene_report",
+ "map_template": "cloud-cover-a4l",
+ "style_spec": {
+  "primary": "style.water-extent"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "qa",
+  "cloud",
+  "coverage"
+ ],
+ "family": "qa"
+}

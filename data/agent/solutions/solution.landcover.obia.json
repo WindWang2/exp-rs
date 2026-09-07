@@ -1,0 +1,49 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.landcover.obia",
+ "version": 1,
+ "title": "Object-based land-cover mapping",
+ "description": "OBIA segmentation + classification for object-consistent land-cover maps.",
+ "tasks": [
+  "landcover",
+  "classification"
+ ],
+ "modalities": [
+  "model"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Optical scene for segmentation."
+  }
+ ],
+ "analysis_recipe": "harness.classify_obia",
+ "map_template": "classification-a4l",
+ "style_spec": {
+  "primary": "style.landcover-classes"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "landcover",
+  "obia",
+  "objects"
+ ],
+ "family": "landcover"
+}

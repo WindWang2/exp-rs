@@ -1,0 +1,22 @@
+{
+ "schema_version": "1.0",
+ "kind": "style_spec",
+ "id": "style.dem-hillshade",
+ "version": 1,
+ "description": "DEM elevation with sequential ramp; pair with hillshade blend (blend knowledge for the map layer).",
+ "token_set_ref": "scientific-light",
+ "semantics": [
+  "dem",
+  "terrain",
+  "elevation"
+ ],
+ "applies_to": "raster",
+ "raster": {
+  "renderertype": "singleband_pseudocolor",
+  "band": 1,
+  "classification": {
+   "mode": "continuous",
+   "ramp": "token:palettes.sequential"
+  }
+ }
+}

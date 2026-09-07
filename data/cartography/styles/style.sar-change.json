@@ -1,0 +1,26 @@
+{
+ "schema_version": "1.0",
+ "kind": "style_spec",
+ "id": "style.sar-change",
+ "version": 1,
+ "description": "SAR log-ratio change: diverging ramp around 0 dB (loss/deposition).",
+ "token_set_ref": "scientific-light",
+ "semantics": [
+  "sar",
+  "change"
+ ],
+ "applies_to": "raster",
+ "raster": {
+  "renderertype": "singleband_pseudocolor",
+  "band": 1,
+  "classification": {
+   "mode": "continuous",
+   "ramp": "token:palettes.diverging",
+   "stretch": {
+    "type": "fixed",
+    "min": -3,
+    "max": 3
+   }
+  }
+ }
+}

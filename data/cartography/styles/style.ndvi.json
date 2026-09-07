@@ -1,0 +1,26 @@
+{
+ "schema_version": "1.0",
+ "kind": "style_spec",
+ "id": "style.ndvi",
+ "version": 1,
+ "description": "NDVI continuous ramp from bare/monitoring minimum to dense canopy.",
+ "token_set_ref": "scientific-light",
+ "semantics": [
+  "vegetation",
+  "ndvi"
+ ],
+ "applies_to": "raster",
+ "raster": {
+  "renderertype": "singleband_pseudocolor",
+  "band": 1,
+  "classification": {
+   "mode": "continuous",
+   "ramp": "token:palettes.sequential_green",
+   "stretch": {
+    "type": "fixed",
+    "min": -0.2,
+    "max": 0.9
+   }
+  }
+ }
+}

@@ -1,0 +1,91 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.flood.optical-ndwi",
+ "version": 1,
+ "title": "Optical flood extent mapping (NDWI)",
+ "description": "Post-event optical scene -> NDWI -> statistical threshold -> cleaned water/flood extent with the probability colorbar template.",
+ "tasks": [
+  "flood",
+  "water"
+ ],
+ "modalities": [
+  "optical"
+ ],
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Post-event optical reflectance product with Green and NIR bands.",
+   "accepted": [
+    "sentinel2_l1c",
+    "sentinel2_l2a",
+    "landsat_c2"
+   ]
+  },
+  {
+   "name": "qa",
+   "kind": "raster",
+   "required": false,
+   "description": "Optional cloud/QA mask for the same footprint."
+  },
+  {
+   "name": "dem",
+   "kind": "raster",
+   "required": false,
+   "description": "Optional DEM for terrain context."
+  }
+ ],
+ "analysis_recipe": "harness.optical_flood_ndwi",
+ "map_template": "water-flood-a4l",
+ "style_spec": {
+  "primary": "style.flood-extent",
+  "probability": "style.flood-probability"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "water_extent",
+   "kind": "raster",
+   "from_output": "water_extent"
+  },
+  {
+   "name": "ndwi",
+   "kind": "raster",
+   "from_output": "ndwi"
+  },
+  {
+   "name": "map_pdf",
+   "kind": "file",
+   "role": "final_map"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "flood",
+  "inundation",
+  "ndwi",
+  "water"
+ ],
+ "report_template": "report-page-a4l",
+ "limitations": [
+  "Cloud cover blocks the optical branch — use the SAR solution for weather-independent mapping."
+ ],
+ "recipe_params": {
+  "threshold": ""
+ },
+ "aliases": [
+  "flood.optical"
+ ],
+ "family": "flood"
+}

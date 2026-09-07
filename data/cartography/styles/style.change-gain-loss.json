@@ -1,0 +1,39 @@
+{
+ "schema_version": "1.0",
+ "kind": "style_spec",
+ "id": "style.change-gain-loss",
+ "version": 1,
+ "description": "Discrete change map: loss, stable, gain with colorblind-safe diverging colors.",
+ "token_set_ref": "scientific-light",
+ "semantics": [
+  "change"
+ ],
+ "applies_to": "raster",
+ "raster": {
+  "renderertype": "singleband_pseudocolor",
+  "band": 1,
+  "classification": {
+   "mode": "discrete",
+   "classes": [
+    {
+     "min": -1,
+     "max": -0.5,
+     "label": "loss",
+     "color": "#d73027"
+    },
+    {
+     "min": -0.5,
+     "max": 0.5,
+     "label": "stable",
+     "color": "#f5f5f5"
+    },
+    {
+     "min": 0.5,
+     "max": 1,
+     "label": "gain",
+     "color": "#1a9850"
+    }
+   ]
+  }
+ }
+}

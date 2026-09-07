@@ -1,0 +1,62 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.landcover.supervised",
+ "version": 1,
+ "title": "Supervised land-cover classification",
+ "description": "Feature stack + training samples -> random-forest style classification with accuracy split and categorical style.",
+ "tasks": [
+  "landcover",
+  "classification"
+ ],
+ "modalities": [
+  "model"
+ ],
+ "sensors": [
+  "sentinel-2",
+  "landsat-8"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Multi-band feature raster (spectral + optional indices)."
+  },
+  {
+   "name": "training",
+   "kind": "vector",
+   "required": true,
+   "description": "Training polygons with class attribute."
+  }
+ ],
+ "analysis_recipe": "harness.classify_supervised",
+ "map_template": "classification-a4l",
+ "style_spec": {
+  "primary": "style.landcover-classes"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "classification",
+   "kind": "raster",
+   "from_output": "classification"
+  },
+  {
+   "name": "classification_clean",
+   "kind": "raster",
+   "from_output": "classification_clean"
+  }
+ ],
+ "quality_grade": "certified",
+ "keywords": [
+  "landcover",
+  "classification",
+  "supervised"
+ ],
+ "family": "landcover"
+}

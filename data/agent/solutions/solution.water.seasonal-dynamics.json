@@ -1,0 +1,50 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.water.seasonal-dynamics",
+ "version": 1,
+ "title": "Seasonal water persistence",
+ "description": "Temporal MNDWI series summary producing seasonal water dynamics products.",
+ "tasks": [
+  "water",
+  "temporal"
+ ],
+ "modalities": [
+  "temporal"
+ ],
+ "sensors": [
+  "sentinel-2",
+  "modis"
+ ],
+ "input_contracts": [
+  {
+   "name": "collection",
+   "kind": "collection",
+   "required": true,
+   "description": "Registered temporal collection."
+  }
+ ],
+ "analysis_recipe": "harness.temporal_water_seasonal",
+ "map_template": "time-series-phenology-a4l",
+ "style_spec": {
+  "primary": "style.ndwi"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "collection",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "water",
+  "seasonal",
+  "persistence"
+ ],
+ "family": "water"
+}
