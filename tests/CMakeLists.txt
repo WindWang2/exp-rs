@@ -556,6 +556,59 @@ target_include_directories(test_nodata_utils PRIVATE
 )
 sicnu_discover_tests(test_nodata_utils)
 
+# Shared scientific primitives (Scientific Algorithm Foundation 5.0, A):
+# histogram/otsu/quantile, morphology, connected components, distance
+# transform, exact quantiles, window contract.
+add_executable(test_primitives5 test_primitives5.cpp)
+target_link_libraries(test_primitives5 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_primitives5 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_primitives5)
+
+# Topographic correction (Foundation 5.0 Milestone B1): kernel closed forms +
+# synthetic-scene operator E2E + grid-refusal contract.
+add_executable(test_topographic_correction test_topographic_correction.cpp)
+target_link_libraries(test_topographic_correction PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_topographic_correction)
+target_include_directories(test_topographic_correction PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_topographic_correction)
+
+# Spectral derivatives (Foundation 5.0 Milestone B3): kernel closed forms +
+# operator E2E over an explicit wavelength axis + index-space refusal.
+add_executable(test_spectral_derivative test_spectral_derivative.cpp)
+target_link_libraries(test_spectral_derivative PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_derivative)
+target_include_directories(test_spectral_derivative PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_derivative)
+
 # Spectral classification (SAM + Continuum Removal) kernel tests
 add_executable(test_spectral_classification test_spectral_classification.cpp)
 target_link_libraries(test_spectral_classification PRIVATE

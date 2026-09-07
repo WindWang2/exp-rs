@@ -10,6 +10,13 @@ add_library(sicnu_processing SHARED
     gdal/gdal_window_read.cpp
     gdal/gdal_error_handler.cpp
 
+    algorithms/primitives/raster_histogram.cpp
+    algorithms/primitives/morphology.cpp
+    algorithms/primitives/connected_components.cpp
+    algorithms/primitives/distance_transform.cpp
+    algorithms/topographic_correction.cpp
+    algorithms/spectral_derivative.cpp
+
     algorithms/spectral_indices.cpp
     algorithms/spectral_classification.cpp
     algorithms/band_math.cpp

@@ -34,6 +34,8 @@
 #include "rs_feature_stack_operator.h"
 #include "rs_feature_normalize_operator.h"
 #include "rs_feature_select_operator.h"
+#include "rs_topographic_correction_operator.h"
+#include "rs_spectral_derivative_operator.h"
 #include "rs_terrain_analysis_operator.h"
 #include "rs_pca_operator.h"
 #include "rs_mnf_operator.h"
@@ -131,6 +133,8 @@ REGISTER_RS_OPERATOR(RsFeatureStackOperator, "rs:feature_stack")
 REGISTER_RS_OPERATOR(RsFeatureNormalizeOperator, "rs:feature_normalize")
 REGISTER_RS_OPERATOR(RsFeatureSelectOperator, "rs:feature_select")
 REGISTER_RS_OPERATOR(RsTerrainAnalysisOperator, "rs:terrain_analysis")
+REGISTER_RS_OPERATOR(RsTopographicCorrectionOperator, "rs:topographic_correction")
+REGISTER_RS_OPERATOR(RsSpectralDerivativeOperator, "rs:spectral_derivative")
 REGISTER_RS_OPERATOR(RsPcaOperator, "rs:pca")
 REGISTER_RS_OPERATOR(RsMnfOperator, "rs:mnf")
 REGISTER_RS_OPERATOR(RsMosaicOperator, "rs:mosaic")
@@ -253,6 +257,8 @@ void initBuiltinRsOperators() {
   add( "rs:feature_normalize", [] { return std::make_unique<RsFeatureNormalizeOperator>(); } );
   add( "rs:feature_select", [] { return std::make_unique<RsFeatureSelectOperator>(); } );
   add( "rs:terrain_analysis", [] { return std::make_unique<RsTerrainAnalysisOperator>(); } );
+  add( "rs:topographic_correction", [] { return std::make_unique<RsTopographicCorrectionOperator>(); } );
+  add( "rs:spectral_derivative", [] { return std::make_unique<RsSpectralDerivativeOperator>(); } );
   add( "rs:pca", [] { return std::make_unique<RsPcaOperator>(); } );
   add( "rs:mnf", [] { return std::make_unique<RsMnfOperator>(); } );
   add( "rs:mosaic", [] { return std::make_unique<RsMosaicOperator>(); } );
