@@ -36,6 +36,7 @@
 #include "rs_feature_select_operator.h"
 #include "rs_topographic_correction_operator.h"
 #include "rs_spectral_derivative_operator.h"
+#include "rs_spectral_detection_operators.h"
 #include "rs_terrain_analysis_operator.h"
 #include "rs_pca_operator.h"
 #include "rs_mnf_operator.h"
@@ -135,6 +136,8 @@ REGISTER_RS_OPERATOR(RsFeatureSelectOperator, "rs:feature_select")
 REGISTER_RS_OPERATOR(RsTerrainAnalysisOperator, "rs:terrain_analysis")
 REGISTER_RS_OPERATOR(RsTopographicCorrectionOperator, "rs:topographic_correction")
 REGISTER_RS_OPERATOR(RsSpectralDerivativeOperator, "rs:spectral_derivative")
+REGISTER_RS_OPERATOR(RsMatchedFilterOperator, "rs:matched_filter")
+REGISTER_RS_OPERATOR(RsAceOperator, "rs:ace")
 REGISTER_RS_OPERATOR(RsPcaOperator, "rs:pca")
 REGISTER_RS_OPERATOR(RsMnfOperator, "rs:mnf")
 REGISTER_RS_OPERATOR(RsMosaicOperator, "rs:mosaic")
@@ -259,6 +262,8 @@ void initBuiltinRsOperators() {
   add( "rs:terrain_analysis", [] { return std::make_unique<RsTerrainAnalysisOperator>(); } );
   add( "rs:topographic_correction", [] { return std::make_unique<RsTopographicCorrectionOperator>(); } );
   add( "rs:spectral_derivative", [] { return std::make_unique<RsSpectralDerivativeOperator>(); } );
+  add( "rs:matched_filter", [] { return std::make_unique<RsMatchedFilterOperator>(); } );
+  add( "rs:ace", [] { return std::make_unique<RsAceOperator>(); } );
   add( "rs:pca", [] { return std::make_unique<RsPcaOperator>(); } );
   add( "rs:mnf", [] { return std::make_unique<RsMnfOperator>(); } );
   add( "rs:mosaic", [] { return std::make_unique<RsMosaicOperator>(); } );

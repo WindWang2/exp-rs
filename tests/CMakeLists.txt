@@ -609,6 +609,24 @@ target_include_directories(test_spectral_derivative PRIVATE
 )
 sicnu_discover_tests(test_spectral_derivative)
 
+# Spectral target detection (Foundation 5.0 Milestone C): matched filter + ACE
+# kernel closed forms, planted-target E2E, target-length contract.
+add_executable(test_spectral_detection test_spectral_detection.cpp)
+target_link_libraries(test_spectral_detection PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_detection)
+target_include_directories(test_spectral_detection PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_detection)
+
 # Spectral classification (SAM + Continuum Removal) kernel tests
 add_executable(test_spectral_classification test_spectral_classification.cpp)
 target_link_libraries(test_spectral_classification PRIVATE
