@@ -39,6 +39,7 @@
 #include "rs_spectral_detection_operators.h"
 #include "rs_sar_dualpol_operator.h"
 #include "rs_sar_terrain_masks_operator.h"
+#include "rs_temporal_monitor_operator.h"
 #include "rs_terrain_analysis_operator.h"
 #include "rs_pca_operator.h"
 #include "rs_mnf_operator.h"
@@ -142,6 +143,7 @@ REGISTER_RS_OPERATOR(RsMatchedFilterOperator, "rs:matched_filter")
 REGISTER_RS_OPERATOR(RsAceOperator, "rs:ace")
 REGISTER_RS_OPERATOR(RsSarDualPolOperator, "rs:sar_dualpol_features")
 REGISTER_RS_OPERATOR(RsSarTerrainMasksOperator, "rs:sar_terrain_masks")
+REGISTER_RS_OPERATOR(RsTemporalMonitorOperator, "rs:temporal_monitor")
 REGISTER_RS_OPERATOR(RsPcaOperator, "rs:pca")
 REGISTER_RS_OPERATOR(RsMnfOperator, "rs:mnf")
 REGISTER_RS_OPERATOR(RsMosaicOperator, "rs:mosaic")
@@ -270,6 +272,7 @@ void initBuiltinRsOperators() {
   add( "rs:ace", [] { return std::make_unique<RsAceOperator>(); } );
   add( "rs:sar_dualpol_features", [] { return std::make_unique<RsSarDualPolOperator>(); } );
   add( "rs:sar_terrain_masks", [] { return std::make_unique<RsSarTerrainMasksOperator>(); } );
+  add( "rs:temporal_monitor", [] { return std::make_unique<RsTemporalMonitorOperator>(); } );
   add( "rs:pca", [] { return std::make_unique<RsPcaOperator>(); } );
   add( "rs:mnf", [] { return std::make_unique<RsMnfOperator>(); } );
   add( "rs:mosaic", [] { return std::make_unique<RsMosaicOperator>(); } );
