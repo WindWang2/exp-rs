@@ -5,6 +5,7 @@
 
 #include "main_window.h"
 #include "workflow/pipeline_editor_dock.h"
+#include "workbench/command_registry.h"
 
 #include <QAbstractButton>
 #include <QButtonGroup>
@@ -256,6 +257,53 @@ QToolButton *RibbonController::addToolButton( GroupHost &group,
     btn->setToolTip( tooltip );
     btn->setStatusTip( tooltip );
   }
+  group.toolsLayout->insertWidget( group.toolsLayout->count() - 1, btn );
+  return btn;
+}
+
+QToolButton *RibbonController::addCommandButton( GroupHost &group,
+                                                 const QString &commandId,
+                                                 bool large )
+{
+  if ( !group.toolsLayout || !m_window || !m_window->commandRegistry() )
+    return nullptr;
+  QAction *action = m_window->commandRegistry()->action( commandId );
+  if ( !action )
+    return nullptr;
+
+  auto *btn = new QToolButton( group.widget );
+  if ( large )
+    polishLargeButton( btn );
+  else
+    polishSmallButton( btn );
+  btn->setText( action->text() );
+  btn->setIcon( action->icon() );
+  btn->setObjectName( QStringLiteral( "cmdBtn_%1" ).arg( commandId ) );
+  btn->setAccessibleName( action->text() );
+  btn->setCheckable( action->isCheckable() );
+
+  // One-way projection: enabled/checked/text follow the registry action
+  // (which itself follows the SelectionContext). Disabled buttons explain
+  // themselves through the registry's unavailability reason.
+  auto syncFromAction = [btn, action, this ] {
+    btn->setText( action->text() );
+    btn->setIcon( action->icon() );
+    btn->setEnabled( action->isEnabled() );
+    btn->setChecked( action->isChecked() );
+    QString tip = action->toolTip();
+    const QString reason = m_window->commandRegistry()->unavailabilityReason( action->objectName().mid( 4 ) );
+    if ( !action->isEnabled() && !reason.isEmpty() )
+      tip += QStringLiteral( "\n⚠ %1" ).arg( reason );
+    btn->setToolTip( tip );
+    btn->setStatusTip( tip );
+  };
+  syncFromAction();
+  connect( action, &QAction::changed, btn, syncFromAction );
+  connect( btn, &QToolButton::clicked, btn, [action] {
+    if ( action->isEnabled() )
+      action->trigger();
+  } );
+
   group.toolsLayout->insertWidget( group.toolsLayout->count() - 1, btn );
   return btn;
 }
@@ -785,25 +833,19 @@ QWidget *RibbonController::createRibbonBar()
     QHBoxLayout *pl = pageLayoutOf( pageW );
 
     auto nav = addGroup( pl, tr( "导航" ) );
-    if ( auto *btn = addToolButton( nav, tr( "平移" ), "p_n", tr( "平移地图" ) ) )
-      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::panMap );
-    if ( auto *btn = addToolButton( nav, tr( "放大" ), "zoo_in", tr( "放大" ) ) )
-      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::zoomIn );
-    if ( auto *btn = addToolButton( nav, tr( "缩小" ), "zoo_out", tr( "缩小" ) ) )
-      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::zoomOut );
-    if ( auto *btn = addToolButton( nav, tr( "全图" ), "full_extent", tr( "缩放到全图" ) ) )
-      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::zoomFullExtent );
-    if ( auto *btn = addToolButton( nav, tr( "刷新" ), "refresh_view", tr( "刷新地图" ) ) )
-      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::refreshMap );
+    // Workbench 5.0: 地图 tab buttons are CommandRegistry projections —
+    // enablement follows the selection context, handlers stay single.
+    addCommandButton( nav, QStringLiteral( "map.pan" ) );
+    addCommandButton( nav, QStringLiteral( "map.zoomIn" ) );
+    addCommandButton( nav, QStringLiteral( "map.zoomOut" ) );
+    addCommandButton( nav, QStringLiteral( "map.zoomFull" ) );
+    addCommandButton( nav, QStringLiteral( "map.refresh" ) );
 
     addGroupSeparator( pl );
     auto inquiry = addGroup( pl, tr( "查询" ) );
-    if ( auto *btn = addToolButton( inquiry, tr( "识别" ), "identify", tr( "识别要素 / 像元" ) ) )
-      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::identifyFeatures );
-    if ( auto *btn = addToolButton( inquiry, tr( "测距" ), "me_sure_dist", tr( "测量距离" ) ) )
-      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::measureDistance );
-    if ( auto *btn = addToolButton( inquiry, tr( "测面" ), "me_sure_are_", tr( "测量面积" ) ) )
-      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::measureArea );
+    addCommandButton( inquiry, QStringLiteral( "map.identify" ) );
+    addCommandButton( inquiry, QStringLiteral( "map.measureDistance" ) );
+    addCommandButton( inquiry, QStringLiteral( "map.measureArea" ) );
 
     addGroupSeparator( pl );
     // 波段合成：下拉选择（模式 / R G B / 灰度）
@@ -823,8 +865,7 @@ QWidget *RibbonController::createRibbonBar()
     addGroupSeparator( pl );
     // 不透明度在底部状态栏（唯一入口），此处只留属性入口
     auto look = addGroup( pl, tr( "外观" ) );
-    if ( auto *btn = addToolButton( look, tr( "图层属性" ), "dis_l_y", tr( "打开图层属性" ) ) )
-      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::layerProperties );
+    addCommandButton( look, QStringLiteral( "layer.properties" ) );
 
     addTab( tr( "地图" ), pageW, tr( "地图 - 视图导航、图层管理与识别工具" ) )->setChecked( true );
   }

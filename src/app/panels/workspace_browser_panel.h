@@ -81,6 +81,9 @@ class WorkspaceBrowserPanel : public QWidget
      * ActiveViewHost so the Data/Display seam stays intact.
      */
     void openPathRequested( const QString &path );
+    /// Governed-entity row selection changed (Workbench 5.0 SelectionContext
+    /// source). Ids are GovernanceStore entity ids (assets/results).
+    void entitySelectionChanged( const QStringList &entityIds );
 
   private slots:
     void refreshSensorFacet();
@@ -88,6 +91,9 @@ class WorkspaceBrowserPanel : public QWidget
     void showDetails( const QModelIndex &index );
     void scanFolder();
     void importRemoteUrls();
+
+  private:
+    void emitEntitySelection();
 
   private:
     sicnu::workspace::WorkspaceService *m_service = nullptr;

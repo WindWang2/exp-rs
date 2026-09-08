@@ -89,6 +89,14 @@ class QgsClassificationMainWindow : public QMainWindow
     /// outputs are registered as Data Assets in addition to the session layer.
     void setDataManager( sicnu::data::DataManager *dm ) { m_dataManager = dm; }
 
+    /// Workbench 5.0 session contract (H): lifecycle probes on the shared
+    /// InteractiveSession surface. Read-only — state stays owned by mSession.
+    bool isSessionDirty() const { return mSession.isDirty(); }
+    /// True while a TaskCenter-tracked train/classify/CV task is in flight.
+    bool hasInFlightCompute() const { return m_classifyBusy || m_jobHandle.isRunning(); }
+    /// Cancel the in-flight TaskCenter task through the window's job handle.
+    void cancelInFlightCompute() { m_jobHandle.cancel(); }
+
   public slots:
     bool openSourceRaster();
     bool openSourceRaster( const QString &path );

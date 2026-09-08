@@ -2,6 +2,55 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-08
+
+### Professional Remote Sensing Workbench 5.0 (goal series, ADR 0134)
+- **WorkbenchHost / IWorkbench**: every professional workspace (map, layout,
+  classification, georef I2I/I2M, OBIA) registers as a workbench with a
+  uniform lifecycle (activate/deactivate, dirty query, close semantics,
+  selection/command context). Session windows stay dedicated top-level
+  surfaces (external benches) - no MDI, no compute moves. A checkable
+  workspace switcher section landed in the window menu.
+- **SelectionContext**: one debounced (<=150 ms) projection of "what the user
+  is operating on" - canvas current layer, layer-tree selection, Data
+  Manager asset selection, governance entity selection, active workbench.
+  Pure ContextRules map snapshots to capability groups (raster/vector/
+  SAR/edit/result/asset) and human-readable unavailability reasons.
+- **CommandRegistry 5.0**: one definition per capability (single handler,
+  availability predicate, canonical shortcut with duplicate rejection,
+  destructive flag, explain hook). ~50 shell commands registered; ribbon
+  map-tab buttons and the layer-tree context menu now project registry
+  commands (enablement + reasons shared with the menu host), the layer menu
+  is uniformly Chinese, and a new layer.attributeTable command landed.
+- **Command palette**: keyboard-first searchable surface over the whole
+  registry (fuzzy rank, bounded rows, recent commands via QSettings,
+  unavailable entries visible with reasons, no handler bypass).
+- **InspectorHost**: sectioned inspector following the selection context
+  (lazy population, stale cancel, placeholder for empty selection) with
+  built-in General/Metadata layer sections in a new inspector dock.
+- **InteractiveSession contract (batch 1)**: shared lifecycle surface
+  (dirty, in-flight compute, cancel through the TaskCenter seam, close
+  confirmation) + classification lab adapter and window probes
+  (isSessionDirty/hasInFlightCompute/cancelInFlightCompute).
+- **Data/Results surfaces emit selection**: DataManagerPanel gained
+  assetSelectionChanged, WorkspaceBrowserPanel gained entitySelectionChanged
+  - both now feed the shell context projection.
+- **Windows fresh-build fixes found by this track** (each verified):
+  plugin_loader.cpp raw ::dlsym routed through the findSymbol seam;
+  WorkflowRunCoordinator missing notifyRunStateLocked/runStateChanged
+  declarations (PR #764 shipped a broken header); external_tool_operator
+  32-bit-long jsoncpp assignment now an explicit Json::Int64 cast;
+  vestigial include of main.moc removed (AUTOMOC hard-fails on the
+  dangling include with no Q_OBJECT type in main.cpp).
+- **Tests**: six new contract binaries - test_workbench_host,
+  test_selection_context, test_command_registry, test_command_palette,
+  test_inspector_host, test_interactive_session_contract (all green
+  offscreen), with the 4.0 guardrails (theme parity, shortcut conflicts,
+  task-center thin-client, schema form, layer bridge, workspace wiring,
+  data manager) still green.
+- **Docs**: docs/ui-architecture.md Part II, ADR 0134,
+  .planning/professional-workbench-5/ audit + models.
+
 ## [Unreleased] - 2026-09-07
 
 ### 🤖 Model Runtime & AI Inference Platform 4.0 (goal series, ADR 0130)

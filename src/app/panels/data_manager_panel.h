@@ -81,6 +81,8 @@ class DataManagerPanel : public QDockWidget
     void promoteRequested( sicnu::data::AssetId id );
     /// Re-resolve a Missing/Unavailable asset at a new source location.
     void relocateRequested( sicnu::data::AssetId id );
+    /// Asset-row selection changed (Workbench 5.0 SelectionContext source).
+    void assetSelectionChanged( const QList<sicnu::data::AssetId> &ids );
 
   private slots:
     void onItemActivated( QTreeWidgetItem *item, int column );

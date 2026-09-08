@@ -146,6 +146,8 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     // Data Manager panel needs ProjectContext; setupDockWidgets runs earlier.
     qDebug() << "Setting up Data Manager panel...";
     setupDataManagerPanel();
+    qDebug() << "Setting up workbench infrastructure...";
+    setupWorkbenchInfrastructure();
     qDebug() << "Setting up ribbon and task panel...";
     setupRibbonAndTaskPanel();
     qDebug() << "Setting up status bar...";

@@ -139,8 +139,8 @@ void QgisDesktopWindow::initLayerTree()
     connect(QgsProject::instance(), &QgsProject::crsChanged,
             this, &QgisDesktopWindow::updateCrsDisplay);
 
-    // Set up native QGIS context menu for layer tree
-    m_layerTreeMenuProvider = new LayerTreeMenuProvider(m_layerTreeView, m_activeViewHost.get());
+    // Set up native QGIS context menu for layer tree (projects registry commands)
+    m_layerTreeMenuProvider = new LayerTreeMenuProvider(m_layerTreeView, m_activeViewHost.get(), m_commandRegistry);
     m_layerTreeView->setMenuProvider(m_layerTreeMenuProvider);
 }
 void QgisDesktopWindow::showCoordinates(const QgsPointXY &point)

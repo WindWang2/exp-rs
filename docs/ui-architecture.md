@@ -178,3 +178,69 @@ and type sizes. `themeIsDark()` is the single theme probe.
    contract; no cross-panel widget reaches.
 4. New status/color → add to `design_tokens.h` + both QSS files in one change.
 5. New result shape → extend `RsResultSummary` (it degrades to raw JSON).
+
+---
+
+# Part II — Professional Workbench 5.0
+
+*(5.0 additions on top of the 4.0 principles above; every claim mirrors code
+landed in this track.)*
+
+## 10. WorkbenchHost — one workspace lifecycle (ADR 0134)
+
+`src/app/workbench/` introduces three shell-level authorities:
+
+- **`WorkbenchHost` / `IWorkbench`** — every professional workspace (map,
+  layout, classification, georef I2I/I2M, OBIA, workflow) registers as a
+  *workbench*: stable id, title, activate/deactivate, dirty query, close
+  semantics, optional save/restore. Interactive sessions keep their own
+  windows (`WorkbenchFeature::ExternalWindow`); the shell never forces them
+  into tabs. `map` is always registered; a checkable 工作区 section in the
+  窗口 menu switches benches; `activeWorkbenchChanged` drives the rest.
+- **`SelectionContext`** — the single projection of "what is the user
+  operating on": active layer + layer-tree selection (QGIS authoritative),
+  Data Manager asset selection, governance entity selection, active
+  workbench id. Changes broadcast coalesced (≤150 ms). Pure availability
+  rules (`ContextRules`) map snapshots to capability groups (raster/vector/
+  SAR/edit/result/asset) and to human unavailability reasons — no panel
+  reads another panel, ever.
+- **`CommandRegistry`** — one `CommandDefinition` per capability: single
+  handler (forwards to the existing window slot/service), one availability
+  predicate, one canonical shortcut (duplicate id/shortcut registration is
+  rejected — contract-tested). Surfaces *project* commands:
+  `CommandRegistry::action(id)` for menu-host QActions, ribbon
+  `addCommandButton(id)` and the layer-tree context menu produce enabled-
+  and reason-following projections. Nothing executes outside a definition's
+  handler.
+
+## 11. Command palette (keyboard-first capability surface)
+
+`workbench/command_palette.cpp` — frameless, keyboard-first popup projecting
+the whole registry: fuzzy rank (title prefix > contains > keywords > id),
+bounded to 60 rows, recent-commands boost (`workbench/palette/recent`),
+unavailable entries stay visible with their reason and cannot run. The
+palette never implements anything: activation goes through
+`CommandRegistry::trigger(id)`.
+
+## 12. InspectorHost — consolidated inspection
+
+`workbench/inspector_host.h` replaces "one dock per feature" inspection
+drift. Sections (`InspectorSection`) declare `supports(snapshot)` and
+populate from authoritative sources only; expensive sections are lazy
+(populate-on-show) and `cancelPending()` on selection change. The shell
+ships 常规 / 元数据 layer sections in the 检查器 dock; identify/spectral
+remain dedicated *tools*, not duplicate layer inspectors.
+
+## 13. Layer tree context menu = registry projection
+
+`LayerTreeMenuProvider` now projects registry commands (缩放到图层, 属性表,
+属性, 移除) with the same availability + reasons as the ribbon, and keeps
+QGIS default actions for tree-structural operations (rename, group,
+feature-count, ordering). The menu text is uniformly Chinese.
+
+## 14. Contracts under test
+
+`test_workbench_host`, `test_selection_context`, `test_command_registry`,
+`test_command_palette`, `test_inspector_host` pin the semantics above; the
+4.0 guardrails (thin-client law, token parity, shortcut conflicts, schema
+form) remain in force.
