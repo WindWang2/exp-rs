@@ -835,9 +835,9 @@ class ModisAdapter final : public ProductAdapter
       GdalDatasetGuard guard( dataset );
 
       int subdatasetCount = 0;
-      if ( char **metadataList = GDALGetMetadata( dataset, "SUBDATASETS" ) )
+      if ( CSLConstList metadataList = GDALGetMetadata( dataset, "SUBDATASETS" ) )
       {
-        for ( char **entry = metadataList; *entry; ++entry )
+        for ( CSLConstList entry = metadataList; *entry; ++entry )
         {
           const std::string item = *entry;
           const std::size_t eq = item.find( '=' );
