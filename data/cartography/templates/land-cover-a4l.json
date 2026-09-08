@@ -1,6 +1,7 @@
 {
   "id": "land-cover-a4l",
   "version": 1,
+  "facets": {"tasks": ["classification", "vegetation"], "medium": "a4", "purpose": "analysis"},
   "description": "Land-cover product map with locator inset, class-area chart and standard furniture.",
   "page": {
     "width_mm": 297,

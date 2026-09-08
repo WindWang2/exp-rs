@@ -1,6 +1,7 @@
 {
   "id": "cloud-cover-a4l",
   "version": 1,
+  "facets": {"tasks": [], "medium": "a4", "purpose": "analysis"},
   "description": "QA cloud/shadow mask overview with class legend and coverage chart.",
   "page": {
     "width_mm": 297,

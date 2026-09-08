@@ -1,6 +1,7 @@
 {
   "id": "forest-cover-a4l",
   "version": 1,
+  "facets": {"tasks": ["vegetation"], "medium": "a4", "purpose": "analysis"},
   "description": "Forest cover / change map with sequential-green colorbar and class chart.",
   "page": {
     "width_mm": 297,

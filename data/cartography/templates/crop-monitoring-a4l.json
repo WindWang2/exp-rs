@@ -1,6 +1,7 @@
 {
   "id": "crop-monitoring-a4l",
   "version": 1,
+  "facets": {"tasks": ["agriculture", "vegetation"], "medium": "a4", "purpose": "analysis"},
   "description": "Crop monitoring map with phenology time-series chart and class legend.",
   "page": {
     "width_mm": 297,

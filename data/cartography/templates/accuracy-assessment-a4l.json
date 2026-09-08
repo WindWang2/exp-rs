@@ -1,6 +1,7 @@
 {
   "id": "accuracy-assessment-a4l",
   "version": 1,
+  "facets": {"tasks": ["accuracy"], "medium": "a4", "purpose": "scientific"},
   "description": "Accuracy assessment page: map, confusion matrix, metric cards and legend.",
   "page": {
     "width_mm": 297,

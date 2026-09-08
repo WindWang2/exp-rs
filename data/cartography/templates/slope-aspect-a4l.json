@@ -1,6 +1,7 @@
 {
   "id": "slope-aspect-a4l",
   "version": 1,
+  "facets": {"tasks": ["terrain"], "medium": "a4", "purpose": "analysis"},
   "description": "Slope/aspect paired small multiples with shared legend and distribution chart.",
   "page": {
     "width_mm": 297,

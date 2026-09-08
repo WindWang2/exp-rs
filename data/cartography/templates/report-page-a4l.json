@@ -1,6 +1,7 @@
 {
   "id": "report-page-a4l",
   "version": 1,
+  "facets": {"tasks": [], "medium": "report", "purpose": "analysis"},
   "extends": "report-page-a4p",
   "description": "A4 portrait report page with section label, map, charts, metadata and disclaimer.",
   "page": {

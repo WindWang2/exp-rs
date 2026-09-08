@@ -1,6 +1,7 @@
 {
   "id": "presentation-screen",
   "version": 1,
+  "facets": {"tasks": [], "medium": "screen", "purpose": "presentation"},
   "description": "16:9 presentation map for screen delivery (screen tokens, larger type).",
   "page": {
     "width_mm": 338.7,

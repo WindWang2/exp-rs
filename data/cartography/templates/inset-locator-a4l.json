@@ -1,6 +1,7 @@
 {
   "id": "inset-locator-a4l",
   "version": 1,
+  "facets": {"tasks": [], "medium": "a4", "purpose": "analysis"},
   "description": "Main map with locator inset, class-area chart and full furniture.",
   "page": {
     "width_mm": 297,

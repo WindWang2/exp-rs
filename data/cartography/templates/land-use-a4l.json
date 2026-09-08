@@ -1,6 +1,7 @@
 {
   "id": "land-use-a4l",
   "version": 1,
+  "facets": {"tasks": ["classification"], "medium": "a4", "purpose": "analysis"},
   "description": "Land-use / zoning map with multi-column legend for wide class sets.",
   "page": {
     "width_mm": 297,

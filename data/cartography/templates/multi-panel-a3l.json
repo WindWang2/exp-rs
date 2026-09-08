@@ -1,6 +1,7 @@
 {
   "id": "multi-panel-a3l",
   "version": 1,
+  "facets": {"tasks": [], "medium": "a3", "purpose": "analysis"},
   "extends": "multi-panel-a4l",
   "description": "Four-panel comparison sheet (small multiples) with shared legend.",
   "page": {

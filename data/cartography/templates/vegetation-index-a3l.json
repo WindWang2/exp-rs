@@ -1,6 +1,7 @@
 {
   "id": "vegetation-index-a3l",
   "version": 1,
+  "facets": {"tasks": ["vegetation"], "medium": "a3", "purpose": "analysis"},
   "extends": "vegetation-index-a4l",
   "description": "Vegetation index (NDVI/EVI) continuous map with sequential colorbar and profile chart.",
   "page": {

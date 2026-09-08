@@ -1,6 +1,7 @@
 {
   "id": "remote-sensing-result-a4p",
   "version": 1,
+  "facets": {"tasks": [], "medium": "a4", "purpose": "exploration"},
   "extends": "remote-sensing-result-a4l",
   "description": "Generic continuous remote-sensing result with sequential colorbar.",
   "page": {

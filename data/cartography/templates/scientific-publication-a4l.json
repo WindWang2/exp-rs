@@ -1,6 +1,7 @@
 {
   "id": "scientific-publication-a4l",
   "version": 1,
+  "facets": {"tasks": ["publication"], "medium": "a4", "purpose": "scientific"},
   "description": "Two-panel scientific publication page with captions, confusion matrix, metric cards and metadata.",
   "page": {
     "width_mm": 297,

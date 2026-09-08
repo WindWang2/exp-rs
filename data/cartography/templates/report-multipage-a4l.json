@@ -1,6 +1,7 @@
 {
  "id": "report-multipage-a4l",
  "version": 1,
+ "facets": {"tasks": [], "medium": "report", "purpose": "analysis"},
  "description": "Three-page operational report: cover with title block, main map page, and a statistics page with tables, metrics and methodology notes. Page roles drive conditional assembly.",
  "page": {
   "width_mm": 297,
