@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "cli_commands.h"
 
+#include "cli_dataset_commands.h"
+
 #include "rs_pipeline_runner.h"
 #include "cli_project_ops.h"
 
@@ -1091,7 +1093,9 @@ int CliIO::finish( bool ok, const std::string &command, Json::Value data, int ex
 bool isCliCommand( const QString &firstArg )
 {
     static const QStringList kCommands = { "algorithms", "run", "pipeline", "workflow", "plugin",
-                                           "models", "catalog", "project", "data-providers" };
+                                           "models", "catalog", "project", "data-providers",
+                                           // Foundation 5.0 scientific command groups (ADR 0134-0138)
+                                           "dataset", "experiment", "reproduce" };
     return kCommands.contains( firstArg );
 }
 
@@ -1119,6 +1123,12 @@ int dispatchCliCommand( const QStringList &arguments, const CliIO &io )
         return commandProject( std::move( args ), io );
     if ( command == "data-providers" )
         return commandDataProviders( std::move( args ), io );
+    if ( command == "dataset" )
+        return commandDataset( std::move( args ), io );
+    if ( command == "experiment" )
+        return commandExperiment( std::move( args ), io );
+    if ( command == "reproduce" )
+        return commandReproduce( std::move( args ), io );
     if ( command == "catalog" )
     {
         // catalog export <dir> — the legacy --export-catalog surface.

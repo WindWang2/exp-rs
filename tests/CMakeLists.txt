@@ -1213,6 +1213,38 @@ target_link_libraries(test_chunk_graph PRIVATE sicnu_runtime)
 sicnu_add_test(test_artifact_store TIMEOUT 120)
 target_link_libraries(test_artifact_store PRIVATE SQLite::SQLite3)
 
+# Foundation 5.0 dataset core (ADR 0134): identity/manifest/fingerprint/
+# version lifecycle/store. SQLite link mirrors test_artifact_store (the
+# schema-guard test pokes the DB directly).
+sicnu_add_test(test_dataset_core TIMEOUT 120)
+target_link_libraries(test_dataset_core PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# Foundation 5.0 sample model / label ontology / annotation chains (ADR 0135).
+sicnu_add_test(test_sample_label_annotation TIMEOUT 120)
+target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# Foundation 5.0 deterministic splits + leakage audit + patch generator
+# known-answer tests (ADR 0136, goal §19/§51).
+sicnu_add_test(test_split_leakage TIMEOUT 120)
+target_link_libraries(test_split_leakage PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# Foundation 5.0 experiment/run identity, metrics, comparison, lineage and
+# reproduction bundle (ADR 0137/0138, goal §23-§31/§51).
+sicnu_add_test(test_experiment_evaluation TIMEOUT 180)
+target_link_libraries(test_experiment_evaluation PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
+# Foundation 5.0 dataset composition/label QA + the 100k metadata scale
+# contract (goal §20/§37/§46/§52). RUN_SERIAL: the 100k benchmark should not
+# compete with other tests for memory.
+sicnu_add_test(test_dataset_quality_scale TIMEOUT 600)
+target_link_libraries(test_dataset_quality_scale PRIVATE Sicnu::dataset SQLite::SQLite3)
+set_property(TARGET test_dataset_quality_scale PROPERTY RUN_SERIAL TRUE)
+
+# Foundation 5.0 end-to-end examples (goal §54): optical classification,
+# SAR pair, multimodal temporal, segmentation — small data, whole chain.
+sicnu_add_test(test_dataset_e2e_examples TIMEOUT 180)
+target_link_libraries(test_dataset_e2e_examples PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
 # Phase C fused-chain equivalence (links through sicnu_task_center which
 # carries fused_chain.cpp; needs the standard set only).
 sicnu_add_test(test_fused_chain TIMEOUT 300)
