@@ -211,7 +211,10 @@ landed in this track.)*
   `CommandRegistry::action(id)` for menu-host QActions, ribbon
   `addCommandButton(id)` and the layer-tree context menu produce enabled-
   and reason-following projections. Nothing executes outside a definition's
-  handler.
+  handler. Migration is incremental: the ribbon 地图 tab, the layer-tree
+  context menu and the palette (Ctrl+Shift+P host) are registry projections
+  today; remaining menu rows and ribbon tabs keep direct slot wiring until
+  their milestone lands (they call the same handlers, so nothing diverges).
 
 ## 11. Command palette (keyboard-first capability surface)
 
@@ -220,7 +223,9 @@ the whole registry: fuzzy rank (title prefix > contains > keywords > id),
 bounded to 60 rows, recent-commands boost (`workbench/palette/recent`),
 unavailable entries stay visible with their reason and cannot run. The
 palette never implements anything: activation goes through
-`CommandRegistry::trigger(id)`.
+`CommandRegistry::trigger(id)`. The shell registers it as the
+`app.commandPalette` command (Ctrl+Shift+P owned by the hidden action-host
+menubar).
 
 ## 12. InspectorHost — consolidated inspection
 

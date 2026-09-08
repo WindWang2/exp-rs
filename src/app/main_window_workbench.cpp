@@ -13,6 +13,7 @@
 #include "panels/workspace_browser_panel.h"
 #include "workbench/adapters.h"
 #include "workbench/command_defs.h"
+#include "workbench/command_palette.h"
 #include "workbench/command_registry.h"
 #include "workbench/inspector_host.h"
 #include "workbench/layer_sections.h"
@@ -21,6 +22,7 @@
 
 #include <QAction>
 #include <QDockWidget>
+#include <QMenuBar>
 #include <QMenu>
 #include <QStackedWidget>
 
@@ -121,6 +123,26 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
              [this]( const sicnu::app::SelectionContextSnapshot & ) {
                  m_commandRegistry->refreshAll();
              } );
+
+    // ── Command palette (keyboard-first surface, owns no execution) ──
+    m_commandPalette = new sicnu::app::CommandPalette( m_commandRegistry, this );
+    sicnu::app::CommandDefinition paletteDef;
+    paletteDef.id = QStringLiteral( "app.commandPalette" );
+    paletteDef.title = tr( "命令面板..." );
+    paletteDef.description = tr( "搜索并执行任意命令（键盘优先）。" );
+    paletteDef.iconName = QStringLiteral( "toolbox" );
+    paletteDef.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+P" ) );
+    paletteDef.category = tr( "工具" );
+    paletteDef.keywords = { QStringLiteral( "palette" ), QStringLiteral( "命令" ),
+                            QStringLiteral( "搜索" ), QStringLiteral( "command" ) };
+    paletteDef.handler = [this] { m_commandPalette->openPalette(); };
+    // The palette itself must not appear inside the palette listing.
+    if ( m_commandRegistry->registerCommand( paletteDef ) )
+    {
+        // Canonical shortcut owner: the hidden action-host menubar.
+        if ( QAction *paletteAction = m_commandRegistry->action( QStringLiteral( "app.commandPalette" ), true ) )
+            appMenuBar()->addAction( paletteAction );
+    }
 
     // ── 窗口 menu → 工作区 switcher ──────────────────────────────────
     if ( m_windowMenu )

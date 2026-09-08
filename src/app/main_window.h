@@ -134,6 +134,7 @@ class WorkbenchHost;
 class SelectionContext;
 class InspectorHost;
 class CommandRegistry;
+class CommandPalette;
 }
 
 class ExprsPluginShellUi;
@@ -525,6 +526,7 @@ private:
     sicnu::app::WorkbenchHost *m_workbenchHost = nullptr;
     sicnu::app::SelectionContext *m_selectionContext = nullptr;
     sicnu::app::CommandRegistry *m_commandRegistry = nullptr;
+    sicnu::app::CommandPalette *m_commandPalette = nullptr;
     sicnu::app::InspectorHost *m_inspectorHost = nullptr;
     QDockWidget *m_inspectorDock = nullptr;
 
