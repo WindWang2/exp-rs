@@ -1,0 +1,76 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.optical_change_cva",
+ "title": "Optical change vector analysis",
+ "intent": "change",
+ "family": "optical-change",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "CVA over two multi-band epochs; magnitude thresholding highlights changed pixels.",
+ "slots": [
+  {
+   "name": "before",
+   "kind": "raster",
+   "description": "Before-date multi-band raster.",
+   "required": true
+  },
+  {
+   "name": "after",
+   "kind": "raster",
+   "description": "After-date multi-band raster (same band order).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "cva",
+   "operator_id": "rs:change_detection",
+   "params": {
+    "before": "$before.path",
+    "after": "$after.path",
+    "output": "$outputs.cva",
+    "method": "cva",
+    "cleanup": "majority"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "threshold",
+   "operator_id": "rs:threshold_raster",
+   "params": {
+    "input": "$outputs.cva",
+    "output": "$outputs.change_classified",
+    "thresholdMethod": "percentile",
+    "percentile": 92,
+    "cleanup": "majority"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "cva",
+   "from_step": "cva",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "change_classified",
+   "from_step": "threshold",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "cva",
+  "renderer_hint": "categorized"
+ }
+}

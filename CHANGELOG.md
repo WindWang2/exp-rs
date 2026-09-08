@@ -2,7 +2,92 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-08
+
+### 🗺️ Solution Template, Recipe & Cartography Knowledge Platform 5.0 (goal series)
+
+The 4.0 design system (tokens / components / templates / MapSpec 2.0) becomes a
+**task-level knowledge platform**: a remote-sensing task semantic resolves to a
+validated SolutionTemplate binding an AnalysisRecipe + StyleSpec + MapSpec +
+ReportSpec, consumed identically by the UI, CLI and Pi agent.
+
+- **Five-layer knowledge model**: DesignToken → Component → StylePattern →
+  Map/ReportTemplate → AnalysisRecipe/SolutionTemplate. New catalogs:
+  `data/cartography/styles/` (17 semantic StyleSpecs) and
+  `data/agent/solutions/` (44 solution templates across 18 task families).
+- **StyleSpec declarative symbology**: closed renderer vocabulary (raster:
+  gray/pseudocolor/paletted/multiband; vector: simple/categorized/graduated/
+  rule-based), class palettes bound to token sets through now-resolved
+  `token:` references (closes the 4.0 unparsed-leak), labels/halo/scale
+  visibility/opacity/blend; `style_compiler` maps specs onto QGIS renderer
+  primitives only — QGIS stays the rendering truth. `style:list/describe/apply`
+  tools.
+- **MapSpec 3.0 (strict superset of v2)**: bounded conditional visibility
+  (`visible_if`/`content_if`/`page_if` — a validated expression grammar with
+  unknown-path=error semantics; unevaluable conditions never hide content),
+  relative placement constraints (`below/above/left_of/right_of/inside/
+  keep_with/avoid_overlap/fit_content`) in the deterministic composition
+  solver, locator extent indicators compiled to QGIS map overviews
+  (outline/region/frame styles + caption), the full atlas surface (filter,
+  sort, margin fraction, filename/page-number expressions, feature variables),
+  page roles and per-item `style_ref`.
+- **Recipe Library 5.0**: 75 recipes (5 → 75) covering the operator registry
+  end-to-end — optical indices, flood (optical/SAR/fused), water dynamics,
+  SAR change (log-ratio/ratio/dual-channel), temporal (phenology/harmonic/
+  trend/breakpoints/anomaly/composite), terrain products, classification/model
+  (kmeans/supervised/OBIA/inference/detect/accuracy/uncertainty),
+  preprocessing and QA. Extended intent vocabulary (5 → 27) with generalized
+  band-ratio preflight packs (NIR/Green/Blue/SWIR/red-edge windows).
+- **SolutionTemplate registry**: validation with cross-domain reference
+  resolvers, `extends` merge with cycle detection, aliases, deterministic
+  bounded facet search (task/modality/sensor/keyword/quality/family) with
+  ~440-char compact summaries; `solution:search/describe/validate/instantiate`
+  tools (instantiate = contract check → AgentPlan v2 → MapSpec draft with
+  condition context → token-resolved style refs).
+- **Template/Solution discovery**: `template:search/describe/validate/preview`
+  and `cartography:lint_catalog` (registry load problems, template structure,
+  solution references, style token resolution). Catalog index now covers
+  styles + solutions (drift-tested); gallery doc regenerated.
+- **Charts & tables**: real grouped bars with series legend; table family
+  (`table`/`summary_table`/`topn_table`) with a 64-row cap, deterministic
+  "+N more" overflow row, top-N sort/cap and elided long/CJK labels;
+  axes-free sparkline. Five new component descriptors.
+- **ReportSpec layer**: multi-page report templates (cover/map/statistics
+  pages with roles and `page_if`), A3 scientific figure page, 16:9 dark
+  briefing, A0 poster foundation, atlas appendix with per-feature tables and
+  provenance blocks.
+- **Preflight/repair 5.0**: `MAP_LOCATOR_MISMATCH`, `MAP_ATLAS_INCOMPLETE`,
+  `MAP_CONDITIONAL_CONTEXT_MISSING`, `MAP_CHART_OVERFLOW` (+ deterministic
+  `grow_chart` repair), `MAP_PAGE_BALANCE`, `MAP_MISSING_CRS_NOTE`; overlap
+  detection is page-aware. Visual regression matrix grows to 19 scenes
+  (atlas appendix, dark screen, A3/A0 formats, locator, conditional pruning,
+  long-English/CJK overflow, uncertainty, flood probability), each asserted
+  to repair-to-passed, render deterministically (SHA-256) and hold geometry
+  contracts.
+- **Scale gates in CI tests**: facet search <20 ms over the full catalog,
+  instantiate/compose/preflight <50 ms, repair convergence ≤5 passes,
+  bounded per-hit response size. Multi-page compile coverage.
+- **Fix**: restore the lost `workflow_run_coordinator.h` declarations from
+  #764 (`notifyRunStateLocked`, `runStateChanged` signal) that broke every
+  non-PCH build.
+- **Docs**: solution-authoring, style-spec-reference, recipe authoring (via
+  recipe facets), migration-mapspec-v3, atlas-guide; limitations rewritten to
+  the lifted/remaining truth; full docs-claim audit against code.
+
 ## [Unreleased] - 2026-09-07
+
+### 🔬 Scientific Algorithm Foundation 5.0 (goal series)
+- **Shared scientific primitives (`src/processing/algorithms/primitives/`)**: streaming raster histogram with the platform binning convention (Otsu with tied-maxima averaging, nearest-rank quantiles with in-bin interpolation, #700 width rule), binary morphology (0/1/255 masks, 4/8-conn, NoData-protected, documented border policy), connected-component labeling (deterministic raster-order compact labels) with a sieve, exact Euclidean distance transform (Felzenszwalb separable), exact small-array quantiles with declared NearestRank/Linear semantics, and a window edge-policy contract. `change_detection`'s otsu/percentile/morphology kernels now delegate to the primitives (values pinned by the existing hand-derived suites).
+- **Optical**: `rs:topographic_correction` — two-pass streaming illumination correction over a same-grid DEM (cosine / C-correction incl. the SCS+C form / Minnaert), full-scene per-band fits, typed grid and degenerate-regression refusals, self-shadowed pixels as NaN; known-answer E2E (an `L = a + b·cos_i` scene maps to `a + b·cosθz`). `rs:spectral_index` gains GNDVI, NDMI, ARVI, MSAVI, EVI2, BAI, UI, BUI (scale-anchored indices follow the declared `SICNU_NUMERIC_SCALE`). `rs:spectral_derivative` — first/second derivatives along the wavelength axis (index-space derivatives are typed refusals).
+- **Spectral detection**: `rs:matched_filter` (signed whitened projection) and `rs:ace` (squared whitened cosine in [0,1]) over the RX detector's streamed background statistics — three passes, O(tile + bands²), bit-exact.
+- **SAR**: `rs:sar_dualpol_features` (ratio, normalized difference, log ratio, dual-pol RVI, span; declared `SICNU_SAR_DOMAIN` wins, dB converted before the kernel) and `rs:sar_terrain_masks` (surface-normal local incidence + geometric layover/shadow under the declared constant-geometry contract; full range-Doppler is documented as NOT approximated, with an additive orbit-state extension contract).
+- **Temporal**: `rs:temporal_monitor` — CUSUM and EWMA of standardized anomalies plus seasonal Mann-Kendall (calendar-month seasons, tie-corrected variance) with an explicit `max_pairwork` complexity guard.
+- **Terrain**: Zevenbergen-Thorne profile/plan/total curvatures (convexity-positive, certified on analytic surfaces), multidirectional hillshade, local relief; `rs:terrain_flow` — priority-flood depression filling (NoData = barrier), D8 directions, self-inclusive accumulation.
+- **Raster spatial**: `rs:morphology`, `rs:connected_components`, `rs:fill_holes`, `rs:sieve`, `rs:proximity`, `rs:local_extrema`, `rs:focal_stats` over the shared primitives (typed refusals for non-binary masks; streamed halo windows for the window family).
+- **Classification**: kNN (OpenCV KNearest) and statistical backends — minimum distance and Mahalanobis (pooled covariance, ridge for small samples) — wired through the backend factory and `rs:supervised_classification`.
+- **Certification**: every new operator ships with hand-derived known-answer suites, degenerate cases (all-NoData/NaN/±Inf, single-pixel, non-tile dims, mismatched grids) and streaming-vs-reference or closed-form checks; benchmarks per family recorded under `benchmarks/`.
+- **Baseline repair**: master at `93a7fb0bbd` did not compile past `sicnu_task_center` (undeclared `notifyRunStateLocked` / missing `runStateChanged` signal in `workflow_run_coordinator.h`; an ambiguous Json::Value conversion in `harness_verification.cpp`) — minimal additive fixes; the algorithm_meta sidecar catalog is regenerated from the descriptor registry (7 → 25) via `--export-catalog`.
+- **Docs**: docs/processing/sar-domain.md, foundation-5.md, extended validation-policy family snapshot, ADR-free additive contracts (primitives placement, orbit extension seam).
 
 ### 🤖 Model Runtime & AI Inference Platform 4.0 (goal series, ADR 0130)
 - **Manifest 4.0 identity**: `id`/`model_version`/`license`/`source`/`manifest_version` fields; the artifact's SHA-256 content digest is always computed and anchors session identity (same path, different bytes never share a session); `runtime.device` token (`cpu`|`cuda`|`cuda:N`|`auto`).

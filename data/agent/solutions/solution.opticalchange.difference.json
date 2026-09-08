@@ -1,0 +1,54 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.opticalchange.difference",
+ "version": 1,
+ "title": "Optical bi-temporal change (difference)",
+ "description": "Co-registration gate + band difference + statistical threshold.",
+ "tasks": [
+  "change"
+ ],
+ "modalities": [
+  "optical"
+ ],
+ "sensors": [
+  "sentinel-2",
+  "landsat-8"
+ ],
+ "input_contracts": [
+  {
+   "name": "before",
+   "kind": "raster",
+   "required": true,
+   "description": "Before-date raster."
+  },
+  {
+   "name": "after",
+   "kind": "raster",
+   "required": true,
+   "description": "After-date raster."
+  }
+ ],
+ "analysis_recipe": "harness.optical_change_difference",
+ "map_template": "change-detection-a4l",
+ "style_spec": {
+  "primary": "style.change-gain-loss"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "before",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "change",
+  "difference"
+ ],
+ "family": "optical-change"
+}

@@ -1,0 +1,47 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.preprocess_sar_calibration",
+ "title": "SAR radiometric calibration",
+ "intent": "preprocess",
+ "family": "preprocessing",
+ "modality": "sar",
+ "sensors": [
+  "sentinel-1"
+ ],
+ "description": "DN -> sigma0 calibration with sensor-aware LUTs.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Input raster product.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "calibrate",
+   "operator_id": "rs:sar_calibrate",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.sigma0"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "sigma0",
+   "from_step": "calibrate",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "calibrate",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:spectral_derivative",
+  "input" : "raster",
+  "notes" : "Finite differences along the wavelength axis; second order is the first derivative applied twice along the successive midpoint axes (honest irregular-spacing form). Bit-exact grade.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "derivative",
+    "feature-engineering"
+  ],
+  "task" : "feature-engineering"
+}

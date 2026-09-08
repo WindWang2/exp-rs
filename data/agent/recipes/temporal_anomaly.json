@@ -1,0 +1,54 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.temporal_anomaly",
+ "title": "Seasonal anomaly detection",
+ "intent": "temporal",
+ "family": "temporal",
+ "modality": "temporal",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9",
+  "modis"
+ ],
+ "description": "Baseline-window anomaly against the seasonal model for a target date.",
+ "slots": [
+  {
+   "name": "collection",
+   "kind": "collection",
+   "description": "Registered temporal collection (spatial:temporal tools).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "anomaly",
+   "operator_id": "rs:temporal_anomaly",
+   "params": {
+    "collection": "$collection.path",
+    "band_role": "$params.band_role",
+    "method": "zscore",
+    "baseline_start": "$params.baseline_start",
+    "baseline_end": "$params.baseline_end",
+    "output": "$outputs.anomaly"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "anomaly",
+   "from_step": "anomaly",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "anomaly",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

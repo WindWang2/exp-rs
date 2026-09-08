@@ -1,0 +1,12 @@
+{
+  "gpu" : false,
+  "id" : "rs:connected_components",
+  "input" : "raster",
+  "notes" : "Two-pass union-find labeling with raster-order compact labels; output 0 = background/NoData. FullRaster contract.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "raster_spatial"
+  ],
+  "task" : "raster_cleanup"
+}

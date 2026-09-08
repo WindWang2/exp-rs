@@ -1,0 +1,54 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.opticalchange.post-classification",
+ "version": 1,
+ "title": "Post-classification change",
+ "description": "Two classified maps -> transition matrix change analysis.",
+ "tasks": [
+  "change",
+  "landcover"
+ ],
+ "modalities": [
+  "model"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "before",
+   "kind": "raster",
+   "required": true,
+   "description": "First-epoch classification."
+  },
+  {
+   "name": "after",
+   "kind": "raster",
+   "required": true,
+   "description": "Second-epoch classification."
+  }
+ ],
+ "analysis_recipe": "harness.classify_change_post",
+ "map_template": "change-before-after-a4l",
+ "style_spec": {
+  "primary": "style.change-gain-loss"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "before",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "change",
+  "transition"
+ ],
+ "family": "optical-change"
+}

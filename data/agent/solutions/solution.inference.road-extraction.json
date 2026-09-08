@@ -1,0 +1,51 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.inference.road-extraction",
+ "version": 1,
+ "title": "Road extraction inference",
+ "description": "Model-based road extraction with the road/transport template.",
+ "tasks": [
+  "road",
+  "model"
+ ],
+ "modalities": [
+  "model"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Feature raster for the model."
+  }
+ ],
+ "analysis_recipe": "harness.classify_inference",
+ "map_template": "road-transport-a4l",
+ "style_spec": {
+  "primary": "style.urban-builtup"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "road",
+  "inference"
+ ],
+ "recipe_params": {
+  "model_id": ""
+ },
+ "family": "inference"
+}

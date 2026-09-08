@@ -1,0 +1,54 @@
+{
+  "id": "chart/grouped-bar",
+  "version": 1,
+  "category": "chart",
+  "semantic_roles": [
+    "chart.statistics",
+    "chart.trend"
+  ],
+  "description": "Grouped bar chart: side-by-side series per label with a compact series legend (real multi-series rendering).",
+  "parameters": {},
+  "defaults": {
+    "chart": {
+      "kind": "grouped_bar",
+      "binding": {
+        "mode": "inline",
+        "data": []
+      }
+    }
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "margin_mm": 6,
+    "min_size_mm": [
+      30,
+      20
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "classification",
+      "change",
+      "statistics"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "series",
+      "source": "params.series",
+      "required": true,
+      "description": "[{label, parts: [{label, value}]}] groups with named series."
+    }
+  ],
+  "variants": [
+    {
+      "id": "paired",
+      "description": "Two series (before/after)."
+    },
+    {
+      "id": "multi",
+      "description": "Three or more series."
+    }
+  ]
+}

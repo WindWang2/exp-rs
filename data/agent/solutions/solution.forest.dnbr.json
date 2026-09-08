@@ -1,0 +1,57 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.forest.dnbr",
+ "version": 1,
+ "title": "Burn severity mapping (dNBR)",
+ "description": "Pre/post NBR -> dNBR -> severity classes with the USGS-inspired palette.",
+ "tasks": [
+  "burn",
+  "forest"
+ ],
+ "modalities": [
+  "optical"
+ ],
+ "sensors": [
+  "sentinel-2",
+  "landsat-8"
+ ],
+ "input_contracts": [
+  {
+   "name": "pre",
+   "kind": "raster",
+   "required": true,
+   "description": "Pre-fire reflectance (NIR + SWIR)."
+  },
+  {
+   "name": "post",
+   "kind": "raster",
+   "required": true,
+   "description": "Post-fire reflectance (NIR + SWIR)."
+  }
+ ],
+ "analysis_recipe": "harness.optical_dnbr",
+ "map_template": "burned-area-a4l",
+ "style_spec": {
+  "primary": "style.burn-severity"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "pre",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "certified",
+ "keywords": [
+  "burn",
+  "dnbr",
+  "severity",
+  "fire"
+ ],
+ "family": "forest-disturbance"
+}

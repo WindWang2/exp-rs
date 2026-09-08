@@ -1,0 +1,50 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.water.optical-mndwi",
+ "version": 1,
+ "title": "Surface water mapping (MNDWI)",
+ "description": "MNDWI-based open-water mapping with manual or statistical thresholding.",
+ "tasks": [
+  "water"
+ ],
+ "modalities": [
+  "optical"
+ ],
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Optical reflectance product (Green + SWIR)."
+  }
+ ],
+ "analysis_recipe": "harness.optical_water_mndwi",
+ "map_template": "water-flood-a4l",
+ "style_spec": {
+  "primary": "style.water-extent"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "water",
+  "mndwi",
+  "reservoir"
+ ],
+ "family": "water"
+}

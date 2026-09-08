@@ -2,6 +2,8 @@
 #include "rs_classifier_backend_factory.h"
 
 #include "rs_classifier_kmeans.h"
+#include "rs_classifier_knn.h"
+#include "rs_classifier_statistical.h"
 #include "rs_classifier_mlp.h"
 #include "rs_classifier_normalbayes.h"
 #include "rs_classifier_random_forest.h"
@@ -27,6 +29,12 @@ std::unique_ptr<RsClassifierBackend> RsClassifierBackendFactory::create(
     return std::make_unique<RsClassifierNormalBayes>();
   if ( m.contains( QStringLiteral( "kmeans" ) ) )
     return std::make_unique<RsClassifierKMeans>();
+  if ( m.contains( QStringLiteral( "knn" ) ) || m.contains( QStringLiteral( "nearest" ) ) )
+    return std::make_unique<RsClassifierKnn>();
+  if ( m.contains( QStringLiteral( "mahalanobis" ) ) )
+    return std::make_unique<RsClassifierMahalanobis>();
+  if ( m.contains( QStringLiteral( "min_distance" ) ) || m.contains( QStringLiteral( "mindistance" ) ) || m.contains( QStringLiteral( "minimum" ) ) )
+    return std::make_unique<RsClassifierMinDistance>();
   return std::make_unique<RsClassifierSvm>();
 }
 

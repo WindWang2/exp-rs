@@ -1,0 +1,14 @@
+{
+  "gpu" : true,
+  "id" : "rs:detect",
+  "input" : "raster",
+  "notes" : "Requires a manifest with an output.detection contract. Tiles are decoded per window; overlap duplicates are removed by whole-raster NMS; boxes are published in geographic coordinates via an atomic vector write.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "inference",
+    "detection",
+    "deep-learning"
+  ],
+  "task" : "detection"
+}

@@ -1,0 +1,60 @@
+{
+  "id": "chart/topn-table",
+  "version": 1,
+  "category": "chart",
+  "semantic_roles": [
+    "chart.statistics"
+  ],
+  "description": "Top-N table: rows sorted by value descending, capped at style.top_n (default 10) with a rank column.",
+  "parameters": {},
+  "defaults": {
+    "chart": {
+      "kind": "topn_table",
+      "binding": {
+        "mode": "inline",
+        "data": []
+      },
+      "style": {
+        "top_n": 10,
+        "label_column": "Class",
+        "value_column": "Area"
+      }
+    }
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "margin_mm": 6,
+    "min_size_mm": [
+      30,
+      20
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "classification",
+      "statistics",
+      "change"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "rows",
+      "source": "params.table_rows",
+      "required": true,
+      "description": "[{label, value}] rows; sorted by value desc."
+    }
+  ],
+  "variants": [
+    {
+      "id": "top-5",
+      "parameters": {},
+      "description": "Cap at 5."
+    },
+    {
+      "id": "top-10",
+      "parameters": {},
+      "description": "Cap at 10."
+    }
+  ]
+}

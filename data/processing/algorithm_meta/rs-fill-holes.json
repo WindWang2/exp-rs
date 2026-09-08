@@ -1,0 +1,12 @@
+{
+  "gpu" : false,
+  "id" : "rs:fill_holes",
+  "input" : "raster",
+  "notes" : "Holes are background components without border contact; reports filledPixels. FullRaster contract.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "raster_spatial"
+  ],
+  "task" : "raster_cleanup"
+}

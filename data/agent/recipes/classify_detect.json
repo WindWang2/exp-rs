@@ -1,0 +1,52 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.classify_detect",
+ "title": "Object detection inference",
+ "intent": "inference",
+ "family": "model",
+ "modality": "model",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9",
+  "sentinel-1"
+ ],
+ "description": "Detection model over the scene; produces vector detections for mapping overlays.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Scene for detection.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "detect",
+   "operator_id": "rs:detect",
+   "params": {
+    "input": "$primary.path",
+    "model": "$params.model_id",
+    "output": "$outputs.detections",
+    "verification": "vector"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "detections",
+   "from_step": "detect",
+   "port": "output",
+   "kind": "vector"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "detect",
+  "renderer_hint": "categorized"
+ }
+}

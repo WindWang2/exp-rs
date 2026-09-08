@@ -1,0 +1,83 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.temporal_forest_disturbance",
+ "title": "Forest disturbance monitoring",
+ "intent": "temporal",
+ "family": "temporal",
+ "modality": "temporal",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9",
+  "modis"
+ ],
+ "description": "NBR series -> breakpoints -> sen trend confirmation.",
+ "slots": [
+  {
+   "name": "collection",
+   "kind": "collection",
+   "description": "Registered temporal collection (spatial:temporal tools).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "series",
+   "operator_id": "rs:temporal_index_series",
+   "params": {
+    "collection": "$collection.path",
+    "index": "NBR",
+    "output": "$outputs.nbr_series"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "breakpoints",
+   "operator_id": "rs:temporal_breakpoints",
+   "params": {
+    "collection": "$collection.path",
+    "band_role": "nbr",
+    "output": "$outputs.breakpoints"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "trend",
+   "operator_id": "rs:temporal_sen_trend",
+   "params": {
+    "collection": "$collection.path",
+    "band_role": "nbr",
+    "output": "$outputs.trend"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "nbr_series",
+   "from_step": "series",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "breakpoints",
+   "from_step": "breakpoints",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "trend",
+   "from_step": "trend",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "series",
+  "renderer_hint": "categorized"
+ }
+}

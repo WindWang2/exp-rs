@@ -1,0 +1,49 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.preprocess_reproject",
+ "title": "Reproject/resample preprocessing",
+ "intent": "preprocess",
+ "family": "preprocessing",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "Reprojection to the reference CRS with explicit resampling for grid harmonization.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Input raster product.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "reproject",
+   "operator_id": "gdal:reproject",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.reprojected"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "reprojected",
+   "from_step": "reproject",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "reproject",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

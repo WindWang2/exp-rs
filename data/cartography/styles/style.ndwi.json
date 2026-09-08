@@ -1,0 +1,30 @@
+{
+ "schema_version": "1.0",
+ "kind": "style_spec",
+ "id": "style.ndwi",
+ "version": 1,
+ "description": "NDWI continuous water-index ramp (negative land to positive water).",
+ "token_set_ref": "scientific-light",
+ "semantics": [
+  "water",
+  "ndwi"
+ ],
+ "applies_to": "raster",
+ "raster": {
+  "renderertype": "singleband_pseudocolor",
+  "band": 1,
+  "classification": {
+   "mode": "continuous",
+   "ramp": [
+    "token:colors.warning",
+    "#f7f7f7",
+    "token:colors.water"
+   ],
+   "stretch": {
+    "type": "fixed",
+    "min": -1,
+    "max": 1
+   }
+  }
+ }
+}

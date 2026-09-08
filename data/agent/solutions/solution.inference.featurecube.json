@@ -1,0 +1,50 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.inference.featurecube",
+ "version": 1,
+ "title": "Feature cube preparation",
+ "description": "Normalized (+ optional PCA) feature cube for downstream model consumers.",
+ "tasks": [
+  "model",
+  "preprocessing"
+ ],
+ "modalities": [
+  "model"
+ ],
+ "sensors": [
+  "sentinel-2",
+  "sentinel-1"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Multi-band feature raster."
+  }
+ ],
+ "analysis_recipe": "harness.classify_feature_cube",
+ "map_template": "multi-panel-a4l",
+ "style_spec": {
+  "primary": "style.ndvi"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "feature-cube",
+  "pca",
+  "normalization"
+ ],
+ "family": "inference"
+}

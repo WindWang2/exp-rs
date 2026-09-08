@@ -1,0 +1,49 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.phenology.double-cropping",
+ "version": 1,
+ "title": "Double-cropping detection",
+ "description": "Smoothed NDVI series with breakpoint segmentation to detect second seasons.",
+ "tasks": [
+  "phenology",
+  "crop"
+ ],
+ "modalities": [
+  "temporal"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "collection",
+   "kind": "collection",
+   "required": true,
+   "description": "Temporal collection."
+  }
+ ],
+ "analysis_recipe": "harness.temporal_double_cropping",
+ "map_template": "time-series-phenology-a4l",
+ "style_spec": {
+  "primary": "style.ndvi"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "collection",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "phenology",
+  "double-cropping",
+  "intensity"
+ ],
+ "family": "phenology"
+}

@@ -1,0 +1,76 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.optical_water_mndwi",
+ "title": "Surface water mapping (MNDWI)",
+ "intent": "mndwi",
+ "family": "water",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "inspect -> MNDWI -> manual/statistical threshold -> cleanup. MNDWI suppresses built-up shadow confusion better than NDWI.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Optical reflectance (Green + SWIR).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "mndwi",
+   "operator_id": "rs:spectral_index",
+   "params": {
+    "input": "$primary.path",
+    "index": "MNDWI",
+    "output": "$outputs.mndwi"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "water",
+   "operator_id": "rs:threshold_raster",
+   "params": {
+    "input": "$outputs.mndwi",
+    "output": "$outputs.water_extent",
+    "thresholdMethod": "manual",
+    "threshold": "$params.threshold",
+    "cleanup": "majority"
+   },
+   "verification": "raster",
+   "when_param": "threshold",
+   "params_when_skipped": {
+    "input": "$outputs.mndwi",
+    "output": "$outputs.water_extent",
+    "thresholdMethod": "statistical",
+    "statisticalK": 2.0,
+    "cleanup": "majority"
+   }
+  }
+ ],
+ "outputs": [
+  {
+   "name": "mndwi",
+   "from_step": "mndwi",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "water_extent",
+   "from_step": "water",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "mndwi",
+  "renderer_hint": "categorized"
+ }
+}

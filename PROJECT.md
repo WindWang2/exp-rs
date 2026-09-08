@@ -35,11 +35,38 @@ Pi agent adapter over the same Task Center seam.
   architecture and extension rules.
 - `src/agent` — copilot, MCP, spatial tools, agent contracts, harness
   (`src/agent/harness`); `pi/` bridge; MapSpec cartography
-  (`src/agent/mapspec`, `src/agent/cartography`, `data/cartography`).
+  (`src/agent/mapspec`, `src/agent/cartography`, `data/cartography`);
+  knowledge platform (solutions `data/agent/solutions`, styles
+  `data/cartography/styles`, solution/style registries + tools).
 - `docs/adr/` — decision ledger (0001–0133); `CONTEXT.md` — domain vocabulary.
 
-## Current state (2026-09-07)
+## Current state (2026-09-08)
 
+- **Solution Template, Recipe & Cartography Knowledge Platform 5.0**:
+  task semantics → validated SolutionTemplate → AnalysisRecipe (AgentPlan v2 →
+  WorkflowDefinition) + StyleSpec (→ QGIS renderers) + MapSpec 3.0
+  (conditions, relative constraints, locator overviews, atlas, page roles) +
+  report pages → verification. Faceted registries with reference-resolved
+  validation, alias/extends semantics and bounded search; recipe library
+  spanning the operator registry; preflight/repair rules for locator, atlas,
+  conditional, chart-overflow and page-balance quality; 19-scene deterministic
+  visual matrix; scale gates in tests. Docs: `docs/cartography/solution-authoring.md`,
+  `style-spec-reference.md`, `migration-mapspec-v3.md`, `atlas-guide.md`.
+
+- **Scientific Algorithm Foundation 5.0**: shared scientific primitives
+  (histogram/otsu/quantile, morphology, connected components, exact Euclidean
+  distance transform, declared quantile semantics, window edge-policy
+  contract) with `change_detection` delegated onto them; optical
+  topographic correction + 8 new index families + spectral derivatives;
+  matched-filter/ACE target detection over the streamed RX background; SAR
+  dual-pol features and constant-geometry terrain masks (range-Doppler
+  documented as refused, additive orbit contract); temporal CUSUM/EWMA/
+  seasonal Mann-Kendall with a pairwork guard; terrain curvatures, MD
+  hillshade, relief, priority-flood fill, D8 routing; seven raster-spatial
+  mask/window operators; kNN + minimum-distance + Mahalanobis classifiers;
+  sidecar catalog regenerated from descriptors (7 -> 25); baseline compile
+  breakage in `workflow_run_coordinator.h` repaired. See
+  `docs/processing/foundation-5.md` and `docs/processing/sar-domain.md`.
 - **Model Runtime & AI Inference Platform 4.0** (ADR 0130):
   manifest 4.0 identity (`runtime.device`, digest anchor), unified runtime contract
   (device resolution, failure classification, OOM ladder), atomic tiled publisher

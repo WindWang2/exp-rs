@@ -1,0 +1,49 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.landcover.kmeans",
+ "version": 1,
+ "title": "Unsupervised land-cover clustering",
+ "description": "k-means over the feature raster with majority-filter cleanup — a training-free first look.",
+ "tasks": [
+  "landcover",
+  "classification"
+ ],
+ "modalities": [
+  "model"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Multi-band feature raster."
+  }
+ ],
+ "analysis_recipe": "harness.classify_kmeans",
+ "map_template": "classification-a4l",
+ "style_spec": {
+  "primary": "style.landcover-classes"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "landcover",
+  "kmeans",
+  "unsupervised"
+ ],
+ "family": "landcover"
+}

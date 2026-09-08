@@ -1,0 +1,48 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.soil.baresoil-map",
+ "version": 1,
+ "title": "Bare soil exposure mapping",
+ "description": "BSI continuous exposure map with the soil template.",
+ "tasks": [
+  "soil"
+ ],
+ "modalities": [
+  "optical"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Reflectance product (Blue, Red, NIR, SWIR)."
+  }
+ ],
+ "analysis_recipe": "harness.optical_bsi",
+ "map_template": "soil-moisture-a4l",
+ "style_spec": {
+  "primary": "style.bare-soil"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "soil",
+  "bare-soil",
+  "bsi"
+ ],
+ "family": "soil"
+}

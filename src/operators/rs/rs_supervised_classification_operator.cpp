@@ -49,7 +49,7 @@ using namespace params;
 
 namespace {
 
-const std::vector<std::string> s_methods = {"svm", "normal_bayes", "rf", "mlp"};
+const std::vector<std::string> s_methods = {"svm", "normal_bayes", "rf", "mlp", "knn", "min_distance", "mahalanobis"};
 
 /// Map a failed pipeline run back onto the operator's stable error codes.
 [[noreturn]] void throwPipelineError(const RsClassificationPipelineResult& res,

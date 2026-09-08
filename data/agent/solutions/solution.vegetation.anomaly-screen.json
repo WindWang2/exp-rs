@@ -1,0 +1,50 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.vegetation.anomaly-screen",
+ "version": 1,
+ "title": "Vegetation anomaly screening",
+ "description": "NDVI series z-score anomaly -> screening mask for early-warning workflows.",
+ "tasks": [
+  "vegetation",
+  "temporal"
+ ],
+ "modalities": [
+  "temporal"
+ ],
+ "sensors": [
+  "sentinel-2",
+  "modis"
+ ],
+ "input_contracts": [
+  {
+   "name": "collection",
+   "kind": "collection",
+   "required": true,
+   "description": "Temporal collection."
+  }
+ ],
+ "analysis_recipe": "harness.temporal_vegetation_anomaly",
+ "map_template": "crop-monitoring-a4l",
+ "style_spec": {
+  "primary": "style.change-gain-loss"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "collection",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "vegetation",
+  "anomaly",
+  "drought"
+ ],
+ "family": "vegetation"
+}

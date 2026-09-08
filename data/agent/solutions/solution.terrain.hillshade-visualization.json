@@ -1,0 +1,47 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.terrain.hillshade-visualization",
+ "version": 1,
+ "title": "Terrain hillshade visualization",
+ "description": "Hillshade rendering base with the DEM ramp for cartographic context.",
+ "tasks": [
+  "terrain"
+ ],
+ "modalities": [
+  "terrain"
+ ],
+ "sensors": [
+  "dem"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Projected DEM."
+  }
+ ],
+ "analysis_recipe": "harness.terrain_hillshade",
+ "map_template": "terrain-dem-a4l",
+ "style_spec": {
+  "dem": "style.dem-hillshade"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "terrain",
+  "hillshade"
+ ],
+ "family": "terrain"
+}
