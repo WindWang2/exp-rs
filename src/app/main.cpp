@@ -563,5 +563,6 @@ int main(int argc, char *argv[])
     delete app;
     return result;
 }
-
-#include "main.moc"
+// NOTE: the former trailing `#include "main.moc"` is gone — main.cpp holds no
+// Q_OBJECT/Q_GADGET types, and the dangling include turned AUTOMOC into a hard
+// failure (Workbench 5.0 fresh-build finding; stale incremental trees hid it).
