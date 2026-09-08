@@ -21,37 +21,39 @@ namespace sicnu::operators::io
 namespace
 {
 
-sicnu::geo::ErrorCode mapGeoCode( sicnu::geo::ErrorCode code )
+// Returns the operator-layer ErrorCode (namespace-scope enum in
+// rs_operator_error.h — NOT nested in RSOperatorError).
+ErrorCode mapGeoCode( sicnu::geo::ErrorCode code )
 {
   using G = sicnu::geo::ErrorCode;
   switch ( code )
   {
-    case G::InvalidArgument: return RSOperatorError::ErrorCode::InvalidParameter;
-    case G::OpenFailed: return RSOperatorError::ErrorCode::FileNotReadable;
-    case G::DriverMissing: return RSOperatorError::ErrorCode::GdalError;
-    case G::MissingCrs: return RSOperatorError::ErrorCode::InvalidParameter;
-    case G::InvalidCrs: return RSOperatorError::ErrorCode::InvalidParameter;
-    case G::TransformFailed: return RSOperatorError::ErrorCode::GdalError;
-    case G::WriteFailed: return RSOperatorError::ErrorCode::FileNotWritable;
-    case G::FidelityLoss: return RSOperatorError::ErrorCode::InvalidInputData;
-    case G::Unsupported: return RSOperatorError::ErrorCode::GdalError;
-    case G::Cancelled: return RSOperatorError::ErrorCode::Cancelled;
-    case G::IoError: return RSOperatorError::ErrorCode::FileNotWritable;
+    case G::InvalidArgument: return ErrorCode::InvalidParameter;
+    case G::OpenFailed: return ErrorCode::FileNotReadable;
+    case G::DriverMissing: return ErrorCode::GdalError;
+    case G::MissingCrs: return ErrorCode::InvalidParameter;
+    case G::InvalidCrs: return ErrorCode::InvalidParameter;
+    case G::TransformFailed: return ErrorCode::GdalError;
+    case G::WriteFailed: return ErrorCode::FileNotWritable;
+    case G::FidelityLoss: return ErrorCode::InvalidInputData;
+    case G::Unsupported: return ErrorCode::GdalError;
+    case G::Cancelled: return ErrorCode::Cancelled;
+    case G::IoError: return ErrorCode::FileNotWritable;
     // Foundation 5.0 additions (ADR 0141) — mapped so remote/corruption/
     // budget failures keep their meaning at the operator boundary instead
     // of collapsing into Unknown.
-    case G::NotFound: return RSOperatorError::ErrorCode::FileNotFound;
-    case G::PermissionDenied: return RSOperatorError::ErrorCode::FileNotReadable;
-    case G::UnsupportedFormat: return RSOperatorError::ErrorCode::InvalidInputData;
-    case G::UnsupportedProduct: return RSOperatorError::ErrorCode::InvalidInputData;
-    case G::InvalidMetadata: return RSOperatorError::ErrorCode::InvalidInputData;
-    case G::CorruptData: return RSOperatorError::ErrorCode::InvalidInputData;
-    case G::NetworkError: return RSOperatorError::ErrorCode::GdalError;
-    case G::Timeout: return RSOperatorError::ErrorCode::ExternalProcessTimeout;
-    case G::ResourceExhausted: return RSOperatorError::ErrorCode::OutOfRange;
-    case G::Incompatible: return RSOperatorError::ErrorCode::InvalidInputData;
+    case G::NotFound: return ErrorCode::FileNotFound;
+    case G::PermissionDenied: return ErrorCode::FileNotReadable;
+    case G::UnsupportedFormat: return ErrorCode::InvalidInputData;
+    case G::UnsupportedProduct: return ErrorCode::InvalidInputData;
+    case G::InvalidMetadata: return ErrorCode::InvalidInputData;
+    case G::CorruptData: return ErrorCode::InvalidInputData;
+    case G::NetworkError: return ErrorCode::GdalError;
+    case G::Timeout: return ErrorCode::ExternalProcessTimeout;
+    case G::ResourceExhausted: return ErrorCode::OutOfRange;
+    case G::Incompatible: return ErrorCode::InvalidInputData;
   }
-  return RSOperatorError::ErrorCode::Unknown;
+  return ErrorCode::Unknown;
 }
 
 /// Runs `body`, translating foundation GeoError into RSOperatorError.
@@ -86,7 +88,7 @@ std::vector<int> bandsFrom( const Json::Value &params )
     }
     catch ( const std::exception & )
     {
-      throw RSOperatorError( RSOperatorError::ErrorCode::TypeMismatch,
+      throw RSOperatorError( ErrorCode::TypeMismatch,
                              "bands entries must be numeric strings: " + text );
     }
   }
@@ -172,7 +174,7 @@ Json::Value IoTranslateOperator::run( const Json::Value &params, RSOperatorConte
     const int width = params::getInt( params, "width", 0 );
     const int height = params::getInt( params, "height", 0 );
     if ( ( width > 0 ) != ( height > 0 ) )
-      throw RSOperatorError( RSOperatorError::ErrorCode::InvalidParameter,
+      throw RSOperatorError( ErrorCode::InvalidParameter,
                              "width and height must be given together" );
     options.targetWidth = width;
     options.targetHeight = height;
@@ -303,7 +305,7 @@ Json::Value IoReprojectOperator::run( const Json::Value &params, RSOperatorConte
       Json::Value details;
       details["path"] = input;
       details["policy"] = "declare srcCrsOverride to take responsibility for the source CRS";
-      throw RSOperatorError( RSOperatorError::ErrorCode::InvalidParameter,
+      throw RSOperatorError( ErrorCode::InvalidParameter,
                              "input raster carries no CRS; refusing to guess", details );
     }
     sicnu::geo::WarpOptions options;
@@ -360,7 +362,7 @@ Json::Value IoClipOperator::run( const Json::Value &params, RSOperatorContext &c
     {
       Json::Value details;
       details["path"] = input;
-      throw RSOperatorError( RSOperatorError::ErrorCode::InvalidParameter,
+      throw RSOperatorError( ErrorCode::InvalidParameter,
                              "input raster carries no CRS; declare srcCrsOverride to clip anyway", details );
     }
     std::vector<double> bounds;
@@ -370,7 +372,7 @@ Json::Value IoClipOperator::run( const Json::Value &params, RSOperatorContext &c
         bounds.push_back( bound.asDouble() );
     }
     if ( bounds.size() != 4 )
-      throw RSOperatorError( RSOperatorError::ErrorCode::MissingRequiredParameter,
+      throw RSOperatorError( ErrorCode::MissingRequiredParameter,
                              "bounds must be [minX,minY,maxX,maxY]" );
 
     sicnu::geo::WarpOptions options;
@@ -433,24 +435,22 @@ Json::Value IoConvertFormatOperator::run( const Json::Value &params, RSOperatorC
     const std::string input = params::requireString( params, "input" );
     const std::string output = params::requireString( params, "output" );
     const std::string driver = params::getString( params, "driver", "GTiff" );
-    Json::Value result;
-    // Vector path: a vector driver name or a vector-reading input.
+    // Vector path: a vector driver name. Raster otherwise.
     if ( driver == "GPKG" || driver == "GeoJSON" || driver == "ESRI Shapefile" || driver == "FlatGeobuf"
          || driver == "CSV" )
     {
       ContextProgress progress( context );
-      result = sicnu::geo::vectorConvert( input, output, driver, "", "", "", {}, &progress );
+      Json::Value result = sicnu::geo::vectorConvert( input, output, driver, "", "", "", {}, &progress );
+      context.reportProgressForced( 1.0, "conversion complete" );
+      return result;
     }
-    else
-    {
-      sicnu::geo::TranslateOptions options;
-      options.outputFormat = driver;
-      options.creationOptions = creationOptionsFrom( params );
-      ContextProgress progress( context );
-      result = sicnu::geo::translateRaster( input, output, options, &progress );
-    }
+    sicnu::geo::TranslateOptions options;
+    options.outputFormat = driver;
+    options.creationOptions = creationOptionsFrom( params );
+    ContextProgress progress( context );
+    sicnu::geo::TranslateResult result = sicnu::geo::translateRaster( input, output, options, &progress );
     context.reportProgressForced( 1.0, "conversion complete" );
-    return result;
+    return result.toJson();
   } );
 }
 

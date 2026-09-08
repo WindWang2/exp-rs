@@ -200,6 +200,8 @@ target_link_libraries(sicnu_operators
         Qt6::Core
         sicnu_operators_core
         sicnu_processing
+        # io:* operators call the Qt-free foundation directly (Foundation 4.0).
+        Sicnu::Geospatial
     PRIVATE
         ${JSONCPP_LIBRARIES}
         Sicnu::data

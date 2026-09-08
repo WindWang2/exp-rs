@@ -102,6 +102,9 @@ class WorkflowRunCoordinator : public QObject {
 
     /// Requires m_mutex held (uses the no-lock directory accessor).
     void persistRunLocked( WorkflowRun &run );
+    /// Emits runStateChanged with the mutex held; callers queue across
+    /// threads (queued connection in ProjectContext).
+    void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
     /// Terminal roll-up + ArtifactGC + checkpoint retention. Called with
     /// m_mutex held when the last step of a tracked run went terminal.
     void finalizeRunLocked( long pipelineId, WorkflowRun &run );
@@ -120,6 +123,12 @@ class WorkflowRunCoordinator : public QObject {
     /// released at finalize / resume swap / submission failure.
     std::map<std::string, std::shared_ptr<WorkflowRunLock>> m_locksByRunId;
     bool m_connected = false;
+
+  signals:
+    /// One emission per tracked-run state transition (issue #754 carries the
+    /// truthful effective start).
+    void runStateChanged( const QString &runId, const QString &workflowId,
+                          const QString &state, qint64 startedMs, qint64 finishedMs );
 };
 
 } // namespace workflow

@@ -94,7 +94,7 @@ TEST_CASE( "io: family registers all ten authoritative operators", "[io][operato
                            "io:build_overviews", "io:make_cog", "io:vector_convert", "io:inspect", "io:doctor" } )
   {
     INFO( "operator: " << id );
-    CHECK( registry.find( std::string( id ) ) != nullptr );
+    CHECK( registry.hasOperator( std::string( id ) ) );
   }
 }
 
@@ -218,6 +218,6 @@ TEST_CASE( "io: operators declare memory policy and determinism grades", "[io][o
     auto op = registry.create( std::string( id ) );
     REQUIRE( op );
     CHECK_FALSE( op->schema().isNull() );
-    CHECK( op->determinismGrade() == "bit-exact" || op->determinismGrade() == "tolerance" );
+    CHECK( ( op->determinismGrade() == "bit-exact" || op->determinismGrade() == "tolerance" ) );
   }
 }
