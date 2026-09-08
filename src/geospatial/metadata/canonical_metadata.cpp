@@ -38,11 +38,11 @@ std::string gdalDataTypeName( GDALDataType type )
 
 void captureBoundedMetadata( GDALMajorObjectH object, std::map<std::string, std::string> &out, int maxItems )
 {
-  char **metadata = GDALGetMetadata( object, nullptr );
+  CSLConstList metadata = GDALGetMetadata( object, nullptr );
   if ( !metadata )
     return;
   int captured = 0;
-  for ( char **entry = metadata; *entry; ++entry )
+  for ( CSLConstList entry = metadata; *entry; ++entry )
   {
     if ( captured >= maxItems )
       break;
@@ -722,12 +722,12 @@ RasterMetadata inspectRaster( const std::string &path, const InspectOptions &opt
   if ( const char *interleave = GDALGetMetadataItem( handle, "INTERLEAVE", "IMAGE_STRUCTURE" ) )
     meta.interleave = interleave;
 
-  char **subdatasets = GDALGetMetadata( handle, "SUBDATASETS" );
+  CSLConstList subdatasets = GDALGetMetadata( handle, "SUBDATASETS" );
   if ( subdatasets )
   {
     const int maxEntries = options.maxSubdatasets > 0 ? options.maxSubdatasets * 2 : kMaxSubdatasetEntriesFallback;
     int captured = 0;
-    for ( char **entry = subdatasets; *entry; ++entry )
+    for ( CSLConstList entry = subdatasets; *entry; ++entry )
     {
       if ( captured >= maxEntries )
         break;

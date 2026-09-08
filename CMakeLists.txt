@@ -655,6 +655,12 @@ endif()
 
 add_subdirectory(src/core)
 add_subdirectory(src/data)
+# Dataset, Experiment & Reproducibility Foundation 5.0 (ADR 0134-0138): the
+# science-core stores over sicnu_data (dataset identity/manifest/splits) and
+# sicnu_dataset (experiment/run/metrics). Qt-free leaves; tests and src/app
+# link Sicnu::dataset / Sicnu::experiment.
+add_subdirectory(src/dataset)
+add_subdirectory(src/experiment)
 # Geospatial I/O Foundation 4.0 (Qt-free leaf: canonical metadata, CRS policy,
 # raster/vector I/O contracts, format profiles, COG, STAC, multidim, doctor).
 add_subdirectory(src/geospatial)
