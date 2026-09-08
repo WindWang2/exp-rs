@@ -453,7 +453,7 @@ bool PluginLoader::loadImpl( const PluginRecord &record, HostServicesV1 &service
 
         // Optional UI contribution entry point (exprs/plugin_ui.h).
         // Failure here is a warning, not a load failure.
-        if ( void *uiSymbol = ::dlsym( handle, kUiContributionEntryPointV1 ) )
+        if ( void *uiSymbol = findSymbol( handle, kUiContributionEntryPointV1 ) )
         {
             using CreateUiFn = void *( * )();
             try

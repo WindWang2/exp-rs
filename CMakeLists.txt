@@ -125,6 +125,13 @@ find_package(Qt6Keychain QUIET)
 find_library(PCRE2_16 pcre2-16 REQUIRED)
 find_library(PCRE2_8 pcre2-8 REQUIRED)
 find_package(CURL REQUIRED)
+# macOS only: libtasn1 for the DER-encoded PKI ASN.1 workarounds in
+# qgsauthcertutils (src/core links ${LIBTASN1_LIBRARY} under APPLE). Without
+# the find_package the variables stay empty: compilation succeeds through
+# the brew include path, then the link fails on every asn1_* symbol.
+if(APPLE)
+    find_package(Libtasn1 REQUIRED)
+endif()
 # Python: always required for build-time scripts; Development only when embedding
 find_package(Python REQUIRED COMPONENTS Interpreter)
 if(SICNU_EMBED_PYTHON)

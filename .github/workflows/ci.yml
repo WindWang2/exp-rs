@@ -200,20 +200,23 @@ jobs:
           $codeql = Get-ChildItem "C:\Program Files\CodeQL" -ErrorAction SilentlyContinue; if ($codeql) { Remove-Item -Recurse -Force "C:\Program Files\CodeQL" }
           Get-PSDrive C | Select-Object Used,Free
 
-      - name: Expose GitHub Actions cache service to vcpkg (x-gha provider)
-        # The x-gha binary-cache provider needs ACTIONS_CACHE_URL and
-        # ACTIONS_RUNTIME_TOKEN, which GitHub does not export to plain steps.
-        # Without them vcpkg silently runs with NO binary cache and rebuilds
-        # gdal/opencv/abseil from source twice per run (the pre-install step
-        # AND the toolchain's manifest install during CMake configure) — that
-        # alone blew the 6h runner cap. github-script sees both variables and
-        # exports them at job level so every later step (and the configure
-        # toolchain) restores/hits binaries from the Actions cache.
-        uses: actions/github-script@v7
+      - name: Cache vcpkg binary archives
+        # vcpkg's default binary cache (C:\Users\runneradmin\AppData\Local
+        # \vcpkg\archives) is the one source of truth both the install step
+        # AND the CMake toolchain's manifest install consult. The former
+        # x-gha provider was REMOVED from the preinstalled vcpkg ("The
+        # 'x-gha' binary caching backend has been removed"), so it silently
+        # ran cache-less and rebuilt gdal/opencv/abseil twice per run —
+        # blowing the 6h cap. Cache the archives dir directly: cold run
+        # builds once in the install step (~2.5h), configure then restores
+        # from the same local archives in minutes, and the post-step saves
+        # them for subsequent runs.
+        uses: actions/cache@v4
         with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+          path: C:\Users\runneradmin\AppData\Local\vcpkg\archives
+          key: vcpkg-archives-x64-windows-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-archives-x64-windows-
 
       - name: Install Qt 6 on Windows
         uses: jurplel/install-qt-action@v4
@@ -236,11 +239,10 @@ jobs:
         # to the pinned builtin-baseline in vcpkg.json (must match exactly or
         # transitive versions like expat/hdf5/opencv4 miss the version DB).
         # Checkout that baseline commit; do not use an unrelated tip.
-        # x-gha binary cache + --clean-after-build keep C: from filling on the
-        # opencv/gdal source builds and make later runs hit binaries.
+        # The cached local binary archives (see actions/cache above) +
+        # --clean-after-build keep C: from filling on the opencv/gdal source
+        # builds and make later runs hit binaries.
         shell: pwsh
-        env:
-          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
         run: |
           git -C C:\vcpkg fetch origin
           if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -315,7 +317,7 @@ jobs:
       - name: Install macOS Dependencies via Homebrew
         run: |
           brew update
-          brew install qt@6 qca qtkeychain gdal proj geos libzip gsl bison flex pcre2 cmake protobuf jsoncpp opencv
+          brew install qt@6 qca qtkeychain gdal proj geos libzip gsl bison flex pcre2 cmake protobuf jsoncpp opencv libtasn1
 
       - name: Configure CMake for macOS
         # Homebrew's bison (>= 3.8) and flex are keg-only; macOS ships bison 2.x
