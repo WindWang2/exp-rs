@@ -119,6 +119,7 @@ struct ProbeResult
     bool isCog = false;           ///< structural COG verdict (driver == COG)
 
     Json::Value diagnostics;      ///< array of {stage, note}
+    Json::Value metadata;         ///< canonical inspection when includeMetadata
 
     Json::Value toJson() const;
 };

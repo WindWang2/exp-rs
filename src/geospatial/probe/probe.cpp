@@ -33,12 +33,11 @@ void note( Json::Value &diagnostics, const char *stage, const std::string &messa
   diagnostics.append( entry );
 }
 
-bool headStartsWith( const std::vector<char> &head, const char *magic, std::size_t offset = 0 )
+bool headStartsWith( const std::vector<char> &head, const char *magic, std::size_t length )
 {
-  const std::size_t length = std::strlen( magic );
-  if ( head.size() < offset + length )
+  if ( head.size() < length )
     return false;
-  return std::memcmp( head.data() + offset, magic, length ) == 0;
+  return std::memcmp( head.data(), magic, length ) == 0;
 }
 
 } // namespace
@@ -78,23 +77,25 @@ const char *fileSignatureName( FileSignature signature )
 
 FileSignature classifySignature( const std::vector<char> &head )
 {
-  // TIFF little/big endian; BigTIFF uses version 43 ("+" / 0x2b).
-  if ( headStartsWith( head, "II*\0" ) || headStartsWith( head, "MM\0*" ) )
+  // TIFF little/big endian; BigTIFF uses version 43 ("+" / 0x2b). Magic
+  // lengths are explicit — strlen would stop at the embedded NUL and make
+  // BigTIFF undetectable.
+  if ( headStartsWith( head, "II*\0", 4 ) || headStartsWith( head, "MM\0*", 4 ) )
     return FileSignature::Tiff;
-  if ( headStartsWith( head, "II+\0" ) || headStartsWith( head, "MM\0+" ) )
+  if ( headStartsWith( head, "II+\0", 4 ) || headStartsWith( head, "MM\0+", 4 ) )
     return FileSignature::BigTiff;
-  if ( headStartsWith( head, "PK\x03\x04" ) || headStartsWith( head, "PK\x05\x06" ) )
+  if ( headStartsWith( head, "PK\x03\x04", 4 ) || headStartsWith( head, "PK\x05\x06", 4 ) )
     return FileSignature::Zip;
-  if ( headStartsWith( head, "SQLite format 3" ) )
+  if ( headStartsWith( head, "SQLite format 3", 15 ) )
     return FileSignature::Gpkg;
-  if ( headStartsWith( head, "\x89HDF\r\n\x1a\n" ) )
+  if ( headStartsWith( head, "\x89HDF\r\n\x1a\n", 8 ) )
     return FileSignature::Hdf5;
   if ( head.size() >= 4 && static_cast<unsigned char>( head[0] ) == 0x0e &&
        static_cast<unsigned char>( head[1] ) == 0x03 &&
        static_cast<unsigned char>( head[2] ) == 0x13 &&
        static_cast<unsigned char>( head[3] ) == 0x01 )
     return FileSignature::Hdf4;
-  if ( headStartsWith( head, "CDF\x01" ) || headStartsWith( head, "CDF\x02" ) )
+  if ( headStartsWith( head, "CDF\x01", 4 ) || headStartsWith( head, "CDF\x02", 4 ) )
     return FileSignature::Netcdf;
 
   // Text-ish families: scan the head for a BOM or printable dominance.
@@ -148,14 +149,16 @@ Json::Value ProbeResult::toJson() const
 {
   Json::Value json;
   json["path"] = path;
-  json["displayPath"] = displayPath;
-  json["resourceKind"] = resourceKindName( resourceKind );
-  json["decidedBy"] = probeStageName( decidedBy );
+  json["display_path"] = displayPath;
+  json["resource_kind"] = resourceKindName( resourceKind );
+  json["decided_by"] = probeStageName( decidedBy );
   json["signature"] = fileSignatureName( signature );
   json["format"] = format.toJson();
   json["product"] = product.toJson();
-  json["isCog"] = isCog;
+  json["is_cog"] = isCog;
   json["diagnostics"] = diagnostics;
+  if ( !metadata.isNull() )
+    json["metadata"] = metadata;
   return json;
 }
 
@@ -187,7 +190,8 @@ ProbeResult probeResource( const std::string &path, const ProbeOptions &options 
     std::ifstream in( payload, std::ios::binary );
     if ( in )
     {
-      head.resize( static_cast<std::size_t>( options.maxSignatureBytes ) );
+      const int boundedBytes = std::clamp( options.maxSignatureBytes, 0, 1024 * 1024 );
+      head.resize( static_cast<std::size_t>( boundedBytes ) );
       in.read( head.data(), head.size() );
       head.resize( static_cast<std::size_t>( in.gcount() ) );
       result.signature = classifySignature( head );
@@ -210,9 +214,9 @@ ProbeResult probeResource( const std::string &path, const ProbeOptions &options 
   const bool specificProductClaim =
     claimedKind != ProductKind::Unknown && claimedKind != ProductKind::GenericRaster;
 
+  const std::string gdalPath = uri.canonical();
   if ( gdalCandidate && !specificProductClaim )
   {
-    const std::string gdalPath = uri.canonical();
     QuietCplErrors quiet;
     GDALDriverH driver = nullptr;
     // Identify is metadata-only; open confirms the driver can really serve it.
@@ -361,6 +365,8 @@ ProbeResult probeResource( const std::string &path, const ProbeOptions &options 
   {
     try
     {
+      const Json::Value metadata = inspectAny( gdalPath );
+      result.metadata = metadata;
       note( result.diagnostics, probeStageName( ProbeStage::Metadata ),
             "metadata inspected lazily" );
     }

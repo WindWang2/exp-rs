@@ -268,6 +268,47 @@ void RasterWriter::writeWindow( int band1Based, const RasterWindow &window, cons
   GDALRasterBandH band = GDALGetRasterBand( datasetOf( mHandle ), band1Based );
   if ( !band )
     throw GeoError( ErrorCode::InvalidArgument, "writeWindow: band disappeared" );
+
+  // Fidelity gate: GDAL silently clamps/saturates on double→integer writes,
+  // so out-of-range and NaN values must be caught BEFORE the write — a
+  // silently clamped raster is a corrupt scientific product.
+  const GDALDataType dtype = GDALGetRasterDataType( band );
+  if ( dtype != GDT_Float64 && dtype != GDT_Float32 )
+  {
+    double low = 0.0;
+    double high = 0.0;
+    bool isInteger = true;
+    switch ( dtype )
+    {
+      case GDT_Byte: low = 0; high = 255; break;
+      case GDT_UInt16: low = 0; high = 65535; break;
+      case GDT_Int16: low = -32768; high = 32767; break;
+      case GDT_UInt32: low = 0; high = 4294967295.0; break;
+      case GDT_Int32: low = -2147483648.0; high = 2147483647.0; break;
+      default: isInteger = false; break;
+    }
+    if ( isInteger )
+    {
+      const std::size_t count = static_cast<std::size_t>( window.width ) * window.height;
+      for ( std::size_t i = 0; i < count; ++i )
+      {
+        const double value = values[i];
+        if ( std::isnan( value ) || value < low || value > high )
+        {
+          Json::Value details;
+          details["band"] = band1Based;
+          details["index"] = static_cast<Json::UInt64>( i );
+          details["value"] = value;
+          details["dtype"] = GDALGetDataTypeName( dtype );
+          throw GeoError( ErrorCode::FidelityLoss,
+                          "writeWindow: value not representable in the band's integer dtype "
+                          "(stored pixels are never silently clamped)",
+                          details );
+        }
+      }
+    }
+  }
+
   const CPLErr error = GDALRasterIO( band, GF_Write, window.xOff, window.yOff, window.width, window.height,
                                      const_cast<double *>( values ), window.width, window.height, GDT_Float64, 0, 0 );
   if ( error != CE_None )

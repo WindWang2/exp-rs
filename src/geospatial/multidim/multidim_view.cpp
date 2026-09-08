@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <set>
 #include <utility>
 
 namespace sicnu::geo
@@ -170,39 +171,60 @@ MultidimGrid MultidimView::readSlice( const std::string &variable,
   const std::string &colDim = info->dimensionNames[dimCount - 1];
   std::int64_t rows = 0;
   std::int64_t cols = 0;
+
+  // Look up each of the VARIABLE's dimensions by name in the metadata —
+  // a multi-variable store carries root dimensions this variable does not
+  // use, and iterating the root list would misindex start/count (out of
+  // bounds) or reject unused dimensions spuriously.
+  std::map<std::string, std::int64_t> dimensionSizes;
   for ( const DimensionInfo &dim : mMetadata.dimensions )
+    dimensionSizes[dim.name] = dim.size;
+
+  std::set<std::string> consumed;
+  for ( std::size_t d = 0; d < dimCount; ++d )
   {
-    const bool isRow = dim.name == rowDim;
-    const bool isCol = dim.name == colDim;
-    const auto sliced = slices.find( dim.name );
+    const std::string &name = info->dimensionNames[d];
+    const bool isRow = d == dimCount - 2;
+    const bool isCol = d == dimCount - 1;
+    const auto sliced = slices.find( name );
+    const std::int64_t size = dimensionSizes.count( name ) ? dimensionSizes[name] : 0;
     if ( isRow )
     {
       if ( sliced != slices.end() )
-        throw GeoError( ErrorCode::InvalidArgument, "The row dimension '" + dim.name + "' must remain free" );
-      rows = dim.size;
+        throw GeoError( ErrorCode::InvalidArgument, "The row dimension '" + name + "' must remain free" );
+      rows = size;
     }
     else if ( isCol )
     {
       if ( sliced != slices.end() )
-        throw GeoError( ErrorCode::InvalidArgument, "The column dimension '" + dim.name + "' must remain free" );
-      cols = dim.size;
+        throw GeoError( ErrorCode::InvalidArgument, "The column dimension '" + name + "' must remain free" );
+      cols = size;
     }
     else
     {
       if ( sliced == slices.end() )
         throw GeoError( ErrorCode::InvalidArgument,
-                        "Dimension '" + dim.name + "' is not sliced; flatten-to-bands is forbidden by contract" );
+                        "Dimension '" + name + "' is not sliced; flatten-to-bands is forbidden by contract" );
       const std::int64_t index = sliced->second;
-      if ( index < 0 || index >= dim.size )
+      if ( index < 0 || index >= size )
       {
         Json::Value details;
-        details["dimension"] = dim.name;
+        details["dimension"] = name;
         details["index"] = index;
-        details["size"] = dim.size;
+        details["size"] = size;
         throw GeoError( ErrorCode::InvalidArgument, "Slice index out of range", details );
       }
-      start[&dim - mMetadata.dimensions.data()] = static_cast<GUInt64>( index );
+      start[d] = static_cast<GUInt64>( index );
+      consumed.insert( name );
     }
+  }
+  // Every requested slice must match one of the variable's dimensions — a
+  // slice naming an unknown dimension is a structured error, not a no-op.
+  for ( const auto &slice : slices )
+  {
+    if ( consumed.count( slice.first ) == 0 )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "Variable '" + variable + "' has no dimension named '" + slice.first + "'" );
   }
   for ( std::size_t i = 0; i < dimCount; ++i )
   {

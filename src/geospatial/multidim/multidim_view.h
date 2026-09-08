@@ -7,9 +7,10 @@
 
   Contract:
   * variable / time / level selection is LAZY: listing never reads array data
-  * slices address dimensions BY NAME with an index (or, for the temporal
-    dimension, a coordinate match on the indexing variable); a slice that
-    names an unknown dimension or variable is a structured error
+  * slices address dimensions BY NAME with an index; a slice that names an
+    unknown dimension or variable is a structured error (coordinate-value
+    matching on the indexing variable is a documented follow-up, not
+    implemented — indices only)
   * a slice always yields an explicit (rows × cols) grid — the layer never
     flattens extra dimensions into pseudo-bands (that is a fidelity violation)
  ***************************************************************************/

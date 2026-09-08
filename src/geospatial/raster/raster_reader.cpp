@@ -39,11 +39,17 @@ GDALDataType requireRealDataType( GDALRasterBandH band, int bandIndex )
     case GDT_Int32:
     case GDT_Float32:
     case GDT_Float64:
+      return type;
+    // 64-bit integers are NOT claimed exact: doubles represent integers
+    // exactly only up to 2^53, so a silent conversion would be a fidelity
+    // lie for full-range Int64/UInt64 rasters.
 #if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 5, 0 )
     case GDT_UInt64:
     case GDT_Int64:
 #endif
-      return type;
+      throw GeoError( ErrorCode::Unsupported,
+                      "Band pixel type exceeds exact double representation (64-bit integers)",
+                      Json::Value( GDALGetDataTypeName( type ) ? GDALGetDataTypeName( type ) : "" ) );
     default:
     {
       Json::Value details;
@@ -284,7 +290,9 @@ std::vector<std::uint8_t> RasterReader::readMask( const RasterWindow &window, co
   const std::size_t pixels = static_cast<std::size_t>( window.width ) * static_cast<std::size_t>( window.height );
   std::vector<std::uint8_t> mask( pixels, 255 );
 
-  const std::vector<double> values = readWindow( effectiveBands, window );
+  // Band-by-band streaming: peak memory is ONE band's window, not
+  // bands × window — a full-extent mask must not be a silent whole-raster
+  // load at 8 bytes/pixel.
   for ( std::size_t b = 0; b < effectiveBands.size(); ++b )
   {
     const BandInfo *info = nullptr;
@@ -298,7 +306,7 @@ std::vector<std::uint8_t> RasterReader::readMask( const RasterWindow &window, co
     }
     if ( !info || !info->hasNoData )
       continue; // undeclared NoData → band contributes no invalid pixels
-    const double *bandValues = values.data() + b * pixels;
+    const std::vector<double> bandValues = readWindow( { effectiveBands[b] }, window );
     for ( std::size_t p = 0; p < pixels; ++p )
     {
       const double value = bandValues[p];
@@ -481,18 +489,12 @@ std::vector<double> RasterReader::readWindowResampled( const std::vector<int> &b
   int level = overviewLevel;
   if ( policy == OverviewPolicy::Nearest && level == 0 )
     level = selectOverview( effectiveBands.front(), dstWidth, dstHeight, OverviewPolicy::Nearest );
-
-  GDALRasterBandH readBand = firstBand;
-  if ( level > 0 )
+  if ( level > 0 && GDALGetOverview( firstBand, level - 1 ) == nullptr )
   {
-    readBand = GDALGetOverview( firstBand, level - 1 );
-    if ( readBand == nullptr )
-    {
-      Json::Value details;
-      details["level"] = level;
-      details["overview_count"] = GDALGetOverviewCount( firstBand );
-      throw GeoError( ErrorCode::Unsupported, "readWindowResampled: overview level does not exist", details );
-    }
+    Json::Value details;
+    details["level"] = level;
+    details["overview_count"] = GDALGetOverviewCount( firstBand );
+    throw GeoError( ErrorCode::Unsupported, "readWindowResampled: overview level does not exist", details );
   }
 
   GDALRIOResampleAlg alg = GRIORA_NearestNeighbour;
@@ -518,9 +520,16 @@ std::vector<double> RasterReader::readWindowResampled( const std::vector<int> &b
   QuietCplErrors quiet;
   for ( std::size_t b = 0; b < effectiveBands.size(); ++b )
   {
-    GDALRasterBandH band = effectiveBands[b] == effectiveBands.front()
-                              ? readBand
-                              : GDALGetRasterBand( dataset, effectiveBands[b] );
+    // Every band reads from ITS OWN overview at the requested level —
+    // mixing an overview band with native bands would give systematically
+    // different grids across bands of the same request.
+    GDALRasterBandH band = GDALGetRasterBand( dataset, effectiveBands[b] );
+    if ( level > 0 && band != nullptr )
+    {
+      GDALRasterBandH overview = GDALGetOverview( band, level - 1 );
+      if ( overview != nullptr )
+        band = overview;
+    }
     if ( band == nullptr )
       throw GeoError( ErrorCode::InvalidArgument, "readWindowResampled: band out of range" );
     requireRealDataType( band, effectiveBands[b] );

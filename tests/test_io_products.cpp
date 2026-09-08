@@ -44,10 +44,10 @@ TEST_CASE( "Landsat MTL parsing extracts sensor, dates, cloud and scaling", "[io
   GROUP = PRODUCT_CONTENTS
     LANDSAT_PRODUCT_ID = "LC08_L2SP_126052_20260801_20260809_02_T1"
   END_GROUP = PRODUCT_CONTENTS
-  GROUP = LEVEL1_SURFACE_REFLECTANCE
+  GROUP = LEVEL2_SURFACE_REFLECTANCE
     REFLECTANCE_MULT_BAND_1 = 2.75e-05
     CLOUD_COVER = 7.0
-  END_GROUP = LEVEL1_SURFACE_REFLECTANCE
+  END_GROUP = LEVEL2_SURFACE_REFLECTANCE
   GROUP = IMAGE_ATTRIBUTES
     SPACECRAFT_ID = "LANDSAT_8"
     SENSOR_ID = "OLI_TIRS"
@@ -67,7 +67,10 @@ END_GROUP = LANDSAT_METADATA_FILE
   CHECK( product.acquisitionTime == "2026-08-01T02:45:12.1234560Z" );
   CHECK( product.hasCloudCover );
   CHECK( product.cloudCover == Approx( 7.0 ) );
-  CHECK( product.radiometricState == "toa_reflectance" );
+  // Collection-2 Level-2 scene: the LEVEL2_SURFACE_REFLECTANCE group makes
+  // this SURFACE reflectance even though REFLECTANCE_MULT_BAND_1 is present
+  // (the regression that mislabeled L2 products as TOA).
+  CHECK( product.radiometricState == "surface_reflectance" );
   CHECK( product.modality == "optical" );
 
   // Canonical enrichment respects existing values.
@@ -78,8 +81,8 @@ END_GROUP = LANDSAT_METADATA_FILE
   CHECK( canonical.platform == "LANDSAT_8" );
   CHECK( canonical.hasCloudCover );
 
-  CHECK( sicnu::geo::productBandRole( sicnu::geo::ProductKind::LandsatMtl, "B4" ) == "Red" );
-  CHECK( sicnu::geo::productBandRole( sicnu::geo::ProductKind::LandsatMtl, "B10" ) == "Thermal" );
+  CHECK( sicnu::geo::productBandRole( sicnu::geo::ProductKind::LandsatMtl, "B4" ) == "red" );
+  CHECK( sicnu::geo::productBandRole( sicnu::geo::ProductKind::LandsatMtl, "B10" ) == "thermal" );
   double wavelength = 0.0;
   CHECK( sicnu::geo::productBandWavelengthNm( sicnu::geo::ProductKind::LandsatMtl, "B5", wavelength ) );
   CHECK( wavelength == Approx( 865.0 ) );
@@ -105,8 +108,8 @@ TEST_CASE( "Sentinel-2 SAFE product XML extracts processing level and cloud", "[
   CHECK( product.numericScale == Approx( 10000.0 ) );
   CHECK( product.hasCloudCover );
   CHECK( product.cloudCover == Approx( 23.4 ) );
-  CHECK( sicnu::geo::productBandRole( sicnu::geo::ProductKind::Sentinel2Safe, "B8A" ) == "NarrowNIR" );
-  CHECK( sicnu::geo::productBandRole( sicnu::geo::ProductKind::Sentinel2Safe, "B12" ) == "SWIR2" );
+  CHECK( sicnu::geo::productBandRole( sicnu::geo::ProductKind::Sentinel2Safe, "B8A" ) == "narrow_nir" );
+  CHECK( sicnu::geo::productBandRole( sicnu::geo::ProductKind::Sentinel2Safe, "B12" ) == "swir2" );
 }
 
 TEST_CASE( "Sentinel-1 manifest extracts polarizations and orbit", "[io][products][sentinel1]" )

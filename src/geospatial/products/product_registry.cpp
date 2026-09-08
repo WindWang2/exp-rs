@@ -180,7 +180,7 @@ std::string upperOf( const std::string &text )
 }
 
 /// Landsat Collection band-role classification by file name.
-ProductAsset landsatAssetFromName( const std::string &path, ProductKind kind )
+ProductAsset landsatAssetFromName( const std::string &path, const std::string &sensorId )
 {
   ProductAsset asset;
   asset.path = path;
@@ -197,7 +197,7 @@ ProductAsset landsatAssetFromName( const std::string &path, ProductKind kind )
     {
       asset.role = "mask";
       asset.nativeBandName = stem;
-      asset.bandRole = productBandRole( kind, "QA" );
+      asset.bandRole = productLandsatBandRole( sensorId, "QA" );
       return asset;
     }
     // Surface temperature (Collection 2: *_ST_B10.TIF) — the thermal band.
@@ -205,7 +205,7 @@ ProductAsset landsatAssetFromName( const std::string &path, ProductKind kind )
     {
       asset.role = "measurement";
       asset.nativeBandName = stem;
-      asset.bandRole = productBandRole( kind, "B10" );
+      asset.bandRole = productLandsatBandRole( sensorId, "B10" );
       return asset;
     }
     // Optical/pan bands: *_B1.._B11
@@ -215,7 +215,7 @@ ProductAsset landsatAssetFromName( const std::string &path, ProductKind kind )
       const std::string bandName = stem.substr( bandUnderscore + 1 );
       asset.role = "measurement";
       asset.nativeBandName = bandName;
-      asset.bandRole = productBandRole( kind, bandName );
+      asset.bandRole = productLandsatBandRole( sensorId, bandName );
       return asset;
     }
   }
@@ -351,6 +351,8 @@ class LandsatAdapter final : public ProductAdapter
         result.missingConstituents.push_back( baseNameOf( mtlPath ) + " (unparseable)" );
         return result;
       }
+      const std::string sensorId =
+        keys.count( "SENSOR_ID" ) ? keys.at( "SENSOR_ID" ) : std::string();
 
       // Version honesty: a declared collection we do not understand is
       // reported as UnsupportedVersion, never silently parsed as v1/v2.
@@ -384,7 +386,7 @@ class LandsatAdapter final : public ProductAdapter
           missing.push_back( fileName );
           continue;
         }
-        ProductAsset asset = landsatAssetFromName( fullPath, ProductKind::LandsatMtl );
+        ProductAsset asset = landsatAssetFromName( fullPath, sensorId );
         if ( asset.role == "measurement" || asset.role == "mask" )
         {
           double wavelength = 0.0;
@@ -431,8 +433,10 @@ class Sentinel2Adapter final : public ProductAdapter
       const std::string upper = upperOf( path );
       if ( upper.find( "MTD_MSIL1C" ) != std::string::npos || upper.find( "MTD_MSIL2A" ) != std::string::npos )
         return true;
+      // A manifest.safe alone is claimed by whichever SAR/optic family the
+      // scene id names — a bare "MANIFEST.SAFE" must not claim S1 products.
       if ( upper.find( "MANIFEST.SAFE" ) != std::string::npos )
-        return true;
+        return upper.find( "S1" ) == std::string::npos && upper.find( "S3" ) == std::string::npos;
       if ( upper.find( ".SAFE" ) != std::string::npos && upper.find( "MSI" ) != std::string::npos )
         return true;
       if ( isDirectoryLocal( path ) && isDirectoryLocal( joinPath( path, "GRANULE" ) ) )
@@ -448,7 +452,21 @@ class Sentinel2Adapter final : public ProductAdapter
 
       std::string root = path;
       if ( !isDirectoryLocal( root ) )
-        root = parentOf( parentOf( root ) ); // MTD_*/granule path → product root
+      {
+        // MTD/granule-file input: climb to the .SAFE root (manifest lives
+        // there), bounded — never a fixed two-parent jump.
+        std::string candidate = parentOf( path );
+        for ( int hops = 0; hops < 4 && !candidate.empty(); ++hops )
+        {
+          if ( upperOf( baseNameOf( candidate ) ).find( ".SAFE" ) != std::string::npos ||
+               isDirectoryLocal( joinPath( candidate, "GRANULE" ) ) )
+          {
+            root = candidate;
+            break;
+          }
+          candidate = parentOf( candidate );
+        }
+      }
 
       const std::string granuleRoot = joinPath( root, "GRANULE" );
       const bool hasManifest = existsLocal( joinPath( root, "manifest.safe" ) );
@@ -465,10 +483,17 @@ class Sentinel2Adapter final : public ProductAdapter
       }
       result.productId = baseNameOf( root );
 
-      // Declared product metadata files present?
-      std::vector<std::string> missing;
-      if ( !hasManifest )
-        missing.push_back( "manifest.safe" );
+      // The product-level MTD is a core constituent: a SAFE whose MTD is
+      // missing/unreadable is PartialReadable even when granules look fine.
+      bool hasMtd = false;
+      for ( const char *mtdName : { "MTD_MSIL1C.xml", "MTD_MSIL2A.xml" } )
+      {
+        if ( existsLocal( joinPath( root, mtdName ) ) )
+        {
+          hasMtd = true;
+          break;
+        }
+      }
 
       int measurementCount = 0;
       if ( hasGranules )
@@ -529,13 +554,15 @@ class Sentinel2Adapter final : public ProductAdapter
         }
       }
 
-      if ( !hasManifest || measurementCount == 0 )
+      if ( !hasManifest || measurementCount == 0 || !hasMtd )
       {
         result.completeness = measurementCount == 0 && !hasManifest
                                 ? ProductCompleteness::Invalid
                                 : ProductCompleteness::PartialReadable;
         if ( !hasManifest )
           result.missingConstituents.push_back( "manifest.safe" );
+        if ( !hasMtd )
+          result.missingConstituents.push_back( "MTD_MSIL1C/2A.xml" );
         if ( measurementCount == 0 )
         {
           result.missingConstituents.push_back( "GRANULE/*/IMG_DATA measurements" );

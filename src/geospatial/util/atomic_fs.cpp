@@ -89,7 +89,7 @@ std::string stagedPathFor( const std::string &targetPath )
   static const int kMaxAttempts = 64;
   for ( int attempt = 0; attempt < kMaxAttempts; ++attempt )
   {
-    const std::string staged = u8( directory ) + "\\" + stem + "." + std::to_string( stagingCounter()++ )
+    const std::string staged = u8( directory ) + "/" + stem + "." + std::to_string( stagingCounter()++ )
                                  + "." + std::to_string( ::rand() ) + ".tmp" + extension;
     if ( !fileExists( staged ) )
       return staged;
@@ -157,6 +157,15 @@ void publishStagedFile( const std::string &stagedPath, const std::string &target
 #endif
 }
 
+/// Renames a file within the same directory (backup moves). Quiet: false on
+/// any failure.
+bool moveFileQuiet( const std::string &from, const std::string &to )
+{
+  std::error_code ec;
+  fs::rename( fs::u8path( from ), fs::u8path( to ), ec );
+  return !ec;
+}
+
 bool removeFileQuiet( const std::string &path )
 {
   if ( !fileExists( path ) )
@@ -205,7 +214,11 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
   if ( !fileExists( stagedMainPath ) )
     throw GeoError( ErrorCode::IoError, "group publish: staged main file missing: " + stagedMainPath );
 
-  // Snapshot existing targets so a mid-publish failure can restore them.
+  // Snapshot existing targets so a mid-publish failure can RESTORE the
+  // previous good group: each existing member moves aside to a backup name
+  // first; cleanup restores backups for replaced members and removes only
+  // newly-created ones (a stale sidecar is recoverable; a deleted
+  // pre-existing sidecar referenced by the old main file is not).
   const std::vector<std::string> stagedSidecars = sidecarsFor( stagedMainPath );
   const std::vector<std::string> targetSidecars = sidecarsFor( targetMainPath );
   std::vector<bool> hadTarget( targetSidecars.size(), false );
@@ -213,6 +226,19 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
   auto cleanup = [ & ]( const std::string &failedName ) {
     for ( const std::string &done : published )
       removeFileQuiet( done );
+    // Restore every backed-up member (the previous good group)...
+    for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
+    {
+      const std::string backup = targetSidecars[i] + ".bak";
+      if ( hadTarget[i] && fileExists( backup ) )
+      {
+        removeFileQuiet( targetSidecars[i] );
+        moveFileQuiet( backup, targetSidecars[i] );
+      }
+    }
+    // ...then drop any leftover backup copies.
+    for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
+      removeFileQuiet( targetSidecars[i] + ".bak" );
     Json::Value details;
     details["failed_member"] = failedName;
     throw GeoError( ErrorCode::IoError, "group publish failed at " + failedName + "; target group rolled back", details );
@@ -225,6 +251,13 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     if ( !fileExists( stagedSidecars[i] ) )
       continue;
     hadTarget[i] = fileExists( targetSidecars[i] );
+    if ( hadTarget[i] )
+    {
+      const std::string backup = targetSidecars[i] + ".bak";
+      removeFileQuiet( backup );
+      if ( !moveFileQuiet( targetSidecars[i], backup ) )
+        cleanup( targetSidecars[i] ); // cannot protect the old member: refuse
+    }
     try
     {
       publishStagedFile( stagedSidecars[i], targetSidecars[i] );
@@ -239,10 +272,13 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
   {
     publishStagedFile( stagedMainPath, targetMainPath );
   }
-  catch ( const GeoError &error )
+  catch ( const GeoError & )
   {
     cleanup( targetMainPath );
   }
+  // Success: drop the backup set.
+  for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
+    removeFileQuiet( targetSidecars[i] + ".bak" );
 }
 
 void writeFileAtomic( const std::string &targetPath, const std::function<void( const std::string &stagedPath )> &writer )

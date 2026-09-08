@@ -8,6 +8,8 @@
 
 #include "geospatial/vector/vector_reader.h"
 
+#include <cpl_error.h>
+
 #include "geospatial/gdal_guard.h"
 
 #include <gdal.h>
@@ -200,6 +202,12 @@ bool VectorReader::nextBatch( std::vector<VectorFeature> &out, std::size_t maxFe
     OGRFeatureH feature = OGR_L_GetNextFeature( layer );
     if ( !feature )
     {
+      // NULL means end-of-stream OR a mid-iteration driver error; the two
+      // must never be conflated (a partial stream is not a complete one).
+      if ( CPLGetLastErrorType() == CE_Failure || CPLGetLastErrorType() == CE_Fatal )
+        throw GeoError( ErrorCode::IoError,
+                        "nextBatch: feature iteration failed",
+                        Json::Value( CPLGetLastErrorMsg() ? CPLGetLastErrorMsg() : "" ) );
       mStreamExhausted = true;
       return taken > 0;
     }

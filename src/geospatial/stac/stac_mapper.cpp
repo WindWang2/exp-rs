@@ -202,7 +202,7 @@ Json::Value StacItem::toJson() const
   if ( hasGsd )
     properties["gsd"] = gsd;
   if ( !epsg.empty() && epsg.rfind( "EPSG:", 0 ) == 0 )
-    properties["proj:epsg"] = std::atoi( epsg.c_str() + 5 );
+    properties["proj:epsg"] = std::strtol( epsg.c_str() + 5 );
   if ( !polarizations.empty() )
   {
     Json::Value pols( Json::arrayValue );
@@ -354,10 +354,7 @@ Json::Value canonicalToStacItem( const RasterMetadata &metadata, const std::stri
     item.geometry["type"] = "Polygon";
     item.geometry["coordinates"] = coordinates;
   }
-  else if ( metadata.hasGsd )
-  {
-    item.hasGsd = true;
-  }
+
 
   // eo:bands are carried separately and merged after model serialization.
   Json::Value eoBands( Json::arrayValue );

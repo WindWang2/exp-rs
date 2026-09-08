@@ -96,6 +96,13 @@ void enrichWithProductMetadata( RasterMetadata &canonical, const ProductMetadata
 /// Returns "" for unknown names; the vocabulary mirrors src/data/band_role.h.
 std::string productBandRole( ProductKind kind, const std::string &bandName );
 
+/// Landsat band role honoring the MTL SENSOR_ID: OLI/OLI_TIRS (Landsat 8/9)
+/// and TM/ETM+ (Landsat 4-7) have different band assignments (B1 coastal vs
+/// blue, B6 SWIR vs thermal). An unknown SENSOR_ID defaults to the OLI
+/// layout (the current constellation) — a documented default, not a fact
+/// about the scene.
+std::string productLandsatBandRole( const std::string &sensorId, const std::string &bandName );
+
 /// Center wavelength (nm) for a product band name; false when unknown.
 bool productBandWavelengthNm( ProductKind kind, const std::string &bandName, double &wavelengthNm );
 

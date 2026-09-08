@@ -53,8 +53,9 @@ Proven by: `tests/test_io_remote_range.cpp`.
 2. Select a variable; fix every non-spatial dimension by name except time.
 3. `readTemporalOrLevelSlice(variable, "time", index, maxCells)` — the slice
    is bounded by the cell budget and returns an explicit rows×cols grid.
-4. CF honesty: time coordinates come from the indexing variable when
-   declared; otherwise the axis stays "unlabeled indices" — never invented.
+4. CF honesty: axes without a readable coordinate variable stay "unlabeled
+   indices" — the layer never invents timestamps (declared units are
+   carried; coordinate-value matching is a documented follow-up).
 
 Proven by: `tests/test_io_multidim.cpp` (driver-gated).
 

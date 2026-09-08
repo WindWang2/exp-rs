@@ -116,6 +116,9 @@ RemoteProbeResult probeRemote( const std::string &url, const RemoteProbeOptions 
 
   RemoteProbeResult probe;
   probe.httpStatus = result->nStatus;
+  // effectiveUrl stays empty: this GDAL build's CPLHTTPResult does not
+  // expose the post-redirect URL; the field is reserved for transports that
+  // do. Redaction is applied by consumers via ResourceUri::display().
 
   // Response headers: subset only, never request credentials.
   const char *lastError = result->pszErrBuf != nullptr ? result->pszErrBuf : CPLGetLastErrorMsg();
@@ -170,7 +173,6 @@ RemoteProbeResult probeRemote( const std::string &url, const RemoteProbeOptions 
   }
 
   const bool fetched = result->pabyData != nullptr && result->nDataLen > 0;
-  const std::size_t fetchedBytes = fetched ? result->nDataLen : 0;
   CPLHTTPDestroyResult( result );
 
   if ( timedOut )
@@ -180,14 +182,16 @@ RemoteProbeResult probeRemote( const std::string &url, const RemoteProbeOptions 
   probe.reachable = fetched || probe.httpStatus > 0 || declaredLength;
   if ( !probe.reachable )
     throw GeoError( ErrorCode::NetworkError, "probeRemote: no usable answer from origin: " + uri.display() );
+  // 404/410 must be tested BEFORE the generic >=400 branch, or the
+  // documented NotFound mapping is unreachable.
+  if ( probe.httpStatus == 404 || probe.httpStatus == 410 )
+    throw GeoError( ErrorCode::NotFound, "probeRemote: remote resource is gone: " + uri.display() );
   if ( probe.httpStatus >= 400 )
   {
     Json::Value details;
     details["status"] = probe.httpStatus;
     throw GeoError( ErrorCode::NetworkError, "probeRemote: remote origin reported an error: " + uri.display(), details );
   }
-  if ( probe.httpStatus == 404 || probe.httpStatus == 410 )
-    throw GeoError( ErrorCode::NotFound, "probeRemote: remote resource is gone: " + uri.display() );
   if ( !fetched && declaredLength && declaredLengthBytes == 0 )
   {
     // No status code exposed by this GDAL build, but an empty declared
@@ -196,9 +200,11 @@ RemoteProbeResult probeRemote( const std::string &url, const RemoteProbeOptions 
     throw GeoError( ErrorCode::NetworkError, "probeRemote: remote origin reported an error: " + uri.display() );
   }
 
-  // Ranged answer honored → the byte budget held (bounded fetch, ADR 0139).
-  if ( rangeRewritten || ( fetched && fetchedBytes <= probeBytes ) )
-    probe.acceptsRanges = true;
+  // Range support comes from a rewritten Content-Range (a real 206) or the
+  // explicit Accept-Ranges header — already parsed above. A truncated 200
+  // from a range-ignoring origin must NOT be read as range support (the
+  // dropped heuristic "fetched <= probeBytes" would bless exactly that
+  // origin).
   if ( declaredLength )
   {
     probe.hasSize = true;

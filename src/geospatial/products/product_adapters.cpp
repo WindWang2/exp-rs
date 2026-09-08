@@ -139,9 +139,36 @@ ProductMetadata readLandsatMtl( const std::string &path )
     if ( values.count( "UTM_ZONE" ) )
       product.crsHint += " zone " + values.at( "UTM_ZONE" );
   }
-  const auto reflIt = values.find( "REFLECTANCE_MULT_BAND_1" );
-  if ( reflIt != values.end() )
+
+  // Radiometric state, from the MTL's own group structure: Collection-2
+  // Level-2 MTLs carry REFLECTANCE_MULT_BAND_1 too (inside the
+  // LEVEL2_SURFACE_REFLECTANCE group), so its presence alone cannot
+  // distinguish TOA from surface reflectance.
+  const bool hasLevel2Group = values.count( "LEVEL2_SURFACE_REFLECTANCE" ) > 0 ||
+                              values.count( "FILE_NAME_SURFACE_REFLECTANCE" ) > 0 ||
+                              values.count( "FILE_NAME_ST_B10" ) > 0;
+  const bool l2Product = values.count( "COLLECTION_CATEGORY" ) &&
+                         values.at( "COLLECTION_CATEGORY" ).find( "L2" ) != std::string::npos;
+  if ( hasLevel2Group || l2Product )
+    product.radiometricState = "surface_reflectance";
+  else if ( values.count( "REFLECTANCE_MULT_BAND_1" ) )
     product.radiometricState = "toa_reflectance";
+
+  // Declared rescaling constants are REPORTED, never applied (ADR 0137):
+  // carry the band-1 reflectance/radiance rescaling factors as declared
+  // values so calibration consumers can apply them deliberately.
+  static const char *const kRadiometricKeys[] = {
+    "REFLECTANCE_MULT_BAND_1", "REFLECTANCE_ADD_BAND_1",
+    "RADIANCE_MULT_BAND_1", "RADIANCE_ADD_BAND_1",
+    "TEMPERATURE_MULT_BAND_ST_B10", "TEMPERATURE_ADD_BAND_ST_B10",
+    "SUN_ELEVATION", "EARTH_SUN_DISTANCE",
+  };
+  for ( const char *key : kRadiometricKeys )
+  {
+    const auto it = values.find( key );
+    if ( it != values.end() && product.extra.size() < 16 )
+      product.extra.emplace_back( key, it->second );
+  }
   return product;
 }
 
@@ -250,6 +277,17 @@ ProductMetadata readSentinel2( const std::string &path )
   ProductMetadata product;
   // Platform from the directory/zip name (S2A_..._T... → SENTINEL-2A).
   const std::string upper = upperAscii( base );
+  // Guard the fabrication path: this reader must never stamp optical
+  // semantics onto an unknown sidecar. If no S2 product metadata can be
+  // located, refuse — the caller sees a structured error instead of an
+  // invented record.
+  if ( !looksLikeSentinel2Directory( path ) &&
+       upper.find( "MTD_MSIL1C" ) == std::string::npos &&
+       upper.find( "MTD_MSIL2A" ) == std::string::npos )
+  {
+    throw GeoError( ErrorCode::UnsupportedProduct,
+                    "Sentinel-2 adapter requires the .SAFE directory or its MTD_MSIL*.xml" );
+  }
   if ( upper.find( "S2A_" ) != std::string::npos )
     product.platform = "SENTINEL-2A";
   else if ( upper.find( "S2B_" ) != std::string::npos )
@@ -259,9 +297,12 @@ ProductMetadata readSentinel2( const std::string &path )
 
   const bool isL2A = upper.find( "MSIL2A" ) != std::string::npos || upper.find( "_L2A_" ) != std::string::npos
                       || upper.find( "MTD_MSIL2A" ) != std::string::npos;
+  // Filename-derived values are HINTS; the MTD XML overrides them when it
+  // declares the product type and quantification (authoritative sidecar
+  // wins — the foundation's no-fabrication contract).
   product.processingLevel = isL2A ? "Level-2A" : "Level-1C";
   product.radiometricState = isL2A ? "surface_reflectance" : "toa_reflectance";
-  product.numericScale = isL2A ? 10000.0 : 10000.0;
+  product.numericScale = 10000.0;
   product.modality = "optical";
   product.sensor = "MSI";
 
@@ -269,7 +310,34 @@ ProductMetadata readSentinel2( const std::string &path )
   {
     const XmlScan scan = scanXml( mtdPath,
                                   { "product_start_time", "cloud_coverage_assessment", "productive_centre",
-                                    "sensing_time", "cloudy_pixel_percentage" } );
+                                    "sensing_time", "cloudy_pixel_percentage", "product_type",
+                                    "quantification_values_max", "boa_quantification" } );
+    const std::string productType = scanValue( scan, "product_type" );
+    if ( !productType.empty() )
+    {
+      // e.g. "S2MSI2A" → Level-2A surface reflectance
+      if ( productType.find( "2A" ) != std::string::npos )
+      {
+        product.processingLevel = "Level-2A";
+        product.radiometricState = "surface_reflectance";
+      }
+      else if ( productType.find( "1C" ) != std::string::npos )
+      {
+        product.processingLevel = "Level-1C";
+        product.radiometricState = "toa_reflectance";
+      }
+    }
+    const std::string quantification = scanValue( scan, "boa_quantification" );
+    const std::string quantificationFallback = scanValue( scan, "quantification_values_max" );
+    const std::string &declared = !quantification.empty() ? quantification : quantificationFallback;
+    if ( !declared.empty() )
+    {
+      try
+      {
+        product.numericScale = std::stod( declared );
+      }
+      catch ( const std::exception & ) { /* unparseable declared value stays default-hinted */ }
+    }
     std::string startTime = scanValue( scan, "product_start_time" );
     if ( startTime.empty() )
       startTime = scanValue( scan, "sensing_time" );
@@ -363,9 +431,13 @@ ProductMetadata readModis( const std::string &path )
   product.modality = "optical";
   product.sensor = "MODIS";
   const std::string upper = upperAscii( path );
-  if ( upper.find( "MOD0" ) != std::string::npos || upper.find( "MYD0" ) != std::string::npos )
-    product.platform = upper.find( "MYD" ) != std::string::npos ? "TERRA/AQUA" : "TERRA";
-  product.processingLevel = "L2";
+  // MOD/MYD prefixes identify the satellite (Terra/Aqua); the processing
+  // level is NOT declared by the file name and stays absent unless a real
+  // sidecar declares it.
+  if ( upper.find( "MYD" ) != std::string::npos )
+    product.platform = "AQUA";
+  else if ( upper.find( "MOD" ) != std::string::npos )
+    product.platform = "TERRA";
   return product;
 }
 
@@ -384,7 +456,7 @@ const BandRoleMapping kSentinel2Bands[] = {
   { "B01", "coastal", 443.0 }, { "B02", "blue", 490.0 }, { "B03", "green", 560.0 },
   { "B04", "red", 665.0 }, { "B05", "red_edge", 705.0 }, { "B06", "red_edge", 740.0 },
   { "B07", "red_edge", 783.0 }, { "B08", "nir", 842.0 }, { "B8A", "narrow_nir", 865.0 },
-  { "B09", "nir", 945.0 }, { "B10", "cirrus", 1375.0 }, { "B11", "swir1", 1610.0 },
+  { "B09", "", 945.0 }, { "B10", "cirrus", 1375.0 }, { "B11", "swir1", 1610.0 },
   { "B12", "swir2", 2190.0 }, { "SCL", "scene_classification", 0.0 },
   { "VV", "vv", 0.0 }, { "VH", "vh", 0.0 }, { "HH", "hh", 0.0 }, { "HV", "hv", 0.0 },
 };
@@ -394,6 +466,15 @@ const BandRoleMapping kLandsatBands[] = {
   { "B4", "red", 655.0 }, { "B5", "nir", 865.0 }, { "B6", "swir1", 1610.0 },
   { "B7", "swir2", 2200.0 }, { "B8", "panchromatic", 590.0 }, { "B9", "cirrus", 1375.0 },
   { "B10", "thermal", 10895.0 }, { "B11", "thermal", 12005.0 }, { "QA", "qa", 0.0 },
+};
+
+// Landsat 4-7 (TM / ETM+): B1 blue (not coastal), B6 thermal, B8 pan (ETM+
+// only). Used when the MTL SENSOR_ID says TM/ETM — an OLI table would
+// mislabel every legacy band.
+const BandRoleMapping kLandsatLegacyBands[] = {
+  { "B1", "blue", 485.0 }, { "B2", "green", 560.0 }, { "B3", "red", 660.0 },
+  { "B4", "nir", 835.0 }, { "B5", "swir1", 1650.0 }, { "B6", "thermal", 11450.0 },
+  { "B7", "swir2", 2215.0 }, { "B8", "panchromatic", 710.0 }, { "QA", "qa", 0.0 },
 };
 
 template <std::size_t N>
@@ -446,6 +527,13 @@ Json::Value ProductMetadata::toJson() const
   json["orbit_direction"] = orbitDirection;
   json["instrument_mode"] = instrumentMode;
   json["crs_hint"] = crsHint;
+  if ( !extra.empty() )
+  {
+    Json::Value extras( Json::objectValue );
+    for ( const auto &entry : extra )
+      extras[entry.first] = entry.second;
+    json["declared"] = extras; // verbatim sidecar values, reported never applied
+  }
   return json;
 }
 
@@ -587,7 +675,24 @@ std::string productBandRole( ProductKind kind, const std::string &bandName )
     const BandRoleMapping *mapping = findBand( kLandsatBands, bandName );
     return mapping ? mapping->role : std::string();
   }
+  if ( kind == ProductKind::Sentinel1Safe )
+  {
+    // SAR polarizations share the canonical string vocabulary; wavelength
+    // is meaningless and stays unset.
+    const BandRoleMapping *mapping = findBand( kSentinel2Bands, bandName );
+    return mapping && mapping->wavelengthNm <= 0.0 ? mapping->role : std::string();
+  }
   return std::string();
+}
+
+std::string productLandsatBandRole( const std::string &sensorId, const std::string &bandName )
+{
+  const std::string upper = upperAscii( sensorId );
+  const BandRoleMapping *table = kLandsatBands;
+  if ( upper.find( "ETM" ) != std::string::npos || upper.find( "TM" ) != std::string::npos )
+    table = kLandsatLegacyBands; // TM/ETM+ layout (an unknown sensor keeps OLI)
+  const BandRoleMapping *mapping = findBand( *table, bandName );
+  return mapping ? mapping->role : std::string();
 }
 
 bool productBandWavelengthNm( ProductKind kind, const std::string &bandName, double &wavelengthNm )

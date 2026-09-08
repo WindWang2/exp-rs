@@ -37,6 +37,19 @@ sicnu::geo::ErrorCode mapGeoCode( sicnu::geo::ErrorCode code )
     case G::Unsupported: return RSOperatorError::ErrorCode::GdalError;
     case G::Cancelled: return RSOperatorError::ErrorCode::Cancelled;
     case G::IoError: return RSOperatorError::ErrorCode::FileNotWritable;
+    // Foundation 5.0 additions (ADR 0141) — mapped so remote/corruption/
+    // budget failures keep their meaning at the operator boundary instead
+    // of collapsing into Unknown.
+    case G::NotFound: return RSOperatorError::ErrorCode::FileNotFound;
+    case G::PermissionDenied: return RSOperatorError::ErrorCode::FileNotReadable;
+    case G::UnsupportedFormat: return RSOperatorError::ErrorCode::InvalidInputData;
+    case G::UnsupportedProduct: return RSOperatorError::ErrorCode::InvalidInputData;
+    case G::InvalidMetadata: return RSOperatorError::ErrorCode::InvalidInputData;
+    case G::CorruptData: return RSOperatorError::ErrorCode::InvalidInputData;
+    case G::NetworkError: return RSOperatorError::ErrorCode::GdalError;
+    case G::Timeout: return RSOperatorError::ErrorCode::ExternalProcessTimeout;
+    case G::ResourceExhausted: return RSOperatorError::ErrorCode::OutOfRange;
+    case G::Incompatible: return RSOperatorError::ErrorCode::InvalidInputData;
   }
   return RSOperatorError::ErrorCode::Unknown;
 }

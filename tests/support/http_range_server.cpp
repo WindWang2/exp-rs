@@ -18,13 +18,11 @@ namespace sicnu::geo::testsupport
 void initializeSockets()
 {
 #ifdef _WIN32
-  static bool initialized = false;
-  if ( !initialized )
-  {
+  static std::once_flag flag;
+  std::call_once( flag, [] {
     WSADATA data;
     WSAStartup( MAKEWORD( 2, 2 ), &data );
-    initialized = true;
-  }
+  } );
 #endif
 }
 
@@ -162,6 +160,8 @@ void HttpRangeServer::handleConnection( SocketHandle client )
       try
       {
         rangeStart = std::stoll( rangeHeader.substr( eq + 1, dash - eq - 1 ) );
+        if ( rangeStart < 0 )
+          rangeStart = 0; // reject suffix ranges ("bytes=-N") — out-of-bounds reads
         const std::string endText = rangeHeader.substr( dash + 1 );
         if ( !endText.empty() )
           rangeEnd = std::stoll( endText );

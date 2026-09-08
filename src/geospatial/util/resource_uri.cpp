@@ -522,6 +522,17 @@ std::string ResourceUri::canonical() const
 
 std::string ResourceUri::display() const
 {
+  if ( kind == ResourceKind::VsiRemote )
+  {
+    // A VSI payload may carry credentials in an embedded URL
+    // ("/vsicurl/https://user:pass@host/…") — redact it like RemoteHttp.
+    const std::string inner = remoteUrl();
+    if ( startsWithIgnoreCase( inner, "http://" ) || startsWithIgnoreCase( inner, "https://" ) )
+    {
+      const ResourceUri embedded = ResourceUri::parse( inner );
+      return vsiPrefix + "/" + embedded.display();
+    }
+  }
   if ( kind != ResourceKind::RemoteHttp )
     return canonical();
 
