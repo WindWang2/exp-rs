@@ -1627,6 +1627,29 @@ sicnu_add_test(test_vector_properties)
 # Layer tree bridge tests
 sicnu_add_test(test_layer_tree_bridge)
 
+# Workbench 5.0 — layer state-sync contract (Milestone E)
+add_executable(test_layer_sync_contract
+  test_layer_sync_contract.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_layer_sync_contract PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_layer_sync_contract PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_layer_sync_contract PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_layer_sync_contract)
+
 # Change detection tests
 add_executable(test_change_detection test_change_detection.cpp)
 target_link_libraries(test_change_detection PRIVATE
