@@ -4,77 +4,67 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - 2026-09-08
 
-### 🗺️ Solution Template, Recipe & Cartography Knowledge Platform 5.0 (goal series)
+### 🛰️ Remote Sensing I/O, Sensor Product & Interoperability Foundation 5.0 (goal series, ADR 0134–0141)
 
-The 4.0 design system (tokens / components / templates / MapSpec 2.0) becomes a
-**task-level knowledge platform**: a remote-sensing task semantic resolves to a
-validated SolutionTemplate binding an AnalysisRecipe + StyleSpec + MapSpec +
-ReportSpec, consumed identically by the UI, CLI and Pi agent.
+Extends the I/O Foundation 4.0 core (`src/geospatial`, Qt-free) with the
+resource URI model, the probe contract, per-dataset capabilities, the sensor
+product registry, bounded remote access and the Pi/CLI surfaces. All
+foundational contracts (canonical metadata, CRS policy, windowed raster /
+batched vector I/O, atomic publication, COG presets + validator, STAC Item
+mapping, multidim slices, certified format profiles) land on the current
+master baseline.
 
-- **Five-layer knowledge model**: DesignToken → Component → StylePattern →
-  Map/ReportTemplate → AnalysisRecipe/SolutionTemplate. New catalogs:
-  `data/cartography/styles/` (17 semantic StyleSpecs) and
-  `data/agent/solutions/` (44 solution templates across 18 task families).
-- **StyleSpec declarative symbology**: closed renderer vocabulary (raster:
-  gray/pseudocolor/paletted/multiband; vector: simple/categorized/graduated/
-  rule-based), class palettes bound to token sets through now-resolved
-  `token:` references (closes the 4.0 unparsed-leak), labels/halo/scale
-  visibility/opacity/blend; `style_compiler` maps specs onto QGIS renderer
-  primitives only — QGIS stays the rendering truth. `style:list/describe/apply`
-  tools.
-- **MapSpec 3.0 (strict superset of v2)**: bounded conditional visibility
-  (`visible_if`/`content_if`/`page_if` — a validated expression grammar with
-  unknown-path=error semantics; unevaluable conditions never hide content),
-  relative placement constraints (`below/above/left_of/right_of/inside/
-  keep_with/avoid_overlap/fit_content`) in the deterministic composition
-  solver, locator extent indicators compiled to QGIS map overviews
-  (outline/region/frame styles + caption), the full atlas surface (filter,
-  sort, margin fraction, filename/page-number expressions, feature variables),
-  page roles and per-item `style_ref`.
-- **Recipe Library 5.0**: 75 recipes (5 → 75) covering the operator registry
-  end-to-end — optical indices, flood (optical/SAR/fused), water dynamics,
-  SAR change (log-ratio/ratio/dual-channel), temporal (phenology/harmonic/
-  trend/breakpoints/anomaly/composite), terrain products, classification/model
-  (kmeans/supervised/OBIA/inference/detect/accuracy/uncertainty),
-  preprocessing and QA. Extended intent vocabulary (5 → 27) with generalized
-  band-ratio preflight packs (NIR/Green/Blue/SWIR/red-edge windows).
-- **SolutionTemplate registry**: validation with cross-domain reference
-  resolvers, `extends` merge with cycle detection, aliases, deterministic
-  bounded facet search (task/modality/sensor/keyword/quality/family) with
-  ~440-char compact summaries; `solution:search/describe/validate/instantiate`
-  tools (instantiate = contract check → AgentPlan v2 → MapSpec draft with
-  condition context → token-resolved style refs).
-- **Template/Solution discovery**: `template:search/describe/validate/preview`
-  and `cartography:lint_catalog` (registry load problems, template structure,
-  solution references, style token resolution). Catalog index now covers
-  styles + solutions (drift-tested); gallery doc regenerated.
-- **Charts & tables**: real grouped bars with series legend; table family
-  (`table`/`summary_table`/`topn_table`) with a 64-row cap, deterministic
-  "+N more" overflow row, top-N sort/cap and elided long/CJK labels;
-  axes-free sparkline. Five new component descriptors.
-- **ReportSpec layer**: multi-page report templates (cover/map/statistics
-  pages with roles and `page_if`), A3 scientific figure page, 16:9 dark
-  briefing, A0 poster foundation, atlas appendix with per-feature tables and
-  provenance blocks.
-- **Preflight/repair 5.0**: `MAP_LOCATOR_MISMATCH`, `MAP_ATLAS_INCOMPLETE`,
-  `MAP_CONDITIONAL_CONTEXT_MISSING`, `MAP_CHART_OVERFLOW` (+ deterministic
-  `grow_chart` repair), `MAP_PAGE_BALANCE`, `MAP_MISSING_CRS_NOTE`; overlap
-  detection is page-aware. Visual regression matrix grows to 19 scenes
-  (atlas appendix, dark screen, A3/A0 formats, locator, conditional pruning,
-  long-English/CJK overflow, uncertainty, flood probability), each asserted
-  to repair-to-passed, render deterministically (SHA-256) and hold geometry
-  contracts.
-- **Scale gates in CI tests**: facet search <20 ms over the full catalog,
-  instantiate/compose/preflight <50 ms, repair convergence ≤5 passes,
-  bounded per-hit response size. Multi-page compile coverage.
-- **Fix**: restore the lost `workflow_run_coordinator.h` declarations from
-  #764 (`notifyRunStateLocked`, `runStateChanged` signal) that broke every
-  non-PCH build.
-- **Docs**: solution-authoring, style-spec-reference, recipe authoring (via
-  recipe facets), migration-mapspec-v3, atlas-guide; limitations rewritten to
-  the lifted/remaining truth; full docs-claim audit against code.
+- **Resource URI & identity (ADR 0135)**: one strict classifier for every
+  source string (local file/dir, directory product, http(s), VSI
+  remote/virtual, subdataset selector, virtual dataset, STAC asset,
+  in-memory); identity vs display — percent-decoded, credential-redacted
+  (`X-Amz-Signature`, tokens, userinfo) for logs/UI; `..`-traversal
+  containment in `resolveAgainst`; Windows drive/UNC/long-path/Unicode
+  (UTF-8) coverage (`test_io_uri`).
+- **Probe contract & capabilities (ADR 0136)**: `probeResource` pipeline
+  (URI → bounded signature → GDAL identify/open → product adapter → lazy
+  metadata); content outranks the file name; COG detection is structural;
+  typed failures (NotFound/OpenFailed/CorruptData);
+  `resolveDatasetCapabilities` answers what *this dataset* supports
+  (window/block/multiband/multidim/subdataset/georef/crs/nodata/mask/
+  overviews/remote-range/streaming/vector/attributes/transactions).
+- **Bounded raster access**: `blockSize`/`readBlock`, planned tile walks
+  (`planTileWalk`/`iterateTiles`) with per-tile cancellation, overview
+  introspection + explicit `OverviewPolicy` (Exact default — a silently
+  sampled overview is a wrong-answer factory), and `readWindowResampled` as
+  the only resampling entry point (caller-declared size/level/kernel,
+  upsampling refused).
+- **Sensor product adapters (ADR 0137)**: `ProductAdapterRegistry` (Landsat
+  MTL / Sentinel-2 SAFE / Sentinel-1 SAFE / MODIS / GenericRaster fallback)
+  enumerates constituents (measurements/masks/annotations/metadata/browse)
+  with native band names, canonical lowercase band roles (+ SAR vv/vh/hh/hv),
+  wavelengths and declared resolutions; Sentinel-2 resolution groups stay
+  distinct (no silent resample); typed completeness verdicts (Complete /
+  PartialReadable / Invalid / UnsupportedVersion) listing exactly what is
+  missing (`test_io_product_registry`).
+- **Multidimensional policy (ADR 0138)**: slices address dimensions by name
+  with a cell budget; CF honesty (unlabeled time axes stay unlabeled);
+  Zarr/GeoParquet capability-gated with explicit `unavailable_in_build` — no
+  new runtime dependency.
+- **Remote I/O (ADR 0139)**: bounded `probeRemote` (reachable/size/
+  range-capable) over CPL HTTP with timeout/retry/MAX_SIZE bounds and
+  credential-safe reporting; local HTTP range fixture with byte accounting +
+  failure injection proves a `/vsicurl/` window read stays far below the full
+  payload and that rangeless origins are detected before pixel access
+  (`test_io_remote_range`).
+- **I/O error model (ADR 0141)**: `GeoError` taxonomy extended (NotFound,
+  PermissionDenied, UnsupportedFormat/Product, InvalidMetadata, CorruptData,
+  NetworkError, Timeout, ResourceExhausted, Incompatible) with stable string
+  names and scoped CPL error hygiene.
+- **Surfaces**: CLI `data probe|capabilities|product describe|stac` joins
+  `inspect|doctor`; Pi/MCP gains read-only `io:probe`, `io:capabilities`,
+  `io:product` tools (thin wrappers — no parsing in tool code).
+- **Windows fix**: sdk plugin_loader routed its UI-contribution lookup
+  through the platform symbol seam (direct `::dlsym` broke the Win32 build).
+- **Docs**: docs/io/foundation-5-audit.md, docs/io/examples.md,
+  docs/products/product-adapters.md, docs/interoperability/format-matrix.md +
+  product-matrix.md; ADR 0134–0141.
 
-## [Unreleased] - 2026-09-07
 
 ### 🔬 Scientific Algorithm Foundation 5.0 (goal series)
 - **Shared scientific primitives (`src/processing/algorithms/primitives/`)**: streaming raster histogram with the platform binning convention (Otsu with tied-maxima averaging, nearest-rank quantiles with in-bin interpolation, #700 width rule), binary morphology (0/1/255 masks, 4/8-conn, NoData-protected, documented border policy), connected-component labeling (deterministic raster-order compact labels) with a sieve, exact Euclidean distance transform (Felzenszwalb separable), exact small-array quantiles with declared NearestRank/Linear semantics, and a window edge-policy contract. `change_detection`'s otsu/percentile/morphology kernels now delegate to the primitives (values pinned by the existing hand-derived suites).

@@ -67,6 +67,31 @@ function(sicnu_add_test NAME)
   sicnu_discover_tests(${NAME})
 endfunction()
 
+# Geospatial I/O Foundation 4.0: light test executables. Links only
+# Catch2 + sicnu_geospatial (GDAL + jsoncpp transitively) — no Qt, no QGIS —
+# so the I/O contract suites build and run without the full vendored chain.
+# Fixtures are synthesized at runtime by the suites (repo convention).
+function(sicnu_add_io_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::Geospatial
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(${NAME} PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+  # Output next to the vcpkg-deployed runtime DLLs so the executables start
+  # without per-exe DLL copies (gdal.dll & friends land in the build root).
+  set_target_properties(${NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  )
+  sicnu_discover_tests(${NAME})
+endfunction()
+
 # Helper function to add a Catch2 offscreen UI dialog test executable
 function(sicnu_add_dialog_test NAME)
   cmake_parse_arguments(PARSE_ARGV 1 ARG "NO_DEFAULT_MAIN" "MAIN_SOURCE" "SOURCES;EXTRA_LIBS;EXTRA_INCLUDES")
@@ -144,6 +169,51 @@ endfunction()
 
 # Core and domain tests
 sicnu_add_test(test_crs)
+
+# Geospatial I/O Foundation 4.0 (light targets — see sicnu_add_io_test above).
+sicnu_add_io_test(test_io_canonical_metadata)
+sicnu_add_io_test(test_io_crs_policy)
+sicnu_add_io_test(test_io_raster_contract)
+sicnu_add_io_test(test_io_vector_contract)
+sicnu_add_io_test(test_io_roundtrip_matrix)
+sicnu_add_io_test(test_io_cog)
+sicnu_add_io_test(test_io_stac)
+sicnu_add_io_test(test_io_multidim)
+find_library(NETCDF_LIBRARY NAMES netcdf)
+target_link_libraries(test_io_multidim PRIVATE ${NETCDF_LIBRARY})
+target_link_libraries(test_io_roundtrip_matrix PRIVATE ${NETCDF_LIBRARY})
+sicnu_add_io_test(test_io_products)
+sicnu_add_io_test(test_io_doctor)
+sicnu_add_io_test(test_io_atomic_failures)
+sicnu_add_io_test(test_io_fidelity)
+sicnu_add_io_test(test_io_paths)
+sicnu_add_io_test(test_io_uri)
+sicnu_add_io_test(test_io_product_registry)
+sicnu_add_io_test(test_io_probe)
+
+# Remote range harness (ADR 0139): local HTTP fixture with byte accounting.
+sicnu_add_io_test(test_io_remote_range)
+target_sources(test_io_remote_range PRIVATE support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_remote_range PRIVATE ws2_32)
+endif()
+
+# io:* operator family suite — rides the operator chain (Qt + sicnu_operators).
+sicnu_add_io_test(test_io_operators)
+target_link_libraries(test_io_operators PRIVATE Qt6::Core sicnu_operators)
+sicnu_link_jsoncpp(test_io_operators)
+
+# Geospatial I/O benchmark harness (Phase 15): run manually —
+#   benchmark_io --out benchmarks/io-foundation-4.json
+add_executable(benchmark_io benchmark_io.cpp)
+target_link_libraries(benchmark_io PRIVATE Sicnu::Geospatial)
+target_include_directories(benchmark_io PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
+target_compile_definitions(benchmark_io PRIVATE CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+set_target_properties(benchmark_io PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  QT_QML_MODULE_NO_IMPORT_SCAN TRUE
+)
+
 sicnu_add_test(test_geometry)
 sicnu_add_test(test_layers)
 sicnu_add_test(test_algorithm_engine)
@@ -6277,3 +6347,17 @@ sicnu_link_jsoncpp(test_harness_evals)
 sicnu_register_test_env_applier()
 
 
+
+# Geospatial I/O Foundation 4.0: Qt's deferred finalizer runs qmlimportscanner at
+# configure time for every executable. The test suite embeds no QML, and on the
+# Windows dev/CI hosts the scanner tool can fail to initialize (0xc0000139)
+# depending on DLL search-order pollution, breaking configure. No test imports
+# QML, so skip the scan for every test executable (property must be set before
+# the directory's deferred finalizer runs; this file's end is that point).
+get_property(_sicnu_test_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(_sicnu_test_target IN LISTS _sicnu_test_targets)
+  get_target_property(_sicnu_test_target_type ${_sicnu_test_target} TYPE)
+  if(_sicnu_test_target_type STREQUAL "EXECUTABLE")
+    set_target_properties(${_sicnu_test_target} PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
+  endif()
+endforeach()

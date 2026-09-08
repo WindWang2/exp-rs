@@ -1,0 +1,327 @@
+/***************************************************************************
+  tests/test_io_raster_contract.cpp
+  Geospatial I/O Foundation 4.0 — raster read/write contract suite.
+ ***************************************************************************/
+
+#include "geospatial/raster/raster_reader.h"
+#include "geospatial/raster/raster_writer.h"
+#include "geospatial/util/atomic_fs.h"
+
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+
+using Catch::Approx;
+
+#include <filesystem>
+#include <limits>
+#include <string>
+#include <vector>
+
+namespace fs = std::filesystem;
+
+namespace
+{
+
+std::string scratchDir( const std::string &name )
+{
+  const fs::path dir = fs::temp_directory_path() / "sicnu_io_test_raster" / name;
+  std::error_code ec;
+  fs::remove_all( dir, ec ); // idempotent suites: start from a clean scratch
+  fs::create_directories( dir );
+  return dir.string();
+}
+
+} // namespace
+
+TEST_CASE( "window reads return stored values exactly", "[io][raster][contract]" )
+{
+  const std::string dir = scratchDir( "window" );
+  const std::string target = ( fs::path( dir ) / "src.tif" ).string();
+
+  sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create(
+    target, 16, 12, { sicnu::geo::RasterBandSpec{} }, {} );
+  writer.setGeotransform( { 500000.0, 10.0, 0.0, 4000000.0, 0.0, -10.0 } );
+  writer.setCrs( sicnu::geo::Crs::fromAuthid( "EPSG:32648" ) );
+
+  // Distinct stored values per row/column.
+  std::vector<double> values( 16 * 12 );
+  for ( int y = 0; y < 12; ++y )
+    for ( int x = 0; x < 16; ++x )
+      values[y * 16 + x] = static_cast<double>( y * 100 + x );
+  sicnu::geo::RasterWindow full;
+  full.width = 16;
+  full.height = 12;
+  writer.writeWindow( 1, full, values.data() );
+  writer.finalize();
+
+  sicnu::geo::RasterReader reader = sicnu::geo::RasterReader::open( target );
+  CHECK( reader.metadata().width == 16 );
+  CHECK( reader.metadata().height == 12 );
+  CHECK( reader.metadata().crs.authid == "EPSG:32648" );
+  REQUIRE( reader.metadata().hasExtent );
+  CHECK( reader.metadata().minX == Approx( 500000.0 ) );
+  CHECK( reader.metadata().maxY == Approx( 4000000.0 ) );
+
+  // A non-aligned interior window keeps value placement.
+  sicnu::geo::RasterWindow window;
+  window.xOff = 3;
+  window.yOff = 4;
+  window.width = 5;
+  window.height = 4;
+  const std::vector<double> chunk = reader.readWindow( { 1 }, window );
+  REQUIRE( chunk.size() == 20 );
+  for ( int y = 0; y < 4; ++y )
+  {
+    for ( int x = 0; x < 5; ++x )
+    {
+      const double expected = static_cast<double>( ( 4 + y ) * 100 + ( 3 + x ) );
+      CHECK( chunk[y * 5 + x] == Approx( expected ) );
+    }
+  }
+
+  // Multi-band request: band list selects layout band-sequentially.
+  sicnu::geo::RasterWriter twoBands = sicnu::geo::RasterWriter::create(
+    ( fs::path( dir ) / "twobands.tif" ).string(), 4, 4,
+    { sicnu::geo::RasterBandSpec{}, sicnu::geo::RasterBandSpec{} }, {} );
+  sicnu::geo::RasterWindow small;
+  small.width = 4;
+  small.height = 4;
+  std::vector<double> b1( 16, 1.0 );
+  std::vector<double> b2( 16, 2.0 );
+  twoBands.writeWindow( 1, small, b1.data() );
+  twoBands.writeWindow( 2, small, b2.data() );
+  twoBands.finalize();
+
+  sicnu::geo::RasterReader reader2 = sicnu::geo::RasterReader::open( ( fs::path( dir ) / "twobands.tif" ).string() );
+  const std::vector<double> both = reader2.readWindow( { 2, 1 }, small );
+  REQUIRE( both.size() == 32 );
+  CHECK( both[0] == Approx( 2.0 ) );   // band 2 first
+  CHECK( both[16] == Approx( 1.0 ) );  // band 1 second
+}
+
+TEST_CASE( "window validation is strict; clamping is an explicit helper", "[io][raster][contract]" )
+{
+  sicnu::geo::RasterMetadata meta;
+  meta.width = 10;
+  meta.height = 10;
+
+  sicnu::geo::RasterWindow inside;
+  inside.width = 5;
+  inside.height = 5;
+  std::string error;
+  CHECK( sicnu::geo::RasterReader::validateWindow( meta, inside, &error ) );
+
+  sicnu::geo::RasterWindow outside;
+  outside.xOff = 8;
+  outside.width = 5;
+  outside.height = 5;
+  CHECK_FALSE( sicnu::geo::RasterReader::validateWindow( meta, outside, &error ) );
+  CHECK( error.find( "extent" ) != std::string::npos );
+
+  sicnu::geo::RasterWindow clamped = outside;
+  CHECK( sicnu::geo::clampWindowToRaster( meta, clamped ) );
+  CHECK( clamped.xOff == 8 );
+  CHECK( clamped.width == 2 );
+
+  sicnu::geo::RasterWindow disjoint;
+  disjoint.xOff = 50;
+  disjoint.yOff = 50;
+  disjoint.width = 5;
+  disjoint.height = 5;
+  CHECK_FALSE( sicnu::geo::clampWindowToRaster( meta, disjoint ) );
+}
+
+TEST_CASE( "readFull enforces the declared byte budget", "[io][raster][contract]" )
+{
+  const std::string target = ( fs::path( scratchDir( "budget" ) ) / "big.tif" ).string();
+  sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create(
+    target, 64, 64, { sicnu::geo::RasterBandSpec{} }, {} );
+  sicnu::geo::RasterWindow full;
+  full.width = 64;
+  full.height = 64;
+  std::vector<double> values( 64 * 64, 7.0 );
+  writer.writeWindow( 1, full, values.data() );
+  writer.finalize();
+
+  sicnu::geo::RasterReader reader = sicnu::geo::RasterReader::open( target );
+  CHECK( reader.readFull( { 1 }, 64 * 64 * sizeof( double ) + 8 ).size() == 64 * 64 );
+
+  try
+  {
+    reader.readFull( { 1 }, 1024 );
+    FAIL( "expected budget refusal" );
+  }
+  catch ( const sicnu::geo::GeoError &error )
+  {
+    CHECK( error.code() == sicnu::geo::ErrorCode::Unsupported );
+    CHECK( error.details()["required_bytes"].asUInt64() > 1024 );
+    CHECK( std::string( error.what() ).find( "budget" ) != std::string::npos );
+  }
+}
+
+TEST_CASE( "masks mark declared nodata only", "[io][raster][contract]" )
+{
+  const std::string target = ( fs::path( scratchDir( "mask" ) ) / "masked.tif" ).string();
+  sicnu::geo::RasterBandSpec spec;
+  spec.hasNoData = true;
+  spec.noDataValue = -1.0;
+  sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create( target, 4, 4, { spec }, {} );
+  std::vector<double> values = { 1, 2, 3, 4, 5, -1, 7, 8, 9, 10, 11, 12, 13, 14, -1, 16 };
+  sicnu::geo::RasterWindow full;
+  full.width = 4;
+  full.height = 4;
+  writer.writeWindow( 1, full, values.data() );
+  writer.finalize();
+
+  sicnu::geo::RasterReader reader = sicnu::geo::RasterReader::open( target );
+  const std::vector<std::uint8_t> mask = reader.readMask( full, { 1 } );
+  REQUIRE( mask.size() == 16 );
+  CHECK( mask[5] == 0 );
+  CHECK( mask[14] == 0 );
+  CHECK( mask[0] == 255 );
+  CHECK( mask[15] == 255 );
+
+  // NaN nodata declarations mask NaNs, not ordinary values.
+  sicnu::geo::RasterBandSpec nanSpec;
+  nanSpec.hasNoData = true;
+  nanSpec.noDataIsNaN = true;
+  const std::string nanTarget = ( fs::path( scratchDir( "mask" ) ) / "nan.tif" ).string();
+  sicnu::geo::RasterWriter nanWriter = sicnu::geo::RasterWriter::create( nanTarget, 4, 4, { nanSpec }, {} );
+  std::vector<double> nanValues( 16, 3.0 );
+  nanValues[1] = std::numeric_limits<double>::quiet_NaN();
+  nanWriter.writeWindow( 1, full, nanValues.data() );
+  nanWriter.finalize();
+  sicnu::geo::RasterReader nanReader = sicnu::geo::RasterReader::open( nanTarget );
+  const std::vector<std::uint8_t> nanMask = nanReader.readMask( full, { 1 } );
+  CHECK( nanMask[1] == 0 );
+  CHECK( nanMask[0] == 255 );
+}
+
+TEST_CASE( "writer publishes atomically with metadata fidelity", "[io][raster][contract]" )
+{
+  const std::string dir = scratchDir( "atomic" );
+  const std::string target = ( fs::path( dir ) / "out.tif" ).string();
+
+  sicnu::geo::RasterBandSpec spec;
+  spec.dtype = "UInt16";
+  spec.description = "Red";
+  spec.hasNoData = true;
+  spec.noDataValue = 0;
+  spec.hasScale = true;
+  spec.scale = 0.01;
+  spec.hasOffset = true;
+  spec.offset = -100.0;
+  spec.unit = "reflectance";
+  spec.role = "Red";
+  spec.hasWavelength = true;
+  spec.wavelengthNm = 665.0;
+  spec.colorInterpretation = "Red";
+
+  sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create( target, 8, 8, { spec }, {} );
+  writer.setGeotransform( { 1.0, 2.0, 0.0, 3.0, 0.0, -2.0 } );
+  writer.setCrs( sicnu::geo::Crs::fromAuthid( "EPSG:4326" ) );
+  writer.setDatasetMetadataItem( "SICNU_SENSOR", "UNIT_TEST" );
+  sicnu::geo::RasterWindow full;
+  full.width = 8;
+  full.height = 8;
+  std::vector<double> values( 64, 100 );
+  values[0] = 0; // nodata
+  writer.writeWindow( 1, full, values.data() );
+
+  // No stray staging before finalize.
+  const std::string stagedDuringWrite = writer.stagedPath();
+  CHECK( stagedDuringWrite != target );
+  writer.finalize();
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( stagedDuringWrite ) );
+
+  sicnu::geo::RasterReader reader = sicnu::geo::RasterReader::open( target );
+  const sicnu::geo::BandInfo &band = reader.metadata().bands.at( 0 );
+  CHECK( band.dtype == "UInt16" );
+  CHECK( band.description == "Red" );
+  CHECK( band.hasNoData );
+  CHECK( band.noDataValue == Approx( 0.0 ) );
+  CHECK( band.hasScale );
+  CHECK( band.scale == Approx( 0.01 ) );
+  CHECK( band.hasOffset );
+  CHECK( band.offset == Approx( -100.0 ) );
+  CHECK( band.unit == "reflectance" );
+  CHECK( band.role == "Red" );
+  CHECK( band.wavelengthNm == Approx( 665.0 ) );
+  CHECK( band.colorInterpretation == "Red" );
+  CHECK( reader.metadata().sensor == "UNIT_TEST" );
+
+  const std::vector<double> stored = reader.readWindow( { 1 }, full );
+  CHECK( stored[0] == Approx( 0.0 ) );
+  CHECK( stored[1] == Approx( 100.0 ) );
+  // Scale/offset are NEVER applied implicitly.
+  CHECK( sicnu::geo::RasterReader::applyScaleOffset( band, stored[1] ) == Approx( 100.0 * 0.01 - 100.0 ) );
+}
+
+TEST_CASE( "cancel discards staging and leaves any existing target untouched", "[io][raster][contract]" )
+{
+  const std::string dir = scratchDir( "cancel" );
+  const std::string target = ( fs::path( dir ) / "keepme.tif" ).string();
+
+  // First, a good output.
+  sicnu::geo::RasterWriter good = sicnu::geo::RasterWriter::create( target, 4, 4, { {} }, {} );
+  sicnu::geo::RasterWindow full;
+  full.width = 4;
+  full.height = 4;
+  std::vector<double> values( 16, 9.0 );
+  good.writeWindow( 1, full, values.data() );
+  good.finalize();
+  const auto originalSize = sicnu::geo::atomic_fs::fileSize( target );
+
+  // A second, cancelled attempt must not touch the target.
+  {
+    sicnu::geo::RasterWriter doomed = sicnu::geo::RasterWriter::create( target, 4, 4, { {} }, sicnu::geo::RasterWriteOptions{ "GTiff", {}, true } );
+    std::vector<double> junk( 16, 0.0 );
+    doomed.writeWindow( 1, full, junk.data() );
+    doomed.cancel();
+  }
+  CHECK( sicnu::geo::atomic_fs::fileSize( target ) == originalSize );
+
+  // A destroyed (never finalized) writer also cleans up after itself.
+  {
+    sicnu::geo::RasterWriter abandoned = sicnu::geo::RasterWriter::create( target, 4, 4, { {} }, sicnu::geo::RasterWriteOptions{ "GTiff", {}, true } );
+    abandoned.writeWindow( 1, full, values.data() );
+    const std::string staged = abandoned.stagedPath();
+    CHECK( sicnu::geo::atomic_fs::fileExists( staged ) );
+  }
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( ( fs::path( dir ) / "keepme.tif.0.00000.tmp" ).string() ) );
+  CHECK( sicnu::geo::atomic_fs::fileSize( target ) == originalSize );
+}
+
+TEST_CASE( "create refuses existing targets unless overwrite is declared", "[io][raster][contract]" )
+{
+  const std::string target = ( fs::path( scratchDir( "overwrite" ) ) / "exists.tif" ).string();
+  {
+    sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create( target, 4, 4, { {} }, {} );
+    writer.finalize();
+  }
+  CHECK_THROWS_AS( sicnu::geo::RasterWriter::create( target, 4, 4, { {} }, {} ), sicnu::geo::GeoError );
+  // overwrite=true is the explicit opt-in.
+  sicnu::geo::RasterWriter overwriter = sicnu::geo::RasterWriter::create( target, 4, 4, { {} }, sicnu::geo::RasterWriteOptions{ "GTiff", {}, true } );
+  overwriter.cancel();
+}
+
+TEST_CASE( "create leaves no staging behind when creation fails", "[io][raster][contract]" )
+{
+  const std::string dir = scratchDir( "badcreate" );
+  // Degenerate size throws before staging.
+  CHECK_THROWS_AS( sicnu::geo::RasterWriter::create( ( fs::path( dir ) / "zero.tif" ).string(), 0, 4, { {} }, {} ),
+                   sicnu::geo::GeoError );
+  // Unknown dtype throws before staging.
+  sicnu::geo::RasterBandSpec badType;
+  badType.dtype = "NotARealType";
+  CHECK_THROWS_AS( sicnu::geo::RasterWriter::create( ( fs::path( dir ) / "bad.tif" ).string(), 4, 4, { badType }, {} ),
+                   sicnu::geo::GeoError );
+  // No tmp files leaked.
+  int strays = 0;
+  for ( const fs::directory_entry &entry : fs::directory_iterator( dir ) )
+  {
+    (void)entry;
+    ++strays;
+  }
+  CHECK( strays == 0 );
+}

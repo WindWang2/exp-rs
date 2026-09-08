@@ -119,6 +119,7 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("rs:"),
         QStringLiteral("gdal:"),
         QStringLiteral("gdal_tools:"),
+        QStringLiteral("io:"),     // geospatial I/O foundation: convert/inspect/doctor (Foundation 4.0)
         QStringLiteral("otb:"),
         QStringLiteral("otb_tools:"),
         QStringLiteral("qgis:"),

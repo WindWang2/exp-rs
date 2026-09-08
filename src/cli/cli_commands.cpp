@@ -3,7 +3,11 @@
  ***************************************************************************/
 #include "cli_commands.h"
 
-#include "cli_dataset_commands.h"
+#include "geospatial/doctor/data_doctor.h"
+#include "geospatial/formats/format_profiles.h"
+#include "geospatial/products/product_registry.h"
+#include "geospatial/probe/probe.h"
+#include "geospatial/stac/stac_mapper.h"
 
 #include "rs_pipeline_runner.h"
 #include "cli_project_ops.h"
@@ -973,6 +977,96 @@ int commandProject( QStringList args, const CliIO &io )
     return io.finish( true, "project", data, 0 );
 }
 
+namespace
+{
+bool cliReadFileUtf8( const std::string &path, std::string &out )
+{
+    std::ifstream in( path, std::ios::binary );
+    if ( !in.is_open() )
+        return false;
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    out = buffer.str();
+    return true;
+}
+} // namespace
+
+// Geospatial I/O Foundation 4.0 (Phase 10): read-only dataset inspection and
+// diagnostics. Same JSON envelope and stable exit codes as the other commands.
+int commandData( QStringList args, const CliIO &io )
+{
+    extractGlobalFlags( args );
+    const QString sub = args.isEmpty() ? "inspect" : args.takeFirst();
+    if ( args.isEmpty() )
+        return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                          {}, "usage: data inspect|doctor|probe|capabilities|product describe|stac <dataset> [--stats]" );
+    const QString path = args.takeFirst();
+
+    sicnu::geo::InspectOptions options;
+    options.includeStatistics = takeFlag( args, "--stats" );
+    const std::string stdPath = path.toStdString();
+
+    try
+    {
+        if ( sub == "inspect" )
+            return io.finish( true, "data", sicnu::geo::runInspect( stdPath, options ), 0 );
+        if ( sub == "doctor" )
+        {
+            const sicnu::geo::DoctorReport report = sicnu::geo::runDoctor( stdPath, options );
+            const bool healthy = report.errorCount == 0;
+            return io.finish( healthy, "data", report.toJson(),
+                              exprs_ns::exitCodeValue( healthy ? exprs_ns::ExitCode::Ok
+                                                               : exprs_ns::ExitCode::InvalidInput ) );
+        }
+        // Foundation 5.0: probe / capabilities / product / stac surfaces over
+        // the same read-only foundation contracts (no pixel scans).
+        if ( sub == "probe" )
+        {
+            sicnu::geo::ProbeOptions probeOptions;
+            probeOptions.includeMetadata = true;
+            return io.finish( true, "data", sicnu::geo::probeResource( stdPath, probeOptions ).toJson(), 0 );
+        }
+        if ( sub == "capabilities" )
+        {
+            return io.finish( true, "data", sicnu::geo::resolveDatasetCapabilities( stdPath ).toJson(), 0 );
+        }
+        if ( sub == "product" )
+        {
+            const QString sub2 = args.isEmpty() ? "describe" : args.takeFirst();
+            if ( sub2 == "describe" )
+            {
+                const sicnu::geo::ProductAssets assets = sicnu::geo::ProductAdapterRegistry::instance().describe( stdPath );
+                return io.finish( true, "data", assets.toJson(), 0 );
+            }
+            return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                              {}, "unknown data product subcommand: " + sub2.toStdString() );
+        }
+        if ( sub == "stac" )
+        {
+            std::string jsonText;
+            if ( !cliReadFileUtf8( stdPath, jsonText ) )
+                return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                  {}, "cannot read STAC document: " + stdPath );
+            const sicnu::geo::StacItem item = sicnu::geo::StacItem::parseText( jsonText );
+            Json::Value out;
+            out["id"] = item.id;
+            out["datetime"] = item.datetime;
+            out["platform"] = item.platform;
+            out["assets"] = static_cast<int>( item.assets.size() );
+            out["canonical_preview"] = sicnu::geo::stacItemToCanonical( item ).toJson();
+            return io.finish( true, "data", out, 0 );
+        }
+    }
+    catch ( const sicnu::geo::GeoError &error )
+    {
+        return io.finish( false, "data", error.toJson(),
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                          {}, error.what() );
+    }
+    return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                      {}, "unknown data subcommand: " + sub.toStdString() );
+}
+
 int commandDataProviders( QStringList args, const CliIO &io )
 {
     extractGlobalFlags( args );
@@ -1093,9 +1187,7 @@ int CliIO::finish( bool ok, const std::string &command, Json::Value data, int ex
 bool isCliCommand( const QString &firstArg )
 {
     static const QStringList kCommands = { "algorithms", "run", "pipeline", "workflow", "plugin",
-                                           "models", "catalog", "project", "data-providers",
-                                           // Foundation 5.0 scientific command groups (ADR 0134-0138)
-                                           "dataset", "experiment", "reproduce" };
+                                           "models", "catalog", "project", "data", "data-providers" };
     return kCommands.contains( firstArg );
 }
 
@@ -1121,6 +1213,8 @@ int dispatchCliCommand( const QStringList &arguments, const CliIO &io )
         return commandModels( std::move( args ), io );
     if ( command == "project" )
         return commandProject( std::move( args ), io );
+    if ( command == "data" )
+        return commandData( std::move( args ), io );
     if ( command == "data-providers" )
         return commandDataProviders( std::move( args ), io );
     if ( command == "dataset" )
