@@ -223,9 +223,39 @@ TEST_CASE( "spatial block split keeps blocks atomic", "[dataset][split]" )
     const auto manifest = SplitEngine::generate( config, QStringLiteral( "v" ), inputs );
     REQUIRE( manifest.has_value() );
     CHECK( manifest->assignments().size() == inputs.size() );
-    // All 64 samples assigned; every block in one role (spot-checked via the
-    // replay determinism below — role grouping follows the same pattern as
-    // the grouped engine, verified by construction in the engine tests).
+    // #775/#817: blocks are ATOMIC split units — every sample inside one
+    // block grid cell carries the same role. (The baseline split each block
+    // internally, putting train and test samples on the same spatial block;
+    // the old test only checked counts and replay determinism.)
+    {
+        QHash<QString, SplitRole> blockRoles;
+        QHash<QString, QString> blockOf;
+        for ( const SplitInput &input : inputs )
+        {
+            const double centerX = ( input.minX + input.maxX ) / 2.0;
+            const double centerY = ( input.minY + input.maxY ) / 2.0;
+            const QString key = QStringLiteral( "%1|%2" )
+                                    .arg( qint64( std::floor( centerX / config.blockSizeX ) ) )
+                                    .arg( qint64( std::floor( centerY / config.blockSizeY ) ) );
+            blockOf.insert( input.sampleId, key );
+        }
+        for ( const SplitAssignment &assignment : manifest->assignments() )
+        {
+            const QString key = blockOf.value( assignment.sampleId );
+            const auto it = blockRoles.constFind( key );
+            if ( it == blockRoles.constEnd() )
+                blockRoles.insert( key, assignment.role );
+            else
+                CHECK( *it == assignment.role );
+        }
+        // With 16 blocks and 4 samples each, atomic assignment must produce
+        // more than one role overall (else the assertion above is vacuous).
+        QSet<SplitRole> distinctRoles;
+        for ( const SplitAssignment &assignment : manifest->assignments() )
+            distinctRoles.insert( assignment.role );
+        CHECK( distinctRoles.size() >= 2 );
+    }
+    // All 64 samples assigned; the replay pins determinism.
     const auto replay = SplitEngine::generate( config, QStringLiteral( "v" ), inputs );
     REQUIRE( replay.has_value() );
     CHECK( replay->assignments() == manifest->assignments() );
@@ -249,8 +279,10 @@ TEST_CASE( "spatial_buffer split keeps accepted test picks, vetoes buffer"
     config.trainRatio = 0.5625;
     config.validationRatio = 0.1875;
     QVector<SplitInput> inputs;
-    // Two clusters: 4 samples near x=0 (2 accepted test candidates + close
-    // neighbors) and 12 samples far away around x=1000.
+    // Two clusters: 4 samples near x=0 (spacing 10 < buffer 50: the first
+    // pick vetoes its neighbors) and 12 samples far away around x=1000 at
+    // spacing 100 > buffer (all eligible test candidates, leaving a real
+    // train/validation remainder).
     for ( int i = 0; i < 4; ++i )
     {
         SplitInput input = makeInput( QStringLiteral( "near-%1" ).arg( i ) );
@@ -265,7 +297,7 @@ TEST_CASE( "spatial_buffer split keeps accepted test picks, vetoes buffer"
     {
         SplitInput input = makeInput( QStringLiteral( "far-%1" ).arg( i ) );
         input.validBounds = true;
-        input.minX = 1000.0 + i * 10.0;
+        input.minX = 1000.0 + i * 100.0;
         input.maxX = input.minX + 2.0;
         input.minY = 0.0;
         input.maxY = 2.0;
@@ -301,6 +333,21 @@ TEST_CASE( "spatial_buffer split keeps accepted test picks, vetoes buffer"
              assignment.role != SplitRole::Test )
             CHECK( assignment.role == SplitRole::Unassigned );
     }
+    // #786: buffer-vetoed samples were once counted in the train/validation
+    // remainder, inflating the train quota until Validation starved to zero.
+    // The remainder splits must actually produce both roles here (12 far
+    // samples minus the accepted picks is comfortably large enough).
+    int validationCount = 0;
+    int trainCount = 0;
+    for ( const SplitAssignment &assignment : manifest->assignments() )
+    {
+        if ( assignment.role == SplitRole::Validation )
+            ++validationCount;
+        if ( assignment.role == SplitRole::Train )
+            ++trainCount;
+    }
+    CHECK( trainCount > 0 );
+    CHECK( validationCount > 0 );
     // Determinism replay.
     const auto replay = SplitEngine::generate( config, QStringLiteral( "v" ), inputs );
     REQUIRE( replay.has_value() );
@@ -338,6 +385,71 @@ TEST_CASE( "leakage spatial checks catch pairs whose centers straddle a"
                         []( const LeakageFinding &finding ) {
                             return finding.kind == LeakageKind::DistanceBelowThreshold;
                         } ) );
+}
+
+TEST_CASE( "leakage spatial hashing stays injective across negative"
+           " coordinates",
+           "[dataset][leakage]" )
+{
+    // #787: the spatial bucket key is the injective (cellX, cellY) pair —
+    // the previous combined key `cy*xSpan+cx` was fragile for negative
+    // cells (its arithmetic collides for reachable cell SHAPES only under
+    // bounds derived from other samples; the audit post-review classified
+    // the practical defect as fragility/robustness rather than an
+    // observable wrong report). This test pins the injective implementation:
+    // a planted pair in negative territory is found exactly once, and
+    // distant samples never attach to it.
+    LeakageAuditConfig config;
+    config.checks = { QStringLiteral( "distance_below_threshold" ) };
+    config.distanceThreshold = 1.0;
+    QVector<AuditSample> samples;
+    // A planted near-duplicate pair fully in negative territory.
+    AuditSample negA = auditFrom( makeInput( QStringLiteral( "neg-a" ) ), SplitRole::Train );
+    negA.input.minX = -10.4;
+    negA.input.maxX = -9.6;
+    negA.input.minY = -10.4;
+    negA.input.maxY = -9.6;
+    AuditSample negB = auditFrom( makeInput( QStringLiteral( "neg-b" ) ), SplitRole::Test );
+    negB.input.minX = -10.2;
+    negB.input.maxX = -9.4;
+    negB.input.minY = -10.2;
+    negB.input.maxY = -9.4;
+    // Distant samples whose (cx, cy) cells collide with the pair's cells
+    // under the old combined key: with cell = 1.0, xSpan = 11 over bounds
+    // [-10.4, 9.6]; (cx=9, cy=-11) used to fold onto (cx=-2, cy=0) etc.
+    const char *farIds[] = { "far-a", "far-b", "far-c", "far-d" };
+    for ( int i = 0; i < 4; ++i )
+    {
+        AuditSample far = auditFrom( makeInput( QLatin1String( farIds[i] ) ),
+                                     i % 2 == 0 ? SplitRole::Train : SplitRole::Test );
+        far.input.minX = 20.0 + i * 200.0;
+        far.input.maxX = far.input.minX + 1.0;
+        far.input.minY = -20.0 - i * 200.0;
+        far.input.maxY = far.input.minY + 1.0;
+        samples.append( far );
+    }
+    samples.append( negA );
+    samples.append( negB );
+    const auto report = LeakageAuditor::audit(
+        QStringLiteral( "v" ), QStringLiteral( "sp" ), samples, config );
+    REQUIRE( report.has_value() );
+    // Exactly the planted pair is found, exactly once (per direction the
+    // reporter emits one finding per unordered pair).
+    int plantedFindings = 0;
+    int totalFindings = 0;
+    for ( const LeakageFinding &finding : report->findings() )
+    {
+        if ( finding.kind != LeakageKind::DistanceBelowThreshold )
+            continue;
+        ++totalFindings;
+        const bool involvesPlanted =
+            ( finding.sampleA == QStringLiteral( "neg-a" ) ||
+              finding.sampleB == QStringLiteral( "neg-a" ) );
+        if ( involvesPlanted )
+            ++plantedFindings;
+    }
+    CHECK( totalFindings == 1 );
+    CHECK( plantedFindings == 1 );
 }
 
 TEST_CASE( "leakage over fully-overlapping far-apart windows reports nothing"
@@ -740,4 +852,69 @@ TEST_CASE( "patch generator policies produce honest provenance", "[dataset][patc
     CHECK( sample.provenance().value( QStringLiteral( "generator_config_hash" ) )
                .toString()
                .size() == 64 );
+}
+
+TEST_CASE( "ratio assignment honors zero ratios and never starves a"
+           " non-zero role",
+           "[dataset][split]" )
+{
+    // #788: floor counts with the remainder dumped into Test starved small
+    // Train ratios and let remainders violate testRatio = 0. The
+    // largest-remainder distribution pins zero ratios to zero and gives the
+    // fractional seats to the largest fractional remainder (ties: Train >
+    // Validation > Test).
+    struct Case
+    {
+        double train;
+        double validation;
+        double test;
+        int total;
+        int wantTrain;
+        int wantValidation;
+        int wantTest;
+    };
+    const Case cases[] = {
+        // 0.05 * 10 = 0.5 must round UP to a seat, not starve Train.
+        { 0.05, 0.15, 0.80, 10, 1, 1, 8 },
+        // Zero test ratio is a hard contract even when floors leave a gap.
+        { 0.70, 0.30, 0.00, 3, 2, 1, 0 },
+        { 0.70, 0.30, 0.00, 100, 70, 30, 0 },
+        // Exact division stays exact; no seat drift.
+        { 0.70, 0.20, 0.10, 10, 7, 2, 1 },
+        // Two fractional seats must go to DIFFERENT roles (one seat per
+        // role): exact 44.8/9.6/9.6 → 45/10/9, never 46/9/9.
+        { 0.70, 0.15, 0.15, 64, 45, 10, 9 },
+        // Two fractional seats to the largest remainders (.75 > .65 > .6):
+        // exact 4.75/6.65/7.60 at total 19 → 5/7/7.
+        { 0.25, 0.35, 0.40, 19, 5, 7, 7 },
+    };
+    for ( const Case &testCase : cases )
+    {
+        SplitConfig config;
+        config.method = SplitMethod::Random;
+        config.seed = 7;
+        config.trainRatio = testCase.train;
+        config.validationRatio = testCase.validation;
+        config.testRatio = testCase.test;
+        const auto inputs = makeInputs( testCase.total );
+        const auto manifest = SplitEngine::generate( config, QStringLiteral( "v" ), inputs );
+        REQUIRE( manifest.has_value() );
+        int train = 0;
+        int validation = 0;
+        int test = 0;
+        for ( const SplitAssignment &assignment : manifest->assignments() )
+        {
+            switch ( assignment.role )
+            {
+                case SplitRole::Train: ++train; break;
+                case SplitRole::Validation: ++validation; break;
+                case SplitRole::Test: ++test; break;
+                case SplitRole::Unassigned: break;
+            }
+        }
+        CAPTURE( testCase.train, testCase.validation, testCase.test, testCase.total );
+        CHECK( train == testCase.wantTrain );
+        CHECK( validation == testCase.wantValidation );
+        CHECK( test == testCase.wantTest );
+    }
 }

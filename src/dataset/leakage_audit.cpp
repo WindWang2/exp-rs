@@ -473,20 +473,6 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
     const bool bufferCheck =
         config.bufferDistance > 0.0 &&
         enabled( QStringLiteral( "buffer_overlap" ) );
-    double minBoundX = 0.0;
-    double maxBoundX = 0.0;
-    bool boundsSeen = false;
-    if ( overlapCheck || distanceCheck || bufferCheck )
-    {
-        for ( const AuditSample &sample : samples )
-        {
-            if ( !sample.input.validBounds )
-                continue;
-            minBoundX = boundsSeen ? qMin( minBoundX, sample.input.minX ) : sample.input.minX;
-            maxBoundX = boundsSeen ? qMax( maxBoundX, sample.input.maxX ) : sample.input.maxX;
-            boundsSeen = true;
-        }
-    }
     if ( overlapCheck || distanceCheck || bufferCheck )
     {
         // 2-D grid with a 3x3 neighborhood. For distance/buffer the cell must
@@ -503,9 +489,13 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
         const double cell = qMax( qMax( 1.0, qMax( config.distanceThreshold,
                                                    config.bufferDistance ) ),
                                   overlapCheck ? overlapCell : 1.0 );
-        const qint64 xSpan = qMax<qint64>(
-            1, qint64( std::ceil( ( maxBoundX - minBoundX ) / cell ) ) + 1 );
-        QHash<qint64, QVector<int>> buckets;
+        // Injective (cellX, cellY) keys (#787): the previous combined key
+        // `cy * xSpan + cx` collided for negative cells (e.g. xSpan=10:
+        // (9,-1) ≡ (-1,0)), merging unrelated cells — duplicated pair
+        // comparisons, duplicate findings and neighbor lookups against
+        // reconstructed wrong cells. qMakePair is lossless for negative
+        // floors, so scenes straddling the axes hash correctly.
+        QHash<QPair<qint64, qint64>, QVector<int>> buckets;
         for ( int i = 0; i < count; ++i )
         {
             const AuditSample &sample = samples.at( i );
@@ -513,14 +503,13 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
             {
                 const qint64 cx = bucketOf( ( sample.input.minX + sample.input.maxX ) / 2.0, cell );
                 const qint64 cy = bucketOf( ( sample.input.minY + sample.input.maxY ) / 2.0, cell );
-                buckets[cy * xSpan + cx].append( i );
+                buckets[qMakePair( cx, cy )].append( i );
             }
         }
         for ( auto it = buckets.constBegin(); it != buckets.constEnd(); ++it )
         {
-            const qint64 cellKey = it.key();
-            const qint64 cx = cellKey % xSpan;
-            const qint64 cy = cellKey / xSpan;
+            const qint64 cx = it.key().first;
+            const qint64 cy = it.key().second;
             QVector<int> bucketIndices = it.value();
             // Self-cell + right/lower neighbors (each unordered pair once).
             for ( qint64 dy = 0; dy <= 1; ++dy )
@@ -529,7 +518,7 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
                 {
                     if ( dx == 0 && dy == 0 )
                         continue;
-                    const auto neighbor = buckets.constFind( ( cy + dy ) * xSpan + ( cx + dx ) );
+                    const auto neighbor = buckets.constFind( qMakePair( cx + dx, cy + dy ) );
                     if ( neighbor != buckets.constEnd() )
                         bucketIndices += neighbor.value();
                 }
