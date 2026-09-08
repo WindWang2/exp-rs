@@ -11,6 +11,7 @@ class QToolButton;
 class QHBoxLayout;
 class QSlider;
 class QComboBox;
+class QAction;
 class QgisDesktopWindow;
 class QgsRasterLayer;
 
@@ -67,6 +68,15 @@ class RibbonController : public QObject
                                 const char *iconAlias,
                                 const QString &tooltip = QString(),
                                 bool large = true );
+    /**
+     * Workbench 5.0 registry-projected tool button: text/icon/tooltip and the
+     * enabled state follow the CommandRegistry definition (one handler, one
+     * availability contract); clicking triggers the command. Unknown ids
+     * return null so call sites can fall back to addToolButton.
+     */
+    QToolButton *addCommandButton( GroupHost &group,
+                                   const QString &commandId,
+                                   bool large = true );
     QSlider *addSlider( GroupHost &group,
                         const QString &title,
                         int minVal,

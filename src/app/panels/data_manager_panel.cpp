@@ -1023,13 +1023,16 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
 
 void DataManagerPanel::onSelectionChanged()
 {
+  const QList<sicnu::data::AssetId> selection = selectedAssetIds();
+  emit assetSelectionChanged( selection );
+
   if ( !m_dataManager )
   {
     clearDetails( tr( "数据管理器不可用。" ) );
     return;
   }
 
-  const QList<sicnu::data::AssetId> ids = selectedAssetIds();
+  const QList<sicnu::data::AssetId> ids = selection;
   if ( ids.size() > 1 )
   {
     showMultiSelectionDetails( ids );

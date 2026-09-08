@@ -289,6 +289,8 @@ Json::Value ExternalToolOperator::run( const Json::Value &params,
         result["stdout_truncated"] = true;
     if ( processResult.truncatedStderr )
         result["stderr_truncated"] = true;
+    // MSVC's long is 32-bit — jsoncpp has no matching operator=; the Int64
+    // cast is exact on Linux (long == 64-bit) and lossless here too.
     result["duration_ms"] = static_cast<Json::Int64>( processResult.durationMs );
     return result;
 }

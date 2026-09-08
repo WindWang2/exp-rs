@@ -508,6 +508,162 @@ target_compile_definitions(test_theme_selector_parity PRIVATE
 )
 sicnu_discover_tests(test_theme_selector_parity)
 
+# ── Workbench 5.0 contracts (workspace model / selection context / commands) ──
+add_executable(test_workbench_host
+  test_workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/adapters.cpp
+)
+target_link_libraries(test_workbench_host PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_workbench_host PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_workbench_host PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_workbench_host)
+
+add_executable(test_selection_context
+  test_selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_selection_context PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_selection_context PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_selection_context PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_selection_context)
+
+add_executable(test_command_registry
+  test_command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_command_registry PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_command_registry PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_command_registry PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_command_registry)
+
+add_executable(test_command_palette
+  test_command_palette.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_palette.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_command_palette PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_command_palette PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_command_palette PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_command_palette)
+
+add_executable(test_inspector_host
+  test_inspector_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/inspector_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_inspector_host PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_inspector_host PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_inspector_host PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_inspector_host)
+
+add_executable(test_interactive_session_contract
+  test_interactive_session_contract.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/session_adapters.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/interactive_session.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+)
+target_link_libraries(test_interactive_session_contract PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow_runtime
+)
+target_include_directories(test_interactive_session_contract PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app/classification
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_interactive_session_contract PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+if(TARGET qgis_app_classify)
+  target_link_libraries(test_interactive_session_contract PRIVATE qgis_app_classify)
+else()
+  # The adapter wraps the classification lab window; without the lab lib the
+  # adapter body cannot link. The contract still compiles interface-side.
+  set_source_files_properties(${CMAKE_SOURCE_DIR}/src/app/workbench/session_adapters.cpp
+    PROPERTIES HEADER_FILE_ONLY ON)
+endif()
+sicnu_discover_tests(test_interactive_session_contract)
+
 qt_add_executable(test_data_manager
   test_data_manager.cpp
 )
@@ -1351,6 +1507,40 @@ sicnu_add_test(test_governance_store TIMEOUT 300)
 sicnu_add_test(test_workspace_services TIMEOUT 600)
 # Workspace Governance 3.0 — scale contract (SICNU_WS3_STRESS=1 -> 100k).
 sicnu_add_test(test_workspace_stress TIMEOUT 900 RUN_SERIAL TRUE)
+
+# Workbench 5.0 — UI scale certification (Milestone O): the governance model
+# pipeline the workspace browser uses, at 10k rows by default and 100k under
+# SICNU_WS3_STRESS=1. Compiles the panel translation unit for the model.
+add_executable(test_ui_scale_benchmark
+  test_ui_scale_benchmark.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/workspace_browser_panel.cpp
+)
+target_link_libraries(test_ui_scale_benchmark PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow_runtime
+)
+target_include_directories(test_ui_scale_benchmark PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_ui_scale_benchmark PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+if(TARGET Sicnu::session_map)
+  target_link_libraries(test_ui_scale_benchmark PRIVATE Sicnu::session_map)
+endif()
+sicnu_discover_tests(test_ui_scale_benchmark TIMEOUT 900 RUN_SERIAL TRUE)
 sicnu_add_test(test_governance_tools TIMEOUT 300)
 
 # Phase M fault injection / chaos matrix (fork + kill semantics; serial).
@@ -1699,6 +1889,29 @@ sicnu_add_test(test_vector_properties)
 
 # Layer tree bridge tests
 sicnu_add_test(test_layer_tree_bridge)
+
+# Workbench 5.0 — layer state-sync contract (Milestone E)
+add_executable(test_layer_sync_contract
+  test_layer_sync_contract.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_layer_sync_contract PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_layer_sync_contract PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_layer_sync_contract PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_layer_sync_contract)
 
 # Change detection tests
 add_executable(test_change_detection test_change_detection.cpp)

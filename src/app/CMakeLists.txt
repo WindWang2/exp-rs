@@ -112,6 +112,17 @@ add_executable(sicnu_geo_rs
     shell/rs_job_runner.cpp
     shell/processing_job_adapter.cpp
     shell/rs_job_panel.cpp
+
+    # Workbench 5.0 (workspace model, selection context, command surface)
+    workbench/workbench_host.cpp
+    workbench/adapters.cpp
+    workbench/selection_context.cpp
+    workbench/command_registry.cpp
+    workbench/command_defs.cpp
+    workbench/command_palette.cpp
+    workbench/inspector_host.cpp
+    workbench/layer_sections.cpp
+    main_window_workbench.cpp
     workflow/pipeline_port_item.cpp
     workflow/pipeline_connection_item.cpp
     workflow/pipeline_node_item.cpp
@@ -349,6 +360,11 @@ endif()
 if(TARGET qgis_app_classify)
     target_link_libraries(sicnu_geo_rs PRIVATE qgis_app_classify)
     target_compile_definitions(sicnu_geo_rs PRIVATE SICNU_HAS_CLASSIFY=1)
+    # Workbench 5.0 session adapter wraps the classification lab window.
+    target_sources(sicnu_geo_rs PRIVATE
+        workbench/session_adapters.cpp
+        workbench/interactive_session.cpp
+    )
 endif()
 
 # Phase 10B — OBIA Classification. Link only when the static library

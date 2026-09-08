@@ -1,0 +1,13 @@
+{
+    "assetLevel": 10000,
+    "envelope": {
+        "filterBudgetMs": 800,
+        "firstPageBudgetMs": 1500
+    },
+    "filterMs": 27,
+    "firstPageMs": 0,
+    "fullFillMs": 411,
+    "pagesFetched": 49,
+    "rowsAfterFill": 10000,
+    "rowsAfterFilter": 200
+}

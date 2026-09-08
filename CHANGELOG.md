@@ -4,80 +4,54 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - 2026-09-08
 
-### 🛰️ Remote Sensing I/O, Sensor Product & Interoperability Foundation 5.0 (goal series, ADR 0134–0141)
+### Professional Remote Sensing Workbench 5.0 (goal series, ADR 0134)
+- **WorkbenchHost / IWorkbench**: every professional workspace (map, layout,
+  classification, georef I2I/I2M, OBIA) registers as a workbench with a
+  uniform lifecycle (activate/deactivate, dirty query, close semantics,
+  selection/command context). Session windows stay dedicated top-level
+  surfaces (external benches) - no MDI, no compute moves. A checkable
+  workspace switcher section landed in the window menu.
+- **SelectionContext**: one debounced (<=150 ms) projection of "what the user
+  is operating on" - canvas current layer, layer-tree selection, Data
+  Manager asset selection, governance entity selection, active workbench.
+  Pure ContextRules map snapshots to capability groups (raster/vector/
+  SAR/edit/result/asset) and human-readable unavailability reasons.
+- **CommandRegistry 5.0**: one definition per capability (single handler,
+  availability predicate, canonical shortcut with duplicate rejection,
+  destructive flag, explain hook). ~50 shell commands registered; ribbon
+  map-tab buttons and the layer-tree context menu now project registry
+  commands (enablement + reasons shared with the menu host), the layer menu
+  is uniformly Chinese, and a new layer.attributeTable command landed.
+- **Command palette**: keyboard-first searchable surface over the whole
+  registry (fuzzy rank, bounded rows, recent commands via QSettings,
+  unavailable entries visible with reasons, no handler bypass).
+- **InspectorHost**: sectioned inspector following the selection context
+  (lazy population, stale cancel, placeholder for empty selection) with
+  built-in General/Metadata layer sections in a new inspector dock.
+- **InteractiveSession contract (batch 1)**: shared lifecycle surface
+  (dirty, in-flight compute, cancel through the TaskCenter seam, close
+  confirmation) + classification lab adapter and window probes
+  (isSessionDirty/hasInFlightCompute/cancelInFlightCompute).
+- **Data/Results surfaces emit selection**: DataManagerPanel gained
+  assetSelectionChanged, WorkspaceBrowserPanel gained entitySelectionChanged
+  - both now feed the shell context projection.
+- **Windows fresh-build fixes found by this track** (each verified):
+  plugin_loader.cpp raw ::dlsym routed through the findSymbol seam;
+  WorkflowRunCoordinator missing notifyRunStateLocked/runStateChanged
+  declarations (PR #764 shipped a broken header); external_tool_operator
+  32-bit-long jsoncpp assignment now an explicit Json::Int64 cast;
+  vestigial include of main.moc removed (AUTOMOC hard-fails on the
+  dangling include with no Q_OBJECT type in main.cpp).
+- **Tests**: six new contract binaries - test_workbench_host,
+  test_selection_context, test_command_registry, test_command_palette,
+  test_inspector_host, test_interactive_session_contract (all green
+  offscreen), with the 4.0 guardrails (theme parity, shortcut conflicts,
+  task-center thin-client, schema form, layer bridge, workspace wiring,
+  data manager) still green.
+- **Docs**: docs/ui-architecture.md Part II, ADR 0134,
+  .planning/professional-workbench-5/ audit + models.
 
-Extends the I/O Foundation 4.0 core (`src/geospatial`, Qt-free) with the
-resource URI model, the probe contract, per-dataset capabilities, the sensor
-product registry, bounded remote access and the Pi/CLI surfaces. All
-foundational contracts (canonical metadata, CRS policy, windowed raster /
-batched vector I/O, atomic publication, COG presets + validator, STAC Item
-mapping, multidim slices, certified format profiles) land on the current
-master baseline.
-
-- **Resource URI & identity (ADR 0135)**: one strict classifier for every
-  source string (local file/dir, directory product, http(s), VSI
-  remote/virtual, subdataset selector, virtual dataset, STAC asset,
-  in-memory); identity vs display — percent-decoded, credential-redacted
-  (`X-Amz-Signature`, tokens, userinfo) for logs/UI; `..`-traversal
-  containment in `resolveAgainst`; Windows drive/UNC/long-path/Unicode
-  (UTF-8) coverage (`test_io_uri`).
-- **Probe contract & capabilities (ADR 0136)**: `probeResource` pipeline
-  (URI → bounded signature → GDAL identify/open → product adapter → lazy
-  metadata); content outranks the file name; COG detection is structural;
-  typed failures (NotFound/OpenFailed/CorruptData);
-  `resolveDatasetCapabilities` answers what *this dataset* supports
-  (window/block/multiband/multidim/subdataset/georef/crs/nodata/mask/
-  overviews/remote-range/streaming/vector/attributes/transactions).
-- **Bounded raster access**: `blockSize`/`readBlock`, planned tile walks
-  (`planTileWalk`/`iterateTiles`) with per-tile cancellation, overview
-  introspection + explicit `OverviewPolicy` (Exact default — a silently
-  sampled overview is a wrong-answer factory), and `readWindowResampled` as
-  the only resampling entry point (caller-declared size/level/kernel,
-  upsampling refused).
-- **Sensor product adapters (ADR 0137)**: `ProductAdapterRegistry` (Landsat
-  MTL / Sentinel-2 SAFE / Sentinel-1 SAFE / MODIS / GenericRaster fallback)
-  enumerates constituents (measurements/masks/annotations/metadata/browse)
-  with native band names, canonical lowercase band roles (+ SAR vv/vh/hh/hv),
-  wavelengths and declared resolutions; Sentinel-2 resolution groups stay
-  distinct (no silent resample); typed completeness verdicts (Complete /
-  PartialReadable / Invalid / UnsupportedVersion) listing exactly what is
-  missing (`test_io_product_registry`).
-- **Multidimensional policy (ADR 0138)**: slices address dimensions by name
-  with a cell budget; CF honesty (unlabeled time axes stay unlabeled);
-  Zarr/GeoParquet capability-gated with explicit `unavailable_in_build` — no
-  new runtime dependency.
-- **Remote I/O (ADR 0139)**: bounded `probeRemote` (reachable/size/
-  range-capable) over CPL HTTP with timeout/retry/MAX_SIZE bounds and
-  credential-safe reporting; local HTTP range fixture with byte accounting +
-  failure injection proves a `/vsicurl/` window read stays far below the full
-  payload and that rangeless origins are detected before pixel access
-  (`test_io_remote_range`).
-- **I/O error model (ADR 0141)**: `GeoError` taxonomy extended (NotFound,
-  PermissionDenied, UnsupportedFormat/Product, InvalidMetadata, CorruptData,
-  NetworkError, Timeout, ResourceExhausted, Incompatible) with stable string
-  names and scoped CPL error hygiene.
-- **Surfaces**: CLI `data probe|capabilities|product describe|stac` joins
-  `inspect|doctor`; Pi/MCP gains read-only `io:probe`, `io:capabilities`,
-  `io:product` tools (thin wrappers — no parsing in tool code).
-- **Windows fix**: sdk plugin_loader routed its UI-contribution lookup
-  through the platform symbol seam (direct `::dlsym` broke the Win32 build).
-- **Docs**: docs/io/foundation-5-audit.md, docs/io/examples.md,
-  docs/products/product-adapters.md, docs/interoperability/format-matrix.md +
-  product-matrix.md; ADR 0134–0141.
-
-
-### 🔬 Scientific Algorithm Foundation 5.0 (goal series)
-- **Shared scientific primitives (`src/processing/algorithms/primitives/`)**: streaming raster histogram with the platform binning convention (Otsu with tied-maxima averaging, nearest-rank quantiles with in-bin interpolation, #700 width rule), binary morphology (0/1/255 masks, 4/8-conn, NoData-protected, documented border policy), connected-component labeling (deterministic raster-order compact labels) with a sieve, exact Euclidean distance transform (Felzenszwalb separable), exact small-array quantiles with declared NearestRank/Linear semantics, and a window edge-policy contract. `change_detection`'s otsu/percentile/morphology kernels now delegate to the primitives (values pinned by the existing hand-derived suites).
-- **Optical**: `rs:topographic_correction` — two-pass streaming illumination correction over a same-grid DEM (cosine / C-correction incl. the SCS+C form / Minnaert), full-scene per-band fits, typed grid and degenerate-regression refusals, self-shadowed pixels as NaN; known-answer E2E (an `L = a + b·cos_i` scene maps to `a + b·cosθz`). `rs:spectral_index` gains GNDVI, NDMI, ARVI, MSAVI, EVI2, BAI, UI, BUI (scale-anchored indices follow the declared `SICNU_NUMERIC_SCALE`). `rs:spectral_derivative` — first/second derivatives along the wavelength axis (index-space derivatives are typed refusals).
-- **Spectral detection**: `rs:matched_filter` (signed whitened projection) and `rs:ace` (squared whitened cosine in [0,1]) over the RX detector's streamed background statistics — three passes, O(tile + bands²), bit-exact.
-- **SAR**: `rs:sar_dualpol_features` (ratio, normalized difference, log ratio, dual-pol RVI, span; declared `SICNU_SAR_DOMAIN` wins, dB converted before the kernel) and `rs:sar_terrain_masks` (surface-normal local incidence + geometric layover/shadow under the declared constant-geometry contract; full range-Doppler is documented as NOT approximated, with an additive orbit-state extension contract).
-- **Temporal**: `rs:temporal_monitor` — CUSUM and EWMA of standardized anomalies plus seasonal Mann-Kendall (calendar-month seasons, tie-corrected variance) with an explicit `max_pairwork` complexity guard.
-- **Terrain**: Zevenbergen-Thorne profile/plan/total curvatures (convexity-positive, certified on analytic surfaces), multidirectional hillshade, local relief; `rs:terrain_flow` — priority-flood depression filling (NoData = barrier), D8 directions, self-inclusive accumulation.
-- **Raster spatial**: `rs:morphology`, `rs:connected_components`, `rs:fill_holes`, `rs:sieve`, `rs:proximity`, `rs:local_extrema`, `rs:focal_stats` over the shared primitives (typed refusals for non-binary masks; streamed halo windows for the window family).
-- **Classification**: kNN (OpenCV KNearest) and statistical backends — minimum distance and Mahalanobis (pooled covariance, ridge for small samples) — wired through the backend factory and `rs:supervised_classification`.
-- **Certification**: every new operator ships with hand-derived known-answer suites, degenerate cases (all-NoData/NaN/±Inf, single-pixel, non-tile dims, mismatched grids) and streaming-vs-reference or closed-form checks; benchmarks per family recorded under `benchmarks/`.
-- **Baseline repair**: master at `93a7fb0bbd` did not compile past `sicnu_task_center` (undeclared `notifyRunStateLocked` / missing `runStateChanged` signal in `workflow_run_coordinator.h`; an ambiguous Json::Value conversion in `harness_verification.cpp`) — minimal additive fixes; the algorithm_meta sidecar catalog is regenerated from the descriptor registry (7 → 25) via `--export-catalog`.
-- **Docs**: docs/processing/sar-domain.md, foundation-5.md, extended validation-policy family snapshot, ADR-free additive contracts (primitives placement, orbit extension seam).
+## [Unreleased] - 2026-09-07
 
 ### 🤖 Model Runtime & AI Inference Platform 4.0 (goal series, ADR 0130)
 - **Manifest 4.0 identity**: `id`/`model_version`/`license`/`source`/`manifest_version` fields; the artifact's SHA-256 content digest is always computed and anchors session identity (same path, different bytes never share a session); `runtime.device` token (`cpu`|`cuda`|`cuda:N`|`auto`).

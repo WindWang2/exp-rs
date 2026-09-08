@@ -29,18 +29,32 @@ Pi agent adapter over the same Task Center seam.
   (ADR 0130: barrier-drained unload, UI reverse ownership, path containment,
   workspace effect policy); Python plugins out-of-process (ADR 0014); conformance
   via `sicnu_geo_rs_cli plugin test`.
-- `src/app` — desktop shell: ribbon workbench, panels (data / governance /
-  layers), dialogs, task center UI, schema form builder, design tokens
-  (`design_tokens.h`). See `docs/ui-architecture.md` for the information
-  architecture and extension rules.
+- `src/app` — desktop shell: ribbon workbench, workbench authorities
+  (`src/app/workbench`: WorkbenchHost/IWorkbench, SelectionContext,
+  CommandRegistry, command palette, InspectorHost, InteractiveSession
+  contracts — ADR 0134), panels (data / governance / layers), dialogs,
+  task center UI, schema form builder, design tokens (`design_tokens.h`).
+  See `docs/ui-architecture.md` for the information architecture and
+  extension rules.
 - `src/agent` — copilot, MCP, spatial tools, agent contracts, harness
   (`src/agent/harness`); `pi/` bridge; MapSpec cartography
-  (`src/agent/mapspec`, `src/agent/cartography`, `data/cartography`);
-  knowledge platform (solutions `data/agent/solutions`, styles
-  `data/cartography/styles`, solution/style registries + tools).
-- `docs/adr/` — decision ledger (0001–0133); `CONTEXT.md` — domain vocabulary.
+  (`src/agent/mapspec`, `src/agent/cartography`, `data/cartography`).
+- `docs/adr/` — decision ledger (0001–0134); `CONTEXT.md` — domain vocabulary.
 
 ## Current state (2026-09-08)
+
+- **Professional Remote Sensing Workbench 5.0** (ADR 0134): WorkbenchHost/
+  IWorkbench workspace lifecycle over map/layout/classification/georef/OBIA
+  (session windows stay external benches), SelectionContext projection with
+  pure ContextRules, CommandRegistry (one handler/availability/shortcut per
+  capability, ~50 shell commands), keyboard-first command palette
+  (Ctrl+Shift+P), InspectorHost with lazy sections, InteractiveSession
+  contract batch 1 (classification adapter + TaskCenter cancel seam),
+  layer-tree context menu and ribbon map tab as registry projections, and
+  the UI-scale benchmark certifying the governance model at 10k/100k rows.
+  Also fixed four fresh-build breakages on master found by this track
+  (sdk dlsym seam, workflow coordinator header, Json::Int64 duration,
+  dangling main.moc include).
 
 - **Solution Template, Recipe & Cartography Knowledge Platform 5.0**:
   task semantics → validated SolutionTemplate → AnalysisRecipe (AgentPlan v2 →

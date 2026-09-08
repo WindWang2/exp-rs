@@ -453,6 +453,8 @@ bool PluginLoader::loadImpl( const PluginRecord &record, HostServicesV1 &service
 
         // Optional UI contribution entry point (exprs/plugin_ui.h).
         // Failure here is a warning, not a load failure.
+        // NOTE: route through the findSymbol platform seam — a raw ::dlsym
+        // here broke MSVC builds (master regression found by Workbench 5.0).
         if ( void *uiSymbol = findSymbol( handle, kUiContributionEntryPointV1 ) )
         {
             using CreateUiFn = void *( * )();

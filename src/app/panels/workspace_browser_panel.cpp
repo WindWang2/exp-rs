@@ -286,6 +286,8 @@ WorkspaceBrowserPanel::WorkspaceBrowserPanel( QWidget *parent )
     connect( m_remoteButton, &QPushButton::clicked, this, &WorkspaceBrowserPanel::importRemoteUrls );
     connect( m_table->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
              &WorkspaceBrowserPanel::showDetails );
+    connect( m_table->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+             &WorkspaceBrowserPanel::emitEntitySelection );
     // Double-click routes the row's artifact through the shell (ActiveViewHost)
     // via a plain path signal — the panel itself never touches the canvas.
     connect( m_table, &QTableView::doubleClicked, this, [this]( const QModelIndex &index ) {
@@ -300,9 +302,24 @@ WorkspaceBrowserPanel::WorkspaceBrowserPanel( QWidget *parent )
     } );
 }
 
-void WorkspaceBrowserPanel::setWorkspaceService( WorkspaceService *service )
+void WorkspaceBrowserPanel::emitEntitySelection()
 {
-    if ( m_service )
+    if ( !m_model )
+        return;
+    const QModelIndexList rows = m_table->selectionModel()->selectedRows();
+    QStringList ids;
+    ids.reserve( rows.size() );
+    for ( const QModelIndex &index : rows )
+    {
+        const QString id = m_model->entityId( index.row() );
+        if ( !id.isEmpty() )
+            ids.append( id );
+    }
+    emit entitySelectionChanged( ids );
+}
+
+void WorkspaceBrowserPanel::setWorkspaceService( WorkspaceService *service )
+{    if ( m_service )
         disconnect( m_service, &WorkspaceService::entityChanged, this, &WorkspaceBrowserPanel::refresh );
     m_service = service;
     if ( m_importCenter )

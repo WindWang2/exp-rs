@@ -130,6 +130,11 @@ class CustomIdentifyTool : public QgsMapToolIdentify
 
 namespace sicnu::app {
 class WorkspaceBrowserPanel;
+class WorkbenchHost;
+class SelectionContext;
+class InspectorHost;
+class CommandRegistry;
+class CommandPalette;
 }
 
 class ExprsPluginShellUi;
@@ -163,6 +168,11 @@ public:
     QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
     QgsMapLayer *activeLayer();
     QList<QgsMapLayer*> selectedLayers();
+
+    /// Workbench 5.0 infrastructure (owned by the window, valid after setupUi).
+    sicnu::app::WorkbenchHost *workbenchHost() const { return m_workbenchHost; }
+    sicnu::app::SelectionContext *selectionContext() const { return m_selectionContext; }
+    sicnu::app::CommandRegistry *commandRegistry() const { return m_commandRegistry; }
 
     /// The panel/toolbar visibility menu (exprs plugin docks add their
     /// toggle actions here; used by ExprsPluginShellUi).
@@ -200,6 +210,7 @@ public:
     void refreshMap();
     void layerProperties();
     void removeLayer();
+    void zoomToLayer();
     void about();
     void helpContents();
     void checkVersion();
@@ -320,7 +331,6 @@ private slots:
     void updateExtents();
     void updateCrsDisplay();
     void setProjectCrs();
-    void zoomToLayer();
 
 private:
     void setupMenu();
@@ -328,6 +338,8 @@ private:
     void setupDockWidgets();
     /// Create Data Manager dock after ProjectContext exists (needs DataManager*).
     void setupDataManagerPanel();
+    /** WorkbenchHost / SelectionContext / CommandRegistry wiring (5.0). */
+    void setupWorkbenchInfrastructure();
     void setupRibbonAndTaskPanel();
     void setupStatusBar();
     void setupConnections();
@@ -509,6 +521,14 @@ private:
     std::unique_ptr<class MapToolManager> m_toolManager;
     std::unique_ptr<sicnu::app::ProjectContext> m_projectContext;
     std::unique_ptr<ActiveViewHost> m_activeViewHost;
+
+    // Workbench 5.0 (children of the window — destroyed with it)
+    sicnu::app::WorkbenchHost *m_workbenchHost = nullptr;
+    sicnu::app::SelectionContext *m_selectionContext = nullptr;
+    sicnu::app::CommandRegistry *m_commandRegistry = nullptr;
+    sicnu::app::CommandPalette *m_commandPalette = nullptr;
+    sicnu::app::InspectorHost *m_inspectorHost = nullptr;
+    QDockWidget *m_inspectorDock = nullptr;
 
     // Declared before m_pluginHost so it is destroyed after it: the
     // plugin proxy (`PythonAppInterfaceProxy`) holds a raw `ActiveViewHost*`
