@@ -1278,6 +1278,40 @@ sicnu_add_test(test_governance_store TIMEOUT 300)
 sicnu_add_test(test_workspace_services TIMEOUT 600)
 # Workspace Governance 3.0 — scale contract (SICNU_WS3_STRESS=1 -> 100k).
 sicnu_add_test(test_workspace_stress TIMEOUT 900 RUN_SERIAL TRUE)
+
+# Workbench 5.0 — UI scale certification (Milestone O): the governance model
+# pipeline the workspace browser uses, at 10k rows by default and 100k under
+# SICNU_WS3_STRESS=1. Compiles the panel translation unit for the model.
+add_executable(test_ui_scale_benchmark
+  test_ui_scale_benchmark.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/workspace_browser_panel.cpp
+)
+target_link_libraries(test_ui_scale_benchmark PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow_runtime
+)
+target_include_directories(test_ui_scale_benchmark PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_ui_scale_benchmark PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+if(TARGET Sicnu::session_map)
+  target_link_libraries(test_ui_scale_benchmark PRIVATE Sicnu::session_map)
+endif()
+sicnu_discover_tests(test_ui_scale_benchmark TIMEOUT 900 RUN_SERIAL TRUE)
 sicnu_add_test(test_governance_tools TIMEOUT 300)
 
 # Phase M fault injection / chaos matrix (fork + kill semantics; serial).
