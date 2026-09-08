@@ -1,0 +1,55 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.sarchange.log-ratio",
+ "version": 1,
+ "title": "SAR log-ratio change detection",
+ "description": "Calibrated, speckle-filtered log-ratio change with magnitude thresholding.",
+ "tasks": [
+  "change",
+  "sar"
+ ],
+ "modalities": [
+  "sar"
+ ],
+ "sensors": [
+  "sentinel-1"
+ ],
+ "input_contracts": [
+  {
+   "name": "before",
+   "kind": "raster",
+   "required": true,
+   "description": "Co-registered before scene."
+  },
+  {
+   "name": "after",
+   "kind": "raster",
+   "required": true,
+   "description": "Co-registered after scene."
+  }
+ ],
+ "analysis_recipe": "harness.sar_change_log_ratio",
+ "map_template": "sar-change-a4l",
+ "style_spec": {
+  "primary": "style.sar-change"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "before",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "certified",
+ "keywords": [
+  "sar",
+  "change",
+  "log-ratio"
+ ],
+ "family": "sar-change"
+}

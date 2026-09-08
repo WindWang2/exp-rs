@@ -1,0 +1,56 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.publication.ndvi-figure",
+ "version": 1,
+ "title": "Publication figure: vegetation index",
+ "description": "NDVI map composed on the A3 scientific-publication template with provenance and figure caption.",
+ "tasks": [
+  "vegetation",
+  "publication"
+ ],
+ "modalities": [
+  "optical"
+ ],
+ "sensors": [
+  "sentinel-2",
+  "landsat-8"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Reflectance product (NIR + Red)."
+  },
+  {
+   "name": "qa",
+   "kind": "raster",
+   "required": false,
+   "description": "Optional QA mask."
+  }
+ ],
+ "analysis_recipe": "harness.optical_ndvi",
+ "map_template": "scientific-publication-a3l",
+ "style_spec": {
+  "primary": "style.ndvi"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "publication",
+  "figure",
+  "ndvi"
+ ],
+ "family": "publication"
+}

@@ -12,7 +12,7 @@ this document in sync when you add descriptors.
 > here). The machine index and `cartography:list_templates` operate on
 > the *resolved* descriptors, so children match their base's tasks.
 
-Shipped: **50 templates**, **47 components** (with variants), 2 token sets.
+Shipped: **56 templates**, **52 components** (with variants), 2 token sets.
 
 ## Design token sets
 
@@ -76,6 +76,13 @@ Shipped: **50 templates**, **47 components** (with variants), 2 token sets.
 | `water-flood-a3p` | 297×420 | — | water-flood-a4l |  | Water / flood extent map with probability colorbar and uncertainty note. |
 | `water-flood-a4l` | 297×210 | water | — | water, flood | Water / flood extent map with probability colorbar and uncertainty note. |
 
+| `poster-a0-foundation` | 841×1189 | poster | — | poster, publication | A0 portrait poster foundation: hero map, section rails for charts/tables/methodology (content slots intentionally unconstrained). |
+| `report-atlas-appendix-a4l` | 297×210 | report | — | atlas, report | Atlas appendix page: per-feature statistics table, top-N ranking and trend sparkline; designed for the atlas page sequence. |
+| `report-multipage-a4l` | 297×210 | report | — | report, operations, monitoring | Three-page operational report: cover with title block, main map page, and a statistics page with tables, metrics and methodology notes. Page roles drive conditional assembly. |
+| `report-multipage-a4p` | 210×297 | report | — | report, operations | Portrait three-page report variant for document-style deliverables (cover, map, statistics). |
+| `report-scientific-a3l` | 420×297 | publication | — | publication, scientific | A3 landscape scientific paper page: large map panel with figure caption, provenance and uncertainty note for journal submissions. |
+| `report-screen-16x9` | 297×167 | report | — | report, presentation | 16:9 screen briefing page (dark tokens): map with headline metric cards for presentations. |
+
 ## Components (categorized, with variants)
 
 | id | category | variants | description |
@@ -127,6 +134,12 @@ Shipped: **50 templates**, **47 components** (with variants), 2 token sets.
 | `text/section-label` | text | — | Short section label ('A', 'Study area', '方法') introducing a map panel or figure group. |
 | `title/bilingual` | title | — | Two-line bilingual title (CJK primary line, Latin secondary line) rendered as one label block. |
 | `title/main` | title | `standard`, `compact` | Primary map title. Token style 'title' (20pt bold by default); one per page. |
+
+| `chart/grouped-bar` | chart.statistics, chart.trend | `paired`, `multi` | Grouped bar chart: side-by-side series per label with a compact series legend (real multi-series rendering). |
+| `chart/sparkline` | chart.trend | — | Axes-free compact trend line with a dashed baseline; the series-extraction companion for report blocks. |
+| `chart/summary-table` | chart.statistics | — | Summary table with an n/mean and sum/min-max header block above the rows. |
+| `chart/table` | chart.statistics | `zebra`, `plain` | Two-column label/value table (class areas, counts, metrics); deterministic 64-row cap with an overflow row. |
+| `chart/topn-table` | chart.statistics | `top-5`, `top-10` | Top-N table: rows sorted by value descending, capped at style.top_n (default 10) with a rank column. |
 
 ## Agent workflow
 

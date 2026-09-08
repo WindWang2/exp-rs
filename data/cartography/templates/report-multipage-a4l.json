@@ -1,0 +1,277 @@
+{
+ "id": "report-multipage-a4l",
+ "version": 1,
+ "description": "Three-page operational report: cover with title block, main map page, and a statistics page with tables, metrics and methodology notes. Page roles drive conditional assembly.",
+ "page": {
+  "width_mm": 297,
+  "height_mm": 210
+ },
+ "pages": [
+  {
+   "width_mm": 297,
+   "height_mm": 210,
+   "role": "map"
+  },
+  {
+   "width_mm": 297,
+   "height_mm": 210,
+   "role": "report",
+   "page_if": "has(statistics)"
+  }
+ ],
+ "style": {
+  "token_set": "scientific-light",
+  "medium": "print"
+ },
+ "product_type": "report",
+ "suitable_tasks": [
+  "report",
+  "operations",
+  "monitoring"
+ ],
+ "slots": [
+  {
+   "role": "title.cover",
+   "accepts": "titles",
+   "rect_mm": [
+    12,
+    80,
+    273,
+    24
+   ],
+   "content": {
+    "text": "遥感监测报告",
+    "page": 0,
+    "font": {
+     "size_pt": 26,
+     "bold": true
+    }
+   }
+  },
+  {
+   "role": "subtitle.cover",
+   "accepts": "titles",
+   "rect_mm": [
+    12,
+    106,
+    273,
+    12
+   ],
+   "content": {
+    "text": "Remote Sensing Monitoring Report",
+    "page": 0,
+    "font": {
+     "size_pt": 12
+    }
+   }
+  },
+  {
+   "role": "source.cover",
+   "accepts": "source_notes",
+   "rect_mm": [
+    12,
+    186,
+    273,
+    8
+   ],
+   "content": {
+    "page": 0
+   }
+  },
+  {
+   "role": "map.main",
+   "accepts": "map_frames",
+   "rect_mm": [
+    12,
+    30,
+    203,
+    144
+   ],
+   "content": {
+    "page": 1
+   }
+  },
+  {
+   "role": "title.main",
+   "accepts": "titles",
+   "rect_mm": [
+    12,
+    12,
+    273,
+    12
+   ],
+   "content": {
+    "page": 1
+   }
+  },
+  {
+   "role": "legend.primary",
+   "accepts": "legends",
+   "rect_mm": [
+    218,
+    30,
+    67,
+    128
+   ],
+   "content": {
+    "content": {
+     "title": "图例"
+    }
+   },
+   "page": 1
+  },
+  {
+   "role": "scalebar.primary",
+   "accepts": "scale_bars",
+   "rect_mm": [
+    14,
+    182,
+    48,
+    10
+   ],
+   "page": 1
+  },
+  {
+   "role": "north.primary",
+   "accepts": "north_arrows",
+   "rect_mm": [
+    68,
+    182,
+    12,
+    12
+   ],
+   "page": 1
+  },
+  {
+   "role": "source.main",
+   "accepts": "source_notes",
+   "rect_mm": [
+    88,
+    184,
+    177,
+    8
+   ],
+   "page": 1
+  },
+  {
+   "role": "chart.distribution",
+   "accepts": "charts",
+   "rect_mm": [
+    12,
+    30,
+    135,
+    80
+   ],
+   "content": {
+    "chart": {
+     "kind": "bar",
+     "binding": {
+      "mode": "inline",
+      "data": []
+     }
+    },
+    "page": 2
+   },
+   "component": "chart/bar"
+  },
+  {
+   "role": "table.summary",
+   "accepts": "charts",
+   "rect_mm": [
+    152,
+    30,
+    133,
+    80
+   ],
+   "content": {
+    "chart": {
+     "kind": "summary_table",
+     "binding": {
+      "mode": "inline",
+      "data": []
+     },
+     "style": {
+      "label_column": "类别",
+      "value_column": "面积"
+     }
+    },
+    "page": 2
+   },
+   "component": "chart/summary-table"
+  },
+  {
+   "role": "metrics.accuracy",
+   "accepts": "charts",
+   "rect_mm": [
+    12,
+    118,
+    135,
+    34
+   ],
+   "content": {
+    "page": 2
+   },
+   "component": "chart/metric-card"
+  },
+  {
+   "role": "trend.sparkline",
+   "accepts": "charts",
+   "rect_mm": [
+    152,
+    118,
+    133,
+    20
+   ],
+   "content": {
+    "page": 2
+   },
+   "component": "chart/sparkline"
+  },
+  {
+   "role": "notes.methodology",
+   "accepts": "annotations",
+   "rect_mm": [
+    12,
+    158,
+    273,
+    20
+   ],
+   "content": {
+    "text": "方法说明 Methodology: 处理链、模型版本与参数见附录。",
+    "page": 2
+   }
+  },
+  {
+   "role": "notes.uncertainty",
+   "accepts": "annotations",
+   "rect_mm": [
+    12,
+    150,
+    273,
+    6
+   ],
+   "content": {
+    "text": "不确定性 Uncertainty: 置信区间与质量控制见随附验证记录。",
+    "page": 2
+   }
+  },
+  {
+   "role": "provenance.block",
+   "accepts": "source_notes",
+   "rect_mm": [
+    12,
+    184,
+    273,
+    10
+   ],
+   "content": {
+    "text": "数据来源 Data: | CRS: EPSG:32650 | 处理 Processing: exp-rs Platform 5.0",
+    "page": 2
+   }
+  }
+ ],
+ "recommended_components": [
+  "north-arrow/scientific",
+  "grid/graticule"
+ ]
+}

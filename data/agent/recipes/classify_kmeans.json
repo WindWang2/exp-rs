@@ -1,0 +1,73 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.classify_kmeans",
+ "title": "Unsupervised k-means classification",
+ "intent": "classify",
+ "family": "classification",
+ "modality": "model",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9",
+  "sentinel-1"
+ ],
+ "description": "Optional feature normalization -> k-means clustering -> majority filter cleanup.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Multi-band feature raster.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "kmeans",
+   "operator_id": "rs:kmeans_classification",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.clusters",
+    "k": "$params.clusters"
+   },
+   "verification": "raster",
+   "when_param": "clusters",
+   "params_when_skipped": {
+    "input": "$primary.path",
+    "output": "$outputs.clusters",
+    "k": 6
+   }
+  },
+  {
+   "id": "clean",
+   "operator_id": "rs:majority_filter",
+   "params": {
+    "input": "$outputs.clusters",
+    "output": "$outputs.classification",
+    "kernel": 3
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "clusters",
+   "from_step": "kmeans",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "classification",
+   "from_step": "clean",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "kmeans",
+  "renderer_hint": "categorized"
+ }
+}

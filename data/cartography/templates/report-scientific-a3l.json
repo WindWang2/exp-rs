@@ -1,0 +1,97 @@
+{
+ "id": "report-scientific-a3l",
+ "version": 1,
+ "description": "A3 landscape scientific paper page: large map panel with figure caption, provenance and uncertainty note for journal submissions.",
+ "page": {
+  "width_mm": 420,
+  "height_mm": 297
+ },
+ "style": {
+  "token_set": "scientific-light",
+  "medium": "print"
+ },
+ "product_type": "publication",
+ "suitable_tasks": [
+  "publication",
+  "scientific"
+ ],
+ "slots": [
+  {
+   "role": "map.main",
+   "accepts": "map_frames",
+   "rect_mm": [
+    14,
+    26,
+    285,
+    255
+   ]
+  },
+  {
+   "role": "legend.primary",
+   "accepts": "legends",
+   "rect_mm": [
+    304,
+    26,
+    102,
+    170
+   ],
+   "content": {
+    "content": {
+     "title": "Legend"
+    }
+   }
+  },
+  {
+   "role": "colorbar.primary",
+   "accepts": "colorbars",
+   "rect_mm": [
+    304,
+    202,
+    102,
+    10
+   ]
+  },
+  {
+   "role": "scalebar.primary",
+   "accepts": "scale_bars",
+   "rect_mm": [
+    16,
+    262,
+    60,
+    10
+   ]
+  },
+  {
+   "role": "north.primary",
+   "accepts": "north_arrows",
+   "rect_mm": [
+    86,
+    262,
+    12,
+    12
+   ]
+  },
+  {
+   "role": "caption.figure",
+   "accepts": "annotations",
+   "rect_mm": [
+    14,
+    276,
+    392,
+    10
+   ],
+   "content": {
+    "text": "Figure 1: | 处理 Processing: exp-rs Platform 5.0",
+    "font": {
+     "size_pt": 9
+    }
+   }
+  }
+ ],
+ "recommended_components": [
+  "north-arrow/scientific",
+  "grid/graticule",
+  "publication/figure-label",
+  "text/scientific-caption"
+ ]
+}

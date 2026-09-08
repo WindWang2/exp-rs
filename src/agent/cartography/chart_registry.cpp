@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
 
 namespace sicnu::agent::cartography {
@@ -21,7 +22,8 @@ namespace sicnu::agent::cartography {
 namespace {
 
 const char *const kChartKinds[] = { "bar", "line", "pie", "histogram", "area", "scatter",
-                                    "stacked_bar", "matrix", "metric" };
+                                    "stacked_bar", "matrix", "metric", "grouped_bar",
+                                    "table", "summary_table", "topn_table", "sparkline" };
 
 bool isKnownKind( const std::string &kind )
 {
@@ -271,6 +273,279 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     return true;
   }
 
+  // --- table family: label/value tables with deterministic caps (5.0) -------
+  if ( kind == "table" || kind == "summary_table" || kind == "topn_table" )
+  {
+    if ( !dataOk || points.empty() )
+    {
+      if ( error )
+        *error = QStringLiteral( "table charts need binding.data with at least one entry" );
+      return false;
+    }
+    // Caps: 64 rendered rows; overflows keep a deterministic trailing
+    // "+N more" row so nothing disappears silently. topn sorts descending
+    // before the cap.
+    constexpr int kMaxTableRows = 64;
+    std::vector<std::pair<QString, double>> rows = points;
+    rows.erase( std::remove_if( rows.begin(), rows.end(),
+                                []( const auto &row ) { return !std::isfinite( row.second ); } ),
+                rows.end() );
+    if ( rows.empty() )
+    {
+      if ( error )
+        *error = QStringLiteral( "table charts need at least one finite value" );
+      return false;
+    }
+    int topN = 10;
+    if ( kind == "topn_table" )
+    {
+      if ( chart.isMember( "style" ) && chart["style"].isMember( "top_n" ) &&
+           chart["style"]["top_n"].isIntegral() )
+        topN = std::clamp( chart["style"]["top_n"].asInt(), 1, kMaxTableRows );
+      std::stable_sort( rows.begin(), rows.end(),
+                        []( const auto &a, const auto &b ) { return a.second > b.second; } );
+      if ( static_cast<int>( rows.size() ) > topN )
+        rows.resize( topN );
+    }
+    // Every kind honors the 64-row render budget; the overflow row reports
+    // what was left out (review fix: plain tables silently dropped rows).
+    if ( static_cast<int>( rows.size() ) > kMaxTableRows )
+      rows.resize( kMaxTableRows );
+    const int hidden =
+      static_cast<int>( points.size() ) - static_cast<int>( rows.size() );
+    const bool withSummary = kind == "summary_table";
+    const QString labelHeader =
+      chart.isMember( "style" ) && chart["style"].isMember( "label_column" ) &&
+          chart["style"]["label_column"].isString()
+        ? QString::fromStdString( chart["style"]["label_column"].asString() )
+        : QStringLiteral( "Class" );
+    const QString valueHeader =
+      chart.isMember( "style" ) && chart["style"].isMember( "value_column" ) &&
+          chart["style"]["value_column"].isString()
+        ? QString::fromStdString( chart["style"]["value_column"].asString() )
+        : QStringLiteral( "Value" );
+
+    qreal y = 24;
+    const qreal rowH = painter.fontMetrics().height() + 4;
+    const qreal labelW = ( size.width() - 8 ) * 0.62;
+    const qreal valueW = ( size.width() - 8 ) * 0.38;
+    auto drawRow = [ & ]( const QString &label, const QString &value, bool header,
+                          bool zebra ) {
+      if ( header )
+      {
+        painter.setPen( textColor );
+        painter.drawText( QRectF( 4, y, labelW, rowH ), Qt::AlignLeft | Qt::AlignVCenter, label );
+        painter.drawText( QRectF( 4 + labelW, y, valueW, rowH ),
+                          Qt::AlignRight | Qt::AlignVCenter, value );
+        y += rowH + 1;
+        painter.setPen( QPen( QColor( 0x90, 0x90, 0x90 ), 1 ) );
+        painter.drawLine( QPointF( 4, y ), QPointF( size.width() - 4, y ) );
+        return;
+      }
+      if ( zebra )
+        painter.fillRect( QRectF( 4, y, size.width() - 8, rowH ), QColor( 0xf2, 0xf4, 0xf7 ) );
+      painter.setPen( textColor );
+      // Long/CJK labels elide deterministically at the column width.
+      painter.drawText( QRectF( 4, y, labelW, rowH ), Qt::AlignLeft | Qt::AlignVCenter,
+                        painter.fontMetrics().elidedText( label, Qt::ElideRight,
+                                                          static_cast<int>( labelW - 8 ) ) );
+      painter.drawText( QRectF( 4 + labelW, y, valueW, rowH ),
+                        Qt::AlignRight | Qt::AlignVCenter, value );
+      y += rowH;
+    };
+
+    drawRow( labelHeader, valueHeader, true, false );
+    if ( withSummary )
+    {
+      double sum = 0.0;
+      double minV = rows.front().second;
+      double maxV = rows.front().second;
+      for ( const auto &row : rows )
+      {
+        sum += row.second;
+        minV = std::min( minV, row.second );
+        maxV = std::max( maxV, row.second );
+      }
+      const double mean = sum / rows.size();
+      drawRow( QStringLiteral( "n / mean" ),
+               QStringLiteral( "%1 / %2" ).arg( rows.size() ).arg( mean, 0, 'g', 4 ), false, true );
+      drawRow( QStringLiteral( "sum / min–max" ),
+               QStringLiteral( "%1 / %2–%3" ).arg( sum, 0, 'g', 4 ).arg( minV, 0, 'g', 4 ).arg( maxV, 0, 'g', 4 ),
+               false, false );
+    }
+    int rendered = 0;
+    for ( const auto &row : rows )
+    {
+      if ( rendered >= kMaxTableRows )
+        break;
+      drawRow( QString::number( rendered + 1 ) + QLatin1String( ". " ) + row.first,
+               QString::number( row.second, 'g', 6 ), false, rendered % 2 == 0 );
+      ++rendered;
+    }
+    if ( hidden > 0 )
+      drawRow( QStringLiteral( "… + %1 more" ).arg( hidden ), QString(), false, false );
+    if ( !title.isEmpty() )
+    {
+      painter.setPen( textColor );
+      painter.drawText( QRectF( 0, 4, size.width(), 20 ), Qt::AlignCenter, title );
+    }
+    return true;
+  }
+
+  // --- sparkline: axes-free compact trend with baseline ---------------------
+  if ( kind == "sparkline" )
+  {
+    if ( !dataOk || points.size() < 2 )
+    {
+      if ( error )
+        *error = QStringLiteral( "sparkline needs binding.data with at least two entries" );
+      return false;
+    }
+    double minV = std::numeric_limits<double>::infinity();
+    double maxV = -std::numeric_limits<double>::infinity();
+    for ( const auto &point : points )
+    {
+      if ( !std::isfinite( point.second ) )
+        continue;
+      minV = std::min( minV, point.second );
+      maxV = std::max( maxV, point.second );
+    }
+    if ( !std::isfinite( minV ) )
+    {
+      if ( error )
+        *error = QStringLiteral( "sparkline needs at least one finite value" );
+      return false;
+    }
+    if ( maxV - minV < 1e-12 )
+      maxV = minV + 1.0;
+    const QRectF area( 6.0, 26.0, size.width() - 12.0, size.height() - 38.0 );
+    painter.setRenderHint( QPainter::Antialiasing, true );
+    QPainterPath path;
+    bool started = false;
+    for ( int i = 0; i < static_cast<int>( points.size() ); ++i )
+    {
+      if ( !std::isfinite( points[i].second ) )
+        continue;
+      const double x = area.left() + area.width() * i / std::max<qreal>( 1, points.size() - 1 );
+      const double t = ( points[i].second - minV ) / ( maxV - minV );
+      const double y = area.bottom() - area.height() * t;
+      if ( !started )
+      {
+        path.moveTo( x, y );
+        started = true;
+      }
+      else
+      {
+        path.lineTo( x, y );
+      }
+    }
+    painter.setPen( QPen( paletteColor( chart["style"], 0 ), 2 ) );
+    painter.drawPath( path );
+    painter.setPen( QPen( QColor( 0xbb, 0xbb, 0xbb ), 1, Qt::DashLine ) );
+    painter.drawLine( QPointF( area.left(), area.bottom() ), QPointF( area.right(), area.bottom() ) );
+    if ( !title.isEmpty() )
+    {
+      painter.setPen( textColor );
+      painter.drawText( QRectF( 0, 4, size.width(), 20 ), Qt::AlignCenter, title );
+    }
+    return true;
+  }
+
+  // --- grouped bars: real side-by-side segments per label (5.0) -------------
+  if ( kind == "grouped_bar" )
+  {
+    const Json::Value &data = chart.isMember( "binding" ) && chart["binding"].isMember( "data" )
+                                ? chart["binding"]["data"]
+                                : Json::Value::nullSingleton();
+    if ( !data.isArray() || data.empty() )
+    {
+      if ( error )
+        *error = QStringLiteral( "grouped_bar needs binding.data entries" );
+      return false;
+    }
+    // Series legend = distinct part labels in first-seen order.
+    QStringList seriesLabels;
+    double maxPart = 0.0;
+    for ( const auto &entry : data )
+    {
+      if ( !entry.isObject() || !entry.isMember( "parts" ) || !entry["parts"].isArray() )
+      {
+        if ( error )
+          *error = QStringLiteral( "grouped_bar entries need parts arrays" );
+        return false;
+      }
+      for ( const auto &part : entry["parts"] )
+      {
+        if ( !part.isObject() )
+          continue;
+        const double value = part.isMember( "value" ) && part["value"].isNumeric()
+                               ? part["value"].asDouble()
+                               : 0.0;
+        if ( std::isfinite( value ) )
+          maxPart = std::max( maxPart, std::fabs( value ) );
+        const QString label = QString::fromStdString( part.get( "label", "" ).asString() );
+        if ( !label.isEmpty() && !seriesLabels.contains( label ) )
+          seriesLabels << label;
+      }
+    }
+    if ( maxPart <= 0 )
+      maxPart = 1.0;
+
+    QRectF plotRect( 44.0, 44.0, size.width() - 54.0, size.height() - 66.0 );
+    drawAxes( painter, plotRect, maxPart, showGrid, textColor );
+    const int groups = static_cast<int>( data.size() );
+    const double groupWidth = plotRect.width() / std::max( 1, groups );
+    const int series = static_cast<int>( std::max<qsizetype>( 1, seriesLabels.size() ) );
+    const double barWidth = std::max( 2.0, groupWidth / series - 2.0 );
+    for ( int g = 0; g < groups; ++g )
+    {
+      const Json::Value &entry = data[g];
+      int s = 0;
+      for ( const auto &part : entry.get( "parts", Json::Value() ) )
+      {
+        if ( !part.isObject() )
+          continue;
+        const double value = part.isMember( "value" ) && part["value"].isNumeric()
+                               ? part["value"].asDouble()
+                               : 0.0;
+        const double h = plotRect.height() * std::fabs( value ) / maxPart;
+        const double x = plotRect.left() + g * groupWidth + s * ( barWidth + 2.0 );
+        painter.setBrush( paletteColor( chart["style"], s ) );
+        painter.setPen( Qt::NoPen );
+        painter.drawRect( QRectF( x, plotRect.bottom() - h, barWidth, h ) );
+        ++s;
+      }
+      const QString label = QString::fromStdString( entry.get( "label", "" ).asString() );
+      if ( !label.isEmpty() && groupWidth > 12 )
+      {
+        painter.setPen( textColor );
+        painter.drawText( QRectF( plotRect.left() + g * groupWidth, plotRect.bottom() + 4, groupWidth, 18 ),
+                          Qt::AlignCenter, label );
+      }
+    }
+    // Compact series legend across the top.
+    if ( !seriesLabels.isEmpty() )
+    {
+      qreal legendX = 44.0;
+      for ( int s = 0; s < seriesLabels.size(); ++s )
+      {
+        painter.fillRect( QRectF( legendX, 30, 8, 8 ), paletteColor( chart["style"], s ) );
+        painter.setPen( textColor );
+        painter.drawText( QRectF( legendX + 11, 24, 90, 18 ), Qt::AlignLeft | Qt::AlignVCenter,
+                          painter.fontMetrics().elidedText( seriesLabels[s], Qt::ElideRight, 90 ) );
+        legendX += 108;
+        if ( legendX > size.width() - 60 )
+          break;
+      }
+    }
+    if ( !title.isEmpty() )
+    {
+      painter.setPen( textColor );
+      painter.drawText( QRectF( 0, 4, size.width(), 20 ), Qt::AlignCenter, title );
+    }
+    return true;
+  }
+
   if ( points.empty() ) // re-check for the generic kinds (matrix/metric returned above)
   {
     if ( error )
@@ -454,7 +729,8 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
                              : "";
   if ( !isKnownKind( kind ) )
     problems.push_back(
-      "kind must be one of bar|line|pie|histogram|area|scatter|stacked_bar|matrix|metric" );
+      "kind must be one of bar|line|pie|histogram|area|scatter|stacked_bar|matrix|metric|"
+      "grouped_bar|table|summary_table|topn_table|sparkline" );
   if ( !chart.isMember( "binding" ) || !chart["binding"].isObject() )
   {
     problems.push_back( "chart needs a binding object" );

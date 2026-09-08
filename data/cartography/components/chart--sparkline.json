@@ -1,0 +1,46 @@
+{
+  "id": "chart/sparkline",
+  "version": 1,
+  "category": "chart",
+  "semantic_roles": [
+    "chart.trend"
+  ],
+  "description": "Axes-free compact trend line with a dashed baseline; the series-extraction companion for report blocks.",
+  "parameters": {},
+  "defaults": {
+    "chart": {
+      "kind": "sparkline",
+      "binding": {
+        "mode": "inline",
+        "data": []
+      }
+    }
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "margin_mm": 4,
+    "min_size_mm": [
+      22,
+      10
+    ],
+    "max_size_mm": [
+      60,
+      24
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "temporal",
+      "statistics"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "series",
+      "source": "params.series",
+      "required": true,
+      "description": "[{label, value}] time series (>=2 finite points)."
+    }
+  ]
+}

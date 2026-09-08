@@ -1,0 +1,48 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.terrain_roughness",
+ "title": "Terrain roughness",
+ "intent": "terrain",
+ "family": "terrain",
+ "modality": "terrain",
+ "sensors": [
+  "dem"
+ ],
+ "description": "Roughness (local relief range) for terrain texture metrics.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Hydrologically consistent DEM (projected CRS).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "terrain",
+   "operator_id": "rs:terrain_analysis",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.roughness",
+    "product": "roughness"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "roughness",
+   "from_step": "terrain",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "terrain",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

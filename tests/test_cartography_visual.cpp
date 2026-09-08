@@ -113,6 +113,55 @@ std::vector<Fixture> benchmarkFixtures()
       fixtures.push_back( { "cjk-title", spec } );
     }
   }
+
+  // --- Platform 5.0 scenes (19-scene matrix, VISUAL_TEST_MATRIX.md) --------
+  for ( const char *id : { "report-atlas-appendix-a4l", "report-screen-16x9",
+                           "scientific-publication-a3l", "inset-locator-a4l",
+                           "terrain-dem-a4l", "sar-change-a4l", "model-uncertainty-a4l",
+                           "water-flood-a3p" } )
+  {
+    Json::Value draft = instantiate( id, std::string( "viz5-" ) + id );
+    if ( !draft.isNull() )
+      fixtures.push_back( { id, draft } );
+  }
+  {
+    // A0 poster foundation (large-format single page).
+    Json::Value spec = instantiate( "poster-a0-foundation", "viz5-poster" );
+    if ( !spec.isNull() )
+      fixtures.push_back( { "poster-a0", spec } );
+  }
+  {
+    // Long English title overflow stress.
+    Json::Value spec = instantiate( "classification-a4l", "viz5-long-title" );
+    if ( !spec.isNull() )
+    {
+      spec["titles"][0]["text"] =
+        "Regional Land Cover and Land Use Change Monitoring Results for the "
+        "Upper Yellow River Basin Administration Zone, 2000-2024";
+      fixtures.push_back( { "long-english-title", spec } );
+    }
+  }
+  {
+    // Conditional visibility: optional DEM-branch annotation pruned at compile.
+    Json::Value spec = instantiate( "classification-a4l", "viz5-conditional" );
+    if ( !spec.isNull() )
+    {
+      Json::Value annotation( Json::objectValue );
+      annotation["id"] = "annotation-dem-branch";
+      Json::Value rect( Json::arrayValue );
+      rect.append( 12.0 );
+      rect.append( 170.0 );
+      rect.append( 120.0 );
+      rect.append( 10.0 );
+      annotation["rect_mm"] = rect;
+      annotation["text"] = "DEM branch: slope-adjusted areas";
+      annotation["visible_if"] = "has(dem)";
+      spec["annotations"].append( annotation );
+      Json::Value ctx( Json::objectValue ); // dem absent -> pruned
+      spec["condition_context"] = ctx;
+      fixtures.push_back( { "conditional-optional", spec } );
+    }
+  }
   return fixtures;
 }
 
@@ -148,11 +197,17 @@ TEST_CASE( "Benchmark fixtures: every required scene exists and repairs to passe
            "[cartography][visual][benchmark]" )
 {
   auto fixtures = benchmarkFixtures();
-  REQUIRE( fixtures.size() >= 8 );
+  REQUIRE( fixtures.size() >= 19 );
   const char *required[] = { "classification-a4l", "change-before-after-a4l",
                              "time-series-phenology-a4l", "sar-backscatter-a4l",
                              "scientific-publication-a4l", "multi-panel-a4l",
-                             "dense-legend", "cjk-title" };
+                             "dense-legend", "cjk-title",
+                             "report-atlas-appendix-a4l", "report-screen-16x9",
+                             "scientific-publication-a3l", "inset-locator-a4l",
+                             "terrain-dem-a4l", "sar-change-a4l",
+                             "model-uncertainty-a4l", "water-flood-a3p",
+                             "poster-a0", "long-english-title",
+                             "conditional-optional" };
   for ( const char *name : required )
   {
     bool found = false;

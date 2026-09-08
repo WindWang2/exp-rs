@@ -1,0 +1,48 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.vegetation.evi-map",
+ "version": 1,
+ "title": "EVI vegetation index map",
+ "description": "EVI with statistical threshold class gate; MODIS-compatible.",
+ "tasks": [
+  "vegetation"
+ ],
+ "modalities": [
+  "optical"
+ ],
+ "sensors": [
+  "modis",
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Reflectance product (NIR, Red, Blue)."
+  }
+ ],
+ "analysis_recipe": "harness.optical_evi",
+ "map_template": "vegetation-index-a4l",
+ "style_spec": {
+  "primary": "style.ndvi"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "vegetation",
+  "evi"
+ ],
+ "family": "vegetation"
+}

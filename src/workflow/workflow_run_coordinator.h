@@ -92,10 +92,11 @@ class WorkflowRunCoordinator : public QObject {
     QString checkpointDirectory() const;
 
   signals:
-    /// Emitted on every run-state transition with effective timestamps
-    /// (project_context consumes it for the governance run ledger).
-    void runStateChanged( const QString &runId, const QString &workflowId,
-                          const QString &state, qint64 startedMs, qint64 finishedMs );
+    /// Emitted on every tracked-run state transition. @a startedMs carries the
+    /// truthful run start (creation stamp when the caller has no better one),
+    /// @a finishedMs is 0 while the run is non-terminal.
+    void runStateChanged( const QString &runId, const QString &workflowId, const QString &state,
+                          qint64 startedMs, qint64 finishedMs );
 
   private slots:
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
@@ -111,8 +112,8 @@ class WorkflowRunCoordinator : public QObject {
     /// Terminal roll-up + ArtifactGC + checkpoint retention. Called with
     /// m_mutex held when the last step of a tracked run went terminal.
     void finalizeRunLocked( long pipelineId, WorkflowRun &run );
-    /// Emits runStateChanged with effective timestamps. Requires m_mutex
-    /// held (reads the run, callers serialize state transitions).
+    /// Emits run-state notifications (timings, observers) — callers hold
+    /// m_mutex; the method never re-locks.
     void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
     /// m_mutex-free directory read for call paths that already hold it.
     QString checkpointDirectoryLocked() const;

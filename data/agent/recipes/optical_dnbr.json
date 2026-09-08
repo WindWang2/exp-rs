@@ -1,0 +1,114 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.optical_dnbr",
+ "title": "dNBR burn severity mapping",
+ "intent": "dnbr",
+ "family": "burn-severity",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "inspect -> NBR(pre) -> NBR(post) -> change_difference -> threshold severity classes. Requires NIR+SWIR on both epochs; the dnbr pack verifies both.",
+ "slots": [
+  {
+   "name": "pre",
+   "kind": "raster",
+   "description": "Pre-fire reflectance product (NIR + SWIR).",
+   "required": true
+  },
+  {
+   "name": "post",
+   "kind": "raster",
+   "description": "Post-fire reflectance product (NIR + SWIR).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "nbr_pre",
+   "operator_id": "rs:spectral_index",
+   "params": {
+    "input": "$pre.path",
+    "index": "NBR",
+    "output": "$outputs.nbr_pre"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "nbr_post",
+   "operator_id": "rs:spectral_index",
+   "params": {
+    "input": "$post.path",
+    "index": "NBR",
+    "output": "$outputs.nbr_post"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "dnbr",
+   "operator_id": "rs:change_difference",
+   "params": {
+    "before": "$outputs.nbr_pre",
+    "after": "$outputs.nbr_post",
+    "output": "$outputs.dnbr"
+   },
+   "verification": "raster",
+   "inputs": [
+    {
+     "step": "nbr_pre",
+     "port": "output",
+     "to_port": "before"
+    },
+    {
+     "step": "nbr_post",
+     "port": "output",
+     "to_port": "after"
+    }
+   ]
+  },
+  {
+   "id": "severity",
+   "operator_id": "rs:threshold_raster",
+   "params": {
+    "input": "$outputs.dnbr",
+    "output": "$outputs.severity",
+    "thresholdMethod": "manual",
+    "threshold": "$params.severity_threshold",
+    "cleanup": "majority"
+   },
+   "verification": "raster",
+   "when_param": "severity_threshold",
+   "params_when_skipped": {
+    "input": "$outputs.dnbr",
+    "output": "$outputs.severity",
+    "thresholdMethod": "manual",
+    "threshold": 0.27,
+    "cleanup": "majority"
+   }
+  }
+ ],
+ "outputs": [
+  {
+   "name": "dnbr",
+   "from_step": "dnbr",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "severity",
+   "from_step": "severity",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "dnbr",
+  "renderer_hint": "categorized"
+ }
+}
