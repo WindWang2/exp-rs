@@ -1,0 +1,14 @@
+{
+  "gpu" : true,
+  "id" : "rs:segment",
+  "input" : "raster",
+  "notes" : "Thin adapter over the model execution service (Platform 4.0). Defaults come from the model manifest; labels/mask/confidence are derived from the model's own class planes \u2014 no second inference path exists.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "inference",
+    "segmentation",
+    "deep-learning"
+  ],
+  "task" : "segmentation"
+}

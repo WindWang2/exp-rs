@@ -289,6 +289,10 @@ add_executable(sicnu_geo_rs
     ${CMAKE_SOURCE_DIR}/resources/icons.qrc
 )
 
+# Desktop shell embeds no QML; skip Qt's configure-time qmlimportscanner pass
+# (unreliable on Windows hosts — see the tail of tests/CMakeLists.txt).
+set_target_properties(sicnu_geo_rs PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
+
 target_include_directories(sicnu_geo_rs PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/sdk

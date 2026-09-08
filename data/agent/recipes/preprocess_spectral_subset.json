@@ -1,0 +1,64 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.preprocess_spectral_subset",
+ "title": "Band subset + spectral resample",
+ "intent": "preprocess",
+ "family": "preprocessing",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "Band extraction and spectral resampling to a reference sensor grid.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Input raster product.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "subset",
+   "operator_id": "rs:extract_bands",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.subset"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "resample",
+   "operator_id": "rs:spectral_resample",
+   "params": {
+    "input": "$outputs.subset",
+    "output": "$outputs.resampled"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "subset",
+   "from_step": "subset",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "resampled",
+   "from_step": "resample",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "subset",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

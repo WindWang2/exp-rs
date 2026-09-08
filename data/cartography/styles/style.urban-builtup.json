@@ -1,0 +1,30 @@
+{
+ "schema_version": "1.0",
+ "kind": "style_spec",
+ "id": "style.urban-builtup",
+ "version": 1,
+ "description": "Built-up density from bare to dense urban fabric.",
+ "token_set_ref": "scientific-light",
+ "semantics": [
+  "urban",
+  "built-up"
+ ],
+ "applies_to": "raster",
+ "raster": {
+  "renderertype": "singleband_pseudocolor",
+  "band": 1,
+  "classification": {
+   "mode": "continuous",
+   "ramp": [
+    "#f7f7f7",
+    "#fdae61",
+    "token:colors.error"
+   ],
+   "stretch": {
+    "type": "fixed",
+    "min": 0,
+    "max": 1
+   }
+  }
+ }
+}

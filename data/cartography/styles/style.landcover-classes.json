@@ -1,0 +1,64 @@
+{
+ "schema_version": "1.0",
+ "kind": "style_spec",
+ "id": "style.landcover-classes",
+ "version": 1,
+ "description": "Discrete land-cover classes bound to the land_cover token palette.",
+ "token_set_ref": "scientific-light",
+ "semantics": [
+  "landcover",
+  "classification"
+ ],
+ "applies_to": "raster",
+ "raster": {
+  "renderertype": "singleband_pseudocolor",
+  "band": 1,
+  "classification": {
+   "mode": "discrete",
+   "classes": [
+    {
+     "min": 1,
+     "max": 1,
+     "label": "water",
+     "color": "#4a7fb5"
+    },
+    {
+     "min": 2,
+     "max": 2,
+     "label": "forest",
+     "color": "#2d6a2d"
+    },
+    {
+     "min": 3,
+     "max": 3,
+     "label": "cropland",
+     "color": "#d9c27a"
+    },
+    {
+     "min": 4,
+     "max": 4,
+     "label": "urban",
+     "color": "#b04a4a"
+    },
+    {
+     "min": 5,
+     "max": 5,
+     "label": "bare",
+     "color": "#c9b8a3"
+    },
+    {
+     "min": 6,
+     "max": 6,
+     "label": "grassland",
+     "color": "#8fbf6b"
+    },
+    {
+     "min": 7,
+     "max": 7,
+     "label": "snow/ice",
+     "color": "#e8eef2"
+    }
+   ]
+  }
+ }
+}

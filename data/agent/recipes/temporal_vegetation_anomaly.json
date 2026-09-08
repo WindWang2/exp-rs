@@ -1,0 +1,95 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.temporal_vegetation_anomaly",
+ "title": "Vegetation anomaly screening",
+ "intent": "temporal",
+ "family": "vegetation",
+ "modality": "temporal",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9",
+  "modis"
+ ],
+ "description": "NDVI series -> z-score anomaly against a baseline window -> screening mask.",
+ "slots": [
+  {
+   "name": "collection",
+   "kind": "collection",
+   "description": "Registered temporal collection (spatial:temporal tools).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "series",
+   "operator_id": "rs:temporal_index_series",
+   "params": {
+    "collection": "$collection.path",
+    "index": "NDVI",
+    "output": "$outputs.ndvi_series"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "anomaly",
+   "operator_id": "rs:temporal_anomaly",
+   "params": {
+    "collection": "$collection.path",
+    "band_role": "ndvi",
+    "method": "zscore",
+    "baseline_start": "$params.baseline_start",
+    "baseline_end": "$params.baseline_end",
+    "output": "$outputs.anomaly"
+   },
+   "verification": "raster",
+   "when_param": "baseline_start",
+   "params_when_skipped": {
+    "collection": "$collection.path",
+    "band_role": "ndvi",
+    "method": "zscore",
+    "output": "$outputs.anomaly"
+   }
+  },
+  {
+   "id": "screen",
+   "operator_id": "rs:threshold_raster",
+   "params": {
+    "input": "$outputs.anomaly",
+    "output": "$outputs.anomaly_mask",
+    "thresholdMethod": "manual",
+    "threshold": -2.0,
+    "cleanup": "majority"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "ndvi_series",
+   "from_step": "series",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "anomaly",
+   "from_step": "anomaly",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "anomaly_mask",
+   "from_step": "screen",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "series",
+  "renderer_hint": "categorized"
+ }
+}

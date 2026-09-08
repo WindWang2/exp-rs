@@ -11,6 +11,8 @@
 #include "agent/cartography/cartography_tools.h"
 #include "agent/cartography/design_tokens.h"
 #include "agent/cartography/registry.h"
+#include "agent/cartography/solution_registry.h"
+#include "agent/cartography/style_spec.h"
 #include "agent/mapspec/mapspec.h"
 #include "agent/mapspec/mapspec_compiler.h"
 
@@ -292,6 +294,17 @@ TEST_CASE( "Catalog index drift: generated index matches the committed file",
   TemplateRegistry::instance().reload();
   TokenSetRegistry::instance().setDirectory( QStringLiteral( SICNU_CARTOGRAPHY_DATA_DIR ) );
   TokenSetRegistry::instance().reload();
+
+  // The index now serializes styles + solutions too: point their registries
+  // at the shipped catalogs (a clean build tree has no cwd data dir).
+  StyleRegistry::instance().setDirectory( SICNU_CARTOGRAPHY_DATA_DIR );
+  StyleRegistry::instance().reload();
+  SolutionRegistry::instance().setDirectory(
+    QDir( QDir::cleanPath( SICNU_CARTOGRAPHY_DATA_DIR + QStringLiteral( "/../agent" ) ) )
+      .filePath( QStringLiteral( "solutions" ) ) );
+  SolutionRegistry::instance().reload();
+  TemplateRegistry::instance().setDirectory( SICNU_CARTOGRAPHY_DATA_DIR );
+  TemplateRegistry::instance().reload();
 
   const Json::Value generated = buildCatalogIndex();
   REQUIRE( generated["kind"].asString() == "cartography_catalog_index" );

@@ -298,9 +298,14 @@ Json::Value resolveTokenSet( const Json::Value &specOrStyle )
   const Json::Value style = specOrStyle.isMember( "style" ) && specOrStyle["style"].isObject()
                               ? specOrStyle["style"]
                               : specOrStyle;
+  // Platform 5.0: StyleSpec documents carry their token set as
+  // token_set_ref (their top-level field) — honor it as the fallback so
+  // describe/apply/lint resolve against the style's declared set.
   std::string setId = style.isMember( "token_set" ) && style["token_set"].isString()
                         ? style["token_set"].asString()
-                        : kDefaultTokenSetId;
+                        : ( style.isMember( "token_set_ref" ) && style["token_set_ref"].isString()
+                              ? style["token_set_ref"].asString()
+                              : kDefaultTokenSetId );
   const std::string medium = style.isMember( "medium" ) && style["medium"].isString()
                                ? style["medium"].asString()
                                : "print";

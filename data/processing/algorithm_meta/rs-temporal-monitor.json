@@ -1,0 +1,15 @@
+{
+  "gpu" : false,
+  "id" : "rs:temporal_monitor",
+  "input" : "",
+  "notes" : "CUSUM/EWMA standardize against the full-series per-pixel statistics (retrospective monitoring). Seasonal MK uses calendar-month seasons with the tie-corrected variance.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "temporal",
+    "cusum",
+    "ewma",
+    "mann-kendall"
+  ],
+  "task" : "temporal-monitoring"
+}

@@ -1,0 +1,50 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.phenology.crop-evi",
+ "version": 1,
+ "title": "Crop season EVI profile",
+ "description": "EVI-based season profile for soil-background-heavy croplands (MODIS-friendly).",
+ "tasks": [
+  "phenology",
+  "crop"
+ ],
+ "modalities": [
+  "temporal"
+ ],
+ "sensors": [
+  "modis",
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "collection",
+   "kind": "collection",
+   "required": true,
+   "description": "Temporal collection with red/blue bands."
+  }
+ ],
+ "analysis_recipe": "harness.temporal_evi_season",
+ "map_template": "time-series-phenology-a4l",
+ "style_spec": {
+  "primary": "style.ndvi"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "collection",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "phenology",
+  "evi",
+  "modis"
+ ],
+ "family": "phenology"
+}

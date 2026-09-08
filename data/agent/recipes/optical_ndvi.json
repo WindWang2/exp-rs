@@ -1,0 +1,92 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.optical_ndvi",
+ "title": "NDVI vegetation vigor map",
+ "intent": "ndvi",
+ "family": "optical-index",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "inspect -> optional QA mask -> NDVI -> optional threshold class map. Orchestrates existing operators only; the ndvi preflight pack verifies the required band roles and radiometric state.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Optical reflectance product with the bands required for NDVI.",
+   "required": true
+  },
+  {
+   "name": "qa",
+   "kind": "raster",
+   "description": "Optional QA/cloud mask raster consumed by rs:qa_mask.",
+   "required": false
+  }
+ ],
+ "steps": [
+  {
+   "id": "mask",
+   "operator_id": "rs:qa_mask",
+   "params": {
+    "input": "$qa.path",
+    "output": "$outputs.mask"
+   },
+   "verification": "raster",
+   "when_slot": "qa"
+  },
+  {
+   "id": "index",
+   "operator_id": "rs:spectral_index",
+   "params": {
+    "input": "$primary.path",
+    "index": "NDVI",
+    "output": "$outputs.ndvi"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "classify",
+   "operator_id": "rs:threshold_raster",
+   "params": {
+    "input": "$outputs.ndvi",
+    "output": "$outputs.classified",
+    "thresholdMethod": "manual",
+    "threshold": "$params.threshold",
+    "cleanup": "majority"
+   },
+   "verification": "raster",
+   "when_param": "threshold",
+   "params_when_skipped": {
+    "input": "$outputs.ndvi",
+    "output": "$outputs.classified",
+    "thresholdMethod": "statistical",
+    "statisticalK": 2.0,
+    "cleanup": "majority"
+   }
+  }
+ ],
+ "outputs": [
+  {
+   "name": "ndvi",
+   "from_step": "index",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "classified",
+   "from_step": "classify",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "index",
+  "renderer_hint": "categorized"
+ }
+}

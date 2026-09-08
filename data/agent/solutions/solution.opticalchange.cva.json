@@ -1,0 +1,53 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.opticalchange.cva",
+ "version": 1,
+ "title": "Optical change vector analysis",
+ "description": "CVA magnitude over multi-band epochs with percentile threshold.",
+ "tasks": [
+  "change"
+ ],
+ "modalities": [
+  "optical"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "before",
+   "kind": "raster",
+   "required": true,
+   "description": "Before multi-band raster."
+  },
+  {
+   "name": "after",
+   "kind": "raster",
+   "required": true,
+   "description": "After multi-band raster."
+  }
+ ],
+ "analysis_recipe": "harness.optical_change_cva",
+ "map_template": "change-detection-a4l",
+ "style_spec": {
+  "primary": "style.change-gain-loss"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "before",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "change",
+  "cva"
+ ],
+ "family": "optical-change"
+}

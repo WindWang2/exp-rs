@@ -8,6 +8,8 @@ namespace gdal { void initBuiltinGdalOperators(); }
 namespace opencv { void initBuiltinOpenCvOperators(); }
 #endif
 namespace otb { void initBuiltinOtbOperators(); }
+// Geospatial I/O Foundation 4.0: authoritative conversion/inspection family.
+namespace io { void initBuiltinIoOperators(); }
 
 } // namespace sicnu::operators
 
@@ -37,6 +39,7 @@ RSOperatorRegistry& RSOperatorRegistry::instance() {
         opencv::initBuiltinOpenCvOperators();
 #endif
         otb::initBuiltinOtbOperators();
+        io::initBuiltinIoOperators();
         sicnu::operators::rs::sRegistryUnderConstruction = nullptr;
     });
     return registry;

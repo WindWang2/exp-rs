@@ -34,6 +34,14 @@
 #include "rs_feature_stack_operator.h"
 #include "rs_feature_normalize_operator.h"
 #include "rs_feature_select_operator.h"
+#include "rs_topographic_correction_operator.h"
+#include "rs_spectral_derivative_operator.h"
+#include "rs_spectral_detection_operators.h"
+#include "rs_sar_dualpol_operator.h"
+#include "rs_sar_terrain_masks_operator.h"
+#include "rs_temporal_monitor_operator.h"
+#include "rs_terrain_flow_operator.h"
+#include "rs_raster_spatial_operators.h"
 #include "rs_terrain_analysis_operator.h"
 #include "rs_pca_operator.h"
 #include "rs_mnf_operator.h"
@@ -131,6 +139,21 @@ REGISTER_RS_OPERATOR(RsFeatureStackOperator, "rs:feature_stack")
 REGISTER_RS_OPERATOR(RsFeatureNormalizeOperator, "rs:feature_normalize")
 REGISTER_RS_OPERATOR(RsFeatureSelectOperator, "rs:feature_select")
 REGISTER_RS_OPERATOR(RsTerrainAnalysisOperator, "rs:terrain_analysis")
+REGISTER_RS_OPERATOR(RsTopographicCorrectionOperator, "rs:topographic_correction")
+REGISTER_RS_OPERATOR(RsSpectralDerivativeOperator, "rs:spectral_derivative")
+REGISTER_RS_OPERATOR(RsMatchedFilterOperator, "rs:matched_filter")
+REGISTER_RS_OPERATOR(RsAceOperator, "rs:ace")
+REGISTER_RS_OPERATOR(RsSarDualPolOperator, "rs:sar_dualpol_features")
+REGISTER_RS_OPERATOR(RsSarTerrainMasksOperator, "rs:sar_terrain_masks")
+REGISTER_RS_OPERATOR(RsTemporalMonitorOperator, "rs:temporal_monitor")
+REGISTER_RS_OPERATOR(RsTerrainFlowOperator, "rs:terrain_flow")
+REGISTER_RS_OPERATOR(RsMorphologyOperator, "rs:morphology")
+REGISTER_RS_OPERATOR(RsConnectedComponentsOperator, "rs:connected_components")
+REGISTER_RS_OPERATOR(RsFillHolesOperator, "rs:fill_holes")
+REGISTER_RS_OPERATOR(RsSieveOperator, "rs:sieve")
+REGISTER_RS_OPERATOR(RsProximityOperator, "rs:proximity")
+REGISTER_RS_OPERATOR(RsLocalExtremaOperator, "rs:local_extrema")
+REGISTER_RS_OPERATOR(RsFocalStatsOperator, "rs:focal_stats")
 REGISTER_RS_OPERATOR(RsPcaOperator, "rs:pca")
 REGISTER_RS_OPERATOR(RsMnfOperator, "rs:mnf")
 REGISTER_RS_OPERATOR(RsMosaicOperator, "rs:mosaic")
@@ -253,6 +276,21 @@ void initBuiltinRsOperators() {
   add( "rs:feature_normalize", [] { return std::make_unique<RsFeatureNormalizeOperator>(); } );
   add( "rs:feature_select", [] { return std::make_unique<RsFeatureSelectOperator>(); } );
   add( "rs:terrain_analysis", [] { return std::make_unique<RsTerrainAnalysisOperator>(); } );
+  add( "rs:topographic_correction", [] { return std::make_unique<RsTopographicCorrectionOperator>(); } );
+  add( "rs:spectral_derivative", [] { return std::make_unique<RsSpectralDerivativeOperator>(); } );
+  add( "rs:matched_filter", [] { return std::make_unique<RsMatchedFilterOperator>(); } );
+  add( "rs:ace", [] { return std::make_unique<RsAceOperator>(); } );
+  add( "rs:sar_dualpol_features", [] { return std::make_unique<RsSarDualPolOperator>(); } );
+  add( "rs:sar_terrain_masks", [] { return std::make_unique<RsSarTerrainMasksOperator>(); } );
+  add( "rs:temporal_monitor", [] { return std::make_unique<RsTemporalMonitorOperator>(); } );
+  add( "rs:terrain_flow", [] { return std::make_unique<RsTerrainFlowOperator>(); } );
+  add( "rs:morphology", [] { return std::make_unique<RsMorphologyOperator>(); } );
+  add( "rs:connected_components", [] { return std::make_unique<RsConnectedComponentsOperator>(); } );
+  add( "rs:fill_holes", [] { return std::make_unique<RsFillHolesOperator>(); } );
+  add( "rs:sieve", [] { return std::make_unique<RsSieveOperator>(); } );
+  add( "rs:proximity", [] { return std::make_unique<RsProximityOperator>(); } );
+  add( "rs:local_extrema", [] { return std::make_unique<RsLocalExtremaOperator>(); } );
+  add( "rs:focal_stats", [] { return std::make_unique<RsFocalStatsOperator>(); } );
   add( "rs:pca", [] { return std::make_unique<RsPcaOperator>(); } );
   add( "rs:mnf", [] { return std::make_unique<RsMnfOperator>(); } );
   add( "rs:mosaic", [] { return std::make_unique<RsMosaicOperator>(); } );

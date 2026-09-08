@@ -1,0 +1,51 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.temporal_breakpoints",
+ "title": "Forest disturbance breakpoints",
+ "intent": "temporal",
+ "family": "temporal",
+ "modality": "temporal",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9",
+  "modis"
+ ],
+ "description": "BFAST-style breakpoint detection over the series; segments land-cover disturbance events.",
+ "slots": [
+  {
+   "name": "collection",
+   "kind": "collection",
+   "description": "Registered temporal collection (spatial:temporal tools).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "breakpoints",
+   "operator_id": "rs:temporal_breakpoints",
+   "params": {
+    "collection": "$collection.path",
+    "band_role": "$params.band_role",
+    "output": "$outputs.breakpoints"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "breakpoints",
+   "from_step": "breakpoints",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "breakpoints",
+  "renderer_hint": "categorized"
+ }
+}

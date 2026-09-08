@@ -47,7 +47,26 @@ class Result
       return m_value.has_value();
     }
 
+    /// std::optional-vocabulary alias for the boolean state (Foundation 5.0,
+    /// ADR 0134): identical to operator bool, additive only.
+    bool has_value() const
+    {
+      return m_value.has_value();
+    }
+
     const T &value() const
+    {
+      return m_value.value();
+    }
+
+    /// std::optional-style accessors (Foundation 5.0, ADR 0134): identical
+    /// semantics to value(), additive only.
+    const T *operator->() const
+    {
+      return &m_value.value();
+    }
+
+    const T &operator*() const
     {
       return m_value.value();
     }
@@ -100,6 +119,13 @@ class Result<void>
     }
 
     explicit operator bool() const
+    {
+      return m_success;
+    }
+
+    /// std::optional-vocabulary alias for the boolean state (Foundation 5.0,
+    /// ADR 0134): identical to operator bool, additive only.
+    bool has_value() const
     {
       return m_success;
     }

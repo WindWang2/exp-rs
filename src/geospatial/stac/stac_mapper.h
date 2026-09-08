@@ -1,0 +1,87 @@
+/***************************************************************************
+  geospatial/stac/stac_mapper.h
+  Geospatial I/O Foundation 4.0 — STAC interoperability.
+  ---------------------------
+  Begin                : 2026-09
+  Copyright            : (C) 2026 SICNU GEO RS
+
+  Read: STAC Item JSON → StacItem view → CanonicalMetadata enrichment
+        (properties.datetime → acquisition, eo:cloud_cover → cloud cover,
+         eo:bands → roles/wavelengths, proj:epsg → CRS, sar:* → polarizations).
+  Write: CanonicalMetadata → STAC-compatible Item JSON (properties with the
+         common + eo + projection extension vocabulary, bbox/geometry from the
+         canonical extent, assets from the declared href).
+  Lineage/provenance stays with the governance APIs; this module produces and
+  consumes metadata only.
+ ***************************************************************************/
+
+#ifndef SICNU_GEOSPATIAL_STAC_MAPPER_H
+#define SICNU_GEOSPATIAL_STAC_MAPPER_H
+
+#include "geospatial/common.h"
+#include "geospatial/metadata/canonical_metadata.h"
+
+#include <json/json.h>
+
+#include <map>
+#include <string>
+#include <vector>
+
+namespace sicnu::geo
+{
+
+struct StacAsset
+{
+    std::string href;
+    std::string title;
+    std::string mediaType;               ///< "image/tiff", "image/jp2", ...
+    std::vector<std::string> roles;      ///< "data", "visual", "thumbnail", ...
+    Json::Value toJson() const;
+};
+
+struct StacItem
+{
+    std::string id;
+    std::string stacVersion;             ///< "1.0.0" typically
+    std::string datetime;                ///< ISO-8601; STAC requires it (or start/end range)
+    std::string startDatetime;
+    std::string endDatetime;
+    std::string platform;
+    std::string constellation;
+    std::vector<std::string> instruments;
+    std::string processingLevel;
+    std::string modality;                ///< optical / sar / dem / ... when declared
+    bool hasCloudCover = false;
+    double cloudCover = 0.0;
+    bool hasGsd = false;
+    double gsd = 0.0;
+    std::vector<std::string> polarizations;   ///< sar:polarizations
+    std::string epsg;                          ///< proj:epsg ("" when absent)
+    std::vector<double> bbox;                  ///< 4 or 6 values
+    Json::Value geometry;                      ///< GeoJSON geometry object
+    std::map<std::string, StacAsset> assets;
+    Json::Value raw;                            ///< the full Item document
+
+    /// Parses a STAC Item document. Structural violations (missing id,
+    /// missing datetime, missing assets) throw GeoError(InvalidArgument).
+    static StacItem parse( const Json::Value &item );
+    static StacItem parseText( const std::string &jsonText );
+    Json::Value toJson() const;                 ///< STAC-compatible Item document
+};
+
+/// Projects a parsed STAC item onto canonical product metadata. The primary
+/// asset (first "data"-roled asset, else first asset) provides media type and
+/// href. Geometric fields (size/geotransform) stay unset — no dataset is
+/// opened; callers enrich by opening the asset with inspectRaster.
+RasterMetadata stacItemToCanonical( const StacItem &item );
+
+/// Generates a STAC-compatible Item from canonical metadata. Requires an
+/// acquisition time or explicit datetime (STAC mandates it) and an extent
+/// (geotransform-derived) for bbox/geometry; missing pieces are structured
+/// errors, not silent omissions.
+Json::Value canonicalToStacItem( const RasterMetadata &metadata, const std::string &assetHref,
+                                 const std::string &itemId );
+
+} // namespace sicnu::geo
+
+#endif // SICNU_GEOSPATIAL_STAC_MAPPER_H

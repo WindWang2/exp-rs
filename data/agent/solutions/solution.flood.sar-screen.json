@@ -1,0 +1,62 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.flood.sar-screen",
+ "version": 1,
+ "title": "SAR flood monitoring sheet (screen)",
+ "description": "SAR flood extent on the dark screen presentation template for operations rooms.",
+ "tasks": [
+  "flood",
+  "water"
+ ],
+ "modalities": [
+  "sar"
+ ],
+ "sensors": [
+  "sentinel-1"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Post-event SAR GRD scene."
+  },
+  {
+   "name": "reference",
+   "kind": "raster",
+   "required": true,
+   "description": "Reference SAR scene."
+  },
+  {
+   "name": "dem",
+   "kind": "raster",
+   "required": false,
+   "description": "Optional DEM."
+  }
+ ],
+ "analysis_recipe": "harness.sar_flood",
+ "map_template": "presentation-screen-dark",
+ "style_spec": {
+  "primary": "style.flood-extent"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "flood",
+  "operations",
+  "dark"
+ ],
+ "family": "flood",
+ "medium": "screen"
+}

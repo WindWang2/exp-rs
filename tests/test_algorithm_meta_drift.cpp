@@ -38,9 +38,13 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     const auto expectedCatalog =
         sicnu::processing::AlgorithmMetaStore::generateCatalog( descriptors );
 
-    // Baseline truth: exactly 7 operators declare a taskFamily in code
-    // (#738 registered the change-detection taskFamily on RsChangeLogRatioOperator).
-    REQUIRE( expectedCatalog.size() == 7 );
+    // Baseline truth: exactly 25 algorithms declare a taskFamily in code
+    // (7 from the Platform 3.0/4.0 tracks; Foundation 5.0 added the raster
+    // spatial / spectral detection / SAR / temporal-monitor / terrain-flow /
+    // topographic-correction families; rs:detect|segment|embedding declared
+    // tasks without shipped sidecars at the Foundation 5.0 baseline and are
+    // now exported like the rest).
+    REQUIRE( expectedCatalog.size() == 25 );
 
     const QString metaDir =
         sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "data/processing/algorithm_meta" ) );
@@ -117,7 +121,7 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
         std::string exportErr;
         const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
             tempDir.path().toStdString(), descriptors, &exportErr );
-        REQUIRE( written == 7 );
+        REQUIRE( written == 25 );
         REQUIRE( exportErr.empty() );
 
         const QDir tempQDir( tempDir.path() );

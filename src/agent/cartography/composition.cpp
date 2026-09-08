@@ -245,6 +245,7 @@ CompositionResult resolveComposition( Json::Value &spec, double marginDefaultMm 
       const std::string cid = constraint.isMember( "id" ) && constraint["id"].isString()
                                 ? constraint["id"].asString()
                                 : kind;
+      const int requiredItems = kind == "fit_content" ? 1 : 2;
 
       // Resolve referenced items (skip unresolvable ones — validation flags).
       std::vector<Json::Value *> items;
@@ -258,9 +259,10 @@ CompositionResult resolveComposition( Json::Value &spec, double marginDefaultMm 
         items.push_back(
           &spec[location["collection"].asString()][location["index"].asInt()] );
       }
-      if ( items.size() < 2 )
+      if ( static_cast<int>( items.size() ) < requiredItems )
       {
-        result.unsatisfied.push_back( cid + ": fewer than two resolvable items" );
+        result.unsatisfied.push_back( cid + ": fewer than " + std::to_string( requiredItems ) +
+                                      " resolvable items" );
         continue;
       }
 
@@ -403,6 +405,143 @@ CompositionResult resolveComposition( Json::Value &spec, double marginDefaultMm 
           result.unsatisfied.push_back( cid + ": unknown distribute direction '" + direction +
                                         "'" );
           solved = false;
+        }
+      }
+      else if ( kind == "below" || kind == "above" || kind == "left_of" || kind == "right_of" )
+      {
+        // v3 relative placement: items = [target, follower] + optional gap_mm.
+        Rect target;
+        Rect follower;
+        if ( !toRect( *items[0], target ) || !toRect( *items[1], follower ) )
+        {
+          result.unsatisfied.push_back( cid + ": target/follower rect unusable" );
+          solved = false;
+        }
+        else
+        {
+          if ( kind == "below" )
+          {
+            follower.x = target.x;
+            follower.y = target.y + target.h + gap;
+          }
+          else if ( kind == "above" )
+          {
+            follower.x = target.x;
+            follower.y = target.y - gap - follower.h;
+          }
+          else if ( kind == "right_of" )
+          {
+            follower.x = target.x + target.w + gap;
+            follower.y = target.y;
+          }
+          else // left_of
+          {
+            follower.x = target.x - gap - follower.w;
+            follower.y = target.y;
+          }
+          writeRect( *items[1], follower );
+        }
+      }
+      else if ( kind == "inside" )
+      {
+        // items = [container, content]: center the content inside the
+        // container, clamped to stay within it.
+        Rect container;
+        Rect content;
+        if ( !toRect( *items[0], container ) || !toRect( *items[1], content ) )
+        {
+          result.unsatisfied.push_back( cid + ": container/content rect unusable" );
+          solved = false;
+        }
+        else
+        {
+          content.x = container.x + ( container.w - content.w ) / 2.0;
+          content.y = container.y + ( container.h - content.h ) / 2.0;
+          content.x = std::max( container.x, std::min( content.x, container.x + container.w - content.w ) );
+          content.y = std::max( container.y, std::min( content.y, container.y + container.h - content.h ) );
+          writeRect( *items[1], content );
+        }
+      }
+      else if ( kind == "keep_with" )
+      {
+        // items = [anchor, companion]: pin the companion directly below the
+        // anchor with the gap, preserving its horizontal position, so the two
+        // cannot drift apart in later layout passes.
+        Rect anchor;
+        Rect companion;
+        if ( !toRect( *items[0], anchor ) || !toRect( *items[1], companion ) )
+        {
+          result.unsatisfied.push_back( cid + ": anchor/companion rect unusable" );
+          solved = false;
+        }
+        else
+        {
+          companion.y = anchor.y + anchor.h + gap;
+          writeRect( *items[1], companion );
+        }
+      }
+      else if ( kind == "avoid_overlap" )
+      {
+        // items = [keeper, mover]: when they intersect, the mover is pushed
+        // below the keeper by the gap (deterministic resolution direction).
+        Rect keeper;
+        Rect mover;
+        if ( !toRect( *items[0], keeper ) || !toRect( *items[1], mover ) )
+        {
+          result.unsatisfied.push_back( cid + ": keeper/mover rect unusable" );
+          solved = false;
+        }
+        else
+        {
+          const bool overlaps = mover.x < keeper.x + keeper.w && keeper.x < mover.x + mover.w &&
+                                mover.y < keeper.y + keeper.h && keeper.y < mover.y + mover.h;
+          if ( overlaps )
+          {
+            mover.y = keeper.y + keeper.h + gap;
+            writeRect( *items[1], mover );
+          }
+        }
+      }
+      else if ( kind == "fit_content" )
+      {
+        // items = [item] with content_mm [w, h]: resize the item to its
+        // declared content size clamped by min/max_size_mm. Single-item
+        // relative constraint (target + declared content).
+        if ( items.size() < 1 || !toRect( *items[0], leader ) )
+        {
+          result.unsatisfied.push_back( cid + ": fit_content needs one item with a rect" );
+          solved = false;
+        }
+        else
+        {
+          const Json::Value &content = constraint.get( "content_mm", Json::Value() );
+          if ( !content.isArray() || content.size() != 2 || !content[0].isNumeric() ||
+               !content[1].isNumeric() )
+          {
+            result.unsatisfied.push_back( cid + ": fit_content needs content_mm" );
+            solved = false;
+          }
+          else
+          {
+            Rect rect = leader;
+            rect.w = content[0].asDouble();
+            rect.h = content[1].asDouble();
+            const Json::Value &minSize = items[0]->get( "min_size_mm", Json::Value() );
+            const Json::Value &maxSize = items[0]->get( "max_size_mm", Json::Value() );
+            if ( minSize.isArray() && minSize.size() == 2 )
+            {
+              rect.w = std::max( rect.w, minSize[0].asDouble() );
+              rect.h = std::max( rect.h, minSize[1].asDouble() );
+            }
+            if ( maxSize.isArray() && maxSize.size() == 2 )
+            {
+              rect.w = std::min( rect.w, maxSize[0].asDouble() );
+              rect.h = std::min( rect.h, maxSize[1].asDouble() );
+            }
+            rect.x = leader.x;
+            rect.y = leader.y;
+            writeRect( *items[0], rect );
+          }
         }
       }
       else

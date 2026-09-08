@@ -28,7 +28,9 @@ using namespace params;
 namespace {
 
 const std::vector<std::string> s_products = {
-    "slope", "aspect", "hillshade", "roughness", "tri", "tpi"
+    "slope", "aspect", "hillshade", "roughness", "tri", "tpi",
+    "curvature_profile", "curvature_plan", "curvature_total",
+    "hillshade_multidirectional", "local_relief"
 };
 
 } // anonymous namespace
@@ -218,6 +220,17 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
             return TerrainAnalysis::tri(demTile, productTile, tileW, tileH, computeNodata);
         } else if (product == "tpi") {
             return TerrainAnalysis::tpi(demTile, productTile, tileW, tileH, computeNodata);
+        } else if (product == "curvature_profile") {
+            return TerrainAnalysis::curvatureProfile(demTile, productTile, tileW, tileH, cellSizeX, cellSizeY, computeNodata);
+        } else if (product == "curvature_plan") {
+            return TerrainAnalysis::curvaturePlan(demTile, productTile, tileW, tileH, cellSizeX, cellSizeY, computeNodata);
+        } else if (product == "curvature_total") {
+            return TerrainAnalysis::curvatureTotal(demTile, productTile, tileW, tileH, cellSizeX, cellSizeY, computeNodata);
+        } else if (product == "hillshade_multidirectional") {
+            return TerrainAnalysis::hillshadeMultidirectional(demTile, productTile, tileW, tileH, cellSizeX, cellSizeY, computeNodata,
+                                                              sunElevation);
+        } else if (product == "local_relief") {
+            return TerrainAnalysis::localRelief(demTile, productTile, tileW, tileH, computeNodata);
         }
         return false;
     };

@@ -1,0 +1,50 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.forest.disturbance-series",
+ "version": 1,
+ "title": "Forest disturbance monitoring",
+ "description": "NBR series breakpoints + Sen trend for disturbance event detection.",
+ "tasks": [
+  "forest",
+  "temporal"
+ ],
+ "modalities": [
+  "temporal"
+ ],
+ "sensors": [
+  "sentinel-2",
+  "landsat"
+ ],
+ "input_contracts": [
+  {
+   "name": "collection",
+   "kind": "collection",
+   "required": true,
+   "description": "NBR-ready temporal collection."
+  }
+ ],
+ "analysis_recipe": "harness.temporal_forest_disturbance",
+ "map_template": "change-detection-a4l",
+ "style_spec": {
+  "primary": "style.change-gain-loss"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "collection",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "forest",
+  "disturbance",
+  "breakpoints"
+ ],
+ "family": "forest-disturbance"
+}

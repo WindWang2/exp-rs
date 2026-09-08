@@ -84,6 +84,17 @@ Maintained in the epic planning dossier; the durable summary:
   continuum removal; endmember PPI streaming-vs-kernel agreement.
 - Classification/OBIA: pipeline E2E + accuracy metrics; grid refusals at the
   operator boundary.
+- Foundation 5.0 additions (per family): shared primitives closed forms
+  (`test_primitives5`), topographic-correction known-answer E2E +
+  illumination closed forms (`test_topographic_correction`), index-family
+  hand formulas (`test_spectral_indices`), spectral-derivative closed forms
+  + index-space refusal (`test_spectral_derivative`), matched-filter/ACE
+  identity-background cosines + planted-target E2E
+  (`test_spectral_detection`), dual-pol and terrain-geometry closed forms +
+  E2E (`test_sar_foundation5`), temporal CUSUM/EWMA/seasonal-MK hand series
+  (`test_temporal_algorithms`), terrain curvature/hillshade/flow analytic
+  surfaces (`test_terrain_foundation5`), and raster-spatial operator E2E
+  (`test_raster_spatial5`).
 
 Known thin areas are tracked as issues, not silently tolerated.
 

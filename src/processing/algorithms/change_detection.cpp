@@ -1,6 +1,8 @@
 // src/processing/algorithms/change_detection.cpp — Change detection algorithms
 #include "change_detection.h"
 #include "math_utils.h"
+#include "primitives/morphology.h"
+#include "primitives/raster_histogram.h"
 #include "core/sicnu_logging.h"
 #include "framework/input_validator.h"
 
@@ -204,51 +206,13 @@ bool otsuThresholdFromHistogram(double minVal, double maxVal,
 {
     if (!threshold || hist.empty() || finiteCount == 0)
         return false;
-    const double range = maxVal - minVal;
-    if (range <= 0.0) {
-        *threshold = static_cast<float>(minVal);
-        return true;
-    }
-    const int bins = static_cast<int>(hist.size());
-
-    // Otsu: maximize between-class variance over cumulative histogram sums.
-    const double total = static_cast<double>(finiteCount);
-    double sumAll = 0.0;
-    for (int b = 0; b < bins; ++b)
-        sumAll += hist[static_cast<size_t>(b)] * b;
-
-    double sumB = 0.0;
-    double weightB = 0.0;
-    double bestVariance = -1.0;
-    // Bins inside an empty gap between two clusters all yield the identical
-    // (bitwise-equal) between-class variance; averaging the tied maxima picks
-    // the middle of the gap instead of its first edge, which is the robust
-    // convention for well-separated bimodal distributions.
-    double bestBinSum = 0.0;
-    int bestBinCount = 0;
-    for (int b = 0; b < bins; ++b) {
-        weightB += hist[static_cast<size_t>(b)];
-        if (weightB == 0.0)
-            continue;
-        sumB += hist[static_cast<size_t>(b)] * b;
-        const double weightF = total - weightB;
-        if (weightF == 0.0)
-            break;
-        const double meanB = sumB / weightB;
-        const double meanF = (sumAll - sumB) / weightF;
-        const double between = weightB * weightF * (meanB - meanF) * (meanB - meanF);
-        if (between > bestVariance) {
-            bestVariance = between;
-            bestBinSum = static_cast<double>(b);
-            bestBinCount = 1;
-        } else if (between == bestVariance) {
-            bestBinSum += static_cast<double>(b);
-            ++bestBinCount;
-        }
-    }
-
-    const double bestBin = (bestBinCount > 0) ? bestBinSum / bestBinCount : 0.0;
-    *threshold = static_cast<float>(minVal + (bestBin + 0.5) * range / (bins - 1));
+    // Single owner since Foundation 5.0 (primitives/raster_histogram);
+    // formula-identical to the pre-consolidation kernel — the historical
+    // hand-derived cases in test_change_detection.cpp pin the values.
+    double t = 0.0;
+    if (!sicnu::rs::primitives::otsuFromCounts(minVal, maxVal, hist, finiteCount, &t))
+        return false;
+    *threshold = static_cast<float>(t);
     return true;
 }
 
@@ -259,39 +223,14 @@ bool percentileThresholdFromHistogram(double minVal, double maxVal,
 {
     if (!threshold || hist.empty() || finiteCount == 0)
         return false;
-    const double range = maxVal - minVal;
-    if (range <= 0.0) {
-        *threshold = static_cast<float>(minVal);
-        return true;
-    }
-    const int bins = static_cast<int>(hist.size());
-    // Bin width must match the histogram builder, which bins with
-    // (v - minVal) / range * (bins - 1) — i.e. width range/(bins-1), not
-    // range/bins. The old /bins reconstruction biased every percentile low
-    // by up to one bin (#700).
-    const double binWidth = bins > 1 ? range / (bins - 1) : range;
-    const double p = std::clamp(static_cast<double>(percentile), 0.0, 100.0);
-    // Nearest-rank index over the sorted finite values (p == 0 -> minimum).
-    const double rank = std::max(1.0,
-        std::ceil(p / 100.0 * static_cast<double>(finiteCount))) - 1.0;
-
-    double cum = 0.0;
-    for (int b = 0; b < bins; ++b) {
-        const double prev = cum;
-        cum += hist[static_cast<size_t>(b)];
-        if (rank < cum || b == bins - 1) {
-            // The rank falls inside this bin; interpolate linearly to the bin
-            // lower edge + fractional offset. Histogram-estimated, so a value
-            // near the true sorted percentile rather than an exact sample.
-            const double frac = (cum > prev)
-                ? (rank - prev) / (cum - prev)
-                : 0.0;
-            *threshold = static_cast<float>(
-                minVal + (static_cast<double>(b) + std::clamp(frac, 0.0, 1.0)) * binWidth);
-            return true;
-        }
-    }
-    *threshold = static_cast<float>(maxVal);
+    // Single owner since Foundation 5.0 (primitives/raster_histogram) —
+    // same nearest-rank + in-bin linear interpolation, range/(bins−1)
+    // reconstruction (#700).
+    double t = 0.0;
+    if (!sicnu::rs::primitives::quantileFromCounts(minVal, maxVal, hist, finiteCount,
+                                                   percentile, &t))
+        return false;
+    *threshold = static_cast<float>(t);
     return true;
 }
 
@@ -321,96 +260,33 @@ bool percentileThreshold(const float *values, size_t count, float percentile, fl
     return true;
 }
 
-namespace {
-
-/// One 3x3 pass over a 0/1 mask; 255 (NoData) cells never change.
-void erodePass(const uint8_t *src, uint8_t *dst, int width, int height)
-{
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            const uint8_t v = src[static_cast<size_t>(y) * width + x];
-            if (v != 1) {
-                dst[static_cast<size_t>(y) * width + x] = v;
-                continue;
-            }
-            bool all = true;
-            for (int dy = -1; dy <= 1 && all; ++dy) {
-                for (int dx = -1; dx <= 1; ++dx) {
-                    if (dx == 0 && dy == 0)
-                        continue;
-                    const int nx = x + dx;
-                    const int ny = y + dy;
-                    if (nx < 0 || ny < 0 || nx >= width || ny >= height)
-                        continue; // border: keep the pixel
-                    if (src[static_cast<size_t>(ny) * width + nx] != 1) {
-                        all = false;
-                        break;
-                    }
-                }
-            }
-            dst[static_cast<size_t>(y) * width + x] = all ? 1 : 0;
-        }
-    }
-}
-
-void dilatePass(const uint8_t *src, uint8_t *dst, int width, int height)
-{
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            const uint8_t v = src[static_cast<size_t>(y) * width + x];
-            if (v == 1) {
-                dst[static_cast<size_t>(y) * width + x] = 1;
-                continue;
-            }
-            if (v == 255) {
-                dst[static_cast<size_t>(y) * width + x] = 255;
-                continue;
-            }
-            bool any = false;
-            for (int dy = -1; dy <= 1 && !any; ++dy) {
-                for (int dx = -1; dx <= 1; ++dx) {
-                    if (dx == 0 && dy == 0)
-                        continue;
-                    const int nx = x + dx;
-                    const int ny = y + dy;
-                    if (nx < 0 || ny < 0 || nx >= width || ny >= height)
-                        continue;
-                    if (src[static_cast<size_t>(ny) * width + nx] == 1) {
-                        any = true;
-                        break;
-                    }
-                }
-            }
-            dst[static_cast<size_t>(y) * width + x] = any ? 1 : 0;
-        }
-    }
-}
-
-} // namespace
-
 void morphologicalCleanup(uint8_t *mask, int width, int height, int iterations, MorphOp op)
 {
     if (!mask || width <= 0 || height <= 0 || iterations <= 0 || op == MorphOp::None)
         return;
 
+    // 3x3 eight-connectivity passes delegated to the shared primitive
+    // (Foundation 5.0); the border/sentinel behaviour is unchanged.
+    using sicnu::rs::primitives::Connectivity;
+    constexpr Connectivity kConn = Connectivity::Eight;
     std::vector<uint8_t> scratch(static_cast<size_t>(width) * height);
     for (int it = 0; it < iterations; ++it) {
         switch (op) {
         case MorphOp::Erode:
-            erodePass(mask, scratch.data(), width, height);
+            sicnu::rs::primitives::erode(mask, scratch.data(), width, height, kConn);
             std::copy(scratch.begin(), scratch.end(), mask);
             break;
         case MorphOp::Dilate:
-            dilatePass(mask, scratch.data(), width, height);
+            sicnu::rs::primitives::dilate(mask, scratch.data(), width, height, kConn);
             std::copy(scratch.begin(), scratch.end(), mask);
             break;
         case MorphOp::Open:
-            erodePass(mask, scratch.data(), width, height);
-            dilatePass(scratch.data(), mask, width, height);
+            sicnu::rs::primitives::erode(mask, scratch.data(), width, height, kConn);
+            sicnu::rs::primitives::dilate(scratch.data(), mask, width, height, kConn);
             break;
         case MorphOp::Close:
-            dilatePass(mask, scratch.data(), width, height);
-            erodePass(scratch.data(), mask, width, height);
+            sicnu::rs::primitives::dilate(mask, scratch.data(), width, height, kConn);
+            sicnu::rs::primitives::erode(scratch.data(), mask, width, height, kConn);
             break;
         case MorphOp::None:
             break;

@@ -1,0 +1,46 @@
+{
+  "id": "chart/summary-table",
+  "version": 1,
+  "category": "chart",
+  "semantic_roles": [
+    "chart.statistics"
+  ],
+  "description": "Summary table with an n/mean and sum/min-max header block above the rows.",
+  "parameters": {},
+  "defaults": {
+    "chart": {
+      "kind": "summary_table",
+      "binding": {
+        "mode": "inline",
+        "data": []
+      },
+      "style": {
+        "label_column": "Class",
+        "value_column": "Value"
+      }
+    }
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "margin_mm": 6,
+    "min_size_mm": [
+      30,
+      20
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "statistics",
+      "accuracy"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "rows",
+      "source": "params.table_rows",
+      "required": true,
+      "description": "[{label, value}] rows."
+    }
+  ]
+}

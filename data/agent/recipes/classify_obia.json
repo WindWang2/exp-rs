@@ -1,0 +1,78 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.classify_obia",
+ "title": "OBIA segmentation + classification",
+ "intent": "classify",
+ "family": "classification",
+ "modality": "model",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "Segmentation -> segment statistics feed OBIA classification for object-based mapping.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Optical scene for segmentation.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "segment",
+   "operator_id": "rs:obia_segment",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.segments",
+    "threshold": "$params.segment_threshold"
+   },
+   "verification": "raster",
+   "when_param": "segment_threshold",
+   "params_when_skipped": {
+    "input": "$primary.path",
+    "output": "$outputs.segments",
+    "threshold": 0.5
+   }
+  },
+  {
+   "id": "classify",
+   "operator_id": "rs:obia_classify",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.classification"
+   },
+   "verification": "raster",
+   "inputs": [
+    {
+     "step": "segment",
+     "port": "output",
+     "to_port": "input"
+    }
+   ]
+  }
+ ],
+ "outputs": [
+  {
+   "name": "segments",
+   "from_step": "segment",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "classification",
+   "from_step": "classify",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "segment",
+  "renderer_hint": "categorized"
+ }
+}

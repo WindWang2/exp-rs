@@ -1,0 +1,12 @@
+{
+  "gpu" : false,
+  "id" : "rs:local_extrema",
+  "input" : "raster",
+  "notes" : "Window max/min test over streamed halo tiles (replicate edges); NoData neighbours are excluded from the comparison, NoData centres are NaN. Streaming.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "raster_spatial"
+  ],
+  "task" : "raster_cleanup"
+}

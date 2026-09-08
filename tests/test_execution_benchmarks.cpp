@@ -558,6 +558,8 @@ struct BenchRasters
     QString reflectance;
     QString labels;
     QString qa;
+    QString mask;  // Foundation 5.0: 0/1 float mask (thresholded LCG)
+    QString dem;   // Foundation 5.0: smooth ramp + noise (terrain workloads)
 
     explicit BenchRasters( BenchFixture &fx )
     {
@@ -570,6 +572,49 @@ struct BenchRasters
         registerRaster( fx.dataManager, reflectance );
         registerRaster( fx.dataManager, labels );
         registerRaster( fx.dataManager, qa );
+        // Foundation 5.0 workloads (Milestone L): a 0/1 mask and a DEM.
+        mask = fx.path( "mask.tif" );
+        dem = fx.path( "dem.tif" );
+        {
+            ensureGdalInit();
+            std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+            GDALDatasetH ds = createOutputTiff( mask, fx.width, fx.height, 1, GDT_Float32,
+                                                gt, QStringLiteral( "EPSG:4326" ) );
+            REQUIRE( ds != nullptr );
+            const size_t pixels = static_cast<size_t>( fx.width ) * fx.height;
+            std::vector<float> buf( pixels );
+            uint32_t st = 0xA11CEu;
+            for ( size_t i = 0; i < pixels; ++i )
+                buf[i] = lcgFloat( st ) > 0.5f ? 1.0f : 0.0f;
+            REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, fx.width,
+                                   fx.height, buf.data(), fx.width, fx.height,
+                                   GDT_Float32, 0, 0 ) == CE_None );
+            GDALClose( ds );
+        }
+        {
+            ensureGdalInit();
+            // Sane geographic placement: the #612 degrees->metres conversion
+            // at scene-centre latitude is only physical within [-90, 90].
+            std::array<double, 6> gt = { 100.0, 0.01, 0.0, 40.0, 0.0, -0.01 };
+            GDALDatasetH ds = createOutputTiff( dem, fx.width, fx.height, 1, GDT_Float32,
+                                                gt, QStringLiteral( "EPSG:4326" ) );
+            REQUIRE( ds != nullptr );
+            const size_t pixels = static_cast<size_t>( fx.width ) * fx.height;
+            std::vector<float> buf( pixels );
+            uint32_t st = 0xD3A5u;
+            for ( int y = 0; y < fx.height; ++y )
+                for ( int x = 0; x < fx.width; ++x )
+                {
+                    const size_t i = static_cast<size_t>( y ) * fx.width + x;
+                    buf[i] = static_cast<float>( x ) * 0.5f + 50.0f * lcgFloat( st );
+                }
+            REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, fx.width,
+                                   fx.height, buf.data(), fx.width, fx.height,
+                                   GDT_Float32, 0, 0 ) == CE_None );
+            GDALClose( ds );
+        }
+        registerRaster( fx.dataManager, mask );
+        registerRaster( fx.dataManager, dem );
     }
 };
 
@@ -649,6 +694,130 @@ TEST_CASE( "ebench majority_filter", "[execution_bench]" )
         REQUIRE( payload.isMember( "output" ) );
     } );
     writeBenchJson( "majority_filter", s );
+}
+
+TEST_CASE( "ebench focal_stats", "[execution_bench]" )
+{
+    BenchFixture fx;
+    BenchRasters rasters( fx );
+
+    const BenchSample s = timeWorkload( [&]( BenchSample &sample ) {
+        QVariantMap params;
+        params.insert( "input", rasters.reflectance );
+        params.insert( "output", fx.path( "focal_out.tif" ) );
+        params.insert( "band", 1 );
+        params.insert( "window", 3 );
+        params.insert( "stat", "mean" );
+        const Json::Value payload = runOperatorTask( "rs:focal_stats", params,
+                                                     sample.cacheHits, sample.cacheMisses );
+        REQUIRE( payload.isMember( "output" ) );
+    } );
+    writeBenchJson( "focal_stats_streaming", s );
+}
+
+TEST_CASE( "ebench proximity", "[execution_bench]" )
+{
+    BenchFixture fx;
+    BenchRasters rasters( fx );
+
+    const BenchSample s = timeWorkload( [&]( BenchSample &sample ) {
+        QVariantMap params;
+        params.insert( "input", rasters.mask );
+        params.insert( "output", fx.path( "prox_out.tif" ) );
+        const Json::Value payload = runOperatorTask( "rs:proximity", params,
+                                                     sample.cacheHits, sample.cacheMisses );
+        REQUIRE( payload.isMember( "output" ) );
+    } );
+    writeBenchJson( "proximity_edt", s );
+}
+
+TEST_CASE( "ebench spectral_derivative", "[execution_bench]" )
+{
+    BenchFixture fx;
+    BenchRasters rasters( fx );
+
+    const BenchSample s = timeWorkload( [&]( BenchSample &sample ) {
+        QVariantMap params;
+        params.insert( "input", rasters.reflectance );
+        params.insert( "output", fx.path( "deriv_out.tif" ) );
+        params.insert( "order", 1 );
+        QVariantList wl;
+        for ( int i = 0; i < 4; ++i )
+            wl.append( 500.0 + 100.0 * i );
+        params.insert( "wavelengths", wl );
+        const Json::Value payload = runOperatorTask( "rs:spectral_derivative", params,
+                                                     sample.cacheHits, sample.cacheMisses );
+        REQUIRE( payload.isMember( "output" ) );
+    } );
+    writeBenchJson( "spectral_derivative", s );
+}
+
+TEST_CASE( "ebench topographic_correction", "[execution_bench]" )
+{
+    BenchFixture fx;
+    BenchRasters rasters( fx );
+
+    // Input and DEM must share a grid (typed refusal otherwise) and the DEM
+    // needs a physical scene-centre latitude for the #612 conversion — write
+    // matched rasters instead of reusing the shared fixtures.
+    const QString topoRefl = fx.path( "topo_refl.tif" );
+    const QString topoDem = fx.path( "topo_dem.tif" );
+    {
+        ensureGdalInit();
+        std::array<double, 6> gt = { 100.0, 0.01, 0.0, 40.0, 0.0, -0.01 };
+        for ( int band = 1; band <= 2; ++band )
+        {
+            GDALDatasetH ds = createOutputTiff( band == 1 ? topoRefl : topoDem,
+                                                fx.width, fx.height, 1, GDT_Float32,
+                                                gt, QStringLiteral( "EPSG:4326" ) );
+            REQUIRE( ds != nullptr );
+            const size_t pixels = static_cast<size_t>( fx.width ) * fx.height;
+            std::vector<float> buf( pixels );
+            uint32_t st = band == 1 ? 0x5EED1u : 0x5EED2u;
+            for ( int y = 0; y < fx.height; ++y )
+                for ( int x = 0; x < fx.width; ++x )
+                {
+                    const size_t i = static_cast<size_t>( y ) * fx.width + x;
+                    buf[i] = band == 1 ? 0.1f + 0.4f * lcgFloat( st )
+                                       : static_cast<float>( x ) * 0.5f + 50.0f * lcgFloat( st );
+                }
+            REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, fx.width,
+                                   fx.height, buf.data(), fx.width, fx.height,
+                                   GDT_Float32, 0, 0 ) == CE_None );
+            GDALClose( ds );
+        }
+    }
+
+    const BenchSample s = timeWorkload( [&]( BenchSample &sample ) {
+        QVariantMap params;
+        params.insert( "input", topoRefl );
+        params.insert( "dem", topoDem );
+        params.insert( "output", fx.path( "topo_out.tif" ) );
+        params.insert( "method", "c_correction" );
+        params.insert( "solar_zenith", 30.0 );
+        params.insert( "solar_azimuth", 150.0 );
+        const Json::Value payload = runOperatorTask( "rs:topographic_correction", params,
+                                                     sample.cacheHits, sample.cacheMisses );
+        REQUIRE( payload.isMember( "output" ) );
+    } );
+    writeBenchJson( "topographic_correction", s );
+}
+
+TEST_CASE( "ebench terrain_curvature", "[execution_bench]" )
+{
+    BenchFixture fx;
+    BenchRasters rasters( fx );
+
+    const BenchSample s = timeWorkload( [&]( BenchSample &sample ) {
+        QVariantMap params;
+        params.insert( "input", rasters.dem );
+        params.insert( "output", fx.path( "curv_out.tif" ) );
+        params.insert( "product", "curvature_profile" );
+        const Json::Value payload = runOperatorTask( "rs:terrain_analysis", params,
+                                                     sample.cacheHits, sample.cacheMisses );
+        REQUIRE( payload.isMember( "output" ) );
+    } );
+    writeBenchJson( "terrain_curvature", s );
 }
 
 TEST_CASE( "ebench temporal_composite", "[execution_bench]" )

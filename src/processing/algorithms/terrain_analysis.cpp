@@ -578,3 +578,176 @@ bool TerrainAnalysis::tpi( const float *dem, float *out, int width, int height,
     }
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// Foundation 5.0 (Milestone F): curvature, multidirectional hillshade, relief
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Zevenbergen-Thorne surface-fit derivatives over one 3x3 stencil
+/// (a b c / d e f / g h i, row-major). See terrain_analysis.h for formulas.
+struct ZtDerivatives
+{
+    double zxx = 0.0;
+    double zyy = 0.0;
+    double zxy = 0.0;
+    double zx = 0.0;
+    double zy = 0.0;
+};
+
+ZtDerivatives ztDerivatives( const float k9[9], double csx, double csy )
+{
+    const double a = k9[0], b = k9[1], c = k9[2];
+    const double d = k9[3], e = k9[4], f = k9[5];
+    const double g = k9[6], h = k9[7], i = k9[8];
+    ZtDerivatives z;
+    z.zxx = ( d + f - 2 * e ) / ( csx * csx );
+    z.zyy = ( b + h - 2 * e ) / ( csy * csy );
+    z.zxy = ( g + i - a - c ) / ( 4 * csx * csy );
+    z.zx = ( f - d ) / ( 2 * csx );
+    z.zy = ( h - b ) / ( 2 * csy );
+    return z;
+}
+
+} // namespace
+
+bool TerrainAnalysis::curvatureProfile( const float *dem, float *out, int width, int height,
+                                        float cellSizeX, float cellSizeY, float nodata )
+{
+    if ( !dem || !out || width <= 0 || height <= 0 || cellSizeX <= 0 || cellSizeY <= 0 )
+        return false;
+    for ( int r = 0; r < height; ++r )
+    {
+        for ( int c = 0; c < width; ++c )
+        {
+            const size_t idx = static_cast<size_t>( r ) * width + c;
+            float k9[9];
+            bool anyInvalid = false;
+            for ( int dy = -1; dy <= 1 && !anyInvalid; ++dy )
+                for ( int dx = -1; dx <= 1; ++dx )
+                {
+                    const float v = getCell( dem, width, height, r + dy, c + dx, nodata );
+                    if ( v == nodata || std::isnan( v ) ) { anyInvalid = true; break; }
+                    k9[( dy + 1 ) * 3 + ( dx + 1 )] = v;
+                }
+            if ( anyInvalid ) { out[idx] = nodata; continue; }
+            const ZtDerivatives z = ztDerivatives( k9, cellSizeX, cellSizeY );
+            const double grad2 = z.zx * z.zx + z.zy * z.zy;
+            if ( grad2 <= 0.0 ) { out[idx] = 0.0f; continue; } // flat: no slope line
+            const double profile =
+                ( z.zx * z.zx * z.zxx + 2 * z.zx * z.zy * z.zxy + z.zy * z.zy * z.zyy ) / grad2;
+            out[idx] = static_cast<float>( profile );
+        }
+    }
+    return true;
+}
+
+bool TerrainAnalysis::curvaturePlan( const float *dem, float *out, int width, int height,
+                                     float cellSizeX, float cellSizeY, float nodata )
+{
+    if ( !dem || !out || width <= 0 || height <= 0 || cellSizeX <= 0 || cellSizeY <= 0 )
+        return false;
+    for ( int r = 0; r < height; ++r )
+    {
+        for ( int c = 0; c < width; ++c )
+        {
+            const size_t idx = static_cast<size_t>( r ) * width + c;
+            float k9[9];
+            bool anyInvalid = false;
+            for ( int dy = -1; dy <= 1 && !anyInvalid; ++dy )
+                for ( int dx = -1; dx <= 1; ++dx )
+                {
+                    const float v = getCell( dem, width, height, r + dy, c + dx, nodata );
+                    if ( v == nodata || std::isnan( v ) ) { anyInvalid = true; break; }
+                    k9[( dy + 1 ) * 3 + ( dx + 1 )] = v;
+                }
+            if ( anyInvalid ) { out[idx] = nodata; continue; }
+            const ZtDerivatives z = ztDerivatives( k9, cellSizeX, cellSizeY );
+            const double grad2 = z.zx * z.zx + z.zy * z.zy;
+            if ( grad2 <= 0.0 ) { out[idx] = 0.0f; continue; }
+            const double plan =
+                ( z.zy * z.zy * z.zxx - 2 * z.zx * z.zy * z.zxy + z.zx * z.zx * z.zyy ) / grad2;
+            out[idx] = static_cast<float>( plan );
+        }
+    }
+    return true;
+}
+
+bool TerrainAnalysis::curvatureTotal( const float *dem, float *out, int width, int height,
+                                      float cellSizeX, float cellSizeY, float nodata )
+{
+    if ( !dem || !out || width <= 0 || height <= 0 || cellSizeX <= 0 || cellSizeY <= 0 )
+        return false;
+    for ( int r = 0; r < height; ++r )
+    {
+        for ( int c = 0; c < width; ++c )
+        {
+            const size_t idx = static_cast<size_t>( r ) * width + c;
+            float k9[9];
+            bool anyInvalid = false;
+            for ( int dy = -1; dy <= 1 && !anyInvalid; ++dy )
+                for ( int dx = -1; dx <= 1; ++dx )
+                {
+                    const float v = getCell( dem, width, height, r + dy, c + dx, nodata );
+                    if ( v == nodata || std::isnan( v ) ) { anyInvalid = true; break; }
+                    k9[( dy + 1 ) * 3 + ( dx + 1 )] = v;
+                }
+            if ( anyInvalid ) { out[idx] = nodata; continue; }
+            const ZtDerivatives z = ztDerivatives( k9, cellSizeX, cellSizeY );
+            out[idx] = static_cast<float>( ( z.zxx + z.zyy ) / 2.0 );
+        }
+    }
+    return true;
+}
+
+bool TerrainAnalysis::hillshadeMultidirectional( const float *dem, float *out, int width, int height,
+                                                 float cellSizeX, float cellSizeY, float nodata,
+                                                 float sunElevation )
+{
+    if ( !dem || !out || width <= 0 || height <= 0 )
+        return false;
+    std::vector<float> shade( static_cast<size_t>( width ) * height, 0.0f );
+    // Accumulating mean: the output must start from zero — streaming callers
+    // reuse one product buffer across tiles, so a pre-zeroed assumption would
+    // silently mix previous tiles into the result.
+    std::fill( out, out + static_cast<size_t>( width ) * height, 0.0f );
+    for ( int k = 0; k < 8; ++k )
+    {
+        const float azimuth = 45.0f * k;
+        if ( !hillshade( dem, shade.data(), width, height, cellSizeX, cellSizeY, nodata,
+                         azimuth, sunElevation ) )
+            return false;
+        for ( size_t i = 0, n = shade.size(); i < n; ++i )
+            out[i] += shade[i] / 8.0f;
+    }
+    return true;
+}
+
+bool TerrainAnalysis::localRelief( const float *dem, float *out, int width, int height,
+                                   float nodata )
+{
+    if ( !dem || !out || width <= 0 || height <= 0 )
+        return false;
+    for ( int r = 0; r < height; ++r )
+    {
+        for ( int c = 0; c < width; ++c )
+        {
+            const size_t idx = static_cast<size_t>( r ) * width + c;
+            if ( dem[idx] == nodata || std::isnan( dem[idx] ) ) { out[idx] = nodata; continue; }
+            float lo = dem[idx];
+            float hi = dem[idx];
+            for ( int dy = -1; dy <= 1; ++dy )
+                for ( int dx = -1; dx <= 1; ++dx )
+                {
+                    const float v = getCell( dem, width, height, r + dy, c + dx, nodata );
+                    if ( v == nodata || std::isnan( v ) )
+                        continue;
+                    lo = std::min( lo, v );
+                    hi = std::max( hi, v );
+                }
+            out[idx] = hi - lo;
+        }
+    }
+    return true;
+}

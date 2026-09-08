@@ -1,0 +1,49 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.preprocess_atmospheric_dos1",
+ "title": "Atmospheric correction (DOS1)",
+ "intent": "preprocess",
+ "family": "preprocessing",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "Image-based DOS1 atmospheric correction for scenes without auxiliary atmosphere data.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Input raster product.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "dos1",
+   "operator_id": "rs:atmospheric_dos1",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.surface_reflectance"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "surface_reflectance",
+   "from_step": "dos1",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "dos1",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

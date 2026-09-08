@@ -13,6 +13,7 @@
 #include "sample_tools.h"
 #include "result_assessment_tool.h"
 #include "capability_tools.h"
+#include "io_tools.h"
 #include "workflow_preflight_tool.h"
 #include "../cartography/cartography_tools.h"
 #include "../symbology/symbology_tools.h"
@@ -21,6 +22,7 @@
 #include "../harness/grounding_tools.h"
 #include "../harness/plan_tools.h"
 #include "../harness/recipe_tools.h"
+#include "../harness/solution_tools.h"
 
 namespace sicnu::agent::spatial_tools {
 
@@ -119,6 +121,8 @@ void SpatialToolRegistry::registerBuiltinTools()
   registerSampleTools();
   registerResultAssessmentTool();
   registerCapabilityTools();
+  // Foundation 5.0: read-only io: probe/capabilities/product surfaces.
+  registerIoTools();
   registerWorkflowPreflightTool();
   cartography::registerCartographyTools();
   symbology::registerSymbologyTools();
@@ -135,6 +139,8 @@ void SpatialToolRegistry::registerBuiltinTools()
   harness::registerPlanTools();
   // Harness 4.0 scientific recipes (metadata under data/agent/recipes).
   harness::registerRecipeTools();
+  // Platform 5.0 solution knowledge: solution:search/describe/validate/instantiate.
+  harness::registerSolutionTools();
 }
 
 void SpatialToolRegistry::reset()

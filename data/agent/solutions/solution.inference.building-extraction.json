@@ -1,0 +1,52 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.inference.building-extraction",
+ "version": 1,
+ "title": "Building footprint inference",
+ "description": "Detection/segmentation model inference for building footprints on the urban template.",
+ "tasks": [
+  "urban",
+  "model"
+ ],
+ "modalities": [
+  "model"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Scene for detection."
+  }
+ ],
+ "analysis_recipe": "harness.classify_detect",
+ "map_template": "urban-building-a4l",
+ "style_spec": {
+  "primary": "style.urban-builtup"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "building",
+  "inference",
+  "model"
+ ],
+ "recipe_params": {
+  "model_id": ""
+ },
+ "family": "inference"
+}

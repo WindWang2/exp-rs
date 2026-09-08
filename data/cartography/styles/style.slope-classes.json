@@ -1,0 +1,52 @@
+{
+ "schema_version": "1.0",
+ "kind": "style_spec",
+ "id": "style.slope-classes",
+ "version": 1,
+ "description": "Slope classes for terrain analysis (flat to very steep).",
+ "token_set_ref": "scientific-light",
+ "semantics": [
+  "slope",
+  "terrain"
+ ],
+ "applies_to": "raster",
+ "raster": {
+  "renderertype": "singleband_pseudocolor",
+  "band": 1,
+  "classification": {
+   "mode": "discrete",
+   "classes": [
+    {
+     "min": 0,
+     "max": 2,
+     "label": "flat",
+     "color": "#f7f7f7"
+    },
+    {
+     "min": 2,
+     "max": 5,
+     "label": "gentle",
+     "color": "#f0e442"
+    },
+    {
+     "min": 5,
+     "max": 15,
+     "label": "moderate",
+     "color": "#e69f00"
+    },
+    {
+     "min": 15,
+     "max": 30,
+     "label": "steep",
+     "color": "#d55e00"
+    },
+    {
+     "min": 30,
+     "max": 90,
+     "label": "very steep",
+     "color": "#8b0000"
+    }
+   ]
+  }
+ }
+}

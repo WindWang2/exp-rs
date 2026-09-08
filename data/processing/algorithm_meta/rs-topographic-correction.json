@@ -1,0 +1,15 @@
+{
+  "gpu" : false,
+  "id" : "rs:topographic_correction",
+  "input" : "raster",
+  "notes" : "Two-pass streaming correction (regression + apply); fits are full-scene per band, accumulated in double; bit-exact grade (single-threaded, fixed order).",
+  "output" : "raster",
+  "tags" : 
+  [
+    "optical",
+    "topographic",
+    "c-correction",
+    "minnaert"
+  ],
+  "task" : "radiometric-normalization"
+}

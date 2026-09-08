@@ -1,0 +1,54 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.publication.classification-figure",
+ "version": 1,
+ "title": "Publication figure: land cover",
+ "description": "A4 scientific publication layout for classification results.",
+ "tasks": [
+  "landcover",
+  "publication"
+ ],
+ "modalities": [
+  "model"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Feature raster."
+  },
+  {
+   "name": "training",
+   "kind": "vector",
+   "required": true,
+   "description": "Training samples."
+  }
+ ],
+ "analysis_recipe": "harness.classify_supervised",
+ "map_template": "scientific-publication-a4l",
+ "style_spec": {
+  "primary": "style.landcover-classes"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "publication",
+  "classification"
+ ],
+ "family": "publication"
+}

@@ -1,0 +1,12 @@
+{
+  "gpu" : false,
+  "id" : "rs:focal_stats",
+  "input" : "raster",
+  "notes" : "Window statistics with the replicate edge policy (primitives/window.h); NoData neighbours are excluded; stddev is the population convention. Streaming.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "raster_spatial"
+  ],
+  "task" : "raster_cleanup"
+}

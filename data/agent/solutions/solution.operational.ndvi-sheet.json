@@ -1,0 +1,55 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.operational.ndvi-sheet",
+ "version": 1,
+ "title": "Operational monitoring sheet: NDVI",
+ "description": "A4 operational sheet for routine NDVI monitoring deliveries.",
+ "tasks": [
+  "vegetation",
+  "operations"
+ ],
+ "modalities": [
+  "optical"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Reflectance product."
+  },
+  {
+   "name": "qa",
+   "kind": "raster",
+   "required": false,
+   "description": "Optional QA mask."
+  }
+ ],
+ "analysis_recipe": "harness.optical_ndvi",
+ "map_template": "operational-sheet-a4l",
+ "style_spec": {
+  "primary": "style.ndvi"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "operations",
+  "sheet",
+  "ndvi"
+ ],
+ "family": "operational"
+}

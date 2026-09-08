@@ -1,0 +1,115 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.optical_change_difference",
+ "title": "Optical bi-temporal change (difference)",
+ "intent": "change",
+ "family": "optical-change",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "Optional co-registration -> band difference -> statistical threshold. The change pack blocks CRS/grid/radiometric mismatches.",
+ "slots": [
+  {
+   "name": "before",
+   "kind": "raster",
+   "description": "Before-date raster.",
+   "required": true
+  },
+  {
+   "name": "after",
+   "kind": "raster",
+   "description": "After-date raster.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "align_before",
+   "operator_id": "gdal:reproject",
+   "params": {
+    "input": "$before.path",
+    "output": "$outputs.aligned_before"
+   },
+   "verification": "raster",
+   "when_param": "align",
+   "params_when_skipped": {
+    "input": "$before.path",
+    "output": "$outputs.aligned_before"
+   }
+  },
+  {
+   "id": "align_after",
+   "operator_id": "gdal:reproject",
+   "params": {
+    "input": "$after.path",
+    "output": "$outputs.aligned_after"
+   },
+   "verification": "raster",
+   "when_param": "align",
+   "params_when_skipped": {
+    "input": "$after.path",
+    "output": "$outputs.aligned_after"
+   }
+  },
+  {
+   "id": "difference",
+   "operator_id": "rs:change_difference",
+   "params": {
+    "before": "$outputs.aligned_before",
+    "after": "$outputs.aligned_after",
+    "output": "$outputs.change_map",
+    "band": "$params.band"
+   },
+   "verification": "raster",
+   "inputs": [
+    {
+     "step": "align_before",
+     "port": "output",
+     "to_port": "before"
+    },
+    {
+     "step": "align_after",
+     "port": "output",
+     "to_port": "after"
+    }
+   ]
+  },
+  {
+   "id": "threshold",
+   "operator_id": "rs:threshold_raster",
+   "params": {
+    "input": "$outputs.change_map",
+    "output": "$outputs.change_classified",
+    "thresholdMethod": "statistical",
+    "statisticalK": 2.0,
+    "cleanup": "majority"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "change_map",
+   "from_step": "difference",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "change_classified",
+   "from_step": "threshold",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "difference",
+  "renderer_hint": "categorized"
+ }
+}

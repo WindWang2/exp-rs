@@ -1,0 +1,24 @@
+{
+ "schema_version": "1.0",
+ "kind": "style_spec",
+ "id": "style.sar-backscatter",
+ "version": 1,
+ "description": "SAR backscatter in dB as a gray stretch with documented percentile bounds.",
+ "token_set_ref": "scientific-light",
+ "semantics": [
+  "sar",
+  "backscatter"
+ ],
+ "applies_to": "raster",
+ "raster": {
+  "renderertype": "singleband_gray",
+  "band": 1,
+  "stretch": {
+   "type": "percentile",
+   "percentile": 2,
+   "min": -25,
+   "max": 0
+  },
+  "gamma": 1.0
+ }
+}
