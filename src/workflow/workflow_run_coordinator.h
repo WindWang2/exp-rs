@@ -94,11 +94,21 @@ class WorkflowRunCoordinator : public QObject {
   private slots:
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
+  signals:
+    /// Mirrored after every persisted run-state transition (issue #754):
+    /// terminal/Interrupted transitions carry truthful started/finished ms.
+    void runStateChanged( const QString &runId, const QString &workflowId,
+                          const QString &state, qint64 startedMs, qint64 finishedMs );
+
   private:
     WorkflowRunCoordinator();
     ~WorkflowRunCoordinator() override;
     WorkflowRunCoordinator( const WorkflowRunCoordinator & ) = delete;
     WorkflowRunCoordinator &operator=( const WorkflowRunCoordinator & ) = delete;
+
+    /// Emits runStateChanged for @p run's current state. Requires m_mutex
+    /// held (reads the run; emission is the last thing before unlocking).
+    void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
 
     /// Requires m_mutex held (uses the no-lock directory accessor).
     void persistRunLocked( WorkflowRun &run );
