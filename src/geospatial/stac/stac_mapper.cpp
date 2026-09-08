@@ -202,7 +202,14 @@ Json::Value StacItem::toJson() const
   if ( hasGsd )
     properties["gsd"] = gsd;
   if ( !epsg.empty() && epsg.rfind( "EPSG:", 0 ) == 0 )
-    properties["proj:epsg"] = std::strtol( epsg.c_str() + 5 );
+  {
+    // A non-numeric authority code is omitted (proj:epsg = 0 is a lie, not
+    // a fallback).
+    char *end = nullptr;
+    const long code = std::strtol( epsg.c_str() + 5, &end, 10 );
+    if ( end != nullptr && *end == char(0) && code > 0 )
+      properties["proj:epsg"] = static_cast<Json::Int>( code );
+  }
   if ( !polarizations.empty() )
   {
     Json::Value pols( Json::arrayValue );

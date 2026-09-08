@@ -144,7 +144,10 @@ ProductMetadata readLandsatMtl( const std::string &path )
   // Level-2 MTLs carry REFLECTANCE_MULT_BAND_1 too (inside the
   // LEVEL2_SURFACE_REFLECTANCE group), so its presence alone cannot
   // distinguish TOA from surface reflectance.
-  const bool hasLevel2Group = values.count( "LEVEL2_SURFACE_REFLECTANCE" ) > 0 ||
+  // GROUP names do not survive the key/value map (last-wins "GROUP" key),
+  // so the L2 group is detected against the raw MTL text; FILE_NAME_ST_B10
+  // is a real key.
+  const bool hasLevel2Group = text.find( "LEVEL2_SURFACE_REFLECTANCE" ) != std::string::npos ||
                               values.count( "FILE_NAME_SURFACE_REFLECTANCE" ) > 0 ||
                               values.count( "FILE_NAME_ST_B10" ) > 0;
   const bool l2Product = values.count( "COLLECTION_CATEGORY" ) &&
@@ -688,10 +691,12 @@ std::string productBandRole( ProductKind kind, const std::string &bandName )
 std::string productLandsatBandRole( const std::string &sensorId, const std::string &bandName )
 {
   const std::string upper = upperAscii( sensorId );
-  const BandRoleMapping *table = kLandsatBands;
   if ( upper.find( "ETM" ) != std::string::npos || upper.find( "TM" ) != std::string::npos )
-    table = kLandsatLegacyBands; // TM/ETM+ layout (an unknown sensor keeps OLI)
-  const BandRoleMapping *mapping = findBand( *table, bandName );
+  {
+    const BandRoleMapping *mapping = findBand( kLandsatLegacyBands, bandName );
+    return mapping ? mapping->role : std::string();
+  }
+  const BandRoleMapping *mapping = findBand( kLandsatBands, bandName );
   return mapping ? mapping->role : std::string();
 }
 
