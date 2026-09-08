@@ -91,6 +91,12 @@ class WorkflowRunCoordinator : public QObject {
     void setCheckpointDirectory( const QString &directory );
     QString checkpointDirectory() const;
 
+  signals:
+    /// Emitted on every run-state transition with effective timestamps
+    /// (project_context consumes it for the governance run ledger).
+    void runStateChanged( const QString &runId, const QString &workflowId,
+                          const QString &state, qint64 startedMs, qint64 finishedMs );
+
   private slots:
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
