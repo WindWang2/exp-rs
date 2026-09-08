@@ -88,3 +88,26 @@ export     layout:export                (QGIS Layout remains the renderer)
 
 `cartography:list_templates` (paged, task filter),
 `cartography:instantiate_template`, `cartography:catalog_index`.
+
+## Platform 6.0 — facets, variants and explainable search
+
+Templates declare orthogonal **facets** instead of proliferating
+near-duplicate files:
+
+```jsonc
+"facets": { "tasks": ["classification", "vegetation"],
+            "medium": "a4",            // screen|a4|a3|a0|report|atlas
+            "purpose": "analysis" },   // exploration|analysis|operational|scientific|presentation
+"variants": [ { "id": "a3-landscape", "page": { "width_mm": 420, "height_mm": 297 } } ]
+```
+
+- Facet vocabularies are closed; `validateTemplateFacets` rejects typos so
+  search cannot silently miss.
+- `variants` parameterize page geometry inside ONE descriptor (controlled
+  inheritance stays `extends`).
+- `searchTemplates(templates, query)` (and `TemplateRegistry::search`)
+  filters by `task`/`medium`/`purpose`/`keyword`, returns compact summaries
+  plus `match: {score, reasons[]}` — facet-complete documents outrank legacy
+  ones; results are deterministic (score desc, id asc).
+- `cartography:list_templates` accepts `medium`/`purpose`/`keyword` and
+  routes through the same search, keeping responses inside the token budget.
