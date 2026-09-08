@@ -1,0 +1,153 @@
+[
+  {
+    "id": "operator.rs.mosaic",
+    "title": "栅格镶嵌",
+    "summary": "多景栅格拼接为连续影像，可选羽化与接缝处理。",
+    "category": "数据 I/O",
+    "keywords": ["镶嵌", "拼接", "mosaic", "接缝"],
+    "algorithm": {
+      "whatItDoes": "把多景重投影到统一格网后逐像元合并，重叠区按次序/羽化/统计决定取值。",
+      "whenToUse": "大区域底图生产；时序/光谱合成前的基础数据准备。",
+      "assumptions": ["各景 CRS/分辨率可对齐", "重叠区辐射差异已控制（先做归一化更佳）"],
+      "limitations": ["接缝线处理简化时重叠区可见色差"],
+      "keyParameters": ["inputs", "overlapPolicy", "feather"],
+      "relatedTools": ["rs:temporal_composite"]
+    },
+    "parameters": [
+      {"name": "inputs", "meaning": "参与镶嵌的栅格列表（次序影响重叠优先级）。"},
+      {"name": "overlapPolicy", "meaning": "重叠区取值策略：first/last/mean/min/max。", "recommended": "时相一致用 mean 平滑接缝；以新数据优先用 last。"}
+    ],
+    "related": ["command.rs.mosaic", "concept.rs.memory_policy"]
+  },
+  {
+    "id": "operator.rs.image_fusion",
+    "title": "影像融合（全色锐化）",
+    "summary": "统一入口执行 Brovey/IHS/PCA/Gram-Schmidt/线性融合。",
+    "category": "数据 I/O",
+    "keywords": ["融合", "全色锐化", "pan-sharpening", "fusion"],
+    "algorithm": {
+      "whatItDoes": "把多光谱的低空间分辨率色彩信息与全色高分辨率细节合成高分辨率多光谱影像。",
+      "whenToUse": "高分辨率目视解译、对象分割前的细节增强。",
+      "assumptions": ["全色与多光谱已配准（亚像元）", "光谱范围重叠合理"],
+      "limitations": ["融合改变光谱保真度，定量分析慎用融合产品"],
+      "keyParameters": ["method", "ratio"],
+      "relatedTools": ["rs:fusion_brovey", "rs:fusion_gram_schmidt"]
+    },
+    "parameters": [
+      {"name": "method", "meaning": "算法：brovey（快速、饱和度自然）、ihs（色彩保持好）、pca、gram_schmidt（光谱保真较高）、linear。", "recommended": "制图展示 brovey/ihs；需要光谱一致性选 gram_schmidt。"},
+      {"name": "ratio", "meaning": "全色/多光谱分辨率比（如 4）。", "warnings": ["比例错误直接导致配准错位。"]}
+    ],
+    "related": ["command.rs.fusion", "operator.rs.fusion_brovey", "operator.rs.fusion_gram_schmidt"]
+  },
+  {
+    "id": "operator.rs.fusion_linear", "title": "线性融合", "summary": "以线性组合注入全色细节的最简融合。",
+    "category": "数据 I/O", "keywords": ["线性融合"],
+    "algorithm": {"whatItDoes": "多光谱上采样后与全色的线性加权组合。", "limitations": ["光谱失真较大"]},
+    "related": ["operator.rs.image_fusion"]
+  },
+  {
+    "id": "operator.rs.fusion_brovey", "title": "Brovey 融合", "summary": "色彩归一化 + 全色注入，视觉自然。",
+    "category": "数据 I/O", "keywords": ["Brovey", "锐化"],
+    "algorithm": {"whatItDoes": "各波段乘以 (PAN/ΣMS) 的归一化注入。", "limitations": ["高反射区易饱和"]},
+    "related": ["operator.rs.image_fusion"]
+  },
+  {
+    "id": "operator.rs.fusion_pca", "title": "PCA 融合", "summary": "以第一主成分替换为全色的融合。",
+    "category": "数据 I/O", "keywords": ["PCA 融合"],
+    "algorithm": {"whatItDoes": "MS 做 PCA，PC1 与 PAN 直方图匹配后替换，逆变换输出。", "limitations": ["统计依赖整幅场景"]},
+    "related": ["operator.rs.image_fusion", "operator.rs.pca"]
+  },
+  {
+    "id": "operator.rs.fusion_ihs", "title": "IHS 融合", "summary": "IHS 色彩空间替换强度分量的融合。",
+    "category": "数据 I/O", "keywords": ["IHS", "色彩空间"],
+    "algorithm": {"whatItDoes": "RGB→IHS，用 PAN 替换 I 后逆变换。", "limitations": ["仅适合 3 波段"]},
+    "related": ["operator.rs.image_fusion"]
+  },
+  {
+    "id": "operator.rs.fusion_gram_schmidt", "title": "Gram-Schmidt 融合", "summary": "正交化注入全色的光谱保真融合。",
+    "category": "数据 I/O", "keywords": ["Gram-Schmidt", "GS 融合"],
+    "algorithm": {"whatItDoes": "以模拟低分辨率全色为第一向量做 GS 正交化，替换后逆变换。", "whenToUse": "对光谱保真要求较高的融合。", "limitations": ["计算量高于 Brovey/IHS"]},
+    "related": ["operator.rs.image_fusion"]
+  },
+  {
+    "id": "operator.rs.morphology", "title": "形态学运算",
+    "summary": "腐蚀/膨胀/开/闭运算处理二值或类别栅格。",
+    "category": "栅格空间分析",
+    "keywords": ["形态学", "腐蚀", "膨胀", "morphology"],
+    "algorithm": {"whatItDoes": "结构元素在二值图上的极值运算：开运算去小斑点，闭运算补小孔。", "whenToUse": "掩膜清理、水体/建筑图斑整形。", "keyParameters": ["operation", "kernelSize"], "limitations": ["改变图斑边界精度"]},
+    "related": ["operator.rs.fill_holes", "operator.rs.sieve"]
+  },
+  {
+    "id": "operator.rs.connected_components", "title": "连通成分标记", "summary": "对二值栅格做连通域编号。",
+    "category": "栅格空间分析", "keywords": ["连通域", "标记", "connected components"],
+    "algorithm": {"whatItDoes": "4/8 邻接连通域识别并编号，用于图斑统计。", "whenToUse": "变化图斑计数、对象化预处理。"},
+    "related": ["operator.rs.segment_stats", "operator.rs.sieve"]
+  },
+  {
+    "id": "operator.rs.fill_holes", "title": "孔洞填充", "summary": "填充二值掩膜中的内部孔洞。",
+    "category": "栅格空间分析", "keywords": ["填孔", "hole filling"],
+    "algorithm": {"whatItDoes": "识别被同类包围的孔洞并填充。", "whenToUse": "水体/云掩膜后处理。", "limitations": ["大面积真实孔洞会被误填"]},
+    "related": ["operator.rs.morphology", "operator.rs.qa_mask"]
+  },
+  {
+    "id": "operator.rs.sieve", "title": "小图斑剔除", "summary": "移除小于阈值的类别图斑并并入邻域。",
+    "category": "栅格空间分析", "keywords": ["筛除", "小图斑", "sieve"],
+    "algorithm": {"whatItDoes": "按连通域面积阈值过滤，小于阈值的图斑并入相邻大类。", "whenToUse": "分类后处理的最小制图单元控制。", "keyParameters": ["minAreaPixels"]},
+    "related": ["operator.rs.majority_filter", "operator.rs.connected_components"]
+  },
+  {
+    "id": "operator.rs.proximity", "title": "邻近分析", "summary": "计算每像元到目标像元的欧氏距离。",
+    "category": "栅格空间分析", "keywords": ["距离", "邻近", "proximity", "buffer"],
+    "algorithm": {"whatItDoes": "精确欧氏距离变换输出距离栅格（单位：像素或地图单位）。", "whenToUse": "缓冲区分析、距离特征构造。", "keyParameters": ["distanceUnit"]},
+    "related": ["operator.rs.feature_stack"]
+  },
+  {
+    "id": "operator.rs.local_extrema", "title": "局部极值", "summary": "滑动窗口内识别局部最大/最小值位置。",
+    "category": "栅格空间分析", "keywords": ["局部极值", "峰值", "extrema"],
+    "algorithm": {"whatItDoes": "窗口比较中心像元与邻域，标记极值点。", "whenToUse": "特征点/树峰/热异常定位。"},
+    "related": ["operator.rs.focal_stats"]
+  },
+  {
+    "id": "operator.rs.focal_stats", "title": "焦点统计", "summary": "滑动窗口统计（均值/方差/众数等）输出邻域产品。",
+    "category": "栅格空间分析", "keywords": ["焦点统计", "窗口统计", "focal"],
+    "algorithm": {"whatItDoes": "窗口内按所选统计量聚合输出，等价于低通/纹理度量族。", "whenToUse": "背景场估计、局部对比特征。", "keyParameters": ["statistic", "windowSize"]},
+    "related": ["operator.rs.image_enhancement", "operator.rs.sar_texture"]
+  },
+  {
+    "id": "operator.rs.landsat_import",
+    "title": "Landsat 导入",
+    "summary": "解析 Landsat Collection 2 产品包：波段对齐、QA 与定标参数提取。",
+    "category": "数据 I/O",
+    "keywords": ["Landsat", "导入", "Collection 2", "GEE"],
+    "algorithm": {
+      "whatItDoes": "读取 MTL 元数据，按产品组装分析就绪堆栈（含 QA 波段），可选直接输出定标反射率。",
+      "whenToUse": "Landsat 8/9 数据进入处理链的第一步。",
+      "assumptions": ["完整产品包（含 MTL）"],
+      "limitations": ["Pre-Collection 产品不支持"],
+      "keyParameters": ["productDir", "level"]
+    },
+    "related": ["operator.rs.qa_mask", "operator.rs.radiometric_calibration", "concept.rs.radiometric_chain"]
+  },
+  {
+    "id": "operator.rs.sentinel2_import",
+    "title": "Sentinel-2 导入",
+    "summary": "解析 S2 L1C/L2A 产品：波段组装、SCL 质量层与重采样。",
+    "category": "数据 I/O",
+    "keywords": ["Sentinel-2", "导入", "L2A", "SCL"],
+    "algorithm": {"whatItDoes": "组装 10/20/60 m 波段到统一格网（按目标分辨率重采样），保留 SCL。", "whenToUse": "S2 分析就绪数据准备。", "assumptions": ["完整 SAFE 包"], "keyParameters": ["targetResolution"]},
+    "related": ["operator.rs.qa_mask", "operator.rs.mosaic"]
+  },
+  {
+    "id": "operator.rs.modis_import", "title": "MODIS 导入",
+    "summary": "MODIS HDF 产品子数据集提取与正弦投影转换。",
+    "category": "数据 I/O", "keywords": ["MODIS", "HDF", "正弦投影"],
+    "algorithm": {"whatItDoes": "选择子数据集、应用 scale factor 并重投影到目标 CRS。", "whenToUse": "MODIS 指数产品（NDVI/LST）进入分析。", "limitations": ["低分辨率决定其用于大尺度分析"]},
+    "related": ["operator.rs.modis_georeference"]
+  },
+  {
+    "id": "operator.rs.modis_georeference", "title": "MODIS 地理参考", "summary": "为 MODIS 数据建立/转换地理参考。",
+    "category": "数据 I/O", "keywords": ["MODIS", "投影", "georeference"],
+    "algorithm": {"whatItDoes": "按正弦网格参数生成地理变换并转换到目标 CRS。", "limitations": ["插值会平滑像元"]},
+    "related": ["operator.rs.modis_import"]
+  }
+]

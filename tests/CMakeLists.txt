@@ -6574,3 +6574,27 @@ foreach(_sicnu_test_target IN LISTS _sicnu_test_targets)
     set_target_properties(${_sicnu_test_target} PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
   endif()
 endforeach()
+
+# ── Unified Help System 6.0 ────────────────────────────────────────────────
+# Knowledge-layer tests: Qt Core + jsoncpp only (no GUI/qgis linkage), so the
+# suite builds and runs fast while guarding the bounded-resource contracts.
+# NOTE: help_content.qrc is compiled into the *executable* — RCC initializers
+# inside static libraries are discarded by the linker.
+function(sicnu_add_help_test NAME)
+  qt_add_executable(${NAME} ${NAME}.cpp
+    ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc
+  )
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Sicnu::help
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(${NAME} PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(${NAME})
+endfunction()
+
+sicnu_add_help_test(test_help_core)

@@ -1,0 +1,80 @@
+[
+  {
+    "id": "workbench.classification",
+    "title": "分类工作区",
+    "summary": "样本采集、监督/非监督分类与精度评估的交互工作区。",
+    "category": "分类",
+    "keywords": ["分类", "classification", "样本", "训练"],
+    "guidance": {
+      "headline": "还没有训练样本",
+      "body": "监督分类需要每类至少一组训练样本；样本质量直接决定分类精度。采集时同类样本应覆盖该类的主要光谱变异，并避免把混合像元划入训练区。",
+      "actions": ["command.layer.newVector", "command.layer.toggleEditing", "command.workbench.classify"],
+      "helpTopic": "concept.dataset.spatial_leakage"
+    }
+  },
+  {
+    "id": "workbench.georef_i2i",
+    "title": "影像对影像配准 (I2I)",
+    "summary": "双画布同名点/SIFT 匹配的相对配准工作区。",
+    "category": "工作区",
+    "keywords": ["配准", "I2I", "SIFT", "同名点"],
+    "guidance": {
+      "headline": "还没有控制点",
+      "body": "先在左（源）右（参考）画布上找到同一地物点击取点；均匀分布、避开边缘的控制点能显著提高配准稳健性。控制点不足时可尝试 SIFT 自动匹配。",
+      "actions": ["command.workbench.georefI2I"],
+      "helpTopic": "concept.rs.gcp"
+    }
+  },
+  {
+    "id": "workbench.georef_i2m",
+    "title": "影像对地图配准 (I2M)",
+    "summary": "以主工程地图为参考的绝对配准工作区，支持 RPC 物理模型。",
+    "category": "工作区",
+    "keywords": ["配准", "I2M", "RPC", "控制点"],
+    "guidance": {
+      "headline": "工程地图还没有地理参考",
+      "body": "I2M 配准要求参考地图具有正确的坐标系。请先为工程加载有地理参考的底图，或先完成影像对影像配准。",
+      "actions": ["command.layer.addRaster", "command.workbench.georefI2M"],
+      "helpTopic": "concept.rs.rpc"
+    }
+  },
+  {
+    "id": "workbench.obia",
+    "title": "面向对象分类 (OBIA) 工作区",
+    "summary": "分割 → 对象特征 → 对象级分类的全流程工作区。",
+    "category": "工作区",
+    "keywords": ["OBIA", "分割", "面向对象"],
+    "guidance": {
+      "headline": "还没有影像",
+      "body": "OBIA 从过分割开始：加载影像后先执行分割，再基于对象的光谱/形状特征做分类。分割尺度应与目标地物尺度匹配。",
+      "actions": ["command.layer.addRaster", "command.workbench.obia"],
+      "helpTopic": "operator.rs.obia_segment"
+    }
+  },
+  {
+    "id": "workbench.layout",
+    "title": "打印布局",
+    "summary": "地图、图例、比例尺等制图元素的排版工作区。",
+    "category": "制图",
+    "keywords": ["布局", "出图", "layout"],
+    "guidance": {
+      "headline": "布局中还没有地图项",
+      "body": "先向布局添加地图项并选择要显示的地图视图，再添加图例、比例尺与指北针。出图前检查比例尺与分辨率设置。",
+      "actions": ["command.project.newLayout"],
+      "helpTopic": "workbench.layout"
+    }
+  },
+  {
+    "id": "workbench.data_manager",
+    "title": "数据管理器",
+    "summary": "治理化数据资产目录：登记、检索与复用数据资产。",
+    "category": "数据与工程",
+    "keywords": ["数据管理", "资产", "catalog"],
+    "guidance": {
+      "headline": "还没有数据资产",
+      "body": "把常用影像、掩膜与产品登记为数据资产后，可在处理面板直接引用资产 ID，避免重复选择文件路径。",
+      "actions": ["command.project.importLayer", "command.project.stacBrowse"],
+      "helpTopic": "concept.dataset.provenance"
+    }
+  }
+]

@@ -661,6 +661,11 @@ add_subdirectory(src/data)
 # link Sicnu::dataset / Sicnu::experiment.
 add_subdirectory(src/dataset)
 add_subdirectory(src/experiment)
+# Unified Help, Hint & Diagnostic Knowledge System 6.0: single authority for
+# help/diagnostic knowledge (descriptor model, registry, search, JSON store,
+# projections). Qt-core leaf over Sicnu::data; reads authoritative catalogs
+# through narrow source interfaces, never links the app/operator layers.
+add_subdirectory(src/help)
 # Geospatial I/O Foundation 4.0 (Qt-free leaf: canonical metadata, CRS policy,
 # raster/vector I/O contracts, format profiles, COG, STAC, multidim, doctor).
 add_subdirectory(src/geospatial)
