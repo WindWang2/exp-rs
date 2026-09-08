@@ -99,18 +99,18 @@ class WorkflowRunCoordinator : public QObject {
     /// Delivery is a Qt signal (lifetime-managed, queueable) because the
     /// coordinator may emit with its internal mutex held: receivers must not
     /// call back into the coordinator synchronously.
+    /// Mirrored after every persisted run-state transition (issue #754):
+    /// terminal/Interrupted transitions carry truthful started/finished ms.
+    /// One emission per tracked-run state transition.
+    //  (Fresh-build repair: churn on master had declared this signal three
+    //  times across three signals: sections — moc emitted one body per
+    //  declaration and the translation unit failed with C2084.)
   signals:
     void runStateChanged( const QString &runId, const QString &workflowId,
                           const QString &state, qint64 startedMs, qint64 finishedMs );
 
   private slots:
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
-
-  signals:
-    /// Mirrored after every persisted run-state transition (issue #754):
-    /// terminal/Interrupted transitions carry truthful started/finished ms.
-    void runStateChanged( const QString &runId, const QString &workflowId,
-                          const QString &state, qint64 startedMs, qint64 finishedMs );
 
   private:
     WorkflowRunCoordinator();
@@ -120,28 +120,20 @@ class WorkflowRunCoordinator : public QObject {
 
     /// Emits runStateChanged for @p run's current state. Requires m_mutex
     /// held (reads the run; emission is the last thing before unlocking).
+    /// Falls back to the run's creation stamp when @a startedMs <= 0
+    /// (issue #754). Callers queue across threads (queued connection in
+    /// ProjectContext). (Fresh-build repair: declared four times on master.)
     void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
-
-    /// Requires m_mutex held (uses the no-lock directory accessor).
-    void persistRunLocked( WorkflowRun &run );
     /// Emits runStateChanged with the mutex held; callers queue across
     /// threads (queued connection in ProjectContext).
-    void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
+    void persistRunLocked( WorkflowRun &run );
     /// Terminal roll-up + ArtifactGC + checkpoint retention. Called with
     /// m_mutex held when the last step of a tracked run went terminal.
     void finalizeRunLocked( long pipelineId, WorkflowRun &run );
-    /// Emits the run-state change and refreshes the checkpoint's state stamp.
-    /// Called with m_mutex held (the *_Locked convention); effectiveStart
-    /// falls back to the run's creation stamp when <= 0 (issue #754).
-    void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
     /// m_mutex-free directory read for call paths that already hold it.
     QString checkpointDirectoryLocked() const;
     QString checkpointPathLocked( const std::string &runId ) const;
     QString checkpointPathFor( const std::string &runId ) const;
-    /// Emits runStateChanged() with @a run's current state (start time taken
-    /// from the run's creation stamp when @a startedMs is 0). m_mutex must be
-    /// held (mirrors persistRunLocked's contract).
-    void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
 
     mutable std::mutex m_mutex;
     WorkflowCheckpointManager m_checkpoints;
@@ -153,12 +145,6 @@ class WorkflowRunCoordinator : public QObject {
     /// released at finalize / resume swap / submission failure.
     std::map<std::string, std::shared_ptr<WorkflowRunLock>> m_locksByRunId;
     bool m_connected = false;
-
-  signals:
-    /// One emission per tracked-run state transition (issue #754 carries the
-    /// truthful effective start).
-    void runStateChanged( const QString &runId, const QString &workflowId,
-                          const QString &state, qint64 startedMs, qint64 finishedMs );
 };
 
 } // namespace workflow

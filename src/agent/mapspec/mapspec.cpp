@@ -198,11 +198,6 @@ void checkV3ItemFields( const Json::Value &item, const std::string &id, const st
 
 } // namespace
 
-const char *const kCollections[] = { "map_frames", "layers", "symbols", "legends",
-                                     "north_arrows", "scale_bars", "titles", "labels",
-                                     "charts", "colorbars", "inset_maps", "grids",
-                                     "annotations", "source_notes", "constraints" };
-const int kCollectionCount = static_cast<int>( sizeof( kCollections ) / sizeof( kCollections[0] ) );
 
 bool isAnchorEdge( const std::string &edge )
 {
