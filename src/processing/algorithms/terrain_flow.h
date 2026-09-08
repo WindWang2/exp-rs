@@ -37,6 +37,14 @@ bool fillDepressions( const float *dem, float *filled, int width, int height, fl
 bool flowDirections( const float *filled, float *dir, int width, int height, float nodata );
 
 /// Drainage accumulation from the D8 directions (self-inclusive counts).
+/// Overload with the filled DEM + nodata sentinel (#783): cells that are
+/// NoData on the DEM are excluded from the routing graph entirely and carry
+/// @p nodata in @a acc (they previously seeded a spurious 1.0 ridge along
+/// every masked/ocean boundary). The 3-arg form keeps accumulating over
+/// every cell — for callers that already routed with a clean (nodata-free)
+/// surface.
 bool flowAccumulation( const float *dir, float *acc, int width, int height );
+bool flowAccumulation( const float *dir, float *acc, int width, int height,
+                       const float *filled, float nodata );
 
 } // namespace TerrainFlow

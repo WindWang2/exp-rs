@@ -76,14 +76,14 @@ SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,
 }
 
 double localIncidenceAngle( double slopeDeg, double aspectDeg, double incidenceDeg,
-                            double headingDeg )
+                            double fromAzimuthDeg )
 {
   // Flat ground: θi = θ0 exactly (aspect undefined).
   if ( slopeDeg < 1e-9 || aspectDeg < 0.0 )
     return incidenceDeg;
   const double alpha = slopeDeg * kDegToRad;
   const double theta0 = incidenceDeg * kDegToRad;
-  const double deltaBetaPhi = ( aspectDeg - headingDeg ) * kDegToRad;
+  const double deltaBetaPhi = ( aspectDeg - fromAzimuthDeg ) * kDegToRad;
   const double cosThetaI =
     std::cos( alpha ) * std::cos( theta0 ) +
     std::sin( alpha ) * std::sin( theta0 ) * std::cos( deltaBetaPhi );
@@ -207,7 +207,13 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
           }
           incidence[idx] = static_cast<float>(
             localIncidenceAngle( sa.slopeDeg, sa.aspectDeg, options.incidenceDeg,
-                                 options.headingDeg ) );
+                                 // localIncidenceAngle measures the azimuth the
+                                 // illumination comes FROM (the antenna sits
+                                 // opposite the beam-travel look azimuth; a
+                                 // facet facing the radar has θi = θ0 − α).
+                                 // #785 review: feeding the beam-travel azimuth
+                                 // mirrored every sloped facet by 180°.
+                                 options.lookAzimuthDeg + 180.0 ) );
           if ( sa.aspectDeg < 0.0 )
           {
             // Flat facet: θi == θ0, so the flattening ratio is 1.
@@ -256,6 +262,10 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
     writeSarOutputMetadata( dst, QStringLiteral( "gamma0" ),
                             QStringLiteral( "linear_power" ), polarizations, sensor,
                             options.incidenceDeg, options.headingDeg );
+    // The geometric parameter actually consumed is the look azimuth (#785);
+    // stamp it alongside the flight heading.
+    dst.setMetadataItem( QString::fromLatin1( kLookAzimuthKey ),
+                         QString::number( options.lookAzimuthDeg, 'g', 10 ) );
     dst.setMetadataItem( QStringLiteral( "SICNU_SAR_TERRAIN_CORRECTED" ),
                          options.applyFlattening ? QStringLiteral( "gamma0_rtc" )
                                                  : QStringLiteral( "mask_only" ) );

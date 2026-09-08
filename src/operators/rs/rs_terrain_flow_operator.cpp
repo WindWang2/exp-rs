@@ -175,7 +175,10 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
     {
         context.reportProgress( 0.8, "Accumulating drainage" );
         productData.assign( n, 0.0f );
-        if ( !TerrainFlow::flowAccumulation( dir.data(), productData.data(), width, height ) )
+        // Pass the filled DEM + sentinel so NoData cells stay NoData in the
+        // accumulation instead of reporting a phantom 1.0 (#783).
+        if ( !TerrainFlow::flowAccumulation( dir.data(), productData.data(), width, height,
+                                             filled.data(), nodata ) )
             throw RSOperatorError( ErrorCode::ComputationError, "Flow accumulation failed" );
     }
 

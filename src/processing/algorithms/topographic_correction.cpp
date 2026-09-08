@@ -122,35 +122,30 @@ void MinnaertRegression::add( double cosIllumination, double value )
         return;
     if ( !std::isfinite( cosIllumination ) || !std::isfinite( value ) )
         return;
-    ++m_count;
-    const double lx = std::log( cosIllumination );
-    const double ly = std::log( value );
-    m_sx += lx;
-    m_sy += ly;
-    m_sxx += lx * lx;
-    m_sxy += lx * ly;
+    // One owner of the OLS sums (Milestone C): the Minnaert exponent is the
+    // slope of ln L on ln cos_i over the log-transformed pairs (#773).
+    m_logFit.add( std::log( cosIllumination ), std::log( value ) );
 }
 
 bool MinnaertRegression::fit( double *k ) const
 {
-    if ( !k || m_count < 2 )
+    if ( !k )
         return false;
-    // Centered slope over the (ln cos_i, ln L) sums: ln L = a + m·ln cos_i,
-    // so the Minnaert exponent is k = −m.
-    const double n = static_cast<double>( m_count );
-    const double meanX = m_sx / n;
-    const double meanY = m_sy / n;
-    const double sxx = m_sxx - n * meanX * meanX;
-    if ( !( sxx > 0.0 ) )
+    double a = 0.0;
+    double slope = 0.0;
+    if ( !m_logFit.fit( &a, &slope ) )
         return false;
-    const double sxy = m_sxy - n * meanX * meanY;
-    const double m = sxy / sxx;
-    if ( !std::isfinite( m ) )
+    if ( !std::isfinite( slope ) )
         return false;
-    const double kk = -m;
-    if ( !( kk > 1e-6 ) )
+    // Empirical Minnaert relation: L = L_n · cos(i)^k, i.e. the log-log fit
+    // ln L = a + k·ln cos_i. The OLS slope of ln L on ln cos_i therefore IS
+    // the Minnaert exponent: real imagery brightens with illumination, so a
+    // physical scene yields a positive slope. (#773: negating the slope here
+    // made every physically valid scene fail the positivity guard below —
+    // and forced the old synthetic test to feed inverted radiance.)
+    if ( !( slope > 1e-6 ) )
         return false;
-    *k = kk;
+    *k = slope;
     return true;
 }
 
