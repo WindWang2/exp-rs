@@ -411,9 +411,18 @@ sicnu::data::Result<void> ExperimentStore::upsertRun( const ExperimentRun &run )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.invalid" ),
                                             QStringLiteral( "run requires run_id + experiment_id" ) ) );
 
+    // #811: BEGIN IMMEDIATE takes the write lock up front, and the existing
+    // run is read INSIDE the same transaction that writes. Validating before
+    // the transaction left a TOCTOU window where a concurrent writer could
+    // change the run between the transition/identity check and the upsert.
+    if ( !m_impl->begin( nullptr ) )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "cannot begin transaction" ) ) );
+
     const auto existing = loadRunLocked( m_impl->db, run.runId() );
     if ( existing && !isValidRunTransition( existing->status(), run.status() ) )
     {
+        m_impl->rollback();
         return ResultT::failure( storeDiag(
             QStringLiteral( "experiment.bad_transition" ),
             QStringLiteral( "illegal status transition %1 → %2" )
@@ -425,6 +434,7 @@ sicnu::data::Result<void> ExperimentStore::upsertRun( const ExperimentRun &run )
     {
         if ( existing->executionIdentity() != run.executionIdentity() )
         {
+            m_impl->rollback();
             return ResultT::failure( storeDiag(
                 QStringLiteral( "experiment.identity_immutable" ),
                 QStringLiteral( "run %1 already started with different identity pins" )
@@ -437,9 +447,6 @@ sicnu::data::Result<void> ExperimentStore::upsertRun( const ExperimentRun &run )
         runExecutionFingerprint( run.executionIdentity() );
     const QString resultFingerprint = run.resultFingerprint();
 
-    if ( !m_impl->begin( nullptr ) )
-        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
-                                            QStringLiteral( "cannot begin transaction" ) ) );
     Stmt upsert( m_impl->db, QStringLiteral(
         "INSERT INTO experiment_runs(run_id, experiment_id, status, algorithm_id,"
         " dataset_version_id, split_manifest_id, seed, config_hash,"
