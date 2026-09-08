@@ -70,6 +70,43 @@ class TerrainAnalysis
     static bool tpi( const float *dem, float *out, int width, int height,
                      float nodata );
 
+    // --- Foundation 5.0 (Milestone F) products ------------------------------
+    // Curvature conventions (convexity-positive): a bowl z = (x²+y²)/2
+    // yields profile = plan = total = +1. The second derivatives come from
+    // the Zevenbergen-Thorne (1987) surface fit over the 3×3 stencil
+    // (a b c / d e f / g h i, row-major); profile curvature uses the
+    // directional-second-derivative normalization (Esri-style, denominator
+    // zx²+zy²) rather than ZT's (zx²+zy²)^1.5 — the formula is declared
+    // here and pinned by the analytic tests either way:
+    //   zxx = (d+f−2e)/csx², zyy = (b+h−2e)/csy², zxy = (g+i−a−c)/(4 csx csy)
+    //   zx = (f−d)/(2 csx), zy = (h−b)/(2 csy)
+    //   profile = (zx²·zxx + 2 zx·zy·zxy + zy²·zyy)/(zx²+zy²)
+    //   plan    = (zy²·zxx − 2 zx·zy·zxy + zx²·zyy)/(zx²+zy²)
+    //   total   = (zxx + zyy)/2
+    // Flat cells (zx = zy = 0) give profile = plan = 0 (no slope line).
+
+    /// Profile curvature along the slope line (convexity-positive).
+    static bool curvatureProfile( const float *dem, float *out, int width, int height,
+                                  float cellSizeX, float cellSizeY, float nodata );
+
+    /// Plan (across-slope) curvature, same sign convention as profile.
+    static bool curvaturePlan( const float *dem, float *out, int width, int height,
+                               float cellSizeX, float cellSizeY, float nodata );
+
+    /// Mean principal second derivative ((zxx + zyy)/2).
+    static bool curvatureTotal( const float *dem, float *out, int width, int height,
+                                float cellSizeX, float cellSizeY, float nodata );
+
+    /// Multidirectional hillshade: mean of the eight 45°-step azimuth
+    /// hillshades at @a sunElevation. Flat cells give cos(zenith).
+    static bool hillshadeMultidirectional( const float *dem, float *out, int width, int height,
+                                           float cellSizeX, float cellSizeY, float nodata,
+                                           float sunElevation );
+
+    /// Local relief: max − min within the 3×3 neighbourhood (centre included).
+    static bool localRelief( const float *dem, float *out, int width, int height,
+                             float nodata );
+
   private:
     /// Get DEM value at (row, col), returning nodata for out-of-bounds.
     static float getCell( const float *dem, int width, int height,

@@ -17,7 +17,7 @@ struct MutatingTool {
 /// Inline tools that mutate state, despite living in read-mostly namespaces.
 /// Execution ids (rs:/gdal:/otb:/qgis:) are creates_artifact by prefix rule;
 /// this table only needs the exceptions and the destructive/network cases.
-constexpr std::array<MutatingTool, 39> kMutating = { {
+constexpr std::array<MutatingTool, 41> kMutating = { {
   // temporal: registration + removal
   { "temporal:create_collection", risk_classes::kCreatesArtifact },
   { "temporal:register_collection", risk_classes::kModifiesProject },
@@ -33,6 +33,10 @@ constexpr std::array<MutatingTool, 39> kMutating = { {
   { "symbology:apply_categorical", risk_classes::kModifiesProject },
   { "symbology:apply_graduated", risk_classes::kModifiesProject },
   { "symbology:apply_raster_ramp", risk_classes::kModifiesProject },
+  // Platform 5.0: StyleSpec application mutates layer renderers (undoable);
+  // solution instantiation produces plan/mapspec drafts for later execution.
+  { "style:apply", risk_classes::kModifiesProject },
+  { "solution:instantiate", risk_classes::kCreatesArtifact },
   // layout: everything except list/preflight/inspect mutates layouts
   { "layout:create", risk_classes::kModifiesProject },
   { "layout:export", risk_classes::kCreatesArtifact },

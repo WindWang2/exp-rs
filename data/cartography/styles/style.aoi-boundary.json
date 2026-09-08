@@ -1,0 +1,30 @@
+{
+ "schema_version": "1.0",
+ "kind": "style_spec",
+ "id": "style.aoi-boundary",
+ "version": 1,
+ "description": "AOI/region boundary overlay: dashed accent line with optional label.",
+ "token_set_ref": "scientific-light",
+ "semantics": [
+  "aoi",
+  "boundary"
+ ],
+ "applies_to": "vector",
+ "vector": {
+  "renderertype": "simple",
+  "opacity": 1.0,
+  "symbols": {
+   "width_mm": 0.5
+  },
+  "labels": {
+   "enabled": true,
+   "field": "name",
+   "size_pt": "token:typography.styles.caption.size_pt",
+   "halo_mm": 0.5
+  },
+  "scaledenominator": {
+   "max": 1000000
+  },
+  "color": "token:colors.accent"
+ }
+}

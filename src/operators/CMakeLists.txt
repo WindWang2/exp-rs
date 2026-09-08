@@ -135,6 +135,14 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_qa_mask_operator.cpp
     rs/rs_apply_mask_operator.cpp
     rs/rs_terrain_analysis_operator.cpp
+    rs/rs_topographic_correction_operator.cpp
+    rs/rs_spectral_derivative_operator.cpp
+    rs/rs_spectral_detection_operators.cpp
+    rs/rs_sar_dualpol_operator.cpp
+    rs/rs_sar_terrain_masks_operator.cpp
+    rs/rs_temporal_monitor_operator.cpp
+    rs/rs_terrain_flow_operator.cpp
+    rs/rs_raster_spatial_operators.cpp
     rs/rs_pca_operator.cpp
     rs/rs_mnf_operator.cpp
     rs/rs_mosaic_operator.cpp

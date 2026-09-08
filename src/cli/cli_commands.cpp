@@ -1217,6 +1217,12 @@ int dispatchCliCommand( const QStringList &arguments, const CliIO &io )
         return commandData( std::move( args ), io );
     if ( command == "data-providers" )
         return commandDataProviders( std::move( args ), io );
+    if ( command == "dataset" )
+        return commandDataset( std::move( args ), io );
+    if ( command == "experiment" )
+        return commandExperiment( std::move( args ), io );
+    if ( command == "reproduce" )
+        return commandReproduce( std::move( args ), io );
     if ( command == "catalog" )
     {
         // catalog export <dir> — the legacy --export-catalog surface.

@@ -1,0 +1,71 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.classify_feature_cube",
+ "title": "Feature cube preparation",
+ "intent": "classify",
+ "family": "classification",
+ "modality": "model",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9",
+  "sentinel-1"
+ ],
+ "description": "Raster stack -> normalization -> optional PCA feature reduction for classifiers.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Multi-band feature raster.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "normalize",
+   "operator_id": "rs:feature_normalize",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.normalized",
+    "method": "standardize"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "pca",
+   "operator_id": "rs:pca",
+   "params": {
+    "input": "$outputs.normalized",
+    "output": "$outputs.pca"
+   },
+   "verification": "raster",
+   "when_param": "pca",
+   "params_when_skipped": {
+    "input": "$outputs.normalized",
+    "output": "$outputs.pca"
+   }
+  }
+ ],
+ "outputs": [
+  {
+   "name": "normalized",
+   "from_step": "normalize",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "pca",
+   "from_step": "pca",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "normalize",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

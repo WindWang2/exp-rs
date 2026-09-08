@@ -3,6 +3,8 @@
 
 #include "../mapspec/mapspec.h"
 #include "design_tokens.h"
+#include "solution_registry.h"
+#include "style_spec.h"
 
 #include <QDir>
 #include <QFile>
@@ -363,6 +365,7 @@ void ComponentRegistry::ensureLoadedLocked() const
     return;
   mLoaded = true;
   mComponents.clear();
+  mLoadProblems.clear();
 
   QString base = mDirectory;
   if ( base.isEmpty() )
@@ -373,9 +376,27 @@ void ComponentRegistry::ensureLoadedLocked() const
     dir.exists( QStringLiteral( "components" ) ) ? dir.filePath( QStringLiteral( "components" ) )
                                                  : base;
   Json::Value loaded( Json::objectValue );
-  loadCartographyDirectory( componentsPath, loaded, nullptr );
+  const QFileInfoList entries =
+    QDir( componentsPath ).entryInfoList( QStringList() << QStringLiteral( "*.json" ), QDir::Files );
+  for ( const QFileInfo &entry : entries )
+  {
+    Json::Value doc;
+    QString parseError;
+    if ( !parseJsonFile( entry.absoluteFilePath(), &doc, &parseError ) )
+    {
+      mLoadProblems << parseError;
+      continue;
+    }
+    const auto problems = validateComponent( doc, knownCategories() );
+    if ( doc.isObject() && doc.isMember( "id" ) && problems.empty() )
+      mComponents.insert( QString::fromStdString( doc["id"].asString() ), doc );
+    else
+      mLoadProblems << QString::fromStdString( entry.fileName().toStdString() + ": " +
+                                               ( problems.empty() ? "missing id"
+                                                                  : problems.front() ) );
+  }
 
-  if ( loaded.empty() )
+  if ( mComponents.isEmpty() )
   {
     const Json::Value fallback = embeddedComponents();
     for ( const auto &component : fallback )
@@ -385,8 +406,6 @@ void ComponentRegistry::ensureLoadedLocked() const
     }
     return;
   }
-  for ( const auto &key : loaded.getMemberNames() )
-    mComponents.insert( QString::fromStdString( key ), loaded[key] );
 }
 
 Json::Value ComponentRegistry::components() const
@@ -434,6 +453,13 @@ bool ComponentRegistry::registerComponent( Json::Value descriptor, QString *erro
   }
   mComponents.insert( QString::fromStdString( descriptor["id"].asString() ), std::move( descriptor ) );
   return true;
+}
+
+QStringList ComponentRegistry::loadProblems() const
+{
+  QMutexLocker lock( &mMutex );
+  ensureLoadedLocked();
+  return mLoadProblems;
 }
 
 void ComponentRegistry::reload()
@@ -756,6 +782,18 @@ Json::Value buildCatalogIndex()
     templates.append( entry );
   }
   out["templates"] = templates;
+
+  // Platform 5.0: style specs and solution templates join the machine index
+  // so the drift test covers the full knowledge platform.
+  Json::Value styles( Json::arrayValue );
+  for ( const auto &style : StyleRegistry::instance().styles() )
+    styles.append( compactStyleSummary( style ) );
+  out["styles"] = styles;
+
+  Json::Value solutions( Json::arrayValue );
+  for ( const auto &solution : SolutionRegistry::instance().solutions() )
+    solutions.append( compactSolutionSummary( solution ) );
+  out["solutions"] = solutions;
   return out;
 }
 
@@ -779,6 +817,10 @@ Json::Value TemplateRegistry::instantiateTemplate( const QString &id, const Json
   // Template style (token set + medium) travels into the draft.
   if ( tmpl.isMember( "style" ) && tmpl["style"].isObject() )
     spec["style"] = tmpl["style"];
+  // Platform 5.0: multi-page templates declare their additional pages; page
+  // roles (cover|map|report|appendix) ride along for compiler/preflight.
+  if ( tmpl.isMember( "pages" ) && tmpl["pages"].isArray() )
+    spec["pages"] = tmpl["pages"];
 
   // Slots may be declared as `slots` (v2) or `required_slots` (v1 compat).
   // NB: the local is not named `slots` — Qt's moc keyword macro would eat it.
@@ -801,6 +843,9 @@ Json::Value TemplateRegistry::instantiateTemplate( const QString &id, const Json
     item["semantic_role"] = slot["role"];
     if ( slot.isMember( "rect_mm" ) )
       item["rect_mm"] = slot["rect_mm"];
+    // Multi-page slot placement (1-based page index).
+    if ( slot.isMember( "page" ) && slot["page"].isIntegral() )
+      item["page"] = slot["page"];
     const std::string collection = slot["accepts"].asString();
 
     // Slot content draft (v2): item-shaped fields deep-merged under the role.

@@ -962,3 +962,134 @@ TEST_CASE( "temporal operators: determinism — identical reruns byte-stable (§
     const auto second = runTo( fx.filePath( QStringLiteral( "det2.tif" ) ) );
     REQUIRE( first == second );
 }
+
+// ------------------------------------------------ temporal_monitor (F5.0 E) —
+
+TEST_CASE( "temporal_monitor cusum: hand-derived standardized cumulative sum",
+           "[temporal][operators][monitor]" )
+{
+    ensureApp();
+    Fixture fx;
+    // 2x1 grid, 4 dates. pixel 0: 0,0,0,10 -> mu=2.5, sample sd=5,
+    // z = (-0.5,-0.5,-0.5,1.5) -> S = -0.5,-1,-1.5,0 (final 0, max|S| 1.5 @ 2).
+    // pixel 1: constant 5 -> sd 0 -> z = 0 -> S = 0, argmax undefined (NaN).
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "a.tif" ), QStringLiteral( "2025-01-01" ), { 0, 5 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "b.tif" ), QStringLiteral( "2025-01-11" ), { 0, 5 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "c.tif" ), QStringLiteral( "2025-01-21" ), { 0, 5 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "d.tif" ), QStringLiteral( "2025-01-31" ), { 10, 5 }, 2, 1 ) ) );
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( const char *p : { "a.tif", "b.tif", "c.tif", "d.tif" } )
+        scenes.append( fx.filePath( p ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["method"] = "cusum";
+    params["output"] = fx.filePath( QStringLiteral( "monitor.tif" ) ).toStdString();
+
+    const Json::Value result = runOp( "rs:temporal_monitor", params );
+    REQUIRE( result["sceneCount"].asInt() == 4 );
+
+    const auto s = readBand( fx.filePath( QStringLiteral( "monitor.tif" ) ), 1 );
+    const auto mx = readBand( fx.filePath( QStringLiteral( "monitor.tif" ) ), 2 );
+    const auto arg = readBand( fx.filePath( QStringLiteral( "monitor.tif" ) ), 3 );
+    REQUIRE( s[0] == Approx( 0.0 ).margin( 1e-9 ) );
+    REQUIRE( mx[0] == Approx( 1.5 ).margin( 1e-9 ) );
+    REQUIRE( arg[0] == Approx( 2.0 ) );
+    REQUIRE( s[1] == Approx( 0.0 ).margin( 1e-9 ) );
+    REQUIRE( mx[1] == Approx( 0.0 ).margin( 1e-9 ) );
+    REQUIRE( std::isnan( arg[1] ) );
+}
+
+TEST_CASE( "temporal_monitor ewma: hand-derived recursion", "[temporal][operators][monitor]" )
+{
+    ensureApp();
+    Fixture fx;
+    // Same series as cusum; lambda = 0.5:
+    // Z = -0.25, -0.125, -0.0625, 0.5*(-0.0625)+0.5*1.5 = 0.71875 (final+max @ 3).
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "a.tif" ), QStringLiteral( "2025-01-01" ), { 0, 5 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "b.tif" ), QStringLiteral( "2025-01-11" ), { 0, 5 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "c.tif" ), QStringLiteral( "2025-01-21" ), { 0, 5 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "d.tif" ), QStringLiteral( "2025-01-31" ), { 10, 5 }, 2, 1 ) ) );
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( const char *p : { "a.tif", "b.tif", "c.tif", "d.tif" } )
+        scenes.append( fx.filePath( p ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["method"] = "ewma";
+    params["lambda"] = 0.5;
+    params["output"] = fx.filePath( QStringLiteral( "ewma.tif" ) ).toStdString();
+
+    REQUIRE( runOp( "rs:temporal_monitor", params )["sceneCount"].asInt() == 4 );
+    const auto z = readBand( fx.filePath( QStringLiteral( "ewma.tif" ) ), 1 );
+    const auto mx = readBand( fx.filePath( QStringLiteral( "ewma.tif" ) ), 2 );
+    const auto arg = readBand( fx.filePath( QStringLiteral( "ewma.tif" ) ), 3 );
+    REQUIRE( z[0] == Approx( 0.53125 ).margin( 1e-9 ) );
+    REQUIRE( mx[0] == Approx( 0.53125 ).margin( 1e-9 ) );
+    REQUIRE( arg[0] == Approx( 3.0 ) );
+}
+
+TEST_CASE( "temporal_monitor seasonal_mk: hand-derived two-season statistic",
+           "[temporal][operators][monitor]" )
+{
+    ensureApp();
+    Fixture fx;
+    // Pixel 0: Jan {1,2} (S=+1), Feb {4,3,2,1} (S=-6) -> S=-5, pairs=1+6=7,
+    // var = 1 + 156/18 = 9.667, Z = (-5+1)/sqrt(9.667) = -1.2863,
+    // tau = -5/7 = -0.7143, seasonsUsed = 2.
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "j1.tif" ), QStringLiteral( "2025-01-01" ), { 1, 5 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "j2.tif" ), QStringLiteral( "2025-01-15" ), { 2, 5 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "f1.tif" ), QStringLiteral( "2025-02-01" ), { 4, 5 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "f2.tif" ), QStringLiteral( "2025-02-10" ), { 3, 5 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "f3.tif" ), QStringLiteral( "2025-02-20" ), { 2, 5 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "f4.tif" ), QStringLiteral( "2025-02-28" ), { 1, 5 }, 2, 1 ) ) );
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( const char *p : { "j1.tif", "j2.tif", "f1.tif", "f2.tif", "f3.tif", "f4.tif" } )
+        scenes.append( fx.filePath( p ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["method"] = "seasonal_mk";
+    params["min_observations"] = 3;
+    params["output"] = fx.filePath( QStringLiteral( "smk.tif" ) ).toStdString();
+
+    REQUIRE( runOp( "rs:temporal_monitor", params )["sceneCount"].asInt() == 6 );
+    const auto z = readBand( fx.filePath( QStringLiteral( "smk.tif" ) ), 1 );
+    const auto tau = readBand( fx.filePath( QStringLiteral( "smk.tif" ) ), 2 );
+    const auto seasons = readBand( fx.filePath( QStringLiteral( "smk.tif" ) ), 3 );
+    REQUIRE( z[0] == Approx( -4.0 / std::sqrt( 1.0 + 156.0 / 18.0 ) ).margin( 1e-9 ) );
+    REQUIRE( tau[0] == Approx( -5.0 / 7.0 ).margin( 1e-9 ) );
+    REQUIRE( seasons[0] == Approx( 2.0 ) );
+}
+
+TEST_CASE( "temporal_monitor: ewma lambda and seasonal_mk pairwork are typed refusals",
+           "[temporal][operators][monitor][contract]" )
+{
+    ensureApp();
+    Fixture fx;
+    const char *names[4] = { "a.tif", "b.tif", "c.tif", "d.tif" };
+    const char *dates[4] = { "2025-01-01", "2025-02-01", "2025-03-01", "2025-04-01" };
+    for ( int i = 0; i < 4; ++i )
+        REQUIRE( writeTestScene( makeTestScene( fx.filePath( names[i] ), QString::fromUtf8( dates[i] ),
+                                                { float( i + 1 ), float( i + 1 ) }, 2, 1 ) ) );
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( const char *p : names )
+        scenes.append( fx.filePath( p ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["output"] = fx.filePath( QStringLiteral( "m.tif" ) ).toStdString();
+
+    params["method"] = "ewma";
+    params["lambda"] = 1.5;
+    REQUIRE_THROWS_AS( runOp( "rs:temporal_monitor", params ), RSOperatorError );
+
+    // Pairwork = scenes^2/2 x tilePixels = 16/2 x 4 = 32 > max_pairwork 1.
+    params["method"] = "seasonal_mk";
+    params["max_pairwork"] = 1;
+    REQUIRE_THROWS_AS( runOp( "rs:temporal_monitor", params ), RSOperatorError );
+}

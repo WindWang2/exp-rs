@@ -1,0 +1,48 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.terrain_tpi",
+ "title": "Topographic Position Index",
+ "intent": "terrain",
+ "family": "terrain",
+ "modality": "terrain",
+ "sensors": [
+  "dem"
+ ],
+ "description": "TPI for landform classification (valleys/ridges).",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Hydrologically consistent DEM (projected CRS).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "terrain",
+   "operator_id": "rs:terrain_analysis",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.tpi",
+    "product": "tpi"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "tpi",
+   "from_step": "terrain",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "terrain",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

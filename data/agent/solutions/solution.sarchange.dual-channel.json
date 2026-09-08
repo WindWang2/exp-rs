@@ -1,0 +1,60 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.sarchange.dual-channel",
+ "version": 1,
+ "title": "SAR coherent dual-channel change",
+ "description": "The dedicated rs:sar_change operator over DEM-flattened epochs.",
+ "tasks": [
+  "change",
+  "sar"
+ ],
+ "modalities": [
+  "sar"
+ ],
+ "sensors": [
+  "sentinel-1"
+ ],
+ "input_contracts": [
+  {
+   "name": "before",
+   "kind": "raster",
+   "required": true,
+   "description": "Before scene."
+  },
+  {
+   "name": "after",
+   "kind": "raster",
+   "required": true,
+   "description": "After scene."
+  },
+  {
+   "name": "dem",
+   "kind": "raster",
+   "required": false,
+   "description": "Optional DEM."
+  }
+ ],
+ "analysis_recipe": "harness.sar_coherent_change",
+ "map_template": "sar-change-a4l",
+ "style_spec": {
+  "primary": "style.sar-change"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "before",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "sar",
+  "change"
+ ],
+ "family": "sar-change"
+}

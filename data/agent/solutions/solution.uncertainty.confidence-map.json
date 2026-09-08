@@ -1,0 +1,49 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.uncertainty.confidence-map",
+ "version": 1,
+ "title": "Model uncertainty visualization",
+ "description": "Inference confidence/uncertainty band rendered on the uncertainty ramp with the model-uncertainty template.",
+ "tasks": [
+  "uncertainty",
+  "model"
+ ],
+ "modalities": [
+  "model"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Multi-band scene for anomaly screening."
+  }
+ ],
+ "analysis_recipe": "harness.uncertainty_rx_anomaly",
+ "map_template": "model-uncertainty-a4l",
+ "style_spec": {
+  "primary": "style.uncertainty-confidence"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "uncertainty",
+  "confidence",
+  "anomaly"
+ ],
+ "family": "uncertainty"
+}

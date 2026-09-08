@@ -1,0 +1,58 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.accuracy.assessment",
+ "version": 1,
+ "title": "Classification accuracy assessment",
+ "description": "Classification with a held-out test split emitting overall accuracy/kappa/confusion matrix; assessed with the accuracy template + matrix chart.",
+ "tasks": [
+  "accuracy",
+  "landcover"
+ ],
+ "modalities": [
+  "model"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Feature raster."
+  },
+  {
+   "name": "training",
+   "kind": "vector",
+   "required": true,
+   "description": "Labeled samples (train + test split)."
+  }
+ ],
+ "analysis_recipe": "harness.classify_accuracy_report",
+ "map_template": "accuracy-assessment-a4l",
+ "style_spec": {
+  "primary": "style.landcover-classes"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "accuracy",
+  "kappa",
+  "confusion"
+ ],
+ "recipe_params": {
+  "test_split": 0.3
+ },
+ "family": "accuracy"
+}

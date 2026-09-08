@@ -395,6 +395,39 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
                                    id + ": chart binding does not resolve (inline data or a "
                                         "layer reference required)",
                                    false, id, nullptr ) );
+
+        // --- table-family overflow estimate (Platform 5.0): rows that cannot
+        // fit the declared rect height would clip at render time.
+        const Json::Value &chartSpec = item.isMember( "chart" ) ? item["chart"] : Json::Value();
+        if ( validBinding && chartSpec.isObject() && item.isMember( "rect_mm" ) &&
+             item["rect_mm"].size() == 4 )
+        {
+          const std::string chartKind = chartSpec.isMember( "kind" ) && chartSpec["kind"].isString()
+                                          ? chartSpec["kind"].asString()
+                                          : "";
+          const bool isTable = chartKind == "table" || chartKind == "summary_table" ||
+                               chartKind == "topn_table";
+          if ( isTable && chartSpec["binding"].isMember( "data" ) &&
+               chartSpec["binding"]["data"].isArray() )
+          {
+            const int rows = static_cast<int>( chartSpec["binding"]["data"].size() );
+            const double fontPt =
+              chartSpec.isMember( "style" ) && chartSpec["style"].isMember( "font_pt" ) &&
+                  chartSpec["style"]["font_pt"].isNumeric()
+                ? chartSpec["style"]["font_pt"].asDouble()
+                : 10.0;
+            const double rowMm = fontPt * 0.352778 * 1.5; // leading factor
+            const double requiredH = 12.0 + rows * rowMm;
+            const double rectH = item["rect_mm"][3].asDouble();
+            if ( requiredH > rectH + 0.5 )
+              issues.push_back( issue(
+                "MAP_CHART_OVERFLOW", "warning",
+                id + ": " + std::to_string( rows ) + " table rows need ~" +
+                  std::to_string( static_cast<int>( std::ceil( requiredH ) ) ) + " mm but the "
+                  "rect is " + std::to_string( static_cast<int>( rectH ) ) + " mm",
+                true, id, "grow_chart" ) );
+          }
+        }
       }
 
       // --- component references --------------------------------------------
@@ -451,6 +484,166 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
                                    ": inset does not overlap any map frame (locators belong "
                                    "inside the main map)",
                                  true, inset["id"].asString(), "place_inset" ) );
+
+      // --- locator scale rule (Platform 5.0): a locator whose inset extent
+      // diverges wildly from the referenced frame renders a useless extent
+      // indicator (a sliver or a full-frame copy).
+      if ( inset.isMember( "locator" ) && inset["locator"].isObject() &&
+           inset["locator"].isMember( "target" ) )
+      {
+        const Json::Value *targetExtent = nullptr;
+        Json::Value insetExtent;
+        if ( inset.isMember( "extent" ) && inset["extent"].isArray() && inset["extent"].size() == 4 )
+          insetExtent = inset["extent"];
+        for ( const auto &frame : spec["map_frames"] )
+        {
+          if ( frame.isObject() && frame.isMember( "id" ) &&
+               frame["id"].asString() == inset["locator"]["target"].asString() )
+          {
+            if ( frame.isMember( "extent" ) && frame["extent"].isArray() && frame["extent"].size() == 4 )
+            {
+              targetExtent = &frame["extent"];
+              break;
+            }
+          }
+        }
+        if ( targetExtent == nullptr && !insetExtent.isNull() && spec["map_frames"].isArray() &&
+             !spec["map_frames"].empty() && spec["map_frames"][0].isMember( "extent" ) )
+          targetExtent = &spec["map_frames"][0]["extent"];
+        if ( targetExtent != nullptr && !insetExtent.isNull() )
+        {
+          auto extentArea = []( const Json::Value &e ) {
+            return std::fabs( ( e[2].asDouble() - e[0].asDouble() ) *
+                              ( e[3].asDouble() - e[1].asDouble() ) );
+          };
+          const double insetArea = extentArea( insetExtent );
+          const double targetArea = extentArea( *targetExtent );
+          if ( insetArea > 0 && targetArea > 0 )
+          {
+            const double ratio = std::max( insetArea / targetArea, targetArea / insetArea );
+            if ( ratio > 100.0 )
+              issues.push_back( issue(
+                "MAP_LOCATOR_MISMATCH", "warning",
+                inset["id"].asString() + ": locator extent differs from the target frame by ~" +
+                  std::to_string( static_cast<int>( ratio ) ) +
+                  "× — the extent indicator will be unreadable at render scale",
+                false, inset["id"].asString(), nullptr ) );
+          }
+        }
+      }
+    }
+  }
+
+  // --- atlas completeness (Platform 5.0) ---------------------------------------
+  if ( spec.isMember( "page" ) && spec["page"].isObject() && spec["page"].isMember( "atlas" ) &&
+       spec["page"]["atlas"].isObject() )
+  {
+    const Json::Value &atlas = spec["page"]["atlas"];
+    if ( atlas.get( "enabled", false ).asBool() )
+    {
+      const std::string coverage = atlas.get( "coverage_layer", "" ).asString();
+      if ( coverage.empty() )
+        issues.push_back( issue( "MAP_ATLAS_INCOMPLETE", "error",
+                                 "page.atlas is enabled but coverage_layer is empty — the atlas "
+                                 "cannot iterate features",
+                                 false, "", nullptr ) );
+      const bool hasSort =
+        ( atlas.isMember( "sort_by" ) && !atlas["sort_by"].asString().empty() ) ||
+        ( atlas.isMember( "sort_expression" ) && !atlas["sort_expression"].asString().empty() );
+      if ( atlas.isMember( "sort_order" ) && !hasSort )
+        issues.push_back( issue( "MAP_ATLAS_INCOMPLETE", "warning",
+                                 "page.atlas.sort_order declared without sort_by/sort_expression",
+                                 false, "", nullptr ) );
+    }
+  }
+
+  // --- conditional context missing (Platform 5.0) ------------------------------
+  {
+    bool carriesConditions = false;
+    for ( int c = 0; c < mapspec::kCollectionCount && !carriesConditions; ++c )
+    {
+      const char *collection = mapspec::kCollections[c];
+      if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+        continue;
+      for ( const auto &item : spec[collection] )
+      {
+        if ( item.isObject() && ( item.isMember( "visible_if" ) || item.isMember( "content_if" ) ) )
+        {
+          carriesConditions = true;
+          break;
+        }
+      }
+    }
+    if ( spec.isMember( "pages" ) && spec["pages"].isArray() )
+      for ( const auto &pageEntry : spec["pages"] )
+        if ( pageEntry.isObject() && pageEntry.isMember( "page_if" ) )
+          carriesConditions = true;
+    if ( carriesConditions && !spec.isMember( "condition_context" ) )
+      issues.push_back( issue(
+        "MAP_CONDITIONAL_CONTEXT_MISSING", "warning",
+        "items/pages carry visible_if/content_if/page_if conditions but no condition_context is "
+        "stamped — they will keep their content at compile (nothing is silently hidden)",
+        false, "", nullptr ) );
+  }
+
+  // --- page balance (Platform 5.0): every declared page should carry items ----
+  if ( spec.isMember( "pages" ) && spec["pages"].isArray() && !spec["pages"].empty() )
+  {
+    const int declaredPages = static_cast<int>( spec["pages"].size() ) + 1;
+    std::vector<int> itemsPerPage( declaredPages, 0 );
+    for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+    {
+      const char *collection = mapspec::kCollections[c];
+      if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+        continue;
+      for ( const auto &item : spec[collection] )
+      {
+        if ( !item.isObject() )
+          continue;
+        const int pageIndex =
+          item.isMember( "page" ) && item["page"].isIntegral() ? item["page"].asInt() : 0;
+        if ( pageIndex >= 0 && pageIndex < declaredPages )
+          ++itemsPerPage[pageIndex];
+      }
+    }
+    for ( int p = 0; p < declaredPages; ++p )
+    {
+      if ( itemsPerPage[p] == 0 )
+        issues.push_back( issue( "MAP_PAGE_BALANCE", "warning",
+                                 "page " + std::to_string( p ) + " carries no items and will "
+                                                                  "export as a blank sheet",
+                                 false, "", nullptr ) );
+    }
+  }
+
+  // --- report/publication CRS note rule (Platform 5.0) --------------------------
+  {
+    bool isReportish = false;
+    if ( spec.isMember( "template" ) && spec["template"].isString() )
+    {
+      const std::string templateId = spec["template"].asString();
+      isReportish = templateId.find( "report" ) != std::string::npos ||
+                    templateId.find( "publication" ) != std::string::npos;
+    }
+    if ( spec.isMember( "pages" ) && spec["pages"].isArray() && !spec["pages"].empty() )
+      isReportish = true;
+    if ( isReportish && hasNonEmpty( "source_notes" ) )
+    {
+      bool crsDeclared = false;
+      for ( const auto &note : spec["source_notes"] )
+      {
+        if ( !note.isObject() || !note.isMember( "text" ) )
+          continue;
+        const std::string text = note["text"].asString();
+        crsDeclared = crsDeclared || text.find( "CRS" ) != std::string::npos ||
+                      text.find( "EPSG" ) != std::string::npos ||
+                      text.find( "坐标" ) != std::string::npos;
+      }
+      if ( !crsDeclared )
+        issues.push_back( issue( "MAP_MISSING_CRS_NOTE", "warning",
+                                 "report/publication documents should state the CRS in a source "
+                                 "note (CRS / EPSG / 坐标系统)",
+                                 false, "", nullptr ) );
     }
   }
 
@@ -491,6 +684,11 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
           if ( i == j && bi <= ai ) // each pair once, in a stable order
             continue;
           if ( a["id"] == b["id"] )
+            continue;
+          // Multi-page documents: only same-page items can actually overlap.
+          const int pageA = a.isMember( "page" ) && a["page"].isIntegral() ? a["page"].asInt() : 0;
+          const int pageB = b.isMember( "page" ) && b["page"].isIntegral() ? b["page"].asInt() : 0;
+          if ( pageA != pageB )
             continue;
           if ( rectsIntersect( a["rect_mm"], b["rect_mm"] ) )
           {
@@ -797,6 +995,37 @@ int repairMapSpec( Json::Value &spec, const Json::Value &report )
       inset["rect_mm"] = rect( x, y, insetW, insetH );
       ++applied;
     }
+    else if ( code == "MAP_CHART_OVERFLOW" )
+    {
+      // Platform 5.0: grow a table chart downward to fit its declared rows,
+      // clamped to the page margin (same margin contract as legend growth).
+      const std::string id = item.get( "item_id", "" ).asString();
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item || !found.item->isMember( "rect_mm" ) ||
+           ( *found.item )["rect_mm"].size() != 4 || !( *found.item ).isMember( "chart" ) )
+        continue;
+      Json::Value &foundItem = *found.item;
+      const Json::Value &chart = foundItem["chart"];
+      const int rows = chart.isMember( "binding" ) && chart["binding"].isMember( "data" ) &&
+                             chart["binding"]["data"].isArray()
+                         ? static_cast<int>( chart["binding"]["data"].size() )
+                         : 0;
+      if ( rows <= 0 )
+        continue;
+      const double fontPt = chart.isMember( "style" ) && chart["style"].isMember( "font_pt" ) &&
+                                  chart["style"]["font_pt"].isNumeric()
+                              ? chart["style"]["font_pt"].asDouble()
+                              : 10.0;
+      const double requiredH = 12.0 + rows * fontPt * 0.352778 * 1.5;
+      const double margin = declaredMargin( spec ) > 0 ? declaredMargin( spec ) : 12.0;
+      const double y = foundItem["rect_mm"][1].asDouble();
+      const double maxH = pageH - margin - y;
+      if ( maxH > foundItem["rect_mm"][3].asDouble() )
+      {
+        foundItem["rect_mm"][3] = std::min( requiredH, maxH );
+        ++applied;
+      }
+    }
     else if ( code == "MAP_UNKNOWN_COMPONENT" )
     {
       // The reference resolved to nothing — stripping it loses no content.
@@ -914,6 +1143,16 @@ Json::Value preflightRuleCatalog()
     { "MAP_UNKNOWN_COMPONENT", "warning", true, "source_component reference does not resolve." },
     { "MAP_CONSTRAINT_UNSATISFIABLE", "warning", false, "Composition solver could not satisfy a constraint." },
     { "MAP_OVERLAP", "warning", true, "Two furniture items overlap." },
+    { "MAP_LOCATOR_MISMATCH", "warning", false,
+      "Locator inset extent diverges from the referenced frame (>100x); indicator unreadable." },
+    { "MAP_ATLAS_INCOMPLETE", "error", false,
+      "Atlas enabled without a coverage layer (error), or sort_order without a sort key." },
+    { "MAP_CONDITIONAL_CONTEXT_MISSING", "warning", false,
+      "Conditions declared without condition_context; content is kept, nothing hidden." },
+    { "MAP_CHART_OVERFLOW", "warning", true, "Table rows cannot fit the chart rect; repair grows it." },
+    { "MAP_PAGE_BALANCE", "warning", false, "A declared page carries no items (blank export)." },
+    { "MAP_MISSING_CRS_NOTE", "warning", false,
+      "Report/publication source notes do not state the CRS." },
     { "MAPSPEC_ISSUES_TRUNCATED", "warning", false,
       "Issue list capped at 500 entries; fix reported findings and re-run." },
     { "LAYOUT_*", "warning", false, "Findings merged from the compiled layout preflight." },

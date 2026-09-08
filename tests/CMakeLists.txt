@@ -417,9 +417,11 @@ qt_add_executable(test_mapspec
   test_cartography_quality.cpp
   test_cartography_templates.cpp
   test_cartography_visual.cpp
+  test_platform5.cpp
 )
 target_compile_definitions(test_mapspec PRIVATE
   SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 target_link_libraries(test_mapspec PRIVATE
   Catch2::Catch2
@@ -625,6 +627,131 @@ target_include_directories(test_nodata_utils PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_nodata_utils)
+
+# Shared scientific primitives (Scientific Algorithm Foundation 5.0, A):
+# histogram/otsu/quantile, morphology, connected components, distance
+# transform, exact quantiles, window contract.
+add_executable(test_primitives5 test_primitives5.cpp)
+target_link_libraries(test_primitives5 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_primitives5 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_primitives5)
+
+# Topographic correction (Foundation 5.0 Milestone B1): kernel closed forms +
+# synthetic-scene operator E2E + grid-refusal contract.
+add_executable(test_topographic_correction test_topographic_correction.cpp)
+target_link_libraries(test_topographic_correction PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_topographic_correction)
+target_include_directories(test_topographic_correction PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_topographic_correction)
+
+# Spectral derivatives (Foundation 5.0 Milestone B3): kernel closed forms +
+# operator E2E over an explicit wavelength axis + index-space refusal.
+add_executable(test_spectral_derivative test_spectral_derivative.cpp)
+target_link_libraries(test_spectral_derivative PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_derivative)
+target_include_directories(test_spectral_derivative PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_derivative)
+
+# Spectral target detection (Foundation 5.0 Milestone C): matched filter + ACE
+# kernel closed forms, planted-target E2E, target-length contract.
+add_executable(test_spectral_detection test_spectral_detection.cpp)
+target_link_libraries(test_spectral_detection PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_detection)
+target_include_directories(test_spectral_detection PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_detection)
+
+# SAR foundation (Foundation 5.0 Milestone D): dual-pol features + terrain
+# geometry closed forms, operator E2E, geometry refusals.
+add_executable(test_sar_foundation5 test_sar_foundation5.cpp)
+target_link_libraries(test_sar_foundation5 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_sar_foundation5)
+target_include_directories(test_sar_foundation5 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_foundation5)
+
+# Terrain foundation (Foundation 5.0 Milestone F): ZT curvatures, MD
+# hillshade, local relief, priority-flood fill, D8 routing + operator E2E.
+add_executable(test_terrain_foundation5 test_terrain_foundation5.cpp)
+target_link_libraries(test_terrain_foundation5 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_terrain_foundation5)
+target_include_directories(test_terrain_foundation5 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_terrain_foundation5)
+
+# Raster spatial operators (Foundation 5.0 Milestone G): morphology, labeling,
+# sieve, fill holes, proximity, extrema, focal stats (operator E2E).
+add_executable(test_raster_spatial5 test_raster_spatial5.cpp)
+target_link_libraries(test_raster_spatial5 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_raster_spatial5)
+target_include_directories(test_raster_spatial5 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_raster_spatial5)
 
 # Spectral classification (SAM + Continuum Removal) kernel tests
 add_executable(test_spectral_classification test_spectral_classification.cpp)
@@ -1155,6 +1282,38 @@ target_link_libraries(test_chunk_graph PRIVATE sicnu_runtime)
 # schema-guard test's direct DB surgery; sicnu_data keeps its own PRIVATE link.
 sicnu_add_test(test_artifact_store TIMEOUT 120)
 target_link_libraries(test_artifact_store PRIVATE SQLite::SQLite3)
+
+# Foundation 5.0 dataset core (ADR 0134): identity/manifest/fingerprint/
+# version lifecycle/store. SQLite link mirrors test_artifact_store (the
+# schema-guard test pokes the DB directly).
+sicnu_add_test(test_dataset_core TIMEOUT 120)
+target_link_libraries(test_dataset_core PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# Foundation 5.0 sample model / label ontology / annotation chains (ADR 0135).
+sicnu_add_test(test_sample_label_annotation TIMEOUT 120)
+target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# Foundation 5.0 deterministic splits + leakage audit + patch generator
+# known-answer tests (ADR 0136, goal §19/§51).
+sicnu_add_test(test_split_leakage TIMEOUT 120)
+target_link_libraries(test_split_leakage PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# Foundation 5.0 experiment/run identity, metrics, comparison, lineage and
+# reproduction bundle (ADR 0137/0138, goal §23-§31/§51).
+sicnu_add_test(test_experiment_evaluation TIMEOUT 180)
+target_link_libraries(test_experiment_evaluation PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
+# Foundation 5.0 dataset composition/label QA + the 100k metadata scale
+# contract (goal §20/§37/§46/§52). RUN_SERIAL: the 100k benchmark should not
+# compete with other tests for memory.
+sicnu_add_test(test_dataset_quality_scale TIMEOUT 600)
+target_link_libraries(test_dataset_quality_scale PRIVATE Sicnu::dataset SQLite::SQLite3)
+set_property(TARGET test_dataset_quality_scale PROPERTY RUN_SERIAL TRUE)
+
+# Foundation 5.0 end-to-end examples (goal §54): optical classification,
+# SAR pair, multimodal temporal, segmentation — small data, whole chain.
+sicnu_add_test(test_dataset_e2e_examples TIMEOUT 180)
+target_link_libraries(test_dataset_e2e_examples PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 
 # Phase C fused-chain equivalence (links through sicnu_task_center which
 # carries fused_chain.cpp; needs the standard set only).
@@ -2897,6 +3056,23 @@ sicnu_add_test(test_layout_tools)
     ${CMAKE_BINARY_DIR}
   )
   sicnu_discover_tests(test_classifier_svm)
+
+  # Foundation 5.0 Milestone H — kNN + statistical backends + factory mapping.
+  add_executable(test_classifier_foundation5 test_classifier_foundation5.cpp)
+  target_link_libraries(test_classifier_foundation5 PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classifier_foundation5 PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_classifier_foundation5)
 
   # Phase 10A Task 10.8 — KMeans backend cluster-centre test.
   add_executable(test_classifier_kmeans test_classifier_kmeans.cpp)

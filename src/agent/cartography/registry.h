@@ -73,6 +73,9 @@ class ComponentRegistry
     /// Registers one component descriptor programmatically (validated).
     bool registerComponent( Json::Value descriptor, QString *error = nullptr );
 
+    /// Problems recorded while loading (invalid descriptors skipped).
+    QStringList loadProblems() const;
+
     /// Reload from disk (directory() or default resolution).
     void reload();
 
@@ -86,6 +89,7 @@ class ComponentRegistry
     mutable bool mLoaded = false;
     QString mDirectory;
     mutable QMap<QString, Json::Value> mComponents; // id -> descriptor
+    mutable QStringList mLoadProblems;
 };
 
 class TemplateRegistry

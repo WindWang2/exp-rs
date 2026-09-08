@@ -1,0 +1,55 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.landcover.a3-poster",
+ "version": 1,
+ "title": "Land-cover classification (A3 poster)",
+ "description": "A3 landscape classification map for wall displays and sessions.",
+ "tasks": [
+  "landcover",
+  "classification"
+ ],
+ "modalities": [
+  "model"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Feature raster."
+  },
+  {
+   "name": "training",
+   "kind": "vector",
+   "required": true,
+   "description": "Training samples."
+  }
+ ],
+ "analysis_recipe": "harness.classify_supervised",
+ "map_template": "classification-a3l",
+ "style_spec": {
+  "primary": "style.landcover-classes"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "landcover",
+  "a3",
+  "poster"
+ ],
+ "family": "landcover"
+}

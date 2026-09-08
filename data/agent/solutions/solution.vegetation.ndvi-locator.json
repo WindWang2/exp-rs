@@ -1,0 +1,48 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.vegetation.ndvi-locator",
+ "version": 1,
+ "title": "NDVI map with locator inset",
+ "description": "NDVI product with an overview locator inset showing the main extent — reference for the locator capability.",
+ "tasks": [
+  "vegetation"
+ ],
+ "modalities": [
+  "optical"
+ ],
+ "sensors": [
+  "sentinel-2"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Reflectance product."
+  }
+ ],
+ "analysis_recipe": "harness.optical_ndvi",
+ "map_template": "inset-locator-a4l",
+ "style_spec": {
+  "primary": "style.ndvi"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "ndvi",
+  "locator",
+  "inset"
+ ],
+ "family": "vegetation"
+}

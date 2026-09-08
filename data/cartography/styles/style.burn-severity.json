@@ -1,0 +1,53 @@
+{
+ "schema_version": "1.0",
+ "kind": "style_spec",
+ "id": "style.burn-severity",
+ "version": 1,
+ "description": "dNBR burn severity: unburned to high-severity, USGS-inspired class breaks.",
+ "token_set_ref": "scientific-light",
+ "semantics": [
+  "burn",
+  "fire",
+  "change"
+ ],
+ "applies_to": "raster",
+ "raster": {
+  "renderertype": "singleband_pseudocolor",
+  "band": 1,
+  "classification": {
+   "mode": "discrete",
+   "classes": [
+    {
+     "min": -2,
+     "max": -0.25,
+     "label": "regrowth",
+     "color": "#1a9850"
+    },
+    {
+     "min": -0.25,
+     "max": 0.1,
+     "label": "unburned",
+     "color": "#7fbc41"
+    },
+    {
+     "min": 0.1,
+     "max": 0.27,
+     "label": "low",
+     "color": "#f4a460"
+    },
+    {
+     "min": 0.27,
+     "max": 0.44,
+     "label": "moderate",
+     "color": "#d2691e"
+    },
+    {
+     "min": 0.44,
+     "max": 2,
+     "label": "high",
+     "color": "#8b0000"
+    }
+   ]
+  }
+ }
+}

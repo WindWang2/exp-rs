@@ -1,0 +1,12 @@
+{
+  "gpu" : false,
+  "id" : "rs:proximity",
+  "input" : "raster",
+  "notes" : "Exact Euclidean distance transform (Felzenszwalb lower envelope), distance in pixels; unreachable pixels are NaN NoData; an all-background mask is a typed refusal. FullRaster contract.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "raster_spatial"
+  ],
+  "task" : "raster_cleanup"
+}

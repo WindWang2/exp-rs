@@ -1,0 +1,12 @@
+{
+  "gpu" : false,
+  "id" : "rs:sieve",
+  "input" : "raster",
+  "notes" : "Removes foreground components smaller than min_area_pixels; reports removedPixels. FullRaster contract.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "raster_spatial"
+  ],
+  "task" : "raster_cleanup"
+}

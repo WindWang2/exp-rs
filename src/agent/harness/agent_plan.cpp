@@ -44,8 +44,19 @@ bool operatorExists( const std::string &operatorId )
 
 bool isKnownIntent( const std::string &intent )
 {
-  return intent.empty() || intent == "ndvi" || intent == "change" ||
-         intent == "sar_change" || intent == "classify" || intent == "phenology";
+  if ( intent.empty() )
+    return true;
+  // Harness 4.0 vocabulary + Platform 5.0 recipe families.
+  static const char *const kIntents[] = {
+    "ndvi", "change", "sar_change", "classify", "phenology",
+    "evi", "savi", "ndre", "ndwi", "mndwi", "ndsi", "nbr", "dnbr", "ndbi", "bsi",
+    "water", "flood", "sar_water", "sar_flood", "sar", "ship",
+    "temporal", "terrain", "accuracy", "qa", "preprocess", "inference",
+  };
+  for ( const char *candidate : kIntents )
+    if ( intent == candidate )
+      return true;
+  return false;
 }
 
 bool readAgentPlan( const Json::Value &doc, AgentPlan &plan, HarnessError &error )
@@ -85,7 +96,9 @@ bool readAgentPlan( const Json::Value &doc, AgentPlan &plan, HarnessError &error
   {
     Json::Value details( Json::objectValue );
     details["intent"] = plan.intent;
-    details["known"] = "ndvi, change, sar_change, classify, phenology";
+    details["known"] = "ndvi|evi|savi|ndre|ndwi|mndwi|ndsi|nbr|dnbr|ndbi|bsi|water|flood|"
+                       "sar_water|sar_flood|sar|ship|change|sar_change|temporal|terrain|"
+                       "classify|accuracy|qa|preprocess|inference|phenology";
     error = HarnessError::make( error_codes::kInvalidPlan, "Unknown intent", details );
     return false;
   }

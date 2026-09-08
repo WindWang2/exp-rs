@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:sar_dualpol_features",
+  "input" : "raster",
+  "notes" : "Tile-streamed element-wise features on linear power; dB inputs are converted before the kernel so the output domain is independent of the input domain; bit-exact grade.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "sar",
+    "dual-pol",
+    "rvi"
+  ],
+  "task" : "sar-feature-engineering"
+}

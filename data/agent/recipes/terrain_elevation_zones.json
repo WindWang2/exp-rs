@@ -1,0 +1,74 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.terrain_elevation_zones",
+ "title": "Elevation zone classification",
+ "intent": "terrain",
+ "family": "terrain",
+ "modality": "terrain",
+ "sensors": [
+  "dem"
+ ],
+ "description": "Slope product + DEM -> threshold-based elevation zoning via band math and thresholds.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Projected DEM.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "slope",
+   "operator_id": "rs:terrain_analysis",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.slope",
+    "product": "slope"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "zones",
+   "operator_id": "rs:threshold_raster",
+   "params": {
+    "input": "$outputs.slope",
+    "output": "$outputs.slope_classes",
+    "thresholdMethod": "manual",
+    "threshold": "$params.slope_break",
+    "cleanup": "majority"
+   },
+   "verification": "raster",
+   "when_param": "slope_break",
+   "params_when_skipped": {
+    "input": "$outputs.slope",
+    "output": "$outputs.slope_classes",
+    "thresholdMethod": "manual",
+    "threshold": 15.0,
+    "cleanup": "majority"
+   }
+  }
+ ],
+ "outputs": [
+  {
+   "name": "slope",
+   "from_step": "slope",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "slope_classes",
+   "from_step": "zones",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "slope",
+  "renderer_hint": "categorized"
+ }
+}

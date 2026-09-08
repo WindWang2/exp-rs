@@ -1,66 +1,72 @@
 {
-  "schema_version": "1.0",
-  "kind": "harness_recipe",
-  "recipe_id": "harness.land_cover",
-  "title": "Supervised land-cover classification map",
-  "intent": "classify",
-  "description": "training -> features (the image stack) -> train/run -> post-process. The 'classify' preflight rule pack checks the training input and class configuration; model compatibility is verified against the ModelCatalog when a model name is bound. Post-processing stays an operator call (rs:majority_filter).",
-  "slots": [
-    {
-      "name": "primary",
-      "kind": "raster",
-      "description": "Feature image stack (reflectance bands or rs:feature_stack output).",
-      "required": true
-    },
-    {
-      "name": "training",
-      "kind": "vector",
-      "description": "Training polygons carrying a class id field (default 'class_id').",
-      "required": true
-    }
-  ],
-  "steps": [
-    {
-      "id": "classify",
-      "operator_id": "rs:supervised_classification",
-      "params": {
-        "input": "$primary.path",
-        "training": "$training.path",
-        "output": "$outputs.classification",
-        "classField": "$params.classField"
-      },
-      "verification": "raster"
-    },
-    {
-      "id": "postprocess",
-      "operator_id": "rs:majority_filter",
-      "params": {
-        "input": "$outputs.classification",
-        "output": "$outputs.classification_clean"
-      },
-      "verification": "raster",
-      "inputs": [
-        {
-          "step": "classify",
-          "port": "output",
-          "to_port": "input"
-        }
-      ]
-    }
-  ],
-  "outputs": [
-    {
-      "name": "classification_clean",
-      "from_step": "postprocess",
-      "port": "output",
-      "kind": "raster"
-    }
-  ],
-  "verification": {
-    "enabled": true
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.land_cover",
+ "title": "Supervised land-cover classification map",
+ "intent": "classify",
+ "description": "training -> features (the image stack) -> train/run -> post-process. The 'classify' preflight rule pack checks the training input and class configuration; model compatibility is verified against the ModelCatalog when a model name is bound. Post-processing stays an operator call (rs:majority_filter).",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Feature image stack (reflectance bands or rs:feature_stack output).",
+   "required": true
   },
-  "map_output": {
-    "from_step": "postprocess",
-    "renderer_hint": "categorized"
+  {
+   "name": "training",
+   "kind": "vector",
+   "description": "Training polygons carrying a class id field (default 'class_id').",
+   "required": true
   }
+ ],
+ "steps": [
+  {
+   "id": "classify",
+   "operator_id": "rs:supervised_classification",
+   "params": {
+    "input": "$primary.path",
+    "training": "$training.path",
+    "output": "$outputs.classification",
+    "classField": "$params.classField"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "postprocess",
+   "operator_id": "rs:majority_filter",
+   "params": {
+    "input": "$outputs.classification",
+    "output": "$outputs.classification_clean"
+   },
+   "verification": "raster",
+   "inputs": [
+    {
+     "step": "classify",
+     "port": "output",
+     "to_port": "input"
+    }
+   ]
+  }
+ ],
+ "outputs": [
+  {
+   "name": "classification_clean",
+   "from_step": "postprocess",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "postprocess",
+  "renderer_hint": "categorized"
+ },
+ "family": "classification",
+ "modality": "model",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8"
+ ]
 }

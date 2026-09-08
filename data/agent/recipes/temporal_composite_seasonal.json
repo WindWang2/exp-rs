@@ -1,0 +1,53 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.temporal_composite_seasonal",
+ "title": "Seasonal best-available composite",
+ "intent": "temporal",
+ "family": "temporal",
+ "modality": "temporal",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9",
+  "modis"
+ ],
+ "description": "Quality-weighted seasonal composite of the collection band.",
+ "slots": [
+  {
+   "name": "collection",
+   "kind": "collection",
+   "description": "Registered temporal collection (spatial:temporal tools).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "composite",
+   "operator_id": "rs:temporal_composite",
+   "params": {
+    "collection": "$collection.path",
+    "band_role": "$params.band_role",
+    "method": "best_available",
+    "period": "seasonal",
+    "output": "$outputs.composite"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "composite",
+   "from_step": "composite",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "composite",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

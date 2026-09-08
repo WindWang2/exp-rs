@@ -694,3 +694,25 @@ scale/offset, band-role resolution, output publication), and
 `docs/processing/temporal.md` (per-operator denominators, time-axis handling,
 references). A PR that changes one of these contracts updates the page in the
 same PR.
+
+## Knowledge Platform (Platform 5.0)
+
+**SolutionTemplate**:
+The task-level knowledge package (`data/agent/solutions`, kind `solution_template`) binding one analysis recipe, one map template, optional report template and StyleSpec references behind typed input contracts. Validated against the live catalogs with reference resolvers; supports `extends` merge (child wins), aliases and the quality grades `experimental|reviewed|certified`.
+_Avoid_: Recipe (that is only the operator orchestration layer), Preset
+
+**StyleSpec**:
+Declarative symbology knowledge (`data/cartography/styles`, kind `style_spec`) describing renderer family, class palettes, stretch, labels and scale visibility. Compiles one-way onto QGIS renderer primitives (`style:apply`); `token:` references resolve against the referenced token set, and unresolvable references are reported rather than leaked.
+_Avoid_: Symbology config (QGIS-native renderer state), Theme
+
+**Condition context**:
+The materialized object stamped as `spec.condition_context` that bounded `visible_if`/`content_if`/`page_if` expressions evaluate against at compile. Unknown paths are evaluation errors and keep their content — conditions never silently hide scientific artifacts.
+_Avoid_: Expression engine, Scripted visibility
+
+**Locator extent indicator**:
+The QGIS map overview attached to an inset (`inset_maps[].locator.target`) that draws the referenced frame's extent (outline/region/frame styles) — a layout primitive, not a screenshot decoration.
+_Avoid_: Overview hack, Red box overlay
+
+**Knowledge catalog index**:
+The deterministic machine index (`data/cartography/index.json`, via `buildCatalogIndex`) covering token sets, components, templates, styles and solutions; the drift test regenerates it with `SICNU_CARTOGRAPHY_REGENERATE_INDEX=1` and compares byte-for-byte.
+_Avoid_: Gallery cache, Search index file
