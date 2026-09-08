@@ -2,6 +2,78 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-08
+
+### 🗺️ Solution Template, Recipe & Cartography Knowledge Platform 5.0 (goal series)
+
+The 4.0 design system (tokens / components / templates / MapSpec 2.0) becomes a
+**task-level knowledge platform**: a remote-sensing task semantic resolves to a
+validated SolutionTemplate binding an AnalysisRecipe + StyleSpec + MapSpec +
+ReportSpec, consumed identically by the UI, CLI and Pi agent.
+
+- **Five-layer knowledge model**: DesignToken → Component → StylePattern →
+  Map/ReportTemplate → AnalysisRecipe/SolutionTemplate. New catalogs:
+  `data/cartography/styles/` (17 semantic StyleSpecs) and
+  `data/agent/solutions/` (44 solution templates across 18 task families).
+- **StyleSpec declarative symbology**: closed renderer vocabulary (raster:
+  gray/pseudocolor/paletted/multiband; vector: simple/categorized/graduated/
+  rule-based), class palettes bound to token sets through now-resolved
+  `token:` references (closes the 4.0 unparsed-leak), labels/halo/scale
+  visibility/opacity/blend; `style_compiler` maps specs onto QGIS renderer
+  primitives only — QGIS stays the rendering truth. `style:list/describe/apply`
+  tools.
+- **MapSpec 3.0 (strict superset of v2)**: bounded conditional visibility
+  (`visible_if`/`content_if`/`page_if` — a validated expression grammar with
+  unknown-path=error semantics; unevaluable conditions never hide content),
+  relative placement constraints (`below/above/left_of/right_of/inside/
+  keep_with/avoid_overlap/fit_content`) in the deterministic composition
+  solver, locator extent indicators compiled to QGIS map overviews
+  (outline/region/frame styles + caption), the full atlas surface (filter,
+  sort, margin fraction, filename/page-number expressions, feature variables),
+  page roles and per-item `style_ref`.
+- **Recipe Library 5.0**: 75 recipes (5 → 75) covering the operator registry
+  end-to-end — optical indices, flood (optical/SAR/fused), water dynamics,
+  SAR change (log-ratio/ratio/dual-channel), temporal (phenology/harmonic/
+  trend/breakpoints/anomaly/composite), terrain products, classification/model
+  (kmeans/supervised/OBIA/inference/detect/accuracy/uncertainty),
+  preprocessing and QA. Extended intent vocabulary (5 → 27) with generalized
+  band-ratio preflight packs (NIR/Green/Blue/SWIR/red-edge windows).
+- **SolutionTemplate registry**: validation with cross-domain reference
+  resolvers, `extends` merge with cycle detection, aliases, deterministic
+  bounded facet search (task/modality/sensor/keyword/quality/family) with
+  ~440-char compact summaries; `solution:search/describe/validate/instantiate`
+  tools (instantiate = contract check → AgentPlan v2 → MapSpec draft with
+  condition context → token-resolved style refs).
+- **Template/Solution discovery**: `template:search/describe/validate/preview`
+  and `cartography:lint_catalog` (registry load problems, template structure,
+  solution references, style token resolution). Catalog index now covers
+  styles + solutions (drift-tested); gallery doc regenerated.
+- **Charts & tables**: real grouped bars with series legend; table family
+  (`table`/`summary_table`/`topn_table`) with a 64-row cap, deterministic
+  "+N more" overflow row, top-N sort/cap and elided long/CJK labels;
+  axes-free sparkline. Five new component descriptors.
+- **ReportSpec layer**: multi-page report templates (cover/map/statistics
+  pages with roles and `page_if`), A3 scientific figure page, 16:9 dark
+  briefing, A0 poster foundation, atlas appendix with per-feature tables and
+  provenance blocks.
+- **Preflight/repair 5.0**: `MAP_LOCATOR_MISMATCH`, `MAP_ATLAS_INCOMPLETE`,
+  `MAP_CONDITIONAL_CONTEXT_MISSING`, `MAP_CHART_OVERFLOW` (+ deterministic
+  `grow_chart` repair), `MAP_PAGE_BALANCE`, `MAP_MISSING_CRS_NOTE`; overlap
+  detection is page-aware. Visual regression matrix grows to 19 scenes
+  (atlas appendix, dark screen, A3/A0 formats, locator, conditional pruning,
+  long-English/CJK overflow, uncertainty, flood probability), each asserted
+  to repair-to-passed, render deterministically (SHA-256) and hold geometry
+  contracts.
+- **Scale gates in CI tests**: facet search <20 ms over the full catalog,
+  instantiate/compose/preflight <50 ms, repair convergence ≤5 passes,
+  bounded per-hit response size. Multi-page compile coverage.
+- **Fix**: restore the lost `workflow_run_coordinator.h` declarations from
+  #764 (`notifyRunStateLocked`, `runStateChanged` signal) that broke every
+  non-PCH build.
+- **Docs**: solution-authoring, style-spec-reference, recipe authoring (via
+  recipe facets), migration-mapspec-v3, atlas-guide; limitations rewritten to
+  the lifted/remaining truth; full docs-claim audit against code.
+
 ## [Unreleased] - 2026-09-07
 
 ### 🔬 Scientific Algorithm Foundation 5.0 (goal series)

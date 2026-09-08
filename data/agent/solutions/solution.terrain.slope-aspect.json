@@ -1,0 +1,49 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.terrain.slope-aspect",
+ "version": 1,
+ "title": "Slope & aspect terrain products",
+ "description": "DEM -> slope + aspect foundation products on the terrain template.",
+ "tasks": [
+  "terrain"
+ ],
+ "modalities": [
+  "terrain"
+ ],
+ "sensors": [
+  "dem"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Projected DEM."
+  }
+ ],
+ "analysis_recipe": "harness.terrain_watershed_foundation",
+ "map_template": "terrain-dem-a4l",
+ "style_spec": {
+  "primary": "style.slope-classes",
+  "dem": "style.dem-hillshade"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "terrain",
+  "slope",
+  "aspect"
+ ],
+ "family": "terrain"
+}

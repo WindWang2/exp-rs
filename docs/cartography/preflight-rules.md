@@ -46,6 +46,12 @@ and must stay bounded on hostile input.
 | `MAP_UNKNOWN_COMPONENT` | warning | yes | strips a `source_component` reference that resolved to nothing |
 | `MAP_CONSTRAINT_UNSATISFIABLE` | warning | no | composition-solver leftovers (unknown items, unsolvable directions) |
 | `MAP_OVERLAP` | warning | yes | relocates through seven fixed anchor slots, first collision-free candidate wins |
+| `MAP_LOCATOR_MISMATCH` | warning | no | locator inset extent diverges from the referenced frame (>100×); indicator would be unreadable at render scale (Platform 5.0) |
+| `MAP_ATLAS_INCOMPLETE` | error / warning | no | atlas enabled without a coverage layer (error), or `sort_order` without a sort key |
+| `MAP_CONDITIONAL_CONTEXT_MISSING` | warning | no | `visible_if`/`content_if`/`page_if` declared but no `condition_context` stamped — content is kept, nothing hidden |
+| `MAP_CHART_OVERFLOW` | warning | yes | table-family rows cannot fit the chart rect; repair grows the rect downward inside the page margin (`grow_chart`) |
+| `MAP_PAGE_BALANCE` | warning | no | a declared page carries no items (blank export sheet) |
+| `MAP_MISSING_CRS_NOTE` | warning | no | report/publication source notes do not state the CRS (CRS / EPSG / 坐标系统) |
 | `MAPSPEC_ISSUES_TRUNCATED` | warning | no | issue lists cap at 500 entries; fix the reported findings and re-run |
 | `LAYOUT_*` | warning | no | findings merged from the compiled-layout preflight |
 
@@ -67,3 +73,5 @@ and must stay bounded on hostile input.
 Non-repairable warnings (empty frame, invalid binding, solver leftovers)
 are advisory: they keep `passed` true when nothing repairable remains, so
 the agent decides — the loop never thrashes on findings it cannot fix.
+
+Platform 5.0: `MAP_OVERLAP` compares only items on the same page; multi-page documents are no longer flagged for cross-page geometry.

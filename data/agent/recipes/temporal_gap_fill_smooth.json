@@ -1,0 +1,63 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.temporal_gap_fill_smooth",
+ "title": "Gap-fill + smoothing preprocessing",
+ "intent": "temporal",
+ "family": "temporal",
+ "modality": "temporal",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9",
+  "modis"
+ ],
+ "description": "Temporal gap filling followed by Savitzky-Golay smoothing; standard series preprocessing.",
+ "slots": [
+  {
+   "name": "collection",
+   "kind": "collection",
+   "description": "Registered temporal collection (spatial:temporal tools).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "gap_fill",
+   "operator_id": "rs:temporal_gap_fill",
+   "params": {
+    "collection": "$collection.path",
+    "band_role": "$params.band_role",
+    "method": "linear_interpolation",
+    "output": "$outputs.filled"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "smooth",
+   "operator_id": "rs:temporal_smooth",
+   "params": {
+    "collection": "$collection.path",
+    "band_role": "$params.band_role",
+    "method": "savgol",
+    "output": "$outputs.smoothed"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "smoothed",
+   "from_step": "smooth",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "smooth",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

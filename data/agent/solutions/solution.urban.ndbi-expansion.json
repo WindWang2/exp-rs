@@ -1,0 +1,49 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.urban.ndbi-expansion",
+ "version": 1,
+ "title": "Urban expansion mapping (NDBI)",
+ "description": "NDBI built-up index with thresholding on the urban template.",
+ "tasks": [
+  "urban"
+ ],
+ "modalities": [
+  "optical"
+ ],
+ "sensors": [
+  "sentinel-2",
+  "landsat-8"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Optical reflectance (SWIR + NIR)."
+  }
+ ],
+ "analysis_recipe": "harness.optical_ndbi",
+ "map_template": "urban-building-a4l",
+ "style_spec": {
+  "primary": "style.urban-builtup"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "urban",
+  "built-up",
+  "ndbi"
+ ],
+ "family": "urban"
+}

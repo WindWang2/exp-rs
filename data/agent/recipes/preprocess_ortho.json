@@ -1,0 +1,56 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.preprocess_ortho",
+ "title": "Orthorectification",
+ "intent": "preprocess",
+ "family": "preprocessing",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "Orthorectification with a DEM for geometric analysis readiness.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Input product to orthorectify.",
+   "required": true
+  },
+  {
+   "name": "dem",
+   "kind": "raster",
+   "description": "DEM for orthorectification.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "ortho",
+   "operator_id": "gdal:orthorectification",
+   "params": {
+    "input": "$primary.path",
+    "dem": "$dem.path",
+    "output": "$outputs.ortho"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "ortho",
+   "from_step": "ortho",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "ortho",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

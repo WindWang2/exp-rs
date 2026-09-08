@@ -1,0 +1,61 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.flood.atlas-series",
+ "version": 1,
+ "title": "Regional flood atlas series",
+ "description": "Atlas over the AOI coverage layer: one flood-extent page per feature with dynamic titles and export naming.",
+ "tasks": [
+  "flood",
+  "water"
+ ],
+ "modalities": [
+  "sar"
+ ],
+ "sensors": [
+  "sentinel-1"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Post-event SAR GRD scene."
+  },
+  {
+   "name": "reference",
+   "kind": "raster",
+   "required": true,
+   "description": "Reference SAR scene."
+  },
+  {
+   "name": "aoi",
+   "kind": "vector",
+   "required": true,
+   "description": "Coverage layer of regions/districts."
+  }
+ ],
+ "analysis_recipe": "harness.sar_flood",
+ "map_template": "atlas-series-a4l",
+ "style_spec": {
+  "primary": "style.flood-extent"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "flood",
+  "atlas",
+  "regional"
+ ],
+ "family": "flood"
+}

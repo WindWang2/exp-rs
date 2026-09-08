@@ -1,8 +1,15 @@
-# MapSpec 2.0 Reference (versioned)
+# MapSpec Reference (versioned; current: 3.0)
 
 A MapSpec is a versioned JSON document describing a map product as semantic
 collections. It compiles to a `QgsPrintLayout` through `MapSpecCompiler`;
 QGIS Layout stays the authoritative renderer (ADR 0127, 0131).
+
+> **Platform 5.0 (spec_version 3)** adds bounded conditional visibility
+> (`visible_if`/`content_if`/`page_if`), relative placement constraints,
+> inset locator extent indicators, the full atlas surface, page roles and
+> item `style_ref`. v3 is a strict superset of v2 — everything in this
+> document still holds. See `migration-mapspec-v3.md` for the additions and
+> the v2→v3 migration path; `spec_version` values ≤ 3 validate.
 
 ## Envelope
 
@@ -11,7 +18,7 @@ QGIS Layout stays the authoritative renderer (ADR 0127, 0131).
   "generated_by": "exp-rs",       // envelope (contracts)
   "generated_at": "…",            // envelope timestamp
   "kind": "map_spec",             // required
-  "spec_version": 2,              // required integer, ≤ 2
+  "spec_version": 3,              // required integer, ≤ 3
   "layout_name": "my-map",        // required; join key for the layout
   "template": "land-cover-a4l",   // optional provenance
   "page": {                       // required, positive sizes

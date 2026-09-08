@@ -46,6 +46,8 @@ add_library(sicnu_agent SHARED
   harness/recipe_catalog.h
   harness/recipe_tools.cpp
   harness/recipe_tools.h
+  harness/solution_tools.cpp
+  harness/solution_tools.h
   tool_catalog/agent_tool.cpp
   tool_catalog/agent_tool.h
   tool_catalog/tool_provider.h
@@ -93,6 +95,12 @@ add_library(sicnu_agent SHARED
   cartography/quality.h
   cartography/registry.cpp
   cartography/registry.h
+  cartography/solution_registry.cpp
+  cartography/solution_registry.h
+  cartography/style_compiler.cpp
+  cartography/style_compiler.h
+  cartography/style_spec.cpp
+  cartography/style_spec.h
   symbology/symbology_tools.cpp
   symbology/symbology_tools.h
   commands/workspace_commands.cpp
@@ -101,6 +109,8 @@ add_library(sicnu_agent SHARED
   mapspec/mapspec.h
   mapspec/mapspec_compiler.cpp
   mapspec/mapspec_compiler.h
+  mapspec/mapspec_conditions.cpp
+  mapspec/mapspec_conditions.h
   layout_tools/layout_service.cpp
   layout_tools/layout_service.h
   layout_tools/layout_tools.cpp

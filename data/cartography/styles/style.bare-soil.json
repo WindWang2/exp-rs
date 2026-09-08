@@ -1,0 +1,26 @@
+{
+ "schema_version": "1.0",
+ "kind": "style_spec",
+ "id": "style.bare-soil",
+ "version": 1,
+ "description": "Bare Soil Index continuous ramp (vegetated to exposed soil).",
+ "token_set_ref": "scientific-light",
+ "semantics": [
+  "soil",
+  "bare-soil"
+ ],
+ "applies_to": "raster",
+ "raster": {
+  "renderertype": "singleband_pseudocolor",
+  "band": 1,
+  "classification": {
+   "mode": "continuous",
+   "ramp": "token:palettes.sequential",
+   "stretch": {
+    "type": "fixed",
+    "min": -0.5,
+    "max": 0.6
+   }
+  }
+ }
+}

@@ -91,6 +91,13 @@ class WorkflowRunCoordinator : public QObject {
     void setCheckpointDirectory( const QString &directory );
     QString checkpointDirectory() const;
 
+  signals:
+    /// Emitted on every tracked-run state transition. @a startedMs carries the
+    /// truthful run start (creation stamp when the caller has no better one),
+    /// @a finishedMs is 0 while the run is non-terminal.
+    void runStateChanged( const QString &runId, const QString &workflowId, const QString &state,
+                          qint64 startedMs, qint64 finishedMs );
+
   private slots:
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 

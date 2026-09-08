@@ -1,0 +1,48 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.terrain.elevation-zones",
+ "version": 1,
+ "title": "Slope/elevation zoning",
+ "description": "Slope product thresholded into terrain classes for planning overlays.",
+ "tasks": [
+  "terrain"
+ ],
+ "modalities": [
+  "terrain"
+ ],
+ "sensors": [
+  "dem"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Projected DEM."
+  }
+ ],
+ "analysis_recipe": "harness.terrain_elevation_zones",
+ "map_template": "slope-aspect-a4l",
+ "style_spec": {
+  "primary": "style.slope-classes"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "terrain",
+  "zones",
+  "slope"
+ ],
+ "family": "terrain"
+}

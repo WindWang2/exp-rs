@@ -1,0 +1,83 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.flood.sar-extent",
+ "version": 1,
+ "title": "SAR flood extent mapping",
+ "description": "Weather-independent flood mapping: calibrated + speckle-filtered SAR water threshold vs reference epoch, with DEM terrain-flatten branch.",
+ "tasks": [
+  "flood",
+  "water"
+ ],
+ "modalities": [
+  "sar"
+ ],
+ "sensors": [
+  "sentinel-1"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "Post-event SAR GRD scene (VV preferred).",
+   "accepted": [
+    "sar_grd"
+   ]
+  },
+  {
+   "name": "reference",
+   "kind": "raster",
+   "required": true,
+   "description": "Pre-event or reference SAR scene, co-registered grid preferred.",
+   "accepted": [
+    "sar_grd"
+   ]
+  },
+  {
+   "name": "dem",
+   "kind": "raster",
+   "required": false,
+   "description": "Optional DEM for radiometric terrain flattening."
+  }
+ ],
+ "analysis_recipe": "harness.sar_flood",
+ "map_template": "water-flood-a4l",
+ "style_spec": {
+  "primary": "style.flood-extent",
+  "backscatter": "style.sar-backscatter"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "flood_extent",
+   "kind": "raster",
+   "from_output": "flood_extent"
+  },
+  {
+   "name": "flood_water",
+   "kind": "raster",
+   "from_output": "flood_water"
+  },
+  {
+   "name": "map_pdf",
+   "kind": "file",
+   "role": "final_map"
+  }
+ ],
+ "quality_grade": "certified",
+ "keywords": [
+  "flood",
+  "sar",
+  "all-weather"
+ ],
+ "report_template": "report-page-a4l",
+ "aliases": [
+  "flood.sar"
+ ],
+ "family": "flood"
+}

@@ -1,0 +1,47 @@
+{
+ "schema_version": "1.0",
+ "kind": "solution_template",
+ "id": "solution.water.sar-open-water",
+ "version": 1,
+ "title": "SAR open-water mapping",
+ "description": "Single-scene calibrated SAR water extent for cloudy conditions.",
+ "tasks": [
+  "water"
+ ],
+ "modalities": [
+  "sar"
+ ],
+ "sensors": [
+  "sentinel-1"
+ ],
+ "input_contracts": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "required": true,
+   "description": "SAR GRD scene."
+  }
+ ],
+ "analysis_recipe": "harness.sar_water",
+ "map_template": "water-flood-a4l",
+ "style_spec": {
+  "primary": "style.water-extent"
+ },
+ "verification": {
+  "scientific": true,
+  "visual": true,
+  "final_map": true
+ },
+ "expected_artifacts": [
+  {
+   "name": "result",
+   "kind": "raster"
+  }
+ ],
+ "quality_grade": "reviewed",
+ "keywords": [
+  "water",
+  "sar"
+ ],
+ "family": "water"
+}

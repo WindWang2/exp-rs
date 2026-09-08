@@ -1,0 +1,51 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.preprocess_contrast_stretch",
+ "title": "Visualization contrast stretch",
+ "intent": "preprocess",
+ "family": "preprocessing",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "Percentile contrast stretch for display products (never for quantitative comparison).",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Input raster product.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "stretch",
+   "operator_id": "rs:contrast_stretch",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.stretched",
+    "method": "percentile",
+    "percentile": 2.0
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "stretched",
+   "from_step": "stretch",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "stretch",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

@@ -1,0 +1,83 @@
+{
+ "id": "report-screen-16x9",
+ "version": 1,
+ "description": "16:9 screen briefing page (dark tokens): map with headline metric cards for presentations.",
+ "page": {
+  "width_mm": 297,
+  "height_mm": 167
+ },
+ "style": {
+  "token_set": "scientific-dark",
+  "medium": "screen"
+ },
+ "product_type": "report",
+ "suitable_tasks": [
+  "report",
+  "presentation"
+ ],
+ "slots": [
+  {
+   "role": "map.main",
+   "accepts": "map_frames",
+   "rect_mm": [
+    12,
+    26,
+    200,
+    130
+   ]
+  },
+  {
+   "role": "title.main",
+   "accepts": "titles",
+   "rect_mm": [
+    12,
+    8,
+    273,
+    12
+   ],
+   "content": {
+    "text": "Monitoring Brief"
+   }
+  },
+  {
+   "role": "legend.primary",
+   "accepts": "legends",
+   "rect_mm": [
+    216,
+    26,
+    69,
+    100
+   ],
+   "content": {
+    "content": {
+     "title": "Legend"
+    }
+   }
+  },
+  {
+   "role": "metrics.key",
+   "accepts": "charts",
+   "rect_mm": [
+    216,
+    130,
+    69,
+    26
+   ],
+   "component": "chart/metric-card"
+  },
+  {
+   "role": "source.main",
+   "accepts": "source_notes",
+   "rect_mm": [
+    12,
+    156,
+    200,
+    6
+   ]
+  }
+ ],
+ "recommended_components": [
+  "north-arrow/minimal",
+  "chart/metric-card"
+ ]
+}

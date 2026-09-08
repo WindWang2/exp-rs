@@ -1,0 +1,49 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.preprocess_atmospheric_quac",
+ "title": "Atmospheric correction (QUAC)",
+ "intent": "preprocess",
+ "family": "preprocessing",
+ "modality": "optical",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9"
+ ],
+ "description": "QUAC empirical atmospheric correction.",
+ "slots": [
+  {
+   "name": "primary",
+   "kind": "raster",
+   "description": "Input raster product.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "quac",
+   "operator_id": "rs:atmospheric_quac",
+   "params": {
+    "input": "$primary.path",
+    "output": "$outputs.surface_reflectance"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "surface_reflectance",
+   "from_step": "quac",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "quac",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}
