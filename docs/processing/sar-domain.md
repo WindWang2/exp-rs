@@ -30,9 +30,19 @@
    α = signed range-direction slope toward the sensor). Geometry is defined
    in `sar/sar_terrain_geometry.h` and pinned by closed-form tests.
 2. This is the rigorous **executable subset** for scenes that declare only a
-   constant incidence angle and heading. It is not range-Doppler
+   constant incidence angle and look geometry. It is not range-Doppler
    simulation: no layover displacement, no radiometric terrain correction
    beyond the exposed cos θi / cos θl factor, no per-pixel orbit geometry.
+3. **Heading vs look azimuth (#785, Foundation 6.0)**: the flight heading
+   (`SICNU_SAR_HEADING_DEG`, platform direction of travel) and the antenna
+   look azimuth (`SICNU_SAR_LOOK_AZIMUTH_DEG`, the boresight ground azimuth
+   the terrain geometry actually consumes) are orthogonal. `lookDirection:
+   right|left` derives `look = heading + 90° (right)` or
+   `heading − 90° (left)`; an explicit `lookAzimuthDeg` parameter overrides.
+   Every terrain operator reports the effective look azimuth. Feeding the
+   heading itself (the pre-6.0 behavior) was a 90° orthogonal error that
+   invalidated masks and radiometric flattening; results for unchanged
+   parameter sets therefore change by design in 6.0.
 
 ## 3. Full range-Doppler: explicit refusal + extension contract
 
