@@ -51,6 +51,9 @@ struct ProbeOptions
     /// (bounded by maxSignatureBytes). Off for remote resources.
     bool includeSignature = true;
     int maxSignatureBytes = 64 * 1024;
+    /// HTTP timeout (seconds) applied to remote identification/open (#809 —
+    /// a latency-stalled remote probe must fail bounded, never hang).
+    int httpTimeoutSeconds = 15;
 };
 
 enum class ProbeStage

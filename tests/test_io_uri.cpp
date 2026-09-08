@@ -237,3 +237,62 @@ TEST_CASE( "kind names are stable strings", "[io][uri]" )
   REQUIRE( std::string( sicnu::geo::resourceKindName( ResourceKind::Subdataset ) ) == "subdataset" );
   REQUIRE( std::string( sicnu::geo::resourceKindName( ResourceKind::Invalid ) ) == "invalid" );
 }
+
+TEST_CASE( "display() masks token-only userinfo and non-HTTP credentials",
+           "[io][uri][redaction]" )
+{
+  // #776: token-only userinfo (no colon) used to render verbatim, and
+  // redaction was applied only to RemoteHttp — every other scheme with an
+  // authority (s3://, gs://, postgres://, ftp://, signed VSI payloads)
+  // leaked credentials through display().
+  const auto displays = []( const std::string &raw ) {
+    return ResourceUri::parse( raw ).display();
+  };
+
+  // Token-only https userinfo.
+  const std::string tokenOnly = displays( "https://SECRET-TOKEN@data.example.com/x.tif" );
+  CHECK( tokenOnly.find( "SECRET-TOKEN" ) == std::string::npos );
+  CHECK( tokenOnly.find( "***@data.example.com" ) != std::string::npos );
+
+  // user:password@ keeps the user, masks the password.
+  const std::string userPass = displays( "https://bob:hunter2@data.example.com/x.tif" );
+  CHECK( userPass.find( "hunter2" ) == std::string::npos );
+  CHECK( userPass.find( "bob:***@" ) != std::string::npos );
+
+  // s3:// path-style payload with embedded credentials in the path.
+  const std::string s3 = displays( "/vsis3/bucket/key?X-Amz-Signature=abc123&expires=1" );
+  CHECK( s3.find( "abc123" ) == std::string::npos );
+
+  // A credential-shaped query on any scheme is masked (uniform pass).
+  const std::string pg = displays( "/vsicurl/http://host/db?password=topsecret&x=1" );
+  CHECK( pg.find( "topsecret" ) == std::string::npos );
+
+  // Non-credential URLs survive display unchanged in their meaningful parts.
+  const std::string plain = displays( "https://data.example.com/x.tif?band=2" );
+  CHECK( plain.find( "band=2" ) != std::string::npos );
+  CHECK( plain.find( "data.example.com/x.tif" ) != std::string::npos );
+}
+
+TEST_CASE( "credential query denylist covers the common signed-URL and"
+           " OAuth keys",
+           "[io][uri][redaction]" )
+{
+  // #810: auth/bearer/access_key and friends were missing from the
+  // denylist and rendered in clear text.
+  const auto queryDisplayed = []( const std::string &query ) {
+    ResourceUri uri = ResourceUri::parse(
+      "https://data.example.com/x.tif?" + query );
+    const std::string displayed = uri.display();
+    const std::size_t question = displayed.find( '?' );
+    return displayed.substr( question + 1 );
+  };
+  for ( const char *key : { "auth", "bearer", "access_key", "aws_access_key_id",
+                            "client_secret", "refresh_token", "session_token" } )
+  {
+    const std::string displayed =
+      queryDisplayed( std::string( key ) + "=SECRETVALUE&keep=1" );
+    INFO( "key: " << key );
+    CHECK( displayed.find( "SECRETVALUE" ) == std::string::npos );
+    CHECK( displayed.find( "keep=1" ) != std::string::npos );
+  }
+}

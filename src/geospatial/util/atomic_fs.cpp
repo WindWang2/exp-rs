@@ -128,6 +128,19 @@ void fsyncFile( const std::string &path )
 #endif
 }
 
+/// Copies src over dst (creating/overwriting), throwing GeoError on failure.
+/// Used by the cross-device publish fallback (#807); callers fsync + rename
+/// the copy into place so the target update itself stays atomic.
+void copyFileOverwriting( const std::string &srcPath, const std::string &dstPath )
+{
+  std::error_code ec;
+  fs::copy_file( fs::u8path( srcPath ), fs::u8path( dstPath ),
+                 fs::copy_options::overwrite_existing, ec );
+  if ( ec )
+    throw GeoError( ErrorCode::IoError, "publish: copy failed for " + srcPath + " → " + dstPath,
+                    Json::Value( ec.message() ) );
+}
+
 void publishStagedFile( const std::string &stagedPath, const std::string &targetPath )
 {
   if ( !fileExists( stagedPath ) )
@@ -149,10 +162,39 @@ void publishStagedFile( const std::string &stagedPath, const std::string &target
 #else
   if ( ::rename( stagedPath.c_str(), targetPath.c_str() ) != 0 )
   {
-    Json::Value details;
-    details["path"] = targetPath;
-    details["errno"] = errno;
-    throw GeoError( ErrorCode::IoError, "publish: rename failed for " + targetPath, details );
+    // #807: rename(2) fails with EXDEV when staged and target live on
+    // different filesystems. Fall back to copy-into-the-target-directory +
+    // fsync + same-directory atomic rename, so the publish stays atomic on
+    // the target device and the staged file is consumed either way.
+    if ( errno != EXDEV )
+    {
+      Json::Value details;
+      details["path"] = targetPath;
+      details["errno"] = errno;
+      throw GeoError( ErrorCode::IoError, "publish: rename failed for " + targetPath, details );
+    }
+    const std::string fallback = targetPath + ".publish-cross-device";
+    try
+    {
+      copyFileOverwriting( stagedPath, fallback );
+      fsyncFile( fallback );
+      if ( ::rename( fallback.c_str(), targetPath.c_str() ) != 0 )
+      {
+        const int renameErrno = errno;
+        removeFileQuiet( fallback );
+        Json::Value details;
+        details["path"] = targetPath;
+        details["errno"] = renameErrno;
+        throw GeoError( ErrorCode::IoError,
+                        "publish: cross-device fallback rename failed for " + targetPath, details );
+      }
+      removeFileQuiet( stagedPath );
+    }
+    catch ( const GeoError & )
+    {
+      removeFileQuiet( fallback );
+      throw;
+    }
   }
 #endif
 }
@@ -219,14 +261,29 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
   // first; cleanup restores backups for replaced members and removes only
   // newly-created ones (a stale sidecar is recoverable; a deleted
   // pre-existing sidecar referenced by the old main file is not).
+  // #791: the MAIN target is part of that backup set too — it used to be
+  // replaced with no backup, so a failure at or after the main swap (e.g.
+  // inside the #807 cross-device fallback) lost the previous good main file.
   const std::vector<std::string> stagedSidecars = sidecarsFor( stagedMainPath );
   const std::vector<std::string> targetSidecars = sidecarsFor( targetMainPath );
   std::vector<bool> hadTarget( targetSidecars.size(), false );
   std::vector<std::string> published;
+  const std::string mainBackup = targetMainPath + ".bak";
+  const bool hadMainTarget = fileExists( targetMainPath );
   auto cleanup = [ & ]( const std::string &failedName ) {
     for ( const std::string &done : published )
       removeFileQuiet( done );
     // Restore every backed-up member (the previous good group)...
+    if ( hadMainTarget && fileExists( mainBackup ) )
+    {
+      removeFileQuiet( targetMainPath );
+      // #791 review: a failed restore must NOT drop the backup — that
+      // would destroy the last copy of the previous good main file.
+      if ( !moveFileQuiet( mainBackup, targetMainPath ) )
+        throw GeoError( ErrorCode::IoError,
+                        "group publish failed at " + failedName +
+                            "; the previous main file could not be restored from " + mainBackup );
+    }
     for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
     {
       const std::string backup = targetSidecars[i] + ".bak";
@@ -237,6 +294,7 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
       }
     }
     // ...then drop any leftover backup copies.
+    removeFileQuiet( mainBackup );
     for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
       removeFileQuiet( targetSidecars[i] + ".bak" );
     Json::Value details;
@@ -268,6 +326,13 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     }
     published.push_back( targetSidecars[i] );
   }
+  // Main file last, with the same backup discipline as the sidecars (#791).
+  if ( hadMainTarget )
+  {
+    removeFileQuiet( mainBackup );
+    if ( !moveFileQuiet( targetMainPath, mainBackup ) )
+      cleanup( targetMainPath ); // cannot protect the old main file: refuse
+  }
   try
   {
     publishStagedFile( stagedMainPath, targetMainPath );
@@ -277,6 +342,7 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     cleanup( targetMainPath );
   }
   // Success: drop the backup set.
+  removeFileQuiet( mainBackup );
   for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
     removeFileQuiet( targetSidecars[i] + ".bak" );
 }

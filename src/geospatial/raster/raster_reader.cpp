@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <utility>
 
 namespace sicnu::geo
@@ -201,6 +202,15 @@ std::size_t RasterReader::windowByteBudget( const RasterMetadata &metadata, cons
 
 std::vector<double> RasterReader::readWindow( const std::vector<int> &bands, const RasterWindow &window ) const
 {
+  // #808: the plain entry point is budget-bounded — an oversized window is a
+  // typed error before allocation, not an uncaught bad_alloc. Callers that
+  // genuinely need more must stream through bounded windows or readBlock.
+  return readWindow( bands, window, kDefaultWindowBudgetBytes );
+}
+
+std::vector<double> RasterReader::readWindow( const std::vector<int> &bands, const RasterWindow &window,
+                                              std::size_t maxBytes ) const
+{
   std::string validationError;
   if ( !validateWindow( mMetadata, window, &validationError ) )
   {
@@ -222,6 +232,16 @@ std::vector<double> RasterReader::readWindow( const std::vector<int> &bands, con
   }
   if ( effectiveBands.empty() )
     throw GeoError( ErrorCode::InvalidArgument, "readWindow: raster has no bands" );
+
+  const std::size_t requiredBytes = windowByteBudget( mMetadata, window, effectiveBands );
+  if ( requiredBytes > maxBytes )
+  {
+    Json::Value details;
+    details["required_bytes"] = static_cast<Json::UInt64>( requiredBytes );
+    details["budget_bytes"] = static_cast<Json::UInt64>( maxBytes );
+    details["hint"] = "reduce the window or stream with bounded tiles";
+    throw GeoError( ErrorCode::Unsupported, "readWindow: window read exceeds the byte budget", details );
+  }
 
   const std::size_t pixels = static_cast<std::size_t>( window.width ) * static_cast<std::size_t>( window.height );
   std::vector<double> out( pixels * effectiveBands.size() );
@@ -271,7 +291,9 @@ std::vector<double> RasterReader::readFull( const std::vector<int> &bands, std::
     details["hint"] = "use readWindow streaming with bounded windows";
     throw GeoError( ErrorCode::Unsupported, "readFull: whole-raster read exceeds the declared byte budget", details );
   }
-  return readWindow( bands, full );
+  // Route through the budgeted overload so a full read can never re-fail on
+  // the (smaller) default budget after the caller's explicit check.
+  return readWindow( bands, full, maxBytes );
 }
 
 std::vector<std::uint8_t> RasterReader::readMask( const RasterWindow &window, const std::vector<int> &bands ) const
@@ -376,9 +398,37 @@ std::vector<double> RasterReader::readBlock( int bandIndex1Based, int blockX, in
   window.width = winW;
   window.height = winH;
 
-  // A block edge is smaller than the native block at raster edges; route
-  // through the strict window read (stored values, validated geometry).
-  return readWindow( { bandIndex1Based }, window );
+  const std::vector<double> stored = readWindow( { bandIndex1Based }, window );
+
+  // #790: the contract is a full blockSize() buffer. At raster edges the
+  // stored window is smaller; pad to the uniform block geometry with the
+  // band's declared NoData (0.0 when none declared, matching GDAL's own
+  // partial-block behavior) so callers indexing by blockSize() never walk
+  // off a truncated buffer.
+  if ( winW == size.first && winH == size.second )
+    return stored;
+
+  const BandInfo *info = nullptr;
+  for ( const BandInfo &candidate : mMetadata.bands )
+  {
+    if ( candidate.index == bandIndex1Based )
+    {
+      info = &candidate;
+      break;
+    }
+  }
+  double padValue = 0.0;
+  if ( info && info->hasNoData )
+    padValue = info->noDataIsNaN ? std::numeric_limits<double>::quiet_NaN() : info->noDataValue;
+
+  std::vector<double> out( static_cast<std::size_t>( size.first ) * size.second, padValue );
+  for ( int row = 0; row < winH; ++row )
+  {
+    double *dstRow = out.data() + static_cast<std::size_t>( row ) * size.first;
+    const double *srcRow = stored.data() + static_cast<std::size_t>( row ) * winW;
+    std::copy( srcRow, srcRow + winW, dstRow );
+  }
+  return out;
 }
 
 void RasterReader::iterateTiles( const TilePlan &plan, const std::vector<int> &bands,

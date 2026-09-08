@@ -205,6 +205,46 @@ ProbeResult probeResource( const std::string &path, const ProbeOptions &options 
   // claims sidecar files (.txt/.xml) and directories (.SAFE) that no GDAL
   // driver can identify — those skip the GDAL stage entirely; "GDAL cannot
   // identify" must never mask a valid product answer.
+  // #809: remote identification/open/inspection can hit the network —
+  // bound it. Thread-local config so the limits never leak into other
+  // threads; the previous values (if any) are restored on scope exit.
+  // Applied around the GDAL stage AND the stage-5 metadata re-open.
+  const bool remoteResource =
+    uri.kind == ResourceKind::VsiRemote || uri.kind == ResourceKind::RemoteHttp;
+  struct ScopedHttpConfig
+  {
+    const char *keys[4];
+    const char *oldValues[4];
+    int count = 0;
+    ScopedHttpConfig()
+    {
+      keys[0] = "GDAL_HTTP_TIMEOUT";
+      keys[1] = "GDAL_HTTP_CONNECT_TIMEOUT";
+      keys[2] = "GDAL_HTTP_MAX_RETRY";
+      keys[3] = "GDAL_HTTP_RETRY_DELAY";
+    }
+    void set( const char *key, const std::string &value )
+    {
+      oldValues[count] = CPLGetConfigOption( key, nullptr );
+      CPLSetThreadLocalConfigOption( key, value.c_str() );
+      ++count;
+    }
+    ~ScopedHttpConfig()
+    {
+      for ( int i = 0; i < count; ++i )
+        CPLSetThreadLocalConfigOption( keys[i], oldValues[i] );
+    }
+  } httpScope;
+  if ( remoteResource )
+  {
+    // Clamp to >= 1 s: a 0/negative timeout would disable the bound (#809 review).
+    const int timeoutSeconds = std::max( 1, options.httpTimeoutSeconds );
+    httpScope.set( "GDAL_HTTP_TIMEOUT", std::to_string( timeoutSeconds ) );
+    httpScope.set( "GDAL_HTTP_CONNECT_TIMEOUT", std::to_string( timeoutSeconds ) );
+    httpScope.set( "GDAL_HTTP_MAX_RETRY", "2" );
+    httpScope.set( "GDAL_HTTP_RETRY_DELAY", "1" );
+  }
+
   const bool gdalCandidate = uri.kind != ResourceKind::StacAsset &&
                              uri.kind != ResourceKind::InMemory &&
                              uri.kind != ResourceKind::VirtualDataset;
@@ -219,9 +259,11 @@ ProbeResult probeResource( const std::string &path, const ProbeOptions &options 
   {
     QuietCplErrors quiet;
     GDALDriverH driver = nullptr;
+    // #809: remote identification/open can hit the network — the bounds
+    // were applied by httpScope above.
     // Identify is metadata-only; open confirms the driver can really serve it.
     driver = GDALIdentifyDriverEx( gdalPath.c_str(), GDAL_OF_RASTER | GDAL_OF_VECTOR, nullptr, nullptr );
-    if ( driver == nullptr && ( uri.kind == ResourceKind::VsiRemote || uri.kind == ResourceKind::RemoteHttp ) )
+    if ( driver == nullptr && remoteResource )
     {
       // Identification of remote resources can require network round trips
       // that Identify skips for some drivers; fall back to a read-only open
@@ -361,6 +403,8 @@ ProbeResult probeResource( const std::string &path, const ProbeOptions &options 
   }
 
   // ---- Stage 5: (optional) lazy metadata ---------------------------------
+  // httpScope (#809) is still alive here: the inspection re-opens remote
+  // resources and must inherit the bounded timeout/retry config.
   if ( options.includeMetadata && gdalCandidate && !result.format.driverName.empty() )
   {
     try
