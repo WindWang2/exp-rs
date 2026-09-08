@@ -1,0 +1,12 @@
+{
+  "gpu" : false,
+  "id" : "rs:morphology",
+  "input" : "raster",
+  "notes" : "Shared primitives/morphology kernel (0/1/255 masks, NoData protected, documented replicate borders). FullRaster contract.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "raster_spatial"
+  ],
+  "task" : "raster_cleanup"
+}

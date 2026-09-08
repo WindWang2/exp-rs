@@ -16,6 +16,14 @@
     "ci",
     "ndsi",
     "ndti",
+    "gndvi",
+    "ndmi",
+    "msavi",
+    "arvi",
+    "evi2",
+    "bai",
+    "ui",
+    "bui",
     "vegetation"
   ],
   "task" : "index-computation"

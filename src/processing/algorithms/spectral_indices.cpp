@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <vector>
 
 namespace SpectralIndices
 {
@@ -114,6 +115,166 @@ bool mndwi(const float *green, const float *swir, float *out, size_t count)
     }
     if (count == 0) return false;
     return MathUtils::normalizedDifference(green, swir, out, count);
+}
+
+// --- Foundation 5.0 (Milestone B2) index families ---------------------------
+
+bool gndvi(const float *nir, const float *green, float *out, size_t count)
+{
+    if (!nir || !green || !out) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "gndvi: null pointer argument");
+        return false;
+    }
+    if (count == 0) return false;
+    return MathUtils::normalizedDifference(nir, green, out, count);
+}
+
+bool ndmi(const float *nir, const float *swir1, float *out, size_t count)
+{
+    if (!nir || !swir1 || !out) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "ndmi: null pointer argument");
+        return false;
+    }
+    if (count == 0) return false;
+    return MathUtils::normalizedDifference(nir, swir1, out, count);
+}
+
+bool arvi(const float *nir, const float *red, const float *blue, float *out, size_t count)
+{
+    if (!nir || !red || !blue || !out) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "arvi: null pointer argument");
+        return false;
+    }
+    if (count == 0) return false;
+    // RB = 2*Red - Blue; NaN in any participating band → NaN.
+    for (size_t i = 0; i < count; i++) {
+        if (!std::isfinite(nir[i]) || !std::isfinite(red[i]) || !std::isfinite(blue[i])) {
+            out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+        }
+        const float rb = 2.0f * red[i] - blue[i];
+        out[i] = MathUtils::safeDiv(nir[i] - rb, nir[i] + rb);
+    }
+    return true;
+}
+
+namespace {
+/// Unit-reflectance normalization for the additive-constant indices: returns
+/// scaled copies (÷10000) when the magnitude heuristic fires (#680 regime),
+/// otherwise borrows the inputs. Pointers stay valid for the kernel's scope.
+struct ReflectancePair {
+    std::vector<float> nirBuf, redBuf;
+    const float *nir = nullptr;
+    const float *red = nullptr;
+    ReflectancePair(const float *n, const float *r, size_t count)
+        : nir(n), red(r)
+    {
+        if (isScaledReflectance(n, r, count)) {
+            nirBuf.resize(count); redBuf.resize(count);
+            for (size_t i = 0; i < count; i++) {
+                nirBuf[i] = std::isfinite(n[i]) ? n[i] / 10000.0f : std::numeric_limits<float>::quiet_NaN();
+                redBuf[i] = std::isfinite(r[i]) ? r[i] / 10000.0f : std::numeric_limits<float>::quiet_NaN();
+            }
+            nir = nirBuf.data(); red = redBuf.data();
+        }
+    }
+};
+} // namespace
+
+bool msavi(const float *nir, const float *red, float *out, size_t count)
+{
+    if (!nir || !red || !out) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "msavi: null pointer argument");
+        return false;
+    }
+    if (count == 0) return false;
+    ReflectancePair scaled(nir, red, count);
+    for (size_t i = 0; i < count; i++) {
+        const float n = scaled.nir[i];
+        const float r = scaled.red[i];
+        if (!std::isfinite(n) || !std::isfinite(r)) {
+            out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+        }
+        // (2n+1)^2 - 8(n-r) >= (2n-1)^2 >= 0 for reflectance-domain inputs;
+        // negative radicands (non-reflectance garbage) fall out as NaN.
+        const float term = 2.0f * n + 1.0f;
+        const float radicand = term * term - 8.0f * (n - r);
+        if (radicand < 0.0f) {
+            out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+        }
+        out[i] = (term - std::sqrt(radicand)) / 2.0f;
+    }
+    return true;
+}
+
+bool evi2(const float *nir, const float *red, float *out, size_t count)
+{
+    if (!nir || !red || !out) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "evi2: null pointer argument");
+        return false;
+    }
+    if (count == 0) return false;
+    // Same constant-regime rule as EVI: the additive constant scales with the
+    // data regime (1 → 10000), the numerator factor stays dimensionless.
+    const bool scaled = isScaledReflectance(nir, red, count);
+    const float c = scaled ? 10000.0f : 1.0f;
+    for (size_t i = 0; i < count; i++) {
+        if (!std::isfinite(nir[i]) || !std::isfinite(red[i])) {
+            out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+        }
+        out[i] = MathUtils::safeDiv(2.5f * (nir[i] - red[i]), nir[i] + 2.4f * red[i] + c);
+    }
+    return true;
+}
+
+bool bai(const float *red, const float *nir, float *out, size_t count)
+{
+    if (!red || !nir || !out) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "bai: null pointer argument");
+        return false;
+    }
+    if (count == 0) return false;
+    // Note the argument order: BAI anchors are (0.1 reflectance at Red,
+    // 0.06 at NIR) per Chuvieco et al. 2002.
+    ReflectancePair scaled(nir, red, count);
+    for (size_t i = 0; i < count; i++) {
+        const float n = scaled.nir[i];
+        const float r = scaled.red[i];
+        if (!std::isfinite(n) || !std::isfinite(r)) {
+            out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+        }
+        const float denom = (0.1f - r) * (0.1f - r) + (0.06f - n) * (0.06f - n);
+        out[i] = MathUtils::safeDiv(1.0f, denom);
+    }
+    return true;
+}
+
+bool ui(const float *swir2, const float *nir, float *out, size_t count)
+{
+    if (!swir2 || !nir || !out) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "ui: null pointer argument");
+        return false;
+    }
+    if (count == 0) return false;
+    return MathUtils::normalizedDifference(swir2, nir, out, count);
+}
+
+bool bui(const float *swir, const float *nir, const float *red, float *out, size_t count)
+{
+    if (!swir || !nir || !red || !out) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "bui: null pointer argument");
+        return false;
+    }
+    if (count == 0) return false;
+    // BUI = NDBI - NDVI, both ratio terms scale-invariant.
+    for (size_t i = 0; i < count; i++) {
+        if (!std::isfinite(swir[i]) || !std::isfinite(nir[i]) || !std::isfinite(red[i])) {
+            out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+        }
+        const float ndbiTerm = MathUtils::safeDiv(swir[i] - nir[i], swir[i] + nir[i]);
+        const float ndviTerm = MathUtils::safeDiv(nir[i] - red[i], nir[i] + red[i]);
+        out[i] = ndbiTerm - ndviTerm;
+    }
+    return true;
 }
 
 } // namespace SpectralIndices

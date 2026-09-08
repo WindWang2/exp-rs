@@ -35,7 +35,8 @@ namespace {
 
 const std::vector<std::string> s_indices = {
     "NDVI", "EVI", "SAVI", "NDWI", "NDBI", "MNDWI",
-    "NBR", "dNBR", "BSI", "NDRE", "CI", "NDSI", "NDTI"
+    "NBR", "dNBR", "BSI", "NDRE", "CI", "NDSI", "NDTI",
+    "GNDVI", "NDMI", "MSAVI", "ARVI", "EVI2", "BAI", "UI", "BUI"
 };
 
 } // anonymous namespace
@@ -81,6 +82,14 @@ Json::Value RsSpectralIndexOperator::metadata() const {
     meta["tags"].append("ci");
     meta["tags"].append("ndsi");
     meta["tags"].append("ndti");
+    meta["tags"].append("gndvi");
+    meta["tags"].append("ndmi");
+    meta["tags"].append("msavi");
+    meta["tags"].append("arvi");
+    meta["tags"].append("evi2");
+    meta["tags"].append("bai");
+    meta["tags"].append("ui");
+    meta["tags"].append("bui");
     meta["tags"].append("vegetation");
         meta["task"] = "index-computation";
         meta["notes"] = "Role-resolved spectral indices (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI). NIR/Red resolve by SICNU_BAND_ROLE when present, otherwise explicit band numbers. First analysis step after preprocessing in most workflows.";
@@ -96,6 +105,10 @@ Json::Value RsSpectralIndexOperator::metadata() const {
                                "rs:sentinel2_import for verbatim DN-scale Level-2 stacks), the "
                                "participating bands are divided by it for the computation; ratio "
                                "indices are scale-invariant and inputs are never rescaled on disk.");
+    meta["limitations"].append("MSAVI, EVI2 and BAI are unit-reflectance-anchored like EVI/SAVI; without "
+                               "declared scale metadata they fall back to the same documented magnitude "
+                               "heuristic (grid-and-radiometric-policy §2), which can misfire on all-dark "
+                               "DN scenes — declare the scale for honest results.");
     meta["facadeOf"] = "rs:ndvi,rs:evi,rs:ndwi,rs:savi,rs:ndbi,rs:mndwi,rs:nbr,rs:dnbr,rs:bsi,rs:ndre,rs:ci,rs:ndsi,rs:ndti";
     return meta;
 }
@@ -523,6 +536,74 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         ok = streamBlocks({makeSource(ds, swirBand), makeSource(ds, swir2Band)},
                           [](const float *const *in, float *outBlk, size_t n) {
                               return MathUtils::normalizedDifference(in[0], in[1], outBlk, n);
+                          });
+    } else if (indexName == "GNDVI") {
+        // GNDVI = (NIR - Green) / (NIR + Green)
+        validateBand(nirBand, "NIR");
+        validateBand(greenBand, "Green");
+        ok = streamBlocks({makeSource(ds, nirBand), makeSource(ds, greenBand)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return MathUtils::normalizedDifference(in[0], in[1], outBlk, n);
+                          });
+    } else if (indexName == "NDMI") {
+        // NDMI = (NIR - SWIR1) / (NIR + SWIR1)
+        validateBand(nirBand, "NIR");
+        validateBand(swirBand, "SWIR1");
+        ok = streamBlocks({makeSource(ds, nirBand), makeSource(ds, swirBand)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return MathUtils::normalizedDifference(in[0], in[1], outBlk, n);
+                          });
+    } else if (indexName == "MSAVI") {
+        // MSAVI: unit-reflectance constants → declared-scale normalization (#680).
+        validateBand(nirBand, "NIR");
+        validateBand(redBand, "Red");
+        ok = streamBlocks({makeSource(ds, nirBand, true), makeSource(ds, redBand, true)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return SpectralIndices::msavi(in[0], in[1], outBlk, n);
+                          });
+    } else if (indexName == "ARVI") {
+        // ARVI = (NIR - (2Red - Blue)) / (NIR + (2Red - Blue))
+        validateBand(nirBand, "NIR");
+        validateBand(redBand, "Red");
+        validateBand(blueBand, "Blue");
+        ok = streamBlocks({makeSource(ds, nirBand), makeSource(ds, redBand),
+                           makeSource(ds, blueBand)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return SpectralIndices::arvi(in[0], in[1], in[2], outBlk, n);
+                          });
+    } else if (indexName == "EVI2") {
+        // EVI2: two-band EVI with the same constant-regime rules as EVI (#680).
+        validateBand(nirBand, "NIR");
+        validateBand(redBand, "Red");
+        ok = streamBlocks({makeSource(ds, nirBand, true), makeSource(ds, redBand, true)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return SpectralIndices::evi2(in[0], in[1], outBlk, n);
+                          });
+    } else if (indexName == "BAI") {
+        // BAI: unit-reflectance anchors → declared-scale normalization (#680).
+        validateBand(redBand, "Red");
+        validateBand(nirBand, "NIR");
+        ok = streamBlocks({makeSource(ds, redBand, true), makeSource(ds, nirBand, true)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return SpectralIndices::bai(in[0], in[1], outBlk, n);
+                          });
+    } else if (indexName == "UI") {
+        // UI = (SWIR2 - NIR) / (SWIR2 + NIR)
+        validateBand(swir2Band, "SWIR2");
+        validateBand(nirBand, "NIR");
+        ok = streamBlocks({makeSource(ds, swir2Band), makeSource(ds, nirBand)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return MathUtils::normalizedDifference(in[0], in[1], outBlk, n);
+                          });
+    } else if (indexName == "BUI") {
+        // BUI = NDBI - NDVI
+        validateBand(swirBand, "SWIR");
+        validateBand(nirBand, "NIR");
+        validateBand(redBand, "Red");
+        ok = streamBlocks({makeSource(ds, swirBand), makeSource(ds, nirBand),
+                           makeSource(ds, redBand)},
+                          [](const float *const *in, float *outBlk, size_t n) {
+                              return SpectralIndices::bui(in[0], in[1], in[2], outBlk, n);
                           });
     }
 

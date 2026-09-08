@@ -53,6 +53,20 @@ Pi agent adapter over the same Task Center seam.
   visual matrix; scale gates in tests. Docs: `docs/cartography/solution-authoring.md`,
   `style-spec-reference.md`, `migration-mapspec-v3.md`, `atlas-guide.md`.
 
+- **Scientific Algorithm Foundation 5.0**: shared scientific primitives
+  (histogram/otsu/quantile, morphology, connected components, exact Euclidean
+  distance transform, declared quantile semantics, window edge-policy
+  contract) with `change_detection` delegated onto them; optical
+  topographic correction + 8 new index families + spectral derivatives;
+  matched-filter/ACE target detection over the streamed RX background; SAR
+  dual-pol features and constant-geometry terrain masks (range-Doppler
+  documented as refused, additive orbit contract); temporal CUSUM/EWMA/
+  seasonal Mann-Kendall with a pairwork guard; terrain curvatures, MD
+  hillshade, relief, priority-flood fill, D8 routing; seven raster-spatial
+  mask/window operators; kNN + minimum-distance + Mahalanobis classifiers;
+  sidecar catalog regenerated from descriptors (7 -> 25); baseline compile
+  breakage in `workflow_run_coordinator.h` repaired. See
+  `docs/processing/foundation-5.md` and `docs/processing/sar-domain.md`.
 - **Model Runtime & AI Inference Platform 4.0** (ADR 0130):
   manifest 4.0 identity (`runtime.device`, digest anchor), unified runtime contract
   (device resolution, failure classification, OOM ladder), atomic tiled publisher
