@@ -226,7 +226,9 @@ std::string redactQuery( const std::string &query )
   return out;
 }
 
-/// Masks "user:password@" to "user:***@" or "token@" to "***@" in an authority block.
+/// Masks credentials in an authority block's userinfo: "user:password" →
+/// "user:***", and a token-only userinfo (no colon, e.g.
+/// "https://TOKEN@host" — #776) is itself the secret → "***".
 std::string redactUserinfo( const std::string &userinfo )
 {
   if ( userinfo.empty() )
@@ -235,6 +237,38 @@ std::string redactUserinfo( const std::string &userinfo )
   if ( colon == std::string::npos )
     return "***";
   return userinfo.substr( 0, colon + 1 ) + "***";
+}
+
+/// Uniform display-time credential pass (#776): masks credential-shaped
+/// query pairs anywhere in the text and userinfo blocks in any embedded
+/// authority ("...://user:pass@host/…", "...://token@host/…"). Covers
+/// schemes the structured parser never sees (s3://, gs://, az://,
+/// postgres://, ftp://, /vsis3/…?X-Amz-Signature=… payloads). Idempotent
+/// over strings the structured branches already redacted.
+std::string redactEmbeddedCredentials( const std::string &text )
+{
+  std::string out = text;
+  const std::size_t schemeMarker = out.find( "://" );
+  if ( schemeMarker != std::string::npos )
+  {
+    const std::size_t authorityStart = schemeMarker + 3;
+    const std::size_t authorityEnd = out.find_first_of( "/?#", authorityStart );
+    const std::size_t authorityLength =
+      authorityEnd == std::string::npos ? std::string::npos : authorityEnd - authorityStart;
+    const std::string authority = out.substr( authorityStart, authorityLength );
+    const std::size_t at = authority.rfind( '@' );
+    if ( at != std::string::npos && at > 0 )
+      out.replace( authorityStart, at, redactUserinfo( authority.substr( 0, at ) ) );
+  }
+  const std::size_t question = out.find( '?' );
+  if ( question != std::string::npos )
+  {
+    const std::size_t hash = out.find( '#', question );
+    const std::string query = out.substr(
+      question + 1, hash == std::string::npos ? std::string::npos : hash - question - 1 );
+    out.replace( question + 1, query.size(), redactQuery( query ) );
+  }
+  return out;
 }
 
 std::vector<std::string> splitSegments( const std::string &path )
@@ -310,7 +344,10 @@ bool isCredentialQueryKey( const std::string &keyName )
     "x-amz-signature", "x-amz-credential", "x-amz-security-token", "x-goog-signature",
     "googleaccessid", "signature", "sig", "token", "access_token", "apikey", "api_key",
     "key", "sas", "sharedaccesssignature", "password", "passwd", "secret",
-    "auth", "bearer", "access_key", "authorization",
+    // #810: common denylist gaps — signed-URL and OAuth families.
+    "auth", "authorization", "bearer", "access_key", "accesskey", "aws_access_key_id",
+    "aws_secret_access_key", "client_secret", "refresh_token", "id_token",
+    "session_token", "sessiontoken", "credentials", "jwt", "hmac", "sha",
   };
   const std::string key = toLower( keyName );
   for ( const char *candidate : kCredentialKeys )
@@ -537,47 +574,10 @@ std::string ResourceUri::display() const
     }
   }
   if ( kind != ResourceKind::RemoteHttp )
-  {
-    // Non-HTTP URIs (e.g. s3://, postgres://, ftp://) may carry userinfo or credentials in raw string
-    const std::size_t schemeSep = raw.find( "://" );
-    if ( schemeSep != std::string::npos )
-    {
-      const std::string sch = raw.substr( 0, schemeSep );
-      std::string rest = raw.substr( schemeSep + 3 );
-      std::string frag;
-      const std::size_t hash = rest.find( '#' );
-      if ( hash != std::string::npos )
-      {
-        frag = rest.substr( hash + 1 );
-        rest = rest.substr( 0, hash );
-      }
-      std::string q;
-      const std::size_t question = rest.find( '?' );
-      if ( question != std::string::npos )
-      {
-        q = rest.substr( question + 1 );
-        rest = rest.substr( 0, question );
-      }
-      std::string uinfo;
-      std::string hostAndPath = rest;
-      const std::size_t at = rest.rfind( '@' );
-      if ( at != std::string::npos )
-      {
-        uinfo = rest.substr( 0, at );
-        hostAndPath = rest.substr( at + 1 );
-      }
-      if ( !uinfo.empty() || !q.empty() )
-      {
-        std::string out = sch + "://" + ( uinfo.empty() ? std::string() : redactUserinfo( uinfo ) + "@" ) + hostAndPath;
-        if ( !q.empty() )
-          out += "?" + redactQuery( q );
-        if ( !frag.empty() )
-          out += "#" + frag;
-        return out;
-      }
-    }
-    return canonical();
-  }
+    // #776: every other kind goes through the same uniform credential pass
+    // before display — s3://, gs://, az://, postgres://, ftp:// payloads and
+    // VSI handles carrying signed-URL queries never render raw secrets.
+    return redactEmbeddedCredentials( canonical() );
 
   std::string out =
     scheme + "://" + ( userinfo.empty() ? std::string() : redactUserinfo( userinfo ) + "@" ) + host;
@@ -588,7 +588,9 @@ std::string ResourceUri::display() const
     out += "?" + redactQuery( query );
   if ( !fragment.empty() )
     out += "#" + fragment;
-  return out;
+  // Token-only userinfo was the RemoteHttp gap (#776): redactUserinfo masks
+  // it, and the uniform pass keeps non-standard spellings covered too.
+  return redactEmbeddedCredentials( out );
 }
 
 std::string ResourceUri::remoteUrl() const

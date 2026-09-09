@@ -123,9 +123,16 @@ class RasterReader
     /// Reads stored pixel values (as doubles; integer types are exact) for
     /// the given 1-based bands. Output layout is band-sequential:
     /// [band0(w*h), band1(w*h), ...]. Throws GeoError(InvalidArgument) on a
-    /// bad window/band list, GeoError(Unsupported) for complex pixel types.
+    /// bad window/band list, GeoError(Unsupported) for complex pixel types,
+    /// and GeoError(Unsupported) when the read exceeds the window
+    /// byte budget (#808 — an oversized request is a typed error, never an
+    /// uncaught bad_alloc). Callers wanting larger reads must stream.
     std::vector<double> readWindow( const std::vector<int> &bands, const RasterWindow &window,
-                                    std::size_t maxBytes = 0 ) const;
+                                    std::size_t maxBytes = kDefaultWindowBudgetBytes ) const;
+
+    /// Default window byte budget (1 GiB of doubles) enforced by the plain
+    /// readWindow/readBlock/iterateTiles entry points.
+    static constexpr std::size_t kDefaultWindowBudgetBytes = 1024ULL * 1024ULL * 1024ULL;
 
     /// Whole-raster read with an explicit byte budget. Exceeding the budget
     /// throws GeoError(Unsupported) with the measured size in details —
@@ -154,8 +161,13 @@ class RasterReader
     std::pair<int, int> blockSize( int bandIndex1Based ) const;
 
     /// Reads one native block of one band (block coordinates, not pixels).
-    /// Stored values, band-sequential layout of blockSize() elements.
-    /// Throws GeoError(InvalidArgument) for out-of-range arguments.
+    /// Stored values, band-sequential layout of exactly blockSize() elements
+    /// EVEN at raster edges (#790: edge blocks are padded with the band's
+    /// declared NoData — 0.0 when none declared — so callers indexing by
+    /// blockSize() can never read out of bounds on a truncated buffer).
+    /// Throws GeoError(InvalidArgument) for out-of-range arguments and
+    /// GeoError(Unsupported) when the native block exceeds the default
+    /// window byte budget (#808 — degenerate block geometries only).
     std::vector<double> readBlock( int bandIndex1Based, int blockX, int blockY ) const;
 
     /// Walks `plan` tile by tile, handing each bounded slice's stored values

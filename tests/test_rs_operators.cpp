@@ -24,6 +24,7 @@
 #include "operators/gdal/gdal_operator_utils.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/algorithms/math_utils.h"
+#include "processing/algorithms/spectral_indices.h"
 #include "raster_bit_compare.h"
 
 #include <limits>
@@ -552,6 +553,77 @@ TEST_CASE("Streaming spectral index output is bit-exact against the full-raster 
         outputPath.toStdString(), expectedPath.toStdString());
     if (!report.identical)
         FAIL(report.detail);
+}
+
+TEST_CASE("SAVI regime is resolved once per raster, never per block (no seams)",
+          "[operators][rs][spectral][streaming]") {
+    // #801 regression: the per-block magnitude heuristic let adjacent row
+    // blocks pick different SAVI constants and stripe the output. A DN-scale
+    // raster whose LOWER half holds small values (below the threshold) used
+    // to flip formulas mid-raster; the dataset-level probe now pins one
+    // regime (dn_scale) for the whole raster, and the streamed output must
+    // match the saviDn anchor everywhere.
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/in.tif";
+    const QString outputPath = tmp.path() + "/out.tif";
+
+    constexpr int W = 5;
+    constexpr int H = 600; // three streaming row blocks (blockRows = 256)
+    constexpr int kSwitchRow = 300;
+    std::vector<std::vector<float>> bands(2);
+    bands[0].resize(static_cast<size_t>(W) * H);
+    bands[1].resize(static_cast<size_t>(W) * H);
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            const size_t i = static_cast<size_t>(y) * W + x;
+            if (y < kSwitchRow) {
+                bands[1][i] = 4000.0f + static_cast<float>(i % 11); // nir
+                bands[0][i] = 2000.0f + static_cast<float>(i % 7);  // red
+            } else {
+                // Values below the DN threshold — the old per-block
+                // heuristic classified THIS block as unit reflectance.
+                bands[1][i] = 4.0f + static_cast<float>(i % 2);
+                bands[0][i] = 2.0f + static_cast<float>(i % 3);
+            }
+        }
+    }
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["index"] = "SAVI";
+    params["nir"] = 2;
+    params["red"] = 1;
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    REQUIRE(result["output"].asString() == outputPath.toStdString());
+    // Provenance: the resolved domain is reported and is DN-scale here.
+    CHECK(result["numeric_domain"]["regime"].asString() == "dn_scale");
+
+    // Anchor: the DN-form kernel over the full raster (the dataset-level
+    // regime decision).
+    std::vector<float> expected(static_cast<size_t>(W) * H);
+    REQUIRE(SpectralIndices::saviDn(bands[1].data(), bands[0].data(),
+                                    expected.data(), expected.size()));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    std::vector<float> actual(static_cast<size_t>(W) * H);
+    REQUIRE(out.readBandWindow(1, 0, 0, W, H, actual.data()));
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            const size_t i = static_cast<size_t>(y) * W + x;
+            INFO("row " << y << " col " << x);
+            // The unit-form-through-normalized-input path is algebraically
+            // identical to the DN form but not bit-identical in float.
+            CHECK(actual[i] == Catch::Approx(expected[i]).margin(1e-4));
+        }
+    }
 }
 
 TEST_CASE("Atomic spectral index operators execution and equivalence", "[operators][rs][spectral]") {

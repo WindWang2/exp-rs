@@ -146,6 +146,120 @@ TEST_CASE( "write failure through injected bad window leaves staging empty", "[i
   CHECK( filesLeft == 0 );
 }
 
+TEST_CASE( "group publish consumes the main-file backup set on success",
+           "[io][atomic][publish]" )
+{
+  // #791: the main target was replaced with no backup discipline — a stale
+  // main .bak survived a successful republish, and any failure inside the
+  // main swap had no restore path. The success path now consumes the main
+  // backup like the sidecar backups.
+  const std::string dir = scratch( "group_main_backup" );
+  const std::string target = ( fs::path( dir ) / "final.shp" ).string();
+
+  auto writeGroup = [ & ]( const std::string &marker ) {
+    sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+      target, "pts", "Point", { { "name", "String", 16 } },
+      sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), { "ESRI Shapefile", {}, true, "" } );
+    Json::Value attrs( Json::objectValue );
+    attrs["name"] = marker;
+    writer.writeFeature( attrs, "POINT (1 2)" );
+    writer.finalize();
+  };
+
+  writeGroup( "first" );
+  const std::string firstMain = []( const std::string &path ) {
+    std::ifstream in( path, std::ios::binary );
+    return std::string( ( std::istreambuf_iterator<char>( in ) ),
+                        std::istreambuf_iterator<char>() );
+  }( target );
+  REQUIRE( !firstMain.empty() );
+
+  // A stale main backup from an interrupted earlier run must be consumed.
+  { std::ofstream stale( target + ".bak", std::ios::binary ); stale << "stale"; }
+
+  writeGroup( "second" );
+
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( target + ".bak" ) );
+  // Every sidecar backup is consumed too.
+  for ( const char *extension : { ".shx", ".dbf", ".prj" } )
+    CHECK_FALSE( sicnu::geo::atomic_fs::fileExists(
+      fs::path( target ).replace_extension( extension ).string() + ".bak" ) );
+
+  // The published group reads back with the NEW content.
+  sicnu::geo::VectorReader reader = sicnu::geo::VectorReader::open( target );
+  std::vector<sicnu::geo::VectorFeature> batch;
+  REQUIRE( reader.nextBatch( batch, 10 ) );
+  REQUIRE( batch.size() == 1 );
+}
+
+TEST_CASE( "a failed group publish restores the previous main file and"
+           " sidecars byte-identical",
+           "[io][atomic][publish]" )
+{
+  // Rollback guarantee: a mid-publish failure must restore the whole
+  // previous good group — main file included (#791).
+  const std::string dir = scratch( "group_rollback" );
+  const std::string target = ( fs::path( dir ) / "final.shp" ).string();
+
+  auto writeGroup = [ & ]( const std::string &marker ) {
+    sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+      target, "pts", "Point", { { "name", "String", 16 } },
+      sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), { "ESRI Shapefile", {}, true, "" } );
+    Json::Value attrs( Json::objectValue );
+    attrs["name"] = marker;
+    writer.writeFeature( attrs, "POINT (1 2)" );
+    writer.finalize();
+  };
+
+  writeGroup( "good" );
+  const std::string goodMain = []( const std::string &path ) {
+    std::ifstream in( path, std::ios::binary );
+    return std::string( ( std::istreambuf_iterator<char>( in ) ),
+                        std::istreambuf_iterator<char>() );
+  }( target );
+  const std::string goodDbf = []( const std::string &path ) {
+    std::ifstream in( path, std::ios::binary );
+    return std::string( ( std::istreambuf_iterator<char>( in ) ),
+                        std::istreambuf_iterator<char>() );
+  }( fs::path( target ).replace_extension( ".dbf" ).string() );
+  REQUIRE( !goodMain.empty() );
+  REQUIRE( !goodDbf.empty() );
+
+  // Publish failure injection: the target .dbf is a DIRECTORY, so the
+  // staged .dbf can never replace it — publish fails mid-sidecar-phase and
+  // the whole target group must roll back.
+  const std::string dbfTarget = fs::path( target ).replace_extension( ".dbf" ).string();
+  std::error_code ec;
+  fs::remove( dbfTarget, ec );
+  fs::create_directories( dbfTarget );
+
+  bool failed = false;
+  try
+  {
+    writeGroup( "rejected" );
+    FAIL( "expected group publish failure" );
+  }
+  catch ( const sicnu::geo::GeoError & )
+  {
+    failed = true;
+  }
+  CHECK( failed );
+
+  // Rollback: previous main byte-identical, previous .dbf restored, no
+  // backup leftovers anywhere.
+  const std::string restoredMain = []( const std::string &path ) {
+    std::ifstream in( path, std::ios::binary );
+    return std::string( ( std::istreambuf_iterator<char>( in ) ),
+                        std::istreambuf_iterator<char>() );
+  }( target );
+  CHECK( restoredMain == goodMain );
+  CHECK( fs::is_directory( dbfTarget ) ); // the unreplaceable member survives
+  for ( const char *extension : { ".shx", ".prj" } )
+    CHECK_FALSE( sicnu::geo::atomic_fs::fileExists(
+      fs::path( target ).replace_extension( extension ).string() + ".bak" ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( target + ".bak" ) );
+}
+
 TEST_CASE( "publishStagedGroup restores targetMainPath on failure", "[io][atomic][group][issue791]" )
 {
   const std::string dir = scratch( "main_rollback" );

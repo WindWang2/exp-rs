@@ -122,13 +122,24 @@ TEST_CASE( "OLS and Minnaert regressions: exact fits and refusals", "[topo][kern
   flatX.add( 0.5, 2.0 );
   REQUIRE_FALSE( flatX.fit( &a, &b ) );
 
-  // L = cosi^k with k = 0.5 → the log-log fit recovers k.
+  // #773/#806: physically valid scene L = cosi^k with k = 0.5 (radiance
+  // GROWS with illumination) → the log-log fit recovers k. The old test fed
+  // L = cosi^-0.5 — nonphysical, and only passable because the kernel
+  // negated the regression slope.
   MinnaertRegression mr;
   for ( double ci : { 0.2, 0.4, 0.6, 0.8 } )
     mr.add( ci, std::pow( ci, 0.5 ) );
   double k = 0.0;
   REQUIRE( mr.fit( &k ) );
   REQUIRE( k == Catch::Approx( 0.5 ).margin( 1e-9 ) );
+
+  // #773 regression: physically INVERTED radiance (L decreasing with
+  // illumination) yields a negative slope and must be refused, never
+  // silently corrected with a negative exponent.
+  MinnaertRegression inverted;
+  for ( double ci : { 0.2, 0.4, 0.6, 0.8 } )
+    inverted.add( ci, std::pow( ci, -0.5 ) );
+  REQUIRE_FALSE( inverted.fit( &k ) );
 
   // Domain: non-positive illumination or radiance pairs are refused.
   MinnaertRegression domain;
@@ -172,16 +183,19 @@ TEST_CASE( "fitBand and correctPixel semantics", "[topo][kernel]" )
   REQUIRE_FALSE( fitBand( Method::CCorrection, zen, flat, MinnaertRegression{} ).usable );
 
   // Minnaert: k = 1 reproduces the cosine form; domain violations → NaN.
+  // Lambertian scene L = 0.4·cosi (radiance grows with illumination ⇒
+  // positive slope ⇒ k = 1; #806 — the old test used L = 0.4/cosi, which is
+  // nonphysical and masked the slope inversion).
   MinnaertRegression one;
   for ( double ci : { 0.25, 0.5, 0.75 } )
-    one.add( ci, 0.4 * ci ); // L = 0.4 * cosi^1 ⇒ k = 1
+    one.add( ci, 0.4 * ci ); // L = 0.4·cosi ⇒ k = 1
   BandFit mFit = fitBand( Method::Minnaert, zen, OlsRegression{}, one );
   REQUIRE( mFit.usable );
   REQUIRE( mFit.k == Catch::Approx( 1.0 ).margin( 1e-9 ) );
-  REQUIRE( correctPixel( Method::Minnaert, 0.4f, 0.5, mFit ) ==
-           Catch::Approx( 0.4 * cosd( 30.0 ) / 0.5 ).margin( 1e-6 ) );
-  REQUIRE( std::isnan( correctPixel( Method::Minnaert, 0.4f, -0.5, mFit ) ) );
-  REQUIRE( std::isnan( correctPixel( Method::Minnaert, -0.4f, 0.5, mFit ) ) );
+  REQUIRE( correctPixel( Method::Minnaert, 0.2f, 0.5, mFit ) ==
+           Catch::Approx( 0.4 * cosd( 30.0 ) ).margin( 1e-6 ) );
+  REQUIRE( std::isnan( correctPixel( Method::Minnaert, 0.2f, -0.5, mFit ) ) );
+  REQUIRE( std::isnan( correctPixel( Method::Minnaert, -0.2f, 0.5, mFit ) ) );
 
   // Cosine self-shadow → NaN; non-finite input passes through as NaN.
   REQUIRE( std::isnan( correctPixel( Method::Cosine, 0.5f, 0.0, cosFit ) ) );

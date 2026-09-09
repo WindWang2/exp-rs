@@ -53,11 +53,21 @@ struct TerrainGeometryResult
 
 /// Computes the local incidence angle and the geometric mask class for one
 /// pixel. @a dzdx is dz/dEast, @a dzdy dz/dNorth (metres/metre),
-/// @a incidenceDeg ∈ (0, 90), @a headingDeg = look azimuth clockwise from
-/// north. NaN gradients → NaN localIncidenceDeg (class Normal, caller
-/// masks).
+/// @a incidenceDeg ∈ (0, 90), @a lookAzimuthDeg = antenna look azimuth
+/// (boresight ground azimuth) clockwise from north — NOT the platform
+/// flight heading: heading and look azimuth are orthogonal (#785). Use
+/// lookAzimuthFromHeading() to derive the boresight from the flight
+/// direction and the antenna side. NaN gradients → NaN localIncidenceDeg
+/// (class Normal, caller masks).
 TerrainGeometryResult terrainGeometry( double dzdx, double dzdy,
-                                       double incidenceDeg, double headingDeg );
+                                       double incidenceDeg, double lookAzimuthDeg );
+
+/// Antenna look azimuth (degrees clockwise from north, normalized to
+/// [0, 360)) from the platform flight heading and the antenna side:
+/// right-looking sensors bore heading + 90°, left-looking heading − 90°.
+/// (#785: operators used to feed the heading itself, a 90° orthogonal
+/// error that invalidated masks and radiometric flattening.)
+double lookAzimuthFromHeading( double headingDeg, bool rightLooking );
 
 /// Radiometric terrain factor cos(θi)/cos(θl) for the pixel (the standard
 /// first-order terrain normalization ratio; consumers apply it to already

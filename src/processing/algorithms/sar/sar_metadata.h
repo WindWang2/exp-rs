@@ -26,7 +26,10 @@ inline const char *kPolarizationsKey = "SICNU_POLARIZATIONS";
 inline const char *kCalibrationKey = "SICNU_SAR_CALIBRATION"; // sigma0|gamma0|beta0|dn
 inline const char *kDomainKey = "SICNU_SAR_DOMAIN";           // linear_power|db
 inline const char *kIncidenceKey = "SICNU_SAR_INCIDENCE_DEG"; // constant incidence angle
-inline const char *kHeadingKey = "SICNU_SAR_HEADING_DEG";     // platform heading (look azimuth)
+inline const char *kHeadingKey = "SICNU_SAR_HEADING_DEG";     // platform flight heading
+// #785: the antenna look azimuth (boresight ground azimuth) is orthogonal to
+// the heading; it is the geometric parameter the terrain kernels consume.
+inline const char *kLookAzimuthKey = "SICNU_SAR_LOOK_AZIMUTH_DEG";
 
 /// Radiometric states specific to SAR (the optical vocabulary lives in
 /// satellite_products.h); stored in the shared SICNU_RADIOMETRIC_STATE key.

@@ -4,6 +4,47 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - 2026-09-08
 
+### Scientific Computing & Data Foundation 6.0 (goal series)
+- **P0/P1 scientific correctness remediation (23 tracked issues)**:
+  Minnaert regression slope no longer inverted (k = +m; #773) with
+  physically valid synthetic scenes (#806); D8 flow accumulation keeps DEM
+  NoData out of the routing graph and writes the sentinel (#783); SAR
+  terrain geometry consumes the antenna LOOK AZIMUTH, derived from flight
+  heading + `lookDirection: right|left` or an explicit `lookAzimuthDeg`
+  (#785), with `SICNU_SAR_LOOK_AZIMUTH_DEG` output metadata and split
+  heading/look vocabulary; SAR speckle queries per-band NoData sentinels
+  (#803).
+- **Canonical scientific contracts (Foundation 6.0, Milestone B)**: new
+  `processing/contracts/scientific_contracts.h` — the numeric domain
+  (DN-scale vs unit reflectance) resolves ONCE PER RASTER from declared
+  `SICNU_NUMERIC_SCALE` metadata or a bounded decimated whole-raster probe,
+  is logged with evidence and reported in operator results (#801 tile-boundary
+  seams removed from rs:spectral_index and rs:temporal_index_series);
+  explicit-regime kernel variants (`eviUnit/eviDn/...`) replace per-tile
+  regime guessing in streaming loops.
+- **Dataset split/leakage hardening (#775, #786, #787, #788)**: spatial
+  blocks are atomic split units; ratio targets use Hare-Niemeyer
+  largest-remainder with zero-ratio pinning; spatial-buffer vetoed samples
+  no longer starve Validation; leakage-audit spatial hashing is injective
+  across negative coordinates.
+- **Experiment integrity (#774, #789, #811)**: dataset deletion commits its
+  transaction (no leaked SQLite write lock); the reproduction bundle
+  re-applies secret filtering at the export boundary and masks
+  secret-shaped parameter keys; run upsert validates inside BEGIN IMMEDIATE
+  (no TOCTOU).
+- **Geospatial I/O boundedness & credential safety (#776, #790, #791, #807,
+  #808, #809, #810)**: URI display() redacts token-only userinfo and
+  credential-shaped queries for every scheme, with an expanded denylist;
+  readBlock pads edge blocks to the uniform blockSize() contract; readWindow
+  enforces a 1 GiB byte budget (typed error, never bad_alloc); group publish
+  backs up and restores the main file; POSIX cross-device publish falls back
+  to copy+fsync+atomic rename; remote probes run under bounded HTTP
+  timeout/retry config.
+- **Test integrity (#806, #814, #816, #817)**: physically valid topo test
+  data + inversion refusal; numerical composition-solver assertions with
+  declared tolerances; a full readBlock/iterateTiles contract suite; spatial
+  block-isolation assertions; new `test_scientific_contracts` target.
+
 ### Professional Remote Sensing Workbench 5.0 (goal series, ADR 0134)
 - **WorkbenchHost / IWorkbench**: every professional workspace (map, layout,
   classification, georef I2I/I2M, OBIA) registers as a workbench with a

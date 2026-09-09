@@ -298,6 +298,34 @@ TEST_CASE( "committed versions are immutable but child drafts carry lineage",
     CHECK( store.datasetById( draftDatasetId ) == std::nullopt );
 }
 
+TEST_CASE( "deleteDataset commits its transaction; the store stays writable",
+           "[dataset][store][delete]" )
+{
+    QTemporaryDir dir;
+    DatasetStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+
+    // Draft-only dataset: the deletable case.
+    const DatasetId draftId = DatasetId::generate();
+    REQUIRE( store.createDataset( draftId, QStringLiteral( "temp" ) ).has_value() );
+    REQUIRE( store
+                 .createDraftVersion(
+                     makeManifest( draftId.toString(), DatasetVersionId::generate().toString() ) )
+                 .has_value() );
+
+    REQUIRE( store.deleteDataset( draftId ).has_value() );
+
+    // #774 regression: the deletion must have COMMITTED. With the write
+    // transaction left open (the baseline leaked the SQLite write lock),
+    // the next store write failed to BEGIN its own transaction.
+    const DatasetId nextId = DatasetId::generate();
+    const auto next = store.createDataset( nextId, QStringLiteral( "after-delete" ) );
+    REQUIRE( next.has_value() );
+
+    // The deleted dataset is really gone.
+    CHECK( store.versionsOfDataset( draftId ).isEmpty() );
+}
+
 TEST_CASE( "store refuses writes on a newer schema (forward tolerance)",
            "[dataset][store][migration]" )
 {

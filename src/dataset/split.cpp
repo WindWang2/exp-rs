@@ -45,74 +45,92 @@ struct IdOrder
     }
 };
 
+/// Hare-Niemeyer largest-remainder distribution of `total` slots over the
+/// three roles. A zero ratio pins its role to zero slots no matter how the
+/// remainders fall; the seats freed that way always land on a role the
+/// configuration actually requested. Ties on the fractional remainder break
+/// deterministically Train > Validation > Test, so the result depends only on
+/// (ratios, total) — never on iteration order or accumulation drift.
+/// (#788: floor-then-remainder-to-Test starved small Train ratios and let
+/// nonzero remainders violate a testRatio of 0.)
+void largestRemainderCounts( double train, double validation, double test, int total,
+                             int &trainCount, int &validationCount, int &testCount )
+{
+    const double exact[3] = { train * total, validation * total, test * total };
+    int floors[3] = { int( std::floor( exact[0] ) ), int( std::floor( exact[1] ) ),
+                      int( std::floor( exact[2] ) ) };
+    const double ratios[3] = { train, validation, test };
+    for ( int role = 0; role < 3; ++role )
+    {
+        if ( ratios[role] <= 0.0 )
+            floors[role] = 0; // a zero ratio is a hard contract, not a quota
+    }
+    int seats = total - ( floors[0] + floors[1] + floors[2] );
+    // Ratios sum to 1, so seats can only be >= 0 when a zero-ratio clamp
+    // freed quota (or float slack); distribute largest-remainder first.
+    // At most ONE extra seat per role (Hamilton/Hare-Niemeyer cap): with
+    // seats <= 2 a role whose fraction dominates must not take every seat
+    // (0.7/0.15/0.15 at 64: floors leave 2 seats → 45/10/9, never 46/9/9).
+    bool granted[3] = { false, false, false };
+    const int order[3] = { 0, 1, 2 }; // tie-break priority: Train, Validation, Test
+    while ( seats > 0 )
+    {
+        int best = -1;
+        double bestRemainder = -1.0;
+        for ( const int role : order )
+        {
+            if ( ratios[role] <= 0.0 || granted[role] )
+                continue;
+            const double remainder = exact[role] - std::floor( exact[role] );
+            if ( remainder > bestRemainder + 1e-12 )
+            {
+                bestRemainder = remainder;
+                best = role;
+            }
+        }
+        if ( best < 0 )
+            break; // nothing may receive (all ratios zero) — callers validated ratios
+        ++floors[best];
+        granted[best] = true;
+        --seats;
+    }
+    // Seats < 0 cannot happen with ratio sums <= 1 + 1e-9 and the zero clamps;
+    // clamp defensively so counts stay consistent regardless.
+    while ( seats < 0 )
+    {
+        int worst = -1;
+        int worstCount = std::numeric_limits<int>::max();
+        for ( const int role : order )
+        {
+            if ( floors[role] > 0 && floors[role] < worstCount )
+            {
+                worstCount = floors[role];
+                worst = role;
+            }
+        }
+        if ( worst < 0 )
+            break;
+        --floors[worst];
+        ++seats;
+    }
+    trainCount = floors[0];
+    validationCount = floors[1];
+    testCount = floors[2];
+}
+
 /// Deterministic role assignment by ratio over an already-shuffled list:
-/// counts are computed using the Largest Remainder Method (Hare-Niemeyer),
-/// strictly clamping Test to 0 when testRatio == 0.0 and routing singletons to Train.
-void assignByRatio( const QVector<int> &indices, double train, double validation,
-                    QVector<SplitAssignment> &out, const QVector<SplitInput> &inputs,
-                    double test = -1.0 )
+/// counts come from the largest-remainder distribution computed once, so the
+/// assignment depends on the LIST CONTENT AND ORDER, never on accumulation
+/// drift, and every declared ratio (including 0) is honored exactly.
+void assignByRatio( const QVector<int> &indices, double train, double validation, double test,
+                    QVector<SplitAssignment> &out, const QVector<SplitInput> &inputs )
 {
     const int total = indices.size();
-    if ( total <= 0 )
-        return;
-
-    const double testRatio = ( test >= 0.0 ) ? test : std::max( 0.0, 1.0 - train - validation );
     int trainCount = 0;
     int validationCount = 0;
     int testCount = 0;
-
-    if ( total == 1 )
-    {
-        trainCount = 1;
-    }
-    else
-    {
-        const double sum = train + validation + ( testRatio > 0.0 ? testRatio : 0.0 );
-        const double tRatio = sum > 0.0 ? train / sum : 1.0;
-        const double vRatio = sum > 0.0 ? validation / sum : 0.0;
-        const double sRatio = ( sum > 0.0 && testRatio > 0.0 ) ? testRatio / sum : 0.0;
-
-        const double qTrain = total * tRatio;
-        const double qVal = total * vRatio;
-        const double qTest = ( testRatio > 0.0 ) ? ( total * sRatio ) : 0.0;
-
-        trainCount = int( std::floor( qTrain ) );
-        validationCount = int( std::floor( qVal ) );
-        testCount = ( testRatio > 0.0 ) ? int( std::floor( qTest ) ) : 0;
-
-        double remTrain = qTrain - trainCount;
-        double remVal = qVal - validationCount;
-        double remTest = ( testRatio > 0.0 ) ? ( qTest - testCount ) : -1.0;
-
-        int rem = total - ( trainCount + validationCount + testCount );
-        while ( rem > 0 )
-        {
-            if ( remTrain >= remVal && ( testRatio == 0.0 || remTrain >= remTest ) )
-            {
-                trainCount++;
-                remTrain = -1.0;
-            }
-            else if ( remVal >= remTrain && ( testRatio == 0.0 || remVal >= remTest ) )
-            {
-                validationCount++;
-                remVal = -1.0;
-            }
-            else if ( testRatio > 0.0 )
-            {
-                testCount++;
-                remTest = -1.0;
-            }
-            else
-            {
-                trainCount++;
-            }
-            --rem;
-        }
-    }
-
-    if ( testRatio == 0.0 )
-        testCount = 0;
-
+    largestRemainderCounts( train, validation, test, total, trainCount, validationCount,
+                            testCount );
     for ( int position = 0; position < total; ++position )
     {
         SplitAssignment assignment;
@@ -160,9 +178,11 @@ void requireNonEmptyRoles( const QVector<SplitAssignment> &assignments,
         }
         return false;
     };
-    const int trainTarget = int( std::floor( config.trainRatio * total ) );
-    const int validationTarget = int( std::floor( config.validationRatio * total ) );
-    const int testTarget = int( std::floor( config.testRatio * total ) );
+    int trainTarget = 0;
+    int validationTarget = 0;
+    int testTarget = 0;
+    largestRemainderCounts( config.trainRatio, config.validationRatio, config.testRatio, total,
+                            trainTarget, validationTarget, testTarget );
     if ( trainTarget > 0 && !hasRole( SplitRole::Train ) )
         throw SplitRoleDegenerate{};
     if ( validationTarget > 0 && !hasRole( SplitRole::Validation ) )
@@ -171,14 +191,49 @@ void requireNonEmptyRoles( const QVector<SplitAssignment> &assignments,
         throw SplitRoleDegenerate{};
 }
 
+int roleIndex( SplitRole role )
+{
+    // Train/Validation/Test are the first three enumerators (dataset_types.h).
+    return static_cast<int>( role );
+}
+
+/// Whole-group budget walk overflow: a group that no longer fits either
+/// budget lands on the nonzero-ratio role furthest under its target
+/// (deterministic Train > Validation > Test tie-break). A zero ratio never
+/// receives overflow — that keeps `testRatio: 0` an actual contract for
+/// grouped walks too, not just per-sample assignment (#788).
+SplitRole overflowRole( const double (&ratios)[3], const int (&targets)[3],
+                        const int (&assigned)[3] )
+{
+    int best = -1;
+    int bestDeficit = std::numeric_limits<int>::min();
+    for ( int role = 0; role < 3; ++role )
+    {
+        if ( ratios[role] <= 0.0 )
+            continue;
+        const int deficit = targets[role] - assigned[role];
+        if ( deficit > bestDeficit )
+        {
+            bestDeficit = deficit;
+            best = role;
+        }
+    }
+    return best >= 0 ? static_cast<SplitRole>( best ) : SplitRole::Test;
+}
+
 QVector<SplitAssignment> walkGroupsInOrder( const QStringList &order,
                                             const QMap<QString, QVector<int>> &table,
                                             const QVector<SplitInput> &inputs,
                                             const SplitConfig &config )
 {
     const int total = inputs.size();
-    const int trainTarget = int( std::floor( config.trainRatio * total ) );
-    const int validationTarget = trainTarget + int( std::floor( config.validationRatio * total ) );
+    int trainTarget = 0;
+    int validationTarget = 0;
+    int testTarget = 0;
+    largestRemainderCounts( config.trainRatio, config.validationRatio, config.testRatio, total,
+                            trainTarget, validationTarget, testTarget );
+    const double ratios[3] = { config.trainRatio, config.validationRatio, config.testRatio };
+    const int targets[3] = { trainTarget, validationTarget, testTarget };
 
     // Greedy walk first: each group takes the role whose budget is open.
     struct GroupInfo
@@ -188,18 +243,20 @@ QVector<SplitAssignment> walkGroupsInOrder( const QStringList &order,
         SplitRole role = SplitRole::Test;
     };
     QVector<GroupInfo> groups;
-    int used = 0;
+    int assigned[3] = { 0, 0, 0 };
     for ( const QString &key : order )
     {
         GroupInfo info;
         info.key = key;
         info.size = int( table.value( key ).size() );
-        if ( used < trainTarget )
+        if ( assigned[0] < trainTarget )
             info.role = SplitRole::Train;
-        else if ( used < validationTarget )
+        else if ( assigned[0] + assigned[1] < trainTarget + validationTarget )
             info.role = SplitRole::Validation;
+        else
+            info.role = overflowRole( ratios, targets, assigned );
+        assigned[roleIndex( info.role )] += info.size;
         groups.append( info );
-        used += info.size;
     }
 
     // Degenerate repair: a non-zero-ratio role that ended up EMPTY steals the
@@ -220,35 +277,64 @@ QVector<SplitAssignment> walkGroupsInOrder( const QStringList &order,
         SplitRole role;
         int target;
     };
-    const RoleSpec specs[3] = { { SplitRole::Test, int( std::floor( config.testRatio * total ) ) },
-                                { SplitRole::Validation,
-                                  int( std::floor( config.validationRatio * total ) ) },
+    const RoleSpec specs[3] = { { SplitRole::Test, testTarget },
+                                { SplitRole::Validation, validationTarget },
                                 { SplitRole::Train, trainTarget } };
-    for ( const RoleSpec &spec : specs )
+    // Emptiness repair to a fixpoint: a single pass can vacate a role it
+    // just fixed (a later steal may take its only group), so the passes
+    // repeat until every nonzero-target role is covered or nothing changes.
+    // Donors that are the SOLE group of another nonzero-target role are
+    // skipped unless there is no alternative — taking them trades one empty
+    // role for another (adversarial review FINDING: e.g. group sizes
+    // {2,8,2} at 0.81/0.10/0.09 used to refuse a split that has a valid
+    // atomic assignment).
+    for ( int pass = 0; pass <= groups.size(); ++pass )
     {
-        if ( spec.target <= 0 || roleCount( spec.role ) > 0 )
-            continue;
-        int donorIndex = -1;
-        int donorExcess = std::numeric_limits<int>::min();
-        for ( int i = groups.size() - 1; i >= 0; --i )
+        bool repaired = false;
+        for ( const RoleSpec &spec : specs )
         {
-            const GroupInfo &info = groups.at( i );
-            if ( info.role == spec.role )
+            if ( spec.target <= 0 || roleCount( spec.role ) > 0 )
                 continue;
-            const int target = info.role == SplitRole::Train
-                                   ? trainTarget
-                                   : ( info.role == SplitRole::Validation
-                                           ? int( std::floor( config.validationRatio * total ) )
-                                           : int( std::floor( config.testRatio * total ) ) );
-            const int excess = roleCount( info.role ) - info.size - target;
-            if ( excess >= donorExcess )
+            // How many groups carry each nonzero-target role (sole-group guard).
+            int groupCount[3] = { 0, 0, 0 };
+            for ( const GroupInfo &info : groups )
             {
-                donorExcess = excess;
-                donorIndex = i;
+                if ( targets[roleIndex( info.role )] > 0 )
+                    ++groupCount[roleIndex( info.role )];
+            }
+            int donorIndex = -1;
+            int donorExcess = std::numeric_limits<int>::min();
+            int fallbackIndex = -1;
+            int fallbackExcess = std::numeric_limits<int>::min();
+            for ( int i = groups.size() - 1; i >= 0; --i )
+            {
+                const GroupInfo &info = groups.at( i );
+                if ( info.role == spec.role )
+                    continue;
+                const int donorRole = roleIndex( info.role );
+                const int excess = roleCount( info.role ) - info.size - targets[donorRole];
+                const bool soleDonor =
+                    targets[donorRole] > 0 && groupCount[donorRole] <= 1;
+                if ( excess >= donorExcess && !soleDonor )
+                {
+                    donorExcess = excess;
+                    donorIndex = i;
+                }
+                if ( excess >= fallbackExcess )
+                {
+                    fallbackExcess = excess;
+                    fallbackIndex = i;
+                }
+            }
+            const int chosen = donorIndex >= 0 ? donorIndex : fallbackIndex;
+            if ( chosen >= 0 )
+            {
+                groups[chosen].role = spec.role;
+                repaired = true;
             }
         }
-        if ( donorIndex >= 0 )
-            groups[donorIndex].role = spec.role;
+        if ( !repaired )
+            break;
     }
 
     QVector<SplitAssignment> out;
@@ -598,8 +684,8 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
             for ( int i = 0; i < inputs.size(); ++i )
                 indices[i] = i;
             random.shuffle( indices );
-            assignByRatio( indices, config.trainRatio, config.validationRatio, assignments,
-                           inputs, config.testRatio );
+            assignByRatio( indices, config.trainRatio, config.validationRatio,
+                           config.testRatio, assignments, inputs );
             break;
         }
         case SplitMethod::Stratified:
@@ -616,8 +702,8 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
             {
                 QVector<int> indices = byClass.value( className );
                 random.shuffle( indices );
-                assignByRatio( indices, config.trainRatio, config.validationRatio, assignments,
-                               inputs, config.testRatio );
+                assignByRatio( indices, config.trainRatio, config.validationRatio,
+                               config.testRatio, assignments, inputs );
             }
             break;
         }
@@ -634,9 +720,13 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
         }
         case SplitMethod::SpatialBlock:
         {
-            // Block id = integer grid cell of the bounds center; blocks are
-            // atomic groups and move whole.
-            QMap<QString, QVector<int>> table;
+            // Block id = integer grid cell of the bounds center. Blocks are
+            // ATOMIC units: the shuffled block list is walked with the same
+            // whole-group budget walk as the grouped engine, so every sample
+            // inside a block carries one role (#775 — splitting per block
+            // put train and test samples on the same spatial block, the
+            // exact autocorrelation leakage this method exists to prevent).
+            QMap<QString, QVector<int>> byBlock;
             for ( int i = 0; i < inputs.size(); ++i )
             {
                 const SplitInput &input = inputs.at( i );
@@ -645,13 +735,17 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
                         QStringLiteral( "spatial_block requires valid bounds on every sample" ) ) );
                 const double centerX = ( input.minX + input.maxX ) / 2.0;
                 const double centerY = ( input.minY + input.maxY ) / 2.0;
+                // Floor on the signed division keeps the grid injective
+                // across the axes (truncation would merge cells straddling
+                // 0); negative block ids are fine — the key below encodes
+                // them losslessly.
                 const qint64 blockX = qint64( std::floor( centerX / config.blockSizeX ) );
                 const qint64 blockY = qint64( std::floor( centerY / config.blockSizeY ) );
-                table[QStringLiteral( "%1:%2" ).arg( blockX ).arg( blockY )].append( i );
+                byBlock[QStringLiteral( "%1|%2" ).arg( blockX ).arg( blockY )].append( i );
             }
-            QStringList groupNames = table.keys();
-            random.shuffle( groupNames );
-            assignments = walkGroupsInOrder( groupNames, table, inputs, config );
+            QStringList blockKeys = byBlock.keys();
+            random.shuffle( blockKeys );
+            assignments = walkGroupsInOrder( blockKeys, byBlock, inputs, config );
             requireNonEmptyRoles( assignments, config, inputs.size() );
             break;
         }
@@ -693,17 +787,28 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
                 else if ( tooClose )
                     excluded.insert( candidate );
             }
-            // Remainder (accepted/excluded removed) splits Train/Validation
-            // by the train:validation share of the config ratios.
+            // Remainder (accepted AND buffer-vetoed removed — #786: counting
+            // vetoed samples inflated the train count and starved
+            // Validation down to zero) splits Train/Validation by the
+            // train:validation share of the config ratios, with the
+            // largest-remainder tie going to Train.
             QVector<int> remaining;
             for ( const int candidate : order )
             {
-                if ( !accepted.contains( candidate ) && !excluded.contains( candidate ) )
-                    remaining.append( candidate );
+                if ( accepted.contains( candidate ) || excluded.contains( candidate ) )
+                    continue;
+                remaining.append( candidate );
             }
             const double ratioSum = config.trainRatio + config.validationRatio;
             const double trainShare = ratioSum > 0.0 ? config.trainRatio / ratioSum : 1.0;
-            const int trainCount = int( std::floor( trainShare * remaining.size() ) );
+            const double trainExact = trainShare * remaining.size();
+            int trainCount = int( std::floor( trainExact ) );
+            // Two-role largest remainder: the fractional seat goes to Train
+            // on an exact tie (deterministic, favors the role a model needs
+            // more when the remainder cannot be split).
+            if ( trainExact - std::floor( trainExact ) >= 0.5 - 1e-12 )
+                ++trainCount;
+            trainCount = std::min( trainCount, int( remaining.size() ) );
             int position = 0;
             for ( const int candidate : order )
             {

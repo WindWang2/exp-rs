@@ -10,6 +10,7 @@
 #include "processing/algorithms/nodata_utils.h"
 #include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/algorithms/sar/sar_terrain.h"
+#include "processing/algorithms/sar/sar_terrain_geometry.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 
@@ -26,7 +27,7 @@ using namespace params;
 namespace {
 
 const std::vector<std::string> s_demUnits = { "meters", "feet", "decimeters" };
-const std::vector<std::string> s_lookDirs = { "right", "left" };
+const std::vector<std::string> s_lookDirections = { "right", "left" };
 
 Json::Value makeSarInputContract() {
     Json::Value c(Json::objectValue);
@@ -53,8 +54,9 @@ Json::Value RsSarTerrainFlattenOperator::schema() const {
     props["dem"] = makeRasterParam("dem", "Co-registered DEM covering the exact same grid (radar geometry)");
     props["dem"]["x-rs-contract"] = makeDemInputContract();
     props["incidenceDeg"] = makeNumberParam("incidenceDeg", "Scene incidence angle θ0 in degrees (near-range center)", 30.0);
-    props["headingDeg"] = makeNumberParam("headingDeg", "Platform flight heading in degrees", 0.0);
-    props["lookDirection"] = makeEnumParam("lookDirection", "Antenna look direction relative to flight heading ('right' or 'left')", s_lookDirs, "right");
+    props["headingDeg"] = makeNumberParam("headingDeg", "Platform flight heading in degrees clockwise from north; combined with lookDirection (#785)", 0.0);
+    props["lookDirection"] = makeEnumParam("lookDirection", "Antenna side relative to the flight path: the look azimuth is heading+90 (right) or heading-90 (left). Ignored when lookAzimuthDeg is given", s_lookDirections, "right");
+    props["lookAzimuthDeg"] = makeNumberParam("lookAzimuthDeg", "Explicit antenna look azimuth (boresight ground azimuth, degrees clockwise from north); overrides headingDeg+lookDirection. Supply it explicitly or not at all — UIs must not auto-fill the default", 0.0);
     props["demUnit"] = makeEnumParam("demUnit", "DEM elevation unit (a declared SICNU_DEM_UNIT metadata on the DEM overrides it)", s_demUnits, "meters");
     props["polarizations"] = makeStringParam("polarizations", "Comma-separated polarizations (e.g. VV,VH) recorded on the output", "");
     props["sensor"] = makeStringParam("sensor", "Sensor/instrument id recorded on the output", "");
@@ -64,6 +66,7 @@ Json::Value RsSarTerrainFlattenOperator::schema() const {
     outputs["calibration"] = makeStringParam("calibration", "Calibration state of the output (gamma0)");
     outputs["incidenceDeg"] = makeNumberParam("incidenceDeg", "Scene incidence angle used (degrees)");
     outputs["headingDeg"] = makeNumberParam("headingDeg", "Platform heading used (degrees)");
+    outputs["lookAzimuthDeg"] = makeNumberParam("lookAzimuthDeg", "Effective antenna look azimuth used (degrees clockwise from north)");
     outputs["demUnit"] = makeStringParam("demUnit", "Effective DEM elevation unit after metadata override");
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
@@ -84,7 +87,9 @@ Json::Value RsSarTerrainFlattenOperator::metadata() const {
                       "geometry, writing a single-band gamma0 SAR product.";
     meta["prerequisites"].append("sigma0 raster (linear power) and a DEM on the exact "
                                  "same grid (radar geometry for GRD products), plus the "
-                                 "scene incidence angle and platform heading.");
+                                 "scene incidence angle and the antenna look azimuth "
+                                 "(headingDeg + lookDirection, or an explicit "
+                                 "lookAzimuthDeg).");
     meta["workflowHints"].append("For the full product with the layover/shadow validity "
                                  "mask and the local incidence angle band use "
                                  "rs:sar_terrain_correction.");
@@ -135,12 +140,22 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     const int band = getInt(params, "band", 1);
     const double incidenceDeg = getDouble(params, "incidenceDeg", 30.0);
     const double headingDeg = getDouble(params, "headingDeg", 0.0);
-    const std::string lookDirection = getEnum(params, "lookDirection", s_lookDirs, "right");
-    double lookAzimuthDeg = (lookDirection == "left") ? (headingDeg - 90.0) : (headingDeg + 90.0);
-    if (params.isMember("lookAzimuthDeg") && params["lookAzimuthDeg"].isNumeric())
+    const std::string lookDirection = getEnum(params, "lookDirection", s_lookDirections, "right");
+    // #785: heading (flight direction) and antenna look azimuth are orthogonal.
+    // The look azimuth is heading ± 90 by antenna side, unless the caller
+    // supplies the boresight explicitly.
+    double lookAzimuthDeg;
+    if (params.isMember("lookAzimuthDeg") && params["lookAzimuthDeg"].isNumeric()) {
         lookAzimuthDeg = params["lookAzimuthDeg"].asDouble();
-    else if (params.isMember("look_azimuth") && params["look_azimuth"].isNumeric())
+        if (!std::isfinite(lookAzimuthDeg)) {
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "lookAzimuthDeg must be a finite angle in degrees");
+        }
+    } else if (params.isMember("look_azimuth") && params["look_azimuth"].isNumeric()) {
         lookAzimuthDeg = params["look_azimuth"].asDouble();
+    } else {
+        lookAzimuthDeg = sicnu::sar::lookAzimuthFromHeading(headingDeg, lookDirection == "right");
+    }
     lookAzimuthDeg = std::fmod(lookAzimuthDeg, 360.0);
     if (lookAzimuthDeg < 0.0)
         lookAzimuthDeg += 360.0;
@@ -201,7 +216,8 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
 
     sicnu::sar::TerrainCorrectionOptions options;
     options.incidenceDeg = incidenceDeg;
-    options.headingDeg = lookAzimuthDeg;
+    options.lookAzimuthDeg = lookAzimuthDeg;
+    options.headingDeg = headingDeg;
     options.applyFlattening = true;
     options.applyShadowMask = true;
     options.demUnitScale = demUnitScale;
@@ -225,6 +241,8 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     }
     // Radiometric state in the shared vocabulary.
     dst.setMetadataItem("SICNU_RADIOMETRIC_STATE", "gamma0");
+    dst.setMetadataItem("SICNU_SAR_LOOK_AZIMUTH_DEG",
+                        QString::number(lookAzimuthDeg, 'g', 10));
 
     QString error;
     if (!dst.closeWithError(&error)) {

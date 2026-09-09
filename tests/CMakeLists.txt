@@ -908,6 +908,41 @@ target_include_directories(test_topographic_correction PRIVATE
 )
 sicnu_discover_tests(test_topographic_correction)
 
+# Grid & resampling foundation (Foundation 6.0, Milestone D):
+# rs:resample / rs:align known answers over the GDAL warp seam.
+add_executable(test_grid_operators test_grid_operators.cpp)
+target_link_libraries(test_grid_operators PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_grid_operators)
+target_include_directories(test_grid_operators PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_grid_operators)
+
+# Scientific contracts (Foundation 6.0): canonical numeric-domain decisions
+# resolved once per raster + kernel regime consistency.
+add_executable(test_scientific_contracts test_scientific_contracts.cpp)
+target_link_libraries(test_scientific_contracts PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_scientific_contracts)
+target_include_directories(test_scientific_contracts PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_scientific_contracts)
+
 # Spectral derivatives (Foundation 5.0 Milestone B3): kernel closed forms +
 # operator E2E over an explicit wavelength axis + index-space refusal.
 add_executable(test_spectral_derivative test_spectral_derivative.cpp)

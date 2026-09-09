@@ -49,10 +49,15 @@ TerrainGeometryResult terrainGeometry( double dzdx, double dzdy,
     out.localIncidenceDeg =
         std::acos( std::clamp( cosInc, -1.0, 1.0 ) ) / kDegToRad;
 
-    // Signed range-direction slope: positive when the terrain rises toward
-    // the sensor (the sensor sits opposite the look azimuth).
-    const double gTowardSensor = -gLook;
-    const double alpha = std::atan( gTowardSensor ); // radians, signed
+    // Signed range-direction slope: positive when the terrain rises along
+    // the beam-travel direction (away from the antenna). Slant-range
+    // monotonicity: R(x)² = (d0+x)² + (H−z(x))² gives dR/dx = cosθ0·(tanθ0
+    // − gLook), so layover (range folds back) ⟺ gLook > tanθ0, and the far
+    // slope shadows the beam ⟺ gLook > cotθ0 ⟺ atan(gLook) > 90°−θ0.
+    // (Adversarial review: the previous −gLook here flagged exactly the
+    // wrong flanks — layover on the side facing away, shadow on the side
+    // facing the radar.)
+    const double alpha = std::atan( gLook ); // radians, signed
 
     if ( alpha > thetaI )
         out.maskClass = TerrainMaskClass::Layover;
@@ -72,6 +77,17 @@ double terrainRadiometricFactor( double localIncidenceDeg, double incidenceDeg )
     if ( cosLocal <= 1e-6 ) // grazing/overturned local geometry
         return kNaN;
     return std::cos( incidenceDeg * kDegToRad ) / cosLocal;
+}
+
+double lookAzimuthFromHeading( double headingDeg, bool rightLooking )
+{
+    if ( !std::isfinite( headingDeg ) )
+        return kNaN;
+    const double look = headingDeg + ( rightLooking ? 90.0 : -90.0 );
+    double normalized = std::fmod( look, 360.0 );
+    if ( normalized < 0.0 )
+        normalized += 360.0;
+    return normalized;
 }
 
 } // namespace sicnu::sar

@@ -411,6 +411,10 @@ sicnu::data::Result<void> ExperimentStore::upsertRun( const ExperimentRun &run )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.invalid" ),
                                             QStringLiteral( "run requires run_id + experiment_id" ) ) );
 
+    // #811: BEGIN IMMEDIATE takes the write lock up front, and the existing
+    // run is read INSIDE the same transaction that writes. Validating before
+    // the transaction left a TOCTOU window where a concurrent writer could
+    // change the run between the transition/identity check and the upsert.
     if ( !m_impl->begin( nullptr ) )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             QStringLiteral( "cannot begin transaction" ) ) );

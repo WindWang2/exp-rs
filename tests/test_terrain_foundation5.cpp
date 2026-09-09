@@ -152,6 +152,47 @@ TEST_CASE( "D8 direction and accumulation on a monotone slope", "[terrain][flow]
     REQUIRE( acc[i] == Catch::Approx( expected[i] ) );
 }
 
+TEST_CASE( "Flow accumulation keeps DEM NoData out of the routing graph",
+           "[terrain][flow]" )
+{
+  // #783: NoData cells used to seed acc = 1.0 phantom ridges along every
+  // masked/ocean boundary. With the DEM passed, they carry the sentinel and
+  // never drain or receive flow.
+  constexpr int kW = 5;
+  constexpr int kH = 3;
+  constexpr float kNoData = -9999.0f;
+  // An eastward-descending slope (z falls as x grows) draining toward a
+  // masked "ocean" column at the east edge.
+  std::vector<float> filled( static_cast<size_t>( kW ) * kH );
+  std::vector<float> dir( static_cast<size_t>( kW ) * kH, 0.0f );
+  for ( int y = 0; y < kH; ++y )
+    for ( int x = 0; x < kW; ++x )
+      filled[static_cast<size_t>( y ) * kW + x] =
+          x == kW - 1 ? kNoData : static_cast<float>( 3 * ( kW - 1 - x ) );
+  // Route with the same nodata contract as the accumulation overload.
+  REQUIRE( flowDirections( filled.data(), dir.data(), kW, kH, kNoData ) );
+  std::vector<float> acc( static_cast<size_t>( kW ) * kH, 0.0f );
+  REQUIRE( flowAccumulation( dir.data(), acc.data(), kW, kH, filled.data(), kNoData ) );
+  for ( int y = 0; y < kH; ++y )
+  {
+    for ( int x = 0; x < kW; ++x )
+    {
+      const size_t i = static_cast<size_t>( y ) * kW + x;
+      if ( x == kW - 1 )
+      {
+        // Masked cell: sentinel out, never a 1.0 ridge.
+        REQUIRE( acc[i] == kNoData );
+      }
+      else
+      {
+        // The coast column is NoData, so flow stops at the last valid
+        // column: each row accumulates exactly its own x+1 cells.
+        REQUIRE( acc[i] == Catch::Approx( static_cast<float>( x + 1 ) ) );
+      }
+    }
+  }
+}
+
 TEST_CASE( "rs:terrain_flow E2E: accumulation over a slope DEM",
            "[terrain][flow][operator][e2e]" )
 {

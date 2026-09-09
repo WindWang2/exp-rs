@@ -45,8 +45,17 @@ namespace sicnu::agent::mapspec {
 inline constexpr int kMapSpecCurrentVersion = 3;
 
 /// Ordered item collection names of a MapSpec document.
-extern const char *const kCollections[];
-extern const int kCollectionCount;
+///  (inline constexpr: Windows DLL builds cannot auto-export extern data
+///  symbols from this shared library — the previous extern pair broke every
+///  fresh MSVC link of the test targets with LNK2019.)
+inline constexpr const char *kCollections[] = {
+    "map_frames", "layers",   "symbols", "legends",
+    "north_arrows", "scale_bars", "titles", "labels",
+    "charts", "colorbars", "inset_maps", "grids",
+    "annotations", "source_notes", "constraints",
+};
+inline constexpr int kCollectionCount =
+    static_cast<int>( sizeof( kCollections ) / sizeof( kCollections[0] ) );
 
 /// True when `name` is a known item collection.
 bool isCollection( const std::string &name );
