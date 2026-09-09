@@ -239,7 +239,9 @@ HttpFetchResult fetchImpl( const std::string &url, const HttpFetchOptions &optio
   // enforced here, at the layer that promises it.
   if ( fetch.body.size() > budget )
     fetch.body.resize( static_cast<std::size_t>( budget ) );
-  fetch.truncated = fetch.body.size() >= budget;
+  // Exactly-budget bodies are complete (MAX_FILE_SIZE aborts strictly
+  // beyond the budget); a guard abort always means a cut answer.
+  fetch.truncated = fetch.sizeGuardHit || fetch.body.size() > budget;
 
   // This build's CPLHTTPFetch can answer a failed transport with a NON-null
   // result carrying a curl code (< 100) in nStatus, no body and no headers.
@@ -270,7 +272,6 @@ HttpFetchResult fetchImpl( const std::string &url, const HttpFetchOptions &optio
     throw GeoError( ErrorCode::Timeout, "httpFetch: request exceeded its time budget: " + uri.display() );
 
   if ( fetch.httpStatus == 404 )
-    std::fprintf( stderr, "DIAG404 url=%s\n", fetch.displayUrl.c_str() );
   if ( throwHttpErrors )
   {
     if ( fetch.httpStatus == 404 || fetch.httpStatus == 410 )

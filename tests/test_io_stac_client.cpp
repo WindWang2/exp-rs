@@ -313,3 +313,58 @@ TEST_CASE( "client contract violations are typed before the network",
   CHECK_THROWS_AS( client.search( badIntersects ), GeoError );
   CHECK_THROWS_AS( client.collection( "" ), GeoError );
 }
+
+TEST_CASE( "POST pagination merges the continuation into the original body",
+           "[io][stac][client][pagination][merge]" )
+{
+  HttpStacServer server;
+  const std::string page1 =
+    "{\"type\": \"FeatureCollection\", \"features\": [" +
+    renderItem( "m1", "2026-08-01T10:00:00Z", "1", "[10,40,11,41]" ) +
+    "], \"links\": [{\"rel\": \"next\", \"href\": \"" + server.url() +
+    "/search?page=2\", \"method\": \"POST\", \"merge\": true, \"body\": {\"page\": 2}}]}";
+  const std::string page2 =
+    "{\"type\": \"FeatureCollection\", \"features\": [" +
+    renderItem( "m2", "2026-08-02T10:00:00Z", "1", "[10,40,11,41]" ) +
+    "], \"links\": []}";
+  testsupport::StacRoute r1;
+  r1.body = page1;
+  testsupport::StacRoute r2;
+  r2.body = page2;
+  server.setRoute( "/search", r1 );
+  server.setRoute( "/search?page=2", r2 );
+
+  StacClient client( server.url() );
+  StacSearchQuery query;
+  query.bbox = { 10.0, 40.0, 11.0, 41.0 };
+  query.datetime = "2026-08-01T00:00:00Z/..";
+  const StacSearchAllResult all = client.searchAll( query );
+  REQUIRE( all.items.size() == 2 );
+
+  // Page 2's POST body must carry the ORIGINAL filters (merged delta), not
+  // the bare continuation — an unfiltered page-2 would silently widen the
+  // query.
+  const auto requests = server.requests();
+  REQUIRE( requests.size() == 2 );
+  CHECK( requests[1].method == "POST" );
+  CHECK_THAT( requests[1].body, ContainsSubstring( "\"bbox\"" ) );
+  CHECK_THAT( requests[1].body, ContainsSubstring( "\"datetime\"" ) );
+  CHECK_THAT( requests[1].body, ContainsSubstring( "\"page\":2" ) );
+}
+
+TEST_CASE( "searchAll survives empty-page walkers and detects pagination loops",
+           "[io][stac][client][pagination][bounds]" )
+{
+  HttpStacServer server;
+  // An origin that answers EMPTY feature lists with a next link forever.
+  const std::string empty =
+    "{\"type\": \"FeatureCollection\", \"features\": [], \"links\": "
+    "[{\"rel\": \"next\", \"href\": \"next-page\", \"method\": \"GET\"}]}";
+  testsupport::StacRoute route;
+  route.body = empty;
+  server.setRoute( "/search", route );
+  server.setRoute( "/next-page", route );
+
+  StacClient client( server.url() );
+  CHECK_THROWS_AS( client.searchAll( StacSearchQuery{} ), GeoError );
+}

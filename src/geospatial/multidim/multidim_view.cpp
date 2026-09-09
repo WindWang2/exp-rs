@@ -224,7 +224,8 @@ MultidimGrid MultidimView::readSliceWindow( const std::string &variable,
       // dimension — a window is a bound, never a clamp-and-lie. 0 means
       // "the whole dimension".
       rows = windowRows > 0 ? static_cast<std::int64_t>( windowRows ) : size;
-      if ( rowOff < 0 || rowOff + rows > size )
+      // Overflow-safe bound check: rowOff can be adversarially large.
+      if ( rowOff < 0 || rows > size || rowOff > size - rows )
       {
         Json::Value details;
         details["dimension"] = name;
@@ -241,7 +242,7 @@ MultidimGrid MultidimView::readSliceWindow( const std::string &variable,
       if ( sliced != slices.end() )
         throw GeoError( ErrorCode::InvalidArgument, "The column dimension '" + name + "' must remain free" );
       cols = windowCols > 0 ? static_cast<std::int64_t>( windowCols ) : size;
-      if ( colOff < 0 || colOff + cols > size )
+      if ( colOff < 0 || cols > size || colOff > size - cols )
       {
         Json::Value details;
         details["dimension"] = name;

@@ -331,3 +331,36 @@ TEST_CASE( "cache configuration and surface helpers are honest",
   RemoteRangeCache::uninstall();
   CHECK( !RemoteRangeCache::installed() );
 }
+
+TEST_CASE( "re-install with a changed blockSize drops entries and stays byte-correct",
+           "[io][remote][range_cache][config]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "reinstall" );
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload );
+
+  RangeCacheConfig config;
+  config.blockSize = 48 * 1024;
+  {
+    InstalledCache guard( config );
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    REQUIRE( reader.isOpen() );
+    const std::vector<double> a = reader.readWindow( { 1 }, { 0, 0, 128, 128 } );
+    CHECK( RemoteRangeCache::telemetryJson()["cached_bytes"].asUInt64() > 0 );
+  }
+
+  // Re-install with a DIFFERENT blockSize: stale-config blocks would be
+  // misinterpreted by the new indexing — they must be dropped, and reads
+  // must stay byte-correct afterwards.
+  config.blockSize = 16 * 1024;
+  {
+    InstalledCache guard( config );
+    RemoteRangeCache::install( config ); // re-install replaces the config
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    REQUIRE( reader.isOpen() );
+    const std::vector<double> b = reader.readWindow( { 1 }, { 64, 64, 128, 128 } );
+    RasterReader local = RasterReader::open( dir + "/scene.tif" );
+    CHECK( b == local.readWindow( { 1 }, { 64, 64, 128, 128 } ) );
+  }
+}

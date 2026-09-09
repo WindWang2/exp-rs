@@ -79,10 +79,16 @@ struct StacPage
     std::vector<StacItem> items;
     /// Continuation descriptor extracted from rel="next" links ("" when this
     /// is the last page). method is "GET" (href carries the token) or "POST"
-    /// (jsonBody carries the merged request body).
+    /// (jsonBody carries the continuation body; merge per the link's merge
+    /// flag against selfBody).
     std::string nextMethod;
     std::string nextHref;
     Json::Value nextBody;
+    bool nextMerge = false;      ///< rel=next "merge": the body is a DELTA
+    /// The request that PRODUCED this page — POST pages merge their next
+    /// body into it, so the caller's filters survive pagination.
+    std::string selfMethod = "GET";
+    Json::Value selfBody;
     bool hasMore() const { return !nextHref.empty(); }
 };
 

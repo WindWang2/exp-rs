@@ -10,6 +10,7 @@
 #include "geospatial/util/resource_uri.h"
 
 #include <algorithm>
+#include <set>
 #include <cctype>
 #include <sstream>
 #include <utility>
@@ -73,7 +74,7 @@ void appendParam( std::string &query, const char *name, const std::string &value
 
 /// Extracts the rel="next" link from a STAC response document.
 bool extractNextLink( const Json::Value &document, std::string &method, std::string &href,
-                      Json::Value &body )
+                      Json::Value &body, bool &merge )
 {
   if ( !document.isObject() || !document.isMember( "links" ) || !document["links"].isArray() )
     return false;
@@ -92,11 +93,54 @@ bool extractNextLink( const Json::Value &document, std::string &method, std::str
       method = "GET";
     if ( link.isMember( "body" ) && link["body"].isObject() )
       body = link["body"];
-    // "merge": the body extends the original request body (STAC API spec);
-    // callers merge before sending.
+    // "merge": the body is a DELTA over the original request body (STAC API
+    // spec) — the caller merges before sending. Absent/false replaces it.
+    merge = link.isMember( "merge" ) && link["merge"].asBool();
     return true;
   }
   return false;
+}
+
+/// Resolves an RFC 8288 reference against the URL it was served from —
+/// spec-legal servers emit relative next links ("../search?page=2").
+std::string resolveReference( const std::string &baseUrl, const std::string &reference )
+{
+  const ResourceUri base = ResourceUri::parse( baseUrl );
+  if ( base.kind != ResourceKind::RemoteHttp )
+    return reference;
+  const ResourceUri ref = ResourceUri::parse( reference );
+  if ( ref.kind == ResourceKind::RemoteHttp )
+    return reference; // already absolute
+  // Strip the reference's fragment; keep its query for same-path refs.
+  std::string path = reference;
+  std::string query;
+  const std::size_t hash = path.find( '#' );
+  if ( hash != std::string::npos )
+    path = path.substr( 0, hash );
+  const std::size_t q = path.find( '?' );
+  if ( q != std::string::npos )
+  {
+    query = path.substr( q );
+    path = path.substr( 0, q );
+  }
+  std::string basePath = base.path;
+  const std::size_t lastSlash = basePath.rfind( '/' );
+  std::string directory = lastSlash == std::string::npos ? "" : basePath.substr( 0, lastSlash );
+  if ( path == "." )
+    path = std::string();
+  while ( path.rfind( "../", 0 ) == 0 )
+  {
+    path = path.substr( 3 );
+    const std::size_t up = directory.rfind( '/' );
+    directory = up == std::string::npos ? std::string() : directory.substr( 0, up );
+  }
+  if ( !path.empty() && path[0] == '/' )
+    directory = std::string();
+  std::string resolved = base.scheme + "://" + base.host;
+  // userinfo is deliberately DROPPED on relative resolution: resolve only
+  // from credential-free bases (display stays redacted either way).
+  resolved += directory + "/" + path + query;
+  return resolved;
 }
 
 bool containsIgnoreCase( const std::string &haystack, const std::string &needle )
@@ -177,6 +221,8 @@ StacPage StacClient::executeSearch( const std::string &method, const std::string
   }
 
   StacPage page;
+  page.selfMethod = method;
+  page.selfBody = body;
   if ( !document.isObject() || !document.isMember( "features" ) || !document["features"].isArray() )
   {
     throw GeoError( ErrorCode::InvalidMetadata, "StacClient: search answer carries no features array" );
@@ -187,11 +233,13 @@ StacPage StacClient::executeSearch( const std::string &method, const std::string
   std::string nextMethod;
   std::string nextHref;
   Json::Value nextBody;
-  if ( extractNextLink( document, nextMethod, nextHref, nextBody ) )
+  bool nextMerge = false;
+  if ( extractNextLink( document, nextMethod, nextHref, nextBody, nextMerge ) )
   {
     page.nextMethod = nextMethod;
-    page.nextHref = nextHref;
+    page.nextHref = resolveReference( url, nextHref );
     page.nextBody = nextBody;
+    page.nextMerge = nextMerge;
   }
   return page;
 }
@@ -272,7 +320,36 @@ StacPage StacClient::search( const StacSearchQuery &query ) const
   if ( !query.sortBy.empty() )
     appendParam( params, "sortby", query.sortBy );
   const std::string url = mRoot + "/search" + ( params.empty() ? "" : "?" + params );
-  return executeSearch( "GET", url, Json::Value() );
+  // GET pages record their EQUIVALENT canonical body so a POST rel=next
+  // (merge:true) can merge into the original filters — the query string
+  // alone cannot survive a POST continuation.
+  Json::Value canonicalBody( Json::objectValue );
+  if ( !query.bbox.empty() )
+  {
+    Json::Value bboxJson( Json::arrayValue );
+    for ( const double value : query.bbox )
+      bboxJson.append( value );
+    canonicalBody["bbox"] = bboxJson;
+  }
+  if ( !query.datetime.empty() )
+    canonicalBody["datetime"] = query.datetime;
+  if ( !query.collections.empty() )
+  {
+    Json::Value list( Json::arrayValue );
+    for ( const std::string &collection : query.collections )
+      list.append( collection );
+    canonicalBody["collections"] = list;
+  }
+  if ( !query.ids.empty() )
+  {
+    Json::Value list( Json::arrayValue );
+    for ( const std::string &id : query.ids )
+      list.append( id );
+    canonicalBody["ids"] = list;
+  }
+  if ( query.limit > 0 )
+    canonicalBody["limit"] = query.limit;
+  return executeSearch( "GET", url, canonicalBody );
 }
 
 StacPage StacClient::nextPage( const StacPage &page ) const
@@ -281,9 +358,25 @@ StacPage StacClient::nextPage( const StacPage &page ) const
     return StacPage{};
   if ( page.nextMethod == "POST" )
   {
-    // rel=next POST links merge their body into the previous request body;
-    // the stored nextBody is the continuation body the origin declared.
-    return executeSearch( "POST", page.nextHref, page.nextBody );
+    // rel=next POST links: with "merge": true the continuation body is a
+    // DELTA over the request that produced this page — the caller's filters
+    // MUST survive pagination, so deep-merge into selfBody. Without merge,
+    // the body replaces it. A POST link with no body at all is a broken
+    // origin, not an unfiltered re-search.
+    if ( page.nextBody.isNull() )
+      throw GeoError( ErrorCode::InvalidMetadata,
+                      "StacClient: rel=next POST link carries no body; refusing an unfiltered crawl" );
+    Json::Value merged = page.selfBody;
+    if ( page.nextMerge )
+    {
+      for ( const std::string &key : page.nextBody.getMemberNames() )
+        merged[key] = page.nextBody[key];
+    }
+    else
+    {
+      merged = page.nextBody;
+    }
+    return executeSearch( "POST", page.nextHref, merged );
   }
   return executeSearch( "GET", page.nextHref, Json::Value() );
 }
@@ -291,7 +384,13 @@ StacPage StacClient::nextPage( const StacPage &page ) const
 StacSearchAllResult StacClient::searchAll( const StacSearchQuery &query ) const
 {
   StacSearchAllResult result;
+  // Hard bounds: maxItems caps accumulation, a page budget caps the WALK
+  // itself (an origin answering empty pages forever must never spin), and
+  // a revisit guard catches pagination loops by href.
+  const int pageBudget = mOptions.maxItems + 16;
+  std::set<std::string> visited;
   StacPage page = search( query );
+  int pages = 0;
   while ( true )
   {
     for ( StacItem &item : page.items )
@@ -305,6 +404,14 @@ StacSearchAllResult StacClient::searchAll( const StacSearchQuery &query ) const
     }
     if ( !page.hasMore() )
       return result;
+    if ( ++pages > pageBudget )
+    {
+      result.truncatedByLimit = true;
+      return result;
+    }
+    if ( !visited.insert( page.nextHref ).second )
+      throw GeoError( ErrorCode::InvalidMetadata,
+                      "StacClient: pagination loop detected (repeated rel=next href)" );
     page = nextPage( page );
   }
 }

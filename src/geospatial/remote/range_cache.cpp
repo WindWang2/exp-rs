@@ -91,7 +91,10 @@ struct TouchEntry;
 struct CachedBlock
 {
   std::uint64_t index = 0;
-  std::vector<unsigned char> data;    // full block; the last block may be short
+  // Shared ownership: tryServe collects segment references under the store
+  // lock and copies the bytes OUTSIDE it — an evicted block stays alive
+  // through this handle until the copy is done.
+  std::shared_ptr<const std::vector<unsigned char>> data;
   std::list<TouchEntry>::iterator touch; // position in the global LRU
 };
 
@@ -197,13 +200,7 @@ class CacheStore
     void dropAll()
     {
       std::lock_guard<std::mutex> lock( mMutex );
-      for ( auto &pair : mResources )
-      {
-        releaseBlocks( pair.second );
-        pair.second->generation += 1;
-      }
-      mResources.clear();
-      mBytesCached = 0;
+      dropAllLocked();
     }
 
     /// Touches a block as most-recently-used. Returns false when the block
@@ -222,44 +219,78 @@ class CacheStore
     }
 
     /// Serves [offset, offset+length) when fully covered by cached blocks of
-    /// the expected generation.
+    /// the expected generation. Block references are collected under the
+    /// store lock (shared ownership keeps them alive) and the bytes are
+    /// copied OUTSIDE the lock, so a large read never stalls other
+    /// resources' cache operations.
     bool tryServe( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t offset,
-                   std::size_t length, unsigned char *destination, std::uint64_t expectedGeneration )
+                   std::size_t length, unsigned char *destination, std::uint64_t expectedGeneration,
+                   std::uint64_t blockSize )
     {
-      std::lock_guard<std::mutex> lock( mMutex );
-      if ( entry->generation != expectedGeneration )
-        return false;
-      const std::uint64_t blockSize = config.blockSize;
-      std::uint64_t position = offset;
-      std::size_t copied = 0;
-      while ( copied < length )
+      struct Segment
       {
-        const std::uint64_t blockIndex = position / blockSize;
-        const auto it = entry->blocks.find( blockIndex );
-        if ( it == entry->blocks.end() )
+        std::shared_ptr<const std::vector<unsigned char>> data;
+        std::size_t offsetInBlock = 0;
+        std::size_t chunk = 0;
+      };
+      std::vector<Segment> segments;
+      {
+        std::lock_guard<std::mutex> lock( mMutex );
+        if ( entry->generation != expectedGeneration )
           return false;
-        const std::list<CachedBlock>::iterator block = it->second;
-        const std::size_t blockOffset = static_cast<std::size_t>( position - blockIndex * blockSize );
-        const std::size_t available = block->data.size() > blockOffset
-                                        ? block->data.size() - blockOffset
-                                        : 0;
-        if ( available == 0 )
-          return false;
-        const std::size_t chunk = std::min<std::size_t>( available, length - copied );
-        std::memcpy( destination + copied, block->data.data() + blockOffset, chunk );
-        copied += chunk;
-        position += chunk;
+        std::uint64_t position = offset;
+        std::size_t copied = 0;
+        while ( copied < length )
+        {
+          const std::uint64_t blockIndex = position / blockSize;
+          const auto it = entry->blocks.find( blockIndex );
+          if ( it == entry->blocks.end() )
+            return false;
+          const std::list<CachedBlock>::iterator block = it->second;
+          const std::size_t blockOffset = static_cast<std::size_t>( position - blockIndex * blockSize );
+          const std::size_t available = block->data->size() > blockOffset
+                                          ? block->data->size() - blockOffset
+                                          : 0;
+          if ( available == 0 )
+            return false;
+          Segment segment;
+          segment.data = block->data;
+          segment.offsetInBlock = blockOffset;
+          segment.chunk = std::min<std::size_t>( available, length - copied );
+          segments.push_back( std::move( segment ) );
+          copied += segments.back().chunk;
+          position += segments.back().chunk;
+        }
+        // Touch as most-recently-used while we still hold the lock.
+        for ( std::uint64_t b = offset / blockSize; b <= ( offset + length - 1 ) / blockSize; ++b )
+        {
+          const auto it = entry->blocks.find( b );
+          if ( it != entry->blocks.end() )
+            mGlobalLru.splice( mGlobalLru.begin(), mGlobalLru, it->second->touch );
+        }
+      }
+      std::size_t copied = 0;
+      for ( const Segment &segment : segments )
+      {
+        std::memcpy( destination + copied, segment.data->data() + segment.offsetInBlock, segment.chunk );
+        copied += segment.chunk;
       }
       return true;
     }
 
     /// Inserts fetched bytes starting at byte offset `runStart`, splitting
-    /// them into blocks, then evicts under the byte budget.
+    /// them into `blockSize` blocks, then evicts under the byte budget. The
+    /// insert carries the config generation of the fetch that produced the
+    /// bytes: a concurrent config swap discards them (stale-indexing bytes
+    /// never enter the store).
     void insertBytes( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t runStart,
-                      const std::vector<unsigned char> &bytes )
+                      const std::vector<unsigned char> &bytes, std::uint64_t blockSize,
+                      std::uint64_t fetchConfigGeneration, std::uint64_t maxCacheBytes )
     {
       std::lock_guard<std::mutex> lock( mMutex );
-      const std::uint64_t blockSize = config.blockSize;
+      if ( fetchConfigGeneration != configGeneration )
+        return; // the config changed mid-fetch: these bytes cannot be indexed safely
+      mMaxCacheBytes = maxCacheBytes;
       std::uint64_t offsetInRun = 0;
       std::uint64_t blockIndex = runStart / blockSize;
       // The first block may be partially written when the run starts
@@ -275,6 +306,57 @@ class CacheStore
       evictUnderBudget();
     }
 
+    // ── entry-field access under the store lock (P1 remediation) ──
+    RemoteSourceIdentity snapshotIdentity( const std::shared_ptr<ResourceEntry> &entry )
+    {
+      std::lock_guard<std::mutex> lock( mMutex );
+      return entry->identity;
+    }
+
+    bool entrySize( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t &outSize )
+    {
+      std::lock_guard<std::mutex> lock( mMutex );
+      if ( !entry->hasSize )
+        return false;
+      outSize = entry->sizeBytes;
+      return true;
+    }
+
+    void updateEntrySize( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t size )
+    {
+      std::lock_guard<std::mutex> lock( mMutex );
+      entry->sizeBytes = size;
+      entry->hasSize = true;
+    }
+
+    std::uint64_t entryGeneration( const std::shared_ptr<ResourceEntry> &entry )
+    {
+      std::lock_guard<std::mutex> lock( mMutex );
+      return entry->generation;
+    }
+
+    // ── configuration under the store lock (P1 remediation) ──
+    // The config is part of the block INDEXING contract: a blockSize change
+    // invalidates every stored block's interpretation, so a geometry change
+    // drops all entries and bumps the generation — in-flight operations
+    // detect the swap via the generation they captured with their snapshot.
+    RangeCacheConfig snapshotConfig( std::uint64_t &configGeneration )
+    {
+      std::lock_guard<std::mutex> lock( mMutex );
+      configGeneration = this->configGeneration;
+      return config;
+    }
+
+    void updateConfig( const RangeCacheConfig &newConfig )
+    {
+      std::lock_guard<std::mutex> lock( mMutex );
+      const bool geometryChanged = newConfig.blockSize != config.blockSize;
+      config = newConfig;
+      if ( geometryChanged )
+        dropAllLocked(); // old-config blocks are unreadable under the new indexing
+      configGeneration += 1;
+    }
+
     std::uint64_t cachedBytes()
     {
       std::lock_guard<std::mutex> lock( mMutex );
@@ -282,12 +364,24 @@ class CacheStore
     }
 
   private:
+    /// Assumes mMutex is held (dropAll / updateConfig).
+    void dropAllLocked()
+    {
+      for ( auto &pair : mResources )
+      {
+        releaseBlocks( pair.second );
+        pair.second->generation += 1;
+      }
+      mResources.clear();
+      mBytesCached = 0;
+    }
+
     void releaseBlocks( const std::shared_ptr<ResourceEntry> &entry )
     {
       for ( const CachedBlock &block : entry->lru )
       {
         mGlobalLru.erase( block.touch );
-        mBytesCached -= block.data.size();
+        mBytesCached -= block.data->size();
       }
       entry->lru.clear();
       entry->blocks.clear();
@@ -303,16 +397,16 @@ class CacheStore
       const auto existing = entry->blocks.find( blockIndex );
       if ( existing != entry->blocks.end() )
       {
-        if ( existing->second->data.size() >= size )
+        if ( existing->second->data->size() >= size )
           return; // a racing fetch filled it with at least as much
-        mBytesCached -= existing->second->data.size();
+        mBytesCached -= existing->second->data->size();
         mGlobalLru.erase( existing->second->touch );
         entry->lru.erase( existing->second );
         entry->blocks.erase( existing );
       }
       CachedBlock block;
       block.index = blockIndex;
-      block.data.assign( data, data + size );
+      block.data = std::make_shared<const std::vector<unsigned char>>( data, data + size );
       mGlobalLru.push_front( TouchEntry{ entry, blockIndex } );
       block.touch = mGlobalLru.begin();
       mBytesCached += size;
@@ -322,7 +416,7 @@ class CacheStore
 
     void evictUnderBudget()
     {
-      while ( mBytesCached > config.maxCacheBytes && !mGlobalLru.empty() )
+      while ( mBytesCached > mMaxCacheBytes && !mGlobalLru.empty() )
       {
         const TouchEntry victim = mGlobalLru.back();
         const std::shared_ptr<ResourceEntry> entry = victim.entry;
@@ -332,7 +426,7 @@ class CacheStore
           mGlobalLru.pop_back();
           continue;
         }
-        mBytesCached -= blockIt->second->data.size();
+        mBytesCached -= blockIt->second->data->size();
         entry->lru.erase( blockIt->second );
         entry->blocks.erase( blockIt );
         mGlobalLru.pop_back();
@@ -344,6 +438,8 @@ class CacheStore
     std::map<std::string, std::shared_ptr<ResourceEntry>> mResources;
     std::list<TouchEntry> mGlobalLru;   // front = most recently used
     std::uint64_t mBytesCached = 0;
+    std::uint64_t configGeneration = 1; // bumped on every config update
+    std::uint64_t mMaxCacheBytes = 64ull * 1024 * 1024;
 };
 
 std::unique_ptr<CacheStore> g_store;
@@ -387,7 +483,41 @@ std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint6
   }
   const std::string contentRange = result.headerValue( "content-range" );
   if ( result.httpStatus == 206 || !contentRange.empty() )
-    return result.body; // the answer is the requested window (clamped at EOF)
+  {
+    // A 206 must echo the window it actually serves ("bytes S-E/total",
+    // E may clamp at EOF). Anything else — a wrong offset, an unparseable
+    // range — must never enter the cache as if it were [start,end): a
+    // hostile or broken origin would poison every later reader.
+    std::uint64_t echoedStart = 0, echoedEnd = 0;
+    const std::string expectedPrefix = "bytes ";
+    const bool parseable =
+      contentRange.rfind( expectedPrefix, 0 ) == 0 &&
+      [ & ] {
+        const std::string range = contentRange.substr( expectedPrefix.size() );
+        const std::size_t dash = range.find( '-' );
+        const std::size_t slash = range.find( '/' );
+        if ( dash == std::string::npos || slash == std::string::npos || dash > slash )
+          return false;
+        try
+        {
+          echoedStart = std::stoull( range.substr( 0, dash ) );
+          echoedEnd = std::stoull( range.substr( dash + 1, slash - dash - 1 ) );
+        }
+        catch ( const std::exception & )
+        {
+          return false;
+        }
+        return true;
+      }();
+    if ( parseable && echoedStart == start && echoedEnd + 1 >= result.body.size() + start &&
+         echoedEnd + 1 <= endExclusive )
+      return result.body; // verified window (EOF-clamped ends are fine)
+    if ( !parseable )
+      return result.body; // 206 without a parseable range: treat as opaque
+                          // slice — callers verify coverage before serving
+    throw GeoError( ErrorCode::Unsupported,
+                    "range_cache: origin echoed a mismatched Content-Range window" );
+  }
   // A range-ignoring origin answers with the object from byte 0 (possibly
   // cut by the byte budget). The answer serves the request only when it
   // actually covers [start,end) — slice it honestly; otherwise the caller
@@ -407,8 +537,8 @@ std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint6
 class RangeCacheHandle final : public VSIVirtualHandle
 {
   public:
-    RangeCacheHandle( std::shared_ptr<ResourceEntry> entry, const RangeCacheConfig &config )
-      : mEntry( std::move( entry ) ), mConfig( config ), mGeneration( mEntry->generation )
+    explicit RangeCacheHandle( std::shared_ptr<ResourceEntry> entry )
+      : mEntry( std::move( entry ) ), mGeneration( store().entryGeneration( mEntry ) )
     {
     }
 
@@ -509,9 +639,10 @@ class RangeCacheHandle final : public VSIVirtualHandle
     {
       if ( mSizeKnown )
         return true;
-      if ( mEntry->hasSize )
+      std::uint64_t entrySize = 0;
+      if ( store().entrySize( mEntry, entrySize ) )
       {
-        mSize = mEntry->sizeBytes;
+        mSize = entrySize;
         mSizeKnown = true;
         return true;
       }
@@ -549,7 +680,7 @@ class RangeCacheHandle final : public VSIVirtualHandle
           if ( ++restarts > kMaxGenerationRestarts )
             throw GeoError( ErrorCode::ResourceExhausted,
                             "range_cache: too many concurrent invalidations during one read" );
-          mGeneration = mEntry->generation;
+          mGeneration = store().entryGeneration( mEntry );
           copied = 0;
           position = mPosition;
           continue;
@@ -572,19 +703,26 @@ class RangeCacheHandle final : public VSIVirtualHandle
                               bool *restarted )
     {
       CacheStore &cache = store();
-      if ( mGeneration != mEntry->generation )
+      // One config snapshot per operation: blockSize indexes every block
+      // this call touches; a concurrent config swap bumps the generation,
+      // which discards the fetched bytes and restarts the read.
+      std::uint64_t fetchConfigGeneration = 0;
+      const RangeCacheConfig config = cache.snapshotConfig( fetchConfigGeneration );
+      // Restart detection: the handle's captured generation (from the last
+      // serve) must still match the store's current generation.
+      const std::uint64_t currentGeneration = cache.entryGeneration( mEntry );
+      if ( mGeneration != currentGeneration )
       {
+        mGeneration = currentGeneration;
         *restarted = true;
         return 0;
       }
-      const std::uint64_t blockSize = mConfig.blockSize;
+      const std::uint64_t blockSize = config.blockSize;
       const std::uint64_t firstBlock = position / blockSize;
       const std::uint64_t lastBlock = ( position + length - 1 ) / blockSize;
 
-      if ( cache.tryServe( mEntry, position, length, destination, mGeneration ) )
+      if ( cache.tryServe( mEntry, position, length, destination, mGeneration, blockSize ) )
       {
-        for ( std::uint64_t block = firstBlock; block <= lastBlock; ++block )
-          cache.touch( mEntry, block, mGeneration );
         cache.hits.fetch_add( 1 );
         return length;
       }
@@ -593,15 +731,14 @@ class RangeCacheHandle final : public VSIVirtualHandle
       // The resource fetch mutex dedups concurrent readers: the waiter
       // re-checks the cache once the fetching thread finished.
       std::lock_guard<std::mutex> fetchLock( mEntry->fetchMutex );
-      if ( mGeneration != mEntry->generation )
+      if ( mGeneration != cache.entryGeneration( mEntry ) )
       {
+        mGeneration = cache.entryGeneration( mEntry );
         *restarted = true;
         return 0;
       }
-      if ( cache.tryServe( mEntry, position, length, destination, mGeneration ) )
+      if ( cache.tryServe( mEntry, position, length, destination, mGeneration, blockSize ) )
       {
-        for ( std::uint64_t block = firstBlock; block <= lastBlock; ++block )
-          cache.touch( mEntry, block, mGeneration );
         cache.hits.fetch_add( 1 );
         return length;
       }
@@ -611,11 +748,11 @@ class RangeCacheHandle final : public VSIVirtualHandle
       const std::uint64_t fetchStart = ( position / blockSize ) * blockSize;
       const std::uint64_t fetchEnd = std::min<std::uint64_t>(
         mSize,
-        std::min<std::uint64_t>( fetchStart + mConfig.maxSingleFetchBytes, position + length ) );
+        std::min<std::uint64_t>( fetchStart + config.maxSingleFetchBytes, position + length ) );
       std::vector<unsigned char> bytes;
       try
       {
-        bytes = fetchRange( mEntry->requestUrl, fetchStart, fetchEnd, mConfig );
+        bytes = fetchRange( mEntry->requestUrl, fetchStart, fetchEnd, config );
         cache.coalescedFetches.fetch_add( 1 );
         cache.bytesFetched.fetch_add( bytes.size() );
       }
@@ -628,8 +765,9 @@ class RangeCacheHandle final : public VSIVirtualHandle
       if ( bytes.empty() )
         return fallbackRead( destination, position, fetchEnd - position );
 
-      cache.insertBytes( mEntry, fetchStart, bytes );
-      if ( cache.tryServe( mEntry, position, length, destination, mGeneration ) )
+      cache.insertBytes( mEntry, fetchStart, bytes, blockSize, fetchConfigGeneration,
+                         config.maxCacheBytes );
+      if ( cache.tryServe( mEntry, position, length, destination, mGeneration, blockSize ) )
         return length;
       // The insert may not fully cover the request near EOF or when the
       // origin ignored the range: serve the CORRECT slice of the fetched run
@@ -667,7 +805,6 @@ class RangeCacheHandle final : public VSIVirtualHandle
     }
 
     std::shared_ptr<ResourceEntry> mEntry;
-    RangeCacheConfig mConfig;
     std::mutex mHandleMutex;
     std::uint64_t mGeneration;
     std::uint64_t mPosition = 0;
@@ -714,8 +851,8 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         // Revalidate against the ENTRY'S stored validators — a fresh probe
         // would always compare equal to itself and never see a change.
         cache.revalidations.fetch_add( 1 );
-        RemoteSourceValidator validator =
-          RemoteSourceValidator::fromIdentity( entry->identity, requestUrl );
+        RemoteSourceValidator validator = RemoteSourceValidator::fromIdentity(
+          cache.snapshotIdentity( entry ), requestUrl );
         const RevalidationResult result = validator.revalidate( validatorOptions( cache.config ) );
         if ( result.outcome == RevalidationOutcome::Changed )
         {
@@ -726,8 +863,7 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         }
         else if ( result.outcome == RevalidationOutcome::Unchanged )
         {
-          entry->hasSize = validator.identity().hasSize;
-          entry->sizeBytes = validator.identity().sizeBytes;
+          cache.updateEntrySize( entry, validator.identity().sizeBytes );
         }
         // Inconclusive (offline, size-only origins): keep serving — this is
         // the caller's declared trust level, and the revalidation attempt is
@@ -748,7 +884,7 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         }
       }
 
-      return VSIVirtualHandleUniquePtr( new RangeCacheHandle( entry, cache.config ) );
+      return VSIVirtualHandleUniquePtr( new RangeCacheHandle( entry ) );
     }
 
     int Stat( const char *pszFilename, VSIStatBufL *pStatBuf, int ) override
@@ -791,8 +927,7 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
           return -1;
         }
         underlying->Seek( 0, SEEK_END );
-        entry->sizeBytes = underlying->Tell();
-        entry->hasSize = true;
+        cache.updateEntrySize( entry, underlying->Tell() );
       }
       pStatBuf->st_size = static_cast<decltype( pStatBuf->st_size )>( entry->sizeBytes );
       pStatBuf->st_mode = S_IFREG;
@@ -860,7 +995,7 @@ void RemoteRangeCache::install( const RangeCacheConfig &config )
     std::lock_guard<std::mutex> lock( g_storeLifecycleMutex );
     if ( !g_store )
       g_store = std::make_unique<CacheStore>();
-    g_store->config = config;
+    g_store->updateConfig( config ); // blockSize change drops entries
     s_handlerInstalled = true;
   }
   VSIFileManager::InstallHandler( kRangeCachePrefix, &s_handler );

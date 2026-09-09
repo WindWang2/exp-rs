@@ -313,8 +313,9 @@ TEST_CASE( "conversion into an existing target keeps the previous file on failur
   const std::uintmax_t sizeBefore = sicnu::geo::atomic_fs::fileSize( target );
   REQUIRE( sizeBefore > 0 );
 
-  // A translate whose source is deleted after staging preparation fails
-  // mid-conversion: the previous target must survive untouched.
+  // A translate whose source is missing fails before staging: the previous
+  // target must survive untouched (the mid-publish restore path is covered
+  // by the group-publish tests above).
   std::filesystem::remove( source );
   bool threw = false;
   try
