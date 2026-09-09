@@ -40,7 +40,6 @@ class ModelWorkbenchPanel : public QgsDockWidget
     void inferenceSubmitted( long taskId );
 
   private slots:
-    void onModelSelected();
     void reloadCatalog();
     void runTestInference();
 

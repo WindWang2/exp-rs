@@ -8,6 +8,7 @@
 
 #include "processing/framework/task_center.h"
 
+#include <QComboBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QDir>
@@ -57,7 +58,7 @@ QString weightSummary( const sicnu::operators::ModelInfo &model )
     if ( !info.exists() )
         return ModelWorkbenchPanel::tr( "文件不存在" );
     const double mib = info.size() / ( 1024.0 * 1024.0 );
-    return tr( "%1 MiB" ).arg( mib, 0, 'f', 1 );
+    return ModelWorkbenchPanel::tr( "%1 MiB" ).arg( mib, 0, 'f', 1 );
 }
 
 } // namespace
@@ -146,7 +147,7 @@ void ModelWorkbenchPanel::refreshCatalog()
         QStringList lines;
         for ( const auto &issue : issues )
             lines << QStringLiteral( "%1: %2" )
-                         .arg( QString::fromStdString( issue.source ),
+                         .arg( QString::fromStdString( issue.manifestPath ),
                                QString::fromStdString( issue.message ) );
         m_issuesView->setPlainText( lines.join( QLatin1Char( '\n' ) ) );
     }
@@ -189,7 +190,7 @@ void ModelWorkbenchPanel::rebuildModelTable()
     }
 
     m_modelTable->setRowCount( static_cast<int>( m_modelNames.size() ) );
-    const auto hw = sicnu::operators::ModelHardwareCapabilities::detect();
+    const auto hw = sicnu::operators::runtime::ModelHardwareCapabilities::detect();
     for ( int row = 0; row < static_cast<int>( m_modelNames.size() ); ++row )
     {
         const auto model = sicnu::operators::ModelCatalog::instance().find( m_modelNames[row] );
@@ -197,7 +198,7 @@ void ModelWorkbenchPanel::rebuildModelTable()
             continue;
         // Readiness is evaluated by the runtime layer — the panel never guesses.
         std::string reason;
-        const auto readiness = sicnu::operators::evaluateRuntimeReadiness( *model, hw, &reason );
+        const auto readiness = sicnu::operators::runtime::evaluateRuntimeReadiness( *model, hw, &reason );
         QTableWidgetItem *statusItem =
             new QTableWidgetItem( readinessText( readiness ) +
                                   ( reason.empty() ? QString()
@@ -251,9 +252,9 @@ void ModelWorkbenchPanel::runTestInference()
     const auto model = sicnu::operators::ModelCatalog::instance().find( modelName.toStdString() );
     if ( !model )
         return;
-    const auto hw = sicnu::operators::ModelHardwareCapabilities::detect();
+    const auto hw = sicnu::operators::runtime::ModelHardwareCapabilities::detect();
     std::string reason;
-    const auto readiness = sicnu::operators::evaluateRuntimeReadiness( *model, hw, &reason );
+    const auto readiness = sicnu::operators::runtime::evaluateRuntimeReadiness( *model, hw, &reason );
     if ( readiness != sicnu::operators::ModelReadiness::Ready )
     {
         m_statusLabel->setText(

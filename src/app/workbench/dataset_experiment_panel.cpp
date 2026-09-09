@@ -8,9 +8,11 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include "dataset/sample.h"
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -278,7 +280,7 @@ void DatasetExperimentPanel::onVersionSelected( int row )
         return;
 
     // Bounded, truthful facts only: counts + manifest refs, no derived stats.
-    const qint64 samples = m_datasetStore.sampleCount( versionId );
+    const qint64 sampleTotal = m_datasetStore.sampleCount( *versionId );
     QStringList lines;
     lines << tr( "版本 %1（%2，质量：%3）" )
                  .arg( version.versionId(), statusText( version.status() ),
@@ -291,7 +293,7 @@ void DatasetExperimentPanel::onVersionSelected( int row )
                  .arg( version.fingerprint().isEmpty() ? tr( "未计算" ) : version.fingerprint() );
     if ( !version.note().isEmpty() )
         lines << tr( "说明：%1" ).arg( version.note() );
-    lines << tr( "样本数：%1" ).arg( samples );
+    lines << tr( "样本数：%1" ).arg( sampleTotal );
 
     // Label schema + splits live in the manifest document — project the
     // reference lists without re-deriving anything.
@@ -303,7 +305,7 @@ void DatasetExperimentPanel::onVersionSelected( int row )
 
     // First page of samples (bounded preview; the store paginates for us).
     m_samplePreview->clear();
-    const auto samples = m_datasetStore.samplesPage( versionId, 0, 20 );
+    const auto samples = m_datasetStore.samplesPage( *versionId, 0, 20 );
     if ( samples.has_value() )
     {
         QStringList preview;
@@ -339,9 +341,9 @@ void DatasetExperimentPanel::rebuildExperiments()
         m_experimentCombo->addItem(
             QStringLiteral( "%1 (%2)" ).arg( experiment.name(), experiment.experimentId() ),
             experiment.experimentId() );
-    m_experimentDbLabel->setText( tr( "%1 — 共 %2 个实验" )
-                                      .arg( m_experimentStore.storePath() )
-                                      .arg( page->first ) );
+    m_experimentDbLabel->setText( m_experimentDbLabel->text() +
+                                  QStringLiteral( " — " ) +
+                                  tr( "共 %1 个实验" ).arg( page->first ) );
     blocker.unblock();
     if ( !m_experiments.isEmpty() )
         onExperimentSelected( 0 );

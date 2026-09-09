@@ -263,6 +263,43 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
 
+    // ── 工作台面板 Workbench 7.0 panels (goal §C/D/E/F) ──────────────
+    // Canonical shortcut owners live HERE (CommandRegistry), so the 窗口 menu
+    // projects these actions instead of defining competing sequences
+    // (goal §I: one owner per shortcut).
+    {
+        RS_CMD( d, "workbench.processingHistory", QObject::tr( "处理历史" ),
+                QObject::tr( "查看跨任务中心/工作流的统一处理历史。" ),
+                "h_story", QObject::tr( "工作区" ) );
+        d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+H" ) );
+        d.handler = [window] { window->showUnifiedProcessingHistory(); };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "workbench.temporal", QObject::tr( "时序工作台" ),
+                QObject::tr( "浏览时序集合、筛选日期并预览时相。" ),
+                "t_mporal", QObject::tr( "工作区" ) );
+        d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+T" ) );
+        d.handler = [window] { window->showTemporalWorkbench(); };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "workbench.datasetExperiment", QObject::tr( "数据集与实验" ),
+                QObject::tr( "浏览数据集版本、样本、运行与指标对比。" ),
+                "dataset", QObject::tr( "工作区" ) );
+        d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+D" ) );
+        d.handler = [window] { window->showDatasetExperimentBench(); };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "workbench.model", QObject::tr( "模型工作台" ),
+                QObject::tr( "查看模型目录、就绪状态并提交测试推理。" ),
+                "model", QObject::tr( "工作区" ) );
+        d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+M" ) );
+        d.handler = [window] { window->showModelBench(); };
+        registry->registerCommand( d );
+    }
+
     // ── 工作区 Workbenches ───────────────────────────────────────────
     {
         RS_CMD( d, "workbench.classify", QObject::tr( "分类工作区..." ),

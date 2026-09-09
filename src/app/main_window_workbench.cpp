@@ -24,6 +24,7 @@
 #include "workbench/temporal_workbench_panel.h"
 #include "workbench/dataset_experiment_panel.h"
 #include "workbench/model_workbench_panel.h"
+#include "project_context.h"
 #include "dialogs/comparison_dialog.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
@@ -43,6 +44,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QStatusBar>
 #include <QStackedWidget>
 
 #include <qgsproject.h>
@@ -305,14 +307,16 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     m_inspectorHost->registerSection( new sicnu::app::SarInfoSection( m_inspectorHost ) );
     // Workbench 7.0 (goal §B): provenance projection over DataManager +
     // WorkspaceService — services injected, never a copied store.
-    m_inspectorHost->registerSection( new sicnu::app::ProvenanceSection(
-        [this] -> sicnu::data::DataManager * {
+    const sicnu::app::ProvenanceSection::DataManagerProvider dmProvider =
+        [this]( ) -> sicnu::data::DataManager * {
             return m_projectContext ? &m_projectContext->dataManager() : nullptr;
-        },
-        [this] -> sicnu::workspace::WorkspaceService * {
+        };
+    const sicnu::app::ProvenanceSection::WorkspaceServiceProvider wsProvider =
+        [this]( ) -> sicnu::workspace::WorkspaceService * {
             return m_projectContext ? &m_projectContext->workspaceService() : nullptr;
-        },
-        m_inspectorHost ) );
+        };
+    m_inspectorHost->registerSection(
+        new sicnu::app::ProvenanceSection( dmProvider, wsProvider, m_inspectorHost ) );
     m_inspectorHost->attachSelectionContext( m_selectionContext );
     m_inspectorDock->setWidget( m_inspectorHost );
     addDockWidget( Qt::RightDockWidgetArea, m_inspectorDock );
@@ -382,24 +386,18 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
              } );
     if ( m_windowMenu )
     {
-        QAction *historyAction = m_windowMenu->addAction( tr( "处理历史" ) );
-        historyAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+H" ) ) );
-        connect( historyAction, &QAction::triggered, this, [this] {
-            m_historyPanel->show();
-            m_historyPanel->raise();
-            m_historyPanel->activateWindow();
-            m_historyPanel->refreshNow();
-        } );
+        if ( QAction *action = m_commandRegistry->action( QStringLiteral( "workbench.processingHistory" ), true ) )
+            m_windowMenu->addAction( action );
     }
 
     // ── Temporal Workbench (Workbench 7.0 §D) ─────────────────────────
     // Timeline + paginated scene browser over DataManager temporal
     // collections; preview/compare route through the existing seams.
-    m_temporalPanel = new sicnu::app::TemporalWorkbenchPanel(
-        [this] -> sicnu::data::DataManager * {
+    const sicnu::app::TemporalWorkbenchPanel::DataManagerProvider temporalProvider =
+        [this]( ) -> sicnu::data::DataManager * {
             return m_projectContext ? &m_projectContext->dataManager() : nullptr;
-        },
-        this );
+        };
+    m_temporalPanel = new sicnu::app::TemporalWorkbenchPanel( temporalProvider, this );
     m_temporalPanel->setObjectName( QStringLiteral( "rsTemporalWorkbenchDock" ) );
     m_temporalPanel->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
     connect( m_temporalPanel, &sicnu::app::TemporalWorkbenchPanel::previewRequested, this,
@@ -448,14 +446,8 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     }
     if ( m_windowMenu )
     {
-        QAction *temporalAction = m_windowMenu->addAction( tr( "时序工作台" ) );
-        temporalAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+T" ) ) );
-        connect( temporalAction, &QAction::triggered, this, [this] {
-            m_temporalPanel->show();
-            m_temporalPanel->raise();
-            m_temporalPanel->activateWindow();
-            m_temporalPanel->refreshCollections();
-        } );
+        if ( QAction *action = m_commandRegistry->action( QStringLiteral( "workbench.temporal" ), true ) )
+            m_windowMenu->addAction( action );
     }
 
     // ── Dataset / Experiment bench (Workbench 7.0 §E) ─────────────────
@@ -467,13 +459,8 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
                                                Qt::RightDockWidgetArea );
     if ( m_windowMenu )
     {
-        QAction *dataAction = m_windowMenu->addAction( tr( "数据集与实验" ) );
-        dataAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+D" ) ) );
-        connect( dataAction, &QAction::triggered, this, [this] {
-            m_datasetExperimentPanel->show();
-            m_datasetExperimentPanel->raise();
-            m_datasetExperimentPanel->activateWindow();
-        } );
+        if ( QAction *action = m_commandRegistry->action( QStringLiteral( "workbench.datasetExperiment" ), true ) )
+            m_windowMenu->addAction( action );
     }
 
     // ── Model bench (Workbench 7.0 §F) ────────────────────────────────
@@ -489,14 +476,8 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
              } );
     if ( m_windowMenu )
     {
-        QAction *modelAction = m_windowMenu->addAction( tr( "模型工作台" ) );
-        modelAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+M" ) ) );
-        connect( modelAction, &QAction::triggered, this, [this] {
-            m_modelPanel->show();
-            m_modelPanel->raise();
-            m_modelPanel->activateWindow();
-            m_modelPanel->refreshCatalog();
-        } );
+        if ( QAction *action = m_commandRegistry->action( QStringLiteral( "workbench.model" ), true ) )
+            m_windowMenu->addAction( action );
     }
 }
 
@@ -564,4 +545,43 @@ bool QgisDesktopWindow::confirmWorkbenchShutdown( const QString &actionTitle )
         return false;
 
     return true;
+}
+
+void QgisDesktopWindow::showUnifiedProcessingHistory()
+{
+    if ( !m_historyPanel )
+        return;
+    m_historyPanel->show();
+    m_historyPanel->raise();
+    m_historyPanel->activateWindow();
+    m_historyPanel->refreshNow();
+}
+
+void QgisDesktopWindow::showTemporalWorkbench()
+{
+    if ( !m_temporalPanel )
+        return;
+    m_temporalPanel->show();
+    m_temporalPanel->raise();
+    m_temporalPanel->activateWindow();
+    m_temporalPanel->refreshCollections();
+}
+
+void QgisDesktopWindow::showDatasetExperimentBench()
+{
+    if ( !m_datasetExperimentPanel )
+        return;
+    m_datasetExperimentPanel->show();
+    m_datasetExperimentPanel->raise();
+    m_datasetExperimentPanel->activateWindow();
+}
+
+void QgisDesktopWindow::showModelBench()
+{
+    if ( !m_modelPanel )
+        return;
+    m_modelPanel->show();
+    m_modelPanel->raise();
+    m_modelPanel->activateWindow();
+    m_modelPanel->refreshCatalog();
 }
