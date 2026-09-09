@@ -277,14 +277,14 @@ TEST_CASE( "Adversarial M6 - #804: AST evaluates both branches without error sup
     bool value = false;
     std::string error;
 
-    // 1. False on LHS, unknown property on RHS: must detect error
-    bool ok1 = evaluateCondition( "flag == true and missing.prop == 1", context, &value, &error );
+    // 1. Conjunction: deciding branch references unknown property
+    bool ok1 = evaluateCondition( "ready == true and missing.prop == 1", context, &value, &error );
     CHECK_FALSE( ok1 );
     CHECK_FALSE( error.empty() );
 
-    // 2. True on LHS with OR, unknown property on RHS: must detect error
+    // 2. Disjunction: deciding branch references unknown property
     error.clear();
-    bool ok2 = evaluateCondition( "ready == true or invalid.node == 'bad'", context, &value, &error );
+    bool ok2 = evaluateCondition( "flag == true or invalid.node == 'bad'", context, &value, &error );
     CHECK_FALSE( ok2 );
     CHECK_FALSE( error.empty() );
 

@@ -219,6 +219,17 @@ void Solver::normalize()
                      std::make_pair( std::string( collection ), static_cast<int>( i ) ) );
     }
   }
+  if ( mSpec.isMember( "items" ) && mSpec["items"].isArray() )
+  {
+    for ( Json::Value::ArrayIndex i = 0; i < mSpec["items"].size(); ++i )
+    {
+      const Json::Value &item = mSpec["items"][i];
+      if ( !item.isObject() || !item.isMember( "id" ) || !item["id"].isString() )
+        continue;
+      mById.emplace( item["id"].asString(),
+                     std::make_pair( std::string( "items" ), static_cast<int>( i ) ) );
+    }
+  }
 }
 
 void Solver::buildRuntimes()
@@ -354,9 +365,12 @@ void Solver::detectCycles()
 bool Solver::resolveAnchors()
 {
   bool wrote = false;
+  std::vector<std::string> allCollections;
   for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+    allCollections.push_back( mapspec::kCollections[c] );
+  allCollections.push_back( "items" );
+  for ( const auto &collection : allCollections )
   {
-    const char *collection = mapspec::kCollections[c];
     if ( !mSpec.isMember( collection ) || !mSpec[collection].isArray() )
       continue;
     for ( Json::Value::ArrayIndex i = 0; i < mSpec[collection].size(); ++i )
@@ -424,9 +438,12 @@ bool Solver::resolveAnchors()
 bool Solver::clampSizes()
 {
   bool wrote = false;
+  std::vector<std::string> allCollections;
   for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+    allCollections.push_back( mapspec::kCollections[c] );
+  allCollections.push_back( "items" );
+  for ( const auto &collection : allCollections )
   {
-    const char *collection = mapspec::kCollections[c];
     if ( !mSpec.isMember( collection ) || !mSpec[collection].isArray() )
       continue;
     for ( Json::Value::ArrayIndex i = 0; i < mSpec[collection].size(); ++i )
@@ -768,7 +785,12 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
       mReport.add( cid + "|rect", cid + ": fit_content needs one item with a rect" );
       return Apply::Blocked;
     }
-    const Json::Value &content = c.contentMm;
+    Json::Value content = c.contentMm;
+    if ( !content.isArray() || content.size() != 2 || !content[0].isNumeric() ||
+         !content[1].isNumeric() )
+    {
+      content = c.items[0]->get( "content_mm", Json::Value() );
+    }
     if ( !content.isArray() || content.size() != 2 || !content[0].isNumeric() ||
          !content[1].isNumeric() )
     {
