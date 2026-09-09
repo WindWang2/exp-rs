@@ -283,6 +283,19 @@ TEST_CASE( "committed versions are immutable but child drafts carry lineage",
     const auto refused = store.deleteDataset( datasetId );
     CHECK( !refused.has_value() );
     CHECK( refused.diagnostics().first().code == QStringLiteral( "dataset.delete_refused" ) );
+
+    // Issue #774: Draft-only dataset can be deleted and commits its transaction.
+    const auto draftDatasetId = DatasetId::generate();
+    REQUIRE( store.createDataset( draftDatasetId, QStringLiteral( "draft_only" ) ).has_value() );
+    const auto draftVersion = store.createDraftVersion(
+        makeManifest( draftDatasetId.toString(), DatasetVersionId::generate().toString() ) );
+    REQUIRE( draftVersion.has_value() );
+    const auto deleted = store.deleteDataset( draftDatasetId );
+    REQUIRE( deleted.has_value() );
+    // Subsequent operations must succeed without SQLite transaction lock errors
+    const auto nextDatasetId = DatasetId::generate();
+    REQUIRE( store.createDataset( nextDatasetId, QStringLiteral( "after_delete" ) ).has_value() );
+    CHECK( store.datasetById( draftDatasetId ) == std::nullopt );
 }
 
 TEST_CASE( "store refuses writes on a newer schema (forward tolerance)",
@@ -453,3 +466,4 @@ TEST_CASE( "paged dataset listing never exceeds the page budget", "[dataset][sto
     CHECK( first.value().second.first().value( QStringLiteral( "name" ) ).toString() ==
            QStringLiteral( "ds-001" ) );
 }
+

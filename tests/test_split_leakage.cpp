@@ -223,9 +223,27 @@ TEST_CASE( "spatial block split keeps blocks atomic", "[dataset][split]" )
     const auto manifest = SplitEngine::generate( config, QStringLiteral( "v" ), inputs );
     REQUIRE( manifest.has_value() );
     CHECK( manifest->assignments().size() == inputs.size() );
-    // All 64 samples assigned; every block in one role (spot-checked via the
-    // replay determinism below — role grouping follows the same pattern as
-    // the grouped engine, verified by construction in the engine tests).
+    // Issue #817: verify block-to-role consistency (every sample in block (bx, by) shares the exact same SplitRole)
+    QMap<QPair<int, int>, SplitRole> blockRoles;
+    const auto &assignments = manifest->assignments();
+    for ( int i = 0; i < inputs.size(); ++i )
+    {
+        const int bx = static_cast<int>( std::floor( ( ( inputs[i].minX + inputs[i].maxX ) / 2.0 ) / config.blockSizeX ) );
+        const int by = static_cast<int>( std::floor( ( ( inputs[i].minY + inputs[i].maxY ) / 2.0 ) / config.blockSizeY ) );
+        const auto key = qMakePair( bx, by );
+        const SplitRole role = assignments[i].role;
+        if ( blockRoles.contains( key ) )
+        {
+            CHECK( blockRoles.value( key ) == role );
+        }
+        else
+        {
+            blockRoles.insert( key, role );
+        }
+    }
+    CHECK( blockRoles.size() == 16 );
+
+    // All 64 samples assigned; replay determinism check.
     const auto replay = SplitEngine::generate( config, QStringLiteral( "v" ), inputs );
     REQUIRE( replay.has_value() );
     CHECK( replay->assignments() == manifest->assignments() );
@@ -741,3 +759,141 @@ TEST_CASE( "patch generator policies produce honest provenance", "[dataset][patc
                .toString()
                .size() == 64 );
 }
+
+TEST_CASE( "leakage audit handles negative coordinates without truncation",
+           "[dataset][audit][issue787]" )
+{
+    LeakageAuditConfig config;
+    config.checks = { QStringLiteral( "distance_below_threshold" ) };
+    config.distanceThreshold = 50.0;
+
+    AuditSample s1 = auditFrom( makeInput( QStringLiteral( "neg-1" ) ), SplitRole::Train );
+    s1.input.minX = -500.0;
+    s1.input.maxX = -490.0;
+    s1.input.minY = -1000.0;
+    s1.input.maxY = -990.0;
+
+    AuditSample s2 = auditFrom( makeInput( QStringLiteral( "neg-2" ) ), SplitRole::Test );
+    s2.input.minX = -495.0; // center distance is ~5 units (< 50.0 threshold)
+    s2.input.maxX = -485.0;
+    s2.input.minY = -995.0;
+    s2.input.maxY = -985.0;
+
+    AuditSample s3 = auditFrom( makeInput( QStringLiteral( "neg-3" ) ), SplitRole::Test );
+    s3.input.minX = -100.0;
+    s3.input.maxX = -90.0;
+    s3.input.minY = -100.0;
+    s3.input.maxY = -90.0;
+
+    const auto report = LeakageAuditor::audit( QStringLiteral( "v" ), QStringLiteral( "sp" ),
+                                               QVector<AuditSample>{ s1, s2, s3 }, config );
+    REQUIRE( report.has_value() );
+    CHECK( std::any_of( report->findings().cbegin(), report->findings().cend(),
+                        []( const LeakageFinding &f ) {
+                            return f.kind == LeakageKind::DistanceBelowThreshold;
+                        } ) );
+}
+
+TEST_CASE( "assignByRatio remainder handling and singletons to train",
+           "[dataset][split][issue788]" )
+{
+    // Issue #788: testRatio=0 clamped, singletons route to Train
+    // 1. Singleton class in stratified split
+    SplitConfig config;
+    config.method = SplitMethod::Stratified;
+    config.seed = 42;
+    config.trainRatio = 0.7;
+    config.validationRatio = 0.15;
+    config.testRatio = 0.15;
+
+    QVector<SplitInput> inputs;
+    inputs.append( makeInput( QStringLiteral( "single-1" ), QStringLiteral( "rare_class" ) ) );
+    for ( int i = 0; i < 20; ++i )
+    {
+        inputs.append( makeInput( QStringLiteral( "common-%1" ).arg( i ), QStringLiteral( "common_class" ) ) );
+    }
+
+    const auto manifest = SplitEngine::generate( config, QStringLiteral( "v1" ), inputs );
+    REQUIRE( manifest.has_value() );
+    // The singleton of rare_class MUST be in Train
+    for ( const auto &as : manifest->assignments() )
+    {
+        if ( as.sampleId == QStringLiteral( "single-1" ) )
+        {
+            CHECK( as.role == SplitRole::Train );
+        }
+    }
+
+    // 2. testRatio = 0.0 with remainders
+    SplitConfig noTestConfig;
+    noTestConfig.method = SplitMethod::Random;
+    noTestConfig.seed = 42;
+    noTestConfig.trainRatio = 0.7;
+    noTestConfig.validationRatio = 0.3;
+    noTestConfig.testRatio = 0.0;
+
+    QVector<SplitInput> inputs5;
+    for ( int i = 0; i < 7; ++i )
+    {
+        inputs5.append( makeInput( QStringLiteral( "s-%1" ).arg( i ) ) );
+    }
+    const auto manifestNoTest = SplitEngine::generate( noTestConfig, QStringLiteral( "v1" ), inputs5 );
+    REQUIRE( manifestNoTest.has_value() );
+    for ( const auto &as : manifestNoTest->assignments() )
+    {
+        CHECK( as.role != SplitRole::Test );
+    }
+}
+
+TEST_CASE( "spatial buffer split does not starve validation due to excluded samples",
+           "[dataset][split][issue786]" )
+{
+    // Issue #786: excluded buffer samples should not be added to remaining
+    SplitConfig config;
+    config.method = SplitMethod::SpatialBuffer;
+    config.seed = 123;
+    config.trainRatio = 0.5;
+    config.validationRatio = 0.3;
+    config.testRatio = 0.2;
+    config.bufferDistance = 20.0;
+
+    QVector<SplitInput> inputs;
+    // Create 20 samples along a line spaced by 10 units
+    for ( int i = 0; i < 20; ++i )
+    {
+        SplitInput in;
+        in.sampleId = QStringLiteral( "buf-%1" ).arg( i );
+        in.validBounds = true;
+        in.minX = i * 10.0;
+        in.maxX = in.minX + 1.0;
+        in.minY = 0.0;
+        in.maxY = 1.0;
+        inputs.append( in );
+    }
+
+    const auto manifest = SplitEngine::generate( config, QStringLiteral( "v1" ), inputs );
+    REQUIRE( manifest.has_value() );
+    const auto &assignments = manifest->assignments();
+
+    int trainCount = 0;
+    int valCount = 0;
+    int testCount = 0;
+    int unassignedCount = 0;
+    for ( const auto &as : assignments )
+    {
+        if ( as.role == SplitRole::Train )
+            ++trainCount;
+        else if ( as.role == SplitRole::Validation )
+            ++valCount;
+        else if ( as.role == SplitRole::Test )
+            ++testCount;
+        else if ( as.role == SplitRole::Unassigned )
+            ++unassignedCount;
+    }
+    CHECK( testCount > 0 );
+    CHECK( unassignedCount > 0 );
+    // Validation must NOT be starved (must receive samples)
+    CHECK( valCount > 0 );
+    CHECK( trainCount > 0 );
+}
+

@@ -46,15 +46,73 @@ struct IdOrder
 };
 
 /// Deterministic role assignment by ratio over an already-shuffled list:
-/// counts are computed once (floor; the remainder lands in Test) so the
-/// assignment depends on the LIST CONTENT AND ORDER, never on accumulation
-/// drift.
+/// counts are computed using the Largest Remainder Method (Hare-Niemeyer),
+/// strictly clamping Test to 0 when testRatio == 0.0 and routing singletons to Train.
 void assignByRatio( const QVector<int> &indices, double train, double validation,
-                    QVector<SplitAssignment> &out, const QVector<SplitInput> &inputs )
+                    QVector<SplitAssignment> &out, const QVector<SplitInput> &inputs,
+                    double test = -1.0 )
 {
     const int total = indices.size();
-    const int trainCount = int( std::floor( train * total ) );
-    const int validationCount = int( std::floor( validation * total ) );
+    if ( total <= 0 )
+        return;
+
+    const double testRatio = ( test >= 0.0 ) ? test : std::max( 0.0, 1.0 - train - validation );
+    int trainCount = 0;
+    int validationCount = 0;
+    int testCount = 0;
+
+    if ( total == 1 )
+    {
+        trainCount = 1;
+    }
+    else
+    {
+        const double sum = train + validation + ( testRatio > 0.0 ? testRatio : 0.0 );
+        const double tRatio = sum > 0.0 ? train / sum : 1.0;
+        const double vRatio = sum > 0.0 ? validation / sum : 0.0;
+        const double sRatio = ( sum > 0.0 && testRatio > 0.0 ) ? testRatio / sum : 0.0;
+
+        const double qTrain = total * tRatio;
+        const double qVal = total * vRatio;
+        const double qTest = ( testRatio > 0.0 ) ? ( total * sRatio ) : 0.0;
+
+        trainCount = int( std::floor( qTrain ) );
+        validationCount = int( std::floor( qVal ) );
+        testCount = ( testRatio > 0.0 ) ? int( std::floor( qTest ) ) : 0;
+
+        double remTrain = qTrain - trainCount;
+        double remVal = qVal - validationCount;
+        double remTest = ( testRatio > 0.0 ) ? ( qTest - testCount ) : -1.0;
+
+        int rem = total - ( trainCount + validationCount + testCount );
+        while ( rem > 0 )
+        {
+            if ( remTrain >= remVal && ( testRatio == 0.0 || remTrain >= remTest ) )
+            {
+                trainCount++;
+                remTrain = -1.0;
+            }
+            else if ( remVal >= remTrain && ( testRatio == 0.0 || remVal >= remTest ) )
+            {
+                validationCount++;
+                remVal = -1.0;
+            }
+            else if ( testRatio > 0.0 )
+            {
+                testCount++;
+                remTest = -1.0;
+            }
+            else
+            {
+                trainCount++;
+            }
+            --rem;
+        }
+    }
+
+    if ( testRatio == 0.0 )
+        testCount = 0;
+
     for ( int position = 0; position < total; ++position )
     {
         SplitAssignment assignment;
@@ -541,7 +599,7 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
                 indices[i] = i;
             random.shuffle( indices );
             assignByRatio( indices, config.trainRatio, config.validationRatio, assignments,
-                           inputs );
+                           inputs, config.testRatio );
             break;
         }
         case SplitMethod::Stratified:
@@ -559,7 +617,7 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
                 QVector<int> indices = byClass.value( className );
                 random.shuffle( indices );
                 assignByRatio( indices, config.trainRatio, config.validationRatio, assignments,
-                               inputs );
+                               inputs, config.testRatio );
             }
             break;
         }
@@ -578,7 +636,7 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
         {
             // Block id = integer grid cell of the bounds center; blocks are
             // atomic groups and move whole.
-            QMap<QPair<qint64, qint64>, QVector<int>> byBlock;
+            QMap<QString, QVector<int>> table;
             for ( int i = 0; i < inputs.size(); ++i )
             {
                 const SplitInput &input = inputs.at( i );
@@ -589,19 +647,12 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
                 const double centerY = ( input.minY + input.maxY ) / 2.0;
                 const qint64 blockX = qint64( std::floor( centerX / config.blockSizeX ) );
                 const qint64 blockY = qint64( std::floor( centerY / config.blockSizeY ) );
-                byBlock[qMakePair( blockX, blockY )].append( i );
+                table[QStringLiteral( "%1:%2" ).arg( blockX ).arg( blockY )].append( i );
             }
-            QList<QPair<qint64, qint64>> blocks = byBlock.keys();
-            std::sort( blocks.begin(), blocks.end() );
-            QVector<int> blockOrder( blocks.size() );
-            for ( int i = 0; i < blocks.size(); ++i )
-                blockOrder[i] = i;
-            random.shuffle( blockOrder );
-            for ( const int blockIndex : blockOrder )
-            {
-                assignByRatio( byBlock.value( blocks.at( blockIndex ) ), config.trainRatio,
-                               config.validationRatio, assignments, inputs );
-            }
+            QStringList groupNames = table.keys();
+            random.shuffle( groupNames );
+            assignments = walkGroupsInOrder( groupNames, table, inputs, config );
+            requireNonEmptyRoles( assignments, config, inputs.size() );
             break;
         }
         case SplitMethod::SpatialBuffer:
@@ -647,7 +698,7 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
             QVector<int> remaining;
             for ( const int candidate : order )
             {
-                if ( !accepted.contains( candidate ) )
+                if ( !accepted.contains( candidate ) && !excluded.contains( candidate ) )
                     remaining.append( candidate );
             }
             const double ratioSum = config.trainRatio + config.validationRatio;
