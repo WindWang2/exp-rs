@@ -96,11 +96,14 @@ void InspectorHost::rebuildTabs()
         // registered InspectorSections while m_sections keeps their pointers
         // (use-after-free on the next selection change). Detach the sections
         // first; they are re-added when a supported selection returns.
+        m_rebuilding = true;
         rescueSectionsFrom( oldTabs );
+        m_rebuilding = false;
         m_stack->setCurrentWidget( m_placeholder );
         return;
     }
 
+    m_rebuilding = true;
     QTabWidget *tabs = oldTabs;
     if ( !tabs )
     {
@@ -109,7 +112,8 @@ void InspectorHost::rebuildTabs()
         tabs->setDocumentMode( true );
         m_stack->addWidget( tabs );
         // #812: the shown section must populate on user tab switches too —
-        // without this, secondary tabs stay permanently blank.
+        // without this, secondary tabs stay permanently blank. (Programmatic
+        // changes during the rebuild are swallowed by m_rebuilding.)
         connect( tabs, &QTabWidget::currentChanged, this, &InspectorHost::onTabChanged );
     }
 
@@ -156,6 +160,7 @@ void InspectorHost::rebuildTabs()
         const QSignalBlocker blocker( tabs );
         tabs->setCurrentIndex( 0 );
     }
+    m_rebuilding = false;
     if ( InspectorSection *shown = currentSection() )
     {
         shown->populate( m_snapshot );
@@ -165,6 +170,9 @@ void InspectorHost::rebuildTabs()
 
 void InspectorHost::onTabChanged( int index )
 {
+    if ( m_rebuilding )
+        return; // programmatic add/remove during rebuild — the shown section
+                // is populated exactly once at the end of rebuildTabs()
     QTabWidget *tabs = m_stack->findChild<QTabWidget *>( QStringLiteral( "rsInspectorTabs" ) );
     if ( !tabs || index < 0 || index >= tabs->count() )
         return;

@@ -98,6 +98,10 @@ class InspectorHost : public QWidget
     QList<InspectorSection *> m_sections;
     SelectionContextSnapshot m_snapshot;
     bool m_hasSnapshot = false;
+    /// True while rebuildTabs() is manipulating the tab widget — programmatic
+    /// addTab/removeTab can emit currentChanged, and only user switches must
+    /// drive onTabChanged.
+    bool m_rebuilding = false;
 };
 
 } // namespace sicnu::app

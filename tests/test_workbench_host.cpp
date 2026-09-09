@@ -215,6 +215,7 @@ TEST_CASE( "ExternalWindowWorkbench: lifecycle hooks expose dirty, in-flight and
   CHECK_FALSE( bench.requestCancel() );
 
   bench.activate(); // opener runs → window exists
+  windowAlive = true;
   CHECK( bench.isActive() );
 
   dirty = true;
