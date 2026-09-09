@@ -6763,6 +6763,19 @@ if(NOT WIN32)
   sicnu_add_test(test_exprs_external_process)
   target_link_libraries(test_exprs_external_process PRIVATE sicnu_sdk)
 endif()
+# Isolation runtime 5.0: behavior helper + Windows external-process lane
+# (CreateProcessW implementation). The helper is cross-platform so the same
+# assertions can run on any lane.
+add_executable(exprs_ep_helper helper_external_process.cpp)
+set_target_properties(exprs_ep_helper PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+if(WIN32)
+  sicnu_add_sdk_test(test_exprs_external_process_win)
+  target_compile_definitions(test_exprs_external_process_win PRIVATE
+    SICNU_TEST_EP_HELPER="${CMAKE_BINARY_DIR}/exprs_ep_helper.exe"
+  )
+endif()
 
 # Isolation runtime 5.0: host-process protocol contract suites (sdk-only).
 sicnu_add_sdk_test(test_exprs_ipc)
