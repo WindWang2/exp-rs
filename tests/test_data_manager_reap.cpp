@@ -536,3 +536,59 @@ TEST_CASE( "AssetLease released from a worker thread does not strand the lease (
   const ReapResult result = manager.reap( ReapRequest{ id } );
   CHECK( result.unloaded );
 }
+
+// ── Workbench 6.0 Milestone C: const-reader affinity enforcement (#800) ────
+
+/// #800: message buffer for the off-affinity reader warning
+/// (qInstallMessageHandler takes a plain function pointer, so the buffer is
+/// file-static).
+static QString g_affinityWarnings;
+static void affinityMessageHandler( QtMsgType, const QMessageLogContext &,
+                                    const QString &message )
+{
+  g_affinityWarnings += message;
+  g_affinityWarnings += QLatin1Char( '\n' );
+}
+
+TEST_CASE( "Off-affinity const reader is flagged by the affinity contract (#800)",
+           "[data_manager][threads][ux6]" )
+{
+  static QCoreApplication *app = []() {
+    if ( !QCoreApplication::instance() )
+    {
+      static int argc = 1;
+      static char a0[] = "test_data_manager_reap";
+      char *argv[] = {a0, nullptr};
+      return new QCoreApplication( argc, argv );
+    }
+    return QCoreApplication::instance();
+  }();
+  (void)app;
+
+  QTemporaryDir dir;
+  DataManager manager;
+  const QString path =
+    stageFixture( dir, QStringLiteral( "samples/dem_sample.tif" ), QStringLiteral( "affinity.tif" ) );
+  const AssetId id =
+    registerDeletableTemporaryRaster( manager, path, PersistencePolicy::SessionTemporary );
+
+  // On-thread reader: normal behavior, no warning.
+  REQUIRE( manager.asset( id ).has_value() );
+
+#ifdef QT_NO_DEBUG
+  // #800: the documented THREAD AFFINITY CONTRACT now warns on every
+  // off-affinity const read (and aborts under Q_ASSERT in debug builds, so
+  // this lane runs in release builds only).
+  g_affinityWarnings.clear();
+  QtMessageHandler previous = qInstallMessageHandler( affinityMessageHandler );
+  std::thread reader( [&manager]() { (void)manager.assets(); } );
+  reader.join();
+  qInstallMessageHandler( previous );
+
+  const QString &captured = g_affinityWarnings;
+  CHECK( captured.contains( QStringLiteral( "DataManager" ) ) );
+  CHECK( captured.contains( QStringLiteral( "owning thread" ) ) );
+#else
+  SKIP( "debug builds abort at Q_ASSERT; the release lane verifies the warning" );
+#endif
+}

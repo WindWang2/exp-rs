@@ -7,6 +7,7 @@
 #include <QMutexLocker>
 #include <QSet>
 #include <QTimer>
+#include <QUuid>
 #include <utility>
 
 #include "framework/json_params_converter.h"
@@ -1371,15 +1372,39 @@ void TaskCenter::flushPendingLaunches()
                 m_taskFingerprints[launch.taskId] = fp;
         }
 
-        std::string jobId;
-        if ( launch.hasExecutor )
-            jobId = sicnu::jobs::JobEngine::instance().submit( launch.request, std::move( launch.executor ),
-                                                               std::move( launch.onCancel ) );
-        else
-            jobId = sicnu::jobs::JobEngine::instance().submit( launch.request );
-
-        if ( jobId.empty() )
+        // #799: PRE-REGISTER the task↔job mapping under m_mutex BEFORE the
+        // job exists, using a caller-chosen engine id. The old order
+        // (submit → register) stranded tasks in Dispatching whenever the job
+        // reached a terminal state before registration landed: its terminal
+        // record arrived with an id that mapped to no task and was dropped.
+        const std::string jobId = QStringLiteral( "task-%1-%2" )
+                                      .arg( launch.taskId )
+                                      .arg( QUuid::createUuid().toString( QUuid::WithoutBraces )
+                                                .left( 8 ) )
+                                      .toStdString();
         {
+            QMutexLocker preLock( &m_mutex );
+            if ( !m_tasks.contains( launch.taskId ) || isTerminalStatus( m_tasks[launch.taskId].status ) )
+                continue; // canceled between staging and dispatch — never submit
+            m_taskByJobId[jobId] = launch.taskId;
+        }
+
+        std::string submittedId;
+        if ( launch.hasExecutor )
+            submittedId = sicnu::jobs::JobEngine::instance().submitWithId(
+                launch.request, jobId, std::move( launch.executor ),
+                std::move( launch.onCancel ) );
+        else
+            submittedId = sicnu::jobs::JobEngine::instance().submitWithId( launch.request, jobId );
+
+        if ( submittedId.empty() )
+        {
+            // Refused id (collision — not reachable with a fresh UUID suffix,
+            // but never leave the pre-registration dangling).
+            {
+                QMutexLocker rollback( &m_mutex );
+                m_taskByJobId.remove( jobId );
+            }
             markTaskFailed( launch.taskId, QStringLiteral( "Task Center could not submit the job" ) );
             continue;
         }
@@ -1389,20 +1414,19 @@ void TaskCenter::flushPendingLaunches()
             QMutexLocker reLock( &m_mutex );
             if ( m_tasks.contains( launch.taskId ) && !isTerminalStatus( m_tasks[launch.taskId].status ) )
             {
-                m_tasks[launch.taskId].jobId = jobId;
-                m_taskByJobId[jobId] = launch.taskId;
+                m_tasks[launch.taskId].jobId = submittedId;
                 mapped = true;
             }
             else
             {
                 // Canceled while submit was in-flight: cancel the newly submitted job immediately
-                sicnu::jobs::JobEngine::instance().cancel( jobId );
+                sicnu::jobs::JobEngine::instance().cancel( submittedId );
             }
         }
         if ( mapped )
         {
             // Catch-up snapshot; see submitJobImpl for the rationale.
-            if ( const auto record = sicnu::jobs::JobEngine::instance().snapshot( jobId ) )
+            if ( const auto record = sicnu::jobs::JobEngine::instance().snapshot( submittedId ) )
                 onJobRecord( *record );
         }
     }

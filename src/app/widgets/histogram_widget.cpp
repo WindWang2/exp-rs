@@ -12,8 +12,9 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QMouseEvent>
-#include <QThreadPool>
 #include <QCoreApplication>
+
+#include "rs_scan_pool.h"
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -61,6 +62,11 @@ void HistogramWidget::closeDataset()
         std::lock_guard<std::mutex> lock( s_reqMutex );
         s_activeRequests.erase( this );
     }
+    // #797: cancel the in-flight scan so the bounded pool stops reading GDAL
+    // sources for a widget that is gone (results are dropped by the stale
+    // check anyway; this ends the work itself).
+    if ( m_scanGeneration )
+        sicnu::app::RsScanPool::instance().cancel( m_scanGeneration );
     if ( m_cachedDataset ) {
         GDALClose( m_cachedDataset );
         m_cachedDataset = nullptr;
@@ -249,8 +255,13 @@ void HistogramWidget::computeHistograms()
         s_activeRequests[this] = reqId;
     }
 
+    // #797: run the GDAL scan on the dedicated bounded scan pool (never the
+    // global pool) and carry a cancellation generation — the worker exits at
+    // band boundaries when a newer request supersedes it.
+    const quint64 scanGeneration = sicnu::app::RsScanPool::instance().nextGeneration();
+    m_scanGeneration = scanGeneration;
     QPointer<HistogramWidget> self = this;
-    QThreadPool::globalInstance()->start( [self, source, reqId, bandsToFetch]() {
+    sicnu::app::RsScanPool::instance().pool().start( [self, source, reqId, bandsToFetch, scanGeneration]() {
         struct BandResult
         {
             int bandNum;
@@ -264,6 +275,13 @@ void HistogramWidget::computeHistograms()
 
         for ( int bandNum : bandsToFetch )
         {
+            // Cooperative cancellation (#797): abandon superseded scans at
+            // band boundaries instead of monopolising a scan worker.
+            if ( sicnu::app::RsScanPool::instance().isStale( scanGeneration ) )
+            {
+                GDALClose( ds );
+                return;
+            }
             BandData data;
             data.valid = false;
             GDALRasterBandH hBand = GDALGetRasterBand( ds, bandNum );

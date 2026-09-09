@@ -42,6 +42,22 @@ Diagnostic wrongThreadDiagnostic()
                      DiagnosticSeverity::Error };
 }
 
+/// #800 / THREAD AFFINITY CONTRACT (#703): the const readers have no internal
+/// locking either — reading off the owning thread races the mutators'
+/// QVector insert/reallocation and can observe a torn snapshot. Enforce the
+/// documented contract: warn always, abort in debug builds.
+void checkReaderAffinity( const QObject *manager )
+{
+  if ( QThread::currentThread() == manager->thread() )
+    return;
+  qWarning( "DataManager: const accessor called from thread %p off the "
+            "manager's owning thread %p (torn-read hazard, #703/#800)",
+            static_cast<const void *>( QThread::currentThread() ),
+            static_cast<const void *>( manager->thread() ) );
+  Q_ASSERT_X( QThread::currentThread() == manager->thread(), "DataManager",
+              "const accessor called off the manager's owning thread" );
+}
+
 /// Builds the diagnostics for refusing to remove a leased asset, shared by
 /// unload() and reap(). `codePrefix` selects the per-operation code
 /// ("unload" / "reap").
@@ -723,7 +739,8 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
 }
 
 std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const
-{
+{  checkReaderAffinity( this );
+
   const auto it = m_impl->findRecord( id );
   if ( it == m_impl->records.end() )
     return std::nullopt;
@@ -731,7 +748,8 @@ std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const
 }
 
 QVector<AssetSnapshot> DataManager::assets( const AssetQuery &query ) const
-{
+{  checkReaderAffinity( this );
+
   QVector<AssetSnapshot> snapshots;
   snapshots.reserve( m_impl->records.size() );
   for ( const Impl::AssetRecord &record : m_impl->records )
@@ -749,7 +767,8 @@ QVector<AssetSnapshot> DataManager::assets( const AssetQuery &query ) const
 }
 
 std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) const
-{
+{  checkReaderAffinity( this );
+
   if ( path.trimmed().isEmpty() )
     return std::nullopt;
 
@@ -798,12 +817,14 @@ std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) cons
 }
 
 quint64 DataManager::catalogGeneration() const
-{
+{  checkReaderAffinity( this );
+
   return m_impl->catalogGeneration;
 }
 
 std::optional<DerivationRecord> DataManager::provenance( AssetId id ) const
-{
+{  checkReaderAffinity( this );
+
   const auto it = m_impl->findRecord( id );
   if ( it == m_impl->records.end() )
     return std::nullopt;
@@ -811,7 +832,8 @@ std::optional<DerivationRecord> DataManager::provenance( AssetId id ) const
 }
 
 QVector<AssetId> DataManager::derivedFrom( AssetId id ) const
-{
+{  checkReaderAffinity( this );
+
   QVector<AssetId> result;
   const auto it = m_impl->findRecord( id );
   if ( it == m_impl->records.end() || !it->derivation )
@@ -822,7 +844,8 @@ QVector<AssetId> DataManager::derivedFrom( AssetId id ) const
 }
 
 QVector<AssetId> DataManager::derivedOutputsOf( AssetId id ) const
-{
+{  checkReaderAffinity( this );
+
   QVector<AssetId> result;
   for ( const auto &record : m_impl->records )
   {
@@ -841,7 +864,8 @@ QVector<AssetId> DataManager::derivedOutputsOf( AssetId id ) const
 }
 
 QVector<AssetId> DataManager::derivedOutputsOfCollection( CollectionId id ) const
-{
+{  checkReaderAffinity( this );
+
   QVector<AssetId> result;
   const auto colAssetId = AssetId::fromString( id.toString() );
   for ( const auto &record : m_impl->records )
@@ -1077,7 +1101,8 @@ Result<void> DataManager::rollbackEdit( AssetId id )
 }
 
 int DataManager::leaseCount( AssetId id ) const
-{
+{  checkReaderAffinity( this );
+
   return static_cast<int>(
     std::count_if( m_impl->leases.begin(), m_impl->leases.end(),
                    [&]( const Impl::LeaseRecord &lease ) {
@@ -1087,7 +1112,8 @@ int DataManager::leaseCount( AssetId id ) const
 }
 
 QVector<LeaseRef> DataManager::leases( AssetId id ) const
-{
+{  checkReaderAffinity( this );
+
   QVector<LeaseRef> result;
   for ( const Impl::LeaseRecord &lease : m_impl->leases )
   {
@@ -1102,7 +1128,8 @@ QVector<LeaseRef> DataManager::leases( AssetId id ) const
 }
 
 bool DataManager::hasActiveEditLease( AssetId id ) const
-{
+{  checkReaderAffinity( this );
+
   for ( const Impl::LeaseRecord &lease : m_impl->leases )
   {
     if ( lease.control->assetId == id && lease.control->active &&
@@ -1113,7 +1140,8 @@ bool DataManager::hasActiveEditLease( AssetId id ) const
 }
 
 UnloadPlan DataManager::planUnload( AssetId id ) const
-{
+{  checkReaderAffinity( this );
+
   AssetRevision revision;
   const auto recordIt = m_impl->findRecord( id );
   if ( recordIt != m_impl->records.end() )

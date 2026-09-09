@@ -2,6 +2,7 @@
 #include "roi_statistics_widget.h"
 #include "processing/algorithms/math_utils.h"
 #include "core/sicnu_logging.h"
+#include "rs_scan_pool.h"
 
 #include <qgsrasterlayer.h>
 #include <qgsrasterdataprovider.h>
@@ -36,6 +37,15 @@ RoiStatisticsWidget::RoiStatisticsWidget(QWidget *parent)
     : QWidget(parent)
 {
     setupUi();
+}
+
+RoiStatisticsWidget::~RoiStatisticsWidget()
+{
+    // #797: cancel the in-flight scan so the bounded pool stops reading GDAL
+    // sources for a widget that is gone (results are dropped by QPointer
+    // anyway; this ends the work itself).
+    if ( m_scanGeneration )
+        sicnu::app::RsScanPool::instance().cancel( m_scanGeneration );
 }
 
 void RoiStatisticsWidget::setupUi()
@@ -148,10 +158,18 @@ void RoiStatisticsWidget::computeStatistics()
     m_summaryLabel->setText(tr("Computing…"));
 
     const uint64_t reqId = ++m_requestEpoch;
+    // #797: run the GDAL scan on the dedicated bounded scan pool (never the
+    // global pool) and carry a cancellation generation — the worker exits at
+    // band boundaries when a newer request supersedes it.
+    const quint64 scanGeneration = sicnu::app::RsScanPool::instance().nextGeneration();
+    m_scanGeneration = scanGeneration;
     QPointer<RoiStatisticsWidget> self = this;
-    QThreadPool::globalInstance()->start([self, source, bandCount, roiWkt, layerExtent, reqId]() {
+    sicnu::app::RsScanPool::instance().pool().start([self, source, bandCount, roiWkt, layerExtent, reqId, scanGeneration]() {
         QVector<BandStats> stats(bandCount);
         QString error;
+
+        if (sicnu::app::RsScanPool::instance().isStale(scanGeneration))
+            return;
 
         QgsGeometry roi = roiWkt.isEmpty() ? QgsGeometry() : QgsGeometry::fromWkt(roiWkt);
         const QgsRectangle bbox = roi.isNull() ? layerExtent : roi.boundingBox();
@@ -239,6 +257,19 @@ void RoiStatisticsWidget::computeStatistics()
         std::vector<float> buf(static_cast<size_t>(bufW) * bufH);
         std::vector<float> roiPixels;
         for (int b = 0; b < bandCount; ++b) {
+            // Cooperative cancellation (#797): a superseded scan abandons the
+            // remaining bands promptly instead of monopolising a scan worker.
+            if (sicnu::app::RsScanPool::instance().isStale(scanGeneration)) {
+                GDALClose(ds);
+                QMetaObject::invokeMethod(qApp, [self, reqId]() {
+                    if (!self || self->m_requestEpoch != reqId)
+                        return;
+                    self->m_computing = false;
+                    self->m_refreshBtn->setEnabled(true);
+                    self->m_summaryLabel->setText(self->tr("Superseded."));
+                });
+                return;
+            }
             GDALRasterBandH band = GDALGetRasterBand(ds, b + 1);
             if (!band) continue;
             if (GDALRasterIO(band, GF_Read, xOff, yOff, xSize, ySize,

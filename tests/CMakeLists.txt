@@ -5666,6 +5666,24 @@ target_compile_definitions(test_shortcut_conflicts PRIVATE
 )
 sicnu_discover_tests(test_shortcut_conflicts)
 
+# ── Workbench 6.0 Milestone C: bounded UI scan pool (#797) ──────────────────
+add_executable(test_scan_pool
+  test_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+)
+target_link_libraries(test_scan_pool PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_scan_pool PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_scan_pool PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_scan_pool)
+
 # Spectral index dialog — role-based band preselection via BandRoleCombo (C5)
 sicnu_add_dialog_test(test_spectral_index_dialog
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/spectral_index_dialog.cpp
