@@ -1046,7 +1046,8 @@ TEST_CASE( "Tier 2 - Boundary: DEM Flow routing over flat sink plain with NoData
     REQUIRE( TerrainFlow::flowAccumulation( dir.data(), acc.data(), W, H ) );
 
     // Center cell is NoData barrier
-    CHECK( acc[4] >= 0.0f );
+    CHECK( acc[4] == kNodata );
+    CHECK( acc[0] >= 1.0f );
 }
 
 // ============================================================================
@@ -1109,6 +1110,7 @@ TEST_CASE( "Tier 3 - Combination: Scientific RS + Dataset Partitioning + Lineage
     run.setRunId( QStringLiteral( "run-001" ) );
     run.setExperimentId( QStringLiteral( "exp-photometric-01" ) );
     run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
     REQUIRE( expStore.upsertRun( run ).has_value() );
 
     auto retrievedRun = expStore.runById( QStringLiteral( "run-001" ) );
