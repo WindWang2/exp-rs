@@ -249,3 +249,71 @@ feature-count, ordering). The menu text is uniformly Chinese.
 `test_command_palette`, `test_inspector_host` pin the semantics above; the
 4.0 guardrails (thin-client law, token parity, shortcut conflicts, schema
 form) remain in force.
+
+## 12. Workbench 6.0 additions
+
+### 12.1 Layer lifetime & canvas rendering
+
+- `QgsMapCanvas::stopRenderingAndSettle()` (vendored canvas): blocking cancel
+  of any in-flight render job (the canvas-destructor idiom). Callers that are
+  about to destroy `QgsMapLayer` objects the canvas may be drawing MUST call
+  this first — `QgisDisplayManager::removeLayer/relocateLayer/removeView` and
+  the legacy `ActiveViewHost::removeSelectedDisplayLayers` path all do.
+- `SelectionContext` tracks its sources through `QPointer` guards, purges
+  layers on `QgsProject::layerWillBeRemoved` (tombstones keep a doomed layer
+  invisible to snapshots even while the canvas still reports it as the
+  current layer), and re-validates cached layer pointers on every query.
+- `QgisDisplayManager::viewLayerTree(viewId)` exposes each view's own layer
+  tree; `ActiveViewHost::refreshCanvasLayers()` reads the ACTIVE view's tree
+  (the main view's registered tree IS the project root, so its behavior is
+  unchanged). Secondary views never consume the global checked-layer state.
+
+### 12.2 Command & shortcut ownership
+
+- `CommandRegistry` tracks installed canonical shortcuts as
+  `QSet<QString> m_shortcutOwners` — exactly ONE projection per COMMAND may
+  install its binding; different commands each own theirs. Installation
+  never aborts the process (the pre-6.0 single-string assert is gone).
+- `test_shortcut_conflicts` scans every command source (menus, command_defs,
+  workbench wiring, ribbon, layer-tree menu) for internal duplicates; the
+  registry enforces cross-command uniqueness at registration.
+
+### 12.3 Availability & reasons (ContextRules 2.0)
+
+- `ContextRules::prerequisiteFacts(snapshot)` is the structured fact
+  projection (selection kind, raster/vector/SAR, editability, governance
+  selection) that Help/Hint surfaces consume.
+- `ContextRules::unavailabilityReason` covers every prefix family that
+  declares an availability predicate (`layer.*`, `layer.edit.*`, `raster.*`,
+  `rs.*`, `sar.*`, `result.*`, `asset.*`); an empty return means available.
+  The palette renders the reason on disabled rows and refuses to run them.
+
+### 12.4 Workbench lifecycle (#813)
+
+- `IWorkbench` carries the full lifecycle contract: activate/deactivate,
+  context augmentation, dirty state, `hasInFlightCompute()`,
+  `requestCancel()` (TaskCenter seam) and `requestClose()`.
+- External session benches wire `windowGetter` / `setDirtyFn` /
+  `setInFlightFn` / `setCancelFn` / `setCloseFn` to the existing windows
+  (classification lab, both georeferencer shells, OBIA). Layout remains
+  plain lazy-open (per-invocation dialogs, nothing to track).
+
+### 12.5 Inspector 2.0 & SchemaFormBuilder 3.0
+
+- Inspector sections: General, Metadata, plus Milestone-G Vector (fields /
+  counts / editability / selection, capped at 32 rows) and SAR (product
+  hint + whitelisted provider-metadata facts, bounded page). Tab switches
+  populate the newly shown section; sections survive unsupported
+  re-selections (reparented, never destroyed by tab rebuilds).
+- Schema hints honored by `SchemaFormBuilder`: `x-ui-unit` (label suffix),
+  `x-ui-recommended` (tooltip + accessible description),
+  `x-ui-visible-when` (conditional fields — hidden fields are excluded from
+  `values()` and `validate()`), `x-ui-soft-min`/`x-ui-soft-max`
+  (WARNING-level scientific-reasonability diagnostics that never block).
+
+### 12.6 UI-side scans (#797)
+
+- `RsScanPool` (app/widgets/rs_scan_pool.h) is the ONLY sanctioned pool for
+  UI-triggered GDAL scans (ROI statistics, histograms): two workers max,
+  generation tokens with `nextGeneration()`/`cancel()` cooperative
+  cancellation. `QThreadPool::globalInstance()` is never used for scans.
