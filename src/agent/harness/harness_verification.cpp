@@ -38,6 +38,14 @@ bool provenanceSidecarExists( const std::string &path )
   return QFileInfo::exists( QString::fromStdString( path + ".provenance.json" ) );
 }
 
+/// Harness 7.0 uncertainty-path convention (mission Area F/G): recipes may
+/// declare an uncertainty companion product; the default writer puts it at
+/// <path>.uncertainty.json.
+bool uncertaintySidecarExists( const std::string &path )
+{
+  return QFileInfo::exists( QString::fromStdString( path + ".uncertainty.json" ) );
+}
+
 Verdict verdictFromChecks( const std::vector<VerificationCheck> &checks )
 {
   bool anyError = false;
@@ -223,6 +231,47 @@ ArtifactVerification verifyArtifact( const std::string &path,
                   error_codes::kCrsMismatch, "info", details );
       }
 
+      // Harness 7.0 (Area F): expected-extent coverage. The output extent
+      // (geotransform) must cover the declared AOI rectangle; a shortfall
+      // means the product does not answer the question it was run for.
+      if ( expectations.expectedExtent.isObject() &&
+           expectations.expectedExtent.isMember( "xmin" ) )
+      {
+        double gt[6] = { 0, 1, 0, 0, 0, 1 };
+        const bool hasTransform = ds->GetGeoTransform( gt ) == CE_None;
+        const bool extentUsable = hasTransform && gt[2] == 0 && gt[4] == 0;
+        if ( extentUsable )
+        {
+          const double xmin = gt[0];
+          const double ymax = gt[3];
+          const double xmax = gt[0] + gt[1] * ds->GetRasterXSize();
+          const double ymin = gt[3] + gt[5] * ds->GetRasterYSize();
+          const double aoiXmin = expectations.expectedExtent.get( "xmin", 0 ).asDouble();
+          const double aoiYmin = expectations.expectedExtent.get( "ymin", 0 ).asDouble();
+          const double aoiXmax = expectations.expectedExtent.get( "xmax", 0 ).asDouble();
+          const double aoiYmax = expectations.expectedExtent.get( "ymax", 0 ).asDouble();
+          constexpr double kEpsilon = 1e-6;
+          Json::Value details;
+          details["output"] = [ = ] {
+            Json::Value v( Json::arrayValue );
+            v.append( xmin ); v.append( ymin ); v.append( xmax ); v.append( ymax );
+            return v;
+          }();
+          details["expected"] = expectations.expectedExtent;
+          const bool covers = xmin <= aoiXmin + kEpsilon && ymin <= aoiYmin + kEpsilon &&
+                              xmax >= aoiXmax - kEpsilon && ymax >= aoiYmax - kEpsilon;
+          addCheck( result.checks, "extent_covers_aoi", covers,
+                    error_codes::kOutputInvalid, "info", details );
+        }
+        else
+        {
+          Json::Value note;
+          note["reason"] = "rotated or missing geotransform; coverage not verifiable";
+          addCheck( result.checks, "extent_covers_aoi", false,
+                    error_codes::kOutputInvalid, "warning", std::move( note ) );
+        }
+      }
+
       // Bounded sample statistics over band 1: finite + NoData fractions.
       GDALRasterBand *band = ds->GetRasterBand( 1 );
       if ( band )
@@ -309,6 +358,11 @@ ArtifactVerification verifyArtifact( const std::string &path,
   if ( expectations.requireProvenance )
   {
     addCheck( result.checks, "provenance_present", provenanceSidecarExists( path ),
+              error_codes::kOutputInvalid, "warning" );
+  }
+  if ( expectations.requireUncertainty )
+  {
+    addCheck( result.checks, "uncertainty_present", uncertaintySidecarExists( path ),
               error_codes::kOutputInvalid, "warning" );
   }
 
