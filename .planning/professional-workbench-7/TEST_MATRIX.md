@@ -2,6 +2,8 @@
 
 Legend: ⬜ planned · ✅ passing locally (Release, offscreen, CTEST_PARALLEL_LEVEL=1)
 
+Results @ 2026-09-10 (worktree build-dev, Release -j2):
+
 | # | Scenario (goal §测试) | Vehicle | Status |
 |---|----------------------|---------|--------|
 | 1 | quit with dirty + in-flight bench → confirm, cancel routed | test_workbench_shutdown_policy | ⬜ |
@@ -19,3 +21,20 @@ Legend: ⬜ planned · ✅ passing locally (Release, offscreen, CTEST_PARALLEL_L
 | 13 | keyboard-only critical flow (palette → history → provenance) | registry shortcut tests + section keyboard nav test | ⬜ |
 | 14 | repeated open/close lifetime (panels, benches) | lifetime loop cases in new tests | ⬜ |
 | 15 | multi-view isolation regression | test_layer_sync_contract / display manager (inherited) | ⬜ |
+
+## Verified results
+
+| Suite | Result |
+|-------|--------|
+| test_workbench_shutdown_policy | ✅ 54 assertions / 4 cases |
+| test_provenance_section | ✅ 61 assertions / 6 cases |
+| test_processing_history_model | ✅ 42 assertions / 5 cases |
+| test_temporal_scene_model | ✅ 16 assertions / 3 cases |
+| test_inspector_host (regression) | ✅ 27/6 |
+| test_selection_context (regression) | ✅ 57/12 |
+| test_command_registry (regression) | ✅ 48/9 |
+| test_workbench_host (regression) | ✅ 50/8 |
+| test_command_palette (regression) | ✅ 23/4 |
+| test_shortcut_conflicts (regression) | ✅ 16/2 (after fixing the Ctrl+Shift+D clash this track introduced — datasetExperiment moved to Ctrl+Shift+E) |
+| test_layer_sync_contract (regression) | ✅ 23/7 |
+| sicnu_geo_rs.exe | ✅ links clean (Release) |

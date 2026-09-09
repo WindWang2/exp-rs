@@ -287,7 +287,8 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         RS_CMD( d, "workbench.datasetExperiment", QObject::tr( "数据集与实验" ),
                 QObject::tr( "浏览数据集版本、样本、运行与指标对比。" ),
                 "dataset", QObject::tr( "工作区" ) );
-        d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+D" ) );
+        // Ctrl+Shift+D is taken by map.measureDistance — use E (E-xperiment).
+        d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+E" ) );
         d.handler = [window] { window->showDatasetExperimentBench(); };
         registry->registerCommand( d );
     }
