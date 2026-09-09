@@ -18,6 +18,7 @@
 #include <cmath>
 #include <map>
 #include <set>
+#include <vector>
 
 namespace sicnu::agent::harness {
 
@@ -68,6 +69,7 @@ int RecipeCatalog::reload()
 {
   const std::string dir = mDirectory.empty() ? defaultDirectory() : mDirectory;
   mRecipes = Json::Value( Json::objectValue );
+  mLoadProblems.clear();
   QDirIterator it( QString::fromStdString( dir ), { QStringLiteral( "*.json" ) }, QDir::Files );
   while ( it.hasNext() )
   {
@@ -81,13 +83,125 @@ int RecipeCatalog::reload()
     std::string errors;
     std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
     if ( !reader->parse( raw.constData(), raw.constData() + raw.size(), &parsed, &errors ) )
+    {
+      mLoadProblems.push_back( it.fileName().toStdString() + ": " + errors );
       continue;
+    }
     if ( parsed.isObject() && parsed.get( "kind", "" ).asString() == "harness_recipe" &&
          parsed.isMember( "recipe_id" ) )
+    {
+      // Platform 6.0: decisionable-knowledge metadata is optional but
+      // validated — a malformed capability/preset block must not silently
+      // load as authoritative knowledge.
+      const auto problems = validateRecipeMetadata( parsed );
+      if ( !problems.empty() )
+      {
+        mLoadProblems.push_back( it.fileName().toStdString() + ": " + problems.front() );
+        continue;
+      }
       mRecipes[parsed["recipe_id"].asString()] = parsed;
+    }
   }
   mLoaded = true;
   return static_cast<int>( mRecipes.size() );
+}
+
+std::vector<std::string> RecipeCatalog::validateRecipeMetadata( const Json::Value &recipe )
+{
+  std::vector<std::string> problems;
+  if ( !recipe.isObject() )
+    return { "recipe must be an object" };
+  const std::string id = recipe.get( "recipe_id", "" ).asString();
+
+  auto checkStringArray = [ &problems, &id ]( const Json::Value &parent, const char *field,
+                                              int budget ) {
+    if ( !parent.isMember( field ) )
+      return;
+    const Json::Value &array = parent[field];
+    if ( !array.isArray() )
+    {
+      problems.push_back( id + ": " + field + " must be an array" );
+      return;
+    }
+    if ( static_cast<int>( array.size() ) > budget )
+      problems.push_back( id + ": " + field + " exceeds the " + std::to_string( budget ) +
+                          " entry budget" );
+    for ( const auto &entry : array )
+      if ( !entry.isString() )
+        problems.push_back( id + ": " + field + " entries must be strings" );
+  };
+
+  checkStringArray( recipe, "capabilities", 16 );
+  checkStringArray( recipe, "limitations", 16 );
+  if ( recipe.isMember( "applicability" ) )
+  {
+    const Json::Value &applicability = recipe["applicability"];
+    if ( !applicability.isObject() )
+      problems.push_back( id + ": applicability must be an object" );
+    else
+    {
+      checkStringArray( applicability, "modalities", 16 );
+      checkStringArray( applicability, "sensors", 32 );
+      if ( applicability.isMember( "resolution_range" ) )
+      {
+        const Json::Value &range = applicability["resolution_range"];
+        if ( !range.isObject() || !range.isMember( "min_m" ) || !range["min_m"].isNumeric() ||
+             !range.isMember( "max_m" ) || !range["max_m"].isNumeric() ||
+             range["min_m"].asDouble() > range["max_m"].asDouble() )
+          problems.push_back( id + ": applicability.resolution_range needs numeric min_m <= max_m" );
+      }
+    }
+  }
+  if ( recipe.isMember( "presets" ) )
+  {
+    const Json::Value &presets = recipe["presets"];
+    if ( !presets.isObject() )
+      problems.push_back( id + ": presets must be an object" );
+    else
+    {
+      const auto names = presets.getMemberNames();
+      if ( static_cast<int>( names.size() ) > 16 )
+        problems.push_back( id + ": presets exceed the 16 entry budget" );
+      for ( const auto &name : names )
+      {
+        const Json::Value &preset = presets[name];
+        if ( !preset.isObject() )
+          problems.push_back( id + ": preset '" + name + "' must be an object" );
+        else if ( static_cast<int>( preset.getMemberNames().size() ) > 32 )
+          problems.push_back( id + ": preset '" + name + "' exceeds the 32 parameter budget" );
+      }
+    }
+  }
+  if ( recipe.isMember( "expected_artifacts" ) )
+  {
+    const Json::Value &artifacts = recipe["expected_artifacts"];
+    if ( !artifacts.isArray() )
+      problems.push_back( id + ": expected_artifacts must be an array" );
+    else if ( static_cast<int>( artifacts.size() ) > 32 )
+      problems.push_back( id + ": expected_artifacts exceed the 32 entry budget" );
+    else
+      for ( const auto &artifact : artifacts )
+        if ( !artifact.isObject() || !artifact.isMember( "name" ) || !artifact["name"].isString() )
+          problems.push_back( id + ": every expected_artifact needs a string name" );
+  }
+  if ( recipe.isMember( "quality_gates" ) )
+  {
+    const Json::Value &gates = recipe["quality_gates"];
+    if ( !gates.isArray() )
+      problems.push_back( id + ": quality_gates must be an array" );
+    else if ( static_cast<int>( gates.size() ) > 8 )
+      problems.push_back( id + ": quality_gates exceed the 8 entry budget" );
+    else
+      for ( const auto &gate : gates )
+        if ( !gate.isObject() || !gate.isMember( "id" ) || !gate["id"].isString() )
+          problems.push_back( id + ": every quality_gate needs a string id" );
+  }
+  return problems;
+}
+
+std::vector<std::string> RecipeCatalog::loadProblems() const
+{
+  return mLoadProblems;
 }
 
 Json::Value RecipeCatalog::listRecipes() const
@@ -107,6 +221,19 @@ Json::Value RecipeCatalog::listRecipes() const
     for ( const auto &slot : recipe.get( "slots", Json::Value( Json::arrayValue ) ) )
       slotNames.append( slot.get( "name", "" ).asString() );
     summary["slots"] = slotNames;
+    // Platform 6.0: decisionable-knowledge metadata in compact summaries so
+    // agents can match recipes without pulling full documents.
+    if ( recipe.isMember( "capabilities" ) && recipe["capabilities"].isArray() )
+      summary["capabilities"] = recipe["capabilities"];
+    if ( recipe.isMember( "applicability" ) && recipe["applicability"].isObject() &&
+         recipe["applicability"].isMember( "modalities" ) )
+      summary["modalities"] = recipe["applicability"]["modalities"];
+    else if ( recipe.isMember( "modality" ) && recipe["modality"].isString() )
+    {
+      Json::Value modalities( Json::arrayValue );
+      modalities.append( recipe["modality"] );
+      summary["modalities"] = modalities;
+    }
     summaries.append( summary );
   }
   return summaries;
@@ -267,9 +394,11 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
   //   * when_slot/when_param gate a step; a closed gate DROPS the step unless
   //     the step declares "params_when_skipped", in which case it runs with
   //     the skipped template,
-  //   * any closed gate anywhere also routes ungated downstream steps to
-  //     their params_when_skipped template (an upstream artifact the gate
-  //     would have produced no longer exists).
+  //   * degradation propagates along the declared step "inputs" wiring: a
+  //     step whose own gate is closed — or that depends (transitively) on a
+  //     dropped or skipped step — runs with its params_when_skipped template.
+  //     Parallel branches stay independent (issue #784): an unrelated closed
+  //     gate elsewhere in the recipe never flips this branch's templates.
   const Json::Value stepTemplates = recipe.get( "steps", Json::Value( Json::arrayValue ) );
   std::map<std::string, bool> paramGateOpen;
   for ( const auto &step : stepTemplates )
@@ -282,40 +411,98 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
                                        : ( binding.isString() && !binding.asString().empty() );
     paramGateOpen[gateKey] = open;
   }
-  bool anyGateClosed = false;
-  for ( const auto &step : stepTemplates )
+  const int stepCount = static_cast<int>( stepTemplates.size() );
+  struct StepGateState
   {
+      std::string id;
+      bool ownGateOpen = true;
+      bool hasSkipped = false;
+      bool usesSkipped = false;
+      bool dropped = false;
+      std::vector<int> upstream; ///< indices of steps this one declares as inputs
+  };
+  std::vector<StepGateState> states( stepCount );
+  std::map<std::string, int> idToIndex;
+  for ( int i = 0; i < stepCount; ++i )
+  {
+    const Json::Value &step = stepTemplates[i];
+    StepGateState &state = states[i];
+    state.id = step.get( "id", "" ).asString();
+    if ( !state.id.empty() )
+      idToIndex[state.id] = i;
     const std::string whenSlot = step.get( "when_slot", "" ).asString();
-    if ( !whenSlot.empty() && !slotPaths.isMember( whenSlot ) )
-      anyGateClosed = true;
     const std::string whenParam = step.get( "when_param", "" ).asString();
-    if ( !whenParam.empty() && !paramGateOpen[whenParam] )
-      anyGateClosed = true;
+    if ( !whenSlot.empty() )
+      state.ownGateOpen = slotPaths.isMember( whenSlot );
+    // Platform 6.0: conjunction gate — ALL named slots must be bound (the
+    // fusion branch of a multi-modal workflow).
+    const Json::Value whenSlots = step["when_slots"];
+    if ( whenSlots.isArray() )
+    {
+      for ( const auto &slotName : whenSlots )
+        if ( slotName.isString() && !slotPaths.isMember( slotName.asString() ) )
+          state.ownGateOpen = false;
+    }
+    if ( !whenParam.empty() )
+    {
+      const auto it = paramGateOpen.find( whenParam );
+      state.ownGateOpen = state.ownGateOpen && ( it != paramGateOpen.end() && it->second );
+    }
+    state.hasSkipped = step.isMember( "params_when_skipped" );
+    state.dropped = !state.ownGateOpen && !state.hasSkipped;
+  }
+  for ( int i = 0; i < stepCount; ++i )
+  {
+    const Json::Value &inputs = stepTemplates[i]["inputs"];
+    if ( !inputs.isArray() )
+      continue;
+    for ( const auto &conn : inputs )
+    {
+      const auto it = idToIndex.find( conn.get( "step", "" ).asString() );
+      if ( it != idToIndex.end() && it->second != i )
+        states[i].upstream.push_back( it->second );
+    }
+  }
+  // Degradation is monotone (usesSkipped only ever flips false→true), so the
+  // propagation fixpoint needs at most stepCount passes — bounded, and the
+  // document item cap bounds stepCount itself.
+  bool changed = true;
+  int pass = 0;
+  while ( changed && pass <= stepCount )
+  {
+    changed = false;
+    ++pass;
+    for ( StepGateState &state : states )
+    {
+      if ( state.usesSkipped || !state.hasSkipped )
+        continue;
+      const bool upstreamDegraded =
+        std::any_of( state.upstream.begin(), state.upstream.end(),
+                     [ &states ]( int j ) { return states[j].dropped || states[j].usesSkipped; } );
+      if ( !state.ownGateOpen || upstreamDegraded )
+      {
+        state.usesSkipped = true;
+        changed = true;
+      }
+    }
   }
 
   Json::Value planSteps( Json::arrayValue );
-  for ( const auto &step : stepTemplates )
+  std::set<std::string> emittedIds;
+  for ( int i = 0; i < stepCount; ++i )
   {
-    const std::string whenSlot = step.get( "when_slot", "" ).asString();
-    const std::string whenParam = step.get( "when_param", "" ).asString();
-    const bool hasSkipped = step.isMember( "params_when_skipped" );
-
-    bool ownGateOpen = true;
-    if ( !whenSlot.empty() )
-      ownGateOpen = slotPaths.isMember( whenSlot );
-    if ( !whenParam.empty() )
-      ownGateOpen = ownGateOpen && paramGateOpen[whenParam];
-
-    if ( !ownGateOpen && !hasSkipped )
+    const Json::Value &step = stepTemplates[i];
+    const StepGateState &state = states[i];
+    if ( state.dropped )
       continue; // gate closed and nothing to fall back to — step drops out
+    emittedIds.insert( step.get( "id", "" ).asString() );
 
     Json::Value planStep( Json::objectValue );
     planStep["id"] = step.get( "id", "" ).asString();
     planStep["operator_id"] = step.get( "operator_id", "" ).asString();
-    const bool useSkipped = !ownGateOpen || ( anyGateClosed && hasSkipped );
     const Json::Value &templateParams =
-      useSkipped ? step.get( "params_when_skipped", Json::Value( Json::objectValue ) )
-                 : step.get( "params", Json::Value( Json::objectValue ) );
+      state.usesSkipped ? step.get( "params_when_skipped", Json::Value( Json::objectValue ) )
+                        : step.get( "params", Json::Value( Json::objectValue ) );
     planStep["params"] =
       substituteParams( templateParams, slotPaths, outputPaths, paramBindings );
     // Declared dependencies gate execution order in the engine — carry them.
@@ -329,9 +516,6 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
   // Drop wiring that references steps the gates removed (the surviving step's
   // concrete params already carry its real inputs), and rewrite surviving
   // inputs whose upstream switched to concrete paths.
-  std::set<std::string> emittedIds;
-  for ( const Json::Value &emitted : planSteps )
-    emittedIds.insert( emitted.get( "id", "" ).asString() );
   for ( Json::Value &emitted : planSteps )
   {
     if ( !emitted.isMember( "inputs" ) )
@@ -356,7 +540,18 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
   plan["intent"] = recipe.get( "intent", "" ).asString();
   plan["inputs"] = planInputs;
   plan["steps"] = planSteps;
-  plan["outputs"] = recipe.get( "outputs", Json::Value( Json::arrayValue ) );
+  // Declared outputs whose producing step was gate-dropped must not poison
+  // the plan (agent_plan validation rejects from_step references to missing
+  // steps). Outputs without from_step always survive.
+  Json::Value survivingOutputs( Json::arrayValue );
+  for ( const auto &output : recipe.get( "outputs", Json::Value( Json::arrayValue ) ) )
+  {
+    const std::string fromStep = output.get( "from_step", "" ).asString();
+    if ( !fromStep.empty() && !emittedIds.count( fromStep ) )
+      continue;
+    survivingOutputs.append( output );
+  }
+  plan["outputs"] = survivingOutputs;
   plan["verification"] = recipe.get( "verification", Json::Value( Json::objectValue ) );
   if ( recipe.isMember( "map_output" ) )
   {
@@ -364,6 +559,13 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
     if ( mapOutput.isObject() && bindings.isMember( "layout_name" ) )
       mapOutput["layout_name"] = bindings["layout_name"];
     plan["map_output"] = mapOutput;
+    // The map output carries the same hazard as declared outputs: a
+    // from_step pointing at a gate-dropped step would only surface as a
+    // confusing map-compile failure after execution. Drop the map_output
+    // entirely when its step is gone (an empty from_step survives).
+    const std::string mapFromStep = mapOutput.get( "from_step", "" ).asString();
+    if ( !mapFromStep.empty() && !emittedIds.count( mapFromStep ) )
+      plan.removeMember( "map_output" );
   }
   return plan;
 }

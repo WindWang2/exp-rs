@@ -10,6 +10,9 @@
 
 #include <qgsrasterlayer.h>
 
+class QColor;
+class QThreadPool;
+
 typedef void *GDALDatasetH;
 
 /**
@@ -24,6 +27,9 @@ class HistogramWidget : public QWidget
     Q_OBJECT
 
 public:
+    /// Dedicated, bounded thread pool for raster analysis (#797).
+    static QThreadPool *analysisThreadPool();
+
     enum class ChannelMode
     {
         MasterRGB,
@@ -147,4 +153,9 @@ private:
 
     ActiveHandle m_activeHandle = ActiveHandle::None;
     bool m_isDragging = false;
+
+    // #797: scan-pool generation of the in-flight request (canceled when the
+    // dataset/cache is released so the bounded pool stops reading GDAL
+    // sources for a widget that is gone).
+    quint64 m_scanGeneration = 0;
 };

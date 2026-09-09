@@ -1,6 +1,7 @@
 {
  "id": "report-multipage-a4p",
  "version": 1,
+ "facets": {"tasks": [], "medium": "report", "purpose": "analysis"},
  "description": "Portrait three-page report variant for document-style deliverables (cover, map, statistics).",
  "page": {
   "width_mm": 210,

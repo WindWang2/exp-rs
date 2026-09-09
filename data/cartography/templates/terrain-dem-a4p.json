@@ -1,6 +1,7 @@
 {
   "id": "terrain-dem-a4p",
   "version": 1,
+  "facets": {"tasks": ["terrain"], "medium": "a4", "purpose": "analysis"},
   "extends": "terrain-dem-a4l",
   "description": "Terrain DEM product with elevation colorbar and furniture.",
   "page": {

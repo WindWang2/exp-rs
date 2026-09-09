@@ -31,7 +31,9 @@
 //                   when c is estimated from the same regression, so this
 //                   one kernel serves both (declared in the operator docs).
 //   * Minnaert    — L·(cosθz/cosi)^k, k from the log-log OLS
-//                   ln L = a − k·ln cos_i over (cos_i > 0, L > 0) pixels.
+//                   ln L = a + k·ln cos_i over (cos_i > 0, L > 0) pixels
+//                   (#773: the slope IS the Minnaert exponent — physically
+//                   valid scenes brighten with illumination, so k > 0).
 //                   Pixels outside that domain are NaN.
 //
 // All fits accumulate in double over the valid pairs (finite L, finite
@@ -93,19 +95,21 @@ class OlsRegression
     double m_sx = 0.0, m_sy = 0.0, m_sxx = 0.0, m_sxy = 0.0;
 };
 
-/// log-log regression ln(y) = a − k·ln(x) for the Minnaert exponent
+/// log-log regression ln(y) = a + k·ln(x) for the Minnaert exponent
 /// (valid domain x > 0, y > 0 enforced here — add() refuses other pairs).
+/// Milestone C consolidation: this is an OLSRegression over the
+/// log-transformed pairs — the sums live in ONE owner now (#773 made the
+/// k = slope semantics explicit; the duplicated accumulator could drift).
 class MinnaertRegression
 {
   public:
     void add( double cosIllumination, double value );
-    size_t count() const { return m_count; }
+    size_t count() const { return m_logFit.count(); }
     /// @return k > 0 when count >= 2 and the fit is usable, else false.
     bool fit( double *k ) const;
 
   private:
-    size_t m_count = 0;
-    double m_sx = 0.0, m_sy = 0.0, m_sxx = 0.0, m_sxy = 0.0;
+    OlsRegression m_logFit;
 };
 
 /// Fitted correction parameters for one band.

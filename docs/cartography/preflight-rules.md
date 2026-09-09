@@ -75,3 +75,18 @@ are advisory: they keep `passed` true when nothing repairable remains, so
 the agent decides — the loop never thrashes on findings it cannot fix.
 
 Platform 5.0: `MAP_OVERLAP` compares only items on the same page; multi-page documents are no longer flagged for cross-page geometry.
+
+## Platform 6.0 additions
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `MAP_STYLE_REF_UNKNOWN` | warning | item `style_ref` does not resolve in the style registry |
+| `MAP_STYLE_DATA_MISMATCH` | warning | referenced style contradicts the item binding (kind / modality / band count / value domain) |
+| `MAP_UNCERTAINTY_NOTE_MISSING` | warning | uncertainty/probability-styled document carries no uncertainty note |
+
+The composition solver behind `MAP_CONSTRAINT_UNSATISFIABLE` is now a
+bounded constraint graph solver: relaxation runs at most 24 passes, converges
+to a fixpoint that is independent of constraint declaration order for
+consistent systems, and reports cycles / non-convergence with the
+constraint ids involved instead of moving items silently. The composition
+report adds `constraints_total`, `passes` and `converged`.

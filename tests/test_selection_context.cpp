@@ -4,12 +4,19 @@
 #include "app/workbench/selection_context.h"
 #include "app/workbench/workbench_host.h"
 
-#include <QCoreApplication>
+#include <QApplication>
 #include <QSignalSpy>
+#include <QItemSelectionModel>
 #include <QTest>
+#include <qgsapplication.h>
 #include <qgsmaplayer.h>
+#include <qgsmapcanvas.h>
+#include <qgsproject.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
+#include <qgslayertree.h>
+#include <qgslayertreemodel.h>
+#include <qgslayertreeview.h>
 
 namespace
 {
@@ -18,12 +25,17 @@ int fake_argc = 1;
 char fake_argv0[] = "test_selection_context";
 char *fake_argv[] = { fake_argv0, nullptr };
 
-QCoreApplication *ensureApp()
+QApplication *ensureApp()
 {
-  static QCoreApplication *app = nullptr;
+  static QgsApplication *app = nullptr;
   if ( !app && !QCoreApplication::instance() )
-    app = new QCoreApplication( fake_argc, fake_argv );
-  return QCoreApplication::instance();
+  {
+    // QgsApplication (QApplication subclass, GUI off): the lifecycle cases
+    // below need real providers (memory layers) and widget-based tree views.
+    app = new QgsApplication( fake_argc, fake_argv, false );
+    QgsApplication::initQgis();
+  }
+  return app;
 }
 
 namespace ContextRules = sicnu::app::ContextRules;
@@ -169,4 +181,189 @@ TEST_CASE( "SelectionContext: workbench id flows into the snapshot",
   sicnu::app::SelectionContext ctx;
   ctx.attachWorkbenchHost( &host );
   REQUIRE( ctx.snapshot().workbenchId == "classify" );
+}
+
+// ── Workbench 6.0 Milestone A: selection lifetime hazards (#778) ───────────
+
+TEST_CASE( "SelectionContext: layer removal purges the projection before the object dies",
+           "[selection_context][lifecycle][ux6][contract]" )
+{
+  ensureApp();
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  // Declaration order matters: the model must outlive the view (reverse
+  // destruction), or ~QgsLayerTreeView touches the half-destructed model.
+  QgsLayerTreeModel model( project->layerTreeRoot() );
+  QgsLayerTreeView tree;
+  tree.setLayerTreeModel( &model );
+  // The shell's initLayerTree() sets BOTH the layer-tree model and the
+  // QTreeView model — without the latter selectionModel() is null.
+  tree.setModel( &model );
+
+  sicnu::app::SelectionContext ctx;
+  ctx.attachCanvas( &canvas );
+  ctx.attachLayerTree( &tree );
+
+  QgsVectorLayer *victim = new QgsVectorLayer( QStringLiteral( "Point?crs=EPSG:4326" ),
+                                               QStringLiteral( "victim" ),
+                                               QStringLiteral( "memory" ) );
+  REQUIRE( victim->isValid() );
+  project->addMapLayer( victim, false );
+  project->layerTreeRoot()->addLayer( victim );
+  canvas.setCurrentLayer( victim );
+  if ( QgsLayerTreeLayer *node = project->layerTreeRoot()->findLayer( victim->id() ) )
+  {
+    const QModelIndex idx = model.node2index( node );
+    tree.selectionModel()->select( idx, QItemSelectionModel::Select | QItemSelectionModel::Rows );
+  }
+  ctx.refreshNow();
+  REQUIRE( ctx.snapshot().activeLayer == victim );
+  REQUIRE( ctx.snapshot().selectedLayers.contains( victim ) );
+
+  // QgsMapLayerStore fires layerWillBeRemoved BEFORE destroying the object —
+  // the context must purge the doomed pointer from every projection and
+  // re-broadcast so consumers never hold it across the deletion (#778).
+  project->removeMapLayer( victim->id() );
+
+  const auto after = ctx.snapshot();
+  REQUIRE( after.activeLayer == nullptr );
+  REQUIRE( after.selectedLayers.isEmpty() );
+  // The purged selection must also be observable through the rules.
+  REQUIRE_FALSE( sicnu::app::ContextRules::layerSelected( after ) );
+
+  project->clear();
+}
+
+TEST_CASE( "SelectionContext: layer removal immediately evicts layer from cached snapshot (#778)",
+           "[selection_context][behavior][contract]" )
+{
+  ensureApp();
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsVectorLayer *layer = new QgsVectorLayer( QStringLiteral( "Point?crs=EPSG:4326" ),
+                                              QStringLiteral( "test_layer" ), QStringLiteral( "memory" ) );
+  project->addMapLayer( layer );
+
+  sicnu::app::SelectionContext ctx;
+  QgsMapCanvas canvas;
+  ctx.attachCanvas( &canvas );
+  canvas.setCurrentLayer( layer );
+
+  const auto snap1 = ctx.snapshot();
+  REQUIRE( snap1.activeLayer == layer );
+
+  // Now remove layer from project. layersWillBeRemoved signal fires!
+  project->removeMapLayer( layer->id() );
+
+  // Snapshot must NOT return the deleted layer, even without waiting 150ms!
+  const auto snap2 = ctx.snapshot();
+  REQUIRE( snap2.activeLayer == nullptr );
+  project->clear();
+}
+
+TEST_CASE( "SelectionContext: canvas destruction leaves the context safe to query",
+           "[selection_context][lifecycle][ux6][contract]" )
+{
+  ensureApp();
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  auto *canvas = new QgsMapCanvas();
+  sicnu::app::SelectionContext ctx;
+  ctx.attachCanvas( canvas );
+  ctx.refreshNow();
+  REQUIRE( ctx.snapshot().activeLayer == nullptr );
+
+  // The context tracks its sources through QPointer guards — destroying a
+  // source must not leave a dangling raw pointer behind (#778).
+  delete canvas;
+  const auto snap = ctx.snapshot();
+  REQUIRE( snap.activeLayer == nullptr );
+  REQUIRE( snap.layerCount == 0 );
+
+  project->clear();
+}
+
+// ── Workbench 6.0 Milestone E: prerequisite facts + deterministic reasons ──
+
+TEST_CASE( "ContextRules: prerequisite facts project the snapshot deterministically",
+           "[selection_context][ux6]" )
+{
+  ensureApp();
+  QgsRasterLayer raster( QStringLiteral( "/tmp/dem.tif" ), QStringLiteral( "dem" ) );
+  const auto snap = snapshotWith( &raster );
+
+  const auto facts = ContextRules::prerequisiteFacts( snap );
+  CHECK( facts.hasLayerSelection );
+  CHECK( facts.hasRaster );
+  CHECK_FALSE( facts.hasVector );
+  CHECK_FALSE( facts.hasSar );
+  CHECK_FALSE( facts.editing );
+  CHECK_FALSE( facts.hasGovernanceAsset );
+
+  const auto none = ContextRules::prerequisiteFacts( snapshotWith( nullptr ) );
+  CHECK_FALSE( none.hasLayerSelection );
+  CHECK( none.workbenchId.isEmpty() );
+}
+
+TEST_CASE( "ContextRules: rs.* commands carry a deterministic raster reason",
+           "[selection_context][ux6]" )
+{
+  ensureApp();
+  // Milestone E: every prefix family with an availability predicate has a
+  // reason case — rs.* used to fall through to an empty explanation.
+  const auto none = snapshotWith( nullptr );
+  REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "rs.bandMath" ) )
+               == QObject::tr( "需要选中栅格图层" ) );
+  REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "rs.pca" ) )
+               == QObject::tr( "需要选中栅格图层" ) );
+
+  QgsRasterLayer raster( QStringLiteral( "/tmp/dem.tif" ), QStringLiteral( "dem" ) );
+  const auto rasterSnap = snapshotWith( &raster );
+  REQUIRE( ContextRules::unavailabilityReason( rasterSnap, QStringLiteral( "rs.bandMath" ) ).isEmpty() );
+
+  // Unrelated families keep their reasons.
+  REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "layer.properties" ) )
+               == QObject::tr( "需要选中图层" ) );
+  REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "sar.calibrate" ) )
+               == QObject::tr( "需要选中 SAR 数据" ) );
+}
+
+// ── Review L #1: edit commands carry reasons for every disabled state ──────
+
+TEST_CASE( "ContextRules: layer edit commands explain every disabled state",
+           "[selection_context][ux6][review-l]" )
+{
+  ensureApp();
+  const auto none = snapshotWith( nullptr );
+
+  REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "layer.toggleEditing" ) )
+               == QObject::tr( "需要选中矢量图层" ) );
+  REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "layer.saveEdits" ) )
+               == QObject::tr( "需要选中矢量图层" ) );
+  REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "layer.attributeTable" ) )
+               == QObject::tr( "需要选中矢量图层" ) );
+
+  QgsRasterLayer raster( QStringLiteral( "/tmp/dem.tif" ), QStringLiteral( "dem" ) );
+  const auto rasterSnap = snapshotWith( &raster );
+  REQUIRE( ContextRules::unavailabilityReason( rasterSnap, QStringLiteral( "layer.toggleEditing" ) )
+               == QObject::tr( "需要选中矢量图层" ) );
+  REQUIRE( ContextRules::unavailabilityReason( rasterSnap, QStringLiteral( "layer.attributeTable" ) )
+               == QObject::tr( "需要选中矢量图层" ) );
+
+  QgsVectorLayer readOnly( QStringLiteral( "Point?crs=EPSG:4326" ),
+                           QStringLiteral( "ro" ), QStringLiteral( "memory" ) );
+  readOnly.setReadOnly( true );
+  const auto roSnap = snapshotWith( &readOnly );
+  REQUIRE( ContextRules::unavailabilityReason( roSnap, QStringLiteral( "layer.toggleEditing" ) )
+               == QObject::tr( "当前图层不可编辑" ) );
+
+  QgsVectorLayer editable( QStringLiteral( "Point?crs=EPSG:4326" ),
+                           QStringLiteral( "rw" ), QStringLiteral( "memory" ) );
+  const auto rwSnap = snapshotWith( &editable );
+  REQUIRE( ContextRules::unavailabilityReason( rwSnap, QStringLiteral( "layer.saveEdits" ) )
+               == QObject::tr( "请先开启编辑会话" ) );
 }

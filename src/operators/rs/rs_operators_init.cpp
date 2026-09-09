@@ -41,6 +41,7 @@
 #include "rs_sar_terrain_masks_operator.h"
 #include "rs_temporal_monitor_operator.h"
 #include "rs_terrain_flow_operator.h"
+#include "rs_grid_operators.h"
 #include "rs_raster_spatial_operators.h"
 #include "rs_terrain_analysis_operator.h"
 #include "rs_pca_operator.h"
@@ -147,6 +148,8 @@ REGISTER_RS_OPERATOR(RsSarDualPolOperator, "rs:sar_dualpol_features")
 REGISTER_RS_OPERATOR(RsSarTerrainMasksOperator, "rs:sar_terrain_masks")
 REGISTER_RS_OPERATOR(RsTemporalMonitorOperator, "rs:temporal_monitor")
 REGISTER_RS_OPERATOR(RsTerrainFlowOperator, "rs:terrain_flow")
+REGISTER_RS_OPERATOR(RsResampleOperator, "rs:resample")
+REGISTER_RS_OPERATOR(RsAlignOperator, "rs:align")
 REGISTER_RS_OPERATOR(RsMorphologyOperator, "rs:morphology")
 REGISTER_RS_OPERATOR(RsConnectedComponentsOperator, "rs:connected_components")
 REGISTER_RS_OPERATOR(RsFillHolesOperator, "rs:fill_holes")
@@ -284,6 +287,8 @@ void initBuiltinRsOperators() {
   add( "rs:sar_terrain_masks", [] { return std::make_unique<RsSarTerrainMasksOperator>(); } );
   add( "rs:temporal_monitor", [] { return std::make_unique<RsTemporalMonitorOperator>(); } );
   add( "rs:terrain_flow", [] { return std::make_unique<RsTerrainFlowOperator>(); } );
+  add( "rs:resample", [] { return std::make_unique<RsResampleOperator>(); } );
+  add( "rs:align", [] { return std::make_unique<RsAlignOperator>(); } );
   add( "rs:morphology", [] { return std::make_unique<RsMorphologyOperator>(); } );
   add( "rs:connected_components", [] { return std::make_unique<RsConnectedComponentsOperator>(); } );
   add( "rs:fill_holes", [] { return std::make_unique<RsFillHolesOperator>(); } );

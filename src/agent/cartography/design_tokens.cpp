@@ -1,6 +1,8 @@
 // src/agent/cartography/design_tokens.cpp
 #include "design_tokens.h"
 
+#include "style_spec.h"
+
 #include <QColor>
 #include <QDir>
 #include <QFile>
@@ -51,6 +53,14 @@ bool parseJsonFile( const QString &path, Json::Value *out, QString *error )
 bool isHexColor( const std::string &value )
 {
   return QColor::isValidColor( QString::fromStdString( value ) );
+}
+
+/// Platform 6.0 (#815): a color token may be a final hex value or a token
+/// reference ("token:colors.base") participating in an alias chain; the
+/// chain itself is resolved (with cycle detection) in resolveTokenSet.
+bool isColorTokenValue( const std::string &value )
+{
+  return isHexColor( value ) || isTokenReference( value );
 }
 
 void checkStyleEntry( const std::string &name, const Json::Value &style,
@@ -125,8 +135,8 @@ std::vector<std::string> validateTokenSet( const Json::Value &doc )
     for ( const auto &key : doc["colors"].getMemberNames() )
     {
       const Json::Value &value = doc["colors"][key];
-      if ( !value.isString() || !isHexColor( value.asString() ) )
-        problems.push_back( id + ": colors." + key + " must be a hex color string" );
+      if ( !value.isString() || !isColorTokenValue( value.asString() ) )
+        problems.push_back( id + ": colors." + key + " must be a hex color or token reference string" );
     }
   }
   if ( doc.isMember( "palettes" ) && doc["palettes"].isObject() )
@@ -140,8 +150,8 @@ std::vector<std::string> validateTokenSet( const Json::Value &doc )
         continue;
       }
       for ( const auto &color : value )
-        if ( !color.isString() || !isHexColor( color.asString() ) )
-          problems.push_back( id + ": palettes." + key + " entries must be hex colors" );
+        if ( !color.isString() || !isColorTokenValue( color.asString() ) )
+          problems.push_back( id + ": palettes." + key + " entries must be hex colors or token references" );
     }
   }
   if ( doc.isMember( "variants" ) )
@@ -293,6 +303,35 @@ Json::Value mergeTokenValues( const Json::Value &base, const Json::Value &overla
   return overlay;
 }
 
+/// Issue #815: token-set values may alias other token paths ("token:…").
+/// Deep-resolves every reference in the merged document against `tokens` so
+/// all consumers (compiler, style application, charts) see final values.
+/// Cycles/over-deep chains are reported through `problems`; the offending
+/// reference stays verbatim.
+Json::Value deepResolveTokenDoc( const Json::Value &node, const Json::Value &tokens,
+                                 std::vector<std::string> &problems )
+{
+  if ( node.isString() )
+    return isTokenReference( node.asString() )
+             ? resolveTokenReferenceChain( tokens, node, problems )
+             : node;
+  if ( node.isObject() )
+  {
+    Json::Value out( Json::objectValue );
+    for ( const auto &key : node.getMemberNames() )
+      out[key] = deepResolveTokenDoc( node[key], tokens, problems );
+    return out;
+  }
+  if ( node.isArray() )
+  {
+    Json::Value out( Json::arrayValue );
+    for ( const auto &entry : node )
+      out.append( deepResolveTokenDoc( entry, tokens, problems ) );
+    return out;
+  }
+  return node;
+}
+
 Json::Value resolveTokenSet( const Json::Value &specOrStyle )
 {
   const Json::Value style = specOrStyle.isMember( "style" ) && specOrStyle["style"].isObject()
@@ -330,6 +369,19 @@ Json::Value resolveTokenSet( const Json::Value &specOrStyle )
 
   if ( style.isMember( "overrides" ) && style["overrides"].isObject() )
     tokens = mergeTokenValues( tokens, style["overrides"] );
+
+  // Platform 6.0 (#815): materialize intra-set alias chains once, here, so
+  // downstream tokenValue()/tokenPalette() lookups never observe a raw
+  // "token:…" string. Problems surface in resolved.token_problems.
+  std::vector<std::string> tokenProblems;
+  tokens = deepResolveTokenDoc( tokens, tokens, tokenProblems );
+  if ( !tokenProblems.empty() )
+  {
+    Json::Value problemArray( Json::arrayValue );
+    for ( const auto &problem : tokenProblems )
+      problemArray.append( problem );
+    tokens["resolved"]["token_problems"] = problemArray;
+  }
 
   tokens["resolved"]["token_set"] = setId;
   tokens["resolved"]["medium"] = medium;

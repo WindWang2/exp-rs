@@ -36,7 +36,10 @@ namespace sicnu::sar
 struct TerrainCorrectionOptions
 {
   double incidenceDeg = 30.0;   ///< scene incidence angle θ0 (near-range center)
-  double headingDeg = 0.0;      ///< platform heading / look azimuth φ (degrees)
+  double lookAzimuthDeg = 0.0;  ///< antenna look azimuth φ, clockwise from north
+                                ///< (#785: the geometry consumes THIS, never the
+                                ///< heading; derive it with lookAzimuthFromHeading)
+  double headingDeg = 0.0;      ///< platform flight heading (metadata stamp only)
   double flattenCosThetaMax = 0.0871557; ///< cos(85°): θi beyond this → invalid
   bool applyFlattening = true;  ///< gamma0 = sigma0 · cosθ0/cosθi
   bool applyShadowMask = true;  ///< write the validity mask band
@@ -58,9 +61,14 @@ SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,
                            double cellSizeMeters, double demUnitScale );
 
 /// Local incidence angle θi (degrees) from slope/aspect and geometry.
+/// @a fromAzimuthDeg is the azimuth the illumination comes FROM — for radar
+/// that is the antenna azimuth, i.e. the beam-travel look azimuth + 180°
+/// (a facet facing the radar gives θi = θ0 − α; #785 review: the parameter
+/// was previously, variously, fed the flight heading or the beam-travel
+/// azimuth, mirroring every sloped facet).
 /// Returns a value in [0°, 180°]; θi > 90° means the facet faces away.
 double localIncidenceAngle( double slopeDeg, double aspectDeg, double incidenceDeg,
-                            double headingDeg );
+                            double fromAzimuthDeg );
 
 /// Whether the facet is invalid (shadow or layover) given θi.
 bool isLayoverOrShadow( double incidenceLocalDeg, double cosThetaMax );

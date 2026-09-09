@@ -30,10 +30,17 @@
 
 namespace sicnu::agent::cartography {
 
+/// Platform 6.0 (Milestone C): maximum number of role-qualified children a
+/// composite component may declare. Bounded on purpose — components model
+/// cartographic furniture blocks (legend title + classes + ramp + NoData +
+/// footer), not unrestricted UI trees. Children do not nest.
+inline constexpr int kMaxComponentChildren = 16;
+
 /// Descriptor-level validation shared by the loader and registerComponent.
 /// Checks schema v2: id, category, version, variants, defaults,
-/// data_bindings, validation, compatibility, layout_constraints shapes.
-/// Empty returned vector = valid.
+/// data_bindings, validation, compatibility, layout_constraints shapes;
+/// Platform 6.0: bounded `children[]` composite grammar (depth 1, unique
+/// roles, ≤ kMaxComponentChildren). Empty returned vector = valid.
 std::vector<std::string> validateComponentDescriptor( const Json::Value &descriptor );
 
 /// Resolves component `id` with an optional `variant` applied: the returned
@@ -45,13 +52,62 @@ Json::Value resolveComponent( const QString &id, const QString &variant = QStrin
 /// Resolves a MapSpec item's `source_component` reference (string id or
 /// {id, variant}) and deep-merges the component's `defaults` and variant
 /// parameters *under* the item's explicit fields (ADR 0130 precedence:
-/// item > variant > component defaults). Unknown references leave the item
-/// untouched and set *error.
+/// item > variant > component defaults). Platform 6.0: composite component
+/// `children[]` are materialized under the item (explicit per-role item
+/// children win; missing roles are inherited). Unknown references leave the
+/// item untouched and set *error.
 bool applyComponentDefaults( Json::Value &item, QString *error = nullptr );
 
 /// The MapSpec collection a component category instantiates into.
 /// Empty string for unknown categories.
 std::string collectionForCategory( const std::string &category );
+
+//
+// Platform 6.0 (Milestone D): semantic template taxonomy. Templates declare
+// orthogonal facets instead of proliferating near-duplicate files:
+//   facets: { tasks: [...], medium: "...", purpose: "..." }
+// Closed vocabularies — search and matching fail loudly on typos rather
+// than silently missing.
+//
+
+/// True when `task` is a known task facet (classification, change, sar,
+/// vegetation, agriculture, water, disaster, terrain, time-series,
+/// accuracy, publication).
+bool isTemplateTask( const std::string &task );
+/// True when `medium` is a known medium facet (screen, a4, a3, a0, report,
+/// atlas).
+bool isTemplateMedium( const std::string &medium );
+/// True when `purpose` is a known purpose facet (exploration, analysis,
+/// operational, scientific, presentation).
+bool isTemplatePurpose( const std::string &purpose );
+
+/// Validates a template descriptor's `facets` and `variants` surfaces
+/// (Platform 6.0). Appends problems; empty means valid.
+std::vector<std::string> validateTemplateFacets( const Json::Value &descriptor );
+
+/// Faceted template query (Platform 6.0). Empty strings are ignored;
+/// `page`/`pageSize` clamp to bounded values. Deterministic: hits are
+/// id-ordered; every hit carries `match: {score, reasons[]}` so callers can
+/// explain why a template matched (and why others did not).
+struct TemplateQuery
+{
+    std::string task;      ///< exact match over facets.tasks
+    std::string medium;    ///< exact facets.medium
+    std::string purpose;   ///< exact facets.purpose
+    std::string keyword;   ///< substring over id + description
+    int page = 0;
+    int pageSize = 20;     ///< clamped to [1, 50]
+};
+
+/// Faceted search over `templates` (an array of resolved descriptors).
+/// Returns {items: [{...compact summary..., match}], total, page, page_size,
+/// next_page|null}. Items without declared facets still match keyword
+/// queries (legacy documents), ranked last.
+Json::Value searchTemplates( const Json::Value &templates, const TemplateQuery &query );
+
+/// Compact, bounded template summary for search results (token budget):
+/// {id, description(truncated), page, medium, purpose, tasks, slot_roles}.
+Json::Value compactTemplateSummary( const Json::Value &descriptor );
 
 class ComponentRegistry
 {
@@ -102,6 +158,10 @@ class TemplateRegistry
 
     Json::Value templates() const;
     Json::Value find( const QString &id ) const;
+
+    /// Faceted search over the loaded catalog (Platform 6.0) — see
+    /// searchTemplates(). Deterministic and bounded.
+    Json::Value search( const TemplateQuery &query ) const;
 
     bool registerTemplate( Json::Value descriptor, QString *error = nullptr );
 

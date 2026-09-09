@@ -1,6 +1,7 @@
 {
  "id": "report-scientific-a3l",
  "version": 1,
+ "facets": {"tasks": [], "medium": "a3", "purpose": "scientific"},
  "description": "A3 landscape scientific paper page: large map panel with figure caption, provenance and uncertainty note for journal submissions.",
  "page": {
   "width_mm": 420,

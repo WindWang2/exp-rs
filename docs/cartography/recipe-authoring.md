@@ -78,3 +78,32 @@ missing windows block the plan. Pair intents (`change`, `sar_change`, `dnbr`,
    backs a solution, `solution:validate` resolves every reference.
 5. Deterministic map_output renderer hint consistent with the StyleSpec id
    used by the consuming solution.
+
+## Platform 6.0 — decisionable workflow knowledge
+
+Recipes may carry decisionable knowledge metadata (all optional, validated
+by `RecipeCatalog::validateRecipeMetadata`, bounded budgets):
+
+```jsonc
+"capabilities": ["water-detection", "flood-mapping"],
+"applicability": { "modalities": ["optical", "sar"],
+                   "resolution_range": { "min_m": 3, "max_m": 30 } },
+"presets": { "sentinel-2": { "index": "NDWI", "statisticalK": 1.5 } },
+"limitations": ["Optical branch degrades under cloud cover"],
+"expected_artifacts": [ { "name": "water_extent", "kind": "raster" } ],
+"quality_gates": [ { "id": "uncertainty-note", "description": "…" } ]
+```
+
+Gates gained a conjunction form and branch-local degradation:
+
+- `when_slots: ["primary", "sar"]` — the step runs only when ALL named
+  slots are bound (fusion branches).
+- Degradation (`params_when_skipped`) propagates along the declared step
+  `inputs` wiring only: an unrelated closed gate never flips a parallel
+  branch (#784).
+- Declared outputs whose `from_step` was gate-dropped are filtered from the
+  plan so the AgentPlan stays structurally valid.
+
+See `data/agent/recipes/flood-mapping.json` for the full example: optical
+branch (NDWI), SAR branch (calibrated backscatter), fusion branch
+(`when_slots`), and capability/preset/limitation metadata.

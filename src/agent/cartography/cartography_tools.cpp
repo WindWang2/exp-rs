@@ -148,8 +148,10 @@ class ListTemplatesTool final : public SpatialTool
     std::string description() const override
     {
       return "Paged catalog of map templates (classification, change-detection, heatmap, "
-             "choropleth, time-series, scientific-publication …). Input: {task?, limit?, offset?} "
-             "with task filtering by suitable_tasks.";
+             "choropleth, time-series, scientific-publication …). Input: {task?, medium?, "
+             "purpose?, keyword?, limit?, offset?}. task/medium/purpose are exact facet "
+             "matches (Platform 6.0 taxonomy); keyword is a substring over id/description. "
+             "Matches carry a compact summary plus match.reasons; results are deterministic.";
     }
     std::vector<std::string> tags() const override { return { "cartography", "templates" }; }
     Json::Value inputSchema() const override
@@ -159,8 +161,22 @@ class ListTemplatesTool final : public SpatialTool
       Json::Value props( Json::objectValue );
       Json::Value task( Json::objectValue );
       task["type"] = "string";
-      task["description"] = "Filter by suitable task (substring)";
+      task["description"] =
+        "Task facet (classification|change|sar|vegetation|agriculture|water|disaster|terrain|"
+        "time-series|accuracy|publication) or a suitable_tasks substring";
       props["task"] = task;
+      Json::Value medium( Json::objectValue );
+      medium["type"] = "string";
+      medium["description"] = "Medium facet: screen|a4|a3|a0|report|atlas";
+      props["medium"] = medium;
+      Json::Value purpose( Json::objectValue );
+      purpose["type"] = "string";
+      purpose["description"] = "Purpose facet: exploration|analysis|operational|scientific|presentation";
+      props["purpose"] = purpose;
+      Json::Value keyword( Json::objectValue );
+      keyword["type"] = "string";
+      keyword["description"] = "Substring over id and description";
+      props["keyword"] = keyword;
       schema["properties"] = props;
       return schema;
     }
@@ -173,9 +189,40 @@ class ListTemplatesTool final : public SpatialTool
     }
     SpatialToolResult execute( const Json::Value &input ) override
     {
-      const std::string task = input.isMember( "task" ) && input["task"].isString()
-                                 ? input["task"].asString()
-                                 : "";
+      const auto stringParam = [ &input ]( const char *name ) {
+        return input.isMember( name ) && input[name].isString() ? input[name].asString() : "";
+      };
+      const std::string task = stringParam( "task" );
+      const std::string medium = stringParam( "medium" );
+      const std::string purpose = stringParam( "purpose" );
+      const std::string keyword = stringParam( "keyword" );
+      const int limit = input.isMember( "limit" ) && input["limit"].isInt() ? input["limit"].asInt() : 20;
+      const int offset = input.isMember( "offset" ) && input["offset"].isInt() ? input["offset"].asInt() : 0;
+
+      // Platform 6.0: any facet/criterion beyond the legacy task substring
+      // routes through the explainable faceted search (compact summaries +
+      // match reasons keep responses inside the token budget).
+      if ( !medium.empty() || !purpose.empty() || !keyword.empty() )
+      {
+        TemplateQuery query;
+        query.task = task;
+        query.medium = medium;
+        query.purpose = purpose;
+        query.keyword = keyword;
+        const int pageSize = std::clamp( limit, 1, 50 );
+        query.page = offset / pageSize;
+        query.pageSize = pageSize;
+        Json::Value out = TemplateRegistry::instance().search( query );
+        // Keep the legacy paginate() sentinel (-1) so clients switching
+        // between the task-only and faceted paths see one terminator, and
+        // keep offsets page-aligned (offset is the absolute item cursor).
+        const int begin = query.page * pageSize;
+        const int total = out["total"].asInt();
+        out["next_offset"] = ( begin + pageSize < total ) ? Json::Value( begin + pageSize )
+                                                          : Json::Value( -1 );
+        return SpatialToolResult::ok( out );
+      }
+
       Json::Value all( Json::arrayValue );
       Json::Value templates = TemplateRegistry::instance().templates();
       for ( const auto &tmpl : templates )
@@ -191,11 +238,16 @@ class ListTemplatesTool final : public SpatialTool
           for ( const auto &candidate : tmpl["suitable_tasks"] )
             matches = matches || candidate.asString().find( task ) != std::string::npos;
         }
+        // Facets count as suitable tasks too (substring, legacy-compatible).
+        if ( !matches && tmpl.isMember( "facets" ) && tmpl["facets"].isObject() &&
+             tmpl["facets"].isMember( "tasks" ) && tmpl["facets"]["tasks"].isArray() )
+        {
+          for ( const auto &candidate : tmpl["facets"]["tasks"] )
+            matches = matches || candidate.asString().find( task ) != std::string::npos;
+        }
         if ( matches )
           all.append( tmpl );
       }
-      const int limit = input.isMember( "limit" ) && input["limit"].isInt() ? input["limit"].asInt() : 20;
-      const int offset = input.isMember( "offset" ) && input["offset"].isInt() ? input["offset"].asInt() : 0;
       Json::Value page = paginate( all, offset, std::clamp( limit, 1, 50 ) );
       Json::Value out( Json::objectValue );
       out["items"] = page["items"];

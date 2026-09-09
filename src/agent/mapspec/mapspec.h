@@ -23,6 +23,7 @@
 
 #include <json/json.h>
 #include "../sicnu_agent_export.h"
+
 #include <string>
 #include <vector>
 
@@ -44,10 +45,18 @@ namespace sicnu::agent::mapspec {
 //       v3 is a strict superset of v2: every new field is optional.
 inline constexpr int kMapSpecCurrentVersion = 3;
 
-/// Ordered item collection names of a MapSpec document. Exported: the
-/// library is SHARED and tests consume these constants directly.
-SICNU_AGENT_EXPORT extern const char *const kCollections[];
-SICNU_AGENT_EXPORT extern const int kCollectionCount;
+/// Ordered item collection names of a MapSpec document.
+/// (inline constexpr: Windows DLL builds cannot auto-export extern data
+/// symbols from this shared library — the previous extern pair broke every
+/// fresh MSVC link of the test targets with LNK2019.)
+inline constexpr const char *kCollections[] = {
+    "map_frames", "layers",   "symbols", "legends",
+    "north_arrows", "scale_bars", "titles", "labels",
+    "charts", "colorbars", "inset_maps", "grids",
+    "annotations", "source_notes", "constraints",
+};
+inline constexpr int kCollectionCount =
+    static_cast<int>( sizeof( kCollections ) / sizeof( kCollections[0] ) );
 
 /// True when `name` is a known item collection.
 bool isCollection( const std::string &name );

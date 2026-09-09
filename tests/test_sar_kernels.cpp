@@ -11,6 +11,7 @@
 #include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/algorithms/sar/sar_speckle.h"
 #include "processing/algorithms/sar/sar_terrain.h"
+#include "processing/algorithms/sar/sar_terrain_geometry.h"
 #include "processing/algorithms/sar/sar_texture.h"
 
 #include <cmath>
@@ -144,8 +145,8 @@ TEST_CASE( "Local incidence angle reduces to theta0 - slope on look-aligned face
            "[sar][terrain]" )
 {
     ensureApp();
-    // Facet tilted toward the radar along the look azimuth (aspect == heading):
-    // cos θi = cos(θ0 − α).
+    // Facet tilted toward the radar (aspect == from-azimuth, i.e. the
+    // direction the illumination comes FROM): cos θi = cos(θ0 − α).
     REQUIRE( localIncidenceAngle( 30.0, 0.0, 45.0, 0.0 ) == Approx( 15.0 ).margin( 1e-6 ) );
     // Facet tilted away: θi = θ0 + α.
     REQUIRE( localIncidenceAngle( 30.0, 180.0, 45.0, 0.0 ) == Approx( 75.0 ).margin( 1e-6 ) );
@@ -249,4 +250,58 @@ TEST_CASE( "SAR metadata helpers read and write the documented keys",
     REQUIRE( isSarRadiometricState( "Sigma0" ) );
     REQUIRE( isSarRadiometricState( "dn" ) );
     REQUIRE_FALSE( isSarRadiometricState( "surface_reflectance" ) );
+}
+
+TEST_CASE( "Antenna look azimuth derives from flight heading + side, and"
+           " geometry uses the look azimuth (not the heading)",
+           "[sar][terrain]" )
+{
+    ensureApp();
+    using namespace sicnu::sar;
+
+    // #785: heading (flight direction) and look azimuth are orthogonal.
+    // Right-looking: look = heading + 90; left-looking: look = heading - 90.
+    REQUIRE( lookAzimuthFromHeading( 0.0, true ) == Approx( 90.0 ).margin( 1e-12 ) );
+    REQUIRE( lookAzimuthFromHeading( 0.0, false ) == Approx( 270.0 ).margin( 1e-12 ) );
+    REQUIRE( lookAzimuthFromHeading( 190.0, true ) == Approx( 280.0 ).margin( 1e-12 ) );
+    // Wraps to [0, 360).
+    REQUIRE( lookAzimuthFromHeading( 350.0, true ) == Approx( 80.0 ).margin( 1e-12 ) );
+    REQUIRE( lookAzimuthFromHeading( 10.0, false ) == Approx( 280.0 ).margin( 1e-12 ) );
+
+    // Surface rising toward the EAST (dzdx > 0, dzdy = 0): facing east,
+    // slope 45°. A sensor looking WEST from the east (look azimuth 270°)
+    // sees the east-facing slope rise toward it → layover at steep grades;
+    // looking EAST (look azimuth 90°) sees it fall away → normal/shadow
+    // side. The heading is 180° (flying south) either way — feeding the
+    // heading instead of the look azimuth (the #785 defect) would swap the
+    // classes.
+    const double dzdx = 1.0; // 45° eastward slope
+    const double dzdy = 0.0;
+    const double incidence = 30.0;
+
+    // Surface rising eastward at 45°, sensor incidence θ0 = 30°.
+    //   beam east (look 90°): the pixel's flank FACES the incoming beam
+    //     (gLook = dz along beam travel = +tan45°) and 45° > 30°, so the
+    //     range folds back → LAYOVER (classic rule: slope facing the radar
+    //     steeper than the incidence angle).
+    //   beam west (look 270°): the same pixel is on the far side
+    //     (gLook = dz going west = −tan45°); −45° is neither > 30° (layover)
+    //     nor < 30°−90° = −60° (shadow) → Normal.
+    // Adversarial review FINDING: the pre-6.0 branch (alpha = atan(−gLook))
+    // flagged exactly the swapped classes; these are the physical ones.
+    const double lookWest = lookAzimuthFromHeading( 180.0, true );
+    REQUIRE( lookWest == Approx( 270.0 ).margin( 1e-12 ) );
+    const TerrainGeometryResult westSide =
+        terrainGeometry( dzdx, dzdy, incidence, lookWest );
+    CHECK( westSide.maskClass == TerrainMaskClass::Normal );
+
+    const double lookEast = lookAzimuthFromHeading( 180.0, false );
+    REQUIRE( lookEast == Approx( 90.0 ).margin( 1e-12 ) );
+    const TerrainGeometryResult eastSide =
+        terrainGeometry( dzdx, dzdy, incidence, lookEast );
+    CHECK( eastSide.maskClass == TerrainMaskClass::Layover );
+
+    // The two look sides must disagree — a 90° orthogonality bug (feeding
+    // heading = 180° directly) makes them identical and masks the error.
+    CHECK( westSide.localIncidenceDeg != eastSide.localIncidenceDeg );
 }

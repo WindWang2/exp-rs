@@ -7,8 +7,10 @@
 #include "composition.h"
 #include "design_tokens.h"
 #include "registry.h"
+#include "style_spec.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <set>
 
@@ -647,6 +649,86 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
     }
   }
 
+  // --- Platform 6.0 (Milestone I): style-knowledge semantic rules --------------
+  {
+    StyleRegistry &styles = StyleRegistry::instance();
+    bool uncertaintyStyled = false;
+    for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+    {
+      const char *collection = mapspec::kCollections[c];
+      if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+        continue;
+      for ( const auto &item : spec[collection] )
+      {
+        if ( !item.isObject() || !item.isMember( "style_ref" ) || !item["style_ref"].isString() )
+          continue;
+        const std::string styleRef = item["style_ref"].asString();
+        const Json::Value style = styles.find( QString::fromStdString( styleRef ) );
+        if ( style.isNull() )
+        {
+          issues.push_back( issue( "MAP_STYLE_REF_UNKNOWN", "warning",
+                                   "style_ref '" + styleRef + "' does not resolve in the style "
+                                   "registry",
+                                   false, item.isMember( "id" ) && item["id"].isString()
+                                            ? item["id"].asString()
+                                            : "",
+                                   nullptr ) );
+          continue;
+        }
+        // Semantic applicability: when the item binding declares dataset
+        // facts (kind/modality/band_count/value range), the style must agree
+        // — a semantically wrong renderer is reported, never applied.
+        if ( item.isMember( "binding" ) && item["binding"].isObject() )
+        {
+          const auto mismatches =
+            checkStyleApplicability( style, item["binding"] );
+          for ( const auto &mismatch : mismatches )
+            issues.push_back( issue( "MAP_STYLE_DATA_MISMATCH", "warning", mismatch, false,
+                                     item.isMember( "id" ) && item["id"].isString()
+                                       ? item["id"].asString()
+                                       : "",
+                                     nullptr ) );
+        }
+        // Uncertainty semantics obligation: probability/uncertainty styles
+        // must ship an explicit uncertainty note on the document.
+        if ( style.isMember( "semantics" ) && style["semantics"].isArray() )
+          for ( const auto &tag : style["semantics"] )
+            if ( tag.isString() && ( tag.asString() == "uncertainty" ||
+                                     tag.asString() == "probability" ) )
+              uncertaintyStyled = true;
+      }
+    }
+    if ( uncertaintyStyled )
+    {
+      bool uncertaintyNoted = false;
+      for ( const char *collection : { "labels", "annotations", "source_notes", "titles" } )
+      {
+        if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+          continue;
+        for ( const auto &note : spec[collection] )
+        {
+          if ( !note.isObject() )
+            continue;
+          std::string text = note.get( "text", "" ).asString();
+          text += " " + note.get( "semantic_role", "" ).asString();
+          for ( char &ch : text )
+            ch = static_cast<char>( std::tolower( static_cast<unsigned char>( ch ) ) );
+          uncertaintyNoted = uncertaintyNoted || text.find( "uncertaint" ) != std::string::npos ||
+                             text.find( "probability" ) != std::string::npos ||
+                             text.find( "confidence" ) != std::string::npos ||
+                             text.find( "不确定性" ) != std::string::npos ||
+                             text.find( "概率" ) != std::string::npos;
+        }
+      }
+      if ( !uncertaintyNoted )
+        issues.push_back( issue(
+          "MAP_UNCERTAINTY_NOTE_MISSING", "warning",
+          "the document styles uncertainty/probability data but carries no uncertainty note "
+          "(label/annotation mentioning uncertainty, probability or confidence)",
+          false, "", nullptr ) );
+    }
+  }
+
   // --- composition solver leftovers (from the same resolved copy) -------------
   for ( const auto &note : solvedResult.unsatisfied )
     issues.push_back(
@@ -1153,6 +1235,11 @@ Json::Value preflightRuleCatalog()
     { "MAP_PAGE_BALANCE", "warning", false, "A declared page carries no items (blank export)." },
     { "MAP_MISSING_CRS_NOTE", "warning", false,
       "Report/publication source notes do not state the CRS." },
+    { "MAP_STYLE_REF_UNKNOWN", "warning", false, "style_ref does not resolve in the style registry." },
+    { "MAP_STYLE_DATA_MISMATCH", "warning", false,
+      "Referenced style contradicts the item binding (kind/modality/bands/value domain)." },
+    { "MAP_UNCERTAINTY_NOTE_MISSING", "warning", false,
+      "Uncertainty/probability-styled document carries no uncertainty note." },
     { "MAPSPEC_ISSUES_TRUNCATED", "warning", false,
       "Issue list capped at 500 entries; fix reported findings and re-run." },
     { "LAYOUT_*", "warning", false, "Findings merged from the compiled layout preflight." },

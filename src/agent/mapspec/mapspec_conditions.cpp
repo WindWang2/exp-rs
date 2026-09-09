@@ -52,10 +52,11 @@ bool tokenize( const std::string &expr, std::vector<Token> &tokens, std::string 
         return false;
       }
     }
-    else if ( c == '"' )
+    else if ( c == '"' || c == '\'' )
     {
+      const char quoteChar = c;
       const size_t start = ++i;
-      while ( i < expr.size() && expr[i] != '"' )
+      while ( i < expr.size() && expr[i] != quoteChar )
         ++i;
       if ( i >= expr.size() )
       {
@@ -439,11 +440,53 @@ bool evaluateAst( const ConditionAst &node, const Json::Value &context, std::str
   switch ( node.op )
   {
     case ConditionAst::Op::And:
-      return evaluateAst( *node.children[0], context, error ) &&
-             evaluateAst( *node.children[1], context, error );
+    {
+      // Issue #804: both operands are evaluated even when the first decides
+      // the result, but only DECISION-RELEVANT errors fail the condition —
+      // a clean false on the left decides the conjunction no matter what the
+      // right operand would have reported. Evaluating every error as fatal
+      // (the first #804 fix) regressed the only presence-guard idiom the
+      // grammar offers ("has(x) or x.status == \"ok\"") and could un-hide
+      // gated content; deciding-operand-wins keeps diagnostics flowing where
+      // they can change the outcome.
+      std::string leftError;
+      const bool left = evaluateAst( *node.children[0], context, leftError );
+      if ( !leftError.empty() )
+      {
+        error = leftError;
+        return false;
+      }
+      if ( !left )
+        return false;
+      std::string rightError;
+      const bool right = evaluateAst( *node.children[1], context, rightError );
+      if ( !rightError.empty() )
+      {
+        error = rightError;
+        return false;
+      }
+      return right;
+    }
     case ConditionAst::Op::Or:
-      return evaluateAst( *node.children[0], context, error ) ||
-             evaluateAst( *node.children[1], context, error );
+    {
+      std::string leftError;
+      const bool left = evaluateAst( *node.children[0], context, leftError );
+      if ( !leftError.empty() )
+      {
+        error = leftError;
+        return false;
+      }
+      if ( left )
+        return true;
+      std::string rightError;
+      const bool right = evaluateAst( *node.children[1], context, rightError );
+      if ( !rightError.empty() )
+      {
+        error = rightError;
+        return false;
+      }
+      return right;
+    }
     case ConditionAst::Op::Compare:
     {
       bool ok = true;
@@ -506,6 +549,15 @@ bool validateConditionSyntax( const std::string &expr, std::vector<std::string> 
   {
     if ( problems )
       problems->push_back( error );
+    return false;
+  }
+  // Issue #804: a whole condition that is a bare number/string literal can
+  // never evaluate — reject it here so validation catches what evaluation
+  // would only report at runtime ("a bare literal is not a condition").
+  if ( ast->op == ConditionAst::Op::Literal )
+  {
+    if ( problems )
+      problems->push_back( "a bare literal is not a condition" );
     return false;
   }
   return true;

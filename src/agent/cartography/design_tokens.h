@@ -32,6 +32,8 @@
 
 #include <json/json.h>
 
+#include "../sicnu_agent_export.h"
+
 #include <QMap>
 #include <QMutex>
 #include <QString>
@@ -42,7 +44,7 @@
 namespace sicnu::agent::cartography {
 
 /// Id of the token set used when a spec does not name one.
-extern const char *const kDefaultTokenSetId;
+extern SICNU_AGENT_EXPORT const char *const kDefaultTokenSetId;
 
 /// Validation of a token-set document (id/version, typography styles,
 /// color hex values, palette arrays, positive spacing, variant shapes).

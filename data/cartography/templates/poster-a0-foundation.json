@@ -1,6 +1,7 @@
 {
  "id": "poster-a0-foundation",
  "version": 1,
+ "facets": {"tasks": ["publication"], "medium": "a0", "purpose": "presentation"},
  "description": "A0 portrait poster foundation: hero map, section rails for charts/tables/methodology (content slots intentionally unconstrained).",
  "page": {
   "width_mm": 841,

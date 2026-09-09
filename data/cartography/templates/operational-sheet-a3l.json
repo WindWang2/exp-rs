@@ -1,6 +1,7 @@
 {
   "id": "operational-sheet-a3l",
   "version": 1,
+  "facets": {"tasks": [], "medium": "a3", "purpose": "operational"},
   "extends": "operational-sheet-a4l",
   "description": "Operational map sheet: metric grid, dual-unit scale bar, navigation arrow and disclaimer.",
   "page": {

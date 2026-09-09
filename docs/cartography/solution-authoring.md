@@ -78,3 +78,16 @@ condition_context?})`:
    → mapspec validates → preflight runs (see `test_platform5.cpp`).
 4. Every claim in `description`/`limitations` matches what the recipe chain
    actually produces.
+
+## Platform 6.0 — explainable matching
+
+`solution:search` (and `searchSolutions`) explain every outcome:
+
+- each hit carries `match: {reasons: [...]}` — e.g. `task:flood`,
+  `modality:optical`, `keyword:'flood'`;
+- the envelope carries `rejected: [{id, reasons}]` (first 10, deterministic
+  order) stating why near-miss solutions were excluded — e.g. `"modality
+  'optical' not declared"`.
+
+Matching stays exact and bounded; explanations are computed during the same
+single pass, so search cost is unchanged.

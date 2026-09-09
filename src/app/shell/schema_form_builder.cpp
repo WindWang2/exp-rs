@@ -814,11 +814,24 @@ void SchemaFormBuilder::rebuild( const Json::Value &schema )
     if ( !form || !field.widget )
       continue;
 
-    const QString label = fieldLabel( e.name, e.prop );
+    // Milestone H: units, recommended values and conditional dependencies
+    // come from schema hints — the schema stays the single source of truth.
+    field.unit = memberString( e.prop, "x-ui-unit" );
+    field.recommended = memberString( e.prop, "x-ui-recommended" );
+    if ( e.prop.isObject() && e.prop.isMember( "x-ui-visible-when" )
+         && e.prop["x-ui-visible-when"].isObject() )
+      field.visibleWhen = e.prop["x-ui-visible-when"];
+
+    const QString label = fieldLabel( e.name, e.prop )
+                          + ( field.unit.isEmpty()
+                                  ? QString()
+                                  : QStringLiteral( " (%1)" ).arg( field.unit ) );
     // Accessible names for screen readers / keyboard navigation (Milestone G):
     // every labeled control carries its schema label.
     field.widget->setAccessibleName( label );
-    const QString fieldDesc = memberString( e.prop, "description" );
+    const QString fieldDesc = tooltipFor( field );
+    if ( !field.recommended.isEmpty() )
+      field.widget->setToolTip( fieldDesc );
     if ( !fieldDesc.isEmpty() )
       field.widget->setAccessibleDescription( fieldDesc );
 
@@ -842,6 +855,7 @@ void SchemaFormBuilder::rebuild( const Json::Value &schema )
     }
     m_fields.push_back( field );
   }
+  updateConditionalVisibility();
 
   // Section order: 输入 → 输出 → 参数 → 高级
   auto addSection = [this]( QGroupBox *box )
@@ -1141,6 +1155,10 @@ Json::Value SchemaFormBuilder::values() const
   Json::Value out( Json::objectValue );
   for ( const Field &field : m_fields )
   {
+    // Milestone H: a field hidden by x-ui-visible-when is not collected (the
+    // operator schema default applies until its condition holds).
+    if ( field.condHidden )
+      continue;
     const std::string key = field.name.toStdString();
     switch ( field.kind )
     {
@@ -1289,6 +1307,12 @@ void SchemaFormBuilder::setValues( const Json::Value &params )
     if ( field.crsSelector )
       field.crsSelector->blockSignals( false );
   }
+
+  // Review L #3: setValues suppresses every widget's signals, so the
+  // valuesChanged → updateValidationUi path cannot fire. Re-evaluate the
+  // x-ui-visible-when dependencies explicitly, or a field whose condition
+  // just became true stays hidden and excluded from values()/validate().
+  updateConditionalVisibility();
 }
 
 // ---------------------------------------------------------------------------
@@ -1313,6 +1337,9 @@ QList<SchemaFormBuilder::ValidationIssue> SchemaFormBuilder::validate() const
 
   for ( const Field &field : m_fields )
   {
+    // Milestone H: conditionally hidden fields are not validated.
+    if ( field.condHidden )
+      continue;
     const bool isRequired = required.contains( field.name );
     const QString text = readFieldValue( field );
 
@@ -1377,10 +1404,31 @@ QList<SchemaFormBuilder::ValidationIssue> SchemaFormBuilder::validate() const
       }
       case FieldKind::Double:
       case FieldKind::Integer:
-      case FieldKind::Enum:
-      case FieldKind::Boolean:
+      {
         // Spin boxes clamp to the schema range; enum combos constrain values
-        // by construction — no further inline check needed.
+        // by construction. Soft ranges (x-ui-soft-min/max) surface as
+        // WARNING-level scientific-reasonability diagnostics.
+        const double value = field.kind == FieldKind::Double
+                                 ? ( field.doubleSpin ? field.doubleSpin->value() : 0.0 )
+                                 : ( field.spin ? field.spin->value() : 0.0 );
+        if ( field.prop.isObject() && field.prop.isMember( "x-ui-soft-min" )
+             && field.prop["x-ui-soft-min"].isNumeric()
+             && value < field.prop["x-ui-soft-min"].asDouble() )
+          issues.append( { field.name,
+                           tr( "“%1”低于建议下限 %2（科学合理性警告）" )
+                               .arg( field.name )
+                               .arg( field.prop["x-ui-soft-min"].asDouble() ),
+                           false } );
+        if ( field.prop.isObject() && field.prop.isMember( "x-ui-soft-max" )
+             && field.prop["x-ui-soft-max"].isNumeric()
+             && value > field.prop["x-ui-soft-max"].asDouble() )
+          issues.append( { field.name,
+                           tr( "“%1”高于建议上限 %2（科学合理性警告）" )
+                               .arg( field.name )
+                               .arg( field.prop["x-ui-soft-max"].asDouble() ),
+                           false } );
+        break;
+      }
         break;
     }
   }
@@ -1433,9 +1481,10 @@ void SchemaFormBuilder::applyValidationMarks( const QList<ValidationIssue> &issu
     }
     else if ( hadError )
     {
-      // Clearing an error restores the schema description tooltip.
-      const QString desc = memberString( field.prop, "description" );
-      field.widget->setToolTip( desc );
+      // Clearing an error restores the schema description + recommended
+      // tooltip (review L #5: the recommended hint used to be lost after one
+      // error→fix cycle until the next rebuild).
+      field.widget->setToolTip( tooltipFor( field ) );
     }
   }
 
@@ -1444,6 +1493,7 @@ void SchemaFormBuilder::applyValidationMarks( const QList<ValidationIssue> &issu
     int errors = 0;
     int warnings = 0;
     QString firstError;
+    QString firstWarning;
     for ( const ValidationIssue &issue : issues )
     {
       if ( issue.isError )
@@ -1455,6 +1505,8 @@ void SchemaFormBuilder::applyValidationMarks( const QList<ValidationIssue> &issu
       else
       {
         ++warnings;
+        if ( firstWarning.isEmpty() )
+          firstWarning = issue.message;
       }
     }
     if ( errors > 0 )
@@ -1464,8 +1516,11 @@ void SchemaFormBuilder::applyValidationMarks( const QList<ValidationIssue> &issu
     }
     else if ( warnings > 0 )
     {
+      // Review L #4: the warning CONTENT must be reachable — the label names
+      // the first warning verbatim (not just a count), so keyboard-only and
+      // screen-reader users can act on it.
       m_validationLabel->setProperty( "state", QStringLiteral( "warn" ) );
-      m_validationLabel->setText( tr( "△ %1 条提示" ).arg( warnings ) );
+      m_validationLabel->setText( tr( "△ %1 条提示：%2" ).arg( warnings ).arg( firstWarning ) );
     }
     else
     {
@@ -1484,6 +1539,9 @@ void SchemaFormBuilder::clearValidationMarks()
 
 void SchemaFormBuilder::updateValidationUi()
 {
+  // Milestone H: dependencies first — a field hidden by its x-ui-visible-when
+  // condition must not be validated (or collected) while hidden.
+  updateConditionalVisibility();
   const QList<ValidationIssue> issues = validate();
   applyValidationMarks( issues );
   bool blocking = false;
@@ -1496,4 +1554,82 @@ void SchemaFormBuilder::updateValidationUi()
     }
   }
   emit validationChanged( blocking );
+}
+
+void SchemaFormBuilder::updateConditionalVisibility()
+{
+  if ( m_fields.isEmpty() )
+    return;
+
+  // Numeric-tolerant scalar comparison: "1", "1.0" and "true"→1 style values
+  // must match regardless of how the editor formats its text.
+  auto sameScalar = []( const QString &a, const QString &b ) {
+    if ( a.compare( b, Qt::CaseInsensitive ) == 0 )
+      return true;
+    bool okA = false, okB = false;
+    const double da = a.toDouble( &okA );
+    const double db = b.toDouble( &okB );
+    return okA && okB && qFuzzyCompare( da, db );
+  };
+  auto valueText = [this]( const QString &name ) -> QString {
+    for ( const Field &f : m_fields )
+    {
+      if ( f.name == name && f.widget )
+        return readFieldValue( f );
+    }
+    return QString();
+  };
+
+  for ( Field &field : m_fields )
+  {
+    if ( !field.widget )
+      continue;
+
+    bool visible = true;
+    if ( field.visibleWhen.isObject() && !field.visibleWhen.empty() )
+    {
+      for ( auto it = field.visibleWhen.begin(); it != field.visibleWhen.end(); ++it )
+      {
+        const QString param = QString::fromUtf8( it.memberName() );
+        QString expected;
+        if ( it->isString() )
+          expected = QString::fromStdString( it->asString() );
+        else if ( it->isBool() )
+          expected = it->asBool() ? QStringLiteral( "true" ) : QStringLiteral( "false" );
+        else if ( it->isNumeric() )
+          expected = QString::number( it->asDouble() );
+        if ( !sameScalar( valueText( param ), expected ) )
+        {
+          visible = false;
+          break;
+        }
+      }
+    }
+
+    field.condHidden = !visible;
+    if ( field.widget->isVisibleTo( field.widget->parentWidget() ) != visible )
+      field.widget->setVisible( visible );
+    if ( QWidget *parent = field.widget->parentWidget() )
+    {
+      if ( auto *form = qobject_cast<QFormLayout *>( parent->layout() ) )
+      {
+        if ( auto *lab = qobject_cast<QLabel *>( form->labelForField( field.widget ) ) )
+          lab->setVisible( visible );
+      }
+    }
+  }
+}
+
+QString SchemaFormBuilder::tooltipFor( const Field &field ) const
+{
+  // Canonical tooltip: schema description first, then the recommended-value
+  // hint. Used by rebuild AND by applyValidationMarks when an error clears,
+  // so the recommended hint survives error→fix cycles (review L #5).
+  QString tip = memberString( field.prop, "description" );
+  if ( !field.recommended.isEmpty() )
+  {
+    const QString recommendedText = tr( "推荐值：%1" ).arg( field.recommended );
+    tip += tip.isEmpty() ? recommendedText : QStringLiteral( " " ) + recommendedText;
+  }
+  return tip;
 }

@@ -428,6 +428,15 @@ sicnu::data::Result<void> DatasetStore::deleteDataset( const DatasetId &datasetI
                                                header.error( m_impl->db ) ) );
         }
     }
+    // #774: the deletion only exists once the transaction commits — returning
+    // success with the transaction still open leaked the SQLite write lock
+    // and stranded every later writer.
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "cannot commit dataset deletion" ) ) );
+    }
     return Result::success();
 }
 

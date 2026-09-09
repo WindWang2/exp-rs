@@ -1,6 +1,7 @@
 {
   "id": "change-before-after-a4l",
   "version": 1,
+  "facets": {"tasks": ["change"], "medium": "a4", "purpose": "analysis"},
   "description": "Before/after synchronized dual map page with transition legend, change matrix and uncertainty note.",
   "page": {
     "width_mm": 297,

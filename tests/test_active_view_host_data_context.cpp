@@ -408,3 +408,72 @@ TEST_CASE( "Loaded layer survives event-loop turns (registry bridge re-parenting
   CHECK( node->parent() == host.findOrCreateGroup(
                                QStringLiteral( "Raster Layers" ) ) );
 }
+
+// ── Workbench 6.0 Milestone B: view-local layer visibility (#793) ──────────
+
+TEST_CASE( "refreshCanvasLayers reads the ACTIVE view's tree, not the global project tree (#793)",
+           "[active_view_host][view_isolation][ux6]" )
+{
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  QgsLayerTreeView treeView;
+  const sicnu::display::DisplayViewSpec mainSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore() };
+  auto createdContext = sicnu::app::ProjectContext::create( mainSpec );
+  REQUIRE( createdContext );
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+
+  ActiveViewHost host( &canvas, &treeView, nullptr,
+                       &context->dataManager(), &context->displayManager(),
+                       context->mainViewId(), nullptr );
+  host.initLayerTree();
+
+  // One raster visible on the MAIN view.
+  const auto loaded = host.openRasterPath(
+      fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ) );
+  REQUIRE( loaded );
+  const sicnu::data::AssetId assetId =
+      context->displayManager().layer( loaded.value() )->assetId();
+
+  // A SECOND view presents the same asset through its own tree/store/canvas.
+  QgsMapCanvas canvas2;
+  QgsLayerTree tree2;
+  QgsMapLayerStore store2;
+  const sicnu::display::DisplayViewSpec secondSpec{ &canvas2, &tree2, &store2 };
+  const auto secondCreated = context->displayManager().createView( secondSpec );
+  REQUIRE( secondCreated );
+  const sicnu::display::DisplayViewId secondViewId = secondCreated.value();
+  const auto addedSecond = context->displayManager().addLayer( secondViewId, assetId );
+  REQUIRE( addedSecond );
+
+  // Same visibility starting point in both views (checked), then the MAIN
+  // view hides the layer in ITS tree only.
+  QgsMapLayer *secondLayer = context->displayManager().mapLayer( addedSecond.value() );
+  REQUIRE( secondLayer );
+  if ( QgsLayerTreeLayer *mainNode =
+           project->layerTreeRoot()->findLayer( context->displayManager().mapLayer( loaded.value() )->id() ) )
+    mainNode->setItemVisibilityChecked( false );
+  // The main view applies its own tree state while it is the active view.
+  host.refreshCanvasLayers();
+  REQUIRE( canvas.layers().isEmpty() );
+
+  // Switching to the SECOND view must NOT touch the main canvas: each view's
+  // own canvas bridge is the authority for its own canvas. The earlier
+  // draft of the fix poured the secondary tree's (checked) layers into the
+  // MAIN canvas, replacing the main view's content with cloned instances —
+  // exactly the cross-view contamination this case pins (review L P2).
+  REQUIRE( host.setActiveViewId( secondViewId ) );
+  host.refreshCanvasLayers();
+  CHECK( canvas.layers().isEmpty() );          // main canvas untouched
+  CHECK( canvas2.layers().size() == 1 );       // secondary canvas shows its own layer
+  CHECK( canvas2.layers().first() == secondLayer );
+
+  // Back on the main view, its own (unchecked) state applies again.
+  REQUIRE( host.setActiveViewId( context->mainViewId() ) );
+  host.refreshCanvasLayers();
+  CHECK( canvas.layers().isEmpty() );
+
+  project->clear();
+}

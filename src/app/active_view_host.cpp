@@ -90,6 +90,18 @@ ActiveViewHost::ActiveViewHost( QgsMapCanvas *canvas,
                 m_overviewCanvas->setLayers( m_mapCanvas->layers() );
         } );
     }
+
+    // #778 companion: a removed layer leaves QgsMapCanvas::currentLayer()
+    // dangling — the canvas is never notified. Clear it before the layer
+    // object is destroyed.
+    if ( m_mapCanvas )
+    {
+        connect( QgsProject::instance(), qOverload<QgsMapLayer *>( &QgsProject::layerWillBeRemoved ),
+                 this, [this]( QgsMapLayer *layer ) {
+                     if ( m_mapCanvas && layer && m_mapCanvas->currentLayer() == layer )
+                         m_mapCanvas->setCurrentLayer( nullptr );
+                 } );
+    }
 }
 
 ActiveViewHost::~ActiveViewHost() = default;
@@ -475,6 +487,9 @@ void ActiveViewHost::removeSelectedDisplayLayers()
     if ( !m_confirmationFn( detail ) )
         return;
 
+    if ( m_mapCanvas )
+        m_mapCanvas->stopRendering();
+
     for ( QgsMapLayer *layer : selected )
     {
         const std::optional<sicnu::display::DisplayLayerId> displayLayerId =
@@ -490,6 +505,11 @@ void ActiveViewHost::removeSelectedDisplayLayers()
         else
         {
             // Legacy/external QGIS layers: presentation-only removal.
+            // #779 companion: project removal destroys the layer — settle an
+            // in-flight canvas render first so its threads cannot touch the
+            // doomed layer.
+            if ( m_mapCanvas )
+                m_mapCanvas->stopRenderingAndSettle();
             QgsProject::instance()->removeMapLayer( layer->id() );
         }
     }
@@ -541,15 +561,24 @@ void ActiveViewHost::zoomToNativeResolution( QgsMapLayer *layer )
 
 void ActiveViewHost::refreshCanvasLayers()
 {
-    if ( !m_mapCanvas )
+    if ( !m_mapCanvas || !m_displayManager )
         return;
 
-    // TODO(P1-M2): This reads the global project tree checked layers, which is
-    // correct for the main view but wrong once secondary DisplayManager views
-    // exist. The active view's layer visibility should come from the view's own
-    // QgsLayerTree (via QgisDisplayManager), not QgsProject::checkedLayers().
-    QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
-    QList<QgsMapLayer *> layers = root->checkedLayers();
+    // This host drives the MAIN window's canvas. Layer visibility comes from
+    // the tree of the view that OWNS the canvas being driven (#793): for the
+    // main view the registered tree is the project root, so its behavior is
+    // unchanged. When a secondary view is active, its OWN canvas bridge is
+    // the authority — pouring the secondary tree's layer set into the main
+    // canvas would replace the main view's content with cloned layer
+    // instances (review L P2), so the main canvas is left untouched.
+    const sicnu::display::DisplayViewId activeId = m_displayManager->activeViewId();
+    if ( !activeId.isNull() && !( activeId == m_mainViewId ) )
+        return;
+
+    QgsLayerTree *mainTree = m_displayManager->viewLayerTree( m_mainViewId );
+    if ( !mainTree )
+        mainTree = QgsProject::instance()->layerTreeRoot();
+    const QList<QgsMapLayer *> layers = mainTree->checkedLayers();
     m_mapCanvas->setLayers( layers );
 
     if ( m_overviewCanvas )

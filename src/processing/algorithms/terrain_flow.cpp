@@ -94,10 +94,13 @@ bool flowDirections( const float *filled, float *dir, int width, int height, flo
         for ( int x = 0; x < width; ++x )
         {
             const size_t i = static_cast<size_t>( y ) * width + x;
-            dir[i] = 0.0f;
             const float z = filled[i];
             if ( z == nodata || std::isnan( z ) )
+            {
+                dir[i] = nodata;
                 continue;
+            }
+            dir[i] = 0.0f;
             float bestSlope = 0.0f;
             int bestCode = 0;
             for ( const Neighbor &nb : kNeighbors )
@@ -123,10 +126,44 @@ bool flowDirections( const float *filled, float *dir, int width, int height, flo
 
 bool flowAccumulation( const float *dir, float *acc, int width, int height )
 {
+    return flowAccumulation( dir, acc, width, height, nullptr, 0.0f );
+}
+
+bool flowAccumulation( const float *dir, float *acc, int width, int height,
+                       const float *filled, float nodata )
+{
     if ( !dir || !acc || width <= 0 || height <= 0 )
         return false;
     const size_t n = static_cast<size_t>( width ) * height;
-    std::vector<int> indegree( n, 0 );
+
+    const bool maskNodata = filled != nullptr;
+    const auto isDirNoData = []( float d ) {
+        if ( std::isnan( d ) )
+            return true;
+        const int code = static_cast<int>( d );
+        if ( static_cast<float>( code ) != d )
+            return true;
+        switch ( code )
+        {
+            case 0:
+            case 1:
+            case 2:
+            case 4:
+            case 8:
+            case 16:
+            case 32:
+            case 64:
+            case 128:
+                return false;
+            default:
+                return true;
+        }
+    };
+    const auto isNodata = [&]( size_t i ) {
+        if ( maskNodata && ( filled[i] == nodata || std::isnan( filled[i] ) ) )
+            return true;
+        return isDirNoData( dir[i] );
+    };
 
     const auto downstreamOf = [&]( size_t i ) -> size_t {
         const int code = static_cast<int>( dir[i] );
@@ -146,23 +183,32 @@ bool flowAccumulation( const float *dir, float *acc, int width, int height )
         return i;
     };
 
+    // NoData cells never enter the routing graph: they are neither sources
+    // nor receivers, and their accumulator carries the sentinel so the
+    // written GeoTIFF marks them NoData instead of a 1.0 phantom ridge
+    // (#783 — ocean/masked cells used to drain nothing yet report 1.0).
+    std::vector<int> indegree( n, 0 );
     for ( size_t i = 0; i < n; ++i )
     {
+        if ( isNodata( i ) )
+        {
+            acc[i] = ( maskNodata && ( filled[i] == nodata || std::isnan( filled[i] ) ) ) ? nodata : dir[i];
+            continue;
+        }
         acc[i] = 1.0f;
         const size_t down = downstreamOf( i );
-        if ( down != i )
+        if ( down != i && !isNodata( down ) )
             ++indegree[down];
     }
-
     std::vector<size_t> queue;
     for ( size_t i = 0; i < n; ++i )
-        if ( indegree[i] == 0 )
+        if ( !isNodata( i ) && indegree[i] == 0 )
             queue.push_back( i );
     for ( size_t head = 0; head < queue.size(); ++head )
     {
         const size_t i = queue[head];
         const size_t down = downstreamOf( i );
-        if ( down != i )
+        if ( down != i && !isNodata( down ) )
         {
             acc[down] += acc[i];
             if ( --indegree[down] == 0 )

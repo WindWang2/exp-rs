@@ -1,6 +1,7 @@
 {
   "id": "model-uncertainty-a4l",
   "version": 1,
+  "facets": {"tasks": ["accuracy"], "medium": "a4", "purpose": "analysis"},
   "description": "Model uncertainty map with uncertainty palette colorbar and accuracy metric cards.",
   "page": {
     "width_mm": 297,

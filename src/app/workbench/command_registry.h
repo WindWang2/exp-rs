@@ -108,8 +108,13 @@ class CommandRegistry : public QObject
 
     QMap<QString, CommandDefinition> m_commands; // sorted by id
     QMap<QString, QAction *> m_actions;
-    QSet<QString> m_shortcuts; // stringified non-empty canonical shortcuts
-    QString m_shortcutOwner;   // projection id holding the installed shortcut
+    QSet<QString> m_shortcuts;    // stringified non-empty canonical shortcuts
+    /// #792: ids whose canonical shortcut was installed on a projection.
+    /// Exactly ONE projection per command may install it — but different
+    /// commands each own their binding, so ownership is a set, not one
+    /// string (the single-string version aborted the process on the second
+    /// command's installation).
+    QSet<QString> m_shortcutOwners;
     std::function<SelectionContextSnapshot()> m_snapshotProvider;
 };
 

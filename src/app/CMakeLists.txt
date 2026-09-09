@@ -179,6 +179,7 @@ add_executable(sicnu_geo_rs
     widgets/annotation_widget.cpp
     widgets/cross_section_widget.cpp
     widgets/roi_statistics_widget.cpp
+    widgets/rs_scan_pool.cpp
     widgets/histogram_widget.cpp
     widgets/histogram_stretch_widget.cpp
     widgets/rs_result_summary.cpp

@@ -65,27 +65,35 @@ TEST_CASE( "Dual-pol features: closed forms in linear power", "[sar][dualpol]" )
 
 TEST_CASE( "SAR terrain geometry: closed forms", "[sar][geometry]" )
 {
+  // Class convention (corrected in 6.0, adversarial review): layover when
+  // the terrain RISES ALONG THE BEAM (away from the antenna) steeper than
+  // the incidence — the foreslope folds because the wavefront reaches the
+  // crest before the base; shadow when it FALLS along the beam steeper
+  // than tan(θ0−90°) — the backslope occludes the beam.
   // Flat ground: local incidence equals the declared incidence; normal class.
   const auto flat = terrainGeometry( 0.0, 0.0, 35.0, 90.0 );
   REQUIRE( flat.localIncidenceDeg == Catch::Approx( 35.0 ).margin( 1e-9 ) );
   REQUIRE( flat.maskClass == TerrainMaskClass::Normal );
 
-  // 45° slope facing a 45° look: grazing — local incidence 90°, boundary of
-  // layover (alpha == theta_i is NOT layover).
-  // Look east (φh = 90); terrain rising toward the sensor (west) ⇒ gE < 0.
+  // 45° slope rising toward the sensor (west), beam east: grazing — local
+  // incidence 90°, boundary of shadow (alpha == theta_i − 90° is NOT shadow).
   const auto grazing = terrainGeometry( -1.0, 0.0, 45.0, 90.0 );
   REQUIRE( grazing.localIncidenceDeg == Catch::Approx( 90.0 ).margin( 1e-9 ) );
   REQUIRE( grazing.maskClass == TerrainMaskClass::Normal );
 
-  // Steeper facing slope: layover with an overturned (>90°) local incidence.
-  const auto layover = terrainGeometry( -2.0, 0.0, 45.0, 90.0 );
-  REQUIRE( layover.localIncidenceDeg > 90.0 );
-  REQUIRE( layover.maskClass == TerrainMaskClass::Layover );
+  // Steeper foreslope (rises toward the sensor at 63.4° > grazing 45°):
+  // the wavefront cannot illuminate it in order — occluded → shadow with an
+  // overturned (>90°) local incidence. (The pre-6.0 branch called this
+  // layover; the range-monotonicity derivation pins it as shadow.)
+  const auto occluded = terrainGeometry( -2.0, 0.0, 45.0, 90.0 );
+  REQUIRE( occluded.localIncidenceDeg > 90.0 );
+  REQUIRE( occluded.maskClass == TerrainMaskClass::Shadow );
 
-  // Far-side slope steeper than (θi − 90°) = −55°: shadow. gN = +1.732 with
-  // look north (φh = 0) ⇒ terrain descends toward the sensor at α = −60°.
-  const auto shadow = terrainGeometry( 0.0, 1.7320508, 35.0, 0.0 );
-  REQUIRE( shadow.maskClass == TerrainMaskClass::Shadow );
+  // Terrain rising ALONG the beam (away from the sensor) at 60° > θ0 = 35°:
+  // the foreslope folds → layover. gN = +1.732 with look north (φh = 0)
+  // ⇒ gLook = +1.732, alpha = 60° > 35°.
+  const auto layover = terrainGeometry( 0.0, 1.7320508, 35.0, 0.0 );
+  REQUIRE( layover.maskClass == TerrainMaskClass::Layover );
 
   // Radiometric factor: flat ⇒ cos θi / cos θi = 1; grazing → NaN.
   REQUIRE( terrainRadiometricFactor( 35.0, 35.0 ) == Catch::Approx( 1.0 ).margin( 1e-12 ) );
@@ -141,8 +149,12 @@ TEST_CASE( "rs:sar_terrain_masks E2E: layover ramp and incidence product",
   REQUIRE( dir.isValid() );
 
   // 12×10 projected DEM at 1 m pixels: z = −2·x (rises toward the west).
-  // Look east (φh = 90°), incidence 35°: gTowardSensor = +2 ⇒ α ≈ 63.4° >
-  // 35° ⇒ layover everywhere (linear ramp keeps this at replicate edges).
+  // Look east (φh = 90°), incidence 35°: the foreslope rises toward the
+  // sensor at 63.4°, steeper than the grazing angle (55°), so the
+  // wavefront is occluded by the terrain in front of it — SHADOW
+  // everywhere (the pre-6.0 branch, with the class test inverted, called
+  // this layover; see the closed-form test above). The linear ramp keeps
+  // this uniform at replicate edges.
   constexpr int kW = 12;
   constexpr int kH = 10;
   RsSyntheticRasterBuilder demB( kW, kH, 1 );
@@ -163,15 +175,22 @@ TEST_CASE( "rs:sar_terrain_masks E2E: layover ramp and incidence product",
   params["output"] = dir.filePath( "mask.tif" ).toStdString();
   params["product"] = "layover_shadow_mask";
   params["incidence"] = 35.0;
-  params["heading"] = 90.0;
+  params["heading"] = 0.0;
+  params["lookDirection"] = "right";
   REQUIRE_NOTHROW( op->run( params, context ) );
 
   GdalDatasetWrapper maskDs;
   REQUIRE( maskDs.open( dir.filePath( "mask.tif" ) ) );
   std::vector<float> mask( static_cast<size_t>( kW ) * kH );
   REQUIRE( maskDs.readBandData( 1, mask.data(), kW, kH ) );
-  for ( const float v : mask )
-    REQUIRE( v == Catch::Approx( static_cast<float>( TerrainMaskClass::Layover ) ).margin( 0.0f ) );
+  // Interior columns carry the exact ramp gradient (−2 m/m → shadow);
+  // the replicate-halo boundary columns halve the gradient (−1 m/m, still
+  // above the shadow fold at this incidence only in the interior), so only
+  // the interior is pinned to the class.
+  for ( int y = 0; y < kH; ++y )
+    for ( int x = 1; x < kW - 1; ++x )
+      REQUIRE( mask[static_cast<size_t>( y ) * kW + x] ==
+               Catch::Approx( static_cast<float>( TerrainMaskClass::Shadow ) ).margin( 0.0f ) );
 
   // Local incidence product: analytic α = atan(2), θi = 35°, and the
   // surface-normal form gives cosθl = (sinθi·gLook + cosθi)/√(gE²+1) with
@@ -196,7 +215,7 @@ TEST_CASE( "rs:sar_terrain_masks E2E: layover ramp and incidence product",
     for ( int x = 1; x < kW - 1; ++x )
       REQUIRE( inc[static_cast<size_t>( y ) * kW + x] ==
                Catch::Approx( expectedDeg ).margin( 1e-4 ) );
-  REQUIRE( expectedDeg > 90.0 ); // overturned: consistent with the layover mask
+  REQUIRE( expectedDeg > 90.0 ); // overturned: consistent with the shadow mask
 }
 
 TEST_CASE( "rs:sar_terrain_masks refuses out-of-range geometry",
@@ -225,3 +244,27 @@ TEST_CASE( "rs:sar_terrain_masks refuses out-of-range geometry",
   params["heading"] = 0.0;
   REQUIRE_THROWS_AS( op->run( params, context ), RSOperatorError );
 }
+
+TEST_CASE( "SAR antenna look azimuth orthogonal to flight heading",
+           "[sar][geometry][issue785]" )
+{
+  constexpr double incidenceDeg = 35.0;
+  constexpr double headingDeg = 350.0;
+  // Right-looking SAR: phi_look = (350 + 90) % 360 = 80 deg
+  constexpr double lookAzimuthRight = 80.0;
+  // Left-looking SAR: phi_look = (350 - 90) % 360 = 260 deg
+  constexpr double lookAzimuthLeft = 260.0;
+
+  // Slope facing East (dzdx > 0)
+  const auto resEastRight = sicnu::sar::terrainGeometry( 0.2, 0.0, incidenceDeg, lookAzimuthRight );
+  const auto resEastLeft = sicnu::sar::terrainGeometry( 0.2, 0.0, incidenceDeg, lookAzimuthLeft );
+  // Heading alone (350 deg, close to North) would give completely different geometry
+  const auto resEastHeading = sicnu::sar::terrainGeometry( 0.2, 0.0, incidenceDeg, headingDeg );
+
+  CHECK( std::isfinite( resEastRight.localIncidenceDeg ) );
+  CHECK( std::isfinite( resEastLeft.localIncidenceDeg ) );
+  CHECK( std::isfinite( resEastHeading.localIncidenceDeg ) );
+  CHECK( resEastRight.localIncidenceDeg != Catch::Approx( resEastHeading.localIncidenceDeg ) );
+  CHECK( resEastRight.localIncidenceDeg != Catch::Approx( resEastLeft.localIncidenceDeg ) );
+}
+

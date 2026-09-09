@@ -1,6 +1,7 @@
 {
   "id": "atlas-series-a4l",
   "version": 1,
+  "facets": {"tasks": [], "medium": "atlas", "purpose": "analysis"},
   "description": "Map-series sheet with the atlas hook enabled (per-feature coverage and file names).",
   "page": {
     "width_mm": 297,

@@ -110,3 +110,30 @@ that only tools read (`size_mm`, `interval_deg` knobs) live in
 - `cartography:list_components` (paged, category filter)
 - `cartography:get_component` (full descriptor)
 - `cartography:catalog_index` (machine index incl. components)
+
+## Platform 6.0 — bounded composite blocks (children)
+
+Components may declare role-qualified **children** — composable semantic
+blocks (legend title + classes + ramp + NoData + footer), not UI trees:
+
+```jsonc
+"children": [
+  { "role": "title", "required": false, "content": { "title": "图例" } },
+  { "role": "classes", "required": true },
+  { "role": "nodata", "required": false,
+    "description": "NoData swatch when the dataset declares one." }
+]
+```
+
+Rules (enforced by `validateComponentDescriptor` and MapSpec item
+validation):
+
+- at most `kMaxComponentChildren` (16) children, depth 1 (children never
+  nest), unique non-empty string `role` per component;
+- optional per-child keys: `required` (bool), `content` (object),
+  `overrides` (object), `source_component` (string), `description` (string);
+- `applyComponentDefaults` materializes children onto MapSpec items:
+  explicit per-role item children win, missing roles are inherited from the
+  component (item > variant > component precedence is unchanged).
+
+Existing flat descriptors validate unchanged — the grammar is additive.

@@ -350,7 +350,23 @@ Json::Value compactSolutionSummary( const Json::Value &solution )
 
 Json::Value searchSolutions( const Json::Value &solutions, const SolutionQuery &query )
 {
-  std::vector<Json::Value> hits;
+  // Platform 6.0 (Milestone G): explainability — every hit carries its match
+  // reasons and every rejection is attributable. Bounded: at most
+  // kMaxExplainedRejections rejections are listed (deterministic order).
+  struct Hit
+  {
+      Json::Value doc;
+      Json::Value reasons;
+  };
+  std::vector<Hit> hits;
+  struct Rejection
+  {
+      std::string id;
+      Json::Value reasons;
+  };
+  std::vector<Rejection> rejections;
+  constexpr int kMaxExplainedRejections = 10;
+
   const std::string task = query.task;
   const std::string modality = query.modality;
   const std::string sensor = query.sensor;
@@ -360,40 +376,69 @@ Json::Value searchSolutions( const Json::Value &solutions, const SolutionQuery &
   const std::string quality = query.quality;
   const std::string family = query.family;
 
+  auto arrayContains = []( const Json::Value &array, const std::string &needle, bool exact ) {
+    if ( !array.isArray() )
+      return false;
+    for ( const auto &candidate : array )
+    {
+      if ( !candidate.isString() )
+        continue;
+      if ( exact ? candidate.asString() == needle
+                 : candidate.asString().find( needle ) != std::string::npos )
+        return true;
+    }
+    return false;
+  };
+
   for ( const Json::Value &doc : solutions )
   {
+    Json::Value reasons( Json::arrayValue );
+    std::string firstRejection;
+    auto reject = [ &firstRejection ]( const std::string &reason ) {
+      if ( firstRejection.empty() )
+        firstRejection = reason;
+      return false;
+    };
+
+    bool matched = true;
     if ( !task.empty() )
     {
-      bool match = false;
-      if ( doc.isMember( "tasks" ) && doc["tasks"].isArray() )
-        for ( const auto &candidate : doc["tasks"] )
-          match = match || candidate.asString().find( task ) != std::string::npos;
-      if ( !match )
-        continue;
+      if ( arrayContains( doc.get( "tasks", Json::Value() ), task, false ) )
+        reasons.append( "task:" + task );
+      else
+        matched = reject( "no task matching '" + task + "'" );
     }
-    if ( !modality.empty() )
+    if ( matched && !modality.empty() )
     {
-      bool match = false;
-      if ( doc.isMember( "modalities" ) && doc["modalities"].isArray() )
-        for ( const auto &candidate : doc["modalities"] )
-          match = match || candidate.asString() == modality;
-      if ( !match )
-        continue;
+      if ( arrayContains( doc.get( "modalities", Json::Value() ), modality, true ) )
+        reasons.append( "modality:" + modality );
+      else
+        matched = reject( "modality '" + modality + "' not declared" );
     }
-    if ( !sensor.empty() )
+    if ( matched && !sensor.empty() )
     {
-      bool match = false;
-      if ( doc.isMember( "sensors" ) && doc["sensors"].isArray() )
-        for ( const auto &candidate : doc["sensors"] )
-          match = match || candidate.asString().find( sensor ) != std::string::npos;
-      if ( !match )
-        continue;
+      if ( arrayContains( doc.get( "sensors", Json::Value() ), sensor, false ) )
+        reasons.append( "sensor:" + sensor );
+      else
+        matched = reject( "no sensor matching '" + sensor + "'" );
     }
-    if ( !quality.empty() && doc.get( "quality_grade", "" ).asString() != quality )
-      continue;
-    if ( !family.empty() && doc.get( "family", "" ).asString() != family )
-      continue;
-    if ( !keyword.empty() )
+    if ( matched && !quality.empty() )
+    {
+      const std::string grade = doc.get( "quality_grade", "" ).asString();
+      if ( grade == quality )
+        reasons.append( "quality:" + quality );
+      else
+        matched = reject( "quality_grade '" + grade + "' != '" + quality + "'" );
+    }
+    if ( matched && !family.empty() )
+    {
+      const std::string docFamily = doc.get( "family", "" ).asString();
+      if ( docFamily == family )
+        reasons.append( "family:" + family );
+      else
+        matched = reject( "family '" + docFamily + "' != '" + family + "'" );
+    }
+    if ( matched && !keyword.empty() )
     {
       std::string haystack = doc.get( "title", "" ).asString() + " " +
                              doc.get( "description", "" ).asString();
@@ -402,10 +447,22 @@ Json::Value searchSolutions( const Json::Value &solutions, const SolutionQuery &
           haystack += " " + candidate.asString();
       std::transform( haystack.begin(), haystack.end(), haystack.begin(),
                       []( unsigned char c ) { return std::tolower( c ); } );
-      if ( haystack.find( keyword ) == std::string::npos )
-        continue;
+      if ( haystack.find( keyword ) != std::string::npos )
+        reasons.append( "keyword:'" + keyword + "'" );
+      else
+        matched = reject( "keyword '" + keyword + "' not in title/description/keywords" );
     }
-    hits.push_back( doc );
+
+    if ( matched )
+    {
+      hits.push_back( { doc, reasons } );
+    }
+    else if ( static_cast<int>( rejections.size() ) < kMaxExplainedRejections )
+    {
+      Json::Value rejectionReasons( Json::arrayValue );
+      rejectionReasons.append( firstRejection );
+      rejections.push_back( { doc.get( "id", "" ).asString(), rejectionReasons } );
+    }
   }
 
   const int pageSize = std::clamp( query.pageSize, 1, 50 );
@@ -418,8 +475,23 @@ Json::Value searchSolutions( const Json::Value &solutions, const SolutionQuery &
   const int begin = page * pageSize;
   const int end = std::min( static_cast<int>( hits.size() ), begin + pageSize );
   for ( int index = begin; index < end; ++index )
-    items.append( compactSolutionSummary( hits[index] ) );
+  {
+    Json::Value entry = compactSolutionSummary( hits[index].doc );
+    Json::Value match( Json::objectValue );
+    match["reasons"] = hits[index].reasons;
+    entry["match"] = match;
+    items.append( entry );
+  }
   out["items"] = items;
+  Json::Value rejectedJson( Json::arrayValue );
+  for ( const auto &rejection : rejections )
+  {
+    Json::Value entry( Json::objectValue );
+    entry["id"] = rejection.id;
+    entry["reasons"] = rejection.reasons;
+    rejectedJson.append( entry );
+  }
+  out["rejected"] = rejectedJson;
   out["next_page"] = end < static_cast<int>( hits.size() ) ? Json::Value( page + 1 ) : Json::Value();
   return out;
 }

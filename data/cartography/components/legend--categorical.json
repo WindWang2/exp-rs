@@ -65,5 +65,35 @@
       "required": false,
       "description": "Entries mirror the linked map renderer when auto-update is on."
     }
+  ],
+  "children": [
+    {
+      "role": "title",
+      "required": false,
+      "content": {
+        "title": "图例"
+      },
+      "description": "Legend heading; falls back to the linked renderer's title."
+    },
+    {
+      "role": "classes",
+      "required": true,
+      "description": "Categorical class entries mirrored from the renderer."
+    },
+    {
+      "role": "nodata",
+      "required": false,
+      "description": "NoData entry rendered when the dataset declares one."
+    },
+    {
+      "role": "statistics",
+      "required": false,
+      "description": "Optional per-class area/count annotations."
+    },
+    {
+      "role": "footer",
+      "required": false,
+      "description": "Optional footer line (units, projection note)."
+    }
   ]
 }

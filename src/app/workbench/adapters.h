@@ -57,6 +57,9 @@ class ExternalWindowWorkbench : public QObject, public IWorkbench
 
     ExternalWindowWorkbench( const QString &id, const QString &title, const QString &iconAlias,
                              Opener opener, QObject *parent = nullptr );
+    ExternalWindowWorkbench( const QString &id, const QString &title, const QString &iconAlias,
+                             Opener opener, WindowGetter windowGetter, DirtyFn dirtyFn = nullptr,
+                             std::function<bool()> closeFn = nullptr, QObject *parent = nullptr );
 
     QString id() const override { return m_id; }
     QString title() const override { return m_title; }
@@ -69,11 +72,19 @@ class ExternalWindowWorkbench : public QObject, public IWorkbench
         return m_active && ( !m_windowGetter || m_windowGetter() != nullptr );
     }
     bool isDirty() const override { return m_dirtyFn ? m_dirtyFn() : false; }
+    bool hasInFlightCompute() const override { return m_inFlightFn ? m_inFlightFn() : false; }
+    bool requestCancel() override;
     bool requestClose() override;
     WorkbenchFeatures features() const override { return m_features; }
     void setFeatures( WorkbenchFeatures f ) { m_features = f; }
     void setDirtyFn( DirtyFn fn ) { m_dirtyFn = std::move( fn ); }
     void setWindowGetter( WindowGetter fn ) { m_windowGetter = std::move( fn ); }
+    /// In-flight compute probe (#813): TaskCenter-tracked work inside the
+    /// session window (e.g. the classification lab's running job).
+    void setInFlightFn( DirtyFn fn ) { m_inFlightFn = std::move( fn ); }
+    /// Cancel hook (#813): forwards to the session's TaskCenter seam. Never
+    /// blocks; returns false when nothing is running.
+    void setCancelFn( DirtyFn fn ) { m_cancelFn = std::move( fn ); }
     /// Install a close hook (e.g. window->close()); default clears active.
     void setCloseFn( std::function<bool()> fn ) { m_closeFn = std::move( fn ); }
 
@@ -84,6 +95,8 @@ class ExternalWindowWorkbench : public QObject, public IWorkbench
     Opener m_opener;
     WindowGetter m_windowGetter;
     DirtyFn m_dirtyFn;
+    DirtyFn m_inFlightFn;
+    DirtyFn m_cancelFn;
     std::function<bool()> m_closeFn;
     WorkbenchFeatures m_features = WorkbenchFeature::ExternalWindow | WorkbenchFeature::ModalInteraction;
     bool m_active = false;

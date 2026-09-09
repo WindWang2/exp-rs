@@ -4,6 +4,98 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - 2026-09-08
 
+### Cartography Knowledge, Template & Recipe Platform 6.0 (goal series, ADR 0135)
+- **Declarative correctness fixes**: single-item `fit_content` no longer
+  discarded (#781); QGIS rule-based renderers compile declared rules as
+  siblings under a symbol-less root (plus bounded nested sub-rules) instead
+  of inverting the hierarchy (#782); recipe gate degradation propagates per
+  branch along declared `inputs` wiring instead of a recipe-global flag
+  (#784); condition pruning accepts an external runtime context without the
+  redundant embedded `condition_context` (#802); condition `and`/`or`
+  evaluate both operands so evaluation errors never hide behind
+  short-circuit and bare literals are rejected at validation (#804); token
+  references resolve through multi-hop alias chains with cycle detection
+  (#815).
+- **Bounded constraint-graph solver (#805)**: anchors, size clamps and all
+  13 constraint kinds resolve through normalize -> dependency graph (cycle
+  detection) -> propagation -> bounded relaxation (<= 24 passes) ->
+  collision handling -> scoring -> convergence report. Consistent layouts
+  converge to declaration-order-independent geometry; contradictions and
+  non-convergence are reported with the constraint ids involved; the result
+  adds `constraints_total`, `passes`, `converged`.
+- **Composable components (C)**: bounded role-qualified `children[]`
+  grammar (depth 1, <= 16, unique roles) with materialization onto MapSpec
+  items (item children win per role); shipped legend components model
+  title/classes/ramp/nodata/footer.
+- **Template taxonomy (D)**: closed task/medium/purpose facet vocabularies,
+  parameterized page `variants`, explainable faceted search
+  (`searchTemplates`/`TemplateRegistry::search`, `match.reasons`), all 56
+  shipped templates annotated; `cartography:list_templates` gained
+  `medium`/`purpose`/`keyword` filters.
+- **Style knowledge (E)**: `applicability` surface (value domain, band
+  count, modalities) with `checkStyleApplicability`; multiband band-range
+  refusal; semantically wrong renderers are reported, never silently
+  applied.
+- **Recipe knowledge (F)**: decisionable metadata (capabilities,
+  applicability, presets, limitations, expected_artifacts, quality_gates)
+  validated at load; `when_slots` conjunction gate; declared outputs of
+  gate-dropped steps filtered to keep plans valid; new
+  `harness.flood_mapping` exemplar (optical/SAR/fusion branches).
+- **Solution explainability (G)**: `solution:search` hits carry
+  `match.reasons`; the envelope explains up to 10 rejections with reasons.
+- **Cross-layer drift checks (H)**: `test_knowledge_drift` mechanically
+  validates recipe->operator, solution->recipe/template/style,
+  template->component, style->token-set and children->component references
+  across the shipped catalogs.
+- **Preflight & repair 6.0 (I)**: `MAP_STYLE_REF_UNKNOWN`,
+  `MAP_STYLE_DATA_MISMATCH`, `MAP_UNCERTAINTY_NOTE_MISSING` semantic rule
+  families; solver diagnostics surface through
+  `MAP_CONSTRAINT_UNSATISFIABLE`.
+- **Visual/structural matrix (J)**: constraint-heavy double-compile
+  structural-hash determinism and conditional-branch compile tests join the
+  existing PNG-determinism/geometry fixture harness.
+
+### Scientific Computing & Data Foundation 6.0 (goal series)
+- **P0/P1 scientific correctness remediation (23 tracked issues)**:
+  Minnaert regression slope no longer inverted (k = +m; #773) with
+  physically valid synthetic scenes (#806); D8 flow accumulation keeps DEM
+  NoData out of the routing graph and writes the sentinel (#783); SAR
+  terrain geometry consumes the antenna LOOK AZIMUTH, derived from flight
+  heading + `lookDirection: right|left` or an explicit `lookAzimuthDeg`
+  (#785), with `SICNU_SAR_LOOK_AZIMUTH_DEG` output metadata and split
+  heading/look vocabulary; SAR speckle queries per-band NoData sentinels
+  (#803).
+- **Canonical scientific contracts (Foundation 6.0, Milestone B)**: new
+  `processing/contracts/scientific_contracts.h` — the numeric domain
+  (DN-scale vs unit reflectance) resolves ONCE PER RASTER from declared
+  `SICNU_NUMERIC_SCALE` metadata or a bounded decimated whole-raster probe,
+  is logged with evidence and reported in operator results (#801 tile-boundary
+  seams removed from rs:spectral_index and rs:temporal_index_series);
+  explicit-regime kernel variants (`eviUnit/eviDn/...`) replace per-tile
+  regime guessing in streaming loops.
+- **Dataset split/leakage hardening (#775, #786, #787, #788)**: spatial
+  blocks are atomic split units; ratio targets use Hare-Niemeyer
+  largest-remainder with zero-ratio pinning; spatial-buffer vetoed samples
+  no longer starve Validation; leakage-audit spatial hashing is injective
+  across negative coordinates.
+- **Experiment integrity (#774, #789, #811)**: dataset deletion commits its
+  transaction (no leaked SQLite write lock); the reproduction bundle
+  re-applies secret filtering at the export boundary and masks
+  secret-shaped parameter keys; run upsert validates inside BEGIN IMMEDIATE
+  (no TOCTOU).
+- **Geospatial I/O boundedness & credential safety (#776, #790, #791, #807,
+  #808, #809, #810)**: URI display() redacts token-only userinfo and
+  credential-shaped queries for every scheme, with an expanded denylist;
+  readBlock pads edge blocks to the uniform blockSize() contract; readWindow
+  enforces a 1 GiB byte budget (typed error, never bad_alloc); group publish
+  backs up and restores the main file; POSIX cross-device publish falls back
+  to copy+fsync+atomic rename; remote probes run under bounded HTTP
+  timeout/retry config.
+- **Test integrity (#806, #814, #816, #817)**: physically valid topo test
+  data + inversion refusal; numerical composition-solver assertions with
+  declared tolerances; a full readBlock/iterateTiles contract suite; spatial
+  block-isolation assertions; new `test_scientific_contracts` target.
+
 ### Professional Remote Sensing Workbench 5.0 (goal series, ADR 0134)
 - **WorkbenchHost / IWorkbench**: every professional workspace (map, layout,
   classification, georef I2I/I2M, OBIA) registers as a workbench with a

@@ -133,6 +133,17 @@ class RunEnvironment
     /// Exposed for tests: the bundle path calls this before serialization.
     static QHash<QString, QString> filterSecrets( const QHash<QString, QString> &variables );
 
+    /// Defense-in-depth copy for EXPORT boundaries (#789): re-applies the
+    /// secret filter to the environment variables no matter how this
+    /// instance was built, so a record assembled before the denylist existed
+    /// (or through a non-filtering path) cannot leak through serialization.
+    RunEnvironment redacted() const;
+
+    /// Deep secret pass over a JSON document (#789): object members whose
+    /// KEY looks secret are masked to "***" at every depth. Parameters and
+    /// metrics embedded in export bundles go through this before write.
+    static QJsonObject redactSecretKeys( const QJsonObject &json );
+
     QJsonObject toJson() const;
     static Result<RunEnvironment> fromJson( const QJsonObject &json );
 

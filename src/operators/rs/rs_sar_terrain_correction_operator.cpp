@@ -10,11 +10,13 @@
 #include "processing/algorithms/nodata_utils.h"
 #include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/algorithms/sar/sar_terrain.h"
+#include "processing/algorithms/sar/sar_terrain_geometry.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 
 #include <QString>
 
+#include <cmath>
 #include <limits>
 #include <string>
 #include <vector>
@@ -26,6 +28,7 @@ using namespace params;
 namespace {
 
 const std::vector<std::string> s_demUnits = { "meters", "feet", "decimeters" };
+const std::vector<std::string> s_lookDirections = { "right", "left" };
 
 Json::Value makeSarInputContract() {
     Json::Value c(Json::objectValue);
@@ -52,7 +55,9 @@ Json::Value RsSarTerrainCorrectionOperator::schema() const {
     props["dem"] = makeRasterParam("dem", "Co-registered DEM covering the exact same grid (radar geometry)");
     props["dem"]["x-rs-contract"] = makeDemInputContract();
     props["incidenceDeg"] = makeNumberParam("incidenceDeg", "Scene incidence angle θ0 in degrees (near-range center)", 30.0);
-    props["headingDeg"] = makeNumberParam("headingDeg", "Platform heading / look azimuth φ in degrees", 0.0);
+    props["headingDeg"] = makeNumberParam("headingDeg", "Platform flight heading in degrees clockwise from north; combined with lookDirection (#785)", 0.0);
+    props["lookDirection"] = makeEnumParam("lookDirection", "Antenna side relative to the flight path: the look azimuth is heading+90 (right) or heading-90 (left). Ignored when lookAzimuthDeg is given", s_lookDirections, "right");
+    props["lookAzimuthDeg"] = makeNumberParam("lookAzimuthDeg", "Explicit antenna look azimuth (boresight ground azimuth, degrees clockwise from north); overrides headingDeg+lookDirection. Supply it explicitly or not at all — UIs must not auto-fill the default", 0.0);
     props["demUnit"] = makeEnumParam("demUnit", "DEM elevation unit (a declared SICNU_DEM_UNIT metadata on the DEM overrides it)", s_demUnits, "meters");
     props["flagMask"] = makeBooleanParam("flagMask", "Write the Byte layover/shadow validity mask band", true);
     props["flagIncidence"] = makeBooleanParam("flagIncidence", "Write the local incidence angle band (degrees)", true);
@@ -133,6 +138,20 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
     const int band = getInt(params, "band", 1);
     const double incidenceDeg = getDouble(params, "incidenceDeg", 30.0);
     const double headingDeg = getDouble(params, "headingDeg", 0.0);
+    const std::string lookDirection = getEnum(params, "lookDirection", s_lookDirections, "right");
+    // #785: the antenna look azimuth is orthogonal to the flight heading;
+    // derive it from the antenna side unless the boresight is given
+    // explicitly. The old code fed the heading itself into the geometry.
+    double lookAzimuthDeg;
+    if (params.isMember("lookAzimuthDeg") && params["lookAzimuthDeg"].isNumeric()) {
+        lookAzimuthDeg = params["lookAzimuthDeg"].asDouble();
+        if (!std::isfinite(lookAzimuthDeg)) {
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "lookAzimuthDeg must be a finite angle in degrees");
+        }
+    } else {
+        lookAzimuthDeg = sicnu::sar::lookAzimuthFromHeading(headingDeg, lookDirection == "right");
+    }
     std::string demUnit = getEnum(params, "demUnit", s_demUnits, "meters");
     const bool flagMask = getBool(params, "flagMask", true);
     const bool flagIncidence = getBool(params, "flagIncidence", true);
@@ -192,6 +211,7 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
 
     sicnu::sar::TerrainCorrectionOptions options;
     options.incidenceDeg = incidenceDeg;
+    options.lookAzimuthDeg = lookAzimuthDeg;
     options.headingDeg = headingDeg;
     options.applyFlattening = true;
     options.applyShadowMask = flagMask;
@@ -227,6 +247,8 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
     }
     // Radiometric state in the shared vocabulary.
     dst.setMetadataItem("SICNU_RADIOMETRIC_STATE", "gamma0");
+    dst.setMetadataItem("SICNU_SAR_LOOK_AZIMUTH_DEG",
+                        QString::number(lookAzimuthDeg, 'g', 10));
 
     QString error;
     if (!dst.closeWithError(&error)) {
@@ -250,6 +272,7 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
     result["incidenceBand"] = incidenceBand;
     result["maskBand"] = maskBand;
     result["layout"] = layout;
+    result["lookAzimuthDeg"] = lookAzimuthDeg;
     context.reportProgress(1.0, "SAR terrain correction complete");
     return result;
 }

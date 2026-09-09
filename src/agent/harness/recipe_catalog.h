@@ -12,9 +12,13 @@
 //   "$outputs.<name>"     — derived output path for a declared output
 //   "$params.<key>"       — a caller binding under bindings.params
 //   "when_slot": "name"   — step included only when that slot is bound
+//   "when_slots": [names] — step included only when ALL named slots are
+//                           bound (fusion branches)
 //   "when_param": "key"   — step included only when bindings.params[key] is
 //                           truthy; downstream steps then read their
-//                           "params_when_skipped" template instead of "params"
+//                           "params_when_skipped" template instead of
+//                           "params"; degradation propagates along declared
+//                           step "inputs" wiring only (per branch, #784)
 //
 
 #include <json/json.h>
@@ -38,7 +42,9 @@ class RecipeCatalog {
     /// (Re)scans the directory. Returns the number of valid recipes loaded.
     int reload();
 
-    /// Bounded summaries: [{recipe_id, title, intent, slots, step_count}].
+    /// Bounded summaries: [{recipe_id, title, intent, slots, step_count}]
+    /// plus, when declared, capabilities and applicability modalities
+    /// (Platform 6.0 decisionable-knowledge metadata).
     Json::Value listRecipes() const;
 
     /// Full recipe document; typed failure (empty Json) when unknown.
@@ -49,8 +55,20 @@ class RecipeCatalog {
     ///  outputs: {name: "path"}}. Deterministic: same inputs, same plan.
     /// Fails (empty Json + typed error) on unknown slots or unresolvable refs
     /// (slot refs are resolved through resolveDatasetRef — no guessing).
+    /// Gate semantics (Platform 6.0, #784): when_slot/when_slots/when_param
+    /// gate a step; degradation runs along the declared step "inputs" wiring
+    /// only — an unrelated closed gate never flips a parallel branch.
     Json::Value instantiateRecipe( const std::string &recipeId, const Json::Value &bindings,
                                    HarnessError &error ) const;
+
+    /// Structural validation of the Platform 6.0 decisionable-knowledge
+    /// metadata (capabilities, applicability, presets, limitations,
+    /// expected_artifacts, quality_gates). All fields optional; present
+    /// fields are shape- and budget-checked. Empty returned vector = valid.
+    static std::vector<std::string> validateRecipeMetadata( const Json::Value &recipe );
+
+    /// Problems recorded while loading (invalid metadata skipped a document).
+    std::vector<std::string> loadProblems() const;
 
     bool loaded() const { return mLoaded; }
 
@@ -61,6 +79,7 @@ class RecipeCatalog {
     std::string mDirectory;
     bool mLoaded = false;
     Json::Value mRecipes{Json::objectValue}; // recipe_id -> document
+    std::vector<std::string> mLoadProblems;
 };
 
 } // namespace sicnu::agent::harness

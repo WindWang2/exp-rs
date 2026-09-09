@@ -1,6 +1,7 @@
 {
   "id": "time-series-phenology-a4l",
   "version": 1,
+  "facets": {"tasks": ["time-series", "vegetation"], "medium": "a4", "purpose": "analysis"},
   "description": "Phenology small multiples (2×2 temporal steps) with shared legend and series chart.",
   "page": {
     "width_mm": 297,

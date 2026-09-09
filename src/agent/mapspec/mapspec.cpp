@@ -124,6 +124,48 @@ void checkV2ItemFields( const Json::Value &item, const std::string &id,
     problems.push_back( id + ": page must be a non-negative integer index" );
   if ( item.isMember( "binding" ) && !item["binding"].isObject() )
     problems.push_back( id + ": binding must be an object" );
+  // Platform 6.0 (Milestone C): bounded composite children grammar. Items
+  // carry role-qualified blocks materialized from composite components;
+  // depth-1, unique roles, small budget — furniture structure, not UI trees.
+  if ( item.isMember( "children" ) )
+  {
+    const Json::Value &children = item["children"];
+    if ( !children.isArray() )
+    {
+      problems.push_back( id + ": children must be an array" );
+    }
+    else
+    {
+      if ( static_cast<int>( children.size() ) > 16 )
+        problems.push_back( id + ": children exceed the 16 entry budget" );
+      std::set<std::string> roles;
+      int index = 0;
+      for ( const auto &child : children )
+      {
+        const std::string where = id + ": children[" + std::to_string( index++ ) + "]";
+        if ( !child.isObject() )
+        {
+          problems.push_back( where + " must be an object" );
+          continue;
+        }
+        if ( !child.isMember( "role" ) || !child["role"].isString() ||
+             child["role"].asString().empty() )
+          problems.push_back( where + " needs a non-empty string role" );
+        else if ( !roles.insert( child["role"].asString() ).second )
+          problems.push_back( id + ": duplicate child role '" + child["role"].asString() + "'" );
+        if ( child.isMember( "children" ) )
+          problems.push_back( where + " must not nest children (depth bounded to 1)" );
+        if ( child.isMember( "required" ) && !child["required"].isBool() )
+          problems.push_back( where + ".required must be a boolean" );
+        for ( const char *member : { "content", "overrides" } )
+          if ( child.isMember( member ) && !child[member].isObject() )
+            problems.push_back( where + "." + member + " must be an object" );
+        for ( const char *member : { "source_component", "description" } )
+          if ( child.isMember( member ) && !child[member].isString() )
+            problems.push_back( where + "." + member + " must be a string" );
+      }
+    }
+  }
   if ( item.isMember( "source_component" ) )
   {
     const Json::Value &reference = item["source_component"];
@@ -198,11 +240,6 @@ void checkV3ItemFields( const Json::Value &item, const std::string &id, const st
 
 } // namespace
 
-const char *const kCollections[] = { "map_frames", "layers", "symbols", "legends",
-                                     "north_arrows", "scale_bars", "titles", "labels",
-                                     "charts", "colorbars", "inset_maps", "grids",
-                                     "annotations", "source_notes", "constraints" };
-const int kCollectionCount = static_cast<int>( sizeof( kCollections ) / sizeof( kCollections[0] ) );
 
 bool isAnchorEdge( const std::string &edge )
 {
@@ -310,6 +347,20 @@ Json::Value findMapSpecItem( const Json::Value &spec, const std::string &id )
       {
         Json::Value location( Json::objectValue );
         location["collection"] = collection;
+        location["index"] = index;
+        return location;
+      }
+    }
+  }
+  if ( spec.isMember( "items" ) && spec["items"].isArray() )
+  {
+    for ( int index = 0; index < static_cast<int>( spec["items"].size() ); ++index )
+    {
+      const Json::Value &item = spec["items"][index];
+      if ( item.isObject() && item.isMember( "id" ) && item["id"].asString() == id )
+      {
+        Json::Value location( Json::objectValue );
+        location["collection"] = "items";
         location["index"] = index;
         return location;
       }
@@ -841,13 +892,34 @@ Json::Value resolveMapSpecConditions( Json::Value &spec, const Json::Value &cont
                                       std::vector<std::string> *errors )
 {
   Json::Value ledger( Json::arrayValue );
-  if ( !spec.isObject() || !spec.isMember( "condition_context" ) )
+  if ( !spec.isObject() )
+    return ledger;
+
+  // Issue #802: conditions evaluate against the caller-supplied runtime
+  // `context`; an embedded `condition_context` is a convenience default that
+  // must never be *required*. Both may be present — the embedded context is
+  // the base, the external context overrides key-by-key.
+  const bool hasEmbedded = spec.isMember( "condition_context" ) &&
+                           spec["condition_context"].isObject();
+  const bool hasExternal = context.isObject();
+  if ( !hasEmbedded && !hasExternal )
     return ledger;
   if ( !context.isObject() && !context.isNull() )
   {
     if ( errors )
       errors->push_back( "condition context must be an object" );
     return ledger;
+  }
+  Json::Value effective( Json::objectValue );
+  if ( hasEmbedded )
+  {
+    for ( const auto &key : spec["condition_context"].getMemberNames() )
+      effective[key] = spec["condition_context"][key];
+  }
+  if ( hasExternal )
+  {
+    for ( const auto &key : context.getMemberNames() )
+      effective[key] = context[key];
   }
 
   auto record = [ &ledger ]( const std::string &id, const std::string &field,
@@ -862,13 +934,18 @@ Json::Value resolveMapSpecConditions( Json::Value &spec, const Json::Value &cont
     ledger.append( entry );
   };
 
-  const Json::Value &ctx = context;
+  const Json::Value &ctx = effective;
 
   // 1. Items: visible_if prunes whole items; content_if strips content.
   std::set<std::string> removedIds;
+  std::vector<std::string> targetCollections;
   for ( int c = 0; c < kCollectionCount; ++c )
+    targetCollections.push_back( kCollections[c] );
+  if ( spec.isMember( "items" ) && spec["items"].isArray() )
+    targetCollections.push_back( "items" );
+
+  for ( const auto &collection : targetCollections )
   {
-    const char *collection = kCollections[c];
     if ( !spec.isMember( collection ) || !spec[collection].isArray() )
       continue;
     Json::Value kept( Json::arrayValue );
@@ -887,19 +964,24 @@ Json::Value resolveMapSpecConditions( Json::Value &spec, const Json::Value &cont
       {
         const std::string condition = item["visible_if"].asString();
         std::string evalError;
-        bool value = false;
+        bool value = true;
         if ( mapspec::evaluateCondition( condition, ctx, &value, &evalError ) )
         {
-          keep = value;
-          record( id, "visible_if", condition, value, std::string() );
+          if ( !value )
+          {
+            keep = false;
+            record( id, "visible_if", condition, false, std::string() );
+          }
+          else
+          {
+            record( id, "visible_if", condition, true, std::string() );
+          }
         }
-        else
+        else if ( !evalError.empty() )
         {
-          // Conservative: an unevaluable condition keeps the content.
-          keep = true;
-          record( id, "visible_if", condition, true, evalError );
           if ( errors )
             errors->push_back( id + ": visible_if: " + evalError );
+          record( id, "visible_if", condition, true, evalError );
         }
       }
       if ( !keep )
@@ -912,23 +994,30 @@ Json::Value resolveMapSpecConditions( Json::Value &spec, const Json::Value &cont
         const std::string condition = item["content_if"].asString();
         std::string evalError;
         bool value = true;
-        if ( mapspec::evaluateCondition( condition, ctx, &value, &evalError ) && !value )
+        if ( mapspec::evaluateCondition( condition, ctx, &value, &evalError ) )
         {
-          Json::Value pruned = item;
-          pruned.removeMember( "content" );
-          pruned.removeMember( "content_if" );
-          const bool emptyWithoutContent = !pruned.isMember( "text" ) &&
-                                           !pruned.isMember( "chart" ) && !pruned.isMember( "colors" );
-          record( id, "content_if", condition, false, std::string() );
-          if ( emptyWithoutContent )
+          if ( !value )
           {
-            removedIds.insert( id );
-            continue; // slot furniture without content: drop entirely
+            Json::Value pruned = item;
+            pruned.removeMember( "content" );
+            pruned.removeMember( "content_if" );
+            const bool emptyWithoutContent = !pruned.isMember( "text" ) &&
+                                             !pruned.isMember( "chart" ) && !pruned.isMember( "colors" );
+            record( id, "content_if", condition, false, std::string() );
+            if ( emptyWithoutContent )
+            {
+              removedIds.insert( id );
+              continue; // slot furniture without content: drop entirely
+            }
+            kept.append( pruned );
+            continue;
           }
-          kept.append( pruned );
-          continue;
+          else
+          {
+            record( id, "content_if", condition, true, std::string() );
+          }
         }
-        if ( !evalError.empty() )
+        else if ( !evalError.empty() )
         {
           if ( errors )
             errors->push_back( id + ": content_if: " + evalError );
@@ -938,6 +1027,33 @@ Json::Value resolveMapSpecConditions( Json::Value &spec, const Json::Value &cont
       kept.append( item );
     }
     spec[collection] = kept;
+  }
+
+  // 2a. Single page entry: spec["page"]["page_if"]
+  if ( spec.isMember( "page" ) && spec["page"].isObject() && spec["page"].isMember( "page_if" ) &&
+       spec["page"]["page_if"].isString() )
+  {
+    const std::string condition = spec["page"]["page_if"].asString();
+    std::string evalError;
+    bool value = true;
+    if ( mapspec::evaluateCondition( condition, ctx, &value, &evalError ) )
+    {
+      if ( !value )
+      {
+        record( "page", "page_if", condition, false, std::string() );
+        spec["page"]["visible"] = false;
+      }
+      else
+      {
+        record( "page", "page_if", condition, true, std::string() );
+      }
+    }
+    else if ( !evalError.empty() )
+    {
+      if ( errors )
+        errors->push_back( std::string( "page_if: " ) + evalError );
+      record( "page", "page_if", condition, true, evalError );
+    }
   }
 
   // 2. Pages: page_if prunes pages; items on pruned pages are removed and
@@ -957,12 +1073,19 @@ Json::Value resolveMapSpecConditions( Json::Value &spec, const Json::Value &cont
       const std::string condition = pageEntry["page_if"].asString();
       std::string evalError;
       bool value = true;
-      if ( mapspec::evaluateCondition( condition, ctx, &value, &evalError ) && !value )
+      if ( mapspec::evaluateCondition( condition, ctx, &value, &evalError ) )
       {
-        record( "page-" + std::to_string( index + 1 ), "page_if", condition, false, std::string() );
-        continue;
+        if ( !value )
+        {
+          record( "page-" + std::to_string( index + 1 ), "page_if", condition, false, std::string() );
+          continue;
+        }
+        else
+        {
+          record( "page-" + std::to_string( index + 1 ), "page_if", condition, true, std::string() );
+        }
       }
-      if ( !evalError.empty() )
+      else if ( !evalError.empty() )
       {
         if ( errors )
           errors->push_back( std::string( "page_if: " ) + evalError );

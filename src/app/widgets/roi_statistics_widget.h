@@ -5,11 +5,14 @@
 #include <QWidget>
 #include <QVector>
 
+#include <cstdint>
+
 class QTableWidget;
 class QPushButton;
 class QLabel;
 class QgsRasterLayer;
 class QgsVectorLayer;
+class QThreadPool;
 
 /**
  * Widget for computing and displaying statistics for selected ROIs.
@@ -21,6 +24,10 @@ class RoiStatisticsWidget : public QWidget
 
 public:
     explicit RoiStatisticsWidget(QWidget *parent = nullptr);
+    ~RoiStatisticsWidget() override;
+
+    /// Dedicated, bounded thread pool for raster analysis (#797).
+    static QThreadPool *analysisThreadPool();
 
     void setRasterLayer(QgsRasterLayer *layer);
     void setRoiLayer(QgsVectorLayer *roiLayer);
@@ -60,5 +67,9 @@ private:
     // newer request starts or the widget is destroyed; m_computing guards
     // double-submit (Refresh is disabled while running).
     uint64_t m_requestEpoch = 0;
+    // #797: scan-pool generation of the in-flight request (canceled in the
+    // destructor so the bounded pool stops reading GDAL sources for a dead
+    // widget).
+    quint64 m_scanGeneration = 0;
     bool m_computing = false;
 };

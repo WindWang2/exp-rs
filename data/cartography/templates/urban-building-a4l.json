@@ -1,6 +1,7 @@
 {
   "id": "urban-building-a4l",
   "version": 1,
+  "facets": {"tasks": ["classification"], "medium": "a4", "purpose": "analysis"},
   "description": "Urban / building footprint density map with class chart.",
   "page": {
     "width_mm": 297,

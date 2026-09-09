@@ -1,6 +1,7 @@
 {
   "id": "soil-moisture-a4l",
   "version": 1,
+  "facets": {"tasks": ["water"], "medium": "a4", "purpose": "analysis"},
   "description": "Soil-moisture product (SAR-derived) with sequential colorbar and series chart.",
   "page": {
     "width_mm": 297,

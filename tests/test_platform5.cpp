@@ -563,6 +563,29 @@ TEST_CASE( "The composition solver resolves v3 relative constraints deterministi
   const CompositionResult solved = resolveComposition( overlap, 5.0 );
   CHECK( solved.constraintsSolved == 1 );
   CHECK( overlap["titles"][1]["rect_mm"][1].asDouble() == Catch::Approx( 35.0 ) );
+
+  // #814: the solver's geometry is pinned numerically, not just "solved".
+  // A "below" chain at a different mm-per-unit scale must place the second
+  // item at y = a.y + a.h + gap exactly (declared tolerance 1e-9).
+  Json::Value chain = makeSpec();
+  chain["titles"].append( rectItem( "top", 0, 0, 50, 12 ) );
+  chain["titles"].append( rectItem( "under", 100, 100, 30, 6 ) );
+  Json::Value below( Json::objectValue );
+  below["id"] = "c-below-2";
+  below["kind"] = "below";
+  Json::Value chainItems( Json::arrayValue );
+  chainItems.append( "top" );
+  chainItems.append( "under" );
+  below["items"] = chainItems;
+  below["gap_mm"] = 2;
+  chain["constraints"].append( below );
+  const CompositionResult chainSolved = resolveComposition( chain, 2.5 );
+  CHECK( chainSolved.constraintsSolved == 1 );
+  const Json::Value under = chain["titles"][1]["rect_mm"];
+  CHECK( under[0].asDouble() == Catch::Approx( 0.0 ).margin( 1e-9 ) ); // x follows the anchor
+  CHECK( under[1].asDouble() == Catch::Approx( 0.0 + 12.0 + 2.0 ).margin( 1e-9 ) );
+  CHECK( under[2].asDouble() == Catch::Approx( 30.0 ).margin( 1e-9 ) ); // width preserved
+  CHECK( under[3].asDouble() == Catch::Approx( 6.0 ).margin( 1e-9 ) );  // height preserved
 }
 
 TEST_CASE( "Conditional pruning hides items, strips content and remaps pages",
@@ -792,9 +815,11 @@ TEST_CASE( "Scale gates: catalog load, facet search and the solution pipeline st
   CHECK( totalHits > 0 );
   CHECK( searchMs < 20.0 );
 
-  // Compact search responses stay inside the token budget. Measured:
-  // a full compact summary serializes to ~440 chars, so gate the per-hit
-  // cost (500) and the family page (all 5 flood solutions) at 2500.
+  // Compact search responses stay inside the token budget. Platform 5.0
+  // measured ~440 chars per compact summary; Platform 6.0 (Milestone G)
+  // adds explainability — match.reasons per hit plus up to 10 explained
+  // rejections — so the measured page grew to ~3.2 KB. The guards track
+  // that feature while keeping the response a bounded ~800 tokens.
   SolutionQuery flood;
   flood.task = "flood";
   const Json::Value page = searchSolutions( solutions, flood );
@@ -803,8 +828,8 @@ TEST_CASE( "Scale gates: catalog load, facet search and the solution pipeline st
   const std::string serialized = Json::writeString( builder, page );
   const int hits = static_cast<int>( page["items"].size() );
   REQUIRE( hits > 0 );
-  CHECK( serialized.size() / hits <= 500u );
-  CHECK( serialized.size() <= 2500 );
+  CHECK( serialized.size() / hits <= 800u );
+  CHECK( serialized.size() <= 4000 );
 
   // Instantiation pipeline: contract check + recipe compile + template draft.
   const auto instStart = tclock::now();
