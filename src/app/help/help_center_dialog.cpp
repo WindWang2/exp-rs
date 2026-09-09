@@ -89,8 +89,15 @@ HelpCenterDialog::HelpCenterDialog( QWidget *parent )
             showTopic( id );
     } );
     connect( m_browser, &QTextBrowser::anchorClicked, this, [this]( const QUrl &url ) {
-        if ( url.scheme() == QLatin1String( "helpid" ) )
-            showTopic( url.host() );
+        if ( url.scheme() == QLatin1String( "helpid" ) ) {
+            // NB: ids travel in the PATH, never the host — QUrl lowercases
+            // hosts (RFC 3986 normalization) and Help IDs are case-sensitive.
+            QString id = url.path();
+            while ( id.startsWith( u'/' ) )
+                id.remove( 0, 1 );
+            if ( !id.isEmpty() )
+                showTopic( id );
+        }
     } );
 
     m_index.build( sicnu::help::globalHelpRegistry().all() );
@@ -112,6 +119,15 @@ void HelpCenterDialog::buildCategories()
         auto *item = new QTreeWidgetItem( m_tree, QStringList{ category } );
         item->setFlags( item->flags() & ~Qt::ItemIsSelectable );
         m_categoryItems.insert( category, item );
+    }
+    for ( const sicnu::help::HelpDescriptor *d : sicnu::help::globalHelpRegistry().all() ) {
+        QTreeWidgetItem *category = m_categoryItems.value( d->category );
+        if ( !category )
+            continue;
+        auto *item = new QTreeWidgetItem(
+            category, QStringList{ QStringLiteral( "%1 — %2" ).arg( d->title, d->summary.left( 40 ) ) } );
+        item->setToolTip( 0, d->id );
+        item->setData( 0, Qt::UserRole, d->id );
     }
     m_tree->expandAll();
 }
@@ -152,10 +168,17 @@ void HelpCenterDialog::showTopic( const QString &helpId )
 
 void HelpCenterDialog::runSearch( const QString &query )
 {
-    buildCategories();
     if ( query.trimmed().isEmpty() ) {
+        buildCategories(); // browse mode: every topic under its category
         m_countLabel->clear();
         return;
+    }
+
+    // search mode: strip browse-mode children, keep only matched topics
+    for ( QTreeWidgetItem *category : m_categoryItems ) {
+        const QList<QTreeWidgetItem *> children = category->takeChildren();
+        for ( QTreeWidgetItem *child : children )
+            delete child;
     }
 
     QElapsedTimer timer;
@@ -268,7 +291,7 @@ QString HelpCenterDialog::renderTopicHtml( const sicnu::help::HelpDescriptor &d 
     if ( !d.relatedIds.isEmpty() ) {
         html += QStringLiteral( "<h3>%1</h3><ul>" ).arg( escapeHtml( tr( "相关主题" ) ) );
         for ( const QString &related : d.relatedIds ) {
-            html += QStringLiteral( "<li><a href=\"helpid://%1\"><code>%1</code></a></li>" ).arg( escapeHtml( related ) );
+            html += QStringLiteral( "<li><a href=\"helpid:/%1\"><code>%1</code></a></li>" ).arg( escapeHtml( related ) );
         }
         html += QStringLiteral( "</ul>" );
     }

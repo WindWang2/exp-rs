@@ -4,107 +4,399 @@
     "title": "时序合成",
     "summary": "把时间集合按周期合成为最小值/中值/均值等合成影像。",
     "category": "时序分析",
-    "keywords": ["合成", "中值合成", "composite", "去云"],
+    "keywords": [
+      "合成",
+      "中值合成",
+      "composite",
+      "去云"
+    ],
     "algorithm": {
       "whatItDoes": "把集合内的景按 period 聚合，对每像元取 min/median/mean 等统计量；可按 QA 波段先剔除云污染。",
       "whenToUse": "去云无缝底图生产、季度/年度植被基线。",
-      "inputs": ["collection 或 scenes：时间序列影像集合"],
-      "outputs": ["每周期一景的合成影像"],
-      "assumptions": ["景已配准同格网", "云掩膜已就绪（或用 QA 波段）"],
-      "limitations": ["周期内有效观测过少时仍含云斑"],
-      "keyParameters": ["period", "method", "apply_qa_masking", "quality_band"],
-      "relatedTools": ["rs:temporal_gap_fill", "rs:qa_mask"]
+      "inputs": [
+        "collection 或 scenes：时间序列影像集合"
+      ],
+      "outputs": [
+        "每周期一景的合成影像"
+      ],
+      "assumptions": [
+        "景已配准同格网",
+        "云掩膜已就绪（或用 QA 波段）"
+      ],
+      "limitations": [
+        "周期内有效观测过少时仍含云斑"
+      ],
+      "keyParameters": [
+        "period",
+        "method",
+        "apply_qa_masking",
+        "quality_band"
+      ],
+      "relatedTools": [
+        "rs:temporal_gap_fill",
+        "rs:qa_mask"
+      ]
     },
     "parameters": [
-      {"name": "collection", "meaning": "时间集合 ID（治理目录引用），与 scenes 二选一。"},
-      {"name": "scenes", "meaning": "显式列出影像路径（逗号分隔）。"},
-      {"name": "period", "meaning": "聚合周期命名（month/season/year）或自定义天数。", "recommended": "云雨区月度合成 + 中值最常用。"},
-      {"name": "method", "meaning": "聚合统计：median（抗云抗离群，推荐）、mean、min（植被最绿值用 min 反射率或 NDVI max 视实现）、max。", "recommended": "光学去云首选 median。"},
-      {"name": "apply_qa_masking", "meaning": "合成前按 QA/质量波段剔除低质量像元。"},
-      {"name": "quality_band", "meaning": "QA 波段名（如 QA_PIXEL / SCL）。"},
-      {"name": "duplicate_policy", "meaning": "同一时刻重复景的处理策略。"},
-      {"name": "target_date", "meaning": "目标日期（单期合成时）。"},
-      {"name": "tile_size", "unit": "像素", "meaning": "流式分块大小，控制内存。", "recommended": "保持默认 256/512 即可。"}
+      {
+        "name": "collection",
+        "meaning": "时间集合 ID（治理目录引用），与 scenes 二选一。"
+      },
+      {
+        "name": "scenes",
+        "meaning": "显式列出影像路径（逗号分隔）。"
+      },
+      {
+        "name": "period",
+        "meaning": "聚合周期命名（month/season/year）或自定义天数。",
+        "recommended": "云雨区月度合成 + 中值最常用。"
+      },
+      {
+        "name": "method",
+        "meaning": "合成方式：best_pixel（按质量分选最优观测，默认）、mean、median（抗云抗离群）。",
+        "recommended": "有质量波段时用 best_pixel；云污染重的光学数据用 median。"
+      },
+      {
+        "name": "apply_qa_masking",
+        "meaning": "合成前按 QA/质量波段剔除低质量像元。"
+      },
+      {
+        "name": "quality_band",
+        "meaning": "质量分 1-based 波段号（值越大越好），供 best_pixel 选取。",
+        "warnings": [
+          "是波段序号而非 QA 波段名；QA 语义掩膜请先用 rs:qa_mask / rs:apply_mask。"
+        ]
+      },
+      {
+        "name": "duplicate_policy",
+        "meaning": "同一时刻重复景的处理策略。"
+      },
+      {
+        "name": "target_date",
+        "meaning": "best_pixel 的时间接近度 tie-break：多景质量相同时选最接近该日期的观测。"
+      },
+      {
+        "name": "tile_size",
+        "unit": "像素",
+        "meaning": "流式分块大小，控制内存。",
+        "recommended": "保持默认 256/512 即可。"
+      }
     ],
-    "related": ["concept.rs.temporal_analysis", "operator.rs.temporal_gap_fill"],
-    "docs": ["docs/temporal/"]
+    "related": [
+      "concept.rs.temporal_analysis",
+      "operator.rs.temporal_gap_fill"
+    ],
+    "docs": [
+      "docs/temporal/"
+    ]
   },
   {
-    "id": "operator.rs.temporal_summary", "title": "时序统计汇总", "summary": "对时序集合输出逐像元 min/max/mean/std/count 汇总。",
-    "category": "时序分析", "keywords": ["统计", "汇总", "summary"],
-    "algorithm": {"whatItDoes": "对每像元时间维计算基本统计量，count 可作为质量层。", "whenToUse": "快速了解时间动态幅度与有效观测数。", "limitations": ["极值对云残余敏感"]},
-    "related": ["operator.rs.temporal_composite"]
+    "id": "operator.rs.temporal_summary",
+    "title": "时序统计汇总",
+    "summary": "对时序集合输出逐像元 min/max/mean/std/count 汇总。",
+    "category": "时序分析",
+    "keywords": [
+      "统计",
+      "汇总",
+      "summary"
+    ],
+    "algorithm": {
+      "whatItDoes": "对每像元时间维计算基本统计量，count 可作为质量层。",
+      "whenToUse": "快速了解时间动态幅度与有效观测数。",
+      "limitations": [
+        "极值对云残余敏感"
+      ]
+    },
+    "related": [
+      "operator.rs.temporal_composite"
+    ]
   },
   {
-    "id": "operator.rs.temporal_index_series", "title": "时序指数序列", "summary": "对时序集合逐期计算光谱指数，输出指数时间堆栈。",
-    "category": "时序分析", "keywords": ["NDVI 时序", "指数序列"],
-    "algorithm": {"whatItDoes": "对每期影像计算所选指数后堆叠为时间序列栅格。", "whenToUse": "物候/趋势分析的特征准备。", "relatedTools": ["rs:spectral_index", "rs:temporal_trend"]},
-    "related": ["concept.rs.temporal_analysis", "operator.rs.spectral_index"]
+    "id": "operator.rs.temporal_index_series",
+    "title": "时序指数序列",
+    "summary": "对时序集合逐期计算光谱指数，输出指数时间堆栈。",
+    "category": "时序分析",
+    "keywords": [
+      "NDVI 时序",
+      "指数序列"
+    ],
+    "algorithm": {
+      "whatItDoes": "对每期影像计算所选指数后堆叠为时间序列栅格。",
+      "whenToUse": "物候/趋势分析的特征准备。",
+      "relatedTools": [
+        "rs:spectral_index",
+        "rs:temporal_trend"
+      ]
+    },
+    "related": [
+      "concept.rs.temporal_analysis",
+      "operator.rs.spectral_index"
+    ]
   },
   {
-    "id": "operator.rs.temporal_trend", "title": "时序趋势", "summary": "逐像元线性趋势（斜率/截距/p 值）。",
-    "category": "时序分析", "keywords": ["趋势", "slope", "线性回归"],
-    "algorithm": {"whatItDoes": "以时间为自变量逐像元最小二乘拟合，输出斜率（变化速率）与显著性。", "whenToUse": "植被退化/恢复、城市化的长期方向性判断。", "assumptions": ["观测数足够", "趋势近似线性"], "limitations": ["对离群值敏感", "非线性过程误拟合"]},
-    "related": ["operator.rs.temporal_sen_trend", "concept.rs.temporal_analysis"]
+    "id": "operator.rs.temporal_trend",
+    "title": "时序趋势",
+    "summary": "逐像元线性趋势（斜率/截距/p 值）。",
+    "category": "时序分析",
+    "keywords": [
+      "趋势",
+      "slope",
+      "线性回归"
+    ],
+    "algorithm": {
+      "whatItDoes": "以时间为自变量逐像元最小二乘拟合，输出斜率（变化速率）与显著性。",
+      "whenToUse": "植被退化/恢复、城市化的长期方向性判断。",
+      "assumptions": [
+        "观测数足够",
+        "趋势近似线性"
+      ],
+      "limitations": [
+        "对离群值敏感",
+        "非线性过程误拟合"
+      ]
+    },
+    "related": [
+      "operator.rs.temporal_sen_trend",
+      "concept.rs.temporal_analysis"
+    ]
   },
   {
-    "id": "operator.rs.temporal_sen_trend", "title": "Sen 斜率趋势", "summary": "Theil–Sen 稳健斜率 + Mann-Kendall 显著性。",
-    "category": "时序分析", "keywords": ["Sen", "Mann-Kendall", "稳健趋势"],
-    "algorithm": {"whatItDoes": "Theil–Sen 以成对斜率中位数估计趋势，抗离群；MK 检验给出显著性。", "whenToUse": "含云残余/离群值的长期植被趋势。", "limitations": ["计算量高于普通回归", "数据点少时功效不足"]},
-    "related": ["operator.rs.temporal_trend", "operator.rs.temporal_breakpoints"]
+    "id": "operator.rs.temporal_sen_trend",
+    "title": "Sen 斜率趋势",
+    "summary": "Theil–Sen 稳健斜率 + Mann-Kendall 显著性。",
+    "category": "时序分析",
+    "keywords": [
+      "Sen",
+      "Mann-Kendall",
+      "稳健趋势"
+    ],
+    "algorithm": {
+      "whatItDoes": "Theil–Sen 以成对斜率中位数估计趋势，抗离群；MK 检验给出显著性。",
+      "whenToUse": "含云残余/离群值的长期植被趋势。",
+      "limitations": [
+        "计算量高于普通回归",
+        "数据点少时功效不足"
+      ]
+    },
+    "related": [
+      "operator.rs.temporal_trend",
+      "operator.rs.temporal_breakpoints"
+    ]
   },
   {
-    "id": "operator.rs.temporal_smooth", "title": "时序平滑", "summary": "S-G 滤波/移动平均/样条平滑指数时间曲线。",
-    "category": "时序分析", "keywords": ["平滑", "Savitzky-Golay", "去噪"],
-    "algorithm": {"whatItDoes": "时间维低通滤波抑制云残余抖动，保留季节形态。", "whenToUse": "物候参数提取前的去噪。", "limitations": ["过度平滑抹平真实突变"]},
-    "related": ["operator.rs.temporal_phenology", "operator.rs.temporal_gap_fill"]
+    "id": "operator.rs.temporal_smooth",
+    "title": "时序平滑",
+    "summary": "S-G 滤波/移动平均/样条平滑指数时间曲线。",
+    "category": "时序分析",
+    "keywords": [
+      "平滑",
+      "Savitzky-Golay",
+      "去噪"
+    ],
+    "algorithm": {
+      "whatItDoes": "时间维低通滤波抑制云残余抖动，保留季节形态。",
+      "whenToUse": "物候参数提取前的去噪。",
+      "limitations": [
+        "过度平滑抹平真实突变"
+      ]
+    },
+    "related": [
+      "operator.rs.temporal_phenology",
+      "operator.rs.temporal_gap_fill"
+    ]
   },
   {
-    "id": "operator.rs.temporal_gap_fill", "title": "时序插补", "summary": "对云洞/缺失时间步插值重建完整序列。",
-    "category": "时序分析", "keywords": ["插补", "缺口填充", "gap filling"],
-    "algorithm": {"whatItDoes": "时间线性/样条插值或邻近均值填充缺失观测，并标记插补掩膜。", "whenToUse": "谐波/趋势分析前的规则化采样。", "limitations": ["长缺口插补会引入人工形态"]},
-    "related": ["operator.rs.temporal_composite", "operator.rs.temporal_harmonic_fit"]
+    "id": "operator.rs.temporal_gap_fill",
+    "title": "时序插补",
+    "summary": "对云洞/缺失时间步插值重建完整序列。",
+    "category": "时序分析",
+    "keywords": [
+      "插补",
+      "缺口填充",
+      "gap filling"
+    ],
+    "algorithm": {
+      "whatItDoes": "时间线性/样条插值或邻近均值填充缺失观测，并标记插补掩膜。",
+      "whenToUse": "谐波/趋势分析前的规则化采样。",
+      "limitations": [
+        "长缺口插补会引入人工形态"
+      ]
+    },
+    "related": [
+      "operator.rs.temporal_composite",
+      "operator.rs.temporal_harmonic_fit"
+    ]
   },
   {
-    "id": "operator.rs.temporal_harmonic_fit", "title": "谐波拟合", "summary": "年度周期谐波回归（HANTS 思路）拟合时序。",
-    "category": "时序分析", "keywords": ["谐波", "HANTS", "物候参数"],
-    "algorithm": {"whatItDoes": "以正弦/余弦基拟合年内周期，输出幅度/相位（物候时间）与残差。", "whenToUse": "稳定季节动态的建模、去云重构。", "limitations": ["非周期过程（砍伐）不适用", "阶数过高拟合噪声"]},
-    "related": ["concept.rs.temporal_analysis", "operator.rs.temporal_phenology"]
+    "id": "operator.rs.temporal_harmonic_fit",
+    "title": "谐波拟合",
+    "summary": "年度周期谐波回归（HANTS 思路）拟合时序。",
+    "category": "时序分析",
+    "keywords": [
+      "谐波",
+      "HANTS",
+      "物候参数"
+    ],
+    "algorithm": {
+      "whatItDoes": "以正弦/余弦基拟合年内周期，输出幅度/相位（物候时间）与残差。",
+      "whenToUse": "稳定季节动态的建模、去云重构。",
+      "limitations": [
+        "非周期过程（砍伐）不适用",
+        "阶数过高拟合噪声"
+      ]
+    },
+    "related": [
+      "concept.rs.temporal_analysis",
+      "operator.rs.temporal_phenology"
+    ]
   },
   {
-    "id": "operator.rs.temporal_phenology", "title": "物候参数提取", "summary": "从指数曲线提取生长季开始/结束/峰值等物候期。",
-    "category": "时序分析", "keywords": ["物候", "生长季", "phenology"],
-    "algorithm": {"whatItDoes": "以阈值/曲率法从平滑曲线判定 SOS/EOS/POS 与季节积分。", "whenToUse": "农业物候监测、生态系统研究。", "assumptions": ["单峰或可分离多峰的季节形态"], "limitations": ["双季作物需要多峰处理"]},
-    "related": ["operator.rs.temporal_smooth", "operator.rs.temporal_harmonic_fit"]
+    "id": "operator.rs.temporal_phenology",
+    "title": "物候参数提取",
+    "summary": "从指数曲线提取生长季开始/结束/峰值等物候期。",
+    "category": "时序分析",
+    "keywords": [
+      "物候",
+      "生长季",
+      "phenology"
+    ],
+    "algorithm": {
+      "whatItDoes": "以阈值/曲率法从平滑曲线判定 SOS/EOS/POS 与季节积分。",
+      "whenToUse": "农业物候监测、生态系统研究。",
+      "assumptions": [
+        "单峰或可分离多峰的季节形态"
+      ],
+      "limitations": [
+        "双季作物需要多峰处理"
+      ]
+    },
+    "related": [
+      "operator.rs.temporal_smooth",
+      "operator.rs.temporal_harmonic_fit"
+    ]
   },
   {
-    "id": "operator.rs.temporal_breakpoints", "title": "时序断点检测", "summary": "检测时间序列结构性突变（BFAST/POC 思路）。",
-    "category": "时序分析", "keywords": ["断点", "突变", "breakpoint", "扰动"],
-    "algorithm": {"whatItDoes": "以分段回归/统计检验定位趋势或季节成分的突变时间。", "whenToUse": "采伐、火灾、建设等扰动事件检测。", "assumptions": ["突变前后各有稳定时段"], "limitations": ["渐变过程不易定位", "短序列误报率升高"]},
-    "related": ["operator.rs.temporal_sen_trend", "operator.rs.temporal_monitor"]
+    "id": "operator.rs.temporal_breakpoints",
+    "title": "时序断点检测",
+    "summary": "检测时间序列结构性突变（BFAST/POC 思路）。",
+    "category": "时序分析",
+    "keywords": [
+      "断点",
+      "突变",
+      "breakpoint",
+      "扰动"
+    ],
+    "algorithm": {
+      "whatItDoes": "以分段回归/统计检验定位趋势或季节成分的突变时间。",
+      "whenToUse": "采伐、火灾、建设等扰动事件检测。",
+      "assumptions": [
+        "突变前后各有稳定时段"
+      ],
+      "limitations": [
+        "渐变过程不易定位",
+        "短序列误报率升高"
+      ]
+    },
+    "related": [
+      "operator.rs.temporal_sen_trend",
+      "operator.rs.temporal_monitor"
+    ]
   },
   {
-    "id": "operator.rs.temporal_decompose", "title": "时序分解", "summary": "把时序分解为趋势 + 季节 + 残差成分。",
-    "category": "时序分析", "keywords": ["分解", "季节", "STL", "trend"],
-    "algorithm": {"whatItDoes": "STL/移动平均分解输出趋势项、季节项与残差项堆栈。", "whenToUse": "分别分析长期变化与周期动态。", "limitations": ["周期参数需与数据频率匹配"]},
-    "related": ["operator.rs.temporal_harmonic_fit", "operator.rs.temporal_trend"]
+    "id": "operator.rs.temporal_decompose",
+    "title": "时序分解",
+    "summary": "把时序分解为趋势 + 季节 + 残差成分。",
+    "category": "时序分析",
+    "keywords": [
+      "分解",
+      "季节",
+      "STL",
+      "trend"
+    ],
+    "algorithm": {
+      "whatItDoes": "STL/移动平均分解输出趋势项、季节项与残差项堆栈。",
+      "whenToUse": "分别分析长期变化与周期动态。",
+      "limitations": [
+        "周期参数需与数据频率匹配"
+      ]
+    },
+    "related": [
+      "operator.rs.temporal_harmonic_fit",
+      "operator.rs.temporal_trend"
+    ]
   },
   {
-    "id": "operator.rs.temporal_anomaly", "title": "时序异常检测", "summary": "以气候基线计算当前期距平/标准异常。",
-    "category": "时序分析", "keywords": ["距平", "异常", "anomaly", "干旱"],
-    "algorithm": {"whatItDoes": "以多年同期的均值/标准差为基线，输出 (x−μ)/σ 标准异常。", "whenToUse": "干旱/洪涝/热 stress 的年度对比。", "assumptions": ["基线期稳定且足够长"], "limitations": ["基线受极端年份影响"]},
-    "related": ["operator.rs.temporal_summary", "operator.rs.temporal_monitor"]
+    "id": "operator.rs.temporal_anomaly",
+    "title": "时序异常检测",
+    "summary": "以气候基线计算当前期距平/标准异常。",
+    "category": "时序分析",
+    "keywords": [
+      "距平",
+      "异常",
+      "anomaly",
+      "干旱"
+    ],
+    "algorithm": {
+      "whatItDoes": "以多年同期的均值/标准差为基线，输出 (x−μ)/σ 标准异常。",
+      "whenToUse": "干旱/洪涝/热 stress 的年度对比。",
+      "assumptions": [
+        "基线期稳定且足够长"
+      ],
+      "limitations": [
+        "基线受极端年份影响"
+      ]
+    },
+    "related": [
+      "operator.rs.temporal_summary",
+      "operator.rs.temporal_monitor"
+    ]
   },
   {
-    "id": "operator.rs.temporal_monitor", "title": "近实时时序监测", "summary": "对增长序列持续评估异常/突变并输出告警。",
-    "category": "时序分析", "keywords": ["监测", "近实时", "告警", "monitor"],
-    "algorithm": {"whatItDoes": "对每个新观测与历史基线/模型比较，超限输出告警与置信度。", "whenToUse": "森林扰动、作物长势滚动监测。", "assumptions": ["历史基线可用"], "limitations": ["告警阈值需按目标调校"]},
-    "related": ["operator.rs.temporal_breakpoints", "operator.rs.temporal_anomaly"]
+    "id": "operator.rs.temporal_monitor",
+    "title": "近实时时序监测",
+    "summary": "对增长序列持续评估异常/突变并输出告警。",
+    "category": "时序分析",
+    "keywords": [
+      "监测",
+      "近实时",
+      "告警",
+      "monitor"
+    ],
+    "algorithm": {
+      "whatItDoes": "对每个新观测与历史基线/模型比较，超限输出告警与置信度。",
+      "whenToUse": "森林扰动、作物长势滚动监测。",
+      "assumptions": [
+        "历史基线可用"
+      ],
+      "limitations": [
+        "告警阈值需按目标调校"
+      ]
+    },
+    "related": [
+      "operator.rs.temporal_breakpoints",
+      "operator.rs.temporal_anomaly"
+    ]
   },
   {
-    "id": "operator.rs.temporal_extract_series", "title": "提取时序曲线", "summary": "按点/面提取逐期观测值输出表格。",
-    "category": "时序分析", "keywords": ["采样", "曲线", "extract", "样区"],
-    "algorithm": {"whatItDoes": "在指定点/面内逐期取样，输出 id/日期/值表格，供曲线绘图与统计。", "whenToUse": "样本点检查、地物光谱曲线时间对比。", "limitations": ["面提取的聚合方式（均值）影响结果"]},
-    "related": ["concept.rs.temporal_analysis"]
+    "id": "operator.rs.temporal_extract_series",
+    "title": "提取时序曲线",
+    "summary": "按点/面提取逐期观测值输出表格。",
+    "category": "时序分析",
+    "keywords": [
+      "采样",
+      "曲线",
+      "extract",
+      "样区"
+    ],
+    "algorithm": {
+      "whatItDoes": "在指定点/面内逐期取样，输出 id/日期/值表格，供曲线绘图与统计。",
+      "whenToUse": "样本点检查、地物光谱曲线时间对比。",
+      "limitations": [
+        "面提取的聚合方式（均值）影响结果"
+      ]
+    },
+    "related": [
+      "concept.rs.temporal_analysis"
+    ]
   }
 ]

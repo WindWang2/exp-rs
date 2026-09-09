@@ -87,6 +87,27 @@ QString suggestedActionFor( const QString &commandId )
 
 } // namespace
 
+QStringList AvailabilityFactsAdapter::coveredCommandIds()
+{
+    // Command ids that have fact rows. Kept in one place so the drift test
+    // (test_help_coverage) can verify each id exists in the shell command
+    // table; new availability-gated commands must add their rows here.
+    return {
+        QStringLiteral( "layer.properties" ),  QStringLiteral( "layer.remove" ),
+        QStringLiteral( "layer.zoomTo" ),      QStringLiteral( "layer.toggleEditing" ),
+        QStringLiteral( "layer.saveEdits" ),   QStringLiteral( "layer.attributeTable" ),
+        QStringLiteral( "rs.bandMath" ),       QStringLiteral( "rs.spectralIndex" ),
+        QStringLiteral( "rs.contrastStretch" ), QStringLiteral( "rs.spatialFilter" ),
+        QStringLiteral( "rs.pca" ),            QStringLiteral( "rs.bandRatio" ),
+        QStringLiteral( "rs.mosaic" ),         QStringLiteral( "rs.changeDetection" ),
+        QStringLiteral( "rs.atmospheric" ),    QStringLiteral( "rs.qaMask" ),
+        QStringLiteral( "rs.applyMask" ),      QStringLiteral( "rs.radiometric" ),
+        QStringLiteral( "rs.ortho" ),          QStringLiteral( "rs.terrain" ),
+        QStringLiteral( "rs.fusion" ),         QStringLiteral( "rs.temporal" ),
+        QStringLiteral( "rs.speckle" ),        QStringLiteral( "rs.extractBands" ),
+    };
+}
+
 sicnu::help::AvailabilityExplanation AvailabilityFactsAdapter::explain(
     const SelectionContextSnapshot &snapshot, const QString &commandId )
 {

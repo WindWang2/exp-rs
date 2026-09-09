@@ -18,6 +18,7 @@
     - generated Markdown reference is stable and complete.
  ***************************************************************************/
 
+#include "app/help/availability_facts_adapter.h"
 #include "help/adapters/operator_help_source.h"
 #include "help/command_help_provider.h"
 #include "help/diagnostic_catalog.h"
@@ -34,6 +35,10 @@
 
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QRegularExpression>
 #include <QTextStream>
 
@@ -154,10 +159,34 @@ TEST_CASE( "Shell command ids all have help knowledge", "[help][coverage][comman
     REQUIRE( ids.size() >= 45 ); // sanity: the scanner still sees the command table
 
     for ( const QString &id : ids ) {
-        // app.commandPalette is registered separately in the shell; embedded
-        // knowledge covers it as well if authored. Everything else must.
         INFO( "command id: " << id.toStdString() );
         CHECK( globalHelpRegistry().find( QStringLiteral( "command.%1" ).arg( id ) ) != nullptr );
+    }
+
+    // reverse drift: every knowledge entry for a command must correspond to
+    // a real command in the shell source (catches stale entries after
+    // commands are removed/renamed)
+    QFile commandsJson( QStringLiteral( CMAKE_SOURCE_DIR "/data/help/commands.json" ) );
+    REQUIRE( commandsJson.open( QIODevice::ReadOnly ) );
+    const QJsonDocument doc = QJsonDocument::fromJson( commandsJson.readAll() );
+    REQUIRE( doc.isArray() );
+    for ( const QJsonValue &entry : doc.array() ) {
+        const QString helpId = entry.toObject().value( QStringLiteral( "id" ) ).toString();
+        if ( !helpId.startsWith( QLatin1String( "command." ) ) )
+            continue;
+        const QString commandId = helpId.mid( QString( "command." ).size() );
+        INFO( "knowledge id: " << helpId.toStdString() );
+        CHECK( ids.contains( commandId ) );
+    }
+}
+
+TEST_CASE( "Availability fact tables only reference real commands", "[help][coverage][availability]" )
+{
+    composed();
+    const QStringList known = scanShellCommandIds();
+    for ( const QString &commandId : sicnu::app::AvailabilityFactsAdapter::coveredCommandIds() ) {
+        INFO( "availability table id: " << commandId.toStdString() );
+        CHECK( known.contains( commandId ) );
     }
 }
 

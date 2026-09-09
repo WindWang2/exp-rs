@@ -47,9 +47,8 @@ bool HelpRegistry::registerDescriptor( HelpDescriptor descriptor, QString *error
 
 bool HelpRegistry::upsertDescriptor( HelpDescriptor descriptor, QString *error )
 {
-    const bool existed = m_descriptors.contains( descriptor.id );
-    // temporarily allow replace: registerDescriptor rejects duplicates, so
-    // validate manually then insert/replace.
+    // Same validation as registerDescriptor, minus the duplicate rejection
+    // (providers upsert derived descriptors over embedded knowledge).
     auto fail = [error]( const QString &reason ) {
         if ( error )
             *error = reason;
@@ -59,8 +58,11 @@ bool HelpRegistry::upsertDescriptor( HelpDescriptor descriptor, QString *error )
         return fail( QStringLiteral( "invalid help id: %1" ).arg( descriptor.id ) );
     if ( !kindMatchesId( descriptor ) )
         return fail( QStringLiteral( "kind mismatch for id: %1" ).arg( descriptor.id ) );
+    if ( descriptor.deprecated && descriptor.supersededBy.isEmpty() )
+        return fail( QStringLiteral( "deprecated descriptor without supersededBy: %1" ).arg( descriptor.id ) );
+    if ( descriptor.id.startsWith( QLatin1String( "diagnostic." ) ) && !descriptor.diagnostic.has_value() )
+        return fail( QStringLiteral( "diagnostic descriptor without DiagnosticInfo: %1" ).arg( descriptor.id ) );
     m_descriptors.insert( descriptor.id, std::move( descriptor ) );
-    Q_UNUSED( existed );
     if ( error )
         error->clear();
     return true;

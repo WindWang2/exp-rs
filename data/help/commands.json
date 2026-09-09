@@ -567,7 +567,7 @@
   },
   {
     "id": "command.rs.atmospheric",
-    "purpose": "把表观反射率校正为地表反射率（DOS/6S 模型），为定量分析打基础。",
+    "purpose": "把表观反射率校正为地表反射率（DOS/QUAC 模型），为定量分析打基础。",
     "prerequisites": [
       "已定标的表观反射率或 DN 数据"
     ],

@@ -36,6 +36,13 @@ void applyKnowledge( HelpDescriptor &derived, const HelpDescriptor &knowledge )
             derived.docRefs << doc;
     if ( knowledge.algorithm.has_value() )
         derived.algorithm = knowledge.algorithm;
+    // deprecation is knowledge-level state: an entry marked deprecated in
+    // content stays deprecated after the derived upsert
+    if ( knowledge.deprecated ) {
+        derived.deprecated = true;
+        if ( !knowledge.supersededBy.isEmpty() )
+            derived.supersededBy = knowledge.supersededBy;
+    }
 }
 
 QString jsonToDisplayText( const Json::Value &value )

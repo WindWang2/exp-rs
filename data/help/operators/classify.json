@@ -4,198 +4,618 @@
     "title": "KMeans 非监督分类",
     "summary": "迭代 K 均值聚类把影像分成 K 个光谱簇。",
     "category": "分类",
-    "keywords": ["KMeans", "非监督", "聚类", "unsupervised"],
+    "keywords": [
+      "KMeans",
+      "非监督",
+      "聚类",
+      "unsupervised"
+    ],
     "algorithm": {
       "whatItDoes": "随机/采样初始化 K 个中心，迭代“分配-更新”直到收敛，输出簇号图。",
       "whenToUse": "无样本时的光谱分区、样本预选辅助。",
-      "assumptions": ["簇在特征空间近似球形", "特征已归一化更稳"],
-      "limitations": ["簇号无语义，需要人工归并到类别", "K 与初始化影响结果"],
-      "keyParameters": ["k", "maxSamples", "scale"],
-      "relatedTools": ["rs:supervised_classification"]
+      "assumptions": [
+        "簇在特征空间近似球形",
+        "特征已归一化更稳"
+      ],
+      "limitations": [
+        "簇号无语义，需要人工归并到类别",
+        "K 与初始化影响结果"
+      ],
+      "keyParameters": [
+        "k",
+        "maxSamples",
+        "scale"
+      ],
+      "relatedTools": [
+        "rs:supervised_classification"
+      ]
     },
     "parameters": [
-      {"name": "k", "unit": "簇数", "meaning": "聚类中心数量 K。", "recommended": "目标类别数的 1.5–2 倍起步，聚类后再归并到语义类别。", "tradeOff": "K 越大对光谱细节刻画越细，但噪声簇与归并工作量增加。"},
-      {"name": "maxSamples", "unit": "样本数", "meaning": "参与中心估计的采样像元上限。", "recommended": "大数据量时保持默认采样即可，统计意义足够。"},
-      {"name": "scale", "meaning": "聚类前特征缩放开关，消除波段量纲差异。", "recommended": "波段动态范围差异大时开启。"}
+      {
+        "name": "k",
+        "unit": "簇数",
+        "meaning": "聚类中心数量 K。",
+        "recommended": "目标类别数的 1.5–2 倍起步，聚类后再归并到语义类别。",
+        "tradeOff": "K 越大对光谱细节刻画越细，但噪声簇与归并工作量增加。"
+      },
+      {
+        "name": "maxSamples",
+        "unit": "样本数",
+        "meaning": "参与中心估计的采样像元上限。",
+        "recommended": "大数据量时保持默认采样即可，统计意义足够。"
+      },
+      {
+        "name": "scale",
+        "meaning": "聚类前特征缩放开关，消除波段量纲差异。",
+        "recommended": "波段动态范围差异大时开启。"
+      }
     ],
-    "related": ["operator.rs.supervised_classification", "concept.dataset.spatial_leakage"]
+    "related": [
+      "operator.rs.supervised_classification",
+      "concept.dataset.spatial_leakage"
+    ]
   },
   {
     "id": "operator.rs.sam_classify",
     "title": "SAM 光谱角制图分类",
     "summary": "以像元光谱与端元光谱的夹角分类，幅度无关。",
     "category": "分类",
-    "keywords": ["SAM", "光谱角", "高光谱分类"],
+    "keywords": [
+      "SAM",
+      "光谱角",
+      "高光谱分类"
+    ],
     "algorithm": {
       "whatItDoes": "计算像元光谱到每个端元光谱的夹角，取最小角对应类别，超阈值判为未知。",
       "whenToUse": "高光谱矿物/目标分类；光照梯度明显场景。",
-      "assumptions": ["端元光谱已知", "光谱形状稳定"],
-      "limitations": ["幅度（亮度）信息被忽略", "端元代表性决定上限"]
+      "assumptions": [
+        "端元光谱已知",
+        "光谱形状稳定"
+      ],
+      "limitations": [
+        "幅度（亮度）信息被忽略",
+        "端元代表性决定上限"
+      ]
     },
-    "related": ["operator.rs.ace", "operator.rs.spectral_unmixing"]
+    "related": [
+      "operator.rs.ace",
+      "operator.rs.spectral_unmixing"
+    ]
   },
   {
     "id": "operator.rs.supervised_classification",
     "title": "监督分类",
     "summary": "用训练样本训练分类器（RF/SVM 等）并对整幅影像分类。",
     "category": "分类",
-    "keywords": ["监督分类", "随机森林", "SVM", "训练样本", "精度"],
+    "keywords": [
+      "监督分类",
+      "随机森林",
+      "SVM",
+      "训练样本",
+      "精度"
+    ],
     "algorithm": {
       "whatItDoes": "以 training 矢量的类别字段 + 影像特征训练分类器，输出类别图与可选概率图；testSplit 划分验证样本估计精度。",
       "whenToUse": "有可靠样本的标准土地覆盖分类任务。",
-      "inputs": ["待分类影像/特征堆栈", "训练样本矢量（含类别字段）"],
-      "outputs": ["类别栅格", "概率图（可选）", "精度指标（有验证样本时）"],
-      "assumptions": ["样本代表性覆盖各类别光谱变异", "验证样本与训练样本空间独立（防泄漏）"],
-      "limitations": ["样本偏差直接进入模型", "类别体系需互斥完备"],
-      "failureModes": ["类别字段缺失/不一致 → TRAINING_INVALID", "样本过少 → 过拟合"],
-      "keyParameters": ["method", "training", "classField", "bands", "testSplit", "maxSamplesPerClass", "seed"],
-      "relatedTools": ["rs:feature_stack", "rs:obia_classify", "rs:recode"]
+      "inputs": [
+        "待分类影像/特征堆栈",
+        "训练样本矢量（含类别字段）"
+      ],
+      "outputs": [
+        "类别栅格",
+        "概率图（可选）",
+        "精度指标（有验证样本时）"
+      ],
+      "assumptions": [
+        "样本代表性覆盖各类别光谱变异",
+        "验证样本与训练样本空间独立（防泄漏）"
+      ],
+      "limitations": [
+        "样本偏差直接进入模型",
+        "类别体系需互斥完备"
+      ],
+      "failureModes": [
+        "类别字段缺失/不一致 → TRAINING_INVALID",
+        "样本过少 → 过拟合"
+      ],
+      "keyParameters": [
+        "method",
+        "training",
+        "classField",
+        "bands",
+        "testSplit",
+        "maxSamplesPerClass",
+        "seed"
+      ],
+      "relatedTools": [
+        "rs:feature_stack",
+        "rs:obia_classify",
+        "rs:recode"
+      ]
     },
     "parameters": [
-      {"name": "input", "meaning": "待分类影像或特征堆栈。"},
-      {"name": "training", "meaning": "训练样本矢量图层（含类别字段）。", "recommended": "每类样本量 ≥ 特征维数的 10 倍；空间分布分散。"},
-      {"name": "classField", "meaning": "类别标签字段名。", "warnings": ["字段不存在或类型非整数/文本时报错。"]},
-      {"name": "bands", "meaning": "参与分类的波段/特征列表。", "recommended": "加入 NDVI/纹理/SAR 特征常显著提升精度。"},
-      {"name": "method", "meaning": "分类器：rf（随机森林，稳健默认）、svm（小样本高维）、等。", "recommended": "不确定时选 rf 并留默认参数。"},
-      {"name": "testSplit", "unit": "比例", "meaning": "从样本中划出的验证比例。", "recommended": "0.2–0.3；注意随机划分存在空间泄漏风险，严格评估用空间分块样本。"},
-      {"name": "maxSamplesPerClass", "unit": "样本数", "meaning": "每类训练样本上限（类别平衡）。", "recommended": "样本极不均衡时设置，防止大类主导。"},
-      {"name": "probabilityOutput", "meaning": "输出各类别概率图。"},
-      {"name": "seed", "meaning": "随机种子（样本划分/森林初始化）。", "recommended": "记录种子保证可复现。"},
-      {"name": "scale", "meaning": "特征缩放开关（SVM 建议）。"}
+      {
+        "name": "input",
+        "meaning": "待分类影像或特征堆栈。"
+      },
+      {
+        "name": "training",
+        "meaning": "训练样本矢量图层（含类别字段）。",
+        "recommended": "每类样本量 ≥ 特征维数的 10 倍；空间分布分散。"
+      },
+      {
+        "name": "classField",
+        "meaning": "类别标签字段名。",
+        "warnings": [
+          "字段不存在或类型非整数/文本时报错。"
+        ]
+      },
+      {
+        "name": "bands",
+        "meaning": "参与分类的波段/特征列表。",
+        "recommended": "加入 NDVI/纹理/SAR 特征常显著提升精度。"
+      },
+      {
+        "name": "method",
+        "meaning": "分类器：rf（随机森林，稳健默认）、svm（小样本高维）、等。",
+        "recommended": "不确定时选 rf 并留默认参数。"
+      },
+      {
+        "name": "testSplit",
+        "unit": "比例",
+        "meaning": "从样本中划出的验证比例。",
+        "recommended": "0.2–0.3；注意随机划分存在空间泄漏风险，严格评估用空间分块样本。"
+      },
+      {
+        "name": "maxSamplesPerClass",
+        "unit": "样本数",
+        "meaning": "每类训练样本上限（类别平衡）。",
+        "recommended": "样本极不均衡时设置，防止大类主导。"
+      },
+      {
+        "name": "probabilityOutput",
+        "meaning": "输出各类别概率图。"
+      },
+      {
+        "name": "seed",
+        "meaning": "随机种子（样本划分/森林初始化）。",
+        "recommended": "记录种子保证可复现。"
+      },
+      {
+        "name": "scale",
+        "meaning": "特征缩放开关（SVM 建议）。"
+      }
     ],
-    "related": ["workbench.classification", "concept.dataset.spatial_leakage", "operator.rs.feature_stack"],
-    "docs": ["docs/processing/foundation-5.md"]
+    "related": [
+      "workbench.classification",
+      "concept.dataset.spatial_leakage",
+      "operator.rs.feature_stack"
+    ],
+    "docs": [
+      "docs/processing/foundation-5.md"
+    ]
   },
   {
     "id": "operator.rs.obia_segment",
     "title": "OBIA 分割",
     "summary": "多尺度分割把影像切分为同质对象，作为 OBIA 的基本单元。",
     "category": "分类",
-    "keywords": ["分割", "segmentation", "多尺度", "对象"],
+    "keywords": [
+      "分割",
+      "segmentation",
+      "多尺度",
+      "对象"
+    ],
     "algorithm": {
       "whatItDoes": "把像元聚合为同质对象（engine 可选 mean-shift 等分割引擎）：mean-shift 在空间-光谱联合域迭代寻找众数形成对象。",
       "whenToUse": "高分辨率影像分类前；避免椒盐现象。",
-      "assumptions": ["分割参数与目标地物尺度匹配"],
-      "limitations": ["单一尺度难以兼顾大小地物", "过分割/欠分割都损害精度"],
-      "keyParameters": ["spatialRadius", "rangeRadius", "minRegionSize"]
+      "assumptions": [
+        "分割参数与目标地物尺度匹配"
+      ],
+      "limitations": [
+        "单一尺度难以兼顾大小地物",
+        "过分割/欠分割都损害精度"
+      ],
+      "keyParameters": [
+        "spatialRadius",
+        "rangeRadius",
+        "minRegionSize"
+      ]
     },
     "parameters": [
-      {"name": "spatialRadius", "unit": "像素", "meaning": "mean-shift 空间带宽，控制邻域参与聚类的空间范围。", "recommended": "与目标对象半径相当；高分辨率影像常用 5–15。", "tradeOff": "半径越大对象越大越平滑，小图斑被吞并。"},
-      {"name": "rangeRadius", "meaning": "mean-shift 光谱带宽，控制视为同质的光谱差异容限。", "recommended": "按影像量化位数与目标对比度调整；过小导致过分割。"},
-      {"name": "minRegionSize", "unit": "像素", "meaning": "分割后保留的最小对象像元数，小于该值的对象并入邻域。", "recommended": "设为最小制图单元对应的像元数。"}
+      {
+        "name": "spatialRadius",
+        "unit": "像素",
+        "meaning": "mean-shift 空间带宽，控制邻域参与聚类的空间范围。",
+        "recommended": "与目标对象半径相当；高分辨率影像常用 5–15。",
+        "tradeOff": "半径越大对象越大越平滑，小图斑被吞并。"
+      },
+      {
+        "name": "rangeRadius",
+        "meaning": "mean-shift 光谱带宽，控制视为同质的光谱差异容限。",
+        "recommended": "按影像量化位数与目标对比度调整；过小导致过分割。"
+      },
+      {
+        "name": "minRegionSize",
+        "unit": "像素",
+        "meaning": "分割后保留的最小对象像元数，小于该值的对象并入邻域。",
+        "recommended": "设为最小制图单元对应的像元数。"
+      }
     ],
-    "related": ["workbench.obia", "operator.rs.obia_features", "operator.rs.obia_hierarchy"]
+    "related": [
+      "workbench.obia",
+      "operator.rs.obia_features",
+      "operator.rs.obia_hierarchy"
+    ]
   },
   {
-    "id": "operator.rs.obia_hierarchy", "title": "OBIA 层级", "summary": "构建多尺度分割层级并维护父子关系。",
-    "category": "分类", "keywords": ["层级", "多尺度", "hierarchy"],
-    "algorithm": {"whatItDoes": "由细到粗逐级合并对象，记录层级拓扑供跨尺度分析。", "whenToUse": "需要多尺度对象（树冠/林分）的复杂场景。", "limitations": ["层级数增加内存与管理成本"]},
-    "related": ["operator.rs.obia_segment"]
+    "id": "operator.rs.obia_hierarchy",
+    "title": "OBIA 层级",
+    "summary": "构建多尺度分割层级并维护父子关系。",
+    "category": "分类",
+    "keywords": [
+      "层级",
+      "多尺度",
+      "hierarchy"
+    ],
+    "algorithm": {
+      "whatItDoes": "由细到粗逐级合并对象，记录层级拓扑供跨尺度分析。",
+      "whenToUse": "需要多尺度对象（树冠/林分）的复杂场景。",
+      "limitations": [
+        "层级数增加内存与管理成本"
+      ]
+    },
+    "related": [
+      "operator.rs.obia_segment"
+    ]
   },
   {
-    "id": "operator.rs.obia_features", "title": "OBIA 对象特征", "summary": "计算对象的光谱/形状/纹理特征向量。",
-    "category": "分类", "keywords": ["对象特征", "形状指数", "特征"],
-    "algorithm": {"whatItDoes": "对每个对象聚合均值/标准差、面积/周长/形状指数与 GLCM 纹理等。", "whenToUse": "对象分类前的特征工程。", "limitations": ["特征维数高时需要筛选"]},
-    "related": ["operator.rs.feature_select", "operator.rs.obia_classify"]
+    "id": "operator.rs.obia_features",
+    "title": "OBIA 对象特征",
+    "summary": "计算对象的光谱/形状/纹理特征向量。",
+    "category": "分类",
+    "keywords": [
+      "对象特征",
+      "形状指数",
+      "特征"
+    ],
+    "algorithm": {
+      "whatItDoes": "对每个对象聚合均值/标准差、面积/周长/形状指数与 GLCM 纹理等。",
+      "whenToUse": "对象分类前的特征工程。",
+      "limitations": [
+        "特征维数高时需要筛选"
+      ]
+    },
+    "related": [
+      "operator.rs.feature_select",
+      "operator.rs.obia_classify"
+    ]
   },
   {
-    "id": "operator.rs.obia_label", "title": "OBIA 样本标注", "summary": "把矢量样本标签赋给重叠对象，生成对象级训练集。",
-    "category": "分类", "keywords": ["标注", "样本", "label"],
-    "algorithm": {"whatItDoes": "按空间叠加把样本多边形的类别赋给对象；重叠度阈值控制纯度。", "whenToUse": "对象分类的训练准备。", "limitations": ["跨界对象归属需规则处理"]},
-    "related": ["operator.rs.obia_classify", "operator.rs.obia_features"]
+    "id": "operator.rs.obia_label",
+    "title": "OBIA 样本标注",
+    "summary": "把矢量样本标签赋给重叠对象，生成对象级训练集。",
+    "category": "分类",
+    "keywords": [
+      "标注",
+      "样本",
+      "label"
+    ],
+    "algorithm": {
+      "whatItDoes": "按空间叠加把样本多边形的类别赋给对象；重叠度阈值控制纯度。",
+      "whenToUse": "对象分类的训练准备。",
+      "limitations": [
+        "跨界对象归属需规则处理"
+      ]
+    },
+    "related": [
+      "operator.rs.obia_classify",
+      "operator.rs.obia_features"
+    ]
   },
   {
-    "id": "operator.rs.obia_classify", "title": "OBIA 对象分类", "summary": "以对象特征 + 样本训练模型分类对象。",
-    "category": "分类", "keywords": ["对象分类", "RF", "OBIA 分类"],
-    "algorithm": {"whatItDoes": "与监督分类相同模型族，但样本/预测单元为对象特征向量。", "whenToUse": "高分辨率地物制图。", "limitations": ["分割质量成为精度上限"]},
-    "related": ["operator.rs.obia_segment", "operator.rs.supervised_classification"]
+    "id": "operator.rs.obia_classify",
+    "title": "OBIA 对象分类",
+    "summary": "以对象特征 + 样本训练模型分类对象。",
+    "category": "分类",
+    "keywords": [
+      "对象分类",
+      "RF",
+      "OBIA 分类"
+    ],
+    "algorithm": {
+      "whatItDoes": "与监督分类相同模型族，但样本/预测单元为对象特征向量。",
+      "whenToUse": "高分辨率地物制图。",
+      "limitations": [
+        "分割质量成为精度上限"
+      ]
+    },
+    "related": [
+      "operator.rs.obia_segment",
+      "operator.rs.supervised_classification"
+    ]
   },
   {
-    "id": "operator.rs.segment_stats", "title": "分割统计", "summary": "输出分割对象的统计属性表（面积/均值等）。",
-    "category": "分类", "keywords": ["统计", "对象表"],
-    "algorithm": {"whatItDoes": "对每个对象计算所选统计并输出属性表/矢量。", "whenToUse": "对象质检、特征核查。"},
-    "related": ["operator.rs.obia_features"]
+    "id": "operator.rs.segment_stats",
+    "title": "分割统计",
+    "summary": "输出分割对象的统计属性表（面积/均值等）。",
+    "category": "分类",
+    "keywords": [
+      "统计",
+      "对象表"
+    ],
+    "algorithm": {
+      "whatItDoes": "对每个对象计算所选统计并输出属性表/矢量。",
+      "whenToUse": "对象质检、特征核查。"
+    },
+    "related": [
+      "operator.rs.obia_features"
+    ]
   },
   {
-    "id": "operator.rs.majority_filter", "title": "众数滤波", "summary": "类别图的多数表决平滑，去除椒盐像元。",
-    "category": "分类", "keywords": ["众数滤波", "椒盐", "后处理"],
-    "algorithm": {"whatItDoes": "窗口内取出现最多的类别替换中心，仅用于类别图。", "whenToUse": "分类结果后处理。", "limitations": ["会抹掉细小真实图斑，谨慎设置窗口"]},
-    "related": ["operator.rs.supervised_classification", "operator.rs.sieve"]
+    "id": "operator.rs.majority_filter",
+    "title": "众数滤波",
+    "summary": "类别图的多数表决平滑，去除椒盐像元。",
+    "category": "分类",
+    "keywords": [
+      "众数滤波",
+      "椒盐",
+      "后处理"
+    ],
+    "algorithm": {
+      "whatItDoes": "窗口内取出现最多的类别替换中心，仅用于类别图。",
+      "whenToUse": "分类结果后处理。",
+      "limitations": [
+        "会抹掉细小真实图斑，谨慎设置窗口"
+      ]
+    },
+    "related": [
+      "operator.rs.supervised_classification",
+      "operator.rs.sieve"
+    ]
   },
   {
-    "id": "operator.rs.recode", "title": "类别重编码", "summary": "按映射表把类别码归并/重命名为新体系。",
-    "category": "分类", "keywords": ["重编码", "归并", "recode"],
-    "algorithm": {"whatItDoes": "按 provided 映射替换类别值，可合并类别。", "whenToUse": "分类体系转换、聚类簇→语义类别归并。"},
-    "related": ["operator.rs.kmeans_classification", "operator.rs.threshold_raster"]
+    "id": "operator.rs.recode",
+    "title": "类别重编码",
+    "summary": "按映射表把类别码归并/重命名为新体系。",
+    "category": "分类",
+    "keywords": [
+      "重编码",
+      "归并",
+      "recode"
+    ],
+    "algorithm": {
+      "whatItDoes": "按 provided 映射替换类别值，可合并类别。",
+      "whenToUse": "分类体系转换、聚类簇→语义类别归并。"
+    },
+    "related": [
+      "operator.rs.kmeans_classification",
+      "operator.rs.threshold_raster"
+    ]
   },
   {
-    "id": "operator.rs.qa_mask", "title": "QA 掩膜生成",
+    "id": "operator.rs.qa_mask",
+    "title": "QA 掩膜生成",
     "summary": "解码 Landsat QA / Sentinel SCL 波段为云/阴影/雪掩膜。",
-    "category": "数据 I/O", "keywords": ["QA", "云掩膜", "SCL", "cloud mask"],
+    "category": "数据 I/O",
+    "keywords": [
+      "QA",
+      "云掩膜",
+      "SCL",
+      "cloud mask"
+    ],
     "algorithm": {
       "whatItDoes": "按位（Landsat QA_PIXEL）或类别值（S2 SCL）解析质量波段，输出 0/1 掩膜。",
       "whenToUse": "时序合成、镶嵌、指数计算前的去云步骤。",
-      "assumptions": ["QA 波段语义与产品版本匹配"],
-      "limitations": ["云影/薄云漏检是常态，可叠加阈值辅助"],
-      "keyParameters": ["platform", "flags"]
+      "assumptions": [
+        "QA 波段语义与产品版本匹配"
+      ],
+      "limitations": [
+        "云影/薄云漏检是常态，可叠加阈值辅助"
+      ],
+      "keyParameters": [
+        "source",
+        "mask",
+        "qa_band"
+      ]
     },
-    "related": ["command.rs.qaMask", "command.rs.applyMask", "operator.rs.temporal_composite"]
+    "related": [
+      "command.rs.qaMask",
+      "command.rs.applyMask",
+      "operator.rs.temporal_composite"
+    ]
   },
   {
-    "id": "operator.rs.apply_mask", "title": "应用掩膜",
+    "id": "operator.rs.apply_mask",
+    "title": "应用掩膜",
     "summary": "以掩膜把像元置 NoData 或裁剪输出。",
-    "category": "数据 I/O", "keywords": ["掩膜", "NoData", "裁剪"],
-    "algorithm": {"whatItDoes": "掩膜非零处像元置 NoData（或保留），输出同格网结果。", "whenToUse": "去云、研究区裁剪、无效区剔除。", "limitations": ["NoData 语义需与下游工具一致"]},
-    "related": ["command.rs.applyMask", "operator.rs.qa_mask"]
+    "category": "数据 I/O",
+    "keywords": [
+      "掩膜",
+      "NoData",
+      "裁剪"
+    ],
+    "algorithm": {
+      "whatItDoes": "掩膜非零处像元置 NoData（或保留），输出同格网结果。",
+      "whenToUse": "去云、研究区裁剪、无效区剔除。",
+      "limitations": [
+        "NoData 语义需与下游工具一致"
+      ]
+    },
+    "related": [
+      "command.rs.applyMask",
+      "operator.rs.qa_mask"
+    ]
   },
   {
-    "id": "operator.rs.feature_stack", "title": "特征堆栈", "summary": "把多个特征波段/产品堆叠为统一特征文件。",
-    "category": "分类", "keywords": ["特征", "堆栈", "stack"],
-    "algorithm": {"whatItDoes": "把多源特征（光谱、指数、纹理、SAR、地形）按统一格网堆叠。", "whenToUse": "分类/回归前统一特征入口。", "assumptions": ["所有输入已配准同格网"], "limitations": ["格网不一致时需先重采样"]},
-    "related": ["operator.rs.supervised_classification", "operator.rs.feature_select", "operator.rs.feature_normalize"]
+    "id": "operator.rs.feature_stack",
+    "title": "特征堆栈",
+    "summary": "把多个特征波段/产品堆叠为统一特征文件。",
+    "category": "分类",
+    "keywords": [
+      "特征",
+      "堆栈",
+      "stack"
+    ],
+    "algorithm": {
+      "whatItDoes": "把多源特征（光谱、指数、纹理、SAR、地形）按统一格网堆叠。",
+      "whenToUse": "分类/回归前统一特征入口。",
+      "assumptions": [
+        "所有输入已配准同格网"
+      ],
+      "limitations": [
+        "格网不一致时需先重采样"
+      ]
+    },
+    "related": [
+      "operator.rs.supervised_classification",
+      "operator.rs.feature_select",
+      "operator.rs.feature_normalize"
+    ]
   },
   {
-    "id": "operator.rs.feature_normalize", "title": "特征归一化", "summary": "按 min-max/z-score 归一化特征波段。",
-    "category": "分类", "keywords": ["归一化", "标准化", "z-score"],
-    "algorithm": {"whatItDoes": "逐波段线性缩放到 [0,1] 或零均值单位方差。", "whenToUse": "距离/核度量模型（SVM/KMeans）前的尺度统一。", "limitations": ["极值会影响 min-max"]},
-    "related": ["operator.rs.feature_stack"]
+    "id": "operator.rs.feature_normalize",
+    "title": "特征归一化",
+    "summary": "按 min-max/z-score 归一化特征波段。",
+    "category": "分类",
+    "keywords": [
+      "归一化",
+      "标准化",
+      "z-score"
+    ],
+    "algorithm": {
+      "whatItDoes": "逐波段线性缩放到 [0,1] 或零均值单位方差。",
+      "whenToUse": "距离/核度量模型（SVM/KMeans）前的尺度统一。",
+      "limitations": [
+        "极值会影响 min-max"
+      ]
+    },
+    "related": [
+      "operator.rs.feature_stack"
+    ]
   },
   {
-    "id": "operator.rs.feature_select", "title": "特征选择", "summary": "按重要性/相关性筛选特征子集。",
-    "category": "分类", "keywords": ["特征选择", "重要性", "降维"],
-    "algorithm": {"whatItDoes": "以模型重要性、相关性阈值或包装法挑选低冗余高判别特征。", "whenToUse": "特征爆炸、需要提速或解释时。", "limitations": ["选择偏差：应在验证集外评估"]},
-    "related": ["operator.rs.feature_stack", "operator.rs.pca"]
+    "id": "operator.rs.feature_select",
+    "title": "特征选择",
+    "summary": "按重要性/相关性筛选特征子集。",
+    "category": "分类",
+    "keywords": [
+      "特征选择",
+      "重要性",
+      "降维"
+    ],
+    "algorithm": {
+      "whatItDoes": "以模型重要性、相关性阈值或包装法挑选低冗余高判别特征。",
+      "whenToUse": "特征爆炸、需要提速或解释时。",
+      "limitations": [
+        "选择偏差：应在验证集外评估"
+      ]
+    },
+    "related": [
+      "operator.rs.feature_stack",
+      "operator.rs.pca"
+    ]
   },
   {
-    "id": "operator.rs.infer", "title": "模型推理", "summary": "用已训练模型（本地/目录）对新影像推理预测。",
+    "id": "operator.rs.infer",
+    "title": "模型推理",
+    "summary": "用已训练模型（本地/目录）对新影像推理预测。",
     "category": "模型推理",
-    "keywords": ["推理", "inference", "深度学习", "模型"],
+    "keywords": [
+      "推理",
+      "inference",
+      "深度学习",
+      "模型"
+    ],
     "algorithm": {
       "whatItDoes": "加载模型资产，按模型输入约定准备影像并推理，输出类别/回归结果。",
       "whenToUse": "已训练模型（语义分割/目标检测/回归）的业务化批量应用。",
-      "assumptions": ["输入分辨率/波段/归一化与训练一致", "模型与运行时兼容"],
-      "limitations": ["跨域（传感器/区域）迁移需评估"],
-      "failureModes": ["输入预处理不一致 → 精度骤降"],
-      "keyParameters": ["model", "input", "output"]
+      "assumptions": [
+        "输入分辨率/波段/归一化与训练一致",
+        "模型与运行时兼容"
+      ],
+      "limitations": [
+        "跨域（传感器/区域）迁移需评估"
+      ],
+      "failureModes": [
+        "输入预处理不一致 → 精度骤降"
+      ],
+      "keyParameters": [
+        "model",
+        "input",
+        "output"
+      ]
     },
-    "related": ["operator.rs.supervised_classification", "concept.rs.memory_policy"]
+    "related": [
+      "operator.rs.supervised_classification",
+      "concept.rs.memory_policy"
+    ]
   },
   {
-    "id": "operator.rs.segment", "title": "语义分割推理", "summary": "深度学习语义分割模型推理输出逐像元类别。",
-    "category": "模型推理", "keywords": ["语义分割", "segmentation", "深度学习"],
-    "algorithm": {"whatItDoes": "滑窗/整图推理分割网络，输出类别概率与标签图。", "whenToUse": "建筑/道路/水体等高精度逐像元提取。", "assumptions": ["影像域与训练数据相近"], "limitations": ["大影像内存策略与分块拼接接缝"]},
-    "related": ["operator.rs.infer"]
+    "id": "operator.rs.segment",
+    "title": "语义分割推理",
+    "summary": "深度学习语义分割模型推理输出逐像元类别。",
+    "category": "模型推理",
+    "keywords": [
+      "语义分割",
+      "segmentation",
+      "深度学习"
+    ],
+    "algorithm": {
+      "whatItDoes": "滑窗/整图推理分割网络，输出类别概率与标签图。",
+      "whenToUse": "建筑/道路/水体等高精度逐像元提取。",
+      "assumptions": [
+        "影像域与训练数据相近"
+      ],
+      "limitations": [
+        "大影像内存策略与分块拼接接缝"
+      ]
+    },
+    "related": [
+      "operator.rs.infer"
+    ]
   },
   {
-    "id": "operator.rs.detect", "title": "目标检测推理", "summary": "深度学习目标检测输出矢量框与置信度。",
-    "category": "模型推理", "keywords": ["目标检测", "检测", "detection"],
-    "algorithm": {"whatItDoes": "检测网络输出目标框（可转矢量），含置信度与类别。", "whenToUse": "船只/车辆/树冠等目标级提取。", "limitations": ["小目标与密集目标性能受限"]},
-    "related": ["operator.rs.infer"]
+    "id": "operator.rs.detect",
+    "title": "目标检测推理",
+    "summary": "深度学习目标检测输出矢量框与置信度。",
+    "category": "模型推理",
+    "keywords": [
+      "目标检测",
+      "检测",
+      "detection"
+    ],
+    "algorithm": {
+      "whatItDoes": "检测网络输出目标框（可转矢量），含置信度与类别。",
+      "whenToUse": "船只/车辆/树冠等目标级提取。",
+      "limitations": [
+        "小目标与密集目标性能受限"
+      ]
+    },
+    "related": [
+      "operator.rs.infer"
+    ]
   },
   {
-    "id": "operator.rs.embedding", "title": "特征嵌入推理", "summary": "深度模型输出像元/图斑特征向量供下游分类。",
-    "category": "模型推理", "keywords": ["嵌入", "embedding", "特征学习"],
-    "algorithm": {"whatItDoes": "以预训练网络把影像编码为低维特征堆栈。", "whenToUse": "小样本分类（特征复用）、相似性检索。", "limitations": ["嵌入域偏移影响下游任务"]},
-    "related": ["operator.rs.feature_stack", "operator.rs.infer"]
+    "id": "operator.rs.embedding",
+    "title": "特征嵌入推理",
+    "summary": "深度模型输出像元/图斑特征向量供下游分类。",
+    "category": "模型推理",
+    "keywords": [
+      "嵌入",
+      "embedding",
+      "特征学习"
+    ],
+    "algorithm": {
+      "whatItDoes": "以预训练网络把影像编码为低维特征堆栈。",
+      "whenToUse": "小样本分类（特征复用）、相似性检索。",
+      "limitations": [
+        "嵌入域偏移影响下游任务"
+      ]
+    },
+    "related": [
+      "operator.rs.feature_stack",
+      "operator.rs.infer"
+    ]
   }
 ]

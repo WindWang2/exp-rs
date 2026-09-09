@@ -6610,9 +6610,15 @@ sicnu_add_help_test(test_help_core)
 # taxonomy: reuses the standard heavy test helper (sicnu_operators +
 # sicnu_agent + processing) because the whole point is real schemas/codes.
 sicnu_add_test(test_help_coverage)
-# embed the help knowledge content (RCC init must live in the executable)
 target_sources(test_help_coverage PRIVATE
-    ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc
+  # availability fact adapter pulls ContextRules, whose implementation lives
+  # in the shell sources — compile the trio here as well (workbench host
+  # satisfies selection_context's dependency chain)
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  # embed the help knowledge content (RCC init must live in the executable)
+  ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc
 )
 target_include_directories(test_help_coverage PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -6621,4 +6627,4 @@ target_include_directories(test_help_coverage PRIVATE
 target_compile_definitions(test_help_coverage PRIVATE
     CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
-target_link_libraries(test_help_coverage PRIVATE Sicnu::help Sicnu::help_adapters)
+target_link_libraries(test_help_coverage PRIVATE Sicnu::help Sicnu::help_adapters Sicnu::help_gui)

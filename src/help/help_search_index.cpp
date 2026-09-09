@@ -20,9 +20,11 @@ constexpr double kWeightSummary = 1.0;
 
 bool isCjk( char32_t cp )
 {
-    return ( cp >= 0x4E00 && cp <= 0x9FFF )   // CJK unified
-           || ( cp >= 0x3400 && cp <= 0x4DBF ) // extension A
-           || ( cp >= 0xF900 && cp <= 0xFAFF ); // compatibility
+    return ( cp >= 0x4E00 && cp <= 0x9FFF )    // CJK unified
+           || ( cp >= 0x3400 && cp <= 0x4DBF )  // extension A
+           || ( cp >= 0xF900 && cp <= 0xFAFF )  // compatibility
+           || ( cp >= 0x20000 && cp <= 0x2A6DF ) // extension B
+           || ( cp >= 0x2A700 && cp <= 0x2EBEF ); // extensions C–F
 }
 
 /// Appends tokens for one field's text. Latin/alphanumeric runs become
@@ -37,29 +39,41 @@ void tokenizeField( const QString &text, QStringList &out )
             latinRun.clear();
         }
         if ( !cjkRun.isEmpty() ) {
-            const QStringList chars = cjkRun.split( QString(), Qt::SkipEmptyParts );
-            for ( int i = 0; i + 1 < chars.size(); ++i )
-                out << ( chars.at( i ) + chars.at( i + 1 ) );
-            if ( chars.size() == 1 )
-                out << chars.first();
+            // bigrams over code POINTS (surrogate pairs stay intact);
+            // QString::toUcs4 yields QList<uint> on this Qt version
+            const auto cps = cjkRun.toUcs4();
+            QString previous;
+            for ( uint upoint : cps ) {
+                const auto cp = static_cast<char32_t>( upoint );
+                const QString current = QString::fromUcs4( &cp, 1 );
+                if ( !previous.isEmpty() )
+                    out << ( previous + current );
+                previous = current;
+            }
+            if ( cps.size() == 1 )
+                out << cjkRun;
             cjkRun.clear();
         }
     };
 
-    for ( const QChar &qch : text ) {
-        const char32_t cp = qch.unicode();
+    const auto codePoints = text.toUcs4();
+    for ( uint rawCp : codePoints ) {
+        const char32_t cp = static_cast<char32_t>( rawCp );
         if ( isCjk( cp ) ) {
             if ( !latinRun.isEmpty() ) {
                 out << latinRun;
                 latinRun.clear();
             }
-            cjkRun += qch;
-        } else if ( qch.isLetterOrNumber() ) {
-            if ( !cjkRun.isEmpty() )
-                flush();
-            latinRun += qch.toLower();
+            cjkRun += QString::fromUcs4( &cp, 1 );
         } else {
-            flush();
+            const QChar ch( cp <= 0xFFFF ? static_cast<char16_t>( cp ) : u'?' );
+            if ( cp <= 0xFFFF && ch.isLetterOrNumber() ) {
+                if ( !cjkRun.isEmpty() )
+                    flush();
+                latinRun += ch.toLower();
+            } else {
+                flush();
+            }
         }
     }
     flush();

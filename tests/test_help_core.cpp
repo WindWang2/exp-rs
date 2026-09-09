@@ -25,6 +25,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include <QElapsedTimer>
+#include <QUrl>
 #include <QVector>
 
 using namespace sicnu::help;
@@ -375,6 +376,11 @@ TEST_CASE( "Compact agent summaries respect the token budget", "[help][compact]"
 
 TEST_CASE( "Diagnostic catalog resolves every family and preserves codes", "[help][diagnostics]" )
 {
+  // compose the shipped content so assertions exercise curated descriptors,
+  // not the generated fallback (which would satisfy them vacuously)
+  if ( globalHelpRegistry().count() == 0 )
+    composeHelpSystem( globalHelpRegistry(), nullptr, nullptr );
+  REQUIRE( globalHelpRegistry().count() > 0 );
   const HelpRegistry &registry = globalHelpRegistry();
   DiagnosticCatalog catalog( registry );
 
@@ -384,6 +390,8 @@ TEST_CASE( "Diagnostic catalog resolves every family and preserves codes", "[hel
   CHECK( resolved.diagnostic.has_value() );
   CHECK( resolved.diagnostic->originCode == QStringLiteral( "DATASET_NOT_FOUND" ) );
   CHECK_FALSE( resolved.diagnostic->remediation.isEmpty() );
+  // must be the curated page, not the generated fallback
+  CHECK( registry.find( resolved.id ) != nullptr );
 
   // unknown codes fall back but keep the original code byte-identical
   const HelpDescriptor fallback = catalog.resolve( DiagnosticFamily::Operator,
@@ -397,6 +405,18 @@ TEST_CASE( "Diagnostic catalog resolves every family and preserves codes", "[hel
                                                   QStringLiteral( "label.unknown_class" ) );
   REQUIRE( dataset.diagnostic.has_value() );
   CHECK( dataset.id == QStringLiteral( "diagnostic.dataset.label.unknown_class" ) );
+}
+
+TEST_CASE( "helpid links keep id case through QUrl (path, not host)", "[help][presenter]" )
+{
+  // QUrl lowercases the HOST (RFC 3986); ids must travel in the path.
+  const QUrl hostUrl( QStringLiteral( "helpid://command.layer.toggleEditing" ) );
+  CHECK( hostUrl.host() == QStringLiteral( "command.layer.toggleediting" ) ); // documents the hazard
+  const QUrl pathUrl( QStringLiteral( "helpid:/command.layer.toggleEditing" ) );
+  QString id = pathUrl.path();
+  while ( id.startsWith( u'/' ) )
+    id.remove( 0, 1 );
+  CHECK( id == QStringLiteral( "command.layer.toggleEditing" ) );
 }
 
 TEST_CASE( "Markdown writer output is stable and complete", "[help][markdown]" )

@@ -20,6 +20,9 @@ namespace sicnu::app
 class AvailabilityFactsAdapter
 {
   public:
+    /// Command ids that have fact rows (drift-test seam).
+    static QStringList coveredCommandIds();
+
     /// Composes the fact list for @p commandId against @p snapshot.
     static sicnu::help::AvailabilityExplanation explain( const SelectionContextSnapshot &snapshot,
                                                          const QString &commandId );

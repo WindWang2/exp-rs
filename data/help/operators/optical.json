@@ -4,204 +4,750 @@
     "title": "光谱指数计算",
     "summary": "统一入口计算 NDVI/EVI/NDWI/SAVI/NDBI/MNDWI 等常用指数。",
     "category": "光学遥感",
-    "keywords": ["光谱指数", "NDVI", "EVI", "NDWI", "spectral index"],
+    "keywords": [
+      "光谱指数",
+      "NDVI",
+      "EVI",
+      "NDWI",
+      "spectral index"
+    ],
     "algorithm": {
       "whatItDoes": "按所选指数公式组合指定波段像元值，输出单波段指数影像。",
       "whenToUse": "植被/水体/建筑等信息提取的第一步特征。",
-      "assumptions": ["波段对应正确（红/近红外/蓝/短波红外）", "定量分析建议用地表反射率输入"],
-      "limitations": ["指数饱和（如高生物量 NDVI）", "未校正数据阈值需按传感器调整"],
-      "keyParameters": ["index", "red", "nir", "blue", "swir"],
-      "relatedTools": ["rs:band_math", "rs:temporal_index_series"]
+      "assumptions": [
+        "波段对应正确（红/近红外/蓝/短波红外）",
+        "定量分析建议用地表反射率输入"
+      ],
+      "limitations": [
+        "指数饱和（如高生物量 NDVI）",
+        "未校正数据阈值需按传感器调整"
+      ],
+      "keyParameters": [
+        "index",
+        "red",
+        "nir",
+        "blue",
+        "swir"
+      ],
+      "relatedTools": [
+        "rs:band_math",
+        "rs:temporal_index_series"
+      ]
     },
     "parameters": [
-      {"name": "index", "meaning": "指数类型。常用：NDVI（植被）、EVI（增强型植被、抗饱和）、NDWI（水体, McFeeters）、MNDWI（改进水体, 加 SWIR）、SAVI（低植被区土壤调整）、NDBI（建筑指数）。", "recommended": "植被监测 NDVI；水体用 MNDWI（比 NDWI 更稳）；建成区用 NDBI 并配合其他特征。"},
-      {"name": "red", "meaning": "红光波段索引或名称（如 Sentinel-2 B4）。", "recommended": "务必与影像实际波段顺序核对。"},
-      {"name": "nir", "meaning": "近红外波段（如 Sentinel-2 B8）。"},
-      {"name": "blue", "meaning": "蓝光波段（EVI 需要，如 Sentinel-2 B2）。"},
-      {"name": "swir", "meaning": "短波红外波段（MNDWI/NDBI 需要，如 Sentinel-2 B11）。"}
+      {
+        "name": "index",
+        "meaning": "指数类型。常用：NDVI（植被）、EVI（增强型植被、抗饱和）、NDWI（水体, McFeeters）、MNDWI（改进水体, 加 SWIR）、SAVI（低植被区土壤调整）、NDBI（建筑指数）。",
+        "recommended": "植被监测 NDVI；水体用 MNDWI（比 NDWI 更稳）；建成区用 NDBI 并配合其他特征。"
+      },
+      {
+        "name": "red",
+        "meaning": "红光波段索引或名称（如 Sentinel-2 B4）。",
+        "recommended": "务必与影像实际波段顺序核对。"
+      },
+      {
+        "name": "nir",
+        "meaning": "近红外波段（如 Sentinel-2 B8）。"
+      },
+      {
+        "name": "blue",
+        "meaning": "蓝光波段（EVI 需要，如 Sentinel-2 B2）。"
+      },
+      {
+        "name": "swir",
+        "meaning": "短波红外波段（MNDWI/NDBI 需要，如 Sentinel-2 B11）。"
+      }
     ],
-    "related": ["concept.rs.ndvi", "operator.rs.ndvi", "operator.rs.band_math"],
-    "docs": ["docs/processing/foundation-5.md"]
+    "related": [
+      "concept.rs.ndvi",
+      "operator.rs.ndvi",
+      "operator.rs.band_math"
+    ],
+    "docs": [
+      "docs/processing/foundation-5.md"
+    ]
   },
   {
-    "id": "operator.rs.ndvi", "title": "NDVI", "summary": "归一化植被指数 (NIR−Red)/(NIR+Red)，值域 −1..1。",
-    "category": "光学遥感", "keywords": ["NDVI", "植被"],
-    "algorithm": {"whatItDoes": "(NIR−Red)/(NIR+Red)，对绿色植被活性敏感。", "whenToUse": "植被覆盖与长势快速监测。", "assumptions": ["地表反射率输入最佳"], "limitations": ["高生物量饱和", "土壤背景影响低覆盖区"], "relatedTools": ["rs:spectral_index"]},
-    "related": ["concept.rs.ndvi", "operator.rs.spectral_index"]
+    "id": "operator.rs.ndvi",
+    "title": "NDVI",
+    "summary": "归一化植被指数 (NIR−Red)/(NIR+Red)，值域 −1..1。",
+    "category": "光学遥感",
+    "keywords": [
+      "NDVI",
+      "植被"
+    ],
+    "algorithm": {
+      "whatItDoes": "(NIR−Red)/(NIR+Red)，对绿色植被活性敏感。",
+      "whenToUse": "植被覆盖与长势快速监测。",
+      "assumptions": [
+        "地表反射率输入最佳"
+      ],
+      "limitations": [
+        "高生物量饱和",
+        "土壤背景影响低覆盖区"
+      ],
+      "relatedTools": [
+        "rs:spectral_index"
+      ]
+    },
+    "related": [
+      "concept.rs.ndvi",
+      "operator.rs.spectral_index"
+    ]
   },
   {
-    "id": "operator.rs.evi", "title": "EVI", "summary": "增强型植被指数，蓝光校正气溶胶并降低高生物量饱和。",
-    "category": "光学遥感", "keywords": ["EVI", "植被指数"],
-    "algorithm": {"whatItDoes": "EVI = G·(NIR−Red)/(NIR+C1·Red−C2·Blue+L)，引入蓝光与增益项。", "whenToUse": "茂密植被区、跨期比较需要低饱和时。", "assumptions": ["需要蓝光波段"], "limitations": ["传感器缺蓝波段时不可用"]},
-    "related": ["concept.rs.ndvi", "operator.rs.ndvi"]
+    "id": "operator.rs.evi",
+    "title": "EVI",
+    "summary": "增强型植被指数，蓝光校正气溶胶并降低高生物量饱和。",
+    "category": "光学遥感",
+    "keywords": [
+      "EVI",
+      "植被指数"
+    ],
+    "algorithm": {
+      "whatItDoes": "EVI = G·(NIR−Red)/(NIR+C1·Red−C2·Blue+L)，引入蓝光与增益项。",
+      "whenToUse": "茂密植被区、跨期比较需要低饱和时。",
+      "assumptions": [
+        "需要蓝光波段"
+      ],
+      "limitations": [
+        "传感器缺蓝波段时不可用"
+      ]
+    },
+    "related": [
+      "concept.rs.ndvi",
+      "operator.rs.ndvi"
+    ]
   },
   {
-    "id": "operator.rs.ndwi", "title": "NDWI", "summary": "归一化水体指数 (Green−NIR)/(Green+NIR)（McFeeters）。",
-    "category": "光学遥感", "keywords": ["NDWI", "水体"],
-    "algorithm": {"whatItDoes": "利用水体绿光高反射/近红外低反射的反差识别水面。", "whenToUse": "开阔水体提取。", "limitations": ["建筑/阴影易混", "浑浊水体阈值需调整"], "relatedTools": ["rs:mndwi"]},
-    "related": ["operator.rs.mndwi", "operator.rs.spectral_index"]
+    "id": "operator.rs.ndwi",
+    "title": "NDWI",
+    "summary": "归一化水体指数 (Green−NIR)/(Green+NIR)（McFeeters）。",
+    "category": "光学遥感",
+    "keywords": [
+      "NDWI",
+      "水体"
+    ],
+    "algorithm": {
+      "whatItDoes": "利用水体绿光高反射/近红外低反射的反差识别水面。",
+      "whenToUse": "开阔水体提取。",
+      "limitations": [
+        "建筑/阴影易混",
+        "浑浊水体阈值需调整"
+      ],
+      "relatedTools": [
+        "rs:mndwi"
+      ]
+    },
+    "related": [
+      "operator.rs.mndwi",
+      "operator.rs.spectral_index"
+    ]
   },
   {
-    "id": "operator.rs.mndwi", "title": "MNDWI", "summary": "改进水体指数 (Green−SWIR)/(Green+SWIR)，水体/建筑区分更稳。",
-    "category": "光学遥感", "keywords": ["MNDWI", "水体", "swir"],
-    "algorithm": {"whatItDoes": "用 SWIR 替代 NIR，拉大水体与阴影/建筑的反差。", "whenToUse": "城镇周边或阴影干扰区的水体提取。", "assumptions": ["需要 SWIR 波段"], "limitations": ["积雪与水体易混"]},
-    "related": ["operator.rs.ndwi", "operator.rs.spectral_index"]
+    "id": "operator.rs.mndwi",
+    "title": "MNDWI",
+    "summary": "改进水体指数 (Green−SWIR)/(Green+SWIR)，水体/建筑区分更稳。",
+    "category": "光学遥感",
+    "keywords": [
+      "MNDWI",
+      "水体",
+      "swir"
+    ],
+    "algorithm": {
+      "whatItDoes": "用 SWIR 替代 NIR，拉大水体与阴影/建筑的反差。",
+      "whenToUse": "城镇周边或阴影干扰区的水体提取。",
+      "assumptions": [
+        "需要 SWIR 波段"
+      ],
+      "limitations": [
+        "积雪与水体易混"
+      ]
+    },
+    "related": [
+      "operator.rs.ndwi",
+      "operator.rs.spectral_index"
+    ]
   },
   {
-    "id": "operator.rs.savi", "title": "SAVI", "summary": "土壤调整植被指数，低覆盖区抑制土壤背景。",
-    "category": "光学遥感", "keywords": ["SAVI", "土壤调整"],
-    "algorithm": {"whatItDoes": "((NIR−Red)/(NIR+Red+L))·(1+L)，L≈0.5 时土壤影响最小。", "whenToUse": "干旱半干旱稀疏植被区替代 NDVI。", "limitations": ["L 需按覆盖度调整"]},
-    "related": ["concept.rs.ndvi", "operator.rs.ndvi"]
+    "id": "operator.rs.savi",
+    "title": "SAVI",
+    "summary": "土壤调整植被指数，低覆盖区抑制土壤背景。",
+    "category": "光学遥感",
+    "keywords": [
+      "SAVI",
+      "土壤调整"
+    ],
+    "algorithm": {
+      "whatItDoes": "((NIR−Red)/(NIR+Red+L))·(1+L)，L≈0.5 时土壤影响最小。",
+      "whenToUse": "干旱半干旱稀疏植被区替代 NDVI。",
+      "limitations": [
+        "L 需按覆盖度调整"
+      ]
+    },
+    "related": [
+      "concept.rs.ndvi",
+      "operator.rs.ndvi"
+    ]
   },
   {
-    "id": "operator.rs.ndbi", "title": "NDBI", "summary": "归一化建筑指数 (SWIR−NIR)/(SWIR+NIR)。",
-    "category": "光学遥感", "keywords": ["NDBI", "建筑", "不透水面"],
-    "algorithm": {"whatItDoes": "建筑/不透水面 SWIR 高于 NIR 的特征比值。", "whenToUse": "建成区粗提取，常与 NDVI/NDWI 组合使用。", "limitations": ["裸土易混入"]},
-    "related": ["operator.rs.spectral_index", "operator.rs.feature_stack"]
+    "id": "operator.rs.ndbi",
+    "title": "NDBI",
+    "summary": "归一化建筑指数 (SWIR−NIR)/(SWIR+NIR)。",
+    "category": "光学遥感",
+    "keywords": [
+      "NDBI",
+      "建筑",
+      "不透水面"
+    ],
+    "algorithm": {
+      "whatItDoes": "建筑/不透水面 SWIR 高于 NIR 的特征比值。",
+      "whenToUse": "建成区粗提取，常与 NDVI/NDWI 组合使用。",
+      "limitations": [
+        "裸土易混入"
+      ]
+    },
+    "related": [
+      "operator.rs.spectral_index",
+      "operator.rs.feature_stack"
+    ]
   },
   {
-    "id": "operator.rs.band_math", "title": "波段数学",
+    "id": "operator.rs.band_math",
+    "title": "波段数学",
     "summary": "表达式驱动的多波段像元运算，支持四则/函数与波段引用。",
-    "category": "光学遥感", "keywords": ["波段运算", "表达式", "band math"],
-    "algorithm": {"whatItDoes": "对每个像元按表达式计算结果，可引用各波段与常量。", "whenToUse": "任意自定义指数、条件掩膜、单位换算。", "assumptions": ["表达式语法正确且波段引用存在"], "limitations": ["除零/开方负数需自行保护（NoData 语义按实现）"], "keyParameters": ["expression", "bands"]},
-    "related": ["operator.rs.spectral_index", "command.rs.bandMath"]
+    "category": "光学遥感",
+    "keywords": [
+      "波段运算",
+      "表达式",
+      "band math"
+    ],
+    "algorithm": {
+      "whatItDoes": "对每个像元按表达式计算结果，可引用各波段与常量。",
+      "whenToUse": "任意自定义指数、条件掩膜、单位换算。",
+      "assumptions": [
+        "表达式语法正确且波段引用存在"
+      ],
+      "limitations": [
+        "除零/开方负数需自行保护（NoData 语义按实现）"
+      ],
+      "keyParameters": [
+        "expression",
+        "bands"
+      ]
+    },
+    "related": [
+      "operator.rs.spectral_index",
+      "command.rs.bandMath"
+    ]
   },
   {
-    "id": "operator.rs.band_ratio", "title": "波段比值", "summary": "两波段比值或归一化比值输出。",
-    "category": "光学遥感", "keywords": ["比值", "ratio"],
-    "algorithm": {"whatItDoes": "逐像元计算 band1/band2 或归一化形式，抑制共同的光照/地形乘性因子。", "whenToUse": "矿物/植被比值特征、光照差异抑制。", "limitations": ["分母为零需要保护"]},
-    "related": ["operator.rs.band_math", "concept.rs.topographic_effects"]
+    "id": "operator.rs.band_ratio",
+    "title": "波段比值",
+    "summary": "两波段比值或归一化比值输出。",
+    "category": "光学遥感",
+    "keywords": [
+      "比值",
+      "ratio"
+    ],
+    "algorithm": {
+      "whatItDoes": "逐像元计算 band1/band2 或归一化形式，抑制共同的光照/地形乘性因子。",
+      "whenToUse": "矿物/植被比值特征、光照差异抑制。",
+      "limitations": [
+        "分母为零需要保护"
+      ]
+    },
+    "related": [
+      "operator.rs.band_math",
+      "concept.rs.topographic_effects"
+    ]
   },
   {
-    "id": "operator.rs.extract_bands", "title": "提取波段", "summary": "从多波段栅格提取指定波段另存。",
-    "category": "数据 I/O", "keywords": ["提取波段", "subset"],
-    "algorithm": {"whatItDoes": "复制所选波段到新栅格，无损保留地理信息。", "whenToUse": "精简数据、单独处理某一波段。", "limitations": []},
-    "related": ["command.rs.extractBands"]
+    "id": "operator.rs.extract_bands",
+    "title": "提取波段",
+    "summary": "从多波段栅格提取指定波段另存。",
+    "category": "数据 I/O",
+    "keywords": [
+      "提取波段",
+      "subset"
+    ],
+    "algorithm": {
+      "whatItDoes": "复制所选波段到新栅格，无损保留地理信息。",
+      "whenToUse": "精简数据、单独处理某一波段。",
+      "limitations": []
+    },
+    "related": [
+      "command.rs.extractBands"
+    ]
   },
   {
-    "id": "operator.rs.contrast_stretch", "title": "对比度拉伸", "summary": "线性/百分比裁剪/直方图均衡输出显示友好影像。",
-    "category": "光学遥感", "keywords": ["拉伸", "对比度", "直方图均衡"],
-    "algorithm": {"whatItDoes": "把原始值映射到显示范围：线性按 min/max，百分比裁剪截除尾部极值，均衡按累计直方图重分布。", "whenToUse": "显示与制图；不影响后续定量分析（保留原始数据）。", "limitations": ["输出拉伸后数据不宜再用于定量反演"]},
-    "related": ["command.rs.contrastStretch"]
+    "id": "operator.rs.contrast_stretch",
+    "title": "对比度拉伸",
+    "summary": "线性/百分比裁剪/直方图均衡输出显示友好影像。",
+    "category": "光学遥感",
+    "keywords": [
+      "拉伸",
+      "对比度",
+      "直方图均衡"
+    ],
+    "algorithm": {
+      "whatItDoes": "把原始值映射到显示范围：线性按 min/max，百分比裁剪截除尾部极值，均衡按累计直方图重分布。",
+      "whenToUse": "显示与制图；不影响后续定量分析（保留原始数据）。",
+      "limitations": [
+        "输出拉伸后数据不宜再用于定量反演"
+      ]
+    },
+    "related": [
+      "command.rs.contrastStretch"
+    ]
   },
   {
-    "id": "operator.rs.image_enhancement", "title": "影像增强滤波", "summary": "均值/高斯/中值/拉普拉斯等空间卷积增强。",
-    "category": "光学遥感", "keywords": ["滤波", "平滑", "锐化", "spatial filter"],
-    "algorithm": {"whatItDoes": "卷积核滑动计算：低通（均值/高斯）去噪，中值保边去噪，拉普拉斯锐化边缘。", "whenToUse": "去噪、细节增强。", "limitations": ["核大小与边缘损失之间的权衡"], "keyParameters": ["method", "kernelSize"]},
-    "related": ["command.rs.spatialFilter", "operator.rs.majority_filter"]
+    "id": "operator.rs.image_enhancement",
+    "title": "影像增强滤波",
+    "summary": "均值/高斯/中值/拉普拉斯等空间卷积增强。",
+    "category": "光学遥感",
+    "keywords": [
+      "滤波",
+      "平滑",
+      "锐化",
+      "spatial filter"
+    ],
+    "algorithm": {
+      "whatItDoes": "卷积核滑动计算：低通（均值/高斯）去噪，中值保边去噪，拉普拉斯锐化边缘。",
+      "whenToUse": "去噪、细节增强。",
+      "limitations": [
+        "核大小与边缘损失之间的权衡"
+      ],
+      "keyParameters": [
+        "method",
+        "kernelSize"
+      ]
+    },
+    "related": [
+      "command.rs.spatialFilter",
+      "operator.rs.majority_filter"
+    ]
   },
   {
-    "id": "operator.rs.spectral_unmixing", "title": "光谱解混", "summary": "把混合像元分解为端元丰度（线性混合模型）。",
-    "category": "光学遥感", "keywords": ["解混", "端元", "丰度", "unmixing"],
-    "algorithm": {"whatItDoes": "假设像元光谱为端元光谱的线性组合，反演各端元比例（FCLS 等约束）。", "whenToUse": "亚像元覆盖度估计（植被/土壤/不透水比例）。", "assumptions": ["端元光谱已知或已提取", "线性混合假设成立"], "limitations": ["多次散射/非线性混合时误差大"], "keyParameters": ["endmembers"]},
-    "related": ["operator.rs.endmember_extraction", "operator.rs.matched_filter"]
+    "id": "operator.rs.spectral_unmixing",
+    "title": "光谱解混",
+    "summary": "把混合像元分解为端元丰度（线性混合模型）。",
+    "category": "光学遥感",
+    "keywords": [
+      "解混",
+      "端元",
+      "丰度",
+      "unmixing"
+    ],
+    "algorithm": {
+      "whatItDoes": "假设像元光谱为端元光谱的线性组合，反演各端元比例（FCLS 等约束）。",
+      "whenToUse": "亚像元覆盖度估计（植被/土壤/不透水比例）。",
+      "assumptions": [
+        "端元光谱已知或已提取",
+        "线性混合假设成立"
+      ],
+      "limitations": [
+        "多次散射/非线性混合时误差大"
+      ],
+      "keyParameters": [
+        "endmembers"
+      ]
+    },
+    "related": [
+      "operator.rs.endmember_extraction",
+      "operator.rs.matched_filter"
+    ]
   },
   {
-    "id": "operator.rs.endmember_extraction", "title": "端元提取", "summary": "从影像自动提取纯像元光谱（VCA/PPI 等）。",
-    "category": "光学遥感", "keywords": ["端元", "纯像元", "endmember"],
-    "algorithm": {"whatItDoes": "在高维特征空间寻找构成数据单形体的顶点光谱。", "whenToUse": "解混前的端元获取；高光谱数据效果最佳。", "limitations": ["纯像元不存在时端元为虚拟混合"]},
-    "related": ["operator.rs.spectral_unmixing", "operator.rs.pca"]
+    "id": "operator.rs.endmember_extraction",
+    "title": "端元提取",
+    "summary": "从影像自动提取纯像元光谱（VCA/PPI 等）。",
+    "category": "光学遥感",
+    "keywords": [
+      "端元",
+      "纯像元",
+      "endmember"
+    ],
+    "algorithm": {
+      "whatItDoes": "在高维特征空间寻找构成数据单形体的顶点光谱。",
+      "whenToUse": "解混前的端元获取；高光谱数据效果最佳。",
+      "limitations": [
+        "纯像元不存在时端元为虚拟混合"
+      ]
+    },
+    "related": [
+      "operator.rs.spectral_unmixing",
+      "operator.rs.pca"
+    ]
   },
   {
-    "id": "operator.rs.rx_anomaly", "title": "RX 异常检测", "summary": "RX 算法基于马氏距离检测光谱异常目标。",
-    "category": "光学遥感", "keywords": ["异常检测", "RX", "anomaly"],
-    "algorithm": {"whatItDoes": "计算像元到背景统计（均值+协方差）的马氏距离，距离越大越异常。", "whenToUse": "无目标先验的小目标/异常探测。", "assumptions": ["背景近似高斯分布"], "limitations": ["背景非均匀时虚警率高"], "keyParameters": ["threshold"]},
-    "related": ["operator.rs.matched_filter", "operator.rs.ace"]
+    "id": "operator.rs.rx_anomaly",
+    "title": "RX 异常检测",
+    "summary": "RX 算法基于马氏距离检测光谱异常目标。",
+    "category": "光学遥感",
+    "keywords": [
+      "异常检测",
+      "RX",
+      "anomaly"
+    ],
+    "algorithm": {
+      "whatItDoes": "计算像元到背景统计（均值+协方差）的马氏距离，距离越大越异常。",
+      "whenToUse": "无目标先验的小目标/异常探测。",
+      "assumptions": [
+        "背景近似高斯分布"
+      ],
+      "limitations": [
+        "背景非均匀时虚警率高",
+        "输出为异常得分图；二值化请配合 rs:threshold_raster"
+      ],
+      "keyParameters": []
+    },
+    "related": [
+      "operator.rs.matched_filter",
+      "operator.rs.ace"
+    ]
   },
   {
-    "id": "operator.rs.matched_filter", "title": "匹配滤波", "summary": "已知目标光谱的似然比目标检测（MF 得分图）。",
-    "category": "光学遥感", "keywords": ["目标检测", "matched filter", "mf"],
-    "algorithm": {"whatItDoes": "把像元投影到目标方向并按背景协方差白化，输出目标存在性得分。", "whenToUse": "已知目标光谱（矿物/材料）的探测。", "assumptions": ["背景高斯、目标亚像元"], "limitations": ["目标光谱失配会漏检"]},
-    "related": ["operator.rs.ace", "operator.rs.rx_anomaly"]
+    "id": "operator.rs.matched_filter",
+    "title": "匹配滤波",
+    "summary": "已知目标光谱的似然比目标检测（MF 得分图）。",
+    "category": "光学遥感",
+    "keywords": [
+      "目标检测",
+      "matched filter",
+      "mf"
+    ],
+    "algorithm": {
+      "whatItDoes": "把像元投影到目标方向并按背景协方差白化，输出目标存在性得分。",
+      "whenToUse": "已知目标光谱（矿物/材料）的探测。",
+      "assumptions": [
+        "背景高斯、目标亚像元"
+      ],
+      "limitations": [
+        "目标光谱失配会漏检"
+      ]
+    },
+    "related": [
+      "operator.rs.ace",
+      "operator.rs.rx_anomaly"
+    ]
   },
   {
-    "id": "operator.rs.ace", "title": "ACE 自适应一致性估计", "summary": "基于光谱形状（归一化）的目标检测算法。",
-    "category": "光学遥感", "keywords": ["ACE", "目标检测", "光谱形状"],
-    "algorithm": {"whatItDoes": "比较像元与目标光谱的夹角余弦（协方差白化后），对幅度不敏感。", "whenToUse": "光照/幅度变化大但形状稳定的目标检测。", "limitations": ["幅度信息被舍弃"]},
-    "related": ["operator.rs.matched_filter", "operator.rs.sam_classify"]
+    "id": "operator.rs.ace",
+    "title": "ACE 自适应一致性估计",
+    "summary": "基于光谱形状（归一化）的目标检测算法。",
+    "category": "光学遥感",
+    "keywords": [
+      "ACE",
+      "目标检测",
+      "光谱形状"
+    ],
+    "algorithm": {
+      "whatItDoes": "比较像元与目标光谱的夹角余弦（协方差白化后），对幅度不敏感。",
+      "whenToUse": "光照/幅度变化大但形状稳定的目标检测。",
+      "limitations": [
+        "幅度信息被舍弃"
+      ]
+    },
+    "related": [
+      "operator.rs.matched_filter",
+      "operator.rs.sam_classify"
+    ]
   },
   {
-    "id": "operator.rs.continuum_removal", "title": "连续统去除", "summary": "归一化吸收特征，突出光谱吸收谷形状。",
-    "category": "光学遥感", "keywords": ["连续统", "吸收特征", "continuum"],
-    "algorithm": {"whatItDoes": "拟合光谱包络线并把反射率除以包络，使吸收深度/位置可比。", "whenToUse": "矿物填图、叶绿素/氮素吸收特征分析。", "assumptions": ["光谱分辨率足以刻画吸收特征"], "limitations": ["端点选择影响包络形状"]},
-    "related": ["operator.rs.spectral_derivative", "operator.rs.spectral_resample"]
+    "id": "operator.rs.continuum_removal",
+    "title": "连续统去除",
+    "summary": "归一化吸收特征，突出光谱吸收谷形状。",
+    "category": "光学遥感",
+    "keywords": [
+      "连续统",
+      "吸收特征",
+      "continuum"
+    ],
+    "algorithm": {
+      "whatItDoes": "拟合光谱包络线并把反射率除以包络，使吸收深度/位置可比。",
+      "whenToUse": "矿物填图、叶绿素/氮素吸收特征分析。",
+      "assumptions": [
+        "光谱分辨率足以刻画吸收特征"
+      ],
+      "limitations": [
+        "端点选择影响包络形状"
+      ]
+    },
+    "related": [
+      "operator.rs.spectral_derivative",
+      "operator.rs.spectral_resample"
+    ]
   },
   {
-    "id": "operator.rs.spectral_resample", "title": "光谱重采样", "summary": "把光谱响应重采样到目标传感器波段设置。",
-    "category": "光学遥感", "keywords": ["光谱重采样", "波段模拟", "resample"],
-    "algorithm": {"whatItDoes": "按目标波段的光谱响应函数加权积分源光谱。", "whenToUse": "跨传感器比较、以高光谱模拟多光谱。", "assumptions": ["已知响应函数或等效波长"], "limitations": ["窄特征可能被平滑掉"]},
-    "related": ["operator.rs.spectral_derivative"]
+    "id": "operator.rs.spectral_resample",
+    "title": "光谱重采样",
+    "summary": "把光谱响应重采样到目标传感器波段设置。",
+    "category": "光学遥感",
+    "keywords": [
+      "光谱重采样",
+      "波段模拟",
+      "resample"
+    ],
+    "algorithm": {
+      "whatItDoes": "按目标波段的光谱响应函数加权积分源光谱。",
+      "whenToUse": "跨传感器比较、以高光谱模拟多光谱。",
+      "assumptions": [
+        "已知响应函数或等效波长"
+      ],
+      "limitations": [
+        "窄特征可能被平滑掉"
+      ]
+    },
+    "related": [
+      "operator.rs.spectral_derivative"
+    ]
   },
   {
-    "id": "operator.rs.spectral_derivative", "title": "光谱微分", "summary": "计算一阶/二阶光谱导数，突出吸收边位置。",
-    "category": "光学遥感", "keywords": ["导数", "红边", "derivative"],
-    "algorithm": {"whatItDoes": "差分近似光谱导数，抑制缓变背景、突出变化率特征。", "whenToUse": "植被红边分析、矿物吸收边定位。", "limitations": ["放大噪声，常先平滑"]},
-    "related": ["operator.rs.continuum_removal", "operator.rs.image_enhancement"]
+    "id": "operator.rs.spectral_derivative",
+    "title": "光谱微分",
+    "summary": "计算一阶/二阶光谱导数，突出吸收边位置。",
+    "category": "光学遥感",
+    "keywords": [
+      "导数",
+      "红边",
+      "derivative"
+    ],
+    "algorithm": {
+      "whatItDoes": "差分近似光谱导数，抑制缓变背景、突出变化率特征。",
+      "whenToUse": "植被红边分析、矿物吸收边定位。",
+      "limitations": [
+        "放大噪声，常先平滑"
+      ]
+    },
+    "related": [
+      "operator.rs.continuum_removal",
+      "operator.rs.image_enhancement"
+    ]
   },
   {
-    "id": "operator.rs.atmospheric_correction", "title": "大气校正（6S）",
-    "summary": "辐射传输模型（6S）把表观反射率校正为地表反射率。",
-    "category": "光学遥感", "keywords": ["大气校正", "6S", "地表反射率"],
-    "algorithm": {"whatItDoes": "以辐射传输方程反演大气透过/程辐射，输出地表反射率。", "whenToUse": "需要物理意义明确的地表反射率产品时。", "assumptions": ["已知几何/大气参数（AOD、水汽）或其缺省近似"], "limitations": ["参数不准时误差可能大于 DOS"], "keyParameters": ["aerosolType", "aod"]},
-    "related": ["concept.rs.radiometric_chain", "operator.rs.atmospheric_dos1", "operator.rs.atmospheric_quac"],
-    "docs": ["docs/processing/grid-and-radiometric-policy.md"]
+    "id": "operator.rs.atmospheric_correction",
+    "title": "大气校正（DOS/QUAC）",
+    "summary": "暗目标（DOS1/DOS2）或经验（QUAC）方法把表观反射率校正为地表反射率。",
+    "category": "光学遥感",
+    "keywords": [
+      "大气校正",
+      "6S",
+      "地表反射率"
+    ],
+    "algorithm": {
+      "whatItDoes": "以辐射传输方程反演大气透过/程辐射，输出地表反射率。",
+      "whenToUse": "需要物理意义明确的地表反射率产品时。",
+      "assumptions": [
+        "已知几何/大气参数（AOD、水汽）或其缺省近似"
+      ],
+      "limitations": [
+        "参数不准时误差可能大于 DOS"
+      ],
+      "keyParameters": [
+        "method",
+        "band",
+        "gain",
+        "bias"
+      ]
+    },
+    "related": [
+      "concept.rs.radiometric_chain",
+      "operator.rs.atmospheric_dos1",
+      "operator.rs.atmospheric_quac"
+    ],
+    "docs": [
+      "docs/processing/grid-and-radiometric-policy.md"
+    ]
   },
   {
     "id": "operator.rs.dn_to_radiance",
     "title": "DN 转辐亮度",
     "summary": "以增益/偏置把原始 DN 定标为光谱辐亮度 (W·m⁻²·sr⁻¹·μm⁻¹)。",
-    "category": "光学遥感", "keywords": ["辐亮度", "定标", "DN", "radiance"],
-    "algorithm": {"whatItDoes": "L = gain·DN + offset，逐波段应用定标系数。", "whenToUse": "辐射处理链第一步。", "assumptions": ["产品提供定标参数"], "unitsDomain": "W·m⁻²·sr⁻¹·μm⁻¹"},
-    "related": ["concept.rs.radiometric_chain", "operator.rs.radiometric_calibration"]
-  },
-  {
-    "id": "operator.rs.atmospheric_dos1", "title": "DOS1 大气校正",
-    "summary": "暗目标假设的简易大气校正，输出地表反射率估计。",
-    "category": "光学遥感", "keywords": ["DOS", "暗目标", "大气校正"],
-    "algorithm": {"whatItDoes": "假设影像存在零反射暗目标，以暗像元统计反演程辐射并扣除。", "whenToUse": "无大气参数的快速校正；中低浑浊度大气效果可接受。", "assumptions": ["影像内有真暗目标", "忽略大气漫射多次散射"], "limitations": ["浑浊/高湿大气误差大", "不同景暗目标不同导致跨景不一致"]},
-    "parameters": [
-      {"name": "band", "unit": "波段序号", "meaning": "要校正的 1-based 波段序号。", "recommended": "确认该波段的定标增益/偏置与元数据一致后再校正。"},
-      {"name": "gain", "unit": "W·m⁻²·sr⁻¹·μm⁻¹ / DN", "meaning": "辐亮度增益；缺省时从产品元数据解析。"},
-      {"name": "bias", "meaning": "辐亮度偏置；缺省时从产品元数据解析。"}
+    "category": "光学遥感",
+    "keywords": [
+      "辐亮度",
+      "定标",
+      "DN",
+      "radiance"
     ],
-    "related": ["concept.rs.radiometric_chain", "operator.rs.atmospheric_dos2"]
+    "algorithm": {
+      "whatItDoes": "L = gain·DN + offset，逐波段应用定标系数。",
+      "whenToUse": "辐射处理链第一步。",
+      "assumptions": [
+        "产品提供定标参数"
+      ],
+      "unitsDomain": "W·m⁻²·sr⁻¹·μm⁻¹"
+    },
+    "related": [
+      "concept.rs.radiometric_chain",
+      "operator.rs.radiometric_calibration"
+    ]
   },
   {
-    "id": "operator.rs.atmospheric_dos2", "title": "DOS2 大气校正",
+    "id": "operator.rs.atmospheric_dos1",
+    "title": "DOS1 大气校正",
+    "summary": "暗目标假设的简易大气校正，输出地表反射率估计。",
+    "category": "光学遥感",
+    "keywords": [
+      "DOS",
+      "暗目标",
+      "大气校正"
+    ],
+    "algorithm": {
+      "whatItDoes": "假设影像内存在反射率约 1%（Chavez 1996）的暗目标，按暗像元水平反演程辐射并扣除；DOS1 不做透过率修正（T=1）。",
+      "whenToUse": "无大气参数的快速校正；中低浑浊度大气效果可接受。",
+      "assumptions": [
+        "影像内有真暗目标（约 1% 反射率）",
+        "需要产品的反射率定标系数与太阳高度角（缺失时fail-closed）",
+        "忽略大气透过率修正"
+      ],
+      "limitations": [
+        "浑浊/高湿大气误差大",
+        "不同景暗目标不同导致跨景不一致",
+        "不做透过率修正，高天顶角误差增大"
+      ]
+    },
+    "parameters": [
+      {
+        "name": "band",
+        "unit": "波段序号",
+        "meaning": "要校正的 1-based 波段序号。",
+        "recommended": "确认该波段的定标增益/偏置与元数据一致后再校正。"
+      },
+      {
+        "name": "gain",
+        "unit": "W·m⁻²·sr⁻¹·μm⁻¹ / DN",
+        "meaning": "辐亮度增益；缺省时从产品元数据解析。"
+      },
+      {
+        "name": "bias",
+        "meaning": "辐亮度偏置；缺省时从产品元数据解析。"
+      }
+    ],
+    "related": [
+      "concept.rs.radiometric_chain",
+      "operator.rs.atmospheric_dos2"
+    ]
+  },
+  {
+    "id": "operator.rs.atmospheric_dos2",
+    "title": "DOS2 大气校正",
     "summary": "在 DOS1 基础上引入大气透过率修正的暗目标校正。",
-    "category": "光学遥感", "keywords": ["DOS2", "透过率", "大气校正"],
-    "algorithm": {"whatItDoes": "在程辐射扣除外再按 Rayleigh/气溶胶近似修正透过率项。", "whenToUse": "需要比 DOS1 略精确且无外部参数时。", "limitations": ["仍是经验近似"]},
-    "related": ["operator.rs.atmospheric_dos1", "operator.rs.atmospheric_correction"]
+    "category": "光学遥感",
+    "keywords": [
+      "DOS2",
+      "透过率",
+      "大气校正"
+    ],
+    "algorithm": {
+      "whatItDoes": "在程辐射扣除外再按 Rayleigh/气溶胶近似修正透过率项。",
+      "whenToUse": "需要比 DOS1 略精确且无外部参数时。",
+      "limitations": [
+        "仍是经验近似"
+      ]
+    },
+    "related": [
+      "operator.rs.atmospheric_dos1",
+      "operator.rs.atmospheric_correction"
+    ]
   },
   {
-    "id": "operator.rs.atmospheric_quac", "title": "QUAC 大气校正",
+    "id": "operator.rs.atmospheric_quac",
+    "title": "QUAC 大气校正",
     "summary": "经验自动大气校正，无需大气参数。",
-    "category": "光学遥感", "keywords": ["QUAC", "自动大气校正"],
-    "algorithm": {"whatItDoes": "假设影像包含若干已知反射率背景材质，按端元统计估计平均反射率。", "whenToUse": "快速、免参数的地表反射率估计。", "assumptions": ["影像包含足够材质多样性"], "limitations": ["均质影像失效", "绝对精度低于辐射传输模型"]},
-    "related": ["operator.rs.atmospheric_dos1", "operator.rs.atmospheric_correction"]
+    "category": "光学遥感",
+    "keywords": [
+      "QUAC",
+      "自动大气校正"
+    ],
+    "algorithm": {
+      "whatItDoes": "假设影像包含若干已知反射率背景材质，按端元统计估计平均反射率。",
+      "whenToUse": "快速、免参数的地表反射率估计。",
+      "assumptions": [
+        "影像包含足够材质多样性"
+      ],
+      "limitations": [
+        "均质影像失效",
+        "绝对精度低于辐射传输模型"
+      ]
+    },
+    "related": [
+      "operator.rs.atmospheric_dos1",
+      "operator.rs.atmospheric_correction"
+    ]
   },
   {
     "id": "operator.rs.radiometric_calibration",
     "title": "辐射定标",
     "summary": "DN → 辐亮度/表观反射率的一步定标。",
-    "category": "光学遥感", "keywords": ["辐射定标", "表观反射率", "calibration"],
-    "algorithm": {"whatItDoes": "按产品定标参数输出辐亮度，或进一步换算为太阳辐照度归一的表观反射率 (TOA)。", "whenToUse": "所有定量处理前；跨期比较的基础。", "assumptions": ["产品元数据完整"]},
-    "related": ["concept.rs.radiometric_chain", "operator.rs.dn_to_radiance"]
+    "category": "光学遥感",
+    "keywords": [
+      "辐射定标",
+      "表观反射率",
+      "calibration"
+    ],
+    "algorithm": {
+      "whatItDoes": "按产品定标参数输出辐亮度，或进一步换算为太阳辐照度归一的表观反射率 (TOA)。",
+      "whenToUse": "所有定量处理前；跨期比较的基础。",
+      "assumptions": [
+        "产品元数据完整"
+      ]
+    },
+    "related": [
+      "concept.rs.radiometric_chain",
+      "operator.rs.dn_to_radiance"
+    ]
   },
   {
-    "id": "operator.rs.pca", "title": "主成分分析 (PCA)",
+    "id": "operator.rs.pca",
+    "title": "主成分分析 (PCA)",
     "summary": "多波段正交变换去相关，输出按方差排序的主成分。",
     "category": "变换与降维",
-    "keywords": ["PCA", "主成分", "降维"],
-    "algorithm": {"whatItDoes": "对波段协方差矩阵特征分解，前几个主成分集中大部分方差；支持逆变换。", "whenToUse": "压缩波段、噪声分离（后几个成分）、变化信息集中。", "assumptions": ["整幅统计（内存策略通常 full raster）"], "limitations": ["成分物理意义不直观", "全局统计对流式场景代价高"], "keyParameters": ["componentCount"]},
-    "related": ["operator.rs.mnf", "concept.rs.memory_policy", "command.rs.pca"]
+    "keywords": [
+      "PCA",
+      "主成分",
+      "降维"
+    ],
+    "algorithm": {
+      "whatItDoes": "对波段协方差矩阵特征分解，前几个主成分集中大部分方差；支持逆变换。",
+      "whenToUse": "压缩波段、噪声分离（后几个成分）、变化信息集中。",
+      "assumptions": [
+        "整幅统计（内存策略通常 full raster）"
+      ],
+      "limitations": [
+        "成分物理意义不直观",
+        "全局统计对流式场景代价高"
+      ],
+      "keyParameters": [
+        "componentCount"
+      ]
+    },
+    "related": [
+      "operator.rs.mnf",
+      "concept.rs.memory_policy",
+      "command.rs.pca"
+    ]
   },
   {
-    "id": "operator.rs.mnf", "title": "最小噪声分数 (MNF)",
+    "id": "operator.rs.mnf",
+    "title": "最小噪声分数 (MNF)",
     "summary": "按信噪比排序的变换，先白化再 PCA。",
     "category": "变换与降维",
-    "keywords": ["MNF", "信噪比", "噪声分离"],
-    "algorithm": {"whatItDoes": "估计噪声协方差做白化后执行 PCA，成分按信噪比而非方差排序。", "whenToUse": "高光谱降噪：保留高 SNR 成分做后续分析。", "limitations": ["噪声估计质量决定效果"]},
-    "related": ["operator.rs.pca"]
+    "keywords": [
+      "MNF",
+      "信噪比",
+      "噪声分离"
+    ],
+    "algorithm": {
+      "whatItDoes": "估计噪声协方差做白化后执行 PCA，成分按信噪比而非方差排序。",
+      "whenToUse": "高光谱降噪：保留高 SNR 成分做后续分析。",
+      "limitations": [
+        "噪声估计质量决定效果"
+      ]
+    },
+    "related": [
+      "operator.rs.pca"
+    ]
   }
 ]

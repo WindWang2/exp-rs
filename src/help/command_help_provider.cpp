@@ -39,6 +39,13 @@ void applyKnowledge( HelpDescriptor &derived, const HelpDescriptor &knowledge )
         if ( !derived.docRefs.contains( doc ) )
             derived.docRefs << doc;
     }
+    // deprecation is knowledge-level state: an entry marked deprecated in
+    // content stays deprecated after the derived upsert
+    if ( knowledge.deprecated ) {
+        derived.deprecated = true;
+        if ( !knowledge.supersededBy.isEmpty() )
+            derived.supersededBy = knowledge.supersededBy;
+    }
     if ( knowledge.command.has_value() )
         derived.command = knowledge.command;
 }

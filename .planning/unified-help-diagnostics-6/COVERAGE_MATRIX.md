@@ -6,7 +6,7 @@ Measured coverage; updated as milestones land. Mechanical tests enforce the ✅ 
 ## Measured after content authoring (M-E close)
 
 - Shipped descriptors in embedded content: 264 authored entries
-  (49 commands + 6 workbenches + 1 alias + 12 concepts + 92 diagnostics + 105
+  (49 commands + 6 workbenches + 1 alias + 12 concepts + 99 diagnostics + 105
   operator entries) + 105 flagship parameter knowledge entries nested inside
   operator entries.
 - After composition with the live registry the registry also gains ~700
@@ -21,7 +21,7 @@ Measured coverage; updated as milestones land. Mechanical tests enforce the ✅ 
 | Workbenches | 4 (classify, georef I2I, georef I2M, OBIA) | 4 (M-G) | empty-state guidance ≥3 | descriptor test |
 | RSOperator `rs:*` | 105 | 105 (M-E) | flagship params deep (see below) | drift test |
 | Operator families beyond rs:* (opencv/gdal/io/otb/python) | registry-listed | schema-derived base tier auto | no manual deep pages (out of scope tier) | derivation test |
-| HarnessError codes | 24 | 24 (M-F) | remediation all | coverage test |
+| HarnessError codes | 26 | 26 (M-F) | remediation all, retry drift-checked | coverage test |
 | RSOperatorError codes | 24 | 24 (M-F) | remediation all | coverage test |
 | GeoError codes | 22 | 22 (M-F) | remediation all | coverage test |
 | Dataset finding kinds | ~10 | 10 (M-F) | remediation all | coverage test |

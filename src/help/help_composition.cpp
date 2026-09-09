@@ -16,6 +16,17 @@ CompositionReport composeHelpSystem( HelpRegistry &target,
                                      const OperatorCatalogSource *operatorSource,
                                      const QString &extraContentDir )
 {
+    // First composition wins: re-running on a populated target would report
+    // duplicate-id errors for identical content. The early-out makes the
+    // operation genuinely idempotent.
+    if ( target.count() > 0 || target.aliasCount() > 0 ) {
+        CompositionReport noop;
+        noop.descriptors = target.count();
+        noop.aliases = target.aliasCount();
+        noop.dangling = target.validateReferences();
+        return noop;
+    }
+
     CompositionReport report;
 
     // 1. Embedded knowledge layer (content authored under data/help/**).

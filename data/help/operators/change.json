@@ -4,109 +4,355 @@
     "title": "变化检测",
     "summary": "两期影像差异/比值/CVA 检测，支持统计阈值与形态清理输出掩膜。",
     "category": "变化检测",
-    "keywords": ["变化检测", "差异", "比值", "CVA", "阈值"],
+    "keywords": [
+      "变化检测",
+      "差异",
+      "比值",
+      "CVA",
+      "阈值"
+    ],
     "algorithm": {
       "whatItDoes": "对前后时相逐像元计算差异/比值/CVA 幅度，再以固定阈值或统计阈值（均值+k·标准差、百分位）二值化，可做形态清理并输出掩膜。",
       "whenToUse": "土地覆盖变化、灾害提取、城市扩张监测。",
-      "inputs": ["before：前时相影像", "after：后时相影像（同格网配准）"],
-      "outputs": ["变化幅度影像", "变化掩膜（可选）"],
-      "assumptions": ["两期几何配准（建议优于 1 像元）", "辐射基准可比（建议都做大气校正）"],
-      "limitations": ["物候差异产生伪变化", "阈值依赖场景统计"],
-      "failureModes": ["配准不良 → 地物边缘整圈误报", "辐射不一致 → 整体漂移误报"],
-      "keyParameters": ["method", "thresholdMethod", "threshold", "statisticalK", "percentile", "makeMask"],
-      "relatedTools": ["rs:change_cva", "rs:change_irmad", "rs:post_classification_change"]
+      "inputs": [
+        "before：前时相影像",
+        "after：后时相影像（同格网配准）"
+      ],
+      "outputs": [
+        "变化幅度影像",
+        "变化掩膜（可选）"
+      ],
+      "assumptions": [
+        "两期几何配准（建议优于 1 像元）",
+        "辐射基准可比（建议都做大气校正）"
+      ],
+      "limitations": [
+        "物候差异产生伪变化",
+        "阈值依赖场景统计"
+      ],
+      "failureModes": [
+        "配准不良 → 地物边缘整圈误报",
+        "辐射不一致 → 整体漂移误报"
+      ],
+      "keyParameters": [
+        "method",
+        "thresholdMethod",
+        "threshold",
+        "statisticalK",
+        "percentile",
+        "makeMask"
+      ],
+      "relatedTools": [
+        "rs:change_cva",
+        "rs:change_irmad",
+        "rs:post_classification_change"
+      ]
     },
     "parameters": [
-      {"name": "before", "meaning": "前时相影像路径。"},
-      {"name": "after", "meaning": "后时相影像路径，需与 before 同格网。"},
-      {"name": "method", "meaning": "变化度量：difference（差值，同量纲适用）、ratio（比值，抑制光照差异）、cva（多波段变化向量幅度）。", "recommended": "反射率数据常用 difference；未一致性校正数据用 ratio；多波段综合用 cva。"},
-      {"name": "thresholdMethod", "meaning": "阈值策略：fixed（固定值）、statistical（均值+k·σ）、percentile（百分位）。", "recommended": "无先验时用 statistical 起步，再按目视/样本微调。"},
-      {"name": "threshold", "meaning": "固定阈值（fixed 模式）。"},
-      {"name": "statisticalK", "meaning": "统计阈值的 σ 倍数。", "recommended": "k=2 保留较多变化，k=3 更严格。"},
-      {"name": "percentile", "unit": "百分比", "meaning": "取变化幅度前 N% 作为变化。", "recommended": "关注显著变化时 95–99。"},
-      {"name": "minAreaPixels", "unit": "像素", "meaning": "形态清理时保留的最小图斑面积。", "recommended": "按最小制图单元设定，过滤孤立像元噪声。"},
-      {"name": "makeMask", "meaning": "是否输出二值变化掩膜。"}
+      {
+        "name": "before",
+        "meaning": "前时相影像路径。"
+      },
+      {
+        "name": "after",
+        "meaning": "后时相影像路径，需与 before 同格网。"
+      },
+      {
+        "name": "method",
+        "meaning": "变化度量：difference（差值，同量纲适用）、ratio（比值，抑制光照差异）、normalized_difference（归一化差值）、cva（多波段变化向量幅度）、mad、change_mask。",
+        "recommended": "反射率数据常用 difference；未一致性校正数据用 ratio；多波段综合用 cva。"
+      },
+      {
+        "name": "thresholdMethod",
+        "meaning": "阈值策略：manual（手动阈值）、statistical（均值+k·σ）、percentile（百分位）、otsu（自动最大化类间方差）。",
+        "recommended": "无先验时用 otsu 或 statistical 起步，再按目视/样本微调。"
+      },
+      {
+        "name": "threshold",
+        "meaning": "固定阈值（fixed 模式）。"
+      },
+      {
+        "name": "statisticalK",
+        "meaning": "统计阈值的 σ 倍数。",
+        "recommended": "k=2 保留较多变化，k=3 更严格。"
+      },
+      {
+        "name": "percentile",
+        "unit": "百分比",
+        "meaning": "取变化幅度前 N% 作为变化。",
+        "recommended": "关注显著变化时 95–99。"
+      },
+      {
+        "name": "minAreaPixels",
+        "unit": "像素",
+        "meaning": "形态清理时保留的最小图斑面积。",
+        "recommended": "按最小制图单元设定，过滤孤立像元噪声。"
+      },
+      {
+        "name": "makeMask",
+        "meaning": "是否输出二值变化掩膜。"
+      }
     ],
-    "related": ["concept.rs.change_detection", "operator.rs.threshold_raster", "command.rs.changeDetection"],
-    "docs": ["docs/processing/foundation-5.md"]
+    "related": [
+      "concept.rs.change_detection",
+      "operator.rs.threshold_raster",
+      "command.rs.changeDetection"
+    ],
+    "docs": [
+      "docs/processing/foundation-5.md"
+    ]
   },
   {
-    "id": "operator.rs.change_difference", "title": "差值变化", "summary": "逐波段前后时相直接相减。",
-    "category": "变化检测", "keywords": ["差值", "difference"],
-    "algorithm": {"whatItDoes": "after − before，正值/负值指示增/减方向。", "whenToUse": "同量纲、已辐射一致性校正的数据（如 NDVI 两期）。", "limitations": ["整体辐射漂移直接进入结果"]},
-    "related": ["operator.rs.change_detection"]
+    "id": "operator.rs.change_difference",
+    "title": "差值变化",
+    "summary": "逐波段前后时相直接相减。",
+    "category": "变化检测",
+    "keywords": [
+      "差值",
+      "difference"
+    ],
+    "algorithm": {
+      "whatItDoes": "after − before，正值/负值指示增/减方向。",
+      "whenToUse": "同量纲、已辐射一致性校正的数据（如 NDVI 两期）。",
+      "limitations": [
+        "整体辐射漂移直接进入结果"
+      ]
+    },
+    "related": [
+      "operator.rs.change_detection"
+    ]
   },
   {
-    "id": "operator.rs.change_normalized_difference", "title": "归一化差值变化", "summary": "把两期差异归一化到 −1..1，抑制整体幅度差异。",
-    "category": "变化检测", "keywords": ["归一化差值"],
-    "algorithm": {"whatItDoes": "(after−before)/(after+before)，类似逐像元归一化比值。", "whenToUse": "幅度漂移较大但相对变化关心的场景。", "limitations": ["值接近零的分母需要保护"]},
-    "related": ["operator.rs.change_difference"]
+    "id": "operator.rs.change_normalized_difference",
+    "title": "归一化差值变化",
+    "summary": "把两期差异归一化到 −1..1，抑制整体幅度差异。",
+    "category": "变化检测",
+    "keywords": [
+      "归一化差值"
+    ],
+    "algorithm": {
+      "whatItDoes": "(after−before)/(after+before)，类似逐像元归一化比值。",
+      "whenToUse": "幅度漂移较大但相对变化关心的场景。",
+      "limitations": [
+        "值接近零的分母需要保护"
+      ]
+    },
+    "related": [
+      "operator.rs.change_difference"
+    ]
   },
   {
-    "id": "operator.rs.change_ratio", "title": "比值变化", "summary": "前后时相逐像元比值。",
-    "category": "变化检测", "keywords": ["比值变化", "ratio"],
-    "algorithm": {"whatItDoes": "after/before，未变化区接近 1，对乘性光照差异稳健。", "whenToUse": "未做辐射归一化的数据。", "limitations": ["零值需保护"]},
-    "related": ["operator.rs.change_log_ratio"]
+    "id": "operator.rs.change_ratio",
+    "title": "比值变化",
+    "summary": "前后时相逐像元比值。",
+    "category": "变化检测",
+    "keywords": [
+      "比值变化",
+      "ratio"
+    ],
+    "algorithm": {
+      "whatItDoes": "after/before，未变化区接近 1，对乘性光照差异稳健。",
+      "whenToUse": "未做辐射归一化的数据。",
+      "limitations": [
+        "零值需保护"
+      ]
+    },
+    "related": [
+      "operator.rs.change_log_ratio"
+    ]
   },
   {
-    "id": "operator.rs.change_log_ratio", "title": "对数比值变化", "summary": "log(after/before)，把乘性噪声转为加性。",
-    "category": "变化检测", "keywords": ["对数比值", "log-ratio"],
-    "algorithm": {"whatItDoes": "对数域差值使乘性斑点/光照因子近似加性高斯，便于统计阈值。", "whenToUse": "SAR 变化检测的标准度量。", "limitations": ["零值必须先处理"]},
-    "related": ["operator.rs.change_ratio", "operator.rs.sar_change"]
+    "id": "operator.rs.change_log_ratio",
+    "title": "对数比值变化",
+    "summary": "log(after/before)，把乘性噪声转为加性。",
+    "category": "变化检测",
+    "keywords": [
+      "对数比值",
+      "log-ratio"
+    ],
+    "algorithm": {
+      "whatItDoes": "对数域差值使乘性斑点/光照因子近似加性高斯，便于统计阈值。",
+      "whenToUse": "SAR 变化检测的标准度量。",
+      "limitations": [
+        "零值必须先处理"
+      ]
+    },
+    "related": [
+      "operator.rs.change_ratio",
+      "operator.rs.sar_change"
+    ]
   },
   {
-    "id": "operator.rs.change_cva", "title": "CVA 变化向量分析", "summary": "多波段特征空间中的变化向量幅度。",
-    "category": "变化检测", "keywords": ["CVA", "变化向量"],
-    "algorithm": {"whatItDoes": "逐像元计算两期多波段向量的欧氏距离作为变化强度。", "whenToUse": "综合利用多波段信息检测总变化。", "limitations": ["只有幅度没有方向（变化类型需再分类）"]},
-    "related": ["operator.rs.change_cva_angle", "operator.rs.change_detection"]
+    "id": "operator.rs.change_cva",
+    "title": "CVA 变化向量分析",
+    "summary": "多波段特征空间中的变化向量幅度。",
+    "category": "变化检测",
+    "keywords": [
+      "CVA",
+      "变化向量"
+    ],
+    "algorithm": {
+      "whatItDoes": "逐像元计算两期多波段向量的欧氏距离作为变化强度。",
+      "whenToUse": "综合利用多波段信息检测总变化。",
+      "limitations": [
+        "只有幅度没有方向（变化类型需再分类）"
+      ]
+    },
+    "related": [
+      "operator.rs.change_cva_angle",
+      "operator.rs.change_detection"
+    ]
   },
   {
-    "id": "operator.rs.change_cva_angle", "title": "CVA 方向角", "summary": "CVA 变化向量的方向角，辅助判断变化类型。",
-    "category": "变化检测", "keywords": ["CVA", "方向", "变化类型"],
-    "algorithm": {"whatItDoes": "在幅度之外输出变化向量方向，不同方向对应不同的波段增减组合（如植被减少 vs 增加）。", "whenToUse": "对变化进行粗分类解释。", "limitations": ["方向解释依赖波段顺序约定"]},
-    "related": ["operator.rs.change_cva"]
+    "id": "operator.rs.change_cva_angle",
+    "title": "CVA 方向角",
+    "summary": "CVA 变化向量的方向角，辅助判断变化类型。",
+    "category": "变化检测",
+    "keywords": [
+      "CVA",
+      "方向",
+      "变化类型"
+    ],
+    "algorithm": {
+      "whatItDoes": "在幅度之外输出变化向量方向，不同方向对应不同的波段增减组合（如植被减少 vs 增加）。",
+      "whenToUse": "对变化进行粗分类解释。",
+      "limitations": [
+        "方向解释依赖波段顺序约定"
+      ]
+    },
+    "related": [
+      "operator.rs.change_cva"
+    ]
   },
   {
-    "id": "operator.rs.change_sam", "title": "SAM 光谱角变化", "summary": "以光谱夹角度量像元光谱形状变化。",
-    "category": "变化检测", "keywords": ["SAM", "光谱角", "形状变化"],
-    "algorithm": {"whatItDoes": "计算两期光谱向量的夹角，对幅度差异不敏感、只看形状。", "whenToUse": "光照/幅度变化大、形状变化更有意义的多/高光谱数据。", "limitations": ["纯幅度变化（亮度）不敏感是双刃剑"]},
-    "related": ["operator.rs.change_cva", "operator.rs.sam_classify"]
+    "id": "operator.rs.change_sam",
+    "title": "SAM 光谱角变化",
+    "summary": "以光谱夹角度量像元光谱形状变化。",
+    "category": "变化检测",
+    "keywords": [
+      "SAM",
+      "光谱角",
+      "形状变化"
+    ],
+    "algorithm": {
+      "whatItDoes": "计算两期光谱向量的夹角，对幅度差异不敏感、只看形状。",
+      "whenToUse": "光照/幅度变化大、形状变化更有意义的多/高光谱数据。",
+      "limitations": [
+        "纯幅度变化（亮度）不敏感是双刃剑"
+      ]
+    },
+    "related": [
+      "operator.rs.change_cva",
+      "operator.rs.sam_classify"
+    ]
   },
   {
-    "id": "operator.rs.change_mad", "title": "MAD 变化检测", "summary": "多元变化检测：典型相关变换后方差分量。",
-    "category": "变化检测", "keywords": ["MAD", "典型相关", "变化分量"],
-    "algorithm": {"whatItDoes": "对两期做 CCA 得到典型变量对，差值 (MAD) 按方差升序排列，低方差分量携带变化信息。", "whenToUse": "多波段两期比较，需要自动分离变化与不变成分。", "assumptions": ["两期已配准", "足够样本估计统计"], "limitations": ["分量选择需要经验或迭代"]},
-    "related": ["operator.rs.change_irmad", "concept.rs.determinism"]
+    "id": "operator.rs.change_mad",
+    "title": "MAD 变化检测",
+    "summary": "多元变化检测：典型相关变换后方差分量。",
+    "category": "变化检测",
+    "keywords": [
+      "MAD",
+      "典型相关",
+      "变化分量"
+    ],
+    "algorithm": {
+      "whatItDoes": "对两期做 CCA 得到典型变量对，差值 (MAD) 按方差升序排列，低方差分量携带变化信息。",
+      "whenToUse": "多波段两期比较，需要自动分离变化与不变成分。",
+      "assumptions": [
+        "两期已配准",
+        "足够样本估计统计"
+      ],
+      "limitations": [
+        "分量选择需要经验或迭代"
+      ]
+    },
+    "related": [
+      "operator.rs.change_irmad",
+      "concept.rs.determinism"
+    ]
   },
   {
-    "id": "operator.rs.change_irmad", "title": "iMAD 迭代变化检测", "summary": "迭代加权的 MAD，自动强调变化像元。",
-    "category": "变化检测", "keywords": ["iMAD", "迭代", "辐射归一化"],
-    "algorithm": {"whatItDoes": "以 no-change 像元权重迭代重估 CCA，收敛后 MAD 分量同时可用于相对辐射归一化 (IR-MAD)。",
+    "id": "operator.rs.change_irmad",
+    "title": "iMAD 迭代变化检测",
+    "summary": "迭代加权的 MAD，自动强调变化像元。",
+    "category": "变化检测",
+    "keywords": [
+      "iMAD",
+      "迭代",
+      "辐射归一化"
+    ],
+    "algorithm": {
+      "whatItDoes": "以 no-change 像元权重迭代重估 CCA，收敛后 MAD 分量同时可用于相对辐射归一化 (IR-MAD)。",
       "whenToUse": "两期辐射差异明显时的变化检测与辐射归一化一体方案。",
-      "assumptions": ["足够的不变像元占多数"],
-      "limitations": ["迭代收敛需要计算量", "变化比例过高时迭代失稳"],
-      "relatedTools": ["rs:change_mad"]},
-    "related": ["operator.rs.change_mad", "concept.rs.change_detection"]
+      "assumptions": [
+        "足够的不变像元占多数"
+      ],
+      "limitations": [
+        "迭代收敛需要计算量",
+        "变化比例过高时迭代失稳"
+      ],
+      "relatedTools": [
+        "rs:change_mad"
+      ]
+    },
+    "related": [
+      "operator.rs.change_mad",
+      "concept.rs.change_detection"
+    ]
   },
   {
-    "id": "operator.rs.threshold_raster", "title": "栅格阈值分割",
+    "id": "operator.rs.threshold_raster",
+    "title": "栅格阈值分割",
     "summary": "按固定/OTSU/百分位阈值把连续栅格转为类别掩膜。",
     "category": "变化检测",
-    "keywords": ["阈值", "OTSU", "二值化", "threshold"],
-    "algorithm": {"whatItDoes": "单波段按阈值离散化；OTSU 自动最大化类间方差。", "whenToUse": "指数图→水体/变化掩膜等二值产品。", "keyParameters": ["threshold", "method"], "limitations": ["多峰直方图场景单一阈值不足"]},
-    "related": ["operator.rs.change_detection", "operator.rs.recode"]
+    "keywords": [
+      "阈值",
+      "OTSU",
+      "二值化",
+      "threshold"
+    ],
+    "algorithm": {
+      "whatItDoes": "单波段按阈值离散化；OTSU 自动最大化类间方差。",
+      "whenToUse": "指数图→水体/变化掩膜等二值产品。",
+      "keyParameters": [
+        "thresholdMethod",
+        "threshold"
+      ],
+      "limitations": [
+        "多峰直方图场景单一阈值不足"
+      ]
+    },
+    "related": [
+      "operator.rs.change_detection",
+      "operator.rs.recode"
+    ]
   },
   {
-    "id": "operator.rs.post_classification_change", "title": "分类后变化比较",
+    "id": "operator.rs.post_classification_change",
+    "title": "分类后变化比较",
     "summary": "比较两期分类图生成变化转移矩阵与变化图。",
     "category": "变化检测",
-    "keywords": ["分类后比较", "转移矩阵", "变化图"],
+    "keywords": [
+      "分类后比较",
+      "转移矩阵",
+      "变化图"
+    ],
     "algorithm": {
       "whatItDoes": "逐像元对比两期类别标签，输出“前类→后类”编码与混淆式转移矩阵。",
       "whenToUse": "需要变化类型（不只变化与否）的成果；规避两期辐射差异问题。",
-      "assumptions": ["两期分类体系一致", "分类精度已评估"],
-      "limitations": ["分类误差会在变化图中加倍", "建议只报告显著转移类别"]
+      "assumptions": [
+        "两期分类体系一致",
+        "分类精度已评估"
+      ],
+      "limitations": [
+        "分类误差会在变化图中加倍",
+        "建议只报告显著转移类别"
+      ]
     },
-    "related": ["operator.rs.supervised_classification", "concept.rs.change_detection"]
+    "related": [
+      "operator.rs.supervised_classification",
+      "concept.rs.change_detection"
+    ]
   }
 ]

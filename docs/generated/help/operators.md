@@ -140,13 +140,13 @@ Apply atmospheric correction (DOS1/DOS2/QUAC/radiance) to optical imagery.
 
 Dark Object Subtraction 1 (DOS1) atmospheric correction to estimate surface reflectance.
 
-**原理**：假设影像存在零反射暗目标，以暗像元统计反演程辐射并扣除。
+**原理**：假设影像内存在反射率约 1%（Chavez 1996）的暗目标，按暗像元水平反演程辐射并扣除；DOS1 不做透过率修正（T=1）。
 
 **适用**：无大气参数的快速校正；中低浑浊度大气效果可接受。
 
-**假设**：影像内有真暗目标；忽略大气漫射多次散射
+**假设**：影像内有真暗目标（约 1% 反射率）；需要产品的反射率定标系数与太阳高度角（缺失时fail-closed）；忽略大气透过率修正
 
-**局限**：浑浊/高湿大气误差大；不同景暗目标不同导致跨景不一致
+**局限**：浑浊/高湿大气误差大；不同景暗目标不同导致跨景不一致；不做透过率修正，高天顶角误差增大
 
 ## Atmospheric Correction DOS2（operator.rs.atmospheric_dos2）
 
@@ -748,6 +748,8 @@ Exact Euclidean distance (pixels) to the nearest foreground cell; unreachable ce
 
 **适用**：缓冲区分析、距离特征构造。
 
+**局限**：输出为像元距离；换算地图单位需乘以像元尺寸
+
 ## QA Mask（operator.rs.qa_mask）
 
 Derive a cloud / cloud-shadow / snow mask from Landsat QA_PIXEL or Sentinel-2 SCL quality bands.
@@ -788,7 +790,7 @@ Reed-Xiaoli anomaly detection (Mahalanobis distance to scene background).
 
 **假设**：背景近似高斯分布
 
-**局限**：背景非均匀时虚警率高
+**局限**：背景非均匀时虚警率高；输出为异常得分图；二值化请配合 rs:threshold_raster
 
 ## Spectral Angle Mapper (SAM) Classification（operator.rs.sam_classify）
 
@@ -832,7 +834,7 @@ Calibrate SAR digital numbers (DN) to sigma0 backscatter (linear power or dB) wi
 
 Detect change between two co-registered SAR scenes: log-ratio magnitude (dB) thresholded into a change mask (manual, Otsu, percentile or statistical).
 
-**原理**：对数比值把乘性斑点噪声转为加性，统计阈值（如 ki/两参数 CFAR 思路）分离变化与未变化。
+**原理**：对数比值把乘性斑点转为加性，再按统计阈值（manual/otsu/percentile/statistical，即均值+k·σ）分离变化与未变化。
 
 **适用**：洪水、建筑变化、作物收割等 SAR 时相对比。
 
@@ -1206,7 +1208,7 @@ Compute slope, aspect, hillshade, roughness, TRI, or TPI from a DEM.
 
 Depression filling (priority-flood), D8 flow directions, and drainage accumulation over a DEM.
 
-**原理**：先填平洼地保证 D8/MFD 流向连续，再计算流量累积并按阈值提取河网与流域。
+**原理**：先填平洼地保证 D8 流向连续，再计算流量累积；河网/流域提取需后续阈值处理。
 
 **适用**：河网制图、流域划分、水土保持分析。
 

@@ -167,7 +167,7 @@
 
 ## command.rs.atmospheric（command.rs.atmospheric）
 
-- 用途：把表观反射率校正为地表反射率（DOS/6S 模型），为定量分析打基础。
+- 用途：把表观反射率校正为地表反射率（DOS/QUAC 模型），为定量分析打基础。
 - 前提：已定标的表观反射率或 DN 数据
 - 相关主题：operator.rs.atmospheric_dos1、operator.rs.atmospheric_dos2、operator.rs.atmospheric_quac
 

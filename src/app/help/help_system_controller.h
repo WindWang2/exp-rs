@@ -22,6 +22,8 @@
 
 #include <functional>
 
+#include <QPointer>
+
 class QAction;
 class QWidget;
 
@@ -88,7 +90,7 @@ class HelpSystemController : public QObject
     HelpSystemController() = default;
 
     HelpEventFilter *m_f1Filter = nullptr;
-    HelpCenterDialog *m_helpCenter = nullptr;
+    QPointer<HelpCenterDialog> m_helpCenter;
 };
 
 } // namespace sicnu::app

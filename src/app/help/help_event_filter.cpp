@@ -28,17 +28,24 @@ void HelpEventFilter::setWorkbenchContext( const QString &workbenchHelpId )
 
 bool HelpEventFilter::eventFilter( QObject *watched, QEvent *event )
 {
+    // Only bare F1 claims the help context: Shift+F1 stays reserved for
+    // What's This, Ctrl+F1 for application use, and auto-repeat must not
+    // spam the Help Center.
     if ( event->type() == QEvent::ShortcutOverride ) {
-        // claim F1 globally so QAction shortcuts (QKeySequence::HelpContents)
+        // claim bare F1 globally so QAction shortcuts (QKeySequence::HelpContents)
         // do not swallow it before context resolution runs
-        if ( auto *keyEvent = static_cast<QKeyEvent *>( event ); keyEvent->key() == Qt::Key_F1 ) {
+        if ( auto *keyEvent = static_cast<QKeyEvent *>( event );
+             keyEvent->key() == Qt::Key_F1 && keyEvent->modifiers() == Qt::NoModifier
+             && !keyEvent->isAutoRepeat() ) {
             keyEvent->accept();
             return true;
         }
         return QObject::eventFilter( watched, event );
     }
     if ( event->type() == QEvent::KeyPress ) {
-        if ( auto *keyEvent = static_cast<QKeyEvent *>( event ); keyEvent->key() == Qt::Key_F1 ) {
+        if ( auto *keyEvent = static_cast<QKeyEvent *>( event );
+             keyEvent->key() == Qt::Key_F1 && keyEvent->modifiers() == Qt::NoModifier
+             && !keyEvent->isAutoRepeat() ) {
             const QWidget *widget = qobject_cast<const QWidget *>( watched );
             const QString helpId = resolveHelpId( widget );
             emit helpRequested( helpId );

@@ -18,6 +18,8 @@
 #include <QApplication>
 #include <QWidget>
 
+#include <QPointer>
+
 namespace sicnu::app
 {
 
@@ -62,10 +64,21 @@ void HelpSystemController::installF1Filter()
 
 void HelpSystemController::openHelpCenter( const QString &helpId )
 {
+    // F1 while the Help Center itself has focus: keep the user's place
+    // instead of navigating away to the workbench fallback topic.
+    if ( m_helpCenter && QApplication::activeWindow() == m_helpCenter ) {
+        m_helpCenter->raise();
+        return;
+    }
+    // A parentless modeless window opened over an app-modal dialog would be
+    // blocked from all input while sitting on screen — suppress until the
+    // modal closes.
+    if ( QApplication::activeModalWidget() != nullptr )
+        return;
+
     if ( !m_helpCenter ) {
         m_helpCenter = new HelpCenterDialog( nullptr );
         m_helpCenter->setAttribute( Qt::WA_DeleteOnClose );
-        connect( m_helpCenter, &QObject::destroyed, this, [this] { m_helpCenter = nullptr; } );
     }
     if ( helpId.isEmpty() )
         m_helpCenter->show();

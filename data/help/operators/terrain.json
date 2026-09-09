@@ -4,64 +4,178 @@
     "title": "地形分析",
     "summary": "从 DEM 生成坡度/坡向/山影/地貌指数等地形产品。",
     "category": "地形",
-    "keywords": ["DEM", "坡度", "坡向", "山影", "hillshade"],
+    "keywords": [
+      "DEM",
+      "坡度",
+      "坡向",
+      "山影",
+      "hillshade"
+    ],
     "algorithm": {
       "whatItDoes": "以邻域差分估计表面导数：坡度为梯度幅值，坡向为梯度方向，山影按光照角度合成。",
       "whenToUse": "地貌判读、水文prep、地形校正输入、制图晕渲。",
-      "inputs": ["投影 DEM（建议投影坐标系，单位一致：水平米/垂直米）"],
-      "outputs": ["所选地形产品波段"],
-      "assumptions": ["DEM 已配准", "垂直基准与水平分辨率匹配（z 因子）"],
+      "inputs": [
+        "投影 DEM（建议投影坐标系，单位一致：水平米/垂直米）"
+      ],
+      "outputs": [
+        "所选地形产品波段"
+      ],
+      "assumptions": [
+        "DEM 已配准",
+        "垂直基准与水平分辨率匹配（z 因子）"
+      ],
       "unitsDomain": "坡度：度或百分比；坡向：0–360°（北为 0 顺时针）",
-      "limitations": ["分辨率决定可提取的地形尺度", "边缘像元受窗口截断影响"],
-      "keyParameters": ["product", "zFactor", "sunAzimuth", "sunElevation"],
-      "relatedTools": ["rs:terrain_flow", "rs:topographic_correction"]
+      "limitations": [
+        "分辨率决定可提取的地形尺度",
+        "边缘像元受窗口截断影响"
+      ],
+      "keyParameters": [
+        "product",
+        "zFactor",
+        "sunAzimuth",
+        "sunElevation"
+      ],
+      "relatedTools": [
+        "rs:terrain_flow",
+        "rs:topographic_correction"
+      ]
     },
     "parameters": [
-      {"name": "product", "meaning": "要生成的地形产品（slope/aspect/hillshade 等）。", "recommended": "制图晕渲选 hillshade；水文准备先出 slope。"},
-      {"name": "zFactor", "meaning": "垂直夸张系数，水平垂直单位不一致时必设。", "recommended": "经纬度 DEM 与米高程混用时按纬度换算设置。"},
-      {"name": "sunAzimuth", "unit": "度", "meaning": "山影计算的光源方位角（0–360，北 0 顺时针）。", "recommended": "西北 315° 为常用制图惯例。"},
-      {"name": "sunElevation", "unit": "度", "meaning": "山影计算的光源高度角（0–90）。", "recommended": "45° 起步，按地形起伏调整阴影对比。"}
+      {
+        "name": "product",
+        "meaning": "要生成的地形产品（slope/aspect/hillshade 等）。",
+        "recommended": "制图晕渲选 hillshade；水文准备先出 slope。"
+      },
+      {
+        "name": "zFactor",
+        "meaning": "垂直夸张系数，水平垂直单位不一致时必设。",
+        "recommended": "经纬度 DEM 与米高程混用时按纬度换算设置。"
+      },
+      {
+        "name": "sunAzimuth",
+        "unit": "度",
+        "meaning": "山影计算的光源方位角（0–360，北 0 顺时针）。",
+        "recommended": "西北 315° 为常用制图惯例。"
+      },
+      {
+        "name": "sunElevation",
+        "unit": "度",
+        "meaning": "山影计算的光源高度角（0–90）。",
+        "recommended": "45° 起步，按地形起伏调整阴影对比。"
+      }
     ],
-    "related": ["command.rs.terrain", "operator.rs.terrain_flow", "concept.rs.topographic_effects"]
+    "related": [
+      "command.rs.terrain",
+      "operator.rs.terrain_flow",
+      "concept.rs.topographic_effects"
+    ]
   },
   {
-    "id": "operator.rs.terrain_flow", "title": "水文分析",
-    "summary": "填洼 → 流向 → 流量累积 → 河网/流域提取。",
+    "id": "operator.rs.terrain_flow",
+    "title": "水文分析",
+    "summary": "填洼 → D8 流向 → 流量累积。",
     "category": "地形",
-    "keywords": ["水文", "流向", "汇流", "流域", "flow"],
+    "keywords": [
+      "水文",
+      "流向",
+      "汇流",
+      "流域",
+      "flow"
+    ],
     "algorithm": {
-      "whatItDoes": "先填平洼地保证 D8/MFD 流向连续，再计算流量累积并按阈值提取河网与流域。",
+      "whatItDoes": "先填平洼地保证 D8 流向连续，再计算流量累积；河网/流域提取需后续阈值处理。",
       "whenToUse": "河网制图、流域划分、水土保持分析。",
-      "assumptions": ["DEM 质量良好", "平坦区流向可能不唯一"],
-      "limitations": ["大型平坦/城市区 D8 结果呈平行条纹", "填洼会改变原始高程"],
-      "keyParameters": ["flowModel", "accumulationThreshold"]
+      "assumptions": [
+        "DEM 质量良好",
+        "平坦区流向可能不唯一"
+      ],
+      "limitations": [
+        "大型平坦/城市区 D8 结果呈平行条纹",
+        "填洼会改变原始高程"
+      ],
+      "keyParameters": [
+        "product",
+        "nodata"
+      ]
     },
-    "related": ["operator.rs.terrain_analysis"]
+    "related": [
+      "operator.rs.terrain_analysis"
+    ]
   },
   {
     "id": "operator.rs.topographic_correction",
     "title": "地形校正",
     "summary": "C/SCS+C/Minnaert 模型消除坡面光照差异，输出归一化反射率。",
     "category": "地形",
-    "keywords": ["地形校正", "C 校正", "SCS", "Minnaert", "topographic"],
+    "keywords": [
+      "地形校正",
+      "C 校正",
+      "SCS",
+      "Minnaert",
+      "topographic"
+    ],
     "algorithm": {
       "whatItDoes": "以 DEM 计算局部入射角余弦，按所选模型把倾斜面反射率归一到等效水平面光照。",
       "whenToUse": "山区植被/覆盖分类与镶嵌前，消除阴阳坡光谱差异。",
-      "inputs": ["地表反射率影像", "配准 DEM"],
-      "outputs": ["地形校正后影像"],
-      "assumptions": ["DEM 与影像配准（建议优于 1 像元）", "朗伯（C/SCS+C）或参数化非朗伯（Minnaert）假设"],
-      "limitations": ["陡坡低光照角可能过补偿", "模型选择影响植被坡面一致性"],
-      "keyParameters": ["method", "solar_azimuth", "solar_zenith"],
-      "relatedTools": ["rs:terrain_analysis"]
+      "inputs": [
+        "地表反射率影像",
+        "配准 DEM"
+      ],
+      "outputs": [
+        "地形校正后影像"
+      ],
+      "assumptions": [
+        "DEM 与影像配准（建议优于 1 像元）",
+        "朗伯（C/SCS+C）或参数化非朗伯（Minnaert）假设"
+      ],
+      "limitations": [
+        "陡坡低光照角可能过补偿",
+        "模型选择影响植被坡面一致性"
+      ],
+      "keyParameters": [
+        "method",
+        "solar_azimuth",
+        "solar_zenith"
+      ],
+      "relatedTools": [
+        "rs:terrain_analysis"
+      ]
     },
     "parameters": [
-      {"name": "input", "meaning": "待校正影像（建议地表反射率）。"},
-      {"name": "dem", "meaning": "与影像配准的 DEM。"},
-      {"name": "method", "meaning": "correction 模型：cosine（简单余弦）、c（经验 C）、scs+c（太阳-冠层-传感器）、minnaert（非朗伯参数）。", "recommended": "植被区常用 scs+c；minnaert 参数按波段回归。"},
-      {"name": "solar_azimuth", "unit": "度", "meaning": "太阳方位角（0–360，北 0 顺时针）。", "recommended": "从影像元数据读取，勿凭经验填写。"},
-      {"name": "solar_zenith", "unit": "度", "meaning": "太阳天顶角（0–90）。", "warnings": ["天顶角/高度角混用是常见错误，确认元数据定义。"]}
+      {
+        "name": "input",
+        "meaning": "待校正影像（建议地表反射率）。"
+      },
+      {
+        "name": "dem",
+        "meaning": "与影像配准的 DEM。"
+      },
+      {
+        "name": "method",
+        "meaning": "correction 模型：cosine（简单余弦）、c（经验 C）、scs+c（太阳-冠层-传感器）、minnaert（非朗伯参数）。",
+        "recommended": "植被区常用 scs+c；minnaert 参数按波段回归。"
+      },
+      {
+        "name": "solar_azimuth",
+        "unit": "度",
+        "meaning": "太阳方位角（0–360，北 0 顺时针）。",
+        "recommended": "从影像元数据读取，勿凭经验填写。"
+      },
+      {
+        "name": "solar_zenith",
+        "unit": "度",
+        "meaning": "太阳天顶角（0–90）。",
+        "warnings": [
+          "天顶角/高度角混用是常见错误，确认元数据定义。"
+        ]
+      }
     ],
-    "related": ["concept.rs.topographic_effects", "operator.rs.terrain_analysis"],
-    "docs": ["docs/processing/grid-and-radiometric-policy.md"]
+    "related": [
+      "concept.rs.topographic_effects",
+      "operator.rs.terrain_analysis"
+    ],
+    "docs": [
+      "docs/processing/grid-and-radiometric-policy.md"
+    ]
   }
 ]

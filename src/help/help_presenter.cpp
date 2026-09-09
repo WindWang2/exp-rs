@@ -3,6 +3,10 @@
  ***************************************************************************/
 #include "help/help_presenter.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+
 #include <algorithm>
 
 namespace sicnu::help
@@ -92,40 +96,63 @@ QString HelpCompact::summary( const HelpDescriptor &descriptor, int budgetChars 
 
 QString HelpCompact::toJsonText( const HelpDescriptor &descriptor, int budgetChars )
 {
-    // Guaranteed bound: try the extended form (category+keywords), then the
-    // plain shell, then an elided summary, then id-only. Each step only when
-    // the previous one exceeds the budget.
-    const QString shell = QStringLiteral( "{\"id\":\"%1\",\"title\":\"%2\",\"summary\":\"%3\"}" );
+    // Built with QJsonObject so output is always valid JSON regardless of
+    // authored text; budget pressure drops optional fields (diagnostics →
+    // keywords → category), then elides the summary, then the id only.
+    const auto makeJson = []( const QJsonObject &object ) {
+        return QString::fromUtf8( QJsonDocument( object ).toJson( QJsonDocument::Compact ) );
+    };
+    const auto withSummary = [&]( const QJsonObject &base, const QString &summary ) {
+        QJsonObject copy = base;
+        copy.insert( QStringLiteral( "summary" ), summary );
+        return makeJson( copy );
+    };
 
-    QStringList keywordList;
-    for ( const QString &keyword : descriptor.keywords )
-        keywordList << QStringLiteral( "\"%1\"" ).arg( keyword );
-    QString extended = QStringLiteral( "{\"id\":\"%1\",\"title\":\"%2\",\"summary\":\"%3\"" )
-                           .arg( descriptor.id, descriptor.title, descriptor.summary );
+    QJsonObject base;
+    base.insert( QStringLiteral( "id" ), descriptor.id );
+    base.insert( QStringLiteral( "title" ), descriptor.title );
+
+    QJsonObject full = base;
+    full.insert( QStringLiteral( "summary" ), descriptor.summary );
     if ( !descriptor.category.isEmpty() )
-        extended += QStringLiteral( ",\"category\":\"%1\"" ).arg( descriptor.category );
-    if ( !keywordList.isEmpty() )
-        extended += QStringLiteral( ",\"keywords\":[%1]" ).arg( keywordList.join( u',' ) );
-    extended += u'}';
-    if ( extended.size() <= budgetChars )
-        return extended;
+        full.insert( QStringLiteral( "category" ), descriptor.category );
+    if ( !descriptor.keywords.isEmpty() ) {
+        QJsonArray keywords;
+        for ( const QString &keyword : descriptor.keywords )
+            keywords.append( keyword );
+        full.insert( QStringLiteral( "keywords" ), keywords );
+    }
+    if ( !descriptor.diagnosticIds.isEmpty() ) {
+        QJsonArray diagnostics;
+        for ( const QString &id : descriptor.diagnosticIds )
+            diagnostics.append( id );
+        full.insert( QStringLiteral( "diagnostics" ), diagnostics );
+    }
+    if ( makeJson( full ).size() <= budgetChars )
+        return makeJson( full );
 
-    QString plain = shell.arg( descriptor.id, descriptor.title, descriptor.summary );
-    if ( plain.size() <= budgetChars )
-        return plain;
+    // drop optional fields progressively
+    full.remove( QStringLiteral( "diagnostics" ) );
+    if ( makeJson( full ).size() <= budgetChars )
+        return makeJson( full );
+    full.remove( QStringLiteral( "keywords" ) );
+    if ( makeJson( full ).size() <= budgetChars )
+        return makeJson( full );
+    full.remove( QStringLiteral( "category" ) );
+    if ( makeJson( full ).size() <= budgetChars )
+        return makeJson( full );
 
-    // shell = format string; the three %n placeholders (~2 chars each) are
-    // replaced by dynamic content, so fixed characters = shell.size() - 6.
-    const int fixedOverhead = shell.size() - 6;
-    const int allowed = qMax( 0, budgetChars - descriptor.id.size() - descriptor.title.size() - fixedOverhead );
-    QString elidedSummary = descriptor.summary;
-    if ( elidedSummary.size() > allowed )
-        elidedSummary = elidedSummary.left( allowed ) + QStringLiteral( "…" );
-    QString trimmed = shell.arg( descriptor.id, descriptor.title, elidedSummary );
+    // elide the summary until it fits
+    const int overhead = makeJson( base ).size() + 14; // {"summary":""} shell + slack
+    const int allowed = qMax( 0, budgetChars - overhead );
+    QString summary = descriptor.summary;
+    if ( summary.size() > allowed )
+        summary = summary.left( allowed ) + QStringLiteral( "…" );
+    const QString trimmed = withSummary( base, summary );
     if ( trimmed.size() <= budgetChars )
         return trimmed;
 
-    const QString idOnly = QStringLiteral( "{\"id\":\"%1\"}" ).arg( descriptor.id );
+    const QString idOnly = makeJson( base );
     if ( idOnly.size() <= budgetChars )
         return idOnly;
     return idOnly.left( qMax( 2, budgetChars ) );

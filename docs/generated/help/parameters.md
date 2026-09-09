@@ -604,7 +604,7 @@
 
 ### parameter.rs.change_detection.method
 
-- 含义：变化度量：difference（差值，同量纲适用）、ratio（比值，抑制光照差异）、cva（多波段变化向量幅度）。
+- 含义：变化度量：difference（差值，同量纲适用）、ratio（比值，抑制光照差异）、normalized_difference（归一化差值）、cva（多波段变化向量幅度）、mad、change_mask。
 - 推荐值：反射率数据常用 difference；未一致性校正数据用 ratio；多波段综合用 cva。
 
 ### parameter.rs.change_detection.minAreaPixels
@@ -633,8 +633,8 @@
 
 ### parameter.rs.change_detection.thresholdMethod
 
-- 含义：阈值策略：fixed（固定值）、statistical（均值+k·σ）、percentile（百分位）。
-- 推荐值：无先验时用 statistical 起步，再按目视/样本微调。
+- 含义：阈值策略：manual（手动阈值）、statistical（均值+k·σ）、percentile（百分位）、otsu（自动最大化类间方差）。
+- 推荐值：无先验时用 otsu 或 statistical 起步，再按目视/样本微调。
 
 ### parameter.rs.change_difference.after
 
@@ -1871,7 +1871,7 @@
 
 ### parameter.rs.sar_speckle.method
 
-- 含义：滤波核类型：lee（局部统计最小均方）、frost（指数加权）、kuan（改进 Lee）、gamma_map（Gamma 先验最大后验）、refined_lee（边缘方向感知）、multitemporal（跨景栈滤波）。
+- 含义：滤波核类型：lee（局部统计最小均方）、enhanced_lee（改进 Lee）、frost（指数加权）、kuan（改进 Kuan）、gamma_map（Gamma 先验最大后验）、refined_lee（边缘方向感知）、multitemporal（跨景栈滤波）。
 - 推荐值：常规制图用 lee 或 refined_lee；保留纹理选 kuan；有同区多景选 multitemporal。
 - 权衡：强抑斑滤波（gamma_map）更平滑但更易抹平细小地物；refined_lee 保边最好但计算最慢。
 
@@ -2302,8 +2302,8 @@
 
 ### parameter.rs.temporal_composite.method
 
-- 含义：聚合统计：median（抗云抗离群，推荐）、mean、min（植被最绿值用 min 反射率或 NDVI max 视实现）、max。
-- 推荐值：光学去云首选 median。
+- 含义：合成方式：best_pixel（按质量分选最优观测，默认）、mean、median（抗云抗离群）。
+- 推荐值：有质量波段时用 best_pixel；云污染重的光学数据用 median。
 
 ### parameter.rs.temporal_composite.output
 
@@ -2318,7 +2318,8 @@
 
 ### parameter.rs.temporal_composite.quality_band
 
-- 含义：QA 波段名（如 QA_PIXEL / SCL）。
+- 含义：质量分 1-based 波段号（值越大越好），供 best_pixel 选取。
+- ⚠ 是波段序号而非 QA 波段名；QA 语义掩膜请先用 rs:qa_mask / rs:apply_mask。
 
 ### parameter.rs.temporal_composite.scenes
 
@@ -2326,7 +2327,7 @@
 
 ### parameter.rs.temporal_composite.target_date
 
-- 含义：目标日期（单期合成时）。
+- 含义：best_pixel 的时间接近度 tie-break：多景质量相同时选最接近该日期的观测。
 
 ### parameter.rs.temporal_composite.tile_size
 

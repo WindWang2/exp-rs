@@ -799,7 +799,7 @@
     "whatHappened": "跳过初始化直接调用运行。",
     "severity": "error",
     "retry": "manual",
-    "whyItMatters": "内部资源未就绪。",
+    "whyItMatters": "跳过初始化运行会产生未定义行为或崩溃，任务产物不可信。",
     "remediation": [
       "按接口契约先执行初始化"
     ],
@@ -865,7 +865,7 @@
     "whatHappened": "地理空间层收到违反契约的参数（空路径/非法窗口）。",
     "severity": "error",
     "retry": "none",
-    "whyItMatters": "调用方契约错误。",
+    "whyItMatters": "调用方契约破坏通常意味着上游参数拼装错误，直接重试不会恢复，需先修正调用。",
     "remediation": [
       "检查调用参数构造"
     ],
@@ -1004,7 +1004,7 @@
     "whatHappened": "驱动/数据集/配置不支持该操作。",
     "severity": "warning",
     "retry": "none",
-    "whyItMatters": "能力边界声明。",
+    "whyItMatters": "该操作在当前驱动/数据组合上无法完成，需改用替代路径，否则流程到此中断。",
     "remediation": [
       "查阅格式能力矩阵选择替代方案"
     ],
@@ -1020,7 +1020,7 @@
     "whatHappened": "调用方请求取消。",
     "severity": "info",
     "retry": "manual",
-    "whyItMatters": "操作未完成。",
+    "whyItMatters": "操作中途终止，产物不完整，不能作为后续步骤的输入。",
     "remediation": [
       "按需重新发起"
     ],
@@ -1052,7 +1052,7 @@
     "whatHappened": "文件/URL/选择器目标不存在。",
     "severity": "error",
     "retry": "none",
-    "whyItMatters": "目标缺失。",
+    "whyItMatters": "后续步骤引用该资源会级联失败，产物链中断。",
     "remediation": [
       "核对路径/URL",
       "确认资源未被移动"
@@ -1086,7 +1086,7 @@
     "whatHappened": "可识别但本构建无法服务的格式。",
     "severity": "error",
     "retry": "none",
-    "whyItMatters": "能力边界。",
+    "whyItMatters": "该格式数据无法进入处理链，需先行转换，否则流程在打开即失败。",
     "remediation": [
       "外部转换到受支持格式"
     ],
@@ -1138,7 +1138,7 @@
     "whyItMatters": "读取结果不可信。",
     "remediation": [
       "重新下载/恢复数据",
-      "用 gdal doctor 定位损坏范围"
+      "用 data doctor 命令定位损坏范围"
     ],
     "keywords": [
       "损坏",
@@ -1308,7 +1308,8 @@
     "retry": "none",
     "whyItMatters": "无法取到特征值。",
     "remediation": [
-      "裁剪样本到影像范围",
+      "核对样本与影像 CRS 是否一致（最常见根因）",
+      "确认样本确实在覆盖区外后再裁剪或剔除",
       "或更换覆盖该区域的影像"
     ],
     "keywords": [

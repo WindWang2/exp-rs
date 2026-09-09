@@ -637,10 +637,12 @@ void QgisDesktopWindow::setupMenu()
                                   sicnu::app::HelpSystemController::instance().openHelpCenter();
                               } ),
          tr( "打开帮助中心：搜索帮助主题、算子说明与错误诊断。" ) );
+    // No F1 binding here: bare F1 is context help (Help Center) owned by
+    // HelpSystemController; this entry stays reachable from the menu.
     tip( helpMenu->addAction( ic( "hel_" ), tr( "帮助内容" ),
-                              QKeySequence::HelpContents, this, &QgisDesktopWindow::helpContents ),
+                              this, &QgisDesktopWindow::helpContents ),
          tr( "打开帮助文档。" ) );
-    tip( helpMenu->addAction( tr( "这是什么？(Shift+F1)" ), this, []() {
+    tip( helpMenu->addAction( tr( "这是什么？" ), this, []() {
              QWhatsThis::enterWhatsThisMode();
          } ),
          tr( "进入「这是什么」模式，点击任意控件查看说明。" ) );

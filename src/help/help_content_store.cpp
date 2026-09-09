@@ -4,6 +4,7 @@
 #include "help/help_content_store.h"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QTextStream>
 
@@ -232,10 +233,15 @@ void HelpContentStore::parseDocument( const Json::Value &document, HelpRegistry 
                     knowledge.dependsOn = readStringList( param, "dependsOn" );
                     knowledge.curated = true;
                     p.parameter = knowledge;
-                    p.title = name;
-                    p.summary = knowledge.meaning;
-                    p.category = d.category;
                     parseCommon( p, param, errors, context );
+                    // defaults applied after parseCommon: explicit JSON fields
+                    // win, but absent fields keep these sane values
+                    if ( p.title.isEmpty() )
+                        p.title = name;
+                    if ( p.summary.isEmpty() )
+                        p.summary = knowledge.meaning;
+                    if ( p.category.isEmpty() )
+                        p.category = d.category;
                     QString error;
                     if ( !out.registerDescriptor( std::move( p ), &error ) )
                         errors << QStringLiteral( "%1: %2" ).arg( context, error );
@@ -284,20 +290,15 @@ HelpContentStore::LoadResult HelpContentStore::loadFromDirectory( const QString 
         result.errors << QStringLiteral( "content directory missing: %1" ).arg( directory );
         return result;
     }
-    const QFileInfoList entries = dir.entryInfoList( QStringList{ QStringLiteral( "*.json" ) }, QDir::Files,
-                                                     QDir::Name );
+    const QFileInfoList entries =
+        dir.entryInfoList( QStringList{ QStringLiteral( "*.json" ) }, QDir::Files, QDir::Name );
     for ( const QFileInfo &entry : entries )
         loadJsonFile( entry.absoluteFilePath(), result.registry, result.errors );
-    const QFileInfoList subDirs = dir.entryInfoList( QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name );
-    for ( const QFileInfo &sub : subDirs ) {
-        const QFileInfoList subEntries =
-            sub.absoluteFilePath().isEmpty()
-                ? QFileInfoList()
-                : QDir( sub.absoluteFilePath() ).entryInfoList( QStringList{ QStringLiteral( "*.json" ) },
-                                                                QDir::Files, QDir::Name );
-        for ( const QFileInfo &entry : subEntries )
-            loadJsonFile( entry.absoluteFilePath(), result.registry, result.errors );
-    }
+    // recursive: nested families (e.g. operators/<group>/x.json) are content
+    QDirIterator subIt( directory, QStringList{ QStringLiteral( "*.json" ) }, QDir::Files,
+                        QDirIterator::Subdirectories );
+    while ( subIt.hasNext() )
+        loadJsonFile( subIt.next(), result.registry, result.errors );
     result.descriptors = result.registry.count();
     result.aliases = result.registry.aliasCount();
     return result;
@@ -306,16 +307,10 @@ HelpContentStore::LoadResult HelpContentStore::loadFromDirectory( const QString 
 HelpContentStore::LoadResult HelpContentStore::loadFromResources()
 {
     LoadResult result;
-    const QDir dir( QStringLiteral( ":/help" ) );
-    for ( const QString &name :
-          dir.entryList( QStringList{ QStringLiteral( "*.json" ) }, QDir::Files, QDir::Name ) )
-        loadJsonFile( QStringLiteral( ":/help/" ) + name, result.registry, result.errors );
-    for ( const QString &sub : dir.entryList( QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name ) ) {
-        const QDir subDir( QStringLiteral( ":/help/" ) + sub );
-        for ( const QString &name :
-              subDir.entryList( QStringList{ QStringLiteral( "*.json" ) }, QDir::Files, QDir::Name ) )
-            loadJsonFile( QStringLiteral( ":/help/%1/%2" ).arg( sub, name ), result.registry, result.errors );
-    }
+    QDirIterator it( QStringLiteral( ":/help" ), QStringList{ QStringLiteral( "*.json" ) }, QDir::Files,
+                     QDirIterator::Subdirectories );
+    while ( it.hasNext() )
+        loadJsonFile( it.next(), result.registry, result.errors );
     result.descriptors = result.registry.count();
     result.aliases = result.registry.aliasCount();
     return result;
