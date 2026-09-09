@@ -78,8 +78,11 @@ int runListTopics()
         std::cerr << "help composition warnings: "
                   << report.errors.join( QStringLiteral( ";" ) ).toStdString() << std::endl;
     std::cout << "Help topics (" << report.descriptors << "):" << std::endl;
-    for ( const auto *d : sicnu::help::globalHelpRegistry().all() )
-        std::cout << "  " << d->id.toStdString() << " | " << d->title.toStdString() << std::endl;
+    for ( const auto *d : sicnu::help::globalHelpRegistry().all() ) {
+        // headless composition has no CommandRegistry titles: fall back to id
+        const QString title = d->title.isEmpty() ? d->id : d->title;
+        std::cout << "  " << d->id.toStdString() << " | " << title.toStdString() << std::endl;
+    }
     return 0;
 }
 
