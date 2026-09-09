@@ -16,11 +16,25 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <map>
 #include <set>
 #include <vector>
 
 namespace sicnu::agent::harness {
+
+namespace {
+
+/// Case-insensitive parameter-key comparison: shipped recipes emit
+/// intermediates via "output" or "OUTPUT" (review finding F12).
+std::string loweredKey( std::string key )
+{
+  std::transform( key.begin(), key.end(), key.begin(),
+                  []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+  return key;
+}
+
+} // namespace
 
 RecipeCatalog &RecipeCatalog::instance()
 {
@@ -215,6 +229,36 @@ std::vector<std::string> RecipeCatalog::validateRecipeMetadata( const Json::Valu
       }
     }
   }
+  // Harness 7.0: auto-derived wiring treats the FIRST mention of an
+  // "$outputs.<name>" intermediate as its producer. Enforce that convention
+  // at load so a consumer written before its producer cannot be wired
+  // backwards: the first mention of an intermediate must be via a param key
+  // named "output" (the production convention every shipped recipe uses).
+  {
+    std::set<std::string> declaredOutputs;
+    for ( const Json::Value &output : recipe.get( "outputs", Json::Value( Json::arrayValue ) ) )
+      if ( output.get( "name", "" ).isString() )
+        declaredOutputs.insert( output["name"].asString() );
+    std::set<std::string> emitted;
+    for ( const Json::Value &step : recipe.get( "steps", Json::Value( Json::arrayValue ) ) )
+    {
+      const std::string stepId = step.get( "id", "" ).asString();
+      for ( const std::string &key : step.get( "params", Json::Value() ).getMemberNames() )
+      {
+        const Json::Value &value = step["params"][ key ];
+        if ( !value.isString() || value.asString().rfind( "$outputs.", 0 ) != 0 )
+          continue;
+        const std::string name = value.asString().substr( 9 );
+        if ( declaredOutputs.count( name ) || emitted.count( name ) )
+          continue;
+        if ( loweredKey( key ) != "output" )
+          problems.push_back( id + ": step '" + stepId + "' consumes intermediate '" + name +
+                              "' before any step produces it (auto-wiring convention)" );
+        else
+          emitted.insert( name );
+      }
+    }
+  }
   if ( recipe.isMember( "aliases" ) )
   {
     const Json::Value &aliases = recipe["aliases"];
@@ -373,8 +417,10 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
 
   // Harness 7.0 (Area G): preset application. Deterministic: step_params
   // override one named step's params; flat entries override every step param
-  // carrying the same key; keep_outputs filters declared outputs. The
-  // effective document copy keeps the catalog entry untouched.
+  // carrying the same key; keep_outputs filters declared outputs. Presets
+  // tune the PRIMARY path only — params_when_skipped templates are
+  // override-immune by design (a degraded branch documents its own fixed
+  // fallback). The effective document copy keeps the catalog entry untouched.
   Json::Value effective = recipe;
   const std::string presetName = bindings.get( "preset", "" ).asString();
   if ( !presetName.empty() )
@@ -473,26 +519,30 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
     }
     for ( int i = 0; i < wiringCount; ++i )
     {
-      const Json::Value &params = steps[i].get( "params", Json::Value( Json::objectValue ) );
       std::set<std::string> upstream;
-      for ( const std::string &key : params.getMemberNames() )
+      for ( const char *paramsKey : { "params", "params_when_skipped" } )
       {
-        const Json::Value &value = params[ key ];
-        if ( !value.isString() || value.asString().rfind( "$outputs.", 0 ) != 0 )
-          continue;
-        const std::string name = value.asString().substr( 9 );
-        std::string producer;
-        const auto declared = producerOfOutput.find( name );
-        if ( declared != producerOfOutput.end() )
-          producer = declared->second;
-        else
+        const Json::Value params =
+          steps[i].get( paramsKey, Json::Value( Json::objectValue ) );
+        for ( const std::string &key : params.getMemberNames() )
         {
-          const auto emitted = emitsOutput.find( name );
-          if ( emitted != emitsOutput.end() )
-            producer = emitted->second;
+          const Json::Value &value = params[ key ];
+          if ( !value.isString() || value.asString().rfind( "$outputs.", 0 ) != 0 )
+            continue;
+          const std::string name = value.asString().substr( 9 );
+          std::string producer;
+          const auto declared = producerOfOutput.find( name );
+          if ( declared != producerOfOutput.end() )
+            producer = declared->second;
+          else
+          {
+            const auto emitted = emitsOutput.find( name );
+            if ( emitted != emitsOutput.end() )
+              producer = emitted->second;
+          }
+          if ( !producer.empty() && producer != steps[i].get( "id", "" ).asString() )
+            upstream.insert( producer );
         }
-        if ( !producer.empty() && producer != steps[i].get( "id", "" ).asString() )
-          upstream.insert( producer );
       }
       if ( upstream.empty() )
         continue;
@@ -576,21 +626,26 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
       outputPaths[name] = recipeId + "_" + name + ".tif";
   }
   // Gated steps may reference intermediate outputs; give those derived paths.
+  // params_when_skipped templates are scanned as well — a degraded step still
+  // consumes real files.
   for ( const auto &step : effective.get( "steps", Json::Value( Json::arrayValue ) ) )
   {
-    const Json::Value params = step.get( "params", Json::Value( Json::objectValue ) );
-    for ( const std::string &key : params.getMemberNames() )
+    for ( const char *paramsKey : { "params", "params_when_skipped" } )
     {
-      const Json::Value &value = params[key];
-      if ( !value.isString() || value.asString().rfind( "$outputs.", 0 ) != 0 )
-        continue;
-      const std::string name = value.asString().substr( 9 );
-      if ( outputPaths.isMember( name ) )
-        continue;
-      if ( !outputDir.empty() )
-        outputPaths[name] = outputDir + "/" + recipeId + "_" + name + ".tif";
-      else
-        outputPaths[name] = recipeId + "_" + name + ".tif";
+      const Json::Value params = step.get( paramsKey, Json::Value( Json::objectValue ) );
+      for ( const std::string &key : params.getMemberNames() )
+      {
+        const Json::Value &value = params[key];
+        if ( !value.isString() || value.asString().rfind( "$outputs.", 0 ) != 0 )
+          continue;
+        const std::string name = value.asString().substr( 9 );
+        if ( outputPaths.isMember( name ) )
+          continue;
+        if ( !outputDir.empty() )
+          outputPaths[name] = outputDir + "/" + recipeId + "_" + name + ".tif";
+        else
+          outputPaths[name] = recipeId + "_" + name + ".tif";
+      }
     }
   }
 

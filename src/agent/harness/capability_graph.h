@@ -8,11 +8,12 @@
 // vocabulary and from there to concrete, feasibility-checked capability
 // candidates. Nothing here guesses:
 //   - clear evidence               → resolved intent + ranked candidates,
-//   - competing evidence (a tie)   → typed INTENT_AMBIGUOUS with the tied
+//   - competing evidence (a tie)   → status "ambiguous" + typed
+//                                    INTENT_AMBIGUOUS with the tied
 //                                    candidates and their matched evidence,
-//   - no evidence at all           → typed INTENT_AMBIGUOUS ("no_evidence")
-//                                    so the agent inspects the dataset
-//                                    instead of inventing a plan.
+//   - no evidence at all           → status "unresolved" + the same typed
+//                                    error, so the agent inspects the
+//                                    dataset instead of inventing a plan.
 // Feasibility is evaluated against DatasetUnderstanding *facts* (modality,
 // band roles, radiometric state, temporal coverage) using the capability
 // knowledge layer (Area A) — the same facts the scientific preflight reads.

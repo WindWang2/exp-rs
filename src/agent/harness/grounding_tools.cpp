@@ -9,6 +9,7 @@
 #include "harness_error.h"
 
 #include <QCryptographicHash>
+#include <QFileInfo>
 
 #include <algorithm>
 #include <cctype>
@@ -137,6 +138,18 @@ bool suggestsOptical( const Json::Value &inspect )
   return false;
 }
 
+/// Cache key: (path, asset revision) for registered assets; (path, size,
+/// mtime) for unregistered ones whose revision is 0 — a rewritten file must
+/// be a cache miss.
+QString understandingCacheKey( const QString &path, long long revision )
+{
+  if ( revision > 0 )
+    return path + QStringLiteral( "|r" ) + QString::number( revision );
+  const QFileInfo info( path );
+  return path + QStringLiteral( "|f" ) + QString::number( info.size() ) + QStringLiteral( "|" ) +
+         QString::number( info.lastModified().toMSecsSinceEpoch() );
+}
+
 class UnderstandTool final : public SpatialTool
 {
   public:
@@ -199,12 +212,14 @@ class UnderstandTool final : public SpatialTool
 
       // Harness 7.0 continuity (Area E): the understanding cache is keyed by
       // (path, asset revision) — an unchanged asset answers from the cache
-      // instead of re-reading the file. Stats requests bypass the cache (the
-      // stats block is the expensive part).
+      // instead of re-reading the file. Unregistered files have revision 0,
+      // so their key folds size+mtime to keep a rewritten file a miss.
+      // Stats requests bypass the cache (the stats block is the expensive
+      // part).
       if ( !wantsStats )
       {
         const Json::Value cached = ContextLedger::instance().cachedUnderstanding(
-          resolved->path, resolved->revision );
+          understandingCacheKey( resolved->path, resolved->revision ), 0 );
         if ( !cached.isNull() )
         {
           Json::Value out( Json::objectValue );
@@ -248,8 +263,8 @@ class UnderstandTool final : public SpatialTool
       if ( isRaster )
         understanding["modality"] = inferModality( inspectOutput );
       understanding["entity"] = resolved->toJson();
-      ContextLedger::instance().cacheUnderstanding( resolved->path, resolved->revision,
-                                                    understanding );
+      ContextLedger::instance().cacheUnderstanding(
+        understandingCacheKey( resolved->path, resolved->revision ), 0, understanding );
 
       Json::Value out( Json::objectValue );
       out["dataset_understanding"] = understanding;

@@ -43,13 +43,14 @@ class ContextLedger {
     bool resolveDecision( const std::string &decisionId, const std::string &chosen );
     Json::Value decisions() const; ///< bounded list, unresolved first
 
-    /// Caches a DatasetUnderstanding document keyed by (path, asset revision).
-    /// A later call with the same key is a hit; any other mutation evicts the
-    /// entry. Bounded to 32 entries, oldest-first eviction.
-    void cacheUnderstanding( const QString &path, long long assetRevision,
+    /// Caches a DatasetUnderstanding document under a caller-computed key
+    /// ((path, revision) or (path, size, mtime) — see grounding_tools).
+    /// A later call with the same key is a hit. Bounded to 32 entries,
+    /// oldest-first eviction.
+    void cacheUnderstanding( const QString &key, long long reserved,
                              const Json::Value &understanding );
-    /// Returns the cached document when (path, revision) matches, else null.
-    Json::Value cachedUnderstanding( const QString &path, long long assetRevision ) const;
+    /// Returns the cached document when the key matches, else null.
+    Json::Value cachedUnderstanding( const QString &key, long long reserved ) const;
 
   private:
     ContextLedger() = default;

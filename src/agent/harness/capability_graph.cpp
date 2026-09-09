@@ -39,7 +39,7 @@ const std::vector<IntentTriggers> &triggerTable()
     // Compound / most specific first — resolved by scoring, not order, but
     // keeping multi-word terms here documents them next to their singles.
     { "sar_flood", { "sar flood", "sar 洪水", "雷达洪水", "sar inundation" } },
-    { "sar_change", { "sar change", "sar 变化" } },
+    { "sar_change", { "sar change", "sar 变化", "雷达变化" } },
     { "sar_water", { "sar water", "sar 水体", "雷达水体" } },
     { "ndvi", { "ndvi", "植被指数", "vegetation index" } },
     { "evi", { "evi" } },
@@ -229,6 +229,7 @@ Json::Value evaluateFeasibility( const Json::Value &capabilityEntry,
 
   const std::string datasetModality = facts::modalityOf( understanding );
   bool modalityChecked = false;
+  bool modalityMatched = false;
   for ( const Json::Value &modality : capabilityEntry.get( "modality", Json::Value( Json::arrayValue ) ) )
   {
     if ( !modality.isString() )
@@ -236,11 +237,12 @@ Json::Value evaluateFeasibility( const Json::Value &capabilityEntry,
     modalityChecked = true;
     if ( modality.asString() == datasetModality )
     {
+      modalityMatched = true;
       why( "Dataset modality '" + datasetModality + "' matches capability demand" );
       break;
     }
   }
-  if ( modalityChecked && result["why"].empty() && !datasetModality.empty() &&
+  if ( modalityChecked && !modalityMatched && !datasetModality.empty() &&
        datasetModality != "unknown" )
   {
     block( error_codes::kModalityMismatch,

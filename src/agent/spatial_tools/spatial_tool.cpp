@@ -111,7 +111,16 @@ class MeteredTool final : public SpatialTool
     {
       SpatialToolResult result = mInner->execute( input );
       if ( result.success )
+      {
         compactIfOversized( result.output );
+      }
+      else if ( result.error.size() > sicnu::agent::contracts::kMaxToolOutputBytes )
+      {
+        // Failure envelopes are bounded by the error taxonomy in practice;
+        // a runaway operator log is clamped instead of passed through.
+        result.error.erase( sicnu::agent::contracts::kMaxToolOutputBytes );
+        result.error += "[truncated: error exceeded the 512 KiB tool budget]";
+      }
       return result;
     }
 
@@ -121,7 +130,7 @@ class MeteredTool final : public SpatialTool
     void trimArray( Json::Value &output, const std::string &member, size_t budget ) const
     {
       int count = static_cast<int>( output[member].size() );
-      while ( count > 1 )
+      while ( count >= 1 )
       {
         Json::Value trimmed( Json::arrayValue );
         for ( int i = 0; i < count; ++i )
@@ -148,6 +157,7 @@ class MeteredTool final : public SpatialTool
       if ( serializedSize( output ) <= kMaxToolOutputBytes )
         return;
       const size_t budget = kMaxToolOutputBytes - 512; // room for markers
+      const Json::UInt64 originalBytes = static_cast<Json::UInt64>( serializedSize( output ) );
 
       // Prefer trimming the largest array-valued member.
       std::string largest;
@@ -173,7 +183,7 @@ class MeteredTool final : public SpatialTool
       Json::Value compact( Json::objectValue );
       compact["truncated"] = true;
       compact["truncated_field"] = largest.empty() ? "*" : largest;
-      compact["original_bytes"] = static_cast<Json::UInt64>( serializedSize( output ) );
+      compact["original_bytes"] = originalBytes;
       compact["note"] = "output exceeded the 512 KiB tool budget and was elided; "
                         "re-query with a narrower filter or pagination";
       output = compact;

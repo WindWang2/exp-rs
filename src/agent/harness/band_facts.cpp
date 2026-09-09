@@ -16,7 +16,13 @@ std::string lowered( std::string text )
 BandFacts bandFacts( const Json::Value &understanding )
 {
   BandFacts facts;
-  facts.bandCount = understanding.get( "band_count", 0 ).asInt();
+  // band_count is a summary field some understanding docs carry alongside
+  // the band arrays; count the arrays and fall back to the summary only
+  // when neither array is present (otherwise the count double-counts).
+  const bool hasBandArray =
+    ( understanding.isMember( "bands" ) && understanding["bands"].isArray() ) ||
+    ( understanding.isMember( "band_roles" ) && understanding["band_roles"].isArray() );
+  facts.bandCount = hasBandArray ? 0 : understanding.get( "band_count", 0 ).asInt();
   auto window = []( const Json::Value &band, double &wavelengthNm ) {
     if ( band.isMember( "wavelength" ) && band["wavelength"].isNumeric() )
     {

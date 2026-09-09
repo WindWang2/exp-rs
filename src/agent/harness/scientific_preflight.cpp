@@ -768,7 +768,7 @@ const std::vector<IntentSpec> &intentSpecTable()
     { "sar_water", PackKind::SarSingle, {}, false, true },
     { "ship", PackKind::SharedOnly },
     { "classify", PackKind::Classify },
-    { "accuracy", PackKind::Classify, {}, true },
+    { "accuracy", PackKind::Classify },
     { "phenology", PackKind::TemporalSeries, {}, false, false, 12 },
     { "temporal", PackKind::TemporalSeries, {}, false, false, 3 },
     { "terrain", PackKind::Terrain },

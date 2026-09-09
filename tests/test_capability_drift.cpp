@@ -21,8 +21,11 @@
 #include "agent/harness/capability_graph.h"
 #include "agent/harness/capability_knowledge.h"
 #include "agent/harness/harness_error.h"
+#include "agent/harness/harness_verification.h"
+#include "agent/spatial_tools/spatial_tool.h"
 #include "agent/harness/recipe_catalog.h"
 #include "agent/harness/scientific_preflight.h"
+#include "agent/contracts/spatial_contracts.h"
 
 #include <operators/framework/rs_operator.h>
 #include <operators/framework/rs_operator_registry.h>
@@ -423,6 +426,113 @@ TEST_CASE( "intent requirements agree with the capability knowledge layer",
 
   // Unknown intents have no requirements document at all.
   REQUIRE( intentRequirements( "warp_speed" ).isNull() );
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial-review regression pins
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "knowledge-driven uncertainty expectation stays warning-class",
+           "[harness][capability][regression]" )
+{
+  using sicnu::agent::harness::VerificationExpectations;
+  using sicnu::agent::harness::verifyArtifact;
+  using sicnu::agent::harness::Verdict;
+
+  CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+  knowledge.setDirectory( std::string( CMAKE_SOURCE_DIR ) + "/data/agent/capabilities" );
+  knowledge.reload(); // loaded BEFORE derivation — order must not matter
+
+  // Derive expectations for a change plan through the production path
+  // (plan_tools::deriveExpectations is file-local; exercise the contract via
+  // harness:run_status's building block: knowledge checks -> expectations ->
+  // verifyArtifact on an output WITHOUT an uncertainty sidecar).
+  Json::Value plan;
+  plan["intent"] = "change";
+  sicnu::agent::harness::AgentPlan parsed;
+  sicnu::agent::harness::HarnessError error;
+  REQUIRE( sicnu::agent::harness::readAgentPlan( plan, parsed, error ) );
+
+  // Reproduce the derivation the run path uses by querying the same layer.
+  bool wantsUncertainty = false;
+  for ( const std::string &operatorId :
+        CapabilityKnowledge::instance().operatorsForIntent( "change" ) )
+  {
+    for ( const Json::Value &check :
+          knowledge.entryForOperator( operatorId ).get( "verification", Json::Value() ).get(
+            "checks", Json::Value( Json::arrayValue ) ) )
+      if ( check.isString() && check.asString() == "uncertainty" )
+        wantsUncertainty = true;
+  }
+  REQUIRE( wantsUncertainty ); // the family contract declares it
+
+  // A sidecar-less raster must NOT fail the run: uncertainty presence is a
+  // warning-class check until a writer exists (adversarial review F1).
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const std::string out = ( QDir( dir.path() ).filePath( QStringLiteral( "change_out.tif" ) ) ).toStdString();
+  {
+    std::ofstream stream( out, std::ios::binary );
+    stream << "synthetic";
+  }
+  VerificationExpectations expectations;
+  expectations.requireUncertainty = true; // what the knowledge layer demands
+  const auto artifact = verifyArtifact( out, expectations );
+  INFO( "checks: " << [&] {
+    std::string joined;
+    for ( const auto &check : artifact.checks )
+      joined += check.check + ( check.passed ? "=pass " : "=FAIL ");
+    return joined;
+  }() );
+  REQUIRE( artifact.verdict != Verdict::Fail );
+}
+
+namespace {
+/// Minimal tool emitting a huge array — drives the registry meter (review F14).
+class HugeOutputTool final : public sicnu::agent::spatial_tools::SpatialTool
+{
+  public:
+    std::string name() const override { return "spatial:__meter_probe"; }
+    std::string displayName() const override { return "Meter probe"; }
+    std::string description() const override { return "test-only"; }
+    std::vector<std::string> tags() const override { return { "test" }; }
+    Json::Value inputSchema() const override { return Json::Value( Json::objectValue ); }
+    Json::Value outputSchema() const override { return Json::Value( Json::objectValue ); }
+    sicnu::agent::spatial_tools::SpatialToolResult execute( const Json::Value & ) override
+    {
+      Json::Value out;
+      out["verdict"] = "PASS";
+      for ( int i = 0; i < 40000; ++i )
+      {
+        Json::Value entry( Json::objectValue );
+        entry["i"] = i;
+        entry["payload"] = std::string( 64, 'x' );
+        out["rows"].append( entry );
+      }
+      return sicnu::agent::spatial_tools::SpatialToolResult::ok( std::move( out ) );
+    }
+};
+} // namespace
+
+TEST_CASE( "runtime meter trims oversized arrays and keeps the envelope",
+           "[harness][capability][regression]" )
+{
+  using namespace sicnu::agent::spatial_tools;
+  SpatialToolRegistry::instance().registerBuiltinTools();
+  REQUIRE( SpatialToolRegistry::instance().registerTool(
+    std::make_shared<HugeOutputTool>() ) );
+  const auto tool = SpatialToolRegistry::instance().find( "spatial:__meter_probe" );
+  REQUIRE( tool.has_value() );
+  const auto result = ( *tool )->execute( Json::Value() );
+  REQUIRE( result.success );
+  REQUIRE( result.output.isObject() );
+  CHECK( result.output.get( "truncated", false ).asBool() );
+  CHECK( result.output.get( "truncated_field", "" ).asString() == "rows" );
+  // The envelope survives: original size is reported and rows were trimmed.
+  CHECK( result.output["original_bytes"].asUInt64() > sicnu::agent::contracts::kMaxToolOutputBytes );
+  CHECK( result.output["rows"].size() >= 1 );
+  CHECK( sicnu::agent::contracts::serializedSize( result.output ) <=
+         sicnu::agent::contracts::kMaxToolOutputBytes );
 }
 
 // ---------------------------------------------------------------------------

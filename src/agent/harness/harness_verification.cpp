@@ -355,16 +355,25 @@ ArtifactVerification verifyArtifact( const std::string &path,
     }
   }
 
+  // Provenance/uncertainty presence are ADVISORY: addCheck escalates any
+  // failed check to error severity, which would turn a missing sidecar into
+  // a FAIL for an otherwise valid product (no codepath writes these sidecars
+  // yet — adversarial review F1). They are recorded as honest failing
+  // checks with warning severity so the verdict degrades to
+  // PASS_WITH_WARNINGS, never a false FAIL and never a silent pass.
+  const auto advisoryCheck = [ & ]( const std::string &name, bool present ) {
+    VerificationCheck check;
+    check.check = name;
+    check.passed = present;
+    check.severity = "warning";
+    if ( !present )
+      check.code = error_codes::kOutputInvalid;
+    result.checks.push_back( std::move( check ) );
+  };
   if ( expectations.requireProvenance )
-  {
-    addCheck( result.checks, "provenance_present", provenanceSidecarExists( path ),
-              error_codes::kOutputInvalid, "warning" );
-  }
+    advisoryCheck( "provenance_present", provenanceSidecarExists( path ) );
   if ( expectations.requireUncertainty )
-  {
-    addCheck( result.checks, "uncertainty_present", uncertaintySidecarExists( path ),
-              error_codes::kOutputInvalid, "warning" );
-  }
+    advisoryCheck( "uncertainty_present", uncertaintySidecarExists( path ) );
 
   result.verdict = verdictFromChecks( result.checks );
   return result;

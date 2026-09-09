@@ -120,6 +120,14 @@ int CapabilityKnowledge::reload()
   mOrder.clear();
   mLoadProblems.clear();
   mLoaded = true;
+
+  // A missing directory is a deployment problem, not an empty catalog —
+  // surface it so tools can distinguish "no knowledge" from "broken install".
+  if ( !QDir( QString::fromStdString( dir ) ).exists() )
+  {
+    mLoadProblems.push_back( "capabilities directory not found: " + dir );
+    return 0;
+  }
   QDirIterator it( QString::fromStdString( dir ), { QStringLiteral( "*.json" ) }, QDir::Files );
   while ( it.hasNext() )
   {
@@ -172,7 +180,10 @@ int CapabilityKnowledge::reload()
         continue;
       if ( entry.get( "kind", "" ).asString() == "family_default" )
       {
-        mFamilyDefaults[ id ] = entry;
+        if ( mFamilyDefaults.isMember( id ) )
+          mLoadProblems.push_back( where + ": duplicate family_default id " + id );
+        else
+          mFamilyDefaults[ id ] = entry;
       }
       else if ( mEntries.isMember( id ) )
       {
@@ -185,6 +196,9 @@ int CapabilityKnowledge::reload()
       }
     }
   }
+  // Deterministic order: directory iteration order is filesystem-dependent,
+  // and operatorsForIntent/candidates use mOrder as a tiebreak.
+  std::sort( mOrder.begin(), mOrder.end() );
   return static_cast<int>( mOrder.size() );
 }
 
@@ -472,6 +486,19 @@ std::vector<std::string> CapabilityKnowledge::validateEntry( const Json::Value &
     }
   }
 
+  if ( entry.isMember( "crs" ) )
+  {
+    const Json::Value &crs = entry["crs"];
+    if ( !crs.isObject() )
+      problems.push_back( "'crs' must be an object" );
+    else
+    {
+      const Json::Value &projected = crs.get( "requires_projected", Json::Value() );
+      if ( !projected.isNull() && !projected.isBool() )
+        problems.push_back( "'crs.requires_projected' must be boolean" );
+    }
+  }
+
   // radiometric / sar / temporal / resource / verification / artifacts
   if ( entry.isMember( "radiometric" ) )
   {
@@ -617,7 +644,8 @@ std::vector<std::string> CapabilityKnowledge::validateEntry( const Json::Value &
                               "'" );
         }
         // Variant payloads obey the same closed vocabularies as top-level
-        // keys — a variant cannot smuggle an unknown intent or band role.
+        // keys — a variant cannot smuggle unknown intents, band roles, or
+        // verification checks past the merged entry's consumers.
         for ( const Json::Value &candidate :
               variant.get( "intents", Json::Value( Json::arrayValue ) ) )
         {
@@ -645,6 +673,25 @@ std::vector<std::string> CapabilityKnowledge::validateEntry( const Json::Value &
                                     "' needs a positive integer count" );
             }
           }
+        }
+        for ( const Json::Value &check : variant.get( "verification", Json::Value() ).get(
+                "checks", Json::Value( Json::arrayValue ) ) )
+        {
+          if ( check.isString() &&
+               !inVocabulary( kVerificationChecks,
+                              sizeof( kVerificationChecks ) / sizeof( kVerificationChecks[0] ),
+                              lowered( check.asString() ) ) )
+            problems.push_back( "variants[" + std::to_string( index ) +
+                                "] unknown verification check '" + check.asString() + "'" );
+        }
+        for ( const Json::Value &modality :
+              variant.get( "modality", Json::Value( Json::arrayValue ) ) )
+        {
+          if ( !modality.isString() ||
+               !inVocabulary( kModalities, sizeof( kModalities ) / sizeof( kModalities[0] ),
+                              lowered( modality.asString() ) ) )
+            problems.push_back( "variants[" + std::to_string( index ) +
+                                "] unknown modality" );
         }
       }
     }

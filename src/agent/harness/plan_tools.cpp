@@ -39,6 +39,10 @@ Json::Value objectSchema( Json::Value properties, Json::Value required )
 /// run. The 4.0 resume bound was "one per status call" — a poll loop could
 /// retry forever. The ledger caps automatic repair/resume attempts for the
 /// lifetime of the run id.
+/// Threading/ownership note: tool execution is serialized by the surfaces
+/// that drive it (MCP stdio loop, copilot UI thread), so the map is not
+/// mutex-guarded; entries are one string+int per run id for the process
+/// lifetime (bounded in practice by the coordinator's own run registry).
 constexpr int kMaxRepairAttempts = 3;
 
 int &repairAttempts( const std::string &runId )
@@ -149,6 +153,7 @@ VerificationExpectations deriveExpectations( const AgentPlan *plan )
     return expectations;
 
   bool provenanceDeclared = false;
+  bool uncertaintyDeclared = false;
   const Json::Value &declared =
     plan->verification.get( "expectations", Json::Value() );
   if ( declared.isObject() )
@@ -175,12 +180,17 @@ VerificationExpectations deriveExpectations( const AgentPlan *plan )
       provenanceDeclared = true;
     }
     if ( declared.isMember( "require_uncertainty" ) && declared["require_uncertainty"].isBool() )
+    {
       expectations.requireUncertainty = declared["require_uncertainty"].asBool();
+      uncertaintyDeclared = true;
+    }
   }
 
   // Capability-knowledge contract for the intent: union of the checks the
   // serving capabilities declare, applied only to knobs the plan left open.
-  if ( !plan->intent.empty() && CapabilityKnowledge::instance().loaded() )
+  // operatorsForIntent lazily loads the knowledge layer, so verification
+  // strength never depends on whether some earlier tool happened to load it.
+  if ( !plan->intent.empty() )
   {
     bool wantsFinite = false;
     bool wantsNodata = false;
@@ -204,7 +214,8 @@ VerificationExpectations deriveExpectations( const AgentPlan *plan )
         }
         else if ( check.asString() == "uncertainty" )
         {
-          expectations.requireUncertainty = true;
+          if ( !uncertaintyDeclared )
+            expectations.requireUncertainty = true;
         }
       }
     }

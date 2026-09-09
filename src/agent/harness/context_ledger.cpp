@@ -17,10 +17,6 @@ QString nowIso()
   return QDateTime::currentDateTimeUtc().toString( Qt::ISODate );
 }
 
-QString understandingKey( const QString &path, long long revision )
-{
-  return path + QStringLiteral( "\u0001" ) + QString::number( revision );
-}
 
 } // namespace
 
@@ -121,11 +117,11 @@ Json::Value ContextLedger::decisions() const
   return unresolved;
 }
 
-void ContextLedger::cacheUnderstanding( const QString &path, long long assetRevision,
+void ContextLedger::cacheUnderstanding( const QString &keyToken, long long,
                                         const Json::Value &understanding )
 {
   QMutexLocker locker( &mMutex );
-  const std::string key = understandingKey( path, assetRevision ).toStdString();
+  const std::string key = keyToken.toStdString();
   for ( Json::ArrayIndex i = 0; i < mUnderstandingKeys.size(); ++i )
   {
     if ( mUnderstandingKeys[i].asString() == key )
@@ -143,11 +139,10 @@ void ContextLedger::cacheUnderstanding( const QString &path, long long assetRevi
   }
 }
 
-Json::Value ContextLedger::cachedUnderstanding( const QString &path,
-                                                long long assetRevision ) const
+Json::Value ContextLedger::cachedUnderstanding( const QString &keyToken, long long ) const
 {
   QMutexLocker locker( &mMutex );
-  const std::string key = understandingKey( path, assetRevision ).toStdString();
+  const std::string key = keyToken.toStdString();
   for ( Json::ArrayIndex i = 0; i < mUnderstandingKeys.size(); ++i )
   {
     if ( mUnderstandingKeys[i].asString() == key )
