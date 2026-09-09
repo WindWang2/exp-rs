@@ -20,6 +20,7 @@
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "framework/fused_chain.h"
+#include "framework/worker_execution_route.h"
 #include "runtime/observability/execution_telemetry.h"
 #include "data/data_manager.h"
 
@@ -111,6 +112,10 @@ void TaskCenter::shutdown()
     // engine still accepts cancel), then join the engine, then finalize.
     cancelAllForShutdown();
     sicnu::jobs::JobEngine::instance().shutdown();
+    // Execution Plane 7.0: quiesce the isolated worker pool AFTER the engine
+    // joined (no more executor runs can start) and before finalization so a
+    // GUI/app shutdown never leaves worker processes behind.
+    processing::shutdownSharedWorkerPool();
 
     // The engine is terminated: no further job records can arrive. Force any
     // task still mid-flight (Cancelling, or never-cancelled stragglers) to a
@@ -204,6 +209,7 @@ void TaskCenter::shutdownForTests()
         m_forwardedLogCounts.clear();
         m_lastForwardedProgress.clear();
         m_estimateMbCache.clear(); // task ids restart at 1: stale estimates must not leak across tests
+        m_admissionDimsCache.clear();
         m_completionCallbacks.clear();
         m_taskFingerprints.clear();
         m_taskFingerprintParams.clear();
@@ -298,6 +304,17 @@ void TaskCenter::resetResourceProfileLimits()
     m_profileLimits.clear();
     m_globalConcurrencyLimit = 0;
     m_resourceMonitor = ResourceMonitor{}; // restore default watermark + sampler (ADR 0063)
+    // Execution Plane 7.0: restore the multi-dimension gates to their
+    // defaults (0 = off) and drop per-task dims so a test reset returns to
+    // the master scheduling behavior.
+    m_budget2 = TaskResourceBudget2{};
+    m_ioHeavyLimit = 0;
+    m_admissionDimsCache.clear();
+    {
+        bool ok = false;
+        const int envRetries = qEnvironmentVariableIntValue( "SICNU_TASK_MAX_AUTO_RETRIES", &ok );
+        m_maxAutoRetries = std::clamp( ok ? envRetries : 1, 0, 3 );
+    }
     // Keep the resource-aware budget consistent with the restored watermark so a
     // test reset returns to the default scheduling behavior (perf/architecture goal).
     m_resourceBudget.setBudgetMb( m_resourceMonitor.memoryLimitMb() );
@@ -394,6 +411,83 @@ unsigned int TaskCenter::resourceBudgetMb() const
     return m_resourceBudget.budgetMb();
 }
 
+// --- Execution Plane 7.0: multi-dimension admission -------------------------
+
+void TaskCenter::setTempDiskBudgetMb( unsigned int mb )
+{
+    QMutexLocker locker( &m_mutex );
+    sicnu::SchedulerLimits limits = m_budget2.limits();
+    limits.tempDiskMb = mb;
+    m_budget2.setLimits( limits );
+}
+
+unsigned int TaskCenter::tempDiskBudgetMb() const
+{
+    QMutexLocker locker( &m_mutex );
+    return m_budget2.limits().tempDiskMb;
+}
+
+void TaskCenter::setVramBudgetMb( unsigned int mb )
+{
+    QMutexLocker locker( &m_mutex );
+    sicnu::SchedulerLimits limits = m_budget2.limits();
+    limits.vramMb = mb;
+    m_budget2.setLimits( limits );
+}
+
+unsigned int TaskCenter::vramBudgetMb() const
+{
+    QMutexLocker locker( &m_mutex );
+    return m_budget2.limits().vramMb;
+}
+
+void TaskCenter::setIoHeavyLimit( unsigned int maxConcurrent )
+{
+    QMutexLocker locker( &m_mutex );
+    m_ioHeavyLimit = maxConcurrent;
+}
+
+unsigned int TaskCenter::ioHeavyLimit() const
+{
+    QMutexLocker locker( &m_mutex );
+    return m_ioHeavyLimit;
+}
+
+TaskCenter::AdmissionDims TaskCenter::admissionDimsLocked( const AlgorithmTaskInfo &task ) const
+{
+    if ( m_admissionDimsCache.contains( task.taskId ) )
+        return m_admissionDimsCache[ task.taskId ];
+    AdmissionDims dims;
+    try
+    {
+        auto adapter =
+            processing::AtomicAlgorithmRegistry::instance().findAdapter( task.algorithmId.toStdString() );
+        if ( adapter )
+        {
+            const auto desc = adapter->descriptor();
+            dims.ioHeavy = desc.agentMetadata.ioHeavy;
+            const Json::Value &execution = desc.agentMetadata.execution;
+            if ( execution.isObject() )
+            {
+                const Json::Value &tempDisk = execution["temporaryDiskBytes"];
+                if ( tempDisk.isNumeric() )
+                    dims.tempDiskMb = static_cast<unsigned int>(
+                        tempDisk.asUInt64() / ( 1024ull * 1024ull ) );
+                const Json::Value &vram = execution["estimatedVramBytes"];
+                if ( vram.isNumeric() )
+                    dims.vramMb = static_cast<unsigned int>(
+                        vram.asUInt64() / ( 1024ull * 1024ull ) );
+            }
+        }
+    }
+    catch ( ... )
+    {
+        dims = AdmissionDims{}; // a descriptor failure never gates
+    }
+    m_admissionDimsCache[ task.taskId ] = dims;
+    return dims;
+}
+
 void TaskCenter::setEstimateResolver( TaskEstimateResolver resolver )
 {
     QMutexLocker locker( &m_mutex );
@@ -404,6 +498,7 @@ void TaskCenter::setEstimateResolver( TaskEstimateResolver resolver )
     // A different resolver may produce different estimates: drop the per-task
     // cache so subsequent passes re-resolve (#702).
     m_estimateMbCache.clear();
+    m_admissionDimsCache.clear();
 }
 
 unsigned int TaskCenter::resolveEstimateMb( const std::string &algorithmId ) const
@@ -1140,6 +1235,12 @@ void TaskCenter::processNextQueuedTasks()
     QMap<ProviderResourceProfile, unsigned int> runningByProfile;
     unsigned int totalRunning = 0;
     unsigned int runningTotalMb = 0; // RAM estimate sum of active tasks (resource-aware gate)
+    // Execution Plane 7.0: active tasks routed to an isolated worker process.
+    // The isolated-slot gate bounds how many worker-bound jobs may run at
+    // once so they cannot starve JobEngine's in-process capacity.
+    unsigned int runningIsolated = 0;
+    unsigned int runningIoHeavy = 0;
+    sicnu::ResourceUsage runningUsage2; // multi-dim usage (temp disk / VRAM)
 
     // Pending launches (Dispatching) already hold their slot; count each
     // active task once. Cancelling tasks still occupy their worker slot until
@@ -1154,6 +1255,13 @@ void TaskCenter::processNextQueuedTasks()
         runningByProfile[t.resourceProfile] = runningByProfile.value( t.resourceProfile, 0u ) + 1u;
         ++totalRunning;
         runningTotalMb += taskEstimateMbLocked( t );
+        if ( t.isolatedRoute )
+            ++runningIsolated;
+        const AdmissionDims activeDims = admissionDimsLocked( t );
+        runningUsage2.tempDiskMb += activeDims.tempDiskMb;
+        runningUsage2.vramMb += activeDims.vramMb;
+        if ( activeDims.ioHeavy )
+            ++runningIoHeavy;
     }
 
     QList<long> eligibleIds;
@@ -1221,6 +1329,21 @@ void TaskCenter::processNextQueuedTasks()
             continue;
         }
 
+        // Execution Plane 7.0: isolated-worker route selection. Tasks with a
+        // caller-supplied executor keep it; everything routable that the
+        // current mode selects runs in an isolated sicnu_worker process.
+        // NOTE: the predicate deliberately does NOT consult hasJobRequest —
+        // after a transient auto-retry the flag is already set, and routing
+        // must re-engage (a retry silently falling back in-process would
+        // break the fail-closed contract).
+        const bool isolateRoute =
+            !m_tasks[id].jobExecutor && processing::shouldRunIsolated( m_tasks[id].algorithmId );
+        if ( isolateRoute && runningIsolated >= static_cast<unsigned int>( std::max( 1, processing::isolatedJobLimit() ) ) )
+        {
+            resourceBlockedIds.append( id );
+            continue;
+        }
+
         // ADR 0063: hold all launches when the process RSS is at/above the
         // watermark. Memory pressure is global, so break rather than continue
         // - remaining eligible tasks cannot run either. Blocked tasks stay
@@ -1258,6 +1381,34 @@ void TaskCenter::processNextQueuedTasks()
             continue;
         }
 
+        // Execution Plane 7.0: multi-dimension admission (TaskResourceBudget2)
+        // over descriptor-declared temporary disk and VRAM. A dimension cap
+        // of 0 disables the gate; never-starve mirrors the RAM gate (when
+        // nothing is running, a declared estimate never blocks the only
+        // candidate). Delays only — the task stays queued.
+        const AdmissionDims candidateDims = admissionDimsLocked( m_tasks[id] );
+        if ( totalRunning > 0
+             && ( candidateDims.tempDiskMb > 0 || candidateDims.vramMb > 0 ) )
+        {
+            sicnu::ResourceRequest candidateRequest;
+            candidateRequest.tempDiskMb = candidateDims.tempDiskMb;
+            candidateRequest.vramMb = candidateDims.vramMb;
+            if ( !m_budget2.canLaunch( runningUsage2, candidateRequest,
+                                       std::chrono::steady_clock::now() ) )
+            {
+                resourceBlockedIds.append( id );
+                continue;
+            }
+        }
+
+        // Execution Plane 7.0: io-heavy concurrency gate (descriptor-declared
+        // ioHeavy kernels; 0 = off). Delays only, like the isolated-slot gate.
+        if ( candidateDims.ioHeavy && m_ioHeavyLimit > 0 && runningIoHeavy >= m_ioHeavyLimit )
+        {
+            resourceBlockedIds.append( id );
+            continue;
+        }
+
         // Execution fingerprint (#667/#726): computed once at SUBMISSION time
         // and verified above after placeholder substitution. Admission never
         // touches the catalog, so downstream steps admitted on JobEngine
@@ -1289,13 +1440,25 @@ void TaskCenter::processNextQueuedTasks()
             launch.hasExecutor = true;
             launch.request = m_tasks[id].jobRequest;
             launch.request.clientTag = "task:" + std::to_string( id );
-            launch.request.params = variantMapToJsonParams( m_tasks[id].parameterMap );
+            launch.request.params = variantMapToJsonParams( m_tasks[ id ].parameterMap );
             launch.request.priority = static_cast<int>( m_tasks[id].priority );
         }
         else
         {
             m_tasks[id].jobRequest = launch.request;
             m_tasks[id].hasJobRequest = true;
+            if ( isolateRoute )
+            {
+                // The pool itself is started outside m_mutex at flush time;
+                // staging only records the route.
+                launch.executor = processing::makeIsolatedWorkerExecutor( m_tasks[id].algorithmId );
+                launch.hasExecutor = true;
+                launch.isolated = true;
+                m_tasks[id].isolatedRoute = true;
+                m_tasks[id].logBuffer.append(
+                    QStringLiteral( "[%1] Routed to an isolated worker process." )
+                        .arg( QDateTime::currentDateTimeUtc().toString( QStringLiteral( "hh:mm:ss" ) ) ) );
+            }
         }
 
         queueTaskUpdatedLocked( id );
@@ -1303,6 +1466,12 @@ void TaskCenter::processNextQueuedTasks()
         runningByProfile[profile] = runningByProfile.value( profile, 0u ) + 1u;
         ++totalRunning;
         runningTotalMb += candidateMb;
+        if ( isolateRoute )
+            ++runningIsolated;
+        runningUsage2.tempDiskMb += candidateDims.tempDiskMb;
+        runningUsage2.vramMb += candidateDims.vramMb;
+        if ( candidateDims.ioHeavy )
+            ++runningIoHeavy;
     }
 
     // Admission outcome bookkeeping: launch-eligible candidates that did not
@@ -1357,8 +1526,34 @@ void TaskCenter::flushPendingLaunches()
         return;
     ensureJobListener();
 
+    // Execution Plane 7.0: start the shared worker pool before submitting
+    // the first isolated launch. Process spawn + handshake must never happen
+    // under m_mutex, so this runs in the flush thread. A pool that cannot
+    // start fails ISOLATED launches with a typed error (fail-closed: never a
+    // silent in-process fallback); non-isolated launches proceed.
+    bool workerPoolReady = true;
+    QString workerPoolError;
+    if ( std::any_of( launches.cbegin(), launches.cend(), []( const PendingLaunch &l ) { return l.isolated; } ) )
+    {
+        sicnu::processing::WorkerExecutionConfig routeConfig =
+            processing::workerExecutionConfigFromEnvironment();
+        // The CONFIGURED mode (host/test API or a previous explicit start)
+        // wins over a re-read of the environment: a mode set after startup
+        // must stay consistent with the pool that gets (re)started here.
+        routeConfig.mode = processing::currentWorkerExecutionMode();
+        workerPoolReady = processing::ensureSharedWorkerPoolStarted( routeConfig, &workerPoolError );
+        if ( !workerPoolReady )
+            workerPoolError = QStringLiteral( "isolated worker execution unavailable: %1" )
+                                  .arg( workerPoolError );
+    }
+
     for ( auto &launch : launches )
     {
+        if ( launch.isolated && !workerPoolReady )
+        {
+            markTaskFailed( launch.taskId, workerPoolError );
+            continue;
+        }
         {
             QMutexLocker lock( &m_mutex );
             if ( !m_tasks.contains( launch.taskId ) || isTerminalStatus( m_tasks[launch.taskId].status ) )
@@ -1726,16 +1921,98 @@ void TaskCenter::dispatchPendingCancels( const QList<QPointer<QgsTask>> &handles
     }
 }
 
+namespace
+{
+/// Execution Plane 7.0: TRANSIENT failure classes eligible for the bounded
+/// auto-retry. These prefixes are produced by the isolated-worker executor
+/// infrastructure (crash/timeout/spawn exhaustion) — the operator never
+/// reported a result, so re-running cannot double-produce. Everything else
+/// (operator errors, validation failures, cancellations) is permanent.
+bool isTransientExecutionError( const QString &error )
+{
+    const QString message = error.trimmed();
+    return message.startsWith( QStringLiteral( "worker crashed:" ) )
+           || message.startsWith( QStringLiteral( "worker timeout:" ) )
+           || message.startsWith( QStringLiteral( "worker protocol: cannot start" ) );
+}
+} // namespace
+
+bool TaskCenter::shouldAutoRetryLocked( const AlgorithmTaskInfo &task, const QString &error ) const
+{
+    if ( m_maxAutoRetries <= 0 )
+        return false;
+    if ( task.autoRetryAttempts >= m_maxAutoRetries )
+        return false;
+    return isTransientExecutionError( error );
+}
+
+void TaskCenter::setMaxAutoRetries( int maxRetries )
+{
+    QMutexLocker locker( &m_mutex );
+    m_maxAutoRetries = std::clamp( maxRetries, 0, 3 );
+}
+
+int TaskCenter::maxAutoRetries() const
+{
+    QMutexLocker locker( &m_mutex );
+    return m_maxAutoRetries;
+}
+
 void TaskCenter::markTaskFailed( long taskId, const QString &error )
 {
     QList<long> cascadeCanceledIds;
     std::vector<std::pair<std::string, long>> jobCancelTargets;
     QList<QPointer<QgsTask>> handlesToCancel;
+    // Execution Plane 7.0: set when the task was resurrected by the bounded
+    // transient auto-retry. The post-lock section then flushes the staged
+    // re-dispatch (a staged launch must NEVER wait for an unrelated terminal
+    // transition) but skips the failure cascade and the terminal completion
+    // callbacks — the task is alive, not terminal.
+    bool autoRetried = false;
     {
         QMutexLocker locker( &m_mutex );
         // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
         if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return;
+
+        // Execution Plane 7.0: bounded transient auto-retry. The task is
+        // resurrected in place — children keep their DAG edges and no
+        // terminal transition fires — with the failed attempt's job identity
+        // cleared so the next admission pass dispatches a FRESH job (#799
+        // pre-registration applies to the new id). The attempt counter and
+        // the hard cap keep the loop bounded; a second transient failure
+        // with an exhausted budget takes the normal Failed path below.
+        if ( shouldAutoRetryLocked( m_tasks[taskId], error ) )
+        {
+            AlgorithmTaskInfo &info = m_tasks[taskId];
+            const std::string deadJobId = info.jobId;
+            ++info.autoRetryAttempts;
+            info.status = TaskStatus::Queued;
+            info.jobId.clear();
+            info.errorMessage.clear();
+            info.endTime = QDateTime();
+            info.progressPercentage = 0.0;
+            if ( !deadJobId.empty() )
+                m_taskByJobId.remove( deadJobId );
+            // The retried run records fresh identity: drop the failed
+            // attempt's fingerprint bookkeeping (the legacy removals below
+            // do not run on this early-return path).
+            m_taskFingerprints.remove( taskId );
+            m_taskFingerprintParams.remove( taskId );
+            info.logBuffer.append(
+                QString( QStringLiteral( "[%1] Transient failure — auto-retry %2/%3: %4" ) )
+                    .arg( QDateTime::currentDateTimeUtc().toString( QStringLiteral( "hh:mm:ss" ) ) )
+                    .arg( info.autoRetryAttempts )
+                    .arg( m_maxAutoRetries )
+                    .arg( error ) );
+            sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
+                sicnu::runtime::observability::Counter::TaskAutoRetries );
+            queueTaskUpdatedLocked( taskId );
+            processNextQueuedTasks();
+            autoRetried = true;
+        }
+        else
+        {
         // The root's own engine job must be cancelled too (#702, symmetric
         // with markTaskCanceled): an externally-driven failure must kill the
         // still-running engine job, or it keeps writing output while the task
@@ -1763,9 +2040,12 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
                                     cascadeCanceledIds, jobCancelTargets, handlesToCancel );
 
         processNextQueuedTasks();
+        }
     }
     flushPendingLaunches();
     flushPendingSignals();
+    if ( autoRetried )
+        return; // the re-dispatch is staged + flushed; no terminal bookkeeping
 
     dispatchPendingCancels( handlesToCancel, jobCancelTargets,
                             QStringLiteral( "Job no longer known to the engine; task canceled after upstream failure." ) );
@@ -2076,6 +2356,7 @@ void TaskCenter::clearCompletedTasks()
             m_forwardedLogCounts.remove( id );
             m_lastForwardedProgress.remove( id );
             m_estimateMbCache.remove( id ); // keep the per-task estimate cache bounded
+            m_admissionDimsCache.remove( id );
             m_completionCallbacks.remove( id ); // defense (#702): stale registrations
             m_taskFingerprints.remove( id );
             m_taskFingerprintParams.remove( id );
@@ -3051,6 +3332,26 @@ bool TaskCenter::serveFromExecutionCache( long taskId, const sicnu::data::Execut
          && !materializeCachedArtifacts( transfers, staleSidecars, fp.toHex().left( 16 ),
                                          expected ) )
         return false; // fall through to a real execution (cache contract C7)
+
+    // Execution Plane 7.0: post-serve destination verification. The in-memory
+    // tier's bytes were stat-bound at store time; a transfer that landed
+    // short (disk pressure, concurrent writer at the destination) must not
+    // surface as a successful cache hit. Compare every transferred
+    // destination against the entry's stat binding for its producing source;
+    // any mismatch falls through to a real execution — a cache hit is only
+    // served when the output it vouches for is verifiably at the destination.
+    for ( auto srcIt = pathMap.constBegin(); srcIt != pathMap.constEnd(); ++srcIt )
+    {
+        const QString &produced = srcIt.key();
+        const QString &served = srcIt.value();
+        if ( QFileInfo( produced ).absoluteFilePath() == QFileInfo( served ).absoluteFilePath() )
+            continue; // in-place: validated by lookupExecution
+        const auto sizeIt = cached->artifactSizes.constFind( produced );
+        if ( sizeIt == cached->artifactSizes.constEnd() )
+            continue; // sidecar or unmapped sibling: no binding to check
+        if ( !QFile::exists( served ) || QFileInfo( served ).size() != sizeIt.value() )
+            return false; // fall through to a real execution (cache contract C7)
+    }
 
     // Restore the producing run's full result payload with this run's paths,
     // so GUI auto-load, agents and workflow placeholder resolution see
