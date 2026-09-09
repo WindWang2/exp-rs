@@ -1,0 +1,109 @@
+[
+  {
+    "id": "family:classify",
+    "kind": "family_default",
+    "family": "classify",
+    "modality": ["optical", "sar", "multimodal"],
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "crs_matches", "dimensions", "class_domain", "finite_fraction"]
+    },
+    "limitations": ["Class maps are only as good as training/cluster separation; validate with held-out samples"]
+  },
+  {
+    "id": "rs:kmeans_classification",
+    "family": "classify",
+    "extends": "family:classify",
+    "intents": ["classify"],
+    "limitations": ["Unsupervised: cluster ids are not land-cover semantics without a labeling step"]
+  },
+  {
+    "id": "rs:supervised_classification",
+    "family": "classify",
+    "extends": "family:classify",
+    "intents": ["classify", "accuracy"],
+    "limitations": ["Needs representative labeled training; class imbalance skews minority classes"]
+  },
+  {
+    "id": "rs:sam_classify",
+    "family": "classify",
+    "extends": "family:classify",
+    "intents": ["classify"],
+    "limitations": ["Spectral angle ignores illumination magnitude; reflectance-domain inputs recommended"]
+  },
+  {
+    "id": "rs:segment",
+    "family": "classify",
+    "extends": "family:classify",
+    "modality": ["optical", "sar"],
+    "intents": ["classify", "preprocess"],
+    "resource": { "cost_class": "heavy", "large_raster_safe": false },
+    "limitations": ["Segment scale parameter drives object size; tune per scene resolution"]
+  },
+  {
+    "id": "rs:segment_stats",
+    "family": "classify",
+    "extends": "rs:segment",
+    "intents": ["classify"]
+  },
+  {
+    "id": "rs:obia_segment",
+    "family": "classify",
+    "extends": "rs:segment",
+    "intents": ["classify"]
+  },
+  {
+    "id": "rs:obia_features",
+    "family": "classify",
+    "extends": "rs:segment",
+    "intents": ["classify"]
+  },
+  {
+    "id": "rs:obia_classify",
+    "family": "classify",
+    "extends": "family:classify",
+    "intents": ["classify", "accuracy"]
+  },
+  {
+    "id": "rs:obia_hierarchy",
+    "family": "classify",
+    "extends": "rs:segment",
+    "intents": ["classify"]
+  },
+  {
+    "id": "rs:obia_label",
+    "family": "classify",
+    "extends": "rs:segment",
+    "intents": ["classify"]
+  },
+  {
+    "id": "rs:post_classification_change",
+    "family": "classify",
+    "extends": "family:classify",
+    "intents": ["change", "classify"],
+    "temporal": { "min_scenes": 2 },
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "class_domain", "finite_fraction"]
+    },
+    "limitations": ["Inherits both epochs' classification errors; consistency beats raw accuracy"]
+  },
+  {
+    "id": "rs:recode",
+    "family": "classify",
+    "extends": "family:classify",
+    "verification": { "expected_kind": "raster", "checks": ["existence", "opens", "class_domain"] }
+  },
+  {
+    "id": "rs:detect",
+    "family": "classify",
+    "extends": "family:classify",
+    "intents": ["ship", "classify"],
+    "verification": {
+      "expected_kind": "vector",
+      "checks": ["existence", "opens", "feature_count", "extent"]
+    }
+  }
+]

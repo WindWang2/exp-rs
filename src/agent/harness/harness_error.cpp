@@ -36,6 +36,7 @@ const CodeInfo *codeInfo( const std::string &code )
     // Harness-internal codes (same style, same table).
     { "PREFLIGHT_BLOCKED",       { "validation", RetryClass::None } },
     { "ENTITY_AMBIGUOUS",        { "validation", RetryClass::None } },
+    { "INTENT_AMBIGUOUS",        { "validation", RetryClass::None } },
     { "INVALID_PLAN",            { "validation", RetryClass::None } },
     { "INVALID_PARAMETER",       { "validation", RetryClass::None } },
     { "TRANSIENT_FAILURE",       { "io", RetryClass::Transient } },

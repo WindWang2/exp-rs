@@ -1,0 +1,95 @@
+[
+  {
+    "id": "family:sar",
+    "kind": "family_default",
+    "family": "sar",
+    "modality": ["sar"],
+    "sar": { "polarizations": ["vv", "vh", "hh", "hv"], "calibration": ["sigma0", "gamma0"] },
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "crs_matches", "dimensions", "finite_fraction"]
+    },
+    "limitations": ["Speckle multiplies variance; single-look comparisons need filtering or averaging"]
+  },
+  {
+    "id": "rs:sar_backscatter",
+    "family": "sar",
+    "extends": "family:sar",
+    "intents": ["sar", "sar_water"],
+    "limitations": ["Radiometric terrain effects remain unless terrain flattening runs first"]
+  },
+  {
+    "id": "rs:sar_calibrate",
+    "family": "sar",
+    "extends": "family:sar",
+    "intents": ["sar", "preprocess"],
+    "side_effects": false
+  },
+  {
+    "id": "rs:sar_speckle",
+    "family": "sar",
+    "extends": "family:sar",
+    "intents": ["sar", "preprocess"],
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "limitations": ["Filter strength trades detail preservation against variance reduction"]
+  },
+  {
+    "id": "rs:sar_terrain_correction",
+    "family": "sar",
+    "extends": "family:sar",
+    "intents": ["sar", "preprocess"],
+    "crs": { "requires_projected": true },
+    "resource": { "cost_class": "heavy", "large_raster_safe": true },
+    "limitations": ["Needs a DEM; steep terrain leaves residual layover/shadow"]
+  },
+  {
+    "id": "rs:sar_terrain_flatten",
+    "family": "sar",
+    "extends": "family:sar",
+    "intents": ["sar", "preprocess"],
+    "crs": { "requires_projected": true },
+    "resource": { "cost_class": "heavy", "large_raster_safe": true }
+  },
+  {
+    "id": "rs:sar_terrain_masks",
+    "family": "sar",
+    "extends": "family:sar",
+    "intents": ["sar", "qa"],
+    "verification": { "expected_kind": "raster", "checks": ["existence", "opens", "class_domain"] }
+  },
+  {
+    "id": "rs:sar_ratio",
+    "family": "sar",
+    "extends": "family:sar",
+    "band_roles": { "vv": 1, "vh": 1 },
+    "limitations": ["Dual-pol ratio presumes co-registered same-pass channels"]
+  },
+  {
+    "id": "rs:sar_dualpol_features",
+    "family": "sar",
+    "extends": "family:sar",
+    "band_roles": { "vv": 1, "vh": 1 }
+  },
+  {
+    "id": "rs:sar_texture",
+    "family": "sar",
+    "extends": "family:sar",
+    "intents": ["sar", "classify"],
+    "resource": { "cost_class": "medium", "large_raster_safe": true }
+  },
+  {
+    "id": "rs:sar_change",
+    "family": "sar",
+    "extends": "family:sar",
+    "intents": ["sar_change", "sar_flood"],
+    "temporal": { "min_scenes": 2, "requires_acquisition_time": false },
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "crs_matches", "dimensions", "finite_fraction", "uncertainty"]
+    },
+    "limitations": ["Epochs must share polarization and calibration domain to be comparable"]
+  }
+]

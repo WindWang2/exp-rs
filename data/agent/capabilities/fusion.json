@@ -1,0 +1,48 @@
+[
+  {
+    "id": "family:fusion",
+    "kind": "family_default",
+    "family": "fusion",
+    "modality": ["multimodal", "optical"],
+    "resource": { "cost_class": "heavy", "large_raster_safe": true },
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "crs_matches", "dimensions", "finite_fraction"]
+    },
+    "limitations": ["Fused products inherit registration error from every input"]
+  },
+  {
+    "id": "rs:fusion_ihs",
+    "family": "fusion",
+    "extends": "family:fusion",
+    "band_roles": { "red": 1, "green": 1, "blue": 1 }
+  },
+  {
+    "id": "rs:fusion_brovey",
+    "family": "fusion",
+    "extends": "family:fusion",
+    "band_roles": { "red": 1, "green": 1, "blue": 1 }
+  },
+  {
+    "id": "rs:fusion_gram_schmidt",
+    "family": "fusion",
+    "extends": "family:fusion",
+    "band_roles": { "red": 1, "green": 1, "blue": 1 }
+  },
+  {
+    "id": "rs:fusion_pca",
+    "family": "fusion",
+    "extends": "family:fusion"
+  },
+  {
+    "id": "rs:fusion_linear",
+    "family": "fusion",
+    "extends": "family:fusion"
+  },
+  {
+    "id": "rs:image_fusion",
+    "family": "fusion",
+    "extends": "family:fusion"
+  }
+]
