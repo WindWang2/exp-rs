@@ -515,9 +515,9 @@ bool onnxRuntimeProviderAvailable()
   return true;
 }
 
-void registerOnnxRuntimeProvider()
+void registerOnnxRuntimeProvider( ModelRuntimeRegistry &registry )
 {
-  ModelRuntimeRegistry::instance().registerProvider(
+  registry.registerProvider(
     "onnxruntime", makeOnnxRuntime,
     ProviderTraits{ /*maxAddressableCudaIndex*/ 63 } );
 }
@@ -539,7 +539,7 @@ bool onnxRuntimeProviderAvailable()
   return false;
 }
 
-void registerOnnxRuntimeProvider()
+void registerOnnxRuntimeProvider( ModelRuntimeRegistry & )
 {
   // Graceful degradation: no ONNX Runtime in this build. Models declaring
   // framework "onnxruntime" stay catalog-ready=false at the runtime layer

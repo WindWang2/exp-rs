@@ -3,8 +3,10 @@
 
 #include "operators/framework/artifact_digest.h"
 #include "operators/framework/rs_operator_error.h"
+#include "operators/runtime/http_provider.h"
 #include "operators/runtime/opencv_dnn_runtime.h"
 #include "operators/runtime/onnxruntime_provider.h"
+#include "operators/runtime/python_worker_provider.h"
 
 #include <QDateTime>
 #include <QFileInfo>
@@ -397,7 +399,8 @@ InferenceFailureKind classifyInferenceError( const std::string &message )
   if ( contains( "worker exited" ) || contains( "worker crashed" ) || contains( "provider crashed" )
        || contains( "terminated unexpectedly" ) || contains( "connection refused" )
        || contains( "connection reset" ) || contains( "broken pipe" )
-       || contains( "timed out" ) || contains( "no response from provider" ) )
+       || contains( "timed out" ) || contains( "no response from provider" )
+       || contains( "provider error" ) )
     return InferenceFailureKind::ProviderCrash;
   if ( contains( "not addressable" ) || contains( "device unavailable" )
        || contains( "cuda is unavailable" ) || contains( "cannot honor device" )
@@ -405,7 +408,7 @@ InferenceFailureKind classifyInferenceError( const std::string &message )
     return InferenceFailureKind::DeviceUnavailable;
   if ( contains( "schema" ) || contains( "contract" ) || contains( "manifest" )
        || contains( "not part of" ) || contains( "does not declare" )
-       || contains( "no runtime provider available" ) )
+       || contains( "no runtime provider available" ) || contains( "wire protocol" ) || contains( "matches no graph" ) )
     return InferenceFailureKind::IncompatibleSchema;
   if ( contains( "not loaded" ) )
     return InferenceFailureKind::NotLoaded;
@@ -526,7 +529,14 @@ ModelRuntimeRegistry::ModelRuntimeRegistry()
   // Platform 3.0: the optional ONNX Runtime provider registers itself when
   // compiled in (SICNU_WITH_ONNX_RUNTIME); otherwise this is a no-op stub and
   // models declaring framework "onnxruntime" surface runtime_unavailable.
-  registerOnnxRuntimeProvider();
+  registerOnnxRuntimeProvider( *this );
+  // Platform 7.0: external provider contracts — same registry seam. The HTTP
+  // provider registers when Qt6::Network is compiled in (otherwise a stub);
+  // the Python worker provider needs Qt Core alone and registers always.
+  // All of them take *this because calling instance() from inside the ctor
+  // would re-enter the static initializer.
+  registerHttpProvider( *this );
+  registerPythonWorkerProvider( *this );
 }
 
 ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, std::string *errorMessage )

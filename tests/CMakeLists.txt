@@ -1381,6 +1381,44 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         ${CMAKE_BINARY_DIR}
     )
     sicnu_discover_tests(test_multimodal_inference)
+
+    # Platform 7.0 external provider contracts (same registry seam).
+    add_executable(test_provider_python test_provider_python.cpp)
+    target_link_libraries(test_provider_python PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_provider_python)
+    target_include_directories(test_provider_python PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_provider_python)
+
+    if(TARGET Qt6::Network)
+        add_executable(test_provider_http test_provider_http.cpp)
+        target_link_libraries(test_provider_http PRIVATE
+            Catch2::Catch2WithMain
+            Qt6::Core
+            Qt6::Network
+            qgis_core
+            sicnu_processing
+            sicnu_task_center
+            sicnu_operators
+            ${OpenCV_LIBS}
+        )
+        sicnu_link_jsoncpp(test_provider_http)
+        target_include_directories(test_provider_http PRIVATE
+            ${CMAKE_SOURCE_DIR}/src
+            ${CMAKE_BINARY_DIR}
+        )
+        sicnu_discover_tests(test_provider_http)
+    endif()
 endif()
 
 # Platform 4.0: failure matrix + device/pool/registry contracts

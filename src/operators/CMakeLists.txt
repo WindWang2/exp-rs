@@ -56,6 +56,9 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         runtime/model_runtime.cpp
         runtime/tensor_blob.cpp
         runtime/device_planner.cpp
+        runtime/provider_wire.cpp
+        runtime/python_worker_provider.cpp
+        runtime/http_provider.cpp
         runtime/opencv_dnn_runtime.cpp
         runtime/onnxruntime_provider.cpp
         runtime/tile_inference_engine.cpp
@@ -217,6 +220,18 @@ target_link_libraries(sicnu_operators
         ${JSONCPP_LIBRARIES}
         Sicnu::data
 )
+
+# Platform 7.0: HTTP inference provider (Qt6::Network). When the module is
+# absent the provider compiles as a stub and framework "http" surfaces
+# runtime_unavailable — the documented graceful-degradation contract.
+find_package(Qt6 COMPONENTS Network QUIET)
+if(TARGET Qt6::Network)
+    target_link_libraries(sicnu_operators PUBLIC Qt6::Network)
+    target_compile_definitions(sicnu_operators PRIVATE SICNU_WITH_HTTP_PROVIDER=1)
+    message(STATUS "HTTP model provider enabled (Qt6::Network)")
+else()
+    message(STATUS "HTTP model provider disabled (Qt6::Network not found)")
+endif()
 
 # Compiled-in source root so ModelCatalog finds <repo>/models when tests
 # run from build dirs and SICNU_MODELS_DIR is unset (CI ctest).
