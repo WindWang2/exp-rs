@@ -32,6 +32,8 @@ qt_add_library(sicnu_help STATIC
   availability_facts.h
   help_presenter.cpp
   help_presenter.h
+  help_topic_text.cpp
+  help_topic_text.h
   help_markdown_writer.cpp
   help_markdown_writer.h
   # NOTE: help_content.qrc is intentionally NOT compiled into this static

@@ -140,6 +140,10 @@ protected:
                                   int limit = 0, int cursor = 0,
                                   const SearchToolsFacets &facets = SearchToolsFacets());
     QVariantMap handleGetToolSchema(const QString &toolId);
+    /// Unified Help 6.0: bounded help for a tool (summary, prerequisites,
+    /// key parameters, related diagnostics). Token-budgeted: fields are
+    /// char-capped so agents never ingest full documentation pages.
+    QVariantMap handleGetToolHelp(const QString &toolId);
 
     // MCP Methods — Agent Interaction Layer
     QVariantMap handleListInteractionTools();

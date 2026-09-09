@@ -160,7 +160,9 @@
     "category": "光学遥感", "keywords": ["DOS", "暗目标", "大气校正"],
     "algorithm": {"whatItDoes": "假设影像存在零反射暗目标，以暗像元统计反演程辐射并扣除。", "whenToUse": "无大气参数的快速校正；中低浑浊度大气效果可接受。", "assumptions": ["影像内有真暗目标", "忽略大气漫射多次散射"], "limitations": ["浑浊/高湿大气误差大", "不同景暗目标不同导致跨景不一致"]},
     "parameters": [
-      {"name": "darkObjectPercentile", "meaning": "暗目标像元百分位阈值。", "recommended": "0.1%–1% 常用；值过低易受噪声影响。"}
+      {"name": "band", "unit": "波段序号", "meaning": "要校正的 1-based 波段序号。", "recommended": "确认该波段的定标增益/偏置与元数据一致后再校正。"},
+      {"name": "gain", "unit": "W·m⁻²·sr⁻¹·μm⁻¹ / DN", "meaning": "辐亮度增益；缺省时从产品元数据解析。"},
+      {"name": "bias", "meaning": "辐亮度偏置；缺省时从产品元数据解析。"}
     ],
     "related": ["concept.rs.radiometric_chain", "operator.rs.atmospheric_dos2"]
   },

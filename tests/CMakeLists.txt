@@ -4766,6 +4766,7 @@ target_link_libraries(test_workflow_session_controller PRIVATE
   sicnu_task_center
   sicnu_core
   Sicnu::data
+  Sicnu::help
 )
 target_include_directories(test_workflow_session_controller PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -5617,6 +5618,7 @@ target_link_libraries(test_schema_form_builder_v2 PRIVATE
   sicnu_operators
   sicnu_data
   GDAL::GDAL
+  Sicnu::help
 )
 target_include_directories(test_schema_form_builder_v2 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -5977,6 +5979,7 @@ target_link_libraries(test_workflow_pipeline_ui PRIVATE
   sicnu_workflow_runtime
   sicnu_task_center
   sicnu_data
+  Sicnu::help
 )
 target_include_directories(test_workflow_pipeline_ui PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -6512,8 +6515,12 @@ target_compile_definitions(test_exprs_plugin_loader PRIVATE
   SICNU_TEST_HELLO_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin"
 )
 
-sicnu_add_test(test_exprs_external_process)
-target_link_libraries(test_exprs_external_process PRIVATE sicnu_sdk)
+# POSIX-only test (setenv + /tmp path semantics); the Windows lane has no
+# equivalent coverage today. See test_help_* for the help-system suites.
+if(NOT WIN32)
+  sicnu_add_test(test_exprs_external_process)
+  target_link_libraries(test_exprs_external_process PRIVATE sicnu_sdk)
+endif()
 
 sicnu_add_test(test_exprs_workflow_schema)
 target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
@@ -6598,3 +6605,20 @@ function(sicnu_add_help_test NAME)
 endfunction()
 
 sicnu_add_help_test(test_help_core)
+
+# Coverage & drift contracts against the LIVE operator registry + harness
+# taxonomy: reuses the standard heavy test helper (sicnu_operators +
+# sicnu_agent + processing) because the whole point is real schemas/codes.
+sicnu_add_test(test_help_coverage)
+# embed the help knowledge content (RCC init must live in the executable)
+target_sources(test_help_coverage PRIVATE
+    ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc
+)
+target_include_directories(test_help_coverage PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_help_coverage PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(test_help_coverage PRIVATE Sicnu::help Sicnu::help_adapters)

@@ -113,10 +113,19 @@ TEST_CASE( "workspace effect policy contains resolved execution effects (issue #
     const char *saved = ::getenv( "SICNU_MCP_WORKSPACE" );
     const std::string savedValue = saved ? saved : "";
     auto setWorkspace = []( const char *value ) {
+#ifdef _WIN32
+        // MSVC has no POSIX setenv/unsetenv; _putenv with an empty value
+        // removes the variable (documented CRT behavior).
+        if ( value )
+            ::_putenv_s( "SICNU_MCP_WORKSPACE", value );
+        else
+            ::_putenv( "SICNU_MCP_WORKSPACE=" );
+#else
         if ( value )
             ::setenv( "SICNU_MCP_WORKSPACE", value, 1 );
         else
             ::unsetenv( "SICNU_MCP_WORKSPACE" );
+#endif
     };
     struct Restore
     {

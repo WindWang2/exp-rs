@@ -10,12 +10,11 @@
       "whenToUse": "大区域底图生产；时序/光谱合成前的基础数据准备。",
       "assumptions": ["各景 CRS/分辨率可对齐", "重叠区辐射差异已控制（先做归一化更佳）"],
       "limitations": ["接缝线处理简化时重叠区可见色差"],
-      "keyParameters": ["inputs", "overlapPolicy", "feather"],
+      "keyParameters": ["inputs"],
       "relatedTools": ["rs:temporal_composite"]
     },
     "parameters": [
-      {"name": "inputs", "meaning": "参与镶嵌的栅格列表（次序影响重叠优先级）。"},
-      {"name": "overlapPolicy", "meaning": "重叠区取值策略：first/last/mean/min/max。", "recommended": "时相一致用 mean 平滑接缝；以新数据优先用 last。"}
+      {"name": "inputs", "meaning": "参与镶嵌的栅格列表，输入次序决定重叠区的取值优先级。", "recommended": "把希望优先保留的景放在列表前部；时相一致的影像先做辐射归一化再镶嵌以弱化接缝。"}
     ],
     "related": ["command.rs.mosaic", "concept.rs.memory_policy"]
   },
@@ -30,12 +29,12 @@
       "whenToUse": "高分辨率目视解译、对象分割前的细节增强。",
       "assumptions": ["全色与多光谱已配准（亚像元）", "光谱范围重叠合理"],
       "limitations": ["融合改变光谱保真度，定量分析慎用融合产品"],
-      "keyParameters": ["method", "ratio"],
+      "keyParameters": ["method", "panWeight"],
       "relatedTools": ["rs:fusion_brovey", "rs:fusion_gram_schmidt"]
     },
     "parameters": [
-      {"name": "method", "meaning": "算法：brovey（快速、饱和度自然）、ihs（色彩保持好）、pca、gram_schmidt（光谱保真较高）、linear。", "recommended": "制图展示 brovey/ihs；需要光谱一致性选 gram_schmidt。"},
-      {"name": "ratio", "meaning": "全色/多光谱分辨率比（如 4）。", "warnings": ["比例错误直接导致配准错位。"]}
+      {"name": "method", "meaning": "融合算法分支（Brovey/IHS/PCA/Gram-Schmidt/线性注入等）。", "recommended": "制图展示 brovey/ihs；需要光谱一致性选 gram_schmidt。"},
+      {"name": "panWeight", "unit": "权重", "meaning": "全色细节的注入强度权重（加权类融合算法）。", "recommended": "从 1.0 起步；出现光晕/过锐时降低。", "tradeOff": "权重越高细节越强，光谱失真与振铃风险越大。"}
     ],
     "related": ["command.rs.fusion", "operator.rs.fusion_brovey", "operator.rs.fusion_gram_schmidt"]
   },

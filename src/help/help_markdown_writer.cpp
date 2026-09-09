@@ -16,6 +16,12 @@ QString header( int level, const QString &title )
     return QStringLiteral( "%1 %2\n\n" ).arg( QString( level, u'#' ), title );
 }
 
+/// Headless composition (CLI) has no CommandRegistry titles; fall back to id.
+QString displayTitle( const HelpDescriptor *d )
+{
+    return d->title.isEmpty() ? d->id : d->title;
+}
+
 } // namespace
 
 QString HelpMarkdownWriter::escape( const QString &text )
@@ -34,7 +40,7 @@ QString HelpMarkdownWriter::commandReference( const HelpRegistry &registry )
     stream << QStringLiteral( "> 本页由统一帮助系统 6.0 从命令注册表生成；请勿手工编辑。\n"
                               "> 权威来源：CommandRegistry / data/help/commands.json。\n\n" );
     for ( const HelpDescriptor *d : registry.byKind( HelpKind::Command ) ) {
-        stream << header( 2, QStringLiteral( "%1（%2）" ).arg( d->title, d->id ) );
+        stream << header( 2, QStringLiteral( "%1（%2）" ).arg( displayTitle( d ), d->id ) );
         if ( !d->summary.isEmpty() )
             stream << d->summary << "\n\n";
         if ( d->command.has_value() ) {
@@ -63,7 +69,7 @@ QString HelpMarkdownWriter::operatorReference( const HelpRegistry &registry )
     stream << QStringLiteral( "> 本页由统一帮助系统 6.0 生成；参数类型/范围/默认值以算子 JSON Schema "
                               "为权威来源，此处仅呈现。\n\n" );
     for ( const HelpDescriptor *d : registry.byKind( HelpKind::Operator ) ) {
-        stream << header( 2, QStringLiteral( "%1（%2）" ).arg( d->title, d->id ) );
+        stream << header( 2, QStringLiteral( "%1（%2）" ).arg( displayTitle( d ), d->id ) );
         if ( !d->summary.isEmpty() )
             stream << d->summary << "\n\n";
         if ( d->algorithm.has_value() ) {
@@ -163,7 +169,7 @@ QString HelpMarkdownWriter::index( const HelpRegistry &registry )
         stream << header( 2, category );
         for ( const QString &id : byCategory.value( category ) ) {
             const HelpDescriptor *d = registry.find( id );
-            stream << QStringLiteral( "- `%1` — %2\n" ).arg( id, d ? d->title : QString() );
+            stream << QStringLiteral( "- `%1` — %2\n" ).arg( id, d ? displayTitle( d ) : QString() );
         }
         stream << u'\n';
     }

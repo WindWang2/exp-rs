@@ -703,6 +703,9 @@ target_include_directories(qgis_core PRIVATE
 # SICNU_GEO_RS: Plugin architecture subdirectories
 add_subdirectory(src/plugins)
 add_subdirectory(src/operators)
+# Read-only operator registry adapter for the help layer (CLI/GUI/tests).
+# Must follow src/operators: the adapters link the sicnu_operators target.
+add_subdirectory(src/help/adapters)
 add_subdirectory(src/workflow)
 add_subdirectory(src/jobs)
 add_subdirectory(src/python/isolated)

@@ -3,6 +3,18 @@
 Measured coverage; updated as milestones land. Mechanical tests enforce the ✅ rows
 (test names in TEST_MATRIX.md).
 
+## Measured after content authoring (M-E close)
+
+- Shipped descriptors in embedded content: 264 authored entries
+  (49 commands + 6 workbenches + 1 alias + 12 concepts + 92 diagnostics + 105
+  operator entries) + 105 flagship parameter knowledge entries nested inside
+  operator entries.
+- After composition with the live registry the registry also gains ~700
+  auto-derived parameter descriptors (base tier from operator schemas), so
+  total topic count is roughly 1,050; exact number asserted by
+  `test_help_coverage` (>200 authored, >500 parameter descriptors,
+  >=105 rs:* operators, >=45 commands via source scan).
+
 | Domain | Total | Help descriptor | Deep knowledge | Tested |
 | --- | --- | --- | --- | --- |
 | CommandRegistry commands | 34 | 34 (M-B) | purpose+related for all; prerequisites for context-gated | drift test |

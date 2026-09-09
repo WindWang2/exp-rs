@@ -10,12 +10,13 @@
       "whenToUse": "无样本时的光谱分区、样本预选辅助。",
       "assumptions": ["簇在特征空间近似球形", "特征已归一化更稳"],
       "limitations": ["簇号无语义，需要人工归并到类别", "K 与初始化影响结果"],
-      "keyParameters": ["clusterCount", "iterations", "seed"],
+      "keyParameters": ["k", "maxSamples", "scale"],
       "relatedTools": ["rs:supervised_classification"]
     },
     "parameters": [
-      {"name": "clusterCount", "meaning": "聚类数 K。", "recommended": "目标类别数的 1.5–2 倍起步再归并。"},
-      {"name": "seed", "meaning": "随机种子，固定后结果可复现。", "recommended": "正式生产固定种子并记录。"}
+      {"name": "k", "unit": "簇数", "meaning": "聚类中心数量 K。", "recommended": "目标类别数的 1.5–2 倍起步，聚类后再归并到语义类别。", "tradeOff": "K 越大对光谱细节刻画越细，但噪声簇与归并工作量增加。"},
+      {"name": "maxSamples", "unit": "样本数", "meaning": "参与中心估计的采样像元上限。", "recommended": "大数据量时保持默认采样即可，统计意义足够。"},
+      {"name": "scale", "meaning": "聚类前特征缩放开关，消除波段量纲差异。", "recommended": "波段动态范围差异大时开启。"}
     ],
     "related": ["operator.rs.supervised_classification", "concept.dataset.spatial_leakage"]
   },
@@ -72,16 +73,16 @@
     "category": "分类",
     "keywords": ["分割", "segmentation", "多尺度", "对象"],
     "algorithm": {
-      "whatItDoes": "区域生长式多尺度分割，以光谱同质性 + 形状紧致度/光滑度权重合并像元。",
+      "whatItDoes": "把像元聚合为同质对象（engine 可选 mean-shift 等分割引擎）：mean-shift 在空间-光谱联合域迭代寻找众数形成对象。",
       "whenToUse": "高分辨率影像分类前；避免椒盐现象。",
-      "assumptions": ["分割尺度与目标地物尺度匹配"],
+      "assumptions": ["分割参数与目标地物尺度匹配"],
       "limitations": ["单一尺度难以兼顾大小地物", "过分割/欠分割都损害精度"],
-      "keyParameters": ["scale", "shape", "compactness"]
+      "keyParameters": ["spatialRadius", "rangeRadius", "minRegionSize"]
     },
     "parameters": [
-      {"name": "scale", "meaning": "分割尺度参数（异质性阈值），控制对象大小。", "recommended": "以目标最小制图单元试验 3–5 个尺度取最优。"},
-      {"name": "shape", "unit": "权重", "meaning": "形状相对光谱的权重（0–1）。", "recommended": "光谱为主时 0.1–0.3。"},
-      {"name": "compactness", "unit": "权重", "meaning": "紧致度相对光滑度权重。", "recommended": "自然地物 0.5 附近起步。"}
+      {"name": "spatialRadius", "unit": "像素", "meaning": "mean-shift 空间带宽，控制邻域参与聚类的空间范围。", "recommended": "与目标对象半径相当；高分辨率影像常用 5–15。", "tradeOff": "半径越大对象越大越平滑，小图斑被吞并。"},
+      {"name": "rangeRadius", "meaning": "mean-shift 光谱带宽，控制视为同质的光谱差异容限。", "recommended": "按影像量化位数与目标对比度调整；过小导致过分割。"},
+      {"name": "minRegionSize", "unit": "像素", "meaning": "分割后保留的最小对象像元数，小于该值的对象并入邻域。", "recommended": "设为最小制图单元对应的像元数。"}
     ],
     "related": ["workbench.obia", "operator.rs.obia_features", "operator.rs.obia_hierarchy"]
   },

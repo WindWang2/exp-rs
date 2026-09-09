@@ -103,10 +103,12 @@ TaskPanelHost::TaskPanelHost( QWidget *parent )
            } );
 }
 
-void TaskPanelHost::showTool( const QString &title, const QString &helpSummary, const Json::Value &schema )
+void TaskPanelHost::showTool( const QString &title, const QString &helpSummary,
+                              const Json::Value &schema, const QString &operatorHelpContext )
 {
   m_title->setText( title );
   m_help->setText( helpSummary );
+  m_form->setHelpContext( operatorHelpContext );
   m_form->rebuild( schema );
   m_progress->setVisible( false );
   m_estimate->hide();

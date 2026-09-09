@@ -3,6 +3,9 @@
  ***************************************************************************/
 #include "schema_form_builder.h"
 
+#include "help/help_id.h"
+#include "help/help_presenter.h"
+#include "help/help_registry.h"
 #include "widgets/crs_selector.h"
 
 #include <QCheckBox>
@@ -326,6 +329,48 @@ SchemaFormBuilder::classifyKind( const QString &name, const Json::Value &prop )
   }
 
   return FieldKind::String;
+}
+
+void SchemaFormBuilder::setHelpContext( const QString &operatorId )
+{
+  m_helpOperatorId = operatorId;
+}
+
+void SchemaFormBuilder::applyParameterHelp( Field &field, const QString &label )
+{
+  if ( m_helpOperatorId.isEmpty() )
+    return;
+  const QString helpId = sicnu::help::HelpId::parameterId( m_helpOperatorId, field.name );
+  const sicnu::help::HelpDescriptor *d = sicnu::help::globalHelpRegistry().find( helpId );
+  if ( !d )
+    return;
+
+  field.widget->setProperty( "helpId", helpId );
+
+  QStringList tooltipLines;
+  if ( !label.isEmpty() )
+    tooltipLines << label;
+  if ( d->parameter.has_value() )
+  {
+    const sicnu::help::ParameterKnowledge &knowledge = *d->parameter;
+    if ( !knowledge.meaning.isEmpty() )
+      tooltipLines << knowledge.meaning;
+    if ( !knowledge.unit.isEmpty() )
+      tooltipLines << tr( "单位：%1" ).arg( knowledge.unit );
+    if ( !knowledge.recommended.isEmpty() )
+      tooltipLines << tr( "推荐：%1" ).arg( knowledge.recommended );
+    if ( !knowledge.tradeOff.isEmpty() )
+      tooltipLines << tr( "权衡：%1" ).arg( knowledge.tradeOff );
+    for ( const QString &warning : knowledge.warnings )
+      tooltipLines << QStringLiteral( "⚠ %1" ).arg( warning );
+  }
+  else if ( !d->summary.isEmpty() )
+  {
+    tooltipLines << d->summary;
+  }
+  if ( tooltipLines.size() > 1 )
+    field.widget->setToolTip( tooltipLines.join( QStringLiteral( "\n" ) ) );
+  field.widget->setWhatsThis( sicnu::help::HelpPresenter::whatsThis( *d ) );
 }
 
 QString SchemaFormBuilder::fieldLabel( const QString &name, const Json::Value &prop )
@@ -776,6 +821,13 @@ void SchemaFormBuilder::rebuild( const Json::Value &schema )
     const QString fieldDesc = memberString( e.prop, "description" );
     if ( !fieldDesc.isEmpty() )
       field.widget->setAccessibleDescription( fieldDesc );
+
+    // Unified Help 6.0: with an operator help context set (setHelpContext),
+    // upgrade the tooltip with unit/recommended/trade-off knowledge and give
+    // every field a What's This + helpId property so F1 lands on the
+    // parameter topic.
+    applyParameterHelp( field, label );
+
     if ( field.kind == FieldKind::Boolean && field.check )
     {
       field.check->setText( label );

@@ -13,13 +13,14 @@
       "assumptions": ["DEM 已配准", "垂直基准与水平分辨率匹配（z 因子）"],
       "unitsDomain": "坡度：度或百分比；坡向：0–360°（北为 0 顺时针）",
       "limitations": ["分辨率决定可提取的地形尺度", "边缘像元受窗口截断影响"],
-      "keyParameters": ["products", "slopeUnit", "zFactor"],
+      "keyParameters": ["product", "zFactor", "sunAzimuth", "sunElevation"],
       "relatedTools": ["rs:terrain_flow", "rs:topographic_correction"]
     },
     "parameters": [
-      {"name": "products", "meaning": "输出产品列表（slope/aspect/hillshade 等）。", "recommended": "制图晕渲选 hillshade；水文准备 slope+aspect+flow。"},
-      {"name": "slopeUnit", "meaning": "坡度单位：degree 或 percent。"},
-      {"name": "zFactor", "meaning": "垂直夸张系数，水平垂直单位不一致时必设。", "recommended": "经纬度 DEM 与米高程混用时按纬度换算设置。"}
+      {"name": "product", "meaning": "要生成的地形产品（slope/aspect/hillshade 等）。", "recommended": "制图晕渲选 hillshade；水文准备先出 slope。"},
+      {"name": "zFactor", "meaning": "垂直夸张系数，水平垂直单位不一致时必设。", "recommended": "经纬度 DEM 与米高程混用时按纬度换算设置。"},
+      {"name": "sunAzimuth", "unit": "度", "meaning": "山影计算的光源方位角（0–360，北 0 顺时针）。", "recommended": "西北 315° 为常用制图惯例。"},
+      {"name": "sunElevation", "unit": "度", "meaning": "山影计算的光源高度角（0–90）。", "recommended": "45° 起步，按地形起伏调整阴影对比。"}
     ],
     "related": ["command.rs.terrain", "operator.rs.terrain_flow", "concept.rs.topographic_effects"]
   },

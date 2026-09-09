@@ -22,7 +22,7 @@
 //
 
 #include <json/json.h>
-
+#include "../sicnu_agent_export.h"
 #include <string>
 #include <vector>
 
@@ -44,9 +44,10 @@ namespace sicnu::agent::mapspec {
 //       v3 is a strict superset of v2: every new field is optional.
 inline constexpr int kMapSpecCurrentVersion = 3;
 
-/// Ordered item collection names of a MapSpec document.
-extern const char *const kCollections[];
-extern const int kCollectionCount;
+/// Ordered item collection names of a MapSpec document. Exported: the
+/// library is SHARED and tests consume these constants directly.
+SICNU_AGENT_EXPORT extern const char *const kCollections[];
+SICNU_AGENT_EXPORT extern const int kCollectionCount;
 
 /// True when `name` is a known item collection.
 bool isCollection( const std::string &name );

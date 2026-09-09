@@ -86,7 +86,7 @@
       "assumptions": ["存在空间自相关（遥感数据普遍成立）"],
       "limitations": ["空间分块会减少有效样本量，需要在偏差与方差之间权衡"]
     },
-    "related": ["workbench.classification", "operator.rs.supervised_classification", "diagnostic.dataset.label.unknown_class"],
+    "related": ["workbench.classify", "operator.rs.supervised_classification", "diagnostic.dataset.label.unknown_class"],
     "docs": ["docs/datasets/"]
   },
   {

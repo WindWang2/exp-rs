@@ -132,6 +132,8 @@ target_link_libraries(sicnu_agent PUBLIC
   sicnu_task_center
   sicnu_operators
   sicnu_workflow
+  Sicnu::help
+  Sicnu::help_adapters
   ${JSONCPP_LIBRARIES}
 )
 

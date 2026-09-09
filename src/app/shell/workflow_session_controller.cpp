@@ -193,7 +193,11 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
                     .arg( QString::fromStdString( def->workspaceKind ) );
   }
 
-  m_panel->showTool( title, helpSummary, schema );
+  // Unified Help 6.0: pass the operator id so the form enriches each field
+  // with parameter knowledge (unit / recommended / trade-off) from data/help.
+  const QString operatorHelpContext =
+      step->operatorId.empty() ? QString() : QString::fromStdString( step->operatorId );
+  m_panel->showTool( title, helpSummary, schema, operatorHelpContext );
   m_panel->setRasterLayerChoices( m_layerIds, m_layerNames );
   ensureRunConnected();
 

@@ -32,7 +32,8 @@ class TaskPanelHost : public QWidget
   public:
     explicit TaskPanelHost( QWidget *parent = nullptr );
 
-    void showTool( const QString &title, const QString &helpSummary, const Json::Value &schema );
+    void showTool( const QString &title, const QString &helpSummary, const Json::Value &schema,
+                   const QString &operatorHelpContext = QString() );
     void setRasterLayerChoices( const QStringList &ids, const QStringList &names );
     void setVectorLayerChoices( const QStringList &ids, const QStringList &names );
     void setAssetChoices( const QStringList &ids, const QStringList &names );

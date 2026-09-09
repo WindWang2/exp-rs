@@ -42,6 +42,13 @@ class SchemaFormBuilder : public QWidget
 
     explicit SchemaFormBuilder( QWidget *parent = nullptr );
 
+    /**
+     * Unified Help 6.0: operator id ("rs:sar_speckle") whose parameter help
+     * (unit/recommended/trade-off from data/help) enriches field tooltips.
+     * Purely additive presentation — schema facts stay authoritative.
+     */
+    void setHelpContext( const QString &operatorId );
+
     /** Build controls from RSOperator::schema() root object. */
     void rebuild( const Json::Value &schema );
 
@@ -136,6 +143,7 @@ class SchemaFormBuilder : public QWidget
 
     void clearFields();
     Field buildField( const QString &name, const Json::Value &prop );
+    void applyParameterHelp( Field &field, const QString &label );
     static FieldGroup classifyGroup( const QString &name, const Json::Value &prop );
     static FieldKind classifyKind( const QString &name, const Json::Value &prop );
     static QString fieldLabel( const QString &name, const Json::Value &prop );
@@ -149,6 +157,7 @@ class SchemaFormBuilder : public QWidget
     QVBoxLayout *m_root = nullptr;
     QList<Field> m_fields;
     Json::Value m_schema;
+    QString m_helpOperatorId;
     QStringList m_layerIds;
     QStringList m_layerNames;
     QStringList m_vectorIds;

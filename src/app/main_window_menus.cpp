@@ -2,6 +2,7 @@
 // Extracted from main_window.cpp for maintainability
 #include "main_window.h"
 
+#include "app/help/help_system_controller.h"
 #include "dialogs/dialog_help_catalog.h"
 #include "dialogs/extract_band_dialog.h"
 
@@ -631,6 +632,11 @@ void QgisDesktopWindow::setupMenu()
     // 帮助 Help
     // ------------------------------------------------------------------
     QMenu *helpMenu = makeMenu( appMenuBar()->addMenu( tr( "帮助(&H)" ) ) );
+    tip( helpMenu->addAction( ic( "hel_" ), tr( "帮助中心 (F1)" ),
+                              this, []() {
+                                  sicnu::app::HelpSystemController::instance().openHelpCenter();
+                              } ),
+         tr( "打开帮助中心：搜索帮助主题、算子说明与错误诊断。" ) );
     tip( helpMenu->addAction( ic( "hel_" ), tr( "帮助内容" ),
                               QKeySequence::HelpContents, this, &QgisDesktopWindow::helpContents ),
          tr( "打开帮助文档。" ) );

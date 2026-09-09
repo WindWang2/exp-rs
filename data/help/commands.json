@@ -236,7 +236,7 @@
     "purpose": "创建新的矢量图层用于采集样本点、训练区或标注边界。",
     "related": [
       "command.layer.toggleEditing",
-      "workbench.classification"
+      "workbench.classify"
     ],
     "keywords": [
       "新建矢量",
@@ -381,7 +381,7 @@
     ],
     "suggestedNextAction": "先采集或导入训练样本",
     "related": [
-      "workbench.classification",
+      "workbench.classify",
       "operator.rs.supervised_classification"
     ],
     "keywords": [
