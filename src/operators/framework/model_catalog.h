@@ -5,6 +5,7 @@
 
 #include <json/json.h>
 
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -38,6 +39,61 @@ struct ModelInputContract
   int height = 0;          ///< Fixed input height (0 = dynamic)
   int temporalLength = 0;  ///< Frames per inference for THIS input (0 = single frame)
   std::string temporalCollapse = "channels"; ///< How T frames collapse: "channels" feeds N,(T·C),H,W
+  // --- Platform 7.0 multimodal surface (all optional; empty = documented default)
+  /// Input modality: "optical" (default) | "sar" | "dem" | "mask" | "aux".
+  /// What the tensor semantically carries; lets the execution layer validate
+  /// feeds and agents rank models by data availability. Unknown values are a
+  /// manifest error (typed refusal), never a silent guess.
+  std::string modality;
+  /// Grid alignment requirement (Platform 7.0): "" | "none" (default) | 
+  /// "reference" — the input MUST be co-registered with the primary input
+  /// (same size/CRS/geotransform). The execution layer refuses misaligned
+  /// feeds instead of silently warping; actual reprojection stays a
+  /// geospatial seam (rs_feature_stack / raster_convert), not runtime magic.
+  std::string alignment;
+  /// Missing-timestep policy for temporal inputs (temporalLength > 0):
+  /// "refuse" (default; typed refusal) | "zero" (explicit zero-fill reported
+  /// as a warning in the result payload). Never a silent guess.
+  std::string missingTimestep;
+
+  /// Vocabulary + range validation (empty string = ok).
+  std::string validate() const;
+};
+
+/**
+ * One typed output head (Platform 7.0 manifest `output.heads[]`). Legacy
+ * single-head manifests keep the flat `output` fields; heads[] is additive
+ * and, when declared, must agree with the flat mirror (heads[0]).
+ */
+struct ModelHeadContract
+{
+  std::string name;        ///< Graph output tensor name this head consumes
+  /// Head role vocabulary: "segmentation" | "classification" | "detection" |
+  /// "embedding" | "uncertainty" | "auxiliary". Unknown roles are a manifest
+  /// error; execution maps roles to stitching/decode behavior.
+  std::string role;
+  std::string layout;      ///< "" (default NCHW) | "NCHW" | "NCTHW" (temporal head)
+  std::string dtype;       ///< "" (float32 default) | "float32" | "uint8" | "int64" ...
+  std::vector<std::string> classes; ///< Class schema (segmentation/classification)
+  /// Confidence semantics for score-bearing heads: "probability" (default,
+  /// [0,1]) | "logit" (pre-sigmoid) | "distance" (smaller = closer; e.g.
+  /// embedding match distance). Consumers must not threshold across semantics.
+  std::string confidence;
+
+  /// Vocabulary validation (empty string = ok).
+  std::string validate() const;
+};
+
+/// External-provider connection contract (Platform 7.0, manifest
+/// `runtime.provider`) — consumed by the HTTP / Python-worker providers
+/// registered through the SAME ModelRuntimeRegistry; never a second catalog.
+struct ModelProviderContract
+{
+  std::string url;          ///< HTTP provider endpoint (framework "http")
+  std::string workerScript; ///< Python worker entry script (framework "python")
+  std::string interpreter;  ///< Interpreter override ("" = "python3")
+  int timeoutMs = 30000;    ///< Request/round-trip timeout (0 = provider default)
+  long maxBodyMb = 256;     ///< Response size guard (0 = provider default)
 };
 
 /**
@@ -53,6 +109,15 @@ struct ModelPreprocessContract
   std::string resize;         ///< "none" (default) | "to_input" (resize each tile to input.width/height)
   std::string interpolation;  ///< "bilinear" (default) | "nearest"
   std::string nodataPolicy;   ///< "zero" (default): non-finite input pixels become 0 before the model
+  // --- Platform 7.0 additions (all optional; absent = disabled)
+  /// Clamp range applied AFTER normalize/scale (NaN = unset). Values outside
+  /// are clamped in; never dropped silently. min < max required when both set.
+  double clampMin = std::numeric_limits<double>::quiet_NaN();
+  double clampMax = std::numeric_limits<double>::quiet_NaN();
+  /// Symmetric zero-pad in px applied to each fed tile AFTER clamp (0 = off).
+  /// The engine crops the pad back out of the OUTPUT window, so output
+  /// geometry stays input geometry (no stitching drift).
+  int pad = 0;
 };
 
 /**
@@ -66,6 +131,12 @@ struct ModelTilingContract
   int overlap = 0;     ///< Adjacent-tile overlap in px (engine reads halo = overlap/2 each side)
   int halo = 0;        ///< Explicit halo radius in px (takes precedence over overlap/2)
   int batchSize = 1;   ///< Tiles batched into one forward pass
+  /// Platform 7.0 valid-coverage gate in [0,1]: tiles whose finite-pixel
+  /// fraction (over ALL fed inputs) is below the gate are skipped and written
+  /// as NoData. 0 (default) keeps the historical "skip only all-nodata tiles"
+  /// behavior exactly; larger values never change model semantics — they only
+  /// widen the skip set (the OOM ladder stays untouched).
+  double minValidCoverage = 0.0;
 };
 
 /**
@@ -115,6 +186,13 @@ struct ModelOutputContract
   std::string format;
   bool detectionDeclared = false;    ///< true when `output.detection` is present
   ModelDetectionContract detection;  ///< meaningful only when detectionDeclared
+  // --- Platform 7.0 typed heads (additive; flat fields above stay heads[0])
+  /// Declared `output.heads[]` entries in graph output order. Empty = legacy
+  /// single-head behavior (the flat fields ARE the head). When declared, the
+  /// flat fields must mirror heads[0] and every graph output consumed by the
+  /// task must be claimed by exactly one head (validated at parse).
+  std::vector<ModelHeadContract> heads;
+  bool headsDeclared = false;        ///< true when `output.heads` is present
 };
 
 /**
@@ -141,6 +219,9 @@ struct ModelRuntimeContract
   /// Platform 4.0 device token: "cpu" | "cuda" | "cuda:N" | "auto".
   /// Empty = "auto" (legacy behavior: cuda when gpu && available, else cpu).
   std::string device;
+  /// Platform 7.0 external provider connection (framework "http"/"python");
+  /// ignored by in-process providers. Validated per framework at parse.
+  ModelProviderContract provider;
 };
 
 /**
@@ -159,8 +240,11 @@ struct ModelInfo {
   std::string modelVersion;///< Model version string. Empty = "0".
   std::string license;     ///< SPDX expression or license name. Empty = unspecified.
   std::string source;      ///< Provenance origin (download source / URL).
-  int manifestVersion = 0; ///< Declared `manifest_version` (1..4); 0 = not declared,
+  int manifestVersion = 0; ///< Declared `manifest_version` (1..5); 0 = not declared,
                            ///< the effective version is inferred from manifest shape.
+                           ///< 5 declares the Platform 7.0 surface (multimodal
+                           ///< inputs, typed heads, provider contracts); every
+                           ///< declared version must agree with the manifest shape.
   std::string contentDigest; ///< SHA-256 hex of the resolved artifact BYTES, computed
                              ///< at catalog load (or acquire for ad-hoc models) whether
                              ///< or not a checksum is declared. "" = no artifact. This

@@ -1300,6 +1300,10 @@ sicnu_discover_tests(test_spatial_scientist_benchmark)
 # Model catalog v2 contracts: readiness states, checksums, ranking gates
 sicnu_add_test(test_model_catalog_v2)
 
+# Platform 7.0 manifest surface: multimodal inputs, typed heads, provider
+# contracts, closed-vocabulary unknown-key refusal (QtCore only).
+sicnu_add_test(test_model_manifest7)
+
 # Model runtime registry, ONNX provider, tile inference engine and rs:infer
 # integration (needs OpenCV for the cv::dnn surface).
 if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
