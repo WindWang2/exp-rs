@@ -1490,9 +1490,11 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   int done = 0;
   int skipped = 0;
 
-  // Preprocess one window in place: sentinel→NaN, non-finite→0, normalize,
-  // clamp. Channel-aware exactly like the single-input engine.
-  auto preprocessWindow = [&]( FeedReader &reader, std::vector<float> &buffer, int winW, int winH ) {    const std::size_t bandCount = reader.bands.size();
+  // Preprocess one RAW window in place: sentinel→NaN, non-finite→0,
+  // normalize, clamp. Channel-aware exactly like the single-input engine.
+  auto preprocessWindow = [&]( FeedReader &reader, std::vector<float> &buffer, int winW,
+                               int winH ) {
+    const std::size_t bandCount = reader.bands.size();
     const std::size_t totalFloats = static_cast<std::size_t>( winH ) * winW * bandCount;
     for ( std::size_t i = 0; i < totalFloats; ++i )
     {
@@ -1816,6 +1818,35 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                    "failed to read tile window at (" + std::to_string( t.x ) + ", "
                                      + std::to_string( t.y ) + ") of feed '" + reader.contract->name
                                      + "'" );
+          // Validity from the RAW window BEFORE preprocessing zero-fills it:
+          // a core pixel is valid when any band of any frame of any feed sees
+          // a finite non-sentinel value (NoData is only what nothing sees).
+          {
+            const std::size_t windowStride = static_cast<std::size_t>( winW ) * bandCount;
+            for ( int row = 0; row < t.h; ++row )
+            {
+              const float *winRow = reader.window.data()
+                                      + static_cast<std::size_t>( row + halo ) * windowStride
+                                      + static_cast<std::size_t>( halo ) * bandCount;
+              uchar *maskRow = invalidMask.ptr<uchar>( row );
+              for ( int col = 0; col < t.w; ++col )
+              {
+                if ( !maskRow[col] )
+                  continue;
+                const float *px = winRow + static_cast<std::size_t>( col ) * bandCount;
+                for ( int c = 0; c < bandCount; ++c )
+                {
+                  const float v = px[c];
+                  if ( std::isfinite( v ) && !( reader.hasSentinel[static_cast<std::size_t>( c )]
+                                                && v == reader.sentinel[static_cast<std::size_t>( c )] ) )
+                  {
+                    maskRow[col] = 0;
+                    break;
+                  }
+                }
+              }
+            }
+          }
           preprocessWindow( reader, reader.window, winW, winH );
           const std::size_t frameBase = frame * static_cast<std::size_t>( bandCount );
           for ( int row = 0; row < winH; ++row )
@@ -1845,35 +1876,13 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
         }
         tileMats[f] = std::move( fedMat );
       }
-      // Cross-feed validity: any finite channel in any feed marks the core
-      // pixel valid; everything else restores to NoData after the forward.
-      for ( std::size_t f = 0; f < feeds.size(); ++f )
+      // Aggregate valid count for the coverage gate / all-nodata skip.
+      for ( int row = 0; row < t.h; ++row )
       {
-        const cv::Mat &mat = tileMats[f];
-        const int channels = readers[f].channels;
-        const std::size_t windowStride = static_cast<std::size_t>( mat.cols ) * channels;
-        const float *src = mat.ptr<float>();
-        for ( int row = 0; row < t.h; ++row )
-        {
-          const float *winRow = src + static_cast<std::size_t>( row + halo + pad ) * windowStride
-                                  + static_cast<std::size_t>( halo + pad ) * channels;
-          uchar *maskRow = invalidMask.ptr<uchar>( row );
-          for ( int col = 0; col < t.w; ++col )
-          {
-            if ( !maskRow[col] )
-              continue;
-            const float *px = winRow + static_cast<std::size_t>( col ) * channels;
-            for ( int c = 0; c < channels; ++c )
-            {
-              if ( std::isfinite( px[c] ) )
-              {
-                maskRow[col] = 0;
-                ++validPixels;
-                break;
-              }
-            }
-          }
-        }
+        const uchar *maskRow = invalidMask.ptr<uchar>( row );
+        for ( int col = 0; col < t.w; ++col )
+          if ( !maskRow[col] )
+            ++validPixels;
       }
 
       for ( std::size_t f = 0; f < feeds.size(); ++f )

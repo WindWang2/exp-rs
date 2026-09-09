@@ -1361,6 +1361,26 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         ${CMAKE_BINARY_DIR}
     )
     sicnu_discover_tests(test_device_planner)
+
+    # Platform 7.0 multimodal / temporal tiled inference: multi-file same-grid
+    # assembly, temporal stacks, coverage gate, service routing.
+    add_executable(test_multimodal_inference test_multimodal_inference.cpp)
+    target_link_libraries(test_multimodal_inference PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_multimodal_inference)
+    target_include_directories(test_multimodal_inference PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_multimodal_inference)
 endif()
 
 # Platform 4.0: failure matrix + device/pool/registry contracts
