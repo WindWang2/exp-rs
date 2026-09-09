@@ -10,7 +10,7 @@
     "Name=value"; the HTTP status code may be absent (nStatus == 0) even on
     success, so reachability is derived from the whole answer, not nStatus.
   * The probe range is declared through the HEADERS option ("Range: ...")
-    and the fetch is double-bounded with MAX_SIZE so even a range-ignoring
+    and the fetch is double-bounded with MAX_FILE_SIZE so even a range-ignoring
     origin cannot push more than maxProbeBytes into this process.
   * Timeout strings arrive through CPL error state ("timed out").
  ***************************************************************************/
@@ -102,7 +102,7 @@ RemoteProbeResult probeRemote( const std::string &url, const RemoteProbeOptions 
   optionStrings.push_back( "TIMEOUT=" + std::to_string( options.timeoutSeconds ) );
   optionStrings.push_back( "CONNECTTIMEOUT=" + std::to_string( options.connectTimeoutSeconds ) );
   optionStrings.push_back( "RETRIES=" + std::to_string( options.maxRetries ) );
-  optionStrings.push_back( "MAX_SIZE=" + std::to_string( probeBytes ) );
+  optionStrings.push_back( "MAX_FILE_SIZE=" + std::to_string( probeBytes ) );
   optionStrings.push_back( "HEADERS=Range: bytes=0-" + std::to_string( probeBytes - 1 ) );
   std::vector<const char *> optionKeys;
   optionKeys.reserve( optionStrings.size() + 1 );

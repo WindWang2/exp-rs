@@ -200,6 +200,13 @@ if(WIN32)
   target_link_libraries(test_io_remote_range PRIVATE ws2_32)
 endif()
 
+# 7.0 remote source identity & validators (shared HTTP fixture).
+sicnu_add_io_test(test_io_remote_validator)
+target_sources(test_io_remote_validator PRIVATE support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_remote_validator PRIVATE ws2_32)
+endif()
+
 # io:* operator family suite — rides the operator chain (Qt + sicnu_operators).
 sicnu_add_io_test(test_io_operators)
 target_link_libraries(test_io_operators PRIVATE Qt6::Core sicnu_operators)

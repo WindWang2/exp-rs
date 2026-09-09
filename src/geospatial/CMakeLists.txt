@@ -15,6 +15,8 @@ set(SICNU_GEOSPATIAL_SOURCES
     util/resource_uri.cpp
     probe/probe.cpp
     remote/probe_remote.cpp
+    remote/http_fetch.cpp
+    remote/remote_source_validator.cpp
     formats/format_profiles.cpp
     cog/cog_presets.cpp
     cog/cog_validator.cpp
