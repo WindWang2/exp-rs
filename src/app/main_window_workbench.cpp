@@ -20,7 +20,7 @@
 #include "workbench/selection_context.h"
 #include "workbench/workbench_host.h"
 #include "georeferencer/qgsgeoref_shell_window.h"
-#include "georeferencer/qgsgeoref_image_to_image_window.h"
+#include "georeferencer/qgsgeoreferencermainwindow.h"
 #include "georeferencer/qgsgeoref_image_to_map_window.h"
 #ifdef SICNU_HAS_CLASSIFY
 #include "classification/qgsclassificationmainwindow.h"
