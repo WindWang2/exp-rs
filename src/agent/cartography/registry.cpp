@@ -13,6 +13,8 @@
 
 #include <json/reader.h>
 
+#include <algorithm>
+#include <cctype>
 #include <set>
 #include <sstream>
 #include <vector>
@@ -150,6 +152,47 @@ std::vector<std::string> validateComponent( const Json::Value &descriptor,
       for ( const auto &binding : descriptor["data_bindings"] )
         if ( !binding.isObject() || !binding.isMember( "name" ) || !binding["name"].isString() )
           problems.push_back( id + ": every data_binding needs a string name" );
+  }
+  // --- Platform 6.0 (Milestone C): bounded composite children ---------------
+  if ( descriptor.isMember( "children" ) )
+  {
+    if ( !descriptor["children"].isArray() )
+    {
+      problems.push_back( id + ": children must be an array" );
+    }
+    else
+    {
+      const Json::Value &children = descriptor["children"];
+      if ( static_cast<int>( children.size() ) > kMaxComponentChildren )
+        problems.push_back( id + ": children exceed the " +
+                            std::to_string( kMaxComponentChildren ) + " entry budget" );
+      std::set<std::string> roles;
+      int index = 0;
+      for ( const auto &child : children )
+      {
+        const std::string where = id + ": children[" + std::to_string( index++ ) + "]";
+        if ( !child.isObject() )
+        {
+          problems.push_back( where + " must be an object" );
+          continue;
+        }
+        if ( !child.isMember( "role" ) || !child["role"].isString() ||
+             child["role"].asString().empty() )
+          problems.push_back( where + " needs a non-empty string role" );
+        else if ( !roles.insert( child["role"].asString() ).second )
+          problems.push_back( id + ": duplicate child role '" + child["role"].asString() + "'" );
+        if ( child.isMember( "children" ) )
+          problems.push_back( where + " must not nest children (composites are depth-1)" );
+        if ( child.isMember( "required" ) && !child["required"].isBool() )
+          problems.push_back( where + ".required must be a boolean" );
+        for ( const char *member : { "content", "overrides" } )
+          if ( child.isMember( member ) && !child[member].isObject() )
+            problems.push_back( where + "." + member + " must be an object" );
+        for ( const char *member : { "source_component", "description" } )
+          if ( child.isMember( member ) && !child[member].isString() )
+            problems.push_back( where + "." + member + " must be a string" );
+      }
+    }
   }
   return problems;
 }
@@ -303,6 +346,33 @@ bool applyComponentDefaults( Json::Value &item, QString *error )
     if ( item.isMember( key ) )
       continue; // explicit item fields always win
     item[key] = defaults[key];
+  }
+  // Platform 6.0 (Milestone C): composite components materialize their
+  // bounded `children[]` onto the item. Explicit per-role item children win;
+  // component children fill the roles the item does not already declare —
+  // the item stays the authority over its own content.
+  if ( descriptor.isMember( "children" ) && descriptor["children"].isArray() )
+  {
+    Json::Value merged( Json::arrayValue );
+    std::set<std::string> itemRoles;
+    if ( item.isMember( "children" ) && item["children"].isArray() )
+    {
+      for ( const auto &child : item["children"] )
+      {
+        if ( child.isObject() && child.isMember( "role" ) && child["role"].isString() )
+        {
+          itemRoles.insert( child["role"].asString() );
+          merged.append( child );
+        }
+      }
+    }
+    for ( const auto &child : descriptor["children"] )
+    {
+      if ( child.isObject() && child.isMember( "role" ) && child["role"].isString() &&
+           !itemRoles.count( child["role"].asString() ) )
+        merged.append( child );
+    }
+    item["children"] = merged;
   }
   return true;
 }
@@ -694,6 +764,301 @@ void TemplateRegistry::reload()
 }
 
 // ---------------------------------------------------------------------------
+// Platform 6.0 (Milestone D): semantic template taxonomy
+// ---------------------------------------------------------------------------
+
+namespace {
+
+const char *const kTemplateTasks[] = {
+  "classification", "change", "sar", "vegetation", "agriculture", "water",
+  "disaster", "terrain", "time-series", "accuracy", "publication",
+};
+const char *const kTemplateMediums[] = { "screen", "a4", "a3", "a0", "report", "atlas" };
+const char *const kTemplatePurposes[] = { "exploration", "analysis", "operational",
+                                          "scientific", "presentation" };
+
+bool inVocabulary( const char *const *vocabulary, int count, const std::string &value )
+{
+  for ( int i = 0; i < count; ++i )
+    if ( value == vocabulary[i] )
+      return true;
+  return false;
+}
+
+} // namespace
+
+bool isTemplateTask( const std::string &task )
+{
+  return inVocabulary( kTemplateTasks, 11, task );
+}
+
+bool isTemplateMedium( const std::string &medium )
+{
+  return inVocabulary( kTemplateMediums, 6, medium );
+}
+
+bool isTemplatePurpose( const std::string &purpose )
+{
+  return inVocabulary( kTemplatePurposes, 5, purpose );
+}
+
+std::vector<std::string> validateTemplateFacets( const Json::Value &descriptor )
+{
+  std::vector<std::string> problems;
+  if ( !descriptor.isObject() )
+    return { "template must be an object" };
+  const std::string id = descriptor.isMember( "id" ) && descriptor["id"].isString()
+                           ? descriptor["id"].asString()
+                           : "";
+  if ( descriptor.isMember( "facets" ) )
+  {
+    const Json::Value &facets = descriptor["facets"];
+    if ( !facets.isObject() )
+    {
+      problems.push_back( id + ": facets must be an object" );
+    }
+    else
+    {
+      if ( facets.isMember( "tasks" ) )
+      {
+        if ( !facets["tasks"].isArray() )
+          problems.push_back( id + ": facets.tasks must be an array" );
+        else
+          for ( const auto &task : facets["tasks"] )
+            if ( !task.isString() || !isTemplateTask( task.asString() ) )
+              problems.push_back( id + ": unknown task facet '" +
+                                  ( task.isString() ? task.asString() : "(non-string)" ) + "'" );
+      }
+      if ( facets.isMember( "medium" ) &&
+           ( !facets["medium"].isString() || !isTemplateMedium( facets["medium"].asString() ) ) )
+        problems.push_back( id + ": facets.medium must be one of screen|a4|a3|a0|report|atlas" );
+      if ( facets.isMember( "purpose" ) &&
+           ( !facets["purpose"].isString() || !isTemplatePurpose( facets["purpose"].asString() ) ) )
+        problems.push_back( id + ": facets.purpose must be one of exploration|analysis|"
+                                  "operational|scientific|presentation" );
+    }
+  }
+  // Controlled parameterized variants: page-size/medium alternatives declared
+  // in ONE file instead of near-duplicate copies (Platform 6.0).
+  if ( descriptor.isMember( "variants" ) )
+  {
+    if ( !descriptor["variants"].isArray() )
+    {
+      problems.push_back( id + ": variants must be an array" );
+    }
+    else
+    {
+      std::set<std::string> variantIds;
+      int index = 0;
+      for ( const auto &variant : descriptor["variants"] )
+      {
+        const std::string where = id + ": variants[" + std::to_string( index++ ) + "]";
+        if ( !variant.isObject() )
+        {
+          problems.push_back( where + " must be an object" );
+          continue;
+        }
+        if ( !variant.isMember( "id" ) || !variant["id"].isString() ||
+             variant["id"].asString().empty() )
+          problems.push_back( where + " needs a string id" );
+        else if ( !variantIds.insert( variant["id"].asString() ).second )
+          problems.push_back( id + ": duplicate variant id '" + variant["id"].asString() + "'" );
+        if ( variant.isMember( "page" ) )
+        {
+          const Json::Value &page = variant["page"];
+          if ( !page.isObject() || !page.isMember( "width_mm" ) || !page["width_mm"].isNumeric() ||
+               !page.isMember( "height_mm" ) || !page["height_mm"].isNumeric() ||
+               page["width_mm"].asDouble() <= 0 || page["height_mm"].asDouble() <= 0 )
+            problems.push_back( where + ".page needs positive width_mm/height_mm" );
+        }
+        if ( variant.isMember( "description" ) && !variant["description"].isString() )
+          problems.push_back( where + ".description must be a string" );
+      }
+    }
+  }
+  return problems;
+}
+
+Json::Value compactTemplateSummary( const Json::Value &descriptor )
+{
+  Json::Value out( Json::objectValue );
+  out["id"] = descriptor.get( "id", "" );
+  std::string description = descriptor.isMember( "description" ) && descriptor["description"].isString()
+                              ? descriptor["description"].asString()
+                              : std::string();
+  if ( description.size() > 160 )
+    description = description.substr( 0, 157 ) + "...";
+  out["description"] = description;
+  if ( descriptor.isMember( "page" ) && descriptor["page"].isObject() )
+  {
+    Json::Value page( Json::objectValue );
+    page["width_mm"] = descriptor["page"]["width_mm"];
+    page["height_mm"] = descriptor["page"]["height_mm"];
+    out["page"] = page;
+  }
+  const Json::Value emptyObject = Json::Value( Json::objectValue );
+  const Json::Value &facets = descriptor.isMember( "facets" ) ? descriptor["facets"] : emptyObject;
+  if ( facets.isObject() )
+  {
+    if ( facets.isMember( "tasks" ) )
+      out["tasks"] = facets["tasks"];
+    if ( facets.isMember( "medium" ) )
+      out["medium"] = facets["medium"];
+    if ( facets.isMember( "purpose" ) )
+      out["purpose"] = facets["purpose"];
+  }
+  const Json::Value emptyArray = Json::Value( Json::arrayValue );
+  const Json::Value &slotList = descriptor.isMember( "slots" ) && descriptor["slots"].isArray()
+                                  ? descriptor["slots"]
+                                  : ( descriptor.isMember( "required_slots" ) &&
+                                          descriptor["required_slots"].isArray()
+                                        ? descriptor["required_slots"]
+                                        : emptyArray );
+  if ( slotList.isArray() )
+  {
+    Json::Value roles( Json::arrayValue );
+    for ( const auto &slot : slotList )
+      if ( slot.isObject() && slot.isMember( "role" ) )
+        roles.append( slot["role"] );
+    out["slot_roles"] = roles;
+  }
+  return out;
+}
+
+Json::Value searchTemplates( const Json::Value &templates, const TemplateQuery &query )
+{
+  struct Hit
+  {
+      Json::Value summary;
+      int score = 0;
+      Json::Value reasons;
+  };
+  std::vector<Hit> hits;
+  const std::string lowerKeyword = [&query]() {
+    std::string out = query.keyword;
+    std::transform( out.begin(), out.end(), out.begin(),
+                    []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+    return out;
+  }();
+
+  int total = 0;
+  if ( templates.isArray() )
+  {
+    for ( const auto &tmpl : templates )
+    {
+      if ( !tmpl.isObject() )
+        continue;
+      Json::Value reasons( Json::arrayValue );
+      int score = 0;
+      const Json::Value emptyObject = Json::Value( Json::objectValue );
+      const Json::Value &facets = tmpl.isMember( "facets" ) ? tmpl["facets"] : emptyObject;
+      const bool hasFacets = facets.isObject() && !facets.empty();
+
+      if ( !query.task.empty() )
+      {
+        bool matched = false;
+        if ( facets.isObject() && facets.isMember( "tasks" ) && facets["tasks"].isArray() )
+          for ( const auto &task : facets["tasks"] )
+            if ( task.isString() && task.asString() == query.task )
+              matched = true;
+        if ( !matched )
+          continue;
+        ++score;
+        reasons.append( "task:" + query.task );
+      }
+      if ( !query.medium.empty() )
+      {
+        const std::string medium = facets.isObject() && facets.isMember( "medium" ) &&
+                                             facets["medium"].isString()
+                                       ? facets["medium"].asString()
+                                       : std::string();
+        if ( medium != query.medium )
+          continue;
+        ++score;
+        reasons.append( "medium:" + query.medium );
+      }
+      if ( !query.purpose.empty() )
+      {
+        const std::string purpose = facets.isObject() && facets.isMember( "purpose" ) &&
+                                              facets["purpose"].isString()
+                                      ? facets["purpose"].asString()
+                                      : std::string();
+        if ( purpose != query.purpose )
+          continue;
+        ++score;
+        reasons.append( "purpose:" + query.purpose );
+      }
+      if ( !lowerKeyword.empty() )
+      {
+        const std::string id = tmpl.get( "id", "" ).asString();
+        std::string description = tmpl.isMember( "description" ) && tmpl["description"].isString()
+                                    ? tmpl["description"].asString()
+                                    : std::string();
+        std::transform( description.begin(), description.end(), description.begin(),
+                        []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+        const size_t inId = id.find( query.keyword );
+        const size_t inDescription = description.find( lowerKeyword );
+        if ( inId == std::string::npos && inDescription == std::string::npos )
+          continue;
+        ++score;
+        reasons.append( inId != std::string::npos ? "keyword:id" : "keyword:description" );
+      }
+
+      // Legacy documents without facets never win over facet-complete ones
+      // when both match — taxonomy adoption is rewarded, not forced.
+      if ( !hasFacets )
+        score -= 1;
+
+      Hit hit;
+      hit.summary = compactTemplateSummary( tmpl );
+      hit.score = score;
+      hit.reasons = reasons;
+      hits.push_back( std::move( hit ) );
+      ++total;
+    }
+  }
+
+  // Deterministic order: score descending, then id ascending.
+  std::stable_sort( hits.begin(), hits.end(),
+                    []( const Hit &a, const Hit &b ) {
+                      if ( a.score != b.score )
+                        return a.score > b.score;
+                      return a.summary.get( "id", "" ).asString() <
+                             b.summary.get( "id", "" ).asString();
+                    } );
+
+  const int pageSize = std::max( 1, std::min( 50, query.pageSize ) );
+  const int page = std::max( 0, query.page );
+  const int begin = page * pageSize;
+  Json::Value items( Json::arrayValue );
+  for ( int i = begin; i < static_cast<int>( hits.size() ) && i < begin + pageSize; ++i )
+  {
+    Json::Value entry = hits[i].summary;
+    Json::Value match( Json::objectValue );
+    match["score"] = hits[i].score;
+    match["reasons"] = hits[i].reasons;
+    entry["match"] = match;
+    items.append( entry );
+  }
+  Json::Value out( Json::objectValue );
+  out["items"] = items;
+  out["total"] = total;
+  out["page"] = page;
+  out["page_size"] = pageSize;
+  const int nextPage = ( begin + pageSize < total ) ? page + 1 : -1;
+  if ( nextPage >= 0 )
+    out["next_page"] = nextPage;
+  else
+    out["next_page"] = Json::Value();
+  return out;
+}
+
+Json::Value TemplateRegistry::search( const TemplateQuery &query ) const
+{
+  return searchTemplates( templates(), query );
+}
+
+// ---------------------------------------------------------------------------
 // Catalog index (Design System 4.0): generated machine index behind the
 // gallery docs and the docs-drift test.
 // ---------------------------------------------------------------------------
@@ -768,6 +1133,10 @@ Json::Value buildCatalogIndex()
       entry["style"] = tmpl["style"];
     if ( tmpl.isMember( "suitable_tasks" ) )
       entry["suitable_tasks"] = tmpl["suitable_tasks"];
+    // Platform 6.0: facets ride in the machine index so search consumers can
+    // rank without loading every descriptor.
+    if ( tmpl.isMember( "facets" ) )
+      entry["facets"] = tmpl["facets"];
     const Json::Value &slotList = tmpl.isMember( "slots" ) && tmpl["slots"].isArray()
                                     ? tmpl["slots"]
                                     : tmpl["required_slots"];

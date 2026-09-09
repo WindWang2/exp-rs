@@ -5,6 +5,8 @@
  "title": "Flood mapping (decisionable multi-modal workflow)",
  "intent": "flood",
  "family": "flood",
+ "modality": "multimodal",
+ "sensors": [ "sentinel-1", "sentinel-2", "landsat-8", "landsat-9" ],
  "description": "Decisionable flood mapping: the optical branch (NDWI threshold) and the SAR branch (calibrated backscatter threshold) run independently; the fusion branch opens only when both modalities are bound; the uncertainty branch is parameter-gated. Branch degradation propagates only along declared inputs, so an unbound modality never flips the other branch to its fallback.",
  "capabilities": [
   "water-detection",
