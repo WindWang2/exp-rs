@@ -19,10 +19,12 @@
 #include "../symbology/symbology_tools.h"
 #include "../commands/workspace_commands.h"
 #include "../harness/harness_tools.h"
+#include "../harness/capability_graph.h"
 #include "../harness/grounding_tools.h"
 #include "../harness/plan_tools.h"
 #include "../harness/recipe_tools.h"
 #include "../harness/solution_tools.h"
+#include "../contracts/spatial_contracts.h"
 
 namespace sicnu::agent::spatial_tools {
 
@@ -84,13 +86,119 @@ SpatialToolRegistry &SpatialToolRegistry::instance()
   return registry;
 }
 
+namespace {
+
+/// Harness 7.0 (mission Area I): runtime output meter. Every tool result
+/// passing through the registry is measured against
+/// contracts::kMaxToolOutputBytes; oversized outputs are compacted
+/// schema-aware — the largest array-valued member is trimmed first (the
+/// shape survives, the envelope stays parseable) and the truncation is
+/// declared, never silent. This turns the 3.0 advisory cap into an enforced
+/// one at the single choke point every agent-facing tool passes through.
+class MeteredTool final : public SpatialTool
+{
+  public:
+    explicit MeteredTool( SpatialToolPtr inner ) : mInner( std::move( inner ) ) {}
+
+    std::string name() const override { return mInner->name(); }
+    std::string displayName() const override { return mInner->displayName(); }
+    std::string description() const override { return mInner->description(); }
+    std::vector<std::string> tags() const override { return mInner->tags(); }
+    Json::Value inputSchema() const override { return mInner->inputSchema(); }
+    Json::Value outputSchema() const override { return mInner->outputSchema(); }
+
+    SpatialToolResult execute( const Json::Value &input ) override
+    {
+      SpatialToolResult result = mInner->execute( input );
+      if ( result.success )
+        compactIfOversized( result.output );
+      return result;
+    }
+
+  private:
+    /// Trims `member` (an array) to the largest prefix whose serialized size
+    /// fits the budget. Deterministic: halving from the full length.
+    void trimArray( Json::Value &output, const std::string &member, size_t budget ) const
+    {
+      int count = static_cast<int>( output[member].size() );
+      while ( count > 1 )
+      {
+        Json::Value trimmed( Json::arrayValue );
+        for ( int i = 0; i < count; ++i )
+          trimmed.append( output[member][i] );
+        Json::Value candidate = output;
+        candidate[member] = trimmed;
+        candidate["truncated"] = true;
+        candidate["truncated_field"] = member;
+        if ( sicnu::agent::contracts::serializedSize( candidate ) <= budget )
+        {
+          output[member] = trimmed;
+          output["truncated"] = true;
+          output["truncated_field"] = member;
+          return;
+        }
+        count /= 2;
+      }
+    }
+
+    void compactIfOversized( Json::Value &output ) const
+    {
+      using sicnu::agent::contracts::kMaxToolOutputBytes;
+      using sicnu::agent::contracts::serializedSize;
+      if ( serializedSize( output ) <= kMaxToolOutputBytes )
+        return;
+      const size_t budget = kMaxToolOutputBytes - 512; // room for markers
+
+      // Prefer trimming the largest array-valued member.
+      std::string largest;
+      size_t largestSize = 0;
+      for ( const std::string &key : output.getMemberNames() )
+      {
+        if ( !output[key].isArray() )
+          continue;
+        const size_t size = serializedSize( output[key] );
+        if ( size > largestSize )
+        {
+          largestSize = size;
+          largest = key;
+        }
+      }
+      if ( !largest.empty() )
+      {
+        trimArray( output, largest, budget );
+        if ( serializedSize( output ) <= kMaxToolOutputBytes )
+          return;
+      }
+      // Last resort: an honest compact envelope replaces the payload.
+      Json::Value compact( Json::objectValue );
+      compact["truncated"] = true;
+      compact["truncated_field"] = largest.empty() ? "*" : largest;
+      compact["original_bytes"] = static_cast<Json::UInt64>( serializedSize( output ) );
+      compact["note"] = "output exceeded the 512 KiB tool budget and was elided; "
+                        "re-query with a narrower filter or pagination";
+      output = compact;
+    }
+
+    SpatialToolPtr mInner;
+};
+
+} // namespace
+
 bool SpatialToolRegistry::registerTool( SpatialToolPtr tool )
 {
   if ( !tool || tool->name().empty() )
     return false;
 
   std::lock_guard<std::mutex> lock( mMutex );
-  return mTools.emplace( tool->name(), std::move( tool ) ).second;
+  // Every registration is metered (Harness 7.0 Area I): callers get the
+  // decorator transparently from find(), so the 512 KiB cap holds no matter
+  // which surface executes the tool. The name is captured and the wrapper
+  // built BEFORE the emplace — the emplace arguments' evaluation order is
+  // unspecified, and moving the pointer away before name() reads it was a
+  // null dereference (found as a segfault in the #725 facets test).
+  const std::string name = tool->name();
+  const SpatialToolPtr metered = std::make_shared<MeteredTool>( std::move( tool ) );
+  return mTools.emplace( name, metered ).second;
 }
 
 void SpatialToolRegistry::registerBuiltinTools()
@@ -139,6 +247,9 @@ void SpatialToolRegistry::registerBuiltinTools()
   harness::registerPlanTools();
   // Harness 4.0 scientific recipes (metadata under data/agent/recipes).
   harness::registerRecipeTools();
+  // Harness 7.0 intent->capability graph: deterministic goal classification +
+  // feasibility-ranked candidates (typed ambiguity, no guessing).
+  harness::registerCapabilityGraphTools();
   // Platform 5.0 solution knowledge: solution:search/describe/validate/instantiate.
   harness::registerSolutionTools();
 }
