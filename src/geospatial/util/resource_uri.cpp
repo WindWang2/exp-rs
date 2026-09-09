@@ -226,12 +226,14 @@ std::string redactQuery( const std::string &query )
   return out;
 }
 
-/// Masks "user:password@" to "user:***@" in an authority block.
+/// Masks "user:password@" to "user:***@" or "token@" to "***@" in an authority block.
 std::string redactUserinfo( const std::string &userinfo )
 {
+  if ( userinfo.empty() )
+    return std::string();
   const std::size_t colon = userinfo.find( ':' );
   if ( colon == std::string::npos )
-    return userinfo;
+    return "***";
   return userinfo.substr( 0, colon + 1 ) + "***";
 }
 
@@ -308,6 +310,7 @@ bool isCredentialQueryKey( const std::string &keyName )
     "x-amz-signature", "x-amz-credential", "x-amz-security-token", "x-goog-signature",
     "googleaccessid", "signature", "sig", "token", "access_token", "apikey", "api_key",
     "key", "sas", "sharedaccesssignature", "password", "passwd", "secret",
+    "auth", "bearer", "access_key", "authorization",
   };
   const std::string key = toLower( keyName );
   for ( const char *candidate : kCredentialKeys )
@@ -534,7 +537,47 @@ std::string ResourceUri::display() const
     }
   }
   if ( kind != ResourceKind::RemoteHttp )
+  {
+    // Non-HTTP URIs (e.g. s3://, postgres://, ftp://) may carry userinfo or credentials in raw string
+    const std::size_t schemeSep = raw.find( "://" );
+    if ( schemeSep != std::string::npos )
+    {
+      const std::string sch = raw.substr( 0, schemeSep );
+      std::string rest = raw.substr( schemeSep + 3 );
+      std::string frag;
+      const std::size_t hash = rest.find( '#' );
+      if ( hash != std::string::npos )
+      {
+        frag = rest.substr( hash + 1 );
+        rest = rest.substr( 0, hash );
+      }
+      std::string q;
+      const std::size_t question = rest.find( '?' );
+      if ( question != std::string::npos )
+      {
+        q = rest.substr( question + 1 );
+        rest = rest.substr( 0, question );
+      }
+      std::string uinfo;
+      std::string hostAndPath = rest;
+      const std::size_t at = rest.rfind( '@' );
+      if ( at != std::string::npos )
+      {
+        uinfo = rest.substr( 0, at );
+        hostAndPath = rest.substr( at + 1 );
+      }
+      if ( !uinfo.empty() || !q.empty() )
+      {
+        std::string out = sch + "://" + ( uinfo.empty() ? std::string() : redactUserinfo( uinfo ) + "@" ) + hostAndPath;
+        if ( !q.empty() )
+          out += "?" + redactQuery( q );
+        if ( !frag.empty() )
+          out += "#" + frag;
+        return out;
+      }
+    }
     return canonical();
+  }
 
   std::string out =
     scheme + "://" + ( userinfo.empty() ? std::string() : redactUserinfo( userinfo ) + "@" ) + host;
@@ -691,6 +734,7 @@ ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const
     return refused;
   }
 
+  const bool leadingSlash = !base.empty() && base[0] == '/';
   const std::string drivePrefix =
     !segments.empty() && segments.front().size() == 2 && segments.front()[1] == ':'
       ? segments.front() + "/"
@@ -702,7 +746,9 @@ ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const
     if ( i + 1 < segments.size() )
       resolved += "/";
   }
-  const std::string joinedPath = drivePrefix.empty() ? resolved : drivePrefix + resolved;
+  const std::string joinedPath = drivePrefix.empty()
+    ? ( ( leadingSlash ? "/" : "" ) + resolved )
+    : drivePrefix + resolved;
 
   // Lexical result: classification is by SHAPE, not by existence — a resolved
   // path may be an export target that does not exist yet.

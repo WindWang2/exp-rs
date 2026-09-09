@@ -282,16 +282,6 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
                                        : ( binding.isString() && !binding.asString().empty() );
     paramGateOpen[gateKey] = open;
   }
-  bool anyGateClosed = false;
-  for ( const auto &step : stepTemplates )
-  {
-    const std::string whenSlot = step.get( "when_slot", "" ).asString();
-    if ( !whenSlot.empty() && !slotPaths.isMember( whenSlot ) )
-      anyGateClosed = true;
-    const std::string whenParam = step.get( "when_param", "" ).asString();
-    if ( !whenParam.empty() && !paramGateOpen[whenParam] )
-      anyGateClosed = true;
-  }
 
   Json::Value planSteps( Json::arrayValue );
   for ( const auto &step : stepTemplates )
@@ -312,7 +302,7 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
     Json::Value planStep( Json::objectValue );
     planStep["id"] = step.get( "id", "" ).asString();
     planStep["operator_id"] = step.get( "operator_id", "" ).asString();
-    const bool useSkipped = !ownGateOpen || ( anyGateClosed && hasSkipped );
+    const bool useSkipped = !ownGateOpen;
     const Json::Value &templateParams =
       useSkipped ? step.get( "params_when_skipped", Json::Value( Json::objectValue ) )
                  : step.get( "params", Json::Value( Json::objectValue ) );

@@ -10,6 +10,7 @@
 #include <qgsmaplayertemporalproperties.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
+#include <qgsproject.h>
 #include <layertree/qgslayertreeview.h>
 #include <layertree/qgslayertreemodel.h>
 #include <layertree/qgslayertreeviewdefaultactions.h>
@@ -181,6 +182,22 @@ SelectionContext::SelectionContext( QObject *parent )
     m_debounce->setSingleShot( true );
     m_debounce->setInterval( 150 );
     connect( m_debounce, &QTimer::timeout, this, &SelectionContext::refreshNow );
+
+    if ( QgsProject::instance() )
+    {
+        connect( QgsProject::instance(),
+                 qOverload<const QList<QgsMapLayer *> &>( &QgsProject::layersWillBeRemoved ),
+                 this, [this]( const QList<QgsMapLayer *> &layers ) {
+                     m_cacheValid = false;
+                     for ( QgsMapLayer *layer : layers )
+                     {
+                         if ( m_cached.activeLayer == layer )
+                             m_cached.activeLayer = nullptr;
+                         m_cached.selectedLayers.removeAll( layer );
+                     }
+                     scheduleRefresh();
+                 } );
+    }
 }
 
 void SelectionContext::attachCanvas( QgsMapCanvas *canvas )
@@ -252,6 +269,7 @@ void SelectionContext::refreshNow()
 
 void SelectionContext::scheduleRefresh()
 {
+    m_cacheValid = false;
     if ( !m_debounce->isActive() )
         m_debounce->start();
 }

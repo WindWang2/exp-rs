@@ -130,6 +130,22 @@ TEST_CASE( "remote URLs classify, redact and preserve identity", "[io][uri][remo
   REQUIRE( cred.display().find( "user:***@example.com" ) != std::string::npos );
   REQUIRE( cred.canonical().find( "secret" ) != std::string::npos );
 
+  // Token without colon is also masked (#776)
+  const ResourceUri tokenOnly = ResourceUri::parse( "https://SECRET_TOKEN@example.com/f.tif" );
+  REQUIRE( tokenOnly.display().find( "SECRET_TOKEN" ) == std::string::npos );
+  REQUIRE( tokenOnly.display().find( "***@example.com" ) != std::string::npos );
+
+  // Non-HTTP URIs with credentials mask userinfo (#776)
+  const ResourceUri s3Cred = ResourceUri::parse( "s3://KEY:SECRET_AWS_KEY@bucket/f.tif" );
+  REQUIRE( s3Cred.display().find( "SECRET_AWS_KEY" ) == std::string::npos );
+
+  // Additional credential query parameters are masked (#810)
+  const ResourceUri queryCred = ResourceUri::parse( "https://example.com/f.tif?auth=SECRET_AUTH&bearer=SECRET_BEARER&access_key=SECRET_KEY&safe=1" );
+  REQUIRE( queryCred.display().find( "SECRET_AUTH" ) == std::string::npos );
+  REQUIRE( queryCred.display().find( "SECRET_BEARER" ) == std::string::npos );
+  REQUIRE( queryCred.display().find( "SECRET_KEY" ) == std::string::npos );
+  REQUIRE( queryCred.display().find( "safe=1" ) != std::string::npos );
+
   // Percent-encoded path decodes for display only.
   const ResourceUri encoded = ResourceUri::parse( "https://example.com/%E6%95%B0%E6%8D%AE.tif" );
   REQUIRE( encoded.display().find( "\xE6\x95\xB0\xE6\x8D\xAE" ) != std::string::npos );

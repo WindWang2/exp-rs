@@ -186,6 +186,16 @@ const HistogramWidget::BandData &HistogramWidget::activeBandData() const
     return m_singleBandData;
 }
 
+QThreadPool *HistogramWidget::analysisThreadPool()
+{
+    static QThreadPool *s_pool = []() {
+        auto *p = new QThreadPool();
+        p->setMaxThreadCount( 2 );
+        return p;
+    }();
+    return s_pool;
+}
+
 void HistogramWidget::computeHistograms()
 {
     if ( !m_rasterLayer )
@@ -250,7 +260,7 @@ void HistogramWidget::computeHistograms()
     }
 
     QPointer<HistogramWidget> self = this;
-    QThreadPool::globalInstance()->start( [self, source, reqId, bandsToFetch]() {
+    analysisThreadPool()->start( [self, source, reqId, bandsToFetch]() {
         struct BandResult
         {
             int bandNum;
@@ -264,6 +274,17 @@ void HistogramWidget::computeHistograms()
 
         for ( int bandNum : bandsToFetch )
         {
+            // Cooperative cancellation check (#797):
+            {
+                std::lock_guard<std::mutex> lock( s_reqMutex );
+                auto it = s_activeRequests.find( self.data() );
+                if ( !self || it == s_activeRequests.end() || it->second != reqId )
+                {
+                    GDALClose( ds );
+                    return;
+                }
+            }
+
             BandData data;
             data.valid = false;
             GDALRasterBandH hBand = GDALGetRasterBand( ds, bandNum );

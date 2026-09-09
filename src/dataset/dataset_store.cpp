@@ -428,6 +428,12 @@ sicnu::data::Result<void> DatasetStore::deleteDataset( const DatasetId &datasetI
                                                header.error( m_impl->db ) ) );
         }
     }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "commit transaction failed" ) ) );
+    }
     return Result::success();
 }
 

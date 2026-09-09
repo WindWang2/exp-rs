@@ -32,32 +32,31 @@ bool ndvi(const float *nir, const float *red, float *out, size_t count)
     return MathUtils::normalizedDifference(nir, red, out, count);
 }
 
-bool evi(const float *nir, const float *red, const float *blue, float *out, size_t count)
+bool evi(const float *nir, const float *red, const float *blue, float *out, size_t count, bool isScaled)
 {
-    if (!nir || !red || !blue || !out) {
+    if (!nir || !red || !out) {
         SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "evi: null pointer argument");
         return false;
     }
     if (count == 0) return false;
-    const bool scaled = isScaledReflectance(nir, red, count);
-    if (scaled) {
-        for (size_t i = 0; i < count; i++) {
-            if (!std::isfinite(nir[i]) || !std::isfinite(red[i]) || (blue && !std::isfinite(blue[i]))) {
-                out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
-            }
-            const float denom = nir[i] + 6.0f * red[i] - 7.5f * blue[i] + 10000.0f;
-            out[i] = MathUtils::safeDiv(2.5f * (nir[i] - red[i]), denom);
-        }
-        return true;
-    }
+    const float addConst = isScaled ? 10000.0f : 1.0f;
     for (size_t i = 0; i < count; i++) {
         if (!std::isfinite(nir[i]) || !std::isfinite(red[i]) || (blue && !std::isfinite(blue[i]))) {
-            out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
+            out[i] = std::numeric_limits<float>::quiet_NaN();
+            continue;
         }
-        float denom = nir[i] + 6.0f * red[i] - 7.5f * blue[i] + 1.0f;
+        const float bVal = blue ? blue[i] : 0.0f;
+        const float denom = nir[i] + 6.0f * red[i] - 7.5f * bVal + addConst;
         out[i] = MathUtils::safeDiv(2.5f * (nir[i] - red[i]), denom);
     }
     return true;
+}
+
+bool evi(const float *nir, const float *red, const float *blue, float *out, size_t count)
+{
+    if (!nir || !red || !out) return false;
+    const bool scaled = isScaledReflectance(nir, red, count);
+    return evi(nir, red, blue, out, count, scaled);
 }
 
 // Scale heuristic for #680: the stack output copies pixels verbatim (no
@@ -66,25 +65,34 @@ bool evi(const float *nir, const float *red, const float *blue, float *out, size
 // 0..10000. SAVI with L=0.5 is then negligible (SAVI ~= 1.5*NDVI). Detect
 // the DN scale by the magnitude of the samples (max absolute > 5) and
 // scale L/EWI constant proportionally, matching the index magnitude.
-bool savi(const float *nir, const float *red, float *out, size_t count)
+bool savi(const float *nir, const float *red, float *out, size_t count, bool isScaled)
 {
     if (!nir || !red || !out) {
         SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "savi: null pointer argument");
         return false;
     }
     if (count == 0) return false;
-    const bool scaled = isScaledReflectance(nir, red, count);
     // Only the soil-brightness term scales with the data (L=0.5 on [0,1]
     // reflectance → 0.5*10000 on DN-scaled products): the trailing factor
     // (1+L) is dimensionless and must stay 1.5 in BOTH regimes — scaling it
     // too multiplied DN-scale outputs by ~3334x (#680 review).
-    const float L = scaled ? 5000.0f : 0.5f;
+    const float L = isScaled ? 5000.0f : 0.5f;
     constexpr float kOnePlusL = 1.5f;
     for (size_t i = 0; i < count; i++) {
-        if (!std::isfinite(nir[i]) || !std::isfinite(red[i])) { out[i] = std::numeric_limits<float>::quiet_NaN(); continue; }
+        if (!std::isfinite(nir[i]) || !std::isfinite(red[i])) {
+            out[i] = std::numeric_limits<float>::quiet_NaN();
+            continue;
+        }
         out[i] = MathUtils::safeDiv(nir[i] - red[i], nir[i] + red[i] + L) * kOnePlusL;
     }
     return true;
+}
+
+bool savi(const float *nir, const float *red, float *out, size_t count)
+{
+    if (!nir || !red || !out) return false;
+    const bool scaled = isScaledReflectance(nir, red, count);
+    return savi(nir, red, out, count, scaled);
 }
 
 bool ndwi(const float *green, const float *nir, float *out, size_t count)
@@ -165,10 +173,10 @@ struct ReflectancePair {
     std::vector<float> nirBuf, redBuf;
     const float *nir = nullptr;
     const float *red = nullptr;
-    ReflectancePair(const float *n, const float *r, size_t count)
+    ReflectancePair(const float *n, const float *r, size_t count, bool isScaled)
         : nir(n), red(r)
     {
-        if (isScaledReflectance(n, r, count)) {
+        if (isScaled) {
             nirBuf.resize(count); redBuf.resize(count);
             for (size_t i = 0; i < count; i++) {
                 nirBuf[i] = std::isfinite(n[i]) ? n[i] / 10000.0f : std::numeric_limits<float>::quiet_NaN();
@@ -180,14 +188,14 @@ struct ReflectancePair {
 };
 } // namespace
 
-bool msavi(const float *nir, const float *red, float *out, size_t count)
+bool msavi(const float *nir, const float *red, float *out, size_t count, bool isScaled)
 {
     if (!nir || !red || !out) {
         SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "msavi: null pointer argument");
         return false;
     }
     if (count == 0) return false;
-    ReflectancePair scaled(nir, red, count);
+    ReflectancePair scaled(nir, red, count, isScaled);
     for (size_t i = 0; i < count; i++) {
         const float n = scaled.nir[i];
         const float r = scaled.red[i];
@@ -206,17 +214,21 @@ bool msavi(const float *nir, const float *red, float *out, size_t count)
     return true;
 }
 
-bool evi2(const float *nir, const float *red, float *out, size_t count)
+bool msavi(const float *nir, const float *red, float *out, size_t count)
+{
+    if (!nir || !red || !out) return false;
+    const bool scaled = isScaledReflectance(nir, red, count);
+    return msavi(nir, red, out, count, scaled);
+}
+
+bool evi2(const float *nir, const float *red, float *out, size_t count, bool isScaled)
 {
     if (!nir || !red || !out) {
         SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "evi2: null pointer argument");
         return false;
     }
     if (count == 0) return false;
-    // Same constant-regime rule as EVI: the additive constant scales with the
-    // data regime (1 → 10000), the numerator factor stays dimensionless.
-    const bool scaled = isScaledReflectance(nir, red, count);
-    const float c = scaled ? 10000.0f : 1.0f;
+    const float c = isScaled ? 10000.0f : 1.0f;
     for (size_t i = 0; i < count; i++) {
         if (!std::isfinite(nir[i]) || !std::isfinite(red[i])) {
             out[i] = std::numeric_limits<float>::quiet_NaN(); continue;
@@ -226,16 +238,21 @@ bool evi2(const float *nir, const float *red, float *out, size_t count)
     return true;
 }
 
-bool bai(const float *red, const float *nir, float *out, size_t count)
+bool evi2(const float *nir, const float *red, float *out, size_t count)
+{
+    if (!nir || !red || !out) return false;
+    const bool scaled = isScaledReflectance(nir, red, count);
+    return evi2(nir, red, out, count, scaled);
+}
+
+bool bai(const float *red, const float *nir, float *out, size_t count, bool isScaled)
 {
     if (!red || !nir || !out) {
         SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "bai: null pointer argument");
         return false;
     }
     if (count == 0) return false;
-    // Note the argument order: BAI anchors are (0.1 reflectance at Red,
-    // 0.06 at NIR) per Chuvieco et al. 2002.
-    ReflectancePair scaled(nir, red, count);
+    ReflectancePair scaled(nir, red, count, isScaled);
     for (size_t i = 0; i < count; i++) {
         const float n = scaled.nir[i];
         const float r = scaled.red[i];
@@ -246,6 +263,13 @@ bool bai(const float *red, const float *nir, float *out, size_t count)
         out[i] = MathUtils::safeDiv(1.0f, denom);
     }
     return true;
+}
+
+bool bai(const float *red, const float *nir, float *out, size_t count)
+{
+    if (!red || !nir || !out) return false;
+    const bool scaled = isScaledReflectance(nir, red, count);
+    return bai(red, nir, out, count, scaled);
 }
 
 bool ui(const float *swir2, const float *nir, float *out, size_t count)
@@ -278,3 +302,25 @@ bool bui(const float *swir, const float *nir, const float *red, float *out, size
 }
 
 } // namespace SpectralIndices
+
+namespace sicnu::rs
+{
+bool evi(const float *nir, const float *red, const float *blue, float *out, size_t count, bool isScaled)
+{
+    return SpectralIndices::evi(nir, red, blue, out, count, isScaled);
+}
+bool savi(const float *nir, const float *red, float *out, size_t count, float L)
+{
+    if (!nir || !red || !out || count == 0) return false;
+    const float onePlusL = 1.0f + L;
+    for (size_t i = 0; i < count; i++) {
+        if (!std::isfinite(nir[i]) || !std::isfinite(red[i])) {
+            out[i] = std::numeric_limits<float>::quiet_NaN();
+            continue;
+        }
+        out[i] = MathUtils::safeDiv(nir[i] - red[i], nir[i] + red[i] + L) * onePlusL;
+    }
+    return true;
+}
+} // namespace sicnu::rs
+

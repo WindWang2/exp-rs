@@ -26,6 +26,7 @@ using namespace params;
 namespace {
 
 const std::vector<std::string> s_demUnits = { "meters", "feet", "decimeters" };
+const std::vector<std::string> s_lookDirs = { "right", "left" };
 
 Json::Value makeSarInputContract() {
     Json::Value c(Json::objectValue);
@@ -52,7 +53,8 @@ Json::Value RsSarTerrainFlattenOperator::schema() const {
     props["dem"] = makeRasterParam("dem", "Co-registered DEM covering the exact same grid (radar geometry)");
     props["dem"]["x-rs-contract"] = makeDemInputContract();
     props["incidenceDeg"] = makeNumberParam("incidenceDeg", "Scene incidence angle θ0 in degrees (near-range center)", 30.0);
-    props["headingDeg"] = makeNumberParam("headingDeg", "Platform heading / look azimuth φ in degrees", 0.0);
+    props["headingDeg"] = makeNumberParam("headingDeg", "Platform flight heading in degrees", 0.0);
+    props["lookDirection"] = makeEnumParam("lookDirection", "Antenna look direction relative to flight heading ('right' or 'left')", s_lookDirs, "right");
     props["demUnit"] = makeEnumParam("demUnit", "DEM elevation unit (a declared SICNU_DEM_UNIT metadata on the DEM overrides it)", s_demUnits, "meters");
     props["polarizations"] = makeStringParam("polarizations", "Comma-separated polarizations (e.g. VV,VH) recorded on the output", "");
     props["sensor"] = makeStringParam("sensor", "Sensor/instrument id recorded on the output", "");
@@ -133,6 +135,15 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     const int band = getInt(params, "band", 1);
     const double incidenceDeg = getDouble(params, "incidenceDeg", 30.0);
     const double headingDeg = getDouble(params, "headingDeg", 0.0);
+    const std::string lookDirection = getEnum(params, "lookDirection", s_lookDirs, "right");
+    double lookAzimuthDeg = (lookDirection == "left") ? (headingDeg - 90.0) : (headingDeg + 90.0);
+    if (params.isMember("lookAzimuthDeg") && params["lookAzimuthDeg"].isNumeric())
+        lookAzimuthDeg = params["lookAzimuthDeg"].asDouble();
+    else if (params.isMember("look_azimuth") && params["look_azimuth"].isNumeric())
+        lookAzimuthDeg = params["look_azimuth"].asDouble();
+    lookAzimuthDeg = std::fmod(lookAzimuthDeg, 360.0);
+    if (lookAzimuthDeg < 0.0)
+        lookAzimuthDeg += 360.0;
     std::string demUnit = getEnum(params, "demUnit", s_demUnits, "meters");
     const QString polarizations =
         QString::fromStdString( getString( params, "polarizations", "" ) );
@@ -190,7 +201,7 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
 
     sicnu::sar::TerrainCorrectionOptions options;
     options.incidenceDeg = incidenceDeg;
-    options.headingDeg = headingDeg;
+    options.headingDeg = lookAzimuthDeg;
     options.applyFlattening = true;
     options.applyShadowMask = true;
     options.demUnitScale = demUnitScale;
@@ -226,6 +237,8 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     result["calibration"] = "gamma0";
     result["incidenceDeg"] = incidenceDeg;
     result["headingDeg"] = headingDeg;
+    result["lookAzimuthDeg"] = lookAzimuthDeg;
+    result["lookDirection"] = lookDirection;
     result["demUnit"] = demUnit;
     context.reportProgress(1.0, "SAR terrain flattening complete");
     return result;

@@ -440,7 +440,7 @@ bool applyVectorBlock( QgsVectorLayer *vector, const Json::Value &vectorBlock,
   }
   else if ( renderertype == "rule_based" )
   {
-    QgsRuleBasedRenderer::Rule *root = nullptr;
+    QgsRuleBasedRenderer::Rule *root = new QgsRuleBasedRenderer::Rule( nullptr );
     int rules = 0;
     for ( const auto &rule : vectorBlock.get( "rules", Json::Value() ) )
     {
@@ -456,14 +456,12 @@ bool applyVectorBlock( QgsVectorLayer *vector, const Json::Value &vectorBlock,
       QgsRuleBasedRenderer::Rule *child =
         new QgsRuleBasedRenderer::Rule( symbol, 0, 0, QString::fromStdString( rule["expression"].asString() ),
                                         label );
-      if ( root == nullptr )
-        root = child;
-      else
-        root->appendChild( child );
+      root->appendChild( child );
       ++rules;
     }
-    if ( root == nullptr )
+    if ( rules == 0 )
     {
+      delete root;
       problems << QStringLiteral( "rule_based renderer needs vector.rules with expressions" );
       return false;
     }

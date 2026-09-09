@@ -475,6 +475,8 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
         enabled( QStringLiteral( "buffer_overlap" ) );
     double minBoundX = 0.0;
     double maxBoundX = 0.0;
+    double minBoundY = 0.0;
+    double maxBoundY = 0.0;
     bool boundsSeen = false;
     if ( overlapCheck || distanceCheck || bufferCheck )
     {
@@ -484,6 +486,8 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
                 continue;
             minBoundX = boundsSeen ? qMin( minBoundX, sample.input.minX ) : sample.input.minX;
             maxBoundX = boundsSeen ? qMax( maxBoundX, sample.input.maxX ) : sample.input.maxX;
+            minBoundY = boundsSeen ? qMin( minBoundY, sample.input.minY ) : sample.input.minY;
+            maxBoundY = boundsSeen ? qMax( maxBoundY, sample.input.maxY ) : sample.input.maxY;
             boundsSeen = true;
         }
     }
@@ -511,8 +515,10 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
             const AuditSample &sample = samples.at( i );
             if ( sample.input.validBounds )
             {
-                const qint64 cx = bucketOf( ( sample.input.minX + sample.input.maxX ) / 2.0, cell );
-                const qint64 cy = bucketOf( ( sample.input.minY + sample.input.maxY ) / 2.0, cell );
+                const double centerX = ( sample.input.minX + sample.input.maxX ) / 2.0;
+                const double centerY = ( sample.input.minY + sample.input.maxY ) / 2.0;
+                const qint64 cx = bucketOf( centerX - minBoundX, cell );
+                const qint64 cy = bucketOf( centerY - minBoundY, cell );
                 buckets[cy * xSpan + cx].append( i );
             }
         }
@@ -528,6 +534,8 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
                 for ( qint64 dx = ( dy == 0 ? 0 : -1 ); dx <= 1; ++dx )
                 {
                     if ( dx == 0 && dy == 0 )
+                        continue;
+                    if ( cx + dx < 0 || cy + dy < 0 || cx + dx >= xSpan )
                         continue;
                     const auto neighbor = buckets.constFind( ( cy + dy ) * xSpan + ( cx + dx ) );
                     if ( neighbor != buckets.constEnd() )

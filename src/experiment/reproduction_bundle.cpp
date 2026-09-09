@@ -186,7 +186,10 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
         return report;
 
     // Environment — denylist applied again at the boundary (goal §29).
-    if ( !writeJson( QStringLiteral( "environment.json" ), run.environment().toJson() ) )
+    const RunEnvironment env = RunEnvironment::fromFields(
+        run.environment().fields(),
+        RunEnvironment::filterSecrets( run.environment().envVariables() ) );
+    if ( !writeJson( QStringLiteral( "environment.json" ), env.toJson() ) )
         return report;
 
     // Software.

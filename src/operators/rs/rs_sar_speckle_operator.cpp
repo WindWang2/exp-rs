@@ -188,9 +188,6 @@ Json::Value RsSarSpeckleOperator::run(const Json::Value& params,
                               "band out of range: " + std::to_string(firstBand));
     }
 
-    // Sentinel declared on the analysis band (NaN when undeclared).
-    const float nodata = sicnu::rs::bandNoDataSentinel(src, firstBand);
-
     context.throwIfCancelled();
     context.reportProgress(0.05, "Filtering SAR speckle");
     // band=0 filters every band independently (legacy dialog behavior);
@@ -205,7 +202,9 @@ Json::Value RsSarSpeckleOperator::run(const Json::Value& params,
     // Companion scenes are opened and grid-validated inside the kernel.
     for (int b = 0; b < bandCount; ++b) {
         context.throwIfCancelled();
-        if (!sicnu::sar::speckleRaster(src, firstBand + b, speckleParams, nodata,
+        const int currentBand = firstBand + b;
+        const float nodata = sicnu::rs::bandNoDataSentinel(src, currentBand);
+        if (!sicnu::sar::speckleRaster(src, currentBand, speckleParams, nodata,
                                        companionPaths, dst, 256, b + 1,
                                        polarizations, sensor)) {
             dst.abandon();

@@ -149,6 +149,20 @@ void publishStagedFile( const std::string &stagedPath, const std::string &target
 #else
   if ( ::rename( stagedPath.c_str(), targetPath.c_str() ) != 0 )
   {
+    if ( errno == EXDEV )
+    {
+      std::error_code ec;
+      fs::copy_file( fs::u8path( stagedPath ), fs::u8path( targetPath ), fs::copy_options::overwrite_existing, ec );
+      if ( ec )
+      {
+        Json::Value details;
+        details["path"] = targetPath;
+        details["errno"] = ec.value();
+        throw GeoError( ErrorCode::IoError, "publish: cross-device copy fallback failed for " + targetPath, details );
+      }
+      fs::remove( fs::u8path( stagedPath ), ec );
+      return;
+    }
     Json::Value details;
     details["path"] = targetPath;
     details["errno"] = errno;
@@ -222,6 +236,8 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
   const std::vector<std::string> stagedSidecars = sidecarsFor( stagedMainPath );
   const std::vector<std::string> targetSidecars = sidecarsFor( targetMainPath );
   std::vector<bool> hadTarget( targetSidecars.size(), false );
+  const bool hadMainTarget = fileExists( targetMainPath );
+  const std::string mainBackup = targetMainPath + ".bak";
   std::vector<std::string> published;
   auto cleanup = [ & ]( const std::string &failedName ) {
     for ( const std::string &done : published )
@@ -236,9 +252,15 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
         moveFileQuiet( backup, targetSidecars[i] );
       }
     }
+    if ( hadMainTarget && fileExists( mainBackup ) )
+    {
+      removeFileQuiet( targetMainPath );
+      moveFileQuiet( mainBackup, targetMainPath );
+    }
     // ...then drop any leftover backup copies.
     for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
       removeFileQuiet( targetSidecars[i] + ".bak" );
+    removeFileQuiet( mainBackup );
     Json::Value details;
     details["failed_member"] = failedName;
     throw GeoError( ErrorCode::IoError, "group publish failed at " + failedName + "; target group rolled back", details );
@@ -268,6 +290,12 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     }
     published.push_back( targetSidecars[i] );
   }
+  if ( hadMainTarget )
+  {
+    removeFileQuiet( mainBackup );
+    if ( !moveFileQuiet( targetMainPath, mainBackup ) )
+      cleanup( targetMainPath );
+  }
   try
   {
     publishStagedFile( stagedMainPath, targetMainPath );
@@ -279,6 +307,7 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
   // Success: drop the backup set.
   for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
     removeFileQuiet( targetSidecars[i] + ".bak" );
+  removeFileQuiet( mainBackup );
 }
 
 void writeFileAtomic( const std::string &targetPath, const std::function<void( const std::string &stagedPath )> &writer )
