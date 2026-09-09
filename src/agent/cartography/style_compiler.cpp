@@ -464,7 +464,7 @@ bool applyVectorBlock( QgsVectorLayer *vector, const Json::Value &vectorBlock,
     int rules = 0;
     // Bounded nesting for declared sub-rules (validation caps flat rules at
     // 64; nesting depth gets its own budget so a hostile document cannot
-    // recurse unboundedly).
+    // recurse unboundeded).
     std::function<void( const Json::Value &, QgsRuleBasedRenderer::Rule *, int )> buildRules =
       [&]( const Json::Value &rulesJson, QgsRuleBasedRenderer::Rule *parent, int depth ) {
         if ( depth > 4 )

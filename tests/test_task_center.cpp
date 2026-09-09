@@ -1560,3 +1560,38 @@ TEST_CASE("TaskCenter - pauseTask refuses engine-dispatched work instead of fabr
     waitForTerminalStatus(center, taskId);
     REQUIRE(ran.load());
 }
+
+// ── Workbench 6.0 Milestone C: pre-registered task↔job mapping (#799) ──────
+
+TEST_CASE("TaskCenter - instantly-completing jobs always map to their task (#799)",
+          "[processing][task_center][ux6]")
+{
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.setMaxWorkers(2);
+    auto &center = sicnu::TaskCenter::instance();
+
+    // Pre-registration contract (#799): the task↔job map must exist BEFORE
+    // the engine can run the job, so even an instantly-completing executor is
+    // observed by the listener and drives its task terminal. The old order
+    // (submit → register) could strand the task in Dispatching whenever the
+    // terminal record landed between submit and registration. A burst of
+    // instant jobs maximizes (without deterministically guaranteeing)
+    // exposure of that window; the engine-level submitWithId tests pin the
+    // primitive itself.
+    for (int i = 0; i < 50; ++i)
+    {
+        sicnu::jobs::JobRequest req;
+        req.algorithmId = "callable:ux799_instant";
+        const long id = center.submitJob(
+            req, [](const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &) {
+                return Json::Value(Json::objectValue);
+            });
+        REQUIRE(id > 0);
+        waitForTerminalStatus(center, id, 400, 5);
+        REQUIRE(sicnu::isTerminalStatus(center.getTaskInfo(id).status));
+        REQUIRE(center.getTaskInfo(id).status == sicnu::TaskStatus::Completed);
+    }
+    engine.waitUntilIdleForTests();
+}

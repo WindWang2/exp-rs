@@ -32,6 +32,22 @@ ExternalWindowWorkbench::ExternalWindowWorkbench( const QString &id, const QStri
 {
 }
 
+ExternalWindowWorkbench::ExternalWindowWorkbench( const QString &id, const QString &title,
+                                                  const QString &iconAlias, Opener opener,
+                                                  WindowGetter windowGetter, DirtyFn dirtyFn,
+                                                  std::function<bool()> closeFn,
+                                                  QObject *parent )
+    : QObject( parent )
+    , m_id( id )
+    , m_title( title )
+    , m_iconAlias( iconAlias )
+    , m_opener( std::move( opener ) )
+    , m_windowGetter( std::move( windowGetter ) )
+    , m_dirtyFn( std::move( dirtyFn ) )
+    , m_closeFn( std::move( closeFn ) )
+{
+}
+
 void ExternalWindowWorkbench::activate()
 {
     m_active = true;
@@ -39,12 +55,31 @@ void ExternalWindowWorkbench::activate()
         m_opener();
 }
 
+bool ExternalWindowWorkbench::requestCancel()
+{
+    // #813: forward to the session's TaskCenter-backed cancel hook. A bench
+    // without a hook (or without running work) reports nothing to cancel.
+    if ( !m_cancelFn )
+        return false;
+    if ( m_inFlightFn && !m_inFlightFn() )
+        return false;
+    return m_cancelFn();
+}
+
 bool ExternalWindowWorkbench::requestClose()
 {
     if ( m_closeFn )
-        return m_closeFn();
+    {
+        const bool closed = m_closeFn();
+        if ( closed )
+            m_active = false;
+        return closed;
+    }
     if ( QWidget *window = ( m_windowGetter ? m_windowGetter() : nullptr ) )
-        window->close();
+    {
+        if ( !window->close() )
+            return false;
+    }
     m_active = false;
     return true;
 }

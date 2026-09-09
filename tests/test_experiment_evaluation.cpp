@@ -565,3 +565,83 @@ TEST_CASE( "reproduction bundle exports complete files and validates",
     const auto missing = exporter.validateBundle( dir.filePath( QStringLiteral( "nope" ) ), hooks );
     CHECK( missing.level == ReproductionLevel::Impossible );
 }
+
+TEST_CASE( "reproduction bundle filters secrets in environment.json at export boundary",
+           "[experiment][bundle][issue789]" )
+{
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    ExperimentStore experiments;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    REQUIRE( experiments.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-sec" ) );
+    experiment.setName( QStringLiteral( "Secret test" ) );
+    REQUIRE( experiments.upsertExperiment( experiment ).has_value() );
+
+    QHash<QString, QString> rawEnv;
+    rawEnv.insert( QStringLiteral( "PATH" ), QStringLiteral( "/usr/bin:/bin" ) );
+    rawEnv.insert( QStringLiteral( "SICNU_API_KEY" ), QStringLiteral( "super_secret_123" ) );
+    rawEnv.insert( QStringLiteral( "AWS_SECRET_ACCESS_KEY" ), QStringLiteral( "secret_aws_key" ) );
+
+    ExperimentRun run;
+    run.setRunId( QStringLiteral( "run-sec" ) );
+    run.setExperimentId( experiment.experimentId() );
+    run.setStatus( RunStatus::Completed );
+    run.setEnvironment( RunEnvironment::fromFields( QJsonObject{}, rawEnv ) );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+
+    ReproductionBundleExporter exporter( experiments, datasets );
+    ReproductionBundleOptions options;
+    options.outputDir = dir.filePath( QStringLiteral( "bundle_sec" ) );
+    options.currentSoftwareRevision = QStringLiteral( "rev1" );
+    const auto report = exporter.exportRun( QStringLiteral( "run-sec" ), options );
+    REQUIRE( report.ok );
+
+    const QString envJsonPath = QDir( report.bundlePath ).filePath( QStringLiteral( "environment.json" ) );
+    REQUIRE( QFile::exists( envJsonPath ) );
+
+    QFile envFile( envJsonPath );
+    REQUIRE( envFile.open( QIODevice::ReadOnly ) );
+    const QJsonDocument doc = QJsonDocument::fromJson( envFile.readAll() );
+    REQUIRE( doc.isObject() );
+    const QJsonObject envVars = doc.object().value( QStringLiteral( "env_variables" ) ).toObject();
+
+    CHECK( envVars.contains( QStringLiteral( "PATH" ) ) );
+    CHECK_FALSE( envVars.contains( QStringLiteral( "SICNU_API_KEY" ) ) );
+    CHECK_FALSE( envVars.contains( QStringLiteral( "AWS_SECRET_ACCESS_KEY" ) ) );
+}
+
+TEST_CASE( "ExperimentStore upsertRun validation runs inside transaction",
+           "[experiment][store][issue811]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "exp.db" ) ) ) );
+
+    Experiment exp;
+    exp.setExperimentId( QStringLiteral( "exp-tx" ) );
+    exp.setName( QStringLiteral( "Transaction test" ) );
+    REQUIRE( store.upsertExperiment( exp ).has_value() );
+
+    ExperimentRun run;
+    run.setRunId( QStringLiteral( "run-tx" ) );
+    run.setExperimentId( exp.experimentId() );
+    run.setStatus( RunStatus::Created );
+    REQUIRE( store.upsertRun( run ).has_value() );
+
+    // Illegal status transition (Created -> Completed directly without Running)
+    ExperimentRun illegal = run;
+    illegal.setStatus( RunStatus::Completed );
+    const auto res = store.upsertRun( illegal );
+    CHECK( !res.has_value() );
+
+    // Check that store is clean and valid transition still works
+    run.setStatus( RunStatus::Running );
+    REQUIRE( store.upsertRun( run ).has_value() );
+    const auto loaded = store.runById( QStringLiteral( "run-tx" ) );
+    REQUIRE( loaded.has_value() );
+    CHECK( loaded->status() == RunStatus::Running );
+}

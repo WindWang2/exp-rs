@@ -5,13 +5,23 @@
 
 #include "data/band_role.h"
 #include "operators/framework/rs_json_params.h"
+#include "processing/framework/json_params_converter.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/satellite_products.h"
 #include "processing/algorithms/spectral_indices.h"
 #include "processing/algorithms/math_utils.h"
+
+namespace SpectralIndices {
+bool evi(const float *nir, const float *red, const float *blue, float *out, size_t count, bool isScaled);
+bool savi(const float *nir, const float *red, float *out, size_t count, bool isScaled);
+bool msavi(const float *nir, const float *red, float *out, size_t count, bool isScaled);
+bool evi2(const float *nir, const float *red, float *out, size_t count, bool isScaled);
+bool bai(const float *red, const float *nir, float *out, size_t count, bool isScaled);
+}
 #include "processing/algorithms/temporal/temporal_band_roles.h"
+#include "processing/contracts/scientific_contracts.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "data/raster_grid_compat.h"
 #include "processing/gdal/gdal_grid_compat.h"
@@ -177,25 +187,43 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     const int height = ds.height();
     const int bandCount = ds.bandCount();
 
-    // #680: EVI/SAVI carry additive constants (+1.0, +0.5, ·1.5) that assume
-    // unit reflectance in [0,1]. Reflectance products stacked at import keep
+    // #680/#801: EVI/SAVI/EVI2/MSAVI/BAI carry additive constants anchored
+    // to unit reflectance [0,1]. Reflectance products stacked at import keep
     // their stored DN-scale pixels (back-compat) and are stamped with
-    // SICNU_NUMERIC_SCALE instead; when present and != 1, the participating
-    // bands are divided by it for the index computation. Ratio-based indices
-    // are scale-invariant and read bands verbatim; stored input pixels are
-    // never rescaled, and outputs stay in the index's native [-1, ~1] range.
-    double numericScale = 1.0;
+    // SICNU_NUMERIC_SCALE; a declared stamp resolves the domain outright.
+    // Without a stamp the domain is resolved ONCE PER RASTER from a bounded
+    // decimated statistics probe — NEVER per tile (#801: the old per-block
+    // magnitude heuristic let adjacent tiles pick different index constants
+    // and stripe the output at tile boundaries). Ratio-based indices are
+    // scale-invariant and skip the resolution entirely; stored input pixels
+    // are never rescaled on disk, and outputs stay in the index's native
+    // [-1, ~1] range.
+    const bool indexNeedsScale =
+        (indexName == "EVI" || indexName == "SAVI" || indexName == "MSAVI" ||
+         indexName == "EVI2" || indexName == "BAI");
+    sicnu::processing::contracts::NumericDomainContract numericDomain;
+    double declaredScale = 0.0;
+    bool hasDeclaredScale = false;
     if (void *datasetHandle = ds.dataset()) {
         if (const char *rawScale = GDALGetMetadataItem(
                 static_cast<GDALDatasetH>(datasetHandle),
                 SatelliteProducts::kNumericScaleKey, nullptr)) {
             bool ok = false;
             const double v = QString::fromUtf8(rawScale).toDouble(&ok);
-            if (ok && std::isfinite(v) && v > 0.0)
-                numericScale = v;
+            if (ok && std::isfinite(v) && v > 0.0) {
+                declaredScale = v;
+                hasDeclaredScale = true;
+            }
         }
     }
-    const bool applyNumericScale = std::abs(numericScale - 1.0) > 1e-9;
+    if (!indexNeedsScale) {
+        numericDomain = sicnu::processing::contracts::defaultUnitDomain();
+        numericDomain.resolvedBy = QStringLiteral("not-needed-ratio-index");
+    } else if (hasDeclaredScale) {
+        numericDomain = sicnu::processing::contracts::domainFromDeclaredScale(declaredScale);
+    }
+    // (The no-declared-scale branch runs below, after the participating
+    // bands are resolved — the probe samples exactly those bands.)
 
     // Band resolution is delegated to the shared temporal resolver
     // (explicit > SICNU_BAND_ROLE > SWIR1/SWIR2 cross-fallback > positional
@@ -233,11 +261,119 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         }
     };
 
+    // No declared scale and a scale-sensitive index: resolve the numeric
+    // domain ONCE from a bounded decimated whole-raster probe over the
+    // participating bands (#801 — never per tile).
+    if (indexNeedsScale && !hasDeclaredScale) {
+        double observedMaxAbs = 0.0;
+        int probeBands[3] = { nirBand, redBand, 0 };
+        int probeBandCount = 2;
+        if (indexName == "EVI")
+            probeBands[probeBandCount++] = blueBand;
+        const int probe = 32;
+        bool hasNodataProbe[3] = { false, false, false };
+        double nodataProbe[3] = { 0.0, 0.0, 0.0 };
+        for (int b = 0; b < probeBandCount; ++b) {
+            bool hasNd = false;
+            const double nd = ds.bandNoDataValue(probeBands[b], &hasNd);
+            nodataProbe[b] = nd;
+            hasNodataProbe[b] = hasNd && std::isfinite(nd);
+        }
+        std::vector<float> window(static_cast<size_t>(probe) * probe);
+        for (int ty = 0; ty < 4; ++ty) {
+            const int y0 = height > probe ? (height - probe) * ty / 3 : 0;
+            for (int tx = 0; tx < 4; ++tx) {
+                const int x0 = width > probe ? (width - probe) * tx / 3 : 0;
+                const int w = std::min(probe, width);
+                const int h = std::min(probe, height);
+                for (int b = 0; b < probeBandCount; ++b) {
+                    if (!ds.readBandWindow(probeBands[b], x0, y0, w, h, window.data()))
+                        continue;
+                    for (int i = 0; i < w * h; ++i) {
+                        const float v = window[static_cast<size_t>(i)];
+                        if (!std::isfinite(v))
+                            continue;
+                        // Compare in float — the streaming path excludes
+                        // sentinels as float too; a double compare would let
+                        // sentinels without an exact float representation
+                        // slip into the probe statistics (review FINDING).
+                        if (hasNodataProbe[b] && v == static_cast<float>(nodataProbe[b]))
+                            continue;
+                        observedMaxAbs = std::max(observedMaxAbs,
+                                                  static_cast<double>(std::abs(v)));
+                    }
+                }
+            }
+        }
+        if (observedMaxAbs > 0.0) {
+            numericDomain = sicnu::processing::contracts::domainFromMaxAbsSample(observedMaxAbs);
+        } else {
+            // No finite probe evidence: keep the unit default but say so —
+            // a silent unit assumption on a DN scene corrupts the constants
+            // (adversarial review FINDING).
+            numericDomain = sicnu::processing::contracts::defaultUnitDomain();
+            context.logWarning("Numeric-domain probe found no finite samples; "
+                               "assuming unit reflectance for " + indexName +
+                               ". Declare SICNU_NUMERIC_SCALE if this raster is "
+                               "DN-scaled.");
+        }
+        context.logInfo("Numeric domain resolved by dataset statistics for " + indexName +
+                        ": regime=" +
+                        (numericDomain.isDnScale() ? std::string("dn_scale") : std::string("unit_reflectance")) +
+                        ", observed_max_abs=" + std::to_string(observedMaxAbs) +
+                        " (decimated whole-raster probe, resolved once)");
+    }
+    const bool applyNumericScale = numericDomain.isDnScale();
+    const double numericScale = numericDomain.divisor;
+
     context.logInfo("Computing " + indexName + " from " + inputPath);
-    if (applyNumericScale && (indexName == "EVI" || indexName == "SAVI")) {
-        context.logInfo("Input carries " + std::string(SatelliteProducts::kNumericScaleKey)
-                        + "=" + std::to_string(numericScale)
-                        + "; dividing the participating bands by it for " + indexName);
+    if (applyNumericScale) {
+        context.logInfo(indexName + " numeric domain: divisor="
+                        + std::to_string(numericScale)
+                        + " (resolved by "
+                        + numericDomain.resolvedBy.toStdString() + ")"
+                        + "; dividing the participating bands by it");
+    }
+
+    // Issue #801: Determine scale regime once at the dataset level before entering streamBlocks.
+    // When applyNumericScale is true, makeSource(..., true) divides by numericScale,
+    // bringing the data to unit reflectance [0, 1] (isScaledDataset = false).
+    // When applyNumericScale is false, check if the dataset samples exceed 5.0f (DN scale).
+    bool isScaledDataset = false;
+    if (!applyNumericScale) {
+        float maxVal = 0.0f;
+        const int sampleW = std::min(width, 64);
+        const int sampleH = std::min(height, 64);
+        std::vector<float> sampleBuf(static_cast<size_t>(sampleW) * sampleH);
+        const std::vector<std::pair<int, int>> sampleLocs = {
+            { 0, 0 },
+            { width / 2 - sampleW / 2, height / 2 - sampleH / 2 },
+            { std::max(0, width - sampleW), std::max(0, height - sampleH) },
+            { 0, std::max(0, height - sampleH) },
+            { std::max(0, width - sampleW), 0 }
+        };
+        for (int b : { nirBand, redBand }) {
+            if (b >= 1 && b <= bandCount) {
+                bool hasNodata = false;
+                const double nodataVal = ds.bandNoDataValue(b, &hasNodata);
+                const float nodataF = hasNodata ? static_cast<float>(nodataVal) : std::numeric_limits<float>::quiet_NaN();
+                for (const auto &loc : sampleLocs) {
+                    const int x = std::max(0, std::min(loc.first, width - sampleW));
+                    const int y = std::max(0, std::min(loc.second, height - sampleH));
+                    if (ds.readBandWindow(b, x, y, sampleW, sampleH, sampleBuf.data())) {
+                        for (float v : sampleBuf) {
+                            if (std::isfinite(v) && (!hasNodata || v != nodataF) && v != -9999.0f && v != 65535.0f && v > 0.0f) {
+                                maxVal = std::max(maxVal, v);
+                                if (maxVal > 5.0f) break;
+                            }
+                        }
+                    }
+                    if (maxVal > 5.0f) break;
+                }
+            }
+            if (maxVal > 5.0f) break;
+        }
+        isScaledDataset = (maxVal > 5.0f);
     }
 
     // Streaming execution (#664, ADR 0124 grade bit-exact): the raster is
@@ -357,14 +493,18 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         ok = streamBlocks({makeSource(ds, nirBand, true), makeSource(ds, redBand, true),
                            makeSource(ds, blueBand, true)},
                           [](const float *const *in, float *outBlk, size_t n) {
-                              return SpectralIndices::evi(in[0], in[1], in[2], outBlk, n);
+                              // #801: inputs are normalized to unit reflectance
+                              // by the BandSource (domain resolved once per
+                              // raster) — the Unit kernel never guesses.
+                              return SpectralIndices::eviUnit(in[0], in[1], in[2], outBlk, n);
                           });
     } else if (indexName == "SAVI") {
         validateBand(nirBand, "NIR");
         validateBand(redBand, "Red");
         ok = streamBlocks({makeSource(ds, nirBand, true), makeSource(ds, redBand, true)},
                           [](const float *const *in, float *outBlk, size_t n) {
-                              return SpectralIndices::savi(in[0], in[1], outBlk, n);
+                              // #801: see EVI — unit-domain inputs, no guessing.
+                              return SpectralIndices::saviUnit(in[0], in[1], outBlk, n);
                           });
     } else if (indexName == "NDWI") {
         validateBand(greenBand, "Green");
@@ -559,7 +699,7 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         validateBand(redBand, "Red");
         ok = streamBlocks({makeSource(ds, nirBand, true), makeSource(ds, redBand, true)},
                           [](const float *const *in, float *outBlk, size_t n) {
-                              return SpectralIndices::msavi(in[0], in[1], outBlk, n);
+                              return SpectralIndices::msaviUnit(in[0], in[1], outBlk, n);
                           });
     } else if (indexName == "ARVI") {
         // ARVI = (NIR - (2Red - Blue)) / (NIR + (2Red - Blue))
@@ -577,7 +717,7 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         validateBand(redBand, "Red");
         ok = streamBlocks({makeSource(ds, nirBand, true), makeSource(ds, redBand, true)},
                           [](const float *const *in, float *outBlk, size_t n) {
-                              return SpectralIndices::evi2(in[0], in[1], outBlk, n);
+                              return SpectralIndices::evi2Unit(in[0], in[1], outBlk, n);
                           });
     } else if (indexName == "BAI") {
         // BAI: unit-reflectance anchors → declared-scale normalization (#680).
@@ -585,7 +725,7 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         validateBand(nirBand, "NIR");
         ok = streamBlocks({makeSource(ds, redBand, true), makeSource(ds, nirBand, true)},
                           [](const float *const *in, float *outBlk, size_t n) {
-                              return SpectralIndices::bai(in[0], in[1], outBlk, n);
+                              return SpectralIndices::baiUnit(in[0], in[1], outBlk, n);
                           });
     } else if (indexName == "UI") {
         // UI = (SWIR2 - NIR) / (SWIR2 + NIR)
@@ -628,6 +768,9 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     result["index"] = indexName;
     result["width"] = width;
     result["height"] = height;
+    // Provenance: how the numeric domain was resolved (once, dataset-level).
+    result["numeric_domain"] =
+        sicnu::processing::jsonValueFromQJson( numericDomain.toJson() );
     return result;
 }
 

@@ -27,7 +27,17 @@ bool isTerminalState( JobState state )
   return state == JobState::Succeeded || state == JobState::Failed || state == JobState::Cancelled;
 }
 
+/// #798: true while running on a JobEngine worker thread. Worker-originated
+/// submit() calls raise transient pool capacity so a body that blocks on a
+/// sub-job can never starve the sub-job's pick.
+thread_local bool t_isWorkerThread = false;
+
 } // namespace
+
+bool JobEngine::isWorkerThread()
+{
+  return t_isWorkerThread;
+}
 
 JobEngine &JobEngine::instance()
 {
@@ -202,18 +212,29 @@ JobEngine::JobExecutor JobEngine::findPrefixExecutorLocked( const std::string &a
 
 std::string JobEngine::submit( JobRequest req )
 {
-  return submit( std::move( req ), JobExecutor{}, CancelHook{} );
+  return submitWithId( std::move( req ), std::string() );
 }
 
 std::string JobEngine::submit( JobRequest req, JobExecutor executor, CancelHook onCancel )
+{
+  return submitWithId( std::move( req ), std::string(), std::move( executor ), std::move( onCancel ) );
+}
+
+std::string JobEngine::submitWithId( JobRequest req, const std::string &requestedId,
+                                     JobExecutor executor, CancelHook onCancel )
 {
   std::string id;
   JobRecord copy;
   {
     std::lock_guard<std::mutex> lock( m_mutex );
+    // #799: a caller-chosen id that is already owned by a live record is
+    // refused — the engine creates nothing and the caller rolls back its
+    // pre-registration.
+    if ( !requestedId.empty() && m_jobs.count( requestedId ) > 0 )
+      return std::string();
+    id = !requestedId.empty() ? requestedId : "job-" + std::to_string( m_nextId.fetch_add( 1 ) );
     if ( m_shuttingDown || m_terminated )
     {
-      id = "job-" + std::to_string( m_nextId.fetch_add( 1 ) );
       JobRecord rec;
       rec.id = id;
       rec.request = std::move( req );
@@ -227,8 +248,6 @@ std::string JobEngine::submit( JobRequest req, JobExecutor executor, CancelHook 
     }
     else
     {
-      id = "job-" + std::to_string( m_nextId.fetch_add( 1 ) );
-
       JobRecord rec;
       rec.id = id;
       rec.request = std::move( req );
@@ -244,6 +263,16 @@ std::string JobEngine::submit( JobRequest req, JobExecutor executor, CancelHook 
         m_jobBodies.emplace( id, std::move( body ) );
       }
       m_queue.push_back( id );
+
+      // #798: a worker-originated submit means a job body is about to wait
+      // for this sub-job. Raise transient capacity (bounded) and respawn so a
+      // saturated pool can always still pick the sub-job — otherwise every
+      // worker could block on a queue that no thread can drain.
+      if ( t_isWorkerThread && m_transientAllowance < kMaxTransientWorkers )
+      {
+        m_transientAllowance += 1;
+        m_transientBacked.insert( id );
+      }
       ensureWorkersLocked();
       copy = m_jobs.at( id );
     }
@@ -288,6 +317,11 @@ bool JobEngine::cancel( const std::string &jobId )
         }
         m_jobBodies.erase( jobId );
         m_cancelFlags.erase( jobId );
+        // #798: a cancelled transient-backed job must release its +1 capacity
+        // slot exactly like a finishing one, or the allowance leaks and the
+        // pick ceiling stays permanently raised (review L P2).
+        if ( m_transientBacked.erase( jobId ) > 0 && m_transientAllowance > 0 )
+          m_transientAllowance -= 1;
         copy = rec;
         changed = true;
         break;
@@ -420,8 +454,54 @@ void JobEngine::setListener( Listener listener )
   m_listener = std::move( listener );
 }
 
+bool JobEngine::waitForJob( const std::string &jobId, int timeoutMs )
+{
+  // Deadlock prevention (#798): worker threads must not synchronously wait
+  // on jobs because doing so can exhaust the pool and deadlock sub-jobs.
+  if ( isWorkerThread() )
+  {
+    return false;
+  }
+
+  std::unique_lock<std::mutex> lock( m_mutex );
+  auto it = m_jobs.find( jobId );
+  if ( it == m_jobs.end() )
+    return false;
+
+  auto isFinished = [this, &jobId]() {
+    auto it = m_jobs.find( jobId );
+    return it == m_jobs.end() ||
+           it->second.state == JobState::Succeeded ||
+           it->second.state == JobState::Failed ||
+           it->second.state == JobState::Cancelled;
+  };
+
+  if ( isFinished() )
+    return true;
+
+  if ( timeoutMs < 0 )
+  {
+    m_cv.wait( lock, isFinished );
+  }
+  else
+  {
+    if ( !m_cv.wait_for( lock, std::chrono::milliseconds( timeoutMs ), isFinished ) )
+      return false;
+  }
+
+  auto endIt = m_jobs.find( jobId );
+  return endIt != m_jobs.end() && (
+    endIt->second.state == JobState::Succeeded ||
+    endIt->second.state == JobState::Failed ||
+    endIt->second.state == JobState::Cancelled );
+}
+
 void JobEngine::waitUntilIdleForTests( int timeoutMs )
 {
+  // #798: blocking waits are forbidden on worker threads — a worker waiting
+  // for pool idle can never satisfy itself and starves the pool.
+  if ( isWorkerThread() )
+    return;
   std::unique_lock<std::mutex> lock( m_mutex );
   const auto deadline = std::chrono::steady_clock::now()
                         + std::chrono::milliseconds( timeoutMs );
@@ -465,6 +545,8 @@ void JobEngine::shutdownForTests()
     m_maxWorkers = defaultWorkerCount();
     m_running = 0;
     m_exclusiveRunning = false;
+    m_transientAllowance = 0; // #798
+    m_transientBacked.clear();
     m_listener = nullptr;
     m_shuttingDown = false;
     m_terminated = false; // explicit test-only reset: the engine is reusable
@@ -484,7 +566,10 @@ void JobEngine::ensureWorkersLocked()
   if ( m_shuttingDown || m_terminated )
     return; // terminated engines never respawn workers (#684)
   const uint64_t gen = m_generation;
-  while ( static_cast<int>( m_workers.size() ) < m_maxWorkers )
+  // #798: the pool may temporarily exceed m_maxWorkers by the transient
+  // allowance raised by worker-originated sub-job submits.
+  const int allowed = m_maxWorkers + m_transientAllowance;
+  while ( static_cast<int>( m_workers.size() ) < allowed )
   {
     m_workers.emplace_back( [this, gen] { workerLoop( gen ); } );
   }
@@ -492,6 +577,9 @@ void JobEngine::ensureWorkersLocked()
 
 void JobEngine::workerLoop( uint64_t gen )
 {
+  // #798: mark this thread as a worker so submit() can raise transient
+  // capacity for worker-originated sub-jobs, and blocking waits can refuse.
+  t_isWorkerThread = true;
   while ( true )
   {
     std::string jobId;
@@ -500,7 +588,10 @@ void JobEngine::workerLoop( uint64_t gen )
       for ( ;; )
       {
         if ( m_shuttingDown || gen != m_generation || m_stop.load() )
+        {
+          t_isWorkerThread = false;
           return;
+        }
         auto picked = tryPickJobLocked();
         if ( picked.has_value() )
         {
@@ -509,7 +600,10 @@ void JobEngine::workerLoop( uint64_t gen )
         }
         m_cv.wait( lock );
         if ( m_shuttingDown || gen != m_generation || m_stop.load() )
+        {
+          t_isWorkerThread = false;
           return;
+        }
       }
     }
 
@@ -560,8 +654,8 @@ std::optional<std::string> JobEngine::tryPickJobLocked()
     return std::nullopt;
   }
 
-  if ( m_running >= m_maxWorkers )
-    return std::nullopt;
+  if ( m_running >= m_maxWorkers + m_transientAllowance )
+    return std::nullopt; // #798: saturation includes transient sub-job capacity
 
   // Priority-aware pick (#686): TaskCenter stages in priority order, but its
   // admission count can exceed the worker pool, so several jobs may sit in
@@ -632,6 +726,9 @@ void JobEngine::finishJobLocked( JobRecord &rec, bool wasExclusive )
     m_running -= 1;
   if ( wasExclusive )
     m_exclusiveRunning = false;
+  // #798: a transient-backed sub-job finished — release its +1 capacity slot.
+  if ( m_transientBacked.erase( rec.id ) > 0 && m_transientAllowance > 0 )
+    m_transientAllowance -= 1;
   m_cancelFlags.erase( rec.id );
   m_jobBodies.erase( rec.id );
   m_deltaLogCursor.erase( rec.id );

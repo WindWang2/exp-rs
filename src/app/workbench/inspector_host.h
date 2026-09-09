@@ -83,16 +83,25 @@ class InspectorHost : public QWidget
 
   private slots:
     void onContextChanged( const sicnu::app::SelectionContextSnapshot &snapshot );
+    void onTabChanged( int index );
 
   private:
     void rebuildTabs();
     InspectorSection *currentSection() const;
+    /// Detaches every registered section from @p tabs (reparented to the host,
+    /// hidden) so the tab widget can be destroyed without destroying sections
+    /// the host still tracks (#777).
+    void rescueSectionsFrom( QTabWidget *tabs );
 
     QStackedWidget *m_stack = nullptr;
     QLabel *m_placeholder = nullptr;
     QList<InspectorSection *> m_sections;
     SelectionContextSnapshot m_snapshot;
     bool m_hasSnapshot = false;
+    /// True while rebuildTabs() is manipulating the tab widget — programmatic
+    /// addTab/removeTab can emit currentChanged, and only user switches must
+    /// drive onTabChanged.
+    bool m_rebuilding = false;
 };
 
 } // namespace sicnu::app

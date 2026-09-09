@@ -9,6 +9,7 @@
 #include "operators/rs/rs_temporal_output.h"
 #include "processing/algorithms/math_utils.h"
 #include "processing/algorithms/spectral_indices.h"
+#include "processing/contracts/scientific_contracts.h"
 #include "processing/algorithms/temporal/temporal_stream.h"
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -79,10 +80,12 @@ bool computeIndexTile( const std::string &index, const float *a, const float *b,
 {
   if ( index == "NDVI" )
     return SpectralIndices::ndvi( a, b, out, count );
+  // #801: callers normalize inputs to unit reflectance once per scene, so
+  // the Unit kernels fire — the index constants never depend on tile content.
   if ( index == "EVI" )
-    return SpectralIndices::evi( a, b, c, out, count );
+    return SpectralIndices::eviUnit( a, b, c, out, count );
   if ( index == "SAVI" )
-    return SpectralIndices::savi( a, b, out, count );
+    return SpectralIndices::saviUnit( a, b, out, count );
   if ( index == "NDWI" )
     return SpectralIndices::ndwi( a, b, out, count );
   if ( index == "NDBI" )
@@ -250,6 +253,64 @@ Json::Value RsTemporalIndexSeriesOperator::run( const Json::Value &params, RSOpe
   int tileDone = 0;
   std::uint64_t totalValid = 0;
 
+  // #801: resolve the numeric domain ONCE PER SCENE (declared GDAL scale on
+  // the scene's analysis band when present, else a bounded decimated probe
+  // over a few deterministic tiles). Scale-sensitive index inputs are then
+  // normalized to unit reflectance before the kernels — per-tile regime
+  // guesses (the seam defect in the single-scene operator) cannot happen.
+  std::vector<float> sceneDivisor( sceneCount, 1.0f );
+  const bool indexNeedsScale = index == "EVI" || index == "SAVI";
+  if ( indexNeedsScale )
+  {
+    std::vector<float> probeTile( tilePixels );
+    for ( int s = 0; s < sceneCount; ++s )
+    {
+      // Probe the tiles the reader actually serves: TemporalTileReader
+      // already applies the declared GDAL scale/offset when normalizing
+      // (temporal_stream normalizeAndMask), so the declared-scale value
+      // must NOT be applied again here — the pre-6.0 declared-scale branch
+      // double-normalized every scale-declared collection (adversarial
+      // review FINDING; P0). The probe decides purely from served values.
+      double maxAbs = 0.0;
+      const int probePositions[4] = { 0, tiles / 3, ( 2 * tiles ) / 3, tiles - 1 };
+      const int probePositionsCount = tiles < 4 ? tiles : 4;
+      const int indexBands[3] = { bandA[s], bandB[s], roles.c ? bandC[s] : 0 };
+      const int indexBandCount = roles.c ? 3 : 2;
+      for ( int p = 0; p < probePositionsCount; ++p )
+      {
+        for ( int b = 0; b < indexBandCount; ++b )
+        {
+          if ( !reader.readSceneBandTile( s, indexBands[b], probePositions[p], probeTile.data() ) )
+            continue;
+          const size_t probePixels = tilePixels;
+          for ( size_t i = 0; i < probePixels; ++i )
+          {
+            if ( std::isfinite( probeTile[i] ) )
+              maxAbs = std::max( maxAbs, static_cast<double>( std::abs( probeTile[i] ) ) );
+          }
+        }
+      }
+      if ( maxAbs > 0.0 )
+      {
+        sceneDivisor[s] = maxAbs > sicnu::processing::contracts::kDnScaleThreshold
+                              ? static_cast<float>( sicnu::processing::contracts::kCanonicalDnDivisor )
+                              : 1.0f;
+      }
+      else
+      {
+        // No finite probe evidence (fully masked probes): keep the identity
+        // divisor but say so — a silent unit assumption on a DN scene would
+        // corrupt the constants (adversarial review FINDING).
+        context.logWarning( "Temporal scene " + std::to_string( s ) +
+                            " numeric-domain probe found no finite samples; "
+                            "assuming unit reflectance. Declare the scale if "
+                            "this scene is DN-scaled." );
+      }
+      context.logInfo( "Temporal scene " + std::to_string( s ) + " numeric domain resolved once: divisor=" +
+                       std::to_string( sceneDivisor[s] ) );
+    }
+  }
+
   for ( int t = 0; t < tiles; ++t )
   {
     int x = 0, y = 0, w = 0, h = 0;
@@ -264,6 +325,21 @@ Json::Value RsTemporalIndexSeriesOperator::run( const Json::Value &params, RSOpe
         throw RSOperatorError( ErrorCode::GdalError,
                                "failed reading index inputs for scene " + std::to_string( s ) );
 
+      // #801: normalize DN-scale scenes to unit reflectance (per-scene
+      // divisor resolved once above); NaN stays NaN under the division.
+      if ( sceneDivisor[s] != 1.0f )
+      {
+        for ( size_t i = 0; i < pixels; ++i )
+        {
+          tileA[i] /= sceneDivisor[s];
+          tileB[i] /= sceneDivisor[s];
+        }
+        if ( roles.c )
+        {
+          for ( size_t i = 0; i < pixels; ++i )
+            tileC[i] /= sceneDivisor[s];
+        }
+      }
       // NaN propagation matches the single-scene kernels: any non-finite
       // input yields NaN via safeDiv arithmetic.
       if ( !computeIndexTile( index, tileA.data(), tileB.data(),

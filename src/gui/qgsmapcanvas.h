@@ -988,6 +988,18 @@ class GUI_EXPORT QgsMapCanvas : public QGraphicsView, public QgsExpressionContex
      */
     void stopRendering();
 
+    /**
+     * Stop any active rendering AND block until the render job's background
+     * threads have fully wound down (the canvas-destructor idiom: blocking
+     * cancel + delete). A plain stopRendering() detaches the canvas but the
+     * job's threads keep finishing in the background — destroying a
+     * QgsMapLayer under them crashes the render thread. Callers about to
+     * delete layers the canvas may be drawing (e.g. removing layers from a
+     * layer store) must call this instead.
+     * \see stopRendering()
+     */
+    void stopRenderingAndSettle();
+
     //! called to read map canvas settings from project
     void readProject( const QDomDocument & );
 

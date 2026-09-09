@@ -119,14 +119,17 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
         return true;
     };
 
-    // Run config + identity (canonical parameters verbatim; the config hash
-    // is recomputable from them by any consumer).
+    // Run config + identity (the config hash is recomputable from the
+    // exported parameters by any consumer).
+    // #789: the export boundary re-applies the secret filters — parameters
+    // with credential-shaped keys are masked, never serialized verbatim.
     QJsonObject runConfig;
     runConfig.insert( QStringLiteral( "run_id" ), run.runId() );
     runConfig.insert( QStringLiteral( "experiment_id" ), run.experimentId() );
     runConfig.insert( QStringLiteral( "algorithm_id" ), run.algorithmId() );
     runConfig.insert( QStringLiteral( "algorithm_version" ), run.algorithmVersion() );
-    runConfig.insert( QStringLiteral( "parameters" ), run.parameters() );
+    runConfig.insert( QStringLiteral( "parameters" ),
+                      RunEnvironment::redactSecretKeys( run.parameters() ) );
     // Identity pins the validator (and any consumer) needs at minimum.
     runConfig.insert( QStringLiteral( "dataset_version_id" ), run.datasetVersionId() );
     runConfig.insert( QStringLiteral( "dataset_fingerprint" ), run.datasetFingerprint() );
@@ -185,8 +188,11 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
     if ( !writeJson( QStringLiteral( "dataset_refs.json" ), datasetRefs ) )
         return report;
 
-    // Environment — denylist applied again at the boundary (goal §29).
-    if ( !writeJson( QStringLiteral( "environment.json" ), run.environment().toJson() ) )
+    // Environment — denylist re-applied AT THE EXPORT BOUNDARY (#789): a run
+    // record assembled before the denylist existed, or through a
+    // non-filtering path, must not leak through serialization.
+    if ( !writeJson( QStringLiteral( "environment.json" ),
+                     run.environment().redacted().toJson() ) )
         return report;
 
     // Software.
@@ -206,11 +212,13 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
     if ( !writeJson( QStringLiteral( "model_refs.json" ), modelRefs ) )
         return report;
 
-    // Metrics + protocol.
+    // Metrics + protocol (#789 review: metrics serialize through the same
+    // secret-key pass as parameters — a credential-shaped metric key must
+    // not leak either).
     QJsonObject metrics;
     const auto metricRecord = m_experimentStore.metricRecordForRun( run.runId() );
     if ( metricRecord )
-        metrics = metricRecord->toJson();
+        metrics = RunEnvironment::redactSecretKeys( metricRecord->toJson() );
     if ( !writeJson( QStringLiteral( "metrics.json" ), metrics ) )
         return report;
 

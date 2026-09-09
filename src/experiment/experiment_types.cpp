@@ -219,6 +219,46 @@ QHash<QString, QString> RunEnvironment::filterSecrets( const QHash<QString, QStr
     return filtered;
 }
 
+RunEnvironment RunEnvironment::redacted() const
+{
+    RunEnvironment copy( *this );
+    copy.m_envVariables = filterSecrets( copy.m_envVariables );
+    return copy;
+}
+
+QJsonObject RunEnvironment::redactSecretKeys( const QJsonObject &json )
+{
+    // Deep key-based pass (#789): export bundles serialize canonical
+    // parameters verbatim, and a parameter named like a credential is a
+    // credential. Values are kept for non-secret keys — parameters are
+    // config, and value-shape guessing would corrupt legitimate numbers.
+    QJsonObject out;
+    for ( auto it = json.constBegin(); it != json.constEnd(); ++it )
+    {
+        const QJsonValue &value = it.value();
+        if ( value.isObject() )
+        {
+            out.insert( it.key(), redactSecretKeys( value.toObject() ) );
+            continue;
+        }
+        if ( value.isArray() )
+        {
+            QJsonArray redactedArray;
+            for ( const QJsonValue &item : value.toArray() )
+            {
+                if ( item.isObject() )
+                    redactedArray.append( redactSecretKeys( item.toObject() ) );
+                else
+                    redactedArray.append( item );
+            }
+            out.insert( it.key(), redactedArray );
+            continue;
+        }
+        out.insert( it.key(), nameLooksSecret( it.key() ) ? QStringLiteral( "***" ) : value );
+    }
+    return out;
+}
+
 RunEnvironment RunEnvironment::captureCurrent()
 {
     RunEnvironment environment;

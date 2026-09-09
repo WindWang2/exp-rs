@@ -1462,6 +1462,44 @@ void QgsMapCanvas::stopRendering()
   stopPreviewJobs();
 }
 
+void QgsMapCanvas::stopRenderingAndSettle()
+{
+  // Not safe to call from canvas render callbacks (renderComplete /
+  // mapCanvasRefreshed handlers): this deletes mJob, which may still be on
+  // the caller's stack there.
+  mRefreshTimer->stop();
+  mRefreshScheduled = false;
+  mRefreshAfterJob = false;
+  if ( mJob )
+  {
+    QgsDebugMsgLevel( u"CANVAS stop rendering and settle!"_s, 2 );
+    mJobCanceled = true;
+    disconnect( mJob, &QgsMapRendererJob::finished, this, &QgsMapCanvas::rendererJobFinished );
+    // Blocking cancel (the ~QgsMapCanvas idiom): returns only after the
+    // parallel/sequential job's worker threads have finished, so layers can
+    // be safely destroyed by the caller afterwards.
+    whileBlocking( mJob )->cancel();
+    delete mJob;
+    mJob = nullptr;
+    emit mapRefreshCanceled();
+  }
+  // Preview jobs also render layers on background painter threads — a plain
+  // stopPreviewJobs() only detaches them (cancelWithoutBlocking + deleteLater),
+  // leaving a window where a destroyed layer is still being read. Settle them
+  // with the same blocking idiom (review L P1).
+  mPreviewTimer.stop();
+  for ( auto previewJob = mPreviewJobs.constBegin(); previewJob != mPreviewJobs.constEnd(); ++previewJob )
+  {
+    if ( *previewJob )
+    {
+      disconnect( *previewJob, &QgsMapRendererJob::finished, this, &QgsMapCanvas::previewJobFinished );
+      whileBlocking( *previewJob )->cancel();
+      delete *previewJob;
+    }
+  }
+  mPreviewJobs.clear();
+}
+
 //the format defaults to "PNG" if not specified
 void QgsMapCanvas::saveAsImage( const QString &fileName, QPixmap *theQPixmap, const QString &format )
 {

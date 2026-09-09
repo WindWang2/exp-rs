@@ -411,7 +411,6 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
                                        : ( binding.isString() && !binding.asString().empty() );
     paramGateOpen[gateKey] = open;
   }
-
   const int stepCount = static_cast<int>( stepTemplates.size() );
   struct StepGateState
   {

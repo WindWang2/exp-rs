@@ -94,11 +94,19 @@ class WorkflowRunCoordinator : public QObject {
     /// Emitted on tracked-run lifecycle transitions — Running when a tracked
     /// pipeline starts, the real terminal state (Completed/Failed/Canceled)
     /// at finalize, and Interrupted when crash recovery reconciles the run.
+    /// Mirrored after every persisted transition so terminal/Interrupted
+    /// entries carry truthful started/finished ms (issue #754).
     /// Governance (WorkspaceService::recordRun) subscribes so the runs index
     /// reflects what actually happened instead of fabricating states.
     /// Delivery is a Qt signal (lifetime-managed, queueable) because the
     /// coordinator may emit with its internal mutex held: receivers must not
     /// call back into the coordinator synchronously.
+    /// Mirrored after every persisted run-state transition (issue #754):
+    /// terminal/Interrupted transitions carry truthful started/finished ms.
+    /// One emission per tracked-run state transition.
+    //  (Fresh-build repair: churn on master had declared this signal three
+    //  times across three signals: sections — moc emitted one body per
+    //  declaration and the translation unit failed with C2084.)
   signals:
     void runStateChanged( const QString &runId, const QString &workflowId,
                           const QString &state, qint64 startedMs, qint64 finishedMs );
@@ -112,13 +120,12 @@ class WorkflowRunCoordinator : public QObject {
     WorkflowRunCoordinator( const WorkflowRunCoordinator & ) = delete;
     WorkflowRunCoordinator &operator=( const WorkflowRunCoordinator & ) = delete;
 
-    /// Emits runStateChanged for @p run's current state (start time taken
-    /// from the run's creation stamp when @a startedMs is 0). Requires
-    /// m_mutex held; emission is the last thing before unlocking, and
-    /// callers queue across threads (queued connection in ProjectContext).
+    /// Emits runStateChanged for @p run's current state. Requires m_mutex
+    /// held (reads the run; emission is the last thing before unlocking).
+    /// Falls back to the run's creation stamp when @a startedMs <= 0
+    /// (issue #754). Callers queue across threads (queued connection in
+    /// ProjectContext).
     void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
-
-    /// Requires m_mutex held (uses the no-lock directory accessor).
     void persistRunLocked( WorkflowRun &run );
     /// Terminal roll-up + ArtifactGC + checkpoint retention. Called with
     /// m_mutex held when the last step of a tracked run went terminal.

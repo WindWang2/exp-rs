@@ -171,10 +171,16 @@ jobs:
   # =========================================================================
   # Tier 3 — Cross-Platform Verification (Windows & macOS)
   # =========================================================================
-  tier3-platform-windows:
-    name: Tier 3 - Windows MSVC Build Verification
+  tier3-windows-deps:
+    name: Tier 3 - Windows vcpkg Deps (archive seeding)
     runs-on: windows-latest
-    timeout-minutes: 540
+    # One job per GitHub's 6h cap: the cold vcpkg source build of
+    # gdal/opencv/abseil (~2.5h) plus the MSVC compile (~3.5h) cannot both
+    # fit. This job ONLY seeds the vcpkg binary archives so its post-step
+    # saves them (a killed job saves nothing — observed when the combined
+    # job hit the cap with the cache still cold). tier3-platform-windows
+    # then restores the archives and spends its whole budget compiling.
+    timeout-minutes: 300
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -202,15 +208,62 @@ jobs:
 
       - name: Cache vcpkg binary archives
         # vcpkg's default binary cache (C:\Users\runneradmin\AppData\Local
-        # \vcpkg\archives) is the one source of truth both the install step
-        # AND the CMake toolchain's manifest install consult. The former
-        # x-gha provider was REMOVED from the preinstalled vcpkg ("The
-        # 'x-gha' binary caching backend has been removed"), so it silently
-        # ran cache-less and rebuilt gdal/opencv/abseil twice per run —
-        # blowing the 6h cap. Cache the archives dir directly: cold run
-        # builds once in the install step (~2.5h), configure then restores
-        # from the same local archives in minutes, and the post-step saves
-        # them for subsequent runs.
+        # \vcpkg\archives) is the one source of truth both this install step
+        # AND the CMake toolchain's manifest install in the build job consult.
+        # The former x-gha provider was REMOVED from the preinstalled vcpkg
+        # ("The 'x-gha' binary caching backend has been removed"), so caching
+        # the archives dir directly is the only provider-independent way.
+        uses: actions/cache@v4
+        with:
+          path: C:\Users\runneradmin\AppData\Local\vcpkg\archives
+          key: vcpkg-archives-x64-windows-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-archives-x64-windows-
+
+      - name: Install GDAL/PROJ/GEOS/Protobuf via vcpkg (preinstalled)
+        # windows-latest ships a maintained vcpkg checkout at C:\vcpkg. Sync it
+        # to the pinned builtin-baseline in vcpkg.json (must match exactly or
+        # transitive versions like expat/hdf5/opencv4 miss the version DB).
+        # Checkout that baseline commit; do not use an unrelated tip.
+        # --clean-after-build keeps C: from filling on the opencv/gdal source
+        # builds; once the archives are warm this step is minutes.
+        shell: pwsh
+        run: |
+          git -C C:\vcpkg fetch origin
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          git -C C:\vcpkg checkout 7f3781e19cc7d4e4882a4caec01668c6f7b5c163
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          C:\vcpkg\vcpkg install --triplet x64-windows --clean-after-build
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+  tier3-platform-windows:
+    name: Tier 3 - Windows MSVC Build Verification
+    needs: tier3-windows-deps
+    runs-on: windows-latest
+    timeout-minutes: 540
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSVC & Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Free disk space for vcpkg source builds
+        # Compile-time disk headroom (Qt+vcpkg installed trees + build-win
+        # object files/PDBs run into tens of GB).
+        shell: pwsh
+        run: |
+          Get-PSDrive C | Select-Object Used,Free
+          foreach ($p in @("C:\Android", "C:\Program Files\dotnet", "C:\Program Files (x86)\Android", "$env:AGENT_TOOLSDIRECTORY\..\..")) { if (Test-Path $p) { echo "keep $p" } }
+          if (Test-Path "C:\Android") { Remove-Item -Recurse -Force "C:\Android" }
+          if (Test-Path "C:\Program Files\dotnet") { Remove-Item -Recurse -Force "C:\Program Files\dotnet" }
+          $haskell = Get-ChildItem "C:\ghcup" -ErrorAction SilentlyContinue; if ($haskell) { Remove-Item -Recurse -Force "C:\ghcup" }
+          $codeql = Get-ChildItem "C:\Program Files\CodeQL" -ErrorAction SilentlyContinue; if ($codeql) { Remove-Item -Recurse -Force "C:\Program Files\CodeQL" }
+          Get-PSDrive C | Select-Object Used,Free
+
+      - name: Cache vcpkg binary archives
         uses: actions/cache@v4
         with:
           path: C:\Users\runneradmin\AppData\Local\vcpkg\archives
@@ -235,13 +288,9 @@ jobs:
           modules: 'qt5compat qtmultimedia'
 
       - name: Install GDAL/PROJ/GEOS/Protobuf via vcpkg (preinstalled)
-        # windows-latest ships a maintained vcpkg checkout at C:\vcpkg. Sync it
-        # to the pinned builtin-baseline in vcpkg.json (must match exactly or
-        # transitive versions like expat/hdf5/opencv4 miss the version DB).
-        # Checkout that baseline commit; do not use an unrelated tip.
-        # The cached local binary archives (see actions/cache above) +
-        # --clean-after-build keep C: from filling on the opencv/gdal source
-        # builds and make later runs hit binaries.
+        # Warm-archives pass: restores every package from the seeded cache
+        # (minutes). Kept as a step so the manifest/toolchain install in
+        # configure agrees with the classic install here.
         shell: pwsh
         run: |
           git -C C:\vcpkg fetch origin

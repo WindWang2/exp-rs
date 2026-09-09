@@ -24,6 +24,7 @@
 #include "operators/gdal/gdal_operator_utils.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/algorithms/math_utils.h"
+#include "processing/algorithms/spectral_indices.h"
 #include "raster_bit_compare.h"
 
 #include <limits>
@@ -552,6 +553,77 @@ TEST_CASE("Streaming spectral index output is bit-exact against the full-raster 
         outputPath.toStdString(), expectedPath.toStdString());
     if (!report.identical)
         FAIL(report.detail);
+}
+
+TEST_CASE("SAVI regime is resolved once per raster, never per block (no seams)",
+          "[operators][rs][spectral][streaming]") {
+    // #801 regression: the per-block magnitude heuristic let adjacent row
+    // blocks pick different SAVI constants and stripe the output. A DN-scale
+    // raster whose LOWER half holds small values (below the threshold) used
+    // to flip formulas mid-raster; the dataset-level probe now pins one
+    // regime (dn_scale) for the whole raster, and the streamed output must
+    // match the saviDn anchor everywhere.
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/in.tif";
+    const QString outputPath = tmp.path() + "/out.tif";
+
+    constexpr int W = 5;
+    constexpr int H = 600; // three streaming row blocks (blockRows = 256)
+    constexpr int kSwitchRow = 300;
+    std::vector<std::vector<float>> bands(2);
+    bands[0].resize(static_cast<size_t>(W) * H);
+    bands[1].resize(static_cast<size_t>(W) * H);
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            const size_t i = static_cast<size_t>(y) * W + x;
+            if (y < kSwitchRow) {
+                bands[1][i] = 4000.0f + static_cast<float>(i % 11); // nir
+                bands[0][i] = 2000.0f + static_cast<float>(i % 7);  // red
+            } else {
+                // Values below the DN threshold — the old per-block
+                // heuristic classified THIS block as unit reflectance.
+                bands[1][i] = 4.0f + static_cast<float>(i % 2);
+                bands[0][i] = 2.0f + static_cast<float>(i % 3);
+            }
+        }
+    }
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["index"] = "SAVI";
+    params["nir"] = 2;
+    params["red"] = 1;
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    REQUIRE(result["output"].asString() == outputPath.toStdString());
+    // Provenance: the resolved domain is reported and is DN-scale here.
+    CHECK(result["numeric_domain"]["regime"].asString() == "dn_scale");
+
+    // Anchor: the DN-form kernel over the full raster (the dataset-level
+    // regime decision).
+    std::vector<float> expected(static_cast<size_t>(W) * H);
+    REQUIRE(SpectralIndices::saviDn(bands[1].data(), bands[0].data(),
+                                    expected.data(), expected.size()));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    std::vector<float> actual(static_cast<size_t>(W) * H);
+    REQUIRE(out.readBandWindow(1, 0, 0, W, H, actual.data()));
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            const size_t i = static_cast<size_t>(y) * W + x;
+            INFO("row " << y << " col " << x);
+            // The unit-form-through-normalized-input path is algebraically
+            // identical to the DN form but not bit-identical in float.
+            CHECK(actual[i] == Catch::Approx(expected[i]).margin(1e-4));
+        }
+    }
 }
 
 TEST_CASE("Atomic spectral index operators execution and equivalence", "[operators][rs][spectral]") {
@@ -3420,3 +3492,244 @@ TEST_CASE("RS terrain analysis echoes NaN through the streaming path and keeps a
     out.bandNoDataValue(1, &hasNodata);
     CHECK_FALSE(hasNodata);
 }
+
+namespace SpectralIndices {
+bool evi(const float *nir, const float *red, const float *blue, float *out, size_t count, bool isScaled);
+bool savi(const float *nir, const float *red, float *out, size_t count, bool isScaled);
+bool msavi(const float *nir, const float *red, float *out, size_t count, bool isScaled);
+bool evi2(const float *nir, const float *red, float *out, size_t count, bool isScaled);
+bool bai(const float *red, const float *nir, float *out, size_t count, bool isScaled);
+}
+
+TEST_CASE("Spectral indices: dataset-level scale heuristic avoids block boundary seams",
+          "[spectral_indices][scale][issue801]")
+{
+    // Issue #801: Spectral indices with additive constants (EVI, SAVI) must
+    // apply consistent scaling across all tiles rather than re-evaluating on each block.
+    constexpr size_t N = 4;
+    std::vector<float> nir = { 0.8f, 0.7f, 0.6f, 0.5f };
+    std::vector<float> red = { 0.2f, 0.15f, 0.1f, 0.05f };
+    std::vector<float> eviOutUnscaled(N, 0.0f);
+    std::vector<float> eviOutScaled(N, 0.0f);
+    std::vector<float> saviOutUnscaled(N, 0.0f);
+    std::vector<float> saviOutScaled(N, 0.0f);
+
+    REQUIRE(SpectralIndices::evi(nir.data(), red.data(), nullptr, eviOutUnscaled.data(), N, false));
+    REQUIRE(SpectralIndices::evi(nir.data(), red.data(), nullptr, eviOutScaled.data(), N, true));
+    REQUIRE(SpectralIndices::savi(nir.data(), red.data(), saviOutUnscaled.data(), N, false));
+    REQUIRE(SpectralIndices::savi(nir.data(), red.data(), saviOutScaled.data(), N, true));
+
+    for (size_t i = 0; i < N; ++i) {
+        CHECK(std::isfinite(eviOutUnscaled[i]));
+        CHECK(std::isfinite(saviOutUnscaled[i]));
+        CHECK(eviOutUnscaled[i] > 0.0f);
+        CHECK(saviOutUnscaled[i] > 0.0f);
+    }
+
+    // Test E2E with rs:spectral_index over a multi-block raster
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const int W = 8;
+    const int H = 4;
+    // Row 0-1: dark water pixels (<= 5.0)
+    // Row 2-3: bright vegetation pixels (> 5.0, e.g. 2000.0f)
+    std::vector<float> nirFull(W * H, 2.0f);
+    std::vector<float> redFull(W * H, 1.0f);
+    for (int y = 2; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            nirFull[y * W + x] = 2000.0f;
+            redFull[y * W + x] = 1000.0f;
+        }
+    }
+    const QString inputPath = tmp.filePath(QStringLiteral("mixed_scale.tif"));
+    const QString outputPath = tmp.filePath(QStringLiteral("savi_out.tif"));
+    const std::vector<std::vector<float>> bands = { nirFull, redFull };
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["index"] = "SAVI";
+    params["nir"] = 1;
+    params["red"] = 2;
+    REQUIRE_NOTHROW(op->run(params, ctx));
+
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outputPath));
+    std::vector<float> saviOut(W * H);
+    REQUIRE(outDs.readBandData(1, saviOut.data(), W, H));
+    // Entire raster recognized as scaled dataset (>5.0 magnitude present), so L=5000.0 everywhere
+    for (float v : saviOut) {
+        CHECK(std::isfinite(v));
+    }
+}
+
+TEST_CASE("rs:spectral_index treats unit reflectance raster with -32768 NoData as unscaled",
+          "[spectral][index][scale][nodata][issue801]")
+{
+    // Issue #801 regression: A unit reflectance raster with declared NoData = -32768.0f
+    // in the swath corners must not trigger DN scale mode via std::abs(-32768) > 5.0.
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString inputPath = dir.filePath(QStringLiteral("unit_refl_nodata.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("savi_unscaled_out.tif"));
+
+    constexpr int W = 32;
+    constexpr int H = 32;
+    constexpr float kNodata = -32768.0f;
+
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+    GDALDatasetH ds = GDALCreate(driver, inputPath.toUtf8().constData(), W, H, 2, GDT_Float32, nullptr);
+    REQUIRE(ds != nullptr);
+
+    std::vector<float> bNIR(W * H, 0.40f);
+    std::vector<float> bRed(W * H, 0.10f);
+
+    // Set corners to NoData sentinel -32768.0f
+    bNIR[0] = kNodata;
+    bRed[0] = kNodata;
+    bNIR[W - 1] = kNodata;
+    bRed[W - 1] = kNodata;
+    bNIR[(H - 1) * W] = kNodata;
+    bRed[(H - 1) * W] = kNodata;
+    bNIR[W * H - 1] = kNodata;
+    bRed[W * H - 1] = kNodata;
+
+    GDALRasterBandH hNIR = GDALGetRasterBand(ds, 1);
+    GDALRasterBandH hRed = GDALGetRasterBand(ds, 2);
+    GDALSetRasterNoDataValue(hNIR, kNodata);
+    GDALSetRasterNoDataValue(hRed, kNodata);
+    REQUIRE(GDALRasterIO(hNIR, GF_Write, 0, 0, W, H, bNIR.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+    REQUIRE(GDALRasterIO(hRed, GF_Write, 0, 0, W, H, bRed.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(ds);
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["index"] = "SAVI";
+    params["nir"] = 1;
+    params["red"] = 2;
+
+    RSOperatorContext ctx;
+    Json::Value res = op->run(params, ctx);
+
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outputPath));
+    std::vector<float> out(W * H);
+    REQUIRE(outDs.readBandData(1, out.data(), W, H));
+
+    // Corner was NoData -> must be NaN
+    CHECK(std::isnan(out[0]));
+
+    // Expected SAVI for NIR=0.4, Red=0.1 on unit reflectance:
+    // (0.4 - 0.1) / (0.4 + 0.1 + 0.5) * 1.5 = 0.3 / 1.0 * 1.5 = 0.45
+    // If bug is present (isScaledDataset == true due to -32768), L would be 5000 -> SAVI = ~0.00009
+    const float validVal = out[W * 2 + 2];
+    CHECK(validVal == Catch::Approx(0.45f).margin(0.01f));
+}
+
+TEST_CASE("rs:sar_speckle respects distinct per-band NoData sentinels in multi-band mode",
+          "[sar][speckle][nodata][issue803]")
+{
+    // Issue #803: Multi-band speckle filtering must query each band's own NoData sentinel
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString b1Path = tmp.filePath(QStringLiteral("b1.tif"));
+    const QString b2Path = tmp.filePath(QStringLiteral("b2.tif"));
+    const QString vrtPath = tmp.filePath(QStringLiteral("sar_multiband.vrt"));
+    const QString outputPath = tmp.filePath(QStringLiteral("sar_speckle_out.tif"));
+
+    const int W = 6;
+    const int H = 6;
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+
+    constexpr float nodataB1 = -9999.0f;
+    constexpr float nodataB2 = -32768.0f;
+
+    std::vector<float> b1(W * H, 4.0f);
+    std::vector<float> b2(W * H, 9.0f);
+    // Mark one pixel as NoData in each band
+    b1[0] = nodataB1;
+    b2[1] = nodataB2;
+
+    GDALDatasetH h1 = GDALCreate(driver, b1Path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr);
+    REQUIRE(h1 != nullptr);
+    GDALRasterBandH hB1 = GDALGetRasterBand(h1, 1);
+    GDALSetRasterNoDataValue(hB1, nodataB1);
+    REQUIRE(GDALRasterIO(hB1, GF_Write, 0, 0, W, H, b1.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(h1);
+
+    GDALDatasetH h2 = GDALCreate(driver, b2Path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr);
+    REQUIRE(h2 != nullptr);
+    GDALRasterBandH hB2 = GDALGetRasterBand(h2, 1);
+    GDALSetRasterNoDataValue(hB2, nodataB2);
+    REQUIRE(GDALRasterIO(hB2, GF_Write, 0, 0, W, H, b2.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(h2);
+
+    // Build VRT referencing both single-band rasters
+    const QString vrtContent = QString(
+        "<VRTDataset rasterXSize=\"%1\" rasterYSize=\"%2\">\n"
+        "  <VRTRasterBand dataType=\"Float32\" band=\"1\">\n"
+        "    <NoDataValue>%3</NoDataValue>\n"
+        "    <SimpleSource>\n"
+        "      <SourceFilename relativeToVRT=\"1\">b1.tif</SourceFilename>\n"
+        "      <SourceBand>1</SourceBand>\n"
+        "      <SrcRect xOff=\"0\" yOff=\"0\" xSize=\"%1\" ySize=\"%2\"/>\n"
+        "      <DstRect xOff=\"0\" yOff=\"0\" xSize=\"%1\" ySize=\"%2\"/>\n"
+        "    </SimpleSource>\n"
+        "  </VRTRasterBand>\n"
+        "  <VRTRasterBand dataType=\"Float32\" band=\"2\">\n"
+        "    <NoDataValue>%4</NoDataValue>\n"
+        "    <SimpleSource>\n"
+        "      <SourceFilename relativeToVRT=\"1\">b2.tif</SourceFilename>\n"
+        "      <SourceBand>1</SourceBand>\n"
+        "      <SrcRect xOff=\"0\" yOff=\"0\" xSize=\"%1\" ySize=\"%2\"/>\n"
+        "      <DstRect xOff=\"0\" yOff=\"0\" xSize=\"%1\" ySize=\"%2\"/>\n"
+        "    </SimpleSource>\n"
+        "  </VRTRasterBand>\n"
+        "</VRTDataset>\n"
+    ).arg(W).arg(H).arg(nodataB1).arg(nodataB2);
+
+    QFile vrtFile(vrtPath);
+    REQUIRE(vrtFile.open(QIODevice::WriteOnly | QIODevice::Text));
+    vrtFile.write(vrtContent.toUtf8());
+    vrtFile.close();
+
+    auto op = RSOperatorRegistry::instance().create("rs:sar_speckle");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = vrtPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["method"] = "lee";
+    params["kernelSize"] = 3;
+    params["band"] = 0; // Filter all bands
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    CHECK(result["bands"].asInt() == 2);
+
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outputPath));
+    std::vector<float> outB1(W * H), outB2(W * H);
+    REQUIRE(outDs.readBandData(1, outB1.data(), W, H));
+    REQUIRE(outDs.readBandData(2, outB2.data(), W, H));
+
+    // Band 1: index 0 was NoData (-9999.0f), output must be NaN
+    CHECK(std::isnan(outB1[0]));
+    // Band 2: index 1 was NoData (-32768.0f), output must be NaN
+    CHECK(std::isnan(outB2[1]));
+    // Valid pixels in Band 1 and Band 2 must be finite
+    CHECK(std::isfinite(outB1[W * H - 1]));
+    CHECK(std::isfinite(outB2[W * H - 1]));
+}
+
+

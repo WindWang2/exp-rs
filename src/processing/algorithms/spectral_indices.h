@@ -27,11 +27,13 @@ namespace SpectralIndices
      * EVI = 2.5 * (NIR - Red) / (NIR + 6*Red - 7.5*Blue + 1)
      */
     bool evi(const float *nir, const float *red, const float *blue, float *out, size_t count);
+    bool evi(const float *nir, const float *red, const float *blue, float *out, size_t count, bool isScaled);
 
     /**
      * SAVI = (NIR - Red) / (NIR + Red + L) * (1 + L), where L=0.5
      */
     bool savi(const float *nir, const float *red, float *out, size_t count);
+    bool savi(const float *nir, const float *red, float *out, size_t count, bool isScaled);
 
     /**
      * NDWI = (Green - NIR) / (Green + NIR)
@@ -76,12 +78,14 @@ namespace SpectralIndices
      * (Qi et al. 1994, modified soil-adjusted vegetation index; unit-reflectance domain).
      */
     bool msavi(const float *nir, const float *red, float *out, size_t count);
+    bool msavi(const float *nir, const float *red, float *out, size_t count, bool isScaled);
 
     /**
      * EVI2 = 2.5 * (NIR - Red) / (NIR + 2.4*Red + 1)
      * (two-band EVI, Jiang et al. 2008; unit-reflectance constants, EVI regime rules).
      */
     bool evi2(const float *nir, const float *red, float *out, size_t count);
+    bool evi2(const float *nir, const float *red, float *out, size_t count, bool isScaled);
 
     /**
      * BAI = 1 / ((0.1 - Red)^2 + (0.06 - NIR)^2)
@@ -89,6 +93,7 @@ namespace SpectralIndices
      * output that grows as bands approach the anchors).
      */
     bool bai(const float *red, const float *nir, float *out, size_t count);
+    bool bai(const float *red, const float *nir, float *out, size_t count, bool isScaled);
 
     /**
      * UI = (SWIR2 - NIR) / (SWIR2 + NIR) (urban index, Kawamura et al. 1996).
@@ -100,4 +105,24 @@ namespace SpectralIndices
      * (built-up index, Zha et al. 2003 / He et al. 2010 composition).
      */
     bool bui(const float *swir, const float *nir, const float *red, float *out, size_t count);
+
+    // --- Foundation 6.0 (#801): explicit numeric-domain variants -------------
+    // Streaming callers MUST resolve the numeric domain ONCE per raster
+    // (processing/contracts/scientific_contracts.h), normalize inputs to
+    // unit reflectance (÷divisor), and call the Unit forms — the index
+    // constants never depend on tile content. The auto forms (evi, savi,
+    // evi2, msavi, bai) decide the regime from the WHOLE buffer they
+    // receive: pass a full frame and the decision is frame-consistent;
+    // pass a streaming tile and adjacent tiles can disagree — that is the
+    // #801 seam defect, do not call the auto forms from streaming loops.
+    bool eviUnit(const float *nir, const float *red, const float *blue, float *out, size_t count);
+    bool eviDn(const float *nir, const float *red, const float *blue, float *out, size_t count);
+    bool saviUnit(const float *nir, const float *red, float *out, size_t count);
+    bool saviDn(const float *nir, const float *red, float *out, size_t count);
+    bool evi2Unit(const float *nir, const float *red, float *out, size_t count);
+    bool evi2Dn(const float *nir, const float *red, float *out, size_t count);
+    bool msaviUnit(const float *nir, const float *red, float *out, size_t count);
+    bool msaviDn(const float *nir, const float *red, float *out, size_t count);
+    bool baiUnit(const float *red, const float *nir, float *out, size_t count);
+    bool baiDn(const float *red, const float *nir, float *out, size_t count);
 }

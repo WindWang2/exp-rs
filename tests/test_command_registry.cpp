@@ -191,3 +191,57 @@ TEST_CASE( "CommandRegistry: definitions are queryable and sorted", "[command_re
   REQUIRE( registry.definition( "missing" ) == nullptr );
   REQUIRE( registry.definition( "a.first" )->title.startsWith( QStringLiteral( "命令" ) ) );
 }
+
+// ── Workbench 6.0 Milestone D: shortcut ownership (#792 / #794) ────────────
+
+TEST_CASE( "CommandRegistry: every command may install its canonical shortcut once",
+           "[command_registry][shortcuts][ux6][contract]" )
+{
+  ensureApp();
+  sicnu::app::CommandRegistry registry;
+
+  CommandDefinition a = simple( "view.zoomIn" );
+  a.shortcut = QKeySequence( QStringLiteral( "Ctrl++" ) );
+  CommandDefinition b = simple( "view.zoomOut" );
+  b.shortcut = QKeySequence( QStringLiteral( "Ctrl+-" ) );
+
+  REQUIRE( registry.registerCommand( a ) );
+  REQUIRE( registry.registerCommand( b ) );
+
+  // #792/#794: installing the canonical shortcut for a second command used to
+  // hit a Q_ASSERT on a single-string owner and abort the process. Each
+  // command owns its binding; different commands must coexist.
+  QAction *aAction = registry.action( "view.zoomIn", /*installShortcut=*/true );
+  QAction *bAction = registry.action( "view.zoomOut", /*installShortcut=*/true );
+  REQUIRE( aAction );
+  REQUIRE( bAction );
+  REQUIRE( aAction->shortcut() == QKeySequence( QStringLiteral( "Ctrl++" ) ) );
+  REQUIRE( bAction->shortcut() == QKeySequence( QStringLiteral( "Ctrl+-" ) ) );
+
+  // A command without a shortcut simply installs nothing.
+  CommandDefinition c = simple( "view.pan" );
+  REQUIRE( registry.registerCommand( c ) );
+  QAction *cAction = registry.action( "view.pan", /*installShortcut=*/true );
+  REQUIRE( cAction );
+  REQUIRE( cAction->shortcut().isEmpty() );
+}
+
+TEST_CASE( "CommandRegistry: repeat shortcut install for one command warns, never aborts",
+           "[command_registry][shortcuts][ux6][contract]" )
+{
+  ensureApp();
+  sicnu::app::CommandRegistry registry;
+  CommandDefinition d = simple( "map.refresh" );
+  d.shortcut = QKeySequence::Refresh;
+  REQUIRE( registry.registerCommand( d ) );
+
+  QAction *first = registry.action( "map.refresh", /*installShortcut=*/true );
+  REQUIRE( first );
+  REQUIRE( first->shortcut() == QKeySequence::Refresh );
+
+  // The projection is cached, so the second request returns the same action;
+  // a repeat-install path must degrade to a warning, not an abort (#792).
+  QAction *again = registry.action( "map.refresh", /*installShortcut=*/true );
+  REQUIRE( again == first );
+  REQUIRE( again->shortcut() == QKeySequence::Refresh );
+}

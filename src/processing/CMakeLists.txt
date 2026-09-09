@@ -3,6 +3,11 @@ add_library(sicnu_processing SHARED
     tools/tool_path_manager.cpp
     tools/cli_tool_discovery.cpp
 
+    # Foundation 6.0: canonical scientific contracts resolved once per
+    # raster/dataset and passed explicitly to streaming kernels (never
+    # re-derived per tile).
+    contracts/scientific_contracts.cpp
+
     gdal/gdal_dataset_wrapper.cpp
     gdal/gdal_grid_compat.cpp
     gdal/gdal_block_stream.cpp

@@ -281,7 +281,10 @@ Json::Value resolveTokensRecursive( const Json::Value &node, const Json::Value &
     // Issue #815: resolution is transitive — a token may alias another
     // token reference. Cycles/over-deep chains are reported by the shared
     // chain resolver, which returns the original value on failure.
-    return resolveTokenReferenceChain( tokens, node, problems );
+    const Json::Value resolved = resolveTokenReferenceChain( tokens, node, problems );
+    if ( resolved.isArray() || resolved.isObject() )
+      return resolveTokensRecursive( resolved, tokens, problems );
+    return resolved;
   }
   if ( node.isArray() )
   {

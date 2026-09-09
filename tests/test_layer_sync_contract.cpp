@@ -117,6 +117,35 @@ TEST_CASE( "Layer sync: removing a layer leaves no stale tree node or canvas lay
     CHECK( canvas.layers().isEmpty() );                 // no stale canvas layer
 }
 
+TEST_CASE( "Layer sync: removing layer during canvas rendering is race-free (#779, #796)",
+           "[layer_sync][removal][race]" )
+{
+    SyncFixture fx;
+    QgsMapCanvas canvas;
+    QgsLayerTree *root = fx.project->layerTreeRoot();
+    QgsLayerTreeMapCanvasBridge bridge( root, &canvas );
+    bridge.setAutoSetupOnFirstLayer( false );
+
+    QgsVectorLayer *layer = new QgsVectorLayer( QStringLiteral( "Point?crs=epsg:4326" ),
+                                                QStringLiteral( "render_race" ), QStringLiteral( "memory" ) );
+    REQUIRE( layer->isValid() );
+    fx.project->addMapLayer( layer, false );
+    root->addLayer( layer );
+    bridge.setCanvasLayers();
+    REQUIRE( canvas.layers().size() == 1 );
+
+    // Trigger asynchronous rendering
+    canvas.refresh();
+
+    // stopRendering() prior to removal guarantees no crash or background thread reading deleted layer
+    canvas.stopRendering();
+    fx.project->removeMapLayer( layer->id() );
+    bridge.setCanvasLayers();
+
+    CHECK( canvas.layers().isEmpty() );
+    CHECK_FALSE( canvas.isDrawing() );
+}
+
 TEST_CASE( "Layer sync: duplicate tree registration is refused by convention",
            "[layer_sync][duplicate]" )
 {
@@ -159,4 +188,75 @@ TEST_CASE( "SelectionContext flags broken layers and read-only editability",
     // operate on the snapshot only (authoritative projection principle).
     const auto snap = ctx.snapshot();
     CHECK( snap.activeLayer == &readOnly );
+}
+
+// ── Workbench 6.0 Milestone A/B: removal during an active render (#779/#796)
+#include <QEventLoop>
+#include <QTimer>
+#include <qgsfeature.h>
+#include <qgsgeometry.h>
+
+TEST_CASE( "Layer sync: removing a layer during an active render settles safely",
+           "[layer_sync][removal][ux6]" )
+{
+    SyncFixture fx;
+    QgsMapCanvas canvas;
+    QgsLayerTree *root = fx.project->layerTreeRoot();
+    QgsLayerTreeMapCanvasBridge bridge( root, &canvas );
+    bridge.setAutoSetupOnFirstLayer( false );
+
+    QgsVectorLayer *layer = new QgsVectorLayer( QStringLiteral( "Point?crs=EPSG:4326" ),
+                                                QStringLiteral( "doomed-render" ),
+                                                QStringLiteral( "memory" ) );
+    REQUIRE( layer->isValid() );
+    // One feature so the layer extent (and thus the canvas settings) is valid.
+    layer->startEditing();
+    QgsFeature f( layer->fields() );
+    f.setGeometry( QgsGeometry::fromPointXY( QgsPointXY( 0.5, 0.5 ) ) );
+    layer->addFeature( f );
+    layer->commitChanges();
+    fx.project->addMapLayer( layer, false );
+    root->addLayer( layer );
+    bridge.setCanvasLayers();
+    canvas.setExtent( QgsRectangle( -1, -1, 2, 2 ) );
+    REQUIRE( canvas.layers().size() == 1 );
+
+    // Remove the layer from INSIDE renderStarting — i.e. while the canvas job
+    // holds the layer pointer on background threads (#779/#796). The removal
+    // path must settle the rendering (blocking cancel of the in-flight job)
+    // BEFORE the layer object is destroyed.
+    bool removedDuringRender = false;
+    bool settled = false;
+    QObject::connect( &canvas, &QgsMapCanvas::renderStarting, &canvas, [&] {
+        removedDuringRender = true;
+        canvas.stopRenderingAndSettle();
+        settled = !canvas.isDrawing();
+        fx.project->removeMapLayer( layer->id() ); // destroys the layer
+        bridge.setCanvasLayers();
+    } );
+
+    canvas.refresh();
+    QEventLoop loop;
+    QTimer timeout;
+    timeout.setSingleShot( true );
+    QObject::connect( &canvas, &QgsMapCanvas::mapRefreshCanceled, &loop, &QEventLoop::quit );
+    QObject::connect( &timeout, &QTimer::timeout, &loop, &QEventLoop::quit );
+    timeout.start( 15000 );
+    loop.exec();
+
+    REQUIRE( removedDuringRender ); // the removal really happened mid-render
+    REQUIRE( settled );             // the job was fully wound down first
+    CHECK( canvas.layers().isEmpty() );
+    CHECK_FALSE( canvas.isDrawing() );
+}
+
+TEST_CASE( "Layer sync: stopRenderingAndSettle is a no-op when idle",
+           "[layer_sync][removal][ux6]" )
+{
+    SyncFixture fx;
+    QgsMapCanvas canvas;
+    // Must return immediately without a job and leave the canvas usable.
+    canvas.stopRenderingAndSettle();
+    CHECK_FALSE( canvas.isDrawing() );
+    CHECK( canvas.layers().isEmpty() );
 }
