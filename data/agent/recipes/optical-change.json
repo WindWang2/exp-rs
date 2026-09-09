@@ -55,7 +55,10 @@
     "output": "$outputs.difference"
    },
    "verification": "raster",
-   "inputs": []
+   "inputs": [
+    { "step": "align_before" },
+    { "step": "align_after" }
+   ]
   },
   {
    "id": "threshold",

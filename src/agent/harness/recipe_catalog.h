@@ -12,9 +12,13 @@
 //   "$outputs.<name>"     — derived output path for a declared output
 //   "$params.<key>"       — a caller binding under bindings.params
 //   "when_slot": "name"   — step included only when that slot is bound
+//   "when_slots": [names] — step included only when ALL named slots are
+//                           bound (fusion branches)
 //   "when_param": "key"   — step included only when bindings.params[key] is
 //                           truthy; downstream steps then read their
-//                           "params_when_skipped" template instead of "params"
+//                           "params_when_skipped" template instead of
+//                           "params"; degradation propagates along declared
+//                           step "inputs" wiring only (per branch, #784)
 //
 
 #include <json/json.h>

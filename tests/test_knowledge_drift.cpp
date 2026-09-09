@@ -28,11 +28,32 @@
 #ifndef CMAKE_SOURCE_DIR
 #define CMAKE_SOURCE_DIR "."
 #endif
+#ifndef SICNU_CARTOGRAPHY_DATA_DIR
+#define SICNU_CARTOGRAPHY_DATA_DIR "data/cartography"
+#endif
 
 using namespace sicnu::agent::cartography;
 using sicnu::agent::harness::RecipeCatalog;
 
 namespace {
+
+// Review P1: never rely on ambient cwd/singleton state for catalog
+// resolution — point every registry at the shipped catalog explicitly so the
+// drift checks cannot degrade to vacuous passes (or false failures) under
+// ctest, where no working directory is pinned.
+void useShippedCatalogs()
+{
+  const auto dir = std::string( SICNU_CARTOGRAPHY_DATA_DIR );
+  ComponentRegistry::instance().setDirectory( QString::fromStdString( dir ) );
+  ComponentRegistry::instance().reload();
+  TemplateRegistry::instance().setDirectory( QString::fromStdString( dir ) );
+  TemplateRegistry::instance().reload();
+  StyleRegistry::instance().setDirectory( QString::fromStdString( dir ) );
+  StyleRegistry::instance().reload();
+  TokenSetRegistry::instance().setDirectory( QString::fromStdString( dir ) );
+  TokenSetRegistry::instance().reload();
+}
+
 
 std::set<std::string> atomicOperatorIds()
 {
@@ -60,6 +81,7 @@ TEST_CASE( "Recipe operator ids resolve against the operator registries (H)",
   catalog.setDirectory( ( std::string( CMAKE_SOURCE_DIR ) + "/data/agent/recipes" ) );
   catalog.reload();
   REQUIRE( catalog.loadProblems().empty() );
+  useShippedCatalogs();
 
   const std::set<std::string> atomicIds = atomicOperatorIds();
   REQUIRE_FALSE( atomicIds.empty() );
@@ -87,6 +109,7 @@ TEST_CASE( "Recipe operator ids resolve against the operator registries (H)",
 
 TEST_CASE( "Solution references (recipe/template/style) resolve (H)", "[platform6][drift]" )
 {
+  useShippedCatalogs();
   SolutionRegistry &solutions = SolutionRegistry::instance();
   solutions.setDirectory(
     QString::fromStdString( std::string( CMAKE_SOURCE_DIR ) + "/data/agent/solutions" ) );
@@ -126,6 +149,7 @@ TEST_CASE( "Solution references (recipe/template/style) resolve (H)", "[platform
 
 TEST_CASE( "Template component references resolve (H)", "[platform6][drift]" )
 {
+  useShippedCatalogs();
   TemplateRegistry &templates = TemplateRegistry::instance();
   ComponentRegistry &components = ComponentRegistry::instance();
 
@@ -171,6 +195,7 @@ TEST_CASE( "Template component references resolve (H)", "[platform6][drift]" )
 
 TEST_CASE( "Style token-set references and token chains resolve (H)", "[platform6][drift]" )
 {
+  useShippedCatalogs();
   StyleRegistry &styles = StyleRegistry::instance();
   TokenSetRegistry &tokens = TokenSetRegistry::instance();
 
@@ -214,6 +239,7 @@ TEST_CASE( "Style token-set references and token chains resolve (H)", "[platform
 
 TEST_CASE( "Composite component children references resolve (H)", "[platform6][drift]" )
 {
+  useShippedCatalogs();
   ComponentRegistry &components = ComponentRegistry::instance();
   std::vector<std::string> drifted;
   for ( const auto &component : components.components() )

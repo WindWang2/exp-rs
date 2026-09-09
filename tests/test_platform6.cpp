@@ -342,25 +342,36 @@ TEST_CASE( "External context overrides the embedded condition_context (#802)",
 // #804 — short-circuit evaluation hides condition AST errors
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "Both operands of and/or are evaluated before deciding (#804)",
+TEST_CASE( "Condition errors surface only when they can change the outcome (#804)",
            "[platform6][conditions]" )
 {
   Json::Value empty( Json::objectValue );
-  // The left operand decides the result, but the right operand carries an
-  // unknown path — the error must surface, not hide behind short-circuit.
   std::string error;
   bool value = true;
-  CHECK_FALSE( evaluateCondition( "false and water.depth == 1", empty, &value, &error ) );
-  CHECK( error.find( "water.depth" ) != std::string::npos );
-
+  // The left operand cleanly decides: the right operand's unknown path can
+  // not change the outcome, so evaluation succeeds (presence-guard idiom
+  // "has(x) or x.status == ..." keeps working).
   error.clear();
-  CHECK_FALSE( evaluateCondition( "true or water.depth == 1", empty, &value, &error ) );
+  CHECK( evaluateCondition( "false and water.depth == 1", empty, &value, &error ) );
+  CHECK_FALSE( value );
+  CHECK( error.empty() );
+  error.clear();
+  CHECK( evaluateCondition( "true or water.depth == 1", empty, &value, &error ) );
+  CHECK( value );
+  CHECK( error.empty() );
+
+  // The DECIDING operand carries an unknown path — the error must surface.
+  Json::Value ctx( Json::objectValue );
+  ctx["x"] = 5;
+  error.clear();
+  CHECK_FALSE( evaluateCondition( "water.depth == 1 and x == 5", ctx, &value, &error ) );
+  CHECK( error.find( "water.depth" ) != std::string::npos );
+  error.clear();
+  CHECK_FALSE( evaluateCondition( "water.depth == 1 or true", ctx, &value, &error ) );
   CHECK( error.find( "water.depth" ) != std::string::npos );
 
   // Valid expressions keep their result semantics.
   error.clear();
-  Json::Value ctx( Json::objectValue );
-  ctx["x"] = 5;
   CHECK( evaluateCondition( "x == 5 and x < 10", ctx, &value, &error ) );
   CHECK( value );
   CHECK( evaluateCondition( "x == 4 or x < 10", ctx, &value, &error ) );

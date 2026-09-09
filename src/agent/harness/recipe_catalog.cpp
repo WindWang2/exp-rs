@@ -560,6 +560,13 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
     if ( mapOutput.isObject() && bindings.isMember( "layout_name" ) )
       mapOutput["layout_name"] = bindings["layout_name"];
     plan["map_output"] = mapOutput;
+    // The map output carries the same hazard as declared outputs: a
+    // from_step pointing at a gate-dropped step would only surface as a
+    // confusing map-compile failure after execution. Drop the map_output
+    // entirely when its step is gone (an empty from_step survives).
+    const std::string mapFromStep = mapOutput.get( "from_step", "" ).asString();
+    if ( !mapFromStep.empty() && !emittedIds.count( mapFromStep ) )
+      plan.removeMember( "map_output" );
   }
   return plan;
 }

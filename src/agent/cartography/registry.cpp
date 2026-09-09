@@ -600,7 +600,15 @@ void TemplateRegistry::ensureLoadedLocked() const
     if ( resolved.isNull() || !problem.isEmpty() )
       mLoadProblems << QStringLiteral( "%1: %2" ).arg( qkey, problem );
     if ( !resolved.isNull() )
+    {
+      // Platform 6.0: closed facet vocabularies fail loudly at load — a
+      // typo'd medium/task would otherwise silently never match in search.
+      // The template still loads (facets are advisory knowledge); the
+      // problem surfaces through loadProblems() like every other registry.
+      for ( const auto &facetProblem : validateTemplateFacets( resolved ) )
+        mLoadProblems << QString::fromStdString( facetProblem );
       mTemplates.insert( qkey, resolved );
+    }
   }
 }
 
@@ -740,6 +748,12 @@ bool TemplateRegistry::registerTemplate( Json::Value descriptor, QString *error 
   {
     if ( error )
       *error = QStringLiteral( "template needs slots (or required_slots)" );
+    return false;
+  }
+  for ( const auto &facetProblem : validateTemplateFacets( descriptor ) )
+  {
+    if ( error )
+      *error = QString::fromStdString( facetProblem );
     return false;
   }
   QMutexLocker lock( &mMutex );
@@ -996,7 +1010,10 @@ Json::Value searchTemplates( const Json::Value &templates, const TemplateQuery &
                                     : std::string();
         std::transform( description.begin(), description.end(), description.begin(),
                         []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
-        const size_t inId = id.find( query.keyword );
+        std::string lowerId = id;
+        std::transform( lowerId.begin(), lowerId.end(), lowerId.begin(),
+                        []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+        const size_t inId = lowerId.find( lowerKeyword );
         const size_t inDescription = description.find( lowerKeyword );
         if ( inId == std::string::npos && inDescription == std::string::npos )
           continue;

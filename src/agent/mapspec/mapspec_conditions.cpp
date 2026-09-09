@@ -441,41 +441,50 @@ bool evaluateAst( const ConditionAst &node, const Json::Value &context, std::str
     case ConditionAst::Op::And:
     {
       // Issue #804: both operands are evaluated even when the first decides
-      // the result — short-circuiting the *evaluation errors* let syntax-level
-      // mistakes (unknown paths, type mismatches) hide behind a lucky operand.
+      // the result, but only DECISION-RELEVANT errors fail the condition —
+      // a clean false on the left decides the conjunction no matter what the
+      // right operand would have reported. Evaluating every error as fatal
+      // (the first #804 fix) regressed the only presence-guard idiom the
+      // grammar offers ("has(x) or x.status == \"ok\"") and could un-hide
+      // gated content; deciding-operand-wins keeps diagnostics flowing where
+      // they can change the outcome.
       std::string leftError;
       const bool left = evaluateAst( *node.children[0], context, leftError );
-      std::string rightError;
-      const bool right = evaluateAst( *node.children[1], context, rightError );
       if ( !leftError.empty() )
       {
         error = leftError;
         return false;
       }
+      if ( !left )
+        return false;
+      std::string rightError;
+      const bool right = evaluateAst( *node.children[1], context, rightError );
       if ( !rightError.empty() )
       {
         error = rightError;
         return false;
       }
-      return left && right;
+      return right;
     }
     case ConditionAst::Op::Or:
     {
       std::string leftError;
       const bool left = evaluateAst( *node.children[0], context, leftError );
-      std::string rightError;
-      const bool right = evaluateAst( *node.children[1], context, rightError );
       if ( !leftError.empty() )
       {
         error = leftError;
         return false;
       }
+      if ( left )
+        return true;
+      std::string rightError;
+      const bool right = evaluateAst( *node.children[1], context, rightError );
       if ( !rightError.empty() )
       {
         error = rightError;
         return false;
       }
-      return left || right;
+      return right;
     }
     case ConditionAst::Op::Compare:
     {

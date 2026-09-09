@@ -209,13 +209,17 @@ class ListTemplatesTool final : public SpatialTool
         query.medium = medium;
         query.purpose = purpose;
         query.keyword = keyword;
-        query.page = offset / std::clamp( limit, 1, 50 );
-        query.pageSize = std::clamp( limit, 1, 50 );
+        const int pageSize = std::clamp( limit, 1, 50 );
+        query.page = offset / pageSize;
+        query.pageSize = pageSize;
         Json::Value out = TemplateRegistry::instance().search( query );
-        out["next_offset"] =
-          out.isMember( "next_page" ) && out["next_page"].isInt()
-            ? Json::Value( out["next_page"].asInt() * out["page_size"].asInt() )
-            : Json::Value();
+        // Keep the legacy paginate() sentinel (-1) so clients switching
+        // between the task-only and faceted paths see one terminator, and
+        // keep offsets page-aligned (offset is the absolute item cursor).
+        const int begin = query.page * pageSize;
+        const int total = out["total"].asInt();
+        out["next_offset"] = ( begin + pageSize < total ) ? Json::Value( begin + pageSize )
+                                                          : Json::Value( -1 );
         return SpatialToolResult::ok( out );
       }
 

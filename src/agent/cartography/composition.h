@@ -27,14 +27,16 @@
 // Determinism contract:
 //   * items are indexed in canonical collection order, constraints iterate in
 //     declared order — identical input produces byte-identical output;
-//   * relaxation is bounded (kMaxRelaxationPasses); for consistent systems the
-//     satisfaction fixpoint is order-independent, so permuting the declared
-//     constraint order converges to the same geometry;
+//   * relaxation is bounded (kMaxRelaxationPasses); consistent chain systems
+//     (unique fixpoint) converge to the same geometry regardless of
+//     declaration order; over-determined systems with several fixpoints stay
+//     deterministic per input but may legitimately settle differently —
+//     both orders report converged;
 //   * every movement comes from a declared constraint — nothing is moved
 //     "to make things fit" silently;
 //   * contradictions (cyclic leader/follower dependencies, unsatisfiable
-//     constraints, non-convergence) are reported with the constraint ids
-//     involved, never silently absorbed.
+//     constraints, non-convergence, anchor conflicts) are reported with the
+//     constraint identities involved, never silently absorbed.
 //
 // The solver mutates ONLY concrete geometry fields (rect_mm); content is
 // never touched. Unsatisfiable outcomes are reported, never "fixed" by
@@ -58,8 +60,9 @@ struct CompositionResult
     int anchorsResolved = 0;
     int sizesClamped = 0;
     int constraintsSolved = 0;
-    /// Total declared solver constraints (excludes malformed/unresolvable
-    /// entries, which are reported individually).
+    /// Declared solver-kind constraints, including arity-failed
+    /// (unresolvable) entries, which are also reported individually;
+    /// excludes non-solver/legacy constraint items.
     int constraintsTotal = 0;
     /// Relaxation passes actually used (1 = converged in a single sweep).
     int passes = 0;

@@ -468,7 +468,12 @@ bool applyVectorBlock( QgsVectorLayer *vector, const Json::Value &vectorBlock,
     std::function<void( const Json::Value &, QgsRuleBasedRenderer::Rule *, int )> buildRules =
       [&]( const Json::Value &rulesJson, QgsRuleBasedRenderer::Rule *parent, int depth ) {
         if ( depth > 4 )
+        {
+          // Review P2: silently dropping declared sub-rules would change the
+          // render without a trace — report the truncation.
+          problems << QStringLiteral( "rule_based sub-rules below nesting depth 4 dropped" );
           return;
+        }
         for ( const auto &rule : rulesJson )
         {
           if ( !rule.isObject() || !rule.isMember( "expression" ) || !rule["expression"].isString() )

@@ -116,7 +116,10 @@ enum class Apply
 {
     Satisfied, ///< already holds — nothing written
     Applied,   ///< geometry written this pass
-    Failed     ///< cannot apply (reported once, constraint leaves the sweep)
+    Blocked,   ///< inputs not usable YET (e.g. rect materialized later by
+               ///< fit_content): stays in the sweep, may resolve next pass
+    Failed     ///< cannot apply (permanent cause — reported once, the
+               ///< constraint leaves the sweep)
 };
 
 class Report
@@ -145,7 +148,8 @@ struct ConstraintRuntime
     double gap = 0.0;
     std::string edge;
     std::string direction;
-    bool disabled = false;              ///< hard failure recorded — leaves the sweep
+    bool disabled = false;              ///< permanent failure — leaves the sweep
+    bool blockedInLastPass = false;     ///< inputs not usable yet at fixpoint
 };
 
 class Solver
@@ -222,6 +226,7 @@ void Solver::buildRuntimes()
   const Json::Value constraints = mSpec.get( "constraints", Json::Value( Json::arrayValue ) );
   if ( !constraints.isArray() )
     return;
+  int declaredIndex = 0;
   for ( const auto &constraint : constraints )
   {
     if ( !constraint.isObject() || !constraint.isMember( "kind" ) ||
@@ -231,9 +236,16 @@ void Solver::buildRuntimes()
     const std::string kind = constraint["kind"].asString();
     if ( !mapspec::isConstraintKind( kind ) )
       continue; // legacy/free-form constraint items (e.g. frame_style) are not solver input
-    const std::string cid = constraint.isMember( "id" ) && constraint["id"].isString()
-                              ? constraint["id"].asString()
-                              : kind;
+    // Review P2: id-less constraints share `kind` as cid and duplicate ids
+    // are legal documents — synthesize a unique identity so per-constraint
+    // reports can never silently collapse into one deduped entry.
+    std::string cid = kind;
+    if ( constraint.isMember( "id" ) && constraint["id"].isString() &&
+         !constraint["id"].asString().empty() )
+      cid = constraint["id"].asString();
+    else
+      cid = kind + "#" + std::to_string( declaredIndex );
+    ++declaredIndex;
     // Issue #781: arity must know the kind — fit_content is a legal
     // single-item constraint.
     const int requiredItems = kind == "fit_content" ? 1 : 2;
@@ -470,7 +482,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     if ( !rectOf( c.items[0], leader ) )
     {
       mReport.add( cid + "|leader-rect", cid + ": leader item has no usable rect_mm" );
-      return Apply::Failed;
+      return Apply::Blocked;
     }
     if ( edge != "top" && edge != "bottom" && edge != "left" && edge != "right" )
     {
@@ -484,7 +496,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
       if ( !rectOf( c.items[i], rect ) )
       {
         mReport.add( cid + "|follower-rect", cid + ": follower item has no usable rect_mm" );
-        return Apply::Failed;
+        return Apply::Blocked;
       }
       Rect target = rect;
       if ( edge == "top" )
@@ -510,7 +522,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     if ( !rectOf( c.items[0], leader ) )
     {
       mReport.add( cid + "|leader-rect", cid + ": leader item has no usable rect_mm" );
-      return Apply::Failed;
+      return Apply::Blocked;
     }
     bool applied = false;
     for ( int i = 1; i < static_cast<int>( c.items.size() ); ++i )
@@ -519,7 +531,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
       if ( !rectOf( c.items[i], rect ) )
       {
         mReport.add( cid + "|follower-rect", cid + ": follower item has no usable rect_mm" );
-        return Apply::Failed;
+        return Apply::Blocked;
       }
       Rect target = rect;
       if ( kind == "match_width" )
@@ -541,7 +553,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     if ( !rectOf( c.items[0], leader ) )
     {
       mReport.add( cid + "|leader-rect", cid + ": leader item has no usable rect_mm" );
-      return Apply::Failed;
+      return Apply::Blocked;
     }
     if ( direction != "below" && direction != "above" && direction != "left_of" &&
          direction != "right_of" )
@@ -557,7 +569,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
       if ( !rectOf( c.items[i], rect ) )
       {
         mReport.add( cid + "|follower-rect", cid + ": follower item has no usable rect_mm" );
-        return Apply::Failed;
+        return Apply::Blocked;
       }
       Rect target = rect;
       if ( direction == "below" )
@@ -598,7 +610,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     if ( !rectOf( c.items.front(), first ) || !rectOf( c.items.back(), last ) )
     {
       mReport.add( cid + "|endpoints", cid + ": first/last item rect unusable" );
-      return Apply::Failed;
+      return Apply::Blocked;
     }
     if ( direction != "horizontal" && direction != "vertical" )
     {
@@ -652,7 +664,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     if ( !rectOf( c.items[0], target ) || !rectOf( c.items[1], follower ) )
     {
       mReport.add( cid + "|pair-rect", cid + ": target/follower rect unusable" );
-      return Apply::Failed;
+      return Apply::Blocked;
     }
     Rect result = follower;
     if ( kind == "below" )
@@ -690,7 +702,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     if ( !rectOf( c.items[0], container ) || !rectOf( c.items[1], content ) )
     {
       mReport.add( cid + "|pair-rect", cid + ": container/content rect unusable" );
-      return Apply::Failed;
+      return Apply::Blocked;
     }
     Rect result = content;
     result.x = container.x + ( container.w - content.w ) / 2.0;
@@ -712,7 +724,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     if ( !rectOf( c.items[0], anchor ) || !rectOf( c.items[1], companion ) )
     {
       mReport.add( cid + "|pair-rect", cid + ": anchor/companion rect unusable" );
-      return Apply::Failed;
+      return Apply::Blocked;
     }
     Rect result = companion;
     result.y = anchor.y + anchor.h + gap;
@@ -731,7 +743,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     if ( !rectOf( c.items[0], keeper ) || !rectOf( c.items[1], mover ) )
     {
       mReport.add( cid + "|pair-rect", cid + ": keeper/mover rect unusable" );
-      return Apply::Failed;
+      return Apply::Blocked;
     }
     const bool overlaps = mover.x < keeper.x + keeper.w && keeper.x < mover.x + mover.w &&
                           mover.y < keeper.y + keeper.h && keeper.y < mover.y + mover.h;
@@ -754,7 +766,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     if ( !rectOf( c.items[0], leader ) )
     {
       mReport.add( cid + "|rect", cid + ": fit_content needs one item with a rect" );
-      return Apply::Failed;
+      return Apply::Blocked;
     }
     const Json::Value &content = c.contentMm;
     if ( !content.isArray() || content.size() != 2 || !content[0].isNumeric() ||
@@ -794,6 +806,8 @@ void Solver::relax()
 {
   for ( mPasses = 1; mPasses <= kMaxRelaxationPasses; ++mPasses )
   {
+    for ( auto &c : mConstraints )
+      c.blockedInLastPass = false;
     bool wrote = resolveAnchors();
     wrote = clampSizes() || wrote;
     bool anyApplied = false;
@@ -801,11 +815,36 @@ void Solver::relax()
     {
       if ( c.disabled )
         continue;
+      // Anchor authority: a positional constraint whose follower is
+      // anchor-pinned fights the anchor every pass (re-pin/move oscillation
+      // burns the whole budget). Declared anchor placement is the stronger
+      // contract — the constraint is disabled with a targeted report instead
+      // of a generic non-convergence note.
+      if ( c.kind != "fit_content" )
+      {
+        std::string anchoredFollower;
+        for ( int k = 1; k < static_cast<int>( c.itemIds.size() ); ++k )
+          if ( mAnchorIds.count( c.itemIds[k] ) )
+          {
+            anchoredFollower = c.itemIds[k];
+            break;
+          }
+        if ( !anchoredFollower.empty() )
+        {
+          c.disabled = true;
+          mReport.add( c.cid + "|anchor-conflict",
+                       c.cid + ": conflicts with a declared anchor on '" + anchoredFollower +
+                         "'; the anchor wins and the constraint is disabled" );
+          continue;
+        }
+      }
       const Apply outcome = applyConstraint( c );
       if ( outcome == Apply::Applied )
         anyApplied = true;
       else if ( outcome == Apply::Failed )
         c.disabled = true; // reported once; leaves the sweep
+      else if ( outcome == Apply::Blocked )
+        c.blockedInLastPass = true; // inputs may materialize in a later pass
     }
     if ( !anyApplied && !wrote )
     {
@@ -833,13 +872,14 @@ void Solver::finalize( CompositionResult &result )
     result.unsatisfied.push_back( note );
   result.constraintsTotal = static_cast<int>( mConstraints.size() ) + mHardFailures;
   // Only constraints that are active AND settled count as solved: a
-  // hard-failed (disabled) constraint never solved, and a non-converged
-  // layout cannot claim any solver constraint as satisfied.
-  int active = 0;
+  // hard-failed (disabled) constraint never solved, a constraint still
+  // blocked at the fixpoint never applied, and a non-converged layout
+  // cannot claim any solver constraint as satisfied.
+  int solved = 0;
   for ( const auto &c : mConstraints )
-    if ( !c.disabled )
-      ++active;
-  result.constraintsSolved = mConverged ? active : 0;
+    if ( !c.disabled && !( mConverged && c.blockedInLastPass ) )
+      ++solved;
+  result.constraintsSolved = mConverged ? solved : 0;
   result.passes = mPasses;
   result.converged = mConverged;
   result.anchorsResolved = static_cast<int>( mAnchorIds.size() );

@@ -21,6 +21,10 @@
 #include <algorithm>
 #include <set>
 
+#ifndef SICNU_CARTOGRAPHY_DATA_DIR
+#define SICNU_CARTOGRAPHY_DATA_DIR "data/cartography"
+#endif
+
 using namespace sicnu::agent::cartography;
 using namespace sicnu::agent::mapspec;
 using sicnu::agent::harness::HarnessError;
@@ -205,9 +209,11 @@ TEST_CASE( "Faceted template search explains matches and ranks facet-complete fi
   CHECK( keywordResult["items"][0]["match"]["score"].asInt() >
          keywordResult["items"][1]["match"]["score"].asInt() );
 
-  // The shipped catalog carries valid facets everywhere.
+  // The shipped catalog carries valid facets everywhere (explicit dir —
+  // never ambient cwd/singleton state, review P1).
   TemplateRegistry &registry = TemplateRegistry::instance();
-  registry.setDirectory( QString() ); // default resolution
+  registry.setDirectory(
+    QString::fromStdString( std::string( SICNU_CARTOGRAPHY_DATA_DIR ) ) );
   registry.reload();
   for ( const auto &tmpl : registry.templates() )
   {
@@ -337,6 +343,25 @@ TEST_CASE( "The flood-mapping exemplar models branches without cross-branch cont
   CHECK( stepIds2.count( "sar_water" ) == 1 );
   CHECK( stepIds2.count( "fused_disagreement" ) == 1 );
   CHECK( plan2["outputs"].size() == 3 );
+
+  // SAR only: the optical branch drops, the when_slots fusion gate stays
+  // CLOSED (only one of its two slots is bound), and the map_output whose
+  // from_step was gate-dropped is filtered from the plan.
+  Json::Value sarOnly( Json::objectValue );
+  sarOnly["slots"]["sar"] = dir.filePath( QStringLiteral( "sar.tif" ) ).toStdString();
+  sarOnly["output_dir"] = dir.filePath( QStringLiteral( "out3" ) ).toStdString();
+  const Json::Value plan3 = catalog.instantiateRecipe( "harness.flood_mapping", sarOnly, error );
+  REQUIRE( plan3.isObject() );
+  std::set<std::string> stepIds3;
+  for ( const auto &step : plan3["steps"] )
+    stepIds3.insert( step["id"].asString() );
+  CHECK( stepIds3.count( "sar_calibrate" ) == 1 );
+  CHECK( stepIds3.count( "sar_water" ) == 1 );
+  CHECK( stepIds3.count( "opt_index" ) == 0 );
+  CHECK( stepIds3.count( "fused_disagreement" ) == 0 );
+  CHECK( plan3["outputs"].size() == 1 );
+  CHECK( plan3["outputs"][0]["name"].asString() == "sar_water_extent" );
+  CHECK_FALSE( plan3.isMember( "map_output" ) );
 }
 
 // ---------------------------------------------------------------------------
