@@ -4,8 +4,10 @@
 #include "app/workbench/workbench_host.h"
 #include "app/workbench/adapters.h"
 
+#include <QApplication>
 #include <QCoreApplication>
 #include <QVariantMap>
+#include <QWidget>
 
 namespace
 {
@@ -16,9 +18,11 @@ char *fake_argv[] = { fake_argv0, nullptr };
 
 QCoreApplication *ensureApp()
 {
-  static QCoreApplication *app = nullptr;
+  static QApplication *app = nullptr;
+  // QApplication (not the core variant): the lifecycle tests construct real
+  // QWidget surfaces for the window-getter hook.
   if ( !app && !QCoreApplication::instance() )
-    app = new QCoreApplication( fake_argc, fake_argv );
+    app = new QApplication( fake_argc, fake_argv );
   return QCoreApplication::instance();
 }
 
@@ -171,4 +175,76 @@ TEST_CASE( "MapWorkbench: embedded bench reports map features", "[workbench][ada
   REQUIRE( map.id() == "map" );
   REQUIRE( map.features().testFlag( sicnu::app::WorkbenchFeature::MapCanvas ) );
   REQUIRE( map.features().testFlag( sicnu::app::WorkbenchFeature::LayerTree ) );
+}
+
+// ── Workbench 6.0 Milestone F: unified external-bench lifecycle (#813) ─────
+
+TEST_CASE( "ExternalWindowWorkbench: lifecycle hooks expose dirty, in-flight and cancel (#813)",
+           "[workbench][ux6]" )
+{
+  ensureApp();
+  QWidget window;
+
+  bool windowAlive = false;
+  bool dirty = false;
+  bool inFlight = false;
+  int cancels = 0;
+  int closes = 0;
+
+  sicnu::app::ExternalWindowWorkbench bench(
+      QStringLiteral( "classify" ), QStringLiteral( "分类工作区" ),
+      QStringLiteral( "su_ervised" ), [] {} );
+  bench.setWindowGetter( [&]() -> QWidget * { return windowAlive ? &window : nullptr; } );
+  bench.setDirtyFn( [&] { return dirty; } );
+  bench.setInFlightFn( [&] { return inFlight; } );
+  bench.setCancelFn( [&]() -> bool {
+    if ( !inFlight )
+      return false;
+    ++cancels;
+    inFlight = false;
+    return true;
+  } );
+  bench.setCloseFn( [&] {
+    ++closes;
+    return true;
+  } );
+
+  // No window yet: nothing dirty, nothing running, cancel refuses.
+  CHECK_FALSE( bench.isDirty() );
+  CHECK_FALSE( bench.hasInFlightCompute() );
+  CHECK_FALSE( bench.requestCancel() );
+
+  bench.activate(); // opener runs → window exists
+  CHECK( bench.isActive() );
+
+  dirty = true;
+  CHECK( bench.isDirty() ); // #813: the shell close policy can see dirty state
+  dirty = false;
+
+  // In-flight compute is visible and cancel routes through the seam once.
+  inFlight = true;
+  CHECK( bench.hasInFlightCompute() );
+  CHECK( bench.requestCancel() );
+  CHECK( cancels == 1 );
+  CHECK_FALSE( bench.hasInFlightCompute() );
+  CHECK_FALSE( bench.requestCancel() ); // nothing running anymore
+
+  // Close delegation runs the window's own confirmation path.
+  CHECK( bench.requestClose() );
+  CHECK( closes == 1 );
+}
+
+TEST_CASE( "ExternalWindowWorkbench: absent hooks degrade to a safe default (#813)",
+           "[workbench][ux6]" )
+{
+  ensureApp();
+  sicnu::app::ExternalWindowWorkbench bench(
+      QStringLiteral( "obia" ), QStringLiteral( "对象级分类" ),
+      QStringLiteral( "seg_ent_tion" ), [] {} );
+  // No hooks installed at all: the lifecycle questions must still answer
+  // safely (clean, idle, nothing to cancel, close allowed).
+  CHECK_FALSE( bench.isDirty() );
+  CHECK_FALSE( bench.hasInFlightCompute() );
+  CHECK_FALSE( bench.requestCancel() );
+  CHECK( bench.requestClose() );
 }

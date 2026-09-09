@@ -69,6 +69,12 @@ class IWorkbench
     virtual bool isActive() const = 0;
     /// Unsaved interaction state (samples, GCPs, edits). Default: clean.
     virtual bool isDirty() const { return false; }
+    /// True while a TaskCenter-tracked compute runs inside the bench
+    /// (#813 unified lifecycle). Default: none.
+    virtual bool hasInFlightCompute() const { return false; }
+    /// Cancel the bench's in-flight compute through its TaskCenter seam.
+    /// Returns false when nothing is running. Never blocks. Default: none.
+    virtual bool requestCancel() { return false; }
     /// Ask the bench to close (confirming its own dirty state). Default: yes.
     virtual bool requestClose() { return true; }
     virtual QVariantMap saveState() const { return QVariantMap(); }

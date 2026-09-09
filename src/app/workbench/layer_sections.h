@@ -50,4 +50,44 @@ class LayerMetadataSection : public InspectorSection
     QLabel *m_body = nullptr;
 };
 
+/// Inspector 2.0 (Milestone G): vector structure — fields, feature count,
+/// CRS, editability and live selection count. Synchronous and bounded: the
+/// field list is capped (first N fields) and counts come from provider
+/// metadata, never a full scan.
+class VectorStructureSection : public InspectorSection
+{
+    Q_OBJECT
+  public:
+    explicit VectorStructureSection( QWidget *parent = nullptr );
+
+    QString sectionId() const override { return QStringLiteral( "vector" ); }
+    QString title() const override { return tr( "字段" ); }
+    int order() const override { return 20; }
+    bool supports( const SelectionContextSnapshot &snapshot ) const override;
+    void populate( const SelectionContextSnapshot &snapshot ) override;
+
+  private:
+    QLabel *m_body = nullptr;
+};
+
+/// Inspector 2.0 (Milestone G): SAR context — the detected product hint plus
+/// whatever standard SAR facts the provider metadata exposes (polarisation,
+/// orbit, incidence/look, calibration). Synchronous and bounded: metadata is
+/// scanned once, in memory, for a fixed key whitelist.
+class SarInfoSection : public InspectorSection
+{
+    Q_OBJECT
+  public:
+    explicit SarInfoSection( QWidget *parent = nullptr );
+
+    QString sectionId() const override { return QStringLiteral( "sar" ); }
+    QString title() const override { return tr( "SAR" ); }
+    int order() const override { return 30; }
+    bool supports( const SelectionContextSnapshot &snapshot ) const override;
+    void populate( const SelectionContextSnapshot &snapshot ) override;
+
+  private:
+    QLabel *m_body = nullptr;
+};
+
 } // namespace sicnu::app
