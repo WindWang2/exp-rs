@@ -23,6 +23,7 @@ set(SICNU_GEOSPATIAL_SOURCES
     cog/cog_validator.cpp
     convert/raster_convert.cpp
     stac/stac_mapper.cpp
+    stac/stac_client.cpp
     products/product_adapters.cpp
     products/product_registry.cpp
     doctor/data_doctor.cpp
