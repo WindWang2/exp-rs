@@ -213,7 +213,7 @@ void HelpContentStore::parseDocument( const Json::Value &document, HelpRegistry 
                 // operator id for parameter-id derivation: "operator.rs.sar_speckle"
                 // → "rs:sar_speckle"
                 const QString operatorId = d.id.mid( QString( "operator." ).size() )
-                                               .replace( u'.', u':', Qt::CaseSensitive );
+                                               .replace( QChar( u'.' ), QChar( u':' ) );
                 for ( const Json::Value &param : params ) {
                     const QString name = readString( param, "name" );
                     if ( name.isEmpty() ) {
