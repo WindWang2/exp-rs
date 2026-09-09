@@ -142,7 +142,13 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     // TICKET-40: enable the auto-display policy — assets added to the Data
     // Manager are presented on the active view automatically.
     if ( m_activeViewHost->displayManager() )
+    {
         m_activeViewHost->displayManager()->setAutoDisplayOnAssetAdded( true );
+        // The overview mirrors the main canvas's layers (the SAME QgsMapLayer
+        // instances) — the display manager must settle it too before a layer
+        // is destroyed (review L P1: overview painter threads).
+        m_activeViewHost->displayManager()->setOverviewCanvas( m_overviewCanvas );
+    }
     // Data Manager panel needs ProjectContext; setupDockWidgets runs earlier.
     qDebug() << "Setting up Data Manager panel...";
     setupDataManagerPanel();

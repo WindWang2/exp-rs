@@ -575,10 +575,10 @@ TEST_CASE( "Off-affinity const reader is flagged by the affinity contract (#800)
   // On-thread reader: normal behavior, no warning.
   REQUIRE( manager.asset( id ).has_value() );
 
-#ifdef QT_NO_DEBUG
-  // #800: the documented THREAD AFFINITY CONTRACT now warns on every
-  // off-affinity const read (and aborts under Q_ASSERT in debug builds, so
-  // this lane runs in release builds only).
+  // #800: the documented THREAD AFFINITY CONTRACT warns on every
+  // off-affinity const read. Enforcement is warning-only (review L: known
+  // sanctioned temporal readers still cross threads), so this runs in every
+  // lane.
   g_affinityWarnings.clear();
   QtMessageHandler previous = qInstallMessageHandler( affinityMessageHandler );
   std::thread reader( [&manager]() { (void)manager.assets(); } );
@@ -588,7 +588,4 @@ TEST_CASE( "Off-affinity const reader is flagged by the affinity contract (#800)
   const QString &captured = g_affinityWarnings;
   CHECK( captured.contains( QStringLiteral( "DataManager" ) ) );
   CHECK( captured.contains( QStringLiteral( "owning thread" ) ) );
-#else
-  SKIP( "debug builds abort at Q_ASSERT; the release lane verifies the warning" );
-#endif
 }

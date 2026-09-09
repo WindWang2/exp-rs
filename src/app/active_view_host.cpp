@@ -561,18 +561,21 @@ void ActiveViewHost::refreshCanvasLayers()
     if ( !m_mapCanvas || !m_displayManager )
         return;
 
-    // #793: the ACTIVE view's own layer tree is the visibility authority
-    // (view-local projection, ADR 0019). Reading the global project tree here
-    // made secondary views consume the main view's checked layers. For the
-    // main view the registered tree *is* the project root, so its behavior is
-    // unchanged; every other view resolves its own tree.
-    QgsLayerTree *activeTree = nullptr;
+    // This host drives the MAIN window's canvas. Layer visibility comes from
+    // the tree of the view that OWNS the canvas being driven (#793): for the
+    // main view the registered tree is the project root, so its behavior is
+    // unchanged. When a secondary view is active, its OWN canvas bridge is
+    // the authority — pouring the secondary tree's layer set into the main
+    // canvas would replace the main view's content with cloned layer
+    // instances (review L P2), so the main canvas is left untouched.
     const sicnu::display::DisplayViewId activeId = m_displayManager->activeViewId();
-    if ( !activeId.isNull() )
-        activeTree = m_displayManager->viewLayerTree( activeId );
-    if ( !activeTree )
-        activeTree = QgsProject::instance()->layerTreeRoot(); // unknown view fallback
-    const QList<QgsMapLayer *> layers = activeTree->checkedLayers();
+    if ( !activeId.isNull() && !( activeId == m_mainViewId ) )
+        return;
+
+    QgsLayerTree *mainTree = m_displayManager->viewLayerTree( m_mainViewId );
+    if ( !mainTree )
+        mainTree = QgsProject::instance()->layerTreeRoot();
+    const QList<QgsMapLayer *> layers = mainTree->checkedLayers();
     m_mapCanvas->setLayers( layers );
 
     if ( m_overviewCanvas )

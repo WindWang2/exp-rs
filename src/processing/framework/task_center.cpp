@@ -1419,8 +1419,12 @@ void TaskCenter::flushPendingLaunches()
             }
             else
             {
-                // Canceled while submit was in-flight: cancel the newly submitted job immediately
+                // Canceled while submit was in-flight: cancel the newly
+                // submitted job immediately, and drop the pre-registration —
+                // the task is terminal, so the job's terminal record would
+                // otherwise leave an orphan mapping behind (review L P3).
                 sicnu::jobs::JobEngine::instance().cancel( submittedId );
+                m_taskByJobId.remove( submittedId );
             }
         }
         if ( mapped )

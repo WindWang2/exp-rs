@@ -44,8 +44,15 @@ Diagnostic wrongThreadDiagnostic()
 
 /// #800 / THREAD AFFINITY CONTRACT (#703): the const readers have no internal
 /// locking either — reading off the owning thread races the mutators'
-/// QVector insert/reallocation and can observe a torn snapshot. Enforce the
-/// documented contract: warn always, abort in debug builds.
+/// QVector insert/reallocation and can observe a torn snapshot. The contract
+/// is enforced as a LOUD WARNING rather than an abort (review L P1): known
+/// sanctioned readers still run on JobEngine worker threads today (temporal
+/// operators parse collections via temporal_workspace's findByPath /
+/// temporalCollections reads on the worker), and aborting production jobs in
+/// debug builds would trade a torn-read hazard for a guaranteed crash. The
+/// worker-side readers must migrate to submission-time snapshots
+/// (task_center's #726 pattern); until then this warning marks every
+/// off-affinity read.
 void checkReaderAffinity( const QObject *manager )
 {
   if ( QThread::currentThread() == manager->thread() )
@@ -54,8 +61,6 @@ void checkReaderAffinity( const QObject *manager )
             "manager's owning thread %p (torn-read hazard, #703/#800)",
             static_cast<const void *>( QThread::currentThread() ),
             static_cast<const void *>( manager->thread() ) );
-  Q_ASSERT_X( QThread::currentThread() == manager->thread(), "DataManager",
-              "const accessor called off the manager's owning thread" );
 }
 
 /// Builds the diagnostics for refusing to remove a leased asset, shared by
@@ -2155,6 +2160,7 @@ DataManager::restoreTemporalCollection( CollectionId id, quint64 revision,
 
 std::optional<TemporalCollectionRecord> DataManager::temporalCollection( CollectionId id ) const
 {
+  checkReaderAffinity( this ); // #800 (review L: temporal readers still cross threads — see checkReaderAffinity)
   const auto it = m_impl->findTemporalCollection( id );
   if ( it == m_impl->temporalCollections.end() )
     return std::nullopt;
@@ -2170,6 +2176,7 @@ std::optional<TemporalCollectionRecord> DataManager::temporalCollection( Collect
 
 QVector<TemporalCollectionRecord> DataManager::temporalCollections() const
 {
+  checkReaderAffinity( this ); // #800 (review L: temporal readers still cross threads — see checkReaderAffinity)
   QVector<TemporalCollectionRecord> snapshots;
   snapshots.reserve( m_impl->temporalCollections.size() );
   for ( const Impl::TemporalCollectionRecord_ &c : m_impl->temporalCollections )

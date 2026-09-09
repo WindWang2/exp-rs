@@ -155,6 +155,9 @@ class SchemaFormBuilder : public QWidget
     /// Milestone H: re-evaluate x-ui-visible-when dependencies; hidden fields
     /// are excluded from values()/validate() until their condition holds.
     void updateConditionalVisibility();
+    /// Review L #5: canonical tooltip text (schema description + the
+    /// x-ui-recommended hint) shared by rebuild and validation-mark restore.
+    QString tooltipFor( const Field &field ) const;
 
     QVBoxLayout *m_root = nullptr;
     QList<Field> m_fields;

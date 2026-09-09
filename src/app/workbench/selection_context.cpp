@@ -177,10 +177,32 @@ QString unavailabilityReason( const SelectionContextSnapshot &s, const QString &
 {
     // Milestone E: deterministic reasons over prerequisiteFacts — an empty
     // return means "available", a non-empty return is the user-facing
-    // explanation the palette / tooltips show. Every prefix family that
-    // DECLARES an availability predicate must have a case here.
-    if ( commandId.startsWith( QStringLiteral( "layer.edit." ) ) )
+    // explanation the palette / tooltips show. Every command id that DECLARES
+    // an availability predicate must have a case here (review L #1: the old
+    // chain had a dead layer.edit.* case while the real edit commands fell
+    // through to an empty explanation).
+    if ( commandId == QLatin1String( "layer.toggleEditing" ) )
     {
+        if ( !vectorSelected( s ) )
+            return QObject::tr( "需要选中矢量图层" );
+        if ( !editingAvailable( s ) )
+            return QObject::tr( "当前图层不可编辑" );
+    }
+    else if ( commandId == QLatin1String( "layer.saveEdits" ) )
+    {
+        if ( !vectorSelected( s ) )
+            return QObject::tr( "需要选中矢量图层" );
+        if ( !editingActive( s ) )
+            return QObject::tr( "请先开启编辑会话" );
+    }
+    else if ( commandId == QLatin1String( "layer.attributeTable" ) )
+    {
+        if ( !vectorSelected( s ) )
+            return QObject::tr( "需要选中矢量图层" );
+    }
+    else if ( commandId.startsWith( QStringLiteral( "layer.edit." ) ) )
+    {
+        // Reserved edit-command family (no registrations yet).
         if ( !vectorSelected( s ) )
             return QObject::tr( "需要选中矢量图层" );
         if ( !editingAvailable( s ) )
@@ -266,8 +288,13 @@ void SelectionContext::attachLayerTree( QgsLayerTreeView *tree )
     if ( !tree || tree == m_layerTree )
         return;
     m_layerTree = tree;
-    connect( tree->selectionModel(), &QItemSelectionModel::selectionChanged,
-             this, &SelectionContext::scheduleRefresh );
+    // A view without a QTreeView model has no selection model yet (headless
+    // fixtures that skipped setModel()) — guard instead of connecting null.
+    if ( QItemSelectionModel *selectionModel = tree->selectionModel() )
+    {
+        connect( selectionModel, &QItemSelectionModel::selectionChanged,
+                 this, &SelectionContext::scheduleRefresh );
+    }
 }
 
 void SelectionContext::attachWorkbenchHost( WorkbenchHost *host )

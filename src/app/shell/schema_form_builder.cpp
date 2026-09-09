@@ -784,17 +784,9 @@ void SchemaFormBuilder::rebuild( const Json::Value &schema )
     // Accessible names for screen readers / keyboard navigation (Milestone G):
     // every labeled control carries its schema label.
     field.widget->setAccessibleName( label );
-    QString fieldDesc = memberString( e.prop, "description" );
+    const QString fieldDesc = tooltipFor( field );
     if ( !field.recommended.isEmpty() )
-    {
-      // Recommended values surface as a tooltip AND an accessible hint so
-      // keyboard-only users hear them too.
-      const QString recommendedText =
-          tr( "推荐值：%1" ).arg( field.recommended );
-      field.widget->setToolTip( recommendedText );
-      fieldDesc += fieldDesc.isEmpty() ? recommendedText
-                                       : QStringLiteral( " " ) + recommendedText;
-    }
+      field.widget->setToolTip( fieldDesc );
     if ( !fieldDesc.isEmpty() )
       field.widget->setAccessibleDescription( fieldDesc );
     if ( field.kind == FieldKind::Boolean && field.check )
@@ -1263,6 +1255,12 @@ void SchemaFormBuilder::setValues( const Json::Value &params )
     if ( field.crsSelector )
       field.crsSelector->blockSignals( false );
   }
+
+  // Review L #3: setValues suppresses every widget's signals, so the
+  // valuesChanged → updateValidationUi path cannot fire. Re-evaluate the
+  // x-ui-visible-when dependencies explicitly, or a field whose condition
+  // just became true stays hidden and excluded from values()/validate().
+  updateConditionalVisibility();
 }
 
 // ---------------------------------------------------------------------------
@@ -1431,9 +1429,10 @@ void SchemaFormBuilder::applyValidationMarks( const QList<ValidationIssue> &issu
     }
     else if ( hadError )
     {
-      // Clearing an error restores the schema description tooltip.
-      const QString desc = memberString( field.prop, "description" );
-      field.widget->setToolTip( desc );
+      // Clearing an error restores the schema description + recommended
+      // tooltip (review L #5: the recommended hint used to be lost after one
+      // error→fix cycle until the next rebuild).
+      field.widget->setToolTip( tooltipFor( field ) );
     }
   }
 
@@ -1442,6 +1441,7 @@ void SchemaFormBuilder::applyValidationMarks( const QList<ValidationIssue> &issu
     int errors = 0;
     int warnings = 0;
     QString firstError;
+    QString firstWarning;
     for ( const ValidationIssue &issue : issues )
     {
       if ( issue.isError )
@@ -1453,6 +1453,8 @@ void SchemaFormBuilder::applyValidationMarks( const QList<ValidationIssue> &issu
       else
       {
         ++warnings;
+        if ( firstWarning.isEmpty() )
+          firstWarning = issue.message;
       }
     }
     if ( errors > 0 )
@@ -1462,8 +1464,11 @@ void SchemaFormBuilder::applyValidationMarks( const QList<ValidationIssue> &issu
     }
     else if ( warnings > 0 )
     {
+      // Review L #4: the warning CONTENT must be reachable — the label names
+      // the first warning verbatim (not just a count), so keyboard-only and
+      // screen-reader users can act on it.
       m_validationLabel->setProperty( "state", QStringLiteral( "warn" ) );
-      m_validationLabel->setText( tr( "△ %1 条提示" ).arg( warnings ) );
+      m_validationLabel->setText( tr( "△ %1 条提示：%2" ).arg( warnings ).arg( firstWarning ) );
     }
     else
     {
@@ -1561,4 +1566,18 @@ void SchemaFormBuilder::updateConditionalVisibility()
       }
     }
   }
+}
+
+QString SchemaFormBuilder::tooltipFor( const Field &field ) const
+{
+  // Canonical tooltip: schema description first, then the recommended-value
+  // hint. Used by rebuild AND by applyValidationMarks when an error clears,
+  // so the recommended hint survives error→fix cycles (review L #5).
+  QString tip = memberString( field.prop, "description" );
+  if ( !field.recommended.isEmpty() )
+  {
+    const QString recommendedText = tr( "推荐值：%1" ).arg( field.recommended );
+    tip += tip.isEmpty() ? recommendedText : QStringLiteral( " " ) + recommendedText;
+  }
+  return tip;
 }

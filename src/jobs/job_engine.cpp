@@ -312,6 +312,11 @@ bool JobEngine::cancel( const std::string &jobId )
         }
         m_jobBodies.erase( jobId );
         m_cancelFlags.erase( jobId );
+        // #798: a cancelled transient-backed job must release its +1 capacity
+        // slot exactly like a finishing one, or the allowance leaks and the
+        // pick ceiling stays permanently raised (review L P2).
+        if ( m_transientBacked.erase( jobId ) > 0 && m_transientAllowance > 0 )
+          m_transientAllowance -= 1;
         copy = rec;
         changed = true;
         break;

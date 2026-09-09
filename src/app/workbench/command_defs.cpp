@@ -5,6 +5,7 @@
 
 #include "command_registry.h"
 #include "main_window.h"
+#include "workbench_host.h"
 
 #include "dialogs/extract_band_dialog.h"
 
@@ -93,7 +94,14 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         RS_CMD( d, "project.newLayout", QObject::tr( "新建布局..." ),
                 QObject::tr( "创建打印布局 / 出图。" ),
                 "print_l_yout", QObject::tr( "工程" ) );
-        d.handler = [window] { window->newLayout(); };
+        // The layout bench opens the same designer — keep the workbench id
+        // truthful when the surface goes through the command (review L #8).
+        d.handler = [window] {
+            if ( sicnu::app::WorkbenchHost *host = window->workbenchHost() )
+                host->activate( QStringLiteral( "layout" ) );
+            else
+                window->newLayout();
+        };
         registry->registerCommand( d );
     }
     {
@@ -260,28 +268,51 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         RS_CMD( d, "workbench.classify", QObject::tr( "分类工作区..." ),
                 QObject::tr( "打开监督/非监督分类交互工作区。" ),
                 "su_ervised", QObject::tr( "工作区" ) );
-        d.handler = [window] { window->openClassificationWindow(); };
+        // Route through WorkbenchHost::activate (review L #8): the opener
+        // alone left m_activeId on the previous bench, desyncing the switcher
+        // and the selection context's workbench projection.
+        d.handler = [window] {
+            if ( sicnu::app::WorkbenchHost *host = window->workbenchHost() )
+                host->activate( QStringLiteral( "classify" ) );
+            else
+                window->openClassificationWindow();
+        };
         registry->registerCommand( d );
     }
     {
         RS_CMD( d, "workbench.georefI2I", QObject::tr( "影像对影像配准 (I2I)..." ),
                 QObject::tr( "双画布 SRC|REF 同名点配准，支持 SIFT。不含 RPC。" ),
                 "coregistr_tion", QObject::tr( "工作区" ) );
-        d.handler = [window] { window->openGeorefImageToImage(); };
+        d.handler = [window] {
+            if ( sicnu::app::WorkbenchHost *host = window->workbenchHost() )
+                host->activate( QStringLiteral( "georef-i2i" ) );
+            else
+                window->openGeorefImageToImage();
+        };
         registry->registerCommand( d );
     }
     {
         RS_CMD( d, "workbench.georefI2M", QObject::tr( "影像对地图配准 (I2M)..." ),
                 QObject::tr( "源影像 + 主工程地图取点；支持 RPC Physical。" ),
                 "geocorrection", QObject::tr( "工作区" ) );
-        d.handler = [window] { window->openGeorefImageToMap(); };
+        d.handler = [window] {
+            if ( sicnu::app::WorkbenchHost *host = window->workbenchHost() )
+                host->activate( QStringLiteral( "georef-i2m" ) );
+            else
+                window->openGeorefImageToMap();
+        };
         registry->registerCommand( d );
     }
     {
         RS_CMD( d, "workbench.obia", QObject::tr( "对象级分类 (OBIA)..." ),
                 QObject::tr( "分割 + 对象特征 + 面向对象分类。" ),
                 "seg_ent_tion", QObject::tr( "工作区" ) );
-        d.handler = [window] { window->openObiaWindow(); };
+        d.handler = [window] {
+            if ( sicnu::app::WorkbenchHost *host = window->workbenchHost() )
+                host->activate( QStringLiteral( "obia" ) );
+            else
+                window->openObiaWindow();
+        };
         registry->registerCommand( d );
     }
 

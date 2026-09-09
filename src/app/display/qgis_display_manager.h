@@ -11,10 +11,13 @@
 #include "data/data_asset.h"
 #include "data/data_result.h"
 
+#include <QPointer>
+
 class QgsLayerTree;
 class QgsMapCanvas;
 class QgsMapLayer;
 class QgsMapLayerStore;
+class QgsMapOverviewCanvas;
 
 namespace sicnu::data {
 class DataManager;
@@ -211,6 +214,11 @@ public:
   /// secondary view). Nullptr for an unknown view or a tree that is gone.
   QgsLayerTree *viewLayerTree(DisplayViewId viewId) const;
 
+  /// Registers the (optional) overview canvas. The overview renders the same
+  /// QgsMapLayer instances as its main canvas, so layer-destroying operations
+  /// settle it alongside the view canvas. Safe to leave unset.
+  void setOverviewCanvas(QgsMapOverviewCanvas *overview);
+
 Q_SIGNALS:
   /// Fired when activeViewId changes.
   void activeViewChanged(DisplayViewId viewId);
@@ -229,6 +237,7 @@ Q_SIGNALS:
 private:
   struct Impl;
   std::unique_ptr<Impl> m_impl;
+  QPointer<QObject> m_overviewCanvas;
 };
 
 } // namespace sicnu::display

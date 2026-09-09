@@ -86,16 +86,13 @@ QAction *CommandRegistry::action( const QString &id, bool installShortcut )
         // #792: one installation per command — enforced per-id without ever
         // aborting the process. The old single-owner assert fired when a
         // SECOND command installed its own canonical shortcut, making the
-        // intended multi-command model impossible in debug builds.
+        // intended multi-command model impossible in debug builds. (The
+        // projection cache above already guarantees a command reaches this
+        // path once; the set documents and defends ownership.)
         if ( !def.shortcut.isEmpty() && !m_shortcutOwners.contains( id ) )
         {
             act->setShortcut( def.shortcut );
             m_shortcutOwners.insert( id );
-        }
-        else if ( m_shortcutOwners.contains( id ) )
-        {
-            qWarning() << "CommandRegistry: shortcut for" << id
-                       << "already installed on a projection — ignoring repeat install";
         }
     }
     connect( act, &QAction::triggered, this, [this, id] {

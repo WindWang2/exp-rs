@@ -345,3 +345,47 @@ TEST_CASE( "SchemaFormBuilder 3.0: x-ui-visible-when hides and excludes conditio
     CHECK( manualValues.isMember( "threshold" ) );
     CHECK( manualValues["threshold"].asDouble() == Catch::Approx( 0.5 ) );
 }
+
+// ── Review L #3: setValues re-evaluates conditional visibility ─────────────
+
+TEST_CASE( "SchemaFormBuilder 3.0: setValues refreshes x-ui-visible-when state",
+           "[ux6][schema-form][review-l]" )
+{
+    testApp();
+    Json::Value schema;
+    schema["type"] = "object";
+    Json::Value props;
+    Json::Value mode;
+    mode["type"] = "string";
+    Json::Value modes = Json::Value( Json::arrayValue );
+    modes.append( "auto" );
+    modes.append( "manual" );
+    mode["enum"] = modes;
+    mode["default"] = "auto";
+    props["mode"] = mode;
+
+    Json::Value thresh;
+    thresh["type"] = "number";
+    thresh["title"] = "阈值";
+    Json::Value when;
+    when["mode"] = "manual";
+    thresh["x-ui-visible-when"] = when;
+    thresh["default"] = 0.5;
+    props["threshold"] = thresh;
+    schema["properties"] = props;
+
+    SchemaFormBuilder form;
+    form.rebuild( schema );
+
+    // setValues suppresses widget signals — the conditional re-evaluation
+    // must still happen, or the dependent field stays hidden AND excluded
+    // from values()/validate() even though its condition now holds.
+    Json::Value values;
+    values["mode"] = "manual";
+    values["threshold"] = 0.5;
+    form.setValues( values );
+
+    Json::Value collected = form.values();
+    CHECK( collected.isMember( "threshold" ) );
+    CHECK( collected["threshold"].asDouble() == Catch::Approx( 0.5 ) );
+}

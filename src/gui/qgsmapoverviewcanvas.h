@@ -45,6 +45,15 @@ class GUI_EXPORT QgsMapOverviewCanvas : public QWidget
     //! renders overview and updates panning widget
     void refresh();
 
+    /**
+     * Stop any in-flight overview render AND block until its background
+     * painter thread has fully wound down. Callers about to destroy
+     * QgsMapLayers the overview may be drawing must call this first — the
+     * overview renders the SAME layer instances as its main canvas.
+     * \see QgsMapCanvas::stopRenderingAndSettle()
+     */
+    void stopRenderingAndSettle();
+
     //! changes background color
     void setBackgroundColor( const QColor &color );
 

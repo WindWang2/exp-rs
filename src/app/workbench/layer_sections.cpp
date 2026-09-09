@@ -18,6 +18,7 @@
 #include <algorithm>
 
 #include <QStringList>
+#include <QTextDocument>
 
 namespace sicnu::app
 {
@@ -213,6 +214,10 @@ void VectorStructureSection::populate( const SelectionContextSnapshot &snapshot 
                                                            : tr( "编辑中" ) )
                                   : ( vector->readOnly() ? tr( "只读" ) : tr( "可编辑（未开始）" ) );
 
+    // Single-pass multi-arg substitution (review L #6): layer-provided text
+    // may contain "%N" lookalikes — chained single-arg .arg() calls would let
+    // them capture later values. One .arg(a1..a9) pass never re-scans
+    // substituted content.
     m_body->setText(
         tr( "<b>%1</b><br>"
             "<table cellspacing='2'>"
@@ -224,14 +229,16 @@ void VectorStructureSection::populate( const SelectionContextSnapshot &snapshot 
             "<tr><td>字段数</td><td>%7</td></tr>"
             "%8%9"
             "</table>" )
-            .arg( escapeCell( vector->name() ) )
-            .arg( vector->featureCount() )
-            .arg( vector->selectedFeatureCount() )
-            .arg( escapeCell( QgsWkbTypes::displayString( vector->wkbType() ) ) )
-            .arg( escapeCell( vector->crs().isValid() ? vector->crs().authid() : tr( "未定义" ) ) )
-            .arg( editState )
-            .arg( fields.count() )
-            .arg( fieldRows.join( QString() ), overflow ) );
+            .arg( escapeCell( vector->name() ),
+                  QString::number( vector->featureCount() ),
+                  QString::number( vector->selectedFeatureCount() ),
+                  escapeCell( QgsWkbTypes::displayString( vector->wkbType() ) ),
+                  escapeCell( vector->crs().isValid() ? vector->crs().authid()
+                                                      : tr( "未定义" ) ),
+                  editState,
+                  QString::number( fields.count() ),
+                  fieldRows.join( QString() ),
+                  overflow ) );
 }
 
 // ── SAR context (Inspector 2.0, Milestone G) ──────────────────────────────
@@ -269,26 +276,31 @@ void SarInfoSection::populate( const SelectionContextSnapshot &snapshot )
     // Standard SAR facts commonly present in product metadata. Extracted from
     // the authoritative provider metadata (in memory, one bounded pass).
     static const QStringList sarKeys = {
-        QStringLiteral( "POLARISATION" ), QStringLiteral( "polarization" ),
-        QStringLiteral( "ORBIT" ),        QStringLiteral( "orbit" ),
-        QStringLiteral( "INCIDENCE" ),    QStringLiteral( "incidence" ),
-        QStringLiteral( "LOOK" ),         QStringLiteral( "look" ),
-        QStringLiteral( "CALIBRATION" ),  QStringLiteral( "calibration" ),
-        QStringLiteral( "PASS" ),         QStringLiteral( "SENSOR" ),
-        QStringLiteral( "BEAM" ),
+        QStringLiteral( "polarisation" ), QStringLiteral( "polarization" ),
+        QStringLiteral( "orbit" ),        QStringLiteral( "incidence" ),
+        QStringLiteral( "look" ),         QStringLiteral( "calibration" ),
+        QStringLiteral( "pass" ),         QStringLiteral( "sensor" ),
+        QStringLiteral( "beam" ),
     };
 
-    // The provider's HTML metadata already renders key/value pairs; pick the
-    // lines mentioning SAR-relevant keys instead of dumping everything.
-    const QStringList lines = raster->htmlMetadata().split(QLatin1Char('\n'));
+    // The provider's htmlMetadata() is an HTML document — render its TEXT in
+    // the RichText label, not escaped markup soup (review L #7). Matching is
+    // case-insensitive so title-case variants ("Polarisation") hit too.
+    QTextDocument htmlText;
+    htmlText.setHtml( raster->htmlMetadata() );
+    const QStringList lines = htmlText.toPlainText().split( QLatin1Char( '\n' ) );
     QStringList facts;
     for ( const QString &line : lines )
     {
+        const QString trimmed = line.trimmed();
+        if ( trimmed.isEmpty() )
+            continue;
+        const QString lower = trimmed.toLower();
         for ( const QString &key : sarKeys )
         {
-            if ( line.contains( key ) )
+            if ( lower.contains( key ) )
             {
-                facts += tr( "<tr><td>%1</td></tr>" ).arg( escapeCell( line.trimmed() ) );
+                facts += tr( "<tr><td>%1</td></tr>" ).arg( escapeCell( trimmed ) );
                 break;
             }
         }
@@ -296,6 +308,8 @@ void SarInfoSection::populate( const SelectionContextSnapshot &snapshot )
             break;
     }
 
+    // Single-pass multi-arg (review L #6): metadata-derived text may contain
+    // "%N" lookalikes that chained .arg() calls would substitute into.
     m_body->setText(
         tr( "<b>%1</b><br>"
             "识别为 SAR 产品（基于数据源/名称启发式，可被显式判定覆盖）。"
@@ -305,11 +319,12 @@ void SarInfoSection::populate( const SelectionContextSnapshot &snapshot )
             "%4"
             "</table>"
             "<br>%5" )
-            .arg( escapeCell( raster->name() ) )
-            .arg( raster->bandCount() )
-            .arg( escapeCell( raster->crs().isValid() ? raster->crs().authid() : tr( "未定义" ) ) )
-            .arg( facts.join( QString() ) )
-            .arg( facts.isEmpty()
+            .arg( escapeCell( raster->name() ),
+                  QString::number( raster->bandCount() ),
+                  escapeCell( raster->crs().isValid() ? raster->crs().authid()
+                                                      : tr( "未定义" ) ),
+                  facts.join( QString() ),
+                  facts.isEmpty()
                       ? tr( "提供方元数据中未发现极化/轨道/入射角等标准 SAR 字段。" )
                       : QString() ) );
 }

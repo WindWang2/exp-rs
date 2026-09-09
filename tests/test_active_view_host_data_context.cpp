@@ -455,14 +455,20 @@ TEST_CASE( "refreshCanvasLayers reads the ACTIVE view's tree, not the global pro
   if ( QgsLayerTreeLayer *mainNode =
            project->layerTreeRoot()->findLayer( context->displayManager().mapLayer( loaded.value() )->id() ) )
     mainNode->setItemVisibilityChecked( false );
+  // The main view applies its own tree state while it is the active view.
+  host.refreshCanvasLayers();
+  REQUIRE( canvas.layers().isEmpty() );
 
-  // With the SECOND view active, the layer set must come from the SECOND
-  // view's tree (checked there) — the old global-project read returned the
-  // main tree's (unchecked) state and corrupted the secondary view (#793).
+  // Switching to the SECOND view must NOT touch the main canvas: each view's
+  // own canvas bridge is the authority for its own canvas. The earlier
+  // draft of the fix poured the secondary tree's (checked) layers into the
+  // MAIN canvas, replacing the main view's content with cloned instances —
+  // exactly the cross-view contamination this case pins (review L P2).
   REQUIRE( host.setActiveViewId( secondViewId ) );
   host.refreshCanvasLayers();
-  REQUIRE( canvas.layers().size() == 1 );
-  CHECK( canvas.layers().first() == secondLayer );
+  CHECK( canvas.layers().isEmpty() );          // main canvas untouched
+  CHECK( canvas2.layers().size() == 1 );       // secondary canvas shows its own layer
+  CHECK( canvas2.layers().first() == secondLayer );
 
   // Back on the main view, its own (unchecked) state applies again.
   REQUIRE( host.setActiveViewId( context->mainViewId() ) );
