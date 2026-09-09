@@ -1,0 +1,182 @@
+[
+  {
+    "id": "concept.rs.ndvi",
+    "title": "NDVI（归一化植被指数）",
+    "summary": "利用近红外与红光反射率反差指示绿色植被活性，值域 −1..1。",
+    "category": "光学遥感",
+    "keywords": ["NDVI", "植被指数", "vegetation index"],
+    "algorithm": {
+      "whatItDoes": "NDVI = (NIR − Red) / (NIR + Red)。健康植被近红外高反射、红光强吸收，比值因此对叶绿素含量与冠层覆盖敏感。",
+      "whenToUse": "植被覆盖度监测、长势对比、物候分析；也用作分类特征。",
+      "assumptions": ["输入为地表反射率（未大气校正时阈值经验需重估）", "红/近红外波段对应关系正确"],
+      "limitations": ["高生物量区易饱和", "土壤背景与大气影响低覆盖区", "跨传感器比较需一致性处理"]
+    },
+    "related": ["operator.rs.ndvi", "operator.rs.spectral_index", "concept.rs.temporal_analysis"],
+    "docs": ["docs/processing/foundation-5.md"]
+  },
+  {
+    "id": "concept.rs.speckle",
+    "title": "SAR 相干斑点 (Speckle)",
+    "summary": "相干成像导致的多乘性噪声，使同质区域灰度呈颗粒状起伏。",
+    "category": "SAR",
+    "keywords": ["speckle", "斑点", "相干", "乘性噪声"],
+    "algorithm": {
+      "whatItDoes": "SAR 相干成像使分辨单元内散射体干涉，强度呈负指数分布，等效视数 (ENL) 越低斑点越强。",
+      "whenToUse": "任何 SAR 解译/分类/变化检测前都需要考虑斑点抑制；多视处理或自适应滤波是主要手段。",
+      "assumptions": ["滤波统计模型（Lee/Kuan 等）假设乘性噪声", "强度(功率)域数据"],
+      "limitations": ["滤波在抑斑同时损失分辨率与纹理", "极化/干涉处理链需谨慎选择滤波位置"]
+    },
+    "related": ["operator.rs.sar_speckle", "operator.rs.sar_backscatter"],
+    "docs": ["docs/processing/sar-domain.md"]
+  },
+  {
+    "id": "concept.rs.rpc",
+    "title": "RPC 与控制点",
+    "summary": "有理多项式系数描述像方-地物几何映射；GCP 用于残差改正。",
+    "category": "几何处理",
+    "keywords": ["RPC", "GCP", "控制点", "正射", "georeferencing"],
+    "algorithm": {
+      "whatItDoes": "RPC 用有理多项式把像点坐标映射到地面坐标（含高程），配合 DEM 可做正射纠正；控制点用于拟合/改正系统性偏移。",
+      "whenToUse": "影像无精确轨道参数、或需要更高几何精度时，通过 GCP/RPC 联合解算。",
+      "assumptions": ["RPC 系数与影像匹配", "控制点分布均匀且地物 identifiable"],
+      "limitations": ["控制点过少或分布集中会造成外推失真", "地形起伏大时无 DEM 的多项式纠正会产生高程相关误差"]
+    },
+    "related": ["workbench.georef_i2m", "workbench.georef_i2i", "command.rs.ortho"],
+    "docs": ["docs/ui-architecture.md"]
+  },
+  {
+    "id": "concept.rs.change_detection",
+    "title": "变化检测",
+    "summary": "对两期配准影像比较光谱/后向散射差异，提取变化图斑。",
+    "category": "变化检测",
+    "keywords": ["变化检测", "CVA", "change detection"],
+    "algorithm": {
+      "whatItDoes": "差值/比值逐波段比较；CVA 在多维特征空间量测变化幅度；MAD/irmad 通过典型相关分离变化成分。",
+      "whenToUse": "两期数据已配准且辐射一致时；宜先做相对辐射归一化。",
+      "assumptions": ["两期影像几何配准（通常要求优于 1 像元）", "辐射基准可比"],
+      "limitations": ["季节/物候差异会造成伪变化", "阈值选择需结合样本或统计"]
+    },
+    "related": ["operator.rs.change_detection", "operator.rs.change_cva", "operator.rs.change_irmad"],
+    "docs": ["docs/processing/foundation-5.md"]
+  },
+  {
+    "id": "concept.rs.temporal_analysis",
+    "title": "时间序列分析",
+    "summary": "以像元/对象为单位分析跨期指数曲线的趋势、物候与突变。",
+    "category": "时序分析",
+    "keywords": ["时间序列", "物候", "谐波", "趋势", "temporal"],
+    "algorithm": {
+      "whatItDoes": "将多期观测组成时间序列；谐波拟合刻画年内周期，Sen 斜率/Theil-Sen 估计趋势，断点检测定位突变时间。",
+      "whenToUse": "耕地物候、植被退化、城市扩张等需要时间维度的监测。",
+      "assumptions": ["时序长度与采样密度足以刻画目标过程", "云污染已被掩膜/插补控制"],
+      "limitations": ["不规则采样会引入伪周期", "谐波阶数过高会拟合噪声"]
+    },
+    "related": ["operator.rs.temporal_harmonic_fit", "operator.rs.temporal_sen_trend", "operator.rs.temporal_breakpoints"],
+    "docs": ["docs/temporal/"]
+  },
+  {
+    "id": "concept.dataset.spatial_leakage",
+    "title": "空间泄漏 (Spatial Leakage)",
+    "summary": "训练/验证样本空间自相关导致的精度虚高，是样本划分的大忌。",
+    "category": "数据与工程",
+    "keywords": ["空间泄漏", "spatial leakage", "样本划分", "过拟合"],
+    "algorithm": {
+      "whatItDoes": "相邻像元/样区高度相关，随机划分会让“几乎相同”的样本同时出现在训练与验证集，精度评估失去意义。",
+      "whenToUse": "任何涉及精度评估的样本划分；应使用空间分块 (spatial block) 或按空间去重的划分策略。",
+      "assumptions": ["存在空间自相关（遥感数据普遍成立）"],
+      "limitations": ["空间分块会减少有效样本量，需要在偏差与方差之间权衡"]
+    },
+    "related": ["workbench.classify", "operator.rs.supervised_classification", "diagnostic.dataset.label.unknown_class"],
+    "docs": ["docs/datasets/"]
+  },
+  {
+    "id": "concept.dataset.provenance",
+    "title": "数据溯源",
+    "summary": "记录数据“从哪来、经过什么处理”，让结果可复现、可审计。",
+    "category": "数据与工程",
+    "keywords": ["溯源", "provenance", "复现", "血缘"],
+    "algorithm": {
+      "whatItDoes": "每个派生资产记录输入、参数与执行指纹，形成血缘链；实验记录引用同一指纹即可复现。",
+      "whenToUse": "正式成果生产、多人协作与论文可复现性场景。",
+      "assumptions": [],
+      "limitations": ["细粒度溯源有存储与记录开销"]
+    },
+    "related": ["workbench.data_manager"],
+    "docs": ["docs/experiments/"]
+  },
+  {
+    "id": "concept.rs.radiometric_chain",
+    "title": "辐射处理链",
+    "summary": "DN → 辐亮度 → 表观反射率 → 地表反射率的定标与大气校正顺序。",
+    "category": "光学遥感",
+    "keywords": ["辐射定标", "大气校正", "反射率", "radiometric"],
+    "algorithm": {
+      "whatItDoes": "先以增益/偏置把 DN 转辐亮度，再除以太阳辐照度得表观反射率，最后用大气模型（DOS/6S/QUAC）估计地表反射率。",
+      "whenToUse": "定量反演、跨期比较、指数阈值分析前应完成整链处理。",
+      "assumptions": ["已知传感器定标参数", "大气校正模型适用当前大气状况"],
+      "limitations": ["DOS 假设无大气漫反射、对浑浊大气误差大", "误差沿处理链传播"]
+    },
+    "related": ["operator.rs.dn_to_radiance", "operator.rs.radiometric_calibration", "operator.rs.atmospheric_dos1"],
+    "docs": ["docs/processing/grid-and-radiometric-policy.md"]
+  },
+  {
+    "id": "concept.rs.topographic_effects",
+    "title": "地形效应",
+    "summary": "坡度坡向改变局部入射/反射几何，造成山区影像的阴阳坡辐射差异。",
+    "category": "地形",
+    "keywords": ["地形校正", "坡度", "坡向", "光照", "topographic"],
+    "algorithm": {
+      "whatItDoes": "由 DEM 计算局部入射角（余弦校正/C 校正/SCS+C 或 Minnaert），把倾斜面观测值归一到标准光照。",
+      "whenToUse": "山区植被/土地覆盖分析、跨坡面比较与镶嵌前。",
+      "assumptions": ["DEM 与影像配准", "朗伯或参数化非朗伯假设"],
+      "limitations": ["陡坡与低太阳高度角下校正可能过补偿", "DEM 分辨率影响校正质量"]
+    },
+    "related": ["operator.rs.topographic_correction", "operator.rs.terrain_analysis"],
+    "docs": ["docs/processing/grid-and-radiometric-policy.md"]
+  },
+  {
+    "id": "concept.rs.sar_geometry",
+    "title": "SAR 几何：侧视、入射角与叠掩",
+    "summary": "侧视成像带来透视收缩、叠掩与阴影，几何与光学影像本质不同。",
+    "category": "SAR",
+    "keywords": ["SAR", "入射角", "叠掩", "layover", "阴影", "look direction"],
+    "algorithm": {
+      "whatItDoes": "SAR 按斜距成像，朝向雷达的坡面被压缩（透视收缩）或翻转（叠掩），背坡被阴影遮挡；地形平坦化 (radiometric terrain flattening) 以 Γ⁰ 归一化后向散射。",
+      "whenToUse": "山地 SAR 处理必须考虑；辐射地形 flattened 数据更适合时序与比较。",
+      "assumptions": ["需要 DEM 与正确的飞行/视线几何"],
+      "limitations": ["叠掩/阴影区无法恢复信息", "错误视线方向会使几何旋转约 90°"]
+    },
+    "related": ["operator.rs.sar_terrain_flatten", "diagnostic.rs.sar.geometry.missing_look_direction"],
+    "docs": ["docs/processing/sar-domain.md"]
+  },
+  {
+    "id": "concept.rs.determinism",
+    "title": "确定性等级 (Determinism Grade)",
+    "summary": "算子并行执行下结果“逐位一致”或“容差一致”的显式声明。",
+    "category": "处理框架",
+    "keywords": ["确定性", "determinism", "可复现", "容差"],
+    "algorithm": {
+      "whatItDoes": "bit-exact 表示与调度无关的逐位一致；tolerance 表示并行浮点归约顺序差异在文档化相对容差内。离散判别输出（类别图）在两种等级下都应稳定。",
+      "whenToUse": "比较/复现处理结果、评估算法替换时查阅；串行执行始终是位一致的回归基线。",
+      "assumptions": [],
+      "limitations": ["容差等级算子做逐位比较时会误报差异"]
+    },
+    "related": ["operator.rs.pca", "operator.rs.change_irmad"],
+    "docs": ["docs/adr/"]
+  },
+  {
+    "id": "concept.rs.memory_policy",
+    "title": "内存策略 (Memory Policy)",
+    "summary": "算子处理大栅格的内存行为声明：流式/多遍/整幅/外部进程。",
+    "category": "处理框架",
+    "keywords": ["内存", "流式", "streaming", "大影像"],
+    "algorithm": {
+      "whatItDoes": "streaming 算子按分块流过数据（O(tile) 内存）；multipass 需要全局统计；full_raster 整幅载入；external_process 委托外部进程；unsupported 明确声明不适合大影像。",
+      "whenToUse": "预估大影像任务的内存与性能、选择处理路径时参考。",
+      "assumptions": [],
+      "limitations": ["流式算子对需要全局上下文的算法（如全局 PCA）不适用"]
+    },
+    "related": ["operator.rs.mosaic", "operator.rs.pca"],
+    "docs": ["docs/processing/validation-policy.md"]
+  }
+]

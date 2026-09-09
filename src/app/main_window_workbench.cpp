@@ -9,6 +9,7 @@
  ***************************************************************************/
 #include "main_window.h"
 
+#include "app/help/help_system_controller.h"
 #include "panels/data_manager_panel.h"
 #include "panels/workspace_browser_panel.h"
 #include "workbench/adapters.h"
@@ -218,6 +219,28 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
              [this]( const sicnu::app::SelectionContextSnapshot & ) {
                  m_commandRegistry->refreshAll();
              } );
+
+    // ── Unified Help 6.0 ─────────────────────────────────────────────
+    // Compose the help knowledge base from the live registries + embedded
+    // content, bind command help to every projection action (unavailable
+    // commands explain themselves via availability facts), install the F1
+    // context filter and track the active workbench for context resolution.
+    {
+        QStringList compositionErrors;
+        sicnu::app::HelpSystemController::instance().compose( *m_commandRegistry,
+                                                              &compositionErrors );
+        sicnu::app::HelpSystemController::instance().attachCommandRegistry(
+            *m_commandRegistry, [this] { return m_selectionContext->snapshot(); } );
+        sicnu::app::HelpSystemController::instance().installF1Filter();
+        sicnu::app::HelpSystemController::instance().setWorkbenchContext(
+            QStringLiteral( "workbench.map" ) );
+        connect( m_workbenchHost, &sicnu::app::WorkbenchHost::activeWorkbenchChanged, this,
+                 []( const QString &benchId ) {
+                     // bench ids may contain '-' (help-id grammar uses '_')
+                     sicnu::app::HelpSystemController::instance().setWorkbenchContext(
+                         QStringLiteral( "workbench.%1" ).arg( QString( benchId ).replace( u'-', u'_' ) ) );
+                 } );
+    }
 
     // ── Command palette (keyboard-first surface, owns no execution) ──
     m_commandPalette = new sicnu::app::CommandPalette( m_commandRegistry, this );

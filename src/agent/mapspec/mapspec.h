@@ -22,7 +22,6 @@
 //
 
 #include <json/json.h>
-
 #include "../sicnu_agent_export.h"
 
 #include <string>

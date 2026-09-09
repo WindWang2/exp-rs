@@ -92,6 +92,10 @@ if(TARGET qgis_app_obia)
     target_link_libraries(qgis_app_obia PUBLIC Sicnu::session_map)
 endif()
 
+# Unified Help System 6.0 GUI projections (Help Center, F1, binders).
+# Defined before the shell so Sicnu::help_gui resolves below.
+add_subdirectory(help)
+
 add_executable(sicnu_geo_rs
     main.cpp
     main_window.cpp
@@ -288,6 +292,9 @@ add_executable(sicnu_geo_rs
     selecttools/qgsmaptoolselectutils.cpp
 
     ${CMAKE_SOURCE_DIR}/resources/icons.qrc
+    # Unified Help 6.0: content must live in the executable — RCC
+    # initializers inside static libraries are dropped by the linker.
+    ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc
 )
 
 # Desktop shell embeds no QML; skip Qt's configure-time qmlimportscanner pass
@@ -324,6 +331,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     qgis_app_georef
     Sicnu::qgis_display
     Sicnu::session_map
+    Sicnu::help_gui
     sicnu_core
     sicnu_processing
     sicnu_operators

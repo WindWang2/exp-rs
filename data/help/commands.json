@@ -1,0 +1,726 @@
+[
+  {
+    "id": "command.project.new",
+    "purpose": "开始一个新的制图或分析任务，获得干净的图层与视图状态。",
+    "prerequisites": [
+      "当前工程未保存的修改已确认处理"
+    ],
+    "suggestedNextAction": "通过“添加栅格图层”或“添加矢量图层”加载数据",
+    "related": [
+      "command.project.open",
+      "command.layer.addRaster",
+      "command.layer.addVector"
+    ],
+    "keywords": [
+      "新工程",
+      "初始化",
+      "new project"
+    ]
+  },
+  {
+    "id": "command.project.open",
+    "purpose": "恢复一个已保存的工程，包括图层、样式与视图状态。",
+    "prerequisites": [
+      "已知工程文件路径"
+    ],
+    "suggestedNextAction": "在图层树中检查数据源是否完整",
+    "related": [
+      "command.project.save",
+      "command.project.saveAs"
+    ],
+    "keywords": [
+      "打开工程",
+      "工程文件",
+      "open project"
+    ]
+  },
+  {
+    "id": "command.project.save",
+    "purpose": "把图层列表、符号化与视图状态持久化，便于下次继续。",
+    "prerequisites": [
+      "工程已有保存路径（首次保存请用另存为）"
+    ],
+    "suggestedNextAction": "定期保存以避免丢失编辑成果",
+    "related": [
+      "command.project.saveAs",
+      "command.layer.saveEdits"
+    ],
+    "keywords": [
+      "保存",
+      "save"
+    ]
+  },
+  {
+    "id": "command.project.saveAs",
+    "purpose": "将当前工程另存为新文件，用于分叉出不同的工作版本。",
+    "related": [
+      "command.project.save"
+    ],
+    "keywords": [
+      "另存为",
+      "save as"
+    ]
+  },
+  {
+    "id": "command.project.importLayer",
+    "purpose": "把本地栅格/矢量数据接入当前工程，是所有分析的第一步。",
+    "prerequisites": [
+      "数据文件可读且格式受支持 (GeoTIFF、Shapefile、GeoPackage 等)"
+    ],
+    "suggestedNextAction": "选中图层后运行处理工具",
+    "related": [
+      "command.layer.addRaster",
+      "command.layer.addVector",
+      "command.project.stacBrowse"
+    ],
+    "keywords": [
+      "导入",
+      "数据接入",
+      "import"
+    ]
+  },
+  {
+    "id": "command.project.stacBrowse",
+    "purpose": "通过 STAC 目录检索和下载遥感影像（如 Sentinel-2、Landsat），替代手工下载。",
+    "prerequisites": [
+      "可访问的 STAC API 地址"
+    ],
+    "suggestedNextAction": "检索结果可直接加入数据管理器",
+    "related": [
+      "command.project.importLayer"
+    ],
+    "keywords": [
+      "STAC",
+      "检索",
+      "目录",
+      "catalog"
+    ]
+  },
+  {
+    "id": "command.project.newLayout",
+    "purpose": "创建打印布局，把地图、图例、比例尺等制图元素组合成成果图。",
+    "prerequisites": [
+      "至少一个数据图层"
+    ],
+    "related": [
+      "workbench.layout"
+    ],
+    "keywords": [
+      "布局",
+      "出图",
+      "制图",
+      "layout"
+    ]
+  },
+  {
+    "id": "command.project.exit",
+    "purpose": "关闭应用程序。",
+    "prerequisites": [
+      "未保存修改已确认"
+    ],
+    "keywords": [
+      "退出",
+      "exit"
+    ]
+  },
+  {
+    "id": "command.layer.addRaster",
+    "purpose": "加载栅格数据（影像、DEM、分类结果等）到工程。",
+    "prerequisites": [
+      "文件路径可访问"
+    ],
+    "suggestedNextAction": "缩放到图层范围检查显示效果",
+    "related": [
+      "command.layer.addVector",
+      "command.layer.zoomTo"
+    ],
+    "keywords": [
+      "栅格",
+      "影像",
+      "raster"
+    ]
+  },
+  {
+    "id": "command.layer.addVector",
+    "purpose": "加载矢量数据（点/线/面）到工程，用于标注、采样或边界。",
+    "prerequisites": [
+      "文件路径可访问"
+    ],
+    "related": [
+      "command.layer.addRaster",
+      "command.layer.attributeTable"
+    ],
+    "keywords": [
+      "矢量",
+      "shapefile",
+      "vector"
+    ]
+  },
+  {
+    "id": "command.layer.properties",
+    "purpose": "查看与修改当前图层的元信息：CRS、波段、符号化、直方图等。",
+    "prerequisites": [
+      "已选中一个图层"
+    ],
+    "related": [
+      "command.layer.zoomTo"
+    ],
+    "keywords": [
+      "属性",
+      "元数据",
+      "properties"
+    ]
+  },
+  {
+    "id": "command.layer.remove",
+    "purpose": "从工程移除不再需要的图层，保持工作区整洁。删除的只是引用，不会删除磁盘文件。",
+    "prerequisites": [
+      "已选中一个图层"
+    ],
+    "keywords": [
+      "移除",
+      "删除图层",
+      "remove"
+    ]
+  },
+  {
+    "id": "command.layer.zoomTo",
+    "purpose": "快速定位到当前图层的地理范围，检查数据覆盖区域。",
+    "prerequisites": [
+      "已选中一个图层"
+    ],
+    "related": [
+      "command.map.zoomFull"
+    ],
+    "keywords": [
+      "缩放",
+      "定位",
+      "zoom"
+    ]
+  },
+  {
+    "id": "command.layer.toggleEditing",
+    "purpose": "开启或关闭矢量编辑会话，是数字化、修改几何与属性的前置状态。",
+    "prerequisites": [
+      "已选中矢量图层",
+      "图层格式支持写入"
+    ],
+    "suggestedNextAction": "编辑完成后执行“保存编辑”",
+    "related": [
+      "command.layer.saveEdits",
+      "command.layer.attributeTable"
+    ],
+    "keywords": [
+      "编辑",
+      "数字化",
+      "editing"
+    ]
+  },
+  {
+    "id": "command.layer.saveEdits",
+    "purpose": "把编辑会话中的几何/属性修改写回数据源，避免意外丢失。",
+    "prerequisites": [
+      "当前矢量图层处于编辑状态"
+    ],
+    "suggestedNextAction": "继续编辑或关闭编辑会话",
+    "related": [
+      "command.layer.toggleEditing"
+    ],
+    "keywords": [
+      "保存编辑",
+      "save edits"
+    ]
+  },
+  {
+    "id": "command.layer.newVector",
+    "purpose": "创建新的矢量图层用于采集样本点、训练区或标注边界。",
+    "related": [
+      "command.layer.toggleEditing",
+      "workbench.classify"
+    ],
+    "keywords": [
+      "新建矢量",
+      "shapefile"
+    ]
+  },
+  {
+    "id": "command.layer.attributeTable",
+    "purpose": "查看/编辑矢量属性表，检查类别字段与样本属性。",
+    "prerequisites": [
+      "已选中矢量图层"
+    ],
+    "related": [
+      "command.layer.toggleEditing"
+    ],
+    "keywords": [
+      "属性表",
+      "attribute table"
+    ]
+  },
+  {
+    "id": "command.map.zoomIn",
+    "purpose": "放大地图视图，查看更小范围的细节。",
+    "related": [
+      "command.map.zoomOut",
+      "command.map.zoomFull"
+    ],
+    "keywords": [
+      "放大",
+      "zoom in"
+    ]
+  },
+  {
+    "id": "command.map.zoomOut",
+    "purpose": "缩小地图视图，查看更大范围。",
+    "related": [
+      "command.map.zoomIn"
+    ],
+    "keywords": [
+      "缩小",
+      "zoom out"
+    ]
+  },
+  {
+    "id": "command.map.zoomFull",
+    "purpose": "缩放到所有图层的整体范围，快速回到全局视角。",
+    "related": [
+      "command.layer.zoomTo"
+    ],
+    "keywords": [
+      "全图",
+      "全局",
+      "full extent"
+    ]
+  },
+  {
+    "id": "command.map.pan",
+    "purpose": "平移地图，不改变比例尺。",
+    "related": [
+      "command.map.zoomIn"
+    ],
+    "keywords": [
+      "平移",
+      "pan"
+    ]
+  },
+  {
+    "id": "command.map.identify",
+    "purpose": "点击查询像元或要素的属性值，核对光谱值、类别码等。",
+    "related": [
+      "command.map.measureDistance"
+    ],
+    "keywords": [
+      "识别",
+      "查询",
+      "identify"
+    ]
+  },
+  {
+    "id": "command.map.measureDistance",
+    "purpose": "量测两点间距离，用于检查样本间距、地物尺寸。",
+    "related": [
+      "command.map.measureArea"
+    ],
+    "keywords": [
+      "测距",
+      "距离",
+      "measure"
+    ]
+  },
+  {
+    "id": "command.map.measureArea",
+    "purpose": "量测多边形面积，例如估算样区覆盖面积。",
+    "related": [
+      "command.map.measureDistance"
+    ],
+    "keywords": [
+      "测面",
+      "面积",
+      "area"
+    ]
+  },
+  {
+    "id": "command.map.refresh",
+    "purpose": "重绘地图，刷新渲染缓存。",
+    "keywords": [
+      "刷新",
+      "refresh"
+    ]
+  },
+  {
+    "id": "command.map.compareLayers",
+    "purpose": "并排对比两个时相或两种处理结果，直观检查变化与效果差异。",
+    "prerequisites": [
+      "工程中至少两个图层"
+    ],
+    "related": [
+      "command.map.swipe"
+    ],
+    "keywords": [
+      "对比",
+      "卷帘",
+      "compare"
+    ]
+  },
+  {
+    "id": "command.map.swipe",
+    "purpose": "卷帘式对比上下图层，拖动分割线即可逐像元检查处理前后差异。",
+    "related": [
+      "command.map.compareLayers"
+    ],
+    "keywords": [
+      "卷帘",
+      "swipe"
+    ]
+  },
+  {
+    "id": "command.workbench.classify",
+    "purpose": "打开监督/非监督分类工作区，完成样本采集、训练与分类全流程。",
+    "prerequisites": [
+      "已加载待分类影像"
+    ],
+    "suggestedNextAction": "先采集或导入训练样本",
+    "related": [
+      "workbench.classify",
+      "operator.rs.supervised_classification"
+    ],
+    "keywords": [
+      "分类",
+      "工作区",
+      "classification"
+    ]
+  },
+  {
+    "id": "command.workbench.georefI2I",
+    "purpose": "影像对影像配准：以参考影像为基准纠正源影像的几何偏移，支持同名点与 SIFT 自动匹配。",
+    "prerequisites": [
+      "源影像与参考影像已加载",
+      "两影像有足够重叠区"
+    ],
+    "related": [
+      "workbench.georef_i2i",
+      "concept.rs.rpc"
+    ],
+    "keywords": [
+      "配准",
+      "几何纠正",
+      "I2I",
+      "georeference"
+    ]
+  },
+  {
+    "id": "command.workbench.georefI2M",
+    "purpose": "影像对地图配准：以主工程地图为参考取控制点，支持 RPC 物理模型。",
+    "prerequisites": [
+      "源影像已加载",
+      "工程地图已有地理参考"
+    ],
+    "related": [
+      "workbench.georef_i2m",
+      "concept.rs.rpc"
+    ],
+    "keywords": [
+      "配准",
+      "RPC",
+      "I2M"
+    ]
+  },
+  {
+    "id": "command.workbench.obia",
+    "purpose": "打开面向对象分类工作区：先分割成对象，再基于对象特征分类。",
+    "prerequisites": [
+      "已加载影像"
+    ],
+    "related": [
+      "workbench.obia",
+      "operator.rs.obia_segment"
+    ],
+    "keywords": [
+      "OBIA",
+      "面向对象",
+      "分割"
+    ]
+  },
+  {
+    "id": "command.rs.bandMath",
+    "purpose": "用表达式对多波段像元值做自定义运算，实现指数、掩膜逻辑等灵活计算。",
+    "prerequisites": [
+      "已选中栅格图层"
+    ],
+    "related": [
+      "operator.rs.band_math",
+      "operator.rs.spectral_index"
+    ],
+    "keywords": [
+      "波段运算",
+      "表达式",
+      "band math"
+    ]
+  },
+  {
+    "id": "command.rs.spectralIndex",
+    "purpose": "计算常用光谱指数（NDVI/EVI/NDWI/NDBI/MNDWI 等），一步完成波段组合。",
+    "prerequisites": [
+      "已选中多波段栅格",
+      "波段对应关系正确"
+    ],
+    "related": [
+      "operator.rs.spectral_index",
+      "concept.rs.ndvi"
+    ],
+    "keywords": [
+      "光谱指数",
+      "NDVI",
+      "spectral index"
+    ]
+  },
+  {
+    "id": "command.rs.contrastStretch",
+    "purpose": "改善影像显示对比度：线性拉伸、百分比裁剪或直方图均衡。",
+    "prerequisites": [
+      "已选中栅格图层"
+    ],
+    "related": [
+      "operator.rs.contrast_stretch"
+    ],
+    "keywords": [
+      "对比度",
+      "拉伸",
+      "stretch"
+    ]
+  },
+  {
+    "id": "command.rs.spatialFilter",
+    "purpose": "用均值/高斯/中值/拉普拉斯核做空间卷积，去噪或增强边缘。",
+    "prerequisites": [
+      "已选中栅格图层"
+    ],
+    "related": [
+      "operator.rs.image_enhancement"
+    ],
+    "keywords": [
+      "滤波",
+      "卷积",
+      "filter"
+    ]
+  },
+  {
+    "id": "command.rs.pca",
+    "purpose": "对多波段做主成分分析，压缩冗余、突出主要信息维度。",
+    "prerequisites": [
+      "已选中多波段栅格"
+    ],
+    "related": [
+      "operator.rs.pca",
+      "operator.rs.mnf"
+    ],
+    "keywords": [
+      "PCA",
+      "主成分",
+      "降维"
+    ]
+  },
+  {
+    "id": "command.rs.bandRatio",
+    "purpose": "计算两波段比值或归一化比值，抑制光照差异突出反射率差异。",
+    "prerequisites": [
+      "已选中多波段栅格"
+    ],
+    "related": [
+      "operator.rs.band_ratio"
+    ],
+    "keywords": [
+      "波段比值",
+      "ratio"
+    ]
+  },
+  {
+    "id": "command.rs.mosaic",
+    "purpose": "把多景相邻影像镶嵌为一幅连续影像。",
+    "prerequisites": [
+      "多个已配准的栅格",
+      " CRS 一致"
+    ],
+    "related": [
+      "operator.rs.mosaic"
+    ],
+    "keywords": [
+      "镶嵌",
+      "拼接",
+      "mosaic"
+    ]
+  },
+  {
+    "id": "command.rs.changeDetection",
+    "purpose": "对两期影像做差异/比值/CVA 变化检测，定位地物变化区域。",
+    "prerequisites": [
+      "两期已配准影像"
+    ],
+    "related": [
+      "operator.rs.change_detection",
+      "concept.rs.change_detection"
+    ],
+    "keywords": [
+      "变化检测",
+      "change detection"
+    ]
+  },
+  {
+    "id": "command.rs.atmospheric",
+    "purpose": "把表观反射率校正为地表反射率（DOS/QUAC 模型），为定量分析打基础。",
+    "prerequisites": [
+      "已定标的表观反射率或 DN 数据"
+    ],
+    "related": [
+      "operator.rs.atmospheric_dos1",
+      "operator.rs.atmospheric_dos2",
+      "operator.rs.atmospheric_quac"
+    ],
+    "keywords": [
+      "大气校正",
+      "地表反射率",
+      "atmospheric"
+    ]
+  },
+  {
+    "id": "command.rs.qaMask",
+    "purpose": "解码 Landsat/Sentinel QA 波段为云/阴影/雪掩膜。",
+    "prerequisites": [
+      "包含 QA 波段的 Landsat/Sentinel 产品"
+    ],
+    "related": [
+      "operator.rs.qa_mask",
+      "command.rs.applyMask"
+    ],
+    "keywords": [
+      "QA",
+      "云掩膜",
+      "mask"
+    ]
+  },
+  {
+    "id": "command.rs.applyMask",
+    "purpose": "把掩膜应用到影像：置 NoData 或裁剪，剔除云与无效区。",
+    "prerequisites": [
+      "影像与掩膜图层"
+    ],
+    "related": [
+      "operator.rs.apply_mask",
+      "command.rs.qaMask"
+    ],
+    "keywords": [
+      "应用掩膜",
+      "NoData"
+    ]
+  },
+  {
+    "id": "command.rs.radiometric",
+    "purpose": "把 DN 定标为辐亮度/反射率，是定量遥感的第一个换算。",
+    "prerequisites": [
+      "带定标参数的产品"
+    ],
+    "related": [
+      "operator.rs.radiometric_calibration",
+      "operator.rs.dn_to_radiance"
+    ],
+    "keywords": [
+      "辐射定标",
+      "radiometric",
+      "定标"
+    ]
+  },
+  {
+    "id": "command.rs.ortho",
+    "purpose": "基于 RPC/GCP 做正射纠正，消除地形与投影几何变形。",
+    "prerequisites": [
+      "影像带 RPC 或已有控制点",
+      "DEM（地形明显时必需）"
+    ],
+    "related": [
+      "workbench.georef_i2m",
+      "concept.rs.rpc"
+    ],
+    "keywords": [
+      "正射",
+      "正射纠正",
+      "ortho"
+    ]
+  },
+  {
+    "id": "command.rs.terrain",
+    "purpose": "从 DEM 生成坡度/坡向/山影等地形产品。",
+    "prerequisites": [
+      "已选中 DEM 栅格"
+    ],
+    "related": [
+      "operator.rs.terrain_analysis"
+    ],
+    "keywords": [
+      "地形",
+      "坡度",
+      "坡向",
+      "DEM"
+    ]
+  },
+  {
+    "id": "command.rs.fusion",
+    "purpose": "全色锐化：把多光谱色彩与全色细节融合（Brovey/IHS/Gram-Schmidt 等）。",
+    "prerequisites": [
+      "配准的全色与多光谱影像"
+    ],
+    "related": [
+      "operator.rs.image_fusion"
+    ],
+    "keywords": [
+      "融合",
+      "全色锐化",
+      "pan-sharpening"
+    ]
+  },
+  {
+    "id": "command.rs.temporal",
+    "purpose": "时序分析入口：时序指数、趋势、物候与断点检测。",
+    "prerequisites": [
+      "时间序列影像集合"
+    ],
+    "related": [
+      "operator.rs.temporal_composite",
+      "concept.rs.temporal_analysis"
+    ],
+    "keywords": [
+      "时间序列",
+      "物候",
+      "temporal"
+    ]
+  },
+  {
+    "id": "command.rs.speckle",
+    "purpose": "抑制 SAR 影像相干斑点（Lee/Frost/Kuan/Gamma-MAP），为后续解译与分类降噪。",
+    "prerequisites": [
+      "已选中 SAR 栅格图层"
+    ],
+    "related": [
+      "operator.rs.sar_speckle",
+      "concept.rs.speckle"
+    ],
+    "keywords": [
+      "斑点滤波",
+      "SAR",
+      "speckle"
+    ]
+  },
+  {
+    "id": "command.rs.extractBands",
+    "purpose": "从多波段栅格中提取指定波段另存，用于精简数据或单独处理。",
+    "prerequisites": [
+      "已选中多波段栅格"
+    ],
+    "related": [
+      "operator.rs.extract_bands"
+    ],
+    "keywords": [
+      "提取波段",
+      "extract bands"
+    ]
+  }
+]

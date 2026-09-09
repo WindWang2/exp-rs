@@ -12,11 +12,26 @@ add_executable(sicnu_geo_rs_cli
     cli_dataset_commands.cpp
     cli_project_ops.cpp
     rs_pipeline_runner.cpp
+    help_cli_projections.cpp
+    # Unified Help 6.0: embedded knowledge content (RCC init in the exe).
+    ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc
 )
 
 # Headless CLI embeds no QML; skip Qt's configure-time qmlimportscanner pass
 # (unreliable on Windows hosts — see the tail of tests/CMakeLists.txt).
 set_target_properties(sicnu_geo_rs_cli PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
+
+# Unified Help 6.0 projections (--operator-help / --help-topic /
+# --list-topics / --export-help-docs).
+target_link_libraries(sicnu_geo_rs_cli PRIVATE
+    Sicnu::help
+    Sicnu::help_adapters
+    # cli_dataset_commands.cpp (Foundation 5.0) calls the dataset/experiment
+    # stores; the CLI previously never linked them (latent master defect the
+    # full-tree link surfaced).
+    Sicnu::dataset
+    Sicnu::experiment
+)
 
 # Headless plugin hosting (ADR 0023): the runner composes PluginHost with a
 # view-less ProjectContext and a widget-free SicnuAppInterface. Compiled in

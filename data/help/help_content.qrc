@@ -1,0 +1,16 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <qresource prefix="/help">
+    <file>commands.json</file>
+    <file>workbenches.json</file>
+    <file>concepts.json</file>
+    <file>diagnostics.json</file>
+    <file>operators/optical.json</file>
+    <file>operators/sar.json</file>
+    <file>operators/change.json</file>
+    <file>operators/temporal.json</file>
+    <file>operators/terrain.json</file>
+    <file>operators/classify.json</file>
+    <file>operators/data_io.json</file>
+  </qresource>
+</RCC>

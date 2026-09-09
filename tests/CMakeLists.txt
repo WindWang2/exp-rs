@@ -4920,6 +4920,7 @@ target_link_libraries(test_workflow_session_controller PRIVATE
   sicnu_task_center
   sicnu_core
   Sicnu::data
+  Sicnu::help
 )
 target_include_directories(test_workflow_session_controller PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -5771,6 +5772,7 @@ target_link_libraries(test_schema_form_builder_v2 PRIVATE
   sicnu_operators
   sicnu_data
   GDAL::GDAL
+  Sicnu::help
 )
 target_include_directories(test_schema_form_builder_v2 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -6149,6 +6151,7 @@ target_link_libraries(test_workflow_pipeline_ui PRIVATE
   sicnu_workflow_runtime
   sicnu_task_center
   sicnu_data
+  Sicnu::help
 )
 target_include_directories(test_workflow_pipeline_ui PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -6731,8 +6734,12 @@ target_compile_definitions(test_exprs_plugin_loader PRIVATE
   SICNU_TEST_HELLO_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin"
 )
 
-sicnu_add_test(test_exprs_external_process)
-target_link_libraries(test_exprs_external_process PRIVATE sicnu_sdk)
+# POSIX-only test (setenv + /tmp path semantics); the Windows lane has no
+# equivalent coverage today. See test_help_* for the help-system suites.
+if(NOT WIN32)
+  sicnu_add_test(test_exprs_external_process)
+  target_link_libraries(test_exprs_external_process PRIVATE sicnu_sdk)
+endif()
 
 sicnu_add_test(test_exprs_workflow_schema)
 target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
@@ -6793,3 +6800,50 @@ foreach(_sicnu_test_target IN LISTS _sicnu_test_targets)
     set_target_properties(${_sicnu_test_target} PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
   endif()
 endforeach()
+
+# ── Unified Help System 6.0 ────────────────────────────────────────────────
+# Knowledge-layer tests: Qt Core + jsoncpp only (no GUI/qgis linkage), so the
+# suite builds and runs fast while guarding the bounded-resource contracts.
+# NOTE: help_content.qrc is compiled into the *executable* — RCC initializers
+# inside static libraries are discarded by the linker.
+function(sicnu_add_help_test NAME)
+  qt_add_executable(${NAME} ${NAME}.cpp
+    ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc
+  )
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Sicnu::help
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(${NAME} PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(${NAME})
+endfunction()
+
+sicnu_add_help_test(test_help_core)
+
+# Coverage & drift contracts against the LIVE operator registry + harness
+# taxonomy: reuses the standard heavy test helper (sicnu_operators +
+# sicnu_agent + processing) because the whole point is real schemas/codes.
+sicnu_add_test(test_help_coverage)
+target_sources(test_help_coverage PRIVATE
+  # availability fact adapter pulls ContextRules, whose implementation lives
+  # in the shell sources — compile the trio here as well (workbench host
+  # satisfies selection_context's dependency chain)
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  # embed the help knowledge content (RCC init must live in the executable)
+  ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc
+)
+target_include_directories(test_help_coverage PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_help_coverage PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(test_help_coverage PRIVATE Sicnu::help Sicnu::help_adapters Sicnu::help_gui)

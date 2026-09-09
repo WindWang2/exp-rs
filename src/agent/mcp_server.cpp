@@ -1,5 +1,11 @@
 #include "mcp_server.h"
 
+#include "help/adapters/operator_help_source.h"
+#include "help/help_composition.h"
+#include "help/help_presenter.h"
+#include "help/help_id.h"
+#include "help/help_registry.h"
+
 #include "workflow/workflow_run_coordinator.h"
 #include "core/sicnu_logging.h"
 #include "env_flag.h"
@@ -1056,6 +1062,10 @@ void McpServer::handleRequest(const QVariantMap &request)
             else if (toolName == QStringLiteral("get_tool_schema"))
             {
                 resultData = handleGetToolSchema(arguments.value(QStringLiteral("tool_id")).toString());
+            }
+            else if (toolName == QStringLiteral("get_tool_help"))
+            {
+                resultData = handleGetToolHelp(arguments.value(QStringLiteral("tool_id")).toString());
             }
             else if (toolName == QStringLiteral("run_workflow"))
             {
@@ -2382,6 +2392,51 @@ QVariantMap McpServer::handleGetToolSchema(const QString &toolId)
     result[QStringLiteral("displayName")] = QString::fromStdString(tool->displayName);
     result[QStringLiteral("description")] = QString::fromStdString(tool->description);
     result[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(tool->normalizedInputSchema());
+    return result;
+}
+
+QVariantMap McpServer::handleGetToolHelp(const QString &toolId)
+{
+    // Unified Help 6.0 (bounded projection): compose the shared knowledge
+    // base once (idempotent; embedded data/help content + operator facts)
+    // and return a char-capped summary so Pi never ingests full pages.
+    if (sicnu::help::globalHelpRegistry().count() == 0) {
+        sicnu::help::adapters::OperatorHelpSource operatorSource;
+        sicnu::help::composeHelpSystem(sicnu::help::globalHelpRegistry(),
+                                       nullptr, &operatorSource);
+    }
+
+    const QString helpId = QStringLiteral("operator.%1").arg(QString(toolId).replace(':', '.'));
+    const auto *d = sicnu::help::globalHelpRegistry().find(helpId);
+    if (!d)
+        throw std::runtime_error(QStringLiteral("No help topic for tool: %1").arg(toolId).toStdString());
+
+    QVariantMap result;
+    result.insert(QStringLiteral("help_id"), d->id);
+    result.insert(QStringLiteral("title"), d->title);
+    // ≤220 chars — one-line summary including key parameters.
+    result.insert(QStringLiteral("summary"),
+                  sicnu::help::HelpCompact::summary(*d, 220));
+    if (d->algorithm.has_value()) {
+        const auto &page = *d->algorithm;
+        // key parameters listed compactly (name only, char-capped list)
+        QStringList keyParameters;
+        keyParameters.reserve(page.keyParameters.size());
+        for (const QString &name : page.keyParameters)
+            keyParameters.append(name.left(64));
+        if (!page.keyParameters.isEmpty())
+            result.insert(QStringLiteral("key_parameters"), keyParameters);
+        if (!page.assumptions.isEmpty())
+            result.insert(QStringLiteral("assumptions"), page.assumptions);
+        if (!page.limitations.isEmpty())
+            result.insert(QStringLiteral("limitations"), page.limitations);
+    }
+    if (!d->diagnosticIds.isEmpty())
+        result.insert(QStringLiteral("diagnostics"), d->diagnosticIds);
+    if (!d->relatedIds.isEmpty())
+        result.insert(QStringLiteral("related"), d->relatedIds);
+    result.insert(QStringLiteral("hint"),
+                  QStringLiteral("deeper help: CLI --help-topic %1").arg(d->id));
     return result;
 }
 

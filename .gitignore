@@ -33,6 +33,8 @@ data/*
 !data/tools/**
 !data/schemas/
 !data/schemas/**
+!data/help/
+!data/help/**
 # Cartographic component/template library and the spatial-scientist benchmark
 # task set are tracked config, not local rasters.
 !data/cartography/
@@ -79,7 +81,8 @@ vendor/
 .worktrees/
 .superpowers/
 .gstack/
-.planning/
+.planning/*
+!.planning/unified-help-diagnostics-6/
 .zcode/
 
 # IDE / editor / OS artifacts

@@ -1,0 +1,393 @@
+[
+  {
+    "id": "operator.rs.sar_calibrate",
+    "title": "SAR 辐射定标",
+    "summary": "把 SAR 原始 DN 定标为后向散射系数（sigma0/beta0/gamma0）。",
+    "category": "SAR",
+    "keywords": [
+      "SAR",
+      "定标",
+      "sigma0",
+      "calibration"
+    ],
+    "algorithm": {
+      "whatItDoes": "用定标常数 LUT 把像元值换算为物理量纲的后向散射系数，使不同景/传感器数据可比。",
+      "whenToUse": "任何 SAR 定量处理的第一步：滤波、地形辐射校正、变化检测、时序分析之前。",
+      "inputs": [
+        "SAR 强度/复数影像产品（带定标 LUT 元数据）"
+      ],
+      "outputs": [
+        "定标后的 sigma0（或所选量纲）强度影像"
+      ],
+      "assumptions": [
+        "产品元数据含定标参数"
+      ],
+      "limitations": [
+        "热噪声未去除时低后向散射区（水面）可能偏高"
+      ],
+      "keyParameters": [
+        "outputDomain"
+      ],
+      "relatedTools": [
+        "rs:sar_speckle",
+        "rs:sar_terrain_flatten"
+      ]
+    },
+    "related": [
+      "concept.rs.speckle",
+      "concept.rs.radiometric_chain",
+      "operator.rs.sar_speckle"
+    ],
+    "docs": [
+      "docs/processing/sar-domain.md"
+    ]
+  },
+  {
+    "id": "operator.rs.sar_backscatter",
+    "title": "SAR 后向散射分析",
+    "summary": "计算/输出 sigma0 等后向散射产品，用于地物散射特性分析。",
+    "category": "SAR",
+    "keywords": [
+      "SAR",
+      "后向散射",
+      "backscatter",
+      "sigma0"
+    ],
+    "algorithm": {
+      "whatItDoes": "输出定标后的后向散射强度，可选分贝变换便于显示与统计。",
+      "whenToUse": "水面/植被/建成区的散射对比分析，或作为分类特征。",
+      "assumptions": [
+        "输入已辐射定标"
+      ],
+      "limitations": [
+        "dB 变换便于人眼判读但不改变信息量"
+      ],
+      "relatedTools": [
+        "rs:sar_calibrate"
+      ]
+    },
+    "related": [
+      "operator.rs.sar_calibrate",
+      "concept.rs.speckle"
+    ]
+  },
+  {
+    "id": "operator.rs.sar_terrain_flatten",
+    "title": "SAR 辐射地形平坦化",
+    "summary": "以 DEM 归一化地形对后向散射的影响，输出 Γ⁰ 产品。",
+    "category": "SAR",
+    "keywords": [
+      "SAR",
+      "地形平坦化",
+      "gamma0",
+      "terrain flattening"
+    ],
+    "algorithm": {
+      "whatItDoes": "按真实散射面积把 sigma0 归一化为参考椭球/局部入射几何下的 Γ⁰，消除坡面辐射畸变。",
+      "whenToUse": "山地 SAR 时序、比较与分类之前；与辐射定标配合使用。",
+      "assumptions": [
+        "有配准的 DEM",
+        "已知几何（轨道/视线）"
+      ],
+      "limitations": [
+        "叠掩/阴影区仍不可恢复",
+        "DEM 质量直接影响结果"
+      ],
+      "relatedTools": [
+        "rs:sar_calibrate",
+        "rs:sar_terrain_correction"
+      ]
+    },
+    "related": [
+      "concept.rs.sar_geometry",
+      "operator.rs.sar_terrain_masks"
+    ],
+    "docs": [
+      "docs/processing/sar-domain.md"
+    ]
+  },
+  {
+    "id": "operator.rs.sar_terrain_correction",
+    "title": "SAR 地形纠正 (Range-Doppler)",
+    "summary": "Range-Doppler 地形纠正：把斜距影像重投影到地图几何。",
+    "category": "SAR",
+    "keywords": [
+      "SAR",
+      "地形纠正",
+      "range doppler",
+      "地理编码"
+    ],
+    "algorithm": {
+      "whatItDoes": "用轨道参数 + DEM 做 RD 正射纠正，消除斜距投影与地形引起的几何位移。",
+      "whenToUse": "SAR 数据进入栅格分析前的标准几何步骤。",
+      "assumptions": [
+        "有轨道元数据与 DEM"
+      ],
+      "limitations": [
+        "阴影/叠掩区输出 NoData"
+      ],
+      "relatedTools": [
+        "rs:sar_terrain_flatten"
+      ]
+    },
+    "related": [
+      "concept.rs.sar_geometry",
+      "diagnostic.rs.sar.geometry.missing_look_direction"
+    ]
+  },
+  {
+    "id": "operator.rs.sar_speckle",
+    "title": "SAR 斑点滤波",
+    "summary": "Lee/Frost/Kuan/Gamma-MAP 或多时相栈滤波抑制相干斑点，保持输入格网。",
+    "category": "SAR",
+    "keywords": [
+      "SAR",
+      "斑点滤波",
+      "speckle",
+      "lee",
+      "frost",
+      "多时相"
+    ],
+    "algorithm": {
+      "whatItDoes": "经典自适应滤波用局部统计区分斑点与真实结构； refined Lee 结合边缘方向；多时相模式跨配准影像联合估计降低噪声同时保留时间变化。",
+      "whenToUse": "SAR 解译/分类/变化检测前的降噪；多时相模式适合同区域多景数据。",
+      "inputs": [
+        "SAR 强度影像（建议先定标为 sigma0）",
+        "companionScenes：多时相配准同格网影像"
+      ],
+      "outputs": [
+        "滤波后强度影像（Float32）"
+      ],
+      "assumptions": [
+        "输入为强度（功率）数据而非幅度/dB",
+        "多时相模式需要同格网配准影像"
+      ],
+      "unitsDomain": "强度（功率）域；kernelSize 为奇数像素窗口",
+      "limitations": [
+        "多时相门限拒绝偏离参考超过 k·局部标准差的像元，被拒像元回退为时间均值",
+        "所有滤波假设强度域数据"
+      ],
+      "failureModes": [
+        "输入 dB/幅度数据时统计模型失效",
+        "companionScenes 未配准会引入模糊"
+      ],
+      "keyParameters": [
+        "method",
+        "kernelSize",
+        "looks",
+        "deviationK",
+        "companionScenes"
+      ],
+      "relatedTools": [
+        "rs:sar_calibrate",
+        "rs:sar_change"
+      ]
+    },
+    "parameters": [
+      {
+        "name": "input",
+        "meaning": "输入 SAR 强度影像。",
+        "recommended": "先运行 rs:sar_calibrate 得到 sigma0 再滤波。"
+      },
+      {
+        "name": "band",
+        "meaning": "要滤波的 1-based 波段序号，0 表示所有波段。",
+        "recommended": "单极化影像保持默认 1；多波段仅处理目标波段可省时。"
+      },
+      {
+        "name": "method",
+        "meaning": "滤波核类型：lee（局部统计最小均方）、enhanced_lee（改进 Lee）、frost（指数加权）、kuan（改进 Kuan）、gamma_map（Gamma 先验最大后验）、refined_lee（边缘方向感知）、multitemporal（跨景栈滤波）。",
+        "recommended": "常规制图用 lee 或 refined_lee；保留纹理选 kuan；有同区多景选 multitemporal。",
+        "tradeOff": "强抑斑滤波（gamma_map）更平滑但更易抹平细小地物；refined_lee 保边最好但计算最慢。"
+      },
+      {
+        "name": "kernelSize",
+        "unit": "像素",
+        "meaning": "定义估计斑点统计的局部邻域窗口。",
+        "recommended": "Sentinel-1 10 m 产品常用 5 或 7。",
+        "tradeOff": "窗口越大抑斑越强，但小目标与边缘更模糊。",
+        "performanceNote": "耗时随窗口面积近似线性增长。"
+      },
+      {
+        "name": "noiseVariance",
+        "meaning": "Lee/Kuan/Gamma-MAP 的噪声方差模型参数，控制对斑点强度的假设。",
+        "recommended": "1 视强度数据约 1.0；已多视数据按 1/ENL 估计。默认 0.25 适合中等多视数据。",
+        "warnings": [
+          "设置过小会欠滤波，过大会过度平滑真实结构。"
+        ]
+      },
+      {
+        "name": "dampingFactor",
+        "meaning": "Frost 滤波的指数衰减系数，控制中心像元权重随距离衰减。",
+        "recommended": "默认 1.0；值越大平滑越弱、边缘保留越多。"
+      },
+      {
+        "name": "looks",
+        "unit": "视数",
+        "meaning": "等效视数 (ENL)，决定斑点统计强度假设。",
+        "recommended": "与数据的真实 ENL 一致；Sentinel-1 GRD IW 一般 4–5。"
+      },
+      {
+        "name": "deviationK",
+        "meaning": "多时相门限：拒绝偏离参考景超过 k·局部标准差的配影像元。",
+        "recommended": "k=1 适合保留真实变化；增大 k 更宽容。"
+      },
+      {
+        "name": "companionScenes",
+        "meaning": "多时相滤波的辅景路径列表，要求与主景同格网配准。",
+        "recommended": "3–10 景同期影像效果较稳。",
+        "warnings": [
+          "未配准的辅景会直接造成滤波错误。"
+        ]
+      }
+    ],
+    "related": [
+      "concept.rs.speckle",
+      "operator.rs.sar_calibrate",
+      "diagnostic.rs.sar.speckle.intensity_expected"
+    ],
+    "docs": [
+      "docs/processing/sar-domain.md"
+    ]
+  },
+  {
+    "id": "operator.rs.sar_ratio",
+    "title": "SAR 极化比值",
+    "summary": "计算两个极化通道的比值，凸显散射机制差异。",
+    "category": "SAR",
+    "keywords": [
+      "SAR",
+      "极化",
+      "比值",
+      "VV/VH",
+      "ratio"
+    ],
+    "algorithm": {
+      "whatItDoes": "同极化/交叉极化强度相除，VH/VV 低值常指示水面或光滑地表，高值指示体散射（植被）。",
+      "whenToUse": "作物/植被监测、水体识别的特征构造。",
+      "assumptions": [
+        "两极化通道已配准且定标一致"
+      ],
+      "limitations": [
+        "零值分母需要 NoData 保护"
+      ]
+    },
+    "related": [
+      "operator.rs.sar_dualpol_features",
+      "operator.rs.sar_calibrate"
+    ]
+  },
+  {
+    "id": "operator.rs.sar_texture",
+    "title": "SAR 纹理特征",
+    "summary": "GLCM 纹理统计（对比度/熵/方差等）刻画 SAR 影像纹理。",
+    "category": "SAR",
+    "keywords": [
+      "SAR",
+      "纹理",
+      "GLCM",
+      "texture"
+    ],
+    "algorithm": {
+      "whatItDoes": "在滑动窗口内计算灰度共生矩阵统计量，把空间结构信息量化为特征波段。",
+      "whenToUse": "城市/植被/作物的分类特征增强；斑点滤波后使用更稳。",
+      "assumptions": [
+        "建议先抑斑再提纹理"
+      ],
+      "limitations": [
+        "窗口大小决定纹理尺度，需要与地物匹配"
+      ],
+      "keyParameters": [
+        "windowSize"
+      ]
+    },
+    "related": [
+      "operator.rs.sar_speckle",
+      "operator.rs.feature_stack"
+    ]
+  },
+  {
+    "id": "operator.rs.sar_change",
+    "title": "SAR 变化检测",
+    "summary": "对两期 SAR 强度做对数比值/差值变化检测。",
+    "category": "SAR",
+    "keywords": [
+      "SAR",
+      "变化检测",
+      "log-ratio"
+    ],
+    "algorithm": {
+      "whatItDoes": "对数比值把乘性斑点转为加性，再按统计阈值（manual/otsu/percentile/statistical，即均值+k·σ）分离变化与未变化。",
+      "whenToUse": "洪水、建筑变化、作物收割等 SAR 时相对比。",
+      "assumptions": [
+        "两期已配准且定标一致",
+        "建议已抑斑"
+      ],
+      "limitations": [
+        "几何失配直接映射为伪变化"
+      ],
+      "relatedTools": [
+        "rs:sar_speckle",
+        "rs:sar_terrain_correction"
+      ]
+    },
+    "related": [
+      "concept.rs.change_detection",
+      "operator.rs.change_detection"
+    ]
+  },
+  {
+    "id": "operator.rs.sar_dualpol_features",
+    "title": "SAR 双极化特征",
+    "summary": "从 VV/VH 生成比值、和值、RVI 等双极化特征堆栈。",
+    "category": "SAR",
+    "keywords": [
+      "SAR",
+      "双极化",
+      "RVI",
+      "dualpol"
+    ],
+    "algorithm": {
+      "whatItDoes": "组合 VV、VH 生成比值 (VH/VV)、总功率 (VV+VH)、雷达植被指数等特征。",
+      "whenToUse": "SAR 单独分类或与光学融合前的特征工程。",
+      "assumptions": [
+        "输入为已定标的 VV/VH 强度对"
+      ],
+      "limitations": [
+        "通道缺失时特征不可算"
+      ]
+    },
+    "related": [
+      "operator.rs.sar_ratio",
+      "operator.rs.feature_stack"
+    ]
+  },
+  {
+    "id": "operator.rs.sar_terrain_masks",
+    "title": "SAR 地形掩膜",
+    "summary": "从 DEM + 几何生成叠掩/阴影/透视收缩掩膜。",
+    "category": "SAR",
+    "keywords": [
+      "SAR",
+      "叠掩",
+      "阴影",
+      "掩膜",
+      "layover",
+      "shadow"
+    ],
+    "algorithm": {
+      "whatItDoes": "以局部入射角与视线几何标记几何畸变区，输出掩膜供质量标记与统计剔除。",
+      "whenToUse": "山地 SAR 质量控制、无效区标记。",
+      "assumptions": [
+        "需要 DEM 与影像几何元数据"
+      ],
+      "limitations": [
+        "掩膜精度受 DEM 分辨率限制"
+      ]
+    },
+    "related": [
+      "concept.rs.sar_geometry",
+      "operator.rs.sar_terrain_flatten"
+    ]
+  }
+]

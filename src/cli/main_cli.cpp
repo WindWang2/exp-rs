@@ -1,5 +1,6 @@
 #include "rs_pipeline_runner.h"
 #include "cli_commands.h"
+#include "help_cli_projections.h"
 
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -130,6 +131,11 @@ int main(int argc, char *argv[])
     // the legacy parser below must not see them.
     const bool commandMode = app.arguments().size() > 1
                              && sicnu::cli::isCliCommand( app.arguments().at( 1 ) );
+    // Unified Help 6.0 projections: handled before the legacy parser so a
+    // --help-topic style query never trips pipeline argument validation.
+    if ( int handled = sicnu::cli::runHelpProjections( app.arguments() ); handled >= 0 )
+        return handled;
+
     if ( !commandMode )
         parser.process(app);
 

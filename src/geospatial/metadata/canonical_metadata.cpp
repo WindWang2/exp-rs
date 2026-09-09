@@ -106,6 +106,8 @@ CrsInfo readCrsInfo( OGRSpatialReferenceH srs )
   CrsInfo info;
   if ( !srs )
     return info;
+  // OGRSpatialReferenceH is void* (or a typed alias depending on the GDAL
+  // version) — reinterpret_cast is the only form valid for both.
   info.valid = !reinterpret_cast< OGRSpatialReference * >( srs )->IsEmpty();
   if ( !info.valid )
     return info;
