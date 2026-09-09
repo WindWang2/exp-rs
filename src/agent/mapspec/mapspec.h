@@ -23,6 +23,8 @@
 
 #include <json/json.h>
 
+#include "../sicnu_agent_export.h"
+
 #include <string>
 #include <vector>
 
@@ -45,8 +47,11 @@ namespace sicnu::agent::mapspec {
 inline constexpr int kMapSpecCurrentVersion = 3;
 
 /// Ordered item collection names of a MapSpec document.
-extern const char *const kCollections[];
-extern const int kCollectionCount;
+// SICNU_AGENT_EXPORT: const free variables are not auto-exported from the
+// Windows DLL (CMake WINDOWS_EXPORT_ALL_SYMBOLS limitation) — the test and
+// tool consumers link them through the import library.
+extern SICNU_AGENT_EXPORT const char *const kCollections[];
+extern SICNU_AGENT_EXPORT const int kCollectionCount;
 
 /// True when `name` is a known item collection.
 bool isCollection( const std::string &name );
