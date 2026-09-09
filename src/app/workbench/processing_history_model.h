@@ -44,6 +44,8 @@ inline QString historyTaskStateText( sicnu::TaskStatus status )
             return QObject::tr( "失败" );
         case sicnu::TaskStatus::Canceled:
             return QObject::tr( "已取消" );
+        case sicnu::TaskStatus::Cancelling:
+            return QObject::tr( "取消中" );
         case sicnu::TaskStatus::WaitingResource:
             return QObject::tr( "等待资源" );
         case sicnu::TaskStatus::Dispatching:
@@ -54,15 +56,11 @@ inline QString historyTaskStateText( sicnu::TaskStatus status )
 
 inline bool historyTaskTerminal( sicnu::TaskStatus status )
 {
-    switch ( status )
-    {
-        case sicnu::TaskStatus::Completed:
-        case sicnu::TaskStatus::Failed:
-        case sicnu::TaskStatus::Canceled:
-            return true;
-        default:
-            return false;
-    }
+    // Cancelling is deliberately NON-terminal: the worker has not yet
+    // reported a terminal record, so the work is still in flight (#A).
+    return sicnu::TaskStatus::Completed == status ||
+           sicnu::TaskStatus::Failed == status ||
+           sicnu::TaskStatus::Canceled == status;
 }
 
 inline QString historyRunStateText( sicnu::workflow::WorkflowRunState state )

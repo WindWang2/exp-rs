@@ -41,7 +41,9 @@ class TemporalTimelineBar : public QWidget
   public:
     explicit TemporalTimelineBar( QWidget *parent = nullptr );
 
-    void setScenes( const QVector<qint64> &epochMillis );
+    /// Parallel validity flags (invalid dates draw hollow markers instead of
+    /// being silently plotted at epoch 0).
+    void setScenes( const QVector<qint64> &epochMillis, const QVector<bool> &valid );
     void setSelectedIndex( int index );
     void setWindow( qint64 fromMs, qint64 toMs );
 
@@ -59,6 +61,7 @@ class TemporalTimelineBar : public QWidget
     int nearestIndex( int x ) const;
 
     QVector<qint64> m_times;
+    QVector<bool> m_valid;
     int m_selected = -1;
     qint64 m_fromMs = 0;
     qint64 m_toMs = 0;

@@ -222,7 +222,11 @@ void ProvenanceSection::populate( const SelectionContextSnapshot &snapshot )
 
     // ── Render each target ───────────────────────────────────────────────
     QString html;
-    if ( snapshot.selectedAssetIds.size() + snapshot.selectedResultIds.size() > kMaxTargets )
+    const int selectedEntities =
+        snapshot.selectedAssetIds.size() + snapshot.selectedResultIds.size();
+    const int selectedLayers =
+        snapshot.selectedLayers.size() + ( snapshot.activeLayer ? 1 : 0 );
+    if ( selectedEntities > kMaxTargets || selectedLayers > kMaxTargets )
         html += warningLine( tr( "多选 — 仅显示前 %1 项的溯源。" ).arg( targets.size() ) );
 
     for ( const sicnu::data::AssetId &id : targets )
@@ -337,6 +341,8 @@ void ProvenanceSection::populate( const SelectionContextSnapshot &snapshot )
         for ( int depth = 0; depth < kMaxChainDepth; ++depth )
         {
             const QVector<sicnu::data::AssetId> parents = dataManager->derivedFrom( cursor );
+            if ( parents.size() > 1 )
+                truncated = true; // multi-input derivation: one branch shown
             bool advanced = false;
             for ( const sicnu::data::AssetId &parent : parents )
             {

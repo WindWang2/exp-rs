@@ -59,6 +59,13 @@ int TemporalSceneModel::sceneIndexAtRow( int row ) const
     return m_filtered[index];
 }
 
+int TemporalSceneModel::rowForSceneIndex( int globalIndex ) const
+{
+    if ( globalIndex < 0 || globalIndex >= m_scenes.size() )
+        return -1;
+    return m_filtered.indexOf( globalIndex );
+}
+
 const sicnu::temporal::TemporalSceneRef *TemporalSceneModel::sceneAtRow( int row ) const
 {
     const int index = sceneIndexAtRow( row );
@@ -154,9 +161,13 @@ void TemporalSceneModel::refilter()
             const QDate date = scene.time.dateString().isEmpty()
                                    ? QDate()
                                    : QDate::fromString( scene.time.dateString(), Qt::ISODate );
-            if ( m_from.isValid() && date.isValid() && date < m_from )
+            // A scene whose date cannot be parsed must never silently pass a
+            // date window it cannot be placed in.
+            if ( !date.isValid() )
                 continue;
-            if ( m_to.isValid() && date.isValid() && date > m_to )
+            if ( m_from.isValid() && date < m_from )
+                continue;
+            if ( m_to.isValid() && date > m_to )
                 continue;
         }
         m_filtered.append( i );

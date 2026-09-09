@@ -9,6 +9,7 @@
 #include "data/temporal_workspace_types.h"
 
 #include <QComboBox>
+#include <limits>
 #include <QDateEdit>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -53,9 +54,13 @@ TemporalTimelineBar::TemporalTimelineBar( QWidget *parent )
     setFocusPolicy( Qt::StrongFocus ); // keyboard navigation (goal §G)
 }
 
-void TemporalTimelineBar::setScenes( const QVector<qint64> &epochMillis )
+void TemporalTimelineBar::setScenes( const QVector<qint64> &epochMillis,
+                                     const QVector<bool> &valid )
 {
     m_times = epochMillis;
+    m_valid = valid;
+    if ( m_valid.size() != m_times.size() )
+        m_valid = QVector<bool>( m_times.size(), true );
     m_selected = m_times.isEmpty() ? -1 : 0;
     update();
 }
@@ -88,8 +93,13 @@ void TemporalTimelineBar::paintEvent( QPaintEvent * )
         return;
     }
 
-    qint64 min = m_times.first();
-    qint64 max = m_times.last();
+    qint64 min = std::numeric_limits<qint64>::max();
+    qint64 max = std::numeric_limits<qint64>::min();
+    for ( qint64 t : m_times )
+    {
+        min = qMin( min, t );
+        max = qMax( max, t );
+    }
     if ( max == min )
         max = min + 1;
 
@@ -109,15 +119,22 @@ void TemporalTimelineBar::paintEvent( QPaintEvent * )
     {
         const int x = 8 + static_cast<int>( ( double )( m_times[i] - min ) / ( max - min ) *
                                             ( width() - 16 ) );
+        const bool known = i < m_valid.size() ? m_valid[i] : true;
         if ( i == m_selected )
         {
             painter.setBrush( palette().color( QPalette::Highlight ) );
             painter.drawEllipse( QPointF( x, axisY ), 5, 5 );
             painter.setBrush( Qt::NoBrush );
         }
-        else
+        else if ( known )
         {
             painter.drawEllipse( QPointF( x, axisY ), 2, 2 );
+        }
+        else
+        {
+            // Unknown acquisition date: hollow ring, never a fabricated
+            // position among real dates.
+            painter.drawEllipse( QPointF( x, axisY ), 3, 3 );
         }
     }
 }
@@ -126,8 +143,13 @@ int TemporalTimelineBar::nearestIndex( int x ) const
 {
     if ( m_times.isEmpty() )
         return -1;
-    qint64 min = m_times.first();
-    qint64 max = m_times.last();
+    qint64 min = std::numeric_limits<qint64>::max();
+    qint64 max = std::numeric_limits<qint64>::min();
+    for ( qint64 t : m_times )
+    {
+        min = qMin( min, t );
+        max = qMax( max, t );
+    }
     if ( max == min )
         max = min + 1;
     const qint64 target =
@@ -292,16 +314,24 @@ TemporalWorkbenchPanel::TemporalWorkbenchPanel( DataManagerProvider provider, QW
             emit compareRequested( a->path, b->path );
     } );
     connect( m_timeline, &TemporalTimelineBar::sceneClicked, this, [this]( int index ) {
-        // Map the timeline's filtered-scene index onto the paged table.
-        const int page = index / TemporalSceneModel::kPageSize;
+        // The timeline carries the FULL collection; the table is the FILTERED,
+        // paged projection. Map through the model's index space — with a date
+        // filter active the two indices would otherwise select wrong scenes.
+        const int row = m_model->rowForSceneIndex( index );
+        if ( row < 0 )
+        {
+            m_qaLabel->setText( tr( "该场景被当前日期筛选隐藏。" ) );
+            return;
+        }
+        const int page = row / TemporalSceneModel::kPageSize;
         if ( page != m_model->page() )
         {
             m_model->setPage( page );
             m_pageLabel->setText( tr( "第 %1 / %2 页" ).arg( page + 1 ).arg( m_model->pageCount() ) );
         }
-        const int row = index - page * TemporalSceneModel::kPageSize;
-        if ( row < m_model->rowCount() )
-            m_view->selectRow( row );
+        const int inPageRow = row - page * TemporalSceneModel::kPageSize;
+        if ( inPageRow < m_model->rowCount() )
+            m_view->selectRow( inPageRow );
         onSelectionChanged();
     } );
 
@@ -346,12 +376,22 @@ void TemporalWorkbenchPanel::onFilterChanged()
         m_toEdit->date() > sentinel ? m_toEdit->date() : QDate();
     m_model->setDateFilter( from, to );
     m_pageLabel->setText( tr( "第 1 / %1 页" ).arg( m_model->pageCount() ) );
+    // Highlight the active window on the timeline (sentinel = no filter).
+    if ( from.isValid() || to.isValid() )
+        m_timeline->setWindow( from.isValid()
+                                   ? QDateTime( from, QTime( 0, 0 ), Qt::UTC ).toMSecsSinceEpoch()
+                                   : 0,
+                               to.isValid() ? QDateTime( to, QTime( 23, 59, 59 ), Qt::UTC )
+                                                  .toMSecsSinceEpoch()
+                                            : std::numeric_limits<qint64>::max() );
+    else
+        m_timeline->setWindow( 0, 0 );
 }
 
 void TemporalWorkbenchPanel::rebuildSceneTable()
 {
     m_model->setScenes( {} );
-    m_timeline->setScenes( {} );
+    m_timeline->setScenes( {}, {} );
     m_collectionSummary->clear();
     m_qaLabel->clear();
     m_previewBtn->setEnabled( false );
@@ -385,13 +425,16 @@ void TemporalWorkbenchPanel::rebuildSceneTable()
     m_model->setScenes( scenes );
 
     QVector<qint64> times;
+    QVector<bool> valid;
     times.reserve( scenes.size() );
+    valid.reserve( scenes.size() );
     qint64 unknownDates = 0;
     qint64 clouds = 0;
     double cloudSum = 0.0;
     for ( const sicnu::temporal::TemporalSceneRef &scene : scenes )
     {
         times.append( scene.time.valid ? scene.time.epochMillis : 0 );
+        valid.append( scene.time.valid );
         if ( !scene.time.valid )
             ++unknownDates;
         if ( scene.cloudCoverPercent >= 0 )
@@ -400,7 +443,7 @@ void TemporalWorkbenchPanel::rebuildSceneTable()
             cloudSum += scene.cloudCoverPercent;
         }
     }
-    m_timeline->setScenes( times );
+    m_timeline->setScenes( times, valid );
 
     const QString range =
         tr( "%1 至 %2" )

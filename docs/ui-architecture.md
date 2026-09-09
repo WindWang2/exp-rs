@@ -399,7 +399,7 @@ history, not in a bespoke dialog). Neither panel persists anything.
 
 The four benches are CommandRegistry commands (`workbench.processingHistory`,
 `workbench.temporal`, `workbench.datasetExperiment`, `workbench.model` —
-Ctrl+Shift+H/T/D/M). The registry owns the shortcuts; the 窗口 menu projects
+Ctrl+Shift+H/T/E/M; D is taken by map.measureDistance). The registry owns the shortcuts; the 窗口 menu projects
 `registry->action(id, true)` instead of defining competing sequences.
 
 ## Contracts under test (7.0)

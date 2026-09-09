@@ -9,6 +9,7 @@
 #include "workflow/workflow_run_coordinator.h"
 
 #include "processing/framework/task_center.h"
+#include "data/derivation_record.h"
 
 #include <QComboBox>
 #include <QDateTime>
@@ -29,13 +30,12 @@ namespace
 
 QString collectOutputPaths( const sicnu::AlgorithmTaskInfo &info )
 {
-    // Same output-key vocabulary TaskCenter uses to LOCATE destinations:
-    // values under output/result-like keys are destinations.
+    // The ONE output-key vocabulary shared with TaskCenter (#726): values
+    // under output/result-like keys are destinations, never sources.
     QStringList paths;
     for ( auto it = info.parameterMap.constBegin(); it != info.parameterMap.constEnd(); ++it )
     {
-        if ( !it.key().contains( QLatin1String( "output" ), Qt::CaseInsensitive ) &&
-             !it.key().contains( QLatin1String( "result" ), Qt::CaseInsensitive ) )
+        if ( !sicnu::data::isOutputVocabularyKey( it.key() ) )
             continue;
         if ( it.value().typeId() == QMetaType::QString )
         {
@@ -131,13 +131,13 @@ ProcessingHistoryPanel::ProcessingHistoryPanel( QWidget *parent )
              &ProcessingHistoryPanel::scheduleRefresh );
     connect( m_taskCenter, &sicnu::TaskCenter::taskUpdated, this,
              &ProcessingHistoryPanel::scheduleRefresh );
+    // Queued: same-thread run-state emissions deliver INSIDE the coordinator
+    // mutex; the refresh must never run on that stack (ProjectContext does
+    // the same for the same reason).
     connect( m_coordinator, &sicnu::workflow::WorkflowRunCoordinator::runStateChanged, this,
-             &ProcessingHistoryPanel::scheduleRefresh );
-    connect( m_model, &ProcessingHistoryModel::droppedCountChanged, this,
-             [this]( long long dropped ) {
-                 m_statusLabel->setText( tr( "历史超出显示上限，最早的 %1 条不再展示（执行记录不受影响）。" )
-                                             .arg( dropped ) );
-             } );
+             &ProcessingHistoryPanel::scheduleRefresh, Qt::QueuedConnection );
+    // Truncation accounting is rendered by refreshNow()'s own summary line
+    // (single writer for the status label).
 
     refreshNow();
 }
@@ -293,11 +293,17 @@ void ProcessingHistoryPanel::rerunSelected()
     if ( !entry || entry->kind != HistoryEntry::Kind::Task || entry->algorithmId.isEmpty() ||
          !m_taskCenter )
         return;
-    // Same seam as the original submission (goal §C): a fresh task with the
-    // same algorithm + parameter snapshot, GUI-tagged, no auto-load.
-    m_taskCenter->enqueueTask( entry->algorithmId, entry->params,
-                               /*autoLoad=*/false, sicnu::TaskPriority::Normal,
-                               QList<long>(), /*autoDispatch=*/true, 0, QStringLiteral( "gui" ) );
+    // The documented retry seam first (#685/#702: parent/pipeline-aware);
+    // fall back to a plain re-submission with the same parameter snapshot
+    // when the original task is no longer retryable.
+    const long newTaskId = m_taskCenter->retryTask( entry->taskId );
+    if ( newTaskId <= 0 )
+    {
+        m_taskCenter->enqueueTask( entry->algorithmId, entry->params,
+                                   /*autoLoad=*/false, sicnu::TaskPriority::Normal,
+                                   QList<long>(), /*autoDispatch=*/true, 0,
+                                   QStringLiteral( "gui" ) );
+    }
     refreshNow();
 }
 

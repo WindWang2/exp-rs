@@ -189,6 +189,13 @@ void DatasetExperimentPanel::openDatasetStore()
         this, tr( "打开数据集库" ), QString(), tr( "SQLite 数据库 (*.db *.sqlite);;所有文件 (*)" ) );
     if ( path.isEmpty() )
         return;
+    // DatasetStore::open() creates missing files — a typo'd path must not
+    // silently become a brand-new authoritative store in the GUI.
+    if ( !QFileInfo::exists( path ) )
+    {
+        m_datasetDbLabel->setText( tr( "文件不存在：%1" ).arg( path ) );
+        return;
+    }
     QString error;
     if ( !m_datasetStore.open( path, &error ) )
     {
@@ -205,6 +212,11 @@ void DatasetExperimentPanel::openExperimentStore()
         this, tr( "打开实验库" ), QString(), tr( "SQLite 数据库 (*.db *.sqlite);;所有文件 (*)" ) );
     if ( path.isEmpty() )
         return;
+    if ( !QFileInfo::exists( path ) )
+    {
+        m_experimentDbLabel->setText( tr( "文件不存在：%1" ).arg( path ) );
+        return;
+    }
     QString error;
     if ( !m_experimentStore.open( path, &error ) )
     {
@@ -242,6 +254,9 @@ void DatasetExperimentPanel::rebuildDatasets()
                                    .arg( m_datasetStore.storePath() )
                                    .arg( page->first ) );
     blocker.unblock();
+    // Always rebuild dependents: a reopened (possibly empty) store must never
+    // keep showing the previous store's versions/samples.
+    rebuildVersions();
     if ( !m_datasets.isEmpty() )
         onDatasetSelected( 0 );
 }
@@ -296,10 +311,36 @@ void DatasetExperimentPanel::onVersionSelected( int row )
     lines << tr( "样本数：%1" ).arg( sampleTotal );
 
     // Label schema + splits live in the manifest document — project the
-    // reference lists without re-deriving anything.
-    const auto schemaVersions =
-        m_datasetStore.labelSchemaVersions( version.datasetId() );
-    lines << tr( "标注方案版本：%1 条" ).arg( schemaVersions.size() );
+    // document's OWN references (label_schema.schema_id, split_manifests)
+    // without re-deriving anything. Leakage/quality reports and reproduction
+    // bundles are separate CLI/agent artifacts; the GUI states that plainly
+    // instead of inventing numbers.
+    QString schemaId;
+    QStringList splitManifests;
+    if ( !version.manifestJson().isEmpty() )
+    {
+        const QJsonDocument doc =
+            QJsonDocument::fromJson( version.manifestJson().toUtf8() );
+        if ( doc.isObject() )
+        {
+            const QJsonObject obj = doc.object();
+            schemaId = obj.value( QStringLiteral( "label_schema" ) )
+                         .toObject()
+                         .value( QStringLiteral( "schema_id" ) )
+                         .toString();
+            const QJsonArray splits =
+                obj.value( QStringLiteral( "split_manifests" ) ).toArray();
+            for ( const QJsonValue &value : splits )
+                splitManifests << value.toString();
+        }
+    }
+    lines << tr( "标注方案：%1" )
+                 .arg( schemaId.isEmpty() ? tr( "清单未声明" ) : schemaId );
+    if ( !splitManifests.isEmpty() )
+        lines << tr( "切分清单：%1" ).arg( splitManifests.join( QStringLiteral( ", " ) ) );
+    else
+        lines << tr( "切分清单：无（未划分或未声明）" );
+    lines << tr( "泄露审计 / 质量报告 / 复现包：由 CLI/Agent 流程生成，此面板不重复计算。" );
 
     m_versionDetail->setText( lines.join( QStringLiteral( "<br/>" ) ) );
 
@@ -345,6 +386,7 @@ void DatasetExperimentPanel::rebuildExperiments()
                                   QStringLiteral( " — " ) +
                                   tr( "共 %1 个实验" ).arg( page->first ) );
     blocker.unblock();
+    rebuildRuns();
     if ( !m_experiments.isEmpty() )
         onExperimentSelected( 0 );
 }
@@ -362,6 +404,13 @@ void DatasetExperimentPanel::rebuildRuns()
         return;
     m_runs = page->second;
     m_runsTable->setRowCount( m_runs.size() );
+    // First-page projection: state the truncation instead of implying "all".
+    m_runDetail->setPlaceholderText(
+        page->first > static_cast<qint64>( m_runs.size() )
+            ? tr( "运行指标（仅显示前 %1 / %2 个运行）。" )
+                  .arg( m_runs.size() )
+                  .arg( page->first )
+            : tr( "运行指标（共 %1 个运行）。" ).arg( page->first ) );
     for ( int i = 0; i < m_runs.size(); ++i )
     {
         const sicnu::experiment::ExperimentRun &run = m_runs[i];
@@ -385,7 +434,10 @@ void DatasetExperimentPanel::onRunsSelectionChanged()
                                       : QModelIndexList();
     m_compareBtn->setEnabled( rows.size() == 2 );
     if ( rows.size() == 1 )
-        showMetricJson( m_runsTable->item( rows.first().row(), 0 )->text() );
+    {
+        if ( const QTableWidgetItem *idItem = m_runsTable->item( rows.first().row(), 0 ) )
+            showMetricJson( idItem->text() );
+    }
 }
 
 void DatasetExperimentPanel::showMetricJson( const QString &runId )
@@ -407,8 +459,12 @@ void DatasetExperimentPanel::compareSelectedRuns()
                                       : QModelIndexList();
     if ( rows.size() != 2 )
         return;
-    const QString runA = m_runsTable->item( rows[0].row(), 0 )->text();
-    const QString runB = m_runsTable->item( rows[1].row(), 0 )->text();
+    const QTableWidgetItem *itemA = m_runsTable->item( rows[0].row(), 0 );
+    const QTableWidgetItem *itemB = m_runsTable->item( rows[1].row(), 0 );
+    if ( !itemA || !itemB )
+        return;
+    const QString runA = itemA->text();
+    const QString runB = itemB->text();
     const auto metricA = m_experimentStore.metricRecordForRun( runA );
     const auto metricB = m_experimentStore.metricRecordForRun( runB );
     if ( !metricA.has_value() || !metricB.has_value() )
@@ -417,12 +473,26 @@ void DatasetExperimentPanel::compareSelectedRuns()
         return;
     }
 
-    // Metric-level diff over top-level keys: truthfully lists both sides and
-    // flags identity pins that differ (dataset/fingerprint), which the
-    // experiment layer treats as comparability gates.
+    // Metric-level diff over top-level keys, PLUS the comparability identity
+    // pins the experiment layer gates on: runs on different dataset
+    // versions/fingerprints are flagged incomparable rather than silently
+    // placed side by side.
+    const auto runRecordA = m_experimentStore.runById( runA );
+    const auto runRecordB = m_experimentStore.runById( runB );
     QJsonObject report;
     report.insert( QStringLiteral( "run_a" ), runA );
     report.insert( QStringLiteral( "run_b" ), runB );
+    if ( runRecordA.has_value() && runRecordB.has_value() )
+    {
+        const bool sameDataset =
+            runRecordA->datasetVersionId() == runRecordB->datasetVersionId() &&
+            runRecordA->datasetFingerprint() == runRecordB->datasetFingerprint();
+        report.insert( QStringLiteral( "comparable_dataset_identity" ), sameDataset );
+        report.insert( QStringLiteral( "dataset_version_a" ), runRecordA->datasetVersionId() );
+        report.insert( QStringLiteral( "dataset_version_b" ), runRecordB->datasetVersionId() );
+        report.insert( QStringLiteral( "dataset_fingerprint_a" ), runRecordA->datasetFingerprint() );
+        report.insert( QStringLiteral( "dataset_fingerprint_b" ), runRecordB->datasetFingerprint() );
+    }
     const QJsonObject metricsA = metricA->metrics;
     const QJsonObject metricsB = metricB->metrics;
     QStringList onlyA;

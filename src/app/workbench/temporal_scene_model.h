@@ -52,6 +52,10 @@ class TemporalSceneModel : public QAbstractTableModel
 
     /// Global (unpaged) index of a row, or -1; used for preview/compare.
     int sceneIndexAtRow( int row ) const;
+    /// Inverse mapping: global scene index → visible row, or -1 when the
+    /// scene is hidden by the active date filter. Keeps the timeline strip
+    /// (full collection) and the paged table (filtered) in ONE index story.
+    int rowForSceneIndex( int globalIndex ) const;
     const sicnu::temporal::TemporalSceneRef *sceneAtRow( int row ) const;
 
     // QAbstractTableModel

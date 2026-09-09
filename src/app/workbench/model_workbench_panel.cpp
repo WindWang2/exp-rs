@@ -79,7 +79,13 @@ ModelWorkbenchPanel::ModelWorkbenchPanel( QWidget *parent )
     m_backendCombo->addItem( tr( "CPU" ), QStringLiteral( "cpu" ) );
     m_backendCombo->addItem( tr( "CUDA" ), QStringLiteral( "cuda" ) );
     toolRow->addWidget( m_search, 1 );
-    toolRow->addWidget( new QLabel( tr( "设备" ), central ) );
+    // A FILTER, not an execution promise: the combo narrows the catalog view;
+    // inference device stays with the runtime ("auto") unless the operator
+    // parameters say otherwise.
+    QLabel *deviceFilterLabel = new QLabel( tr( "设备筛选" ), central );
+    deviceFilterLabel->setToolTip(
+        tr( "仅过滤目录视图；测试推理的设备由运行时自动解析。" ) );
+    toolRow->addWidget( deviceFilterLabel );
     toolRow->addWidget( m_backendCombo );
     toolRow->addWidget( m_reloadBtn );
     layout->addLayout( toolRow );
@@ -225,7 +231,10 @@ void ModelWorkbenchPanel::showModelDetail()
         m_manifestView->clear();
         return;
     }
-    const QString name = m_modelTable->item( current.row(), 0 )->text();
+    const QTableWidgetItem *nameItem = m_modelTable->item( current.row(), 0 );
+    if ( !nameItem )
+        return;
+    const QString name = nameItem->text();
     // inspect() returns the full registry record (manifest + health).
     const Json::Value record =
         sicnu::operators::ModelCatalog::instance().inspect( name.toStdString() );
@@ -245,7 +254,10 @@ void ModelWorkbenchPanel::runTestInference()
     const QModelIndex current = m_modelTable->currentIndex();
     if ( !current.isValid() )
         return;
-    const QString modelName = m_modelTable->item( current.row(), 0 )->text();
+    const QTableWidgetItem *nameItem = m_modelTable->item( current.row(), 0 );
+    if ( !nameItem )
+        return;
+    const QString modelName = nameItem->text();
 
     // Readiness gate BEFORE submission: never enqueue work the runtime layer
     // already knows will fail.

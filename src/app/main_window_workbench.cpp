@@ -82,6 +82,41 @@ void populateWorkbenchMenu( QMenu *menu, sicnu::app::WorkbenchHost *host )
     }
 }
 
+/// Shared compare-surface routing (history panel + temporal bench): load both
+/// artifacts through the project (ComparisonDialog borrows project-owned
+/// layers), locate them by canonical source and open the existing dialog.
+void openComparisonForPaths( QgisDesktopWindow *window, const QString &pathA,
+                             const QString &pathB )
+{
+    if ( !window->loadRasterLayer( pathA ) || !window->loadRasterLayer( pathB ) )
+    {
+        window->statusBar()->showMessage( QgisDesktopWindow::tr( "无法加载待对比的产物。" ), 4000 );
+        return;
+    }
+    QgsRasterLayer *left = nullptr;
+    QgsRasterLayer *right = nullptr;
+    const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
+    for ( QgsMapLayer *layer : layers )
+    {
+        auto *raster = qobject_cast<QgsRasterLayer *>( layer );
+        if ( !raster )
+            continue;
+        if ( raster->source() == pathA )
+            left = raster;
+        if ( raster->source() == pathB )
+            right = raster;
+    }
+    if ( !left || !right )
+    {
+        window->statusBar()->showMessage( QgisDesktopWindow::tr( "未找到待对比的图层。" ), 4000 );
+        return;
+    }
+    ComparisonDialog dialog( window );
+    dialog.setLeftLayer( left );
+    dialog.setRightLayer( right );
+    dialog.exec();
+}
+
 } // namespace
 
 void QgisDesktopWindow::setupWorkbenchInfrastructure()
@@ -329,39 +364,16 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     m_historyPanel->setObjectName( QStringLiteral( "rsProcessingHistoryDock" ) );
     m_historyPanel->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea |
                                      Qt::BottomDockWidgetArea );
+    addDockWidget( Qt::BottomDockWidgetArea, m_historyPanel );
+    m_historyPanel->hide(); // available on demand (窗口 menu / registry command)
     connect( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::resultOpenRequested, this,
-             [this]( const QString &path ) { loadRasterLayer( path ); } );
+             [this]( const QString &path ) {
+                 if ( !loadRasterLayer( path ) )
+                     statusBar()->showMessage( tr( "无法在地图上打开产物：%1" ).arg( path ), 5000 );
+             } );
     connect( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::compareRequested, this,
              [this]( const QString &pathA, const QString &pathB ) {
-                 // Both artifacts go through the project (the dialog borrows
-                 // project-owned layers), then the existing compare surface.
-                 if ( !loadRasterLayer( pathA ) || !loadRasterLayer( pathB ) )
-                 {
-                     statusBar()->showMessage( tr( "无法加载待对比的产物。" ), 4000 );
-                     return;
-                 }
-                 QgsRasterLayer *left = nullptr;
-                 QgsRasterLayer *right = nullptr;
-                 const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
-                 for ( QgsMapLayer *layer : layers )
-                 {
-                     auto *raster = qobject_cast<QgsRasterLayer *>( layer );
-                     if ( !raster )
-                         continue;
-                     if ( raster->source() == pathA )
-                         left = raster;
-                     if ( raster->source() == pathB )
-                         right = raster;
-                 }
-                 if ( !left || !right )
-                 {
-                     statusBar()->showMessage( tr( "未找到待对比的图层。" ), 4000 );
-                     return;
-                 }
-                 ComparisonDialog dialog( this );
-                 dialog.setLeftLayer( left );
-                 dialog.setRightLayer( right );
-                 dialog.exec();
+                 openComparisonForPaths( this, pathA, pathB );
              } );
     connect( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::inspectRequested, this,
              [this]( const QString &path ) {
@@ -377,12 +389,20 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
                          QStringList{ asset->id().toString() } );
              } );
     connect( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::resumeRunRequested, this,
-             []( const QString &runId ) {
+             [this]( const QString &runId ) {
                  QString error;
-                 sicnu::workflow::WorkflowRunCoordinator::instance().resumeRun(
+                 const long taskId = sicnu::workflow::WorkflowRunCoordinator::instance().resumeRun(
                      runId.toStdString(), &error );
-                 // Surfacing resume failures happens through the run's own
-                 // Failed state in the history — no extra modal surface here.
+                 // resumeRun rejects WITHOUT changing run state (lock held,
+                 // checkpoint missing/corrupt) — that must surface now, not
+                 // "later through some state change that never comes".
+                 if ( taskId < 0 )
+                     statusBar()->showMessage(
+                         tr( "恢复运行 %1 失败：%2" )
+                             .arg( runId, error.isEmpty() ? tr( "未知原因" ) : error ),
+                         6000 );
+                 if ( m_historyPanel )
+                     m_historyPanel->refreshNow();
              } );
     if ( m_windowMenu )
     {
@@ -400,37 +420,13 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     m_temporalPanel = new sicnu::app::TemporalWorkbenchPanel( temporalProvider, this );
     m_temporalPanel->setObjectName( QStringLiteral( "rsTemporalWorkbenchDock" ) );
     m_temporalPanel->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+    addDockWidget( Qt::RightDockWidgetArea, m_temporalPanel );
+    m_temporalPanel->hide();
     connect( m_temporalPanel, &sicnu::app::TemporalWorkbenchPanel::previewRequested, this,
              [this]( const QString &path ) { loadRasterLayer( path ); } );
     connect( m_temporalPanel, &sicnu::app::TemporalWorkbenchPanel::compareRequested, this,
              [this]( const QString &pathA, const QString &pathB ) {
-                 if ( !loadRasterLayer( pathA ) || !loadRasterLayer( pathB ) )
-                 {
-                     statusBar()->showMessage( tr( "无法加载待对比的时相。" ), 4000 );
-                     return;
-                 }
-                 QgsRasterLayer *left = nullptr;
-                 QgsRasterLayer *right = nullptr;
-                 const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
-                 for ( QgsMapLayer *layer : layers )
-                 {
-                     auto *raster = qobject_cast<QgsRasterLayer *>( layer );
-                     if ( !raster )
-                         continue;
-                     if ( raster->source() == pathA )
-                         left = raster;
-                     if ( raster->source() == pathB )
-                         right = raster;
-                 }
-                 if ( !left || !right )
-                 {
-                     statusBar()->showMessage( tr( "未找到待对比的图层。" ), 4000 );
-                     return;
-                 }
-                 ComparisonDialog dialog( this );
-                 dialog.setLeftLayer( left );
-                 dialog.setRightLayer( right );
-                 dialog.exec();
+                 openComparisonForPaths( this, pathA, pathB );
              } );
     // Collections change with the project data context; the panel re-reads.
     if ( m_projectContext )
@@ -457,6 +453,8 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     m_datasetExperimentPanel->setObjectName( QStringLiteral( "rsDatasetExperimentDock" ) );
     m_datasetExperimentPanel->setAllowedAreas( Qt::LeftDockWidgetArea |
                                                Qt::RightDockWidgetArea );
+    addDockWidget( Qt::RightDockWidgetArea, m_datasetExperimentPanel );
+    m_datasetExperimentPanel->hide();
     if ( m_windowMenu )
     {
         if ( QAction *action = m_commandRegistry->action( QStringLiteral( "workbench.datasetExperiment" ), true ) )
@@ -469,6 +467,8 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     m_modelPanel = new sicnu::app::ModelWorkbenchPanel( this );
     m_modelPanel->setObjectName( QStringLiteral( "rsModelWorkbenchDock" ) );
     m_modelPanel->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+    addDockWidget( Qt::RightDockWidgetArea, m_modelPanel );
+    m_modelPanel->hide();
     connect( m_modelPanel, &sicnu::app::ModelWorkbenchPanel::inferenceSubmitted, this,
              [this]( long ) {
                  if ( m_historyPanel )
@@ -498,6 +498,7 @@ bool QgisDesktopWindow::confirmWorkbenchShutdown( const QString &actionTitle )
             case sicnu::TaskStatus::Paused:
             case sicnu::TaskStatus::WaitingResource:
             case sicnu::TaskStatus::Dispatching:
+            case sicnu::TaskStatus::Cancelling: // cancel in flight — still in-flight work (#A)
                 ++runningTaskCount;
                 cancellableTaskIds.append( task.taskId );
                 break;
@@ -513,7 +514,13 @@ bool QgisDesktopWindow::confirmWorkbenchShutdown( const QString &actionTitle )
     if ( plan.isEmpty() )
         return true;
 
-    // Stage 1 — in-flight work: the user either cancels it explicitly through
+    // Stage 1 — dirty benches FIRST: their requestClose() confirmations can
+    // still abort the whole operation, and an abort must not leave already
+    // cancelled compute behind (review M8: cancel-before-confirm order).
+    if ( !plan.dirtyBenches.isEmpty() && !sicnu::app::requestCloseDirtyBenches( m_workbenchHost ) )
+        return false;
+
+    // Stage 2 — in-flight work: the user either cancels it explicitly through
     // the benches'/TaskCenter's own cancel seams, or aborts the operation.
     if ( !plan.inFlightBenches.isEmpty() || plan.runningTaskCount > 0 )
     {
@@ -538,11 +545,6 @@ bool QgisDesktopWindow::confirmWorkbenchShutdown( const QString &actionTitle )
         for ( long taskId : cancellableTaskIds )
             sicnu::TaskCenter::instance().cancelTask( taskId );
     }
-
-    // Stage 2 — dirty benches: each one runs its own save/discard
-    // confirmation via requestClose(); a refusal aborts the operation.
-    if ( !plan.dirtyBenches.isEmpty() && !sicnu::app::requestCloseDirtyBenches( m_workbenchHost ) )
-        return false;
 
     return true;
 }
