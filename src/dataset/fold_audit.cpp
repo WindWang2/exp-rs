@@ -54,6 +54,7 @@ QJsonObject FoldComparabilitySummary::toJson() const
     QJsonObject json;
     json.insert( QStringLiteral( "fold_count" ), foldCount );
     json.insert( QStringLiteral( "replay_matches" ), replayMatches );
+    json.insert( QStringLiteral( "replay_verified" ), replayVerified );
     json.insert( QStringLiteral( "replay_fingerprint" ), replayFingerprint );
     json.insert( QStringLiteral( "notes" ), QJsonArray::fromStringList( notes ) );
     QJsonArray foldArray;
@@ -85,8 +86,6 @@ sicnu::data::Result<FoldComparabilitySummary> FoldAuditor::auditFolds(
         if ( !input.classCode.isEmpty() )
             allClasses.insert( input.classCode );
     }
-    if ( allClasses.isEmpty() )
-        ; // no class evidence — zero-ratio checks degrade to notes below
 
     FoldComparabilitySummary summary;
     summary.foldCount = manifest.config().foldCount;
@@ -155,6 +154,7 @@ sicnu::data::Result<FoldComparabilitySummary> FoldAuditor::auditFolds(
             "inputs carry no class codes; zero-ratio checks were not run" ) );
 
     const auto replay = verifyDeterministicReplay( manifest, inputs );
+    summary.replayVerified = replay.has_value();
     if ( replay )
     {
         summary.replayMatches = replay.value();

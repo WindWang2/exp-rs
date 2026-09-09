@@ -23,6 +23,7 @@
 #include "experiment/run_recorder.h"
 
 #include <QFileInfo>
+#include <algorithm>
 #include <cmath>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -267,8 +268,10 @@ TEST_CASE( "pairs require event groups; temporal keeps missing observations",
 {
     DraftFixture fx;
     SamplePromoter promoter( fx.store );
+    // Same-group members: the temporal sample's leakage group is the
+    // members' SHARED group, so mixed-group members are refused (F8).
     const auto &memberA = fx.samples[0].sampleId();
-    const auto &memberB = fx.samples[1].sampleId();
+    const auto &memberB = fx.samples[2].sampleId();
 
     // No event group → refused (pairs without a leakage key are unauditable).
     const auto noEvent =
@@ -410,6 +413,35 @@ TEST_CASE( "run recorder records truthful terminal states", "[recorder][experime
     CHECK( cancelled->metrics().value( QStringLiteral( "cancel_reason" ) ).toString() ==
            QStringLiteral( "user requested" ) );
 
+    // Cancel from Created is legal (run never started).
+    request.executionRef = QStringLiteral( "workflow-run-3" );
+    auto third = recorder.startRun( request );
+    REQUIRE( third.has_value() );
+    // markCancelled walks Running->Cancelling->Cancelled; from Created it is
+    // the single legal step.
+    REQUIRE( recorder.markCancelled( third.value(), QStringLiteral( "never started" ) ).has_value() );
+    // A second cancel hits the terminal wall: correction = a new run.
+    auto again = recorder.markCancelled( third.value(), QStringLiteral( "again" ) );
+    CHECK( !again.has_value() );
+
+    // Environment redaction: a secret smuggled into the request environment
+    // cannot survive the record boundary (#789 defense).
+    RunStartRequest secretRequest = request;
+    secretRequest.executionRef = QStringLiteral( "workflow-run-4" );
+    secretRequest.environment = RunEnvironment::fromFields(
+        QJsonObject{ { QStringLiteral( "platform" ), QStringLiteral( "test" ) } },
+        QHash<QString, QString>{
+            { QStringLiteral( "SICNU_DB_PASSWORD" ), QStringLiteral( "hunter2" ) },
+            { QStringLiteral( "SICNU_TOKEN" ), QStringLiteral( "abc123" ) } } );
+    auto secretRun = recorder.startRun( secretRequest );
+    REQUIRE( secretRun.has_value() );
+    const auto secretRecord = experimentStore.runById( secretRun.value() );
+    REQUIRE( secretRecord.has_value() );
+    const QString envText =
+        QJsonDocument( secretRecord->environment().toJson() ).toJson( QJsonDocument::Compact );
+    CHECK( !envText.contains( QStringLiteral( "hunter2" ) ) );
+    CHECK( !envText.contains( QStringLiteral( "abc123" ) ) );
+
     // Stale-run reconciliation: a live ref keeps its run out of the report;
     // a non-terminal run whose execution died lands in it. No auto-closing.
     request.executionRef = QStringLiteral( "workflow-run-live" );
@@ -419,9 +451,16 @@ TEST_CASE( "run recorder records truthful terminal states", "[recorder][experime
     auto dead = recorder.startRun( request );
     REQUIRE( dead.has_value() );
     const auto stale = recorder.reconcileStaleRuns( { QStringLiteral( "workflow-run-live" ) } );
-    REQUIRE( stale.size() == 1 );
-    CHECK( stale.first().runId == dead.value() );
-    CHECK( stale.first().executionRef == QStringLiteral( "workflow-run-dead" ) );
+    // Both dead-ref non-terminal runs land: workflow-run-dead and the
+    // secret-carrying workflow-run-4; the live ref keeps its run out.
+    REQUIRE( stale.size() == 2 );
+    // Same-millisecond inserts order by run_id, so assert by content.
+    const bool deadListed = std::any_of(
+        stale.cbegin(), stale.cend(), [ & ]( const auto &item ) {
+            return item.runId == dead.value() &&
+                   item.executionRef == QStringLiteral( "workflow-run-dead" );
+        } );
+    CHECK( deadListed );
 }
 
 // --- M4: fold audit ------------------------------------------------------------
@@ -540,17 +579,44 @@ TEST_CASE( "fold audit surfaces planted duplicate leakage with fold evidence",
     const auto summary =
         FoldAuditor::auditFolds( fx.manifest, fx.inputs, LeakageAuditConfig(), digest );
     REQUIRE( summary.has_value() );
+    // Every planted sample sits in group g-0..g-3 with folds f(0..3); a
+    // finding appears in materialization k exactly when some planted pair
+    // straddles fold k's Test/Train boundary. With the four planted groups
+    // holding folds {f(0),f(1),f(2),f(3)}, every fold that carries at least
+    // one planted group AND at least one other planted group in a different
+    // fold must report the duplicate - and folds without such a pair must
+    // NOT report one.
+    QSet<int> plantedFolds;
+    for ( int i = 0; i < 4; ++i )
+    {
+        const auto placement = fx.manifest.assignmentOf( QStringLiteral( "s-%1" ).arg( i ) );
+        REQUIRE( placement.has_value() );
+        plantedFolds.insert( placement->fold );
+    }
     int foldsWithFinding = 0;
     for ( const auto &fold : summary.value().folds )
     {
+        int hasExactDuplicate = 0;
+        bool digestIsPlanted = false;
         for ( const auto &finding : fold.report.findings() )
             if ( finding.kind == LeakageKind::ExactDuplicate )
             {
-                ++foldsWithFinding;
-                break;
+                ++hasExactDuplicate;
+                digestIsPlanted |=
+                    finding.evidence.value( QStringLiteral( "digest" ) ).toString()
+                    == QStringLiteral( "planted-shared" );
             }
+        // A fold WITH a planted group pair straddling must flag it; a fold
+        // whose planted members are all on one side must stay clean for the
+        // planted digest.
+        if ( hasExactDuplicate )
+            ++foldsWithFinding;
+        if ( hasExactDuplicate )
+            CHECK( digestIsPlanted );
     }
-    CHECK( foldsWithFinding >= 1 );
+    // All four planted groups share one digest and the folds {f(0..3)} cover
+    // every materialization pair, so the count must match the fold count.
+    CHECK( foldsWithFinding == summary.value().foldCount );
 }
 
 // --- M5: facets & quality cache ------------------------------------------------
@@ -582,6 +648,15 @@ TEST_CASE( "facet distributions are bounded and honest about the tail",
     for ( const auto &bucket : digests.value().values )
         reported += bucket.second;
     CHECK( reported == digests.value().total );
+
+    // Bounded tail: maxValues=1 keeps only the top bucket and folds the rest
+    // into the explicit "(other)" bucket; counts still sum to the total.
+    const auto bounded =
+        fx.store.facetDistribution( fx.versionId, QStringLiteral( "content_digest" ), 1 );
+    REQUIRE( bounded.has_value() );
+    CHECK( bounded.value().values.size() == 2 );
+    CHECK( bounded.value().values[1].first == QStringLiteral( "(other)" ) );
+    CHECK( bounded.value().values[0].second + bounded.value().values[1].second == 12 );
 
     const auto cross =
         fx.store.facetCrossCounts( fx.versionId, QStringLiteral( "region" ), QStringLiteral( "content_digest" ) );
@@ -708,6 +783,15 @@ TEST_CASE( "replay readiness never overstates", "[replay][readiness]" )
     // Wired store: dataset + split ok, algorithm unknown -> BestEffort.
     const auto wired = ReplayReadiness::assess( run, &fx.store, hooks );
     CHECK( wired.level == sicnu::dataset::ReproductionLevel::BestEffort );
+
+    // A run with NO algorithm pin is Missing (a required pin absent can
+    // never be Exact - the level must not overstate).
+    ExperimentRun unpinnedAlgorithm = run;
+    unpinnedAlgorithm.setRunId( QStringLiteral( "55555555-5555-4555-8555-555555555555" ) );
+    unpinnedAlgorithm.setAlgorithmId( QString() );
+    const auto noAlgorithm = ReplayReadiness::assess( unpinnedAlgorithm, &fx.store, hooks );
+    CHECK( noAlgorithm.level != sicnu::dataset::ReproductionLevel::Exact );
+    CHECK( noAlgorithm.level == sicnu::dataset::ReproductionLevel::Impossible );
 
     // A run pinning a MISSING artifact is Impossible via the artifact hook.
     sicnu::experiment::ExperimentRun::Artifact artifact;

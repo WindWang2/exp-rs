@@ -50,7 +50,7 @@ void ExperimentRunRecorder::setDatasetStore( const sicnu::dataset::DatasetStore 
     m_datasetStore = store;
 }
 
-Result<ExperimentRun> ExperimentRunRecorder::loadRunnable( const QString &runId ) const
+Result<ExperimentRun> ExperimentRunRecorder::loadRun( const QString &runId ) const
 {
     const auto run = m_store->runById( runId );
     if ( !run )
@@ -62,9 +62,6 @@ Result<ExperimentRun> ExperimentRunRecorder::loadRunnable( const QString &runId 
 
 Result<QString> ExperimentRunRecorder::startRun( const RunStartRequest &request )
 {
-    if ( !m_store )
-        return failWith<QString>( QStringLiteral( "dataset.store_closed" ),
-                                  QStringLiteral( "store closed" ) );
     if ( request.experimentId.isEmpty() )
         return failWith<QString>( QStringLiteral( "experiment.recorder_missing_experiment" ),
                                   QStringLiteral( "run request carries no experiment id" ) );
@@ -153,7 +150,7 @@ VoidResult ExperimentRunRecorder::markSucceeded( const QString &runId,
                                                  const QVector<ExperimentRun::Artifact> &artifacts,
                                                  const QJsonObject &metrics )
 {
-    auto loaded = loadRunnable( runId );
+    auto loaded = loadRun( runId );
     if ( !loaded )
         return VoidResult::failure( loaded.diagnostics() );
     ExperimentRun run = loaded.value();
@@ -170,7 +167,7 @@ VoidResult ExperimentRunRecorder::markSucceeded( const QString &runId,
 VoidResult ExperimentRunRecorder::markFailed( const QString &runId, const QString &errorCode,
                                               const QString &message )
 {
-    auto loaded = loadRunnable( runId );
+    auto loaded = loadRun( runId );
     if ( !loaded )
         return VoidResult::failure( loaded.diagnostics() );
     ExperimentRun run = loaded.value();
@@ -190,7 +187,7 @@ VoidResult ExperimentRunRecorder::markFailed( const QString &runId, const QStrin
 
 VoidResult ExperimentRunRecorder::markCancelled( const QString &runId, const QString &reason )
 {
-    auto loaded = loadRunnable( runId );
+    auto loaded = loadRun( runId );
     if ( !loaded )
         return VoidResult::failure( loaded.diagnostics() );
     ExperimentRun run = loaded.value();

@@ -45,20 +45,6 @@ sicnu::data::Result<void> DatasetStore::setSampleFacets( const DatasetVersionId 
         return Result::failure( facetDiag( QStringLiteral( "dataset.store_read_only" ),
                                            QStringLiteral( "store is read-only" ) ) );
 
-    // Draft-only: facets track sample content.
-    StoreStmt status( m_impl->db, QStringLiteral( "SELECT status FROM dataset_versions WHERE id=?" ) );
-    if ( !status )
-        return Result::failure( facetDiag( QStringLiteral( "dataset.store_query_failed" ),
-                                           status.error( m_impl->db ) ) );
-    status.bind( 1, versionId.toString() );
-    if ( !status.stepRow() )
-        return Result::failure( facetDiag( QStringLiteral( "dataset.not_found" ),
-                                           QStringLiteral( "version %1 does not exist" )
-                                               .arg( versionId.toString() ) ) );
-    const auto versionStatus = datasetVersionStatusFromString( status.text( 0 ) );
-    if ( !versionStatus || *versionStatus != DatasetVersionStatus::Draft )
-        return Result::failure( notDraft( versionId.toString() ) );
-
     for ( const auto &entry : entries )
     {
         if ( entry.first.isEmpty() )
@@ -67,9 +53,53 @@ sicnu::data::Result<void> DatasetStore::setSampleFacets( const DatasetVersionId 
     }
 
     // Replace is atomic per sample: wipe then insert inside one transaction.
+    // (#811 playbook: the draft/sample checks run INSIDE the BEGIN IMMEDIATE
+    // transaction so a concurrent commit cannot slip between check and write.)
     if ( !m_impl->begin( nullptr ) )
         return Result::failure( facetDiag( QStringLiteral( "dataset.store_transaction" ),
                                            QStringLiteral( "cannot begin facet transaction" ) ) );
+    StoreStmt status( m_impl->db, QStringLiteral( "SELECT status FROM dataset_versions WHERE id=?" ) );
+    if ( !status )
+    {
+        m_impl->rollback();
+        return Result::failure( facetDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           status.error( m_impl->db ) ) );
+    }
+    status.bind( 1, versionId.toString() );
+    if ( !status.stepRow() )
+    {
+        m_impl->rollback();
+        return Result::failure( facetDiag( QStringLiteral( "dataset.not_found" ),
+                                           QStringLiteral( "version %1 does not exist" )
+                                               .arg( versionId.toString() ) ) );
+    }
+    const auto versionStatus = datasetVersionStatusFromString( status.text( 0 ) );
+    if ( !versionStatus || *versionStatus != DatasetVersionStatus::Draft )
+    {
+        m_impl->rollback();
+        return Result::failure( notDraft( versionId.toString() ) );
+    }
+    {
+        // The facet target must be a real sample of the version: orphan rows
+        // would silently count in facet distributions.
+        StoreStmt sample( m_impl->db, QStringLiteral(
+            "SELECT 1 FROM samples WHERE dataset_version_id=? AND sample_id=?" ) );
+        if ( !sample )
+        {
+            m_impl->rollback();
+            return Result::failure( facetDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               sample.error( m_impl->db ) ) );
+        }
+        sample.bind( 1, versionId.toString() );
+        sample.bind( 2, sampleId.toString() );
+        if ( !sample.stepRow() )
+        {
+            m_impl->rollback();
+            return Result::failure( facetDiag( QStringLiteral( "dataset.sample_not_found" ),
+                                               QStringLiteral( "sample %1 is not in version %2" )
+                                                   .arg( sampleId.toString(), versionId.toString() ) ) );
+        }
+    }
     {
         StoreStmt wipe( m_impl->db, QStringLiteral(
             "DELETE FROM sample_facets WHERE dataset_version_id=? AND sample_id=?" ) );
@@ -224,6 +254,20 @@ sicnu::data::Result<void> DatasetStore::saveQualitySummary( const DatasetVersion
     if ( isReadOnly() )
         return Result::failure( facetDiag( QStringLiteral( "dataset.store_read_only" ),
                                            QStringLiteral( "store is read-only" ) ) );
+    {
+        // The cache target must be a real version (cache-only content, but a
+        // summary for a nonexistent version is a lie about coverage).
+        StoreStmt status( m_impl->db, QStringLiteral(
+            "SELECT 1 FROM dataset_versions WHERE id=?" ) );
+        if ( !status )
+            return Result::failure( facetDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               status.error( m_impl->db ) ) );
+        status.bind( 1, versionId.toString() );
+        if ( !status.stepRow() )
+            return Result::failure( facetDiag( QStringLiteral( "dataset.not_found" ),
+                                               QStringLiteral( "version %1 does not exist" )
+                                                   .arg( versionId.toString() ) ) );
+    }
     StoreStmt upsert( m_impl->db, QStringLiteral(
         "INSERT OR REPLACE INTO quality_summaries(dataset_version_id, sample_count,"
         " max_roword, json, updated_ms) VALUES(?,?,?,?,?)" ) );

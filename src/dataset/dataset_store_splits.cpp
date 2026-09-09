@@ -49,6 +49,20 @@ sicnu::data::Result<void> DatasetStore::saveSplitManifest( const SplitManifest &
     if ( manifest.datasetVersionId().isEmpty() )
         return Result::failure( storeDiag( QStringLiteral( "dataset.split_invalid" ),
                                            QStringLiteral( "manifest carries no dataset version" ) ) );
+    {
+        // Dangling manifests are refused: a stored split always resolves to
+        // a version (derived evidence about nothing is not evidence).
+        StoreStmt version( m_impl->db, QStringLiteral(
+            "SELECT 1 FROM dataset_versions WHERE id=?" ) );
+        if ( !version )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               version.error( m_impl->db ) ) );
+        version.bind( 1, manifest.datasetVersionId() );
+        if ( !version.stepRow() )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
+                                               QStringLiteral( "version %1 does not exist" )
+                                                   .arg( manifest.datasetVersionId() ) ) );
+    }
 
     const QString fingerprint = splitManifestFingerprint( manifest );
     const QString json = jsonToText( manifest.toJson() );
@@ -206,7 +220,7 @@ QVector<LeakageReport> DatasetStore::leakageReportsForSplit( const QString &spli
     if ( !stmt )
         return reports;
     stmt.bind( 1, splitManifestId );
-    stmt.bind( 2, limit );
+    stmt.bind( 2, qBound<qint64>( qint64( 1 ), limit, qint64( 1000 ) ) );
     while ( stmt.stepRow() )
     {
         const auto report = LeakageReport::fromJson( textToJson( stmt.text( 0 ) ) );

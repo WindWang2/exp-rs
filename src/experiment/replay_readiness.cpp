@@ -145,11 +145,18 @@ void addModelAndAlgorithmChecks( QVector<ReplayCheck> &checks, const ExperimentR
         }
         checks.append( check );
     }
-    if ( !run.algorithmId().isEmpty() )
     {
+        // The algorithm pin is REQUIRED: an absent pin means nothing was
+        // recorded about the executing algorithm, so a replay can never be
+        // verified. Silence here would overstate the level to Exact.
         ReplayCheck check;
         check.dependency = QStringLiteral( "algorithm" );
-        if ( hooks.algorithmAvailable )
+        if ( run.algorithmId().isEmpty() )
+        {
+            check.status = ReplayCheckStatus::Missing;
+            check.detail = QStringLiteral( "run records no algorithm" );
+        }
+        else if ( hooks.algorithmAvailable )
         {
             const bool available = hooks.algorithmAvailable( run.algorithmId() );
             check.status = available ? ReplayCheckStatus::Ok : ReplayCheckStatus::Missing;

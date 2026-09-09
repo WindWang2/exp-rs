@@ -284,6 +284,7 @@ QVariantMap datasetInspect( const QVariantMap &args )
         rows.append( versionSummary( entry ) );
     }
     data.insert( QStringLiteral( "versions" ), rows );
+    data.insert( QStringLiteral( "versions_truncated" ), versions.size() > kMaxVersionsListed );
     return toVariant( data );
 }
 
@@ -306,8 +307,8 @@ QVariantMap datasetVersionList( const QVariantMap &args )
     QJsonObject data;
     data.insert( QStringLiteral( "dataset_id" ), datasetText );
     data.insert( QStringLiteral( "versions" ), rows );
-    data.insert( QStringLiteral( "total" ), qint64( qMin( qint64( versions.size() ),
-                                                          qint64( kMaxVersionsListed ) ) ) );
+    data.insert( QStringLiteral( "total" ), qint64( versions.size() ) );
+    data.insert( QStringLiteral( "truncated" ), versions.size() > kMaxVersionsListed );
     return toVariant( data );
 }
 
@@ -395,24 +396,27 @@ QVariantMap datasetStats( const QVariantMap &args )
 
 QVariantMap datasetValidate( const QVariantMap &args )
 {
+    // READ-ONLY validation: the stored manifest is checked under exactly the
+    // strict reader contract consumers use. No staging (staging is a state
+    // change and belongs to the management CLI's `dataset validate`).
     auto store = openDatasetStore( args );
     const auto versionId = parseVersionId( args );
-    const auto staged = store->stageVersion( versionId );
+    const auto record = store->versionById( versionId );
+    if ( !record )
+        fail( QStringLiteral( "dataset version not found: %1" ).arg( versionId.toString() ) );
+    const auto parsed = DatasetManifest::fromJson(
+        QJsonDocument::fromJson( record->manifestJson().toUtf8() ).object() );
     QJsonObject data;
     data.insert( QStringLiteral( "version" ), versionId.toString() );
-    data.insert( QStringLiteral( "staged" ), staged.has_value() );
-    if ( staged )
-    {
-        data.insert( QStringLiteral( "fingerprint" ), staged.value().fingerprint() );
-        data.insert( QStringLiteral( "status" ),
-                     datasetVersionStatusToString( staged.value().status() ) );
-    }
+    data.insert( QStringLiteral( "status" ),
+                 datasetVersionStatusToString( record->status() ) );
+    data.insert( QStringLiteral( "valid" ), parsed.has_value() );
+    if ( parsed )
+        data.insert( QStringLiteral( "fingerprint" ), record->fingerprint() );
     else
-    {
         data.insert( QStringLiteral( "diagnostics" ),
-                     diagnosticsArray( staged.diagnostics() ) );
-    }
-    // Truthful: a failed validation is a completed inspection with a false
+                     diagnosticsArray( parsed.diagnostics() ) );
+    // Truthful: an invalid manifest is a completed inspection with a false
     // flag, NOT a thrown tool error — the caller asked "is this valid?".
     return toVariant( data );
 }
@@ -719,14 +723,21 @@ QVariantMap leakageAudit( const QVariantMap &args )
         fail( QStringLiteral( "audit failed: %1" )
                   .arg( report.diagnostics().isEmpty() ? QStringLiteral( "unknown error" )
                                                        : report.diagnostics().first().message ) );
-    // Persist the evidence the report cites (append-only; see store contract).
+    // Persist the evidence the report cites (append-only; see store
+    // contract). A persist failure FAILS the tool: an unpersisted report
+    // would cite evidence the store cannot resolve.
     const auto saved = store->saveLeakageReport( report.value() );
+    if ( !saved )
+        fail( QStringLiteral( "audit evidence persistence failed: %1" )
+                  .arg( saved.diagnostics().isEmpty()
+                            ? QStringLiteral( "unknown error" )
+                            : saved.diagnostics().first().message ) );
 
     QJsonObject data;
     data.insert( QStringLiteral( "mode" ), QStringLiteral( "run" ) );
     data.insert( QStringLiteral( "report" ), report.value().toJson() );
     data.insert( QStringLiteral( "bounds_unknown_count" ), boundsUnknown );
-    data.insert( QStringLiteral( "persisted" ), saved.has_value() );
+    data.insert( QStringLiteral( "persisted" ), true );
     return toVariant( data );
 }
 
@@ -925,12 +936,19 @@ QVariantMap reproducibilityValidate( const QVariantMap &args )
         fail( QStringLiteral( "bundle is required" ) );
     sicnu::experiment::ReproductionBundleExporter exporter( *experimentStore, *datasetStore );
     sicnu::experiment::ReproductionHooks hooks;
-    // Explicit caller-declared availability (headless MCP has no registries);
-    // absent arguments leave the hooks unwired and the check stays unknown.
+    // Explicit caller-declared availability (headless MCP has no registries).
+    // The VALUE matters: false wires a hook that answers false - declaring a
+    // dependency unavailable can never be read as available.
     if ( args.contains( QStringLiteral( "model_available" ) ) )
-        hooks.modelAvailable = []( const QString &, const QString & ) { return true; };
+    {
+        const bool available = args.value( QStringLiteral( "model_available" ) ).toBool();
+        hooks.modelAvailable = [ available ]( const QString &, const QString & ) { return available; };
+    }
     if ( args.contains( QStringLiteral( "algorithm_available" ) ) )
-        hooks.algorithmAvailable = []( const QString & ) { return true; };
+    {
+        const bool available = args.value( QStringLiteral( "algorithm_available" ) ).toBool();
+        hooks.algorithmAvailable = [ available ]( const QString & ) { return available; };
+    }
     hooks.artifactAvailable = []( const QString &path, qint64 sizeBytes ) {
         const QFileInfo info( path );
         return info.exists() && ( sizeBytes <= 0 || info.size() == sizeBytes );
@@ -973,7 +991,7 @@ const QList<DataPlatformToolDef> &dataPlatformToolDefs()
           { { "dataset_db", "string", "Path to the dataset store database", true },
             { "version", "string", "Dataset version id", true } } },
         { "dataset:validate",
-          "Validate one version (stage + report diagnostics). staged=false means INVALID, never a crash.",
+          "Read-only validation of one version's stored manifest under the strict reader contract. valid=false means INVALID. (Staging - a state change - remains a management-CLI operation.)",
           { { "dataset_db", "string", "Path to the dataset store database", true },
             { "version", "string", "Dataset version id", true } } },
         { "dataset:label_schema",

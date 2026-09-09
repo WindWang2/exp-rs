@@ -199,6 +199,8 @@ TEST_CASE( "leakage reports are append-only and keyed by manifest", "[dataset][s
     const auto latest = seeded.store.latestLeakageReport( seeded.manifestId );
     REQUIRE( latest.has_value() );
     CHECK( latest->summary() == report->summary() );
+    CHECK( latest->sampleCount() == report->sampleCount() ); // round-trip gap
+    CHECK( latest->digestUnknownCount() == report->digestUnknownCount() );
 
     // Reports of a version list under the manifest.
     const auto reports = seeded.store.leakageReportsForSplit( seeded.manifestId );
@@ -256,10 +258,12 @@ TEST_CASE( "dataset: tools expose bounded, truthful projections",
     CHECK( stats.value( QStringLiteral( "sample_count" ) ).toLongLong() == 20 );
     CHECK( stats.value( QStringLiteral( "by_group" ) ).toMap().size() == 2 );
 
-    // dataset:validate on a committed version reports staged=false honestly.
+    // dataset:validate is read-only: the committed version's stored manifest
+    // parses, so valid=true (and no state change is needed to answer).
     auto validated = handleDataPlatformTool( QStringLiteral( "dataset:validate" ), statsArgs );
-    CHECK( !validated.value( QStringLiteral( "staged" ) ).toBool() );
-    CHECK( validated.contains( QStringLiteral( "diagnostics" ) ) );
+    CHECK( validated.value( QStringLiteral( "valid" ) ).toBool() );
+    CHECK( validated.value( QStringLiteral( "status" ) ).toString()
+           == QStringLiteral( "committed" ) );
 
     // dataset:split_inspect summary carries role/fold distribution.
     QVariantMap splitArgs = baseArgs( seeded.fixture.datasetDb );

@@ -113,7 +113,7 @@ class ExperimentRunRecorder
     QVector<StaleRun> reconcileStaleRuns( const QSet<QString> &liveExecutionRefs ) const;
 
   private:
-    Result<ExperimentRun> loadRunnable( const QString &runId ) const;
+    Result<ExperimentRun> loadRun( const QString &runId ) const;
 
     ExperimentStore *m_store = nullptr;
     const sicnu::dataset::DatasetStore *m_datasetStore = nullptr;

@@ -13,10 +13,12 @@
 #include "dataset/split.h"
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
+#include "experiment/replay_readiness.h"
 #include "experiment/reproduction_bundle.h"
 
 #include <json/json.h>
 
+#include <QFileInfo>
 #include <QJsonDocument>
 
 namespace sicnu::cli
@@ -434,6 +436,28 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
         if ( !manifest )
             return fail( io, "dataset", "split manifest not found" );
         Json::Value data = toJsonValue( manifest->toJson() );
+        // A 100k-assignment manifest is summarized by default; the assignment
+        // page (bounded by --limit) is opt-in.
+        if ( options.limit <= 0 )
+            data.removeMember( "assignments" );
+        else
+        {
+            const auto &assignments = manifest->assignments();
+            const qint64 bound = qMin( options.limit, qint64( 500 ) );
+            Json::Value rows( Json::arrayValue );
+            const qint64 end = qMin( qint64( assignments.size() ), bound );
+            for ( qint64 i = 0; i < end; ++i )
+            {
+                Json::Value item( Json::objectValue );
+                item["sample_id"] = assignments[int( i )].sampleId.toStdString();
+                item["role"] =
+                    sicnu::dataset::splitRoleToString( assignments[int( i )].role ).toStdString();
+                item["fold"] = assignments[int( i )].fold;
+                rows.append( item );
+            }
+            data["assignments"] = rows;
+            data["assignment_total"] = static_cast<Json::Int64>( assignments.size() );
+        }
         Json::Value roleCounts( Json::objectValue );
         Json::Value foldCounts( Json::objectValue );
         for ( const auto &assignment : manifest->assignments() )
@@ -569,13 +593,15 @@ int experimentSubcommand( const QString &sub, QStringList args, const CliIO &io 
         const auto run = store.runById( options.runId );
         if ( !run )
             return fail( io, "experiment", "run not found" );
-        Json::Value data = toJsonValue( run->toJson() );
+        Json::Value data = toJsonValue( sicnu::experiment::RunEnvironment::redactSecretKeys(
+            run->toJson() ) );
         data["config_hash"] = run->configHash().toStdString();
         const auto metricRecord = store.metricRecordForRun( options.runId );
         if ( metricRecord )
         {
             data["protocol"] = toJsonValue( metricRecord->protocol.toJson() );
-            data["metrics_record"] = toJsonValue( metricRecord->metrics );
+            data["metrics_record"] = toJsonValue(
+                sicnu::experiment::RunEnvironment::redactSecretKeys( metricRecord->metrics ) );
         }
         return io.finish( true, "experiment", data, 0 );
     }
@@ -630,90 +656,29 @@ int reproduceSubcommand( const QString &sub, QStringList args, const CliIO &io )
         const auto run = experimentStore.runById( options.runId );
         if ( !run )
             return fail( io, "reproduce", "run not found" );
-        // Store-side availability of the recorded pins (dataset version and
-        // split manifest). Model/algorithm stay "unknown" without registries.
-        Json::Value checks( Json::arrayValue );
-        auto addCheck = [ & ]( const std::string &dependency, const std::string &status,
-                               const std::string &detail ) {
-            Json::Value item( Json::objectValue );
-            item["dependency"] = dependency;
-            item["status"] = status;
-            item["detail"] = detail;
-            checks.append( item );
+        // Same library assessment as the MCP surface: dataset/split pins
+        // against the store, artifact existence probe, model/algorithm via
+        // hooks (unwired here -> unknown, never a fabricated ok).
+        sicnu::experiment::ReproductionHooks hooks;
+        hooks.artifactAvailable = []( const QString &path, qint64 sizeBytes ) {
+            const QFileInfo info( path );
+            return info.exists() && ( sizeBytes <= 0 || info.size() == sizeBytes );
         };
-        bool impossible = false;
-        int unknowns = 0;
-        if ( run->datasetVersionId().isEmpty() )
-        {
-            addCheck( "dataset_version", "missing", "run records no dataset version" );
-            impossible = true;
-        }
-        else
-        {
-            const auto versionId =
-                sicnu::dataset::DatasetVersionId::fromString( run->datasetVersionId() );
-            const auto record =
-                versionId ? datasetStore.versionById( versionId.value() ) : std::nullopt;
-            if ( !record )
-            {
-                addCheck( "dataset_version", "missing",
-                          "version " + run->datasetVersionId().toStdString() +
-                              " is not in the store" );
-                impossible = true;
-            }
-            else if ( !run->datasetFingerprint().isEmpty() &&
-                      record->fingerprint() != run->datasetFingerprint() )
-            {
-                addCheck( "dataset_version", "mismatched", "fingerprint changed since the run" );
-                impossible = true;
-            }
-            else
-            {
-                addCheck( "dataset_version", "ok", record->fingerprint().toStdString() );
-            }
-        }
-        if ( run->splitManifestId().isEmpty() )
-        {
-            addCheck( "split_manifest", "missing", "run records no split manifest" );
-            impossible = true;
-        }
-        else
-        {
-            const auto manifest = datasetStore.splitManifestById( run->splitManifestId() );
-            if ( !manifest )
-            {
-                addCheck( "split_manifest", "missing",
-                          "manifest " + run->splitManifestId().toStdString() +
-                              " is not stored" );
-                impossible = true;
-            }
-            else if ( !run->splitFingerprint().isEmpty() &&
-                      manifest->fingerprint() != run->splitFingerprint() )
-            {
-                addCheck( "split_manifest", "mismatched", "fingerprint changed since the run" );
-                impossible = true;
-            }
-            else
-            {
-                addCheck( "split_manifest", "ok", manifest->fingerprint().toStdString() );
-            }
-        }
-        if ( !run->modelId().isEmpty() )
-        {
-            addCheck( "model", "unknown", "requires the model catalog hook" );
-            ++unknowns;
-        }
-        if ( !run->algorithmId().isEmpty() )
-        {
-            addCheck( "algorithm", "unknown", "requires the operator/workflow registry hook" );
-            ++unknowns;
-        }
-        const std::string level =
-            impossible ? "impossible" : ( unknowns > 0 ? "best_effort" : "exact" );
-        Json::Value data( Json::objectValue );
+        const auto report =
+            sicnu::experiment::ReplayReadiness::assess( run.value(), &datasetStore, hooks );
+        const auto fingerprint =
+            sicnu::experiment::runExecutionFingerprint( run->executionIdentity() );
+        const auto equivalent = sicnu::experiment::ReplayReadiness::equivalentRuns(
+            experimentStore, fingerprint, options.runId );
+        Json::Value data = toJsonValue( report.toJson() );
         data["run_id"] = options.runId.toStdString();
-        data["level"] = level;
-        data["checks"] = checks;
+        data["execution_fingerprint"] = fingerprint.toStdString();
+        Json::Value equivalentJson( Json::arrayValue );
+        for ( const auto &id : equivalent )
+            equivalentJson.append( id.toStdString() );
+        data["equivalent_runs"] = equivalentJson;
+        const bool impossible =
+            report.level == sicnu::dataset::ReproductionLevel::Impossible;
         return io.finish( !impossible, "reproduce", data, impossible ? 1 : 0 );
     }
 

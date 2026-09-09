@@ -207,7 +207,9 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteClassification(
     }
 
     // Batch-write samples first (one transaction), then the annotations that
-    // reference them. A failed addSamples aborts before any annotation exists.
+    // reference them. A failed addSamples aborts before any annotation
+    // exists; a later annotation failure is reported TRUTHFULLY with the
+    // committed counts so the caller knows exactly what landed.
     if ( !samples.isEmpty() )
     {
         auto written = m_store->addSamples( samples );
@@ -219,7 +221,16 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteClassification(
     {
         auto written = m_store->addAnnotation( annotation );
         if ( !written )
-            return failAs<PromotionReport>( written.diagnostics() );
+        {
+            QVector<sicnu::data::Diagnostic> diags = written.diagnostics();
+            diags.append( promotionDiag(
+                QStringLiteral( "dataset.promotion_partial" ),
+                QStringLiteral( "%1 samples and %2 annotations committed before the"
+                                " failure; the remainder was refused" )
+                    .arg( report.samplesWritten )
+                    .arg( report.annotationsWritten ) ) );
+            return failAs<PromotionReport>( diags );
+        }
         ++report.annotationsWritten;
     }
     return TypedResult::success( report );
@@ -300,7 +311,16 @@ sicnu::data::Result<PromotionReport> SamplePromoter::promoteSegmentation(
     {
         auto written = m_store->addAnnotation( annotation );
         if ( !written )
-            return failAs<PromotionReport>( written.diagnostics() );
+        {
+            QVector<sicnu::data::Diagnostic> diags = written.diagnostics();
+            diags.append( promotionDiag(
+                QStringLiteral( "dataset.promotion_partial" ),
+                QStringLiteral( "%1 samples and %2 annotations committed before the"
+                                " failure; the remainder was refused" )
+                    .arg( report.samplesWritten )
+                    .arg( report.annotationsWritten ) ) );
+            return failAs<PromotionReport>( diags );
+        }
         ++report.annotationsWritten;
     }
     return sicnu::data::Result<PromotionReport>::success( report );
@@ -443,10 +463,22 @@ sicnu::data::Result<QString> SamplePromoter::promoteTemporal(
             return failAs<QString>( QStringLiteral( "dataset.sample_not_found" ),
                                     QStringLiteral( "temporal member %1 is not in the version" )
                                         .arg( member.memberSampleId ) );
+        // The temporal sample's leakage group is the members' shared group;
+        // conflicting groups would make the group key arbitrary (first-wins
+        // hides the conflict), so they are refused with the conflict named.
+        const auto memberRecord = m_store->sampleById( version, memberId.value() );
+        const QString memberGroup = memberRecord->groupId();
         if ( sharedGroup.isEmpty() )
         {
-            const auto memberRecord = m_store->sampleById( version, memberId.value() );
-            sharedGroup = memberRecord->groupId();
+            sharedGroup = memberGroup;
+        }
+        else if ( memberGroup != sharedGroup )
+        {
+            return failAs<QString>(
+                QStringLiteral( "dataset.promotion_group_conflict" ),
+                QStringLiteral( "temporal members disagree on leakage group: '%1' vs '%2'"
+                                " (member %3)" )
+                    .arg( sharedGroup, memberGroup, member.memberSampleId ) );
         }
     }
     payload.targetTimeUtc = targetTimeUtc;

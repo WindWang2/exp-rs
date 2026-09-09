@@ -54,6 +54,10 @@ struct FoldComparabilitySummary
     /// fingerprint. Unset (-1 folds / false) when the manifest is not fold
     /// based or inputs were insufficient.
     bool replayMatches = false;
+    /// True when the replay check actually RAN (it is skipped only when the
+    /// regeneration itself fails, in which case a note explains why).
+    /// replayMatches=false + replayVerified=true is a genuine mismatch.
+    bool replayVerified = false;
     QString replayFingerprint;
     /// Honest gaps: what the summary could NOT check (e.g. no class evidence
     /// on any input).
