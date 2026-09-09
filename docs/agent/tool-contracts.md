@@ -95,3 +95,40 @@ Stable codes (closed table in `src/agent/harness/harness_error.h`):
 
 Retry classes: `none` (never), `manual` (explicit decision only), `transient`
 (bounded auto-retry in the plan runner). Pi reads codes; it never parses logs.
+
+---
+
+## Harness 7.0: New Tools & Catalog Semantics (2026-09)
+
+| Tool | Purpose |
+|---|---|
+| `harness:resolve_intent` | Deterministic goal classification → closed intent → feasibility-ranked capability candidates. Ambiguity returns `{status:"ambiguous", candidates[], ambiguity{code:INTENT_AMBIGUOUS}}`; no evidence returns `{status:"unresolved"}`. Optional `understanding` accepts a DatasetUnderstanding document or a dataset reference. |
+| `harness:repair_plan` | Bounded (≤3 passes) deterministic plan surgery: duplicate step ids renamed (first wins), outputs referencing unknown steps dropped. Science (operator choice, wiring, verification strength) stays advisory with suggested actions. Returns repaired plan, per-pass log, remaining issues, and compiled workflow when clean. |
+| `harness:decision_record` | Typed decision ledger: `record` (kind ambiguity/alternative/parameter) → `decision-N`, `resolve` (chosen), `list` (unresolved first). Surfaces in `harness:context.decisions`. |
+
+`spatial:understand` now answers from an understanding cache keyed by
+(path, asset revision) — `cached:true` when it does; `stats:true` bypasses.
+`harness:context` additionally carries `plan_bindings[]` (run → plan with
+verification status) and `decisions[]`. `workspace_state` gains an
+`experiments[]` provider seam (`setExperimentsProvider`) mirroring workflow
+runs.
+
+Transient resume is now ledger-bounded: `repair_attempts` /
+`repair_attempt_limit` (3) travel in every run status document, so poll loops
+cannot retry a failed run forever.
+
+### Recipe catalog (Area G)
+
+- `presets` are now executable: `bindings.preset` applies flat param
+  overrides, `step_params` (per-step overrides), and `keep_outputs` filters.
+- `aliases` keep deleted near-clone recipe ids resolving (29 files collapsed;
+  102 → 73).
+- Every recipe now declares `capabilities` (its operator chain) and
+  `expected_artifacts` (mirroring `outputs`).
+
+### Output budgets (Area I)
+
+Every `SpatialToolRegistry` registration is metered: outputs above 512 KiB
+are compacted schema-aware (largest array member trimmed first) with explicit
+`truncated` / `truncated_field` markers; the 512 KiB `kMaxToolOutputBytes`
+registry cap is now enforced at runtime, not only in tests.
