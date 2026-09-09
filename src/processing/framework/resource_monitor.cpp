@@ -14,6 +14,13 @@
 #include <mach/mach.h>
 #include <mach/task_info.h>
 #endif
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <psapi.h>
+#endif
 
 namespace sicnu {
 
@@ -59,6 +66,19 @@ unsigned int defaultRssMb()
     return static_cast<unsigned int>( info.resident_size / ( 1024u * 1024u ) );
   }
   return 0;
+#elif defined( Q_OS_WIN )
+  // Execution Plane 7.0 (Windows parity): the working set is this process's
+  // resident memory (the same quantity VmRSS reports on Linux). Returning 0
+  // here silently disabled every memory gate on Windows while the platform
+  // shipped the same admission behavior as Linux — documented divergence,
+  // now closed. GetProcessMemoryInfo with PROCESS_MEMORY_COUNTERS is
+  // available since XP; no dynamic loading needed.
+  PROCESS_MEMORY_COUNTERS pmc;
+  memset( &pmc, 0, sizeof( pmc ) );
+  pmc.cb = sizeof( pmc );
+  if ( ::GetProcessMemoryInfo( ::GetCurrentProcess(), &pmc, sizeof( pmc ) ) )
+    return static_cast<unsigned int>( pmc.WorkingSetSize / ( 1024ull * 1024ull ) );
+  return 0; // sampler failed: gate disabled for this sample (count throttling remains)
 #else
   return 0; // unsupported platform: gate disabled
 #endif

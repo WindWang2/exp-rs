@@ -56,11 +56,14 @@ inline const char *latencyClassName( LatencyClass cls )
 
 /// Multi-dimension resource request. Weights are 0..100 relative loads; a
 /// dimension of 0 means "does not gate on this resource". MiB for *_mb.
+/// tempDiskMb (Execution Plane 7.0): declared temporary/scratch disk the
+/// kernel will write; gated like the absolute MiB dimensions.
 struct ResourceRequest
 {
     unsigned int cpuThreads = 1;
     unsigned int ramMb = 0;
     unsigned int vramMb = 0;
+    unsigned int tempDiskMb = 0;
     unsigned int diskReadWeight = 0;
     unsigned int diskWriteWeight = 0;
     unsigned int networkWeight = 0;
@@ -77,19 +80,21 @@ struct ResourceUsage
     unsigned int cpuThreads = 0;
     unsigned int ramMb = 0;
     unsigned int vramMb = 0;
+    unsigned int tempDiskMb = 0;
     unsigned int diskReadWeight = 0;
     unsigned int diskWriteWeight = 0;
     unsigned int networkWeight = 0;
 };
 
 /// Per-dimension caps and the interactive reserve. Weights share the 0..100
-/// scale of ResourceRequest; ramMb/vramMb/cpuThreads are absolute. A cap of 0
-/// disables the gate on that dimension (unlimited).
+/// scale of ResourceRequest; ramMb/vramMb/cpuThreads/tempDiskMb are absolute.
+/// A cap of 0 disables the gate on that dimension (unlimited).
 struct SchedulerLimits
 {
     unsigned int cpuThreads = 0;
     unsigned int ramMb = 0;
     unsigned int vramMb = 0;
+    unsigned int tempDiskMb = 0;
     unsigned int diskReadWeight = 100;
     unsigned int diskWriteWeight = 100;
     unsigned int networkWeight = 100;
@@ -137,6 +142,7 @@ class TaskResourceBudget2
         return fitsCount( running.cpuThreads, candidate.cpuThreads, m_limits.cpuThreads ) &&
                fitsCount( running.ramMb, candidate.ramMb, m_limits.ramMb ) &&
                fitsCount( running.vramMb, candidate.vramMb, m_limits.vramMb ) &&
+               fitsCount( running.tempDiskMb, candidate.tempDiskMb, m_limits.tempDiskMb ) &&
                fitsWeight( running.diskReadWeight, candidate.diskReadWeight,
                            m_limits.diskReadWeight, protectedLane ) &&
                fitsWeight( running.diskWriteWeight, candidate.diskWriteWeight,

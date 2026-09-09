@@ -48,6 +48,8 @@ const char *counterName( Counter counter )
     case Counter::TilesProcessed: return "tiles_processed";
     case Counter::WorkersSpawned: return "workers_spawned";
     case Counter::WorkersCrashed: return "workers_crashed";
+    case Counter::WorkerCancelAcks: return "worker_cancel_acks";
+    case Counter::TaskAutoRetries: return "task_auto_retries";
     case Counter::ArtifactsRegistered: return "artifacts_registered";
     case Counter::ArtifactsReclaimed: return "artifacts_reclaimed";
     case Counter::_Count: break;

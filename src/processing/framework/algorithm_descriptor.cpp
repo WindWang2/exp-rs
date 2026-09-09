@@ -253,6 +253,9 @@ Json::Value AgentMetadata::toJson() const
     root["costClass"] = costClass;
   root["largeRasterSafe"] = largeRasterSafe;
   root["supportsCancellation"] = supportsCancellation;
+  if ( !executionPreference.empty() )
+    root["executionPreference"] = executionPreference;
+  root["ioHeavy"] = ioHeavy;
   root["producesProvenance"] = producesProvenance;
   if ( !facadeOf.empty() )
     root["facadeOf"] = facadeOf;
@@ -332,6 +335,10 @@ AgentMetadata AgentMetadata::fromJson( const Json::Value &val )
     meta.largeRasterSafe = val["largeRasterSafe"].asBool();
   if ( val.isMember( "supportsCancellation" ) && val["supportsCancellation"].isBool() )
     meta.supportsCancellation = val["supportsCancellation"].asBool();
+  if ( val.isMember( "executionPreference" ) && val["executionPreference"].isString() )
+    meta.executionPreference = val["executionPreference"].asString();
+  if ( val.isMember( "ioHeavy" ) && val["ioHeavy"].isBool() )
+    meta.ioHeavy = val["ioHeavy"].asBool();
   if ( val.isMember( "producesProvenance" ) && val["producesProvenance"].isBool() )
     meta.producesProvenance = val["producesProvenance"].asBool();
   if ( val.isMember( "facadeOf" ) && val["facadeOf"].isString() )
