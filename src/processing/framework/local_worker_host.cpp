@@ -2,6 +2,7 @@
 #include "local_worker_host.h"
 
 #include "runtime/worker/worker_protocol.h"
+#include "worker_process_io.h"
 
 #include <QProcess>
 #include <QString>
@@ -19,56 +20,14 @@ constexpr int kProtocolVersion = 1;
 // collide on the timestamp-only id.
 std::atomic<long> g_hostJobSeq{ 0 };
 
-bool writeLine( QProcess &process, const std::string &line )
+/// True when an error frame reports cancellation — via the structured code
+/// (7.0 workers) or the legacy message text.
+bool errorFrameMeansCancelled( const Json::Value &frame )
 {
-    const QByteArray bytes = QByteArray::fromStdString( line + "\n" );
-    process.write( bytes );
-    return process.waitForBytesWritten( 5000 );
+    return sicnu::runtime::worker::frameErrorCode( frame ) == "cancelled"
+           || frame["message"].asString() == "cancelled";
 }
 
-/// Reads one protocol frame with a deadline. Returns false on EOF/crash
-/// (@p workerCrashed set) or timeout.
-/// As readFrame, but gives up waiting after @p softDeadlineMs without
-/// treating it as an error (@p softTimedOut set) so the caller can poll
-/// cancellation even while the worker emits no frames.
-bool readFrame( QProcess &process, std::chrono::steady_clock::time_point deadline,
-                Json::Value &frame, bool &workerCrashed,
-                std::chrono::steady_clock::time_point softDeadline,
-                bool &softTimedOut )
-{
-    workerCrashed = false;
-    while ( true )
-    {
-        while ( process.canReadLine() )
-        {
-            const QByteArray raw = process.readLine();
-            const std::string line = QString::fromUtf8( raw ).trimmed().toStdString();
-            if ( line.empty() )
-                continue;
-            if ( !sicnu::runtime::worker::parseFrame( line, frame ) )
-                return false; // malformed or version mismatch — hard refusal
-            return true;
-        }
-        if ( process.state() != QProcess::Running && !process.canReadLine() )
-        {
-            workerCrashed = true;
-            return false;
-        }
-        const auto now = std::chrono::steady_clock::now();
-        if ( now >= deadline )
-            return false;
-        if ( now >= softDeadline )
-        {
-            softTimedOut = true;
-            return false;
-        }
-        if ( !process.waitForReadyRead( 100 ) && process.state() != QProcess::Running )
-        {
-            workerCrashed = true;
-            return false;
-        }
-    }
-}
 } // namespace
 
 Json::Value runInLocalWorker( const QString &workerProgram,
@@ -76,7 +35,9 @@ Json::Value runInLocalWorker( const QString &workerProgram,
                               const Json::Value &params,
                               const std::function<bool()> &isCancelled,
                               std::chrono::milliseconds timeout,
-                              std::chrono::milliseconds cancelGraceMs )
+                              std::chrono::milliseconds cancelGraceMs,
+                              const std::function<void( double, const std::string & )> &onProgress,
+                              LocalWorkerRunReport *report )
 {
     const std::string jobId = "w-" + std::to_string( ++g_hostJobSeq ) + "-"
                               + std::to_string( std::chrono::steady_clock::now().time_since_epoch().count() );
@@ -86,22 +47,44 @@ Json::Value runInLocalWorker( const QString &workerProgram,
     process.setArguments( { QStringLiteral( "--protocol" ),
                             QString::fromLatin1( sicnu::runtime::worker::kWorkerProtocolVersion ) } );
     process.setProcessChannelMode( QProcess::SeparateChannels ); // stderr = diagnostics
+    WorkerDiagnosticsRing diagnostics;
+    const auto startedAt = std::chrono::steady_clock::now();
     process.start( QIODevice::ReadWrite );
     if ( !process.waitForStarted( 5000 ) )
         throw std::runtime_error( "worker protocol: cannot start " + workerProgram.toStdString() );
 
     const auto deadline = std::chrono::steady_clock::now() + timeout;
 
-    // Handshake: first frame must be ready/v1.
+    // Handshake: first frame must be ready/v1; "caps" (7.0) is optional.
     Json::Value frame;
     bool crashed = false;
     bool softTimedOut = false;
-    if ( !readFrame( process, deadline, frame, crashed, deadline, softTimedOut )
+    std::string badFrame;
+    if ( !workerReadFrame( process, deadline, frame, crashed, deadline, softTimedOut, &diagnostics,
+                           &badFrame )
          || frame["op"].asString() != "ready" )
+    {
+        if ( !badFrame.empty() )
+            throw std::runtime_error( "worker protocol: malformed handshake frame: " + badFrame );
         throw std::runtime_error( crashed ? "worker crashed: no ready handshake"
                                           : "worker protocol: bad handshake" );
+    }
+    if ( report )
+        report->handshakeMs =
+            std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now()
+                                                                   - startedAt )
+                .count();
+    for ( const auto &cap : { sicnu::runtime::worker::kWorkerCapProgress,
+                              sicnu::runtime::worker::kWorkerCapCancelAck,
+                              sicnu::runtime::worker::kWorkerCapStructuredErrors,
+                              sicnu::runtime::worker::kWorkerCapOutputIdentity } )
+    {
+        if ( report && sicnu::runtime::worker::frameHasCapability( frame, cap ) )
+            report->capabilities << QString::fromLatin1( cap );
+    }
 
-    if ( !writeLine( process, sicnu::runtime::worker::makeRunRequest( jobId, algorithmId, params ) ) )
+    if ( !workerWriteLine( process,
+                           sicnu::runtime::worker::makeRunRequest( jobId, algorithmId, params ) ) )
         throw std::runtime_error( "worker protocol: cannot send run request" );
 
     bool cancelRequested = false;
@@ -115,21 +98,39 @@ Json::Value runInLocalWorker( const QString &workerProgram,
             // the job started (any job longer than the grace must still get
             // its grace).
             cancelDeadline = std::chrono::steady_clock::now() + cancelGraceMs;
-            writeLine( process, sicnu::runtime::worker::makeCancelRequest( jobId ) );
-            process.terminate();
+            workerWriteLine( process, sicnu::runtime::worker::makeCancelRequest( jobId ) );
         }
         if ( cancelRequested && std::chrono::steady_clock::now() >= cancelDeadline )
         {
-            process.kill();
-            process.waitForFinished( 3000 );
+            // Escalation ladder: the worker had its full grace window to ack
+            // and exit cooperatively. terminate() first (best effort), then a
+            // hard kill. (terminate() is NOT sent at cancel-request time: on
+            // POSIX it SIGTERMs and on Windows it WM_CLOSEs the worker
+            // before it ever reads the cancel frame, defeating the
+            // cooperative ack and diagnostics the protocol promises.)
+            process.terminate();
+            process.waitForFinished( 1000 );
+            if ( process.state() == QProcess::Running )
+            {
+                process.kill();
+                process.waitForFinished( 3000 );
+            }
+            if ( report )
+                report->stderrTail = diagnostics.tail();
             throw std::runtime_error( "worker cancelled" );
         }
         frame = Json::Value();
+        badFrame.clear();
         const auto soft = std::chrono::steady_clock::now() + std::chrono::milliseconds( 250 );
-        if ( !readFrame( process, deadline, frame, crashed, soft, softTimedOut ) )
+        if ( !workerReadFrame( process, deadline, frame, crashed, soft, softTimedOut, &diagnostics,
+                               &badFrame ) )
         {
             if ( softTimedOut )
                 continue; // re-check cancellation, keep waiting
+            if ( report )
+                report->stderrTail = diagnostics.tail();
+            if ( !badFrame.empty() )
+                throw std::runtime_error( "worker protocol: malformed frame: " + badFrame );
             if ( crashed )
                 throw std::runtime_error( "worker crashed: process died without a reply" );
             if ( cancelRequested )
@@ -138,21 +139,45 @@ Json::Value runInLocalWorker( const QString &workerProgram,
         }
         const std::string op = frame["op"].asString();
         if ( op == "progress" )
-            continue; // operators' progress callback bridge stays simple: ignored
+        {
+            if ( onProgress )
+                onProgress( frame["value"].asDouble(), frame["message"].asString() );
+            if ( report )
+                ++report->progressUpdates;
+            continue;
+        }
+        if ( op == "ack" )
+        {
+            // 7.0 cancel receipt: evidence the worker accepted the cancel
+            // (the escalation ladder below stays the enforcement mechanism).
+            if ( cancelRequested && frame["kind"].asString() == "cancel" && report )
+                report->cancelAcked = true;
+            continue;
+        }
         if ( op == "error" && frame["jobId"].asString() == jobId )
         {
-            if ( cancelRequested && frame["message"].asString() == "cancelled" )
+            if ( cancelRequested && errorFrameMeansCancelled( frame ) )
                 throw std::runtime_error( "worker cancelled" );
-            throw std::runtime_error( "worker error: " + frame["message"].asString() );
+            std::string message = "worker error: " + frame["message"].asString();
+            if ( report )
+                report->stderrTail = diagnostics.tail();
+            const std::string tail = diagnostics.tail().toStdString();
+            if ( !tail.empty() )
+                message += " [worker stderr: " + tail + "]";
+            throw std::runtime_error( message );
         }
         if ( op == "result" && frame["jobId"].asString() == jobId )
         {
             const Json::Value payload = frame["payload"];
-            if ( !writeLine( process, sicnu::runtime::worker::makeShutdownRequest() ) )
+            if ( !workerWriteLine( process, sicnu::runtime::worker::makeShutdownRequest() ) )
                 process.kill();
             process.waitForFinished( 5000 );
+            if ( report )
+                report->stderrTail = diagnostics.tail();
             return payload;
         }
+        // Unknown op (7.0 extension rule): keep waiting, bounded by the
+        // deadline — never a protocol violation.
     }
 }
 

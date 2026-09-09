@@ -25,10 +25,13 @@
 //     grace window, then a kill fallback; post-shutdown runs refuse.
 #pragma once
 
+#include "local_worker_host.h"
 #include "runtime/observability/execution_telemetry.h"
+#include "worker_process_io.h"
 
 #include <QProcess>
 #include <QString>
+#include <QStringList>
 #include <QThread>
 
 #include <json/json.h>
@@ -93,9 +96,20 @@ class LocalWorkerPool
     bool isRunning() const;
 
     /// Runs one job (blocks the caller, like runInLocalWorker). Throws typed
-    /// errors; never returns a stale/wrong-result silently.
+    /// errors; never returns a stale/wrong-result silently. @p onProgress
+    /// (7.0) receives the worker's progress frames; @p report (7.0) collects
+    /// handshake/capabilities/cancel-ack/diagnostics for the run.
+    ///
+    /// Thread model (7.0): the pool may be driven concurrently from several
+    /// threads (e.g. JobEngine workers). Each Worker is QProcess-affine to
+    /// the thread that spawned it and is only ever acquired/released by that
+    /// thread; the pool's global cap bounds the total. A warm worker parked
+    /// by a thread that never returns is recycled by the idle budget or
+    /// force-retired when its slot is needed.
     Json::Value run( const std::string &algorithmId, const Json::Value &params,
-                     const std::function<bool()> &isCancelled = {} );
+                     const std::function<bool()> &isCancelled = {},
+                     const std::function<void( double, const std::string & )> &onProgress = {},
+                     LocalWorkerRunReport *report = nullptr );
 
     WorkerPoolHealthSnapshot health() const;
 
@@ -106,6 +120,14 @@ class LocalWorkerPool
         qint64 startedMs = 0;
         qint64 lastUsedMs = 0;
         qint64 jobsDone = 0;
+        // QProcess affinity: the thread that spawned the process and the
+        // only thread that may drive it (acquire/run/release).
+        Qt::HANDLE ownerThread = nullptr;
+        // 7.0: handshake timing and advertised capabilities; a per-worker
+        // bounded stderr tail feeding crash/timeout error reports.
+        qint64 handshakeMs = 0;
+        QStringList capabilities;
+        WorkerDiagnosticsRing diagnostics;
     };
 
     enum class Outcome
@@ -124,8 +146,10 @@ class LocalWorkerPool
     /// non-Result outcome.
     Outcome runOnWorker( Worker &worker, const std::string &jobId,
                          const std::string &algorithmId, const Json::Value &params,
-                         const std::function<bool()> &isCancelled, Json::Value *payload,
-                         std::string *errorMessage );
+                         const std::function<bool()> &isCancelled,
+                         const std::function<void( double, const std::string & )> &onProgress,
+                         Json::Value *payload, std::string *errorMessage,
+                         bool *cancelAcked );
     /// Retires (shutdown frame → grace → kill) and discards @a worker.
     void retireWorker( std::unique_ptr<Worker> worker );
     /// Returns a healthy worker to the idle pool (or retires it when its
@@ -151,9 +175,6 @@ class LocalWorkerPool
     /// already-destroyed members (review P1).
     int m_activeRuns = 0;
     bool m_destroying = false;
-    /// Owner-thread discipline: QProcess is thread-affine; every pool call
-    /// (start/run/shutdown) must come from the thread that started it.
-    Qt::HANDLE m_ownerThread = nullptr; // Qt::HANDLE = pthread_t on POSIX
 };
 
 } // namespace sicnu::processing
