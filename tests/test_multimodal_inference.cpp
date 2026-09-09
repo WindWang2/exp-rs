@@ -25,6 +25,7 @@
 
 #include <cmath>
 #include <memory>
+#include <string>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -404,4 +405,80 @@ TEST_CASE( "the single execution seam routes named feeds and refuses misuse", "[
   {
     CHECK_THAT( e.message(), Catch::Matchers::ContainsSubstring( "named inputs" ) );
   }
+}
+
+
+TEST_CASE( "non-divisible rasters keep per-tile known answers at batch>1", "[models][multimodal]" )
+{
+  QTemporaryDir dir;
+  // 80 px wide / tile 32 → tile columns 32, 32, 16: mixed EDGE tiles join
+  // batches. Uniform fed windows must keep every core pixel's known answer
+  // (no cross-tile contamination, no garbage from the smaller tail tile).
+  auto before = sicnu::testing::RsSyntheticRasterBuilder( 80, 32, 1, GDT_Float32 )
+                  .withConstantValue( 1, 5.0f )
+                  .writeToDisk( dir.filePath( QStringLiteral( "nb-before.tif" ) ) );
+  auto after = sicnu::testing::RsSyntheticRasterBuilder( 80, 32, 1, GDT_Float32 )
+                 .withConstantValue( 1, 3.0f )
+                 .writeToDisk( dir.filePath( QStringLiteral( "nb-after.tif" ) ) );
+
+  ModelInfo model = changeModel( /*tile*/ 32, /*halo*/ 0 );
+  model.tiling.batchSize = 2;
+  auto runtime = std::make_shared<ChangeFakeRuntime>();
+  TileInferenceEngine engine( model, runtime );
+  RSOperatorContext context;
+
+  const QString out = dir.filePath( QStringLiteral( "nb-out.tif" ) );
+  const TileInferenceStats stats = engine.runMultiInput(
+    { NamedRasterFeed{ "before", { before.toStdString() }, {} },
+      NamedRasterFeed{ "after", { after.toStdString() }, {} } },
+    out.toStdString(), context, {} );
+  CHECK( stats.batchSize == 2 );
+  CHECK( stats.tilesProcessed == 3 );
+
+  int width = 0;
+  int height = 0;
+  const std::vector<float> data = readBand( out, width, height );
+  REQUIRE( width == 80 );
+  for ( std::size_t i = 0; i < data.size(); ++i )
+    CHECK( data[i] == Catch::Approx( 8.0f ).margin( 1e-4 ) ); // 5 + 3 everywhere
+}
+
+TEST_CASE( "the coverage gate is per tile under batching", "[models][multimodal]" )
+{
+  QTemporaryDir dir;
+  // Two tiles per row, batch 2: LEFT column invalid, RIGHT column valid —
+  // a mixed batch. The gate must skip only the invalid tiles; the valid
+  // tiles in the SAME batch keep their values (no batch-wide NoData).
+  auto half = sicnu::testing::RsSyntheticRasterBuilder( 64, 32, 1, GDT_Float32 )
+                .withConstantValue( 1, 2.0f )
+                .withRect( 1, 0, 0, 32, 32, std::numeric_limits<float>::quiet_NaN() )
+                .writeToDisk( dir.filePath( QStringLiteral( "half.tif" ) ) );
+
+  ModelInfo model = changeModel( /*tile*/ 32, /*halo*/ 0, /*minCoverage*/ 0.9 );
+  model.tiling.batchSize = 2;
+  model.inputs = { { "before" }, { "after" } };
+  model.input = model.inputs[0];
+  auto runtime = std::make_shared<ChangeFakeRuntime>();
+  TileInferenceEngine engine( model, runtime );
+  RSOperatorContext context;
+
+  const QString out = dir.filePath( QStringLiteral( "gated-batch.tif" ) );
+  const TileInferenceStats stats = engine.runMultiInput(
+    { NamedRasterFeed{ "before", { half.toStdString() }, {} },
+      NamedRasterFeed{ "after", { half.toStdString() }, {} } },
+    out.toStdString(), context, {} );
+  CHECK( stats.tilesSkippedNoData == 1 ); // the single all-invalid left tile
+
+  int width = 0;
+  int height = 0;
+  const std::vector<float> data = readBand( out, width, height );
+  for ( int y = 0; y < 32; ++y )
+    for ( int x = 0; x < 64; ++x )
+    {
+      const float v = data[static_cast<std::size_t>( y ) * 64 + x];
+      if ( x < 32 )
+        CHECK( std::isnan( v ) );
+      else
+        CHECK( v == Catch::Approx( 4.0f ).margin( 1e-4 ) );
+    }
 }

@@ -304,6 +304,20 @@ class OnnxRuntimeSession final : public IModelRuntime
         std::lock_guard<std::mutex> runLock( m_activeRunMutex );
         m_activeRunOptions = &runOptions;
       }
+      // RAII guard: the registered pointer MUST clear on EVERY exit path —
+      // a non-Ort::Exception escaping Run would otherwise leave
+      // m_activeRunOptions dangling into the destroyed stack object and any
+      // later requestCancel()/clearCancel() would dereference it.
+      struct ActiveRunGuard
+      {
+        std::mutex &mutex;
+        Ort::RunOptions *&slot;
+        ~ActiveRunGuard()
+        {
+          std::lock_guard<std::mutex> runLock( mutex );
+          slot = nullptr;
+        }
+      } activeRunGuard{ m_activeRunMutex, m_activeRunOptions };
       std::vector<Ort::Value> outputs;
       try
       {
@@ -312,8 +326,6 @@ class OnnxRuntimeSession final : public IModelRuntime
       }
       catch ( const Ort::Exception &e )
       {
-        std::lock_guard<std::mutex> runLock( m_activeRunMutex );
-        m_activeRunOptions = nullptr;
         if ( m_cancelRequested.load( std::memory_order_relaxed ) )
         {
           recordFailure( "inference canceled during the forward pass" );
@@ -321,10 +333,6 @@ class OnnxRuntimeSession final : public IModelRuntime
         }
         recordFailure( e.what() );
         throw std::runtime_error( std::string( "forward pass failed: " ) + e.what() );
-      }
-      {
-        std::lock_guard<std::mutex> runLock( m_activeRunMutex );
-        m_activeRunOptions = nullptr;
       }
 
       if ( outputs.size() != wanted.size() )
@@ -392,10 +400,30 @@ class OnnxRuntimeSession final : public IModelRuntime
         const std::vector<std::string> graphInputs = inputTensorNames();
         if ( graphInputs.empty() )
           return;
+        // Probe with the graph's own STATIC shapes where declared (dynamic
+        // dims collapse to 1); inputs whose rank differs from 4 keep the
+        // 1x3x64x64 fallback. A static-shape graph therefore warms up
+        // instead of recording a pointless "warmup skipped" health entry.
         std::vector<NamedTensor> probe;
-        for ( const std::string &name : graphInputs )
+        for ( size_t i = 0; i < graphInputs.size(); ++i )
+        {
+          std::vector<std::int64_t> dims;
+          try
+          {
+            const auto shapeInfo =
+              m_session->GetInputTypeInfo( i ).GetTensorTypeAndShapeInfo();
+            for ( const auto d : shapeInfo.GetShape() )
+              dims.push_back( d > 0 ? d : 1 );
+          }
+          catch ( const Ort::Exception & )
+          {
+            dims.clear(); // introspection unavailable — fall back below
+          }
+          if ( dims.empty() )
+            dims = { 1, 3, 64, 64 };
           probe.push_back(
-            NamedTensor{ name, TensorBlob::zeros( { 1, 3, 64, 64 }, TensorDType::Float32 ) } );
+            NamedTensor{ graphInputs[i], TensorBlob::zeros( dims, TensorDType::Float32 ) } );
+        }
         inferNamed( probe, {} );
       }
       catch ( const std::exception &e )

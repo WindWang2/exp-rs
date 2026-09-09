@@ -592,6 +592,8 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   if ( !std::isnan( info.preprocess.clampMin ) && !std::isnan( info.preprocess.clampMax )
        && info.preprocess.clampMin >= info.preprocess.clampMax )
     markInvalid( "preprocess.clamp_min must be < preprocess.clamp_max" );
+  if ( !coverageVal.isDouble() && !coverageVal.isNull() && !coverageVal.isUndefined() )
+    markInvalid( "tiling.min_valid_coverage must be a number in [0, 1]" );
   if ( info.tiling.minValidCoverage < 0.0 || info.tiling.minValidCoverage > 1.0 )
     markInvalid( "tiling.min_valid_coverage must be in [0, 1]" );
   if ( !runtimeObj.contains( QStringLiteral( "provider" ) ) )

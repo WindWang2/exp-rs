@@ -289,3 +289,63 @@ TEST_CASE( "device inventory derives deterministically from hardware", "[models]
   noGpu.cudaAvailable = false;
   CHECK( DeviceInventory::fromHardware( noGpu ).empty() );
 }
+
+
+TEST_CASE( "ledger capacities seed from the inventory (no manual setup)", "[models][planner]" )
+{
+  QTemporaryDir dir;
+  RegistryGuard guard;
+  auto &registry = ModelRuntimeRegistry::instance();
+  ModelHardwareCapabilities hw;
+  hw.cudaAvailable = true;
+  hw.cudaDeviceCount = 1;
+  hw.vramBudgetMb = 100;
+  registry.setHardwareForTest( hw );
+  registry.registerProvider(
+    "planner7",
+    []( const ModelInfo &, const ModelHardwareCapabilities &, std::string * ) -> ModelRuntimePtr {
+      return std::make_shared<FakeSession>( "cuda" );
+    },
+    ProviderTraits{} );
+  // NO manual vramLedger().setCapacity: acquire must seed capacities itself,
+  // otherwise freeMb would read 0 and every GPU request would silently
+  // demote to cpu.
+  const ModelInfo model = makeModel( dir, "seeded", 60 );
+  std::string error;
+  const auto session = registry.acquire( model, RequestedDevice::autoDetect(), &error );
+  REQUIRE( session );
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 60 );
+}
+
+TEST_CASE( "a throwing factory leaves no residual reservation", "[models][planner]" )
+{
+  QTemporaryDir dir;
+  RegistryGuard guard;
+  auto &registry = ModelRuntimeRegistry::instance();
+  ModelHardwareCapabilities hw;
+  hw.cudaAvailable = true;
+  hw.cudaDeviceCount = 1;
+  hw.vramBudgetMb = 100;
+  registry.setHardwareForTest( hw );
+  int calls = 0;
+  registry.registerProvider(
+    "planner7",
+    [ &calls ]( const ModelInfo &, const ModelHardwareCapabilities &, std::string * )
+      -> ModelRuntimePtr {
+      if ( ++calls == 1 )
+        throw std::runtime_error( "factory exploded (bad_alloc style)" );
+      return std::make_shared<FakeSession>( "cuda" );
+    },
+    ProviderTraits{} );
+  registry.vramLedger().setCapacity( 0, 100 );
+
+  const ModelInfo boom = makeModel( dir, "boom", 60 );
+  std::string error;
+  REQUIRE_THROWS_AS( registry.acquire( boom, RequestedDevice::autoDetect(), &error ),
+                     std::runtime_error );
+  // The reservation MUST be gone: the retry (same identity) fits and runs.
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 0 );
+  const auto session = registry.acquire( boom, RequestedDevice::autoDetect(), &error );
+  REQUIRE( session );
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 60 );
+}

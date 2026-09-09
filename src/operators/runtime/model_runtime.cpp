@@ -614,6 +614,11 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
       for ( int i = 0; i <= maxIndex; ++i )
       {
         const DeviceInfo *info = inventory.device( i );
+        // Seed the ledger capacity from the inventory (idempotent): without
+        // this the production path never registers a capacity and freeMb
+        // would read 0, silently demoting every GPU request to cpu.
+        if ( info && info->vramCapacityMb > 0 )
+          m_ledger.setCapacity( i, info->vramCapacityMb );
         freeMbByIndex[static_cast<std::size_t>( i )] =
           info && info->vramCapacityMb > 0 ? m_ledger.freeMb( i ) : -1;
       }
@@ -710,7 +715,24 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   effective.runtime.gpu = device.gpu;
   effective.runtime.resolvedCudaIndex = device.gpu ? device.cudaIndex : 0;
   std::string error;
-  ModelRuntimePtr session = factory( effective, hw, &error );
+  ModelRuntimePtr session;
+  try
+  {
+    session = factory( effective, hw, &error );
+  }
+  catch ( ... )
+  {
+    // The failed acquisition must return its reservation even when the
+    // factory throws — otherwise the identity stays reserved forever and
+    // every later acquire of this model is refused.
+    if ( device.gpu && estimateMb > 0 )
+    {
+      lock.lock();
+      m_ledger.release( device.cudaIndex, estimateMb, identityComponent );
+      lock.unlock();
+    }
+    throw;
+  }
   if ( !session )
   {
     // The failed acquisition must return its reservation — admission and

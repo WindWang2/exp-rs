@@ -1422,6 +1422,23 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
       if ( !frame->open( QString::fromStdString( feeds[f].paths[t] ) ) )
         throw RSOperatorError( ErrorCode::GdalError,
                                "failed to open input raster: " + feeds[f].paths[t] );
+      // EVERY frame must sit on the primary grid — a mismatched later frame
+      // would silently feed shifted/NaN windows instead of failing loudly.
+      if ( frame->width() != rasterW || frame->height() != rasterH
+           || [ & ]() {
+                const std::array<double, 6> gt = frame->geoTransform();
+                for ( int i = 0; i < 6; ++i )
+                  if ( std::abs( gt[i] - primaryGt[i] ) > 1e-6 )
+                    return true;
+                return false;
+              }() )
+      {
+        const std::array<double, 6> gt = frame->geoTransform();
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               gridMismatch( feeds[0].paths[0], rasterW, rasterH,
+                                             primaryGt.data(), feeds[f].paths[t],
+                                             frame->width(), frame->height(), gt.data() ) );
+      }
       reader.frames[t] = std::move( frame );
     }
     // Missing frames stay null → zero-filled below (missing_timestep=zero).
@@ -1605,7 +1622,17 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                "model output '" + nt.first + "' is rank "
                                  + std::to_string( nt.second.rank() )
                                  + " — the raster writer stitches rank-4 heads" );
-      cv::Mat mat = nt.second.toMat();
+      cv::Mat mat;
+      try
+      {
+        mat = nt.second.toMat();
+      }
+      catch ( const std::exception &e )
+      {
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               std::string( "model output '" ) + nt.first
+                                 + "' cannot cross the raster stitcher: " + e.what() );
+      }
       if ( const std::string typeError = outputTypeMismatch( mat.type(), nt.first ); !typeError.empty() )
         throw RSOperatorError( ErrorCode::InvalidInputData, typeError );
       if ( mat.size[1] <= 0 )
@@ -1713,6 +1740,11 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
           {
             cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, cv::INTER_LINEAR );
           }
+          // The writer consumes a CONTIGUOUS bt.w × bt.h buffer: with uniform
+          // fed windows the core sits at the window origin, so an uncropped
+          // plane is still fed-sized — materialize the exact core rect.
+          if ( plane.cols != bt.w || plane.rows != bt.h )
+            plane = plane( cv::Range( 0, bt.h ), cv::Range( 0, bt.w ) ).clone();
           if ( isUncertaintyHead )
             headPlanes.push_back( plane );
           if ( m_model.postprocess.maskThreshold >= 0.0 )
@@ -1766,8 +1798,7 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   auto flushDeferredNoDataMulti = [&]( int currentTileIndex ) {
     if ( !writer || deferredNoData.empty() )
       return;
-    while ( !deferredNoData.empty() && deferredNoData.front().y + deferredNoData.front().h
-              <= currentTileIndex * 0 + rasterH ) // writer exists: flush all queued
+    while ( !deferredNoData.empty() )
     {
       const CoreTile &bt = deferredNoData.front();
       cv::Mat nanTile( bt.h, bt.w, CV_32F, std::numeric_limits<float>::quiet_NaN() );
@@ -1778,6 +1809,11 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
         if ( !writer->writeTile( band, writeTile, nanTile.ptr<float>() ) )
           throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write NoData tile" );
       }
+      // Same accounting convention as the single-input engine: a deferred
+      // tile moves from "skipped" back to "done" once its NoData rows are on
+      // disk, so tilesProcessed covers the whole raster.
+      --skipped;
+      ++done;
       deferredNoData.erase( deferredNoData.begin() );
     }
   };
@@ -1790,8 +1826,13 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
       const CoreTile &t = core[static_cast<std::size_t>( tileIndex )];
       const int winX = t.x - halo;
       const int winY = t.y - halo;
-      const int winW = t.w + 2 * halo;
-      const int winH = t.h + 2 * halo;
+      // Uniform fed window: EVERY tile reads the full tileSize window with
+      // the core at [halo, halo+core). Edge tiles extend past the raster and
+      // are NaN/zero-filled by the read — fed sizes stay constant so a
+      // batch can never mix geometries (the single-input engine refuses
+      // mixed batches; here the geometry makes mixed batches unreachable).
+      const int winW = tileSize + 2 * halo;
+      const int winH = tileSize + 2 * halo;
 
       // Per-feed window reads for this tile. A core pixel is VALID when any
       // feed sees a finite value in any channel — NoData is only what nothing
@@ -1885,6 +1926,24 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
             ++validPixels;
       }
 
+      // Per-tile coverage gate + all-nodata skip (Platform 7.0 / #705):
+      // decided per TILE (a batch-level verdict would write valid output
+      // tiles as NoData). Skipped tiles become NoData rows — never a
+      // resolution change, never a model change.
+      const double coverage =
+        static_cast<double>( validPixels ) / static_cast<double>( std::max( 1, t.w * t.h ) );
+      if ( validPixels == 0 || ( minCoverage > 0.0 && coverage < minCoverage ) )
+      {
+        deferredNoData.push_back( t );
+        ++skipped;
+        ++stats.tilesSkippedNoData;
+        context.reportProgress(
+          static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
+          "Tiled multi-input inference: " + std::to_string( done + skipped ) + "/"
+            + std::to_string( totalTiles ) );
+        continue;
+      }
+
       for ( std::size_t f = 0; f < feeds.size(); ++f )
         batchByFeed[f].push_back( tileMats[f] );
       batchCores.push_back( t );
@@ -1896,29 +1955,6 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
         static_cast<int>( batchCores.size() ) >= batchSize || tileIndex == totalTiles - 1;
       if ( !batchFull )
         continue;
-
-      // Coverage gate + all-nodata skip (Platform 7.0 / #705): skipped tiles
-      // become NoData rows — never a resolution change, never a model change.
-      const double coverage =
-        static_cast<double>( validPixels ) / static_cast<double>( std::max( 1, t.w * t.h ) );
-      if ( TileInferenceEngine::batchIsAllNoData( batchValidPixels )
-           || ( minCoverage > 0.0 && coverage < minCoverage ) )
-      {
-        skipped += static_cast<int>( batchCores.size() );
-        stats.tilesSkippedNoData += static_cast<int>( batchCores.size() );
-        deferredNoData.insert( deferredNoData.end(), batchCores.begin(), batchCores.end() );
-        for ( auto &mats : batchByFeed )
-          mats.clear();
-        batchMasks.clear();
-        batchFedSize.clear();
-        batchCores.clear();
-        batchValidPixels.clear();
-        context.reportProgress(
-          static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
-          "Tiled multi-input inference: " + std::to_string( done + skipped ) + "/"
-            + std::to_string( totalTiles ) );
-        continue;
-      }
 
       // OOM ladder: identical semantics — halve to serial, never shrink
       // tiles, never change the model.

@@ -107,6 +107,10 @@ class PythonWorkerSession final : public IModelRuntime
     std::vector<NamedTensor> inferNamed( const std::vector<NamedTensor> &inputs,
                                          const std::vector<std::string> &outputNames ) override
     {
+      // The registry hands the same shared session to any thread; the worker
+      // protocol is strictly request/response per process — serialize the
+      // whole exchange like the ORT provider serializes Run.
+      std::lock_guard<std::mutex> lock( m_inferMutex );
       if ( !m_loaded || !m_process )
         throw std::runtime_error( "runtime session is not loaded" );
       if ( m_cancelRequested.load( std::memory_order_relaxed ) )
@@ -261,6 +265,7 @@ class PythonWorkerSession final : public IModelRuntime
     std::string m_digest;
     int m_timeoutMs = 30000;
     bool m_loaded = false;
+    std::mutex m_inferMutex; // one request/response exchange at a time
     std::unique_ptr<QProcess> m_process;
     std::atomic<bool> m_cancelRequested{ false };
     std::atomic<std::uint64_t> m_forwards{ 0 };

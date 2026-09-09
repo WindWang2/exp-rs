@@ -60,8 +60,21 @@ bool VramLedger::tryReserve( int deviceIndex, int vramMb, const std::string &hol
     return true; // unknown estimate: nothing to account, admission granted
   if ( entry.capacityMb <= 0 )
     return true; // unenforced capacity: tracked below, never refused
+  // Re-reserving the same holder REPLACES its previous reservation (idempotent
+  // acquire paths): drop the old amount BEFORE the capacity check so a
+  // same-holder upgrade is judged against the effectively-free VRAM.
+  int previousMb = 0;
+  if ( auto existing = entry.holders.find( holder ); existing != entry.holders.end() )
+  {
+    previousMb = existing->second;
+    entry.reservedMb -= previousMb;
+    entry.holders.erase( existing );
+  }
   if ( entry.reservedMb + vramMb > entry.capacityMb )
   {
+    // Restore the previous reservation — a refused upgrade must not lose it.
+    entry.holders[holder] = previousMb;
+    entry.reservedMb += previousMb;
     if ( why )
       *why = "cuda:" + std::to_string( deviceIndex ) + " has " +
              std::to_string( entry.capacityMb - entry.reservedMb ) + " MiB free of " +
@@ -69,11 +82,6 @@ bool VramLedger::tryReserve( int deviceIndex, int vramMb, const std::string &hol
              std::to_string( vramMb ) + " MiB";
     return false;
   }
-  // Re-reserving the same holder replaces its previous reservation (idempotent
-  // acquire paths), never double-books it.
-  auto existing = entry.holders.find( holder );
-  if ( existing != entry.holders.end() )
-    entry.reservedMb -= existing->second;
   entry.holders[holder] = vramMb;
   entry.reservedMb += vramMb;
   return true;
