@@ -8,9 +8,12 @@
 
 #include "geospatial/doctor/data_doctor.h"
 
+#include "geospatial/crs/grid_descriptor.h"
 #include "geospatial/formats/format_profiles.h"
 #include "geospatial/gdal_guard.h"
+#include "geospatial/remote/remote_source_validator.h"
 #include "geospatial/util/atomic_fs.h"
+#include "geospatial/util/resource_uri.h"
 
 #include <gdal.h>
 
@@ -31,6 +34,40 @@ void addFinding( Json::Value &findings, const char *check, const char *severity,
   if ( !detail.isNull() )
     finding["detail"] = detail;
   findings.append( finding );
+}
+
+/// Remediation advice for a finding check — ADVICE ONLY: the doctor never
+/// executes conversions or mutations itself (auto_fixable stays false).
+const char *remediationFor( const std::string &check )
+{
+  static const struct
+  {
+    const char *check;
+    const char *advice;
+  } kRemediations[] = {
+    { "readability", "Verify the path and that the file exists; run the doctor again after fixing" },
+    { "existence", "Check the path spelling and that the file was not moved or deleted" },
+    { "crs", "Declare a CRS for the source, or consume it with an explicit fallback policy "
+             "(CrsPolicy::allowDeclaredFallback with a declared fallbackCrs)" },
+    { "vector_crs", "Assign the layer CRS in the source, or transform it explicitly (io:vector_convert "
+                    "with targetCrs) before analysis" },
+    { "geotransform", "Georeference the source (world file, metadata) or consume it with an explicit "
+                      "placement contract; the layer refuses to guess placement" },
+    { "band_nodata", "Declare a NoData value for floating-point bands so masking is unambiguous" },
+    { "overviews", "Run io:build_overviews (e.g. GAUSS, levels 2/4/8/16) to speed up display access" },
+    { "product_metadata", "Run the product adapter over the scene sidecars (io:product describe) to "
+                          "attach sensor/platform vocabulary" },
+    { "remote_access", "Verify network reachability and credentials; the range cache serves only what "
+                       "the origin still confirms" },
+    { "format_profile", "Consume through the profiled contracts, or re-encode into a certified format "
+                        "(see docs/io/certified-formats.md)" },
+  };
+  for ( const auto &entry : kRemediations )
+  {
+    if ( check == entry.check )
+      return entry.advice;
+  }
+  return nullptr;
 }
 
 bool isRemotePath( const std::string &path )
@@ -64,7 +101,8 @@ void doctorSidecars( const std::string &path, Json::Value &findings )
 Json::Value DoctorReport::toJson() const
 {
   Json::Value json;
-  json["format_version"] = 1;
+  json["format_version"] = 1;   // legacy consumer compat
+  json["doctor_version"] = 2;   // 7.0: sections + remediation
   json["kind"] = "doctor_report";
   json["path"] = path;
   json["dataset_kind"] = kind;
@@ -73,6 +111,24 @@ Json::Value DoctorReport::toJson() const
   json["error_count"] = errorCount;
   json["warning_count"] = warningCount;
   json["findings"] = findings;
+  json["identity"] = identity;
+  json["format"] = format;
+  json["grid"] = grid;
+  json["remote"] = remote;
+  Json::Value remediationJson( Json::arrayValue );
+  for ( const DoctorRemediation &item : remediation )
+    remediationJson.append( item.toJson() );
+  json["remediation"] = remediationJson;
+  return json;
+}
+
+Json::Value DoctorRemediation::toJson() const
+{
+  Json::Value json;
+  json["check"] = check;
+  json["severity"] = severity;
+  json["advice"] = advice;
+  json["auto_fixable"] = autoFixable;
   return json;
 }
 
@@ -93,6 +149,13 @@ DoctorReport runDoctor( const std::string &path, const InspectOptions &options )
     return report;
   }
 
+  // ── identity (7.0): classification works with or without a dataset ──────
+  {
+    const ResourceUri uri = ResourceUri::parse( path );
+    report.identity["resource_kind"] = resourceKindName( uri.kind );
+    report.identity["display_path"] = uri.display();
+  }
+
   // ── readability ──────────────────────────────────────────────────────────
   Json::Value canonicalJson;
   try
@@ -108,9 +171,21 @@ DoctorReport runDoctor( const std::string &path, const InspectOptions &options )
     addFinding( report.findings, "readability", "error", error.what(), error.details() );
     if ( !atomic_fs::fileExists( path ) )
       addFinding( report.findings, "existence", "error", "File does not exist at the given path" );
+    // Remediation rides the early exit too — unreadable inputs deserve
+    // advice, not a bare failure.
     for ( Json::ArrayIndex i = 0; i < report.findings.size(); ++i )
     {
-      const std::string severity = report.findings[i]["severity"].asString();
+      const Json::Value &finding = report.findings[i];
+      const std::string severity = finding["severity"].asString();
+      if ( severity != "error" && severity != "warning" )
+        continue;
+      DoctorRemediation item;
+      item.check = finding["check"].asString();
+      item.severity = severity;
+      const char *advice = remediationFor( item.check );
+      item.advice = advice ? advice : "Review this finding manually";
+      item.autoFixable = false;
+      report.remediation.push_back( item );
       if ( severity == "error" )
         ++report.errorCount;
       else if ( severity == "warning" )
@@ -122,6 +197,38 @@ DoctorReport runDoctor( const std::string &path, const InspectOptions &options )
   const std::string kind = canonicalJson.get( "kind", "" ).asString();
   report.kind = kind;
   report.driver = canonicalJson.get( "driver", "" ).asString();
+
+  // ── identity (7.0): classification + redacted display form ──────────
+  {
+    const ResourceUri uri = ResourceUri::parse( path );
+    report.identity["resource_kind"] = resourceKindName( uri.kind );
+    report.identity["display_path"] = uri.display();
+    report.identity["dataset_kind"] = kind;
+    report.identity["driver"] = report.driver;
+  }
+
+  // ── format capabilities (7.0): one read-only introspection pass ─────
+  try
+  {
+    const ResolvedCapabilities capabilities = resolveDatasetCapabilities( path );
+    report.format["capabilities"] = capabilityNames( capabilities.caps ).empty()
+                                      ? Json::Value( Json::arrayValue )
+                                      : [ &capabilities ] {
+                                          Json::Value list( Json::arrayValue );
+                                          for ( const std::string &name : capabilityNames( capabilities.caps ) )
+                                            list.append( name );
+                                          return list;
+                                        }();
+    report.format["profile"] = capabilities.profileId;
+    report.format["driver"] = capabilities.driver;
+    report.format["remote"] = capabilities.remote;
+    report.format["is_cog"] = capabilities.isCog;
+    report.format["notes"] = capabilities.notes;
+  }
+  catch ( const GeoError &error )
+  {
+    report.format["unavailable"] = error.what();
+  }
 
   // ── format profile posture ───────────────────────────────────────────────
   const FormatRegistry &registry = FormatRegistry::instance();
@@ -222,6 +329,19 @@ DoctorReport runDoctor( const std::string &path, const InspectOptions &options )
       addFinding( report.findings, "product_metadata", "info",
                   "No sensor/platform declared; run a product adapter over sidecars if applicable" );
 
+    // ── grid verdict (7.0): north-up is a special case, never an assumption
+    const GridDescriptor descriptor = GridDescriptor::fromMetadata( meta );
+    report.grid["kind"] = gridKindName( descriptor.kind );
+    report.grid["rotation_degrees"] = descriptor.rotationDegrees;
+    report.grid["flipped_x"] = descriptor.flippedX;
+    report.grid["flipped_y"] = descriptor.flippedY;
+    report.grid["has_gcps"] = descriptor.hasGcps;
+    report.grid["has_rpc"] = descriptor.hasRpcs;
+    report.grid["resampling_category"] =
+      resamplingCategoryName( resamplingCategoryFor( meta ) );
+    addFinding( report.findings, "grid_kind", "info",
+                std::string( "Placement: " ) + gridKindName( descriptor.kind ) );
+
     doctorSidecars( path, report.findings );
   }
   else if ( kind == "vector" )
@@ -254,15 +374,38 @@ DoctorReport runDoctor( const std::string &path, const InspectOptions &options )
                 std::to_string( variables.size() ) + " variable(s); slices are lazy through the multidim contract" );
   }
 
-  // ── remote posture ───────────────────────────────────────────────────────
+  // ── remote posture (7.0): bounded validator identity for remote sources ─
   if ( isRemotePath( path ) )
   {
-    if ( options.includeRemoteProbe )
-      addFinding( report.findings, "remote_access", "ok",
-                  "Dataset opened through a GDAL VSI handle (range reads)" );
+    if ( options.includeRemoteProbe && RemoteSourceValidator::isRemoteUrl( path ) )
+    {
+      const RemoteSourceValidator validator = RemoteSourceValidator::probe( path );
+      report.remote = validator.identity().toJson();
+      const bool healthy = validator.identity().state != RemoteSourceState::Offline;
+      addFinding( report.findings, "remote_access", healthy ? "ok" : "warning",
+                  std::string( "Remote identity: " ) + remoteSourceStateName( validator.identity().state ) +
+                    ( validator.identity().lastError.empty() ? "" : " (" + validator.identity().lastError + ")" ) );
+    }
     else
       addFinding( report.findings, "remote_access", "info",
-                  "Remote path accepted; accessibility was verified by the successful open" );
+                  "Remote path accepted; accessibility was verified by the successful open "
+                  "(pass includeRemoteProbe for a bounded identity probe)" );
+  }
+
+  // ── remediation (7.0): advice for every error/warning finding ───────────
+  for ( Json::ArrayIndex i = 0; i < report.findings.size(); ++i )
+  {
+    const Json::Value &finding = report.findings[i];
+    const std::string severity = finding["severity"].asString();
+    if ( severity != "error" && severity != "warning" )
+      continue;
+    DoctorRemediation item;
+    item.check = finding["check"].asString();
+    item.severity = severity;
+    const char *advice = remediationFor( item.check );
+    item.advice = advice ? advice : "Review this finding manually";
+    item.autoFixable = false; // advice only — no destructive auto-conversion
+    report.remediation.push_back( item );
   }
 
   for ( Json::ArrayIndex i = 0; i < report.findings.size(); ++i )

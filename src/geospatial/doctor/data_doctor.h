@@ -27,6 +27,17 @@
 namespace sicnu::geo
 {
 
+struct DoctorRemediation
+{
+    std::string check;      ///< the finding this advice addresses
+    std::string severity;   ///< "error" | "warning"
+    std::string advice;     ///< recommended remediation (advice ONLY — the
+                            ///< doctor never executes destructive conversions)
+    bool autoFixable = false;
+
+    Json::Value toJson() const;
+};
+
 struct DoctorReport
 {
     std::string path;
@@ -36,6 +47,13 @@ struct DoctorReport
     int errorCount = 0;
     int warningCount = 0;
     Json::Value findings;      ///< array of {check, severity, message, detail?}
+
+    // ── 7.0 (doctor_version 2): structured sections + remediation ──
+    Json::Value identity;      ///< resource classification + redacted display form
+    Json::Value format;        ///< profile posture + dataset capabilities
+    Json::Value grid;          ///< GridDescriptor verdict (raster only)
+    Json::Value remote;        ///< RemoteSourceIdentity state (remote only)
+    std::vector<DoctorRemediation> remediation;
 
     Json::Value toJson() const;
 };
