@@ -1,6 +1,7 @@
 {
   "id": "road-transport-a4l",
   "version": 1,
+  "facets": {"tasks": ["classification"], "medium": "a4", "purpose": "analysis"},
   "description": "Road / transport network map with section label and furniture.",
   "page": {
     "width_mm": 297,

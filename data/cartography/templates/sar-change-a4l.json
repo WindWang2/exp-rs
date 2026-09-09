@@ -1,6 +1,7 @@
 {
   "id": "sar-change-a4l",
   "version": 1,
+  "facets": {"tasks": ["change", "sar"], "medium": "a4", "purpose": "analysis"},
   "description": "SAR ratio/log-ratio change page: before/after frames with transition legend and uncertainty note.",
   "page": {
     "width_mm": 297,

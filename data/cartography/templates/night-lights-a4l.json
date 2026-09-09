@@ -1,6 +1,7 @@
 {
   "id": "night-lights-a4l",
   "version": 1,
+  "facets": {"tasks": ["classification"], "medium": "a4", "purpose": "analysis"},
   "description": "Nighttime lights continuous product with diverging colorbar (change years).",
   "page": {
     "width_mm": 297,

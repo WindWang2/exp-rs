@@ -34,6 +34,8 @@
 #include <QColor>
 #include <QFont>
 
+#include <functional>
+
 namespace sicnu::agent::cartography {
 
 namespace {
@@ -249,6 +251,20 @@ bool applyRasterBlock( QgsRasterLayer *raster, const Json::Value &rasterBlock,
     const int green =
       bands.isMember( "green" ) && bands["green"].isIntegral() ? bands["green"].asInt() : 2;
     const int blue = bands.isMember( "blue" ) && bands["blue"].isIntegral() ? bands["blue"].asInt() : 1;
+    // Platform 6.0 (Milestone E): refuse band assignments beyond the real
+    // band count — a silently clamped/empty multiband composite is a
+    // semantically wrong render.
+    const int bandCount = raster->bandCount();
+    if ( red < 1 || red > bandCount || green < 1 || green > bandCount || blue < 1 ||
+         blue > bandCount )
+    {
+      problems << QStringLiteral( "multiband_color bands (%1,%2,%3) out of range (1-%4)" )
+                    .arg( red )
+                    .arg( green )
+                    .arg( blue )
+                    .arg( bandCount );
+      return false;
+    }
     raster->setRenderer( new QgsMultiBandColorRenderer( raster->dataProvider(), red, green, blue ) );
     applied << QStringLiteral( "raster:multiband_color(%1,%2,%3)" ).arg( red ).arg( green ).arg( blue );
     return true;
@@ -440,25 +456,46 @@ bool applyVectorBlock( QgsVectorLayer *vector, const Json::Value &vectorBlock,
   }
   else if ( renderertype == "rule_based" )
   {
+    // Issue #782: the renderer's root must be a symbol-less group rule with
+    // the declared rules as its *children* (siblings of each other). The
+    // previous build used the first rule as the root and appended the rest
+    // as its children, so rules 2..n were only evaluated when rule 1 matched.
     QgsRuleBasedRenderer::Rule *root = new QgsRuleBasedRenderer::Rule( nullptr );
     int rules = 0;
-    for ( const auto &rule : vectorBlock.get( "rules", Json::Value() ) )
-    {
-      if ( !rule.isObject() || !rule.isMember( "expression" ) || !rule["expression"].isString() )
-        continue;
-      Json::Value entry( Json::objectValue );
-      entry["color"] = rule.get( "color", Json::Value() );
-      entry["symbol"] = rule.get( "symbol", Json::Value() );
-      QgsSymbol *symbol = buildSymbol( entry, defaultColor, geometry );
-      const QString label = rule.isMember( "label" ) && rule["label"].isString()
-                              ? QString::fromStdString( rule["label"].asString() )
-                              : QString();
-      QgsRuleBasedRenderer::Rule *child =
-        new QgsRuleBasedRenderer::Rule( symbol, 0, 0, QString::fromStdString( rule["expression"].asString() ),
-                                        label );
-      root->appendChild( child );
-      ++rules;
-    }
+    // Bounded nesting for declared sub-rules (validation caps flat rules at
+    // 64; nesting depth gets its own budget so a hostile document cannot
+    // recurse unboundeded).
+    std::function<void( const Json::Value &, QgsRuleBasedRenderer::Rule *, int )> buildRules =
+      [&]( const Json::Value &rulesJson, QgsRuleBasedRenderer::Rule *parent, int depth ) {
+        if ( depth > 4 )
+        {
+          // Review P2: silently dropping declared sub-rules would change the
+          // render without a trace — report the truncation.
+          problems << QStringLiteral( "rule_based sub-rules below nesting depth 4 dropped" );
+          return;
+        }
+        for ( const auto &rule : rulesJson )
+        {
+          if ( !rule.isObject() || !rule.isMember( "expression" ) || !rule["expression"].isString() )
+            continue;
+          Json::Value entry( Json::objectValue );
+          entry["color"] = rule.get( "color", Json::Value() );
+          entry["symbol"] = rule.get( "symbol", Json::Value() );
+          QgsSymbol *symbol = buildSymbol( entry, defaultColor, geometry );
+          const QString label = rule.isMember( "label" ) && rule["label"].isString()
+                                  ? QString::fromStdString( rule["label"].asString() )
+                                  : QString();
+          QgsRuleBasedRenderer::Rule *child =
+            new QgsRuleBasedRenderer::Rule( symbol, 0, 0,
+                                            QString::fromStdString( rule["expression"].asString() ),
+                                            label );
+          parent->appendChild( child );
+          ++rules;
+          if ( rule.isMember( "rules" ) && rule["rules"].isArray() )
+            buildRules( rule["rules"], child, depth + 1 );
+        }
+      };
+    buildRules( vectorBlock.get( "rules", Json::Value() ), root, 0 );
     if ( rules == 0 )
     {
       delete root;

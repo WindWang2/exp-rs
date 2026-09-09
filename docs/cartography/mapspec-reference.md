@@ -116,3 +116,20 @@ validate → create/replace layout (page sizes, extra pages, atlas)
 `extract(layout)` mirrors a layout back to MapSpec; stamped semantic roles
 round-trip faithfully, non-mappable QGIS items surface as annotations with
 a `qgis_type` marker (documented divergence).
+
+## Platform 6.0 notes
+
+- **Children**: items may carry a bounded `children[]` array (role-qualified
+  blocks materialized from composite components; depth 1, ≤ 16, unique
+  roles) — validated with the item grammar.
+- **Conditions**: `resolveMapSpecConditions` accepts the runtime context as
+  an argument; an embedded `condition_context` is optional and merged *under*
+  the external context (external keys win) — #802. Both operands of
+  `and`/`or` are always evaluated so evaluation errors can never hide behind
+  short-circuit, and bare-literal conditions are rejected at validation
+  time — #804.
+- **Solver**: constraints resolve through a bounded constraint-graph
+  pipeline (normalize → dependency graph + cycle detection → propagation →
+  ≤ 24 relaxation passes → collision handling → scoring → convergence
+  report); consistent systems converge to declaration-order-independent
+  geometry — #805, #781.

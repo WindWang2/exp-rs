@@ -1,6 +1,7 @@
 {
  "id": "report-atlas-appendix-a4l",
  "version": 1,
+ "facets": {"tasks": [], "medium": "report", "purpose": "analysis"},
  "description": "Atlas appendix page: per-feature statistics table, top-N ranking and trend sparkline; designed for the atlas page sequence.",
  "page": {
   "width_mm": 297,

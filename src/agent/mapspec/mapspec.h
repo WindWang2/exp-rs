@@ -23,6 +23,8 @@
 
 #include <json/json.h>
 
+#include "../sicnu_agent_export.h"
+
 #include <string>
 #include <vector>
 
@@ -45,9 +47,9 @@ namespace sicnu::agent::mapspec {
 inline constexpr int kMapSpecCurrentVersion = 3;
 
 /// Ordered item collection names of a MapSpec document.
-///  (inline constexpr: Windows DLL builds cannot auto-export extern data
-///  symbols from this shared library — the previous extern pair broke every
-///  fresh MSVC link of the test targets with LNK2019.)
+/// (inline constexpr: Windows DLL builds cannot auto-export extern data
+/// symbols from this shared library — the previous extern pair broke every
+/// fresh MSVC link of the test targets with LNK2019.)
 inline constexpr const char *kCollections[] = {
     "map_frames", "layers",   "symbols", "legends",
     "north_arrows", "scale_bars", "titles", "labels",

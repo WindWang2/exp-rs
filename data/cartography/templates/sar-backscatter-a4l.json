@@ -1,6 +1,7 @@
 {
   "id": "sar-backscatter-a4l",
   "version": 1,
+  "facets": {"tasks": ["sar"], "medium": "a4", "purpose": "analysis"},
   "description": "SAR backscatter (dB) continuous map with dB colorbar and histogram.",
   "page": {
     "width_mm": 297,

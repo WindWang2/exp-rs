@@ -2606,6 +2606,15 @@
 	[
 		{
 			"description" : "Accuracy assessment page: map, confusion matrix, metric cards and legend.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "scientific",
+				"tasks" : 
+				[
+					"accuracy"
+				]
+			},
 			"id" : "accuracy-assessment-a4l",
 			"page" : 
 			{
@@ -2636,6 +2645,12 @@
 		},
 		{
 			"description" : "Map-series sheet with the atlas hook enabled (per-feature coverage and file names).",
+			"facets" : 
+			{
+				"medium" : "atlas",
+				"purpose" : "analysis",
+				"tasks" : []
+			},
 			"id" : "atlas-series-a4l",
 			"page" : 
 			{
@@ -2665,6 +2680,16 @@
 		},
 		{
 			"description" : "Burned-area product with severity colorbar and class chart.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"change",
+					"disaster"
+				]
+			},
 			"id" : "burned-area-a4l",
 			"page" : 
 			{
@@ -2695,6 +2720,15 @@
 		},
 		{
 			"description" : "Before/after synchronized dual map page with transition legend, change matrix and uncertainty note.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"change"
+				]
+			},
 			"id" : "change-before-after-a4l",
 			"page" : 
 			{
@@ -2727,6 +2761,15 @@
 		{
 			"description" : "Before/after synchronized dual map page with transition legend, change matrix and uncertainty note.",
 			"extends" : "change-before-after-a4l",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"change"
+				]
+			},
 			"id" : "change-before-after-a4p",
 			"page" : 
 			{
@@ -2758,6 +2801,15 @@
 		},
 		{
 			"description" : "Post-classification change map with transition legend, change matrix and uncertainty note.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"change"
+				]
+			},
 			"id" : "change-detection-a4l",
 			"page" : 
 			{
@@ -2788,6 +2840,12 @@
 		},
 		{
 			"description" : "Choropleth of region statistics with diverging colorbar.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "exploration",
+				"tasks" : []
+			},
 			"id" : "choropleth-a4l",
 			"page" : 
 			{
@@ -2819,6 +2877,15 @@
 		{
 			"description" : "Categorical classification result map with legend, class-area chart, scale bar, north arrow and source note.",
 			"extends" : "classification-a4l",
+			"facets" : 
+			{
+				"medium" : "a3",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"classification"
+				]
+			},
 			"id" : "classification-a3l",
 			"page" : 
 			{
@@ -2848,6 +2915,15 @@
 		},
 		{
 			"description" : "Categorical classification result map with legend, class-area chart, scale bar, north arrow and source note.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"classification"
+				]
+			},
 			"id" : "classification-a4l",
 			"page" : 
 			{
@@ -2878,6 +2954,15 @@
 		{
 			"description" : "Categorical classification result map with legend, class-area chart, scale bar, north arrow and source note.",
 			"extends" : "classification-a4l",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"classification"
+				]
+			},
 			"id" : "classification-a4p",
 			"page" : 
 			{
@@ -2907,6 +2992,12 @@
 		},
 		{
 			"description" : "QA cloud/shadow mask overview with class legend and coverage chart.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : []
+			},
 			"id" : "cloud-cover-a4l",
 			"page" : 
 			{
@@ -2938,6 +3029,16 @@
 		},
 		{
 			"description" : "Crop monitoring map with phenology time-series chart and class legend.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"agriculture",
+					"vegetation"
+				]
+			},
 			"id" : "crop-monitoring-a4l",
 			"page" : 
 			{
@@ -2968,6 +3069,15 @@
 		},
 		{
 			"description" : "Forest cover / change map with sequential-green colorbar and class chart.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"vegetation"
+				]
+			},
 			"id" : "forest-cover-a4l",
 			"page" : 
 			{
@@ -2997,6 +3107,12 @@
 		},
 		{
 			"description" : "Kernel-density / heatmap product with heat colorbar.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "exploration",
+				"tasks" : []
+			},
 			"id" : "heatmap-density-a4l",
 			"page" : 
 			{
@@ -3027,6 +3143,12 @@
 		},
 		{
 			"description" : "Main map with locator inset, class-area chart and full furniture.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : []
+			},
 			"id" : "inset-locator-a4l",
 			"page" : 
 			{
@@ -3059,6 +3181,16 @@
 		{
 			"description" : "Land-cover product map with locator inset, class-area chart and standard furniture.",
 			"extends" : "land-cover-a4l",
+			"facets" : 
+			{
+				"medium" : "a3",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"classification",
+					"vegetation"
+				]
+			},
 			"id" : "land-cover-a3l",
 			"page" : 
 			{
@@ -3090,6 +3222,16 @@
 		},
 		{
 			"description" : "Land-cover product map with locator inset, class-area chart and standard furniture.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"classification",
+					"vegetation"
+				]
+			},
 			"id" : "land-cover-a4l",
 			"page" : 
 			{
@@ -3121,6 +3263,15 @@
 		},
 		{
 			"description" : "Land-use / zoning map with multi-column legend for wide class sets.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"classification"
+				]
+			},
 			"id" : "land-use-a4l",
 			"page" : 
 			{
@@ -3151,6 +3302,15 @@
 		{
 			"description" : "Land-use / zoning map with multi-column legend for wide class sets.",
 			"extends" : "land-use-a4l",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"classification"
+				]
+			},
 			"id" : "land-use-a4p",
 			"page" : 
 			{
@@ -3180,6 +3340,15 @@
 		},
 		{
 			"description" : "Model uncertainty map with uncertainty palette colorbar and accuracy metric cards.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"accuracy"
+				]
+			},
 			"id" : "model-uncertainty-a4l",
 			"page" : 
 			{
@@ -3211,6 +3380,12 @@
 		{
 			"description" : "Four-panel comparison sheet (small multiples) with shared legend.",
 			"extends" : "multi-panel-a4l",
+			"facets" : 
+			{
+				"medium" : "a3",
+				"purpose" : "analysis",
+				"tasks" : []
+			},
 			"id" : "multi-panel-a3l",
 			"page" : 
 			{
@@ -3244,6 +3419,12 @@
 		},
 		{
 			"description" : "Four-panel comparison sheet (small multiples) with shared legend.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : []
+			},
 			"id" : "multi-panel-a4l",
 			"page" : 
 			{
@@ -3277,6 +3458,15 @@
 		},
 		{
 			"description" : "Nighttime lights continuous product with diverging colorbar (change years).",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"classification"
+				]
+			},
 			"id" : "night-lights-a4l",
 			"page" : 
 			{
@@ -3308,6 +3498,12 @@
 		{
 			"description" : "Operational map sheet: metric grid, dual-unit scale bar, navigation arrow and disclaimer.",
 			"extends" : "operational-sheet-a4l",
+			"facets" : 
+			{
+				"medium" : "a3",
+				"purpose" : "operational",
+				"tasks" : []
+			},
 			"id" : "operational-sheet-a3l",
 			"page" : 
 			{
@@ -3338,6 +3534,12 @@
 		},
 		{
 			"description" : "Operational map sheet: metric grid, dual-unit scale bar, navigation arrow and disclaimer.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "operational",
+				"tasks" : []
+			},
 			"id" : "operational-sheet-a4l",
 			"page" : 
 			{
@@ -3368,6 +3570,15 @@
 		},
 		{
 			"description" : "A0 portrait poster foundation: hero map, section rails for charts/tables/methodology (content slots intentionally unconstrained).",
+			"facets" : 
+			{
+				"medium" : "a0",
+				"purpose" : "presentation",
+				"tasks" : 
+				[
+					"publication"
+				]
+			},
 			"id" : "poster-a0-foundation",
 			"page" : 
 			{
@@ -3398,6 +3609,12 @@
 		},
 		{
 			"description" : "16:9 presentation map for screen delivery (screen tokens, larger type).",
+			"facets" : 
+			{
+				"medium" : "screen",
+				"purpose" : "presentation",
+				"tasks" : []
+			},
 			"id" : "presentation-screen",
 			"page" : 
 			{
@@ -3427,6 +3644,12 @@
 		},
 		{
 			"description" : "16:9 presentation map on the dark token set for dashboards.",
+			"facets" : 
+			{
+				"medium" : "screen",
+				"purpose" : "presentation",
+				"tasks" : []
+			},
 			"id" : "presentation-screen-dark",
 			"page" : 
 			{
@@ -3457,6 +3680,12 @@
 		},
 		{
 			"description" : "Generic continuous remote-sensing result with sequential colorbar.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "exploration",
+				"tasks" : []
+			},
 			"id" : "remote-sensing-result-a4l",
 			"page" : 
 			{
@@ -3488,6 +3717,12 @@
 		{
 			"description" : "Generic continuous remote-sensing result with sequential colorbar.",
 			"extends" : "remote-sensing-result-a4l",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "exploration",
+				"tasks" : []
+			},
 			"id" : "remote-sensing-result-a4p",
 			"page" : 
 			{
@@ -3518,6 +3753,12 @@
 		},
 		{
 			"description" : "Atlas appendix page: per-feature statistics table, top-N ranking and trend sparkline; designed for the atlas page sequence.",
+			"facets" : 
+			{
+				"medium" : "report",
+				"purpose" : "analysis",
+				"tasks" : []
+			},
 			"id" : "report-atlas-appendix-a4l",
 			"page" : 
 			{
@@ -3550,6 +3791,12 @@
 		},
 		{
 			"description" : "Three-page operational report: cover with title block, main map page, and a statistics page with tables, metrics and methodology notes. Page roles drive conditional assembly.",
+			"facets" : 
+			{
+				"medium" : "report",
+				"purpose" : "analysis",
+				"tasks" : []
+			},
 			"id" : "report-multipage-a4l",
 			"page" : 
 			{
@@ -3590,6 +3837,12 @@
 		},
 		{
 			"description" : "Portrait three-page report variant for document-style deliverables (cover, map, statistics).",
+			"facets" : 
+			{
+				"medium" : "report",
+				"purpose" : "analysis",
+				"tasks" : []
+			},
 			"id" : "report-multipage-a4p",
 			"page" : 
 			{
@@ -3625,6 +3878,12 @@
 		{
 			"description" : "A4 portrait report page with section label, map, charts, metadata and disclaimer.",
 			"extends" : "report-page-a4p",
+			"facets" : 
+			{
+				"medium" : "report",
+				"purpose" : "analysis",
+				"tasks" : []
+			},
 			"id" : "report-page-a4l",
 			"page" : 
 			{
@@ -3657,6 +3916,12 @@
 		},
 		{
 			"description" : "A4 portrait report page with section label, map, charts, metadata and disclaimer.",
+			"facets" : 
+			{
+				"medium" : "report",
+				"purpose" : "analysis",
+				"tasks" : []
+			},
 			"id" : "report-page-a4p",
 			"page" : 
 			{
@@ -3689,6 +3954,12 @@
 		},
 		{
 			"description" : "A3 landscape scientific paper page: large map panel with figure caption, provenance and uncertainty note for journal submissions.",
+			"facets" : 
+			{
+				"medium" : "a3",
+				"purpose" : "scientific",
+				"tasks" : []
+			},
 			"id" : "report-scientific-a3l",
 			"page" : 
 			{
@@ -3718,6 +3989,12 @@
 		},
 		{
 			"description" : "16:9 screen briefing page (dark tokens): map with headline metric cards for presentations.",
+			"facets" : 
+			{
+				"medium" : "screen",
+				"purpose" : "analysis",
+				"tasks" : []
+			},
 			"id" : "report-screen-16x9",
 			"page" : 
 			{
@@ -3746,6 +4023,15 @@
 		},
 		{
 			"description" : "Road / transport network map with section label and furniture.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"classification"
+				]
+			},
 			"id" : "road-transport-a4l",
 			"page" : 
 			{
@@ -3777,6 +4063,15 @@
 		{
 			"description" : "SAR backscatter (dB) continuous map with dB colorbar and histogram.",
 			"extends" : "sar-backscatter-a4l",
+			"facets" : 
+			{
+				"medium" : "a3",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"sar"
+				]
+			},
 			"id" : "sar-backscatter-a3l",
 			"page" : 
 			{
@@ -3807,6 +4102,15 @@
 		},
 		{
 			"description" : "SAR backscatter (dB) continuous map with dB colorbar and histogram.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"sar"
+				]
+			},
 			"id" : "sar-backscatter-a4l",
 			"page" : 
 			{
@@ -3837,6 +4141,16 @@
 		},
 		{
 			"description" : "SAR ratio/log-ratio change page: before/after frames with transition legend and uncertainty note.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"change",
+					"sar"
+				]
+			},
 			"id" : "sar-change-a4l",
 			"page" : 
 			{
@@ -3869,6 +4183,15 @@
 		{
 			"description" : "Two-panel scientific publication page with captions, confusion matrix, metric cards and metadata.",
 			"extends" : "scientific-publication-a4l",
+			"facets" : 
+			{
+				"medium" : "a3",
+				"purpose" : "scientific",
+				"tasks" : 
+				[
+					"publication"
+				]
+			},
 			"id" : "scientific-publication-a3l",
 			"page" : 
 			{
@@ -3902,6 +4225,15 @@
 		},
 		{
 			"description" : "Two-panel scientific publication page with captions, confusion matrix, metric cards and metadata.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "scientific",
+				"tasks" : 
+				[
+					"publication"
+				]
+			},
 			"id" : "scientific-publication-a4l",
 			"page" : 
 			{
@@ -3935,6 +4267,15 @@
 		},
 		{
 			"description" : "SAR ship-detection result with detection chart and navigation furniture.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"classification"
+				]
+			},
 			"id" : "ship-detection-a4l",
 			"page" : 
 			{
@@ -3966,6 +4307,15 @@
 		},
 		{
 			"description" : "Slope/aspect paired small multiples with shared legend and distribution chart.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"terrain"
+				]
+			},
 			"id" : "slope-aspect-a4l",
 			"page" : 
 			{
@@ -3999,6 +4349,15 @@
 		},
 		{
 			"description" : "Snow-cover extent map with probability colorbar and furniture.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"water"
+				]
+			},
 			"id" : "snow-cover-a4l",
 			"page" : 
 			{
@@ -4029,6 +4388,15 @@
 		},
 		{
 			"description" : "Soil-moisture product (SAR-derived) with sequential colorbar and series chart.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"water"
+				]
+			},
 			"id" : "soil-moisture-a4l",
 			"page" : 
 			{
@@ -4060,6 +4428,15 @@
 		},
 		{
 			"description" : "Terrain DEM product with elevation colorbar and furniture.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"terrain"
+				]
+			},
 			"id" : "terrain-dem-a4l",
 			"page" : 
 			{
@@ -4091,6 +4468,15 @@
 		{
 			"description" : "Terrain DEM product with elevation colorbar and furniture.",
 			"extends" : "terrain-dem-a4l",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"terrain"
+				]
+			},
 			"id" : "terrain-dem-a4p",
 			"page" : 
 			{
@@ -4121,6 +4507,16 @@
 		},
 		{
 			"description" : "Phenology small multiples (2\u00d72 temporal steps) with shared legend and series chart.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"time-series",
+					"vegetation"
+				]
+			},
 			"id" : "time-series-phenology-a4l",
 			"page" : 
 			{
@@ -4155,6 +4551,16 @@
 		{
 			"description" : "Phenology small multiples (2\u00d72 temporal steps) with shared legend and series chart.",
 			"extends" : "time-series-phenology-a4l",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"time-series",
+					"vegetation"
+				]
+			},
 			"id" : "time-series-phenology-a4p",
 			"page" : 
 			{
@@ -4188,6 +4594,15 @@
 		},
 		{
 			"description" : "Urban / building footprint density map with class chart.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"classification"
+				]
+			},
 			"id" : "urban-building-a4l",
 			"page" : 
 			{
@@ -4219,6 +4634,15 @@
 		{
 			"description" : "Vegetation index (NDVI/EVI) continuous map with sequential colorbar and profile chart.",
 			"extends" : "vegetation-index-a4l",
+			"facets" : 
+			{
+				"medium" : "a3",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"vegetation"
+				]
+			},
 			"id" : "vegetation-index-a3l",
 			"page" : 
 			{
@@ -4250,6 +4674,15 @@
 		},
 		{
 			"description" : "Vegetation index (NDVI/EVI) continuous map with sequential colorbar and profile chart.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"vegetation"
+				]
+			},
 			"id" : "vegetation-index-a4l",
 			"page" : 
 			{
@@ -4282,6 +4715,16 @@
 		{
 			"description" : "Water / flood extent map with probability colorbar and uncertainty note.",
 			"extends" : "water-flood-a4l",
+			"facets" : 
+			{
+				"medium" : "a3",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"disaster",
+					"water"
+				]
+			},
 			"id" : "water-flood-a3p",
 			"page" : 
 			{
@@ -4312,6 +4755,16 @@
 		},
 		{
 			"description" : "Water / flood extent map with probability colorbar and uncertainty note.",
+			"facets" : 
+			{
+				"medium" : "a4",
+				"purpose" : "analysis",
+				"tasks" : 
+				[
+					"disaster",
+					"water"
+				]
+			},
 			"id" : "water-flood-a4l",
 			"page" : 
 			{

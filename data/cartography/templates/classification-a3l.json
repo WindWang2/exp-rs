@@ -1,6 +1,7 @@
 {
   "id": "classification-a3l",
   "version": 1,
+  "facets": {"tasks": ["classification"], "medium": "a3", "purpose": "analysis"},
   "extends": "classification-a4l",
   "description": "Categorical classification result map with legend, class-area chart, scale bar, north arrow and source note.",
   "page": {

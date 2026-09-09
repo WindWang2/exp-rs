@@ -83,3 +83,33 @@ skipped (and reported by `cartography:lint_catalog`) above 512 KB.
 
 - `solution-authoring.md` — how solutions reference styles
 - `docs/cartography/design-tokens.md` — the token sets being referenced
+
+## Platform 6.0 — semantic applicability and token alias chains
+
+### Applicability
+
+A style may declare the data it is semantically FOR:
+
+```jsonc
+"applicability": {
+  "value_domain": { "min": -1, "max": 1 },   // e.g. NDVI
+  "band_count": { "min": 3 },                 // e.g. multiband_color
+  "modalities": ["optical"],
+  "semantics": ["ndvi"]
+}
+```
+
+`checkStyleApplicability(style, dataset)` reports explicit mismatches
+(kind, bands, value-range overlap, modality); `applyStyleSpecToLayer`
+refuses a multiband assignment beyond the real band count. A semantically
+wrong renderer is never silently substituted. The preflight maps these to
+`MAP_STYLE_DATA_MISMATCH`.
+
+### Token alias chains
+
+`token:` references resolve transitively (`token:colors.accent` →
+`token:colors.base` → `#2c7fb8`, up to `kMaxTokenHops` = 8 hops). Cycles
+and over-deep chains are reported and the raw reference survives verbatim —
+no wrong value is invented. Token sets may legally declare references in
+`colors`/`palettes`; `resolveTokenSet` materializes chains once (problems
+surface in `resolved.token_problems`).

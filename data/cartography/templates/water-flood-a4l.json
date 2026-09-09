@@ -1,6 +1,7 @@
 {
   "id": "water-flood-a4l",
   "version": 1,
+  "facets": {"tasks": ["disaster", "water"], "medium": "a4", "purpose": "analysis"},
   "description": "Water / flood extent map with probability colorbar and uncertainty note.",
   "page": {
     "width_mm": 297,

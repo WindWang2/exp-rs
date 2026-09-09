@@ -815,9 +815,11 @@ TEST_CASE( "Scale gates: catalog load, facet search and the solution pipeline st
   CHECK( totalHits > 0 );
   CHECK( searchMs < 20.0 );
 
-  // Compact search responses stay inside the token budget. Measured:
-  // a full compact summary serializes to ~440 chars, so gate the per-hit
-  // cost (500) and the family page (all 5 flood solutions) at 2500.
+  // Compact search responses stay inside the token budget. Platform 5.0
+  // measured ~440 chars per compact summary; Platform 6.0 (Milestone G)
+  // adds explainability — match.reasons per hit plus up to 10 explained
+  // rejections — so the measured page grew to ~3.2 KB. The guards track
+  // that feature while keeping the response a bounded ~800 tokens.
   SolutionQuery flood;
   flood.task = "flood";
   const Json::Value page = searchSolutions( solutions, flood );
@@ -826,8 +828,8 @@ TEST_CASE( "Scale gates: catalog load, facet search and the solution pipeline st
   const std::string serialized = Json::writeString( builder, page );
   const int hits = static_cast<int>( page["items"].size() );
   REQUIRE( hits > 0 );
-  CHECK( serialized.size() / hits <= 500u );
-  CHECK( serialized.size() <= 2500 );
+  CHECK( serialized.size() / hits <= 800u );
+  CHECK( serialized.size() <= 4000 );
 
   // Instantiation pipeline: contract check + recipe compile + template draft.
   const auto instStart = tclock::now();

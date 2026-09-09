@@ -124,7 +124,7 @@ class WorkflowRunCoordinator : public QObject {
     /// held (reads the run; emission is the last thing before unlocking).
     /// Falls back to the run's creation stamp when @a startedMs <= 0
     /// (issue #754). Callers queue across threads (queued connection in
-    /// ProjectContext). (Fresh-build repair: declared four times on master.)
+    /// ProjectContext).
     void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
     void persistRunLocked( WorkflowRun &run );
     /// Terminal roll-up + ArtifactGC + checkpoint retention. Called with

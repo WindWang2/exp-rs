@@ -420,6 +420,9 @@ qt_add_executable(test_mapspec
   test_cartography_templates.cpp
   test_cartography_visual.cpp
   test_platform5.cpp
+  test_platform6.cpp
+  test_platform6_knowledge.cpp
+  test_knowledge_drift.cpp
 )
 target_compile_definitions(test_mapspec PRIVATE
   SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"

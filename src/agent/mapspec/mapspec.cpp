@@ -124,6 +124,48 @@ void checkV2ItemFields( const Json::Value &item, const std::string &id,
     problems.push_back( id + ": page must be a non-negative integer index" );
   if ( item.isMember( "binding" ) && !item["binding"].isObject() )
     problems.push_back( id + ": binding must be an object" );
+  // Platform 6.0 (Milestone C): bounded composite children grammar. Items
+  // carry role-qualified blocks materialized from composite components;
+  // depth-1, unique roles, small budget — furniture structure, not UI trees.
+  if ( item.isMember( "children" ) )
+  {
+    const Json::Value &children = item["children"];
+    if ( !children.isArray() )
+    {
+      problems.push_back( id + ": children must be an array" );
+    }
+    else
+    {
+      if ( static_cast<int>( children.size() ) > 16 )
+        problems.push_back( id + ": children exceed the 16 entry budget" );
+      std::set<std::string> roles;
+      int index = 0;
+      for ( const auto &child : children )
+      {
+        const std::string where = id + ": children[" + std::to_string( index++ ) + "]";
+        if ( !child.isObject() )
+        {
+          problems.push_back( where + " must be an object" );
+          continue;
+        }
+        if ( !child.isMember( "role" ) || !child["role"].isString() ||
+             child["role"].asString().empty() )
+          problems.push_back( where + " needs a non-empty string role" );
+        else if ( !roles.insert( child["role"].asString() ).second )
+          problems.push_back( id + ": duplicate child role '" + child["role"].asString() + "'" );
+        if ( child.isMember( "children" ) )
+          problems.push_back( where + " must not nest children (depth bounded to 1)" );
+        if ( child.isMember( "required" ) && !child["required"].isBool() )
+          problems.push_back( where + ".required must be a boolean" );
+        for ( const char *member : { "content", "overrides" } )
+          if ( child.isMember( member ) && !child[member].isObject() )
+            problems.push_back( where + "." + member + " must be an object" );
+        for ( const char *member : { "source_component", "description" } )
+          if ( child.isMember( member ) && !child[member].isString() )
+            problems.push_back( where + "." + member + " must be a string" );
+      }
+    }
+  }
   if ( item.isMember( "source_component" ) )
   {
     const Json::Value &reference = item["source_component"];
@@ -852,11 +894,32 @@ Json::Value resolveMapSpecConditions( Json::Value &spec, const Json::Value &cont
   Json::Value ledger( Json::arrayValue );
   if ( !spec.isObject() )
     return ledger;
+
+  // Issue #802: conditions evaluate against the caller-supplied runtime
+  // `context`; an embedded `condition_context` is a convenience default that
+  // must never be *required*. Both may be present — the embedded context is
+  // the base, the external context overrides key-by-key.
+  const bool hasEmbedded = spec.isMember( "condition_context" ) &&
+                           spec["condition_context"].isObject();
+  const bool hasExternal = context.isObject();
+  if ( !hasEmbedded && !hasExternal )
+    return ledger;
   if ( !context.isObject() && !context.isNull() )
   {
     if ( errors )
       errors->push_back( "condition context must be an object" );
     return ledger;
+  }
+  Json::Value effective( Json::objectValue );
+  if ( hasEmbedded )
+  {
+    for ( const auto &key : spec["condition_context"].getMemberNames() )
+      effective[key] = spec["condition_context"][key];
+  }
+  if ( hasExternal )
+  {
+    for ( const auto &key : context.getMemberNames() )
+      effective[key] = context[key];
   }
 
   auto record = [ &ledger ]( const std::string &id, const std::string &field,
@@ -871,16 +934,7 @@ Json::Value resolveMapSpecConditions( Json::Value &spec, const Json::Value &cont
     ledger.append( entry );
   };
 
-  Json::Value effectiveContext( Json::objectValue );
-  if ( spec.isMember( "condition_context" ) && spec["condition_context"].isObject() )
-    effectiveContext = spec["condition_context"];
-  if ( context.isObject() )
-  {
-    for ( const auto &key : context.getMemberNames() )
-      effectiveContext[key] = context[key];
-  }
-
-  const Json::Value &ctx = effectiveContext;
+  const Json::Value &ctx = effective;
 
   // 1. Items: visible_if prunes whole items; content_if strips content.
   std::set<std::string> removedIds;

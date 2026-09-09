@@ -1,6 +1,7 @@
 {
   "id": "ship-detection-a4l",
   "version": 1,
+  "facets": {"tasks": ["classification"], "medium": "a4", "purpose": "analysis"},
   "description": "SAR ship-detection result with detection chart and navigation furniture.",
   "page": {
     "width_mm": 297,

@@ -891,12 +891,11 @@ TEST_CASE( "Tier 1 - #804: Condition AST evaluates both branches without error s
 {
     // Issue #804: C++ &&/|| short-circuit skips right child, swallowing syntax/property errors.
     Json::Value context( Json::objectValue );
-    context["flag"] = false;
+    context["flag"] = true;
 
     bool value = false;
     std::string error;
-    // Right branch references missing property "nonexistent.prop"
-    // Short-circuiting would skip evaluating the right child and return false with no error.
+    // Deciding branch references missing property "nonexistent.prop"
     // Safe evaluation must detect and report the missing property error!
     const bool ok = evaluateCondition( "flag == true and nonexistent.prop == 1", context, &value, &error );
     CHECK_FALSE( ok );

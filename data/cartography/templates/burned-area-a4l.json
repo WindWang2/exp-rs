@@ -1,6 +1,7 @@
 {
   "id": "burned-area-a4l",
   "version": 1,
+  "facets": {"tasks": ["change", "disaster"], "medium": "a4", "purpose": "analysis"},
   "description": "Burned-area product with severity colorbar and class chart.",
   "page": {
     "width_mm": 297,

@@ -34,5 +34,29 @@
       "source": "map_ref.renderer",
       "required": true
     }
+  ],
+  "children": [
+    {
+      "role": "title",
+      "required": false,
+      "content": {
+        "title": "图例"
+      }
+    },
+    {
+      "role": "ramp",
+      "required": true,
+      "description": "Continuous color ramp with min/max tick labels."
+    },
+    {
+      "role": "nodata",
+      "required": false,
+      "description": "NoData swatch when the dataset declares one."
+    },
+    {
+      "role": "footer",
+      "required": false,
+      "description": "Units line."
+    }
   ]
 }

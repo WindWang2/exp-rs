@@ -4,6 +4,57 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - 2026-09-08
 
+### Cartography Knowledge, Template & Recipe Platform 6.0 (goal series, ADR 0135)
+- **Declarative correctness fixes**: single-item `fit_content` no longer
+  discarded (#781); QGIS rule-based renderers compile declared rules as
+  siblings under a symbol-less root (plus bounded nested sub-rules) instead
+  of inverting the hierarchy (#782); recipe gate degradation propagates per
+  branch along declared `inputs` wiring instead of a recipe-global flag
+  (#784); condition pruning accepts an external runtime context without the
+  redundant embedded `condition_context` (#802); condition `and`/`or`
+  evaluate both operands so evaluation errors never hide behind
+  short-circuit and bare literals are rejected at validation (#804); token
+  references resolve through multi-hop alias chains with cycle detection
+  (#815).
+- **Bounded constraint-graph solver (#805)**: anchors, size clamps and all
+  13 constraint kinds resolve through normalize -> dependency graph (cycle
+  detection) -> propagation -> bounded relaxation (<= 24 passes) ->
+  collision handling -> scoring -> convergence report. Consistent layouts
+  converge to declaration-order-independent geometry; contradictions and
+  non-convergence are reported with the constraint ids involved; the result
+  adds `constraints_total`, `passes`, `converged`.
+- **Composable components (C)**: bounded role-qualified `children[]`
+  grammar (depth 1, <= 16, unique roles) with materialization onto MapSpec
+  items (item children win per role); shipped legend components model
+  title/classes/ramp/nodata/footer.
+- **Template taxonomy (D)**: closed task/medium/purpose facet vocabularies,
+  parameterized page `variants`, explainable faceted search
+  (`searchTemplates`/`TemplateRegistry::search`, `match.reasons`), all 56
+  shipped templates annotated; `cartography:list_templates` gained
+  `medium`/`purpose`/`keyword` filters.
+- **Style knowledge (E)**: `applicability` surface (value domain, band
+  count, modalities) with `checkStyleApplicability`; multiband band-range
+  refusal; semantically wrong renderers are reported, never silently
+  applied.
+- **Recipe knowledge (F)**: decisionable metadata (capabilities,
+  applicability, presets, limitations, expected_artifacts, quality_gates)
+  validated at load; `when_slots` conjunction gate; declared outputs of
+  gate-dropped steps filtered to keep plans valid; new
+  `harness.flood_mapping` exemplar (optical/SAR/fusion branches).
+- **Solution explainability (G)**: `solution:search` hits carry
+  `match.reasons`; the envelope explains up to 10 rejections with reasons.
+- **Cross-layer drift checks (H)**: `test_knowledge_drift` mechanically
+  validates recipe->operator, solution->recipe/template/style,
+  template->component, style->token-set and children->component references
+  across the shipped catalogs.
+- **Preflight & repair 6.0 (I)**: `MAP_STYLE_REF_UNKNOWN`,
+  `MAP_STYLE_DATA_MISMATCH`, `MAP_UNCERTAINTY_NOTE_MISSING` semantic rule
+  families; solver diagnostics surface through
+  `MAP_CONSTRAINT_UNSATISFIABLE`.
+- **Visual/structural matrix (J)**: constraint-heavy double-compile
+  structural-hash determinism and conditional-branch compile tests join the
+  existing PNG-determinism/geometry fixture harness.
+
 ### Scientific Computing & Data Foundation 6.0 (goal series)
 - **P0/P1 scientific correctness remediation (23 tracked issues)**:
   Minnaert regression slope no longer inverted (k = +m; #773) with
