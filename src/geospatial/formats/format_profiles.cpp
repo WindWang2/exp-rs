@@ -209,6 +209,23 @@ std::vector<FormatProfile> buildDeclaredProfiles()
   }
   {
     FormatProfile p;
+    p.id = "GeoParquet";
+    p.displayName = "GeoParquet";
+    p.family = FormatFamily::Vector;
+    // The GDAL Parquet driver appears only in builds compiled with Arrow
+    // support — capability queries must degrade truthfully elsewhere.
+    p.driverNames = { "Parquet" };
+    p.extensions = { "parquet", "geoparquet" };
+    p.certification = Certification::Accessible;
+    p.supportsRead = true;
+    p.supportsWrite = false;
+    p.supportsStreaming = true;
+    p.notes = "Read-only Accessible profile: the columnar GeoParquet mapping is "
+              "driver-gated; certification requires a proven round-trip on this stack.";
+    profiles.push_back( p );
+  }
+  {
+    FormatProfile p;
     p.id = "CSV-XY";
     p.displayName = "CSV (XY points)";
     p.family = FormatFamily::Vector;

@@ -221,6 +221,10 @@ if(WIN32)
   target_link_libraries(test_io_stac_client PRIVATE ws2_32)
 endif()
 
+# 7.0 modern vector interop audit (field types / null / collections / CRS /
+# streaming / driver-gated GeoParquet).
+sicnu_add_io_test(test_io_vector_interop)
+
 # io:* operator family suite — rides the operator chain (Qt + sicnu_operators).
 sicnu_add_io_test(test_io_operators)
 target_link_libraries(test_io_operators PRIVATE Qt6::Core sicnu_operators)
