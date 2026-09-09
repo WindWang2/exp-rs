@@ -267,9 +267,9 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
   const std::vector<std::string> stagedSidecars = sidecarsFor( stagedMainPath );
   const std::vector<std::string> targetSidecars = sidecarsFor( targetMainPath );
   std::vector<bool> hadTarget( targetSidecars.size(), false );
-  std::vector<std::string> published;
-  const std::string mainBackup = targetMainPath + ".bak";
   const bool hadMainTarget = fileExists( targetMainPath );
+  const std::string mainBackup = targetMainPath + ".bak";
+  std::vector<std::string> published;
   auto cleanup = [ & ]( const std::string &failedName ) {
     for ( const std::string &done : published )
       removeFileQuiet( done );
@@ -292,6 +292,11 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
         removeFileQuiet( targetSidecars[i] );
         moveFileQuiet( backup, targetSidecars[i] );
       }
+    }
+    if ( hadMainTarget && fileExists( mainBackup ) )
+    {
+      removeFileQuiet( targetMainPath );
+      moveFileQuiet( mainBackup, targetMainPath );
     }
     // ...then drop any leftover backup copies.
     removeFileQuiet( mainBackup );

@@ -12,6 +12,14 @@
 #include "processing/algorithms/satellite_products.h"
 #include "processing/algorithms/spectral_indices.h"
 #include "processing/algorithms/math_utils.h"
+
+namespace SpectralIndices {
+bool evi(const float *nir, const float *red, const float *blue, float *out, size_t count, bool isScaled);
+bool savi(const float *nir, const float *red, float *out, size_t count, bool isScaled);
+bool msavi(const float *nir, const float *red, float *out, size_t count, bool isScaled);
+bool evi2(const float *nir, const float *red, float *out, size_t count, bool isScaled);
+bool bai(const float *red, const float *nir, float *out, size_t count, bool isScaled);
+}
 #include "processing/algorithms/temporal/temporal_band_roles.h"
 #include "processing/contracts/scientific_contracts.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -325,6 +333,47 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                         + " (resolved by "
                         + numericDomain.resolvedBy.toStdString() + ")"
                         + "; dividing the participating bands by it");
+    }
+
+    // Issue #801: Determine scale regime once at the dataset level before entering streamBlocks.
+    // When applyNumericScale is true, makeSource(..., true) divides by numericScale,
+    // bringing the data to unit reflectance [0, 1] (isScaledDataset = false).
+    // When applyNumericScale is false, check if the dataset samples exceed 5.0f (DN scale).
+    bool isScaledDataset = false;
+    if (!applyNumericScale) {
+        float maxVal = 0.0f;
+        const int sampleW = std::min(width, 64);
+        const int sampleH = std::min(height, 64);
+        std::vector<float> sampleBuf(static_cast<size_t>(sampleW) * sampleH);
+        const std::vector<std::pair<int, int>> sampleLocs = {
+            { 0, 0 },
+            { width / 2 - sampleW / 2, height / 2 - sampleH / 2 },
+            { std::max(0, width - sampleW), std::max(0, height - sampleH) },
+            { 0, std::max(0, height - sampleH) },
+            { std::max(0, width - sampleW), 0 }
+        };
+        for (int b : { nirBand, redBand }) {
+            if (b >= 1 && b <= bandCount) {
+                bool hasNodata = false;
+                const double nodataVal = ds.bandNoDataValue(b, &hasNodata);
+                const float nodataF = hasNodata ? static_cast<float>(nodataVal) : std::numeric_limits<float>::quiet_NaN();
+                for (const auto &loc : sampleLocs) {
+                    const int x = std::max(0, std::min(loc.first, width - sampleW));
+                    const int y = std::max(0, std::min(loc.second, height - sampleH));
+                    if (ds.readBandWindow(b, x, y, sampleW, sampleH, sampleBuf.data())) {
+                        for (float v : sampleBuf) {
+                            if (std::isfinite(v) && (!hasNodata || v != nodataF) && v != -9999.0f && v != 65535.0f && v > 0.0f) {
+                                maxVal = std::max(maxVal, v);
+                                if (maxVal > 5.0f) break;
+                            }
+                        }
+                    }
+                    if (maxVal > 5.0f) break;
+                }
+            }
+            if (maxVal > 5.0f) break;
+        }
+        isScaledDataset = (maxVal > 5.0f);
     }
 
     // Streaming execution (#664, ADR 0124 grade bit-exact): the raster is

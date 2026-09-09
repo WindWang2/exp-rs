@@ -724,6 +724,7 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
 
 std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   const auto it = m_impl->findRecord( id );
   if ( it == m_impl->records.end() )
     return std::nullopt;
@@ -732,6 +733,7 @@ std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const
 
 QVector<AssetSnapshot> DataManager::assets( const AssetQuery &query ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   QVector<AssetSnapshot> snapshots;
   snapshots.reserve( m_impl->records.size() );
   for ( const Impl::AssetRecord &record : m_impl->records )
@@ -750,6 +752,7 @@ QVector<AssetSnapshot> DataManager::assets( const AssetQuery &query ) const
 
 std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   if ( path.trimmed().isEmpty() )
     return std::nullopt;
 
@@ -799,11 +802,13 @@ std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) cons
 
 quint64 DataManager::catalogGeneration() const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   return m_impl->catalogGeneration;
 }
 
 std::optional<DerivationRecord> DataManager::provenance( AssetId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   const auto it = m_impl->findRecord( id );
   if ( it == m_impl->records.end() )
     return std::nullopt;
@@ -812,6 +817,7 @@ std::optional<DerivationRecord> DataManager::provenance( AssetId id ) const
 
 QVector<AssetId> DataManager::derivedFrom( AssetId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   QVector<AssetId> result;
   const auto it = m_impl->findRecord( id );
   if ( it == m_impl->records.end() || !it->derivation )
@@ -823,6 +829,7 @@ QVector<AssetId> DataManager::derivedFrom( AssetId id ) const
 
 QVector<AssetId> DataManager::derivedOutputsOf( AssetId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   QVector<AssetId> result;
   for ( const auto &record : m_impl->records )
   {
@@ -842,6 +849,7 @@ QVector<AssetId> DataManager::derivedOutputsOf( AssetId id ) const
 
 QVector<AssetId> DataManager::derivedOutputsOfCollection( CollectionId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   QVector<AssetId> result;
   const auto colAssetId = AssetId::fromString( id.toString() );
   for ( const auto &record : m_impl->records )
@@ -1078,6 +1086,7 @@ Result<void> DataManager::rollbackEdit( AssetId id )
 
 int DataManager::leaseCount( AssetId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   return static_cast<int>(
     std::count_if( m_impl->leases.begin(), m_impl->leases.end(),
                    [&]( const Impl::LeaseRecord &lease ) {
@@ -1088,6 +1097,7 @@ int DataManager::leaseCount( AssetId id ) const
 
 QVector<LeaseRef> DataManager::leases( AssetId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   QVector<LeaseRef> result;
   for ( const Impl::LeaseRecord &lease : m_impl->leases )
   {
@@ -1103,6 +1113,7 @@ QVector<LeaseRef> DataManager::leases( AssetId id ) const
 
 bool DataManager::hasActiveEditLease( AssetId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   for ( const Impl::LeaseRecord &lease : m_impl->leases )
   {
     if ( lease.control->assetId == id && lease.control->active &&
@@ -1114,6 +1125,7 @@ bool DataManager::hasActiveEditLease( AssetId id ) const
 
 UnloadPlan DataManager::planUnload( AssetId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   AssetRevision revision;
   const auto recordIt = m_impl->findRecord( id );
   if ( recordIt != m_impl->records.end() )
@@ -1192,6 +1204,7 @@ Result<void> DataManager::addStrongDependency( AssetId dependent, AssetId input 
 
 QVector<AssetId> DataManager::strongDependenciesOf( AssetId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   QVector<AssetId> inputs;
   for ( const Impl::DependencyEdge &edge : m_impl->dependencyEdges )
   {
@@ -1203,6 +1216,7 @@ QVector<AssetId> DataManager::strongDependenciesOf( AssetId id ) const
 
 QVector<AssetId> DataManager::strongDependentsOf( AssetId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   QVector<AssetId> dependents;
   for ( const Impl::DependencyEdge &edge : m_impl->dependencyEdges )
   {
@@ -1318,6 +1332,7 @@ Result<AssetId> DataManager::createVirtualRaster(
 std::optional<VirtualRasterRecipe> DataManager::virtualRasterRecipe(
   AssetId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   const auto recordIt = m_impl->findRecord( id );
   if ( recordIt == m_impl->records.end() )
     return std::nullopt;
@@ -2036,6 +2051,7 @@ DataManager::restoreCollection( CollectionId id, const CollectionCreateRequest &
 
 std::optional<CollectionSnapshot> DataManager::collection( CollectionId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   const auto it = m_impl->findCollection( id );
   if ( it == m_impl->collections.end() )
     return std::nullopt;
@@ -2055,6 +2071,7 @@ std::optional<CollectionSnapshot> DataManager::collection( CollectionId id ) con
 
 QVector<CollectionId> DataManager::collections() const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   QVector<CollectionId> ids;
   ids.reserve( m_impl->collections.size() );
   for ( const Impl::CollectionRecord &c : m_impl->collections )
@@ -2127,6 +2144,7 @@ DataManager::restoreTemporalCollection( CollectionId id, quint64 revision,
 
 std::optional<TemporalCollectionRecord> DataManager::temporalCollection( CollectionId id ) const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   const auto it = m_impl->findTemporalCollection( id );
   if ( it == m_impl->temporalCollections.end() )
     return std::nullopt;
@@ -2142,6 +2160,7 @@ std::optional<TemporalCollectionRecord> DataManager::temporalCollection( Collect
 
 QVector<TemporalCollectionRecord> DataManager::temporalCollections() const
 {
+  Q_ASSERT( QThread::currentThread() == thread() );
   QVector<TemporalCollectionRecord> snapshots;
   snapshots.reserve( m_impl->temporalCollections.size() );
   for ( const Impl::TemporalCollectionRecord_ &c : m_impl->temporalCollections )

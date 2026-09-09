@@ -19,6 +19,12 @@
 #include "workbench/layer_sections.h"
 #include "workbench/selection_context.h"
 #include "workbench/workbench_host.h"
+#include "georeferencer/qgsgeoref_shell_window.h"
+#include "georeferencer/qgsgeoreferencermainwindow.h"
+#include "georeferencer/qgsgeoref_image_to_map_window.h"
+#ifdef SICNU_HAS_CLASSIFY
+#include "classification/qgsclassificationmainwindow.h"
+#endif
 
 #include <QAction>
 #include <QDockWidget>
@@ -68,28 +74,85 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
         new sicnu::app::MapWorkbench( m_canvasStack, m_workbenchHost ) );
 
     // External session benches wrap the existing lazy-open slots. No session
-    // logic moves here (Milestone H owns the shared session contract). The
-    // openers are void (slots already show/raise); lifetime tracking uses
-    // the getters where the shell holds a typed window pointer.
-    m_workbenchHost->registerWorkbench( new sicnu::app::ExternalWindowWorkbench(
+    // logic moves here (Milestone H owns the shared session contract).
+    auto *classifyWb = new sicnu::app::ExternalWindowWorkbench(
         QStringLiteral( "classify" ), tr( "分类工作区" ), QStringLiteral( "su_ervised" ),
-        [this] { openClassificationWindow(); }, m_workbenchHost ) );
+        [this] { openClassificationWindow(); },
+        [this]() -> QWidget * { return m_classifyWindow; },
+        [this]() -> bool {
+#ifdef SICNU_HAS_CLASSIFY
+            return m_classifyWindow ? m_classifyWindow->isSessionDirty() : false;
+#else
+            return false;
+#endif
+        },
+        [this]() -> bool {
+            if ( m_classifyWindow )
+            {
+                m_classifyWindow->close();
+                return !m_classifyWindow->isVisible();
+            }
+            return true;
+        },
+        m_workbenchHost );
+    m_workbenchHost->registerWorkbench( classifyWb );
 
-    m_workbenchHost->registerWorkbench( new sicnu::app::ExternalWindowWorkbench(
+    auto *georefI2IWb = new sicnu::app::ExternalWindowWorkbench(
         QStringLiteral( "georef-i2i" ), tr( "影像对影像配准" ), QStringLiteral( "coregistr_tion" ),
-        [this] { openGeorefImageToImage(); }, m_workbenchHost ) );
+        [this] { openGeorefImageToImage(); },
+        [this]() -> QWidget * { return m_georefI2I; },
+        nullptr,
+        [this]() -> bool {
+            if ( m_georefI2I )
+            {
+                m_georefI2I->close();
+                return !m_georefI2I->isVisible();
+            }
+            return true;
+        },
+        m_workbenchHost );
+    m_workbenchHost->registerWorkbench( georefI2IWb );
 
-    m_workbenchHost->registerWorkbench( new sicnu::app::ExternalWindowWorkbench(
+    auto *georefI2MWb = new sicnu::app::ExternalWindowWorkbench(
         QStringLiteral( "georef-i2m" ), tr( "影像对地图配准" ), QStringLiteral( "geocorrection" ),
-        [this] { openGeorefImageToMap(); }, m_workbenchHost ) );
+        [this] { openGeorefImageToMap(); },
+        [this]() -> QWidget * { return m_georefI2M; },
+        nullptr,
+        [this]() -> bool {
+            if ( m_georefI2M )
+            {
+                m_georefI2M->close();
+                return !m_georefI2M->isVisible();
+            }
+            return true;
+        },
+        m_workbenchHost );
+    m_workbenchHost->registerWorkbench( georefI2MWb );
 
-    m_workbenchHost->registerWorkbench( new sicnu::app::ExternalWindowWorkbench(
+    auto *obiaWb = new sicnu::app::ExternalWindowWorkbench(
         QStringLiteral( "obia" ), tr( "对象级分类" ), QStringLiteral( "seg_ent_tion" ),
-        [this] { openObiaWindow(); }, m_workbenchHost ) );
+        [this] { openObiaWindow(); },
+        [this]() -> QWidget * { return m_obiaWindow; },
+        nullptr,
+        [this]() -> bool {
+            if ( m_obiaWindow )
+            {
+                m_obiaWindow->close();
+                return !m_obiaWindow->isVisible();
+            }
+            return true;
+        },
+        m_workbenchHost );
+    m_workbenchHost->registerWorkbench( obiaWb );
 
-    m_workbenchHost->registerWorkbench( new sicnu::app::ExternalWindowWorkbench(
+    auto *layoutWb = new sicnu::app::ExternalWindowWorkbench(
         QStringLiteral( "layout" ), tr( "布局设计" ), QStringLiteral( "print_l_yout" ),
-        [this] { newLayout(); }, m_workbenchHost ) );
+        [this] { newLayout(); },
+        nullptr,
+        nullptr,
+        nullptr,
+        m_workbenchHost );
+    m_workbenchHost->registerWorkbench( layoutWb );
 
     m_workbenchHost->activate( QStringLiteral( "map" ) );
 

@@ -200,14 +200,6 @@ std::size_t RasterReader::windowByteBudget( const RasterMetadata &metadata, cons
   return pixels * bandCount * kDoubleSize;
 }
 
-std::vector<double> RasterReader::readWindow( const std::vector<int> &bands, const RasterWindow &window ) const
-{
-  // #808: the plain entry point is budget-bounded — an oversized window is a
-  // typed error before allocation, not an uncaught bad_alloc. Callers that
-  // genuinely need more must stream through bounded windows or readBlock.
-  return readWindow( bands, window, kDefaultWindowBudgetBytes );
-}
-
 std::vector<double> RasterReader::readWindow( const std::vector<int> &bands, const RasterWindow &window,
                                               std::size_t maxBytes ) const
 {
@@ -233,12 +225,14 @@ std::vector<double> RasterReader::readWindow( const std::vector<int> &bands, con
   if ( effectiveBands.empty() )
     throw GeoError( ErrorCode::InvalidArgument, "readWindow: raster has no bands" );
 
+  const std::size_t effectiveMaxBytes = ( maxBytes > 0 ) ? maxBytes : kDefaultWindowBudgetBytes;
   const std::size_t requiredBytes = windowByteBudget( mMetadata, window, effectiveBands );
-  if ( requiredBytes > maxBytes )
+  if ( requiredBytes > effectiveMaxBytes )
   {
     Json::Value details;
     details["required_bytes"] = static_cast<Json::UInt64>( requiredBytes );
-    details["budget_bytes"] = static_cast<Json::UInt64>( maxBytes );
+    details["budget_bytes"] = static_cast<Json::UInt64>( effectiveMaxBytes );
+    details["max_bytes"] = static_cast<Json::UInt64>( effectiveMaxBytes );
     details["hint"] = "reduce the window or stream with bounded tiles";
     throw GeoError( ErrorCode::Unsupported, "readWindow: window read exceeds the byte budget", details );
   }

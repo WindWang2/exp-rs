@@ -259,3 +259,34 @@ TEST_CASE( "a failed group publish restores the previous main file and"
       fs::path( target ).replace_extension( extension ).string() + ".bak" ) );
   CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( target + ".bak" ) );
 }
+
+TEST_CASE( "publishStagedGroup restores targetMainPath on failure", "[io][atomic][group][issue791]" )
+{
+  const std::string dir = scratch( "main_rollback" );
+  const std::string targetMain = ( fs::path( dir ) / "main.shp" ).string();
+  const std::string stagedMain = ( fs::path( dir ) / "staged.shp" ).string();
+
+  // Create an initial good main file and sidecar
+  {
+    std::ofstream out( targetMain );
+    out << "initial_main_content";
+  }
+  {
+    std::ofstream out( ( fs::path( dir ) / "main.dbf" ).string() );
+    out << "initial_dbf_content";
+  }
+
+  // Create staged main file
+  {
+    std::ofstream out( stagedMain );
+    out << "new_staged_content";
+  }
+
+  sicnu::geo::atomic_fs::publishStagedGroup( stagedMain, targetMain );
+  CHECK( sicnu::geo::atomic_fs::fileExists( targetMain ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( targetMain + ".bak" ) );
+  std::ifstream in( targetMain );
+  std::string content;
+  in >> content;
+  CHECK( content == "new_staged_content" );
+}

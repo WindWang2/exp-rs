@@ -27,11 +27,13 @@ namespace SpectralIndices
      * EVI = 2.5 * (NIR - Red) / (NIR + 6*Red - 7.5*Blue + 1)
      */
     bool evi(const float *nir, const float *red, const float *blue, float *out, size_t count);
+    bool evi(const float *nir, const float *red, const float *blue, float *out, size_t count, bool isScaled);
 
     /**
      * SAVI = (NIR - Red) / (NIR + Red + L) * (1 + L), where L=0.5
      */
     bool savi(const float *nir, const float *red, float *out, size_t count);
+    bool savi(const float *nir, const float *red, float *out, size_t count, bool isScaled);
 
     /**
      * NDWI = (Green - NIR) / (Green + NIR)
@@ -76,12 +78,14 @@ namespace SpectralIndices
      * (Qi et al. 1994, modified soil-adjusted vegetation index; unit-reflectance domain).
      */
     bool msavi(const float *nir, const float *red, float *out, size_t count);
+    bool msavi(const float *nir, const float *red, float *out, size_t count, bool isScaled);
 
     /**
      * EVI2 = 2.5 * (NIR - Red) / (NIR + 2.4*Red + 1)
      * (two-band EVI, Jiang et al. 2008; unit-reflectance constants, EVI regime rules).
      */
     bool evi2(const float *nir, const float *red, float *out, size_t count);
+    bool evi2(const float *nir, const float *red, float *out, size_t count, bool isScaled);
 
     /**
      * BAI = 1 / ((0.1 - Red)^2 + (0.06 - NIR)^2)
@@ -89,6 +93,7 @@ namespace SpectralIndices
      * output that grows as bands approach the anchors).
      */
     bool bai(const float *red, const float *nir, float *out, size_t count);
+    bool bai(const float *red, const float *nir, float *out, size_t count, bool isScaled);
 
     /**
      * UI = (SWIR2 - NIR) / (SWIR2 + NIR) (urban index, Kawamura et al. 1996).

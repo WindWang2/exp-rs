@@ -268,7 +268,11 @@ ProbeResult probeResource( const std::string &path, const ProbeOptions &options 
       // Identification of remote resources can require network round trips
       // that Identify skips for some drivers; fall back to a read-only open
       // (still metadata-only — no pixel access).
+      CPLSetThreadLocalConfigOption( "GDAL_HTTP_TIMEOUT", "10" );
+      CPLSetThreadLocalConfigOption( "GDAL_HTTP_CONNECTTIMEOUT", "5" );
       GDALDatasetH dataset = GDALOpenEx( gdalPath.c_str(), GDAL_OF_RASTER | GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr );
+      CPLSetThreadLocalConfigOption( "GDAL_HTTP_TIMEOUT", nullptr );
+      CPLSetThreadLocalConfigOption( "GDAL_HTTP_CONNECTTIMEOUT", nullptr );
       if ( dataset )
       {
         driver = GDALGetDatasetDriver( dataset );
@@ -301,6 +305,7 @@ ProbeResult probeResource( const std::string &path, const ProbeOptions &options 
       }
       if ( !profile || !matchedByDriver )
       {
+        profile = nullptr;
         // Fall back: first profile whose driver list contains this driver.
         for ( const FormatProfile &candidate : registry.profiles() )
         {
@@ -308,7 +313,7 @@ ProbeResult probeResource( const std::string &path, const ProbeOptions &options 
           {
             if ( name == result.format.driverName )
             {
-              profile = &candidate;
+              profile = registry.find( candidate.id );
               matchedByDriver = true;
               break;
             }

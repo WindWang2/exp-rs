@@ -475,6 +475,9 @@ void ActiveViewHost::removeSelectedDisplayLayers()
     if ( !m_confirmationFn( detail ) )
         return;
 
+    if ( m_mapCanvas )
+        m_mapCanvas->stopRendering();
+
     for ( QgsMapLayer *layer : selected )
     {
         const std::optional<sicnu::display::DisplayLayerId> displayLayerId =
@@ -544,12 +547,16 @@ void ActiveViewHost::refreshCanvasLayers()
     if ( !m_mapCanvas )
         return;
 
-    // TODO(P1-M2): This reads the global project tree checked layers, which is
-    // correct for the main view but wrong once secondary DisplayManager views
-    // exist. The active view's layer visibility should come from the view's own
-    // QgsLayerTree (via QgisDisplayManager), not QgsProject::checkedLayers().
-    QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
-    QList<QgsMapLayer *> layers = root->checkedLayers();
+    QgsLayerTree *root = nullptr;
+    if ( m_displayManager && !activeViewId().isNull() )
+    {
+        root = m_displayManager->layerTree( activeViewId() );
+    }
+    if ( !root )
+    {
+        root = QgsProject::instance()->layerTreeRoot();
+    }
+    QList<QgsMapLayer *> layers = root ? root->checkedLayers() : QList<QgsMapLayer *>();
     m_mapCanvas->setLayers( layers );
 
     if ( m_overviewCanvas )

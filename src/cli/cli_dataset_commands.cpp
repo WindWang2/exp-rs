@@ -178,9 +178,9 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
             data["status"] =
                 sicnu::dataset::datasetVersionStatusToString( version->status() ).toStdString();
             data["fingerprint"] = version->fingerprint().toStdString();
-            data["sample_count"] = store.sampleCount(
+            data["sample_count"] = static_cast<Json::Int64>( store.sampleCount(
                 sicnu::dataset::DatasetVersionId::fromString( options.versionId )
-                    .value_or( sicnu::dataset::DatasetVersionId{} ) );
+                    .value_or( sicnu::dataset::DatasetVersionId{} ) ) );
         }
         else if ( !options.datasetId.isEmpty() )
         {
@@ -209,7 +209,7 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
             const auto page = store.listDatasets( 0, sicnu::dataset::DatasetStore::kMaxPageSize );
             if ( !page )
                 return fail( io, "dataset", "listing failed" );
-            data["total"] = qint64( page.value().first );
+            data["total"] = static_cast<Json::Int64>( page.value().first );
             Json::Value rows( Json::arrayValue );
             for ( const QVariantMap &row : page.value().second )
             {
@@ -292,7 +292,7 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
             offset += page.value().second.size();
         }
         Json::Value data( Json::objectValue );
-        data["sample_count"] = qint64( count );
+        data["sample_count"] = static_cast<Json::Int64>( count );
         data["by_group"] = byGroup;
         return io.finish( true, "dataset", data, 0 );
     }

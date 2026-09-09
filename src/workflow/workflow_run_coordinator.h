@@ -94,6 +94,8 @@ class WorkflowRunCoordinator : public QObject {
     /// Emitted on tracked-run lifecycle transitions — Running when a tracked
     /// pipeline starts, the real terminal state (Completed/Failed/Canceled)
     /// at finalize, and Interrupted when crash recovery reconciles the run.
+    /// Mirrored after every persisted transition so terminal/Interrupted
+    /// entries carry truthful started/finished ms (issue #754).
     /// Governance (WorkspaceService::recordRun) subscribes so the runs index
     /// reflects what actually happened instead of fabricating states.
     /// Delivery is a Qt signal (lifetime-managed, queueable) because the
@@ -124,8 +126,6 @@ class WorkflowRunCoordinator : public QObject {
     /// (issue #754). Callers queue across threads (queued connection in
     /// ProjectContext). (Fresh-build repair: declared four times on master.)
     void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
-    /// Emits runStateChanged with the mutex held; callers queue across
-    /// threads (queued connection in ProjectContext).
     void persistRunLocked( WorkflowRun &run );
     /// Terminal roll-up + ArtifactGC + checkpoint retention. Called with
     /// m_mutex held when the last step of a tracked run went terminal.

@@ -104,9 +104,11 @@ Json::Value RsSarTerrainMasksOperator::schema() const {
     props["dem"] = makeRasterParam( "dem", "DEM raster" );
     props["output"] = makeOutputParam( "output", "Output raster path", "tif" );
     props["product"] = makeEnumParam( "product", "Terrain geometry product", s_products, "layover_shadow_mask" );
+    const std::vector<std::string> s_lookDirs = { "right", "left" };
     props["incidence"] = makeNumberParam( "incidence", "Incidence angle in degrees from vertical (0, 90); required — no scene-metadata fallback is consulted", 35.0 );
-    props["heading"] = makeNumberParam( "heading", "Legacy name kept for compatibility: this is the ANTENNA LOOK AZIMUTH (boresight ground azimuth, degrees clockwise from north [0, 360)), not the flight heading — a right-looking antenna look azimuth is flight heading + 90 (#785). No scene-metadata fallback is consulted", 0.0 );
-    props["lookAzimuthDeg"] = makeNumberParam( "lookAzimuthDeg", "Explicit antenna look azimuth in degrees clockwise from north; when present overrides the legacy 'heading' parameter", 0.0 );
+    props["heading"] = makeNumberParam( "heading", "Flight heading in degrees clockwise from north [0, 360); required — no scene-metadata fallback is consulted", 0.0 );
+    props["lookDirection"] = makeEnumParam( "lookDirection", "Antenna look direction relative to flight heading ('right' or 'left')", s_lookDirs, "right" );
+    props["lookAzimuthDeg"] = makeNumberParam( "lookAzimuthDeg", "Explicit antenna look azimuth in degrees clockwise from north; when present overrides heading + lookDirection", 0.0 );
 
     Json::Value outputs( Json::objectValue );
     outputs["output"] = makeRasterParam( "output", "Output raster path" );
@@ -196,18 +198,25 @@ Json::Value RsSarTerrainMasksOperator::run( const Json::Value &params, RSOperato
     // product is uncommon, so callers normally pass the SAR scene's values).
     double incidence = getDouble( params, "incidence", 35.0 );
     double heading = getDouble( params, "heading", 0.0 );
-    // #785 disambiguation: 'heading' always meant the look azimuth here; the
-    // canonical 'lookAzimuthDeg' override makes that explicit and lets
-    // callers deriving the boresight from flight heading + antenna side
-    // (lookAzimuthFromHeading) pass it without the legacy name.
+    const std::vector<std::string> s_lookDirs = { "right", "left" };
+    const std::string lookDirection = getEnum( params, "lookDirection", s_lookDirs, "right" );
+
+    double lookAzimuth = ( lookDirection == "left" ) ? ( heading - 90.0 ) : ( heading + 90.0 );
     if ( params.isMember( "lookAzimuthDeg" ) && params["lookAzimuthDeg"].isNumeric() )
     {
-        const double lookAzimuth = params["lookAzimuthDeg"].asDouble();
+        lookAzimuth = params["lookAzimuthDeg"].asDouble();
         if ( !std::isfinite( lookAzimuth ) )
             throw RSOperatorError( ErrorCode::InvalidParameter,
                                    "lookAzimuthDeg must be a finite angle in degrees" );
-        heading = lookAzimuth;
     }
+    else if ( params.isMember( "lookAzimuth" ) && params["lookAzimuth"].isNumeric() )
+        lookAzimuth = params["lookAzimuth"].asDouble();
+    else if ( params.isMember( "look_azimuth" ) && params["look_azimuth"].isNumeric() )
+        lookAzimuth = params["look_azimuth"].asDouble();
+
+    lookAzimuth = std::fmod( lookAzimuth, 360.0 );
+    if ( lookAzimuth < 0.0 )
+        lookAzimuth += 360.0;
 
     if ( !( incidence > 0.0 && incidence < 90.0 ) )
         throw RSOperatorError( ErrorCode::InvalidParameter,
@@ -290,7 +299,7 @@ Json::Value RsSarTerrainMasksOperator::run( const Json::Value &params, RSOperato
                 // contracts dz/dNorth — negate it (#785 review; the
                 // pre-6.0 masks were mirrored along every N-S look).
                 const sicnu::sar::TerrainGeometryResult geo =
-                    sicnu::sar::terrainGeometry( dzdx, -dzdy, incidence, heading );
+                    sicnu::sar::terrainGeometry( dzdx, -dzdy, incidence, lookAzimuth );
                 if ( byteMask )
                     outB[idx] = static_cast<uint8_t>( static_cast<int>( geo.maskClass ) );
                 else
@@ -319,6 +328,7 @@ Json::Value RsSarTerrainMasksOperator::run( const Json::Value &params, RSOperato
     out.setMetadataItem( QLatin1String( "SICNU_SAR_GEOMETRY_PRODUCT" ), QString::fromStdString( product ) );
     out.setMetadataItem( QLatin1String( sicnu::sar::kIncidenceKey ), QString::number( incidence ) );
     out.setMetadataItem( QLatin1String( sicnu::sar::kHeadingKey ), QString::number( heading ) );
+    out.setMetadataItem( QStringLiteral( "SICNU_SAR_LOOK_AZIMUTH_DEG" ), QString::number( lookAzimuth ) );
 
     QString closeError;
     if ( !out.closeWithError( &closeError ) )
@@ -329,7 +339,8 @@ Json::Value RsSarTerrainMasksOperator::run( const Json::Value &params, RSOperato
     result["product"] = product;
     result["incidenceDeg"] = incidence;
     result["headingDeg"] = heading;
-    result["lookAzimuthDeg"] = heading; // canonical name for the look azimuth (#785)
+    result["lookAzimuthDeg"] = lookAzimuth;
+    result["lookDirection"] = lookDirection;
     result["width"] = width;
     result["height"] = height;
     context.reportProgress( 1.0, "SAR terrain masks complete" );

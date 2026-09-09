@@ -16,6 +16,7 @@ using Catch::Approx;
 #include <gdal_priv.h>
 
 #include <filesystem>
+#include <mutex>
 #include <fstream>
 #include <string>
 

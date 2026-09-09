@@ -191,3 +191,28 @@ TEST_CASE( "CommandRegistry: definitions are queryable and sorted", "[command_re
   REQUIRE( registry.definition( "missing" ) == nullptr );
   REQUIRE( registry.definition( "a.first" )->title.startsWith( QStringLiteral( "命令" ) ) );
 }
+
+TEST_CASE( "CommandRegistry: multiple commands can each install canonical shortcuts (#792, #794)",
+           "[command_registry][contract]" )
+{
+  ensureApp();
+  sicnu::app::CommandRegistry registry;
+
+  CommandDefinition c1 = simple( "cmd.one" );
+  c1.shortcut = QKeySequence( QStringLiteral( "Ctrl+1" ) );
+  REQUIRE( registry.registerCommand( c1 ) );
+
+  CommandDefinition c2 = simple( "cmd.two" );
+  c2.shortcut = QKeySequence( QStringLiteral( "Ctrl+2" ) );
+  REQUIRE( registry.registerCommand( c2 ) );
+
+  // Both should be able to install their canonical shortcut without assert
+  QAction *act1 = registry.action( QStringLiteral( "cmd.one" ), true );
+  REQUIRE( act1 );
+  CHECK( act1->shortcut() == QKeySequence( QStringLiteral( "Ctrl+1" ) ) );
+
+  QAction *act2 = registry.action( QStringLiteral( "cmd.two" ), true );
+  REQUIRE( act2 );
+  CHECK( act2->shortcut() == QKeySequence( QStringLiteral( "Ctrl+2" ) ) );
+}
+

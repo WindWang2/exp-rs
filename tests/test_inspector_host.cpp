@@ -4,6 +4,7 @@
 #include "app/workbench/inspector_host.h"
 
 #include <QStackedWidget>
+#include <QTabWidget>
 #include <QApplication>
 #include <QLabel>
 
@@ -113,6 +114,10 @@ TEST_CASE( "InspectorHost: unsupported→cancel; empty→placeholder without sta
 
   auto *placeholder = host.findChild<QLabel *>( QStringLiteral( "rsInspectorPlaceholder" ) );
   REQUIRE( placeholder );
+
+  // Issue #780 / #777: Re-selection after unsupported snapshot must not crash or UAF
+  host.setSnapshot( snapRaster( true ) );
+  REQUIRE( general.populates == 2 );
 }
 
 TEST_CASE( "InspectorHost: multi-section ordering by order()/id", "[inspector_host]" )
@@ -130,3 +135,27 @@ TEST_CASE( "InspectorHost: multi-section ordering by order()/id", "[inspector_ho
   REQUIRE( sections.front()->sectionId() == QLatin1String( "general" ) );
   REQUIRE( sections.back()->sectionId() == QLatin1String( "metadata" ) );
 }
+
+TEST_CASE( "InspectorHost: switching tabs lazily populates secondary sections (#812)",
+           "[inspector_host][behavior]" )
+{
+  ensureApp();
+  sicnu::app::InspectorHost host;
+  FakeRasterSection sec1( QStringLiteral( "sec1" ), 1 );
+  FakeRasterSection sec2( QStringLiteral( "sec2" ), 2 );
+  host.registerSection( &sec1 );
+  host.registerSection( &sec2 );
+
+  host.setSnapshot( snapRaster() );
+  REQUIRE( sec1.populates == 1 );
+  REQUIRE( sec2.populates == 0 ); // secondary tab not yet shown, lazy
+
+  auto *tabs = host.findChild<QTabWidget *>( QStringLiteral( "rsInspectorTabs" ) );
+  REQUIRE( tabs );
+  REQUIRE( tabs->count() == 2 );
+
+  // Switch to secondary tab
+  tabs->setCurrentIndex( 1 );
+  REQUIRE( sec2.populates == 1 );
+}
+

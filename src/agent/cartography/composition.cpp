@@ -229,329 +229,373 @@ CompositionResult resolveComposition( Json::Value &spec, double marginDefaultMm 
     }
   }
 
-  // --- 3. constraints (declared order, one deterministic pass each) -----------
+  // --- 3. constraints (multi-pass relaxation up to 10 passes, ADR 0131 / #781 / #805) ---
   const Json::Value constraints = spec.get( "constraints", Json::Value( Json::arrayValue ) );
-  if ( constraints.isArray() )
+  if ( constraints.isArray() && !constraints.empty() )
   {
-    for ( const auto &constraint : constraints )
-    {
-      if ( !constraint.isObject() || !constraint.isMember( "kind" ) ||
-           !constraint["kind"].isString() || !constraint.isMember( "items" ) ||
-           !constraint["items"].isArray() || constraint["items"].size() < 2 )
-        continue;
-      const std::string kind = constraint["kind"].asString();
-      if ( !mapspec::isConstraintKind( kind ) )
-        continue; // legacy/free-form constraint items (e.g. frame_style) are not solver input
-      const std::string cid = constraint.isMember( "id" ) && constraint["id"].isString()
-                                ? constraint["id"].asString()
-                                : kind;
-      const int requiredItems = kind == "fit_content" ? 1 : 2;
-
-      // Resolve referenced items (skip unresolvable ones — validation flags).
-      std::vector<Json::Value *> items;
-      for ( const auto &reference : constraint["items"] )
+    auto applyRect = []( Json::Value &target, const Rect &newRect, bool &changed ) {
+      Rect current;
+      if ( toRect( target, current ) )
       {
-        if ( !reference.isString() )
-          continue;
-        Json::Value location = mapspec::findMapSpecItem( spec, reference.asString() );
-        if ( location.isNull() )
-          continue;
-        items.push_back(
-          &spec[location["collection"].asString()][location["index"].asInt()] );
-      }
-      if ( static_cast<int>( items.size() ) < requiredItems )
-      {
-        result.unsatisfied.push_back( cid + ": fewer than " + std::to_string( requiredItems ) +
-                                      " resolvable items" );
-        continue;
-      }
-
-      Rect leader;
-      if ( !toRect( *items[0], leader ) )
-      {
-        result.unsatisfied.push_back( cid + ": leader item has no usable rect_mm" );
-        continue;
-      }
-      double gap = marginDefaultMm;
-      if ( constraint.isMember( "gap_mm" ) && constraint["gap_mm"].isNumeric() )
-        gap = constraint["gap_mm"].asDouble();
-      const std::string direction = constraint.get( "direction", "" ).asString();
-      const std::string edge = constraint.get( "edge", "" ).asString();
-      bool solved = true;
-
-      if ( kind == "align" )
-      {
-        for ( int i = 1; i < static_cast<int>( items.size() ); ++i )
+        if ( std::fabs( current.x - newRect.x ) > 1e-6 || std::fabs( current.y - newRect.y ) > 1e-6 ||
+             std::fabs( current.w - newRect.w ) > 1e-6 || std::fabs( current.h - newRect.h ) > 1e-6 )
         {
-          Rect rect;
-          if ( !toRect( *items[i], rect ) )
-          {
-            solved = false;
-            continue;
-          }
-          if ( edge == "top" )
-            rect.y = leader.y;
-          else if ( edge == "bottom" )
-            rect.y = leader.y + leader.h - rect.h;
-          else if ( edge == "left" )
-            rect.x = leader.x;
-          else if ( edge == "right" )
-            rect.x = leader.x + leader.w - rect.w;
-          else
-          {
-            result.unsatisfied.push_back( cid + ": unknown align edge '" + edge + "'" );
-            solved = false;
-            break;
-          }
-          writeRect( *items[i], rect );
-        }
-      }
-      else if ( kind == "match_width" || kind == "match_height" )
-      {
-        for ( int i = 1; i < static_cast<int>( items.size() ); ++i )
-        {
-          Rect rect;
-          if ( !toRect( *items[i], rect ) )
-          {
-            solved = false;
-            continue;
-          }
-          if ( kind == "match_width" )
-            rect.w = leader.w;
-          else
-            rect.h = leader.h;
-          writeRect( *items[i], rect );
-        }
-      }
-      else if ( kind == "stack" )
-      {
-        Rect previous = leader;
-        for ( int i = 1; i < static_cast<int>( items.size() ); ++i )
-        {
-          Rect rect;
-          if ( !toRect( *items[i], rect ) )
-          {
-            solved = false;
-            continue;
-          }
-          if ( direction == "below" )
-          {
-            rect.y = previous.y + previous.h + gap;
-            rect.x = leader.x;
-          }
-          else if ( direction == "above" )
-          {
-            rect.y = previous.y - gap - rect.h;
-            rect.x = leader.x;
-          }
-          else if ( direction == "right_of" )
-          {
-            rect.x = previous.x + previous.w + gap;
-            rect.y = leader.y;
-          }
-          else if ( direction == "left_of" )
-          {
-            rect.x = previous.x - gap - rect.w;
-            rect.y = leader.y;
-          }
-          else
-          {
-            result.unsatisfied.push_back( cid + ": unknown stack direction '" + direction +
-                                          "'" );
-            solved = false;
-            break;
-          }
-          writeRect( *items[i], rect );
-          previous = rect;
-        }
-      }
-      else if ( kind == "distribute" )
-      {
-        // Even spacing between the first and last item along the direction.
-        Rect first;
-        Rect last;
-        if ( !toRect( *items.front(), first ) || !toRect( *items.back(), last ) )
-        {
-          result.unsatisfied.push_back( cid + ": first/last item rect unusable" );
-          continue;
-        }
-        const int count = static_cast<int>( items.size() );
-        if ( direction == "horizontal" )
-        {
-          const double span = ( last.x - ( first.x + first.w ) ) / std::max( 1, count - 1 );
-          for ( int i = 1; i < count - 1; ++i )
-          {
-            Rect rect;
-            if ( !toRect( *items[i], rect ) )
-              continue;
-            rect.x = first.x + first.w + span * i;
-            writeRect( *items[i], rect );
-          }
-        }
-        else if ( direction == "vertical" )
-        {
-          const double span = ( last.y - ( first.y + first.h ) ) / std::max( 1, count - 1 );
-          for ( int i = 1; i < count - 1; ++i )
-          {
-            Rect rect;
-            if ( !toRect( *items[i], rect ) )
-              continue;
-            rect.y = first.y + first.h + span * i;
-            writeRect( *items[i], rect );
-          }
-        }
-        else
-        {
-          result.unsatisfied.push_back( cid + ": unknown distribute direction '" + direction +
-                                        "'" );
-          solved = false;
-        }
-      }
-      else if ( kind == "below" || kind == "above" || kind == "left_of" || kind == "right_of" )
-      {
-        // v3 relative placement: items = [target, follower] + optional gap_mm.
-        Rect target;
-        Rect follower;
-        if ( !toRect( *items[0], target ) || !toRect( *items[1], follower ) )
-        {
-          result.unsatisfied.push_back( cid + ": target/follower rect unusable" );
-          solved = false;
-        }
-        else
-        {
-          if ( kind == "below" )
-          {
-            follower.x = target.x;
-            follower.y = target.y + target.h + gap;
-          }
-          else if ( kind == "above" )
-          {
-            follower.x = target.x;
-            follower.y = target.y - gap - follower.h;
-          }
-          else if ( kind == "right_of" )
-          {
-            follower.x = target.x + target.w + gap;
-            follower.y = target.y;
-          }
-          else // left_of
-          {
-            follower.x = target.x - gap - follower.w;
-            follower.y = target.y;
-          }
-          writeRect( *items[1], follower );
-        }
-      }
-      else if ( kind == "inside" )
-      {
-        // items = [container, content]: center the content inside the
-        // container, clamped to stay within it.
-        Rect container;
-        Rect content;
-        if ( !toRect( *items[0], container ) || !toRect( *items[1], content ) )
-        {
-          result.unsatisfied.push_back( cid + ": container/content rect unusable" );
-          solved = false;
-        }
-        else
-        {
-          content.x = container.x + ( container.w - content.w ) / 2.0;
-          content.y = container.y + ( container.h - content.h ) / 2.0;
-          content.x = std::max( container.x, std::min( content.x, container.x + container.w - content.w ) );
-          content.y = std::max( container.y, std::min( content.y, container.y + container.h - content.h ) );
-          writeRect( *items[1], content );
-        }
-      }
-      else if ( kind == "keep_with" )
-      {
-        // items = [anchor, companion]: pin the companion directly below the
-        // anchor with the gap, preserving its horizontal position, so the two
-        // cannot drift apart in later layout passes.
-        Rect anchor;
-        Rect companion;
-        if ( !toRect( *items[0], anchor ) || !toRect( *items[1], companion ) )
-        {
-          result.unsatisfied.push_back( cid + ": anchor/companion rect unusable" );
-          solved = false;
-        }
-        else
-        {
-          companion.y = anchor.y + anchor.h + gap;
-          writeRect( *items[1], companion );
-        }
-      }
-      else if ( kind == "avoid_overlap" )
-      {
-        // items = [keeper, mover]: when they intersect, the mover is pushed
-        // below the keeper by the gap (deterministic resolution direction).
-        Rect keeper;
-        Rect mover;
-        if ( !toRect( *items[0], keeper ) || !toRect( *items[1], mover ) )
-        {
-          result.unsatisfied.push_back( cid + ": keeper/mover rect unusable" );
-          solved = false;
-        }
-        else
-        {
-          const bool overlaps = mover.x < keeper.x + keeper.w && keeper.x < mover.x + mover.w &&
-                                mover.y < keeper.y + keeper.h && keeper.y < mover.y + mover.h;
-          if ( overlaps )
-          {
-            mover.y = keeper.y + keeper.h + gap;
-            writeRect( *items[1], mover );
-          }
-        }
-      }
-      else if ( kind == "fit_content" )
-      {
-        // items = [item] with content_mm [w, h]: resize the item to its
-        // declared content size clamped by min/max_size_mm. Single-item
-        // relative constraint (target + declared content).
-        if ( items.size() < 1 || !toRect( *items[0], leader ) )
-        {
-          result.unsatisfied.push_back( cid + ": fit_content needs one item with a rect" );
-          solved = false;
-        }
-        else
-        {
-          const Json::Value &content = constraint.get( "content_mm", Json::Value() );
-          if ( !content.isArray() || content.size() != 2 || !content[0].isNumeric() ||
-               !content[1].isNumeric() )
-          {
-            result.unsatisfied.push_back( cid + ": fit_content needs content_mm" );
-            solved = false;
-          }
-          else
-          {
-            Rect rect = leader;
-            rect.w = content[0].asDouble();
-            rect.h = content[1].asDouble();
-            const Json::Value &minSize = items[0]->get( "min_size_mm", Json::Value() );
-            const Json::Value &maxSize = items[0]->get( "max_size_mm", Json::Value() );
-            if ( minSize.isArray() && minSize.size() == 2 )
-            {
-              rect.w = std::max( rect.w, minSize[0].asDouble() );
-              rect.h = std::max( rect.h, minSize[1].asDouble() );
-            }
-            if ( maxSize.isArray() && maxSize.size() == 2 )
-            {
-              rect.w = std::min( rect.w, maxSize[0].asDouble() );
-              rect.h = std::min( rect.h, maxSize[1].asDouble() );
-            }
-            rect.x = leader.x;
-            rect.y = leader.y;
-            writeRect( *items[0], rect );
-          }
+          changed = true;
         }
       }
       else
       {
-        result.unsatisfied.push_back( cid + ": unsupported constraint kind '" + kind + "'" );
-        solved = false;
+        changed = true;
       }
-      if ( solved )
-        ++result.constraintsSolved;
+      writeRect( target, newRect );
+    };
+
+    constexpr int kMaxPasses = 10;
+    int finalSolved = 0;
+    std::vector<std::string> finalUnsatisfied;
+
+    for ( int pass = 0; pass < kMaxPasses; ++pass )
+    {
+      bool anyChanged = false;
+      int passSolved = 0;
+      std::vector<std::string> passUnsatisfied;
+
+      for ( const auto &constraint : constraints )
+      {
+        if ( !constraint.isObject() || !constraint.isMember( "kind" ) ||
+             !constraint["kind"].isString() || !constraint.isMember( "items" ) ||
+             !constraint["items"].isArray() )
+          continue;
+        const std::string kind = constraint["kind"].asString();
+        if ( !mapspec::isConstraintKind( kind ) )
+          continue; // legacy/free-form constraint items (e.g. frame_style) are not solver input
+        const int requiredItems = kind == "fit_content" ? 1 : 2;
+        if ( static_cast<int>( constraint["items"].size() ) < requiredItems )
+          continue;
+        const std::string cid = constraint.isMember( "id" ) && constraint["id"].isString()
+                                  ? constraint["id"].asString()
+                                  : kind;
+
+        // Resolve referenced items (skip unresolvable ones — validation flags).
+        std::vector<Json::Value *> items;
+        for ( const auto &reference : constraint["items"] )
+        {
+          if ( !reference.isString() )
+            continue;
+          Json::Value location = mapspec::findMapSpecItem( spec, reference.asString() );
+          if ( location.isNull() )
+            continue;
+          items.push_back(
+            &spec[location["collection"].asString()][location["index"].asInt()] );
+        }
+        if ( static_cast<int>( items.size() ) < requiredItems )
+        {
+          passUnsatisfied.push_back( cid + ": fewer than " + std::to_string( requiredItems ) +
+                                     " resolvable items" );
+          continue;
+        }
+
+        Rect leader;
+        if ( !toRect( *items[0], leader ) )
+        {
+          passUnsatisfied.push_back( cid + ": leader item has no usable rect_mm" );
+          continue;
+        }
+        double gap = marginDefaultMm;
+        if ( constraint.isMember( "gap_mm" ) && constraint["gap_mm"].isNumeric() )
+          gap = constraint["gap_mm"].asDouble();
+        const std::string direction = constraint.get( "direction", "" ).asString();
+        const std::string edge = constraint.get( "edge", "" ).asString();
+        bool solved = true;
+
+        if ( kind == "align" )
+        {
+          for ( int i = 1; i < static_cast<int>( items.size() ); ++i )
+          {
+            Rect rect;
+            if ( !toRect( *items[i], rect ) )
+            {
+              solved = false;
+              continue;
+            }
+            if ( edge == "top" )
+              rect.y = leader.y;
+            else if ( edge == "bottom" )
+              rect.y = leader.y + leader.h - rect.h;
+            else if ( edge == "left" )
+              rect.x = leader.x;
+            else if ( edge == "right" )
+              rect.x = leader.x + leader.w - rect.w;
+            else
+            {
+              passUnsatisfied.push_back( cid + ": unknown align edge '" + edge + "'" );
+              solved = false;
+              break;
+            }
+            applyRect( *items[i], rect, anyChanged );
+          }
+        }
+        else if ( kind == "match_width" || kind == "match_height" )
+        {
+          for ( int i = 1; i < static_cast<int>( items.size() ); ++i )
+          {
+            Rect rect;
+            if ( !toRect( *items[i], rect ) )
+            {
+              solved = false;
+              continue;
+            }
+            if ( kind == "match_width" )
+              rect.w = leader.w;
+            else
+              rect.h = leader.h;
+            applyRect( *items[i], rect, anyChanged );
+          }
+        }
+        else if ( kind == "stack" )
+        {
+          Rect previous = leader;
+          for ( int i = 1; i < static_cast<int>( items.size() ); ++i )
+          {
+            Rect rect;
+            if ( !toRect( *items[i], rect ) )
+            {
+              solved = false;
+              continue;
+            }
+            if ( direction == "below" )
+            {
+              rect.y = previous.y + previous.h + gap;
+              rect.x = leader.x;
+            }
+            else if ( direction == "above" )
+            {
+              rect.y = previous.y - gap - rect.h;
+              rect.x = leader.x;
+            }
+            else if ( direction == "right_of" )
+            {
+              rect.x = previous.x + previous.w + gap;
+              rect.y = leader.y;
+            }
+            else if ( direction == "left_of" )
+            {
+              rect.x = previous.x - gap - rect.w;
+              rect.y = leader.y;
+            }
+            else
+            {
+              passUnsatisfied.push_back( cid + ": unknown stack direction '" + direction +
+                                         "'" );
+              solved = false;
+              break;
+            }
+            applyRect( *items[i], rect, anyChanged );
+            previous = rect;
+          }
+        }
+        else if ( kind == "distribute" )
+        {
+          // Even spacing between the first and last item along the direction.
+          Rect first;
+          Rect last;
+          if ( !toRect( *items.front(), first ) || !toRect( *items.back(), last ) )
+          {
+            passUnsatisfied.push_back( cid + ": first/last item rect unusable" );
+            continue;
+          }
+          const int count = static_cast<int>( items.size() );
+          if ( direction == "horizontal" )
+          {
+            const double span = ( last.x - ( first.x + first.w ) ) / std::max( 1, count - 1 );
+            for ( int i = 1; i < count - 1; ++i )
+            {
+              Rect rect;
+              if ( !toRect( *items[i], rect ) )
+                continue;
+              rect.x = first.x + first.w + span * i;
+              applyRect( *items[i], rect, anyChanged );
+            }
+          }
+          else if ( direction == "vertical" )
+          {
+            const double span = ( last.y - ( first.y + first.h ) ) / std::max( 1, count - 1 );
+            for ( int i = 1; i < count - 1; ++i )
+            {
+              Rect rect;
+              if ( !toRect( *items[i], rect ) )
+                continue;
+              rect.y = first.y + first.h + span * i;
+              applyRect( *items[i], rect, anyChanged );
+            }
+          }
+          else
+          {
+            passUnsatisfied.push_back( cid + ": unknown distribute direction '" + direction +
+                                       "'" );
+            solved = false;
+          }
+        }
+        else if ( kind == "below" || kind == "above" || kind == "left_of" || kind == "right_of" )
+        {
+          // v3 relative placement: items = [target, follower] + optional gap_mm.
+          Rect target;
+          Rect follower;
+          if ( !toRect( *items[0], target ) || !toRect( *items[1], follower ) )
+          {
+            passUnsatisfied.push_back( cid + ": target/follower rect unusable" );
+            solved = false;
+          }
+          else
+          {
+            if ( kind == "below" )
+            {
+              follower.x = target.x;
+              follower.y = target.y + target.h + gap;
+            }
+            else if ( kind == "above" )
+            {
+              follower.x = target.x;
+              follower.y = target.y - gap - follower.h;
+            }
+            else if ( kind == "right_of" )
+            {
+              follower.x = target.x + target.w + gap;
+              follower.y = target.y;
+            }
+            else // left_of
+            {
+              follower.x = target.x - gap - follower.w;
+              follower.y = target.y;
+            }
+            applyRect( *items[1], follower, anyChanged );
+          }
+        }
+        else if ( kind == "inside" )
+        {
+          // items = [container, content]: center the content inside the
+          // container, clamped to stay within it.
+          Rect container;
+          Rect content;
+          if ( !toRect( *items[0], container ) || !toRect( *items[1], content ) )
+          {
+            passUnsatisfied.push_back( cid + ": container/content rect unusable" );
+            solved = false;
+          }
+          else
+          {
+            content.x = container.x + ( container.w - content.w ) / 2.0;
+            content.y = container.y + ( container.h - content.h ) / 2.0;
+            content.x = std::max( container.x, std::min( content.x, container.x + container.w - content.w ) );
+            content.y = std::max( container.y, std::min( content.y, container.y + container.h - content.h ) );
+            applyRect( *items[1], content, anyChanged );
+          }
+        }
+        else if ( kind == "keep_with" )
+        {
+          // items = [anchor, companion]: pin the companion directly below the
+          // anchor with the gap, preserving its horizontal position, so the two
+          // cannot drift apart in later layout passes.
+          Rect anchor;
+          Rect companion;
+          if ( !toRect( *items[0], anchor ) || !toRect( *items[1], companion ) )
+          {
+            passUnsatisfied.push_back( cid + ": anchor/companion rect unusable" );
+            solved = false;
+          }
+          else
+          {
+            companion.y = anchor.y + anchor.h + gap;
+            applyRect( *items[1], companion, anyChanged );
+          }
+        }
+        else if ( kind == "avoid_overlap" )
+        {
+          // items = [keeper, mover]: when they intersect, the mover is pushed
+          // below the keeper by the gap (deterministic resolution direction).
+          Rect keeper;
+          Rect mover;
+          if ( !toRect( *items[0], keeper ) || !toRect( *items[1], mover ) )
+          {
+            passUnsatisfied.push_back( cid + ": keeper/mover rect unusable" );
+            solved = false;
+          }
+          else
+          {
+            const bool overlaps = mover.x < keeper.x + keeper.w && keeper.x < mover.x + mover.w &&
+                                  mover.y < keeper.y + keeper.h && keeper.y < mover.y + mover.h;
+            if ( overlaps )
+            {
+              mover.y = keeper.y + keeper.h + gap;
+              applyRect( *items[1], mover, anyChanged );
+            }
+          }
+        }
+        else if ( kind == "fit_content" )
+        {
+          // items = [item] with content_mm [w, h]: resize the item to its
+          // declared content size clamped by min/max_size_mm. Single-item
+          // relative constraint (target + declared content).
+          if ( items.size() < 1 || !toRect( *items[0], leader ) )
+          {
+            passUnsatisfied.push_back( cid + ": fit_content needs one item with a rect" );
+            solved = false;
+          }
+          else
+          {
+            Json::Value content = constraint.get( "content_mm", Json::Value() );
+            if ( !content.isArray() || content.size() != 2 || !content[0].isNumeric() ||
+                 !content[1].isNumeric() )
+            {
+              content = items[0]->get( "content_mm", Json::Value() );
+            }
+            if ( !content.isArray() || content.size() != 2 || !content[0].isNumeric() ||
+                 !content[1].isNumeric() )
+            {
+              passUnsatisfied.push_back( cid + ": fit_content needs content_mm" );
+              solved = false;
+            }
+            else
+            {
+              Rect rect = leader;
+              rect.w = content[0].asDouble();
+              rect.h = content[1].asDouble();
+              const Json::Value &minSize = items[0]->get( "min_size_mm", Json::Value() );
+              const Json::Value &maxSize = items[0]->get( "max_size_mm", Json::Value() );
+              if ( minSize.isArray() && minSize.size() == 2 )
+              {
+                rect.w = std::max( rect.w, minSize[0].asDouble() );
+                rect.h = std::max( rect.h, minSize[1].asDouble() );
+              }
+              if ( maxSize.isArray() && maxSize.size() == 2 )
+              {
+                rect.w = std::min( rect.w, maxSize[0].asDouble() );
+                rect.h = std::min( rect.h, maxSize[1].asDouble() );
+              }
+              rect.x = leader.x;
+              rect.y = leader.y;
+              applyRect( *items[0], rect, anyChanged );
+            }
+          }
+        }
+        else
+        {
+          passUnsatisfied.push_back( cid + ": unsupported constraint kind '" + kind + "'" );
+          solved = false;
+        }
+        if ( solved )
+          ++passSolved;
+      }
+
+      finalSolved = passSolved;
+      finalUnsatisfied = passUnsatisfied;
+      if ( !anyChanged )
+        break;
     }
+
+    result.constraintsSolved = finalSolved;
+    for ( const auto &msg : finalUnsatisfied )
+      result.unsatisfied.push_back( msg );
   }
 
   return result;

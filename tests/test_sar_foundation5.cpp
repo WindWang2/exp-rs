@@ -175,7 +175,8 @@ TEST_CASE( "rs:sar_terrain_masks E2E: layover ramp and incidence product",
   params["output"] = dir.filePath( "mask.tif" ).toStdString();
   params["product"] = "layover_shadow_mask";
   params["incidence"] = 35.0;
-  params["heading"] = 90.0;
+  params["heading"] = 0.0;
+  params["lookDirection"] = "right";
   REQUIRE_NOTHROW( op->run( params, context ) );
 
   GdalDatasetWrapper maskDs;
@@ -243,3 +244,27 @@ TEST_CASE( "rs:sar_terrain_masks refuses out-of-range geometry",
   params["heading"] = 0.0;
   REQUIRE_THROWS_AS( op->run( params, context ), RSOperatorError );
 }
+
+TEST_CASE( "SAR antenna look azimuth orthogonal to flight heading",
+           "[sar][geometry][issue785]" )
+{
+  constexpr double incidenceDeg = 35.0;
+  constexpr double headingDeg = 350.0;
+  // Right-looking SAR: phi_look = (350 + 90) % 360 = 80 deg
+  constexpr double lookAzimuthRight = 80.0;
+  // Left-looking SAR: phi_look = (350 - 90) % 360 = 260 deg
+  constexpr double lookAzimuthLeft = 260.0;
+
+  // Slope facing East (dzdx > 0)
+  const auto resEastRight = sicnu::sar::terrainGeometry( 0.2, 0.0, incidenceDeg, lookAzimuthRight );
+  const auto resEastLeft = sicnu::sar::terrainGeometry( 0.2, 0.0, incidenceDeg, lookAzimuthLeft );
+  // Heading alone (350 deg, close to North) would give completely different geometry
+  const auto resEastHeading = sicnu::sar::terrainGeometry( 0.2, 0.0, incidenceDeg, headingDeg );
+
+  CHECK( std::isfinite( resEastRight.localIncidenceDeg ) );
+  CHECK( std::isfinite( resEastLeft.localIncidenceDeg ) );
+  CHECK( std::isfinite( resEastHeading.localIncidenceDeg ) );
+  CHECK( resEastRight.localIncidenceDeg != Catch::Approx( resEastHeading.localIncidenceDeg ) );
+  CHECK( resEastRight.localIncidenceDeg != Catch::Approx( resEastLeft.localIncidenceDeg ) );
+}
+

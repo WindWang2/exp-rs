@@ -109,7 +109,7 @@ class CommandRegistry : public QObject
     QMap<QString, CommandDefinition> m_commands; // sorted by id
     QMap<QString, QAction *> m_actions;
     QSet<QString> m_shortcuts; // stringified non-empty canonical shortcuts
-    QString m_shortcutOwner;   // projection id holding the installed shortcut
+    QSet<QString> m_shortcutOwners; // commands that have installed their canonical shortcut
     std::function<SelectionContextSnapshot()> m_snapshotProvider;
 };
 

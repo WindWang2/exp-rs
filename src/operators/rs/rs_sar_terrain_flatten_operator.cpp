@@ -143,8 +143,7 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     const std::string lookDirection = getEnum(params, "lookDirection", s_lookDirections, "right");
     // #785: heading (flight direction) and antenna look azimuth are orthogonal.
     // The look azimuth is heading ± 90 by antenna side, unless the caller
-    // supplies the boresight explicitly. The old code fed the heading itself
-    // into the geometry, a 90° error that broke flattening and masks.
+    // supplies the boresight explicitly.
     double lookAzimuthDeg;
     if (params.isMember("lookAzimuthDeg") && params["lookAzimuthDeg"].isNumeric()) {
         lookAzimuthDeg = params["lookAzimuthDeg"].asDouble();
@@ -152,9 +151,14 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
             throw RSOperatorError(ErrorCode::InvalidParameter,
                                   "lookAzimuthDeg must be a finite angle in degrees");
         }
+    } else if (params.isMember("look_azimuth") && params["look_azimuth"].isNumeric()) {
+        lookAzimuthDeg = params["look_azimuth"].asDouble();
     } else {
         lookAzimuthDeg = sicnu::sar::lookAzimuthFromHeading(headingDeg, lookDirection == "right");
     }
+    lookAzimuthDeg = std::fmod(lookAzimuthDeg, 360.0);
+    if (lookAzimuthDeg < 0.0)
+        lookAzimuthDeg += 360.0;
     std::string demUnit = getEnum(params, "demUnit", s_demUnits, "meters");
     const QString polarizations =
         QString::fromStdString( getString( params, "polarizations", "" ) );
@@ -252,6 +256,7 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     result["incidenceDeg"] = incidenceDeg;
     result["headingDeg"] = headingDeg;
     result["lookAzimuthDeg"] = lookAzimuthDeg;
+    result["lookDirection"] = lookDirection;
     result["demUnit"] = demUnit;
     context.reportProgress(1.0, "SAR terrain flattening complete");
     return result;

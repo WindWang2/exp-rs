@@ -231,6 +231,8 @@ std::string redactQuery( const std::string &query )
 /// "https://TOKEN@host" — #776) is itself the secret → "***".
 std::string redactUserinfo( const std::string &userinfo )
 {
+  if ( userinfo.empty() )
+    return std::string();
   const std::size_t colon = userinfo.find( ':' );
   if ( colon == std::string::npos )
     return "***";
@@ -734,6 +736,7 @@ ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const
     return refused;
   }
 
+  const bool leadingSlash = !base.empty() && base[0] == '/';
   const std::string drivePrefix =
     !segments.empty() && segments.front().size() == 2 && segments.front()[1] == ':'
       ? segments.front() + "/"
@@ -745,7 +748,9 @@ ResourceUri ResourceUri::resolveAgainst( const std::string &baseDirectory, const
     if ( i + 1 < segments.size() )
       resolved += "/";
   }
-  const std::string joinedPath = drivePrefix.empty() ? resolved : drivePrefix + resolved;
+  const std::string joinedPath = drivePrefix.empty()
+    ? ( ( leadingSlash ? "/" : "" ) + resolved )
+    : drivePrefix + resolved;
 
   // Lexical result: classification is by SHAPE, not by existence — a resolved
   // path may be an export target that does not exist yet.
