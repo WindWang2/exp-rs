@@ -1,63 +1,53 @@
 # FINAL_REPORT — Dataset / Experiment / Reproducibility Platform 7.0
 
 Branch: `feat/dataset-experiment-7` (worktree `exp-rs-dataset-experiment-7`)
-Base: master @ `2041f6fa`
+Base: master `2041f6fa`, rebased onto `c731e3e7` (no conflicts; that commit
+touches src/help only).
+**PR: https://github.com/WindWang2/exp-rs/pull/824**
 
-## Architecture
+## Delivered (goal sections A–G)
 
-All additions are thin over the authoritative stores (`DatasetStore`,
-`ExperimentStore`) and the existing engines (split, leakage, evaluation,
-comparison, bundles). No second scheduler, no new persistence format; store
-schema v1 extended with additive tables only.
+- **A MCP surface**: 15 namespaced tools (`dataset:` ×9, `experiment:` ×3,
+  `reproducibility:` ×3) over the authoritative stores; paged, bounded,
+  read-time secret re-redaction; CLI parity verbs (plus the routing fix that
+  made the Foundation 5.0 verbs reachable at all).
+- **B Promotion**: SamplePromoter turns classification regions, segmentation
+  objects, annotation layers, pre/post pairs and temporal assemblies into
+  governed samples/annotation chains in DRAFT versions. Raw pipeline values
+  map to schema class codes via explicit rules and never become identity.
+- **C Run recorder**: ExperimentRunRecorder opens/advances/closes runs with
+  verified pins, auto-filled fingerprints, redacted environment, truthful
+  Failed/Cancelled (with evidence), and read-only reconcileStaleRuns.
+- **D Fold audit**: per-fold materialize + leakage audit, per-fold class
+  balance + zero-ratio flags, deterministic replay verification
+  (replayVerified distinguishes Unverified from Mismatched).
+- **E Facets & scale**: sample_facets side table with atomic per-sample
+  replace, SQL-side bounded distributions (+ explicit "(other)" tail),
+  cross-facet cells, quality cache with (count, max roword) staleness stamps.
+- **F Replay readiness**: per-dependency Ok/Missing/Mismatched/Unknown,
+  overall level never overstates; missingDependencyDiagnostics;
+  equivalentRuns for historical duplicate executions.
+- **G Comparison**: protocol compatibility (8 dimensions), schema
+  compatibility (added/removed/foreign), pairedRunComparison with support
+  gates — no fabricated significance.
 
-New units:
-- `src/dataset/dataset_store_splits.cpp` — split manifest + leakage report persistence
-- `src/dataset/sample_promotion.{h,cpp}` — pipeline → SampleRecord promotion (goal B)
-- `src/dataset/fold_audit.{h,cpp}` — per-fold audit/comparability/replay (goal D)
-- `src/dataset/dataset_store_facets.cpp` — facet side table + quality cache (goal E)
-- `src/experiment/run_recorder.{h,cpp}` — Workflow/TaskCenter → ExperimentRun (goal C)
-- `src/experiment/replay_readiness.{h,cpp}` — replay readiness + equivalent runs (goal F)
-- `src/experiment/comparison_ext.{h,cpp}` — protocol/schema compatibility + paired runs (goal G)
-- `src/agent/data_platform_tools.{h,cpp}` — 15 MCP tools (goal A)
-- CLI verbs in `src/cli/cli_dataset_commands.cpp` (goal A)
+## Verification (local, no CI)
 
-## Changes
-
-(filled at PR time — see PR description)
-
-## Tests
-
-- `tests/test_data_platform_surface.cpp` — split/leakage persistence, MCP
-  projections, honest readiness levels (5 TEST_CASEs + M1 surfaces)
-- `tests/test_platform7_library.cpp` — promotion, recorder, fold audit,
-  facets/quality cache, replay readiness, comparison extensions (15 TEST_CASEs)
-- Evidence: local build + ctest runs (paths/commands in REVIEW_LOG)
+- New suites: 228 assertions/15 cases (library) + 101/5 (surface) — green.
+- Regression: dataset_core 155, sample_label_annotation 98, split_leakage
+  672, experiment_evaluation 162, e2e 57, adversarial_m2 1105,
+  quality_scale(100k) 733 — all green.
+- Review round 1 (1 read-only subagent, ≤2 budget): 0 P0, 3 P1 + CLI-twin
+  fixed, P2/P3 fixed or documented (REVIEW_LOG.md).
 
 ## Performance / resources
 
-- Facet queries are SQL GROUP BY with bounded results + "(other)" tail.
-- Audit assembly is paged (500/page); leakage checks stay bucketed.
-- Build at j2/j6 with observed RAM headroom; tests at CTEST_PARALLEL_LEVEL=1.
-
-## Compatibility
-
-- Additive store tables; schema_version stays "1" (older readers unaffected;
-  newer tables ignored). No API breaks: all changes are new symbols plus the
-  mcp_server dispatch branch (first-match, so existing tools unaffected).
+Ninja Debug builds at j2→j6 within observed headroom (32 GB RAM); CTest
+parallelism 1; bounded-memory contracts preserved (paged assembly, SQL-side
+aggregation, bounded results with honest tails).
 
 ## Known limitations
 
-- CLI/MCP share verbs but not projection code (CLI links jsoncpp and cannot
-  link the GUI-level agent lib without an architecture regression).
-- Recorder is not yet called from every workflow state hook; it is the
-  callable adapter at the seam (integration points documented).
-- `get_tool_schema` (Agent Tool Catalog) does not resolve dataset:/experiment:
-  tools; schemas come from tools/list includeSchemas=true.
-- Near-duplicate detection requires caller-supplied digests; the platform
-  never pretends a perceptual hash it did not compute.
-
-## Follow-ups
-
-- Wire `ExperimentRunRecorder` into WorkflowRunCoordinator state transitions.
-- MCP export tool: progress streaming for portable bundles.
-- Fold comparability: add stratification-aware balance suggestions.
+See PR description (CLI/projection split, recorder workflow wiring,
+get_tool_schema scope, digest-supplied near-duplicates, headless CLI cold
+start) — all documented with rationale in REVIEW_LOG.md.
