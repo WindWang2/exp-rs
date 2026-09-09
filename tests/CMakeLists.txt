@@ -115,6 +115,7 @@ function(sicnu_add_dialog_test NAME)
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   )
   set_target_properties(${NAME} PROPERTIES AUTOMOC ON)
 
@@ -657,6 +658,7 @@ add_executable(test_adversarial_m5
   test_adversarial_m5.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/roi_statistics_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
 )
 target_link_libraries(test_adversarial_m5 PRIVATE
@@ -1872,6 +1874,7 @@ sicnu_discover_tests(test_spectral_profile_widget)
 # ROI statistics widget tests (#429)
 add_executable(test_roi_statistics_widget test_roi_statistics_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/roi_statistics_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
 )
 target_link_libraries(test_roi_statistics_widget PRIVATE
@@ -4602,6 +4605,7 @@ add_executable(test_histogram_stretch_widget
   test_histogram_stretch_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_stretch_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_types.cpp
   ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_resolve.cpp
   ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_apply.cpp
@@ -5813,6 +5817,24 @@ target_compile_definitions(test_shortcut_conflicts PRIVATE
 )
 sicnu_discover_tests(test_shortcut_conflicts)
 
+# ── Workbench 6.0 Milestone C: bounded UI scan pool (#797) ──────────────────
+add_executable(test_scan_pool
+  test_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+)
+target_link_libraries(test_scan_pool PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_scan_pool PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_scan_pool PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_scan_pool)
+
 # Spectral index dialog — role-based band preselection via BandRoleCombo (C5)
 sicnu_add_dialog_test(test_spectral_index_dialog
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/spectral_index_dialog.cpp
@@ -6195,6 +6217,7 @@ sicnu_discover_tests(test_image_enhancement_panel_ihs)
 
 add_executable(test_subsystem_stability test_subsystem_stability.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
 )
 target_link_libraries(test_subsystem_stability PRIVATE
   Catch2::Catch2WithMain

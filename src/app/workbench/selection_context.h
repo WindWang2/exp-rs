@@ -69,6 +69,24 @@ struct SelectionContextSnapshot
 /// Pure availability rules — no widget access, fully unit-testable.
 namespace ContextRules
 {
+/// Structured projection of the facts availability derives from (Milestone E).
+/// Help/Hint surfaces consume these instead of re-deriving context state, and
+/// unavailabilityReason() is expressed over exactly these facts so a disabled
+/// command always has a deterministic explanation.
+struct ContextFacts
+{
+    QString workbenchId;      ///< active workbench (empty = none)
+    bool hasLayerSelection = false;
+    bool hasRaster = false;
+    bool hasVector = false;
+    bool hasSar = false;
+    bool editable = false;    ///< a selected vector CAN start an edit session
+    bool editing = false;     ///< an edit session is open
+    bool hasGovernanceResult = false;
+    bool hasGovernanceAsset = false;
+};
+ContextFacts prerequisiteFacts( const SelectionContextSnapshot &s );
+
 /// Any raster (or multi-raster selection) selected → band tools, style,
 /// histogram, statistics, processing, classification entry points.
 bool rasterSelected( const SelectionContextSnapshot &s );
@@ -131,6 +149,10 @@ class SelectionContext : public QObject
   private:
     SelectionContextSnapshot computeSnapshot() const;
     void scheduleRefresh();
+    /// #778: a layer announced its removal — purge it from every cached
+    /// projection immediately and re-broadcast so consumers never observe the
+    /// doomed pointer.
+    void handleLayerWillBeRemoved( QgsMapLayer *layer );
 
     QTimer *m_debounce = nullptr;
     QPointer<WorkbenchHost> m_workbenchHost;
@@ -138,6 +160,22 @@ class SelectionContext : public QObject
     QPointer<QgsLayerTreeView> m_layerTree;
     SarPredicate m_sarPredicate;
     mutable SelectionContextSnapshot m_cached;
+    /// #778: liveness mirror of the cached layer pointers — a null entry means
+    /// the layer object died without (or before) a removal signal, and the
+    /// cache must be recomputed before it is handed out again.
+    mutable QList<QPointer<QgsMapLayer>> m_cachedLayerGuard;
+    /// #778: layers that announced layerWillBeRemoved and must stay invisible
+    /// to snapshots even though they may briefly still be reachable from the
+    /// canvas / layer tree while they die. The guard tracks the doomed object;
+    /// raw is kept so a canvas still reporting the (now destroyed) pointer as
+    /// its current layer keeps the entry filtering instead of resurrecting a
+    /// dangling pointer.
+    struct DyingLayer
+    {
+        QPointer<QgsMapLayer> guard;
+        QgsMapLayer *raw = nullptr;
+    };
+    QList<DyingLayer> m_dyingLayers;
     mutable bool m_cacheValid = false;
     QStringList m_selectedAssetIds;
     QStringList m_selectedResultIds;

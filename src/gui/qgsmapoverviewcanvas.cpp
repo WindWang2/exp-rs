@@ -209,6 +209,20 @@ void QgsMapOverviewCanvas::updatePanningWidget( QPoint pos )
   mPanningWidget->move( pos.x() - mPanningCursorOffset.x(), pos.y() - mPanningCursorOffset.y() );
 }
 
+void QgsMapOverviewCanvas::stopRenderingAndSettle()
+{
+  // Blocking cancel (the same idiom refresh() uses to swap jobs): returns
+  // only after the painter thread finished, so layers can be safely
+  // destroyed by the caller afterwards.
+  if ( mJob )
+  {
+    disconnect( mJob, &QgsMapRendererJob::finished, this, &QgsMapOverviewCanvas::mapRenderingFinished );
+    whileBlocking( mJob )->cancel();
+    delete mJob;
+    mJob = nullptr;
+  }
+}
+
 void QgsMapOverviewCanvas::refresh()
 {
   if ( !isVisible() )

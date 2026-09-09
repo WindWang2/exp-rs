@@ -153,4 +153,9 @@ private:
 
     ActiveHandle m_activeHandle = ActiveHandle::None;
     bool m_isDragging = false;
+
+    // #797: scan-pool generation of the in-flight request (canceled when the
+    // dataset/cache is released so the bounded pool stops reading GDAL
+    // sources for a widget that is gone).
+    quint64 m_scanGeneration = 0;
 };

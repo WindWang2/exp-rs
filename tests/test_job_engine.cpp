@@ -1520,3 +1520,99 @@ TEST_CASE( "engine queue pick honors request priority (#686)", "[job][priority]"
   REQUIRE( eng.snapshot( idHigh )->state == JobState::Succeeded );
   REQUIRE( eng.snapshot( idNormal )->state == JobState::Succeeded );
 }
+
+// ── Workbench 6.0 Milestone C: sub-job starvation guard (#798) ─────────────
+
+TEST_CASE( "worker-originated sub-job never deadlocks a saturated pool (#798)",
+           "[job][concurrency][ux6]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  // Two OUTER jobs saturate the pool. Each body submits a sub-job and blocks
+  // until that sub-job reaches a terminal state. Without the transient
+  // capacity raise (#798) no worker would remain to pick the queued sub-jobs
+  // and both bodies would wait forever.
+  std::atomic<int> completedOuter{ 0 };
+
+  auto submitOuter = [&]( int tag ) {
+    JobRequest req;
+    req.algorithmId = "callable:outer";
+    req.params["tag"] = tag;
+    return eng.submit( req, [&]( const JobRequest &r, RSOperatorContext & ) {
+      JobRequest sub;
+      sub.algorithmId = "callable:sub";
+      sub.params["tag"] = r.params["tag"];
+      // Submit + wait from a WORKER thread — exactly the #798 pattern.
+      const std::string subId = eng.submit( sub, []( const JobRequest &,
+                                                     RSOperatorContext & ) {
+        return Json::Value( Json::objectValue );
+      } );
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
+      for ( ;; )
+      {
+        auto snap = eng.snapshot( subId );
+        if ( snap && ( snap->state == JobState::Succeeded || snap->state == JobState::Failed
+                       || snap->state == JobState::Cancelled ) )
+          break;
+        if ( std::chrono::steady_clock::now() > deadline )
+          return Json::Value( Json::objectValue ); // starved — outer finishes without the sub
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+      }
+      completedOuter.fetch_add( 1 );
+      Json::Value res( Json::objectValue );
+      res["outer"] = r.params["tag"];
+      return res;
+    } );
+  };
+
+  const auto a = submitOuter( 1 );
+  const auto b = submitOuter( 2 );
+
+  // Bounded overall wait: both outer bodies must see their sub-job terminal
+  // (completion, not speed, is the contract — no timing assertion).
+  const auto overall = std::chrono::steady_clock::now() + std::chrono::seconds( 60 );
+  while ( completedOuter.load() < 2 && std::chrono::steady_clock::now() < overall )
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+
+  REQUIRE( completedOuter.load() == 2 );
+  REQUIRE( eng.snapshot( a )->state == JobState::Succeeded );
+  REQUIRE( eng.snapshot( b )->state == JobState::Succeeded );
+  eng.waitUntilIdleForTests();
+}
+
+TEST_CASE( "submitWithId refuses an occupied id and submits a free one (#799)",
+           "[job][contract][ux6]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  JobRequest req;
+  req.algorithmId = "callable:cycle";
+  req.params["c"] = 7;
+
+  const std::string chosen = "ux6-fixed-id";
+  const auto id = eng.submitWithId( req, chosen, []( const JobRequest &r,
+                                                     RSOperatorContext & ) {
+    Json::Value res( Json::objectValue );
+    res["c"] = r.params["c"];
+    return res;
+  } );
+  REQUIRE( id == chosen );
+  eng.waitUntilIdleForTests();
+  REQUIRE( eng.snapshot( id )->state == JobState::Succeeded );
+
+  // Same id again → refused (empty), engine state untouched.
+  JobRequest req2;
+  req2.algorithmId = "callable:cycle";
+  REQUIRE( eng.submitWithId( req2, chosen ).empty() );
+  REQUIRE( eng.snapshot( chosen )->state == JobState::Succeeded );
+
+  // A different free id submits normally.
+  REQUIRE( eng.submitWithId( req2, "ux6-fixed-id-2" ) == "ux6-fixed-id-2" );
+  eng.waitUntilIdleForTests();
+}

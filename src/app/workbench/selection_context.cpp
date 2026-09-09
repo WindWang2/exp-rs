@@ -8,6 +8,7 @@
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
 #include <qgsmaplayertemporalproperties.h>
+#include <qgsproject.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
 #include <qgsproject.h>
@@ -16,10 +17,32 @@
 #include <layertree/qgslayertreeviewdefaultactions.h>
 
 #include <QMetaType>
+#include <QSet>
 #include <QTimer>
 
 namespace sicnu::app
 {
+
+namespace
+{
+
+/// #778 helper: drop dead entries from the guard list; true when any entry
+/// died (the cached snapshot then references a destroyed object).
+bool pruneDeadGuards( QList<QPointer<QgsMapLayer>> &guards )
+{
+    bool removed = false;
+    for ( int i = guards.size() - 1; i >= 0; --i )
+    {
+        if ( !guards.at( i ) )
+        {
+            guards.removeAt( i );
+            removed = true;
+        }
+    }
+    return removed;
+}
+
+} // namespace
 
 namespace
 {
@@ -93,6 +116,21 @@ QgsRasterLayer *SelectionContextSnapshot::firstRasterLayer() const
 namespace ContextRules
 {
 
+ContextFacts prerequisiteFacts( const SelectionContextSnapshot &s )
+{
+    ContextFacts facts;
+    facts.workbenchId = s.workbenchId;
+    facts.hasLayerSelection = layerSelected( s );
+    facts.hasRaster = rasterSelected( s );
+    facts.hasVector = vectorSelected( s );
+    facts.hasSar = sarSelected( s );
+    facts.editable = editingAvailable( s );
+    facts.editing = editingActive( s );
+    facts.hasGovernanceResult = resultSelected( s );
+    facts.hasGovernanceAsset = assetSelected( s );
+    return facts;
+}
+
 bool rasterSelected( const SelectionContextSnapshot &s )
 {
     if ( s.hasRaster )
@@ -138,8 +176,34 @@ bool assetSelected( const SelectionContextSnapshot &s )
 
 QString unavailabilityReason( const SelectionContextSnapshot &s, const QString &commandId )
 {
-    if ( commandId.startsWith( QStringLiteral( "layer.edit." ) ) )
+    // Milestone E: deterministic reasons over prerequisiteFacts — an empty
+    // return means "available", a non-empty return is the user-facing
+    // explanation the palette / tooltips show. Every command id that DECLARES
+    // an availability predicate must have a case here (review L #1: the old
+    // chain had a dead layer.edit.* case while the real edit commands fell
+    // through to an empty explanation).
+    if ( commandId == QLatin1String( "layer.toggleEditing" ) )
     {
+        if ( !vectorSelected( s ) )
+            return QObject::tr( "需要选中矢量图层" );
+        if ( !editingAvailable( s ) )
+            return QObject::tr( "当前图层不可编辑" );
+    }
+    else if ( commandId == QLatin1String( "layer.saveEdits" ) )
+    {
+        if ( !vectorSelected( s ) )
+            return QObject::tr( "需要选中矢量图层" );
+        if ( !editingActive( s ) )
+            return QObject::tr( "请先开启编辑会话" );
+    }
+    else if ( commandId == QLatin1String( "layer.attributeTable" ) )
+    {
+        if ( !vectorSelected( s ) )
+            return QObject::tr( "需要选中矢量图层" );
+    }
+    else if ( commandId.startsWith( QStringLiteral( "layer.edit." ) ) )
+    {
+        // Reserved edit-command family (no registrations yet).
         if ( !vectorSelected( s ) )
             return QObject::tr( "需要选中矢量图层" );
         if ( !editingAvailable( s ) )
@@ -149,7 +213,9 @@ QString unavailabilityReason( const SelectionContextSnapshot &s, const QString &
     {
         return QObject::tr( "需要选中图层" );
     }
-    else if ( commandId.startsWith( QStringLiteral( "raster." ) ) && !rasterSelected( s ) )
+    else if ( ( commandId.startsWith( QStringLiteral( "raster." ) )
+                || commandId.startsWith( QStringLiteral( "rs." ) ) )
+              && !rasterSelected( s ) )
     {
         return QObject::tr( "需要选中栅格图层" );
     }
@@ -182,22 +248,46 @@ SelectionContext::SelectionContext( QObject *parent )
     m_debounce->setSingleShot( true );
     m_debounce->setInterval( 150 );
     connect( m_debounce, &QTimer::timeout, this, &SelectionContext::refreshNow );
-
     if ( QgsProject::instance() )
     {
-        connect( QgsProject::instance(),
-                 qOverload<const QList<QgsMapLayer *> &>( &QgsProject::layersWillBeRemoved ),
+        // #778: the project announces layer removal BEFORE the QgsMapLayer object
+        // is destroyed — purge it from every projection right away. Batch removals
+        // (removeMapLayers / clear) emit this per-layer signal for each layer.
+        connect( QgsProject::instance(), qOverload<QgsMapLayer *>( &QgsProject::layerWillBeRemoved ),
+                 this, [this]( QgsMapLayer *layer ) { handleLayerWillBeRemoved( layer ); } );
+        connect( QgsProject::instance(), qOverload<const QList<QgsMapLayer *> &>( &QgsProject::layersWillBeRemoved ),
                  this, [this]( const QList<QgsMapLayer *> &layers ) {
-                     m_cacheValid = false;
                      for ( QgsMapLayer *layer : layers )
-                     {
-                         if ( m_cached.activeLayer == layer )
-                             m_cached.activeLayer = nullptr;
-                         m_cached.selectedLayers.removeAll( layer );
-                     }
-                     scheduleRefresh();
+                         handleLayerWillBeRemoved( layer );
+                 } );
+        connect( QgsProject::instance(), qOverload<const QString &>( &QgsProject::layerWillBeRemoved ),
+                 this, [this]( const QString & ) {
+                     // id-based announcement: the cached snapshot may borrow the
+                     // doomed layer even if the object signal was not observed.
+                     m_cacheValid = false;
                  } );
     }
+}
+
+void SelectionContext::handleLayerWillBeRemoved( QgsMapLayer *layer )
+{
+    if ( !layer )
+        return;
+    DyingLayer tombstone;
+    tombstone.guard = QPointer<QgsMapLayer>( layer );
+    tombstone.raw = layer;
+    m_dyingLayers.append( tombstone );
+    m_cacheValid = false;
+    if ( m_cached.activeLayer == layer )
+        m_cached.activeLayer = nullptr;
+    m_cached.selectedLayers.removeAll( layer );
+    if ( m_canvas && m_canvas->currentLayer() == layer )
+    {
+        m_canvas->setCurrentLayer( nullptr );
+    }
+    // Re-broadcast immediately (not on the debounce): consumers re-query and
+    // never observe the doomed pointer across the removal.
+    refreshNow();
 }
 
 void SelectionContext::attachCanvas( QgsMapCanvas *canvas )
@@ -214,8 +304,13 @@ void SelectionContext::attachLayerTree( QgsLayerTreeView *tree )
     if ( !tree || tree == m_layerTree )
         return;
     m_layerTree = tree;
-    connect( tree->selectionModel(), &QItemSelectionModel::selectionChanged,
-             this, &SelectionContext::scheduleRefresh );
+    // A view without a QTreeView model has no selection model yet (headless
+    // fixtures that skipped setModel()) — guard instead of connecting null.
+    if ( QItemSelectionModel *selectionModel = tree->selectionModel() )
+    {
+        connect( selectionModel, &QItemSelectionModel::selectionChanged,
+                 this, &SelectionContext::scheduleRefresh );
+    }
 }
 
 void SelectionContext::attachWorkbenchHost( WorkbenchHost *host )
@@ -251,9 +346,21 @@ void SelectionContext::setSarPredicate( SarPredicate predicate )
 
 SelectionContextSnapshot SelectionContext::snapshot() const
 {
+    // #778: a cached layer may have been destroyed without a removal signal
+    // (tests, third-party code) — the guard mirror detects the corpse.
+    if ( m_cacheValid && pruneDeadGuards( m_cachedLayerGuard ) )
+        m_cacheValid = false;
     if ( !m_cacheValid )
     {
         m_cached = computeSnapshot();
+        m_cachedLayerGuard.clear();
+        if ( m_cached.activeLayer )
+            m_cachedLayerGuard.append( QPointer<QgsMapLayer>( m_cached.activeLayer ) );
+        for ( QgsMapLayer *layer : m_cached.selectedLayers )
+        {
+            if ( layer )
+                m_cachedLayerGuard.append( QPointer<QgsMapLayer>( layer ) );
+        }
         m_cacheValid = true;
     }
     return m_cached;
@@ -263,6 +370,20 @@ void SelectionContext::refreshNow()
 {
     if ( m_debounce->isActive() )
         m_debounce->stop();
+    // Retire tombstones: keep them while the doomed layer is alive, and while
+    // the canvas could still report the (destroyed) pointer as its current
+    // layer; drop the rest so the blacklist never grows unbounded and never
+    // filters an unrelated layer that reused the address.
+    const QgsMapLayer *canvasCurrentRaw = m_canvas ? m_canvas->currentLayer() : nullptr;
+    for ( int i = m_dyingLayers.size() - 1; i >= 0; --i )
+    {
+        const DyingLayer &d = m_dyingLayers.at( i );
+        if ( d.guard )
+            continue; // doomed but alive — still must be filtered
+        if ( canvasCurrentRaw && canvasCurrentRaw == d.raw )
+            continue; // canvas can still produce the dangling pointer
+        m_dyingLayers.removeAt( i );
+    }
     m_cacheValid = false;
     emit changed( snapshot() );
 }
@@ -278,6 +399,25 @@ SelectionContextSnapshot SelectionContext::computeSnapshot() const
 {
     SelectionContextSnapshot snap;
 
+    // #778: layers that announced removal are invisible to projections even
+    // while they are still briefly reachable from the canvas / tree.
+    const auto dying = [this]( QgsMapLayer *layer ) {
+        if ( !layer )
+            return true;
+        for ( const DyingLayer &d : m_dyingLayers )
+        {
+            if ( d.guard && d.guard.data() == layer )
+                return true; // doomed and still alive
+            if ( !d.guard && d.raw == layer )
+            {
+                if ( QgsProject::instance() && QgsProject::instance()->mapLayer( layer->id() ) == layer )
+                    continue; // valid new layer reusing the address
+                return true; // destroyed — the pointer must never resurface
+            }
+        }
+        return false;
+    };
+
     if ( m_workbenchHost )
     {
         snap.workbenchId = m_workbenchHost->activeWorkbenchId();
@@ -287,17 +427,20 @@ SelectionContextSnapshot SelectionContext::computeSnapshot() const
 
     if ( m_canvas )
     {
-        snap.activeLayer = m_canvas->currentLayer();
+        QgsMapLayer *current = m_canvas->currentLayer();
+        snap.activeLayer = dying( current ) ? nullptr : current;
         snap.layerCount = m_canvas->layerCount();
     }
 
     if ( m_layerTree )
     {
         const QList<QgsMapLayer *> selected = m_layerTree->selectedLayers();
-        snap.selectedLayers = selected;
         for ( QgsMapLayer *layer : selected )
         {
-            if ( !layer || !layer->isValid() )
+            if ( !layer || dying( layer ) )
+                continue;
+            snap.selectedLayers.append( layer );
+            if ( !layer->isValid() )
             {
                 snap.hasBroken = true;
                 continue;

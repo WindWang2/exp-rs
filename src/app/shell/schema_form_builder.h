@@ -132,6 +132,13 @@ class SchemaFormBuilder : public QWidget
       QPlainTextEdit *plainEdit = nullptr;
       CrsSelector *crsSelector = nullptr;
       Json::Value prop; // original schema property for array item typing
+      // Milestone H (SchemaFormBuilder 3.0):
+      QString unit;         ///< x-ui-unit — appended to the label
+      QString recommended;  ///< x-ui-recommended — tooltip + accessible hint
+      /// x-ui-visible-when: {param: expectedValue} — the field is hidden and
+      /// excluded from values()/validate() while the condition does not hold.
+      Json::Value visibleWhen;
+      bool condHidden = false; ///< last computed visibility (see visibleWhen)
     };
 
     void clearFields();
@@ -145,6 +152,12 @@ class SchemaFormBuilder : public QWidget
                               const QStringList &names );
     QString readFieldValue( const Field &field ) const;
     void writeFieldValue( Field &field, const Json::Value &value );
+    /// Milestone H: re-evaluate x-ui-visible-when dependencies; hidden fields
+    /// are excluded from values()/validate() until their condition holds.
+    void updateConditionalVisibility();
+    /// Review L #5: canonical tooltip text (schema description + the
+    /// x-ui-recommended hint) shared by rebuild and validation-mark restore.
+    QString tooltipFor( const Field &field ) const;
 
     QVBoxLayout *m_root = nullptr;
     QList<Field> m_fields;

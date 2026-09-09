@@ -74,85 +74,117 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
         new sicnu::app::MapWorkbench( m_canvasStack, m_workbenchHost ) );
 
     // External session benches wrap the existing lazy-open slots. No session
-    // logic moves here (Milestone H owns the shared session contract).
-    auto *classifyWb = new sicnu::app::ExternalWindowWorkbench(
-        QStringLiteral( "classify" ), tr( "分类工作区" ), QStringLiteral( "su_ervised" ),
-        [this] { openClassificationWindow(); },
-        [this]() -> QWidget * { return m_classifyWindow; },
-        [this]() -> bool {
+    // logic moves here; the benches expose the shared lifecycle contract
+    // (#813): window lifetime tracking, dirty state, in-flight compute and
+    // cancel routing through each session's own TaskCenter seam, and close
+    // delegation to the window's own closeEvent confirmation.
+    {
+        auto *bench = new sicnu::app::ExternalWindowWorkbench(
+            QStringLiteral( "classify" ), tr( "分类工作区" ), QStringLiteral( "su_ervised" ),
+            [this] {
 #ifdef SICNU_HAS_CLASSIFY
-            return m_classifyWindow ? m_classifyWindow->isSessionDirty() : false;
+                openClassificationWindow();
+#endif
+            }, m_workbenchHost );
+        bench->setWindowGetter( [this]() -> QWidget * {
+#ifdef SICNU_HAS_CLASSIFY
+            return m_classifyWindow;
+#else
+            return nullptr;
+#endif
+        } );
+        bench->setDirtyFn( [this] {
+#ifdef SICNU_HAS_CLASSIFY
+            return m_classifyWindow && m_classifyWindow->isSessionDirty();
 #else
             return false;
 #endif
-        },
-        [this]() -> bool {
-            if ( m_classifyWindow )
-            {
-                m_classifyWindow->close();
-                return !m_classifyWindow->isVisible();
-            }
+        } );
+        bench->setInFlightFn( [this] {
+#ifdef SICNU_HAS_CLASSIFY
+            return m_classifyWindow && m_classifyWindow->hasInFlightCompute();
+#else
+            return false;
+#endif
+        } );
+        bench->setCancelFn( [this] {
+#ifdef SICNU_HAS_CLASSIFY
+            if ( !m_classifyWindow || !m_classifyWindow->hasInFlightCompute() )
+                return false;
+            m_classifyWindow->cancelInFlightCompute();
             return true;
-        },
-        m_workbenchHost );
-    m_workbenchHost->registerWorkbench( classifyWb );
-
-    auto *georefI2IWb = new sicnu::app::ExternalWindowWorkbench(
-        QStringLiteral( "georef-i2i" ), tr( "影像对影像配准" ), QStringLiteral( "coregistr_tion" ),
-        [this] { openGeorefImageToImage(); },
-        [this]() -> QWidget * { return m_georefI2I; },
-        nullptr,
-        [this]() -> bool {
-            if ( m_georefI2I )
-            {
-                m_georefI2I->close();
-                return !m_georefI2I->isVisible();
-            }
+#else
+            return false;
+#endif
+        } );
+        bench->setCloseFn( [this] {
+#ifdef SICNU_HAS_CLASSIFY
+            if ( !m_classifyWindow )
+                return true;
+            m_classifyWindow->close(); // its closeEvent confirms unsaved state
+            return !m_classifyWindow->isVisible();
+#else
             return true;
-        },
-        m_workbenchHost );
-    m_workbenchHost->registerWorkbench( georefI2IWb );
+#endif
+        } );
+        m_workbenchHost->registerWorkbench( bench );
+    }
 
-    auto *georefI2MWb = new sicnu::app::ExternalWindowWorkbench(
-        QStringLiteral( "georef-i2m" ), tr( "影像对地图配准" ), QStringLiteral( "geocorrection" ),
-        [this] { openGeorefImageToMap(); },
-        [this]() -> QWidget * { return m_georefI2M; },
-        nullptr,
-        [this]() -> bool {
-            if ( m_georefI2M )
-            {
-                m_georefI2M->close();
-                return !m_georefI2M->isVisible();
-            }
-            return true;
-        },
-        m_workbenchHost );
-    m_workbenchHost->registerWorkbench( georefI2MWb );
+    {
+        auto *bench = new sicnu::app::ExternalWindowWorkbench(
+            QStringLiteral( "georef-i2i" ), tr( "影像对影像配准" ), QStringLiteral( "coregistr_tion" ),
+            [this] { openGeorefImageToImage(); }, m_workbenchHost );
+        bench->setWindowGetter( [this]() -> QWidget * { return m_georefI2I; } );
+        bench->setDirtyFn( [this] { return m_georefI2I && m_georefI2I->isDirtyForTest(); } );
+        bench->setCloseFn( [this] {
+            if ( !m_georefI2I )
+                return true;
+            m_georefI2I->close();
+            return !m_georefI2I->isVisible();
+        } );
+        m_workbenchHost->registerWorkbench( bench );
+    }
 
-    auto *obiaWb = new sicnu::app::ExternalWindowWorkbench(
-        QStringLiteral( "obia" ), tr( "对象级分类" ), QStringLiteral( "seg_ent_tion" ),
-        [this] { openObiaWindow(); },
-        [this]() -> QWidget * { return m_obiaWindow; },
-        nullptr,
-        [this]() -> bool {
-            if ( m_obiaWindow )
-            {
-                m_obiaWindow->close();
-                return !m_obiaWindow->isVisible();
-            }
-            return true;
-        },
-        m_workbenchHost );
-    m_workbenchHost->registerWorkbench( obiaWb );
+    {
+        auto *bench = new sicnu::app::ExternalWindowWorkbench(
+            QStringLiteral( "georef-i2m" ), tr( "影像对地图配准" ), QStringLiteral( "geocorrection" ),
+            [this] { openGeorefImageToMap(); }, m_workbenchHost );
+        bench->setWindowGetter( [this]() -> QWidget * { return m_georefI2M; } );
+        bench->setDirtyFn( [this] { return m_georefI2M && m_georefI2M->isDirtyForTest(); } );
+        bench->setCloseFn( [this] {
+            if ( !m_georefI2M )
+                return true;
+            m_georefI2M->close();
+            return !m_georefI2M->isVisible();
+        } );
+        m_workbenchHost->registerWorkbench( bench );
+    }
 
-    auto *layoutWb = new sicnu::app::ExternalWindowWorkbench(
+    // The OBIA window exposes no dirty/in-flight state yet — the bench still
+    // gains lifetime tracking and close delegation (#813 baseline).
+    {
+        auto *bench = new sicnu::app::ExternalWindowWorkbench(
+            QStringLiteral( "obia" ), tr( "对象级分类" ), QStringLiteral( "seg_ent_tion" ),
+            [this] { openObiaWindow(); }, m_workbenchHost );
+        bench->setWindowGetter( [this]() -> QWidget * { return m_obiaWindow; } );
+        bench->setCloseFn( [this] {
+            if ( !m_obiaWindow )
+                return true;
+            m_obiaWindow->close();
+            return !m_obiaWindow->isVisible();
+        } );
+        m_workbenchHost->registerWorkbench( bench );
+    }
+
+    // Layout designers are created per invocation (no singleton window to
+    // track); the bench keeps the plain lazy-open contract.
+    m_workbenchHost->registerWorkbench( new sicnu::app::ExternalWindowWorkbench(
         QStringLiteral( "layout" ), tr( "布局设计" ), QStringLiteral( "print_l_yout" ),
         [this] { newLayout(); },
         nullptr,
         nullptr,
         nullptr,
-        m_workbenchHost );
-    m_workbenchHost->registerWorkbench( layoutWb );
+        m_workbenchHost ) );
 
     m_workbenchHost->activate( QStringLiteral( "map" ) );
 
@@ -228,6 +260,8 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     m_inspectorHost = new sicnu::app::InspectorHost( m_inspectorDock );
     m_inspectorHost->registerSection( new sicnu::app::LayerGeneralSection( m_inspectorHost ) );
     m_inspectorHost->registerSection( new sicnu::app::LayerMetadataSection( m_inspectorHost ) );
+    m_inspectorHost->registerSection( new sicnu::app::VectorStructureSection( m_inspectorHost ) );
+    m_inspectorHost->registerSection( new sicnu::app::SarInfoSection( m_inspectorHost ) );
     m_inspectorHost->attachSelectionContext( m_selectionContext );
     m_inspectorDock->setWidget( m_inspectorHost );
     addDockWidget( Qt::RightDockWidgetArea, m_inspectorDock );

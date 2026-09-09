@@ -15,6 +15,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace sicnu::jobs {
@@ -98,6 +99,17 @@ class JobEngine
      * "module:classify:apply").
      */
     std::string submit( JobRequest req, JobExecutor executor, CancelHook onCancel = {} );
+
+    /**
+     * Submit with a CALLER-CHOSEN job id (#799). TaskCenter uses this to
+     * register its task↔job mapping BEFORE the job exists, so a job that
+     * completes instantly can never be mis-recorded as unknown and strand its
+     * task in Dispatching. Returns @p jobId, or an empty string when the id is
+     * already taken (the engine then owns nothing — no record is created).
+     * The id must be unique across the engine's record retention window.
+     */
+    std::string submitWithId( JobRequest req, const std::string &jobId,
+                              JobExecutor executor = {}, CancelHook onCancel = {} );
 
     /**
      * Synchronously wait for a job to reach a terminal state (Succeeded, Failed, Cancelled).
@@ -227,6 +239,19 @@ class JobEngine
     uint64_t m_generation = 0;
     std::atomic<bool> m_stop{false};
     std::atomic<uint64_t> m_nextId{1};
+
+    // ── Sub-job starvation guard (#798) ────────────────────────────────
+    /// A job body that submits a sub-job and blocks on it must never deadlock
+    /// the pool: when ALL workers are blocked waiting for queued sub-jobs, no
+    /// thread would remain to pick them. submit() called FROM a worker thread
+    /// therefore raises m_transientAllowance so the pool temporarily exceeds
+    /// m_maxWorkers and the sub-job is always runnable. Bounded by
+    /// kMaxTransientWorkers; each transient-backed job's completion restores
+    /// one slot. Blocking waits remain forbidden on worker threads
+    /// (waitUntilIdleForTests refuses there).
+    static constexpr int kMaxTransientWorkers = 8;
+    int m_transientAllowance = 0;
+    std::unordered_set<std::string> m_transientBacked; // sub-jobs holding +1 capacity
 };
 
 } // namespace sicnu::jobs

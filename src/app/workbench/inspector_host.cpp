@@ -95,22 +95,18 @@ void InspectorHost::rebuildTabs()
 
     if ( !m_hasSnapshot || !anySupported )
     {
-        if ( oldTabs )
-        {
-            for ( InspectorSection *section : m_sections )
-            {
-                if ( section )
-                {
-                    section->setParent( this );
-                    section->hide();
-                }
-            }
-            delete oldTabs;
-        }
+        // #777: QTabWidget owns its pages — deleting it would destroy the
+        // registered InspectorSections while m_sections keeps their pointers
+        // (use-after-free on the next selection change). Detach the sections
+        // first; they are re-added when a supported selection returns.
+        m_rebuilding = true;
+        rescueSectionsFrom( oldTabs );
+        m_rebuilding = false;
         m_stack->setCurrentWidget( m_placeholder );
         return;
     }
 
+    m_rebuilding = true;
     QTabWidget *tabs = oldTabs;
     if ( !tabs )
     {
@@ -118,15 +114,10 @@ void InspectorHost::rebuildTabs()
         tabs->setObjectName( QStringLiteral( "rsInspectorTabs" ) );
         tabs->setDocumentMode( true );
         m_stack->addWidget( tabs );
-        connect( tabs, &QTabWidget::currentChanged, this, [this, tabs]( int index ) {
-            if ( index < 0 )
-                return;
-            if ( auto *sec = qobject_cast<InspectorSection *>( tabs->widget( index ) ) )
-            {
-                sec->populate( m_snapshot );
-                sec->setProperty( "rsLazyPopulated", true );
-            }
-        } );
+        // #812: the shown section must populate on user tab switches too —
+        // without this, secondary tabs stay permanently blank. (Programmatic
+        // changes during the rebuild are swallowed by m_rebuilding.)
+        connect( tabs, &QTabWidget::currentChanged, this, &InspectorHost::onTabChanged );
     }
 
     {
@@ -151,7 +142,13 @@ void InspectorHost::rebuildTabs()
             if ( auto *section = qobject_cast<InspectorSection *>( page ) )
             {
                 if ( !wanted.contains( section->sectionId() ) )
+                {
                     tabs->removeTab( i );
+                    // Keep orphaned sections alive under the host, not the tab
+                    // widget's internal stack (same #777 ownership hazard).
+                    section->setParent( this );
+                    section->hide();
+                }
             }
         }
 
@@ -164,12 +161,44 @@ void InspectorHost::rebuildTabs()
             tabs->setCurrentIndex( 0 );
     }
 
-    // Populate exactly the shown section.
+    m_rebuilding = false;
     if ( InspectorSection *shown = currentSection() )
     {
         shown->populate( m_snapshot );
         shown->setProperty( "rsLazyPopulated", true );
     }
+}
+
+void InspectorHost::onTabChanged( int index )
+{
+    if ( m_rebuilding )
+        return; // programmatic add/remove during rebuild — the shown section
+                // is populated exactly once at the end of rebuildTabs()
+    QTabWidget *tabs = m_stack->findChild<QTabWidget *>( QStringLiteral( "rsInspectorTabs" ) );
+    if ( !tabs || index < 0 || index >= tabs->count() )
+        return;
+    InspectorSection *section = qobject_cast<InspectorSection *>( tabs->widget( index ) );
+    if ( !section || !m_hasSnapshot || !section->supports( m_snapshot ) )
+        return;
+    section->populate( m_snapshot );
+    section->setProperty( "rsLazyPopulated", true );
+}
+
+void InspectorHost::rescueSectionsFrom( QTabWidget *tabs )
+{
+    if ( !tabs )
+        return;
+    while ( tabs->count() > 0 )
+    {
+        QWidget *page = tabs->widget( 0 );
+        tabs->removeTab( 0 );
+        if ( page )
+        {
+            page->setParent( this );
+            page->hide();
+        }
+    }
+    delete tabs;
 }
 
 InspectorSection *InspectorHost::currentSection() const

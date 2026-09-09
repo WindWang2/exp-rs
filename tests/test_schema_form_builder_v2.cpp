@@ -236,3 +236,156 @@ TEST_CASE( "Invalid JSON and invalid color produce inline errors", "[ux4][schema
     form.updateValidationUi();
     REQUIRE( form.hasErrors() );
 }
+
+#include <QDoubleSpinBox>
+#include <catch2/catch_approx.hpp>
+
+// ── Workbench 6.0 Milestone H: units, recommended values, soft ranges ──────
+
+TEST_CASE( "SchemaFormBuilder 3.0: unit labels, recommended hints, soft-range warnings",
+           "[ux6][schema-form]" )
+{
+    testApp();
+    Json::Value schema;
+    schema["type"] = "object";
+    Json::Value props;
+    Json::Value res;
+    res["type"] = "number";
+    res["title"] = "分辨率";
+    res["x-ui-unit"] = "m";
+    res["x-ui-recommended"] = "10";
+    res["x-ui-soft-min"] = 1.0;
+    res["x-ui-soft-max"] = 100.0;
+    res["default"] = 10.0;
+    props["resolution"] = res;
+    schema["properties"] = props;
+
+    SchemaFormBuilder form;
+    form.rebuild( schema );
+
+    QDoubleSpinBox *spin = form.findChild<QDoubleSpinBox *>();
+    REQUIRE( spin != nullptr );
+
+    // Unit hint surfaces in the label (Milestone H).
+    bool labelHasUnit = false;
+    const QList<QLabel *> labels = form.findChildren<QLabel *>();
+    for ( const QLabel *l : labels )
+    {
+        if ( l->text().contains( QLatin1String( "(m)" ) ) )
+            labelHasUnit = true;
+    }
+    REQUIRE( labelHasUnit );
+
+    // Recommended value surfaces as a tooltip (and accessible hint).
+    REQUIRE_FALSE( spin->toolTip().isEmpty() );
+    CHECK( spin->toolTip().contains( QLatin1String( "10" ) ) );
+
+    // Within the soft range: no issues at all.
+    spin->setValue( 10.0 );
+    CHECK( form.validate().isEmpty() );
+
+    // Above the soft (but inside the hard) range: a WARNING, never blocking.
+    spin->setValue( 500.0 );
+    bool sawWarning = false;
+    bool sawBlocking = false;
+    for ( const auto &issue : form.validate() )
+    {
+        if ( issue.fieldName != QLatin1String( "resolution" ) )
+            continue;
+        if ( issue.isError )
+            sawBlocking = true;
+        else
+            sawWarning = true;
+    }
+    REQUIRE( sawWarning );
+    REQUIRE_FALSE( sawBlocking );
+}
+
+TEST_CASE( "SchemaFormBuilder 3.0: x-ui-visible-when hides and excludes conditional fields",
+           "[ux6][schema-form]" )
+{
+    testApp();
+    Json::Value schema;
+    schema["type"] = "object";
+    Json::Value props;
+    Json::Value mode;
+    mode["type"] = "string";
+    Json::Value modes = Json::Value( Json::arrayValue );
+    modes.append( "auto" );
+    modes.append( "manual" );
+    mode["enum"] = modes;
+    mode["default"] = "auto";
+    props["mode"] = mode;
+
+    Json::Value thresh;
+    thresh["type"] = "number";
+    thresh["title"] = "阈值";
+    Json::Value when;
+    when["mode"] = "manual";
+    thresh["x-ui-visible-when"] = when;
+    thresh["default"] = 0.5;
+    props["threshold"] = thresh;
+    schema["properties"] = props;
+
+    SchemaFormBuilder form;
+    form.rebuild( schema );
+
+    // auto mode: the dependent field is hidden AND excluded from values().
+    form.updateValidationUi();
+    Json::Value autoValues = form.values();
+    CHECK( autoValues.isMember( "mode" ) );
+    CHECK_FALSE( autoValues.isMember( "threshold" ) );
+
+    // manual mode: the field becomes visible and is collected again.
+    QComboBox *combo = form.findChild<QComboBox *>();
+    REQUIRE( combo != nullptr );
+    combo->setCurrentText( QStringLiteral( "manual" ) );
+    form.updateValidationUi();
+    Json::Value manualValues = form.values();
+    CHECK( manualValues.isMember( "threshold" ) );
+    CHECK( manualValues["threshold"].asDouble() == Catch::Approx( 0.5 ) );
+}
+
+// ── Review L #3: setValues re-evaluates conditional visibility ─────────────
+
+TEST_CASE( "SchemaFormBuilder 3.0: setValues refreshes x-ui-visible-when state",
+           "[ux6][schema-form][review-l]" )
+{
+    testApp();
+    Json::Value schema;
+    schema["type"] = "object";
+    Json::Value props;
+    Json::Value mode;
+    mode["type"] = "string";
+    Json::Value modes = Json::Value( Json::arrayValue );
+    modes.append( "auto" );
+    modes.append( "manual" );
+    mode["enum"] = modes;
+    mode["default"] = "auto";
+    props["mode"] = mode;
+
+    Json::Value thresh;
+    thresh["type"] = "number";
+    thresh["title"] = "阈值";
+    Json::Value when;
+    when["mode"] = "manual";
+    thresh["x-ui-visible-when"] = when;
+    thresh["default"] = 0.5;
+    props["threshold"] = thresh;
+    schema["properties"] = props;
+
+    SchemaFormBuilder form;
+    form.rebuild( schema );
+
+    // setValues suppresses widget signals — the conditional re-evaluation
+    // must still happen, or the dependent field stays hidden AND excluded
+    // from values()/validate() even though its condition now holds.
+    Json::Value values;
+    values["mode"] = "manual";
+    values["threshold"] = 0.5;
+    form.setValues( values );
+
+    Json::Value collected = form.values();
+    CHECK( collected.isMember( "threshold" ) );
+    CHECK( collected["threshold"].asDouble() == Catch::Approx( 0.5 ) );
+}

@@ -55,6 +55,17 @@ void ExternalWindowWorkbench::activate()
         m_opener();
 }
 
+bool ExternalWindowWorkbench::requestCancel()
+{
+    // #813: forward to the session's TaskCenter-backed cancel hook. A bench
+    // without a hook (or without running work) reports nothing to cancel.
+    if ( !m_cancelFn )
+        return false;
+    if ( m_inFlightFn && !m_inFlightFn() )
+        return false;
+    return m_cancelFn();
+}
+
 bool ExternalWindowWorkbench::requestClose()
 {
     if ( m_closeFn )

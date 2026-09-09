@@ -12,6 +12,7 @@
 #include <qgslayertreelayer.h>
 #include <qgslayertreemapcanvasbridge.h>
 #include <qgsmapcanvas.h>
+#include <qgsmapoverviewcanvas.h>
 #include <qgsmaplayer.h>
 #include <qgsmaplayerstore.h>
 #include <qgsmaplayerstyle.h>
@@ -224,6 +225,23 @@ struct QgisDisplayManager::Impl {
       ++viewRecord->canvasLayerSyncCount;
       viewRecord->bridge->setCanvasLayers();
     }
+  }
+
+  /// #779: block until any in-flight canvas render has fully wound down so
+  /// the caller can destroy layers without the render threads touching them.
+  /// The overview canvas renders the SAME layer instances (main view) and is
+  /// settled as well when registered via setOverviewCanvas (review L P1).
+  /// No-op when the canvases are idle (or already gone).
+  static void settleRendering(ViewRecord *viewRecord) {
+    if (viewRecord && viewRecord->canvas)
+      viewRecord->canvas->stopRenderingAndSettle();
+  }
+  static void settleRenderingIncludingOverview(
+      ViewRecord *viewRecord, const QPointer<QObject> &overview) {
+    settleRendering(viewRecord);
+    if (overview)
+      qobject_cast<QgsMapOverviewCanvas *>(overview.data())
+          ->stopRenderingAndSettle();
   }
 
   struct LayerRecord {
@@ -842,8 +860,12 @@ data::Result<void> QgisDisplayManager::relocateLayer(DisplayLayerId layerId) {
     viewRecord->canvas->stopRendering();
 
   // Remove the stale layer from the store after the replacement is registered.
-  if (viewRecord->layerStore->mapLayer(oldQgisLayerId))
+  // #779: the store removal destroys the old layer — settle an in-flight
+  // render first so its threads cannot dereference the doomed layer.
+  if (viewRecord->layerStore->mapLayer(oldQgisLayerId)) {
+    m_impl->settleRenderingIncludingOverview(viewRecord, m_overviewCanvas);
     viewRecord->layerStore->removeMapLayer(oldQgisLayerId);
+  }
   Impl::syncViewCanvasLayers(viewRecord);
 
   // Update the record: same DisplayLayerId and asset, new QGIS layer and lease.
@@ -877,6 +899,13 @@ data::Result<void> QgisDisplayManager::removeLayer(DisplayLayerId layerId) {
   const QString qgisLayerId = layerRecord->snapshot.qgisLayerId();
 
   if (viewRecord) {
+    // #779: removing the layer from the store destroys it. If a canvas render
+    // is in flight, its background threads still hold the layer pointer —
+    // settle the rendering first or the render thread dereferences freed
+    // memory. The overview canvas renders the same instances and is settled
+    // too (review L P1).
+    m_impl->settleRenderingIncludingOverview(viewRecord, m_overviewCanvas);
+
     viewRecord->layerIds.removeAll(layerId);
     if (viewRecord->layerTree) {
       if (QgsLayerTreeLayer *node =
@@ -962,6 +991,15 @@ QgisDisplayManager::layer(DisplayLayerId layerId) const {
 QgsMapLayer *QgisDisplayManager::mapLayer(DisplayLayerId layerId) const {
   const Impl::LayerRecord *record = m_impl->findLayer(layerId);
   return record ? record->mapLayer.data() : nullptr;
+}
+
+void QgisDisplayManager::setOverviewCanvas(QgsMapOverviewCanvas *overview) {
+  m_overviewCanvas = overview;
+}
+
+QgsLayerTree *QgisDisplayManager::viewLayerTree(DisplayViewId viewId) const {
+  const Impl::ViewRecord *record = m_impl->findView(viewId);
+  return record ? record->layerTree.data() : nullptr;
 }
 
 data::Result<void> QgisDisplayManager::setLayerVisible(DisplayLayerId layerId, bool visible) {

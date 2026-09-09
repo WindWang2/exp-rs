@@ -136,26 +136,63 @@ TEST_CASE( "InspectorHost: multi-section ordering by order()/id", "[inspector_ho
   REQUIRE( sections.back()->sectionId() == QLatin1String( "metadata" ) );
 }
 
-TEST_CASE( "InspectorHost: switching tabs lazily populates secondary sections (#812)",
-           "[inspector_host][behavior]" )
+// ── Workbench 6.0 Milestone A: lifecycle hazards (#777 / #780 / #812) ──────
+
+TEST_CASE( "InspectorHost: sections survive the unsupported→supported re-selection cycle",
+           "[inspector_host][lifecycle][ux6][contract]" )
 {
   ensureApp();
   sicnu::app::InspectorHost host;
-  FakeRasterSection sec1( QStringLiteral( "sec1" ), 1 );
-  FakeRasterSection sec2( QStringLiteral( "sec2" ), 2 );
-  host.registerSection( &sec1 );
-  host.registerSection( &sec2 );
+  FakeRasterSection general( QStringLiteral( "general" ) );
+  sicnu::app::InspectorSection *section = &general;
+  host.registerSection( section );
 
   host.setSnapshot( snapRaster() );
-  REQUIRE( sec1.populates == 1 );
-  REQUIRE( sec2.populates == 0 ); // secondary tab not yet shown, lazy
+  REQUIRE( general.populates == 1 );
+
+  // Selection moves away from raster: the tab widget is torn down and the
+  // placeholder shown. The registered section object MUST survive this
+  // rebuild (#777: delete oldTabs used to destroy it inside the QTabWidget).
+  host.setSnapshot( snapRaster( false ) );
+  REQUIRE( general.cancels == 1 );
+  REQUIRE( host.sections().size() == 1 );
+  REQUIRE( host.sections().first() == section );
+
+  // Re-selecting a supported object must not use-after-free and must repopulate
+  // the SAME section instance (#780 masks this whole cycle if it is untested).
+  host.setSnapshot( snapRaster() );
+  REQUIRE( host.sections().first() == section );
+  REQUIRE( general.populates == 2 );
+
+  // And a second full cycle keeps the pointer stable.
+  host.setSnapshot( snapRaster( false ) );
+  host.setSnapshot( snapRaster() );
+  REQUIRE( host.sections().first() == section );
+  REQUIRE( general.populates == 3 );
+}
+
+TEST_CASE( "InspectorHost: switching tabs populates the newly shown section",
+           "[inspector_host][behavior][ux6][contract]" )
+{
+  ensureApp();
+  sicnu::app::InspectorHost host;
+  FakeRasterSection general( QStringLiteral( "general" ), 0 );
+  FakeRasterSection metadata( QStringLiteral( "metadata" ), 10 );
+  host.registerSection( &general );
+  host.registerSection( &metadata );
+
+  host.setSnapshot( snapRaster() );
+  REQUIRE( general.populates == 1 );
+  REQUIRE( metadata.populates == 0 ); // lazy: only the shown tab populates
 
   auto *tabs = host.findChild<QTabWidget *>( QStringLiteral( "rsInspectorTabs" ) );
   REQUIRE( tabs );
   REQUIRE( tabs->count() == 2 );
 
-  // Switch to secondary tab
+  // #812: currentChanged was never connected — the secondary tab stayed
+  // permanently blank. A user tab switch must populate the shown section.
   tabs->setCurrentIndex( 1 );
-  REQUIRE( sec2.populates == 1 );
+  REQUIRE( metadata.populates == 1 );
+  tabs->setCurrentIndex( 0 );
+  REQUIRE( general.populates == 2 );
 }
-
