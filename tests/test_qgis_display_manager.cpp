@@ -1018,3 +1018,54 @@ TEST_CASE( "QgisDisplayManager: 10. multi-layer batch update coalesces setCanvas
   REQUIRE( canvas.layers().size() == 5 );
 }
 
+
+// ── Workbench 6.0 Milestone A: removal during an active render (#779) ──────
+#include <QEventLoop>
+#include <QObject>
+#include <QTimer>
+#include <qgsrectangle.h>
+
+TEST_CASE("Removing a Display Layer during an active canvas render settles first (#779)",
+          "[qgis_display_manager][ux6]") {
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvas;
+  QgsLayerTree layerTree;
+  QgsMapLayerStore layerStore;
+  QgisDisplayManager displayManager(&dataManager);
+  const DisplayViewId viewId =
+      createView(displayManager, canvas, layerTree, layerStore);
+  const sicnu::data::AssetId assetId = registerRaster(dataManager);
+  const auto added = displayManager.addLayer(viewId, assetId);
+  REQUIRE(added);
+  canvas.setExtent(QgsRectangle(-1, -1, 2, 2));
+
+  bool removedDuringRender = false;
+  bool removedOk = false;
+  bool settled = false;
+  // removeLayer is called from INSIDE renderStarting — the render job is live
+  // and its background threads hold the layer pointer. The store removal must
+  // wait for the job to wind down before destroying the layer.
+  QObject::connect(&canvas, &QgsMapCanvas::renderStarting, &canvas, [&] {
+    removedDuringRender = true;
+    const auto removed = displayManager.removeLayer(added.value());
+    removedOk = static_cast<bool>(removed);
+    settled = !canvas.isDrawing();
+  });
+
+  canvas.refresh();
+  QEventLoop loop;
+  QTimer timeout;
+  timeout.setSingleShot(true);
+  QObject::connect(&canvas, &QgsMapCanvas::mapRefreshCanceled, &loop, &QEventLoop::quit);
+  QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+  timeout.start(15000);
+  loop.exec();
+
+  REQUIRE(removedDuringRender);
+  REQUIRE(removedOk);
+  REQUIRE(settled);
+  CHECK(layerStore.count() == 0);
+  CHECK(layerTree.findLayers().isEmpty());
+  CHECK(dataManager.leaseCount(assetId) == 0);
+}

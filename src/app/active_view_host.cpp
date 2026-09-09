@@ -90,6 +90,18 @@ ActiveViewHost::ActiveViewHost( QgsMapCanvas *canvas,
                 m_overviewCanvas->setLayers( m_mapCanvas->layers() );
         } );
     }
+
+    // #778 companion: a removed layer leaves QgsMapCanvas::currentLayer()
+    // dangling — the canvas is never notified. Clear it before the layer
+    // object is destroyed.
+    if ( m_mapCanvas )
+    {
+        connect( QgsProject::instance(), qOverload<QgsMapLayer *>( &QgsProject::layerWillBeRemoved ),
+                 this, [this]( QgsMapLayer *layer ) {
+                     if ( m_mapCanvas && layer && m_mapCanvas->currentLayer() == layer )
+                         m_mapCanvas->setCurrentLayer( nullptr );
+                 } );
+    }
 }
 
 ActiveViewHost::~ActiveViewHost() = default;
@@ -490,6 +502,11 @@ void ActiveViewHost::removeSelectedDisplayLayers()
         else
         {
             // Legacy/external QGIS layers: presentation-only removal.
+            // #779 companion: project removal destroys the layer — settle an
+            // in-flight canvas render first so its threads cannot touch the
+            // doomed layer.
+            if ( m_mapCanvas )
+                m_mapCanvas->stopRenderingAndSettle();
             QgsProject::instance()->removeMapLayer( layer->id() );
         }
     }
@@ -541,15 +558,21 @@ void ActiveViewHost::zoomToNativeResolution( QgsMapLayer *layer )
 
 void ActiveViewHost::refreshCanvasLayers()
 {
-    if ( !m_mapCanvas )
+    if ( !m_mapCanvas || !m_displayManager )
         return;
 
-    // TODO(P1-M2): This reads the global project tree checked layers, which is
-    // correct for the main view but wrong once secondary DisplayManager views
-    // exist. The active view's layer visibility should come from the view's own
-    // QgsLayerTree (via QgisDisplayManager), not QgsProject::checkedLayers().
-    QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
-    QList<QgsMapLayer *> layers = root->checkedLayers();
+    // #793: the ACTIVE view's own layer tree is the visibility authority
+    // (view-local projection, ADR 0019). Reading the global project tree here
+    // made secondary views consume the main view's checked layers. For the
+    // main view the registered tree *is* the project root, so its behavior is
+    // unchanged; every other view resolves its own tree.
+    QgsLayerTree *activeTree = nullptr;
+    const sicnu::display::DisplayViewId activeId = m_displayManager->activeViewId();
+    if ( !activeId.isNull() )
+        activeTree = m_displayManager->viewLayerTree( activeId );
+    if ( !activeTree )
+        activeTree = QgsProject::instance()->layerTreeRoot(); // unknown view fallback
+    const QList<QgsMapLayer *> layers = activeTree->checkedLayers();
     m_mapCanvas->setLayers( layers );
 
     if ( m_overviewCanvas )

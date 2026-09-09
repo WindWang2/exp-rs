@@ -226,6 +226,14 @@ struct QgisDisplayManager::Impl {
     }
   }
 
+  /// #779: block until any in-flight canvas render has fully wound down so
+  /// the caller can destroy layers without the render threads touching them.
+  /// No-op when the canvas is idle (or already gone).
+  static void settleRendering(ViewRecord *viewRecord) {
+    if (viewRecord && viewRecord->canvas)
+      viewRecord->canvas->stopRenderingAndSettle();
+  }
+
   struct LayerRecord {
     DisplayLayerSnapshot snapshot;
     QPointer<QgsMapLayer> mapLayer;
@@ -838,8 +846,12 @@ data::Result<void> QgisDisplayManager::relocateLayer(DisplayLayerId layerId) {
   }
 
   // Remove the stale layer from the store after the replacement is registered.
-  if (viewRecord->layerStore->mapLayer(oldQgisLayerId))
+  // #779: the store removal destroys the old layer — settle an in-flight
+  // render first so its threads cannot dereference the doomed layer.
+  if (viewRecord->layerStore->mapLayer(oldQgisLayerId)) {
+    Impl::settleRendering(viewRecord);
     viewRecord->layerStore->removeMapLayer(oldQgisLayerId);
+  }
   Impl::syncViewCanvasLayers(viewRecord);
 
   // Update the record: same DisplayLayerId and asset, new QGIS layer and lease.
@@ -873,6 +885,12 @@ data::Result<void> QgisDisplayManager::removeLayer(DisplayLayerId layerId) {
   const QString qgisLayerId = layerRecord->snapshot.qgisLayerId();
 
   if (viewRecord) {
+    // #779: removing the layer from the store destroys it. If a canvas render
+    // is in flight, its background threads still hold the layer pointer —
+    // settle the rendering first or the render thread dereferences freed
+    // memory.
+    Impl::settleRendering(viewRecord);
+
     viewRecord->layerIds.removeAll(layerId);
     if (viewRecord->layerTree) {
       if (QgsLayerTreeLayer *node =
@@ -955,6 +973,11 @@ QgisDisplayManager::layer(DisplayLayerId layerId) const {
 QgsMapLayer *QgisDisplayManager::mapLayer(DisplayLayerId layerId) const {
   const Impl::LayerRecord *record = m_impl->findLayer(layerId);
   return record ? record->mapLayer.data() : nullptr;
+}
+
+QgsLayerTree *QgisDisplayManager::viewLayerTree(DisplayViewId viewId) const {
+  const Impl::ViewRecord *record = m_impl->findView(viewId);
+  return record ? record->layerTree.data() : nullptr;
 }
 
 data::Result<void> QgisDisplayManager::setLayerVisible(DisplayLayerId layerId, bool visible) {

@@ -206,6 +206,11 @@ public:
   /// Non-owning access to the view's map canvas.
   QgsMapCanvas *mapCanvas(DisplayViewId viewId) const;
 
+  /// Non-owning access to the view's OWN layer tree — the view-local layer
+  /// visibility authority (#793: never read the global project tree for a
+  /// secondary view). Nullptr for an unknown view or a tree that is gone.
+  QgsLayerTree *viewLayerTree(DisplayViewId viewId) const;
+
 Q_SIGNALS:
   /// Fired when activeViewId changes.
   void activeViewChanged(DisplayViewId viewId);

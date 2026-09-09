@@ -1462,6 +1462,24 @@ void QgsMapCanvas::stopRendering()
   stopPreviewJobs();
 }
 
+void QgsMapCanvas::stopRenderingAndSettle()
+{
+  if ( mJob )
+  {
+    QgsDebugMsgLevel( u"CANVAS stop rendering and settle!"_s, 2 );
+    mJobCanceled = true;
+    disconnect( mJob, &QgsMapRendererJob::finished, this, &QgsMapCanvas::rendererJobFinished );
+    // Blocking cancel (the ~QgsMapCanvas idiom): returns only after the
+    // parallel/sequential job's worker threads have finished, so layers can
+    // be safely destroyed by the caller afterwards.
+    whileBlocking( mJob )->cancel();
+    delete mJob;
+    mJob = nullptr;
+    emit mapRefreshCanceled();
+  }
+  stopPreviewJobs();
+}
+
 //the format defaults to "PNG" if not specified
 void QgsMapCanvas::saveAsImage( const QString &fileName, QPixmap *theQPixmap, const QString &format )
 {
