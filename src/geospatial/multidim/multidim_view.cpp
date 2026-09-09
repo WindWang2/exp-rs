@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstring>
 #include <set>
 #include <utility>
@@ -71,7 +72,27 @@ Json::Value MultidimGrid::toJson() const
     else
       json["nodata"] = noDataValue;
   }
+  json["missing_count"] = static_cast<Json::UInt64>( missingCount );
   return json;
+}
+
+const char *coordinateMatchName( CoordinateMatch match )
+{
+  switch ( match )
+  {
+    case CoordinateMatch::Exact: return "exact";
+    case CoordinateMatch::Nearest: return "nearest";
+  }
+  return "exact";
+}
+
+CoordinateMatch coordinateMatchFromName( const std::string &name )
+{
+  if ( name == "exact" ) return CoordinateMatch::Exact;
+  if ( name == "nearest" ) return CoordinateMatch::Nearest;
+  Json::Value details;
+  details["name"] = name;
+  throw GeoError( ErrorCode::InvalidArgument, "coordinateMatchFromName: unknown match mode", details );
 }
 
 MultidimView MultidimView::open( const std::string &path )
@@ -130,6 +151,15 @@ MultidimGrid MultidimView::readSlice( const std::string &variable,
                                       const std::vector<std::pair<std::string, std::int64_t>> &dimSlices,
                                       std::size_t maxCells )
 {
+  return readSliceWindow( variable, dimSlices, 0, 0, 0, 0, maxCells );
+}
+
+MultidimGrid MultidimView::readSliceWindow( const std::string &variable,
+                                            const std::vector<std::pair<std::string, std::int64_t>> &dimSlices,
+                                            std::int64_t rowOff, std::int64_t colOff,
+                                            std::size_t windowRows, std::size_t windowCols,
+                                            std::size_t maxCells )
+{
   if ( !mHandle )
     throw GeoError( ErrorCode::InvalidArgument, "readSlice: view is closed" );
 
@@ -167,8 +197,6 @@ MultidimGrid MultidimView::readSlice( const std::string &variable,
 
   std::vector<GUInt64> start( dimCount, 0 );
   std::vector<std::size_t> count( dimCount, 1 );
-  const std::string &rowDim = info->dimensionNames[dimCount - 2];
-  const std::string &colDim = info->dimensionNames[dimCount - 1];
   std::int64_t rows = 0;
   std::int64_t cols = 0;
 
@@ -192,13 +220,38 @@ MultidimGrid MultidimView::readSlice( const std::string &variable,
     {
       if ( sliced != slices.end() )
         throw GeoError( ErrorCode::InvalidArgument, "The row dimension '" + name + "' must remain free" );
-      rows = size;
+      // A declared window restricts the free extent; it must lie inside the
+      // dimension — a window is a bound, never a clamp-and-lie. 0 means
+      // "the whole dimension".
+      rows = windowRows > 0 ? static_cast<std::int64_t>( windowRows ) : size;
+      if ( rowOff < 0 || rowOff + rows > size )
+      {
+        Json::Value details;
+        details["dimension"] = name;
+        details["offset"] = rowOff;
+        details["window_rows"] = static_cast<Json::UInt64>( windowRows );
+        details["size"] = size;
+        throw GeoError( ErrorCode::InvalidArgument, "Row window outside the dimension extent", details );
+      }
+      start[d] = static_cast<GUInt64>( rowOff );
+      count[d] = static_cast<std::size_t>( rows );
     }
     else if ( isCol )
     {
       if ( sliced != slices.end() )
         throw GeoError( ErrorCode::InvalidArgument, "The column dimension '" + name + "' must remain free" );
-      cols = size;
+      cols = windowCols > 0 ? static_cast<std::int64_t>( windowCols ) : size;
+      if ( colOff < 0 || colOff + cols > size )
+      {
+        Json::Value details;
+        details["dimension"] = name;
+        details["offset"] = colOff;
+        details["window_cols"] = static_cast<Json::UInt64>( windowCols );
+        details["size"] = size;
+        throw GeoError( ErrorCode::InvalidArgument, "Column window outside the dimension extent", details );
+      }
+      start[d] = static_cast<GUInt64>( colOff );
+      count[d] = static_cast<std::size_t>( cols );
     }
     else
     {
@@ -225,13 +278,6 @@ MultidimGrid MultidimView::readSlice( const std::string &variable,
     if ( consumed.count( slice.first ) == 0 )
       throw GeoError( ErrorCode::InvalidArgument,
                       "Variable '" + variable + "' has no dimension named '" + slice.first + "'" );
-  }
-  for ( std::size_t i = 0; i < dimCount; ++i )
-  {
-    if ( i == dimCount - 2 )
-      count[i] = static_cast<std::size_t>( rows );
-    else if ( i == dimCount - 1 )
-      count[i] = static_cast<std::size_t>( cols );
   }
 
   const std::size_t cells = static_cast<std::size_t>( rows ) * static_cast<std::size_t>( cols );
@@ -270,7 +316,102 @@ MultidimGrid MultidimView::readSlice( const std::string &variable,
   grid.hasNoData = info->hasNoData;
   grid.noDataValue = info->noDataValue;
   grid.noDataIsNaN = info->noDataIsNaN;
+
+  // Missing-value accounting: declared NoData cells (or NaN when NoData is
+  // NaN) are counted — values themselves stay untouched (stored values).
+  if ( grid.hasNoData )
+  {
+    std::size_t missing = 0;
+    for ( const double value : grid.values )
+    {
+      const bool isMissing = grid.noDataIsNaN ? std::isnan( value ) : value == grid.noDataValue;
+      if ( isMissing )
+        ++missing;
+    }
+    grid.missingCount = missing;
+  }
+  else
+  {
+    std::size_t missing = 0;
+    for ( const double value : grid.values )
+      if ( std::isnan( value ) )
+        ++missing;
+    grid.missingCount = missing;
+  }
   return grid;
+}
+
+CoordinateSliceMatch MultidimView::resolveCoordinateIndex( const std::string &dimensionName, double value,
+                                                           CoordinateMatch matchMode, double tolerance ) const
+{
+  const DimensionInfo *axis = nullptr;
+  for ( const DimensionInfo &dim : mMetadata.dimensions )
+  {
+    if ( dim.name == dimensionName )
+    {
+      axis = &dim;
+      break;
+    }
+  }
+  if ( axis == nullptr )
+    throw GeoError( ErrorCode::InvalidArgument, "Dimension not found: " + dimensionName );
+  if ( !axis->hasValues )
+    throw GeoError( ErrorCode::Unsupported,
+                    "Dimension '" + dimensionName + "' carries no captured coordinate axis" );
+
+  CoordinateSliceMatch best;
+  best.exact = false;
+  double bestDistance = std::numeric_limits<double>::infinity();
+  for ( std::size_t i = 0; i < axis->values.size(); ++i )
+  {
+    const double distance = std::fabs( axis->values[i] - value );
+    if ( distance == 0.0 )
+    {
+      best.index = static_cast<std::int64_t>( i );
+      best.resolvedValue = axis->values[i];
+      best.distance = 0.0;
+      best.exact = true;
+      return best;
+    }
+    if ( distance < bestDistance )
+    {
+      bestDistance = distance;
+      best.index = static_cast<std::int64_t>( i );
+      best.resolvedValue = axis->values[i];
+      best.distance = distance;
+    }
+  }
+  // Exact mode never falls back to a neighbour; Nearest must stay within
+  // the declared tolerance — otherwise the answer is a typed miss.
+  if ( matchMode == CoordinateMatch::Exact )
+    throw GeoError( ErrorCode::NotFound,
+                    "Coordinate value not present on axis '" + dimensionName + "'" );
+  if ( bestDistance > tolerance )
+  {
+    Json::Value details;
+    details["dimension"] = dimensionName;
+    details["requested"] = value;
+    details["nearest"] = best.resolvedValue;
+    details["distance"] = bestDistance;
+    details["tolerance"] = tolerance;
+    throw GeoError( ErrorCode::NotFound, "Nearest coordinate beyond the declared tolerance", details );
+  }
+  return best;
+}
+
+MultidimGrid MultidimView::readSliceByCoordinateValues(
+  const std::string &variable,
+  const std::vector<std::pair<std::string, double>> &dimValues,
+  CoordinateMatch matchMode, double tolerance, std::size_t maxCells )
+{
+  std::vector<std::pair<std::string, std::int64_t>> dimSlices;
+  dimSlices.reserve( dimValues.size() );
+  for ( const auto &entry : dimValues )
+  {
+    const CoordinateSliceMatch match = resolveCoordinateIndex( entry.first, entry.second, matchMode, tolerance );
+    dimSlices.emplace_back( entry.first, match.index );
+  }
+  return readSlice( variable, dimSlices, maxCells );
 }
 
 MultidimGrid MultidimView::readTemporalOrLevelSlice( const std::string &variable,

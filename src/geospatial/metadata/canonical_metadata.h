@@ -195,6 +195,15 @@ struct DimensionInfo
     std::string type;        ///< GDAL dimension type ("TEMPORAL", "HORIZONTAL_X", ...) or ""
     std::string direction;   ///< "" when undeclared
     std::string unit;
+
+    // 7.0 — coordinate axis values from the indexing variable (time steps,
+    // depths, ...). Numeric axes only; capture is hard-bounded at
+    // kMaxAxisValues entries with valuesBounded flagging a truncation.
+    static constexpr std::size_t kMaxAxisValues = 4096;
+    bool hasValues = false;      ///< true when numeric axis values were read
+    bool valuesBounded = false;  ///< true when the axis was truncated at the cap
+    std::vector<double> values;  ///< ascending count == min(size, kMaxAxisValues)
+
     Json::Value toJson() const;
     static DimensionInfo fromJson( const Json::Value &json );
 };
@@ -213,6 +222,12 @@ struct VariableInfo
     bool hasScale = false;
     bool hasOffset = false;
     std::map<std::string, std::string> attributes;
+
+    // 7.0 — chunk shape as the storage reports it ("" when unknown), for
+    // chunk-aware bounded read planning. Slowest -> fastest, matching
+    // dimensionNames.
+    std::vector<std::int64_t> blockShape;
+
     Json::Value toJson() const;
     static VariableInfo fromJson( const Json::Value &json );
 };

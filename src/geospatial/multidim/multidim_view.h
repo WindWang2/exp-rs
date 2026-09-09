@@ -38,7 +38,34 @@ struct MultidimGrid
     bool hasNoData = false;
     double noDataValue = 0.0;
     bool noDataIsNaN = false;
+
+    // 7.0 — missing-value accounting over the returned grid: cells equal to
+    // the declared NoData (or NaN when NoData is NaN) are counted, never
+    // silently rewritten — masking stays the caller's explicit decision.
+    std::size_t missingCount = 0;
+
     Json::Value toJson() const;
+};
+
+/// How a requested coordinate value is matched against a captured axis.
+enum class CoordinateMatch
+{
+  Exact,    ///< the axis must contain the value exactly (an absent value is
+            ///< a typed error, never a guess)
+  Nearest   ///< the closest axis value wins; `tolerance` bounds the accepted
+            ///< distance (a miss beyond tolerance is a typed error)
+};
+
+const char *coordinateMatchName( CoordinateMatch match );
+CoordinateMatch coordinateMatchFromName( const std::string &name ); ///< throws
+
+/// The result of resolving a coordinate value against a captured axis.
+struct CoordinateSliceMatch
+{
+    std::int64_t index = -1;      ///< resolved axis index (>= 0 on success)
+    double resolvedValue = 0.0;   ///< the axis value at the resolved index
+    double distance = 0.0;        ///< |requested - resolved| (0 for exact)
+    bool exact = false;           ///< true when the match was exact
 };
 
 class MultidimView
@@ -72,6 +99,39 @@ class MultidimView
                                            const std::string &dimensionName,
                                            std::int64_t index,
                                            std::size_t maxCells = 64ull * 1024 * 1024 );
+
+    // --- 7.0: coordinate-aware slicing, spatial windows, missing values --
+
+    /// Resolves a coordinate VALUE against the captured axis of `dimension`
+    /// (time steps, depths, ...). Requires a captured numeric axis; Exact
+    /// demands presence, Nearest bounds |distance| by `tolerance`. The
+    /// result names an INDEX — the actual read still goes through readSlice
+    /// (one read path, no duplicated slicing machinery).
+    CoordinateSliceMatch resolveCoordinateIndex( const std::string &dimensionName, double value,
+                                                 CoordinateMatch matchMode, double tolerance = 0.0 ) const;
+
+    /// Coordinate-value slice: `dimValues` name non-spatial dimensions and
+    /// the coordinate values to fix them at (resolved through
+    /// resolveCoordinateIndex); exactly the two trailing spatial dimensions
+    /// stay free. Same contract as readSlice otherwise.
+    MultidimGrid readSliceByCoordinateValues(
+      const std::string &variable,
+      const std::vector<std::pair<std::string, double>> &dimValues,
+      CoordinateMatch matchMode, double tolerance = 0.0,
+      std::size_t maxCells = 64ull * 1024 * 1024 );
+
+    /// Bounded spatial sub-window of a slice: dimSlices fix every
+    /// non-spatial dimension; (rowOff, colOff) and (rows, cols) address the
+    /// two free (trailing) dimensions. Reads touch only the requested
+    /// window — chunked storages (Zarr, chunked NetCDF/HDF5) are read at
+    /// their chunk granularity by GDAL, and the cell budget bounds the
+    /// materialized result. Chunk shapes are reported per variable in
+    /// MultidimMetadata (VariableInfo::blockShape) for read planning.
+    MultidimGrid readSliceWindow( const std::string &variable,
+                                  const std::vector<std::pair<std::string, std::int64_t>> &dimSlices,
+                                  std::int64_t rowOff, std::int64_t colOff,
+                                  std::size_t rows, std::size_t cols,
+                                  std::size_t maxCells = 64ull * 1024 * 1024 );
 
   private:
     void *mHandle = nullptr;   // GDALDatasetH
