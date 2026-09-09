@@ -1,72 +1,82 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.classify_postprocess",
- "title": "Classification map postprocessing",
- "intent": "classify",
- "family": "classification",
- "modality": "model",
- "sensors": [
-  "sentinel-2",
-  "landsat-8",
-  "landsat-9",
-  "sentinel-1"
- ],
- "description": "Majority filter -> class recode -> final map. Standard cleanup after any classifier.",
- "slots": [
-  {
-   "name": "primary",
-   "kind": "raster",
-   "description": "Raw classification raster.",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "clean",
-   "operator_id": "rs:majority_filter",
-   "params": {
-    "input": "$primary.path",
-    "output": "$outputs.filtered",
-    "kernel": "$params.kernel"
-   },
-   "verification": "raster",
-   "when_param": "kernel",
-   "params_when_skipped": {
-    "input": "$primary.path",
-    "output": "$outputs.filtered",
-    "kernel": 3
-   }
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.classify_postprocess",
+  "title": "Classification map postprocessing",
+  "intent": "classify",
+  "family": "classification",
+  "modality": "model",
+  "sensors": [
+    "sentinel-2",
+    "landsat-8",
+    "landsat-9",
+    "sentinel-1"
+  ],
+  "description": "Majority filter -> class recode -> final map. Standard cleanup after any classifier.",
+  "slots": [
+    {
+      "name": "primary",
+      "kind": "raster",
+      "description": "Raw classification raster.",
+      "required": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "clean",
+      "operator_id": "rs:majority_filter",
+      "params": {
+        "input": "$primary.path",
+        "output": "$outputs.filtered",
+        "kernel": "$params.kernel"
+      },
+      "verification": "raster",
+      "when_param": "kernel",
+      "params_when_skipped": {
+        "input": "$primary.path",
+        "output": "$outputs.filtered",
+        "kernel": 3
+      }
+    },
+    {
+      "id": "recode",
+      "operator_id": "rs:recode",
+      "params": {
+        "input": "$outputs.filtered",
+        "output": "$outputs.classification",
+        "recode_map": "$params.recode_map"
+      },
+      "verification": "raster",
+      "when_param": "recode_map",
+      "params_when_skipped": {
+        "input": "$outputs.filtered",
+        "output": "$outputs.classification"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "name": "classification",
+      "from_step": "recode",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
   },
-  {
-   "id": "recode",
-   "operator_id": "rs:recode",
-   "params": {
-    "input": "$outputs.filtered",
-    "output": "$outputs.classification",
-    "recode_map": "$params.recode_map"
-   },
-   "verification": "raster",
-   "when_param": "recode_map",
-   "params_when_skipped": {
-    "input": "$outputs.filtered",
-    "output": "$outputs.classification"
-   }
-  }
- ],
- "outputs": [
-  {
-   "name": "classification",
-   "from_step": "recode",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "recode",
-  "renderer_hint": "categorized"
- }
+  "map_output": {
+    "from_step": "recode",
+    "renderer_hint": "categorized"
+  },
+  "capabilities": [
+    "rs:majority_filter",
+    "rs:recode"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "classification",
+      "kind": "raster"
+    }
+  ]
 }

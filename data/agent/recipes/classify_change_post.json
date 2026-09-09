@@ -1,56 +1,65 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.classify_change_post",
- "title": "Post-classification change comparison",
- "intent": "change",
- "family": "classification",
- "modality": "model",
- "sensors": [
-  "sentinel-2",
-  "landsat-8",
-  "landsat-9"
- ],
- "description": "Two classified maps -> transition analysis via post-classification change.",
- "slots": [
-  {
-   "name": "before",
-   "kind": "raster",
-   "description": "Classification of the first epoch.",
-   "required": true
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.classify_change_post",
+  "title": "Post-classification change comparison",
+  "intent": "change",
+  "family": "classification",
+  "modality": "model",
+  "sensors": [
+    "sentinel-2",
+    "landsat-8",
+    "landsat-9"
+  ],
+  "description": "Two classified maps -> transition analysis via post-classification change.",
+  "slots": [
+    {
+      "name": "before",
+      "kind": "raster",
+      "description": "Classification of the first epoch.",
+      "required": true
+    },
+    {
+      "name": "after",
+      "kind": "raster",
+      "description": "Classification of the second epoch (same legend).",
+      "required": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "change",
+      "operator_id": "rs:post_classification_change",
+      "params": {
+        "before": "$before.path",
+        "after": "$after.path",
+        "output": "$outputs.transitions"
+      },
+      "verification": "raster"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "transitions",
+      "from_step": "change",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
   },
-  {
-   "name": "after",
-   "kind": "raster",
-   "description": "Classification of the second epoch (same legend).",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "change",
-   "operator_id": "rs:post_classification_change",
-   "params": {
-    "before": "$before.path",
-    "after": "$after.path",
-    "output": "$outputs.transitions"
-   },
-   "verification": "raster"
-  }
- ],
- "outputs": [
-  {
-   "name": "transitions",
-   "from_step": "change",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "change",
-  "renderer_hint": "categorized"
- }
+  "map_output": {
+    "from_step": "change",
+    "renderer_hint": "categorized"
+  },
+  "capabilities": [
+    "rs:post_classification_change"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "transitions",
+      "kind": "raster"
+    }
+  ]
 }

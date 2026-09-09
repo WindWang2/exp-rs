@@ -1,51 +1,60 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.temporal_trend",
- "title": "Long-term trend (Sen slope)",
- "intent": "temporal",
- "family": "temporal",
- "modality": "temporal",
- "sensors": [
-  "sentinel-2",
-  "landsat-8",
-  "landsat-9",
-  "modis"
- ],
- "description": "Theil-Sen trend over the collection with Mann-Kendall-style robustness.",
- "slots": [
-  {
-   "name": "collection",
-   "kind": "collection",
-   "description": "Registered temporal collection (spatial:temporal tools).",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "trend",
-   "operator_id": "rs:temporal_sen_trend",
-   "params": {
-    "collection": "$collection.path",
-    "band_role": "$params.band_role",
-    "output": "$outputs.trend"
-   },
-   "verification": "raster"
-  }
- ],
- "outputs": [
-  {
-   "name": "trend",
-   "from_step": "trend",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "trend",
-  "renderer_hint": "singleband_pseudocolor"
- }
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.temporal_trend",
+  "title": "Long-term trend (Sen slope)",
+  "intent": "temporal",
+  "family": "temporal",
+  "modality": "temporal",
+  "sensors": [
+    "sentinel-2",
+    "landsat-8",
+    "landsat-9",
+    "modis"
+  ],
+  "description": "Theil-Sen trend over the collection with Mann-Kendall-style robustness.",
+  "slots": [
+    {
+      "name": "collection",
+      "kind": "collection",
+      "description": "Registered temporal collection (spatial:temporal tools).",
+      "required": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "trend",
+      "operator_id": "rs:temporal_sen_trend",
+      "params": {
+        "collection": "$collection.path",
+        "band_role": "$params.band_role",
+        "output": "$outputs.trend"
+      },
+      "verification": "raster"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "trend",
+      "from_step": "trend",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
+  },
+  "map_output": {
+    "from_step": "trend",
+    "renderer_hint": "singleband_pseudocolor"
+  },
+  "capabilities": [
+    "rs:temporal_sen_trend"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "trend",
+      "kind": "raster"
+    }
+  ]
 }

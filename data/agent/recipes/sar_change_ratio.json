@@ -1,102 +1,117 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.sar_change_ratio",
- "title": "SAR ratio change detection",
- "intent": "sar_change",
- "family": "sar-change",
- "modality": "sar",
- "sensors": [
-  "sentinel-1"
- ],
- "description": "Calibrate both epochs -> speckle -> ratio change -> magnitude threshold.",
- "slots": [
-  {
-   "name": "before",
-   "kind": "raster",
-   "description": "Co-registered before scene.",
-   "required": true
-  },
-  {
-   "name": "after",
-   "kind": "raster",
-   "description": "Co-registered after scene.",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "calibrate_before",
-   "operator_id": "rs:sar_calibrate",
-   "params": {
-    "input": "$before.path",
-    "output": "$outputs.cal_before"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "calibrate_after",
-   "operator_id": "rs:sar_calibrate",
-   "params": {
-    "input": "$after.path",
-    "output": "$outputs.cal_after"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "ratio",
-   "operator_id": "rs:sar_ratio",
-   "params": {
-    "inputA": "$outputs.cal_before",
-    "inputB": "$outputs.cal_after",
-    "output": "$outputs.ratio"
-   },
-   "verification": "raster",
-   "inputs": [
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.sar_change_ratio",
+  "title": "SAR ratio change detection",
+  "intent": "sar_change",
+  "family": "sar-change",
+  "modality": "sar",
+  "sensors": [
+    "sentinel-1"
+  ],
+  "description": "Calibrate both epochs -> speckle -> ratio change -> magnitude threshold.",
+  "slots": [
     {
-     "step": "calibrate_before",
-     "port": "output",
-     "to_port": "inputA"
+      "name": "before",
+      "kind": "raster",
+      "description": "Co-registered before scene.",
+      "required": true
     },
     {
-     "step": "calibrate_after",
-     "port": "output",
-     "to_port": "inputB"
+      "name": "after",
+      "kind": "raster",
+      "description": "Co-registered after scene.",
+      "required": true
     }
-   ]
+  ],
+  "steps": [
+    {
+      "id": "calibrate_before",
+      "operator_id": "rs:sar_calibrate",
+      "params": {
+        "input": "$before.path",
+        "output": "$outputs.cal_before"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "calibrate_after",
+      "operator_id": "rs:sar_calibrate",
+      "params": {
+        "input": "$after.path",
+        "output": "$outputs.cal_after"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "ratio",
+      "operator_id": "rs:sar_ratio",
+      "params": {
+        "inputA": "$outputs.cal_before",
+        "inputB": "$outputs.cal_after",
+        "output": "$outputs.ratio"
+      },
+      "verification": "raster",
+      "inputs": [
+        {
+          "step": "calibrate_before",
+          "port": "output",
+          "to_port": "inputA"
+        },
+        {
+          "step": "calibrate_after",
+          "port": "output",
+          "to_port": "inputB"
+        }
+      ]
+    },
+    {
+      "id": "threshold",
+      "operator_id": "rs:threshold_raster",
+      "params": {
+        "input": "$outputs.ratio",
+        "output": "$outputs.change_classified",
+        "thresholdMethod": "statistical",
+        "statisticalK": 2.5,
+        "cleanup": "open"
+      },
+      "verification": "raster"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "ratio",
+      "from_step": "ratio",
+      "port": "output",
+      "kind": "raster"
+    },
+    {
+      "name": "change_classified",
+      "from_step": "threshold",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
   },
-  {
-   "id": "threshold",
-   "operator_id": "rs:threshold_raster",
-   "params": {
-    "input": "$outputs.ratio",
-    "output": "$outputs.change_classified",
-    "thresholdMethod": "statistical",
-    "statisticalK": 2.5,
-    "cleanup": "majority"
-   },
-   "verification": "raster"
-  }
- ],
- "outputs": [
-  {
-   "name": "ratio",
-   "from_step": "ratio",
-   "port": "output",
-   "kind": "raster"
+  "map_output": {
+    "from_step": "ratio",
+    "renderer_hint": "categorized"
   },
-  {
-   "name": "change_classified",
-   "from_step": "threshold",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "ratio",
-  "renderer_hint": "categorized"
- }
+  "capabilities": [
+    "rs:sar_calibrate",
+    "rs:sar_ratio",
+    "rs:threshold_raster"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "ratio",
+      "kind": "raster"
+    },
+    {
+      "name": "change_classified",
+      "kind": "raster"
+    }
+  ]
 }

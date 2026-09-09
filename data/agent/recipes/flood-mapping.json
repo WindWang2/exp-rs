@@ -1,182 +1,225 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.flood_mapping",
- "title": "Flood mapping (decisionable multi-modal workflow)",
- "intent": "flood",
- "family": "flood",
- "modality": "multimodal",
- "sensors": [ "sentinel-1", "sentinel-2", "landsat-8", "landsat-9" ],
- "description": "Decisionable flood mapping: the optical branch (NDWI threshold) and the SAR branch (calibrated backscatter threshold) run independently; the fusion branch opens only when both modalities are bound; the uncertainty branch is parameter-gated. Branch degradation propagates only along declared inputs, so an unbound modality never flips the other branch to its fallback.",
- "capabilities": [
-  "water-detection",
-  "flood-mapping",
-  "multi-modal-fusion"
- ],
- "applicability": {
-  "modalities": [ "optical", "sar" ],
-  "resolution_range": { "min_m": 3, "max_m": 30 }
- },
- "presets": {
-  "sentinel-2": {
-   "index": "NDWI",
-   "thresholdMethod": "statistical",
-   "statisticalK": 1.5
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.flood_mapping",
+  "title": "Flood mapping (decisionable multi-modal workflow)",
+  "intent": "flood",
+  "family": "flood",
+  "modality": "multimodal",
+  "sensors": [
+    "sentinel-1",
+    "sentinel-2",
+    "landsat-8",
+    "landsat-9"
+  ],
+  "description": "Decisionable flood mapping: the optical branch (NDWI threshold) and the SAR branch (calibrated backscatter threshold) run independently; the fusion branch opens only when both modalities are bound; the uncertainty branch is parameter-gated. Branch degradation propagates only along declared inputs, so an unbound modality never flips the other branch to its fallback.",
+  "capabilities": [
+    "water-detection",
+    "flood-mapping",
+    "multi-modal-fusion"
+  ],
+  "applicability": {
+    "modalities": [
+      "optical",
+      "sar"
+    ],
+    "resolution_range": {
+      "min_m": 3,
+      "max_m": 30
+    }
   },
-  "sentinel-1": {
-   "polarization": "VH",
-   "thresholdMethod": "manual",
-   "threshold": -18
+  "presets": {
+    "sentinel-2": {
+      "index": "NDWI",
+      "thresholdMethod": "statistical",
+      "statisticalK": 1.5
+    },
+    "sentinel-1": {
+      "polarization": "VH",
+      "thresholdMethod": "manual",
+      "threshold": -18
+    }
+  },
+  "limitations": [
+    "Optical branch degrades under cloud cover; QA mask strongly recommended",
+    "SAR threshold presets assume VV/VH GRD backscatter in dB",
+    "Fusion disagreement polygons require manual review before operational use"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "water_extent",
+      "kind": "raster"
+    },
+    {
+      "name": "fused_disagreement",
+      "kind": "raster"
+    }
+  ],
+  "quality_gates": [
+    {
+      "id": "water-extent-min-area",
+      "description": "Water extent must cover a plausible fraction of the AOI before publication."
+    },
+    {
+      "id": "uncertainty-note",
+      "description": "When only one modality is available, the report must carry an explicit uncertainty note."
+    }
+  ],
+  "slots": [
+    {
+      "name": "primary",
+      "kind": "raster",
+      "description": "Optional post-event optical reflectance (Green + NIR).",
+      "required": false
+    },
+    {
+      "name": "sar",
+      "kind": "raster",
+      "description": "Optional post-event SAR GRD backscatter (dB).",
+      "required": false
+    },
+    {
+      "name": "qa",
+      "kind": "raster",
+      "description": "Optional QA/cloud mask for the optical branch.",
+      "required": false
+    }
+  ],
+  "steps": [
+    {
+      "id": "opt_qa",
+      "operator_id": "rs:qa_mask",
+      "when_slot": "qa",
+      "params": {
+        "input": "$qa.path",
+        "output": "$outputs.opt_qa_mask"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "opt_index",
+      "operator_id": "rs:spectral_index",
+      "when_slot": "primary",
+      "params": {
+        "input": "$primary.path",
+        "index": "NDWI",
+        "output": "$outputs.opt_ndwi"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "opt_water",
+      "operator_id": "rs:threshold_raster",
+      "when_slot": "primary",
+      "inputs": [
+        {
+          "step": "opt_index"
+        }
+      ],
+      "params": {
+        "input": "$outputs.opt_ndwi",
+        "output": "$outputs.water_extent",
+        "thresholdMethod": "statistical",
+        "statisticalK": 1.5,
+        "cleanup": "open",
+        "minAreaPixels": 8
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "sar_calibrate",
+      "operator_id": "rs:sar_calibrate",
+      "when_slot": "sar",
+      "params": {
+        "input": "$sar.path",
+        "output": "$outputs.sar_calibrated"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "sar_speckle",
+      "operator_id": "rs:sar_speckle",
+      "when_slot": "sar",
+      "inputs": [
+        {
+          "step": "sar_calibrate"
+        }
+      ],
+      "params": {
+        "input": "$outputs.sar_calibrated",
+        "output": "$outputs.sar_filtered",
+        "filter": "lee",
+        "windowSize": 7
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "sar_water",
+      "operator_id": "rs:threshold_raster",
+      "when_slot": "sar",
+      "inputs": [
+        {
+          "step": "sar_speckle"
+        }
+      ],
+      "params": {
+        "input": "$outputs.sar_filtered",
+        "output": "$outputs.sar_water_extent",
+        "thresholdMethod": "manual",
+        "threshold": -18,
+        "cleanup": "open",
+        "minAreaPixels": 8
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "fused_disagreement",
+      "operator_id": "rs:change_difference",
+      "when_slots": [
+        "primary",
+        "sar"
+      ],
+      "inputs": [
+        {
+          "step": "opt_water"
+        },
+        {
+          "step": "sar_water"
+        }
+      ],
+      "params": {
+        "input_a": "$outputs.water_extent",
+        "input_b": "$outputs.sar_water_extent",
+        "output": "$outputs.fused_disagreement"
+      },
+      "verification": "raster"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "water_extent",
+      "from_step": "opt_water",
+      "port": "output",
+      "kind": "raster"
+    },
+    {
+      "name": "sar_water_extent",
+      "from_step": "sar_water",
+      "port": "output",
+      "kind": "raster"
+    },
+    {
+      "name": "fused_disagreement",
+      "from_step": "fused_disagreement",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
+  },
+  "map_output": {
+    "from_step": "opt_water",
+    "renderer_hint": "categorized"
   }
- },
- "limitations": [
-  "Optical branch degrades under cloud cover; QA mask strongly recommended",
-  "SAR threshold presets assume VV/VH GRD backscatter in dB",
-  "Fusion disagreement polygons require manual review before operational use"
- ],
- "expected_artifacts": [
-  { "name": "water_extent", "kind": "raster" },
-  { "name": "fused_disagreement", "kind": "raster" }
- ],
- "quality_gates": [
-  { "id": "water-extent-min-area",
-    "description": "Water extent must cover a plausible fraction of the AOI before publication." },
-  { "id": "uncertainty-note",
-    "description": "When only one modality is available, the report must carry an explicit uncertainty note." }
- ],
- "slots": [
-  {
-   "name": "primary",
-   "kind": "raster",
-   "description": "Optional post-event optical reflectance (Green + NIR).",
-   "required": false
-  },
-  {
-   "name": "sar",
-   "kind": "raster",
-   "description": "Optional post-event SAR GRD backscatter (dB).",
-   "required": false
-  },
-  {
-   "name": "qa",
-   "kind": "raster",
-   "description": "Optional QA/cloud mask for the optical branch.",
-   "required": false
-  }
- ],
- "steps": [
-  {
-   "id": "opt_qa",
-   "operator_id": "rs:qa_mask",
-   "when_slot": "qa",
-   "params": {
-    "input": "$qa.path",
-    "output": "$outputs.opt_qa_mask"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "opt_index",
-   "operator_id": "rs:spectral_index",
-   "when_slot": "primary",
-   "params": {
-    "input": "$primary.path",
-    "index": "NDWI",
-    "output": "$outputs.opt_ndwi"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "opt_water",
-   "operator_id": "rs:threshold_raster",
-   "when_slot": "primary",
-   "inputs": [ { "step": "opt_index" } ],
-   "params": {
-    "input": "$outputs.opt_ndwi",
-    "output": "$outputs.water_extent",
-    "thresholdMethod": "statistical",
-    "statisticalK": 1.5,
-    "cleanup": "majority",
-    "minAreaPixels": 8
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "sar_calibrate",
-   "operator_id": "rs:sar_calibrate",
-   "when_slot": "sar",
-   "params": {
-    "input": "$sar.path",
-    "output": "$outputs.sar_calibrated"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "sar_speckle",
-   "operator_id": "rs:sar_speckle",
-   "when_slot": "sar",
-   "inputs": [ { "step": "sar_calibrate" } ],
-   "params": {
-    "input": "$outputs.sar_calibrated",
-    "output": "$outputs.sar_filtered",
-    "filter": "lee",
-    "windowSize": 7
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "sar_water",
-   "operator_id": "rs:threshold_raster",
-   "when_slot": "sar",
-   "inputs": [ { "step": "sar_speckle" } ],
-   "params": {
-    "input": "$outputs.sar_filtered",
-    "output": "$outputs.sar_water_extent",
-    "thresholdMethod": "manual",
-    "threshold": -18,
-    "cleanup": "majority",
-    "minAreaPixels": 8
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "fused_disagreement",
-   "operator_id": "rs:change_difference",
-   "when_slots": [ "primary", "sar" ],
-   "inputs": [ { "step": "opt_water" }, { "step": "sar_water" } ],
-   "params": {
-    "input_a": "$outputs.water_extent",
-    "input_b": "$outputs.sar_water_extent",
-    "output": "$outputs.fused_disagreement"
-   },
-   "verification": "raster"
-  }
- ],
- "outputs": [
-  {
-   "name": "water_extent",
-   "from_step": "opt_water",
-   "port": "output",
-   "kind": "raster"
-  },
-  {
-   "name": "sar_water_extent",
-   "from_step": "sar_water",
-   "port": "output",
-   "kind": "raster"
-  },
-  {
-   "name": "fused_disagreement",
-   "from_step": "fused_disagreement",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "opt_water",
-  "renderer_hint": "categorized"
- }
 }

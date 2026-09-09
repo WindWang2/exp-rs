@@ -1,57 +1,66 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.preprocess_pansharpen",
- "title": "Pan-sharpening (Brovey)",
- "intent": "preprocess",
- "family": "preprocessing",
- "modality": "optical",
- "sensors": [
-  "sentinel-2",
-  "landsat-8",
-  "landsat-9"
- ],
- "description": "Fuse a panchromatic band with multispectral bands for higher-resolution color analysis.",
- "slots": [
-  {
-   "name": "primary",
-   "kind": "raster",
-   "description": "Panchromatic band raster.",
-   "required": true
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.preprocess_pansharpen",
+  "title": "Pan-sharpening (Brovey)",
+  "intent": "preprocess",
+  "family": "preprocessing",
+  "modality": "optical",
+  "sensors": [
+    "sentinel-2",
+    "landsat-8",
+    "landsat-9"
+  ],
+  "description": "Fuse a panchromatic band with multispectral bands for higher-resolution color analysis.",
+  "slots": [
+    {
+      "name": "primary",
+      "kind": "raster",
+      "description": "Panchromatic band raster.",
+      "required": true
+    },
+    {
+      "name": "ms",
+      "kind": "raster",
+      "description": "Multispectral raster (resampled to the pan grid).",
+      "required": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "fuse",
+      "operator_id": "rs:image_fusion",
+      "params": {
+        "pan": "$primary.path",
+        "ms": "$ms.path",
+        "output": "$outputs.sharpened",
+        "method": "brovey"
+      },
+      "verification": "raster"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "sharpened",
+      "from_step": "fuse",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
   },
-  {
-   "name": "ms",
-   "kind": "raster",
-   "description": "Multispectral raster (resampled to the pan grid).",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "fuse",
-   "operator_id": "rs:image_fusion",
-   "params": {
-    "pan": "$primary.path",
-    "ms": "$ms.path",
-    "output": "$outputs.sharpened",
-    "method": "brovey"
-   },
-   "verification": "raster"
-  }
- ],
- "outputs": [
-  {
-   "name": "sharpened",
-   "from_step": "fuse",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "fuse",
-  "renderer_hint": "singleband_pseudocolor"
- }
+  "map_output": {
+    "from_step": "fuse",
+    "renderer_hint": "singleband_pseudocolor"
+  },
+  "capabilities": [
+    "rs:image_fusion"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "sharpened",
+      "kind": "raster"
+    }
+  ]
 }

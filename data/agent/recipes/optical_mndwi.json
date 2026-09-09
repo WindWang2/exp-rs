@@ -1,92 +1,119 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.optical_mndwi",
- "title": "MNDWI modified surface water index",
- "intent": "mndwi",
- "family": "optical-index",
- "modality": "optical",
- "sensors": [
-  "sentinel-2",
-  "landsat-8",
-  "landsat-9"
- ],
- "description": "inspect -> optional QA mask -> MNDWI -> optional threshold class map. Orchestrates existing operators only; the mndwi preflight pack verifies the required band roles and radiometric state.",
- "slots": [
-  {
-   "name": "primary",
-   "kind": "raster",
-   "description": "Optical reflectance product with the bands required for MNDWI.",
-   "required": true
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.optical_mndwi",
+  "title": "MNDWI modified surface water index",
+  "intent": "mndwi",
+  "family": "optical-index",
+  "modality": "optical",
+  "sensors": [
+    "sentinel-2",
+    "landsat-8",
+    "landsat-9"
+  ],
+  "description": "inspect -> optional QA mask -> MNDWI -> optional threshold class map. Orchestrates existing operators only; the mndwi preflight pack verifies the required band roles and radiometric state.",
+  "slots": [
+    {
+      "name": "primary",
+      "kind": "raster",
+      "description": "Optical reflectance product with the bands required for MNDWI.",
+      "required": true
+    },
+    {
+      "name": "qa",
+      "kind": "raster",
+      "description": "Optional QA/cloud mask raster consumed by rs:qa_mask.",
+      "required": false
+    }
+  ],
+  "steps": [
+    {
+      "id": "mask",
+      "operator_id": "rs:qa_mask",
+      "params": {
+        "input": "$qa.path",
+        "output": "$outputs.mask"
+      },
+      "verification": "raster",
+      "when_slot": "qa"
+    },
+    {
+      "id": "index",
+      "operator_id": "rs:spectral_index",
+      "params": {
+        "input": "$primary.path",
+        "index": "MNDWI",
+        "output": "$outputs.mndwi"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "classify",
+      "operator_id": "rs:threshold_raster",
+      "params": {
+        "input": "$outputs.mndwi",
+        "output": "$outputs.classified",
+        "thresholdMethod": "manual",
+        "threshold": "$params.threshold",
+        "cleanup": "open"
+      },
+      "verification": "raster",
+      "when_param": "threshold",
+      "params_when_skipped": {
+        "input": "$outputs.mndwi",
+        "output": "$outputs.classified",
+        "thresholdMethod": "statistical",
+        "statisticalK": 2.0,
+        "cleanup": "open"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "name": "mndwi",
+      "from_step": "index",
+      "port": "output",
+      "kind": "raster"
+    },
+    {
+      "name": "classified",
+      "from_step": "classify",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
   },
-  {
-   "name": "qa",
-   "kind": "raster",
-   "description": "Optional QA/cloud mask raster consumed by rs:qa_mask.",
-   "required": false
-  }
- ],
- "steps": [
-  {
-   "id": "mask",
-   "operator_id": "rs:qa_mask",
-   "params": {
-    "input": "$qa.path",
-    "output": "$outputs.mask"
-   },
-   "verification": "raster",
-   "when_slot": "qa"
+  "map_output": {
+    "from_step": "index",
+    "renderer_hint": "categorized"
   },
-  {
-   "id": "index",
-   "operator_id": "rs:spectral_index",
-   "params": {
-    "input": "$primary.path",
-    "index": "MNDWI",
-    "output": "$outputs.mndwi"
-   },
-   "verification": "raster"
+  "aliases": [
+    "harness.optical_mndwi_landsat"
+  ],
+  "presets": {
+    "landsat": {
+      "step_params": {
+        "index": {
+          "scale": 0.0001
+        }
+      }
+    }
   },
-  {
-   "id": "classify",
-   "operator_id": "rs:threshold_raster",
-   "params": {
-    "input": "$outputs.mndwi",
-    "output": "$outputs.classified",
-    "thresholdMethod": "manual",
-    "threshold": "$params.threshold",
-    "cleanup": "majority"
-   },
-   "verification": "raster",
-   "when_param": "threshold",
-   "params_when_skipped": {
-    "input": "$outputs.mndwi",
-    "output": "$outputs.classified",
-    "thresholdMethod": "statistical",
-    "statisticalK": 2.0,
-    "cleanup": "majority"
-   }
-  }
- ],
- "outputs": [
-  {
-   "name": "mndwi",
-   "from_step": "index",
-   "port": "output",
-   "kind": "raster"
-  },
-  {
-   "name": "classified",
-   "from_step": "classify",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "index",
-  "renderer_hint": "categorized"
- }
+  "capabilities": [
+    "rs:qa_mask",
+    "rs:spectral_index",
+    "rs:threshold_raster"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "mndwi",
+      "kind": "raster"
+    },
+    {
+      "name": "classified",
+      "kind": "raster"
+    }
+  ]
 }

@@ -1,123 +1,136 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.sar_optical_fused_flood",
- "title": "SAR + optical fused flood mapping",
- "intent": "flood",
- "family": "flood",
- "modality": "multimodal",
- "sensors": [
-  "sentinel-1",
-  "sentinel-2",
-  "landsat-8",
-  "landsat-9"
- ],
- "description": "SAR water (weather-independent) + optical NDWI water -> union via thresholded sum. Produces a fused extent.",
- "slots": [
-  {
-   "name": "sar_scene",
-   "kind": "raster",
-   "description": "Post-event SAR GRD.",
-   "required": true
-  },
-  {
-   "name": "optical_scene",
-   "kind": "raster",
-   "description": "Near-coincident optical scene (Green + NIR).",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "sar_calibrate",
-   "operator_id": "rs:sar_calibrate",
-   "params": {
-    "input": "$sar_scene.path",
-    "output": "$outputs.sar_cal"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "sar_speckle",
-   "operator_id": "rs:sar_speckle",
-   "params": {
-    "input": "$outputs.sar_cal",
-    "output": "$outputs.sar_flt",
-    "method": "lee",
-    "looks": 2
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "sar_water",
-   "operator_id": "rs:threshold_raster",
-   "params": {
-    "input": "$outputs.sar_flt",
-    "output": "$outputs.sar_water",
-    "thresholdMethod": "statistical",
-    "statisticalK": 1.5,
-    "cleanup": "majority"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "ndwi",
-   "operator_id": "rs:spectral_index",
-   "params": {
-    "input": "$optical_scene.path",
-    "index": "NDWI",
-    "output": "$outputs.ndwi"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "opt_water",
-   "operator_id": "rs:threshold_raster",
-   "params": {
-    "input": "$outputs.ndwi",
-    "output": "$outputs.opt_water",
-    "thresholdMethod": "manual",
-    "threshold": 0.0,
-    "cleanup": "majority"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "fuse",
-   "operator_id": "rs:change_difference",
-   "params": {
-    "before": "$outputs.opt_water",
-    "after": "$outputs.sar_water",
-    "output": "$outputs.fused"
-   },
-   "verification": "raster",
-   "inputs": [
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.sar_optical_fused_flood",
+  "title": "SAR + optical fused flood mapping",
+  "intent": "flood",
+  "family": "flood",
+  "modality": "multimodal",
+  "sensors": [
+    "sentinel-1",
+    "sentinel-2",
+    "landsat-8",
+    "landsat-9"
+  ],
+  "description": "SAR water (weather-independent) + optical NDWI water -> union via thresholded sum. Produces a fused extent.",
+  "slots": [
     {
-     "step": "opt_water",
-     "port": "output",
-     "to_port": "before"
+      "name": "sar_scene",
+      "kind": "raster",
+      "description": "Post-event SAR GRD.",
+      "required": true
     },
     {
-     "step": "sar_water",
-     "port": "output",
-     "to_port": "after"
+      "name": "optical_scene",
+      "kind": "raster",
+      "description": "Near-coincident optical scene (Green + NIR).",
+      "required": true
     }
-   ]
-  }
- ],
- "outputs": [
-  {
-   "name": "fused",
-   "from_step": "fuse",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "fuse",
-  "renderer_hint": "categorized"
- }
+  ],
+  "steps": [
+    {
+      "id": "sar_calibrate",
+      "operator_id": "rs:sar_calibrate",
+      "params": {
+        "input": "$sar_scene.path",
+        "output": "$outputs.sar_cal"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "sar_speckle",
+      "operator_id": "rs:sar_speckle",
+      "params": {
+        "input": "$outputs.sar_cal",
+        "output": "$outputs.sar_flt",
+        "method": "lee",
+        "looks": 2
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "sar_water",
+      "operator_id": "rs:threshold_raster",
+      "params": {
+        "input": "$outputs.sar_flt",
+        "output": "$outputs.sar_water",
+        "thresholdMethod": "statistical",
+        "statisticalK": 1.5,
+        "cleanup": "open"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "ndwi",
+      "operator_id": "rs:spectral_index",
+      "params": {
+        "input": "$optical_scene.path",
+        "index": "NDWI",
+        "output": "$outputs.ndwi"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "opt_water",
+      "operator_id": "rs:threshold_raster",
+      "params": {
+        "input": "$outputs.ndwi",
+        "output": "$outputs.opt_water",
+        "thresholdMethod": "manual",
+        "threshold": 0.0,
+        "cleanup": "open"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "fuse",
+      "operator_id": "rs:change_difference",
+      "params": {
+        "before": "$outputs.opt_water",
+        "after": "$outputs.sar_water",
+        "output": "$outputs.fused"
+      },
+      "verification": "raster",
+      "inputs": [
+        {
+          "step": "opt_water",
+          "port": "output",
+          "to_port": "before"
+        },
+        {
+          "step": "sar_water",
+          "port": "output",
+          "to_port": "after"
+        }
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "fused",
+      "from_step": "fuse",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
+  },
+  "map_output": {
+    "from_step": "fuse",
+    "renderer_hint": "categorized"
+  },
+  "capabilities": [
+    "rs:sar_calibrate",
+    "rs:sar_speckle",
+    "rs:threshold_raster",
+    "rs:spectral_index",
+    "rs:change_difference"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "fused",
+      "kind": "raster"
+    }
+  ]
 }

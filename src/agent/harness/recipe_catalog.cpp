@@ -69,6 +69,7 @@ int RecipeCatalog::reload()
 {
   const std::string dir = mDirectory.empty() ? defaultDirectory() : mDirectory;
   mRecipes = Json::Value( Json::objectValue );
+  mAliases = Json::Value( Json::objectValue );
   mLoadProblems.clear();
   QDirIterator it( QString::fromStdString( dir ), { QStringLiteral( "*.json" ) }, QDir::Files );
   while ( it.hasNext() )
@@ -99,7 +100,14 @@ int RecipeCatalog::reload()
         mLoadProblems.push_back( it.fileName().toStdString() + ": " + problems.front() );
         continue;
       }
-      mRecipes[parsed["recipe_id"].asString()] = parsed;
+      const std::string id = parsed["recipe_id"].asString();
+      mRecipes[id] = parsed;
+      // Harness 7.0: deleted near-clone ids resolve to this canonical doc.
+      for ( const Json::Value &alias : parsed.get( "aliases", Json::Value( Json::arrayValue ) ) )
+      {
+        if ( alias.isString() && !alias.asString().empty() )
+          mAliases[alias.asString()] = id;
+      }
     }
   }
   mLoaded = true;
@@ -156,21 +164,68 @@ std::vector<std::string> RecipeCatalog::validateRecipeMetadata( const Json::Valu
   {
     const Json::Value &presets = recipe["presets"];
     if ( !presets.isObject() )
+    {
       problems.push_back( id + ": presets must be an object" );
+    }
     else
     {
       const auto names = presets.getMemberNames();
       if ( static_cast<int>( names.size() ) > 16 )
         problems.push_back( id + ": presets exceed the 16 entry budget" );
+      // Harness 7.0: preset internals are validated against the recipe so a
+      // preset can never reference a step/output that does not exist.
+      std::set<std::string> stepIds;
+      for ( const Json::Value &step : recipe.get( "steps", Json::Value( Json::arrayValue ) ) )
+        stepIds.insert( step.get( "id", "" ).asString() );
+      std::set<std::string> outputNames;
+      for ( const Json::Value &output : recipe.get( "outputs", Json::Value( Json::arrayValue ) ) )
+        outputNames.insert( output.get( "name", "" ).asString() );
       for ( const auto &name : names )
       {
         const Json::Value &preset = presets[name];
         if ( !preset.isObject() )
+        {
           problems.push_back( id + ": preset '" + name + "' must be an object" );
-        else if ( static_cast<int>( preset.getMemberNames().size() ) > 32 )
+          continue;
+        }
+        if ( static_cast<int>( preset.getMemberNames().size() ) > 32 )
           problems.push_back( id + ": preset '" + name + "' exceeds the 32 parameter budget" );
+        if ( preset.isMember( "step_params" ) )
+        {
+          const Json::Value &stepParams = preset["step_params"];
+          if ( !stepParams.isObject() )
+            problems.push_back( id + ": preset '" + name + "' step_params must be an object" );
+          else
+            for ( const std::string &stepId : stepParams.getMemberNames() )
+              if ( !stepIds.count( stepId ) )
+                problems.push_back( id + ": preset '" + name +
+                                    "' overrides unknown step '" + stepId + "'" );
+        }
+        if ( preset.isMember( "keep_outputs" ) )
+        {
+          const Json::Value &keep = preset["keep_outputs"];
+          if ( !keep.isArray() )
+            problems.push_back( id + ": preset '" + name + "' keep_outputs must be an array" );
+          else
+            for ( const Json::Value &outputName : keep )
+              if ( !outputName.isString() || !outputNames.count( outputName.asString() ) )
+                problems.push_back( id + ": preset '" + name + "' keeps unknown output '" +
+                                    outputName.asString() + "'" );
+        }
       }
     }
+  }
+  if ( recipe.isMember( "aliases" ) )
+  {
+    const Json::Value &aliases = recipe["aliases"];
+    if ( !aliases.isArray() )
+      problems.push_back( id + ": aliases must be an array" );
+    else if ( static_cast<int>( aliases.size() ) > 16 )
+      problems.push_back( id + ": aliases exceed the 16 entry budget" );
+    else
+      for ( const Json::Value &alias : aliases )
+        if ( !alias.isString() || alias.asString().empty() )
+          problems.push_back( id + ": aliases entries must be non-empty strings" );
   }
   if ( recipe.isMember( "expected_artifacts" ) )
   {
@@ -243,7 +298,11 @@ Json::Value RecipeCatalog::recipe( const std::string &recipeId ) const
 {
   if ( !mLoaded )
     const_cast<RecipeCatalog *>( this )->reload();
-  return mRecipes.get( recipeId, Json::Value() );
+  // Harness 7.0: alias ids (deleted near-clone recipes) resolve to the
+  // canonical document.
+  const std::string canonical =
+    mAliases.isMember( recipeId ) ? mAliases[recipeId].asString() : recipeId;
+  return mRecipes.get( canonical, Json::Value() );
 }
 
 namespace {
@@ -312,11 +371,156 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
   const Json::Value outputBindings = bindings.get( "outputs", Json::Value( Json::objectValue ) );
   const std::string outputDir = bindings.get( "output_dir", "" ).asString();
 
+  // Harness 7.0 (Area G): preset application. Deterministic: step_params
+  // override one named step's params; flat entries override every step param
+  // carrying the same key; keep_outputs filters declared outputs. The
+  // effective document copy keeps the catalog entry untouched.
+  Json::Value effective = recipe;
+  const std::string presetName = bindings.get( "preset", "" ).asString();
+  if ( !presetName.empty() )
+  {
+    const Json::Value &preset = recipe.get( "presets", Json::Value() ).get( presetName,
+                                                                            Json::Value() );
+    if ( !preset.isObject() )
+    {
+      Json::Value details( Json::objectValue );
+      details["recipe"] = recipeId;
+      details["preset"] = presetName;
+      error = HarnessError::make( error_codes::kInvalidParameter,
+                                  "Unknown preset '" + presetName + "' for recipe " + recipeId,
+                                  details );
+      error.recoverable = true;
+      return {};
+    }
+    const Json::Value &stepParams = preset.get( "step_params", Json::Value() );
+    Json::Value steps( Json::arrayValue );
+    for ( Json::Value step : recipe.get( "steps", Json::Value( Json::arrayValue ) ) )
+    {
+      const std::string stepId = step.get( "id", "" ).asString();
+      if ( stepParams.isObject() && stepParams.isMember( stepId ) )
+      {
+        Json::Value params = step.get( "params", Json::Value( Json::objectValue ) );
+        for ( const std::string &key : stepParams[stepId].getMemberNames() )
+          params[key] = stepParams[stepId][key];
+        step["params"] = params;
+      }
+      // Flat entries: override any step param with the same key.
+      for ( const std::string &key : preset.getMemberNames() )
+      {
+        if ( key == "step_params" || key == "keep_outputs" || key == "description" )
+          continue;
+        Json::Value params = step.get( "params", Json::Value( Json::objectValue ) );
+        if ( params.isMember( key ) )
+          params[key] = preset[key];
+        step["params"] = params;
+      }
+      steps.append( step );
+    }
+    effective["steps"] = steps;
+    if ( preset.isMember( "keep_outputs" ) && preset["keep_outputs"].isArray() )
+    {
+      std::set<std::string> keep;
+      for ( const Json::Value &outputName : preset["keep_outputs"] )
+        keep.insert( outputName.asString() );
+      Json::Value outputs( Json::arrayValue );
+      for ( const Json::Value &output : recipe.get( "outputs", Json::Value( Json::arrayValue ) ) )
+        if ( keep.count( output.get( "name", "" ).asString() ) )
+          outputs.append( output );
+      effective["outputs"] = outputs;
+    }
+  }
+
+  // Harness 7.0 (Area G): auto-derive step wiring from data flow. Recipes
+  // written before declared "inputs" existed rely on document order; the
+  // engine does not guarantee ordering for steps without declared wiring,
+  // which is a race (the flood NDWI eval caught the threshold step reading an
+  // intermediate before the index step wrote it). A step whose params consume
+  // "$outputs.<name>" gains an input on the producing step (declared outputs
+  // first, then the first step emitting the intermediate). This composes with
+  // the gate semantics: degradation propagation now sees real dependencies.
+  if ( effective.isMember( "steps" ) && effective["steps"].isArray() )
+  {
+    Json::Value steps = effective["steps"];
+    const int wiringCount = static_cast<int>( steps.size() );
+    std::map<std::string, int> indexById;
+    for ( int i = 0; i < wiringCount; ++i )
+      indexById[ steps[i].get( "id", "" ).asString() ] = i;
+
+    std::map<std::string, std::string> producerOfOutput; // output name -> step id
+    for ( const Json::Value &output :
+          effective.get( "outputs", Json::Value( Json::arrayValue ) ) )
+    {
+      const std::string name = output.get( "name", "" ).asString();
+      const std::string from = output.get( "from_step", "" ).asString();
+      if ( !name.empty() && !from.empty() )
+        producerOfOutput[ name ] = from;
+    }
+    std::map<std::string, std::string> emitsOutput; // intermediate name -> first emitting step
+    for ( int i = 0; i < wiringCount; ++i )
+    {
+      const Json::Value &params = steps[i].get( "params", Json::Value( Json::objectValue ) );
+      const std::string stepId = steps[i].get( "id", "" ).asString();
+      for ( const std::string &key : params.getMemberNames() )
+      {
+        const Json::Value &value = params[ key ];
+        if ( !value.isString() || value.asString().rfind( "$outputs.", 0 ) != 0 )
+          continue;
+        const std::string name = value.asString().substr( 9 );
+        if ( emitsOutput.count( name ) )
+          continue;
+        emitsOutput[ name ] = stepId;
+      }
+    }
+    for ( int i = 0; i < wiringCount; ++i )
+    {
+      const Json::Value &params = steps[i].get( "params", Json::Value( Json::objectValue ) );
+      std::set<std::string> upstream;
+      for ( const std::string &key : params.getMemberNames() )
+      {
+        const Json::Value &value = params[ key ];
+        if ( !value.isString() || value.asString().rfind( "$outputs.", 0 ) != 0 )
+          continue;
+        const std::string name = value.asString().substr( 9 );
+        std::string producer;
+        const auto declared = producerOfOutput.find( name );
+        if ( declared != producerOfOutput.end() )
+          producer = declared->second;
+        else
+        {
+          const auto emitted = emitsOutput.find( name );
+          if ( emitted != emitsOutput.end() )
+            producer = emitted->second;
+        }
+        if ( !producer.empty() && producer != steps[i].get( "id", "" ).asString() )
+          upstream.insert( producer );
+      }
+      if ( upstream.empty() )
+        continue;
+      Json::Value wiring( Json::arrayValue );
+      if ( steps[i].isMember( "inputs" ) && steps[i]["inputs"].isArray() )
+        wiring = steps[i]["inputs"];
+      for ( const std::string &producer : upstream )
+      {
+        bool already = false;
+        for ( const Json::Value &conn : wiring )
+          if ( conn.get( "step", "" ).asString() == producer )
+            already = true;
+        if ( already )
+          continue;
+        Json::Value conn( Json::objectValue );
+        conn["step"] = producer;
+        wiring.append( conn );
+      }
+      steps[i]["inputs"] = wiring;
+    }
+    effective["steps"] = steps;
+  }
+
   // Resolve slots through the authoritative resolver — a bound slot that does
   // not resolve stops instantiation with a typed error.
   Json::Value slotPaths( Json::objectValue );
   Json::Value planInputs( Json::arrayValue );
-  for ( const auto &slot : recipe.get( "slots", Json::Value( Json::arrayValue ) ) )
+  for ( const auto &slot : effective.get( "slots", Json::Value( Json::arrayValue ) ) )
   {
     const std::string slotName = slot.get( "name", "" ).asString();
     const bool required = slot.get( "required", true ).asBool();
@@ -361,7 +565,7 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
   // <output_dir>/<recipe>_<name>.tif (relative paths stay workspace-relative
   // under the MCP path policy).
   Json::Value outputPaths( Json::objectValue );
-  for ( const auto &output : recipe.get( "outputs", Json::Value( Json::arrayValue ) ) )
+  for ( const auto &output : effective.get( "outputs", Json::Value( Json::arrayValue ) ) )
   {
     const std::string name = output.get( "name", "" ).asString();
     if ( outputBindings.isMember( name ) && outputBindings[name].isString() )
@@ -372,7 +576,7 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
       outputPaths[name] = recipeId + "_" + name + ".tif";
   }
   // Gated steps may reference intermediate outputs; give those derived paths.
-  for ( const auto &step : recipe.get( "steps", Json::Value( Json::arrayValue ) ) )
+  for ( const auto &step : effective.get( "steps", Json::Value( Json::arrayValue ) ) )
   {
     const Json::Value params = step.get( "params", Json::Value( Json::objectValue ) );
     for ( const std::string &key : params.getMemberNames() )
@@ -399,7 +603,7 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
   //     dropped or skipped step — runs with its params_when_skipped template.
   //     Parallel branches stay independent (issue #784): an unrelated closed
   //     gate elsewhere in the recipe never flips this branch's templates.
-  const Json::Value stepTemplates = recipe.get( "steps", Json::Value( Json::arrayValue ) );
+  const Json::Value stepTemplates = effective.get( "steps", Json::Value( Json::arrayValue ) );
   std::map<std::string, bool> paramGateOpen;
   for ( const auto &step : stepTemplates )
   {
@@ -536,15 +740,15 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
   plan["schema_version"] = kAgentPlanSchemaVersion;
   plan["kind"] = "execution_plan";
   plan["plan_id"] = "plan-" + recipeId;
-  plan["goal"] = recipe.get( "title", recipeId ).asString();
-  plan["intent"] = recipe.get( "intent", "" ).asString();
+  plan["goal"] = effective.get( "title", recipeId ).asString();
+  plan["intent"] = effective.get( "intent", "" ).asString();
   plan["inputs"] = planInputs;
   plan["steps"] = planSteps;
   // Declared outputs whose producing step was gate-dropped must not poison
   // the plan (agent_plan validation rejects from_step references to missing
   // steps). Outputs without from_step always survive.
   Json::Value survivingOutputs( Json::arrayValue );
-  for ( const auto &output : recipe.get( "outputs", Json::Value( Json::arrayValue ) ) )
+  for ( const auto &output : effective.get( "outputs", Json::Value( Json::arrayValue ) ) )
   {
     const std::string fromStep = output.get( "from_step", "" ).asString();
     if ( !fromStep.empty() && !emittedIds.count( fromStep ) )
@@ -552,10 +756,10 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
     survivingOutputs.append( output );
   }
   plan["outputs"] = survivingOutputs;
-  plan["verification"] = recipe.get( "verification", Json::Value( Json::objectValue ) );
-  if ( recipe.isMember( "map_output" ) )
+  plan["verification"] = effective.get( "verification", Json::Value( Json::objectValue ) );
+  if ( effective.isMember( "map_output" ) )
   {
-    Json::Value mapOutput = recipe["map_output"];
+    Json::Value mapOutput = effective["map_output"];
     if ( mapOutput.isObject() && bindings.isMember( "layout_name" ) )
       mapOutput["layout_name"] = bindings["layout_name"];
     plan["map_output"] = mapOutput;
