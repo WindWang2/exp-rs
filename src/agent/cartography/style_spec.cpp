@@ -276,17 +276,42 @@ Json::Value resolveTokensRecursive( const Json::Value &node, const Json::Value &
 {
   if ( node.isString() )
   {
-    const std::string value = node.asString();
+    std::string value = node.asString();
     if ( !isTokenReference( value ) )
       return node;
-    const std::string path = tokenReferencePath( value );
-    const Json::Value resolved = tokenValue( tokens, path );
-    if ( resolved.isNull() )
+
+    constexpr int kMaxTokenHops = 10;
+    int hops = 0;
+    std::set<std::string> visited;
+
+    while ( isTokenReference( value ) )
     {
-      problems.push_back( "unresolvable token reference '" + value + "'" );
-      return node;
+      if ( visited.count( value ) || hops >= kMaxTokenHops )
+      {
+        problems.push_back( "cyclic or excessive token reference '" + value + "'" );
+        return node;
+      }
+      visited.insert( value );
+      ++hops;
+
+      const std::string path = tokenReferencePath( value );
+      const Json::Value resolved = tokenValue( tokens, path );
+      if ( resolved.isNull() )
+      {
+        problems.push_back( "unresolvable token reference '" + value + "'" );
+        return node;
+      }
+      if ( resolved.isString() && isTokenReference( resolved.asString() ) )
+      {
+        value = resolved.asString();
+      }
+      else
+      {
+        if ( resolved.isArray() || resolved.isObject() )
+          return resolveTokensRecursive( resolved, tokens, problems );
+        return resolved;
+      }
     }
-    return resolved;
   }
   if ( node.isArray() )
   {

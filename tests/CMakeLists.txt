@@ -685,6 +685,35 @@ target_compile_definitions(test_adversarial_m5 PRIVATE
 )
 sicnu_discover_tests(test_adversarial_m5)
 
+add_executable(test_adversarial_m6
+  test_adversarial_m6.cpp
+)
+target_link_libraries(test_adversarial_m6 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  sicnu_processing
+  sicnu_task_center
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_adversarial_m6 PRIVATE jsoncpp)
+endif()
+target_include_directories(test_adversarial_m6 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_adversarial_m6 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_adversarial_m6)
+
 add_executable(test_interactive_session_contract
   test_interactive_session_contract.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/session_adapters.cpp
