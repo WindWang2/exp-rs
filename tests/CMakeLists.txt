@@ -556,6 +556,66 @@ target_include_directories(test_workbench_shutdown_policy PRIVATE
 )
 sicnu_discover_tests(test_workbench_shutdown_policy)
 
+# ── Workbench 7.0: provenance inspector section over DataManager + WorkspaceService ──
+add_executable(test_provenance_section
+  test_provenance_section.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/inspector_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/provenance_section.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_provenance_section PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+)
+target_include_directories(test_provenance_section PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_provenance_section)
+
+# ── Workbench 7.0: unified processing history projection (TaskCenter + runs) ──
+add_executable(test_processing_history_model
+  test_processing_history_model.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_model.cpp
+)
+target_link_libraries(test_processing_history_model PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  sicnu_task_center
+  sicnu_workflow
+)
+target_include_directories(test_processing_history_model PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_processing_history_model)
+
+# ── Workbench 7.0: temporal scene browser model (paged, filtered) ──
+add_executable(test_temporal_scene_model
+  test_temporal_scene_model.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/temporal_scene_model.cpp
+)
+target_link_libraries(test_temporal_scene_model PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  sicnu_processing
+)
+target_include_directories(test_temporal_scene_model PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_temporal_scene_model)
+
 add_executable(test_selection_context
   test_selection_context.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp

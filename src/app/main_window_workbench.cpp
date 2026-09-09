@@ -18,7 +18,16 @@
 #include "workbench/command_registry.h"
 #include "workbench/inspector_host.h"
 #include "workbench/layer_sections.h"
+#include "workbench/processing_history_panel.h"
+#include "workbench/provenance_section.h"
 #include "workbench/shutdown_policy.h"
+#include "workbench/temporal_workbench_panel.h"
+#include "workbench/dataset_experiment_panel.h"
+#include "workbench/model_workbench_panel.h"
+#include "dialogs/comparison_dialog.h"
+#include "data/data_asset.h"
+#include "data/data_manager.h"
+#include "workflow/workflow_run_coordinator.h"
 #include "workbench/selection_context.h"
 #include "workbench/workbench_host.h"
 #include "georeferencer/qgsgeoref_shell_window.h"
@@ -35,6 +44,10 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QStackedWidget>
+
+#include <qgsproject.h>
+#include <qgsrasterlayer.h>
+#include <qgsmaplayer.h>
 
 #include "processing/framework/task_center.h"
 
@@ -290,10 +303,201 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     m_inspectorHost->registerSection( new sicnu::app::LayerMetadataSection( m_inspectorHost ) );
     m_inspectorHost->registerSection( new sicnu::app::VectorStructureSection( m_inspectorHost ) );
     m_inspectorHost->registerSection( new sicnu::app::SarInfoSection( m_inspectorHost ) );
+    // Workbench 7.0 (goal §B): provenance projection over DataManager +
+    // WorkspaceService — services injected, never a copied store.
+    m_inspectorHost->registerSection( new sicnu::app::ProvenanceSection(
+        [this] -> sicnu::data::DataManager * {
+            return m_projectContext ? &m_projectContext->dataManager() : nullptr;
+        },
+        [this] -> sicnu::workspace::WorkspaceService * {
+            return m_projectContext ? &m_projectContext->workspaceService() : nullptr;
+        },
+        m_inspectorHost ) );
     m_inspectorHost->attachSelectionContext( m_selectionContext );
     m_inspectorDock->setWidget( m_inspectorHost );
     addDockWidget( Qt::RightDockWidgetArea, m_inspectorDock );
     m_inspectorDock->hide(); // available on demand — no more permanent chrome
+
+    // ── Processing History (Workbench 7.0 §C) ─────────────────────────
+    // Unified projection over TaskCenter + WorkflowRunCoordinator; the panel
+    // owns no execution state. Actions route through the same seams.
+    m_historyPanel = new sicnu::app::ProcessingHistoryPanel( this );
+    m_historyPanel->setObjectName( QStringLiteral( "rsProcessingHistoryDock" ) );
+    m_historyPanel->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea |
+                                     Qt::BottomDockWidgetArea );
+    connect( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::resultOpenRequested, this,
+             [this]( const QString &path ) { loadRasterLayer( path ); } );
+    connect( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::compareRequested, this,
+             [this]( const QString &pathA, const QString &pathB ) {
+                 // Both artifacts go through the project (the dialog borrows
+                 // project-owned layers), then the existing compare surface.
+                 if ( !loadRasterLayer( pathA ) || !loadRasterLayer( pathB ) )
+                 {
+                     statusBar()->showMessage( tr( "无法加载待对比的产物。" ), 4000 );
+                     return;
+                 }
+                 QgsRasterLayer *left = nullptr;
+                 QgsRasterLayer *right = nullptr;
+                 const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
+                 for ( QgsMapLayer *layer : layers )
+                 {
+                     auto *raster = qobject_cast<QgsRasterLayer *>( layer );
+                     if ( !raster )
+                         continue;
+                     if ( raster->source() == pathA )
+                         left = raster;
+                     if ( raster->source() == pathB )
+                         right = raster;
+                 }
+                 if ( !left || !right )
+                 {
+                     statusBar()->showMessage( tr( "未找到待对比的图层。" ), 4000 );
+                     return;
+                 }
+                 ComparisonDialog dialog( this );
+                 dialog.setLeftLayer( left );
+                 dialog.setRightLayer( right );
+                 dialog.exec();
+             } );
+    connect( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::inspectRequested, this,
+             [this]( const QString &path ) {
+                 if ( !m_projectContext )
+                     return;
+                 // Resolve the artifact to its registered asset and steer the
+                 // shared selection context: the provenance inspector section
+                 // renders whatever the catalog truly knows about it.
+                 const std::optional<sicnu::data::AssetSnapshot> asset =
+                     m_projectContext->dataManager().findByPath( path );
+                 if ( asset )
+                     m_selectionContext->notifyAssetSelection(
+                         QStringList{ asset->id().toString() } );
+             } );
+    connect( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::resumeRunRequested, this,
+             []( const QString &runId ) {
+                 QString error;
+                 sicnu::workflow::WorkflowRunCoordinator::instance().resumeRun(
+                     runId.toStdString(), &error );
+                 // Surfacing resume failures happens through the run's own
+                 // Failed state in the history — no extra modal surface here.
+             } );
+    if ( m_windowMenu )
+    {
+        QAction *historyAction = m_windowMenu->addAction( tr( "处理历史" ) );
+        historyAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+H" ) ) );
+        connect( historyAction, &QAction::triggered, this, [this] {
+            m_historyPanel->show();
+            m_historyPanel->raise();
+            m_historyPanel->activateWindow();
+            m_historyPanel->refreshNow();
+        } );
+    }
+
+    // ── Temporal Workbench (Workbench 7.0 §D) ─────────────────────────
+    // Timeline + paginated scene browser over DataManager temporal
+    // collections; preview/compare route through the existing seams.
+    m_temporalPanel = new sicnu::app::TemporalWorkbenchPanel(
+        [this] -> sicnu::data::DataManager * {
+            return m_projectContext ? &m_projectContext->dataManager() : nullptr;
+        },
+        this );
+    m_temporalPanel->setObjectName( QStringLiteral( "rsTemporalWorkbenchDock" ) );
+    m_temporalPanel->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+    connect( m_temporalPanel, &sicnu::app::TemporalWorkbenchPanel::previewRequested, this,
+             [this]( const QString &path ) { loadRasterLayer( path ); } );
+    connect( m_temporalPanel, &sicnu::app::TemporalWorkbenchPanel::compareRequested, this,
+             [this]( const QString &pathA, const QString &pathB ) {
+                 if ( !loadRasterLayer( pathA ) || !loadRasterLayer( pathB ) )
+                 {
+                     statusBar()->showMessage( tr( "无法加载待对比的时相。" ), 4000 );
+                     return;
+                 }
+                 QgsRasterLayer *left = nullptr;
+                 QgsRasterLayer *right = nullptr;
+                 const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
+                 for ( QgsMapLayer *layer : layers )
+                 {
+                     auto *raster = qobject_cast<QgsRasterLayer *>( layer );
+                     if ( !raster )
+                         continue;
+                     if ( raster->source() == pathA )
+                         left = raster;
+                     if ( raster->source() == pathB )
+                         right = raster;
+                 }
+                 if ( !left || !right )
+                 {
+                     statusBar()->showMessage( tr( "未找到待对比的图层。" ), 4000 );
+                     return;
+                 }
+                 ComparisonDialog dialog( this );
+                 dialog.setLeftLayer( left );
+                 dialog.setRightLayer( right );
+                 dialog.exec();
+             } );
+    // Collections change with the project data context; the panel re-reads.
+    if ( m_projectContext )
+    {
+        connect( &m_projectContext->dataManager(), &sicnu::data::DataManager::temporalCollectionAdded,
+                 m_temporalPanel, &sicnu::app::TemporalWorkbenchPanel::refreshCollections );
+        connect( &m_projectContext->dataManager(),
+                 &sicnu::data::DataManager::temporalCollectionChanged,
+                 m_temporalPanel, &sicnu::app::TemporalWorkbenchPanel::refreshCollections );
+        connect( &m_projectContext->dataManager(),
+                 &sicnu::data::DataManager::temporalCollectionRemoved,
+                 m_temporalPanel, &sicnu::app::TemporalWorkbenchPanel::refreshCollections );
+    }
+    if ( m_windowMenu )
+    {
+        QAction *temporalAction = m_windowMenu->addAction( tr( "时序工作台" ) );
+        temporalAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+T" ) ) );
+        connect( temporalAction, &QAction::triggered, this, [this] {
+            m_temporalPanel->show();
+            m_temporalPanel->raise();
+            m_temporalPanel->activateWindow();
+            m_temporalPanel->refreshCollections();
+        } );
+    }
+
+    // ── Dataset / Experiment bench (Workbench 7.0 §E) ─────────────────
+    // Thin client over the ML-engineering stores (user opens the DB files;
+    // the panel projects them read-only, no second store).
+    m_datasetExperimentPanel = new sicnu::app::DatasetExperimentPanel( this );
+    m_datasetExperimentPanel->setObjectName( QStringLiteral( "rsDatasetExperimentDock" ) );
+    m_datasetExperimentPanel->setAllowedAreas( Qt::LeftDockWidgetArea |
+                                               Qt::RightDockWidgetArea );
+    if ( m_windowMenu )
+    {
+        QAction *dataAction = m_windowMenu->addAction( tr( "数据集与实验" ) );
+        dataAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+D" ) ) );
+        connect( dataAction, &QAction::triggered, this, [this] {
+            m_datasetExperimentPanel->show();
+            m_datasetExperimentPanel->raise();
+            m_datasetExperimentPanel->activateWindow();
+        } );
+    }
+
+    // ── Model bench (Workbench 7.0 §F) ────────────────────────────────
+    // Catalog/readiness/manifest projection over ModelCatalog + ModelRuntime;
+    // test inference submits rs:infer through TaskCenter (goal §F seam).
+    m_modelPanel = new sicnu::app::ModelWorkbenchPanel( this );
+    m_modelPanel->setObjectName( QStringLiteral( "rsModelWorkbenchDock" ) );
+    m_modelPanel->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+    connect( m_modelPanel, &sicnu::app::ModelWorkbenchPanel::inferenceSubmitted, this,
+             [this]( long ) {
+                 if ( m_historyPanel )
+                     m_historyPanel->refreshNow();
+             } );
+    if ( m_windowMenu )
+    {
+        QAction *modelAction = m_windowMenu->addAction( tr( "模型工作台" ) );
+        modelAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+M" ) ) );
+        connect( modelAction, &QAction::triggered, this, [this] {
+            m_modelPanel->show();
+            m_modelPanel->raise();
+            m_modelPanel->activateWindow();
+            m_modelPanel->refreshCatalog();
+        } );
+    }
 }
 
 bool QgisDesktopWindow::confirmWorkbenchShutdown( const QString &actionTitle )

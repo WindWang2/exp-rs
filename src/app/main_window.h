@@ -537,6 +537,10 @@ private:
     sicnu::app::CommandPalette *m_commandPalette = nullptr;
     sicnu::app::InspectorHost *m_inspectorHost = nullptr;
     QDockWidget *m_inspectorDock = nullptr;
+    class ProcessingHistoryPanel *m_historyPanel = nullptr;
+    class TemporalWorkbenchPanel *m_temporalPanel = nullptr;
+    class DatasetExperimentPanel *m_datasetExperimentPanel = nullptr;
+    class ModelWorkbenchPanel *m_modelPanel = nullptr;
 
     // Declared before m_pluginHost so it is destroyed after it: the
     // plugin proxy (`PythonAppInterfaceProxy`) holds a raw `ActiveViewHost*`
