@@ -32,10 +32,25 @@
 #include <limits>
 #include <memory>
 
+QThreadPool *RoiStatisticsWidget::analysisThreadPool()
+{
+    static QThreadPool *s_pool = []() {
+        auto *p = new QThreadPool();
+        p->setMaxThreadCount( 2 );
+        return p;
+    }();
+    return s_pool;
+}
+
 RoiStatisticsWidget::RoiStatisticsWidget(QWidget *parent)
     : QWidget(parent)
 {
     setupUi();
+}
+
+RoiStatisticsWidget::~RoiStatisticsWidget()
+{
+    ++m_requestEpoch;
 }
 
 void RoiStatisticsWidget::setupUi()
@@ -92,6 +107,8 @@ void RoiStatisticsWidget::setupUi()
 
 void RoiStatisticsWidget::setRasterLayer(QgsRasterLayer *layer)
 {
+    ++m_requestEpoch;
+    m_computing = false;
     m_rasterLayer = layer;
     m_stats.clear();
     updateTable();
@@ -108,7 +125,7 @@ void RoiStatisticsWidget::computeStatistics()
     // GEOS predicate (one QgsGeometry allocation per pixel) synchronously in
     // the Refresh slot - an unbounded GUI freeze (10 GB/band and up to 2.5e9
     // predicate calls on a 50k x 50k scene). Now: the heavy work runs on the
-    // global thread pool with a staleness guard (HistogramWidget pattern),
+    // dedicated bounded thread pool (#797) with a staleness guard (HistogramWidget pattern),
     // the ROI test uses ONE prepared geometry engine, and a missing ROI
     // reads a decimated window instead of the whole scene.
     if (m_computing)
@@ -149,7 +166,7 @@ void RoiStatisticsWidget::computeStatistics()
 
     const uint64_t reqId = ++m_requestEpoch;
     QPointer<RoiStatisticsWidget> self = this;
-    QThreadPool::globalInstance()->start([self, source, bandCount, roiWkt, layerExtent, reqId]() {
+    analysisThreadPool()->start([self, source, bandCount, roiWkt, layerExtent, reqId]() {
         QVector<BandStats> stats(bandCount);
         QString error;
 
@@ -239,6 +256,12 @@ void RoiStatisticsWidget::computeStatistics()
         std::vector<float> buf(static_cast<size_t>(bufW) * bufH);
         std::vector<float> roiPixels;
         for (int b = 0; b < bandCount; ++b) {
+            // Cooperative cancellation check (#797)
+            if ( !self || self->m_requestEpoch != reqId ) {
+                GDALClose( ds );
+                return;
+            }
+
             GDALRasterBandH band = GDALGetRasterBand(ds, b + 1);
             if (!band) continue;
             if (GDALRasterIO(band, GF_Read, xOff, yOff, xSize, ySize,

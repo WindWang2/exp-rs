@@ -27,7 +27,14 @@ bool isTerminalState( JobState state )
   return state == JobState::Succeeded || state == JobState::Failed || state == JobState::Cancelled;
 }
 
+thread_local bool t_isWorkerThread = false;
+
 } // namespace
+
+bool JobEngine::isWorkerThread()
+{
+  return t_isWorkerThread;
+}
 
 JobEngine &JobEngine::instance()
 {
@@ -420,8 +427,54 @@ void JobEngine::setListener( Listener listener )
   m_listener = std::move( listener );
 }
 
+bool JobEngine::waitForJob( const std::string &jobId, int timeoutMs )
+{
+  // Deadlock prevention (#798): worker threads must not synchronously wait
+  // on jobs because doing so can exhaust the pool and deadlock sub-jobs.
+  if ( isWorkerThread() )
+  {
+    return false;
+  }
+
+  std::unique_lock<std::mutex> lock( m_mutex );
+  auto it = m_jobs.find( jobId );
+  if ( it == m_jobs.end() )
+    return false;
+
+  auto isFinished = [this, &jobId]() {
+    auto it = m_jobs.find( jobId );
+    return it == m_jobs.end() ||
+           it->second.state == JobState::Succeeded ||
+           it->second.state == JobState::Failed ||
+           it->second.state == JobState::Cancelled;
+  };
+
+  if ( isFinished() )
+    return true;
+
+  if ( timeoutMs < 0 )
+  {
+    m_cv.wait( lock, isFinished );
+  }
+  else
+  {
+    if ( !m_cv.wait_for( lock, std::chrono::milliseconds( timeoutMs ), isFinished ) )
+      return false;
+  }
+
+  auto endIt = m_jobs.find( jobId );
+  return endIt != m_jobs.end() && (
+    endIt->second.state == JobState::Succeeded ||
+    endIt->second.state == JobState::Failed ||
+    endIt->second.state == JobState::Cancelled );
+}
+
 void JobEngine::waitUntilIdleForTests( int timeoutMs )
 {
+  if ( isWorkerThread() )
+  {
+    return;
+  }
   std::unique_lock<std::mutex> lock( m_mutex );
   const auto deadline = std::chrono::steady_clock::now()
                         + std::chrono::milliseconds( timeoutMs );
@@ -492,6 +545,7 @@ void JobEngine::ensureWorkersLocked()
 
 void JobEngine::workerLoop( uint64_t gen )
 {
+  t_isWorkerThread = true;
   while ( true )
   {
     std::string jobId;

@@ -10,6 +10,9 @@
 
 #include <qgsrasterlayer.h>
 
+class QColor;
+class QThreadPool;
+
 typedef void *GDALDatasetH;
 
 /**
@@ -24,6 +27,9 @@ class HistogramWidget : public QWidget
     Q_OBJECT
 
 public:
+    /// Dedicated, bounded thread pool for raster analysis (#797).
+    static QThreadPool *analysisThreadPool();
+
     enum class ChannelMode
     {
         MasterRGB,

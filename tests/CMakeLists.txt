@@ -653,6 +653,38 @@ target_compile_definitions(test_adversarial_m4 PRIVATE
 )
 sicnu_discover_tests(test_adversarial_m4)
 
+add_executable(test_adversarial_m5
+  test_adversarial_m5.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/roi_statistics_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
+)
+target_link_libraries(test_adversarial_m5 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_adversarial_m5 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/stubs
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_adversarial_m5 PROPERTIES AUTOMOC ON)
+target_compile_definitions(test_adversarial_m5 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_adversarial_m5)
+
 add_executable(test_interactive_session_contract
   test_interactive_session_contract.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/session_adapters.cpp
