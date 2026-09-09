@@ -9,6 +9,7 @@
  *   E3xxx  content problems         (entrypoint / dependency / resources)
  *   E4xxx  runtime problems         (symbol / load / init / registration)
  *   E5xxx  policy problems          (permission denied / trust / disabled)
+ *   E6xxx  isolation problems       (host-process protocol / crash / quota)
  ***************************************************************************/
 #pragma once
 
@@ -62,6 +63,27 @@ enum class PluginDiagnosticCode
     PluginDisabled = 5003,
     PolicyBlocklisted = 5004,
     WorkspaceEscape = 5005,
+
+    // E6xxx — isolation (host-process runtime & IPC, appended in 5.0)
+    /// Worker/host protocol majors differ, or worker minor > host minor.
+    IpcProtocolVersionMismatch = 6001,
+    /// Malformed frame or envelope; the channel is no longer trusted.
+    IpcProtocolError = 6002,
+    /// Frame or accumulated response exceeded the negotiated byte cap.
+    IpcPayloadTooLarge = 6003,
+    /// Request deadline passed (cancel + kill ladder already applied).
+    IpcRequestTimeout = 6004,
+    /// The worker process died while one or more requests were in flight.
+    HostProcessCrashed = 6005,
+    /// The worker process could not be launched (binary missing, spawn error).
+    HostProcessUnavailable = 6006,
+    /// A declared quota (concurrency, output bytes, child processes, ...)
+    /// was exceeded. Refusal, not degradation.
+    QuotaExceeded = 6007,
+    /// Peer does not implement a method the caller requires.
+    IpcUnsupportedMethod = 6008,
+    /// Request was cancelled before completion (cooperative or kill ladder).
+    RequestCancelled = 6009,
 };
 
 enum class PluginDiagnosticSeverity

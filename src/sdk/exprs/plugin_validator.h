@@ -26,6 +26,9 @@ struct PluginValidationRequest
     int hostAbi = pluginAbiVersion();
     /// Treat the plugin as coming from this origin (affects trust checks).
     std::string trust = "third-party";
+    /// Plugin-scoped temp directory used to expand ${temp} in access
+    /// declarations (isolation runtime 5.0). Empty disables ${temp}.
+    std::string tempDirectory;
 };
 
 class PluginManifestValidator

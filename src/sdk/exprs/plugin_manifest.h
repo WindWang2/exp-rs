@@ -182,6 +182,19 @@ enum class PluginEntrypointKind
 std::string entrypointKindName( PluginEntrypointKind kind );
 bool entrypointKindFromName( const std::string &name, PluginEntrypointKind &out );
 
+/// Where a native plugin's code runs (isolation runtime 5.0). In-process is
+/// the historical default; host-process opts the plugin into the
+/// out-of-process host worker (docs/plugins/host-process.md). UI
+/// contributions are not supported in a host-process worker (v1 scope).
+enum class PluginRuntimeKind
+{
+    InProcess,
+    HostProcess,
+};
+
+std::string pluginRuntimeKindName( PluginRuntimeKind kind );
+bool pluginRuntimeKindFromName( const std::string &name, PluginRuntimeKind &out );
+
 /// Parsed plugin manifest.
 struct PluginManifest
 {
@@ -197,6 +210,12 @@ struct PluginManifest
     std::vector<std::string> platforms;
     std::string entrypoint;                 // file name relative to plugin dir
     PluginEntrypointKind entrypointKind = PluginEntrypointKind::Native;
+    PluginRuntimeKind runtime = PluginRuntimeKind::InProcess;
+    bool runtimeUnknown = false;  ///< manifest declared an unrecognized runtime
+    Json::Value access;      // raw manifest "access" object (structured
+                             // capability declarations; expanded+validated
+                             // by exprs/plugin_capabilities.h)
+    Json::Value quotas;      // raw manifest "quotas" object (exprs/plugin_quotas.h)
     ManifestPythonSection python;
     std::vector<std::string> capabilities;
     std::vector<PluginPermission> permissions;
