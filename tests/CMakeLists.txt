@@ -190,6 +190,7 @@ sicnu_add_io_test(test_io_paths)
 sicnu_add_io_test(test_io_uri)
 sicnu_add_io_test(test_io_product_registry)
 sicnu_add_io_test(test_io_probe)
+sicnu_add_io_test(test_adversarial_m3)
 
 # Remote range harness (ADR 0139): local HTTP fixture with byte accounting.
 sicnu_add_io_test(test_io_remote_range)
@@ -1470,6 +1471,10 @@ set_property(TARGET test_dataset_quality_scale PROPERTY RUN_SERIAL TRUE)
 # SAR pair, multimodal temporal, segmentation — small data, whole chain.
 sicnu_add_test(test_dataset_e2e_examples TIMEOUT 180)
 target_link_libraries(test_dataset_e2e_examples PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
+sicnu_add_test(test_adversarial_m2 TIMEOUT 180)
+target_link_libraries(test_adversarial_m2 PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
 
 # Phase C fused-chain equivalence (links through sicnu_task_center which
 # carries fused_chain.cpp; needs the standard set only).
@@ -3968,6 +3973,25 @@ if(TARGET sicnu_operators)
   sicnu_link_jsoncpp(test_rs_operators)
   sicnu_discover_tests(test_rs_operators)
 
+  add_executable(test_adversarial_m1 test_adversarial_m1.cpp)
+  target_link_libraries(test_adversarial_m1 PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    sicnu_processing
+    sicnu_operators
+    GDAL::GDAL
+  )
+  target_include_directories(test_adversarial_m1 PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_adversarial_m1)
+  sicnu_discover_tests(test_adversarial_m1)
+
   # Desktop Workbench UX 4.0 — band tool operator promotions (Milestone C)
   add_executable(test_rs_band_tools_operators test_rs_band_tools_operators.cpp)
   target_link_libraries(test_rs_band_tools_operators PRIVATE
@@ -6103,6 +6127,52 @@ target_include_directories(test_e2e_phase2 PRIVATE
 )
 set_target_properties(test_e2e_phase2 PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_e2e_phase2)
+
+# ---------------------------------------------------------------------------
+# E2E Test Suite for Open Issues #773 - #817
+# ---------------------------------------------------------------------------
+add_executable(test_e2e_open_issues
+  test_e2e_open_issues.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/inspector_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/adapters.cpp
+)
+target_link_libraries(test_e2e_open_issues PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  Sicnu::qgis_display
+  Sicnu::dataset
+  Sicnu::experiment
+  Sicnu::Geospatial
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  sicnu_workflow_runtime
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_e2e_open_issues)
+target_include_directories(test_e2e_open_issues PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_e2e_open_issues PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_e2e_open_issues PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_e2e_open_issues)
 
 # ---------------------------------------------------------------------------
 # Workflow Engine 2.0 test suites

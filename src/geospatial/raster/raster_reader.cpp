@@ -199,7 +199,8 @@ std::size_t RasterReader::windowByteBudget( const RasterMetadata &metadata, cons
   return pixels * bandCount * kDoubleSize;
 }
 
-std::vector<double> RasterReader::readWindow( const std::vector<int> &bands, const RasterWindow &window ) const
+std::vector<double> RasterReader::readWindow( const std::vector<int> &bands, const RasterWindow &window,
+                                              std::size_t maxBytes ) const
 {
   std::string validationError;
   if ( !validateWindow( mMetadata, window, &validationError ) )
@@ -222,6 +223,18 @@ std::vector<double> RasterReader::readWindow( const std::vector<int> &bands, con
   }
   if ( effectiveBands.empty() )
     throw GeoError( ErrorCode::InvalidArgument, "readWindow: raster has no bands" );
+
+  if ( maxBytes > 0 )
+  {
+    const std::size_t required = windowByteBudget( mMetadata, window, effectiveBands );
+    if ( required > maxBytes )
+    {
+      Json::Value details;
+      details["required_bytes"] = static_cast<Json::UInt64>( required );
+      details["max_bytes"] = static_cast<Json::UInt64>( maxBytes );
+      throw GeoError( ErrorCode::Unsupported, "readWindow: window read exceeds the declared byte budget", details );
+    }
+  }
 
   const std::size_t pixels = static_cast<std::size_t>( window.width ) * static_cast<std::size_t>( window.height );
   std::vector<double> out( pixels * effectiveBands.size() );
@@ -376,9 +389,28 @@ std::vector<double> RasterReader::readBlock( int bandIndex1Based, int blockX, in
   window.width = winW;
   window.height = winH;
 
-  // A block edge is smaller than the native block at raster edges; route
-  // through the strict window read (stored values, validated geometry).
-  return readWindow( { bandIndex1Based }, window );
+  const std::vector<double> partial = readWindow( { bandIndex1Based }, window );
+  if ( winW == size.first && winH == size.second )
+    return partial;
+
+  // On edge blocks, pad the remainder up to size.first * size.second with band NoData (or 0.0)
+  double nodata = 0.0;
+  for ( const BandInfo &candidate : mMetadata.bands )
+  {
+    if ( candidate.index == bandIndex1Based )
+    {
+      if ( candidate.hasNoData )
+        nodata = candidate.noDataValue;
+      break;
+    }
+  }
+
+  std::vector<double> padded( static_cast<std::size_t>( size.first ) * static_cast<std::size_t>( size.second ), nodata );
+  for ( int r = 0; r < winH; ++r )
+  {
+    std::copy_n( partial.data() + r * winW, winW, padded.data() + r * size.first );
+  }
+  return padded;
 }
 
 void RasterReader::iterateTiles( const TilePlan &plan, const std::vector<int> &bands,

@@ -325,3 +325,75 @@ TEST_CASE( "create leaves no staging behind when creation fails", "[io][raster][
   }
   CHECK( strays == 0 );
 }
+
+TEST_CASE( "readWindow respects maxBytes budget", "[io][raster][contract][issue808]" )
+{
+  const std::string dir = scratchDir( "budget" );
+  const std::string target = ( fs::path( dir ) / "budget.tif" ).string();
+
+  sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create(
+    target, 10, 10, { sicnu::geo::RasterBandSpec{} }, {} );
+  sicnu::geo::RasterWindow full;
+  full.width = 10;
+  full.height = 10;
+  std::vector<double> vals( 100, 1.0 );
+  writer.writeWindow( 1, full, vals.data() );
+  writer.finalize();
+
+  sicnu::geo::RasterReader reader = sicnu::geo::RasterReader::open( target );
+  // Budget smaller than 100 * sizeof(double) (800 bytes) should throw GeoError
+  CHECK_THROWS_AS( reader.readWindow( { 1 }, full, 100 ), sicnu::geo::GeoError );
+  // Budget larger than or equal to 800 bytes succeeds
+  CHECK_NOTHROW( reader.readWindow( { 1 }, full, 1000 ) );
+}
+
+TEST_CASE( "readBlock and iterateTiles streaming contracts", "[io][raster][contract][issue790][issue816]" )
+{
+  const std::string dir = scratchDir( "blocks" );
+  const std::string target = ( fs::path( dir ) / "blocks.tif" ).string();
+
+  // Create a 5x5 raster
+  sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create(
+    target, 5, 5, { sicnu::geo::RasterBandSpec{} }, {} );
+  sicnu::geo::RasterWindow full;
+  full.width = 5;
+  full.height = 5;
+  std::vector<double> vals( 25, 42.0 );
+  writer.writeWindow( 1, full, vals.data() );
+  writer.finalize();
+
+  sicnu::geo::RasterReader reader = sicnu::geo::RasterReader::open( target );
+  const auto bSize = reader.blockSize( 1 );
+  REQUIRE( bSize.first > 0 );
+  REQUIRE( bSize.second > 0 );
+
+  // readBlock returns exact uniform vector of size blockSize.first * blockSize.second
+  const std::vector<double> blockData = reader.readBlock( 1, 0, 0 );
+  CHECK( blockData.size() == static_cast<std::size_t>( bSize.first * bSize.second ) );
+  CHECK( blockData[0] == Approx( 42.0 ) );
+
+  // Out of bounds block coords throw
+  CHECK_THROWS_AS( reader.readBlock( 1, -1, 0 ), sicnu::geo::GeoError );
+  CHECK_THROWS_AS( reader.readBlock( 1, 0, 9999 ), sicnu::geo::GeoError );
+
+  // iterateTiles contract test
+  const auto plan = sicnu::geo::planTileWalk( reader.metadata(), full, 2, 2 );
+  int tileCount = 0;
+  reader.iterateTiles( plan, { 1 }, [&]( const sicnu::geo::TileSlice &slice, const std::vector<double> &data ) {
+    ++tileCount;
+    CHECK( data.size() == static_cast<std::size_t>( slice.width * slice.height ) );
+  } );
+  CHECK( tileCount == 9 );
+
+  // iterateTiles cancellation test
+  int cancelCount = 0;
+  CHECK_THROWS_AS( reader.iterateTiles( plan, { 1 },
+    [&]( const sicnu::geo::TileSlice &, const std::vector<double> & ) {
+      ++cancelCount;
+    },
+    [&]() {
+      return cancelCount >= 2;
+    }
+  ), sicnu::geo::GeoError );
+  CHECK( cancelCount == 2 );
+}

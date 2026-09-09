@@ -78,7 +78,7 @@ class FormatRegistry
     static const FormatRegistry &instance();
 
     /// All declared profiles, each annotated with runtime driver availability.
-    std::vector<FormatProfile> profiles() const;
+    const std::vector<FormatProfile> &profiles() const;
 
     /// Profile lookup by canonical id; nullptr when unknown.
     const FormatProfile *find( const std::string &id ) const;

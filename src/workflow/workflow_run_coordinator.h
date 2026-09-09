@@ -106,12 +106,6 @@ class WorkflowRunCoordinator : public QObject {
   private slots:
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
-  signals:
-    /// Mirrored after every persisted run-state transition (issue #754):
-    /// terminal/Interrupted transitions carry truthful started/finished ms.
-    void runStateChanged( const QString &runId, const QString &workflowId,
-                          const QString &state, qint64 startedMs, qint64 finishedMs );
-
   private:
     WorkflowRunCoordinator();
     ~WorkflowRunCoordinator() override;
@@ -124,24 +118,13 @@ class WorkflowRunCoordinator : public QObject {
 
     /// Requires m_mutex held (uses the no-lock directory accessor).
     void persistRunLocked( WorkflowRun &run );
-    /// Emits runStateChanged with the mutex held; callers queue across
-    /// threads (queued connection in ProjectContext).
-    void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
     /// Terminal roll-up + ArtifactGC + checkpoint retention. Called with
     /// m_mutex held when the last step of a tracked run went terminal.
     void finalizeRunLocked( long pipelineId, WorkflowRun &run );
-    /// Emits the run-state change and refreshes the checkpoint's state stamp.
-    /// Called with m_mutex held (the *_Locked convention); effectiveStart
-    /// falls back to the run's creation stamp when <= 0 (issue #754).
-    void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
     /// m_mutex-free directory read for call paths that already hold it.
     QString checkpointDirectoryLocked() const;
     QString checkpointPathLocked( const std::string &runId ) const;
     QString checkpointPathFor( const std::string &runId ) const;
-    /// Emits runStateChanged() with @a run's current state (start time taken
-    /// from the run's creation stamp when @a startedMs is 0). m_mutex must be
-    /// held (mirrors persistRunLocked's contract).
-    void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
 
     mutable std::mutex m_mutex;
     WorkflowCheckpointManager m_checkpoints;
@@ -153,12 +136,6 @@ class WorkflowRunCoordinator : public QObject {
     /// released at finalize / resume swap / submission failure.
     std::map<std::string, std::shared_ptr<WorkflowRunLock>> m_locksByRunId;
     bool m_connected = false;
-
-  signals:
-    /// One emission per tracked-run state transition (issue #754 carries the
-    /// truthful effective start).
-    void runStateChanged( const QString &runId, const QString &workflowId,
-                          const QString &state, qint64 startedMs, qint64 finishedMs );
 };
 
 } // namespace workflow

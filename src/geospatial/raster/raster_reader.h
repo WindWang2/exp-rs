@@ -124,7 +124,8 @@ class RasterReader
     /// the given 1-based bands. Output layout is band-sequential:
     /// [band0(w*h), band1(w*h), ...]. Throws GeoError(InvalidArgument) on a
     /// bad window/band list, GeoError(Unsupported) for complex pixel types.
-    std::vector<double> readWindow( const std::vector<int> &bands, const RasterWindow &window ) const;
+    std::vector<double> readWindow( const std::vector<int> &bands, const RasterWindow &window,
+                                    std::size_t maxBytes = 0 ) const;
 
     /// Whole-raster read with an explicit byte budget. Exceeding the budget
     /// throws GeoError(Unsupported) with the measured size in details —

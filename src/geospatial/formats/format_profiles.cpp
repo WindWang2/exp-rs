@@ -541,7 +541,7 @@ const FormatRegistry &FormatRegistry::instance()
   return registry;
 }
 
-std::vector<FormatProfile> FormatRegistry::profiles() const
+const std::vector<FormatProfile> &FormatRegistry::profiles() const
 {
   return mProfiles;
 }
