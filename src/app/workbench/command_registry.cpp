@@ -83,10 +83,10 @@ QAction *CommandRegistry::action( const QString &id, bool installShortcut )
         act->setIcon( QIcon( QStringLiteral( ":/icons/" ) + def.iconName ) );
     if ( installShortcut )
     {
-        Q_ASSERT_X( m_shortcutOwner.isEmpty(), "CommandRegistry",
-                    "only one projection may install the canonical shortcut" );
+        Q_ASSERT_X( !m_shortcutOwners.contains( id ), "CommandRegistry",
+                    "only one projection per command may install the canonical shortcut" );
         act->setShortcut( def.shortcut );
-        m_shortcutOwner = id;
+        m_shortcutOwners.insert( id );
     }
     connect( act, &QAction::triggered, this, [this, id] {
         const CommandDefinition *d = definition( id );

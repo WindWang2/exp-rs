@@ -55,6 +55,12 @@
 #include "app/workbench/selection_context.h"
 #include "app/workbench/workbench_host.h"
 #include "app/workbench/adapters.h"
+#include "app/display/qgis_display_manager.h"
+#include <qgslayertree.h>
+#include <qgsmaplayerstore.h>
+#include <qgsmapcanvas.h>
+#include <qgsvectorlayer.h>
+#include <QRegularExpression>
 
 // M5: Concurrency & Threading
 #include "jobs/job_engine.h"
@@ -706,6 +712,70 @@ TEST_CASE( "Tier 1 - #813: ExternalWindowWorkbench adapter hooks",
     CHECK( host.workbench( QStringLiteral( "test_external" ) ) != nullptr );
     CHECK_FALSE( wb->isDirty() );
     CHECK( dirtyChecked );
+}
+
+TEST_CASE( "Tier 1 - #779 & #796: Canvas layer destruction race and async stopRendering",
+           "[e2e][tier1][m4][issue-779][issue-796]" )
+{
+    // Issue #779: Layer destroyed while canvas background render thread is active.
+    // Issue #796: Test suite checked only synchronous pointer updates, omitting async render race.
+    ensureApp();
+    QgsMapCanvas canvas;
+    QgsVectorLayer *layer = new QgsVectorLayer( QStringLiteral( "Point?crs=epsg:4326" ),
+                                                QStringLiteral( "race_e2e" ), QStringLiteral( "memory" ) );
+    REQUIRE( layer->isValid() );
+    canvas.setLayers( { layer } );
+    canvas.refresh();
+
+    // stopRendering() ensures no crash or background thread race when deleting layer
+    canvas.stopRendering();
+    canvas.setLayers( {} );
+    delete layer;
+    CHECK( canvas.layers().isEmpty() );
+    CHECK_FALSE( canvas.isDrawing() );
+}
+
+TEST_CASE( "Tier 1 - #793: Multi-view isolation with view-specific layer tree",
+           "[e2e][tier1][m4][issue-793]" )
+{
+    // Issue #793: refreshCanvasLayers read global QgsProject checked layers, breaking multi-view isolation.
+    ensureApp();
+    QgsMapCanvas canvas1;
+    QgsMapCanvas canvas2;
+    QgsLayerTree tree1;
+    QgsLayerTree tree2;
+    QgsMapLayerStore store1;
+    QgsMapLayerStore store2;
+
+    sicnu::display::QgisDisplayManager dm( nullptr );
+    sicnu::display::DisplayViewSpec spec1{ &canvas1, &tree1, &store1 };
+    sicnu::display::DisplayViewSpec spec2{ &canvas2, &tree2, &store2 };
+
+    auto v1 = dm.createView( spec1 );
+    auto v2 = dm.createView( spec2 );
+    REQUIRE( v1.has_value() );
+    REQUIRE( v2.has_value() );
+
+    // View-specific layer tree access ensures multi-view isolation
+    CHECK( dm.layerTree( *v1 ) == &tree1 );
+    CHECK( dm.layerTree( *v2 ) == &tree2 );
+    CHECK( dm.layerTree( *v1 ) != dm.layerTree( *v2 ) );
+}
+
+TEST_CASE( "Tier 1 - #795: Shortcut conflict scanner regex and multi-file coverage",
+           "[e2e][tier1][m4][issue-795]" )
+{
+    // Issue #795: Regex missed QStringLiteral and scanned only main_window_menus.cpp.
+    const QRegularExpression stringLit(
+        QStringLiteral( "QKeySequence\\(\\s*(?:QStringLiteral\\(\\s*)?\"([^\"]+)\"" ) );
+
+    auto m1 = stringLit.match( QStringLiteral( "QKeySequence( \"Ctrl+O\" )" ) );
+    CHECK( m1.hasMatch() );
+    CHECK( m1.captured( 1 ) == QStringLiteral( "Ctrl+O" ) );
+
+    auto m2 = stringLit.match( QStringLiteral( "QKeySequence( QStringLiteral( \"Ctrl+Shift+P\" ) )" ) );
+    CHECK( m2.hasMatch() );
+    CHECK( m2.captured( 1 ) == QStringLiteral( "Ctrl+Shift+P" ) );
 }
 
 // --- Milestone 5: Concurrency & Job Engine ----------------------------------

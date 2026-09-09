@@ -57,6 +57,9 @@ class ExternalWindowWorkbench : public QObject, public IWorkbench
 
     ExternalWindowWorkbench( const QString &id, const QString &title, const QString &iconAlias,
                              Opener opener, QObject *parent = nullptr );
+    ExternalWindowWorkbench( const QString &id, const QString &title, const QString &iconAlias,
+                             Opener opener, WindowGetter windowGetter, DirtyFn dirtyFn = nullptr,
+                             std::function<bool()> closeFn = nullptr, QObject *parent = nullptr );
 
     QString id() const override { return m_id; }
     QString title() const override { return m_title; }

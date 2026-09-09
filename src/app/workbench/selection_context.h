@@ -15,6 +15,7 @@
 
 #include <QList>
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QStringList>
 
@@ -132,9 +133,9 @@ class SelectionContext : public QObject
     void scheduleRefresh();
 
     QTimer *m_debounce = nullptr;
-    WorkbenchHost *m_workbenchHost = nullptr;
-    QgsMapCanvas *m_canvas = nullptr;
-    QgsLayerTreeView *m_layerTree = nullptr;
+    QPointer<WorkbenchHost> m_workbenchHost;
+    QPointer<QgsMapCanvas> m_canvas;
+    QPointer<QgsLayerTreeView> m_layerTree;
     SarPredicate m_sarPredicate;
     mutable SelectionContextSnapshot m_cached;
     mutable bool m_cacheValid = false;

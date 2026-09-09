@@ -5,6 +5,7 @@
 
 #include <QLabel>
 #include <QSet>
+#include <QSignalBlocker>
 #include <QStackedWidget>
 #include <QTabWidget>
 #include <QVBoxLayout>
@@ -35,6 +36,8 @@ void InspectorHost::registerSection( InspectorSection *section )
 {
     if ( !section || m_sections.contains( section ) )
         return;
+    section->setParent( this );
+    section->hide();
     m_sections.append( section );
     // Stable ordering by (order, id).
     std::sort( m_sections.begin(), m_sections.end(),
@@ -92,7 +95,18 @@ void InspectorHost::rebuildTabs()
 
     if ( !m_hasSnapshot || !anySupported )
     {
-        delete oldTabs;
+        if ( oldTabs )
+        {
+            for ( InspectorSection *section : m_sections )
+            {
+                if ( section )
+                {
+                    section->setParent( this );
+                    section->hide();
+                }
+            }
+            delete oldTabs;
+        }
         m_stack->setCurrentWidget( m_placeholder );
         return;
     }
@@ -104,38 +118,53 @@ void InspectorHost::rebuildTabs()
         tabs->setObjectName( QStringLiteral( "rsInspectorTabs" ) );
         tabs->setDocumentMode( true );
         m_stack->addWidget( tabs );
+        connect( tabs, &QTabWidget::currentChanged, this, [this, tabs]( int index ) {
+            if ( index < 0 )
+                return;
+            if ( auto *sec = qobject_cast<InspectorSection *>( tabs->widget( index ) ) )
+            {
+                sec->populate( m_snapshot );
+                sec->setProperty( "rsLazyPopulated", true );
+            }
+        } );
     }
 
-    // Sync tabs with supported sections.
-    QSet<QString> wanted;
-    for ( InspectorSection *section : m_sections )
     {
-        if ( !section->supports( m_snapshot ) )
-            continue;
-        wanted.insert( section->sectionId() );
-        const int existing = tabs->indexOf( section );
-        if ( existing < 0 )
-            tabs->addTab( section, section->title() );
-        else
-            tabs->setTabText( existing, section->title() );
-    }
-    for ( int i = tabs->count() - 1; i >= 0; --i )
-    {
-        auto *page = tabs->widget( i );
-        if ( auto *section = qobject_cast<InspectorSection *>( page ) )
+        QSignalBlocker blocker( tabs );
+
+        // Sync tabs with supported sections.
+        QSet<QString> wanted;
+        for ( InspectorSection *section : m_sections )
         {
-            if ( !wanted.contains( section->sectionId() ) )
-                tabs->removeTab( i );
+            if ( !section->supports( m_snapshot ) )
+                continue;
+            wanted.insert( section->sectionId() );
+            const int existing = tabs->indexOf( section );
+            if ( existing < 0 )
+                tabs->addTab( section, section->title() );
+            else
+                tabs->setTabText( existing, section->title() );
         }
+        for ( int i = tabs->count() - 1; i >= 0; --i )
+        {
+            auto *page = tabs->widget( i );
+            if ( auto *section = qobject_cast<InspectorSection *>( page ) )
+            {
+                if ( !wanted.contains( section->sectionId() ) )
+                    tabs->removeTab( i );
+            }
+        }
+
+        m_stack->setCurrentWidget( tabs );
+
+        // Restore / choose selection.
+        if ( current && tabs->indexOf( current ) >= 0 )
+            tabs->setCurrentWidget( current );
+        else if ( tabs->count() > 0 )
+            tabs->setCurrentIndex( 0 );
     }
 
-    m_stack->setCurrentWidget( tabs );
-
-    // Restore / choose selection and populate exactly the shown section.
-    if ( current && tabs->indexOf( current ) >= 0 )
-        tabs->setCurrentWidget( current );
-    else if ( tabs->count() > 0 )
-        tabs->setCurrentIndex( 0 );
+    // Populate exactly the shown section.
     if ( InspectorSection *shown = currentSection() )
     {
         shown->populate( m_snapshot );

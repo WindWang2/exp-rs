@@ -626,6 +626,33 @@ target_compile_definitions(test_inspector_host PRIVATE
 )
 sicnu_discover_tests(test_inspector_host)
 
+add_executable(test_adversarial_m4
+  test_adversarial_m4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/inspector_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/adapters.cpp
+)
+target_link_libraries(test_adversarial_m4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  sicnu_data
+)
+target_include_directories(test_adversarial_m4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_adversarial_m4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_adversarial_m4)
+
 add_executable(test_interactive_session_contract
   test_interactive_session_contract.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/session_adapters.cpp

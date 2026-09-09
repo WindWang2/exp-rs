@@ -4,12 +4,14 @@
 #include "app/workbench/selection_context.h"
 #include "app/workbench/workbench_host.h"
 
-#include <QCoreApplication>
+#include <QApplication>
 #include <QSignalSpy>
 #include <QTest>
 #include <qgsmaplayer.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
+#include <qgsmapcanvas.h>
+#include <qgsproject.h>
 
 namespace
 {
@@ -18,12 +20,12 @@ int fake_argc = 1;
 char fake_argv0[] = "test_selection_context";
 char *fake_argv[] = { fake_argv0, nullptr };
 
-QCoreApplication *ensureApp()
+QApplication *ensureApp()
 {
-  static QCoreApplication *app = nullptr;
+  static QApplication *app = nullptr;
   if ( !app && !QCoreApplication::instance() )
-    app = new QCoreApplication( fake_argc, fake_argv );
-  return QCoreApplication::instance();
+    app = new QApplication( fake_argc, fake_argv );
+  return app;
 }
 
 namespace ContextRules = sicnu::app::ContextRules;
@@ -170,3 +172,32 @@ TEST_CASE( "SelectionContext: workbench id flows into the snapshot",
   ctx.attachWorkbenchHost( &host );
   REQUIRE( ctx.snapshot().workbenchId == "classify" );
 }
+
+TEST_CASE( "SelectionContext: layer removal immediately evicts layer from cached snapshot (#778)",
+           "[selection_context][behavior]" )
+{
+  ensureApp();
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsVectorLayer *layer = new QgsVectorLayer( QStringLiteral( "Point?crs=EPSG:4326" ),
+                                              QStringLiteral( "test_layer" ), QStringLiteral( "memory" ) );
+  project->addMapLayer( layer );
+
+  sicnu::app::SelectionContext ctx;
+  QgsMapCanvas canvas;
+  ctx.attachCanvas( &canvas );
+  canvas.setCurrentLayer( layer );
+
+  const auto snap1 = ctx.snapshot();
+  REQUIRE( snap1.activeLayer == layer );
+
+  // Now remove layer from project. layersWillBeRemoved signal fires!
+  project->removeMapLayer( layer->id() );
+
+  // Snapshot must NOT return the deleted layer, even without waiting 150ms!
+  const auto snap2 = ctx.snapshot();
+  REQUIRE( snap2.activeLayer == nullptr );
+  project->clear();
+}
+

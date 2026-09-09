@@ -63,7 +63,7 @@
 | M1 | Scientific & Remote Sensing Algorithms | #773, #783, #785, #801, #803, #806 | none | DONE |
 | M2 | Dataset, Experiment Store & Spatial Split Lineage | #774, #775, #786, #787, #788, #789, #811, #817 | none | DONE |
 | M3 | Geospatial I/O, Raster Contracts & Atomic Filesystem | #776, #790, #791, #807, #808, #809, #810, #816 | none | DONE |
-| M4 | Workbench UI, Display Manager & Canvas Synchronization | #777, #778, #779, #780, #792, #793, #794, #795, #796, #812, #813 | none | IN_PROGRESS |
+| M4 | Workbench UI, Display Manager & Canvas Synchronization | #777, #778, #779, #780, #792, #793, #794, #795, #796, #812, #813 | none | DONE |
 | M5 | Concurrency, Threading & Job Engine | #797, #798, #799, #800 | none | IN_PROGRESS |
 | M6 | Cartography, Layout Composition & MapSpec Compiler | #781, #782, #784, #802, #804, #805, #814, #815 | none | IN_PROGRESS |
 | M7 | Final E2E Integration & Issue Closure | Pass 100% E2E tests, clean merge to master, close #773-#817 | M1-M6, E2E | PLANNED |
