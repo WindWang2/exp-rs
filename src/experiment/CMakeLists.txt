@@ -11,6 +11,12 @@ qt_add_library(sicnu_experiment STATIC
   experiment_types.h
   experiment_store.cpp
   experiment_store.h
+  run_recorder.cpp
+  run_recorder.h
+  replay_readiness.cpp
+  replay_readiness.h
+  comparison_ext.cpp
+  comparison_ext.h
   lineage.cpp
   lineage.h
   reproduction_bundle.cpp

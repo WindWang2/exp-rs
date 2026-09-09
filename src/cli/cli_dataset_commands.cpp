@@ -5,9 +5,12 @@
 
 #include "dataset/dataset_manifest.h"
 #include "dataset/dataset_store.h"
+#include "dataset/label_schema.h"
+#include "dataset/leakage_audit.h"
 #include "dataset/sample.h"
 #include "dataset/dataset_types.h"
 #include "dataset/dataset_version.h"
+#include "dataset/split.h"
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
 #include "experiment/reproduction_bundle.h"
@@ -39,6 +42,12 @@ struct CommonOptions
     QString runId;
     QString outputDir;
     QString bundleDir;
+    QString schemaId;
+    QString schemaVersion;
+    QString splitManifestId;
+    QString mode;
+    qint64 limit = 0;
+    qint64 cursor = 0;
 };
 
 CommonOptions parseOptions( QStringList args )
@@ -52,7 +61,10 @@ CommonOptions parseOptions( QStringList args )
         QStringLiteral( "--to" ),         QStringLiteral( "--experiment" ),
         QStringLiteral( "--a" ),          QStringLiteral( "--b" ),
         QStringLiteral( "--run" ),        QStringLiteral( "--out" ),
-        QStringLiteral( "--bundle" ),
+        QStringLiteral( "--bundle" ),     QStringLiteral( "--schema" ),
+        QStringLiteral( "--schema-version" ), QStringLiteral( "--split" ),
+        QStringLiteral( "--mode" ),       QStringLiteral( "--limit" ),
+        QStringLiteral( "--cursor" ),
     };
     while ( !args.isEmpty() )
     {
@@ -94,6 +106,18 @@ CommonOptions parseOptions( QStringList args )
             options.outputDir = value;
         else if ( flag == QLatin1String( "--bundle" ) )
             options.bundleDir = value;
+        else if ( flag == QLatin1String( "--schema" ) )
+            options.schemaId = value;
+        else if ( flag == QLatin1String( "--schema-version" ) )
+            options.schemaVersion = value;
+        else if ( flag == QLatin1String( "--split" ) )
+            options.splitManifestId = value;
+        else if ( flag == QLatin1String( "--mode" ) )
+            options.mode = value;
+        else if ( flag == QLatin1String( "--limit" ) )
+            options.limit = value.toLongLong();
+        else if ( flag == QLatin1String( "--cursor" ) )
+            options.cursor = value.toLongLong();
     }
     return options;
 }
@@ -297,6 +321,152 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
         return io.finish( true, "dataset", data, 0 );
     }
 
+    if ( sub == QLatin1String( "list" ) )
+    {
+        const qint64 limit = options.limit > 0 ? qMin( options.limit, qint64( 500 ) ) : 50;
+        const qint64 cursor = options.cursor > 0 ? options.cursor : 0;
+        const auto page = store.listDatasets( cursor, limit );
+        if ( !page )
+            return fail( io, "dataset", "listing failed" );
+        Json::Value data( Json::objectValue );
+        data["total"] = static_cast<Json::Int64>( page.value().first );
+        Json::Value rows( Json::arrayValue );
+        for ( const QVariantMap &row : page.value().second )
+        {
+            Json::Value item( Json::objectValue );
+            item["id"] = row.value( QStringLiteral( "id" ) ).toString().toStdString();
+            item["name"] = row.value( QStringLiteral( "name" ) ).toString().toStdString();
+            item["description"] =
+                row.value( QStringLiteral( "description" ) ).toString().toStdString();
+            rows.append( item );
+        }
+        data["datasets"] = rows;
+        data["next_cursor"] = static_cast<Json::Int64>(
+            cursor + limit < page.value().first ? cursor + limit : -1 );
+        return io.finish( true, "dataset", data, 0 );
+    }
+
+    if ( sub == QLatin1String( "version" ) )
+    {
+        if ( options.datasetId.isEmpty() )
+            return fail( io, "dataset", "--dataset is required" );
+        const auto datasetId = sicnu::dataset::DatasetId::fromString( options.datasetId );
+        if ( !datasetId )
+            return fail( io, "dataset", "invalid dataset id: " + options.datasetId.toStdString() );
+        Json::Value data( Json::objectValue );
+        data["dataset_id"] = options.datasetId.toStdString();
+        Json::Value rows( Json::arrayValue );
+        for ( const auto &entry : store.versionsOfDataset( datasetId.value() ) )
+        {
+            Json::Value item( Json::objectValue );
+            item["version_id"] = entry.versionId().toStdString();
+            item["parent_version_id"] = entry.parentVersionId().toStdString();
+            item["status"] =
+                sicnu::dataset::datasetVersionStatusToString( entry.status() ).toStdString();
+            item["quality_level"] =
+                sicnu::dataset::datasetQualityLevelToString( entry.qualityLevel() ).toStdString();
+            item["fingerprint"] = entry.fingerprint().toStdString();
+            item["note"] = entry.note().toStdString();
+            rows.append( item );
+        }
+        data["versions"] = rows;
+        return io.finish( true, "dataset", data, 0 );
+    }
+
+    if ( sub == QLatin1String( "label-schema" ) )
+    {
+        if ( options.schemaId.isEmpty() )
+            return fail( io, "dataset", "--schema is required" );
+        Json::Value data( Json::objectValue );
+        if ( !options.schemaVersion.isEmpty() )
+        {
+            bool versionOk = false;
+            const quint64 version = options.schemaVersion.toULongLong( &versionOk );
+            if ( !versionOk )
+                return fail( io, "dataset", "invalid --schema-version" );
+            const auto schema = store.labelSchema( options.schemaId, version );
+            if ( !schema )
+                return fail( io, "dataset", "label schema not found" );
+            data["schema"] = toJsonValue( schema->toJson() );
+        }
+        else
+        {
+            Json::Value rows( Json::arrayValue );
+            for ( const auto &entry : store.labelSchemaVersions( options.schemaId ) )
+            {
+                Json::Value item( Json::objectValue );
+                item["version"] = static_cast<Json::UInt64>( entry.first );
+                item["fingerprint"] = entry.second.toStdString();
+                rows.append( item );
+            }
+            data["schema_id"] = options.schemaId.toStdString();
+            data["versions"] = rows;
+        }
+        return io.finish( true, "dataset", data, 0 );
+    }
+
+    if ( sub == QLatin1String( "split" ) )
+    {
+        if ( options.splitManifestId.isEmpty() )
+        {
+            if ( options.versionId.isEmpty() )
+                return fail( io, "dataset", "--split or --version is required" );
+            const auto versionId =
+                sicnu::dataset::DatasetVersionId::fromString( options.versionId );
+            if ( !versionId )
+                return fail( io, "dataset", "invalid version id" );
+            Json::Value data( Json::objectValue );
+            Json::Value rows( Json::arrayValue );
+            for ( const auto &manifest : store.splitManifestsForVersion( versionId.value() ) )
+            {
+                Json::Value item( Json::objectValue );
+                item["manifest_id"] = manifest.manifestId().toStdString();
+                item["method"] =
+                    sicnu::dataset::splitMethodToString( manifest.config().method ).toStdString();
+                item["fingerprint"] = manifest.fingerprint().toStdString();
+                item["assignments"] = static_cast<Json::Int64>( manifest.assignments().size() );
+                rows.append( item );
+            }
+            data["manifests"] = rows;
+            return io.finish( true, "dataset", data, 0 );
+        }
+        const auto manifest = store.splitManifestById( options.splitManifestId );
+        if ( !manifest )
+            return fail( io, "dataset", "split manifest not found" );
+        Json::Value data = toJsonValue( manifest->toJson() );
+        Json::Value roleCounts( Json::objectValue );
+        Json::Value foldCounts( Json::objectValue );
+        for ( const auto &assignment : manifest->assignments() )
+        {
+            const std::string role =
+                sicnu::dataset::splitRoleToString( assignment.role ).toStdString();
+            roleCounts[role] = roleCounts[role].asInt64() + 1;
+            if ( assignment.fold >= 0 )
+            {
+                const std::string foldKey = std::to_string( assignment.fold );
+                foldCounts[foldKey] = foldCounts[foldKey].asInt64() + 1;
+            }
+        }
+        data["role_counts"] = roleCounts;
+        if ( !foldCounts.empty() )
+            data["fold_counts"] = foldCounts;
+        return io.finish( true, "dataset", data, 0 );
+    }
+
+    if ( sub == QLatin1String( "leakage" ) )
+    {
+        if ( options.splitManifestId.isEmpty() )
+            return fail( io, "dataset", "--split is required" );
+        const auto report = store.latestLeakageReport( options.splitManifestId );
+        if ( !report )
+            return fail( io, "dataset",
+                         "no stored leakage report for split " +
+                             options.splitManifestId.toStdString() );
+        Json::Value data = toJsonValue( report->toJson() );
+        data["clean"] = report->isClean();
+        return io.finish( true, "dataset", data, 0 );
+    }
+
     return fail( io, "dataset", "unknown dataset subcommand: " + sub.toStdString() );
 }
 
@@ -368,6 +538,48 @@ int experimentSubcommand( const QString &sub, QStringList args, const CliIO &io 
         return io.finish( true, "experiment", data, 0 );
     }
 
+    if ( sub == QLatin1String( "list" ) )
+    {
+        const qint64 limit = options.limit > 0 ? qMin( options.limit, qint64( 500 ) ) : 50;
+        const qint64 cursor = options.cursor > 0 ? options.cursor : 0;
+        const auto page = store.listExperiments( cursor, limit );
+        if ( !page )
+            return fail( io, "experiment", "listing failed" );
+        Json::Value data( Json::objectValue );
+        data["total"] = static_cast<Json::Int64>( page.value().first );
+        Json::Value rows( Json::arrayValue );
+        for ( const auto &experiment : page.value().second )
+        {
+            Json::Value item( Json::objectValue );
+            item["experiment_id"] = experiment.experimentId().toStdString();
+            item["name"] = experiment.name().toStdString();
+            item["run_count"] = static_cast<Json::Int64>( experiment.runIds().size() );
+            rows.append( item );
+        }
+        data["experiments"] = rows;
+        data["next_cursor"] = static_cast<Json::Int64>(
+            cursor + limit < page.value().first ? cursor + limit : -1 );
+        return io.finish( true, "experiment", data, 0 );
+    }
+
+    if ( sub == QLatin1String( "run" ) )
+    {
+        if ( options.runId.isEmpty() )
+            return fail( io, "experiment", "--run is required" );
+        const auto run = store.runById( options.runId );
+        if ( !run )
+            return fail( io, "experiment", "run not found" );
+        Json::Value data = toJsonValue( run->toJson() );
+        data["config_hash"] = run->configHash().toStdString();
+        const auto metricRecord = store.metricRecordForRun( options.runId );
+        if ( metricRecord )
+        {
+            data["protocol"] = toJsonValue( metricRecord->protocol.toJson() );
+            data["metrics_record"] = toJsonValue( metricRecord->metrics );
+        }
+        return io.finish( true, "experiment", data, 0 );
+    }
+
     return fail( io, "experiment", "unknown experiment subcommand: " + sub.toStdString() );
 }
 
@@ -409,6 +621,100 @@ int reproduceSubcommand( const QString &sub, QStringList args, const CliIO &io )
         const bool replayable =
             validation.level != sicnu::dataset::ReproductionLevel::Impossible;
         return io.finish( replayable, "reproduce", data, replayable ? 0 : 1 );
+    }
+
+    if ( sub == QLatin1String( "inspect" ) )
+    {
+        if ( options.runId.isEmpty() )
+            return fail( io, "reproduce", "--run is required" );
+        const auto run = experimentStore.runById( options.runId );
+        if ( !run )
+            return fail( io, "reproduce", "run not found" );
+        // Store-side availability of the recorded pins (dataset version and
+        // split manifest). Model/algorithm stay "unknown" without registries.
+        Json::Value checks( Json::arrayValue );
+        auto addCheck = [ & ]( const std::string &dependency, const std::string &status,
+                               const std::string &detail ) {
+            Json::Value item( Json::objectValue );
+            item["dependency"] = dependency;
+            item["status"] = status;
+            item["detail"] = detail;
+            checks.append( item );
+        };
+        bool impossible = false;
+        int unknowns = 0;
+        if ( run->datasetVersionId().isEmpty() )
+        {
+            addCheck( "dataset_version", "missing", "run records no dataset version" );
+            impossible = true;
+        }
+        else
+        {
+            const auto versionId =
+                sicnu::dataset::DatasetVersionId::fromString( run->datasetVersionId() );
+            const auto record =
+                versionId ? datasetStore.versionById( versionId.value() ) : std::nullopt;
+            if ( !record )
+            {
+                addCheck( "dataset_version", "missing",
+                          "version " + run->datasetVersionId().toStdString() +
+                              " is not in the store" );
+                impossible = true;
+            }
+            else if ( !run->datasetFingerprint().isEmpty() &&
+                      record->fingerprint() != run->datasetFingerprint() )
+            {
+                addCheck( "dataset_version", "mismatched", "fingerprint changed since the run" );
+                impossible = true;
+            }
+            else
+            {
+                addCheck( "dataset_version", "ok", record->fingerprint().toStdString() );
+            }
+        }
+        if ( run->splitManifestId().isEmpty() )
+        {
+            addCheck( "split_manifest", "missing", "run records no split manifest" );
+            impossible = true;
+        }
+        else
+        {
+            const auto manifest = datasetStore.splitManifestById( run->splitManifestId() );
+            if ( !manifest )
+            {
+                addCheck( "split_manifest", "missing",
+                          "manifest " + run->splitManifestId().toStdString() +
+                              " is not stored" );
+                impossible = true;
+            }
+            else if ( !run->splitFingerprint().isEmpty() &&
+                      manifest->fingerprint() != run->splitFingerprint() )
+            {
+                addCheck( "split_manifest", "mismatched", "fingerprint changed since the run" );
+                impossible = true;
+            }
+            else
+            {
+                addCheck( "split_manifest", "ok", manifest->fingerprint().toStdString() );
+            }
+        }
+        if ( !run->modelId().isEmpty() )
+        {
+            addCheck( "model", "unknown", "requires the model catalog hook" );
+            ++unknowns;
+        }
+        if ( !run->algorithmId().isEmpty() )
+        {
+            addCheck( "algorithm", "unknown", "requires the operator/workflow registry hook" );
+            ++unknowns;
+        }
+        const std::string level =
+            impossible ? "impossible" : ( unknowns > 0 ? "best_effort" : "exact" );
+        Json::Value data( Json::objectValue );
+        data["run_id"] = options.runId.toStdString();
+        data["level"] = level;
+        data["checks"] = checks;
+        return io.finish( !impossible, "reproduce", data, impossible ? 1 : 0 );
     }
 
     return fail( io, "reproduce", "unknown reproduce subcommand: " + sub.toStdString() );

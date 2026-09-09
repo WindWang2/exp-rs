@@ -38,7 +38,9 @@ namespace sicnu::dataset
 
 class AnnotationRecord;
 class LabelSchema;
+class LeakageReport;
 class SampleRecord;
+class SplitManifest;
 
 class DatasetStore
 {
@@ -171,6 +173,85 @@ class DatasetStore
     /// Current (tip) annotations targeting one sample, revision-ascending.
     QVector<AnnotationRecord> annotationsOfSample( const QString &sampleId,
                                                    qint64 limit = 1000 ) const;
+
+    // --- split manifests & leakage reports (goal §18/§19) -----------------------
+    /// Persists a split manifest as platform content. split.h's contract —
+    /// "a split that was never stored is not a split the platform reasons
+    /// about" — is enforced here: runs and audits may only cite stored
+    /// manifests. Immutability: a manifest id is written ONCE; re-saving the
+    /// same id with the same fingerprint is an idempotent success, with a
+    /// different fingerprint fails with `dataset.conflict` (ids are never
+    /// re-pointed at different content).
+    sicnu::data::Result<void> saveSplitManifest( const SplitManifest &manifest );
+    std::optional<SplitManifest> splitManifestById( const QString &manifestId ) const;
+    /// Manifests of one version, creation order ascending.
+    QVector<SplitManifest> splitManifestsForVersion( const DatasetVersionId &versionId ) const;
+
+    /// Appends a leakage report for a split manifest. Append-only audit
+    /// history: re-running an audit with a different config adds a row keyed
+    /// by report content digest (same content re-run is idempotent). The
+    /// report's splitManifestId must reference a stored manifest
+    /// (`dataset.split_not_found` otherwise).
+    sicnu::data::Result<void> saveLeakageReport( const LeakageReport &report );
+    /// Newest report for one manifest (creation order, then rowid).
+    std::optional<LeakageReport> latestLeakageReport( const QString &splitManifestId ) const;
+    /// All reports for one manifest, oldest first (bounded).
+    QVector<LeakageReport> leakageReportsForSplit( const QString &splitManifestId,
+                                                   qint64 limit = 100 ) const;
+
+    // --- sample facets & quality cache (goal 7.0 §E) ----------------------------
+    /// One facet value of one sample (caller-supplied evidence: "sensor",
+    /// "region", "class", "season", "modality", "year", "content_digest", …).
+    using FacetEntry = QPair<QString, QString>;
+
+    /// Replaces the facet rows of ONE sample (draft versions only — facets
+    /// describe content and committed versions are frozen). All rows ride a
+    /// single transaction: replace is atomic per sample.
+    sicnu::data::Result<void> setSampleFacets( const DatasetVersionId &versionId,
+                                               const SampleId &sampleId,
+                                               const QVector<FacetEntry> &entries );
+
+    /// One facet's value distribution, computed SQL-side (GROUP BY) with the
+    /// result bounded by @p maxValues — the store never materializes all
+    /// rows in memory for a facet question.
+    struct FacetDistribution
+    {
+        QString facet;
+        qint64 total = 0; ///< rows carrying this facet (any value)
+        QVector<QPair<QString, qint64>> values; ///< descending count, then value
+    };
+    sicnu::data::Result<FacetDistribution> facetDistribution( const DatasetVersionId &versionId,
+                                                              const QString &facet,
+                                                              int maxValues = 100 ) const;
+
+    /// Cross-facet cells (e.g. class × region), SQL-side, bounded by
+    /// @p maxCells. Cells are "valueA\u001FvalueB" keys with counts.
+    sicnu::data::Result<QVector<QPair<QString, qint64>>> facetCrossCounts(
+        const DatasetVersionId &versionId, const QString &facetA, const QString &facetB,
+        int maxCells = 1000 ) const;
+
+    /// Facet names present for one version (bounded; ascending).
+    QVector<QString> facetNames( const DatasetVersionId &versionId, qint64 limit = 100 ) const;
+
+    /// Persists a computed quality summary for one version together with the
+    /// content stamp it was computed from (sample count + max roword).
+    /// Re-saving overwrites the cache (it IS a cache; the samples stay
+    /// authoritative).
+    sicnu::data::Result<void> saveQualitySummary( const DatasetVersionId &versionId,
+                                                  qint64 sampleCount, qint64 maxRoword,
+                                                  const QJsonObject &summary );
+    struct QualitySummaryRecord
+    {
+        qint64 sampleCount = 0;
+        qint64 maxRoword = 0;
+        QJsonObject summary;
+        QDateTime updatedAtUtc;
+    };
+    std::optional<QualitySummaryRecord> qualitySummary(
+        const DatasetVersionId &versionId ) const;
+    /// Live content stamp of one version (count + max roword) — the
+    /// staleness probe for the cached summary.
+    QPair<qint64, qint64> sampleContentStamp( const DatasetVersionId &versionId ) const;
 
   private:
     struct Impl;

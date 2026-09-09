@@ -21,10 +21,14 @@ qt_add_library(sicnu_dataset STATIC
   dataset_version.h
   dataset_quality.cpp
   dataset_quality.h
+  fold_audit.cpp
+  fold_audit.h
   dataset_store.cpp
   dataset_store.h
   dataset_store_impl.h
   dataset_store_samples.cpp
+  dataset_store_splits.cpp
+  dataset_store_facets.cpp
   deterministic_random.cpp
   deterministic_random.h
   label_schema.cpp
@@ -35,6 +39,8 @@ qt_add_library(sicnu_dataset STATIC
   patch_generator.h
   sample.cpp
   sample.h
+  sample_promotion.cpp
+  sample_promotion.h
   split.cpp
   split.h
   wkt.cpp

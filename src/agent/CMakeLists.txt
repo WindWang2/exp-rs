@@ -2,6 +2,8 @@
 add_library(sicnu_agent SHARED
   output_verifier.cpp
   output_verifier.h
+  data_platform_tools.cpp
+  data_platform_tools.h
   workspace_snapshot.cpp
   workspace_snapshot.h
   workspace_state.cpp
@@ -131,6 +133,8 @@ target_link_libraries(sicnu_agent PUBLIC
   sicnu_processing
   sicnu_task_center
   sicnu_operators
+  Sicnu::dataset
+  Sicnu::experiment
   sicnu_workflow
   Sicnu::help
   Sicnu::help_adapters
