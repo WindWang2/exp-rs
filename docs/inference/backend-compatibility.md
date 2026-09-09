@@ -31,3 +31,42 @@ Notes:
   under a new `framework` id; manifests referencing that id become executable
   with no further code. Remote (HTTP/process) runtimes take the same path and
   must honor the cancel/health semantics they declare.
+
+
+## Platform 7.0: external provider contracts
+
+Two out-of-process providers register through the SAME
+`ModelRuntimeRegistry::registerProvider` seam — no second catalog, no second
+runtime. Both speak one shared wire document (`exp-rs-infer/1`, JSON with
+base64 tensor payloads, see `src/operators/runtime/provider_wire.h`).
+
+| framework | transport | manifest keys | notes |
+|---|---|---|---|
+| `http` | POST JSON to `runtime.provider.url` (Qt6::Network; builds degrade to a stub → `runtime_unavailable`) | `url`, `timeout_ms`, `max_body_mb` | transport/HTTP failures map to `ProviderCrash`; a foreign `protocol` maps to `IncompatibleSchema` |
+| `python` | out-of-process interpreter speaking newline-delimited JSON over stdin/stdout | `worker_script`, `interpreter` (default `python3`), `timeout_ms` | worker handshake: one `{"protocol":"exp-rs-infer/1","event":"ready"}` line; worker death maps to `ProviderCrash` |
+
+### Capability negotiation
+
+`IModelRuntime::capabilities()` declares what a session supports:
+`multiInput`, `namedBind`, `maxRank`, `batch`, `cancelInForward`,
+`inputDtypes`, `outputDtypes`. Consumers negotiate before feeding; a manifest
+asking beyond the capabilities is a typed refusal, never silent
+reinterpretation. Defaults describe the historical contract (single-input,
+rank-4 float32, positional, coarse cancellation).
+
+### In-forward cancellation
+
+- `onnxruntime`: `requestCancel()` terminates a RUNNING forward via
+  `Ort::RunOptions::SetTerminate` (`cancelInForward = true`).
+- `onnx` (cv::dnn), `http`, `python`: cancellation is checked at forward
+  boundaries only (documented limitation, `cancelInForward = false`).
+
+### Failure taxonomy (7.0 completion)
+
+`classifyInferenceError` kinds: OutOfMemory, Canceled, ShapeMismatch,
+CorruptModel, NotLoaded, **IncompatibleSchema** (schema/contract/wire
+mismatch), **DeviceUnavailable** (unaddressable or over-budget device),
+**ProviderCrash** (worker death, connection lost, HTTP errors),
+**OutputInvalid** (forward ran but output failed validation). The stable
+error-code projection lives in `errorCodeForInferenceFailure`
+(+`DeviceUnavailable` 3006, +`RuntimeProviderFailed` 3007).
