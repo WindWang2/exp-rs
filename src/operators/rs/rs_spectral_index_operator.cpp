@@ -267,13 +267,16 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         };
         for (int b : { nirBand, redBand }) {
             if (b >= 1 && b <= bandCount) {
+                bool hasNodata = false;
+                const double nodataVal = ds.bandNoDataValue(b, &hasNodata);
+                const float nodataF = hasNodata ? static_cast<float>(nodataVal) : std::numeric_limits<float>::quiet_NaN();
                 for (const auto &loc : sampleLocs) {
                     const int x = std::max(0, std::min(loc.first, width - sampleW));
                     const int y = std::max(0, std::min(loc.second, height - sampleH));
                     if (ds.readBandWindow(b, x, y, sampleW, sampleH, sampleBuf.data())) {
                         for (float v : sampleBuf) {
-                            if (std::isfinite(v) && v != -9999.0f && v != 65535.0f) {
-                                maxVal = std::max(maxVal, std::abs(v));
+                            if (std::isfinite(v) && (!hasNodata || v != nodataF) && v != -9999.0f && v != 65535.0f && v > 0.0f) {
+                                maxVal = std::max(maxVal, v);
                                 if (maxVal > 5.0f) break;
                             }
                         }

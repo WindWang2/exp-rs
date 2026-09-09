@@ -3495,6 +3495,74 @@ TEST_CASE("Spectral indices: dataset-level scale heuristic avoids block boundary
     }
 }
 
+TEST_CASE("rs:spectral_index treats unit reflectance raster with -32768 NoData as unscaled",
+          "[spectral][index][scale][nodata][issue801]")
+{
+    // Issue #801 regression: A unit reflectance raster with declared NoData = -32768.0f
+    // in the swath corners must not trigger DN scale mode via std::abs(-32768) > 5.0.
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString inputPath = dir.filePath(QStringLiteral("unit_refl_nodata.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("savi_unscaled_out.tif"));
+
+    constexpr int W = 32;
+    constexpr int H = 32;
+    constexpr float kNodata = -32768.0f;
+
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+    GDALDatasetH ds = GDALCreate(driver, inputPath.toUtf8().constData(), W, H, 2, GDT_Float32, nullptr);
+    REQUIRE(ds != nullptr);
+
+    std::vector<float> bNIR(W * H, 0.40f);
+    std::vector<float> bRed(W * H, 0.10f);
+
+    // Set corners to NoData sentinel -32768.0f
+    bNIR[0] = kNodata;
+    bRed[0] = kNodata;
+    bNIR[W - 1] = kNodata;
+    bRed[W - 1] = kNodata;
+    bNIR[(H - 1) * W] = kNodata;
+    bRed[(H - 1) * W] = kNodata;
+    bNIR[W * H - 1] = kNodata;
+    bRed[W * H - 1] = kNodata;
+
+    GDALRasterBandH hNIR = GDALGetRasterBand(ds, 1);
+    GDALRasterBandH hRed = GDALGetRasterBand(ds, 2);
+    GDALSetRasterNoDataValue(hNIR, kNodata);
+    GDALSetRasterNoDataValue(hRed, kNodata);
+    REQUIRE(GDALRasterIO(hNIR, GF_Write, 0, 0, W, H, bNIR.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+    REQUIRE(GDALRasterIO(hRed, GF_Write, 0, 0, W, H, bRed.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(ds);
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["index"] = "SAVI";
+    params["nir"] = 1;
+    params["red"] = 2;
+
+    RSOperatorContext ctx;
+    Json::Value res = op->run(params, ctx);
+
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outputPath));
+    std::vector<float> out(W * H);
+    REQUIRE(outDs.readBandData(1, out.data(), W, H));
+
+    // Corner was NoData -> must be NaN
+    CHECK(std::isnan(out[0]));
+
+    // Expected SAVI for NIR=0.4, Red=0.1 on unit reflectance:
+    // (0.4 - 0.1) / (0.4 + 0.1 + 0.5) * 1.5 = 0.3 / 1.0 * 1.5 = 0.45
+    // If bug is present (isScaledDataset == true due to -32768), L would be 5000 -> SAVI = ~0.00009
+    const float validVal = out[W * 2 + 2];
+    CHECK(validVal == Catch::Approx(0.45f).margin(0.01f));
+}
+
 TEST_CASE("rs:sar_speckle respects distinct per-band NoData sentinels in multi-band mode",
           "[sar][speckle][nodata][issue803]")
 {
