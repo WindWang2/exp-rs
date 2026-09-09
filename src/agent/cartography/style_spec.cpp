@@ -276,17 +276,12 @@ Json::Value resolveTokensRecursive( const Json::Value &node, const Json::Value &
 {
   if ( node.isString() )
   {
-    const std::string value = node.asString();
-    if ( !isTokenReference( value ) )
+    if ( !isTokenReference( node.asString() ) )
       return node;
-    const std::string path = tokenReferencePath( value );
-    const Json::Value resolved = tokenValue( tokens, path );
-    if ( resolved.isNull() )
-    {
-      problems.push_back( "unresolvable token reference '" + value + "'" );
-      return node;
-    }
-    return resolved;
+    // Issue #815: resolution is transitive — a token may alias another
+    // token reference. Cycles/over-deep chains are reported by the shared
+    // chain resolver, which returns the original value on failure.
+    return resolveTokenReferenceChain( tokens, node, problems );
   }
   if ( node.isArray() )
   {
@@ -335,6 +330,159 @@ std::string tokenReferencePath( const std::string &value )
   return value.substr( strlen( "token:" ) );
 }
 
+Json::Value resolveTokenReferenceChain( const Json::Value &tokens, const Json::Value &value,
+                                        std::vector<std::string> &problems )
+{
+  if ( !value.isString() || !isTokenReference( value.asString() ) )
+    return value;
+  const Json::Value original = value;
+  Json::Value current = value;
+  std::set<std::string> visited;
+  int hops = 0;
+  while ( current.isString() && isTokenReference( current.asString() ) )
+  {
+    const std::string path = tokenReferencePath( current.asString() );
+    if ( !visited.insert( path ).second )
+    {
+      problems.push_back( "token reference cycle at '" + path + "'" );
+      return original;
+    }
+    if ( ++hops > kMaxTokenHops )
+    {
+      problems.push_back( "token reference chain exceeds " + std::to_string( kMaxTokenHops ) +
+                          " hops at '" + path + "'" );
+      return original;
+    }
+    const Json::Value resolved = tokenValue( tokens, path );
+    if ( resolved.isNull() )
+    {
+      problems.push_back( "unresolvable token reference '" + current.asString() + "'" );
+      return original;
+    }
+    current = resolved;
+  }
+  return current;
+}
+
+// ---------------------------------------------------------------------------
+// Platform 6.0 (Milestone E): semantic applicability
+// ---------------------------------------------------------------------------
+
+std::vector<std::string> validateStyleApplicability( const Json::Value &styleSpec )
+{
+  std::vector<std::string> problems;
+  if ( !styleSpec.isObject() || !styleSpec.isMember( "applicability" ) )
+    return problems;
+  const std::string id = styleSpec.isMember( "id" ) && styleSpec["id"].isString()
+                           ? styleSpec["id"].asString()
+                           : "";
+  const Json::Value &applicability = styleSpec["applicability"];
+  if ( !applicability.isObject() )
+  {
+    problems.push_back( id + ": applicability must be an object" );
+    return problems;
+  }
+  if ( applicability.isMember( "value_domain" ) )
+  {
+    const Json::Value &domain = applicability["value_domain"];
+    if ( !domain.isObject() || !domain.isMember( "min" ) || !domain["min"].isNumeric() ||
+         !domain.isMember( "max" ) || !domain["max"].isNumeric() ||
+         domain["min"].asDouble() >= domain["max"].asDouble() )
+      problems.push_back( id + ": applicability.value_domain needs numeric min < max" );
+  }
+  if ( applicability.isMember( "band_count" ) )
+  {
+    const Json::Value &bandCount = applicability["band_count"];
+    if ( !bandCount.isObject() )
+      problems.push_back( id + ": applicability.band_count must be an object" );
+    else
+    {
+      const bool hasMin = bandCount.isMember( "min" ) && bandCount["min"].isIntegral();
+      const bool hasMax = bandCount.isMember( "max" ) && bandCount["max"].isIntegral();
+      if ( !hasMin && !hasMax )
+        problems.push_back( id + ": applicability.band_count needs integer min and/or max" );
+      else if ( hasMin && hasMax && bandCount["min"].asInt() > bandCount["max"].asInt() )
+        problems.push_back( id + ": applicability.band_count min must not exceed max" );
+    }
+  }
+  for ( const char *member : { "modalities", "semantics" } )
+    if ( applicability.isMember( member ) && !applicability[member].isArray() )
+      problems.push_back( id + ": applicability." + member + " must be an array of strings" );
+  return problems;
+}
+
+std::vector<std::string> checkStyleApplicability( const Json::Value &styleSpec,
+                                                  const Json::Value &dataset )
+{
+  std::vector<std::string> problems;
+  if ( !styleSpec.isObject() || !styleSpec.isMember( "applicability" ) ||
+       !styleSpec["applicability"].isObject() || !dataset.isObject() )
+    return problems;
+  const std::string id = styleSpec.isMember( "id" ) && styleSpec["id"].isString()
+                           ? styleSpec["id"].asString()
+                           : "";
+  const Json::Value &applicability = styleSpec["applicability"];
+
+  // Layer-kind contract (applies_to was already mandatory).
+  const std::string kind = dataset.isMember( "kind" ) && dataset["kind"].isString()
+                             ? dataset["kind"].asString()
+                             : std::string();
+  const std::string applies = styleSpec.isMember( "applies_to" ) && styleSpec["applies_to"].isString()
+                                ? styleSpec["applies_to"].asString()
+                                : "any";
+  if ( !kind.empty() && applies != "any" && applies != kind )
+    problems.push_back( id + ": style applies to " + applies + " data but the dataset is " + kind );
+
+  // Band count contract (e.g. multiband_color needs >= 3 bands).
+  if ( applicability.isMember( "band_count" ) && applicability["band_count"].isObject() &&
+       dataset.isMember( "band_count" ) && dataset["band_count"].isIntegral() )
+  {
+    const int actual = dataset["band_count"].asInt();
+    const Json::Value &bandCount = applicability["band_count"];
+    if ( bandCount.isMember( "min" ) && bandCount["min"].isIntegral() &&
+         actual < bandCount["min"].asInt() )
+      problems.push_back( id + ": dataset has " + std::to_string( actual ) +
+                          " band(s), style requires at least " + bandCount["min"].asString() );
+    if ( bandCount.isMember( "max" ) && bandCount["max"].isIntegral() &&
+         actual > bandCount["max"].asInt() )
+      problems.push_back( id + ": dataset has " + std::to_string( actual ) +
+                          " band(s), style requires at most " + bandCount["max"].asString() );
+  }
+
+  // Value-domain contract: a style built for NDVI must not be applied to
+  // SAR backscatter magnitudes "because it renders something".
+  if ( applicability.isMember( "value_domain" ) && applicability["value_domain"].isObject() &&
+       dataset.isMember( "value_min" ) && dataset["value_min"].isNumeric() &&
+       dataset.isMember( "value_max" ) && dataset["value_max"].isNumeric() )
+  {
+    const double declaredMin = applicability["value_domain"]["min"].asDouble();
+    const double declaredMax = applicability["value_domain"]["max"].asDouble();
+    const double actualMin = dataset["value_min"].asDouble();
+    const double actualMax = dataset["value_max"].asDouble();
+    const bool overlaps = actualMin <= declaredMax && declaredMin <= actualMax;
+    if ( !overlaps )
+      problems.push_back( id + ": data range [" + std::to_string( actualMin ) + ", " +
+                          std::to_string( actualMax ) + "] does not overlap the style's declared "
+                          "value domain [" + std::to_string( declaredMin ) + ", " +
+                          std::to_string( declaredMax ) + "]" );
+  }
+
+  // Modality contract: optical indices do not apply to SAR magnitude and
+  // vice versa.
+  if ( applicability.isMember( "modalities" ) && applicability["modalities"].isArray() &&
+       dataset.isMember( "modality" ) && dataset["modality"].isString() )
+  {
+    bool matched = false;
+    for ( const auto &modality : applicability["modalities"] )
+      if ( modality.isString() && modality.asString() == dataset["modality"].asString() )
+        matched = true;
+    if ( !matched )
+      problems.push_back( id + ": style is not declared applicable to modality '" +
+                          dataset["modality"].asString() + "'" );
+  }
+  return problems;
+}
+
 std::vector<std::string> validateStyleSpec( const Json::Value &doc )
 {
   std::vector<std::string> problems;
@@ -371,6 +519,10 @@ std::vector<std::string> validateStyleSpec( const Json::Value &doc )
   }
   if ( doc.isMember( "token_set_ref" ) && !doc["token_set_ref"].isString() )
     problems.push_back( id + ": token_set_ref must be a string" );
+
+  // Platform 6.0 (Milestone E): semantic applicability surface.
+  for ( const auto &problem : validateStyleApplicability( doc ) )
+    problems.push_back( problem );
   return problems;
 }
 

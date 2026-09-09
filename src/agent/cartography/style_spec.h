@@ -58,6 +58,43 @@ bool isTokenReference( const std::string &value );
 /// "palettes.diverging"); empty when `value` is not a reference.
 std::string tokenReferencePath( const std::string &value );
 
+/// Maximum transitive hops when resolving token references (issue #815:
+/// tokens may alias other tokens, e.g. "token:colors.primary" ->
+/// "token:colors.accent" -> "#2c7fb8").
+inline constexpr int kMaxTokenHops = 8;
+
+/// Resolves `value` transitively while it stays a "token:<path>" string
+/// reference into `tokens`. Cycles and over-deep chains are appended to
+/// `problems` and the ORIGINAL value is returned verbatim — a resolution
+/// failure never silently substitutes a wrong value. Pure.
+Json::Value resolveTokenReferenceChain( const Json::Value &tokens, const Json::Value &value,
+                                        std::vector<std::string> &problems );
+
+//
+// Platform 6.0 (Milestone E): semantic applicability.
+//
+// A StyleSpec may declare the data it is semantically FOR:
+//   applicability: {
+//     value_domain?: {min: number, max: number},  // e.g. NDVI [-1,1], probability [0,1]
+//     band_count?: {min?: int, max?: int},        // e.g. multiband_color needs >= 3
+//     modalities?: ["optical","sar",...],
+//     semantics?: ["ndvi", ...]                    // additional domain tags
+//   }
+// Application refuses — with an explicit problem — when the target data
+// contradicts the declaration. A semantically wrong renderer is never
+// silently substituted.
+//
+
+/// Validates the `applicability` block shape. Empty = valid.
+std::vector<std::string> validateStyleApplicability( const Json::Value &styleSpec );
+
+/// Checks a style's applicability against dataset metadata:
+///   {kind?: "raster"|"vector", band_count?, modality?,
+///    value_min?, value_max?, semantics?: [...]}
+/// Returns human-readable problems; empty means applicable. Pure.
+std::vector<std::string> checkStyleApplicability( const Json::Value &styleSpec,
+                                                  const Json::Value &dataset );
+
 /// Structural validation of a StyleSpec document (envelope, applies_to,
 /// renderer vocabulary, class/category entries, numeric ranges, bounded
 /// array sizes). Empty returned vector = valid.

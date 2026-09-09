@@ -439,11 +439,44 @@ bool evaluateAst( const ConditionAst &node, const Json::Value &context, std::str
   switch ( node.op )
   {
     case ConditionAst::Op::And:
-      return evaluateAst( *node.children[0], context, error ) &&
-             evaluateAst( *node.children[1], context, error );
+    {
+      // Issue #804: both operands are evaluated even when the first decides
+      // the result — short-circuiting the *evaluation errors* let syntax-level
+      // mistakes (unknown paths, type mismatches) hide behind a lucky operand.
+      std::string leftError;
+      const bool left = evaluateAst( *node.children[0], context, leftError );
+      std::string rightError;
+      const bool right = evaluateAst( *node.children[1], context, rightError );
+      if ( !leftError.empty() )
+      {
+        error = leftError;
+        return false;
+      }
+      if ( !rightError.empty() )
+      {
+        error = rightError;
+        return false;
+      }
+      return left && right;
+    }
     case ConditionAst::Op::Or:
-      return evaluateAst( *node.children[0], context, error ) ||
-             evaluateAst( *node.children[1], context, error );
+    {
+      std::string leftError;
+      const bool left = evaluateAst( *node.children[0], context, leftError );
+      std::string rightError;
+      const bool right = evaluateAst( *node.children[1], context, rightError );
+      if ( !leftError.empty() )
+      {
+        error = leftError;
+        return false;
+      }
+      if ( !rightError.empty() )
+      {
+        error = rightError;
+        return false;
+      }
+      return left || right;
+    }
     case ConditionAst::Op::Compare:
     {
       bool ok = true;
@@ -506,6 +539,15 @@ bool validateConditionSyntax( const std::string &expr, std::vector<std::string> 
   {
     if ( problems )
       problems->push_back( error );
+    return false;
+  }
+  // Issue #804: a whole condition that is a bare number/string literal can
+  // never evaluate — reject it here so validation catches what evaluation
+  // would only report at runtime ("a bare literal is not a condition").
+  if ( ast->op == ConditionAst::Op::Literal )
+  {
+    if ( problems )
+      problems->push_back( "a bare literal is not a condition" );
     return false;
   }
   return true;
