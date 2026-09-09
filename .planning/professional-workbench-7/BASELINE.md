@@ -46,3 +46,13 @@ worktree-local `build-dev` (dev-default preset), vcpkg deps shared from
 `../exp-rs-win/build-win`. `test_task_center` full-sequence timing flakiness
 on this host is documented pre-existing (6.0 A/B proof); run its cases in
 isolation when touched.
+
+## Worktree bootstrap notes (7.0)
+
+- `resources/icons` is a placeholder file (gitignored real dir is
+  docs/design/ui/svg-icons/icons). `make_icons_junction.cmd` (worktree-local,
+  excluded via .git/info/exclude by repo convention) repairs it:
+  mklink /J resources\icons <abs>\docs\design\ui\svg-icons\icons.
+  Without it, ninja fails on resources/icons.qrc targets.
+- Build/test helpers: configure_wb7.cmd, build_wb7.cmd, run_wb7_tests.cmd,
+  test_wb7.cmd (worktree-local, matching the ux-6 track convention).
