@@ -184,11 +184,22 @@ WorkflowRunsProvider &workflowRunsProviderSlot()
   static WorkflowRunsProvider provider;
   return provider;
 }
+
+ExperimentsProvider &experimentsProviderSlot()
+{
+  static ExperimentsProvider provider;
+  return provider;
+}
 } // namespace
 
 void setWorkflowRunsProvider( WorkflowRunsProvider provider )
 {
   workflowRunsProviderSlot() = std::move( provider );
+}
+
+void setExperimentsProvider( ExperimentsProvider provider )
+{
+  experimentsProviderSlot() = std::move( provider );
 }
 
 // ---------------------------------------------------------------------------
@@ -447,6 +458,20 @@ Json::Value buildWorkspaceState( data::DataManager *dataManager, QgsMapCanvas *c
     }
   }
   body["workflow_runs"] = workflowRuns;
+
+  // --- experiments (Harness 7.0 provider seam) -------------------------------
+  Json::Value experiments( Json::arrayValue );
+  if ( experimentsProviderSlot() )
+  {
+    Json::Value provided = experimentsProviderSlot()();
+    if ( provided.isArray() )
+    {
+      const int experimentLimit = std::min<int>( provided.size(), 20 );
+      for ( int i = 0; i < experimentLimit; ++i )
+        experiments.append( provided[i] );
+    }
+  }
+  body["experiments"] = experiments;
 
   return contracts::makeEnvelope( "workspace_state", std::move( body ) );
 }

@@ -100,11 +100,18 @@ class WorkspaceEntityRegistry
 using WorkflowRunsProvider = std::function<Json::Value()>;
 void setWorkflowRunsProvider( WorkflowRunsProvider provider );
 
+/// Harness 7.0 (mission Area E): provider seam for experiment summaries from
+/// the dataset/experiment platform (same layering rule: the agent library
+/// never links the experiment store). Empty by default; bounded ≤ 20.
+using ExperimentsProvider = std::function<Json::Value()>;
+void setExperimentsProvider( ExperimentsProvider provider );
+
 /**
  * Builds the WorkspaceState contract document:
  *   { schema_version, kind: "workspace_state", project, view, active,
  *     assets[], layers[], temporal_collections[], layouts[], charts[],
- *     models[], running_tasks[], recent_outputs[], workflow_runs[] }
+ *     models[], running_tasks[], recent_outputs[], workflow_runs[],
+ *     experiments[] }
  *
  * Bounded by construction: assets capped at 200, layers 200, models 25,
  * running tasks 25, recent outputs `recentOutputsLimit` (default 8, max 50).

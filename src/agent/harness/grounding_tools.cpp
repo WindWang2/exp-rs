@@ -4,6 +4,7 @@
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "agent/workspace_state.h"
 #include "contracts/spatial_contracts.h"
+#include "context_ledger.h"
 #include "entity_resolver.h"
 #include "harness_error.h"
 
@@ -191,8 +192,27 @@ class UnderstandTool final : public SpatialTool
 
       Json::Value inspectInput;
       inspectInput["path"] = resolved->path.toStdString();
-      if ( input.isMember( "stats" ) && input["stats"].isBool() )
+      const bool wantsStats = input.isMember( "stats" ) && input["stats"].isBool() &&
+                              input["stats"].asBool();
+      if ( wantsStats )
         inspectInput["stats"] = input["stats"];
+
+      // Harness 7.0 continuity (Area E): the understanding cache is keyed by
+      // (path, asset revision) — an unchanged asset answers from the cache
+      // instead of re-reading the file. Stats requests bypass the cache (the
+      // stats block is the expensive part).
+      if ( !wantsStats )
+      {
+        const Json::Value cached = ContextLedger::instance().cachedUnderstanding(
+          resolved->path, resolved->revision );
+        if ( !cached.isNull() )
+        {
+          Json::Value out( Json::objectValue );
+          out["dataset_understanding"] = cached;
+          out["cached"] = true;
+          return SpatialToolResult::ok( std::move( out ) );
+        }
+      }
 
       // Raster first (the dominant RS case); fall back to vector. Whichever
       // inspection succeeds defines the source kind — no guessing from names.
@@ -228,9 +248,12 @@ class UnderstandTool final : public SpatialTool
       if ( isRaster )
         understanding["modality"] = inferModality( inspectOutput );
       understanding["entity"] = resolved->toJson();
+      ContextLedger::instance().cacheUnderstanding( resolved->path, resolved->revision,
+                                                    understanding );
 
       Json::Value out( Json::objectValue );
       out["dataset_understanding"] = understanding;
+      out["cached"] = false;
       return SpatialToolResult::ok( std::move( out ) );
     }
 };
@@ -309,8 +332,116 @@ class ContextTool final : public SpatialTool
         }
       }
       out["unchanged"] = false;
-      out["context"] = state;
+      // Harness 7.0 continuity slots (Area E): plan/run bindings with
+      // verification status and the typed decision ledger ride on the same
+      // revision contract as the derived workspace state.
+      Json::Value context = state;
+      context["plan_bindings"] = ContextLedger::instance().planBindings();
+      context["decisions"] = ContextLedger::instance().decisions();
+      out["context"] = context;
       return SpatialToolResult::ok( std::move( out ) );
+    }
+};
+
+/// Harness 7.0 (Area E): typed decision ledger tool. Records scientific
+/// decisions (ambiguities, alternatives, parameter choices) as bounded
+/// structured rows — decision memory is explicit tool writes from
+/// authoritative agent turns, never chat state.
+class DecisionRecordTool final : public SpatialTool
+{
+  public:
+    std::string name() const override { return "harness:decision_record"; }
+    std::string displayName() const override { return "Typed Decision Ledger"; }
+    std::string description() const override
+    {
+      return "Record, resolve, and list typed scientific decisions: "
+             "{action: 'record', kind: 'ambiguity'|'alternative'|'parameter', "
+             "subject, note, candidates?} returns a decision-N id; "
+             "{action: 'resolve', decision_id, chosen} closes it; "
+             "{action: 'list'} returns unresolved first. Decisions surface in "
+             "harness:context so later turns see open questions without any "
+             "chat memory.";
+    }
+    std::vector<std::string> tags() const override
+    { return { "harness", "context", "decision", "continuity" }; }
+
+    Json::Value inputSchema() const override
+    {
+      Json::Value props( Json::objectValue );
+      Json::Value action( Json::objectValue );
+      action["type"] = "string";
+      action["description"] = "record | resolve | list";
+      props["action"] = action;
+      Json::Value kind( Json::objectValue );
+      kind["type"] = "string";
+      kind["description"] = "ambiguity | alternative | parameter (record only)";
+      props["kind"] = kind;
+      Json::Value subject( Json::objectValue );
+      subject["type"] = "string";
+      props["subject"] = subject;
+      Json::Value note( Json::objectValue );
+      note["type"] = "string";
+      props["note"] = note;
+      Json::Value candidates( Json::objectValue );
+      candidates["type"] = "array";
+      props["candidates"] = candidates;
+      Json::Value decisionId( Json::objectValue );
+      decisionId["type"] = "string";
+      decisionId["description"] = "decision-N (resolve only)";
+      props["decision_id"] = decisionId;
+      Json::Value chosen( Json::objectValue );
+      chosen["type"] = "string";
+      props["chosen"] = chosen;
+      Json::Value required( Json::arrayValue );
+      required.append( "action" );
+      return objectSchema( std::move( props ), std::move( required ) );
+    }
+
+    Json::Value outputSchema() const override
+    {
+      Json::Value props( Json::objectValue );
+      props["decision_id"] = Json::Value( Json::objectValue );
+      props["resolved"] = Json::Value( Json::objectValue );
+      props["decisions"] = Json::Value( Json::arrayValue );
+      return objectSchema( std::move( props ), Json::Value() );
+    }
+
+    SpatialToolResult execute( const Json::Value &input ) override
+    {
+      const std::string action = input.get( "action", "" ).asString();
+      if ( action == "record" )
+      {
+        const std::string subject = input.get( "subject", "" ).asString();
+        if ( subject.empty() )
+          return SpatialToolResult::failure( "missing string parameter 'subject'",
+                                             error_codes::kInvalidParameter, "validation" );
+        const std::string id = ContextLedger::instance().recordDecision(
+          input.get( "kind", "alternative" ).asString(), subject,
+          input.get( "status", "unresolved" ).asString(), input.get( "note", "" ).asString(),
+          input.isMember( "candidates" ) ? input["candidates"] : Json::Value() );
+        Json::Value out( Json::objectValue );
+        out["decision_id"] = id;
+        return SpatialToolResult::ok( std::move( out ) );
+      }
+      if ( action == "resolve" )
+      {
+        const std::string decisionId = input.get( "decision_id", "" ).asString();
+        if ( decisionId.empty() )
+          return SpatialToolResult::failure( "missing string parameter 'decision_id'",
+                                             error_codes::kInvalidParameter, "validation" );
+        Json::Value out( Json::objectValue );
+        out["resolved"] = ContextLedger::instance().resolveDecision(
+          decisionId, input.get( "chosen", "" ).asString() );
+        return SpatialToolResult::ok( std::move( out ) );
+      }
+      if ( action == "list" )
+      {
+        Json::Value out( Json::objectValue );
+        out["decisions"] = ContextLedger::instance().decisions();
+        return SpatialToolResult::ok( std::move( out ) );
+      }
+      return SpatialToolResult::failure( "action must be record|resolve|list",
+                                         error_codes::kInvalidParameter, "validation" );
     }
 };
 
@@ -332,6 +463,8 @@ void registerGroundingTools()
   auto &registry = SpatialToolRegistry::instance();
   registry.registerTool( std::make_shared<UnderstandTool>() );
   registry.registerTool( std::make_shared<ContextTool>() );
+  // Harness 7.0: typed decision ledger (Area E continuity).
+  registry.registerTool( std::make_shared<DecisionRecordTool>() );
 }
 
 } // namespace sicnu::agent::harness
