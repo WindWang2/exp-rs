@@ -136,7 +136,7 @@ bool MinnaertRegression::fit( double *k ) const
     if ( !k || m_count < 2 )
         return false;
     // Centered slope over the (ln cos_i, ln L) sums: ln L = a + m·ln cos_i,
-    // so the Minnaert exponent is k = −m.
+    // so the Minnaert exponent is k = m.
     const double n = static_cast<double>( m_count );
     const double meanX = m_sx / n;
     const double meanY = m_sy / n;
@@ -147,7 +147,7 @@ bool MinnaertRegression::fit( double *k ) const
     const double m = sxy / sxx;
     if ( !std::isfinite( m ) )
         return false;
-    const double kk = -m;
+    const double kk = m;
     if ( !( kk > 1e-6 ) )
         return false;
     *k = kk;

@@ -122,10 +122,10 @@ TEST_CASE( "OLS and Minnaert regressions: exact fits and refusals", "[topo][kern
   flatX.add( 0.5, 2.0 );
   REQUIRE_FALSE( flatX.fit( &a, &b ) );
 
-  // L = cosi^(−k) with k = 0.5 → the log-log fit recovers k.
+  // L = cosi^k with k = 0.5 → the log-log fit recovers k.
   MinnaertRegression mr;
   for ( double ci : { 0.2, 0.4, 0.6, 0.8 } )
-    mr.add( ci, std::pow( ci, -0.5 ) );
+    mr.add( ci, std::pow( ci, 0.5 ) );
   double k = 0.0;
   REQUIRE( mr.fit( &k ) );
   REQUIRE( k == Catch::Approx( 0.5 ).margin( 1e-9 ) );
@@ -174,7 +174,7 @@ TEST_CASE( "fitBand and correctPixel semantics", "[topo][kernel]" )
   // Minnaert: k = 1 reproduces the cosine form; domain violations → NaN.
   MinnaertRegression one;
   for ( double ci : { 0.25, 0.5, 0.75 } )
-    one.add( ci, 0.4 / ci ); // L·cosi const ⇒ k = 1
+    one.add( ci, 0.4 * ci ); // L = 0.4 * cosi^1 ⇒ k = 1
   BandFit mFit = fitBand( Method::Minnaert, zen, OlsRegression{}, one );
   REQUIRE( mFit.usable );
   REQUIRE( mFit.k == Catch::Approx( 1.0 ).margin( 1e-9 ) );

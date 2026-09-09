@@ -17,11 +17,11 @@ constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 } // namespace
 
 TerrainGeometryResult terrainGeometry( double dzdx, double dzdy,
-                                       double incidenceDeg, double headingDeg )
+                                       double incidenceDeg, double lookAzimuthDeg )
 {
     TerrainGeometryResult out;
     if ( !std::isfinite( dzdx ) || !std::isfinite( dzdy ) ||
-         !std::isfinite( incidenceDeg ) || !std::isfinite( headingDeg ) ||
+         !std::isfinite( incidenceDeg ) || !std::isfinite( lookAzimuthDeg ) ||
          incidenceDeg <= 0.0 || incidenceDeg >= 90.0 )
     {
         out.localIncidenceDeg = kNaN;
@@ -29,7 +29,7 @@ TerrainGeometryResult terrainGeometry( double dzdx, double dzdy,
     }
 
     const double thetaI = incidenceDeg * kDegToRad;
-    const double phiH = headingDeg * kDegToRad;
+    const double phiH = lookAzimuthDeg * kDegToRad;
     const double sinPhi = std::sin( phiH );
     const double cosPhi = std::cos( phiH );
 
