@@ -1323,6 +1323,44 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         ${CMAKE_BINARY_DIR}
     )
     sicnu_discover_tests(test_model_runtime)
+
+    # Platform 7.0 runtime core: TensorBlob N-D value type, failure taxonomy
+    # extension, inferNamed default bridge (needs OpenCV for the cv bridge).
+    add_executable(test_tensor_blob test_tensor_blob.cpp)
+    target_link_libraries(test_tensor_blob PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_tensor_blob)
+    target_include_directories(test_tensor_blob PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_tensor_blob)
+
+    # Platform 7.0 device planner: inventory, VRAM ledger, admission and
+    # memory-pressure eviction (injectable inventory — runs without GPUs).
+    add_executable(test_device_planner test_device_planner.cpp)
+    target_link_libraries(test_device_planner PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_device_planner)
+    target_include_directories(test_device_planner PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_device_planner)
 endif()
 
 # Platform 4.0: failure matrix + device/pool/registry contracts

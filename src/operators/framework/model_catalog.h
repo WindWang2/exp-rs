@@ -222,6 +222,12 @@ struct ModelRuntimeContract
   /// Platform 7.0 external provider connection (framework "http"/"python");
   /// ignored by in-process providers. Validated per framework at parse.
   ModelProviderContract provider;
+  /// RUNTIME-FILLED (never parsed from a manifest): the CUDA index the
+  /// registry's device resolution picked for this acquisition. Providers
+  /// supporting multi-device execution bind execution to exactly this index;
+  /// 0 when the resolved device is cpu. Keeping it here means the factory
+  /// sees the same resolved decision the cache key was built from.
+  int resolvedCudaIndex = 0;
 };
 
 /**

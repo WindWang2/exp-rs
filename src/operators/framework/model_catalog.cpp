@@ -462,9 +462,15 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                           "postprocess", "runtime", "domain", "sensors", "band_roles", "modalities",
                           "polarizations", "temporal_length", "radiometric_state", "resolution_range",
                           "cpu_fallback", "estimated_ram_mb", "estimated_vram_mb", "supports_tiling",
-                          // derived output projections (ignored by design)
+                          // legacy freeform version string superseded by
+                          // model_version (historically ignored; kept legal)
+                          "version",
+                          // derived output projections (ignored by design;
+                          // re-registering an inspected/toJson manifest must
+                          // keep working)
                           "readiness", "readiness_reason", "resolved_artifact_path",
-                          "content_digest", "input_contract" },
+                          "content_digest", "input_contract", "output_contract",
+                          "sourceManifest" },
                         "", &unknown );
     if ( inputVal.isObject() )
       collectUnknownKeys( inputVal.toObject(),
@@ -657,12 +663,10 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   }
   // Platform 4.0 follow-up vocabulary is NOT implemented yet; declaring it
   // must fail loudly instead of being silently ignored (#646 discipline).
-  for ( const char *unimplemented : { "pad", "clamp" } )
-  {
-    if ( preObj.contains( QLatin1String( unimplemented ) ) )
-      markInvalid( std::string( "preprocess." ) + unimplemented
-                   + " is declared but not implemented by any runtime" );
-  }
+  // Platform 7.0: preprocess.pad / clamp_min / clamp_max are IMPLEMENTED by
+  // the multimodal/temporal engine (runMultiInput) and refused at execution
+  // time by engines that cannot honor them — the #646 loud-failure contract
+  // now lives at the engine boundary where support actually differs.
   if ( info.preprocess.scale != 1.0
        && info.preprocess.normalize != "linear" && info.preprocess.normalize != "mean_std" )
     markInvalid( "preprocess.scale is declared but normalize is neither linear nor mean_std - "
@@ -961,7 +965,9 @@ Json::Value ModelInfo::toJson() const
     out["inputs"] = inputsJson;
   }
   if ( !preprocess.normalize.empty() || !preprocess.mean.empty() || !preprocess.stdv.empty()
-       || preprocess.scale != 1.0 || !preprocess.resize.empty() )
+       || preprocess.scale != 1.0 || !preprocess.resize.empty()
+       || !std::isnan( preprocess.clampMin ) || !std::isnan( preprocess.clampMax )
+       || preprocess.pad > 0 )
   {
     Json::Value pre( Json::objectValue );
     if ( !preprocess.normalize.empty() )
@@ -997,7 +1003,8 @@ Json::Value ModelInfo::toJson() const
       pre["pad"] = preprocess.pad;
     out["preprocess"] = pre;
   }
-  if ( tiling.tileSize > 0 || tiling.overlap > 0 || tiling.halo > 0 || tiling.batchSize != 1 )
+  if ( tiling.tileSize > 0 || tiling.overlap > 0 || tiling.halo > 0 || tiling.batchSize != 1
+       || tiling.minValidCoverage > 0.0 )
   {
     Json::Value t( Json::objectValue );
     t["supported"] = tiling.supported;
@@ -1014,7 +1021,8 @@ Json::Value ModelInfo::toJson() const
     out["tiling"] = t;
   }
   if ( !output.tensorNames.empty() || !output.classes.empty() || output.threshold >= 0.0
-       || output.uncertainty != "none" || !output.format.empty() || output.detectionDeclared )
+       || output.uncertainty != "none" || !output.format.empty() || output.detectionDeclared
+       || output.headsDeclared )
   {
     Json::Value o( Json::objectValue );
     if ( !output.type.empty() )

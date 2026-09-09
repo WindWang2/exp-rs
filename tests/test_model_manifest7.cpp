@@ -29,7 +29,8 @@ ModelInfo parseOk( const std::string &json )
 {
   auto &catalog = ModelCatalog::instance();
   std::string error;
-  REQUIRE( catalog.registerManifestJson( json, "test://manifest7", &error ) );
+  if ( !catalog.registerManifestJson( json, "test://manifest7", &error ) )
+    FAIL( "registerManifestJson failed: " << error );
   // Extract the name the way the catalog did (JSON is an object with "name").
   const std::string name = [&json] {
     const std::size_t pos = json.find( "\"name\"" );
@@ -200,7 +201,7 @@ TEST_CASE( "7.0 preprocess clamp/pad and coverage gate parse + validate", "[mode
   expectRefusal( R"({
       "name": "m7-badclamp", "task": "t", "framework": "onnx",
       "preprocess": { "clamp_min": 2.0, "clamp_max": 1.0 } })",
-                 "clamp_min must be < clamp_max" );
+                 "clamp_min must be < preprocess.clamp_max" );
   expectRefusal( R"({
       "name": "m7-badcov", "task": "t", "framework": "onnx",
       "tiling": { "min_valid_coverage": 1.5 } })",

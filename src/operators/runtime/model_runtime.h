@@ -25,6 +25,9 @@
 
 #include "operators/framework/model_catalog.h"
 #include "operators/framework/model_readiness.h"
+#include "operators/framework/rs_operator_error.h"
+#include "operators/runtime/device_planner.h"
+#include "operators/runtime/tensor_blob.h"
 
 #include <opencv2/core.hpp>
 
@@ -116,6 +119,19 @@ bool resolveDevice( const RequestedDevice &request,
                     int maxAddressableCudaIndex, bool allowCpuFallback,
                     ResolvedDevice *out, std::string *why = nullptr );
 
+/// Platform 7.0 ledger-aware resolution: same contract, but @p freeVramMbByIndex
+/// carries the planner's per-device free VRAM (index → MiB; negative = the
+/// device is unenforced/unknown). Auto is no longer a trivial cuda:0 — it
+/// deterministically picks the LOWEST index whose free VRAM fits the model's
+/// estimate; cuda:N requires that device to fit. Equal inputs always yield
+/// equal outputs; refusal is always typed.
+bool resolveDevice( const RequestedDevice &request,
+                    const ModelHardwareCapabilities &hw,
+                    bool modelWantsGpu, int estimatedVramMb,
+                    int maxAddressableCudaIndex, bool allowCpuFallback,
+                    const std::vector<int> &freeVramMbByIndex,
+                    ResolvedDevice *out, std::string *why = nullptr );
+
 /// Backend capabilities the registry needs beyond the factory itself
 /// (Platform 4.0). Defaults describe the historical built-in provider.
 struct ProviderTraits
@@ -127,8 +143,9 @@ struct ProviderTraits
 };
 
 /// Structured failure classification for forward-pass / load errors
-/// (Platform 4.0): drives the OOM ladder and error payloads. Classification
-/// is message-based over exception types we actually see (cv::Exception,
+/// (Platform 4.0, extended Platform 7.0): drives the OOM ladder, error
+/// payloads and the external error-code projection. Classification is
+/// message-based over exception types we actually see (cv::Exception,
 /// std::bad_alloc, runtime_error) — honest pattern matching, not a guarantee.
 enum class InferenceFailureKind
 {
@@ -137,9 +154,19 @@ enum class InferenceFailureKind
   Canceled,
   ShapeMismatch,
   CorruptModel,
-  NotLoaded
+  NotLoaded,
+  // --- Platform 7.0 taxonomy completion
+  IncompatibleSchema,   ///< manifest/graph contract the runtime cannot honor
+  DeviceUnavailable,    ///< requested/selected device missing or unaddressable
+  ProviderCrash,        ///< external provider died / connection lost
+  OutputInvalid         ///< forward ran but its output failed validation
 };
 InferenceFailureKind classifyInferenceError( const std::string &message );
+
+/// Error-code projection for the taxonomy (Platform 7.0): one stable
+/// RSOperatorError code per failure kind, shared by every consumer so
+/// CLI/workflow/GUI payloads classify identically.
+ErrorCode errorCodeForInferenceFailure( InferenceFailureKind kind );
 
 /// Liveness/statistics probe for one loaded session (Platform 4.0).
 struct SessionHealth
@@ -228,6 +255,41 @@ class IModelRuntime
       ( void )namedBlobs;
       throw std::runtime_error( "runtime does not support multi-input models" );
     }
+
+    // --- Platform 7.0: N-D named tensors + capability negotiation ------------
+    /// What THIS session/backend actually supports. Consumers negotiate before
+    /// feeding; a manifest asking beyond the capabilities is a typed refusal,
+    /// never silent reinterpretation. Defaults describe the historical
+    /// contract: single-input, rank-4 float32, positional, batched by caller,
+    /// coarse (batch-boundary) cancellation only.
+    struct ProviderCapabilities
+    {
+      bool multiInput = false;      ///< inferNamed with several inputs
+      bool namedBind = false;       ///< input NAMES honored (not positional)
+      int maxRank = 4;              ///< highest tensor rank inferNamed accepts
+      bool batch = true;            ///< leading batch dimension supported
+      bool cancelInForward = false; ///< requestCancel interrupts a RUNNING forward
+      /// Dtype tokens the provider consumes/produces; empty = {"float32"}.
+      std::vector<std::string> inputDtypes;
+      std::vector<std::string> outputDtypes;
+    };
+    virtual ProviderCapabilities capabilities() const { return ProviderCapabilities{}; }
+
+    /**
+     * Run one forward pass with N-D named input tensors and get every graph
+     * output back, named in the graph's own head order ("" when the provider
+     * cannot enumerate names). This is THE multi-input/temporal entry point;
+     * the historical infer/inferMulti remain for the raster engines' fast
+     * path and for older providers.
+     *
+     * The DEFAULT implementation bridges through cv::Mat (exact-dtype only —
+     * Int64/Float16 refuse here) and therefore honors the historical
+     * rank-4 float32 contract; providers override it for true N-D support.
+     * Input names are matched by NAME when the backend can do so, else by
+     * declaration order — the session's capabilities() always tells which.
+     */
+    virtual std::vector<NamedTensor> inferNamed( const std::vector<NamedTensor> &inputs,
+                                                 const std::vector<std::string> &outputNames );
 
     // --- Platform 4.0 unified contract ---------------------------------------
     /**
@@ -346,18 +408,37 @@ class ModelRuntimeRegistry
     /// Test seam: pin capabilities; pass nullopt to return to detection.
     void setHardwareForTest( const std::optional<ModelHardwareCapabilities> &capabilities );
 
+    /// Platform 7.0 per-device VRAM ledger backing every acquisition: GPU
+    /// sessions reserve their manifest estimate on the resolved device for
+    /// the lifetime of their cache entry; the ledger is the admission
+    /// authority behind device resolution (placement seam, not a scheduler).
+    VramLedger &vramLedger() { return m_ledger; }
+
   private:
     ModelRuntimeRegistry();
 
     /// LRU/idle eviction shared by acquire paths. Caller holds m_mutex.
     void evictExpiredLocked( std::int64_t nowMs );
+    /// Platform 7.0 memory-pressure valve: evicts every cached GPU session
+    /// pinned to @p cudaIndex (LRU order) and releases its reservation.
+    /// ONE bounded pass per failed admission — never an eviction loop.
+    /// Caller holds m_mutex.
+    void evictDeviceLocked( int cudaIndex );
 
     struct CacheEntry
     {
       ModelRuntimePtr session;
       std::uint64_t lastUsed = 0; ///< LRU tick (monotonic counter)
       std::int64_t lastUsedMs = 0; ///< wall clock, for idle eviction
+      // Platform 7.0 reservation bookkeeping (GPU sessions only).
+      int cudaIndex = -1;       ///< -1 = cpu / no reservation
+      int reservedVramMb = 0;   ///< estimate reserved on the ledger
+      std::string ledgerHolder; ///< session identity in the ledger
     };
+
+    /// Releases a cache entry's VRAM reservation (no-op for CPU entries).
+    /// Caller holds m_mutex.
+    void dropReservationLocked( const CacheEntry &entry );
 
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, CacheEntry> m_cache;
@@ -368,6 +449,7 @@ class ModelRuntimeRegistry
     };
     std::unordered_map<std::string, ProviderEntry> m_providers;
     std::optional<ModelHardwareCapabilities> m_hardwareOverride;
+    VramLedger m_ledger;
     std::size_t m_maxSessions = 2;
     std::size_t m_totalLoaded = 0;
     std::uint64_t m_useCounter = 0;

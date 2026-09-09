@@ -54,6 +54,8 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         # Model runtime layer (cv::dnn tensor surface): session registry,
         # ONNX provider, bounded tile inference engine.
         runtime/model_runtime.cpp
+        runtime/tensor_blob.cpp
+        runtime/device_planner.cpp
         runtime/opencv_dnn_runtime.cpp
         runtime/onnxruntime_provider.cpp
         runtime/tile_inference_engine.cpp

@@ -42,6 +42,12 @@ struct ModelExecutionRequest
   RasterOutputMode outputMode = RasterOutputMode::Probability; ///< manifest default unless overridden
   double confOverride = -1.0;   ///< detection confidence gate override (<0 = manifest)
   double nmsIouOverride = -1.0; ///< detection NMS IoU override (<0 = manifest)
+  // --- Platform 7.0 multimodal / temporal surface ---------------------------
+  /// Named multi-input feeds (empty = the historical single-input path over
+  /// @p inputPath). When declared, feeds map onto the manifest inputs[]
+  /// contracts and @p inputPath is ignored; temporal models provide one feed
+  /// entry per declared input with one path per frame.
+  std::vector<NamedRasterFeed> namedInputs;
 };
 
 /// Execution outcome: the compatibility payload plus full stats.
