@@ -935,6 +935,7 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
         else
         {
             it->jobRequest = request;
+            it->jobRequest.clientTag = "task:" + std::to_string( taskId );
             it->hasJobRequest = true;
             it->jobExecutor = std::move( executor );
             it->jobCancelHook = std::move( onCancel );
@@ -963,9 +964,27 @@ void TaskCenter::onJobRecord( const sicnu::jobs::JobRecord &record )
     {
         QMutexLocker locker( &m_mutex );
         auto it = m_taskByJobId.find( record.id );
-        if ( it == m_taskByJobId.end() )
+        if ( it != m_taskByJobId.end() )
+        {
+            taskId = it.value();
+        }
+        else if ( !record.request.clientTag.empty() )
+        {
+            // Rapid completion race guard (#799): recover taskId from clientTag if not yet mapped
+            std::string tag = record.request.clientTag;
+            if ( tag.rfind( "task:", 0 ) == 0 )
+                tag = tag.substr( 5 );
+            bool ok = false;
+            long parsedId = QString::fromStdString( tag ).toLong( &ok );
+            if ( ok && m_tasks.contains( parsedId ) )
+            {
+                taskId = parsedId;
+                m_taskByJobId[record.id] = taskId;
+                m_tasks[taskId].jobId = record.id;
+            }
+        }
+        if ( taskId == -1 )
             return; // job not submitted through Task Center (e.g. direct engine use in tests)
-        taskId = it.value();
     }
     processJobRecord( taskId, record );
 }
@@ -1262,12 +1281,14 @@ void TaskCenter::processNextQueuedTasks()
                                   : m_tasks[id].source.toStdString();
         launch.request.params = variantMapToJsonParams( m_tasks[id].parameterMap );
         launch.request.priority = static_cast<int>( m_tasks[id].priority );
+        launch.request.clientTag = "task:" + std::to_string( id );
         launch.onCancel = std::move( m_tasks[id].jobCancelHook );
         if ( m_tasks[id].hasJobRequest && m_tasks[id].jobExecutor )
         {
             launch.executor = m_tasks[id].jobExecutor;
             launch.hasExecutor = true;
             launch.request = m_tasks[id].jobRequest;
+            launch.request.clientTag = "task:" + std::to_string( id );
             launch.request.params = variantMapToJsonParams( m_tasks[id].parameterMap );
             launch.request.priority = static_cast<int>( m_tasks[id].priority );
         }

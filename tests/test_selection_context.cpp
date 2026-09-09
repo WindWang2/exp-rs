@@ -4,7 +4,7 @@
 #include "app/workbench/selection_context.h"
 #include "app/workbench/workbench_host.h"
 
-#include <QCoreApplication>
+#include <QApplication>
 #include <QSignalSpy>
 #include <QItemSelectionModel>
 #include <QTest>
@@ -25,7 +25,7 @@ int fake_argc = 1;
 char fake_argv0[] = "test_selection_context";
 char *fake_argv[] = { fake_argv0, nullptr };
 
-QCoreApplication *ensureApp()
+QApplication *ensureApp()
 {
   static QgsApplication *app = nullptr;
   if ( !app && !QCoreApplication::instance() )
@@ -35,7 +35,7 @@ QCoreApplication *ensureApp()
     app = new QgsApplication( fake_argc, fake_argv, false );
     QgsApplication::initQgis();
   }
-  return QCoreApplication::instance();
+  return app;
 }
 
 namespace ContextRules = sicnu::app::ContextRules;
@@ -186,7 +186,7 @@ TEST_CASE( "SelectionContext: workbench id flows into the snapshot",
 // ── Workbench 6.0 Milestone A: selection lifetime hazards (#778) ───────────
 
 TEST_CASE( "SelectionContext: layer removal purges the projection before the object dies",
-           "[selection_context][lifecycle][ux6]" )
+           "[selection_context][lifecycle][ux6][contract]" )
 {
   ensureApp();
   QgsProject *project = QgsProject::instance();
@@ -218,18 +218,14 @@ TEST_CASE( "SelectionContext: layer removal purges the projection before the obj
     const QModelIndex idx = model.node2index( node );
     tree.selectionModel()->select( idx, QItemSelectionModel::Select | QItemSelectionModel::Rows );
   }
-  { FILE* t = fopen( "C:/Users/wangj.KEVIN/projects/ux6_trace.log", "a" ); if ( t ) { fputs( "C\n", t ); fclose( t ); } }
   ctx.refreshNow();
-  { FILE* t = fopen( "C:/Users/wangj.KEVIN/projects/ux6_trace.log", "a" ); if ( t ) { fputs( "D\n", t ); fclose( t ); } }
   REQUIRE( ctx.snapshot().activeLayer == victim );
   REQUIRE( ctx.snapshot().selectedLayers.contains( victim ) );
 
   // QgsMapLayerStore fires layerWillBeRemoved BEFORE destroying the object —
   // the context must purge the doomed pointer from every projection and
   // re-broadcast so consumers never hold it across the deletion (#778).
-  { FILE* t = fopen( "C:/Users/wangj.KEVIN/projects/ux6_trace.log", "a" ); if ( t ) { fputs( "A\n", t ); fclose( t ); } }
   project->removeMapLayer( victim->id() );
-  { FILE* t = fopen( "C:/Users/wangj.KEVIN/projects/ux6_trace.log", "a" ); if ( t ) { fputs( "B\n", t ); fclose( t ); } }
 
   const auto after = ctx.snapshot();
   REQUIRE( after.activeLayer == nullptr );
@@ -240,8 +236,36 @@ TEST_CASE( "SelectionContext: layer removal purges the projection before the obj
   project->clear();
 }
 
+TEST_CASE( "SelectionContext: layer removal immediately evicts layer from cached snapshot (#778)",
+           "[selection_context][behavior][contract]" )
+{
+  ensureApp();
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsVectorLayer *layer = new QgsVectorLayer( QStringLiteral( "Point?crs=EPSG:4326" ),
+                                              QStringLiteral( "test_layer" ), QStringLiteral( "memory" ) );
+  project->addMapLayer( layer );
+
+  sicnu::app::SelectionContext ctx;
+  QgsMapCanvas canvas;
+  ctx.attachCanvas( &canvas );
+  canvas.setCurrentLayer( layer );
+
+  const auto snap1 = ctx.snapshot();
+  REQUIRE( snap1.activeLayer == layer );
+
+  // Now remove layer from project. layersWillBeRemoved signal fires!
+  project->removeMapLayer( layer->id() );
+
+  // Snapshot must NOT return the deleted layer, even without waiting 150ms!
+  const auto snap2 = ctx.snapshot();
+  REQUIRE( snap2.activeLayer == nullptr );
+  project->clear();
+}
+
 TEST_CASE( "SelectionContext: canvas destruction leaves the context safe to query",
-           "[selection_context][lifecycle][ux6]" )
+           "[selection_context][lifecycle][ux6][contract]" )
 {
   ensureApp();
   QgsProject *project = QgsProject::instance();
@@ -308,7 +332,6 @@ TEST_CASE( "ContextRules: rs.* commands carry a deterministic raster reason",
                == QObject::tr( "需要选中 SAR 数据" ) );
 }
 
-
 // ── Review L #1: edit commands carry reasons for every disabled state ──────
 
 TEST_CASE( "ContextRules: layer edit commands explain every disabled state",
@@ -344,5 +367,3 @@ TEST_CASE( "ContextRules: layer edit commands explain every disabled state",
   REQUIRE( ContextRules::unavailabilityReason( rwSnap, QStringLiteral( "layer.saveEdits" ) )
                == QObject::tr( "请先开启编辑会话" ) );
 }
-
-// ── Workbench 6.0 Milestone A: selection lifetime hazards (#778) ───────────

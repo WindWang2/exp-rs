@@ -33,6 +33,16 @@
 #include <limits>
 #include <memory>
 
+QThreadPool *RoiStatisticsWidget::analysisThreadPool()
+{
+    static QThreadPool *s_pool = []() {
+        auto *p = new QThreadPool();
+        p->setMaxThreadCount( 2 );
+        return p;
+    }();
+    return s_pool;
+}
+
 RoiStatisticsWidget::RoiStatisticsWidget(QWidget *parent)
     : QWidget(parent)
 {
@@ -41,6 +51,7 @@ RoiStatisticsWidget::RoiStatisticsWidget(QWidget *parent)
 
 RoiStatisticsWidget::~RoiStatisticsWidget()
 {
+    ++m_requestEpoch;
     // #797: cancel the in-flight scan so the bounded pool stops reading GDAL
     // sources for a widget that is gone (results are dropped by QPointer
     // anyway; this ends the work itself).
@@ -102,6 +113,8 @@ void RoiStatisticsWidget::setupUi()
 
 void RoiStatisticsWidget::setRasterLayer(QgsRasterLayer *layer)
 {
+    ++m_requestEpoch;
+    m_computing = false;
     m_rasterLayer = layer;
     m_stats.clear();
     updateTable();
@@ -118,7 +131,7 @@ void RoiStatisticsWidget::computeStatistics()
     // GEOS predicate (one QgsGeometry allocation per pixel) synchronously in
     // the Refresh slot - an unbounded GUI freeze (10 GB/band and up to 2.5e9
     // predicate calls on a 50k x 50k scene). Now: the heavy work runs on the
-    // global thread pool with a staleness guard (HistogramWidget pattern),
+    // dedicated bounded thread pool (#797) with a staleness guard (HistogramWidget pattern),
     // the ROI test uses ONE prepared geometry engine, and a missing ROI
     // reads a decimated window instead of the whole scene.
     if (m_computing)
@@ -259,7 +272,7 @@ void RoiStatisticsWidget::computeStatistics()
         for (int b = 0; b < bandCount; ++b) {
             // Cooperative cancellation (#797): a superseded scan abandons the
             // remaining bands promptly instead of monopolising a scan worker.
-            if (sicnu::app::RsScanPool::instance().isStale(scanGeneration)) {
+            if (sicnu::app::RsScanPool::instance().isStale(scanGeneration) || !self || self->m_requestEpoch != reqId) {
                 GDALClose(ds);
                 QMetaObject::invokeMethod(qApp, [self, reqId]() {
                     if (!self || self->m_requestEpoch != reqId)

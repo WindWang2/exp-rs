@@ -4,9 +4,9 @@
 #include "app/workbench/inspector_host.h"
 
 #include <QStackedWidget>
+#include <QTabWidget>
 #include <QApplication>
 #include <QLabel>
-#include <QTabWidget>
 
 namespace
 {
@@ -114,6 +114,10 @@ TEST_CASE( "InspectorHost: unsupported→cancel; empty→placeholder without sta
 
   auto *placeholder = host.findChild<QLabel *>( QStringLiteral( "rsInspectorPlaceholder" ) );
   REQUIRE( placeholder );
+
+  // Issue #780 / #777: Re-selection after unsupported snapshot must not crash or UAF
+  host.setSnapshot( snapRaster( true ) );
+  REQUIRE( general.populates == 2 );
 }
 
 TEST_CASE( "InspectorHost: multi-section ordering by order()/id", "[inspector_host]" )
@@ -135,7 +139,7 @@ TEST_CASE( "InspectorHost: multi-section ordering by order()/id", "[inspector_ho
 // ── Workbench 6.0 Milestone A: lifecycle hazards (#777 / #780 / #812) ──────
 
 TEST_CASE( "InspectorHost: sections survive the unsupported→supported re-selection cycle",
-           "[inspector_host][lifecycle][ux6]" )
+           "[inspector_host][lifecycle][ux6][contract]" )
 {
   ensureApp();
   sicnu::app::InspectorHost host;
@@ -168,7 +172,7 @@ TEST_CASE( "InspectorHost: sections survive the unsupported→supported re-selec
 }
 
 TEST_CASE( "InspectorHost: switching tabs populates the newly shown section",
-           "[inspector_host][behavior][ux6]" )
+           "[inspector_host][behavior][ux6][contract]" )
 {
   ensureApp();
   sicnu::app::InspectorHost host;

@@ -487,6 +487,9 @@ void ActiveViewHost::removeSelectedDisplayLayers()
     if ( !m_confirmationFn( detail ) )
         return;
 
+    if ( m_mapCanvas )
+        m_mapCanvas->stopRendering();
+
     for ( QgsMapLayer *layer : selected )
     {
         const std::optional<sicnu::display::DisplayLayerId> displayLayerId =

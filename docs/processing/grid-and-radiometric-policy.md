@@ -47,12 +47,20 @@ Policy:
    consume the declared scale at the operator seam — participating bands are
    divided by the declared scale before the kernel, so the kernel sees true
    [0,1] reflectance (`rs_spectral_index_operator.cpp`, #680).
-2. **The sample heuristic is a documented fallback only**: for rasters without
-   declared metadata, EVI/SAVI detect the DN regime by magnitude
-   (`max|v| > 5` in `spectral_indices.cpp`). It can misfire on pathological
-   scenes (an all-dark DN scene); the fix is to declare metadata, not to
-   widen the heuristic. New kernels must NOT add their own magnitude
-   heuristics — they take an explicit scale parameter resolved by the caller.
+2. **The magnitude rule is a dataset-level contract, never a per-tile guess
+   (#801, Foundation 6.0)**: for rasters without declared metadata, the
+   numeric domain is resolved ONCE PER RASTER before streaming — from a
+   bounded decimated probe (`processing/contracts/scientific_contracts.h`,
+   `domainFromMaxAbsSample`, threshold `max|v| > 5`), logged with its
+   evidence and reported in the operator result (`numeric_domain`). The
+   decision can never vary between tiles (the old per-block heuristic
+   striped the output at tile boundaries where a block's max fell below the
+   threshold). Streaming kernels take the explicit-regime variants
+   (`eviUnit`/`eviDn`/…); the legacy auto forms decide from the whole buffer
+   they receive and must never be called from streaming loops. New kernels
+   must NOT add their own magnitude heuristics — they take an explicit
+   regime resolved by the caller. It can still misfire on pathological
+   scenes (an all-dark DN scene); the fix is to declare metadata.
 3. **Scale/offset application** goes through `MathUtils::linearScale`
    (gain·v + bias) — one owner of the arithmetic; calibration kernels may
    inline the formula where it is part of their published equation, but the

@@ -19,12 +19,12 @@
 #include "workbench/layer_sections.h"
 #include "workbench/selection_context.h"
 #include "workbench/workbench_host.h"
-
-// Full session-window types: the bench lifecycle hooks (#813) call each
-// window's dirty/in-flight accessors directly.
-#include "classification/qgsclassificationmainwindow.h"
+#include "georeferencer/qgsgeoref_shell_window.h"
 #include "georeferencer/qgsgeoreferencermainwindow.h"
 #include "georeferencer/qgsgeoref_image_to_map_window.h"
+#ifdef SICNU_HAS_CLASSIFY
+#include "classification/qgsclassificationmainwindow.h"
+#endif
 
 #include <QAction>
 #include <QDockWidget>
@@ -81,21 +81,51 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     {
         auto *bench = new sicnu::app::ExternalWindowWorkbench(
             QStringLiteral( "classify" ), tr( "分类工作区" ), QStringLiteral( "su_ervised" ),
-            [this] { openClassificationWindow(); }, m_workbenchHost );
-        bench->setWindowGetter( [this]() -> QWidget * { return m_classifyWindow; } );
-        bench->setDirtyFn( [this] { return m_classifyWindow && m_classifyWindow->isSessionDirty(); } );
-        bench->setInFlightFn( [this] { return m_classifyWindow && m_classifyWindow->hasInFlightCompute(); } );
+            [this] {
+#ifdef SICNU_HAS_CLASSIFY
+                openClassificationWindow();
+#endif
+            }, m_workbenchHost );
+        bench->setWindowGetter( [this]() -> QWidget * {
+#ifdef SICNU_HAS_CLASSIFY
+            return m_classifyWindow;
+#else
+            return nullptr;
+#endif
+        } );
+        bench->setDirtyFn( [this] {
+#ifdef SICNU_HAS_CLASSIFY
+            return m_classifyWindow && m_classifyWindow->isSessionDirty();
+#else
+            return false;
+#endif
+        } );
+        bench->setInFlightFn( [this] {
+#ifdef SICNU_HAS_CLASSIFY
+            return m_classifyWindow && m_classifyWindow->hasInFlightCompute();
+#else
+            return false;
+#endif
+        } );
         bench->setCancelFn( [this] {
+#ifdef SICNU_HAS_CLASSIFY
             if ( !m_classifyWindow || !m_classifyWindow->hasInFlightCompute() )
                 return false;
             m_classifyWindow->cancelInFlightCompute();
             return true;
+#else
+            return false;
+#endif
         } );
         bench->setCloseFn( [this] {
+#ifdef SICNU_HAS_CLASSIFY
             if ( !m_classifyWindow )
                 return true;
             m_classifyWindow->close(); // its closeEvent confirms unsaved state
             return !m_classifyWindow->isVisible();
+#else
+            return true;
+#endif
         } );
         m_workbenchHost->registerWorkbench( bench );
     }
@@ -150,7 +180,11 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     // track); the bench keeps the plain lazy-open contract.
     m_workbenchHost->registerWorkbench( new sicnu::app::ExternalWindowWorkbench(
         QStringLiteral( "layout" ), tr( "布局设计" ), QStringLiteral( "print_l_yout" ),
-        [this] { newLayout(); }, m_workbenchHost ) );
+        [this] { newLayout(); },
+        nullptr,
+        nullptr,
+        nullptr,
+        m_workbenchHost ) );
 
     m_workbenchHost->activate( QStringLiteral( "map" ) );
 

@@ -195,7 +195,7 @@ TEST_CASE( "CommandRegistry: definitions are queryable and sorted", "[command_re
 // ── Workbench 6.0 Milestone D: shortcut ownership (#792 / #794) ────────────
 
 TEST_CASE( "CommandRegistry: every command may install its canonical shortcut once",
-           "[command_registry][shortcuts][ux6]" )
+           "[command_registry][shortcuts][ux6][contract]" )
 {
   ensureApp();
   sicnu::app::CommandRegistry registry;
@@ -227,7 +227,7 @@ TEST_CASE( "CommandRegistry: every command may install its canonical shortcut on
 }
 
 TEST_CASE( "CommandRegistry: repeat shortcut install for one command warns, never aborts",
-           "[command_registry][shortcuts][ux6]" )
+           "[command_registry][shortcuts][ux6][contract]" )
 {
   ensureApp();
   sicnu::app::CommandRegistry registry;

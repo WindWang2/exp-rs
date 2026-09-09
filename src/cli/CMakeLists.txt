@@ -47,6 +47,9 @@ target_include_directories(sicnu_geo_rs_cli PRIVATE
 target_link_libraries(sicnu_geo_rs_cli PRIVATE
     Qt6::Core
     Sicnu::data
+    Sicnu::dataset
+    Sicnu::experiment
+    SQLite::SQLite3
     Sicnu::Geospatial
     sicnu_plugins_framework
     sicnu_sdk

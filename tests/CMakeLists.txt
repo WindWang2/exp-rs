@@ -115,6 +115,7 @@ function(sicnu_add_dialog_test NAME)
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   )
   set_target_properties(${NAME} PROPERTIES AUTOMOC ON)
 
@@ -190,6 +191,7 @@ sicnu_add_io_test(test_io_paths)
 sicnu_add_io_test(test_io_uri)
 sicnu_add_io_test(test_io_product_registry)
 sicnu_add_io_test(test_io_probe)
+sicnu_add_io_test(test_adversarial_m3)
 
 # Remote range harness (ADR 0139): local HTTP fixture with byte accounting.
 sicnu_add_io_test(test_io_remote_range)
@@ -625,6 +627,95 @@ target_compile_definitions(test_inspector_host PRIVATE
 )
 sicnu_discover_tests(test_inspector_host)
 
+add_executable(test_adversarial_m4
+  test_adversarial_m4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/inspector_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/adapters.cpp
+)
+target_link_libraries(test_adversarial_m4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  sicnu_data
+)
+target_include_directories(test_adversarial_m4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_adversarial_m4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_adversarial_m4)
+
+add_executable(test_adversarial_m5
+  test_adversarial_m5.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/roi_statistics_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
+)
+target_link_libraries(test_adversarial_m5 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_adversarial_m5 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/stubs
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_adversarial_m5 PROPERTIES AUTOMOC ON)
+target_compile_definitions(test_adversarial_m5 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_adversarial_m5)
+
+add_executable(test_adversarial_m6
+  test_adversarial_m6.cpp
+)
+target_link_libraries(test_adversarial_m6 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  sicnu_processing
+  sicnu_task_center
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_adversarial_m6 PRIVATE jsoncpp)
+endif()
+target_include_directories(test_adversarial_m6 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_adversarial_m6 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_adversarial_m6)
+
 add_executable(test_interactive_session_contract
   test_interactive_session_contract.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/session_adapters.cpp
@@ -818,6 +909,41 @@ target_include_directories(test_topographic_correction PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_topographic_correction)
+
+# Grid & resampling foundation (Foundation 6.0, Milestone D):
+# rs:resample / rs:align known answers over the GDAL warp seam.
+add_executable(test_grid_operators test_grid_operators.cpp)
+target_link_libraries(test_grid_operators PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_grid_operators)
+target_include_directories(test_grid_operators PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_grid_operators)
+
+# Scientific contracts (Foundation 6.0): canonical numeric-domain decisions
+# resolved once per raster + kernel regime consistency.
+add_executable(test_scientific_contracts test_scientific_contracts.cpp)
+target_link_libraries(test_scientific_contracts PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_scientific_contracts)
+target_include_directories(test_scientific_contracts PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_scientific_contracts)
 
 # Spectral derivatives (Foundation 5.0 Milestone B3): kernel closed forms +
 # operator E2E over an explicit wavelength axis + index-space refusal.
@@ -1471,6 +1597,10 @@ set_property(TARGET test_dataset_quality_scale PROPERTY RUN_SERIAL TRUE)
 sicnu_add_test(test_dataset_e2e_examples TIMEOUT 180)
 target_link_libraries(test_dataset_e2e_examples PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 
+sicnu_add_test(test_adversarial_m2 TIMEOUT 180)
+target_link_libraries(test_adversarial_m2 PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
+
 # Phase C fused-chain equivalence (links through sicnu_task_center which
 # carries fused_chain.cpp; needs the standard set only).
 sicnu_add_test(test_fused_chain TIMEOUT 300)
@@ -1744,6 +1874,7 @@ sicnu_discover_tests(test_spectral_profile_widget)
 # ROI statistics widget tests (#429)
 add_executable(test_roi_statistics_widget test_roi_statistics_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/roi_statistics_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
 )
 target_link_libraries(test_roi_statistics_widget PRIVATE
@@ -3968,6 +4099,25 @@ if(TARGET sicnu_operators)
   sicnu_link_jsoncpp(test_rs_operators)
   sicnu_discover_tests(test_rs_operators)
 
+  add_executable(test_adversarial_m1 test_adversarial_m1.cpp)
+  target_link_libraries(test_adversarial_m1 PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    sicnu_processing
+    sicnu_operators
+    GDAL::GDAL
+  )
+  target_include_directories(test_adversarial_m1 PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_adversarial_m1)
+  sicnu_discover_tests(test_adversarial_m1)
+
   # Desktop Workbench UX 4.0 — band tool operator promotions (Milestone C)
   add_executable(test_rs_band_tools_operators test_rs_band_tools_operators.cpp)
   target_link_libraries(test_rs_band_tools_operators PRIVATE
@@ -4455,6 +4605,7 @@ add_executable(test_histogram_stretch_widget
   test_histogram_stretch_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_stretch_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_types.cpp
   ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_resolve.cpp
   ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_apply.cpp
@@ -6066,6 +6217,7 @@ sicnu_discover_tests(test_image_enhancement_panel_ihs)
 
 add_executable(test_subsystem_stability test_subsystem_stability.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
 )
 target_link_libraries(test_subsystem_stability PRIVATE
   Catch2::Catch2WithMain
@@ -6121,6 +6273,52 @@ target_include_directories(test_e2e_phase2 PRIVATE
 )
 set_target_properties(test_e2e_phase2 PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_e2e_phase2)
+
+# ---------------------------------------------------------------------------
+# E2E Test Suite for Open Issues #773 - #817
+# ---------------------------------------------------------------------------
+add_executable(test_e2e_open_issues
+  test_e2e_open_issues.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/inspector_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/adapters.cpp
+)
+target_link_libraries(test_e2e_open_issues PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  Sicnu::qgis_display
+  Sicnu::dataset
+  Sicnu::experiment
+  Sicnu::Geospatial
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  sicnu_workflow_runtime
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_e2e_open_issues)
+target_include_directories(test_e2e_open_issues PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_e2e_open_issues PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_e2e_open_issues PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_e2e_open_issues)
 
 # ---------------------------------------------------------------------------
 # Workflow Engine 2.0 test suites

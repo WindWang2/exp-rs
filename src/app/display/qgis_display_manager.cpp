@@ -855,6 +855,10 @@ data::Result<void> QgisDisplayManager::relocateLayer(DisplayLayerId layerId) {
       parent->removeChildNode(oldNode);
   }
 
+  // Stop background rendering before removing the stale layer
+  if (viewRecord->canvas)
+    viewRecord->canvas->stopRendering();
+
   // Remove the stale layer from the store after the replacement is registered.
   // #779: the store removal destroys the old layer — settle an in-flight
   // render first so its threads cannot dereference the doomed layer.
@@ -912,6 +916,9 @@ data::Result<void> QgisDisplayManager::removeLayer(DisplayLayerId layerId) {
         }
       }
     }
+
+    if (viewRecord->canvas)
+      viewRecord->canvas->stopRendering();
 
     if (viewRecord->layerStore &&
         viewRecord->layerStore->mapLayer(qgisLayerId)) {
@@ -1181,6 +1188,11 @@ quint64 QgisDisplayManager::canvasLayerSyncCount(DisplayViewId viewId) const {
 QgsMapCanvas *QgisDisplayManager::mapCanvas(DisplayViewId viewId) const {
   const Impl::ViewRecord *viewRecord = m_impl->findView(viewId);
   return viewRecord ? viewRecord->canvas.data() : nullptr;
+}
+
+QgsLayerTree *QgisDisplayManager::layerTree(DisplayViewId viewId) const {
+  const Impl::ViewRecord *viewRecord = m_impl->findView(viewId);
+  return viewRecord ? viewRecord->layerTree.data() : nullptr;
 }
 
 } // namespace sicnu::display

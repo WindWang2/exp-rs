@@ -12,6 +12,7 @@ class QPushButton;
 class QLabel;
 class QgsRasterLayer;
 class QgsVectorLayer;
+class QThreadPool;
 
 /**
  * Widget for computing and displaying statistics for selected ROIs.
@@ -24,6 +25,9 @@ class RoiStatisticsWidget : public QWidget
 public:
     explicit RoiStatisticsWidget(QWidget *parent = nullptr);
     ~RoiStatisticsWidget() override;
+
+    /// Dedicated, bounded thread pool for raster analysis (#797).
+    static QThreadPool *analysisThreadPool();
 
     void setRasterLayer(QgsRasterLayer *layer);
     void setRoiLayer(QgsVectorLayer *roiLayer);

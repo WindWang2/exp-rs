@@ -11,6 +11,7 @@
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
+#include <qgsproject.h>
 #include <layertree/qgslayertreeview.h>
 #include <layertree/qgslayertreemodel.h>
 #include <layertree/qgslayertreeviewdefaultactions.h>
@@ -247,17 +248,25 @@ SelectionContext::SelectionContext( QObject *parent )
     m_debounce->setSingleShot( true );
     m_debounce->setInterval( 150 );
     connect( m_debounce, &QTimer::timeout, this, &SelectionContext::refreshNow );
-    // #778: the project announces layer removal BEFORE the QgsMapLayer object
-    // is destroyed — purge it from every projection right away. Batch removals
-    // (removeMapLayers / clear) emit this per-layer signal for each layer.
-    connect( QgsProject::instance(), qOverload<QgsMapLayer *>( &QgsProject::layerWillBeRemoved ),
-             this, [this]( QgsMapLayer *layer ) { handleLayerWillBeRemoved( layer ); } );
-    connect( QgsProject::instance(), qOverload<const QString &>( &QgsProject::layerWillBeRemoved ),
-             this, [this]( const QString & ) {
-                 // id-based announcement: the cached snapshot may borrow the
-                 // doomed layer even if the object signal was not observed.
-                 m_cacheValid = false;
-             } );
+    if ( QgsProject::instance() )
+    {
+        // #778: the project announces layer removal BEFORE the QgsMapLayer object
+        // is destroyed — purge it from every projection right away. Batch removals
+        // (removeMapLayers / clear) emit this per-layer signal for each layer.
+        connect( QgsProject::instance(), qOverload<QgsMapLayer *>( &QgsProject::layerWillBeRemoved ),
+                 this, [this]( QgsMapLayer *layer ) { handleLayerWillBeRemoved( layer ); } );
+        connect( QgsProject::instance(), qOverload<const QList<QgsMapLayer *> &>( &QgsProject::layersWillBeRemoved ),
+                 this, [this]( const QList<QgsMapLayer *> &layers ) {
+                     for ( QgsMapLayer *layer : layers )
+                         handleLayerWillBeRemoved( layer );
+                 } );
+        connect( QgsProject::instance(), qOverload<const QString &>( &QgsProject::layerWillBeRemoved ),
+                 this, [this]( const QString & ) {
+                     // id-based announcement: the cached snapshot may borrow the
+                     // doomed layer even if the object signal was not observed.
+                     m_cacheValid = false;
+                 } );
+    }
 }
 
 void SelectionContext::handleLayerWillBeRemoved( QgsMapLayer *layer )
@@ -269,6 +278,13 @@ void SelectionContext::handleLayerWillBeRemoved( QgsMapLayer *layer )
     tombstone.raw = layer;
     m_dyingLayers.append( tombstone );
     m_cacheValid = false;
+    if ( m_cached.activeLayer == layer )
+        m_cached.activeLayer = nullptr;
+    m_cached.selectedLayers.removeAll( layer );
+    if ( m_canvas && m_canvas->currentLayer() == layer )
+    {
+        m_canvas->setCurrentLayer( nullptr );
+    }
     // Re-broadcast immediately (not on the debounce): consumers re-query and
     // never observe the doomed pointer across the removal.
     refreshNow();
@@ -374,6 +390,7 @@ void SelectionContext::refreshNow()
 
 void SelectionContext::scheduleRefresh()
 {
+    m_cacheValid = false;
     if ( !m_debounce->isActive() )
         m_debounce->start();
 }
@@ -392,7 +409,11 @@ SelectionContextSnapshot SelectionContext::computeSnapshot() const
             if ( d.guard && d.guard.data() == layer )
                 return true; // doomed and still alive
             if ( !d.guard && d.raw == layer )
+            {
+                if ( QgsProject::instance() && QgsProject::instance()->mapLayer( layer->id() ) == layer )
+                    continue; // valid new layer reusing the address
                 return true; // destroyed — the pointer must never resurface
+            }
         }
         return false;
     };

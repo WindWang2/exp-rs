@@ -214,6 +214,9 @@ public:
   /// secondary view). Nullptr for an unknown view or a tree that is gone.
   QgsLayerTree *viewLayerTree(DisplayViewId viewId) const;
 
+  /// Non-owning access to the view's layer tree.
+  QgsLayerTree *layerTree(DisplayViewId viewId) const;
+
   /// Registers the (optional) overview canvas. The overview renders the same
   /// QgsMapLayer instances as its main canvas, so layer-destroying operations
   /// settle it alongside the view canvas. Safe to leave unset.

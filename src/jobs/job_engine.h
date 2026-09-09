@@ -112,6 +112,18 @@ class JobEngine
                               JobExecutor executor = {}, CancelHook onCancel = {} );
 
     /**
+     * Synchronously wait for a job to reach a terminal state (Succeeded, Failed, Cancelled).
+     * Deadlock prevention (#798): worker threads detect self-execution and reject
+     * synchronous child waits, returning false immediately.
+     */
+    bool waitForJob( const std::string &jobId, int timeoutMs = -1 );
+
+    /**
+     * Returns true if the calling thread is an active JobEngine worker thread (#798).
+     */
+    static bool isWorkerThread();
+
+    /**
      * Register a prefix executor. algorithmId that starts with \a prefix uses
      * this executor instead of RSOperatorRegistry (unless a per-job executor
      * was supplied). Empty prefix is ignored.

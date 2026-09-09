@@ -5,6 +5,7 @@
 
 #include <QLabel>
 #include <QSet>
+#include <QSignalBlocker>
 #include <QStackedWidget>
 #include <QTabWidget>
 #include <QVBoxLayout>
@@ -35,6 +36,8 @@ void InspectorHost::registerSection( InspectorSection *section )
 {
     if ( !section || m_sections.contains( section ) )
         return;
+    section->setParent( this );
+    section->hide();
     m_sections.append( section );
     // Stable ordering by (order, id).
     std::sort( m_sections.begin(), m_sections.end(),
@@ -117,49 +120,47 @@ void InspectorHost::rebuildTabs()
         connect( tabs, &QTabWidget::currentChanged, this, &InspectorHost::onTabChanged );
     }
 
-    // Sync tabs with supported sections.
-    QSet<QString> wanted;
-    for ( InspectorSection *section : m_sections )
     {
-        if ( !section->supports( m_snapshot ) )
-            continue;
-        wanted.insert( section->sectionId() );
-        const int existing = tabs->indexOf( section );
-        if ( existing < 0 )
-            tabs->addTab( section, section->title() );
-        else
-            tabs->setTabText( existing, section->title() );
-    }
-    for ( int i = tabs->count() - 1; i >= 0; --i )
-    {
-        auto *page = tabs->widget( i );
-        if ( auto *section = qobject_cast<InspectorSection *>( page ) )
+        QSignalBlocker blocker( tabs );
+
+        // Sync tabs with supported sections.
+        QSet<QString> wanted;
+        for ( InspectorSection *section : m_sections )
         {
-            if ( !wanted.contains( section->sectionId() ) )
+            if ( !section->supports( m_snapshot ) )
+                continue;
+            wanted.insert( section->sectionId() );
+            const int existing = tabs->indexOf( section );
+            if ( existing < 0 )
+                tabs->addTab( section, section->title() );
+            else
+                tabs->setTabText( existing, section->title() );
+        }
+        for ( int i = tabs->count() - 1; i >= 0; --i )
+        {
+            auto *page = tabs->widget( i );
+            if ( auto *section = qobject_cast<InspectorSection *>( page ) )
             {
-                tabs->removeTab( i );
-                // Keep orphaned sections alive under the host, not the tab
-                // widget's internal stack (same #777 ownership hazard).
-                section->setParent( this );
-                section->hide();
+                if ( !wanted.contains( section->sectionId() ) )
+                {
+                    tabs->removeTab( i );
+                    // Keep orphaned sections alive under the host, not the tab
+                    // widget's internal stack (same #777 ownership hazard).
+                    section->setParent( this );
+                    section->hide();
+                }
             }
         }
+
+        m_stack->setCurrentWidget( tabs );
+
+        // Restore / choose selection.
+        if ( current && tabs->indexOf( current ) >= 0 )
+            tabs->setCurrentWidget( current );
+        else if ( tabs->count() > 0 )
+            tabs->setCurrentIndex( 0 );
     }
 
-    m_stack->setCurrentWidget( tabs );
-
-    // Restore / choose selection without re-entering onTabChanged; the shown
-    // section is populated exactly once below.
-    if ( current && tabs->indexOf( current ) >= 0 )
-    {
-        const QSignalBlocker blocker( tabs );
-        tabs->setCurrentWidget( current );
-    }
-    else if ( tabs->count() > 0 )
-    {
-        const QSignalBlocker blocker( tabs );
-        tabs->setCurrentIndex( 0 );
-    }
     m_rebuilding = false;
     if ( InspectorSection *shown = currentSection() )
     {

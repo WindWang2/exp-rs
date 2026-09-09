@@ -45,7 +45,7 @@ QVector<SequenceUse> collectSequenceUses( const QString &source )
     const QStringList lines = source.split( QLatin1Char( '\n' ) );
 
     static const QRegularExpression stringLit(
-        QStringLiteral( "QKeySequence\\(\\s*\"([^\"]+)\"" ) );
+        QStringLiteral( "QKeySequence\\(\\s*(?:QStringLiteral\\(\\s*)?\"([^\"]+)\"" ) );
     // Standard sequences: QKeySequence::New / Open / Save / Quit / Undo / ...
     static const QRegularExpression stdLit(
         QStringLiteral( "QKeySequence::([A-Za-z]+)" ) );
@@ -72,39 +72,50 @@ QVector<SequenceUse> collectSequenceUses( const QString &source )
 TEST_CASE( "Shortcuts: no duplicate key sequences in the shell action host",
            "[ux4][shortcuts][a11y]" )
 {
-    const QString source = readSource( QStringLiteral( "src/app/main_window_menus.cpp" ) );
-    REQUIRE_FALSE( source.isEmpty() );
+    const QStringList files = {
+        QStringLiteral( "src/app/main_window_menus.cpp" ),
+        QStringLiteral( "src/app/workbench/command_defs.cpp" ),
+        QStringLiteral( "src/app/main_window_workbench.cpp" ),
+    };
 
-    const QVector<SequenceUse> uses = collectSequenceUses( source );
-
-    // Explicit whitelist (documented decisions): line-specific duplicates the
-    // team accepts. Keep this list empty in the ideal case.
-    static const QSet<int> whitelistedLines = {};
-
-    QMap<QString, int> firstUse;
-    QStringList conflicts;
-    for ( const SequenceUse &use : uses )
+    for ( const QString &relPath : files )
     {
-        if ( whitelistedLines.contains( use.line ) )
-            continue;
-        if ( firstUse.contains( use.sequence ) )
+        DYNAMIC_SECTION( "Scanning " << relPath.toStdString() )
         {
-            conflicts << QStringLiteral( "%1 claimed at lines %2 and %3" )
-                             .arg( use.sequence )
-                             .arg( firstUse.value( use.sequence ) )
-                             .arg( use.line );
-        }
-        else
-        {
-            firstUse.insert( use.sequence, use.line );
+            const QString source = readSource( relPath );
+            REQUIRE_FALSE( source.isEmpty() );
+
+            const QVector<SequenceUse> uses = collectSequenceUses( source );
+
+            // Explicit whitelist (documented decisions): line-specific duplicates the
+            // team accepts. Keep this list empty in the ideal case.
+            static const QSet<int> whitelistedLines = {};
+
+            QMap<QString, int> firstUse;
+            QStringList conflicts;
+            for ( const SequenceUse &use : uses )
+            {
+                if ( whitelistedLines.contains( use.line ) )
+                    continue;
+                if ( firstUse.contains( use.sequence ) )
+                {
+                    conflicts << QStringLiteral( "%1 claimed at lines %2 and %3 in %4" )
+                                     .arg( use.sequence )
+                                     .arg( firstUse.value( use.sequence ) )
+                                     .arg( use.line )
+                                     .arg( relPath );
+                }
+                else
+                {
+                    firstUse.insert( use.sequence, use.line );
+                }
+            }
+
+            INFO( conflicts.join( QStringLiteral( "; " ) ).toStdString() );
+            // UX 4.0 baseline: each file declares each binding once.
+            REQUIRE( conflicts.isEmpty() );
         }
     }
-
-    INFO( conflicts.join( QStringLiteral( "; " ) ).toStdString() );
-    // UX 4.0 baseline: menus declare each binding once. Surfaces may share a
-    // handler slot, but a repeated literal here means two competing actions —
-    // exactly what this test pins down.
-    REQUIRE( conflicts.isEmpty() );
 }
 
 // ── Workbench 6.0 Milestone D: conflict scans cover every command source

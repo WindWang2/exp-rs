@@ -21,6 +21,7 @@
 
 #include <functional>
 
+class QTimer;
 class QgsMapCanvas;
 class QgsLayerTreeView;
 class QgsMapLayer;

@@ -117,6 +117,35 @@ TEST_CASE( "Layer sync: removing a layer leaves no stale tree node or canvas lay
     CHECK( canvas.layers().isEmpty() );                 // no stale canvas layer
 }
 
+TEST_CASE( "Layer sync: removing layer during canvas rendering is race-free (#779, #796)",
+           "[layer_sync][removal][race]" )
+{
+    SyncFixture fx;
+    QgsMapCanvas canvas;
+    QgsLayerTree *root = fx.project->layerTreeRoot();
+    QgsLayerTreeMapCanvasBridge bridge( root, &canvas );
+    bridge.setAutoSetupOnFirstLayer( false );
+
+    QgsVectorLayer *layer = new QgsVectorLayer( QStringLiteral( "Point?crs=epsg:4326" ),
+                                                QStringLiteral( "render_race" ), QStringLiteral( "memory" ) );
+    REQUIRE( layer->isValid() );
+    fx.project->addMapLayer( layer, false );
+    root->addLayer( layer );
+    bridge.setCanvasLayers();
+    REQUIRE( canvas.layers().size() == 1 );
+
+    // Trigger asynchronous rendering
+    canvas.refresh();
+
+    // stopRendering() prior to removal guarantees no crash or background thread reading deleted layer
+    canvas.stopRendering();
+    fx.project->removeMapLayer( layer->id() );
+    bridge.setCanvasLayers();
+
+    CHECK( canvas.layers().isEmpty() );
+    CHECK_FALSE( canvas.isDrawing() );
+}
+
 TEST_CASE( "Layer sync: duplicate tree registration is refused by convention",
            "[layer_sync][duplicate]" )
 {

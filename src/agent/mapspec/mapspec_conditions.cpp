@@ -52,10 +52,11 @@ bool tokenize( const std::string &expr, std::vector<Token> &tokens, std::string 
         return false;
       }
     }
-    else if ( c == '"' )
+    else if ( c == '"' || c == '\'' )
     {
+      const char quoteChar = c;
       const size_t start = ++i;
-      while ( i < expr.size() && expr[i] != '"' )
+      while ( i < expr.size() && expr[i] != quoteChar )
         ++i;
       if ( i >= expr.size() )
       {
@@ -439,11 +440,41 @@ bool evaluateAst( const ConditionAst &node, const Json::Value &context, std::str
   switch ( node.op )
   {
     case ConditionAst::Op::And:
-      return evaluateAst( *node.children[0], context, error ) &&
-             evaluateAst( *node.children[1], context, error );
+    {
+      std::string err0;
+      const bool v0 = evaluateAst( *node.children[0], context, err0 );
+      std::string err1;
+      const bool v1 = evaluateAst( *node.children[1], context, err1 );
+      if ( !err0.empty() )
+      {
+        error = err0;
+        return false;
+      }
+      if ( !err1.empty() )
+      {
+        error = err1;
+        return false;
+      }
+      return v0 && v1;
+    }
     case ConditionAst::Op::Or:
-      return evaluateAst( *node.children[0], context, error ) ||
-             evaluateAst( *node.children[1], context, error );
+    {
+      std::string err0;
+      const bool v0 = evaluateAst( *node.children[0], context, err0 );
+      std::string err1;
+      const bool v1 = evaluateAst( *node.children[1], context, err1 );
+      if ( !err0.empty() )
+      {
+        error = err0;
+        return false;
+      }
+      if ( !err1.empty() )
+      {
+        error = err1;
+        return false;
+      }
+      return v0 || v1;
+    }
     case ConditionAst::Op::Compare:
     {
       bool ok = true;

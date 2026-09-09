@@ -11,6 +11,7 @@
 
 #include "rs_pipeline_runner.h"
 #include "cli_project_ops.h"
+#include "cli_dataset_commands.h"
 
 #include "exprs/exit_codes.h"
 #include "exprs/external_process.h"
