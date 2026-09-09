@@ -18,6 +18,7 @@
 #include "workbench/command_registry.h"
 #include "workbench/inspector_host.h"
 #include "workbench/layer_sections.h"
+#include "workbench/shutdown_policy.h"
 #include "workbench/selection_context.h"
 #include "workbench/workbench_host.h"
 #include "georeferencer/qgsgeoref_shell_window.h"
@@ -31,7 +32,11 @@
 #include <QDockWidget>
 #include <QMenuBar>
 #include <QMenu>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QStackedWidget>
+
+#include "processing/framework/task_center.h"
 
 namespace
 {
@@ -289,4 +294,70 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     m_inspectorDock->setWidget( m_inspectorHost );
     addDockWidget( Qt::RightDockWidgetArea, m_inspectorDock );
     m_inspectorDock->hide(); // available on demand — no more permanent chrome
+}
+
+bool QgisDesktopWindow::confirmWorkbenchShutdown( const QString &actionTitle )
+{
+    // Non-terminal TaskCenter tasks: every surface (GUI, agent, workflow,
+    // CLI-enqueued) converges here, so the count is the truthful "work in
+    // progress" projection (goal §A: no silent drop).
+    int runningTaskCount = 0;
+    QList<long> cancellableTaskIds;
+    const QList<sicnu::AlgorithmTaskInfo> tasks = sicnu::TaskCenter::instance().allTasks();
+    for ( const sicnu::AlgorithmTaskInfo &task : tasks )
+    {
+        switch ( task.status )
+        {
+            case sicnu::TaskStatus::Queued:
+            case sicnu::TaskStatus::Running:
+            case sicnu::TaskStatus::Paused:
+            case sicnu::TaskStatus::WaitingResource:
+            case sicnu::TaskStatus::Dispatching:
+                ++runningTaskCount;
+                cancellableTaskIds.append( task.taskId );
+                break;
+            case sicnu::TaskStatus::Completed:
+            case sicnu::TaskStatus::Failed:
+            case sicnu::TaskStatus::Canceled:
+                break;
+        }
+    }
+
+    const sicnu::app::ShutdownPlan plan = sicnu::app::planWorkbenchShutdown(
+        sicnu::app::collectWorkbenchShutdownFacts( m_workbenchHost ), runningTaskCount );
+    if ( plan.isEmpty() )
+        return true;
+
+    // Stage 1 — in-flight work: the user either cancels it explicitly through
+    // the benches'/TaskCenter's own cancel seams, or aborts the operation.
+    if ( !plan.inFlightBenches.isEmpty() || plan.runningTaskCount > 0 )
+    {
+        QString text = tr( "以下工作仍有未完成的任务，%1 会中断它们：\n" ).arg( actionTitle );
+        for ( const QString &bench : plan.inFlightBenches )
+            text += QStringLiteral( "• 工作区「%1」正在运行任务\n" ).arg( bench );
+        if ( plan.runningTaskCount > 0 )
+            text += tr( "• 任务中心还有 %1 个未完成任务（含排队/等待资源）\n" ).arg( plan.runningTaskCount );
+        text += tr( "\n是否取消这些任务并继续？" );
+
+        QMessageBox box( QMessageBox::Warning, actionTitle, text, QMessageBox::NoButton, this );
+        QPushButton *cancelAndContinue =
+            box.addButton( tr( "取消任务并继续" ), QMessageBox::AcceptRole );
+        QPushButton *stay = box.addButton( tr( "留在当前操作" ), QMessageBox::RejectRole );
+        box.setDefaultButton( stay );
+        box.exec();
+        if ( box.clickedButton() != cancelAndContinue )
+            return false;
+
+        // Bounded, cooperative cancel — never waits for terminal state.
+        sicnu::app::cancelInFlightBenches( m_workbenchHost );
+        for ( long taskId : cancellableTaskIds )
+            sicnu::TaskCenter::instance().cancelTask( taskId );
+    }
+
+    // Stage 2 — dirty benches: each one runs its own save/discard
+    // confirmation via requestClose(); a refusal aborts the operation.
+    if ( !plan.dirtyBenches.isEmpty() && !sicnu::app::requestCloseDirtyBenches( m_workbenchHost ) )
+        return false;
+
+    return true;
 }

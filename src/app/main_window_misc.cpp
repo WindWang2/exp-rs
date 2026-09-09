@@ -454,6 +454,14 @@ void QgisDesktopWindow::savePanelState()
 
 void QgisDesktopWindow::closeEvent( QCloseEvent *event )
 {
+    // Workbench 7.0 (goal §A): benches and TaskCenter jobs are consulted
+    // BEFORE the project-level save prompt so running compute is never
+    // silently dropped by quit.
+    if (!confirmWorkbenchShutdown(tr("退出应用")))
+    {
+        event->ignore();
+        return;
+    }
     if (!checkUnsavedChanges())
     {
         event->ignore();

@@ -536,6 +536,26 @@ target_compile_definitions(test_workbench_host PRIVATE
 )
 sicnu_discover_tests(test_workbench_host)
 
+# ── Workbench 7.0 contracts (shutdown/switch policy over bench lifecycles) ──
+add_executable(test_workbench_shutdown_policy
+  test_workbench_shutdown_policy.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/shutdown_policy.cpp
+)
+target_link_libraries(test_workbench_shutdown_policy PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_workbench_shutdown_policy PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_workbench_shutdown_policy)
+
 add_executable(test_selection_context
   test_selection_context.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp

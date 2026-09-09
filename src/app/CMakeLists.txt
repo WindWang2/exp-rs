@@ -126,6 +126,7 @@ add_executable(sicnu_geo_rs
     workbench/command_palette.cpp
     workbench/inspector_host.cpp
     workbench/layer_sections.cpp
+    workbench/shutdown_policy.cpp
     main_window_workbench.cpp
     workflow/pipeline_port_item.cpp
     workflow/pipeline_connection_item.cpp

@@ -366,6 +366,14 @@ private:
 
     bool confirmSaveEdits(QgsVectorLayer *vl);
     bool checkUnsavedChanges();
+    /**
+     * Workbench 7.0 (goal §A): confirm quitting / switching projects while
+     * any registered bench is dirty or has in-flight compute, and while
+     * TaskCenter still tracks non-terminal tasks. Cancellation routes through
+     * each bench's requestCancel() and TaskCenter::cancelTask — nothing is
+     * silently dropped. Returns false when the user aborts the operation.
+     */
+    bool confirmWorkbenchShutdown(const QString &actionTitle);
     /** Acquire the exclusive Edit Lease for an Asset-backed vector layer. */
     bool acquireEditLease(QgsVectorLayer *vlayer, bool showConflictWarning = true);
     /** Commit the Edit Lease (advances Asset Revision, refreshes other layers). */
