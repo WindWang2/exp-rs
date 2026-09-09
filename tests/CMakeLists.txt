@@ -225,6 +225,9 @@ endif()
 # streaming / driver-gated GeoParquet).
 sicnu_add_io_test(test_io_vector_interop)
 
+# 7.0 generalized grid classification & placement (rotated/flipped/GCP/RPC).
+sicnu_add_io_test(test_io_grid_descriptor)
+
 # io:* operator family suite — rides the operator chain (Qt + sicnu_operators).
 sicnu_add_io_test(test_io_operators)
 target_link_libraries(test_io_operators PRIVATE Qt6::Core sicnu_operators)
