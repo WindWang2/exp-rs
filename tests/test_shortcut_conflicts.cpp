@@ -106,3 +106,54 @@ TEST_CASE( "Shortcuts: no duplicate key sequences in the shell action host",
     // exactly what this test pins down.
     REQUIRE( conflicts.isEmpty() );
 }
+
+// ── Workbench 6.0 Milestone D: conflict scans cover every command source
+// (#795) — the hidden menu host is no longer the only place shortcuts are
+// declared; the registry definitions and the workbench/ribbon wiring each
+// own bindings too. Each source must be internally duplicate-free; the
+// registry itself enforces cross-command uniqueness at registration
+// (test_command_registry pins that primitive).
+TEST_CASE( "Shortcuts: no duplicate key sequences in any command source",
+           "[ux6][shortcuts][a11y]" )
+{
+    static const QStringList commandSources = {
+        QStringLiteral( "src/app/main_window_menus.cpp" ),
+        QStringLiteral( "src/app/workbench/command_defs.cpp" ),
+        QStringLiteral( "src/app/main_window_workbench.cpp" ),
+        QStringLiteral( "src/app/shell/ribbon_controller.cpp" ),
+        QStringLiteral( "src/app/layer_tree_menu.cpp" ),
+    };
+
+    for ( const QString &relative : commandSources )
+    {
+        const QString source = readSource( relative );
+        REQUIRE_FALSE( source.isEmpty() );
+
+        const QVector<SequenceUse> uses = collectSequenceUses( source );
+
+        static const QSet<int> whitelistedLines = {};
+        QMap<QString, int> firstUse;
+        QStringList conflicts;
+        for ( const SequenceUse &use : uses )
+        {
+            if ( whitelistedLines.contains( use.line ) )
+                continue;
+            if ( firstUse.contains( use.sequence ) )
+            {
+                conflicts << QStringLiteral( "%1: %2 claimed at lines %3 and %4" )
+                                 .arg( relative )
+                                 .arg( use.sequence )
+                                 .arg( firstUse.value( use.sequence ) )
+                                 .arg( use.line );
+            }
+            else
+            {
+                firstUse.insert( use.sequence, use.line );
+            }
+        }
+
+        INFO( conflicts.join( QStringLiteral( "; " ) ).toStdString() );
+        CAPTURE( relative.toStdString() );
+        REQUIRE( conflicts.isEmpty() );
+    }
+}
