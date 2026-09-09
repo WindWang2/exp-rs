@@ -54,7 +54,7 @@ OGRSpatialReferenceH importAndValidate( OGRSpatialReferenceH handle, ErrorCode f
         details["gdal_error"] = error;
       return details;
     }() );
-  if ( static_cast< OGRSpatialReference * >( handle )->IsEmpty() )
+  if ( reinterpret_cast< OGRSpatialReference * >( handle )->IsEmpty() )
   {
     OSRDestroySpatialReference( handle );
     Json::Value details;
@@ -219,7 +219,7 @@ Crs Crs::fromDatasetInfo( const CrsInfo &info )
   return fromAuthid( info.authid );
 }
 
-bool Crs::isValid() const { return mHandle && !static_cast< OGRSpatialReference * >( mHandle )->IsEmpty(); }
+bool Crs::isValid() const { return mHandle && !reinterpret_cast< OGRSpatialReference * >( mHandle )->IsEmpty(); }
 
 std::string Crs::wkt() const
 {

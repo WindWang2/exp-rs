@@ -106,7 +106,7 @@ CrsInfo readCrsInfo( OGRSpatialReferenceH srs )
   CrsInfo info;
   if ( !srs )
     return info;
-  info.valid = !static_cast< OGRSpatialReference * >( srs )->IsEmpty();
+  info.valid = !reinterpret_cast< OGRSpatialReference * >( srs )->IsEmpty();
   if ( !info.valid )
     return info;
 
