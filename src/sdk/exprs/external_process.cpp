@@ -617,11 +617,7 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     return result;
 }
 
-} // namespace exprs
-
 #else // POSIX ==============================================================
-
-namespace exprs {
 
 namespace {
 
@@ -1086,6 +1082,6 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     return result;
 }
 
-} // namespace exprs
-
 #endif // !_WIN32
+
+} // namespace exprs
