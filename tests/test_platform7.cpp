@@ -10,7 +10,11 @@
 #include <json/json.h>
 
 #include "agent/cartography/composition.h"
+#include "agent/cartography/registry.h"
 #include "agent/mapspec/mapspec.h"
+
+#include <QDir>
+#include <QFile>
 
 #include <cmath>
 #include <string>
@@ -86,7 +90,236 @@ std::string rejectionReason( const Json::Value &composition, const std::string &
   return std::string();
 }
 
+void writeJsonFile( const QString &path, const Json::Value &doc )
+{
+  QFile file( path );
+  REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+  file.write( Json::writeString( Json::StreamWriterBuilder(), doc ).c_str() );
+  file.close();
+}
+
 } // namespace
+
+TEST_CASE( "P7 templates: multi-parent extends with per-key merge policy",
+           "[platform7][templates]" )
+{
+  TemplateRegistry &registry = TemplateRegistry::instance();
+  const QString tempDir = QDir::temp().filePath( QStringLiteral( "sicnu-p7-templates" ) );
+  QDir().mkpath( tempDir );
+
+  // base: foundation layout with two slots and a print variant.
+  Json::Value base( Json::objectValue );
+  base["id"] = "p7-base";
+  base["description"] = "base description";
+  Json::Value baseSlots( Json::arrayValue );
+  {
+    Json::Value slot( Json::objectValue );
+    slot["role"] = "map.main";
+    Json::Value rect( Json::arrayValue );
+    rect.append( 10.0 );
+    rect.append( 10.0 );
+    rect.append( 200.0 );
+    rect.append( 150.0 );
+    slot["rect_mm"] = rect;
+    baseSlots.append( slot );
+  }
+  {
+    Json::Value slot( Json::objectValue );
+    slot["role"] = "legend.primary";
+    Json::Value rect( Json::arrayValue );
+    rect.append( 220.0 );
+    rect.append( 10.0 );
+    rect.append( 60.0 );
+    rect.append( 100.0 );
+    slot["rect_mm"] = rect;
+    baseSlots.append( slot );
+  }
+  base["slots"] = baseSlots;
+  base["facets"]["tasks"] = Json::Value( Json::arrayValue );
+  base["facets"]["tasks"].append( "terrain" );
+  base["facets"]["medium"] = "a4";
+  base["facets"]["purpose"] = "analysis";
+  Json::Value baseVariants( Json::arrayValue );
+  {
+    Json::Value variant( Json::objectValue );
+    variant["id"] = "print";
+    variant["description"] = "base print variant";
+    variant["page"]["width_mm"] = 297.0;
+    variant["page"]["height_mm"] = 210.0;
+    baseVariants.append( variant );
+  }
+  base["variants"] = baseVariants;
+  writeJsonFile( tempDir + "/p7-base.json", base );
+
+  // domain: overrides the legend slot, adds a task + a recommended component.
+  Json::Value domain( Json::objectValue );
+  domain["id"] = "p7-domain";
+  domain["extends"] = "p7-base";
+  Json::Value domainSlots( Json::arrayValue );
+  {
+    Json::Value slot( Json::objectValue );
+    slot["role"] = "legend.primary";
+    Json::Value rect( Json::arrayValue );
+    rect.append( 220.0 );
+    rect.append( 10.0 );
+    rect.append( 80.0 );
+    rect.append( 120.0 );
+    slot["rect_mm"] = rect;
+    domainSlots.append( slot );
+  }
+  domain["slots"] = domainSlots;
+  domain["facets"]["tasks"] = Json::Value( Json::arrayValue );
+  domain["facets"]["tasks"].append( "water" );
+  domain["recommended_components"] = Json::Value( Json::arrayValue );
+  domain["recommended_components"].append( "north.arrow.basic" );
+  writeJsonFile( tempDir + "/p7-domain.json", domain );
+
+  // child: multi-parent [base, domain] + its own overrides.
+  Json::Value child( Json::objectValue );
+  child["id"] = "p7-medium";
+  child["description"] = "child description";
+  Json::Value parents( Json::arrayValue );
+  parents.append( "p7-base" );
+  parents.append( "p7-domain" );
+  child["extends"] = parents;
+  child["facets"]["medium"] = "a3";
+  Json::Value childVariants( Json::arrayValue );
+  {
+    Json::Value variant( Json::objectValue );
+    variant["id"] = "screen";
+    variant["description"] = "child variant";
+    childVariants.append( variant );
+  }
+  child["variants"] = childVariants;
+  writeJsonFile( tempDir + "/p7-medium.json", child );
+
+  registry.setDirectory( tempDir );
+  registry.reload();
+  if ( !registry.loadProblems().isEmpty() )
+    FAIL( registry.loadProblems().join( "; " ).toStdString() );
+
+  const Json::Value resolved = registry.find( QLatin1String( "p7-medium" ) );
+  REQUIRE_FALSE( resolved.isNull() );
+  // Child description wins; multi-parent stamps the array form.
+  REQUIRE( resolved["description"].asString() == "child description" );
+  REQUIRE( resolved["extends"].isArray() );
+  REQUIRE( resolved["extends"].size() == 2 );
+  // Slots: map.main inherited from base; legend.primary overridden by the
+  // domain layer (later parent wins over base; child declared nothing).
+  bool sawMapSlot = false;
+  for ( const auto &slot : resolved["slots"] )
+  {
+    if ( slot["role"].asString() == "map.main" )
+      sawMapSlot = true;
+    if ( slot["role"].asString() == "legend.primary" )
+      REQUIRE( slot["rect_mm"][2].asDouble() == Catch::Approx( 80.0 ) );
+  }
+  REQUIRE( sawMapSlot );
+  // Facets merge: tasks UNION (terrain + water), medium from the child
+  // override, purpose inherited from base.
+  REQUIRE( resolved["facets"]["tasks"].size() == 2 );
+  REQUIRE( resolved["facets"]["tasks"][0].asString() == "terrain" );
+  REQUIRE( resolved["facets"]["tasks"][1].asString() == "water" );
+  REQUIRE( resolved["facets"]["medium"].asString() == "a3" );
+  REQUIRE( resolved["facets"]["purpose"].asString() == "analysis" );
+  // Variants merge by id: print (inherited from base) + screen (child).
+  REQUIRE( resolved["variants"].size() == 2 );
+  // Provenance explains where each top-level field came from.
+  REQUIRE( resolved["inheritance"]["parents"].size() == 2 );
+  REQUIRE( resolved["inheritance"]["sources"]["description"][0].asString() == "p7-medium" );
+  REQUIRE( resolved["inheritance"]["sources"]["facets"].size() >= 2 );
+  REQUIRE( resolved["inheritance"]["sources"]["slots"].size() >= 2 );
+
+  registry.setDirectory( QStringLiteral( SICNU_CARTOGRAPHY_DATA_DIR ) );
+  registry.reload();
+  REQUIRE( registry.loadProblems().isEmpty() );
+}
+
+TEST_CASE( "P7 templates: inheritance cycles are diagnosed explicitly",
+           "[platform7][templates]" )
+{
+  TemplateRegistry &registry = TemplateRegistry::instance();
+  const QString tempDir = QDir::temp().filePath( QStringLiteral( "sicnu-p7-cycle" ) );
+  QDir().mkpath( tempDir );
+  Json::Value a( Json::objectValue );
+  a["id"] = "p7-cyc-a";
+  a["extends"] = "p7-cyc-b";
+  Json::Value b( Json::objectValue );
+  b["id"] = "p7-cyc-b";
+  Json::Value parents( Json::arrayValue );
+  parents.append( "p7-cyc-a" );
+  b["extends"] = parents;
+  writeJsonFile( tempDir + "/p7-cyc-a.json", a );
+  writeJsonFile( tempDir + "/p7-cyc-b.json", b );
+
+  registry.setDirectory( tempDir );
+  registry.reload();
+  REQUIRE_FALSE( registry.loadProblems().isEmpty() );
+  bool sawCycle = false;
+  for ( const QString &problem : registry.loadProblems() )
+    sawCycle = sawCycle || problem.contains( QLatin1String( "extends cycle" ) );
+  REQUIRE( sawCycle );
+  REQUIRE( registry.find( QLatin1String( "p7-cyc-a" ) ).isNull() );
+
+  registry.setDirectory( QStringLiteral( SICNU_CARTOGRAPHY_DATA_DIR ) );
+  registry.reload();
+  REQUIRE( registry.loadProblems().isEmpty() );
+}
+
+TEST_CASE( "P7 templates: extends shape validation rejects malformed chains",
+           "[platform7][templates][validation]" )
+{
+  TemplateRegistry &registry = TemplateRegistry::instance();
+  const QString tempDir = QDir::temp().filePath( QStringLiteral( "sicnu-p7-shape" ) );
+  QDir().mkpath( tempDir );
+  Json::Value selfExt( Json::objectValue );
+  selfExt["id"] = "p7-self";
+  selfExt["extends"] = "p7-self";
+  writeJsonFile( tempDir + "/p7-self.json", selfExt );
+  Json::Value badType( Json::objectValue );
+  badType["id"] = "p7-badtype";
+  Json::Value badParents( Json::arrayValue );
+  badParents.append( 42 );
+  badType["extends"] = badParents;
+  writeJsonFile( tempDir + "/p7-badtype.json", badType );
+
+  registry.setDirectory( tempDir );
+  registry.reload();
+  REQUIRE_FALSE( registry.loadProblems().isEmpty() );
+  bool sawSelf = false;
+  bool sawShape = false;
+  for ( const QString &problem : registry.loadProblems() )
+  {
+    sawSelf = sawSelf || problem.contains( QLatin1String( "extends itself" ) );
+    sawShape = sawShape || problem.contains( QLatin1String( "non-empty strings" ) );
+  }
+  REQUIRE( sawSelf );
+  REQUIRE( sawShape );
+
+  registry.setDirectory( QStringLiteral( SICNU_CARTOGRAPHY_DATA_DIR ) );
+  registry.reload();
+  REQUIRE( registry.loadProblems().isEmpty() );
+}
+
+TEST_CASE( "P7 templates: shipped catalog still resolves (single-parent legacy)",
+           "[platform7][templates][compat]" )
+{
+  TemplateRegistry &registry = TemplateRegistry::instance();
+  registry.setDirectory( QStringLiteral( SICNU_CARTOGRAPHY_DATA_DIR ) );
+  registry.reload();
+  REQUIRE( registry.loadProblems().isEmpty() );
+  // sar-backscatter-a3l extends sar-backscatter-a4l: facets now MERGE (the
+  // 6.0 wholesale-replace P3), so the parent tasks carry over and the child
+  // medium wins.
+  const Json::Value resolved = registry.find( QLatin1String( "sar-backscatter-a3l" ) );
+  REQUIRE_FALSE( resolved.isNull() );
+  REQUIRE( resolved["extends"].isString() );
+  REQUIRE( resolved["extends"].asString() == "sar-backscatter-a4l" );
+  REQUIRE( resolved["facets"]["medium"].asString() == "a3" );
+  REQUIRE( resolved["facets"]["tasks"].isArray() );
+  REQUIRE_FALSE( resolved["facets"]["tasks"].empty() );
+  REQUIRE( resolved["inheritance"]["parents"].size() == 1 );
+}
 
 TEST_CASE( "P7 solver: soft failure downgrades the objective, never convergence",
            "[platform7][solver]" )
