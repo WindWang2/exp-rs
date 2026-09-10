@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:sar_geocode",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "sar",
+    "geocoding",
+    "orthorectification",
+    "rtc"
+  ],
+  "task" : "sar-geometry"
+}

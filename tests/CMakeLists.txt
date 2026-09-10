@@ -1143,6 +1143,82 @@ target_include_directories(test_sar_orbit PRIVATE
 )
 sicnu_discover_tests(test_sar_orbit)
 
+# Spectral formula drift guard (Scientific Processing 8.0): operator vs
+# independent documented formulas, schema-enum coverage, NaN contracts.
+add_executable(test_spectral_formula_drift test_spectral_formula_drift.cpp)
+target_link_libraries(test_spectral_formula_drift PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_formula_drift)
+target_include_directories(test_spectral_formula_drift PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_formula_drift)
+
+# Raster-vector analytics (Scientific Processing 8.0): rs:rasterize +
+# rs:zonal_stats over GeoJSON fixtures, analytic expectations.
+add_executable(test_raster_vector test_raster_vector.cpp)
+target_link_libraries(test_raster_vector PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_raster_vector)
+target_include_directories(test_raster_vector PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_raster_vector)
+
+# SAR temporal statistics (Scientific Processing 8.0): linear-domain
+# aggregates, robust log-change, operator E2E.
+add_executable(test_sar_temporal_stats test_sar_temporal_stats.cpp)
+target_link_libraries(test_sar_temporal_stats PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_sar_temporal_stats)
+target_include_directories(test_sar_temporal_stats PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_temporal_stats)
+
+# SAR forward geocoding (Scientific Processing 8.0): scene-contract parser,
+# per-cell forward range-Doppler geometry, operator E2E on analytic fixtures.
+add_executable(test_sar_geocoding test_sar_geocoding.cpp)
+target_link_libraries(test_sar_geocoding PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_sar_geocoding)
+target_include_directories(test_sar_geocoding PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_geocoding)
+
 add_executable(test_sar_foundation5 test_sar_foundation5.cpp)
 target_link_libraries(test_sar_foundation5 PRIVATE
   Catch2::Catch2WithMain

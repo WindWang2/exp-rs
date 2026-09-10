@@ -28,6 +28,8 @@ add_library(sicnu_processing SHARED
     algorithms/sar/sar_dualpol.cpp
     algorithms/sar/sar_terrain_geometry.cpp
     algorithms/sar/sar_orbit.cpp
+    algorithms/sar/sar_geocoding.cpp
+    algorithms/sar/sar_temporal.cpp
     algorithms/temporal/temporal_monitoring.cpp
     algorithms/terrain_flow.cpp
 
