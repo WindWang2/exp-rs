@@ -16,6 +16,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/runtime/detection_postprocess.h"
 #include "operators/runtime/model_execution_service.h"
+#include "runtime/observability/fault_registry.h"
 #include "operators/runtime/model_runtime.h"
 #include "operators/runtime/tile_inference_engine.h"
 #include "synthetic_raster_builder.h"
@@ -733,4 +734,74 @@ TEST_CASE( "validateManifestJson reports issues without registering", "[models][
   // Nothing was registered by validation.
   CHECK( catalog.models().size() == before );
   CHECK( catalog.find( "good-manifest" ) == std::nullopt );
+}
+
+// ---------------------------------------------------------------------------
+// Verification Platform 8.0: acquire-boundary fault injection (task E)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "an acquire fault at the model provider boundary fails truthfully "
+           "and never touches the provider",
+           "[models][failure][fault8]" )
+{
+  RegistryReset reset;
+  ScriptedProviderGuard guard;
+
+  QTemporaryDir dir;
+  // Artifact placeholder: the scripted provider never runs while the fault
+  // is armed; after disarming it serves the identity pass-through.
+  const QString artifact = dir.filePath( QStringLiteral( "scripted.bin" ) );
+  {
+    QFile f( artifact );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( QByteArray( "scriptfw fixture artifact" ) );
+  }
+  const QString input = writeRaster( dir, QStringLiteral( "acq-in.tif" ), 32, 32 );
+  const QString output = dir.filePath( QStringLiteral( "acq-out.tif" ) );
+
+  auto &catalog = ModelCatalog::instance();
+  std::string manifestJson = R"({
+      "name": "fault8-acquire-model",
+      "task": "segmentation",
+      "framework": "scriptfw",
+      "artifact": { "path": "WEIGHTS" },
+      "output": { "type": "raster", "tensor_names": ["a"], "classes": ["a", "b"] },
+      "tiling": { "tile_size": 32 }
+  })";
+  const std::size_t placeholder = manifestJson.find( "WEIGHTS" );
+  REQUIRE( placeholder != std::string::npos );
+  manifestJson.replace( placeholder, 7, artifact.toStdString() );
+  const int before = static_cast<int>( catalog.models().size() );
+  REQUIRE( catalog.registerManifestJson(
+    manifestJson, QStringLiteral( "%1/model.json" ).arg( dir.path() ).toStdString() ) );
+  REQUIRE( catalog.models().size() == before + 1 );
+
+  RSOperatorContext context;
+  ModelExecutionRequest request;
+  request.inputPath = input.toStdString();
+  request.modelReference = "fault8-acquire-model";
+  request.outputPath = output.toStdString();
+
+  {
+    // Armed: the real session-acquire failure path fires before any provider
+    // work; the typed error carries the injected diagnostic.
+    sicnu::runtime::observability::fault::ArmedFault fault(
+      { "model_provider.acquire", sicnu::runtime::observability::fault::Mode::NextN, 1, "" } );
+    REQUIRE_THROWS_WITH( runModelInference( request, context ),
+                         Catch::Matchers::ContainsSubstring( "fault-injected acquire failure" ) );
+    CHECK( guard.script->forwards.load() == 0 );
+    CHECK_FALSE( fileExists( output ) );
+    CHECK_FALSE( fileExists( tmpResidue( output ) ) );
+  }
+
+  // Disarmed (ArmedFault RAII): the same request succeeds through the normal
+  // path — the fault left no residue in the registry, pool or output tree.
+  const sicnu::operators::runtime::ModelExecutionResult result =
+    runModelInference( request, context );
+  CHECK( result.rasterStats.tilesProcessed == 1 );
+  CHECK( fileExists( output ) );
+
+  // Leave no trace in the shared catalog for later tests.
+  CHECK( catalog.unregister( "fault8-acquire-model" ) );
+  CHECK( catalog.models().size() == before );
 }

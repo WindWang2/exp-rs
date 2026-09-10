@@ -14,6 +14,7 @@
 #include "placeholder_grammar.h"
 #include "processing/framework/task_center.h"
 #include "data/artifact_store.h"
+#include "runtime/observability/trace.h"
 
 namespace sicnu::workflow {
 
@@ -193,6 +194,45 @@ void WorkflowRunCoordinator::notifyRunStateLocked( const WorkflowRun &run,
                           QString::fromStdString( run.workflowId() ),
                           QString::fromStdString( workflowRunStateToString( run.state() ) ),
                           effectiveStart, finishedMs );
+
+    // Unified-trace adapter (Verification Platform 8.0): the Workflow link of
+    // the chain — the run-state broadcast also emits one exp.trace.v1 record,
+    // reusing the SAME effectiveStart the signal carries. Disabled path = one
+    // relaxed atomic load; the callers hold m_mutex either way, so the
+    // enabled path adds only the same bounded push JobEngine's adapter does.
+    if ( sicnu::runtime::observability::trace::Trace::enabled() )
+    {
+        sicnu::runtime::observability::trace::TraceEvent trace;
+        trace.run = run.runId();
+        trace.event = "run_state";
+        trace.detail = run.workflowId();
+        switch ( run.state() )
+        {
+        case WorkflowRunState::Completed:
+            trace.status = "ok";
+            break;
+        case WorkflowRunState::Failed:
+            trace.status = "error";
+            break;
+        case WorkflowRunState::Canceled:
+            trace.status = "cancelled";
+            break;
+        case WorkflowRunState::Cancelling:
+            // In-flight cancellation attempt; distinct from final Canceled.
+            trace.status = "cancelling";
+            break;
+        case WorkflowRunState::Interrupted:
+            // Terminal recovery state (crash/shutdown): its own verdict so
+            // consumers never read it as ok/error/cancelled.
+            trace.status = "interrupted";
+            break;
+        default:
+            break;
+        }
+        if ( finishedMs > 0 && effectiveStart > 0 )
+            trace.durationUs = ( finishedMs - effectiveStart ) * 1000;
+        sicnu::runtime::observability::trace::Trace::publish( trace );
+    }
 }
 
 void WorkflowRunCoordinator::persistRunLocked( WorkflowRun &run )

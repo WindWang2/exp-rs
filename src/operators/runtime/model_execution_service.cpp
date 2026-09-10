@@ -1,6 +1,8 @@
 // src/operators/runtime/model_execution_service.cpp
 #include "operators/runtime/model_execution_service.h"
 
+#include "runtime/observability/fault_point.h"
+
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/runtime/detection_tile_engine.h"
@@ -185,6 +187,14 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
   }
 
   context.reportProgress( 0.05, "Acquiring model runtime session" );
+  if ( SICNU_FAULT_POINT( "model_provider.acquire" ) )
+  {
+    // Injected provider failure (Verification Platform 8.0 fault matrix,
+    // test-only arming): exactly the real session-load failure path — typed
+    // error, no session fabricated, pool state untouched.
+    throw RSOperatorError( ErrorCode::ComputationError,
+                           "Failed to load model session: fault-injected acquire failure" );
+  }
   std::string loadError;
   const auto session = request.deviceToken.empty()
                          ? registry.acquire( model, &loadError )
