@@ -25,6 +25,8 @@
 
 #include "exprs/plugin_registry.h"
 
+#include "plugins/host/plugin_host_process_runtime.h"
+
 #include <map>
 #include <memory>
 #include <mutex>
