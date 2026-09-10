@@ -1879,6 +1879,12 @@ set_property(TARGET test_platform7_library PROPERTY RUN_SERIAL TRUE)
 sicnu_add_test(test_mlops8_bridge TIMEOUT 300)
 target_link_libraries(test_mlops8_bridge PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 
+# Platform 8.0 scale probe: reconcile/scan boundedness at 20k stored runs
+# (RUN_SERIAL: it pays 20k single-row transactions by design).
+sicnu_add_test(test_mlops8_scale TIMEOUT 900)
+target_link_libraries(test_mlops8_scale PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+set_property(TARGET test_mlops8_scale PROPERTY RUN_SERIAL TRUE)
+
 # Platform 8.0 MLOps E2E: real tracked pipelines auto-recorded into the
 # ExperimentStore through the workflow→experiment adapter.
 add_executable(test_mlops8_e2e test_mlops8_e2e.cpp)
