@@ -1,0 +1,228 @@
+{
+  "cases": [
+    {
+      "foreach": {
+        "var": "INDEX",
+        "values": [
+          "ndvi",
+          "evi",
+          "savi",
+          "ndre",
+          "ndwi",
+          "mndwi",
+          "ndsi",
+          "nbr",
+          "dnbr",
+          "ndbi",
+          "bsi"
+        ]
+      },
+      "case_id": "invalid-science/$INDEX-missing-nir-blocked",
+      "category": "invalid_science",
+      "description": "$INDEX preflight on a scene without its required roles is blocked",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "blue"
+        ],
+        "nodata": -9999.0,
+        "metadata": {
+          "SICNU_RADIOMETRIC_STATE": "surface_reflectance"
+        }
+      },
+      "steps": [
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "$INDEX",
+            "inputs": [
+              {
+                "name": "primary",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "blocked"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "invalid-science/ndvi-on-sar-blocked",
+      "category": "invalid_science",
+      "description": "NDVI on a SAR scene is a modality blocker",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "vv"
+        ],
+        "nodata": -9999.0,
+        "metadata": {
+          "SICNU_PRODUCT_TYPE": "SENTINEL-1"
+        }
+      },
+      "steps": [
+        {
+          "tool": "spatial:understand",
+          "input": {
+            "asset": "$fixture"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "dataset_understanding.modality",
+                "equals": "sar"
+              }
+            ]
+          }
+        },
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "ndvi",
+            "inputs": [
+              {
+                "name": "primary",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "blocked"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "invalid-science/resolve-intent-feasibility-modality-blocked",
+      "category": "invalid_science",
+      "description": "Feasibility on a SAR understanding blocks optical candidates with a typed code",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "vv"
+        ],
+        "nodata": -9999.0,
+        "metadata": {
+          "SICNU_PRODUCT_TYPE": "SENTINEL-1"
+        }
+      },
+      "steps": [
+        {
+          "tool": "harness:resolve_intent",
+          "input": {
+            "goal": "compute ndvi",
+            "understanding": "$fixture"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "status",
+                "equals": "resolved"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "invalid-science/dn-radiometry-warns-not-blocks",
+      "category": "invalid_science",
+      "description": "DN-scale radiometry on an index intent degrades to a warning, never a fake pass",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0,
+        "metadata": {
+          "SICNU_RADIOMETRIC_STATE": "dn"
+        }
+      },
+      "steps": [
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "ndvi",
+            "inputs": [
+              {
+                "name": "primary",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "ok"
+              },
+              {
+                "path": "preflight",
+                "contains": "raw DN"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "invalid-science/unknown-intent-refused",
+      "category": "invalid_science",
+      "description": "An intent outside the closed vocabulary is refused, not guessed",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0
+      },
+      "steps": [
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "teleportation",
+            "inputs": [
+              {
+                "name": "primary",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": false,
+            "error_code": "INVALID_PARAMETER"
+          }
+        }
+      ]
+    }
+  ]
+}

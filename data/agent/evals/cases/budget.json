@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "case_id": "budget/tool-manifest-page-bounded",
+      "category": "budget",
+      "description": "The tool manifest catalog answers within its 64 KiB page budget",
+      "steps": [
+        {"tool": "harness:tool_manifest", "input": {},
+         "expect": {"success": true, "response_bytes_le": 65536}}
+      ]
+    },
+    {
+      "case_id": "budget/error-catalog-bounded",
+      "category": "budget",
+      "description": "The stable error catalog answers within its 8 KiB budget",
+      "steps": [
+        {"tool": "harness:error_codes", "input": {},
+         "expect": {"success": true, "response_bytes_le": 8192}}
+      ]
+    },
+    {
+      "case_id": "budget/context-bounded",
+      "category": "budget",
+      "description": "Typed context stays within the 512 KiB registry cap",
+      "steps": [
+        {"tool": "harness:context", "input": {},
+         "expect": {"success": true, "response_bytes_le": 524288}}
+      ]
+    },
+    {
+      "case_id": "budget/resolve-intent-bounded",
+      "category": "budget",
+      "description": "Intent resolution with feasibility stays within the registry cap",
+      "steps": [
+        {"tool": "harness:resolve_intent", "input": {"goal": "flood mapping with sentinel-1 and ndwi"},
+         "expect": {"success": true, "response_bytes_le": 524288}}
+      ]
+    }
+  ]
+}

@@ -54,6 +54,27 @@ Json::Value evaluateFeasibility( const Json::Value &capabilityEntry,
 Json::Value capabilityCandidates( const std::string &intent,
                                   const Json::Value &understanding );
 
+/// Harness 8.0 (Area C): the typed facts whose absence kept feasibility from
+/// being fully decided for `intent` — derived deterministically from the
+/// serving capabilities' demands vs the slots actually present in the
+/// understanding document. [{fact, why_needed, how_to_obtain}], bounded to 8.
+Json::Value missingFactsForIntent( const std::string &intent,
+                                   const Json::Value &understanding );
+
+/// Harness 8.0 (Area C): deterministic, machine-actionable preparation
+/// suggestions for a capabilityCandidates candidate's why_not entries — a
+/// static code→action table (pinned by test), never prose reasoning. Shape:
+/// [{code, preparations:[{action, tool?, recipe?}]}]; codes with no safe
+/// preparation carry {"no_safe_preparation": true}.
+Json::Value preparationForWhyNot( const Json::Value &whyNot );
+
+/// Harness 8.0 (Area C): recipe-level solution paths serving `intent` —
+/// recipes whose declared intent matches or whose capability chain contains
+/// a serving operator. [{recipe_id, title, intent, step_count}], bounded to
+/// 8, deterministic order. Empty (with a note) when the catalog is
+/// unavailable in this process — never a guessed path.
+Json::Value solutionPathsForIntent( const std::string &intent );
+
 /// Registers the harness:resolve_intent tool on the SpatialToolRegistry
 /// (called once from the built-in tool registration).
 void registerCapabilityGraphTools();

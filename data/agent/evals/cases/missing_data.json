@@ -1,0 +1,194 @@
+{
+  "cases": [
+    {
+      "case_id": "missing/understand-unknown-asset-id",
+      "category": "missing_data",
+      "description": "Understanding an unknown asset id is a typed failure",
+      "steps": [
+        {
+          "tool": "spatial:understand",
+          "input": {
+            "asset": "asset-424242"
+          },
+          "expect": {
+            "success": false,
+            "error_code": "DATASET_NOT_FOUND"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "missing/understand-missing-path",
+      "category": "missing_data",
+      "description": "Understanding a nonexistent path is a typed failure",
+      "steps": [
+        {
+          "tool": "spatial:understand",
+          "input": {
+            "asset": "$tmp/ghost.tif"
+          },
+          "expect": {
+            "success": false,
+            "error_code": "DATASET_NOT_FOUND"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "missing/understand-empty-ref",
+      "category": "missing_data",
+      "description": "An empty reference is INVALID_PARAMETER, never a guess",
+      "steps": [
+        {
+          "tool": "spatial:understand",
+          "input": {
+            "asset": "   "
+          },
+          "expect": {
+            "success": false,
+            "error_code": "INVALID_PARAMETER"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "missing/preflight-unresolvable-slot",
+      "category": "missing_data",
+      "description": "Preflight with an unresolvable slot is blocked with DATASET_NOT_FOUND",
+      "steps": [
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "ndvi",
+            "inputs": [
+              {
+                "name": "primary",
+                "ref": "$tmp/missing.tif"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "blocked"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "missing/recipe-unknown-id",
+      "category": "missing_data",
+      "description": "Describing an unknown recipe fails typed",
+      "steps": [
+        {
+          "tool": "harness:describe_recipe",
+          "input": {
+            "recipe_id": "harness.does_not_exist"
+          },
+          "expect": {
+            "success": false,
+            "error_code": "TOOL_NOT_FOUND"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "missing/run-status-unknown-run",
+      "category": "missing_data",
+      "description": "Polling an unknown run id is WORKFLOW_NOT_FOUND",
+      "steps": [
+        {
+          "tool": "harness:run_status",
+          "input": {
+            "run_id": "run-does-not-exist"
+          },
+          "expect": {
+            "success": false,
+            "error_code": "WORKFLOW_NOT_FOUND"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "missing/explain-unknown-run",
+      "category": "missing_data",
+      "description": "Explaining an unknown run id is WORKFLOW_NOT_FOUND",
+      "steps": [
+        {
+          "tool": "harness:explain",
+          "input": {
+            "run_id": "run-does-not-exist"
+          },
+          "expect": {
+            "success": false,
+            "error_code": "WORKFLOW_NOT_FOUND"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "missing/instantiate-unknown-slot",
+      "category": "missing_data",
+      "description": "Instantiating a recipe with an unresolvable slot fails typed",
+      "steps": [
+        {
+          "tool": "harness:instantiate_recipe",
+          "input": {
+            "recipe_id": "harness.optical_ndvi",
+            "bindings": {
+              "slots": {
+                "primary": "$tmp/nope.tif"
+              }
+            }
+          },
+          "expect": {
+            "success": false,
+            "error_code": "DATASET_NOT_FOUND"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "missing/change-missing-second-epoch",
+      "category": "missing_data",
+      "description": "Change preflight with only one epoch is blocked (pair intent)",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0
+      },
+      "steps": [
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "change",
+            "inputs": [
+              {
+                "name": "before",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "blocked"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

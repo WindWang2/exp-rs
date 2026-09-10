@@ -8,6 +8,7 @@
 #include "entity_resolver.h"
 #include "grounding_tools.h"
 #include "harness_error.h"
+#include "recipe_catalog.h"
 #include "spatial_tools/spatial_tool.h"
 
 #include <algorithm>
@@ -386,6 +387,223 @@ Json::Value capabilityCandidates( const std::string &intent,
   return document;
 }
 
+// ---------------------------------------------------------------------------
+// Harness 8.0 (Area C): missing facts, preparation, and solution paths.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// True when the understanding document carries a usable slot value.
+bool hasSlot( const Json::Value &understanding, const char *slot )
+{
+  if ( understanding.isNull() || !understanding.isObject() )
+    return false;
+  if ( !understanding.isMember( slot ) )
+    return false;
+  const Json::Value &value = understanding[ slot ];
+  if ( value.isString() )
+    return !value.asString().empty();
+  if ( value.isArray() )
+    return !value.empty();
+  if ( value.isObject() )
+    return !value.empty();
+  return !value.isNull();
+}
+
+} // namespace
+
+Json::Value missingFactsForIntent( const std::string &intent,
+                                   const Json::Value &understanding )
+{
+  Json::Value document( Json::objectValue );
+  document["intent"] = intent;
+  document["missing_facts"] = Json::Value( Json::arrayValue );
+  if ( !isKnownIntent( intent ) )
+  {
+    document["error"] = HarnessError::make( error_codes::kInvalidParameter,
+                                            "Unknown intent: " + intent )
+                          .toJson();
+    return document;
+  }
+
+  CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+  // Deduped fact slots, in a fixed inspection order.
+  bool missingModality = false;
+  bool missingBandRoles = false;
+  bool missingRadiometry = false;
+  bool missingAcquisitionTime = false;
+  bool demandsAny = false;
+
+  for ( const std::string &operatorId : knowledge.operatorsForIntent( intent ) )
+  {
+    const Json::Value entry = knowledge.entryForOperator( operatorId );
+    if ( entry.get( "modality", Json::Value() ).isArray() &&
+         !entry["modality"].empty() && !hasSlot( understanding, "modality" ) )
+      missingModality = true;
+    if ( entry.get( "band_roles", Json::Value() ).isObject() &&
+         !entry["band_roles"].empty() && !hasSlot( understanding, "band_roles" ) )
+      missingBandRoles = true;
+    if ( entry.isMember( "radiometric" ) && !hasSlot( understanding, "radiometric_state" ) )
+      missingRadiometry = true;
+    const Json::Value &temporal = entry.get( "temporal", Json::Value() );
+    if ( temporal.isObject() &&
+         ( temporal.get( "min_scenes", 0 ).asInt() > 0 ||
+           temporal.get( "requires_acquisition_time", false ).asBool() ) &&
+         !hasSlot( understanding, "acquisition_time" ) &&
+         !hasSlot( understanding, "scene_dates" ) )
+      missingAcquisitionTime = true;
+    demandsAny = true;
+  }
+
+  if ( !demandsAny )
+    return document;
+
+  const auto append = [ & ]( const char *fact, const char *whyNeeded ) {
+    Json::Value entry( Json::objectValue );
+    entry["fact"] = fact;
+    entry["why_needed"] = whyNeeded;
+    entry["how_to_obtain"] = "spatial:understand {asset: <dataset ref>}";
+    document["missing_facts"].append( entry );
+  };
+  if ( missingModality )
+    append( "modality", "feasibility cannot distinguish optical/sar/dem demands" );
+  if ( missingBandRoles )
+    append( "band_roles", "band-role requirements cannot be checked against the scene" );
+  if ( missingRadiometry )
+    append( "radiometric_state",
+            "radiometric suitability (DN vs reflectance vs backscatter) is unknown" );
+  if ( missingAcquisitionTime )
+    append( "acquisition_time", "temporal ordering and scene-floor checks need dates" );
+
+  // Bounded.
+  while ( document["missing_facts"].size() > 8 )
+    document["missing_facts"].removeIndex( document["missing_facts"].size() - 1, nullptr );
+  return document;
+}
+
+Json::Value preparationForWhyNot( const Json::Value &whyNot )
+{
+  Json::Value document( Json::objectValue );
+  document["preparations"] = Json::Value( Json::arrayValue );
+  if ( !whyNot.isArray() )
+    return document;
+
+  const auto prepare = [ & ]( const char *code, const char *action, const char *tool,
+                              const char *recipe ) {
+    Json::Value entry( Json::objectValue );
+    Json::Value preparations( Json::arrayValue );
+    Json::Value step( Json::objectValue );
+    step["action"] = action;
+    if ( tool )
+      step["tool"] = tool;
+    if ( recipe )
+      step["recipe"] = recipe;
+    preparations.append( step );
+    entry["code"] = code;
+    entry["preparations"] = preparations;
+    document["preparations"].append( entry );
+  };
+
+  // Static code→action table (H8 test pins the codes it covers). Only
+  // structurally safe, deterministic preparation steps appear here; codes
+  // whose "fix" would be a science decision carry no_safe_preparation.
+  static const std::set<std::string> kNoSafePreparation = {
+    error_codes::kModalityMismatch, error_codes::kPolarizationMismatch,
+    error_codes::kNotSupported,     error_codes::kDatasetNotFound,
+  };
+  bool sawUnsafe = false;
+  for ( const Json::Value &entry : whyNot )
+  {
+    if ( !entry.isObject() || !entry.isMember( "code" ) || !entry["code"].isString() )
+      continue;
+    const std::string code = entry["code"].asString();
+    if ( kNoSafePreparation.count( code ) )
+    {
+      sawUnsafe = true;
+      continue;
+    }
+    if ( code == error_codes::kBandRoleUnresolved )
+      prepare( code.c_str(), "inspect band roles, then extract the required bands from a "
+                             "richer source product",
+               "rs:extract_bands", nullptr );
+    else if ( code == error_codes::kInvalidRadiometry )
+      prepare( code.c_str(), "bring the scene into the preferred radiometric domain",
+               "rs:atmospheric_dos1", "harness.preprocess_dn_to_reflectance" );
+    else if ( code == error_codes::kCrsMismatch || code == error_codes::kGridMismatch )
+      prepare( code.c_str(), "reproject/align inputs onto the reference grid", "rs:align",
+               nullptr );
+    else if ( code == error_codes::kCalibrationMismatch )
+      prepare( code.c_str(), "calibrate the SAR product into the demanded domain",
+               "rs:sar_calibrate", nullptr );
+    else if ( code == error_codes::kTimeOrderInvalid )
+      prepare( code.c_str(), "inspect acquisition times and order the collection",
+               "spatial:understand", nullptr );
+    // Unknown codes intentionally yield no row — never guessed advice.
+  }
+  document["no_safe_preparation"] = sawUnsafe;
+  return document;
+}
+
+Json::Value solutionPathsForIntent( const std::string &intent )
+{
+  Json::Value document( Json::objectValue );
+  document["intent"] = intent;
+  document["solution_paths"] = Json::Value( Json::arrayValue );
+
+  RecipeCatalog &catalog = RecipeCatalog::instance();
+  if ( !catalog.loaded() )
+    catalog.reload();
+  if ( !catalog.loaded() )
+  {
+    document["note"] = "recipe catalog unavailable in this process; "
+                       "operator candidates remain authoritative";
+    return document;
+  }
+
+  CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+  std::set<std::string> servingOperators;
+  for ( const std::string &operatorId : knowledge.operatorsForIntent( intent ) )
+    servingOperators.insert( operatorId );
+
+  // Deterministic order: recipe id sort, then bounded. Capabilities live on
+  // the full documents, not the bounded summaries.
+  std::map<std::string, Json::Value> paths;
+  for ( const Json::Value &summary : catalog.listRecipes() )
+  {
+    const std::string recipeId = summary.get( "recipe_id", "" ).asString();
+    const Json::Value doc = catalog.recipe( recipeId );
+    const std::string recipeIntent = doc.get( "intent", "" ).asString();
+    bool serves = recipeIntent == intent;
+    if ( !serves )
+    {
+      for ( const Json::Value &capability :
+            doc.get( "capabilities", Json::Value( Json::arrayValue ) ) )
+        if ( capability.isString() && servingOperators.count( capability.asString() ) )
+          serves = true;
+    }
+    if ( !serves )
+      continue;
+    Json::Value path( Json::objectValue );
+    path["recipe_id"] = recipeId;
+    if ( doc.isMember( "title" ) )
+      path["title"] = doc["title"];
+    if ( recipeIntent.size() )
+      path["intent"] = recipeIntent;
+    path["step_count"] = static_cast<Json::Int>(
+      doc.get( "steps", Json::Value( Json::arrayValue ) ).size() );
+    paths[ recipeId ] = std::move( path );
+  }
+
+  int appended = 0;
+  for ( const auto &[ recipeId, path ] : paths )
+  {
+    document["solution_paths"].append( path );
+    if ( ++appended >= 8 )
+      break;
+  }
+  return document;
+}
+
 } // namespace sicnu::agent::harness
 
 // ---------------------------------------------------------------------------
@@ -501,6 +719,24 @@ class ResolveIntentTool final : public SpatialTool
         document["intent"] = resolution.intent;
         document["matched_terms"] = resolution.matchedTerms;
         document["capabilities"] = capabilityCandidates( resolution.intent, understanding );
+        // Harness 8.0 (Area C): explainable planning surface — what facts are
+        // missing, what safe preparation exists for the blockers, and which
+        // recipe-level solution paths serve the intent.
+        document["missing_facts"] =
+          missingFactsForIntent( resolution.intent, understanding )["missing_facts"];
+        document["solution_paths"] =
+          solutionPathsForIntent( resolution.intent )["solution_paths"];
+        Json::Value preparations( Json::arrayValue );
+        for ( const Json::Value &candidate :
+              document["capabilities"].get( "candidates", Json::Value( Json::arrayValue ) ) )
+        {
+          if ( candidate.get( "feasible", true ).asBool() )
+            continue;
+          for ( const Json::Value &preparation :
+                preparationForWhyNot( candidate["why_not"] )["preparations"] )
+            preparations.append( preparation );
+        }
+        document["preparations"] = preparations;
       }
       else
       {
