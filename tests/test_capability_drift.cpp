@@ -662,12 +662,16 @@ TEST_CASE( "knowledge-driven uncertainty expectation stays warning-class",
     return joined;
   }() );
   REQUIRE( artifact.verdict == Verdict::PassWithWarnings );
+  bool foundUncertaintyCheck = false;
   for ( const auto &check : artifact.checks )
     if ( check.check == "uncertainty_present" )
     {
+      foundUncertaintyCheck = true;
       REQUIRE_FALSE( check.passed );
       REQUIRE( check.severity == "warning" ); // advisory, never error-class
     }
+  // Non-vacuous: the check must actually have been emitted (review P3).
+  REQUIRE( foundUncertaintyCheck );
 }
 
 namespace {
@@ -884,4 +888,41 @@ TEST_CASE( "recipe capabilities resolve in the registry and the knowledge layer"
     return joined;
   }() );
   REQUIRE( problems.empty() );
+}
+
+TEST_CASE( "preparation table emits explicit no-safe-preparation rows",
+           "[harness][capability][review]" )
+{
+  using sicnu::agent::harness::preparationForWhyNot;
+
+  Json::Value whyNot( Json::arrayValue );
+  Json::Value modality( Json::objectValue );
+  modality["code"] = "MODALITY_MISMATCH";
+  whyNot.append( modality );
+  Json::Value bands( Json::objectValue );
+  bands["code"] = "BAND_ROLE_UNRESOLVED";
+  whyNot.append( bands );
+
+  const Json::Value doc = preparationForWhyNot( whyNot );
+  REQUIRE( doc["preparations"].size() == 2 );
+
+  bool unsafeMarked = false;
+  bool safePrepared = false;
+  for ( const Json::Value &row : doc["preparations"] )
+  {
+    if ( row["code"].asString() == "MODALITY_MISMATCH" )
+      unsafeMarked = row["no_safe_preparation"].asBool();
+    if ( row["code"].asString() == "BAND_ROLE_UNRESOLVED" )
+      safePrepared = row["preparations"][0]["tool"].asString() == "rs:extract_bands";
+  }
+  REQUIRE( unsafeMarked );
+  REQUIRE( safePrepared );
+
+  // Unknown codes also get the explicit marker — never guessed advice.
+  Json::Value unknownRow( Json::objectValue );
+  unknownRow["code"] = "SOMETHING_NEW";
+  Json::Value unknownArray( Json::arrayValue );
+  unknownArray.append( unknownRow );
+  const Json::Value doc2 = preparationForWhyNot( unknownArray );
+  REQUIRE( doc2["preparations"][0]["no_safe_preparation"].asBool() );
 }

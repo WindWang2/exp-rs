@@ -34,6 +34,8 @@
 #include <agent/harness/recipe_catalog.h>
 #include <agent/harness/capability_knowledge.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <set>
 #include <string>
@@ -46,6 +48,7 @@ namespace {
 
 constexpr int kMaxExpandedCases = 400;
 constexpr int kMaxFixtureDimension = 32;
+constexpr int kMaxFixtureBands = 8;
 
 const char *const kCategories[] = {
   "normal_workflow", "missing_data", "ambiguity", "invalid_science",
@@ -147,7 +150,10 @@ std::string writeRasterFixture( const QString &path, const Json::Value &spec )
   const int width = std::min( kMaxFixtureDimension, spec.get( "width", 8 ).asInt() );
   const int height = std::min( kMaxFixtureDimension, spec.get( "height", 8 ).asInt() );
   const Json::Value &bands = spec.get( "bands", Json::Value( Json::arrayValue ) );
-  const int bandCount = std::max( 1, static_cast<int>( bands.size() ) );
+  // Band count clamped like the dimensions — a hostile corpus must not be
+  // able to generate oversized files (review P3).
+  const int bandCount =
+    std::clamp( static_cast<int>( bands.size() ), 1, kMaxFixtureBands );
   GDALDataset *ds = driver->Create( path.toUtf8().constData(), width, height, bandCount,
                                     GDT_Float32, nullptr );
   if ( !ds )
@@ -202,12 +208,18 @@ Json::Value resolveDottedPath( const Json::Value &doc, const std::string &dotted
                                                   : dot - start );
     if ( segment.empty() )
       return Json::Value();
-    // Optional trailing [N] index.
+    // Optional trailing [N] index — parsed strictly so a malformed index
+    // resolves to nothing instead of silently passing on element 0 (P3).
     size_t index = std::string::npos;
     const size_t open = segment.find( '[' );
     if ( open != std::string::npos && segment.back() == ']' )
     {
-      index = static_cast<size_t>( std::max( 0, std::atoi( segment.c_str() + open + 1 ) ) );
+      const std::string digits = segment.substr( open + 1, segment.size() - open - 2 );
+      if ( digits.empty() ||
+           !std::all_of( digits.begin(), digits.end(),
+                         []( unsigned char ch ) { return std::isdigit( ch ); } ) )
+        return Json::Value();
+      index = static_cast<size_t>( std::stoul( digits ) );
       segment = segment.substr( 0, open );
     }
     if ( !cursor.isObject() || !cursor.isMember( segment ) )
@@ -381,8 +393,14 @@ TEST_CASE( "eval corpus cases pass against the live tool surface",
         }
         else if ( fixtureSpec.get( "kind", "" ).asString() == "text" )
         {
-          const QString path = dir.filePath(
-            QString::fromStdString( fixtureSpec.get( "name", "fixture.txt" ).asString() ) );
+          // Sanitized: strip any path separators so a corpus file cannot
+          // point the fixture outside the case temp dir (review P3).
+          QString name = QString::fromStdString(
+            fixtureSpec.get( "name", "fixture.txt" ).asString() );
+          name.remove( QChar( '/' ) ).remove( QChar( '\\' ) );
+          if ( name.isEmpty() )
+            name = QStringLiteral( "fixture.txt" );
+          const QString path = dir.filePath( name );
           QFile textFile( path );
           if ( !textFile.open( QIODevice::WriteOnly ) ||
                textFile.write( fixtureSpec.get( "content", "" ).asString().c_str() ) < 0 )

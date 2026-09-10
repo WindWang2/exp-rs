@@ -117,9 +117,28 @@ bool readAgentPlan( const Json::Value &doc, AgentPlan &plan, HarnessError &error
     plan.mapOutput = doc["map_output"];
   // Harness 8.0 (Area E): identity pins + cleanup policy. Shape/vocabulary
   // is validated structurally below; identity is checked at execute time.
-  if ( doc.isMember( "pins" ) && doc["pins"].isObject() )
+  if ( doc.isMember( "pins" ) )
+  {
+    // A malformed pins block must not silently disable the identity gate
+    // (adversarial review P1): reject it instead of dropping it.
+    if ( !doc["pins"].isObject() )
+    {
+      error = HarnessError::make( error_codes::kInvalidPlan,
+                                  "pins must be an object" );
+      return false;
+    }
     plan.pins = doc["pins"];
-  plan.cleanup = doc.get( "cleanup", "keep_all" ).asString();
+  }
+  if ( doc.isMember( "cleanup" ) )
+  {
+    if ( !doc["cleanup"].isString() )
+    {
+      error = HarnessError::make( error_codes::kInvalidPlan,
+                                  "cleanup must be a string (keep_all|keep_outputs)" );
+      return false;
+    }
+    plan.cleanup = doc["cleanup"].asString();
+  }
 
   // v1 steps used "operator_id" too (makeExecutionStep), so both versions
   // read through the same accessors.
@@ -150,6 +169,20 @@ std::vector<AgentPlanIssue> validateAgentPlan( const AgentPlan &plan )
                     : HarnessError::makeWithAction( code, summary, action, details );
     issues.push_back( std::move( issue ) );
   };
+
+  // Harness 8.0 (adversarial review P1): duplicate input slot names make
+  // identity pins ambiguous — a pinned slot must match exactly one input.
+  std::set<std::string> inputNames;
+  for ( const Json::Value &input : plan.inputs )
+  {
+    if ( !input.isObject() )
+      continue;
+    const std::string name = input.get( "name", "" ).asString();
+    if ( !name.empty() && !inputNames.insert( name ).second )
+      addIssue( error_codes::kInvalidPlan,
+                "Duplicate input slot name: " + name + " — pins cannot gate it",
+                "", true, "rename_input" );
+  }
 
   std::set<std::string> ids;
   for ( const Json::Value &step : plan.steps )
@@ -367,6 +400,12 @@ std::string planFingerprint( const AgentPlan &plan )
   content["steps"] = steps;
   content["outputs"] = plan.outputs;
   content["verification"] = plan.verification;
+  // Identity/policy content (adversarial review P3): two plans that differ
+  // only in their pins or cleanup policy are different commitments.
+  if ( plan.pins.isObject() && !plan.pins.empty() )
+    content["pins"] = plan.pins;
+  if ( !plan.cleanup.empty() && plan.cleanup != "keep_all" )
+    content["cleanup"] = plan.cleanup;
 
   Json::StreamWriterBuilder builder;
   builder["indentation"] = "";

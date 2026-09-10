@@ -62,8 +62,7 @@ struct AgentPlan {
   /// { "datasets": { "<slot>": { "asset_entity_id"?: "asset-N",
   ///                              "asset_id"?: "<uuid>", "path"?: "...",
   ///                              "revision"?: N } },
-  ///   "model"?: "<id>" | "<id>@<version>",
-  ///   "split"?: "<split id>" }
+  ///   "model"?: "<id>" | "<id>@<version>" }
   /// A pinned slot must exist in `inputs` and — at execute time — resolve to
   /// the SAME dataset; a mismatch is a typed IDENTITY_MISMATCH blocker, so a
   /// silently re-registered or renamed input can never feed the plan.

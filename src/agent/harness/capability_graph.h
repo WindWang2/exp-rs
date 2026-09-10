@@ -64,8 +64,10 @@ Json::Value missingFactsForIntent( const std::string &intent,
 /// Harness 8.0 (Area C): deterministic, machine-actionable preparation
 /// suggestions for a capabilityCandidates candidate's why_not entries — a
 /// static code→action table (pinned by test), never prose reasoning. Shape:
-/// [{code, preparations:[{action, tool?, recipe?}]}]; codes with no safe
-/// preparation carry {"no_safe_preparation": true}.
+/// {preparations: [{code, preparations?: [{action, tool?, recipe?}] |
+///                  no_safe_preparation: true}]} — every why_not code gets
+/// exactly one row: either its safe preparation steps or the explicit
+/// no-safe-preparation marker.
 Json::Value preparationForWhyNot( const Json::Value &whyNot );
 
 /// Harness 8.0 (Area C): recipe-level solution paths serving `intent` —

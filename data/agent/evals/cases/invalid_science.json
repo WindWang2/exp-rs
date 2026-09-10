@@ -140,6 +140,10 @@
               {
                 "path": "status",
                 "equals": "resolved"
+              },
+              {
+                "path": "capabilities.candidates[0].feasible",
+                "equals": false
               }
             ]
           }

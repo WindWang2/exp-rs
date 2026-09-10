@@ -91,7 +91,8 @@ Stable codes (closed table in `src/agent/harness/harness_error.h`):
 `INVALID_PLAN`, `INVALID_PARAMETER`, `TRANSIENT_FAILURE`, `IO_ERROR`,
 `PATH_OUTSIDE_WORKSPACE`, `WORKFLOW_NOT_FOUND`, `TOOL_NOT_FOUND`,
 `TIME_ORDER_INVALID`, `MODALITY_MISMATCH`, `POLARIZATION_MISMATCH`,
-`CALIBRATION_MISMATCH`, `TRAINING_INVALID`, `NOT_SUPPORTED`.
+`CALIBRATION_MISMATCH`, `TRAINING_INVALID`, `NOT_SUPPORTED`,
+`IDENTITY_MISMATCH`.
 
 Retry classes: `none` (never), `manual` (explicit decision only), `transient`
 (bounded auto-retry in the plan runner). Pi reads codes; it never parses logs.

@@ -506,12 +506,12 @@ Json::Value preparationForWhyNot( const Json::Value &whyNot )
 
   // Static code→action table (H8 test pins the codes it covers). Only
   // structurally safe, deterministic preparation steps appear here; codes
-  // whose "fix" would be a science decision carry no_safe_preparation.
+  // whose "fix" would be a science decision carry an explicit
+  // no_safe_preparation row. Unknown codes are treated the same way.
   static const std::set<std::string> kNoSafePreparation = {
     error_codes::kModalityMismatch, error_codes::kPolarizationMismatch,
     error_codes::kNotSupported,     error_codes::kDatasetNotFound,
   };
-  bool sawUnsafe = false;
   for ( const Json::Value &entry : whyNot )
   {
     if ( !entry.isObject() || !entry.isMember( "code" ) || !entry["code"].isString() )
@@ -519,7 +519,12 @@ Json::Value preparationForWhyNot( const Json::Value &whyNot )
     const std::string code = entry["code"].asString();
     if ( kNoSafePreparation.count( code ) )
     {
-      sawUnsafe = true;
+      // Surface the marker per code so the agent knows the blocker is real
+      // (adversarial review P2: the flag was computed then discarded).
+      Json::Value row( Json::objectValue );
+      row["code"] = code;
+      row["no_safe_preparation"] = true;
+      document["preparations"].append( row );
       continue;
     }
     if ( code == error_codes::kBandRoleUnresolved )
@@ -538,9 +543,16 @@ Json::Value preparationForWhyNot( const Json::Value &whyNot )
     else if ( code == error_codes::kTimeOrderInvalid )
       prepare( code.c_str(), "inspect acquisition times and order the collection",
                "spatial:understand", nullptr );
-    // Unknown codes intentionally yield no row — never guessed advice.
+    else
+    {
+      // Unknown codes carry an explicit no-safe-preparation row too — never
+      // guessed advice, but never silently dropped either.
+      Json::Value row( Json::objectValue );
+      row["code"] = code;
+      row["no_safe_preparation"] = true;
+      document["preparations"].append( row );
+    }
   }
-  document["no_safe_preparation"] = sawUnsafe;
   return document;
 }
 

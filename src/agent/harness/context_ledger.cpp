@@ -179,6 +179,13 @@ void ContextLedger::recordAssetContext( const QString &path, const Json::Value &
   record["path"] = pathUtf8;
   record["entity"] = entity;
   record["observed_key"] = observedKey.toStdString();
+  // Explicit key kind (adversarial review P3): a path containing "|f" must
+  // never be misread as a stat key.
+  record["observed_kind"] =
+    ( observedKey.contains( QStringLiteral( "|r" ) ) &&
+              !observedKey.contains( QStringLiteral( "|f" ) ) )
+      ? "revision"
+      : "stat";
   record["summary"] = summary;
   record["recorded_at"] = nowIso().toStdString();
   mAssetContexts.append( record );
@@ -192,14 +199,19 @@ namespace {
 /// disk. Keys are "<path>|r<revision>" for registered assets (staleness
 /// authority is the catalog; only a vanished file can be detected here) and
 /// "<path>|f<size>|<mtimeMs>" for unregistered files (stat identity).
-bool assetContextStale( const std::string &path, const std::string &observedKey )
+bool assetContextStale( const std::string &path, const std::string &observedKey,
+                        const std::string &kind )
 {
   const QString qpath = QString::fromStdString( path );
   const QString key = QString::fromStdString( observedKey );
   const QFileInfo info( qpath );
   if ( !info.exists() )
     return true;
-  if ( key.contains( QStringLiteral( "|f" ) ) )
+  // Stat keys fold (size, mtime): a rewritten file with a different size or
+  // timestamp stales the record. Same-size, same-granularity rewrites are
+  // NOT detectable (documented limitation — the catalog revision is the
+  // authority for registered assets).
+  if ( kind == "stat" )
   {
     const QString expected =
       qpath + QStringLiteral( "|f" ) + QString::number( info.size() ) + QStringLiteral( "|" ) +
@@ -213,13 +225,20 @@ bool assetContextStale( const std::string &path, const std::string &observedKey 
 
 Json::Value ContextLedger::assetContexts() const
 {
-  QMutexLocker locker( &mMutex );
+  Json::Value records;
+  {
+    // Copy under the lock; the staleness stats run outside it so a slow
+    // network filesystem cannot stall every ledger consumer (review P2).
+    QMutexLocker locker( &mMutex );
+    records = mAssetContexts;
+  }
   Json::Value out( Json::arrayValue );
-  for ( const Json::Value &record : mAssetContexts )
+  for ( const Json::Value &record : records )
   {
     Json::Value entry = record;
+    const std::string kind = record.get( "observed_kind", "stat" ).asString();
     entry["stale"] = assetContextStale( record.get( "path", "" ).asString(),
-                                        record.get( "observed_key", "" ).asString() );
+                                        record.get( "observed_key", "" ).asString(), kind );
     out.append( entry );
   }
   return out;

@@ -35,6 +35,7 @@
 //
 
 #include <json/json.h>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -94,6 +95,15 @@ SidecarResult writeVerificationEvidence( const std::string &outputPath,
                                          const VerificationExpectations &expectations,
                                          const Json::Value &runIdentity,
                                          const UncertaintyHarvest &uncertainty );
+
+/// Harness 8.0: reads back the verification-evidence sidecar written for
+/// `runId`. Returns nullopt when the sidecar is absent, unreadable, of
+/// another kind, or belongs to a different run — the caller then performs a
+/// first evaluation. Read-only: observation surfaces use this to keep polls
+/// stable (the first evaluation is authoritative; later polls never rewrite
+/// evidence or re-flip verdicts).
+std::optional<ArtifactVerification> readVerificationEvidence( const std::string &outputPath,
+                                                              const std::string &runId );
 
 } // namespace evidence
 

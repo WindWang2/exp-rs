@@ -314,3 +314,134 @@ TEST_CASE( "verification evidence sidecar records verdict and quality",
     CHECK( evidence["quality"]["uncertainty_declared"].asBool() == false );
     CHECK( evidence["run"]["run_id"].asString() == "run-2" );
 }
+
+TEST_CASE( "adversarial-review remediations hold", "[harness][evidence8][review]" )
+{
+    SECTION( "duplicate input slot names are rejected (pin bypass)" )
+    {
+        Json::Value doc( Json::objectValue );
+        doc["schema_version"] = "2.0";
+        doc["kind"] = "execution_plan";
+        doc["plan_id"] = "plan-dup";
+        Json::Value steps( Json::arrayValue );
+        Json::Value step( Json::objectValue );
+        step["id"] = "s1";
+        step["operator_id"] = "rs:ndvi";
+        steps.append( step );
+        doc["steps"] = steps;
+        Json::Value a( Json::objectValue );
+        a["name"] = "primary";
+        a["ref"] = "/data/a.tif";
+        doc["inputs"].append( a );
+        Json::Value b( Json::objectValue );
+        b["name"] = "primary";
+        b["ref"] = "/data/b.tif";
+        doc["inputs"].append( b );
+
+        AgentPlan plan;
+        HarnessError error;
+        REQUIRE( readAgentPlan( doc, plan, error ) );
+        const auto issues = validateAgentPlan( plan );
+        bool dupReported = false;
+        for ( const auto &issue : issues )
+            dupReported |= issue.error.summary.find( "Duplicate input slot name" )
+                           != std::string::npos;
+        CHECK( dupReported );
+    }
+
+    SECTION( "a non-object pins block is a typed error, never silently dropped" )
+    {
+        Json::Value doc( Json::objectValue );
+        doc["schema_version"] = "2.0";
+        doc["kind"] = "execution_plan";
+        doc["plan_id"] = "plan-bad-pins";
+        Json::Value steps( Json::arrayValue );
+        Json::Value step( Json::objectValue );
+        step["id"] = "s1";
+        step["operator_id"] = "rs:ndvi";
+        steps.append( step );
+        doc["steps"] = steps;
+        doc["pins"] = "primary=/data/a.tif";
+
+        AgentPlan plan;
+        HarnessError error;
+        CHECK_FALSE( readAgentPlan( doc, plan, error ) );
+        CHECK( error.code == "INVALID_PLAN" );
+    }
+
+    SECTION( "model pins that do not resolve are MODEL_NOT_READY" )
+    {
+        Json::Value doc( Json::objectValue );
+        doc["schema_version"] = "2.0";
+        doc["kind"] = "execution_plan";
+        doc["plan_id"] = "plan-model-pin";
+        Json::Value steps( Json::arrayValue );
+        Json::Value step( Json::objectValue );
+        step["id"] = "s1";
+        step["operator_id"] = "rs:ndvi";
+        steps.append( step );
+        doc["steps"] = steps;
+        doc["inputs"] = Json::Value( Json::arrayValue );
+        Json::Value pins( Json::objectValue );
+        pins["model"] = "no-such-model-in-catalog@1";
+        doc["pins"] = pins;
+
+        AgentPlan plan;
+        HarnessError error;
+        REQUIRE( readAgentPlan( doc, plan, error ) );
+        const HarnessError mismatch = validatePlanIdentity( plan );
+        CHECK( mismatch.code == "MODEL_NOT_READY" );
+    }
+
+    SECTION( "fingerprint covers pins and cleanup" )
+    {
+        Json::Value doc( Json::objectValue );
+        doc["schema_version"] = "2.0";
+        doc["kind"] = "execution_plan";
+        doc["plan_id"] = "plan-fp";
+        Json::Value steps( Json::arrayValue );
+        Json::Value step( Json::objectValue );
+        step["id"] = "s1";
+        step["operator_id"] = "rs:ndvi";
+        steps.append( step );
+        doc["steps"] = steps;
+        AgentPlan plan;
+        HarnessError error;
+        REQUIRE( readAgentPlan( doc, plan, error ) );
+        const std::string base = planFingerprint( plan );
+
+        plan.cleanup = "keep_outputs";
+        CHECK( planFingerprint( plan ) != base );
+
+        Json::Value pins( Json::objectValue );
+        Json::Value datasets( Json::objectValue );
+        Json::Value pin( Json::objectValue );
+        pin["path"] = "/data/a.tif";
+        datasets["primary"] = pin;
+        pins["datasets"] = datasets;
+        plan.pins = pins;
+        CHECK( planFingerprint( plan ) != base );
+    }
+
+    SECTION( "verification evidence read-back is run-scoped" )
+    {
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        const std::string raster = writeTinyRaster( dir.filePath( QStringLiteral( "reuse.tif" ) ) );
+        VerificationExpectations expectations;
+        const ArtifactVerification verified = verifyArtifact( raster, expectations );
+        Json::Value identity( Json::objectValue );
+        identity["run_id"] = "run-A";
+        const evidence::UncertaintyHarvest noFacts;
+        const auto written = evidence::writeVerificationEvidence( raster, verified, expectations,
+                                                                  identity, noFacts );
+        REQUIRE( written.written );
+
+        // Same run: authoritative reuse. Different run: fresh evaluation.
+        const auto reused = evidence::readVerificationEvidence( raster, "run-A" );
+        REQUIRE( reused.has_value() );
+        CHECK( reused->verdict == verified.verdict );
+        CHECK( reused->checks.size() == verified.checks.size() );
+        CHECK_FALSE( evidence::readVerificationEvidence( raster, "run-B" ).has_value() );
+    }
+}

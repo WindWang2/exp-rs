@@ -2,6 +2,7 @@
 #include "plan_tools.h"
 
 #include "agent_plan.h"
+#include "capability_graph.h"
 #include "capability_knowledge.h"
 #include "contracts/spatial_contracts.h"
 #include "context_ledger.h"
@@ -11,6 +12,7 @@
 #include "harness_verification.h"
 #include "scientific_preflight.h"
 #include "spatial_tools/spatial_tool.h"
+#include "operators/framework/model_catalog.h"
 #include "workflow/workflow_run.h"
 #include "workflow/workflow_run_coordinator.h"
 
@@ -135,9 +137,12 @@ Json::Value refsProperty()
 
 /// Reads run state + verifies declared/final outputs (Phase 9). Returns the
 /// bounded structured result document shared by harness:run_status and
-/// harness:execute_plan.
+/// harness:execute_plan. `persistEvidence` (default true) controls the
+/// evidence sidecar writes, the ledger rebind, and map confirmation —
+/// observation surfaces (harness:explain) pass false so they stay strictly
+/// read-only (adversarial review P1).
 Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRun> &run,
-                               const AgentPlan *plan );
+                               const AgentPlan *plan, bool persistEvidence = true );
 
 /// Harness 7.0 (mission Area F): derive verification expectations instead of
 /// the near-vacuous 4.0 defaults. Layered, most specific wins:
@@ -145,7 +150,8 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
 ///   2. capability-knowledge verification contract for the plan intent
 ///      (finite/nodata/provenance/uncertainty checks tighten what is open),
 ///   3. the plan's own verification.expectations block (Pi/recipe authority).
-VerificationExpectations deriveExpectations( const AgentPlan *plan )
+VerificationExpectations deriveExpectations( const AgentPlan *plan,
+                                             bool includeDeclared = true )
 {
   VerificationExpectations expectations;
   // Workflow-run outputs are plain files today; provenance presence stays
@@ -159,7 +165,7 @@ VerificationExpectations deriveExpectations( const AgentPlan *plan )
   bool uncertaintyDeclared = false;
   const Json::Value &declared =
     plan->verification.get( "expectations", Json::Value() );
-  if ( declared.isObject() )
+  if ( includeDeclared && declared.isObject() )
   {
     if ( declared.isMember( "kind" ) && declared["kind"].isString() )
       expectations.kind = declared["kind"].asString();
@@ -257,8 +263,27 @@ Json::Value runIdentityFor( const std::shared_ptr<sicnu::workflow::WorkflowRun> 
 
 HarnessError validatePlanIdentity( const AgentPlan &plan )
 {
-  if ( !plan.pins.isObject() || !plan.pins.isMember( "datasets" ) ||
-       !plan.pins["datasets"].isObject() )
+  if ( !plan.pins.isObject() || plan.pins.empty() )
+    return {};
+
+  // Model pin: "<id>" or "<id>@<version>" must resolve in the ModelCatalog.
+  if ( plan.pins.isMember( "model" ) && plan.pins["model"].isString() )
+  {
+    const std::string modelRef = plan.pins["model"].asString();
+    std::string modelError;
+    if ( !sicnu::operators::ModelCatalog::instance().resolve( modelRef, &modelError ) )
+    {
+      Json::Value details( Json::objectValue );
+      details["pin"] = modelRef;
+      details["reason"] = modelError;
+      return HarnessError::make(
+        error_codes::kModelNotReady,
+        "Pinned model '" + modelRef + "' does not resolve in the model catalog", details,
+        true, suggestedAction( "select_model", Json::Value() ) );
+    }
+  }
+
+  if ( !plan.pins.isMember( "datasets" ) || !plan.pins["datasets"].isObject() )
     return {};
 
   for ( const std::string &slot : plan.pins["datasets"].getMemberNames() )
@@ -470,8 +495,10 @@ class ExplainTool final : public SpatialTool
         explanation["method_applicability"] = applicability;
       }
 
-      // What actually executed.
-      Json::Value doc = runResultDocument( run, plan ? &*plan : nullptr );
+      // What actually executed. Observation-only: no sidecar writes, no
+      // ledger rebind, no map-repair loops (adversarial review P1).
+      Json::Value doc = runResultDocument( run, plan ? &*plan : nullptr,
+                                           /*persistEvidence=*/false );
       Json::Value executed( Json::objectValue );
       executed["state"] = doc["state"];
       executed["status"] = doc["status"];
@@ -507,6 +534,25 @@ class ExplainTool final : public SpatialTool
       for ( const Json::Value &context : ContextLedger::instance().assetContexts() )
         if ( context.get( "stale", false ).asBool() )
           staleContexts.append( context["path"] );
+      // Missing facts for the intent, judged against the primary input's
+      // cached understanding (never re-inspects — observation only).
+      if ( !intent.empty() && plan && plan->inputs.isArray() && plan->inputs.size() > 0 )
+      {
+        Json::Value understanding;
+        for ( const Json::Value &entry : plan->inputs )
+        {
+          HarnessError error;
+          const auto resolved = resolveDatasetRef(
+            QString::fromStdString( entry.get( "ref", "" ).asString() ), &error );
+          if ( resolved )
+          {
+            understanding = cachedUnderstandingFor( resolved->path, resolved->revision );
+            break;
+          }
+        }
+        unknowns["missing_facts"] =
+          missingFactsForIntent( intent, understanding )[ "missing_facts" ];
+      }
       unknowns["stale_asset_contexts"] = staleContexts;
       explanation["unknowns"] = unknowns;
 
@@ -1040,8 +1086,9 @@ class RunStatusTool final : public SpatialTool
 };
 
 Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRun> &run,
-                               const AgentPlan *plan )
+                               const AgentPlan *plan, bool persistEvidence )
 {
+  const bool runResultDocumentPersistEvidence = persistEvidence;
   Json::Value doc( Json::objectValue );
   doc["run_id"] = run->runId();
   doc["state"] = sicnu::workflow::workflowRunStateToString( run->state() );
@@ -1074,57 +1121,129 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
   if ( terminal && run->state() == sicnu::workflow::WorkflowRunState::Completed )
   {
     const VerificationExpectations derived = deriveExpectations( plan );
-    // Harness 8.0 (Area F): write the evidence sidecars BEFORE verification
-    // so the checks see the files that exist after this run, then persist
-    // the verification record itself afterwards.
+    // Harness 8.0 (adversarial review): plan-declared expectations (width/
+    // height/CRS/band count/extent) apply only to the plan's DECLARED
+    // outputs — enforcing them on intermediate products would force false
+    // FAILs in multimodal/classified chains. Structural + knowledge-derived
+    // checks apply to every completed output.
+    VerificationExpectations baseDerived = deriveExpectations( plan, false );
+
+    // Declared output paths: plan.outputs {from_step} → completed step path.
+    std::set<std::string> declaredPaths;
+    if ( plan && plan->outputs.isArray() )
+    {
+      std::map<std::string, std::string> stepOutput;
+      for ( const auto &step : run->stepPlans() )
+        if ( !step.outputLayerPath.empty() )
+          stepOutput[ step.stepId ] = step.outputLayerPath;
+      for ( const Json::Value &output : plan->outputs )
+      {
+        const auto it = stepOutput.find( output.get( "from_step", "" ).asString() );
+        if ( it != stepOutput.end() )
+          declaredPaths.insert( it->second );
+      }
+    }
+
+    // Harness 8.0 (Area F): first evaluation writes the evidence sidecars
+    // and persists the verification record; subsequent observations of the
+    // same run reuse the persisted record — polls are stable, read-only and
+    // can never re-flip a verdict (adversarial review P1/P2).
     const Json::Value runIdentity = runIdentityFor( run, plan );
+    const bool persistEvidence = runResultDocumentPersistEvidence;
 
     std::vector<ArtifactVerification> verifications;
     Json::Value artifacts( Json::arrayValue );
     Json::Value evidenceArtifacts( Json::arrayValue );
     for ( const std::string &path : outputPaths )
     {
-      // 1. Uncertainty: operator-declared facts only; a method that produces
-      //    no uncertainty yields no sidecar and no fabrication.
-      const evidence::UncertaintyHarvest harvest =
-        evidence::harvestUncertainty( run->stepPlans(), path );
-      const evidence::SidecarResult uncertaintyWritten =
-        evidence::writeUncertaintySidecar( path, harvest );
-      // 2. Run-identity provenance (the engine's own sidecar always wins).
-      const evidence::SidecarResult provenanceWritten =
-        evidence::writeProvenanceSidecarIfAbsent( path, runIdentity );
+      const bool declaredOutput = declaredPaths.count( path ) > 0;
+      const VerificationExpectations &expectationsForArtifact =
+        declaredOutput ? derived : baseDerived;
 
-      // 3. Verify against the artifacts as they now exist on disk.
-      ArtifactVerification artifact = verifyArtifact( path, derived );
-
-      // 4. Declared uncertainty that could not be persisted is an evidence
-      //    failure (error-class) — declared science evidence never silently
-      //    disappears. A missing file for a method that declares none stays
-      //    the existing warning-class advisory check.
-      if ( harvest.declared && !uncertaintyWritten.written )
+      // Write-once: an existing verification sidecar for THIS run is
+      // authoritative — reuse its verdict and checks verbatim.
+      if ( const auto reused = evidence::readVerificationEvidence( path, run->runId() ) )
       {
-        VerificationCheck failed;
-        failed.check = "uncertainty_written";
-        failed.passed = false;
-        failed.severity = "error";
-        failed.code = error_codes::kOutputInvalid;
-        failed.details["error"] = uncertaintyWritten.error;
-        appendCheck( artifact, std::move( failed ) );
+        verifications.push_back( *reused );
+        artifacts.append( reused->toJson() );
+        Json::Value evidenceEntry( Json::objectValue );
+        evidenceEntry["path"] = path;
+        evidenceEntry["reused"] = true;
+        evidenceEntry["verification_sidecar"] = path + ".verification.json";
+        evidenceEntry["provenance_sidecar"] = path + ".provenance.json";
+        if ( QFileInfo::exists( QString::fromStdString( path + ".uncertainty.json" ) ) )
+          evidenceEntry["uncertainty_sidecar"] = path + ".uncertainty.json";
+        else
+          evidenceEntry["uncertainty_declared"] = false;
+        evidenceArtifacts.append( evidenceEntry );
+        continue;
       }
 
-      // 5. Persist the verification evidence itself (verdict + checks +
-      //    expectations + quality summary + run identity).
-      const evidence::SidecarResult verificationWritten =
-        evidence::writeVerificationEvidence( path, artifact, derived, runIdentity, harvest );
-      if ( !verificationWritten.written && !verificationWritten.error.empty() )
+      // First evaluation for this run+artifact.
+      ArtifactVerification artifact;
+
+      // 1. Uncertainty: operator-declared facts only; a method that produces
+      //    no uncertainty yields no sidecar and no fabrication. Written
+      //    BEFORE verification so the presence check reflects this run.
+      evidence::UncertaintyHarvest harvest;
+      evidence::SidecarResult uncertaintyWritten;
+      evidence::SidecarResult provenanceWritten;
+      evidence::SidecarResult verificationWritten;
+      if ( persistEvidence )
       {
-        VerificationCheck failed;
-        failed.check = "verification_evidence_written";
-        failed.passed = false;
-        failed.severity = "warning";
-        failed.code = error_codes::kOutputInvalid;
-        failed.details["error"] = verificationWritten.error;
-        appendCheck( artifact, std::move( failed ) );
+        harvest = evidence::harvestUncertainty( run->stepPlans(), path );
+        uncertaintyWritten = evidence::writeUncertaintySidecar( path, harvest );
+      }
+
+      // 2. Verify. The run-identity provenance sidecar is deliberately NOT
+      //    written yet (adversarial review): `provenance_present` must
+      //    reflect derivation provenance (engine sidecar / catalog), never
+      //    the harness's own bookkeeping.
+      artifact = verifyArtifact( path, expectationsForArtifact );
+
+      if ( persistEvidence )
+      {
+        // 3. Now write run-identity provenance (engine sidecar always wins).
+        provenanceWritten = evidence::writeProvenanceSidecarIfAbsent( path, runIdentity );
+        if ( !provenanceWritten.written && !provenanceWritten.error.empty() )
+        {
+          VerificationCheck failed;
+          failed.check = "provenance_written";
+          failed.passed = false;
+          failed.severity = "warning";
+          failed.code = error_codes::kOutputInvalid;
+          failed.details["error"] = provenanceWritten.error;
+          appendCheck( artifact, std::move( failed ) );
+        }
+
+        // 4. Declared uncertainty that could not be persisted is an evidence
+        //    failure (error-class) — declared science evidence never
+        //    silently disappears. A missing file for a method that declares
+        //    none stays the existing warning-class advisory check.
+        if ( harvest.declared && !uncertaintyWritten.written )
+        {
+          VerificationCheck failed;
+          failed.check = "uncertainty_written";
+          failed.passed = false;
+          failed.severity = "error";
+          failed.code = error_codes::kOutputInvalid;
+          failed.details["error"] = uncertaintyWritten.error;
+          appendCheck( artifact, std::move( failed ) );
+        }
+
+        // 5. Persist the verification evidence itself.
+        verificationWritten = evidence::writeVerificationEvidence(
+          path, artifact, expectationsForArtifact, runIdentity, harvest );
+        if ( !verificationWritten.written && !verificationWritten.error.empty() )
+        {
+          VerificationCheck failed;
+          failed.check = "verification_evidence_written";
+          failed.passed = false;
+          failed.severity = "warning";
+          failed.code = error_codes::kOutputInvalid;
+          failed.details["error"] = verificationWritten.error;
+          appendCheck( artifact, std::move( failed ) );
+        }
       }
 
       Json::Value evidenceEntry( Json::objectValue );
@@ -1132,8 +1251,10 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
       evidenceEntry["verification_sidecar"] =
         verificationWritten.written ? Json::Value( verificationWritten.path ) : Json::Value();
       evidenceEntry["provenance_sidecar"] =
-        provenanceWritten.written ? Json::Value( provenanceWritten.path )
-                                  : Json::Value( path + ".provenance.json" );
+        ( provenanceWritten.written ||
+          QFileInfo::exists( QString::fromStdString( path + ".provenance.json" ) ) )
+          ? Json::Value( path + ".provenance.json" )
+          : Json::Value();
       if ( harvest.declared )
         evidenceEntry["uncertainty_sidecar"] =
           uncertaintyWritten.written ? Json::Value( uncertaintyWritten.path ) : Json::Value();
@@ -1174,13 +1295,18 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
     doc["evidence"] = evidenceArtifacts;
     // A FAIL verification forces status failed — no false success path.
     doc["status"] = overall == Verdict::Fail ? "failed" : "completed";
-    // Harness 7.0 (Area E): the binding's verification status follows the run.
-    ContextLedger::instance().recordPlanBinding(
-      run->runId(), plan ? plan->planId : "", plan ? plan->goal : "",
-      plan ? plan->intent : "", verdictToStringWire( overall ),
-      plan ? planFingerprint( *plan ) : "" );
-    if ( overall != Verdict::Fail && plan && plan->mapOutput.isObject() )
-      doc["map_confirmation"] = confirmMapOutput( *plan, doc["steps"] );
+    // Harness 7.0 (Area E): the binding's verification status follows the
+    // run. Harness 8.0: observation surfaces (harness:explain) must not
+    // mutate the ledger, so the rebind happens on the persisting path only.
+    if ( runResultDocumentPersistEvidence )
+    {
+      ContextLedger::instance().recordPlanBinding(
+        run->runId(), plan ? plan->planId : "", plan ? plan->goal : "",
+        plan ? plan->intent : "", verdictToStringWire( overall ),
+        plan ? planFingerprint( *plan ) : "" );
+      if ( overall != Verdict::Fail && plan && plan->mapOutput.isObject() )
+        doc["map_confirmation"] = confirmMapOutput( *plan, doc["steps"] );
+    }
   }
   else if ( terminal && run->state() == sicnu::workflow::WorkflowRunState::Failed )
   {

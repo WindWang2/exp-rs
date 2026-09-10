@@ -26,7 +26,6 @@ A file under `cases/` holds `{"cases": [...]}`. One case:
     "width": 8, "height": 8,
     "bands": ["red", "swir"],
     "nodata": -9999.0,
-    "crs": "EPSG:32650",
     "pixel_size": 30.0,
     "metadata": {"SICNU_RADIOMETRIC_STATE": "surface_reflectance"}
   },
@@ -55,7 +54,7 @@ A file under `cases/` holds `{"cases": [...]}`. One case:
 | `fixture` | optional synthetic raster generated at runtime (≤ 32×32, deterministic pixel formula — never a checked-in binary) |
 | `steps` | ordered tool calls; each `input`/`asserts` path may reference `$fixture` (generated raster path) and `$tmp` (per-case temp dir) |
 | `foreach` | optional `{"var": "INDEX", "values": [...]}` — the case is expanded deterministically per value; `$INDEX` substitutes into `case_id`, `description`, and step inputs |
-| `expect.success` | required: the tool must succeed/fail exactly so |
+| `expect.success` | the tool must succeed/fail exactly so (defaults to `true`) |
 | `expect.error_code` | required on failure: the typed `errorCode` (never prose matching) |
 | `expect.asserts` | dotted JSON paths with `equals` / `exists` / `contains` |
 | `expect.response_bytes_le` | whole-response size bound (token budget grading) |

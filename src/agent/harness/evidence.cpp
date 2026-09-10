@@ -9,11 +9,12 @@
 #include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QSaveFile>
 
+#include <json/reader.h>
 #include <json/writer.h>
+
+#include <optional>
 
 namespace sicnu::agent::harness::evidence {
 
@@ -36,7 +37,9 @@ std::string compactJson( const Json::Value &doc )
 }
 
 /// Atomic sidecar write following the engine's own #698 convention
-/// (QSaveFile = write to temp + rename in the same directory).
+/// (QSaveFile = write to temp + rename in the same directory). The jsoncpp
+/// serialization is written verbatim — no second parser round-trip that
+/// could silently produce an empty file.
 SidecarResult atomicWrite( const std::string &path, const Json::Value &doc )
 {
   SidecarResult result;
@@ -47,8 +50,12 @@ SidecarResult atomicWrite( const std::string &path, const Json::Value &doc )
     result.error = "cannot open sidecar for write: " + path;
     return result;
   }
-  const QByteArray bytes = QJsonDocument(
-    QJsonDocument::fromJson( QByteArray::fromStdString( compactJson( doc ) ) ) ).toJson();
+  const QByteArray bytes = QByteArray::fromStdString( compactJson( doc ) );
+  if ( bytes.isEmpty() )
+  {
+    result.error = "refusing to write an empty sidecar: " + path;
+    return result;
+  }
   file.write( bytes );
   if ( !file.commit() )
   {
@@ -126,6 +133,10 @@ SidecarResult writeProvenanceSidecarIfAbsent( const std::string &outputPath,
   Json::Value doc = makeEnvelope( "harness_provenance", outputPath );
   doc["source"] = "harness_run_identity";
   doc["run"] = runIdentity;
+  // Narrow the exists-then-write window once more: an engine sidecar landing
+  // between the first check and here must win.
+  if ( QFileInfo::exists( QString::fromStdString( sidecarPath ) ) )
+    return {};
   return atomicWrite( sidecarPath, doc );
 }
 
@@ -191,6 +202,56 @@ SidecarResult writeVerificationEvidence( const std::string &outputPath,
     doc["uncertainty_sidecar"] = outputPath + ".uncertainty.json";
 
   return atomicWrite( outputPath + ".verification.json", doc );
+}
+
+std::optional<ArtifactVerification> readVerificationEvidence( const std::string &outputPath,
+                                                              const std::string &runId )
+{
+  QFile file( QString::fromStdString( outputPath + ".verification.json" ) );
+  if ( !file.open( QIODevice::ReadOnly ) )
+    return std::nullopt;
+  const QByteArray raw = file.readAll();
+  Json::Value doc;
+  Json::CharReaderBuilder builder;
+  std::string errors;
+  std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+  if ( !reader->parse( raw.constData(), raw.constData() + raw.size(), &doc, &errors ) )
+    return std::nullopt;
+  if ( doc.get( "kind", "" ).asString() != "verification_evidence" )
+    return std::nullopt;
+  if ( doc.get( "run", Json::Value() ).get( "run_id", "" ).asString() != runId )
+    return std::nullopt; // a different run overwrote the artifact — re-evaluate
+
+  const Json::Value &record = doc.get( "verification", Json::Value() );
+  if ( !record.isObject() )
+    return std::nullopt;
+
+  ArtifactVerification artifact;
+  artifact.path = outputPath;
+  artifact.kind = record.get( "kind", "" ).asString();
+  const std::string verdict = record.get( "verdict", "" ).asString();
+  if ( verdict == "PASS" )
+    artifact.verdict = Verdict::Pass;
+  else if ( verdict == "PASS_WITH_WARNINGS" )
+    artifact.verdict = Verdict::PassWithWarnings;
+  else if ( verdict == "FAIL" )
+    artifact.verdict = Verdict::Fail;
+  else
+    return std::nullopt;
+
+  for ( const Json::Value &entry : record.get( "checks", Json::Value( Json::arrayValue ) ) )
+  {
+    if ( !entry.isObject() || !entry.isMember( "check" ) || !entry.isMember( "passed" ) )
+      return std::nullopt;
+    VerificationCheck check;
+    check.check = entry.get( "check", "" ).asString();
+    check.passed = entry.get( "passed", false ).asBool();
+    check.severity = entry.get( "severity", check.passed ? "info" : "error" ).asString();
+    check.code = entry.get( "code", "" ).asString();
+    check.details = entry.get( "details", Json::Value( Json::objectValue ) );
+    artifact.checks.push_back( std::move( check ) );
+  }
+  return artifact;
 }
 
 } // namespace sicnu::agent::harness::evidence

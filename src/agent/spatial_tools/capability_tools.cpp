@@ -553,9 +553,11 @@ class SelectModelTool final : public SpatialTool
       // Harness 8.0 (typed context 2.0): the model contract/readiness the
       // agent just observed rides the context ledger so later turns (and
       // harness:explain) see which model the current work assumes.
-      if ( !candidates.empty() )
-        sicnu::agent::harness::ContextLedger::instance().recordModelContract( ranked.front().model.name,
-                                                       candidates[0] );
+      // Incompatible candidates are never recorded as the assumed model
+      // (adversarial review P3).
+      if ( !candidates.empty() && candidates[0].get( "compatible", false ).asBool() )
+        sicnu::agent::harness::ContextLedger::instance().recordModelContract(
+          ranked.front().model.name, candidates[0] );
 
       return SpatialToolResult::ok( out );
     }

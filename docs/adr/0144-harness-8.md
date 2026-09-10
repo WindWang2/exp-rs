@@ -31,7 +31,7 @@ agent loop and deepens the evidence chain instead. The verified gaps:
 
 1. **Typed spatial context 2.0**: DatasetUnderstanding gains typed slots
    (`sensor`, `product_type`, `product_id`, `processing_level`,
-   `acquisition_time`, `radiometric_state`) plus a bounded SICNU_*
+   `acquisition_time`, `radiometric_state`) plus a dataset-level SICNU_*
    passthrough, sparse `nodata`, and `quality_masks` — each fact exactly one
    slot, validator-checked. `ContextLedger` records per-asset contexts with
    read-time stale detection (stat identity) and model contracts (bounded).
