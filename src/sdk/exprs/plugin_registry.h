@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "exprs/plugin_discovery.h"
+#include "exprs/plugin_host_runtime.h"
 #include "exprs/plugin_loader.h"
 #include "exprs/plugin_permissions.h"
 
@@ -40,6 +41,9 @@ struct PluginRegistryOptions
     std::string tempDirectory;
     std::string workspaceRoot;
     std::string dataDirectory;
+    /// Explicit exprs_plugin_host_worker path (empty: locate next to the
+    /// executable). Isolation runtime 5.0.
+    std::string hostProcessWorkerPath;
     std::function<void( const char *, const std::string & )> logSink;
 };
 
@@ -56,6 +60,14 @@ public:
     /// The sink that receives contributions from loaded plugins (owned by
     /// the host runtime). Must be set before any load().
     void setContributionSink( PluginContributionSink *sink ) { mSink = sink; }
+
+    /// Installs the out-of-process hosting strategy (isolation runtime 5.0).
+    /// When installed, native plugins whose manifest declares
+    /// runtime "host-process" are delegated to it; when not installed such
+    /// plugins are refused typed (E6006) instead of silently loading
+    /// in-process. Not owned; must outlive the registry's use.
+    void setHostProcessRuntime( HostProcessRuntime *runtime ) { mHostProcessRuntime = runtime; }
+    HostProcessRuntime *hostProcessRuntime() const { return mHostProcessRuntime; }
 
     /// Rescans roots and re-evaluates validation + policy. Loaded plugins
     /// are untouched (their records keep state Loaded).
@@ -119,6 +131,8 @@ private:
     std::vector<PluginRecord> mRecords;
     PluginDiagnosticLog mDiagnostics;
     PluginContributionSink *mSink = nullptr;
+    HostProcessRuntime *mHostProcessRuntime = nullptr;
+    std::vector<std::string> mHostProcessLoaded; // pluginIds hosted out-of-process
     std::unique_ptr<PluginLoader> mLoader;
     std::vector<LoadedPlugin> mLoaded; // parallel to nothing; lookup by pluginId
     std::unique_ptr<HostServicesV1> mServices;

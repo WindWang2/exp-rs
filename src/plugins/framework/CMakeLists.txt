@@ -29,6 +29,7 @@ target_include_directories( sicnu_plugins_framework
 target_link_libraries( sicnu_plugins_framework
   PUBLIC
     sicnu_sdk
+    sicnu_plugins_hostprocess
     sicnu_operators
     sicnu_processing
     sicnu_agent

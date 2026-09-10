@@ -10,5 +10,6 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${QGIS_OUTPUT_DIRECTORY}/${QGIS_PLUGIN_SUBDI
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${QGIS_OUTPUT_DIRECTORY}/${QGIS_PLUGIN_SUBDIR}")
 
 add_subdirectory(framework)
+add_subdirectory(host)
 add_subdirectory(layer_tree)
 add_subdirectory(processing)

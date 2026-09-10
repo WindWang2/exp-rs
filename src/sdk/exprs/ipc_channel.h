@@ -86,6 +86,9 @@ public:
 
     /// Sends a cancel frame for @p id (host side, e.g. on local timeout).
     void cancel( long long id );
+    /// Sends a cancel frame addressed to ALL in-flight requests (id -1;
+    /// worker dispatches treat it as broadcast). Kill-ladder companion.
+    void cancelAll();
 
     // -- worker side ---------------------------------------------------------
     /// Pops the next incoming request (blocking up to @p timeoutMs).
@@ -139,6 +142,7 @@ private:
     std::condition_variable mRequestCv;
     std::map<long long, Pending> mPending;
     std::deque<Ipc::Envelope> mIncomingRequests;
+    std::vector<Ipc::Envelope> mPendingEvents;   ///< arrived before a sink existed
     std::function<void( const Ipc::Envelope & )> mEventSink;
     std::function<void( long long )> mCancelSink;
     std::string mProtocolFailure;

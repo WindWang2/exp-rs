@@ -6742,6 +6742,27 @@ set_target_properties(hello_plugin PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin
 )
 
+# Isolation runtime 5.0: misbehaving fixture plugin (crash/hang/flood) for
+# the host-process suites + the out-of-process plugin host test.
+add_library(isolation_plugin MODULE fixtures/isolation_plugin/isolation_plugin.cpp)
+target_include_directories(isolation_plugin PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/sdk
+)
+target_link_libraries(isolation_plugin PRIVATE sicnu_operators sicnu_operators_core jsoncpp)
+set_target_properties(isolation_plugin PROPERTIES
+  LIBRARY_OUTPUT_NAME isolation_plugin
+  PREFIX "lib"
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugin_fixtures/isolation_plugin
+)
+
+sicnu_add_sdk_test(test_plugin_host_process)
+target_link_libraries(test_plugin_host_process PRIVATE sicnu_plugins_hostprocess sicnu_operators_core)
+target_compile_definitions(test_plugin_host_process PRIVATE
+  SICNU_TEST_ISOLATION_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/isolation_plugin"
+  SICNU_TEST_PLUGIN_HOST_WORKER="${CMAKE_BINARY_DIR}/exprs_plugin_host_worker.exe"
+)
+
 sicnu_add_test(test_plugin_manifest)
 target_link_libraries(test_plugin_manifest PRIVATE sicnu_sdk)
 

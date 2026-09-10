@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "exprs/ipc_channel.h"
 
+#include <cstdio>
+
 namespace exprs {
 
 namespace {
@@ -244,6 +246,15 @@ void IpcChannel::cancel( long long id )
     sendEnvelope( envelope, error );
 }
 
+void IpcChannel::cancelAll()
+{
+    Ipc::Envelope envelope;
+    envelope.type = Ipc::MessageType::Cancel;
+    envelope.id = -1;
+    std::string error;
+    sendEnvelope( envelope, error );
+}
+
 bool IpcChannel::nextRequest( Ipc::Envelope &request, int timeoutMs )
 {
     std::unique_lock<std::mutex> lock( mMutex );
@@ -301,8 +312,20 @@ bool IpcChannel::sendEvent( const std::string &event, const Json::Value &params 
 
 void IpcChannel::setEventSink( std::function<void( const Ipc::Envelope & )> sink )
 {
-    std::lock_guard<std::mutex> lock( mMutex );
-    mEventSink = std::move( sink );
+    // Events arriving before a sink is installed are QUEUED and flushed
+    // here: the worker.hello handshake races the launcher's registration
+    // (the reader thread starts in the channel constructor).
+    std::vector<Ipc::Envelope> pending;
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        mEventSink = sink;
+        pending.swap( mPendingEvents );
+    }
+    for ( const Ipc::Envelope &event : pending )
+    {
+        if ( sink )
+            sink( event );
+    }
 }
 
 void IpcChannel::setCancelSink( std::function<void( long long )> sink )
@@ -408,6 +431,11 @@ void IpcChannel::handleFrame( const std::string &payload )
         {
             std::lock_guard<std::mutex> lock( mMutex );
             sink = mEventSink;
+            if ( !sink )
+            {
+                mPendingEvents.push_back( std::move( envelope ) );
+                return;
+            }
         }
         if ( sink )
             sink( envelope );
@@ -446,13 +474,25 @@ void IpcChannel::readerLoop()
         }
         if ( status == IpcFrame::ReadStatus::TooLarge )
         {
+            // Hexdump the stream head: a bogus length means framing desynced
+            // or a peer wrote unframed bytes — the dump says which.
+            std::string head;
+            const size_t dumpLen = payload.size() < 32 ? payload.size() : 32;
+            for ( size_t i = 0; i < dumpLen; ++i )
+            {
+                char byte[ 4 ];
+                std::snprintf( byte, sizeof( byte ), "%02x ",
+                               static_cast<unsigned char>( payload[ i ] ) );
+                head += byte;
+            }
+            std::string detailed = error + "; stream head: " + head;
             {
                 std::lock_guard<std::mutex> lock( mMutex );
                 if ( mProtocolFailure.empty() )
-                    mProtocolFailure = error;
+                    mProtocolFailure = detailed;
                 closeLocked();
             }
-            failAllPending( Outcome::Status::ProtocolError, "E6003", error );
+            failAllPending( Outcome::Status::ProtocolError, "E6003", detailed );
             break;
         }
         handleFrame( payload );

@@ -26,6 +26,7 @@
 #include "exprs/plugin_registry.h"
 
 #include <map>
+#include <memory>
 #include <mutex>
 
 namespace sicnu::plugins {
@@ -97,6 +98,7 @@ private:
     void installPluginModelRuntimes( const exprs::PluginRecord &record );
 
     mutable std::mutex mMutex;
+    std::unique_ptr<sicnu::plugins::PluginHostProcessRuntime> mHostProcessRuntime;
     std::map<std::string, OperatorEntry> mOperators;      ///< operatorId -> entry
     std::map<std::string, exprs::PluginModelRuntimeFactoryV1> mModelRuntimeFactories;
     std::map<std::string, std::string> mModelRuntimeOwners; ///< framework -> pluginId

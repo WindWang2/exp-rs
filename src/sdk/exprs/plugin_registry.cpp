@@ -328,6 +328,43 @@ bool PluginRegistry::loadUnlocked( const std::string &pluginId )
         entry->state = PluginState::Loaded;
         return true;
     }
+    if ( entry->manifest.runtime == PluginRuntimeKind::HostProcess )
+    {
+        // Isolation runtime 5.0: the plugin runs in exprs_plugin_host_worker.
+        if ( !mHostProcessRuntime )
+        {
+            mDiagnostics.add( PluginDiagnosticCode::HostProcessUnavailable,
+                              PluginDiagnosticSeverity::Error,
+                              "manifest requests runtime 'host-process' but no "
+                              "host-process runtime is installed in this process",
+                              pluginId );
+            entry->state = PluginState::Failed;
+            return false;
+        }
+        if ( !mSink )
+        {
+            mDiagnostics.add( PluginDiagnosticCode::RegistrationFailed,
+                              PluginDiagnosticSeverity::Error,
+                              "no contribution sink installed", pluginId );
+            return false;
+        }
+        entry->state = PluginState::Loading;
+        const bool ok =
+            mHostProcessRuntime->loadPlugin( *entry, *mServices, *mSink, mDiagnostics );
+        if ( ok )
+        {
+            mHostProcessLoaded.push_back( pluginId );
+            entry->state = PluginState::Loaded;
+            mSink->pluginLoaded( pluginId );
+        }
+        else
+        {
+            if ( mSink )
+                mSink->revokePlugin( pluginId );
+            entry->state = PluginState::Failed;
+        }
+        return ok;
+    }
     if ( !mSink )
     {
         mDiagnostics.add( PluginDiagnosticCode::RegistrationFailed,
@@ -388,6 +425,65 @@ const LoadedPlugin *PluginRegistry::loaded( const std::string &pluginId ) const
 
 bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
 {
+    // Host-process plugins (isolation runtime 5.0) follow the SAME
+    // barrier-protected sequence, but the teardown step delegates to the
+    // runtime (shutdown request, kill ladder, session close) instead of
+    // dlclose. No plugin code is ever mapped here, so the UAF window the
+    // in-process ordering guards against cannot exist; the barrier still
+    // guards against contributions outliving their session.
+    if ( std::find( mHostProcessLoaded.begin(), mHostProcessLoaded.end(), pluginId )
+             != mHostProcessLoaded.end()
+         && std::none_of( mLoaded.begin(), mLoaded.end(), [&]( const LoadedPlugin &e ) {
+                return e.pluginId == pluginId;
+            } ) )
+    {
+        {
+            std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+            if ( PluginRecord *entry = record( pluginId ) )
+                entry->state = PluginState::Quiescing;
+        }
+        const int budget = timeoutMs > 0 ? timeoutMs : unloadTimeoutMs();
+        if ( mSink )
+            mSink->beginPluginDrain( pluginId );
+        const bool idle = mSink ? mSink->waitPluginIdle( pluginId, budget ) : true;
+        if ( !idle )
+        {
+            if ( mSink )
+                mSink->cancelPluginDrain( pluginId );
+            std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+            if ( PluginRecord *entry = record( pluginId ) )
+            {
+                if ( entry->state == PluginState::Quiescing )
+                    entry->state = PluginState::Loaded;
+            }
+            mDiagnostics.add( PluginDiagnosticCode::PluginInUse,
+                              PluginDiagnosticSeverity::Error,
+                              "unload refused: plugin is in use (execution still active after "
+                                  + std::to_string( budget )
+                                  + " ms); stop the running task first",
+                              pluginId );
+            return false;
+        }
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        if ( mSink )
+            mSink->revokePlugin( pluginId );
+        if ( mHostProcessRuntime )
+        {
+            if ( !mHostProcessRuntime->unloadPlugin( pluginId, mDiagnostics ) )
+                mDiagnostics.add( PluginDiagnosticCode::LibraryLoadFailed,
+                                  PluginDiagnosticSeverity::Warning,
+                                  "host-process worker did not shut down cleanly; "
+                                  "process was killed",
+                                  pluginId );
+        }
+        mHostProcessLoaded.erase(
+            std::remove( mHostProcessLoaded.begin(), mHostProcessLoaded.end(), pluginId ),
+            mHostProcessLoaded.end() );
+        if ( PluginRecord *entry = record( pluginId ) )
+            entry->state = PluginState::Unloaded;
+        return true;
+    }
+
     // Unload sequence (issue #747), in order:
     //   1. arm the drain (new dispatch refused) and mark the record Quiescing;
     //   2. wait bounded for in-flight executions — refusing (state restored)
@@ -468,6 +564,26 @@ void PluginRegistry::unloadAll()
     // ones. A plugin that does not drain within the budget is left loaded —
     // its mapping is reclaimed by process exit; revoking/dlclosing it would
     // unmap code under a running thread.
+    // Host-process plugins first, through the same barrier-protected
+    // unload() branch (bounded by one shared deadline across them).
+    if ( !mHostProcessLoaded.empty() )
+    {
+        std::vector<std::string> oopIds;
+        {
+            std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+            oopIds = mHostProcessLoaded;
+        }
+        const auto sharedDeadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds( unloadTimeoutMs() );
+        for ( const std::string &id : oopIds )
+        {
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                sharedDeadline - std::chrono::steady_clock::now() );
+            if ( remaining.count() <= 0 )
+                break;
+            unload( id, static_cast<int>( remaining.count() ) );
+        }
+    }
     std::vector<std::string> ids;
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
@@ -576,7 +692,10 @@ bool PluginRegistry::ensureLoaded( const std::string &pluginId )
 bool PluginRegistry::isLoaded( const std::string &pluginId ) const
 {
     std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-    return findLoaded( mLoaded, pluginId ) != nullptr;
+    if ( findLoaded( mLoaded, pluginId ) )
+        return true;
+    return std::find( mHostProcessLoaded.begin(), mHostProcessLoaded.end(), pluginId )
+           != mHostProcessLoaded.end();
 }
 
 std::string PluginRegistry::userIndexPath() const

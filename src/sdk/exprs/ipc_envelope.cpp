@@ -25,8 +25,8 @@ IpcError IpcError::fromJson( const Json::Value &json )
     error.message = json.get( "message", "" ).asString();
     error.retryable = json.get( "retryable", false ).asBool();
     const Json::Value &data = json[ "data" ];
-    if ( data.isObject() )
-        error.data = data;
+    if ( !data.isNull() )
+        error.data = data;   // object OR array (e.g. diagnostic log batches)
     return error;
 }
 
@@ -94,6 +94,8 @@ Json::Value encodeEnvelope( const Envelope &envelope )
     if ( envelope.type == MessageType::Event )
     {
         json["event"] = envelope.method;
+        if ( !envelope.params.isNull() )
+            json["params"] = envelope.params;
     }
     else if ( envelope.type == MessageType::Request )
     {
