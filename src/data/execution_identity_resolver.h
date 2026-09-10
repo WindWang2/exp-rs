@@ -10,11 +10,10 @@
 // artifact in object storage): its bytes can change server-side while the
 // local cache still holds a valid-looking registration.
 //
-// This seam is the single authoritative extension point for that: a host
-// that owns a remote identity source (ETag, content hash from a STAC
-// checksum field, object-store version id) installs a resolver; the
-// fingerprint input collector consults it AFTER the local resolution
-// chain missed. The contract is fail-closed:
+// STATUS (7.0): SEAM ONLY — the contract and the install point ship here,
+// but no fingerprint collector consults it yet; wiring it into the input
+// collector is the follow-up that activates remote-identity caching.
+// The contract is fail-closed:
 //   - an empty return means "cannot identify" ⇒ the input is
 //     uncacheable (no fingerprint), never a guessed identity;
 //   - the returned token must be STABLE across processes and sessions

@@ -1433,7 +1433,10 @@ void TaskCenter::processNextQueuedTasks()
         launch.request.params = variantMapToJsonParams( m_tasks[id].parameterMap );
         launch.request.priority = static_cast<int>( m_tasks[id].priority );
         launch.request.clientTag = "task:" + std::to_string( id );
-        launch.onCancel = std::move( m_tasks[id].jobCancelHook );
+        // COPIED, not moved: a transient auto-retry re-stages this task and
+        // must re-install the caller's cancel hook (a moved-out hook would
+        // leave the retry without its cancellation mechanism).
+        launch.onCancel = m_tasks[id].jobCancelHook;
         if ( m_tasks[id].hasJobRequest && m_tasks[id].jobExecutor )
         {
             launch.executor = m_tasks[id].jobExecutor;
@@ -1931,9 +1934,16 @@ namespace
 bool isTransientExecutionError( const QString &error )
 {
     const QString message = error.trimmed();
+    // Every prefix below is produced by the worker INFRASTRUCTURE only — in
+    // all of them the operator provably never produced a result, so a bounded
+    // re-run cannot double-produce. (The prefixes are infrastructure-owned
+    // namespace; an operator imitating them only widens its own retry
+    // budget, which stays bounded by maxAutoRetries.)
     return message.startsWith( QStringLiteral( "worker crashed:" ) )
            || message.startsWith( QStringLiteral( "worker timeout:" ) )
-           || message.startsWith( QStringLiteral( "worker protocol: cannot start" ) );
+           || message.startsWith( QStringLiteral( "worker protocol: cannot start" ) )
+           || message.startsWith( QStringLiteral( "worker protocol: cannot send" ) )
+           || message.startsWith( QStringLiteral( "worker protocol: malformed frame" ) );
 }
 } // namespace
 
@@ -2005,6 +2015,10 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
                     .arg( info.autoRetryAttempts )
                     .arg( m_maxAutoRetries )
                     .arg( error ) );
+            // Keep the pipeline step status truthful during the retry window
+            // (the legacy path recomputes it below; this early branch does
+            // not reach that recompute).
+            updatePipelineForTaskLocked( taskId );
             sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
                 sicnu::runtime::observability::Counter::TaskAutoRetries );
             queueTaskUpdatedLocked( taskId );

@@ -41,31 +41,24 @@
 #define SICNU_WORKER_EXE "sicnu_worker"
 #endif
 
-// Case-boundary tracing on stderr (fflush'd): shows exactly where a long or
-// wedged run stalls. Temporary diagnostic aid — remove before merge.
-#include <catch2/catch_reporter_event_listener.hpp>
-#include <catch2/catch_test_case_info.hpp>
-#include <cstdio>
-namespace {
-class Ep7TraceListener : public Catch::EventListenerBase
+// Headless Windows: route Debug-CRT assertions/errors to stderr instead of
+// a modal dialog that blocks an unattended run forever.
+#if defined( _MSC_VER )
+#include <crtdbg.h>
+namespace
 {
-  public:
-    using Catch::EventListenerBase::EventListenerBase;
-    void testCaseStarting( Catch::TestCaseInfo const &info ) override
-    {
-        std::fprintf( stderr, "[EP7-CASE-START] %s
-", info.name.c_str() );
-        std::fflush( stderr );
-    }
-    void testCaseEnded( Catch::TestCaseStats const &stats ) override
-    {
-        std::fprintf( stderr, "[EP7-CASE-END] %s
-", stats.testInfo->name.c_str() );
-        std::fflush( stderr );
-    }
-};
-} // namespace
-CATCH_REGISTER_LISTENER( Ep7TraceListener )
+const bool ep7CrtInit = [] {
+    _CrtSetReportMode( _CRT_WARN, _CRTDBG_MODE_FILE | _CRTDBG_MODE_DEBUG );
+    _CrtSetReportFile( _CRT_WARN, _CRTDBG_FILE_STDERR );
+    _CrtSetReportMode( _CRT_ERROR, _CRTDBG_MODE_FILE | _CRTDBG_MODE_DEBUG );
+    _CrtSetReportFile( _CRT_ERROR, _CRTDBG_FILE_STDERR );
+    _CrtSetReportMode( _CRT_ASSERT, _CRTDBG_MODE_FILE | _CRTDBG_MODE_DEBUG );
+    _CrtSetReportFile( _CRT_ASSERT, _CRTDBG_FILE_STDERR );
+    return true;
+}();
+}
+#endif
+
 
 using sicnu::TaskCenter;
 using sicnu::processing::WorkerExecutionMode;

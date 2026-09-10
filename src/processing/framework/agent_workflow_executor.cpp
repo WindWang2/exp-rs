@@ -82,6 +82,11 @@ Json::Value makePlanErrorResult( int totalSteps, long pipelineId, const std::str
 /// failures are recorded per step ("registrationError") and never flip the
 /// step's status to success; a skipped registration (no catalog) is
 /// reported as such instead of being silent.
+/// THREAD AFFINITY: DataManager mutators are catalog-thread-affine. The
+/// blocking plan path runs this on the CALLER's thread — callers off the
+/// catalog thread get per-step "asset registration failed" entries
+/// (fail-closed, visible) instead of registered assets; the async path
+/// runs on the executor's event-loop thread and delivers registrations.
 void stampPlanResultProvenance( data::DataManager *dataManager, long pipelineId,
                                 Json::Value *planResultInOut )
 {

@@ -2,7 +2,7 @@
 
 | 里程碑 | 状态 | 证据 |
 |---|---|---|
-| M0 基线 | in_progress | worktree+档案 ✓；基线构建运行中 |
+| M0 基线 | done | Windows 全量首建+测试通过（master 上该平台从未绿过执行面套件） |
 | M1 protocol | code-complete | worker_protocol.h 可选 caps/ack/code/outputs；sicnu_worker caps+ack+codes+outputs 清单；host/pool stderr 环形诊断+progress 透传；test_worker_host 新增 4 组用例 |
 | M2 worker wiring | code-complete | worker_execution_route.{h,cpp}（off/auto/require、configured-mode fail-closed、隔离槽位上限）；LocalWorkerPool 每-worker 线程亲缘 + 槽位自愈；TaskCenter staging/flush/shutdown 接线；SICNU_WORKER_EXECUTION/PROGRAM/MAX_CONCURRENT |
 | M3 admission | code-complete | Windows RSS 采样修复（psapi，门禁上线）；budget2 +tempDisk 维度；TaskCenter tempDisk/VRAM 门 + ioHeavy 并发门（默认全关）；descriptor 新增 executionPreference/ioHeavy + 序列化 |
@@ -12,7 +12,7 @@
 | M7 cache | code-complete | serve 后目标文件尺寸验证（TOCTOU 关闭）；execution_identity_resolver seam（本地默认=现行为）；磁盘 GC 配额已存在（SICNU_ARTIFACT_CACHE_MAX_GB 默认 8GB，避免重复开发） |
 | M8 concurrency | code-complete | waitForTask/waitForPipeline 审计结论：QWaitCondition 等待期释放锁、无持锁等待缺陷（记录 REVIEW_LOG）；池析构竞态关闭（m_destroying 拒绝新 run） |
 | M9 fault/stress/perf | code-complete（测试部分） | tests/test_execution_plane_7.cpp：retry×2、dag-保持、路由 e2e、fail-closed、tempdisk/VRAM hold+never-starve、RSS parity、queued-cancel、10k rapid、shutdown；RUN_SERIAL |
-| M10 review/PR | pending | subagent #2 adversarial review → remediation → master 同步 → PR |
+| M10 review/PR | in_progress | 评审 0×P0/2×P1/10×P2 → P1 全修+P2 处置 → 复测 9/9+12/12+8/11 |
 
 ## M0 记录
 - 2026-09-09 worktree 建立 `../exp-rs-execution-plane-runtime-7`，分支
@@ -37,3 +37,10 @@
 5. 不做：worker 进程 Windows Job Object（记为已知限制，stdin-EOF 契约 +
    kill 兜底已保证 GUI 不受 worker 崩溃影响）；moved-output/changed-operator
    resume（M5 剩余，见 FINAL_REPORT）。
+
+
+## 复测证据（P1/P2 修复后, 2026-09-10）
+- run_all_ep7.cmd（逐用例独立进程）：**9 passed, 0 failed**
+- test_worker_host：**All tests passed (56 assertions in 12 test cases)**
+- run_fence.cmd：**8 passed, 3 failed**（3 个为既有 Windows 平台限制）
+- 性能：10k 短任务 drain **83.294 s**（Debug, --durations）

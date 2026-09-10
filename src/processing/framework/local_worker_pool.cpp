@@ -78,22 +78,16 @@ bool LocalWorkerPool::start( const LocalWorkerPoolConfig &config, QString *error
     }
     // Pre-warm: spawn+handshake the minimum now so the first job skips the
     // process start cost. A warm-up failure is not fatal (lazy spawn retries
-    // on demand); it only means the pool starts cold. Worker spawn/retire
-    // lock the pool mutex themselves — never call them with it held.
+    // on demand); it only means the pool starts cold. Spawning happens
+    // WITHOUT the pool mutex (P1: process waits never under m_mutex).
     for ( int i = 0; i < m_config.minWarmWorkers; ++i )
     {
-        std::unique_ptr<Worker> worker;
-        {
-            std::lock_guard<std::mutex> lock( m_mutex );
-            worker = acquireWorkerLocked();
-        }
+        auto worker = spawnWorker();
         if ( !worker )
             break;
-        {
-            std::lock_guard<std::mutex> lock( m_mutex );
-            m_idle.push_back( std::move( worker ) );
-            m_idleChanged.notify_all();
-        }
+        std::lock_guard<std::mutex> lock( m_mutex );
+        m_idle.push_back( std::move( worker ) );
+        m_idleChanged.notify_all();
     }
     return true;
 }
@@ -117,85 +111,87 @@ bool LocalWorkerPool::isRunning() const
     return m_running;
 }
 
-std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::acquireWorkerLocked()
+// Tears down a worker that is ALREADY removed from the pool's accounting.
+// NO pool lock held. Bounded (~2s): idle workers have no in-flight job, so a
+// short shutdown window followed by a hard kill loses nothing.
+void LocalWorkerPool::teardownWorker( std::unique_ptr<Worker> worker )
 {
-    // QProcess affinity (7.0): only a worker spawned by THIS thread is
-    // drivable here. Scan the idle list for an owned healthy worker, recycle
-    // lifetime-exhausted owned workers inline, keep foreign workers aside.
-    const Qt::HANDLE self = QThread::currentThreadId();
+    if ( !worker )
+        return;
+    if ( worker->process && worker->process->state() == QProcess::Running )
+    {
+        workerWriteLine( *worker->process, sicnu::runtime::worker::makeShutdownRequest() );
+        worker->process->waitForFinished( 1000 );
+        if ( worker->process->state() == QProcess::Running )
+        {
+            worker->process->kill();
+            worker->process->waitForFinished( 1000 );
+        }
+    }
+    worker->process.reset();
+}
+
+// m_mutex HELD. Pops one drivable (QProcess-affine to @p self, lifetime
+// budget left) idle worker. Lifetime-exhausted owned workers and, under slot
+// pressure, the oldest foreign idle worker are moved to @a teardownOut with
+// their m_alive accounting already applied; the CALLER tears them down after
+// releasing the mutex (P1: process waits must never happen under m_mutex).
+std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::takeIdleWorkerLocked(
+    Qt::HANDLE self, std::unique_ptr<Worker> &teardownOut )
+{
     std::unique_ptr<Worker> ownedHealthy;
-    std::deque<std::unique_ptr<Worker>> foreignIdle;
+    std::deque<std::unique_ptr<Worker>> keep;
     while ( !m_idle.empty() )
     {
         auto worker = std::move( m_idle.front() );
         m_idle.pop_front();
         const bool owned = !worker->ownerThread || worker->ownerThread == self;
-        if ( !ownedHealthy && owned )
+        const qint64 idleMs = nowMs() - worker->lastUsedMs;
+        const bool lifetimeExhausted = worker->jobsDone >= m_config.maxJobsPerWorker
+                                       || idleMs > m_config.idleRecycleAfter.count();
+        const bool processAlive = worker->process->state() == QProcess::Running;
+        if ( !ownedHealthy && owned && !lifetimeExhausted && processAlive )
         {
-            const qint64 idleMs = nowMs() - worker->lastUsedMs;
-            const bool lifetimeExhausted = worker->jobsDone >= m_config.maxJobsPerWorker
-                                           || idleMs > m_config.idleRecycleAfter.count();
-            if ( lifetimeExhausted || worker->process->state() != QProcess::Running )
-            {
-                ++m_totalRecycles;
-                // m_mutex is held: tear the process down inline (rare path).
-                if ( worker->process->state() == QProcess::Running )
-                {
-                    workerWriteLine( *worker->process, sicnu::runtime::worker::makeShutdownRequest() );
-                    worker->process->waitForFinished( 3000 );
-                    if ( worker->process->state() == QProcess::Running )
-                    {
-                        worker->process->kill();
-                        worker->process->waitForFinished( 3000 );
-                    }
-                }
-                worker->process.reset();
-                if ( m_alive > 0 )
-                    --m_alive;
-                m_idleChanged.notify_all();
-                continue;
-            }
             ownedHealthy = std::move( worker );
             continue;
         }
-        foreignIdle.push_back( std::move( worker ) );
-    }
-
-    // Slot pressure self-healing: when this thread has no drivable worker and
-    // the global cap is reached, force-retire the oldest foreign idle worker
-    // so a thread that parked its workers and died cannot starve new callers.
-    if ( !ownedHealthy && m_alive >= m_config.maxWorkers && !foreignIdle.empty() )
-    {
-        auto victim = std::move( foreignIdle.front() );
-        foreignIdle.pop_front();
-        if ( victim->process->state() == QProcess::Running )
+        if ( owned && ( lifetimeExhausted || !processAlive ) )
         {
-            workerWriteLine( *victim->process, sicnu::runtime::worker::makeShutdownRequest() );
-            victim->process->waitForFinished( 3000 );
-            if ( victim->process->state() == QProcess::Running )
-            {
-                victim->process->kill();
-                victim->process->waitForFinished( 3000 );
-            }
+            // Recycle: accounting applied now, teardown after unlock.
+            ++m_totalRecycles;
+            if ( m_alive > 0 )
+                --m_alive;
+            m_idleChanged.notify_all();
+            teardownOut = std::move( worker );
+            continue;
         }
-        victim->process.reset();
+        keep.push_back( std::move( worker ) );
+    }
+    if ( !ownedHealthy && m_alive >= m_config.maxWorkers && !keep.empty() )
+    {
+        // Slot pressure self-healing: force-retire the OLDEST idle worker
+        // (foreign by construction — owned ones were scanned above) so a
+        // thread that parked its workers and died cannot starve new callers.
+        auto victim = std::move( keep.front() );
+        keep.pop_front();
         ++m_totalRecycles;
         if ( m_alive > 0 )
             --m_alive;
         m_idleChanged.notify_all();
+        teardownOut = std::move( victim );
     }
+    m_idle = std::move( keep );
+    return ownedHealthy;
+}
 
-    m_idle = std::move( foreignIdle );
-    if ( ownedHealthy )
-        return ownedHealthy;
-
-    // Pool has no drivable idle worker: spawn a fresh one within the global
-    // bound (or wait — handled by the caller's loop when m_alive is at the
-    // cap).
-    if ( m_alive >= m_config.maxWorkers )
-        return nullptr;
+// NO pool lock held: spawns the worker process and runs the ready/handshake
+// (worst case 30s). m_config is read without the mutex — the shared pool is
+// never restarted while running; direct-use pools must not call start()
+// concurrently with run() (documented contract).
+std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::spawnWorker()
+{
     auto worker = std::make_unique<Worker>();
-    worker->ownerThread = self;
+    worker->ownerThread = QThread::currentThreadId();
     worker->process = std::make_unique<QProcess>();
     worker->process->setProgram( m_config.workerProgram );
     worker->process->setArguments(
@@ -220,10 +216,12 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::acquireWorkerLocked()
                            &worker->diagnostics, &badFrame )
          || frame["op"].asString() != "ready" )
     {
-        ++m_totalCrashes;
+        {
+            std::lock_guard<std::mutex> lock( m_mutex );
+            ++m_totalCrashes;
+        }
         telemetry::ExecutionTelemetry::instance().recordSimple(
             telemetry::EventKind::WorkerStatus, -1, 0, "worker-pool:handshake-failed" );
-        // m_mutex is held: inline teardown, not retireWorker (which locks).
         if ( worker->process->state() == QProcess::Running )
         {
             worker->process->kill();
@@ -245,7 +243,6 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::acquireWorkerLocked()
                                                                - spawnAt ).count();
     worker->startedMs = nowMs();
     worker->lastUsedMs = worker->startedMs;
-    ++m_alive;
     telemetry::ExecutionTelemetry::instance().increment( telemetry::Counter::WorkersSpawned );
     telemetry::ExecutionTelemetry::instance().recordSimple(
         telemetry::EventKind::WorkerStatus, -1, 0, "worker-pool:spawned" );
@@ -459,43 +456,87 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
 
     const auto giveUpBy = std::chrono::steady_clock::now() + m_config.jobTimeout;
     int spawnAttempts = 0;
+    const Qt::HANDLE self = QThread::currentThreadId();
     for ( ;; )
     {
         std::unique_ptr<Worker> worker;
+        std::unique_ptr<Worker> teardown;
+        bool reserveSpawn = false;
+        bool waitRequired = false;
         {
             std::unique_lock<std::mutex> lock( m_mutex );
-            if ( !m_running )
+            if ( !m_running || m_destroying )
                 throw std::runtime_error( "worker pool: pool is not running" );
-            worker = acquireWorkerLocked();
-            if ( !worker && m_alive >= m_config.maxWorkers )
+            worker = takeIdleWorkerLocked( self, teardown );
+            if ( !worker )
             {
-                // All workers busy: wait for one to come back (bounded by the
-                // job timeout so a stuck pool cannot wait forever).
-                if ( !m_idleChanged.wait_for( lock, m_config.jobTimeout, [&] {
-                         return !m_idle.empty() || m_alive < m_config.maxWorkers || !m_running;
-                     } ) )
+                if ( m_alive < m_config.maxWorkers )
                 {
-                    throw std::runtime_error( "worker timeout: no worker became available" );
+                    // Reserve the slot NOW (under the lock) so concurrent
+                    // acquirers cannot oversubscribe; the spawn itself runs
+                    // with the lock RELEASED (P1: process spawn + 30s
+                    // handshake must never stall the whole pool).
+                    ++m_alive;
+                    reserveSpawn = true;
                 }
-                if ( !m_running )
-                    throw std::runtime_error( "worker pool: pool is not running" );
-                continue;
+                else if ( teardown )
+                {
+                    // The force-retired victim freed a slot: use it.
+                    --m_alive;
+                    reserveSpawn = true;
+                }
+                else
+                {
+                    waitRequired = true;
+                }
             }
         }
-        if ( !worker )
+        // Teardown AFTER unlock: bounded waits on an idle worker (no
+        // in-flight job → nothing to lose by the short kill ladder).
+        if ( teardown )
+            teardownWorker( std::move( teardown ) );
+        if ( waitRequired )
         {
-            // Cannot spawn: bounded fail-fast retry (transient fork pressure
-            // self-heals; a genuinely broken program fails within seconds,
-            // not after the full job timeout).
-            ++spawnAttempts;
-            if ( spawnAttempts >= 3
-                 || std::chrono::steady_clock::now() >= giveUpBy )
-                throw std::runtime_error( "worker protocol: cannot start "
-                                          + m_config.workerProgram.toStdString() );
-            std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+            // All slots busy and nothing reclaimable: wait for a release
+            // (bounded by the job timeout so a stuck pool cannot wait
+            // forever).
+            std::unique_lock<std::mutex> lock( m_mutex );
+            if ( !m_idleChanged.wait_for( lock, m_config.jobTimeout, [&] {
+                     return !m_idle.empty() || m_alive < m_config.maxWorkers || !m_running;
+                 } ) )
+            {
+                throw std::runtime_error( "worker timeout: no worker became available" );
+            }
+            if ( !m_running || m_destroying )
+                throw std::runtime_error( "worker pool: pool is not running" );
             continue;
         }
-        spawnAttempts = 0;
+        if ( reserveSpawn )
+        {
+            worker = spawnWorker(); // no lock held here
+            if ( !worker )
+            {
+                {
+                    std::lock_guard<std::mutex> lock( m_mutex );
+                    if ( m_alive > 0 )
+                        --m_alive;
+                    m_idleChanged.notify_all();
+                }
+                // Cannot spawn: bounded fail-fast retry (transient fork
+                // pressure self-heals; a genuinely broken program fails
+                // within seconds, not after the full job timeout).
+                ++spawnAttempts;
+                if ( spawnAttempts >= 3
+                     || std::chrono::steady_clock::now() >= giveUpBy )
+                    throw std::runtime_error( "worker protocol: cannot start "
+                                              + m_config.workerProgram.toStdString() );
+                std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+                continue;
+            }
+            spawnAttempts = 0;
+        }
+        if ( !worker )
+            continue; // defensive: no idle, no reservation, no wait flagged
 
         Json::Value payload;
         std::string errorMessage;

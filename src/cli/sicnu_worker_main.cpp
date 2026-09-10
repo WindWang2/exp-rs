@@ -111,14 +111,23 @@ Json::Value collectOutputIdentity( const Json::Value &payload )
     return manifest;
 }
 
-int runHangJob( const std::string &jobId, const std::atomic<bool> &cancel )
+int runHangJob( const std::string &jobId, const std::atomic<bool> &cancel,
+                std::mutex &stdoutMutex )
 {
-    emitFrame( "progress", jobId, Json::Value{} );
+    {
+        std::lock_guard<std::mutex> lock( stdoutMutex );
+        emitFrame( "progress", jobId, Json::Value{} );
+    }
     while ( !cancel.load() )
         std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+    std::lock_guard<std::mutex> lock( stdoutMutex );
     emitFrame( "error", jobId, [] {
         Json::Value e;
         e["message"] = "cancelled";
+        // The structured code mirrors the legacy exact text; a MASTER host
+        // (no "code" support) still matches message=="cancelled" byte-for-
+        // byte, so mixed host/worker installs keep their cancellation
+        // semantics.
         e["code"] = "cancelled";
         return e;
     }() );
@@ -258,7 +267,7 @@ int main( int argc, char **argv )
             } activeGuard{ jobActive };
             if ( algorithmId == "__hang__" )
             {
-                runHangJob( jobId, cancelFlag );
+                runHangJob( jobId, cancelFlag, stdoutMutex );
                 return;
             }
             try

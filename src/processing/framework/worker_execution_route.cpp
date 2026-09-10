@@ -23,14 +23,16 @@ namespace
 namespace telemetry = sicnu::runtime::observability;
 
 std::atomic<int> g_isolatedJobLimit{ 2 };
-std::atomic<int> g_isolatedJobsRunning{ 0 };
 /// CONFIGURED execution mode: -1 = not yet read (first read consumes the
 /// environment), otherwise an explicit configuration (pool start or the
 /// host/test hook) wins over the environment.
 std::atomic<int> g_configuredMode{ -1 };
 
 std::mutex g_poolMutex;
-LocalWorkerPool g_pool;
+// Intentionally leaked (never destroyed): a process-lifetime singleton whose
+// destruction order against ~TaskCenter is unspecified — destroying it at
+// exit could race a late shutdownSharedWorkerPool. shutdown() is explicit.
+LocalWorkerPool *g_pool = new LocalWorkerPool();
 bool g_poolStarted = false;
 WorkerExecutionConfig g_activeConfig;
 
@@ -151,7 +153,7 @@ bool ensureSharedWorkerPoolStarted( const WorkerExecutionConfig &config, QString
     effective.pool.minWarmWorkers = 0;
     g_isolatedJobLimit.store( std::max( 1, effective.maxConcurrentIsolatedJobs ) );
     QString error;
-    if ( !g_pool.start( effective.pool, &error ) )
+    if ( !g_pool->start( effective.pool, &error ) )
     {
         if ( errorOut )
             *errorOut = error;
@@ -171,7 +173,7 @@ bool ensureSharedWorkerPoolStarted( const WorkerExecutionConfig &config, QString
 LocalWorkerPool *sharedWorkerPool()
 {
     std::lock_guard<std::mutex> lock( g_poolMutex );
-    return g_poolStarted ? &g_pool : nullptr;
+    return g_poolStarted ? g_pool : nullptr;
 }
 
 void shutdownSharedWorkerPool()
@@ -179,7 +181,7 @@ void shutdownSharedWorkerPool()
     std::lock_guard<std::mutex> lock( g_poolMutex );
     if ( !g_poolStarted )
         return;
-    g_pool.shutdown();
+    g_pool->shutdown();
     g_poolStarted = false;
     g_activeConfig = WorkerExecutionConfig{};
     telemetry::ExecutionTelemetry::instance().recordSimple(

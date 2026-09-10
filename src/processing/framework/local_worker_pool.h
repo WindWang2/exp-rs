@@ -139,9 +139,22 @@ class LocalWorkerPool
         ProtocolError,
     };
 
-    /// Returns an idle healthy worker (spawning/recycling as needed), or
-    /// nullptr on shutdown/cannot-spawn. m_mutex held.
-    std::unique_ptr<Worker> acquireWorkerLocked();
+    /// Pops one drivable idle worker for @p self (QProcess-affine, lifetime
+    /// budget left), or nullptr. m_mutex HELD. Workers to retire (lifetime
+    /// exhausted, dead process, or the force-retired oldest idle worker under
+    /// slot pressure) come back via @a teardownOut with their m_alive
+    /// accounting already applied; the CALLER tears them down after releasing
+    /// the mutex — process waits must never happen under m_mutex (P1).
+    std::unique_ptr<Worker> takeIdleWorkerLocked( Qt::HANDLE self,
+                                                  std::unique_ptr<Worker> &teardownOut );
+    /// Spawns + handshakes a worker for the calling thread (worst case ~30s).
+    /// NO pool lock held. m_config is read without the mutex: the shared pool
+    /// is never restarted while running; direct-use pools must not call
+    /// start() concurrently with run().
+    std::unique_ptr<Worker> spawnWorker();
+    /// Tears down a worker already removed from the pool's accounting. NO
+    /// lock held, bounded waits (~2s): idle workers have no in-flight job.
+    void teardownWorker( std::unique_ptr<Worker> worker );
     /// Runs one job on @a worker; never returns the worker to the pool on a
     /// non-Result outcome.
     Outcome runOnWorker( Worker &worker, const std::string &jobId,
