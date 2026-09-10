@@ -8,8 +8,10 @@
 #include "geospatial/stac/stac_client.h"
 
 #include "geospatial/util/resource_uri.h"
+#include "geospatial/util/time_normalization.h"
 
 #include <algorithm>
+#include <map>
 #include <set>
 #include <cctype>
 #include <sstream>
@@ -495,30 +497,130 @@ std::string StacClient::displayAssetHref( const StacAsset &asset )
   return uri.display();
 }
 
-std::vector<StacSeriesEntry> buildTemporalSeries( const std::vector<StacItem> &items )
+namespace
 {
-  std::vector<StacSeriesEntry> series;
-  series.reserve( items.size() );
-  for ( const StacItem &item : items )
+
+/// The item's effective instant: the parsed epoch-nanoseconds of the item
+/// datetime (or range start when datetime is a range-only declaration), plus
+/// whether an instant exists at all. Parse-failure keeps `hasInstant` false so
+/// the ordering falls back to the raw-string comparison (never a guess).
+struct EffectiveInstant
+{
+    bool hasInstant = false;
+    std::int64_t epochNanos = 0;
+    std::string id;
+    std::size_t inputOrder = 0;
+    bool hasDate = false;
+};
+
+EffectiveInstant effectiveInstantOf( const StacItem &item, std::size_t order )
+{
+  EffectiveInstant instant;
+  instant.id = item.id;
+  instant.inputOrder = order;
+  const std::string &verbatim = !item.datetime.empty() ? item.datetime : item.startDatetime;
+  instant.hasDate = !verbatim.empty();
+  if ( !item.datetimeUtc.empty() )
+  {
+    // Prefer the parse-time normalized instant when present.
+    const InstantParse normalized = parseIso8601Instant( item.datetimeUtc );
+    if ( normalized.ok )
+    {
+      instant.hasInstant = true;
+      instant.epochNanos = normalized.epochNanos;
+    }
+  }
+  if ( !instant.hasInstant )
+  {
+    const InstantParse parsed = parseIso8601Instant( verbatim );
+    if ( parsed.ok )
+    {
+      instant.hasInstant = true;
+      instant.epochNanos = parsed.epochNanos;
+    }
+  }
+  return instant;
+}
+
+} // namespace
+
+StacSeries buildTemporalSeriesDetailed( const std::vector<StacItem> &items )
+{
+  StacSeries series;
+  series.entries.reserve( items.size() );
+  std::vector<EffectiveInstant> instants;
+  instants.reserve( items.size() );
+  for ( std::size_t i = 0; i < items.size(); ++i )
   {
     StacSeriesEntry entry;
-    entry.item = item;
-    entry.datetime = !item.datetime.empty() ? item.datetime : item.startDatetime;
-    entry.canonical = stacItemToCanonical( item );
-    series.push_back( std::move( entry ) );
+    entry.item = items[i];
+    entry.datetime = !items[i].datetime.empty() ? items[i].datetime : items[i].startDatetime;
+    entry.canonical = stacItemToCanonical( items[i] );
+    series.entries.push_back( std::move( entry ) );
+    instants.push_back( effectiveInstantOf( items[i], i ) );
   }
-  std::stable_sort( series.begin(), series.end(),
-                    [] ( const StacSeriesEntry &a, const StacSeriesEntry &b ) {
-                      // Undated entries sort last while keeping item order
-                      // (stable_sort preserves the original sequence).
-                      if ( a.datetime.empty() || b.datetime.empty() )
-                        return !a.datetime.empty() && b.datetime.empty();
-                      // ISO-8601 UTC strings sort lexicographically in time
-                      // order when their formats agree; differing formats
-                      // fall back to id order through stable_sort.
-                      return a.datetime < b.datetime;
-                    } );
+
+  // Sort an index permutation (the instants stay addressed by ORIGINAL input
+  // order — sorting the entries directly would desynchronize the two arrays
+  // mid-sort). Pairwise order: undated last (input order kept); normalized
+  // instants when BOTH parse (mixed offsets order correctly); raw strings for
+  // unparseable-but-present datetimes; item id; input order as the final
+  // deterministic tie-break.
+  std::vector<std::size_t> order( series.entries.size() );
+  for ( std::size_t i = 0; i < order.size(); ++i )
+    order[i] = i;
+  std::stable_sort(
+    order.begin(), order.end(),
+    [ & ] ( std::size_t aIndex, std::size_t bIndex ) {
+      const EffectiveInstant &ia = instants[ aIndex ];
+      const EffectiveInstant &ib = instants[ bIndex ];
+      const StacSeriesEntry &a = series.entries[ aIndex ];
+      const StacSeriesEntry &b = series.entries[ bIndex ];
+      if ( !ia.hasDate || !ib.hasDate )
+        return ia.hasDate && !ib.hasDate;
+      if ( ia.hasInstant && ib.hasInstant )
+      {
+        if ( ia.epochNanos != ib.epochNanos )
+          return ia.epochNanos < ib.epochNanos;
+      }
+      else if ( a.datetime != b.datetime )
+      {
+        return a.datetime < b.datetime;
+      }
+      if ( ia.id != ib.id )
+        return ia.id < ib.id;
+      return ia.inputOrder < ib.inputOrder;
+    } );
+
+  std::vector<StacSeriesEntry> ordered;
+  ordered.reserve( series.entries.size() );
+  for ( const std::size_t index : order )
+    ordered.push_back( std::move( series.entries[ index ] ) );
+  series.entries = std::move( ordered );
+
+  // Duplicate accounting AFTER ordering: an entry whose instant equals an
+  // earlier entry's instant is a duplicate acquisition (reported, kept).
+  std::map<std::int64_t, bool> seenInstants;
+  for ( std::size_t i = 0; i < series.entries.size(); ++i )
+  {
+    // order[] maps sorted position -> original index; recompute the original
+    // index to reach the matching instant.
+    const std::size_t originalIndex = order[ i ];
+    const EffectiveInstant &instant = instants[ originalIndex ];
+    if ( !instant.hasInstant )
+      continue;
+    const auto inserted = seenInstants.emplace( instant.epochNanos, false );
+    if ( inserted.first->second )
+      series.duplicateEntryIndices.push_back( i );
+    else
+      inserted.first->second = true; // first occurrence — not a duplicate
+  }
   return series;
+}
+
+std::vector<StacSeriesEntry> buildTemporalSeries( const std::vector<StacItem> &items )
+{
+  return buildTemporalSeriesDetailed( items ).entries;
 }
 
 } // namespace sicnu::geo

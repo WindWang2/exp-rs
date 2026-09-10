@@ -12,6 +12,12 @@
 #include <cstring>
 #include <utility>
 
+// Windows spells the both-directions shutdown "SD_BOTH"; POSIX "SHUT_RDWR"
+// (kept in sync with http_range_server.cpp).
+#ifndef SD_BOTH
+#define SD_BOTH SHUT_RDWR
+#endif
+
 namespace sicnu::geo::testsupport
 {
 
@@ -96,6 +102,25 @@ HttpStacServer::~HttpStacServer()
 {
   mStop.store( true );
   shutdownSocket( mListener );
+  // shutdown() alone does not reliably wake a thread blocked in accept()
+  // (Linux returns ENOTCONN for listening sockets): wake it deterministically
+  // with a loopback connect the server drains like any other request.
+  if ( mPort != 0 )
+  {
+    SocketHandle wake = ::socket( AF_INET, SOCK_STREAM, IPPROTO_TCP );
+    if ( wake != kInvalidSocket )
+    {
+      sockaddr_in address {};
+      address.sin_family = AF_INET;
+      address.sin_addr.s_addr = htonl( INADDR_LOOPBACK );
+      address.sin_port = htons( static_cast<uint16_t>( mPort ) );
+      const bool connected = ::connect( wake, reinterpret_cast<sockaddr *>( &address ),
+                                        sizeof( address ) ) == 0;
+      ::shutdown( wake, SD_BOTH );
+      shutdownSocket( wake );
+      ( void ) connected;
+    }
+  }
   if ( mThread.joinable() )
     mThread.join();
 }
@@ -128,6 +153,9 @@ void HttpStacServer::serveLoop()
         break;
       continue;
     }
+    // A client that connects and stays silent must not pin the server
+    // thread: bound the request-head receive window (see http_range_server).
+    boundSocketWait( client );
     handleConnection( client );
     shutdownSocket( client );
   }

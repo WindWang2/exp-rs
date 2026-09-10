@@ -106,6 +106,32 @@ struct StacSeriesEntry
     RasterMetadata canonical;   ///< stacItemToCanonical projection
 };
 
+/// Result of the detailed temporal-series build (8.0): the ordered entries
+/// plus duplicate-acquisition accounting. Entries sharing one normalized
+/// instant (duplicates) keep a deterministic relative order (item id, then
+/// input order) and are reported — never dropped, never reordered randomly.
+struct StacSeries
+{
+    std::vector<StacSeriesEntry> entries;
+    /// Indices into `entries` that share the effective instant of an earlier
+    /// entry (the first occurrence is not itself a duplicate). Empty when the
+    /// series has no repeated acquisition instants.
+    std::vector<std::size_t> duplicateEntryIndices;
+};
+
+/// Temporal collection adapter (task C seam): orders items into a series by
+/// effective datetime (item datetime, else start/end range, else item id —
+/// never dropped silently; undated entries sort last and keep item order).
+/// 8.0: ordering compares NORMALIZED instants (mixed UTC offsets order
+/// correctly — raw strings do not); unparseable datetimes fall back to the
+/// raw-string comparison; equal instants tie-break deterministically by item
+/// id and then input order.
+std::vector<StacSeriesEntry> buildTemporalSeries( const std::vector<StacItem> &items );
+
+/// Same ordering contract as buildTemporalSeries, with duplicate-acquisition
+/// reporting (8.0).
+StacSeries buildTemporalSeriesDetailed( const std::vector<StacItem> &items );
+
 class StacClient
 {
   public:

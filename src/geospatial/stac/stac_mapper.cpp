@@ -8,6 +8,8 @@
 
 #include "geospatial/stac/stac_mapper.h"
 
+#include "geospatial/util/time_normalization.h"
+
 #include <algorithm>
 #include <cmath>
 #include <sstream>
@@ -88,6 +90,33 @@ StacItem StacItem::parse( const Json::Value &item )
   if ( parsed.datetime.empty() && ( parsed.startDatetime.empty() || parsed.endDatetime.empty() ) )
     throw GeoError( ErrorCode::InvalidArgument,
                     "STAC item requires properties.datetime or start_datetime/end_datetime" );
+
+  // 8.0: UTC normalization of every declared datetime (see stac_mapper.h).
+  const auto normalizeUtc = [] ( const std::string &verbatim, std::string &utc, bool &assumed ) {
+    if ( verbatim.empty() )
+      return;
+    const InstantParse parsed = parseIso8601Instant( verbatim );
+    if ( !parsed.ok )
+      return; // unparseable stays empty — never a guessed instant
+    utc = instantToUtcString( parsed.epochNanos );
+    assumed = parsed.assumedUtc;
+  };
+  normalizeUtc( parsed.datetime, parsed.datetimeUtc, parsed.datetimeAssumedUtc );
+  bool startAssumed = false, endAssumed = false;
+  normalizeUtc( parsed.startDatetime, parsed.startDatetimeUtc, startAssumed );
+  normalizeUtc( parsed.endDatetime, parsed.endDatetimeUtc, endAssumed );
+  if ( parsed.datetimeUtc.empty() && !parsed.startDatetimeUtc.empty() )
+  {
+    // A range-only item's effective instant is the range start (same rule as
+    // the temporal adapter below) — derived, and marked as assumed when the
+    // range endpoints declared no offset.
+    parsed.datetimeUtc = parsed.startDatetimeUtc;
+    parsed.datetimeAssumedUtc = startAssumed;
+  }
+  parsed.datetimeNormalized =
+    ( !parsed.datetimeUtc.empty() && parsed.datetimeUtc != parsed.datetime ) ||
+    ( !parsed.startDatetimeUtc.empty() && parsed.startDatetimeUtc != parsed.startDatetime ) ||
+    ( !parsed.endDatetimeUtc.empty() && parsed.endDatetimeUtc != parsed.endDatetime );
 
   parsed.platform = optionalString( properties, "platform" );
   parsed.constellation = optionalString( properties, "constellation" );

@@ -12,6 +12,11 @@
 #include <cstring>
 #include <thread>
 
+// Windows spells the both-directions shutdown "SD_BOTH"; POSIX "SHUT_RDWR".
+#ifndef SD_BOTH
+#define SD_BOTH SHUT_RDWR
+#endif
+
 namespace sicnu::geo::testsupport
 {
 
@@ -34,6 +39,22 @@ void shutdownSocket( SocketHandle socket )
 #else
   if ( socket != kInvalidSocket )
     ::close( socket );
+#endif
+}
+
+void boundSocketWait( SocketHandle socket )
+{
+  if ( socket == kInvalidSocket )
+    return;
+#ifdef _WIN32
+  const DWORD timeoutMs = 2000;
+  ::setsockopt( socket, SOL_SOCKET, SO_RCVTIMEO,
+                reinterpret_cast<const char *>( &timeoutMs ), sizeof( timeoutMs ) );
+#else
+  timeval timeout {};
+  timeout.tv_sec = 2;
+  timeout.tv_usec = 0;
+  ::setsockopt( socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout ) );
 #endif
 }
 
@@ -63,6 +84,34 @@ HttpRangeServer::~HttpRangeServer()
 {
   mStop.store( true );
   shutdownSocket( mListener );
+  // shutdown() alone does not reliably wake a thread blocked in accept()
+  // (Linux returns ENOTCONN for listening sockets): wake it deterministically
+  // with a loopback connect. The dummy connection drains like any other —
+  // its client end closes immediately, so the server's bounded recv sees EOF.
+  if ( mPort != 0 )
+  {
+    SocketHandle wake = ::socket( AF_INET, SOCK_STREAM, IPPROTO_TCP );
+    if ( wake != kInvalidSocket )
+    {
+      sockaddr_in address {};
+      address.sin_family = AF_INET;
+      address.sin_addr.s_addr = htonl( INADDR_LOOPBACK );
+      address.sin_port = htons( static_cast<uint16_t>( mPort ) );
+      if ( ::connect( wake, reinterpret_cast<sockaddr *>( &address ), sizeof( address ) ) == 0 )
+      {
+        ::shutdown( wake, SD_BOTH );
+        shutdownSocket( wake );
+      }
+      else
+      {
+        shutdownSocket( wake );
+      }
+    }
+  }
+  // A client holding the server thread in recv() (connected, request head
+  // never completed) must not outlive the fixture: unblock it, the bounded
+  // receive timeout (boundSocketWait) covers the rest.
+  shutdownSocket( mCurrentClient.load() );
   if ( mThread.joinable() )
     mThread.join();
 }
@@ -143,7 +192,13 @@ void HttpRangeServer::serveLoop()
         break;
       continue;
     }
+    // One request head must arrive within a bounded window: a client that
+    // connects and stays silent (connection-pool preconnects do) returns
+    // recv() <= 0 after the timeout instead of pinning the server thread.
+    boundSocketWait( client );
+    mCurrentClient.store( client );
     handleConnection( client );
+    mCurrentClient.store( kInvalidSocket );
     shutdownSocket( client );
   }
 }

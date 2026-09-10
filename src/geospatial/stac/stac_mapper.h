@@ -46,6 +46,18 @@ struct StacItem
     std::string datetime;                ///< ISO-8601; STAC requires it (or start/end range)
     std::string startDatetime;
     std::string endDatetime;
+
+    // 8.0 — normalized UTC instants, derived at parse time and NEVER emitted
+    // by toJson() (the wire form stays the origin's verbatim RFC 3339).
+    // Mixed offsets ("+02:00") normalize to Z; offset-less datetimes assume
+    // UTC per the STAC spec and flag it; unparseable datetimes leave the UTC
+    // form empty — never a guessed time.
+    std::string datetimeUtc;
+    std::string startDatetimeUtc;
+    std::string endDatetimeUtc;
+    bool datetimeNormalized = false;     ///< true when a UTC form differs from its verbatim source
+    bool datetimeAssumedUtc = false;     ///< true when the effective datetime declared no offset
+
     std::string platform;
     std::string constellation;
     std::vector<std::string> instruments;

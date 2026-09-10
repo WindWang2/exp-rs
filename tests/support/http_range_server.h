@@ -102,6 +102,11 @@ class HttpRangeServer
 
     ServerBehavior mBehavior;
     SocketHandle mListener = kInvalidSocket;
+    /// The connection currently being served (kInvalidSocket when none).
+    /// The destructor shuts it down too: a client that opened a connection
+    /// but never completed a request head (connection-pool preconnects do)
+    /// must not hold the server thread in recv() past fixture destruction.
+    std::atomic<SocketHandle> mCurrentClient{ kInvalidSocket };
     int mPort = 0;
     std::thread mThread;
     std::atomic<bool> mStop{ false };
@@ -119,5 +124,9 @@ class HttpRangeServer
 /// Windows socket stack needs per-process initialization.
 void initializeSockets();
 void shutdownSocket( SocketHandle socket );
+/// Bounds how long a recv() may wait on @p socket (test fixtures must never
+/// hang on a client that connects and stays silent). Best effort — failures
+/// are ignored; the bounded recv still works without it.
+void boundSocketWait( SocketHandle socket );
 
 } // namespace sicnu::geo::testsupport

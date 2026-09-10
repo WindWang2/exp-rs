@@ -998,6 +998,21 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
 
 } // namespace
 
+/// Heap-allocated when installed, owned by GDAL from InstallHandler() onward:
+/// VSIFileManager::RemoveHandler() DELETES the registered handler, so this
+/// must never be static storage (a static would be deleted by GDAL and then
+/// destroyed again at process exit — use-after-free + double free) and must
+/// never be deleted here. Re-install cycles lazily allocate a fresh handler.
+/// (Function-local in the accessor below; the pointer lives process-global.)
+namespace
+{
+RangeCacheFilesystemHandler *&cachedHandler()
+{
+  static RangeCacheFilesystemHandler *s_handler = nullptr;
+  return s_handler;
+}
+}
+
 const char *rangeCacheStalePolicyName( RangeCacheStalePolicy policy )
 {
   switch ( policy )
@@ -1051,15 +1066,21 @@ void RemoteRangeCache::install( const RangeCacheConfig &config )
 {
   if ( config.blockSize == 0 || config.maxCacheBytes == 0 )
     throw GeoError( ErrorCode::InvalidArgument, "RemoteRangeCache: blockSize and budget must be positive" );
-  static RangeCacheFilesystemHandler s_handler; // process-lifetime, like VSI itself
   {
     std::lock_guard<std::mutex> lock( g_storeLifecycleMutex );
     if ( !g_store )
       g_store = std::make_unique<CacheStore>();
     g_store->updateConfig( config ); // blockSize change drops entries
-    s_handlerInstalled = true;
+    if ( !s_handlerInstalled )
+    {
+      // Register exactly once per install cycle: re-registering while
+      // installed would hand GDAL a second (or deleted) handler instance.
+      // GDAL owns the handler from here on (RemoveHandler deletes it).
+      cachedHandler() = new RangeCacheFilesystemHandler();
+      VSIFileManager::InstallHandler( kRangeCachePrefix, cachedHandler() );
+      s_handlerInstalled = true;
+    }
   }
-  VSIFileManager::InstallHandler( kRangeCachePrefix, &s_handler );
   ensureGdalRegistered();
 }
 
@@ -1070,6 +1091,10 @@ void RemoteRangeCache::uninstall()
     return;
 #if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 9, 0 )
   VSIFileManager::RemoveHandler( kRangeCachePrefix );
+  // GDAL deleted the handler above — forget the pointer (a later install()
+  // lazily allocates a fresh one; touching the old pointer would be a
+  // use-after-free).
+  cachedHandler() = nullptr;
 #endif
   g_store->dropAll();
   s_handlerInstalled = false;
