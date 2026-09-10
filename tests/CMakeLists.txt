@@ -6878,3 +6878,39 @@ target_link_libraries(test_fault_matrix PRIVATE
   sicnu_workflow
   sicnu_runtime
 )
+
+# Bounded contract fuzz (task D): ResourceUri total-function/credential/
+# traversal properties. Deterministic seeds, hard input caps.
+sicnu_add_test(test_contract_fuzz_io TIMEOUT 180)
+target_link_libraries(test_contract_fuzz_io PRIVATE Sicnu::Geospatial)
+target_include_directories(test_contract_fuzz_io PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Bounded contract fuzz (task D): MapSpec condition AST + workflow placeholder
+# grammar. Compiles the two Qt-free/light production sources directly so the
+# fuzz target needs no sicnu_agent/sicnu_workflow closure.
+add_executable(test_contract_fuzz_lang
+  test_contract_fuzz_lang.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/mapspec/mapspec_conditions.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/placeholder_grammar.cpp
+)
+target_link_libraries(test_contract_fuzz_lang PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_contract_fuzz_lang PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_contract_fuzz_lang SYSTEM PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_contract_fuzz_lang PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_contract_fuzz_lang PRIVATE jsoncpp)
+endif()
+target_include_directories(test_contract_fuzz_lang PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_compile_definitions(test_contract_fuzz_lang PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_contract_fuzz_lang)
