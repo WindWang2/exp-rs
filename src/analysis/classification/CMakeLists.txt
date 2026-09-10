@@ -24,6 +24,7 @@ if(SICNU_HAS_OPENCV)
         rs_classifier_backend.cpp
         rs_classifier_normalbayes.cpp
         rs_classifier_svm.cpp
+        rs_classifier_isodata.cpp
         rs_classifier_kmeans.cpp
         rs_classifier_random_forest.cpp
         rs_classifier_mlp.cpp

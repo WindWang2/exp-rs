@@ -8,6 +8,7 @@
 
 #include "qgis_analysis_export.h"
 #include "rs_classifier_backend.h"
+#include "rs_classifier_isodata.h"
 
 #include <QString>
 
@@ -52,4 +53,8 @@ class QGIS_ANALYSIS_EXPORT RsClassifierBackendFactory
 
     /// K-Means with an explicit cluster count (operator path).
     static std::unique_ptr<RsClassifierBackend> createKMeans( int k );
+
+    /// ISODATA with explicit parameters (operator path).
+    static std::unique_ptr<RsClassifierBackend> createIsodata(
+      const RsClassifierIsodata::Params &params );
 };
