@@ -204,6 +204,18 @@ ArtifactVerification verifyArtifact( const std::string &path,
                           ds->GetRasterCount() > 0;
       addCheck( result.checks, "dimensions", dimsOk, error_codes::kOutputInvalid, "info", dims );
 
+      // Harness 8.0 (Area G): declared band-count expectation. Multimodal and
+      // classified chains break silently when a producer drops bands.
+      if ( expectations.expectedBandCount > 0 )
+      {
+        Json::Value bands;
+        bands["expected"] = expectations.expectedBandCount;
+        bands["found"] = ds->GetRasterCount();
+        addCheck( result.checks, "band_count_matches",
+                  ds->GetRasterCount() == expectations.expectedBandCount,
+                  error_codes::kOutputInvalid, "info", bands );
+      }
+
       if ( expectations.width )
         addCheck( result.checks, "width_matches",
                   expectations.width == ds->GetRasterXSize(), error_codes::kGridMismatch );
@@ -393,6 +405,12 @@ Verdict aggregateVerdict( const std::vector<ArtifactVerification> &artifacts )
   if ( anyFail )
     return Verdict::Fail;
   return anyWarning ? Verdict::PassWithWarnings : Verdict::Pass;
+}
+
+void appendCheck( ArtifactVerification &artifact, VerificationCheck check )
+{
+  artifact.checks.push_back( std::move( check ) );
+  artifact.verdict = verdictFromChecks( artifact.checks );
 }
 
 } // namespace sicnu::agent::harness

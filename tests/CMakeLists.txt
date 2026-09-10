@@ -7109,6 +7109,8 @@ sicnu_link_jsoncpp(test_harness_grounding)
 # Harness 4.0 evals: six deterministic RS scenarios + anti-hallucination +
 # token budgets (mission Phases 18-20).
 sicnu_add_test(test_harness_evals)
+sicnu_add_test(test_harness_evidence)
+sicnu_add_test(test_harness_eval_corpus)
 sicnu_link_jsoncpp(test_harness_evals)
 
 
