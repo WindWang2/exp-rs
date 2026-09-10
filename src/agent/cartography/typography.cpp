@@ -278,6 +278,13 @@ std::vector<std::string> wrapParagraph( const std::string &text, double maxWidth
     // Advance the gap cursor past the line begin.
     while ( gapIndex < gaps.size() && gaps[gapIndex] <= static_cast<size_t>( begin ) )
       ++gapIndex;
+    // Whole remainder fits: emit it as the final line (the greedy gap scan
+    // only sees gaps BEFORE the end and would over-split the tail).
+    if ( measureLineMm( encode( begin, static_cast<int>( cps.size() ) ), sizePt ) <= maxWidthMm )
+    {
+      lines.push_back( encode( begin, static_cast<int>( cps.size() ) ) );
+      return lines;
+    }
     // Greedy: take the farthest breakable gap that still fits.
     int best = -1;
     size_t cursor = gapIndex;

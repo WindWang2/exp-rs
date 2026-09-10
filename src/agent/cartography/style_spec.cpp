@@ -418,13 +418,20 @@ std::vector<std::string> checkStyleApplicability( const Json::Value &styleSpec,
                                                   const Json::Value &dataset )
 {
   std::vector<std::string> problems;
-  if ( !styleSpec.isObject() || !styleSpec.isMember( "applicability" ) ||
-       !styleSpec["applicability"].isObject() || !dataset.isObject() )
+  if ( !styleSpec.isObject() || !dataset.isObject() )
     return problems;
   const std::string id = styleSpec.isMember( "id" ) && styleSpec["id"].isString()
                            ? styleSpec["id"].asString()
                            : "";
-  const Json::Value &applicability = styleSpec["applicability"];
+  // Platform 7.0: the renderer/modality checks below run regardless of an
+  // applicability block; only the block-driven checks are guarded on it.
+  const bool hasApplicability = styleSpec.isMember( "applicability" ) &&
+                                styleSpec["applicability"].isObject();
+  const Json::Value &applicability =
+    hasApplicability ? styleSpec["applicability"] : Json::Value( Json::objectValue );
+
+  if ( !hasApplicability )
+    return problems; // block-driven checks below need the applicability block
 
   // Layer-kind contract (applies_to was already mandatory).
   const std::string kind = dataset.isMember( "kind" ) && dataset["kind"].isString()

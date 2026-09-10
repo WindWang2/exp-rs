@@ -23,6 +23,7 @@
 #include <QFileInfo>
 
 #include <cmath>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -463,7 +464,8 @@ TEST_CASE( "P7 typography: overflow_report never hides overflow",
 
   const TextFitReport report = fitTextIntoBox( request );
   REQUIRE_FALSE( report.fits );
-  REQUIRE( report.overflowWidthMm > 0.0 );
+  REQUIRE( report.overflowHeightMm > 0.0 ); // 5 CJK glyphs wrap into 3 lines
+                                             // in a 10 mm-wide, 3 mm-high box
   REQUIRE( report.truncated == false ); // nothing hidden
   REQUIRE_FALSE( report.diagnostics.empty() );
   REQUIRE( report.diagnostics[0].find( "nothing is hidden" ) != std::string::npos );
@@ -534,7 +536,7 @@ TEST_CASE( "P7 style: diverging scheme requires and validates a center",
   REQUIRE( repairStyleSemantics( style, &decisions ) );
   REQUIRE( style["raster"]["classification"]["center"].asDouble() == Catch::Approx( 0.0 ) );
   REQUIRE( decisions.size() == 1 );
-  REQUIRE( validateStyleSpec( style ).empty() );
+  requireNoProblems( validateStyleSpec( style ) );
 
   // A class structure that does not bracket zero cannot be repaired.
   Json::Value positive( Json::objectValue );
@@ -607,7 +609,7 @@ TEST_CASE( "P7 style: nodata and uncertainty blocks are shape-validated",
   good["raster"]["nodata"]["label"] = "NoData";
   good["uncertainty"]["kind"] = "confidence_interval";
   good["uncertainty"]["level"] = 0.9;
-  REQUIRE( validateStyleSpec( good ).empty() );
+  requireNoProblems( validateStyleSpec( good ) );
 }
 
 TEST_CASE( "P7 style: applicability refuses SAR/multiband and DEM-without-stretch",
@@ -736,7 +738,8 @@ TEST_CASE( "P7 charts: accuracy_summary validates the confusion binding",
 {
   // Valid square matrix binding.
   const Json::Value chart = confusionChart();
-  REQUIRE( validateChartSpec( chart ).empty() );
+  for ( const auto &problem : validateChartSpec( chart ) )
+    FAIL( problem );
 
   // Non-square → rejected.
   Json::Value ragged = chart;
@@ -893,6 +896,12 @@ TEST_CASE( "P7 components: style_tokens shape is validated",
 
 namespace {
 
+void requireNoProblems( const std::vector<std::string> &problems )
+{
+  for ( const auto &problem : problems )
+    FAIL( problem );
+}
+
 bool hasIssue( const Json::Value &report, const std::string &code, const std::string &idPart )
 {
   for ( const auto &issue : report["issues"] )
@@ -920,11 +929,15 @@ TEST_CASE( "P7 preflight: declarative layer visibility and reference rules",
   layers.append( "layer-water" );
   frame["layers"] = layers;
   spec["map_frames"].append( frame );
-  spec["titles"].append( rectItem( "t1", 12.0, 6.0, 120.0, 12.0 ) );
+  Json::Value t1 = rectItem( "t1", 12.0, 6.0, 120.0, 12.0 );
+  t1["text"] = "标题";
+  spec["titles"].append( t1 );
   spec["legends"].append( rectItem( "lg", 220.0, 30.0, 60.0, 80.0 ) );
   spec["scale_bars"].append( rectItem( "sb", 14.0, 190.0, 50.0, 8.0 ) );
   spec["north_arrows"].append( rectItem( "na", 270.0, 30.0, 12.0, 12.0 ) );
-  spec["source_notes"].append( rectItem( "sn", 180.0, 194.0, 90.0, 8.0 ) );
+  Json::Value sn = rectItem( "sn", 180.0, 194.0, 90.0, 8.0 );
+  sn["text"] = "数据来源";
+  spec["source_notes"].append( sn );
 
   // Invisible layer declared + referenced → warned.
   Json::Value water( Json::objectValue );
@@ -1053,6 +1066,7 @@ TEST_CASE( "P7 visual: structural digest is stable, sensitive and order-free",
   // Identical specs -> identical digest (byte-stable known answer).
   const std::string digestA = structuralDigest( build() );
   const std::string digestB = structuralDigest( build() );
+  std::cout << "[pin] structural digest = " << digestA << std::endl;
   REQUIRE( digestA == digestB );
   REQUIRE( digestA.size() == 64 ); // SHA-256 hex
   REQUIRE( std::string( kGoldenDigest ) != "PENDING_FIRST_RUN" );
@@ -1307,7 +1321,8 @@ TEST_CASE( "P7 solver: anchor authority is reported as a decision",
     sawNote = sawNote || note.find( "anchor wins" ) != std::string::npos;
   REQUIRE( sawNote );
   const Json::Value &lg = itemById( spec, "legends", "lg" );
-  REQUIRE( lg["rect_mm"][0].asDouble() == Catch::Approx( 200.0 ) );
+  // bottom-right anchor on a 297 mm page at margin 10: x = 297 - 10 - 40.
+  REQUIRE( lg["rect_mm"][0].asDouble() == Catch::Approx( 247.0 ) );
 }
 
 TEST_CASE( "P7 solver: declaration permutations produce identical geometry",
@@ -1410,12 +1425,14 @@ TEST_CASE( "P7 validation: v4 constraint surface is closed and bounded",
   }
   {
     Json::Value good = spec;
+    good["titles"][0]["text"] = "标题";
+    good["legends"][0]["title"] = "图例";
     Json::Value c = constraint( "c1", "below", "t1", "lg", 2.0 );
     c["hardness"] = "soft";
     c["priority"] = 100;
     c["weight"] = 0.5;
     good["constraints"].append( c );
-    REQUIRE( validateMapSpec( good ).empty() );
+    requireNoProblems( validateMapSpec( good ) );
   }
 }
 
@@ -1447,8 +1464,10 @@ TEST_CASE( "P7 solver: upgradeMapSpec re-stamps v3 documents to v4",
 {
   Json::Value spec = makeMapSpec( "p7-upgrade", Json::Value() );
   spec["spec_version"] = 3;
-  spec["titles"].append( rectItem( "t1", 20.0, 10.0, 60.0, 10.0 ) );
-  REQUIRE( validateMapSpec( spec ).empty() ); // v3 is still a supported version
+  Json::Value titled = rectItem( "t1", 20.0, 10.0, 60.0, 10.0 );
+  titled["text"] = "标题";
+  spec["titles"].append( titled );
+  requireNoProblems( validateMapSpec( spec ) ); // v3 is still a supported version
   const Json::Value upgraded = upgradeMapSpec( spec );
   REQUIRE( upgraded["spec_version"].asInt() == kMapSpecCurrentVersion );
   REQUIRE( kMapSpecCurrentVersion == 4 );
