@@ -44,6 +44,17 @@ Deliberate design points a reviewer should probe (with rationale):
    records nothing; the ghost's registration lifetime guarantees the
    filter is exact (tracked at emit, untracked at delivery).
 
+- **[F6, P1] Resume-ghost Running events could dangle forever.** A resume
+  swap emits Running for the fresh submission and then unregisters it; the
+  queued delivery would record a ghost execution that can never terminate.
+  The monitor now skips untracked Running events whose checkpoint file is
+  absent (ghosts' checkpoints are deleted at the swap; real runs persist
+  theirs before dispatch). Terminal/Interrupted events always record —
+  startup-recovery Interrupted reaches the bridge untracked by design.
+  The resume E2E asserts exactly one record exists (no ghost).
+- **[F7, P3]** `experiment:compare` now surfaces experiment_context
+  (baseline/treatment tags) — closes the WP-F "baseline tags" gap additively.
+
 ## Round 1 — adversarial review (subagents), after local builds
 
 (pending — to be filled after targeted tests pass)

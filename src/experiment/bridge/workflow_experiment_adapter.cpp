@@ -302,6 +302,25 @@ void WorkflowExperimentMonitor::onRunStateChanged( const QString &runId,
     if ( !bridgeExecutionStates().contains( state ) )
         return; // transitional workflow state: no experiment meaning
 
+    const long pipelineId = m_coordinator.pipelineIdForRun( runId.toStdString() );
+    if ( pipelineId <= 0 && state == QStringLiteral( "Running" ) )
+    {
+        // An untracked Running event is ambiguous: either a real submission
+        // whose registration has not landed yet (cross-thread delivery race)
+        // or the ghost of a resume swap (its checkpoint was deleted when the
+        // original run took the pipeline back — recording it would create a
+        // record that can never terminate). The checkpoint disambiguates:
+        // real runs persist theirs BEFORE dispatch, ghosts lose theirs at
+        // the swap. Terminal/Interrupted events are always recorded —
+        // Interrupted reaches the bridge untracked on purpose (startup
+        // recovery reconciles from disk, not from the live map).
+        const QString checkpoint = m_coordinator.checkpointDirectory()
+                                   + QDir::separator()
+                                   + QStringLiteral( "checkpoint_%1.json" ).arg( runId );
+        if ( !QFile::exists( checkpoint ) )
+            return;
+    }
+
     ExecutionEvent event;
     event.executionRef = runId;
     event.workflowId = workflowId;
@@ -311,8 +330,7 @@ void WorkflowExperimentMonitor::onRunStateChanged( const QString &runId,
 
     // Enrich from the authoritative run aggregate when it is still tracked
     // (terminal runs stay registered, so this answers for the whole story).
-    if ( const long pipelineId = m_coordinator.pipelineIdForRun( runId.toStdString() );
-         pipelineId > 0 )
+    if ( pipelineId > 0 )
     {
         if ( const auto run = m_coordinator.runForPipeline( pipelineId ) )
             event = workflowRunToExecutionEvent( *run, state, startedMs, finishedMs );
