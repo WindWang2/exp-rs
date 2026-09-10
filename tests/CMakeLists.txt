@@ -3,6 +3,8 @@ include(Catch)
 
 if(WIN32 AND TARGET Catch2WithMain)
   set_property(TARGET Catch2WithMain PROPERTY SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/sicnu_test_main.cpp")
+  # sicnu_test_main wires the unified-trace env bootstrap (Verification 7.0).
+  target_include_directories(Catch2WithMain PRIVATE ${CMAKE_SOURCE_DIR}/src)
 endif()
 
 # Wrapper around catch_discover_tests that injects LSAN_OPTIONS when sanitizers
