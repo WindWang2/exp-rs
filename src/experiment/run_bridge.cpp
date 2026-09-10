@@ -337,9 +337,13 @@ Result<QString> ExperimentRunBridge::handleExecutionEvent( const ExecutionEvent 
         const QString existing = resolveRunId( event.executionRef );
         if ( !existing.isEmpty() )
         {
-            // Duplicate start or resume continuation: markResumed is a no-op
-            // for a Running run, re-opens an Interrupted one, and lets the
-            // store reject anything dishonest.
+            // Late re-delivery of a start for an already-terminal run is a
+            // tolerated no-op (the store knows more than this event says).
+            const auto current = m_store->runById( existing );
+            if ( current && isTerminalRunStatus( current->status() ) )
+                return Result<QString>::success( existing );
+            // Otherwise markResumed is a no-op for a Running run and
+            // re-opens an Interrupted one (resume continuation).
             auto resumed = m_recorder.markResumed( existing );
             if ( !resumed )
                 return Result<QString>::failure( resumed.diagnostics() );

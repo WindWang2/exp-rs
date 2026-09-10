@@ -7,6 +7,7 @@
 #include "dataset/dataset_store.h"
 #include "dataset/dataset_types.h"
 #include "dataset/split.h"
+#include "dataset/sample.h"
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
 #include "experiment/run_bridge.h"
@@ -30,7 +31,10 @@ struct BridgeFixture
     ExperimentStore experimentStore;
     ExperimentRunBridge bridge;
 
-    static constexpr const char *kExperimentId = "6d2b3d52-1111-4111-8111-111111111111";
+    static QString experimentId()
+    {
+        return QStringLiteral( "6d2b3d52-1111-4111-8111-111111111111" );
+    }
 
     explicit BridgeFixture( bool wireDatasetStore = false )
         : bridge( experimentStore )
@@ -41,7 +45,7 @@ struct BridgeFixture
             REQUIRE( datasetStore.open( dir.filePath( QStringLiteral( "ds.db" ) ) ) );
             bridge.setDatasetStore( &datasetStore );
         }
-        REQUIRE( bridge.ensureExperiment( QStringLiteral( kExperimentId ),
+        REQUIRE( bridge.ensureExperiment( experimentId(),
                                           QStringLiteral( "auto-recording" ) )
                      .has_value() );
     }
@@ -81,8 +85,20 @@ struct PinFixture
         manifest.setCreatedAtUtc( QDateTime::fromString(
             QStringLiteral( "2026-09-10T00:00:00.000Z" ), Qt::ISODateWithMs ) );
         REQUIRE( store.createDraftVersion( manifest ).has_value() );
-        // Empty versions stage+commit cleanly (a version with zero samples is
-        // still a version; addSamples would need records).
+        // One sample + assignment: manifests must carry assignments to
+        // round-trip (fromJson refuses assignment-less manifests), so the
+        // fixture pins a single-point version.
+        SampleRecord sample;
+        const QString sampleId = SampleId::generate().toString();
+        sample.setSampleId( sampleId );
+        sample.setDatasetVersionId( fx.versionId.toString() );
+        sample.setKind( SampleKind::Point );
+        PointSample point;
+        point.x = 0;
+        point.y = 0;
+        sample.payload() = point;
+        REQUIRE( store.addSamples( { sample } ).has_value() );
+
         auto staged = store.stageVersion( fx.versionId );
         REQUIRE( staged.has_value() );
         auto committed = store.commitVersion( fx.versionId );
@@ -99,6 +115,10 @@ struct PinFixture
         config.method = SplitMethod::Random;
         config.seed = 7;
         split.setConfig( config );
+        SplitAssignment assignment;
+        assignment.sampleId = sampleId;
+        assignment.role = SplitRole::Train;
+        split.assignments().append( assignment );
         fx.splitFingerprint = QStringLiteral( "splitfp" );
         split.setFingerprint( fx.splitFingerprint );
         REQUIRE( store.saveSplitManifest( split ).has_value() );
@@ -137,10 +157,10 @@ TEST_CASE( "successful execution lifecycle records a Completed run", "[bridge][l
     REQUIRE( run->startedAtUtc().isValid() );
     REQUIRE( run->finishedAtUtc().isValid() );
     REQUIRE( run->artifacts().size() == 1 );
-    REQUIRE( run->artifacts().first().digest() == QStringLiteral( "abc123" ) );
-    REQUIRE( run->artifacts().first().sizeBytes() == 42 );
+    REQUIRE( run->artifacts().first().digest == QStringLiteral( "abc123" ) );
+    REQUIRE( run->artifacts().first().sizeBytes == 42 );
     // The producing step id rides the artifact role.
-    REQUIRE( run->artifacts().first().role() == QStringLiteral( "step-a" ) );
+    REQUIRE( run->artifacts().first().role == QStringLiteral( "step-a" ) );
     // Workflow evidence landed in the metrics document.
     REQUIRE( run->metrics().value( QStringLiteral( "workflow" ) ).toObject()
                  .value( QStringLiteral( "execution_ref" ) )
@@ -292,8 +312,12 @@ TEST_CASE( "workflow pins land in the recorded run before start", "[bridge][pins
     // The dataset fingerprint was auto-filled from the authoritative store.
     REQUIRE( run->datasetFingerprint() == pins.fingerprint );
     REQUIRE( run->splitManifestId() == pins.splitManifestId );
-    // The split fingerprint was verified from the stored manifest.
-    REQUIRE( run->splitFingerprint() == pins.splitFingerprint );
+    // The split fingerprint was resolved from the STORED manifest (the store
+    // recomputes the canonical fingerprint on save — the fixture's
+    // placeholder is intentionally not the authority).
+    const auto storedManifest = fx.datasetStore.splitManifestById( pins.splitManifestId );
+    REQUIRE( storedManifest.has_value() );
+    REQUIRE( run->splitFingerprint() == storedManifest->fingerprint() );
     REQUIRE( run->modelId() == QStringLiteral( "segformer" ) );
     REQUIRE( run->modelDigest() == QStringLiteral( "deadbeef" ) );
     REQUIRE( run->seed() == 42 );
@@ -343,7 +367,7 @@ TEST_CASE( "ensureExperiment is idempotent", "[bridge][experiment]" )
 {
     BridgeFixture fx;
     REQUIRE( fx.bridge
-                 .ensureExperiment( QStringLiteral( kExperimentId ),
+                 .ensureExperiment( BridgeFixture::experimentId(),
                                     QStringLiteral( "another name" ) )
                  .has_value() );
     const auto page = fx.experimentStore.listExperiments();

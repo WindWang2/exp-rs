@@ -38,9 +38,11 @@ QJsonValue jsonCppToQJson( const Json::Value &value, int depth = 0 )
         case Json::nullValue:
             return QJsonValue( QJsonValue::Null );
         case Json::intValue:
-            return QJsonValue( value.asInt64() );
+            // QJsonValue stores numbers as double (Qt JSON contract); a
+            // definition carrying >2^53 magnitudes is out of contract.
+            return QJsonValue( static_cast<double>( value.asInt64() ) );
         case Json::uintValue:
-            return QJsonValue( qint64( value.asUInt64() ) );
+            return QJsonValue( static_cast<double>( value.asUInt64() ) );
         case Json::realValue:
             return QJsonValue( value.asDouble() );
         case Json::stringValue:
@@ -85,7 +87,8 @@ QJsonObject stepSummary( const workflow::StepPlan &plan )
         QJsonObject output;
         output.insert( QStringLiteral( "path" ), QString::fromStdString( plan.outputLayerPath ) );
         if ( plan.outputSizeBytes > 0 )
-            output.insert( QStringLiteral( "size" ), plan.outputSizeBytes );
+            output.insert( QStringLiteral( "size" ),
+                           static_cast<double>( plan.outputSizeBytes ) );
         if ( !plan.outputDigest.empty() )
             output.insert( QStringLiteral( "digest" ),
                            QString::fromStdString( plan.outputDigest ) );

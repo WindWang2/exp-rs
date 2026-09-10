@@ -165,9 +165,9 @@ TEST_CASE( "successful tracked pipeline auto-records a Completed experiment run"
     bool sawSecondArtifact = false;
     for ( const auto &artifact : run.artifacts() )
     {
-        if ( artifact.role() == QStringLiteral( "second" ) )
+        if ( artifact.role == QStringLiteral( "second" ) )
         {
-            REQUIRE( artifact.path() == QStringLiteral( "/tmp/mlops8_ok_second.tif" ) );
+            REQUIRE( artifact.path == QStringLiteral( "/tmp/mlops8_ok_second.tif" ) );
             sawSecondArtifact = true;
         }
     }
@@ -225,6 +225,7 @@ TEST_CASE( "cancelled tracked pipeline auto-records Cancelled", "[mlops8][e2e]" 
                                      waited += 10;
                                  }
                                  throw std::runtime_error( "cancelled while running" );
+                                 return Json::Value( Json::objectValue );
                              } );
     engine.registerExecutor( prefix + ":second",
                              []( const sicnu::jobs::JobRequest &,
@@ -262,8 +263,9 @@ TEST_CASE( "cancelled tracked pipeline auto-records Cancelled", "[mlops8][e2e]" 
     // Failed when the executor's own error landed first — both are truthful).
     const auto terminalState =
         fx.coordinator.runForPipeline( pipelineId )->state();
-    REQUIRE( terminalState == WorkflowRunState::Canceled
-             || terminalState == WorkflowRunState::Failed );
+    const bool truthfulTerminal = terminalState == WorkflowRunState::Canceled
+                                  || terminalState == WorkflowRunState::Failed;
+    REQUIRE( truthfulTerminal );
     const auto page = fx.experimentStore.listRuns();
     REQUIRE( page.has_value() );
     REQUIRE( page.value().second.size() >= 1 );
@@ -348,7 +350,7 @@ TEST_CASE( "interrupted run resumes and completes the SAME experiment record",
         secondPlan.operatorId = prefix + ":second";
         secondPlan.status = "Running";
         run.setStepPlans( { firstPlan, secondPlan } );
-        workflow::WorkflowCheckpointManager manager;
+        WorkflowCheckpointManager manager;
         REQUIRE_FALSE( manager.saveCheckpoint( run, fx.checkpointDir.path() ).isEmpty() );
     }
 
@@ -400,7 +402,7 @@ TEST_CASE( "stale reconciliation closes dead executions from checkpoint evidence
         if ( state == WorkflowRunState::Failed )
             plan.errorMessage = "crashed with evidence";
         run.setStepPlans( { plan } );
-        workflow::WorkflowCheckpointManager manager;
+        WorkflowCheckpointManager manager;
         const QString saved = manager.saveCheckpoint( run, fx.checkpointDir.path() );
         REQUIRE_FALSE( saved.isEmpty() );
     };
