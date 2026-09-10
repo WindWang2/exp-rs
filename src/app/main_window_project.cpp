@@ -25,6 +25,8 @@
 
 void QgisDesktopWindow::newProject()
 {
+    if (!confirmWorkbenchShutdown(tr("新建工程")))
+        return;
     if (!checkUnsavedChanges())
         return;
 
@@ -75,6 +77,8 @@ void QgisDesktopWindow::newLayout()
 
 void QgisDesktopWindow::openProject()
 {
+    if (!confirmWorkbenchShutdown(tr("打开工程")))
+        return;
     if (!checkUnsavedChanges())
         return;
 

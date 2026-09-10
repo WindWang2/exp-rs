@@ -131,6 +131,10 @@ class CustomIdentifyTool : public QgsMapToolIdentify
 namespace sicnu::app {
 class WorkspaceBrowserPanel;
 class WorkbenchHost;
+class ProcessingHistoryPanel;
+class TemporalWorkbenchPanel;
+class DatasetExperimentPanel;
+class ModelWorkbenchPanel;
 class SelectionContext;
 class InspectorHost;
 class CommandRegistry;
@@ -173,6 +177,12 @@ public:
     sicnu::app::WorkbenchHost *workbenchHost() const { return m_workbenchHost; }
     sicnu::app::SelectionContext *selectionContext() const { return m_selectionContext; }
     sicnu::app::CommandRegistry *commandRegistry() const { return m_commandRegistry; }
+
+    /** Workbench 7.0 panel surfaces (goal §C/D/E/F); registry commands call these. */
+    void showUnifiedProcessingHistory();
+    void showTemporalWorkbench();
+    void showDatasetExperimentBench();
+    void showModelBench();
 
     /// The panel/toolbar visibility menu (exprs plugin docks add their
     /// toggle actions here; used by ExprsPluginShellUi).
@@ -366,6 +376,14 @@ private:
 
     bool confirmSaveEdits(QgsVectorLayer *vl);
     bool checkUnsavedChanges();
+    /**
+     * Workbench 7.0 (goal §A): confirm quitting / switching projects while
+     * any registered bench is dirty or has in-flight compute, and while
+     * TaskCenter still tracks non-terminal tasks. Cancellation routes through
+     * each bench's requestCancel() and TaskCenter::cancelTask — nothing is
+     * silently dropped. Returns false when the user aborts the operation.
+     */
+    bool confirmWorkbenchShutdown(const QString &actionTitle);
     /** Acquire the exclusive Edit Lease for an Asset-backed vector layer. */
     bool acquireEditLease(QgsVectorLayer *vlayer, bool showConflictWarning = true);
     /** Commit the Edit Lease (advances Asset Revision, refreshes other layers). */
@@ -529,6 +547,10 @@ private:
     sicnu::app::CommandPalette *m_commandPalette = nullptr;
     sicnu::app::InspectorHost *m_inspectorHost = nullptr;
     QDockWidget *m_inspectorDock = nullptr;
+    class sicnu::app::ProcessingHistoryPanel *m_historyPanel = nullptr;
+    class sicnu::app::TemporalWorkbenchPanel *m_temporalPanel = nullptr;
+    class sicnu::app::DatasetExperimentPanel *m_datasetExperimentPanel = nullptr;
+    class sicnu::app::ModelWorkbenchPanel *m_modelPanel = nullptr;
 
     // Declared before m_pluginHost so it is destroyed after it: the
     // plugin proxy (`PythonAppInterfaceProxy`) holds a raw `ActiveViewHost*`

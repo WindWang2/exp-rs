@@ -317,3 +317,93 @@ form) remain in force.
   UI-triggered GDAL scans (ROI statistics, histograms): two workers max,
   generation tokens with `nextGeneration()`/`cancel()` cooperative
   cancellation. `QThreadPool::globalInstance()` is never used for scans.
+
+# Part III — Professional Workbench 7.0
+
+## 15. Shell shutdown/switch policy (goal §A)
+
+`workbench/shutdown_policy.h` is the pure decision layer:
+`collectWorkbenchShutdownFacts(WorkbenchHost*)` reads every registered bench
+through the IWorkbench lifecycle contract; `planWorkbenchShutdown(facts,
+runningTaskCount)` projects dirty benches, in-flight benches and TaskCenter
+non-terminal tasks into a `ShutdownPlan`. The shell applies it in
+`QgisDesktopWindow::confirmWorkbenchShutdown(actionTitle)`:
+
+1. In-flight work first — one dialog; "取消任务并继续" fires
+   `cancelInFlightBenches()` (each bench's own `requestCancel()`) plus
+   `TaskCenter::cancelTask` for every non-terminal task, and proceeds. Bounded:
+   nothing waits for terminal states.
+2. Dirty benches — `requestCloseDirtyBenches()` delegates to each bench's own
+   `requestClose()` (external session windows run their save/discard
+   confirmation); a refusal aborts the operation.
+
+Wired into `closeEvent` (退出), `newProject` and `openProject`. Nothing is
+silently dropped; there is exactly one confirmation pass, never a loop.
+
+## 16. Provenance inspector section (goal §B)
+
+`ProvenanceSection` (inspector tab 溯源, order 40) resolves the selection
+through authoritative services only — DataManager providers injected by the
+shell (never a copied store): Data-Manager asset ids → governance entity ids
+(WorkspaceService `assetById`) → layer source paths (`findByPath`). Per target
+it renders: identity/state/revision, the `DerivationRecord` (operator, version,
+workflow/run/step or task reference, parameter snapshot capped at 1200 chars,
+completion time, execution fingerprint, cache truth), source assets with
+revisions, a bounded ancestor chain (depth 6 + visited set), derived outputs,
+and governance verification (availability, content fingerprint, verification
+stamp). Quality warnings (missing/unavailable assets, unresolved input paths,
+stale/unverified governance rows) are listed, never suppressed; unknown fields
+render as unknown. Population is synchronous (indexed lookups only).
+
+## 17. Unified processing history (goal §C)
+
+`ProcessingHistoryModel` + `ProcessingHistoryPanel` project TaskCenter tasks
+(source-tagged gui/agent/mcp/cli/workflow) and WorkflowRunCoordinator runs —
+including Interrupted resumables — into ONE queryable view. Bounded by
+contract: newest-first, hard cap `kMaxRows` (5000) with a truthful
+`droppedCount` surfaced in the UI; filtering and incremental search run over
+the capped set; a QTableView renders it (no widget per row). Actions route
+through the same seams as the original submissions: cancel →
+`TaskCenter::cancelTask`; rerun → `TaskCenter::enqueueTask` with the stored
+algorithmId + parameter snapshot; resume → `WorkflowRunCoordinator::resumeRun`;
+open/compare/inspect emit signals the shell routes through the Data/Display
+and comparison surfaces. The panel keeps no second task store — every refresh
+re-queries the services (coalesced at 250 ms).
+
+## 18. Temporal workbench (goal §D)
+
+`TemporalWorkbenchPanel` lists the project's DataManager temporal collections,
+parses the stored descriptor through the authoritative `sicnu::temporal` typed
+layer, and renders: a clickable/keyboard-navigable timeline strip, a PAGED
+scene browser (`TemporalSceneModel`, 200 rows/page over the date-filtered set
+— large collections never render unbounded), QA/cloud-cover summary, current
+timestep preview and two-date comparison. Preview/compare route through the
+shell's existing raster-load and comparison seams; the UI does no raster I/O.
+
+## 19. Dataset/experiment + model benches (goal §E/§F)
+
+`DatasetExperimentPanel` is a thin client over `sicnu::dataset::DatasetStore`
+and `sicnu::experiment::ExperimentStore` — the same stores the CLI/agent
+write. The user opens the DB files; the panel only projects: dataset list
+(store-paged), versions with status/quality/fingerprint, sample counts with a
+bounded first-page preview, label-schema version counts, experiment runs
+(status/algorithm/dataset pin) and a JSON metric diff over two selected runs.
+`ModelWorkbenchPanel` projects the ModelCatalog: task/framework/device/weights
+columns, readiness evaluated ONLY by the runtime layer
+(`evaluateRuntimeReadiness`, with its reason verbatim), catalog load issues
+verbatim, manifest inspection via `inspect()`, and test inference submitted as
+a normal `rs:infer` TaskCenter task (failures surface in the processing
+history, not in a bespoke dialog). Neither panel persists anything.
+
+## 20. Command surface (goal §I)
+
+The four benches are CommandRegistry commands (`workbench.processingHistory`,
+`workbench.temporal`, `workbench.datasetExperiment`, `workbench.model` —
+Ctrl+Shift+H/T/E/M; D is taken by map.measureDistance). The registry owns the shortcuts; the 窗口 menu projects
+`registry->action(id, true)` instead of defining competing sequences.
+
+## Contracts under test (7.0)
+
+`test_workbench_shutdown_policy`, `test_provenance_section`,
+`test_processing_history_model`, `test_temporal_scene_model` — see
+`.planning/professional-workbench-7/TEST_MATRIX.md`.
