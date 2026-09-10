@@ -23,6 +23,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/algorithms/sar/sar_metadata.h"
+#include "processing/algorithms/sar/sar_orbit.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 using Catch::Approx;
@@ -627,4 +628,148 @@ TEST_CASE( "rs:sar_change derives a change mask from a planted dB shift",
     const int evaluated = result["evaluatedPixels"].asInt();
     REQUIRE( evaluated == 16 );
     REQUIRE( changed == 8 );
+}
+
+// ---------------------------------------------------------------------------
+// rs:sar_terrain_masks product=local_incidence_orbit (Scientific Algorithms
+// 7.0): per-pixel incidence from the declared orbit contract.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "rs:sar_terrain_masks local_incidence_orbit: analytic incidence from a circular orbit",
+           "[sar][orbit][operator][e2e]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    // Synthetic circular equatorial orbit (same anchor orbit as
+    // test_sar_orbit.cpp): P(t) = R(cos wt, sin wt, 0).
+    constexpr double kR = 7000000.0;
+    constexpr double kOmega = 2.0 * M_PI / 5880.0;
+    constexpr double kA = 6378137.0;
+    constexpr double kNadirRange = kR - kA;
+
+    // 8 columns x 4 rows; 30 m slant-range samples; PRF 100 Hz; scene start
+    // at t = 30 s. Range gate starts 90 m (3 samples) BEFORE the nadir
+    // distance, so column 3 is the nadir column.
+    constexpr int kW = 8;
+    constexpr int kH = 4;
+    // Realistic range sample clock: 30 m of slant range per sample.
+    constexpr double kRangeRate = 299792458.0 / ( 2.0 * 30.0 ); // samples per second
+    constexpr double kHalfLightSpeed = 299792458.0 / 2.0;
+    constexpr double kPrf = 100.0;
+    constexpr double kAzStart = 30.0;
+    const double rangeStart = kNadirRange - 90.0;
+
+    sicnu::sar::OrbitSegment orbit;
+    {
+        QStringList records;
+        for ( int i = 0; i <= 6; ++i )
+        {
+            const double t = 10.0 * i;
+            const double phase = kOmega * t;
+            records << QString::number( t, 'g', 17 ) + ";" + QString::number( kR * std::cos( phase ), 'g', 17 )
+                           + ";" + QString::number( kR * std::sin( phase ), 'g', 17 ) + ";0;"
+                           + QString::number( -kR * kOmega * std::sin( phase ), 'g', 17 ) + ";"
+                           + QString::number( kR * kOmega * std::cos( phase ), 'g', 17 ) + ";0";
+        }
+        REQUIRE( sicnu::sar::parseOrbitStates( records.join( QLatin1Char( '|' ) ), &orbit ) );
+    }
+
+    const QString dem = tmp.filePath( "dem.tif" );
+    {
+        ensureGdalInit();
+        GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+        REQUIRE( driver != nullptr );
+        GDALDatasetH ds = GDALCreate( driver, dem.toUtf8().constData(), kW, kH, 1,
+                                      GDT_Float32, nullptr );
+        REQUIRE( ds != nullptr );
+        std::vector<float> flat( static_cast<size_t>( kW ) * kH, 0.0f ); // h = 0 shell
+        GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+        REQUIRE( GDALRasterIO( band, GF_Write, 0, 0, kW, kH, flat.data(), kW, kH,
+                               GDT_Float32, 0, 0 ) == CE_None );
+        auto setState = [&]( const char *key, const QString &value ) {
+            GDALSetMetadataItem( ds, key, value.toUtf8().constData(), nullptr );
+        };
+        QStringList records;
+        for ( int i = 0; i <= 6; ++i )
+        {
+            const double t = 10.0 * i;
+            const double phase = kOmega * t;
+            records << QString::number( t, 'g', 17 ) + ";" + QString::number( kR * std::cos( phase ), 'g', 17 )
+                           + ";" + QString::number( kR * std::sin( phase ), 'g', 17 ) + ";0;"
+                           + QString::number( -kR * kOmega * std::sin( phase ), 'g', 17 ) + ";"
+                           + QString::number( kR * kOmega * std::cos( phase ), 'g', 17 ) + ";0";
+        }
+        setState( "SICNU_SAR_ORBIT_STATES", records.join( QLatin1Char( '|' ) ) );
+        setState( "SICNU_SAR_AZIMUTH_START_UTC", QString::number( kAzStart, 'g', 17 ) );
+        setState( "SICNU_SAR_PRF", QString::number( kPrf, 'g', 17 ) );
+        setState( "SICNU_SAR_RANGE_RATE", QString::number( kRangeRate, 'g', 17 ) );
+        setState( "SICNU_SAR_RANGE_WINDOW",
+                  QString::number( rangeStart / kHalfLightSpeed, 'g', 17 ) + ";"
+                      + QString::number( ( rangeStart + ( kW - 1 ) * 30.0 ) / kHalfLightSpeed, 'g', 17 ) );
+        GDALClose( ds );
+    }
+
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_terrain_masks" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["dem"] = dem.toStdString();
+    params["output"] = tmp.filePath( "inc_orbit.tif" ).toStdString();
+    params["product"] = "local_incidence_orbit";
+    RSOperatorContext ctx;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, ctx ) );
+    REQUIRE( result["geolocatedPixels"].asUInt64() == 20ULL ); // 5 columns x 4 rows
+
+    const auto values = readBand( tmp.filePath( "inc_orbit.tif" ) );
+    REQUIRE( values.size() == static_cast<size_t>( kW ) * kH );
+    for ( int r = 0; r < kH; ++r )
+    {
+        for ( int c = 0; c < kW; ++c )
+        {
+            const float v = values[static_cast<size_t>( r ) * kW + c];
+            if ( c < 3 )
+            {
+                // Ranges shorter than the nadir distance never reach the
+                // height shell: typed NoData, never a fabricated angle.
+                REQUIRE( std::isnan( v ) );
+                continue;
+            }
+            // Near-equatorial ground points: the analytic equatorial
+            // triangle cos(theta_i) = (R^2 - a^2 - rho^2) / (2 a rho).
+            // The ground point is not exactly on the equator (in-plane
+            // off-nadir is a latitude offset), so the spherical-approx
+            // anchor carries an O(1e-4 deg) ellipsoidal residual — the
+            // exact analytic incidence pins live in test_sar_orbit.cpp.
+            const double rho = rangeStart + 30.0 * c;
+            const double cosTheta = ( kR * kR - kA * kA - rho * rho ) / ( 2.0 * kA * rho );
+            const double expectedDeg = std::acos( cosTheta ) * 180.0 / M_PI;
+            REQUIRE( v == Approx( expectedDeg ).margin( 1e-3 ) );
+        }
+    }
+    // Nadir column is exactly zero incidence.
+    REQUIRE( values[3] == Approx( 0.0 ).margin( 1e-6 ) );
+    // Incidence grows monotonically with range (physical invariant).
+    for ( int c = 4; c < kW; ++c )
+        REQUIRE( values[c] > values[c - 1] );
+}
+
+TEST_CASE( "rs:sar_terrain_masks local_incidence_orbit refuses scenes without the orbit contract",
+           "[sar][orbit][operator]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString dem = tmp.filePath( "dem.tif" );
+    REQUIRE( writeRaster( dem, std::vector<float>( 16, 0.0f ), 4, 4 ) );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_terrain_masks" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["dem"] = dem.toStdString();
+    params["output"] = tmp.filePath( "inc.tif" ).toStdString();
+    params["product"] = "local_incidence_orbit";
+    RSOperatorContext ctx;
+    REQUIRE_THROWS_AS( op->run( params, ctx ), RSOperatorError );
 }

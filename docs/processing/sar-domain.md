@@ -44,22 +44,41 @@
    invalidated masks and radiometric flattening; results for unchanged
    parameter sets therefore change by design in 6.0.
 
-## 3. Full range-Doppler: explicit refusal + extension contract
+## 3. Orbit geometry: the declared-contract executable subset
 
 Full range-Doppler terrain correction / geocoding needs orbit state vectors
 and sensor timing (zero-Doppler range equations, DEM sampling in range time,
-azimuth compression timing). The generic product metadata contract does not
-carry them, so **no operator may approximate it** — requests are typed
-refusals. The additive extension contract for future providers (parsed by
-none of the current operators):
+azimuth compression timing). Scenes that do not declare them keep the
+constant-geometry subset — **requests are typed refusals, never
+approximations**. The additive extension contract (dataset metadata):
 
 ```
-SICNU_SAR_ORBIT_STATES   "t;x;y;z;vx;vy;vz|..."  (UTC seconds, metres, m/s)
-SICNU_SAR_RANGE_WINDOW   range gate start/stop (s)
-SICNU_SAR_PRF            pulse repetition frequency (Hz)
-SICNU_SAR_RANGE_RATE     range sampling rate (samples/s)
+SICNU_SAR_ORBIT_STATES       "t;x;y;z;vx;vy;vz|..." (UTC seconds on the
+                             scene azimuth epoch; WGS84 ECEF metres, m/s)
+SICNU_SAR_AZIMUTH_START_UTC  azimuth time of image row 0 (s, same time base)
+SICNU_SAR_PRF                pulse repetition frequency (Hz)
+SICNU_SAR_RANGE_WINDOW       slant-range gate "start;stop" (s, two-way)
+SICNU_SAR_RANGE_RATE         range sampling rate (samples/s)
 ```
 
-When a provider declares and validates these, a zero-Doppler solver may be
-added behind the same operator seam; until then the limitation stands as
-documented here and in the operator metadata.
+**Scientific Algorithms 7.0 consumes this contract** behind
+`sar/sar_orbit.h` (parser + segment validation, Hermite interpolation,
+zero-Doppler geolocation, forward range-Doppler, per-point incidence — all
+known-answer tested against a synthetic circular orbit):
+
+- `rs:sar_terrain_masks product=local_incidence_orbit` geolocates every
+  pixel center (row → azimuth time via PRF, column → slant range via
+  RANGE_RATE and the two-way light path, DEM height above the ellipsoid)
+  and writes the incidence angle from the REAL line of sight — range- and
+  height-dependent, unlike the constant-geometry product. Pixels whose
+  (azimuth, range, height) cannot resolve on the shell (e.g. ranges
+  shorter than the nadir distance) are NoData, never fabricated.
+  Ranges: sample spacing = c / (2 · RANGE_RATE) metres.
+- Declared-but-invalid segments (unsorted, non-finite, single state,
+  window/grid contradictions beyond a 2-sample tolerance) are typed
+  refusals.
+- What this is NOT: full range-Doppler terrain correction still requires
+  DEM resampling into range time and output-grid geocoding with
+  radiometric rescaling — no operator claims it. Radiometric terrain
+  flattening remains the plane-fit / projected-area model of sar_terrain.h,
+  honestly named `gamma0_rtc`.
