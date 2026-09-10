@@ -96,7 +96,8 @@ std::vector<std::string> wrapTextMmBudgeted( const std::string &text, double max
 // Platform 8.0 (Typography 2.0): declared CJK line-end composition.
 //
 // A text item may declare `font.break_policy` governing line-FINAL fullwidth
-// closing punctuation (。，」…):
+// closing punctuation (。，」etc. — the U+2026 ellipsis is NOT in the
+// fullwidth class and is never compressed):
 //   "none"      (default) — the full advance counts; exactly the 7.0 model;
 //   "halfwidth" — the line-final fullwidth closing punctuation measures half
 //                 its advance (CJK halfwidth compression): more glyphs fit

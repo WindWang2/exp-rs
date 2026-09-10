@@ -313,6 +313,89 @@ TEST_CASE( "P8 mapspec: connector without resolvable extents anchors at the fram
   CHECK( pos.y() == Catch::Approx( 45.0 + 25.0 * 30.0 / 140.0 ).margin( 0.01 ) );
 }
 
+TEST_CASE( "P8 mapspec: connector projects north-up extents without vertical mirroring",
+           "[platform8][mapspec][locator]" )
+{
+  // Asymmetric case (adversarial review P1-1): the inset shows the NORTHERN
+  // quarter of the frame extent. QGIS renders ymin at the frame BOTTOM, so
+  // the anchor must land in the upper part of the target frame — page-y
+  // = rectY + (ymax - mapY)/H * rectH = 10 + (1 - 0.875) * 120 = 25.
+  Json::Value spec = makeConnectorSpec( "p8-connector-north" );
+  Json::Value inset( Json::objectValue );
+  inset["id"] = "inset-1";
+  Json::Value rect( Json::arrayValue );
+  rect.append( 180.0 );
+  rect.append( 20.0 );
+  rect.append( 60.0 );
+  rect.append( 50.0 );
+  inset["rect_mm"] = rect;
+  // Extent center at map y = 0.75+0.25*... : center (0.5, 0.875).
+  Json::Value extent( Json::arrayValue );
+  extent.append( 0.25 );
+  extent.append( 0.75 );
+  extent.append( 0.75 );
+  extent.append( 1.0 );
+  inset["extent"] = extent;
+  Json::Value locator( Json::objectValue );
+  locator["target"] = "map-1";
+  locator["connector"] = Json::Value( Json::objectValue );
+  inset["locator"] = locator;
+  appendMapSpecItem( spec, "inset_maps", inset );
+
+  QString error;
+  QgsPrintLayout *layout = MapSpecCompiler::compile( spec, &error );
+  REQUIRE( layout != nullptr );
+  auto *line = qobject_cast<QgsLayoutItemPolyline *>(
+    sicnu::agent::layout_tools::LayoutService::instance().findItem(
+      layout, QStringLiteral( "inset_map-1-locator-connector" ) ) );
+  REQUIRE( line != nullptr );
+  const double anchorX = 70.0;
+  const double anchorY = 10.0 + ( 1.0 - 0.875 ) * 120.0; // 25 — upper frame
+  const double dx = anchorX - 210.0;
+  const double dy = anchorY - 45.0;
+  const double scale = std::min( 30.0 / 140.0, 25.0 / 5.0 );
+  const double startY = 45.0 + dy * scale;
+  const QgsLayoutPoint pos = line->pagePositionWithUnits();
+  // Item origin = the connector bounding box top-left: x at the anchor's
+  // clamped column, y at the smaller of start/end page y.
+  CHECK( pos.x() == Catch::Approx( 70.0 ).margin( 0.01 ) );
+  CHECK( pos.y() == Catch::Approx( std::min( startY, anchorY ) ).margin( 0.01 ) );
+}
+
+TEST_CASE( "P8 preflight: malformed legend nodata keeps firing and validates",
+           "[platform8][preflight][nodata][validation]" )
+{
+  StyleRegistry &registry = StyleRegistry::instance();
+  registry.setDirectory( QStringLiteral( SICNU_CARTOGRAPHY_DATA_DIR ) );
+  registry.reload();
+
+  // Structural validation: legends[].nodata must be {label?, color?}.
+  Json::Value spec = makeConnectorSpec( "p8-nodata-malformed" );
+  Json::Value legend( Json::objectValue );
+  legend["id"] = "legend-1";
+  Json::Value rect( Json::arrayValue );
+  rect.append( 200.0 );
+  rect.append( 40.0 );
+  rect.append( 60.0 );
+  rect.append( 60.0 );
+  legend["rect_mm"] = rect;
+  legend["nodata"] = "NoData";
+  appendMapSpecItem( spec, "legends", legend );
+  bool sawShape = false;
+  for ( const auto &problem : validateMapSpec( spec ) )
+    sawShape = sawShape || problem.find( "nodata must be an object" ) != std::string::npos;
+  REQUIRE( sawShape );
+
+  // QA: a well-formed declaration suppresses the rule; a malformed one does
+  // not (the compiler renders nothing for it).
+  REQUIRE_FALSE( validateMapSpec( spec ).empty() );
+  legend["nodata"] = Json::Value( Json::objectValue );
+  legend["nodata"]["label"] = "NoData";
+  spec["legends"].clear();
+  appendMapSpecItem( spec, "legends", legend );
+  REQUIRE( validateMapSpec( spec ).empty() );
+}
+
 TEST_CASE( "P8 mapspec: locator connector surface is validated",
            "[platform8][mapspec][validation]" )
 {

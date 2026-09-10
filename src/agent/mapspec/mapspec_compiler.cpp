@@ -139,6 +139,23 @@ QgsLayoutItem *compileTextItem( QgsPrintLayout *layout, const QString &type,
   return item;
 }
 
+/// Derived furniture (locator caption/connector, nodata swatch/label) is
+/// positioned in the coordinates of its PARENT's page. The compiler places
+/// it at parent-rect-relative offsets — page-relative for the parent's page
+/// — and the v2 post-pass only moves items whose ids appear in the spec
+/// (derived ids do not), so a parent declared on page > 0 needs the same
+/// attemptMove the post-pass applies, keeping the item's own coordinates.
+void placeWithParentPage( QgsLayoutItem *item, const Json::Value &parent )
+{
+  if ( !item || !parent.isObject() )
+    return;
+  const int pageIndex =
+    parent.isMember( "page" ) && parent["page"].isIntegral() ? parent["page"].asInt() : 0;
+  if ( pageIndex <= 0 )
+    return;
+  item->attemptMove( item->pagePositionWithUnits(), true, false, pageIndex );
+}
+
 } // namespace
 
 QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *error )
@@ -459,7 +476,9 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
               labelProps["font_size"] = locator["label_size_pt"];
             else
               applyTokenTextStyle( labelProps, locator, tokens, "caption", 8.0 );
-            compileTextItem( layout, "label", id + "-locator-label", labelProps, tokens );
+            if ( QgsLayoutItem *caption = compileTextItem( layout, "label", id + "-locator-label",
+                                                           labelProps, tokens ) )
+              placeWithParentPage( caption, inset );
           }
 
           // Platform 8.0 connector graphics: a QGIS-native polyline from the
@@ -512,11 +531,14 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
                     ( insetExtent[0].asDouble() + insetExtent[2].asDouble() ) / 2.0;
                   const double insetCenterMapY =
                     ( insetExtent[1].asDouble() + insetExtent[3].asDouble() ) / 2.0;
+                  // North-up rendering puts ymin at the BOTTOM edge of the
+                  // frame (larger page y): page-y grows as the map y
+                  // DECREASES, hence the (ymax - mapY) numerator.
                   anchorX = targetRect[0].asDouble() +
                             ( insetCenterMapX - targetExtent[0].asDouble() ) / targetW *
                                 targetRect[2].asDouble();
                   anchorY = targetRect[1].asDouble() +
-                            ( insetCenterMapY - targetExtent[1].asDouble() ) / targetH *
+                            ( targetExtent[3].asDouble() - insetCenterMapY ) / targetH *
                                 targetRect[3].asDouble();
                   anchorX = std::max( targetRect[0].asDouble(),
                                       std::min( anchorX, targetRect[0].asDouble() +
@@ -531,34 +553,56 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
               const double dy = anchorY - insetCenterY;
               const double halfW = insetRect[2].asDouble() / 2.0;
               const double halfH = insetRect[3].asDouble() / 2.0;
+              const bool leavesInset =
+                std::abs( dx ) > 1e-9 || std::abs( dy ) > 1e-9;
               const double denomX = std::abs( dx ) > 1e-9 ? std::abs( dx ) : 1e-9;
               const double denomY = std::abs( dy ) > 1e-9 ? std::abs( dy ) : 1e-9;
               const double scale = std::min( halfW / denomX, halfH / denomY );
-              Json::Value points( Json::arrayValue );
-              Json::Value start( Json::arrayValue );
-              start.append( insetCenterX + dx * scale );
-              start.append( insetCenterY + dy * scale );
-              Json::Value end( Json::arrayValue );
-              end.append( anchorX );
-              end.append( anchorY );
-              points.append( start );
-              points.append( end );
-              Json::Value lineProps( Json::objectValue );
-              lineProps["points"] = points;
-              lineProps["color"] =
-                connector.isMember( "color" ) && connector["color"].isString()
-                  ? connector["color"]
-                  : Json::Value( "#333333" );
-              lineProps["width_mm"] =
-                connector.isMember( "stroke_mm" ) && connector["stroke_mm"].isNumeric()
-                  ? connector["stroke_mm"]
-                  : Json::Value( 0.4 );
-              lineProps["line_style"] =
-                connector.isMember( "style" ) && connector["style"].isString() &&
-                    connector["style"].asString() == "dash"
-                  ? Json::Value( "dash" )
-                  : Json::Value( "solid" );
-              compileItem( layout, "line", id + "-locator-connector", lineProps, &itemError );
+              if ( leavesInset )
+              {
+                // Classic locator practice: no leader when the projected
+                // anchor lies inside the inset footprint (the line would
+                // double back over the inset map).
+                Json::Value points( Json::arrayValue );
+                Json::Value start( Json::arrayValue );
+                start.append( insetCenterX + dx * scale );
+                start.append( insetCenterY + dy * scale );
+                Json::Value end( Json::arrayValue );
+                end.append( anchorX );
+                end.append( anchorY );
+                points.append( start );
+                points.append( end );
+                Json::Value lineProps( Json::objectValue );
+                lineProps["points"] = points;
+                lineProps["color"] =
+                  connector.isMember( "color" ) && connector["color"].isString()
+                    ? connector["color"]
+                    : Json::Value( "#333333" );
+                lineProps["width_mm"] =
+                  connector.isMember( "stroke_mm" ) && connector["stroke_mm"].isNumeric()
+                    ? connector["stroke_mm"]
+                    : Json::Value( 0.4 );
+                lineProps["line_style"] =
+                  connector.isMember( "style" ) && connector["style"].isString() &&
+                      connector["style"].asString() == "dash"
+                    ? Json::Value( "dash" )
+                    : Json::Value( "solid" );
+                QgsLayoutItem *connectorItem =
+                  compileItem( layout, "line", id + "-locator-connector", lineProps, &itemError );
+                if ( !connectorItem )
+                {
+                  // A declared relationship graphic that cannot materialize
+                  // is a compile failure, like an inset that cannot compile —
+                  // never a silently absent feature.
+                  if ( error )
+                    *error = QStringLiteral( "inset map '%1': connector: %2" )
+                               .arg( QString::fromStdString( id ), itemError );
+                  LayoutService::instance().deleteLayout(
+                    QString::fromStdString( spec["layout_name"].asString() ) );
+                  return nullptr;
+                }
+                placeWithParentPage( connectorItem, inset );
+              }
             }
           }
         }
@@ -656,7 +700,10 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       const Json::Value &r = legend["rect_mm"];
       Json::Value swatchProps( Json::objectValue );
       swatchProps["x"] = r[0].asDouble() + 2.0;
-      swatchProps["y"] = r[1].asDouble() + r[3].asDouble() - 6.0;
+      // Clamp into the legend rect so degenerate (very flat) legends cannot
+      // push the swatch above the legend top.
+      swatchProps["y"] = std::max( r[1].asDouble(),
+                                   r[1].asDouble() + r[3].asDouble() - 6.0 );
       swatchProps["width"] = 4.0;
       swatchProps["height"] = 4.0;
       QgsLayoutItem *swatch = compileItem( layout, "shape", legend["id"].asString() + "-nodata-swatch",
@@ -673,6 +720,7 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         swatchSymbol[QStringLiteral( "width_unit" )] = QStringLiteral( "MM" );
         swatchShape->setSymbol( QgsFillSymbol::createSimple( swatchSymbol ).release() );
         swatchShape->update();
+        placeWithParentPage( swatchShape, legend );
       }
       Json::Value nodataLabelProps( Json::objectValue );
       nodataLabelProps["x"] = r[0].asDouble() + 8.0;
@@ -681,8 +729,10 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       nodataLabelProps["height"] = 4.0;
       nodataLabelProps["text"] = nodataLabel;
       applyTokenTextStyle( nodataLabelProps, legend, tokens, "caption", 6.0 );
-      compileTextItem( layout, "label", legend["id"].asString() + "-nodata-label",
-                       nodataLabelProps, tokens );
+      if ( QgsLayoutItem *swatchLabel =
+             compileTextItem( layout, "label", legend["id"].asString() + "-nodata-label",
+                              nodataLabelProps, tokens ) )
+        placeWithParentPage( swatchLabel, legend );
     }
   }
   for ( const auto &scaleBar : itemsOf( "scale_bars" ) )

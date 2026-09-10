@@ -1030,10 +1030,19 @@ bool Solver::sweepHardOnce()
       c.disabled = true; // reported once; leaves the sweep
       c.failReason = failReason;
       if ( !mSimulating )
+      {
         mReport.add( c.cid + "|failed",
                      c.cid + ": " + ( failReason.empty()
                                         ? std::string( "cannot be applied; it leaves the sweep" )
                                         : failReason + " — it leaves the sweep" ) );
+        // The ledger carries the refusal too (page_overflow evidence is a
+        // first-class decision, not only a report note). Permanent failures
+        // cannot participate in the unsat-core search: no subset removal of
+        // OTHER constraints changes the geometry bound that caused them.
+        decide( c, "failed",
+                failReason.empty() ? std::string( "constraint cannot be applied" )
+                                   : failReason );
+      }
     }
     else if ( outcome == Apply::Blocked )
     {
@@ -1287,10 +1296,16 @@ void Solver::applySofts()
       if ( outcome == Apply::Failed )
       {
         c.disabled = true;
+        c.failReason = failReason;
         mReport.add( c.cid + "|failed",
                      c.cid + ": " + ( failReason.empty()
                                         ? std::string( "cannot be applied; it leaves the sweep" )
                                         : failReason + " — it leaves the sweep" ) );
+        // Same ledger contract as the hard sweep: the refusal itself is the
+        // decision record.
+        decide( c, "failed",
+                failReason.empty() ? std::string( "constraint cannot be applied" )
+                                   : failReason );
         continue;
       }
       if ( outcome == Apply::Blocked )
@@ -1376,7 +1391,9 @@ void Solver::finalize( CompositionResult &result )
         violation.cid = c.cid;
         violation.kind = c.kind;
         if ( c.disabled )
-          violation.reason = "disabled (anchor conflict or permanent failure)";
+          violation.reason = c.failReason.empty()
+                               ? "disabled (anchor conflict or permanent failure)"
+                               : c.failReason;
         else if ( c.rejected )
           violation.reason = "rejected: a higher-ranked constraint keeps the geometry";
         else

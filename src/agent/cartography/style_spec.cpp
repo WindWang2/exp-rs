@@ -3,6 +3,7 @@
 
 #include "design_tokens.h"
 
+#include <QColor>
 #include <QDir>
 #include <QFile>
 #include <QMutexLocker>
@@ -661,9 +662,17 @@ std::vector<std::string> validateStyleSemantics( const Json::Value &styleSpec )
       if ( nodata.isMember( "label" ) && !nodata["label"].isString() )
         problems.push_back( id + ": raster.nodata.label must be a string" );
       // Platform 8.0: shading color for non-transparent nodata pixels
-      // (renderer nodataColor). Optional; defaults to black.
-      if ( nodata.isMember( "color" ) && !nodata["color"].isString() )
-        problems.push_back( id + ": raster.nodata.color must be a string" );
+      // (renderer nodataColor). Optional; defaults to black. Must PARSE as a
+      // color: QGIS reads an invalid QColor as "transparent", so a typo like
+      // "redd" would silently invert the declaration.
+      if ( nodata.isMember( "color" ) )
+      {
+        if ( !nodata["color"].isString() )
+          problems.push_back( id + ": raster.nodata.color must be a string" );
+        else if ( !QColor( QString::fromStdString( nodata["color"].asString() ) ).isValid() )
+          problems.push_back( id + ": raster.nodata.color '" +
+                              nodata["color"].asString() + "' is not a parseable color" );
+      }
     }
   }
 

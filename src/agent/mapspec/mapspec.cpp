@@ -649,6 +649,18 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
            ( !item.isMember( "chart" ) || !item["chart"].isObject() ) )
         problems.push_back( id + ": chart needs a 'chart' object" );
 
+      // Platform 8.0: NoData legend declaration shape (label/color strings).
+      if ( std::string( info->name ) == "legends" && item.isMember( "nodata" ) )
+      {
+        if ( !item["nodata"].isObject() )
+          problems.push_back( id + ": nodata must be an object" );
+        else
+        {
+          for ( const char *member : { "label", "color" } )
+            if ( item["nodata"].isMember( member ) && !item["nodata"][member].isString() )
+              problems.push_back( id + ": nodata." + member + " must be a string" );
+        }
+      }
       // v2 composition fields.
       checkV2ItemFields( item, id, problems );
       // v3 knowledge-platform fields.

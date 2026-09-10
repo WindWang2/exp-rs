@@ -188,5 +188,5 @@ a `qgis_type` marker (documented divergence).
   `docs/cartography/preflight-rules.md`).
 - **Page-aware solver evidence**: `keep_with`/`avoid_overlap` refuse pins
   that would push a companion past its own page bottom with a
-  `page_overflow` reason (unsatisfied/violated/decision + unsat core)
-  instead of silently writing off-page geometry.
+  `page_overflow` reason (carried in unsatisfied, violated and the decisions
+  ledger) instead of silently writing off-page geometry.

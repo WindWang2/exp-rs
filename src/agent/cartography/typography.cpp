@@ -597,6 +597,7 @@ Json::Value textFitReportToJson( const TextFitReport &report )
   out["overflow_height_mm"] = report.overflowHeightMm;
   out["truncated"] = report.truncated;
   out["policy"] = report.policyApplied;
+  out["break_policy"] = report.breakPolicyApplied;
   Json::Value lines( Json::arrayValue );
   for ( const std::string &line : report.lines )
     lines.append( line );

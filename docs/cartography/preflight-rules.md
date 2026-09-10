@@ -124,6 +124,8 @@ and every unsatisfied hard constraint carries a bounded unsat core. See
 The page-aware solver evidence is also new: `keep_with` and
 `avoid_overlap` respect the follower's declared page height. A pin that
 would push the companion past its own page bottom is refused with a
-`page_overflow` reason in `unsatisfied`/`violated`/`decisions` (and a
-bounded unsat core), instead of silently producing off-page geometry that
-only `MAP_OFF_PAGE` would find later without provenance.
+`page_overflow` reason in `unsatisfied`, `violated` and the decisions
+ledger, instead of silently producing off-page geometry that only
+`MAP_OFF_PAGE` would find later without provenance. A permanent refusal
+like this cannot appear in the bounded unsat cores: no subset removal of
+other constraints changes the page bound that caused it.

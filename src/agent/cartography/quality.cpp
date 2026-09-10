@@ -420,8 +420,10 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
       if ( !legend.isObject() || !legend.isMember( "id" ) || !legend.isMember( "style_ref" ) ||
            !legend["style_ref"].isString() )
         continue;
-      if ( legend.isMember( "nodata" ) )
-        continue; // declared — compiler renders the swatch entry
+      // Declared AND well-formed counts as covered; a malformed (non-object)
+      // declaration compiles nothing, so the rule must keep firing.
+      if ( legend.isMember( "nodata" ) && legend["nodata"].isObject() )
+        continue;
       const Json::Value style = StyleRegistry::instance().find(
         QString::fromStdString( legend["style_ref"].asString() ) );
       if ( style.isNull() || !style.isObject() )

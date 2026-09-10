@@ -280,16 +280,34 @@ bool applyRasterBlock( QgsRasterLayer *raster, const Json::Value &rasterBlock,
 /// user-nodata range on the declared band (validated callers only);
 /// `transparent: false` shades nodata pixels with `color` (default black)
 /// through QgsRasterRenderer::setNodataColor; `label` is legend/preflight
-/// knowledge only, never a renderer input. Idempotent under re-apply.
-void applyRasterNodata( QgsRasterLayer *raster, const Json::Value &rasterBlock,
-                        const Json::Value &nodata, QStringList &applied )
+/// knowledge only, never a renderer input. Idempotent under re-apply
+/// (applyRasterBlock installs a fresh renderer whose nodata color is
+/// invalid = transparent, so nothing stale survives). Unparseable color
+/// strings fall back to the documented black default and are reported —
+/// QGIS reads an invalid QColor as "transparent", which would silently
+/// invert the declaration.
+/// Declared band of a raster style block (1-based; default 1). Shared by
+/// applyRasterBlock and applyRasterNodata so they can never drift.
+int bandOf( const Json::Value &rasterBlock )
 {
-  const int band = rasterBlock.isMember( "band" ) && rasterBlock["band"].isIntegral()
-                     ? rasterBlock["band"].asInt()
-                     : 1;
+  return rasterBlock.isMember( "band" ) && rasterBlock["band"].isIntegral()
+           ? rasterBlock["band"].asInt()
+           : 1;
+}
+
+void applyRasterNodata( QgsRasterLayer *raster, const Json::Value &rasterBlock,
+                        const Json::Value &nodata, QStringList &applied,
+                        QStringList &problems )
+{
+  const int band = bandOf( rasterBlock );
   const bool hasValue = nodata.isMember( "value" ) && nodata["value"].isNumeric();
   const bool transparent = !( nodata.isMember( "transparent" ) && nodata["transparent"].isBool() &&
                               !nodata["transparent"].asBool() );
+  if ( hasValue && !raster->dataProvider() )
+  {
+    problems << QStringLiteral( "raster:nodata value declared but the layer has no data "
+                                 "provider; the range was not set" );
+  }
   if ( hasValue && raster->dataProvider() )
   {
     QgsRasterRangeList ranges;
@@ -300,15 +318,22 @@ void applyRasterNodata( QgsRasterLayer *raster, const Json::Value &rasterBlock,
   {
     if ( !transparent )
     {
-      const QString color = nodata.isMember( "color" ) && nodata["color"].isString()
-                              ? QString::fromStdString( nodata["color"].asString() )
-                              : QStringLiteral( "#000000" );
-      renderer->setNodataColor( QColor( color ) );
+      QColor shade = QColor( QStringLiteral( "#000000" ) );
+      if ( nodata.isMember( "color" ) && nodata["color"].isString() )
+      {
+        const QColor declared( QString::fromStdString( nodata["color"].asString() ) );
+        if ( declared.isValid() )
+          shade = declared;
+        else
+          problems << QStringLiteral( "raster:nodata.color '%1' is not a parseable color; "
+                                      "the documented black default is applied" )
+                          .arg( QString::fromStdString( nodata["color"].asString() ) );
+      }
+      renderer->setNodataColor( shade );
     }
     else
     {
-      // Invalid color = QGIS default transparent nodata rendering, so a
-      // re-apply with transparent:true resets any earlier shading.
+      // Invalid color = QGIS default transparent nodata rendering.
       renderer->setNodataColor( QColor() );
     }
   }
@@ -588,10 +613,16 @@ QgsRasterRenderer *buildRasterRenderer( const Json::Value &rasterBlock, int band
                            nodata["transparent"].isBool() && !nodata["transparent"].asBool();
   const QColor nodataShade = shadeNodata && nodata.isMember( "color" ) && nodata["color"].isString()
                                ? QColor( QString::fromStdString( nodata["color"].asString() ) )
-                               : QColor( QStringLiteral( "#000000" ) );
+                               : QColor();
+  // Invalid declared colors fall back to the documented black default — an
+  // invalid QColor would mean "transparent" in QGIS and invert the
+  // declaration. (Validation rejects unparseable colors at load time.)
+  const QColor effectiveShade =
+    shadeNodata ? ( nodataShade.isValid() ? nodataShade : QColor( QStringLiteral( "#000000" ) ) )
+                : QColor();
   QgsRasterRenderer *renderer = buildRasterRendererImpl( rasterBlock, bandCount, error );
   if ( renderer && shadeNodata )
-    renderer->setNodataColor( nodataShade );
+    renderer->setNodataColor( effectiveShade );
   return renderer;
 }
 
@@ -676,7 +707,8 @@ bool applyStyleSpecToLayer( QgsMapLayer *layer, const Json::Value &styleSpecIn, 
       // the pair is applied together for one coherent report).
       if ( rasterApplied && styleSpec["raster"].isMember( "nodata" ) &&
            styleSpec["raster"]["nodata"].isObject() )
-        applyRasterNodata( raster, styleSpec["raster"], styleSpec["raster"]["nodata"], applied );
+        applyRasterNodata( raster, styleSpec["raster"], styleSpec["raster"]["nodata"], applied,
+                           problems );
       appliedAny = rasterApplied || appliedAny;
     }
     else
