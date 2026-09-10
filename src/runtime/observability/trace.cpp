@@ -389,7 +389,7 @@ std::shared_ptr<ITraceSink> Trace::sink()
     return s_sink;
 }
 
-void Trace::emit( const TraceEvent &event )
+void Trace::publish( const TraceEvent &event )
 {
     if ( !s_enabled.load( std::memory_order_relaxed ) )
         return;

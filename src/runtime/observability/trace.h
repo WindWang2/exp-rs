@@ -141,7 +141,7 @@ class Trace
     static std::shared_ptr<ITraceSink> sink();
 
     /// Hot-path entry point: one relaxed load when disabled.
-    static void emit( const TraceEvent &event );
+    static void publish( const TraceEvent &event );
     static bool enabled() { return s_enabled.load( std::memory_order_relaxed ); }
 
   private:
@@ -157,7 +157,7 @@ std::string installFileSinkFromEnv();
 /// Convenience: emit a one-line event; fills tsMs when 0.
 inline void emitEvent( TraceEvent event )
 {
-    Trace::emit( event );
+    Trace::publish( event );
 }
 
 /// Serialize one event as a single-line NDJSON record (exposed for tests and

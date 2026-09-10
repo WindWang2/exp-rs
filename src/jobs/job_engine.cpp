@@ -789,7 +789,7 @@ void JobEngine::runOperatorJob( const std::string &jobId )
     start.op = request.algorithmId;
     start.event = "execution_start";
     start.phase = "start";
-    sicnu::runtime::observability::trace::Trace::emit( start );
+    sicnu::runtime::observability::trace::Trace::publish( start );
   }
   const auto traceStart = std::chrono::steady_clock::now();
   struct TraceEndGuard
@@ -822,7 +822,7 @@ void JobEngine::runOperatorJob( const std::string &jobId )
         }
         end.detail = rec->error;
       }
-      Trace::emit( end );
+      Trace::publish( end );
     }
   } traceEnd{ jobId, request.algorithmId, traceStart };
 

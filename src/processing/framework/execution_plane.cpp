@@ -23,7 +23,7 @@ constexpr auto kAwaitSlice = std::chrono::milliseconds( 25 );
 /// Unified-trace adapter (Verification 7.0): emit one exp.trace.v1 record per
 /// entry/terminal transition. The entry correlationId travels in the `run`
 /// field — it is the top-level trace handle at this layer. Cost when tracing
-/// is off: one relaxed atomic load inside Trace::emit.
+/// is off: one relaxed atomic load inside Trace::publish.
 void tracePlaneEvent( const char *event, const char *status, const ExecutionRequest &request,
                       long taskId )
 {
@@ -33,7 +33,7 @@ void tracePlaneEvent( const char *event, const char *status, const ExecutionRequ
   trace.op = request.algorithmId.toStdString();
   trace.event = event;
   trace.status = status;
-  observability::trace::Trace::emit( trace );
+  observability::trace::Trace::publish( trace );
 }
 
 } // namespace
@@ -126,7 +126,7 @@ ExecutionHandle ExecutionPlane::submit( const ExecutionRequest &request )
           case sicnu::TaskStatus::Canceled: trace.status = "cancelled"; break;
           default: trace.status = "unknown"; break;
           }
-          observability::trace::Trace::emit( trace );
+          observability::trace::Trace::publish( trace );
         }
       } );
   }

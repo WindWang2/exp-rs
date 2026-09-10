@@ -161,7 +161,7 @@ TEST_CASE( "trace control: disabled by default, one-call enable/disable", "[trac
         TraceEvent event;
         event.run = "r";
         event.event = "submitted";
-        Trace::emit( event );
+        Trace::publish( event );
         REQUIRE( installed.sink->size() == 1 );
         // tsMs stamped by emit.
         REQUIRE( installed.sink->snapshot().front().tsMs != 0 );
