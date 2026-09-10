@@ -159,6 +159,106 @@ struct Fixture
 
 } // namespace
 
+// ------------------------------------------------------------ gap fill ----
+
+TEST_CASE( "temporal_gap_fill: linear interpolation over real day offsets E2E",
+           "[temporal][operators][gapfill]" )
+{
+    ensureApp();
+    Fixture fx;
+
+    // 4 dates 10 days apart, 2x1 pixels (raster is width-major):
+    // pixel 0: 10, gap, gap, 40  → linear fills 20 (t=11), 30 (t=21)
+    // pixel 1: gap, 20, gap, 80  → leading gap stays NaN (linear never
+    //          extrapolates); interior gap fills 20 + (80−20)/2 = 50.
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "a.tif" ), QStringLiteral( "2025-01-01" ),
+                                            { 10, -9999 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "b.tif" ), QStringLiteral( "2025-01-11" ),
+                                            { -9999, 20 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "c.tif" ), QStringLiteral( "2025-01-21" ),
+                                            { -9999, -9999 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "d.tif" ), QStringLiteral( "2025-01-31" ),
+                                            { 40, 80 }, 2, 1 ) ) );
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( const char *p : { "a.tif", "b.tif", "c.tif", "d.tif" } )
+        scenes.append( fx.filePath( p ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["method"] = "linear";
+    params["output"] = fx.filePath( QStringLiteral( "filled.tif" ) ).toStdString();
+
+    const Json::Value result = runOp( "rs:temporal_gap_fill", params );
+    REQUIRE( result["sceneCount"].asInt() == 4 );
+    // filled/fillable: pixel 0 fills 2 of 2 anchored; pixel 1 fills 1 of 2
+    // (the leading gap has no left anchor — fillable, never extrapolated).
+    REQUIRE( result["filledFraction"].asDouble() == Approx( 3.0 / 4.0 ) );
+
+    REQUIRE( readBand( fx.filePath( "filled.tif" ), 1 )[0] == Approx( 10.0 ) );
+    REQUIRE( readBand( fx.filePath( "filled.tif" ), 2 )[0] == Approx( 20.0 ) );
+    REQUIRE( readBand( fx.filePath( "filled.tif" ), 3 )[0] == Approx( 30.0 ) );
+    REQUIRE( readBand( fx.filePath( "filled.tif" ), 4 )[0] == Approx( 40.0 ) );
+
+    const auto p1b1 = readBand( fx.filePath( "filled.tif" ), 1 );
+    const auto p1b2 = readBand( fx.filePath( "filled.tif" ), 2 );
+    const auto p1b4 = readBand( fx.filePath( "filled.tif" ), 4 );
+    REQUIRE( std::isnan( p1b1[1] ) );                       // leading gap
+    REQUIRE( p1b2[1] == Approx( 20.0 ) );                   // valid copy-through
+    REQUIRE( p1b4[1] == Approx( 80.0 ) );
+    const auto p1b3 = readBand( fx.filePath( "filled.tif" ), 3 );
+    REQUIRE( p1b3[1] == Approx( 50.0 ) );                   // 20 + 60·(10/20)
+
+    // filled_count band: pixel 0 filled 2; pixel 1 filled 1.
+    const auto countBand = readBand( fx.filePath( "filled.tif" ), 5 );
+    REQUIRE( countBand[0] == Approx( 2 ) );
+    REQUIRE( countBand[1] == Approx( 1 ) );
+}
+
+TEST_CASE( "temporal_gap_fill: nearest fills one-sided gaps, ties take the earlier scene",
+           "[temporal][operators][gapfill]" )
+{
+    ensureApp();
+    Fixture fx;
+
+    // Same 4-date collection; nearest semantics:
+    // pixel 0: 10, gap(t=11), gap(t=21), 40 → t=11: left 10 days vs right 20
+    // → 10; t=21: right 10 days vs left 20 → 40.
+    // pixel 1: gap(t=1), 20(t=11), gap(t=21), 80(t=31) → leading gap fills
+    // from t=11 (10 days, nearest DOES use one-sided anchors): 20; interior
+    // tie 10/10 → earlier scene → 20.
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "a.tif" ), QStringLiteral( "2025-01-01" ),
+                                            { 10, -9999 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "b.tif" ), QStringLiteral( "2025-01-11" ),
+                                            { -9999, 20 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "c.tif" ), QStringLiteral( "2025-01-21" ),
+                                            { -9999, -9999 }, 2, 1 ) ) );
+    REQUIRE( writeTestScene( makeTestScene( fx.filePath( "d.tif" ), QStringLiteral( "2025-01-31" ),
+                                            { 40, 80 }, 2, 1 ) ) );
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( const char *p : { "a.tif", "b.tif", "c.tif", "d.tif" } )
+        scenes.append( fx.filePath( p ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["method"] = "nearest";
+    params["output"] = fx.filePath( QStringLiteral( "filled.tif" ) ).toStdString();
+
+    const Json::Value result = runOp( "rs:temporal_gap_fill", params );
+    REQUIRE( result["filledFraction"].asDouble() == Approx( 1.0 ) );
+
+    REQUIRE( readBand( fx.filePath( "filled.tif" ), 2 )[0] == Approx( 10.0 ) );
+    REQUIRE( readBand( fx.filePath( "filled.tif" ), 3 )[0] == Approx( 40.0 ) );
+    REQUIRE( readBand( fx.filePath( "filled.tif" ), 1 )[1] == Approx( 20.0 ) );
+    REQUIRE( readBand( fx.filePath( "filled.tif" ), 3 )[1] == Approx( 20.0 ) );
+    REQUIRE( readBand( fx.filePath( "filled.tif" ), 4 )[1] == Approx( 80.0 ) );
+    // filled_count: every gap position filled (pixel 0: 2, pixel 1: 2).
+    const auto countBand = readBand( fx.filePath( "filled.tif" ), 5 );
+    REQUIRE( countBand[0] == Approx( 2 ) );
+    REQUIRE( countBand[1] == Approx( 2 ) );
+}
+
 // ------------------------------------------------------------- summary ----
 
 TEST_CASE( "temporal_summary: hand-computed statistics", "[temporal][operators][summary]" )
