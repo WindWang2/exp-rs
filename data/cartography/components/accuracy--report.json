@@ -1,0 +1,54 @@
+{
+ "id": "accuracy/report",
+ "version": 1,
+ "category": "accuracy",
+ "semantic_roles": [
+  "accuracy.report"
+ ],
+ "description": "Accuracy report block (overall accuracy, kappa, per-class precision/recall) for classification products.",
+ "parameters": {
+  "font": {
+   "size_pt": 7
+  },
+  "show_kappa": true
+ },
+ "defaults": {
+  "title": "Accuracy"
+ },
+ "style_tokens": [
+  "typography.styles.caption",
+  "colors.text",
+  "colors.success",
+  "colors.error",
+  "spacing.padding_mm"
+ ],
+ "layout_constraints": {
+  "anchor": "free",
+  "preferred_positions": [
+   "right-rail",
+   "report-page"
+  ],
+  "margin_mm": 6,
+  "max_count_per_page": 1,
+  "min_size_mm": [
+   40,
+   24
+  ]
+ },
+ "compatibility": {
+  "requires_map_frame": true,
+  "result_types": [
+   "classification",
+   "land_cover",
+   "change"
+  ]
+ },
+ "data_bindings": [
+  {
+   "name": "confusion",
+   "source": "params.confusion_matrix",
+   "required": false,
+   "description": "Square confusion matrix (rows = reference); falls back to params.metrics."
+  }
+ ]
+}

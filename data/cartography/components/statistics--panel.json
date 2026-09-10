@@ -1,0 +1,62 @@
+{
+ "id": "statistics/panel",
+ "version": 1,
+ "category": "statistics",
+ "semantic_roles": [
+  "statistics.panel"
+ ],
+ "description": "Compact statistics panel (min/max/mean/sum or per-class counts) for numeric result layers.",
+ "parameters": {
+  "font": {
+   "size_pt": 7
+  },
+  "columns": 1,
+  "show": [
+   "min",
+   "max",
+   "mean"
+  ]
+ },
+ "defaults": {
+  "title": "Statistics"
+ },
+ "style_tokens": [
+  "typography.styles.caption",
+  "colors.text_secondary",
+  "colors.panel",
+  "spacing.padding_mm",
+  "furniture.legend_line_height_mm"
+ ],
+ "layout_constraints": {
+  "anchor": "free",
+  "preferred_positions": [
+   "right-rail",
+   "bottom-rail"
+  ],
+  "margin_mm": 6,
+  "max_count_per_page": 1,
+  "min_size_mm": [
+   30,
+   16
+  ]
+ },
+ "compatibility": {
+  "requires_map_frame": true,
+  "map_types": [
+   "raster"
+  ],
+  "result_types": [
+   "continuous",
+   "index",
+   "change"
+  ]
+ },
+ "data_bindings": [
+  {
+   "name": "values",
+   "source": "map_ref.statistics",
+   "required": false,
+   "description": "Derives from the linked map renderer statistics when absent from params."
+  }
+ ]
+}

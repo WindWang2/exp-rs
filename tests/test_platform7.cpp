@@ -11,6 +11,7 @@
 
 #include "agent/cartography/chart_registry.h"
 #include "agent/cartography/composition.h"
+#include "agent/cartography/design_tokens.h"
 #include "agent/cartography/registry.h"
 #include "agent/cartography/style_spec.h"
 #include "agent/cartography/typography.h"
@@ -801,6 +802,91 @@ TEST_CASE( "P7 charts: dual axis is rejected without semantic justification",
   saw = false;
   for ( const auto &problem : validateChartSpec( pie ) )
     saw = saw || problem.find( "only defined for line/scatter" ) != std::string::npos;
+  REQUIRE( saw );
+}
+
+TEST_CASE( "P7 components: professional set loads with roles, bounds and tokens",
+           "[platform7][components]" )
+{
+  ComponentRegistry &registry = ComponentRegistry::instance();
+  registry.setDirectory( QStringLiteral( SICNU_CARTOGRAPHY_DATA_DIR ) );
+  registry.reload();
+  if ( !registry.loadProblems().isEmpty() )
+    FAIL( registry.loadProblems().join( "; " ).toStdString() );
+
+  const Json::Value all = registry.components();
+  REQUIRE( all.size() >= 57 );
+
+  // Every new component resolves and carries the required surfaces.
+  const std::vector<std::string> expected = {
+    "text/uncertainty-note", "statistics/panel", "accuracy/report",
+    "chart/class-composition", "publication/footer",
+  };
+  for ( const std::string &id : expected )
+  {
+    INFO( id );
+    const Json::Value component = registry.find( QString::fromStdString( id ) );
+    REQUIRE_FALSE( component.isNull() );
+    REQUIRE( component["semantic_roles"].isArray() );
+    REQUIRE_FALSE( component["semantic_roles"].empty() );
+    REQUIRE( component["layout_constraints"].isObject() );
+    REQUIRE( component["compatibility"].isObject() );
+    REQUIRE( component["style_tokens"].isArray() );
+    REQUIRE_FALSE( component["style_tokens"].empty() );
+  }
+
+  // New categories map to the labels collection.
+  REQUIRE( collectionForCategory( "statistics" ) == "labels" );
+  REQUIRE( collectionForCategory( "accuracy" ) == "labels" );
+  REQUIRE( registry.byCategory( QLatin1String( "statistics" ) ).size() == 1 );
+  REQUIRE( registry.byCategory( QLatin1String( "accuracy" ) ).size() == 1 );
+}
+
+TEST_CASE( "P7 components: style_tokens paths resolve against the default token set",
+           "[platform7][components][drift]" )
+{
+  ComponentRegistry &registry = ComponentRegistry::instance();
+  registry.setDirectory( QStringLiteral( SICNU_CARTOGRAPHY_DATA_DIR ) );
+  registry.reload();
+  const Json::Value tokens = resolveTokenSet( Json::Value() ); // default set
+  REQUIRE_FALSE( tokens.isNull() );
+
+  std::vector<std::string> dangling;
+  for ( const auto &component : registry.components() )
+  {
+    if ( !component.isMember( "style_tokens" ) )
+      continue;
+    for ( const auto &path : component["style_tokens"] )
+    {
+      if ( !path.isString() )
+        continue;
+      if ( tokenValue( tokens, path.asString() ).isNull() )
+        dangling.push_back( component["id"].asString() + " -> " + path.asString() );
+    }
+  }
+  REQUIRE( dangling.empty() );
+}
+
+TEST_CASE( "P7 components: style_tokens shape is validated",
+           "[platform7][components][validation]" )
+{
+  Json::Value descriptor( Json::objectValue );
+  descriptor["id"] = "test/tokened";
+  descriptor["category"] = "text";
+  descriptor["version"] = 1;
+  descriptor["style_tokens"] = "typography.styles.body"; // not an array
+  std::vector<std::string> problems = validateComponentDescriptor( descriptor );
+  bool saw = false;
+  for ( const auto &problem : problems )
+    saw = saw || problem.find( "style_tokens must be an array" ) != std::string::npos;
+  REQUIRE( saw );
+
+  descriptor["style_tokens"] = Json::Value( Json::arrayValue );
+  descriptor["style_tokens"].append( "" );
+  problems = validateComponentDescriptor( descriptor );
+  saw = false;
+  for ( const auto &problem : problems )
+    saw = saw || problem.find( "non-empty dotted token path" ) != std::string::npos;
   REQUIRE( saw );
 }
 

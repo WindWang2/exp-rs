@@ -1,0 +1,52 @@
+{
+ "id": "text/uncertainty-note",
+ "version": 1,
+ "category": "text",
+ "semantic_roles": [
+  "text.uncertainty"
+ ],
+ "description": "Standalone uncertainty note (kind, level, source) required when the product declares uncertain data.",
+ "parameters": {
+  "font": {
+   "size_pt": 7
+  }
+ },
+ "defaults": {
+  "text": "Uncertainty: -- (level --)"
+ },
+ "style_tokens": [
+  "typography.styles.annotation",
+  "colors.uncertainty",
+  "spacing.padding_mm"
+ ],
+ "layout_constraints": {
+  "anchor": "edge",
+  "preferred_positions": [
+   "bottom-left",
+   "bottom-center"
+  ],
+  "margin_mm": 6,
+  "max_count_per_page": 1,
+  "min_size_mm": [
+   24,
+   4
+  ]
+ },
+ "compatibility": {
+  "requires_map_frame": true,
+  "result_types": [
+   "uncertainty",
+   "probability",
+   "confidence",
+   "classification"
+  ]
+ },
+ "data_bindings": [
+  {
+   "name": "text",
+   "source": "params.uncertainty_note",
+   "required": false,
+   "description": "Falls back to the declared uncertainty kind/level of the linked style."
+  }
+ ]
+}

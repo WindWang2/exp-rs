@@ -72,6 +72,7 @@ const CategoryInfo kCategoryInfos[] = {
   { "inset-map", "inset_maps" },     { "annotation", "annotations" },
   { "source-note", "source_notes" }, { "frame", "constraints" },
   { "publication", "labels" },
+  { "statistics", "labels" },        { "accuracy", "labels" },
 };
 
 QStringList knownCategories()
@@ -152,6 +153,26 @@ std::vector<std::string> validateComponent( const Json::Value &descriptor,
       for ( const auto &binding : descriptor["data_bindings"] )
         if ( !binding.isObject() || !binding.isMember( "name" ) || !binding["name"].isString() )
           problems.push_back( id + ": every data_binding needs a string name" );
+  }
+  // Platform 7.0: style token references (dotted token-set paths) power the
+  // component-to-token drift check; the shape is closed and bounded here.
+  if ( descriptor.isMember( "style_tokens" ) )
+  {
+    const Json::Value &styleTokens = descriptor["style_tokens"];
+    if ( !styleTokens.isArray() )
+      problems.push_back( id + ": style_tokens must be an array of dotted token paths" );
+    else
+    {
+      if ( static_cast<int>( styleTokens.size() ) > 24 )
+        problems.push_back( id + ": style_tokens capped at 24 entries" );
+      int tokenIndex = 0;
+      for ( const auto &path : styleTokens )
+      {
+        const std::string where = id + ": style_tokens[" + std::to_string( tokenIndex++ ) + "]";
+        if ( !path.isString() || path.asString().empty() )
+          problems.push_back( where + " must be a non-empty dotted token path" );
+      }
+    }
   }
   // --- Platform 6.0 (Milestone C): bounded composite children ---------------
   if ( descriptor.isMember( "children" ) )
