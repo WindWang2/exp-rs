@@ -1,6 +1,7 @@
 // JobEngine implementation
 #include "job_engine.h"
 
+#include "observability/trace.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -775,6 +776,55 @@ void JobEngine::runOperatorJob( const std::string &jobId )
     fallback = m_fallbackExecutor;
   }
   notify( startedCopy );
+
+  // Unified trace (Verification 7.0): one execution_start / execution_end
+  // pair per job. Gated on Trace::enabled() — zero work when tracing is off.
+  // The RAII end-guard covers every return path below; it reads the terminal
+  // state via snapshot() (engine mutex, worker thread — safe, never held
+  // across user code).
+  if ( sicnu::runtime::observability::trace::Trace::enabled() )
+  {
+    sicnu::runtime::observability::trace::TraceEvent start;
+    start.job = jobId;
+    start.op = request.algorithmId;
+    start.event = "execution_start";
+    start.phase = "start";
+    sicnu::runtime::observability::trace::Trace::emit( start );
+  }
+  const auto traceStart = std::chrono::steady_clock::now();
+  struct TraceEndGuard
+  {
+    const std::string &jobId;
+    const std::string &algorithmId;
+    std::chrono::steady_clock::time_point start;
+    ~TraceEndGuard()
+    {
+      using namespace sicnu::runtime::observability::trace;
+      if ( !Trace::enabled() )
+        return;
+      TraceEvent end;
+      end.job = jobId;
+      end.op = algorithmId;
+      end.event = "execution_end";
+      end.phase = "end";
+      end.durationUs =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now() - start )
+          .count();
+      if ( const auto rec = JobEngine::instance().snapshot( jobId ) )
+      {
+        switch ( rec->state )
+        {
+        case JobState::Succeeded: end.status = "ok"; break;
+        case JobState::Failed: end.status = "error"; break;
+        case JobState::Cancelled: end.status = "cancelled"; break;
+        default: end.status = "unknown"; break;
+        }
+        end.detail = rec->error;
+      }
+      Trace::emit( end );
+    }
+  } traceEnd{ jobId, request.algorithmId, traceStart };
 
   // Resolve body. Resolution order (ADR 0062):
   //   per-job executor → prefix executor → RSOperator → fallback (registry).

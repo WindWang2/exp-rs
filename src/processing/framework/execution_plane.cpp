@@ -2,6 +2,7 @@
 #include "execution_plane.h"
 
 #include "algorithm_preflight.h"
+#include "observability/trace.h"
 #include "tool_call_dispatcher.h"
 
 #include <QCoreApplication>
@@ -18,6 +19,22 @@ namespace {
 /// shutdown is a flag — slice the wait so an awaiter notices shutdown within
 /// one slice instead of sleeping to its full timeout.
 constexpr auto kAwaitSlice = std::chrono::milliseconds( 25 );
+
+/// Unified-trace adapter (Verification 7.0): emit one exp.trace.v1 record per
+/// entry/terminal transition. The entry correlationId travels in the `run`
+/// field — it is the top-level trace handle at this layer. Cost when tracing
+/// is off: one relaxed atomic load inside Trace::emit.
+void tracePlaneEvent( const char *event, const char *status, const ExecutionRequest &request,
+                      long taskId )
+{
+  observability::trace::TraceEvent trace;
+  trace.run = request.correlationId.toStdString();
+  trace.task = taskId > 0 ? std::to_string( taskId ) : std::string();
+  trace.op = request.algorithmId.toStdString();
+  trace.event = event;
+  trace.status = status;
+  observability::trace::Trace::emit( trace );
+}
 
 } // namespace
 
@@ -71,6 +88,7 @@ ExecutionHandle ExecutionPlane::submit( const ExecutionRequest &request )
 
   auto shared = std::make_shared<ExecutionHandle::Shared>();
   shared->taskId = taskId;
+  tracePlaneEvent( "submitted", taskId > 0 ? "ok" : "error", request, taskId );
   if ( taskId <= 0 )
   {
     // Rejected at the seam (shutdown): resolve the handle immediately so an
@@ -85,7 +103,7 @@ ExecutionHandle ExecutionPlane::submit( const ExecutionRequest &request )
     // and only flips a mutex-guarded flag — no Qt delivery in the wakeup path.
     std::weak_ptr<ExecutionHandle::Shared> weak = shared;
     shared->callbackToken = center.addTaskCompletionCallback(
-      taskId, [weak]( const sicnu::AlgorithmTaskInfo & ) {
+      taskId, [weak]( const sicnu::AlgorithmTaskInfo & info ) {
         if ( auto s = weak.lock() )
         {
           {
@@ -93,6 +111,22 @@ ExecutionHandle ExecutionPlane::submit( const ExecutionRequest &request )
             s->terminal = true;
           }
           s->cv.notify_all();
+        }
+        // Unified trace: terminal transition (Verification 7.0). Mirrors the
+        // TaskStatus → ExecutionState mapping at the statusToState seam.
+        {
+          observability::trace::TraceEvent trace;
+          trace.task = std::to_string( info.taskId );
+          trace.op = info.algorithmId.toStdString();
+          trace.event = "terminal";
+          switch ( info.status )
+          {
+          case sicnu::TaskStatus::Completed: trace.status = "ok"; break;
+          case sicnu::TaskStatus::Failed: trace.status = "error"; break;
+          case sicnu::TaskStatus::Canceled: trace.status = "cancelled"; break;
+          default: trace.status = "unknown"; break;
+          }
+          observability::trace::Trace::emit( trace );
         }
       } );
   }

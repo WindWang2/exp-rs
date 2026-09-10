@@ -6932,6 +6932,7 @@ target_link_libraries(test_concurrency_stress PRIVATE
   Qt6::Core
   GDAL::GDAL
   sicnu_operators_core
+  sicnu_runtime
 )
 if(TARGET jsoncpp)
   target_link_libraries(test_concurrency_stress PRIVATE jsoncpp)
