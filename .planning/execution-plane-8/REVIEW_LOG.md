@@ -42,6 +42,7 @@ triage of their findings:
 | ID | Finding | Class | Disposition |
 |---|---|---|---|
 | V1 | Full-suite run: require-mode retry test left the task in WaitingResource forever. Root cause: staging set `isolatedRoute` AFTER the status transition — the enter-transition charged `m_active.isolated` from a still-false flag while the leave-transition decremented for a true one (unsigned underflow → routed tasks blocked permanently) | P0 | **FIXED**: `isolatedRoute` set before `setTaskStatusLocked(Dispatching)`; isolated-flag accounting verified by the ep7 fail-closed + route e2e cases (passing) |
+| V2 | One ep7 full-suite run under machine load ~20 (three parallel track builds + a partially-stale test binary from concurrent relinking) showed ±1 retry-run-count anomalies (flakyRuns 3/2, 2/3). Not reproduced in 9+ subsequent full-suite runs incl. three under deliberate synthetic CPU load, with task-log dump instrumentation active; every semantic assertion (autoRetryAttempts, status, DAG wiring) passed in all clean runs. Instrumentation left in place for future diagnosis | P3 (open, unreproduced, load-correlated) | Documented; monitoring via ep7 suite |
 
 ### Reviewer-verified clean (record)
 
