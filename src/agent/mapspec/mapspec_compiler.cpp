@@ -26,6 +26,7 @@
 #include <qgslayoutpoint.h>
 #include <qgslayoutatlas.h>
 #include <qgslayoutitemmapoverview.h>
+#include <qgslayoutitemshape.h>
 #include <qgssymbol.h>
 #include <qgsfillsymbol.h>
 #include <qgsvectorlayer.h>
@@ -460,6 +461,106 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
               applyTokenTextStyle( labelProps, locator, tokens, "caption", 8.0 );
             compileTextItem( layout, "label", id + "-locator-label", labelProps, tokens );
           }
+
+          // Platform 8.0 connector graphics: a QGIS-native polyline from the
+          // inset frame edge to the target frame's projected extent anchor —
+          // the classic locator relationship line. Geometry is a pure
+          // function of the declared page rects/extents (deterministic).
+          if ( locator.isMember( "connector" ) && locator["connector"].isObject() )
+          {
+            const Json::Value &connector = locator["connector"];
+            const Json::Value insetRect = inset["rect_mm"];
+            Json::Value targetRect;
+            Json::Value targetExtent;
+            const std::string targetId = locator["target"].asString();
+            for ( const char *collection : { "map_frames", "inset_maps" } )
+            {
+              for ( const auto &candidate : itemsOf( collection ) )
+              {
+                if ( candidate.isObject() && candidate.isMember( "id" ) &&
+                     candidate["id"].asString() == targetId )
+                {
+                  if ( candidate.isMember( "rect_mm" ) && candidate["rect_mm"].isArray() &&
+                       candidate["rect_mm"].size() == 4 )
+                    targetRect = candidate["rect_mm"];
+                  if ( candidate.isMember( "extent" ) && candidate["extent"].isArray() &&
+                       candidate["extent"].size() == 4 )
+                    targetExtent = candidate["extent"];
+                }
+              }
+            }
+            if ( insetRect.isArray() && insetRect.size() == 4 && targetRect.isArray() &&
+                 targetRect.size() == 4 )
+            {
+              const double insetCenterX = insetRect[0].asDouble() + insetRect[2].asDouble() / 2.0;
+              const double insetCenterY = insetRect[1].asDouble() + insetRect[3].asDouble() / 2.0;
+              // Anchor: where the inset extent center falls inside the target
+              // frame (linear extent→page mapping, clamped to the frame).
+              // Without resolvable extents the anchor is the frame center.
+              double anchorX = targetRect[0].asDouble() + targetRect[2].asDouble() / 2.0;
+              double anchorY = targetRect[1].asDouble() + targetRect[3].asDouble() / 2.0;
+              const Json::Value insetExtent = props.isMember( "extent" ) ? props["extent"] : Json::Value();
+              if ( insetExtent.isArray() && insetExtent.size() == 4 && targetExtent.isArray() &&
+                   targetExtent.size() == 4 )
+              {
+                const double targetW = targetExtent[2].asDouble() - targetExtent[0].asDouble();
+                const double targetH = targetExtent[3].asDouble() - targetExtent[1].asDouble();
+                if ( targetW > 1e-12 && targetH > 1e-12 )
+                {
+                  // Extents are [xmin, ymin, xmax, ymax]: center = (min + max) / 2.
+                  const double insetCenterMapX =
+                    ( insetExtent[0].asDouble() + insetExtent[2].asDouble() ) / 2.0;
+                  const double insetCenterMapY =
+                    ( insetExtent[1].asDouble() + insetExtent[3].asDouble() ) / 2.0;
+                  anchorX = targetRect[0].asDouble() +
+                            ( insetCenterMapX - targetExtent[0].asDouble() ) / targetW *
+                                targetRect[2].asDouble();
+                  anchorY = targetRect[1].asDouble() +
+                            ( insetCenterMapY - targetExtent[1].asDouble() ) / targetH *
+                                targetRect[3].asDouble();
+                  anchorX = std::max( targetRect[0].asDouble(),
+                                      std::min( anchorX, targetRect[0].asDouble() +
+                                                             targetRect[2].asDouble() ) );
+                  anchorY = std::max( targetRect[1].asDouble(),
+                                      std::min( anchorY, targetRect[1].asDouble() +
+                                                             targetRect[3].asDouble() ) );
+                }
+              }
+              // Start point: where the center→anchor ray leaves the inset rect.
+              const double dx = anchorX - insetCenterX;
+              const double dy = anchorY - insetCenterY;
+              const double halfW = insetRect[2].asDouble() / 2.0;
+              const double halfH = insetRect[3].asDouble() / 2.0;
+              const double denomX = std::abs( dx ) > 1e-9 ? std::abs( dx ) : 1e-9;
+              const double denomY = std::abs( dy ) > 1e-9 ? std::abs( dy ) : 1e-9;
+              const double scale = std::min( halfW / denomX, halfH / denomY );
+              Json::Value points( Json::arrayValue );
+              Json::Value start( Json::arrayValue );
+              start.append( insetCenterX + dx * scale );
+              start.append( insetCenterY + dy * scale );
+              Json::Value end( Json::arrayValue );
+              end.append( anchorX );
+              end.append( anchorY );
+              points.append( start );
+              points.append( end );
+              Json::Value lineProps( Json::objectValue );
+              lineProps["points"] = points;
+              lineProps["color"] =
+                connector.isMember( "color" ) && connector["color"].isString()
+                  ? connector["color"]
+                  : Json::Value( "#333333" );
+              lineProps["width_mm"] =
+                connector.isMember( "stroke_mm" ) && connector["stroke_mm"].isNumeric()
+                  ? connector["stroke_mm"]
+                  : Json::Value( 0.4 );
+              lineProps["line_style"] =
+                connector.isMember( "style" ) && connector["style"].isString() &&
+                    connector["style"].asString() == "dash"
+                  ? Json::Value( "dash" )
+                  : Json::Value( "solid" );
+              compileItem( layout, "line", id + "-locator-connector", lineProps, &itemError );
+            }
+          }
         }
       }
     }
@@ -536,6 +637,52 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         legendItem->setAutoUpdateModel( false );
         legendItem->setColumnCount( legend["columns"].asInt() );
       }
+    }
+    // Platform 8.0: declared NoData legend entry. QgsLayoutItemLegend cannot
+    // host custom nodes declaratively, so the entry compiles as a sanctioned
+    // swatch composite (QGIS shape rectangle + label) pinned inside the
+    // declared legend rect bottom — the same furniture class as charts and
+    // colorbars (QPainter→picture since 4.0).
+    if ( legend.isMember( "nodata" ) && legend["nodata"].isObject() &&
+         legend.isMember( "rect_mm" ) && legend["rect_mm"].isArray() &&
+         legend["rect_mm"].size() == 4 )
+    {
+      const Json::Value &nodata = legend["nodata"];
+      const std::string nodataLabel =
+        nodata.isMember( "label" ) && nodata["label"].isString() &&
+            !nodata["label"].asString().empty()
+          ? nodata["label"].asString()
+          : "NoData";
+      const Json::Value &r = legend["rect_mm"];
+      Json::Value swatchProps( Json::objectValue );
+      swatchProps["x"] = r[0].asDouble() + 2.0;
+      swatchProps["y"] = r[1].asDouble() + r[3].asDouble() - 6.0;
+      swatchProps["width"] = 4.0;
+      swatchProps["height"] = 4.0;
+      QgsLayoutItem *swatch = compileItem( layout, "shape", legend["id"].asString() + "-nodata-swatch",
+                                           swatchProps, nullptr );
+      if ( auto *swatchShape = qobject_cast<QgsLayoutItemShape *>( swatch ) )
+      {
+        QVariantMap swatchSymbol;
+        swatchSymbol[QStringLiteral( "color" )] =
+          nodata.isMember( "color" ) && nodata["color"].isString()
+            ? QString::fromStdString( nodata["color"].asString() )
+            : QStringLiteral( "#f0f0f0" );
+        swatchSymbol[QStringLiteral( "outline_color" )] = QStringLiteral( "#666666" );
+        swatchSymbol[QStringLiteral( "outline_width" )] = QStringLiteral( "0.2" );
+        swatchSymbol[QStringLiteral( "width_unit" )] = QStringLiteral( "MM" );
+        swatchShape->setSymbol( QgsFillSymbol::createSimple( swatchSymbol ).release() );
+        swatchShape->update();
+      }
+      Json::Value nodataLabelProps( Json::objectValue );
+      nodataLabelProps["x"] = r[0].asDouble() + 8.0;
+      nodataLabelProps["y"] = r[1].asDouble() + r[3].asDouble() - 6.0;
+      nodataLabelProps["width"] = std::max( 10.0, r[2].asDouble() - 10.0 );
+      nodataLabelProps["height"] = 4.0;
+      nodataLabelProps["text"] = nodataLabel;
+      applyTokenTextStyle( nodataLabelProps, legend, tokens, "caption", 6.0 );
+      compileTextItem( layout, "label", legend["id"].asString() + "-nodata-label",
+                       nodataLabelProps, tokens );
     }
   }
   for ( const auto &scaleBar : itemsOf( "scale_bars" ) )
