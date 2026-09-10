@@ -1073,7 +1073,7 @@ void Solver::searchCores()
     // contract — disabling their constraint opponents is the meaningful
     // counterfactual).
     std::vector<ConstraintRuntime *> candidates;
-    for ( const auto &other : mConstraints )
+    for ( auto &other : mConstraints )
     {
       if ( other.isSoft || other.disabled || other.cid == target.cid )
         continue;
