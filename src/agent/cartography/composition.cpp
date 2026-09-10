@@ -159,6 +159,7 @@ struct ConstraintRuntime
     int rank = 0;                       ///< canonical order position (set by sortCanonical)
     bool decided = false;               ///< first hard application recorded?
     bool anchorDecided = false;         ///< anchor_wins decision recorded?
+    bool rejected = false;              ///< soft: reverted by a higher-ranked constraint
 };
 
 /// A pending geometry write computed by computeTargets.
@@ -1253,6 +1254,7 @@ void Solver::applySofts()
       if ( !conflict.empty() )
       {
         restoreRects( before );
+        c.rejected = true;
         const std::string reason =
           "rejected: applying it would break '" + conflict +
           "' (higher-ranked constraint keeps the geometry)";
@@ -1277,8 +1279,6 @@ void Solver::applySofts()
 
 void Solver::finalize( CompositionResult &result )
 {
-  for ( const auto &note : mReport.notes() )
-    result.unsatisfied.push_back( note );
   int hardTotal = mArityFailuresHard;
   int hardSolved = 0;
   int softCount = 0;
@@ -1303,8 +1303,19 @@ void Solver::finalize( CompositionResult &result )
         CompositionViolation violation;
         violation.cid = c.cid;
         violation.kind = c.kind;
-        violation.reason = c.disabled ? "disabled (anchor conflict or permanent failure)"
-                                      : "not satisfied at the final geometry";
+        if ( c.disabled )
+          violation.reason = "disabled (anchor conflict or permanent failure)";
+        else if ( c.rejected )
+          violation.reason = "rejected: a higher-ranked constraint keeps the geometry";
+        else
+        {
+          violation.reason = "not satisfied at the final geometry";
+          // Blocked softs produce no other report line — surface them so
+          // preflight sees every violated soft, not only the loud ones.
+          mReport.add( c.cid + "|soft-unsat",
+                       c.cid + ": soft constraint not satisfied at the final geometry "
+                               "(inputs never materialized)" );
+        }
         result.violated.push_back( violation );
       }
       continue;
@@ -1357,6 +1368,10 @@ void Solver::finalize( CompositionResult &result )
   }
   result.unsatCores = mUnsatCores;
   result.fixpointPolicy = "canonical: hard before soft, priority desc, weight desc, index asc";
+  // Copied last so every report line added while accounting (e.g. blocked
+  // softs) is included, in report order.
+  for ( const auto &note : mReport.notes() )
+    result.unsatisfied.push_back( note );
 }
 
 } // namespace
