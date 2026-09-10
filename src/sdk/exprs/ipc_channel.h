@@ -47,12 +47,7 @@ public:
     {
         IpcFrameLimits frameLimits;
         /// Slice between cancel-predicate polls while waiting for a response.
-        int cancelPollMs;
-        /// Explicit (not a default member initializer): newer Clang rejects
-        /// the enclosing class's `Options options = {}` default argument
-        /// when it would ODR-use a default member initializer from within
-        /// IpcChannel's own definition.
-        Options() : cancelPollMs( 100 ) {}
+        int cancelPollMs = 100;
     };
 
     explicit IpcChannel( std::unique_ptr<IIpcStream> stream );
