@@ -27,6 +27,8 @@
 #include "operators/framework/rs_operator_registry.h"
 
 #include <atomic>
+#include <mutex>
+#include <cstdio>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -170,9 +172,11 @@ TEST_CASE( "stress: worker-thread child wait is rejected, never deadlocks "
     const std::string childId = "child-of-worker";
     // Pre-register the child's id so the worker can submit it by id.
     const std::string parentJobId = "parent-on-worker";
-    std::atomic<bool> childCompleted{ false };
+    std::atomic<bool> childSubmitted{ false };
     std::atomic<bool> isWorkerInside{ false };
     std::atomic<bool> waitRejected{ false };
+    std::string dynamicChildId;
+    std::mutex childMutex;
 
     engine.submitWithId(
         simpleRequest( childId ), childId,
@@ -197,8 +201,13 @@ TEST_CASE( "stress: worker-thread child wait is rejected, never deadlocks "
                                } );
             const bool waited = engine.waitForJob( id, 5000 );
             waitRejected.store( !waited );
-            childCompleted.store( engine.snapshot( id ).has_value() &&
-                                  engine.waitForJob( id, kWaitMs ) );
+            // A worker thread can never block-wait (#798): record the child
+            // id so the MAIN thread asserts its completion after the parent.
+            {
+                std::lock_guard<std::mutex> lock( childMutex );
+                dynamicChildId = id;
+            }
+            childSubmitted.store( !id.empty() );
             Json::Value result;
             result["parent"] = true;
             return result;
@@ -208,7 +217,15 @@ TEST_CASE( "stress: worker-thread child wait is rejected, never deadlocks "
     REQUIRE( isWorkerInside.load() );
     INFO( "child wait inside worker must be rejected" );
     REQUIRE( waitRejected.load() );
-    REQUIRE( childCompleted.load() );
+    REQUIRE( childSubmitted.load() );
+    // From the MAIN thread the child completes normally.
+    std::string dynamicId;
+    {
+        std::lock_guard<std::mutex> lock( childMutex );
+        dynamicId = dynamicChildId;
+    }
+    REQUIRE( engine.waitForJob( dynamicId, kWaitMs ) );
+    REQUIRE( engine.snapshot( dynamicId )->state == JobState::Succeeded );
     REQUIRE( engine.snapshot( childId )->state == JobState::Succeeded );
 }
 
@@ -238,16 +255,19 @@ TEST_CASE( "stress: exclusive job runs alone after in-flight work drains",
     };
     auto exitJob = [ & ] { --concurrent; };
 
-    // Warm non-exclusive load.
+    // Warm non-exclusive load. submit() mints its own id — capture them so
+    // the drain waits below target real records, not invented ones.
+    std::vector<std::string> warmIds;
     for ( int i = 0; i < 12; ++i )
-        engine.submit( simpleRequest( "warm-" + std::to_string( i ) ),
+        warmIds.push_back( engine.submit(
+            simpleRequest( "warm-" + std::to_string( i ) ),
                        [ & ]( const JobRequest &, sicnu::operators::RSOperatorContext & ) {
                            enterJob();
                            std::this_thread::yield();
                            exitJob();
                            Json::Value result;
                            return result;
-                       } );
+                       } ) );
 
     // Exclusive job: must drain the queue, then run with no other job.
     JobRequest exclusive = simpleRequest( "the-exclusive" );
@@ -265,20 +285,35 @@ TEST_CASE( "stress: exclusive job runs alone after in-flight work drains",
         } );
 
     // Trailing non-exclusive jobs must wait for the exclusive to finish.
+    std::vector<std::string> tailIds;
     for ( int i = 0; i < 12; ++i )
-        engine.submit( simpleRequest( "tail-" + std::to_string( i ) ),
+        tailIds.push_back( engine.submit(
+            simpleRequest( "tail-" + std::to_string( i ) ),
                        [ & ]( const JobRequest &, sicnu::operators::RSOperatorContext & ) {
                            enterJob();
                            std::this_thread::yield();
                            exitJob();
                            Json::Value result;
                            return result;
-                       } );
+                       } ) );
 
     REQUIRE( engine.waitForJob( "the-exclusive", kWaitMs ) );
-    for ( int i = 0; i < 12; ++i )
-        REQUIRE( engine.waitForJob( "tail-" + std::to_string( i ), kWaitMs ) );
-    REQUIRE( engine.waitForJob( "warm-0", kWaitMs ) );
+    for ( const std::string &id : tailIds )
+    {
+        const bool done = engine.waitForJob( id, kWaitMs );
+        if ( !done )
+        {
+            // Diagnostic dump (Verification 7.0): is the exclusive policy
+            // leaving queued jobs stranded after the exclusive completes?
+            for ( const auto &rec : engine.list() )
+                std::printf( "STATE-DUMP job=%s state=%d\n", rec.id.c_str(),
+                             static_cast<int>( rec.state ) );
+            std::fflush( stdout );
+        }
+        REQUIRE( done );
+    }
+    for ( const std::string &id : warmIds )
+        REQUIRE( engine.waitForJob( id, kWaitMs ) );
     // Nothing ever overlapped the exclusive job's body.
     INFO( "max concurrency seen while exclusive inside: "
           << maxOverlapWithExclusive.load() );
