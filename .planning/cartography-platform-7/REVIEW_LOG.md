@@ -32,3 +32,23 @@ Running log of self-review findings and the final adversarial review disposition
 - Known risk pinned for the build: M5 compat test validates all 17 shipped
   styles; verified none carries scheme/nodata/uncertainty fields that the
   new validator would reject.
+
+## Local validation evidence (rounds 0-4, Windows headless)
+
+- Baseline build: configure (Ninja, shared vcpkg installed dir, winflexbison)
+  + full `test_mapspec` target chain — green.
+- DLL root-cause for the local 0xc0000135 failures: PATH gaps (Qt debug
+  binaries, qca/kc bins, shared vcpkg debug bins), NOT a code defect. Fixed
+  in run-tests.cmd; this also un-blocked the PNG cases 6.0 had to skip.
+- `[platform7]`: 45 cases / 283 assertions — ALL PASSED.
+- Full suite `~[visual]`: 145 cases / 1293 assertions — ALL PASSED.
+- Remediation rounds fixed, with root causes:
+  1. resolved-template identity (jsoncpp payload sharing corrupted the raw
+     catalog through the `self` return; fixed with copyPayload + id re-stamp),
+  2. kinsoku condition inversion (tail-fit also added),
+  3. applicability early-return short-circuiting the 7.0 checks,
+  4. chart validation else-if chain broken by the axes insertion
+     (matrix/accuracy Summary:family demanded inline data / layer wrongly),
+  5. accuracy_summary renderer gate + inline-only check keyed on mode,
+  6. test fixture defects (missing style envelopes, text on titles,
+     anchor-resolved expectation, provenance semantics).
