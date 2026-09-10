@@ -1539,6 +1539,51 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_multimodal_inference)
 
+    # Model Runtime 8.0: CRS-aware grid authority + provenance, temporal
+    # sequence lane (dynamic T, timestamps, quality masks), placement policy
+    # and the Labels class remap. Fake providers + synthetic rasters — runs
+    # in every OpenCV-enabled build.
+    add_executable(test_model_runtime_8 test_model_runtime_8.cpp)
+    target_link_libraries(test_model_runtime_8 PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_model_runtime_8)
+    target_include_directories(test_model_runtime_8 PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_model_runtime_8)
+
+    # Model Runtime 8.0 WP-A: the REAL ONNX Runtime lane. Built only when the
+    # ORT provider is actually compiled in — hosts without the dependency skip
+    # the target entirely (honest capability gate, never a fake pass).
+    if(SICNU_WITH_ONNX_RUNTIME AND ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
+        add_executable(test_onnxruntime_provider test_onnxruntime_provider.cpp)
+        target_link_libraries(test_onnxruntime_provider PRIVATE
+            Catch2::Catch2WithMain
+            Qt6::Core
+            qgis_core
+            sicnu_processing
+            sicnu_task_center
+            sicnu_operators
+            ${OpenCV_LIBS}
+        )
+        sicnu_link_jsoncpp(test_onnxruntime_provider)
+        target_include_directories(test_onnxruntime_provider PRIVATE
+            ${CMAKE_SOURCE_DIR}/src
+            ${CMAKE_SOURCE_DIR}/tests
+            ${CMAKE_BINARY_DIR}
+        )
+        sicnu_discover_tests(test_onnxruntime_provider)
+    endif()
+
     # Platform 7.0 external provider contracts (same registry seam).
     add_executable(test_provider_python test_provider_python.cpp)
     target_link_libraries(test_provider_python PRIVATE
@@ -1620,6 +1665,11 @@ endif()
 # Platform 4.0: model runtime benchmark (env-gated: SICNU_MODEL_BENCH=1)
 if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     add_executable(test_model_runtime_bench test_model_runtime_bench.cpp)
+    # The env-gated benchmark gains an ORT-lane section when the provider is
+    # compiled in (the same macro the provider body uses).
+    if(SICNU_WITH_ONNX_RUNTIME AND ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
+        target_compile_definitions(test_model_runtime_bench PRIVATE SICNU_WITH_ONNX_RUNTIME=1)
+    endif()
     target_link_libraries(test_model_runtime_bench PRIVATE
         Catch2::Catch2WithMain
         Qt6::Core

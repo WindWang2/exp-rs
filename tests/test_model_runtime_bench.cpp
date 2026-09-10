@@ -12,6 +12,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/runtime/model_runtime.h"
 #include "operators/runtime/tile_inference_engine.h"
+#include "support/onnx_fixture_builder.h"
 
 #include <opencv2/core.hpp>
 #include "synthetic_raster_builder.h"
@@ -31,6 +32,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -59,6 +61,26 @@ using sicnu::operators::runtime::TileInferenceEngine;
 QString identityModelPath()
 {
   return QFileInfo( __FILE__ ).absolutePath() + QStringLiteral( "/data/test_infer_identity.onnx" );
+}
+
+/// Platform 8.0 WP-H: hand-encoded ONNX fixtures for the real-ORT bench lane
+/// (byte-deterministic; the same builder the capability-gated tests use).
+struct OnnxFixtureModels
+{
+    QByteArray sumDual;    // two named 1x2x64x64 inputs → sum
+    QByteArray slowMatmul; // 96 chained 1024x1024 matmuls (cancel-latency load)
+};
+
+OnnxFixtureModels buildOnnxFixtureModels()
+{
+  OnnxFixtureModels models;
+  const std::string sum =
+    onnxfixture::sumDual( { onnxfixture::fixed( 1 ), onnxfixture::fixed( 2 ),
+                            onnxfixture::fixed( 64 ), onnxfixture::fixed( 64 ) } );
+  models.sumDual = QByteArray( sum.data(), static_cast<int>( sum.size() ) );
+  const std::string slow = onnxfixture::slowMatmulChain( 1024, 96 );
+  models.slowMatmul = QByteArray( slow.data(), static_cast<int>( slow.size() ) );
+  return models;
 }
 
 ModelInfo identityCatalogModel( const QTemporaryDir &dir )
@@ -233,6 +255,105 @@ TEST_CASE( "model runtime benchmark (SICNU_MODEL_BENCH=1)", "[.] [model_bench]" 
     bench7["run_ms"] = multiMs;
     bench7["tiles"] = multiStats.tilesProcessed;
   }
+
+  // --- Platform 8.0: REAL ONNX Runtime lane (WP-H) ---------------------------
+  // Only compiled when the provider is embedded; measures cold/warm ORT
+  // session acquire, named N-D forward throughput and in-forward cancel
+  // latency against hand-encoded deterministic fixtures.
+#ifdef SICNU_WITH_ONNX_RUNTIME
+  {
+    QJsonObject benchOrt;
+    benchOrt["schema"] = QStringLiteral( "model-runtime-bench-ort/1" );
+    benchOrt["ort_runtime_version"] = QStringLiteral( "1.20.1" );
+
+    const OnnxFixtureModels models = buildOnnxFixtureModels();
+    const QString sumPath = dir.filePath( QStringLiteral( "bench-sum.onnx" ) );
+    { QFile f( sumPath ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( models.sumDual ); }
+    const QString slowPath = dir.filePath( QStringLiteral( "bench-slow.onnx" ) );
+    { QFile f( slowPath ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( models.slowMatmul ); }
+
+    ModelInfo ortModel;
+    ortModel.name = "bench-ort";
+    ortModel.framework = "onnxruntime";
+    ortModel.readiness = ModelReadiness::Ready;
+    ortModel.resolvedArtifactPath = sumPath.toStdString();
+
+    const auto ortCold = std::chrono::steady_clock::now();
+    ModelRuntimePtr ortSession = registry.acquire( ortModel, RequestedDevice::cpu() );
+    REQUIRE( ortSession );
+    const double ortColdMs =
+      std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - ortCold )
+        .count();
+    ortSession.reset();
+    registry.releaseAll();
+    const auto ortWarm = std::chrono::steady_clock::now();
+    ortSession = registry.acquire( ortModel, RequestedDevice::cpu() );
+    REQUIRE( ortSession );
+    const double ortWarmMs =
+      std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - ortWarm )
+        .count();
+    benchOrt["cold_load_ms"] = ortColdMs;
+    benchOrt["warm_load_ms"] = ortWarmMs;
+
+    // Named N-D forward throughput: 128 forwards on 1x2x64x64 pairs.
+    std::vector<float> a( 2 * 64 * 64, 1.5f );
+    std::vector<float> b( 2 * 64 * 64, 2.5f );
+    const TensorBlob ta = TensorBlob::fromFloat32( { 1, 2, 64, 64 }, a.data(), a.size() );
+    const TensorBlob tb = TensorBlob::fromFloat32( { 1, 2, 64, 64 }, b.data(), b.size() );
+    constexpr int kOrtForwards = 128;
+    const auto fwdStart = std::chrono::steady_clock::now();
+    for ( int i = 0; i < kOrtForwards; ++i )
+    {
+      const auto outputs = ortSession->inferNamed( { { "a", ta }, { "b", tb } }, { "sum" } );
+      REQUIRE( outputs.size() == 1 );
+    }
+    const double fwdMs =
+      std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - fwdStart )
+        .count();
+    benchOrt["named_forward_ms_avg"] = fwdMs / kOrtForwards;
+    benchOrt["named_forwards_per_sec"] = fwdMs > 0 ? kOrtForwards * 1000.0 / fwdMs : 0.0;
+    ortSession.reset();
+    registry.releaseAll();
+
+    // In-forward cancellation latency on the slow chained-matmul fixture:
+    // request cancel 300 ms into the forward, measure until the session
+    // surfaces the cancel.
+    ModelInfo slowModel;
+    slowModel.name = "bench-ort-slow";
+    slowModel.framework = "onnxruntime";
+    slowModel.readiness = ModelReadiness::Ready;
+    slowModel.resolvedArtifactPath = slowPath.toStdString();
+    ModelRuntimePtr slowSession = registry.acquire( slowModel, RequestedDevice::cpu() );
+    REQUIRE( slowSession );
+    std::vector<float> x( 1024ull * 1024ull, 1.0f );
+    const TensorBlob tx = TensorBlob::fromFloat32( { 1024, 1024 }, x.data(), x.size() );
+    std::atomic<bool> cancelObserved{ false };
+    double cancelLatencyOrtMs = -1.0;
+    std::thread ortRunner( [ & ] {
+      try
+      {
+        slowSession->inferNamed( { { "x", tx } }, {} );
+      }
+      catch ( const std::exception & )
+      {
+        cancelObserved.store( true, std::memory_order_relaxed );
+      }
+    } );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 300 ) );
+    const auto ortCancelStart = std::chrono::steady_clock::now();
+    slowSession->requestCancel();
+    ortRunner.join();
+    if ( cancelObserved.load( std::memory_order_relaxed ) )
+      cancelLatencyOrtMs = std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - ortCancelStart )
+                             .count();
+    benchOrt["in_forward_cancel_latency_ms"] = cancelLatencyOrtMs;
+    slowSession->clearCancel();
+    registry.releaseAll();
+
+    bench["platform8_ort"] = benchOrt;
+  }
+#endif
 
   // --- Baseline JSON --------------------------------------------------------
   QJsonObject bench;
