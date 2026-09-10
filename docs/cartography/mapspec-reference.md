@@ -1,4 +1,4 @@
-# MapSpec Reference (versioned; current: 3.0)
+# MapSpec Reference (versioned; current: 5.0)
 
 A MapSpec is a versioned JSON document describing a map product as semantic
 collections. It compiles to a `QgsPrintLayout` through `MapSpecCompiler`;
@@ -18,7 +18,7 @@ QGIS Layout stays the authoritative renderer (ADR 0127, 0131).
   "generated_by": "exp-rs",       // envelope (contracts)
   "generated_at": "…",            // envelope timestamp
   "kind": "map_spec",             // required
-  "spec_version": 3,              // required integer, ≤ 3
+  "spec_version": 5,              // required integer, ≤ 5
   "layout_name": "my-map",        // required; join key for the layout
   "template": "land-cover-a4l",   // optional provenance
   "page": {                       // required, positive sizes
@@ -34,7 +34,12 @@ QGIS Layout stays the authoritative renderer (ADR 0127, 0131).
              "overrides": {} },  // optional (ADR 0130)
   "pages": [ { "width_mm": 210, "height_mm": 297 } ], // optional, ≤10 extra pages
   "slots": [ { "role": "title.main", "item": "title-1" } ], // optional bindings
-  "…collections": []
+  "…collections": [],
+  "output": {                     // optional (v5): delivery declaration
+    "formats": ["png", "pdf"],    //   closed vocabulary; ≤ 8 entries
+    "dpi": 300,                   //   72..1200
+    "dir": "exports"              //   non-empty when declared
+  }
 }
 ```
 
@@ -155,3 +160,33 @@ a `qgis_type` marker (documented divergence).
   wrap, CJK kinsoku, `none|ellipsis|shrink_to_fit|overflow_report`
   truncation policies, structured fit reports). Preflight consumes it via
   `MAP_TEXT_WRAP_OVERFLOW`.
+
+
+## Platform 8.0 notes
+
+- **spec_version 5** (strict superset of v4): the envelope may declare an
+  `output` block (formats `png`/`pdf`, dpi 72..1200, optional dir). It is
+  validated and surfaced through `cartography:compose` /
+  `confirmMapOutput`, but compilation never auto-exports — delivery stays an
+  explicit governed action. `upgradeMapSpec` re-stamps v≤4 documents to 5.
+- **Typed bindings**: per-item `binding` objects are shape-validated
+  (non-empty string `mode`; string `layer`/`field`/`expression`
+  fields; object `params`; `data` bounded at 256 entries; square
+  `matrix {labels, rows}` bounded at 24×24) without breaking shipped
+  templates.
+- **Locator connectors**: `inset_maps[].locator.connector` (object; optional
+  `style: solid|dash`, `stroke_mm ≤ 5`, `color`) compiles to a QGIS-native
+  polyline from the inset frame edge to the referenced frame's projected
+  extent anchor (`<id>-locator-connector`).
+- **Declared typography**: text items may declare `font.break_policy`
+  (`none | halfwidth` — line-final fullwidth closing punctuation
+  compression) and `font.line_height` (0 < h ≤ 3, leading override used by
+  the wrap-aware overflow rule).
+- **NoData legend**: `legends[].nodata = {label}` compiles as a QGIS-backed
+  swatch composite inside the declared legend rect; the
+  `MAP_NODATA_LEGEND` preflight rule keeps declarations honest (see
+  `docs/cartography/preflight-rules.md`).
+- **Page-aware solver evidence**: `keep_with`/`avoid_overlap` refuse pins
+  that would push a companion past its own page bottom with a
+  `page_overflow` reason (unsatisfied/violated/decision + unsat core)
+  instead of silently writing off-page geometry.
