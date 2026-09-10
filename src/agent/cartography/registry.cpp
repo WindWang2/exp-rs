@@ -915,8 +915,13 @@ Json::Value resolveTemplateChain( const Json::Value &raw, const QString &id, QSt
     parentsApplied.push_back( parentId );
   }
 
-  // The child layer wins over every parent.
+  // The child layer wins over every parent. mergeTemplateLayer skips the
+  // `id` key (parents may not change identity), so stamp the resolved
+  // descriptor's identity back to the requested template explicitly —
+  // otherwise every child would carry its first parent's id (and the
+  // extends-self validation would misfire).
   mergeTemplateLayer( merged, self, key );
+  merged["id"] = key;
   if ( parentsApplied.size() == 1 )
     merged["extends"] = parentsApplied[0];
   else
