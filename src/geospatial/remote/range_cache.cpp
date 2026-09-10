@@ -28,6 +28,7 @@
 #include <cpl_conv.h>
 #include <cpl_vsi.h>
 #include <cpl_vsi_virtual.h>
+#include <gdal_version.h>
 
 #include <algorithm>
 #include <atomic>
@@ -46,6 +47,22 @@ namespace sicnu::geo
 
 namespace
 {
+
+// GDAL VSI APIs moved across 3.8 → 3.13 (Ubuntu CI vs Homebrew CI).
+// Bridge the breakpoints we actually hit in CI:
+//   * < 3.10: no ClearErr()/Error() on VSIVirtualHandle
+//   * < 3.12: Open() returns VSIVirtualHandle*; no OpenStatic()
+//   * < 3.9:  no VSIFileManager::RemoveHandler()
+//   * >= 3.13: Read/Write are byte-oriented (2-arg), not item-oriented (3-arg)
+inline VSIVirtualHandleUniquePtr openReadonlyVsi( const char *path )
+{
+#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 12, 0 )
+  return VSIFilesystemHandler::OpenStatic( path, "rb" );
+#else
+  return VSIVirtualHandleUniquePtr( VSIFOpenL( path, "rb" ) );
+#endif
+}
+
 
 constexpr int kMaxGenerationRestarts = 8;
 
@@ -574,6 +591,36 @@ class RangeCacheHandle final : public VSIVirtualHandle
       return mPosition;
     }
 
+#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 13, 0 )
+    size_t Read( void *pBuffer, size_t nBytes ) override
+    {
+      std::lock_guard<std::mutex> lock( mHandleMutex );
+      if ( nBytes == 0 )
+        return 0;
+      try
+      {
+        const std::size_t readBytes =
+          readThroughCache( static_cast<unsigned char *>( pBuffer ), nBytes );
+        if ( readBytes < nBytes )
+          mEof = true;
+        mPosition += static_cast<std::uint64_t>( readBytes );
+        return readBytes;
+      }
+      catch ( const std::exception & )
+      {
+        mError = true;
+        return 0;
+      }
+    }
+
+    size_t Write( const void *, size_t ) override
+    {
+      std::lock_guard<std::mutex> lock( mHandleMutex );
+      mError = true;
+      CPLError( CE_Failure, CPLE_NotSupported, "vsirangecache: read-only handle" );
+      return 0;
+    }
+#else
     size_t Read( void *pBuffer, size_t nSize, size_t nCount ) override
     {
       std::lock_guard<std::mutex> lock( mHandleMutex );
@@ -607,13 +654,16 @@ class RangeCacheHandle final : public VSIVirtualHandle
       CPLError( CE_Failure, CPLE_NotSupported, "vsirangecache: read-only handle" );
       return 0;
     }
+#endif
 
+#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 10, 0 )
     void ClearErr() override
     {
       std::lock_guard<std::mutex> lock( mHandleMutex );
       mError = false;
       mEof = false;
     }
+#endif
 
     int Eof() override
     {
@@ -621,11 +671,13 @@ class RangeCacheHandle final : public VSIVirtualHandle
       return mEof ? 1 : 0;
     }
 
+#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 10, 0 )
     int Error() override
     {
       std::lock_guard<std::mutex> lock( mHandleMutex );
       return mError ? 1 : 0;
     }
+#endif
 
     int Close() override
     {
@@ -799,7 +851,7 @@ class RangeCacheHandle final : public VSIVirtualHandle
       if ( !mFallback )
       {
         const std::string vsicurl = "/vsicurl/" + mEntry->requestUrl;
-        mFallback = VSIFilesystemHandler::OpenStatic( vsicurl.c_str(), "rb" );
+        mFallback = openReadonlyVsi( vsicurl.c_str() );
       }
       return mFallback.get();
     }
@@ -822,8 +874,13 @@ class RangeCacheHandle final : public VSIVirtualHandle
 class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
 {
   public:
+#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 12, 0 )
     VSIVirtualHandleUniquePtr Open( const char *pszFilename, const char *pszAccess,
                                     bool bSetError, CSLConstList ) override
+#else
+    VSIVirtualHandle *Open( const char *pszFilename, const char *pszAccess,
+                            bool bSetError, CSLConstList ) override
+#endif
     {
       ( void ) bSetError;
       if ( std::strchr( pszAccess, 'w' ) != nullptr || std::strchr( pszAccess, '+' ) != nullptr )
@@ -884,7 +941,11 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         }
       }
 
+#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 12, 0 )
       return VSIVirtualHandleUniquePtr( new RangeCacheHandle( entry ) );
+#else
+      return new RangeCacheHandle( entry );
+#endif
     }
 
     int Stat( const char *pszFilename, VSIStatBufL *pStatBuf, int ) override
@@ -920,7 +981,7 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         // Range-ignoring oversized origin: learn the size from the
         // underlying handle (open + Seek END — no content transfer).
         VSIVirtualHandleUniquePtr underlying =
-          VSIFilesystemHandler::OpenStatic( ( std::string( "/vsicurl/" ) + requestUrl ).c_str(), "rb" );
+          openReadonlyVsi( ( std::string( "/vsicurl/" ) + requestUrl ).c_str() );
         if ( underlying == nullptr )
         {
           errno = ENOENT;
@@ -1007,7 +1068,9 @@ void RemoteRangeCache::uninstall()
   std::lock_guard<std::mutex> lock( g_storeLifecycleMutex );
   if ( !g_store )
     return;
+#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 9, 0 )
   VSIFileManager::RemoveHandler( kRangeCachePrefix );
+#endif
   g_store->dropAll();
   s_handlerInstalled = false;
 }
