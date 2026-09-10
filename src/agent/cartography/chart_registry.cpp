@@ -898,7 +898,7 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
               ( matrix["rows"].empty() || matrix["rows"].size() != matrix["labels"].size() ) )
       problems.push_back( "accuracy_summary needs a square confusion matrix "
                           "(rows = reference, columns = predicted)" );
-    if ( kind == "accuracy_summary" && mode == "inline" && binding.isMember( "layer" ) )
+    if ( kind == "accuracy_summary" && mode != "inline" )
       problems.push_back( "accuracy_summary derives from inline data only "
                           "(no vector_expression binding)" );
   }
