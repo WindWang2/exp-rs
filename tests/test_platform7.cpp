@@ -1090,6 +1090,49 @@ TEST_CASE( "P7 visual: structural digest is stable, sensitive and order-free",
   REQUIRE( structuralDigest( resolvedOnce ) == structuralDigest( resolvedTwice ) );
 }
 
+TEST_CASE( "P7 style: class ontology mapping refuses concept-blind application",
+           "[platform7][style]" )
+{
+  Json::Value style( Json::objectValue );
+  style["id"] = "p7-ontology";
+  style["version"] = 1;
+  style["applies_to"] = "raster";
+  style["raster"]["renderertype"] = "paletted";
+  Json::Value classes( Json::arrayValue );
+  Json::Value entry( Json::objectValue );
+  entry["min"] = 1.0;
+  entry["max"] = 2.0;
+  entry["label"] = "water";
+  entry["color"] = "#2255aa";
+  entry["ontology"] = "inundation";
+  classes.append( entry );
+  style["raster"]["classification"]["classes"] = classes;
+
+  // Malformed ontology tag → rejected by validation.
+  Json::Value bad = style;
+  bad["raster"]["classification"]["classes"][0]["ontology"] = "";
+  bool saw = false;
+  for ( const auto &problem : validateStyleSpec( bad ) )
+    saw = saw || problem.find( ".ontology must be a non-empty string" ) != std::string::npos;
+  REQUIRE( saw );
+
+  // Disjoint ontology vs dataset semantics → refused.
+  Json::Value dataset( Json::objectValue );
+  dataset["kind"] = "raster";
+  Json::Value semantics( Json::arrayValue );
+  semantics.append( "burn" );
+  semantics.append( "fire" );
+  dataset["semantics"] = semantics;
+  bool mapped = false;
+  for ( const auto &problem : checkStyleApplicability( style, dataset ) )
+    mapped = mapped || problem.find( "do not intersect the dataset semantics" ) != std::string::npos;
+  REQUIRE( mapped );
+
+  // Intersecting semantics apply cleanly.
+  dataset["semantics"][0] = "inundation";
+  REQUIRE( checkStyleApplicability( style, dataset ).empty() );
+}
+
 TEST_CASE( "P7 solver: soft failure downgrades the objective, never convergence",
            "[platform7][solver]" )
 {

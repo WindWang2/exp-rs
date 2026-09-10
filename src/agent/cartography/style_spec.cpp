@@ -510,6 +510,40 @@ std::vector<std::string> checkStyleApplicability( const Json::Value &styleSpec,
        !styleSpec["raster"].isMember( "stretch" ) && !styleSpec["raster"].isMember( "classification" ) )
     problems.push_back( id + ": DEM/terrain styles should declare a stretch or a "
                              "classification (bare singleband gray hides elevation semantics)" );
+  // Class ontology mapping: a style whose ontology tags are all disjoint
+  // from the dataset semantics maps no declared concept of the data —
+  // refused with an explicit problem instead of a wrong correspondence.
+  const auto checkOntologyMapping = [ & ]( const char *where, const Json::Value &entries ) {
+    if ( !entries.isArray() || entries.empty() )
+      return;
+    std::vector<std::string> ontologyTags;
+    for ( const auto &entry : entries )
+      if ( entry.isObject() && entry.isMember( "ontology" ) && entry["ontology"].isString() &&
+           !entry["ontology"].asString().empty() )
+        ontologyTags.push_back( entry["ontology"].asString() );
+    if ( ontologyTags.empty() || !dataset.isMember( "semantics" ) ||
+         !dataset["semantics"].isArray() || dataset["semantics"].empty() )
+      return;
+    bool anyMatch = false;
+    for ( const auto &tag : dataset["semantics"] )
+      anyMatch =
+        anyMatch ||
+        ( tag.isString() &&
+          std::count( ontologyTags.begin(), ontologyTags.end(), tag.asString() ) > 0 );
+    if ( !anyMatch )
+      problems.push_back( id + ": " + where + " ontology tags (" + ontologyTags.front() +
+                          ", …) do not intersect the dataset semantics" );
+  };
+  if ( styleSpec.isMember( "raster" ) && styleSpec["raster"].isObject() &&
+       styleSpec["raster"].isMember( "classification" ) &&
+       styleSpec["raster"]["classification"].isObject() &&
+       styleSpec["raster"]["classification"].isMember( "classes" ) )
+    checkOntologyMapping( "classification.classes",
+                          styleSpec["raster"]["classification"]["classes"] );
+  if ( styleSpec.isMember( "vector" ) && styleSpec["vector"].isObject() &&
+       styleSpec["vector"].isMember( "categories" ) )
+    checkOntologyMapping( "categories", styleSpec["vector"]["categories"] );
+
   // Declared uncertainty wants data that can carry it.
   if ( styleSpec.isMember( "uncertainty" ) && styleSpec["uncertainty"].isObject() )
   {
@@ -623,6 +657,36 @@ std::vector<std::string> validateStyleSemantics( const Json::Value &styleSpec )
         problems.push_back( id + ": raster.nodata.label must be a string" );
     }
   }
+
+  // Platform 7.0 class ontology mapping: class/category entries may tag an
+  // `ontology` concept (free-form string). Shape is validated here; the
+  // semantic intersection with the target dataset is checked by
+  // checkStyleApplicability.
+  const auto checkOntologyShape = [ & ]( const char *where, const Json::Value &entries ) {
+    if ( !entries.isArray() )
+      return;
+    int index = 0;
+    for ( const auto &entry : entries )
+    {
+      if ( !entry.isObject() || !entry.isMember( "ontology" ) )
+      {
+        ++index;
+        continue;
+      }
+      const std::string at = std::string( where ) + "[" + std::to_string( index++ ) + "]";
+      if ( !entry["ontology"].isString() || entry["ontology"].asString().empty() )
+        problems.push_back( id + ": " + at + ".ontology must be a non-empty string" );
+    }
+  };
+  if ( styleSpec.isMember( "raster" ) && styleSpec["raster"].isObject() &&
+       styleSpec["raster"].isMember( "classification" ) &&
+       styleSpec["raster"]["classification"].isObject() &&
+       styleSpec["raster"]["classification"].isMember( "classes" ) )
+    checkOntologyShape( "classification.classes",
+                        styleSpec["raster"]["classification"]["classes"] );
+  if ( styleSpec.isMember( "vector" ) && styleSpec["vector"].isObject() &&
+       styleSpec["vector"].isMember( "categories" ) )
+    checkOntologyShape( "categories", styleSpec["vector"]["categories"] );
 
   if ( styleSpec.isMember( "uncertainty" ) )
   {
