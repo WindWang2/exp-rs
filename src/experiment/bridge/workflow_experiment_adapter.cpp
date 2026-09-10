@@ -10,6 +10,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QEvent>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>

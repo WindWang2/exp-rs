@@ -112,6 +112,7 @@ Result<void> ExperimentRunBridge::ensureExperiment( const QString &experimentId,
                                                     const QString &name,
                                                     const QString &objective )
 {
+    QMutexLocker lock( &m_mutex );
     if ( experimentId.isEmpty() )
         return failVoid( QStringLiteral( "experiment.bridge_invalid_event" ),
                          QStringLiteral( "experiment id must not be empty" ) );

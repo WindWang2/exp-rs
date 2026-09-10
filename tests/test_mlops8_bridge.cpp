@@ -13,6 +13,7 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMap>
 #include <QSet>
 #include <QTemporaryDir>
 
