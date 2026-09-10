@@ -25,6 +25,7 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -54,6 +55,49 @@ std::string fdToString( int fd )
 
 } // namespace
 
+// -- ConcurrencyGate ---------------------------------------------------------
+
+bool ConcurrencyGate::acquire( int timeoutMs )
+{
+    std::unique_lock<std::mutex> lock( mMutex );
+    const unsigned long long ticket = mNextTicket++;
+    mWaiters.push_back( ticket );
+    const auto deadline = std::chrono::steady_clock::now()
+                          + std::chrono::milliseconds( timeoutMs > 0 ? timeoutMs : 0 );
+    for ( ;; )
+    {
+        // FIFO: only the front waiter may take a freed slot.
+        if ( mWaiters.front() == ticket && mActive < mSlots )
+        {
+            mWaiters.pop_front();
+            ++mActive;
+            return true;
+        }
+        if ( mWaiters.front() != ticket )
+        {
+            // Someone ahead of us is waiting; they take precedence.
+            mCv.wait( lock );
+            continue;
+        }
+        if ( std::chrono::steady_clock::now() >= deadline )
+        {
+            // Bounded refusal: leave the queue (we are the front, so this
+            // cannot starve anyone behind us).
+            mWaiters.pop_front();
+            mCv.notify_all();
+            return false;
+        }
+        mCv.wait_until( lock, deadline );
+    }
+}
+
+void ConcurrencyGate::release()
+{
+    std::lock_guard<std::mutex> lock( mMutex );
+    --mActive;
+    mCv.notify_all();
+}
+
 PluginHostProcessSession::~PluginHostProcessSession()
 {
     killProcess( "session destroyed" );
@@ -82,6 +126,7 @@ std::shared_ptr<PluginHostProcessSession> PluginHostProcessSession::spawn(
 
     auto session = std::shared_ptr<PluginHostProcessSession>( new PluginHostProcessSession() );
     session->mOptions = options;
+    session->mGate.setSlots( options.quota.maxRequestConcurrency );
     if ( !session->spawnWorkerProcess( diagnostics ) )
         return {};
     if ( !session->awaitHandshake( diagnostics ) )
@@ -251,6 +296,12 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
                          mOptions.pluginId );
         return false;
     }
+
+    // Pre-exec resource bounds are computed BEFORE fork: the child between
+    // fork and exec must stay allocation-free (a multithreaded parent's
+    // heap cannot be safely touched there).
+    long long memoryLimit = mOptions.quota.workerMemoryBytes;
+
     const pid_t pid = ::fork();
     if ( pid < 0 )
     {
@@ -261,6 +312,10 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
     }
     if ( pid == 0 )
     {
+        // Process group of our own: the launcher's kill ladder can take
+        // down worker-spawned grandchildren with one kill(-pid). Must run
+        // before anything that could fail and leak the group.
+        ::setpgid( 0, 0 );
         ::dup2( hostToWorker[ 0 ], 3 );
         ::dup2( workerToHost[ 1 ], 4 );
         ::fcntl( 3, F_SETFD, 0 );
@@ -269,6 +324,15 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
                          workerToHost[ 1 ] } )
             if ( fd > 4 )
                 ::close( fd );
+        if ( memoryLimit > 0 )
+        {
+            // Coarse best-effort bound (address space, not RSS); enforced
+            // by the kernel before exec. Documented in capabilities.md.
+            struct ::rlimit addressSpace;
+            addressSpace.rlim_cur = static_cast<rlim_t>( memoryLimit );
+            addressSpace.rlim_max = static_cast<rlim_t>( memoryLimit );
+            ::setrlimit( RLIMIT_AS, &addressSpace );
+        }
         const std::string fdRead = std::string( kIpcReadSwitch ) + fdToString( 3 );
         const std::string fdWrite = std::string( kIpcWriteSwitch ) + fdToString( 4 );
         ::execl( mOptions.workerPath.c_str(), mOptions.workerPath.c_str(), fdRead.c_str(),
@@ -278,6 +342,7 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
     ::close( hostToWorker[ 0 ] );
     ::close( workerToHost[ 1 ] );
     mProcessHandle = reinterpret_cast<void *>( static_cast<intptr_t>( pid ) );
+    mProcessGroupId = static_cast<long long>( pid );
     mProcessAlive = true;
     mChannel = std::make_unique<IpcChannel>(
         makeIpcHandleStream( reinterpret_cast<void *>( workerToHost[ 0 ] ),
@@ -336,12 +401,26 @@ bool PluginHostProcessSession::awaitHandshake( PluginDiagnosticLog &diagnostics 
                          mOptions.pluginId );
         return false;
     }
+    // Protocol 1.1: informational worker dispatch width (a v1.0 worker
+    // omits the field → 1, i.e. serialized dispatch; the host gate still
+    // protects the host, the worker just serves slower).
+    const int workerConcurrent = mHello.get( "maxConcurrentRequests", 1 ).asInt();
+    {
+        std::lock_guard<std::mutex> stateLock( mStateMutex );
+        mWorkerMaxConcurrent = workerConcurrent > 0 ? workerConcurrent : 1;
+    }
     return true;
 }
 
 bool PluginHostProcessSession::isAlive() const
 {
     return mProcessAlive;
+}
+
+int PluginHostProcessSession::effectiveConcurrency() const
+{
+    std::lock_guard<std::mutex> stateLock( mStateMutex );
+    return std::min( mOptions.quota.maxRequestConcurrency, mWorkerMaxConcurrent );
 }
 
 void PluginHostProcessSession::killProcess( const char *reason )
@@ -373,20 +452,53 @@ void PluginHostProcessSession::killProcess( const char *reason )
     const pid_t pid = static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) );
     if ( pid > 0 )
     {
+        // Process-group kill first: worker-spawned grandchildren (fork/exec
+        // inside plugin code) die WITH the worker, not as orphans. The
+        // group exists because the child ran setpgid(0,0) before exec.
+        if ( mProcessGroupId > 0 )
+            ::kill( static_cast<pid_t>( -mProcessGroupId ), SIGKILL );
         ::kill( pid, SIGKILL );
         int status = 0;
         ::waitpid( pid, &status, 0 );
     }
     mProcessHandle = nullptr;
+    mProcessGroupId = -1;
 #endif
     if ( mChannel )
         mChannel->close();
 }
 
-void PluginHostProcessSession::enforceDeadline( long long requestId )
+void PluginHostProcessSession::escalateTimeout( long long requestId )
 {
-    if ( mChannel )
-        mChannel->cancel( requestId );
+    // The channel already sent the per-id cancel frame when its local wait
+    // timed out (protocol 1.1); this escalation owns grace and force: wait
+    // the grace window (a cooperative worker may still finish or exit),
+    // then kill when this was the last request in flight, poison otherwise.
+    (void)requestId;
+
+    const int grace = mOptions.killGraceMs > 0 ? mOptions.killGraceMs : kKillGraceMs;
+    const auto graceDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds( grace );
+    while ( std::chrono::steady_clock::now() < graceDeadline && mProcessAlive )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+
+    bool forceKill = false;
+    {
+        std::lock_guard<std::mutex> stateLock( mStateMutex );
+        if ( !mProcessAlive )
+            return;                       // died during grace: nothing to force
+        if ( mInFlight <= 1 )
+        {
+            forceKill = true;             // last request in flight: v1 ladder
+            mPoisoned = false;
+        }
+        else
+        {
+            mPoisoned = true;             // peers in flight: kill when drained
+            return;                       // kill-on-drain happens in request()
+        }
+    }
+    if ( forceKill )
+        killProcess( "request deadline ladder" );
 }
 
 IpcChannel::Outcome PluginHostProcessSession::request(
@@ -396,7 +508,120 @@ IpcChannel::Outcome PluginHostProcessSession::request(
     // Quota authority: the ceiling applies regardless of the caller's ask.
     const int effectiveDeadline = deadlineMs > 0 ? std::min( deadlineMs, mOptions.quota.requestDeadlineMs )
                                                  : mOptions.quota.requestDeadlineMs;
-    return requestRaw( method, params, effectiveDeadline, cancelPredicate, progressSink );
+
+    if ( !mChannel || !mProcessAlive )
+    {
+        IpcChannel::Outcome outcome;
+        outcome.status = IpcChannel::Outcome::Status::ChannelClosed;
+        outcome.error.code = "E6005";
+        outcome.error.message = "worker process is not running";
+        outcome.error.retryable = true;
+        return outcome;
+    }
+
+    // Drain-check first: a poisoned worker whose peers have finished must
+    // die before anything else is sent (the next request then fails E6005
+    // and the proxy's restart policy brings a fresh worker).
+    if ( mPoisoned )
+    {
+        std::lock_guard<std::mutex> stateLock( mStateMutex );
+        if ( mInFlight == 0 && mPoisoned )
+        {
+            mPoisoned = false;
+            killProcess( "poisoned worker drained" );
+        }
+    }
+    if ( !mProcessAlive )
+    {
+        IpcChannel::Outcome outcome;
+        outcome.status = IpcChannel::Outcome::Status::ChannelClosed;
+        outcome.error.code = "E6005";
+        outcome.error.message = "worker process is not running";
+        outcome.error.retryable = true;
+        return outcome;
+    }
+
+    // Bounded FIFO gate = maxRequestConcurrency (exact enforcement of the
+    // quota; overflow refuses typed instead of queueing without bound).
+    const int gateBudget = std::max( 1000, effectiveDeadline );
+    if ( !mGate.acquire( gateBudget ) )
+    {
+        IpcChannel::Outcome outcome;
+        outcome.status = IpcChannel::Outcome::Status::Error;
+        outcome.error.code = "E6007";
+        outcome.error.message = "plugin request concurrency limit ("
+                                + std::to_string( mGate.slots() )
+                                + ") is saturated; request refused (overload protection)";
+        return outcome;
+    }
+
+    {
+        std::lock_guard<std::mutex> stateLock( mStateMutex );
+        ++mInFlight;
+    }
+
+    IpcChannel::Outcome outcome;
+    outcome = mChannel->request( method, params, effectiveDeadline, cancelPredicate, progressSink );
+
+    if ( outcome.status == IpcChannel::Outcome::Status::Timeout )
+    {
+        // Per-id cancel already went out (channel); this waits the grace
+        // window and then kills (sole request) or poisons (peers in flight).
+        escalateTimeout( 0 );
+        outcome.error.message += "; the request was cancelled (worker killed or scheduled for kill)";
+    }
+
+    {
+        bool killDrained = false;
+        {
+            std::lock_guard<std::mutex> stateLock( mStateMutex );
+            --mInFlight;
+            if ( mInFlight == 0 && mPoisoned && mProcessAlive )
+            {
+                mPoisoned = false;
+                killDrained = true;
+            }
+        }
+        if ( killDrained )
+            killProcess( "poisoned worker drained" );
+        mGate.release();
+    }
+
+    if ( outcome.status == IpcChannel::Outcome::Status::Timeout )
+    {
+        outcome.error.message += "; the request was cancelled and the worker was killed or poisoned";
+    }
+    else if ( outcome.status == IpcChannel::Outcome::Status::ChannelClosed && mProcessAlive )
+    {
+        // Channel EOF while we believed the process lived: confirm death.
+#ifdef _WIN32
+        const DWORD wait = ::WaitForSingleObject( mProcessHandle, 0 );
+        if ( wait == WAIT_OBJECT_0 )
+        {
+            mProcessAlive = false;
+            if ( mJobHandle )
+            {
+                ::CloseHandle( mJobHandle );
+                mJobHandle = nullptr;
+            }
+            ::CloseHandle( mProcessHandle );
+            mProcessHandle = nullptr;
+        }
+#else
+        const pid_t pid = static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) );
+        int status = 0;
+        const pid_t done = ::waitpid( pid, &status, WNOHANG );
+        if ( done == pid )
+        {
+            mProcessAlive = false;
+            mProcessHandle = nullptr;
+            mProcessGroupId = -1;
+        }
+#endif
+        if ( !mProcessAlive )
+            killProcess( "confirmed dead after channel close" );
+    }
+    return outcome;
 }
 
 IpcChannel::Outcome PluginHostProcessSession::requestRaw(
@@ -421,8 +646,10 @@ IpcChannel::Outcome PluginHostProcessSession::requestRaw(
     if ( outcome.status == IpcChannel::Outcome::Status::Timeout )
     {
         // Ladder: cancel frame, grace, forced kill. The outcome stays the
-        // typed timeout the caller already received.
-        mChannel->cancelAll(); // broadcast cancel (v1 serial dispatch)
+        // typed timeout the caller already received. Control requests are
+        // never poisoned-away: they are lifecycle-critical, so a stalled
+        // worker dies here regardless of other traffic.
+        mChannel->cancelAll();
         const auto graceDeadline =
             std::chrono::steady_clock::now() + std::chrono::milliseconds( kKillGraceMs );
         while ( std::chrono::steady_clock::now() < graceDeadline && mProcessAlive )
@@ -457,6 +684,7 @@ IpcChannel::Outcome PluginHostProcessSession::requestRaw(
         {
             mProcessAlive = false;
             mProcessHandle = nullptr;
+            mProcessGroupId = -1;
         }
 #endif
         if ( !mProcessAlive )
@@ -523,6 +751,7 @@ bool PluginHostProcessSession::shutdown( int timeoutMs, PluginDiagnosticLog &dia
         }
 #else
         mProcessHandle = nullptr;
+        mProcessGroupId = -1;
 #endif
         if ( mChannel )
             mChannel->close();
@@ -536,61 +765,4 @@ bool PluginHostProcessSession::shutdown( int timeoutMs, PluginDiagnosticLog &dia
                      "worker did not answer plugin.shutdown and was killed",
                      mOptions.pluginId );
     return false;
-}
-
-bool PluginHostProcessSession::respawnSession( PluginDiagnosticLog &diagnostics,
-                                               const Json::Value &loadParams,
-                                               const std::string &entrypointPath )
-{
-    (void)entrypointPath;
-    // Restart policy: bounded respawns inside a rolling window.
-    const auto now = std::chrono::steady_clock::now();
-    if ( !mRestartWindowArmed )
-    {
-        mRestartWindowArmed = true;
-        mFirstRestart = now;
-        mRestartCount = 0;
-    }
-    if ( std::chrono::duration_cast<std::chrono::milliseconds>( now - mFirstRestart ).count()
-             > mOptions.restartWindowMs )
-    {
-        mRestartWindowArmed = false; // window elapsed: counter resets
-    }
-    else if ( mRestartCount >= mOptions.maxRestarts )
-    {
-        diagnostics.add( PluginDiagnosticCode::HostProcessCrashed,
-                         PluginDiagnosticSeverity::Error,
-                         "restart policy exhausted (" + std::to_string( mOptions.maxRestarts )
-                             + " respawns in " + std::to_string( mOptions.restartWindowMs )
-                             + " ms); unload/reload resets it",
-                         mOptions.pluginId );
-        return false;
-    }
-
-    if ( mChannel )
-    {
-        mChannel->close();
-        mChannel.reset();
-    }
-    killProcess( "respawn" );
-
-    if ( !spawnWorkerProcess( diagnostics ) )
-        return false;
-    ++mRestartCount;
-    ++mGeneration;
-
-    // Handshake validation happens through the first plugin.load reply; the
-    // hello event of the fresh worker is consumed by the channel.
-    IpcChannel::Outcome outcome =
-        mChannel->request( kLoadPlugin, loadParams, mOptions.handshakeTimeoutMs * 2 );
-    if ( outcome.status != IpcChannel::Outcome::Status::Ok )
-    {
-        diagnostics.add( PluginDiagnosticCode::HostProcessCrashed,
-                         PluginDiagnosticSeverity::Error,
-                         "worker respawn could not reload the plugin: " + outcome.error.message,
-                         mOptions.pluginId );
-        killProcess( "respawn load failed" );
-        return false;
-    }
-    return true;
 }

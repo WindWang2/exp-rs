@@ -122,19 +122,25 @@ public:
         // Exactly ONE bounded recovery per call, whether the worker was
         // already dead on entry or died mid-execution (the restart
         // policy inside the runtime bounds total respawns per window).
+        // Locking note: entry.mutex only guards the session SNAPSHOT (respawn
+        // swaps it in place); the request itself runs UNLOCKED so protocol
+        // 1.1 concurrency is real — the session is refcounted, so a respawn
+        // can never invalidate the shared_ptr we are using (its channel
+        // simply fails typed when the old worker dies).
         bool recovered = false;
         for ( int attempt = 0; attempt < 2; ++attempt )
         {
-            bool aliveNow;
+            std::shared_ptr<PluginHostProcessSession> session;
             {
                 std::lock_guard<std::mutex> lock( mEntry->mutex );
-                aliveNow = mEntry->session && mEntry->session->isAlive();
+                session = mEntry->session;
             }
-            if ( !aliveNow )
+            if ( !session || !session->isAlive() )
             {
                 if ( recovered || !tryRecovery( *mEntry ) )
                     throwUnavailable( "crashed or exited (E6005); restart policy exhausted" );
                 recovered = true;
+                continue;
             }
 
             Json::Value requestParams( Json::objectValue );
@@ -142,16 +148,16 @@ public:
             requestParams["params"] = params;
             requestParams["workDir"] = context.workDir();
 
-            IpcChannel::Outcome outcome;
-            {
-                std::lock_guard<std::mutex> lock( mEntry->mutex );
-                outcome = mEntry->session->request(
-                    kExecuteOperator, requestParams, effectiveDeadline( mEntry->quota, 0 ),
-                    IpcChannel::CancelPredicate(),
-                    [&context]( double progress, const std::string &message ) {
-                        context.reportProgress( progress, message );
-                    } );
-            }
+            // Host-side cooperative cancel (job engine / TaskCenter)
+            // forwards as a per-id cancel frame (protocol 1.1): the worker
+            // sets the request's flag and a well-behaved operator answers
+            // E6009. Before 1.1 the host could only kill the whole worker.
+            IpcChannel::Outcome outcome = session->request(
+                kExecuteOperator, requestParams, effectiveDeadline( mEntry->quota, 0 ),
+                [&context]() -> bool { return context.isCancelled(); },
+                [&context]( double progress, const std::string &message ) {
+                    context.reportProgress( progress, message );
+                } );
 
             switch ( outcome.status )
             {
@@ -212,14 +218,18 @@ public:
 
     Json::Value execute( const Json::Value &params ) override
     {
-        std::lock_guard<std::mutex> lock( mEntry->mutex );
-        if ( !mEntry->session || !mEntry->session->isAlive() )
+        std::shared_ptr<PluginHostProcessSession> session;
+        {
+            std::lock_guard<std::mutex> lock( mEntry->mutex );
+            session = mEntry->session;
+        }
+        if ( !session || !session->isAlive() )
             return typedFailure( "E6005", "host-process worker is not running" );
         Json::Value requestParams( Json::objectValue );
         requestParams["toolId"] = mToolId;
         requestParams["params"] = params;
-        auto outcome = mEntry->session->request( kExecuteAgentTool, requestParams,
-                                                 effectiveDeadline( mEntry->quota, 0 ) );
+        auto outcome = session->request( kExecuteAgentTool, requestParams,
+                                         effectiveDeadline( mEntry->quota, 0 ) );
         if ( outcome.status == IpcChannel::Outcome::Status::Ok )
             return outcome.result;
         Json::Value envelope( Json::objectValue );
@@ -253,15 +263,19 @@ public:
 
     Json::Value call( const char *method, const Json::Value &extra ) const
     {
-        std::lock_guard<std::mutex> lock( mEntry->mutex );
-        if ( !mEntry->session || !mEntry->session->isAlive() )
+        std::shared_ptr<PluginHostProcessSession> session;
+        {
+            std::lock_guard<std::mutex> lock( mEntry->mutex );
+            session = mEntry->session;
+        }
+        if ( !session || !session->isAlive() )
             return typedFailure( "E6005", "host-process worker is not running" );
         Json::Value params( Json::objectValue );
         params["providerId"] = mProviderId;
         for ( const std::string &name : extra.getMemberNames() )
             params[name] = extra[name];
-        auto outcome = mEntry->session->request( method, params,
-                                                 effectiveDeadline( mEntry->quota, 0 ) );
+        auto outcome = session->request( method, params,
+                                         effectiveDeadline( mEntry->quota, 0 ) );
         if ( outcome.status == IpcChannel::Outcome::Status::Ok )
             return outcome.result;
         return typedFailure( outcome.statusCode().c_str(), outcome.error.message );
@@ -318,8 +332,17 @@ public:
         requestJson["manifest"] = request.manifest;
         requestJson["gpuRequested"] = request.gpuRequested;
         params["request"] = requestJson;
-        auto outcome = mEntry->session->request( kLoadModel, params,
-                                                 effectiveDeadline( mEntry->quota, 0 ) );
+        // Consistent locking with every other proxy: snapshot the session
+        // under the entry mutex, then request unlocked (baseline G11 fix).
+        std::shared_ptr<PluginHostProcessSession> session;
+        {
+            std::lock_guard<std::mutex> lock( mEntry->mutex );
+            session = mEntry->session;
+        }
+        auto outcome = session
+                           ? session->request( kLoadModel, params,
+                                               effectiveDeadline( mEntry->quota, 0 ) )
+                           : IpcChannel::Outcome{};
         if ( outcome.status != IpcChannel::Outcome::Status::Ok )
         {
             error = outcome.error.message.empty() ? "worker model load failed"
@@ -345,8 +368,12 @@ public:
                                    const std::string &outputTensorName ) override
     {
         PluginInferenceResultV1 result;
-        std::lock_guard<std::mutex> lock( mEntry->mutex );
-        if ( !mLoaded || !mEntry->session || !mEntry->session->isAlive() )
+        std::shared_ptr<PluginHostProcessSession> session;
+        {
+            std::lock_guard<std::mutex> lock( mEntry->mutex );
+            session = mEntry->session;
+        }
+        if ( !mLoaded || !session || !session->isAlive() )
         {
             result.error = "model runtime is not loaded (E4003)";
             return result;
@@ -364,8 +391,8 @@ public:
         inputJson["cols"] = input.cols;
         params["input"] = inputJson;
         params["outputTensorName"] = outputTensorName;
-        auto outcome = mEntry->session->request( kInferModel, params,
-                                                 effectiveDeadline( mEntry->quota, 0 ) );
+        auto outcome = session->request( kInferModel, params,
+                                         effectiveDeadline( mEntry->quota, 0 ) );
         if ( outcome.status != IpcChannel::Outcome::Status::Ok )
         {
             result.error = outcome.error.message;

@@ -57,6 +57,9 @@ public:
         /// plugin.load budget (cold first LoadLibrary of a heavy plugin can
         /// take tens of seconds; never bounded by the execution quota).
         int loadTimeoutMs = 120000;
+        /// Grace between the cancel frame and forced kill (protocol 1.1
+        /// timeout escalation). Bounded tests lower this.
+        int killGraceMs = 3000;
     };
 
     explicit PluginHostProcessRuntime( Options options );

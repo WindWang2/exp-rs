@@ -6,6 +6,7 @@
 #include "plugin_host_protocol.h"
 #include "plugin_host_proxies.h"
 
+#include "exprs/ipc_frame.h"
 #include "exprs/plugin_loader.h"
 
 #include <cstring>
@@ -103,6 +104,22 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
     spawnOptions.maxRestarts = mOptions.maxRestarts;
     spawnOptions.restartWindowMs = mOptions.restartWindowMs;
     spawnOptions.handshakeTimeoutMs = mOptions.handshakeTimeoutMs;
+    spawnOptions.killGraceMs = mOptions.killGraceMs;
+
+    // Protocol 1.1 limits negotiation (params travel to the worker with
+    // plugin.load): the frame cap lowers to the quota's maxResponseBytes
+    // when it is below the transport default, and the dispatch width is
+    // the quota's concurrency (the worker clamps to its own capability).
+    {
+        Json::Value limits( Json::objectValue );
+        IpcFrameLimits transport;
+        if ( entry->quota.maxResponseBytes > 0
+             && static_cast<long long>( entry->quota.maxResponseBytes )
+                    < static_cast<long long>( transport.maxFrameBytes ) )
+            limits["maxFrameBytes"] = static_cast<Json::Int64>( entry->quota.maxResponseBytes );
+        limits["maxConcurrentRequests"] = entry->quota.maxRequestConcurrency;
+        params["limits"] = limits;
+    }
 
     auto session = PluginHostProcessSession::spawn( spawnOptions, log );
     if ( !session )
@@ -222,6 +239,7 @@ bool PluginHostProcessRuntime::respawn( const std::string &pluginId,
     spawnOptions.maxRestarts = mOptions.maxRestarts;
     spawnOptions.restartWindowMs = mOptions.restartWindowMs;
     spawnOptions.handshakeTimeoutMs = mOptions.handshakeTimeoutMs;
+    spawnOptions.killGraceMs = mOptions.killGraceMs;
 
     auto session = PluginHostProcessSession::spawn( spawnOptions, log );
     if ( !session )
@@ -275,7 +293,8 @@ Json::Value PluginHostProcessRuntime::diagnosticsSnapshot() const
         Json::Value entryJson( Json::objectValue );
         entryJson["workerAlive"] = entry->session->isAlive();
         entryJson["generation"] = entry->session->generation();
-        entryJson["restarts"] = entry->session->restartCount();
+        entryJson["poisoned"] = entry->session->isPoisoned();
+        entryJson["effectiveConcurrency"] = entry->session->effectiveConcurrency();
         entryJson["quota"] = entry->quota.toJson();
         plugins[ pluginId ] = entryJson;
     }

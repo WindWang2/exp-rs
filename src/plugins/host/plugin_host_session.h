@@ -5,6 +5,16 @@
  * handles), handshake validation, request plumbing with quotas applied,
  * crash detection, the cancel/kill ladder and the restart policy.
  *
+ * Protocol 1.1: quota.maxRequestConcurrency is enforced EXACTLY here via a
+ * FIFO-fair concurrency gate — at most N requests are in flight on the
+ * wire; further requesters wait bounded and then fail typed (E6007
+ * overload refusal). A timed-out request is cancelled per-id; when other
+ * requests are still in flight the worker keeps serving them and the
+ * session is marked POISONED — a poisoned worker is killed as soon as its
+ * last in-flight request drains, and the next request applies the restart
+ * policy. A sole timed-out request escalates to the kill ladder directly
+ * (v1 semantics).
+ *
  * Sessions are reference-counted through shared_ptr so an in-flight proxy
  * call keeps the object alive across an unload; the process handle inside
  * may already be dead, in which case requests fail typed (E6005).
@@ -19,10 +29,48 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
 #include <memory>
 #include <mutex>
 
 namespace sicnu::plugins {
+
+/// FIFO-fair counting semaphore (the per-plugin request-slot gate). Waiters
+/// are served strictly in arrival order, so a burst of callers cannot
+/// starve the first one; acquisition is bounded (typed refusal at the call
+/// site on timeout — E6007 overload).
+class ConcurrencyGate
+{
+public:
+    explicit ConcurrencyGate( int slots ) : mSlots( slots < 1 ? 1 : slots ) {}
+
+    /// Resizes the gate BEFORE traffic (spawn-time quota application only).
+    void setSlots( int slots )
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        mSlots = slots < 1 ? 1 : slots;
+    }
+    int slots() const
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        return mSlots;
+    }
+
+    /// Acquires one slot; FIFO order. Returns false when @p timeoutMs
+    /// elapsed without a slot (caller refuses typed).
+    bool acquire( int timeoutMs );
+    /// Releases one slot (wakes the next waiter in order).
+    void release();
+
+private:
+    mutable std::mutex mMutex;
+    std::condition_variable mCv;
+    std::deque<unsigned long long> mWaiters;   ///< FIFO tickets
+    int mSlots;
+    int mActive = 0;
+    unsigned long long mNextTicket = 1;
+};
 
 class PluginHostProcessSession
 {
@@ -40,6 +88,9 @@ public:
         int maxRestarts = 3;
         long long restartWindowMs = 60000;
         int handshakeTimeoutMs = 15000;
+        /// Grace between the cancel frame and forced kill (kill ladder and
+        /// poison-drain checks). Exposed for bounded tests.
+        int killGraceMs = 3000;
     };
 
     /// Spawns the worker and validates the handshake. Returns an empty ptr
@@ -53,29 +104,36 @@ public:
     PluginHostProcessSession &operator=( const PluginHostProcessSession & ) = delete;
 
     /// Sends one request with the session's quotas applied: the deadline is
-    /// clamped to the quota ceiling, and on timeout the cancel/kill ladder
-    /// runs (cancel frame, grace, TerminateJobObject/SIGKILL).
+    /// clamped to the quota ceiling, a concurrency slot is acquired (FIFO,
+    /// bounded wait = the effective deadline; otherwise typed E6007
+    /// refusal), and on timeout the cancel/escalation policy runs.
     exprs::IpcChannel::Outcome request( const std::string &method, const Json::Value &params,
                                         int deadlineMs,
                                         const exprs::IpcChannel::CancelPredicate &cancelPredicate = {},
                                         const exprs::IpcChannel::ProgressSink &progressSink = {} );
 
-    /// Unclamped variant for INTERNAL control requests (plugin.load during
-    /// spawn/recovery): the request-deadline quota must not bound these —
-    /// a cold first LoadLibrary of a heavy plugin legitimately exceeds it.
+    /// Unclamped, UNGATED variant for INTERNAL control requests
+    /// (plugin.load during spawn/recovery, plugin.shutdown): the request
+    /// deadline quota and the concurrency gate must not bound these — a
+    /// cold first LoadLibrary legitimately exceeds the quota, and lifecycle
+    /// traffic must never wait behind data-plane slots.
     exprs::IpcChannel::Outcome requestRaw(
         const std::string &method, const Json::Value &params, int deadlineMs,
         const exprs::IpcChannel::CancelPredicate &cancelPredicate = {},
         const exprs::IpcChannel::ProgressSink &progressSink = {} );
 
     /// True while the worker process is alive. A dead session fails
-    /// requests typed; respawnSession() applies the restart policy.
+    /// requests typed; the RUNTIME's respawn() applies the restart policy
+    /// and swaps in a fresh session.
     bool isAlive() const;
-
-    /// Crash liveness probe: after a crash, in-flight requests have failed
-    /// and this returns false.
-    bool respawnSession( exprs::PluginDiagnosticLog &diagnostics, const Json::Value &loadParams,
-                         const std::string &entrypointPath );
+    /// True when a timed-out request was abandoned while peers kept the
+    /// worker alive (protocol 1.1); the worker is killed when in-flight
+    /// drains to zero.
+    bool isPoisoned() const { return mPoisoned; }
+    /// Effective concurrent-request width: min(quota gate slots, worker
+    /// hello maxConcurrentRequests) — diagnostic surface.
+    int effectiveConcurrency() const;
+    unsigned generation() const { return mGeneration; }
 
     /// Graceful shutdown request + bounded wait, then kill ladder. Always
     /// ends with the process dead.
@@ -83,8 +141,6 @@ public:
 
     const exprs::PluginQuota &quota() const { return mOptions.quota; }
     const Json::Value &hello() const { return mHello; }
-    unsigned generation() const { return mGeneration; }
-    int restartCount() const { return mRestartCount; }
 
 private:
     PluginHostProcessSession() = default;
@@ -92,21 +148,30 @@ private:
     bool spawnWorkerProcess( exprs::PluginDiagnosticLog &diagnostics );
     bool awaitHandshake( exprs::PluginDiagnosticLog &diagnostics );
     void killProcess( const char *reason );
-    void enforceDeadline( long long requestId );
+    /// Shared timeout escalation: per-id cancel frame, bounded grace, then
+    /// either direct kill (sole in-flight request) or poison (peers still
+    /// in flight; the worker dies when the last request drains).
+    void escalateTimeout( long long requestId );
 
     SpawnOptions mOptions;
     Json::Value mHello;
     std::unique_ptr<exprs::IpcChannel> mChannel;
+    ConcurrencyGate mGate{ 1 };
+
+    // Request/concurrency state (mStateMutex; NEVER held while writing to
+    // the channel or waiting on the channel's own locks).
+    mutable std::mutex mStateMutex;
+    int mInFlight = 0;
+    bool mPoisoned = false;
+    int mWorkerMaxConcurrent = 1;   ///< from worker.hello (protocol 1.1)
 
     // OS process plumbing (platform handles owned here).
     void *mProcessHandle = nullptr;   ///< Windows: HANDLE; POSIX: pid as void*
     void *mJobHandle = nullptr;       ///< Windows: job object
+    long long mProcessGroupId = -1;   ///< POSIX: worker process group (-pid)
 
     std::atomic<bool> mProcessAlive{ false };
     std::atomic<unsigned> mGeneration{ 1 };
-    std::atomic<int> mRestartCount{ 0 };
-    std::chrono::steady_clock::time_point mFirstRestart;
-    bool mRestartWindowArmed = false;
 
     // Handshake state (written by the channel reader thread).
     std::mutex mHelloMutex;

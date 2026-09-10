@@ -13,6 +13,7 @@
 #include "operators/framework/rs_operator_error.h"
 
 #include "plugins/host/plugin_host_process_runtime.h"
+#include "plugins/host/plugin_host_session.h"
 
 #include <atomic>
 #include <chrono>
@@ -95,7 +96,8 @@ void writeManifest()
     manifest["capabilities"].append( "operator" );
     Json::Value operators( Json::arrayValue );
     for ( const char *id : { "test:iso-echo", "test:iso-crash", "test:iso-hang",
-                             "test:iso-flood", "test:iso-slow" } )
+                             "test:iso-flood", "test:iso-gate", "test:iso-spawn",
+                             "test:iso-slow" } )
     {
         Json::Value op( Json::objectValue );
         op["id"] = id;
@@ -115,13 +117,15 @@ void writeManifest()
 }
 
 /// One registry + runtime + sink stack wired the way the framework does.
+/// Budget overrides keep escalation suites bounded without touching the
+/// default 6 s / 3 s numbers the other tests assume.
 struct Stack
 {
     TestSink sink;
     std::unique_ptr<sicnu::plugins::PluginHostProcessRuntime> runtime;
     std::string tempDir;
 
-    Stack()
+    explicit Stack( int deadlineCeilingMs = 6000, int killGraceMs = 3000 )
     {
         const int pid =
 #ifdef _WIN32
@@ -139,7 +143,8 @@ struct Stack
         options.workerPath = kWorkerPath;
         options.handshakeTimeoutMs = 15000;
         options.quotaCeilings = PluginQuota::fromEnvironment();
-        options.quotaCeilings.requestDeadlineMs = 6000; // bounded test budgets
+        options.quotaCeilings.requestDeadlineMs = deadlineCeilingMs;
+        options.killGraceMs = killGraceMs;
         runtime = std::make_unique<sicnu::plugins::PluginHostProcessRuntime>( options );
 
         auto &registry = PluginRegistry::instance();
@@ -326,4 +331,154 @@ TEST_CASE( "enable/disable round-trip works with the host-process runtime",
     REQUIRE( registry.setEnabled( kPluginId, false ) );
     REQUIRE_FALSE( registry.load( kPluginId ) );
     REQUIRE( registry.setEnabled( kPluginId, true ) );
+}
+
+TEST_CASE( "concurrent requests run in parallel within the quota", "[hostprocess][concurrency]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // Three gate instances must rendezvous INSIDE the worker: proof that
+    // the worker dispatches concurrently (protocol 1.1) instead of the v1
+    // serial loop. Each instance blocks until the running peak reaches 3.
+    constexpr int kParallel = 3;
+    std::vector<Json::Value> results( kParallel );
+    std::vector<std::thread> threads;
+    for ( int i = 0; i < kParallel; ++i )
+    {
+        threads.emplace_back( [&stack, &results, i] {
+            Json::Value params( Json::objectValue );
+            params["expected"] = kParallel;
+            params["waitMs"] = 8000;
+            results[ i ] = runOperator( stack, "test:iso-gate", params );
+        } );
+    }
+    for ( std::thread &thread : threads )
+        thread.join();
+    for ( int i = 0; i < kParallel; ++i )
+    {
+        INFO( "gate " << i << ": "
+                      << Json::writeString( Json::StreamWriterBuilder(), results[ i ] ) );
+        REQUIRE( results[ i ]["success"].asBool() );
+        REQUIRE( results[ i ]["rendezvous"].asBool() );
+        REQUIRE( results[ i ]["observedPeak"].asInt() >= kParallel );
+    }
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "host-side cooperative cancel reaches the worker", "[hostprocess][concurrency][cancel]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    sicnu::operators::RSOperatorContext cancelContext;
+    std::atomic<int> cancelPolls{ 0 };
+    cancelContext.setCancelCallback( [&cancelPolls]() -> bool {
+        // Cancel a moment after the call starts (the proxy polls this
+        // predicate and converts it into a per-id cancel frame).
+        return cancelPolls.fetch_add( 1 ) > 20;
+    } );
+
+    Json::Value cancelled = runOperator( stack, "test:iso-slow", Json::Value(), &cancelContext );
+    REQUIRE( cancelled["__operatorError"].asBool() );
+    REQUIRE( cancelled["code"].asString() == "4000" ); // ErrorCode::Cancelled = 4000
+
+    // A cooperative cancel must NOT have killed the worker (that is the
+    // kill ladder's job, not the cancel's).
+    REQUIRE( stack.runtime->isWorkerAlive( kPluginId ) );
+    Json::Value params( Json::objectValue );
+    params["seconds"] = 1;
+    Json::Value after = runOperator( stack, "test:iso-slow", params );
+    REQUIRE( after["success"].asBool() );
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "timeout escalation poisons the session instead of killing a busy worker",
+           "[hostprocess][concurrency][poison]" )
+{
+    // Dedicated budgets: 2.5 s deadline ceiling, 400 ms kill grace.
+    Stack stack( 2500, 400 );
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // Sequence (deterministic, margins >= 1 s):
+    //   t=0.0  A starts iso-slow 8 s  -> times out at t=2.5 (ceiling);
+    //          per-id cancel goes out, grace runs t=2.5..2.9.
+    //   t=2.0  B starts iso-slow 2 s  -> would finish at t=4.0, i.e. B is
+    //          IN FLIGHT at A's escalation decision (t=2.9).
+    //   => A's timeout must NOT kill the worker (B is a peer in flight);
+    //      the session is poisoned and the worker dies at drain.
+    Json::Value aResult;
+    Json::Value bResult;
+    std::thread threadA( [&] {
+        Json::Value params( Json::objectValue );
+        params["seconds"] = 8;
+        aResult = runOperator( stack, "test:iso-slow", params );
+    } );
+    std::thread threadB( [&] {
+        std::this_thread::sleep_for( std::chrono::milliseconds( 2000 ) );
+        Json::Value params( Json::objectValue );
+        params["seconds"] = 2;
+        bResult = runOperator( stack, "test:iso-slow", params );
+    } );
+    threadA.join();
+
+    // A timed out (typed E6004 path)...
+    REQUIRE( aResult["__operatorError"].asBool() );
+    REQUIRE( aResult["code"].asString() == "4100" ); // ExternalProcessTimeout
+    // ...and at this moment (B still in flight, decision time passed) the
+    // worker must be ALIVE: poison, not the v1 whole-worker kill. The v1
+    // ladder would have terminated the worker at A's deadline (t=2.5 s)
+    // while B runs until t=4.0 s.
+    REQUIRE( stack.runtime->isWorkerAlive( kPluginId ) );
+
+    threadB.join();
+    // B was still served to completion by the poisoned worker...
+    REQUIRE( bResult["success"].asBool() );
+    // ...whose in-flight count then drained to zero: the poison kill fired.
+    REQUIRE_FALSE( stack.runtime->isWorkerAlive( kPluginId ) );
+
+    // The next call hits the dead worker (E6005), the proxy applies ONE
+    // bounded recovery, and the fresh worker answers — all inside one
+    // operator call.
+    Json::Value after = runOperator( stack, "test:iso-echo", Json::Value() );
+    REQUIRE( after["success"].asBool() );
+    REQUIRE( stack.runtime->isWorkerAlive( kPluginId ) );
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "ConcurrencyGate is FIFO-fair and bounded", "[hostprocess][gate]" )
+{
+    // Unit-level contract of the exact quota enforcement primitive: a full
+    // gate refuses bounded waiters (session maps that to E6007) and the
+    // first waiter always wins the next slot.
+    sicnu::plugins::ConcurrencyGate gate( 1 );
+    REQUIRE( gate.acquire( 0 ) );
+    std::atomic<bool> firstGotSlot{ false };
+    std::atomic<bool> secondGotSlot{ false };
+    std::atomic<int> order{ 0 };
+    std::thread first( [&] {
+        if ( gate.acquire( 2000 ) )
+        {
+            firstGotSlot = order.fetch_add( 1 ) == 0;
+            gate.release();
+        }
+    } );
+    std::thread second( [&] {
+        std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+        if ( gate.acquire( 2000 ) )
+        {
+            secondGotSlot = order.fetch_add( 1 ) == 1;
+            gate.release();
+        }
+    } );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 150 ) );
+    REQUIRE( gate.slots() == 1 );
+    gate.release(); // free the original slot; FIFO: first waiter wins
+    first.join();
+    second.join();
+    REQUIRE( firstGotSlot );
+    REQUIRE( secondGotSlot );
 }
