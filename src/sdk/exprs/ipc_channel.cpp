@@ -19,6 +19,11 @@ IpcChannel::Outcome::Status statusForCode( const std::string &code )
 
 } // namespace
 
+IpcChannel::IpcChannel( std::unique_ptr<IIpcStream> stream )
+    : IpcChannel( std::move( stream ), Options{} )
+{
+}
+
 IpcChannel::IpcChannel( std::unique_ptr<IIpcStream> stream, Options options )
     : mStream( std::move( stream ) ), mOptions( options )
 {
