@@ -490,6 +490,89 @@ TEST_CASE( "rs:sar_terrain_flatten is the identity on flat DEMs",
         REQUIRE( v == Approx( 0.4f ).margin( 1e-5 ) );
 }
 
+TEST_CASE( "rs:sar_terrain_flatten geometry consumes the look azimuth, not the flight heading",
+           "[sar][rtc][regression]" )
+{
+    // A west-looking (heading 0 + right → look azimuth 90°, antenna west of
+    // the scene) flattening over an east–west ramp. The closed form for the
+    // facet is cosθi = cosα·cosθ0 + sinα·sinθ0·cos(β − φ_from) with
+    // φ_from = lookAzimuth + 180 = 270°, so the flank sloping down TOWARD
+    // the antenna (β = 270°) gives θi = θ0 − α and the opposite flank
+    // (β = 90°) θi = θ0 + α. The pre-fix kernel fed the flight heading
+    // (0°) — cos(β − 0°) = 0 for both flanks, rotating RTC by 90°.
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    constexpr int kW = 12;
+    constexpr int kH = 10;
+    constexpr float kSigma0 = 0.5f;
+    constexpr double kIncidence = 30.0;
+
+    auto runFlatten = [&]( const QString &demPath, const QString &output ) {
+        auto op = RSOperatorRegistry::instance().create( "rs:sar_terrain_flatten" );
+        REQUIRE( op != nullptr );
+        Json::Value params( Json::objectValue );
+        params["input"] = tmp.filePath( "sigma0.tif" ).toStdString();
+        params["output"] = output.toStdString();
+        params["dem"] = demPath.toStdString();
+        params["incidenceDeg"] = kIncidence;
+        params["headingDeg"] = 0.0;
+        params["lookDirection"] = "right";
+        params["demUnit"] = "meters";
+        RSOperatorContext ctx;
+        REQUIRE_NOTHROW( op->run( params, ctx ) );
+    };
+
+    std::vector<float> sigma0( static_cast<size_t>( kW ) * kH, kSigma0 );
+    REQUIRE( writeRaster( tmp.filePath( "sigma0.tif" ), sigma0, kW, kH ) );
+
+    // DEM z = 0.3·x: rises eastward, downslope aspect β = 270° (west,
+    // toward the antenna) → θi = θ0 − α, gain < 1.
+    std::vector<float> demToward( static_cast<size_t>( kW ) * kH );
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 0; x < kW; ++x )
+            demToward[static_cast<size_t>( y ) * kW + x] = static_cast<float>( 0.3 * x );
+    REQUIRE( writeRaster( tmp.filePath( "dem_toward.tif" ), demToward, kW, kH ) );
+
+    // DEM z = −0.3·x: downslope aspect β = 90° (east, away) → θi = θ0 + α.
+    std::vector<float> demAway( static_cast<size_t>( kW ) * kH );
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 0; x < kW; ++x )
+            demAway[static_cast<size_t>( y ) * kW + x] = static_cast<float>( -0.3 * x );
+    REQUIRE( writeRaster( tmp.filePath( "dem_away.tif" ), demAway, kW, kH ) );
+
+    runFlatten( tmp.filePath( "dem_toward.tif" ), tmp.filePath( "gamma_toward.tif" ) );
+    runFlatten( tmp.filePath( "dem_away.tif" ), tmp.filePath( "gamma_away.tif" ) );
+
+    // writeRaster stamps 10 m cells, so the ramp gradient is 0.3 per pixel
+    // = 0.03 per metre (the Horn denominator is metres).
+    const double alpha = std::atan( 0.3 / 10.0 );
+    const double theta0 = kIncidence * M_PI / 180.0;
+    const double expectedToward = kSigma0 * std::cos( theta0 ) / std::cos( theta0 - alpha );
+    const double expectedAway = kSigma0 * std::cos( theta0 ) / std::cos( theta0 + alpha );
+    // The two flanks are physically distinct; a look/heading mixup collapses
+    // both to cos(β) = 0 (gain ≈ 1.042), between these two answers.
+    REQUIRE( expectedToward == Approx( 0.4917 ).margin( 1e-3 ) );
+    REQUIRE( expectedAway == Approx( 0.5092 ).margin( 1e-3 ) );
+
+    // Interior columns carry the exact Horn gradient; replicate-halo border
+    // columns halve it, so only x ∈ [1, kW−2] is pinned.
+    const auto gammaToward = readBand( tmp.filePath( "gamma_toward.tif" ) );
+    REQUIRE( gammaToward.size() == sigma0.size() );
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 1; x < kW - 1; ++x )
+            REQUIRE( gammaToward[static_cast<size_t>( y ) * kW + x] ==
+                     Approx( expectedToward ).margin( 1e-4 ) );
+
+    const auto gammaAway = readBand( tmp.filePath( "gamma_away.tif" ) );
+    REQUIRE( gammaAway.size() == sigma0.size() );
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 1; x < kW - 1; ++x )
+            REQUIRE( gammaAway[static_cast<size_t>( y ) * kW + x] ==
+                     Approx( expectedAway ).margin( 1e-4 ) );
+}
+
 TEST_CASE( "rs:sar_terrain_flatten refuses mismatched DEM grids", "[sar][operator]" )
 {
     const AppInit app;

@@ -13,6 +13,8 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/sar/sar_terrain_geometry.h"
 #include "processing/algorithms/sar/sar_metadata.h"
+#include "processing/algorithms/math_utils.h"
+#include "processing/gdal/gdal_cell_geometry.h"
 #include "processing/algorithms/topographic_correction.h" // hornGradient (shared Horn kernels)
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_block_stream.h"
@@ -44,42 +46,9 @@ constexpr int kHalo = 1;
 constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
 constexpr uint8_t kMaskNoData = 255;
 
-/// Same WGS84 degrees->metres conversion the terrain/topographic operators
-/// apply (#612); consolidation tracked for Milestone F.1.
-void cellSizesMetres( const GdalDatasetWrapper &ds, double *csx, double *csy )
-{
-    const std::array<double, 6> gt = ds.geoTransform();
-    double x = std::abs( gt[1] );
-    double y = std::abs( gt[5] );
-    if ( x <= 1e-7 )
-        x = 30.0;
-    if ( y <= 1e-7 )
-        y = x;
-    const QString wkt = ds.projection();
-    if ( !wkt.isEmpty() )
-    {
-        OGRSpatialReferenceH srs = OSRNewSpatialReference( nullptr );
-        if ( srs )
-        {
-            const QByteArray wktBytes = wkt.toUtf8();
-            char *wktPtr = const_cast<char *>( wktBytes.constData() );
-            if ( OSRImportFromWkt( srs, &wktPtr ) == OGRERR_NONE && OSRIsGeographic( srs ) )
-            {
-                const double phiDeg = gt[3] + ( ds.height() / 2.0 ) * gt[5];
-                const double phiRad = phiDeg * M_PI / 180.0;
-                const double cosPhi = std::cos( phiRad );
-                const double mPerDegLat =
-                    111132.92 - 559.82 * std::cos( 2 * phiRad ) + 1.175 * std::cos( 4 * phiRad );
-                const double mPerDegLon = 111412.84 * cosPhi - 93.5 * std::cos( 3 * phiRad );
-                x = std::abs( gt[1] ) * mPerDegLon;
-                y = ( std::abs( gt[5] ) > 1e-7 ? std::abs( gt[5] ) : std::abs( gt[1] ) ) * mPerDegLat;
-            }
-            OSRDestroySpatialReference( srs );
-        }
-    }
-    *csx = x;
-    *csy = y;
-}
+// Same WGS84 degrees->metres conversion the terrain/topographic operators
+// apply (#612) — single owner: processing/gdal/gdal_cell_geometry.
+using sicnu::processing::gdal_util::cellSizesMetres;
 
 /// Sentinel -> NaN normalization over the stream's borrowed halo buffer
 /// (copied into @a scratch, which the compute loop then indexes).

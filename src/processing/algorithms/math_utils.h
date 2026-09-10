@@ -1,6 +1,7 @@
 // math_utils.h — Shared math utilities for processing algorithms
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -102,5 +103,28 @@ bool normalizedDifference(const float *a, const float *b, float *out, size_t cou
  * @return true on success; false on null pointers, zero count, or NaN gain/bias
  */
 bool linearScale(const float *in, float *out, size_t count, float gain, float bias);
+
+/**
+ * WGS84 geodetic arc lengths in metres per degree of latitude/longitude at
+ * @p latitudeDeg (Snyder's expansion to the 4th/3rd harmonic). The single
+ * owner of the degree→metre conversion every geographic-CRS kernel
+ * consumes (terrain cell sizes, change areas, SAR masks); callers pass the
+ * scene-centre latitude and multiply their own pixel sizes. Sub-metre
+ * accuracy versus full geodesics at pixel scales, deterministic, and
+ * identical at every call site by construction.
+ */
+struct Wgs84ArcMeters
+{
+    double perDegLat;  ///< metres per degree of latitude at the given latitude
+    double perDegLon;  ///< metres per degree of longitude at the given latitude
+};
+Wgs84ArcMeters wgs84ArcAtLatitudeDeg( double latitudeDeg );
+
+/**
+ * Scene-centre latitude in degrees of a north-up geotransform:
+ * gt[3] + (height / 2) * gt[5]. All geographic-CRS conversions in the
+ * platform evaluate the arc lengths at this single latitude per raster.
+ */
+double sceneCentreLatitudeDeg( const std::array<double, 6> &geoTransform, int height );
 
 } // namespace MathUtils

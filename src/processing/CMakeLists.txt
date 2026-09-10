@@ -14,11 +14,14 @@ add_library(sicnu_processing SHARED
     gdal/gdal_multiband_block_stream.cpp
     gdal/gdal_window_read.cpp
     gdal/gdal_error_handler.cpp
+    gdal/gdal_cell_geometry.cpp
 
     algorithms/primitives/raster_histogram.cpp
     algorithms/primitives/morphology.cpp
     algorithms/primitives/connected_components.cpp
     algorithms/primitives/distance_transform.cpp
+    algorithms/primitives/dense_linalg.cpp
+    algorithms/ir_mad_kernels.cpp
     algorithms/topographic_correction.cpp
     algorithms/spectral_derivative.cpp
     algorithms/spectral_detection.cpp

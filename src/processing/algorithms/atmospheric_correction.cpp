@@ -727,9 +727,16 @@ bool processFileDos(const QString &sourcePath, const QString &outputPath,
     const float transmittance = (method == Method::Dos2) ? estimateTransmittance(airmass) : 1.0f;
 
     // Passes 1+2: dark-object statistics in TOA-reflectance space (the same
-    // streaming histogram estimator the radiance path uses).
+    // streaming histogram estimator the radiance path uses). Declared
+    // sentinels are masked BEFORE accumulation — toToaReflectance converts
+    // linearly, so an unmasked -9999 fill DN would become rho ≈ −0.4 and
+    // win the dark-object histogram, adding its |rho| to every output pixel
+    // (parity with the radiance path's sentinel skip and pass 3 below).
     float darkLevel = 0.0f;
     {
+        const float statsNoDataF =
+            (hasSrcNoData && std::isfinite(bandNoData)) ? static_cast<float>(bandNoData)
+                                                        : std::numeric_limits<float>::quiet_NaN();
         DarkObjectStats stats;
         std::vector<float> rhoToa;
         const auto statsPass = [&](bool binning) -> bool {
@@ -739,6 +746,10 @@ bool processFileDos(const QString &sourcePath, const QString &outputPath,
                     rhoToa.resize(n);
                     if (!toToaReflectance(pixels, rhoToa.data(), n, coeffs, sensor, sunElevationDeg))
                         return false;
+                    for (size_t i = 0; i < n; ++i) {
+                        if (pixels[i] == statsNoDataF)
+                            rhoToa[i] = std::numeric_limits<float>::quiet_NaN();
+                    }
                     if (binning)
                         stats.accumulateBins(rhoToa.data(), n);
                     else
@@ -773,10 +784,16 @@ bool processFileDos(const QString &sourcePath, const QString &outputPath,
             const size_t n = static_cast<size_t>(tile.width) * tile.height;
             out.resize(n);
             for (size_t i = 0; i < n; ++i) {
+                // #699 parity with processFile: the sentinel compare is exact
+                // in float space — the old 1e-4 tolerance additionally
+                // deleted genuine samples near the sentinel (dark-object DOS
+                // scenes are exactly where those live).
                 const bool invalid =
                     !std::isfinite(pixels[i])
                     || (hasSrcNoData
-                        && (!std::isnan(bandNoData) ? std::abs(pixels[i] - bandNoData) < 1e-4f : std::isnan(pixels[i])));
+                        && (!std::isnan(bandNoData)
+                                ? pixels[i] == static_cast<float>(bandNoData)
+                                : std::isnan(pixels[i])));
                 if (invalid) {
                     out[i] = std::numeric_limits<float>::quiet_NaN();
                     continue;

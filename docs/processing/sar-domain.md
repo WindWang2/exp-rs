@@ -14,7 +14,7 @@
    converted (10^(dB/10)) **before** the kernel, so the output domain never
    depends on the input domain.
 2. Features: `ratio` (VV/VH), `normalized_difference`, `log_ratio`
-   (10·log10(VV/VH)), `rvi` = 4·VV/(VV+VH), `span` = VV+VH.
+   (10·log10(VV/VH)), `rvi` = 4·VH/(VV+VH), `span` = VV+VH.
 3. **Honesty rule**: `rvi` is the dual-pol Sentinel-1 APPROXIMATION. It is
    not the quad-pol RVI (4σ/(σVV+σVH+2σHV)) — the platform models no
    second cross-pol channel, and no doc/operator may claim quad-pol
