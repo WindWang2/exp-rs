@@ -6915,23 +6915,16 @@ target_compile_definitions(test_contract_fuzz_lang PRIVATE
 )
 sicnu_discover_tests(test_contract_fuzz_lang)
 
-# JobEngine concurrency/lifecycle stress (task E). Compiles job_engine.cpp
-# (+ the operator registry/base/logger sources it references) directly:
-# Qt6::Core + GDAL only, no sicnu_operators SHARED closure. Deterministic
-# condition-wait synchronization, no sleeps. RUN_SERIAL: saturates all
-# workers; keep timing measurements uncontended.
+# JobEngine concurrency/lifecycle stress (task E). Links the Qt-free static
+# sicnu_jobs (which PUBLIC-links sicnu_operators for the registry seam).
+# Deterministic condition-wait synchronization, no sleeps. RUN_SERIAL:
+# saturates all workers; keep timing measurements uncontended.
 add_executable(test_concurrency_stress
   test_concurrency_stress.cpp
-  ${CMAKE_SOURCE_DIR}/src/jobs/job_engine.cpp
-  ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_registry.cpp
-  ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator.cpp
-  ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operation_logger.cpp
 )
 target_link_libraries(test_concurrency_stress PRIVATE
   Catch2::Catch2WithMain
-  Qt6::Core
-  GDAL::GDAL
-  sicnu_operators_core
+  sicnu_jobs
   sicnu_runtime
 )
 if(TARGET jsoncpp)
@@ -6969,15 +6962,12 @@ target_link_libraries(test_diagnostic_report PRIVATE sicnu_runtime)
 # gate: benchmark_quality7 --out benchmarks/quality7.json
 add_executable(benchmark_quality7
   benchmark_quality7.cpp
-  ${CMAKE_SOURCE_DIR}/src/jobs/job_engine.cpp
-  ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_registry.cpp
-  ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator.cpp
-  ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operation_logger.cpp
   ${CMAKE_SOURCE_DIR}/src/agent/mapspec/mapspec_conditions.cpp
 )
 target_link_libraries(benchmark_quality7 PRIVATE
   Qt6::Core
   GDAL::GDAL
+  sicnu_jobs
   sicnu_operators_core
   sicnu_geospatial
   sicnu_runtime
