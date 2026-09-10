@@ -67,6 +67,16 @@ struct TileInferenceRunOptions
   RasterOutputMode outputMode = RasterOutputMode::Probability;
 };
 
+/// One named raster feed for multimodal / temporal models (Platform 7.0).
+/// The name matches a manifest `inputs[]` contract entry; the paths are the
+/// temporal frames in time order (exactly one for non-temporal inputs).
+struct NamedRasterFeed
+{
+  std::string name;                ///< manifest input contract name ("" = positional)
+  std::vector<std::string> paths;  ///< temporal frames, time-ordered (1 = static)
+  std::vector<int> bands;          ///< 1-based band selection (empty = all)
+};
+
 class TileInferenceEngine
 {
   public:
@@ -89,6 +99,33 @@ class TileInferenceEngine
     TileInferenceStats run( const std::string &inputPath, const std::vector<int> &bands,
                             const std::string &outputPath, RSOperatorContext &context,
                             const TileInferenceRunOptions &options );
+
+    // --- Platform 7.0: multimodal / temporal tiled inference -----------------
+    /**
+     * Run tiled inference over SEVERAL named raster feeds on ONE common grid.
+     * The FIRST feed is the grid authority (tile grid + output geometry); every
+     * other feed must be co-registered (same size and geotransform within
+     * 1e-6) — misaligned feeds are a typed refusal pointing at the manifest's
+     * input.alignment contract, never a silent warp (reprojection stays a
+     * geospatial seam). Temporal feeds (contract temporalLength > 0) stack
+     * their frames along the channel axis (N,(T·C),H,W — "channels" collapse).
+     * Missing frames follow the contract's missing_timestep: refuse (typed) or
+     * explicit zero-fill. The forward pass goes through inferNamed (named
+     * tensor bind) and the OOM ladder keeps its exact batch-halving semantics.
+     * Output: float32 probability stack (+ optional uncertainty band), atomic
+     * publish — identical band semantics to run().
+     * @throws RSOperatorError on any contract/read/forward/write failure.
+     */
+    TileInferenceStats runMultiInput( const std::vector<NamedRasterFeed> &feeds,
+                                      const std::string &outputPath, RSOperatorContext &context,
+                                      const TileInferenceRunOptions &options = {} );
+
+    /// Same-grid contract check shared by validation and tests: empty string
+    /// when both rasters carry the geometry, else a typed refusal naming both
+    /// paths and the offending property (size / geotransform).
+    static std::string gridMismatch( const std::string &primaryPath, int primaryW, int primaryH,
+                                     const double *primaryGeoTransform, const std::string &otherPath,
+                                     int otherW, int otherH, const double *otherGeoTransform );
 
     /// Effective tile geometry for a raster (manifest tiling contract +
     /// fixed graph input size fallback, engine floor of 16 px).

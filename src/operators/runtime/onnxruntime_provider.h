@@ -23,10 +23,14 @@ namespace sicnu::operators::runtime
 /// True when this build embeds the ONNX Runtime provider (compile-time).
 bool onnxRuntimeProviderAvailable();
 
-/// Registers the "onnxruntime" provider factory with the registry when the
-/// provider is compiled in; no-op otherwise. Called once from the registry
-/// constructor.
-void registerOnnxRuntimeProvider();
+class ModelRuntimeRegistry;
+
+/// Registers the "onnxruntime" provider factory on @p registry when the
+/// provider is compiled in; no-op otherwise. Takes the registry BY REFERENCE
+/// on purpose: this runs inside the registry constructor, where calling
+/// instance() again would re-enter the static initializer
+/// (recursive_init_error). Called once from the registry ctor.
+void registerOnnxRuntimeProvider( ModelRuntimeRegistry &registry );
 
 /// Formats the compile-time provider state for readiness reasons.
 std::string onnxRuntimeUnavailableReason();

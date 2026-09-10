@@ -1328,6 +1328,10 @@ sicnu_discover_tests(test_spatial_scientist_benchmark)
 # Model catalog v2 contracts: readiness states, checksums, ranking gates
 sicnu_add_test(test_model_catalog_v2)
 
+# Platform 7.0 manifest surface: multimodal inputs, typed heads, provider
+# contracts, closed-vocabulary unknown-key refusal (QtCore only).
+sicnu_add_test(test_model_manifest7)
+
 # Model runtime registry, ONNX provider, tile inference engine and rs:infer
 # integration (needs OpenCV for the cv::dnn surface).
 if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
@@ -1347,6 +1351,102 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         ${CMAKE_BINARY_DIR}
     )
     sicnu_discover_tests(test_model_runtime)
+
+    # Platform 7.0 runtime core: TensorBlob N-D value type, failure taxonomy
+    # extension, inferNamed default bridge (needs OpenCV for the cv bridge).
+    add_executable(test_tensor_blob test_tensor_blob.cpp)
+    target_link_libraries(test_tensor_blob PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_tensor_blob)
+    target_include_directories(test_tensor_blob PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_tensor_blob)
+
+    # Platform 7.0 device planner: inventory, VRAM ledger, admission and
+    # memory-pressure eviction (injectable inventory — runs without GPUs).
+    add_executable(test_device_planner test_device_planner.cpp)
+    target_link_libraries(test_device_planner PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_device_planner)
+    target_include_directories(test_device_planner PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_device_planner)
+
+    # Platform 7.0 multimodal / temporal tiled inference: multi-file same-grid
+    # assembly, temporal stacks, coverage gate, service routing.
+    add_executable(test_multimodal_inference test_multimodal_inference.cpp)
+    target_link_libraries(test_multimodal_inference PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_multimodal_inference)
+    target_include_directories(test_multimodal_inference PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_multimodal_inference)
+
+    # Platform 7.0 external provider contracts (same registry seam).
+    add_executable(test_provider_python test_provider_python.cpp)
+    target_link_libraries(test_provider_python PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_provider_python)
+    target_include_directories(test_provider_python PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_provider_python)
+
+    if(TARGET Qt6::Network)
+        add_executable(test_provider_http test_provider_http.cpp)
+        target_link_libraries(test_provider_http PRIVATE
+            Catch2::Catch2WithMain
+            Qt6::Core
+            Qt6::Network
+            qgis_core
+            sicnu_processing
+            sicnu_task_center
+            sicnu_operators
+            ${OpenCV_LIBS}
+        )
+        sicnu_link_jsoncpp(test_provider_http)
+        target_include_directories(test_provider_http PRIVATE
+            ${CMAKE_SOURCE_DIR}/src
+            ${CMAKE_BINARY_DIR}
+        )
+        sicnu_discover_tests(test_provider_http)
+    endif()
 endif()
 
 # Platform 4.0: failure matrix + device/pool/registry contracts

@@ -8,6 +8,7 @@
 
 #include <opencv2/imgproc.hpp>
 
+#include <array>
 #include <cstring>
 #include <map>
 #include <QDir>
@@ -217,6 +218,15 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
 {
   if ( !m_runtime )
     throw RSOperatorError( ErrorCode::ComputationError, "tile inference engine has no runtime session" );
+
+  // Platform 7.0 preprocess additions are executed by the multimodal engine;
+  // the single-input engine refuses them loudly instead of running identity.
+  if ( m_model.preprocess.pad > 0 || !std::isnan( m_model.preprocess.clampMin )
+       || !std::isnan( m_model.preprocess.clampMax ) )
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "preprocess.pad / clamp_min / clamp_max are executed by the "
+                             "multi-input engine (runMultiInput); this single-input model must "
+                             "drop them from the manifest to run here" );
 
   // Manifest output.tensor_names contract (#705): every declared name must
   // exist in the loaded graph; the first declared name selects the head the
@@ -1158,6 +1168,910 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   stats.tilesProcessed = done;
   return stats;
 }
+
+// --- Platform 7.0: multimodal / temporal tiled inference --------------------
+
+std::string TileInferenceEngine::gridMismatch( const std::string &primaryPath, int primaryW,
+                                               int primaryH, const double *primaryGeoTransform,
+                                               const std::string &otherPath, int otherW, int otherH,
+                                               const double *otherGeoTransform )
+{
+  if ( primaryW != otherW || primaryH != otherH )
+    return "input grids are not co-registered: '" + primaryPath + "' is "
+             + std::to_string( primaryW ) + "x" + std::to_string( primaryH ) + " but '" + otherPath
+             + "' is " + std::to_string( otherW ) + "x" + std::to_string( otherH )
+             + " — align the rasters first (the runtime never warps implicitly)";
+  if ( primaryGeoTransform && otherGeoTransform )
+  {
+    for ( int i = 0; i < 6; ++i )
+    {
+      if ( std::abs( primaryGeoTransform[i] - otherGeoTransform[i] ) > 1e-6 )
+        return "input grids are not co-registered: '" + primaryPath + "' and '" + otherPath
+                 + "' carry different geotransforms — align the rasters first (warp/resample "
+                   "through the geospatial raster_convert seam), the runtime refuses misaligned "
+                   "feeds instead of guessing";
+    }
+  }
+  return {};
+}
+
+TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRasterFeed> &feeds,
+                                                       const std::string &outputPath,
+                                                       RSOperatorContext &context,
+                                                       const TileInferenceRunOptions &options )
+{
+  if ( !m_runtime )
+    throw RSOperatorError( ErrorCode::ComputationError, "tile inference engine has no runtime session" );
+  if ( feeds.empty() )
+    throw RSOperatorError( ErrorCode::InvalidParameter, "multi-input inference needs at least one feed" );
+
+  // Head resolution: identical contract to run() (manifest tensor_names vs
+  // the graph's own outputs; advisory when the runtime cannot enumerate).
+  std::vector<std::string> headNames;
+  if ( !m_model.output.tensorNames.empty() )
+  {
+    if ( const std::string missing = missingOutputTensor( m_model, m_runtime->outputTensorNames() );
+         !missing.empty() )
+      throw RSOperatorError( ErrorCode::InvalidInputData, missing );
+    headNames = m_runtime->outputTensorNames().empty() ? std::vector<std::string>{ m_model.output.tensorNames.front() }
+                                                       : m_model.output.tensorNames;
+  }
+  else
+    headNames = { std::string() };
+  const std::string uncertainty = uncertaintyMethod( m_model );
+
+  // The multimodal path writes the full probability stack: derived formats
+  // collapse head 0's class planes and are a single-head single-input
+  // convenience — refusing here is the typed, honest answer.
+  if ( rasterOutputMode( m_model ) != RasterOutputMode::Probability
+       || options.outputMode != RasterOutputMode::Probability )
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "multi-input models write the probability stack only — derived "
+                             "output.format (labels/mask/confidence) is a single-head convenience; "
+                             "derive from the stack afterwards or run the single-input engine" );
+  if ( m_model.preprocess.resize == "to_input" )
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "preprocess.resize=to_input is not supported for multi-input models — "
+                             "declare aligned grids per input (alignment=reference) instead" );
+
+  // Map feeds onto the manifest input contracts: by NAME (the binding
+  // document) or positionally when the feed omits its name. Duplicate names
+  // refuse — ambiguity is never resolved silently.
+  if ( feeds.size() != m_model.inputs.size() )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "model declares " + std::to_string( m_model.inputs.size() )
+                             + " inputs but " + std::to_string( feeds.size() )
+                             + " feeds were given" );
+  std::vector<std::size_t> feedContract( feeds.size() );
+  for ( std::size_t f = 0; f < feeds.size(); ++f )
+  {
+    if ( feeds[f].name.empty() )
+    {
+      feedContract[f] = f; // positional
+      continue;
+    }
+    bool matched = false;
+    for ( std::size_t c = 0; c < m_model.inputs.size(); ++c )
+    {
+      if ( m_model.inputs[c].name == feeds[f].name )
+      {
+        if ( std::find( feedContract.begin(), feedContract.begin() + f, c ) != feedContract.begin() + f )
+          throw RSOperatorError( ErrorCode::InvalidParameter,
+                                 "two feeds share the input name '" + feeds[f].name + "'" );
+        feedContract[f] = c;
+        matched = true;
+        break;
+      }
+    }
+    if ( !matched )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "feed '" + feeds[f].name
+                               + "' matches no declared model input (declared: "
+                               + ( m_model.inputs.empty() || m_model.inputs[0].name.empty()
+                                     ? std::string( "<unnamed>" )
+                                     : m_model.inputs[0].name )
+                               + "...)" );
+  }
+
+  const ModelPreprocessContract &pre = m_model.preprocess;
+  const bool meanStd = pre.normalize == "mean_std";
+  const bool hasClamp = !std::isnan( pre.clampMin ) || !std::isnan( pre.clampMax );
+
+  // Open every feed's frames; validate the temporal contract and co-registration.
+  struct FeedReader
+  {
+    std::vector<std::unique_ptr<GdalDatasetWrapper>> frames; // per timestep
+    std::vector<int> bands;
+    int channels = 0;        // bands × temporal length (the fed channel count)
+    const ModelInputContract *contract = nullptr;
+    std::vector<float> sentinel;
+    std::vector<bool> hasSentinel;
+    std::vector<float> window; // reused per-tile buffer
+  };
+  std::vector<FeedReader> readers( feeds.size() );
+
+  GdalDatasetWrapper primary;
+  if ( !primary.open( QString::fromStdString( feeds[0].paths.at( 0 ) ) ) )
+    throw RSOperatorError( ErrorCode::GdalError,
+                           "failed to open primary input raster: " + feeds[0].paths[0] );
+  const int rasterW = primary.width();
+  const int rasterH = primary.height();
+  if ( rasterW <= 0 || rasterH <= 0 )
+    throw RSOperatorError( ErrorCode::InvalidInputData, "input raster is empty: " + feeds[0].paths[0] );
+  const std::array<double, 6> primaryGt = primary.geoTransform();
+
+  for ( std::size_t f = 0; f < feeds.size(); ++f )
+  {
+    FeedReader &reader = readers[f];
+    reader.contract = &m_model.inputs[feedContract[f]];
+    const ModelInputContract &contract = *reader.contract;
+
+    const std::size_t declaredFrames =
+      contract.temporalLength > 0 ? static_cast<std::size_t>( contract.temporalLength ) : 1u;
+    const std::string missingPolicy =
+      contract.missingTimestep.empty() ? "refuse" : contract.missingTimestep;
+    if ( feeds[f].paths.size() > declaredFrames )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "feed '" + feeds[f].name + "' provides "
+                               + std::to_string( feeds[f].paths.size() ) + " frames but the input "
+                               "contract declares temporal_length "
+                               + std::to_string( contract.temporalLength ) );
+    if ( feeds[f].paths.size() < declaredFrames && missingPolicy != "zero" )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "feed '" + feeds[f].name + "' provides "
+                               + std::to_string( feeds[f].paths.size() ) + " of "
+                               + std::to_string( declaredFrames )
+                               + " temporal frames and missing_timestep=refuse (declare "
+                                 "missing_timestep=zero to fill missing frames explicitly)" );
+    // Zero-filled frames beyond the provided paths materialize as absent
+    // datasets — the read path substitutes zeros for them.
+
+    // Band selection against the FIRST provided frame.
+    const std::string &firstPath = feeds[f].paths.front();
+    std::vector<int> bandList = feeds[f].bands;
+    {
+      GdalDatasetWrapper probe;
+      if ( !probe.open( QString::fromStdString( firstPath ) ) )
+        throw RSOperatorError( ErrorCode::GdalError, "failed to open input raster: " + firstPath );
+      if ( probe.width() != rasterW || probe.height() != rasterH )
+      {
+        const std::array<double, 6> gt = probe.geoTransform();
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               gridMismatch( feeds[0].paths[0], rasterW, rasterH, primaryGt.data(),
+                                             firstPath, probe.width(), probe.height(), gt.data() ) );
+      }
+      const std::array<double, 6> gt = probe.geoTransform();
+      if ( f > 0 )
+      {
+        if ( const std::string grid = gridMismatch( feeds[0].paths[0], rasterW, rasterH,
+                                                    primaryGt.data(), firstPath, rasterW, rasterH,
+                                                    gt.data() );
+             !grid.empty() )
+          throw RSOperatorError( ErrorCode::InvalidInputData, grid );
+      }
+      const int rasterBands = probe.bandCount();
+      if ( rasterBands <= 0 )
+        throw RSOperatorError( ErrorCode::InvalidInputData, "input raster is empty: " + firstPath );
+      if ( bandList.empty() )
+      {
+        bandList.resize( rasterBands );
+        for ( int i = 0; i < rasterBands; ++i )
+          bandList[static_cast<std::size_t>( i )] = i + 1;
+      }
+      else
+      {
+        for ( int b : bandList )
+          if ( b < 1 || b > rasterBands )
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   "feed '" + feeds[f].name + "': band "
+                                     + std::to_string( b ) + " out of range (1.."
+                                     + std::to_string( rasterBands ) + ")" );
+      }
+      // Dtype contract per feed: each input contract's declared dtype must
+      // match the actual GDAL type of every band fed from that feed (same
+      // semantics as the single-input engine's #632/#705 check).
+      if ( !contract.dtype.empty() )
+      {
+        static const std::map<std::string, int> kAccepted = {
+          { "float32", GDT_Float32 }, { "float64", GDT_Float64 },
+          { "float16", GDT_Float32 }, { "uint16", GDT_UInt16 },
+          { "int16", GDT_Int16 },     { "uint8", GDT_Byte },
+          { "int32", GDT_Int32 },     { "uint32", GDT_UInt32 },
+        };
+        const auto accepted = kAccepted.find( contract.dtype );
+        if ( accepted == kAccepted.end() )
+          throw RSOperatorError( ErrorCode::InvalidInputData,
+                                 "feed '" + feeds[f].name + "': manifest declares unsupported "
+                                   "input dtype '" + contract.dtype + "'" );
+        for ( int band : bandList )
+        {
+          if ( probe.bandDataType( band ) != accepted->second )
+            throw RSOperatorError( ErrorCode::InvalidInputData,
+                                   "feed '" + feeds[f].name + "': manifest requires input dtype '"
+                                     + contract.dtype + "' but band " + std::to_string( band )
+                                     + " has GDAL type "
+                                     + std::to_string( probe.bandDataType( band ) )
+                                     + " (convert the raster or update the manifest)" );
+        }
+      }
+      if ( !contract.bandRoles.empty()
+           && contract.bandRoles.size() != bandList.size() )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "feed '" + feeds[f].name + "': manifest declares "
+                                 + std::to_string( contract.bandRoles.size() ) + " band roles but "
+                                 + std::to_string( bandList.size() ) + " bands are fed" );
+      if ( meanStd && !pre.mean.empty() && pre.mean.size() != bandList.size() )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "preprocess.mean declares " + std::to_string( pre.mean.size() )
+                                 + " channels but " + std::to_string( bandList.size() )
+                                 + " bands are fed" );
+      if ( meanStd && !pre.stdv.empty() && pre.stdv.size() != bandList.size() )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "preprocess.std declares " + std::to_string( pre.stdv.size() )
+                                 + " channels but " + std::to_string( bandList.size() )
+                                 + " bands are fed" );
+    }
+    reader.bands = bandList;
+    reader.channels = static_cast<int>( bandList.size() * declaredFrames );
+
+    // Open all provided frames.
+    reader.frames.resize( declaredFrames );
+    for ( std::size_t t = 0; t < feeds[f].paths.size(); ++t )
+    {
+      auto frame = std::make_unique<GdalDatasetWrapper>();
+      if ( !frame->open( QString::fromStdString( feeds[f].paths[t] ) ) )
+        throw RSOperatorError( ErrorCode::GdalError,
+                               "failed to open input raster: " + feeds[f].paths[t] );
+      // EVERY frame must sit on the primary grid — a mismatched later frame
+      // would silently feed shifted/NaN windows instead of failing loudly.
+      if ( frame->width() != rasterW || frame->height() != rasterH
+           || [ & ]() {
+                const std::array<double, 6> gt = frame->geoTransform();
+                for ( int i = 0; i < 6; ++i )
+                  if ( std::abs( gt[i] - primaryGt[i] ) > 1e-6 )
+                    return true;
+                return false;
+              }() )
+      {
+        const std::array<double, 6> gt = frame->geoTransform();
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               gridMismatch( feeds[0].paths[0], rasterW, rasterH,
+                                             primaryGt.data(), feeds[f].paths[t],
+                                             frame->width(), frame->height(), gt.data() ) );
+      }
+      reader.frames[t] = std::move( frame );
+    }
+    // Missing frames stay null → zero-filled below (missing_timestep=zero).
+
+    // Per-band NoData sentinels from the first frame.
+    reader.sentinel.assign( bandList.size(), 0.0f );
+    reader.hasSentinel.assign( bandList.size(), false );
+    if ( reader.frames[0] )
+    {
+      for ( std::size_t i = 0; i < bandList.size(); ++i )
+      {
+        bool has = false;
+        const double nd = reader.frames[0]->bandNoDataValue( bandList[i], &has );
+        if ( has && std::isfinite( nd ) )
+        {
+          reader.sentinel[i] = static_cast<float>( nd );
+          reader.hasSentinel[i] = true;
+        }
+      }
+    }
+  }
+
+  // Tile geometry: primary grid authority; fed channels for the batch budget
+  // come from the PRIMARY feed (the others scale linearly and the admission
+  // seam already accounted the session).
+  const int tileSize = std::min( effectiveTileSize( m_model ), std::max( rasterW, rasterH ) );
+  const int halo = std::max( 0, effectiveHalo( m_model ) );
+  const int pad = std::max( 0, pre.pad );
+  int batchSize = effectiveBatchSize( m_model, ModelRuntimeRegistry::instance().hardware(),
+                                      tileSize, readers[0].channels );
+  if ( options.batchSizeOverride > 0 )
+    batchSize = std::min( batchSize, options.batchSizeOverride );
+  batchSize = std::max( 1, batchSize );
+  const int maxWin = tileSize + 2 * halo + 2 * pad;
+
+  std::vector<CoreTile> core;
+  for ( int y = 0; y < rasterH; y += tileSize )
+    for ( int x = 0; x < rasterW; x += tileSize )
+      core.push_back( CoreTile{ x, y, std::min( tileSize, rasterW - x ), std::min( tileSize, rasterH - y ) } );
+  const int totalTiles = static_cast<int>( core.size() );
+  const double minCoverage = std::clamp( m_model.tiling.minValidCoverage, 0.0, 1.0 );
+
+  TileInferenceStats stats;
+  stats.tileSize = tileSize;
+  stats.halo = halo;
+  stats.batchSize = batchSize;
+  stats.tilesPlanned = totalTiles;
+  stats.outWidth = rasterW;
+  stats.outHeight = rasterH;
+
+  // Reused per-feed window buffers (fed size incl. halo; pad applied after
+  // preprocessing so the zero pad cannot be normalized over).
+  for ( auto &reader : readers )
+    reader.window.assign( static_cast<std::size_t>( maxWin ) * maxWin * reader.bands.size(), 0.0f );
+
+  // Pending batch across ALL feeds.
+  std::vector<std::vector<cv::Mat>> batchByFeed( feeds.size() );
+  std::vector<cv::Mat> batchMasks;
+  std::vector<std::pair<int, int>> batchFedSize;
+  std::vector<CoreTile> batchCores;
+  std::vector<int> batchValidPixels;
+  std::vector<CoreTile> deferredNoData;
+
+  std::unique_ptr<GdalStreamingOutput> writer;
+  QString stagePath;
+  int done = 0;
+  int skipped = 0;
+
+  // Preprocess one RAW window in place: sentinel→NaN, non-finite→0,
+  // normalize, clamp. Channel-aware exactly like the single-input engine.
+  auto preprocessWindow = [&]( FeedReader &reader, std::vector<float> &buffer, int winW,
+                               int winH ) {
+    const std::size_t bandCount = reader.bands.size();
+    const std::size_t totalFloats = static_cast<std::size_t>( winH ) * winW * bandCount;
+    for ( std::size_t i = 0; i < totalFloats; ++i )
+    {
+      const std::size_t b = i % bandCount;
+      if ( reader.hasSentinel[b] && buffer[i] == reader.sentinel[b] )
+        buffer[i] = std::numeric_limits<float>::quiet_NaN();
+      if ( !std::isfinite( buffer[i] ) )
+        buffer[i] = 0.0f; // nodata_policy "zero"
+    }
+    if ( meanStd || ( pre.normalize == "linear" && pre.scale != 1.0 ) )
+    {
+      const double *meanArr = meanStd && !pre.mean.empty() ? pre.mean.data() : nullptr;
+      const double *stdArr = meanStd && !pre.stdv.empty() ? pre.stdv.data() : nullptr;
+      for ( std::size_t i = 0; i < totalFloats; ++i )
+      {
+        const std::size_t c = i % bandCount;
+        double v = buffer[i];
+        if ( meanStd )
+        {
+          if ( meanArr )
+            v -= meanArr[c];
+          if ( stdArr && stdArr[c] > 0.0 )
+            v /= stdArr[c];
+        }
+        v *= pre.scale;
+        if ( hasClamp )
+        {
+          if ( !std::isnan( pre.clampMin ) && v < pre.clampMin )
+            v = pre.clampMin;
+          if ( !std::isnan( pre.clampMax ) && v > pre.clampMax )
+            v = pre.clampMax;
+        }
+        buffer[i] = static_cast<float>( v );
+      }
+    }
+    else if ( hasClamp )
+    {
+      for ( std::size_t i = 0; i < totalFloats; ++i )
+      {
+        double v = buffer[i];
+        if ( !std::isnan( pre.clampMin ) && v < pre.clampMin )
+          v = pre.clampMin;
+        if ( !std::isnan( pre.clampMax ) && v > pre.clampMax )
+          v = pre.clampMax;
+        buffer[i] = static_cast<float>( v );
+      }
+    }
+  };
+
+  // One forward pass + stitch + write for the pending batch. The OOM ladder
+  // and the atomic publish share the single-input semantics exactly.
+  auto flushBatch = [&]( int currentTileIndex ) {
+    context.throwIfCancelled();
+
+    // Build one NCHW blob per feed: (B, channels, H, W).
+    const int B = static_cast<int>( batchCores.size() );
+    const int fedW = batchFedSize[0].first;
+    const int fedH = batchFedSize[0].second;
+    std::vector<NamedTensor> inputs( feeds.size() );
+    for ( std::size_t f = 0; f < feeds.size(); ++f )
+    {
+      FeedReader &reader = readers[f];
+      const int C = reader.channels;
+      std::vector<cv::Mat> &mats = batchByFeed[f];
+      const int dims[4] = { B, C, fedH, fedW };
+      cv::Mat blob( 4, dims, CV_32F );
+      blob.setTo( 0 );
+      for ( int b = 0; b < B; ++b )
+      {
+        const cv::Mat &tileMat = mats[static_cast<std::size_t>( b )]; // HWC, C channels
+        std::vector<cv::Mat> channels;
+        cv::split( tileMat, channels );
+        for ( int c = 0; c < C; ++c )
+        {
+          const cv::Mat &ch = channels[static_cast<std::size_t>( c )];
+          float *dst = blob.ptr<float>( b, c, 0 );
+          for ( int y = 0; y < fedH; ++y )
+            std::memcpy( dst + static_cast<std::size_t>( y ) * fedW, ch.ptr<float>( y ),
+                         static_cast<std::size_t>( fedW ) * sizeof( float ) );
+        }
+      }
+      inputs[f] = NamedTensor{ reader.contract->name, TensorBlob::fromMat( blob ) };
+    }
+
+    // One named forward for the whole batch (named bind; all heads).
+    std::vector<NamedTensor> outputs;
+    try
+    {
+      outputs = m_runtime->inferNamed( inputs, headNames.front().empty() ? std::vector<std::string>{} : headNames );
+    }
+    catch ( const RSOperatorError & )
+    {
+      throw;
+    }
+    catch ( const std::exception &e )
+    {
+      throw RSOperatorError( ErrorCode::ComputationError,
+                             std::string( "multi-input forward pass failed: " ) + e.what() );
+    }
+
+    // Head outputs: named results first, then graph order for unnamed ones.
+    std::vector<cv::Mat> headOutputs;
+    std::vector<std::string> resolvedHeadNames;
+    for ( auto &nt : outputs )
+    {
+      if ( nt.second.rank() != 4 )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "model output '" + nt.first + "' is rank "
+                                 + std::to_string( nt.second.rank() )
+                                 + " — the raster writer stitches rank-4 heads" );
+      cv::Mat mat;
+      try
+      {
+        mat = nt.second.toMat();
+      }
+      catch ( const std::exception &e )
+      {
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               std::string( "model output '" ) + nt.first
+                                 + "' cannot cross the raster stitcher: " + e.what() );
+      }
+      if ( const std::string typeError = outputTypeMismatch( mat.type(), nt.first ); !typeError.empty() )
+        throw RSOperatorError( ErrorCode::InvalidInputData, typeError );
+      if ( mat.size[1] <= 0 )
+        throw RSOperatorError( ErrorCode::ComputationError, "model output has no channels" );
+      if ( const std::string classesError = classesChannelMismatch( m_model, mat.size[1], nt.first );
+           !classesError.empty() )
+        throw RSOperatorError( ErrorCode::InvalidInputData, classesError );
+      headOutputs.push_back( std::move( mat ) );
+      resolvedHeadNames.push_back( nt.first );
+    }
+    if ( headOutputs.empty() )
+      throw RSOperatorError( ErrorCode::ComputationError, "model produced no usable output" );
+    if ( resolvedHeadNames.size() < headNames.size() && !headNames.front().empty() )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "model produced " + std::to_string( resolvedHeadNames.size() )
+                               + " heads but the manifest declares "
+                               + std::to_string( headNames.size() ) );
+
+    // Band layout: identical to run() — all heads in order + one uncertainty
+    // band after the first head with >= 2 channels.
+    const bool addUncertainty = !uncertainty.empty();
+    int totalBands = 0;
+    std::vector<int> headChannelList( headOutputs.size() );
+    int uncertaintyHeadIndex = -1;
+    for ( std::size_t h = 0; h < headOutputs.size(); ++h )
+    {
+      headChannelList[h] = headOutputs[h].size[1];
+      totalBands += headChannelList[h];
+      if ( addUncertainty && uncertaintyHeadIndex < 0 && headChannelList[h] >= 2 )
+        uncertaintyHeadIndex = static_cast<int>( h );
+    }
+    const int uncertaintyBandOffset = uncertaintyHeadIndex >= 0 ? totalBands : -1;
+    if ( uncertaintyHeadIndex >= 0 )
+      ++totalBands;
+
+    if ( !writer )
+    {
+      const QFileInfo outFi( QString::fromStdString( outputPath ) );
+      stagePath = QString::fromStdString( outputPath ) + QStringLiteral( ".tmp~" );
+      QDir().mkpath( outFi.absolutePath() );
+      QFile::remove( stagePath );
+      writer = std::make_unique<GdalStreamingOutput>( stagePath, rasterW, rasterH, totalBands,
+                                                      /*GDT_Float32*/ 6,
+                                                      primary.geoTransform(), primary.projection() );
+      if ( !writer->isOpen() )
+        throw RSOperatorError( ErrorCode::FileNotWritable,
+                               "failed to create output raster: " + outputPath );
+      writer->setNoDataValue( std::numeric_limits<float>::quiet_NaN() );
+      stats.outBands = totalBands;
+      stats.headChannels = headChannelList;
+      if ( uncertaintyHeadIndex >= 0 )
+        stats.headChannels[static_cast<std::size_t>( uncertaintyHeadIndex )] += 1;
+      QString layout;
+      for ( std::size_t h = 0; h < resolvedHeadNames.size(); ++h )
+      {
+        if ( h )
+          layout += QLatin1Char( ',' );
+        const QString name = resolvedHeadNames[h].empty() ? QStringLiteral( "default" )
+                                                          : QString::fromStdString( resolvedHeadNames[h] );
+        layout += QString( "%1:%2" ).arg( name ).arg( headChannelList[h] );
+      }
+      if ( uncertaintyHeadIndex >= 0 )
+        layout += QString( ",uncertainty:%1" ).arg( QString::fromStdString( uncertainty ) );
+      writer->setMetadataItem( QStringLiteral( "SICNU_OUTPUT_HEADS" ), layout );
+    }
+    else if ( totalBands != stats.outBands )
+    {
+      throw RSOperatorError( ErrorCode::ComputationError,
+                             "model output channel count changed mid-run (" +
+                               std::to_string( stats.outBands ) + " → " + std::to_string( totalBands )
+                               + ")" );
+    }
+
+    // Stitch: per head, per tile, per channel — the same crop/resize/restore
+    // math as the single-input engine (grid-preserving ⇒ crop halo+pad).
+    int bandOffset = 0;
+    for ( std::size_t h = 0; h < headOutputs.size(); ++h )
+    {
+      const cv::Mat &output = headOutputs[h];
+      const int outChannels = output.size[1];
+      const int outH = output.size[2];
+      const int outW = output.size[3];
+      const bool isUncertaintyHead = ( uncertaintyHeadIndex == static_cast<int>( h ) );
+      const cv::Mat flat =
+        output.reshape( 1, std::vector<int>{ B * outChannels, outH * outW } );
+      for ( int bi = 0; bi < B; ++bi )
+      {
+        const CoreTile &bt = batchCores[static_cast<std::size_t>( bi )];
+        const int tileFedW = batchFedSize[static_cast<std::size_t>( bi )].first;
+        const int tileFedH = batchFedSize[static_cast<std::size_t>( bi )].second;
+        std::vector<cv::Mat> headPlanes;
+        if ( isUncertaintyHead )
+          headPlanes.reserve( static_cast<std::size_t>( outChannels ) );
+        for ( int c = 0; c < outChannels; ++c )
+        {
+          cv::Mat plane = flat.row( bi * outChannels + c ).reshape( 1, outH ).clone();
+          if ( outW == tileFedW && outH == tileFedH )
+          {
+            // Grid-preserving: crop halo+pad border away.
+            const int margin = halo + pad;
+            if ( margin > 0 )
+              plane = plane( cv::Range( margin, margin + bt.h ), cv::Range( margin, margin + bt.w ) ).clone();
+          }
+          else if ( outW != bt.w || outH != bt.h )
+          {
+            cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, cv::INTER_LINEAR );
+          }
+          // The writer consumes a CONTIGUOUS bt.w × bt.h buffer: with uniform
+          // fed windows the core sits at the window origin, so an uncropped
+          // plane is still fed-sized — materialize the exact core rect.
+          if ( plane.cols != bt.w || plane.rows != bt.h )
+            plane = plane( cv::Range( 0, bt.h ), cv::Range( 0, bt.w ) ).clone();
+          if ( isUncertaintyHead )
+            headPlanes.push_back( plane );
+          if ( m_model.postprocess.maskThreshold >= 0.0 )
+          {
+            const float thr = static_cast<float>( m_model.postprocess.maskThreshold );
+            cv::Mat mask = plane >= thr;
+            cv::Mat thresholded;
+            mask.convertTo( thresholded, CV_32F, 1.0 / 255.0 );
+            plane = thresholded;
+          }
+          // Restore NoData where every feed's every band was invalid.
+          const cv::Mat &tileMask = batchMasks[static_cast<std::size_t>( bi )];
+          for ( int row = 0; row < bt.h; ++row )
+          {
+            const uchar *maskRow = tileMask.ptr<uchar>( row );
+            float *outRow = plane.ptr<float>( row );
+            for ( int col = 0; col < bt.w; ++col )
+              if ( maskRow[col] )
+                outRow[col] = std::numeric_limits<float>::quiet_NaN();
+          }
+          const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
+                                                 currentTileIndex, totalTiles };
+          if ( !writer->writeTile( bandOffset + c + 1, writeTile, plane.ptr<float>() ) )
+            throw RSOperatorError( ErrorCode::FileNotWritable,
+                                   "failed to write output tile at (" + std::to_string( bt.x )
+                                     + ", " + std::to_string( bt.y ) + ")" );
+        }
+        if ( isUncertaintyHead && uncertaintyBandOffset >= 0 )
+        {
+          cv::Mat unc = headUncertainty( headPlanes, uncertainty );
+          const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
+                                                 currentTileIndex, totalTiles };
+          if ( !writer->writeTile( uncertaintyBandOffset + 1, writeTile, unc.ptr<float>() ) )
+            throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write uncertainty tile" );
+        }
+      }
+      bandOffset += outChannels;
+    }
+    done += B;
+    for ( auto &mats : batchByFeed )
+      mats.clear();
+    batchMasks.clear();
+    batchFedSize.clear();
+    batchCores.clear();
+    batchValidPixels.clear();
+    context.reportProgress( static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
+                            "Tiled multi-input inference: " + std::to_string( done + skipped ) + "/"
+                              + std::to_string( totalTiles ) );
+  };
+
+  auto flushDeferredNoDataMulti = [&]( int currentTileIndex ) {
+    if ( !writer || deferredNoData.empty() )
+      return;
+    while ( !deferredNoData.empty() )
+    {
+      const CoreTile &bt = deferredNoData.front();
+      cv::Mat nanTile( bt.h, bt.w, CV_32F, std::numeric_limits<float>::quiet_NaN() );
+      for ( int band = 1; band <= stats.outBands; ++band )
+      {
+        const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
+                                               currentTileIndex, totalTiles };
+        if ( !writer->writeTile( band, writeTile, nanTile.ptr<float>() ) )
+          throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write NoData tile" );
+      }
+      // Same accounting convention as the single-input engine: a deferred
+      // tile moves from "skipped" back to "done" once its NoData rows are on
+      // disk, so tilesProcessed covers the whole raster.
+      --skipped;
+      ++done;
+      deferredNoData.erase( deferredNoData.begin() );
+    }
+  };
+
+  try
+  {
+    for ( int tileIndex = 0; tileIndex < totalTiles; ++tileIndex )
+    {
+      context.throwIfCancelled();
+      const CoreTile &t = core[static_cast<std::size_t>( tileIndex )];
+      const int winX = t.x - halo;
+      const int winY = t.y - halo;
+      // Uniform fed window: EVERY tile reads the full tileSize window with
+      // the core at [halo, halo+core). Edge tiles extend past the raster and
+      // are NaN/zero-filled by the read — fed sizes stay constant so a
+      // batch can never mix geometries (the single-input engine refuses
+      // mixed batches; here the geometry makes mixed batches unreachable).
+      const int winW = tileSize + 2 * halo;
+      const int winH = tileSize + 2 * halo;
+
+      // Per-feed window reads for this tile. A core pixel is VALID when any
+      // feed sees a finite value in any channel — NoData is only what nothing
+      // sees. The mask is rebuilt from the prepared tile mats so the
+      // halo/pad layout has a single source of truth.
+      cv::Mat invalidMask( t.h, t.w, CV_8UC1, cv::Scalar( 1 ) );
+      int validPixels = 0;
+      std::vector<cv::Mat> tileMats( feeds.size() );
+      for ( std::size_t f = 0; f < feeds.size(); ++f )
+      {
+        FeedReader &reader = readers[f];
+        const int bandCount = static_cast<int>( reader.bands.size() );
+        const std::size_t declaredFrames = reader.frames.size();
+        // Stacked HWC buffer: (frames × bands) channels, zeros for missing
+        // frames (missing_timestep=zero) and preprocessed data otherwise.
+        std::vector<float> stacked( static_cast<std::size_t>( winH ) * winW * reader.channels, 0.0f );
+        for ( std::size_t frame = 0; frame < declaredFrames; ++frame )
+        {
+          GdalDatasetWrapper *ds = reader.frames[frame].get();
+          if ( !ds )
+            continue; // missing frame stays zero-filled
+          if ( !readBipWindow( *ds, reader.bands, winX, winY, winW, winH, reader.window.data() ) )
+            throw RSOperatorError( ErrorCode::GdalError,
+                                   "failed to read tile window at (" + std::to_string( t.x ) + ", "
+                                     + std::to_string( t.y ) + ") of feed '" + reader.contract->name
+                                     + "'" );
+          // Validity from the RAW window BEFORE preprocessing zero-fills it:
+          // a core pixel is valid when any band of any frame of any feed sees
+          // a finite non-sentinel value (NoData is only what nothing sees).
+          {
+            const std::size_t windowStride = static_cast<std::size_t>( winW ) * bandCount;
+            for ( int row = 0; row < t.h; ++row )
+            {
+              const float *winRow = reader.window.data()
+                                      + static_cast<std::size_t>( row + halo ) * windowStride
+                                      + static_cast<std::size_t>( halo ) * bandCount;
+              uchar *maskRow = invalidMask.ptr<uchar>( row );
+              for ( int col = 0; col < t.w; ++col )
+              {
+                if ( !maskRow[col] )
+                  continue;
+                const float *px = winRow + static_cast<std::size_t>( col ) * bandCount;
+                for ( int c = 0; c < bandCount; ++c )
+                {
+                  const float v = px[c];
+                  if ( std::isfinite( v ) && !( reader.hasSentinel[static_cast<std::size_t>( c )]
+                                                && v == reader.sentinel[static_cast<std::size_t>( c )] ) )
+                  {
+                    maskRow[col] = 0;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          preprocessWindow( reader, reader.window, winW, winH );
+          const std::size_t frameBase = frame * static_cast<std::size_t>( bandCount );
+          for ( int row = 0; row < winH; ++row )
+          {
+            for ( int col = 0; col < winW; ++col )
+            {
+              for ( int c = 0; c < bandCount; ++c )
+              {
+                stacked[( static_cast<std::size_t>( row ) * winW + col ) * reader.channels
+                        + frameBase + static_cast<std::size_t>( c )] =
+                  reader.window[( static_cast<std::size_t>( row ) * winW + col ) * bandCount
+                                 + static_cast<std::size_t>( c )];
+              }
+            }
+          }
+        }
+        // Symmetric zero pad AFTER preprocessing (so the pad cannot be
+        // normalized over): the fed window grows by pad on every side.
+        cv::Mat stackedHwc( winH, winW, CV_32FC( reader.channels ), stacked.data() );
+        cv::Mat fedMat = stackedHwc.clone();
+        if ( pad > 0 )
+        {
+          cv::Mat padded( winH + 2 * pad, winW + 2 * pad, CV_32FC( reader.channels ),
+                          cv::Scalar( 0.0 ) );
+          stackedHwc.copyTo( padded( cv::Rect( pad, pad, winW, winH ) ) );
+          fedMat = padded;
+        }
+        tileMats[f] = std::move( fedMat );
+      }
+      // Aggregate valid count for the coverage gate / all-nodata skip.
+      for ( int row = 0; row < t.h; ++row )
+      {
+        const uchar *maskRow = invalidMask.ptr<uchar>( row );
+        for ( int col = 0; col < t.w; ++col )
+          if ( !maskRow[col] )
+            ++validPixels;
+      }
+
+      // Per-tile coverage gate + all-nodata skip (Platform 7.0 / #705):
+      // decided per TILE (a batch-level verdict would write valid output
+      // tiles as NoData). Skipped tiles become NoData rows — never a
+      // resolution change, never a model change.
+      const double coverage =
+        static_cast<double>( validPixels ) / static_cast<double>( std::max( 1, t.w * t.h ) );
+      if ( validPixels == 0 || ( minCoverage > 0.0 && coverage < minCoverage ) )
+      {
+        deferredNoData.push_back( t );
+        ++skipped;
+        ++stats.tilesSkippedNoData;
+        context.reportProgress(
+          static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
+          "Tiled multi-input inference: " + std::to_string( done + skipped ) + "/"
+            + std::to_string( totalTiles ) );
+        continue;
+      }
+
+      for ( std::size_t f = 0; f < feeds.size(); ++f )
+        batchByFeed[f].push_back( tileMats[f] );
+      batchCores.push_back( t );
+      batchMasks.push_back( invalidMask.clone() );
+      batchFedSize.emplace_back( winW + 2 * pad, winH + 2 * pad );
+      batchValidPixels.push_back( validPixels );
+
+      const bool batchFull =
+        static_cast<int>( batchCores.size() ) >= batchSize || tileIndex == totalTiles - 1;
+      if ( !batchFull )
+        continue;
+
+      // OOM ladder: identical semantics — halve to serial, never shrink
+      // tiles, never change the model.
+      try
+      {
+        flushBatch( tileIndex );
+      }
+      catch ( const RSOperatorError &e )
+      {
+        if ( classifyInferenceError( e.what() ) != InferenceFailureKind::OutOfMemory )
+          throw;
+        if ( batchCores.size() <= 1 )
+          throw RSOperatorError(
+            ErrorCode::ComputationError,
+            std::string( "inference ran out of memory even at batch=1 (tile " )
+              + std::to_string( tileSize )
+              + " px): free memory or use a smaller model - the engine never alters spatial "
+                "resolution or model semantics to fit memory. Original error: "
+              + e.what() );
+        ++stats.batchReductions;
+        const std::vector<std::vector<cv::Mat>> pending = std::move( batchByFeed );
+        const std::vector<cv::Mat> pendingMasks = std::move( batchMasks );
+        const std::vector<std::pair<int, int>> pendingFed = std::move( batchFedSize );
+        const std::vector<CoreTile> pendingCores = std::move( batchCores );
+        const std::vector<int> pendingValid = std::move( batchValidPixels );
+        batchByFeed.assign( feeds.size(), {} );
+        batchMasks.clear();
+        batchFedSize.clear();
+        batchCores.clear();
+        batchValidPixels.clear();
+        for ( std::size_t i = 0; i < pendingCores.size(); ++i )
+        {
+          for ( std::size_t f = 0; f < feeds.size(); ++f )
+            batchByFeed[f].assign( 1, pending[f][i] );
+          batchMasks.assign( 1, pendingMasks[i] );
+          batchFedSize.assign( 1, pendingFed[i] );
+          batchCores.assign( 1, pendingCores[i] );
+          batchValidPixels.assign( 1, pendingValid[i] );
+          try
+          {
+            flushBatch( tileIndex );
+          }
+          catch ( const RSOperatorError &inner )
+          {
+            if ( classifyInferenceError( inner.what() ) == InferenceFailureKind::OutOfMemory )
+              throw RSOperatorError(
+                ErrorCode::ComputationError,
+                "inference ran out of memory even at batch=1 (tile " + std::to_string( tileSize )
+                  + " px): free memory or use a smaller model — the engine never alters spatial "
+                    "resolution or model semantics to fit memory. Original error: "
+                  + inner.what() );
+            throw;
+          }
+        }
+      }
+      context.reportProgress( static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
+                              "Tiled multi-input inference: " + std::to_string( done + skipped )
+                                + "/" + std::to_string( totalTiles ) );
+    }
+
+    if ( !deferredNoData.empty() && !writer )
+    {
+      // Whole-raster NoData: one zero probe establishes the output shape.
+      const CoreTile probeTile = deferredNoData.front();
+      deferredNoData.erase( deferredNoData.begin() );
+      const int probeFedW = probeTile.w + 2 * halo + 2 * pad;
+      const int probeFedH = probeTile.h + 2 * halo + 2 * pad;
+      for ( std::size_t f = 0; f < feeds.size(); ++f )
+        batchByFeed[f].push_back(
+          cv::Mat( probeFedH, probeFedW, CV_32FC( readers[f].channels ), cv::Scalar( 0.0 ) ) );
+      batchMasks.push_back( cv::Mat( probeTile.h, probeTile.w, CV_8UC1, cv::Scalar( 1 ) ) );
+      batchFedSize.emplace_back( probeFedW, probeFedH );
+      batchCores.push_back( probeTile );
+      batchValidPixels.push_back( 0 );
+      flushBatch( totalTiles - 1 );
+    }
+    flushDeferredNoDataMulti( totalTiles - 1 );
+  }
+  catch ( ... )
+  {
+    if ( writer )
+      writer->removeOutput();
+    throw;
+  }
+
+  QString writeError;
+  if ( !writer || !writer->closeWithError( &writeError ) )
+  {
+    if ( writer )
+      writer->removeOutput();
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "failed to finalize output raster: " + writeError.toStdString() );
+  }
+  const QString finalPath = QString::fromStdString( outputPath );
+  const QString backupPath = finalPath + QStringLiteral( ".prev~" );
+  QFile::remove( backupPath );
+  const bool hadExisting = QFile::exists( finalPath );
+  if ( hadExisting && !QFile::rename( finalPath, backupPath ) )
+  {
+    QFile::remove( stagePath );
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "failed to back up the previous output before publishing: " + outputPath );
+  }
+  if ( !QFile::rename( stagePath, finalPath ) )
+  {
+    QFile::remove( stagePath );
+    if ( hadExisting )
+      QFile::rename( backupPath, finalPath );
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "failed to publish output raster to: " + outputPath );
+  }
+  QFile::remove( backupPath );
+  context.reportProgressForced( 1.0, "Tiled multi-input inference complete" );
+  stats.tilesProcessed = done;
+  return stats;
+}
+
 
 int TileInferenceEngine::effectiveBatchSize( const ModelInfo &model,
                                              const ModelHardwareCapabilities &hw,

@@ -45,6 +45,22 @@ class OpenCvDnnRuntime final : public IModelRuntime
     bool supportsMultiInput() const override { return true; }
     std::vector<cv::Mat> inferMulti( const std::vector<NamedBlob> &namedBlobs ) override;
 
+    // Platform 7.0 capability declaration: cv::dnn binds by NAME (setInput's
+    // blobNameParameter), carries rank-4 float32 only, and cannot interrupt a
+    // running forward (coarse, batch-boundary cancellation).
+    ProviderCapabilities capabilities() const override
+    {
+      ProviderCapabilities caps;
+      caps.multiInput = true;
+      caps.namedBind = true;
+      caps.maxRank = 4;
+      caps.batch = true;
+      caps.cancelInForward = false;
+      caps.inputDtypes = { "float32" };
+      caps.outputDtypes = { "float32" };
+      return caps;
+    }
+
     /// The ONNX graph's unconnected output layer names (empty before load or
     /// when enumeration fails — consumers treat that as "unknown", #705).
     std::vector<std::string> outputTensorNames() const override;

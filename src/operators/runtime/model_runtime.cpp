@@ -2,8 +2,11 @@
 #include "operators/runtime/model_runtime.h"
 
 #include "operators/framework/artifact_digest.h"
+#include "operators/framework/rs_operator_error.h"
+#include "operators/runtime/http_provider.h"
 #include "operators/runtime/opencv_dnn_runtime.h"
 #include "operators/runtime/onnxruntime_provider.h"
+#include "operators/runtime/python_worker_provider.h"
 
 #include <QDateTime>
 #include <QFileInfo>
@@ -107,6 +110,56 @@ std::string identityFallbackFor( const ModelInfo &model )
 }
 
 } // namespace
+
+
+// --- Platform 7.0: default named-tensor bridge ------------------------------
+// Bridges through the historical cv::Mat surface with an exact-dtype policy:
+// the bridge carries exactly what infer/inferMulti always carried (rank-4
+// float32 semantics through the engines), refuses everything else loudly,
+// and providers override inferNamed for true N-D support.
+std::vector<NamedTensor> IModelRuntime::inferNamed( const std::vector<NamedTensor> &inputs,
+                                                    const std::vector<std::string> &outputNames )
+{
+  ( void )outputNames; // the historical transport cannot select specific heads
+  if ( inputs.empty() )
+    throw std::runtime_error( "inferNamed needs at least one input tensor" );
+
+  auto toRankedBlob = []( const NamedTensor &nt ) {
+    cv::Mat mat;
+    try
+    {
+      mat = nt.second.toMat();
+    }
+    catch ( const std::exception &e )
+    {
+      throw std::runtime_error( std::string( "input '" ) + ( nt.first.empty() ? "<default>" : nt.first )
+                                + "' cannot cross the named-tensor bridge: " + e.what() );
+    }
+    if ( mat.dims != 4 )
+      throw std::runtime_error( "input '" + ( nt.first.empty() ? std::string( "<default>" ) : nt.first )
+                                + "' has rank " + std::to_string( mat.dims )
+                                + "; the default named-tensor bridge carries exactly rank-4 tensors "
+                                  "(this provider does not declare N-D support)" );
+    return mat;
+  };
+
+  if ( inputs.size() == 1 )
+  {
+    const cv::Mat out = infer( toRankedBlob( inputs.front() ) );
+    return { NamedTensor{ std::string(), TensorBlob::fromMat( out ) } };
+  }
+
+  std::vector<NamedBlob> blobs;
+  blobs.reserve( inputs.size() );
+  for ( const NamedTensor &nt : inputs )
+    blobs.push_back( NamedBlob{ nt.first, toRankedBlob( nt ) } );
+  std::vector<cv::Mat> outs = inferMulti( blobs );
+  std::vector<NamedTensor> named;
+  named.reserve( outs.size() );
+  for ( const cv::Mat &m : outs )
+    named.push_back( NamedTensor{ std::string(), TensorBlob::fromMat( m ) } );
+  return named;
+}
 
 
 ModelHardwareCapabilities ModelHardwareCapabilities::detect()
@@ -220,8 +273,30 @@ bool resolveDevice( const RequestedDevice &request,
                     int maxAddressableCudaIndex, bool allowCpuFallback,
                     ResolvedDevice *out, std::string *why )
 {
+  return resolveDevice( request, hw, modelWantsGpu, estimatedVramMb, maxAddressableCudaIndex,
+                        allowCpuFallback, {}, out, why );
+}
+
+bool resolveDevice( const RequestedDevice &request,
+                    const ModelHardwareCapabilities &hw,
+                    bool modelWantsGpu, int estimatedVramMb,
+                    int maxAddressableCudaIndex, bool allowCpuFallback,
+                    const std::vector<int> &freeVramMbByIndex,
+                    ResolvedDevice *out, std::string *why )
+{
   const auto fitsBudget = [ & ]() {
     return hw.vramBudgetMb <= 0 || estimatedVramMb <= hw.vramBudgetMb;
+  };
+  // Ledger fit: negative free = unenforced (no constraint); a positive
+  // capacity requires the estimate to fit the FREE value.
+  const auto freeOnDevice = [ & ]( int index ) -> int {
+    return index >= 0 && index < static_cast<int>( freeVramMbByIndex.size() )
+             ? freeVramMbByIndex[static_cast<std::size_t>( index )]
+             : -1;
+  };
+  const auto fitsLedger = [ & ]( int index ) {
+    const int freeMb = freeOnDevice( index );
+    return freeMb < 0 || estimatedVramMb <= freeMb;
   };
   const auto cudaAvailable = [&]( int index ) {
     return hw.cudaAvailable && index >= 0 && index < hw.cudaDeviceCount
@@ -260,7 +335,7 @@ bool resolveDevice( const RequestedDevice &request,
                        + " is not addressable by this backend/host (addressable indices: 0.."
                          + std::to_string( std::min( hw.cudaDeviceCount - 1, maxAddressableCudaIndex ) )
                          + ")" );
-      if ( fitsBudget() )
+      if ( fitsBudget() && fitsLedger( request.cudaIndex ) )
       {
         ResolvedDevice device;
         device.gpu = true;
@@ -275,15 +350,24 @@ bool resolveDevice( const RequestedDevice &request,
     }
     case RequestedDevice::Kind::Auto:
     {
-      // Deterministic: lowest addressable index that fits, else cpu. Auto
-      // means "best available" — cpu is always a valid answer unless the
-      // model itself forbids fallback (a readiness/contract error).
-      if ( modelWantsGpu && cudaAvailable( 0 ) && fitsBudget() )
+      // Deterministic multi-device selection (Platform 7.0): auto is NOT a
+      // trivial cuda:0 — it picks the LOWEST addressable index that fits both
+      // the global budget and the planner ledger's free VRAM, else cpu (or a
+      // typed refusal when the model forbids fallback). Equal inputs always
+      // yield equal outputs.
+      if ( modelWantsGpu && hw.cudaAvailable )
       {
-        ResolvedDevice device;
-        device.gpu = true;
-        device.cudaIndex = 0;
-        return answer( device );
+        const int maxIndex = std::min( hw.cudaDeviceCount - 1, maxAddressableCudaIndex );
+        for ( int index = 0; index <= maxIndex; ++index )
+        {
+          if ( fitsBudget() && fitsLedger( index ) )
+          {
+            ResolvedDevice device;
+            device.gpu = true;
+            device.cudaIndex = index;
+            return answer( device );
+          }
+        }
       }
       if ( modelWantsGpu && !allowCpuFallback )
         return refuse( "no fitting CUDA device and cpu_fallback is disabled" );
@@ -310,15 +394,62 @@ InferenceFailureKind classifyInferenceError( const std::string &message )
        || contains( "cuda_error_out_of_memory" ) || contains( "cudamalloc" )
        || contains( "alloc failed" ) || contains( "allocation failure" ) )
     return InferenceFailureKind::OutOfMemory;
+  // Platform 7.0 taxonomy: external-provider death beats shape/corrupt checks
+  // — a worker that died mid-run must not read as a model or tensor problem.
+  if ( contains( "worker exited" ) || contains( "worker crashed" ) || contains( "provider crashed" )
+       || contains( "terminated unexpectedly" ) || contains( "connection refused" )
+       || contains( "connection reset" ) || contains( "broken pipe" )
+       || contains( "timed out" ) || contains( "no response from provider" )
+       || contains( "provider error" ) )
+    return InferenceFailureKind::ProviderCrash;
+  if ( contains( "not addressable" ) || contains( "device unavailable" )
+       || contains( "cuda is unavailable" ) || contains( "cannot honor device" )
+       || contains( "device request" ) )
+    return InferenceFailureKind::DeviceUnavailable;
+  if ( contains( "schema" ) || contains( "contract" ) || contains( "manifest" )
+       || contains( "not part of" ) || contains( "does not declare" )
+       || contains( "no runtime provider available" ) || contains( "wire protocol" ) || contains( "matches no graph" ) )
+    return InferenceFailureKind::IncompatibleSchema;
   if ( contains( "not loaded" ) )
     return InferenceFailureKind::NotLoaded;
   if ( contains( "shape" ) || contains( "dimension" ) || contains( "size mismatch" )
        || contains( "wrong input" ) || contains( "channels" ) )
     return InferenceFailureKind::ShapeMismatch;
+  // Platform 7.0: a forward that RAN but produced an unusable output is an
+  // output-validity failure, not an unknown crash.
+  if ( contains( "output invalid" ) || contains( "invalid output" ) || contains( "empty output" )
+       || contains( "no usable output" ) || contains( "output head" ) )
+    return InferenceFailureKind::OutputInvalid;
   if ( contains( "failed to load" ) || contains( "parse" ) || contains( "protobuf" )
        || contains( "proto:" ) || contains( "corrupt" ) )
     return InferenceFailureKind::CorruptModel;
   return InferenceFailureKind::Unknown;
+}
+
+ErrorCode errorCodeForInferenceFailure( InferenceFailureKind kind )
+{
+  switch ( kind )
+  {
+    case InferenceFailureKind::OutOfMemory:
+    case InferenceFailureKind::CorruptModel:
+    case InferenceFailureKind::OutputInvalid:
+      return ErrorCode::ComputationError;
+    case InferenceFailureKind::Canceled:
+      return ErrorCode::Cancelled;
+    case InferenceFailureKind::ShapeMismatch:
+      return ErrorCode::InvalidInputData;
+    case InferenceFailureKind::NotLoaded:
+      return ErrorCode::NotInitialized;
+    case InferenceFailureKind::IncompatibleSchema:
+      return ErrorCode::InvalidInputData;
+    case InferenceFailureKind::DeviceUnavailable:
+      return ErrorCode::DeviceUnavailable;
+    case InferenceFailureKind::ProviderCrash:
+      return ErrorCode::RuntimeProviderFailed;
+    case InferenceFailureKind::Unknown:
+      break;
+  }
+  return ErrorCode::Unknown;
 }
 
 ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
@@ -398,7 +529,14 @@ ModelRuntimeRegistry::ModelRuntimeRegistry()
   // Platform 3.0: the optional ONNX Runtime provider registers itself when
   // compiled in (SICNU_WITH_ONNX_RUNTIME); otherwise this is a no-op stub and
   // models declaring framework "onnxruntime" surface runtime_unavailable.
-  registerOnnxRuntimeProvider();
+  registerOnnxRuntimeProvider( *this );
+  // Platform 7.0: external provider contracts — same registry seam. The HTTP
+  // provider registers when Qt6::Network is compiled in (otherwise a stub);
+  // the Python worker provider needs Qt Core alone and registers always.
+  // All of them take *this because calling instance() from inside the ctor
+  // would re-enter the static initializer.
+  registerHttpProvider( *this );
+  registerPythonWorkerProvider( *this );
 }
 
 ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, std::string *errorMessage )
@@ -461,23 +599,100 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     traits = provider->second.traits;
   }
 
-  // Platform 4.0 device resolution (deterministic pure function). The
-  // resolved device is part of the cache key, so a fallback switch can never
-  // serve a stale-GPU session. An unhonorable explicit request fails loudly.
+  // Platform 4.0 device resolution (deterministic pure function), Platform
+  // 7.0 ledger-aware: the planner's per-device free VRAM feeds the choice so
+  // auto picks the lowest FITTING index and explicit cuda:N must fit its card.
   ResolvedDevice device;
   std::string deviceWhy;
+  const int maxIndex = std::min( hw.cudaDeviceCount - 1, traits.maxAddressableCudaIndex );
+  const auto buildFreeList = [ & ]() {
+    const DeviceInventory inventory = DeviceInventory::fromHardware( hw );
+    std::vector<int> freeMbByIndex;
+    if ( maxIndex >= 0 )
+    {
+      freeMbByIndex.resize( static_cast<std::size_t>( maxIndex ) + 1, -1 );
+      for ( int i = 0; i <= maxIndex; ++i )
+      {
+        const DeviceInfo *info = inventory.device( i );
+        // Seed the ledger capacity from the inventory (idempotent): without
+        // this the production path never registers a capacity and freeMb
+        // would read 0, silently demoting every GPU request to cpu.
+        if ( info && info->vramCapacityMb > 0 )
+          m_ledger.setCapacity( i, info->vramCapacityMb );
+        freeMbByIndex[static_cast<std::size_t>( i )] =
+          info && info->vramCapacityMb > 0 ? m_ledger.freeMb( i ) : -1;
+      }
+    }
+    return freeMbByIndex;
+  };
   if ( !resolveDevice( request, hw, model.runtime.gpu, model.runtime.estimatedVramMb,
                        traits.maxAddressableCudaIndex, model.runtime.cpuFallback,
-                       &device, &deviceWhy ) )
+                       buildFreeList(), &device, &deviceWhy ) )
   {
-    lock.unlock();
-    if ( errorMessage )
-      *errorMessage = "cannot honor device request '" + request.toString() + "' for model '"
-                        + model.name + "': " + ( deviceWhy.empty() ? std::string( "unresolvable" )
-                                                                   : deviceWhy );
-    return nullptr;
+    // Platform 7.0 pressure valve on the RESOLUTION path: a GPU-fit refusal
+    // may be recoverable by evicting cached sessions — ONE bounded pass over
+    // the addressable devices, then a single resolution retry. A request the
+    // hardware cannot honor (bad index, no CUDA, cpu request) stays refused:
+    // eviction cannot create hardware. Models allowing CPU fallback never
+    // reach this refusal through auto (they demote), so eviction only serves
+    // runs that demand GPU.
+    bool recovered = false;
+    if ( model.runtime.gpu && hw.cudaAvailable && maxIndex >= 0
+         && request.kind != RequestedDevice::Kind::Cpu )
+    {
+      // Explicit cuda:N evicts ONLY that device; auto sweeps every
+      // addressable device. Either way: one bounded pass, one retry.
+      if ( request.kind == RequestedDevice::Kind::Cuda )
+        evictDeviceLocked( request.cudaIndex );
+      else
+      {
+        for ( int i = 0; i <= maxIndex; ++i )
+          evictDeviceLocked( i );
+      }
+      recovered = resolveDevice( request, hw, model.runtime.gpu, model.runtime.estimatedVramMb,
+                                 traits.maxAddressableCudaIndex, model.runtime.cpuFallback,
+                                 buildFreeList(), &device, &deviceWhy );
+    }
+    if ( !recovered )
+    {
+      // A GPU-demanding request that failed even after the eviction pass is
+      // a device-capacity refusal — tagged so payloads and the failure
+      // taxonomy classify it as DeviceUnavailable.
+      if ( model.runtime.gpu && request.kind != RequestedDevice::Kind::Cpu
+           && deviceWhy.find( "cpu_fallback" ) != std::string::npos )
+        deviceWhy = "device unavailable — " + deviceWhy;
+      lock.unlock();
+      if ( errorMessage )
+        *errorMessage = "cannot honor device request '" + request.toString() + "' for model '"
+                          + model.name + "': " + ( deviceWhy.empty() ? std::string( "unresolvable" )
+                                                                     : deviceWhy );
+      return nullptr;
+    }
   }
   const std::string key = framework + "|" + device.toString() + "|" + identityComponent;
+
+  // Platform 7.0 admission: the acquisition reserves its manifest estimate on
+  // the resolved GPU device for the lifetime of the cache entry (bounded,
+  // deterministic, never a scheduler). Reservations on CPU are a no-op.
+  const int estimateMb = model.runtime.estimatedVramMb;
+  if ( device.gpu && estimateMb > 0 )
+  {
+    std::string admitWhy;
+    if ( !m_ledger.tryReserve( device.cudaIndex, estimateMb, identityComponent, &admitWhy ) )
+    {
+      // Memory-pressure valve: ONE bounded eviction pass over the sessions
+      // pinned to this device, then a single retry. No loops, no queueing.
+      evictDeviceLocked( device.cudaIndex );
+      if ( !m_ledger.tryReserve( device.cudaIndex, estimateMb, identityComponent, &admitWhy ) )
+      {
+        lock.unlock();
+        if ( errorMessage )
+          *errorMessage = "cannot honor device request '" + request.toString() + "' for model '"
+                            + model.name + "': device unavailable — " + admitWhy;
+        return nullptr;
+      }
+    }
+  }
 
   const auto cached = m_cache.find( key );
   if ( cached != m_cache.end() )
@@ -493,13 +708,41 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   // Load outside the registry lock: weight parsing is slow and must not
   // block concurrent acquires of other models. The factory sees the RESOLVED
   // gpu decision via a copy of the manifest contract (providers keep reading
-  // runtime.gpu — the single source both paths share).
+  // runtime.gpu — the single source both paths share). The resolved CUDA
+  // index travels with it so multi-device providers bind to exactly the
+  // device the cache key was built from.
   ModelInfo effective = model;
   effective.runtime.gpu = device.gpu;
+  effective.runtime.resolvedCudaIndex = device.gpu ? device.cudaIndex : 0;
   std::string error;
-  ModelRuntimePtr session = factory( effective, hw, &error );
+  ModelRuntimePtr session;
+  try
+  {
+    session = factory( effective, hw, &error );
+  }
+  catch ( ... )
+  {
+    // The failed acquisition must return its reservation even when the
+    // factory throws — otherwise the identity stays reserved forever and
+    // every later acquire of this model is refused.
+    if ( device.gpu && estimateMb > 0 )
+    {
+      lock.lock();
+      m_ledger.release( device.cudaIndex, estimateMb, identityComponent );
+      lock.unlock();
+    }
+    throw;
+  }
   if ( !session )
   {
+    // The failed acquisition must return its reservation — admission and
+    // load are one transaction.
+    if ( device.gpu && estimateMb > 0 )
+    {
+      lock.lock();
+      m_ledger.release( device.cudaIndex, estimateMb, identityComponent );
+      lock.unlock();
+    }
     if ( errorMessage )
       *errorMessage = error.empty() ? "failed to load model session" : error;
     return nullptr;
@@ -514,9 +757,19 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   {
     raced->second.lastUsed = ++m_useCounter;
     raced->second.lastUsedMs = QDateTime::currentMSecsSinceEpoch();
+    // The raced entry and this acquisition share the same ledger holder
+    // identity (framework+device+digest) — our tryReserve re-asserted the
+    // entry's own reservation, so there is nothing to release here.
     return raced->second.session;
   }
-  m_cache[key] = CacheEntry{ session, ++m_useCounter, QDateTime::currentMSecsSinceEpoch() };
+  CacheEntry entry;
+  entry.session = session;
+  entry.lastUsed = ++m_useCounter;
+  entry.lastUsedMs = QDateTime::currentMSecsSinceEpoch();
+  entry.cudaIndex = device.gpu ? device.cudaIndex : -1;
+  entry.reservedVramMb = device.gpu ? std::max( 0, estimateMb ) : 0;
+  entry.ledgerHolder = identityComponent;
+  m_cache[key] = std::move( entry );
   ++m_totalLoaded;
   while ( m_cache.size() > m_maxSessions )
   {
@@ -526,6 +779,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
       if ( it->second.lastUsed < lru->second.lastUsed )
         lru = it;
     }
+    dropReservationLocked( lru->second );
     m_cache.erase( lru );
     ++m_evictions;
   }
@@ -540,6 +794,7 @@ void ModelRuntimeRegistry::evictExpiredLocked( std::int64_t nowMs )
   {
     if ( nowMs - it->second.lastUsedMs > static_cast<std::int64_t>( m_idleEvictionMs ) )
     {
+      dropReservationLocked( it->second );
       it = m_cache.erase( it );
       ++m_evictions;
     }
@@ -548,9 +803,35 @@ void ModelRuntimeRegistry::evictExpiredLocked( std::int64_t nowMs )
   }
 }
 
+void ModelRuntimeRegistry::dropReservationLocked( const CacheEntry &entry )
+{
+  if ( entry.cudaIndex >= 0 && entry.reservedVramMb > 0 && !entry.ledgerHolder.empty() )
+    m_ledger.release( entry.cudaIndex, entry.reservedVramMb, entry.ledgerHolder );
+}
+
+void ModelRuntimeRegistry::evictDeviceLocked( int cudaIndex )
+{
+  // LRU-ordered eviction of the sessions pinned to one device. Called only
+  // from the failed-admission path: ONE pass, bounded by the cache size.
+  std::vector<std::unordered_map<std::string, CacheEntry>::iterator> victims;
+  for ( auto it = m_cache.begin(); it != m_cache.end(); ++it )
+    if ( it->second.cudaIndex == cudaIndex )
+      victims.push_back( it );
+  std::sort( victims.begin(), victims.end(),
+             []( const auto &a, const auto &b ) { return a->second.lastUsed < b->second.lastUsed; } );
+  for ( auto &victim : victims )
+  {
+    dropReservationLocked( victim->second );
+    m_cache.erase( victim );
+    ++m_evictions;
+  }
+}
+
 void ModelRuntimeRegistry::releaseAll()
 {
   std::lock_guard<std::mutex> lock( m_mutex );
+  for ( auto &entry : m_cache )
+    dropReservationLocked( entry.second );
   m_cache.clear();
 }
 
@@ -573,7 +854,10 @@ void ModelRuntimeRegistry::release( const std::string &framework, const std::str
     if ( lastSep != std::string::npos && key.size() - lastSep - 1 == identity.size()
          && key.compare( lastSep + 1, identity.size(), identity ) == 0
          && key.compare( 0, prefix.size(), prefix ) == 0 )
+    {
+      dropReservationLocked( it->second );
       it = m_cache.erase( it );
+    }
     else
       ++it;
   }
@@ -591,6 +875,7 @@ void ModelRuntimeRegistry::setMaxCachedSessions( std::size_t maxSessions )
       if ( it->second.lastUsed < lru->second.lastUsed )
         lru = it;
     }
+    dropReservationLocked( lru->second );
     m_cache.erase( lru );
   }
 }

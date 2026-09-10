@@ -70,3 +70,25 @@ violation; the platform fails explicitly instead.
 - GPU state is released with the session destruction (OpenCV) or the process;
   the application-level shutdown hook is a documented follow-up (the CLI
   worker and tests call `releaseAll()` explicitly).
+
+
+## Platform 7.0: deterministic device planner (VRAM ledger)
+
+Device placement stays a pure placement/admission seam — no scheduler.
+
+- `DeviceInventory` enumerates addressable CUDA devices; capacities come from
+  real provider enumeration when available, else the enforced budget applies
+  to EACH device (`SICNU_MODEL_CUDA_DEVICES` / `SICNU_MODEL_VRAM_MB`
+  overrides keep hosts and tests deterministic). Multi-device decisions are
+  fully testable on GPU-less hosts through the injectable inventory.
+- `VramLedger` keeps per-device reservations. Every GPU acquisition reserves
+  the manifest's `estimated_vram_mb` for its cache-entry lifetime; the
+  reservation is released on every eviction/release path.
+- `auto` resolution picks the LOWEST index whose FREE VRAM (capacity minus
+  reservations) fits the estimate — no longer a trivial cuda:0. Explicit
+  `cuda:N` must fit its own card.
+- Memory-pressure valve: when resolution/admission fails, cached sessions are
+  evicted in LRU order (explicit `cuda:N` evicts ONLY that device; auto
+  sweeps addressable devices) — ONE bounded pass, one retry. Exhaustion is a
+  typed DeviceUnavailable refusal; the engine never responds to pressure by
+  shrinking tiles or changing models.
