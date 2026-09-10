@@ -9,6 +9,7 @@
 
 #include <json/json.h>
 
+#include "agent/cartography/chart_registry.h"
 #include "agent/cartography/composition.h"
 #include "agent/cartography/registry.h"
 #include "agent/cartography/style_spec.h"
@@ -17,6 +18,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 
 #include <cmath>
 #include <string>
@@ -695,6 +697,111 @@ TEST_CASE( "P7 style: shipped catalog keeps validating (compat)",
     REQUIRE( validateStyleSpec( style ).empty() );
   }
   REQUIRE( validated >= 10 );
+}
+
+namespace {
+
+Json::Value confusionChart()
+{
+  Json::Value chart( Json::objectValue );
+  chart["kind"] = "accuracy_summary";
+  chart["title"] = "classification accuracy";
+  chart["binding"]["mode"] = "inline";
+  Json::Value labels( Json::arrayValue );
+  labels.append( "water" );
+  labels.append( "forest" );
+  Json::Value rows( Json::arrayValue );
+  // rows = reference, columns = predicted.
+  Json::Value row0( Json::arrayValue );
+  row0.append( 40 );
+  row0.append( 10 );
+  Json::Value row1( Json::arrayValue );
+  row1.append( 5 );
+  row1.append( 45 );
+  rows.append( row0 );
+  rows.append( row1 );
+  chart["binding"]["matrix"]["labels"] = labels;
+  chart["binding"]["matrix"]["rows"] = rows;
+  chart["width_px"] = 480;
+  chart["height_px"] = 320;
+  return chart;
+}
+
+} // namespace
+
+TEST_CASE( "P7 charts: accuracy_summary validates the confusion binding",
+           "[platform7][charts]" )
+{
+  // Valid square matrix binding.
+  const Json::Value chart = confusionChart();
+  REQUIRE( validateChartSpec( chart ).empty() );
+
+  // Non-square → rejected.
+  Json::Value ragged = chart;
+  ragged["binding"]["matrix"]["labels"] = Json::Value( Json::arrayValue );
+  ragged["binding"]["matrix"]["labels"].append( "only" );
+  bool saw = false;
+  for ( const auto &problem : validateChartSpec( ragged ) )
+    saw = saw || problem.find( "square confusion matrix" ) != std::string::npos;
+  REQUIRE( saw );
+
+  // vector_expression binding → rejected (derives from inline data only).
+  Json::Value native = chart;
+  native["binding"].removeMember( "matrix" );
+  native["binding"]["mode"] = "vector_expression";
+  native["binding"]["layer"] = "layer-1";
+  saw = false;
+  for ( const auto &problem : validateChartSpec( native ) )
+    saw = saw || problem.find( "inline data only" ) != std::string::npos;
+  REQUIRE( saw );
+
+  // Registry roundtrip + render smoke (PNG painted by the QPainter path).
+  ChartRegistry &registry = ChartRegistry::instance();
+  registry.clear();
+  QString error;
+  const QString id = registry.createChart( chart, &error );
+  REQUIRE( !id.isEmpty() );
+  const QString path = QDir::temp().filePath( QStringLiteral( "p7-accuracy-summary.png" ) );
+  REQUIRE( renderChartToFile( registry.find( id ), path, &error ) );
+  REQUIRE( QFileInfo( path ).exists() );
+  REQUIRE( QFileInfo( path ).size() > 1000 );
+  QFile::remove( path );
+}
+
+TEST_CASE( "P7 charts: dual axis is rejected without semantic justification",
+           "[platform7][charts]" )
+{
+  Json::Value chart( Json::objectValue );
+  chart["kind"] = "line";
+  chart["binding"]["mode"] = "inline";
+  Json::Value data( Json::arrayValue );
+  Json::Value point( Json::objectValue );
+  point["label"] = "2020";
+  point["value"] = 1.5;
+  data.append( point );
+  chart["binding"]["data"] = data;
+
+  // Unjustified dual axis → rejected.
+  chart["axes"]["secondary"]["data"] = Json::Value( Json::arrayValue );
+  bool saw = false;
+  for ( const auto &problem : validateChartSpec( chart ) )
+    saw = saw || problem.find( "dual axis requires axes.secondary.justification" ) !=
+                    std::string::npos;
+  REQUIRE( saw );
+
+  // Justified dual axis on a line chart → accepted.
+  chart["axes"]["secondary"]["justification"] =
+    "secondary series is NDVI (unitless) against rainfall (mm)";
+  chart["axes"]["secondary"]["data"][0] = point;
+  REQUIRE( validateChartSpec( chart ).empty() );
+
+  // Dual axis is not defined for non line/scatter kinds.
+  Json::Value pie = chart;
+  pie["kind"] = "pie";
+  saw = false;
+  for ( const auto &problem : validateChartSpec( pie ) )
+    saw = saw || problem.find( "only defined for line/scatter" ) != std::string::npos;
+  REQUIRE( saw );
 }
 
 TEST_CASE( "P7 solver: soft failure downgrades the objective, never convergence",

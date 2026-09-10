@@ -23,7 +23,8 @@ namespace {
 
 const char *const kChartKinds[] = { "bar", "line", "pie", "histogram", "area", "scatter",
                                     "stacked_bar", "matrix", "metric", "grouped_bar",
-                                    "table", "summary_table", "topn_table", "sparkline" };
+                                    "table", "summary_table", "topn_table", "sparkline",
+                                    "accuracy_summary" };
 
 bool isKnownKind( const std::string &kind )
 {
@@ -271,6 +272,92 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
       painter.drawText( QRectF( 0, 4, size.width(), 20 ), Qt::AlignCenter, title );
     }
     return true;
+  }
+
+  // --- accuracy summary: confusion matrix -> deterministic metric table ----
+  if ( kind == "accuracy_summary" )
+  {
+    const Json::Value &binding = chart["binding"];
+    const Json::Value &matrix = binding.get( "matrix", Json::Value() );
+    if ( !matrix.isObject() || !matrix.isMember( "labels" ) || !matrix["labels"].isArray() ||
+         !matrix.isMember( "rows" ) || !matrix["rows"].isArray() ||
+         matrix["rows"].empty() || matrix["rows"].size() != matrix["labels"].size() )
+    {
+      if ( error )
+        *error = QStringLiteral(
+          "accuracy_summary needs a square binding.matrix {labels: [n], rows: [n][n]}" );
+      return false;
+    }
+    const int n = static_cast<int>( matrix["labels"].size() );
+    if ( n > 64 )
+    {
+      if ( error )
+        *error = QStringLiteral( "accuracy_summary capped at 64 classes" );
+      return false;
+    }
+    double rowSums[64] = { 0.0 };
+    double colSums[64] = { 0.0 };
+    double trace = 0.0;
+    double total = 0.0;
+    for ( int r = 0; r < n; ++r )
+    {
+      const Json::Value &row = matrix["rows"][r];
+      if ( !row.isArray() || static_cast<int>( row.size() ) != n )
+      {
+        if ( error )
+          *error = QStringLiteral( "accuracy_summary matrix rows must be n×n numeric" );
+        return false;
+      }
+      for ( int c = 0; c < n; ++c )
+      {
+        const double value = row[c].isNumeric() ? row[c].asDouble() : 0.0;
+        rowSums[r] += value;
+        colSums[c] += value;
+        total += value;
+        if ( r == c )
+          trace += value;
+      }
+    }
+    if ( total <= 0 )
+    {
+      if ( error )
+        *error = QStringLiteral( "accuracy_summary matrix totals must be positive" );
+      return false;
+    }
+    const double po = trace / total;
+    double pe = 0.0;
+    for ( int i = 0; i < n; ++i )
+      pe += ( rowSums[i] * colSums[i] ) / ( total * total );
+    const double kappa = pe < 1.0 ? ( po - pe ) / ( 1.0 - pe ) : 0.0;
+
+    // Derived table rows: overall metrics first, then per-class
+    // precision/recall in label order (deterministic).
+    std::vector<std::pair<QString, double>> rows;
+    rows.emplace_back( QStringLiteral( "Overall accuracy" ), po );
+    rows.emplace_back( QStringLiteral( "Kappa" ), kappa );
+    for ( int i = 0; i < n; ++i )
+    {
+      const QString label = QString::fromStdString( matrix["labels"][i].asString() );
+      const double precision =
+        colSums[i] > 0 ? matrix["rows"][i][i].asDouble() / colSums[i] : 0.0;
+      const double recall = rowSums[i] > 0 ? matrix["rows"][i][i].asDouble() / rowSums[i] : 0.0;
+      rows.emplace_back( QStringLiteral( "P " ) + label, precision );
+      rows.emplace_back( QStringLiteral( "R " ) + label, recall );
+    }
+
+    // Paint with the table-family path by temporarily presenting as a
+    // summary table (local mutable kind copy; validation already ran).
+    Json::Value tableChart = chart;
+    tableChart["kind"] = "summary_table";
+    tableChart["binding"]["data"] = Json::Value( Json::arrayValue );
+    for ( const auto &row : rows )
+    {
+      Json::Value entry( Json::objectValue );
+      entry["label"] = row.first.toStdString();
+      entry["value"] = row.second;
+      tableChart["binding"]["data"].append( entry );
+    }
+    return renderInlineChart( tableChart, painter, size, error );
   }
 
   // --- table family: label/value tables with deterministic caps (5.0) -------
@@ -706,6 +793,62 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     }
   }
 
+  // Platform 7.0 dual-axis overlay (validation guarantees a justification
+  // exists and the kind is line/scatter): the secondary series maps to the
+  // right edge with its own scale and right-side tick labels.
+  if ( kind == "line" || kind == "scatter" )
+  {
+    const Json::Value &axes = chart.get( "axes", Json::Value() );
+    if ( axes.isObject() && axes.isMember( "secondary" ) && axes["secondary"].isObject() )
+    {
+      const Json::Value &secondary = axes["secondary"];
+      const Json::Value &data = secondary.get( "data", Json::Value() );
+      if ( data.isArray() && !data.empty() && data.size() == points.size() )
+      {
+        double secondaryMax = 0.0;
+        std::vector<double> values;
+        for ( const auto &entry : data )
+        {
+          const double value =
+            entry.isObject() && entry.isMember( "value" ) && entry["value"].isNumeric()
+              ? entry["value"].asDouble()
+              : 0.0;
+          values.push_back( value );
+          secondaryMax = std::max( secondaryMax, std::fabs( value ) );
+        }
+        if ( secondaryMax <= 0 )
+          secondaryMax = 1.0;
+        // Right-side axis: 5 ticks, labels in the right margin.
+        painter.setPen( textColor );
+        for ( int t = 0; t <= 4; ++t )
+        {
+          const double y = plotRect.bottom() - plotRect.height() * t / 4.0;
+          painter.drawLine( QPointF( plotRect.right(), y ), QPointF( plotRect.right() + 4, y ) );
+          painter.drawText( QRectF( plotRect.right() + 6, y - 8, 44, 16 ),
+                            Qt::AlignLeft | Qt::AlignVCenter,
+                            QString::number( secondaryMax * t / 4.0, 'g', 3 ) );
+        }
+        // Secondary series as a dashed line over the primary x positions.
+        const int n = static_cast<int>( points.size() );
+        const double stepX = n > 1 ? plotRect.width() / ( n - 1 ) : 0.0;
+        QPen secondaryPen( paletteColor( chart["style"], 1 ), 2, Qt::DashLine );
+        painter.setPen( secondaryPen );
+        QPainterPath secondaryPath;
+        for ( int i = 0; i < n; ++i )
+        {
+          const double x = plotRect.left() + i * stepX;
+          const double y =
+            plotRect.bottom() - plotRect.height() * std::fabs( values[i] ) / secondaryMax;
+          if ( i == 0 )
+            secondaryPath.moveTo( x, y );
+          else
+            secondaryPath.lineTo( x, y );
+        }
+        painter.drawPath( secondaryPath );
+      }
+    }
+  }
+
   if ( !title.isEmpty() )
   {
     painter.setPen( textColor );
@@ -730,7 +873,7 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
   if ( !isKnownKind( kind ) )
     problems.push_back(
       "kind must be one of bar|line|pie|histogram|area|scatter|stacked_bar|matrix|metric|"
-      "grouped_bar|table|summary_table|topn_table|sparkline" );
+      "grouped_bar|table|summary_table|topn_table|sparkline|accuracy_summary" );
   if ( !chart.isMember( "binding" ) || !chart["binding"].isObject() )
   {
     problems.push_back( "chart needs a binding object" );
@@ -742,12 +885,52 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
                              : "inline";
   if ( mode != "inline" && mode != "vector_expression" )
     problems.push_back( "binding.mode must be inline|vector_expression" );
-  if ( mode == "inline" && kind == "matrix" )
+  if ( mode == "inline" && ( kind == "matrix" || kind == "accuracy_summary" ) )
   {
     const Json::Value &matrix = binding.get( "matrix", Json::Value() );
     if ( !matrix.isObject() || !matrix.isMember( "labels" ) || !matrix["labels"].isArray() ||
          !matrix.isMember( "rows" ) || !matrix["rows"].isArray() )
-      problems.push_back( "matrix charts need binding.matrix {labels, rows}" );
+      problems.push_back( kind == "accuracy_summary"
+                            ? "accuracy_summary charts need binding.matrix {labels, rows} "
+                              "(square confusion matrix)"
+                            : "matrix charts need binding.matrix {labels, rows}" );
+    else if ( kind == "accuracy_summary" &&
+              ( matrix["rows"].empty() || matrix["rows"].size() != matrix["labels"].size() ) )
+      problems.push_back( "accuracy_summary needs a square confusion matrix "
+                          "(rows = reference, columns = predicted)" );
+    if ( kind == "accuracy_summary" && mode == "inline" && binding.isMember( "layer" ) )
+      problems.push_back( "accuracy_summary derives from inline data only "
+                          "(no vector_expression binding)" );
+  }
+
+  // Platform 7.0 dual-axis policy: a secondary axis is accepted ONLY with an
+  // explicit semantic justification — otherwise validation rejects it (no
+  // silent single-axis downgrade, no unjustified dual axes).
+  if ( chart.isMember( "axes" ) )
+  {
+    const Json::Value &axes = chart["axes"];
+    if ( !axes.isObject() )
+      problems.push_back( "axes must be an object" );
+    else if ( axes.isMember( "secondary" ) )
+    {
+      const Json::Value &secondary = axes["secondary"];
+      if ( !secondary.isObject() )
+        problems.push_back( "axes.secondary must be an object" );
+      else
+      {
+        const bool justified = secondary.isMember( "justification" ) &&
+                               secondary["justification"].isString() &&
+                               !secondary["justification"].asString().empty();
+        if ( !justified )
+          problems.push_back( "dual axis requires axes.secondary.justification stating the "
+                              "semantic reason (different units/scale); without it the chart "
+                              "is rejected" );
+        if ( kind != "line" && kind != "scatter" )
+          problems.push_back( "dual axis is only defined for line/scatter charts" );
+        if ( secondary.isMember( "data" ) && !secondary["data"].isArray() )
+          problems.push_back( "axes.secondary.data must be an array of {label, value}" );
+      }
+    }
   }
   else if ( mode == "inline" )
   {
