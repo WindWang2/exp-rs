@@ -18,7 +18,7 @@
 //
 // Evidence only: wall-clock here is for regression EVIDENCE (JSON files in
 // benchmarks/ with environment headers), never a hard CI gate.
-#include <catch2/catch_test_macros.hpp>
+
 
 #include "runtime/observability/fault_point.h"
 #include "runtime/observability/trace.h"
