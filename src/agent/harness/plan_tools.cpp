@@ -875,6 +875,16 @@ Json::Value confirmMapOutput( const AgentPlan &plan, const Json::Value &stepsDoc
     }
     if ( composed.output.isMember( "quality" ) )
       confirmation["compose_quality"] = composed.output["quality"];
+    // Platform 8.0: the confirmation identifies WHAT was composed — the
+    // rendering-free structural digest and the declared template/component
+    // provenance come straight from cartography:compose (no second
+    // digest/provenance implementation here).
+    if ( composed.output.isMember( "structural_digest" ) )
+      confirmation["structural_digest"] = composed.output["structural_digest"];
+    if ( composed.output.isMember( "provenance" ) )
+      confirmation["provenance"] = composed.output["provenance"];
+    if ( composed.output.isMember( "declared_output" ) )
+      confirmation["declared_output"] = composed.output["declared_output"];
 
     Json::Value preflightInput;
     preflightInput["mapspec"] = mapOutput["mapspec"];

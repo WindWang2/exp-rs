@@ -660,6 +660,10 @@ std::vector<std::string> validateStyleSemantics( const Json::Value &styleSpec )
         problems.push_back( id + ": raster.nodata.transparent must be a boolean" );
       if ( nodata.isMember( "label" ) && !nodata["label"].isString() )
         problems.push_back( id + ": raster.nodata.label must be a string" );
+      // Platform 8.0: shading color for non-transparent nodata pixels
+      // (renderer nodataColor). Optional; defaults to black.
+      if ( nodata.isMember( "color" ) && !nodata["color"].isString() )
+        problems.push_back( id + ": raster.nodata.color must be a string" );
     }
   }
 
