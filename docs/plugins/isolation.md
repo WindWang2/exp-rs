@@ -56,17 +56,14 @@ catalog and the provider map drop every id the plugin registered, and the
 worker daemon pops the plugin's executors from the reused process). A reload
 re-registers cleanly — no dead entries, no duplicates (issue #755).
 
-## Optional plugin-host worker (roadmap, deliberately deferred)
+## Host-process worker (isolation runtime 5.0, implemented)
 
-An out-of-process native plugin host (exe-side shim loading third-party
-binaries over a versioned RPC, mirroring the Python worker's isolation) is
-the DESIGNED follow-up for full native crash isolation: plugin crash ≠ GUI
-crash, timeout can kill the host process, reload is a process restart, and
-contribution metadata stays discoverable without mapping code in the GUI.
-It is intentionally NOT implemented in V1: the in-process lifecycle above is
-its precondition, and no partial isolation layer ships. A full-UI host
-would additionally need out-of-process widget transport; the first host
-slice scopes to operator/model/data/agent contributions. The V1 interfaces
-were shaped so this is additive: a new entry point
-(`EXPRS_createPluginHostWorkerV2`-style) plus an IPC transport — no change
-to PluginV1.
+The out-of-process native plugin host described above is now implemented:
+`runtime: "host-process"` plugins are hosted in `exprs_plugin_host_worker`
+over the versioned IPC contract — plugin crash/timeout/malformed output
+degrades to typed diagnostics (E6001–E6009) and a bounded restart policy
+while the host stays up. Scope, quotas enforcement matrix, recovery
+semantics and the honest path-policy-vs-sandbox boundary are documented in
+[host-process.md](host-process.md). Full-UI out-of-process widget transport
+remains future work; host-process plugins declaring UI contributions are
+refused at validation.

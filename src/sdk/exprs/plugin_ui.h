@@ -59,8 +59,10 @@ public:
 
 /// Convenience macro for the UI contribution translation unit:
 ///   EXPRS_EXPORT_UI_CONTRIBUTION(org_example_ui::DemoUi)
+/// Uses EXPRS_PLUGIN_ENTRY_EXPORT (exprs/plugin_interface.h) so the entry
+/// point is actually exported from Windows DLLs as well.
 #define EXPRS_EXPORT_UI_CONTRIBUTION(UiClass)                                  \
-    extern "C" ::exprs::UiContributionV1 *EXPRS_createUiContributionV1()       \
+    EXPRS_PLUGIN_ENTRY_EXPORT ::exprs::UiContributionV1 *EXPRS_createUiContributionV1() \
     {                                                                          \
         try                                                                    \
         {                                                                      \

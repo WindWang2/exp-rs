@@ -40,6 +40,15 @@ Qt types are confined to `exprs/plugin_ui.h`, which is build-locked to
 the host application (same Qt minor + same app build) and explicitly NOT a
 long-term ABI surface.
 
+## Host protocol version (fourth axis, isolation runtime 5.0)
+
+`EXP_RS_HOST_PROTOCOL_VERSION` ("1.0") governs the wire protocol between
+the host and an out-of-process plugin host worker
+([../plugins/host-process.md](../plugins/host-process.md)). Same rule as
+the API axis: same major required, peer minor ≤ local minor; violations
+are refused E6001 before any plugin code loads. Unknown envelope fields
+are ignored (additive); unknown methods are answered E6008.
+
 ## Interface evolution rules (V1)
 
 For every `*V1` interface (`PluginV1`, `ContributionContextV1`,

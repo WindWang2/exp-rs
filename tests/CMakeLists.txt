@@ -92,6 +92,29 @@ function(sicnu_add_io_test NAME)
   sicnu_discover_tests(${NAME})
 endfunction()
 
+# Isolation runtime 5.0: light SDK test executables. Links only Catch2 +
+# sicnu_sdk (jsoncpp transitively) — no Qt, no QGIS — so the IPC/capability
+# contract suites build and run fast on every platform lane.
+function(sicnu_add_sdk_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_sdk
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/sdk
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(${NAME} PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+  set_target_properties(${NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  )
+  sicnu_discover_tests(${NAME})
+endfunction()
+
 # Helper function to add a Catch2 offscreen UI dialog test executable
 function(sicnu_add_dialog_test NAME)
   cmake_parse_arguments(PARSE_ARGV 1 ARG "NO_DEFAULT_MAIN" "MAIN_SOURCE" "SOURCES;EXTRA_LIBS;EXTRA_INCLUDES")
@@ -6975,6 +6998,27 @@ set_target_properties(hello_plugin PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin
 )
 
+# Isolation runtime 5.0: misbehaving fixture plugin (crash/hang/flood) for
+# the host-process suites + the out-of-process plugin host test.
+add_library(isolation_plugin MODULE fixtures/isolation_plugin/isolation_plugin.cpp)
+target_include_directories(isolation_plugin PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/sdk
+)
+target_link_libraries(isolation_plugin PRIVATE sicnu_operators sicnu_operators_core jsoncpp)
+set_target_properties(isolation_plugin PROPERTIES
+  LIBRARY_OUTPUT_NAME isolation_plugin
+  PREFIX "lib"
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugin_fixtures/isolation_plugin
+)
+
+sicnu_add_sdk_test(test_plugin_host_process)
+target_link_libraries(test_plugin_host_process PRIVATE sicnu_plugins_hostprocess sicnu_operators_core)
+target_compile_definitions(test_plugin_host_process PRIVATE
+  SICNU_TEST_ISOLATION_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/isolation_plugin"
+  SICNU_TEST_PLUGIN_HOST_WORKER="${CMAKE_BINARY_DIR}/exprs_plugin_host_worker.exe"
+)
+
 sicnu_add_test(test_plugin_manifest)
 target_link_libraries(test_plugin_manifest PRIVATE sicnu_sdk)
 
@@ -6996,6 +7040,23 @@ if(NOT WIN32)
   sicnu_add_test(test_exprs_external_process)
   target_link_libraries(test_exprs_external_process PRIVATE sicnu_sdk)
 endif()
+# Isolation runtime 5.0: behavior helper + Windows external-process lane
+# (CreateProcessW implementation). The helper is cross-platform so the same
+# assertions can run on any lane.
+add_executable(exprs_ep_helper helper_external_process.cpp)
+set_target_properties(exprs_ep_helper PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+if(WIN32)
+  sicnu_add_sdk_test(test_exprs_external_process_win)
+  target_compile_definitions(test_exprs_external_process_win PRIVATE
+    SICNU_TEST_EP_HELPER="${CMAKE_BINARY_DIR}/exprs_ep_helper.exe"
+  )
+endif()
+
+# Isolation runtime 5.0: host-process protocol contract suites (sdk-only).
+sicnu_add_sdk_test(test_exprs_ipc)
+sicnu_add_sdk_test(test_plugin_capabilities)
 
 sicnu_add_test(test_exprs_workflow_schema)
 target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)

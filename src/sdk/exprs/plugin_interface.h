@@ -222,10 +222,23 @@ constexpr const char *kPluginEntryPointV1 = "EXPRS_createPluginV1";
 /// Qt-dependent exprs/plugin_ui.h for the interface it returns.
 constexpr const char *kUiContributionEntryPointV1 = "EXPRS_createUiContributionV1";
 
+/// Export linkage for plugin entry points. Windows DLLs only export symbols
+/// declared with __declspec(dllexport): without this, a plugin built on
+/// Windows carries no EXPRS_createPluginV1 at all and LoadLibrary-based
+/// loading fails with SymbolMissing (the host-process suites exercise this
+/// path; the historical Linux-only lane never did).
+#if defined( _WIN32 )
+#define EXPRS_PLUGIN_ENTRY_EXPORT extern "C" __declspec( dllexport )
+#elif defined( __GNUC__ ) || defined( __clang__ )
+#define EXPRS_PLUGIN_ENTRY_EXPORT extern "C" __attribute__( ( visibility( "default" ) ) )
+#else
+#define EXPRS_PLUGIN_ENTRY_EXPORT extern "C"
+#endif
+
 /// Convenience macro for plugin main translation units:
 ///   EXPRS_EXPORT_PLUGIN(org_example_plugin::MyPlugin)
 #define EXPRS_EXPORT_PLUGIN(PluginClass)                                       \
-    extern "C" ::exprs::PluginV1 *EXPRS_createPluginV1()                       \
+    EXPRS_PLUGIN_ENTRY_EXPORT ::exprs::PluginV1 *EXPRS_createPluginV1()        \
     {                                                                          \
         try                                                                    \
         {                                                                      \

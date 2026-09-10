@@ -465,6 +465,29 @@ bool entrypointKindFromName( const std::string &name, PluginEntrypointKind &out 
     return false;
 }
 
+std::string pluginRuntimeKindName( PluginRuntimeKind kind )
+{
+    switch ( kind )
+    {
+    case PluginRuntimeKind::InProcess:
+        return "in-process";
+    case PluginRuntimeKind::HostProcess:
+        return "host-process";
+    }
+    return "in-process";
+}
+
+bool pluginRuntimeKindFromName( const std::string &name, PluginRuntimeKind &out )
+{
+    if ( name == "in-process" )
+        out = PluginRuntimeKind::InProcess;
+    else if ( name == "host-process" )
+        out = PluginRuntimeKind::HostProcess;
+    else
+        return false;
+    return true;
+}
+
 bool PluginManifest::hasCapability( const std::string &capability ) const
 {
     for ( const std::string &entry : capabilities )
@@ -604,6 +627,19 @@ bool PluginManifest::fromJson( const Json::Value &json, PluginManifest &out,
         if ( capability.isString() )
             out.capabilities.push_back( capability.asString() );
     }
+    const std::string runtimeName = json.get( "runtime", "in-process" ).asString();
+    if ( !pluginRuntimeKindFromName( runtimeName, out.runtime ) )
+    {
+        // Lenient here (forward compatibility); the validator refuses unknown
+        // runtime values strictly so a load never guesses.
+        out.runtime = PluginRuntimeKind::InProcess;
+        out.runtimeUnknown = true;
+        out.warnings.push_back( "unknown runtime '" + runtimeName + "'; loaded in-process" );
+    }
+    if ( json.isMember( "access" ) )
+        out.access = json["access"];
+    if ( json.isMember( "quotas" ) )
+        out.quotas = json["quotas"];
     out.permissions = parsePermissions( json["permissions"], out.warnings );
     for ( const Json::Value &dependency : json["dependencies"] )
     {

@@ -29,6 +29,12 @@ set( EXPRS_SDK_SOURCES
   exprs/plugin_registry.cpp
   exprs/plugin_package.cpp
   exprs/external_process.cpp
+  exprs/ipc_frame.cpp
+  exprs/ipc_envelope.cpp
+  exprs/ipc_stream.cpp
+  exprs/ipc_channel.cpp
+  exprs/plugin_capabilities.cpp
+  exprs/plugin_quotas.cpp
   exprs/workflow_schema.cpp
   exprs/workflow_builder.cpp
 )
@@ -79,6 +85,13 @@ set( EXPRS_SDK_INCLUDE_HEADERS
   exprs/external_process.h
   exprs/plugin_ui.h
   exprs/exit_codes.h
+  exprs/ipc_frame.h
+  exprs/ipc_envelope.h
+  exprs/ipc_stream.h
+  exprs/ipc_channel.h
+  exprs/plugin_capabilities.h
+  exprs/plugin_quotas.h
+  exprs/host_protocol.h
   exprs/workflow_schema.h
   exprs/workflow_builder.h
 )

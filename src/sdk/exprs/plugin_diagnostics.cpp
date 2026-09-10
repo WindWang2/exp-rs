@@ -44,6 +44,15 @@ const CodeEntry kCodeTable[] = {
     { PluginDiagnosticCode::PluginDisabled, "E5003" },
     { PluginDiagnosticCode::PolicyBlocklisted, "E5004" },
     { PluginDiagnosticCode::WorkspaceEscape, "E5005" },
+    { PluginDiagnosticCode::IpcProtocolVersionMismatch, "E6001" },
+    { PluginDiagnosticCode::IpcProtocolError, "E6002" },
+    { PluginDiagnosticCode::IpcPayloadTooLarge, "E6003" },
+    { PluginDiagnosticCode::IpcRequestTimeout, "E6004" },
+    { PluginDiagnosticCode::HostProcessCrashed, "E6005" },
+    { PluginDiagnosticCode::HostProcessUnavailable, "E6006" },
+    { PluginDiagnosticCode::QuotaExceeded, "E6007" },
+    { PluginDiagnosticCode::IpcUnsupportedMethod, "E6008" },
+    { PluginDiagnosticCode::RequestCancelled, "E6009" },
 };
 } // namespace
 
