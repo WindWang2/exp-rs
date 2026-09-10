@@ -7071,6 +7071,8 @@ endif()
 # Isolation runtime 5.0: host-process protocol contract suites (sdk-only).
 sicnu_add_sdk_test(test_exprs_ipc)
 sicnu_add_sdk_test(test_plugin_capabilities)
+# Plugin-platform 8.0: declarative out-of-process UI schema contract.
+sicnu_add_sdk_test(test_plugin_ui_schema)
 
 sicnu_add_test(test_exprs_workflow_schema)
 target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
@@ -7091,6 +7093,11 @@ target_link_libraries(test_plugins_runtime_host PRIVATE sicnu_plugins_framework 
 # Owner-scoped unload barrier (#747).
 sicnu_add_test(test_plugin_execution_barrier)
 target_link_libraries(test_plugin_execution_barrier PRIVATE sicnu_plugins_framework sicnu_sdk)
+
+# Plugin-platform 8.0: declarative UI schema renderer (host-owned widgets,
+# fake delegate; offscreen Qt).
+sicnu_add_test(test_plugin_ui_schema_host)
+target_link_libraries(test_plugin_ui_schema_host PRIVATE sicnu_plugins_framework sicnu_sdk)
 
 
 # — Harness 4.0 (Pi Spatial Scientist & Agent Harness) —

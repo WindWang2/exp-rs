@@ -602,3 +602,45 @@ TEST_CASE( "worker-side workDir policy refuses paths outside declared roots",
 
     REQUIRE( registry.unload( kPluginId ) );
 }
+
+TEST_CASE( "declarative UI schema round-trips through the worker", "[hostprocess][uischema]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // Describe: the worker probes the optional entry point, validates the
+    // schema (fail closed) and answers with the normalized schema.
+    exprs::PluginDiagnosticLog uiLog;
+    Json::Value described = stack.runtime->describeUiSchema( kPluginId, uiLog );
+    INFO( "describe: " << Json::writeString( Json::StreamWriterBuilder(), described ) );
+    REQUIRE( described["ok"].asBool() );
+    const Json::Value &schema = described["schema"];
+    REQUIRE( schema["version"].asInt() == 1 );
+    REQUIRE( schema["commands"].size() == 1 );
+    REQUIRE( schema["commands"][0]["id"].asString() == "fixture.refresh" );
+    REQUIRE( schema["settingsPages"][0]["controls"].size() == 5 );
+    REQUIRE( schema["dockPanels"][0]["controls"].size() == 2 );
+
+    // Invoke: bounded event in, bounded state update out.
+    Json::Value event( Json::objectValue );
+    event["contributionId"] = "dock.status";
+    event["controlId"] = "ping";
+    event["eventType"] = "clicked";
+    Json::Value invoked = stack.runtime->invokeUi( kPluginId, event, 5000, uiLog );
+    INFO( "invoke: " << Json::writeString( Json::StreamWriterBuilder(), invoked ) );
+    REQUIRE( invoked["ok"].asBool() );
+    REQUIRE( invoked["response"]["state"]["status"].asString() == "pinged" );
+
+    // The worker itself refuses an INVALID schema (fail closed): point a
+    // second registry cycle at the same plugin but mutate nothing — the
+    // negative path is covered by the SDK validation suite; here we prove
+    // the transport stays alive after UI traffic.
+    Json::Value params( Json::objectValue );
+    params["seconds"] = 1;
+    Json::Value after = runOperator( stack, "test:iso-slow", params );
+    REQUIRE( after["success"].asBool() );
+
+    REQUIRE( registry.unload( kPluginId ) );
+    REQUIRE_FALSE( stack.runtime->isWorkerAlive( kPluginId ) );
+}

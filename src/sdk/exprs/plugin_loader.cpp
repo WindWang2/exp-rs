@@ -292,6 +292,13 @@ private:
 
 } // namespace
 
+void *PluginLoader::resolveLibrarySymbol( void *libraryHandle, const char *name )
+{
+    if ( !libraryHandle || !name )
+        return nullptr;
+    return findSymbol( libraryHandle, name );
+}
+
 PluginLoader::~PluginLoader()
 {
     if ( mLoaded.instance && mInstanceValid )

@@ -14,6 +14,7 @@
 #include "plugin_model_runtime_bridge.h"
 #include "plugin_operator_adapter.h"
 #include "plugin_ui_host.h"
+#include "plugin_ui_schema_host.h"
 
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -237,6 +238,10 @@ void PluginRuntimeHost::revokePluginContributions( const std::string &pluginId )
     // after the execution barrier drained. Order matters — UI contributions
     // first (widgets/actions created by the plugin are destroyed here while
     // its code can still service destructors and vtables), then registries.
+    // Plugin-platform 8.0: the declarative schema rendering is host-owned,
+    // but its events travel to the plugin — detach it before the worker
+    // goes away, same lifecycle position as the in-process UI release.
+    PluginUiSchemaRenderer::instance()->releasePluginUi( QString::fromStdString( pluginId ) );
     PluginUiHost::instance()->releasePluginUi( QString::fromStdString( pluginId ) );
 
     std::lock_guard<std::mutex> lock( mMutex );

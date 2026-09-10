@@ -291,11 +291,17 @@ bool PluginManifestValidator::validate( const PluginManifest &manifest,
     }
     if ( manifest.runtime == PluginRuntimeKind::HostProcess )
     {
-        if ( manifest.hasUi )
+        // plugin-platform 8.0: a host-process plugin may declare UI through
+        // the DECLARATIVE schema route (EXPRS_createUiSchemaProviderV1,
+        // exprs/plugin_ui_schema.h); raw widget transport does not exist.
+        // The provider itself is probed at load: absence while hasUi is a
+        // load-time diagnostic, not a validation failure (the binary may be
+        // a slim refresh of the same manifest).
+        if ( manifest.hasUi && !manifest.access.get( "ui", Json::Value( false ) ).asBool() )
         {
             fail( PluginDiagnosticCode::ManifestInvalidField, "runtime",
-                  "runtime 'host-process' does not support UI contributions in "
-                  "this host (v1 scope); use in-process for UI plugins" );
+                  "runtime 'host-process' with a ui section requires access.ui = true "
+                  "(declarative schema route)" );
         }
         if ( manifest.entrypointKind != PluginEntrypointKind::Native )
         {
@@ -340,11 +346,8 @@ bool PluginManifestValidator::validate( const PluginManifest &manifest,
                      id, "permissions" );
             }
         }
-        if ( access.capabilities.uiContribution && manifest.runtime == PluginRuntimeKind::HostProcess )
-        {
-            fail( PluginDiagnosticCode::ManifestInvalidField, "access",
-                  "access.ui is incompatible with runtime 'host-process'" );
-        }
+        // access.ui + host-process is the DECLARATIVE UI route since
+        // plugin-platform 8.0 (validated schema; host-rendered widgets).
     }
 
     // Quotas: junk values are warnings; clamping happens at session build.

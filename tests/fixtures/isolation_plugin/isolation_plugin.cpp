@@ -14,6 +14,7 @@
 //   test:iso-spawn   spawns a sleeping grandchild process (orphan-kill
 //                    target for the process-group kill ladder)
 #include "exprs/plugin_interface.h"
+#include "exprs/plugin_ui_schema.h"
 
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_context.h"
@@ -366,6 +367,122 @@ public:
     bool mShutdownCalled = false;
 };
 
+/// Declarative UI provider (protocol 1.1): describes a small schema and
+/// answers bounded events with a state update. Deliberately covers the
+/// host-renderer surface the conformance kit drives.
+class FixtureUiSchemaProvider : public exprs::UiSchemaProviderV1
+{
+public:
+    Json::Value describeUi() override
+    {
+        Json::Value schema( Json::objectValue );
+        schema["version"] = 1;
+
+        Json::Value commands( Json::arrayValue );
+        Json::Value command( Json::objectValue );
+        command["id"] = "fixture.refresh";
+        command["title"] = "Refresh Fixture";
+        command["helpId"] = "help.fixture.refresh";
+        commands.append( command );
+        schema["commands"] = commands;
+
+        Json::Value menuItems( Json::arrayValue );
+        Json::Value menuItem( Json::objectValue );
+        menuItem["id"] = "menu.refresh";
+        menuItem["title"] = "Isolation Fixture";
+        menuItem["commandId"] = "fixture.refresh";
+        menuItems.append( menuItem );
+        schema["menuItems"] = menuItems;
+
+        Json::Value settings( Json::arrayValue );
+        Json::Value page( Json::objectValue );
+        page["id"] = "page.main";
+        page["title"] = "Isolation Fixture";
+        Json::Value controls( Json::arrayValue );
+        Json::Value text( Json::objectValue );
+        text["id"] = "name";
+        text["type"] = "text";
+        text["label"] = "Name";
+        text["defaultValue"] = "world";
+        controls.append( text );
+        Json::Value number( Json::objectValue );
+        number["id"] = "threshold";
+        number["type"] = "number";
+        number["label"] = "Threshold";
+        number["minimum"] = 0;
+        number["maximum"] = 10;
+        number["step"] = 1;
+        number["defaultValue"] = 5;
+        controls.append( number );
+        Json::Value checkbox( Json::objectValue );
+        checkbox["id"] = "enabled";
+        checkbox["type"] = "checkbox";
+        checkbox["label"] = "Enabled";
+        checkbox["defaultValue"] = true;
+        controls.append( checkbox );
+        Json::Value combo( Json::objectValue );
+        combo["id"] = "profile";
+        combo["type"] = "combo";
+        combo["label"] = "Profile";
+        Json::Value options( Json::arrayValue );
+        for ( const char *value : { "fast", "safe" } )
+        {
+            Json::Value option( Json::objectValue );
+            option["value"] = value;
+            option["label"] = value;
+            options.append( option );
+        }
+        combo["options"] = options;
+        combo["defaultValue"] = "safe";
+        controls.append( combo );
+        Json::Value button( Json::objectValue );
+        button["id"] = "apply";
+        button["type"] = "button";
+        button["label"] = "Apply";
+        controls.append( button );
+        page["controls"] = controls;
+        settings.append( page );
+        schema["settingsPages"] = settings;
+
+        Json::Value docks( Json::arrayValue );
+        Json::Value dock( Json::objectValue );
+        dock["id"] = "dock.status";
+        dock["title"] = "Fixture Status";
+        Json::Value dockControls( Json::arrayValue );
+        Json::Value statusLabel( Json::objectValue );
+        statusLabel["id"] = "status";
+        statusLabel["type"] = "label";
+        statusLabel["label"] = "idle";
+        dockControls.append( statusLabel );
+        Json::Value ping( Json::objectValue );
+        ping["id"] = "ping";
+        ping["type"] = "button";
+        ping["label"] = "Ping";
+        dockControls.append( ping );
+        dock["controls"] = dockControls;
+        docks.append( dock );
+        schema["dockPanels"] = docks;
+
+        return schema;
+    }
+
+    Json::Value handleUiEvent( const Json::Value &event ) override
+    {
+        Json::Value response( Json::objectValue );
+        response["ok"] = true;
+        response["echo"] = event;
+        const std::string controlId = event.get( "controlId", "" ).asString();
+        if ( controlId == "apply" || controlId == "ping" )
+        {
+            Json::Value state( Json::objectValue );
+            state["status"] = controlId == "ping" ? "pinged" : "applied";
+            response["state"] = state;
+        }
+        return response;
+    }
+};
+
 } // namespace
 
 EXPRS_EXPORT_PLUGIN( IsolationPlugin )
+EXPRS_EXPORT_UI_SCHEMA_PROVIDER( FixtureUiSchemaProvider )

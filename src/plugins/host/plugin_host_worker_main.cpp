@@ -40,6 +40,7 @@
 #include "exprs/ipc_stream.h"
 #include "exprs/plugin_loader.h"
 #include "exprs/plugin_manifest.h"
+#include "exprs/plugin_ui_schema.h"
 #include "exprs/version.h"
 
 #include "operators/framework/rs_operator_context.h"
@@ -68,6 +69,12 @@
 
 using namespace exprs;
 using namespace sicnu::plugins::hostprotocol;
+
+extern "C" {
+/// Resolved with dlsym/GetProcAddress from the plugin binary when present
+/// (declared here so the worker can resolve it without SDK-loader changes).
+typedef exprs::UiSchemaProviderV1 *( *CreateUiSchemaProviderV1Fn )();
+}
 
 namespace {
 
@@ -801,6 +808,7 @@ int main( int argc, char **argv )
     ExecutionPool pool;
     bool poolStarted = false;
     WorkerPolicy policy;
+    exprs::UiSchemaProviderV1 *uiProvider = nullptr;   // plugin-owned; delete before unload
 
     Ipc::Envelope request;
     for ( ;; )
@@ -901,6 +909,17 @@ int main( int argc, char **argv )
             loadedInstance = loader.take();
             instanceValid = true;
 
+            // Optional declarative-UI provider (protocol 1.1): probe the
+            // optional entry point. Absence is the normal "no UI" answer.
+            if ( void *symbol = PluginLoader::resolveLibrarySymbol(
+                     loadedInstance.libraryHandle, "EXPRS_createUiSchemaProviderV1" ) )
+            {
+                CreateUiSchemaProviderV1Fn create =
+                    reinterpret_cast<CreateUiSchemaProviderV1Fn>( symbol );
+                if ( exprs::UiSchemaProviderV1 *provider = create() )
+                    uiProvider = provider;
+            }
+
             // Dispatch width: min(host ask, worker capability), at least 1.
             int width = 1;
             if ( limits.isObject() && limits["maxConcurrentRequests"].isNumeric() )
@@ -939,6 +958,11 @@ int main( int argc, char **argv )
             // exit; the launcher's kill ladder is the backstop.
             if ( poolStarted )
                 pool.drain( kShutdownDrainTimeoutMs );
+            if ( uiProvider )
+            {
+                delete uiProvider;   // plugin code is still mapped here
+                uiProvider = nullptr;
+            }
             if ( instanceValid )
             {
                 PluginLoader loader;
@@ -955,6 +979,83 @@ int main( int argc, char **argv )
         }
 
         // ---- execution requests: bounded pool -----------------------------
+        else if ( request.method == kDescribeUi || request.method == kInvokeUi )
+        {
+            // Declarative UI (protocol 1.1). ui.describe is answered on the
+            // main thread (one-shot, validated); ui.invoke may interleave
+            // with executions and runs on the pool.
+            if ( !instanceValid || !uiProvider )
+            {
+                // E6008 is the protocol's "no such surface" answer: for
+                // ui.describe it means "the plugin offers no UI".
+                channel.sendError( request.id,
+                                   { "E6008", "plugin provides no declarative UI" } );
+                continue;
+            }
+            if ( request.method == kDescribeUi )
+            {
+                Json::Value schema;
+                try
+                {
+                    schema = uiProvider->describeUi();
+                }
+                catch ( const std::exception &exception )
+                {
+                    channel.sendError( request.id,
+                                       { "E4003",
+                                         std::string( "describeUi() threw: " )
+                                             + exception.what() } );
+                    continue;
+                }
+                const exprs::PluginUiSchemaParseResult validated =
+                    exprs::validatePluginUiSchema( schema );
+                if ( !validated.ok() )
+                {
+                    Json::Value details( Json::arrayValue );
+                    for ( const std::string &error : validated.errors )
+                        details.append( error );
+                    IpcError refusal;
+                    refusal.code = "E5005";
+                    refusal.message = "plugin UI schema failed validation";
+                    refusal.data = details;
+                    channel.sendError( request.id, refusal );
+                    continue;
+                }
+                Json::Value result( Json::objectValue );
+                result["schema"] = validated.normalized;
+                std::string sendError;
+                channel.sendResponse( request.id, result, sendError );
+                continue;
+            }
+            // ui.invoke -> pool (bounded, may wait on plugin state).
+            const Ipc::Envelope uiRequest = std::move( request );
+            const bool posted = pool.post( [this_ = &channel, &cancels, uiProvider, instanceValid,
+                                            uiRequest] {
+                auto cancelled = cancels.registerRequest( uiRequest.id );
+                (void)cancelled; // events are cooperative; the plugin answers
+                Json::Value response;
+                try
+                {
+                    response = uiProvider->handleUiEvent( uiRequest.params["event"] );
+                }
+                catch ( const std::exception &exception )
+                {
+                    this_->sendError( uiRequest.id,
+                                      { "E4003",
+                                        std::string( "handleUiEvent() threw: " )
+                                            + exception.what() } );
+                    return;
+                }
+                Json::Value result( Json::objectValue );
+                result["response"] = response;
+                std::string sendError;
+                this_->sendResponse( uiRequest.id, result, sendError );
+                cancels.unregisterRequest( uiRequest.id );
+            } );
+            if ( !posted )
+                channel.sendError( uiRequest.id,
+                                   { "E6002", "worker is shutting down; request refused" } );
+        }
         else if ( request.method == kExecuteOperator || request.method == kExecuteAgentTool
                   || request.method == kDiscoverData || request.method == kInspectData
                   || request.method == kOpenData || request.method == kLoadModel
@@ -1027,6 +1128,11 @@ int main( int argc, char **argv )
     // shutdown contract inside the worker, then let the process exit.
     if ( poolStarted )
         pool.drain( kShutdownDrainTimeoutMs );
+    if ( uiProvider )
+    {
+        delete uiProvider;
+        uiProvider = nullptr;
+    }
     if ( instanceValid )
     {
         PluginLoader loader;

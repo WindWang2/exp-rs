@@ -302,6 +302,96 @@ Json::Value PluginHostProcessRuntime::diagnosticsSnapshot() const
     return snapshot;
 }
 
+Json::Value PluginHostProcessRuntime::describeUiSchema( const std::string &pluginId,
+                                                        PluginDiagnosticLog &log )
+{
+    Json::Value result( Json::objectValue );
+    std::shared_ptr<PluginHostProcessSession> session;
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        auto iterator = mSessions.find( pluginId );
+        if ( iterator == mSessions.end() )
+        {
+            result["ok"] = false;
+            result["error"] = "plugin is not hosted (E4003)";
+            return result;
+        }
+        session = iterator->second->session;
+    }
+    if ( !session || !session->isAlive() )
+    {
+        result["ok"] = false;
+        result["error"] = "worker process is not running (E6005)";
+        return result;
+    }
+    IpcChannel::Outcome outcome =
+        session->request( kDescribeUi, Json::Value( Json::objectValue ),
+                          std::max( 10000, mOptions.handshakeTimeoutMs ) );
+    if ( outcome.status == IpcChannel::Outcome::Status::Error
+         && outcome.error.code == "E6008" )
+    {
+        result["ok"] = false;
+        result["error"] = "plugin provides no declarative UI (E6008)";
+        return result;
+    }
+    if ( outcome.status != IpcChannel::Outcome::Status::Ok )
+    {
+        result["ok"] = false;
+        result["error"] = outcome.error.message.empty()
+                              ? "ui.describe failed"
+                              : outcome.error.message;
+        if ( !outcome.error.code.empty() )
+            result["code"] = outcome.error.code;
+        log.add( PluginDiagnosticCode::IpcProtocolError, PluginDiagnosticSeverity::Warning,
+                 "ui.describe failed: " + outcome.error.message, pluginId );
+        return result;
+    }
+    result["ok"] = true;
+    result["schema"] = outcome.result["schema"];
+    return result;
+}
+
+Json::Value PluginHostProcessRuntime::invokeUi( const std::string &pluginId,
+                                                const Json::Value &event, int timeoutMs,
+                                                PluginDiagnosticLog &log )
+{
+    Json::Value result( Json::objectValue );
+    std::shared_ptr<PluginHostProcessSession> session;
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        auto iterator = mSessions.find( pluginId );
+        if ( iterator == mSessions.end() )
+        {
+            result["ok"] = false;
+            result["error"] = "plugin is not hosted (E4003)";
+            return result;
+        }
+        session = iterator->second->session;
+    }
+    if ( !session || !session->isAlive() )
+    {
+        result["ok"] = false;
+        result["error"] = "worker process is not running (E6005)";
+        return result;
+    }
+    Json::Value params( Json::objectValue );
+    params["event"] = event;
+    IpcChannel::Outcome outcome =
+        session->request( kInvokeUi, params, timeoutMs > 0 ? timeoutMs : 10000 );
+    if ( outcome.status != IpcChannel::Outcome::Status::Ok )
+    {
+        result["ok"] = false;
+        result["error"] = outcome.error.message.empty() ? "ui.invoke failed"
+                                                        : outcome.error.message;
+        if ( !outcome.error.code.empty() )
+            result["code"] = outcome.error.code;
+        return result;
+    }
+    result["ok"] = true;
+    result["response"] = outcome.result["response"];
+    return result;
+}
+
 bool PluginHostProcessRuntime::isWorkerAlive( const std::string &pluginId ) const
 {
     std::lock_guard<std::mutex> lock( mMutex );
