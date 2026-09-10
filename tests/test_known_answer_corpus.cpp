@@ -236,8 +236,8 @@ TEST_CASE( "known-answer: TOA reflectance divides by sin(sun elevation)",
     // θ=90° ⇒ 1; θ=30° ⇒ 1/sin30° = 2; θ=45° ⇒ √2. The sun-elevation
     // branch is the physics — a missing/extra division breaks all three.
     BandCoefficients c;
-    c.reflMult = 1.0;
-    c.reflAdd = 0.0;
+    c.reflMult = 2.0;
+    c.reflAdd = 0.5;
     c.hasReflectance = true;
     const std::vector<float> dn = { 1.0f };
     std::vector<float> rho( 1 );
@@ -247,9 +247,9 @@ TEST_CASE( "known-answer: TOA reflectance divides by sin(sun elevation)",
         double elevation;
         double expected;
     };
-    const std::vector<Case> cases = { { 90.0, 1.0 },
-                                      { 30.0, 2.0 },
-                                      { 45.0, std::sqrt( 2.0 ) } };
+    const std::vector<Case> cases = { { 90.0, 2.5 },
+                                      { 30.0, 5.0 },
+                                      { 45.0, 2.5 * std::sqrt( 2.0 ) } };
     for ( const Case &kase : cases )
     {
         REQUIRE( toToaReflectance( dn.data(), rho.data(), 1, c, SensorType::Landsat,
@@ -263,11 +263,12 @@ TEST_CASE( "known-answer: brightness temperature inverts the calibration "
            "Planck trace",
            "[known_answer][radiometric]" )
 {
-    // T = K2 / ln(K1/L + 1). Feeding L = K2/ln(K1/T₀ + 1) must return T₀:
-    // compose the forward trace at T₀ = 300 K and check the round trip.
+    // T = K2 / ln(K1/L + 1). The exact inverse radiance for T₀ is
+    // L = K1 / (exp(K2/T₀) − 1); feed that and the kernel must return T₀
+    // (a Planck-trace inversion with the Landsat 8 band 10 constants).
     const double k1 = 607.76, k2 = 1260.56; // Landsat 8 band 10 constants
     const double t0 = 300.0;
-    const float radiance = static_cast<float>( k2 / std::log( k1 / t0 + 1.0 ) );
+    const float radiance = static_cast<float>( k1 / ( std::exp( k2 / t0 ) - 1.0 ) );
 
     BandCoefficients c;
     c.k1 = k1;

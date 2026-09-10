@@ -28,8 +28,8 @@ QJsonObject validManifest()
 {
     QJsonObject json;
     json.insert( QStringLiteral( "schema_version" ), 1 );
-    json.insert( QStringLiteral( "dataset_id" ), QStringLiteral( "ds-fuzz-1" ) );
-    json.insert( QStringLiteral( "version_id" ), QStringLiteral( "ver-1" ) );
+    json.insert( QStringLiteral( "dataset_id" ), QStringLiteral( "6ba7b810-9dad-11d1-80b4-00c04fd430c8" ) );
+    json.insert( QStringLiteral( "version_id" ), QStringLiteral( "6ba7b811-9dad-11d1-80b4-00c04fd430c8" ) );
     json.insert( QStringLiteral( "name" ), QStringLiteral( "Fuzz Fixture" ) );
 
     QJsonObject schema;
@@ -64,8 +64,9 @@ TEST_CASE( "dataset manifest: valid baseline parses and tolerates unknown "
 {
     const auto result = DatasetManifest::fromJson( validManifest() );
     REQUIRE( result.has_value() );
-    REQUIRE( result->datasetId() == QStringLiteral( "ds-fuzz-1" ) );
-    REQUIRE( result->versionId() == QStringLiteral( "ver-1" ) );
+    // Already-lowercase UUID: QUuid canonicalization must return it verbatim.
+    REQUIRE( result->datasetId() == QStringLiteral( "6ba7b810-9dad-11d1-80b4-00c04fd430c8" ) );
+    REQUIRE( result->versionId() == QStringLiteral( "6ba7b811-9dad-11d1-80b4-00c04fd430c8" ) );
 }
 
 TEST_CASE( "dataset manifest fuzz: mutated payloads never crash and never "

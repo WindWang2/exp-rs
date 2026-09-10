@@ -140,9 +140,11 @@ class Trace
     static void install( std::shared_ptr<ITraceSink> sink );
     static std::shared_ptr<ITraceSink> sink();
 
-    /// Hot-path entry point: one relaxed load when disabled.
+    /// Hot-path entry point: one relaxed load when disabled. Defined in the
+    /// .cpp: inline accessors would reference the private static data
+    /// members from consumer TUs, which the DLL export surface does not carry.
     static void publish( const TraceEvent &event );
-    static bool enabled() { return s_enabled.load( std::memory_order_relaxed ); }
+    static bool enabled();
 
   private:
     static std::atomic<bool> s_enabled;

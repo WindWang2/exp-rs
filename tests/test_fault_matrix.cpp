@@ -18,6 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QString>
@@ -226,10 +227,16 @@ TEST_CASE( "fault matrix: pool staging copy failure leaves no object and no "
     REQUIRE( object2.has_value() );
 
     // No .puttmp staging residue anywhere in the pool tree.
-    QDir poolDir( dir.filePath( QStringLiteral( "pool" ) ) );
-    const auto entries = poolDir.entryList( { QStringLiteral( "*.puttmp" ) }, QDir::Files,
-                                            QDir::Subdirectories );
-    REQUIRE( entries.isEmpty() );
+    int puttmpResidue = 0;
+    QDirIterator it( dir.filePath( QStringLiteral( "pool" ) ),
+                     { QStringLiteral( "*.puttmp" ) }, QDir::Files,
+                     QDirIterator::Subdirectories );
+    while ( it.hasNext() )
+    {
+        it.next();
+        ++puttmpResidue;
+    }
+    REQUIRE( puttmpResidue == 0 );
 }
 
 TEST_CASE( "fault matrix: pool publish-rename failure returns nullopt and the "
