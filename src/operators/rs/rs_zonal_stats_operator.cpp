@@ -278,8 +278,14 @@ Json::Value RsZonalStatsOperator::run( const Json::Value &params, RSOperatorCont
                 const bool hasS = hasSentinel[bi];
                 for ( size_t i = 0; i < winN; ++i )
                 {
-                    const int slot = static_cast<int>( mask[i] );
-                    if ( slot <= 0 )
+                    // NaN-safe slot test: the mask holds burn values 1..n
+                    // or NaN (unburned); a float→int cast of NaN would be
+                    // undefined behavior, so filter on the float first.
+                    const float maskValue = mask[i];
+                    if ( !( maskValue > 0.0f ) )
+                        continue;
+                    const int slot = static_cast<int>( maskValue );
+                    if ( slot > static_cast<int>( slotFeatures.size() ) )
                         continue;
                     BandAcc &acc = zones[slotFeatures[static_cast<size_t>( slot - 1 )]->zoneKey]
                                    [bands[bi]];
@@ -373,6 +379,7 @@ Json::Value RsZonalStatsOperator::run( const Json::Value &params, RSOperatorCont
     result["geometrylessFeatures"] = Json::Value::UInt64( cache.geometryless );
     result["outsideGridFeatures"] = Json::Value::UInt64( cache.outsideGrid );
     result["medianTruncatedZones"] = Json::Value::UInt64( truncatedZones );
+    result["windowsTouched"] = Json::Value::UInt64( windowsTouched );
     context.reportProgress( 1.0, "Zonal statistics complete" );
     return result;
 }

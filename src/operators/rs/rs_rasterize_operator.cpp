@@ -241,6 +241,7 @@ Json::Value RsRasterizeOperator::run( const Json::Value &params, RSOperatorConte
     result["features"] = Json::Value::UInt64( cache.features.size() );
     result["geometrylessFeatures"] = Json::Value::UInt64( cache.geometryless );
     result["outsideGridFeatures"] = Json::Value::UInt64( cache.outsideGrid );
+    result["windowsTouched"] = Json::Value::UInt64( windowsTouched );
     result["allTouched"] = allTouched;
     context.reportProgress( 1.0, "Rasterize complete" );
     return result;
