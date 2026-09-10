@@ -426,31 +426,37 @@ int PluginHostProcessSession::effectiveConcurrency() const
 void PluginHostProcessSession::killProcess( const char *reason )
 {
     (void)reason;
-    if ( !mProcessAlive.exchange( false ) )
-        return;
+    // NOTE: this must do useful work even when the worker already died by
+    // ITSELF (crash): the process group still holds worker-spawned
+    // grandchildren, and the Windows job handle must close so kill-on-close
+    // reaps them. The early-return guard of v1 orphaned exactly that.
 #ifdef _WIN32
-    if ( mJobHandle )
+    const bool wasAlive = mProcessAlive.exchange( false );
+    if ( wasAlive )
     {
-        ::TerminateJobObject( mJobHandle, 9 );
-    }
-    else if ( mProcessHandle )
-    {
-        ::TerminateProcess( mProcessHandle, 9 );
+        if ( mJobHandle )
+            ::TerminateJobObject( mJobHandle, 9 );
+        else if ( mProcessHandle )
+            ::TerminateProcess( mProcessHandle, 9 );
+        if ( mProcessHandle )
+            ::WaitForSingleObject( mProcessHandle, 5000 );
     }
     if ( mProcessHandle )
     {
-        ::WaitForSingleObject( mProcessHandle, 5000 );
         ::CloseHandle( mProcessHandle );
         mProcessHandle = nullptr;
     }
     if ( mJobHandle )
     {
+        // Closing the last job handle fires JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE:
+        // every survivor in the job (worker-spawned children included) dies.
         ::CloseHandle( mJobHandle );
         mJobHandle = nullptr;
     }
 #else
+    const bool wasAlive = mProcessAlive.exchange( false );
     const pid_t pid = static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) );
-    if ( pid > 0 )
+    if ( wasAlive && pid > 0 )
     {
         // Process-group kill first: worker-spawned grandchildren (fork/exec
         // inside plugin code) die WITH the worker, not as orphans. The
@@ -460,6 +466,11 @@ void PluginHostProcessSession::killProcess( const char *reason )
         ::kill( pid, SIGKILL );
         int status = 0;
         ::waitpid( pid, &status, 0 );
+    }
+    else if ( mProcessGroupId > 0 )
+    {
+        // Worker died by itself (crash): reap the rest of its group.
+        ::kill( static_cast<pid_t>( -mProcessGroupId ), SIGKILL );
     }
     mProcessHandle = nullptr;
     mProcessGroupId = -1;
@@ -729,6 +740,16 @@ bool PluginHostProcessSession::shutdown( int timeoutMs, PluginDiagnosticLog &dia
             std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
         }
         mProcessAlive = false;
+#ifndef _WIN32
+        if ( exited && mProcessGroupId > 0 )
+        {
+            // The worker exited cleanly, but plugin-spawned grandchildren
+            // survive a plain exit (they would be reparented to init).
+            // Windows kills them via job close at this same point; reap the
+            // group here for parity.
+            ::kill( static_cast<pid_t>( -mProcessGroupId ), SIGKILL );
+        }
+#endif
         if ( !exited )
         {
             killProcess( "shutdown grace elapsed" );

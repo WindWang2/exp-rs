@@ -22,6 +22,8 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <signal.h>
+#include <sys/types.h>
 #include <unistd.h>
 #endif
 #include <filesystem>
@@ -482,3 +484,79 @@ TEST_CASE( "ConcurrencyGate is FIFO-fair and bounded", "[hostprocess][gate]" )
     REQUIRE( firstGotSlot );
     REQUIRE( secondGotSlot );
 }
+
+#ifndef _WIN32
+TEST_CASE( "process-group cleanup takes worker-spawned grandchildren with the worker",
+           "[hostprocess][orphans]" )
+{
+    auto grandchildAlive = []( pid_t pid ) { return pid > 0 && ::kill( pid, 0 ) == 0; };
+    auto waitReaped = [&grandchildAlive]( pid_t pid ) {
+        for ( int i = 0; i < 50; ++i )
+        {
+            if ( !grandchildAlive( pid ) )
+                return true;
+            std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+        }
+        return !grandchildAlive( pid );
+    };
+
+    // Scenario 1: GRACEFUL unload. The fixture writes the grandchild pid to
+    // $SICNU_ISO_SPAWN_MARKER (read by the WORKER, so set before load).
+    pid_t firstChild = -1;
+    {
+        Stack stack;
+        auto &registry = PluginRegistry::instance();
+        const std::string marker = ( std::filesystem::path( stack.tempDir ) / "spawn.pid" ).generic_string();
+        ::setenv( "SICNU_ISO_SPAWN_MARKER", marker.c_str(), 1 );
+        REQUIRE( loadOrExplain( kPluginId ) );
+
+        Json::Value params( Json::objectValue );
+        params["childSeconds"] = 60;
+        Json::Value result = runOperator( stack, "test:iso-spawn", params );
+        REQUIRE( result["success"].asBool() );
+        REQUIRE( result["supported"].asBool() );
+        std::ifstream in( marker );
+        REQUIRE( in.is_open() );
+        in >> firstChild;
+        in.close();
+        REQUIRE( grandchildAlive( firstChild ) );
+
+        // Graceful unload; the POSIX group reap fires with the shutdown
+        // (parity with the Windows job-close semantics).
+        REQUIRE( registry.unload( kPluginId ) );
+        REQUIRE( waitReaped( firstChild ) );
+        ::unsetenv( "SICNU_ISO_SPAWN_MARKER" );
+    }
+
+    // Scenario 2: CRASH. The worker aborts itself; the group survives until
+    // the session's confirmed-dead cleanup reaps it.
+    {
+        Stack stack;
+        auto &registry = PluginRegistry::instance();
+        const std::string marker = ( std::filesystem::path( stack.tempDir ) / "spawn.pid" ).generic_string();
+        ::setenv( "SICNU_ISO_SPAWN_MARKER", marker.c_str(), 1 );
+        REQUIRE( loadOrExplain( kPluginId ) );
+
+        Json::Value params( Json::objectValue );
+        params["childSeconds"] = 60;
+        Json::Value result = runOperator( stack, "test:iso-spawn", params );
+        REQUIRE( result["success"].asBool() );
+        pid_t child = -1;
+        std::ifstream in( marker );
+        REQUIRE( in.is_open() );
+        in >> child;
+        in.close();
+        REQUIRE( grandchildAlive( child ) );
+
+        Json::Value crash = runOperator( stack, "test:iso-crash", Json::Value() );
+        REQUIRE( crash["__operatorError"].asBool() );
+        REQUIRE( waitReaped( child ) ); // no orphan after the crash path
+
+        // Reload restores a fresh worker (crash test parity).
+        REQUIRE( registry.unload( kPluginId ) );
+        REQUIRE( loadOrExplain( kPluginId ) );
+        REQUIRE( registry.unload( kPluginId ) );
+        ::unsetenv( "SICNU_ISO_SPAWN_MARKER" );
+    }
+}
+#endif
