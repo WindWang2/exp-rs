@@ -40,6 +40,17 @@ void syncArmedCount_locked()
 }
 } // namespace
 
+bool shouldFail( const char *name )
+{
+    if ( g_armedCount.load( std::memory_order_relaxed ) == 0 )
+        return false;
+    if ( !name )
+        return false;
+    // Armed: reuse the std::string path (allocation only happens on the
+    // armed path, never on the production fast path).
+    return shouldFail( std::string( name ) );
+}
+
 bool shouldFail( const std::string &name )
 {
     if ( g_armedCount.load( std::memory_order_relaxed ) == 0 )
@@ -87,7 +98,9 @@ void armFault( const FaultAction &action )
     Entry &entry = registryMap()[action.name];
     entry.mode = action.mode;
     entry.remaining = action.mode == Mode::Always ? UINT32_MAX : action.count;
-    entry.period = action.count;
+    // Normalize: EveryNth with period 0 would never fire yet permanently
+    // defeat the global fast path (armedCount stays > 0).
+    entry.period = action.count > 0 ? action.count : 1;
     entry.calls = 0;
     entry.payload = action.payload;
     syncArmedCount_locked();

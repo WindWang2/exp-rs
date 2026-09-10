@@ -46,15 +46,18 @@ never emits a raw newline).
 | OutputCommitter | publish / rollback / register | artifact id = registered AssetId |
 | Data/Experiment | asset registered / experiment appended | closes the chain |
 
-The adapters live in `src/runtime/observability/` (`trace_adapters.*`) and
-are wired at the seams that ALREADY broadcast state (listeners, transitions);
-no second event bus, no polling.
+The adapters are thin inline blocks wired at the seams that ALREADY
+broadcast state — `ExecutionPlane::submit` + the completion callback
+(`execution_plane.cpp`) and `JobEngine::runOperatorJob` (`job_engine.cpp`,
+execution_start/end via an RAII guard); no second event bus, no polling,
+no separate `trace_adapters.*` files.
 
 ## Sinks & budgets
 
-- **Disabled by default.** `Trace::emit` with no sink = one relaxed atomic
-  load (same hot-path contract as `ExecutionTelemetry`). Measured evidence in
-  `benchmarks/quality7.json` (`trace_emit_disabled`).
+- **Disabled by default.** `Trace::publish` with no sink = one relaxed atomic
+  load (same hot-path contract as `ExecutionTelemetry`); both adapter sites
+  additionally gate on `Trace::enabled()` before building strings. Measured
+  evidence in `benchmarks/quality7.json` (`trace_emit_disabled`).
 - `RingTraceSink` — bounded in-memory ring (tests, GUI inspector).
 - `FileTraceSink` — NDJSON append via a single writer thread; bounded queue
   (drop-oldest + dropped counter — honest accounting, bounded memory);
@@ -75,6 +78,7 @@ codes stay honest (`recoverability: unknown`), never renamed, never swallowed
 
 - `test_trace_contract` — id format/uniqueness/sortability under 8-thread
   concurrency, deterministic mode, encoder escaping, ring bounds, file
-  rotation bound + no record loss, drop accounting, disabled hot path.
+  rotation bound (history-bounded, newest kept), drop accounting with
+  written + dropped == pushed coherence, disabled hot path.
 - `test_diagnostic_report` — envelope fields, verbatim unknown codes,
   escaping, one-line guarantee.

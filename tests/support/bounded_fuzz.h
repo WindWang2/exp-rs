@@ -48,7 +48,8 @@ class BoundedRandom
     /// True with probability ~p (0.0–1.0).
     bool chance( double p ) { return ( next() & 0xFFFFFFFFull ) < static_cast<uint64_t>( p * 4294967295.0 ); }
 
-    /// Picks one element of @p items (empty vector → empty result).
+    /// Picks one element of @p items. PRECONDITION: items is non-empty
+    /// (callers must not pass an empty vector — a reference cannot be empty).
     template <typename T>
     const T &pick( const std::vector<T> &items )
     {

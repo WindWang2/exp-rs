@@ -273,7 +273,11 @@ void FileTraceSink::write( const TraceEvent &event )
     {
         std::lock_guard<std::mutex> lock( m_queueMutex );
         if ( m_queue.size() >= m_options.queueCapacity )
+        {
             m_queue.pop_front(); // drop-oldest; bounded memory
+            // Honest accounting: the drop is part of the trace evidence.
+            m_dropped.fetch_add( 1, std::memory_order_relaxed );
+        }
         m_queue.push_back( event );
     }
     m_queueCv.notify_one();
@@ -420,7 +424,13 @@ std::string installFileSinkFromEnv()
     if ( const char *dir = std::getenv( "SICNU_TRACE_DIR" ) )
         options.directory = dir;
     if ( options.directory.empty() )
-        options.directory = ( std::filesystem::temp_directory_path() / "sicnu-trace" ).string();
+    {
+        std::error_code ec;
+        auto tmpRoot = std::filesystem::temp_directory_path( ec );
+        if ( ec )
+            return std::string(); // no usable temp dir: stay disabled, never throw
+        options.directory = ( tmpRoot / "sicnu-trace" ).string();
+    }
     if ( const char *maxMb = std::getenv( "SICNU_TRACE_MAX_MB" ) )
     {
         const unsigned long long mb = std::strtoull( maxMb, nullptr, 10 );

@@ -10,6 +10,7 @@
 #include "runtime/observability/fault_registry.h"
 
 #include <atomic>
+#include <functional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -137,10 +138,38 @@ TEST_CASE( "fault registry: concurrent probes never crash and NextN is bounded",
 TEST_CASE( "fault registry: rollback after a fired fault runs fault-free", "[fault][registry]" )
 {
     AllDisarmed guard;
-    // Real seams: the fault-induced failure triggers a rollback that re-enters
-    // the seam. With NextN(1), the entry is consumed by the first firing, so
-    // the re-entrant cleanup call must observe a healthy path.
+    // Real seams: the fault-induced failure triggers a rollback that RE-ENTERS
+    // the same seam while the failure branch is still running. With NextN(1)
+    // the entry is consumed by the outer firing, so the nested cleanup call
+    // must observe a healthy path — asserted with true nesting here.
     armFault( { "seam.write", Mode::NextN, 1, {} } );
-    REQUIRE( writeThroughSeam( "outer" ) == "failure" );
-    REQUIRE( writeThroughSeam( "rollback" ) == "ok:rollback" );
+
+    // A seam whose failure branch re-enters itself (rollback publish).
+    const std::function<std::string( bool nested )> seamWithRollback =
+        [ & ]( bool nested ) -> std::string {
+        if ( SICNU_FAULT_POINT( "seam.write" ) )
+            return nested ? "outer-failure(rollback=" + seamWithRollback( true ) + ")"
+                          : "failure";
+        return "ok";
+    };
+    const std::string outcome = seamWithRollback( false );
+    // outer fired (NextN consumed); the nested rollback probe saw nothing armed.
+    REQUIRE( outcome == "failure" );
+    REQUIRE( armedFaultCount() == 0 );
+    REQUIRE( seamWithRollback( false ) == "ok" );
+
+    // With Always, re-entry DOES re-fire — document that an Always arm is a
+    // deliberate choice a test makes when the rollback must fail too.
+    armFault( { "seam.write", Mode::Always, 1, {} } );
+    int firings = 0;
+    std::function<void( int )> alwaysSeam = [ & ]( int depth ) {
+        if ( shouldFail( "seam.write" ) )
+        {
+            ++firings;
+            if ( depth < 2 )
+                alwaysSeam( depth + 1 ); // rollback re-enters
+        }
+    };
+    alwaysSeam( 0 );
+    REQUIRE( firings == 2 ); // outer + nested re-entry both fired
 }

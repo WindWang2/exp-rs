@@ -3,8 +3,12 @@ include(Catch)
 
 if(WIN32 AND TARGET Catch2WithMain)
   set_property(TARGET Catch2WithMain PROPERTY SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/sicnu_test_main.cpp")
-  # sicnu_test_main wires the unified-trace env bootstrap (Verification 7.0).
+  # sicnu_test_main wires the unified-trace env bootstrap (Verification 7.0),
+  # which references sicnu_runtime. Link (not just include) here so EVERY
+  # Catch2 consumer inherits the dependency via LINK_ONLY — io test targets
+  # and light fuzz targets link only Catch2::Catch2WithMain.
   target_include_directories(Catch2WithMain PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(Catch2WithMain PRIVATE sicnu_runtime)
 endif()
 
 # Wrapper around catch_discover_tests that injects LSAN_OPTIONS when sanitizers
@@ -38,8 +42,11 @@ function(sicnu_discover_tests NAME)
     PROPERTIES ${_discovery_props})
 endfunction()
 
-# Helper function to add a test executable
+# Helper function to add a test executable. Extra args (TIMEOUT n,
+# RUN_SERIAL TRUE, ...) are forwarded to sicnu_discover_tests as test
+# properties — previously they were accepted and silently dropped.
 function(sicnu_add_test NAME)
+  cmake_parse_arguments(SAT "" "" "" ${ARGN})
   qt_add_executable(${NAME} ${NAME}.cpp)
   target_link_libraries(${NAME} PRIVATE
     Catch2::Catch2WithMain
@@ -66,7 +73,11 @@ function(sicnu_add_test NAME)
   target_compile_definitions(${NAME} PRIVATE
     CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   )
-  sicnu_discover_tests(${NAME})
+  if(SAT_UNPARSED_ARGUMENTS)
+    sicnu_discover_tests(${NAME} ${SAT_UNPARSED_ARGUMENTS})
+  else()
+    sicnu_discover_tests(${NAME})
+  endif()
 endfunction()
 
 # Geospatial I/O Foundation 4.0: light test executables. Links only

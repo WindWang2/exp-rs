@@ -14,11 +14,12 @@
 //
 // The point must route through the *production failure path* — a fault point
 // never fabricates success and never bypasses error handling; it only makes
-// the real code take the real failure branch. Nested failure paths that
-// re-enter the same seam see "not firing" (per-name suspend guard).
+// the real code take the real failure branch. Nesting: a consumed NextN fault
+// is disarmed before the failure branch runs, so rollback re-entry is
+// fault-free; Always re-fires on re-entry.
 #pragma once
 
 #include "fault_registry.h"
 
 #define SICNU_FAULT_POINT( name ) \
-    ::sicnu::runtime::observability::fault::shouldFail( name )
+    ::sicnu::runtime::observability::fault::shouldFail( static_cast<const char *>( name ) )

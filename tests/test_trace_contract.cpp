@@ -251,34 +251,27 @@ TEST_CASE( "file sink: bounded queue drops oldest and counts drops", "[trace][fi
                      ( "sicnu-trace-drop-" + TraceIdGenerator::next() );
     FileTraceSink::Options options;
     options.directory = tmp.string();
+    options.baseName = "drop";
     options.queueCapacity = 8; // force drops faster than the writer drains
+    options.maxFileBytes = 64ull * 1024 * 1024; // no rotation: file keeps ALL written records
+    constexpr int kPushed = 100000;
+    uint64_t dropped;
     {
         FileTraceSink sink( options );
-        for ( int i = 0; i < 100000; ++i )
+        for ( int i = 0; i < kPushed; ++i )
         {
             TraceEvent event;
             event.event = "flood";
             sink.write( event );
         }
+        dropped = sink.droppedCount();
     }
-    // After drain, records written ≤ pushed; drops were counted honestly.
-    // (Exact split is timing-dependent; the invariant is: dropped + written == pushed.)
-    const uint64_t dropped = 0; // captured before destruction — intentionally
-    // re-run the invariant check on a fresh sink instance where we can observe:
-    FileTraceSink::Options options2 = options;
-    options2.queueCapacity = 8;
-    FileTraceSink probe( options2 );
-    for ( int i = 0; i < 1000; ++i )
-    {
-        TraceEvent event;
-        event.event = "flood";
-        probe.write( event );
-    }
-    // The writer thread may drain concurrently; drops can only be >= 0 and
-    // the counter is exposed — assert the accounting path exists and is
-    // coherent after drain (queue empty, counter stable, no crash).
-    ( void )dropped;
-    ( void )probe.droppedCount();
+    // After the destructor drains the queue: written + dropped == pushed
+    // (honest accounting — every record is either on disk or counted).
+    size_t written = readLines( ( tmp / "drop.ndjson" ).string() ).size();
+    INFO( "written=" << written << " dropped=" << dropped );
+    REQUIRE( dropped >= 1 ); // the flood MUST have overflowed a capacity-8 queue
+    REQUIRE( written + static_cast<size_t>( dropped ) == static_cast<size_t>( kPushed ) );
     std::error_code ec;
     std::filesystem::remove_all( tmp, ec );
 }

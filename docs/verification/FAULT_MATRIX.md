@@ -10,10 +10,11 @@ load when nothing is armed); arming happens only from test code.
 | staged copy fails (disk full analog) | `artifact_pool.stage_copy` | `put` returns nullopt, tmp removed, pool stays healthy, next put succeeds | `test_fault_matrix` (pool staging copy failure) ✓ |
 | staged publish (rename) fails | `artifact_pool.stage_publish` | nullopt, no object fabricated, no `.puttmp` residue | `test_fault_matrix` (pool publish-rename failure) ✓ |
 | mid-group publish rename fails | `output_committer.publish` (EveryNth) | commit fails truthfully, whole group rolled back, no half-published dataset | `test_fault_matrix` (mid-group rollback) ✓ |
+| in-place commit failure | not probed — `isInPlace` commits take a different branch | acceptable: in-place publish has no staging/rollback window | note (review R1) |
 | publish rename fails (lock/permission) | `output_committer.publish` (NextN) | commit fails, previous stable output survives byte-identical, no `.new`/`.old` residue | `test_fault_matrix` (publish preserves previous stable) ✓ |
 | checkpoint write fails (short write / ENOSPC) | `workflow_checkpoint.write` | save returns empty, tmp removed, old checkpoint still loads | `test_fault_matrix` (checkpoint write failure) ✓ |
 | checkpoint rename fails (locked target) | `workflow_checkpoint.publish` | save returns empty, old checkpoint bytes intact, no tmp residue | `test_fault_matrix` (checkpoint publish failure) ✓ |
-| registry-mode faults (fail-once / fail-n / every-nth) | fault registry | exactly N firings under 8-thread concurrency; rollback re-entry runs fault-free; RAII survives throwing assertions | `test_fault_registry` ✓ |
+| registry-mode faults (fail-once / fail-n / every-nth) | fault registry | exactly N firings under 8-thread concurrency; NextN rollback re-entry runs fault-free (true nested probe), Always re-fires by design; RAII survives throwing assertions | `test_fault_registry` ✓ |
 | cache object corrupt (self-heal) | corrupt object bytes | corrupted object → cache miss, never wrong serve | `test_fault_injection` (POSIX) [existing] |
 | checkpoint file corrupt | corrupt checkpoint JSON | skipped, not fatal; ghost-election prevents double execution | `test_fault_injection` (POSIX) [existing] |
 | cross-process run lock | second owner | double-start refused, serialized submissions | `test_fault_injection` (POSIX) [existing] |

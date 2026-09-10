@@ -27,6 +27,9 @@ constexpr auto kAwaitSlice = std::chrono::milliseconds( 25 );
 void tracePlaneEvent( const char *event, const char *status, const ExecutionRequest &request,
                       long taskId )
 {
+  // Gate BEFORE building strings: the disabled path must not allocate.
+  if ( !sicnu::runtime::observability::trace::Trace::enabled() )
+    return;
   sicnu::runtime::observability::trace::TraceEvent trace;
   trace.run = request.correlationId.toStdString();
   trace.task = taskId > 0 ? std::to_string( taskId ) : std::string();
@@ -114,6 +117,7 @@ ExecutionHandle ExecutionPlane::submit( const ExecutionRequest &request )
         }
         // Unified trace: terminal transition (Verification 7.0). Mirrors the
         // TaskStatus → ExecutionState mapping at the statusToState seam.
+        if ( sicnu::runtime::observability::trace::Trace::enabled() )
         {
           sicnu::runtime::observability::trace::TraceEvent trace;
           trace.task = std::to_string( info.taskId );

@@ -97,7 +97,10 @@ TEST_CASE( "AgentPlan fuzz: reader is total; accept/reject always truthful",
             if ( error.code.empty() )
             {
                 // Accepted: identity round-trips (raw document preserved).
-                REQUIRE( plan.planId == doc["plan_id"].asString() );
+                // Guarded: jsoncpp asString throws on object/array, and a
+                // mutated-but-accepted plan may carry a non-string plan_id.
+                if ( doc["plan_id"].isString() )
+                    REQUIRE( plan.planId == doc["plan_id"].asString() );
             }
             else
             {

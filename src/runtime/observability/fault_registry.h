@@ -12,9 +12,12 @@
 //       EveryNth — fires true on every n-th call (count = n).
 //   * shouldFail(name) — the production-site probe. Mutex-guarded map only on
 //     the armed path; the mutex is never held across user code, so a fault
-//     site may re-enter (nested publish) without deadlock. Nested probes of a
-//     name whose failure path is currently running observe "not firing"
-//     (Suspend guard, used by the seam itself when its failure branch runs).
+//     site may re-enter (nested publish) without deadlock. Nesting semantics
+//     are mode-defined: a NextN fault consumed by the outer firing is
+//     disarmed, so cleanup/rollback re-entry runs fault-free; an Always fault
+//     re-fires on re-entry (arm that deliberately when a test wants the
+//     rollback path to fail too). There is deliberately NO suspend guard —
+//     prediction beats interception for deterministic tests.
 //   * payload(name) — optional annotation the site may use (e.g. to write a
 //     truncated buffer). Empty when nothing armed.
 //   * Armed RAII hard-disarms everything on scope exit so a failing assertion
@@ -49,6 +52,11 @@ struct FaultAction
 /// fault-free — arm additional firings explicitly when a test wants the
 /// rollback to fail too.
 bool shouldFail( const std::string &name );
+/// Literal-string overload: checks the armed counter BEFORE constructing a
+/// std::string, so a disarmed probe performs no heap allocation (the
+/// documented "one relaxed atomic load" budget is literal for call sites
+/// that pass a string literal, i.e. every SICNU_FAULT_POINT site).
+bool shouldFail( const char *name );
 
 /// Test-side control.
 void armFault( const FaultAction &action );
