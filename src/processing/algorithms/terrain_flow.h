@@ -24,6 +24,7 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace TerrainFlow
@@ -46,5 +47,18 @@ bool flowDirections( const float *filled, float *dir, int width, int height, flo
 bool flowAccumulation( const float *dir, float *acc, int width, int height );
 bool flowAccumulation( const float *dir, float *acc, int width, int height,
                        const float *filled, float nodata );
+
+/// Watershed delineation on the D8 graph: labels every cell whose flow path
+/// reaches one of @a pourPoints (zero-based (col,row) pairs). Cells draining
+/// to pour point k receive label k+1; cells on no path to any pour point
+/// (including direction-0 sinks that are not pour points) receive 0. A pour
+/// point always carries its own label. Deterministic: the upstream BFS is
+/// seeded in pour-point order and a reachable-from-both cell keeps the label
+/// of the FIRST pour point (documented tie-break — a cell with two
+/// downstream paths drains to exactly one under D8, so ambiguity requires
+/// duplicate pour points or ties between separate sinks).
+bool watershedLabels( const float *dir, int width, int height,
+                      const std::vector<std::pair<int, int>> &pourPoints,
+                      std::vector<float> *labels );
 
 } // namespace TerrainFlow

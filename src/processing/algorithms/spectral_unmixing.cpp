@@ -1,5 +1,6 @@
 // src/processing/algorithms/spectral_unmixing.cpp — linear spectral unmixing
 #include "spectral_unmixing.h"
+#include "processing/algorithms/primitives/dense_linalg.h"
 
 #include <cmath>
 #include <limits>
@@ -11,70 +12,9 @@ namespace SpectralUnmixing
 namespace
 {
 
-/// Inverts the n x n matrix @a m in place (Gauss-Jordan with partial pivoting).
-/// Returns false when the matrix is singular (threshold matches the solver).
-/// The per-pixel unmixing hot loop then solves via one matrix-vector product
-/// instead of a full elimination per pixel (O(E^3) once vs O(E^3) per pixel).
-bool invertMatrixInPlace( std::vector<double> &m, int n )
-{
-    std::vector<double> inv( static_cast<size_t>( n ) * n, 0.0 );
-    for ( int i = 0; i < n; ++i )
-        inv[static_cast<size_t>( i ) * n + i] = 1.0;
-
-    for ( int col = 0; col < n; ++col )
-    {
-        int pivot = col;
-        double best = std::abs( m[static_cast<size_t>( col ) * n + col] );
-        for ( int r = col + 1; r < n; ++r )
-        {
-            const double v = std::abs( m[static_cast<size_t>( r ) * n + col] );
-            if ( v > best )
-            {
-                best = v;
-                pivot = r;
-            }
-        }
-        if ( best < 1e-12 )
-            return false;
-        if ( pivot != col )
-        {
-            for ( int c = 0; c < n; ++c )
-            {
-                std::swap( m[static_cast<size_t>( pivot ) * n + c],
-                           m[static_cast<size_t>( col ) * n + c ] );
-                std::swap( inv[static_cast<size_t>( pivot ) * n + c],
-                           inv[static_cast<size_t>( col ) * n + c ] );
-            }
-        }
-
-        const double diag = m[static_cast<size_t>( col ) * n + col];
-        for ( int c = 0; c < n; ++c )
-        {
-            m[static_cast<size_t>( col ) * n + c] /= diag;
-            inv[static_cast<size_t>( col ) * n + c] /= diag;
-        }
-
-        for ( int r = 0; r < n; ++r )
-        {
-            if ( r == col )
-                continue;
-            const double factor = m[static_cast<size_t>( r ) * n + col];
-            if ( factor == 0.0 )
-                continue;
-            for ( int c = 0; c < n; ++c )
-            {
-                m[static_cast<size_t>( r ) * n + c] -=
-                    factor * m[static_cast<size_t>( col ) * n + c];
-                inv[static_cast<size_t>( r ) * n + c] -=
-                    factor * inv[static_cast<size_t>( col ) * n + c];
-            }
-        }
-    }
-
-    m.swap( inv );
-    return true;
-}
-
+// The Gram-matrix inversion lives in the shared primitive
+// primitives/dense_linalg.h (single owner; this file used to carry its own
+// Gauss-Jordan copy with the same 1e-12 pivot threshold).
 } // namespace
 
 bool unmix( const float *pixels, size_t count, int bands,
@@ -117,7 +57,7 @@ bool unmix( const float *pixels, size_t count, int bands,
     std::vector<double> invGram = gram;
     for ( int e = 0; e < nEndmembers; ++e )
         invGram[static_cast<size_t>( e ) * nEndmembers + e] += kRidge;
-    const bool invertible = invertMatrixInPlace( invGram, nEndmembers );
+    const bool invertible = sicnu::primitives::invertDenseMatrixInPlace( invGram, nEndmembers );
 
     std::vector<double> rhs( nEndmembers, 0.0 );
     std::vector<double> abundance( nEndmembers, 0.0 );

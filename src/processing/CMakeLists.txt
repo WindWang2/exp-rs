@@ -14,16 +14,20 @@ add_library(sicnu_processing SHARED
     gdal/gdal_multiband_block_stream.cpp
     gdal/gdal_window_read.cpp
     gdal/gdal_error_handler.cpp
+    gdal/gdal_cell_geometry.cpp
 
     algorithms/primitives/raster_histogram.cpp
     algorithms/primitives/morphology.cpp
     algorithms/primitives/connected_components.cpp
     algorithms/primitives/distance_transform.cpp
+    algorithms/primitives/dense_linalg.cpp
+    algorithms/ir_mad_kernels.cpp
     algorithms/topographic_correction.cpp
     algorithms/spectral_derivative.cpp
     algorithms/spectral_detection.cpp
     algorithms/sar/sar_dualpol.cpp
     algorithms/sar/sar_terrain_geometry.cpp
+    algorithms/sar/sar_orbit.cpp
     algorithms/temporal/temporal_monitoring.cpp
     algorithms/terrain_flow.cpp
 
@@ -62,6 +66,7 @@ add_library(sicnu_processing SHARED
     algorithms/temporal/temporal_workspace.cpp
     algorithms/temporal/temporal_stac_adapter.cpp
     algorithms/temporal/temporal_fit.cpp
+    algorithms/temporal/temporal_gapfill.cpp
     algorithms/temporal/temporal_preflight.cpp
     algorithms/temporal/temporal_stream.cpp
 

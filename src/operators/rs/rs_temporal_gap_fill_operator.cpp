@@ -8,6 +8,7 @@
 #include "operators/rs/rs_temporal_collection_input.h"
 #include "operators/rs/rs_temporal_output.h"
 #include "processing/algorithms/temporal/temporal_stream.h"
+#include "processing/algorithms/temporal/temporal_gapfill.h"
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
@@ -23,6 +24,7 @@ namespace sicnu::operators::rs
 {
 
 using namespace params;
+using temporal::GapFillMethod;
 using temporal::TemporalTileReader;
 
 namespace
@@ -32,11 +34,7 @@ constexpr double kDefaultMaxGapDays = 90.0;
 constexpr int kTypicalSceneEstimate = 8;
 constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
 
-enum class Method
-{
-  Linear,
-  Nearest
-};
+// The gap-fill method enum lives in the kernel (temporal/temporal_gapfill.h).
 
 /// "YYYY-MM-DD" tag for band names; falls back to the chronological index
 /// when a scene carries no parsable date (preflight normally rejects those).
@@ -164,8 +162,9 @@ Json::Value RsTemporalGapFillOperator::run( const Json::Value &params, RSOperato
   const std::string outputPath = requireString( params, "output" );
   const QString methodToken =
       QString::fromStdString( getEnum( params, "method", { "linear", "nearest" }, "linear" ) );
-  const Method method =
-      methodToken == QLatin1String( "nearest" ) ? Method::Nearest : Method::Linear;
+  const GapFillMethod method = methodToken == QLatin1String( "nearest" )
+                                   ? GapFillMethod::Nearest
+                                   : GapFillMethod::Linear;
   const double maxGapDays = getDouble( params, "max_gap_days", kDefaultMaxGapDays );
   if ( !( maxGapDays >= 0.0 ) )
     throw RSOperatorError( ErrorCode::InvalidParameter, "max_gap_days must be >= 0" );
@@ -293,7 +292,7 @@ Json::Value RsTemporalGapFillOperator::run( const Json::Value &params, RSOperato
       std::copy( tile.begin(), tile.begin() + static_cast<std::ptrdiff_t>( pixels ),
                  series.begin() + static_cast<std::ptrdiff_t>( s * tilePixels ) );
       context.throwIfCancelled();
-    }
+      }
 
     std::uint64_t tileFilled = 0;
     std::uint64_t tileFillable = 0;
@@ -302,74 +301,17 @@ Json::Value RsTemporalGapFillOperator::run( const Json::Value &params, RSOperato
       for ( int s = 0; s < sceneCount; ++s )
         pixelSeries[static_cast<size_t>( s )] = series[s * tilePixels + i];
 
-      float filledHere = 0.0f;
+      // The interpolation math is the shared kernel (known-answer tested);
+      // the operator only gathers, calls, and writes back.
+      temporal::GapFillCounts counts;
+      temporal::gapFillSeries( pixelSeries.data(), sceneCount, tDays.data(),
+                               method, maxGapDays, pixelSeries.data(), &counts );
       for ( int s = 0; s < sceneCount; ++s )
-      {
-        const float v = pixelSeries[static_cast<size_t>( s )];
-        if ( std::isfinite( v ) )
-          continue; // valid samples copy through unchanged
+        series[s * tilePixels + i] = pixelSeries[static_cast<size_t>( s )];
 
-        // Nearest valid sample on each side of the gap (l < s < r).
-        int l = s - 1;
-        while ( l >= 0 && !std::isfinite( pixelSeries[static_cast<size_t>( l )] ) )
-          --l;
-        int r = s + 1;
-        while ( r < sceneCount && !std::isfinite( pixelSeries[static_cast<size_t>( r )] ) )
-          ++r;
-        const bool hasLeft = l >= 0;
-        const bool hasRight = r < sceneCount;
-        if ( !hasLeft && !hasRight )
-          continue; // no anchor at all — nothing to interpolate from
-
-        ++tileFillable;
-        float filled = kNan;
-        if ( method == Method::Linear )
-        {
-          if ( hasLeft && hasRight )
-          {
-            const double span = tDays[r] - tDays[l];
-            if ( span <= maxGapDays )
-            {
-              if ( span > 0.0 )
-              {
-                const double weight = ( tDays[s] - tDays[l] ) / span;
-                filled = static_cast<float>(
-                  pixelSeries[static_cast<size_t>( l )] +
-                  ( pixelSeries[static_cast<size_t>( r )] -
-                    pixelSeries[static_cast<size_t>( l )] ) * weight );
-              }
-              else
-              {
-                // Duplicate instants (keep_all): identical timestamps —
-                // deterministic average instead of a 0/0 weight.
-                filled = 0.5f * ( pixelSeries[static_cast<size_t>( l )] +
-                                  pixelSeries[static_cast<size_t>( r )] );
-              }
-            }
-          }
-          // one-sided gaps stay NaN: linear never extrapolates
-        }
-        else // nearest
-        {
-          const double distLeft =
-              hasLeft ? tDays[s] - tDays[l] : std::numeric_limits<double>::infinity();
-          const double distRight =
-              hasRight ? tDays[r] - tDays[s] : std::numeric_limits<double>::infinity();
-          const double dist = std::min( distLeft, distRight );
-          if ( dist <= maxGapDays )
-            filled = distLeft <= distRight // tie -> earlier scene
-                         ? pixelSeries[static_cast<size_t>( l )]
-                         : pixelSeries[static_cast<size_t>( r )];
-        }
-
-        if ( std::isfinite( filled ) )
-        {
-          series[s * tilePixels + i] = filled;
-          ++filledHere;
-        }
-      }
-      filledCount[i] = filledHere;
-      tileFilled += static_cast<std::uint64_t>( filledHere );
+      filledCount[i] = static_cast<float>( counts.filled );
+      tileFilled += static_cast<std::uint64_t>( counts.filled );
+      tileFillable += static_cast<std::uint64_t>( counts.fillable );
     }
     filledPositions += tileFilled;
     fillablePositions += tileFillable;

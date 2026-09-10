@@ -45,7 +45,8 @@ TEST_CASE( "Dual-pol features: closed forms in linear power", "[sar][dualpol]" )
   REQUIRE( dualPolFeature( DualPolFeature::Span, vv, vh ) == Catch::Approx( 0.5 ).margin( 1e-12 ) );
 
   // Zero VH: ratio/log_ratio divide by zero → NaN; ND saturates to +1;
-  // RVI hits its 4·VV/(VV+VH) ceiling value 4 at VH→0 exactly.
+  // RVI = 4·VH/(VV+VH) vanishes at VH→0 (it saturates to 4 only as VV→0,
+  // mirroring the implementation in sar_dualpol.cpp).
   REQUIRE( std::isnan( dualPolFeature( DualPolFeature::Ratio, vv, 0.0 ) ) );
   REQUIRE( std::isnan( dualPolFeature( DualPolFeature::LogRatio, vv, 0.0 ) ) );
   REQUIRE( dualPolFeature( DualPolFeature::NormalizedDifference, vv, 0.0 ) ==

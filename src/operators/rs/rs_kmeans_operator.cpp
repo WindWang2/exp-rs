@@ -84,6 +84,10 @@ Json::Value RsKmeansOperator::schema() const {
     props["input"] = makeRasterParam("input", "Input multi-band raster");
     props["output"] = makeOutputParam("output", "Output class map (Byte GeoTIFF)", "tif");
     props["k"] = makeIntegerParam("k", "Number of clusters", 3);
+    props["algorithm"] = makeEnumParam("algorithm",
+        "Unsupervised clustering algorithm: plain k-means or ISODATA "
+        "(k-means with the classic discard/split/merge self-organisation, "
+        "deterministic even-row seeding)", {"kmeans", "isodata"}, "kmeans");
     props["maxSamples"] = makeIntegerParam("maxSamples",
                                            "Max samples for centroid fitting (0 = all pixels)",
                                            100000);
@@ -342,10 +346,21 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     // surfaces. Standardize by default; explicit scale=false opts out.
     const bool scale = getBool(params, "scale", true);
     cfg.fitScaler = scale;
-    cfg.methodName = QStringLiteral("kmeans");
+    const std::string algorithm =
+        getEnum(params, "algorithm", {"kmeans", "isodata"}, "kmeans");
+    cfg.methodName = QString::fromStdString(algorithm);
     for (int id = 1; id <= k; ++id)
         cfg.classColors[id] = rsSynthesizedClassColor(id);
-    cfg.backend = RsClassifierBackendFactory::createKMeans(k);
+    if (algorithm == "isodata")
+    {
+        RsClassifierIsodata::Params iso;
+        iso.targetClusters = k;
+        cfg.backend = RsClassifierBackendFactory::createIsodata(iso);
+    }
+    else
+    {
+        cfg.backend = RsClassifierBackendFactory::createKMeans(k);
+    }
 
     // Bridge: pipeline fraction [0,1] → operator progress 0.40–0.98; cancel
     // via the sink's return value so the pipeline removes a partially-written

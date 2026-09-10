@@ -1094,6 +1094,18 @@ sicnu_discover_tests(test_spectral_detection)
 
 # SAR foundation (Foundation 5.0 Milestone D): dual-pol features + terrain
 # geometry closed forms, operator E2E, geometry refusals.
+add_executable(test_sar_orbit test_sar_orbit.cpp)
+target_link_libraries(test_sar_orbit PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_sar_orbit PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_orbit)
+
 add_executable(test_sar_foundation5 test_sar_foundation5.cpp)
 target_link_libraries(test_sar_foundation5 PRIVATE
   Catch2::Catch2WithMain
@@ -3663,7 +3675,24 @@ sicnu_add_test(test_layout_tools)
     ${OpenCV_INCLUDE_DIRS}
     ${CMAKE_BINARY_DIR}
   )
+
+  # Scientific Algorithms 7.0 — ISODATA backend tests.
+  add_executable(test_classifier_isodata test_classifier_isodata.cpp)
+  target_link_libraries(test_classifier_isodata PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classifier_isodata PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
   sicnu_discover_tests(test_classifier_kmeans)
+  sicnu_discover_tests(test_classifier_isodata)
 
   # OBIA Classification Optimization — RandomForest backend test.
   add_executable(test_classifier_random_forest test_classifier_random_forest.cpp)

@@ -1,5 +1,6 @@
 // src/processing/algorithms/spectral_anomaly.cpp — RX anomaly detector
 #include "spectral_anomaly.h"
+#include "processing/algorithms/primitives/dense_linalg.h"
 
 #include <cmath>
 #include <vector>
@@ -7,70 +8,9 @@
 namespace SpectralAnomaly
 {
 
-/// Inverts an n x n symmetric positive-definite matrix (given in column-major
-/// row order) via Gauss-Jordan with partial pivoting and a ridge added by the
-/// caller. Returns false when singular.
-bool invertMatrix( const std::vector<double> &m, int n, std::vector<double> *inverse )
-{
-    // Augmented matrix [A | I].
-    std::vector<double> a = m;
-    std::vector<double> inv( static_cast<size_t>( n ) * n, 0.0 );
-    for ( int i = 0; i < n; ++i )
-        inv[static_cast<size_t>( i ) * n + i ] = 1.0;
-
-    for ( int col = 0; col < n; ++col )
-    {
-        int pivot = col;
-        double best = std::abs( a[static_cast<size_t>( col ) * n + col] );
-        for ( int r = col + 1; r < n; ++r )
-        {
-            const double v = std::abs( a[static_cast<size_t>( r ) * n + col] );
-            if ( v > best )
-            {
-                best = v;
-                pivot = r;
-            }
-        }
-        if ( best < 1e-12 )
-            return false;
-        if ( pivot != col )
-        {
-            for ( int c = 0; c < n; ++c )
-            {
-                std::swap( a[static_cast<size_t>( pivot ) * n + c],
-                           a[static_cast<size_t>( col ) * n + c ] );
-                std::swap( inv[static_cast<size_t>( pivot ) * n + c],
-                           inv[static_cast<size_t>( col ) * n + c ] );
-            }
-        }
-
-        const double diag = a[static_cast<size_t>( col ) * n + col];
-        // Normalize the pivot row.
-        for ( int c = 0; c < n; ++c )
-        {
-            a[static_cast<size_t>( col ) * n + c] /= diag;
-            inv[static_cast<size_t>( col ) * n + c] /= diag;
-        }
-        // Eliminate all other rows.
-        for ( int r = 0; r < n; ++r )
-        {
-            if ( r == col )
-                continue;
-            const double factor = a[static_cast<size_t>( r ) * n + col];
-            if ( factor == 0.0 )
-                continue;
-            for ( int c = 0; c < n; ++c )
-            {
-                a[static_cast<size_t>( r ) * n + c] -=
-                    factor * a[static_cast<size_t>( col ) * n + c];
-                inv[static_cast<size_t>( r ) * n + c] -=
-                    factor * inv[static_cast<size_t>( col ) * n + c];
-            }
-        }
-    }
-    *inverse = std::move( inv );
-    return true;
-}
+// The background-covariance inversion lives in the shared primitive
+// primitives/dense_linalg.h (single owner; this file used to carry its own
+// Gauss-Jordan copy with the same 1e-12 pivot threshold).
 
 void accumulateMean( const float *pixels, size_t count, int bands,
                      BackgroundStats *stats, bool skipNonFinite,
@@ -206,7 +146,7 @@ bool invertCovariance( const std::vector<double> &covariance, int bands,
     std::vector<double> covRidge = covariance;
     for ( int i = 0; i < bands; ++i )
         covRidge[static_cast<size_t>( i ) * bands + i] += kRidge;
-    return invertMatrix( covRidge, bands, inverse );
+    return sicnu::primitives::invertDenseMatrix( covRidge, bands, inverse );
 }
 
 float rxScore( const float *spectrum, const std::vector<double> &mean,

@@ -12,7 +12,10 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/sar/sar_terrain_geometry.h"
+#include "processing/algorithms/sar/sar_orbit.h"
 #include "processing/algorithms/sar/sar_metadata.h"
+#include "processing/algorithms/math_utils.h"
+#include "processing/gdal/gdal_cell_geometry.h"
 #include "processing/algorithms/topographic_correction.h" // hornGradient (shared Horn kernels)
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_block_stream.h"
@@ -37,49 +40,16 @@ using namespace params;
 
 namespace {
 
-const std::vector<std::string> s_products = { "local_incidence", "layover_shadow_mask" };
+const std::vector<std::string> s_products = { "local_incidence", "layover_shadow_mask", "local_incidence_orbit" };
 
 constexpr int kTileDim = 256;
 constexpr int kHalo = 1;
 constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
 constexpr uint8_t kMaskNoData = 255;
 
-/// Same WGS84 degrees->metres conversion the terrain/topographic operators
-/// apply (#612); consolidation tracked for Milestone F.1.
-void cellSizesMetres( const GdalDatasetWrapper &ds, double *csx, double *csy )
-{
-    const std::array<double, 6> gt = ds.geoTransform();
-    double x = std::abs( gt[1] );
-    double y = std::abs( gt[5] );
-    if ( x <= 1e-7 )
-        x = 30.0;
-    if ( y <= 1e-7 )
-        y = x;
-    const QString wkt = ds.projection();
-    if ( !wkt.isEmpty() )
-    {
-        OGRSpatialReferenceH srs = OSRNewSpatialReference( nullptr );
-        if ( srs )
-        {
-            const QByteArray wktBytes = wkt.toUtf8();
-            char *wktPtr = const_cast<char *>( wktBytes.constData() );
-            if ( OSRImportFromWkt( srs, &wktPtr ) == OGRERR_NONE && OSRIsGeographic( srs ) )
-            {
-                const double phiDeg = gt[3] + ( ds.height() / 2.0 ) * gt[5];
-                const double phiRad = phiDeg * M_PI / 180.0;
-                const double cosPhi = std::cos( phiRad );
-                const double mPerDegLat =
-                    111132.92 - 559.82 * std::cos( 2 * phiRad ) + 1.175 * std::cos( 4 * phiRad );
-                const double mPerDegLon = 111412.84 * cosPhi - 93.5 * std::cos( 3 * phiRad );
-                x = std::abs( gt[1] ) * mPerDegLon;
-                y = ( std::abs( gt[5] ) > 1e-7 ? std::abs( gt[5] ) : std::abs( gt[1] ) ) * mPerDegLat;
-            }
-            OSRDestroySpatialReference( srs );
-        }
-    }
-    *csx = x;
-    *csy = y;
-}
+// Same WGS84 degrees->metres conversion the terrain/topographic operators
+// apply (#612) — single owner: processing/gdal/gdal_cell_geometry.
+using sicnu::processing::gdal_util::cellSizesMetres;
 
 /// Sentinel -> NaN normalization over the stream's borrowed halo buffer
 /// (copied into @a scratch, which the compute loop then indexes).
@@ -174,6 +144,185 @@ Json::Value RsSarTerrainMasksOperator::estimateExecution( const Json::Value &par
     return executionEstimate();
 }
 
+// ---------------------------------------------------------------------------
+// local_incidence_orbit: the rigorous per-pixel incidence product under the
+// declared orbit contract (Scientific Algorithms 7.0). Requires
+//   SICNU_SAR_ORBIT_STATES       state vectors "t;x;y;z;vx;vy;vz|..."
+//   SICNU_SAR_AZIMUTH_START_UTC  azimuth time of row 0 (s, orbit time base)
+//   SICNU_SAR_PRF                rows → seconds
+//   SICNU_SAR_RANGE_WINDOW       "start;stop" slant-range gate (s)
+//   SICNU_SAR_RANGE_RATE         slant-range samples per second
+// declared on the DEM dataset (the co-registered scene metadata). Every
+// pixel's center is geolocated (azimuth time of its row, slant range of its
+// column, DEM height above the ellipsoid) and the incidence angle follows
+// from the real line of sight — range- and height-dependent, not constant.
+// Missing or invalid keys are a typed refusal: nothing is approximated.
+// ---------------------------------------------------------------------------
+Json::Value runOrbitIncidence( const Json::Value &params, RSOperatorContext &context,
+                               GdalDatasetWrapper &demDs, const std::string &outputPath,
+                               int width, int height )
+{
+    (void)params;
+    auto metaItem = [&]( const char *key ) -> QString {
+        const char *value =
+            GDALGetMetadataItem( static_cast<GDALDatasetH>( demDs.dataset() ), key, nullptr );
+        return value != nullptr ? QString::fromUtf8( value ) : QString();
+    };
+
+    const QString orbitStatesValue = metaItem( "SICNU_SAR_ORBIT_STATES" );
+    const QString azStartValue = metaItem( "SICNU_SAR_AZIMUTH_START_UTC" );
+    const QString rangeWindowValue = metaItem( "SICNU_SAR_RANGE_WINDOW" );
+    const QString prfValue = metaItem( "SICNU_SAR_PRF" );
+    const QString rangeRateValue = metaItem( "SICNU_SAR_RANGE_RATE" );
+    if ( orbitStatesValue.isEmpty() || azStartValue.isEmpty() || prfValue.isEmpty()
+         || rangeRateValue.isEmpty() )
+        throw RSOperatorError(
+            ErrorCode::InvalidInputData,
+            "local_incidence_orbit requires the declared orbit contract "
+            "(SICNU_SAR_ORBIT_STATES, SICNU_SAR_AZIMUTH_START_UTC, SICNU_SAR_PRF, "
+            "SICNU_SAR_RANGE_RATE, SICNU_SAR_RANGE_WINDOW) on the input metadata; "
+            "this scene does not declare it. Use the constant-geometry products "
+            "instead - the orbit path is never approximated." );
+
+    sicnu::sar::OrbitSegment orbit;
+    QString orbitError;
+    if ( !sicnu::sar::parseOrbitStates( orbitStatesValue, &orbit, &orbitError ) )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "SICNU_SAR_ORBIT_STATES is invalid: " + orbitError.toStdString() );
+
+    bool okNum = false;
+    const double azimuthStart = azStartValue.toDouble( &okNum );
+    if ( !okNum || !std::isfinite( azimuthStart ) )
+        throw RSOperatorError( ErrorCode::InvalidInputData, "SICNU_SAR_AZIMUTH_START_UTC is not a finite number" );
+    const double prf = prfValue.toDouble( &okNum );
+    if ( !okNum || !( prf > 0.0 ) )
+        throw RSOperatorError( ErrorCode::InvalidInputData, "SICNU_SAR_PRF must be > 0" );
+    const double rangeRate = rangeRateValue.toDouble( &okNum );
+    if ( !okNum || !( rangeRate > 0.0 ) )
+        throw RSOperatorError( ErrorCode::InvalidInputData, "SICNU_SAR_RANGE_RATE must be > 0" );
+
+    // Slant range per sample: c / (2 * rangeRate) metres (two-way path).
+    constexpr double kHalfLightSpeed = 299792458.0 / 2.0;
+    // The window is 'start;stop' in seconds — both fields validated
+    // independently (a shared ok-flag let a malformed start be overwritten
+    // by a valid stop and fabricated a 0 m range gate).
+    const QStringList windowFields = rangeWindowValue.split( QLatin1Char( ';' ) );
+    if ( windowFields.size() != 2 )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "SICNU_SAR_RANGE_WINDOW must be 'start;stop' in seconds" );
+    bool okStart = false;
+    bool okStop = false;
+    const double rangeStartTime = windowFields[0].toDouble( &okStart );
+    const double rangeStopTime = windowFields[1].toDouble( &okStop );
+    if ( !okStart || !okStop || !std::isfinite( rangeStartTime )
+         || !std::isfinite( rangeStopTime ) || !( rangeStopTime > rangeStartTime ) )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "SICNU_SAR_RANGE_WINDOW must be 'start;stop' in seconds" );
+    // Range time → slant range via the two-way light path: a range
+    // sample every 1/rate seconds is c/2 metres of slant range apart.
+    const double rangeStart = rangeStartTime * kHalfLightSpeed;
+    // Timing consistency: the window must cover the raster's columns.
+    const double coveredSamples = ( rangeStopTime - rangeStartTime ) * rangeRate;
+    if ( std::fabs( coveredSamples - ( width - 1 ) ) > 2.0 )
+        throw RSOperatorError(
+            ErrorCode::InvalidInputData,
+            "SICNU_SAR_RANGE_WINDOW covers " + std::to_string( coveredSamples )
+                + " range samples but the raster has " + std::to_string( width - 1 )
+                + " columns (tolerance 2) - the declared timing contradicts the grid" );
+
+    // DEM heights feed the geolocation directly (metres above the ellipsoid).
+    bool demHasSentinel = false;
+    float demSentinel = 0.0f;
+    {
+        bool hasNodataFlag = false;
+        const double nodata = demDs.bandNoDataValue( 1, &hasNodataFlag );
+        if ( hasNodataFlag && std::isfinite( nodata ) )
+        {
+            demSentinel = static_cast<float>( nodata );
+            demHasSentinel = true;
+        }
+    }
+
+    GdalBlockStream demStream( demDs, 1, kTileDim, kTileDim, kHalo );
+    GdalStreamingOutput out( QString::fromStdString( outputPath ), width, height, 1,
+                             GDT_Float32, demDs.geoTransform(), demDs.projection() );
+    if ( !out.isOpen() )
+        throw RSOperatorError( ErrorCode::FileNotWritable,
+                               "Failed to create output raster: " + outputPath );
+    out.setNoDataValue( std::numeric_limits<double>::quiet_NaN() );
+
+    std::vector<float> demScratch;
+    std::vector<float> outF( static_cast<size_t>( kTileDim ) * kTileDim );
+
+    const int totalTiles = demStream.tileCount();
+    int tileIndex = 0;
+    std::uint64_t geolocated = 0;
+    const bool ok = demStream.forEach( [&]( const GdalBlockStream::Tile &tile, const float *haloBuf ) {
+        context.throwIfCancelled();
+        const int bw = tile.bufferWidth;
+        const size_t bufN = static_cast<size_t>( bw ) * tile.bufferHeight;
+        normalizeHalo( haloBuf, bufN, demHasSentinel, demSentinel, &demScratch );
+        for ( int y = 0; y < tile.height; ++y )
+        {
+            const double azimuthTime = azimuthStart + static_cast<double>( tile.yOffset + y ) / prf;
+            for ( int x = 0; x < tile.width; ++x )
+            {
+                const size_t idx = static_cast<size_t>( y ) * tile.width + x;
+                const float demValue =
+                    demScratch[static_cast<size_t>( y + kHalo ) * bw + ( x + kHalo )];
+                if ( !std::isfinite( demValue ) )
+                {
+                    outF[idx] = kNaN;
+                    continue;
+                }
+                const double slantRange =
+                    rangeStart + static_cast<double>( tile.xOffset + x ) * kHalfLightSpeed / rangeRate;
+                sicnu::sar::GeodeticPoint ground;
+                if ( !sicnu::sar::geolocateZeroDoppler( orbit, azimuthTime, slantRange,
+                                                        demValue, &ground ) )
+                {
+
+                    // A pixel whose (azimuth, range, height) does not resolve
+                    // on the shell is NoData - never a fabricated angle.
+                    outF[idx] = kNaN;
+                    continue;
+                }
+                outF[idx] = static_cast<float>(
+                    sicnu::sar::incidenceAngleDeg( orbit, azimuthTime, ground ) );
+                ++geolocated;
+            }
+        }
+        if ( !out.writeTile( 1, tile, outF.data() ) )
+            return false;
+        context.reportProgress( 0.9 * ( ++tileIndex ) / totalTiles,
+                                "Computing local_incidence_orbit" );
+        return true;
+    } );
+    if ( !ok )
+    {
+        out.abandon();
+        throw RSOperatorError( ErrorCode::GdalError, "Failed to stream/compute the orbit incidence product" );
+    }
+
+    out.setMetadataItem( QLatin1String( sicnu::sar::kModalityKey ), QLatin1String( "sar" ) );
+    out.setMetadataItem( QLatin1String( "SICNU_SAR_GEOMETRY_PRODUCT" ),
+                         QLatin1String( "local_incidence_orbit" ) );
+    out.setMetadataItem( QLatin1String( "SICNU_SAR_ORBIT_GEOMETRY" ), QLatin1String( "declared" ) );
+    QString closeError;
+    if ( !out.closeWithError( &closeError ) )
+        throw RSOperatorError( ErrorCode::GdalError,
+                               "Failed to finalize output: " + closeError.toStdString() );
+
+    Json::Value result( Json::objectValue );
+    result["output"] = outputPath;
+    result["product"] = "local_incidence_orbit";
+    result["geolocatedPixels"] = Json::Value::UInt64( geolocated );
+    result["width"] = width;
+    result["height"] = height;
+    context.reportProgress( 1.0, "SAR orbit incidence complete" );
+    return result;
+}
+
 Json::Value RsSarTerrainMasksOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
     if ( !params.isObject() )
@@ -192,6 +341,9 @@ Json::Value RsSarTerrainMasksOperator::run( const Json::Value &params, RSOperato
     const int height = demDs.height();
     if ( width <= 0 || height <= 0 )
         throw RSOperatorError( ErrorCode::InvalidInputData, "DEM raster is empty: " + demPath );
+
+    if ( product == "local_incidence_orbit" )
+        return runOrbitIncidence( params, context, demDs, outputPath, width, height );
 
     // Geometry: explicit parameters win; declared SAR scene metadata
     // (SICNU_SAR_INCIDENCE_DEG / SICNU_SAR_HEADING_DEG on the DEM-derived

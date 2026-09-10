@@ -6,6 +6,7 @@
 // the corresponding primitive header (see derivation notes per case).
 
 #include "processing/algorithms/change_detection.h"
+#include "processing/algorithms/primitives/dense_linalg.h"
 #include "processing/algorithms/primitives/connected_components.h"
 #include "processing/algorithms/primitives/distance_transform.h"
 #include "processing/algorithms/primitives/morphology.h"
@@ -375,4 +376,68 @@ TEST_CASE( "WindowSpec: odd sizes, radius, halo", "[primitives][window]" )
   WindowSpec bad;
   bad.size = 4;
   REQUIRE_FALSE( bad.valid() );
+}
+
+// ---------------------------------------------------------------------------
+// dense_linalg (Foundation 7.0 consolidation): one Gauss-Jordan inverse
+// replacing the former spectral_anomaly / spectral_unmixing copies.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Dense inverse: known 2x2 inverse and round-trip", "[primitives][linalg]" )
+{
+    // [[4, 7], [2, 6]] has det = 10 and inverse [[0.6, -0.7], [-0.2, 0.4]].
+    const std::vector<double> m = { 4.0, 7.0, 2.0, 6.0 };
+    std::vector<double> inv;
+    REQUIRE( sicnu::primitives::invertDenseMatrix( m, 2, &inv ) );
+    REQUIRE( inv[0] == Catch::Approx( 0.6 ).margin( 1e-12 ) );
+    REQUIRE( inv[1] == Catch::Approx( -0.7 ).margin( 1e-12 ) );
+    REQUIRE( inv[2] == Catch::Approx( -0.2 ).margin( 1e-12 ) );
+    REQUIRE( inv[3] == Catch::Approx( 0.4 ).margin( 1e-12 ) );
+    // The input is preserved by the out-of-place form.
+    REQUIRE( m[0] == 4.0 );
+    // A·A⁻¹ = I.
+    for ( int i = 0; i < 2; ++i )
+        for ( int j = 0; j < 2; ++j )
+        {
+            const double dot = m[i * 2] * inv[j] + m[i * 2 + 1] * inv[2 + j];
+            REQUIRE( dot == Catch::Approx( i == j ? 1.0 : 0.0 ).margin( 1e-12 ) );
+        }
+}
+
+TEST_CASE( "Dense inverse: 3x3 shifted system recovers the identity solve", "[primitives][linalg]" )
+{
+    // A = I + u·uᵀ with u = (1,2,3) (symmetric positive definite, like the
+    // RX covariance ridge). Solve by inverting and multiplying.
+    const double u[3] = { 1.0, 2.0, 3.0 };
+    std::vector<double> a( 9, 0.0 );
+    for ( int i = 0; i < 3; ++i )
+        for ( int j = 0; j < 3; ++j )
+            a[i * 3 + j] = ( i == j ? 1.0 : 0.0 ) + u[i] * u[j];
+    std::vector<double> inv;
+    REQUIRE( sicnu::primitives::invertDenseMatrix( a, 3, &inv ) );
+    const double b[3] = { 2.0, -1.0, 0.5 };
+    for ( int i = 0; i < 3; ++i )
+    {
+        double x = 0.0;
+        for ( int j = 0; j < 3; ++j )
+            x += inv[i * 3 + j] * b[j];
+        // Sherman–Morrison: x = (I − u uᵀ/(1+uᵀu)) b.
+        const double unorm = 14.0;
+        double corr = 0.0;
+        for ( int j = 0; j < 3; ++j )
+            corr += u[j] * b[j];
+        const double expected = b[i] - u[i] * corr / ( 1.0 + unorm );
+        REQUIRE( x == Catch::Approx( expected ).margin( 1e-12 ) );
+    }
+}
+
+TEST_CASE( "Dense inverse refuses a singular matrix at the shared 1e-12 pivot floor",
+           "[primitives][linalg]" )
+{
+    std::vector<double> singular = { 1.0, 2.0, 2.0, 4.0 }; // rank 1
+    std::vector<double> inv;
+    REQUIRE_FALSE( sicnu::primitives::invertDenseMatrix( singular, 2, &inv ) );
+    // Degenerate zero matrix refuses too.
+    std::vector<double> zero( 4, 0.0 );
+    REQUIRE_FALSE( sicnu::primitives::invertDenseMatrix( zero, 2, &inv ) );
 }

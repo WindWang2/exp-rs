@@ -554,6 +554,55 @@ TEST_CASE("processFileDos refuses Landsat without finite sun elevation (#610)", 
         std::numeric_limits<double>::quiet_NaN(), 1.0f, &err));
 }
 
+TEST_CASE("processFileDos sentinel compare is exact, never an epsilon (#700-class)", "[atm][dos][gdal]")
+{
+    // A declared 0.0 sentinel with a genuine near-zero DN next to it. The
+    // old |p − nodata| < 1e-4 compare deleted the 5e-5 sample (its
+    // reflectance is indistinguishable from zero, but it is a VALID
+    // observation and the scene's dark object); exact float equality keeps
+    // it. Dark-water / shadow DN products are exactly where these live.
+    GDALAllRegister();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString src = dir.filePath(QStringLiteral("dos_sentinel_src.tif"));
+    const QString dst = dir.filePath(QStringLiteral("dos_sentinel_out.tif"));
+
+    GDALDriverH drv = GDALGetDriverByName("GTiff");
+    REQUIRE(drv);
+    GDALDatasetH ds = GDALCreate(drv, src.toUtf8().constData(), 4, 1, 1, GDT_Float32, nullptr);
+    REQUIRE(ds);
+    double gt[6] = {0, 1, 0, 0, 0, -1};
+    GDALSetGeoTransform(ds, gt);
+    GDALRasterBandH b = GDALGetRasterBand(ds, 1);
+    // {0 sentinel, 5e-5 legit small, 10000 bright, 3000 mid}
+    std::vector<float> dn = {0.0f, 5e-5f, 10000.0f, 3000.0f};
+    REQUIRE(GDALRasterIO(b, GF_Write, 0, 0, 4, 1, dn.data(), 4, 1, GDT_Float32, 0, 0) == CE_None);
+    REQUIRE(GDALSetRasterNoDataValue(b, 0.0) == CE_None);
+    GDALClose(ds);
+
+    RadiometricCalibration::BandCoefficients c;
+    c.reflMult = 2e-5;
+    c.reflAdd = 0.0;
+    c.hasReflectance = true;
+    QString err;
+    REQUIRE(AtmosphericCorrection::processFileDos(
+        src, dst, 1, AtmosphericCorrection::Dos1, c,
+        RadiometricCalibration::SensorType::Landsat, 30.0, 1.0f, &err));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(dst));
+    std::vector<float> result(4, -999.0f);
+    REQUIRE(out.readBandData(1, result.data(), 4, 1));
+    // Sentinel stays invalid (NaN), the near-zero sample survives.
+    REQUIRE(std::isnan(result[0]));
+    // rho_TOA = 4e-5·5e-5 = 2e-9 ≈ the dark level → Chavez 1% → 0.01.
+    REQUIRE_THAT(result[1], Catch::Matchers::WithinAbs(0.01f, 0.005f));
+    // Bright/mid pixels are unchanged by the fix (dark level dropped from
+    // 0.12 to ≈0, so their surface reflectance is now rho_TOA + 0.01).
+    REQUIRE_THAT(result[2], Catch::Matchers::WithinAbs(0.41f, 0.005f));
+    REQUIRE_THAT(result[3], Catch::Matchers::WithinAbs(0.13f, 0.005f));
+}
+
 TEST_CASE("processFileMultiBand QUAC streaming matches the in-memory kernel (#634)", "[atm][quac][gdal][stream]")
 {
     ensureGdalInit();
