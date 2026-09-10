@@ -6963,3 +6963,34 @@ target_link_libraries(test_known_answer_corpus PRIVATE
 # Machine-readable diagnostic envelope (task G): exp.diag.v1 contract.
 sicnu_add_test(test_diagnostic_report TIMEOUT 60)
 target_link_libraries(test_diagnostic_report PRIVATE sicnu_runtime)
+
+# Quality-platform micro-baselines (task H) — run MANUALLY, never a ctest
+# gate: benchmark_quality7 --out benchmarks/quality7.json
+add_executable(benchmark_quality7
+  benchmark_quality7.cpp
+  ${CMAKE_SOURCE_DIR}/src/jobs/job_engine.cpp
+  ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator.cpp
+  ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operation_logger.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/mapspec/mapspec_conditions.cpp
+)
+target_link_libraries(benchmark_quality7 PRIVATE
+  Qt6::Core
+  GDAL::GDAL
+  sicnu_operators_core
+  sicnu_geospatial
+  sicnu_runtime
+)
+if(TARGET jsoncpp)
+  target_link_libraries(benchmark_quality7 PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(benchmark_quality7 SYSTEM PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(benchmark_quality7 PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(benchmark_quality7 PRIVATE jsoncpp)
+endif()
+target_include_directories(benchmark_quality7 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
