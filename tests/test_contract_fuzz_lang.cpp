@@ -278,12 +278,21 @@ TEST_CASE( "placeholder grammar fuzz: substitution with a counting resolver is "
            "consistent",
            "[contract][fuzz][placeholder]" )
 {
+    const std::vector<char> alphabet = [] {
+        std::vector<char> chars;
+        for ( char c = 'a'; c <= 'b'; ++c )
+            chars.push_back( c );
+        for ( const char c : std::string_view( "${}/._0123456789" ) )
+            chars.push_back( c );
+        return chars;
+    }();
+
     for ( const uint64_t seed : { 91ull } )
     {
         BoundedRandom random( seed );
         for ( int i = 0; i < kIterationsPerSeed; ++i )
         {
-            const std::string text = random.string( 0, 256, "ab${}/._0123456789" );
+            const std::string text = random.string( 0, 256, alphabet );
             const auto refs = sicnu::workflow::parsePlaceholders( text );
             size_t substitutions = 0;
             const std::string out = sicnu::workflow::substitutePlaceholders(
