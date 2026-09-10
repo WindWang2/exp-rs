@@ -1,0 +1,95 @@
+[
+  {
+    "id": "family:spectral_transform",
+    "kind": "family_default",
+    "family": "spectral_transform",
+    "modality": ["optical"],
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction"]
+    },
+    "limitations": [
+      "Transform components are scene statistics, not physical quantities — components are not comparable across scenes without the fitted coefficients",
+      "Radiometric domain must be consistent across every input band before fitting"
+    ]
+  },
+  {
+    "id": "rs:pca",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "limitations": ["Component sign/order is dataset-dependent; never hardcode band meaning"]
+  },
+  {
+    "id": "rs:mnf",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "resource": { "cost_class": "heavy", "large_raster_safe": true },
+    "limitations": ["Noise covariance estimate dominates MNF quality; low-SNR scenes produce noise components"]
+  },
+  {
+    "id": "rs:continuum_removal",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "limitations": ["Requires band wavelengths metadata; results are relative (normalized absorption depth)"]
+  },
+  {
+    "id": "rs:spectral_derivative",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "limitations": ["Amplifies band noise; prefer smoothed or resampled spectra"]
+  },
+  {
+    "id": "rs:spectral_resample",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "limitations": ["Sensor response functions must match the source product; FWHM-based resampling is approximate"]
+  },
+  {
+    "id": "rs:spectral_unmixing",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction"]
+    },
+    "limitations": ["Endmember count must not exceed band count; fractions are non-negative and sum to one only for constrained variants"]
+  },
+  {
+    "id": "rs:endmember_extraction",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "artifacts": { "output": { "kind": "table", "dtype": "float32" } },
+    "limitations": ["Extracted endmembers are scene-local spectra, not library signatures"]
+  },
+  {
+    "id": "rs:matched_filter",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "limitations": ["Target signature must be in the same radiometric domain as the scene"]
+  },
+  {
+    "id": "rs:rx_anomaly",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction", "uncertainty"]
+    },
+    "limitations": [
+      "RX flags statistical outliers, not materials — every anomaly needs visual or spectral confirmation",
+      "Detector response is threshold-dependent; report the threshold alongside the mask"
+    ]
+  },
+  {
+    "id": "rs:ace",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction"]
+    },
+    "limitations": ["ACE cosine similarity assumes the target signature shares the scene radiometric domain"]
+  }
+]

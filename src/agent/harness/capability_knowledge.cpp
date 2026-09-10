@@ -57,9 +57,22 @@ const std::set<std::string> &knownKeys()
     "id", "kind", "family", "extends", "intents", "variants", "modality",
     "band_roles", "radiometric", "crs", "sar", "temporal", "model_compatibility",
     "resource", "side_effects", "artifacts", "verification", "applicability",
-    "limitations", "when",
+    "limitations", "when", "surface",
   };
   return kKeys;
+}
+
+/// Harness 8.0: which live registry an entry's id must resolve against.
+/// "operator" (default) = RSOperatorRegistry; "spatial_tool" =
+/// SpatialToolRegistry; "data_platform_tool" = dataPlatformToolDefs().
+/// The drift test cross-checks each surface against its authoritative
+/// registry so knowledge can never name a tool that does not exist.
+const std::set<std::string> &knownSurfaces()
+{
+  static const std::set<std::string> kSurfaces = {
+    "operator", "spatial_tool", "data_platform_tool",
+  };
+  return kSurfaces;
 }
 
 } // namespace
@@ -367,6 +380,21 @@ std::vector<std::string> CapabilityKnowledge::entryIds() const
   return mOrder;
 }
 
+std::vector<std::string> CapabilityKnowledge::entryIdsForSurface(
+  const std::string &surface ) const
+{
+  ensureLoaded( const_cast<CapabilityKnowledge &>( *this ) );
+  std::vector<std::string> ids;
+  for ( const std::string &id : mOrder )
+  {
+    const Json::Value raw = mEntries[ id ];
+    const std::string entrySurface = raw.get( "surface", "operator" ).asString();
+    if ( entrySurface == surface )
+      ids.push_back( id );
+  }
+  return ids;
+}
+
 int CapabilityKnowledge::bandRoleMinimum( const Json::Value &entry, const std::string &role )
 {
   const Json::Value &bandRoles = entry.get( "band_roles", Json::Value() );
@@ -400,6 +428,18 @@ std::vector<std::string> CapabilityKnowledge::validateEntry( const Json::Value &
     problems.push_back( "missing 'id'" );
   if ( family.empty() )
     problems.push_back( "missing 'family'" );
+
+  // Harness 8.0: surface discriminator. The default "operator" keeps the
+  // 7.0 semantics; tool surfaces must stay out of the scientific intent
+  // vocabulary (intents route to processing operators only).
+  if ( entry.isMember( "surface" ) )
+  {
+    const Json::Value &surface = entry["surface"];
+    if ( !surface.isString() || !knownSurfaces().count( surface.asString() ) )
+      problems.push_back( "'surface' must be operator|spatial_tool|data_platform_tool" );
+    else if ( surface.asString() != "operator" && entry.isMember( "intents" ) )
+      problems.push_back( "tool-surface entries must not declare 'intents'" );
+  }
 
   const auto checkStringArray = [ &problems ]( const Json::Value &value,
                                                const std::string &field )

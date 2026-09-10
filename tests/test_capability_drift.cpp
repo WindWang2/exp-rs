@@ -17,6 +17,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "agent/data_platform_tools.h"
 #include "agent/harness/agent_plan.h"
 #include "agent/harness/capability_graph.h"
 #include "agent/harness/capability_knowledge.h"
@@ -31,6 +32,9 @@
 #include <operators/framework/rs_operator_registry.h>
 
 #include <fstream>
+
+#include <gdal_priv.h>
+#include <ogr_spatialref.h>
 
 #include <QDir>
 #include <QTemporaryDir>
@@ -78,7 +82,9 @@ TEST_CASE( "capability entry ids resolve in the operator registry",
   knowledge.reload();
 
   std::vector<std::string> unresolved;
-  for ( const std::string &id : knowledge.entryIds() )
+  // Harness 8.0: only operator-surface entries answer in RSOperatorRegistry;
+  // tool-surface entries have their own authoritative registries (below).
+  for ( const std::string &id : knowledge.entryIdsForSurface( "operator" ) )
   {
     if ( !RSOperatorRegistry::instance().create( id ) )
       unresolved.push_back( id );
@@ -90,6 +96,133 @@ TEST_CASE( "capability entry ids resolve in the operator registry",
     return joined;
   }() );
   REQUIRE( unresolved.empty() );
+}
+
+// ---------------------------------------------------------------------------
+// Harness 8.0: platform tool-surface knowledge resolves against the live
+// tool registries (Area A completion).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Closed tool-surface floor: the goal families whose tool ids must carry
+/// capability knowledge. Viewport/UI interaction tools (view:, canvas:,
+/// layer:, roi:, data:, raster:) are out of scope by contract — they are not
+/// scientific capabilities.
+const std::vector<std::string> kSpatialToolPrefixes = {
+  "cartography:", "workflow:", "style:", "template:", "solution:",
+};
+const std::vector<std::string> kDataPlatformPrefixes = {
+  "dataset:", "experiment:", "reproducibility:",
+};
+const std::set<std::string> kModelToolIds = { "spatial:list_models", "spatial:select_model" };
+
+bool hasAnyPrefix( const std::string &id, const std::vector<std::string> &prefixes )
+{
+  for ( const std::string &prefix : prefixes )
+    if ( id.rfind( prefix, 0 ) == 0 )
+      return true;
+  return false;
+}
+
+std::set<std::string> knowledgeIdSet( CapabilityKnowledge &knowledge )
+{
+  std::set<std::string> ids;
+  for ( const std::string &id : knowledge.entryIds() )
+    ids.insert( id );
+  return ids;
+}
+
+} // namespace
+
+TEST_CASE( "tool-surface knowledge entries resolve in the live tool registries",
+           "[harness][capability][drift]" )
+{
+  using sicnu::agent::spatial_tools::SpatialToolRegistry;
+  CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+  knowledge.setDirectory( std::string( CMAKE_SOURCE_DIR ) + "/data/agent/capabilities" );
+  knowledge.reload();
+  SpatialToolRegistry::instance().registerBuiltinTools();
+
+  std::vector<std::string> unresolved;
+  for ( const std::string &id : knowledge.entryIdsForSurface( "spatial_tool" ) )
+    if ( !SpatialToolRegistry::instance().find( id ).has_value() )
+      unresolved.push_back( id );
+  for ( const std::string &id : knowledge.entryIdsForSurface( "data_platform_tool" ) )
+  {
+    bool found = false;
+    for ( const auto &def : sicnu::agent::dataPlatformToolDefs() )
+      found = found || id == def.name;
+    if ( !found )
+      unresolved.push_back( id );
+  }
+  INFO( "unresolved tool ids: " << [&] {
+    std::string joined;
+    for ( const std::string &id : unresolved )
+      joined += id + "; ";
+    return joined;
+  }() );
+  REQUIRE( unresolved.empty() );
+}
+
+TEST_CASE( "every registered spatial tool in the platform families carries knowledge",
+           "[harness][capability][drift]" )
+{
+  using sicnu::agent::spatial_tools::SpatialToolRegistry;
+  CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+  knowledge.setDirectory( std::string( CMAKE_SOURCE_DIR ) + "/data/agent/capabilities" );
+  knowledge.reload();
+  SpatialToolRegistry::instance().registerBuiltinTools();
+
+  const std::set<std::string> known = knowledgeIdSet( knowledge );
+
+  std::vector<std::string> uncovered;
+  for ( const auto &tool : SpatialToolRegistry::instance().tools() )
+  {
+    const std::string toolId = tool->name();
+    if ( hasAnyPrefix( toolId, kSpatialToolPrefixes ) && !known.count( toolId ) )
+      uncovered.push_back( toolId );
+  }
+  for ( const auto &def : sicnu::agent::dataPlatformToolDefs() )
+  {
+    const std::string name = def.name;
+    if ( hasAnyPrefix( name, kDataPlatformPrefixes ) && !known.count( name ) )
+      uncovered.push_back( name );
+  }
+  for ( const std::string &modelTool : kModelToolIds )
+    if ( !known.count( modelTool ) )
+      uncovered.push_back( modelTool );
+
+  INFO( "uncovered tools: " << [&] {
+    std::string joined;
+    for ( const std::string &id : uncovered )
+      joined += id + "; ";
+    return joined;
+  }() );
+  REQUIRE( uncovered.empty() );
+}
+
+TEST_CASE( "every registered operator carries capability knowledge "
+           "(Harness 8.0 full-registry coverage floor)",
+           "[harness][capability][drift]" )
+{
+  CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+  knowledge.setDirectory( std::string( CMAKE_SOURCE_DIR ) + "/data/agent/capabilities" );
+  knowledge.reload();
+
+  const std::set<std::string> known = knowledgeIdSet( knowledge );
+  std::vector<std::string> uncovered;
+  for ( const std::string &operatorId : RSOperatorRegistry::instance().operatorNames() )
+    if ( !known.count( operatorId ) )
+      uncovered.push_back( operatorId );
+
+  INFO( "uncovered operators: " << [&] {
+    std::string joined;
+    for ( const std::string &id : uncovered )
+      joined += id + "; ";
+    return joined;
+  }() );
+  REQUIRE( uncovered.empty() );
 }
 
 TEST_CASE( "capability intents are in the closed plan vocabulary",
@@ -120,6 +253,9 @@ TEST_CASE( "capability modality agrees with operator x-rs-contract facts",
   // Operators that declare metadata()["x-rs-contract"]["modality"] are the
   // authoritative source for that fact (they own their physics); the
   // knowledge layer must not contradict them.
+  static const std::set<std::string> kKnowledgeModalities = {
+    "optical", "sar", "thermal", "dem", "vector", "tabular", "multimodal",
+  };
   for ( const std::string &id : knowledge.entryIds() )
   {
     const std::unique_ptr<sicnu::operators::RSOperator> op =
@@ -136,6 +272,19 @@ TEST_CASE( "capability modality agrees with operator x-rs-contract facts",
     {
       if ( modality.isString() && modality.asString() == declared )
         agrees = true;
+    }
+    // Harness 8.0: operators may declare a GENERIC contract modality that is
+    // outside the knowledge vocabulary (rs:align / rs:resample say "raster").
+    // That is a generalization, not a contradiction — for those, require the
+    // entry to declare a concrete modality set instead of exact agreement.
+    if ( !kKnowledgeModalities.count( declared ) )
+    {
+      INFO( "entry " << id << " must declare concrete modalities for generic contract '"
+                     << declared << "'" );
+      const Json::Value &modalityList = entry.get( "modality", Json::Value() );
+      REQUIRE( modalityList.isArray() );
+      REQUIRE( modalityList.size() > 0 );
+      continue;
     }
     INFO( "entry " << id << " modality list disagrees with operator contract modality "
                    << declared );
@@ -449,6 +598,15 @@ TEST_CASE( "knowledge-driven uncertainty expectation stays warning-class",
   // verifyArtifact on an output WITHOUT an uncertainty sidecar).
   Json::Value plan;
   plan["intent"] = "change";
+  // Harness 8.0: plans must carry steps to be readable (the 7.0 form of this
+  // regression pin built an intent-only document, which readAgentPlan has
+  // always rejected — the pin was red on master).
+  Json::Value changeSteps( Json::arrayValue );
+  Json::Value changeStep( Json::objectValue );
+  changeStep["id"] = "diff";
+  changeStep["operator_id"] = "rs:change_difference";
+  changeSteps.append( changeStep );
+  plan["steps"] = changeSteps;
   sicnu::agent::harness::AgentPlan parsed;
   sicnu::agent::harness::HarnessError error;
   REQUIRE( sicnu::agent::harness::readAgentPlan( plan, parsed, error ) );
@@ -467,13 +625,32 @@ TEST_CASE( "knowledge-driven uncertainty expectation stays warning-class",
   REQUIRE( wantsUncertainty ); // the family contract declares it
 
   // A sidecar-less raster must NOT fail the run: uncertainty presence is a
-  // warning-class check until a writer exists (adversarial review F1).
+  // warning-class advisory — it degrades the verdict to PASS_WITH_WARNINGS,
+  // never FAIL and never a silent pass. Harness 8.0: the fixture is now a
+  // REAL raster (the 7.0 pin wrote a text file, so "opens" failed with an
+  // error before the advisory checks were even reached — the pin was red on
+  // master and tested nothing about sidecar severity).
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
   const std::string out = ( QDir( dir.path() ).filePath( QStringLiteral( "change_out.tif" ) ) ).toStdString();
   {
-    std::ofstream stream( out, std::ios::binary );
-    stream << "synthetic";
+    GDALAllRegister();
+    GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    GDALDataset *ds = driver->Create( out.c_str(), 4, 4, 1, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    double geoTransform[6] = { 500000.0, 30.0, 0.0, 5000000.0, 0.0, -30.0 };
+    ds->SetGeoTransform( geoTransform );
+    OGRSpatialReference srs;
+    srs.importFromEPSG( 32650 );
+    char *wkt = nullptr;
+    srs.exportToWkt( &wkt );
+    ds->SetProjection( wkt );
+    CPLFree( wkt );
+    float row[4] = { 0.1f, 0.2f, 0.3f, 0.4f };
+    for ( int y = 0; y < 4; ++y )
+      ds->GetRasterBand( 1 )->RasterIO( GF_Write, 0, y, 4, 1, row, 4, 1, GDT_Float32, 0, 0 );
+    GDALClose( ds );
   }
   VerificationExpectations expectations;
   expectations.requireUncertainty = true; // what the knowledge layer demands
@@ -484,7 +661,13 @@ TEST_CASE( "knowledge-driven uncertainty expectation stays warning-class",
       joined += check.check + ( check.passed ? "=pass " : "=FAIL ");
     return joined;
   }() );
-  REQUIRE( artifact.verdict != Verdict::Fail );
+  REQUIRE( artifact.verdict == Verdict::PassWithWarnings );
+  for ( const auto &check : artifact.checks )
+    if ( check.check == "uncertainty_present" )
+    {
+      REQUIRE_FALSE( check.passed );
+      REQUIRE( check.severity == "warning" ); // advisory, never error-class
+    }
 }
 
 namespace {
@@ -642,8 +825,63 @@ TEST_CASE( "recipe expected_artifacts mirror declared outputs",
       outputNames.insert( output.get( "name", "" ).asString() );
     for ( const Json::Value &artifact : artifacts )
     {
-      INFO( "recipe " << summary["recipe_id"].asString() );
+      INFO( "recipe " << summary["recipe_id"] );
       REQUIRE( outputNames.count( artifact["name"].asString() ) == 1 );
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Harness 8.0: recipe capability chains stay pinned to the knowledge layer.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "recipe capabilities resolve in the registry and the knowledge layer",
+           "[harness][recipes][drift]" )
+{
+  using sicnu::agent::harness::RecipeCatalog;
+  using sicnu::agent::harness::CapabilityKnowledge;
+
+  RecipeCatalog &catalog = RecipeCatalog::instance();
+  catalog.setDirectory( std::string( CMAKE_SOURCE_DIR ) + "/data/agent/recipes" );
+  REQUIRE( catalog.reload() > 0 );
+  CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+  knowledge.setDirectory( std::string( CMAKE_SOURCE_DIR ) + "/data/agent/capabilities" );
+  knowledge.reload();
+
+  std::vector<std::string> problems;
+  for ( const Json::Value &summary : catalog.listRecipes() )
+  {
+    const std::string recipeId = summary["recipe_id"].asString();
+    const Json::Value doc = catalog.recipe( recipeId );
+    for ( const Json::Value &capability : doc.get( "capabilities", Json::Value( Json::arrayValue ) ) )
+    {
+      if ( !capability.isString() )
+        continue;
+      const std::string id = capability.asString();
+      // Thematic tags ("flood-mapping") are free-form; operator-shaped ids
+      // (contain ':') must resolve in the live registry AND carry knowledge.
+      if ( id.find( ':' ) == std::string::npos )
+        continue;
+      if ( !RSOperatorRegistry::instance().create( id ) )
+        problems.push_back( recipeId + ": capability '" + id + "' is not a registered operator" );
+      if ( knowledge.entryForOperator( id ).isNull() )
+        problems.push_back( recipeId + ": capability '" + id + "' has no knowledge entry" );
+    }
+    // Declared intents must be in the closed vocabulary and served.
+    const std::string intent = doc.get( "intent", "" ).asString();
+    if ( !intent.empty() )
+    {
+      if ( !sicnu::agent::harness::isKnownIntent( intent ) )
+        problems.push_back( recipeId + ": intent '" + intent + "' is not in the closed vocabulary" );
+      else if ( knowledge.operatorsForIntent( intent ).empty() )
+        problems.push_back( recipeId + ": intent '" + intent + "' is served by no capability" );
+    }
+  }
+  INFO( "problems: " << [&] {
+    std::string joined;
+    for ( const std::string &problem : problems )
+      joined += problem + "; ";
+    return joined;
+  }() );
+  REQUIRE( problems.empty() );
 }

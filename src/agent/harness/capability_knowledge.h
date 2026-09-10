@@ -101,6 +101,13 @@ class CapabilityKnowledge {
     /// All loaded entry ids (operator ids, family defaults excluded).
     std::vector<std::string> entryIds() const;
 
+    /// Harness 8.0: entry ids whose raw entry declares `surface` (missing
+    /// surface = "operator"). Surfaces: "operator" resolves against
+    /// RSOperatorRegistry, "spatial_tool" against SpatialToolRegistry,
+    /// "data_platform_tool" against dataPlatformToolDefs(); the drift test
+    /// cross-checks each against its authoritative registry.
+    std::vector<std::string> entryIdsForSurface( const std::string &surface ) const;
+
     /// Structural + vocabulary validation of one raw entry. Returns one
     /// problem per finding; empty means valid. Static so the drift test can
     /// validate documents without going through the directory scan.
