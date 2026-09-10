@@ -95,3 +95,21 @@ re-entry-safe (NextN semantics from the 7.0 registry apply unchanged).
   7.0 suites set precedent.
 - Ladder: `CMAKE_BUILD_PARALLEL_LEVEL`/ninja `-j` capped (default 8, env
   override), tests run `-j1` by default (matching local discipline).
+
+## Cross-track reconciliation (observed 2026-09-11)
+
+Concurrent 8.0 tracks are actively building on this host:
+`exp-rs-execution-plane-8` (targets: test_execution_plane_8/7,
+test_task_center, test_job_engine, test_workflow_run_coordinator — shares
+the TaskCenter/JobEngine seams this track instruments) and
+`exp-rs-geospatial-data-fabric-8` (temporal workspace / CLI). Dispositions:
+
+- This track's edits to shared seams are strict adapters (5–15-line
+  insertions at existing broadcast funnels); conflicts, if any, are trivial
+  context merges.
+- Host contention from those builds is the leading explanation for the
+  flaky GCC diagnostic-path segfaults (PLAN.md D1); benchmark numbers from
+  this host carry a contention caveat (PERFORMANCE.md).
+- test_task_center appears in BOTH tracks' plans; this track deliberately
+  does NOT edit it — the TaskCenter chain proof lives in
+  tests/test_trace_chain_8.cpp.

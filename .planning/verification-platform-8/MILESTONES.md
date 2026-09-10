@@ -18,4 +18,10 @@
 ## Current status
 
 - M0 done (this directory).
-- M1..M11 pending.
+- M1 done (committed: hygiene + gdal_compat + portability contract + probes).
+- M2 done (ladder script; D5/D6 lane fixes).
+- M3..M7 code complete (trace adapters, fault points, corpus, fuzz, bench);
+  local evidence pending the Clang build.
+- M8 done (sweeps + TaskCenter adapter anti-vacuity proof).
+- M9 script + docs done; report generation pending evidence.
+- M10..M11 pending.
