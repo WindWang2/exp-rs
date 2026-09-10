@@ -2,6 +2,73 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-11
+
+### 🧭 Pi Spatial Scientist Harness 8.0 (goal series, ADR 0144)
+
+- **Typed spatial context 2.0**: `DatasetUnderstanding` keeps every product
+  fact in its own typed slot (`sensor`, `product_type`, `product_id`,
+  `processing_level`, `acquisition_time`, `radiometric_state`), fixing the 7.0
+  builder that folded all `SICNU_*` metadata into `radiometric_state` (last
+  key won, so spacecraft/acquisition dates clobbered the radiometric state);
+  adds sparse per-band `nodata`, `quality_masks` (cloud/QA band roles), and a
+  bounded `SICNU_*` passthrough. `ContextLedger` records per-asset contexts
+  with read-time stale detection (file identity) and bounded model
+  contracts/readiness; `harness:context` surfaces `asset_contexts` and
+  `model_contracts`.
+- **Capability knowledge graph completion (Area A)**: knowledge entries gain
+  a `surface` discriminator (`operator` | `spatial_tool` |
+  `data_platform_tool`); the catalog now covers every registered operator
+  (132, was 91) — preprocess, spectral-transform, filter/morphology, OpenCV,
+  OTB families — plus the platform tool families (`cartography:*`,
+  `workflow:*`, `style:*`, `template:*`, `solution:*`, model selection,
+  `dataset:*`, `experiment:*`, `reproducibility:*`). Drift tests pin: every
+  registry operator and every platform tool carries knowledge; tool-surface
+  entries resolve against their authoritative registry; recipe `capabilities`
+  chains resolve in registry + knowledge.
+- **Evidence sidecars (Area F)** — the 7.0 known gap closes: harness-owned
+  atomic writers beside each artifact produce `<out>.verification.json`
+  (verdict, checks, expectations, quality summary, run identity) and
+  run-identity `<out>.provenance.json` when the engine did not write one
+  (never overwritten); `<out>.uncertainty.json` is written ONLY from
+  operator-declared result facts (closed key list) — no fabrication; a
+  declared-but-unwritable uncertainty sidecar is error-class. Run documents
+  gain an `evidence[]` block; the Tier-B suite asserts sidecars land on disk.
+- **Plans 8.0 (Area E)**: identity `pins` (datasets/model) validated against
+  resolved entities at execute — mismatches block with the new stable code
+  `IDENTITY_MISMATCH`; `cleanup` policy and step `role` vocabularies;
+  deterministic `planFingerprint` recorded in bindings, run responses,
+  compiled workflow `metadata`, and every evidence sidecar.
+- **Intent & feasibility 2.0 (Area C)**: `harness:resolve_intent` reports
+  `missing_facts` (demands vs known slots), `preparations` (static
+  code→action table; unsafe fixes are marked, never guessed), and
+  `solution_paths` (recipes serving the intent).
+- **Explainability (Area J)**: new `harness:explain {run_id, plan?}` assembles
+  data used, method applicability, execution facts, verification evidence,
+  assumptions, and unknowns from authoritative stores only.
+- **Preflight 8.0 (Area D)**: preflight documents expose `assumptions` (the
+  warning-class issues); optical index intents on SAR-only inputs are now a
+  `MODALITY_MISMATCH` blocker (fusion with an optical input still skips the
+  SAR branch with a warning, unchanged).
+- **Verification 8.0 (Area G)**: declared `expected_band_count` check;
+  post-verification evidence checks recompute the verdict (FAIL-never-success
+  preserved); meter trim path now reports `original_bytes` (7.0 pin was red
+  on master).
+- **Externalized eval corpus (Area I)**: `data/agent/evals/cases/*.json` —
+  versioned, schema-guarded corpus (closed categories, `foreach` expansion,
+  runtime fixtures, ≤ 400 cases) with a deterministic Tier-A runner
+  (`test_harness_eval_corpus`); seeded with 63 expanded cases across
+  anti-hallucination, invalid science, ambiguity, missing data, impossible
+  tasks, multimodal, context continuation, map confirmation, and budget
+  categories.
+- **Test repairs of 7.0 master-red pins**: three `test_capability_drift`
+  regression pins were red on origin/master (intent-only plan document;
+  `original_bytes` never set by the meter trim; a text-file fixture failing
+  `opens` before the advisory checks) — all repaired with the pins now
+  asserting what they claim.
+- `tests/helper_external_process.cpp` gains `<sys/wait.h>` (master did not
+  compile the test helper on Linux/glibc).
+
 ## [Unreleased] - 2026-09-08
 
 ### Cartography Knowledge, Template & Recipe Platform 6.0 (goal series, ADR 0135)

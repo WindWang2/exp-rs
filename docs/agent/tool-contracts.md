@@ -132,3 +132,60 @@ Every `SpatialToolRegistry` registration is metered: outputs above 512 KiB
 are compacted schema-aware (largest array member trimmed first) with explicit
 `truncated` / `truncated_field` markers; the 512 KiB `kMaxToolOutputBytes`
 registry cap is now enforced at runtime, not only in tests.
+
+---
+
+## Harness 8.0: Evidence-Driven Surfaces (2026-09)
+
+### New tool: `harness:explain {run_id, plan?}`
+
+One bounded document answering the spatial-scientist questions from
+authoritative stores only (no chat memory): **data used** (inputs with
+resolved identity/revision + cached typed facts), **method applicability**
+(serving capabilities for the intent), **what executed** (per-step status and
+cache hits), **verification** (verdicts + checks), **evidence** (sidecar
+paths), **assumptions** (failed warning-class checks), and **unknowns**
+(stale asset contexts, unresolved decisions).
+
+### Plan additions (AgentPlan v2.0, additive)
+
+| Field | Meaning |
+|---|---|
+| `pins.datasets.<slot>` | `{asset_entity_id | asset_id | path, revision?}` — validated against the RESOLVED dataset at execute time; a mismatch blocks with the new stable code **`IDENTITY_MISMATCH`** so silently swapped inputs can never feed a run |
+| `pins.model` | `"<id>" | "<id>@<version>"` model identity pin |
+| `cleanup` | `keep_all` (default) | `keep_outputs` — declared intermediate-artifact policy; forwarded in compiled workflow `metadata` (engine consumption is an execution-plane follow-up) |
+| `steps[].role` | `preparation | analysis | postprocess | verification` — explainability only, closed vocabulary |
+
+`planFingerprint(plan)` — SHA-256 (16 hex) over the canonical serialization of
+the plan's scientific content (intent, inputs, steps, outputs, verification).
+Identical science → identical fingerprint regardless of plan id or
+timestamps; recorded in plan bindings, `harness:execute_plan` responses,
+compiled workflow `metadata`, and every evidence sidecar.
+
+### Capability knowledge: platform tool surface
+
+Entries gain an optional `"surface"`: `"operator"` (default,
+`RSOperatorRegistry`), `"spatial_tool"` (`SpatialToolRegistry`),
+`"data_platform_tool"` (`dataPlatformToolDefs()` — `dataset:*`,
+`experiment:*`, `reproducibility:*`). Tool-surface entries never declare
+scientific intents. Knowledge now covers **every registered operator**
+(132, full-registry coverage floor) plus the platform tool families
+(`cartography:*`, `workflow:*`, `style:*`, `template:*`, `solution:*`,
+model selection, dataset/experiment/reproducibility surfaces). Viewport/UI
+tools (`view:`, `canvas:`, `layer:`, `roi:`, `data:`, `raster:`) are out of
+scope by contract — they are not scientific capabilities. Plugin-provided
+operators register in-process and are covered by the same floor; out-of
+-process plugin tools are a recorded follow-up.
+
+### `harness:resolve_intent` 2.0
+
+Resolved intents now also report `missing_facts` (capability demands vs the
+understanding slots actually present), `preparations` (static, typed
+code→action table; codes with no safe preparation are marked
+`no_safe_preparation`, never guessed), and `solution_paths` (recipes serving
+the intent, deterministic order, bounded 8).
+
+### Meter fix
+
+The registry meter's trim path now reports `original_bytes` (the 7.0 pin
+asserted it; the trim path never set it — the pin was red on master).
