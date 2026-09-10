@@ -635,8 +635,8 @@ std::vector<std::string> validateStyleSemantics( const Json::Value &styleSpec )
       }
     }
     else if ( scheme.asString() == "categorical" && classification->isMember( "mode" ) &&
-              classification->at( "mode" ).isString() &&
-              classification->at( "mode" ).asString() == "continuous" )
+              ( *classification )["mode"].isString() &&
+              ( *classification )["mode"].asString() == "continuous" )
       problems.push_back( id + ": categorical scheme contradicts classification.mode "
                                "'continuous' (categorical classes are discrete)" );
   }
