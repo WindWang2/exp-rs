@@ -82,3 +82,73 @@ known-answer tested against a synthetic circular orbit):
   radiometric rescaling — no operator claims it. Radiometric terrain
   flattening remains the plane-fit / projected-area model of sar_terrain.h,
   honestly named `gamma0_rtc`.
+
+## 4. Forward Range-Doppler geocoding (`rs:sar_geocode`, Scientific Processing 8.0)
+
+The 7.0 backward product geolocated SAR pixels; 8.0 closes the chain: with
+the SAME declared contract (§3), `rs:sar_geocode` maps every cell of a DEM
+map grid through forward range-Doppler (ground → zero-Doppler azimuth time +
+slant range → source row/column via PRF and the range gate) and writes the
+geocoded products. Authority: `processing/algorithms/sar/sar_geocoding.h`
+(scene-contract parser shared in spirit with the backward path, per-cell
+geometry, bounded bilinear/nearest samplers); streaming driver:
+`operators/rs/rs_sar_geocode_operator.cpp`.
+
+1. **Grid contract**: the DEM defines the output grid (CRS + north-up
+   geotransform required; rotated grids are typed refusals — the
+   terrain-family north-up convention). Geographic grids geolocate by the
+   geotransform; projected grids transform every pixel center through the
+   foundation CRS policy (`geospatial/crs`).
+2. **Products** (fixed five-band Float32, order in
+   `SICNU_SAR_GEOCODE_BANDS`): `backscatter` (resampled radiometry in the
+   input's own declared domain — pass calibrated sigma0), `gamma0`
+   (= backscatter · sin θ0 / sin θL, Ulander 1996 area factor from REAL
+   per-pixel geometry — distinct from the constant-geometry plane-fit model
+   of `rs:sar_terrain_flatten`), `incidence` (ellipsoid reference θ0),
+   `local_incidence` (terrain facet θL), `layover_shadow`
+   (0 normal / 1 layover / 2 shadow, NaN NoData).
+3. **Real-geometry classes**: layover/shadow on the map grid use the
+   per-pixel LOS elevation θe = asin(ŝ·û): LAYOVER when the toward-sensor
+   slope α > 90° − θe; SHADOW when α < −θe. These reduce exactly to the
+   §2 constant-geometry conditions when the LOS is constant.
+4. **Honesty rule (unchanged)**: cells whose forward geometry does not
+   resolve (no zero-Doppler crossing inside the declared segment), whose
+   source position falls outside the SAR raster, whose DEM height is
+   NoData, or whose resampling taps are non-finite are NaN — counted per
+   cause in the result (`unresolvedGeometryPixels`, `outsideImagePixels`,
+   `demNoDataPixels`, `sourceNoDataPixels`), never fabricated. Undeclared
+   or contradictory orbit contracts are typed refusals.
+5. **Memory**: O(tile + bounded source window); windows above a fixed
+   budget are never materialized (per-pixel bounded reads instead).
+   Determinism: bit-exact grade (pure per-pixel math, no parallel
+   reductions).
+6. **Evidence**: `tests/test_sar_geocoding.cpp` — analytic circular-orbit
+   known answers (row/col/incidence/factor/class), backward∘forward
+   round-trip closure < 1 mm, independent-vector-math facet validation,
+   sampler NaN/bounds matrix, operator E2E round-trip + layover/RTC
+   fixture, refusal matrix.
+
+## 5. Multi-date SAR statistics (`rs:sar_temporal_stats`, Scientific Processing 8.0)
+
+Where `rs:sar_ratio`/`rs:sar_change` cover the bi-temporal case, 8.0 adds
+the N-scene summary. Authority: `processing/algorithms/sar/sar_temporal.h`.
+
+1. **Domain rule (unchanged)**: kernels compute in LINEAR POWER; dB-declared
+   scenes are converted once (`SICNU_SAR_DOMAIN` wins, explicit
+   `inputDomain` overrides, undeclared falls back to linear). Mixed
+   declarations inside a stack are typed refusals — statistics over a
+   silently mixed stack would be meaningless.
+2. **Valid sample**: finite AND strictly positive (nonpositive power is
+   outside the physical domain — NaN, never clamped).
+3. **Robust change**: the per-pixel baseline is the median linear-power
+   sample (upper-median selection for even counts, documented); deviations
+   are |10·log10(x) − baseline| dB — the log domain makes multiplicative
+   speckle additive, so baseline and deviations are speckle-robust.
+4. **Products** (fixed band order, `SICNU_SAR_TEMPORAL_BANDS`): mean_db /
+   mean_linear / std_dev_linear / cv / min_db / max_db / argmax_date /
+   baseline_db / max_log_deviation_db / changed_dates / valid_count.
+   Pixels under `minValid` observations are NaN everywhere except
+   valid_count.
+5. **Evidence**: `tests/test_sar_temporal_stats.cpp` (closed forms on
+   hand-computed series, threshold counting, invalid-sample bookkeeping,
+   domain conversion, refusal matrix).
