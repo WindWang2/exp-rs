@@ -26,7 +26,7 @@
 
 #include "agent/mapspec/mapspec_conditions.h"
 #include "geospatial/util/resource_uri.h"
-#include "job_engine.h"
+#include "jobs/job_engine.h"
 #include "jobs/job_types.h"
 
 #include <algorithm>

@@ -22,7 +22,7 @@
 // SHARED closure.
 #include <catch2/catch_test_macros.hpp>
 
-#include "job_engine.h"
+#include "jobs/job_engine.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_registry.h"
 
