@@ -35,9 +35,11 @@
 // Determinism contract (Platform 7.0):
 //   * items are indexed in canonical collection order; constraints are
 //     ordered canonically — (hard before soft, priority desc, weight desc,
-//     canonical index asc) — so the chosen fixpoint no longer depends on
-//     declaration order. Identical input produces byte-identical output AND
-//     identical geometry under declaration permutations;
+//     canonical index asc) — so the chosen fixpoint is independent of
+//     declaration order except for constraints tied on the whole ordering
+//     key, whose relative order is by design the declaration order.
+//     Identical input produces byte-identical output, and distinct-key
+//     systems produce identical geometry under declaration permutations;
 //   * relaxation is bounded (kMaxRelaxationPasses hard, kMaxSoftPasses soft);
 //     exceeding a budget is a reported diagnostic, never a hang;
 //   * every movement comes from a declared constraint — nothing is moved

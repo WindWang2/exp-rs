@@ -132,8 +132,11 @@ rendering something wrong.
 ### NoData
 
 `raster.nodata: {value?: number, transparent?: bool, label?: string}` —
-the declared NoData sentinel travels with the style; `style:apply` wires it
-to the renderer.
+the declared NoData sentinel travels with the style and is validated.
+**Wiring**: `style:apply` does not yet push `nodata` into the QGIS renderer
+(design-system limitation, documented honestly): QGIS-native NoData stays
+configured through the symbology tools. The declarative block is the
+catalog's knowledge surface; renderer wiring is future work.
 
 ### Uncertainty declaration
 
@@ -149,6 +152,14 @@ refused by `checkStyleApplicability`.
 - DEM/terrain styles must declare a `stretch` or a `classification` — bare
   single-band gray hides elevation semantics;
 - existing value-domain / band-count / modality checks unchanged.
+
+### Class ontology mapping
+
+Class/category entries may tag an `ontology` concept (free-form string,
+shape-validated). `checkStyleApplicability` refuses a style whose ontology
+tags are all disjoint from the target dataset's declared `semantics` — a
+mapping-blind application is an explicit problem, never a silent wrong
+correspondence.
 
 ### Contrast checks (deterministic advisory)
 

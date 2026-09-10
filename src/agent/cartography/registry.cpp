@@ -887,9 +887,10 @@ Json::Value resolveTemplateChain( const Json::Value &raw, const QString &id, QSt
   }
   if ( parents.empty() )
   {
-    // jsoncpp Value copies share their payload: handing out `self` (a
-    // reference into the raw table) would let the merge fold below mutate
-    // the raw catalog entry for every subsequent resolution.
+    // Return an owned copy of the raw-table entry: the merge fold below may
+    // mutate the accumulator, and handing out a reference (or an aliased
+    // copy) into the raw table would couple resolutions through shared
+    // state. Explicit payload copy = independent storage by construction.
     Json::Value copy;
     copy.copyPayload( self );
     return copy;

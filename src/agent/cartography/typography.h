@@ -81,6 +81,11 @@ double measureLineMm( const std::string &text, double sizePt );
 /// (the caller sees truncated=true in the fit report).
 std::vector<std::string> wrapTextMm( const std::string &text, double maxWidthMm, double sizePt );
 
+/// Same wrap, reporting whether the kMaxWrappedLines budget truncated the
+/// output (consumed by fitTextIntoBox to flag truncation honestly).
+std::vector<std::string> wrapTextMmBudgeted( const std::string &text, double maxWidthMm,
+                                             double sizePt, bool *lineBudgetHit );
+
 /// Declared truncation policy for a text item (MapSpec v4 may carry
 /// `text: {policy: ...}`; the default keeps the 6.0 behavior).
 ///   none            — wrap at the declared font; overflow reported, nothing hidden

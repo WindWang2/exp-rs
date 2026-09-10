@@ -29,6 +29,8 @@
 #include <QMutex>
 #include <QString>
 
+#include <utility>
+
 #include <string>
 #include <vector>
 
@@ -67,6 +69,13 @@ class ChartRegistry
 /// Structural validation of a chart spec (kind, binding, inline data).
 /// Empty returned vector = valid.
 std::vector<std::string> validateChartSpec( const Json::Value &chart );
+
+/// Derives the accuracy-summary metric rows ({label, value} pairs: overall
+/// accuracy, kappa, per-class precision/recall in label order) from an
+/// accuracy_summary binding's square confusion matrix (rows = reference,
+/// columns = predicted). Pure; empty result with *error on malformed input.
+std::vector<std::pair<QString, double>> deriveAccuracySummaryRows( const Json::Value &binding,
+                                                                   QString *error = nullptr );
 
 /// Renders an inline-data chart spec to a PNG file with plain QPainter.
 /// Native kinds (vector_expression) render an explanatory placeholder —

@@ -343,6 +343,12 @@ std::vector<std::string> wrapParagraph( const std::string &text, double maxWidth
 
 std::vector<std::string> wrapTextMm( const std::string &text, double maxWidthMm, double sizePt )
 {
+  return wrapTextMmBudgeted( text, maxWidthMm, sizePt, nullptr );
+}
+
+std::vector<std::string> wrapTextMmBudgeted( const std::string &text, double maxWidthMm,
+                                             double sizePt, bool *lineBudgetHit )
+{
   std::vector<std::string> lines;
   bool hitBudget = false;
   for ( const std::string &paragraph : splitHardLines( text ) )
@@ -355,7 +361,8 @@ std::vector<std::string> wrapTextMm( const std::string &text, double maxWidthMm,
     for ( std::string &line : wrapParagraph( paragraph, maxWidthMm, sizePt, &hitBudget ) )
       lines.push_back( std::move( line ) );
   }
-  ( void )hitBudget;
+  if ( lineBudgetHit )
+    *lineBudgetHit = hitBudget;
   return lines;
 }
 
@@ -431,7 +438,7 @@ TextFitReport fitTextIntoBox( const TextFitRequest &request )
       }
     }
     report.fontPt = fits ? chosen : minPt;
-    report.fontPolicy = fits ? "shrunk" : "floor";
+    report.fontPolicy = !fits ? "floor" : ( chosen < declaredPt - 1e-9 ? "shrunk" : "declared" );
     report.lines = wrapTextMm( request.text, usableWidth, report.fontPt );
     report.usedWidthMm = widestLineMm( report.lines, report.fontPt );
     report.usedHeightMm = report.lines.size() * lineHeightMm( report.fontPt, request.lineHeightFactor );
@@ -456,7 +463,16 @@ TextFitReport fitTextIntoBox( const TextFitRequest &request )
   // Declared-font policies: wrap at fontPt.
   report.fontPt = declaredPt;
   report.fontPolicy = "declared";
-  report.lines = wrapTextMm( request.text, usableWidth, declaredPt );
+  bool lineBudgetHit = false;
+  report.lines = wrapTextMmBudgeted( request.text, usableWidth, declaredPt, &lineBudgetHit );
+  if ( lineBudgetHit )
+  {
+    report.truncated = true;
+    report.fits = false;
+    report.diagnostics.push_back(
+      "text exceeds the kMaxWrappedLines line budget; the remaining lines are "
+      "not representable and are reported, never dropped silently" );
+  }
   report.usedWidthMm = widestLineMm( report.lines, declaredPt );
   report.usedHeightMm = report.lines.size() * lineHeightMm( declaredPt, request.lineHeightFactor );
 
@@ -480,7 +496,12 @@ TextFitReport fitTextIntoBox( const TextFitRequest &request )
     {
       const unsigned char tail = static_cast<unsigned char>( last.back() );
       if ( tail >= 0x80 && tail < 0xC0 )
-        last.pop_back();
+        last.pop_back(); // continuation byte of a split sequence
+      else if ( tail >= 0x80 )
+      {
+        last.pop_back(); // a lone lead byte whose continuation was popped
+        break;
+      }
       else
         break;
     }

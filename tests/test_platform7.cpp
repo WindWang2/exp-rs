@@ -734,6 +734,31 @@ TEST_CASE( "P7 charts: accuracy_summary validates the confusion binding",
   for ( const auto &problem : validateChartSpec( chart ) )
     FAIL( problem );
 
+  // The derivation math is pinned numerically (rows = reference):
+  // po = 85/100, pe = (50*45 + 50*55)/100^2 = 0.5, kappa = 0.7.
+  const auto rows = deriveAccuracySummaryRows( chart["binding"], nullptr );
+  REQUIRE( rows.size() == 6 );
+  REQUIRE( rows[0].first == QStringLiteral( "Overall accuracy" ) );
+  REQUIRE( rows[0].second == Catch::Approx( 0.85 ).epsilon( 1e-12 ) );
+  REQUIRE( rows[1].first == QStringLiteral( "Kappa" ) );
+  REQUIRE( rows[1].second == Catch::Approx( 0.7 ).epsilon( 1e-12 ) );
+  REQUIRE( rows[2].first == QStringLiteral( "P water" ) );
+  REQUIRE( rows[2].second == Catch::Approx( 40.0 / 45.0 ).epsilon( 1e-12 ) );
+  REQUIRE( rows[3].first == QStringLiteral( "R water" ) );
+  REQUIRE( rows[3].second == Catch::Approx( 0.8 ).epsilon( 1e-12 ) );
+  REQUIRE( rows[4].first == QStringLiteral( "P forest" ) );
+  REQUIRE( rows[4].second == Catch::Approx( 45.0 / 55.0 ).epsilon( 1e-12 ) );
+  REQUIRE( rows[5].first == QStringLiteral( "R forest" ) );
+  REQUIRE( rows[5].second == Catch::Approx( 0.9 ).epsilon( 1e-12 ) );
+
+  // Non-numeric cells are rejected, never coerced into plausible numbers.
+  Json::Value dirty = chart;
+  dirty["binding"]["matrix"]["rows"][0][1] = "many";
+  bool sawNumeric = false;
+  for ( const auto &problem : validateChartSpec( dirty ) )
+    sawNumeric = sawNumeric || problem.find( "must be numeric" ) != std::string::npos;
+  REQUIRE( sawNumeric );
+
   // Non-square → rejected.
   Json::Value ragged = chart;
   ragged["binding"]["matrix"]["labels"] = Json::Value( Json::arrayValue );
@@ -957,6 +982,8 @@ TEST_CASE( "P7 preflight: declarative layer visibility and reference rules",
 TEST_CASE( "P7 preflight: legend classes contradicting the referenced style warn",
            "[platform7][preflight]" )
 {
+  StyleRegistry::instance().setDirectory( QStringLiteral( SICNU_CARTOGRAPHY_DATA_DIR ) );
+  StyleRegistry::instance().reload();
   Json::Value spec = makeMapSpec( "p7-legend-mismatch", Json::Value() );
   Json::Value legend( Json::objectValue );
   legend["id"] = "lg-1";
@@ -1004,12 +1031,16 @@ TEST_CASE( "P7 preflight: wrap-aware overflow catches multi-line clipping",
   title["font"] = font;
   spec["titles"].append( title );
 
-  const Json::Value report = preflightMapSpec( spec );
+  Json::Value report = preflightMapSpec( spec );
   REQUIRE( hasIssue( report, "MAP_TEXT_WRAP_OVERFLOW", "t-wrap" ) );
 
-  // Repair path: the deterministic text repair applies (rect/font adjust).
+  // Repair path: the deterministic, model-matched text repair applies and
+  // the re-preflight must CLEAR the rule (a repair that cannot converge
+  // would burn the whole repair budget).
   const int repaired = repairMapSpec( spec, report );
   REQUIRE( repaired >= 1 );
+  report = preflightMapSpec( spec );
+  REQUIRE_FALSE( hasIssue( report, "MAP_TEXT_WRAP_OVERFLOW", "t-wrap" ) );
 }
 
 TEST_CASE( "P7 preflight: rule catalog lists the 7.0 rules",
@@ -1035,7 +1066,7 @@ namespace {
 
 // Golden structural digest of the fixture below (pinned after a verified
 // run; update ONLY with re-verified geometry).
-constexpr const char *kGoldenDigest = "907bc94698a404310651773e278ef9a245ffb8a389bbbad30b1b5cbb1956f159";
+constexpr const char *kGoldenDigest = "6412f55f2c9ca658beb9985fbc7360a49a6a2042a456868292fee16eeb16e86e";
 
 } // namespace
 

@@ -585,8 +585,15 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
   // --- v2: solver-enforced constraints --------------------------------------
   if ( spec.isMember( "constraints" ) && spec["constraints"].isArray() )
   {
+    std::set<std::string> constraintIds;
     for ( const auto &constraint : spec["constraints"] )
     {
+      // v4: duplicate declared ids would collapse per-constraint reports and
+      // rank comparisons — rejected like duplicate item ids.
+      if ( constraint.isObject() && constraint.isMember( "id" ) &&
+           constraint["id"].isString() && !constraint["id"].asString().empty() &&
+           !constraintIds.insert( constraint["id"].asString() ).second )
+        problems.push_back( "duplicate constraint id '" + constraint["id"].asString() + "'" );
       if ( !constraint.isObject() || !constraint.isMember( "id" ) )
         continue; // structural item checks above handle malformed entries
       const std::string cid = constraint["id"].asString();

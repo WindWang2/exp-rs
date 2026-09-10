@@ -105,6 +105,85 @@ void drawAxes( QPainter &painter, const QRectF &plotRect, double maxValue, bool 
   }
 }
 
+/// Derives the accuracy-summary metric rows from a square confusion matrix
+/// binding (rows = reference, columns = predicted): overall accuracy, kappa,
+/// then per-class precision/recall in label order. Pure; empty result with
+/// *error on malformed input.
+std::vector<std::pair<QString, double>> deriveAccuracyRows( const Json::Value &binding,
+                                                            QString *error )
+{
+  const Json::Value &matrix = binding.get( "matrix", Json::Value() );
+  if ( !matrix.isObject() || !matrix.isMember( "labels" ) || !matrix["labels"].isArray() ||
+       !matrix.isMember( "rows" ) || !matrix["rows"].isArray() || matrix["rows"].empty() ||
+       matrix["rows"].size() != matrix["labels"].size() )
+  {
+    if ( error )
+      *error = QStringLiteral(
+        "accuracy_summary needs a square binding.matrix {labels: [n], rows: [n][n]}" );
+    return {};
+  }
+  const int n = static_cast<int>( matrix["labels"].size() );
+  if ( n > 64 )
+  {
+    if ( error )
+      *error = QStringLiteral( "accuracy_summary capped at 64 classes" );
+    return {};
+  }
+  double rowSums[64] = { 0.0 };
+  double colSums[64] = { 0.0 };
+  double trace = 0.0;
+  double total = 0.0;
+  for ( int r = 0; r < n; ++r )
+  {
+    const Json::Value &row = matrix["rows"][r];
+    if ( !row.isArray() || static_cast<int>( row.size() ) != n )
+    {
+      if ( error )
+        *error = QStringLiteral( "accuracy_summary matrix rows must be n×n numeric" );
+      return {};
+    }
+    for ( int c = 0; c < n; ++c )
+    {
+      if ( !row[c].isNumeric() )
+      {
+        if ( error )
+          *error = QStringLiteral( "accuracy_summary matrix cells must be numeric" );
+        return {};
+      }
+      const double value = row[c].asDouble();
+      rowSums[r] += value;
+      colSums[c] += value;
+      total += value;
+      if ( r == c )
+        trace += value;
+    }
+  }
+  if ( total <= 0 )
+  {
+    if ( error )
+      *error = QStringLiteral( "accuracy_summary matrix totals must be positive" );
+    return {};
+  }
+  const double po = trace / total;
+  double pe = 0.0;
+  for ( int i = 0; i < n; ++i )
+    pe += ( rowSums[i] * colSums[i] ) / ( total * total );
+  const double kappa = pe < 1.0 ? ( po - pe ) / ( 1.0 - pe ) : 0.0;
+
+  std::vector<std::pair<QString, double>> rows;
+  rows.emplace_back( QStringLiteral( "Overall accuracy" ), po );
+  rows.emplace_back( QStringLiteral( "Kappa" ), kappa );
+  for ( int i = 0; i < n; ++i )
+  {
+    const QString label = QString::fromStdString( matrix["labels"][i].asString() );
+    const double precision = colSums[i] > 0 ? matrix["rows"][i][i].asDouble() / colSums[i] : 0.0;
+    const double recall = rowSums[i] > 0 ? matrix["rows"][i][i].asDouble() / rowSums[i] : 0.0;
+    rows.emplace_back( QStringLiteral( "P " ) + label, precision );
+    rows.emplace_back( QStringLiteral( "R " ) + label, recall );
+  }
+  return rows;
+}
+
 /// Shared two-value scale for the painter renderer.
 bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSizeF &size,
                         QString *error )
@@ -277,78 +356,20 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
   // --- accuracy summary: confusion matrix -> deterministic metric table ----
   if ( kind == "accuracy_summary" )
   {
-    const Json::Value &binding = chart["binding"];
-    const Json::Value &matrix = binding.get( "matrix", Json::Value() );
-    if ( !matrix.isObject() || !matrix.isMember( "labels" ) || !matrix["labels"].isArray() ||
-         !matrix.isMember( "rows" ) || !matrix["rows"].isArray() ||
-         matrix["rows"].empty() || matrix["rows"].size() != matrix["labels"].size() )
+    QString deriveError;
+    const std::vector<std::pair<QString, double>> rows =
+      deriveAccuracyRows( chart["binding"], &deriveError );
+    if ( rows.empty() )
     {
       if ( error )
-        *error = QStringLiteral(
-          "accuracy_summary needs a square binding.matrix {labels: [n], rows: [n][n]}" );
+        *error = deriveError;
       return false;
     }
-    const int n = static_cast<int>( matrix["labels"].size() );
-    if ( n > 64 )
-    {
-      if ( error )
-        *error = QStringLiteral( "accuracy_summary capped at 64 classes" );
-      return false;
-    }
-    double rowSums[64] = { 0.0 };
-    double colSums[64] = { 0.0 };
-    double trace = 0.0;
-    double total = 0.0;
-    for ( int r = 0; r < n; ++r )
-    {
-      const Json::Value &row = matrix["rows"][r];
-      if ( !row.isArray() || static_cast<int>( row.size() ) != n )
-      {
-        if ( error )
-          *error = QStringLiteral( "accuracy_summary matrix rows must be n×n numeric" );
-        return false;
-      }
-      for ( int c = 0; c < n; ++c )
-      {
-        const double value = row[c].isNumeric() ? row[c].asDouble() : 0.0;
-        rowSums[r] += value;
-        colSums[c] += value;
-        total += value;
-        if ( r == c )
-          trace += value;
-      }
-    }
-    if ( total <= 0 )
-    {
-      if ( error )
-        *error = QStringLiteral( "accuracy_summary matrix totals must be positive" );
-      return false;
-    }
-    const double po = trace / total;
-    double pe = 0.0;
-    for ( int i = 0; i < n; ++i )
-      pe += ( rowSums[i] * colSums[i] ) / ( total * total );
-    const double kappa = pe < 1.0 ? ( po - pe ) / ( 1.0 - pe ) : 0.0;
-
-    // Derived table rows: overall metrics first, then per-class
-    // precision/recall in label order (deterministic).
-    std::vector<std::pair<QString, double>> rows;
-    rows.emplace_back( QStringLiteral( "Overall accuracy" ), po );
-    rows.emplace_back( QStringLiteral( "Kappa" ), kappa );
-    for ( int i = 0; i < n; ++i )
-    {
-      const QString label = QString::fromStdString( matrix["labels"][i].asString() );
-      const double precision =
-        colSums[i] > 0 ? matrix["rows"][i][i].asDouble() / colSums[i] : 0.0;
-      const double recall = rowSums[i] > 0 ? matrix["rows"][i][i].asDouble() / rowSums[i] : 0.0;
-      rows.emplace_back( QStringLiteral( "P " ) + label, precision );
-      rows.emplace_back( QStringLiteral( "R " ) + label, recall );
-    }
-
-    // Paint with the table-family path by temporarily presenting as a
-    // summary table (local mutable kind copy; validation already ran).
+    // Paint with the plain table path (kind "table": NO n/mean/sum header —
+    // aggregating accuracies would be meaningless), presenting the derived
+    // rows as the binding data (validation already ran on the original).
     Json::Value tableChart = chart;
-    tableChart["kind"] = "summary_table";
+    tableChart["kind"] = "table";
     tableChart["binding"]["data"] = Json::Value( Json::arrayValue );
     for ( const auto &row : rows )
     {
@@ -664,7 +685,14 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
   if ( maxValue <= 0 )
     maxValue = 1.0;
 
-  QRectF plotRect( 44.0, 30.0, size.width() - 54.0, size.height() - 56.0 );
+  // A justified secondary axis reserves a right margin for its tick labels
+  // (validation guarantees justification + line/scatter + array shape).
+  const bool hasSecondaryAxis =
+    ( kind == "line" || kind == "scatter" ) && chart.isMember( "axes" ) &&
+    chart["axes"].isObject() && chart["axes"].isMember( "secondary" ) &&
+    chart["axes"]["secondary"].isObject();
+  const double rightMargin = hasSecondaryAxis ? 104.0 : 10.0;
+  QRectF plotRect( 44.0, 30.0, size.width() - 44.0 - rightMargin, size.height() - 56.0 );
 
   if ( kind == "pie" )
   {
@@ -803,7 +831,15 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     {
       const Json::Value &secondary = axes["secondary"];
       const Json::Value &data = secondary.get( "data", Json::Value() );
-      if ( data.isArray() && !data.empty() && data.size() == points.size() )
+      if ( data.isArray() && !data.empty() && data.size() != points.size() )
+      {
+        // Validation rejects length mismatches; this defensive branch keeps
+        // the renderer honest if it is ever called unvalidated.
+        if ( error )
+          *error = QStringLiteral( "axes.secondary.data must have one value per series point" );
+        return false;
+      }
+      if ( data.isArray() && !data.empty() )
       {
         double secondaryMax = 0.0;
         std::vector<double> values;
@@ -859,6 +895,12 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
 
 } // namespace
 
+std::vector<std::pair<QString, double>> deriveAccuracySummaryRows( const Json::Value &binding,
+                                                                   QString *error )
+{
+  return deriveAccuracyRows( binding, error );
+}
+
 std::vector<std::string> validateChartSpec( const Json::Value &chart )
 {
   std::vector<std::string> problems;
@@ -894,10 +936,38 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
                             ? "accuracy_summary charts need binding.matrix {labels, rows} "
                               "(square confusion matrix)"
                             : "matrix charts need binding.matrix {labels, rows}" );
-    else if ( kind == "accuracy_summary" &&
-              ( matrix["rows"].empty() || matrix["rows"].size() != matrix["labels"].size() ) )
-      problems.push_back( "accuracy_summary needs a square confusion matrix "
-                          "(rows = reference, columns = predicted)" );
+    else if ( kind == "accuracy_summary" )
+    {
+      if ( matrix["rows"].empty() || matrix["rows"].size() != matrix["labels"].size() )
+        problems.push_back( "accuracy_summary needs a square confusion matrix "
+                            "(rows = reference, columns = predicted)" );
+      if ( static_cast<int>( matrix["labels"].size() ) > 31 )
+        problems.push_back( "accuracy_summary capped at 31 classes so the metric "
+                            "table fits its 64-row budget" );
+      int labelIndex = 0;
+      for ( const auto &label : matrix["labels"] )
+      {
+        if ( !label.isString() )
+          problems.push_back( "accuracy_summary labels[" + std::to_string( labelIndex ) +
+                              "] must be a string" );
+        ++labelIndex;
+      }
+      int rowIndex = 0;
+      for ( const auto &row : matrix["rows"] )
+      {
+        int cellIndex = 0;
+        if ( row.isArray() )
+          for ( const auto &cell : row )
+          {
+            if ( !cell.isNumeric() )
+              problems.push_back( "accuracy_summary matrix rows must be numeric "
+                                  "(row " + std::to_string( rowIndex ) + ", cell " +
+                                  std::to_string( cellIndex ) + ")" );
+            ++cellIndex;
+          }
+        ++rowIndex;
+      }
+    }
   }
   if ( kind == "accuracy_summary" && mode != "inline" )
     problems.push_back( "accuracy_summary derives from inline data only "
@@ -928,7 +998,16 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
         if ( kind != "line" && kind != "scatter" )
           problems.push_back( "dual axis is only defined for line/scatter charts" );
         if ( secondary.isMember( "data" ) && !secondary["data"].isArray() )
+        {
           problems.push_back( "axes.secondary.data must be an array of {label, value}" );
+        }
+        else if ( secondary.isMember( "data" ) )
+        {
+          const Json::Value &secondaryData = secondary["data"];
+          const Json::Value &primaryData = binding.get( "data", Json::Value() );
+          if ( primaryData.isArray() && secondaryData.size() != primaryData.size() )
+            problems.push_back( "axes.secondary.data must have one value per series point" );
+        }
       }
     }
   }

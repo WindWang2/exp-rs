@@ -616,23 +616,24 @@ std::vector<std::string> validateStyleSemantics( const Json::Value &styleSpec )
         const double center = ( *classification )["center"].asDouble();
         double lo = 0.0;
         double hi = 0.0;
-        bool first = true;
+        bool hasLo = false;
+        bool hasHi = false;
         for ( const auto &entry : ( *classification )["classes"] )
         {
           if ( !entry.isObject() )
             continue;
           if ( entry.isMember( "min" ) && entry["min"].isNumeric() )
           {
-            lo = first ? entry["min"].asDouble() : std::min( lo, entry["min"].asDouble() );
-            first = false;
+            lo = hasLo ? std::min( lo, entry["min"].asDouble() ) : entry["min"].asDouble();
+            hasLo = true;
           }
           if ( entry.isMember( "max" ) && entry["max"].isNumeric() )
           {
-            hi = first ? entry["max"].asDouble() : std::max( hi, entry["max"].asDouble() );
-            first = false;
+            hi = hasHi ? std::max( hi, entry["max"].asDouble() ) : entry["max"].asDouble();
+            hasHi = true;
           }
         }
-        if ( !first && ( center < lo - 1e-9 || center > hi + 1e-9 ) )
+        if ( ( hasLo || hasHi ) && ( center < lo - 1e-9 || center > hi + 1e-9 ) )
           problems.push_back( id + ": diverging center " + std::to_string( center ) +
                               " lies outside the declared class range [" + std::to_string( lo ) +
                               ", " + std::to_string( hi ) + "]" );

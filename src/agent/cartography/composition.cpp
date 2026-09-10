@@ -160,6 +160,7 @@ struct ConstraintRuntime
     bool decided = false;               ///< first hard application recorded?
     bool anchorDecided = false;         ///< anchor_wins decision recorded?
     bool rejected = false;              ///< soft: reverted by a higher-ranked constraint
+    bool rejectedDecided = false;       ///< first rejection recorded?
 };
 
 /// A pending geometry write computed by computeTargets.
@@ -1075,8 +1076,8 @@ void Solver::searchCores()
     std::vector<ConstraintRuntime *> candidates;
     for ( auto &other : mConstraints )
     {
-      if ( other.isSoft || other.disabled || other.cid == target.cid )
-        continue;
+      if ( other.isSoft || other.disabled || other.index == target.index )
+        continue; // runtime identity: duplicate declared ids stay distinct
       bool shares = false;
       for ( const std::string &id : other.itemIds )
         shares = shares || std::count( target.itemIds.begin(), target.itemIds.end(), id ) > 0;
@@ -1090,9 +1091,13 @@ void Solver::searchCores()
     coreEntry["constraint"] = target.cid;
     bool found = false;
     bool bounded = false;
+    bool searched = false;
     std::vector<int> chosen;
     const int n = static_cast<int>( candidates.size() );
     const int maxSubset = std::min( kMaxCoreSubsetSize, n );
+    int targetBudget = kMaxCoreSimulations - mSimulations; // per-target slice
+    if ( targetBudget < 0 )
+      targetBudget = 0;
     for ( int size = 1; size <= maxSubset && !found; ++size )
     {
       std::vector<int> combination( size );
@@ -1105,6 +1110,7 @@ void Solver::searchCores()
           bounded = true;
           break;
         }
+        searched = true;
         // Simulation: pre-solve geometry + all candidates re-enabled except
         // the tested subset, reports suppressed.
         restoreRects( mPreSolveRects );
@@ -1135,12 +1141,20 @@ void Solver::searchCores()
       if ( bounded )
         break;
     }
-    // Restore the real post-fixpoint state.
+    // Restore the real post-fixpoint state. blockedInLastPass must be
+    // cleared first: the re-sweep mirrors the FINAL real pass (which itself
+    // started by clearing the flags), and stale flags from mid-re-run
+    // passes would make finalize() report phantom "blocked" violations.
     restoreRects( mPreSolveRects );
     for ( auto &c : mConstraints )
+    {
       c.disabled = false;
+      c.blockedInLastPass = false;
+    }
     for ( int pass = 0; pass < kMaxRelaxationPasses; ++pass )
     {
+      for ( auto &c : mConstraints )
+        c.blockedInLastPass = false;
       if ( !sweepHardOnce() )
         break;
     }
@@ -1168,17 +1182,19 @@ void Solver::searchCores()
     }
     else
     {
-      coreEntry["bounded"] = true;
+      if ( bounded )
+        coreEntry["bounded"] = true; // truncation actually happened
       coreEntry["explanation"] =
-        "no conflicting subset within the search radius (candidates: " +
-        std::to_string( n ) + ", simulations: " + std::to_string( mSimulations ) +
-        ") explains the failure; the constraint conflicts with the anchor-"
-        "resolved geometry itself";
+        bounded
+          ? "the search budget was exhausted before a conflicting subset was "
+            "found (candidates: " + std::to_string( n ) + ", simulations: " +
+            std::to_string( mSimulations ) + "); the core may exist beyond the radius"
+          : "no conflicting subset within the search radius explains the "
+            "failure (candidates: " + std::to_string( n ) + ", exhaustive over the " +
+            std::to_string( searched ? mSimulations : 0 ) + " simulations performed)";
       mReport.add( target.cid + "|unsat-core",
                    target.cid + ": unsatisfied — " + coreEntry["explanation"].asString() );
     }
-    if ( bounded )
-      coreEntry["bounded"] = true;
     mUnsatCores.append( coreEntry );
   }
 }
@@ -1229,8 +1245,8 @@ void Solver::applySofts()
       std::string conflict;
       for ( const auto &other : mConstraints )
       {
-        if ( other.cid == c.cid || other.disabled )
-          continue;
+        if ( other.index == c.index || other.disabled )
+          continue; // runtime identity: duplicate declared ids stay distinct
         // Hard constraints always outrank softs; softs outrank later softs
         // by canonical order position (NOT declaration index).
         const bool higherRanked = !other.isSoft || other.rank < c.rank;
@@ -1250,7 +1266,11 @@ void Solver::applySofts()
           "rejected: applying it would break '" + conflict +
           "' (higher-ranked constraint keeps the geometry)";
         mReport.add( c.cid + "|rejected", c.cid + ": " + reason );
-        decide( c, "rejected", reason );
+        if ( !c.rejectedDecided )
+        {
+          c.rejectedDecided = true;
+          decide( c, "rejected", reason );
+        }
         continue;
       }
       anyWritten = true;
