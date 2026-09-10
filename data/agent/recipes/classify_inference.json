@@ -1,58 +1,67 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.classify_inference",
- "title": "Model inference mapping",
- "intent": "inference",
- "family": "model",
- "modality": "model",
- "sensors": [
-  "sentinel-2",
-  "landsat-8",
-  "landsat-9",
-  "sentinel-1"
- ],
- "description": "Trained model inference over a feature raster with optional test-time augmentation.",
- "slots": [
-  {
-   "name": "primary",
-   "kind": "raster",
-   "description": "Feature raster matching the model input contract.",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "infer",
-   "operator_id": "rs:infer",
-   "params": {
-    "input": "$primary.path",
-    "model": "$params.model_id",
-    "output": "$outputs.prediction",
-    "tta": "$params.tta"
-   },
-   "verification": "raster",
-   "when_param": "tta",
-   "params_when_skipped": {
-    "input": "$primary.path",
-    "model": "$params.model_id",
-    "output": "$outputs.prediction"
-   }
-  }
- ],
- "outputs": [
-  {
-   "name": "prediction",
-   "from_step": "infer",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "infer",
-  "renderer_hint": "categorized"
- }
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.classify_inference",
+  "title": "Model inference mapping",
+  "intent": "inference",
+  "family": "model",
+  "modality": "model",
+  "sensors": [
+    "sentinel-2",
+    "landsat-8",
+    "landsat-9",
+    "sentinel-1"
+  ],
+  "description": "Trained model inference over a feature raster with optional test-time augmentation.",
+  "slots": [
+    {
+      "name": "primary",
+      "kind": "raster",
+      "description": "Feature raster matching the model input contract.",
+      "required": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "infer",
+      "operator_id": "rs:infer",
+      "params": {
+        "input": "$primary.path",
+        "model": "$params.model_id",
+        "output": "$outputs.prediction",
+        "tta": "$params.tta"
+      },
+      "verification": "raster",
+      "when_param": "tta",
+      "params_when_skipped": {
+        "input": "$primary.path",
+        "model": "$params.model_id",
+        "output": "$outputs.prediction"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "name": "prediction",
+      "from_step": "infer",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
+  },
+  "map_output": {
+    "from_step": "infer",
+    "renderer_hint": "categorized"
+  },
+  "capabilities": [
+    "rs:infer"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "prediction",
+      "kind": "raster"
+    }
+  ]
 }

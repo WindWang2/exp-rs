@@ -1,156 +1,168 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.sar_coherent_change",
- "title": "SAR dual-channel change (rs:sar_change)",
- "intent": "sar_change",
- "family": "sar-change",
- "modality": "sar",
- "sensors": [
-  "sentinel-1"
- ],
- "description": "Optional DEM flatten gates on both epochs, then the dedicated rs:sar_change operator.",
- "slots": [
-  {
-   "name": "before",
-   "kind": "raster",
-   "description": "Before SAR scene.",
-   "required": true
-  },
-  {
-   "name": "after",
-   "kind": "raster",
-   "description": "After SAR scene.",
-   "required": true
-  },
-  {
-   "name": "dem",
-   "kind": "raster",
-   "description": "Optional DEM for terrain flattening.",
-   "required": false
-  }
- ],
- "steps": [
-  {
-   "id": "calibrate_before",
-   "operator_id": "rs:sar_calibrate",
-   "params": {
-    "input": "$before.path",
-    "output": "$outputs.cal_before_scene"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "flatten_before",
-   "operator_id": "rs:sar_terrain_flatten",
-   "params": {
-    "input": "$outputs.cal_before_scene",
-    "output": "$outputs.flat_before_scene",
-    "dem": "$dem.path"
-   },
-   "verification": "raster",
-   "when_slot": "dem",
-   "params_when_skipped": {
-    "input": "$outputs.cal_before_scene",
-    "output": "$outputs.flat_before_scene"
-   }
-  },
-  {
-   "id": "speckle_before",
-   "operator_id": "rs:sar_speckle",
-   "params": {
-    "input": "$outputs.flat_before_scene",
-    "output": "$outputs.before_scene",
-    "method": "$params.speckle",
-    "looks": 2
-   },
-   "verification": "raster",
-   "when_slot": "dem",
-   "params_when_skipped": {
-    "input": "$outputs.cal_before_scene",
-    "output": "$outputs.before_scene",
-    "method": "$params.speckle",
-    "looks": 2
-   }
-  },
-  {
-   "id": "calibrate_after",
-   "operator_id": "rs:sar_calibrate",
-   "params": {
-    "input": "$after.path",
-    "output": "$outputs.cal_after_scene"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "flatten_after",
-   "operator_id": "rs:sar_terrain_flatten",
-   "params": {
-    "input": "$outputs.cal_after_scene",
-    "output": "$outputs.flat_after_scene",
-    "dem": "$dem.path"
-   },
-   "verification": "raster",
-   "when_slot": "dem",
-   "params_when_skipped": {
-    "input": "$outputs.cal_after_scene",
-    "output": "$outputs.flat_after_scene"
-   }
-  },
-  {
-   "id": "speckle_after",
-   "operator_id": "rs:sar_speckle",
-   "params": {
-    "input": "$outputs.flat_after_scene",
-    "output": "$outputs.after_scene",
-    "method": "$params.speckle",
-    "looks": 2
-   },
-   "verification": "raster",
-   "when_slot": "dem",
-   "params_when_skipped": {
-    "input": "$outputs.cal_after_scene",
-    "output": "$outputs.after_scene",
-    "method": "$params.speckle",
-    "looks": 2
-   }
-  },
-  {
-   "id": "change",
-   "operator_id": "rs:sar_change",
-   "params": {
-    "inputA": "$outputs.before_scene",
-    "inputB": "$outputs.after_scene",
-    "output": "$outputs.change_map"
-   },
-   "verification": "raster",
-   "inputs": [
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.sar_coherent_change",
+  "title": "SAR dual-channel change (rs:sar_change)",
+  "intent": "sar_change",
+  "family": "sar-change",
+  "modality": "sar",
+  "sensors": [
+    "sentinel-1"
+  ],
+  "description": "Optional DEM flatten gates on both epochs, then the dedicated rs:sar_change operator.",
+  "slots": [
     {
-     "step": "speckle_before",
-     "port": "output",
-     "to_port": "inputA"
+      "name": "before",
+      "kind": "raster",
+      "description": "Before SAR scene.",
+      "required": true
     },
     {
-     "step": "speckle_after",
-     "port": "output",
-     "to_port": "inputB"
+      "name": "after",
+      "kind": "raster",
+      "description": "After SAR scene.",
+      "required": true
+    },
+    {
+      "name": "dem",
+      "kind": "raster",
+      "description": "Optional DEM for terrain flattening.",
+      "required": false
     }
-   ]
-  }
- ],
- "outputs": [
-  {
-   "name": "change_map",
-   "from_step": "change",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "change",
-  "renderer_hint": "singleband_pseudocolor"
- }
+  ],
+  "steps": [
+    {
+      "id": "calibrate_before",
+      "operator_id": "rs:sar_calibrate",
+      "params": {
+        "input": "$before.path",
+        "output": "$outputs.cal_before_scene"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "flatten_before",
+      "operator_id": "rs:sar_terrain_flatten",
+      "params": {
+        "input": "$outputs.cal_before_scene",
+        "output": "$outputs.flat_before_scene",
+        "dem": "$dem.path"
+      },
+      "verification": "raster",
+      "when_slot": "dem",
+      "params_when_skipped": {
+        "input": "$outputs.cal_before_scene",
+        "output": "$outputs.flat_before_scene"
+      }
+    },
+    {
+      "id": "speckle_before",
+      "operator_id": "rs:sar_speckle",
+      "params": {
+        "input": "$outputs.flat_before_scene",
+        "output": "$outputs.before_scene",
+        "method": "$params.speckle",
+        "looks": 2
+      },
+      "verification": "raster",
+      "when_slot": "dem",
+      "params_when_skipped": {
+        "input": "$outputs.cal_before_scene",
+        "output": "$outputs.before_scene",
+        "method": "$params.speckle",
+        "looks": 2
+      }
+    },
+    {
+      "id": "calibrate_after",
+      "operator_id": "rs:sar_calibrate",
+      "params": {
+        "input": "$after.path",
+        "output": "$outputs.cal_after_scene"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "flatten_after",
+      "operator_id": "rs:sar_terrain_flatten",
+      "params": {
+        "input": "$outputs.cal_after_scene",
+        "output": "$outputs.flat_after_scene",
+        "dem": "$dem.path"
+      },
+      "verification": "raster",
+      "when_slot": "dem",
+      "params_when_skipped": {
+        "input": "$outputs.cal_after_scene",
+        "output": "$outputs.flat_after_scene"
+      }
+    },
+    {
+      "id": "speckle_after",
+      "operator_id": "rs:sar_speckle",
+      "params": {
+        "input": "$outputs.flat_after_scene",
+        "output": "$outputs.after_scene",
+        "method": "$params.speckle",
+        "looks": 2
+      },
+      "verification": "raster",
+      "when_slot": "dem",
+      "params_when_skipped": {
+        "input": "$outputs.cal_after_scene",
+        "output": "$outputs.after_scene",
+        "method": "$params.speckle",
+        "looks": 2
+      }
+    },
+    {
+      "id": "change",
+      "operator_id": "rs:sar_change",
+      "params": {
+        "inputA": "$outputs.before_scene",
+        "inputB": "$outputs.after_scene",
+        "output": "$outputs.change_map"
+      },
+      "verification": "raster",
+      "inputs": [
+        {
+          "step": "speckle_before",
+          "port": "output",
+          "to_port": "inputA"
+        },
+        {
+          "step": "speckle_after",
+          "port": "output",
+          "to_port": "inputB"
+        }
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "change_map",
+      "from_step": "change",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
+  },
+  "map_output": {
+    "from_step": "change",
+    "renderer_hint": "singleband_pseudocolor"
+  },
+  "capabilities": [
+    "rs:sar_calibrate",
+    "rs:sar_terrain_flatten",
+    "rs:sar_speckle",
+    "rs:sar_change"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "change_map",
+      "kind": "raster"
+    }
+  ]
 }

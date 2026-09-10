@@ -1,0 +1,149 @@
+[
+  {
+    "id": "family:spectral_index",
+    "kind": "family_default",
+    "family": "spectral_index",
+    "modality": ["optical"],
+    "radiometric": { "acceptable": ["surface_reflectance", "toa"], "warn": ["dn"] },
+    "crs": { "requires_projected": false },
+    "resource": { "cost_class": "light", "large_raster_safe": true },
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "crs_matches", "dimensions", "finite_fraction", "nodata_fraction"]
+    },
+    "limitations": ["Index saturation over high biomass/dense urban targets"]
+  },
+  {
+    "id": "rs:spectral_index",
+    "family": "spectral_index",
+    "extends": "family:spectral_index",
+    "variants": [
+      {
+        "when": { "param": "index", "values": ["NDVI"] },
+        "intents": ["ndvi"],
+        "band_roles": { "red": 1, "nir": 1 }
+      },
+      {
+        "when": { "param": "index", "values": ["EVI"] },
+        "intents": ["evi"],
+        "band_roles": { "red": 1, "nir": 1, "blue": 1 }
+      },
+      {
+        "when": { "param": "index", "values": ["SAVI"] },
+        "intents": ["savi"],
+        "band_roles": { "red": 1, "nir": 1 }
+      },
+      {
+        "when": { "param": "index", "values": ["NDRE"] },
+        "intents": ["ndre"],
+        "band_roles": { "red_edge": 1, "nir": 1 }
+      },
+      {
+        "when": { "param": "index", "values": ["NDWI", "NDWI_MCFEETERS"] },
+        "intents": ["ndwi", "water", "flood"],
+        "band_roles": { "green": 1, "nir": 1 }
+      },
+      {
+        "when": { "param": "index", "values": ["MNDWI"] },
+        "intents": ["mndwi", "water", "flood"],
+        "band_roles": { "green": 1, "swir": 1 }
+      },
+      {
+        "when": { "param": "index", "values": ["NDSI"] },
+        "intents": ["ndsi"],
+        "band_roles": { "green": 1, "swir": 1 }
+      },
+      {
+        "when": { "param": "index", "values": ["NBR"] },
+        "intents": ["nbr", "change"],
+        "band_roles": { "nir": 1, "swir": 1 }
+      },
+      {
+        "when": { "param": "index", "values": ["NDBI"] },
+        "intents": ["ndbi"],
+        "band_roles": { "swir": 1, "nir": 1 }
+      },
+      {
+        "when": { "param": "index", "values": ["BSI"] },
+        "intents": ["bsi"],
+        "band_roles": { "blue": 1, "red": 1, "nir": 1, "swir": 1 }
+      }
+    ]
+  },
+  {
+    "id": "rs:ndvi",
+    "family": "spectral_index",
+    "extends": "family:spectral_index",
+    "intents": ["ndvi"],
+    "band_roles": { "red": 1, "nir": 1 }
+  },
+  {
+    "id": "rs:evi",
+    "family": "spectral_index",
+    "extends": "family:spectral_index",
+    "intents": ["evi"],
+    "band_roles": { "red": 1, "nir": 1, "blue": 1 }
+  },
+  {
+    "id": "rs:savi",
+    "family": "spectral_index",
+    "extends": "family:spectral_index",
+    "intents": ["savi"],
+    "band_roles": { "red": 1, "nir": 1 }
+  },
+  {
+    "id": "rs:ndwi",
+    "family": "spectral_index",
+    "extends": "family:spectral_index",
+    "intents": ["ndwi", "water", "flood"],
+    "band_roles": { "green": 1, "nir": 1 }
+  },
+  {
+    "id": "rs:mndwi",
+    "family": "spectral_index",
+    "extends": "family:spectral_index",
+    "intents": ["mndwi", "water", "flood"],
+    "band_roles": { "green": 1, "swir": 1 }
+  },
+  {
+    "id": "rs:threshold_raster",
+    "family": "spectral_index",
+    "modality": ["optical", "sar", "thermal", "dem"],
+    "intents": ["water", "sar_water", "flood"],
+    "resource": { "cost_class": "light", "large_raster_safe": true },
+    "verification": { "expected_kind": "raster", "checks": ["existence", "opens", "class_domain"] },
+    "limitations": ["Thresholds are scene- and radiometry-dependent; raw DN inputs need calibration"]
+  },
+  {
+    "id": "rs:ndbi",
+    "family": "spectral_index",
+    "extends": "family:spectral_index",
+    "intents": ["ndbi"],
+    "band_roles": { "swir": 1, "nir": 1 }
+  },
+  {
+    "id": "rs:band_math",
+    "family": "spectral_index",
+    "modality": ["optical", "sar", "thermal", "dem"],
+    "resource": { "cost_class": "light", "large_raster_safe": true },
+    "verification": { "expected_kind": "raster", "checks": ["existence", "opens", "finite_fraction"] },
+    "limitations": ["Band semantics are caller-supplied; no role knowledge is inferred"]
+  },
+  {
+    "id": "rs:band_ratio",
+    "family": "spectral_index",
+    "extends": "rs:band_math",
+    "limitations": ["Division by near-zero denominators must be guarded by the caller"]
+  },
+  {
+    "id": "rs:temporal_index_series",
+    "family": "spectral_index",
+    "modality": ["optical"],
+    "temporal": { "min_scenes": 3, "requires_acquisition_time": true },
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "intents": ["temporal", "phenology"],
+    "verification": { "expected_kind": "collection", "checks": ["existence", "opens"] },
+    "limitations": ["Series regularity depends on acquisition-time metadata quality"]
+  }
+]

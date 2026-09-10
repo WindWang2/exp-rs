@@ -7000,6 +7000,12 @@ sicnu_add_test(test_harness_evals)
 sicnu_link_jsoncpp(test_harness_evals)
 
 
+# Harness 7.0 capability-knowledge drift guard: entries vs the live operator
+# registry, operator x-rs-contract facts, and the closed intent vocabulary.
+sicnu_add_test(test_capability_drift)
+sicnu_link_jsoncpp(test_capability_drift)
+
+
 # Last TEST_INCLUDE_FILES entry: stamp PYTHONHOME / LD_LIBRARY_PATH / QT_IM_MODULE
 # onto every test after Catch PRE_TEST discovery has registered them (#730).
 sicnu_register_test_env_applier()

@@ -1,0 +1,113 @@
+[
+  {
+    "id": "family:temporal",
+    "kind": "family_default",
+    "family": "temporal",
+    "modality": ["optical"],
+    "temporal": { "min_scenes": 3, "requires_acquisition_time": true },
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "finite_fraction"]
+    },
+    "limitations": ["Irregular acquisition spacing biases trend/phenology metrics"]
+  },
+  {
+    "id": "rs:temporal_composite",
+    "family": "temporal",
+    "extends": "family:temporal",
+    "intents": ["temporal", "preprocess"],
+    "temporal": { "min_scenes": 2, "requires_acquisition_time": false }
+  },
+  {
+    "id": "rs:temporal_smooth",
+    "family": "temporal",
+    "extends": "family:temporal",
+    "intents": ["temporal", "phenology", "preprocess"]
+  },
+  {
+    "id": "rs:temporal_gap_fill",
+    "family": "temporal",
+    "extends": "family:temporal",
+    "intents": ["temporal", "preprocess"],
+    "limitations": ["Filled gaps are modelled values; flag them in downstream uncertainty"]
+  },
+  {
+    "id": "rs:temporal_extract_series",
+    "family": "temporal",
+    "extends": "family:temporal",
+    "intents": ["temporal"],
+    "verification": { "expected_kind": "table", "checks": ["existence", "opens"] }
+  },
+  {
+    "id": "rs:temporal_summary",
+    "family": "temporal",
+    "extends": "family:temporal",
+    "intents": ["temporal"]
+  },
+  {
+    "id": "rs:temporal_trend",
+    "family": "temporal",
+    "extends": "family:temporal",
+    "intents": ["temporal"],
+    "temporal": { "min_scenes": 6, "requires_acquisition_time": true },
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "finite_fraction", "uncertainty"]
+    },
+    "limitations": ["Short or gappy series produce unstable slopes"]
+  },
+  {
+    "id": "rs:temporal_sen_trend",
+    "family": "temporal",
+    "extends": "rs:temporal_trend",
+    "intents": ["temporal"]
+  },
+  {
+    "id": "rs:temporal_harmonic_fit",
+    "family": "temporal",
+    "extends": "rs:temporal_trend",
+    "intents": ["temporal", "phenology"],
+    "limitations": ["Assumes roughly periodic seasonal signal"]
+  },
+  {
+    "id": "rs:temporal_phenology",
+    "family": "temporal",
+    "extends": "family:temporal",
+    "intents": ["phenology"],
+    "band_roles": { "nir": 1, "red": 1 },
+    "temporal": { "min_scenes": 12, "requires_acquisition_time": true, "max_gap_days": 30 },
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "finite_fraction", "uncertainty"]
+    },
+    "limitations": ["Phenology metrics need full-season coverage; off-season gaps bias SOS/EOS"]
+  },
+  {
+    "id": "rs:temporal_anomaly",
+    "family": "temporal",
+    "extends": "family:temporal",
+    "intents": ["temporal", "change"]
+  },
+  {
+    "id": "rs:temporal_breakpoints",
+    "family": "temporal",
+    "extends": "family:temporal",
+    "intents": ["temporal", "change"],
+    "temporal": { "min_scenes": 8, "requires_acquisition_time": true }
+  },
+  {
+    "id": "rs:temporal_monitor",
+    "family": "temporal",
+    "extends": "family:temporal",
+    "intents": ["temporal", "change"],
+    "limitations": ["Monitoring baselines must be disturbance-free to be meaningful"]
+  },
+  {
+    "id": "rs:temporal_decompose",
+    "family": "temporal",
+    "extends": "family:temporal",
+    "intents": ["temporal"]
+  }
+]

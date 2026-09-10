@@ -1,85 +1,101 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.phenology",
- "title": "One-year vegetation phenology analysis",
- "intent": "phenology",
- "description": "collection -> QA -> index series -> smoothing -> phenology metrics -> summary/chart. Works on a temporal collection (workspace UUID or descriptor path); the 'phenology' preflight rule pack warns when scene ordering or NIR/Red roles cannot be verified.",
- "slots": [
-  {
-   "name": "collection",
-   "kind": "collection",
-   "description": "Temporal collection reference: workspace UUID or descriptor JSON path covering at least one full growing cycle.",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "index_series",
-   "operator_id": "rs:temporal_index_series",
-   "params": {
-    "collection": "$collection.path",
-    "index": "NDVI",
-    "output": "$outputs.index_series"
-   },
-   "verification": "raster"
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.phenology",
+  "title": "One-year vegetation phenology analysis",
+  "intent": "phenology",
+  "description": "collection -> QA -> index series -> smoothing -> phenology metrics -> summary/chart. Works on a temporal collection (workspace UUID or descriptor path); the 'phenology' preflight rule pack warns when scene ordering or NIR/Red roles cannot be verified.",
+  "slots": [
+    {
+      "name": "collection",
+      "kind": "collection",
+      "description": "Temporal collection reference: workspace UUID or descriptor JSON path covering at least one full growing cycle.",
+      "required": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "index_series",
+      "operator_id": "rs:temporal_index_series",
+      "params": {
+        "collection": "$collection.path",
+        "index": "NDVI",
+        "output": "$outputs.index_series"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "smooth",
+      "operator_id": "rs:temporal_smooth",
+      "params": {
+        "collection": "$collection.path",
+        "band_role": "nir",
+        "output": "$outputs.smoothed"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "phenology",
+      "operator_id": "rs:temporal_phenology",
+      "params": {
+        "collection": "$collection.path",
+        "band_role": "nir",
+        "output": "$outputs.phenology"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "summary",
+      "operator_id": "rs:temporal_summary",
+      "params": {
+        "collection": "$collection.path",
+        "band_role": "nir",
+        "output": "$outputs.summary"
+      },
+      "verification": "raster"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "phenology",
+      "from_step": "phenology",
+      "port": "output",
+      "kind": "raster"
+    },
+    {
+      "name": "summary",
+      "from_step": "summary",
+      "port": "output",
+      "kind": "report"
+    }
+  ],
+  "verification": {
+    "enabled": true
   },
-  {
-   "id": "smooth",
-   "operator_id": "rs:temporal_smooth",
-   "params": {
-    "collection": "$collection.path",
-    "band_role": "nir",
-    "output": "$outputs.smoothed"
-   },
-   "verification": "raster"
+  "map_output": {
+    "from_step": "phenology",
+    "renderer_hint": "singleband_pseudocolor"
   },
-  {
-   "id": "phenology",
-   "operator_id": "rs:temporal_phenology",
-   "params": {
-    "collection": "$collection.path",
-    "band_role": "nir",
-    "output": "$outputs.phenology"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "summary",
-   "operator_id": "rs:temporal_summary",
-   "params": {
-    "collection": "$collection.path",
-    "band_role": "nir",
-    "output": "$outputs.summary"
-   },
-   "verification": "raster"
-  }
- ],
- "outputs": [
-  {
-   "name": "phenology",
-   "from_step": "phenology",
-   "port": "output",
-   "kind": "raster"
-  },
-  {
-   "name": "summary",
-   "from_step": "summary",
-   "port": "output",
-   "kind": "report"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "phenology",
-  "renderer_hint": "singleband_pseudocolor"
- },
- "family": "temporal",
- "modality": "temporal",
- "sensors": [
-  "sentinel-2",
-  "modis"
- ]
+  "family": "temporal",
+  "modality": "temporal",
+  "sensors": [
+    "sentinel-2",
+    "modis"
+  ],
+  "capabilities": [
+    "rs:temporal_index_series",
+    "rs:temporal_smooth",
+    "rs:temporal_phenology",
+    "rs:temporal_summary"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "phenology",
+      "kind": "raster"
+    },
+    {
+      "name": "summary",
+      "kind": "report"
+    }
+  ]
 }

@@ -56,3 +56,38 @@ harness:preflight {
 declares an `intent` — planners cannot skip it by forgetting to call
 preflight first (the explicit `skip_preflight` flag exists only for custom
 plans with no intent).
+
+---
+
+## Harness 7.0: Specification Table & New Rule Packs (2026-09)
+
+The intent → pack dispatch is a single specification table (`IntentSpecTable`
+in `scientific_preflight.cpp`), not an if/else chain. The same table powers
+`intentRequirements(intent)` — the machine-readable mirror whose band-role and
+min-scene demands `test_capability_drift` pins against the capability
+knowledge layer (`data/agent/capabilities/`).
+
+Packs by intent (7.0 state):
+
+| Intent(s) | Pack | Notes |
+|---|---|---|
+| ndvi / evi / savi / ndre | band_ratio | EVI demands Blue, NDRE demands Red edge (spec-correct since 7.0) |
+| ndwi / water / flood | band_ratio + flood | Green+NIR; flood adds physics caveats |
+| mndwi / ndsi | band_ratio | Green+SWIR |
+| nbr / dnbr / ndbi / bsi | band_ratio | dNBR requires a pair |
+| change | optical_change | pair CRS/grid/resolution/radiometry |
+| sar_change / sar_flood | sar_change | polarization + calibration + grid; sar_flood adds flood caveats |
+| sar / sar_water | sar_single | modality + calibration/polarization warnings |
+| classify | classify + land_cover | legends, sample sufficiency; `supervised:false` refs entry exempts training demand |
+| accuracy | classify + accuracy + pair | reference vs class-map domain intersection |
+| phenology / temporal | temporal_series | facts-driven blockers (scene floor 12 / 3, ordering), warnings without facts |
+| terrain | terrain | projected-CRS demand |
+| inference | inference | model manifest vs dataset: band roles, modality, temporal length, radiometry, resolution window; unknown model → MODEL_NOT_READY |
+| qa / preprocess / ship | shared | resolvability only |
+
+Mixed-modality inputs (optical + SAR on one intent) additionally run the
+**multimodal pack**: cross-CRS is a blocker, registration/resolution
+mismatches and SAR calibration gaps are declared warnings.
+
+Refs entries accept Harness 7.0 extras: `"model"` (model catalog id),
+`"supervised"` (bool), `"temporal_facts"` ({scene_count, dates[], max_gap_days?}).

@@ -1,0 +1,47 @@
+[
+  {
+    "id": "rs:infer",
+    "family": "inference",
+    "modality": ["optical", "sar", "multimodal"],
+    "intents": ["inference", "ship"],
+    "model_compatibility": { "families": ["segmentation", "detection", "change_detection"] },
+    "resource": { "cost_class": "heavy", "large_raster_safe": true },
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "class_domain", "finite_fraction", "uncertainty"]
+    },
+    "limitations": [
+      "Model input contracts (band roles, dtype, temporal length) must match the dataset",
+      "Tiled inference can produce seam artifacts; check the model tiling policy"
+    ]
+  },
+  {
+    "id": "rs:embedding",
+    "family": "inference",
+    "modality": ["optical", "sar"],
+    "model_compatibility": { "families": ["ssl", "embedding"] },
+    "resource": { "cost_class": "heavy", "large_raster_safe": true },
+    "verification": { "expected_kind": "raster", "checks": ["existence", "opens", "finite_fraction"] }
+  },
+  {
+    "id": "rs:feature_stack",
+    "family": "inference",
+    "modality": ["optical", "sar", "multimodal", "dem"],
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "verification": { "expected_kind": "raster", "checks": ["existence", "opens", "dimensions"] },
+    "limitations": ["Stacked layers must share grid/CRS; alignment is the caller's contract"]
+  },
+  {
+    "id": "rs:feature_normalize",
+    "family": "inference",
+    "extends": "rs:feature_stack",
+    "resource": { "cost_class": "light", "large_raster_safe": true }
+  },
+  {
+    "id": "rs:feature_select",
+    "family": "inference",
+    "extends": "rs:feature_stack",
+    "resource": { "cost_class": "light", "large_raster_safe": true }
+  }
+]

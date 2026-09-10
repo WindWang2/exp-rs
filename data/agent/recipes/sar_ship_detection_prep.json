@@ -1,87 +1,103 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.sar_ship_detection_prep",
- "title": "SAR ship detection preparation",
- "intent": "ship",
- "family": "ship-detection",
- "modality": "sar",
- "sensors": [
-  "sentinel-1"
- ],
- "description": "Calibrate -> speckle -> GLCM texture contrast -> threshold bright targets. Prepares input for rs:detect.",
- "slots": [
-  {
-   "name": "primary",
-   "kind": "raster",
-   "description": "SAR GRD scene over water.",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "calibrate",
-   "operator_id": "rs:sar_calibrate",
-   "params": {
-    "input": "$primary.path",
-    "output": "$outputs.calibrated"
-   },
-   "verification": "raster"
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.sar_ship_detection_prep",
+  "title": "SAR ship detection preparation",
+  "intent": "ship",
+  "family": "ship-detection",
+  "modality": "sar",
+  "sensors": [
+    "sentinel-1"
+  ],
+  "description": "Calibrate -> speckle -> GLCM texture contrast -> threshold bright targets. Prepares input for rs:detect.",
+  "slots": [
+    {
+      "name": "primary",
+      "kind": "raster",
+      "description": "SAR GRD scene over water.",
+      "required": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "calibrate",
+      "operator_id": "rs:sar_calibrate",
+      "params": {
+        "input": "$primary.path",
+        "output": "$outputs.calibrated"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "speckle",
+      "operator_id": "rs:sar_speckle",
+      "params": {
+        "input": "$outputs.calibrated",
+        "output": "$outputs.filtered",
+        "method": "lee",
+        "looks": 2
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "texture",
+      "operator_id": "rs:sar_texture",
+      "params": {
+        "input": "$outputs.filtered",
+        "output": "$outputs.texture",
+        "displacement": 1
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "targets",
+      "operator_id": "rs:threshold_raster",
+      "params": {
+        "input": "$outputs.texture",
+        "output": "$outputs.target_mask",
+        "thresholdMethod": "statistical",
+        "statisticalK": 3.0,
+        "cleanup": "open",
+        "minAreaPixels": 4
+      },
+      "verification": "raster"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "texture",
+      "from_step": "texture",
+      "port": "output",
+      "kind": "raster"
+    },
+    {
+      "name": "target_mask",
+      "from_step": "targets",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
   },
-  {
-   "id": "speckle",
-   "operator_id": "rs:sar_speckle",
-   "params": {
-    "input": "$outputs.calibrated",
-    "output": "$outputs.filtered",
-    "method": "lee",
-    "looks": 2
-   },
-   "verification": "raster"
+  "map_output": {
+    "from_step": "texture",
+    "renderer_hint": "categorized"
   },
-  {
-   "id": "texture",
-   "operator_id": "rs:sar_texture",
-   "params": {
-    "input": "$outputs.filtered",
-    "output": "$outputs.texture",
-    "displacement": 1
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "targets",
-   "operator_id": "rs:threshold_raster",
-   "params": {
-    "input": "$outputs.texture",
-    "output": "$outputs.target_mask",
-    "thresholdMethod": "statistical",
-    "statisticalK": 3.0,
-    "cleanup": "majority",
-    "minAreaPixels": 4
-   },
-   "verification": "raster"
-  }
- ],
- "outputs": [
-  {
-   "name": "texture",
-   "from_step": "texture",
-   "port": "output",
-   "kind": "raster"
-  },
-  {
-   "name": "target_mask",
-   "from_step": "targets",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "texture",
-  "renderer_hint": "categorized"
- }
+  "capabilities": [
+    "rs:sar_calibrate",
+    "rs:sar_speckle",
+    "rs:sar_texture",
+    "rs:threshold_raster"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "texture",
+      "kind": "raster"
+    },
+    {
+      "name": "target_mask",
+      "kind": "raster"
+    }
+  ]
 }

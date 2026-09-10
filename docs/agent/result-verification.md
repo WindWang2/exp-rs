@@ -71,3 +71,28 @@ transient I/O), `harness:run_status` may resume **once** per call via the
 engine's own `resumeRun` — completed steps with valid outputs are never
 re-executed. Non-idempotent and destructive operations are never auto-retried;
 the LLM cannot raise the bound.
+
+---
+
+## Harness 7.0: Derived Expectations & New Checks (2026-09)
+
+`harness:run_status` / `harness:execute_plan` no longer verify outputs with
+vacuous defaults. Expectations are layered, most specific wins:
+
+1. Structural defaults (4.0 semantics; provenance stays warning-class unless
+   tightened below).
+2. Capability-knowledge contract for the plan intent: when a serving entry's
+   `verification.checks` declares `finite_fraction` / `nodata_fraction`, the
+   thresholds tighten to 0.5 / 0.9; `provenance` and `uncertainty` switch the
+   corresponding sidecar checks on.
+3. The plan's `verification.expectations` block — `crs`, `width`, `height`,
+   `class_values`, `max_nodata_fraction`, `min_finite_fraction`,
+   `expected_extent`, `require_provenance`, `require_uncertainty`.
+
+New checks: `extent_covers_aoi` (output geotransform must cover the declared
+AOI rectangle; error) and `uncertainty_present` (`<output>.uncertainty.json`
+sidecar per the recipe uncertainty-path convention; warning).
+
+The derived expectations are echoed in `verification.expectations` of the run
+status document. FAIL propagation is unchanged: any FAIL verdict forces
+`status: "failed"`.

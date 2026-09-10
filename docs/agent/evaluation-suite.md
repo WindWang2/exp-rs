@@ -56,3 +56,24 @@ success (Phase 9), and token budgets (Phase 20).
 ```bash
 ctest --test-dir build -C Release -R harness --output-on-failure
 ```
+
+---
+
+## Harness 7.0: Scenario Additions (2026-09)
+
+`tests/test_harness_evals.cpp` adds (real engine + synthetic fixtures unless
+noted):
+
+| Scenario | Tier | Grades |
+|---|---|---|
+| Optical flood NDWI full pipeline | B | recipe instantiate → execute → verification PASS |
+| SAR flood gates (polarization, mixed-modality CRS, same-grid fusion) | A | preflight blockers + `sar_flood_vh` compile + `vv` preset parity |
+| DEM terrain full pipeline | B | terrain preflight + `rs:terrain_analysis` execution + PASS |
+| Temporal trend pack | A | scene-floor / ordering blockers from `temporal_facts`; warning without facts; phenology floor |
+| Inference model contract | A | unknown model → MODEL_NOT_READY; undeclared model → warning |
+| Bounded plan repair | A | structural repair log + advisory-only science issues |
+| Intent ambiguity & decisions | A | typed ambiguity → candidates; decision record/list/resolve; context surfacing |
+| Understanding cache & plan binding | B | cached understanding; run binding with PASS status in context |
+
+Regression pins kept: NDVI & change full execution, FAIL-never-success,
+anti-hallucination, token budgets, capability drift, recipe de-duplication.

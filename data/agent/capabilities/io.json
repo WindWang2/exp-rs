@@ -1,0 +1,84 @@
+[
+  {
+    "id": "family:io",
+    "kind": "family_default",
+    "family": "io",
+    "modality": ["optical", "sar", "thermal", "dem", "vector", "tabular"],
+    "resource": { "cost_class": "light", "large_raster_safe": true },
+    "side_effects": true,
+    "verification": { "expected_kind": "raster", "checks": ["existence", "opens"] },
+    "limitations": ["Reprojection resamples pixels; record source grid for provenance"]
+  },
+  {
+    "id": "gdal:reproject",
+    "family": "io",
+    "extends": "family:io",
+    "intents": ["preprocess"]
+  },
+  {
+    "id": "io:reproject",
+    "family": "io",
+    "extends": "family:io",
+    "intents": ["preprocess"]
+  },
+  {
+    "id": "io:warp",
+    "family": "io",
+    "extends": "family:io",
+    "intents": ["preprocess"]
+  },
+  {
+    "id": "io:translate",
+    "family": "io",
+    "extends": "family:io",
+    "intents": ["preprocess"]
+  },
+  {
+    "id": "io:convert_format",
+    "family": "io",
+    "extends": "family:io"
+  },
+  {
+    "id": "io:make_cog",
+    "family": "io",
+    "extends": "family:io"
+  },
+  {
+    "id": "io:clip",
+    "family": "io",
+    "extends": "family:io",
+    "intents": ["preprocess"]
+  },
+  {
+    "id": "gdal:clip",
+    "family": "io",
+    "extends": "family:io",
+    "intents": ["preprocess"]
+  },
+  {
+    "id": "gdal:pansharpen",
+    "family": "io",
+    "modality": ["optical"],
+    "band_roles": { "pan": 1, "red": 1, "green": 1, "blue": 1 },
+    "intents": ["preprocess"],
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "verification": { "expected_kind": "raster", "checks": ["existence", "opens", "dimensions"] }
+  },
+  {
+    "id": "gdal:polygonize",
+    "family": "io",
+    "modality": ["optical", "sar", "dem"],
+    "intents": ["preprocess", "classify"],
+    "verification": { "expected_kind": "vector", "checks": ["existence", "opens", "feature_count"] }
+  },
+  {
+    "id": "io:inspect",
+    "family": "io",
+    "side_effects": false
+  },
+  {
+    "id": "io:doctor",
+    "family": "io",
+    "side_effects": false
+  }
+]

@@ -39,6 +39,13 @@ struct VerificationExpectations {
   Json::Value classValues;        ///< optional closed class-value domain (array)
   bool requireNonEmpty = true;    ///< vector feature count > 0
   bool requireProvenance = true;  ///< derivation/provenance sidecar must exist
+
+  /// Harness 7.0 (mission Area F): when declared, the raster output extent
+  /// ({xmin,ymin,xmax,ymax}) must COVER this region; a shortfall is an error.
+  Json::Value expectedExtent{Json::Value()};
+  /// When true, an uncertainty sidecar (<path>.uncertainty.json) is expected
+  /// where the plan/recipe declares an uncertainty path (warning-class).
+  bool requireUncertainty = false;
 };
 
 struct VerificationCheck {
