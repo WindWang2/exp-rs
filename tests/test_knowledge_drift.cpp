@@ -17,6 +17,10 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "operators/framework/rs_operator_registry.h"
 
+#include "agent/cartography/solution_registry.h"
+
+#include <QDir>
+#include <QFile>
 #include <QString>
 
 #include <algorithm>
@@ -256,4 +260,140 @@ TEST_CASE( "Composite component children references resolve (H)", "[platform6][d
     }
   }
   CHECK( drifted.empty() );
+}
+
+// ---------------------------------------------------------------------------
+// Platform 7.0: component→token closure, template inheritance closure,
+// style applicability vocabulary, and mutation tests proving the checks
+// above are live (a seeded dangling reference must FAIL, not pass).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Component style_tokens resolve against the default token set (I)",
+           "[platform7][drift]" )
+{
+  useShippedCatalogs();
+  ComponentRegistry &components = ComponentRegistry::instance();
+  const Json::Value tokens = resolveTokenSet( Json::Value() );
+
+  std::vector<std::string> drifted;
+  for ( const auto &component : components.components() )
+  {
+    if ( !component.isMember( "style_tokens" ) )
+      continue;
+    for ( const auto &path : component["style_tokens"] )
+      if ( path.isString() && tokenValue( tokens, path.asString() ).isNull() )
+        drifted.push_back( component.get( "id", "" ).asString() + " -> unknown token path '" +
+                           path.asString() + "'" );
+  }
+  for ( const auto &entry : drifted )
+    FAIL( "drift: " << entry );
+}
+
+TEST_CASE( "Template inheritance parents resolve (I)", "[platform7][drift]" )
+{
+  useShippedCatalogs();
+  TemplateRegistry &templates = TemplateRegistry::instance();
+
+  std::vector<std::string> drifted;
+  for ( const auto &tmpl : templates.templates() )
+  {
+    const std::string id = tmpl.get( "id", "" ).asString();
+    const Json::Value &extends = tmpl["extends"];
+    if ( extends.isString() && !extends.asString().empty() &&
+         templates.find( QString::fromStdString( extends.asString() ) ).isNull() )
+      drifted.push_back( id + " -> unknown parent '" + extends.asString() + "'" );
+    if ( extends.isArray() )
+      for ( const auto &parent : extends )
+        if ( parent.isString() &&
+             templates.find( QString::fromStdString( parent.asString() ) ).isNull() )
+          drifted.push_back( id + " -> unknown parent '" + parent.asString() + "'" );
+  }
+  for ( const auto &entry : drifted )
+    FAIL( "drift: " << entry );
+}
+
+TEST_CASE( "Style applicability modalities stay in the closed vocabulary (I)",
+           "[platform7][drift]" )
+{
+  useShippedCatalogs();
+  StyleRegistry &styles = StyleRegistry::instance();
+
+  std::vector<std::string> drifted;
+  for ( const auto &style : styles.styles() )
+  {
+    if ( !style.isMember( "applicability" ) || !style["applicability"].isObject() ||
+         !style["applicability"].isMember( "modalities" ) )
+      continue;
+    for ( const auto &modality : style["applicability"]["modalities"] )
+      if ( modality.isString() &&
+           !sicnu::agent::cartography::isSolutionModality( modality.asString() ) )
+        drifted.push_back( style.get( "id", "" ).asString() + " -> unknown modality '" +
+                           modality.asString() + "'" );
+  }
+  for ( const auto &entry : drifted )
+    FAIL( "drift: " << entry );
+}
+
+TEST_CASE( "Mutation: a dangling component style_token fails the drift check (I)",
+           "[platform7][drift][mutation]" )
+{
+  ComponentRegistry &components = ComponentRegistry::instance();
+  const QString tempDir = QDir::temp().filePath( QStringLiteral( "sicnu-p7-drift-mutant" ) );
+  QDir().mkpath( tempDir );
+
+  Json::Value mutant( Json::objectValue );
+  mutant["id"] = "test/dangling-tokens";
+  mutant["category"] = "text";
+  mutant["version"] = 1;
+  mutant["style_tokens"] = Json::Value( Json::arrayValue );
+  mutant["style_tokens"].append( "colors.does_not_exist" );
+  const QString path = tempDir + "/mutant.json";
+  QFile file( path );
+  REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+  file.write( Json::writeString( Json::StreamWriterBuilder(), mutant ).c_str() );
+  file.close();
+
+  // Point the registry at the mutated catalog and re-run the walk.
+  components.setDirectory( tempDir );
+  components.reload();
+  const Json::Value tokens = resolveTokenSet( Json::Value() );
+  int dangling = 0;
+  for ( const auto &component : components.components() )
+    if ( component.isMember( "style_tokens" ) )
+      for ( const auto &tokenPath : component["style_tokens"] )
+        if ( tokenPath.isString() && tokenValue( tokens, tokenPath.asString() ).isNull() )
+          ++dangling;
+  REQUIRE( dangling == 1 );
+
+  // Restore the shipped catalog for the remaining tests.
+  components.setDirectory( QString::fromStdString( SICNU_CARTOGRAPHY_DATA_DIR ) );
+  components.reload();
+  REQUIRE( components.loadProblems().isEmpty() );
+}
+
+TEST_CASE( "Mutation: an unknown template extends parent fails at load (I)",
+           "[platform7][drift][mutation]" )
+{
+  TemplateRegistry &templates = TemplateRegistry::instance();
+  const QString tempDir = QDir::temp().filePath( QStringLiteral( "sicnu-p7-drift-parent" ) );
+  QDir().mkpath( tempDir );
+  Json::Value orphan( Json::objectValue );
+  orphan["id"] = "test/orphan-tpl";
+  orphan["extends"] = "ghost-parent";
+  const QString path = tempDir + "/orphan.json";
+  QFile file( path );
+  REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+  file.write( Json::writeString( Json::StreamWriterBuilder(), orphan ).c_str() );
+  file.close();
+
+  templates.setDirectory( tempDir );
+  templates.reload();
+  bool reported = false;
+  for ( const QString &problem : templates.loadProblems() )
+    reported = reported || problem.contains( QLatin1String( "ghost-parent" ) );
+  REQUIRE( reported );
+
+  templates.setDirectory( QString::fromStdString( SICNU_CARTOGRAPHY_DATA_DIR ) );
+  templates.reload();
+  REQUIRE( templates.loadProblems().isEmpty() );
 }
