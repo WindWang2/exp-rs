@@ -68,7 +68,7 @@ bool writeRaster( const QString &path, const std::vector<float> &values, int wid
     if ( wkt )
         GDALSetProjection( ds, wkt );
     if ( withNodata )
-        GDALGetRasterBand( ds, 1 )->SetNoDataValue( nodata );
+        GDALSetRasterNoDataValue( GDALGetRasterBand( ds, 1 ), nodata );
     if ( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, width, height,
                        const_cast<float *>( values.data() ), width, height, GDT_Float32,
                        0, 0 ) != CE_None )

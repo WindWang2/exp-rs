@@ -34,6 +34,7 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 using namespace sicnu::sar;
+using namespace sicnu::operators;
 using Catch::Approx;
 
 namespace
@@ -159,7 +160,7 @@ bool writeDem( const QString &path, const std::vector<float> &values, int width,
     if ( withCrs && wkt )
         GDALSetProjection( ds, wkt );
     if ( withNodata )
-        GDALGetRasterBand( ds, 1 )->SetNoDataValue( nodata );
+        GDALSetRasterNoDataValue( GDALGetRasterBand( ds, 1 ), nodata );
     if ( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, width, height,
                        const_cast<float *>( values.data() ), width, height, GDT_Float32,
                        0, 0 ) != CE_None )
@@ -234,7 +235,10 @@ constexpr int kDemW = 6;
 constexpr int kDemH = 6;
 constexpr double kDlonDeg = 0.001;
 constexpr double kDlatDeg = 0.004;
-constexpr double kLonStartDeg = kSceneCenterLonDeg - 0.002; // cols 0-1 center before the swath
+// Column spacing maps to 1.634 SAR rows per 0.001 deg; the -0.0015 deg
+// offset places cols 0-1 solidly before the scene leading edge (rowF < -0.8)
+// and cols 2-5 solidly inside (rowF > +0.8) — no cell near the boundary.
+constexpr double kLonStartDeg = kSceneCenterLonDeg - 0.0015;
 constexpr double kLatStartDeg = 0.002;                      // all cells north of the equator
 
 void demGeoTransform( double *gt )
@@ -277,8 +281,8 @@ TEST_CASE( "parseSarSceneContract: valid contract parses, every class of garbage
     const OrbitSegment orbit = makeCircularOrbit();
     const QString encoded = encodeOrbit( orbit );
     const double startT = kRangeStart / ( 299792458.0 / 2.0 );
-    auto meta = [&]( const QString &orbitStates, const QString &win ) {
-        return [&]( const char *key ) -> QString {
+    auto meta = []( const QString &orbitStates, const QString &win ) {
+        return [orbitStates, win]( const char *key ) -> QString {
             const QString k = QString::fromLatin1( key );
             if ( k == "SICNU_SAR_ORBIT_STATES" )
                 return orbitStates;
@@ -600,7 +604,7 @@ TEST_CASE( "rs:sar_geocode round-trips a linear radiometry field onto the DEM gr
                 // Geometry is still valid; radiometry is honestly absent.
                 REQUIRE( std::isnan( backscatter[idx] ) );
                 REQUIRE( std::isnan( gamma0[idx] ) );
-                REQUIRE( std::isnan( mask[idx] ) || mask[idx] == 0.0f );
+                REQUIRE( ( std::isnan( mask[idx] ) || mask[idx] == 0.0f ) );
                 REQUIRE( std::isfinite( incidence[idx] ) );
                 continue;
             }

@@ -8,6 +8,7 @@
 #include "geospatial/vector/vector_reader.h"
 #include "processing/gdal/gdal_dataset_wrapper.h" // ensureGdalInit
 
+#include <gdal_alg.h>
 #include <ogr_geometry.h>
 #include <ogr_srs_api.h>
 

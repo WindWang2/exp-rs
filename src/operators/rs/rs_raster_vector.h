@@ -84,15 +84,6 @@ struct FeatureLoadSpec
     double constantValue = 1.0;
 };
 
-/// Streams the vector through the geospatial VectorReader (declared CRS
-/// transform into @a targetCrs — the raster grid's CRS), parses geometries,
-/// and caches them with pixel bounds. Throws RSOperatorError on open/CRS
-/// failures, malformed WKT, a missing/non-numeric field value, or a cache
-/// over kFeatureCacheBytes.
-FeatureCache loadFeatureCache( const FeatureLoadSpec &spec, const RasterGrid &grid,
-                               const sicnu::geo::Crs &targetCrs );
-
-
 /// North-up affine grid (the terrain/raster-vector family contract; rotated
 /// geotransforms are refused by the operators before this seam runs).
 struct RasterGrid
@@ -104,6 +95,15 @@ struct RasterGrid
     /// Georeferenced envelope of a pixel-space rectangle (window incl.).
     std::array<double, 4> windowGeoBounds( int xOff, int yOff, int winW, int winH ) const;
 };
+
+/// Streams the vector through the geospatial VectorReader (declared CRS
+/// transform into @a targetCrs — the raster grid's CRS), parses geometries,
+/// and caches them with pixel bounds. Throws RSOperatorError on open/CRS
+/// failures, malformed WKT, a missing/non-numeric field value, or a cache
+/// over kFeatureCacheBytes.
+FeatureCache loadFeatureCache( const FeatureLoadSpec &spec, const RasterGrid &grid,
+                               const sicnu::geo::Crs &targetCrs );
+
 
 /// Pixel-space bounds of a georeferenced envelope against the grid.
 /// Returns false when the envelope misses the grid entirely.

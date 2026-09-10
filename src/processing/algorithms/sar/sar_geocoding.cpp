@@ -1,6 +1,8 @@
 // sar_geocoding.cpp — see sar_geocoding.h
 #include "sar_geocoding.h"
 
+#include <QStringList>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -63,10 +65,10 @@ bool parseSarSceneContract( const std::function<QString( const char * )> &metaIt
     if ( !ok || !( c.prfHz > 0.0 ) )
         return fail( QStringLiteral( "SICNU_SAR_PRF must be > 0" ) );
 
-    const double rangeRate = rangeRate.toDouble( &ok );
-    if ( !ok || !( rangeRate > 0.0 ) )
+    const double rangeRateHz = rangeRate.toDouble( &ok );
+    if ( !ok || !( rangeRateHz > 0.0 ) )
         return fail( QStringLiteral( "SICNU_SAR_RANGE_RATE must be > 0" ) );
-    c.rangeSampleSpacingM = kHalfLightSpeed / rangeRate;
+    c.rangeSampleSpacingM = kHalfLightSpeed / rangeRateHz;
 
     const QStringList windowFields = rangeWindow.split( QLatin1Char( ';' ) );
     if ( windowFields.size() != 2 )
@@ -82,7 +84,7 @@ bool parseSarSceneContract( const std::function<QString( const char * )> &metaIt
 
     // Timing consistency: the window must cover the raster's columns within
     // the same tolerance the backward orbit product enforces.
-    const double coveredSamples = ( rangeStopTime - rangeStartTime ) * rangeRate;
+    const double coveredSamples = ( rangeStopTime - rangeStartTime ) * rangeRateHz;
     if ( std::fabs( coveredSamples - ( imageWidth - 1 ) ) > 2.0 )
         return fail( QStringLiteral(
                          "SICNU_SAR_RANGE_WINDOW covers %1 range samples but the raster has %2 "
@@ -147,8 +149,6 @@ bool geocodeGroundCell( const SarSceneContract &contract,
     // normal and the line of sight — same definition as
     // sar_orbit.cpp incidenceAngleDeg, evaluated on the already-interpolated
     // state so one cell costs one orbit interpolation.
-    const double nPrime = Wgs84::kSemiMajor
-                          / std::sqrt( 1.0 - Wgs84::kEcc2 * sinLat * sinLat );
     const double nRefx = cosLat * cosLon, nRefy = cosLat * sinLon, nRefz = sinLat;
     const double cosTheta0 = ( nRefx * shx + nRefy * shy + nRefz * shz );
     out->incidenceDeg = std::acos( clamp1( cosTheta0 ) ) * kRadToDeg;

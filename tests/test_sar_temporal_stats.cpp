@@ -29,6 +29,7 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 using namespace sicnu::sar;
+using namespace sicnu::operators;
 using Catch::Approx;
 
 namespace
