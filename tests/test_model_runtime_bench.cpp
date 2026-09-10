@@ -256,13 +256,18 @@ TEST_CASE( "model runtime benchmark (SICNU_MODEL_BENCH=1)", "[.] [model_bench]" 
     bench7["tiles"] = multiStats.tilesProcessed;
   }
 
+  // Platform 8.0 ORT-lane results (filled below when the provider is
+  // compiled in, attached to the baseline document afterwards).
+  QJsonObject benchOrt;
   // --- Platform 8.0: REAL ONNX Runtime lane (WP-H) ---------------------------
   // Only compiled when the provider is embedded; measures cold/warm ORT
   // session acquire, named N-D forward throughput and in-forward cancel
   // latency against hand-encoded deterministic fixtures.
 #ifdef SICNU_WITH_ONNX_RUNTIME
   {
-    QJsonObject benchOrt;
+    using sicnu::operators::runtime::RequestedDevice;
+    using sicnu::operators::runtime::TensorBlob;
+    using sicnu::operators::runtime::NamedTensor;
     benchOrt["schema"] = QStringLiteral( "model-runtime-bench-ort/1" );
     benchOrt["ort_runtime_version"] = QStringLiteral( "1.20.1" );
 
@@ -350,8 +355,6 @@ TEST_CASE( "model runtime benchmark (SICNU_MODEL_BENCH=1)", "[.] [model_bench]" 
     benchOrt["in_forward_cancel_latency_ms"] = cancelLatencyOrtMs;
     slowSession->clearCancel();
     registry.releaseAll();
-
-    bench["platform8_ort"] = benchOrt;
   }
 #endif
 
@@ -373,6 +376,8 @@ TEST_CASE( "model runtime benchmark (SICNU_MODEL_BENCH=1)", "[.] [model_bench]" 
   bench["pixels_per_sec"] = pixelsPerSec;
   bench["peak_rss_mb"] = static_cast<qint64>( peakRssMb() );
   bench["cancel_latency_ms"] = cancelLatencyMs;
+  if ( !benchOrt.isEmpty() )
+    bench["platform8_ort"] = benchOrt;
 
   const QString outPath =
 #ifdef SICNU_SOURCE_DIR
