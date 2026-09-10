@@ -1193,3 +1193,203 @@ TEST_CASE( "temporal_monitor: ewma lambda and seasonal_mk pairwork are typed ref
     params["max_pairwork"] = 1;
     REQUIRE_THROWS_AS( runOp( "rs:temporal_monitor", params ), RSOperatorError );
 }
+
+// ---------------------------------------------------------------------------
+// Operator E2E for the smooth / harmonic_fit / phenology / breakpoints
+// families (Temporal 7.0): the kernels behind them are known-answer tested
+// in test_temporal_fit.cpp; these pin the full streaming path — collection
+// input, per-tile series, band layout, and output metadata.
+// ---------------------------------------------------------------------------
+
+/// 1-based GDAL band index whose description contains @a needle.
+int findBandByDescription( const QString &path, const QString &needle )
+{
+    GdalDatasetWrapper ds;
+    if ( !ds.open( path ) )
+        return -1;
+    const int count = ds.bandCount();
+    for ( int b = 1; b <= count; ++b )
+    {
+        const char *desc =
+            GDALGetDescription( GDALGetRasterBand( static_cast<GDALDatasetH>( ds.dataset() ), b ) );
+        if ( desc != nullptr && QString::fromUtf8( desc ).contains( needle ) )
+            return b;
+    }
+    return -1;
+}
+
+TEST_CASE( "temporal_smooth: Savitzky-Golay preserves linear ramps E2E",
+           "[temporal][operators][smooth]" )
+{
+    ensureApp();
+    Fixture fx;
+
+    // 6 dates, 10 days apart, 2x1 pixels: pixel 0 is a linear ramp, pixel 1
+    // is constant. SG of degree >= 1 over ANY odd window reproduces
+    // polynomials exactly (up to float noise) — a param-independent
+    // known answer for the whole streaming path.
+    const float ramp[] = { 10, 20, 30, 40, 50, 60 };
+    for ( int i = 0; i < 6; ++i )
+    {
+        const QString date = QDate( 2025, 1, 1 ).addDays( 10 * i ).toString( Qt::ISODate );
+        const float v = ramp[i];
+        REQUIRE( writeTestScene( makeTestScene( fx.filePath( QStringLiteral( "s%1.tif" ).arg( i ) ),
+                                                date, { v, 5.0f }, 2, 1 ) ) );
+    }
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( int i = 0; i < 6; ++i )
+        scenes.append( fx.filePath( QStringLiteral( "s%1.tif" ).arg( i ) ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["method"] = "savitzky_golay";
+    params["window"] = 5;
+    params["degree"] = 2;
+    params["output"] = fx.filePath( QStringLiteral( "smooth.tif" ) ).toStdString();
+
+    const Json::Value result = runOp( "rs:temporal_smooth", params );
+    REQUIRE( result["bands"].asInt() == 6 );
+
+    for ( int s = 0; s < 6; ++s )
+    {
+        const auto out = readBand( fx.filePath( "smooth.tif" ), s + 1 );
+        REQUIRE( out[0] == Approx( ramp[s] ).margin( 1e-3 ) );
+        REQUIRE( out[1] == Approx( 5.0 ).margin( 1e-3 ) );
+    }
+}
+
+TEST_CASE( "temporal_harmonic_fit: recovers the sine coefficients E2E",
+           "[temporal][operators][harmonic]" )
+{
+    ensureApp();
+    Fixture fx;
+
+    // y(doy) = 0.2 + 0.1·sin(2π·doy/365.25) sampled every 10 days over a
+    // year: one harmonic is the exact model, so the fit must recover
+    // intercept 0.2, sin coefficient 0.1, near-zero RMSE.
+    const int nScenes = 36;
+    for ( int i = 0; i < nScenes; ++i )
+    {
+        const int doy = 1 + 10 * i;
+        const QString date = QDate( 2025, 1, 1 ).addDays( doy - 1 ).toString( Qt::ISODate );
+        const float v = static_cast<float>(
+            0.2 + 0.1 * std::sin( 2.0 * M_PI * doy / 365.25 ) );
+        REQUIRE( writeTestScene(
+            makeTestScene( fx.filePath( QStringLiteral( "h%1.tif" ).arg( i ) ),
+                           date, { v, v }, 2, 1 ) ) );
+    }
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( int i = 0; i < nScenes; ++i )
+        scenes.append( fx.filePath( QStringLiteral( "h%1.tif" ).arg( i ) ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["harmonics"] = 1;
+    params["writeCoefficients"] = true;
+    params["output"] = fx.filePath( QStringLiteral( "fit.tif" ) ).toStdString();
+
+    REQUIRE_NOTHROW( runOp( "rs:temporal_harmonic_fit", params ) );
+
+    // Documented band layout after the fitted_1..N bands: rmse, r2,
+    // coef_intercept, then two coefficient bands per harmonic (sin, cos).
+    const int rmseBand = nScenes + 1;
+    const int interceptBand = nScenes + 3;
+    const int sinBand = nScenes + 4;
+
+    const auto rmse = readBand( fx.filePath( "fit.tif" ), rmseBand );
+    const auto intercept = readBand( fx.filePath( "fit.tif" ), interceptBand );
+    const auto sinCoef = readBand( fx.filePath( "fit.tif" ), sinBand );
+    REQUIRE( rmse[0] == Approx( 0.0 ).margin( 0.01 ) );
+    REQUIRE( intercept[0] == Approx( 0.2 ).margin( 0.01 ) );
+    REQUIRE( sinCoef[0] == Approx( 0.1 ).margin( 0.01 ) );
+
+    // The fitted series reproduces the input at every sample date.
+    for ( int i = 0; i < nScenes; ++i )
+    {
+        const int doy = 1 + 10 * i;
+        const float v = static_cast<float>(
+            0.2 + 0.1 * std::sin( 2.0 * M_PI * doy / 365.25 ) );
+        const auto fitted = readBand( fx.filePath( "fit.tif" ), i + 1 );
+        REQUIRE( fitted[0] == Approx( v ).margin( 0.01 ) );
+    }
+}
+
+TEST_CASE( "temporal_phenology: analytic SOS/POS/EOS on a sine season E2E",
+           "[temporal][operators][phenology]" )
+{
+    ensureApp();
+    Fixture fx;
+
+    // y(doy) = 0.2 + 0.3·sin(2π(doy − 91.3)/365.25), sampled every 5 days.
+    // The threshold crossings are fractions of the observed (max−min)
+    // range: min = −0.1, max = 0.5, crossing level = −0.1 + 0.2·0.6 = 0.02,
+    // i.e. sin(θ) = −0.6: SOS at θ = asin(−0.6) → doy ≈ 53.9, POS at the
+    // crest ≈ 182.6, EOS at θ = π − asin(−0.6) → doy ≈ 311.1. Five-day
+    // sampling discretizes the crossings by ±2 days; margins absorb that
+    // plus the harmonic fit's share.
+    const int nScenes = 73;
+    for ( int i = 0; i < nScenes; ++i )
+    {
+        const int doy = 1 + 5 * i;
+        const QString date = QDate( 2025, 1, 1 ).addDays( doy - 1 ).toString( Qt::ISODate );
+        const float v = static_cast<float>(
+            0.2 + 0.3 * std::sin( 2.0 * M_PI * ( doy - 91.3 ) / 365.25 ) );
+        REQUIRE( writeTestScene(
+            makeTestScene( fx.filePath( QStringLiteral( "p%1.tif" ).arg( i ) ),
+                           date, { v, v }, 2, 1 ) ) );
+    }
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( int i = 0; i < nScenes; ++i )
+        scenes.append( fx.filePath( QStringLiteral( "p%1.tif" ).arg( i ) ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["output"] = fx.filePath( QStringLiteral( "phen.tif" ) ).toStdString();
+
+    REQUIRE_NOTHROW( runOp( "rs:temporal_phenology", params ) );
+
+    const auto sos = readBand( fx.filePath( "phen.tif" ), 1 );
+    const auto pos = readBand( fx.filePath( "phen.tif" ), 2 );
+    const auto eos = readBand( fx.filePath( "phen.tif" ), 3 );
+    REQUIRE( sos[0] == Approx( 53.9 ).margin( 8.0 ) );
+    REQUIRE( pos[0] == Approx( 182.6 ).margin( 5.0 ) );
+    REQUIRE( eos[0] == Approx( 311.1 ).margin( 12.0 ) );
+    // Season length is consistent with its endpoints.
+    REQUIRE( ( eos[0] - sos[0] ) == Approx( 257.2 ).margin( 15.0 ) );
+}
+
+TEST_CASE( "temporal_breakpoints: locates a step change E2E",
+           "[temporal][operators][breakpoints]" )
+{
+    ensureApp();
+    Fixture fx;
+
+    // 12 dates, 10 days apart: 10,10,...,10 then 30,30,...,30. The true
+    // break lies between doy 51 and 61 (midpoint 56); the piecewise-linear
+    // fit must place break_date_1 within a scene or two.
+    for ( int i = 0; i < 12; ++i )
+    {
+        const QString date = QDate( 2025, 1, 1 ).addDays( 10 * i ).toString( Qt::ISODate );
+        const float v = i < 6 ? 10.0f : 30.0f;
+        REQUIRE( writeTestScene( makeTestScene( fx.filePath( QStringLiteral( "b%1.tif" ).arg( i ) ),
+                                                date, { v, v }, 2, 1 ) ) );
+    }
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( int i = 0; i < 12; ++i )
+        scenes.append( fx.filePath( QStringLiteral( "b%1.tif" ).arg( i ) ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["output"] = fx.filePath( QStringLiteral( "brk.tif" ) ).toStdString();
+
+    REQUIRE_NOTHROW( runOp( "rs:temporal_breakpoints", params ) );
+
+    const int breakBand = findBandByDescription( fx.filePath( "brk.tif" ), "break_date_1" );
+    REQUIRE( breakBand > 0 );
+    const auto breakDay = readBand( fx.filePath( "brk.tif" ), breakBand );
+    REQUIRE( breakDay[0] == Approx( 56.0 ).margin( 15.0 ) );
+}
