@@ -1631,6 +1631,17 @@ target_link_libraries(test_dataset_e2e_examples PRIVATE Sicnu::experiment Sicnu:
 sicnu_add_test(test_adversarial_m2 TIMEOUT 180)
 target_link_libraries(test_adversarial_m2 PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 
+# Platform 7.0 dataset/experiment surface: split-manifest + leakage-report
+# persistence, MCP tool projections, honest reproducibility levels.
+sicnu_add_test(test_data_platform_surface TIMEOUT 300)
+target_link_libraries(test_data_platform_surface PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
+# Platform 7.0 library contracts: promotion, fold audit, facets, replay
+# readiness, comparison extensions.
+sicnu_add_test(test_platform7_library TIMEOUT 600)
+target_link_libraries(test_platform7_library PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+set_property(TARGET test_platform7_library PROPERTY RUN_SERIAL TRUE)
+
 
 # Phase C fused-chain equivalence (links through sicnu_task_center which
 # carries fused_chain.cpp; needs the standard set only).

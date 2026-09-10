@@ -1188,7 +1188,10 @@ int CliIO::finish( bool ok, const std::string &command, Json::Value data, int ex
 bool isCliCommand( const QString &firstArg )
 {
     static const QStringList kCommands = { "algorithms", "run", "pipeline", "workflow", "plugin",
-                                           "models", "catalog", "project", "data", "data-providers" };
+                                           "models",    "catalog", "project",  "data",
+                                           "data-providers",
+                                           // Foundation 5.0/7.0 dataset-experiment surface.
+                                           "dataset", "experiment", "reproduce" };
     return kCommands.contains( firstArg );
 }
 

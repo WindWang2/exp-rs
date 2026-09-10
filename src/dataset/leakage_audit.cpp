@@ -191,6 +191,9 @@ QJsonObject LeakageReport::toJson() const
         findingArray.append( finding.toJson() );
     json.insert( QStringLiteral( "findings" ), findingArray );
     json.insert( QStringLiteral( "summary" ), summary() );
+    json.insert( QStringLiteral( "sample_count" ), m_sampleCount );
+    if ( m_digestUnknownCount >= 0 )
+        json.insert( QStringLiteral( "digest_unknown_count" ), m_digestUnknownCount );
     return json;
 }
 
@@ -212,6 +215,10 @@ sicnu::data::Result<LeakageReport> LeakageReport::fromJson( const QJsonObject &j
     report.m_splitManifestId = json.value( QStringLiteral( "split_manifest_id" ) ).toString();
     report.m_auditedChecks =
         json.value( QStringLiteral( "audited_checks" ) ).toVariant().toStringList();
+    report.m_sampleCount = json.value( QStringLiteral( "sample_count" ) ).toInteger();
+    if ( json.contains( QStringLiteral( "digest_unknown_count" ) ) )
+        report.m_digestUnknownCount =
+            int( json.value( QStringLiteral( "digest_unknown_count" ) ).toInteger() );
     for ( const QJsonValue &value : json.value( QStringLiteral( "findings" ) ).toArray() )
     {
         auto finding = LeakageFinding::fromJson( value.toObject() );
