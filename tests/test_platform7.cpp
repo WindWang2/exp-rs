@@ -12,6 +12,7 @@
 #include "agent/cartography/chart_registry.h"
 #include "agent/cartography/composition.h"
 #include "agent/cartography/design_tokens.h"
+#include "agent/cartography/quality.h"
 #include "agent/cartography/registry.h"
 #include "agent/cartography/style_spec.h"
 #include "agent/cartography/typography.h"
@@ -888,6 +889,146 @@ TEST_CASE( "P7 components: style_tokens shape is validated",
   for ( const auto &problem : problems )
     saw = saw || problem.find( "non-empty dotted token path" ) != std::string::npos;
   REQUIRE( saw );
+}
+
+namespace {
+
+bool hasIssue( const Json::Value &report, const std::string &code, const std::string &idPart )
+{
+  for ( const auto &issue : report["issues"] )
+    if ( issue["code"].asString() == code &&
+         issue["message"].asString().find( idPart ) != std::string::npos )
+      return true;
+  return false;
+}
+
+} // namespace
+
+TEST_CASE( "P7 preflight: declarative layer visibility and reference rules",
+           "[platform7][preflight]" )
+{
+  Json::Value spec = makeMapSpec( "p7-layers", Json::Value() );
+  Json::Value frame( Json::objectValue );
+  frame["id"] = "map-1";
+  Json::Value rect( Json::arrayValue );
+  rect.append( 12.0 );
+  rect.append( 24.0 );
+  rect.append( 200.0 );
+  rect.append( 160.0 );
+  frame["rect_mm"] = rect;
+  Json::Value layers( Json::arrayValue );
+  layers.append( "layer-water" );
+  frame["layers"] = layers;
+  spec["map_frames"].append( frame );
+  spec["titles"].append( rectItem( "t1", 12.0, 6.0, 120.0, 12.0 ) );
+  spec["legends"].append( rectItem( "lg", 220.0, 30.0, 60.0, 80.0 ) );
+  spec["scale_bars"].append( rectItem( "sb", 14.0, 190.0, 50.0, 8.0 ) );
+  spec["north_arrows"].append( rectItem( "na", 270.0, 30.0, 12.0, 12.0 ) );
+  spec["source_notes"].append( rectItem( "sn", 180.0, 194.0, 90.0, 8.0 ) );
+
+  // Invisible layer declared + referenced → warned.
+  Json::Value water( Json::objectValue );
+  water["id"] = "layer-water";
+  water["visible"] = false;
+  spec["layers"].append( water );
+  Json::Value report = preflightMapSpec( spec );
+  REQUIRE( hasIssue( report, "MAP_INVISIBLE_LAYER", "layer-water" ) );
+  REQUIRE_FALSE( hasIssue( report, "MAP_LAYER_UNREFERENCED", "layer-water" ) );
+
+  // An unreferenced declarative layer → warned, repair attaches it to the
+  // main frame.
+  Json::Value extra( Json::objectValue );
+  extra["id"] = "layer-forest";
+  spec["layers"].append( extra );
+  report = preflightMapSpec( spec );
+  REQUIRE( hasIssue( report, "MAP_LAYER_UNREFERENCED", "layer-forest" ) );
+
+  const int repaired = repairMapSpec( spec, report );
+  REQUIRE( repaired >= 1 );
+  bool attached = false;
+  for ( const auto &ref : spec["map_frames"][0]["layers"] )
+    attached = attached || ref.asString() == "layer-forest";
+  REQUIRE( attached );
+  // Re-preflight: the unreferenced finding is gone.
+  report = preflightMapSpec( spec );
+  REQUIRE_FALSE( hasIssue( report, "MAP_LAYER_UNREFERENCED", "layer-forest" ) );
+}
+
+TEST_CASE( "P7 preflight: legend classes contradicting the referenced style warn",
+           "[platform7][preflight]" )
+{
+  Json::Value spec = makeMapSpec( "p7-legend-mismatch", Json::Value() );
+  Json::Value legend( Json::objectValue );
+  legend["id"] = "lg-1";
+  legend["style_ref"] = "style.landcover-classes";
+  Json::Value classes( Json::arrayValue );
+  classes.append( "water" );
+  classes.append( "forest" );
+  classes.append( "not-a-real-class" );
+  legend["classes"] = classes;
+  spec["legends"].append( legend );
+
+  const Json::Value report = preflightMapSpec( spec );
+  REQUIRE( hasIssue( report, "MAP_LEGEND_MISMATCH", "not-a-real-class" ) );
+
+  // Matching labels pass clean.
+  Json::Value ok = makeMapSpec( "p7-legend-match", Json::Value() );
+  Json::Value okLegend( Json::objectValue );
+  okLegend["id"] = "lg-ok";
+  okLegend["style_ref"] = "style.landcover-classes";
+  Json::Value okClasses( Json::arrayValue );
+  okClasses.append( "water" );
+  okClasses.append( "forest" );
+  okClasses.append( "cropland" );
+  okClasses.append( "urban" );
+  okLegend["classes"] = okClasses;
+  ok["legends"].append( okLegend );
+  REQUIRE_FALSE( hasIssue( preflightMapSpec( ok ), "MAP_LEGEND_MISMATCH", "lg-ok" ) );
+}
+
+TEST_CASE( "P7 preflight: wrap-aware overflow catches multi-line clipping",
+           "[platform7][preflight]" )
+{
+  Json::Value spec = makeMapSpec( "p7-wrap", Json::Value() );
+  Json::Value title( Json::objectValue );
+  title["id"] = "t-wrap";
+  title["text"] = "\xE7\xAC\xAC\xE4\xB8\x80\xE8\xA1\x8C\xE5\xBE\x88\xE9\x95\xBF\n\xE7\xAC\xAC\xE4\xBA\x8C\xE8\xA1\x8C\xE4\xB9\x9F\xE5\xBE\x88\xE9\x95\xBF";
+  Json::Value rect( Json::arrayValue );
+  rect.append( 10.0 );
+  rect.append( 6.0 );
+  rect.append( 30.0 );
+  rect.append( 8.0 ); // two lines at 9 pt need ~8 mm; force overflow via width 30→wraps
+  title["rect_mm"] = rect;
+  Json::Value font( Json::objectValue );
+  font["size_pt"] = 9.0;
+  title["font"] = font;
+  spec["titles"].append( title );
+
+  const Json::Value report = preflightMapSpec( spec );
+  REQUIRE( hasIssue( report, "MAP_TEXT_WRAP_OVERFLOW", "t-wrap" ) );
+
+  // Repair path: the deterministic text repair applies (rect/font adjust).
+  const int repaired = repairMapSpec( spec, report );
+  REQUIRE( repaired >= 1 );
+}
+
+TEST_CASE( "P7 preflight: rule catalog lists the 7.0 rules",
+           "[platform7][preflight][catalog]" )
+{
+  const Json::Value catalog = preflightRuleCatalog();
+  REQUIRE( catalog.isArray() );
+  int found = 0;
+  for ( const auto &rule : catalog )
+  {
+    const std::string code = rule["code"].asString();
+    found += code == "MAP_INVISIBLE_LAYER" ? 1 : 0;
+    found += code == "MAP_LAYER_UNREFERENCED" ? 1 : 0;
+    found += code == "MAP_LEGEND_MISMATCH" ? 1 : 0;
+    found += code == "MAP_TEXT_WRAP_OVERFLOW" ? 1 : 0;
+    if ( code == "MAP_TEXT_WRAP_OVERFLOW" )
+      REQUIRE( rule["repairable"].asBool() );
+  }
+  REQUIRE( found == 4 );
 }
 
 TEST_CASE( "P7 solver: soft failure downgrades the objective, never convergence",

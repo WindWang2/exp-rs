@@ -8,6 +8,7 @@
 #include "design_tokens.h"
 #include "registry.h"
 #include "style_spec.h"
+#include "typography.h"
 
 #include <algorithm>
 #include <cctype>
@@ -294,6 +295,101 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
     issues.push_back( issue( "MAP_MISSING_SOURCE_NOTE", "warning", "No data-source note.", true,
                              "", "add_source_note" ) );
 
+  // --- Platform 7.0: declarative layer visibility & reference checks --------
+  {
+    std::set<std::string> referencedLayers;
+    for ( const char *collection : { "map_frames", "inset_maps" } )
+      for ( const auto &frame : spec.isMember( collection ) && spec[collection].isArray()
+                                  ? spec[collection]
+                                  : Json::Value( Json::arrayValue ) )
+        if ( frame.isObject() && frame.isMember( "layers" ) && frame["layers"].isArray() )
+          for ( const auto &ref : frame["layers"] )
+            if ( ref.isString() )
+              referencedLayers.insert( ref.asString() );
+    for ( const auto &layer : spec.isMember( "layers" ) && spec["layers"].isArray()
+                                ? spec["layers"]
+                                : Json::Value( Json::arrayValue ) )
+    {
+      if ( !layer.isObject() || !layer.isMember( "id" ) || !layer["id"].isString() )
+        continue;
+      const std::string layerId = layer["id"].asString();
+      const bool declaredInvisible =
+        ( layer.isMember( "visible" ) && layer["visible"].isBool() && !layer["visible"].asBool() ) ||
+        ( layer.isMember( "opacity" ) && layer["opacity"].isNumeric() &&
+          layer["opacity"].asDouble() <= 0.0 );
+      if ( declaredInvisible )
+        issues.push_back( issue( "MAP_INVISIBLE_LAYER", "warning",
+                                 layerId + ": declared invisible or fully transparent; the "
+                                           "compiled map will not show it",
+                                 false, layerId, nullptr ) );
+      // A layer referenced by id but absent from the declarative layers
+      // collection may still resolve against the workspace — that path is
+      // the compile's business. The spec-level gap is the opposite: a
+      // declarative layer nothing references will never render anywhere.
+      if ( !referencedLayers.count( layerId ) )
+        issues.push_back( issue( "MAP_LAYER_UNREFERENCED", "warning",
+                                 layerId + ": declared in layers[] but referenced by no "
+                                           "map frame or inset; it will not render",
+                                 true, layerId, "reference_layer" ) );
+    }
+  }
+
+  // --- Platform 7.0: legend/style class mismatch ----------------------------
+  if ( spec.isMember( "legends" ) && spec["legends"].isArray() )
+    for ( const auto &legend : spec["legends"] )
+    {
+      if ( !legend.isObject() || !legend.isMember( "id" ) )
+        continue;
+      const std::string id = legend["id"].asString();
+      if ( !legend.isMember( "classes" ) || !legend["classes"].isArray() ||
+           legend["classes"].empty() || !legend.isMember( "style_ref" ) ||
+           !legend["style_ref"].isString() )
+        continue;
+      const Json::Value style = StyleRegistry::instance().find(
+        QString::fromStdString( legend["style_ref"].asString() ) );
+      if ( style.isNull() || !style.isObject() )
+        continue; // unknown style refs are MAP_STYLE_REF_UNKNOWN's business
+      std::vector<std::string> styleLabels;
+      if ( style.isMember( "raster" ) && style["raster"].isObject() &&
+           style["raster"].isMember( "classification" ) &&
+           style["raster"]["classification"].isObject() &&
+           style["raster"]["classification"].isMember( "classes" ) &&
+           style["raster"]["classification"]["classes"].isArray() )
+        for ( const auto &entry : style["raster"]["classification"]["classes"] )
+          if ( entry.isObject() && entry.isMember( "label" ) && entry["label"].isString() )
+            styleLabels.push_back( entry["label"].asString() );
+      if ( style.isMember( "vector" ) && style["vector"].isObject() &&
+           style["vector"].isMember( "categories" ) && style["vector"]["categories"].isArray() )
+        for ( const auto &entry : style["vector"]["categories"] )
+          if ( entry.isObject() && entry.isMember( "label" ) && entry["label"].isString() )
+            styleLabels.push_back( entry["label"].asString() );
+      if ( styleLabels.empty() )
+        continue;
+      std::set<std::string> styleSet( styleLabels.begin(), styleLabels.end() );
+      int missing = 0;
+      std::string firstMissing;
+      for ( const auto &entry : legend["classes"] )
+      {
+        const std::string label = entry.isString() ? entry.asString()
+                                  : entry.isObject() && entry.isMember( "label" ) &&
+                                        entry["label"].isString()
+                                      ? entry["label"].asString()
+                                      : std::string();
+        if ( !label.empty() && !styleSet.count( label ) )
+        {
+          ++missing;
+          if ( firstMissing.empty() )
+            firstMissing = label;
+        }
+      }
+      if ( missing > 0 )
+        issues.push_back( issue(
+          "MAP_LEGEND_MISMATCH", "warning",
+          id + ": " + std::to_string( missing ) + " legend class(es) (first: '" + firstMissing +
+            "') do not appear in the referenced style '" + legend["style_ref"].asString() + "'",
+          false, id, nullptr ) );
+    }
+
   // --- per-item geometry, style, text and bindings --------------------------
   for ( int c = 0; c < mapspec::kCollectionCount; ++c )
   {
@@ -350,6 +446,36 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
                                    std::to_string( static_cast<int>( std::ceil( overflow ) ) ) +
                                    " mm",
                                  true, id, "widen_or_shrink" ) );
+      }
+
+      // Platform 7.0 wrap-aware check: the single-line estimator above only
+      // sees the widest hard line. fitTextIntoBox additionally simulates
+      // word wrap (CJK kinsoku included) and the line budget, so
+      // multi-line clipping surfaces here.
+      if ( ( collectionName == "titles" || collectionName == "labels" ||
+             collectionName == "source_notes" ) &&
+           item.isMember( "text" ) && item["text"].isString() &&
+           item.isMember( "rect_mm" ) && item["rect_mm"].size() == 4 )
+      {
+        sicnu::agent::cartography::TextFitRequest fitRequest;
+        fitRequest.text = item["text"].asString();
+        fitRequest.boxWidthMm = item["rect_mm"][2].asDouble();
+        fitRequest.boxHeightMm = item["rect_mm"][3].asDouble();
+        if ( item.isMember( "font" ) && item["font"].isObject() &&
+             item["font"].isMember( "size_pt" ) && item["font"]["size_pt"].isNumeric() )
+          fitRequest.fontPt = item["font"]["size_pt"].asDouble();
+        fitRequest.policy = "overflow_report";
+        const TextFitReport fit = fitTextIntoBox( fitRequest );
+        if ( !fit.fits )
+          issues.push_back( issue( "MAP_TEXT_WRAP_OVERFLOW", "warning",
+                                   id + ": wrapped text does not fit the rect (" +
+                                     std::to_string( static_cast<int>( fit.lines.size() ) ) +
+                                     " line(s), overflow " +
+                                     std::to_string( static_cast<int>( std::ceil(
+                                       std::max( fit.overflowWidthMm,
+                                                 fit.overflowHeightMm ) ) ) ) +
+                                     " mm at " + std::to_string( fit.fontPt ) + " pt)",
+                                   true, id, "widen_or_shrink" ) );
       }
 
       // --- legend density (declared max_entries) ---------------------------
@@ -946,7 +1072,7 @@ int repairMapSpec( Json::Value &spec, const Json::Value &report )
       ++applied;
     }
     else if ( code == "MAP_TITLE_OVERFLOW" || code == "MAP_SOURCE_NOTE_CLIPPING" ||
-              code == "MAP_TEXT_OVERFLOW" )
+              code == "MAP_TEXT_OVERFLOW" || code == "MAP_TEXT_WRAP_OVERFLOW" )
     {
       const std::string id = item.get( "item_id", "" ).asString();
       ItemRef found = findItemMutable( spec, id );
@@ -954,6 +1080,25 @@ int repairMapSpec( Json::Value &spec, const Json::Value &report )
         continue;
       if ( repairTextOverflow( *found.item, pageW, found.collection ) )
         ++applied;
+    }
+    else if ( code == "MAP_LAYER_UNREFERENCED" )
+    {
+      const std::string id = item.get( "item_id", "" ).asString();
+      if ( mapRef.empty() || id.empty() )
+        continue; // no frame to attach to: stays reported
+      ItemRef found = findItemMutable( spec, mapRef );
+      if ( !found.item )
+        continue;
+      Json::Value &layers = ( *found.item )["layers"];
+      if ( !layers.isArray() )
+        layers = Json::Value( Json::arrayValue );
+      bool already = false;
+      for ( const auto &ref : layers )
+        already = already || ( ref.isString() && ref.asString() == id );
+      if ( already )
+        continue;
+      layers.append( id );
+      ++applied;
     }
     else if ( code == "MAP_MARGIN_VIOLATION" )
     {
@@ -1240,6 +1385,14 @@ Json::Value preflightRuleCatalog()
       "Referenced style contradicts the item binding (kind/modality/bands/value domain)." },
     { "MAP_UNCERTAINTY_NOTE_MISSING", "warning", false,
       "Uncertainty/probability-styled document carries no uncertainty note." },
+    { "MAP_INVISIBLE_LAYER", "warning", false,
+      "Declarative layer is invisible or fully transparent; it will not render." },
+    { "MAP_LAYER_UNREFERENCED", "warning", true,
+      "Declarative layer is referenced by no map frame or inset." },
+    { "MAP_LEGEND_MISMATCH", "warning", false,
+      "Explicit legend classes do not all appear in the referenced style's classes." },
+    { "MAP_TEXT_WRAP_OVERFLOW", "warning", true,
+      "Wrap-aware text layout (CJK kinsoku included) does not fit the item rect." },
     { "MAPSPEC_ISSUES_TRUNCATED", "warning", false,
       "Issue list capped at 500 entries; fix reported findings and re-run." },
     { "LAYOUT_*", "warning", false, "Findings merged from the compiled layout preflight." },
