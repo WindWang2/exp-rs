@@ -6995,3 +6995,13 @@ target_include_directories(benchmark_quality7 PRIVATE
   ${CMAKE_SOURCE_DIR}/src/processing
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# Bounded contract fuzz (task D): DatasetManifest unknown-field tolerance,
+# total parse on mutated payloads, typed negative cases. Light closure
+# (Qt + SQLite only).
+sicnu_add_test(test_contract_fuzz_data TIMEOUT 180)
+target_link_libraries(test_contract_fuzz_data PRIVATE
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_contract_fuzz_data PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
