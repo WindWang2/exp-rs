@@ -2,6 +2,7 @@
 #include "capability_tools.h"
 
 #include "../contracts/spatial_contracts.h"
+#include "../harness/context_ledger.h"
 #include "../tool_catalog/agent_tool.h"
 #include "../tool_catalog/agent_tool_catalog.h"
 #include "../workspace_state.h"
@@ -548,6 +549,14 @@ class SelectModelTool final : public SpatialTool
       Json::Value echoedCriteria( Json::objectValue );
       echoedCriteria["task"] = task;
       out["criteria"] = echoedCriteria;
+
+      // Harness 8.0 (typed context 2.0): the model contract/readiness the
+      // agent just observed rides the context ledger so later turns (and
+      // harness:explain) see which model the current work assumes.
+      if ( !candidates.empty() )
+        sicnu::agent::harness::ContextLedger::instance().recordModelContract( ranked.front().model.name,
+                                                       candidates[0] );
+
       return SpatialToolResult::ok( out );
     }
 };
