@@ -23,12 +23,12 @@
 #include "geospatial/gdal_guard.h"
 #include "geospatial/remote/http_fetch.h"
 #include "geospatial/remote/remote_source_validator.h"
+#include "geospatial/util/gdal_compat.h"
 #include "geospatial/util/resource_uri.h"
 
 #include <cpl_conv.h>
 #include <cpl_vsi.h>
 #include <cpl_vsi_virtual.h>
-#include <gdal_version.h>
 
 #include <algorithm>
 #include <atomic>
@@ -48,15 +48,12 @@ namespace sicnu::geo
 namespace
 {
 
-// GDAL VSI APIs moved across 3.8 → 3.13 (Ubuntu CI vs Homebrew CI).
-// Bridge the breakpoints we actually hit in CI:
-//   * < 3.10: no ClearErr()/Error() on VSIVirtualHandle
-//   * < 3.12: Open() returns VSIVirtualHandle*; no OpenStatic()
-//   * < 3.9:  no VSIFileManager::RemoveHandler()
-//   * >= 3.13: Read/Write are byte-oriented (2-arg), not item-oriented (3-arg)
+// GDAL VSI API breakpoints are named in geospatial/util/gdal_compat.h —
+// the version ladder below asks the compat seam instead of re-deriving
+// GDAL_VERSION_NUM breakpoints per TU.
 inline VSIVirtualHandleUniquePtr openReadonlyVsi( const char *path )
 {
-#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 12, 0 )
+#if SICNU_GDAL_VSI_OPEN_RETURNS_UNIQUE_PTR
   return VSIFilesystemHandler::OpenStatic( path, "rb" );
 #else
   return VSIVirtualHandleUniquePtr( VSIFOpenL( path, "rb" ) );
@@ -591,7 +588,7 @@ class RangeCacheHandle final : public VSIVirtualHandle
       return mPosition;
     }
 
-#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 13, 0 )
+#if SICNU_GDAL_VSI_HANDLE_READ_BYTES
     size_t Read( void *pBuffer, size_t nBytes ) override
     {
       std::lock_guard<std::mutex> lock( mHandleMutex );
@@ -656,7 +653,7 @@ class RangeCacheHandle final : public VSIVirtualHandle
     }
 #endif
 
-#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 10, 0 )
+#if SICNU_GDAL_VSI_HANDLE_ERR_API
     void ClearErr() override
     {
       std::lock_guard<std::mutex> lock( mHandleMutex );
@@ -671,7 +668,7 @@ class RangeCacheHandle final : public VSIVirtualHandle
       return mEof ? 1 : 0;
     }
 
-#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 10, 0 )
+#if SICNU_GDAL_VSI_HANDLE_ERR_API
     int Error() override
     {
       std::lock_guard<std::mutex> lock( mHandleMutex );
@@ -874,7 +871,7 @@ class RangeCacheHandle final : public VSIVirtualHandle
 class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
 {
   public:
-#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 12, 0 )
+#if SICNU_GDAL_VSI_OPEN_RETURNS_UNIQUE_PTR
     VSIVirtualHandleUniquePtr Open( const char *pszFilename, const char *pszAccess,
                                     bool bSetError, CSLConstList ) override
 #else
@@ -941,7 +938,7 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         }
       }
 
-#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 12, 0 )
+#if SICNU_GDAL_VSI_OPEN_RETURNS_UNIQUE_PTR
       return VSIVirtualHandleUniquePtr( new RangeCacheHandle( entry ) );
 #else
       return new RangeCacheHandle( entry );
@@ -1068,7 +1065,7 @@ void RemoteRangeCache::uninstall()
   std::lock_guard<std::mutex> lock( g_storeLifecycleMutex );
   if ( !g_store )
     return;
-#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 9, 0 )
+#if SICNU_GDAL_VSI_REMOVE_HANDLER
   VSIFileManager::RemoveHandler( kRangeCachePrefix );
 #endif
   g_store->dropAll();
