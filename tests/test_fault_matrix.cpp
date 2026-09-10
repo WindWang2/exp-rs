@@ -34,7 +34,7 @@
 #include "data/derivation_record.h"
 #include "data/artifact_object_pool.h"
 #include "data/source_descriptor.h"
-#include "observability/fault_registry.h"
+#include "runtime/observability/fault_registry.h"
 #include "processing/framework/output_committer.h"
 #include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run.h"

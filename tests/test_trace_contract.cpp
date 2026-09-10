@@ -11,9 +11,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
-#include "observability/fault_point.h"
-#include "observability/trace.h"
-#include "observability/trace_id.h"
+#include "runtime/observability/fault_point.h"
+#include "runtime/observability/trace.h"
+#include "runtime/observability/trace_id.h"
 
 #include <algorithm>
 #include <filesystem>

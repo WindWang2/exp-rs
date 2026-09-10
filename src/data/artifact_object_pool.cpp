@@ -17,7 +17,7 @@
 #include <algorithm>
 #include <vector>
 
-#include "observability/fault_point.h"
+#include "runtime/observability/fault_point.h"
 
 namespace sicnu::data
 {

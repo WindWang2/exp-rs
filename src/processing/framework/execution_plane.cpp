@@ -2,7 +2,7 @@
 #include "execution_plane.h"
 
 #include "algorithm_preflight.h"
-#include "observability/trace.h"
+#include "runtime/observability/trace.h"
 #include "tool_call_dispatcher.h"
 
 #include <QCoreApplication>

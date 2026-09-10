@@ -6,8 +6,8 @@
 // path — never a fabricated success".
 #include <catch2/catch_test_macros.hpp>
 
-#include "observability/fault_point.h"
-#include "observability/fault_registry.h"
+#include "runtime/observability/fault_point.h"
+#include "runtime/observability/fault_registry.h"
 
 #include <atomic>
 #include <string>

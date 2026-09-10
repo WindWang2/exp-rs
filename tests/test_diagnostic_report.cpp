@@ -2,7 +2,7 @@
 // (task G, Verification 7.0). Qt-free; links sicnu_runtime.
 #include <catch2/catch_test_macros.hpp>
 
-#include "observability/diagnostic_report.h"
+#include "runtime/observability/diagnostic_report.h"
 
 using sicnu::runtime::observability::diagnostics::DiagnosticReport;
 using sicnu::runtime::observability::diagnostics::Recoverability;

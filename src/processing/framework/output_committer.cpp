@@ -12,7 +12,7 @@
 #include "data/data_manager.h"
 #include "data/source_descriptor.h"
 #include "gdal/gdal_dataset_wrapper.h"
-#include "observability/fault_point.h"
+#include "runtime/observability/fault_point.h"
 
 using namespace sicnu::data;
 

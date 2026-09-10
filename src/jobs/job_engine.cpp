@@ -1,7 +1,7 @@
 // JobEngine implementation
 #include "job_engine.h"
 
-#include "observability/trace.h"
+#include "runtime/observability/trace.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"

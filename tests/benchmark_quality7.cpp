@@ -20,9 +20,9 @@
 // benchmarks/ with environment headers), never a hard CI gate.
 #include <catch2/catch_test_macros.hpp>
 
-#include "observability/fault_point.h"
-#include "observability/trace.h"
-#include "observability/trace_id.h"
+#include "runtime/observability/fault_point.h"
+#include "runtime/observability/trace.h"
+#include "runtime/observability/trace_id.h"
 
 #include "agent/mapspec/mapspec_conditions.h"
 #include "geospatial/util/resource_uri.h"

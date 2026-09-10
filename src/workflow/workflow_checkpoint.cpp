@@ -1,6 +1,6 @@
 #include "workflow_checkpoint.h"
 
-#include "observability/fault_point.h"
+#include "runtime/observability/fault_point.h"
 #include "workflow_run_lock.h"
 
 #include <QCoreApplication>
