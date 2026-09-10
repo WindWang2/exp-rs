@@ -1031,6 +1031,65 @@ TEST_CASE( "P7 preflight: rule catalog lists the 7.0 rules",
   REQUIRE( found == 4 );
 }
 
+namespace {
+
+// Golden structural digest of the fixture below (pinned after a verified
+// run; update ONLY with re-verified geometry).
+constexpr const char *kGoldenDigest = "PENDING_FIRST_RUN";
+
+} // namespace
+
+TEST_CASE( "P7 visual: structural digest is stable, sensitive and order-free",
+           "[platform7][visual]" )
+{
+  auto build = []() {
+    Json::Value spec = makeMapSpec( "p7-digest", Json::Value() );
+    spec["titles"].append( rectItem( "t1", 10.0, 6.0, 120.0, 12.0 ) );
+    spec["legends"].append( rectItem( "lg", 220.0, 30.0, 60.0, 80.0 ) );
+    spec["scale_bars"].append( rectItem( "sb", 14.0, 190.0, 50.0, 8.0 ) );
+    return spec;
+  };
+
+  // Identical specs -> identical digest (byte-stable known answer).
+  const std::string digestA = structuralDigest( build() );
+  const std::string digestB = structuralDigest( build() );
+  REQUIRE( digestA == digestB );
+  REQUIRE( digestA.size() == 64 ); // SHA-256 hex
+  REQUIRE( std::string( kGoldenDigest ) != "PENDING_FIRST_RUN" );
+  REQUIRE( digestA == kGoldenDigest );
+
+  // Moving one item changes the digest.
+  Json::Value moved = build();
+  moved["legends"][0]["rect_mm"][0] = 221.0;
+  REQUIRE( structuralDigest( moved ) != digestA );
+
+  // Declaration order does not (canonical, id-sorted entries).
+  Json::Value reordered = build();
+  Json::Value titles = reordered["titles"];
+  reordered.removeMember( "titles" );
+  Json::Value rotated( Json::arrayValue );
+  for ( int i = static_cast<int>( titles.size() ) - 1; i >= 0; --i )
+    rotated.append( titles[i] );
+  reordered["titles"] = rotated;
+  REQUIRE( structuralDigest( reordered ) == digestA );
+
+  // Page-size changes participate.
+  Json::Value pageChanged = build();
+  pageChanged["page"]["width_mm"] = 298.0;
+  REQUIRE( structuralDigest( pageChanged ) != digestA );
+
+  // Double resolve: geometry-affecting solving is digest-visible and
+  // deterministic (the pinned multi-fixpoint policy).
+  Json::Value resolvedOnce = build();
+  Json::Value softBelow = constraint( "s1", "below", "t1", "lg", 2.0 );
+  markSoft( softBelow, 50, 1.0 );
+  resolvedOnce["constraints"].append( softBelow );
+  Json::Value resolvedTwice = resolvedOnce;
+  resolveComposition( resolvedOnce, 10.0 );
+  resolveComposition( resolvedTwice, 10.0 );
+  REQUIRE( structuralDigest( resolvedOnce ) == structuralDigest( resolvedTwice ) );
+}
+
 TEST_CASE( "P7 solver: soft failure downgrades the objective, never convergence",
            "[platform7][solver]" )
 {

@@ -50,4 +50,14 @@ double estimateTextWidthMm( const std::string &text, double sizePt );
 /// ({code, severity, repairable, description}), in catalog order.
 Json::Value preflightRuleCatalog();
 
+/// Platform 7.0 visual-regression substrate: a deterministic structural
+/// digest of the RESOLVED spec geometry — one SHA-256 hex string over the
+/// canonical, id-sorted item entries (collection, id, rect rounded to
+/// 0.01 mm, page, z_index). Rendering-free: identical resolved geometry
+/// produces the identical digest on every platform, so tests can pin
+/// known-answer layouts and detect drift without QgsLayoutExporter (whose
+/// PNG path is environmentally fragile headless — see
+/// docs/cartography/visual-regression.md). `spec` is not modified.
+std::string structuralDigest( const Json::Value &spec );
+
 } // namespace sicnu::agent::cartography

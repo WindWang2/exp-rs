@@ -10,6 +10,8 @@
 #include "style_spec.h"
 #include "typography.h"
 
+#include <QCryptographicHash>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -1408,6 +1410,58 @@ Json::Value preflightRuleCatalog()
     catalog.append( entry );
   }
   return catalog;
+}
+
+
+
+std::string structuralDigest( const Json::Value &spec )
+{
+  // Canonical entries: every item with a usable rect from every collection
+  // (plus the legacy items[] collection), id-sorted, geometry rounded to
+  // 0.01 mm. Nothing platform-, locale- or pointer-dependent enters the
+  // hash. The page envelope participates so page-size changes are visible.
+  std::vector<std::string> entries;
+  double pageW = 0.0;
+  double pageH = 0.0;
+  if ( spec.isObject() && spec.isMember( "page" ) && spec["page"].isObject() )
+  {
+    pageW = spec["page"].get( "width_mm", 0.0 ).asDouble();
+    pageH = spec["page"].get( "height_mm", 0.0 ).asDouble();
+  }
+  entries.push_back( "page:" + std::to_string( std::round( pageW * 100.0 ) ) + "x" +
+                     std::to_string( std::round( pageH * 100.0 ) ) );
+
+  auto round2 = []( double v ) {
+    return std::round( v * 100.0 ) / 100.0;
+  };
+  auto addCollection = [ & ]( const char *collection ) {
+    if ( !spec.isObject() || !spec.isMember( collection ) || !spec[collection].isArray() )
+      return;
+    for ( const auto &item : spec[collection] )
+    {
+      if ( !item.isObject() || !item.isMember( "id" ) || !item["id"].isString() ||
+           !item.isMember( "rect_mm" ) || !item["rect_mm"].isArray() ||
+           item["rect_mm"].size() != 4 )
+        continue;
+      std::string entry = std::string( collection ) + "/" + item["id"].asString() + ":";
+      for ( Json::Value::ArrayIndex i = 0; i < 4; ++i )
+        entry += std::to_string( round2( item["rect_mm"][i].asDouble() ) ) + ",";
+      if ( item.isMember( "page" ) && item["page"].isIntegral() )
+        entry += "p" + std::to_string( item["page"].asInt() ) + ",";
+      if ( item.isMember( "z_index" ) && item["z_index"].isIntegral() )
+        entry += "z" + std::to_string( item["z_index"].asInt() );
+      entries.push_back( entry );
+    }
+  };
+  for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+    addCollection( mapspec::kCollections[c] );
+  addCollection( "items" );
+
+  std::sort( entries.begin(), entries.end() );
+  QCryptographicHash hash( QCryptographicHash::Sha256 );
+  for ( const std::string &entry : entries )
+    hash.addData( QByteArray( entry.c_str(), static_cast<qsizetype>( entry.size() ) ) );
+  return std::string( hash.result().toHex().constData() );
 }
 
 } // namespace sicnu::agent::cartography
