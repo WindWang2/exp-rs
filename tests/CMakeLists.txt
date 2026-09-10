@@ -7005,3 +7005,23 @@ target_link_libraries(test_contract_fuzz_data PRIVATE
   SQLite::SQLite3
 )
 target_include_directories(test_contract_fuzz_data PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Bounded contract fuzz (task D): AgentPlan reader + MapSpec validate/patch.
+# Heavy closure (sicnu_agent) — part of the full-tree lane.
+sicnu_add_test(test_contract_fuzz_agent TIMEOUT 300)
+target_link_libraries(test_contract_fuzz_agent PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  sicnu_processing
+  sicnu_task_center
+)
+target_include_directories(test_contract_fuzz_agent PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
