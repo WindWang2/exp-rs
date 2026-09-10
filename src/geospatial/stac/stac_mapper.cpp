@@ -109,14 +109,19 @@ StacItem StacItem::parse( const Json::Value &item )
   {
     // A range-only item's effective instant is the range start (same rule as
     // the temporal adapter below) — derived, and marked as assumed when the
-    // range endpoints declared no offset.
+    // range endpoints declared no offset. This DERIVATION alone does not set
+    // datetimeNormalized: the flag means "an origin form was rewritten",
+    // which is decided per declared field below.
     parsed.datetimeUtc = parsed.startDatetimeUtc;
     parsed.datetimeAssumedUtc = startAssumed;
   }
   parsed.datetimeNormalized =
-    ( !parsed.datetimeUtc.empty() && parsed.datetimeUtc != parsed.datetime ) ||
-    ( !parsed.startDatetimeUtc.empty() && parsed.startDatetimeUtc != parsed.startDatetime ) ||
-    ( !parsed.endDatetimeUtc.empty() && parsed.endDatetimeUtc != parsed.endDatetime );
+    ( !parsed.datetime.empty() && !parsed.datetimeUtc.empty() &&
+      parsed.datetimeUtc != parsed.datetime ) ||
+    ( !parsed.startDatetime.empty() && !parsed.startDatetimeUtc.empty() &&
+      parsed.startDatetimeUtc != parsed.startDatetime ) ||
+    ( !parsed.endDatetime.empty() && !parsed.endDatetimeUtc.empty() &&
+      parsed.endDatetimeUtc != parsed.endDatetime );
 
   parsed.platform = optionalString( properties, "platform" );
   parsed.constellation = optionalString( properties, "constellation" );

@@ -578,14 +578,19 @@ StacSeries buildTemporalSeriesDetailed( const std::vector<StacItem> &items )
       const StacSeriesEntry &b = series.entries[ bIndex ];
       if ( !ia.hasDate || !ib.hasDate )
         return ia.hasDate && !ib.hasDate;
-      if ( ia.hasInstant && ib.hasInstant )
+      // Class split (strict weak ordering): parseable instants ALWAYS sort
+      // before unparseable datetimes — mixing the epoch ordering with the
+      // raw-string ordering across classes would be intransitive (a cycle).
+      if ( ia.hasInstant != ib.hasInstant )
+        return ia.hasInstant;
+      if ( ia.hasInstant )
       {
         if ( ia.epochNanos != ib.epochNanos )
           return ia.epochNanos < ib.epochNanos;
       }
       else if ( a.datetime != b.datetime )
       {
-        return a.datetime < b.datetime;
+        return a.datetime < b.datetime; // unparseable class: raw-string order
       }
       if ( ia.id != ib.id )
         return ia.id < ib.id;

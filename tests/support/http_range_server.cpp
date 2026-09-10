@@ -109,10 +109,17 @@ HttpRangeServer::~HttpRangeServer()
       }
     }
   }
-  // A client holding the server thread in recv() (connected, request head
-  // never completed) must not outlive the fixture: unblock it, the bounded
-  // receive timeout (boundSocketWait) covers the rest.
-  shutdownSocket( mCurrentClient.load() );
+  // Clients held by the serve loop or a handler thread (connected, request
+  // head never completed) must not keep threads blocked past teardown:
+  // SHUTDOWN each in-flight socket. POSIX does not wake a peer thread's
+  // recv() when an fd is CLOSEd elsewhere, and closing here could hit an fd
+  // number another component has already reused — only the owning thread
+  // closes. The bounded receive window covers anything this misses.
+  {
+    std::lock_guard<std::mutex> lock( mHandlerMutex );
+    for ( const SocketHandle client : mInFlight )
+      ::shutdown( client, SD_BOTH );
+  }
   if ( mThread.joinable() )
     mThread.join();
   // Concurrent-mode handlers touch fixture state — join every one of them
@@ -123,6 +130,7 @@ HttpRangeServer::~HttpRangeServer()
       if ( handler.joinable() )
         handler.join();
     mHandlers.clear();
+    mInFlight.clear();
   }
 }
 
@@ -205,16 +213,22 @@ void HttpRangeServer::serveLoop()
     // A client that connects and stays silent must not pin the server
     // thread: bound the request-head receive window (see boundSocketWait).
     boundSocketWait( client );
-    if ( mMaxConnections > 1 && mLiveHandlers.load() < mMaxConnections )
+    if ( mMaxConnections.load() > 1 && mLiveHandlers.load() < mMaxConnections.load() )
     {
       // 8.0 concurrent mode: serve on a bounded side thread so several
       // readers can be in flight at once (real COG clients read in parallel).
       mLiveHandlers.fetch_add( 1 );
+      {
+        std::lock_guard<std::mutex> lock( mHandlerMutex );
+        mInFlight.insert( client );
+      }
       std::thread handler( [this, client] {
-        mCurrentClient.store( client );
         handleConnection( client );
-        mCurrentClient.store( kInvalidSocket );
-        shutdownSocket( client );
+        {
+          std::lock_guard<std::mutex> lock( mHandlerMutex );
+          mInFlight.erase( client );
+        }
+        shutdownSocket( client ); // the owning thread closes its own socket
         mLiveHandlers.fetch_sub( 1 );
       } );
       std::lock_guard<std::mutex> lock( mHandlerMutex );
@@ -223,9 +237,15 @@ void HttpRangeServer::serveLoop()
       mHandlers.push_back( std::move( handler ) );
       continue;
     }
-    mCurrentClient.store( client );
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      mInFlight.insert( client );
+    }
     handleConnection( client );
-    mCurrentClient.store( kInvalidSocket );
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      mInFlight.erase( client );
+    }
     shutdownSocket( client );
   }
   // Serial mode drains its own connection; concurrent mode's detached
@@ -386,7 +406,7 @@ void HttpRangeServer::handleConnection( SocketHandle client )
                                "/" + std::to_string( payloadSize );
     body = payloadData + rangeStart;
     bodySize = static_cast<std::size_t>( rangeEnd - rangeStart + 1 );
-    if ( mBehavior == ServerBehavior::ResetRanged && rangeStart >= 1024 &&
+    if ( mBehavior == ServerBehavior::ResetRanged && !isHead && rangeStart >= 1024 &&
          mResetArmed.exchange( false ) )
     {
       // Answer the headers, hand over a few body bytes, then kill the
@@ -395,8 +415,8 @@ void HttpRangeServer::handleConnection( SocketHandle client )
       // fault): a permanently hostile origin would starve the /vsicurl/
       // fallback too, and the cache's fallback guarantee needs a recoverable
       // origin. Identity probes fetch the head window (bytes=0-1023) and
-      // HEAD/GET answers never reset.
-      if ( !isHead )
+      // HEAD answers never consume the fault (nothing is on the wire to
+      // reset).
       {
         std::string head = "HTTP/1.1 206 Partial Content\r\n";
         for ( const auto &entry : headers )

@@ -343,8 +343,15 @@ std::string writeCubeWithStringTime( const std::string &dir, const std::string &
 {
   const std::string path = ( fs::path( dir ) / name ).string();
   int ncid = -1;
-  // NC_STRING variables need the netCDF-4 (HDF5) container format.
-  REQUIRE( nc_create( path.c_str(), NC_CLOBBER | NC_NETCDF4, &ncid ) == NC_NOERR );
+  // NC_STRING variables need the netCDF-4 (HDF5) container format; a libnetcdf
+  // built without HDF5 support must SKIP the suite, not fail it.
+  const int createStatus = nc_create( path.c_str(), NC_CLOBBER | NC_NETCDF4, &ncid );
+  if ( createStatus != NC_NOERR )
+  {
+    WARN( "netCDF-4 (HDF5) container unavailable (nc_create status " << createStatus << ") — string-axis suite skipped" );
+    return std::string();
+  }
+  REQUIRE( ncid != -1 );
   int timeId = -1, yId = -1, xId = -1;
   REQUIRE( nc_def_dim( ncid, "time", 3, &timeId ) == NC_NOERR );
   REQUIRE( nc_def_dim( ncid, "y", 4, &yId ) == NC_NOERR );
@@ -387,6 +394,8 @@ TEST_CASE( "string datetime axes are captured and resolve by label or instant",
   }
   const std::string dir = scratch( "string_time" );
   const std::string path = writeCubeWithStringTime( dir, "eo_cube.nc" );
+  if ( path.empty() )
+    return;
 
   sicnu::geo::MultidimView view = sicnu::geo::MultidimView::open( path );
   REQUIRE( view.isOpen() );
@@ -435,6 +444,8 @@ TEST_CASE( "EO cube workflow: instant selection, bounded window, dimension fidel
   }
   const std::string dir = scratch( "eo_workflow" );
   const std::string path = writeCubeWithStringTime( dir, "eo_cube.nc" );
+  if ( path.empty() )
+    return;
 
   sicnu::geo::MultidimView view = sicnu::geo::MultidimView::open( path );
   REQUIRE( view.isOpen() );

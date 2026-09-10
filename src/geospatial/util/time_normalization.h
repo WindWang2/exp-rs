@@ -16,7 +16,11 @@
     instant is exact across mixed offsets; ordering by raw strings is not.
   * total function: unparseable input is `ok = false`, never a throw and
     never a guessed time.
-  * bounded by design: years 0000–9999, no locale, no system clock reads.
+  * bounded by design: no locale, no system clock reads. Instants are
+    epoch nanoseconds (int64), so dates outside ≈1678–2262 are REFUSED
+    (ok = false) rather than wrapped — the alternative is silently wrong
+    ordering. The 4-digit-year syntax still accepts 0000–9999; only the
+    representable subset parses.
  ***************************************************************************/
 
 #ifndef SICNU_GEOSPATIAL_TIME_NORMALIZATION_H

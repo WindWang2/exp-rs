@@ -30,13 +30,14 @@
 #define SICNU_GEOSPATIAL_REMOTE_IDENTITY_TOKEN_H
 
 #include "geospatial/common.h"
+#include "geospatial/remote/remote_source_validator.h"
 
 #include <string>
 
 namespace sicnu::geo
 {
 
-/// Prefix of every identity token produced here ("ri1:v1:<hex>").
+/// Prefix of every identity token produced here ("ri1:v1:<64 hex chars>").
 inline constexpr const char *kRemoteIdentityTokenPrefix = "ri1";
 
 struct RemoteIdentityTokenOptions
@@ -56,6 +57,12 @@ struct RemoteIdentityTokenOptions
 /// contract violation, mirroring RemoteSourceValidator::probe).
 std::string remoteIdentityToken( const std::string &url,
                                  const RemoteIdentityTokenOptions &options = {} );
+
+/// Derives the token from an ALREADY-CAPTURED identity (no extra network
+/// probe) — the single-probe form for callers that just probed the resource.
+/// Same fail-closed contract as remoteIdentityToken().
+std::string remoteIdentityTokenFromIdentity( const std::string &url,
+                                             const RemoteSourceIdentity &identity );
 
 /// The identity basis behind a token (canonical URL sans credential-shaped
 /// query values + validator + size), exposed for diagnostics/tests. Never

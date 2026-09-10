@@ -116,7 +116,9 @@ class MultidimView
     /// label and axis entry parse as ISO-8601 (mixed offsets select
     /// correctly). Everything else is a typed miss — never a nearest guess.
     /// The result names an INDEX — the actual read still goes through
-    /// readSlice.
+    /// readSlice. For string axes `resolvedValue` carries the RESOLVED INDEX
+    /// (as a double), not a coordinate value — string labels have no numeric
+    /// axis value; `distance` is 0 for both exact forms.
     CoordinateSliceMatch resolveCoordinateIndexByString( const std::string &dimensionName,
                                                          const std::string &value ) const;
 

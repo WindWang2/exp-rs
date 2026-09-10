@@ -452,3 +452,62 @@ TEST_CASE( "searchAll survives empty-page walkers and detects pagination loops",
   StacClient client( server.url() );
   CHECK_THROWS_AS( client.searchAll( StacSearchQuery{} ), GeoError );
 }
+
+TEST_CASE( "series ordering stays total when unparseable datetimes mix with offsets",
+           "[io][stac][client][adapter][utc8]" )
+{
+  // Regression (adversarial review): parseable items must form their own
+  // ordering class — ordering parseable-vs-unparseable pairs by raw string
+  // while parseable pairs order by instant is intransitive (stable_sort UB).
+  std::vector<std::string> jsons = {
+    renderItem( "broken", "2026-01-01T00:45:00Q", "5", "[10,40,11,41]" ),      // unparseable
+    renderItem( "c-offset", "2026-01-01T01:00:00+02:00", "5", "[10,40,11,41]" ), // 2025-12-31T23:00Z
+    renderItem( "a-utc", "2026-01-01T00:30:00Z", "5", "[10,40,11,41]" ),
+  };
+  std::vector<StacItem> items;
+  for ( const std::string &text : jsons )
+  {
+    Json::Value parsed;
+    Json::CharReaderBuilder builder;
+    std::istringstream stream( text );
+    REQUIRE( Json::parseFromStream( builder, stream, &parsed, nullptr ) );
+    items.push_back( StacItem::parse( parsed ) );
+  }
+  const StacSeries series = buildTemporalSeriesDetailed( items );
+  REQUIRE( series.entries.size() == 3 );
+  // Parseable class first (by instant), unparseable class last.
+  CHECK( series.entries[0].item.id == "c-offset" );
+  CHECK( series.entries[1].item.id == "a-utc" );
+  CHECK( series.entries[2].item.id == "broken" );
+  // Deterministic across runs (same input, same order).
+  const StacSeries again = buildTemporalSeriesDetailed( items );
+  CHECK( again.entries[0].item.id == series.entries[0].item.id );
+  CHECK( again.entries[1].item.id == series.entries[1].item.id );
+  CHECK( again.entries[2].item.id == series.entries[2].item.id );
+}
+
+TEST_CASE( "range-only items do not claim normalization from the derived instant",
+           "[io][stac][client][adapter][utc8]" )
+{
+  Json::Value parsed;
+  Json::CharReaderBuilder builder;
+  std::string item = "{";
+  item += "\"type\": \"Feature\",";
+  item += "\"stac_version\": \"1.0.0\",";
+  item += "\"id\": \"range-only\",";
+  item += "\"properties\": {";
+  item += "  \"start_datetime\": \"2026-01-01T00:00:00Z\",";
+  item += "  \"end_datetime\": \"2026-01-02T00:00:00Z\"";
+  item += "},";
+  item += "\"bbox\": [10,40,11,41],";
+  item += "\"geometry\": {\"type\": \"Polygon\", \"coordinates\": [[[10,40],[11,40],[11,41],[10,41],[10,40]]]},";
+  item += "\"assets\": {\"image\": {\"href\": \"https://data.example.com/r.tif\", \"roles\": [\"data\"]}}";
+  item += "}";
+  std::istringstream stream( item );
+  REQUIRE( Json::parseFromStream( builder, stream, &parsed, nullptr ) );
+  const StacItem parsedItem = StacItem::parse( parsed );
+  // The effective instant is derived from the start; the origin's declared
+  // fields were NOT rewritten, so datetimeNormalized stays false.
+  CHECK( parsedItem.datetimeUtc == "2026-01-01T00:00:00Z" );
+  CHECK_FALSE( parsedItem.datetimeNormalized );
+}

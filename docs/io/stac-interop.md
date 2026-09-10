@@ -59,8 +59,10 @@ Asset hrefs keep their declared form; remote opens ride GDAL's VSI layer
 
 STAC datetimes arrive with mixed offsets (`Z`, `+02:00`, naive). The mapper
 derives normalized UTC instants at parse time (`datetimeUtc` on `StacItem`);
-`buildTemporalSeries` orders series by parsed instants (never raw strings, so
-mixed-offset acquisitions interleave correctly), ties break deterministically
+`buildTemporalSeries` orders series by parsed instants (parseable instants
+form one ordering class, unparseable datetimes another — a class-split keeps
+the sort transitive while letting mixed-offset acquisitions interleave
+correctly), ties break deterministically
 (item id, then input order), and duplicate acquisition instants are reported
 through `buildTemporalSeriesDetailed` (kept, never dropped). Naive datetimes
 are treated as UTC per the STAC spec and flagged (`datetimeAssumedUtc`);

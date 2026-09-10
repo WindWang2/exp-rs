@@ -16,6 +16,7 @@
 #include <mutex>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -89,10 +90,14 @@ class HttpRangeServer
 
     // --- 8.0 concurrency fixture -----------------------------------------
     /// Serves up to @p maxConnections connections CONCURRENTLY (thread per
-    /// connection, hard-bounded; 1 keeps the legacy serial serve loop). Lets
-    /// tests exercise concurrent readers of one cached resource. Must be
-    /// called before any request arrives (constructor-time configuration).
+    /// connection, hard-bounded at 8; ≤1 keeps the legacy serial serve
+    /// loop). Lets tests exercise concurrent readers of one cached resource.
+    /// Call at construction time, before any request arrives.
     void setConcurrency( unsigned maxConnections );
+
+    /// True when the transient ResetRanged fault has actually fired (lets
+    /// tests prove the reset path was exercised, not just the fallback).
+    bool resetFired() const { return !mResetArmed.load(); }
 
   private:
     void serveLoop();
@@ -114,13 +119,15 @@ class HttpRangeServer
 
     ServerBehavior mBehavior;
     SocketHandle mListener = kInvalidSocket;
-    /// The connection currently being served (kInvalidSocket when none).
-    /// The destructor shuts it down too: a client that opened a connection
-    /// but never completed a request head (connection-pool preconnects do)
-    /// must not hold the server thread in recv() past fixture destruction.
-    std::atomic<SocketHandle> mCurrentClient{ kInvalidSocket };
+    /// Connections currently owned by the serve loop / handler threads.
+    /// Teardown SHUTDOWNS (never closes — the owning thread closes) every
+    /// one of them: a client that opened a connection but never completed a
+    /// request head (connection-pool preconnects do) must not hold a handler
+    /// in recv() past fixture destruction.
+    std::set<SocketHandle> mInFlight;
     /// Max live handler threads when concurrency > 1 (0 = serial loop).
-    unsigned mMaxConnections = 0;
+    /// Atomic: serveLoop reads it while a test may still configure it.
+    std::atomic<unsigned> mMaxConnections{ 0 };
     std::atomic<unsigned> mLiveHandlers{ 0 };
     /// ResetRanged is transient: armed until the first eligible request.
     std::atomic<bool> mResetArmed{ true };

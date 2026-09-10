@@ -444,8 +444,11 @@ TEST_CASE( "concurrent readers of one resource share the origin fetch",
   const std::uint64_t fetchedBytes =
     telemetry["bytes_fetched"].asUInt64() - fetchedBefore;
   INFO( "fetched this test=" << fetchedBytes );
+  // Distinct bytes (window tiles + per-open metadata) ≈ 266 KB observed;
+  // the bound must reject a no-dedup run (~4× ≈ 1.05 MB) while leaving the
+  // dedup run generous headroom.
   const std::uint64_t windowBlockBytes = 4ull * 64 * 1024; // 256×256 Float32 ≤ 4 blocks
-  CHECK( fetchedBytes < windowBlockBytes * 4 );
+  CHECK( fetchedBytes < windowBlockBytes * 2 );
 }
 
 TEST_CASE( "adjacent and overlapping window reads stay byte-correct and pay once",
@@ -488,7 +491,8 @@ TEST_CASE( "mid-range connection reset degrades to the fallback without wrong by
   CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
   const std::string dir = scratch( "reset" );
   const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
-  // Resets every ranged read beyond the identity head window (bytes≥1024).
+  // The FIRST ranged read beyond the identity head window (bytes≥1024) is
+  // reset, then the origin recovers — the transient-fault shape.
   HttpRangeServer server( payload, testsupport::ServerBehavior::ResetRanged );
   server.setEtag( "\"reset-1\"" );
 
@@ -512,6 +516,8 @@ TEST_CASE( "mid-range connection reset degrades to the fallback without wrong by
   CHECK( head == local.readWindow( { 1 }, { 0, 0, 128, 128 } ) );
   CHECK( deep == local.readWindow( { 1 }, { 0, 512, 256, 128 } ) );
   CHECK( RemoteRangeCache::telemetryJson()["fallback_reads"].asUInt64() > 0 );
+  // The reset fault itself fired (not merely some unrelated fallback).
+  CHECK( server.resetFired() );
 }
 
 TEST_CASE( "changed content under the same URL invalidates across generations",

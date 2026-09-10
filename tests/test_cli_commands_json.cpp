@@ -91,7 +91,11 @@ TEST_CASE( "data identity reports a redacted, provable remote identity",
     sicnu::geo::testsupport::HttpRangeServer server( std::vector<unsigned char>( 4096, 0x11 ) );
     server.setEtag( "\"cli-identity-1\"" );
 
-    const auto result = runCli( "data identity " + server.url() );
+    // A SIGNED URL: the credential-shaped query value must never appear in
+    // the output — this is the redaction contract, made falsifiable.
+    const std::string secret = "srv1signature9f2cSECRETvalue";
+    const std::string signedUrl = server.url() + "?X-Goog-Signature=" + secret;
+    const auto result = runCli( "data identity " + signedUrl );
     REQUIRE( result.exitCode == 0 );
     const Json::Value envelope = parseEnvelope( result.output );
     REQUIRE( envelope.get( "ok", false ).asBool() );
@@ -99,10 +103,11 @@ TEST_CASE( "data identity reports a redacted, provable remote identity",
     const Json::Value &identity = envelope["data"]["identity"];
     REQUIRE( identity.isObject() );
     CHECK( identity.get( "state", "" ).asString() == "fresh" );
-    // Redaction contract: the display URL carries no credentials and the
-    // payload never echoes raw query secrets.
     CHECK( envelope["data"]["token_provable"].asBool() );
-    CHECK( result.output.find( "secret" ) == std::string::npos );
+    // The query string is stripped from the identity basis — the token stays
+    // provable AND the secret is absent from every output byte.
+    CHECK( result.output.find( secret ) == std::string::npos );
+    CHECK( result.output.find( "X-Goog-Signature" ) == std::string::npos );
 }
 
 TEST_CASE( "data identity folds offline origins into an honest state",

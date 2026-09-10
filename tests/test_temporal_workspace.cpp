@@ -773,7 +773,13 @@ TEST_CASE( "Unregistered remote inputs resolve through the installed identity re
 
     // The geospatial bridge contract, faked deterministically: a strong-ETag
     // resource yields a stable token; everything else yields "" (fail-closed).
-    auto *previous = sicnu::data::setExecutionIdentityResolver(
+    // Save/restore the global explicitly: setExecutionIdentityResolver does
+    // not return the previous resolver (its header comment notwithstanding —
+    // it returns a pointer to the installed resolver, or null when empty).
+    sicnu::data::InputIdentityResolver saved;
+    if ( auto *current = sicnu::data::executionIdentityResolver() )
+        saved = *current;
+    sicnu::data::setExecutionIdentityResolver(
         []( const QString &path ) {
             return path.contains( QStringLiteral( "provable" ) )
                        ? QStringLiteral( "ri1:v1:deadbeef" )
@@ -814,8 +820,7 @@ TEST_CASE( "Unregistered remote inputs resolve through the installed identity re
     CHECK( inputs.first().lazyContentDigest == QStringLiteral( "ri1:v1:deadbeef" ) );
 
     // Restore the previous resolver (tests must not leak global state).
-    sicnu::data::setExecutionIdentityResolver( previous ? *previous
-                                                        : sicnu::data::InputIdentityResolver() );
+    sicnu::data::setExecutionIdentityResolver( saved );
 }
 
 // ---------------------------------------------------------------------------

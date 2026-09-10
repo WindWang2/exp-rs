@@ -119,6 +119,32 @@ TEST_CASE( "ISO-8601 instants normalize across mixed offsets",
     const InstantParse parsed = parseIso8601Instant( bad );
     CHECK_FALSE( parsed.ok );
   }
+
+  // Epoch-nanosecond representability (int64): outside ≈1678–2262 the parse
+  // refuses instead of wrapping (a wrapped instant would silently poison
+  // ordering and freshness verdicts).
+  for ( const char *unrepresentable : { "2263-01-01T00:00:00Z", "1677-01-01T00:00:00Z",
+                                        "9999-12-31T23:59:59Z", "0001-01-01T00:00:00Z" } )
+  {
+    INFO( "input: " << unrepresentable );
+    const InstantParse parsed = parseIso8601Instant( unrepresentable );
+    CHECK_FALSE( parsed.ok );
+  }
+  const InstantParse inRange = parseIso8601Instant( "2262-01-01T00:00:00Z" );
+  REQUIRE( inRange.ok );
+
+  // Pre-epoch (negative) instants round-trip through the canonical rendering.
+  const InstantParse historical = parseIso8601Instant( "1900-06-15T12:00:00Z" );
+  REQUIRE( historical.ok );
+  CHECK( historical.epochNanos < 0 );
+  CHECK( instantToUtcString( historical.epochNanos ) == "1900-06-15T12:00:00Z" );
+
+  // Leap second ":60" carries the ":59" epoch (clamped, never wraps).
+  const InstantParse leap = parseIso8601Instant( "2016-12-31T23:59:60Z" );
+  const InstantParse beforeLeap = parseIso8601Instant( "2016-12-31T23:59:59Z" );
+  REQUIRE( leap.ok );
+  REQUIRE( beforeLeap.ok );
+  CHECK( leap.epochNanos == beforeLeap.epochNanos );
 }
 
 TEST_CASE( "remote identity tokens are proven by strong ETags only",
@@ -188,7 +214,20 @@ TEST_CASE( "remote identity tokens never carry credentials and survive re-signin
   // Credential-shaped query values are stripped from the basis: re-signing
   // the same object does not invalidate the identity.
   CHECK( signedToken == plainToken );
-  // The token is a digest — no fragment of the signature or URL survives.
-  CHECK( plainToken.find( "secret" ) == std::string::npos );
-  CHECK( plainToken.find( "127.0.0.1" ) == std::string::npos );
+  // The BASIS (not just the digest) must be credential-free — check the
+  // diagnostic surface directly for both the plain and the signed URL.
+  const std::string plainBasis = sicnu::geo::remoteIdentityBasis( plain );
+  const std::string signedBasis = sicnu::geo::remoteIdentityBasis( signedUrl );
+  REQUIRE( !plainBasis.empty() );
+  CHECK( plainBasis.find( "secret" ) == std::string::npos );
+  CHECK( signedBasis.find( "secret" ) == std::string::npos );
+  CHECK( signedBasis.find( "X-Goog-Signature" ) == std::string::npos );
+
+  // The /vsicurl/ spelling of the same signed object is the SAME identity:
+  // VSI payloads route through the same credential scan (not canonical()
+  // which keeps the query verbatim).
+  const std::string vsiToken =
+    sicnu::geo::remoteIdentityToken( "/vsicurl/" + signedUrl );
+  REQUIRE( !vsiToken.empty() );
+  CHECK( vsiToken == plainToken );
 }

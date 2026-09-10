@@ -10,6 +10,7 @@
 #include "geospatial/products/product_registry.h"
 #include "geospatial/probe/probe.h"
 #include "geospatial/remote/remote_identity_token.h"
+#include "geospatial/util/resource_uri.h"
 #include "geospatial/remote/remote_source_validator.h"
 #include "geospatial/remote/range_cache.h"
 #include "geospatial/stac/stac_mapper.h"
@@ -1129,7 +1130,10 @@ int commandData( QStringList args, const CliIO &io )
             Json::Value out;
             sicnu::geo::RemoteSourceValidator validator = sicnu::geo::RemoteSourceValidator::probe( stdPath, identityOptions );
             out["identity"] = validator.identity().toJson();
-            out["token_provable"] = !sicnu::geo::remoteIdentityToken( stdPath ).empty();
+            // Single probe: derive provability from the identity above
+            // (remoteIdentityToken(url) would probe a second time).
+            out["token_provable"] =
+                !sicnu::geo::remoteIdentityTokenFromIdentity( stdPath, validator.identity() ).empty();
             if ( revalidate )
             {
                 const sicnu::geo::RevalidationResult result = validator.revalidate( identityOptions );
@@ -1154,31 +1158,36 @@ int commandData( QStringList args, const CliIO &io )
                 {
                     bool parsed = false;
                     const std::uint64_t value = args[i + 1].toULongLong( &parsed );
-                    if ( parsed && value > 0 && value <= 64ull * 1024 * 1024 )
-                        readBytes = value;
+                    if ( !parsed || value == 0 || value > 64ull * 1024 * 1024 )
+                        return io.finish( false, "data", {},
+                                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                          {}, "--bytes requires 1..67108864" );
+                    readBytes = value;
                     args.removeAt( i );
                     args.removeAt( i );
                     break;
                 }
             }
+            // RAII: the installed cache must come down on every exit path.
+            struct CacheGuard
+            {
+                ~CacheGuard() { sicnu::geo::RemoteRangeCache::uninstall(); }
+            } cacheGuard;
             sicnu::geo::RemoteRangeCache::install(); // default bounded config
             Json::Value out;
-            out["cached_path"] = sicnu::geo::RemoteRangeCache::cachedPath( stdPath );
+            // Report the REDACTED display form — a signed URL passed on the
+            // command line must not be echoed verbatim into logs/output.
+            out["cached_path"] = sicnu::geo::ResourceUri::parse( stdPath ).display();
             out["requested_bytes"] = static_cast<Json::UInt64>( readBytes );
             out["config"] = sicnu::geo::RemoteRangeCache::currentConfig().toJson();
             const Json::Value before = sicnu::geo::RemoteRangeCache::telemetryJson();
-            VSILFILE *handle = VSIFOpenL( out["cached_path"].asCString(), "rb" );
+            VSILFILE *handle = VSIFOpenL( sicnu::geo::RemoteRangeCache::cachedPath( stdPath ).c_str(), "rb" );
             if ( handle == nullptr )
             {
-                sicnu::geo::RemoteRangeCache::uninstall();
                 return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                                  {}, "cannot open remote source through the range cache: " + stdPath );
+                                  {}, "cannot open remote source through the range cache: " +
+                                          sicnu::geo::ResourceUri::parse( stdPath ).display() );
             }
-            std::vector<char> buffer( static_cast<std::size_t>( readBytes ) );
-            const size_t got = VSIFReadL( buffer.data(), 1, buffer.size(), handle );
-            VSIFCloseL( handle );
-            const Json::Value after = sicnu::geo::RemoteRangeCache::telemetryJson();
-            sicnu::geo::RemoteRangeCache::uninstall();
             out["bytes_read"] = static_cast<Json::UInt64>( got );
             out["telemetry_delta"]["bytes_served"] =
                 Json::Value( after["bytes_served"].asUInt64() - before["bytes_served"].asUInt64() );

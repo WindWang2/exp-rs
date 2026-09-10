@@ -166,7 +166,14 @@ InstantParse parseIso8601Instant( const std::string &text )
                                            static_cast<unsigned>( day ) );
   const std::int64_t secondsOfDay =
     hour * 3600 + minute * 60 + clampedSecond - offsetSeconds;
-  result.epochNanos = ( days * 86400 + secondsOfDay ) * 1000000000 + fractionalNanos;
+  const std::int64_t totalSeconds = days * 86400 + secondsOfDay;
+  // Epoch nanoseconds live in an int64: |seconds| beyond ~9.22e9 (years
+  // outside ≈1678–2262) cannot be represented — refuse instead of wrapping
+  // (a wrapped instant would silently poison ordering and freshness).
+  constexpr std::int64_t kMaxRepresentableSeconds = 9223372035LL;
+  if ( totalSeconds > kMaxRepresentableSeconds || totalSeconds < -kMaxRepresentableSeconds )
+    return result; // ok stays false
+  result.epochNanos = totalSeconds * 1000000000 + fractionalNanos;
   result.ok = true;
   return result;
 }

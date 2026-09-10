@@ -1100,9 +1100,15 @@ void RemoteRangeCache::uninstall()
   // lazily allocates a fresh one; touching the old pointer would be a
   // use-after-free).
   cachedHandler() = nullptr;
-#endif
   g_store->dropAll();
   s_handlerInstalled = false;
+#else
+  // GDAL < 3.9 has no RemoveHandler: the prefix cannot be deregistered, so
+  // uninstall only drops the bytes and KEEPS the handler installed/registered
+  // (reporting installed()==false while /vsirangecache/ still resolves, or
+  // re-registering a fresh handler per cycle, would leak and lie).
+  g_store->dropAll();
+#endif
 }
 
 bool RemoteRangeCache::installed()
