@@ -19,6 +19,7 @@
 #include "geospatial/util/resource_uri.h"
 #include "support/bounded_fuzz.h"
 
+#include <cctype>
 #include <string>
 #include <vector>
 
