@@ -6847,3 +6847,34 @@ target_compile_definitions(test_help_coverage PRIVATE
     CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 target_link_libraries(test_help_coverage PRIVATE Sicnu::help Sicnu::help_adapters Sicnu::help_gui)
+
+# =============================================================================
+# Verification / Observability / Performance Engineering 7.0
+# (feat/verification-observability-7) — appended at end of file on purpose:
+# this track and feat/cloud-geospatial-io-7 both edit this file; appending
+# keeps integration conflicts trivial.
+# =============================================================================
+
+# Unified trace contract (task F): ids, NDJSON encoding, ring/file sinks.
+sicnu_add_test(test_trace_contract TIMEOUT 120)
+target_link_libraries(test_trace_contract PRIVATE sicnu_runtime)
+
+# Fault-injection registry semantics (task B): the registry lives in
+# sicnu_runtime; production seams probe it through SICNU_FAULT_POINT and the
+# fast path is one relaxed atomic load when nothing is armed.
+sicnu_add_test(test_fault_registry TIMEOUT 120)
+target_link_libraries(test_fault_registry PRIVATE sicnu_runtime)
+
+# Portable fault matrix (task B): OutputCommitter / ArtifactObjectPool /
+# WorkflowCheckpointManager failure paths via the fault registry. Runs on
+# Windows/MSVC where the POSIX-only test_fault_injection cannot.
+sicnu_add_test(test_fault_matrix TIMEOUT 300)
+target_link_libraries(test_fault_matrix PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_data
+  sicnu_workflow
+  sicnu_runtime
+)

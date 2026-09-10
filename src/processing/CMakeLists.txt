@@ -224,6 +224,9 @@ target_link_libraries(sicnu_processing PUBLIC
 # Sicnu::data themselves.
 target_link_libraries(sicnu_processing PRIVATE
     Sicnu::data
+  # output_committer's fault-injection probes (Verification 7.0) resolve in
+  # the Qt-free leaf sicnu_runtime.
+    sicnu_runtime
 )
 # jsoncpp: the canonical `jsoncpp` target (and JSONCPP_INCLUDE_DIRS/LIBRARIES)
 # is resolved once at the top level (see root CMakeLists.txt) — distro configs

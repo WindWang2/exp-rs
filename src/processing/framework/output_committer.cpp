@@ -12,6 +12,7 @@
 #include "data/data_manager.h"
 #include "data/source_descriptor.h"
 #include "gdal/gdal_dataset_wrapper.h"
+#include "observability/fault_point.h"
 
 using namespace sicnu::data;
 
@@ -166,6 +167,15 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
       const QString backup = pair.to + QStringLiteral( ".old" );
       QFile::remove( staging );
       QFile::remove( backup );
+      if ( SICNU_FAULT_POINT( "output_committer.publish" ) )
+      {
+        // Injected publish failure (Verification 7.0 fault matrix, test-only
+        // arming): take exactly the real mid-group failure path below —
+        // nothing is published, the generic !publishOk rollback restores the
+        // pre-commit state.
+        publishOk = false;
+        break;
+      }
       if ( QFile::exists( pair.to ) && !QFile::rename( pair.to, backup ) )
       {
         publishOk = false;
