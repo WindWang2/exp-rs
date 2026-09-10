@@ -237,6 +237,8 @@ ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
       return a.lazyContentDigest < b.lazyContentDigest;
     if ( a.producerFingerprint != b.producerFingerprint )
       return a.producerFingerprint < b.producerFingerprint;
+    if ( a.remoteIdentity != b.remoteIdentity )
+      return a.remoteIdentity < b.remoteIdentity;
     return false;
   } );
 
@@ -281,9 +283,30 @@ ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
       out.append( ";pfp=" );
       out.append( framingLiteral( in.producerFingerprint ) );
     }
+    if ( !in.remoteIdentity.isEmpty() )
+    {
+      // Remote origin identity (8.0 WP-F): the confirmed strong ETag is the
+      // input's whole identity; a server-side change yields a different
+      // token, hence a different fingerprint and a guaranteed miss.
+      out.append( ";rid=" );
+      out.append( framingLiteral( in.remoteIdentity ) );
+    }
   }
 
   return ExecutionFingerprint{ QCryptographicHash::hash( out, QCryptographicHash::Sha256 ) };
+}
+
+ExecutionFingerprint makeImplementationIdentity( const std::string &identityText )
+{
+  // Exact byte layout preserved from TaskCenter's inline recipe (Execution
+  // Plane 7.0): schema text + contract + platform. Changing the layout would
+  // silently invalidate every recorded execution fingerprint.
+  const std::string canonical = identityText
+                                + "|contract="
+                                + std::to_string( kExecutionFingerprintContractVersion )
+                                + "|platform=" + kExecutionFingerprintPlatformVersion;
+  return ExecutionFingerprint{ QCryptographicHash::hash(
+      QByteArray::fromStdString( canonical ), QCryptographicHash::Sha256 ) };
 }
 
 ExecutionResultCache &ExecutionResultCache::instance()
@@ -687,6 +710,15 @@ QStringList ExecutionResultCache::cachedArtifacts() const
     }
   }
   return paths;
+}
+
+std::optional<PoolObject> ExecutionResultCache::pooledObjectByDigest( const QString &digestHex )
+{
+  std::lock_guard<std::recursive_mutex> locker( m_mutex );
+  ensurePersistentTierLocked();
+  if ( !m_persistent )
+    return std::nullopt;
+  return m_persistent->objectByDigest( digestHex );
 }
 
 int ExecutionResultCache::pathSize() const

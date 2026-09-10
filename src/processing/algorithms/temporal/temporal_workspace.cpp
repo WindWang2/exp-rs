@@ -4,6 +4,7 @@
 #include "data/data_manager.h"
 #include "data/derivation_record.h"
 #include "data/artifact_store.h"
+#include "data/execution_identity_resolver.h"
 #include "data/providers/gdal_raster_source_provider.h"
 
 #include <qgsdatasourceresolver.h>
@@ -491,8 +492,26 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
     }
     const auto snapshot = dataManager->findByPath( lookupPath );
     if ( !snapshot )
-      return fail( QStringLiteral( "unresolved input (%1): %2" )
-                     .arg( QgsDataSourceResolver::kindToString( kind ), path ) );
+    {
+        // 8.0 WP-F: a remote input the catalog cannot resolve may still be
+        // identifiable through the installed execution-identity resolver
+        // (confirmed strong ETag — geospatial/remote/remote_identity_resolver).
+        // An empty verdict stays fail-closed (pre-8.0 behavior): unresolved
+        // ⇒ uncacheable, never a guessed identity.
+        QString remoteToken;
+        if ( const auto resolver = sicnu::data::executionIdentityResolver() )
+            remoteToken = ( *resolver )( path );
+        if ( remoteToken.isEmpty() )
+            return fail( QStringLiteral( "unresolved input (%1): %2" )
+                             .arg( QgsDataSourceResolver::kindToString( kind ), path ) );
+        sicnu::data::TaggedDerivationInput input;
+        input.revision = sicnu::data::AssetRevision::initial();
+        input.toPort = QStringLiteral( "input" );
+        input.valueDomain = QStringLiteral( "remote" );
+        input.remoteIdentity = remoteToken;
+        out->append( input );
+        continue;
+    }
     sicnu::data::TaggedDerivationInput input;
     input.assetId = snapshot->id();
     input.revision = snapshot->revision();
@@ -519,7 +538,22 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
     }
     const auto snapshot = dataManager->findByPath( lookupPath );
     if ( !snapshot )
-      return fail( QStringLiteral( "unresolved scene input: %1" ).arg( lookupPath ) );
+    {
+        // 8.0 WP-F: remote scene identity through the installed resolver
+        // (strong ETag only); empty verdict = uncacheable (fail-closed).
+        QString remoteToken;
+        if ( const auto resolver = sicnu::data::executionIdentityResolver() )
+            remoteToken = ( *resolver )( lookupPath );
+        if ( remoteToken.isEmpty() )
+            return fail( QStringLiteral( "unresolved scene input: %1" ).arg( lookupPath ) );
+        sicnu::data::TaggedDerivationInput input;
+        input.revision = sicnu::data::AssetRevision::initial();
+        input.toPort = QStringLiteral( "scene" );
+        input.valueDomain = QStringLiteral( "remote" );
+        input.remoteIdentity = remoteToken;
+        out->append( input );
+        continue;
+    }
     sicnu::data::TaggedDerivationInput input;
     input.assetId = snapshot->id();
     input.revision = snapshot->revision();

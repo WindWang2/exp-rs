@@ -8,12 +8,22 @@
 #include <QFile>
 #include <QFileInfo>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <algorithm>
 
 #include "jobs/job_types.h"
+#include "operators/framework/rs_operator.h"
+#include "operators/framework/rs_operator_registry.h"
 #include "placeholder_grammar.h"
 #include "processing/framework/task_center.h"
 #include "data/artifact_store.h"
+#include "data/execution_fingerprint.h"
+#include "runtime/observability/trace.h"
 
 namespace sicnu::workflow {
 
@@ -73,6 +83,101 @@ void stampCompletionIdentity( StepPlan &plan, const CompletionIdentity &identity
     plan.outputSizeBytes = identity.sizeBytes;
     plan.outputMtimeMs = identity.mtimeMs;
     plan.outputDigest = identity.digest;
+}
+
+/// Current implementation identity of @p operatorId (8.0 WP-E): SHA-256 over
+/// (schema text + determinism grade + fingerprint contract + platform
+/// version). nullopt when the operator is unknown to the registry or its
+/// schema cannot be proven — the resume gate then refuses to serve (fail
+/// -closed). Registry access reads no shared mutable state beyond the
+/// instance's own locks; called outside the coordinator mutex like the other
+/// out-of-lock identity work.
+std::optional<std::string> currentOperatorImplIdentity( const std::string &operatorId )
+{
+    if ( operatorId.empty() )
+        return std::nullopt;
+    const auto op = sicnu::operators::RSOperatorRegistry::instance().create( operatorId );
+    if ( !op )
+        return std::nullopt;
+    Json::StreamWriterBuilder schemaWriter;
+    schemaWriter[ "indentation" ] = "";
+    const std::string schemaText = Json::writeString( schemaWriter, op->schema() );
+    const sicnu::data::ExecutionFingerprint identity =
+        sicnu::data::makeImplementationIdentity( schemaText + "|grade=" + op->determinismGrade() );
+    if ( !identity.isValid() )
+        return std::nullopt;
+    return identity.toStdString();
+}
+
+/// Re-hydrates a moved/missing step output from the content-addressed pool
+/// (8.0 WP-E): when the checkpoint recorded a digest and the recorded path
+/// no longer vouches for it, a verified pool object with the SAME digest is
+/// staged to the declared path via temp-copy + atomic rename and its bytes
+/// re-verified after the copy. Returns true only when the declared path now
+/// provably holds the digested content — anything else leaves the step to
+/// re-execute (fail-closed, identical to pre-8.0 behavior).
+bool rehydrateMovedOutput( const StepPlan &plan )
+{
+    if ( plan.outputDigest.empty() || plan.outputLayerPath.empty() )
+        return false;
+    const auto object = sicnu::data::ExecutionResultCache::instance().pooledObjectByDigest(
+        QString::fromStdString( plan.outputDigest ) );
+    if ( !object || object->size <= 0 )
+        return false;
+    const QString destination = QString::fromStdString( plan.outputLayerPath );
+    const QFileInfo destInfo( destination );
+    if ( !QDir().mkpath( destInfo.absolutePath() ) )
+        return false;
+    const QString tmp = destination + QStringLiteral( ".%1.resume.tmp" )
+#ifdef _WIN32
+                            .arg( static_cast<int>( ::_getpid() ) );
+#else
+                            .arg( ::getpid() );
+#endif
+    QFile::remove( tmp );
+    if ( !QFile::copy( object->poolPath, tmp ) )
+    {
+        QFile::remove( tmp );
+        return false;
+    }
+    // The staged bytes must prove the digest before they may become the
+    // output — never rename bytes nobody vouches for.
+    QString digestError;
+    const QString stagedDigest = sicnu::data::artifactContentDigest( tmp, &digestError );
+    if ( !digestError.isEmpty()
+         || stagedDigest != QString::fromStdString( plan.outputDigest ) )
+    {
+        QFile::remove( tmp );
+        return false;
+    }
+    if ( QFile::exists( destination ) )
+        QFile::remove( destination );
+    if ( !QFile::rename( tmp, destination ) )
+    {
+        QFile::remove( tmp );
+        return false;
+    }
+    return true;
+}
+
+/// Execution Plane 8.0 WP-I: bounded resume-decision trace. Correlation:
+/// run id + step id (operator id rides the op field). One relaxed atomic
+/// load when tracing is off (trace.h hot-path rule).
+void traceResumeEvent( const WorkflowRun &run, const char *event, const char *status,
+                       const std::string &stepId, const std::string &operatorId,
+                       const std::string &detail = {} )
+{
+    namespace trace = sicnu::runtime::observability::trace;
+    if ( !trace::Trace::enabled() )
+        return;
+    trace::TraceEvent record;
+    record.run = run.runId();
+    record.task = stepId;
+    record.op = operatorId;
+    record.event = event;
+    record.status = status;
+    record.detail = detail;
+    trace::Trace::publish( record );
 }
 
 QString stepStatusForTaskStatus( sicnu::TaskStatus status )
@@ -361,6 +466,14 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     if ( info.status == sicnu::TaskStatus::Completed && !info.outputLayerPath.isEmpty() )
         completionIdentity = computeCompletionIdentity( info.outputLayerPath );
 
+    // 8.0 WP-E: the producing operator's implementation identity, resolved
+    // outside the fold lock for the same reason (registry + schema work).
+    // A step the registry cannot resolve stays unstamped — the resume gate
+    // then serves it only in the equally-unresolvable state (fail-closed).
+    std::optional<std::string> operatorImplIdentity;
+    if ( info.status == sicnu::TaskStatus::Completed && !info.algorithmId.isEmpty() )
+        operatorImplIdentity = currentOperatorImplIdentity( info.algorithmId.toStdString() );
+
     // The whole fold runs under m_mutex: resumeRun swaps the mapped run
     // object under the same lock, so a transition either lands entirely
     // before the swap (visible to its merge) or entirely after (folded into
@@ -400,6 +513,9 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
             if ( completionIdentity )
                 stampCompletionIdentity( *plan, *completionIdentity );
         }
+        // 8.0 WP-E: bind the output to the implementation that produced it.
+        if ( operatorImplIdentity )
+            plan->operatorImplStamp = *operatorImplIdentity;
     }
     else if ( info.status == sicnu::TaskStatus::Failed )
     {
@@ -616,16 +732,75 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
         std::string outputPath;
     };
     std::map<std::string, CompletedResult> completedResults;
-    for ( const auto &plan : run->stepPlans() )
+    for ( const StepPlan &planRef : run->stepPlans() )
     {
+        StepPlan plan = planRef; // mutable copy: a re-hydrated identity converges below
         if ( plan.status != "Completed" || plan.outputLayerPath.empty() )
             continue;
+        // 8.0 WP-E operator-implementation gate: the step may only be served
+        // when the operator implementation that would run NOW is provably
+        // the one that produced the recorded output.
+        //   stamp recorded + identity resolvable  ⇒ equal serves, changed
+        //                                          re-executes;
+        //   stamp recorded + operator unresolvable ⇒ re-executes (fail-closed);
+        //   no stamp (legacy checkpoint) + resolvable ⇒ re-executes
+        //       (the completion never proved which implementation ran);
+        //   no stamp + unresolvable ⇒ serve (both sides unknown-implementation;
+        //       nothing provable changed — this is the pre-8.0 behavior).
+        const auto currentIdentity = currentOperatorImplIdentity( plan.operatorId );
+        if ( !plan.operatorImplStamp.empty() )
+        {
+            if ( !currentIdentity || *currentIdentity != plan.operatorImplStamp )
+            {
+                traceResumeEvent( *run, "resume", "operator_changed", plan.stepId,
+                                  plan.operatorId );
+                continue;
+            }
+        }
+        else if ( currentIdentity )
+        {
+            traceResumeEvent( *run, "resume", "legacy_no_stamp", plan.stepId,
+                              plan.operatorId );
+            continue;
+        }
+
         // Phase J (W2): a mere existence check once served a truncated
         // crash-era intermediate to downstream steps. Require a real,
         // non-empty file — a rewrite mid-crash fails this and is re-executed.
-        const QFileInfo outputInfo( QString::fromStdString( plan.outputLayerPath ) );
+        bool rehydrated = false;
+        QFileInfo outputInfo( QString::fromStdString( plan.outputLayerPath ) );
         if ( !outputInfo.isFile() || outputInfo.size() <= 0 )
-            continue;
+        {
+            // 8.0 WP-E moved-output recovery: the recorded path lost the
+            // bytes, but the checkpoint recorded a digest — re-hydrate from
+            // the content-addressed pool when a verified object with that
+            // digest exists. Anything else re-executes (pre-8.0 behavior).
+            if ( !rehydrateMovedOutput( plan ) )
+            {
+                traceResumeEvent( *run, "resume", "output_lost", plan.stepId,
+                                  plan.operatorId );
+                continue;
+            }
+            traceResumeEvent( *run, "resume", "rehydrated", plan.stepId,
+                              plan.operatorId, plan.outputDigest );
+            rehydrated = true;
+            outputInfo = QFileInfo( QString::fromStdString( plan.outputLayerPath ) );
+            if ( !outputInfo.isFile() || outputInfo.size() <= 0 )
+                continue;
+            // Converge the persisted stat identity to the restored file so
+            // later resumes take the normal stat path (the digest re-check
+            // below remains the actual proof — the restored bytes were
+            // verified before the rename and are verified again there).
+            plan.outputSizeBytes = outputInfo.size();
+            plan.outputMtimeMs = outputInfo.lastModified().toMSecsSinceEpoch();
+            if ( StepPlan *persisted = run->findStepPlan( plan.stepId ) )
+            {
+                persisted->outputSizeBytes = plan.outputSizeBytes;
+                persisted->outputMtimeMs = plan.outputMtimeMs;
+                run->updateStepPlan( *persisted );
+            }
+        }
+        Q_UNUSED( rehydrated );
         // Completion identity gate (issue #750): the checkpoint must prove
         // the bytes at the recorded path are the ones the step completed
         // with. Stat identity (size + mtime) is checked when recorded; the
@@ -651,6 +826,7 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
             if ( !digestError.isEmpty() || actualDigest.toStdString() != plan.outputDigest )
                 continue;
         }
+        traceResumeEvent( *run, "resume", "served", plan.stepId, plan.operatorId );
         completedResults[plan.stepId] = { plan.resultPayload, plan.outputLayerPath };
     }
 

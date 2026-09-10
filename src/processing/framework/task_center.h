@@ -5,11 +5,13 @@
 #include <QVariantMap>
 #include <QList>
 #include <QMap>
+#include <QMultiHash>
 #include <QDateTime>
 #include <QMutex>
 #include <QWaitCondition>
 #include <QPointer>
 #include <memory>
+#include <queue>
 #include <string>
 #include <functional>
 #include <utility>
@@ -74,6 +76,17 @@ enum class TaskPriority {
     Normal,
     Low
 };
+
+/// Execution Plane 8.0 WP-D: formal TRANSIENT failure classification for the
+/// bounded auto-retry. True only for the worker-INFRASTRUCTURE error classes
+/// (crash / timeout / spawn exhaustion / broken write path / malformed
+/// frame) — in every one of them the operator provably never produced a
+/// result, so a bounded re-run cannot double-produce. Operator errors,
+/// validation failures and cancellations are PERMANENT and never auto-retry.
+/// The prefixes are infrastructure-owned namespace (see local_worker_pool /
+/// local_worker_host, the only producers); an operator imitating them only
+/// widens its own retry budget, which stays clamped to 0..3.
+bool isTransientExecutionError( const QString &error );
 
 struct AlgorithmTaskInfo {
     long taskId = -1;
@@ -488,6 +501,105 @@ private:
     /// Descriptor-backed admission dimensions for @a task (cached; a
     /// descriptor failure yields all-zero dims = no gating).
     AdmissionDims admissionDimsLocked( const AlgorithmTaskInfo &task ) const;
+
+    // --- 8.0 WP-A: incremental admission bookkeeping --------------------------
+    // The admission pass used to rescan the WHOLE task map (active counters,
+    // parent-satisfied collection, full re-sort) plus re-apply placeholder
+    // substitution for every eligible candidate on every call — O(n²) over a
+    // drain (10k short jobs ≈ 83s in Debug). The structures below keep the
+    // same launch semantics (priority order, fairness, never-starve, resource
+    // gates, cancellation) with incremental maintenance instead.
+    //
+    /// Active-set membership: statuses that hold an engine/QgsTask slot and
+    /// consume admission dimensions.
+    static bool isActiveStatus( TaskStatus status );
+    /// Incremental active-set counters. Derived ONLY through
+    /// setTaskStatusLocked; every status write outside enqueue() must go
+    /// through it or the admission gates run on stale sums.
+    struct ActiveCounters
+    {
+        unsigned int total = 0;
+        unsigned int ramMb = 0;
+        unsigned int isolated = 0;
+        unsigned int ioHeavy = 0;
+        QMap<ProviderResourceProfile, unsigned int> byProfile;
+        sicnu::ResourceUsage usage2;
+    };
+    ActiveCounters m_active;
+    /// The one status-transition seam (m_mutex held): updates m_active by
+    /// comparing active-set membership before/after, and maintains the
+    /// manual-queued tracking used by the legacy placeholder pass.
+    void setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newStatus );
+    /// Removes every derived-structure trace of @p taskId (task pruned or
+    /// everything reset). m_mutex held.
+    void forgetDerivedTaskStateLocked( long taskId );
+
+    /// Parent → children index for O(children) promotion on completion (the
+    /// cancel/failure cascade keeps its own O(V+E) traversal: terminal cascades
+    /// are user-paced and rare). Registration happens at enqueue; edges of a
+    /// pruned parent are dropped with the task.
+    QMultiHash<long, long> m_children;
+    /// Per-task count of parents that are present in the map and NOT
+    /// Completed (a missing parent counts as satisfied — the eligibility rule).
+    /// A child becomes launch-ready when this reaches 0.
+    QMap<long, int> m_incompleteParentCount;
+    void registerParentLinksLocked( const AlgorithmTaskInfo &task );
+    /// Decrements the children's incomplete-parent counters and pushes the
+    /// newly-ready ones onto the candidate heap. m_mutex held.
+    void promoteChildrenOfLocked( long parentTaskId );
+
+    /// Launch-ready candidate heap. Key (epoch, priority, taskId, serial):
+    ///   epoch 0   — never admitted-blocked; fresh candidates keep the strict
+    ///               (priority, taskId) launch order of the old full sort;
+    ///   epoch > 0 — the pass number in which the candidate was last held by a
+    ///               per-candidate gate. Blocked candidates re-examine in FIFO
+    ///               epoch order (never-starve under steady fresh arrivals)
+    ///               but always behind fresh ones — the same relative order
+    ///               the old `continue`-on-block semantics produced;
+    ///   serial    — lazily invalidates superseded entries (dispatch, cancel,
+    ///               retry, re-promotion) without erase-on-cancel.
+    struct ReadyEntry
+    {
+        unsigned long long epoch = 0;
+        int priority = 1;
+        long taskId = 0;
+        unsigned long long serial = 0;
+    };
+    struct ReadyEntryGreater
+    {
+        bool operator()( const ReadyEntry &a, const ReadyEntry &b ) const
+        {
+            if ( a.epoch != b.epoch ) return a.epoch > b.epoch;
+            if ( a.priority != b.priority ) return a.priority > b.priority;
+            if ( a.taskId != b.taskId ) return a.taskId > b.taskId;
+            return a.serial > b.serial;
+        }
+    };
+    std::priority_queue<ReadyEntry, std::vector<ReadyEntry>, ReadyEntryGreater> m_readyHeap;
+    QMap<long, unsigned long long> m_readySerial; ///< taskId → current valid heap serial
+    unsigned long long m_nextReadySerial = 1;
+    unsigned long long m_admissionPass = 0;
+    /// Per-pass bound on examined candidates: keeps a pass O(bound·log n) even
+    /// when every candidate is held by a per-candidate gate. Blocked
+    /// candidates rotate FIFO across passes, so the cap never strands work.
+    static constexpr unsigned int kAdmissionScanFloor = 32;
+
+    /// True when @p task may be staged for launch by the admission pass
+    /// (launch-candidate predicate). m_mutex held.
+    bool isLaunchCandidateLocked( const AlgorithmTaskInfo &task ) const;
+    /// True when every parent of @p task is Completed or absent.
+    bool parentsSatisfiedLocked( const AlgorithmTaskInfo &task ) const;
+    /// Stamps a fresh serial and pushes the candidate (no-op when the task is
+    /// not a launch candidate). m_mutex held.
+    void pushReadyCandidateLocked( long taskId );
+    /// Invalidates the task's heap entries (lazy deletion on next pop).
+    void dropReadyCandidateLocked( long taskId );
+
+    /// Non-autoDispatch (manual/QgsTask) queued tasks with satisfied parents:
+    /// legacy behavior applies placeholder substitution to them on every
+    /// admission pass (they never stage a launch). Kept OUT of the launch
+    /// heap; this list is user-paced and small.
+    QList<long> m_manualQueued;
     /// Transient auto-retry decision for markTaskFailed (m_mutex held): the
     /// error class is transient AND the task's retry budget is not exhausted.
     bool shouldAutoRetryLocked( const AlgorithmTaskInfo &task, const QString &error ) const;

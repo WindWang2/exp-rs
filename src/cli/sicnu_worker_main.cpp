@@ -53,11 +53,14 @@ bool writeLine( const std::string &line )
 void emitReady()
 {
     // Capability advertisement (7.0): a legacy host ignores the "caps" member.
+    // "heartbeat" (8.0): liveness frames while a job runs; hosts that do not
+    // know the op ignore it (extension rule), absence changes nothing.
     writeLine( sicnu::runtime::worker::makeReadyFrame( {
         sicnu::runtime::worker::kWorkerCapProgress,
         sicnu::runtime::worker::kWorkerCapCancelAck,
         sicnu::runtime::worker::kWorkerCapStructuredErrors,
         sicnu::runtime::worker::kWorkerCapOutputIdentity,
+        sicnu::runtime::worker::kWorkerCapHeartbeat,
     } ) );
 }
 
@@ -184,6 +187,34 @@ int main( int argc, char **argv )
     // stdout carries frames from two threads (progress/result from the job
     // thread, ack/error from the main loop): serialize whole lines.
     std::mutex stdoutMutex;
+
+    // 8.0 WP-C heartbeat: a bounded watchdog thread emits a liveness frame
+    // every 15s WHILE a job is active, so a host can tell "operator silent
+    // but process alive" from "process hung/dead" without any operator
+    // cooperation. Legacy hosts ignore the unknown op; the frames are one
+    // small line per interval and stop when the job ends (no idle traffic).
+    std::atomic<bool> heartbeatStop{ false };
+    std::thread heartbeatThread( [ &heartbeatStop, &jobActive, &currentJobId, &stdoutMutex ]() {
+        constexpr int kHeartbeatIntervalMs = 15000;
+        int elapsed = 0;
+        while ( !heartbeatStop.load() )
+        {
+            std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+            elapsed += 50;
+            if ( elapsed < kHeartbeatIntervalMs )
+                continue;
+            elapsed = 0;
+            if ( !jobActive.load() )
+                continue;
+            std::lock_guard<std::mutex> lock( stdoutMutex );
+            writeLine( sicnu::runtime::worker::makeHeartbeatFrame( currentJobId ) );
+        }
+    } );
+    auto stopHeartbeat = [ &heartbeatThread, &heartbeatStop ]() {
+        heartbeatStop = true;
+        if ( heartbeatThread.joinable() )
+            heartbeatThread.join();
+    };
     while ( true )
     {
         std::string line;
@@ -193,6 +224,7 @@ int main( int argc, char **argv )
             // then wait for it (the host kills us anyway if we stall).
             cancelFlag = true;
             finishJobThread();
+            stopHeartbeat();
             break;
         }
         Json::Value frame;
@@ -204,6 +236,7 @@ int main( int argc, char **argv )
         {
             cancelFlag = true;
             finishJobThread();
+            stopHeartbeat();
             break;
         }
         if ( op == "cancel" )

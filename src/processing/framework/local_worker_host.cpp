@@ -2,6 +2,7 @@
 #include "local_worker_host.h"
 
 #include "runtime/worker/worker_protocol.h"
+#include "worker_process_guard.h"
 #include "worker_process_io.h"
 
 #include <QProcess>
@@ -47,11 +48,18 @@ Json::Value runInLocalWorker( const QString &workerProgram,
     process.setArguments( { QStringLiteral( "--protocol" ),
                             QString::fromLatin1( sicnu::runtime::worker::kWorkerProtocolVersion ) } );
     process.setProcessChannelMode( QProcess::SeparateChannels ); // stderr = diagnostics
+    // 8.0 WP-C: bind the one-shot worker to OS-level containment (POSIX
+    // new session / process group; Windows kill-on-close Job Object armed
+    // after start). The guard's destructor closes the job handle, so the
+    // whole tree dies even if this host throws or the process dies.
+    WorkerProcessGuard guard;
+    guard.attach( process );
     WorkerDiagnosticsRing diagnostics;
     const auto startedAt = std::chrono::steady_clock::now();
     process.start( QIODevice::ReadWrite );
     if ( !process.waitForStarted( 5000 ) )
         throw std::runtime_error( "worker protocol: cannot start " + workerProgram.toStdString() );
+    guard.armAfterStart( process );
 
     const auto deadline = std::chrono::steady_clock::now() + timeout;
 
@@ -103,18 +111,12 @@ Json::Value runInLocalWorker( const QString &workerProgram,
         if ( cancelRequested && std::chrono::steady_clock::now() >= cancelDeadline )
         {
             // Escalation ladder: the worker had its full grace window to ack
-            // and exit cooperatively. terminate() first (best effort), then a
-            // hard kill. (terminate() is NOT sent at cancel-request time: on
-            // POSIX it SIGTERMs and on Windows it WM_CLOSEs the worker
-            // before it ever reads the cancel frame, defeating the
-            // cooperative ack and diagnostics the protocol promises.)
-            process.terminate();
-            process.waitForFinished( 1000 );
-            if ( process.state() == QProcess::Running )
-            {
-                process.kill();
-                process.waitForFinished( 3000 );
-            }
+            // and exit cooperatively. The group/job-wide terminate → kill
+            // ladder follows (terminate() is NOT sent at cancel-request
+            // time: on POSIX it SIGTERMs and on Windows it WM_CLOSEs the
+            // worker before it ever reads the cancel frame, defeating the
+            // cooperative ack and diagnostics the protocol promises).
+            guard.terminateTree( process );
             if ( report )
                 report->stderrTail = diagnostics.tail();
             throw std::runtime_error( "worker cancelled" );
@@ -130,11 +132,19 @@ Json::Value runInLocalWorker( const QString &workerProgram,
             if ( report )
                 report->stderrTail = diagnostics.tail();
             if ( !badFrame.empty() )
+            {
+                // A desynchronized stream means the worker can never be
+                // trusted again — tear the tree down before reporting.
+                guard.terminateTree( process, 0, 3000 );
                 throw std::runtime_error( "worker protocol: malformed frame: " + badFrame );
+            }
             if ( crashed )
                 throw std::runtime_error( "worker crashed: process died without a reply" );
             if ( cancelRequested )
                 throw std::runtime_error( "worker cancelled" );
+            // No reply within the deadline: a hung worker must not outlive
+            // this host (8.0 WP-C: group/job-wide kill, not just the leader).
+            guard.terminateTree( process, 0, 3000 );
             throw std::runtime_error( "worker timeout: no reply within the deadline" );
         }
         const std::string op = frame["op"].asString();

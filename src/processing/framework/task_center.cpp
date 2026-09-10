@@ -22,7 +22,10 @@
 #include "framework/fused_chain.h"
 #include "framework/worker_execution_route.h"
 #include "runtime/observability/execution_telemetry.h"
+#include "runtime/observability/trace.h"
 #include "data/data_manager.h"
+#include "data/execution_identity_resolver.h"
+#include "geospatial/remote/remote_identity_resolver.h"
 
 #include <QCryptographicHash>
 #include <QDirIterator>
@@ -33,6 +36,29 @@
 #include <QThread>
 
 namespace sicnu {
+
+namespace
+{
+/// Execution Plane 8.0 WP-I: one bounded exp.trace.v1 record per scheduling
+/// transition (admitted / held / dispatched / retry / cancel / terminal /
+/// cache). Correlation: task id (engine job ids join via the JobEngine's own
+/// start/end events). Off by default: one relaxed atomic load when no sink
+/// is installed (trace.h hot-path rule).
+void traceTaskEvent( const char *event, const char *status, long taskId,
+                     const QString &algorithmId, const QString &detail = {} )
+{
+    namespace trace = sicnu::runtime::observability::trace;
+    if ( !trace::Trace::enabled() )
+        return;
+    trace::TraceEvent record;
+    record.task = std::to_string( taskId );
+    record.op = algorithmId.toStdString();
+    record.event = event;
+    record.status = status;
+    record.detail = detail.left( 200 ).toStdString();
+    trace::Trace::publish( record );
+}
+} // namespace
 
 static QString findOutputPathInParams( const QVariantMap &params )
 {
@@ -130,7 +156,7 @@ void TaskCenter::shutdown()
                 continue;
             auto &info = m_tasks[id];
             const bool wasCancelling = ( info.status == TaskStatus::Cancelling );
-            info.status = TaskStatus::Canceled;
+            setTaskStatusLocked( info, TaskStatus::Canceled );
             info.errorMessage = wasCancelling ? QStringLiteral( "Canceled during shutdown" )
                                               : QStringLiteral( "Canceled: application is shutting down" );
             info.endTime = QDateTime::currentDateTimeUtc();
@@ -214,6 +240,17 @@ void TaskCenter::shutdownForTests()
         m_taskFingerprints.clear();
         m_taskFingerprintParams.clear();
         m_taskChainedEdges.clear();
+        // 8.0 WP-A: reset the incremental admission state (task ids restart
+        // at 1 — stale heap/serial/counter entries must not leak across tests).
+        m_active = ActiveCounters{};
+        m_children.clear();
+        m_incompleteParentCount.clear();
+        std::priority_queue<ReadyEntry, std::vector<ReadyEntry>, ReadyEntryGreater> emptyHeap;
+        m_readyHeap.swap( emptyHeap );
+        m_readySerial.clear();
+        m_nextReadySerial = 1;
+        m_admissionPass = 0;
+        m_manualQueued.clear();
         m_nextTaskId = 1;
         m_nextPipelineId = 1;
         m_waitCondition.wakeAll();
@@ -240,6 +277,22 @@ TaskCenter::TaskCenter()
         []() {
             return sicnu::data::ExecutionResultCache::instance().cachedArtifacts();
         } );
+
+    // Execution Plane 8.0 WP-F: activate the remote-identity seam (7.0 left
+    // it SEAM ONLY) with the geospatial strong-ETag resolver as the DEFAULT.
+    // Only installs when no resolver is set: a host that explicitly wired its
+    // own identity source keeps full authority. The resolver never blocks
+    // submission (it is consulted per remote input ONLY when the execution
+    // cache is enabled — off by default), and its empty verdicts stay
+    // fail-closed (input uncacheable).
+    if ( sicnu::data::executionIdentityResolver() == nullptr )
+    {
+        static const auto remoteResolver = [resolver = sicnu::geo::makeRemoteInputIdentityResolver()](
+                                               const QString &path ) -> QString {
+            return QString::fromStdString( resolver( path.toStdString() ) );
+        };
+        sicnu::data::setExecutionIdentityResolver( remoteResolver );
+    }
 }
 
 ProviderResourceProfile TaskCenter::resolveResourceProfile( const QString &algorithmId ) const
@@ -288,8 +341,17 @@ unsigned int TaskCenter::limitForProfileLocked( ProviderResourceProfile profile 
 
 void TaskCenter::setResourceProfileLimit( ProviderResourceProfile profile, unsigned int maxConcurrent )
 {
-    QMutexLocker locker( &m_mutex );
-    m_profileLimits[profile] = std::max( 1u, maxConcurrent );
+    {
+        QMutexLocker locker( &m_mutex );
+        m_profileLimits[profile] = std::max( 1u, maxConcurrent );
+        // 8.0 WP-B dynamic availability: a limit change re-evaluates held
+        // candidates immediately instead of waiting for an unrelated task
+        // transition (gates only ever DELAY launches, so a lowered limit
+        // never preempts running work).
+        processNextQueuedTasks();
+    }
+    flushPendingLaunches();
+    flushPendingSignals();
 }
 
 unsigned int TaskCenter::resourceProfileLimit( ProviderResourceProfile profile ) const
@@ -322,8 +384,13 @@ void TaskCenter::resetResourceProfileLimits()
 
 void TaskCenter::setGlobalConcurrencyLimit( unsigned int maxConcurrent )
 {
-    QMutexLocker locker( &m_mutex );
-    m_globalConcurrencyLimit = std::max( 1u, maxConcurrent );
+    {
+        QMutexLocker locker( &m_mutex );
+        m_globalConcurrencyLimit = std::max( 1u, maxConcurrent );
+        processNextQueuedTasks(); // 8.0 WP-B dynamic availability (see above)
+    }
+    flushPendingLaunches();
+    flushPendingSignals();
 }
 
 unsigned int TaskCenter::globalConcurrencyLimit() const
@@ -336,11 +403,16 @@ unsigned int TaskCenter::globalConcurrencyLimit() const
 
 void TaskCenter::setMemoryLimitMb( unsigned int mb )
 {
-    QMutexLocker locker( &m_mutex );
-    m_resourceMonitor.setMemoryLimitMb( mb );
-    // Keep the resource-aware budget in sync with the watermark (the documented
-    // invariant — both gates must use the same cap, perf/architecture goal §7).
-    m_resourceBudget.setBudgetMb( mb );
+    {
+        QMutexLocker locker( &m_mutex );
+        m_resourceMonitor.setMemoryLimitMb( mb );
+        // Keep the resource-aware budget in sync with the watermark (the documented
+        // invariant — both gates must use the same cap, perf/architecture goal §7).
+        m_resourceBudget.setBudgetMb( mb );
+        processNextQueuedTasks(); // 8.0 WP-B dynamic availability
+    }
+    flushPendingLaunches();
+    flushPendingSignals();
 }
 
 unsigned int TaskCenter::memoryLimitMb() const
@@ -401,8 +473,13 @@ void TaskCenter::installDefaultEstimateResolver()
 
 void TaskCenter::setResourceBudgetMb( unsigned int mb )
 {
-    QMutexLocker locker( &m_mutex );
-    m_resourceBudget.setBudgetMb( mb );
+    {
+        QMutexLocker locker( &m_mutex );
+        m_resourceBudget.setBudgetMb( mb );
+        processNextQueuedTasks(); // 8.0 WP-B dynamic availability
+    }
+    flushPendingLaunches();
+    flushPendingSignals();
 }
 
 unsigned int TaskCenter::resourceBudgetMb() const
@@ -415,10 +492,15 @@ unsigned int TaskCenter::resourceBudgetMb() const
 
 void TaskCenter::setTempDiskBudgetMb( unsigned int mb )
 {
-    QMutexLocker locker( &m_mutex );
-    sicnu::SchedulerLimits limits = m_budget2.limits();
-    limits.tempDiskMb = mb;
-    m_budget2.setLimits( limits );
+    {
+        QMutexLocker locker( &m_mutex );
+        sicnu::SchedulerLimits limits = m_budget2.limits();
+        limits.tempDiskMb = mb;
+        m_budget2.setLimits( limits );
+        processNextQueuedTasks(); // 8.0 WP-B dynamic availability
+    }
+    flushPendingLaunches();
+    flushPendingSignals();
 }
 
 unsigned int TaskCenter::tempDiskBudgetMb() const
@@ -429,10 +511,15 @@ unsigned int TaskCenter::tempDiskBudgetMb() const
 
 void TaskCenter::setVramBudgetMb( unsigned int mb )
 {
-    QMutexLocker locker( &m_mutex );
-    sicnu::SchedulerLimits limits = m_budget2.limits();
-    limits.vramMb = mb;
-    m_budget2.setLimits( limits );
+    {
+        QMutexLocker locker( &m_mutex );
+        sicnu::SchedulerLimits limits = m_budget2.limits();
+        limits.vramMb = mb;
+        m_budget2.setLimits( limits );
+        processNextQueuedTasks(); // 8.0 WP-B dynamic availability
+    }
+    flushPendingLaunches();
+    flushPendingSignals();
 }
 
 unsigned int TaskCenter::vramBudgetMb() const
@@ -443,8 +530,13 @@ unsigned int TaskCenter::vramBudgetMb() const
 
 void TaskCenter::setIoHeavyLimit( unsigned int maxConcurrent )
 {
-    QMutexLocker locker( &m_mutex );
-    m_ioHeavyLimit = maxConcurrent;
+    {
+        QMutexLocker locker( &m_mutex );
+        m_ioHeavyLimit = maxConcurrent;
+        processNextQueuedTasks(); // 8.0 WP-B dynamic availability
+    }
+    flushPendingLaunches();
+    flushPendingSignals();
 }
 
 unsigned int TaskCenter::ioHeavyLimit() const
@@ -927,6 +1019,13 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
                                  .arg( static_cast<int>( priority ) ) );
 
         m_tasks[id] = info;
+        // 8.0 WP-A: derived admission state for the new task (children index,
+        // incomplete-parent counts, ready-heap / manual-queue registration).
+        registerParentLinksLocked( m_tasks[id] );
+        if ( m_tasks[id].autoDispatch )
+            pushReadyCandidateLocked( id );
+        else if ( parentsSatisfiedLocked( m_tasks[id] ) )
+            m_manualQueued.append( id );
         queueTaskAddedLocked( id );
 
         // Submission-time execution fingerprint (#726): computed ONCE here on
@@ -1022,7 +1121,7 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
         {
             // Shutdown slipped between enqueue and arming: no launch will
             // ever happen. Finalize inline so callers/waiters resolve.
-            it->status = TaskStatus::Canceled;
+            setTaskStatusLocked( *it, TaskStatus::Canceled );
             it->errorMessage = QStringLiteral( "Canceled: application is shutting down" );
             it->endTime = QDateTime::currentDateTimeUtc();
             queueTaskUpdatedLocked( taskId );
@@ -1035,6 +1134,8 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
             it->jobExecutor = std::move( executor );
             it->jobCancelHook = std::move( onCancel );
             it->autoDispatch = true;
+            // 8.0 WP-A: the task just became a launch candidate.
+            pushReadyCandidateLocked( taskId );
             processNextQueuedTasks();
         }
     }
@@ -1108,7 +1209,7 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
                  && ( it->status == TaskStatus::Queued || it->status == TaskStatus::WaitingResource
                       || it->status == TaskStatus::Dispatching ) )
             {
-                it->status = TaskStatus::Running;
+                setTaskStatusLocked( *it, TaskStatus::Running );
                 if ( record.startedAtMs > 0 )
                     it->startTime = QDateTime::fromMSecsSinceEpoch( record.startedAtMs, Qt::UTC );
                 updatePipelineForTaskLocked( taskId );
@@ -1223,6 +1324,168 @@ unsigned int TaskCenter::taskEstimateMbLocked( const AlgorithmTaskInfo &task ) c
     return mb;
 }
 
+// --- 8.0 WP-A: incremental admission bookkeeping ---------------------------
+
+bool TaskCenter::isActiveStatus( TaskStatus status )
+{
+    return status == TaskStatus::Running || status == TaskStatus::Cancelling
+           || status == TaskStatus::Dispatching || status == TaskStatus::Paused;
+}
+
+void TaskCenter::setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newStatus )
+{
+    if ( task.status == newStatus )
+    {
+        // Nothing to re-account, but keep the manual-queue/heap invariants
+        // untouched: same-status writes are true no-ops.
+        return;
+    }
+    const bool wasActive = isActiveStatus( task.status );
+    const bool wasReadyLike = task.status == TaskStatus::Queued
+                              || task.status == TaskStatus::WaitingResource;
+    const bool willBeActive = isActiveStatus( newStatus );
+    const bool willBeReadyLike = newStatus == TaskStatus::Queued
+                                 || newStatus == TaskStatus::WaitingResource;
+
+    if ( wasActive && !willBeActive )
+    {
+        // Leave: subtract exactly what entering added (the estimates/dims are
+        // immutable per task, so the unsigned sums can never underflow).
+        --m_active.total;
+        m_active.ramMb -= taskEstimateMbLocked( task );
+        if ( task.isolatedRoute )
+            --m_active.isolated;
+        const AdmissionDims dims = admissionDimsLocked( task );
+        m_active.usage2.tempDiskMb -= dims.tempDiskMb;
+        m_active.usage2.vramMb -= dims.vramMb;
+        if ( dims.ioHeavy )
+            --m_active.ioHeavy;
+        auto &slot = m_active.byProfile[task.resourceProfile];
+        if ( slot > 0 )
+            --slot;
+    }
+    else if ( !wasActive && willBeActive )
+    {
+        ++m_active.total;
+        m_active.ramMb += taskEstimateMbLocked( task );
+        if ( task.isolatedRoute )
+            ++m_active.isolated;
+        const AdmissionDims dims = admissionDimsLocked( task );
+        m_active.usage2.tempDiskMb += dims.tempDiskMb;
+        m_active.usage2.vramMb += dims.vramMb;
+        if ( dims.ioHeavy )
+            ++m_active.ioHeavy;
+        ++m_active.byProfile[task.resourceProfile];
+    }
+    task.status = newStatus;
+
+    // Leaving a queued-like status also retires the task's heap entries and
+    // its legacy manual-queue registration.
+    if ( wasReadyLike && !willBeReadyLike )
+        dropReadyCandidateLocked( task.taskId );
+    if ( task.autoDispatch )
+        return;
+    // Manual (non-autoDispatch) task tracking for the legacy per-pass
+    // placeholder application.
+    if ( willBeReadyLike && !wasReadyLike )
+    {
+        if ( parentsSatisfiedLocked( task ) && !m_manualQueued.contains( task.taskId ) )
+            m_manualQueued.append( task.taskId );
+    }
+    else if ( !willBeReadyLike && wasReadyLike )
+    {
+        m_manualQueued.removeAll( task.taskId );
+    }
+}
+
+void TaskCenter::forgetDerivedTaskStateLocked( long taskId )
+{
+    dropReadyCandidateLocked( taskId );
+    m_incompleteParentCount.remove( taskId );
+    m_manualQueued.removeAll( taskId );
+}
+
+void TaskCenter::registerParentLinksLocked( const AlgorithmTaskInfo &task )
+{
+    int incomplete = 0;
+    for ( long parentId : task.parentTaskIds )
+    {
+        const auto it = m_tasks.constFind( parentId );
+        if ( it == m_tasks.constEnd() )
+            continue; // a missing parent counts as satisfied (eligibility rule)
+        m_children.insert( parentId, task.taskId );
+        if ( it->status != TaskStatus::Completed )
+            ++incomplete;
+    }
+    if ( incomplete > 0 )
+        m_incompleteParentCount[task.taskId] = incomplete;
+}
+
+void TaskCenter::promoteChildrenOfLocked( long parentTaskId )
+{
+    const QList<long> children = m_children.values( parentTaskId );
+    for ( long childId : children )
+    {
+        const auto countIt = m_incompleteParentCount.find( childId );
+        if ( countIt == m_incompleteParentCount.end() )
+            continue; // already satisfied via another edge/pass
+        if ( countIt.value() > 0 )
+            --countIt.value();
+        if ( countIt.value() > 0 )
+            continue; // other parents still outstanding
+        m_incompleteParentCount.erase( countIt );
+        const auto taskIt = m_tasks.constFind( childId );
+        if ( taskIt == m_tasks.constEnd() )
+            continue;
+        if ( taskIt->autoDispatch )
+        {
+            pushReadyCandidateLocked( childId );
+        }
+        else if ( taskIt->status == TaskStatus::Queued
+                  && !m_manualQueued.contains( childId ) )
+        {
+            m_manualQueued.append( childId );
+        }
+    }
+    // The parent's edges are consumed: a terminal parent never transitions
+    // again, and prune/clear paths drop their own edges.
+    m_children.remove( parentTaskId );
+}
+
+bool TaskCenter::parentsSatisfiedLocked( const AlgorithmTaskInfo &task ) const
+{
+    for ( long parentId : task.parentTaskIds )
+    {
+        const auto it = m_tasks.constFind( parentId );
+        if ( it != m_tasks.constEnd() && it->status != TaskStatus::Completed )
+            return false;
+    }
+    return true;
+}
+
+bool TaskCenter::isLaunchCandidateLocked( const AlgorithmTaskInfo &task ) const
+{
+    return ( task.status == TaskStatus::Queued || task.status == TaskStatus::WaitingResource )
+           && task.autoDispatch
+           && task.jobId.empty()
+           && parentsSatisfiedLocked( task );
+}
+
+void TaskCenter::pushReadyCandidateLocked( long taskId )
+{
+    const auto it = m_tasks.constFind( taskId );
+    if ( it == m_tasks.constEnd() || !isLaunchCandidateLocked( *it ) )
+        return;
+    const unsigned long long serial = ++m_nextReadySerial;
+    m_readySerial[taskId] = serial;
+    m_readyHeap.push( ReadyEntry{ 0, static_cast<int>( it->priority ), taskId, serial } );
+}
+
+void TaskCenter::dropReadyCandidateLocked( long taskId )
+{
+    m_readySerial.remove( taskId );
+}
+
 void TaskCenter::processNextQueuedTasks()
 {
     // Called with m_mutex held. Only stages work; callers must flushPendingLaunches() outside the lock.
@@ -1232,101 +1495,73 @@ void TaskCenter::processNextQueuedTasks()
                                      ? m_globalConcurrencyLimit
                                      : defaultLimitForProfile( ProviderResourceProfile::InProcessThread );
 
-    QMap<ProviderResourceProfile, unsigned int> runningByProfile;
-    unsigned int totalRunning = 0;
-    unsigned int runningTotalMb = 0; // RAM estimate sum of active tasks (resource-aware gate)
-    // Execution Plane 7.0: active tasks routed to an isolated worker process.
-    // The isolated-slot gate bounds how many worker-bound jobs may run at
-    // once so they cannot starve JobEngine's in-process capacity.
-    unsigned int runningIsolated = 0;
-    unsigned int runningIoHeavy = 0;
-    sicnu::ResourceUsage runningUsage2; // multi-dim usage (temp disk / VRAM)
+    // 8.0 WP-A: the active-set sums (slots, RAM, isolated, io-heavy, temp
+    // disk, VRAM) are maintained incrementally by setTaskStatusLocked and the
+    // candidate order lives in m_readyHeap — this pass costs
+    // O(examined · log n) instead of a full task-map rescan + re-sort. A pass
+    // examines at most the budget below; candidates held by per-candidate
+    // gates rotate FIFO across passes, so the cap never strands work.
+    const unsigned int scanBudget = std::max( kAdmissionScanFloor, 4u * globalMax );
+    const unsigned long long passEpoch = ++m_admissionPass;
+    unsigned int scanned = 0;
+    unsigned int launchedCount = 0;
+    QString globalHoldReason;
+    std::vector<ReadyEntry> requeue;
+    QList<long> resourceBlockedIds;
+    QList<long> dagRegressedIds;
 
-    // Pending launches (Dispatching) already hold their slot; count each
-    // active task once. Cancelling tasks still occupy their worker slot until
-    // the job reports its terminal record, and Paused tasks hold their
-    // (engine or QgsTask) slot too — counting them prevents over-admission
-    // while real workers stay busy (#702).
-    for ( const auto &t : m_tasks )
+    while ( m_active.total < globalMax && !m_readyHeap.empty() && scanned < scanBudget )
     {
-        if ( t.status != TaskStatus::Running && t.status != TaskStatus::Cancelling
-             && t.status != TaskStatus::Dispatching && t.status != TaskStatus::Paused )
-            continue;
-        runningByProfile[t.resourceProfile] = runningByProfile.value( t.resourceProfile, 0u ) + 1u;
-        ++totalRunning;
-        runningTotalMb += taskEstimateMbLocked( t );
-        if ( t.isolatedRoute )
-            ++runningIsolated;
-        const AdmissionDims activeDims = admissionDimsLocked( t );
-        runningUsage2.tempDiskMb += activeDims.tempDiskMb;
-        runningUsage2.vramMb += activeDims.vramMb;
-        if ( activeDims.ioHeavy )
-            ++runningIoHeavy;
-    }
+        ReadyEntry entry = m_readyHeap.top();
+        m_readyHeap.pop();
 
-    QList<long> eligibleIds;
-    for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
-    {
-        // WaitingResource tasks are launch-eligible candidates held by resource
-        // admission on a previous pass; they compete with Queued tasks here.
-        if ( it.value().status != TaskStatus::Queued && it.value().status != TaskStatus::WaitingResource )
+        // Lazy invalidation: superseded entries (dispatched, canceled,
+        // retried, re-promoted) are dropped on pop, never erased eagerly.
+        const auto serialIt = m_readySerial.constFind( entry.taskId );
+        if ( serialIt == m_readySerial.constEnd() || *serialIt != entry.serial )
             continue;
 
-        bool parentsSatisfied = true;
-        for ( long parentId : it.value().parentTaskIds )
+        const auto taskIt = m_tasks.find( entry.taskId );
+        if ( taskIt == m_tasks.end() )
         {
-            if ( m_tasks.contains( parentId ) && m_tasks[parentId].status != TaskStatus::Completed )
-            {
-                parentsSatisfied = false;
-                break;
-            }
+            m_readySerial.remove( entry.taskId );
+            continue;
+        }
+        AlgorithmTaskInfo &task = taskIt.value();
+
+        if ( !isLaunchCandidateLocked( task ) )
+        {
+            m_readySerial.remove( entry.taskId );
+            // A candidate held back because its parents regressed (e.g. an
+            // upstream step was retried) returns to plain Queued so the
+            // status stays truthful (legacy flip-back).
+            if ( task.status == TaskStatus::WaitingResource )
+                dagRegressedIds.append( entry.taskId );
+            continue;
         }
 
-        if ( parentsSatisfied )
-            eligibleIds.append( it.key() );
-    }
-
-    std::sort( eligibleIds.begin(), eligibleIds.end(), [this]( long a, long b ) {
-        if ( m_tasks[a].priority != m_tasks[b].priority )
-            return static_cast<int>( m_tasks[a].priority ) < static_cast<int>( m_tasks[b].priority );
-        return m_tasks[a].taskId < m_tasks[b].taskId;
-    } );
-
-    QList<long> resourceBlockedIds;
-    QString globalHoldReason;
-
-    for ( long id : eligibleIds )
-    {
-        if ( totalRunning >= globalMax )
+        // ADR 0063: hold all launches when the process RSS is at/above the
+        // watermark. Memory pressure is global, so stop examining (remaining
+        // candidates cannot run either). The popped candidate re-queues
+        // unchanged (fresh stays fresh: strict priority order), and when
+        // nothing is running a bounded timer re-arms the pass.
+        if ( m_resourceMonitor.memoryPressureHigh() )
         {
-            globalHoldReason = QStringLiteral( "Waiting for a worker slot (%1/%2 running)." )
-                                   .arg( totalRunning )
-                                   .arg( globalMax );
+            globalHoldReason = QStringLiteral( "Waiting for memory: process RSS at/above the watermark." );
+            resourceBlockedIds.append( entry.taskId );
+            requeue.push_back( entry );
             break;
         }
 
-        applyPlaceholdersForTask( id );
-
-        // Dispatch-time verification (#726): the submission-time fingerprint
-        // was computed over statically-resolved parameters; if the real
-        // substitution diverged, the fingerprint no longer describes this
-        // execution — drop it (conservative miss). Pure in-memory comparison:
-        // safe on worker threads, no catalog access.
-        verifyDispatchFingerprintLocked( id );
-
-        if ( !m_tasks[id].autoDispatch )
-            continue;
-        if ( !m_tasks[id].jobId.empty() )
-            continue;
-        if ( m_tasks[id].status != TaskStatus::Queued && m_tasks[id].status != TaskStatus::WaitingResource )
-            continue;
-
-        const ProviderResourceProfile profile = m_tasks[id].resourceProfile;
+        const ProviderResourceProfile profile = task.resourceProfile;
         const unsigned int profileMax = limitForProfileLocked( profile );
-        if ( runningByProfile.value( profile, 0u ) >= profileMax )
+        if ( m_active.byProfile.value( profile, 0u ) >= profileMax )
         {
-            resourceBlockedIds.append( id ); // leave queued; another profile may still launch
-            continue;
+            entry.epoch = passEpoch;
+            requeue.push_back( entry );
+            resourceBlockedIds.append( entry.taskId );
+            ++scanned;
+            continue; // another profile may still launch
         }
 
         // Execution Plane 7.0: isolated-worker route selection. Tasks with a
@@ -1337,47 +1572,30 @@ void TaskCenter::processNextQueuedTasks()
         // must re-engage (a retry silently falling back in-process would
         // break the fail-closed contract).
         const bool isolateRoute =
-            !m_tasks[id].jobExecutor && processing::shouldRunIsolated( m_tasks[id].algorithmId );
-        if ( isolateRoute && runningIsolated >= static_cast<unsigned int>( std::max( 1, processing::isolatedJobLimit() ) ) )
+            !task.jobExecutor && processing::shouldRunIsolated( task.algorithmId );
+        if ( isolateRoute
+             && m_active.isolated >= static_cast<unsigned int>( std::max( 1, processing::isolatedJobLimit() ) ) )
         {
-            resourceBlockedIds.append( id );
+            entry.epoch = passEpoch;
+            requeue.push_back( entry );
+            resourceBlockedIds.append( entry.taskId );
+            ++scanned;
             continue;
-        }
-
-        // ADR 0063: hold all launches when the process RSS is at/above the
-        // watermark. Memory pressure is global, so break rather than continue
-        // - remaining eligible tasks cannot run either. Blocked tasks stay
-        // Queued/WaitingResource and are re-evaluated when a running task
-        // finishes (each terminal transition re-enters processNextQueuedTasks).
-        if ( m_resourceMonitor.memoryPressureHigh() )
-        {
-            globalHoldReason = QStringLiteral( "Waiting for memory: process RSS at/above the watermark." );
-            if ( totalRunning == 0 && QCoreApplication::instance() )
-            {
-                QTimer::singleShot( 250, QCoreApplication::instance(), [this]() {
-                    {
-                        QMutexLocker locker( &m_mutex );
-                        processNextQueuedTasks();
-                    }
-                    flushPendingLaunches();
-                    flushPendingSignals();
-                } );
-            }
-            break;
         }
 
         // Resource-aware gate (perf/architecture goal 2026-08-08): hold the
         // launch when projected (running + candidate) RAM exceeds the budget,
         // UNLESS nothing at all is running (global never-starve: a wrong or
-        // missing estimate must not permanently block all work). A budget of 0
-        // disables this gate (legacy behavior). Like the RSS gate this only
-        // DELAYS — the task stays queued and is re-evaluated on the next
-        // terminal transition. `continue` (not break): a later, lighter
-        // eligible task may still fit within the budget this pass.
-        const unsigned int candidateMb = taskEstimateMbLocked( m_tasks[id] );
-        if ( !m_resourceBudget.canLaunch( runningTotalMb, candidateMb ) )
+        // missing estimate must not permanently block all work). A budget of
+        // 0 disables this gate (legacy behavior). `continue` (not break): a
+        // later, lighter eligible task may still fit within the budget.
+        const unsigned int candidateMb = taskEstimateMbLocked( task );
+        if ( m_active.total > 0 && !m_resourceBudget.canLaunch( m_active.ramMb, candidateMb ) )
         {
-            resourceBlockedIds.append( id );
+            entry.epoch = passEpoch;
+            requeue.push_back( entry );
+            resourceBlockedIds.append( entry.taskId );
+            ++scanned;
             continue;
         }
 
@@ -1385,128 +1603,185 @@ void TaskCenter::processNextQueuedTasks()
         // over descriptor-declared temporary disk and VRAM. A dimension cap
         // of 0 disables the gate; never-starve mirrors the RAM gate (when
         // nothing is running, a declared estimate never blocks the only
-        // candidate). Delays only — the task stays queued.
-        const AdmissionDims candidateDims = admissionDimsLocked( m_tasks[id] );
-        if ( totalRunning > 0
+        // candidate).
+        const AdmissionDims candidateDims = admissionDimsLocked( task );
+        if ( m_active.total > 0
              && ( candidateDims.tempDiskMb > 0 || candidateDims.vramMb > 0 ) )
         {
             sicnu::ResourceRequest candidateRequest;
             candidateRequest.tempDiskMb = candidateDims.tempDiskMb;
             candidateRequest.vramMb = candidateDims.vramMb;
-            if ( !m_budget2.canLaunch( runningUsage2, candidateRequest,
+            if ( !m_budget2.canLaunch( m_active.usage2, candidateRequest,
                                        std::chrono::steady_clock::now() ) )
             {
-                resourceBlockedIds.append( id );
+                entry.epoch = passEpoch;
+                requeue.push_back( entry );
+                resourceBlockedIds.append( entry.taskId );
+                ++scanned;
                 continue;
             }
         }
 
         // Execution Plane 7.0: io-heavy concurrency gate (descriptor-declared
         // ioHeavy kernels; 0 = off). Delays only, like the isolated-slot gate.
-        if ( candidateDims.ioHeavy && m_ioHeavyLimit > 0 && runningIoHeavy >= m_ioHeavyLimit )
+        if ( candidateDims.ioHeavy && m_ioHeavyLimit > 0 && m_active.ioHeavy >= m_ioHeavyLimit )
         {
-            resourceBlockedIds.append( id );
+            entry.epoch = passEpoch;
+            requeue.push_back( entry );
+            resourceBlockedIds.append( entry.taskId );
+            ++scanned;
             continue;
         }
 
-        // Execution fingerprint (#667/#726): computed once at SUBMISSION time
-        // and verified above after placeholder substitution. Admission never
-        // touches the catalog, so downstream steps admitted on JobEngine
-        // worker threads keep their recorded fingerprint (a cold chained
-        // pipeline acquires a usable identity for every deterministic step in
-        // its first run).
+        // Launch staging. Placeholder substitution + dispatch-fingerprint
+        // verification (#726/#766) run HERE, exactly once per task, after
+        // every gate passed: the gates read only resource identity (never
+        // parameters), so per-candidate per-pass re-substitution — the old
+        // pass's dominant per-candidate cost — was pure overhead.
+        applyPlaceholdersForTask( entry.taskId );
 
-        m_tasks[id].status = TaskStatus::Dispatching;
-        m_tasks[id].logBuffer.append(
+        // Dispatch-time verification (#726): the submission-time fingerprint
+        // was computed over statically-resolved parameters; if the real
+        // substitution diverged, the fingerprint no longer describes this
+        // execution — drop it (conservative miss). Pure in-memory comparison:
+        // safe on worker threads, no catalog access.
+        verifyDispatchFingerprintLocked( entry.taskId );
+
+        setTaskStatusLocked( task, TaskStatus::Dispatching );
+        task.logBuffer.append(
           QString( QStringLiteral( "[%1] Dispatching to JobEngine (profile=%2)." ) )
             .arg( QDateTime::currentDateTimeUtc().toString( QStringLiteral( "hh:mm:ss" ) ) )
             .arg( static_cast<int>( profile ) ) );
-        updatePipelineForTaskLocked( id );
+        updatePipelineForTaskLocked( entry.taskId );
 
         PendingLaunch launch;
-        launch.taskId = id;
-        launch.request.algorithmId = m_tasks[id].algorithmId.toStdString();
-        launch.request.title = m_tasks[id].algorithmName.toStdString();
-        launch.request.source = m_tasks[id].source.isEmpty()
-                                  ? ( m_tasks[id].pipelineId >= 0 ? "pipeline" : "task_center" )
-                                  : m_tasks[id].source.toStdString();
-        launch.request.params = variantMapToJsonParams( m_tasks[id].parameterMap );
-        launch.request.priority = static_cast<int>( m_tasks[id].priority );
-        launch.request.clientTag = "task:" + std::to_string( id );
+        launch.taskId = entry.taskId;
+        launch.request.algorithmId = task.algorithmId.toStdString();
+        launch.request.title = task.algorithmName.toStdString();
+        launch.request.source = task.source.isEmpty()
+                                  ? ( task.pipelineId >= 0 ? "pipeline" : "task_center" )
+                                  : task.source.toStdString();
+        launch.request.params = variantMapToJsonParams( task.parameterMap );
+        launch.request.priority = static_cast<int>( task.priority );
+        launch.request.clientTag = "task:" + std::to_string( entry.taskId );
         // COPIED, not moved: a transient auto-retry re-stages this task and
         // must re-install the caller's cancel hook (a moved-out hook would
         // leave the retry without its cancellation mechanism).
-        launch.onCancel = m_tasks[id].jobCancelHook;
-        if ( m_tasks[id].hasJobRequest && m_tasks[id].jobExecutor )
+        launch.onCancel = task.jobCancelHook;
+        if ( task.hasJobRequest && task.jobExecutor )
         {
-            launch.executor = m_tasks[id].jobExecutor;
+            launch.executor = task.jobExecutor;
             launch.hasExecutor = true;
-            launch.request = m_tasks[id].jobRequest;
-            launch.request.clientTag = "task:" + std::to_string( id );
-            launch.request.params = variantMapToJsonParams( m_tasks[ id ].parameterMap );
-            launch.request.priority = static_cast<int>( m_tasks[id].priority );
+            launch.request = task.jobRequest;
+            launch.request.clientTag = "task:" + std::to_string( entry.taskId );
+            launch.request.params = variantMapToJsonParams( task.parameterMap );
+            launch.request.priority = static_cast<int>( task.priority );
         }
         else
         {
-            m_tasks[id].jobRequest = launch.request;
-            m_tasks[id].hasJobRequest = true;
+            task.jobRequest = launch.request;
+            task.hasJobRequest = true;
             if ( isolateRoute )
             {
                 // The pool itself is started outside m_mutex at flush time;
                 // staging only records the route.
-                launch.executor = processing::makeIsolatedWorkerExecutor( m_tasks[id].algorithmId );
+                launch.executor = processing::makeIsolatedWorkerExecutor( task.algorithmId );
                 launch.hasExecutor = true;
                 launch.isolated = true;
-                m_tasks[id].isolatedRoute = true;
-                m_tasks[id].logBuffer.append(
+                task.isolatedRoute = true;
+                task.logBuffer.append(
                     QStringLiteral( "[%1] Routed to an isolated worker process." )
                         .arg( QDateTime::currentDateTimeUtc().toString( QStringLiteral( "hh:mm:ss" ) ) ) );
             }
         }
 
-        queueTaskUpdatedLocked( id );
+        queueTaskUpdatedLocked( entry.taskId );
         m_pendingLaunches.append( std::move( launch ) );
-        runningByProfile[profile] = runningByProfile.value( profile, 0u ) + 1u;
-        ++totalRunning;
-        runningTotalMb += candidateMb;
-        if ( isolateRoute )
-            ++runningIsolated;
-        runningUsage2.tempDiskMb += candidateDims.tempDiskMb;
-        runningUsage2.vramMb += candidateDims.vramMb;
-        if ( candidateDims.ioHeavy )
-            ++runningIoHeavy;
+        m_readySerial.remove( entry.taskId ); // consumed: staging owns the task now
+        ++scanned;
+        ++launchedCount;
     }
 
-    // Admission outcome bookkeeping: launch-eligible candidates that did not
-    // launch this pass are waiting on resources (worker slots, RSS watermark
-    // or the RAM budget), not on pipeline gating. Surface that as an explicit
-    // WaitingResource status so entries, panels and tests can distinguish
-    // "queued behind the DAG" from "held for admission". Log only on the
-    // Queued → WaitingResource transition to avoid spamming re-evaluations.
-    for ( long id : eligibleIds )
-    {
-        if ( m_tasks[id].status != TaskStatus::Queued && m_tasks[id].status != TaskStatus::WaitingResource )
-            continue;
-        if ( !m_tasks[id].autoDispatch || !m_tasks[id].jobId.empty() )
-            continue;
+    for ( const ReadyEntry &e : requeue )
+        m_readyHeap.push( e );
 
-        const bool blockedByIdentifiedResource = resourceBlockedIds.contains( id ) || !globalHoldReason.isEmpty();
-        if ( blockedByIdentifiedResource && m_tasks[id].status == TaskStatus::Queued )
+    // Admission outcome bookkeeping: examined candidates that did not launch
+    // this pass are waiting on resources (worker slots, RSS watermark, RAM
+    // budget or a multi-dimension gate), not on pipeline gating. Surface that
+    // as an explicit WaitingResource status so entries, panels and tests can
+    // distinguish "queued behind the DAG" from "held for admission". Log only
+    // on the Queued → WaitingResource transition to avoid spamming
+    // re-evaluations. (Candidates the bounded pass never examined keep Queued
+    // until examined — equally truthful.)
+    for ( long id : resourceBlockedIds )
+    {
+        const auto it = m_tasks.find( id );
+        if ( it == m_tasks.end() || !it->autoDispatch || !it->jobId.empty() )
+            continue;
+        if ( it->status == TaskStatus::Queued )
         {
-            m_tasks[id].status = TaskStatus::WaitingResource;
-            m_tasks[id].logBuffer.append( QStringLiteral( "Waiting for resources (admission held)." ) );
+            setTaskStatusLocked( *it, TaskStatus::WaitingResource );
+            it->logBuffer.append( QStringLiteral( "Waiting for resources (admission held)." ) );
             updatePipelineForTaskLocked( id );
             queueTaskUpdatedLocked( id );
         }
-        else if ( !blockedByIdentifiedResource && m_tasks[id].status == TaskStatus::WaitingResource )
+    }
+    for ( long id : dagRegressedIds )
+    {
+        const auto it = m_tasks.find( id );
+        if ( it == m_tasks.end() )
+            continue;
+        if ( it->status == TaskStatus::WaitingResource )
         {
-            // Held only by DAG gating now (parents not yet Completed on a
-            // re-evaluation): fall back to plain Queued so the status stays
-            // truthful. This can happen when a parent was re-queued/retried.
-            m_tasks[id].status = TaskStatus::Queued;
+            setTaskStatusLocked( *it, TaskStatus::Queued );
             updatePipelineForTaskLocked( id );
             queueTaskUpdatedLocked( id );
         }
+    }
+
+    // Global-hold parity: when this pass launched nothing because a GLOBAL
+    // gate holds (slot saturation or the RSS watermark break above), the old
+    // full scan flipped every eligible candidate to WaitingResource. A bounded
+    // heap pass vouches for the candidate it can see in O(1): the heap head.
+    if ( launchedCount == 0 && resourceBlockedIds.isEmpty() && !m_readyHeap.empty()
+         && ( !globalHoldReason.isEmpty() || m_active.total >= globalMax ) )
+    {
+        const ReadyEntry head = m_readyHeap.top();
+        const auto serialIt = m_readySerial.constFind( head.taskId );
+        if ( serialIt != m_readySerial.constEnd() && *serialIt == head.serial )
+        {
+            const auto it = m_tasks.find( head.taskId );
+            if ( it != m_tasks.end() && it->status == TaskStatus::Queued
+                 && it->autoDispatch && it->jobId.empty() )
+            {
+                setTaskStatusLocked( *it, TaskStatus::WaitingResource );
+                it->logBuffer.append( QStringLiteral( "Waiting for resources (admission held)." ) );
+                updatePipelineForTaskLocked( head.taskId );
+                queueTaskUpdatedLocked( head.taskId );
+            }
+        }
+    }
+
+    // Legacy manual-task placeholder pass: non-autoDispatch tasks never stage
+    // a launch; their placeholder substitution keeps running on every pass as
+    // before (the tracked set is user-paced and small).
+    const QList<long> manualQueued = m_manualQueued;
+    for ( long id : manualQueued )
+        applyPlaceholdersForTask( id );
+
+    // RSS watermark re-arm (unchanged semantics): with nothing running and
+    // the watermark holding the queue, poll until pressure clears — no task
+    // transition will ever fire to re-run admission on its own.
+    if ( !globalHoldReason.isEmpty() && m_active.total == 0 && QCoreApplication::instance() )
+    {
+        QTimer::singleShot( 250, QCoreApplication::instance(), [this]() {
+            {
+                QMutexLocker locker( &m_mutex );
+                processNextQueuedTasks();
+            }
+            flushPendingLaunches();
+            flushPendingSignals();
+        } );
     }
 }
 
@@ -1580,9 +1855,14 @@ void TaskCenter::flushPendingLaunches()
             if ( serveFromExecutionCache( launch.taskId, fp ) )
             {
                 ExecutionTelemetry::instance().increment( Counter::CacheHits );
+                traceTaskEvent( "cache", "hit", launch.taskId, m_tasks[launch.taskId].algorithmId );
                 continue;
             }
             ExecutionTelemetry::instance().increment( Counter::CacheMisses );
+            traceTaskEvent( "cache", "miss", launch.taskId,
+                            m_tasks.contains( launch.taskId )
+                                ? m_tasks[launch.taskId].algorithmId
+                                : QString() );
         }
         if ( fp.isValid() )
         {
@@ -1679,7 +1959,7 @@ void TaskCenter::updateTaskProgress( long taskId, double progress )
         {
             // Progress ticks mean the executor is genuinely running — flip
             // pre-start states (staged/queued) to Running.
-            m_tasks[taskId].status = TaskStatus::Running;
+            setTaskStatusLocked( m_tasks[taskId], TaskStatus::Running );
         }
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
@@ -1705,7 +1985,7 @@ void TaskCenter::markTaskRunning( long taskId )
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return;
-        m_tasks[taskId].status = TaskStatus::Running;
+        setTaskStatusLocked( m_tasks[taskId], TaskStatus::Running );
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
     }
@@ -1723,7 +2003,8 @@ void TaskCenter::markTaskCompleted( long taskId,
         // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
         if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return;
-        m_tasks[taskId].status = TaskStatus::Completed;
+        setTaskStatusLocked( m_tasks[taskId], TaskStatus::Completed );
+        traceTaskEvent( "terminal", "ok", taskId, m_tasks[taskId].algorithmId );
         m_tasks[taskId].resultPayload = resultPayload;
         sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
             sicnu::runtime::observability::Counter::TasksCompleted );
@@ -1784,6 +2065,9 @@ void TaskCenter::markTaskCompleted( long taskId,
 
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
+        // 8.0 WP-A: O(children) promotion of unblocked children onto the
+        // ready heap before the admission pass runs.
+        promoteChildrenOfLocked( taskId );
         processNextQueuedTasks();
     }
 
@@ -1834,7 +2118,7 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
             // Dispatched work: the worker observes the cancel flag and the
             // terminal Canceled record arrives via the listener. Track the
             // in-between explicitly so entries/UI can show "cancelling".
-            info.status = TaskStatus::Cancelling;
+            setTaskStatusLocked( info, TaskStatus::Cancelling );
             jobCancelTargets.emplace_back( info.jobId, targetId );
             info.logBuffer.append( isUserRoot
                                      ? QStringLiteral( "Cancellation requested by user." )
@@ -1842,7 +2126,7 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
         }
         else
         {
-            info.status = TaskStatus::Canceled;
+            setTaskStatusLocked( info, TaskStatus::Canceled );
             info.errorMessage = isUserRoot
                                   ? QStringLiteral( "Task canceled" )
                                   : QStringLiteral( "Canceled due to upstream parent task %1." ).arg( upstreamCause );
@@ -1907,7 +2191,7 @@ void TaskCenter::dispatchPendingCancels( const QList<QPointer<QgsTask>> &handles
             if ( m_tasks.contains( targetId ) && m_tasks[targetId].status == TaskStatus::Cancelling )
             {
                 auto &info = m_tasks[targetId];
-                info.status = TaskStatus::Canceled;
+                setTaskStatusLocked( info, TaskStatus::Canceled );
                 info.errorMessage = strandedReason;
                 info.endTime = QDateTime::currentDateTimeUtc();
                 info.logBuffer.append( strandedReason );
@@ -1924,13 +2208,6 @@ void TaskCenter::dispatchPendingCancels( const QList<QPointer<QgsTask>> &handles
     }
 }
 
-namespace
-{
-/// Execution Plane 7.0: TRANSIENT failure classes eligible for the bounded
-/// auto-retry. These prefixes are produced by the isolated-worker executor
-/// infrastructure (crash/timeout/spawn exhaustion) — the operator never
-/// reported a result, so re-running cannot double-produce. Everything else
-/// (operator errors, validation failures, cancellations) is permanent.
 bool isTransientExecutionError( const QString &error )
 {
     const QString message = error.trimmed();
@@ -1945,7 +2222,6 @@ bool isTransientExecutionError( const QString &error )
            || message.startsWith( QStringLiteral( "worker protocol: cannot send" ) )
            || message.startsWith( QStringLiteral( "worker protocol: malformed frame" ) );
 }
-} // namespace
 
 bool TaskCenter::shouldAutoRetryLocked( const AlgorithmTaskInfo &task, const QString &error ) const
 {
@@ -1997,7 +2273,7 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
             AlgorithmTaskInfo &info = m_tasks[taskId];
             const std::string deadJobId = info.jobId;
             ++info.autoRetryAttempts;
-            info.status = TaskStatus::Queued;
+            setTaskStatusLocked( info, TaskStatus::Queued );
             info.jobId.clear();
             info.errorMessage.clear();
             info.endTime = QDateTime();
@@ -2009,6 +2285,10 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
             // do not run on this early-return path).
             m_taskFingerprints.remove( taskId );
             m_taskFingerprintParams.remove( taskId );
+            // 8.0 WP-A: resurrect onto the ready heap — its heap entries were
+            // dropped when the task was staged/dispatched, so a fresh serial
+            // is required or the retry would strand.
+            pushReadyCandidateLocked( taskId );
             info.logBuffer.append(
                 QString( QStringLiteral( "[%1] Transient failure — auto-retry %2/%3: %4" ) )
                     .arg( QDateTime::currentDateTimeUtc().toString( QStringLiteral( "hh:mm:ss" ) ) )
@@ -2021,6 +2301,11 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
             updatePipelineForTaskLocked( taskId );
             sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
                 sicnu::runtime::observability::Counter::TaskAutoRetries );
+            traceTaskEvent( "retry", "transient", taskId, info.algorithmId,
+                            QStringLiteral( "attempt=%1/%2 class=%3" )
+                                .arg( info.autoRetryAttempts )
+                                .arg( m_maxAutoRetries )
+                                .arg( error.left( 60 ) ) );
             queueTaskUpdatedLocked( taskId );
             processNextQueuedTasks();
             autoRetried = true;
@@ -2039,11 +2324,21 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         m_taskFingerprintParams.remove( taskId );
         m_taskChainedEdges.remove( taskId );
         m_taskRegisteredInputStats.remove( taskId );
-        m_tasks[taskId].status = TaskStatus::Failed;
+        setTaskStatusLocked( m_tasks[taskId], TaskStatus::Failed );
+        traceTaskEvent( "terminal", "error", taskId, m_tasks[taskId].algorithmId, error.left( 120 ) );
         m_tasks[taskId].errorMessage = error;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] Task failed: %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), error ) );
+        // 8.0 WP-D evidence: when this failure ends a retry sequence, the
+        // record must say WHY the task was retried and why it stopped.
+        if ( m_tasks[taskId].autoRetryAttempts > 0 )
+        {
+            m_tasks[taskId].logBuffer.append(
+                QString( QStringLiteral( "[%1] Auto-retry budget exhausted after %2 transient failure attempt(s); failing permanently (operator errors and cancellations are never auto-retried)." ) )
+                    .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ) )
+                    .arg( m_tasks[taskId].autoRetryAttempts ) );
+        }
         if ( !rootJobId.empty() )
             m_taskByJobId.remove( rootJobId );
         updatePipelineForTaskLocked( taskId );
@@ -2091,7 +2386,8 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
         m_taskFingerprintParams.remove( taskId );
         m_taskChainedEdges.remove( taskId );
         m_taskRegisteredInputStats.remove( taskId );
-        m_tasks[taskId].status = TaskStatus::Canceled;
+        setTaskStatusLocked( m_tasks[taskId], TaskStatus::Canceled );
+        traceTaskEvent( "cancel", "ok", taskId, m_tasks[taskId].algorithmId, reason.left( 120 ) );
         m_tasks[taskId].errorMessage = reason;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] %2" ) )
@@ -2193,7 +2489,7 @@ bool TaskCenter::pauseTask( long taskId )
             QgsTask *handle = m_tasks[taskId].taskHandle.data();
             QMetaObject::invokeMethod( handle, [handle]() { handle->hold(); },
                                        Qt::QueuedConnection );
-            m_tasks[taskId].status = TaskStatus::Paused;
+            setTaskStatusLocked( m_tasks[taskId], TaskStatus::Paused );
             m_tasks[taskId].logBuffer.append( QStringLiteral( "Task paused." ) );
             updatePipelineForTaskLocked( taskId );
             queueTaskUpdatedLocked( taskId );
@@ -2220,7 +2516,7 @@ bool TaskCenter::resumeTask( long taskId )
                 QMetaObject::invokeMethod( handle, [handle]() { handle->unhold(); },
                                            Qt::QueuedConnection );
             }
-            m_tasks[taskId].status = TaskStatus::Running;
+            setTaskStatusLocked( m_tasks[taskId], TaskStatus::Running );
             m_tasks[taskId].logBuffer.append( QStringLiteral( "Task resumed." ) );
             updatePipelineForTaskLocked( taskId );
             queueTaskUpdatedLocked( taskId );
@@ -2360,6 +2656,11 @@ void TaskCenter::clearCompletedTasks()
             if ( !m_tasks[id].jobId.empty() )
                 clearedJobIds.push_back( m_tasks[id].jobId );
             clearedTaskIds.append( id );
+            // 8.0 WP-A: drop the task's derived admission state and its
+            // incoming children-index edges BEFORE the map entry is gone.
+            for ( long parentId : m_tasks[id].parentTaskIds )
+                m_children.remove( parentId, id );
+            forgetDerivedTaskStateLocked( id );
             m_tasks.remove( id );
         }
         // Drop listener-dispatch / delta-dedup state for the cleared tasks
@@ -2505,6 +2806,15 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                                            QString::fromStdString( stepId ) ) );
 
             m_tasks[taskId] = info;
+            // 8.0 WP-A: derived admission state for the pipeline step
+            // (children index + ready-heap / manual-queue registration; fused
+            // members are autoDispatch=false and land on the manual list,
+            // preserving the legacy per-pass placeholder pass for them).
+            registerParentLinksLocked( m_tasks[taskId] );
+            if ( m_tasks[taskId].autoDispatch )
+                pushReadyCandidateLocked( taskId );
+            else if ( parentsSatisfiedLocked( m_tasks[taskId] ) )
+                m_manualQueued.append( taskId );
             stepToTaskId[stepId] = taskId;
             pipeInfo.stepToTaskId[stepId] = taskId;
             pipeInfo.taskToStepId[taskId] = stepId;
@@ -2743,15 +3053,13 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
     // behavior change; the contract version additionally invalidates every
     // entry computed under an older fingerprint SEMANTICS (a behavior fix
     // that leaves the schema untouched must not serve stale artifacts).
+    // 8.0: the canonical recipe moved into makeImplementationIdentity so the
+    // resume-side operator stamp (WorkflowRunCoordinator) hashes the SAME
+    // identity surface — one recipe, no drift.
     Json::StreamWriterBuilder schemaWriter;
     schemaWriter["indentation"] = "";
     const std::string schemaText = Json::writeString( schemaWriter, op->schema() );
-    const std::string implIdentity = schemaText + "|contract="
-      + std::to_string( sicnu::data::kExecutionFingerprintContractVersion )
-      + "|platform=" + sicnu::data::kExecutionFingerprintPlatformVersion;
-    const QString versionHash = QString::fromUtf8(
-        QCryptographicHash::hash( QByteArray::fromStdString( implIdentity ),
-                                  QCryptographicHash::Sha256 ).toHex() );
+    const QString versionHash = sicnu::data::makeImplementationIdentity( schemaText ).toHex();
 
     // Statically resolve placeholder references against the DECLARED upstream
     // outputs (#726): the resolved map is what the fingerprint hashes, and the

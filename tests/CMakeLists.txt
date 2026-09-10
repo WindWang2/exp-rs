@@ -1908,6 +1908,12 @@ target_compile_definitions(test_execution_plane_7 PRIVATE
     SICNU_WORKER_EXE="$<TARGET_FILE:sicnu_worker>"
 )
 
+# Execution Plane 8.0: admission scaling (indexed ready heap + bucketed
+# engine queue), worker containment, retry evidence, resume identity, cache
+# identity. RUN_SERIAL: stress cases share the TaskCenter/JobEngine
+# singletons and measure wall-clock scaling.
+sicnu_add_test(test_execution_plane_8 TIMEOUT 1200 RUN_SERIAL TRUE)
+
 # Phase I persistent workspace catalog.
 sicnu_add_test(test_workspace_catalog TIMEOUT 300)
 
