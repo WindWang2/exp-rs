@@ -1472,7 +1472,7 @@ TEST_CASE( "P7 solver: documents without v4 fields keep the 6.0 contract",
   REQUIRE( lg["rect_mm"][0].asDouble() == Catch::Approx( 20.0 ) );
 }
 
-TEST_CASE( "P7 solver: upgradeMapSpec re-stamps v3 documents to v4",
+TEST_CASE( "P7 solver: upgradeMapSpec re-stamps v3 documents to current",
            "[platform7][solver][compat]" )
 {
   Json::Value spec = makeMapSpec( "p7-upgrade", Json::Value() );
@@ -1483,5 +1483,7 @@ TEST_CASE( "P7 solver: upgradeMapSpec re-stamps v3 documents to v4",
   requireNoProblems( validateMapSpec( spec ) ); // v3 is still a supported version
   const Json::Value upgraded = upgradeMapSpec( spec );
   REQUIRE( upgraded["spec_version"].asInt() == kMapSpecCurrentVersion );
-  REQUIRE( kMapSpecCurrentVersion == 4 );
+  // Platform 8.0 bumped the current spec to 5 (additive output/binding
+  // surface); the constant moves only with a strict-superset version.
+  REQUIRE( kMapSpecCurrentVersion == 5 );
 }
