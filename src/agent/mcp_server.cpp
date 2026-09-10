@@ -7,6 +7,7 @@
 #include "help/help_registry.h"
 
 #include "workflow/workflow_run_coordinator.h"
+#include "experiment/bridge/workflow_experiment_adapter.h"
 #include "core/sicnu_logging.h"
 #include "env_flag.h"
 
@@ -424,7 +425,17 @@ const MetaToolDef kMetaTools[] = {
       "execution_id per step — poll them with get_execution_status or use "
       "get_workflow_status for the aggregate view.",
       { { "pipeline", "object", "Pipeline definition: {id, name, steps: [{id, title, operator, params, inputs: [{fromStepId, fromPort, toPort}]}]}. A JSON string is also accepted.", true },
-        { "auto_load", "boolean", "Auto-load finished outputs as layers (headless MCP default false).", false } } },
+        { "auto_load", "boolean", "Auto-load finished outputs as layers (headless MCP default false).", false },
+        { "experiment_db", "string", "Optional. Path of an ExperimentStore database; when set, this run is auto-recorded into it as a truthful experiment run (Created/Running/Succeeded/Failed/Cancelled/Interrupted) through the authoritative workflow lifecycle. Requires experiment_id.", false },
+        { "experiment_id", "string", "Target experiment id for auto-recording (created if missing). Required with experiment_db.", false },
+        { "experiment_name", "string", "Name used when auto-recording creates the experiment. Optional.", false },
+        { "experiment_objective", "string", "Research question recorded for the experiment. Optional.", false },
+        { "dataset_db", "string", "Optional DatasetStore path for pin verification (dataset fingerprint/split fingerprint auto-fill).", false },
+        { "dataset_version", "string", "Optional dataset version id pin (must exist in dataset_db when provided).", false },
+        { "split_manifest", "string", "Optional split manifest id pin.", false },
+        { "model_id", "string", "Optional model id pin.", false },
+        { "model_digest", "string", "Optional model content digest pin.", false },
+        { "seed", "integer", "Optional seed pin (non-negative).", false } } },
     { "get_workflow_status",
       "Get the aggregate status of a workflow submitted with run_workflow: overall "
       "state plus per-step execution ids, statuses, and progress.",
@@ -2513,6 +2524,71 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
     }
 
     const bool autoLoad = arguments.value(QStringLiteral("auto_load")).toBool();
+
+    // Opt-in experiment auto-recording (goal 8.0 §A): when experiment_db +
+    // experiment_id arrive, tracked runs of THIS submission are recorded
+    // truthfully into the ExperimentStore through the authoritative
+    // coordinator lifecycle. Absent arguments leave behavior identical to a
+    // build without recording (the monitor is created lazily and stays
+    // disabled until then). Pins are registered BEFORE submission so they are
+    // part of the run's immutable identity.
+    const QString experimentDb =
+        arguments.value(QStringLiteral("experiment_db")).toString().trimmed();
+    if (!experimentDb.isEmpty()) {
+        const QString experimentId =
+            arguments.value(QStringLiteral("experiment_id")).toString().trimmed();
+        if (experimentId.isEmpty())
+            throw McpToolError(QStringLiteral("run_workflow: experiment_db requires experiment_id"),
+                               QStringLiteral("INVALID_ARGUMENTS"), QStringLiteral("validation"));
+        if (!m_experimentMonitor)
+            m_experimentMonitor = std::make_unique<sicnu::experiment::WorkflowExperimentMonitor>(
+                sicnu::workflow::WorkflowRunCoordinator::instance());
+        QString recordError;
+        if (!m_experimentMonitor->enable(
+                experimentDb, experimentId,
+                arguments.value(QStringLiteral("experiment_name")).toString(),
+                arguments.value(QStringLiteral("experiment_objective")).toString(),
+                arguments.value(QStringLiteral("dataset_db")).toString().trimmed(), &recordError)) {
+            SICNU_LOG_ERROR(SicnuLogTags::MCP,
+                            QStringLiteral("run_workflow recording refused: %1").arg(recordError));
+            throw McpToolError(QStringLiteral("run_workflow: experiment recording refused: ")
+                                   + recordError,
+                               QStringLiteral("EXPERIMENT_RECORDING_REFUSED"),
+                               QStringLiteral("validation"));
+        }
+        sicnu::experiment::RunPins pins;
+        pins.datasetVersionId =
+            arguments.value(QStringLiteral("dataset_version")).toString().trimmed();
+        pins.splitManifestId =
+            arguments.value(QStringLiteral("split_manifest")).toString().trimmed();
+        pins.modelId = arguments.value(QStringLiteral("model_id")).toString().trimmed();
+        pins.modelDigest = arguments.value(QStringLiteral("model_digest")).toString().trimmed();
+        bool seedOk = false;
+        const qlonglong seed = arguments.value(QStringLiteral("seed")).toLongLong(&seedOk);
+        if (seedOk && seed >= 0) {
+            pins.seed = static_cast<quint64>(seed);
+            pins.hasSeed = true;
+        }
+        // Keyed by the definition id: the coordinator generates the run id
+        // internally, so pre-start pin attachment can only target the
+        // workflow being submitted.
+        QString definitionId;
+        if (pipelineArg.typeId() == QMetaType::QString) {
+            const QJsonDocument doc = QJsonDocument::fromJson(pipelineJson.toUtf8());
+            if (doc.isObject())
+                definitionId =
+                    doc.object().value(QStringLiteral("id")).toString().trimmed();
+        } else if (pipelineArg.canConvert<QVariantMap>()) {
+            definitionId = pipelineArg.toMap()
+                               .value(QStringLiteral("id")).toString().trimmed();
+        }
+        if (!definitionId.isEmpty())
+            m_experimentMonitor->setWorkflowPins(definitionId, pins);
+        else
+            SICNU_LOG_ERROR(SicnuLogTags::MCP,
+                            QStringLiteral("run_workflow recording: pipeline carries no id; "
+                                           "pins not attached"));
+    }
 
     // Tracked submission (#697): MCP workflows persist checkpoints per step
     // transition and become resumable after a crash instead of vanishing.
