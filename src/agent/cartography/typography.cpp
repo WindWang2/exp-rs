@@ -150,6 +150,34 @@ double measureLineMm( const std::string &text, double sizePt )
   return em * sizePt * kMmPerPoint;
 }
 
+bool isTextBreakPolicy( const std::string &policy )
+{
+  return policy == "none" || policy == "halfwidth";
+}
+
+namespace {
+
+/// Platform 8.0: line measurement under a break policy — identical to
+/// measureLineMm except that a line-FINAL fullwidth closing punctuation
+/// measures at kHalfwidthEndFactor of its advance under "halfwidth".
+double measureLineMmPolicy( const std::string &text, double sizePt,
+                            const std::string &breakPolicy )
+{
+  double em = 0.0;
+  char32_t last = 0;
+  for ( size_t i = 0; i < text.size(); )
+  {
+    last = decodeUtf8( text, i );
+    em += codepointAdvanceEm( last );
+  }
+  if ( breakPolicy == "halfwidth" && last != 0 && isFullwidthCodepoint( last ) &&
+       isClosingPunctuation( last ) )
+    em -= codepointAdvanceEm( last ) * ( 1.0 - kHalfwidthEndFactor );
+  return em * sizePt * kMmPerPoint;
+}
+
+} // namespace
+
 namespace {
 
 /// Split on hard \n (bounded by kMaxWrappedLines paragraphs).
@@ -227,7 +255,8 @@ std::vector<size_t> breakableGaps( const std::vector<char32_t> &cps )
 
 /// Greedy wrap of ONE paragraph (no \n) to maxWidthMm at sizePt.
 std::vector<std::string> wrapParagraph( const std::string &text, double maxWidthMm,
-                                        double sizePt, bool *hitBudget )
+                                        double sizePt, bool *hitBudget,
+                                        const std::string &breakPolicy = "none" )
 {
   std::vector<std::string> lines;
   if ( text.empty() )
@@ -283,7 +312,7 @@ std::vector<std::string> wrapParagraph( const std::string &text, double maxWidth
       ++gapIndex;
     // Whole remainder fits: emit it as the final line (the greedy gap scan
     // only sees gaps BEFORE the end and would over-split the tail).
-    if ( measureLineMm( encode( begin, static_cast<int>( cps.size() ) ), sizePt ) <= maxWidthMm )
+    if ( measureLineMmPolicy( encode( begin, static_cast<int>( cps.size() ) ), sizePt, breakPolicy ) <= maxWidthMm )
     {
       lines.push_back( encode( begin, static_cast<int>( cps.size() ) ) );
       return lines;
@@ -298,7 +327,7 @@ std::vector<std::string> wrapParagraph( const std::string &text, double maxWidth
       int trimEnd = end;
       while ( trimEnd > begin + 1 && cps[trimEnd - 1] == ' ' )
         --trimEnd;
-      if ( measureLineMm( encode( begin, trimEnd ), sizePt ) <= maxWidthMm )
+      if ( measureLineMmPolicy( encode( begin, trimEnd ), sizePt, breakPolicy ) <= maxWidthMm )
       {
         best = cursor;
         ++cursor;
@@ -322,10 +351,10 @@ std::vector<std::string> wrapParagraph( const std::string &text, double maxWidth
       // take the whole rest when it fits on the line).
       int end = begin + 1;
       while ( end < static_cast<int>( cps.size() ) &&
-              measureLineMm( encode( begin, end ), sizePt ) <= maxWidthMm )
+              measureLineMmPolicy( encode( begin, end ), sizePt, breakPolicy ) <= maxWidthMm )
         ++end;
       if ( end == begin + 1 && end < static_cast<int>( cps.size() ) &&
-           measureLineMm( encode( begin, end ), sizePt ) > maxWidthMm && lines.empty() )
+           measureLineMmPolicy( encode( begin, end ), sizePt, breakPolicy ) > maxWidthMm && lines.empty() )
       {
         // Single glyph wider than the box: still emit it (degrade honestly).
       }
@@ -349,8 +378,16 @@ std::vector<std::string> wrapTextMm( const std::string &text, double maxWidthMm,
 std::vector<std::string> wrapTextMmBudgeted( const std::string &text, double maxWidthMm,
                                              double sizePt, bool *lineBudgetHit )
 {
+  return wrapTextMmBudgeted( text, maxWidthMm, sizePt, lineBudgetHit, "none" );
+}
+
+std::vector<std::string> wrapTextMmBudgeted( const std::string &text, double maxWidthMm,
+                                             double sizePt, bool *lineBudgetHit,
+                                             const std::string &breakPolicy )
+{
   std::vector<std::string> lines;
   bool hitBudget = false;
+  const std::string resolved = isTextBreakPolicy( breakPolicy ) ? breakPolicy : "none";
   for ( const std::string &paragraph : splitHardLines( text ) )
   {
     if ( static_cast<int>( lines.size() ) >= kMaxWrappedLines )
@@ -358,7 +395,8 @@ std::vector<std::string> wrapTextMmBudgeted( const std::string &text, double max
       hitBudget = true;
       break;
     }
-    for ( std::string &line : wrapParagraph( paragraph, maxWidthMm, sizePt, &hitBudget ) )
+    for ( std::string &line :
+          wrapParagraph( paragraph, maxWidthMm, sizePt, &hitBudget, resolved ) )
       lines.push_back( std::move( line ) );
   }
   if ( lineBudgetHit )
@@ -374,11 +412,12 @@ bool isTextFitPolicy( const std::string &policy )
 
 namespace {
 
-double widestLineMm( const std::vector<std::string> &lines, double sizePt )
+double widestLineMm( const std::vector<std::string> &lines, double sizePt,
+                     const std::string &breakPolicy = "none" )
 {
   double widest = 0.0;
   for ( const std::string &line : lines )
-    widest = std::max( widest, measureLineMm( line, sizePt ) );
+    widest = std::max( widest, measureLineMmPolicy( line, sizePt, breakPolicy ) );
   return widest;
 }
 
@@ -393,6 +432,8 @@ TextFitReport fitTextIntoBox( const TextFitRequest &request )
 {
   TextFitReport report;
   report.policyApplied = isTextFitPolicy( request.policy ) ? request.policy : "overflow_report";
+  report.breakPolicyApplied =
+    isTextBreakPolicy( request.breakPolicy ) ? request.breakPolicy : "none";
   const double usableWidth = std::max( 0.0, request.boxWidthMm - 2.0 * request.paddingMm );
   const double usableHeight = std::max( 0.0, request.boxHeightMm - 2.0 * request.paddingMm );
   const double declaredPt =
@@ -413,9 +454,10 @@ TextFitReport fitTextIntoBox( const TextFitRequest &request )
     {
       const double mid = 0.5 * ( lo + hi );
       const std::vector<std::string> lines =
-        wrapTextMm( request.text, usableWidth, mid );
+        wrapTextMmBudgeted( request.text, usableWidth, mid, nullptr, report.breakPolicyApplied );
       const double height = lines.size() * lineHeightMm( mid, request.lineHeightFactor );
-      if ( widestLineMm( lines, mid ) <= usableWidth + 1e-9 && height <= usableHeight + 1e-9 )
+      if ( widestLineMm( lines, mid, report.breakPolicyApplied ) <= usableWidth + 1e-9 &&
+           height <= usableHeight + 1e-9 )
       {
         chosen = mid;
         fits = true;
@@ -428,9 +470,10 @@ TextFitReport fitTextIntoBox( const TextFitRequest &request )
     }
     // Also accept the declared size itself when it fits outright.
     {
-      const std::vector<std::string> lines = wrapTextMm( request.text, usableWidth, declaredPt );
+      const std::vector<std::string> lines = wrapTextMmBudgeted(
+        request.text, usableWidth, declaredPt, nullptr, report.breakPolicyApplied );
       const double height = lines.size() * lineHeightMm( declaredPt, request.lineHeightFactor );
-      if ( widestLineMm( lines, declaredPt ) <= usableWidth + 1e-9 &&
+      if ( widestLineMm( lines, declaredPt, report.breakPolicyApplied ) <= usableWidth + 1e-9 &&
            height <= usableHeight + 1e-9 )
       {
         chosen = declaredPt;
@@ -439,8 +482,9 @@ TextFitReport fitTextIntoBox( const TextFitRequest &request )
     }
     report.fontPt = fits ? chosen : minPt;
     report.fontPolicy = !fits ? "floor" : ( chosen < declaredPt - 1e-9 ? "shrunk" : "declared" );
-    report.lines = wrapTextMm( request.text, usableWidth, report.fontPt );
-    report.usedWidthMm = widestLineMm( report.lines, report.fontPt );
+    report.lines = wrapTextMmBudgeted( request.text, usableWidth, report.fontPt, nullptr,
+                                       report.breakPolicyApplied );
+    report.usedWidthMm = widestLineMm( report.lines, report.fontPt, report.breakPolicyApplied );
     report.usedHeightMm = report.lines.size() * lineHeightMm( report.fontPt, request.lineHeightFactor );
     report.fits = fits;
     if ( !fits )
@@ -464,7 +508,8 @@ TextFitReport fitTextIntoBox( const TextFitRequest &request )
   report.fontPt = declaredPt;
   report.fontPolicy = "declared";
   bool lineBudgetHit = false;
-  report.lines = wrapTextMmBudgeted( request.text, usableWidth, declaredPt, &lineBudgetHit );
+  report.lines = wrapTextMmBudgeted( request.text, usableWidth, declaredPt, &lineBudgetHit,
+                                     report.breakPolicyApplied );
   if ( lineBudgetHit )
   {
     report.truncated = true;
@@ -473,7 +518,7 @@ TextFitReport fitTextIntoBox( const TextFitRequest &request )
       "text exceeds the kMaxWrappedLines line budget; the remaining lines are "
       "not representable and are reported, never dropped silently" );
   }
-  report.usedWidthMm = widestLineMm( report.lines, declaredPt );
+  report.usedWidthMm = widestLineMm( report.lines, declaredPt, report.breakPolicyApplied );
   report.usedHeightMm = report.lines.size() * lineHeightMm( declaredPt, request.lineHeightFactor );
 
   const bool widthFits = report.usedWidthMm <= usableWidth + 1e-9;
@@ -489,7 +534,8 @@ TextFitReport fitTextIntoBox( const TextFitRequest &request )
       report.lines.pop_back();
     std::string &last = report.lines.back();
     while ( !last.empty() &&
-            measureLineMm( last + "\xE2\x80\xA6", declaredPt ) > usableWidth + 1e-9 )
+            measureLineMmPolicy( last + "\xE2\x80\xA6", declaredPt,
+                                 report.breakPolicyApplied ) > usableWidth + 1e-9 )
       last.pop_back();
     // pop_back may split a UTF-8 sequence — re-decode cleanly.
     while ( !last.empty() )
@@ -517,7 +563,7 @@ TextFitReport fitTextIntoBox( const TextFitRequest &request )
         "box smaller than one glyph; only the ellipsis marker is representable" );
     }
     report.truncated = true;
-    report.usedWidthMm = widestLineMm( report.lines, declaredPt );
+    report.usedWidthMm = widestLineMm( report.lines, declaredPt, report.breakPolicyApplied );
     report.usedHeightMm = report.lines.size() * lineHeightMm( declaredPt, request.lineHeightFactor );
     report.fits = report.usedWidthMm <= usableWidth + 1e-9 &&
                   report.usedHeightMm <= usableHeight + 1e-9;

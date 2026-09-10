@@ -161,6 +161,7 @@ struct ConstraintRuntime
     bool anchorDecided = false;         ///< anchor_wins decision recorded?
     bool rejected = false;              ///< soft: reverted by a higher-ranked constraint
     bool rejectedDecided = false;       ///< first rejection recorded?
+    std::string failReason;             ///< permanent-failure cause (page_overflow, …)
 };
 
 /// A pending geometry write computed by computeTargets.
@@ -251,6 +252,22 @@ class Solver
 
     // Pre-solve geometry snapshot for the unsat-core simulation.
     std::vector<RectSnapshot> mPreSolveRects;
+
+    // Platform 8.0: page index → height (mm); page bottoms for the
+    // page-aware pin evidence on keep_with / avoid_overlap.
+    std::map<int, double> mPageHeights;
+
+    /// Bottom (max y) of the page `item` is declared on.
+    double pageBottomFor( const Json::Value *item ) const
+    {
+      const int page =
+        item && ( *item ).isObject() && ( *item ).isMember( "page" ) &&
+            ( *item )["page"].isIntegral()
+          ? ( *item )["page"].asInt()
+          : 0;
+      const auto it = mPageHeights.find( page );
+      return it != mPageHeights.end() ? it->second : mPageH;
+    }
 };
 
 Json::Value *Solver::findItem( const std::string &id )
@@ -269,6 +286,22 @@ void Solver::normalize()
   {
     mPageW = mSpec["page"]["width_mm"].asDouble();
     mPageH = mSpec["page"]["height_mm"].asDouble();
+  }
+  // Platform 8.0: page bottoms for the page-aware pin evidence. rect_mm y is
+  // per-page (the compiler moves items with page-relative positions), so a
+  // follower's bottom bound is the height of ITS declared page.
+  mPageHeights.clear();
+  mPageHeights[0] = mPageH;
+  if ( mSpec.isObject() && mSpec.isMember( "pages" ) && mSpec["pages"].isArray() )
+  {
+    for ( Json::Value::ArrayIndex i = 0; i < mSpec["pages"].size(); ++i )
+    {
+      const Json::Value &page = mSpec["pages"][i];
+      if ( page.isObject() && page.isMember( "height_mm" ) && page["height_mm"].isNumeric() )
+        mPageHeights[static_cast<int>( i ) + 1] = page["height_mm"].asDouble();
+      else
+        mPageHeights[static_cast<int>( i ) + 1] = mPageH;
+    }
   }
   for ( int c = 0; c < mapspec::kCollectionCount; ++c )
   {
@@ -808,6 +841,20 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
       return Apply::Blocked;
     Rect result = companion;
     result.y = anchorRect.y + anchorRect.h + gap;
+    // Platform 8.0 page-aware evidence: a pin that would push the companion
+    // past its own page bottom is refused with an explicit reason instead of
+    // silently producing off-page geometry (MAP_OFF_PAGE would only find it
+    // later, with no provenance).
+    const double pageBottom = pageBottomFor( c.items[1] );
+    if ( result.y + result.h > pageBottom + kEps )
+    {
+      if ( failReason )
+        *failReason = "page_overflow: pinning '" + c.itemIds[1] + "' below '" +
+                      c.itemIds[0] + "' would end at y=" +
+                      std::to_string( result.y + result.h ) +
+                      " mm, past the page bottom (" + std::to_string( pageBottom ) + " mm)";
+      return Apply::Failed;
+    }
     if ( sameRect( companion, result ) )
       return Apply::Satisfied;
     push( c.items[1], result );
@@ -828,6 +875,19 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
       return Apply::Satisfied;
     Rect result = mover;
     result.y = keeper.y + keeper.h + gap;
+    // Platform 8.0 page-aware evidence: same contract as keep_with — the
+    // deterministic push-down direction is refused when it would leave the
+    // mover's declared page, never silently applied.
+    const double pageBottom = pageBottomFor( c.items[1] );
+    if ( result.y + result.h > pageBottom + kEps )
+    {
+      if ( failReason )
+        *failReason = "page_overflow: clearing '" + c.itemIds[1] + "' below '" +
+                      c.itemIds[0] + "' would end at y=" +
+                      std::to_string( result.y + result.h ) +
+                      " mm, past the page bottom (" + std::to_string( pageBottom ) + " mm)";
+      return Apply::Failed;
+    }
     if ( sameRect( mover, result ) )
       return Apply::Satisfied;
     push( c.items[1], result );
@@ -968,6 +1028,7 @@ bool Solver::sweepHardOnce()
     else if ( outcome == Apply::Failed )
     {
       c.disabled = true; // reported once; leaves the sweep
+      c.failReason = failReason;
       if ( !mSimulating )
         mReport.add( c.cid + "|failed",
                      c.cid + ": " + ( failReason.empty()
@@ -1346,7 +1407,9 @@ void Solver::finalize( CompositionResult &result )
     violation.cid = c.cid;
     violation.kind = c.kind;
     if ( c.disabled )
-      violation.reason = "disabled (anchor conflict or permanent failure)";
+      violation.reason = c.failReason.empty()
+                           ? "disabled (anchor conflict or permanent failure)"
+                           : c.failReason;
     else if ( !mConverged )
       // On non-convergence only the constraints that verifiably do NOT hold
       // at the final geometry are listed as violated — holding constraints
