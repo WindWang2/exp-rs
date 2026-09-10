@@ -44,6 +44,7 @@
 using namespace sicnu::runtime::observability;
 using namespace sicnu::runtime::observability::trace;
 using namespace sicnu::runtime::observability::fault;
+using namespace sicnu::jobs;
 
 namespace
 {
