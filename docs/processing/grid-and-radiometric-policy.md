@@ -104,3 +104,23 @@ parameter when the positional convention is not enough.
   size refusals, shared-grid checks.
 - `tests/test_qa_mask.cpp`, `tests/test_rs_operators.cpp` — band-role
   resolution.
+
+## Categorical resampling across seams (Scientific Algorithms 7.0)
+
+Two seams resample rasters, and their categorical policies are **declared
+different on purpose** (audited 2026-09-10, no silent inconsistency):
+
+- `rs:resample` / `rs:align` are the scientific seam: a categorical raster
+  (declared or detected) with an interpolated kernel is a **typed refusal**
+  (`rs_grid_operators.cpp`), tested in `tests/test_grid_operators.cpp`.
+  Pass `resample=near` (or `mode`) explicitly to proceed.
+- `gdal:warp` and the gdal_tools CLI wrappers are the QGIS-compatibility
+  seam: GDAL itself silently honours the requested kernel, so the wrapper
+  **downgrades to nearest with a logged warning** when the source declares
+  categorical (`gdal_operator_utils.h`) — refusing there would break
+  QGIS-style workflows that rely on GDAL semantics.
+
+Rule of thumb: scientific products resample through `rs:resample`; the
+`gdal:` family is a compatibility surface and its categorical downgrade is
+always logged. Both behaviours are pinned by tests and neither may change
+without touching this page.
