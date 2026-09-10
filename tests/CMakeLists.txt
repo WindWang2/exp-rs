@@ -200,6 +200,34 @@ if(WIN32)
   target_link_libraries(test_io_remote_range PRIVATE ws2_32)
 endif()
 
+# 7.0 remote source identity & validators (shared HTTP fixture).
+sicnu_add_io_test(test_io_remote_validator)
+target_sources(test_io_remote_validator PRIVATE support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_remote_validator PRIVATE ws2_32)
+endif()
+
+# 7.0 bounded byte-range cache over remote rasters.
+sicnu_add_io_test(test_io_range_cache)
+target_sources(test_io_range_cache PRIVATE support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_range_cache PRIVATE ws2_32)
+endif()
+
+# 7.0 STAC API client (loopback JSON fixture).
+sicnu_add_io_test(test_io_stac_client)
+target_sources(test_io_stac_client PRIVATE support/http_stac_server.cpp support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_stac_client PRIVATE ws2_32)
+endif()
+
+# 7.0 modern vector interop audit (field types / null / collections / CRS /
+# streaming / driver-gated GeoParquet).
+sicnu_add_io_test(test_io_vector_interop)
+
+# 7.0 generalized grid classification & placement (rotated/flipped/GCP/RPC).
+sicnu_add_io_test(test_io_grid_descriptor)
+
 # io:* operator family suite — rides the operator chain (Qt + sicnu_operators).
 sicnu_add_io_test(test_io_operators)
 target_link_libraries(test_io_operators PRIVATE Qt6::Core sicnu_operators)

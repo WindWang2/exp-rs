@@ -7,6 +7,7 @@
 set(SICNU_GEOSPATIAL_SOURCES
     metadata/canonical_metadata.cpp
     crs/crs_policy.cpp
+    crs/grid_descriptor.cpp
     raster/raster_reader.cpp
     raster/raster_writer.cpp
     vector/vector_reader.cpp
@@ -15,11 +16,15 @@ set(SICNU_GEOSPATIAL_SOURCES
     util/resource_uri.cpp
     probe/probe.cpp
     remote/probe_remote.cpp
+    remote/http_fetch.cpp
+    remote/remote_source_validator.cpp
+    remote/range_cache.cpp
     formats/format_profiles.cpp
     cog/cog_presets.cpp
     cog/cog_validator.cpp
     convert/raster_convert.cpp
     stac/stac_mapper.cpp
+    stac/stac_client.cpp
     products/product_adapters.cpp
     products/product_registry.cpp
     doctor/data_doctor.cpp

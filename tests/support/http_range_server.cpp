@@ -72,6 +72,66 @@ std::string HttpRangeServer::url() const
   return "http://127.0.0.1:" + std::to_string( mPort ) + "/fixture.tif";
 }
 
+void HttpRangeServer::setEtag( const std::string &etag )
+{
+  std::lock_guard<std::mutex> lock( mConfigMutex );
+  mConfig.etag = etag;
+  mConfig.hasConfig = true;
+}
+
+void HttpRangeServer::setLastModified( const std::string &lastModified )
+{
+  std::lock_guard<std::mutex> lock( mConfigMutex );
+  mConfig.lastModified = lastModified;
+  mConfig.hasConfig = true;
+}
+
+void HttpRangeServer::replacePayload( std::vector<unsigned char> payload, const std::string &etag,
+                                      const std::string &lastModified )
+{
+  std::lock_guard<std::mutex> lock( mConfigMutex );
+  mConfig.payload = std::move( payload );
+  if ( !etag.empty() || !lastModified.empty() )
+  {
+    mConfig.etag = etag;
+    mConfig.lastModified = lastModified;
+  }
+  mConfig.hasConfig = true;
+}
+
+HttpRangeServer::ValidatorConfig HttpRangeServer::snapshotConfig() const
+{
+  std::lock_guard<std::mutex> lock( mConfigMutex );
+  return mConfig;
+}
+
+namespace
+{
+
+/// Fixture-grade RFC 7232 weak ETag comparison (strip W/, opaque equality).
+bool fixtureWeakEtagMatch( const std::string &a, const std::string &b )
+{
+  const auto strip = [] ( const std::string &etag ) {
+    return etag.rfind( "W/", 0 ) == 0 ? etag.substr( 2 ) : etag;
+  };
+  return strip( a ) == strip( b );
+}
+
+/// Extracts the value of a request header ("Name: value"), or "".
+std::string requestHeaderValue( const std::string &request, const char *headerName )
+{
+  const std::size_t position = request.find( headerName );
+  if ( position == std::string::npos )
+    return std::string();
+  std::size_t valueStart = position + std::strlen( headerName );
+  while ( valueStart < request.size() && ( request[valueStart] == ' ' || request[valueStart] == '\t' ) )
+    ++valueStart;
+  const std::size_t end = request.find( "\r\n", valueStart );
+  return request.substr( valueStart, end == std::string::npos ? std::string::npos : end - valueStart );
+}
+
+} // namespace
+
 void HttpRangeServer::serveLoop()
 {
   while ( !mStop.load() )
@@ -127,6 +187,8 @@ void HttpRangeServer::handleConnection( SocketHandle client )
       rangeHeader = request.substr( rangePosition, end == std::string::npos ? std::string::npos : end - rangePosition );
     }
   }
+  const std::string ifNoneMatch = requestHeaderValue( request, "If-None-Match:" );
+  const std::string ifModifiedSince = requestHeaderValue( request, "If-Modified-Since:" );
 
   if ( mBehavior == ServerBehavior::ServerError )
   {
@@ -138,18 +200,53 @@ void HttpRangeServer::handleConnection( SocketHandle client )
     std::this_thread::sleep_for( std::chrono::milliseconds( 3000 ) );
   }
 
+  // 7.0: validator fixtures (mutable mid-test; the mutex-guarded config
+  // wins once a fixture API has been used).
+  const ValidatorConfig config = snapshotConfig();
+  const bool useFixtureConfig = config.hasConfig && !config.payload.empty();
+  const unsigned char *payloadData = useFixtureConfig ? config.payload.data() : mPayload.data();
+  const std::size_t payloadSize = useFixtureConfig ? config.payload.size() : mPayload.size();
+
   std::map<std::string, std::string> headers;
   // A server that ignores Range requests must not advertise range support.
   if ( mBehavior != ServerBehavior::NoRange )
     headers["Accept-Ranges"] = "bytes";
   headers["Content-Type"] = "image/tiff";
+  if ( !config.etag.empty() )
+    headers["ETag"] = config.etag;
+  if ( !config.lastModified.empty() )
+    headers["Last-Modified"] = config.lastModified;
 
-  const unsigned char *body = mPayload.data();
-  std::size_t bodySize = mPayload.size();
+  // RFC 7232 conditional answers. If-None-Match uses the weak comparison;
+  // If-Modified-Since revalidates on fixture-grade date equality.
+  const bool conditional = !ifNoneMatch.empty() || !ifModifiedSince.empty();
+  if ( conditional && mBehavior != ServerBehavior::ServerError )
+  {
+    bool matched = false;
+    if ( !ifNoneMatch.empty() && !config.etag.empty() )
+      matched = fixtureWeakEtagMatch( ifNoneMatch, config.etag );
+    else if ( ifNoneMatch.empty() && !ifModifiedSince.empty() && !config.lastModified.empty() )
+      matched = ifModifiedSince == config.lastModified;
+    if ( matched )
+    {
+      mNotModifiedResponses.fetch_add( 1 );
+      {
+        std::lock_guard<std::mutex> lock( mLogMutex );
+        if ( mRequestLog.size() < 64 )
+          mRequestLog.push_back( "304 " + ( ifNoneMatch.empty() ? ifModifiedSince : ifNoneMatch ) );
+      }
+      // A bare 304: no body, no Content-Length (RFC 7232 §4.1).
+      respond( client, 304, "Not Modified", {}, nullptr, 0, isHead, true );
+      return;
+    }
+  }
+
+  const unsigned char *body = payloadData;
+  std::size_t bodySize = payloadSize;
 
   // Range support: honor "bytes=a-b" unless the fixture forbids it.
   long long rangeStart = 0;
-  long long rangeEnd = static_cast<long long>( mPayload.size() ) - 1;
+  long long rangeEnd = static_cast<long long>( payloadSize ) - 1;
   bool ranged = false;
   if ( mBehavior != ServerBehavior::NoRange && !rangeHeader.empty() )
   {
@@ -165,7 +262,7 @@ void HttpRangeServer::handleConnection( SocketHandle client )
         const std::string endText = rangeHeader.substr( dash + 1 );
         if ( !endText.empty() )
           rangeEnd = std::stoll( endText );
-        rangeEnd = std::min<long long>( rangeEnd, static_cast<long long>( mPayload.size() ) - 1 );
+        rangeEnd = std::min<long long>( rangeEnd, static_cast<long long>( payloadSize ) - 1 );
         if ( rangeStart <= rangeEnd )
           ranged = true;
       }
@@ -177,15 +274,20 @@ void HttpRangeServer::handleConnection( SocketHandle client )
 
   {
     std::lock_guard<std::mutex> lock( mLogMutex );
+    std::string signature = ( isHead ? std::string( "HEAD " ) : std::string( "GET " ) ) + rangeHeader;
+    if ( !ifNoneMatch.empty() )
+      signature += " | INM: " + ifNoneMatch;
+    if ( !ifModifiedSince.empty() )
+      signature += " | IMS: " + ifModifiedSince;
     if ( mRequestLog.size() < 64 )
-      mRequestLog.push_back( ( isHead ? std::string( "HEAD " ) : std::string( "GET " ) ) + rangeHeader );
+      mRequestLog.push_back( signature );
   }
   if ( ranged )
   {
     mRangedResponses.fetch_add( 1 );
     headers["Content-Range"] = "bytes " + std::to_string( rangeStart ) + "-" + std::to_string( rangeEnd ) +
-                               "/" + std::to_string( mPayload.size() );
-    body = mPayload.data() + rangeStart;
+                               "/" + std::to_string( payloadSize );
+    body = payloadData + rangeStart;
     bodySize = static_cast<std::size_t>( rangeEnd - rangeStart + 1 );
     respond( client, 206, "Partial Content", headers, body, bodySize, isHead,
              mBehavior != ServerBehavior::Truncated );
@@ -206,6 +308,22 @@ void HttpRangeServer::respond( SocketHandle client, int status, const std::strin
     std::fprintf( stderr, "[SRV] answering %d\n", status );
   for ( const auto &entry : extraHeaders )
     response += entry.first + ": " + entry.second + "\r\n";
+  // RFC 7232 §4.1: a 304 MUST NOT carry a body (and our client-side 304
+  // shape detection relies on the absence of entity framing).
+  if ( status == 304 )
+  {
+    response += "Connection: close\r\n\r\n";
+    std::size_t sent = 0;
+    while ( sent < response.size() )
+    {
+      const int written = ::send( client, response.data() + sent,
+                                  static_cast<int>( response.size() - sent ), 0 );
+      if ( written <= 0 )
+        return;
+      sent += static_cast<std::size_t>( written );
+    }
+    return;
+  }
   response += "Content-Length: " + std::to_string( bodySize ) + "\r\n";
   response += "Connection: close\r\n\r\n";
 
