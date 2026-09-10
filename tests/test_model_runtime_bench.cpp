@@ -14,6 +14,10 @@
 #include "operators/runtime/tile_inference_engine.h"
 #include "support/onnx_fixture_builder.h"
 
+#ifdef SICNU_WITH_ONNX_RUNTIME
+#include <onnxruntime_c_api.h> // OrtGetVersionString for the bench header
+#endif
+
 #include <opencv2/core.hpp>
 #include "synthetic_raster_builder.h"
 
@@ -269,7 +273,7 @@ TEST_CASE( "model runtime benchmark (SICNU_MODEL_BENCH=1)", "[.] [model_bench]" 
     using sicnu::operators::runtime::TensorBlob;
     using sicnu::operators::runtime::NamedTensor;
     benchOrt["schema"] = QStringLiteral( "model-runtime-bench-ort/1" );
-    benchOrt["ort_runtime_version"] = QStringLiteral( "1.20.1" );
+    benchOrt["ort_runtime_version"] = QString::fromUtf8( OrtGetVersionString() );
 
     const OnnxFixtureModels models = buildOnnxFixtureModels();
     const QString sumPath = dir.filePath( QStringLiteral( "bench-sum.onnx" ) );

@@ -103,10 +103,14 @@ std::string crsDisplayName( const QString &wkt )
     if ( authority && code )
       return std::string( authority ) + ":" + code;
   }
-  std::string text = wkt.toStdString();
-  if ( text.size() > 64 )
-    text = text.substr( 0, 61 ) + "...";
-  return text;
+  const std::string text = wkt.toStdString();
+  if ( text.size() <= 64 )
+    return text;
+  // Truncate on a safe boundary: never split a UTF-8 multibyte sequence.
+  std::size_t cut = 61;
+  while ( cut > 0 && ( text[cut] & 0xC0 ) == 0x80 )
+    --cut;
+  return text.substr( 0, cut ) + "...";
 }
 
 /// Semantic CRS comparison through GDAL (geodetic authority for the
@@ -132,11 +136,12 @@ int compareCrs( const QString &primaryCrs, const QString &otherCrs )
 }
 
 /// Publishes the provenance sidecar next to a successfully published raster.
-/// Same-directory staged write + rename (the .prov.json is rewritten when a
-/// previous run's sidecar exists — metadata, not data; the sidecar rename is
-/// the LAST step, so a present product with no sidecar means the caller
-/// disabled nothing and the publish crashed — treated as a hard failure by
-/// the engines, which remove the product in that case).
+/// Same-directory staged write + rename. The CALLER removes any previous
+/// sidecar BEFORE the product rename, so the on-disk states possible across
+/// a crash are: product+matching sidecar (full success), product without
+/// sidecar (crash before the sidecar rename — detectable absence, never a
+/// stale mismatched one), or the previous product untouched. There is no
+/// consumer-side detection; the next successful run rewrites both.
 bool publishProvenanceSidecar( const QString &finalPath, const std::string &outputPath,
                                const Json::Value &provenance, std::string *error )
 {
@@ -162,7 +167,7 @@ bool publishProvenanceSidecar( const QString &finalPath, const std::string &outp
       *error = "failed to write the provenance sidecar: " + stagePath.toStdString();
     return false;
   }
-  QFile::remove( sidecarPath ); // Windows rename does not overwrite
+  QFile::remove( sidecarPath ); // Windows rename does not overwrite (stage leftovers)
   if ( !QFile::rename( stagePath, sidecarPath ) )
   {
     stage.remove();
@@ -225,7 +230,12 @@ Json::Value buildProvenanceDocument( const ModelInfo &model, const ModelRuntimeP
     input["name"] = grid.name;
     input["path"] = grid.path;
     if ( !grid.preparedFrom.empty() )
-      input["prepared_from"] = grid.preparedFrom;
+    {
+      Json::Value prepared( Json::arrayValue );
+      for ( const std::string &origin : grid.preparedFrom )
+        prepared.append( origin );
+      input["prepared_from"] = prepared;
+    }
     if ( !grid.crs.empty() )
       input["crs"] = grid.crs;
     input["crs_verified"] = grid.crsVerified;
@@ -1373,19 +1383,26 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "failed to publish output raster to: " + outputPath );
   }
-  QFile::remove( backupPath );
   // Platform 8.0: a published raster inference product always carries its
-  // provenance sidecar — if the sidecar cannot be published, the product is
-  // removed and the run fails (never an untracked result).
+  // provenance sidecar. Ordering: the OLD sidecar is removed BEFORE the new
+  // product lands (a crash can then only leave a MISSING sidecar, never a
+  // stale/mismatched one), and the old product's backup is kept until the
+  // new sidecar is in — a sidecar failure restores the previous product
+  // instead of destroying it (same invariant as the raster publish).
+  QFile::remove( finalPath + QStringLiteral( ".prov.json" ) );
+  stats.tilesProcessed = done; // counters finalized BEFORE the document build
   {
     const Json::Value prov = buildProvenanceDocument( m_model, m_runtime, stats, {} );
     std::string provError;
     if ( !publishProvenanceSidecar( finalPath, outputPath, prov, &provError ) )
     {
       QFile::remove( finalPath );
+      if ( hadExisting )
+        QFile::rename( backupPath, finalPath ); // restore the previous good product
       throw RSOperatorError( ErrorCode::FileNotWritable, provError );
     }
   }
+  QFile::remove( backupPath );
   context.reportProgressForced( 1.0, "Tiled inference complete" );
   stats.tilesProcessed = done;
   return stats;
@@ -1440,8 +1457,9 @@ std::string TileInferenceEngine::crsMismatch( const std::string &primaryPath,
              "alignment declaration; the runtime never guesses a CRS)";
   }
   return "input grids are not co-registered: '" + primaryPath + "' ("
-           + ( primaryCrs.empty() ? "<no CRS>" : primaryCrs ) + ") and '" + otherPath + "' ("
-           + ( otherCrs.empty() ? "<no CRS>" : otherCrs )
+           + ( primaryCrs.empty() ? "<no CRS>" : crsDisplayName( QString::fromStdString( primaryCrs ) ) )
+           + ") and '" + otherPath + "' ("
+           + ( otherCrs.empty() ? "<no CRS>" : crsDisplayName( QString::fromStdString( otherCrs ) ) )
            + ") carry different coordinate reference systems — identical geotransform "
              "numbers under different CRS do NOT describe the same ground. Align the "
              "rasters through the geospatial raster_convert warp seam; the runtime "
@@ -1556,7 +1574,11 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   if ( rasterW <= 0 || rasterH <= 0 )
     throw RSOperatorError( ErrorCode::InvalidInputData, "input raster is empty: " + feeds[0].paths[0] );
   const std::array<double, 6> primaryGt = primary.geoTransform();
+  // Raw projection strings are the COMPARISON input (display names can be
+  // lossy — authority-less WKT is truncated for messages and would never
+  // re-parse); crsDisplayName is for messages/sidecar only.
   const QString primaryProjection = primary.projection();
+  const std::string primaryCrsRaw = primaryProjection.toStdString();
   const std::string primaryCrs = crsDisplayName( primaryProjection );
   // Declared before the feed loop: grid provenance accumulates per feed.
   TileInferenceStats stats;
@@ -1591,6 +1613,16 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     if ( feeds[f].paths.empty() )
       throw RSOperatorError( ErrorCode::InvalidParameter,
                              "feed '" + feeds[f].name + "' provides no raster paths" );
+    // Resource bound (WP-D): a feed materializes ALL its frames in memory —
+    // an unbounded time axis is an unbounded allocation. 1024 frames is far
+    // above any real EO series and keeps blob memory bounded per tile.
+    constexpr std::size_t kMaxTemporalFrames = 1024;
+    if ( feeds[f].paths.size() > kMaxTemporalFrames )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "feed '" + feeds[f].name + "' provides "
+                               + std::to_string( feeds[f].paths.size() ) + " frames; the "
+                               "temporal lane is bounded at " + std::to_string( kMaxTemporalFrames )
+                               + " (split the series or coarsen it)" );
     if ( dynamicT )
     {
       if ( feeds[f].paths.size() < 2 )
@@ -1661,7 +1693,8 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     // Band selection against the FIRST provided frame.
     const std::string &firstPath = feeds[f].paths.front();
     std::vector<int> bandList = feeds[f].bands;
-    std::string feedCrs; // display CRS of the first frame ("" = undeclared)
+    std::string feedCrs;     // display CRS of the first frame ("" = undeclared)
+    std::string feedCrsRaw;  // RAW projection string (the comparison input)
     {
       GdalDatasetWrapper probe;
       if ( !probe.open( QString::fromStdString( firstPath ) ) )
@@ -1675,6 +1708,7 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
       }
       const std::array<double, 6> gt = probe.geoTransform();
       feedCrs = crsDisplayName( probe.projection() );
+      feedCrsRaw = probe.projection().toStdString();
       if ( f > 0 )
       {
         if ( const std::string grid = gridMismatch( feeds[0].paths[0], rasterW, rasterH,
@@ -1684,8 +1718,8 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
           throw RSOperatorError( ErrorCode::InvalidInputData, grid );
         // Platform 8.0: same geotransform NUMBERS under different CRS are
         // different grids — the CRS verdict is part of co-registration.
-        if ( const std::string crs = crsMismatch( feeds[0].paths[0], primaryCrs, firstPath,
-                                                  feedCrs, strictAlignment );
+        if ( const std::string crs = crsMismatch( feeds[0].paths[0], primaryCrsRaw, firstPath,
+                                                  feedCrsRaw, strictAlignment );
              !crs.empty() )
           throw RSOperatorError( ErrorCode::InvalidInputData, crs );
       }
@@ -1781,9 +1815,9 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
       }
       // Every frame is also CRS-checked: a temporal series acquired in one
       // CRS must never leak a reprojected member whose numbers happen to fit.
-      if ( const std::string crs = crsMismatch( feeds[0].paths[0], primaryCrs,
+      if ( const std::string crs = crsMismatch( feeds[0].paths[0], primaryCrsRaw,
                                                 feeds[f].paths[t],
-                                                crsDisplayName( frame->projection() ),
+                                                frame->projection().toStdString(),
                                                 strictAlignment );
            !crs.empty() )
         throw RSOperatorError( ErrorCode::InvalidInputData, crs );
@@ -1809,8 +1843,8 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                  + std::to_string( rasterW ) + "x" + std::to_string( rasterH )
                                  + " — align the mask through the geospatial seam first" );
       if ( const std::string crs =
-             crsMismatch( feeds[0].paths[0], primaryCrs, feeds[f].qualityMasks[t],
-                          crsDisplayName( mask->projection() ), strictAlignment );
+             crsMismatch( feeds[0].paths[0], primaryCrsRaw, feeds[f].qualityMasks[t],
+                          mask->projection().toStdString(), strictAlignment );
            !crs.empty() )
         throw RSOperatorError( ErrorCode::InvalidInputData, crs );
       if ( mask->bandCount() < 1 )
@@ -1842,8 +1876,7 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     GridProvenance grid;
     grid.name = contract.name.empty() ? "input" + std::to_string( f + 1 ) : contract.name;
     grid.path = firstPath;
-    if ( !feeds[f].preparedFrom.empty() )
-      grid.preparedFrom = feeds[f].preparedFrom.front();
+    grid.preparedFrom = feeds[f].preparedFrom; // per-frame origins, verbatim
     grid.crs = ( f == 0 ) ? primaryCrs : feedCrs;
     grid.crsVerified = ( f == 0 ) ? !grid.crs.empty()
                                   : ( !grid.crs.empty() && !primaryCrs.empty() );
@@ -1859,8 +1892,14 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   const int tileSize = std::min( effectiveTileSize( m_model ), std::max( rasterW, rasterH ) );
   const int halo = std::max( 0, effectiveHalo( m_model ) );
   const int pad = std::max( 0, pre.pad );
+  // Budget on the LARGEST feed: with per-feed temporal lengths the "others
+  // scale linearly" assumption does not hold (a dynamic-T feed can dwarf the
+  // primary), so admit on the worst case.
+  int maxFeedChannels = 0;
+  for ( const FeedReader &reader : readers )
+    maxFeedChannels = std::max( maxFeedChannels, reader.channels );
   int batchSize = effectiveBatchSize( m_model, ModelRuntimeRegistry::instance().hardware(),
-                                      tileSize, readers[0].channels );
+                                      tileSize, maxFeedChannels );
   if ( options.batchSizeOverride > 0 )
     batchSize = std::min( batchSize, options.batchSizeOverride );
   batchSize = std::max( 1, batchSize );
@@ -2519,8 +2558,11 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "failed to publish output raster to: " + outputPath );
   }
-  QFile::remove( backupPath );
-  // Platform 8.0: same provenance contract as the single-input publish.
+  // Platform 8.0: same provenance contract and ordering as the single-input
+  // publish (old sidecar removed before the product lands; backup kept until
+  // the new sidecar is in).
+  QFile::remove( finalPath + QStringLiteral( ".prov.json" ) );
+  stats.tilesProcessed = done; // counters finalized BEFORE the document build
   {
     const Json::Value prov = buildProvenanceDocument( m_model, m_runtime, stats,
                                                       "multi_input_probability_stack" );
@@ -2528,9 +2570,12 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     if ( !publishProvenanceSidecar( finalPath, outputPath, prov, &provError ) )
     {
       QFile::remove( finalPath );
+      if ( hadExisting )
+        QFile::rename( backupPath, finalPath ); // restore the previous good product
       throw RSOperatorError( ErrorCode::FileNotWritable, provError );
     }
   }
+  QFile::remove( backupPath );
   context.reportProgressForced( 1.0, "Tiled multi-input inference complete" );
   stats.tilesProcessed = done;
   return stats;

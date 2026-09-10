@@ -26,13 +26,16 @@ namespace sicnu::operators::runtime {
 /// warping happened (the runtime never warps implicitly).
 struct GridProvenance
 {
-  std::string name;          ///< feed/input contract name
-  std::string path;          ///< the raster that was actually fed
-  std::string preparedFrom;  ///< original source when the caller pre-aligned
-                             ///< through the geospatial seam ("" = direct)
+  std::string name;                 ///< feed/input contract name
+  std::string path;                 ///< the raster that was actually fed
+  std::vector<std::string> preparedFrom; ///< original sources when the caller
+                                    ///< pre-aligned through the geospatial
+                                    ///< seam, parallel to the fed frames
+                                    ///< (empty = fed as-is)
   std::string crs;           ///< CRS authority string ("" = undeclared)
   bool crsVerified = false;  ///< true when the CRS was CHECKED equal to the
-                             ///< primary feed's CRS (not merely absent)
+                             ///< primary feed's CRS; for the primary feed
+                             ///< itself (the reference), true when declared
   int width = 0;
   int height = 0;
   int frames = 1;            ///< temporal frames fed under this grid identity

@@ -99,6 +99,9 @@ class PythonWorkerSession final : public IModelRuntime
       // surface in the ready event; declared values replace the historical
       // defaults so consumers negotiate against what THIS worker actually
       // supports (unknown fields keep defaults; lying is the worker's bug).
+      // Reset first: a RESTARTED worker must not inherit the dead process's
+      // declarations when it declares nothing itself.
+      m_negotiated = QJsonObject();
       const QJsonObject negotiated = ready.value( QStringLiteral( "capabilities" ) ).toObject();
       if ( !negotiated.isEmpty() )
       {

@@ -1566,6 +1566,9 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     # the target entirely (honest capability gate, never a fake pass).
     if(SICNU_WITH_ONNX_RUNTIME AND ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
         add_executable(test_onnxruntime_provider test_onnxruntime_provider.cpp)
+        target_include_directories(test_onnxruntime_provider PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+        # The CUDA-EP presence probe calls the ORT C++ API directly.
+        target_link_libraries(test_onnxruntime_provider PRIVATE ${ONNXRUNTIME_LIBRARY})
         target_link_libraries(test_onnxruntime_provider PRIVATE
             Catch2::Catch2WithMain
             Qt6::Core
@@ -1669,6 +1672,9 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     # compiled in (the same macro the provider body uses).
     if(SICNU_WITH_ONNX_RUNTIME AND ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
         target_compile_definitions(test_model_runtime_bench PRIVATE SICNU_WITH_ONNX_RUNTIME=1)
+        target_include_directories(test_model_runtime_bench PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+        # OrtGetVersionString() for the bench header.
+        target_link_libraries(test_model_runtime_bench PRIVATE ${ONNXRUNTIME_LIBRARY})
     endif()
     target_link_libraries(test_model_runtime_bench PRIVATE
         Catch2::Catch2WithMain

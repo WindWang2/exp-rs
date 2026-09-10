@@ -25,10 +25,13 @@ through the geospatial seam (`raster_convert` warp); the feed entry carries
 arity and records verbatim.
 
 Every successful raster product publishes `<output>.prov.json`
-(`exp-rs-prov/1`) atomically next to the raster: model identity + content
-digest, backend/device, per-input grid provenance (path, prepared_from, CRS,
-`crs_verified`), execution counters and output band semantics. A product
-whose sidecar cannot be published is REMOVED — no untracked results. The
+(`exp-rs-prov/1`) next to the raster through the same staged-write + rename
+path: model identity + content digest, backend/device, per-input grid
+provenance (path, prepared_from per frame, CRS, `crs_verified`), execution
+counters and output band semantics. Ordering: the old sidecar is removed
+before the new product lands and the new sidecar lands last — a crash can
+leave a product with a MISSING sidecar (detectable absence), never a stale
+mismatched one; on sidecar failure the previous product is restored. The
 result payload carries the same story under `inputs`.
 
 ## 2. Temporal tensor lane (WP-D)
@@ -58,9 +61,12 @@ silently fetching.
 
 - `DevicePlacementPolicy` knob: `LowestFitting` (7.0 default) or
   `LeastLoaded` (auto picks the fitting device with the most free VRAM,
-  ties → lowest index). Explicit `cpu`/`cuda:N` requests are
-  policy-independent. It is a placement knob only — admission, the bounded
-  pressure valve and refusal semantics are unchanged.
+  ties → lowest index). Deployment selects it via
+  `SICNU_MODEL_PLACEMENT=least_loaded`; explicit `cpu`/`cuda:N` requests
+  are policy-independent. It is a placement knob only — admission, the
+  bounded pressure valve and refusal semantics are unchanged.
+- Temporal feeds are bounded: a feed carries at most 1024 frames (typed
+  refusal beyond), and the batch budget admits on the LARGEST feed.
 - `ModelRuntimeRegistry::deviceReport()` exposes the per-device
   capacity/reserved/holders snapshot. There is no sub-allocation, so
   `capacity − reserved` IS the honest fragmentation view.

@@ -36,8 +36,9 @@ All notable changes to the `exp-rs` project will be documented in this file.
 - **Provider resilience (WP-F)**: python worker handshake capability
   negotiation (max_rank/multi_input/dtypes replace defaults); ONE
   respawn + replay per session after a mid-exchange worker death
-  (live-but-stuck workers are never restarted — no double execution);
-  exhausted restart budget is a typed ProviderCrash.
+  (live-but-stuck workers are never restarted — a request is never replayed
+  into a live worker and there are never two delivered responses); exhausted
+  restart budget is a typed ProviderCrash.
 - **Provenance sidecars (WP-G)**: every published raster inference product
   carries `<output>.prov.json` (model identity/digest, backend/device,
   per-input grid+CRS verdicts, execution counters, band semantics)

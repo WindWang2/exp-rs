@@ -50,8 +50,11 @@
      `capabilities` (max_rank, multi_input, dtypes) replacing defaults; a
      worker that DIES mid-exchange gets ONE respawn + replay per session
      (dead workers only — a live-but-stuck worker is a hang and is never
-     restarted, so a forward can never double-execute); exhausted budget is
-     a typed ProviderCrash. The `exp-rs-infer/1` wire contract is extended
+     restarted, so a request is never replayed into a live worker and there
+     are never two delivered responses; a worker that dies after executing
+     but before responding can still cause a replay — inherent to
+     at-least-once recovery and honestly documented); exhausted budget is a
+     typed ProviderCrash. The `exp-rs-infer/1` wire contract is extended
      additively, never forked.
 - Consequences:
   - Adding a real backend lane is now an evidenced, repeatable act: the ORT

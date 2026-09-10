@@ -84,6 +84,10 @@ void expandStacCollection( const std::string &documentPath, const std::string &a
          || item["properties"].isNull() )
       throw RSOperatorError( ErrorCode::InvalidInputData,
                              "STAC item is not valid: " + itemPath );
+    // STAC relative hrefs resolve against the document containing them —
+    // the ITEM (which may live in a subdirectory of the collection), not
+    // the top-level document.
+    const QFileInfo itemInfo( QString::fromStdString( itemPath ) );
     const std::string datetime = item["properties"].get( "datetime", "" ).asString();
     if ( datetime.empty() )
       throw RSOperatorError( ErrorCode::InvalidInputData,
@@ -108,10 +112,14 @@ void expandStacCollection( const std::string &documentPath, const std::string &a
         href = assets.begin()->get( "href", "" ).asString();
     }
     if ( href.empty() )
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "STAC item asset '" + assetKey + "' carries no href: " + itemPath );
+      throw RSOperatorError(
+        ErrorCode::InvalidInputData,
+        "STAC item carries no usable asset href"
+          + ( assetKey.empty() ? std::string( " (tried COG, data, image, first entry)" )
+                               : " for asset '" + assetKey + "'" )
+          + ": " + itemPath );
     if ( QFileInfo( QString::fromStdString( href ) ).isRelative() )
-      href = docInfo.absoluteDir().filePath( QString::fromStdString( href ) ).toStdString();
+      href = itemInfo.absoluteDir().filePath( QString::fromStdString( href ) ).toStdString();
     frames.emplace_back( datetime, href );
   };
 
@@ -122,10 +130,16 @@ void expandStacCollection( const std::string &documentPath, const std::string &a
     if ( !links.isArray() )
       throw RSOperatorError( ErrorCode::InvalidInputData,
                              "STAC collection carries no links array: " + documentPath );
+    constexpr std::size_t kMaxStacItems = 1024; // mirrors the engine frame cap
     for ( const auto &link : links )
     {
       if ( link.get( "rel", "" ).asString() != "item" )
         continue;
+      if ( frames.size() >= kMaxStacItems )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "STAC collection resolves to more than "
+                                 + std::to_string( kMaxStacItems )
+                                 + " items: " + documentPath + " (coarsen the series)" );
       std::string href = link.get( "href", "" ).asString();
       if ( href.empty() )
         continue;
@@ -146,18 +160,21 @@ void expandStacCollection( const std::string &documentPath, const std::string &a
                            "stac_collection '" + documentPath
                              + "' is neither a Collection nor an Item (type '" + type + "')" );
 
-  // STAC datetimes are ISO 8601 with UTC offsets — lexicographic order is
-  // wrong across offsets, so sort by parsed instant. Equal instants keep the
-  // document order (stable sort).
+  // Validate EVERY datetime BEFORE sorting: throwing from a comparator
+  // gives no ordering guarantee and reports the failure data-order
+  // dependently.
+  for ( const auto &frame : frames )
+    if ( !QDateTime::fromString( QString::fromStdString( frame.first ), Qt::ISODate ).isValid() )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "STAC datetime '" + frame.first + "' is not ISO 8601 in: "
+                               + documentPath );
+  // Sort by parsed instant; equal instants keep document order (stable).
   std::stable_sort( frames.begin(), frames.end(),
                     [ & ]( const auto &a, const auto &b ) {
                       const QDateTime ta = QDateTime::fromString( QString::fromStdString( a.first ),
                                                                   Qt::ISODate );
                       const QDateTime tb = QDateTime::fromString( QString::fromStdString( b.first ),
                                                                   Qt::ISODate );
-                      if ( !ta.isValid() || !tb.isValid() )
-                        throw RSOperatorError( ErrorCode::InvalidInputData,
-                                               "STAC datetime is not ISO 8601 in: " + documentPath );
                       return ta < tb;
                     } );
   for ( const auto &frame : frames )
@@ -370,6 +387,10 @@ Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorConte
         feed.name = entry.isMember( "name" ) && entry["name"].isString()
                       ? entry["name"].asString()
                       : std::string();
+        if ( entry.isMember( "stac_collection" ) && entry.isMember( "paths" ) )
+          throw RSOperatorError( ErrorCode::InvalidParameter,
+                                 "named_inputs feed '" + feed.name
+                                   + "': declare stac_collection OR paths, not both" );
         if ( entry.isMember( "stac_collection" ) )
         {
           // Local STAC Collection/Item → time-ordered frames + timestamps.
@@ -459,7 +480,13 @@ Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorConte
     }();
     if ( !request.namedInputs.empty() )
     {
-      request.bands = {}; // per-feed bands ride the feeds
+      // Per-feed band selection rides the feeds; a top-level bands list next
+      // to named feeds is an authoring error (it would be silently ignored).
+      if ( params.isMember( "bands" ) && !params["bands"].isNull() )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "bands applies to the single-input path — select bands "
+                                 "per feed inside named_inputs" );
+      request.bands = {};
     }
     else
     {

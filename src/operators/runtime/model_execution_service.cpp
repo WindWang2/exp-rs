@@ -303,7 +303,12 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
       input["name"] = grid.name;
       input["path"] = grid.path;
       if ( !grid.preparedFrom.empty() )
-        input["prepared_from"] = grid.preparedFrom;
+      {
+        Json::Value prepared( Json::arrayValue );
+        for ( const std::string &origin : grid.preparedFrom )
+          prepared.append( origin );
+        input["prepared_from"] = prepared;
+      }
       if ( !grid.crs.empty() )
         input["crs"] = grid.crs;
       input["crs_verified"] = grid.crsVerified;

@@ -14,6 +14,7 @@
 #include "operators/runtime/model_execution_service.h"
 #include "operators/runtime/model_runtime.h"
 #include "operators/runtime/tile_inference_engine.h"
+#include "operators/rs/rs_inference_operator.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "synthetic_raster_builder.h"
 
@@ -197,6 +198,16 @@ TEST_CASE( "crsMismatch compares CRS semantically, not syntactically", "[models]
     "UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],"
     "AUTHORITY[\"EPSG\",\"4326\"]]";
   CHECK( TileInferenceEngine::crsMismatch( "a", wkt4326, "b", "EPSG:4326", true ).empty() );
+  // REVIEW P0-1 regression: an AUTHORITY-LESS WKT (custom/local CRS) must
+  // compare equal against itself — the comparison runs on the RAW strings,
+  // never on the truncated display form.
+  const char *wktNoAuth =
+    "GEOGCS[\"Local Grid\",DATUM[\"Local Datum\",SPHEROID[\"WGS 84\",6378137,298.257223563]],"
+    "PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]";
+  CHECK( TileInferenceEngine::crsMismatch( "a", wktNoAuth, "b", wktNoAuth, true ).empty() );
+  // ...while an authority-less WKT still differs from a real CRS.
+  CHECK_THAT( TileInferenceEngine::crsMismatch( "a", wktNoAuth, "b", "EPSG:32633", false ),
+              Catch::Matchers::ContainsSubstring( "coordinate reference systems" ) );
 }
 
 TEST_CASE( "same geotransform under different CRS is a co-registration refusal",
@@ -262,7 +273,8 @@ TEST_CASE( "matching CRS feeds run and carry grid provenance with prepared_from"
 
   REQUIRE( stats.inputGrids.size() == 2 );
   CHECK( stats.inputGrids[0].name == "before" );
-  CHECK( stats.inputGrids[0].preparedFrom == "raw-before.tif" );
+  REQUIRE( stats.inputGrids[0].preparedFrom.size() == 1 );
+  CHECK( stats.inputGrids[0].preparedFrom[0] == "raw-before.tif" );
   CHECK( stats.inputGrids[0].crsVerified );
   CHECK( stats.inputGrids[0].width == 32 );
   CHECK( stats.inputGrids[1].crsVerified );
@@ -789,4 +801,239 @@ TEST_CASE( "a dynamic-T model refuses the single-input service path",
   REQUIRE_THROWS_WITH( runModelInference( request, context ),
                        Catch::Matchers::ContainsSubstring( "temporal input" ) );
   ModelCatalog::instance().setDirectory( "/nonexistent-mr8-restore" );
+}
+
+// ---------------------------------------------------------------------------
+// WP-D/WP-C: the rs:infer named_inputs operator surface (REVIEW P1-2 B)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Installs a provider for the "m8-fake" framework so the OPERATOR path (which
+/// resolves through evaluateRuntimeReadiness) sees a registered provider.
+struct OperatorFakeProvider
+{
+    OperatorFakeProvider()
+    {
+      ModelRuntimeRegistry::instance().registerProvider(
+        "m8-fake",
+        []( const ModelInfo &model, const ModelHardwareCapabilities &,
+            std::string * ) -> ModelRuntimePtr {
+          return std::make_shared<RecordingMultiRuntime>();
+        } );
+    }
+};
+
+/// Writes a ready "m8-fake" catalog model so the operator path resolves
+/// through the full runModelInference service. Each instance needs a UNIQUE
+/// name: unregister() poisons the id for scanned manifests until reload, so
+/// a second case reusing the name would resolve to nothing.
+struct OperatorCatalogModel
+{
+    explicit OperatorCatalogModel( const QTemporaryDir &dir, const std::string &name,
+                                   bool temporalInput = false )
+        : m_name( name )
+    {
+      const QString modelDir = QStringLiteral( "m8-op-%1" ).arg( QString::fromStdString( name ) );
+      QDir( dir.path() ).mkpath( modelDir );
+      QFile weights( dir.filePath( modelDir + QStringLiteral( "/weights.bin" ) ) );
+      REQUIRE( weights.open( QIODevice::WriteOnly ) );
+      weights.write( QByteArray( "m8-operator-fake-weights:" ) + QString::fromStdString( name ).toUtf8() );
+      weights.close();
+      QFile manifest( dir.filePath( modelDir + QStringLiteral( "/model.json" ) ) );
+      REQUIRE( manifest.open( QIODevice::WriteOnly ) );
+      const QString inputs = temporalInput
+                               ? QStringLiteral( "[ { \"name\": \"before\", "
+                                                 "\"temporal_length\": 2 }, { \"name\": "
+                                                 "\"after\", \"temporal_length\": 2 } ]" )
+                               : QStringLiteral( "[ { \"name\": \"before\" }, { \"name\": "
+                                                  "\"after\" } ]" );
+      manifest.write( QString( R"({
+        "name": "%1",
+        "task": "change_detection",
+        "framework": "m8-fake",
+        "artifact": { "path": "weights.bin" },
+        "inputs": %2,
+        "output": { "classes": ["change"] }
+      } )" )
+                        .arg( QString::fromStdString( name ), inputs )
+                        .toUtf8() );
+      manifest.close();
+      ModelCatalog::instance().setDirectory( dir.path().toStdString() );
+    }
+    ~OperatorCatalogModel() { ModelCatalog::instance().unregister( m_name ); }
+    std::string m_name;
+};
+
+} // namespace
+
+TEST_CASE( "rs:infer named_inputs runs the operator surface end-to-end",
+           "[models][operator8]" )
+{
+  QTemporaryDir dir;
+  OperatorFakeProvider providerInstall;
+  OperatorCatalogModel catalog( dir, "m8-op-a" );
+
+  auto primary = sicnu::testing::RsSyntheticRasterBuilder( 16, 16, 1, GDT_Float32 )
+                   .withConstantValue( 1, 5.0f )
+                   .writeToDisk( dir.filePath( QStringLiteral( "p.tif" ) ) );
+  auto other = sicnu::testing::RsSyntheticRasterBuilder( 16, 16, 1, GDT_Float32 )
+                 .withConstantValue( 1, 7.0f )
+                 .writeToDisk( dir.filePath( QStringLiteral( "o.tif" ) ) );
+  REQUIRE_FALSE( primary.isEmpty() );
+  REQUIRE_FALSE( other.isEmpty() );
+
+  auto &registry = ModelRuntimeRegistry::instance();
+  registry.releaseAll();
+
+  Json::Value params;
+  params["model"] = "m8-op-a";
+  params["output"] = dir.filePath( QStringLiteral( "op-out.tif" ) ).toStdString();
+  Json::Value feeds( Json::arrayValue );
+  Json::Value before;
+  before["name"] = "before";
+  before["paths"] = Json::Value( Json::arrayValue );
+  before["paths"].append( primary.toStdString() );
+  Json::Value after;
+  after["name"] = "after";
+  after["paths"] = Json::Value( Json::arrayValue );
+  after["paths"].append( other.toStdString() );
+  feeds.append( before );
+  feeds.append( after );
+  params["named_inputs"] = feeds;
+
+  sicnu::operators::rs::RsInferenceOperator op;
+  RSOperatorContext context;
+  const Json::Value payload = op.run( params, context );
+  CHECK( payload["tiles"].asInt() == 1 );
+  CHECK( payload.isMember( "inputs" ) );
+  CHECK( payload["inputs"].size() == 2 );
+  // Product + sidecar both published.
+  CHECK( QFile::exists( dir.filePath( QStringLiteral( "op-out.tif" ) ) ) );
+  CHECK( QFile::exists( dir.filePath( QStringLiteral( "op-out.tif.prov.json" ) ) ) );
+
+  // Malformed feeds are typed refusals, never silent drops.
+  {
+    Json::Value broken = params;
+    Json::Value badFeeds( Json::arrayValue );
+    badFeeds.append( "not-an-object" );
+    broken["named_inputs"] = badFeeds;
+    REQUIRE_THROWS_WITH( op.run( broken, context ),
+                         Catch::Matchers::ContainsSubstring( "must be an object" ) );
+  }
+  {
+    Json::Value broken = params;
+    Json::Value badFeeds = feeds;
+    badFeeds[0]["bands"] = Json::Value( "1" ); // strings refuse
+    broken["named_inputs"] = badFeeds;
+    REQUIRE_THROWS_AS( op.run( broken, context ), RSOperatorError );
+  }
+  {
+    // A top-level bands list next to named feeds is an authoring error.
+    Json::Value broken = params;
+    broken["bands"] = Json::Value( Json::arrayValue );
+    broken["bands"].append( 1 );
+    REQUIRE_THROWS_AS( op.run( broken, context ), RSOperatorError );
+  }
+  {
+    // stac_collection and paths are mutually exclusive.
+    Json::Value broken = params;
+    Json::Value badFeeds = feeds;
+    badFeeds[0]["stac_collection"] = "/tmp/whatever.json";
+    broken["named_inputs"] = badFeeds;
+    REQUIRE_THROWS_AS( op.run( broken, context ), RSOperatorError );
+  }
+  {
+    // Remote STAC documents refuse (local-only boundary).
+    Json::Value broken = params;
+    Json::Value badFeeds( Json::arrayValue );
+    Json::Value remote;
+    remote["name"] = "before";
+    remote["stac_collection"] = "https://example.com/collection.json";
+    badFeeds.append( remote );
+    broken["named_inputs"] = badFeeds;
+    try
+    {
+      op.run( broken, context );
+      FAIL( "remote stac_collection must refuse" );
+    }
+    catch ( const RSOperatorError &e )
+    {
+      CHECK( std::string( e.what() ).find( "remote" ) != std::string::npos );
+    }
+  }
+}
+
+TEST_CASE( "rs:infer expands a local STAC collection with nested items into ordered frames",
+           "[models][operator8][stac]" )
+{
+  QTemporaryDir dir;
+  OperatorFakeProvider providerInstall;
+  OperatorCatalogModel catalog( dir, "m8-op-b", /*temporalInput*/ true );
+  // Standard self-contained layout: collection.json links to items/scene*.json;
+  // each item's asset href is relative to the ITEM directory (review P1-3).
+  QDir().mkpath( dir.filePath( QStringLiteral( "items" ) ) );
+  QDir().mkpath( dir.filePath( QStringLiteral( "items/data" ) ) );
+
+  const auto writeJson = [ & ]( const QString &path, const QByteArray &text ) {
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::WriteOnly ) );
+    file.write( text );
+  };
+  // rasters under items/data/
+  auto t1 = sicnu::testing::RsSyntheticRasterBuilder( 16, 16, 1, GDT_Float32 )
+              .withConstantValue( 1, 1.0f )
+              .writeToDisk( dir.filePath( QStringLiteral( "items/data/t1.tif" ) ) );
+  auto t2 = sicnu::testing::RsSyntheticRasterBuilder( 16, 16, 1, GDT_Float32 )
+              .withConstantValue( 1, 2.0f )
+              .writeToDisk( dir.filePath( QStringLiteral( "items/data/t2.tif" ) ) );
+  REQUIRE_FALSE( t1.isEmpty() );
+  REQUIRE_FALSE( t2.isEmpty() );
+
+  writeJson( dir.filePath( QStringLiteral( "items/scene2.json" ) ),
+             QByteArray( R"({"type":"Feature","stac_version":"1.0.0",
+               "properties":{"datetime":"2024-06-01T00:00:00Z"},
+               "assets":{"data":{"href":"data/t2.tif"}}})" ) );
+  writeJson( dir.filePath( QStringLiteral( "items/scene1.json" ) ),
+             QByteArray( R"({"type":"Feature","stac_version":"1.0.0",
+               "properties":{"datetime":"2024-01-01T00:00:00Z"},
+               "assets":{"data":{"href":"data/t1.tif"}}})" ) );
+  // Deliberately out of order in the links: expansion sorts by datetime.
+  writeJson( dir.filePath( QStringLiteral( "collection.json" ) ),
+             QByteArray( R"({"type":"Collection","stac_version":"1.0.0",
+               "links":[
+                 {"rel":"item","href":"items/scene2.json"},
+                 {"rel":"item","href":"items/scene1.json"}
+               ]})" ) );
+
+  RSOperatorContext context;
+  Json::Value params;
+  params["model"] = "m8-op-b";
+  params["output"] = dir.filePath( QStringLiteral( "stac-op-out.tif" ) ).toStdString();
+  Json::Value feeds( Json::arrayValue );
+  Json::Value before;
+  before["name"] = "before";
+  before["stac_collection"] = dir.filePath( QStringLiteral( "collection.json" ) ).toStdString();
+  before["stac_asset"] = "data";
+  feeds.append( before );
+  params["named_inputs"] = feeds;
+
+  // Expand through the operator's own path: a temporal feed needs BOTH
+  // declared inputs fed; feed "after" with the same collection.
+  Json::Value after;
+  after["name"] = "after";
+  after["stac_collection"] = dir.filePath( QStringLiteral( "collection.json" ) ).toStdString();
+  feeds.append( after );
+  params["named_inputs"] = feeds;
+
+  sicnu::operators::rs::RsInferenceOperator op;
+  const Json::Value payload = op.run( params, context );
+  CHECK( payload.isMember( "inputs" ) );
+  // Both feeds expanded to T=2 (the collection's two items), time-ordered.
+  CHECK( payload["inputs"][0]["frames"].asInt() == 2 );
+  CHECK( payload["inputs"][1]["frames"].asInt() == 2 );
+  // The raster builder defaults to EPSG:4326: the CRS was declared, compared
+  // equal across feeds, and is reported as verified.
+  CHECK( payload["inputs"][0]["crs_verified"].asBool() == true );
+  CHECK( payload["inputs"][0]["crs"].asString().find( "4326" ) != std::string::npos );
 }

@@ -633,7 +633,7 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   const std::string &inputLayout = info.input.layout;
   if ( !inputLayout.empty() && inputLayout != "NCHW" && inputLayout != "nchw" )
   {
-    if ( inputLayout == "NCTHW" && sequenceInput )
+    if ( ( inputLayout == "NCTHW" || inputLayout == "ncthw" ) && sequenceInput )
       ; // legal: sequence feeds carry the rank-5 time axis
     else
       markInvalid( "unsupported input layout '" + inputLayout
@@ -783,7 +783,8 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     if ( in.temporalCollapse == "sequence" && in.temporalLength <= 0 && !in.temporalDynamic )
       markInvalid( "input.temporal_collapse 'sequence' requires either a fixed "
                    "temporal_length or dynamic T (declare \"temporal_dynamic\": true)" );
-    if ( in.temporalCollapse == "sequence" && !in.layout.empty() && in.layout != "NCTHW" )
+    if ( in.temporalCollapse == "sequence" && !in.layout.empty()
+         && in.layout != "NCTHW" && in.layout != "ncthw" )
       markInvalid( "input.temporal_collapse 'sequence' feeds an explicit time axis "
                    "(rank-5 NCTHW) — input.layout must be NCTHW, got '" + in.layout + "'" );
   }
@@ -830,7 +831,7 @@ std::string ModelInputContract::validate() const
     if ( temporalLength <= 0 && !temporalDynamic )
       return "temporal_collapse 'sequence' requires a fixed temporal_length > 0 or "
                "temporal_dynamic: true (the feed then defines T)";
-    if ( layout != "NCTHW" )
+    if ( layout != "NCTHW" && layout != "ncthw" )
       return "temporal_collapse 'sequence' feeds an explicit time axis (rank-5 NCTHW) "
                "- declare input.layout \"NCTHW\", got '" + layout + "'";
   }

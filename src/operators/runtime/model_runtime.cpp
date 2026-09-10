@@ -542,7 +542,22 @@ ModelRuntimeRegistry &ModelRuntimeRegistry::instance()
   return registry;
 }
 
+namespace {
+/// Platform 8.0 WP-B: the placement policy is a deployment knob, not just a
+/// test seam — SICNU_MODEL_PLACEMENT=least_loaded spreads concurrent
+/// sessions across cards at construction time (documented in
+/// docs/inference/platform-8.md). Unknown tokens keep the 7.0 default.
+DevicePlacementPolicy placementPolicyFromEnv()
+{
+  const QByteArray token = qgetenv( "SICNU_MODEL_PLACEMENT" );
+  if ( token.compare( "least_loaded", Qt::CaseInsensitive ) == 0 )
+    return DevicePlacementPolicy::LeastLoaded;
+  return DevicePlacementPolicy::LowestFitting;
+}
+} // namespace
+
 ModelRuntimeRegistry::ModelRuntimeRegistry()
+    : m_placementPolicy( placementPolicyFromEnv() )
 {
   registerProvider( "onnx",
                     []( const ModelInfo &model, const ModelHardwareCapabilities &hw,

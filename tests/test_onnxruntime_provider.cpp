@@ -25,6 +25,8 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/runtime/model_runtime.h"
 #include "operators/runtime/onnxruntime_provider.h"
+
+#include <onnxruntime_cxx_api.h>
 #include "operators/runtime/tile_inference_engine.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "synthetic_raster_builder.h"
@@ -497,13 +499,10 @@ TEST_CASE( "requestCancel terminates a RUNNING ORT forward within a bounded dela
 
   std::atomic<bool> done{ false };
   std::string failureMessage;
-  bool completedSizeOk = false;
   std::thread runner( [ & ] {
     try
     {
-      const std::vector<NamedTensor> out = session->inferNamed( { { "x", tx } }, {} );
-      // Completing is legal on a fast host; remember nothing went wrong.
-      completedSizeOk = out.size() == 1;
+      session->inferNamed( { { "x", tx } }, {} );
     }
     catch ( const std::exception &e )
     {
@@ -523,8 +522,6 @@ TEST_CASE( "requestCancel terminates a RUNNING ORT forward within a bounded dela
   }
   runner.join();
   CHECK( joined );
-  if ( !failureMessage.empty() )
-    CHECK( completedSizeOk == false );
 
   // Either the forward was terminated (cancel-flavored diagnostic) or it had
   // already completed before the cancel landed (only on a much faster host).
@@ -545,6 +542,25 @@ TEST_CASE( "requestCancel terminates a RUNNING ORT forward within a bounded dela
 TEST_CASE( "a forced CUDA acquisition on a CUDA-less host fails with a typed load error",
            "[models][ort][device]" )
 {
+  // REVIEW P2-6: on an ORT build that actually ships the CUDA EP the
+  // acquisition below may legitimately succeed — the test asserts the
+  // CUDA-LESS refusal, so skip when the EP is compiled in. Probing the
+  // session-options level EP registration distinguishes "EP not compiled
+  // in" (throws) from "EP present" (returns).
+  {
+    Ort::SessionOptions probe;
+    try
+    {
+      OrtCUDAProviderOptions cudaOptions{};
+      probe.AppendExecutionProvider_CUDA( cudaOptions );
+      WARN( "ORT build carries a CUDA EP — skipping the CUDA-less refusal test" );
+      return;
+    }
+    catch ( const Ort::Exception & )
+    {
+      // expected on CPU-only ORT builds: fall through and run the test
+    }
+  }
   QTemporaryDir dir;
   const std::string artifact =
     writeFixture( dir, "sum_dual", onnxfixture::sumDual(
