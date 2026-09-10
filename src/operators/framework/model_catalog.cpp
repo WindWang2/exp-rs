@@ -890,7 +890,7 @@ Json::Value ModelInfo::toJson() const
     if ( runtime.provider.timeoutMs != 30000 )
       p["timeout_ms"] = runtime.provider.timeoutMs;
     if ( runtime.provider.maxBodyMb != 256 )
-      p["max_body_mb"] = runtime.provider.maxBodyMb;
+      p["max_body_mb"] = static_cast<Json::Int64>( runtime.provider.maxBodyMb );
     runtimeJson["provider"] = p;
   }
   out["runtime"] = runtimeJson;

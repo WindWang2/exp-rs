@@ -55,7 +55,8 @@ public:
         Options() : cancelPollMs( 100 ) {}
     };
 
-    explicit IpcChannel( std::unique_ptr<IIpcStream> stream, Options options = {} );
+    explicit IpcChannel( std::unique_ptr<IIpcStream> stream );
+    explicit IpcChannel( std::unique_ptr<IIpcStream> stream, Options options );
     ~IpcChannel();
 
     IpcChannel( const IpcChannel & ) = delete;
