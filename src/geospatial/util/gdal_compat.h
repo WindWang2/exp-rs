@@ -21,12 +21,13 @@
 //                                            RemoveHandler)
 //   SICNU_GDAL_INT64_DATATYPES              (>= 3.5: GDT_Int64/GDT_UInt64)
 //
-// The header is SELF-CONTAINED apart from cpl_port.h (which defines
-// GDAL_VERSION_NUM): including it must not force a cascade of other GDAL
-// headers, so test TUs can probe the selected configuration cheaply.
+// The header is SELF-CONTAINED apart from <gdal_version.h> (which defines
+// GDAL_VERSION_NUM / GDAL_COMPUTE_VERSION): including it must not force a
+// cascade of other GDAL headers, so test TUs can probe the selected
+// configuration cheaply.
 #pragma once
 
-#include <cpl_port.h> // GDAL_VERSION_NUM, GDAL_COMPUTE_VERSION
+#include <gdal_version.h> // GDAL_VERSION_NUM, GDAL_COMPUTE_VERSION
 
 #define SICNU_GDAL_VERSION_NUM GDAL_VERSION_NUM
 

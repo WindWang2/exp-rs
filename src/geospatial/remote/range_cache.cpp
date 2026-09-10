@@ -459,6 +459,10 @@ class CacheStore
 std::unique_ptr<CacheStore> g_store;
 std::mutex g_storeLifecycleMutex;
 bool s_handlerInstalled = false;
+// Heap-owned while installed (see install()/uninstall()): RemoveHandler
+// deletes the object, so this pointer must never dangle across uninstall.
+class RangeCacheFilesystemHandler;
+RangeCacheFilesystemHandler *g_handler = nullptr;
 
 CacheStore &store()
 {
@@ -1048,15 +1052,21 @@ void RemoteRangeCache::install( const RangeCacheConfig &config )
 {
   if ( config.blockSize == 0 || config.maxCacheBytes == 0 )
     throw GeoError( ErrorCode::InvalidArgument, "RemoteRangeCache: blockSize and budget must be positive" );
-  static RangeCacheFilesystemHandler s_handler; // process-lifetime, like VSI itself
+  // The handler MUST be heap-allocated: VSIFileManager::RemoveHandler()
+  // (GDAL >= 3.9) DELETES the registered handler, so a static-storage object
+  // would be freed here and then freed AGAIN by its static destructor at
+  // process exit ("double free or corruption"). Ownership transfers to GDAL
+  // on RemoveHandler; until then this module owns the single instance.
   {
     std::lock_guard<std::mutex> lock( g_storeLifecycleMutex );
+    if ( !g_handler )
+      g_handler = new RangeCacheFilesystemHandler();
     if ( !g_store )
       g_store = std::make_unique<CacheStore>();
     g_store->updateConfig( config ); // blockSize change drops entries
     s_handlerInstalled = true;
   }
-  VSIFileManager::InstallHandler( kRangeCachePrefix, &s_handler );
+  VSIFileManager::InstallHandler( kRangeCachePrefix, g_handler );
   ensureGdalRegistered();
 }
 
@@ -1066,7 +1076,10 @@ void RemoteRangeCache::uninstall()
   if ( !g_store )
     return;
 #if SICNU_GDAL_VSI_REMOVE_HANDLER
+  // RemoveHandler deletes the handler object (see install): forget our
+  // pointer so a re-install allocates a fresh one.
   VSIFileManager::RemoveHandler( kRangeCachePrefix );
+  g_handler = nullptr;
 #endif
   g_store->dropAll();
   s_handlerInstalled = false;

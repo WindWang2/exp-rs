@@ -16,6 +16,7 @@
 //
 // Nothing here links QGIS/Qt — the whole suite builds in the light geo lane.
 #include "geospatial/util/gdal_compat.h"
+#include "geospatial/remote/range_cache.h"
 
 #include <catch2/catch_test_macros.hpp>
 
