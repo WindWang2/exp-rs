@@ -171,5 +171,7 @@ TEST_CASE( "fault registry: rollback after a fired fault runs fault-free", "[fau
         }
     };
     alwaysSeam( 0 );
-    REQUIRE( firings == 2 ); // outer + nested re-entry both fired
+    // depth 0 (outer), 1 (rollback), 2 (rollback of the rollback) — every
+    // nested probe re-fired because the mode is Always.
+    REQUIRE( firings == 3 );
 }
