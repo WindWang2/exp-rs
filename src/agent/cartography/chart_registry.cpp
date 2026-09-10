@@ -941,7 +941,7 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
     else if ( binding["data"].size() > 256 )
       problems.push_back( "inline binding capped at 256 data points" );
   }
-  else
+  if ( mode == "vector_expression" )
   {
     if ( !binding.isMember( "layer" ) || !binding["layer"].isString() )
       problems.push_back( "vector_expression binding needs 'layer'" );

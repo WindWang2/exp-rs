@@ -833,8 +833,11 @@ void mergeTemplateLayer( Json::Value &accumulator, const Json::Value &layer,
       mergeTemplateVariants( accumulator, layer );
       stampProvenance( accumulator, key.c_str(), sourceId );
     }
-    else
+    else if ( !accumulator.isMember( key ) || accumulator[key] != layer[key] )
     {
+      // Only a layer that actually contributes (adds or changes the value)
+      // earns provenance — inherited keys carried by a resolved parent do
+      // not count as that parent's contribution.
       accumulator[key] = layer[key];
       stampProvenance( accumulator, key.c_str(), sourceId );
     }
