@@ -95,6 +95,15 @@ class PythonWorkerSession final : public IModelRuntime
         stopWorker();
         return false;
       }
+      // Platform 8.0 WP-F capability negotiation: the worker MAY declare its
+      // surface in the ready event; declared values replace the historical
+      // defaults so consumers negotiate against what THIS worker actually
+      // supports (unknown fields keep defaults; lying is the worker's bug).
+      const QJsonObject negotiated = ready.value( QStringLiteral( "capabilities" ) ).toObject();
+      if ( !negotiated.isEmpty() )
+      {
+        m_negotiated = negotiated;
+      }
       m_loaded = true;
       return true;
     }
@@ -116,40 +125,75 @@ class PythonWorkerSession final : public IModelRuntime
       if ( m_cancelRequested.load( std::memory_order_relaxed ) )
         throw std::runtime_error( "inference canceled before the forward pass" );
 
+      // Platform 8.0 WP-F bounded restart: a worker that DIED mid-exchange
+      // (crash between two forwards) gets ONE respawn + replay for the whole
+      // SESSION lifetime — never a loop. An exhausted restart budget, or a
+      // restart that fails to hand-shake, surfaces as a typed provider-crash
+      // diagnostic. The request document is deterministic, so replaying it
+      // is safe.
       const QJsonObject request = encodeInferRequest( inputs, outputNames, m_artifact, m_digest );
-      const QByteArray line = QJsonDocument( request ).toJson( QJsonDocument::Compact ) + '\n';
-      m_process->write( line );
-      if ( !m_process->waitForBytesWritten( m_timeoutMs ) )
+      for ( int attempt = 0; attempt < 2; ++attempt )
       {
-        recordFailure( "python worker stopped accepting requests (broken pipe)" );
-        throw std::runtime_error( "python worker stopped accepting requests (broken pipe)" );
-      }
+        if ( attempt > 0 )
+        {
+          if ( m_restartsLeft <= 0 )
+          {
+            recordFailure( "worker crashed and the session restart budget is exhausted" );
+            throw std::runtime_error( "provider crashed: python worker crashed and the "
+                                      "session restart budget is exhausted" );
+          }
+          --m_restartsLeft;
+          stopWorker();
+          std::string restartError;
+          if ( !startWorker( &restartError ) )
+          {
+            recordFailure( "worker crashed and the restart failed: " + restartError );
+            throw std::runtime_error( "provider crashed: python worker crashed and the "
+                                      "restart failed: " + restartError );
+          }
+          recordFailure( "worker crashed mid-run; restarted and replayed the forward" );
+        }
+        const QByteArray line = QJsonDocument( request ).toJson( QJsonDocument::Compact ) + '\n';
+        m_process->write( line );
+        if ( !m_process->waitForBytesWritten( m_timeoutMs ) )
+        {
+          // Only a DEAD worker is restartable — a live-but-stuck worker is a
+          // hang, and replaying into it could double-execute the forward.
+          if ( attempt == 0 && m_process->state() != QProcess::Running )
+            continue; // dead worker → the bounded restart above
+          recordFailure( "python worker stopped accepting requests (broken pipe)" );
+          throw std::runtime_error( "python worker stopped accepting requests (broken pipe)" );
+        }
 
-      QJsonObject response;
-      if ( !readLine( response, m_timeoutMs ) )
-      {
-        recordFailure( "python worker exited unexpectedly before responding; stderr: "
-                       + drainStderr() );
-        throw std::runtime_error( "python worker exited unexpectedly before responding" );
+        QJsonObject response;
+        if ( !readLine( response, m_timeoutMs ) )
+        {
+          if ( attempt == 0 && m_process->state() != QProcess::Running )
+            continue; // worker EXITED (crash) → restart + replay
+          recordFailure( "python worker exited unexpectedly before responding; stderr: "
+                         + drainStderr() );
+          throw std::runtime_error( "python worker exited unexpectedly before responding" );
+        }
+        if ( response.contains( QStringLiteral( "error" ) ) )
+        {
+          const std::string error =
+            response.value( QStringLiteral( "error" ) ).toString().toStdString();
+          recordFailure( error );
+          throw std::runtime_error( error );
+        }
+        try
+        {
+          auto outputs = decodeInferOutputs( response.value( QStringLiteral( "outputs" ) ).toArray() );
+          m_forwards.fetch_add( 1, std::memory_order_relaxed );
+          return outputs;
+        }
+        catch ( const std::exception &e )
+        {
+          recordFailure( e.what() );
+          throw;
+        }
       }
-      if ( response.contains( QStringLiteral( "error" ) ) )
-      {
-        const std::string error =
-          response.value( QStringLiteral( "error" ) ).toString().toStdString();
-        recordFailure( error );
-        throw std::runtime_error( error );
-      }
-      try
-      {
-        auto outputs = decodeInferOutputs( response.value( QStringLiteral( "outputs" ) ).toArray() );
-        m_forwards.fetch_add( 1, std::memory_order_relaxed );
-        return outputs;
-      }
-      catch ( const std::exception &e )
-      {
-        recordFailure( e.what() );
-        throw;
-      }
+      throw std::runtime_error( "provider crashed: python worker exchange failed (unreachable)" );
     }
 
     bool supportsMultiInput() const override { return true; }
@@ -175,6 +219,28 @@ class PythonWorkerSession final : public IModelRuntime
       caps.cancelInForward = false;
       caps.inputDtypes = { "float32", "float64", "int32", "int64", "uint8", "int8" };
       caps.outputDtypes = { "float32", "float64", "int32", "int64", "uint8", "int8" };
+      // Platform 8.0 WP-F: worker-declared capabilities override the defaults
+      // (handshake negotiation; unknown/absent fields keep the defaults).
+      if ( !m_negotiated.isEmpty() )
+      {
+        const int maxRank = m_negotiated.value( QStringLiteral( "max_rank" ) ).toInt( caps.maxRank );
+        if ( maxRank >= 1 && maxRank <= 8 )
+          caps.maxRank = maxRank;
+        const bool multiInput =
+          m_negotiated.value( QStringLiteral( "multi_input" ) ).toBool( caps.multiInput );
+        caps.multiInput = multiInput;
+        const auto dtypeList = [ & ]( const char *key, std::vector<std::string> *out ) {
+          const QJsonArray arr = m_negotiated.value( key ).toArray();
+          if ( !arr.isEmpty() )
+          {
+            out->clear();
+            for ( const auto &v : arr )
+              out->push_back( v.toString().toStdString() );
+          }
+        };
+        dtypeList( "input_dtypes", &caps.inputDtypes );
+        dtypeList( "output_dtypes", &caps.outputDtypes );
+      }
       return caps;
     }
 
@@ -272,6 +338,8 @@ class PythonWorkerSession final : public IModelRuntime
     std::atomic<std::uint64_t> m_failures{ 0 };
     mutable std::mutex m_healthMutex;
     std::string m_lastError;
+    QJsonObject m_negotiated; // WP-F: capabilities declared in the ready handshake
+    int m_restartsLeft = 1;   // WP-F: ONE bounded restart for the session lifetime
 };
 
 ModelRuntimePtr makePythonWorkerRuntime( const ModelInfo &model,

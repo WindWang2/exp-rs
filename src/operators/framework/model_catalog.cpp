@@ -102,6 +102,7 @@ ModelInputContract parseModelInputContract( const QJsonObject &inputObj )
   input.temporalCollapse = inputObj.value( QStringLiteral( "temporal_collapse" ) ).toString().toStdString();
   if ( input.temporalCollapse.empty() )
     input.temporalCollapse = "channels"; // documented default
+  input.temporalDynamic = inputObj.value( QStringLiteral( "temporal_dynamic" ) ).toBool( false );
   // Platform 7.0 multimodal surface.
   input.modality = inputObj.value( QStringLiteral( "modality" ) ).toString().toStdString();
   input.alignment = inputObj.value( QStringLiteral( "alignment" ) ).toString().toStdString();
@@ -358,6 +359,13 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   info.postprocess.nms = postObj.value( QStringLiteral( "nms" ) ).toBool( false );
   info.postprocess.maskThreshold = postObj.value( QStringLiteral( "mask_threshold" ) ).toDouble( -1.0 );
   info.postprocess.polygonize = postObj.value( QStringLiteral( "polygonize" ) ).toBool( false );
+  // Platform 8.0 WP-E: product-class remap for Labels products (model class
+  // i → product class mapping[i]; absent = identity).
+  if ( postObj.value( QStringLiteral( "class_mapping" ) ).isArray() )
+  {
+    for ( const auto &v : postObj.value( QStringLiteral( "class_mapping" ) ).toArray() )
+      info.postprocess.classMapping.push_back( v.toInt( -1 ) );
+  }
   const double simplify = postObj.value( QStringLiteral( "simplify" ) ).toDouble( 0.0 );
   info.postprocess.simplify = simplify > 0.0 ? simplify : 0.0;
 
@@ -475,8 +483,8 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     if ( inputVal.isObject() )
       collectUnknownKeys( inputVal.toObject(),
                           { "name", "data_type", "dtype", "layout", "band_roles", "width", "height",
-                            "temporal_length", "temporal_collapse", "modality", "alignment",
-                            "missing_timestep" },
+                            "temporal_length", "temporal_collapse", "temporal_dynamic", "modality",
+                            "alignment", "missing_timestep" },
                           "input.", &unknown );
     if ( inputsVal.isArray() )
     {
@@ -486,8 +494,8 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
         if ( entry.isObject() )
           collectUnknownKeys( entry.toObject(),
                               { "name", "data_type", "dtype", "layout", "band_roles", "width",
-                                "height", "temporal_length", "temporal_collapse", "modality",
-                                "alignment", "missing_timestep" },
+                                "height", "temporal_length", "temporal_collapse", "temporal_dynamic",
+                                "modality", "alignment", "missing_timestep" },
                               "inputs[" + std::to_string( index ) + "].", &unknown );
         ++index;
       }
@@ -526,7 +534,8 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                         { "supported", "tile_size", "overlap", "halo", "batch_size",
                           "min_valid_coverage" },
                         "tiling.", &unknown );
-    collectUnknownKeys( postObj, { "nms", "mask_threshold", "polygonize", "simplify" },
+    collectUnknownKeys( postObj, { "nms", "mask_threshold", "polygonize", "simplify",
+                                    "class_mapping" },
                         "postprocess.", &unknown );
     collectUnknownKeys( runtimeObj,
                         { "gpu", "cpu_fallback", "estimated_ram_mb", "estimated_vram_mb", "device",
@@ -617,8 +626,19 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                    "'python' frameworks only" );
   }
 
-  if ( !info.input.layout.empty() && info.input.layout != "NCHW" && info.input.layout != "nchw" )
-    markInvalid( "unsupported input layout '" + info.input.layout + "' (only NCHW is executed)" );
+  // Platform 8.0: NCTHW is the explicit-time-axis layout and is legal only
+  // on a sequence-collapse input; raster feeds stay NCHW.
+  const bool sequenceInput = !info.inputs.empty()
+                                 && info.inputs.front().temporalCollapse == "sequence";
+  const std::string &inputLayout = info.input.layout;
+  if ( !inputLayout.empty() && inputLayout != "NCHW" && inputLayout != "nchw" )
+  {
+    if ( inputLayout == "NCTHW" && sequenceInput )
+      ; // legal: sequence feeds carry the rank-5 time axis
+    else
+      markInvalid( "unsupported input layout '" + inputLayout
+                     + "' (supported: NCHW, or NCTHW with temporal_collapse 'sequence')" );
+  }
   if ( info.preprocess.normalize == "mean_std"
        && info.preprocess.mean.empty() && info.preprocess.stdv.empty() )
     markInvalid( "preprocess.normalize is mean_std but neither mean nor std is declared" );
@@ -708,6 +728,23 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     markInvalid( "postprocess.polygonize is declared but not implemented by any runtime - remove it or implement mask->polygon chaining" );
   if ( info.postprocess.simplify > 0.0 )
     markInvalid( "postprocess.simplify is declared but not implemented by any runtime" );
+  // Platform 8.0 WP-E: the Labels class remap must be injective and
+  // non-negative — a colliding remap would silently merge classes.
+  {
+    const std::vector<int> &mapping = info.postprocess.classMapping;
+    for ( std::size_t i = 0; i < mapping.size(); ++i )
+    {
+      if ( mapping[i] < 0 )
+        markInvalid( "postprocess.class_mapping values must be >= 0 (element "
+                       + std::to_string( i ) + " is " + std::to_string( mapping[i] ) + ")" );
+      for ( std::size_t j = 0; j < i; ++j )
+        if ( mapping[i] == mapping[j] )
+          markInvalid( "postprocess.class_mapping maps classes "
+                         + std::to_string( j ) + " and " + std::to_string( i ) + " to the same "
+                         + "product class " + std::to_string( mapping[i] )
+                         + " (a colliding remap silently merges classes)" );
+    }
+  }
   // Platform 4.0 raster-task output format vocabulary.
   if ( !info.output.format.empty() && info.output.format != "probability"
        && info.output.format != "labels" && info.output.format != "mask"
@@ -740,9 +777,15 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   {
     if ( in.temporalLength < 0 )
       markInvalid( "input.temporal_length must be >= 0 (got " + std::to_string( in.temporalLength ) + ")" );
-    if ( in.temporalCollapse != "channels" )
+    if ( in.temporalCollapse != "channels" && in.temporalCollapse != "sequence" )
       markInvalid( "unsupported input.temporal_collapse '" + in.temporalCollapse
-                   + "' (only 'channels' is executed)" );
+                   + "' (supported: 'channels', 'sequence')" );
+    if ( in.temporalCollapse == "sequence" && in.temporalLength <= 0 && !in.temporalDynamic )
+      markInvalid( "input.temporal_collapse 'sequence' requires either a fixed "
+                   "temporal_length or dynamic T (declare \"temporal_dynamic\": true)" );
+    if ( in.temporalCollapse == "sequence" && !in.layout.empty() && in.layout != "NCTHW" )
+      markInvalid( "input.temporal_collapse 'sequence' feeds an explicit time axis "
+                   "(rank-5 NCTHW) — input.layout must be NCTHW, got '" + in.layout + "'" );
   }
   if ( info.output.uncertainty != "none" && info.output.uncertainty != "entropy"
        && info.output.uncertainty != "margin" )
@@ -776,9 +819,24 @@ std::string ModelInputContract::validate() const
              + "' is unsupported (supported: refuse, zero)";
   if ( missingTimestep.empty() || missingTimestep == "refuse" || missingTimestep == "zero" )
   {
-    if ( temporalLength <= 0 && !missingTimestep.empty() )
+    if ( temporalLength <= 0 && !missingTimestep.empty() && !temporalDynamic )
       return "missing_timestep is declared but temporal_length is 0 - the policy would never apply";
   }
+  if ( temporalCollapse != "channels" && temporalCollapse != "sequence" )
+    return "temporal_collapse '" + temporalCollapse
+             + "' is unsupported (supported: channels, sequence)";
+  if ( temporalCollapse == "sequence" )
+  {
+    if ( temporalLength <= 0 && !temporalDynamic )
+      return "temporal_collapse 'sequence' requires a fixed temporal_length > 0 or "
+               "temporal_dynamic: true (the feed then defines T)";
+    if ( layout != "NCTHW" )
+      return "temporal_collapse 'sequence' feeds an explicit time axis (rank-5 NCTHW) "
+               "- declare input.layout \"NCTHW\", got '" + layout + "'";
+  }
+  if ( temporalDynamic && temporalCollapse != "sequence" )
+    return "temporal_dynamic requires temporal_collapse 'sequence' (the channel fold has "
+             "a manifest-fixed T by definition)";
   return {};
 }
 
@@ -956,6 +1014,8 @@ Json::Value ModelInfo::toJson() const
         inJson["temporal_length"] = in.temporalLength;
       if ( !in.temporalCollapse.empty() && in.temporalCollapse != "channels" )
         inJson["temporal_collapse"] = in.temporalCollapse;
+      if ( in.temporalDynamic )
+        inJson["temporal_dynamic"] = true;
       if ( !in.modality.empty() )
         inJson["modality"] = in.modality;
       if ( !in.alignment.empty() )
@@ -1073,7 +1133,7 @@ Json::Value ModelInfo::toJson() const
     out["output_contract"] = o;
   }
   if ( postprocess.nms || postprocess.maskThreshold >= 0.0 || postprocess.polygonize
-       || postprocess.simplify > 0.0 )
+       || postprocess.simplify > 0.0 || !postprocess.classMapping.empty() )
   {
     Json::Value p( Json::objectValue );
     if ( postprocess.nms )
@@ -1084,6 +1144,13 @@ Json::Value ModelInfo::toJson() const
       p["polygonize"] = true;
     if ( postprocess.simplify > 0.0 )
       p["simplify"] = postprocess.simplify;
+    if ( !postprocess.classMapping.empty() )
+    {
+      Json::Value mapping( Json::arrayValue );
+      for ( int mapped : postprocess.classMapping )
+        mapping.append( mapped );
+      p["class_mapping"] = mapping;
+    }
     out["postprocess"] = p;
   }
 

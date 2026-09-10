@@ -15,6 +15,7 @@
 #include <opencv2/dnn.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <cctype>
 #include <cstdlib>
 #include <stdexcept>
@@ -284,6 +285,19 @@ bool resolveDevice( const RequestedDevice &request,
                     const std::vector<int> &freeVramMbByIndex,
                     ResolvedDevice *out, std::string *why )
 {
+  return resolveDevice( request, hw, modelWantsGpu, estimatedVramMb, maxAddressableCudaIndex,
+                        allowCpuFallback, freeVramMbByIndex, DevicePlacementPolicy::LowestFitting,
+                        out, why );
+}
+
+bool resolveDevice( const RequestedDevice &request,
+                    const ModelHardwareCapabilities &hw,
+                    bool modelWantsGpu, int estimatedVramMb,
+                    int maxAddressableCudaIndex, bool allowCpuFallback,
+                    const std::vector<int> &freeVramMbByIndex,
+                    DevicePlacementPolicy policy,
+                    ResolvedDevice *out, std::string *why )
+{
   const auto fitsBudget = [ & ]() {
     return hw.vramBudgetMb <= 0 || estimatedVramMb <= hw.vramBudgetMb;
   };
@@ -354,19 +368,39 @@ bool resolveDevice( const RequestedDevice &request,
       // trivial cuda:0 — it picks the LOWEST addressable index that fits both
       // the global budget and the planner ledger's free VRAM, else cpu (or a
       // typed refusal when the model forbids fallback). Equal inputs always
-      // yield equal outputs.
+      // yield equal outputs. Platform 8.0 WP-B: under LeastLoaded the choice
+      // among FITTING devices falls to the largest free VRAM (ties → lowest
+      // index), spreading concurrent sessions across cards.
       if ( modelWantsGpu && hw.cudaAvailable )
       {
         const int maxIndex = std::min( hw.cudaDeviceCount - 1, maxAddressableCudaIndex );
+        int chosen = -1;
+        // INT_MIN start: the first fitting index always seeds the choice, so
+        // unknown-free devices (−1) keep a deterministic lowest-index order
+        // and known-free devices win by their actual free VRAM.
+        int chosenFree = std::numeric_limits<int>::min();
         for ( int index = 0; index <= maxIndex; ++index )
         {
-          if ( fitsBudget() && fitsLedger( index ) )
+          if ( !( fitsBudget() && fitsLedger( index ) ) )
+            continue;
+          if ( policy == DevicePlacementPolicy::LowestFitting )
           {
-            ResolvedDevice device;
-            device.gpu = true;
-            device.cudaIndex = index;
-            return answer( device );
+            chosen = index;
+            break;
           }
+          const int freeMb = freeOnDevice( index );
+          if ( freeMb > chosenFree )
+          {
+            chosenFree = freeMb;
+            chosen = index;
+          }
+        }
+        if ( chosen >= 0 )
+        {
+          ResolvedDevice device;
+          device.gpu = true;
+          device.cudaIndex = chosen;
+          return answer( device );
         }
       }
       if ( modelWantsGpu && !allowCpuFallback )
@@ -627,7 +661,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   };
   if ( !resolveDevice( request, hw, model.runtime.gpu, model.runtime.estimatedVramMb,
                        traits.maxAddressableCudaIndex, model.runtime.cpuFallback,
-                       buildFreeList(), &device, &deviceWhy ) )
+                       buildFreeList(), m_placementPolicy, &device, &deviceWhy ) )
   {
     // Platform 7.0 pressure valve on the RESOLUTION path: a GPU-fit refusal
     // may be recoverable by evicting cached sessions — ONE bounded pass over
@@ -651,7 +685,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
       }
       recovered = resolveDevice( request, hw, model.runtime.gpu, model.runtime.estimatedVramMb,
                                  traits.maxAddressableCudaIndex, model.runtime.cpuFallback,
-                                 buildFreeList(), &device, &deviceWhy );
+                                 buildFreeList(), m_placementPolicy, &device, &deviceWhy );
     }
     if ( !recovered )
     {
@@ -961,6 +995,26 @@ void ModelRuntimeRegistry::setHardwareForTest( const std::optional<ModelHardware
 {
   std::lock_guard<std::mutex> lock( m_mutex );
   m_hardwareOverride = capabilities;
+}
+
+// --- Platform 8.0 WP-B: policy + pressure observability ----------------------
+
+void ModelRuntimeRegistry::setPlacementPolicy( DevicePlacementPolicy policy )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_placementPolicy = policy;
+}
+
+DevicePlacementPolicy ModelRuntimeRegistry::placementPolicy() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_placementPolicy;
+}
+
+std::vector<VramLedger::DeviceState> ModelRuntimeRegistry::deviceReport() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_ledger.snapshot();
 }
 
 } // namespace sicnu::operators::runtime

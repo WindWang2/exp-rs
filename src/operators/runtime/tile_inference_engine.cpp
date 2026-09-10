@@ -6,11 +6,17 @@
 
 #include "rs_classification_utils.h"
 
+#include <gdal.h>
+#include <ogr_spatialref.h>
+
 #include <opencv2/imgproc.hpp>
+
+#include <json/json.h>
 
 #include <array>
 #include <cstring>
 #include <map>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -79,6 +85,172 @@ bool readBipWindow( const GdalDatasetWrapper &ds, const std::vector<int> &bands,
                buffer + dstBase );
   }
   return true;
+}
+
+// --- Platform 8.0 provenance helpers ----------------------------------------
+
+/// Compact CRS display string for payloads/sidecars: "EPSG:32633" when the
+/// SRS carries an authority code, else a truncated WKT; "" for undeclared.
+std::string crsDisplayName( const QString &wkt )
+{
+  if ( wkt.trimmed().isEmpty() )
+    return {};
+  OGRSpatialReference srs;
+  if ( srs.SetFromUserInput( wkt.toUtf8().constData() ) == OGRERR_NONE )
+  {
+    const char *authority = srs.GetAuthorityName( nullptr );
+    const char *code = srs.GetAuthorityCode( nullptr );
+    if ( authority && code )
+      return std::string( authority ) + ":" + code;
+  }
+  std::string text = wkt.toStdString();
+  if ( text.size() > 64 )
+    text = text.substr( 0, 61 ) + "...";
+  return text;
+}
+
+/// Semantic CRS comparison through GDAL (geodetic authority for the
+/// co-registration verdict — string equality of WKT would false-negative on
+/// formatting). SetFromUserInput accepts WKT AND authority codes
+/// ("EPSG:4326"), so callers may hand over either spelling.
+/// Returns: 0 = same, 1 = different/unverifiable, -1 = at least one side
+/// undeclared.
+int compareCrs( const QString &primaryCrs, const QString &otherCrs )
+{
+  const bool primaryEmpty = primaryCrs.trimmed().isEmpty();
+  const bool otherEmpty = otherCrs.trimmed().isEmpty();
+  if ( primaryEmpty && otherEmpty )
+    return 0; // nothing declared on either side — nothing to disagree about
+  if ( primaryEmpty || otherEmpty )
+    return -1;
+  OGRSpatialReference primary;
+  OGRSpatialReference other;
+  if ( primary.SetFromUserInput( primaryCrs.toUtf8().constData() ) != OGRERR_NONE
+       || other.SetFromUserInput( otherCrs.toUtf8().constData() ) != OGRERR_NONE )
+    return 1; // unparsable declarations cannot be verified equal
+  return primary.IsSame( &other ) ? 0 : 1;
+}
+
+/// Publishes the provenance sidecar next to a successfully published raster.
+/// Same-directory staged write + rename (the .prov.json is rewritten when a
+/// previous run's sidecar exists — metadata, not data; the sidecar rename is
+/// the LAST step, so a present product with no sidecar means the caller
+/// disabled nothing and the publish crashed — treated as a hard failure by
+/// the engines, which remove the product in that case).
+bool publishProvenanceSidecar( const QString &finalPath, const std::string &outputPath,
+                               const Json::Value &provenance, std::string *error )
+{
+  const QString sidecarPath = finalPath + QStringLiteral( ".prov.json" );
+  const QString stagePath = sidecarPath + QStringLiteral( ".stage~" );
+  QFile stage( stagePath );
+  if ( !stage.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+  {
+    if ( error )
+      *error = "failed to stage the provenance sidecar: " + stagePath.toStdString();
+    return false;
+  }
+  const Json::Value formatted = provenance;
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "  ";
+  const std::string text = Json::writeString( builder, formatted );
+  stage.write( text.data(), static_cast<qint64>( text.size() ) );
+  stage.close();
+  if ( stage.error() != QFileDevice::NoError )
+  {
+    stage.remove();
+    if ( error )
+      *error = "failed to write the provenance sidecar: " + stagePath.toStdString();
+    return false;
+  }
+  QFile::remove( sidecarPath ); // Windows rename does not overwrite
+  if ( !QFile::rename( stagePath, sidecarPath ) )
+  {
+    stage.remove();
+    if ( error )
+      *error = "failed to publish the provenance sidecar: " + sidecarPath.toStdString();
+    return false;
+  }
+  ( void )outputPath;
+  return true;
+}
+
+/// Builds the shared provenance document body for one engine run (everything
+/// the caller needs to reproduce the run's semantics). Fields the run cannot
+/// know stay absent — truthful provenance, never placeholders.
+Json::Value buildProvenanceDocument( const ModelInfo &model, const ModelRuntimePtr &runtime,
+                                     const TileInferenceStats &stats,
+                                     const std::string &outputModeNote )
+{
+  Json::Value prov( Json::objectValue );
+  prov["schema"] = "exp-rs-prov/1";
+
+  Json::Value modelJson( Json::objectValue );
+  modelJson["name"] = model.name;
+  if ( !model.id.empty() )
+    modelJson["id"] = model.id;
+  if ( !model.modelVersion.empty() )
+    modelJson["version"] = model.modelVersion;
+  modelJson["identity_tag"] = model.identityTag();
+  if ( !model.contentDigest.empty() )
+    modelJson["content_digest"] = model.contentDigest;
+  modelJson["framework"] = model.framework;
+  if ( !model.sourceManifest.empty() )
+    modelJson["source_manifest"] = model.sourceManifest;
+  if ( !model.license.empty() )
+    modelJson["license"] = model.license;
+  prov["model"] = modelJson;
+
+  Json::Value execution( Json::objectValue );
+  if ( runtime )
+  {
+    execution["backend"] = runtime->backendName();
+    execution["device"] = runtime->deviceName();
+  }
+  execution["tile_size"] = stats.tileSize;
+  execution["halo"] = stats.halo;
+  execution["batch_size"] = stats.batchSize;
+  execution["tiles_planned"] = stats.tilesPlanned;
+  execution["tiles_processed"] = stats.tilesProcessed;
+  execution["tiles_skipped_nodata"] = stats.tilesSkippedNoData;
+  if ( stats.batchReductions > 0 )
+    execution["batch_reductions"] = stats.batchReductions;
+  if ( !outputModeNote.empty() )
+    execution["output_mode"] = outputModeNote;
+  prov["execution"] = execution;
+
+  Json::Value inputs( Json::arrayValue );
+  for ( const GridProvenance &grid : stats.inputGrids )
+  {
+    Json::Value input( Json::objectValue );
+    input["name"] = grid.name;
+    input["path"] = grid.path;
+    if ( !grid.preparedFrom.empty() )
+      input["prepared_from"] = grid.preparedFrom;
+    if ( !grid.crs.empty() )
+      input["crs"] = grid.crs;
+    input["crs_verified"] = grid.crsVerified;
+    input["width"] = grid.width;
+    input["height"] = grid.height;
+    if ( grid.frames > 1 )
+      input["frames"] = grid.frames;
+    inputs.append( input );
+  }
+  prov["inputs"] = inputs;
+
+  Json::Value output( Json::objectValue );
+  output["bands"] = stats.outBands;
+  output["width"] = stats.outWidth;
+  output["height"] = stats.outHeight;
+  Json::Value heads( Json::arrayValue );
+  for ( int channels : stats.headChannels )
+    heads.append( channels );
+  if ( !stats.headChannels.empty() )
+    output["head_channels"] = heads;
+  prov["output"] = output;
+
+  prov["created_utc"] =
+    QDateTime::currentDateTimeUtc().toString( Qt::ISODateWithMs ).toStdString();
+  return prov;
 }
 
 } // namespace
@@ -393,6 +565,19 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   stats.outWidth = rasterW;
   stats.outHeight = rasterH;
 
+  // Platform 8.0 grid provenance: the single input's verified grid identity
+  // (self-consistent by construction; recorded for payload + sidecar).
+  {
+    GridProvenance grid;
+    grid.name = m_model.input.name.empty() ? "input" : m_model.input.name;
+    grid.path = inputPath;
+    grid.crs = crsDisplayName( ds.projection() );
+    grid.crsVerified = !grid.crs.empty();
+    grid.width = rasterW;
+    grid.height = rasterH;
+    stats.inputGrids.push_back( std::move( grid ) );
+  }
+
   // Reusable read buffer: one halo-extended window at a time.
   const int maxWin = tileSize + 2 * halo;
   std::vector<float> windowBuffer( static_cast<std::size_t>( maxWin ) * maxWin * bandCount );
@@ -692,6 +877,10 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           // label rasters render meaningfully without a lookup sidecar.
           QString palette;
           QString names;
+          // Platform 8.0 WP-E: with a declared product-class remap the
+          // palette keys are the PRODUCT class ids (what the raster holds),
+          // keyed by their model class order.
+          const std::vector<int> &classRemap = m_model.postprocess.classMapping;
           for ( int classId = 0; classId < static_cast<int>( m_model.output.classes.size() ); ++classId )
           {
             const QColor color = rsSynthesizedClassColor( classId );
@@ -700,7 +889,10 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
               palette += QLatin1Char( ';' );
               names += QLatin1Char( ';' );
             }
-            palette += QString( "%1:%2,%3,%4" ).arg( classId ).arg( color.red() )
+            const int productClass =
+              ( static_cast<std::size_t>( classId ) < classRemap.size() )
+                ? classRemap[static_cast<std::size_t>( classId )] : classId;
+            palette += QString( "%1:%2,%3,%4" ).arg( productClass ).arg( color.red() )
                          .arg( color.green() ).arg( color.blue() );
             names += QString::fromStdString( m_model.output.classes[static_cast<std::size_t>( classId )] );
           }
@@ -832,6 +1024,18 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           // stay at the writer's NoData sentinel.
           const std::vector<cv::Mat> &planes = derivedPlanes[bi];
           const int channels = static_cast<int>( planes.size() );
+          // Platform 8.0 WP-E: the Labels remap must cover every model class
+          // of this head — a partial mapping would silently pass classes
+          // through un-remapped (the #646 failure class).
+          if ( mode == RasterOutputMode::Labels && !m_model.postprocess.classMapping.empty()
+               && m_model.postprocess.classMapping.size()
+                    != static_cast<std::size_t>( channels ) )
+            throw RSOperatorError(
+              ErrorCode::InvalidInputData,
+              "postprocess.class_mapping declares "
+                + std::to_string( m_model.postprocess.classMapping.size() )
+                + " entries but head '" + headNames[h] + "' produces "
+                + std::to_string( channels ) + " class planes" );
           cv::Mat derived( bt.h, bt.w, CV_32FC1, cv::Scalar( writeNoData ) );
           const float maskThr = m_model.postprocess.maskThreshold >= 0.0
                                   ? static_cast<float>( m_model.postprocess.maskThreshold )
@@ -863,7 +1067,13 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
               switch ( mode )
               {
                 case RasterOutputMode::Labels:
-                  outRow[col] = static_cast<float>( best );
+                  // Platform 8.0 WP-E: declared product-class remap (model
+                  // class → product class). Guarded below so an arity
+                  // mismatch refuses loudly instead of indexing OOB.
+                  outRow[col] = static_cast<float>(
+                    m_model.postprocess.classMapping.empty()
+                      ? best
+                      : m_model.postprocess.classMapping[static_cast<std::size_t>( best )] );
                   break;
                 case RasterOutputMode::Confidence:
                   outRow[col] = bestv;
@@ -1164,6 +1374,18 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                            "failed to publish output raster to: " + outputPath );
   }
   QFile::remove( backupPath );
+  // Platform 8.0: a published raster inference product always carries its
+  // provenance sidecar — if the sidecar cannot be published, the product is
+  // removed and the run fails (never an untracked result).
+  {
+    const Json::Value prov = buildProvenanceDocument( m_model, m_runtime, stats, {} );
+    std::string provError;
+    if ( !publishProvenanceSidecar( finalPath, outputPath, prov, &provError ) )
+    {
+      QFile::remove( finalPath );
+      throw RSOperatorError( ErrorCode::FileNotWritable, provError );
+    }
+  }
   context.reportProgressForced( 1.0, "Tiled inference complete" );
   stats.tilesProcessed = done;
   return stats;
@@ -1193,6 +1415,37 @@ std::string TileInferenceEngine::gridMismatch( const std::string &primaryPath, i
     }
   }
   return {};
+}
+
+std::string TileInferenceEngine::crsMismatch( const std::string &primaryPath,
+                                              const std::string &primaryCrs,
+                                              const std::string &otherPath,
+                                              const std::string &otherCrs,
+                                              bool strictAlignment )
+{
+  const int comparison = compareCrs( QString::fromStdString( primaryCrs ),
+                                     QString::fromStdString( otherCrs ) );
+  if ( comparison == 0 )
+    return {};
+  if ( comparison < 0 )
+  {
+    // At least one side declares no CRS. Non-strict feeds keep the
+    // historical behavior (geometry-only check); alignment=reference demands
+    // VERIFIED co-registration, so an unverifiable CRS is a refusal.
+    if ( !strictAlignment )
+      return {};
+    return "input grids are not verifiably co-registered: '" + primaryPath + "' and '"
+             + otherPath + "' — one of the rasters declares no CRS, and the input "
+             "contract demands alignment=reference (verify the CRS or relax the "
+             "alignment declaration; the runtime never guesses a CRS)";
+  }
+  return "input grids are not co-registered: '" + primaryPath + "' ("
+           + ( primaryCrs.empty() ? "<no CRS>" : primaryCrs ) + ") and '" + otherPath + "' ("
+           + ( otherCrs.empty() ? "<no CRS>" : otherCrs )
+           + ") carry different coordinate reference systems — identical geotransform "
+             "numbers under different CRS do NOT describe the same ground. Align the "
+             "rasters through the geospatial raster_convert warp seam; the runtime "
+             "refuses misaligned feeds instead of warping implicitly";
 }
 
 TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRasterFeed> &feeds,
@@ -1281,12 +1534,16 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   struct FeedReader
   {
     std::vector<std::unique_ptr<GdalDatasetWrapper>> frames; // per timestep
+    /// Platform 8.0 WP-D: per-timestep quality masks (optional, parallel to
+    /// frames; null entries only when the feed declares no masks at all).
+    std::vector<std::unique_ptr<GdalDatasetWrapper>> qualityMasks;
     std::vector<int> bands;
     int channels = 0;        // bands × temporal length (the fed channel count)
     const ModelInputContract *contract = nullptr;
     std::vector<float> sentinel;
     std::vector<bool> hasSentinel;
     std::vector<float> window; // reused per-tile buffer
+    std::vector<float> qualityWindow; // reused per-tile mask buffer (WP-D)
   };
   std::vector<FeedReader> readers( feeds.size() );
 
@@ -1299,6 +1556,10 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   if ( rasterW <= 0 || rasterH <= 0 )
     throw RSOperatorError( ErrorCode::InvalidInputData, "input raster is empty: " + feeds[0].paths[0] );
   const std::array<double, 6> primaryGt = primary.geoTransform();
+  const QString primaryProjection = primary.projection();
+  const std::string primaryCrs = crsDisplayName( primaryProjection );
+  // Declared before the feed loop: grid provenance accumulates per feed.
+  TileInferenceStats stats;
 
   for ( std::size_t f = 0; f < feeds.size(); ++f )
   {
@@ -1306,29 +1567,101 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     reader.contract = &m_model.inputs[feedContract[f]];
     const ModelInputContract &contract = *reader.contract;
 
+    // Platform 8.0 alignment provenance: preparedFrom must parallel the fed
+    // paths (or be absent) — a partial list would record wrong origins.
+    if ( !feeds[f].preparedFrom.empty()
+         && feeds[f].preparedFrom.size() != feeds[f].paths.size() )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "feed '" + feeds[f].name + "': prepared_from provenance has "
+                               + std::to_string( feeds[f].preparedFrom.size() ) + " entries but "
+                               + std::to_string( feeds[f].paths.size() ) + " frames are fed" );
+    // Platform 8.0 CRS authority: strict only when the contract demands
+    // verified co-registration (alignment=reference).
+    const bool strictAlignment = ( contract.alignment == "reference" );
+
+    // Platform 8.0 dynamic T (sequence collapse): the FEED defines T — every
+    // provided frame is fed, no missing-frame policy exists by definition.
+    const bool dynamicT = contract.temporalCollapse == "sequence" && contract.temporalDynamic;
     const std::size_t declaredFrames =
-      contract.temporalLength > 0 ? static_cast<std::size_t>( contract.temporalLength ) : 1u;
+      dynamicT ? feeds[f].paths.size()
+               : ( contract.temporalLength > 0 ? static_cast<std::size_t>( contract.temporalLength )
+                                               : 1u );
     const std::string missingPolicy =
       contract.missingTimestep.empty() ? "refuse" : contract.missingTimestep;
-    if ( feeds[f].paths.size() > declaredFrames )
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "feed '" + feeds[f].name + "' provides "
-                               + std::to_string( feeds[f].paths.size() ) + " frames but the input "
-                               "contract declares temporal_length "
-                               + std::to_string( contract.temporalLength ) );
-    if ( feeds[f].paths.size() < declaredFrames && missingPolicy != "zero" )
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "feed '" + feeds[f].name + "' provides "
-                               + std::to_string( feeds[f].paths.size() ) + " of "
-                               + std::to_string( declaredFrames )
-                               + " temporal frames and missing_timestep=refuse (declare "
-                                 "missing_timestep=zero to fill missing frames explicitly)" );
+    if ( feeds[f].paths.empty() )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "feed '" + feeds[f].name + "' provides no raster paths" );
+    if ( dynamicT )
+    {
+      if ( feeds[f].paths.size() < 2 )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "feed '" + feeds[f].name
+                                 + "' declares temporal_dynamic but provides only "
+                                 + std::to_string( feeds[f].paths.size() )
+                                 + " frame (a time axis needs T >= 2)" );
+    }
+    else
+    {
+      if ( feeds[f].paths.size() > declaredFrames )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "feed '" + feeds[f].name + "' provides "
+                                 + std::to_string( feeds[f].paths.size() ) + " frames but the input "
+                                 "contract declares temporal_length "
+                                 + std::to_string( contract.temporalLength ) );
+      if ( feeds[f].paths.size() < declaredFrames && missingPolicy != "zero" )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "feed '" + feeds[f].name + "' provides "
+                                 + std::to_string( feeds[f].paths.size() ) + " of "
+                                 + std::to_string( declaredFrames )
+                                 + " temporal frames and missing_timestep=refuse (declare "
+                                   "missing_timestep=zero to fill missing frames explicitly)" );
+    }
     // Zero-filled frames beyond the provided paths materialize as absent
     // datasets — the read path substitutes zeros for them.
+
+    // Platform 8.0 WP-D: declared acquisition times must parse as ISO 8601
+    // and be STRICTLY INCREASING in feed order. A misordered series is a
+    // typed refusal — the engine never silently sorts (the model would see a
+    // different time axis than the agent intended).
+    if ( !feeds[f].timestamps.empty() )
+    {
+      if ( feeds[f].timestamps.size() != feeds[f].paths.size() )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "feed '" + feeds[f].name + "': " + std::to_string( feeds[f].timestamps.size() )
+                                 + " timestamps but " + std::to_string( feeds[f].paths.size() )
+                                 + " frames (timestamps must parallel the frames)" );
+      QDateTime previous;
+      for ( std::size_t t = 0; t < feeds[f].timestamps.size(); ++t )
+      {
+        const QDateTime parsed =
+          QDateTime::fromString( QString::fromStdString( feeds[f].timestamps[t] ), Qt::ISODate );
+        if ( !parsed.isValid() )
+          throw RSOperatorError( ErrorCode::InvalidInputData,
+                                 "feed '" + feeds[f].name + "': timestamp '"
+                                   + feeds[f].timestamps[t]
+                                   + "' is not a valid ISO 8601 instant" );
+        if ( t > 0 && !( previous < parsed ) )
+          throw RSOperatorError( ErrorCode::InvalidInputData,
+                                 "feed '" + feeds[f].name + "': timestamps are not strictly "
+                                   "increasing ('" + feeds[f].timestamps[t - 1] + "' then '"
+                                   + feeds[f].timestamps[t]
+                                   + "') — order the frames by acquisition time; the engine "
+                                     "never reorders a temporal series silently" );
+        previous = parsed;
+      }
+    }
+    // Quality masks must parallel the frames 1:1 (Platform 8.0 WP-D).
+    if ( !feeds[f].qualityMasks.empty()
+         && feeds[f].qualityMasks.size() != feeds[f].paths.size() )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "feed '" + feeds[f].name + "': " + std::to_string( feeds[f].qualityMasks.size() )
+                               + " quality masks but " + std::to_string( feeds[f].paths.size() )
+                               + " frames (quality masks must parallel the frames)" );
 
     // Band selection against the FIRST provided frame.
     const std::string &firstPath = feeds[f].paths.front();
     std::vector<int> bandList = feeds[f].bands;
+    std::string feedCrs; // display CRS of the first frame ("" = undeclared)
     {
       GdalDatasetWrapper probe;
       if ( !probe.open( QString::fromStdString( firstPath ) ) )
@@ -1341,6 +1674,7 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                              firstPath, probe.width(), probe.height(), gt.data() ) );
       }
       const std::array<double, 6> gt = probe.geoTransform();
+      feedCrs = crsDisplayName( probe.projection() );
       if ( f > 0 )
       {
         if ( const std::string grid = gridMismatch( feeds[0].paths[0], rasterW, rasterH,
@@ -1348,6 +1682,12 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                                     gt.data() );
              !grid.empty() )
           throw RSOperatorError( ErrorCode::InvalidInputData, grid );
+        // Platform 8.0: same geotransform NUMBERS under different CRS are
+        // different grids — the CRS verdict is part of co-registration.
+        if ( const std::string crs = crsMismatch( feeds[0].paths[0], primaryCrs, firstPath,
+                                                  feedCrs, strictAlignment );
+             !crs.empty() )
+          throw RSOperatorError( ErrorCode::InvalidInputData, crs );
       }
       const int rasterBands = probe.bandCount();
       if ( rasterBands <= 0 )
@@ -1439,9 +1779,46 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                              primaryGt.data(), feeds[f].paths[t],
                                              frame->width(), frame->height(), gt.data() ) );
       }
+      // Every frame is also CRS-checked: a temporal series acquired in one
+      // CRS must never leak a reprojected member whose numbers happen to fit.
+      if ( const std::string crs = crsMismatch( feeds[0].paths[0], primaryCrs,
+                                                feeds[f].paths[t],
+                                                crsDisplayName( frame->projection() ),
+                                                strictAlignment );
+           !crs.empty() )
+        throw RSOperatorError( ErrorCode::InvalidInputData, crs );
       reader.frames[t] = std::move( frame );
     }
     // Missing frames stay null → zero-filled below (missing_timestep=zero).
+
+    // Platform 8.0 WP-D: open quality masks and verify each against the
+    // primary grid (a mask that does not sit on the fed grid would silently
+    // invalidate the wrong pixels — worse than no mask).
+    reader.qualityMasks.resize( feeds[f].qualityMasks.size() );
+    for ( std::size_t t = 0; t < feeds[f].qualityMasks.size(); ++t )
+    {
+      auto mask = std::make_unique<GdalDatasetWrapper>();
+      if ( !mask->open( QString::fromStdString( feeds[f].qualityMasks[t] ) ) )
+        throw RSOperatorError( ErrorCode::GdalError,
+                               "failed to open quality mask: " + feeds[f].qualityMasks[t] );
+      if ( mask->width() != rasterW || mask->height() != rasterH )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "quality mask '" + feeds[f].qualityMasks[t] + "' is "
+                                 + std::to_string( mask->width() ) + "x"
+                                 + std::to_string( mask->height() ) + " but the primary grid is "
+                                 + std::to_string( rasterW ) + "x" + std::to_string( rasterH )
+                                 + " — align the mask through the geospatial seam first" );
+      if ( const std::string crs =
+             crsMismatch( feeds[0].paths[0], primaryCrs, feeds[f].qualityMasks[t],
+                          crsDisplayName( mask->projection() ), strictAlignment );
+           !crs.empty() )
+        throw RSOperatorError( ErrorCode::InvalidInputData, crs );
+      if ( mask->bandCount() < 1 )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "quality mask '" + feeds[f].qualityMasks[t]
+                                 + "' carries no bands" );
+      reader.qualityMasks[t] = std::move( mask );
+    }
 
     // Per-band NoData sentinels from the first frame.
     reader.sentinel.assign( bandList.size(), 0.0f );
@@ -1459,6 +1836,21 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
         }
       }
     }
+
+    // Platform 8.0 grid provenance for payload + sidecar: recorded only
+    // after every check above passed, so a presence here IS the verdict.
+    GridProvenance grid;
+    grid.name = contract.name.empty() ? "input" + std::to_string( f + 1 ) : contract.name;
+    grid.path = firstPath;
+    if ( !feeds[f].preparedFrom.empty() )
+      grid.preparedFrom = feeds[f].preparedFrom.front();
+    grid.crs = ( f == 0 ) ? primaryCrs : feedCrs;
+    grid.crsVerified = ( f == 0 ) ? !grid.crs.empty()
+                                  : ( !grid.crs.empty() && !primaryCrs.empty() );
+    grid.width = rasterW;
+    grid.height = rasterH;
+    grid.frames = static_cast<int>( feeds[f].paths.size() );
+    stats.inputGrids.push_back( std::move( grid ) );
   }
 
   // Tile geometry: primary grid authority; fed channels for the batch budget
@@ -1481,7 +1873,6 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   const int totalTiles = static_cast<int>( core.size() );
   const double minCoverage = std::clamp( m_model.tiling.minValidCoverage, 0.0, 1.0 );
 
-  TileInferenceStats stats;
   stats.tileSize = tileSize;
   stats.halo = halo;
   stats.batchSize = batchSize;
@@ -1566,7 +1957,9 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   auto flushBatch = [&]( int currentTileIndex ) {
     context.throwIfCancelled();
 
-    // Build one NCHW blob per feed: (B, channels, H, W).
+    // Build one blob per feed. Channel-fold feeds (temporalCollapse
+    // "channels") carry (B, T·C, H, W); sequence feeds carry an explicit
+    // time axis (B, T, C, H, W) — rank 5, layout NCTHW (Platform 8.0 WP-D).
     const int B = static_cast<int>( batchCores.size() );
     const int fedW = batchFedSize[0].first;
     const int fedH = batchFedSize[0].second;
@@ -1574,8 +1967,38 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     for ( std::size_t f = 0; f < feeds.size(); ++f )
     {
       FeedReader &reader = readers[f];
-      const int C = reader.channels;
+      const bool sequenceCollapse = reader.contract->temporalCollapse == "sequence";
+      const int C = sequenceCollapse ? static_cast<int>( reader.bands.size() ) : reader.channels;
       std::vector<cv::Mat> &mats = batchByFeed[f];
+      if ( sequenceCollapse )
+      {
+        const int T = static_cast<int>( reader.frames.size() );
+        const int dims[5] = { B, T, C, fedH, fedW };
+        cv::Mat blob( 5, dims, CV_32F );
+        blob.setTo( 0 );
+        for ( int b = 0; b < B; ++b )
+        {
+          const cv::Mat &tileMat = mats[static_cast<std::size_t>( b )]; // HWC, T·C channels
+          std::vector<cv::Mat> channels;
+          cv::split( tileMat, channels );
+          for ( int t = 0; t < T; ++t )
+            for ( int c = 0; c < C; ++c )
+            {
+              const cv::Mat &ch = channels[static_cast<std::size_t>( t * C + c )];
+              // cv::Mat::ptr has no 4-index overload for 5-D mats — the blob
+              // is continuous, so address the (b,t,c) plane arithmetically.
+              float *dst =
+                reinterpret_cast<float *>( blob.data )
+                + ( ( static_cast<std::size_t>( b ) * T + t ) * C + c )
+                    * static_cast<std::size_t>( fedH ) * fedW;
+              for ( int y = 0; y < fedH; ++y )
+                std::memcpy( dst + static_cast<std::size_t>( y ) * fedW, ch.ptr<float>( y ),
+                             static_cast<std::size_t>( fedW ) * sizeof( float ) );
+            }
+        }
+        inputs[f] = NamedTensor{ reader.contract->name, TensorBlob::fromMat( blob ) };
+        continue;
+      }
       const int dims[4] = { B, C, fedH, fedW };
       cv::Mat blob( 4, dims, CV_32F );
       blob.setTo( 0 );
@@ -1859,6 +2282,36 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                    "failed to read tile window at (" + std::to_string( t.x ) + ", "
                                      + std::to_string( t.y ) + ") of feed '" + reader.contract->name
                                      + "'" );
+          // Platform 8.0 WP-D quality mask: a 0 marks the pixel invalid for
+          // THIS frame. Invalid pixels become NaN — exactly the NoData
+          // convention — so they are excluded from the valid-coverage gate
+          // AND zeroed for the forward by the shared preprocess path. The
+          // pass covers the whole window (halo included) so context pixels
+          // follow the same rule as core pixels.
+          if ( frame < reader.qualityMasks.size() && reader.qualityMasks[frame] )
+          {
+            if ( reader.qualityWindow.size()
+                 != static_cast<std::size_t>( winH ) * winW )
+              reader.qualityWindow.assign( static_cast<std::size_t>( winH ) * winW, 1.0f );
+            const std::vector<int> qualityBand{ 1 };
+            if ( !readBipWindow( *reader.qualityMasks[frame], qualityBand, winX, winY, winW,
+                                 winH, reader.qualityWindow.data() ) )
+              throw RSOperatorError( ErrorCode::GdalError,
+                                     "failed to read quality mask window at ("
+                                       + std::to_string( t.x ) + ", " + std::to_string( t.y )
+                                       + ") of feed '" + reader.contract->name + "'" );
+            const std::size_t bandCountQ = reader.bands.size();
+            float *windowData = reader.window.data();
+            for ( int i = 0; i < winH * winW; ++i )
+            {
+              if ( reader.qualityWindow[static_cast<std::size_t>( i )] == 0.0f )
+              {
+                float *px = windowData + static_cast<std::size_t>( i ) * bandCountQ;
+                for ( std::size_t c = 0; c < bandCountQ; ++c )
+                  px[c] = std::numeric_limits<float>::quiet_NaN();
+              }
+            }
+          }
           // Validity from the RAW window BEFORE preprocessing zero-fills it:
           // a core pixel is valid when any band of any frame of any feed sees
           // a finite non-sentinel value (NoData is only what nothing sees).
@@ -2067,6 +2520,17 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                            "failed to publish output raster to: " + outputPath );
   }
   QFile::remove( backupPath );
+  // Platform 8.0: same provenance contract as the single-input publish.
+  {
+    const Json::Value prov = buildProvenanceDocument( m_model, m_runtime, stats,
+                                                      "multi_input_probability_stack" );
+    std::string provError;
+    if ( !publishProvenanceSidecar( finalPath, outputPath, prov, &provError ) )
+    {
+      QFile::remove( finalPath );
+      throw RSOperatorError( ErrorCode::FileNotWritable, provError );
+    }
+  }
   context.reportProgressForced( 1.0, "Tiled multi-input inference complete" );
   stats.tilesProcessed = done;
   return stats;
