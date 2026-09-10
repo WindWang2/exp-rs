@@ -15,6 +15,7 @@
 // run/task/job ids (see trace_id.h).
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
