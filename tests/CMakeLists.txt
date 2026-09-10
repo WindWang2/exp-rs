@@ -6914,3 +6914,36 @@ target_compile_definitions(test_contract_fuzz_lang PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 sicnu_discover_tests(test_contract_fuzz_lang)
+
+# JobEngine concurrency/lifecycle stress (task E). Compiles job_engine.cpp
+# (+ the operator registry/base/logger sources it references) directly:
+# Qt6::Core + GDAL only, no sicnu_operators SHARED closure. Deterministic
+# condition-wait synchronization, no sleeps. RUN_SERIAL: saturates all
+# workers; keep timing measurements uncontended.
+add_executable(test_concurrency_stress
+  test_concurrency_stress.cpp
+  ${CMAKE_SOURCE_DIR}/src/jobs/job_engine.cpp
+  ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator.cpp
+  ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operation_logger.cpp
+)
+target_link_libraries(test_concurrency_stress PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  GDAL::GDAL
+  sicnu_operators_core
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_concurrency_stress PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_concurrency_stress SYSTEM PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_concurrency_stress PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_concurrency_stress PRIVATE jsoncpp)
+endif()
+target_include_directories(test_concurrency_stress PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+sicnu_discover_tests(test_concurrency_stress TIMEOUT 600 RUN_SERIAL TRUE)
