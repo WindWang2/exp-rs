@@ -10,10 +10,18 @@
   "font": {
    "size_pt": 8
   },
-  "orientation": "horizontal"
+  "orientation": "horizontal",
+  "kind": "stacked_bar"
  },
  "defaults": {
-  "title": "Class composition"
+  "title": "Class composition",
+  "chart": {
+   "kind": "stacked_bar",
+   "binding": {
+    "mode": "inline",
+    "data": []
+   }
+  }
  },
  "style_tokens": [
   "typography.styles.chart",
