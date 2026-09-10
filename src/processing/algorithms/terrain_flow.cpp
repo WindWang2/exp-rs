@@ -277,6 +277,11 @@ bool watershedLabels( const float *dir, int width, int height,
             const size_t nIdx = static_cast<size_t>( ny ) * width + nx;
             if ( ( *labels )[nIdx] != 0.0f )
                 continue;
+            // NoData neighbours carry a NaN direction (flowDirections marks
+            // them 0/NaN outside the routing graph) — skip before the
+            // float→int cast (UB for NaN).
+            if ( !std::isfinite( dir[nIdx] ) )
+                continue;
             const int code = static_cast<int>( dir[nIdx] );
             if ( code != reverseCode( nb.code ) )
                 continue;

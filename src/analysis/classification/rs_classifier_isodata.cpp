@@ -11,8 +11,6 @@
 
 namespace
 {
-constexpr double kHalfLight = 1.0; // placeholder guard (unused)
-
 double distSq( const cv::Mat &centers, int k, const float *x, int cols )
 {
     const float *c = centers.ptr<float>( k );

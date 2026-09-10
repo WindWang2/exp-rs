@@ -137,7 +137,7 @@ TEST_CASE( "D8 direction and accumulation on a monotone slope", "[terrain][flow]
 {
   // 5x1 slope [8,6,4,2,0] descends eastward: interior cells drain east
   // (code 1); the east boundary cell and the west boundary are sinks (0).
-  // Accumulation (self-inclusive) accumulates at the west end: [4,3,2,1,1].
+  // Self-inclusive accumulation counts each cell plus its upstream: {1,2,3,4,5}.
   std::vector<float> dem = { 8, 6, 4, 2, 0 };
   std::vector<float> filled( 5 ), dir( 5 ), acc( 5 );
   REQUIRE( fillDepressions( dem.data(), filled.data(), 5, 1, kNodata ) );
@@ -332,13 +332,6 @@ TEST_CASE( "Watershed labels: a valley sink outside the pours stays unlabeled",
   std::vector<float> labels;
   REQUIRE( watershedLabels( dir.data(), kW, kH, { { 0, 0 }, { 6, 0 } }, &labels ) );
   for ( int y = 0; y < kH; ++y )
-  {
-    for ( int x = 0; x < kW; ++x )
-      std::cout << "[" << dir[static_cast<size_t>( y ) * kW + x] << "/"
-                << labels[static_cast<size_t>( y ) * kW + x] << "]";
-    std::cout << std::endl;
-  }
-  for ( int y = 0; y < kH; ++y )
     for ( int x = 0; x < kW; ++x )
     {
       INFO( "cell (x=" << x << " y=" << y << ")" );
@@ -416,12 +409,6 @@ TEST_CASE( "rs:terrain_flow E2E: watershed product with pour points",
   REQUIRE( outDs.open( dir.filePath( "basins.tif" ) ) );
   std::vector<float> labels( static_cast<size_t>( kW ) * kH );
   REQUIRE( outDs.readBandData( 1, labels.data(), kW, kH ) );
-  for ( int y = 0; y < kH; ++y )
-  {
-    for ( int x = 0; x < kW; ++x )
-      std::cout << "[" << labels[static_cast<size_t>( y ) * kW + x] << "]";
-    std::cout << std::endl;
-  }
   for ( int y = 0; y < kH; ++y )
     for ( int x = 0; x < kW; ++x )
     {

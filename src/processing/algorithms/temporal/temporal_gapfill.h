@@ -35,7 +35,9 @@ enum class GapFillMethod
 struct GapFillCounts
 {
     int filled = 0;    ///< NaN positions this call wrote a finite value into
-    int fillable = 0;  ///< NaN positions that had at least one anchor inside maxGapDays
+    int fillable = 0;  ///< NaN positions with at least one anchor on either
+                       ///< side (regardless of maxGapDays — one-anchored gaps
+                       ///< count as fillable even when unfilled)
 };
 
 /// Fills NaN gaps of one series against real time offsets @a tDays (days,

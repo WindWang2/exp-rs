@@ -96,9 +96,10 @@ bool geolocateZeroDoppler( const OrbitSegment &orbit, double azimuthTime,
                            double slantRangeM, double heightM, GeodeticPoint *out );
 
 /// Forward range-Doppler (ground → image): the zero-Doppler azimuth time
-/// and slant range the sensor records for the ground point @a p.
-/// Newton iteration on the Doppler equation (the crossing is unique for
-/// near-Earth orbits inside the segment); false outside the segment.
+/// and slant range the sensor records for the ground point @a p. The
+/// crossing is bracketed by a sign scan over the segment and bisected
+/// (a plain Newton from the midpoint can march away from the crossing);
+/// false outside the segment.
 bool forwardRangeDoppler( const OrbitSegment &orbit, const GeodeticPoint &p,
                           double *azimuthTime, double *slantRangeM );
 

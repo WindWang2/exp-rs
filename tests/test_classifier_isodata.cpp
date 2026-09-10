@@ -36,13 +36,13 @@ cv::Mat twoClusters1D()
 }
 } // namespace
 
-TEST_CASE( "ISODATA recovers two separable clusters with a single start centre",
+TEST_CASE( "ISODATA recovers two separable clusters (even seeding lands on both modes)",
            "[classify][isodata]" )
 {
-    // k=1 start forces the split rule to discover the second cluster.
+    // With target 2 and even-row seeding the initial centres land directly
+    // on the two modes, so this pins assignment + centre recovery (the
+    // split rule has its own test below).
     RsClassifierIsodata::Params p;
-    p.targetClusters = 2;
-    p.sigmaFactor = 0.5; // 1-D spread 5 > 0.5·overall 5 → split fires
     p.minSamplesPerCluster = 3;
     RsClassifierIsodata iso( p );
     cv::Mat dummy = cv::Mat::zeros( 20, 1, CV_32S );
@@ -68,6 +68,60 @@ TEST_CASE( "ISODATA recovers two separable clusters with a single start centre",
     std::sort( centers.begin(), centers.end() );
     REQUIRE( centers[0] == Approx( 0.0 ).margin( 1.0 ) );
     REQUIRE( centers[1] == Approx( 10.0 ).margin( 1.0 ) );
+}
+
+TEST_CASE( "ISODATA split rule fires after a discard and persists three clusters",
+           "[classify][isodata]" )
+{
+    // Sorted data [0×6, 6×6, 20×4]. Even seeding rows 0/5/10 lands on
+    // {0, 0, 6}: the duplicate centre gets zero support and is discarded,
+    // which drops the count below the target and OPENS the split gate on
+    // the over-dispersed {6,20} cluster (σ 6.86 vs overall 7.60 → ratio
+    // 0.90 > 0.7). The ±σ/2 split then converges with all three clusters
+    // above the support floor, so the split survives to the final model —
+    // this is the only test that exercises the split arithmetic end-to-end.
+    cv::Mat X( 16, 1, CV_32F );
+    for ( int i = 0; i < 6; ++i )
+        X.at<float>( i, 0 ) = 0.0f;
+    for ( int i = 6; i < 12; ++i )
+        X.at<float>( i, 0 ) = 6.0f;
+    for ( int i = 12; i < 16; ++i )
+        X.at<float>( i, 0 ) = 20.0f;
+
+    RsClassifierIsodata::Params p;
+    p.targetClusters = 3;
+    p.minSamplesPerCluster = 2;
+    p.sigmaFactor = 0.7;
+    RsClassifierIsodata iso( p );
+    cv::Mat dummy = cv::Mat::zeros( 16, 1, CV_32S );
+    REQUIRE( iso.fit( X, dummy ) );
+    REQUIRE( iso.centers().rows == 3 );
+    std::vector<double> centers;
+    for ( int k = 0; k < 3; ++k )
+        centers.push_back( iso.centers().at<float>( k, 0 ) );
+    std::sort( centers.begin(), centers.end() );
+    REQUIRE( centers[0] == Approx( 0.0 ).margin( 0.5 ) );
+    REQUIRE( centers[1] == Approx( 6.0 ).margin( 0.5 ) );
+    // The two tight groups are exactly recovered; the 20-block may occupy
+    // one or two labels depending on where the split branch seeds it, as
+    // long as every such centre sits at the far mode.
+    const cv::Mat labels = iso.predict( X );
+    std::set<int> g0, g1;
+    for ( int i = 0; i < 6; ++i )
+        g0.insert( labels.at<int>( i, 0 ) );
+    for ( int i = 6; i < 12; ++i )
+        g1.insert( labels.at<int>( i, 0 ) );
+    REQUIRE( g0.size() == 1 );
+    REQUIRE( g1.size() == 1 );
+    REQUIRE( *g0.begin() != *g1.begin() );
+    // No 0-block or 6-block sample leaks into a far centre.
+    REQUIRE( centers[0] < 3.0 );
+    REQUIRE( centers[1] < 9.0 );
+    for ( int i = 12; i < 16; ++i )
+    {
+        const int k = labels.at<int>( i, 0 );
+        REQUIRE( iso.centers().at<float>( k - 1, 0 ) > 12.0 );
+    }
 }
 
 TEST_CASE( "ISODATA is deterministic across runs (bit-stable centres)",

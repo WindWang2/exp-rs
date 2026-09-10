@@ -203,35 +203,32 @@ Json::Value runOrbitIncidence( const Json::Value &params, RSOperatorContext &con
 
     // Slant range per sample: c / (2 * rangeRate) metres (two-way path).
     constexpr double kHalfLightSpeed = 299792458.0 / 2.0;
+    // The window is 'start;stop' in seconds — both fields validated
+    // independently (a shared ok-flag let a malformed start be overwritten
+    // by a valid stop and fabricated a 0 m range gate).
     const QStringList windowFields = rangeWindowValue.split( QLatin1Char( ';' ) );
-    double rangeStart = 0.0;
-    if ( windowFields.size() == 2 )
-    {
-        const double rangeStartTime = windowFields[0].toDouble( &okNum );
-        const double rangeStopTime = windowFields[1].toDouble( &okNum );
-        if ( !okNum || !( rangeStopTime > rangeStartTime ) )
-            throw RSOperatorError( ErrorCode::InvalidInputData,
-                                   "SICNU_SAR_RANGE_WINDOW must be 'start;stop' in seconds" );
-        // Range time → slant range via the two-way light path: a range
-        // sample every 1/rate seconds is c/2 metres of slant range apart.
-        rangeStart = rangeStartTime * kHalfLightSpeed;
-        // Timing consistency: the window must cover the raster's columns.
-        const double coveredSamples = ( rangeStopTime - rangeStartTime ) * rangeRate;
-        if ( std::fabs( coveredSamples - ( width - 1 ) ) > 2.0 )
-            throw RSOperatorError(
-                ErrorCode::InvalidInputData,
-                "SICNU_SAR_RANGE_WINDOW covers " + std::to_string( coveredSamples )
-                    + " range samples but the raster has " + std::to_string( width - 1 )
-                    + " columns (tolerance 2) - the declared timing contradicts the grid" );
-    }
-    else
-    {
-        const double rangeStartTime = rangeWindowValue.toDouble( &okNum );
-        if ( !okNum )
-            throw RSOperatorError( ErrorCode::InvalidInputData,
-                                   "SICNU_SAR_RANGE_WINDOW must be 'start;stop' in seconds" );
-        rangeStart = rangeStartTime * kHalfLightSpeed;
-    }
+    if ( windowFields.size() != 2 )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "SICNU_SAR_RANGE_WINDOW must be 'start;stop' in seconds" );
+    bool okStart = false;
+    bool okStop = false;
+    const double rangeStartTime = windowFields[0].toDouble( &okStart );
+    const double rangeStopTime = windowFields[1].toDouble( &okStop );
+    if ( !okStart || !okStop || !std::isfinite( rangeStartTime )
+         || !std::isfinite( rangeStopTime ) || !( rangeStopTime > rangeStartTime ) )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "SICNU_SAR_RANGE_WINDOW must be 'start;stop' in seconds" );
+    // Range time → slant range via the two-way light path: a range
+    // sample every 1/rate seconds is c/2 metres of slant range apart.
+    const double rangeStart = rangeStartTime * kHalfLightSpeed;
+    // Timing consistency: the window must cover the raster's columns.
+    const double coveredSamples = ( rangeStopTime - rangeStartTime ) * rangeRate;
+    if ( std::fabs( coveredSamples - ( width - 1 ) ) > 2.0 )
+        throw RSOperatorError(
+            ErrorCode::InvalidInputData,
+            "SICNU_SAR_RANGE_WINDOW covers " + std::to_string( coveredSamples )
+                + " range samples but the raster has " + std::to_string( width - 1 )
+                + " columns (tolerance 2) - the declared timing contradicts the grid" );
 
     // DEM heights feed the geolocation directly (metres above the ellipsoid).
     bool demHasSentinel = false;

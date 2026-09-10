@@ -92,9 +92,13 @@ bool parseOrbitStates( const QString &value, OrbitSegment *out, QString *error )
         return fail( QStringLiteral( "output segment is null" ) );
     out->states.clear();
 
-    const QStringList records = value.split( QLatin1Char( '|' ), Qt::SkipEmptyParts );
+    const QStringList records = value.split( QLatin1Char( '|' ) );
     for ( const QString &record : records )
     {
+        // An empty record ("state||state") is a malformed encoding, not
+        // something to skip: the header promises refusal.
+        if ( record.isEmpty() )
+            return fail( QStringLiteral( "empty state record (double '|'?')" ) );
         const QStringList fields =
             record.split( QLatin1Char( ';' ), Qt::KeepEmptyParts );
         if ( fields.size() != 7 )
@@ -257,8 +261,9 @@ bool geolocateZeroDoppler( const OrbitSegment &orbit, double azimuthTime,
         {
             // u = π is the symmetric height minimum along the circle (the
             // central difference vanishes there exactly): nudge off the
-            // symmetry point and let Newton climb toward the nearest shell
-            // crossing (deterministic: the northern in-plane solution).
+            // symmetry point along +e2 and let Newton climb to the shell
+            // crossing on that side (deterministic; the e2 direction is
+            // orbit-dependent, either crossing is a valid solution).
             u += 0.1;
             continue;
         }
@@ -268,9 +273,10 @@ bool geolocateZeroDoppler( const OrbitSegment &orbit, double azimuthTime,
     }
     if ( !converged )
     {
-        // Accept the last iterate when the residual is tight anyway (the
-        // tolerance above can be unreachable at extreme incidence).
-        if ( std::fabs( heightOf( px, py, pz ) - heightM ) > 1e-4 )
+        // Accept the last iterate only when the residual is tightly finite
+        // (fail-closed: NaN height compares false against any threshold and
+        // would otherwise be accepted as a "solution").
+        if ( !( std::fabs( heightOf( px, py, pz ) - heightM ) <= 1e-4 ) )
             return false;
     }
 
