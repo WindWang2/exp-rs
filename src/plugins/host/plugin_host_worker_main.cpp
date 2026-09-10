@@ -871,7 +871,12 @@ int main( int argc, char **argv )
                     serviceValues.get( "tempDirectory", "" ).asString() );
                 policy.writeRoots = access.capabilities.fsWriteRoots;
                 policy.tempDirectory = serviceValues.get( "tempDirectory", "" ).asString();
-                policy.active = access.ok();
+                // Opt-in containment: only plugins that DECLARE write roots
+                // get the workDir gate. Without declarations the
+                // host-provided default workDir (the executor's run
+                // directory) is legitimate and is not gated — identical to
+                // v1 behavior for manifests that make no capability claims.
+                policy.active = access.ok() && !policy.writeRoots.empty();
             }
 
             PluginLoader loader;

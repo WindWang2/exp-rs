@@ -515,6 +515,14 @@ Json::Value PluginManifest::toJson() const
     json["version"] = version;
     json["api_version"] = apiVersion;
     json["abi_version"] = abiVersion;
+    // Structured declarations round-trip too: the discovery index, the
+    // record snapshot and the host-process worker's load params all travel
+    // through toJson(), and losing them silently disabled the capability
+    // surfaces they carry (access/quotas, isolation 5.0+).
+    if ( !access.isNull() )
+        json["access"] = access;
+    if ( !quotas.isNull() )
+        json["quotas"] = quotas;
     if ( !description.empty() )
         json["description"] = description;
     if ( !vendor.empty() )

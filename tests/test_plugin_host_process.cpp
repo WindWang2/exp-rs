@@ -82,7 +82,8 @@ public:
 };
 
 /// Writes plugin.json (runtime: host-process) next to the built fixture.
-void writeManifest()
+/// @p access is an optional manifest "access" object (capability suites).
+void writeManifest( const Json::Value &access = Json::Value() )
 {
     Json::Value manifest( Json::objectValue );
     manifest["manifest_version"] = 1;
@@ -96,6 +97,8 @@ void writeManifest()
     manifest["entrypoint_kind"] = "native";
     manifest["capabilities"] = Json::Value( Json::arrayValue );
     manifest["capabilities"].append( "operator" );
+    if ( access.isObject() )
+        manifest["access"] = access;
     Json::Value operators( Json::arrayValue );
     for ( const char *id : { "test:iso-echo", "test:iso-crash", "test:iso-hang",
                              "test:iso-flood", "test:iso-gate", "test:iso-spawn",
@@ -127,7 +130,8 @@ struct Stack
     std::unique_ptr<sicnu::plugins::PluginHostProcessRuntime> runtime;
     std::string tempDir;
 
-    explicit Stack( int deadlineCeilingMs = 6000, int killGraceMs = 3000 )
+    explicit Stack( int deadlineCeilingMs = 6000, int killGraceMs = 3000,
+                    bool declareTempWriteRoot = false )
     {
         const int pid =
 #ifdef _WIN32
@@ -139,7 +143,15 @@ struct Stack
                     / ( "sicnu-iso-" + std::to_string( pid ) ) )
                       .generic_string();
         std::filesystem::create_directories( tempDir );
-        writeManifest();
+        Json::Value access( Json::Value::nullSingleton() );
+        if ( declareTempWriteRoot )
+        {
+            Json::Value fs( Json::objectValue );
+            fs["write"] = Json::Value( Json::arrayValue );
+            fs["write"].append( "${temp}" );
+            access["filesystem"] = fs;
+        }
+        writeManifest( access );
 
         sicnu::plugins::PluginHostProcessRuntime::Options options;
         options.workerPath = kWorkerPath;
@@ -296,6 +308,7 @@ TEST_CASE( "hung request hits the deadline and the kill ladder", "[hostprocess][
 
     // Recovery: next call respawns and works.
     Json::Value echo = runOperator( stack, "test:iso-echo", Json::Value() );
+    INFO( "recovery echo: " << Json::writeString( Json::StreamWriterBuilder(), echo ) );
     REQUIRE( echo["success"].asBool() );
     REQUIRE( registry.unload( kPluginId ) );
 }
@@ -564,9 +577,11 @@ TEST_CASE( "process-group cleanup takes worker-spawned grandchildren with the wo
 TEST_CASE( "worker-side workDir policy refuses paths outside declared roots",
            "[hostprocess][capabilities]" )
 {
-    // The fixture manifest written by Stack declares NO access object:
-    // deny-by-default leaves only the plugin-scoped temp dir writable.
-    Stack stack;
+    // The manifest declares access.filesystem.write = ["${temp}"]: the
+    // containment gate is OPT-IN via declared write roots (a manifest that
+    // declares nothing keeps v1 behavior — the executor's default workDir
+    // is legitimate and is not gated).
+    Stack stack( 6000, 3000, true ); // declare ${temp} as the write root
     auto &registry = PluginRegistry::instance();
     REQUIRE( loadOrExplain( kPluginId ) );
 
