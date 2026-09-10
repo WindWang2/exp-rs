@@ -588,6 +588,48 @@ qint64 ExperimentStore::runCount() const
     return 0;
 }
 
+QStringList ExperimentStore::runIdsByExecutionRef( const QString &executionRef,
+                                                   qint64 limit ) const
+{
+    // The execution ref lives inside the run JSON (no dedicated column), so
+    // this is a bounded paged scan, not an index lookup: it exists for
+    // restart-time reconciliation, not per-event hot paths. Callers that
+    // track executions live should keep their own ref→runId map (the bridge
+    // does) and treat this as the cold-path fallback.
+    QStringList ids;
+    if ( !m_impl || executionRef.isEmpty() )
+        return ids;
+    limit = qBound<qint64>( qint64( 1 ), limit, kMaxPageSize );
+    QMutexLocker lock( &m_impl->mutex );
+    constexpr qint64 kPage = 200;
+    qint64 offset = 0;
+    while ( qint64( ids.size() ) < limit )
+    {
+        Stmt stmt( m_impl->db, QStringLiteral(
+            "SELECT run_id, json FROM experiment_runs ORDER BY created_ms, run_id"
+            " LIMIT ? OFFSET ?" ) );
+        if ( !stmt )
+            break;
+        stmt.bind( 1, kPage );
+        stmt.bind( 2, offset );
+        bool pageEmpty = true;
+        const QString needle = QStringLiteral( "\"execution_ref\":\"%1\"" ).arg( executionRef );
+        while ( stmt.stepRow() )
+        {
+            pageEmpty = false;
+            const QString json = stmt.text( 1 );
+            // The JSON serializer emits no spaces between members; matching
+            // the exact member token avoids accidental substring collisions.
+            if ( json.contains( needle ) )
+                ids.append( stmt.text( 0 ) );
+        }
+        if ( pageEmpty )
+            break;
+        offset += kPage;
+    }
+    return ids;
+}
+
 // --- metric records ---------------------------------------------------------------
 
 sicnu::data::Result<void> ExperimentStore::saveMetricRecord( const MetricRecord &record )

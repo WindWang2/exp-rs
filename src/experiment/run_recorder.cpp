@@ -211,6 +211,53 @@ VoidResult ExperimentRunRecorder::markCancelled( const QString &runId, const QSt
     return VoidResult::success();
 }
 
+VoidResult ExperimentRunRecorder::markInterrupted( const QString &runId, const QString &note )
+{
+    auto loaded = loadRun( runId );
+    if ( !loaded )
+        return VoidResult::failure( loaded.diagnostics() );
+    ExperimentRun run = loaded.value();
+    if ( run.status() == RunStatus::Interrupted )
+    {
+        // Idempotent re-delivery: merge the newest note, never a transition
+        // (Interrupted → Interrupted is not a state change).
+        if ( note.isEmpty() )
+            return VoidResult::success();
+        QJsonObject metrics = run.metrics();
+        metrics.insert( QStringLiteral( "interrupt_note" ), note );
+        run.setMetrics( RunEnvironment::redactSecretKeys( metrics ) );
+        auto written = m_store->upsertRun( run );
+        if ( !written )
+            return VoidResult::failure( written.diagnostics() );
+        return VoidResult::success();
+    }
+    // The store validates the transition (only a Running run may become
+    // Interrupted; a Created run was never live, so it cannot be interrupted).
+    run.setStatus( RunStatus::Interrupted );
+    QJsonObject metrics = run.metrics();
+    metrics.insert( QStringLiteral( "interrupt_note" ), note );
+    run.setMetrics( RunEnvironment::redactSecretKeys( metrics ) );
+    auto written = m_store->upsertRun( run );
+    if ( !written )
+        return VoidResult::failure( written.diagnostics() );
+    return VoidResult::success();
+}
+
+VoidResult ExperimentRunRecorder::markResumed( const QString &runId )
+{
+    auto loaded = loadRun( runId );
+    if ( !loaded )
+        return VoidResult::failure( loaded.diagnostics() );
+    ExperimentRun run = loaded.value();
+    if ( run.status() == RunStatus::Running )
+        return VoidResult::success(); // idempotent re-delivery
+    run.setStatus( RunStatus::Running );
+    auto written = m_store->upsertRun( run );
+    if ( !written )
+        return VoidResult::failure( written.diagnostics() );
+    return VoidResult::success();
+}
+
 VoidResult ExperimentRunRecorder::recordMetrics( const QString &runId,
                                                  const EvaluationProtocol &protocol,
                                                  const QJsonObject &metrics )

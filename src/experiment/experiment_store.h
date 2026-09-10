@@ -52,6 +52,12 @@ class ExperimentStore
         const QString &status = QString(), qint64 offset = 0,
         qint64 limit = kMaxPageSize ) const;
     qint64 runCount() const;
+    /// Run ids whose executionRef matches @p executionRef (store order, not
+    /// recency). Bounded paged scan over the run JSON: a cold-path
+    /// reconciliation helper, not a per-event lookup — callers tracking
+    /// executions live keep their own ref→runId map.
+    QStringList runIdsByExecutionRef( const QString &executionRef,
+                                      qint64 limit = 10 ) const;
 
     // --- metric records -----------------------------------------------------------
     /// One metric record per run (the protocol+metrics of the run's primary
