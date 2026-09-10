@@ -1,5 +1,6 @@
 #include "workflow_checkpoint.h"
 
+#include "runtime/observability/fault_point.h"
 #include "workflow_run_lock.h"
 
 #include <QCoreApplication>
@@ -81,6 +82,14 @@ QString WorkflowCheckpointManager::saveCheckpoint( const WorkflowRun &run, const
     QFile::remove( tmpPath );
     return QString(); // a truncated payload must never be promoted
   }
+  // Injected write failure (Verification 7.0 fault matrix): same cleanup as a
+  // short write — the tmp file is removed and nothing is promoted.
+  if ( SICNU_FAULT_POINT( "workflow_checkpoint.write" ) )
+  {
+    file.close();
+    QFile::remove( tmpPath );
+    return QString();
+  }
 
   const int fd = file.handle();
 #if defined( Q_OS_UNIX )
@@ -93,11 +102,17 @@ QString WorkflowCheckpointManager::saveCheckpoint( const WorkflowRun &run, const
   // MoveFileEx(MOVEFILE_REPLACE_EXISTING) on Windows, both of which replace
   // an existing destination in one step - no remove/rename window in which
   // the previous checkpoint could be lost.
+  // Injected rename failure (test-only arming): same cleanup as a real
+  // cross-device/locked-target failure.
+  const bool renameFault = SICNU_FAULT_POINT( "workflow_checkpoint.publish" );
   std::error_code renameError;
-  std::filesystem::rename( std::filesystem::path( tmpPath.toStdWString() ),
-                           std::filesystem::path( finalPath.toStdWString() ),
-                           renameError );
-  if ( renameError )
+  if ( !renameFault )
+  {
+    std::filesystem::rename( std::filesystem::path( tmpPath.toStdWString() ),
+                             std::filesystem::path( finalPath.toStdWString() ),
+                             renameError );
+  }
+  if ( renameFault || renameError )
   {
     QFile::remove( tmpPath );
     return QString();

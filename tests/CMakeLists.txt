@@ -3,6 +3,12 @@ include(Catch)
 
 if(WIN32 AND TARGET Catch2WithMain)
   set_property(TARGET Catch2WithMain PROPERTY SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/sicnu_test_main.cpp")
+  # sicnu_test_main wires the unified-trace env bootstrap (Verification 7.0),
+  # which references sicnu_runtime. Link (not just include) here so EVERY
+  # Catch2 consumer inherits the dependency via LINK_ONLY — io test targets
+  # and light fuzz targets link only Catch2::Catch2WithMain.
+  target_include_directories(Catch2WithMain PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(Catch2WithMain PRIVATE sicnu_runtime)
 endif()
 
 # Wrapper around catch_discover_tests that injects LSAN_OPTIONS when sanitizers
@@ -36,8 +42,11 @@ function(sicnu_discover_tests NAME)
     PROPERTIES ${_discovery_props})
 endfunction()
 
-# Helper function to add a test executable
+# Helper function to add a test executable. Extra args (TIMEOUT n,
+# RUN_SERIAL TRUE, ...) are forwarded to sicnu_discover_tests as test
+# properties — previously they were accepted and silently dropped.
 function(sicnu_add_test NAME)
+  cmake_parse_arguments(SAT "" "" "" ${ARGN})
   qt_add_executable(${NAME} ${NAME}.cpp)
   target_link_libraries(${NAME} PRIVATE
     Catch2::Catch2WithMain
@@ -64,7 +73,11 @@ function(sicnu_add_test NAME)
   target_compile_definitions(${NAME} PRIVATE
     CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   )
-  sicnu_discover_tests(${NAME})
+  if(SAT_UNPARSED_ARGUMENTS)
+    sicnu_discover_tests(${NAME} ${SAT_UNPARSED_ARGUMENTS})
+  else()
+    sicnu_discover_tests(${NAME})
+  endif()
 endfunction()
 
 # Geospatial I/O Foundation 4.0: light test executables. Links only
@@ -7170,3 +7183,171 @@ target_compile_definitions(test_help_coverage PRIVATE
     CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 target_link_libraries(test_help_coverage PRIVATE Sicnu::help Sicnu::help_adapters Sicnu::help_gui)
+
+# =============================================================================
+# Verification / Observability / Performance Engineering 7.0
+# (feat/verification-observability-7) — appended at end of file on purpose:
+# this track and feat/cloud-geospatial-io-7 both edit this file; appending
+# keeps integration conflicts trivial.
+# =============================================================================
+
+# Unified trace contract (task F): ids, NDJSON encoding, ring/file sinks.
+sicnu_add_test(test_trace_contract TIMEOUT 120)
+target_link_libraries(test_trace_contract PRIVATE sicnu_runtime)
+
+# Fault-injection registry semantics (task B): the registry lives in
+# sicnu_runtime; production seams probe it through SICNU_FAULT_POINT and the
+# fast path is one relaxed atomic load when nothing is armed.
+sicnu_add_test(test_fault_registry TIMEOUT 120)
+target_link_libraries(test_fault_registry PRIVATE sicnu_runtime)
+
+# Portable fault matrix (task B): OutputCommitter / ArtifactObjectPool /
+# WorkflowCheckpointManager failure paths via the fault registry. Runs on
+# Windows/MSVC where the POSIX-only test_fault_injection cannot.
+sicnu_add_test(test_fault_matrix TIMEOUT 300)
+target_link_libraries(test_fault_matrix PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_data
+  sicnu_workflow
+  sicnu_runtime
+)
+
+# Bounded contract fuzz (task D): ResourceUri total-function/credential/
+# traversal properties. Deterministic seeds, hard input caps.
+sicnu_add_test(test_contract_fuzz_io TIMEOUT 180)
+target_link_libraries(test_contract_fuzz_io PRIVATE Sicnu::Geospatial)
+target_include_directories(test_contract_fuzz_io PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Bounded contract fuzz (task D): MapSpec condition AST + workflow placeholder
+# grammar. Compiles the two Qt-free/light production sources directly so the
+# fuzz target needs no sicnu_agent/sicnu_workflow closure.
+add_executable(test_contract_fuzz_lang
+  test_contract_fuzz_lang.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/mapspec/mapspec_conditions.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/placeholder_grammar.cpp
+)
+target_link_libraries(test_contract_fuzz_lang PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_contract_fuzz_lang PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_contract_fuzz_lang SYSTEM PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_contract_fuzz_lang PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_contract_fuzz_lang PRIVATE jsoncpp)
+endif()
+target_include_directories(test_contract_fuzz_lang PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_compile_definitions(test_contract_fuzz_lang PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_contract_fuzz_lang)
+
+# JobEngine concurrency/lifecycle stress (task E). Links the Qt-free static
+# sicnu_jobs (which PUBLIC-links sicnu_operators for the registry seam).
+# Deterministic condition-wait synchronization, no sleeps. RUN_SERIAL:
+# saturates all workers; keep timing measurements uncontended.
+add_executable(test_concurrency_stress
+  test_concurrency_stress.cpp
+)
+target_link_libraries(test_concurrency_stress PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_jobs
+  sicnu_runtime
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_concurrency_stress PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_concurrency_stress SYSTEM PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_concurrency_stress PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_concurrency_stress PRIVATE jsoncpp)
+endif()
+target_include_directories(test_concurrency_stress PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+sicnu_discover_tests(test_concurrency_stress TIMEOUT 600 RUN_SERIAL TRUE)
+
+# Scientific known-answer corpus (task C): analytically derivable fixtures for
+# spectral / change / terrain / radiometric / transition-matrix / temporal
+# statistics. Physical invariants with documented derivations, not shapes.
+sicnu_add_test(test_known_answer_corpus TIMEOUT 180)
+target_link_libraries(test_known_answer_corpus PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators_core
+)
+
+# Machine-readable diagnostic envelope (task G): exp.diag.v1 contract.
+sicnu_add_test(test_diagnostic_report TIMEOUT 60)
+target_link_libraries(test_diagnostic_report PRIVATE sicnu_runtime)
+
+# Quality-platform micro-baselines (task H) — run MANUALLY, never a ctest
+# gate: benchmark_quality7 --out benchmarks/quality7.json
+add_executable(benchmark_quality7
+  benchmark_quality7.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/mapspec/mapspec_conditions.cpp
+)
+target_link_libraries(benchmark_quality7 PRIVATE
+  Qt6::Core
+  GDAL::GDAL
+  sicnu_jobs
+  sicnu_operators_core
+  sicnu_geospatial
+  sicnu_runtime
+)
+if(TARGET jsoncpp)
+  target_link_libraries(benchmark_quality7 PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(benchmark_quality7 SYSTEM PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(benchmark_quality7 PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(benchmark_quality7 PRIVATE jsoncpp)
+endif()
+target_include_directories(benchmark_quality7 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Bounded contract fuzz (task D): DatasetManifest unknown-field tolerance,
+# total parse on mutated payloads, typed negative cases. Light closure
+# (Qt + SQLite only).
+sicnu_add_test(test_contract_fuzz_data TIMEOUT 180)
+target_link_libraries(test_contract_fuzz_data PRIVATE
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_contract_fuzz_data PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Bounded contract fuzz (task D): AgentPlan reader + MapSpec validate/patch.
+# Heavy closure (sicnu_agent) — part of the full-tree lane.
+sicnu_add_test(test_contract_fuzz_agent TIMEOUT 300)
+target_link_libraries(test_contract_fuzz_agent PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  sicnu_processing
+  sicnu_task_center
+)
+target_include_directories(test_contract_fuzz_agent PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)

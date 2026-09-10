@@ -9,8 +9,13 @@
 #include <shellapi.h>
 #endif
 
+#include "runtime/observability/trace.h"
+
 int main( int argc, char *argv[] )
 {
+  // Unified trace (Verification 7.0): opt-in via SICNU_TRACE=1; no-op by
+  // default. Lets any test binary emit exp.trace.v1 NDJSON evidence.
+  sicnu::runtime::observability::trace::installFileSinkFromEnv();
 #ifdef _WIN32
   // Windows: Convert UTF-16 command-line to UTF-8 so Catch2 test-name filters
   // containing Unicode symbols (e.g. °, →, —, ×) match UTF-8 TEST_CASE names.

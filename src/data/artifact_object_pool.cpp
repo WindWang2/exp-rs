@@ -17,6 +17,8 @@
 #include <algorithm>
 #include <vector>
 
+#include "runtime/observability/fault_point.h"
+
 namespace sicnu::data
 {
 namespace
@@ -125,6 +127,14 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
                               .arg( ::getpid() );
 #endif
         QFile::remove( tmp );
+        // Injected staging failures (Verification 7.0 fault matrix): route
+        // through the real failure paths — copy failure cleans the tmp file,
+        // publish-rename failure leaves the object unpooled but healthy.
+        if ( SICNU_FAULT_POINT( "artifact_pool.stage_copy" ) )
+        {
+            QFile::remove( tmp );
+            return std::nullopt;
+        }
         if ( !QFile::copy( filePath, tmp ) )
         {
             QFile::remove( tmp );
@@ -136,7 +146,7 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
             QFile::remove( tmp );
             return std::nullopt;
         }
-        if ( !QFile::rename( tmp, objectPath ) )
+        if ( SICNU_FAULT_POINT( "artifact_pool.stage_publish" ) || !QFile::rename( tmp, objectPath ) )
         {
             QFile::remove( tmp );
             return std::nullopt;

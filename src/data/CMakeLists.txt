@@ -92,6 +92,9 @@ target_link_libraries(sicnu_data
   # public interface (headers stay Qt-only).
   PRIVATE
     SQLite::SQLite3
+  # Fault-injection probes (Verification 7.0) live in sicnu_runtime (Qt-free
+  # leaf); PRIVATE keeps the leaf out of the data layer's public interface.
+    sicnu_runtime
 )
 
 get_target_property(SICNU_DATA_DIRECT_LINKS sicnu_data LINK_LIBRARIES)
