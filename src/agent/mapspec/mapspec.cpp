@@ -274,6 +274,11 @@ bool isRelativeConstraintKind( const std::string &kind )
   return false;
 }
 
+bool isConstraintHardness( const std::string &hardness )
+{
+  return hardness == "hard" || hardness == "soft";
+}
+
 bool isCollection( const std::string &name )
 {
   return collectionInfo( name ) != nullptr;
@@ -598,6 +603,33 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
                                 "above|below|left_of|right_of|inside|keep_with|"
                                 "avoid_overlap|fit_content|frame_style)" );
           continue;
+        }
+        // v4: explainable-solve surface. Closed vocabulary and bounded
+        // ranges — typos and out-of-band values must fail validation, never
+        // silently change solver semantics.
+        if ( constraint.isMember( "hardness" ) )
+        {
+          if ( !constraint["hardness"].isString() ||
+               !isConstraintHardness( constraint["hardness"].asString() ) )
+            problems.push_back( cid + ": constraint hardness must be \"hard\" or \"soft\"" );
+        }
+        if ( constraint.isMember( "priority" ) )
+        {
+          if ( !constraint["priority"].isIntegral() ||
+               constraint["priority"].asInt() < 0 || constraint["priority"].asInt() > 100 )
+            problems.push_back( cid + ": constraint priority must be an integer in [0, 100]" );
+        }
+        if ( constraint.isMember( "weight" ) )
+        {
+          const bool softDeclared = constraint.isMember( "hardness" ) &&
+                                    constraint["hardness"].isString() &&
+                                    constraint["hardness"].asString() == "soft";
+          if ( !constraint["weight"].isNumeric() || constraint["weight"].asDouble() < 0 ||
+               constraint["weight"].asDouble() > 1000 )
+            problems.push_back( cid + ": constraint weight must be a number in [0, 1000]" );
+          else if ( !softDeclared )
+            problems.push_back( cid + ": constraint weight is only meaningful on "
+                                     "hardness \"soft\" constraints" );
         }
         if ( isRelativeConstraintKind( kind ) )
         {
