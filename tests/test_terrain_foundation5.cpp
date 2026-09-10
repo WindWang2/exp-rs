@@ -13,7 +13,6 @@
 #include <json/json.h>
 
 #include <cmath>
-#include <iostream>
 #include <limits>
 #include <vector>
 
