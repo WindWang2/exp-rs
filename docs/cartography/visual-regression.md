@@ -58,3 +58,28 @@ QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/usr/lib \
 # with golden references (writes/compares out-of-tree):
 SICNU_CARTOGRAPHY_GOLDEN_DIR=/tmp/cartography-goldens ctest --test-dir build -R test_mapspec
 ```
+
+## Platform 7.0 — rendering-free structural hashes
+
+`cartography::structuralDigest(spec)` computes a SHA-256 over the resolved
+geometry in canonical form: page envelope plus id-sorted
+`collection/id:x,y,w,h[,pN][,zN]` entries with coordinates rounded to
+0.01 mm. It is pure and platform-independent — the same resolved layout
+produces the same digest everywhere, with no `QgsLayoutExporter` in the
+loop.
+
+Use it for:
+
+- **known-answer layouts** — a fixture's digest is pinned in the test suite
+  (update only with re-verified geometry); 1 mm of movement flips it;
+- **compile determinism** — resolve the same spec twice, compare digests;
+- **catalog-wide regression** — digest every fixture before and after a
+  solver/compiler change and diff, without any rendering.
+
+The PNG layers above remain the pixel-level contract where the environment
+supports them; the structural digest is the honest, always-runnable
+fallback that catches layout drift those layers would have caught. Known
+environmental limitation: on this headless Windows setup the
+`[visual][determinism]`/`[visual][golden]` PNG cases crash in
+`QgsLayoutExporter` (DLL-resolution class, 0xC0000135) — they are reported
+as not-exercised locally, never as passed.
