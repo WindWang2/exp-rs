@@ -14,16 +14,20 @@ add_library(sicnu_processing SHARED
     gdal/gdal_multiband_block_stream.cpp
     gdal/gdal_window_read.cpp
     gdal/gdal_error_handler.cpp
+    gdal/gdal_cell_geometry.cpp
 
     algorithms/primitives/raster_histogram.cpp
     algorithms/primitives/morphology.cpp
     algorithms/primitives/connected_components.cpp
     algorithms/primitives/distance_transform.cpp
+    algorithms/primitives/dense_linalg.cpp
+    algorithms/ir_mad_kernels.cpp
     algorithms/topographic_correction.cpp
     algorithms/spectral_derivative.cpp
     algorithms/spectral_detection.cpp
     algorithms/sar/sar_dualpol.cpp
     algorithms/sar/sar_terrain_geometry.cpp
+    algorithms/sar/sar_orbit.cpp
     algorithms/temporal/temporal_monitoring.cpp
     algorithms/terrain_flow.cpp
 
@@ -62,6 +66,7 @@ add_library(sicnu_processing SHARED
     algorithms/temporal/temporal_workspace.cpp
     algorithms/temporal/temporal_stac_adapter.cpp
     algorithms/temporal/temporal_fit.cpp
+    algorithms/temporal/temporal_gapfill.cpp
     algorithms/temporal/temporal_preflight.cpp
     algorithms/temporal/temporal_stream.cpp
 
@@ -224,6 +229,9 @@ target_link_libraries(sicnu_processing PUBLIC
 # Sicnu::data themselves.
 target_link_libraries(sicnu_processing PRIVATE
     Sicnu::data
+  # output_committer's fault-injection probes (Verification 7.0) resolve in
+  # the Qt-free leaf sicnu_runtime.
+    sicnu_runtime
 )
 # jsoncpp: the canonical `jsoncpp` target (and JSONCPP_INCLUDE_DIRS/LIBRARIES)
 # is resolved once at the top level (see root CMakeLists.txt) — distro configs
@@ -257,8 +265,11 @@ add_library(sicnu_task_center STATIC
     # Phase C fused-chain execution (intermediate materialization elimination)
     framework/fused_chain.cpp
     framework/local_worker_host.cpp
+    framework/worker_process_io.h
     framework/local_worker_pool.h
     framework/local_worker_pool.cpp
+    framework/worker_execution_route.h
+    framework/worker_execution_route.cpp
     framework/resource_monitor.cpp
     framework/task_resource_budget.cpp
     framework/agent_workflow_executor.cpp
@@ -294,6 +305,12 @@ target_link_libraries(sicnu_task_center PUBLIC
 set_target_properties(sicnu_task_center PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
+# Execution Plane 7.0: Windows RSS sampler (GetProcessMemoryInfo) so the
+# memory watermark gates are live on Windows too (they silently returned 0
+# before — the platform shipped with memory admission disabled).
+if(WIN32)
+  target_link_libraries(sicnu_task_center PRIVATE psapi)
+endif()
 
 install(TARGETS sicnu_processing
     RUNTIME DESTINATION ${QGIS_BIN_DIR}

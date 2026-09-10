@@ -58,6 +58,10 @@ if(TARGET sicnu_operators)
   target_link_libraries(sicnu_workflow PUBLIC sicnu_operators)
 endif()
 
+# Fault-injection probes (Verification 7.0) resolve in sicnu_runtime (Qt-free
+# leaf); sicnu_runtime itself never links back into workflow — no cycle.
+target_link_libraries(sicnu_workflow PUBLIC sicnu_runtime)
+
 # Deliberately NO link from sicnu_workflow itself to task_center/processing/
 # agent: task_center PUBLIC-links sicnu_workflow, so adding the reverse edge
 # would form a cycle. workflow_runtime.cpp's ExecutionPlane/OutputVerifier

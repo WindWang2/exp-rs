@@ -29,6 +29,16 @@ struct PreflightInput {
   Json::Value understanding; ///< DatasetUnderstanding document (may be null).
   HarnessError resolutionError; ///< Set when the reference did not resolve.
   bool resolved() const { return understanding.isObject(); }
+
+  /// Harness 7.0 optional facts. All default to "unknown" and every rule pack
+  /// must degrade to warnings — facts narrow the checks, they never fake them.
+  /// {scene_count, dates[], max_gap_days?} from a temporal collection.
+  Json::Value temporalFacts{Json::Value()};
+  /// Projected model manifest (ModelCatalog) for inference intents.
+  Json::Value modelManifest{Json::Value()};
+  /// Explicit supervised/unsupervised classification switch (refs entry
+  /// "supervised"); default true keeps the 4.0 training-required behavior.
+  bool supervised = true;
 };
 
 struct PreflightOutcome {
@@ -48,12 +58,21 @@ PreflightOutcome runScientificPreflight( const std::string &intent,
 /// Convenience: resolves `refs` (name → reference) through resolveDatasetRef
 /// and gathers DatasetUnderstanding facts (raster inspect; vectors tolerated)
 /// before running the rule pack. Non-resolving slots become blocker issues
-/// (DATASET_NOT_FOUND) instead of exceptions.
+/// (DATASET_NOT_FOUND) instead of exceptions. Refs entries may carry
+/// Harness 7.0 extras: "model" (model catalog id), "supervised" (bool),
+/// "temporal_facts" (object).
 PreflightOutcome preflightIntent( const std::string &intent,
                                   const Json::Value &refs );
 
 /// True when the rule pack for `intent` needs >=2 comparable rasters
 /// (change, sar_change) — surfaced for plan drafting guidance.
 bool intentRequiresPair( const std::string &intent );
+
+/// Machine-readable mirror of the rule-pack table (Harness 7.0 Area A drift
+/// anchor): the pack kind, band-role minimums, pair requirement, and modality
+/// expectation enforced for `intent`. Null for unknown intents. The drift
+/// test pins the capability-knowledge layer to this table so the JSON layer
+/// and the C++ rules cannot silently diverge.
+Json::Value intentRequirements( const std::string &intent );
 
 } // namespace sicnu::agent::harness

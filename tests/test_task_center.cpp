@@ -323,7 +323,17 @@ TEST_CASE("TaskCenter - clearCompletedTasks also prunes the JobEngine records", 
     // without crashing or creating bookkeeping.
     const auto directId2 = engine.submit(direct);
     engine.waitUntilIdleForTests();
-    std::this_thread::sleep_for(std::chrono::milliseconds(20)); // let the terminal notify land
+    // The TaskCenter listener runs on the transitioning thread slightly AFTER
+    // the engine goes idle; poll the actual invariant instead of assuming a
+    // fixed delay (flaky-test remediation, Verification 7.0).
+    bool settleOk = false;
+    for (int attempt = 0; attempt < 2000 && !settleOk; ++attempt) {
+        settleOk = center.allTasks().size() == tasksAfterClear &&
+                   engine.snapshot(directId2).has_value();
+        if (!settleOk)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(settleOk);
     REQUIRE(engine.snapshot(directId2).has_value());
     REQUIRE(center.allTasks().size() == tasksAfterClear);
 

@@ -131,3 +131,82 @@ provider for the framework) and `IncompatibleHardware` (device/VRAM verdict).
 
 Pre/post-processing semantics: [pre-post-processing.md](../inference/pre-post-processing.md).
 Model authoring guide: [model-authoring.md](../inference/model-authoring.md).
+
+
+## Platform 7.0 manifest surface (manifest_version 5)
+
+Platform 7.0 extends the contract with multimodal inputs, typed output heads,
+extra preprocessing knobs, a valid-coverage gate and external provider
+connections. Everything is additive: legacy manifests parse unchanged.
+
+### Closed vocabulary (typed refusal of unknown keys)
+
+Every declared section is a closed set. A key nobody reads is refused at
+parse (`InvalidManifest`, the reason names the section path, e.g.
+`unknown key 'tiling.batch'`), never silently ignored. Legal everywhere:
+`note`, `reference` and `x-*` vendor extensions (annotations — never
+interpreted as contract fields). Derived output projections (`readiness`,
+`content_digest`, `input_contract`, `output_contract`, `sourceManifest`,
+legacy root `version`) are accepted and ignored so re-registering an
+inspected manifest keeps working.
+
+### Multimodal inputs
+
+```json
+"inputs": [
+  { "name": "optical",   "modality": "optical", "band_roles": ["B","G","R","NIR"] },
+  { "name": "sar",       "modality": "sar" },
+  { "name": "dem",       "modality": "dem", "alignment": "reference" },
+  { "name": "cloudmask", "modality": "mask", "alignment": "reference" },
+  { "name": "stack",     "temporal_length": 6, "missing_timestep": "zero" }
+]
+```
+
+- `modality`: optical (default) | sar | dem | mask | aux.
+- `alignment`: none (default) | `reference` — the input must be
+  co-registered with the primary input; execution REFUSES misaligned feeds
+  instead of warping (reprojection stays a geospatial seam).
+- `missing_timestep`: refuse (default) | `zero` (explicit zero-fill of
+  missing temporal frames).
+
+### Typed output heads
+
+```json
+"output": {
+  "type": "raster",
+  "tensor_names": ["logits"],
+  "heads": [
+    { "name": "logits", "role": "segmentation", "classes": ["bg", "water"] },
+    { "name": "embed",  "role": "embedding", "confidence": "distance" },
+    { "name": "unc",    "role": "uncertainty" }
+  ]
+}
+```
+
+Roles: segmentation | classification | detection (requires the
+`output.detection` contract) | embedding | uncertainty | auxiliary.
+`confidence`: probability (default) | logit | distance. The flat single-head
+fields stay the `heads[0]` mirror.
+
+### Preprocess / tiling additions
+
+- `preprocess.clamp_min` / `clamp_max`: clamp window applied after
+  normalize/scale (min < max enforced).
+- `preprocess.pad`: symmetric zero-pad applied AFTER preprocessing; the
+  stitch crops halo+pad back out so output geometry stays input geometry.
+  Pad/clamp are executed by the multi-input engine; the single-input engine
+  refuses them loudly.
+- `tiling.min_valid_coverage`: tiles whose valid-pixel fraction is below the
+  gate skip the forward and write NoData (0 = historical all-nodata-only
+  skip; the OOM ladder semantics never change).
+
+### External provider connections
+
+```json
+"runtime": { "provider": { "url": "http://host:8080/infer", "timeout_ms": 5000 } }
+```
+
+`framework: "http"` requires `url`; `framework: "python"` requires
+`worker_script` (+ optional `interpreter`, `timeout_ms`, `max_body_mb`).
+Declaring a provider on an in-process framework is a parse error. See
+[backend-compatibility](../inference/backend-compatibility.md).

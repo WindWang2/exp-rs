@@ -130,3 +130,71 @@ TEST_CASE( "runInspect returns canonical metadata for any supported kind", "[io]
   CHECK( inspected["kind"].asString() == "raster" );
   CHECK( inspected["width"].asInt() == 4 );
 }
+
+TEST_CASE( "doctor v2 carries structured sections and remediation advice",
+           "[io][doctor][v2]" )
+{
+  const std::string dir = scratch( "v2raster" );
+  const std::string path = dir + "/plain.tif";
+  {
+    sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create(
+      path, 3000, 3000, { sicnu::geo::RasterBandSpec {} }, { "GTiff", {}, true } );
+    writer.setGeotransform( { 100.0, 10.0, 0.0, 5000.0, 0.0, -10.0 } );
+    // Float band without NoData: triggers the nodata warning.
+    std::vector<double> values( 3000 * 3000, 1.0 );
+    writer.writeWindow( 1, { 0, 0, 3000, 3000 }, values.data() );
+    writer.finalize();
+  }
+
+  const sicnu::geo::DoctorReport report = sicnu::geo::runDoctor( path );
+  REQUIRE( report.readable );
+  CHECK( report.kind == "raster" );
+
+  const Json::Value json = report.toJson();
+  // Versioned envelope, backward-compatible findings.
+  CHECK( json["doctor_version"].asInt() == 2 );
+  CHECK( json["findings"].isArray() );
+  CHECK( json["identity"]["dataset_kind"].asString() == "raster" );
+  CHECK( json["identity"]["display_path"].asString().find( "plain.tif" ) != std::string::npos );
+  CHECK( json["format"]["driver"].asString() == "GTiff" );
+  CHECK( json["format"]["is_cog"].asBool() == false );
+  CHECK( json["grid"]["kind"].asString() == "north_up" );
+  CHECK( json["grid"]["resampling_category"].asString() == "continuous" );
+  CHECK( json["remote"].isNull() );
+
+  // Remediation covers every error/warning finding with explicit advice.
+  const Json::Value &remediation = json["remediation"];
+  REQUIRE( remediation.isArray() );
+  CHECK( remediation.size() >= static_cast<Json::ArrayIndex>( report.warningCount + report.errorCount ) );
+  for ( const Json::Value &item : remediation )
+  {
+    CHECK( item["advice"].asString().size() > 8 );
+    CHECK( item["auto_fixable"].asBool() == false );
+  }
+  bool hasOverviewAdvice = false;
+  for ( const Json::Value &item : remediation )
+    if ( item["check"].asString() == "overviews" )
+      hasOverviewAdvice = true;
+  CHECK( hasOverviewAdvice ); // 3000x3000 without overviews triggers the advice
+}
+
+TEST_CASE( "doctor v2 refuses nothing and hides nothing on unreadable input",
+           "[io][doctor][v2]" )
+{
+  const std::string dir = scratch( "v2missing" );
+  const sicnu::geo::DoctorReport report = sicnu::geo::runDoctor( dir + "/missing.tif" );
+  CHECK_FALSE( report.readable );
+  CHECK( report.kind == "unreadable" );
+  const Json::Value json = report.toJson();
+  CHECK( json["doctor_version"].asInt() == 2 );
+  // The classifier answers truthfully for the path shape it was given
+  // (Windows temp paths can carry mixed separators and classify Invalid);
+  // the contract is a non-empty classification + display form.
+  CHECK_FALSE( json["identity"]["resource_kind"].asString().empty() );
+  CHECK_FALSE( json["identity"]["display_path"].asString().empty() );
+  bool hasExistenceAdvice = false;
+  for ( const Json::Value &item : json["remediation"] )
+    if ( item["check"].asString() == "existence" )
+      hasExistenceAdvice = true;
+  CHECK( hasExistenceAdvice );
+}

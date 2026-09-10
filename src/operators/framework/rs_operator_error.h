@@ -44,6 +44,10 @@ enum class ErrorCode : int {
     OtbError,
     QgisProcessingError,
     ComputationError,
+    DeviceUnavailable = 3006,      ///< requested/selected device missing or unaddressable
+                                   ///< (Platform 7.0 model-runtime taxonomy, append-only)
+    RuntimeProviderFailed = 3007,  ///< external inference provider crashed / connection lost
+                                   ///< (Platform 7.0 model-runtime taxonomy, append-only)
 
     // Lifecycle errors (4000-4999)
     Cancelled = 4000,

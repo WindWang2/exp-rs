@@ -1,52 +1,61 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.temporal_harmonic",
- "title": "Harmonic temporal model fit",
- "intent": "temporal",
- "family": "temporal",
- "modality": "temporal",
- "sensors": [
-  "sentinel-2",
-  "landsat-8",
-  "landsat-9",
-  "modis"
- ],
- "description": "Harmonic regression over the band series -> residual seasonality model for trend/anomaly work.",
- "slots": [
-  {
-   "name": "collection",
-   "kind": "collection",
-   "description": "Registered temporal collection (spatial:temporal tools).",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "harmonic",
-   "operator_id": "rs:temporal_harmonic_fit",
-   "params": {
-    "collection": "$collection.path",
-    "band_role": "$params.band_role",
-    "robust": true,
-    "output": "$outputs.harmonic"
-   },
-   "verification": "raster"
-  }
- ],
- "outputs": [
-  {
-   "name": "harmonic",
-   "from_step": "harmonic",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "harmonic",
-  "renderer_hint": "singleband_pseudocolor"
- }
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.temporal_harmonic",
+  "title": "Harmonic temporal model fit",
+  "intent": "temporal",
+  "family": "temporal",
+  "modality": "temporal",
+  "sensors": [
+    "sentinel-2",
+    "landsat-8",
+    "landsat-9",
+    "modis"
+  ],
+  "description": "Harmonic regression over the band series -> residual seasonality model for trend/anomaly work.",
+  "slots": [
+    {
+      "name": "collection",
+      "kind": "collection",
+      "description": "Registered temporal collection (spatial:temporal tools).",
+      "required": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "harmonic",
+      "operator_id": "rs:temporal_harmonic_fit",
+      "params": {
+        "collection": "$collection.path",
+        "band_role": "$params.band_role",
+        "robust": true,
+        "output": "$outputs.harmonic"
+      },
+      "verification": "raster"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "harmonic",
+      "from_step": "harmonic",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
+  },
+  "map_output": {
+    "from_step": "harmonic",
+    "renderer_hint": "singleband_pseudocolor"
+  },
+  "capabilities": [
+    "rs:temporal_harmonic_fit"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "harmonic",
+      "kind": "raster"
+    }
+  ]
 }

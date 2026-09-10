@@ -189,4 +189,22 @@ bool linearScale(const float *in, float *out, size_t count, float gain, float bi
     return true;
 }
 
+
+
+Wgs84ArcMeters wgs84ArcAtLatitudeDeg( double latitudeDeg )
+{
+    const double phiRad = latitudeDeg * M_PI / 180.0;
+    const double cosPhi = std::cos( phiRad );
+    Wgs84ArcMeters arc;
+    arc.perDegLat =
+        111132.92 - 559.82 * std::cos( 2 * phiRad ) + 1.175 * std::cos( 4 * phiRad );
+    arc.perDegLon = 111412.84 * cosPhi - 93.5 * std::cos( 3 * phiRad );
+    return arc;
+}
+
+double sceneCentreLatitudeDeg( const std::array<double, 6> &geoTransform, int height )
+{
+    return geoTransform[3] + ( height / 2.0 ) * geoTransform[5];
+}
+
 } // namespace MathUtils

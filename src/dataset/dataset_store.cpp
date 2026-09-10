@@ -179,6 +179,42 @@ bool DatasetStore::open( const QString &dbPath, QString *errorOut )
          !m_impl->exec(
              "CREATE INDEX IF NOT EXISTS idx_annotations_version"
              " ON annotations(dataset_version_id)",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE TABLE IF NOT EXISTS split_manifests("
+             "manifest_id TEXT NOT NULL, dataset_version_id TEXT NOT NULL,"
+             "fingerprint TEXT NOT NULL, json TEXT NOT NULL, created_ms INTEGER NOT NULL,"
+             "PRIMARY KEY(manifest_id))",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE INDEX IF NOT EXISTS idx_splits_version"
+             " ON split_manifests(dataset_version_id)",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE TABLE IF NOT EXISTS leakage_reports("
+             "split_manifest_id TEXT NOT NULL, report_digest TEXT NOT NULL,"
+             "json TEXT NOT NULL, created_ms INTEGER NOT NULL,"
+             "PRIMARY KEY(split_manifest_id, report_digest))",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE INDEX IF NOT EXISTS idx_leakage_split"
+             " ON leakage_reports(split_manifest_id, created_ms)",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE TABLE IF NOT EXISTS sample_facets("
+             "dataset_version_id TEXT NOT NULL, sample_id TEXT NOT NULL,"
+             "facet TEXT NOT NULL, value TEXT NOT NULL,"
+             "PRIMARY KEY(dataset_version_id, sample_id, facet, value))",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE INDEX IF NOT EXISTS idx_facets_query"
+             " ON sample_facets(dataset_version_id, facet, value)",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE TABLE IF NOT EXISTS quality_summaries("
+             "dataset_version_id TEXT NOT NULL PRIMARY KEY,"
+             "sample_count INTEGER NOT NULL, max_roword INTEGER NOT NULL,"
+             "json TEXT NOT NULL, updated_ms INTEGER NOT NULL)",
              errorOut ) )
     {
         close();

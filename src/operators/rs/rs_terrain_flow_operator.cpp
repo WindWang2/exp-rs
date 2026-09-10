@@ -26,7 +26,7 @@ using namespace params;
 
 namespace {
 
-const std::vector<std::string> s_products = { "fill", "flow_direction", "flow_accumulation" };
+const std::vector<std::string> s_products = { "fill", "flow_direction", "flow_accumulation", "watershed" };
 
 } // anonymous namespace
 
@@ -36,6 +36,9 @@ Json::Value RsTerrainFlowOperator::schema() const {
     props["input"] = makeRasterParam( "input", "DEM raster" );
     props["output"] = makeOutputParam( "output", "Output raster path", "tif" );
     props["product"] = makeEnumParam( "product", "Hydrology product", s_products, "flow_accumulation" );
+    props["pour_points"] = makeStringParam( "pour_points",
+        "Watershed outlets as 'col,row' pairs (zero-based pixels), separated by ';' or spaces; "
+        "required for product=watershed. Output labels are 1-based in the given order, 0 = outside every basin.", "" );
     props["nodata"] = makeNumberParam( "nodata", "DEM NoData value; undeclared bands keep NaN as the missing marker", -9999.0 );
 
     Json::Value outputs( Json::objectValue );
@@ -150,7 +153,8 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
     context.throwIfCancelled();
 
     std::vector<float> filled( n );
-    if ( product == "fill" || product == "flow_direction" || product == "flow_accumulation" )
+    if ( product == "fill" || product == "flow_direction" || product == "flow_accumulation"
+         || product == "watershed" )
     {
         context.reportProgress( 0.1, "Filling depressions" );
         if ( !TerrainFlow::fillDepressions( dem.data(), filled.data(), width, height, nodata ) )
@@ -158,7 +162,8 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
     }
 
     std::vector<float> dir;
-    if ( product == "flow_direction" || product == "flow_accumulation" )
+    if ( product == "flow_direction" || product == "flow_accumulation"
+         || product == "watershed" )
     {
         context.reportProgress( 0.5, "Computing D8 directions" );
         dir.resize( n );
@@ -171,6 +176,58 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
         productData = std::move( filled );
     else if ( product == "flow_direction" )
         productData = std::move( dir );
+    else if ( product == "watershed" )
+    {
+        // Parse pour points ('col,row' pairs separated by ';' or spaces).
+        const std::string pourParam =
+            params.isMember( "pour_points" ) && params["pour_points"].isString()
+                ? params["pour_points"].asString()
+                : std::string();
+        if ( pourParam.empty() )
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   "product=watershed requires 'pour_points' "
+                                   "('col,row' pairs separated by ';' or spaces)" );
+        std::vector<std::pair<int, int>> pourPoints;
+        std::string token;
+        auto flushToken = [&]() {
+            if ( token.empty() )
+                return;
+            const auto comma = token.find( ',' );
+            if ( comma == std::string::npos )
+                throw RSOperatorError( ErrorCode::InvalidParameter,
+                                       "pour_points entries must be 'col,row' pairs, got '" + token + "'" );
+            try
+            {
+                const int col = std::stoi( token.substr( 0, comma ) );
+                const int row = std::stoi( token.substr( comma + 1 ) );
+                pourPoints.emplace_back( col, row );
+            }
+            catch ( const std::exception & )
+            {
+                throw RSOperatorError( ErrorCode::InvalidParameter,
+                                       "pour_points entries must be integer 'col,row' pairs, got '"
+                                           + token + "'" );
+            }
+            token.clear();
+        };
+        for ( const char c : pourParam )
+        {
+            if ( c == ';' || c == ' ' )
+                flushToken();
+            else
+                token.push_back( c );
+        }
+        flushToken();
+        if ( pourPoints.empty() )
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   "pour_points parsed to no outlets" );
+        context.reportProgress( 0.8, "Delineating watersheds" );
+        productData.assign( n, 0.0f );
+        if ( !TerrainFlow::watershedLabels( dir.data(), width, height, pourPoints,
+                                            &productData ) )
+            throw RSOperatorError( ErrorCode::ComputationError,
+                                   "Watershed delineation failed (pour point out of range?)" );
+    }
     else
     {
         context.reportProgress( 0.8, "Accumulating drainage" );

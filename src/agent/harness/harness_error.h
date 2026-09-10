@@ -37,6 +37,7 @@ inline constexpr const char *kOutputInvalid = "OUTPUT_INVALID";
 inline constexpr const char *kMapPreflightFailed = "MAP_PREFLIGHT_FAILED";
 inline constexpr const char *kPreflightBlocked = "PREFLIGHT_BLOCKED";
 inline constexpr const char *kEntityAmbiguous = "ENTITY_AMBIGUOUS";
+inline constexpr const char *kIntentAmbiguous = "INTENT_AMBIGUOUS";
 inline constexpr const char *kInvalidPlan = "INVALID_PLAN";
 inline constexpr const char *kInvalidParameter = "INVALID_PARAMETER";
 inline constexpr const char *kTransientFailure = "TRANSIENT_FAILURE";

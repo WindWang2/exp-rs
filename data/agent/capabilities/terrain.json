@@ -1,0 +1,44 @@
+[
+  {
+    "id": "family:terrain",
+    "kind": "family_default",
+    "family": "terrain",
+    "modality": ["dem"],
+    "crs": { "requires_projected": true },
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "crs_matches", "dimensions", "finite_fraction"]
+    },
+    "limitations": ["Slope/aspect in a geographic CRS are physically wrong; reproject first"]
+  },
+  {
+    "id": "rs:terrain_analysis",
+    "family": "terrain",
+    "extends": "family:terrain",
+    "intents": ["terrain"],
+    "variants": [
+      {
+        "when": { "param": "product", "values": ["slope", "aspect", "hillshade", "roughness", "tpi", "tri"] },
+        "intents": ["terrain"]
+      }
+    ]
+  },
+  {
+    "id": "rs:terrain_flow",
+    "family": "terrain",
+    "extends": "family:terrain",
+    "intents": ["terrain"],
+    "resource": { "cost_class": "heavy", "large_raster_safe": true },
+    "limitations": ["Depression-filled DEMs alter flow paths; record the fill operation"]
+  },
+  {
+    "id": "rs:topographic_correction",
+    "family": "terrain",
+    "modality": ["optical"],
+    "intents": ["preprocess", "terrain"],
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "limitations": ["Illumination correction quality depends on DEM/scene co-registration"]
+  }
+]

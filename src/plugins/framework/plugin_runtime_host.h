@@ -25,7 +25,10 @@
 
 #include "exprs/plugin_registry.h"
 
+#include "plugins/host/plugin_host_process_runtime.h"
+
 #include <map>
+#include <memory>
 #include <mutex>
 
 namespace sicnu::plugins {
@@ -58,6 +61,11 @@ public:
 
     /// Manifest declaration for a plugin operator (nullptr when unknown).
     const exprs::ManifestOperator *manifestOperator( const std::string &operatorId ) const;
+
+    /// Host-process runtime snapshot (worker liveness/generation/quota per
+    /// plugin) for the conformance kit and doctor surfaces. Null when the
+    /// runtime is not installed (SICNU_PLUGIN_HOST_PROCESS=off).
+    Json::Value hostProcessSnapshot() const;
 
     /// Current factory for @p operatorId (empty when the plugin has not
     /// registered it yet). The lazy adapter resolves through this so a
@@ -97,6 +105,7 @@ private:
     void installPluginModelRuntimes( const exprs::PluginRecord &record );
 
     mutable std::mutex mMutex;
+    std::unique_ptr<sicnu::plugins::PluginHostProcessRuntime> mHostProcessRuntime;
     std::map<std::string, OperatorEntry> mOperators;      ///< operatorId -> entry
     std::map<std::string, exprs::PluginModelRuntimeFactoryV1> mModelRuntimeFactories;
     std::map<std::string, std::string> mModelRuntimeOwners; ///< framework -> pluginId

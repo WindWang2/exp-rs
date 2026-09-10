@@ -1,67 +1,81 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.uncertainty_rx_anomaly",
- "title": "RX anomaly detection (uncertainty proxy)",
- "intent": "inference",
- "family": "uncertainty",
- "modality": "model",
- "sensors": [
-  "sentinel-2",
-  "landsat-8",
-  "landsat-9"
- ],
- "description": "Reed-Xiaoli anomaly detection highlights statistically anomalous pixels — a model-free uncertainty screen.",
- "slots": [
-  {
-   "name": "primary",
-   "kind": "raster",
-   "description": "Multi-band scene.",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "rx",
-   "operator_id": "rs:rx_anomaly",
-   "params": {
-    "input": "$primary.path",
-    "output": "$outputs.anomaly"
-   },
-   "verification": "raster"
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.uncertainty_rx_anomaly",
+  "title": "RX anomaly detection (uncertainty proxy)",
+  "intent": "inference",
+  "family": "uncertainty",
+  "modality": "model",
+  "sensors": [
+    "sentinel-2",
+    "landsat-8",
+    "landsat-9"
+  ],
+  "description": "Reed-Xiaoli anomaly detection highlights statistically anomalous pixels — a model-free uncertainty screen.",
+  "slots": [
+    {
+      "name": "primary",
+      "kind": "raster",
+      "description": "Multi-band scene.",
+      "required": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "rx",
+      "operator_id": "rs:rx_anomaly",
+      "params": {
+        "input": "$primary.path",
+        "output": "$outputs.anomaly"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "screen",
+      "operator_id": "rs:threshold_raster",
+      "params": {
+        "input": "$outputs.anomaly",
+        "output": "$outputs.anomaly_mask",
+        "thresholdMethod": "percentile",
+        "percentile": 99,
+        "cleanup": "none"
+      },
+      "verification": "raster"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "anomaly",
+      "from_step": "rx",
+      "port": "output",
+      "kind": "raster"
+    },
+    {
+      "name": "anomaly_mask",
+      "from_step": "screen",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
   },
-  {
-   "id": "screen",
-   "operator_id": "rs:threshold_raster",
-   "params": {
-    "input": "$outputs.anomaly",
-    "output": "$outputs.anomaly_mask",
-    "thresholdMethod": "percentile",
-    "percentile": 99,
-    "cleanup": "none"
-   },
-   "verification": "raster"
-  }
- ],
- "outputs": [
-  {
-   "name": "anomaly",
-   "from_step": "rx",
-   "port": "output",
-   "kind": "raster"
+  "map_output": {
+    "from_step": "rx",
+    "renderer_hint": "singleband_pseudocolor"
   },
-  {
-   "name": "anomaly_mask",
-   "from_step": "screen",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "rx",
-  "renderer_hint": "singleband_pseudocolor"
- }
+  "capabilities": [
+    "rs:rx_anomaly",
+    "rs:threshold_raster"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "anomaly",
+      "kind": "raster"
+    },
+    {
+      "name": "anomaly_mask",
+      "kind": "raster"
+    }
+  ]
 }

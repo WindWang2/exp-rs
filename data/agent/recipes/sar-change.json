@@ -1,138 +1,150 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.sar_change",
- "title": "SAR bi-temporal change map",
- "intent": "sar_change",
- "description": "inspect -> calibrate both epochs -> speckle policy -> change. The 'sar_change' preflight rule pack blocks modality, polarization, and calibration-domain mismatches; terrain normalization is added as an explicit operator step when the caller binds a DEM slot.",
- "slots": [
-  {
-   "name": "reference",
-   "kind": "raster",
-   "description": "Earlier SAR epoch (Single Look Complex derived or calibrated GRD).",
-   "required": true
-  },
-  {
-   "name": "observation",
-   "kind": "raster",
-   "description": "Later SAR epoch, same polarization and calibration domain as the reference.",
-   "required": true
-  },
-  {
-   "name": "dem",
-   "kind": "raster",
-   "description": "Optional DEM enabling terrain flattening/correction steps.",
-   "required": false
-  }
- ],
- "steps": [
-  {
-   "id": "calibrate_reference",
-   "operator_id": "rs:sar_calibrate",
-   "params": {
-    "input": "$reference.path",
-    "output": "$outputs.reference_cal"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "calibrate_observation",
-   "operator_id": "rs:sar_calibrate",
-   "params": {
-    "input": "$observation.path",
-    "output": "$outputs.observation_cal"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "flatten_reference",
-   "operator_id": "rs:sar_terrain_flatten",
-   "when_slot": "dem",
-   "params": {
-    "input": "$outputs.reference_cal",
-    "output": "$outputs.reference_flat"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "flatten_observation",
-   "operator_id": "rs:sar_terrain_flatten",
-   "when_slot": "dem",
-   "params": {
-    "input": "$outputs.observation_cal",
-    "output": "$outputs.observation_flat"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "speckle_reference",
-   "operator_id": "rs:sar_speckle",
-   "when_slot": "dem",
-   "params": {
-    "input": "$outputs.reference_flat",
-    "output": "$outputs.reference_sp"
-   },
-   "params_when_skipped": {
-    "input": "$outputs.reference_cal",
-    "output": "$outputs.reference_sp"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "speckle_observation",
-   "operator_id": "rs:sar_speckle",
-   "when_slot": "dem",
-   "params": {
-    "input": "$outputs.observation_flat",
-    "output": "$outputs.observation_sp"
-   },
-   "params_when_skipped": {
-    "input": "$outputs.observation_cal",
-    "output": "$outputs.observation_sp"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "change",
-   "operator_id": "rs:sar_change",
-   "params": {
-    "inputA": "$speckle_reference.output",
-    "inputB": "$speckle_observation.output",
-    "output": "$outputs.change_map"
-   },
-   "verification": "raster",
-   "inputs": [
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.sar_change",
+  "title": "SAR bi-temporal change map",
+  "intent": "sar_change",
+  "description": "inspect -> calibrate both epochs -> speckle policy -> change. The 'sar_change' preflight rule pack blocks modality, polarization, and calibration-domain mismatches; terrain normalization is added as an explicit operator step when the caller binds a DEM slot.",
+  "slots": [
     {
-     "step": "speckle_reference",
-     "port": "output",
-     "to_port": "inputA"
+      "name": "reference",
+      "kind": "raster",
+      "description": "Earlier SAR epoch (Single Look Complex derived or calibrated GRD).",
+      "required": true
     },
     {
-     "step": "speckle_observation",
-     "port": "output",
-     "to_port": "inputB"
+      "name": "observation",
+      "kind": "raster",
+      "description": "Later SAR epoch, same polarization and calibration domain as the reference.",
+      "required": true
+    },
+    {
+      "name": "dem",
+      "kind": "raster",
+      "description": "Optional DEM enabling terrain flattening/correction steps.",
+      "required": false
     }
-   ]
-  }
- ],
- "outputs": [
-  {
-   "name": "change_map",
-   "from_step": "change",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "change",
-  "renderer_hint": "singleband_pseudocolor"
- },
- "family": "sar-change",
- "modality": "sar",
- "sensors": [
-  "sentinel-1"
- ]
+  ],
+  "steps": [
+    {
+      "id": "calibrate_reference",
+      "operator_id": "rs:sar_calibrate",
+      "params": {
+        "input": "$reference.path",
+        "output": "$outputs.reference_cal"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "calibrate_observation",
+      "operator_id": "rs:sar_calibrate",
+      "params": {
+        "input": "$observation.path",
+        "output": "$outputs.observation_cal"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "flatten_reference",
+      "operator_id": "rs:sar_terrain_flatten",
+      "when_slot": "dem",
+      "params": {
+        "input": "$outputs.reference_cal",
+        "output": "$outputs.reference_flat"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "flatten_observation",
+      "operator_id": "rs:sar_terrain_flatten",
+      "when_slot": "dem",
+      "params": {
+        "input": "$outputs.observation_cal",
+        "output": "$outputs.observation_flat"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "speckle_reference",
+      "operator_id": "rs:sar_speckle",
+      "when_slot": "dem",
+      "params": {
+        "input": "$outputs.reference_flat",
+        "output": "$outputs.reference_sp"
+      },
+      "params_when_skipped": {
+        "input": "$outputs.reference_cal",
+        "output": "$outputs.reference_sp"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "speckle_observation",
+      "operator_id": "rs:sar_speckle",
+      "when_slot": "dem",
+      "params": {
+        "input": "$outputs.observation_flat",
+        "output": "$outputs.observation_sp"
+      },
+      "params_when_skipped": {
+        "input": "$outputs.observation_cal",
+        "output": "$outputs.observation_sp"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "change",
+      "operator_id": "rs:sar_change",
+      "params": {
+        "inputA": "$speckle_reference.output",
+        "inputB": "$speckle_observation.output",
+        "output": "$outputs.change_map"
+      },
+      "verification": "raster",
+      "inputs": [
+        {
+          "step": "speckle_reference",
+          "port": "output",
+          "to_port": "inputA"
+        },
+        {
+          "step": "speckle_observation",
+          "port": "output",
+          "to_port": "inputB"
+        }
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "change_map",
+      "from_step": "change",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
+  },
+  "map_output": {
+    "from_step": "change",
+    "renderer_hint": "singleband_pseudocolor"
+  },
+  "family": "sar-change",
+  "modality": "sar",
+  "sensors": [
+    "sentinel-1"
+  ],
+  "capabilities": [
+    "rs:sar_calibrate",
+    "rs:sar_terrain_flatten",
+    "rs:sar_speckle",
+    "rs:sar_change"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "change_map",
+      "kind": "raster"
+    }
+  ]
 }

@@ -828,6 +828,56 @@ int commandPlugin( QStringList args, const CliIO &io )
                   registrationsOk ? "all declared operators registered"
                                   : "operator not registered after load: " + offendingOperator );
 
+        // Isolation runtime 5.0: host-process plugins are additionally
+        // checked for worker launch and a real execution round-trip.
+        if ( record.manifest.runtime == exprs_ns::PluginRuntimeKind::HostProcess )
+        {
+            const Json::Value snapshot =
+                sicnu::plugins::PluginRuntimeHost::instance().hostProcessSnapshot();
+            const Json::Value &entry = snapshot["plugins"][pluginId];
+            addCheck( "PT_HOST_LAUNCH", entry.isObject() && entry["workerAlive"].asBool(),
+                      entry.isObject() && entry["workerAlive"].asBool()
+                          ? "worker process launched and handshake passed"
+                          : "no live worker for the host-process plugin" );
+
+            // Execute the first declared operator with empty params: any
+            // structured answer is fine; the refusal family (E6005 worker
+            // died / E6004 timeout / E6002 protocol) fails the check.
+            if ( !record.manifest.operators.empty() )
+            {
+                const std::string operatorId = record.manifest.operators.front().id;
+                const auto adapter =
+                    sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( operatorId );
+                Json::Value executeResult;
+                if ( !adapter )
+                {
+                    executeResult["error"] = "no adapter registered for " + operatorId;
+                }
+                else
+                {
+                    try
+                    {
+                        executeResult = adapter->execute( Json::Value( Json::objectValue ),
+                                                          nullptr, nullptr );
+                    }
+                    catch ( const std::exception &exception )
+                    {
+                        executeResult["error"] = exception.what();
+                    }
+                }
+                const std::string errorText =
+                    executeResult.get( "error", "" ).isConvertibleTo( Json::stringValue )
+                        ? executeResult.get( "error", "" ).asString()
+                        : std::string();
+                const bool refused = errorText.find( "E6005" ) != std::string::npos
+                                     || errorText.find( "E6004" ) != std::string::npos
+                                     || errorText.find( "E6002" ) != std::string::npos;
+                addCheck( "PT_EXECUTE", !refused,
+                          refused ? "operator execution failed inside the worker: " + errorText
+                                  : "operator executed through the worker round-trip" );
+            }
+        }
+
         const bool unloadOk = registry.unload( pluginId );
         bool revocationOk = unloadOk;
         for ( const exprs_ns::ManifestOperator &op : record.manifest.operators )
@@ -879,8 +929,15 @@ int commandPlugin( QStringList args, const CliIO &io )
         summary["passed"] = passed;
         summary["total"] = checks.size();
         data["summary"] = summary;
-        const bool ok =
+        bool allChecksOk =
             valid && loadOk && registrationsOk && revocationOk && roundTripRegistrations;
+        for ( const Json::Value &check : checks )
+        {
+            const std::string code = check["code"].asString();
+            if ( ( code == "PT_HOST_LAUNCH" || code == "PT_EXECUTE" ) && !check["ok"].asBool() )
+                allChecksOk = false;
+        }
+        const bool ok = allChecksOk;
         return io.finish( ok, "plugin", data,
                           ok ? 0 : exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure ),
                           diagnostics.toJson(), ok ? "" : "plugin conformance failed" );
@@ -1188,7 +1245,10 @@ int CliIO::finish( bool ok, const std::string &command, Json::Value data, int ex
 bool isCliCommand( const QString &firstArg )
 {
     static const QStringList kCommands = { "algorithms", "run", "pipeline", "workflow", "plugin",
-                                           "models", "catalog", "project", "data", "data-providers" };
+                                           "models",    "catalog", "project",  "data",
+                                           "data-providers",
+                                           // Foundation 5.0/7.0 dataset-experiment surface.
+                                           "dataset", "experiment", "reproduce" };
     return kCommands.contains( firstArg );
 }
 

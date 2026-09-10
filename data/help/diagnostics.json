@@ -277,6 +277,25 @@
     ]
   },
   {
+    "id": "diagnostic.harness.intent_ambiguous",
+    "family": "harness",
+    "code": "INTENT_AMBIGUOUS",
+    "title": "科学意图不明确",
+    "whatHappened": "目标文本同时匹配多个科学意图，或没有任何可识别意图。",
+    "whyItMatters": "按猜测执行可能选错算法；候选与匹配依据已随错误返回，应由代理明确选择。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "从返回的 candidates 中明确选择一个意图后重述目标",
+      "先对数据执行 spatial:understand，再用更具体的术语重述目标"
+    ],
+    "keywords": [
+      "intent",
+      "ambiguity",
+      "意图"
+    ]
+  },
+  {
     "id": "diagnostic.harness.invalid_plan",
     "family": "harness",
     "code": "INVALID_PLAN",

@@ -4,6 +4,11 @@
 #include "exprs/plugin_validator.h"
 
 #include "exprs/path_policy.h"
+#include "exprs/plugin_capabilities.h"
+#include "exprs/plugin_permissions.h"
+#include "exprs/plugin_quotas.h"
+
+#include "exprs/path_policy.h"
 
 // MSVC's <sys/stat.h> exposes _S_IFREG but not the POSIX S_ISREG macro.
 #if defined( _WIN32 ) && !defined( S_ISREG )
@@ -275,6 +280,81 @@ bool PluginManifestValidator::validate( const PluginManifest &manifest,
                      id, "permissions" );
             }
         }
+    }
+
+    // Runtime & access declarations (isolation runtime 5.0) -------------------
+    if ( manifest.runtimeUnknown )
+    {
+        fail( PluginDiagnosticCode::ManifestInvalidField, "runtime",
+              "manifest declares an unknown runtime value; supported: "
+              "in-process, host-process" );
+    }
+    if ( manifest.runtime == PluginRuntimeKind::HostProcess )
+    {
+        if ( manifest.hasUi )
+        {
+            fail( PluginDiagnosticCode::ManifestInvalidField, "runtime",
+                  "runtime 'host-process' does not support UI contributions in "
+                  "this host (v1 scope); use in-process for UI plugins" );
+        }
+        if ( manifest.entrypointKind != PluginEntrypointKind::Native )
+        {
+            fail( PluginDiagnosticCode::ManifestInvalidField, "runtime",
+                  "runtime 'host-process' requires a native entrypoint" );
+        }
+    }
+
+    const PluginCapabilityParseResult access =
+        parsePluginAccess( manifest.access, request.pluginDir,
+                           PathPolicy::workspaceRoot(), request.tempDirectory );
+    for ( const std::string &error : access.errors )
+        fail( PluginDiagnosticCode::ManifestInvalidField, "access", error );
+    if ( access.ok() )
+    {
+        // Implication diagnostics: declaring structured access without the
+        // matching coarse permission is a warning (completed, not refused),
+        // matching the capability -> permission rule above.
+        const std::vector<std::pair<const char *, bool>> flagRules = {
+            { "network", access.capabilities.network },
+            { "external_process", access.capabilities.externalProcess },
+            { "gpu", !access.capabilities.gpuHint.empty() },
+            { "project_mutation", access.capabilities.projectMutation },
+            { "filesystem_write", access.capabilities.workspaceMutation
+                                      || !access.capabilities.fsWriteRoots.empty() },
+            { "filesystem_read", !access.capabilities.fsReadRoots.empty() },
+        };
+        for ( const auto &[ permissionName, required ] : flagRules )
+        {
+            if ( !required )
+                continue;
+            PluginPermission permission;
+            if ( pluginPermissionFromName( permissionName, permission )
+                 && std::find( manifest.permissions.begin(), manifest.permissions.end(),
+                               permission )
+                     == manifest.permissions.end() )
+            {
+                add( diagnostics, PluginDiagnosticCode::PermissionDenied,
+                     PluginDiagnosticSeverity::Warning,
+                     "access declaration implies permission '" + std::string( permissionName )
+                         + "' which the manifest does not declare",
+                     id, "permissions" );
+            }
+        }
+        if ( access.capabilities.uiContribution && manifest.runtime == PluginRuntimeKind::HostProcess )
+        {
+            fail( PluginDiagnosticCode::ManifestInvalidField, "access",
+                  "access.ui is incompatible with runtime 'host-process'" );
+        }
+    }
+
+    // Quotas: junk values are warnings; clamping happens at session build.
+    if ( !manifest.quotas.isNull() )
+    {
+        PluginQuota quota;
+        std::vector<std::string> quotaWarnings;
+        quota.parseManifest( manifest.quotas, quotaWarnings );
+        for ( const std::string &message : quotaWarnings )
+            warn( "quotas", message );
     }
 
     // Entrypoint --------------------------------------------------------------

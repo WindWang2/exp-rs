@@ -551,6 +551,13 @@ DimensionInfo DimensionInfo::fromJson( const Json::Value &json )
   dim.type = json.get( "type", "" ).asString();
   dim.direction = json.get( "direction", "" ).asString();
   dim.unit = json.get( "unit", "" ).asString();
+  dim.hasValues = json.get( "has_values", false ).asBool();
+  dim.valuesBounded = json.get( "values_bounded", false ).asBool();
+  if ( dim.hasValues && json["values"].isArray() )
+  {
+    for ( const Json::Value &value : json["values"] )
+      dim.values.push_back( value.asDouble() );
+  }
   return dim;
 }
 
@@ -585,6 +592,10 @@ Json::Value VariableInfo::toJson() const
       attrs[item.first] = item.second;
     json["attributes"] = attrs;
   }
+  Json::Value blocks( Json::arrayValue );
+  for ( const std::int64_t b : blockShape )
+    blocks.append( static_cast<Json::Int64>( b ) );
+  json["block_shape"] = blocks;
   return json;
 }
 
@@ -623,6 +634,11 @@ VariableInfo VariableInfo::fromJson( const Json::Value &json )
   {
     for ( const auto &key : json["attributes"].getMemberNames() )
       variable.attributes[key] = json["attributes"][key].asString();
+  }
+  if ( json.isMember( "block_shape" ) && json["block_shape"].isArray() )
+  {
+    for ( const Json::Value &b : json["block_shape"] )
+      variable.blockShape.push_back( b.asInt64() );
   }
   return variable;
 }
@@ -936,14 +952,42 @@ MultidimMetadata inspectMultidim( const std::string &path, const InspectOptions 
         info.type = type;
       if ( const char *direction = GDALDimensionGetDirection( dim ) )
         info.direction = direction;
-      // Unit of the indexing variable, when one exists (netCDF CF convention).
-      if ( GDALMDArrayH indexingVariable = GDALDimensionGetIndexingVariable( dim ) )
+      // Unit + coordinate axis values of the indexing variable, when one
+      // exists (netCDF CF convention). Axis values are read as doubles,
+      // hard-bounded at kMaxAxisValues (a truncated capture flags
+      // valuesBounded so callers never mistake a partial axis for complete).
+      if ( GDALMDArrayH indexingVariable = GDALMDArrayH( GDALDimensionGetIndexingVariable( dim ) ) )
       {
         if ( GDALAttributeH unitAttribute = GDALMDArrayGetAttribute( indexingVariable, "units" ) )
         {
           if ( const char *unitText = GDALAttributeReadAsString( unitAttribute ) )
             info.unit = unitText;
           GDALAttributeRelease( unitAttribute );
+        }
+        GDALExtendedDataTypeH axisType = GDALMDArrayGetDataType( indexingVariable );
+        const bool numericAxis = GDALExtendedDataTypeGetClass( axisType ) == GEDTC_NUMERIC &&
+                                 GDALExtendedDataTypeGetNumericDataType( axisType ) != GDT_Unknown;
+        GDALExtendedDataTypeRelease( axisType );
+        if ( numericAxis && info.size > 0 )
+        {
+          const GUInt64 axisCount = static_cast<GUInt64>(
+            std::min<std::int64_t>( info.size, static_cast<std::int64_t>( DimensionInfo::kMaxAxisValues ) ) );
+          std::vector<double> axisValues( static_cast<std::size_t>( axisCount ), 0.0 );
+          const GUInt64 axisStart = 0;
+          const std::size_t axisCountSize = static_cast<std::size_t>( axisCount );
+          const GInt64 axisStep = 1;
+          const GPtrDiff_t axisStride = 1;
+          GDALExtendedDataTypeH bufferType = GDALExtendedDataTypeCreate( GDT_Float64 );
+          QuietCplErrors quietAxis;
+          if ( GDALMDArrayRead( indexingVariable, &axisStart, &axisCountSize, &axisStep, &axisStride,
+                                bufferType, axisValues.data(), axisValues.data(),
+                                axisValues.size() * sizeof( double ) ) )
+          {
+            info.hasValues = true;
+            info.valuesBounded = static_cast<std::int64_t>( axisCount ) < info.size;
+            info.values = std::move( axisValues );
+          }
+          GDALExtendedDataTypeRelease( bufferType );
         }
         GDALMDArrayRelease( indexingVariable );
       }
@@ -986,6 +1030,16 @@ MultidimMetadata inspectMultidim( const std::string &path, const InspectOptions 
           }
         }
         CPLFree( arrayDims );
+      }
+
+      // Chunk shape for chunk-aware read planning (absent storages answer 0).
+      size_t blockCount = 0;
+      GUInt64 *blockSizes = GDALMDArrayGetBlockSize( array, &blockCount );
+      if ( blockSizes )
+      {
+        for ( size_t b = 0; b < blockCount; ++b )
+          info.blockShape.push_back( static_cast<std::int64_t>( blockSizes[b] ) );
+        CPLFree( blockSizes );
       }
 
       if ( GDALAttributeH unitAttribute = GDALMDArrayGetAttribute( array, "units" ) )

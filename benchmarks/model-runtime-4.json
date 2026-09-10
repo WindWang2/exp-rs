@@ -1,16 +1,22 @@
 {
-    "cancel_latency_ms": 0.9536,
-    "cold_load_ms": 3.7425,
-    "date": "2026-09-07T15:49:50",
+    "cancel_latency_ms": 0.514528,
+    "cold_load_ms": 313.85544,
+    "date": "2026-09-10T05:48:19",
     "hardware": {
         "cuda": false
     },
-    "peak_rss_mb": 51,
-    "pixels_per_sec": 6528741.815537342,
-    "run_ms": 40.1523,
+    "peak_rss_mb": 0,
+    "pixels_per_sec": 8761926.344321338,
+    "platform7_multi_input": {
+        "run_ms": 29.458764,
+        "schema": "model-runtime-bench-7/1",
+        "tiles": 64,
+        "tiles_per_sec": 2172.528351834449
+    },
+    "run_ms": 29.918535,
     "schema": "model-runtime-bench/1",
     "tile_size": 64,
     "tiles": 64,
-    "tiles_per_sec": 1593.9311073089214,
-    "warm_load_ms": 0.3873
+    "tiles_per_sec": 2139.1421739065768,
+    "warm_load_ms": 0.154701
 }

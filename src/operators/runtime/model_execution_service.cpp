@@ -65,28 +65,38 @@ ModelInfo resolveModelReference( const std::string &modelReference, std::string 
 
 namespace {
 
-/// Contract gates shared by every surface (inherited from rs:infer 3.0):
-/// temporal / multi-input execution is not wired into the tile engine and
-/// must fail loudly instead of silently running one frame of a T-frame model.
-void rejectUnwiredContracts( const ModelInfo &model )
+/// Contract gates shared by every surface (inherited from rs:infer 3.0).
+/// Platform 7.0: temporal / multi-input models execute through the
+/// runMultiInput path — the loud refusal now applies only when the caller
+/// did NOT provide the named feeds the contract demands (a silent single
+/// frame or single branch run would be the #646 failure class).
+void rejectUnwiredContracts( const ModelInfo &model,
+                             const std::vector<NamedRasterFeed> &namedInputs )
 {
+  const bool multiFeeds = !namedInputs.empty();
   for ( const auto &input : model.inputs )
   {
-    if ( input.temporalLength > 0 )
+    if ( input.temporalLength > 0 && !multiFeeds )
       throw RSOperatorError(
         ErrorCode::InvalidInputData,
         "Model '" + model.name + "' declares temporal_length=" +
           std::to_string( input.temporalLength ) +
-          "; temporal (T-frame) inference is not wired into the tile "
-          "engine yet — the graph would silently run on a single frame" );
+          "; provide temporal feed frames through the multi-input request "
+          "(named inputs) — the single-input path would silently run one frame" );
   }
-  if ( model.inputs.size() > 1 )
+  if ( model.inputs.size() > 1 && !multiFeeds )
     throw RSOperatorError(
       ErrorCode::InvalidInputData,
       "Model '" + model.name + "' declares " + std::to_string( model.inputs.size() )
-        + " named inputs; multi-input execution is not wired into the tile "
-          "engine yet — pick a single-input model or run each branch "
-          "separately" );
+        + " named inputs; provide one feed per input through the multi-input "
+          "request (named inputs) — the single-input path would silently run "
+          "one branch" );
+  if ( model.inputs.size() <= 1 && multiFeeds )
+    throw RSOperatorError(
+      ErrorCode::InvalidInputData,
+      "Model '" + model.name + "' declares " + std::to_string( model.inputs.size() )
+        + " input(s); named multi-input feeds apply to multi-input models — "
+          "use the single-input path (input + bands)" );
 }
 
 /// Feature-cube preflight (goal §8 train/inference consistency): when the
@@ -117,9 +127,22 @@ void preflightFeatureCube( const ModelInfo &model, const std::string &inputPath 
 ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
                                         RSOperatorContext &context )
 {
-  if ( !sicnu::operators::params::fileExists( request.inputPath ) )
+  const bool multiInput = !request.namedInputs.empty();
+  if ( !multiInput && !sicnu::operators::params::fileExists( request.inputPath ) )
     throw RSOperatorError( ErrorCode::FileNotFound,
                            "Input raster not found: " + request.inputPath );
+  for ( const NamedRasterFeed &feed : request.namedInputs )
+  {
+    if ( feed.paths.empty() )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "named input '" + feed.name + "' provides no raster paths" );
+    for ( const std::string &path : feed.paths )
+    {
+      if ( !sicnu::operators::params::fileExists( path ) )
+        throw RSOperatorError( ErrorCode::FileNotFound,
+                               "Input raster not found (feed '" + feed.name + "'): " + path );
+    }
+  }
 
   // Resolve catalog name or direct path to a ready model contract.
   std::string errorDetail;
@@ -142,8 +165,13 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
     throw RSOperatorError( ErrorCode::InvalidInputData,
                            "Model '" + model.name + "' cannot execute: " + runtimeReason );
 
-  rejectUnwiredContracts( model );
-  preflightFeatureCube( model, request.inputPath );
+  if ( multiInput && request.asDetection )
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "detection decode runs on the single-input path — multi-input "
+                             "detection heads are not wired yet" );
+  rejectUnwiredContracts( model, request.namedInputs );
+  if ( !multiInput )
+    preflightFeatureCube( model, request.inputPath );
 
   // Detection contracts run through the detection engine; everything else is
   // raster-stack output. The engines share the tile skeleton and the session.
@@ -166,24 +194,25 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
                            "Failed to load model session: " + loadError );
 
   int bandCount = 0;
+  if ( !multiInput )
   {
     GdalDatasetWrapper ds;
     if ( !ds.open( QString::fromStdString( request.inputPath ) ) )
       throw RSOperatorError( ErrorCode::GdalError,
                              "Failed to open input raster: " + request.inputPath );
     bandCount = ds.bandCount();
-  }
-  if ( bandCount <= 0 )
-    throw RSOperatorError( ErrorCode::GdalError,
-                           "Failed to read band count from input raster" );
-  if ( !request.bands.empty() )
-  {
-    for ( int b : request.bands )
+    if ( bandCount <= 0 )
+      throw RSOperatorError( ErrorCode::GdalError,
+                             "Failed to read band count from input raster" );
+    if ( !request.bands.empty() )
     {
-      if ( b < 1 || b > bandCount )
-        throw RSOperatorError( ErrorCode::InvalidParameter,
-                               "band " + std::to_string( b ) + " out of range (1.."
-                                 + std::to_string( bandCount ) + ")" );
+      for ( int b : request.bands )
+      {
+        if ( b < 1 || b > bandCount )
+          throw RSOperatorError( ErrorCode::InvalidParameter,
+                                 "band " + std::to_string( b ) + " out of range (1.."
+                                   + std::to_string( bandCount ) + ")" );
+      }
     }
   }
   const std::vector<int> bands = request.bands;
@@ -240,7 +269,10 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
   }
 
   TileInferenceEngine engine( effectiveModel, session );
-  result.rasterStats = engine.run( request.inputPath, bands, request.outputPath, context, options );
+  if ( multiInput )
+    result.rasterStats = engine.runMultiInput( request.namedInputs, request.outputPath, context, options );
+  else
+    result.rasterStats = engine.run( request.inputPath, bands, request.outputPath, context, options );
 
   Json::Value payload( Json::objectValue );
   payload["output"] = request.outputPath;

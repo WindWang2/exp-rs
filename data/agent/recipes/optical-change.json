@@ -1,101 +1,119 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.optical_change",
- "title": "Optical bi-temporal change map",
- "intent": "change",
- "description": "inspect -> align (only when bindings.params.align is true) -> change difference -> threshold. The 'change' preflight rule pack blocks CRS/grid/radiometry mismatches before execution; alignment is an operator call (gdal:reproject), never a hand-rolled warp.",
- "slots": [
-  {
-   "name": "before",
-   "kind": "raster",
-   "description": "Earlier epoch raster.",
-   "required": true
-  },
-  {
-   "name": "after",
-   "kind": "raster",
-   "description": "Later epoch raster.",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "align_before",
-   "operator_id": "gdal:reproject",
-   "when_param": "align",
-   "params": {
-    "INPUT": "$before.path",
-    "OUTPUT": "$outputs.before_aligned"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "align_after",
-   "operator_id": "gdal:reproject",
-   "when_param": "align",
-   "params": {
-    "INPUT": "$after.path",
-    "OUTPUT": "$outputs.after_aligned"
-   },
-   "verification": "raster",
-   "inputs": []
-  },
-  {
-   "id": "difference",
-   "operator_id": "rs:change_difference",
-   "params": {
-    "before": "$outputs.before_aligned",
-    "after": "$outputs.after_aligned",
-    "output": "$outputs.difference"
-   },
-   "params_when_skipped": {
-    "before": "$before.path",
-    "after": "$after.path",
-    "output": "$outputs.difference"
-   },
-   "verification": "raster",
-   "inputs": [
-    { "step": "align_before" },
-    { "step": "align_after" }
-   ]
-  },
-  {
-   "id": "threshold",
-   "operator_id": "rs:threshold_raster",
-   "params": {
-    "input": "$outputs.difference",
-    "output": "$outputs.change_map"
-   },
-   "verification": "raster",
-   "inputs": [
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.optical_change",
+  "title": "Optical bi-temporal change map",
+  "intent": "change",
+  "description": "inspect -> align (only when bindings.params.align is true) -> change difference -> threshold. The 'change' preflight rule pack blocks CRS/grid/radiometry mismatches before execution; alignment is an operator call (gdal:reproject), never a hand-rolled warp.",
+  "slots": [
     {
-     "step": "difference",
-     "port": "output",
-     "to_port": "input"
+      "name": "before",
+      "kind": "raster",
+      "description": "Earlier epoch raster.",
+      "required": true
+    },
+    {
+      "name": "after",
+      "kind": "raster",
+      "description": "Later epoch raster.",
+      "required": true
     }
-   ]
-  }
- ],
- "outputs": [
-  {
-   "name": "change_map",
-   "from_step": "threshold",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "threshold",
-  "renderer_hint": "categorized"
- },
- "family": "optical-change",
- "modality": "optical",
- "sensors": [
-  "sentinel-2",
-  "landsat-8"
- ]
+  ],
+  "steps": [
+    {
+      "id": "align_before",
+      "operator_id": "gdal:reproject",
+      "when_param": "align",
+      "params": {
+        "INPUT": "$before.path",
+        "OUTPUT": "$outputs.before_aligned"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "align_after",
+      "operator_id": "gdal:reproject",
+      "when_param": "align",
+      "params": {
+        "INPUT": "$after.path",
+        "OUTPUT": "$outputs.after_aligned"
+      },
+      "verification": "raster",
+      "inputs": []
+    },
+    {
+      "id": "difference",
+      "operator_id": "rs:change_difference",
+      "params": {
+        "before": "$outputs.before_aligned",
+        "after": "$outputs.after_aligned",
+        "output": "$outputs.difference"
+      },
+      "params_when_skipped": {
+        "before": "$before.path",
+        "after": "$after.path",
+        "output": "$outputs.difference"
+      },
+      "verification": "raster",
+      "inputs": [
+        {
+          "step": "align_before"
+        },
+        {
+          "step": "align_after"
+        }
+      ]
+    },
+    {
+      "id": "threshold",
+      "operator_id": "rs:threshold_raster",
+      "params": {
+        "input": "$outputs.difference",
+        "output": "$outputs.change_map"
+      },
+      "verification": "raster",
+      "inputs": [
+        {
+          "step": "difference",
+          "port": "output",
+          "to_port": "input"
+        }
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "change_map",
+      "from_step": "threshold",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true,
+    "expectations": {
+      "require_uncertainty": false
+    }
+  },
+  "map_output": {
+    "from_step": "threshold",
+    "renderer_hint": "categorized"
+  },
+  "family": "optical-change",
+  "modality": "optical",
+  "sensors": [
+    "sentinel-2",
+    "landsat-8"
+  ],
+  "capabilities": [
+    "gdal:reproject",
+    "rs:change_difference",
+    "rs:threshold_raster"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "change_map",
+      "kind": "raster"
+    }
+  ]
 }

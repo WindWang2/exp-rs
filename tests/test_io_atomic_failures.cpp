@@ -7,6 +7,7 @@
 #include "geospatial/raster/raster_reader.h"
 #include "geospatial/vector/vector_reader.h"
 #include "geospatial/raster/raster_writer.h"
+#include "geospatial/convert/raster_convert.h"
 #include "geospatial/util/atomic_fs.h"
 #include "geospatial/vector/vector_writer.h"
 
@@ -31,6 +32,15 @@ std::string scratch( const std::string &name )
   fs::remove_all( dir, ec ); // idempotent suites: start from a clean scratch
   fs::create_directories( dir );
   return dir.string();
+}
+std::string writeTinyRaster( const std::string &path, int width, int height )
+{
+  sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create(
+    path, width, height, { sicnu::geo::RasterBandSpec {} }, { "GTiff", {}, true } );
+  std::vector<double> values( static_cast<std::size_t>( width ) * height, 1.0 );
+  writer.writeWindow( 1, { 0, 0, width, height }, values.data() );
+  writer.finalize();
+  return path;
 }
 } // namespace
 
@@ -289,4 +299,64 @@ TEST_CASE( "publishStagedGroup restores targetMainPath on failure", "[io][atomic
   std::string content;
   in >> content;
   CHECK( content == "new_staged_content" );
+}
+
+
+TEST_CASE( "conversion into an existing target keeps the previous file on failure",
+           "[io][atomic][publish][7.0]" )
+{
+  const std::string dir = scratch( "convert_keep" );
+  const std::string source = ( fs::path( dir ) / "src.tif" ).string();
+  const std::string target = ( fs::path( dir ) / "dst.tif" ).string();
+  writeTinyRaster( source, 8, 8 );
+  writeTinyRaster( target, 16, 16 );
+  const std::uintmax_t sizeBefore = sicnu::geo::atomic_fs::fileSize( target );
+  REQUIRE( sizeBefore > 0 );
+
+  // A translate whose source is missing fails before staging: the previous
+  // target must survive untouched (the mid-publish restore path is covered
+  // by the group-publish tests above).
+  std::filesystem::remove( source );
+  bool threw = false;
+  try
+  {
+    sicnu::geo::TranslateOptions options;
+    sicnu::geo::translateRaster( source, target, options );
+  }
+  catch ( const sicnu::geo::GeoError & )
+  {
+    threw = true;
+  }
+  CHECK( threw );
+  CHECK( sicnu::geo::atomic_fs::fileSize( target ) == sizeBefore );
+  // No staging residue next to the target.
+  for ( const auto &entry : std::filesystem::directory_iterator( dir ) )
+    CHECK( entry.path().filename().string().find( ".tmp" ) == std::string::npos );
+}
+
+TEST_CASE( "a successful re-conversion replaces the target and consumes backups",
+           "[io][atomic][publish][7.0]" )
+{
+  const std::string dir = scratch( "convert_replace" );
+  const std::string source = ( fs::path( dir ) / "src.tif" ).string();
+  const std::string target = ( fs::path( dir ) / "dst.tif" ).string();
+  writeTinyRaster( source, 8, 8 );
+  writeTinyRaster( target, 16, 16 );
+
+  sicnu::geo::TranslateOptions options;
+  const sicnu::geo::TranslateResult result =
+    sicnu::geo::translateRaster( source, target, options );
+  CHECK( result.width == 8 );
+
+  // The replace consumed its backups: only the two real rasters remain.
+  std::size_t tifCount = 0;
+  for ( const auto &entry : std::filesystem::directory_iterator( dir ) )
+  {
+    const std::string name = entry.path().filename().string();
+    if ( name.find( ".tif" ) != std::string::npos )
+      ++tifCount;
+    CHECK( name.find( ".bak" ) == std::string::npos );
+    CHECK( name.find( ".tmp" ) == std::string::npos );
+  }
+  CHECK( tifCount == 2 );
 }

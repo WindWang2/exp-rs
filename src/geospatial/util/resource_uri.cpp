@@ -89,13 +89,34 @@ bool hasUncPrefix( const std::string &path )
 bool fileExistsUtf8( const std::string &path )
 {
   std::error_code ec;
-  return std::filesystem::exists( std::filesystem::u8path( path ), ec );
+  std::filesystem::path native;
+  try
+  {
+    native = std::filesystem::u8path( path );
+  }
+  catch ( ... )
+  {
+    // Not representable as UTF-8 (parse() fuzz, Verification 7.0): the
+    // documented contract is that classification NEVER throws — treat the
+    // input as not-an-existing-file and let the classifier answer by shape.
+    return false;
+  }
+  return std::filesystem::exists( native, ec );
 }
 
 bool isDirectoryUtf8( const std::string &path )
 {
   std::error_code ec;
-  return std::filesystem::is_directory( std::filesystem::u8path( path ), ec );
+  std::filesystem::path native;
+  try
+  {
+    native = std::filesystem::u8path( path );
+  }
+  catch ( ... )
+  {
+    return false; // same totality rule as fileExistsUtf8
+  }
+  return std::filesystem::is_directory( native, ec );
 }
 
 /// GDAL subdataset selector: "DRIVER:"path":selector" — driver is a word with

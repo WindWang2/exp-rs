@@ -17,6 +17,8 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/satellite_products.h"
 #include "processing/algorithms/topographic_correction.h"
+#include "processing/algorithms/math_utils.h"
+#include "processing/gdal/gdal_cell_geometry.h"
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -118,44 +120,10 @@ void readHaloWindow( GdalDatasetWrapper &ds, int band, int xOff, int yOff,
     }
 }
 
-/// Per-axis pixel size in METRES for the DEM gradients — the same WGS84
-/// arc-length conversion for geographic DEMs the terrain operator applies
-/// (#612). Consolidation candidate tracked for Milestone F.1.
-void cellSizesMetres( const GdalDatasetWrapper &ds, double *csx, double *csy )
-{
-    const std::array<double, 6> gt = ds.geoTransform();
-    double x = std::abs( gt[1] );
-    double y = std::abs( gt[5] );
-    if ( x <= 1e-7 )
-        x = 30.0;
-    if ( y <= 1e-7 )
-        y = x;
-
-    const QString wkt = ds.projection();
-    if ( !wkt.isEmpty() )
-    {
-        OGRSpatialReferenceH srs = OSRNewSpatialReference( nullptr );
-        if ( srs )
-        {
-            const QByteArray wktBytes = wkt.toUtf8();
-            char *wktPtr = const_cast<char *>( wktBytes.constData() );
-            if ( OSRImportFromWkt( srs, &wktPtr ) == OGRERR_NONE && OSRIsGeographic( srs ) )
-            {
-                const double phiDeg = gt[3] + ( ds.height() / 2.0 ) * gt[5];
-                const double phiRad = phiDeg * M_PI / 180.0;
-                const double cosPhi = std::cos( phiRad );
-                const double mPerDegLat =
-                    111132.92 - 559.82 * std::cos( 2 * phiRad ) + 1.175 * std::cos( 4 * phiRad );
-                const double mPerDegLon = 111412.84 * cosPhi - 93.5 * std::cos( 3 * phiRad );
-                x = std::abs( gt[1] ) * mPerDegLon;
-                y = ( std::abs( gt[5] ) > 1e-7 ? std::abs( gt[5] ) : std::abs( gt[1] ) ) * mPerDegLat;
-            }
-            OSRDestroySpatialReference( srs );
-        }
-    }
-    *csx = x;
-    *csy = y;
-}
+// Per-axis DEM pixel size in metres (geographic CRS → scene-centre WGS84
+// arcs) — single owner: processing/gdal/gdal_cell_geometry (the #612 rule;
+// this file used to carry its own copy, tracked for Milestone F.1).
+using sicnu::processing::gdal_util::cellSizesMetres;
 
 } // anonymous namespace
 

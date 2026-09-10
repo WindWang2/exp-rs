@@ -29,6 +29,7 @@
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "agent/tool_catalog/agent_tool.h"
 #include "agent/spatial_tools/spatial_tool.h"
+#include "agent/data_platform_tools.h"
 
 #include <optional>
 #include <iostream>
@@ -828,6 +829,32 @@ void McpServer::handleRequest(const QVariantMap &request)
                 tool[QStringLiteral("inputSchema")] = metaToolInputSchema(def);
             tools.append(tool);
         }
+        // Dataset/Experiment platform 7.0 surface (dataset:/experiment:/
+        // reproducibility:) — thin tools over the authoritative stores.
+        for (const auto &def : sicnu::agent::dataPlatformToolDefs()) {
+            QVariantMap tool;
+            tool[QStringLiteral("name")] = QString::fromUtf8(def.name);
+            tool[QStringLiteral("description")] = QString::fromUtf8(def.description);
+            if (includeSchemas) {
+                QVariantMap schema;
+                schema[QStringLiteral("type")] = QStringLiteral("object");
+                QVariantMap properties;
+                QStringList requiredInputs;
+                for (const auto &input : def.inputs) {
+                    QVariantMap prop;
+                    prop[QStringLiteral("type")] = QString::fromUtf8(input.type);
+                    prop[QStringLiteral("description")] = QString::fromUtf8(input.description);
+                    properties[QString::fromUtf8(input.name)] = prop;
+                    if (input.required)
+                        requiredInputs.append(QString::fromUtf8(input.name));
+                }
+                schema[QStringLiteral("properties")] = properties;
+                if (!requiredInputs.isEmpty())
+                    schema[QStringLiteral("required")] = requiredInputs;
+                tool[QStringLiteral("inputSchema")] = schema;
+            }
+            tools.append(tool);
+        }
         // ADR 0122: also expose the unified Agent Tool Catalog (algorithms,
         // interaction, data, spatial tools) so harness-side bridges (e.g. the
         // Pi extension) enumerate one surface. Only tools that tools/call can
@@ -908,7 +935,11 @@ void McpServer::handleRequest(const QVariantMap &request)
         try
         {
             QVariantMap resultData;
-            if (toolName == QStringLiteral("list_algorithms"))
+            if (sicnu::agent::isDataPlatformTool(toolName))
+            {
+                resultData = sicnu::agent::handleDataPlatformTool(toolName, arguments);
+            }
+            else if (toolName == QStringLiteral("list_algorithms"))
             {
                 resultData = handleListAlgorithms(
                     mcpPageLimit(arguments.value(QStringLiteral("limit")).toInt()),

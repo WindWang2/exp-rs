@@ -2,6 +2,8 @@
 add_library(sicnu_agent SHARED
   output_verifier.cpp
   output_verifier.h
+  data_platform_tools.cpp
+  data_platform_tools.h
   workspace_snapshot.cpp
   workspace_snapshot.h
   workspace_state.cpp
@@ -22,6 +24,14 @@ add_library(sicnu_agent SHARED
   llm_streaming_client.h
   contracts/spatial_contracts.cpp
   contracts/spatial_contracts.h
+  harness/band_facts.cpp
+  harness/band_facts.h
+  harness/capability_knowledge.cpp
+  harness/capability_knowledge.h
+  harness/capability_graph.cpp
+  harness/capability_graph.h
+  harness/context_ledger.cpp
+  harness/context_ledger.h
   harness/harness_error.cpp
   harness/harness_error.h
   harness/tool_taxonomy.cpp
@@ -133,6 +143,8 @@ target_link_libraries(sicnu_agent PUBLIC
   sicnu_processing
   sicnu_task_center
   sicnu_operators
+  Sicnu::dataset
+  Sicnu::experiment
   sicnu_workflow
   Sicnu::help
   Sicnu::help_adapters

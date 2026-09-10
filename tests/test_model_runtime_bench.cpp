@@ -12,6 +12,8 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/runtime/model_runtime.h"
 #include "operators/runtime/tile_inference_engine.h"
+
+#include <opencv2/core.hpp>
 #include "synthetic_raster_builder.h"
 
 #include <gdal_priv.h>
@@ -44,6 +46,7 @@ namespace {
 
 using sicnu::operators::ModelCatalog;
 using sicnu::operators::ModelInfo;
+using sicnu::operators::ModelInputContract;
 using sicnu::operators::ModelReadiness;
 using sicnu::operators::RSOperatorContext;
 using sicnu::operators::RSOperatorError;
@@ -171,9 +174,71 @@ TEST_CASE( "model runtime benchmark (SICNU_MODEL_BENCH=1)", "[.] [model_bench]" 
   CHECK( canceled );
   CHECK( cancelLatencyMs < 1000.0 );
 
+  // --- Platform 7.0: multi-input / temporal throughput ----------------------
+  QJsonObject bench7;
+  // A deterministic known-answer fake (same wire semantics as the 7.0 test
+  // fakes) exercises the multimodal engine: per-tile cost now includes the
+  // per-feed window reads, the temporal stack and the named forward.
+  {
+    using namespace sicnu::operators::runtime;
+    class MultiInputBenchRuntime final : public IModelRuntime
+    {
+      public:
+        std::string framework() const override { return "bench7"; }
+        std::string backendName() const override { return "multi-input-bench"; }
+        std::string deviceName() const override { return "cpu"; }
+        std::string artifactPath() const override { return "fake://bench7"; }
+        cv::Mat infer( const cv::Mat &blob ) override { return blob.clone(); }
+        std::vector<NamedTensor> inferNamed( const std::vector<NamedTensor> &inputs,
+                                             const std::vector<std::string> & ) override
+        {
+          const TensorBlob &first = inputs.front().second;
+          auto out = TensorBlob::zeros( first.shape, TensorDType::Float32 );
+          return { NamedTensor{ std::string(), std::move( out ) } };
+        }
+    };
+    ModelInfo multiModel;
+    multiModel.name = "bench7-multi";
+    multiModel.framework = "bench7";
+    multiModel.tiling.tileSize = 64;
+    ModelInputContract t1;
+    t1.name = "before";
+    ModelInputContract t2;
+    t2.name = "after";
+    t2.temporalLength = 3;
+    t2.missingTimestep = "zero";
+    multiModel.inputs = { t1, t2 };
+    multiModel.input = t1;
+
+    const QString t1Path = dir.filePath( QStringLiteral( "bench7-t1.tif" ) );
+    const QString t2Path = dir.filePath( QStringLiteral( "bench7-t2.tif" ) );
+    sicnu::testing::RsSyntheticRasterBuilder( 512, 512, 2, GDT_Float32 )
+      .withConstantValue( 1, 1.0f )
+      .writeToDisk( t1Path );
+    sicnu::testing::RsSyntheticRasterBuilder( 512, 512, 2, GDT_Float32 )
+      .withConstantValue( 1, 2.0f )
+      .writeToDisk( t2Path );
+
+    TileInferenceEngine multiEngine( multiModel,
+                                     std::make_shared<MultiInputBenchRuntime>() );
+    const auto multiStart = std::chrono::steady_clock::now();
+    const auto multiStats = multiEngine.runMultiInput(
+      { NamedRasterFeed{ "before", { t1Path.toStdString() }, {} },
+        NamedRasterFeed{ "after", { t2Path.toStdString(), t2Path.toStdString(), t2Path.toStdString() }, {} } },
+      dir.filePath( QStringLiteral( "bench7-out.tif" ) ).toStdString(), context );
+    const double multiMs =
+      std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - multiStart )
+        .count();
+    bench7["tiles_per_sec"] = multiMs > 0 ? multiStats.tilesProcessed * 1000.0 / multiMs : 0.0;
+    bench7["run_ms"] = multiMs;
+    bench7["tiles"] = multiStats.tilesProcessed;
+  }
+
   // --- Baseline JSON --------------------------------------------------------
   QJsonObject bench;
   bench["schema"] = QStringLiteral( "model-runtime-bench/1" );
+  bench7["schema"] = QStringLiteral( "model-runtime-bench-7/1" );
+  bench["platform7_multi_input"] = bench7;
   bench["date"] = QDateTime::currentDateTime().toString( Qt::ISODate );
   QJsonObject hw;
   hw["cuda"] = ModelHardwareCapabilities::detect().cudaAvailable;

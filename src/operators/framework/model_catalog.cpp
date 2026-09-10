@@ -82,7 +82,8 @@ void appendJsonArray( Json::Value &out, const char *key, const std::vector<std::
 
 /// Parses one input object: the manifest v2 `input` section or, since v3,
 /// one entry of the `inputs` array. Same keys for both: name, data_type,
-/// dtype, layout, band_roles, width, height, temporal_length, temporal_collapse.
+/// dtype, layout, band_roles, width, height, temporal_length, temporal_collapse
+/// and, since Platform 7.0, modality / alignment / missing_timestep.
 ModelInputContract parseModelInputContract( const QJsonObject &inputObj )
 {
   ModelInputContract input;
@@ -101,7 +102,46 @@ ModelInputContract parseModelInputContract( const QJsonObject &inputObj )
   input.temporalCollapse = inputObj.value( QStringLiteral( "temporal_collapse" ) ).toString().toStdString();
   if ( input.temporalCollapse.empty() )
     input.temporalCollapse = "channels"; // documented default
+  // Platform 7.0 multimodal surface.
+  input.modality = inputObj.value( QStringLiteral( "modality" ) ).toString().toStdString();
+  input.alignment = inputObj.value( QStringLiteral( "alignment" ) ).toString().toStdString();
+  input.missingTimestep = inputObj.value( QStringLiteral( "missing_timestep" ) ).toString().toStdString();
   return input;
+}
+
+/// Platform 7.0 typed refusal of manifest keys outside the contract
+/// vocabulary: a declared section is a CLOSED set — a key nobody reads is an
+/// authoring error (the #646 failure class: a knob that silently does
+/// nothing). Unknown keys never abort the scan; they surface as
+/// InvalidManifest readiness through markInvalid, like every other contract
+/// finding. @a section prefixes the reported key ("output.heads[2].foo").
+///
+/// Documented ANNOTATION keys ("note", "reference", vendor extensions with an
+/// "x-" prefix) are legal in every section and never interpreted as contract
+/// fields — they exist so authors can document manifests without inventing
+/// knobs the runtime would silently ignore.
+void collectUnknownKeys( const QJsonObject &obj, const std::vector<const char *> &allowed,
+                         const std::string &section, std::vector<std::string> *out )
+{
+  for ( auto it = obj.begin(); it != obj.end(); ++it )
+  {
+    const std::string key = it.key().toStdString();
+    bool known = key == "note" || key == "reference"
+                   || ( key.size() >= 2 && key[0] == 'x' && key[1] == '-' );
+    if ( !known )
+    {
+      for ( const char *a : allowed )
+      {
+        if ( key == a )
+        {
+          known = true;
+          break;
+        }
+      }
+    }
+    if ( !known )
+      out->push_back( section + key );
+  }
 }
 
 ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
@@ -216,6 +256,29 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
       if ( det.classes.empty() )
         det.classes = info.output.classes;
     }
+    // Platform 7.0: typed heads[] — additive over the flat fields, which stay
+    // the heads[0] mirror when heads are declared.
+    const QJsonValue headsVal = outputObj.value( QStringLiteral( "heads" ) );
+    if ( headsVal.isArray() )
+    {
+      info.output.headsDeclared = true;
+      for ( const auto &entry : headsVal.toArray() )
+      {
+        if ( !entry.isObject() )
+          continue; // shape finding surfaces via the unknown/shape checks below
+        const QJsonObject headObj = entry.toObject();
+        ModelHeadContract head;
+        head.name = headObj.value( QStringLiteral( "name" ) ).toString().toStdString();
+        head.role = headObj.value( QStringLiteral( "role" ) ).toString().toStdString();
+        head.layout = headObj.value( QStringLiteral( "layout" ) ).toString().toStdString();
+        head.dtype = headObj.value( QStringLiteral( "dtype" ) ).toString().toStdString();
+        head.classes = parseStringArray( headObj, QStringLiteral( "classes" ) );
+        head.confidence = headObj.value( QStringLiteral( "confidence" ) ).toString().toStdString();
+        if ( head.confidence.empty() )
+          head.confidence = "probability"; // documented default
+        info.output.heads.push_back( std::move( head ) );
+      }
+    }
   }
   if ( info.outputType.empty() )
     info.outputType = info.output.type;
@@ -263,6 +326,15 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   info.preprocess.resize = preObj.value( QStringLiteral( "resize" ) ).toString().toStdString();
   info.preprocess.interpolation = preObj.value( QStringLiteral( "interpolation" ) ).toString().toStdString();
   info.preprocess.nodataPolicy = preObj.value( QStringLiteral( "nodata_policy" ) ).toString().toStdString();
+  // Platform 7.0: clamp window + symmetric tile pad.
+  const QJsonValue clampMinVal = preObj.value( QStringLiteral( "clamp_min" ) );
+  if ( clampMinVal.isDouble() )
+    info.preprocess.clampMin = clampMinVal.toDouble();
+  const QJsonValue clampMaxVal = preObj.value( QStringLiteral( "clamp_max" ) );
+  if ( clampMaxVal.isDouble() )
+    info.preprocess.clampMax = clampMaxVal.toDouble();
+  const int padPx = preObj.value( QStringLiteral( "pad" ) ).toInt( 0 );
+  info.preprocess.pad = padPx > 0 ? padPx : 0;
 
   // --- Manifest v2: tiling ---------------------------------------------------
   const QJsonObject tilingObj = obj.value( QStringLiteral( "tiling" ) ).toObject();
@@ -276,6 +348,10 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   info.tiling.halo = halo > 0 ? halo : 0;
   const int batch = tilingObj.value( QStringLiteral( "batch_size" ) ).toInt( 1 );
   info.tiling.batchSize = std::clamp( batch, 1, 64 );
+  // Platform 7.0: valid-coverage gate (0 = historical all-nodata-only skip).
+  const QJsonValue coverageVal = tilingObj.value( QStringLiteral( "min_valid_coverage" ) );
+  if ( coverageVal.isDouble() )
+    info.tiling.minValidCoverage = coverageVal.toDouble();
 
   // --- Manifest v2: postprocess ----------------------------------------------
   const QJsonObject postObj = obj.value( QStringLiteral( "postprocess" ) ).toObject();
@@ -299,6 +375,15 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   // Platform 4.0 device token; validated at acquire time (registry knows the
   // backend traits), so a bad token fails the run, not the catalog scan.
   info.runtime.device = runtimeObj.value( QStringLiteral( "device" ) ).toString().toStdString();
+  // Platform 7.0: external provider connection (framework "http"/"python").
+  const QJsonObject providerObj = runtimeObj.value( QStringLiteral( "provider" ) ).toObject();
+  info.runtime.provider.url = providerObj.value( QStringLiteral( "url" ) ).toString().toStdString();
+  info.runtime.provider.workerScript =
+    providerObj.value( QStringLiteral( "worker_script" ) ).toString().toStdString();
+  info.runtime.provider.interpreter =
+    providerObj.value( QStringLiteral( "interpreter" ) ).toString().toStdString();
+  info.runtime.provider.timeoutMs = providerObj.value( QStringLiteral( "timeout_ms" ) ).toInt( 30000 );
+  info.runtime.provider.maxBodyMb = providerObj.value( QStringLiteral( "max_body_mb" ) ).toInt( 256 );
 
   // Tiling support flag: nested tiling.supported, legacy supports_tiling, in that order.
   info.supportsTiling = runtimeObj.contains( QStringLiteral( "supports_tiling" ) )
@@ -334,14 +419,14 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     if ( declaredVersion.isDouble() )
     {
       const int v = declaredVersion.toInt();
-      if ( v < 1 || v > 4 )
-        markInvalid( "manifest_version " + std::to_string( v ) + " is unsupported (1..4)" );
+      if ( v < 1 || v > 5 )
+        markInvalid( "manifest_version " + std::to_string( v ) + " is unsupported (1..5)" );
       else
         info.manifestVersion = v;
     }
     else if ( !declaredVersion.isNull() && !declaredVersion.isUndefined() )
     {
-      markInvalid( "manifest_version must be an integer (1..4)" );
+      markInvalid( "manifest_version must be an integer (1..5)" );
     }
     int shapeVersion = 1;
     if ( inputsDeclaredAsArray )
@@ -350,12 +435,186 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
       shapeVersion = 2;
     // Version 4 is the v3 shape plus the 4.0 vocabulary (identity fields,
     // output.format / output.detection) - it validates against shape 3.
-    const int effectiveDeclared = info.manifestVersion == 4 ? 3 : info.manifestVersion;
+    // Version 5 is the 7.0 vocabulary (multimodal inputs, typed heads,
+    // provider contracts) on the same v3 shape.
+    const int effectiveDeclared =
+      ( info.manifestVersion == 4 || info.manifestVersion == 5 ) ? 3 : info.manifestVersion;
     if ( effectiveDeclared > 0 && effectiveDeclared != shapeVersion )
       markInvalid( "declared manifest_version " + std::to_string( info.manifestVersion )
                    + " but the manifest shape is version " + std::to_string( shapeVersion )
                    + ( shapeVersion == 3 ? " ('inputs' array)" : shapeVersion == 2 ? " ('input' object)"
                                                                                    : " (legacy flat fields)" ) );
+  }
+
+  // --- Platform 7.0: closed-vocabulary key check -----------------------------
+  // Every declared section is a closed set; a key nobody reads is refused
+  // (typed refusal), never silently ignored. Derived OUTPUT projections
+  // (inspect()/toJson surface: readiness, digests, the inputs[0] mirror) are
+  // accepted at the root and deliberately ignored on load — they describe
+  // catalog state, not contract intent, and re-registering an inspected
+  // manifest must keep working.
+  {
+    std::vector<std::string> unknown;
+    collectUnknownKeys( obj,
+                        { "name", "task", "input", "output", "framework", "path", "gpu", "accuracy",
+                          "description", "tags", "id", "model_version", "license", "source",
+                          "manifest_version", "artifact", "inputs", "preprocess", "tiling",
+                          "postprocess", "runtime", "domain", "sensors", "band_roles", "modalities",
+                          "polarizations", "temporal_length", "radiometric_state", "resolution_range",
+                          "cpu_fallback", "estimated_ram_mb", "estimated_vram_mb", "supports_tiling",
+                          // legacy freeform version string superseded by
+                          // model_version (historically ignored; kept legal)
+                          "version",
+                          // derived output projections (ignored by design;
+                          // re-registering an inspected/toJson manifest must
+                          // keep working)
+                          "readiness", "readiness_reason", "resolved_artifact_path",
+                          "content_digest", "input_contract", "output_contract",
+                          "sourceManifest" },
+                        "", &unknown );
+    if ( inputVal.isObject() )
+      collectUnknownKeys( inputVal.toObject(),
+                          { "name", "data_type", "dtype", "layout", "band_roles", "width", "height",
+                            "temporal_length", "temporal_collapse", "modality", "alignment",
+                            "missing_timestep" },
+                          "input.", &unknown );
+    if ( inputsVal.isArray() )
+    {
+      int index = 0;
+      for ( const auto &entry : inputsVal.toArray() )
+      {
+        if ( entry.isObject() )
+          collectUnknownKeys( entry.toObject(),
+                              { "name", "data_type", "dtype", "layout", "band_roles", "width",
+                                "height", "temporal_length", "temporal_collapse", "modality",
+                                "alignment", "missing_timestep" },
+                              "inputs[" + std::to_string( index ) + "].", &unknown );
+        ++index;
+      }
+    }
+    if ( outputVal.isObject() )
+    {
+      collectUnknownKeys( outputObj,
+                          { "type", "tensor_names", "classes", "threshold", "uncertainty", "format",
+                            "detection", "heads" },
+                          "output.", &unknown );
+      if ( outputObj.contains( QStringLiteral( "detection" ) )
+           && outputObj.value( QStringLiteral( "detection" ) ).isObject() )
+        collectUnknownKeys( outputObj.value( QStringLiteral( "detection" ) ).toObject(),
+                            { "layout", "tensor_layout", "conf_threshold", "nms_iou",
+                              "max_detections", "classes" },
+                            "output.detection.", &unknown );
+      const QJsonValue headsVal = outputObj.value( QStringLiteral( "heads" ) );
+      if ( headsVal.isArray() )
+      {
+        int headIndex = 0;
+        for ( const auto &entry : headsVal.toArray() )
+        {
+          if ( entry.isObject() )
+            collectUnknownKeys( entry.toObject(),
+                                { "name", "role", "layout", "dtype", "classes", "confidence" },
+                                "output.heads[" + std::to_string( headIndex ) + "].", &unknown );
+          ++headIndex;
+        }
+      }
+    }
+    collectUnknownKeys( preObj,
+                        { "normalize", "mean", "std", "scale", "resize", "interpolation",
+                          "nodata_policy", "clamp_min", "clamp_max", "pad" },
+                        "preprocess.", &unknown );
+    collectUnknownKeys( tilingObj,
+                        { "supported", "tile_size", "overlap", "halo", "batch_size",
+                          "min_valid_coverage" },
+                        "tiling.", &unknown );
+    collectUnknownKeys( postObj, { "nms", "mask_threshold", "polygonize", "simplify" },
+                        "postprocess.", &unknown );
+    collectUnknownKeys( runtimeObj,
+                        { "gpu", "cpu_fallback", "estimated_ram_mb", "estimated_vram_mb", "device",
+                          "provider", "supports_tiling" },
+                        "runtime.", &unknown );
+    if ( runtimeObj.contains( QStringLiteral( "provider" ) )
+         && runtimeObj.value( QStringLiteral( "provider" ) ).isObject() )
+      collectUnknownKeys( runtimeObj.value( QStringLiteral( "provider" ) ).toObject(),
+                          { "url", "worker_script", "interpreter", "timeout_ms", "max_body_mb" },
+                          "runtime.provider.", &unknown );
+    collectUnknownKeys( obj.value( QStringLiteral( "artifact" ) ).toObject(),
+                        { "path", "checksum", "size_bytes" }, "artifact.", &unknown );
+    if ( obj.contains( QStringLiteral( "domain" ) ) )
+      collectUnknownKeys( domainObj,
+                          { "sensors", "modalities", "polarizations", "temporal_length",
+                            "radiometric_state", "resolution_range" },
+                          "domain.", &unknown );
+    for ( const std::string &key : unknown )
+      markInvalid( "unknown key '" + key + "' is not part of the manifest contract - "
+                   "declare it where it belongs or remove it (unsupported keys are never ignored)" );
+  }
+
+  // --- Platform 7.0: new-field vocabulary -------------------------------------
+  for ( const ModelInputContract &in : info.inputs )
+  {
+    const std::string inputWhy = in.validate();
+    if ( !inputWhy.empty() )
+      markInvalid( ( in.name.empty() ? std::string( "input" ) : "input '" + in.name + "'" )
+                     + ": " + inputWhy );
+  }
+  if ( info.output.headsDeclared && info.output.heads.empty() )
+    markInvalid( "output.heads is declared but empty - declare at least one head or remove the key" );
+  if ( info.output.headsDeclared )
+  {
+    std::vector<std::string> seenHeadNames;
+    for ( const ModelHeadContract &head : info.output.heads )
+    {
+      const std::string headWhy = head.validate();
+      if ( !headWhy.empty() )
+        markInvalid( "output.heads" + ( head.name.empty() ? std::string( "" )
+                                                          : "('" + head.name + "')" )
+                       + ": " + headWhy );
+      if ( !head.name.empty() )
+      {
+        if ( std::find( seenHeadNames.begin(), seenHeadNames.end(), head.name )
+             != seenHeadNames.end() )
+          markInvalid( "output.heads declares duplicate name '" + head.name
+                       + "' - head names must be unique" );
+        seenHeadNames.push_back( head.name );
+      }
+      if ( head.role == "detection" && !info.output.detectionDeclared )
+        markInvalid( "output.heads role 'detection' requires the output.detection decode contract" );
+    }
+    // The flat single-head surface stays the heads[0] mirror: a tensor_names
+    // list that contradicts heads[0].name means the two vocabularies disagree.
+    if ( !info.output.heads.empty() && !info.output.heads.front().name.empty()
+         && !info.output.tensorNames.empty() && info.output.tensorNames.front()
+                                                   != info.output.heads.front().name )
+      markInvalid( "output.tensor_names[0] '" + info.output.tensorNames.front()
+                     + "' contradicts output.heads[0].name '" + info.output.heads.front().name
+                     + "'" );
+  }
+  if ( !std::isnan( info.preprocess.clampMin ) && !std::isnan( info.preprocess.clampMax )
+       && info.preprocess.clampMin >= info.preprocess.clampMax )
+    markInvalid( "preprocess.clamp_min must be < preprocess.clamp_max" );
+  if ( !coverageVal.isDouble() && !coverageVal.isNull() && !coverageVal.isUndefined() )
+    markInvalid( "tiling.min_valid_coverage must be a number in [0, 1]" );
+  if ( info.tiling.minValidCoverage < 0.0 || info.tiling.minValidCoverage > 1.0 )
+    markInvalid( "tiling.min_valid_coverage must be in [0, 1]" );
+  if ( !runtimeObj.contains( QStringLiteral( "provider" ) ) )
+  {
+    // no provider section: nothing to check
+  }
+  else if ( info.framework == "http" )
+  {
+    if ( info.runtime.provider.url.empty() )
+      markInvalid( "framework 'http' requires runtime.provider.url" );
+  }
+  else if ( info.framework == "python" )
+  {
+    if ( info.runtime.provider.workerScript.empty() )
+      markInvalid( "framework 'python' requires runtime.provider.worker_script" );
+  }
+  else if ( !info.runtime.provider.url.empty() || !info.runtime.provider.workerScript.empty() )
+  {
+    markInvalid( "runtime.provider is declared for framework '" + info.framework
+                   + "' which executes in-process - provider connections apply to the 'http' and "
+                   "'python' frameworks only" );
   }
 
   if ( !info.input.layout.empty() && info.input.layout != "NCHW" && info.input.layout != "nchw" )
@@ -406,12 +665,10 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   }
   // Platform 4.0 follow-up vocabulary is NOT implemented yet; declaring it
   // must fail loudly instead of being silently ignored (#646 discipline).
-  for ( const char *unimplemented : { "pad", "clamp" } )
-  {
-    if ( preObj.contains( QLatin1String( unimplemented ) ) )
-      markInvalid( std::string( "preprocess." ) + unimplemented
-                   + " is declared but not implemented by any runtime" );
-  }
+  // Platform 7.0: preprocess.pad / clamp_min / clamp_max are IMPLEMENTED by
+  // the multimodal/temporal engine (runMultiInput) and refused at execution
+  // time by engines that cannot honor them — the #646 loud-failure contract
+  // now lives at the engine boundary where support actually differs.
   if ( info.preprocess.scale != 1.0
        && info.preprocess.normalize != "linear" && info.preprocess.normalize != "mean_std" )
     markInvalid( "preprocess.scale is declared but normalize is neither linear nor mean_std - "
@@ -507,6 +764,38 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
 
 } // namespace
 
+std::string ModelInputContract::validate() const
+{
+  if ( !modality.empty() && modality != "optical" && modality != "sar" && modality != "dem"
+       && modality != "mask" && modality != "aux" )
+    return "modality '" + modality + "' is unsupported (supported: optical, sar, dem, mask, aux)";
+  if ( !alignment.empty() && alignment != "none" && alignment != "reference" )
+    return "alignment '" + alignment + "' is unsupported (supported: none, reference)";
+  if ( !missingTimestep.empty() && missingTimestep != "refuse" && missingTimestep != "zero" )
+    return "missing_timestep '" + missingTimestep
+             + "' is unsupported (supported: refuse, zero)";
+  if ( missingTimestep.empty() || missingTimestep == "refuse" || missingTimestep == "zero" )
+  {
+    if ( temporalLength <= 0 && !missingTimestep.empty() )
+      return "missing_timestep is declared but temporal_length is 0 - the policy would never apply";
+  }
+  return {};
+}
+
+std::string ModelHeadContract::validate() const
+{
+  if ( role != "segmentation" && role != "classification" && role != "detection"
+       && role != "embedding" && role != "uncertainty" && role != "auxiliary" )
+    return "role '" + role
+             + "' is unsupported (supported: segmentation, classification, detection, embedding, "
+               "uncertainty, auxiliary)";
+  if ( !layout.empty() && layout != "NCHW" && layout != "NCTHW" )
+    return "layout '" + layout + "' is unsupported (supported: NCHW, NCTHW)";
+  if ( confidence != "probability" && confidence != "logit" && confidence != "distance" )
+    return "confidence '" + confidence + "' is unsupported (supported: probability, logit, distance)";
+  return {};
+}
+
 std::string ModelDetectionContract::validate() const
 {
   if ( layout != "xywh_objectness" && layout != "xywh_class_scores" )
@@ -588,6 +877,22 @@ Json::Value ModelInfo::toJson() const
   runtimeJson["estimated_ram_mb"] = runtime.estimatedRamMb;
   if ( !runtime.device.empty() )
     runtimeJson["device"] = runtime.device;
+  // Platform 7.0 external provider connection.
+  if ( !runtime.provider.url.empty() || !runtime.provider.workerScript.empty() )
+  {
+    Json::Value p( Json::objectValue );
+    if ( !runtime.provider.url.empty() )
+      p["url"] = runtime.provider.url;
+    if ( !runtime.provider.workerScript.empty() )
+      p["worker_script"] = runtime.provider.workerScript;
+    if ( !runtime.provider.interpreter.empty() )
+      p["interpreter"] = runtime.provider.interpreter;
+    if ( runtime.provider.timeoutMs != 30000 )
+      p["timeout_ms"] = runtime.provider.timeoutMs;
+    if ( runtime.provider.maxBodyMb != 256 )
+      p["max_body_mb"] = runtime.provider.maxBodyMb;
+    runtimeJson["provider"] = p;
+  }
   out["runtime"] = runtimeJson;
 
   // Manifest v2 surface (additive; PART B consumers ignore unknown keys).
@@ -651,12 +956,20 @@ Json::Value ModelInfo::toJson() const
         inJson["temporal_length"] = in.temporalLength;
       if ( !in.temporalCollapse.empty() && in.temporalCollapse != "channels" )
         inJson["temporal_collapse"] = in.temporalCollapse;
+      if ( !in.modality.empty() )
+        inJson["modality"] = in.modality;
+      if ( !in.alignment.empty() )
+        inJson["alignment"] = in.alignment;
+      if ( !in.missingTimestep.empty() )
+        inJson["missing_timestep"] = in.missingTimestep;
       inputsJson.append( inJson );
     }
     out["inputs"] = inputsJson;
   }
   if ( !preprocess.normalize.empty() || !preprocess.mean.empty() || !preprocess.stdv.empty()
-       || preprocess.scale != 1.0 || !preprocess.resize.empty() )
+       || preprocess.scale != 1.0 || !preprocess.resize.empty()
+       || !std::isnan( preprocess.clampMin ) || !std::isnan( preprocess.clampMax )
+       || preprocess.pad > 0 )
   {
     Json::Value pre( Json::objectValue );
     if ( !preprocess.normalize.empty() )
@@ -683,9 +996,17 @@ Json::Value ModelInfo::toJson() const
       pre["interpolation"] = preprocess.interpolation;
     if ( !preprocess.nodataPolicy.empty() )
       pre["nodata_policy"] = preprocess.nodataPolicy;
+    // Platform 7.0 additions.
+    if ( !std::isnan( preprocess.clampMin ) )
+      pre["clamp_min"] = preprocess.clampMin;
+    if ( !std::isnan( preprocess.clampMax ) )
+      pre["clamp_max"] = preprocess.clampMax;
+    if ( preprocess.pad > 0 )
+      pre["pad"] = preprocess.pad;
     out["preprocess"] = pre;
   }
-  if ( tiling.tileSize > 0 || tiling.overlap > 0 || tiling.halo > 0 || tiling.batchSize != 1 )
+  if ( tiling.tileSize > 0 || tiling.overlap > 0 || tiling.halo > 0 || tiling.batchSize != 1
+       || tiling.minValidCoverage > 0.0 )
   {
     Json::Value t( Json::objectValue );
     t["supported"] = tiling.supported;
@@ -697,10 +1018,13 @@ Json::Value ModelInfo::toJson() const
       t["halo"] = tiling.halo;
     if ( tiling.batchSize != 1 )
       t["batch_size"] = tiling.batchSize;
+    if ( tiling.minValidCoverage > 0.0 )
+      t["min_valid_coverage"] = tiling.minValidCoverage;
     out["tiling"] = t;
   }
   if ( !output.tensorNames.empty() || !output.classes.empty() || output.threshold >= 0.0
-       || output.uncertainty != "none" || !output.format.empty() || output.detectionDeclared )
+       || output.uncertainty != "none" || !output.format.empty() || output.detectionDeclared
+       || output.headsDeclared )
   {
     Json::Value o( Json::objectValue );
     if ( !output.type.empty() )
@@ -725,6 +1049,26 @@ Json::Value ModelInfo::toJson() const
       d["max_detections"] = output.detection.maxDetections;
       appendJsonArray( d, "classes", output.detection.classes );
       o["detection"] = d;
+    }
+    // Platform 7.0 typed heads surface.
+    if ( output.headsDeclared )
+    {
+      Json::Value headsJson( Json::arrayValue );
+      for ( const ModelHeadContract &head : output.heads )
+      {
+        Json::Value h( Json::objectValue );
+        h["name"] = head.name;
+        h["role"] = head.role;
+        if ( !head.layout.empty() )
+          h["layout"] = head.layout;
+        if ( !head.dtype.empty() )
+          h["dtype"] = head.dtype;
+        if ( !head.classes.empty() )
+          appendJsonArray( h, "classes", head.classes );
+        h["confidence"] = head.confidence;
+        headsJson.append( h );
+      }
+      o["heads"] = headsJson;
     }
     out["output_contract"] = o;
   }

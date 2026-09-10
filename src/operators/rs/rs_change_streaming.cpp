@@ -6,6 +6,8 @@
 #include "operators/framework/rs_operator_error.h"
 #include "processing/algorithms/change_detection.h"
 #include "processing/algorithms/math_utils.h"
+#include "processing/algorithms/ir_mad_kernels.h"
+#include "processing/gdal/gdal_cell_geometry.h"
 
 #include <QFile>
 #include <QString>
@@ -26,23 +28,9 @@ namespace {
 
 constexpr int kTileDim = 256;
 constexpr int kMaskHistogramBins = 65536;
-constexpr double kDegToRad = 0.017453292519943295;
 
-/// True when the WKT describes a geographic (lat/lon) CRS.
-bool isGeographicCrs( const QString &wkt )
-{
-    if ( wkt.isEmpty() )
-        return false;
-    OGRSpatialReferenceH srs = OSRNewSpatialReference( nullptr );
-    if ( !srs )
-        return false;
-    const QByteArray wktBytes = wkt.toUtf8();
-    char *wktPtr = const_cast<char *>( wktBytes.constData() );
-    const bool geographic =
-        ( OSRImportFromWkt( srs, &wktPtr ) == OGRERR_NONE && OSRIsGeographic( srs ) );
-    OSRDestroySpatialReference( srs );
-    return geographic;
-}
+// Geographic-CRS test: single owner in processing/gdal/gdal_cell_geometry.
+using sicnu::processing::gdal_util::isGeographicCrs;
 
 struct DatasetFileGuard
 {
@@ -75,81 +63,12 @@ ChangeDetection::MorphOp morphOpFromName( const std::string &name )
 
 // --- Streaming IR-MAD math -------------------------------------------------
 //
-// change_detection.cpp keeps the IR-MAD-specific numerics (sqrt-inverse, the
-// per-iteration CCA, the Chi-square survival function) in its anonymous
-// namespace, and the file is shared with the full-frame kernels, so the exact
-// recipes are mirrored here. The streamed iteration performs the same
-// accumulations in the same global pixel order as ChangeDetection::irMadChange,
-// which makes the streaming result match the full-frame kernel bit-for-bit
-// (verified by the operator tests against the kernel as oracle).
-
-/// cv::SVD-based symmetric square-root inverse; eigenvalues <= 1e-12 are
-/// zeroed. Same recipe as change_detection.cpp's madSqrtInv().
-cv::Mat irMadSqrtInv( const cv::Mat &M )
-{
-    cv::Mat w, u, vt;
-    cv::SVD::compute( M, w, u, vt );
-    cv::Mat wInvSqrt = cv::Mat::zeros( M.rows, M.cols, CV_64F );
-    for ( int i = 0; i < M.rows; ++i )
-    {
-        const double val = w.at<double>( i );
-        wInvSqrt.at<double>( i, i ) = ( val > 1e-12 ) ? ( 1.0 / std::sqrt( val ) ) : 0.0;
-    }
-    return u * wInvSqrt * vt;
-}
-
-/// Chi-square survival function P(X_k > x); verbatim the change_detection.cpp
-/// anonymous-namespace helper so streamed IR-MAD weights match the kernel's.
-double chiSquareUpperCdf( double k, double x )
-{
-    if ( x <= 0.0 ) return 1.0;
-    if ( k <= 0.0 ) return 0.0;
-    const double a = k * 0.5;
-    const double z = x * 0.5;
-    if ( k == 2.0 )
-    {
-        return std::exp( -z );
-    }
-    if ( k == 1.0 )
-    {
-        return std::erfc( std::sqrt( z ) );
-    }
-    if ( z < a + 1.0 )
-    {
-        double sum = 1.0 / a;
-        double term = 1.0 / a;
-        for ( int n = 1; n < 100; ++n )
-        {
-            term *= z / ( a + n );
-            sum += term;
-            if ( term < sum * 1e-12 ) break;
-        }
-        double lower = sum * std::exp( -z + a * std::log( z ) - std::lgamma( a ) );
-        return std::clamp( 1.0 - lower, 0.0, 1.0 );
-    }
-    else
-    {
-        double b = z + 1.0 - a;
-        double c = 1.0 / 1e-30;
-        double d = 1.0 / b;
-        double h = d;
-        for ( int n = 1; n < 100; ++n )
-        {
-            double an = -static_cast<double>( n ) * ( static_cast<double>( n ) - a );
-            b += 2.0;
-            d = an * d + b;
-            if ( std::abs( d ) < 1e-30 ) d = 1e-30;
-            c = b + an / c;
-            if ( std::abs( c ) < 1e-30 ) c = 1e-30;
-            d = 1.0 / d;
-            double delta = d * c;
-            h *= delta;
-            if ( std::abs( delta - 1.0 ) < 1e-12 ) break;
-        }
-        double q = std::exp( -z + a * std::log( z ) - std::lgamma( a ) ) * h;
-        return std::clamp( q, 0.0, 1.0 );
-    }
-}
+// The IR-MAD-specific numerics (sqrt-inverse, the Chi-square survival
+// function) are owned by processing/algorithms/ir_mad_kernels.h; the
+// streaming path calls the same compiled functions the kernel uses, which is
+// what keeps the streamed iteration bit-for-bit identical to
+// ChangeDetection::irMadChange (verified by the operator tests against the
+// kernel as oracle).
 
 /// Per-pixel IR-MAD Chi-square for one iteration's canonical variates:
 /// Z = sum_k (u_k - v_k)^2 / varMad_k with u = A^T (x - meanX),
@@ -724,13 +643,9 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
         // matching the projected-CRS unit (#700).
         if ( pixelArea > 0.0 && isGeographicCrs( beforeDs.projection() ) )
         {
-            const double phiDeg = gt[3] + ( height / 2.0 ) * gt[5];
-            const double phiRad = phiDeg * kDegToRad;
-            const double mPerDegLat =
-                111132.92 - 559.82 * std::cos( 2 * phiRad ) + 1.175 * std::cos( 4 * phiRad );
-            const double mPerDegLon =
-                111412.84 * std::cos( phiRad ) - 93.5 * std::cos( 3 * phiRad );
-            pixelArea = std::abs( gt[1] ) * mPerDegLon * std::abs( gt[5] ) * mPerDegLat;
+            const double phiDeg = MathUtils::sceneCentreLatitudeDeg( gt, height );
+            const auto arc = MathUtils::wgs84ArcAtLatitudeDeg( phiDeg );
+            pixelArea = std::abs( gt[1] ) * arc.perDegLon * std::abs( gt[5] ) * arc.perDegLat;
         }
         if ( pixelArea > 0.0 )
         {
@@ -1226,8 +1141,8 @@ Json::Value runIrMadStreaming( const GdalDatasetWrapper &beforeDs,
             SYY.at<double>( b, b ) += std::max( epsYY, 1e-12 );
         }
 
-        const cv::Mat SXXInvSqrt = irMadSqrtInv( SXX );
-        const cv::Mat SYYInvSqrt = irMadSqrtInv( SYY );
+        const cv::Mat SXXInvSqrt = ChangeDetectionMAD::madSqrtInv( SXX );
+        const cv::Mat SYYInvSqrt = ChangeDetectionMAD::madSqrtInv( SYY );
         if ( cv::countNonZero( SXXInvSqrt ) == 0 || cv::countNonZero( SYYInvSqrt ) == 0 )
             break;
 
@@ -1283,7 +1198,7 @@ Json::Value runIrMadStreaming( const GdalDatasetWrapper &beforeDs,
                             beforeBip.data(), afterBip.data(), A, Bmat,
                             meanX, meanY, curVarMad, bandCount, p );
                         weights[static_cast<size_t>( yOff + row ) * width + ( xOff + col )] =
-                            chiSquareUpperCdf( static_cast<double>( bandCount ), z );
+                            ChangeDetectionMAD::chiSquareUpperCdf( static_cast<double>( bandCount ), z );
                     }
                 }
             } );

@@ -16,6 +16,10 @@ endif()
 if(TARGET sicnu_operators)
   target_link_libraries(sicnu_jobs PUBLIC sicnu_operators)
 endif()
+# job_engine emits unified-trace records (Verification 7.0); sicnu_runtime is
+# the Qt-free leaf that owns the trace/fault state — declared PUBLIC so every
+# consumer of the static sicnu_jobs archive links the runtime DLL too.
+target_link_libraries(sicnu_jobs PUBLIC sicnu_runtime)
 set_target_properties(sicnu_jobs PROPERTIES
   CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON

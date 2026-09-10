@@ -1,52 +1,61 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.temporal_extract_profiles",
- "title": "Per-pixel series extraction",
- "intent": "temporal",
- "family": "temporal",
- "modality": "temporal",
- "sensors": [
-  "sentinel-2",
-  "landsat-8",
-  "landsat-9",
-  "modis"
- ],
- "description": "Extracts the raw series for sampled pixels/QA — the diagnostic companion to every temporal workflow.",
- "slots": [
-  {
-   "name": "collection",
-   "kind": "collection",
-   "description": "Registered temporal collection (spatial:temporal tools).",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "extract",
-   "operator_id": "rs:temporal_extract_series",
-   "params": {
-    "collection": "$collection.path",
-    "band_role": "$params.band_role",
-    "output": "$outputs.series_table",
-    "verification": "report"
-   },
-   "verification": "raster"
-  }
- ],
- "outputs": [
-  {
-   "name": "series_table",
-   "from_step": "extract",
-   "port": "output",
-   "kind": "report"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "extract",
-  "renderer_hint": "singleband_pseudocolor"
- }
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.temporal_extract_profiles",
+  "title": "Per-pixel series extraction",
+  "intent": "temporal",
+  "family": "temporal",
+  "modality": "temporal",
+  "sensors": [
+    "sentinel-2",
+    "landsat-8",
+    "landsat-9",
+    "modis"
+  ],
+  "description": "Extracts the raw series for sampled pixels/QA — the diagnostic companion to every temporal workflow.",
+  "slots": [
+    {
+      "name": "collection",
+      "kind": "collection",
+      "description": "Registered temporal collection (spatial:temporal tools).",
+      "required": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "extract",
+      "operator_id": "rs:temporal_extract_series",
+      "params": {
+        "collection": "$collection.path",
+        "band_role": "$params.band_role",
+        "output": "$outputs.series_table",
+        "verification": "report"
+      },
+      "verification": "raster"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "series_table",
+      "from_step": "extract",
+      "port": "output",
+      "kind": "report"
+    }
+  ],
+  "verification": {
+    "enabled": true
+  },
+  "map_output": {
+    "from_step": "extract",
+    "renderer_hint": "singleband_pseudocolor"
+  },
+  "capabilities": [
+    "rs:temporal_extract_series"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "series_table",
+      "kind": "report"
+    }
+  ]
 }

@@ -28,6 +28,8 @@ const char* errorCodeToString(ErrorCode code) noexcept {
         case ErrorCode::NotInitialized: return "NotInitialized";
         case ErrorCode::ExternalProcessTimeout: return "ExternalProcessTimeout";
         case ErrorCode::ExternalProcessFailed: return "ExternalProcessFailed";
+        case ErrorCode::DeviceUnavailable: return "DeviceUnavailable";
+        case ErrorCode::RuntimeProviderFailed: return "RuntimeProviderFailed";
         case ErrorCode::Unknown: return "Unknown";
     }
     return "Unknown";

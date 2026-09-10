@@ -1,6 +1,7 @@
 // rs_classifier_backend_factory.cpp — ADR 0061.
 #include "rs_classifier_backend_factory.h"
 
+#include "rs_classifier_isodata.h"
 #include "rs_classifier_kmeans.h"
 #include "rs_classifier_knn.h"
 #include "rs_classifier_statistical.h"
@@ -27,6 +28,8 @@ std::unique_ptr<RsClassifierBackend> RsClassifierBackendFactory::create(
       params.rfNumTrees, params.rfMaxDepth, params.rfMinSampleCount );
   if ( m.contains( QStringLiteral( "bayes" ) ) )
     return std::make_unique<RsClassifierNormalBayes>();
+  if ( m.contains( QStringLiteral( "isodata" ) ) )
+    return std::make_unique<RsClassifierIsodata>();
   if ( m.contains( QStringLiteral( "kmeans" ) ) )
     return std::make_unique<RsClassifierKMeans>();
   if ( m.contains( QStringLiteral( "knn" ) ) || m.contains( QStringLiteral( "nearest" ) ) )
@@ -41,4 +44,10 @@ std::unique_ptr<RsClassifierBackend> RsClassifierBackendFactory::create(
 std::unique_ptr<RsClassifierBackend> RsClassifierBackendFactory::createKMeans( int k )
 {
   return std::make_unique<RsClassifierKMeans>( k );
+}
+
+std::unique_ptr<RsClassifierBackend> RsClassifierBackendFactory::createIsodata(
+  const RsClassifierIsodata::Params &params )
+{
+  return std::make_unique<RsClassifierIsodata>( params );
 }

@@ -182,6 +182,12 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
       std::vector<uint8_t> validity( static_cast<size_t>( tile.width ) * tile.height, 1 );
 
       const double cosTheta0 = std::cos( options.incidenceDeg * kDegToRad );
+      // The illumination azimuth every local-incidence computation consumes:
+      // the antenna sits opposite the beam-travel look azimuth (#785). The
+      // incidence product band and the flattening/shadow angle MUST agree —
+      // feeding the flight heading here rotated RTC by ±90° (regression:
+      // "terrainFlattenRaster geometry uses the look azimuth").
+      const double fromAzimuthDeg = options.lookAzimuthDeg + 180.0;
       for ( int y = 0; y < tile.height; ++y )
       {
         for ( int x = 0; x < tile.width; ++x )
@@ -207,13 +213,7 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
           }
           incidence[idx] = static_cast<float>(
             localIncidenceAngle( sa.slopeDeg, sa.aspectDeg, options.incidenceDeg,
-                                 // localIncidenceAngle measures the azimuth the
-                                 // illumination comes FROM (the antenna sits
-                                 // opposite the beam-travel look azimuth; a
-                                 // facet facing the radar has θi = θ0 − α).
-                                 // #785 review: feeding the beam-travel azimuth
-                                 // mirrored every sloped facet by 180°.
-                                 options.lookAzimuthDeg + 180.0 ) );
+                                 fromAzimuthDeg ) );
           if ( sa.aspectDeg < 0.0 )
           {
             // Flat facet: θi == θ0, so the flattening ratio is 1.
@@ -223,7 +223,7 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
           }
           const double thetaI =
             localIncidenceAngle( sa.slopeDeg, sa.aspectDeg, options.incidenceDeg,
-                                 options.headingDeg );
+                                 fromAzimuthDeg );
           if ( options.applyShadowMask && isLayoverOrShadow( thetaI, options.flattenCosThetaMax ) )
           {
             gamma[idx] = kNan;

@@ -75,3 +75,18 @@ A FAIL verification is final: report failure, never success. Error codes
 - Mixed CRS/grids: reproject to a reference grid before differencing.
 - Nodata leaking into indices: check per-band nodata in the inspect output;
    mask first (`rs:apply_mask`).
+
+## Harness 7.0 planning surfaces (use these first)
+
+| Tool | When |
+|---|---|
+| `harness:resolve_intent` | Start here for any free-text goal: returns the resolved intent (or typed ambiguity with candidates), plus feasibility-ranked capability candidates against a dataset understanding. Never guess an intent from a tie — disambiguate. |
+| `harness:preflight` | Before any execution; blocked verdicts are authoritative. Inference intents accept `"model"` refs; temporal intents accept `"temporal_facts"`; unsupervised classify passes `"supervised": false`. |
+| `harness:repair_plan` | When `harness:plan` reports repairable issues: deterministic bounded surgery (duplicate ids, dangling outputs) plus advisory actions for everything else. |
+| `harness:decision_record` | Record ambiguities/alternatives/parameter choices as typed decisions; later turns read them from `harness:context.decisions`. |
+| `harness:context` | Typed continuity: project, assets, runs, plan bindings with verification status, decisions, experiments. Pass `if_revision` for cheap no-op reads. |
+
+Capability knowledge (band roles, modality, SAR/temporal requirements,
+verification contracts) lives in `data/agent/capabilities/`; recipes support
+`presets` (`bindings.preset`) so sensor variants no longer duplicate files —
+e.g. `harness.optical_ndvi` + preset `landsat` replaces the old Landsat twin.

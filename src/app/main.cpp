@@ -71,6 +71,7 @@
 #include "processing/providers/qgis_algorithms/provider.h"
 #include "processing/providers/generic_cli/provider.h"
 #include "processing/tools/tool_path_manager.h"
+#include "runtime/observability/trace.h"
 
 // Python embedding (disabled — Python runtime removed, pybind11 console deferred)
 // #include "python/qgis_python.h"
@@ -94,6 +95,9 @@ static void messageHandler(QtMsgType type, const QMessageLogContext &context, co
 
 int main(int argc, char *argv[])
 {
+  // Unified trace (Verification 7.0): opt-in via SICNU_TRACE=1 / SICNU_TRACE_DIR;
+  // a no-op (one getenv) when the env is unset.
+  sicnu::runtime::observability::trace::installFileSinkFromEnv();
     qInstallMessageHandler(messageHandler);
     qDebug() << "Starting SICNU GEO RS...";
 

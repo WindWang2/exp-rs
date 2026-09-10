@@ -2,6 +2,8 @@
   tests/support/http_range_server.h
   Foundation 5.0 — local, test-only HTTP server with Range support and
   failure injection (ADR 0139's proof harness).
+  7.0 — validator fixtures: ETag / Last-Modified emission, conditional GET
+  (RFC 7232) answers and mid-test content replacement.
 
   Loopback-only, one connection at a time, zero dependencies beyond the OS
   socket API. Serves one in-memory payload. Byte accounting proves that a
@@ -61,8 +63,24 @@ class HttpRangeServer
     int port() const { return mPort; }
     int fullResponses() const { return mFullResponses.load(); }
     int rangedResponses() const { return mRangedResponses.load(); }
-    /// Last distinct request signatures (method + range header), capped.
+    /// 304 answers served after a conditional request matched.
+    int notModifiedResponses() const { return mNotModifiedResponses.load(); }
+    /// Last distinct request signatures (method + range + conditional
+    /// headers), capped.
     std::vector<std::string> requestLog() const;
+
+    // --- 7.0 validator fixtures -------------------------------------------
+    /// Declares the ETag emitted on every 200/206 answer ("…" form may
+    /// include a "W/" weak prefix). Empty disables emission (default).
+    void setEtag( const std::string &etag );
+    /// Declares the Last-Modified HTTP-date emitted on every answer.
+    /// Empty disables emission (default).
+    void setLastModified( const std::string &httpDate );
+    /// Replaces the served payload (and optionally the validator headers) —
+    /// the fixture-side "the object changed" event. The next conditional
+    /// request therefore mismatches and must answer 200.
+    void replacePayload( std::vector<unsigned char> payload, const std::string &etag,
+                         const std::string &lastModified );
 
   private:
     void serveLoop();
@@ -71,7 +89,17 @@ class HttpRangeServer
                   const std::map<std::string, std::string> &extraHeaders,
                   const unsigned char *body, std::size_t bodySize, bool isHead, bool close );
 
-    std::vector<unsigned char> mPayload;
+    struct ValidatorConfig
+    {
+      bool hasConfig = false;   ///< any fixture API was used at least once
+      std::string etag;
+      std::string lastModified;
+      std::vector<unsigned char> payload;
+    };
+
+    std::vector<unsigned char> mPayload;   // construction payload (fallback)
+    ValidatorConfig snapshotConfig() const;
+
     ServerBehavior mBehavior;
     SocketHandle mListener = kInvalidSocket;
     int mPort = 0;
@@ -81,8 +109,11 @@ class HttpRangeServer
     std::atomic<int> mRequestCount{ 0 };
     std::atomic<int> mFullResponses{ 0 };
     std::atomic<int> mRangedResponses{ 0 };
+    std::atomic<int> mNotModifiedResponses{ 0 };
     mutable std::mutex mLogMutex;
     std::vector<std::string> mRequestLog;
+    mutable std::mutex mConfigMutex;       // guards mConfig (validator fixtures)
+    ValidatorConfig mConfig;
 };
 
 /// Windows socket stack needs per-process initialization.

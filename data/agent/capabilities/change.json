@@ -1,0 +1,80 @@
+[
+  {
+    "id": "family:change",
+    "kind": "family_default",
+    "family": "change",
+    "modality": ["optical"],
+    "temporal": { "min_scenes": 2 },
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "crs_matches", "dimensions", "finite_fraction", "uncertainty"]
+    },
+    "limitations": ["Comparable epochs need a shared grid and matched radiometric state"]
+  },
+  {
+    "id": "rs:change_detection",
+    "family": "change",
+    "extends": "family:change",
+    "intents": ["change"]
+  },
+  {
+    "id": "rs:change_difference",
+    "family": "change",
+    "extends": "family:change",
+    "intents": ["change"]
+  },
+  {
+    "id": "rs:change_ratio",
+    "family": "change",
+    "extends": "family:change",
+    "intents": ["change"]
+  },
+  {
+    "id": "rs:change_log_ratio",
+    "family": "change",
+    "extends": "family:change",
+    "intents": ["change", "sar_change"],
+    "modality": ["optical", "sar"]
+  },
+  {
+    "id": "rs:change_normalized_difference",
+    "family": "change",
+    "extends": "family:change",
+    "intents": ["change", "nbr", "dnbr"],
+    "band_roles": { "nir": 1, "swir": 1 }
+  },
+  {
+    "id": "rs:change_cva",
+    "family": "change",
+    "extends": "family:change",
+    "intents": ["change"]
+  },
+  {
+    "id": "rs:change_cva_angle",
+    "family": "change",
+    "extends": "rs:change_cva",
+    "intents": ["change"]
+  },
+  {
+    "id": "rs:change_mad",
+    "family": "change",
+    "extends": "family:change",
+    "intents": ["change"],
+    "resource": { "cost_class": "heavy", "large_raster_safe": true },
+    "limitations": ["MAD/IR-MAD assume multivariate normality; iterate to convergence"]
+  },
+  {
+    "id": "rs:change_irmad",
+    "family": "change",
+    "extends": "rs:change_mad",
+    "intents": ["change"]
+  },
+  {
+    "id": "rs:change_sam",
+    "family": "change",
+    "extends": "family:change",
+    "intents": ["change"]
+  }
+]

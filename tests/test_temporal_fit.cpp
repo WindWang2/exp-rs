@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 
 #include "processing/algorithms/temporal/temporal_fit.h"
+#include "processing/algorithms/temporal/temporal_gapfill.h"
 
 #include <cmath>
 #include <limits>
@@ -426,4 +427,95 @@ TEST_CASE( "Seasonal decomposition recovers trend and climatology", "[temporal][
     // discretization), far below the seasonal amplitude itself.
     for ( int d : { 400, 800, 1000 } )
         REQUIRE( std::fabs( r.remainder[d] ) < 0.3 );
+}
+
+// ---------------------------------------------------------------------------
+// Gap-fill kernel (Temporal 7.0): the interpolation math extracted from
+// rs:temporal_gap_fill — previously inlined in the operator with zero
+// kernel-level coverage.
+// ---------------------------------------------------------------------------
+
+using sicnu::temporal::GapFillMethod;
+using sicnu::temporal::gapFillSeries;
+
+TEST_CASE( "Gap-fill linear: time-weighted interpolation over real day offsets", "[temporal][gapfill]" )
+{
+    // t = {0, 10, 20, 30}; value 10 at t=0, gap, 30 at t=30 → t=10 fills 20
+    // by weight 10/30... (linear in time, NOT by index), t=20 fills 30.
+    std::vector<float> y = { 10.0f, kNan, kNan, 40.0f };
+    const std::vector<double> t = { 0.0, 10.0, 20.0, 30.0 };
+    const auto out = gapFillSeries( y, t, GapFillMethod::Linear, 90.0 );
+    REQUIRE( out[1] == Approx( 20.0 ).margin( 1e-6 ) );  // 10 + (40-10)*10/30
+    REQUIRE( out[2] == Approx( 30.0 ).margin( 1e-6 ) );  // 10 + (40-10)*20/30
+    // Index-linear would wrongly give 20/30 with equal index spacing —
+    // stretch the middle gap: same values, t = {0, 5, 25, 30} shifts weights.
+    const std::vector<double> t2 = { 0.0, 5.0, 25.0, 30.0 };
+    const auto out2 = gapFillSeries( y, t2, GapFillMethod::Linear, 90.0 );
+    REQUIRE( out2[1] == Approx( 10.0 + 30.0 * 5.0 / 30.0 ).margin( 1e-6 ) );
+    REQUIRE( out2[2] == Approx( 10.0 + 30.0 * 25.0 / 30.0 ).margin( 1e-6 ) );
+}
+
+TEST_CASE( "Gap-fill linear: maxGapDays and the no-extrapolation contract", "[temporal][gapfill]" )
+{
+    std::vector<float> y = { kNan, 10.0f, kNan, 40.0f };
+    const std::vector<double> t = { 0.0, 10.0, 20.0, 30.0 };
+    // Span 20 days exceeds maxGapDays 15 → interior gap stays NaN.
+    const auto out = gapFillSeries( y, t, GapFillMethod::Linear, 15.0 );
+    REQUIRE( std::isnan( out[2] ) );
+    // Leading one-sided gap stays NaN even with a huge budget (never
+    // extrapolate).
+    const auto out2 = gapFillSeries( y, t, GapFillMethod::Linear, 1e9 );
+    REQUIRE( std::isnan( out2[0] ) );
+    // Isolated sample with no anchors at all stays NaN.
+    std::vector<float> lone = { kNan, kNan };
+    const auto out3 = gapFillSeries( lone, { 0.0, 1.0 }, GapFillMethod::Linear, 1e9 );
+    REQUIRE( std::isnan( out3[0] ) );
+    REQUIRE( std::isnan( out3[1] ) );
+}
+
+TEST_CASE( "Gap-fill duplicate instants average instead of 0/0 weight", "[temporal][gapfill]" )
+{
+    // keep_all collections can carry identical timestamps: span 0 must not
+    // produce a 0/0 weight — the deterministic answer is the anchors' mean.
+    std::vector<float> y = { 4.0f, kNan, 8.0f };
+    const std::vector<double> t = { 10.0, 10.0, 10.0 };
+    const auto out = gapFillSeries( y, t, GapFillMethod::Linear, 90.0 );
+    REQUIRE( out[1] == Approx( 6.0 ).margin( 1e-6 ) );
+}
+
+TEST_CASE( "Gap-fill nearest: closer anchor wins, ties go to the earlier scene", "[temporal][gapfill]" )
+{
+    std::vector<float> y = { 1.0f, kNan, kNan, kNan, 2.0f };
+    const std::vector<double> t = { 0.0, 10.0, 20.0, 30.0, 40.0 };
+    const auto out = gapFillSeries( y, t, GapFillMethod::Nearest, 90.0 );
+    REQUIRE( out[1] == Approx( 1.0 ).margin( 1e-6 ) );  // closer to t=0
+    REQUIRE( out[2] == Approx( 1.0 ).margin( 1e-6 ) );  // tie 10/10 -> earlier
+    REQUIRE( out[3] == Approx( 2.0 ).margin( 1e-6 ) );  // closer to t=40
+    // The 15-day budget: position t=20 is 20 days from BOTH anchors — over
+    // budget → NaN (its 20/20 tie would have chosen the earlier scene, as
+    // the unlimited run above shows at index 2). Position t=30 still reaches
+    // its right anchor (40−30=10 ≤ 15).
+    const auto out2 = gapFillSeries( y, t, GapFillMethod::Nearest, 15.0 );
+    REQUIRE( out2[3] == Approx( 2.0 ).margin( 1e-6 ) );
+    REQUIRE( std::isnan( out2[2] ) );
+}
+
+TEST_CASE( "Gap-fill counts: filled vs fillable accounting matches the operator metric", "[temporal][gapfill]" )
+{
+    // Series with two interior gaps (anchored both sides) and a trailing
+    // one-sided gap (anchored on the left only — fillable but linear must
+    // never extrapolate).
+    std::vector<float> y = { 10.0f, kNan, kNan, 40.0f, kNan };
+    const std::vector<double> t = { 0.0, 10.0, 20.0, 30.0, 40.0 };
+    sicnu::temporal::GapFillCounts counts;
+    std::vector<float> out( 5 );
+    // Budget 0: every gap is anchored (fillable) but nothing may be filled.
+    gapFillSeries( y.data(), 5, t.data(), GapFillMethod::Linear, 0.0, out.data(), &counts );
+    REQUIRE( counts.fillable == 3 );
+    REQUIRE( counts.filled == 0 );
+    // Unlimited budget: the two interior gaps fill; the trailing gap stays NaN.
+    gapFillSeries( y.data(), 5, t.data(), GapFillMethod::Linear, 1e9, out.data(), &counts );
+    REQUIRE( counts.fillable == 3 );
+    REQUIRE( counts.filled == 2 );
+    REQUIRE( std::isnan( out[4] ) );
 }

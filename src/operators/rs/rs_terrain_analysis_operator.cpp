@@ -8,6 +8,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/terrain_analysis.h"
+#include "processing/algorithms/math_utils.h"
 #include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
@@ -155,17 +156,12 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
                     char *wktPtr = const_cast<char *>(wktBytes.constData());
                     if (OSRImportFromWkt(srs, &wktPtr) == OGRERR_NONE && OSRIsGeographic(srs)) {
                         isGeographic = true;
-                        // Scene-centre latitude from the geotransform (row
-                        // height/2). WGS84 arc lengths per degree (Snyder).
-                        const double phiDeg = gt[3] + (ds.height() / 2.0) * gt[5];
-                        const double phiRad = phiDeg * M_PI / 180.0;
-                        const double cosPhi = std::cos(phiRad);
-                        const double mPerDegLat =
-                            111132.92 - 559.82 * std::cos(2 * phiRad) + 1.175 * std::cos(4 * phiRad);
-                        const double mPerDegLon =
-                            111412.84 * cosPhi - 93.5 * std::cos(3 * phiRad);
-                        cellSizeX = static_cast<float>(resX * mPerDegLon);
-                        cellSizeY = static_cast<float>((resY > 1e-7 ? resY : resX) * mPerDegLat);
+                        // Scene-centre WGS84 arc lengths (single owner:
+                        // math_utils), so Horn gradients are metres/metre.
+                        const double phiDeg = MathUtils::sceneCentreLatitudeDeg(gt, ds.height());
+                        const auto arc = MathUtils::wgs84ArcAtLatitudeDeg(phiDeg);
+                        cellSizeX = static_cast<float>(resX * arc.perDegLon);
+                        cellSizeY = static_cast<float>((resY > 1e-7 ? resY : resX) * arc.perDegLat);
                         context.logInfo("Geographic DEM: converted pixel size to metres "
                                         "at centre latitude " + std::to_string(phiDeg));
                     }

@@ -1,192 +1,209 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.sar_flood",
- "title": "SAR flood extent mapping",
- "intent": "sar_flood",
- "family": "flood",
- "modality": "sar",
- "sensors": [
-  "sentinel-1"
- ],
- "description": "Calibrate -> optional terrain flatten (DEM) -> speckle -> water threshold -> optional cleanup. The sar_flood pack verifies calibration and polarization.",
- "slots": [
-  {
-   "name": "primary",
-   "kind": "raster",
-   "description": "Post-event SAR GRD (VV preferred).",
-   "required": true
-  },
-  {
-   "name": "reference",
-   "kind": "raster",
-   "description": "Reference (pre-event or climatological) SAR scene.",
-   "required": true
-  },
-  {
-   "name": "dem",
-   "kind": "raster",
-   "description": "Optional DEM for radiometric terrain flattening.",
-   "required": false
-  },
-  {
-   "name": "aoi",
-   "kind": "vector",
-   "description": "Optional AOI/coverage layer context (atlas series).",
-   "required": false
-  }
- ],
- "steps": [
-  {
-   "id": "calibrate_primary",
-   "operator_id": "rs:sar_calibrate",
-   "params": {
-    "input": "$primary.path",
-    "output": "$outputs.cal_flood_scene"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "flatten_primary",
-   "operator_id": "rs:sar_terrain_flatten",
-   "params": {
-    "input": "$outputs.cal_flood_scene",
-    "output": "$outputs.flat_flood_scene",
-    "dem": "$dem.path"
-   },
-   "verification": "raster",
-   "when_slot": "dem",
-   "params_when_skipped": {
-    "input": "$outputs.cal_flood_scene",
-    "output": "$outputs.flat_flood_scene"
-   }
-  },
-  {
-   "id": "speckle_primary",
-   "operator_id": "rs:sar_speckle",
-   "params": {
-    "input": "$outputs.flat_flood_scene",
-    "output": "$outputs.flood_scene",
-    "method": "$params.speckle",
-    "looks": 2
-   },
-   "verification": "raster",
-   "when_slot": "dem",
-   "params_when_skipped": {
-    "input": "$outputs.cal_flood_scene",
-    "output": "$outputs.flood_scene",
-    "method": "$params.speckle",
-    "looks": 2
-   }
-  },
-  {
-   "id": "calibrate_reference",
-   "operator_id": "rs:sar_calibrate",
-   "params": {
-    "input": "$reference.path",
-    "output": "$outputs.cal_reference_scene"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "flatten_reference",
-   "operator_id": "rs:sar_terrain_flatten",
-   "params": {
-    "input": "$outputs.cal_reference_scene",
-    "output": "$outputs.flat_reference_scene",
-    "dem": "$dem.path"
-   },
-   "verification": "raster",
-   "when_slot": "dem",
-   "params_when_skipped": {
-    "input": "$outputs.cal_reference_scene",
-    "output": "$outputs.flat_reference_scene"
-   }
-  },
-  {
-   "id": "speckle_reference",
-   "operator_id": "rs:sar_speckle",
-   "params": {
-    "input": "$outputs.flat_reference_scene",
-    "output": "$outputs.reference_scene",
-    "method": "$params.speckle",
-    "looks": 2
-   },
-   "verification": "raster",
-   "when_slot": "dem",
-   "params_when_skipped": {
-    "input": "$outputs.cal_reference_scene",
-    "output": "$outputs.reference_scene",
-    "method": "$params.speckle",
-    "looks": 2
-   }
-  },
-  {
-   "id": "flood_water",
-   "operator_id": "rs:threshold_raster",
-   "params": {
-    "input": "$outputs.flood_scene",
-    "output": "$outputs.flood_water",
-    "thresholdMethod": "statistical",
-    "statisticalK": 1.5,
-    "cleanup": "majority"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "ref_water",
-   "operator_id": "rs:threshold_raster",
-   "params": {
-    "input": "$outputs.reference_scene",
-    "output": "$outputs.reference_water",
-    "thresholdMethod": "statistical",
-    "statisticalK": 1.5,
-    "cleanup": "majority"
-   },
-   "verification": "raster"
-  },
-  {
-   "id": "extent",
-   "operator_id": "rs:change_difference",
-   "params": {
-    "before": "$outputs.reference_water",
-    "after": "$outputs.flood_water",
-    "output": "$outputs.flood_extent"
-   },
-   "verification": "raster",
-   "inputs": [
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.sar_flood",
+  "title": "SAR flood extent mapping",
+  "intent": "sar_flood",
+  "family": "flood",
+  "modality": "sar",
+  "sensors": [
+    "sentinel-1"
+  ],
+  "description": "Calibrate -> optional terrain flatten (DEM) -> speckle -> water threshold -> optional cleanup. The sar_flood pack verifies calibration and polarization.",
+  "slots": [
     {
-     "step": "ref_water",
-     "port": "output",
-     "to_port": "before"
+      "name": "primary",
+      "kind": "raster",
+      "description": "Post-event SAR GRD (VV preferred).",
+      "required": true
     },
     {
-     "step": "flood_water",
-     "port": "output",
-     "to_port": "after"
+      "name": "reference",
+      "kind": "raster",
+      "description": "Reference (pre-event or climatological) SAR scene.",
+      "required": true
+    },
+    {
+      "name": "dem",
+      "kind": "raster",
+      "description": "Optional DEM for radiometric terrain flattening.",
+      "required": false
+    },
+    {
+      "name": "aoi",
+      "kind": "vector",
+      "description": "Optional AOI/coverage layer context (atlas series).",
+      "required": false
     }
-   ]
-  }
- ],
- "outputs": [
-  {
-   "name": "flood_extent",
-   "from_step": "extent",
-   "port": "output",
-   "kind": "raster"
+  ],
+  "steps": [
+    {
+      "id": "calibrate_primary",
+      "operator_id": "rs:sar_calibrate",
+      "params": {
+        "input": "$primary.path",
+        "output": "$outputs.cal_flood_scene"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "flatten_primary",
+      "operator_id": "rs:sar_terrain_flatten",
+      "params": {
+        "input": "$outputs.cal_flood_scene",
+        "output": "$outputs.flat_flood_scene",
+        "dem": "$dem.path"
+      },
+      "verification": "raster",
+      "when_slot": "dem",
+      "params_when_skipped": {
+        "input": "$outputs.cal_flood_scene",
+        "output": "$outputs.flat_flood_scene"
+      }
+    },
+    {
+      "id": "speckle_primary",
+      "operator_id": "rs:sar_speckle",
+      "params": {
+        "input": "$outputs.flat_flood_scene",
+        "output": "$outputs.flood_scene",
+        "method": "$params.speckle",
+        "looks": 2
+      },
+      "verification": "raster",
+      "when_slot": "dem",
+      "params_when_skipped": {
+        "input": "$outputs.cal_flood_scene",
+        "output": "$outputs.flood_scene",
+        "method": "$params.speckle",
+        "looks": 2
+      }
+    },
+    {
+      "id": "calibrate_reference",
+      "operator_id": "rs:sar_calibrate",
+      "params": {
+        "input": "$reference.path",
+        "output": "$outputs.cal_reference_scene"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "flatten_reference",
+      "operator_id": "rs:sar_terrain_flatten",
+      "params": {
+        "input": "$outputs.cal_reference_scene",
+        "output": "$outputs.flat_reference_scene",
+        "dem": "$dem.path"
+      },
+      "verification": "raster",
+      "when_slot": "dem",
+      "params_when_skipped": {
+        "input": "$outputs.cal_reference_scene",
+        "output": "$outputs.flat_reference_scene"
+      }
+    },
+    {
+      "id": "speckle_reference",
+      "operator_id": "rs:sar_speckle",
+      "params": {
+        "input": "$outputs.flat_reference_scene",
+        "output": "$outputs.reference_scene",
+        "method": "$params.speckle",
+        "looks": 2
+      },
+      "verification": "raster",
+      "when_slot": "dem",
+      "params_when_skipped": {
+        "input": "$outputs.cal_reference_scene",
+        "output": "$outputs.reference_scene",
+        "method": "$params.speckle",
+        "looks": 2
+      }
+    },
+    {
+      "id": "flood_water",
+      "operator_id": "rs:threshold_raster",
+      "params": {
+        "input": "$outputs.flood_scene",
+        "output": "$outputs.flood_water",
+        "thresholdMethod": "statistical",
+        "statisticalK": 1.5,
+        "cleanup": "open"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "ref_water",
+      "operator_id": "rs:threshold_raster",
+      "params": {
+        "input": "$outputs.reference_scene",
+        "output": "$outputs.reference_water",
+        "thresholdMethod": "statistical",
+        "statisticalK": 1.5,
+        "cleanup": "open"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "extent",
+      "operator_id": "rs:change_difference",
+      "params": {
+        "before": "$outputs.reference_water",
+        "after": "$outputs.flood_water",
+        "output": "$outputs.flood_extent"
+      },
+      "verification": "raster",
+      "inputs": [
+        {
+          "step": "ref_water",
+          "port": "output",
+          "to_port": "before"
+        },
+        {
+          "step": "flood_water",
+          "port": "output",
+          "to_port": "after"
+        }
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "flood_extent",
+      "from_step": "extent",
+      "port": "output",
+      "kind": "raster"
+    },
+    {
+      "name": "flood_water",
+      "from_step": "flood_water",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
   },
-  {
-   "name": "flood_water",
-   "from_step": "flood_water",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "extent",
-  "renderer_hint": "categorized"
- }
+  "map_output": {
+    "from_step": "extent",
+    "renderer_hint": "categorized"
+  },
+  "capabilities": [
+    "rs:sar_calibrate",
+    "rs:sar_terrain_flatten",
+    "rs:sar_speckle",
+    "rs:threshold_raster",
+    "rs:change_difference"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "flood_extent",
+      "kind": "raster"
+    },
+    {
+      "name": "flood_water",
+      "kind": "raster"
+    }
+  ]
 }

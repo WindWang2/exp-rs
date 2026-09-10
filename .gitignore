@@ -84,6 +84,7 @@ vendor/
 .planning/*
 !.planning/unified-help-diagnostics-6/
 !.planning/cartography-platform-7/
+!.planning/dataset-experiment-7/
 .zcode/
 
 # IDE / editor / OS artifacts

@@ -2,9 +2,11 @@
 #include "scientific_preflight.h"
 
 #include "agent/workspace_state.h"
+#include "band_facts.h"
 #include "contracts/spatial_contracts.h"
 #include "entity_resolver.h"
 #include "grounding_tools.h"
+#include "operators/framework/model_catalog.h"
 #include "spatial_tools/spatial_tool.h"
 
 #include <algorithm>
@@ -17,6 +19,17 @@ namespace sicnu::agent::harness {
 using namespace sicnu::agent::spatial_tools;
 
 namespace {
+
+using facts::BandFacts;
+using facts::GridFacts;
+using facts::SarFacts;
+using facts::bandFacts;
+using facts::crsOf;
+using facts::gridFacts;
+using facts::lowered;
+using facts::modalityOf;
+using facts::radiometricState;
+using facts::sarFacts;
 
 Json::Value makeIssueWithCode( const std::string &code, const std::string &severity,
                                const std::string &message, bool repairable,
@@ -55,188 +68,6 @@ void addInfo( PreflightOutcome &outcome, const std::string &name, bool passed,
               const std::string &code )
 {
   outcome.checks.append( makeCheck( name, passed, code, Json::Value() ) );
-}
-
-std::string lowered( std::string text )
-{
-  std::transform( text.begin(), text.end(), text.begin(),
-                  []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
-  return text;
-}
-
-/// Band-role extraction with the wavelength fallback: a band without an
-/// explicit role is *not* guessed from position — but a declared wavelength
-/// in a documented window is a physical fact, not a guess.
-struct BandFacts {
-  std::vector<std::string> roles;
-  bool hasNir = false;
-  bool hasRed = false;
-  bool hasGreen = false;
-  bool hasBlue = false;
-  bool hasSwir = false;    ///< any SWIR window (1550-1750 or 2080-2350 nm)
-  bool hasRedEdge = false; ///< 700-740 nm red-edge window
-  bool nirByWavelength = false;
-  bool redByWavelength = false;
-  int bandCount = 0;
-};
-
-BandFacts bandFacts( const Json::Value &understanding )
-{
-  BandFacts facts;
-  facts.bandCount = understanding.get( "band_count", 0 ).asInt();
-  auto window = []( const Json::Value &band, double &wavelengthNm ) {
-    if ( band.isMember( "wavelength" ) && band["wavelength"].isNumeric() )
-    {
-      wavelengthNm = band["wavelength"].asDouble();
-      const std::string units = lowered( band.get( "wavelengthUnits", "nm" ).asString() );
-      if ( units == "µm" || units == "um" )
-        wavelengthNm *= 1000.0;
-    }
-  };
-  auto inWindow = []( double wavelengthNm, double low, double high ) {
-    return wavelengthNm >= low && wavelengthNm <= high;
-  };
-  if ( understanding.isMember( "bands" ) && understanding["bands"].isArray() )
-  {
-    for ( const auto &band : understanding["bands"] )
-    {
-      ++facts.bandCount;
-      const std::string role = lowered( band.get( "role", "" ).asString() );
-      if ( !role.empty() )
-        facts.roles.push_back( role );
-      double wavelengthNm = -1;
-      window( band, wavelengthNm );
-      const bool isNirRole = role == "nir";
-      const bool isRedRole = role == "red";
-      if ( isNirRole || inWindow( wavelengthNm, 750.0, 1100.0 ) )
-      {
-        facts.hasNir = true;
-        facts.nirByWavelength = isNirRole ? facts.nirByWavelength : true;
-      }
-      if ( isRedRole || ( wavelengthNm >= 600.0 && wavelengthNm < 700.0 ) )
-      {
-        facts.hasRed = true;
-        facts.redByWavelength = isRedRole ? facts.redByWavelength : true;
-      }
-      if ( role == "green" || inWindow( wavelengthNm, 500.0, 600.0 ) )
-        facts.hasGreen = true;
-      if ( role == "blue" || inWindow( wavelengthNm, 430.0, 520.0 ) )
-        facts.hasBlue = true;
-      if ( role == "swir" || role == "swir1" || role == "swir2" ||
-           inWindow( wavelengthNm, 1550.0, 1750.0 ) || inWindow( wavelengthNm, 2080.0, 2350.0 ) )
-        facts.hasSwir = true;
-      if ( role == "red_edge" || role == "rededge" || inWindow( wavelengthNm, 700.0, 745.0 ) )
-        facts.hasRedEdge = true;
-    }
-  }
-  else if ( understanding.isMember( "band_roles" ) && understanding["band_roles"].isArray() )
-  {
-    for ( const auto &role : understanding["band_roles"] )
-    {
-      ++facts.bandCount;
-      const std::string r = lowered( role.asString() );
-      if ( !r.empty() )
-      {
-        facts.roles.push_back( r );
-        if ( r == "nir" )
-          facts.hasNir = true;
-        if ( r == "red" )
-          facts.hasRed = true;
-        if ( r == "green" )
-          facts.hasGreen = true;
-        if ( r == "blue" )
-          facts.hasBlue = true;
-        if ( r == "swir" || r == "swir1" || r == "swir2" )
-          facts.hasSwir = true;
-        if ( r == "red_edge" || r == "rededge" )
-          facts.hasRedEdge = true;
-      }
-    }
-  }
-  return facts;
-}
-
-struct GridFacts {
-  std::string crs;
-  double pixelSizeX = 0;
-  double pixelSizeY = 0;
-  Json::Int width = 0;
-  Json::Int height = 0;
-};
-
-/// The inspect tools emit CRS as a string (vectors) or as {authid, wkt}
-/// (rasters); normalize both to the authid (or the raw string).
-std::string crsOf( const Json::Value &understanding )
-{
-  const Json::Value &crs = understanding.get( "crs", Json::Value() );
-  if ( crs.isString() )
-    return crs.asString();
-  if ( crs.isObject() )
-    return crs.get( "authid", "" ).asString();
-  return "";
-}
-
-GridFacts gridFacts( const Json::Value &understanding )
-{
-  GridFacts facts;
-  facts.crs = crsOf( understanding );
-  if ( understanding.isMember( "pixel_size" ) && understanding["pixel_size"].isArray() &&
-       understanding["pixel_size"].size() == 2 )
-  {
-    facts.pixelSizeX = understanding["pixel_size"][0].asDouble();
-    facts.pixelSizeY = understanding["pixel_size"][1].asDouble();
-  }
-  if ( understanding.isMember( "size" ) && understanding["size"].isArray() &&
-       understanding["size"].size() == 2 )
-  {
-    facts.width = understanding["size"][0].asInt64();
-    facts.height = understanding["size"][1].asInt64();
-  }
-  return facts;
-}
-
-std::string radiometricState( const Json::Value &understanding )
-{
-  return lowered( understanding.get( "radiometric_state", "" ).asString() );
-}
-
-std::string modalityOf( const Json::Value &understanding )
-{
-  return lowered( understanding.get( "modality", "" ).asString() );
-}
-
-/// SAR facts: polarizations + calibration domain from the understanding doc
-/// (roles / product metadata). Unknown facts stay unknown — a *warning* is
-/// emitted, never a silent pass.
-struct SarFacts {
-  std::string polarization;   ///< first polarization found ("hh"/"vv"/...)
-  bool calibrationDeclared = false;
-  std::string calibration;    ///< "sigma0" | "gamma0" | "dn" | ...
-};
-
-SarFacts sarFacts( const Json::Value &understanding )
-{
-  SarFacts facts;
-  const BandFacts bands = bandFacts( understanding );
-  for ( const std::string &role : bands.roles )
-  {
-    if ( role == "hh" || role == "vv" || role == "hv" || role == "vh" )
-    {
-      facts.polarization = role;
-      break;
-    }
-  }
-  const std::string state = radiometricState( understanding );
-  for ( const char *domain : { "sigma0", "gamma0", "beta0", "dn" } )
-  {
-    if ( state.find( domain ) != std::string::npos )
-    {
-      facts.calibrationDeclared = true;
-      facts.calibration = domain;
-      break;
-    }
-  }
-  return facts;
 }
 
 Json::Value inputSummary( const PreflightInput &input )
@@ -349,6 +180,12 @@ void bandRatioRules( const std::vector<PreflightInput> &inputs, PreflightOutcome
   {
     if ( !input.resolved() )
       continue;
+    // Harness 7.0: mixed workflows feed SAR companions to optical intents
+    // (fused flood mapping). Spectral-window demands are physical facts about
+    // optical inputs only; the SAR branch is gated by the SAR/multimodal
+    // packs, so it is skipped here instead of failing on missing bands.
+    if ( modalityOf( input.understanding ) == "sar" )
+      continue;
     const BandFacts facts = bandFacts( input.understanding );
     for ( const auto &[ roleLabel, requirement ] : requirements )
     {
@@ -372,12 +209,6 @@ void bandRatioRules( const std::vector<PreflightInput> &inputs, PreflightOutcome
                                            input.understanding.isMember( "bands" ),
              "INVALID_RADIOMETRY" );
   }
-}
-
-void ndviRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &outcome )
-{
-  bandRatioRules( inputs, outcome, "index", { { "NIR", BandRequirement::Nir },
-                                              { "Red", BandRequirement::Red } } );
 }
 
 void opticalChangeRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &outcome )
@@ -544,6 +375,479 @@ void phenologyRules( const std::vector<PreflightInput> &inputs, PreflightOutcome
   }
 }
 
+// --- Harness 7.0 rule packs (mission Area C) -------------------------------
+
+/// Temporal-series pack: facts-driven blockers for scene count, ordering and
+/// gaps. Without declared temporal facts it only warns — unknown facts stay
+/// unknown, never blockers.
+void temporalSeriesRules( const std::vector<PreflightInput> &inputs,
+                          PreflightOutcome &outcome, int minScenes,
+                          const std::string &intentLabel )
+{
+  phenologyRules( inputs, outcome );
+  const PreflightInput *withFacts = nullptr;
+  for ( const PreflightInput &input : inputs )
+  {
+    if ( input.temporalFacts.isObject() )
+    {
+      withFacts = &input;
+      break;
+    }
+  }
+  if ( !withFacts )
+  {
+    addWarning( outcome, "TIME_ORDER_INVALID",
+                "No temporal collection facts declared for '" + intentLabel +
+                  "'; run temporal:preflight_collection to verify series quality" );
+    return;
+  }
+  const Json::Value &facts = withFacts->temporalFacts;
+  const int sceneCount = facts.get( "scene_count", 0 ).asInt();
+  if ( minScenes > 0 && sceneCount > 0 && sceneCount < minScenes )
+    addBlocker( outcome, error_codes::kInvalidParameter,
+                "'" + intentLabel + "' needs >= " + std::to_string( minScenes ) +
+                  " scenes; collection provides " + std::to_string( sceneCount ),
+                "temporal.preflight_collection" );
+  const Json::Value &dates = facts.get( "dates", Json::Value() );
+  if ( dates.isArray() && dates.size() >= 2 )
+  {
+    bool sorted = true;
+    for ( Json::ArrayIndex i = 1; i < dates.size(); ++i )
+    {
+      if ( dates[i - 1].asString() > dates[i].asString() )
+        sorted = false;
+    }
+    if ( !sorted )
+      addBlocker( outcome, error_codes::kTimeOrderInvalid,
+                  "Collection dates are not in acquisition order", "check_collection" );
+    const int maxGapDays = facts.get( "max_gap_days", 0 ).asInt();
+    if ( maxGapDays > 0 )
+      addWarning( outcome, "TIME_ORDER_INVALID",
+                  "Collection declares max gap of " + std::to_string( maxGapDays ) +
+                    " days; gaps beyond the declared budget bias '" + intentLabel + "'" );
+  }
+}
+
+/// Land-cover deepening of the classify pack: legend declarations and sample
+/// sufficiency become explicit checks instead of silent assumptions.
+void landCoverRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &outcome )
+{
+  for ( const PreflightInput &input : inputs )
+  {
+    if ( !input.resolved() )
+      continue;
+    const bool isTraining = input.name == "training" || input.name == "samples";
+    if ( !isTraining )
+      continue;
+    if ( input.understanding.isMember( "class_values" ) &&
+         input.understanding["class_values"].isArray() &&
+         input.understanding["class_values"].size() > 0 )
+    {
+      addInfo( outcome, "class_legend_declared", true, "TRAINING_INVALID" );
+    }
+    else
+    {
+      addWarning( outcome, "TRAINING_INVALID",
+                  "Training input '" + input.name +
+                    "' declares no class legend; output verification can only check "
+                    "value finiteness, not semantic class domains" );
+    }
+    const int featureCount = input.understanding.get( "feature_count", 0 ).asInt();
+    if ( featureCount > 0 && featureCount < 10 )
+      addWarning( outcome, "TRAINING_INVALID",
+                  "Training input '" + input.name + "' exposes only " +
+                    std::to_string( featureCount ) +
+                    " features; accuracy estimates from <10 samples are unstable" );
+  }
+}
+
+/// Accuracy-assessment pack: the reference must describe the same class
+/// domain as the classified map when both declare one.
+void accuracyRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &outcome )
+{
+  const PreflightInput *classMap = nullptr;
+  const PreflightInput *reference = nullptr;
+  for ( const PreflightInput &input : inputs )
+  {
+    if ( !input.resolved() )
+      continue;
+    const std::string name = lowered( input.name );
+    if ( name.find( "class" ) != std::string::npos && !classMap )
+      classMap = &input;
+    if ( ( name.find( "reference" ) != std::string::npos ||
+           name.find( "ground" ) != std::string::npos ||
+           name.find( "truth" ) != std::string::npos ||
+           name == "training" || name == "samples" ) && !reference )
+      reference = &input;
+  }
+  if ( !classMap || !reference )
+  {
+    addWarning( outcome, "TRAINING_INVALID",
+                "Could not identify the classified map and reference inputs by name; "
+                "name them 'classified' and 'reference' for domain cross-checks" );
+    return;
+  }
+  const Json::Value &mapValues = classMap->understanding.get( "class_values", Json::Value() );
+  const Json::Value &refValues = reference->understanding.get( "class_values", Json::Value() );
+  if ( mapValues.isArray() && !mapValues.empty() && refValues.isArray() && !refValues.empty() )
+  {
+    bool intersects = false;
+    for ( const Json::Value &mapValue : mapValues )
+      for ( const Json::Value &refValue : refValues )
+        if ( mapValue.asString() == refValue.asString() )
+          intersects = true;
+    if ( !intersects )
+      addBlocker( outcome, error_codes::kInvalidParameter,
+                  "Reference class domain does not intersect the classified map domain; "
+                  "accuracy assessment would be meaningless",
+                  "check_training" );
+  }
+}
+
+/// Inference pack (7.0): model-manifest contract vs dataset facts. Absent
+/// manifests warn — an unverified compatibility is not a compatible one.
+void inferenceRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &outcome )
+{
+  const PreflightInput *withModel = nullptr;
+  for ( const PreflightInput &input : inputs )
+  {
+    if ( input.modelManifest.isObject() )
+    {
+      withModel = &input;
+      break;
+    }
+  }
+  if ( !withModel )
+  {
+    addWarning( outcome, error_codes::kModelIncompatible,
+                "No model manifest declared; model/dataset compatibility is unverified" );
+    return;
+  }
+  const Json::Value &manifest = withModel->modelManifest;
+  const std::string modelName = manifest.get( "name", "" ).asString();
+
+  // Unknown model id: typed blocker, never a silent pass.
+  if ( manifest.get( "unknown", false ).asBool() )
+  {
+    addBlocker( outcome, error_codes::kModelNotReady,
+                "Model '" + modelName + "' is not in the model catalog",
+                "select_model", Json::Value() );
+    return;
+  }
+
+  // Input modality demand.
+  const std::string datasetModality = modalityOf( withModel->understanding );
+  const Json::Value &modalities = manifest.get( "modalities", Json::Value() );
+  if ( modalities.isArray() && !modalities.empty() && !datasetModality.empty() &&
+       datasetModality != "unknown" )
+  {
+    bool accepts = false;
+    for ( const Json::Value &modality : modalities )
+      if ( modality.isString() && lowered( modality.asString() ) == datasetModality )
+        accepts = true;
+    if ( !accepts )
+      addBlocker( outcome, error_codes::kModelIncompatible,
+                  "Model '" + modelName + "' does not accept " + datasetModality +
+                    " input",
+                  "select_model" );
+  }
+
+  // Band-role demand.
+  const BandFacts facts = bandFacts( withModel->understanding );
+  for ( const Json::Value &roleValue : manifest.get( "supported_band_roles", Json::Value( Json::arrayValue ) ) )
+  {
+    if ( !roleValue.isString() )
+      continue;
+    const std::string role = lowered( roleValue.asString() );
+    const bool present =
+      ( role == "nir" && facts.hasNir ) ||
+      ( role == "red" && facts.hasRed ) ||
+      ( role == "green" && facts.hasGreen ) ||
+      ( role == "blue" && facts.hasBlue ) ||
+      ( role == "swir" && facts.hasSwir ) ||
+      ( role == "red_edge" && facts.hasRedEdge ) ||
+      std::count( facts.roles.begin(), facts.roles.end(), role ) > 0;
+    if ( !present )
+      addBlocker( outcome, error_codes::kModelIncompatible,
+                  "Dataset lacks the '" + role + "' band required by model '" +
+                    modelName + "'",
+                  "select_model" );
+  }
+
+  // Temporal contract.
+  const int temporalLength = manifest.get( "temporal_length", 0 ).asInt();
+  if ( temporalLength > 1 )
+  {
+    if ( withModel->temporalFacts.isObject() )
+    {
+      const int sceneCount = withModel->temporalFacts.get( "scene_count", 0 ).asInt();
+      if ( sceneCount > 0 && sceneCount < temporalLength )
+        addBlocker( outcome, error_codes::kModelIncompatible,
+                    "Model '" + modelName + "' needs " +
+                      std::to_string( temporalLength ) +
+                      " frames per inference; collection provides " +
+                      std::to_string( sceneCount ),
+                    "temporal.preflight_collection" );
+    }
+    else
+    {
+      addWarning( outcome, error_codes::kModelIncompatible,
+                  "Model '" + modelName + "' is temporal (length " +
+                    std::to_string( temporalLength ) +
+                    "); declare temporal_facts to verify the series" );
+    }
+  }
+
+  // Radiometric expectation.
+  const std::string expectedRadiometry = lowered( manifest.get( "radiometric_state", "" ).asString() );
+  const std::string datasetRadiometry = radiometricState( withModel->understanding );
+  if ( !expectedRadiometry.empty() && !datasetRadiometry.empty() &&
+       datasetRadiometry.find( expectedRadiometry ) == std::string::npos )
+    addWarning( outcome, error_codes::kInvalidRadiometry,
+                "Model '" + modelName + "' expects " + expectedRadiometry +
+                  " input; dataset declares " + datasetRadiometry );
+
+  // Resolution window.
+  const GridFacts grid = gridFacts( withModel->understanding );
+  const double minRes = manifest.get( "min_resolution_meters", -1.0 ).asDouble();
+  const double maxRes = manifest.get( "max_resolution_meters", -1.0 ).asDouble();
+  if ( grid.pixelSizeX > 0 && minRes > 0 && grid.pixelSizeX < minRes )
+    addWarning( outcome, error_codes::kModelIncompatible,
+                "Dataset resolution (" + std::to_string( grid.pixelSizeX ) +
+                  " m) is finer than the model's recommended minimum (" +
+                  std::to_string( minRes ) + " m)" );
+  if ( grid.pixelSizeX > 0 && maxRes > 0 && grid.pixelSizeX > maxRes )
+    addWarning( outcome, error_codes::kModelIncompatible,
+                "Dataset resolution (" + std::to_string( grid.pixelSizeX ) +
+                  " m) is coarser than the model's recommended maximum (" +
+                  std::to_string( maxRes ) + " m)" );
+}
+
+/// Cross-modality pack (7.0): optical + SAR fused analysis. Both branches
+/// must be individually sound and mutually registrable.
+void multimodalRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &outcome )
+{
+  const PreflightInput *optical = nullptr;
+  const PreflightInput *sar = nullptr;
+  for ( const PreflightInput &input : inputs )
+  {
+    if ( !input.resolved() )
+      continue;
+    const std::string modality = modalityOf( input.understanding );
+    if ( modality == "sar" && !sar )
+      sar = &input;
+    else if ( !modality.empty() && modality != "sar" && modality != "unknown" && !optical )
+      optical = &input;
+  }
+  if ( !optical || !sar )
+    return;
+
+  // Registration: a fused product inherits the worse of the two grids.
+  const GridFacts opticalGrid = gridFacts( optical->understanding );
+  const GridFacts sarGrid = gridFacts( sar->understanding );
+  if ( !opticalGrid.crs.empty() && !sarGrid.crs.empty() && opticalGrid.crs != sarGrid.crs )
+    addBlocker( outcome, error_codes::kCrsMismatch,
+                "Optical ('" + optical->name + "') and SAR ('" + sar->name +
+                  "') inputs are in different CRS; fuse only in a shared CRS",
+                "reproject_to_reference" );
+  else
+    addWarning( outcome, "GRID_MISMATCH",
+                "Optical and SAR fusion assumes co-registration; verify the "
+                "orthorectification/terrain-correction chain before trusting "
+                "pixel-aligned fusion" );
+  if ( opticalGrid.pixelSizeX > 0 && sarGrid.pixelSizeX > 0 &&
+       std::fabs( opticalGrid.pixelSizeX - sarGrid.pixelSizeX ) > 1e-9 )
+    addWarning( outcome, "GRID_MISMATCH",
+                "Optical and SAR resolutions differ; resample to a shared grid "
+                "before fusion" );
+
+  // SAR branch: calibration must be declared for threshold fusion.
+  const SarFacts sarFactsOfInput = sarFacts( sar->understanding );
+  if ( !sarFactsOfInput.calibrationDeclared )
+    addWarning( outcome, "INVALID_RADIOMETRY",
+                "SAR branch ('" + sar->name +
+                  "') declares no calibration domain; threshold-based fusion will "
+                  "be unstable" );
+
+  // Optical branch: water mapping needs Green plus NIR or SWIR.
+  const BandFacts opticalFacts = bandFacts( optical->understanding );
+  if ( !opticalFacts.hasGreen || ( !opticalFacts.hasNir && !opticalFacts.hasSwir ) )
+    addWarning( outcome, "BAND_ROLE_UNRESOLVED",
+                "Optical branch ('" + optical->name +
+                  "') lacks Green + NIR/SWIR; water reflectance contrast cannot be "
+                  "verified" );
+}
+
+/// Flood deepening (7.0): physics caveats that apply to both branches,
+/// stated as warnings — never silently skipped.
+void floodRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &outcome )
+{
+  for ( const PreflightInput &input : inputs )
+  {
+    if ( !input.resolved() )
+      continue;
+    const std::string modality = modalityOf( input.understanding );
+    if ( modality == "sar" )
+    {
+      const SarFacts facts = sarFacts( input.understanding );
+      if ( !facts.polarization.empty() &&
+           ( facts.polarization == "vv" || facts.polarization == "hh" ) )
+        addWarning( outcome, "POLARIZATION_MISMATCH",
+                    "Input '" + input.name + "' is " + facts.polarization +
+                      "-pol; co-pol backscatter is wind-sensitive — cross-pol (VH/HV) "
+                      "is preferred for open-water mapping" );
+    }
+    else if ( !modality.empty() && modality != "unknown" )
+    {
+      addWarning( outcome, "INVALID_RADIOMETRY",
+                  "Flood extents from optical indices miss turbid or vegetated "
+                  "water; validate against an independent reference" );
+    }
+  }
+}
+
+// --- intent specification table (single source for dispatch + drift) -------
+
+enum class PackKind {
+  BandRatio,
+  OpticalChange,
+  SarChange,
+  SarSingle,
+  Classify,
+  TemporalSeries,
+  Terrain,
+  Inference,
+  SharedOnly,
+};
+
+struct IntentSpec {
+  std::string intent;
+  PackKind kind;
+  std::vector<std::pair<std::string, BandRequirement>> bands;
+  bool requiresPair = false;
+  bool sarModality = false;
+  int minScenes = 0;
+};
+
+const std::vector<IntentSpec> &intentSpecTable()
+{
+  static const std::vector<IntentSpec> kTable = {
+    { "ndvi", PackKind::BandRatio, { { "red", BandRequirement::Red },
+                                    { "nir", BandRequirement::Nir } } },
+    { "evi", PackKind::BandRatio, { { "blue", BandRequirement::Blue },
+                                    { "red", BandRequirement::Red },
+                                    { "nir", BandRequirement::Nir } } },
+    { "savi", PackKind::BandRatio, { { "red", BandRequirement::Red },
+                                     { "nir", BandRequirement::Nir } } },
+    { "ndre", PackKind::BandRatio, { { "red_edge", BandRequirement::RedEdge },
+                                     { "nir", BandRequirement::Nir } } },
+    { "ndwi", PackKind::BandRatio, { { "green", BandRequirement::Green },
+                                     { "nir", BandRequirement::Nir } } },
+    { "water", PackKind::BandRatio, { { "green", BandRequirement::Green },
+                                      { "nir", BandRequirement::Nir } } },
+    { "flood", PackKind::BandRatio, { { "green", BandRequirement::Green },
+                                      { "nir", BandRequirement::Nir } } },
+    { "mndwi", PackKind::BandRatio, { { "green", BandRequirement::Green },
+                                      { "swir", BandRequirement::Swir } } },
+    { "ndsi", PackKind::BandRatio, { { "green", BandRequirement::Green },
+                                     { "swir", BandRequirement::Swir } } },
+    { "nbr", PackKind::BandRatio, { { "nir", BandRequirement::Nir },
+                                    { "swir", BandRequirement::Swir } } },
+    { "dnbr", PackKind::BandRatio, { { "nir", BandRequirement::Nir },
+                                     { "swir", BandRequirement::Swir } }, true },
+    { "ndbi", PackKind::BandRatio, { { "swir", BandRequirement::Swir },
+                                     { "nir", BandRequirement::Nir } } },
+    { "bsi", PackKind::BandRatio, { { "blue", BandRequirement::Blue },
+                                    { "red", BandRequirement::Red },
+                                    { "nir", BandRequirement::Nir },
+                                    { "swir", BandRequirement::Swir } } },
+    { "change", PackKind::OpticalChange, {}, true },
+    { "sar_change", PackKind::SarChange, {}, true, true },
+    { "sar_flood", PackKind::SarChange, {}, true, true },
+    { "sar", PackKind::SarSingle, {}, false, true },
+    { "sar_water", PackKind::SarSingle, {}, false, true },
+    { "ship", PackKind::SharedOnly },
+    { "classify", PackKind::Classify },
+    { "accuracy", PackKind::Classify },
+    { "phenology", PackKind::TemporalSeries, {}, false, false, 12 },
+    { "temporal", PackKind::TemporalSeries, {}, false, false, 3 },
+    { "terrain", PackKind::Terrain },
+    { "qa", PackKind::SharedOnly },
+    { "preprocess", PackKind::SharedOnly },
+    { "inference", PackKind::Inference },
+  };
+  return kTable;
+}
+
+const IntentSpec *intentSpec( const std::string &intent )
+{
+  for ( const IntentSpec &spec : intentSpecTable() )
+    if ( spec.intent == intent )
+      return &spec;
+  return nullptr;
+}
+
+bool inputMixedModality( const std::vector<PreflightInput> &inputs )
+{
+  bool hasOptical = false;
+  bool hasSar = false;
+  for ( const PreflightInput &input : inputs )
+  {
+    if ( !input.resolved() )
+      continue;
+    const std::string modality = modalityOf( input.understanding );
+    if ( modality == "sar" )
+      hasSar = true;
+    else if ( !modality.empty() && modality != "unknown" )
+      hasOptical = true;
+  }
+  return hasOptical && hasSar;
+}
+
+std::string bandRequirementRole( BandRequirement requirement )
+{
+  switch ( requirement )
+  {
+    case BandRequirement::Nir: return "nir";
+    case BandRequirement::Red: return "red";
+    case BandRequirement::Green: return "green";
+    case BandRequirement::Blue: return "blue";
+    case BandRequirement::Swir: return "swir";
+    case BandRequirement::RedEdge: return "red_edge";
+  }
+  return "";
+}
+
+std::string packKindLabel( PackKind kind )
+{
+  switch ( kind )
+  {
+    case PackKind::BandRatio: return "band_ratio";
+    case PackKind::OpticalChange: return "optical_change";
+    case PackKind::SarChange: return "sar_change";
+    case PackKind::SarSingle: return "sar_single";
+    case PackKind::Classify: return "classify";
+    case PackKind::TemporalSeries: return "temporal_series";
+    case PackKind::Terrain: return "terrain";
+    case PackKind::Inference: return "inference";
+    case PackKind::SharedOnly: return "shared_only";
+  }
+  return "";
+}
+
+bool anyResolvedInput( const std::vector<PreflightInput> &inputs )
+{
+  return std::any_of( inputs.begin(), inputs.end(),
+                      []( const PreflightInput &i ) { return i.resolved(); } );
+}
+
+void requirePair( PreflightOutcome &outcome, const std::string &intentLabel )
+{
+  addBlocker( outcome, error_codes::kInvalidParameter,
+              intentLabel + " needs two comparable epochs; got one", "harness.plan",
+              Json::Value() );
+}
+
 } // namespace
 
 Json::Value PreflightOutcome::toJson( const std::string &subject ) const
@@ -553,8 +857,29 @@ Json::Value PreflightOutcome::toJson( const std::string &subject ) const
 
 bool intentRequiresPair( const std::string &intent )
 {
-  return intent == "change" || intent == "sar_change" || intent == "dnbr" ||
-         intent == "accuracy" || intent == "sar_flood";
+  if ( const IntentSpec *spec = intentSpec( intent ) )
+    return spec->requiresPair;
+  return false;
+}
+
+Json::Value intentRequirements( const std::string &intent )
+{
+  const IntentSpec *spec = intentSpec( intent );
+  if ( !spec )
+    return Json::Value();
+  Json::Value doc( Json::objectValue );
+  doc["intent"] = spec->intent;
+  doc["pack"] = packKindLabel( spec->kind );
+  Json::Value bandRoles( Json::objectValue );
+  for ( const auto &[ role, requirement ] : spec->bands )
+    bandRoles[ role ] = 1;
+  doc["band_roles"] = bandRoles;
+  doc["requires_pair"] = spec->requiresPair;
+  if ( spec->sarModality )
+    doc["modality"] = "sar";
+  if ( spec->minScenes > 0 )
+    doc["min_scenes"] = spec->minScenes;
+  return doc;
 }
 
 /// Single-input SAR rule pack (Platform 5.0): modality + calibration checks
@@ -617,58 +942,62 @@ PreflightOutcome runScientificPreflight( const std::string &intent,
     return outcome;
   }
 
-  if ( intent == "ndvi" || intent == "evi" || intent == "savi" || intent == "ndre" )
-    ndviRules( inputs, outcome );
-  else if ( intent == "ndwi" || intent == "water" || intent == "flood" )
-    bandRatioRules( inputs, outcome, intent, { { "Green", BandRequirement::Green },
-                                               { "NIR", BandRequirement::Nir } } );
-  else if ( intent == "mndwi" )
-    bandRatioRules( inputs, outcome, "MNDWI", { { "Green", BandRequirement::Green },
-                                                { "SWIR", BandRequirement::Swir } } );
-  else if ( intent == "ndsi" )
-    bandRatioRules( inputs, outcome, "NDSI", { { "Green", BandRequirement::Green },
-                                               { "SWIR", BandRequirement::Swir } } );
-  else if ( intent == "nbr" || intent == "dnbr" )
+  // Harness 7.0: the dispatch is a specification table, not an if/else chain.
+  // The same table drives intentRequirements() — one source, no drift.
+  if ( const IntentSpec *spec = intentSpec( intent ) )
   {
-    bandRatioRules( inputs, outcome, intent, { { "NIR", BandRequirement::Nir },
-                                               { "SWIR", BandRequirement::Swir } } );
-    if ( intent == "dnbr" && inputs.size() < 2 )
-      addBlocker( outcome, error_codes::kInvalidParameter,
-                  "dNBR needs pre- and post-fire epochs; got one", "harness.plan",
-                  Json::Value() );
-  }
-  else if ( intent == "ndbi" )
-    bandRatioRules( inputs, outcome, "NDBI", { { "SWIR", BandRequirement::Swir },
-                                               { "NIR", BandRequirement::Nir } } );
-  else if ( intent == "bsi" )
-    bandRatioRules( inputs, outcome, "BSI", { { "Blue", BandRequirement::Blue },
-                                              { "Red", BandRequirement::Red },
-                                              { "NIR", BandRequirement::Nir },
-                                              { "SWIR", BandRequirement::Swir } } );
-  else if ( intent == "change" )
-    opticalChangeRules( inputs, outcome );
-  else if ( intent == "sar_change" || intent == "sar_flood" )
-    sarChangeRules( inputs, outcome );
-  else if ( intent == "sar" || intent == "ship" || intent == "sar_water" )
-    sarSingleRules( inputs, outcome );
-  else if ( intent == "classify" )
-    classifyRules( inputs, outcome );
-  else if ( intent == "accuracy" )
-  {
-    classifyRules( inputs, outcome );
-    if ( inputs.size() < 2 )
-      addBlocker( outcome, error_codes::kInvalidParameter,
-                  "Accuracy assessment needs the classified map and a reference input",
-                  "harness.plan", Json::Value() );
-  }
-  else if ( intent == "phenology" || intent == "temporal" )
-    phenologyRules( inputs, outcome );
-  else if ( intent == "terrain" )
-    terrainRules( inputs, outcome );
-  else if ( intent == "qa" || intent == "preprocess" || intent == "inference" )
-  {
-    // Shared rules only: mask/preprocess/model intents have no physical band
-    // demands beyond resolvability.
+    switch ( spec->kind )
+    {
+      case PackKind::BandRatio:
+      {
+        bandRatioRules( inputs, outcome, intent, spec->bands );
+        if ( spec->requiresPair && inputs.size() < 2 && anyResolvedInput( inputs ) )
+          requirePair( outcome, intent == "dnbr" ? "dNBR" : intent );
+        if ( intent == "flood" )
+          floodRules( inputs, outcome );
+        if ( inputMixedModality( inputs ) )
+          multimodalRules( inputs, outcome );
+        break;
+      }
+      case PackKind::OpticalChange:
+        opticalChangeRules( inputs, outcome );
+        break;
+      case PackKind::SarChange:
+        sarChangeRules( inputs, outcome );
+        if ( intent == "sar_flood" )
+        {
+          floodRules( inputs, outcome );
+          if ( inputMixedModality( inputs ) )
+            multimodalRules( inputs, outcome );
+        }
+        break;
+      case PackKind::SarSingle:
+        sarSingleRules( inputs, outcome );
+        break;
+      case PackKind::Classify:
+        // Supervised/unsupervised: the training-slot demand is skipped only
+        // when a refs entry explicitly declares supervised=false.
+        if ( std::any_of( inputs.begin(), inputs.end(),
+                          []( const PreflightInput &i ) { return i.supervised; } ) )
+          classifyRules( inputs, outcome );
+        landCoverRules( inputs, outcome );
+        if ( intent == "accuracy" )
+          accuracyRules( inputs, outcome );
+        break;
+      case PackKind::TemporalSeries:
+        temporalSeriesRules( inputs, outcome, spec->minScenes, intent );
+        break;
+      case PackKind::Terrain:
+        terrainRules( inputs, outcome );
+        break;
+      case PackKind::Inference:
+        inferenceRules( inputs, outcome );
+        break;
+      case PackKind::SharedOnly:
+        // Mask/preprocess/ship intents have no physical band demands beyond
+        // resolvability.
+        break;
+    }
   }
 
   const bool blocked = std::any_of(
@@ -696,6 +1025,42 @@ PreflightOutcome preflightIntent( const std::string &intent,
       PreflightInput input;
       input.name = entry.get( "name", "" ).asString();
       input.reference = entry.get( "ref", entry.get( "asset", "" ) ).asString();
+      input.supervised = entry.get( "supervised", true ).asBool();
+      input.temporalFacts = entry.get( "temporal_facts", Json::Value() );
+      if ( entry.isMember( "model" ) && entry["model"].isString() &&
+           !entry["model"].asString().empty() )
+      {
+        // Project the ModelCatalog manifest into a bounded JSON document so
+        // the inference pack checks typed facts (never weight paths).
+        if ( const auto model =
+               sicnu::operators::ModelCatalog::instance().find( entry["model"].asString() ) )
+        {
+          Json::Value manifest( Json::objectValue );
+          manifest["name"] = model->name;
+          manifest["task"] = model->task;
+          manifest["input_type"] = model->inputType;
+          for ( const std::string &role : model->supportedBandRoles )
+            manifest["supported_band_roles"].append( role );
+          for ( const std::string &modality : model->modalities )
+            manifest["modalities"].append( modality );
+          for ( const std::string &polarization : model->polarizations )
+            manifest["polarizations"].append( polarization );
+          manifest["temporal_length"] = model->temporalLength;
+          manifest["radiometric_state"] = model->radiometricState;
+          manifest["min_resolution_meters"] = model->minResolutionMeters;
+          manifest["max_resolution_meters"] = model->maxResolutionMeters;
+          input.modelManifest = std::move( manifest );
+        }
+        else
+        {
+          // Unknown model: keep the blocker deterministic and typed — the
+          // inference pack turns this marker into MODEL_NOT_READY.
+          Json::Value unknown( Json::objectValue );
+          unknown["name"] = entry["model"].asString();
+          unknown["unknown"] = true;
+          input.modelManifest = std::move( unknown );
+        }
+      }
       HarnessError error;
       if ( const auto resolved =
              resolveDatasetRef( QString::fromStdString( input.reference ), &error ) )

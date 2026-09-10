@@ -2,7 +2,9 @@
 #include "plan_tools.h"
 
 #include "agent_plan.h"
+#include "capability_knowledge.h"
 #include "contracts/spatial_contracts.h"
+#include "context_ledger.h"
 #include "harness_verification.h"
 #include "scientific_preflight.h"
 #include "spatial_tools/spatial_tool.h"
@@ -12,7 +14,9 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 
 namespace sicnu::agent::harness {
@@ -29,6 +33,77 @@ Json::Value objectSchema( Json::Value properties, Json::Value required )
   if ( required.isArray() && !required.empty() )
     schema["required"] = std::move( required );
   return schema;
+}
+
+/// Harness 7.0 (mission Area D): global repair-attempt ledger, bounded per
+/// run. The 4.0 resume bound was "one per status call" — a poll loop could
+/// retry forever. The ledger caps automatic repair/resume attempts for the
+/// lifetime of the run id.
+/// Threading/ownership note: tool execution is serialized by the surfaces
+/// that drive it (MCP stdio loop, copilot UI thread), so the map is not
+/// mutex-guarded; entries are one string+int per run id for the process
+/// lifetime (bounded in practice by the coordinator's own run registry).
+constexpr int kMaxRepairAttempts = 3;
+
+int &repairAttempts( const std::string &runId )
+{
+  static std::map<std::string, int> kLedger;
+  return kLedger[ runId ];
+}
+
+/// Structural duplicates: deterministic rename pass. Returns the actions
+/// applied (empty when none). Only the duplicate occurrence is renamed —
+/// first declaration wins, downstream references keep meaning the first.
+Json::Value renameDuplicateStepIds( Json::Value &plan, const std::string &suffix )
+{
+  Json::Value actions( Json::arrayValue );
+  if ( !plan.isObject() || !plan["steps"].isArray() )
+    return actions;
+  std::set<std::string> seen;
+  Json::Value steps( Json::arrayValue );
+  for ( const Json::Value &step : plan["steps"] )
+  {
+    Json::Value mutableStep = step;
+    const std::string id = step.get( "id", "" ).asString();
+    if ( !id.empty() && !seen.insert( id ).second )
+    {
+      const std::string renamed = id + suffix;
+      mutableStep["id"] = renamed;
+      actions.append( "renamed duplicate step '" + id + "' -> '" + renamed + "'" );
+    }
+    if ( !id.empty() )
+      seen.insert( mutableStep["id"].asString() );
+    steps.append( mutableStep );
+  }
+  if ( !actions.empty() )
+    plan["steps"] = steps;
+  return actions;
+}
+
+/// Declared outputs referencing unknown steps: deterministic drop pass.
+Json::Value dropDanglingOutputs( Json::Value &plan )
+{
+  Json::Value actions( Json::arrayValue );
+  if ( !plan.isObject() || !plan["steps"].isArray() || !plan["outputs"].isArray() )
+    return actions;
+  std::set<std::string> stepIds;
+  for ( const Json::Value &step : plan["steps"] )
+    stepIds.insert( step.get( "id", "" ).asString() );
+  Json::Value outputs( Json::arrayValue );
+  for ( const Json::Value &output : plan["outputs"] )
+  {
+    const std::string from = output.get( "from_step", "" ).asString();
+    if ( !from.empty() && !stepIds.count( from ) )
+    {
+      actions.append( "dropped output '" + output.get( "name", "" ).asString() +
+                      "' referencing unknown step '" + from + "'" );
+      continue;
+    }
+    outputs.append( output );
+  }
+  if ( outputs.size() != plan["outputs"].size() )
+    plan["outputs"] = outputs;
+  return actions;
 }
 
 Json::Value refsProperty()
@@ -60,6 +135,97 @@ Json::Value refsProperty()
 /// harness:execute_plan.
 Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRun> &run,
                                const AgentPlan *plan );
+
+/// Harness 7.0 (mission Area F): derive verification expectations instead of
+/// the near-vacuous 4.0 defaults. Layered, most specific wins:
+///   1. structural defaults (existing semantics),
+///   2. capability-knowledge verification contract for the plan intent
+///      (finite/nodata/provenance/uncertainty checks tighten what is open),
+///   3. the plan's own verification.expectations block (Pi/recipe authority).
+VerificationExpectations deriveExpectations( const AgentPlan *plan )
+{
+  VerificationExpectations expectations;
+  // Workflow-run outputs are plain files today; provenance presence stays
+  // warning-class unless knowledge/plan tightens it below.
+  expectations.requireProvenance = false;
+
+  if ( !plan )
+    return expectations;
+
+  bool provenanceDeclared = false;
+  bool uncertaintyDeclared = false;
+  const Json::Value &declared =
+    plan->verification.get( "expectations", Json::Value() );
+  if ( declared.isObject() )
+  {
+    if ( declared.isMember( "kind" ) && declared["kind"].isString() )
+      expectations.kind = declared["kind"].asString();
+    if ( declared.isMember( "crs" ) && declared["crs"].isString() )
+      expectations.crs = declared["crs"].asString();
+    if ( declared.isMember( "width" ) && declared["width"].isInt() )
+      expectations.width = declared["width"].asInt();
+    if ( declared.isMember( "height" ) && declared["height"].isInt() )
+      expectations.height = declared["height"].asInt();
+    if ( declared.isMember( "max_nodata_fraction" ) && declared["max_nodata_fraction"].isNumeric() )
+      expectations.maxNodataFraction = declared["max_nodata_fraction"].asDouble();
+    if ( declared.isMember( "min_finite_fraction" ) && declared["min_finite_fraction"].isNumeric() )
+      expectations.minFiniteFraction = declared["min_finite_fraction"].asDouble();
+    if ( declared.isMember( "class_values" ) && declared["class_values"].isArray() )
+      expectations.classValues = declared["class_values"];
+    if ( declared.isMember( "expected_extent" ) && declared["expected_extent"].isObject() )
+      expectations.expectedExtent = declared["expected_extent"];
+    if ( declared.isMember( "require_provenance" ) && declared["require_provenance"].isBool() )
+    {
+      expectations.requireProvenance = declared["require_provenance"].asBool();
+      provenanceDeclared = true;
+    }
+    if ( declared.isMember( "require_uncertainty" ) && declared["require_uncertainty"].isBool() )
+    {
+      expectations.requireUncertainty = declared["require_uncertainty"].asBool();
+      uncertaintyDeclared = true;
+    }
+  }
+
+  // Capability-knowledge contract for the intent: union of the checks the
+  // serving capabilities declare, applied only to knobs the plan left open.
+  // operatorsForIntent lazily loads the knowledge layer, so verification
+  // strength never depends on whether some earlier tool happened to load it.
+  if ( !plan->intent.empty() )
+  {
+    bool wantsFinite = false;
+    bool wantsNodata = false;
+    for ( const std::string &operatorId :
+          CapabilityKnowledge::instance().operatorsForIntent( plan->intent ) )
+    {
+      const Json::Value checks = CapabilityKnowledge::instance()
+                                   .entryForOperator( operatorId )
+                                   .get( "verification", Json::Value() )
+                                   .get( "checks", Json::Value( Json::arrayValue ) );
+      for ( const Json::Value &check : checks )
+      {
+        if ( !check.isString() )
+          continue;
+        wantsFinite |= check.asString() == "finite_fraction";
+        wantsNodata |= check.asString() == "nodata_fraction";
+        if ( check.asString() == "provenance" )
+        {
+          if ( !provenanceDeclared )
+            expectations.requireProvenance = true;
+        }
+        else if ( check.asString() == "uncertainty" )
+        {
+          if ( !uncertaintyDeclared )
+            expectations.requireUncertainty = true;
+        }
+      }
+    }
+    if ( wantsFinite && expectations.minFiniteFraction <= 0.0 )
+      expectations.minFiniteFraction = 0.5;
+    if ( wantsNodata && expectations.maxNodataFraction >= 1.0 )
+      expectations.maxNodataFraction = 0.9;
+  }
+  return expectations;
+}
 
 /// Phase 10: final map confirmation. Verifies the composed map output when the
 /// plan declares one: target layout presence, MapSpec preflight/repair loop,
@@ -211,6 +377,131 @@ class PlanTool final : public SpatialTool
     }
 };
 
+class RepairPlanTool final : public SpatialTool
+{
+  public:
+    std::string name() const override { return "harness:repair_plan"; }
+    std::string displayName() const override { return "Bounded Plan Repair"; }
+    std::string description() const override
+    {
+      return "Deterministic, bounded plan repair (<= 3 passes): applies only "
+             "structurally safe fixes — duplicate step ids are renamed (first "
+             "declaration wins) and declared outputs referencing unknown steps "
+             "are dropped — then re-validates. Everything else (unknown "
+             "operator, dangling wiring, verification typos) is returned as "
+             "typed advisory issues with suggested actions for the agent, "
+             "never guessed. Unchanged steps keep engine execution-cache reuse "
+             "(fingerprint-based); repaired plans compile to a fresh run.";
+    }
+    std::vector<std::string> tags() const override
+    { return { "harness", "plan", "repair", "validation", "bounded" }; }
+
+    Json::Value inputSchema() const override
+    {
+      Json::Value props( Json::objectValue );
+      Json::Value plan( Json::objectValue );
+      plan["type"] = "object";
+      plan["description"] = "AgentPlan document (v2 or legacy v1) to repair.";
+      props["plan"] = plan;
+      Json::Value required( Json::arrayValue );
+      required.append( "plan" );
+      return objectSchema( std::move( props ), std::move( required ) );
+    }
+
+    Json::Value outputSchema() const override
+    {
+      Json::Value props( Json::objectValue );
+      props["repaired_plan"] = Json::Value( Json::objectValue );
+      props["passes"] = Json::Value( Json::objectValue );
+      props["repair_log"] = Json::Value( Json::arrayValue );
+      props["issues"] = Json::Value( Json::arrayValue );
+      props["compilable"] = Json::Value( Json::objectValue );
+      props["workflow_json"] = Json::Value( Json::objectValue );
+      return objectSchema( std::move( props ), Json::Value() );
+    }
+
+    SpatialToolResult execute( const Json::Value &input ) override
+    {
+      if ( !input.isMember( "plan" ) || !input["plan"].isObject() )
+        return SpatialToolResult::failure( "missing object parameter 'plan'",
+                                           error_codes::kInvalidParameter, "validation" );
+
+      Json::Value working = input["plan"];
+      constexpr int kMaxPasses = 3;
+      Json::Value repairLog( Json::arrayValue );
+      int passes = 0;
+
+      std::vector<AgentPlanIssue> issues;
+      for ( ; passes < kMaxPasses; ++passes )
+      {
+        AgentPlan plan;
+        HarnessError error;
+        if ( !readAgentPlan( working, plan, error ) )
+          return SpatialToolResult::failure( error.summary, error.code, "validation" );
+        issues = validateAgentPlan( plan );
+        if ( issues.empty() )
+          break;
+
+        // One deterministic pass: only structurally safe surgery. Science
+        // (operator choice, wiring intent, verification strength) is never
+        // auto-edited — those stay advisory for Pi.
+        Json::Value actions( Json::arrayValue );
+        for ( const Json::Value &applied :
+              renameDuplicateStepIds( working, "-r" + std::to_string( passes + 1 ) ) )
+          actions.append( applied );
+        for ( const Json::Value &applied : dropDanglingOutputs( working ) )
+          actions.append( applied );
+        if ( actions.empty() )
+          break; // nothing deterministically repairable — advisory only
+        Json::Value passLog( Json::objectValue );
+        passLog["pass"] = passes + 1;
+        passLog["actions"] = actions;
+        repairLog.append( passLog );
+      }
+
+      // Final validation of the (possibly repaired) document.
+      Json::Value out( Json::objectValue );
+      AgentPlan finalPlan;
+      HarnessError error;
+      bool ok = readAgentPlan( working, finalPlan, error );
+      if ( ok )
+      {
+        issues = validateAgentPlan( finalPlan );
+        out["repaired_plan"] = working;
+        out["passes"] = passes;
+        out["repair_log"] = repairLog;
+        if ( !issues.empty() )
+        {
+          Json::Value arr( Json::arrayValue );
+          for ( const AgentPlanIssue &issue : issues )
+          {
+            Json::Value entry( Json::objectValue );
+            entry["code"] = issue.error.code;
+            entry["summary"] = issue.error.summary;
+            if ( !issue.stepId.empty() )
+              entry["step_id"] = issue.stepId;
+            entry["repairable"] = issue.repairable;
+            entry["suggested_actions"] = issue.error.suggestedActions;
+            arr.append( entry );
+          }
+          out["issues"] = arr;
+          out["compilable"] = false;
+          return SpatialToolResult::ok( std::move( out ) );
+        }
+        out["compilable"] = true;
+        HarnessError compileError;
+        const std::string workflowJson = compilePlanToWorkflowJson( finalPlan, compileError );
+        if ( workflowJson.empty() )
+          return SpatialToolResult::failure( compileError.summary, compileError.code,
+                                             "validation" );
+        out["workflow_json"] = workflowJson;
+        out["estimates"] = estimatePlanResources( finalPlan );
+        return SpatialToolResult::ok( std::move( out ) );
+      }
+      return SpatialToolResult::failure( error.summary, error.code, "validation" );
+    }
+};
+
 class ExecutePlanTool final : public SpatialTool
 {
   public:
@@ -301,6 +592,9 @@ class ExecutePlanTool final : public SpatialTool
         out["status"] = run->state() == sicnu::workflow::WorkflowRunState::Running
                           ? "running"
                           : sicnu::workflow::workflowRunStateToString( run->state() );
+        // Harness 7.0 (Area E): bind plan -> run for typed cross-turn context.
+        ContextLedger::instance().recordPlanBinding( run->runId(), plan.planId, plan.goal,
+                                                     plan.intent, "running" );
       }
       out["next"] = "harness:run_status {run_id} — poll until terminal";
       return SpatialToolResult::ok( std::move( out ) );
@@ -384,10 +678,13 @@ class RunStatusTool final : public SpatialTool
 
       Json::Value doc = runResultDocument( run, plan ? &*plan : nullptr );
 
-      // Bounded transient retry (Phase 13): a failed run whose recorded error
-      // is transient-class may be resumed exactly once per status call, and
-      // only when the caller still allows it (default true). Resume re-runs
-      // only steps without valid outputs — completed work is never redone.
+      // Bounded transient retry (Phase 13 + 7.0 Area D): a failed run whose
+      // recorded error is transient-class may be resumed — but attempts are
+      // counted in a global per-run ledger (kMaxRepairAttempts), so a poll
+      // loop cannot retry forever. Resume re-runs only steps without valid
+      // outputs — completed work is never redone.
+      doc["repair_attempts"] = repairAttempts( runId );
+      doc["repair_attempt_limit"] = kMaxRepairAttempts;
       if ( run->state() == sicnu::workflow::WorkflowRunState::Failed &&
            input.get( "auto_resume_transient", true ).asBool() )
       {
@@ -397,13 +694,17 @@ class RunStatusTool final : public SpatialTool
                                message.find( "Transient" ) != std::string::npos ||
                                message.find( "transient" ) != std::string::npos ||
                                normalized.code == error_codes::kTransientFailure;
-        if ( transient && !doc.isMember( "auto_resumed" ) )
+        int &attempts = repairAttempts( runId );
+        if ( transient && attempts < kMaxRepairAttempts && !doc.isMember( "auto_resumed" ) )
         {
+          ++attempts;
           QString resumeError;
           const long resumed = coordinator.resumeRun( runId, &resumeError );
           Json::Value retry( Json::objectValue );
           retry["attempted"] = resumed > 0;
-          retry["policy"] = "single_bounded_resume";
+          retry["policy"] = "ledger_bounded_resume";
+          retry["attempt"] = attempts;
+          retry["attempt_limit"] = kMaxRepairAttempts;
           if ( resumed > 0 )
           {
             retry["resumed_pipeline_id"] = static_cast<Json::Int64>( resumed );
@@ -412,6 +713,8 @@ class RunStatusTool final : public SpatialTool
             {
               doc = runResultDocument( resumedRun, plan ? &*plan : nullptr );
               doc["auto_resumed"] = true;
+              doc["repair_attempts"] = attempts;
+              doc["repair_attempt_limit"] = kMaxRepairAttempts;
             }
           }
           else
@@ -461,22 +764,44 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
   {
     std::vector<ArtifactVerification> verifications;
     Json::Value artifacts( Json::arrayValue );
+    const VerificationExpectations derived = deriveExpectations( plan );
     for ( const std::string &path : outputPaths )
     {
-      VerificationExpectations expectations;
-      // Workflow-run outputs are plain files today; provenance presence is a
-      // warning-class check on the copilot path, not a run gate here.
-      expectations.requireProvenance = false;
-      const ArtifactVerification artifact = verifyArtifact( path, expectations );
+      const ArtifactVerification artifact = verifyArtifact( path, derived );
       verifications.push_back( artifact );
       artifacts.append( artifact.toJson() );
     }
     const Verdict overall = aggregateVerdict( verifications );
     verificationDoc["artifacts"] = artifacts;
     verificationDoc["verdict"] = verdictToStringWire( overall );
+    verificationDoc["expectations"] = [ &derived ] {
+      Json::Value e( Json::objectValue );
+      if ( !derived.crs.empty() )
+        e["crs"] = derived.crs;
+      if ( derived.width )
+        e["width"] = derived.width;
+      if ( derived.height )
+        e["height"] = derived.height;
+      if ( derived.minFiniteFraction > 0.0 )
+        e["min_finite_fraction"] = derived.minFiniteFraction;
+      if ( derived.maxNodataFraction < 1.0 )
+        e["max_nodata_fraction"] = derived.maxNodataFraction;
+      if ( derived.classValues.isArray() && !derived.classValues.empty() )
+        e["class_values"] = derived.classValues;
+      if ( derived.expectedExtent.isObject() )
+        e["expected_extent"] = derived.expectedExtent;
+      e["require_provenance"] = derived.requireProvenance;
+      if ( derived.requireUncertainty )
+        e["require_uncertainty"] = true;
+      return e;
+    }();
     doc["verification"] = verificationDoc;
     // A FAIL verification forces status failed — no false success path.
     doc["status"] = overall == Verdict::Fail ? "failed" : "completed";
+    // Harness 7.0 (Area E): the binding's verification status follows the run.
+    ContextLedger::instance().recordPlanBinding(
+      run->runId(), plan ? plan->planId : "", plan ? plan->goal : "",
+      plan ? plan->intent : "", verdictToStringWire( overall ) );
     if ( overall != Verdict::Fail && plan && plan->mapOutput.isObject() )
       doc["map_confirmation"] = confirmMapOutput( *plan, doc["steps"] );
   }
@@ -487,6 +812,9 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
     doc["verification"] = verificationDoc;
     doc["status"] = "failed";
     doc["error"] = run->errorMessage();
+    ContextLedger::instance().recordPlanBinding(
+      run->runId(), plan ? plan->planId : "", plan ? plan->goal : "",
+      plan ? plan->intent : "", "FAIL" );
   }
   else
   {
@@ -614,6 +942,7 @@ void registerPlanTools()
   auto &registry = SpatialToolRegistry::instance();
   registry.registerTool( std::make_shared<PreflightTool>() );
   registry.registerTool( std::make_shared<PlanTool>() );
+  registry.registerTool( std::make_shared<RepairPlanTool>() );
   registry.registerTool( std::make_shared<ExecutePlanTool>() );
   registry.registerTool( std::make_shared<RunStatusTool>() );
 }

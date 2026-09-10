@@ -3,6 +3,10 @@
  ***************************************************************************/
 #include "plugin_runtime_host.h"
 
+#include "plugins/host/plugin_host_process_runtime.h"
+
+#include <cstdlib>
+
 #include "data_provider_registry.h"
 #include "external_tool_operator.h"
 #include "plugin_agent_tool_provider.h"
@@ -33,11 +37,39 @@ void bootstrapPluginRuntime( const exprs::PluginRegistryOptions &options )
     PluginRuntimeHost::instance().bootstrap( options );
 }
 
+Json::Value PluginRuntimeHost::hostProcessSnapshot() const
+{
+    std::lock_guard<std::mutex> lock( mMutex );
+    if ( !mHostProcessRuntime )
+        return Json::Value();
+    return mHostProcessRuntime->diagnosticsSnapshot();
+}
+
 void PluginRuntimeHost::bootstrap( const exprs::PluginRegistryOptions &options )
 {
     std::lock_guard<std::mutex> lock( mMutex );
     exprs::PluginRegistry &registry = exprs::PluginRegistry::instance();
     registry.setContributionSink( this );
+
+    // Isolation runtime 5.0: install the out-of-process hosting strategy.
+    // SICNU_PLUGIN_HOST_PROCESS=off refuses host-process plugins typed
+    // instead (E6006); anything else installs the runtime so manifests may
+    // opt into worker isolation.
+    {
+        const char *flag = std::getenv( "SICNU_PLUGIN_HOST_PROCESS" );
+        const bool disabled = flag && std::string( flag ) == "off";
+        if ( !disabled && !mHostProcessRuntime )
+        {
+            exprs::PluginDiagnosticLog setupLog;
+            sicnu::plugins::PluginHostProcessRuntime::Options runtimeOptions;
+            if ( !options.hostProcessWorkerPath.empty() )
+                runtimeOptions.workerPath = options.hostProcessWorkerPath;
+            mHostProcessRuntime =
+                std::make_unique<sicnu::plugins::PluginHostProcessRuntime>( runtimeOptions );
+        }
+        registry.setHostProcessRuntime( disabled ? nullptr : mHostProcessRuntime.get() );
+    }
+
     registry.configure( options );
     mBootstrapped = true;
     installManifestContributions();

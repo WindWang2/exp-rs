@@ -126,6 +126,14 @@ add_executable(sicnu_geo_rs
     workbench/command_palette.cpp
     workbench/inspector_host.cpp
     workbench/layer_sections.cpp
+    workbench/provenance_section.cpp
+    workbench/processing_history_model.cpp
+    workbench/processing_history_panel.cpp
+    workbench/shutdown_policy.cpp
+    workbench/temporal_scene_model.cpp
+    workbench/temporal_workbench_panel.cpp
+    workbench/dataset_experiment_panel.cpp
+    workbench/model_workbench_panel.cpp
     main_window_workbench.cpp
     workflow/pipeline_port_item.cpp
     workflow/pipeline_connection_item.cpp
@@ -332,6 +340,8 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     Sicnu::qgis_display
     Sicnu::session_map
     Sicnu::help_gui
+    Sicnu::dataset
+    Sicnu::experiment
     sicnu_core
     sicnu_processing
     sicnu_operators
@@ -340,6 +350,8 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
+  # unified-trace bootstrap in main.cpp (Verification 7.0)
+    sicnu_runtime
     jsoncpp
     CURL::libcurl
     ${PCRE2_16}

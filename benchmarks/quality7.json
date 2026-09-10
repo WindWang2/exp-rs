@@ -1,0 +1,18 @@
+{
+  "schema": "exp.bench.quality7.v1",
+  "os": "windows",
+  "cpu_cores": 16,
+  "build": "debug",
+  "note": "wall-clock evidence only — not a CI gate",
+  "measurements": [
+    { "name": "trace_id_generate", "ops_per_s": 713634, "iterations": 200000 },
+    { "name": "trace_ndjson_encode", "ops_per_s": 53306.2, "iterations": 200000 },
+    { "name": "trace_emit_disabled", "ops_per_s": 169046, "iterations": 500000 },
+    { "name": "trace_emit_ring", "ops_per_s": 70690.4, "iterations": 200000 },
+    { "name": "fault_probe_disarmed", "ops_per_s": 2.76915e+06, "iterations": 500000 },
+    { "name": "condition_validate", "ops_per_s": 27367.4, "iterations": 100000 },
+    { "name": "condition_evaluate", "ops_per_s": 19146, "iterations": 200000 },
+    { "name": "resource_uri_parse", "ops_per_s": 51049.1, "iterations": 200000 },
+    { "name": "job_dispatch_roundtrip", "ops_per_s": 91818.1, "iterations": 2000 }
+  ]
+}

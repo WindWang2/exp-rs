@@ -19,6 +19,13 @@ struct ChangeStats {
     float stddev = 0.0f;
 };
 
+/**
+ * Absolute two-date difference: out[i] = |after[i] − before[i]|. The result
+ * is deliberately UNSIGNED magnitude — the sign of the change (greening vs
+ * browning, gain vs loss) is not recoverable from this kernel; callers that
+ * need signed change should compute after − before directly or use
+ * band_math. NaN in either input propagates to the output (IEEE 754).
+ */
 bool difference(const float *before, const float *after, float *out, size_t count);
 bool normalizedDifference(const float *before, const float *after, float *out, size_t count);
 bool changeMask(const float *diff, uint8_t *mask, size_t count, float threshold);

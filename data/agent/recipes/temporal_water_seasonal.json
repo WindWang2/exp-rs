@@ -1,69 +1,83 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.temporal_water_seasonal",
- "title": "Seasonal surface water dynamics",
- "intent": "water",
- "family": "temporal",
- "modality": "temporal",
- "sensors": [
-  "sentinel-2",
-  "landsat-8",
-  "landsat-9",
-  "modis"
- ],
- "description": "MNDWI series -> per-epoch water thresholding summary for seasonal water persistence.",
- "slots": [
-  {
-   "name": "collection",
-   "kind": "collection",
-   "description": "Registered temporal collection (spatial:temporal tools).",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "series",
-   "operator_id": "rs:temporal_index_series",
-   "params": {
-    "collection": "$collection.path",
-    "index": "MNDWI",
-    "output": "$outputs.mndwi_series"
-   },
-   "verification": "raster"
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.temporal_water_seasonal",
+  "title": "Seasonal surface water dynamics",
+  "intent": "water",
+  "family": "temporal",
+  "modality": "temporal",
+  "sensors": [
+    "sentinel-2",
+    "landsat-8",
+    "landsat-9",
+    "modis"
+  ],
+  "description": "MNDWI series -> per-epoch water thresholding summary for seasonal water persistence.",
+  "slots": [
+    {
+      "name": "collection",
+      "kind": "collection",
+      "description": "Registered temporal collection (spatial:temporal tools).",
+      "required": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "series",
+      "operator_id": "rs:temporal_index_series",
+      "params": {
+        "collection": "$collection.path",
+        "index": "MNDWI",
+        "output": "$outputs.mndwi_series"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "summary",
+      "operator_id": "rs:temporal_summary",
+      "params": {
+        "collection": "$collection.path",
+        "band_role": "mndwi",
+        "include_median": true,
+        "output": "$outputs.summary",
+        "verification": "report"
+      },
+      "verification": "raster"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "mndwi_series",
+      "from_step": "series",
+      "port": "output",
+      "kind": "raster"
+    },
+    {
+      "name": "summary",
+      "from_step": "summary",
+      "port": "output",
+      "kind": "report"
+    }
+  ],
+  "verification": {
+    "enabled": true
   },
-  {
-   "id": "summary",
-   "operator_id": "rs:temporal_summary",
-   "params": {
-    "collection": "$collection.path",
-    "band_role": "mndwi",
-    "include_median": true,
-    "output": "$outputs.summary",
-    "verification": "report"
-   },
-   "verification": "raster"
-  }
- ],
- "outputs": [
-  {
-   "name": "mndwi_series",
-   "from_step": "series",
-   "port": "output",
-   "kind": "raster"
+  "map_output": {
+    "from_step": "series",
+    "renderer_hint": "singleband_pseudocolor"
   },
-  {
-   "name": "summary",
-   "from_step": "summary",
-   "port": "output",
-   "kind": "report"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "series",
-  "renderer_hint": "singleband_pseudocolor"
- }
+  "capabilities": [
+    "rs:temporal_index_series",
+    "rs:temporal_summary"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "mndwi_series",
+      "kind": "raster"
+    },
+    {
+      "name": "summary",
+      "kind": "report"
+    }
+  ]
 }

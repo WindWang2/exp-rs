@@ -1,72 +1,86 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.qa_scene_report",
- "title": "Scene QA / coverage report",
- "intent": "qa",
- "family": "qa",
- "modality": "optical",
- "sensors": [
-  "sentinel-2",
-  "landsat-8",
-  "landsat-9"
- ],
- "description": "QA mask statistics + coverage summary for acquisition reports (report artifact, no map).",
- "slots": [
-  {
-   "name": "primary",
-   "kind": "raster",
-   "description": "Reflectance product.",
-   "required": true
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.qa_scene_report",
+  "title": "Scene QA / coverage report",
+  "intent": "qa",
+  "family": "qa",
+  "modality": "optical",
+  "sensors": [
+    "sentinel-2",
+    "landsat-8",
+    "landsat-9"
+  ],
+  "description": "QA mask statistics + coverage summary for acquisition reports (report artifact, no map).",
+  "slots": [
+    {
+      "name": "primary",
+      "kind": "raster",
+      "description": "Reflectance product.",
+      "required": true
+    },
+    {
+      "name": "qa",
+      "kind": "raster",
+      "description": "QA band.",
+      "required": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "mask",
+      "operator_id": "rs:qa_mask",
+      "params": {
+        "input": "$qa.path",
+        "output": "$outputs.mask"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "apply",
+      "operator_id": "rs:apply_mask",
+      "params": {
+        "input": "$primary.path",
+        "mask": "$outputs.mask",
+        "output": "$outputs.masked",
+        "align_mask": true
+      },
+      "verification": "raster"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "mask",
+      "from_step": "mask",
+      "port": "output",
+      "kind": "raster"
+    },
+    {
+      "name": "masked",
+      "from_step": "apply",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
   },
-  {
-   "name": "qa",
-   "kind": "raster",
-   "description": "QA band.",
-   "required": true
-  }
- ],
- "steps": [
-  {
-   "id": "mask",
-   "operator_id": "rs:qa_mask",
-   "params": {
-    "input": "$qa.path",
-    "output": "$outputs.mask"
-   },
-   "verification": "raster"
+  "map_output": {
+    "from_step": "mask",
+    "renderer_hint": "categorized"
   },
-  {
-   "id": "apply",
-   "operator_id": "rs:apply_mask",
-   "params": {
-    "input": "$primary.path",
-    "mask": "$outputs.mask",
-    "output": "$outputs.masked",
-    "align_mask": true
-   },
-   "verification": "raster"
-  }
- ],
- "outputs": [
-  {
-   "name": "mask",
-   "from_step": "mask",
-   "port": "output",
-   "kind": "raster"
-  },
-  {
-   "name": "masked",
-   "from_step": "apply",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "mask",
-  "renderer_hint": "categorized"
- }
+  "capabilities": [
+    "rs:qa_mask",
+    "rs:apply_mask"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "mask",
+      "kind": "raster"
+    },
+    {
+      "name": "masked",
+      "kind": "raster"
+    }
+  ]
 }

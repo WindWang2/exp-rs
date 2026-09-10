@@ -3,6 +3,12 @@ include(Catch)
 
 if(WIN32 AND TARGET Catch2WithMain)
   set_property(TARGET Catch2WithMain PROPERTY SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/sicnu_test_main.cpp")
+  # sicnu_test_main wires the unified-trace env bootstrap (Verification 7.0),
+  # which references sicnu_runtime. Link (not just include) here so EVERY
+  # Catch2 consumer inherits the dependency via LINK_ONLY — io test targets
+  # and light fuzz targets link only Catch2::Catch2WithMain.
+  target_include_directories(Catch2WithMain PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(Catch2WithMain PRIVATE sicnu_runtime)
 endif()
 
 # Wrapper around catch_discover_tests that injects LSAN_OPTIONS when sanitizers
@@ -36,8 +42,11 @@ function(sicnu_discover_tests NAME)
     PROPERTIES ${_discovery_props})
 endfunction()
 
-# Helper function to add a test executable
+# Helper function to add a test executable. Extra args (TIMEOUT n,
+# RUN_SERIAL TRUE, ...) are forwarded to sicnu_discover_tests as test
+# properties — previously they were accepted and silently dropped.
 function(sicnu_add_test NAME)
+  cmake_parse_arguments(SAT "" "" "" ${ARGN})
   qt_add_executable(${NAME} ${NAME}.cpp)
   target_link_libraries(${NAME} PRIVATE
     Catch2::Catch2WithMain
@@ -64,7 +73,11 @@ function(sicnu_add_test NAME)
   target_compile_definitions(${NAME} PRIVATE
     CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   )
-  sicnu_discover_tests(${NAME})
+  if(SAT_UNPARSED_ARGUMENTS)
+    sicnu_discover_tests(${NAME} ${SAT_UNPARSED_ARGUMENTS})
+  else()
+    sicnu_discover_tests(${NAME})
+  endif()
 endfunction()
 
 # Geospatial I/O Foundation 4.0: light test executables. Links only
@@ -86,6 +99,29 @@ function(sicnu_add_io_test NAME)
   )
   # Output next to the vcpkg-deployed runtime DLLs so the executables start
   # without per-exe DLL copies (gdal.dll & friends land in the build root).
+  set_target_properties(${NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  )
+  sicnu_discover_tests(${NAME})
+endfunction()
+
+# Isolation runtime 5.0: light SDK test executables. Links only Catch2 +
+# sicnu_sdk (jsoncpp transitively) — no Qt, no QGIS — so the IPC/capability
+# contract suites build and run fast on every platform lane.
+function(sicnu_add_sdk_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_sdk
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/sdk
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(${NAME} PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
   set_target_properties(${NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   )
@@ -199,6 +235,34 @@ target_sources(test_io_remote_range PRIVATE support/http_range_server.cpp)
 if(WIN32)
   target_link_libraries(test_io_remote_range PRIVATE ws2_32)
 endif()
+
+# 7.0 remote source identity & validators (shared HTTP fixture).
+sicnu_add_io_test(test_io_remote_validator)
+target_sources(test_io_remote_validator PRIVATE support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_remote_validator PRIVATE ws2_32)
+endif()
+
+# 7.0 bounded byte-range cache over remote rasters.
+sicnu_add_io_test(test_io_range_cache)
+target_sources(test_io_range_cache PRIVATE support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_range_cache PRIVATE ws2_32)
+endif()
+
+# 7.0 STAC API client (loopback JSON fixture).
+sicnu_add_io_test(test_io_stac_client)
+target_sources(test_io_stac_client PRIVATE support/http_stac_server.cpp support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_stac_client PRIVATE ws2_32)
+endif()
+
+# 7.0 modern vector interop audit (field types / null / collections / CRS /
+# streaming / driver-gated GeoParquet).
+sicnu_add_io_test(test_io_vector_interop)
+
+# 7.0 generalized grid classification & placement (rotated/flipped/GCP/RPC).
+sicnu_add_io_test(test_io_grid_descriptor)
 
 # io:* operator family suite — rides the operator chain (Qt + sicnu_operators).
 sicnu_add_io_test(test_io_operators)
@@ -536,6 +600,86 @@ target_compile_definitions(test_workbench_host PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 sicnu_discover_tests(test_workbench_host)
+
+# ── Workbench 7.0 contracts (shutdown/switch policy over bench lifecycles) ──
+add_executable(test_workbench_shutdown_policy
+  test_workbench_shutdown_policy.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/shutdown_policy.cpp
+)
+target_link_libraries(test_workbench_shutdown_policy PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_workbench_shutdown_policy PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_workbench_shutdown_policy)
+
+# ── Workbench 7.0: provenance inspector section over DataManager + WorkspaceService ──
+add_executable(test_provenance_section
+  test_provenance_section.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/inspector_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/provenance_section.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_provenance_section PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+)
+target_include_directories(test_provenance_section PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_provenance_section)
+
+# ── Workbench 7.0: unified processing history projection (TaskCenter + runs) ──
+add_executable(test_processing_history_model
+  test_processing_history_model.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_model.cpp
+)
+target_link_libraries(test_processing_history_model PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  sicnu_task_center
+  sicnu_workflow
+)
+target_include_directories(test_processing_history_model PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_processing_history_model)
+
+# ── Workbench 7.0: temporal scene browser model (paged, filtered) ──
+add_executable(test_temporal_scene_model
+  test_temporal_scene_model.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/temporal_scene_model.cpp
+)
+target_link_libraries(test_temporal_scene_model PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  sicnu_processing
+)
+target_include_directories(test_temporal_scene_model PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_temporal_scene_model)
 
 add_executable(test_selection_context
   test_selection_context.cpp
@@ -987,6 +1131,18 @@ sicnu_discover_tests(test_spectral_detection)
 
 # SAR foundation (Foundation 5.0 Milestone D): dual-pol features + terrain
 # geometry closed forms, operator E2E, geometry refusals.
+add_executable(test_sar_orbit test_sar_orbit.cpp)
+target_link_libraries(test_sar_orbit PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_sar_orbit PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_orbit)
+
 add_executable(test_sar_foundation5 test_sar_foundation5.cpp)
 target_link_libraries(test_sar_foundation5 PRIVATE
   Catch2::Catch2WithMain
@@ -1301,6 +1457,10 @@ sicnu_discover_tests(test_spatial_scientist_benchmark)
 # Model catalog v2 contracts: readiness states, checksums, ranking gates
 sicnu_add_test(test_model_catalog_v2)
 
+# Platform 7.0 manifest surface: multimodal inputs, typed heads, provider
+# contracts, closed-vocabulary unknown-key refusal (QtCore only).
+sicnu_add_test(test_model_manifest7)
+
 # Model runtime registry, ONNX provider, tile inference engine and rs:infer
 # integration (needs OpenCV for the cv::dnn surface).
 if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
@@ -1320,6 +1480,102 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         ${CMAKE_BINARY_DIR}
     )
     sicnu_discover_tests(test_model_runtime)
+
+    # Platform 7.0 runtime core: TensorBlob N-D value type, failure taxonomy
+    # extension, inferNamed default bridge (needs OpenCV for the cv bridge).
+    add_executable(test_tensor_blob test_tensor_blob.cpp)
+    target_link_libraries(test_tensor_blob PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_tensor_blob)
+    target_include_directories(test_tensor_blob PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_tensor_blob)
+
+    # Platform 7.0 device planner: inventory, VRAM ledger, admission and
+    # memory-pressure eviction (injectable inventory — runs without GPUs).
+    add_executable(test_device_planner test_device_planner.cpp)
+    target_link_libraries(test_device_planner PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_device_planner)
+    target_include_directories(test_device_planner PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_device_planner)
+
+    # Platform 7.0 multimodal / temporal tiled inference: multi-file same-grid
+    # assembly, temporal stacks, coverage gate, service routing.
+    add_executable(test_multimodal_inference test_multimodal_inference.cpp)
+    target_link_libraries(test_multimodal_inference PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_multimodal_inference)
+    target_include_directories(test_multimodal_inference PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_multimodal_inference)
+
+    # Platform 7.0 external provider contracts (same registry seam).
+    add_executable(test_provider_python test_provider_python.cpp)
+    target_link_libraries(test_provider_python PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_provider_python)
+    target_include_directories(test_provider_python PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_provider_python)
+
+    if(TARGET Qt6::Network)
+        add_executable(test_provider_http test_provider_http.cpp)
+        target_link_libraries(test_provider_http PRIVATE
+            Catch2::Catch2WithMain
+            Qt6::Core
+            Qt6::Network
+            qgis_core
+            sicnu_processing
+            sicnu_task_center
+            sicnu_operators
+            ${OpenCV_LIBS}
+        )
+        sicnu_link_jsoncpp(test_provider_http)
+        target_include_directories(test_provider_http PRIVATE
+            ${CMAKE_SOURCE_DIR}/src
+            ${CMAKE_BINARY_DIR}
+        )
+        sicnu_discover_tests(test_provider_http)
+    endif()
 endif()
 
 # Platform 4.0: failure matrix + device/pool/registry contracts
@@ -1604,6 +1860,17 @@ target_link_libraries(test_dataset_e2e_examples PRIVATE Sicnu::experiment Sicnu:
 sicnu_add_test(test_adversarial_m2 TIMEOUT 180)
 target_link_libraries(test_adversarial_m2 PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 
+# Platform 7.0 dataset/experiment surface: split-manifest + leakage-report
+# persistence, MCP tool projections, honest reproducibility levels.
+sicnu_add_test(test_data_platform_surface TIMEOUT 300)
+target_link_libraries(test_data_platform_surface PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
+# Platform 7.0 library contracts: promotion, fold audit, facets, replay
+# readiness, comparison extensions.
+sicnu_add_test(test_platform7_library TIMEOUT 600)
+target_link_libraries(test_platform7_library PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+set_property(TARGET test_platform7_library PROPERTY RUN_SERIAL TRUE)
+
 
 # Phase C fused-chain equivalence (links through sicnu_task_center which
 # carries fused_chain.cpp; needs the standard set only).
@@ -1630,6 +1897,14 @@ target_link_libraries(test_gpu_plane PRIVATE sicnu_runtime)
 # so SIGKILL/kill escalation never disturbs neighboring tests).
 sicnu_add_test(test_worker_host TIMEOUT 300 RUN_SERIAL TRUE)
 target_compile_definitions(test_worker_host PRIVATE
+    SICNU_WORKER_EXE="$<TARGET_FILE:sicnu_worker>"
+)
+
+# Execution Plane 7.0 fault matrix (retry/routing/admission/cancel/shutdown/
+# stress). RUN_SERIAL: the sticky-shutdown case must run after everything and
+# the routing cases spawn real worker processes.
+sicnu_add_test(test_execution_plane_7 TIMEOUT 1200 RUN_SERIAL TRUE)
+target_compile_definitions(test_execution_plane_7 PRIVATE
     SICNU_WORKER_EXE="$<TARGET_FILE:sicnu_worker>"
 )
 
@@ -3437,7 +3712,24 @@ sicnu_add_test(test_layout_tools)
     ${OpenCV_INCLUDE_DIRS}
     ${CMAKE_BINARY_DIR}
   )
+
+  # Scientific Algorithms 7.0 — ISODATA backend tests.
+  add_executable(test_classifier_isodata test_classifier_isodata.cpp)
+  target_link_libraries(test_classifier_isodata PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classifier_isodata PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
   sicnu_discover_tests(test_classifier_kmeans)
+  sicnu_discover_tests(test_classifier_isodata)
 
   # OBIA Classification Optimization — RandomForest backend test.
   add_executable(test_classifier_random_forest test_classifier_random_forest.cpp)
@@ -6720,6 +7012,27 @@ set_target_properties(hello_plugin PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin
 )
 
+# Isolation runtime 5.0: misbehaving fixture plugin (crash/hang/flood) for
+# the host-process suites + the out-of-process plugin host test.
+add_library(isolation_plugin MODULE fixtures/isolation_plugin/isolation_plugin.cpp)
+target_include_directories(isolation_plugin PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/sdk
+)
+target_link_libraries(isolation_plugin PRIVATE sicnu_operators sicnu_operators_core jsoncpp)
+set_target_properties(isolation_plugin PROPERTIES
+  LIBRARY_OUTPUT_NAME isolation_plugin
+  PREFIX "lib"
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugin_fixtures/isolation_plugin
+)
+
+sicnu_add_sdk_test(test_plugin_host_process)
+target_link_libraries(test_plugin_host_process PRIVATE sicnu_plugins_hostprocess sicnu_operators_core)
+target_compile_definitions(test_plugin_host_process PRIVATE
+  SICNU_TEST_ISOLATION_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/isolation_plugin"
+  SICNU_TEST_PLUGIN_HOST_WORKER="${CMAKE_BINARY_DIR}/exprs_plugin_host_worker.exe"
+)
+
 sicnu_add_test(test_plugin_manifest)
 target_link_libraries(test_plugin_manifest PRIVATE sicnu_sdk)
 
@@ -6741,6 +7054,23 @@ if(NOT WIN32)
   sicnu_add_test(test_exprs_external_process)
   target_link_libraries(test_exprs_external_process PRIVATE sicnu_sdk)
 endif()
+# Isolation runtime 5.0: behavior helper + Windows external-process lane
+# (CreateProcessW implementation). The helper is cross-platform so the same
+# assertions can run on any lane.
+add_executable(exprs_ep_helper helper_external_process.cpp)
+set_target_properties(exprs_ep_helper PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+if(WIN32)
+  sicnu_add_sdk_test(test_exprs_external_process_win)
+  target_compile_definitions(test_exprs_external_process_win PRIVATE
+    SICNU_TEST_EP_HELPER="${CMAKE_BINARY_DIR}/exprs_ep_helper.exe"
+  )
+endif()
+
+# Isolation runtime 5.0: host-process protocol contract suites (sdk-only).
+sicnu_add_sdk_test(test_exprs_ipc)
+sicnu_add_sdk_test(test_plugin_capabilities)
 
 sicnu_add_test(test_exprs_workflow_schema)
 target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
@@ -6780,6 +7110,12 @@ sicnu_link_jsoncpp(test_harness_grounding)
 # token budgets (mission Phases 18-20).
 sicnu_add_test(test_harness_evals)
 sicnu_link_jsoncpp(test_harness_evals)
+
+
+# Harness 7.0 capability-knowledge drift guard: entries vs the live operator
+# registry, operator x-rs-contract facts, and the closed intent vocabulary.
+sicnu_add_test(test_capability_drift)
+sicnu_link_jsoncpp(test_capability_drift)
 
 
 # Last TEST_INCLUDE_FILES entry: stamp PYTHONHOME / LD_LIBRARY_PATH / QT_IM_MODULE
@@ -6848,3 +7184,171 @@ target_compile_definitions(test_help_coverage PRIVATE
     CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 target_link_libraries(test_help_coverage PRIVATE Sicnu::help Sicnu::help_adapters Sicnu::help_gui)
+
+# =============================================================================
+# Verification / Observability / Performance Engineering 7.0
+# (feat/verification-observability-7) — appended at end of file on purpose:
+# this track and feat/cloud-geospatial-io-7 both edit this file; appending
+# keeps integration conflicts trivial.
+# =============================================================================
+
+# Unified trace contract (task F): ids, NDJSON encoding, ring/file sinks.
+sicnu_add_test(test_trace_contract TIMEOUT 120)
+target_link_libraries(test_trace_contract PRIVATE sicnu_runtime)
+
+# Fault-injection registry semantics (task B): the registry lives in
+# sicnu_runtime; production seams probe it through SICNU_FAULT_POINT and the
+# fast path is one relaxed atomic load when nothing is armed.
+sicnu_add_test(test_fault_registry TIMEOUT 120)
+target_link_libraries(test_fault_registry PRIVATE sicnu_runtime)
+
+# Portable fault matrix (task B): OutputCommitter / ArtifactObjectPool /
+# WorkflowCheckpointManager failure paths via the fault registry. Runs on
+# Windows/MSVC where the POSIX-only test_fault_injection cannot.
+sicnu_add_test(test_fault_matrix TIMEOUT 300)
+target_link_libraries(test_fault_matrix PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_data
+  sicnu_workflow
+  sicnu_runtime
+)
+
+# Bounded contract fuzz (task D): ResourceUri total-function/credential/
+# traversal properties. Deterministic seeds, hard input caps.
+sicnu_add_test(test_contract_fuzz_io TIMEOUT 180)
+target_link_libraries(test_contract_fuzz_io PRIVATE Sicnu::Geospatial)
+target_include_directories(test_contract_fuzz_io PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Bounded contract fuzz (task D): MapSpec condition AST + workflow placeholder
+# grammar. Compiles the two Qt-free/light production sources directly so the
+# fuzz target needs no sicnu_agent/sicnu_workflow closure.
+add_executable(test_contract_fuzz_lang
+  test_contract_fuzz_lang.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/mapspec/mapspec_conditions.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/placeholder_grammar.cpp
+)
+target_link_libraries(test_contract_fuzz_lang PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_contract_fuzz_lang PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_contract_fuzz_lang SYSTEM PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_contract_fuzz_lang PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_contract_fuzz_lang PRIVATE jsoncpp)
+endif()
+target_include_directories(test_contract_fuzz_lang PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_compile_definitions(test_contract_fuzz_lang PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_contract_fuzz_lang)
+
+# JobEngine concurrency/lifecycle stress (task E). Links the Qt-free static
+# sicnu_jobs (which PUBLIC-links sicnu_operators for the registry seam).
+# Deterministic condition-wait synchronization, no sleeps. RUN_SERIAL:
+# saturates all workers; keep timing measurements uncontended.
+add_executable(test_concurrency_stress
+  test_concurrency_stress.cpp
+)
+target_link_libraries(test_concurrency_stress PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_jobs
+  sicnu_runtime
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_concurrency_stress PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_concurrency_stress SYSTEM PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_concurrency_stress PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_concurrency_stress PRIVATE jsoncpp)
+endif()
+target_include_directories(test_concurrency_stress PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+sicnu_discover_tests(test_concurrency_stress TIMEOUT 600 RUN_SERIAL TRUE)
+
+# Scientific known-answer corpus (task C): analytically derivable fixtures for
+# spectral / change / terrain / radiometric / transition-matrix / temporal
+# statistics. Physical invariants with documented derivations, not shapes.
+sicnu_add_test(test_known_answer_corpus TIMEOUT 180)
+target_link_libraries(test_known_answer_corpus PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators_core
+)
+
+# Machine-readable diagnostic envelope (task G): exp.diag.v1 contract.
+sicnu_add_test(test_diagnostic_report TIMEOUT 60)
+target_link_libraries(test_diagnostic_report PRIVATE sicnu_runtime)
+
+# Quality-platform micro-baselines (task H) — run MANUALLY, never a ctest
+# gate: benchmark_quality7 --out benchmarks/quality7.json
+add_executable(benchmark_quality7
+  benchmark_quality7.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/mapspec/mapspec_conditions.cpp
+)
+target_link_libraries(benchmark_quality7 PRIVATE
+  Qt6::Core
+  GDAL::GDAL
+  sicnu_jobs
+  sicnu_operators_core
+  sicnu_geospatial
+  sicnu_runtime
+)
+if(TARGET jsoncpp)
+  target_link_libraries(benchmark_quality7 PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(benchmark_quality7 SYSTEM PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(benchmark_quality7 PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(benchmark_quality7 PRIVATE jsoncpp)
+endif()
+target_include_directories(benchmark_quality7 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Bounded contract fuzz (task D): DatasetManifest unknown-field tolerance,
+# total parse on mutated payloads, typed negative cases. Light closure
+# (Qt + SQLite only).
+sicnu_add_test(test_contract_fuzz_data TIMEOUT 180)
+target_link_libraries(test_contract_fuzz_data PRIVATE
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_contract_fuzz_data PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Bounded contract fuzz (task D): AgentPlan reader + MapSpec validate/patch.
+# Heavy closure (sicnu_agent) — part of the full-tree lane.
+sicnu_add_test(test_contract_fuzz_agent TIMEOUT 300)
+target_link_libraries(test_contract_fuzz_agent PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  sicnu_processing
+  sicnu_task_center
+)
+target_include_directories(test_contract_fuzz_agent PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)

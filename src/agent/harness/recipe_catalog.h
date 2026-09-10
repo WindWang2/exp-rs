@@ -20,6 +20,19 @@
 //                           "params"; degradation propagates along declared
 //                           step "inputs" wiring only (per branch, #784)
 //
+// Harness 7.0 (mission Area G) adds two de-duplication mechanisms so the
+// catalog does not grow one near-clone file per sensor/filter/classifier:
+//   "aliases": ["<old recipe_id>", ...] — deleted near-clone ids resolve to
+//                                         this canonical document.
+//   "presets": { "<name>": { "step_params": { "<step_id>": {..overrides..} },
+//                             "keep_outputs": ["<output name>", ...],
+//                             "<flat param key>": value, ... } }
+//     chosen via bindings.preset. Flat keys override ANY step param with the
+//     same name (the flood-mapping shape); "step_params" overrides params of
+//     one named step; "keep_outputs" filters declared outputs. Application is
+//     deterministic and validated at load (preset step/output names must
+//     exist).
+//
 
 #include <json/json.h>
 #include <string>
@@ -48,23 +61,26 @@ class RecipeCatalog {
     Json::Value listRecipes() const;
 
     /// Full recipe document; typed failure (empty Json) when unknown.
+    /// Alias ids (Harness 7.0) resolve to their canonical document.
     Json::Value recipe( const std::string &recipeId ) const;
 
     /// Instantiates a recipe into an AgentPlan v2 document. `bindings`:
     /// {slots: {name: "<dataset ref>"}, params: {...}, output_dir: "...",
-    ///  outputs: {name: "path"}}. Deterministic: same inputs, same plan.
-    /// Fails (empty Json + typed error) on unknown slots or unresolvable refs
-    /// (slot refs are resolved through resolveDatasetRef — no guessing).
-    /// Gate semantics (Platform 6.0, #784): when_slot/when_slots/when_param
-    /// gate a step; degradation runs along the declared step "inputs" wiring
-    /// only — an unrelated closed gate never flips a parallel branch.
+    ///  outputs: {name: "path"}, preset: "<name>"}. Deterministic: same
+    /// inputs, same plan. Fails (empty Json + typed error) on unknown slots
+    /// or unresolvable refs (slot refs are resolved through resolveDatasetRef
+    /// — no guessing). Gate semantics (Platform 6.0, #784): when_slot/
+    /// when_slots/when_param gate a step; degradation runs along the declared
+    /// step "inputs" wiring only — an unrelated closed gate never flips a
+    /// parallel branch.
     Json::Value instantiateRecipe( const std::string &recipeId, const Json::Value &bindings,
                                    HarnessError &error ) const;
 
     /// Structural validation of the Platform 6.0 decisionable-knowledge
     /// metadata (capabilities, applicability, presets, limitations,
-    /// expected_artifacts, quality_gates). All fields optional; present
-    /// fields are shape- and budget-checked. Empty returned vector = valid.
+    /// expected_artifacts, quality_gates) plus the Harness 7.0 alias/preset
+    /// internals. All fields optional; present fields are shape- and
+    /// budget-checked. Empty returned vector = valid.
     static std::vector<std::string> validateRecipeMetadata( const Json::Value &recipe );
 
     /// Problems recorded while loading (invalid metadata skipped a document).
@@ -78,8 +94,10 @@ class RecipeCatalog {
 
     std::string mDirectory;
     bool mLoaded = false;
-    Json::Value mRecipes{Json::objectValue}; // recipe_id -> document
+    Json::Value mRecipes{Json::Value( Json::objectValue )}; // recipe_id -> document
+    Json::Value mAliases{Json::Value( Json::objectValue )}; // alias -> canonical id
     std::vector<std::string> mLoadProblems;
 };
 
 } // namespace sicnu::agent::harness
+

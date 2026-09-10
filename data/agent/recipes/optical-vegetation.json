@@ -1,65 +1,75 @@
 {
- "schema_version": "1.0",
- "kind": "harness_recipe",
- "recipe_id": "harness.optical_vegetation",
- "title": "Optical vegetation index map",
- "intent": "ndvi",
- "description": "inspect -> bands -> QA mask -> NDVI -> threshold/class map. Orchestrates existing operators only; no kernels live here. Preflight rule pack 'ndvi' verifies NIR/Red roles, radiometric state, and NoData before execution.",
- "slots": [
-  {
-   "name": "primary",
-   "kind": "raster",
-   "description": "Optical reflectance product with NIR and Red band roles (or wavelengths in the 700-1100nm / 600-700nm windows).",
-   "required": true
+  "schema_version": "1.0",
+  "kind": "harness_recipe",
+  "recipe_id": "harness.optical_vegetation",
+  "title": "Optical vegetation index map",
+  "intent": "ndvi",
+  "description": "inspect -> bands -> QA mask -> NDVI -> threshold/class map. Orchestrates existing operators only; no kernels live here. Preflight rule pack 'ndvi' verifies NIR/Red roles, radiometric state, and NoData before execution.",
+  "slots": [
+    {
+      "name": "primary",
+      "kind": "raster",
+      "description": "Optical reflectance product with NIR and Red band roles (or wavelengths in the 700-1100nm / 600-700nm windows).",
+      "required": true
+    },
+    {
+      "name": "qa",
+      "kind": "raster",
+      "description": "Optional QA/cloud mask raster consumed by rs:qa_mask.",
+      "required": false
+    }
+  ],
+  "steps": [
+    {
+      "id": "mask",
+      "operator_id": "rs:qa_mask",
+      "when_slot": "qa",
+      "params": {
+        "input": "$qa.path",
+        "output": "$outputs.mask"
+      },
+      "verification": "raster"
+    },
+    {
+      "id": "ndvi",
+      "operator_id": "rs:spectral_index",
+      "params": {
+        "input": "$primary.path",
+        "index": "NDVI",
+        "output": "$outputs.ndvi"
+      },
+      "verification": "raster"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "ndvi",
+      "from_step": "ndvi",
+      "port": "output",
+      "kind": "raster"
+    }
+  ],
+  "verification": {
+    "enabled": true
   },
-  {
-   "name": "qa",
-   "kind": "raster",
-   "description": "Optional QA/cloud mask raster consumed by rs:qa_mask.",
-   "required": false
-  }
- ],
- "steps": [
-  {
-   "id": "mask",
-   "operator_id": "rs:qa_mask",
-   "when_slot": "qa",
-   "params": {
-    "input": "$qa.path",
-    "output": "$outputs.mask"
-   },
-   "verification": "raster"
+  "map_output": {
+    "from_step": "ndvi",
+    "renderer_hint": "singleband_pseudocolor"
   },
-  {
-   "id": "ndvi",
-   "operator_id": "rs:spectral_index",
-   "params": {
-    "input": "$primary.path",
-    "index": "NDVI",
-    "output": "$outputs.ndvi"
-   },
-   "verification": "raster"
-  }
- ],
- "outputs": [
-  {
-   "name": "ndvi",
-   "from_step": "ndvi",
-   "port": "output",
-   "kind": "raster"
-  }
- ],
- "verification": {
-  "enabled": true
- },
- "map_output": {
-  "from_step": "ndvi",
-  "renderer_hint": "singleband_pseudocolor"
- },
- "family": "optical-index",
- "modality": "optical",
- "sensors": [
-  "sentinel-2",
-  "landsat-8"
- ]
+  "family": "optical-index",
+  "modality": "optical",
+  "sensors": [
+    "sentinel-2",
+    "landsat-8"
+  ],
+  "capabilities": [
+    "rs:qa_mask",
+    "rs:spectral_index"
+  ],
+  "expected_artifacts": [
+    {
+      "name": "ndvi",
+      "kind": "raster"
+    }
+  ]
 }
