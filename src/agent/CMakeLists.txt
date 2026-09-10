@@ -102,6 +102,8 @@ add_library(sicnu_agent SHARED
   cartography/style_compiler.h
   cartography/style_spec.cpp
   cartography/style_spec.h
+  cartography/typography.cpp
+  cartography/typography.h
   symbology/symbology_tools.cpp
   symbology/symbology_tools.h
   commands/workspace_commands.cpp

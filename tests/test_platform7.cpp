@@ -11,6 +11,7 @@
 
 #include "agent/cartography/composition.h"
 #include "agent/cartography/registry.h"
+#include "agent/cartography/typography.h"
 #include "agent/mapspec/mapspec.h"
 
 #include <QDir>
@@ -319,6 +320,167 @@ TEST_CASE( "P7 templates: shipped catalog still resolves (single-parent legacy)"
   REQUIRE( resolved["facets"]["tasks"].isArray() );
   REQUIRE_FALSE( resolved["facets"]["tasks"].empty() );
   REQUIRE( resolved["inheritance"]["parents"].size() == 1 );
+}
+
+TEST_CASE( "P7 typography: deterministic width model (known answers)",
+           "[platform7][typography]" )
+{
+  using namespace sicnu::agent::cartography;
+  // Width classes: fullwidth 1 em, space 0.35 em, other 0.55 em; 1 pt =
+  // 0.3528 mm. "Hello" = 5 x 0.55 em.
+  REQUIRE( measureLineMm( "Hello", 10.0 ) == Catch::Approx( 5 * 0.55 * 10.0 * 0.3528 ).epsilon( 1e-9 ) );
+  // "地图" = 2 fullwidth em (measured per codepoint, not per UTF-8 byte).
+  REQUIRE( measureLineMm( "\xE5\x9C\xB0\xE5\x9B\xBE", 10.0 ) ==
+           Catch::Approx( 2 * 1.0 * 10.0 * 0.3528 ).epsilon( 1e-9 ) );
+  // Mixed: 2 fullwidth + 1 narrow.
+  REQUIRE( measureLineMm( "\xE5\x9C\xB0\xE5\x9B\xBE" "a", 10.0 ) ==
+           Catch::Approx( ( 2 * 1.0 + 0.55 ) * 10.0 * 0.3528 ).epsilon( 1e-9 ) );
+  // Spaces measure distinctly.
+  REQUIRE( measureLineMm( "a b", 10.0 ) ==
+           Catch::Approx( ( 0.55 + 0.35 + 0.55 ) * 10.0 * 0.3528 ).epsilon( 1e-9 ) );
+  // Invalid UTF-8 degrades deterministically to U+FFFD (0.55 em each).
+  REQUIRE( measureLineMm( "\xFF\xFF", 10.0 ) ==
+           Catch::Approx( 2 * 0.55 * 10.0 * 0.3528 ).epsilon( 1e-9 ) );
+}
+
+TEST_CASE( "P7 typography: greedy word wrap keeps Latin words unbroken",
+           "[platform7][typography]" )
+{
+  using namespace sicnu::agent::cartography;
+  // At 10 pt, one narrow char is 1.9404 mm; make a box of exactly two
+  // "xx "-ish words wide.
+  const double pt = 10.0;
+  const double charMm = 0.55 * pt * 0.3528; // 1.9404
+  const std::string text = "aaaa bbbb cccc";
+  const std::vector<std::string> lines =
+    wrapTextMm( text, 4 * charMm + 0.5, pt ); // "aaaa" + margin fits, "aaaa " doesn't
+  REQUIRE( lines.size() == 3 );
+  REQUIRE( lines[0] == "aaaa" );
+  REQUIRE( lines[1] == "bbbb" );
+  REQUIRE( lines[2] == "cccc" );
+}
+
+TEST_CASE( "P7 typography: CJK wraps between glyphs and honors kinsoku",
+           "[platform7][typography]" )
+{
+  using namespace sicnu::agent::cartography;
+  const double pt = 10.0;
+  const double emMm = 1.0 * pt * 0.3528; // 3.528 mm per fullwidth glyph
+  // 5 glyphs: 地图与分 at a 3-glyph width → breaks between glyphs.
+  const std::string text = "\xE5\x9C\xB0\xE5\x9B\xBE\xE4\xB8\x8E\xE5\x88\x86\xE6\x9E\x90";
+  const std::vector<std::string> lines = wrapTextMm( text, 3 * emMm + 0.01, pt );
+  REQUIRE( lines.size() == 2 );
+  REQUIRE( lines[0].size() == 9 ); // 3 glyphs x 3 UTF-8 bytes
+  // Kinsoku: a line never ends before closing punctuation — "地图，" stays
+  // together even at a 3-glyph width.
+  const std::string punct = "\xE5\x9C\xB0\xE5\x9B\xBE\xEF\xBC\x8C\xE5\x88\x86\xE6\x9E\x90";
+  const std::vector<std::string> kinsoku = wrapTextMm( punct, 3 * emMm + 0.01, pt );
+  REQUIRE( kinsoku.size() >= 2 );
+  for ( const std::string &line : kinsoku )
+  {
+    // No line may END with the comma... actually no line may START with the
+    // comma: "，" must stay attached to the previous glyph.
+    REQUIRE( line.find( "\xEF\xBC\x8C" ) != 0 );
+  }
+}
+
+TEST_CASE( "P7 typography: hard line breaks are honored",
+           "[platform7][typography]" )
+{
+  using namespace sicnu::agent::cartography;
+  const std::vector<std::string> lines = wrapTextMm( "one\ntwo\nthree", 1000.0, 10.0 );
+  REQUIRE( lines.size() == 3 );
+  REQUIRE( lines[0] == "one" );
+  REQUIRE( lines[1] == "two" );
+  REQUIRE( lines[2] == "three" );
+}
+
+TEST_CASE( "P7 typography: shrink_to_fit finds the largest fitting font",
+           "[platform7][typography]" )
+{
+  using namespace sicnu::agent::cartography;
+  TextFitRequest request;
+  request.text = "clipped title example";
+  request.boxWidthMm = 40.0;
+  request.boxHeightMm = 6.0;
+  request.fontPt = 12.0;
+  request.fontPtMin = 6.0;
+  request.policy = "shrink_to_fit";
+
+  const TextFitReport report = fitTextIntoBox( request );
+  REQUIRE( report.fits );
+  REQUIRE( report.fontPolicy == "shrunk" );
+  REQUIRE( report.fontPt < 12.0 );
+  REQUIRE( report.fontPt >= 6.0 );
+  REQUIRE( report.usedWidthMm <= 40.0 + 1e-6 );
+  // Deterministic: identical request, byte-identical report.
+  const Json::Value again = textFitReportToJson( fitTextIntoBox( request ) );
+  REQUIRE( textFitReportToJson( report ).toStyledString() == again.toStyledString() );
+}
+
+TEST_CASE( "P7 typography: ellipsis policy truncates without silent drops",
+           "[platform7][typography]" )
+{
+  using namespace sicnu::agent::cartography;
+  TextFitRequest request;
+  request.text = "a very long map title that will not fit";
+  request.boxWidthMm = 20.0;
+  request.boxHeightMm = 4.0;
+  request.fontPt = 10.0;
+  request.policy = "ellipsis";
+
+  const TextFitReport report = fitTextIntoBox( request );
+  REQUIRE( report.truncated );
+  REQUIRE_FALSE( report.lines.empty() );
+  // The last line ends with the ellipsis (U+2026, UTF-8 e2 80 a6) — or the
+  // box is degenerate, in which case the diagnostic says so.
+  const std::string &last = report.lines.back();
+  const bool endsWithEllipsis = last.size() >= 3 &&
+                                last.compare( last.size() - 3, 3, "\xE2\x80\xA6" ) == 0;
+  if ( !endsWithEllipsis )
+  {
+    REQUIRE( report.diagnostics.size() == 1 );
+    REQUIRE( report.diagnostics[0].find( "ellipsis marker" ) != std::string::npos );
+  }
+  REQUIRE( report.usedWidthMm <= 20.0 + 1e-6 );
+}
+
+TEST_CASE( "P7 typography: overflow_report never hides overflow",
+           "[platform7][typography]" )
+{
+  using namespace sicnu::agent::cartography;
+  TextFitRequest request;
+  request.text = "\xE5\x9C\xB0\xE5\x9B\xBE\xE6\xA0\x87\xE6\xB3\xA8\xE6\xB5\x8B\xE8\xAF\x95";
+  request.boxWidthMm = 10.0;
+  request.boxHeightMm = 3.0;
+  request.fontPt = 10.0;
+  request.policy = "overflow_report";
+
+  const TextFitReport report = fitTextIntoBox( request );
+  REQUIRE_FALSE( report.fits );
+  REQUIRE( report.overflowWidthMm > 0.0 );
+  REQUIRE( report.truncated == false ); // nothing hidden
+  REQUIRE_FALSE( report.diagnostics.empty() );
+  REQUIRE( report.diagnostics[0].find( "nothing is hidden" ) != std::string::npos );
+}
+
+TEST_CASE( "P7 typography: fit report JSON projection is complete",
+           "[platform7][typography]" )
+{
+  using namespace sicnu::agent::cartography;
+  TextFitRequest request;
+  request.text = "title";
+  request.boxWidthMm = 50.0;
+  request.boxHeightMm = 5.0;
+  request.fontPt = 9.0;
+  request.policy = "overflow_report";
+  const Json::Value json = textFitReportToJson( fitTextIntoBox( request ) );
+  for ( const char *key : { "fits", "font_pt", "font_policy", "used_width_mm",
+                            "used_height_mm", "overflow_width_mm", "overflow_height_mm",
+                            "truncated", "policy", "lines", "diagnostics" } )
+    REQUIRE( json.isMember( key ) );
+  REQUIRE( json["lines"].size() == 1 );
+  REQUIRE( json["lines"][0].asString() == "title" );
 }
 
 TEST_CASE( "P7 solver: soft failure downgrades the objective, never convergence",
