@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <utility>
 
 namespace sicnu::jobs {
@@ -122,13 +123,20 @@ void JobEngine::shutdown()
         qId = m_exclusiveQueue.front();
         m_exclusiveQueue.pop_front();
       }
-      else
+      else if ( !m_queueBuckets.empty() )
       {
         auto bucket = m_queueBuckets.begin();
         qId = bucket->second.front();
         bucket->second.pop_front();
         if ( bucket->second.empty() )
           m_queueBuckets.erase( bucket );
+      }
+      else
+      {
+        // m_queuedCount desynced from the buckets (cannot happen — every
+        // mutation site is symmetric); stop instead of dereferencing end().
+        m_queuedCount = 0;
+        break;
       }
       m_queuedCount -= 1;
       auto it = m_jobs.find( qId );
@@ -676,17 +684,25 @@ std::optional<std::string> JobEngine::tryPickJobLocked()
     if ( m_running > 0 )
       return std::nullopt; // drain before exclusive
 
-    const std::string id = m_exclusiveQueue.front();
-    m_exclusiveQueue.pop_front();
-    m_queuedCount -= 1;
-    auto jit = m_jobs.find( id );
-    if ( jit == m_jobs.end() || jit->second.state != JobState::Queued )
-      return std::nullopt; // unreachable: cancel removes queued ids; defensive
-    jit->second.state = JobState::Running;
-    jit->second.startedAtMs = nowUnixMs();
-    m_running += 1;
-    m_exclusiveRunning = true;
-    return id;
+    // Reviewed P3 hardening: a stale entry (unreachable today — cancel
+    // mutates record+buckets in one critical section) is DROPPED and the
+    // scan continues instead of stalling the exclusive queue behind a
+    // zombie head.
+    while ( !m_exclusiveQueue.empty() )
+    {
+      const std::string id = m_exclusiveQueue.front();
+      m_exclusiveQueue.pop_front();
+      m_queuedCount -= 1;
+      auto jit = m_jobs.find( id );
+      if ( jit == m_jobs.end() || jit->second.state != JobState::Queued )
+        continue;
+      jit->second.state = JobState::Running;
+      jit->second.startedAtMs = nowUnixMs();
+      m_running += 1;
+      m_exclusiveRunning = true;
+      return id;
+    }
+    // The queue held only stale ids: fall through to the non-exclusive scan.
   }
 
   if ( m_running >= m_maxWorkers + m_transientAllowance )
@@ -697,27 +713,29 @@ std::optional<std::string> JobEngine::tryPickJobLocked()
   // this queue. Pick the lowest priority value (High first), FIFO within the
   // same priority, instead of blind front-pop — otherwise a late-submitted
   // High task runs behind everything staged before it. The priority buckets
-  // (8.0) make this O(log P) instead of a full-queue scan per pick.
-  auto bucket = m_queueBuckets.begin();
-  if ( bucket == m_queueBuckets.end() )
-    return std::nullopt;
+  // (8.0) make this O(log P) instead of a full-queue scan per pick. Stale
+  // entries are dropped and the scan advances (reviewed P3 hardening).
+  while ( !m_queueBuckets.empty() )
+  {
+    auto bucket = m_queueBuckets.begin();
+    auto &dq = bucket->second;
+    const std::string id = dq.front();
+    dq.pop_front();
+    if ( dq.empty() )
+      m_queueBuckets.erase( bucket );
+    m_queuedCount -= 1;
 
-  auto &dq = bucket->second;
-  const std::string id = dq.front();
-  dq.pop_front();
-  if ( dq.empty() )
-    m_queueBuckets.erase( bucket );
-  m_queuedCount -= 1;
-
-  auto jit = m_jobs.find( id );
-  if ( jit == m_jobs.end() || jit->second.state != JobState::Queued )
-    return std::nullopt; // unreachable: cancel removes queued ids; defensive
-  jit->second.state = JobState::Running;
-  jit->second.startedAtMs = nowUnixMs();
-  m_running += 1;
-  if ( jit->second.request.exclusive )
-    m_exclusiveRunning = true;
-  return id;
+    auto jit = m_jobs.find( id );
+    if ( jit == m_jobs.end() || jit->second.state != JobState::Queued )
+      continue;
+    jit->second.state = JobState::Running;
+    jit->second.startedAtMs = nowUnixMs();
+    m_running += 1;
+    if ( jit->second.request.exclusive )
+      m_exclusiveRunning = true;
+    return id;
+  }
+  return std::nullopt;
 }
 
 void JobEngine::appendLog( JobRecord &rec, JobLogLevel level, const std::string &text )

@@ -368,10 +368,11 @@ void TaskCenter::resetResourceProfileLimits()
     m_resourceMonitor = ResourceMonitor{}; // restore default watermark + sampler (ADR 0063)
     // Execution Plane 7.0: restore the multi-dimension gates to their
     // defaults (0 = off) and drop per-task dims so a test reset returns to
-    // the master scheduling behavior.
+    // the master scheduling behavior. Reviewed P2 fix: the purge keeps
+    // ACTIVE tasks' entries (their dims are charged into the active sums).
     m_budget2 = TaskResourceBudget2{};
     m_ioHeavyLimit = 0;
-    m_admissionDimsCache.clear();
+    purgeAdmissionCachesForIdleTasksLocked();
     {
         bool ok = false;
         const int envRetries = qEnvironmentVariableIntValue( "SICNU_TASK_MAX_AUTO_RETRIES", &ok );
@@ -588,9 +589,13 @@ void TaskCenter::setEstimateResolver( TaskEstimateResolver resolver )
     else
         installDefaultEstimateResolver();
     // A different resolver may produce different estimates: drop the per-task
-    // cache so subsequent passes re-resolve (#702).
-    m_estimateMbCache.clear();
-    m_admissionDimsCache.clear();
+    // cache so subsequent passes re-resolve (#702). Reviewed P2 fix: entries
+    // of ACTIVE tasks are KEPT — the active-set sums were charged with the
+    // values these caches produce, and re-resolving a leaving task under a
+    // new resolver would subtract a different value (unsigned underflow ->
+    // admission wedged until restart). Active tasks keep their charged
+    // identity; only idle entries re-resolve.
+    purgeAdmissionCachesForIdleTasksLocked();
 }
 
 unsigned int TaskCenter::resolveEstimateMb( const std::string &algorithmId ) const
@@ -980,6 +985,15 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
 {
     if ( m_isShuttingDown.load() )
         return -1; // no new work after shutdown (#684)
+    sicnu::data::DataManager *catalogForWarm = nullptr;
+    // 8.0 WP-F (review P1 fix): the remote-identity probe is network I/O —
+    // perform it HERE, lock-free on the submitting thread, so the collector's
+    // resolver consult under m_mutex resolves from the warm session cache.
+    {
+        QMutexLocker catalogLocker( &m_mutex );
+        catalogForWarm = m_catalog;
+    }
+    sicnu::temporal::warmExecutionIdentityCache( catalogForWarm, params );
     long id = -1;
     {
         QMutexLocker locker( &m_mutex );
@@ -1134,6 +1148,11 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
             it->jobExecutor = std::move( executor );
             it->jobCancelHook = std::move( onCancel );
             it->autoDispatch = true;
+            // Reviewed P1 fix: arming flips the task OUT of the legacy
+            // manual-placeholder list (enqueue registered it there because
+            // autoDispatch was still false) — a stale entry would be fed to
+            // the legacy per-pass placeholder loop forever.
+            m_manualQueued.removeOne( taskId );
             // 8.0 WP-A: the task just became a launch candidate.
             pushReadyCandidateLocked( taskId );
             processNextQueuedTasks();
@@ -1405,6 +1424,33 @@ void TaskCenter::forgetDerivedTaskStateLocked( long taskId )
     m_manualQueued.removeAll( taskId );
 }
 
+/// Reviewed P2 fix: drops estimate/dims cache entries ONLY for tasks that
+/// are not in the active set. The active-set sums were charged from these
+/// caches at enter time; re-resolving an active task's values (leave
+/// transition) under a swapped resolver would subtract a different amount
+/// and wrap the unsigned admission sums. m_mutex held.
+void TaskCenter::purgeAdmissionCachesForIdleTasksLocked()
+{
+    auto isIdle = [this]( long taskId ) {
+        const auto it = m_tasks.constFind( taskId );
+        return it == m_tasks.constEnd() || !isActiveStatus( it->status );
+    };
+    for ( auto it = m_estimateMbCache.begin(); it != m_estimateMbCache.end(); )
+    {
+        if ( isIdle( it.key() ) )
+            it = m_estimateMbCache.erase( it );
+        else
+            ++it;
+    }
+    for ( auto it = m_admissionDimsCache.begin(); it != m_admissionDimsCache.end(); )
+    {
+        if ( isIdle( it.key() ) )
+            it = m_admissionDimsCache.erase( it );
+        else
+            ++it;
+    }
+}
+
 void TaskCenter::registerParentLinksLocked( const AlgorithmTaskInfo &task )
 {
     int incomplete = 0;
@@ -1647,6 +1693,11 @@ void TaskCenter::processNextQueuedTasks()
         // safe on worker threads, no catalog access.
         verifyDispatchFingerprintLocked( entry.taskId );
 
+        // 8.0 WP-A (regression fix): the isolated flag MUST be set BEFORE the
+        // status transition — the enter-transition charges m_active.isolated
+        // from task.isolatedRoute, and charging late would underflow the
+        // counter at the leave transition (blocking every later routed task).
+        task.isolatedRoute = isolateRoute;
         setTaskStatusLocked( task, TaskStatus::Dispatching );
         task.logBuffer.append(
           QString( QStringLiteral( "[%1] Dispatching to JobEngine (profile=%2)." ) )
@@ -1656,6 +1707,7 @@ void TaskCenter::processNextQueuedTasks()
 
         PendingLaunch launch;
         launch.taskId = entry.taskId;
+        launch.algorithmId = task.algorithmId;
         launch.request.algorithmId = task.algorithmId.toStdString();
         launch.request.title = task.algorithmName.toStdString();
         launch.request.source = task.source.isEmpty()
@@ -1684,11 +1736,11 @@ void TaskCenter::processNextQueuedTasks()
             if ( isolateRoute )
             {
                 // The pool itself is started outside m_mutex at flush time;
-                // staging only records the route.
+                // staging only records the route (already reflected in
+                // task.isolatedRoute above for the admission accounting).
                 launch.executor = processing::makeIsolatedWorkerExecutor( task.algorithmId );
                 launch.hasExecutor = true;
                 launch.isolated = true;
-                task.isolatedRoute = true;
                 task.logBuffer.append(
                     QStringLiteral( "[%1] Routed to an isolated worker process." )
                         .arg( QDateTime::currentDateTimeUtc().toString( QStringLiteral( "hh:mm:ss" ) ) ) );
@@ -1855,14 +1907,11 @@ void TaskCenter::flushPendingLaunches()
             if ( serveFromExecutionCache( launch.taskId, fp ) )
             {
                 ExecutionTelemetry::instance().increment( Counter::CacheHits );
-                traceTaskEvent( "cache", "hit", launch.taskId, m_tasks[launch.taskId].algorithmId );
+                traceTaskEvent( "cache", "hit", launch.taskId, launch.algorithmId );
                 continue;
             }
             ExecutionTelemetry::instance().increment( Counter::CacheMisses );
-            traceTaskEvent( "cache", "miss", launch.taskId,
-                            m_tasks.contains( launch.taskId )
-                                ? m_tasks[launch.taskId].algorithmId
-                                : QString() );
+            traceTaskEvent( "cache", "miss", launch.taskId, launch.algorithmId );
         }
         if ( fp.isValid() )
         {
@@ -2714,6 +2763,21 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
     sicnu::processing::FusedChainPlan fusedPlan;
     if ( fusedChainsEnabled )
         fusedPlan = sicnu::processing::planFusedChain( def );
+
+    sicnu::data::DataManager *catalogForWarm = nullptr;
+    // 8.0 WP-F (review P1 fix): warm the remote-identity session cache for
+    // every step's params BEFORE the mutex section (network I/O must never
+    // run under the scheduler lock).
+    {
+        QMutexLocker catalogLocker( &m_mutex );
+        catalogForWarm = m_catalog;
+    }
+    if ( catalogForWarm )
+    {
+        for ( const auto &step : def.steps )
+            sicnu::temporal::warmExecutionIdentityCache(
+                catalogForWarm, sicnu::processing::jsonParamsToVariantMap( step.params ) );
+    }
 
     long pipelineId = -1;
     {

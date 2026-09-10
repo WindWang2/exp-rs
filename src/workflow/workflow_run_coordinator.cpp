@@ -460,6 +460,16 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     if ( info.pipelineId < 0 || info.stepId.isEmpty() )
         return;
 
+    // Reviewed P3: the identity work below (digest hashing + operator
+    // schema hashing) is only consumed by a TRACKED run. Untracked
+    // pipelines (GUI single tasks, untracked submissions) were folded,
+    // discarded and re-paid the hashing cost on every completion.
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        if ( m_runsByPipeline.find( info.pipelineId ) == m_runsByPipeline.end() )
+            return;
+    }
+
     // Hash OUTSIDE the fold lock (review P1): the digest may read up to the
     // verification budget, and this fold runs under m_mutex.
     std::optional<CompletionIdentity> completionIdentity;
@@ -767,7 +777,6 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
         // Phase J (W2): a mere existence check once served a truncated
         // crash-era intermediate to downstream steps. Require a real,
         // non-empty file — a rewrite mid-crash fails this and is re-executed.
-        bool rehydrated = false;
         QFileInfo outputInfo( QString::fromStdString( plan.outputLayerPath ) );
         if ( !outputInfo.isFile() || outputInfo.size() <= 0 )
         {
@@ -783,7 +792,6 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
             }
             traceResumeEvent( *run, "resume", "rehydrated", plan.stepId,
                               plan.operatorId, plan.outputDigest );
-            rehydrated = true;
             outputInfo = QFileInfo( QString::fromStdString( plan.outputLayerPath ) );
             if ( !outputInfo.isFile() || outputInfo.size() <= 0 )
                 continue;
@@ -800,7 +808,6 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
                 run->updateStepPlan( *persisted );
             }
         }
-        Q_UNUSED( rehydrated );
         // Completion identity gate (issue #750): the checkpoint must prove
         // the bytes at the recorded path are the ones the step completed
         // with. Stat identity (size + mtime) is checked when recorded; the
@@ -958,6 +965,12 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
                         plan->outputSizeBytes = fresh.outputSizeBytes;
                         plan->outputMtimeMs = fresh.outputMtimeMs;
                         plan->outputDigest = fresh.outputDigest;
+                        // Reviewed P2 fix: the implementation identity must
+                        // follow the output through the swap — a stale stamp
+                        // here would re-execute a provably-valid step on the
+                        // next resume (and worse, record new-implementation
+                        // bytes under the old implementation's stamp).
+                        plan->operatorImplStamp = fresh.operatorImplStamp;
                         if ( !plan->outputLayerPath.empty() )
                             run->setArtifact( fresh.stepId, plan->outputLayerPath );
                     }

@@ -8,20 +8,25 @@
 // operator that spawns helper processes of its own leaves those behind even
 // when the worker itself exits.
 //
-// The guard binds each worker to a kill-on-close OS construct so the whole
-// tree dies with the host:
+// Containment is PLATFORM-DIFFERENTIATED — the two halves make different
+// guarantees, stated precisely:
 //   - POSIX: the child calls setsid(2) at spawn (QProcess CreateNewSession;
 //     Qt >= 6.7, the project's floor is 6.8), making it a session AND process
-//     group leader (pgid == pid). Escalation/teardown signal the whole group
-//     (kill -pid), so operator-spawned grandchildren are covered. The
-//     pre-6.7 fallback is setpgid(0,0) via the child process modifier.
+//     group leader (pgid == pid). Escalation/teardown signal the WHOLE GROUP
+//     (kill -pid), so operator-spawned grandchildren are covered. This is
+//     teardown/escalation-time containment ONLY: setsid deliberately
+//     detaches the child from the host's session, so a host that dies
+//     without running teardown (SIGKILL/crash) does NOT take the tree with
+//     it — the stdin-EOF contract remains the host-death path there.
 //   - Windows: the child is assigned to a Job Object with
 //     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE right after start. Closing the
 //     handle — at teardown, or whenever the host process dies for any
-//     reason — makes the kernel terminate the whole tree. Assignment happens
-//     just after CreateProcess (QProcess starts the child synchronously on
-//     Windows); a child spawning helpers within that first millisecond would
-//     predate the assignment — accepted, documented window.
+//     reason — makes the kernel terminate the whole tree: on Windows the
+//     host-death guarantee is real. The assignment happens after
+//     start()+waitForStarted(); a worker spawning helpers inside that
+//     start->arm window escapes the job (documented residual window —
+//     QProcess exposes no post-CreateProcess hook to close it without
+//     thread-enumeration resume tricks).
 //
 // The guard is an executor-side helper. It is NOT a scheduler, adds no wire
 // traffic, and changes no worker behavior.

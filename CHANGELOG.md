@@ -2,6 +2,48 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-11
+
+### Execution Plane / Worker Runtime / Admission / Cache & Recovery 8.0
+- **Admission scaling (cliff removed)**: TaskCenter admission now maintains
+  incremental active-set counters through a single status-transition seam and
+  orders launch candidates in an indexed ready heap (lazy serial
+  invalidation, bounded per-pass scan, FIFO rotation for gate-held
+  candidates) instead of rescanning and re-sorting the whole task map on
+  every submit/transition; placeholder substitution and dispatch-fingerprint
+  verification run once at staging. JobEngine's queue became priority
+  buckets + an exclusive FIFO (pick O(log P) instead of full-deque scans).
+  The 10k short-job drain drops from the recorded 83.3 s Debug baseline to
+  seconds on this host, with launch order, never-starve and exclusive
+  drain-then-alone semantics preserved.
+- **Dynamic resource availability**: every resource-limit setter re-runs
+  admission, so raised limits admit held work immediately (gates only ever
+  delay launches).
+- **Worker containment & liveness**: workers are bound to OS-level tree
+  containment — POSIX session/process group with group-wide
+  SIGTERM->SIGKILL ladders (a SIGTERM-immune helper is reaped; e2e tested),
+  Windows kill-on-close Job Object assigned right after start. Workers emit
+  optional heartbeat frames (15 s while a job runs, wire-compatible); hosts
+  may enable a hang window (`SICNU_WORKER_HANG_TIMEOUT_MS`, default off).
+- **Retry evidence**: the transient-failure classifier is a documented
+  public seam; retry attempt/class and budget exhaustion are recorded in the
+  task log and the unified trace.
+- **Resume identity 3.0**: completed steps stamp their operator's
+  implementation identity (schema + determinism grade + contract + platform)
+  into the checkpoint (additive optional field); resume re-executes when the
+  current identity differs or cannot be proven (fail-closed). A moved output
+  whose checkpoint records a content digest is re-hydrated from the
+  content-addressed pool only after the restored bytes re-prove the digest.
+- **Remote identity in the execution fingerprint**: remote http(s) inputs
+  resolve through a strong-ETag-only identity resolver (bounded session
+  cache, TTL, no network under any lock — warmed before the scheduler lock),
+  installed by TaskCenter unless a host wired its own; the token rides the
+  canonical fingerprint as an additive optional field. Weak/inconclusive
+  verdicts stay uncacheable.
+- **Observability**: bounded trace events for admitted/held/retry/cancel/
+  terminal/cache and resume served/rehydrated/operator_changed transitions
+  (one relaxed atomic load when tracing is off).
+
 ## [Unreleased] - 2026-09-08
 
 ### Cartography Knowledge, Template & Recipe Platform 6.0 (goal series, ADR 0135)

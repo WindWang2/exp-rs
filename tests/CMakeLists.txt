@@ -1913,6 +1913,9 @@ target_compile_definitions(test_execution_plane_7 PRIVATE
 # identity. RUN_SERIAL: stress cases share the TaskCenter/JobEngine
 # singletons and measure wall-clock scaling.
 sicnu_add_test(test_execution_plane_8 TIMEOUT 1200 RUN_SERIAL TRUE)
+target_compile_definitions(test_execution_plane_8 PRIVATE
+    SICNU_WORKER_EXE="$<TARGET_FILE:sicnu_worker>"
+)
 
 # Phase I persistent workspace catalog.
 sicnu_add_test(test_workspace_catalog TIMEOUT 300)

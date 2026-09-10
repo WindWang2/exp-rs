@@ -126,7 +126,15 @@ bool WorkerProcessGuard::terminateTree( QProcess &process, int graceWaitMs, int 
         ::kill( static_cast<pid_t>( -pid ), SIGTERM );
         ::kill( static_cast<pid_t>( pid ), SIGTERM );
         if ( process.waitForFinished( graceWaitMs ) )
+        {
+            // Reviewed P2 fix: even when the LEADER exited cleanly, a helper
+            // that ignored/deferred SIGTERM may still be alive in the group.
+            // The reaped leader's pgid remains valid until this call (pid
+            // recycling within this window is the accepted, documented
+            // residual risk), so clear the group before declaring success.
+            ::kill( static_cast<pid_t>( -pid ), SIGKILL );
             return true;
+        }
         ::kill( static_cast<pid_t>( -pid ), SIGKILL );
         ::kill( static_cast<pid_t>( pid ), SIGKILL );
         return process.waitForFinished( killWaitMs );

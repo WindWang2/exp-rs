@@ -117,6 +117,7 @@ Json::Value runInLocalWorker( const QString &workerProgram,
             // worker before it ever reads the cancel frame, defeating the
             // cooperative ack and diagnostics the protocol promises).
             guard.terminateTree( process );
+            diagnostics.drain( process );
             if ( report )
                 report->stderrTail = diagnostics.tail();
             throw std::runtime_error( "worker cancelled" );

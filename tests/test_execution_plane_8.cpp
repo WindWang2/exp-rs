@@ -28,6 +28,7 @@
 #include "data/artifact_object_pool.h"
 #include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run_coordinator.h"
+#include "processing/framework/local_worker_host.h"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -43,6 +44,16 @@
 #include <thread>
 #include <unordered_set>
 #include <vector>
+
+#ifndef SICNU_WORKER_EXE
+#define SICNU_WORKER_EXE "sicnu_worker"
+#endif
+
+#ifdef Q_OS_UNIX
+#include <errno.h>
+#include <signal.h>
+#include <sys/types.h>
+#endif
 
 using sicnu::TaskCenter;
 using namespace sicnu::workflow;
@@ -60,7 +71,7 @@ void ensureApp()
     new QCoreApplication( argc, argv );
 }
 
-void waitForTerminalStatus( long taskId, int attempts = 600, int sleepMs = 5 )
+void waitForTerminalStatus( long taskId, int attempts = 1200, int sleepMs = 5 )
 {
     for ( int i = 0; i < attempts; ++i )
     {
@@ -70,7 +81,7 @@ void waitForTerminalStatus( long taskId, int attempts = 600, int sleepMs = 5 )
     }
 }
 
-bool waitForCondition( const std::function<bool()> &predicate, int attempts = 600, int sleepMs = 5 )
+bool waitForCondition( const std::function<bool()> &predicate, int attempts = 1200, int sleepMs = 5 )
 {
     for ( int i = 0; i < attempts; ++i )
     {
@@ -91,6 +102,10 @@ sicnu::jobs::JobRequest ep8Request( const char *algorithmId )
 
 /// Test executor registry id + registration helper.
 constexpr const char *kStubAlgo = "ep8:stub";
+
+/// The engine clamps pool sizes to JobEngine::kMinWorkers (2) — the smallest
+/// deterministic pool this suite can request.
+constexpr int kMinWorkersForTest = 2;
 
 struct StartOrderRecorder
 {
@@ -185,7 +200,7 @@ TEST_CASE( "Priority order holds through the ready heap under a single slot",
     REQUIRE( order[3] == 1 );
 
     engine.clearExecutors();
-    center.setGlobalConcurrencyLimit( 0 );
+    center.resetResourceProfileLimits(); // restores the global limit too
     center.clearCompletedTasks();
     engine.shutdownForTests();
 }
@@ -223,15 +238,18 @@ TEST_CASE( "Cancelling an admission-held task leaves no stranded work",
 
     // Two candidates queue on the single slot; cancel the FIRST one while
     // it sits in the ready heap (its heap entry must be lazily invalidated —
-    // a stale launch would run a canceled job).
+    // a stale launch would run a canceled job). With the slot busy, the
+    // heap HEAD (the first candidate) surfaces as WaitingResource via the
+    // global-hold parity flip; the deeper candidate stays Queued (truthful:
+    // a bounded pass never examined it).
     const long canceled = center.submitJob( ep8Request( "ep8:canceled" ) );
     const long survivor = center.submitJob( ep8Request( "ep8:survivor" ) );
     REQUIRE( canceled > 0 );
     REQUIRE( survivor > 0 );
     REQUIRE( waitForCondition( [&] {
-        return center.getTaskInfo( survivor ).status == sicnu::TaskStatus::WaitingResource
-               || center.getTaskInfo( survivor ).status == sicnu::TaskStatus::Dispatching;
+        return center.getTaskInfo( canceled ).status == sicnu::TaskStatus::WaitingResource;
     } ) );
+    CHECK( sicnu::isTerminalStatus( center.getTaskInfo( survivor ).status ) == false );
 
     REQUIRE( center.cancelTask( canceled ) );
     REQUIRE( center.getTaskInfo( canceled ).status == sicnu::TaskStatus::Canceled );
@@ -245,7 +263,7 @@ TEST_CASE( "Cancelling an admission-held task leaves no stranded work",
     CHECK( center.getTaskInfo( survivor ).status == sicnu::TaskStatus::Completed );
 
     engine.clearExecutors();
-    center.setGlobalConcurrencyLimit( 0 );
+    center.resetResourceProfileLimits(); // restores the global limit too
     center.clearCompletedTasks();
     engine.shutdownForTests();
 }
@@ -282,9 +300,10 @@ TEST_CASE( "DAG chains drain in dependency order through parent promotion",
 
     // Chain of 4: root parks until released; each child must not launch
     // before its parent completes.
+    // The root's request carries no "i" param: the executor records 0 and
+    // parks (that is the park key below).
     long previous = center.submitJob( ep8Request( "ep8:root" ) );
     REQUIRE( previous > 0 );
-    center.getTaskInfo( previous ); // root uses params {"i": "0"}
     QList<long> parents{ previous };
     for ( int i = 1; i < 4; ++i )
     {
@@ -312,7 +331,7 @@ TEST_CASE( "DAG chains drain in dependency order through parent promotion",
     }
 
     engine.clearExecutors();
-    center.setGlobalConcurrencyLimit( 0 );
+    center.resetResourceProfileLimits(); // restores the global limit too
     center.clearCompletedTasks();
     engine.shutdownForTests();
 }
@@ -353,6 +372,55 @@ TEST_CASE( "Transient auto-retry re-enters admission through the ready heap",
     engine.shutdownForTests();
 }
 
+TEST_CASE( "Exhausted retry budget records evidence and fails permanently",
+           "[ep8][retry][evidence]" )
+{
+    ensureApp();
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    auto &center = TaskCenter::instance();
+    center.resetResourceProfileLimits();
+    center.setMaxAutoRetries( 1 );
+
+    engine.clearExecutors();
+    static std::atomic<int> runs{ 0 };
+    runs.store( 0 );
+    engine.registerExecutor( "ep8:", []( const sicnu::jobs::JobRequest &,
+                                         sicnu::operators::RSOperatorContext & )
+                                 -> Json::Value {
+        // Transient-class failure EVERY time: attempt 1 → auto-retry →
+        // attempt 2 → budget exhausted → permanent Failed.
+        ++runs;
+        throw std::runtime_error( "worker crashed: always transient" );
+    } );
+
+    const long task = center.submitJob( ep8Request( "ep8:always-flaky" ) );
+    REQUIRE( task > 0 );
+    waitForTerminalStatus( task );
+
+    const auto info = center.getTaskInfo( task );
+    CHECK( info.status == sicnu::TaskStatus::Failed );
+    CHECK( info.autoRetryAttempts == 1 );
+    CHECK( runs.load() == 2 );
+    // WP-D evidence: the record must say WHY the task was retried and why it
+    // stopped being retried.
+    bool sawRetry = false;
+    bool sawExhausted = false;
+    for ( const QString &line : info.logBuffer )
+    {
+        if ( line.contains( QStringLiteral( "auto-retry 1/1" ) ) )
+            sawRetry = true;
+        if ( line.contains( QStringLiteral( "Auto-retry budget exhausted" ) ) )
+            sawExhausted = true;
+    }
+    CHECK( sawRetry );
+    CHECK( sawExhausted );
+
+    engine.clearExecutors();
+    center.clearCompletedTasks();
+    engine.shutdownForTests();
+}
+
 TEST_CASE( "JobEngine bucketed queue: priority pick and exclusive drain order",
            "[ep8][engine][queue]" )
 {
@@ -360,7 +428,10 @@ TEST_CASE( "JobEngine bucketed queue: priority pick and exclusive drain order",
     auto &engine = sicnu::jobs::JobEngine::instance();
     engine.shutdownForTests();
     const int defaultWorkers = engine.maxWorkers();
-    engine.setMaxWorkers( 1 ); // serialize picks so order is directly observable
+    // The engine clamps pool sizes to kMinWorkers (= 2), so the smallest
+    // observable pool is two workers: BOTH are kept busy by park jobs, which
+    // makes every subsequent pick deterministic.
+    engine.setMaxWorkers( kMinWorkersForTest );
 
     engine.clearExecutors();
     static StartOrderRecorder recorder;
@@ -379,31 +450,37 @@ TEST_CASE( "JobEngine bucketed queue: priority pick and exclusive drain order",
         return Json::Value();
     } );
 
-    // The first job parks and occupies the only worker; the next five queue.
-    sicnu::jobs::JobRequest park = ep8Request( "ep8:park" );
-    park.params["i"] = 0;
-    park.params["park"] = true;
-    const std::string parkId = engine.submit( park );
+    // Two park jobs occupy the whole pool; the test continues only when BOTH
+    // are running (their executors recorded the starts).
+    sicnu::jobs::JobRequest parkA = ep8Request( "ep8:parkA" );
+    parkA.params["i"] = 0;
+    parkA.params["park"] = true;
+    const std::string parkAId = engine.submit( parkA );
+    sicnu::jobs::JobRequest parkB = ep8Request( "ep8:parkB" );
+    parkB.params["i"] = 6;
+    parkB.params["park"] = true;
+    const std::string parkBId = engine.submit( parkB );
+    REQUIRE( waitForCondition( [&] { return recorder.snapshot().size() == 2; } ) );
 
     sicnu::jobs::JobRequest lowA = ep8Request( "ep8:lowA" );
     lowA.priority = 2;
     lowA.params["i"] = 1;
-    engine.submit( lowA );
+    const std::string lowAId = engine.submit( lowA );
 
     sicnu::jobs::JobRequest normalB = ep8Request( "ep8:normalB" );
     normalB.priority = 1;
     normalB.params["i"] = 2;
-    engine.submit( normalB );
+    const std::string normalBId = engine.submit( normalB );
 
     sicnu::jobs::JobRequest highC = ep8Request( "ep8:highC" );
     highC.priority = 0;
     highC.params["i"] = 3;
-    engine.submit( highC );
+    const std::string highCId = engine.submit( highC );
 
     sicnu::jobs::JobRequest lowD = ep8Request( "ep8:lowD" );
     lowD.priority = 2;
     lowD.params["i"] = 4;
-    engine.submit( lowD );
+    const std::string lowDId = engine.submit( lowD );
 
     // An exclusive job queued while non-exclusive work is in flight follows
     // the drain-then-exclusive contract: it must not start until in-flight
@@ -414,19 +491,45 @@ TEST_CASE( "JobEngine bucketed queue: priority pick and exclusive drain order",
     exclusive.params["i"] = 5;
     const std::string exclusiveId = engine.submit( exclusive );
 
-    // Launch order once the park releases: 0 (park), then 5 (exclusive —
-    // pool idle: it runs alone), then HIGH(3), NORMAL(2), LOW(1), LOW(4).
+    // Launch order once the parks release: both parks drain, then the
+    // exclusive runs ALONE on the idle pool, then HIGH(3), NORMAL(2),
+    // LOW(1), LOW(4) in strict priority order.
     releaseGate.store( true );
+    // Wait for EVERY job (the exclusive finishing only unblocks the queued
+    // non-exclusive work — snapshotting earlier races the scheduler).
     REQUIRE( engine.waitForJob( exclusiveId, 60000 ) );
+    REQUIRE( engine.waitForJob( parkAId, 60000 ) );
+    REQUIRE( engine.waitForJob( parkBId, 60000 ) );
+    REQUIRE( engine.waitForJob( highCId, 60000 ) );
+    REQUIRE( engine.waitForJob( normalBId, 60000 ) );
+    REQUIRE( engine.waitForJob( lowAId, 60000 ) );
+    REQUIRE( engine.waitForJob( lowDId, 60000 ) );
 
     const auto order = recorder.snapshot();
-    REQUIRE( order.size() == 6 );
-    REQUIRE( order[0] == 0 );
-    REQUIRE( order[1] == 5 ); // exclusive ran alone right after the drain
-    REQUIRE( order[2] == 3 ); // high
-    REQUIRE( order[3] == 2 ); // normal
-    REQUIRE( order[4] == 1 ); // low (first)
-    REQUIRE( order[5] == 4 ); // low (second)
+    {
+        std::string dump;
+        for ( int v : order )
+            dump += std::to_string( v ) + ",";
+        INFO( "order: " << dump );
+    }
+    REQUIRE( order.size() == 7 );
+    // The two parks started first (either order).
+    REQUIRE( ( ( order[0] == 0 && order[1] == 6 )
+               || ( order[0] == 6 && order[1] == 0 ) ) );
+    REQUIRE( order[2] == 5 ); // exclusive ran alone right after the drain
+    // PICK order is strictly priority-serial (3, 2, 1, 4); with two workers
+    // the STARTS of same-... adjacent picks can land in either order, so
+    // assert the scheduler guarantees: high+normal occupy the next two slots
+    // (either order), and the two lows follow FIFO (pick order is serial).
+    const bool highThenNormal = ( order[3] == 3 && order[4] == 2 );
+    const bool normalThenHigh = ( order[3] == 2 && order[4] == 3 );
+    // Adjacent picks may interleave their starts on the two workers.
+    REQUIRE( ( highThenNormal || normalThenHigh ) );
+    // The two lows occupy the last two slots (either start order — adjacent
+    // picks interleave on two workers; their PICK order is serial).
+    const bool lowThenLow = ( order[5] == 1 && order[6] == 4 )
+                            || ( order[5] == 4 && order[6] == 1 );
+    REQUIRE( lowThenLow );
 
     engine.clearExecutors();
     engine.setMaxWorkers( defaultWorkers );
@@ -466,14 +569,20 @@ TEST_CASE( "Short-job drain scales without the pre-8.0 admission cliff",
         }
         REQUIRE( ids.size() == static_cast<size_t>( n ) );
 
+        // The TIMED window ends at engine idle (submission + drain): an
+        // O(n) allTasks() poll loop inside the window inflated the 10k ratio
+        // with test-side cost. The verification snapshot below is NOT timed.
+        engine.waitUntilIdleForTests( 600000 );
+
         const auto drainDeadline = std::chrono::steady_clock::now()
-                                   + std::chrono::seconds( 600 );
+                                   + std::chrono::seconds( 60 );
         size_t terminal = 0;
+        size_t completed = 0;
         std::unordered_set<long> idSet( ids.begin(), ids.end() );
         do
         {
-            engine.waitUntilIdleForTests( 60000 );
             terminal = 0;
+            completed = 0;
             const QList<sicnu::AlgorithmTaskInfo> snapshot = center.allTasks();
             for ( const auto &t : snapshot )
             {
@@ -481,6 +590,8 @@ TEST_CASE( "Short-job drain scales without the pre-8.0 admission cliff",
                     continue;
                 if ( sicnu::isTerminalStatus( t.status ) )
                     ++terminal;
+                if ( t.status == sicnu::TaskStatus::Completed )
+                    ++completed;
             }
             if ( terminal < ids.size() )
                 std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
@@ -492,22 +603,34 @@ TEST_CASE( "Short-job drain scales without the pre-8.0 admission cliff",
                 std::chrono::steady_clock::now() - start ).count();
         INFO( "drained " << n << " jobs in " << elapsedMs << " ms" );
         REQUIRE( terminal == ids.size() ); // no stranded tasks
+        REQUIRE( completed == ids.size() ); // and none failed/canceled
         center.clearCompletedTasks();
         return elapsedMs;
     };
 
-    const int smallN = 2000;
-    const int largeN = 10000;
-    const qint64 smallMs = drainJobs( smallN );
-    const qint64 largeMs = drainJobs( largeN );
+    // Best-of-3 per size: a transient machine-load spike must not fail the
+    // complexity check (the min sample is the machine's honest capability).
+    qint64 smallMs = 0;
+    qint64 largeMs = 0;
+    for ( int round = 0; round < 3; ++round )
+    {
+        const qint64 ms = drainJobs( 2000 );
+        smallMs = ( round == 0 || ms < smallMs ) ? ms : smallMs;
+    }
+    for ( int round = 0; round < 3; ++round )
+    {
+        const qint64 ms = drainJobs( 10000 );
+        largeMs = ( round == 0 || ms < largeMs ) ? ms : largeMs;
+    }
 
-    INFO( "scaling: " << smallN << "→" << smallMs << " ms, " << largeN << "→"
-                      << largeMs << " ms, ratio=" << ( double( largeMs ) / std::max( qint64( 1 ), smallMs ) ) );
-    // Generous machine-noise margins: the assertion fails on quadratic
-    // behavior, never on linear scaling with a slow machine.
+    INFO( "scaling: 2000→" << smallMs << " ms, 10000→" << largeMs
+                           << " ms, ratio=" << ( double( largeMs ) / std::max( qint64( 1 ), smallMs ) ) );
+    // ALWAYS-ON complexity check (review P2): linear scaling is ~5×; the
+    // removed quadratic admission was >= 25×. The denominator is
+    // floor-clamped so a fast machine cannot silently disable the assertion
+    // (100 ms floor: linear passes comfortably, quadratic cannot).
+    REQUIRE( largeMs < 10 * std::max( qint64( 100 ), smallMs ) );
     REQUIRE( largeMs < 600000 );
-    if ( smallMs > 200 ) // below that the measurement is noise-dominated
-        REQUIRE( largeMs < 15 * smallMs );
 
     engine.clearExecutors();
     center.clearCompletedTasks();
@@ -565,7 +688,7 @@ TEST_CASE( "Raising a resource limit admits held work without a task transition"
     waitForTerminalStatus( held );
 
     engine.clearExecutors();
-    center.setGlobalConcurrencyLimit( 0 );
+    center.resetResourceProfileLimits(); // restores the global limit too
     center.clearCompletedTasks();
     engine.shutdownForTests();
 }
@@ -664,7 +787,7 @@ TEST_CASE( "Resume re-executes a served step only when the operator implementati
         second.params["output"] = ( checkpointDir.path() + "/ep8_resume_second.tif" ).toStdString();
         sicnu::workflow::StepConnection conn;
         conn.fromStepId = "first";
-        conn.toPort = "output";
+        conn.fromPort = "output";
         conn.toPort = "input";
         second.inputs.push_back( conn );
         def.steps.push_back( first );
@@ -829,3 +952,75 @@ TEST_CASE( "TaskCenter installs the remote identity resolver by default and the 
     CHECK( ( *resolver )( QStringLiteral( "/tmp/some/local/file.tif" ) ).isEmpty() );
     CHECK( ( *resolver )( QStringLiteral( "relative/path.tif" ) ).isEmpty() );
 }
+
+// ---------------------------------------------------------------------------
+// WP-C: process-tree containment (POSIX-runnable; Windows logic compiled on
+// Windows lanes only)
+// ---------------------------------------------------------------------------
+
+#ifndef Q_OS_WIN
+TEST_CASE( "Worker cancel escalation reaps SIGTERM-immune helper processes",
+           "[ep8][worker][containment]" )
+{
+    ensureApp();
+    QTemporaryDir workDir;
+    const QString helperPidFile = workDir.path() + "/helper.pid";
+
+    // Runs one "__spawn_helper__" job on a REAL isolated worker. The job
+    // parks ignoring cancellation and the helper ignores SIGTERM — the only
+    // way both can die is the guard's group-wide SIGKILL sweep. (The worker
+    // thread records its outcome; Catch2 assertions stay on the test thread.)
+    std::atomic<bool> cancelRequest{ false };
+    std::string workerOutcome;
+    std::thread runThread( [&] {
+        try
+        {
+            Json::Value helperParams( Json::objectValue );
+            helperParams["helperPidFile"] = helperPidFile.toStdString();
+            ( void )sicnu::processing::runInLocalWorker(
+                QStringLiteral( SICNU_WORKER_EXE ), "__spawn_helper__", helperParams,
+                [&] { return cancelRequest.load(); },
+                std::chrono::minutes( 1 ),           // job timeout
+                std::chrono::milliseconds( 1000 ) ); // cancel grace
+            workerOutcome = "returned-a-result";
+        }
+        catch ( const std::exception &e )
+        {
+            workerOutcome = e.what();
+        }
+    } );
+
+    // Wait for the helper to publish its pid, then request cancellation.
+    qint64 helperPid = 0;
+    for ( int i = 0; i < 1200 && helperPid <= 0; ++i )
+    {
+        QFile f( helperPidFile );
+        if ( f.open( QIODevice::ReadOnly ) )
+        {
+            helperPid = f.readAll().toLongLong();
+        }
+        if ( helperPid <= 0 )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+    REQUIRE( helperPid > 0 );
+    cancelRequest.store( true );
+    runThread.join();
+    INFO( "worker outcome: " << workerOutcome );
+    REQUIRE( workerOutcome.find( "worker cancelled" ) != std::string::npos );
+
+    // The helper ignored SIGTERM and its parent (the worker) is dead: only
+    // the group-wide SIGKILL sweep can account for it. Poll until the pid is
+    // gone (ESRCH — reaped after reparenting; a zombie would still resolve).
+    bool gone = false;
+    for ( int i = 0; i < 2000; ++i )
+    {
+        if ( ::kill( static_cast<pid_t>( helperPid ), 0 ) == -1 && errno == ESRCH )
+        {
+            gone = true;
+            break;
+        }
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+    REQUIRE( gone );
+}
+#endif

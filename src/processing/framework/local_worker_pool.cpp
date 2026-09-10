@@ -254,7 +254,8 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::spawnWorker()
     for ( const auto &cap : { sicnu::runtime::worker::kWorkerCapProgress,
                               sicnu::runtime::worker::kWorkerCapCancelAck,
                               sicnu::runtime::worker::kWorkerCapStructuredErrors,
-                              sicnu::runtime::worker::kWorkerCapOutputIdentity } )
+                              sicnu::runtime::worker::kWorkerCapOutputIdentity,
+                              sicnu::runtime::worker::kWorkerCapHeartbeat } )
     {
         if ( sicnu::runtime::worker::frameHasCapability( frame, cap ) )
             worker->capabilities << QString::fromLatin1( cap );
@@ -380,7 +381,8 @@ LocalWorkerPool::Outcome LocalWorkerPool::runOnWorker(
                     // frame, and its helper processes must not survive.
                     worker.guard.terminateTree( *worker.process );
                     worker.diagnostics.drain( *worker.process );
-                    *errorMessage = "worker timeout: no frames within the hang window";
+                    *errorMessage = "worker timeout: no frames within the hang window"
+                                    + diagnosticsSuffix( worker.diagnostics );
                     return Outcome::TimedOut;
                 }
                 continue; // re-check cancellation, keep waiting

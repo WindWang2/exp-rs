@@ -433,6 +433,9 @@ private:
 
     struct PendingLaunch {
         long taskId = -1;
+        /// Captured at staging (review P1 fix): the flush thread runs outside
+        /// m_mutex and must not touch m_tasks (e.g. for trace labels).
+        QString algorithmId;
         sicnu::jobs::JobRequest request;
         JobExecutor executor;
         bool hasExecutor = false;
@@ -533,6 +536,10 @@ private:
     /// Removes every derived-structure trace of @p taskId (task pruned or
     /// everything reset). m_mutex held.
     void forgetDerivedTaskStateLocked( long taskId );
+    /// Drops estimate/dims cache entries for NON-active tasks only — active
+    /// tasks' charged values must stay stable for the leave transition.
+    /// m_mutex held.
+    void purgeAdmissionCachesForIdleTasksLocked();
 
     /// Parent → children index for O(children) promotion on completion (the
     /// cancel/failure cascade keeps its own O(V+E) traversal: terminal cascades
@@ -548,14 +555,17 @@ private:
     /// newly-ready ones onto the candidate heap. m_mutex held.
     void promoteChildrenOfLocked( long parentTaskId );
 
-    /// Launch-ready candidate heap. Key (epoch, priority, taskId, serial):
-    ///   epoch 0   — never admitted-blocked; fresh candidates keep the strict
-    ///               (priority, taskId) launch order of the old full sort;
-    ///   epoch > 0 — the pass number in which the candidate was last held by a
-    ///               per-candidate gate. Blocked candidates re-examine in FIFO
-    ///               epoch order (never-starve under steady fresh arrivals)
-    ///               but always behind fresh ones — the same relative order
-    ///               the old `continue`-on-block semantics produced;
+    /// Launch-ready candidate heap. Key (priority, epoch, taskId, serial) —
+    /// PRIORITY-MAJOR (review P1 fix): the old full sort launched a
+    /// previously-blocked HIGH-priority candidate the moment its gate opened,
+    /// ahead of lower-priority fresh work; an epoch-major key would starve it
+    /// behind a steady low-priority arrival stream. The corrected order:
+    ///   priority  — strict, exactly the old full sort's primary key;
+    ///   epoch     — within one priority: 0 = never admitted-blocked (the old
+    ///               (priority, taskId) order among them); > 0 = the pass
+    ///               number when last held by a per-candidate gate, rotating
+    ///               FIFO across passes (never-starve among same-priority
+    ///               blocked candidates);
     ///   serial    — lazily invalidates superseded entries (dispatch, cancel,
     ///               retry, re-promotion) without erase-on-cancel.
     struct ReadyEntry
@@ -569,8 +579,8 @@ private:
     {
         bool operator()( const ReadyEntry &a, const ReadyEntry &b ) const
         {
-            if ( a.epoch != b.epoch ) return a.epoch > b.epoch;
             if ( a.priority != b.priority ) return a.priority > b.priority;
+            if ( a.epoch != b.epoch ) return a.epoch > b.epoch;
             if ( a.taskId != b.taskId ) return a.taskId > b.taskId;
             return a.serial > b.serial;
         }

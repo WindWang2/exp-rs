@@ -23,10 +23,13 @@
   sicnu::data::InputIdentityResolver. Installation is a HOST-side decision —
   TaskCenter installs this factory's result when no other resolver is set.
 
-  A bounded session cache (256 entries, insertion-order eviction) avoids
-  re-probing the same origin for every submission within one process; every
-  cache hit is revalidated before use, so a changed resource is detected (and
-  its NEW strong ETag becomes the identity) without unbounded network use.
+  A bounded session cache (256 entries, insertion-order eviction) converts
+  repeated submissions of the same origin into cheap lookups: an entry
+  younger than a TTL (SICNU_REMOTE_IDENTITY_TTL_MS, default 5 s) is returned
+  without network use; older entries are revalidated (one bounded round
+  trip), so a changed resource is detected and its NEW strong ETag becomes
+  the identity. The cache mutex is never held across network I/O, and the
+  installing layer warms the cache before any lock-sensitive section.
  ***************************************************************************/
 
 #ifndef SICNU_GEOSPATIAL_REMOTE_IDENTITY_RESOLVER_H
