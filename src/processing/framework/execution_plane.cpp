@@ -27,13 +27,13 @@ constexpr auto kAwaitSlice = std::chrono::milliseconds( 25 );
 void tracePlaneEvent( const char *event, const char *status, const ExecutionRequest &request,
                       long taskId )
 {
-  observability::trace::TraceEvent trace;
+  sicnu::runtime::observability::trace::TraceEvent trace;
   trace.run = request.correlationId.toStdString();
   trace.task = taskId > 0 ? std::to_string( taskId ) : std::string();
   trace.op = request.algorithmId.toStdString();
   trace.event = event;
   trace.status = status;
-  observability::trace::Trace::publish( trace );
+  sicnu::runtime::observability::trace::Trace::publish( trace );
 }
 
 } // namespace
@@ -115,7 +115,7 @@ ExecutionHandle ExecutionPlane::submit( const ExecutionRequest &request )
         // Unified trace: terminal transition (Verification 7.0). Mirrors the
         // TaskStatus → ExecutionState mapping at the statusToState seam.
         {
-          observability::trace::TraceEvent trace;
+          sicnu::runtime::observability::trace::TraceEvent trace;
           trace.task = std::to_string( info.taskId );
           trace.op = info.algorithmId.toStdString();
           trace.event = "terminal";
@@ -126,7 +126,7 @@ ExecutionHandle ExecutionPlane::submit( const ExecutionRequest &request )
           case sicnu::TaskStatus::Canceled: trace.status = "cancelled"; break;
           default: trace.status = "unknown"; break;
           }
-          observability::trace::Trace::publish( trace );
+          sicnu::runtime::observability::trace::Trace::publish( trace );
         }
       } );
   }
