@@ -110,6 +110,16 @@ class MultidimView
     CoordinateSliceMatch resolveCoordinateIndex( const std::string &dimensionName, double value,
                                                  CoordinateMatch matchMode, double tolerance = 0.0 ) const;
 
+    /// 8.0: resolves a STRING axis label (CF datetime strings, categorical
+    /// labels) against the captured string axis of `dimension`. An exact
+    /// label match wins; an offset-normalized EQUAL instant matches when the
+    /// label and axis entry parse as ISO-8601 (mixed offsets select
+    /// correctly). Everything else is a typed miss — never a nearest guess.
+    /// The result names an INDEX — the actual read still goes through
+    /// readSlice.
+    CoordinateSliceMatch resolveCoordinateIndexByString( const std::string &dimensionName,
+                                                         const std::string &value ) const;
+
     /// Coordinate-value slice: `dimValues` name non-spatial dimensions and
     /// the coordinate values to fix them at (resolved through
     /// resolveCoordinateIndex); exactly the two trailing spatial dimensions

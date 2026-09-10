@@ -4,6 +4,7 @@
  ***************************************************************************/
 
 #include "geospatial/doctor/data_doctor.h"
+#include "support/http_range_server.h"
 #include "geospatial/raster/raster_writer.h"
 #include "geospatial/util/atomic_fs.h"
 
@@ -197,4 +198,116 @@ TEST_CASE( "doctor v2 refuses nothing and hides nothing on unreadable input",
     if ( item["check"].asString() == "existence" )
       hasExistenceAdvice = true;
   CHECK( hasExistenceAdvice );
+}
+
+// ---------------------------------------------------------------------------
+// 8.0 — Data Doctor 3.0 additions (Data Fabric track, pkg H): cacheability,
+// reproducibility and categorical resampling risk. Advice-only — none of
+// these findings may ever trigger an automatic change.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+bool doctorHasFinding( const sicnu::geo::DoctorReport &report, const std::string &check,
+                       const std::string &severity = std::string() )
+{
+  for ( const Json::Value &finding : report.findings )
+  {
+    if ( !finding.isObject() || finding["check"].asString() != check )
+      continue;
+    if ( severity.empty() || finding["severity"].asString() == severity )
+      return true;
+  }
+  return false;
+}
+
+std::vector<unsigned char> doctorPayload( std::size_t size )
+{
+  return std::vector<unsigned char>( size, 0x5A );
+}
+
+} // namespace
+
+TEST_CASE( "doctor cacheability verdict follows the origin validator strength",
+           "[io][doctor][cacheability][utc8]" )
+{
+  using sicnu::geo::testsupport::HttpRangeServer;
+  const std::string dir = scratch( "cacheability" );
+
+  // Strong ETag + ranges: cacheable, reproducibility stays silent.
+  {
+    const std::string tif = dir + "/strong.tif";
+    sicnu::geo::RasterWriter writer =
+      sicnu::geo::RasterWriter::create( tif, 16, 16, { sicnu::geo::RasterBandSpec {} }, {} );
+    std::vector<double> values( 256, 1.0 );
+    sicnu::geo::RasterWindow full;
+    full.width = 16;
+    full.height = 16;
+    writer.writeWindow( 1, full, values.data() );
+    writer.finalize();
+    std::ifstream in( tif, std::ios::binary );
+    const std::vector<unsigned char> payload( ( std::istreambuf_iterator<char>( in ) ),
+                                              std::istreambuf_iterator<char>() );
+    HttpRangeServer server( payload );
+    server.setEtag( "\"doctor-strong\"" );
+
+    sicnu::geo::InspectOptions options;
+    options.includeRemoteProbe = true;
+    const sicnu::geo::DoctorReport report = sicnu::geo::runDoctor( server.url(), options );
+    CHECK( doctorHasFinding( report, "cacheability", "ok" ) );
+    CHECK_FALSE( doctorHasFinding( report, "reproducibility" ) );
+  }
+
+  // Weak ETag: cacheability warning + reproducibility warning, advice-only.
+  {
+    const std::string tif = dir + "/weak.tif";
+    sicnu::geo::RasterWriter writer =
+      sicnu::geo::RasterWriter::create( tif, 16, 16, { sicnu::geo::RasterBandSpec {} }, {} );
+    std::vector<double> values( 256, 2.0 );
+    sicnu::geo::RasterWindow full;
+    full.width = 16;
+    full.height = 16;
+    writer.writeWindow( 1, full, values.data() );
+    writer.finalize();
+    std::ifstream in( tif, std::ios::binary );
+    const std::vector<unsigned char> payload( ( std::istreambuf_iterator<char>( in ) ),
+                                              std::istreambuf_iterator<char>() );
+    HttpRangeServer server( payload );
+    server.setEtag( "W/\"doctor-weak\"" );
+
+    sicnu::geo::InspectOptions options;
+    options.includeRemoteProbe = true;
+    const sicnu::geo::DoctorReport report = sicnu::geo::runDoctor( server.url(), options );
+    CHECK( doctorHasFinding( report, "cacheability", "warning" ) );
+    CHECK( doctorHasFinding( report, "reproducibility", "warning" ) );
+    // Advice rides the findings.
+    bool advicePresent = false;
+    for ( const sicnu::geo::DoctorRemediation &item : report.remediation )
+      advicePresent = advicePresent || item.check == "reproducibility";
+    CHECK( advicePresent );
+  }
+}
+
+TEST_CASE( "doctor flags categorical bands as a resampling risk",
+           "[io][doctor][resampling][utc8]" )
+{
+  const std::string dir = scratch( "categorical" );
+  const std::string tif = dir + "/classes.tif";
+  sicnu::geo::RasterBandSpec spec;
+  spec.role = "QA"; // categorical band vocabulary
+  sicnu::geo::RasterWriter writer =
+    sicnu::geo::RasterWriter::create( tif, 16, 16, { spec }, {} );
+  std::vector<double> values( 256, 3.0 );
+  sicnu::geo::RasterWindow full;
+  full.width = 16;
+  full.height = 16;
+  writer.writeWindow( 1, full, values.data() );
+  writer.finalize();
+
+  const sicnu::geo::DoctorReport report = sicnu::geo::runDoctor( tif );
+  CHECK( doctorHasFinding( report, "resampling_risk", "warning" ) );
+  // Advice-only: nothing in the report may claim an automatic fix.
+  for ( const sicnu::geo::DoctorRemediation &item : report.remediation )
+    CHECK_FALSE( item.autoFixable );
 }

@@ -66,9 +66,10 @@ unsigned daysInMonth( std::int64_t y, unsigned m )
 InstantParse parseIso8601Instant( const std::string &text )
 {
   InstantParse result;
-  // Strict minimum: "YYYY-MM-DDTHH:MM:SS" (20 chars). Bound the scan by the
-  // actual length — the year accepts exactly 4 digits (0000–9999 by contract).
-  if ( text.size() < 20 )
+  // Strict minimum: "YYYY-MM-DDTHH:MM:SS" (20 chars; the space-separated
+  // naive variant is 19). Bound the scan by the actual length — the year
+  // accepts exactly 4 digits (0000–9999 by contract).
+  if ( text.size() < 19 )
     return result;
 
   std::int64_t year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;

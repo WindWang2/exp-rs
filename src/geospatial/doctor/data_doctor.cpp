@@ -11,6 +11,7 @@
 #include "geospatial/crs/grid_descriptor.h"
 #include "geospatial/formats/format_profiles.h"
 #include "geospatial/gdal_guard.h"
+#include "geospatial/remote/remote_identity_token.h"
 #include "geospatial/remote/remote_source_validator.h"
 #include "geospatial/util/atomic_fs.h"
 #include "geospatial/util/resource_uri.h"
@@ -61,6 +62,14 @@ const char *remediationFor( const std::string &check )
                        "the origin still confirms" },
     { "format_profile", "Consume through the profiled contracts, or re-encode into a certified format "
                         "(see docs/io/certified-formats.md)" },
+    { "resampling_risk", "Categorical or palette bands must resample with nearest neighbour; conversions "
+                         "and COG production must not average category codes" },
+    { "cacheability", "Cache reuse stays disabled for origins without a strong ETag: consume via a cache "
+                      "that revalidates (RevalidateOnOpen) or accept change-blind reads explicitly" },
+    { "reproducibility", "Remote inputs without a provable identity cannot participate in execution-cache "
+                         "reuse; stage the asset or use an origin that serves strong validators" },
+    { "multidim_axes", "Multidimensional axes without captured coordinates only support index slices; "
+                       "add coordinate variables (CF convention) for value-based selection" },
   };
   for ( const auto &entry : kRemediations )
   {
@@ -297,6 +306,12 @@ DoctorReport runDoctor( const std::string &path, const InspectOptions &options )
         addFinding( report.findings, "radiometric", "info",
                     "Band " + std::to_string( band.index ) + " carries scale/offset with radiometric state "
                       + meta.radiometricState );
+      // 8.0: categorical resampling risk — averaging category codes corrupts
+      // them; surface the risk wherever a categorical band is declared.
+      if ( band.hasColorTable || band.role == "QA" || band.role == "SceneClassification" )
+        addFinding( report.findings, "resampling_risk", "warning",
+                    "Band " + std::to_string( band.index ) + " is categorical (palette/QA/classification); "
+                    "any resampling or COG production must use nearest neighbour" );
     }
     addFinding( report.findings, "nodata", anyNoData ? "ok" : "warning",
                 anyNoData ? "NoData declared on at least one band" : "No NoData declared on any band" );
@@ -372,6 +387,54 @@ DoctorReport runDoctor( const std::string &path, const InspectOptions &options )
     const Json::Value &variables = canonicalJson["variables"];
     addFinding( report.findings, "multidim", "info",
                 std::to_string( variables.size() ) + " variable(s); slices are lazy through the multidim contract" );
+    // 8.0: axis-capture posture — numeric/string/bounded axes decide whether
+    // value-based (coordinate) selection is possible at all.
+    const Json::Value &dimensions = canonicalJson["dimensions"];
+    Json::Value axes( Json::arrayValue );
+    int axesWithNumeric = 0;
+    int axesWithString = 0;
+    int axesBounded = 0;
+    for ( const Json::Value &dim : dimensions )
+    {
+      if ( !dim.isObject() )
+        continue;
+      Json::Value entry;
+      entry["name"] = dim.get( "name", "" ).asString();
+      if ( dim.get( "has_values", false ).asBool() )
+      {
+        entry["axis"] = "numeric";
+        ++axesWithNumeric;
+        if ( dim.get( "values_bounded", false ).asBool() )
+        {
+          entry["bounded"] = true;
+          ++axesBounded;
+        }
+      }
+      else if ( dim.get( "has_string_values", false ).asBool() )
+      {
+        entry["axis"] = "string";
+        ++axesWithString;
+        if ( dim.get( "string_values_bounded", false ).asBool() )
+        {
+          entry["bounded"] = true;
+          ++axesBounded;
+        }
+      }
+      else
+      {
+        entry["axis"] = "none";
+      }
+      axes.append( entry );
+    }
+    if ( dimensions.isArray() && !dimensions.empty() )
+    {
+      addFinding( report.findings, "multidim_axes",
+                  axesWithNumeric + axesWithString > 0 ? "ok" : "warning",
+                  "Coordinate axes captured: " + std::to_string( axesWithNumeric ) + " numeric, " +
+                    std::to_string( axesWithString ) + " string" +
+                    ( axesBounded > 0 ? " (some truncated at the capture bound)" : "" ),
+                  axes );
+    }
   }
 
   // ── remote posture (7.0): bounded validator identity for remote sources ─
@@ -385,6 +448,26 @@ DoctorReport runDoctor( const std::string &path, const InspectOptions &options )
       addFinding( report.findings, "remote_access", healthy ? "ok" : "warning",
                   std::string( "Remote identity: " ) + remoteSourceStateName( validator.identity().state ) +
                     ( validator.identity().lastError.empty() ? "" : " (" + validator.identity().lastError + ")" ) );
+
+      // 8.0: cacheability + reproducibility verdicts over the identity.
+      // Advice-only: the doctor never mutates cache configuration.
+      const RemoteSourceIdentity &identity = validator.identity();
+      const bool tokenProvable = identity.freshnessProvable();
+      Json::Value cacheability;
+      cacheability["strong_etag"] = tokenProvable;
+      cacheability["accepts_ranges"] = identity.acceptsRanges;
+      cacheability["range_cacheable"] = tokenProvable && identity.acceptsRanges;
+      addFinding( report.findings, "cacheability", tokenProvable ? "ok" : "warning",
+                  tokenProvable
+                    ? std::string( "Origin proves byte-level freshness (strong ETag); range-cache and "
+                                   "execution-identity reuse are provable" )
+                    : std::string( "Origin identity is weak (no strong ETag); cache reuse stays fail-closed "
+                                   "and must never be claimed as freshness" ),
+                  cacheability );
+      if ( !tokenProvable )
+        addFinding( report.findings, "reproducibility", "warning",
+                    "Executions over this remote input cannot prove input freshness across runs; "
+                    "the execution fingerprint will treat the input as uncacheable" );
     }
     else
       addFinding( report.findings, "remote_access", "info",

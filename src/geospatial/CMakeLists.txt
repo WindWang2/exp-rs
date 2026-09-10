@@ -15,6 +15,8 @@ set(SICNU_GEOSPATIAL_SOURCES
     util/atomic_fs.cpp
     util/resource_uri.cpp
     util/time_normalization.cpp
+    util/sha256.cpp
+    remote/remote_identity_token.cpp
     probe/probe.cpp
     remote/probe_remote.cpp
     remote/http_fetch.cpp

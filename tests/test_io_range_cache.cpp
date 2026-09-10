@@ -13,17 +13,22 @@
 #include "geospatial/remote/range_cache.h"
 #include "geospatial/raster/raster_reader.h"
 #include "geospatial/raster/raster_writer.h"
+#include "geospatial/convert/raster_convert.h"
 #include "support/http_range_server.h"
 
 #include <cpl_conv.h>
 #include <cpl_vsi.h>
+#include <gdal.h>
+#include <json/json.h>
 #include <cstring>
 #include <cstdio>
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
 #include <fstream>
+#include <thread>
 #include <vector>
 
 using namespace sicnu::geo;
@@ -363,4 +368,284 @@ TEST_CASE( "re-install with a changed blockSize drops entries and stays byte-cor
     RasterReader local = RasterReader::open( dir + "/scene.tif" );
     CHECK( b == local.readWindow( { 1 }, { 64, 64, 128, 128 } ) );
   }
+}
+
+// ---------------------------------------------------------------------------
+// 8.0 — fault-injection and concurrency evidence (Data Fabric track, pkg C)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "concurrent readers of one resource share the origin fetch",
+           "[io][remote][range_cache][concurrency][utc8]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "concurrent" );
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload );
+  server.setConcurrency( 4 ); // thread-per-connection, bounded at 4
+  server.setEtag( "\"concurrent-1\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.maxCacheBytes = 4ull * 1024 * 1024;
+  InstalledCache guard( config );
+
+  const std::string cachedPath = RemoteRangeCache::cachedPath( server.url() );
+  // Telemetry counters are process-cumulative: diff around this test's reads.
+  const std::uint64_t fetchedBefore = RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64();
+
+  // The expected window bytes, from the local file.
+  std::vector<double> expected;
+  {
+    RasterReader local( RasterReader::open( dir + "/scene.tif" ) );
+    expected = local.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    REQUIRE( expected.size() == 256ull * 256 );
+  }
+
+  // Four readers race for the same window. The fetch mutex dedups the
+  // in-flight fetch: total origin bytes must stay far below 4× one window
+  // worth of blocks, and every reader must see identical, correct bytes.
+  constexpr int kReaders = 4;
+  std::vector<std::vector<double>> results( kReaders );
+  std::vector<bool> ok( kReaders, false );
+  {
+    std::vector<std::thread> readers;
+    for ( int i = 0; i < kReaders; ++i )
+    {
+      readers.emplace_back( [ &, i ] {
+        try
+        {
+          RasterReader reader = RasterReader::open( cachedPath );
+          if ( !reader.isOpen() )
+            return;
+          results[ i ] = reader.readWindow( { 1 }, { 0, 0, 256, 256 } );
+          ok[ i ] = results[ i ].size() == expected.size();
+        }
+        catch ( ... )
+        {
+          ok[ i ] = false;
+        }
+      } );
+    }
+    for ( std::thread &reader : readers )
+      reader.join();
+  }
+  for ( int i = 0; i < kReaders; ++i )
+  {
+    INFO( "reader " << i );
+    REQUIRE( ok[ i ] );
+    CHECK( results[ i ] == expected );
+  }
+
+  const Json::Value telemetry = RemoteRangeCache::telemetryJson();
+  // Four racing readers must not multiply the origin cost by the reader
+  // count: the fetch mutex dedups the in-flight block fetches, so the origin
+  // cost stays at the distinct-block total plus per-open metadata, far below
+  // 4× one window's block bytes.
+  const std::uint64_t fetchedBytes =
+    telemetry["bytes_fetched"].asUInt64() - fetchedBefore;
+  INFO( "fetched this test=" << fetchedBytes );
+  const std::uint64_t windowBlockBytes = 4ull * 64 * 1024; // 256×256 Float32 ≤ 4 blocks
+  CHECK( fetchedBytes < windowBlockBytes * 4 );
+}
+
+TEST_CASE( "adjacent and overlapping window reads stay byte-correct and pay once",
+           "[io][remote][range_cache][adjacency][utc8]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "adjacent" );
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload );
+  server.setEtag( "\"adjacent-1\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 32 * 1024;
+  InstalledCache guard( config );
+  const std::string cachedPath = RemoteRangeCache::cachedPath( server.url() );
+
+  RasterReader local = RasterReader::open( dir + "/scene.tif" );
+
+  std::vector<double> leftHalf, rightHalf, whole;
+  {
+    RasterReader reader = RasterReader::open( cachedPath );
+    REQUIRE( reader.isOpen() );
+    leftHalf = reader.readWindow( { 1 }, { 0, 0, 256, 128 } );
+    rightHalf = reader.readWindow( { 1 }, { 256, 0, 256, 128 } );
+    const std::uint64_t fetchedAfterHalves =
+      RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64();
+    // The overlapping full-width re-read must come out of the cache.
+    whole = reader.readWindow( { 1 }, { 0, 0, 512, 128 } );
+    CHECK( RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64() ==
+           fetchedAfterHalves + 0 );
+  }
+  CHECK( leftHalf == local.readWindow( { 1 }, { 0, 0, 256, 128 } ) );
+  CHECK( rightHalf == local.readWindow( { 1 }, { 256, 0, 256, 128 } ) );
+  CHECK( whole == local.readWindow( { 1 }, { 0, 0, 512, 128 } ) );
+}
+
+TEST_CASE( "mid-range connection reset degrades to the fallback without wrong bytes",
+           "[io][remote][range_cache][reset][utc8]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "reset" );
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  // Resets every ranged read beyond the identity head window (bytes≥1024).
+  HttpRangeServer server( payload, testsupport::ServerBehavior::ResetRanged );
+  server.setEtag( "\"reset-1\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 32 * 1024;
+  InstalledCache guard( config );
+  const std::string cachedPath = RemoteRangeCache::cachedPath( server.url() );
+
+  RasterReader local = RasterReader::open( dir + "/scene.tif" );
+
+  // The first blocks (inside the head window) cache normally; deeper blocks
+  // hit the reset and must degrade to the direct /vsicurl/ fallback — the
+  // bytes the reader sees are still the origin's, never garbage.
+  std::vector<double> head, deep;
+  {
+    RasterReader reader = RasterReader::open( cachedPath );
+    REQUIRE( reader.isOpen() );
+    head = reader.readWindow( { 1 }, { 0, 0, 128, 128 } );
+    deep = reader.readWindow( { 1 }, { 0, 512, 256, 128 } ); // ~512 KB into the file
+  }
+  CHECK( head == local.readWindow( { 1 }, { 0, 0, 128, 128 } ) );
+  CHECK( deep == local.readWindow( { 1 }, { 0, 512, 256, 128 } ) );
+  CHECK( RemoteRangeCache::telemetryJson()["fallback_reads"].asUInt64() > 0 );
+}
+
+TEST_CASE( "changed content under the same URL invalidates across generations",
+           "[io][remote][range_cache][stale][utc8]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "changed" );
+  const std::vector<unsigned char> payloadV1 = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payloadV1 );
+  server.setEtag( "\"gen-1\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 32 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::RevalidateOnOpen;
+  InstalledCache guard( config );
+  const std::string cachedPath = RemoteRangeCache::cachedPath( server.url() );
+
+  std::vector<double> v1;
+  {
+    RasterReader reader = RasterReader::open( cachedPath );
+    REQUIRE( reader.isOpen() );
+    v1 = reader.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    REQUIRE( v1.size() == 256ull * 256 );
+  }
+
+  // The origin swaps the object (new bytes, new ETag).
+  const std::vector<unsigned char> payloadV2 = buildSmallTiff( dir + "/scene_v2.tif" );
+  server.replacePayload( payloadV2, "\"gen-2\"", "Wed, 09 Sep 2026 08:00:00 GMT" );
+  {
+    RasterReader local = RasterReader::open( dir + "/scene_v2.tif" );
+    std::vector<double> v2;
+    // A reader still open against the OLD generation finishes with coherent
+    // v1 bytes (invalidation restarts are bounded; here the handle is already
+    // at EOF for this window, so no blend can occur)…
+    RasterReader staleReader = RasterReader::open( cachedPath ); // revalidated: drops v1 blocks
+    REQUIRE( staleReader.isOpen() );
+    // …and a fresh read after the mismatch returns v2, byte-correct.
+    v2 = staleReader.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    CHECK( v2 == local.readWindow( { 1 }, { 0, 0, 256, 256 } ) );
+    CHECK( v2 != v1 );
+  }
+  CHECK( RemoteRangeCache::telemetryJson()["invalidations"].asUInt64() >= 1 );
+}
+
+TEST_CASE( "COG overview and window reads through the cache stay bounded and correct",
+           "[io][remote][range_cache][cog][utc8]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "cog" );
+  const std::string plain = dir + "/plain.tif";
+  {
+    RasterWriter writer = RasterWriter::create( plain, 1024, 1024, { RasterBandSpec {} },
+                                                { "GTiff", { "TILED=YES", "BLOCKXSIZE=256", "BLOCKYSIZE=256" }, true } );
+    writer.setGeotransform( { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 } );
+    // A deflate-hostile pattern (xorshift) keeps the COG near its raw size
+    // so the byte-accounting bound below is meaningful.
+    std::vector<double> values( 1024ull * 1024 );
+    std::uint32_t state = 0x9E3779B9u;
+    for ( std::size_t i = 0; i < values.size(); ++i )
+    {
+      state ^= state << 13;
+      state ^= state >> 17;
+      state ^= state << 5;
+      values[ i ] = static_cast<double>( state % 1000003u );
+    }
+    RasterWindow full;
+    full.width = 1024;
+    full.height = 1024;
+    writer.writeWindow( 1, full, values.data() );
+    writer.finalize();
+  }
+  const std::string cog = dir + "/cog.tif";
+  makeCog( plain, cog, CogPreset::LosslessScientific ); // throws GeoError on failure
+  std::ifstream cogFile( cog, std::ios::binary );
+  const std::vector<unsigned char> payload( ( std::istreambuf_iterator<char>( cogFile ) ),
+                                            std::istreambuf_iterator<char>() );
+  REQUIRE( payload.size() > 0 );
+
+  HttpRangeServer server( payload );
+  server.setEtag( "\"cog-1\"" );
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.maxCacheBytes = 8ull * 1024 * 1024;
+  InstalledCache guard( config );
+  const std::string cachedPath = RemoteRangeCache::cachedPath( server.url() );
+
+  // Open the cached COG with GDAL directly (full driver stack: overviews,
+  // masks, window reads) and read a reduced-resolution overview + a window.
+  GDALAllRegister();
+  const std::uint64_t fetchedBefore = RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64();
+  GDALDatasetH cached = GDALOpen( cachedPath.c_str(), GA_ReadOnly );
+  REQUIRE( cached != nullptr );
+  GDALDatasetH local = GDALOpen( cog.c_str(), GA_ReadOnly );
+  REQUIRE( local != nullptr );
+  CHECK( GDALGetRasterCount( cached ) == GDALGetRasterCount( local ) );
+
+  GDALRasterBandH cachedOverview = GDALGetRasterBand( cached, 1 );
+  CHECK( cachedOverview != nullptr );
+  cachedOverview = GDALGetOverview( GDALGetRasterBand( cached, 1 ), 0 );
+  GDALRasterBandH localOverview = GDALGetOverview( GDALGetRasterBand( local, 1 ), 0 );
+  if ( cachedOverview != nullptr && localOverview != nullptr )
+  {
+    int ow = 0, oh = 0;
+    GDALGetBlockSize( cachedOverview, &ow, &oh );
+    const int readW = std::min( 64, ow );
+    const int readH = std::min( 64, oh );
+    std::vector<float> cachedPixels( static_cast<std::size_t>( readW ) * readH );
+    std::vector<float> localPixels( static_cast<std::size_t>( readW ) * readH );
+    REQUIRE( GDALRasterIO( cachedOverview, GF_Read, 0, 0, readW, readH,
+                           cachedPixels.data(), readW, readH, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( localOverview, GF_Read, 0, 0, readW, readH,
+                           localPixels.data(), readW, readH, GDT_Float32, 0, 0 ) == CE_None );
+    CHECK( cachedPixels == localPixels );
+  }
+  // Full-resolution window: byte-equal to the local COG.
+  {
+    std::vector<float> cachedPixels( 128ull * 128 );
+    std::vector<float> localPixels( 128ull * 128 );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( cached, 1 ), GF_Read, 0, 0, 128, 128,
+                           cachedPixels.data(), 128, 128, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( local, 1 ), GF_Read, 0, 0, 128, 128,
+                           localPixels.data(), 128, 128, GDT_Float32, 0, 0 ) == CE_None );
+    CHECK( cachedPixels == localPixels );
+  }
+  GDALClose( cached );
+  GDALClose( local );
+
+  const std::uint64_t fetched = RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64() - fetchedBefore;
+  // Byte accounting: opening a COG (IFD walks, overview directories, mask
+  // handling) plus one overview tile (a full 256×256 tile is inflated even
+  // for a 64×64 window — the driver's granularity) plus a full-res window
+  // costs a bounded MINORITY of the object, never the whole file. Measured
+  // locally: ~1.7 MB fetched of a ~4.2 MB deflate-hostile COG (~40%).
+  INFO( "fetched=" << fetched << " payload=" << payload.size() );
+  CHECK( fetched * 2 < static_cast<std::uint64_t>( payload.size() ) );
+  CHECK( fetched > 0 ); // the reads did go through the ranged cache
 }

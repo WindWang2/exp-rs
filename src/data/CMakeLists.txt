@@ -19,6 +19,8 @@ qt_add_library(sicnu_data STATIC
   derivation_record.h
   execution_fingerprint.cpp
     execution_identity_resolver.cpp
+  execution_identity_bridge.cpp
+  execution_identity_bridge.h
   execution_fingerprint.h
   governance/governance_store.cpp
   governance/governance_store.h
@@ -95,6 +97,11 @@ target_link_libraries(sicnu_data
   # Fault-injection probes (Verification 7.0) live in sicnu_runtime (Qt-free
   # leaf); PRIVATE keeps the leaf out of the data layer's public interface.
     sicnu_runtime
+  # Geospatial Data Fabric 8.0: the execution identity bridge (Qt adapter)
+  # resolves remote inputs through the Qt-free sicnu_geospatial foundation;
+  # PRIVATE keeps the foundation out of the data layer's public interface
+  # (headers stay Qt-only, no GUI/QtNetwork dependency is added).
+    sicnu_geospatial
 )
 
 get_target_property(SICNU_DATA_DIRECT_LINKS sicnu_data LINK_LIBRARIES)

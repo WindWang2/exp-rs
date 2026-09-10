@@ -7,6 +7,7 @@
 
 #include "http_range_server.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -114,6 +115,15 @@ HttpRangeServer::~HttpRangeServer()
   shutdownSocket( mCurrentClient.load() );
   if ( mThread.joinable() )
     mThread.join();
+  // Concurrent-mode handlers touch fixture state — join every one of them
+  // before the members they reference start disappearing.
+  {
+    std::lock_guard<std::mutex> lock( mHandlerMutex );
+    for ( std::thread &handler : mHandlers )
+      if ( handler.joinable() )
+        handler.join();
+    mHandlers.clear();
+  }
 }
 
 std::string HttpRangeServer::url() const
@@ -192,15 +202,42 @@ void HttpRangeServer::serveLoop()
         break;
       continue;
     }
-    // One request head must arrive within a bounded window: a client that
-    // connects and stays silent (connection-pool preconnects do) returns
-    // recv() <= 0 after the timeout instead of pinning the server thread.
+    // A client that connects and stays silent must not pin the server
+    // thread: bound the request-head receive window (see boundSocketWait).
     boundSocketWait( client );
+    if ( mMaxConnections > 1 && mLiveHandlers.load() < mMaxConnections )
+    {
+      // 8.0 concurrent mode: serve on a bounded side thread so several
+      // readers can be in flight at once (real COG clients read in parallel).
+      mLiveHandlers.fetch_add( 1 );
+      std::thread handler( [this, client] {
+        mCurrentClient.store( client );
+        handleConnection( client );
+        mCurrentClient.store( kInvalidSocket );
+        shutdownSocket( client );
+        mLiveHandlers.fetch_sub( 1 );
+      } );
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      // Handles accumulate per connection (tests issue a bounded handful)
+      // and are joined in the destructor.
+      mHandlers.push_back( std::move( handler ) );
+      continue;
+    }
     mCurrentClient.store( client );
     handleConnection( client );
     mCurrentClient.store( kInvalidSocket );
     shutdownSocket( client );
   }
+  // Serial mode drains its own connection; concurrent mode's detached
+  // handlers own theirs. Both finish in bounded time: recv windows are
+  // bounded and the destructor additionally closes the listener + the
+  // in-flight client, so accepts and recvs cannot block indefinitely.
+}
+
+void HttpRangeServer::setConcurrency( unsigned maxConnections )
+{
+  if ( maxConnections > 1 )
+    mMaxConnections = maxConnections > 8 ? 8 : maxConnections; // bounded by design
 }
 
 void HttpRangeServer::handleConnection( SocketHandle client )
@@ -221,11 +258,16 @@ void HttpRangeServer::handleConnection( SocketHandle client )
   const bool isHead = request.rfind( "HEAD ", 0 ) == 0;
 
   // Only the fixture path is served; auxiliary probes (.aux.xml, .properties,
-  // ...) get a 404 so byte accounting measures the asset itself.
+  // ...) get a 404 so byte accounting measures the asset itself. The query
+  // string does not affect routing (a signed URL carries its credentials in
+  // the query — the object path stays the same).
   {
     const std::size_t sp1 = request.find( ' ' );
     const std::size_t sp2 = request.find( ' ', sp1 == std::string::npos ? 0 : sp1 + 1 );
-    const std::string path = request.substr( sp1 + 1, sp2 == std::string::npos ? std::string::npos : sp2 - sp1 - 1 );
+    std::string path = request.substr( sp1 + 1, sp2 == std::string::npos ? std::string::npos : sp2 - sp1 - 1 );
+    const std::size_t query = path.find( '?' );
+    if ( query != std::string::npos )
+      path = path.substr( 0, query );
     if ( path != "/fixture.tif" )
     {
       std::fprintf( stderr, "[SRV] 404 for path %s\n", path.c_str() );
@@ -344,6 +386,47 @@ void HttpRangeServer::handleConnection( SocketHandle client )
                                "/" + std::to_string( payloadSize );
     body = payloadData + rangeStart;
     bodySize = static_cast<std::size_t>( rangeEnd - rangeStart + 1 );
+    if ( mBehavior == ServerBehavior::ResetRanged && rangeStart >= 1024 &&
+         mResetArmed.exchange( false ) )
+    {
+      // Answer the headers, hand over a few body bytes, then kill the
+      // connection hard (SO_LINGER 0 ⇒ RST) — a mid-transfer connection
+      // reset, not a graceful short read. The reset fires ONCE (a transient
+      // fault): a permanently hostile origin would starve the /vsicurl/
+      // fallback too, and the cache's fallback guarantee needs a recoverable
+      // origin. Identity probes fetch the head window (bytes=0-1023) and
+      // HEAD/GET answers never reset.
+      if ( !isHead )
+      {
+        std::string head = "HTTP/1.1 206 Partial Content\r\n";
+        for ( const auto &entry : headers )
+          head += entry.first + ": " + entry.second + "\r\n";
+        head += "Content-Length: " + std::to_string( bodySize ) + "\r\n";
+        head += "Connection: close\r\n\r\n";
+        std::size_t sent = 0;
+        while ( sent < head.size() )
+        {
+          const int written = ::send( client, head.data() + sent,
+                                      static_cast<int>( head.size() - sent ), 0 );
+          if ( written <= 0 )
+            break;
+          sent += static_cast<std::size_t>( written );
+        }
+        const std::size_t bytesBeforeReset = std::min<std::size_t>( bodySize, 4 );
+        if ( bytesBeforeReset > 0 )
+          ::send( client, reinterpret_cast<const char *>( body ),
+                  static_cast<int>( bytesBeforeReset ), 0 );
+        mBytesServed.fetch_add( bytesBeforeReset );
+        linger options {};
+        options.l_onoff = 1;
+        options.l_linger = 0;
+        ::setsockopt( client, SOL_SOCKET, SO_LINGER,
+                      reinterpret_cast<const char *>( &options ), sizeof( options ) );
+        // serveLoop's shutdownSocket() now closes through the linger-0
+        // setting — the peer sees a hard reset mid-body.
+      }
+      return;
+    }
     respond( client, 206, "Partial Content", headers, body, bodySize, isHead,
              mBehavior != ServerBehavior::Truncated );
     return;

@@ -54,3 +54,15 @@ STAC documents are metadata in, metadata out.
 Asset hrefs keep their declared form; remote opens ride GDAL's VSI layer
 (`/vsicurl/`-style) with the existing SSRF policy in the STAC browser path.
 `io:inspect` / `data doctor` accept VSI handles directly.
+
+## UTC instant normalization (8.0)
+
+STAC datetimes arrive with mixed offsets (`Z`, `+02:00`, naive). The mapper
+derives normalized UTC instants at parse time (`datetimeUtc` on `StacItem`);
+`buildTemporalSeries` orders series by parsed instants (never raw strings, so
+mixed-offset acquisitions interleave correctly), ties break deterministically
+(item id, then input order), and duplicate acquisition instants are reported
+through `buildTemporalSeriesDetailed` (kept, never dropped). Naive datetimes
+are treated as UTC per the STAC spec and flagged (`datetimeAssumedUtc`);
+unparseable datetimes leave the UTC form empty — never a guessed time.
+`toJson()` keeps the origin's verbatim RFC 3339 wire form.

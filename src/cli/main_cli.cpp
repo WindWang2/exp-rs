@@ -11,6 +11,7 @@
 #include "python/isolated/python_plugin_host.h"
 #include "data/data_manager.h"
 #include "data/execution_fingerprint.h"
+#include "data/execution_identity_bridge.h"
 #include "workflow/workflow_run_coordinator.h"
 #include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run_lock.h"
@@ -68,6 +69,10 @@ int main(int argc, char *argv[])
     app.setApplicationName("sicnu_geo_rs_cli");
     QCoreApplication::setApplicationVersion("0.9.2-dev");
     ShutdownGuard shutdownGuard;
+
+    // Data Fabric 8.0: remote inputs participate in execution-cache identity
+    // (fail-closed geospatial remote-identity resolver).
+    sicnu::data::installGeospatialInputIdentityResolver();
 
     QCommandLineParser parser;
     parser.setApplicationDescription(

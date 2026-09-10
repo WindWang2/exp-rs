@@ -920,7 +920,12 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         }
         else if ( result.outcome == RevalidationOutcome::Unchanged )
         {
-          cache.updateEntrySize( entry, validator.identity().sizeBytes );
+          // Only refresh the size when the revalidation answer actually
+          // carried one: an Unchanged verdict never implies a known size
+          // (a 304 has no entity headers), and writing a fabricated size 0
+          // would collapse every later read to EOF.
+          if ( validator.identity().hasSize )
+            cache.updateEntrySize( entry, validator.identity().sizeBytes );
         }
         // Inconclusive (offline, size-only origins): keep serving — this is
         // the caller's declared trust level, and the revalidation attempt is

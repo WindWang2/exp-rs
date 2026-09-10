@@ -204,6 +204,14 @@ struct DimensionInfo
     bool valuesBounded = false;  ///< true when the axis was truncated at the cap
     std::vector<double> values;  ///< ascending count == min(size, kMaxAxisValues)
 
+    // 8.0 — string coordinate axes (CF datetime strings, categorical labels):
+    // captured when the indexing variable is string-typed and the numeric
+    // capture is not. Same bound; JSON serialization is symmetric (the 7.0
+    // toJson dropped numeric axis values — fixed in 8.0).
+    bool hasStringValues = false;
+    bool stringValuesBounded = false;
+    std::vector<std::string> stringValues;
+
     Json::Value toJson() const;
     static DimensionInfo fromJson( const Json::Value &json );
 };

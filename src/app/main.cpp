@@ -29,6 +29,7 @@
 #include <memory>
 
 #include "data/data_manager.h"
+#include "data/execution_identity_bridge.h"
 #include "data/governance/workspace_service.h"
 #include "processing/framework/atomic_algorithm_adapter.h"
 #include "processing/framework/task_center.h"
@@ -105,6 +106,11 @@ int main(int argc, char *argv[])
     // (OpenCV internal thread pool, #692) before any operator or provider can
     // run. Idempotent — the CLI/MCP entry points call it too.
     ensureGdalInit();
+
+    // Data Fabric 8.0: remote inputs participate in execution-cache identity
+    // through the geospatial remote-identity resolver (fail-closed: inputs
+    // without a provable strong-ETag identity stay uncacheable).
+    sicnu::data::installGeospatialInputIdentityResolver();
 
     bool mcpMode = false;
     for (int i = 1; i < argc; ++i) {

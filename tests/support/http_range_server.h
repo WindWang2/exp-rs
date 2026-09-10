@@ -44,7 +44,12 @@ enum class ServerBehavior
   NoRange,       ///< Range header ignored (always 200 + whole file)
   ServerError,   ///< every request answers 500
   Truncated,     ///< body cut short (connection reset mid-payload)
-  Slow           ///< answers after a delay (timeout probing)
+  Slow,          ///< answers after a delay (timeout probing)
+  ResetRanged    ///< 8.0: the FIRST ranged GET beyond the identity head
+                 ///< window answers its headers then resets the connection
+                 ///< (a transient mid-transfer reset); later requests are
+                 ///< served normally — hostile origins would starve the
+                 ///< fallback path too
 };
 
 class HttpRangeServer
@@ -82,6 +87,13 @@ class HttpRangeServer
     void replacePayload( std::vector<unsigned char> payload, const std::string &etag,
                          const std::string &lastModified );
 
+    // --- 8.0 concurrency fixture -----------------------------------------
+    /// Serves up to @p maxConnections connections CONCURRENTLY (thread per
+    /// connection, hard-bounded; 1 keeps the legacy serial serve loop). Lets
+    /// tests exercise concurrent readers of one cached resource. Must be
+    /// called before any request arrives (constructor-time configuration).
+    void setConcurrency( unsigned maxConnections );
+
   private:
     void serveLoop();
     void handleConnection( SocketHandle client );
@@ -107,6 +119,15 @@ class HttpRangeServer
     /// but never completed a request head (connection-pool preconnects do)
     /// must not hold the server thread in recv() past fixture destruction.
     std::atomic<SocketHandle> mCurrentClient{ kInvalidSocket };
+    /// Max live handler threads when concurrency > 1 (0 = serial loop).
+    unsigned mMaxConnections = 0;
+    std::atomic<unsigned> mLiveHandlers{ 0 };
+    /// ResetRanged is transient: armed until the first eligible request.
+    std::atomic<bool> mResetArmed{ true };
+    /// 8.0 concurrent-mode handler threads (joined by the destructor —
+    /// they touch fixture state, so they must never outlive it).
+    std::mutex mHandlerMutex;
+    std::vector<std::thread> mHandlers;
     int mPort = 0;
     std::thread mThread;
     std::atomic<bool> mStop{ false };

@@ -213,15 +213,21 @@ std::vector<FormatProfile> buildDeclaredProfiles()
     p.displayName = "GeoParquet";
     p.family = FormatFamily::Vector;
     // The GDAL Parquet driver appears only in builds compiled with Arrow
-    // support — capability queries must degrade truthfully elsewhere.
+    // support — capability queries must degrade truthfully elsewhere. The
+    // 8.0 round-trip certification (fields, nulls, empty-vs-null, polygon +
+    // null geometry, projected CRS, atomic staged publish) is proven by
+    // tests/test_io_vector_interop.cpp on stacks where the driver can
+    // actually create datasets.
     p.driverNames = { "Parquet" };
     p.extensions = { "parquet", "geoparquet" };
-    p.certification = Certification::Accessible;
+    p.certification = Certification::Certified;
     p.supportsRead = true;
-    p.supportsWrite = false;
+    p.supportsWrite = true;
     p.supportsStreaming = true;
-    p.notes = "Read-only Accessible profile: the columnar GeoParquet mapping is "
-              "driver-gated; certification requires a proven round-trip on this stack.";
+    p.notes = "Certified round-trip where the Parquet driver is create-capable "
+              "(verified on GDAL 3.13); driver-gated elsewhere — capability "
+              "queries answer unavailable, never a claimed fidelity. Layer name "
+              "on read is the file stem (GDAL Parquet convention).";
     profiles.push_back( p );
   }
   {

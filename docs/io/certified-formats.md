@@ -44,6 +44,7 @@ the certified subset carries fidelity guarantees.
 | Format | Certification | Read | Write | Remote | Tests |
 |---|---|---|---|---|---|
 | STAC Item/Collection | **Certified** (canonical mapping, both directions) | ✔ | ✔ | ✔ | `test_io_stac`, `test_io_roundtrip_matrix` |
+| GeoParquet | **Certified** (8.0: round-trip where the Parquet driver is create-capable — fields, nulls, geometry, projected CRS, atomic publish) | ✔ | ✔ (driver-gated) | ✔ (range reads) | `test_io_vector_interop` |
 | /vsicurl/, /vsis3/, /vsiaz/, /vsigs/ | Accessible | ✔ | ✘ | ✔ | `benchmark_io` (simulated range baseline) |
 
 ## CRS policy (summary; see `src/geospatial/crs/crs_policy.h`)
