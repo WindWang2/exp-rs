@@ -8,6 +8,7 @@ add_library(sicnu_runtime STATIC
     observability/execution_telemetry.cpp
     observability/fault_registry.cpp
     observability/trace.cpp
+    observability/diagnostic_report.cpp
 )
 target_include_directories(sicnu_runtime PUBLIC ${CMAKE_SOURCE_DIR}/src)
 # Linked into SHARED consumers; force PIC like the other static leaves.

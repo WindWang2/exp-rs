@@ -6947,3 +6947,19 @@ target_include_directories(test_concurrency_stress PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 sicnu_discover_tests(test_concurrency_stress TIMEOUT 600 RUN_SERIAL TRUE)
+
+# Scientific known-answer corpus (task C): analytically derivable fixtures for
+# spectral / change / terrain / radiometric / transition-matrix / temporal
+# statistics. Physical invariants with documented derivations, not shapes.
+sicnu_add_test(test_known_answer_corpus TIMEOUT 180)
+target_link_libraries(test_known_answer_corpus PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators_core
+)
+
+# Machine-readable diagnostic envelope (task G): exp.diag.v1 contract.
+sicnu_add_test(test_diagnostic_report TIMEOUT 60)
+target_link_libraries(test_diagnostic_report PRIVATE sicnu_runtime)
