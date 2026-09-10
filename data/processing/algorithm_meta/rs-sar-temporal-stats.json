@@ -1,7 +1,7 @@
 {
   "gpu" : false,
   "id" : "rs:sar_temporal_stats",
-  "input" : "raster",
+  "input" : "",
   "output" : "raster",
   "tags" : 
   [

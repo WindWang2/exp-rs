@@ -251,7 +251,7 @@ TEST_CASE( "spectral formula drift guard: operator matches the documented formul
         Json::Value result;
         INFO( "index " << row.name << " (" << row.formula << ")" );
         REQUIRE_NOTHROW( result = op->run( params, ctx ) );
-        const auto values = readBand( tmp.filePath( params["output"].asString().c_str() ), 1 );
+        const auto values = readBand( QString::fromStdString( params["output"].asString() ), 1 );
         REQUIRE( values.size() == 4 );
         const double expected = row.expected( v );
         for ( float value : values )

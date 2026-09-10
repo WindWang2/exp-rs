@@ -27,6 +27,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "geospatial/crs/crs_policy.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 using Catch::Approx;
@@ -144,14 +145,17 @@ std::string rectFeature( const std::string &id, const std::string &zone,
                          const std::string &props, double minX, double minY,
                          double maxX, double maxY )
 {
+    // Proper GeoJSON polygon: array of rings, each ring an array of [x,y]
+    // positions, closed.
+    auto pos = []( double x, double y ) {
+        return "[" + std::to_string( x ) + "," + std::to_string( y ) + "]";
+    };
+    const std::string ring = "[" + pos( minX, minY ) + "," + pos( maxX, minY ) + ","
+                             + pos( maxX, maxY ) + "," + pos( minX, maxY ) + ","
+                             + pos( minX, minY ) + "]";
     return R"( {"type":"Feature","id":)" + id + R"(,"properties":{)"
            + ( zone.empty() ? "" : R"("zone":")" + zone + R"(",)" ) + props
-           + R"(},"geometry":{"type":"Polygon","coordinates":[[)"
-           + std::to_string( minX ) + "," + std::to_string( minY ) + ","
-           + std::to_string( maxX ) + "," + std::to_string( minY ) + ","
-           + std::to_string( maxX ) + "," + std::to_string( maxY ) + ","
-           + std::to_string( minX ) + "," + std::to_string( maxY ) + ","
-           + std::to_string( minX ) + "," + std::to_string( minY ) + "]]} }";
+           + R"(},"geometry":{"type":"Polygon","coordinates":[)" + ring + "]} }";
 }
 
 std::string featureCollection( const std::vector<std::string> &features )
@@ -197,8 +201,8 @@ TEST_CASE( "rs:rasterize burns constant and attribute values with last-wins over
     // Zone a covers cols {1,2,3} x rows {2,3,4}; zone b overlaps cols {2,3}
     // and wins there (later feature). Attribute `val`: 2.0 / 3.0.
     const std::string geojson = featureCollection( {
-        rectFeature( "1", "a", R"("val":2.0)", 10.55, 14.55, 13.55, 17.45 ),
-        rectFeature( "2", "b", R"("val":3.0)", 11.55, 14.55, 14.45, 17.45 ),
+        rectFeature( "1", "a", R"("val":2.0)", 10.55, 14.60, 13.55, 17.60 ),
+        rectFeature( "2", "b", R"("val":3.0)", 11.55, 14.60, 14.55, 17.60 ),
     } );
     const QString zones = tmp.filePath( "zones.geojson" );
     REQUIRE( writeGeoJson( zones, geojson ) );
@@ -399,11 +403,13 @@ TEST_CASE( "rs:zonal_stats computes exact statistics; zones spanning windows acc
     REQUIRE( result["zones"].asUInt64() == 1ULL );
     REQUIRE( result["rows"].asUInt64() == 1ULL );
 
-    // Analytic expectations over 100x100 = 10000 cells.
+    // Analytic expectations over 100x100 = 10000 cells: each column value
+    // appears 100x and each row value 100x, so the mean is the mean of the
+    // column values plus 1000x the mean of the row values.
     const double count = 10000.0;
-    const double sumC = ( 200 + 299 ) * 100.0 / 2.0; // 24950
-    const double sumR = ( 400 + 499 ) * 100.0 / 2.0; // 44950
-    const double expectedMean = ( sumC + 1000.0 * sumR ) / count;
+    const double meanC = ( 200 + 299 ) / 2.0;  // 249.5
+    const double meanR = ( 400 + 499 ) / 2.0;  // 449.5
+    const double expectedMean = meanC + 1000.0 * meanR;
     const double expectedMin = 200.0 + 1000.0 * 400.0;
     const double expectedMax = 299.0 + 1000.0 * 499.0;
 
@@ -473,8 +479,8 @@ TEST_CASE( "rs:zonal_stats: overlapping zones last-wins, sentinel exclusion, "
     // c: empty zone (outside the data... same grid but over NoData cell
     // only); d: geometryless feature.
     const std::string geojson = featureCollection( {
-        rectFeature( "1", "a", R"("val":1.0)", 10.55, 14.55, 13.55, 17.45 ),
-        rectFeature( "2", "b", R"("val":2.0)", 11.55, 14.55, 13.6, 17.45 ),
+        rectFeature( "1", "a", R"("val":1.0)", 10.55, 14.60, 13.55, 17.60 ),
+        rectFeature( "2", "b", R"("val":2.0)", 11.55, 14.60, 13.6, 17.60 ),
         rectFeature( "3", "c", R"("val":3.0)", 15.1, 14.1, 15.9, 14.9 ),
         R"( {"type":"Feature","id":4,"properties":{"zone":"d","val":4.0},"geometry":null} )",
     } );
@@ -518,8 +524,9 @@ TEST_CASE( "rs:zonal_stats: overlapping zones last-wins, sentinel exclusion, "
         const std::string expectedPrefix = "b,1,5,1,22,43,32.6,";
         REQUIRE( row.rfind( expectedPrefix, 0 ) == 0 );
     }
-    // Zone c: exactly one cell (row center 14.5, col center 15.5) → v=55.
-    REQUIRE( csv.find( "c,1,1,0,55,55,55,55,55,0" ) != std::string::npos );
+    // Zone c: exactly one cell (row center 14.5, col center 15.5) → v=55;
+    // stddev of a single sample is 0.
+    REQUIRE( csv.find( "c,1,1,0,55,55,55,0,55,0" ) != std::string::npos );
 }
 
 TEST_CASE( "rs:zonal_stats transforms zone CRS through the foundation policy",
@@ -529,23 +536,44 @@ TEST_CASE( "rs:zonal_stats transforms zone CRS through the foundation policy",
     QTemporaryDir tmp;
     REQUIRE( tmp.isValid() );
 
-    // UTM 50N grid, 10 m cells, origin chosen near the CRS84 test area.
+    // UTM 50N grid, 10 m cells, origin (300000, 2500000).
     double gt[6] = { 300000.0, 10.0, 0.0, 2500000.0, 0.0, -10.0 };
     constexpr int kW = 100;
     constexpr int kH = 100;
     std::vector<float> values( static_cast<size_t>( kW ) * kH );
     for ( int r = 0; r < kH; ++r )
         for ( int c = 0; c < kW; ++c )
-            values[static_cast<size_t>( r ) * kW + c] = static_cast<float>( 7.0 );
+            values[static_cast<size_t>( r ) * kW + c] = 7.0f;
     const QString ref = tmp.filePath( "utm.tif" );
     REQUIRE( writeRaster( ref, values, kW, kH, gt, epsg32650Wkt() ) );
 
-    // Zone polygon in CRS84 over the grid's geographic footprint. The
-    // expected cell count is computed by transforming the raster grid
-    // bounds into geographic space with OGR (the same foundation policy the
-    // operator uses) and counting centers inside the polygon.
+    // Zone: the projected rectangle covering cols {1,2,3} x rows {1,2,3}
+    // (eastings 300010..300040, northings 2499960..2499990), transformed
+    // to CRS84 through OGR with the same foundation policy the operator
+    // uses. The geographic bbox of the four corners bounds the rectangle
+    // (the box is tiny), so the zone covers exactly those 9 cells.
+    double minX = 300010.0, minY = 2499960.0, maxX = 300040.0, maxY = 2499990.0;
+    // Transform through the FOUNDATION policy (which normalizes axis order)
+    // — raw OCT handles would carry authority-order lat/lon on the
+    // geographic end and swap the polygon coordinates.
+    const sicnu::geo::CrsTransform toGeographic = sicnu::geo::CrsTransform::create(
+        sicnu::geo::Crs::fromAuthid( "EPSG:32650" ),
+        sicnu::geo::Crs::fromAuthid( "EPSG:4326" ),
+        sicnu::geo::AxisOrder::TraditionalGis );
+    double minXg = 1e300, minYg = 1e300, maxXg = -1e300, maxYg = -1e300;
+    const double corners[4][2] = { { minX, minY }, { maxX, minY },
+                                   { maxX, maxY }, { minX, maxY } };
+    for ( const auto &corner : corners )
+    {
+        const sicnu::geo::CrsPoint p = toGeographic.forward( { corner[0], corner[1] } );
+        minXg = std::min( minXg, p.x );
+        maxXg = std::max( maxXg, p.x );
+        minYg = std::min( minYg, p.y );
+        maxYg = std::max( maxYg, p.y );
+    }
+
     const std::string geojson = featureCollection( {
-        rectFeature( "1", "u", R"("val":1.0)", 113.5, 22.3, 114.5, 23.1 ),
+        rectFeature( "1", "u", R"("val":1.0)", minXg, minYg, maxXg, maxYg ),
     } );
     const QString zones = tmp.filePath( "zones.geojson" );
     REQUIRE( writeGeoJson( zones, geojson ) );
@@ -561,11 +589,11 @@ TEST_CASE( "rs:zonal_stats transforms zone CRS through the foundation policy",
     Json::Value result;
     REQUIRE_NOTHROW( result = op->run( params, ctx ) );
 
-    // The polygon is huge relative to the 1 km grid: it must cover ALL of
-    // it (the grid origin 300000/2500000 in UTM 50N is ~113.55E/22.59N).
+    // The CRS84 zone transforms back onto the projected rectangle: exactly
+    // the 9 interior cells report, all with the constant value 7.
     const std::string csv = readCsv( tmp.filePath( "stats.csv" ) );
-    REQUIRE( csv.find( "u,1,10000,0," ) != std::string::npos );
-    REQUIRE( csv.find( ",7,7,7,7,7,0\n" ) != std::string::npos );
+    REQUIRE( csv.find( "u,1,9,0," ) != std::string::npos );
+    REQUIRE( csv.find( ",7,7,7,0,7,0\n" ) != std::string::npos );
     REQUIRE( result["outsideGridFeatures"].asUInt64() == 0ULL );
 }
 

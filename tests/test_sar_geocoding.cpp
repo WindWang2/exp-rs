@@ -239,7 +239,9 @@ constexpr double kDlatDeg = 0.004;
 // offset places cols 0-1 solidly before the scene leading edge (rowF < -0.8)
 // and cols 2-5 solidly inside (rowF > +0.8) — no cell near the boundary.
 constexpr double kLonStartDeg = kSceneCenterLonDeg - 0.0015;
-constexpr double kLatStartDeg = 0.002;                      // all cells north of the equator
+constexpr double kLatStartDeg = 0.022; // row 0 center; north-up rows run
+                                       // southward, keeping every cell north
+                                       // of the equator (sensor due south)
 
 void demGeoTransform( double *gt )
 {
@@ -266,7 +268,8 @@ const char *epsg4326Wkt()
     return wkt.c_str();
 }
 
-double demCenterLat( int y ) { return kLatStartDeg + y * kDlatDeg; }
+// North-up grid: latitude DECREASES with row (gt[5] < 0).
+double demCenterLat( int y ) { return kLatStartDeg - y * kDlatDeg; }
 double demCenterLon( int x ) { return kLonStartDeg + x * kDlonDeg; }
 
 } // namespace
@@ -400,7 +403,7 @@ TEST_CASE( "geocodeGroundCell: analytic forward mapping on the circular orbit",
     // slant range, height) must recover the input geodetic position.
     std::mt19937 rng( 42 );
     std::uniform_real_distribution<double> lonDist( demCenterLon( 0 ), demCenterLon( kDemW - 1 ) );
-    std::uniform_real_distribution<double> latDist( demCenterLat( 0 ), demCenterLat( kDemH - 1 ) );
+    std::uniform_real_distribution<double> latDist( demCenterLat( kDemH - 1 ), demCenterLat( 0 ) ); // ascending (north-up: row 0 is northernmost)
     std::uniform_real_distribution<double> hDist( 0.0, 300.0 );
     for ( int i = 0; i < 64; ++i )
     {
@@ -649,16 +652,20 @@ TEST_CASE( "rs:sar_geocode tilted DEM: layover class and gamma0 area factor from
     REQUIRE( writeSarScene( sarPath, sar, kSarW, kSarH, 1, true, orbit ) );
 
     // Ramp rising toward the sensor: the cells sit north of the equator
-    // (sensor due south) and row order runs north→south, so z = +0.06
-    // metres per row is a 6% grade rising toward the equator
-    // (dz/dN = −0.06 m/m). The near-nadir beam (θ0 ≈ 1.3°) lays over on
-    // every interior cell and gamma0 carries the sinθ0/sinθL area factor.
+    // (sensor due south) and row order runs north→south, so z = +0.01
+    // metres per row is a 1% grade rising toward the equator
+    // (dz/dN = −0.01 m/m, α ≈ 0.57°). The near-nadir beam lays over on
+    // every interior cell (θ0 ≤ 0.23° < α) and gamma0 carries the
+    // sinθ0/sinθL area factor. The grade stays shallow ON PURPOSE: at
+    // near-nadir geometry a height Δh moves the range position by Δh/30
+    // pixels, and a taller ramp would carry its cells out of the swath
+    // (honest NaN backscatter) instead of exercising the RTC product.
     const double dLatMetres = kDlatDeg * 111320.0;
     std::vector<float> dem( static_cast<size_t>( kDemW ) * kDemH );
     for ( int y = 0; y < kDemH; ++y )
         for ( int x = 0; x < kDemW; ++x )
             dem[static_cast<size_t>( y ) * kDemW + x] =
-                static_cast<float>( 0.06 * dLatMetres * y );
+                static_cast<float>( 0.01 * dLatMetres * y );
     double gt[6];
     demGeoTransform( gt );
     const QString demPath = tmp.filePath( "dem_ramp.tif" );
@@ -694,6 +701,7 @@ TEST_CASE( "rs:sar_geocode tilted DEM: layover class and gamma0 area factor from
                 // only the strict interior.
                 continue;
             }
+            INFO( "tilted cell (" << x << "," << y << ")" );
             REQUIRE( mask[idx] == 1.0f );
             ++layoverCells;
             // gamma0 = sigma0 · sin θ0 / sin θL evaluated per pixel with
@@ -702,6 +710,8 @@ TEST_CASE( "rs:sar_geocode tilted DEM: layover class and gamma0 area factor from
             const double theta0 = fix.incidenceDeg * M_PI / 180.0;
             const double thetaL = localIncidence[idx] * M_PI / 180.0;
             REQUIRE( localIncidence[idx] > 0.0 );
+            INFO( "rtc cell (" << x << "," << y << ") gamma0=" << gamma0[idx]
+                  << " linc=" << localIncidence[idx] );
             REQUIRE( gamma0[idx]
                      == Approx( 2.0f * static_cast<float>( std::sin( theta0 ) / std::sin( thetaL ) ) )
                             .epsilon( 1e-3 ) );

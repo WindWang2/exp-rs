@@ -103,8 +103,9 @@ TEST_CASE( "sarTemporalStats: closed forms on a hand-computed series",
     REQUIRE( s.validCount == 4 );
     REQUIRE( s.meanLinear == Approx( 3.75 ).margin( 1e-12 ) );
     REQUIRE( s.meanDb == Approx( 10.0 * std::log10( 3.75 ) ).margin( 1e-12 ) );
-    // Population stddev: mean deviation squares (2.75² + 1.25² + 0.25² + 4.25²)/4.
-    const double var = ( 2.75 * 2.75 + 1.25 * 1.25 + 0.25 * 0.25 + 4.25 * 4.25 ) / 4.0;
+    // Population stddev: deviations -2.75, -1.75, 0.25, 4.25 →
+    // (2.75² + 1.75² + 0.25² + 4.25²)/4 = 28.75/4 = 7.1875.
+    const double var = ( 2.75 * 2.75 + 1.75 * 1.75 + 0.25 * 0.25 + 4.25 * 4.25 ) / 4.0;
     REQUIRE( s.stdDevLinear == Approx( std::sqrt( var ) ).margin( 1e-12 ) );
     REQUIRE( s.cv == Approx( std::sqrt( var ) / 3.75 ).margin( 1e-12 ) );
     REQUIRE( s.minLinear == 1.0 );
