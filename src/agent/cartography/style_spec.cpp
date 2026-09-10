@@ -483,7 +483,342 @@ std::vector<std::string> checkStyleApplicability( const Json::Value &styleSpec,
       problems.push_back( id + ": style is not declared applicable to modality '" +
                           dataset["modality"].asString() + "'" );
   }
+
+  // Platform 7.0 modality-aware renderer checks (advisory-free: these are
+  // hard semantic contradictions, not stylistic advice).
+  const std::string renderer =
+    styleSpec.isMember( "raster" ) && styleSpec["raster"].isObject() &&
+        styleSpec["raster"].isMember( "renderertype" ) && styleSpec["raster"]["renderertype"].isString()
+      ? styleSpec["raster"]["renderertype"].asString()
+      : std::string();
+  const std::string datasetModality =
+    dataset.isMember( "modality" ) && dataset["modality"].isString()
+      ? dataset["modality"].asString()
+      : std::string();
+  if ( renderer == "multiband_color" )
+  {
+    if ( dataset.isMember( "band_count" ) && dataset["band_count"].isIntegral() &&
+         dataset["band_count"].asInt() < 3 )
+      problems.push_back( id + ": multiband_color needs at least 3 bands, the dataset has " +
+                          std::to_string( dataset["band_count"].asInt() ) );
+    if ( datasetModality == "sar" )
+      problems.push_back( id + ": SAR backscatter is single-band; multiband_color cannot "
+                               "represent it semantically" );
+  }
+  if ( ( datasetModality == "dem" || datasetModality == "terrain" ) &&
+       styleSpec.isMember( "raster" ) && styleSpec["raster"].isObject() &&
+       !styleSpec["raster"].isMember( "stretch" ) && !styleSpec["raster"].isMember( "classification" ) )
+    problems.push_back( id + ": DEM/terrain styles should declare a stretch or a "
+                             "classification (bare singleband gray hides elevation semantics)" );
+  // Declared uncertainty wants data that can carry it.
+  if ( styleSpec.isMember( "uncertainty" ) && styleSpec["uncertainty"].isObject() )
+  {
+    const std::string kind =
+      styleSpec["uncertainty"].isMember( "kind" ) && styleSpec["uncertainty"]["kind"].isString()
+        ? styleSpec["uncertainty"]["kind"].asString()
+        : "none";
+    if ( kind != "none" && dataset.isMember( "semantics" ) && dataset["semantics"].isArray() )
+    {
+      bool carries = false;
+      for ( const auto &tag : dataset["semantics"] )
+        if ( tag.isString() )
+        {
+          const std::string value = tag.asString();
+          carries = carries || value == "uncertainty" || value == "probability" ||
+                    value == "confidence";
+        }
+      if ( !carries )
+        problems.push_back( id + ": style declares uncertainty (" + kind +
+                            ") but the dataset carries no uncertainty/probability/confidence "
+                            "semantics" );
+    }
+  }
   return problems;
+}
+
+//
+// Platform 7.0 semantic scheme / nodata / uncertainty / contrast surfaces.
+//
+
+bool isStyleScheme( const std::string &scheme )
+{
+  return scheme == "categorical" || scheme == "sequential" || scheme == "diverging";
+}
+
+std::vector<std::string> validateStyleSemantics( const Json::Value &styleSpec )
+{
+  std::vector<std::string> problems;
+  if ( !styleSpec.isObject() )
+    return problems;
+  const std::string id = styleSpec.isMember( "id" ) && styleSpec["id"].isString()
+                           ? styleSpec["id"].asString()
+                           : "";
+  const Json::Value *classification = nullptr;
+  if ( styleSpec.isMember( "raster" ) && styleSpec["raster"].isObject() &&
+       styleSpec["raster"].isMember( "classification" ) &&
+       styleSpec["raster"]["classification"].isObject() )
+    classification = &styleSpec["raster"]["classification"];
+
+  if ( classification && classification->isMember( "scheme" ) )
+  {
+    const Json::Value &scheme = ( *classification )["scheme"];
+    if ( !scheme.isString() || !isStyleScheme( scheme.asString() ) )
+    {
+      problems.push_back( id + ": raster.classification.scheme must be categorical, "
+                               "sequential or diverging" );
+    }
+    else if ( scheme.asString() == "diverging" )
+    {
+      if ( !classification->isMember( "center" ) || !( *classification )["center"].isNumeric() )
+        problems.push_back( id + ": diverging scheme requires a numeric "
+                                "raster.classification.center (the neutral value)" );
+      else if ( classification->isMember( "classes" ) && ( *classification )["classes"].isArray() &&
+                !( *classification )["classes"].empty() )
+      {
+        const double center = ( *classification )["center"].asDouble();
+        double lo = 0.0;
+        double hi = 0.0;
+        bool first = true;
+        for ( const auto &entry : ( *classification )["classes"] )
+        {
+          if ( !entry.isObject() )
+            continue;
+          if ( entry.isMember( "min" ) && entry["min"].isNumeric() )
+          {
+            lo = first ? entry["min"].asDouble() : std::min( lo, entry["min"].asDouble() );
+            first = false;
+          }
+          if ( entry.isMember( "max" ) && entry["max"].isNumeric() )
+          {
+            hi = first ? entry["max"].asDouble() : std::max( hi, entry["max"].asDouble() );
+            first = false;
+          }
+        }
+        if ( !first && ( center < lo - 1e-9 || center > hi + 1e-9 ) )
+          problems.push_back( id + ": diverging center " + std::to_string( center ) +
+                              " lies outside the declared class range [" + std::to_string( lo ) +
+                              ", " + std::to_string( hi ) + "]" );
+      }
+    }
+    else if ( scheme.asString() == "categorical" && classification->isMember( "mode" ) &&
+              classification->at( "mode" ).isString() &&
+              classification->at( "mode" ).asString() == "continuous" )
+      problems.push_back( id + ": categorical scheme contradicts classification.mode "
+                               "'continuous' (categorical classes are discrete)" );
+  }
+
+  if ( styleSpec.isMember( "raster" ) && styleSpec["raster"].isObject() &&
+       styleSpec["raster"].isMember( "nodata" ) )
+  {
+    const Json::Value &nodata = styleSpec["raster"]["nodata"];
+    if ( !nodata.isObject() )
+      problems.push_back( id + ": raster.nodata must be an object" );
+    else
+    {
+      if ( nodata.isMember( "value" ) && !nodata["value"].isNumeric() )
+        problems.push_back( id + ": raster.nodata.value must be numeric" );
+      if ( nodata.isMember( "transparent" ) && !nodata["transparent"].isBool() )
+        problems.push_back( id + ": raster.nodata.transparent must be a boolean" );
+      if ( nodata.isMember( "label" ) && !nodata["label"].isString() )
+        problems.push_back( id + ": raster.nodata.label must be a string" );
+    }
+  }
+
+  if ( styleSpec.isMember( "uncertainty" ) )
+  {
+    const Json::Value &uncertainty = styleSpec["uncertainty"];
+    if ( !uncertainty.isObject() )
+      problems.push_back( id + ": uncertainty must be an object" );
+    else
+    {
+      const std::string kind = uncertainty.isMember( "kind" ) && uncertainty["kind"].isString()
+                                 ? uncertainty["kind"].asString()
+                                 : "";
+      if ( kind != "none" && kind != "band" && kind != "hatch" &&
+           kind != "confidence_interval" )
+        problems.push_back( id + ": uncertainty.kind must be none, band, hatch or "
+                                "confidence_interval" );
+      if ( uncertainty.isMember( "level" ) &&
+           ( !uncertainty["level"].isNumeric() || uncertainty["level"].asDouble() < 0 ||
+             uncertainty["level"].asDouble() > 1 ) )
+        problems.push_back( id + ": uncertainty.level must be a number in [0, 1]" );
+      if ( uncertainty.isMember( "field" ) && !uncertainty["field"].isString() )
+        problems.push_back( id + ": uncertainty.field must be a string" );
+    }
+  }
+  return problems;
+}
+
+namespace {
+
+/// WCAG relative luminance of a hex color ("#rrggbb"); 0 when unparseable.
+double relativeLuminance( const std::string &hex )
+{
+  if ( hex.size() != 7 || hex[0] != '#' )
+    return -1.0;
+  auto nibble = []( char c ) -> int {
+    if ( c >= '0' && c <= '9' )
+      return c - '0';
+    if ( c >= 'a' && c <= 'f' )
+      return c - 'a' + 10;
+    if ( c >= 'A' && c <= 'F' )
+      return c - 'A' + 10;
+    return -1;
+  };
+  int rgb[3];
+  for ( int i = 0; i < 3; ++i )
+  {
+    const int hi = nibble( hex[1 + 2 * i] );
+    const int lo = nibble( hex[2 + 2 * i] );
+    if ( hi < 0 || lo < 0 )
+      return -1.0;
+    rgb[i] = hi * 16 + lo;
+  }
+  double linear[3];
+  for ( int i = 0; i < 3; ++i )
+  {
+    const double c = rgb[i] / 255.0;
+    linear[i] = c <= 0.04045 ? c / 12.92 : std::pow( ( c + 0.055 ) / 1.055, 2.4 );
+  }
+  return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+}
+
+double contrastRatio( double l1, double l2 )
+{
+  if ( l1 < 0 || l2 < 0 )
+    return -1.0;
+  const double lighter = std::max( l1, l2 );
+  const double darker = std::min( l1, l2 );
+  return ( lighter + 0.05 ) / ( darker + 0.05 );
+}
+
+} // namespace
+
+std::vector<std::string> checkStyleContrast( const Json::Value &resolvedStyleSpec,
+                                             const Json::Value *tokens )
+{
+  std::vector<std::string> warnings;
+  if ( !resolvedStyleSpec.isObject() )
+    return warnings;
+  const std::string id = resolvedStyleSpec.isMember( "id" ) && resolvedStyleSpec["id"].isString()
+                           ? resolvedStyleSpec["id"].asString()
+                           : "";
+  const Json::Value &contrast =
+    resolvedStyleSpec.isMember( "contrast" ) && resolvedStyleSpec["contrast"].isObject()
+      ? resolvedStyleSpec["contrast"]
+      : Json::Value( Json::objectValue );
+  const double minText = contrast.isMember( "min_text" ) && contrast["min_text"].isNumeric()
+                           ? contrast["min_text"].asDouble()
+                           : 4.5;
+  const double minClass = contrast.isMember( "min_class" ) && contrast["min_class"].isNumeric()
+                            ? contrast["min_class"].asDouble()
+                            : 1.5;
+
+  // Label text vs background (needs a token background; without tokens the
+  // check degrades to class-pair checks only — reported once).
+  std::vector<std::string> textColors;
+  if ( resolvedStyleSpec.isMember( "vector" ) && resolvedStyleSpec["vector"].isObject() &&
+       resolvedStyleSpec["vector"].isMember( "labels" ) &&
+       resolvedStyleSpec["vector"]["labels"].isObject() &&
+       resolvedStyleSpec["vector"]["labels"].isMember( "color" ) &&
+       resolvedStyleSpec["vector"]["labels"]["color"].isString() )
+    textColors.push_back( resolvedStyleSpec["vector"]["labels"]["color"].asString() );
+  double background = -1.0;
+  std::string backgroundHex = "#ffffff";
+  if ( tokens && tokens->isObject() && tokens->isMember( "colors" ) &&
+       ( *tokens )["colors"].isObject() && ( *tokens )["colors"].isMember( "background" ) &&
+       ( *tokens )["colors"]["background"].isString() )
+  {
+    backgroundHex = ( *tokens )["colors"]["background"].asString();
+    background = relativeLuminance( backgroundHex );
+  }
+  if ( background >= 0 )
+  {
+    for ( const std::string &color : textColors )
+    {
+      const double ratio = contrastRatio( relativeLuminance( color ), background );
+      if ( ratio >= 0 && ratio < minText )
+        warnings.push_back( id + ": label color " + color + " on background " + backgroundHex +
+                            " has contrast " + std::to_string( ratio ).substr( 0, 5 ) +
+                            " (< " + std::to_string( minText ).substr( 0, 4 ) + ")" );
+    }
+  }
+
+  // Consecutive class color pairs must stay distinguishable.
+  const auto checkPairs = [ & ]( const char *where, const Json::Value &entries ) {
+    std::string previous;
+    for ( const auto &entry : entries )
+    {
+      if ( !entry.isObject() || !entry.isMember( "color" ) || !entry["color"].isString() )
+        continue;
+      const std::string color = entry["color"].asString();
+      if ( !previous.empty() )
+      {
+        const double ratio = contrastRatio( relativeLuminance( color ),
+                                            relativeLuminance( previous ) );
+        if ( ratio >= 0 && ratio < minClass )
+          warnings.push_back( id + ": adjacent " + where + " colors " + previous + " / " +
+                              color + " have contrast " + std::to_string( ratio ).substr( 0, 5 ) +
+                              " (< " + std::to_string( minClass ).substr( 0, 4 ) + ")" );
+      }
+      previous = color;
+    }
+  };
+  if ( resolvedStyleSpec.isMember( "raster" ) && resolvedStyleSpec["raster"].isObject() &&
+       resolvedStyleSpec["raster"].isMember( "classification" ) &&
+       resolvedStyleSpec["raster"]["classification"].isObject() &&
+       resolvedStyleSpec["raster"]["classification"].isMember( "classes" ) &&
+       resolvedStyleSpec["raster"]["classification"]["classes"].isArray() )
+    checkPairs( "class", resolvedStyleSpec["raster"]["classification"]["classes"] );
+  if ( resolvedStyleSpec.isMember( "vector" ) && resolvedStyleSpec["vector"].isObject() &&
+       resolvedStyleSpec["vector"].isMember( "categories" ) &&
+       resolvedStyleSpec["vector"]["categories"].isArray() )
+    checkPairs( "category", resolvedStyleSpec["vector"]["categories"] );
+  return warnings;
+}
+
+bool repairStyleSemantics( Json::Value &styleSpec, std::vector<std::string> *decisions )
+{
+  if ( !styleSpec.isObject() || !styleSpec.isMember( "raster" ) ||
+       !styleSpec["raster"].isObject() || !styleSpec["raster"].isMember( "classification" ) ||
+       !styleSpec["raster"]["classification"].isObject() )
+    return false;
+  Json::Value classification = styleSpec["raster"]["classification"];
+  if ( !classification.isMember( "scheme" ) || !classification["scheme"].isString() ||
+       classification["scheme"].asString() != "diverging" ||
+       classification.isMember( "center" ) )
+    return false;
+  // Canonical fix: a diverging ramp without a declared center whose class
+  // structure brackets 0 takes center = 0 (the neutral-zero convention).
+  if ( !classification.isMember( "classes" ) || !classification["classes"].isArray() ||
+       classification["classes"].empty() )
+    return false;
+  double lo = 0.0;
+  double hi = 0.0;
+  bool first = true;
+  for ( const auto &entry : classification["classes"] )
+  {
+    if ( !entry.isObject() )
+      continue;
+    if ( entry.isMember( "min" ) && entry["min"].isNumeric() )
+    {
+      lo = first ? entry["min"].asDouble() : std::min( lo, entry["min"].asDouble() );
+      first = false;
+    }
+    if ( entry.isMember( "max" ) && entry["max"].isNumeric() )
+    {
+      hi = first ? entry["max"].asDouble() : std::max( hi, entry["max"].asDouble() );
+      first = false;
+    }
+  }
+  if ( first || lo > 0 || hi < 0 )
+    return false; // does not bracket zero: reject, no canonical fix
+  classification["center"] = 0.0;
+  styleSpec["raster"]["classification"] = classification;
+  if ( decisions )
+    decisions->push_back( "diverging scheme without center: derived center = 0 from the "
+                          "zero-bracketing class structure" );
+  return true;
 }
 
 std::vector<std::string> validateStyleSpec( const Json::Value &doc )
@@ -526,6 +861,9 @@ std::vector<std::string> validateStyleSpec( const Json::Value &doc )
   // Platform 6.0 (Milestone E): semantic applicability surface.
   for ( const auto &problem : validateStyleApplicability( doc ) )
     problems.push_back( problem );
+  for ( const auto &problem : validateStyleSemantics( doc ) )
+    problems.push_back( problem );
+
   return problems;
 }
 

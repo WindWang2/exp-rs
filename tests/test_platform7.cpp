@@ -11,6 +11,7 @@
 
 #include "agent/cartography/composition.h"
 #include "agent/cartography/registry.h"
+#include "agent/cartography/style_spec.h"
 #include "agent/cartography/typography.h"
 #include "agent/mapspec/mapspec.h"
 
@@ -481,6 +482,219 @@ TEST_CASE( "P7 typography: fit report JSON projection is complete",
     REQUIRE( json.isMember( key ) );
   REQUIRE( json["lines"].size() == 1 );
   REQUIRE( json["lines"][0].asString() == "title" );
+}
+
+TEST_CASE( "P7 style: diverging scheme requires and validates a center",
+           "[platform7][style]" )
+{
+  Json::Value style( Json::objectValue );
+  style["id"] = "p7-diverging";
+  style["version"] = 1;
+  style["applies_to"] = "raster";
+  style["raster"]["renderertype"] = "singleband_pseudocolor";
+  style["raster"]["classification"]["mode"] = "discrete";
+  style["raster"]["classification"]["scheme"] = "diverging";
+  Json::Value classes( Json::arrayValue );
+  double lo = -1.0;
+  for ( int i = 0; i < 4; ++i )
+  {
+    Json::Value entry( Json::objectValue );
+    entry["min"] = lo;
+    entry["max"] = lo + 0.5;
+    entry["label"] = "c" + std::to_string( i );
+    entry["color"] = "#2233aa";
+    classes.append( entry );
+    lo += 0.5;
+  }
+  style["raster"]["classification"]["classes"] = classes;
+
+  // Diverging without center → rejected (validateStyleSpec embeds the
+  // semantics check).
+  std::vector<std::string> problems = validateStyleSpec( style );
+  bool sawCenter = false;
+  for ( const auto &problem : problems )
+    sawCenter = sawCenter || problem.find( "diverging scheme requires" ) != std::string::npos;
+  REQUIRE( sawCenter );
+
+  // Center outside the class range → rejected.
+  style["raster"]["classification"]["center"] = 5.0;
+  problems = validateStyleSpec( style );
+  sawCenter = false;
+  for ( const auto &problem : problems )
+    sawCenter = sawCenter || problem.find( "outside the declared class range" ) != std::string::npos;
+  REQUIRE( sawCenter );
+
+  // Deterministic repair: zero-bracketing classes derive center = 0.
+  style["raster"]["classification"].removeMember( "center" );
+  std::vector<std::string> decisions;
+  REQUIRE( repairStyleSemantics( style, &decisions ) );
+  REQUIRE( style["raster"]["classification"]["center"].asDouble() == Catch::Approx( 0.0 ) );
+  REQUIRE( decisions.size() == 1 );
+  REQUIRE( validateStyleSpec( style ).empty() );
+
+  // A class structure that does not bracket zero cannot be repaired.
+  Json::Value positive( Json::objectValue );
+  positive["id"] = "p7-positive";
+  positive["version"] = 1;
+  positive["applies_to"] = "raster";
+  positive["raster"]["renderertype"] = "singleband_pseudocolor";
+  positive["raster"]["classification"]["mode"] = "discrete";
+  positive["raster"]["classification"]["scheme"] = "diverging";
+  Json::Value posClasses( Json::arrayValue );
+  Json::Value entry( Json::objectValue );
+  entry["min"] = 0.2;
+  entry["max"] = 0.9;
+  entry["label"] = "c";
+  entry["color"] = "#aa2233";
+  posClasses.append( entry );
+  positive["raster"]["classification"]["classes"] = posClasses;
+  REQUIRE_FALSE( repairStyleSemantics( positive, nullptr ) );
+}
+
+TEST_CASE( "P7 style: categorical scheme contradicts continuous mode",
+           "[platform7][style][validation]" )
+{
+  Json::Value style( Json::objectValue );
+  style["id"] = "p7-cat";
+  style["version"] = 1;
+  style["applies_to"] = "raster";
+  style["raster"]["renderertype"] = "paletted";
+  style["raster"]["classification"]["mode"] = "continuous";
+  style["raster"]["classification"]["scheme"] = "categorical";
+  const std::vector<std::string> problems = validateStyleSpec( style );
+  bool saw = false;
+  for ( const auto &problem : problems )
+    saw = saw || problem.find( "categorical scheme contradicts" ) != std::string::npos;
+  REQUIRE( saw );
+}
+
+TEST_CASE( "P7 style: nodata and uncertainty blocks are shape-validated",
+           "[platform7][style][validation]" )
+{
+  Json::Value style( Json::objectValue );
+  style["id"] = "p7-nodata";
+  style["version"] = 1;
+  style["applies_to"] = "raster";
+  style["raster"]["renderertype"] = "singleband_gray";
+  style["raster"]["nodata"]["value"] = "not-a-number";
+  style["raster"]["nodata"]["transparent"] = "yes";
+  style["raster"]["nodata"]["label"] = 7;
+  style["uncertainty"]["kind"] = "vibes";
+  style["uncertainty"]["level"] = 1.5;
+  const std::vector<std::string> problems = validateStyleSpec( style );
+  int saw = 0;
+  for ( const auto &problem : problems )
+  {
+    saw += problem.find( "nodata.value must be numeric" ) != std::string::npos ? 1 : 0;
+    saw += problem.find( "nodata.transparent must be a boolean" ) != std::string::npos ? 1 : 0;
+    saw += problem.find( "nodata.label must be a string" ) != std::string::npos ? 1 : 0;
+    saw += problem.find( "uncertainty.kind must be" ) != std::string::npos ? 1 : 0;
+    saw += problem.find( "uncertainty.level must be" ) != std::string::npos ? 1 : 0;
+  }
+  REQUIRE( saw == 5 );
+
+  Json::Value good( Json::objectValue );
+  good["id"] = "p7-nodata-good";
+  good["version"] = 1;
+  good["applies_to"] = "raster";
+  good["raster"]["renderertype"] = "singleband_gray";
+  good["raster"]["nodata"]["value"] = -9999.0;
+  good["raster"]["nodata"]["transparent"] = true;
+  good["raster"]["nodata"]["label"] = "NoData";
+  good["uncertainty"]["kind"] = "confidence_interval";
+  good["uncertainty"]["level"] = 0.9;
+  REQUIRE( validateStyleSpec( good ).empty() );
+}
+
+TEST_CASE( "P7 style: applicability refuses SAR/multiband and DEM-without-stretch",
+           "[platform7][style]" )
+{
+  Json::Value sar( Json::objectValue );
+  sar["id"] = "p7-sar-mb";
+  sar["version"] = 1;
+  sar["applies_to"] = "raster";
+  sar["raster"]["renderertype"] = "multiband_color";
+  Json::Value dataset( Json::objectValue );
+  dataset["kind"] = "raster";
+  dataset["modality"] = "sar";
+  dataset["band_count"] = 1;
+  const std::vector<std::string> problems = checkStyleApplicability( sar, dataset );
+  bool sawSar = false;
+  bool sawBands = false;
+  for ( const auto &problem : problems )
+  {
+    sawSar = sawSar || problem.find( "SAR backscatter is single-band" ) != std::string::npos;
+    sawBands = sawBands || problem.find( "needs at least 3 bands" ) != std::string::npos;
+  }
+  REQUIRE( sawSar );
+  REQUIRE( sawBands );
+
+  Json::Value dem( Json::objectValue );
+  dem["id"] = "p7-dem-bare";
+  dem["version"] = 1;
+  dem["applies_to"] = "raster";
+  dem["raster"]["renderertype"] = "singleband_gray";
+  Json::Value demData( Json::objectValue );
+  demData["kind"] = "raster";
+  demData["modality"] = "dem";
+  const std::vector<std::string> demProblems = checkStyleApplicability( dem, demData );
+  bool sawDem = false;
+  for ( const auto &problem : demProblems )
+    sawDem = sawDem || problem.find( "DEM/terrain styles should declare" ) != std::string::npos;
+  REQUIRE( sawDem );
+
+  // Declared stretch satisfies the DEM requirement.
+  dem["raster"]["stretch"]["type"] = "minmax";
+  REQUIRE( checkStyleApplicability( dem, demData ).empty() );
+}
+
+TEST_CASE( "P7 style: contrast checks report sub-floor pairs deterministically",
+           "[platform7][style]" )
+{
+  Json::Value style( Json::objectValue );
+  style["id"] = "p7-contrast";
+  style["version"] = 1;
+  style["applies_to"] = "raster";
+  style["raster"]["renderertype"] = "singleband_pseudocolor";
+  Json::Value classes( Json::arrayValue );
+  const char *colors[] = { "#111111", "#1a1a1a", "#eeeeee" }; // first pair too close
+  for ( int i = 0; i < 3; ++i )
+  {
+    Json::Value entry( Json::objectValue );
+    entry["min"] = i * 1.0;
+    entry["max"] = i * 1.0 + 1.0;
+    entry["label"] = "c" + std::to_string( i );
+    entry["color"] = colors[i];
+    classes.append( entry );
+  }
+  style["raster"]["classification"]["classes"] = classes;
+
+  const std::vector<std::string> warnings = checkStyleContrast( style, nullptr );
+  REQUIRE( warnings.size() == 1 );
+  REQUIRE( warnings[0].find( "adjacent class colors" ) != std::string::npos );
+  REQUIRE( warnings[0].find( "#111111 / #1a1a1a" ) != std::string::npos );
+
+  // Distinct-enough consecutive pairs pass clean (#111111 -> #3a3a3a has
+  // ratio ~1.67, #3a3a3a -> #eeeeee ~9.8).
+  style["raster"]["classification"]["classes"][1]["color"] = "#3a3a3a";
+  REQUIRE( checkStyleContrast( style, nullptr ).empty() );
+}
+
+TEST_CASE( "P7 style: shipped catalog keeps validating (compat)",
+           "[platform7][style][compat]" )
+{
+  StyleRegistry &registry = StyleRegistry::instance();
+  registry.setDirectory( QStringLiteral( SICNU_CARTOGRAPHY_DATA_DIR ) );
+  registry.reload();
+  REQUIRE( registry.loadProblems().isEmpty() );
+  int validated = 0;
+  for ( const auto &style : registry.styles() )
+  {
+    ++validated;
+    INFO( style["id"].asString() );
+    REQUIRE( validateStyleSpec( style ).empty() );
+  }
+  REQUIRE( validated >= 10 );
 }
 
 TEST_CASE( "P7 solver: soft failure downgrades the objective, never convergence",
