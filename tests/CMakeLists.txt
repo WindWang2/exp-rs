@@ -7449,6 +7449,7 @@ sicnu_discover_tests(test_known_answer_corpus_8 TIMEOUT 180)
 add_executable(test_contract_fuzz_ipc
   test_contract_fuzz_ipc.cpp
   ${CMAKE_SOURCE_DIR}/src/sdk/exprs/plugin_manifest.cpp
+  ${CMAKE_SOURCE_DIR}/src/sdk/exprs/plugin_permissions.cpp
 )
 target_link_libraries(test_contract_fuzz_ipc PRIVATE
   Catch2::Catch2WithMain
@@ -7457,6 +7458,7 @@ target_link_libraries(test_contract_fuzz_ipc PRIVATE
 )
 target_include_directories(test_contract_fuzz_ipc PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/sdk
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 if(TARGET jsoncpp)
