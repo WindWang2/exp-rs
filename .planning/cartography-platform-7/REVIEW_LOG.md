@@ -52,3 +52,41 @@ Running log of self-review findings and the final adversarial review disposition
   5. accuracy_summary renderer gate + inline-only check keyed on mode,
   6. test fixture defects (missing style envelopes, text on titles,
      anchor-resolved expectation, provenance semantics).
+
+## Final adversarial review (2 read-only subagents, both dispatched)
+
+Verdicts before remediation: reviewer 1 (solver/typography/templates/digest)
+FAIL — 0 P0, 1 P1, 3 P2, 9 P3. Reviewer 2 (style/charts/QA/drift/catalog)
+FAIL — 0 P0, 2 P1, 5 P2, 7 P3.
+
+### Dispositions
+
+- ALL 3 P1 FIXED (commit f2c16a1c): stale blockedInLastPass in the core
+  search restore; wrap-repair convergence via the shared typography model
+  (test pins the re-preflight clears); raster.nodata doc claim corrected.
+- ALL P2 FIXED: runtime constraint identity + duplicate-id validation;
+  per-target core budget + honest bounded flag; accuracy derivation
+  extracted/pinned numerically, non-numeric cells rejected, plain-table
+  recursion, 31-class cap, dual-axis right margin + length validation;
+  checkStyleContrast surfaced via the new MAP_CONTRAST_LOW preflight rule.
+- P3 fixed: wrap line-budget truncation reporting, ellipsis lead-byte
+  cleanup, fontPolicy label, permutation-claim scoping, diverging center
+  scan flags, digest integer formatting + length framing (golden
+  re-pinned), ontology docs, jsoncpp comment wording, legend-test registry
+  pinning.
+- P3 accepted with rationale: renderer-side label reads on validation-
+  gated input (renderChartToFile validates first); O(line²) wrap scan on
+  adversarially wide boxes (bounded at map scale); 63+64 wrap nuance
+  (budget flag reports it); 3-digit hex not contrast-checked (#rrggbb
+  documented); mixed v1/v2 required_slots stale key (pre-existing 6.0
+  behavior); provenance special-key stamping semantics (documented).
+
+### Post-remediation validation (local, Windows, headless)
+
+- `[platform7]`: 45 cases — ALL PASSED.
+- Full suite `~[visual]`: **145 cases / 1312 assertions — ALL PASSED.**
+- `[visual]`: repair-to-pass fixture passes under offscreen; the
+  QgsLayoutExporter PNG rasterization case still terminates the process
+  (exit 3) in this headless session — documented environmental
+  limitation; the rendering-free structural digest carries the local
+  evidence (its golden is pinned).
