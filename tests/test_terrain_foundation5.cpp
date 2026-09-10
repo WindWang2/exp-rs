@@ -13,6 +13,7 @@
 #include <json/json.h>
 
 #include <cmath>
+#include <iostream>
 #include <limits>
 #include <vector>
 
@@ -274,3 +275,165 @@ TEST_CASE( "DEM flow accumulation preserves NoData sentinel",
   REQUIRE( acc[15] >= 1.0f );
 }
 
+
+// ---------------------------------------------------------------------------
+// Watershed delineation (Scientific Algorithms 7.0, capability package D):
+// D8 reverse-BFS labelling with the documented first-pour-point tie-break.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Watershed labels: two basins split by a ridge, ridge stays unlabeled",
+           "[terrain][watershed]" )
+{
+  // z = 10 − |x−3| + 0.01·y on 7×5: the column x=3 is a ridge. The west
+  // half drains to (0,0) (pour 1), the east half to (6,0) (pour 2). The
+  // ridge cells have an east/west slope tie; the documented E-first
+  // tie-break of flowDirections sends them into the EAST basin, so every
+  // cell is labeled. The unlabeled-sink case is the valley test below.
+  constexpr int kW = 7;
+  constexpr int kH = 5;
+  std::vector<float> dem( static_cast<size_t>( kW ) * kH );
+  for ( int y = 0; y < kH; ++y )
+    for ( int x = 0; x < kW; ++x )
+      dem[static_cast<size_t>( y ) * kW + x] =
+          10.0f - std::fabs( static_cast<float>( x - 3 ) ) + 0.01f * y;
+
+  std::vector<float> filled( dem.size() );
+  REQUIRE( fillDepressions( dem.data(), filled.data(), kW, kH, kNodata ) );
+  std::vector<float> dir( dem.size() );
+  REQUIRE( flowDirections( filled.data(), dir.data(), kW, kH, kNodata ) );
+
+  std::vector<float> labels;
+  REQUIRE( watershedLabels( dir.data(), kW, kH, { { 0, 0 }, { 6, 0 } }, &labels ) );
+  for ( int y = 0; y < kH; ++y )
+    for ( int x = 0; x < kW; ++x )
+    {
+      INFO( "cell (x=" << x << " y=" << y << ")" );
+      REQUIRE( labels[static_cast<size_t>( y ) * kW + x] == ( x < 3 ? 1.0f : 2.0f ) );
+    }
+}
+
+TEST_CASE( "Watershed labels: a valley sink outside the pours stays unlabeled",
+           "[terrain][watershed]" )
+{
+  // z = |x−3| + 0.01·y on 7×5: the column x=3 is a north-draining VALLEY
+  // whose outlet (3,0) is a D8 sink. BOTH walls drain toward the valley
+  // (z rises away from x=3), so every cell except the pour points
+  // themselves drains into the (3,0) sink and stays unlabeled.
+  constexpr int kW = 7;
+  constexpr int kH = 5;
+  std::vector<float> dem( static_cast<size_t>( kW ) * kH );
+  for ( int y = 0; y < kH; ++y )
+    for ( int x = 0; x < kW; ++x )
+      dem[static_cast<size_t>( y ) * kW + x] =
+          std::fabs( static_cast<float>( x - 3 ) ) + 0.01f * y;
+  std::vector<float> filled( dem.size() );
+  REQUIRE( fillDepressions( dem.data(), filled.data(), kW, kH, kNodata ) );
+  std::vector<float> dir( dem.size() );
+  REQUIRE( flowDirections( filled.data(), dir.data(), kW, kH, kNodata ) );
+  std::vector<float> labels;
+  REQUIRE( watershedLabels( dir.data(), kW, kH, { { 0, 0 }, { 6, 0 } }, &labels ) );
+  for ( int y = 0; y < kH; ++y )
+  {
+    for ( int x = 0; x < kW; ++x )
+      std::cout << "[" << dir[static_cast<size_t>( y ) * kW + x] << "/"
+                << labels[static_cast<size_t>( y ) * kW + x] << "]";
+    std::cout << std::endl;
+  }
+  for ( int y = 0; y < kH; ++y )
+    for ( int x = 0; x < kW; ++x )
+    {
+      INFO( "cell (x=" << x << " y=" << y << ")" );
+      // Everything, including both walls, drains into the (3,0) valley
+      // sink: only the pour cells themselves carry a label.
+      const float expected =
+          ( x == 0 && y == 0 ) ? 1.0f : ( ( x == 6 && y == 0 ) ? 2.0f : 0.0f );
+      REQUIRE( labels[static_cast<size_t>( y ) * kW + x] == expected );
+    }
+}
+
+TEST_CASE( "Watershed labels: duplicates keep the first label, out-of-range refuses, empty labels nothing",
+           "[terrain][watershed]" )
+{
+  // Tilted plane z = x drains everything to the west edge.
+  constexpr int kW = 4;
+  constexpr int kH = 3;
+  std::vector<float> dem( static_cast<size_t>( kW ) * kH );
+  for ( int y = 0; y < kH; ++y )
+    for ( int x = 0; x < kW; ++x )
+      dem[static_cast<size_t>( y ) * kW + x] = static_cast<float>( x );
+  std::vector<float> filled( dem.size() );
+  REQUIRE( fillDepressions( dem.data(), filled.data(), kW, kH, kNodata ) );
+  std::vector<float> dir( dem.size() );
+  REQUIRE( flowDirections( filled.data(), dir.data(), kW, kH, kNodata ) );
+
+  // Everything drains to the whole west column; pouring any west cell
+  // labels the cells upstream of it. Pour (0,1): the two east rows drain
+  // diagonally — assert only cells on a path into (0,1) carry label 1.
+  std::vector<float> labels;
+  REQUIRE( watershedLabels( dir.data(), kW, kH, { { 0, 1 }, { 0, 1 } }, &labels ) );
+  // (1,1) drains west straight into the pour; (1,0) drains into (0,0),
+  // which is NOT a pour point here and must stay unlabeled.
+  REQUIRE( labels[static_cast<size_t>( 1 ) * kW + 1] == 1.0f );
+  REQUIRE( labels[static_cast<size_t>( 0 ) * kW + 1] == 0.0f );
+
+  REQUIRE_FALSE( watershedLabels( dir.data(), kW, kH, { { 99, 0 } }, &labels ) );
+  REQUIRE( watershedLabels( dir.data(), kW, kH, {}, &labels ) );
+  for ( float v : labels )
+    REQUIRE( v == 0.0f );
+}
+
+TEST_CASE( "rs:terrain_flow E2E: watershed product with pour points",
+           "[terrain][watershed][operator][e2e]" )
+{
+  using namespace sicnu::testing;
+  using namespace sicnu::operators;
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+
+  constexpr int kW = 7;
+  constexpr int kH = 5;
+  RsSyntheticRasterBuilder b( kW, kH, 1 );
+  b.withCrs( "EPSG:32650" );
+  b.withGeoTransform( 0.0, 1.0, static_cast<double>( kH ), -1.0 );
+  for ( int y = 0; y < kH; ++y )
+    for ( int x = 0; x < kW; ++x )
+      b.withPixel( 1, x, y,
+                   10.0f - std::fabs( static_cast<float>( x - 3 ) ) + 0.01f * y );
+  const QString demPath = b.writeToDisk( dir.filePath( "dem.tif" ) );
+  REQUIRE( !demPath.isEmpty() );
+
+  auto op = RSOperatorRegistry::instance().create( "rs:terrain_flow" );
+  REQUIRE( op != nullptr );
+
+  RSOperatorContext context;
+  Json::Value params( Json::objectValue );
+  params["input"] = demPath.toStdString();
+  params["output"] = dir.filePath( "basins.tif" ).toStdString();
+  params["product"] = "watershed";
+  params["pour_points"] = "0,0;6,0";
+  REQUIRE_NOTHROW( op->run( params, context ) );
+
+  GdalDatasetWrapper outDs;
+  REQUIRE( outDs.open( dir.filePath( "basins.tif" ) ) );
+  std::vector<float> labels( static_cast<size_t>( kW ) * kH );
+  REQUIRE( outDs.readBandData( 1, labels.data(), kW, kH ) );
+  for ( int y = 0; y < kH; ++y )
+  {
+    for ( int x = 0; x < kW; ++x )
+      std::cout << "[" << labels[static_cast<size_t>( y ) * kW + x] << "]";
+    std::cout << std::endl;
+  }
+  for ( int y = 0; y < kH; ++y )
+    for ( int x = 0; x < kW; ++x )
+    {
+      INFO( "cell (x=" << x << " y=" << y << ")" );
+      REQUIRE( labels[static_cast<size_t>( y ) * kW + x] == ( x < 3 ? 1.0f : 2.0f ) );
+    }
+
+  // Missing pour_points is a typed refusal.
+  Json::Value bad = params;
+  bad["output"] = dir.filePath( "basins2.tif" ).toStdString();
+  bad.removeMember( "pour_points" );
+  RSOperatorContext ctx2;
+  REQUIRE_THROWS_AS( op->run( bad, ctx2 ), RSOperatorError );
+}

@@ -218,4 +218,73 @@ bool flowAccumulation( const float *dir, float *acc, int width, int height,
     return true;
 }
 
+bool watershedLabels( const float *dir, int width, int height,
+                      const std::vector<std::pair<int, int>> &pourPoints,
+                      std::vector<float> *labels )
+{
+    if ( dir == nullptr || labels == nullptr || width <= 0 || height <= 0 )
+        return false;
+    const size_t n = static_cast<size_t>( width ) * height;
+    labels->assign( n, 0.0f );
+    if ( pourPoints.empty() )
+        return true;
+
+    // BFS upstream: from every labeled cell, label the neighbors whose D8
+    // direction points INTO it. FIFO queue seeded in pour-point order keeps
+    // the labelling deterministic (first pour point wins a shared cell).
+    std::vector<size_t> queue;
+    queue.reserve( n );
+    for ( size_t k = 0; k < pourPoints.size(); ++k )
+    {
+        const int px = pourPoints[k].first;
+        const int py = pourPoints[k].second;
+        if ( px < 0 || py < 0 || px >= width || py >= height )
+            return false;
+        const size_t idx = static_cast<size_t>( py ) * width + px;
+        if ( ( *labels )[idx] == 0.0f ) // duplicate pour points keep their first label
+        {
+            ( *labels )[idx] = static_cast<float>( k + 1 );
+            queue.push_back( idx );
+        }
+    }
+    for ( size_t head = 0; head < queue.size(); ++head )
+    {
+        const size_t cur = queue[head];
+        const float label = ( *labels )[cur];
+        const int cx = static_cast<int>( cur % width );
+        const int cy = static_cast<int>( cur / width );
+        // A neighbour drains into cur only when its D8 code is the REVERSE
+        // of the step cur->neighbour (E<->W, SE<->NW, S<->N, SW<->NE).
+        auto reverseCode = []( int code ) {
+            switch ( code )
+            {
+            case 1: return 16;   // E -> W
+            case 2: return 32;   // SE -> NW
+            case 4: return 64;   // S -> N
+            case 8: return 128;  // SW -> NE
+            case 16: return 1;   // W -> E
+            case 32: return 2;   // NW -> SE
+            case 64: return 4;   // N -> S
+            default: return 8;   // NE -> SW (128)
+            }
+        };
+        for ( const Neighbor &nb : kNeighbors )
+        {
+            const int nx = cx + nb.dx;
+            const int ny = cy + nb.dy;
+            if ( nx < 0 || ny < 0 || nx >= width || ny >= height )
+                continue;
+            const size_t nIdx = static_cast<size_t>( ny ) * width + nx;
+            if ( ( *labels )[nIdx] != 0.0f )
+                continue;
+            const int code = static_cast<int>( dir[nIdx] );
+            if ( code != reverseCode( nb.code ) )
+                continue;
+            ( *labels )[nIdx] = label;
+            queue.push_back( nIdx );
+        }
+    }
+    return true;
+}
+
 } // namespace TerrainFlow
