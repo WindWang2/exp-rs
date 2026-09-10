@@ -430,9 +430,6 @@ std::vector<std::string> checkStyleApplicability( const Json::Value &styleSpec,
   const Json::Value &applicability =
     hasApplicability ? styleSpec["applicability"] : Json::Value( Json::objectValue );
 
-  if ( !hasApplicability )
-    return problems; // block-driven checks below need the applicability block
-
   // Layer-kind contract (applies_to was already mandatory).
   const std::string kind = dataset.isMember( "kind" ) && dataset["kind"].isString()
                              ? dataset["kind"].asString()

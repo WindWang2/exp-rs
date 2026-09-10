@@ -932,7 +932,9 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
       }
     }
   }
-  else if ( mode == "inline" )
+  // Standalone check (the 7.0 axes block above broke the historical
+  // else-if chain): matrix-family kinds validate their own binding shape.
+  if ( mode == "inline" && kind != "matrix" && kind != "accuracy_summary" )
   {
     if ( !binding.isMember( "data" ) || !binding["data"].isArray() || binding["data"].empty() )
       problems.push_back( "inline binding needs non-empty data array" );

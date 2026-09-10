@@ -97,6 +97,12 @@ std::string rejectionReason( const Json::Value &composition, const std::string &
   return std::string();
 }
 
+void requireNoProblems( const std::vector<std::string> &problems )
+{
+  for ( const auto &problem : problems )
+    FAIL( problem );
+}
+
 void writeJsonFile( const QString &path, const Json::Value &doc )
 {
   QFile file( path );
@@ -896,12 +902,6 @@ TEST_CASE( "P7 components: style_tokens shape is validated",
 
 namespace {
 
-void requireNoProblems( const std::vector<std::string> &problems )
-{
-  for ( const auto &problem : problems )
-    FAIL( problem );
-}
-
 bool hasIssue( const Json::Value &report, const std::string &code, const std::string &idPart )
 {
   for ( const auto &issue : report["issues"] )
@@ -1048,7 +1048,7 @@ namespace {
 
 // Golden structural digest of the fixture below (pinned after a verified
 // run; update ONLY with re-verified geometry).
-constexpr const char *kGoldenDigest = "PENDING_FIRST_RUN";
+constexpr const char *kGoldenDigest = "907bc94698a404310651773e278ef9a245ffb8a389bbbad30b1b5cbb1956f159";
 
 } // namespace
 
@@ -1066,10 +1066,8 @@ TEST_CASE( "P7 visual: structural digest is stable, sensitive and order-free",
   // Identical specs -> identical digest (byte-stable known answer).
   const std::string digestA = structuralDigest( build() );
   const std::string digestB = structuralDigest( build() );
-  std::cout << "[pin] structural digest = " << digestA << std::endl;
   REQUIRE( digestA == digestB );
   REQUIRE( digestA.size() == 64 ); // SHA-256 hex
-  REQUIRE( std::string( kGoldenDigest ) != "PENDING_FIRST_RUN" );
   REQUIRE( digestA == kGoldenDigest );
 
   // Moving one item changes the digest.

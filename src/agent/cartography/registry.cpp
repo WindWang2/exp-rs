@@ -883,7 +883,14 @@ Json::Value resolveTemplateChain( const Json::Value &raw, const QString &id, QSt
     return Json::Value();
   }
   if ( parents.empty() )
-    return self;
+  {
+    // jsoncpp Value copies share their payload: handing out `self` (a
+    // reference into the raw table) would let the merge fold below mutate
+    // the raw catalog entry for every subsequent resolution.
+    Json::Value copy;
+    copy.copyPayload( self );
+    return copy;
+  }
 
   std::vector<std::string> localPath;
   if ( path )

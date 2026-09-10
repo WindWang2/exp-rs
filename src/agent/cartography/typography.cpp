@@ -197,7 +197,10 @@ std::vector<size_t> breakableGaps( const std::vector<char32_t> &cps )
       // CJK-ish glyph: the following gap is breakable unless the next
       // glyph is forbidden at line start or this one is forbidden at line
       // end (kinsoku).
-      if ( i + 1 < n && !isClosingPunctuation( cps[i] ) && !isOpeningPunctuation( cps[i + 1] ) )
+      // A gap after glyph i is forbidden when glyph i is an opening mark
+      // (the line must not end on it) or glyph i+1 is a closing mark (the
+      // line must not end before it) — kinsoku.
+      if ( i + 1 < n && !isOpeningPunctuation( cps[i] ) && !isClosingPunctuation( cps[i + 1] ) )
         gaps.push_back( i + 1 );
       ++i;
       continue;
