@@ -34,6 +34,7 @@
  ***************************************************************************/
 #include "exprs/host_protocol.h"
 #include "exprs/ipc_channel.h"
+#include "exprs/plugin_capabilities.h"
 #include "exprs/ipc_envelope.h"
 #include "exprs/ipc_frame.h"
 #include "exprs/ipc_stream.h"
@@ -516,12 +517,35 @@ Json::Value tensorToJson( const PluginTensorV1 &tensor )
     return json;
 }
 
+/// Capability policy materialized at plugin.load (worker-side gate for the
+/// host-provided operator workDir seam). Deny-by-default: with no declared
+/// write roots, only the plugin-scoped temp directory is writable.
+struct WorkerPolicy
+{
+    std::vector<std::string> writeRoots;
+    std::string tempDirectory;
+    bool active = false;
+
+    bool allowsWorkDir( const std::string &workDir, std::string &resolved ) const
+    {
+        if ( workDir.empty() )
+            return true;
+        if ( !tempDirectory.empty() && pathIsWithinRoot( workDir, tempDirectory, resolved ) )
+            return true;
+        for ( const std::string &root : writeRoots )
+            if ( pathIsWithinRoot( workDir, root, resolved ) )
+                return true;
+        return false;
+    }
+};
+
 /// Runs one operator request on a pool thread. Progress flows back as
 /// coalesced progress frames; cancellation is cooperative through
 /// @p cancelled.
 void executeOperator( IpcChannel &channel, long long requestId, WorkerSink &sink,
                       const Json::Value &params, const std::shared_ptr<std::atomic<bool>> &cancelled,
-                      const std::string &pluginId, ProgressThrottle &throttle )
+                      const std::string &pluginId, ProgressThrottle &throttle,
+                      const WorkerPolicy &policy )
 {
     const std::string operatorId = params.get( "operatorId", "" ).asString();
     auto factoryIterator = sink.mOperatorFactories.find( operatorId );
@@ -551,6 +575,18 @@ void executeOperator( IpcChannel &channel, long long requestId, WorkerSink &sink
     }
 
     const std::string workDir = params.get( "workDir", "" ).asString();
+    std::string resolvedWorkDir;
+    if ( !workDir.empty() && policy.active && !policy.allowsWorkDir( workDir, resolvedWorkDir ) )
+    {
+        // Typed policy refusal (fail closed): the host-provided workDir is
+        // outside every declared write root and the plugin-scoped temp
+        // directory. Honest boundary: this gates the workDir SEAM, not
+        // arbitrary plugin I/O (see docs/plugins/capabilities.md).
+        channel.sendError( requestId,
+                           { "E5005", "operator workDir is outside the declared write roots "
+                                      "and the plugin temp directory: " + workDir } );
+        return;
+    }
     if ( !workDir.empty() )
     {
         std::error_code ec;
@@ -764,6 +800,7 @@ int main( int argc, char **argv )
     bool instanceValid = false;
     ExecutionPool pool;
     bool poolStarted = false;
+    WorkerPolicy policy;
 
     Ipc::Envelope request;
     for ( ;; )
@@ -823,6 +860,19 @@ int main( int argc, char **argv )
             PluginRecord record;
             record.manifest = manifest;
             record.directory = params.get( "pluginDirectory", "" ).asString();
+
+            // Capability policy for the worker-side workDir gate: re-derived
+            // HERE from the manifest the worker parsed itself plus its own
+            // materialized services (no extra trust in launcher params).
+            {
+                PluginCapabilityParseResult access = parsePluginAccess(
+                    manifest.access, record.directory,
+                    serviceValues.get( "workspaceRoot", "" ).asString(),
+                    serviceValues.get( "tempDirectory", "" ).asString() );
+                policy.writeRoots = access.capabilities.fsWriteRoots;
+                policy.tempDirectory = serviceValues.get( "tempDirectory", "" ).asString();
+                policy.active = access.ok();
+            }
 
             PluginLoader loader;
             PluginDiagnosticLog loadLog;
@@ -912,12 +962,12 @@ int main( int argc, char **argv )
             }
             const Ipc::Envelope executionRequest = std::move( request );
             const bool posted = pool.post( [this_ = &channel, &cancels, &throttle, &sink,
-                                            &manifest, instanceValid, executionRequest] {
+                                            &manifest, &policy, instanceValid, executionRequest] {
                 const Ipc::Envelope &request = executionRequest;
                 auto cancelled = cancels.registerRequest( request.id );
                 if ( request.method == kExecuteOperator )
                     executeOperator( *this_, request.id, sink, request.params, cancelled,
-                                     manifest.id, throttle );
+                                     manifest.id, throttle, policy );
                 else if ( request.method == kExecuteAgentTool )
                 {
                     const std::string toolId = request.params.get( "toolId", "" ).asString();

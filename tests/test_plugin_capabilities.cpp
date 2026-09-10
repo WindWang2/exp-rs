@@ -171,3 +171,23 @@ TEST_CASE( "quota environment defaults parse", "[plugin][quotas]" )
     REQUIRE( quota.workerCpuRatePercent >= 0 );
     REQUIRE( quota.workerCpuRatePercent <= 100 );
 }
+
+TEST_CASE( "pathIsWithinRoot contains and rejects exactly", "[plugin][capabilities]" )
+{
+    namespace fs = std::filesystem;
+    const std::string root = ( fs::temp_directory_path() / "cap-within" ).generic_string();
+    std::string resolved;
+
+    // Direct containment (including the root itself and nested paths).
+    REQUIRE( pathIsWithinRoot( root, root, resolved ) );
+    REQUIRE( pathIsWithinRoot( root + "/nested/output", root, resolved ) );
+    // Traversal that stays inside is fine; escaping is not.
+    REQUIRE( pathIsWithinRoot( root + "/a/../b", root, resolved ) );
+    REQUIRE_FALSE( pathIsWithinRoot( root + "/../escape", root, resolved ) );
+    REQUIRE_FALSE( pathIsWithinRoot( "/tmp", root, resolved ) );
+    // Sibling prefixes must not match ("cap-within-2" shares a prefix).
+    REQUIRE_FALSE( pathIsWithinRoot( root + "-2/output", root, resolved ) );
+    // Empty inputs contain nothing (fail closed).
+    REQUIRE_FALSE( pathIsWithinRoot( "", root, resolved ) );
+    REQUIRE_FALSE( pathIsWithinRoot( root, "", resolved ) );
+}

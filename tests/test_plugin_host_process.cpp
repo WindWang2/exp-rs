@@ -560,3 +560,30 @@ TEST_CASE( "process-group cleanup takes worker-spawned grandchildren with the wo
     }
 }
 #endif
+
+TEST_CASE( "worker-side workDir policy refuses paths outside declared roots",
+           "[hostprocess][capabilities]" )
+{
+    // The fixture manifest written by Stack declares NO access object:
+    // deny-by-default leaves only the plugin-scoped temp dir writable.
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // workDir inside the plugin-scoped temp directory: allowed.
+    sicnu::operators::RSOperatorContext inside( stack.tempDir + "/work" );
+    Json::Value ok = runOperator( stack, "test:iso-echo", Json::Value(), &inside );
+    REQUIRE( ok["success"].asBool() );
+
+    // workDir outside every declared root: typed E5005 refusal, the
+    // operator never runs.
+    sicnu::operators::RSOperatorContext outside( "/tmp" );
+    Json::Value refused = runOperator( stack, "test:iso-echo", Json::Value(), &outside );
+    REQUIRE( refused["__operatorError"].asBool() );
+    REQUIRE( refused["code"].asString() == "9999" ); // Unknown (stable E5005 in details)
+    REQUIRE( refused["message"].asString().find( "E5005" ) != std::string::npos );
+    REQUIRE( refused["message"].asString().find( "outside the declared write roots" )
+             != std::string::npos );
+
+    REQUIRE( registry.unload( kPluginId ) );
+}

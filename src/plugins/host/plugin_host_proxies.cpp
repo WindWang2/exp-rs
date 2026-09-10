@@ -171,9 +171,16 @@ public:
                         sicnu::operators::ErrorCode::Cancelled, outcome.error.message,
                         outcome.error.data );
                 }
+                // Numeric codes are operator-taxonomy values straight from
+                // the plugin. Structured E-codes (E5005 policy refusal,
+                // E6008 unregistered id, ...) have no numeric counterpart:
+                // they refuse as Unknown with the stable code preserved,
+                // never coerced to ErrorCode(0) (Success).
                 const int code = std::atoi( outcome.error.code.c_str() );
                 throw sicnu::operators::RSOperatorError(
-                    static_cast<sicnu::operators::ErrorCode>( code ), outcome.error.message,
+                    code != 0 ? static_cast<sicnu::operators::ErrorCode>( code )
+                              : sicnu::operators::ErrorCode::Unknown,
+                    outcome.error.message + " [" + outcome.error.code + "]",
                     outcome.error.data );
             }
             case IpcChannel::Outcome::Status::Timeout:
