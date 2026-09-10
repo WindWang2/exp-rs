@@ -90,3 +90,27 @@ to a fixpoint that is independent of constraint declaration order for
 consistent systems, and reports cycles / non-convergence with the
 constraint ids involved instead of moving items silently. The composition
 report adds `constraints_total`, `passes` and `converged`.
+
+## Platform 7.0 additions
+
+| Code | Severity | Repairable | Meaning |
+|---|---|---|---|
+| `MAP_INVISIBLE_LAYER` | warning | no | declarative layer has `visible: false` or `opacity <= 0` — it will not render |
+| `MAP_LAYER_UNREFERENCED` | warning | yes | layer declared in `layers[]` is referenced by no map frame or inset; repair attaches it to the main frame (dedup-safe) |
+| `MAP_LEGEND_MISMATCH` | warning | no | explicit legend `classes[]` labels missing from the referenced style's class/category labels (first missing label named) |
+| `MAP_TEXT_WRAP_OVERFLOW` | warning | yes | wrap-aware text layout (word wrap, CJK kinsoku, ≤64-line budget) does not fit the item rect; the single-line estimator rules above only see the widest hard line |
+
+The wrap-aware rule runs through the typography engine
+(`cartography/typography.h`): deterministic per-codepoint width classes
+(identical to the estimator), greedy word wrap, CJK kinsoku (no line starts
+with closing punctuation, none ends on opening punctuation), declared
+truncation policies (`none | ellipsis | shrink_to_fit | overflow_report`)
+and a structured `TextFitReport` used for overflow diagnostics.
+
+The composition solver behind `MAP_CONSTRAINT_UNSATISFIABLE` is now the
+Platform 7.0 explainable solver: constraints may declare
+`hardness`/`priority`/`weight` (MapSpec v4), the fixpoint is chosen by a
+canonical policy (declaration-order independent even for over-determined
+systems), soft conflicts are reverted with the winning constraint named,
+and every unsatisfied hard constraint carries a bounded unsat core. See
+`docs/cartography/migration-mapspec-v4.md`.

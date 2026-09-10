@@ -1,0 +1,46 @@
+{
+ "id": "publication/footer",
+ "version": 1,
+ "category": "publication",
+ "semantic_roles": [
+  "publication.footer"
+ ],
+ "description": "Product footer (logo placeholder, production date, contact/licence line) pinned to the page edge.",
+ "parameters": {
+  "font": {
+   "size_pt": 6
+  }
+ },
+ "defaults": {
+  "text": "Produced -- | Licence --"
+ },
+ "style_tokens": [
+  "typography.styles.source_note",
+  "colors.text_secondary",
+  "spacing.margin_mm",
+  "lines.hairline_mm"
+ ],
+ "layout_constraints": {
+  "anchor": "edge",
+  "preferred_positions": [
+   "bottom-center",
+   "bottom-right"
+  ],
+  "margin_mm": 4,
+  "max_count_per_page": 1,
+  "min_size_mm": [
+   40,
+   3
+  ]
+ },
+ "compatibility": {
+  "requires_map_frame": false
+ },
+ "data_bindings": [
+  {
+   "name": "text",
+   "source": "params.footer",
+   "required": false
+  }
+ ]
+}

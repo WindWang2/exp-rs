@@ -133,3 +133,25 @@ a `qgis_type` marker (documented divergence).
   ≤ 24 relaxation passes → collision handling → scoring → convergence
   report); consistent systems converge to declaration-order-independent
   geometry — #805, #781.
+
+## Platform 7.0 notes
+
+- **spec_version 4** (strict superset of v3): constraint items may declare
+  `hardness` (`"hard"` default | `"soft"`), `priority` (integer 0..100,
+  default 50) and `weight` (0..1000, default 1, soft-only). See
+  `docs/cartography/migration-mapspec-v4.md` for the full surface.
+- **Explainable solver**: canonical constraint ordering (hard before soft,
+  priority desc, weight desc, declaration index) picks the fixpoint —
+  declaration permutations no longer change over-determined outcomes; soft
+  constraints apply after the hard fixpoint and yield (reverted + reported)
+  to higher-ranked constraints; the composition report adds
+  `soft_total/soft_satisfied`, `satisfied_weight/violated_weight`,
+  `decisions[]`, `violated[]`, `unsat_cores[]` and `fixpoint_policy`.
+- **Unsat cores**: every unsatisfied hard constraint reports the minimal
+  conflicting subset found within the bounded search radius (candidates ≤ 8,
+  subset ≤ 3, ≤ 32 simulations; truncation marked `bounded: true`).
+- **Typography**: text furniture is measurable through the deterministic
+  engine in `cartography/typography.h` (UTF-8 codepoint width classes, word
+  wrap, CJK kinsoku, `none|ellipsis|shrink_to_fit|overflow_report`
+  truncation policies, structured fit reports). Preflight consumes it via
+  `MAP_TEXT_WRAP_OVERFLOW`.

@@ -1,0 +1,64 @@
+{
+ "id": "chart/class-composition",
+ "version": 1,
+ "category": "chart",
+ "semantic_roles": [
+  "chart.class_composition"
+ ],
+ "description": "Class composition chart (stacked share of classes) for categorical products.",
+ "parameters": {
+  "font": {
+   "size_pt": 8
+  },
+  "orientation": "horizontal",
+  "kind": "stacked_bar"
+ },
+ "defaults": {
+  "title": "Class composition",
+  "chart": {
+   "kind": "stacked_bar",
+   "binding": {
+    "mode": "inline",
+    "data": []
+   }
+  }
+ },
+ "style_tokens": [
+  "typography.styles.chart",
+  "palettes.qualitative",
+  "spacing.gutter_mm"
+ ],
+ "layout_constraints": {
+  "anchor": "free",
+  "preferred_positions": [
+   "bottom-rail",
+   "right-rail"
+  ],
+  "margin_mm": 6,
+  "max_count_per_page": 1,
+  "min_size_mm": [
+   40,
+   24
+  ]
+ },
+ "compatibility": {
+  "requires_map_frame": true,
+  "map_types": [
+   "raster",
+   "vector"
+  ],
+  "result_types": [
+   "classification",
+   "land_cover",
+   "categorical"
+  ]
+ },
+ "data_bindings": [
+  {
+   "name": "shares",
+   "source": "map_ref.class_shares",
+   "required": false,
+   "description": "Per-class share values; defaults to renderer class counts."
+  }
+ ]
+}

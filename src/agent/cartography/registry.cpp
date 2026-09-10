@@ -72,6 +72,7 @@ const CategoryInfo kCategoryInfos[] = {
   { "inset-map", "inset_maps" },     { "annotation", "annotations" },
   { "source-note", "source_notes" }, { "frame", "constraints" },
   { "publication", "labels" },
+  { "statistics", "labels" },        { "accuracy", "labels" },
 };
 
 QStringList knownCategories()
@@ -152,6 +153,26 @@ std::vector<std::string> validateComponent( const Json::Value &descriptor,
       for ( const auto &binding : descriptor["data_bindings"] )
         if ( !binding.isObject() || !binding.isMember( "name" ) || !binding["name"].isString() )
           problems.push_back( id + ": every data_binding needs a string name" );
+  }
+  // Platform 7.0: style token references (dotted token-set paths) power the
+  // component-to-token drift check; the shape is closed and bounded here.
+  if ( descriptor.isMember( "style_tokens" ) )
+  {
+    const Json::Value &styleTokens = descriptor["style_tokens"];
+    if ( !styleTokens.isArray() )
+      problems.push_back( id + ": style_tokens must be an array of dotted token paths" );
+    else
+    {
+      if ( static_cast<int>( styleTokens.size() ) > 24 )
+        problems.push_back( id + ": style_tokens capped at 24 entries" );
+      int tokenIndex = 0;
+      for ( const auto &path : styleTokens )
+      {
+        const std::string where = id + ": style_tokens[" + std::to_string( tokenIndex++ ) + "]";
+        if ( !path.isString() || path.asString().empty() )
+          problems.push_back( where + " must be a non-empty dotted token path" );
+      }
+    }
   }
   // --- Platform 6.0 (Milestone C): bounded composite children ---------------
   if ( descriptor.isMember( "children" ) )
@@ -543,8 +564,13 @@ void ComponentRegistry::reload()
 // ---------------------------------------------------------------------------
 
 /// Resolves one template's `extends` chain against the raw descriptor table.
+/// Platform 7.0: `extends` may be a string (legacy single parent) or an
+/// ordered array of parents (later parents override earlier ones; the child
+/// overrides all), `facets` merge (tasks union, scalars child-wins),
+/// `variants` merge by variant id, and the resolved descriptor stamps an
+/// `inheritance` provenance block. Cycles are diagnosed explicitly.
 Json::Value resolveTemplateChain( const Json::Value &raw, const QString &id, QString *problem,
-                                  int depth = 0 );
+                                  int depth = 0, std::vector<std::string> *path = nullptr );
 
 TemplateRegistry::TemplateRegistry() = default;
 
@@ -612,107 +638,319 @@ void TemplateRegistry::ensureLoadedLocked() const
   }
 }
 
-/// Deep-merges parent slots/components beneath the child: child slots win by
-/// `role`; other parent slots are inherited; recommended_components and
-/// suitable_tasks concatenate (parent first, duplicates dropped).
-Json::Value resolveTemplateChain( const Json::Value &raw, const QString &id, QString *problem,
-                                  int depth )
+/// The declared parent ids of a template: `extends` string (legacy) or
+/// ordered array (Platform 7.0). Empty when the template is a root.
+std::vector<std::string> templateParentIds( const Json::Value &self, std::string *problem )
 {
+  std::vector<std::string> parents;
+  if ( !self.isMember( "extends" ) )
+    return parents;
+  const Json::Value &extends = self["extends"];
+  if ( extends.isString() )
+  {
+    if ( !extends.asString().empty() )
+      parents.push_back( extends.asString() );
+  }
+  else if ( extends.isArray() )
+  {
+    for ( const auto &entry : extends )
+    {
+      if ( !entry.isString() || entry.asString().empty() )
+      {
+        if ( problem )
+          *problem = "extends array entries must be non-empty strings";
+        return {};
+      }
+      parents.push_back( entry.asString() );
+    }
+  }
+  else
+  {
+    if ( problem )
+      *problem = "extends must be a string or an array of strings";
+    return {};
+  }
+  return parents;
+}
+
+/// Platform 7.0 facets merge: `tasks` union (accumulated first, duplicates
+/// dropped), scalar facets (medium/purpose) only when the layer declares
+/// them. Inheritance must ADD information, not replace it wholesale (the
+/// 6.0 wholesale replace was an accepted-P3 defect).
+void mergeTemplateFacets( Json::Value &accumulator, const Json::Value &layer )
+{
+  if ( !layer.isObject() || !layer.isMember( "facets" ) || !layer["facets"].isObject() )
+    return;
+  if ( !accumulator.isMember( "facets" ) || !accumulator["facets"].isObject() )
+    accumulator["facets"] = Json::Value( Json::objectValue );
+  Json::Value merged = accumulator["facets"];
+  const Json::Value &incoming = layer["facets"];
+  if ( incoming.isMember( "tasks" ) && incoming["tasks"].isArray() )
+  {
+    Json::Value tasks( Json::arrayValue );
+    std::set<std::string> seen;
+    const Json::Value empty( Json::arrayValue );
+    const Json::Value &existing = merged.isMember( "tasks" ) && merged["tasks"].isArray()
+                                    ? merged["tasks"]
+                                    : empty;
+    for ( const auto &task : existing )
+      if ( task.isString() && seen.insert( task.asString() ).second )
+        tasks.append( task );
+    for ( const auto &task : incoming["tasks"] )
+      if ( task.isString() && seen.insert( task.asString() ).second )
+        tasks.append( task );
+    merged["tasks"] = tasks;
+  }
+  for ( const char *scalar : { "medium", "purpose" } )
+    if ( incoming.isMember( scalar ) )
+      merged[scalar] = incoming[scalar];
+  accumulator["facets"] = merged;
+}
+
+/// Platform 7.0 variants merge by variant id: parent variants are inherited,
+/// same-id variants merge (layer fields win per field, arrays replace).
+void mergeTemplateVariants( Json::Value &accumulator, const Json::Value &layer )
+{
+  if ( !layer.isObject() || !layer.isMember( "variants" ) || !layer["variants"].isArray() )
+    return;
+  if ( !accumulator.isMember( "variants" ) || !accumulator["variants"].isArray() )
+    accumulator["variants"] = Json::Value( Json::arrayValue );
+  for ( const auto &incoming : layer["variants"] )
+  {
+    if ( !incoming.isObject() || !incoming.isMember( "id" ) || !incoming["id"].isString() )
+      continue;
+    const std::string vid = incoming["id"].asString();
+    Json::Value *existing = nullptr;
+    for ( auto &variant : accumulator["variants"] )
+      if ( variant.isObject() && variant.isMember( "id" ) && variant["id"].isString() &&
+           variant["id"].asString() == vid )
+        existing = &variant;
+    if ( existing )
+      *existing = mergeTokenValues( *existing, incoming );
+    else
+      accumulator["variants"].append( incoming );
+  }
+}
+
+/// Records one top-level provenance entry: key -> contributing template ids.
+void stampProvenance( Json::Value &merged, const char *key, const std::string &sourceId )
+{
+  if ( !merged.isMember( "inheritance" ) || !merged["inheritance"].isObject() )
+    merged["inheritance"] = Json::Value( Json::objectValue );
+  Json::Value inheritance = merged["inheritance"];
+  if ( !inheritance.isMember( "sources" ) || !inheritance["sources"].isObject() )
+    inheritance["sources"] = Json::Value( Json::objectValue );
+  Json::Value sources = inheritance["sources"];
+  Json::Value ids = sources.isMember( key ) && sources[key].isArray()
+                      ? sources[key]
+                      : Json::Value( Json::arrayValue );
+  bool present = false;
+  for ( const auto &entry : ids )
+    present = present || ( entry.isString() && entry.asString() == sourceId );
+  if ( !present )
+    ids.append( sourceId );
+  sources[key] = ids;
+  inheritance["sources"] = sources;
+  merged["inheritance"] = inheritance;
+}
+
+/// Merges one inheritance layer over the accumulator with the documented
+/// per-key policy (Platform 7.0): slots by role, list-valued knowledge
+/// concatenated with dedupe, style deep-merged, facets/variants merged,
+/// everything else replaced by the layer when declared.
+void mergeTemplateLayer( Json::Value &accumulator, const Json::Value &layer,
+                         const std::string &sourceId )
+{
+  for ( const auto &key : layer.getMemberNames() )
+  {
+    if ( key == "extends" || key == "id" || key == "inheritance" )
+      continue;
+    if ( key == "slots" || key == "required_slots" )
+    {
+      // Merge by role: inherited slots provide defaults; layer slots with
+      // the same role replace them entirely. Mixed-vocabulary chains
+      // (v1 required_slots parent, v2 slots child) are normalized.
+      const char *baseKey = accumulator.isMember( "slots" ) && accumulator["slots"].isArray()
+                              ? "slots"
+                              : ( accumulator.isMember( "required_slots" ) &&
+                                      accumulator["required_slots"].isArray()
+                                    ? "required_slots"
+                                    : nullptr );
+      const Json::Value &baseSlots =
+        baseKey ? accumulator[baseKey] : Json::Value( Json::arrayValue );
+      Json::Value combined( Json::arrayValue );
+      std::set<std::string> layerRoles;
+      for ( const auto &slot : layer[key] )
+        if ( slot.isObject() && slot.isMember( "role" ) )
+          layerRoles.insert( slot["role"].asString() );
+      for ( const auto &slot : baseSlots )
+        if ( slot.isObject() && slot.isMember( "role" ) &&
+             !layerRoles.count( slot["role"].asString() ) )
+          combined.append( slot );
+      for ( const auto &slot : layer[key] )
+        combined.append( slot );
+      accumulator[key] = combined;
+      stampProvenance( accumulator, key.c_str(), sourceId );
+    }
+    else if ( key == "recommended_components" || key == "suitable_tasks" )
+    {
+      Json::Value combined( Json::arrayValue );
+      std::set<std::string> seen;
+      const Json::Value &baseList = accumulator.isMember( key ) && accumulator[key].isArray()
+                                      ? accumulator[key]
+                                      : Json::Value( Json::arrayValue );
+      for ( const auto &entry : baseList )
+      {
+        const std::string identity = entry.isString() ? entry.asString()
+                                                      : entry.get( "id", "" ).asString();
+        if ( seen.insert( identity ).second )
+          combined.append( entry );
+      }
+      for ( const auto &entry : layer[key] )
+      {
+        const std::string identity = entry.isString() ? entry.asString()
+                                                      : entry.get( "id", "" ).asString();
+        if ( seen.insert( identity ).second )
+          combined.append( entry );
+      }
+      accumulator[key] = combined;
+      stampProvenance( accumulator, key.c_str(), sourceId );
+    }
+    else if ( key == "style" )
+    {
+      accumulator[key] = mergeTokenValues(
+        accumulator.get( "style", Json::Value( Json::objectValue ) ),
+        layer[key].isObject() ? layer[key] : Json::Value( Json::objectValue ) );
+      stampProvenance( accumulator, key.c_str(), sourceId );
+    }
+    else if ( key == "facets" )
+    {
+      mergeTemplateFacets( accumulator, layer );
+      stampProvenance( accumulator, key.c_str(), sourceId );
+    }
+    else if ( key == "variants" )
+    {
+      mergeTemplateVariants( accumulator, layer );
+      stampProvenance( accumulator, key.c_str(), sourceId );
+    }
+    else if ( !accumulator.isMember( key ) || accumulator[key] != layer[key] )
+    {
+      // Only a layer that actually contributes (adds or changes the value)
+      // earns provenance — inherited keys carried by a resolved parent do
+      // not count as that parent's contribution.
+      accumulator[key] = layer[key];
+      stampProvenance( accumulator, key.c_str(), sourceId );
+    }
+  }
+}
+
+Json::Value resolveTemplateChain( const Json::Value &raw, const QString &id, QString *problem,
+                                  int depth, std::vector<std::string> *path )
+{
+  const std::string key = id.toStdString();
+  if ( path && std::find( path->begin(), path->end(), key ) != path->end() )
+  {
+    std::string cycle;
+    for ( const std::string &node : *path )
+      cycle += ( cycle.empty() ? "" : " -> " ) + node;
+    cycle += " -> " + key;
+    if ( problem )
+      *problem = QStringLiteral( "extends cycle: %1" ).arg( QString::fromStdString( cycle ) );
+    return Json::Value();
+  }
   if ( depth > 8 )
   {
     if ( problem )
       *problem = QStringLiteral( "extends chain too deep (cycle?)" );
     return Json::Value();
   }
-  if ( !raw.isMember( id.toStdString() ) )
+  if ( !raw.isMember( key ) )
   {
     if ( problem )
       *problem = QStringLiteral( "unknown template '%1'" ).arg( id );
     return Json::Value();
   }
-  const Json::Value &self = raw[id.toStdString()];
+  const Json::Value &self = raw[key];
   if ( !self.isObject() )
   {
     if ( problem )
       *problem = QStringLiteral( "template '%1' is not an object" ).arg( id );
     return Json::Value();
   }
-  const std::string parent =
-    self.isMember( "extends" ) && self["extends"].isString() ? self["extends"].asString() : "";
-  if ( parent.empty() || parent == id.toStdString() )
-    return self;
-  const Json::Value base = resolveTemplateChain( raw, QString::fromStdString( parent ), problem,
-                                                 depth + 1 );
-  if ( base.isNull() )
-    return Json::Value();
-
-  Json::Value merged = base;
-  for ( const auto &key : self.getMemberNames() )
+  std::string parentProblem;
+  const std::vector<std::string> parents = templateParentIds( self, &parentProblem );
+  if ( !parentProblem.empty() )
   {
-    if ( key == "extends" )
-      continue;
-    if ( key == "slots" || key == "required_slots" )
-    {
-      // Merge by role: parent slots provide defaults; child slots with the
-      // same role replace them entirely. Mixed-vocabulary chains
-      // (v1 required_slots parent, v2 slots child) are normalized.
-      const char *parentKey = base.isMember( "slots" ) && base["slots"].isArray()
-                                ? "slots"
-                                : ( base.isMember( "required_slots" ) &&
-                                        base["required_slots"].isArray()
-                                      ? "required_slots"
-                                      : nullptr );
-      const Json::Value &parentSlots =
-        parentKey ? base[parentKey] : Json::Value( Json::arrayValue );
-      Json::Value combined( Json::arrayValue );
-      std::set<std::string> childRoles;
-      for ( const auto &slot : self[key] )
-        if ( slot.isObject() && slot.isMember( "role" ) )
-          childRoles.insert( slot["role"].asString() );
-      for ( const auto &slot : parentSlots )
-        if ( slot.isObject() && slot.isMember( "role" ) &&
-             !childRoles.count( slot["role"].asString() ) )
-          combined.append( slot );
-      for ( const auto &slot : self[key] )
-        combined.append( slot );
-      merged[key] = combined;
-    }
-    else if ( key == "recommended_components" || key == "suitable_tasks" )
-    {
-      Json::Value combined( Json::arrayValue );
-      std::set<std::string> seen;
-      const Json::Value &parentList = base.isMember( key ) && base[key].isArray()
-                                        ? base[key]
-                                        : Json::Value( Json::arrayValue );
-      for ( const auto &entry : parentList )
-      {
-        const std::string identity = entry.isString() ? entry.asString()
-                                                      : entry.get( "id", "" ).asString();
-        if ( seen.insert( identity ).second )
-          combined.append( entry );
-      }
-      for ( const auto &entry : self[key] )
-      {
-        const std::string identity = entry.isString() ? entry.asString()
-                                                      : entry.get( "id", "" ).asString();
-        if ( seen.insert( identity ).second )
-          combined.append( entry );
-      }
-      merged[key] = combined;
-    }
-    else if ( key == "style" )
-    {
-      merged[key] = mergeTokenValues( base.get( "style", Json::Value( Json::objectValue ) ),
-                                      self[key].isObject() ? self[key]
-                                                           : Json::Value( Json::objectValue ) );
-    }
-    else
-    {
-      merged[key] = self[key];
-    }
+    if ( problem )
+      *problem = QString::fromStdString( key + ": " + parentProblem );
+    return Json::Value();
   }
-  // stamp resolved inheritance for the gallery + debugging
-  merged["extends"] = parent;
+  if ( parents.empty() )
+  {
+    // Return an owned copy of the raw-table entry: the merge fold below may
+    // mutate the accumulator, and handing out a reference (or an aliased
+    // copy) into the raw table would couple resolutions through shared
+    // state. Explicit payload copy = independent storage by construction.
+    Json::Value copy;
+    copy.copyPayload( self );
+    return copy;
+  }
+
+  std::vector<std::string> localPath;
+  if ( path )
+    localPath = *path;
+  localPath.push_back( key );
+
+  // Fold the parents left-to-right: later parents override earlier ones,
+  // the child overrides all. Each parent is itself resolved through its
+  // own chain, with cycle detection over the active path.
+  Json::Value merged;
+  std::vector<std::string> parentsApplied;
+  for ( const std::string &parentId : parents )
+  {
+    if ( parentId == key )
+    {
+      if ( problem )
+        *problem = QStringLiteral( "template '%1' extends itself" ).arg( id );
+      return Json::Value();
+    }
+    const Json::Value parentResolved =
+      resolveTemplateChain( raw, QString::fromStdString( parentId ), problem, depth + 1,
+                            &localPath );
+    if ( parentResolved.isNull() )
+      return Json::Value();
+    if ( merged.isNull() )
+      merged = parentResolved;
+    else
+      mergeTemplateLayer( merged, parentResolved, parentId );
+    parentsApplied.push_back( parentId );
+  }
+
+  // The child layer wins over every parent. mergeTemplateLayer skips the
+  // `id` key (parents may not change identity), so stamp the resolved
+  // descriptor's identity back to the requested template explicitly —
+  // otherwise every child would carry its first parent's id (and the
+  // extends-self validation would misfire).
+  mergeTemplateLayer( merged, self, key );
+  merged["id"] = key;
+  if ( parentsApplied.size() == 1 )
+    merged["extends"] = parentsApplied[0];
+  else
+  {
+    Json::Value parentsArr( Json::arrayValue );
+    for ( const std::string &parentId : parentsApplied )
+      parentsArr.append( parentId );
+    merged["extends"] = parentsArr;
+  }
+  // Stamp the linearized parents for the gallery + debugging.
+  if ( !merged.isMember( "inheritance" ) || !merged["inheritance"].isObject() )
+    merged["inheritance"] = Json::Value( Json::objectValue );
+  Json::Value inheritance = merged["inheritance"];
+  Json::Value parentsArr( Json::arrayValue );
+  for ( const std::string &parentId : parentsApplied )
+    parentsArr.append( parentId );
+  inheritance["parents"] = parentsArr;
+  merged["inheritance"] = inheritance;
   return merged;
 }
 
@@ -851,6 +1089,34 @@ std::vector<std::string> validateTemplateFacets( const Json::Value &descriptor )
         problems.push_back( id + ": facets.purpose must be one of exploration|analysis|"
                                   "operational|scientific|presentation" );
     }
+  }
+  // Platform 7.0: `extends` may be a string (legacy single parent) or an
+  // ordered array of parents. Shape errors fail loudly at load; cycles and
+  // unknown parents are diagnosed during chain resolution.
+  if ( descriptor.isMember( "extends" ) )
+  {
+    const Json::Value &extends = descriptor["extends"];
+    if ( extends.isString() )
+    {
+      if ( extends.asString().empty() )
+        problems.push_back( id + ": extends must not be empty" );
+      else if ( extends.asString() == id )
+        problems.push_back( id + ": template extends itself" );
+    }
+    else if ( extends.isArray() )
+    {
+      int index = 0;
+      for ( const auto &entry : extends )
+      {
+        const std::string where = id + ": extends[" + std::to_string( index++ ) + "]";
+        if ( !entry.isString() || entry.asString().empty() )
+          problems.push_back( where + " must be a non-empty string" );
+        else if ( entry.asString() == id )
+          problems.push_back( where + ": template extends itself" );
+      }
+    }
+    else
+      problems.push_back( id + ": extends must be a string or an array of strings" );
   }
   // Controlled parameterized variants: page-size/medium alternatives declared
   // in ONE file instead of near-duplicate copies (Platform 6.0).

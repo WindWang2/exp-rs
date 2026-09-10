@@ -41,15 +41,33 @@ composition. They live in `data/cartography/templates/*.json`.
 
 Page families are variants of one base: `classification-a4p` extends
 `classification-a4l` and re-declares `page` + `slots` at the new size.
-Resolution (at load time, cycle-safe, `loadProblems()`):
+Resolution (at load time, cycle-safe with an explicit
+`extends cycle: a -> b -> a` diagnosis in `loadProblems()`):
 
 - child slot with the same `role` replaces the parent's slot entirely;
   other parent slots are inherited;
 - `recommended_components` and `suitable_tasks` concatenate (parent first,
   duplicates dropped);
-- `style` deep-merges; other fields (description, page, product_type) are
-  replaced by the child;
-- the resolved descriptor records `extends` for the gallery.
+- `style` deep-merges;
+- **facets merge** (Platform 7.0): `facets.tasks` union (inherited first,
+  duplicates dropped), scalar `medium`/`purpose` only when the child
+  declares them — inheritance adds information instead of replacing it;
+- **variants merge** by variant `id` (Platform 7.0): parent variants are
+  inherited, same-id variants merge per field;
+- other fields (description, page, product_type) are replaced by the child;
+- the resolved descriptor records `extends` and an `inheritance` block
+  (`parents`, `sources{field: [contributing template ids]}`) for the
+  gallery and for explainability.
+
+### Multi-parent inheritance (Platform 7.0)
+
+`extends` may be an ordered array: `"extends": ["base-layout",
+"domain-water"]`. Parents fold left-to-right (a later parent overrides an
+earlier one where both declare a field), and the child overrides all. Use
+this to compose orthogonal knowledge — a layout family from one parent, a
+task domain from another — instead of filename-encoded duplicate
+templates. Cycle detection covers DAG shapes (diamonds are legal; every
+ancestor appears once in the fold, in left-to-right order).
 
 ## Layout rules (generator-enforced, drift-checked)
 

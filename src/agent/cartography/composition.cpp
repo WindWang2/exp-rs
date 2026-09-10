@@ -111,7 +111,7 @@ void anchorPoint( const std::string &edge, double marginMm, double pageW, double
   }
 }
 
-/// Outcome of one constraint application during a relaxation pass.
+/// Outcome of one constraint evaluation during a sweep.
 enum class Apply
 {
     Satisfied, ///< already holds — nothing written
@@ -150,6 +150,24 @@ struct ConstraintRuntime
     std::string direction;
     bool disabled = false;              ///< permanent failure — leaves the sweep
     bool blockedInLastPass = false;     ///< inputs not usable yet at fixpoint
+    // Platform 7.0 explainable-solve surface (validated upstream; defensive
+    // defaults reproduce the v3 all-hard behavior).
+    bool isSoft = false;                ///< hardness "soft"
+    int priority = 50;                  ///< 0..100
+    double weight = 1.0;                ///< 0..1000 (soft only)
+    int index = 0;                      ///< canonical declaration index
+    int rank = 0;                       ///< canonical order position (set by sortCanonical)
+    bool decided = false;               ///< first hard application recorded?
+    bool anchorDecided = false;         ///< anchor_wins decision recorded?
+    bool rejected = false;              ///< soft: reverted by a higher-ranked constraint
+    bool rejectedDecided = false;       ///< first rejection recorded?
+};
+
+/// A pending geometry write computed by computeTargets.
+struct TargetWrite
+{
+    Json::Value *item = nullptr;
+    Rect target;
 };
 
 class Solver
@@ -161,15 +179,47 @@ class Solver
     // --- bounded pipeline ---------------------------------------------------
     void normalize();     ///< item index in canonical collection order
     void buildRuntimes(); ///< declared constraints → normalized form (#781 aware)
+    void sortCanonical(); ///< multi-fixpoint policy: canonical constraint order
     void detectCycles();  ///< leader→follower cycles, diagnosed not absorbed
-    void relax();         ///< anchors + clamps + constraint sweeps to a fixpoint
+    void snapshotGeometry(); ///< pre-solve rects for the unsat-core simulation
+    void relaxHard();     ///< anchors + clamps + HARD constraints to a fixpoint
+    void searchCores();   ///< bounded unsat cores for unsatisfied hard constraints
+    void applySofts();    ///< SOFT constraints: priority-desc greedy, rank-aware
     void finalize( CompositionResult &result );
 
   private:
     Json::Value *findItem( const std::string &id );
     bool resolveAnchors();
     bool clampSizes();
-    Apply applyConstraint( ConstraintRuntime &c );
+    /// Computes the geometry a constraint wants, WITHOUT writing. `targets`
+    /// receives one entry per item the constraint would change (only entries
+    /// that differ from the current rect). Returns Blocked/Failed when the
+    /// constraint cannot be evaluated; Satisfied when `targets` ends empty
+    /// for "already holds" reasons.
+    Apply computeTargets( const ConstraintRuntime &c, std::vector<TargetWrite> &targets,
+                          std::string *failReason = nullptr ) const;
+    /// Writes the computed targets (pure mechanical step).
+    static void applyTargets( const std::vector<TargetWrite> &targets );
+    /// Full sweep of the active hard constraints (+ anchors + clamps). Returns
+    /// true when anything was written. Honors mSimulating (no reports, no
+    /// disablement recording beyond runtime state).
+    bool sweepHardOnce();
+    /// True when `c` currently holds at the live geometry (no writes).
+    bool holds( const ConstraintRuntime &c ) const;
+    /// Anchor-authority guard: non-fit_content constraints whose follower is
+    /// anchor-pinned are disabled with a targeted report (6.0 rule).
+    void enforceAnchorAuthority( ConstraintRuntime &c );
+    /// Appends a decision, bounded by kMaxDecisions (overflow noted once).
+    void decide( const ConstraintRuntime &c, const std::string &outcome,
+                 const std::string &reason, bool recordAlways = false );
+
+    struct RectSnapshot
+    {
+        Json::Value *item = nullptr;
+        Json::Value rect; ///< deep copy of the item's rect_mm (or null)
+    };
+    void saveRects( std::vector<RectSnapshot> &out ) const;
+    void restoreRects( const std::vector<RectSnapshot> &snapshots ) const;
 
     Json::Value &mSpec;
     double mMargin = 0.0;
@@ -181,11 +231,26 @@ class Solver
     std::map<std::string, std::pair<std::string, int>> mById;
 
     std::vector<ConstraintRuntime> mConstraints;
-    int mHardFailures = 0;
+    int mArityFailuresHard = 0;
+    int mArityFailuresSoft = 0;
     int mPasses = 0;
+    int mSoftPasses = 0;
     bool mConverged = true;
+    bool mSoftsExhaustedBudget = false;
     std::set<std::string> mAnchorIds;
     std::set<std::string> mClampedIds;
+
+    // Decisions ledger (bounded) + simulation mode guard.
+    std::vector<CompositionDecision> mDecisions;
+    bool mDecisionsTruncated = false;
+    bool mSimulating = false;
+    int mSimulations = 0;
+
+    // Unsat-core search output.
+    Json::Value mUnsatCores = Json::Value( Json::arrayValue );
+
+    // Pre-solve geometry snapshot for the unsat-core simulation.
+    std::vector<RectSnapshot> mPreSolveRects;
 };
 
 Json::Value *Solver::findItem( const std::string &id )
@@ -256,6 +321,7 @@ void Solver::buildRuntimes()
       cid = constraint["id"].asString();
     else
       cid = kind + "#" + std::to_string( declaredIndex );
+    const int canonicalIndex = declaredIndex;
     ++declaredIndex;
     // Issue #781: arity must know the kind — fit_content is a legal
     // single-item constraint.
@@ -264,7 +330,20 @@ void Solver::buildRuntimes()
     ConstraintRuntime runtime;
     runtime.cid = cid;
     runtime.kind = kind;
+    runtime.index = canonicalIndex;
     runtime.contentMm = constraint.get( "content_mm", Json::Value() );
+    // v4 hardness/priority/weight: validated upstream (validateMapSpec);
+    // here they are read defensively — anything malformed falls back to the
+    // v3 defaults instead of inventing semantics.
+    if ( constraint.isMember( "hardness" ) && constraint["hardness"].isString() &&
+         mapspec::isConstraintHardness( constraint["hardness"].asString() ) )
+      runtime.isSoft = constraint["hardness"].asString() == "soft";
+    if ( constraint.isMember( "priority" ) && constraint["priority"].isIntegral() &&
+         constraint["priority"].asInt() >= 0 && constraint["priority"].asInt() <= 100 )
+      runtime.priority = constraint["priority"].asInt();
+    if ( runtime.isSoft && constraint.isMember( "weight" ) && constraint["weight"].isNumeric() &&
+         constraint["weight"].asDouble() >= 0 && constraint["weight"].asDouble() <= 1000 )
+      runtime.weight = constraint["weight"].asDouble();
     for ( const auto &reference : constraint["items"] )
     {
       if ( !reference.isString() )
@@ -277,7 +356,10 @@ void Solver::buildRuntimes()
     {
       mReport.add( cid + "|arity",
                    cid + ": fewer than " + std::to_string( requiredItems ) + " resolvable items" );
-      ++mHardFailures;
+      if ( runtime.isSoft )
+        ++mArityFailuresSoft;
+      else
+        ++mArityFailuresHard;
       continue;
     }
     runtime.gap = mMargin;
@@ -287,6 +369,27 @@ void Solver::buildRuntimes()
     runtime.direction = constraint.get( "direction", "" ).asString();
     mConstraints.push_back( std::move( runtime ) );
   }
+}
+
+void Solver::sortCanonical()
+{
+  // Multi-fixpoint policy: the solver's chosen fixpoint must not depend on
+  // declaration order. Constraints are totally ordered by
+  // (hard before soft, priority desc, weight desc, canonical index asc);
+  // std::stable_sort with the full key makes the order total and the whole
+  // pipeline a pure function of the document.
+  std::stable_sort( mConstraints.begin(), mConstraints.end(),
+                    []( const ConstraintRuntime &a, const ConstraintRuntime &b ) {
+                      if ( a.isSoft != b.isSoft )
+                        return !a.isSoft;
+                      if ( a.priority != b.priority )
+                        return a.priority > b.priority;
+                      if ( std::fabs( a.weight - b.weight ) > kEps )
+                        return a.weight > b.weight;
+                      return a.index < b.index;
+                    } );
+  for ( int i = 0; i < static_cast<int>( mConstraints.size() ); ++i )
+    mConstraints[i].rank = i;
 }
 
 void Solver::detectCycles()
@@ -356,9 +459,12 @@ void Solver::detectCycles()
     for ( const std::string &id : c.itemIds )
       touchesCycle = touchesCycle || cyclic.count( id ) > 0;
     if ( touchesCycle )
+    {
       mReport.add( c.cid + "|cycle",
                    c.cid + ": participates in a cyclic constraint dependency (" + nodes +
                      "); residual violations are reported, not absorbed" );
+      decide( c, "cycle", "participates in a cyclic dependency (" + nodes + ")" );
+    }
   }
 }
 
@@ -484,37 +590,34 @@ bool Solver::clampSizes()
   return wrote;
 }
 
-Apply Solver::applyConstraint( ConstraintRuntime &c )
+Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrite> &targets,
+                              std::string *failReason ) const
 {
   const std::string &kind = c.kind;
-  const std::string &cid = c.cid;
   const std::string &edge = c.edge;
   const std::string &direction = c.direction;
   const double gap = c.gap;
-  const auto rectOf = []( Json::Value *item, Rect &out ) { return toRect( *item, out ); };
+  auto rectOf = []( const Json::Value *item, Rect &out ) { return toRect( *item, out ); };
+  auto push = [ &targets ]( Json::Value *item, const Rect &target ) {
+    targets.push_back( { item, target } );
+  };
 
   if ( kind == "align" )
   {
     Rect leader;
     if ( !rectOf( c.items[0], leader ) )
-    {
-      mReport.add( cid + "|leader-rect", cid + ": leader item has no usable rect_mm" );
       return Apply::Blocked;
-    }
     if ( edge != "top" && edge != "bottom" && edge != "left" && edge != "right" )
     {
-      mReport.add( cid + "|edge", cid + ": unknown align edge '" + edge + "'" );
+      if ( failReason )
+        *failReason = "unknown align edge '" + edge + "'";
       return Apply::Failed;
     }
-    bool applied = false;
     for ( int i = 1; i < static_cast<int>( c.items.size() ); ++i )
     {
       Rect rect;
       if ( !rectOf( c.items[i], rect ) )
-      {
-        mReport.add( cid + "|follower-rect", cid + ": follower item has no usable rect_mm" );
         return Apply::Blocked;
-      }
       Rect target = rect;
       if ( edge == "top" )
         target.y = leader.y;
@@ -525,69 +628,50 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
       else
         target.x = leader.x + leader.w - rect.w;
       if ( !sameRect( rect, target ) )
-      {
-        writeRect( *c.items[i], target );
-        applied = true;
-      }
+        push( c.items[i], target );
     }
-    return applied ? Apply::Applied : Apply::Satisfied;
+    return targets.empty() ? Apply::Satisfied : Apply::Applied;
   }
 
   if ( kind == "match_width" || kind == "match_height" )
   {
     Rect leader;
     if ( !rectOf( c.items[0], leader ) )
-    {
-      mReport.add( cid + "|leader-rect", cid + ": leader item has no usable rect_mm" );
       return Apply::Blocked;
-    }
-    bool applied = false;
     for ( int i = 1; i < static_cast<int>( c.items.size() ); ++i )
     {
       Rect rect;
       if ( !rectOf( c.items[i], rect ) )
-      {
-        mReport.add( cid + "|follower-rect", cid + ": follower item has no usable rect_mm" );
         return Apply::Blocked;
-      }
       Rect target = rect;
       if ( kind == "match_width" )
         target.w = leader.w;
       else
         target.h = leader.h;
       if ( !sameRect( rect, target ) )
-      {
-        writeRect( *c.items[i], target );
-        applied = true;
-      }
+        push( c.items[i], target );
     }
-    return applied ? Apply::Applied : Apply::Satisfied;
+    return targets.empty() ? Apply::Satisfied : Apply::Applied;
   }
 
   if ( kind == "stack" )
   {
     Rect leader;
     if ( !rectOf( c.items[0], leader ) )
-    {
-      mReport.add( cid + "|leader-rect", cid + ": leader item has no usable rect_mm" );
       return Apply::Blocked;
-    }
     if ( direction != "below" && direction != "above" && direction != "left_of" &&
          direction != "right_of" )
     {
-      mReport.add( cid + "|direction", cid + ": unknown stack direction '" + direction + "'" );
+      if ( failReason )
+        *failReason = "unknown stack direction '" + direction + "'";
       return Apply::Failed;
     }
-    bool applied = false;
     Rect previous = leader;
     for ( int i = 1; i < static_cast<int>( c.items.size() ); ++i )
     {
       Rect rect;
       if ( !rectOf( c.items[i], rect ) )
-      {
-        mReport.add( cid + "|follower-rect", cid + ": follower item has no usable rect_mm" );
         return Apply::Blocked;
-      }
       Rect target = rect;
       if ( direction == "below" )
       {
@@ -610,13 +694,10 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
         target.y = leader.y;
       }
       if ( !sameRect( rect, target ) )
-      {
-        writeRect( *c.items[i], target );
-        applied = true;
-      }
+        push( c.items[i], target );
       previous = target;
     }
-    return applied ? Apply::Applied : Apply::Satisfied;
+    return targets.empty() ? Apply::Satisfied : Apply::Applied;
   }
 
   if ( kind == "distribute" )
@@ -625,17 +706,14 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     Rect first;
     Rect last;
     if ( !rectOf( c.items.front(), first ) || !rectOf( c.items.back(), last ) )
-    {
-      mReport.add( cid + "|endpoints", cid + ": first/last item rect unusable" );
       return Apply::Blocked;
-    }
     if ( direction != "horizontal" && direction != "vertical" )
     {
-      mReport.add( cid + "|direction", cid + ": unknown distribute direction '" + direction + "'" );
+      if ( failReason )
+        *failReason = "unknown distribute direction '" + direction + "'";
       return Apply::Failed;
     }
     const int count = static_cast<int>( c.items.size() );
-    bool applied = false;
     if ( direction == "horizontal" )
     {
       const double span = ( last.x - ( first.x + first.w ) ) / std::max( 1, count - 1 );
@@ -647,10 +725,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
         Rect target = rect;
         target.x = first.x + first.w + span * i;
         if ( !sameRect( rect, target ) )
-        {
-          writeRect( *c.items[i], target );
-          applied = true;
-        }
+          push( c.items[i], target );
       }
     }
     else
@@ -664,49 +739,43 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
         Rect target = rect;
         target.y = first.y + first.h + span * i;
         if ( !sameRect( rect, target ) )
-        {
-          writeRect( *c.items[i], target );
-          applied = true;
-        }
+          push( c.items[i], target );
       }
     }
-    return applied ? Apply::Applied : Apply::Satisfied;
+    return targets.empty() ? Apply::Satisfied : Apply::Applied;
   }
 
   if ( kind == "below" || kind == "above" || kind == "left_of" || kind == "right_of" )
   {
     // v3 relative placement: items = [target, follower] + optional gap_mm.
-    Rect target;
+    Rect targetRect;
     Rect follower;
-    if ( !rectOf( c.items[0], target ) || !rectOf( c.items[1], follower ) )
-    {
-      mReport.add( cid + "|pair-rect", cid + ": target/follower rect unusable" );
+    if ( !rectOf( c.items[0], targetRect ) || !rectOf( c.items[1], follower ) )
       return Apply::Blocked;
-    }
     Rect result = follower;
     if ( kind == "below" )
     {
-      result.x = target.x;
-      result.y = target.y + target.h + gap;
+      result.x = targetRect.x;
+      result.y = targetRect.y + targetRect.h + gap;
     }
     else if ( kind == "above" )
     {
-      result.x = target.x;
-      result.y = target.y - gap - follower.h;
+      result.x = targetRect.x;
+      result.y = targetRect.y - gap - follower.h;
     }
     else if ( kind == "right_of" )
     {
-      result.x = target.x + target.w + gap;
-      result.y = target.y;
+      result.x = targetRect.x + targetRect.w + gap;
+      result.y = targetRect.y;
     }
     else // left_of
     {
-      result.x = target.x - gap - follower.w;
-      result.y = target.y;
+      result.x = targetRect.x - gap - follower.w;
+      result.y = targetRect.y;
     }
     if ( sameRect( follower, result ) )
       return Apply::Satisfied;
-    writeRect( *c.items[1], result );
+    push( c.items[1], result );
     return Apply::Applied;
   }
 
@@ -717,10 +786,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     Rect container;
     Rect content;
     if ( !rectOf( c.items[0], container ) || !rectOf( c.items[1], content ) )
-    {
-      mReport.add( cid + "|pair-rect", cid + ": container/content rect unusable" );
       return Apply::Blocked;
-    }
     Rect result = content;
     result.x = container.x + ( container.w - content.w ) / 2.0;
     result.y = container.y + ( container.h - content.h ) / 2.0;
@@ -728,7 +794,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     result.y = std::max( container.y, std::min( result.y, container.y + container.h - content.h ) );
     if ( sameRect( content, result ) )
       return Apply::Satisfied;
-    writeRect( *c.items[1], result );
+    push( c.items[1], result );
     return Apply::Applied;
   }
 
@@ -736,18 +802,15 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
   {
     // items = [anchor, companion]: pin the companion directly below the
     // anchor with the gap, preserving its horizontal position.
-    Rect anchor;
+    Rect anchorRect;
     Rect companion;
-    if ( !rectOf( c.items[0], anchor ) || !rectOf( c.items[1], companion ) )
-    {
-      mReport.add( cid + "|pair-rect", cid + ": anchor/companion rect unusable" );
+    if ( !rectOf( c.items[0], anchorRect ) || !rectOf( c.items[1], companion ) )
       return Apply::Blocked;
-    }
     Rect result = companion;
-    result.y = anchor.y + anchor.h + gap;
+    result.y = anchorRect.y + anchorRect.h + gap;
     if ( sameRect( companion, result ) )
       return Apply::Satisfied;
-    writeRect( *c.items[1], result );
+    push( c.items[1], result );
     return Apply::Applied;
   }
 
@@ -758,10 +821,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     Rect keeper;
     Rect mover;
     if ( !rectOf( c.items[0], keeper ) || !rectOf( c.items[1], mover ) )
-    {
-      mReport.add( cid + "|pair-rect", cid + ": keeper/mover rect unusable" );
       return Apply::Blocked;
-    }
     const bool overlaps = mover.x < keeper.x + keeper.w && keeper.x < mover.x + mover.w &&
                           mover.y < keeper.y + keeper.h && keeper.y < mover.y + mover.h;
     if ( !overlaps )
@@ -770,7 +830,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     result.y = keeper.y + keeper.h + gap;
     if ( sameRect( mover, result ) )
       return Apply::Satisfied;
-    writeRect( *c.items[1], result );
+    push( c.items[1], result );
     return Apply::Applied;
   }
 
@@ -781,10 +841,7 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     // relative constraint (target + declared content).
     Rect leader;
     if ( !rectOf( c.items[0], leader ) )
-    {
-      mReport.add( cid + "|rect", cid + ": fit_content needs one item with a rect" );
       return Apply::Blocked;
-    }
     Json::Value content = c.contentMm;
     if ( !content.isArray() || content.size() != 2 || !content[0].isNumeric() ||
          !content[1].isNumeric() )
@@ -794,7 +851,8 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     if ( !content.isArray() || content.size() != 2 || !content[0].isNumeric() ||
          !content[1].isNumeric() )
     {
-      mReport.add( cid + "|content", cid + ": fit_content needs content_mm" );
+      if ( failReason )
+        *failReason = "fit_content needs content_mm";
       return Apply::Failed;
     }
     Rect rect = leader;
@@ -816,59 +874,122 @@ Apply Solver::applyConstraint( ConstraintRuntime &c )
     rect.y = leader.y;
     if ( sameRect( leader, rect ) )
       return Apply::Satisfied;
-    writeRect( *c.items[0], rect );
+    push( c.items[0], rect );
     return Apply::Applied;
   }
 
-  mReport.add( cid + "|kind", cid + ": unsupported constraint kind '" + kind + "'" );
+  if ( failReason )
+    *failReason = "unsupported constraint kind '" + c.kind + "'";
   return Apply::Failed;
 }
 
-void Solver::relax()
+void Solver::applyTargets( const std::vector<TargetWrite> &targets )
+{
+  for ( const TargetWrite &write : targets )
+    writeRect( *write.item, write.target );
+}
+
+bool Solver::holds( const ConstraintRuntime &c ) const
+{
+  std::vector<TargetWrite> targets;
+  const Apply outcome = computeTargets( c, targets );
+  return outcome == Apply::Satisfied; // no pending writes == currently holds
+}
+
+void Solver::decide( const ConstraintRuntime &c, const std::string &outcome,
+                     const std::string &reason, bool recordAlways )
+{
+  if ( mSimulating )
+    return;
+  if ( outcome == "satisfied" && !recordAlways )
+    return; // the ledger records decisions, not every no-op check
+  if ( static_cast<int>( mDecisions.size() ) >= kMaxDecisions )
+  {
+    mDecisionsTruncated = true;
+    return;
+  }
+  CompositionDecision decision;
+  decision.cid = c.cid;
+  decision.kind = c.kind;
+  decision.outcome = outcome;
+  decision.reason = reason;
+  decision.order = static_cast<int>( mDecisions.size() );
+  mDecisions.push_back( std::move( decision ) );
+}
+
+void Solver::enforceAnchorAuthority( ConstraintRuntime &c )
+{
+  if ( c.kind == "fit_content" || c.disabled )
+    return;
+  std::string anchoredFollower;
+  for ( int k = 1; k < static_cast<int>( c.itemIds.size() ); ++k )
+    if ( mAnchorIds.count( c.itemIds[k] ) )
+    {
+      anchoredFollower = c.itemIds[k];
+      break;
+    }
+  if ( anchoredFollower.empty() )
+    return;
+  c.disabled = true;
+  if ( mSimulating || c.anchorDecided )
+    return;
+  c.anchorDecided = true;
+  const std::string reason = "conflicts with a declared anchor on '" + anchoredFollower +
+                             "'; the anchor wins and the constraint is disabled";
+  mReport.add( c.cid + "|anchor-conflict", c.cid + ": " + reason );
+  decide( c, "anchor_wins", reason );
+}
+
+bool Solver::sweepHardOnce()
+{
+  bool wrote = resolveAnchors();
+  wrote = clampSizes() || wrote;
+  for ( auto &c : mConstraints )
+  {
+    if ( c.isSoft || c.disabled )
+      continue;
+    enforceAnchorAuthority( c );
+    if ( c.disabled )
+      continue;
+    std::vector<TargetWrite> targets;
+    std::string failReason;
+    const Apply outcome = computeTargets( c, targets, &failReason );
+    if ( outcome == Apply::Applied )
+    {
+      applyTargets( targets );
+      wrote = true;
+      if ( !mSimulating && !c.decided )
+      {
+        c.decided = true;
+        decide( c, "applied", "hard constraint applied during relaxation (pass " +
+                                std::to_string( mPasses ) + ")" );
+      }
+    }
+    else if ( outcome == Apply::Failed )
+    {
+      c.disabled = true; // reported once; leaves the sweep
+      if ( !mSimulating )
+        mReport.add( c.cid + "|failed",
+                     c.cid + ": " + ( failReason.empty()
+                                        ? std::string( "cannot be applied; it leaves the sweep" )
+                                        : failReason + " — it leaves the sweep" ) );
+    }
+    else if ( outcome == Apply::Blocked )
+    {
+      c.blockedInLastPass = true; // inputs may materialize in a later pass
+    }
+  }
+  return wrote;
+}
+
+void Solver::relaxHard()
 {
   for ( mPasses = 1; mPasses <= kMaxRelaxationPasses; ++mPasses )
   {
     for ( auto &c : mConstraints )
       c.blockedInLastPass = false;
-    bool wrote = resolveAnchors();
-    wrote = clampSizes() || wrote;
-    bool anyApplied = false;
-    for ( auto &c : mConstraints )
-    {
-      if ( c.disabled )
-        continue;
-      // Anchor authority: a positional constraint whose follower is
-      // anchor-pinned fights the anchor every pass (re-pin/move oscillation
-      // burns the whole budget). Declared anchor placement is the stronger
-      // contract — the constraint is disabled with a targeted report instead
-      // of a generic non-convergence note.
-      if ( c.kind != "fit_content" )
-      {
-        std::string anchoredFollower;
-        for ( int k = 1; k < static_cast<int>( c.itemIds.size() ); ++k )
-          if ( mAnchorIds.count( c.itemIds[k] ) )
-          {
-            anchoredFollower = c.itemIds[k];
-            break;
-          }
-        if ( !anchoredFollower.empty() )
-        {
-          c.disabled = true;
-          mReport.add( c.cid + "|anchor-conflict",
-                       c.cid + ": conflicts with a declared anchor on '" + anchoredFollower +
-                         "'; the anchor wins and the constraint is disabled" );
-          continue;
-        }
-      }
-      const Apply outcome = applyConstraint( c );
-      if ( outcome == Apply::Applied )
-        anyApplied = true;
-      else if ( outcome == Apply::Failed )
-        c.disabled = true; // reported once; leaves the sweep
-      else if ( outcome == Apply::Blocked )
-        c.blockedInLastPass = true; // inputs may materialize in a later pass
-    }
-    if ( !anyApplied && !wrote )
+    const bool wrote = sweepHardOnce();
+    if ( !wrote )
     {
       // Fixpoint: every satisfiable constraint holds, nothing moved this
       // pass — the layout is stable.
@@ -880,7 +1001,7 @@ void Solver::relax()
   mConverged = false;
   std::string ids;
   for ( const auto &c : mConstraints )
-    if ( !c.disabled )
+    if ( !c.isSoft && !c.disabled )
       ids += ( ids.empty() ? "" : ", " ) + c.cid;
   mReport.add( "|non-convergence",
                "constraint relaxation did not converge within " +
@@ -888,24 +1009,380 @@ void Solver::relax()
                  ( ids.empty() ? std::string( "(none)" ) : ids ) );
 }
 
+void Solver::snapshotGeometry()
+{
+  mPreSolveRects.clear();
+  saveRects( mPreSolveRects );
+}
+
+void Solver::saveRects( std::vector<RectSnapshot> &out ) const
+{
+  out.clear();
+  // Iterate the collections directly (not mById): anchors and size clamps
+  // also touch id-less items, and the restore must cover every rect the
+  // solver could have modified.
+  std::vector<std::string> allCollections;
+  for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+    allCollections.push_back( mapspec::kCollections[c] );
+  allCollections.push_back( "items" );
+  for ( const auto &collection : allCollections )
+  {
+    if ( !mSpec.isMember( collection ) || !mSpec[collection].isArray() )
+      continue;
+    for ( Json::Value::ArrayIndex i = 0; i < mSpec[collection].size(); ++i )
+    {
+      Json::Value &item = mSpec[collection][i];
+      if ( !item.isObject() )
+        continue;
+      RectSnapshot snapshot;
+      snapshot.item = &item;
+      snapshot.rect = item.isMember( "rect_mm" ) ? item.get( "rect_mm", Json::Value() )
+                                                 : Json::Value();
+      out.push_back( std::move( snapshot ) );
+    }
+  }
+}
+
+void Solver::restoreRects( const std::vector<RectSnapshot> &snapshots ) const
+{
+  for ( const RectSnapshot &snapshot : snapshots )
+  {
+    if ( snapshot.rect.isNull() )
+      snapshot.item->removeMember( "rect_mm" );
+    else
+      ( *snapshot.item )["rect_mm"] = snapshot.rect;
+  }
+}
+
+void Solver::searchCores()
+{
+  // For every active hard constraint that does NOT hold at the hard fixpoint,
+  // run the bounded unsat-core search: find the smallest subset (within the
+  // declared radius) of conflicting constraints whose absence would let this
+  // constraint be satisfied. The search re-runs the bounded hard sweep on the
+  // pre-solve geometry with the subset disabled — a bounded, honest witness,
+  // never claimed to be a global minimum.
+  for ( const auto &target : mConstraints )
+  {
+    if ( target.isSoft || target.disabled || mSimulating )
+      continue;
+    if ( holds( target ) )
+      continue;
+    // Candidate neighborhood: hard constraints sharing ≥1 item with the
+    // target, canonical order, capped at kMaxCoreCandidates. The anchor of a
+    // shared item participates as a pseudo-member (anchors are the stronger
+    // contract — disabling their constraint opponents is the meaningful
+    // counterfactual).
+    std::vector<ConstraintRuntime *> candidates;
+    for ( auto &other : mConstraints )
+    {
+      if ( other.isSoft || other.disabled || other.index == target.index )
+        continue; // runtime identity: duplicate declared ids stay distinct
+      bool shares = false;
+      for ( const std::string &id : other.itemIds )
+        shares = shares || std::count( target.itemIds.begin(), target.itemIds.end(), id ) > 0;
+      if ( !shares )
+        continue;
+      if ( static_cast<int>( candidates.size() ) < kMaxCoreCandidates )
+        candidates.push_back( &other );
+    }
+
+    Json::Value coreEntry( Json::objectValue );
+    coreEntry["constraint"] = target.cid;
+    bool found = false;
+    bool bounded = false;
+    bool searched = false;
+    std::vector<int> chosen;
+    const int n = static_cast<int>( candidates.size() );
+    const int maxSubset = std::min( kMaxCoreSubsetSize, n );
+    int targetBudget = kMaxCoreSimulations - mSimulations; // per-target slice
+    if ( targetBudget < 0 )
+      targetBudget = 0;
+    for ( int size = 1; size <= maxSubset && !found; ++size )
+    {
+      std::vector<int> combination( size );
+      for ( int i = 0; i < size; ++i )
+        combination[i] = i;
+      while ( !found )
+      {
+        if ( ++mSimulations > kMaxCoreSimulations )
+        {
+          bounded = true;
+          break;
+        }
+        searched = true;
+        // Simulation: pre-solve geometry + all candidates re-enabled except
+        // the tested subset, reports suppressed.
+        restoreRects( mPreSolveRects );
+        for ( auto &c : mConstraints )
+          c.disabled = false;
+        for ( int idx : combination )
+          candidates[idx]->disabled = true;
+        mSimulating = true;
+        for ( int pass = 0; pass < kMaxRelaxationPasses; ++pass )
+        {
+          if ( !sweepHardOnce() )
+            break;
+        }
+        mSimulating = false;
+        found = holds( target );
+        if ( found )
+          chosen = combination;
+        // Next combination (lexicographic index order).
+        int pos = size - 1;
+        while ( pos >= 0 && combination[pos] == n - size + pos )
+          --pos;
+        if ( pos < 0 )
+          break;
+        ++combination[pos];
+        for ( int i = pos + 1; i < size; ++i )
+          combination[i] = combination[i - 1] + 1;
+      }
+      if ( bounded )
+        break;
+    }
+    // Restore the real post-fixpoint state. blockedInLastPass must be
+    // cleared first: the re-sweep mirrors the FINAL real pass (which itself
+    // started by clearing the flags), and stale flags from mid-re-run
+    // passes would make finalize() report phantom "blocked" violations.
+    restoreRects( mPreSolveRects );
+    for ( auto &c : mConstraints )
+    {
+      c.disabled = false;
+      c.blockedInLastPass = false;
+    }
+    for ( int pass = 0; pass < kMaxRelaxationPasses; ++pass )
+    {
+      for ( auto &c : mConstraints )
+        c.blockedInLastPass = false;
+      if ( !sweepHardOnce() )
+        break;
+    }
+    // Re-apply anchor authority + failed leave-sweep state for disabled
+    // constraints so finalize() counts them exactly as the real run did.
+    for ( auto &c : mConstraints )
+    {
+      if ( c.isSoft || c.disabled )
+        continue;
+      enforceAnchorAuthority( c );
+    }
+
+    coreEntry["core"] = Json::Value( Json::arrayValue );
+    coreEntry["core"].append( target.cid );
+    if ( found )
+    {
+      for ( int idx : chosen )
+        coreEntry["core"].append( candidates[idx]->cid );
+      coreEntry["explanation"] = "'" + target.cid + "' is satisfiable only without " +
+                                 std::to_string( static_cast<int>( chosen.size() ) ) +
+                                 " of its conflicting constraints (bounded search)";
+      mReport.add( target.cid + "|unsat-core",
+                   target.cid + ": unsatisfied — minimal conflicting subset found: " +
+                     coreEntry["explanation"].asString() );
+    }
+    else
+    {
+      if ( bounded )
+        coreEntry["bounded"] = true; // truncation actually happened
+      coreEntry["explanation"] =
+        bounded
+          ? "the search budget was exhausted before a conflicting subset was "
+            "found (candidates: " + std::to_string( n ) + ", simulations: " +
+            std::to_string( mSimulations ) + "); the core may exist beyond the radius"
+          : "no conflicting subset within the search radius explains the "
+            "failure (candidates: " + std::to_string( n ) + ", exhaustive over the " +
+            std::to_string( searched ? mSimulations : 0 ) + " simulations performed)";
+      mReport.add( target.cid + "|unsat-core",
+                   target.cid + ": unsatisfied — " + coreEntry["explanation"].asString() );
+    }
+    mUnsatCores.append( coreEntry );
+  }
+}
+
+void Solver::applySofts()
+{
+  // SOFT phase: canonical-order greedy application. A soft application that
+  // would break any hard constraint or any higher-ranked (earlier) soft
+  // constraint is REVERTED and reported — rank, not luck, decides which
+  // constraint keeps the scarce space.
+  for ( mSoftPasses = 1; mSoftPasses <= kMaxSoftPasses; ++mSoftPasses )
+  {
+    bool anyWritten = false;
+    for ( auto &c : mConstraints )
+    {
+      if ( !c.isSoft || c.disabled )
+        continue;
+      enforceAnchorAuthority( c );
+      if ( c.disabled )
+        continue;
+      std::vector<TargetWrite> targets;
+      std::string failReason;
+      const Apply outcome = computeTargets( c, targets, &failReason );
+      if ( outcome == Apply::Satisfied )
+      {
+        c.blockedInLastPass = false;
+        continue;
+      }
+      if ( outcome == Apply::Failed )
+      {
+        c.disabled = true;
+        mReport.add( c.cid + "|failed",
+                     c.cid + ": " + ( failReason.empty()
+                                        ? std::string( "cannot be applied; it leaves the sweep" )
+                                        : failReason + " — it leaves the sweep" ) );
+        continue;
+      }
+      if ( outcome == Apply::Blocked )
+      {
+        c.blockedInLastPass = true; // inputs may materialize in a later pass
+        continue;
+      }
+      // Rank-aware conflict check: snapshot this constraint's writes, apply,
+      // verify all hard + higher-ranked soft constraints still hold.
+      std::vector<RectSnapshot> before;
+      saveRects( before );
+      applyTargets( targets );
+      std::string conflict;
+      for ( const auto &other : mConstraints )
+      {
+        if ( other.index == c.index || other.disabled )
+          continue; // runtime identity: duplicate declared ids stay distinct
+        // Hard constraints always outrank softs; softs outrank later softs
+        // by canonical order position (NOT declaration index).
+        const bool higherRanked = !other.isSoft || other.rank < c.rank;
+        if ( !higherRanked )
+          continue;
+        if ( !holds( other ) )
+        {
+          conflict = other.cid;
+          break;
+        }
+      }
+      if ( !conflict.empty() )
+      {
+        restoreRects( before );
+        c.rejected = true;
+        const std::string reason =
+          "rejected: applying it would break '" + conflict +
+          "' (higher-ranked constraint keeps the geometry)";
+        mReport.add( c.cid + "|rejected", c.cid + ": " + reason );
+        if ( !c.rejectedDecided )
+        {
+          c.rejectedDecided = true;
+          decide( c, "rejected", reason );
+        }
+        continue;
+      }
+      anyWritten = true;
+      decide( c, "applied",
+              "applied in canonical order (priority " + std::to_string( c.priority ) + ", weight " +
+                std::to_string( c.weight ) + ")" );
+    }
+    if ( !anyWritten )
+      return; // fixpoint: no soft constraint can move further
+  }
+  mSoftsExhaustedBudget = true;
+  mReport.add( "|soft-non-convergence",
+               "soft constraint application did not settle within " +
+                 std::to_string( kMaxSoftPasses ) + " passes; remaining soft constraints are "
+                 "reported as unsatisfied" );
+}
+
 void Solver::finalize( CompositionResult &result )
 {
-  for ( const auto &note : mReport.notes() )
-    result.unsatisfied.push_back( note );
-  result.constraintsTotal = static_cast<int>( mConstraints.size() ) + mHardFailures;
-  // Only constraints that are active AND settled count as solved: a
-  // hard-failed (disabled) constraint never solved, a constraint still
-  // blocked at the fixpoint never applied, and a non-converged layout
-  // cannot claim any solver constraint as satisfied.
-  int solved = 0;
+  int hardTotal = mArityFailuresHard;
+  int hardSolved = 0;
+  int softCount = 0;
+  int softSatisfied = 0;
+  double satisfiedWeight = 0.0;
+  double violatedWeight = 0.0;
   for ( const auto &c : mConstraints )
-    if ( !c.disabled && !( mConverged && c.blockedInLastPass ) )
-      ++solved;
-  result.constraintsSolved = mConverged ? solved : 0;
+  {
+    if ( c.isSoft )
+    {
+      ++softCount;
+      const bool holdsNow = !c.disabled && holds( c ) &&
+                            !( mSoftsExhaustedBudget && c.blockedInLastPass );
+      if ( holdsNow )
+      {
+        ++softSatisfied;
+        satisfiedWeight += c.weight;
+      }
+      else
+      {
+        violatedWeight += c.weight;
+        CompositionViolation violation;
+        violation.cid = c.cid;
+        violation.kind = c.kind;
+        if ( c.disabled )
+          violation.reason = "disabled (anchor conflict or permanent failure)";
+        else if ( c.rejected )
+          violation.reason = "rejected: a higher-ranked constraint keeps the geometry";
+        else
+        {
+          violation.reason = "not satisfied at the final geometry";
+          // Blocked softs produce no other report line — surface them so
+          // preflight sees every violated soft, not only the loud ones.
+          mReport.add( c.cid + "|soft-unsat",
+                       c.cid + ": soft constraint not satisfied at the final geometry "
+                               "(inputs never materialized)" );
+        }
+        result.violated.push_back( violation );
+      }
+      continue;
+    }
+    ++hardTotal;
+    // Only constraints that are active AND settled count as solved: a
+    // hard-failed (disabled) constraint never solved, a constraint still
+    // blocked at the fixpoint never applied, and a non-converged layout
+    // cannot claim any solver constraint as satisfied.
+    const bool solved = mConverged && !c.disabled && !c.blockedInLastPass;
+    if ( solved )
+    {
+      ++hardSolved;
+      continue;
+    }
+    CompositionViolation violation;
+    violation.cid = c.cid;
+    violation.kind = c.kind;
+    if ( c.disabled )
+      violation.reason = "disabled (anchor conflict or permanent failure)";
+    else if ( !mConverged )
+      // On non-convergence only the constraints that verifiably do NOT hold
+      // at the final geometry are listed as violated — holding constraints
+      // stay out of the violation list even though none may claim "solved".
+      violation.reason = holds( c ) ? "unresolved: the relaxation did not converge"
+                                    : "not satisfied at the fixpoint";
+    else
+      violation.reason = "blocked at the fixpoint (inputs never materialized)";
+    result.violated.push_back( violation );
+  }
+  result.constraintsTotal = hardTotal;
+  result.constraintsSolved = mConverged ? hardSolved : 0;
+  result.softTotal = softCount;
+  result.softSatisfied = softSatisfied;
+  result.satisfiedWeight = satisfiedWeight;
+  result.violatedWeight = violatedWeight;
   result.passes = mPasses;
   result.converged = mConverged;
   result.anchorsResolved = static_cast<int>( mAnchorIds.size() );
   result.sizesClamped = static_cast<int>( mClampedIds.size() );
+  result.decisions = std::move( mDecisions );
+  if ( mDecisionsTruncated )
+  {
+    CompositionDecision truncated;
+    truncated.cid = "(ledger)";
+    truncated.kind = "(ledger)";
+    truncated.outcome = "truncated";
+    truncated.reason = "decisions ledger truncated at kMaxDecisions";
+    result.decisions.push_back( std::move( truncated ) );
+  }
+  result.unsatCores = mUnsatCores;
+  result.fixpointPolicy = "canonical: hard before soft, priority desc, weight desc, index asc";
+  // Copied last so every report line added while accounting (e.g. blocked
+  // softs) is included, in report order.
+  for ( const auto &note : mReport.notes() )
+    result.unsatisfied.push_back( note );
 }
 
 } // namespace
@@ -923,6 +1400,35 @@ Json::Value CompositionResult::toJson() const
   for ( const auto &note : unsatisfied )
     array.append( note );
   out["unsatisfied"] = array;
+  // Platform 7.0 explainability surface (additive).
+  out["soft_total"] = softTotal;
+  out["soft_satisfied"] = softSatisfied;
+  out["satisfied_weight"] = satisfiedWeight;
+  out["violated_weight"] = violatedWeight;
+  out["fixpoint_policy"] = fixpointPolicy;
+  Json::Value decisionsJson( Json::arrayValue );
+  for ( const auto &decision : decisions )
+  {
+    Json::Value entry( Json::objectValue );
+    entry["cid"] = decision.cid;
+    entry["kind"] = decision.kind;
+    entry["outcome"] = decision.outcome;
+    entry["reason"] = decision.reason;
+    entry["order"] = decision.order;
+    decisionsJson.append( entry );
+  }
+  out["decisions"] = decisionsJson;
+  Json::Value violatedJson( Json::arrayValue );
+  for ( const auto &violation : violated )
+  {
+    Json::Value entry( Json::objectValue );
+    entry["cid"] = violation.cid;
+    entry["kind"] = violation.kind;
+    entry["reason"] = violation.reason;
+    violatedJson.append( entry );
+  }
+  out["violated"] = violatedJson;
+  out["unsat_cores"] = unsatCores;
   return out;
 }
 
@@ -943,8 +1449,12 @@ CompositionResult resolveComposition( Json::Value &spec, double marginDefaultMm 
   Solver solver( spec, marginDefaultMm, report );
   solver.normalize();
   solver.buildRuntimes();
+  solver.sortCanonical();
   solver.detectCycles();
-  solver.relax();
+  solver.snapshotGeometry();
+  solver.relaxHard();
+  solver.searchCores();
+  solver.applySofts();
   solver.finalize( result );
   return result;
 }

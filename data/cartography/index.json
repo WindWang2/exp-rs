@@ -2,6 +2,26 @@
 	"components" : 
 	[
 		{
+			"category" : "accuracy",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true,
+				"result_types" : 
+				[
+					"classification",
+					"land_cover",
+					"change"
+				]
+			},
+			"description" : "Accuracy report block (overall accuracy, kappa, per-class precision/recall) for classification products.",
+			"id" : "accuracy/report",
+			"semantic_roles" : 
+			[
+				"accuracy.report"
+			],
+			"version" : 1
+		},
+		{
 			"category" : "annotation",
 			"compatibility" : 
 			{
@@ -70,6 +90,31 @@
 			"semantic_roles" : 
 			[
 				"chart.statistics"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"map_types" : 
+				[
+					"raster",
+					"vector"
+				],
+				"requires_map_frame" : true,
+				"result_types" : 
+				[
+					"classification",
+					"land_cover",
+					"categorical"
+				]
+			},
+			"description" : "Class composition chart (stacked share of classes) for categorical products.",
+			"id" : "chart/class-composition",
+			"semantic_roles" : 
+			[
+				"chart.class_composition"
 			],
 			"version" : 1
 		},
@@ -787,6 +832,20 @@
 			{
 				"requires_map_frame" : false
 			},
+			"description" : "Product footer (logo placeholder, production date, contact/licence line) pinned to the page edge.",
+			"id" : "publication/footer",
+			"semantic_roles" : 
+			[
+				"publication.footer"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "publication",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false
+			},
 			"description" : "Institution logo placeholder box; swap the picture path at composition time.",
 			"id" : "publication/logo-placeholder",
 			"semantic_roles" : 
@@ -862,6 +921,30 @@
 			"version" : 1
 		},
 		{
+			"category" : "statistics",
+			"compatibility" : 
+			{
+				"map_types" : 
+				[
+					"raster"
+				],
+				"requires_map_frame" : true,
+				"result_types" : 
+				[
+					"continuous",
+					"index",
+					"change"
+				]
+			},
+			"description" : "Compact statistics panel (min/max/mean/sum or per-class counts) for numeric result layers.",
+			"id" : "statistics/panel",
+			"semantic_roles" : 
+			[
+				"statistics.panel"
+			],
+			"version" : 1
+		},
+		{
 			"category" : "subtitle",
 			"compatibility" : 
 			{
@@ -932,6 +1015,27 @@
 			"semantic_roles" : 
 			[
 				"text.section"
+			],
+			"version" : 1
+		},
+		{
+			"category" : "text",
+			"compatibility" : 
+			{
+				"requires_map_frame" : true,
+				"result_types" : 
+				[
+					"uncertainty",
+					"probability",
+					"confidence",
+					"classification"
+				]
+			},
+			"description" : "Standalone uncertainty note (kind, level, source) required when the product declares uncertain data.",
+			"id" : "text/uncertainty-note",
+			"semantic_roles" : 
+			[
+				"text.uncertainty"
 			],
 			"version" : 1
 		},

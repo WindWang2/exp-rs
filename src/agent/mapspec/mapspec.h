@@ -43,7 +43,17 @@ namespace sicnu::agent::mapspec {
 //       (inset_maps[].locator.target), per-item style_ref, page roles and
 //       the full atlas surface (filter/sort/margins/feature variables).
 //       v3 is a strict superset of v2: every new field is optional.
-inline constexpr int kMapSpecCurrentVersion = 3;
+//   4 — cartography platform 7.0: explainable constraint solving. Constraint
+//       items may declare hardness ("hard"|"soft", default "hard" = v3
+//       behavior), priority (integer 0..100, default 50) and weight
+//       (0..1000, default 1, soft constraints only). The solver orders
+//       constraints canonically (hardness, priority desc, weight desc,
+//       canonical index), applies soft constraints greedily after the hard
+//       fixpoint with rank-aware conflict rejection, and reports a decisions
+//       ledger, a bounded unsat core per unsatisfied hard constraint and the
+//       weighted objective. v4 is a strict superset of v3: every new field
+//       is optional.
+inline constexpr int kMapSpecCurrentVersion = 4;
 
 /// Ordered item collection names of a MapSpec document.
 /// (inline constexpr: Windows DLL builds cannot auto-export extern data
@@ -78,6 +88,9 @@ bool isConstraintKind( const std::string &kind );
 /// (above, below, left_of, right_of, inside, keep_with, avoid_overlap,
 /// fit_content).
 bool isRelativeConstraintKind( const std::string &kind );
+
+/// True when `hardness` is a known v4 constraint hardness ("hard"|"soft").
+bool isConstraintHardness( const std::string &hardness );
 
 /// Creates an empty MapSpec with a page. `page` may carry width_mm/height_mm
 /// (defaults: A4 landscape 297×210).

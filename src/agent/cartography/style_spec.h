@@ -92,8 +92,48 @@ std::vector<std::string> validateStyleApplicability( const Json::Value &styleSpe
 ///   {kind?: "raster"|"vector", band_count?, modality?,
 ///    value_min?, value_max?, semantics?: [...]}
 /// Returns human-readable problems; empty means applicable. Pure.
+/// Platform 7.0 adds modality-aware checks (SAR stays single-band,
+/// multiband_color needs ≥3 bands, DEM/terrain styles should declare a
+/// stretch or classification, declared uncertainty wants uncertainty
+/// semantics on the dataset).
 std::vector<std::string> checkStyleApplicability( const Json::Value &styleSpec,
                                                   const Json::Value &dataset );
+
+//
+// Platform 7.0 (package E): semantic scheme, NoData, uncertainty and
+// contrast surfaces. All additive and validated — a semantically wrong
+// style is REJECTED at validation, or repaired only where a canonical,
+// deterministic fix exists.
+//
+//   raster.classification.scheme: "categorical" | "sequential" | "diverging"
+//     diverging requires numeric `center` inside the declared class range;
+//     categorical requires discrete classes.
+//   raster.nodata: {value?: number, transparent?: bool, label?: string}
+//   uncertainty: {kind: "none"|"band"|"hatch"|"confidence_interval",
+//                 level?: number (0..1), field?: string}
+//
+
+/// True when `scheme` is a known color-scheme semantic.
+bool isStyleScheme( const std::string &scheme );
+
+/// Validates the 7.0 semantic surfaces. Empty = valid. Called from
+/// validateStyleSpec; exposed for direct schema work.
+std::vector<std::string> validateStyleSemantics( const Json::Value &styleSpec );
+
+/// Deterministic accessibility advisory over a TOKEN-RESOLVED style:
+/// WCAG-derived contrast ratios for label text colors against the token
+/// background (floor 4.5) and for consecutive class color pairs (floor
+/// 1.5, overridable via style.contrast.{min_text,min_class}). Returns
+/// human-readable warnings; empty = passes. Never rejects by itself.
+std::vector<std::string> checkStyleContrast( const Json::Value &resolvedStyleSpec,
+                                             const Json::Value *tokens = nullptr );
+
+/// Deterministic repair for the small, canonically-fixable set of semantic
+/// errors. Returns true when `styleSpec` was repaired (decisions appended);
+/// false means "reject at validation, no canonical fix". Currently repairs:
+/// diverging scheme without center when the class structure brackets 0
+/// (center = 0). Pure otherwise; never guesses silently.
+bool repairStyleSemantics( Json::Value &styleSpec, std::vector<std::string> *decisions );
 
 /// Structural validation of a StyleSpec document (envelope, applies_to,
 /// renderer vocabulary, class/category entries, numeric ranges, bounded

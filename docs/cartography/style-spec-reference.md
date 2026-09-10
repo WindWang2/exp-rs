@@ -113,3 +113,58 @@ and over-deep chains are reported and the raw reference survives verbatim —
 no wrong value is invented. Token sets may legally declare references in
 `colors`/`palettes`; `resolveTokenSet` materializes chains once (problems
 surface in `resolved.token_problems`).
+
+## Platform 7.0 — semantic schemes, NoData, uncertainty, contrast
+
+All fields optional; validation rejects semantic contradictions instead of
+rendering something wrong.
+
+### Color scheme semantics
+
+`raster.classification.scheme` ∈ `categorical | sequential | diverging`:
+
+- `diverging` requires a numeric `raster.classification.center` (the neutral
+  value) inside the declared class range; a diverging style whose classes
+  bracket zero and that lacks a center is **deterministically repairable**
+  (`repairStyleSemantics` derives `center: 0` and reports the decision);
+- `categorical` contradicts `classification.mode: "continuous"` — rejected.
+
+### NoData
+
+`raster.nodata: {value?: number, transparent?: bool, label?: string}` —
+the declared NoData sentinel travels with the style and is validated.
+**Wiring**: `style:apply` does not yet push `nodata` into the QGIS renderer
+(design-system limitation, documented honestly): QGIS-native NoData stays
+configured through the symbology tools. The declarative block is the
+catalog's knowledge surface; renderer wiring is future work.
+
+### Uncertainty declaration
+
+`uncertainty: {kind: "none"|"band"|"hatch"|"confidence_interval",
+level?: number (0..1), field?: string}` — a style declaring `kind != none`
+against a dataset without uncertainty/probability/confidence semantics is
+refused by `checkStyleApplicability`.
+
+### Modality-aware applicability (hard checks)
+
+- `multiband_color` requires ≥ 3 bands and cannot represent SAR backscatter
+  (single-band by physics);
+- DEM/terrain styles must declare a `stretch` or a `classification` — bare
+  single-band gray hides elevation semantics;
+- existing value-domain / band-count / modality checks unchanged.
+
+### Class ontology mapping
+
+Class/category entries may tag an `ontology` concept (free-form string,
+shape-validated). `checkStyleApplicability` refuses a style whose ontology
+tags are all disjoint from the target dataset's declared `semantics` — a
+mapping-blind application is an explicit problem, never a silent wrong
+correspondence.
+
+### Contrast checks (deterministic advisory)
+
+`checkStyleContrast(resolvedStyle, tokens)` computes WCAG-derived contrast
+ratios: label text vs the token background (floor 4.5) and consecutive
+class/category color pairs (floor 1.5). Floors are overridable per style via
+`contrast: {min_text, min_class}`. Output is a warning list — it never
+rejects by itself; thresholds are fixed, results are byte-stable.

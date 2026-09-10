@@ -12,7 +12,7 @@ this document in sync when you add descriptors.
 > here). The machine index and `cartography:list_templates` operate on
 > the *resolved* descriptors, so children match their base's tasks.
 
-Shipped: **56 templates**, **52 components** (with variants), 2 token sets.
+Shipped: **56 templates**, **57 components** (with variants), 2 token sets.
 
 ## Design token sets
 
@@ -87,10 +87,12 @@ Shipped: **56 templates**, **52 components** (with variants), 2 token sets.
 
 | id | category | variants | description |
 |----|----------|----------|-------------|
+| `accuracy/report` | accuracy | — | Accuracy report block (overall accuracy, kappa, per-class precision/recall) for classification products. |
 | `annotation/callout` | annotation | — | Free annotation with optional leader hint; anchored anywhere. |
 | `chart/area` | chart | — | Area chart (cumulative composition). |
 | `chart/bar` | chart | `grouped`, `stacked` | Category bar chart (class areas, counts). |
 | `chart/class-area` | chart | — | Class-area bar chart bound to classification statistics (hectares or percent). |
+| `chart/class-composition` | chart | — | Class composition chart (stacked share of classes) for categorical products. |
 | `chart/confusion-matrix` | chart | `confusion`, `change-matrix` | Confusion/change matrix rendered as a labeled grid; diagonal emphasized. |
 | `chart/histogram` | chart | — | Histogram of values (band statistics, index distribution). |
 | `chart/line` | chart | `single-series`, `multi-series` | Line chart (profiles, trends). |
@@ -122,16 +124,19 @@ Shipped: **56 templates**, **52 components** (with variants), 2 token sets.
 | `north-arrow/navigation` | north-arrow | — | Operational/navigation north arrow for mission sheets and quick looks. |
 | `north-arrow/scientific` | north-arrow | — | Publication-grade true-north arrow. |
 | `publication/figure-label` | publication | — | Figure label ('图1', 'Figure 2') in the token figure_label style. |
+| `publication/footer` | publication | — | Product footer (logo placeholder, production date, contact/licence line) pinned to the page edge. |
 | `publication/logo-placeholder` | publication | — | Institution logo placeholder box; swap the picture path at composition time. |
 | `publication/panel-image` | publication | — | Photo/panel image frame for report pages (scene thumbnail, field photo). |
 | `scale-bar/dual-unit` | scale-bar | — | Metric scale bar paired with a secondary unit label line (km + miles) for international reports. |
 | `scale-bar/single` | scale-bar | `single-box`, `double-box`, `line-ticks-up`, `line-ticks-down`, `stepped-line` | Scale bar for projected maps; style variants map to QGIS scale bar renderers. |
 | `source-note/default` | source-note | — | Data source and processing provenance note (token style 'source_note'). |
+| `statistics/panel` | statistics | — | Compact statistics panel (min/max/mean or per-class counts) for numeric result layers. |
 | `subtitle/standard` | subtitle | — | Secondary line under the main title: product, region, or date context. |
 | `text/disclaimer` | text | — | Legal or interpretation disclaimer rendered in the secondary text color. |
 | `text/metadata-block` | text | — | Multi-line metadata block (sensor, date, CRS, processing level) for the map margin. |
 | `text/scientific-caption` | text | — | Figure caption with number, e.g. 'Fig. 1 — Land cover 2024'. Styled from token 'caption'. |
 | `text/section-label` | text | — | Short section label ('A', 'Study area', '方法') introducing a map panel or figure group. |
+| `text/uncertainty-note` | text | — | Standalone uncertainty note (kind, level, source) required when the product declares uncertain data. |
 | `title/bilingual` | title | — | Two-line bilingual title (CJK primary line, Latin secondary line) rendered as one label block. |
 | `title/main` | title | `standard`, `compact` | Primary map title. Token style 'title' (20pt bold by default); one per page. |
 
