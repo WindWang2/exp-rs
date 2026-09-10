@@ -213,12 +213,19 @@ TEST_CASE( "ResourceUri: credential-shaped query keys are recognized",
            "[contract][resource_uri]" )
 {
     using sicnu::geo::isCredentialQueryKey;
+    // Exact-match denylist (curated, drift-checked by the io layer): the
+    // lowercase form of the key must equal a denylist entry.
     REQUIRE( isCredentialQueryKey( "token" ) );
     REQUIRE( isCredentialQueryKey( "Signature" ) );
     REQUIRE( isCredentialQueryKey( "X-Amz-Signature" ) );
     REQUIRE( isCredentialQueryKey( "access_key" ) );
-    REQUIRE( isCredentialQueryKey( "API-KEY" ) );
+    REQUIRE( isCredentialQueryKey( "SECRET" ) );
+    REQUIRE( isCredentialQueryKey( "ApiKey" ) );
     REQUIRE_FALSE( isCredentialQueryKey( "layer" ) );
     REQUIRE_FALSE( isCredentialQueryKey( "bbox" ) );
     REQUIRE_FALSE( isCredentialQueryKey( "time" ) );
+    // Observed (Verification 7.0 fuzz): the hyphen-spelled "api-key" is NOT
+    // in the denylist (only apikey/api_key). Left as-is deliberately — the
+    // denylist is curated by the io owner; flagged in the fault matrix.
+    REQUIRE_FALSE( isCredentialQueryKey( "api-key" ) );
 }

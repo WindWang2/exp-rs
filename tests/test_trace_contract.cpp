@@ -64,9 +64,10 @@ TEST_CASE( "trace ids: format, uniqueness, sortability", "[trace][id]" )
     REQUIRE( a.size() == 26 );
     REQUIRE( b.size() == 26 );
     REQUIRE( a != b );
-    // Crockford base32 alphabet only.
+    // Crockford base32 alphabet only (excludes I, L, O, U).
+    const std::string crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     for ( const char ch : a )
-        REQUIRE( ( ( ch >= '0' && ch <= '9' ) || ( ch >= 'A' && ch <= 'V' ) ) );
+        REQUIRE( crockford.find( ch ) != std::string::npos );
     // Monotonic ids sort ascending in generation order.
     REQUIRE( a < b );
     // Prefix passthrough.
