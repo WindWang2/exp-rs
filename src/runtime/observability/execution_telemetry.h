@@ -92,6 +92,8 @@ enum class Counter : uint8_t
     TilesProcessed,
     WorkersSpawned,
     WorkersCrashed,
+    WorkerCancelAcks,
+    TaskAutoRetries,
     ArtifactsRegistered,
     ArtifactsReclaimed,
     _Count

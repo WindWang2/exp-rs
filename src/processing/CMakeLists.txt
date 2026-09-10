@@ -257,8 +257,11 @@ add_library(sicnu_task_center STATIC
     # Phase C fused-chain execution (intermediate materialization elimination)
     framework/fused_chain.cpp
     framework/local_worker_host.cpp
+    framework/worker_process_io.h
     framework/local_worker_pool.h
     framework/local_worker_pool.cpp
+    framework/worker_execution_route.h
+    framework/worker_execution_route.cpp
     framework/resource_monitor.cpp
     framework/task_resource_budget.cpp
     framework/agent_workflow_executor.cpp
@@ -294,6 +297,12 @@ target_link_libraries(sicnu_task_center PUBLIC
 set_target_properties(sicnu_task_center PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
+# Execution Plane 7.0: Windows RSS sampler (GetProcessMemoryInfo) so the
+# memory watermark gates are live on Windows too (they silently returned 0
+# before — the platform shipped with memory admission disabled).
+if(WIN32)
+  target_link_libraries(sicnu_task_center PRIVATE psapi)
+endif()
 
 install(TARGETS sicnu_processing
     RUNTIME DESTINATION ${QGIS_BIN_DIR}

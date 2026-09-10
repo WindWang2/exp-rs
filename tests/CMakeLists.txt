@@ -1851,6 +1851,14 @@ target_compile_definitions(test_worker_host PRIVATE
     SICNU_WORKER_EXE="$<TARGET_FILE:sicnu_worker>"
 )
 
+# Execution Plane 7.0 fault matrix (retry/routing/admission/cancel/shutdown/
+# stress). RUN_SERIAL: the sticky-shutdown case must run after everything and
+# the routing cases spawn real worker processes.
+sicnu_add_test(test_execution_plane_7 TIMEOUT 1200 RUN_SERIAL TRUE)
+target_compile_definitions(test_execution_plane_7 PRIVATE
+    SICNU_WORKER_EXE="$<TARGET_FILE:sicnu_worker>"
+)
+
 # Phase I persistent workspace catalog.
 sicnu_add_test(test_workspace_catalog TIMEOUT 300)
 

@@ -20,6 +20,7 @@
 #include "jobs/job_types.h"
 #include "resource_monitor.h"
 #include "task_resource_budget.h"
+#include "task_resource_budget2.h"
 #include "data/execution_fingerprint.h"
 #include "workflow/placeholder_grammar.h"
 
@@ -126,6 +127,14 @@ struct AlgorithmTaskInfo {
     /// marked Completed with the chain's tail payload when the head completes
     /// (Canceled via the normal upstream-failure cascade when the head fails).
     bool fusedMember = false;
+    /// Execution Plane 7.0: the task was routed to an isolated worker process
+    /// (worker_execution_route). Informational + admission accounting: the
+    /// isolated-slot gate counts active tasks with this flag.
+    bool isolatedRoute = false;
+    /// Execution Plane 7.0: automatic TRANSIENT retries consumed so far
+    /// (worker crash/timeout/spawn failure). Bounded by
+    /// TaskCenter::maxAutoRetries; operator errors never auto-retry.
+    int autoRetryAttempts = 0;
 };
 
 struct PipelineExecutionInfo {
@@ -210,6 +219,17 @@ public:
     /// falsy). The retry drops parents that are not Completed (#685) and
     /// stays attached to the original pipeline step (#702).
     long retryTask(long taskId);
+
+    /// --- Execution Plane 7.0: bounded transient auto-retry -----------------
+    /// Automatic retries for TRANSIENT execution failures only (isolated
+    /// worker crash / timeout / spawn exhaustion — infrastructure died, the
+    /// operator never reported a result). Operator errors, validation
+    /// failures and cancellations are NEVER auto-retried. The task is
+    /// resurrected in place (children keep their DAG edges); the attempt
+    /// count and the hard cap (clamped 0..3, default from
+    /// SICNU_TASK_MAX_AUTO_RETRIES, else 1) keep every retry bounded.
+    void setMaxAutoRetries( int maxRetries );
+    int maxAutoRetries() const;
 
     void updateTaskProgress(long taskId, double progress);
     void appendTaskLog(long taskId, const QString& message);
@@ -298,6 +318,21 @@ public:
     /// Resolve the RAM estimate (MiB) for an algorithm, applying the
     /// conservative per-class fallback when the operator declares none.
     unsigned int resolveEstimateMb( const std::string &algorithmId ) const;
+
+    /// --- Execution Plane 7.0: multi-dimension admission -------------------
+    /// Declared temporary-disk budget (MiB) across active tasks (descriptor
+    /// execution.temporaryDiskBytes). 0 = gate off (default).
+    void setTempDiskBudgetMb( unsigned int mb );
+    unsigned int tempDiskBudgetMb() const;
+    /// Declared VRAM budget (MiB) across active tasks (descriptor
+    /// execution.estimatedVramBytes). 0 = gate off (default; the model
+    /// session pool keeps its own per-device VRAM admission).
+    void setVramBudgetMb( unsigned int mb );
+    unsigned int vramBudgetMb() const;
+    /// Concurrency cap for tasks whose descriptor declares ioHeavy. 0 = gate
+    /// off (default).
+    void setIoHeavyLimit( unsigned int maxConcurrent );
+    unsigned int ioHeavyLimit() const;
 
 signals:
     /// Lifecycle notifications are always emitted **outside** m_mutex so slots may
@@ -389,6 +424,10 @@ private:
         JobExecutor executor;
         bool hasExecutor = false;
         CancelHook onCancel;
+        /// Execution Plane 7.0: the executor runs the job in an isolated
+        /// worker process (worker_execution_route); the shared pool must be
+        /// started before this launch is submitted.
+        bool isolated = false;
     };
 
     /// Fused-chain binding (Phase C): head task → member tasks. When the head
@@ -430,6 +469,28 @@ private:
     long m_nextPipelineId = 1;
     ResourceMonitor m_resourceMonitor;
     TaskResourceBudget m_resourceBudget;
+    /// Execution Plane 7.0: multi-dimension admission over the ACTIVE set
+    /// (temp disk / VRAM absolute dims; RAM stays on m_resourceBudget).
+    /// Caps default to 0 = gate off, so master behavior is unchanged.
+    TaskResourceBudget2 m_budget2;
+    unsigned int m_ioHeavyLimit = 0;
+    /// Bounded transient auto-retry cap (0..3; default 1, env-overridable).
+    int m_maxAutoRetries = 1;
+    /// Per-task declared admission dimensions (descriptor-derived, resolved
+    /// once per task like the RAM estimate cache).
+    struct AdmissionDims
+    {
+        unsigned int tempDiskMb = 0;
+        unsigned int vramMb = 0;
+        bool ioHeavy = false;
+    };
+    mutable QMap<long, AdmissionDims> m_admissionDimsCache;
+    /// Descriptor-backed admission dimensions for @a task (cached; a
+    /// descriptor failure yields all-zero dims = no gating).
+    AdmissionDims admissionDimsLocked( const AlgorithmTaskInfo &task ) const;
+    /// Transient auto-retry decision for markTaskFailed (m_mutex held): the
+    /// error class is transient AND the task's retry budget is not exhausted.
+    bool shouldAutoRetryLocked( const AlgorithmTaskInfo &task, const QString &error ) const;
     /// Installs the registry-backed estimate resolver (idempotent). Called once
     /// from the constructor; re-installed if a test clears it via {}.
     void installDefaultEstimateResolver();

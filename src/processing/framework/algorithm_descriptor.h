@@ -94,6 +94,14 @@ struct AgentMetadata
   bool largeRasterSafe = false;
   /// Cooperative cancellation honored during execution (preflight advisory).
   bool supportsCancellation = false;
+  /// Execution-location preference (Execution Plane 7.0): "" (default,
+  /// in-process) | "isolated" (may run in an isolated sicnu_worker process
+  /// when worker execution is enabled). Only honored together with
+  /// supportsCancellation.
+  std::string executionPreference;
+  /// Declared I/O-heavy kernel (streams large blocks to/from disk; bounded
+  /// by the TaskCenter io-heavy concurrency limit when that gate is on).
+  bool ioHeavy = false;
   /// Execution produces provenance/lineage records for its outputs.
   bool producesProvenance = false;
   /// When non-empty, this operator is a compatibility facade/alias whose
