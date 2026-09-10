@@ -1072,7 +1072,7 @@ void Solver::searchCores()
     // shared item participates as a pseudo-member (anchors are the stronger
     // contract — disabling their constraint opponents is the meaningful
     // counterfactual).
-    std::vector<const ConstraintRuntime *> candidates;
+    std::vector<ConstraintRuntime *> candidates;
     for ( const auto &other : mConstraints )
     {
       if ( other.isSoft || other.disabled || other.cid == target.cid )
@@ -1386,7 +1386,7 @@ Json::Value CompositionResult::toJson() const
   out["satisfied_weight"] = satisfiedWeight;
   out["violated_weight"] = violatedWeight;
   out["fixpoint_policy"] = fixpointPolicy;
-  Json::Value decisions( Json::arrayValue );
+  Json::Value decisionsJson( Json::arrayValue );
   for ( const auto &decision : decisions )
   {
     Json::Value entry( Json::objectValue );
@@ -1395,19 +1395,19 @@ Json::Value CompositionResult::toJson() const
     entry["outcome"] = decision.outcome;
     entry["reason"] = decision.reason;
     entry["order"] = decision.order;
-    decisions.append( entry );
+    decisionsJson.append( entry );
   }
-  out["decisions"] = decisions;
-  Json::Value violated( Json::arrayValue );
+  out["decisions"] = decisionsJson;
+  Json::Value violatedJson( Json::arrayValue );
   for ( const auto &violation : violated )
   {
     Json::Value entry( Json::objectValue );
     entry["cid"] = violation.cid;
     entry["kind"] = violation.kind;
     entry["reason"] = violation.reason;
-    violated.append( entry );
+    violatedJson.append( entry );
   }
-  out["violated"] = violated;
+  out["violated"] = violatedJson;
   out["unsat_cores"] = unsatCores;
   return out;
 }
