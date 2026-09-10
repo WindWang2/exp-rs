@@ -129,7 +129,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
   const std::vector<std::pair<QString, double>> points = inlineData( chart, &dataOk );
   // matrix/metric branches validate their own binding shapes below; the
   // generic two-value scale (points) only gates the remaining kinds.
-  const bool genericKind = kind != "matrix" && kind != "metric";
+  const bool genericKind = kind != "matrix" && kind != "metric" && kind != "accuracy_summary";
   if ( !dataOk || points.empty() )
   {
     if ( genericKind )
