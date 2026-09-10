@@ -35,3 +35,13 @@ weight desc, canonical index asc) — never by JSON object iteration order.
   for `tasks`, child override for scalar facets; keyed arrays (variants) deep-merge.
 - (resolved) Dual-axis charts: reject at validation without explicit
   `justification` string; no silent single-axis downgrade.
+
+## Progress log
+
+- M0 done: worktree `exp-rs-cartography-platform-7` @ origin/master c731e3e7;
+  configure: Ninja + vcpkg installed dir shared from platform-6 worktree +
+  winflexbison; baseline full build running (-j2).
+- M1..M9 implemented and committed (see git log). Remaining: build green,
+  index/gallery regeneration (SICNU_CARTOGRAPHY_REGENERATE_INDEX=1),
+  pin the structural-digest golden, headless PNG RCA, docs drift check,
+  full local regression, adversarial review, PR.
