@@ -898,10 +898,10 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
               ( matrix["rows"].empty() || matrix["rows"].size() != matrix["labels"].size() ) )
       problems.push_back( "accuracy_summary needs a square confusion matrix "
                           "(rows = reference, columns = predicted)" );
-    if ( kind == "accuracy_summary" && mode != "inline" )
-      problems.push_back( "accuracy_summary derives from inline data only "
-                          "(no vector_expression binding)" );
   }
+  if ( kind == "accuracy_summary" && mode != "inline" )
+    problems.push_back( "accuracy_summary derives from inline data only "
+                        "(no vector_expression binding)" );
 
   // Platform 7.0 dual-axis policy: a secondary axis is accepted ONLY with an
   // explicit semantic justification — otherwise validation rejects it (no
