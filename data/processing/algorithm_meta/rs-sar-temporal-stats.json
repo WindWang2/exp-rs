@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:sar_temporal_stats",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "sar",
+    "temporal",
+    "statistics",
+    "change"
+  ],
+  "task" : "sar-temporal"
+}
