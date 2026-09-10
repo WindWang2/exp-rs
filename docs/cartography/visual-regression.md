@@ -83,3 +83,20 @@ environmental limitation: on this headless Windows setup the
 `[visual][determinism]`/`[visual][golden]` PNG cases crash in
 `QgsLayoutExporter` (DLL-resolution class, 0xC0000135) — they are reported
 as not-exercised locally, never as passed.
+
+### Headless Windows RCA (Platform 7.0)
+
+The 6.0-era local failures split into two distinct causes:
+
+1. **Process never started (0xC0000135)** — a PATH gap: the test executable
+   needs the Qt debug binaries, qca/kc bins and the vcpkg debug bins on
+   `PATH`. Fixed by `run-tests.cmd` in the worktree root; the executable now
+   loads and runs.
+2. **Hard stop inside `QgsLayoutExporter` (exit code 3)** — with the DLLs
+   resolved, the non-rendering visual layers run green (repair-to-pass
+   fixtures pass under `QT_QPA_PLATFORM=offscreen`), but the PNG
+   rasterization case still terminates the process without a Catch2 report.
+   This remains an environmental limitation of this headless Windows
+   session (desktop print/print-engine support); Linux CI renders it.
+   The rendering-free structural digest above is the always-runnable
+   evidence for layout drift; PNG goldens stay opt-in.
