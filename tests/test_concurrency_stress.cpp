@@ -133,9 +133,12 @@ TEST_CASE( "stress: cancel race always lands in a terminal state", "[stress][job
             [] { /* cancel hook */ } );
 
         // Race by construction: half the cancels are requested while the job
-        // is still queued (workers = 2), half likely while running.
+        // is still queued (workers = 2), half likely while running. The
+        // cancel() return value is intentionally NOT asserted — a job that
+        // already finished before the cancel landed is legitimate; the
+        // invariant under test is terminality of every job below.
         if ( i % 2 == 0 )
-            REQUIRE( engine.cancel( jobId ) );
+            engine.cancel( jobId );
     }
 
     for ( int i = 0; i < kJobs; ++i )
