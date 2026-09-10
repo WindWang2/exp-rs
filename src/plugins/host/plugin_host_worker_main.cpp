@@ -351,8 +351,18 @@ int main( int argc, char **argv )
     } );
 
     Ipc::Envelope request;
-    while ( channel.nextRequest( request, 60000 ) )
+    for ( ;; )
     {
+        // nextRequest returns false BOTH on close and on the idle
+        // timeout: an idle worker must keep serving (a GUI host may not
+        // call the plugin for minutes), so only a genuinely closed
+        // channel ends the serve loop.
+        if ( !channel.nextRequest( request, 60000 ) )
+        {
+            if ( channel.isOpen() )
+                continue;
+            break;
+        }
         if ( request.method == kLoadPlugin )
         {
             if ( instanceValid )

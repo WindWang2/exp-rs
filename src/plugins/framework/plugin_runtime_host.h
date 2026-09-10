@@ -60,6 +60,11 @@ public:
     /// Manifest declaration for a plugin operator (nullptr when unknown).
     const exprs::ManifestOperator *manifestOperator( const std::string &operatorId ) const;
 
+    /// Host-process runtime snapshot (worker liveness/generation/quota per
+    /// plugin) for the conformance kit and doctor surfaces. Null when the
+    /// runtime is not installed (SICNU_PLUGIN_HOST_PROCESS=off).
+    Json::Value hostProcessSnapshot() const;
+
     /// Current factory for @p operatorId (empty when the plugin has not
     /// registered it yet). The lazy adapter resolves through this so a
     /// binary plugin's factory installed at load time is honoured.

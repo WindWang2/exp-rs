@@ -21,9 +21,18 @@ IpcError IpcError::fromJson( const Json::Value &json )
     IpcError error;
     if ( !json.isObject() )
         return error;
-    error.code = json.get( "code", "" ).asString();
-    error.message = json.get( "message", "" ).asString();
-    error.retryable = json.get( "retryable", false ).asBool();
+    // Every field is type-checked: this parses UNTRUSTED peer frames, and
+    // jsoncpp's asString()/asBool() throw on mismatched types - an
+    // exception here would escape onto the reader thread and kill the host.
+    const Json::Value &codeValue = json[ "code" ];
+    if ( codeValue.isString() )
+        error.code = codeValue.asString();
+    const Json::Value &messageValue = json[ "message" ];
+    if ( messageValue.isString() )
+        error.message = messageValue.asString();
+    const Json::Value &retryableValue = json[ "retryable" ];
+    if ( retryableValue.isBool() )
+        error.retryable = retryableValue.asBool();
     const Json::Value &data = json[ "data" ];
     if ( !data.isNull() )
         error.data = data;   // object OR array (e.g. diagnostic log batches)

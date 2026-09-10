@@ -4,6 +4,7 @@
 #include "exprs/ipc_channel.h"
 
 #include <cstdio>
+#include <stdexcept>
 
 namespace exprs {
 
@@ -495,7 +496,25 @@ void IpcChannel::readerLoop()
             failAllPending( Outcome::Status::ProtocolError, "E6003", detailed );
             break;
         }
-        handleFrame( payload );
+        try
+        {
+            handleFrame( payload );
+        }
+        catch ( const std::exception &exception )
+        {
+            // A malformed peer frame must never kill the reader thread
+            // (uncaught -> terminate -> host dies). Record, close, fail
+            // pending typed - the protocol-error contract.
+            std::string failure = std::string( "reader exception: " ) + exception.what();
+            {
+                std::lock_guard<std::mutex> lock( mMutex );
+                if ( mProtocolFailure.empty() )
+                    mProtocolFailure = failure;
+                closeLocked();
+            }
+            failAllPending( Outcome::Status::ProtocolError, "E6002", failure );
+            break;
+        }
         if ( mClosed )
             break;
     }

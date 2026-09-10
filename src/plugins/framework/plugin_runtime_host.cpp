@@ -37,6 +37,14 @@ void bootstrapPluginRuntime( const exprs::PluginRegistryOptions &options )
     PluginRuntimeHost::instance().bootstrap( options );
 }
 
+Json::Value PluginRuntimeHost::hostProcessSnapshot() const
+{
+    std::lock_guard<std::mutex> lock( mMutex );
+    if ( !mHostProcessRuntime )
+        return Json::Value();
+    return mHostProcessRuntime->diagnosticsSnapshot();
+}
+
 void PluginRuntimeHost::bootstrap( const exprs::PluginRegistryOptions &options )
 {
     std::lock_guard<std::mutex> lock( mMutex );

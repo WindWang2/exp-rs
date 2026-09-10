@@ -377,14 +377,19 @@ void AppInterfaceBridge::setupDefaultAlgorithmHandler()
         shmSegs.clear();
         switch ( awaitStatus )
         {
+          // Failure messages carry the shared isolation diagnostic codes
+          // (exprs/plugin_diagnostics.h E6xxx) so both worker transports
+          // surface one failure taxonomy (isolation runtime 5.0 alignment).
           case AwaitStatus::NoClient:
-            throw std::runtime_error( "IPC client not connected" );
+            throw std::runtime_error(
+              "E6006: IPC client not connected (Python worker unavailable)" );
           case AwaitStatus::Disconnected:
-            throw std::runtime_error( "Python worker disconnected during algorithm execution" );
+            throw std::runtime_error(
+              "E6005: Python worker disconnected during algorithm execution" );
           case AwaitStatus::Timeout:
-            throw std::runtime_error( "Python algorithm execution timed out" );
+            throw std::runtime_error( "E6004: Python algorithm execution timed out" );
           case AwaitStatus::Cancelled:
-            throw std::runtime_error( "Python algorithm execution cancelled" );
+            throw std::runtime_error( "E6009: Python algorithm execution cancelled" );
           case AwaitStatus::Ok:
             break;
         }

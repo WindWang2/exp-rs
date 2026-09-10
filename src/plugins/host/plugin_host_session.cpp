@@ -109,9 +109,15 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
     if ( !::CreatePipe( &hostToWorkerRead, &hostToWorkerWrite, &inherit, 0 )
          || !::CreatePipe( &workerToHostRead, &workerToHostWrite, &inherit, 0 ) )
     {
+        // Partial failure: close whatever exists (respawn retries land here).
+        const DWORD pipeError = ::GetLastError();
+        for ( HANDLE handle : { hostToWorkerRead, hostToWorkerWrite, workerToHostRead,
+                                workerToHostWrite } )
+            if ( handle )
+                ::CloseHandle( handle );
         diagnostics.add( PluginDiagnosticCode::HostProcessUnavailable,
                          PluginDiagnosticSeverity::Error,
-                         "CreatePipe failed: " + std::to_string( ::GetLastError() ),
+                         "CreatePipe failed: " + std::to_string( pipeError ),
                          mOptions.pluginId );
         return false;
     }
@@ -153,7 +159,15 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
     const std::string commandLine = "\"" + mOptions.workerPath + "\" " + kIpcReadSwitch
                                     + handleToString( hostToWorkerRead ) + " " + kIpcWriteSwitch
                                     + handleToString( workerToHostWrite );
-    std::wstring commandWide( commandLine.begin(), commandLine.end() );
+    // Proper UTF-8 widening: naive char-to-wchar_t widening breaks every
+    // non-ASCII install path (localized user directories are the norm).
+    const int wideLen = MultiByteToWideChar( CP_UTF8, 0, commandLine.c_str(),
+                                             static_cast<int>( commandLine.size() ), nullptr, 0 );
+    std::wstring commandWide( wideLen > 0 ? static_cast<size_t>( wideLen ) : 0, L'\0' );
+    if ( wideLen > 0 )
+        MultiByteToWideChar( CP_UTF8, 0, commandLine.c_str(),
+                             static_cast<int>( commandLine.size() ), commandWide.data(),
+                             wideLen );
 
     STARTUPINFOEXW startupInfo;
     ZeroMemory( &startupInfo, sizeof( startupInfo ) );

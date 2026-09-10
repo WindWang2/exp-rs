@@ -15,6 +15,7 @@
 
 #include "plugin_host_session.h"
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -84,6 +85,9 @@ private:
 
     Options mOptions;
     mutable std::mutex mMutex;
+    int mRestartCount = 0;                     ///< restart policy counter
+    bool mRestartWindowArmed = false;
+    std::chrono::steady_clock::time_point mFirstRestart;
     std::map<std::string, PluginHostSessionEntryPtr> mSessions;
 };
 

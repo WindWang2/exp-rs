@@ -59,6 +59,7 @@ namespace exprs {
 // ===========================================================================
 namespace {
 constexpr int kTerminateGraceMs = 2000;
+constexpr int kPostExitDrainGraceMs = 2000;
 class BoundedSink
 {
 public:
@@ -420,7 +421,11 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     if ( !::CreatePipe( &stdoutRead, &stdoutWrite, &inherit, 0 )
          || !::CreatePipe( &stderrRead, &stderrWrite, &inherit, 0 ) )
     {
-        result.error = "CreatePipe failed: " + std::to_string( ::GetLastError() );
+        const DWORD pipeError = ::GetLastError();
+        for ( HANDLE handle : { stdoutRead, stdoutWrite, stderrRead, stderrWrite } )
+            if ( handle )
+                ::CloseHandle( handle );
+        result.error = "CreatePipe failed: " + std::to_string( pipeError );
         return result;
     }
     // The read ends must NOT leak into the child or a grandchild holding
@@ -520,6 +525,10 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     bool stderrOpen = true;
     bool sawStdoutEof = false;
     bool sawStderrEof = false;
+    // A grandchild holding inherited write ends can keep the pipes open
+    // forever after the child exited; bound the post-exit drain so run()
+    // always returns (documented: tail output beyond the grace is lost).
+    std::chrono::steady_clock::time_point postExitDrainDeadline{};
 
     while ( !exited || stdoutOpen || stderrOpen )
     {
@@ -548,6 +557,8 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
             if ( wait == WAIT_OBJECT_0 )
             {
                 exited = true;
+                postExitDrainDeadline = std::chrono::steady_clock::now()
+                                        + std::chrono::milliseconds( kPostExitDrainGraceMs );
             }
             else if ( ( cancelled || timedOut ) && !killed )
             {
@@ -562,10 +573,11 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         }
 
         // Once the process exited, drain until both pipes hit EOF so no
-        // buffered output is lost.
-        if ( exited && sawStdoutEof && sawStderrEof )
+        // buffered output is lost — bounded by the post-exit grace (a
+        // grandchild inheriting the write ends must not hang run()).
+        if ( exited && ( ( sawStdoutEof && sawStderrEof ) || !stdoutOpen && !stderrOpen ) )
             break;
-        if ( exited && !stdoutOpen && !stderrOpen )
+        if ( exited && std::chrono::steady_clock::now() >= postExitDrainDeadline )
             break;
     }
 

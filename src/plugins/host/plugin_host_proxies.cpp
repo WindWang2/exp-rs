@@ -119,6 +119,10 @@ public:
                 "host-process worker for '" + mPluginId + "' " + why );
         };
 
+        // Exactly ONE bounded recovery per call, whether the worker was
+        // already dead on entry or died mid-execution (the restart
+        // policy inside the runtime bounds total respawns per window).
+        bool recovered = false;
         for ( int attempt = 0; attempt < 2; ++attempt )
         {
             bool aliveNow;
@@ -128,10 +132,9 @@ public:
             }
             if ( !aliveNow )
             {
-                // Dead on entry (previous timeout/crash) or just crashed:
-                // exactly ONE bounded recovery across both attempts.
-                if ( attempt > 0 || !tryRecovery( *mEntry ) )
-                    throwUnavailable( "is not running (E6005)" );
+                if ( recovered || !tryRecovery( *mEntry ) )
+                    throwUnavailable( "crashed or exited (E6005); restart policy exhausted" );
+                recovered = true;
             }
 
             Json::Value requestParams( Json::objectValue );
@@ -180,7 +183,9 @@ public:
                     "worker protocol violation (E6002/E6003): " + outcome.error.message );
             case IpcChannel::Outcome::Status::ChannelClosed:
             default:
-                // Worker died mid-execution: one bounded recovery, then typed.
+                // Worker died mid-execution: the next loop iteration
+                // applies ONE bounded recovery (or refuses typed if the
+                // restart policy is exhausted).
                 continue;
             }
         }

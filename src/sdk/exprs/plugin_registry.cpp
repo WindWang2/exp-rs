@@ -431,11 +431,17 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
     // dlclose. No plugin code is ever mapped here, so the UAF window the
     // in-process ordering guards against cannot exist; the barrier still
     // guards against contributions outliving their session.
-    if ( std::find( mHostProcessLoaded.begin(), mHostProcessLoaded.end(), pluginId )
-             != mHostProcessLoaded.end()
-         && std::none_of( mLoaded.begin(), mLoaded.end(), [&]( const LoadedPlugin &e ) {
-                return e.pluginId == pluginId;
-            } ) )
+    bool hostedOop = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        hostedOop = std::find( mHostProcessLoaded.begin(), mHostProcessLoaded.end(), pluginId )
+                        != mHostProcessLoaded.end()
+                    && std::none_of( mLoaded.begin(), mLoaded.end(),
+                                     [&]( const LoadedPlugin &e ) {
+                                         return e.pluginId == pluginId;
+                                     } );
+    }
+    if ( hostedOop )
     {
         {
             std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
@@ -465,9 +471,9 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
             return false;
         }
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-        if ( mSink )
+        if ( mSink && !gDestructing )
             mSink->revokePlugin( pluginId );
-        if ( mHostProcessRuntime )
+        if ( mHostProcessRuntime && !gDestructing )
         {
             if ( !mHostProcessRuntime->unloadPlugin( pluginId, mDiagnostics ) )
                 mDiagnostics.add( PluginDiagnosticCode::LibraryLoadFailed,

@@ -118,7 +118,7 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
     entry->pluginId = pluginId;
 
     IpcChannel::Outcome outcome =
-        session->request( kLoadPlugin, params, mOptions.handshakeTimeoutMs * 2 );
+        session->requestRaw( kLoadPlugin, params, mOptions.loadTimeoutMs );
     if ( outcome.status != IpcChannel::Outcome::Status::Ok )
     {
         log.add( PluginDiagnosticCode::LibraryLoadFailed, PluginDiagnosticSeverity::Error,
@@ -182,6 +182,39 @@ bool PluginHostProcessRuntime::respawn( const std::string &pluginId,
     // already collapsed the stampede.
     std::lock_guard<std::mutex> lock( mMutex );
 
+    // Restart policy: at most maxRestarts respawns inside a rolling
+    // window; afterwards recovery refuses (typed E6005 at the caller)
+    // until an unload/reload cycle resets the counter.
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if ( mRestartWindowArmed
+             && std::chrono::duration_cast<std::chrono::milliseconds>( now
+                                                                       - mFirstRestart )
+                    .count()
+                    > mOptions.restartWindowMs )
+        {
+            mRestartWindowArmed = false;
+            mRestartCount = 0;
+        }
+        if ( !mRestartWindowArmed )
+        {
+            mRestartWindowArmed = true;
+            mFirstRestart = now;
+            mRestartCount = 0;
+        }
+        if ( mRestartCount >= mOptions.maxRestarts )
+        {
+            log.add( PluginDiagnosticCode::HostProcessCrashed,
+                     PluginDiagnosticSeverity::Error,
+                     "restart policy exhausted (" + std::to_string( mOptions.maxRestarts )
+                         + " respawns in " + std::to_string( mOptions.restartWindowMs )
+                         + " ms); unload/reload resets it",
+                     pluginId );
+            return false;
+        }
+        ++mRestartCount;
+    }
+
     PluginHostProcessSession::SpawnOptions spawnOptions;
     spawnOptions.workerPath = mOptions.workerPath;
     spawnOptions.pluginId = pluginId;
@@ -203,10 +236,13 @@ bool PluginHostProcessRuntime::respawn( const std::string &pluginId,
         session->shutdown( 5000, log );
         return false;
     }
-    // Publish without entry.mutex: proxies call respawn OUTSIDE the entry
-    // lock (they must never hold it — non-recursive double-lock throws), and
-    // shared_ptr assignment is safe for readers that already hold a copy.
-    entry.session = session;
+    // Publish under entry.mutex: proxies call respawn OUTSIDE that lock
+    // (a non-recursive double-lock would throw), so taking it here is
+    // safe and gives readers a happens-before edge.
+    {
+        std::lock_guard<std::mutex> entryLock( entry.mutex );
+        entry.session = session;
+    }
     log.add( PluginDiagnosticCode::HostProcessCrashed, PluginDiagnosticSeverity::Info,
              "worker respawned and the plugin was reloaded (restart policy applied)", pluginId );
     return true;
