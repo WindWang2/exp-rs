@@ -23,5 +23,8 @@
 - M3..M7 code complete (trace adapters, fault points, corpus, fuzz, bench);
   local evidence pending the Clang build.
 - M8 done (sweeps + TaskCenter adapter anti-vacuity proof).
-- M9 script + docs done; report generation pending evidence.
-- M10..M11 pending.
+- M9 done (READINESS.md/json generated from ladder evidence).
+- M10 done (2 adversarial subagents; 1 P0 + 4 P1 + 8 P2 + 10 P3 findings —
+  all P0/P1/P2 fixed; P3s fixed or accepted with rationale in REVIEW_LOG).
+- M11 done: master integrated (PRs #836/#838; upstream IpcChannel fix
+  adopted wholesale, mine dropped), branch pushed, PR created.

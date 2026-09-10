@@ -85,3 +85,12 @@ ladder run; subagent 2/2.)
   (review A check E), and the io/visual suites exercise io-track/cartography
   code this branch does not modify. Recorded honestly as failed/timeout in
   the ladder JSON and readiness report — NOT marked pass.
+
+## Post-merge integration note (2026-09-11)
+
+origin/master moved (PRs #836/#838) after this branch was cut: #836 fixed
+the same IpcChannel newer-Clang break with a two-constructor form that
+KEEPS the default member initializer (and Options' aggregate-ness) — the
+better shape also recommended by review B (P3-15). Merged origin/master
+and adopted the upstream fix wholesale; my explicit-ctor variant is
+dropped. #838 (waitpid include) touched no file this branch owns.
