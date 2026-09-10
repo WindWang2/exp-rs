@@ -1073,7 +1073,6 @@ void Solver::searchCores()
     // contract — disabling their constraint opponents is the meaningful
     // counterfactual).
     std::vector<const ConstraintRuntime *> candidates;
-    std::set<std::string> anchoredShared;
     for ( const auto &other : mConstraints )
     {
       if ( other.isSoft || other.disabled || other.cid == target.cid )
@@ -1086,9 +1085,6 @@ void Solver::searchCores()
       if ( static_cast<int>( candidates.size() ) < kMaxCoreCandidates )
         candidates.push_back( &other );
     }
-    for ( const std::string &id : target.itemIds )
-      if ( mAnchorIds.count( id ) )
-        anchoredShared.insert( id );
 
     Json::Value coreEntry( Json::objectValue );
     coreEntry["constraint"] = target.cid;
@@ -1114,7 +1110,6 @@ void Solver::searchCores()
         restoreRects( mPreSolveRects );
         for ( auto &c : mConstraints )
           c.disabled = false;
-        std::vector<bool> savedBlocked( mConstraints.size(), false );
         for ( int idx : combination )
           candidates[idx]->disabled = true;
         mSimulating = true;
@@ -1127,8 +1122,6 @@ void Solver::searchCores()
         found = holds( target );
         if ( found )
           chosen = combination;
-        if ( bounded )
-          break;
         // Next combination (lexicographic index order).
         int pos = size - 1;
         while ( pos >= 0 && combination[pos] == n - size + pos )
@@ -1166,8 +1159,6 @@ void Solver::searchCores()
     {
       for ( int idx : chosen )
         coreEntry["core"].append( candidates[idx]->cid );
-      for ( const std::string &anchorId : anchoredShared )
-        coreEntry["core"].append( "anchor:" + anchorId );
       coreEntry["explanation"] = "'" + target.cid + "' is satisfiable only without " +
                                  std::to_string( static_cast<int>( chosen.size() ) ) +
                                  " of its conflicting constraints (bounded search)";
