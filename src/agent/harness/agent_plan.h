@@ -57,7 +57,32 @@ struct AgentPlan {
   Json::Value verification{Json::objectValue};
   Json::Value mapOutput{Json::Value()};    ///< null or object
   Json::Value raw{Json::objectValue};      ///< original document (estimates kept)
+
+  /// Harness 8.0 (Area E): identity pins. Shape:
+  /// { "datasets": { "<slot>": { "asset_entity_id"?: "asset-N",
+  ///                              "asset_id"?: "<uuid>", "path"?: "...",
+  ///                              "revision"?: N } },
+  ///   "model"?: "<id>" | "<id>@<version>",
+  ///   "split"?: "<split id>" }
+  /// A pinned slot must exist in `inputs` and — at execute time — resolve to
+  /// the SAME dataset; a mismatch is a typed IDENTITY_MISMATCH blocker, so a
+  /// silently re-registered or renamed input can never feed the plan.
+  Json::Value pins{Json::Value()};
+  /// Harness 8.0 (Area E): intermediate-artifact cleanup policy declared for
+  /// the run. "keep_all" (default) | "keep_outputs". Validated here and
+  /// forwarded into the compiled workflow metadata (engine consumption is an
+  /// execution-plane follow-up); harness:explain reports the policy.
+  std::string cleanup;                       ///< "" = keep_all
 };
+
+/// Harness 8.0 (Area E): deterministic plan fingerprint — SHA-256 (first 16
+/// hex chars) over the canonical compact serialization of the plan's
+/// scientific content (intent, inputs, steps with operator/params/wiring/
+/// verification/role, outputs, verification block). Identical plans →
+/// identical fingerprint regardless of plan_id/timestamps; any change to the
+/// science changes it. Recorded in plan bindings, the execute_plan response,
+/// and every evidence sidecar for reproducibility bookkeeping.
+std::string planFingerprint( const AgentPlan &plan );
 
 /// Reads a plan document (v2 or legacy v1). Returns false with a typed error.
 bool readAgentPlan( const Json::Value &doc, AgentPlan &plan, HarnessError &error );
