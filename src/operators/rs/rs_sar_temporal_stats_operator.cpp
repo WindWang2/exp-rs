@@ -208,6 +208,22 @@ Json::Value RsSarTemporalStatsOperator::run( const Json::Value &params, RSOperat
         inputIsDb = anyDeclared && allDb;
     }
 
+    // Per-scene declared sentinels (compared in float space, #444): a
+    // positive sentinel (e.g. 65535) must drop out of the aggregates like
+    // any other invalid sample, not silently count as backscatter.
+    std::vector<bool> sceneHasSentinel( nScenes, false );
+    std::vector<float> sceneSentinel( nScenes, 0.0f );
+    for ( size_t s = 0; s < nScenes; ++s )
+    {
+        bool has = false;
+        const double nodata = scenes[s]->bandNoDataValue( band, &has );
+        if ( has && std::isfinite( nodata ) )
+        {
+            sceneHasSentinel[s] = true;
+            sceneSentinel[s] = static_cast<float>( nodata );
+        }
+    }
+
     GdalBlockStream stream( *scenes[0], band, kTileDim, kTileDim, 0 );
     GdalStreamingOutput out( QString::fromStdString( outputPath ), width, height,
                              kProductBands, GDT_Float32, scenes[0]->geoTransform(),
@@ -239,7 +255,8 @@ Json::Value RsSarTemporalStatsOperator::run( const Json::Value &params, RSOperat
             for ( size_t s = 0; s < nScenes; ++s )
             {
                 const float v = tiles[s][i];
-                if ( std::isfinite( v ) )
+                const bool sentinel = sceneHasSentinel[s] && v == sceneSentinel[s];
+                if ( std::isfinite( v ) && !sentinel )
                     series[s] = inputIsDb ? sicnu::sar::dbToLinear( v ) : v;
                 else
                     series[s] = std::numeric_limits<double>::quiet_NaN();
