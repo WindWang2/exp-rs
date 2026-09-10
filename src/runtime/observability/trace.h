@@ -21,11 +21,13 @@
 #include "trace_id.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace sicnu::runtime::observability::trace
