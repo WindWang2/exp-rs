@@ -28,6 +28,29 @@ governing principle: **never claim enforcement that does not exist.**
   (fail closed), not warnings.
 - Roots are canonicalized; symlink escapes are rejected.
 
+### Plugin-platform 9.0 additions
+
+Three capability gates moved from declaration to enforcement, plus a
+machine-readable honesty table:
+
+- **modelProvider.frameworks (enforced-host)**: model runtime registration
+  is refused (typed E5005) for frameworks outside the declared list.
+  Manifests WITHOUT an `access` object keep pre-9.0 behavior — gates act
+  only on EXPLICIT declarations.
+- **ui (enforced-host)**: an explicit `ui: false` refuses declarative-UI
+  describe/invoke with typed E5005 (E6010 for invalid events).
+- **externalProcess (enforced-host)**: an explicit `externalProcess: false`
+  makes pure-manifest external tool operators refuse to spawn (typed
+  PolicyRefused 4102 in the operator taxonomy).
+- **provider URI schemes (enforced-worker)**: `open`/`inspect` URIs whose
+  scheme is not declared by the provider are refused E5005; `discover`
+  (the enumeration surface) stays unfiltered.
+- **The matrix as data**: `pluginCapabilityEnforcementMatrix()` (and its
+  JSON projection) is the single source of truth quoted by this doc,
+  `plugin inspect --json` and the debug bundle — enforced-host /
+  enforced-worker / enforced-os / advisory / audit-only /
+  refused-by-contract.
+
 ### Enforcement by runtime
 
 | declaration | host-process runtime | in-process runtime |

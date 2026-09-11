@@ -33,6 +33,26 @@ Install root: `~/.local/share/sicnu_geo_rs/plugins/<plugin-id>`.
    immediately before the library is mapped — install-time validation alone
    is never trusted (issue #756; see ADR 0130).
 
+## Dependency constraints (plugin-platform 9.0)
+
+`plugin install` probes each declared `"dependencies": ["<id>@<range>"]`
+constraint against the installed set and records a diagnostic per
+constraint: INFO when satisfied, a typed E3003 WARNING when not.
+Install PROCEEDS either way — install order is the user's business — while
+the load-time gate remains the enforcement point.
+
+Supported ranges (semver-ish): `^X.Y.Z` (same major; `0.x` bounds pin the
+minor), `~X.Y.Z` (same minor), `>=X.Y.Z`, `=X.Y.Z`, `X.Y.Z` (exact) and a
+bare plugin id (any version). An unparsable range is satisfied by nothing
+(fail closed).
+
+## Interrupted installs
+
+Staging leftovers from crashed installs are swept automatically (older than
+24 h, or the current process's own directory at install start). A failed
+upgrade never touches the previous-good install (staged install + atomic
+swap + rollback).
+
 ## Enable/disable
 
 `plugins.index.json` next to the user plugin root records disabled ids.
