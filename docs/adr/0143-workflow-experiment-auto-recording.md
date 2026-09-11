@@ -39,11 +39,13 @@ recordRun`, issue #754) already consumes.
    experiment (MCP `run_workflow` recording arguments today). Default
    behavior is byte-identical to an unrecorded platform.
 
-4. **Pins before start.** The store enforces identity-pin immutability once
-   a run started, so pins are registered pre-submission, keyed by workflow
-   definition id. Post-start pin attachment with different identity is an
-   honest typed refusal (`experiment.bridge_pins_late`), never a silent
-   drop or a rewrite.
+4. **Pins at submission.** The store enforces identity-pin immutability
+   once a run started; the enabling surface therefore passes pins with the
+   synchronous `recordSubmission()` call — bound to that run, immune to
+   queued-signal reordering or later submissions of the same workflow.
+   Post-start pin attachment with different identity is an honest typed
+   refusal (`experiment.bridge_pins_late`), never a silent drop or a
+   rewrite.
 
 5. **Truthful interruption and stale reconciliation.** `Interrupted` is a
    first-class non-terminal record (`markInterrupted`); a resumed execution
@@ -68,10 +70,15 @@ recordRun`, issue #754) already consumes.
   events for unknown executions are typed errors).
 - MCP `run_workflow` callers opt in with `experiment_db` + `experiment_id`
   (+ optional pins) and read results back through the existing read-only
-  `experiment:`/`reproducibility:` tools — no new read verbs.
+  `experiment:`/`reproducibility:` tools — no new read verbs. Recording is
+  bound to the SUBMISSION: the enabling surface calls `recordSubmission()`
+  synchronously with the just-submitted run (pins included in the first
+  transition), and signal-driven events for any other run are ignored.
 - The governance mirror keeps its own signal subscription; both consumers
   are queued (the coordinator emits with its mutex held).
 - Known limit: a terminal event still queued when the process exits is
-  delivered only if the owner flushes (`flush()` at shutdown); the next
-  enable()'s stale reconciliation closes the record from checkpoint
-  evidence either way.
+  delivered if the owner flushes (`flush()` at shutdown — the MCP server
+  does). Otherwise the next enable()'s stale reconciliation closes
+  Failed/Cancelled/Interrupted records from checkpoint evidence; a
+  COMPLETED checkpoint is only reported (closing as success without
+  artifact evidence would fabricate output truth).

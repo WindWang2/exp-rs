@@ -20,6 +20,7 @@ using sicnu::dataset::Diagnostic;
 using sicnu::dataset::DiagnosticSeverity;
 
 constexpr int kBridgedStepLimit = 256;
+constexpr int kMaxLiveRefs = 10000;
 
 Diagnostic bridgeDiag( QString code, QString message )
 {
@@ -39,10 +40,6 @@ VoidResult failVoid( const QString &code, const QString &message )
     return VoidResult::failure( bridgeDiag( code, message ) );
 }
 
-QString statusToString( RunStatus status )
-{
-    return sicnu::dataset::runStatusToString( status );
-}
 
 } // namespace
 
@@ -353,6 +350,11 @@ Result<QString> ExperimentRunBridge::handleExecutionEvent( const ExecutionEvent 
         auto started = startFromEvent( event, pins );
         if ( !started )
             return started;
+        // Bound the in-process map: a bridge that records hundreds of
+        // thousands of executions in one process does not need its oldest
+        // warm entries (they fall back to the store's cold-path scan).
+        if ( m_runIdByExecution.size() >= kMaxLiveRefs )
+            m_runIdByExecution.clear();
         m_runIdByExecution.insert( event.executionRef, started.value() );
         m_pinsByExecution.remove( event.executionRef );
         return started;

@@ -12,10 +12,12 @@
 #include <QDir>
 #include <QEvent>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
+#include <QThread>
 #include <QtLogging>
 
 #include <json/json.h>
@@ -28,11 +30,12 @@ namespace
 
 /// jsoncpp → QJson conversion for definition snapshots. Definitions are
 /// caller-authored documents (bounded in practice); nesting is capped so a
-/// pathological definition cannot balloon the record.
+/// pathological definition cannot balloon the record. Truncation is marked
+/// with an explicit "…truncated" entry, never silent.
 QJsonValue jsonCppToQJson( const Json::Value &value, int depth = 0 )
 {
     if ( depth > 16 )
-        return QJsonValue( QStringLiteral( "…" ) );
+        return QJsonValue( QStringLiteral( "…truncated" ) );
     switch ( value.type() )
     {
         case Json::nullValue:
@@ -53,6 +56,8 @@ QJsonValue jsonCppToQJson( const Json::Value &value, int depth = 0 )
         {
             QJsonArray array;
             const Json::ArrayIndex count = qMin<Json::ArrayIndex>( value.size(), 512 );
+            if ( count < value.size() )
+                array.append( QStringLiteral( "…truncated" ) );
             for ( Json::ArrayIndex i = 0; i < count; ++i )
                 array.append( jsonCppToQJson( value[i], depth + 1 ) );
             return array;
@@ -64,7 +69,10 @@ QJsonValue jsonCppToQJson( const Json::Value &value, int depth = 0 )
             for ( const std::string &key : value.getMemberNames() )
             {
                 if ( written++ >= 512 )
+                {
+                    object.insert( QStringLiteral( "…truncated" ), true );
                     break;
+                }
                 object.insert( QString::fromStdString( key ),
                                jsonCppToQJson( value[key], depth + 1 ) );
             }
@@ -74,32 +82,36 @@ QJsonValue jsonCppToQJson( const Json::Value &value, int depth = 0 )
     return QJsonValue( QJsonValue::Null );
 }
 
-QJsonObject stepSummary( const workflow::StepPlan &plan )
+QJsonObject stepSummary( const Json::Value &plan )
 {
     QJsonObject summary;
-    summary.insert( QStringLiteral( "id" ), QString::fromStdString( plan.stepId ) );
-    summary.insert( QStringLiteral( "operator" ), QString::fromStdString( plan.operatorId ) );
-    summary.insert( QStringLiteral( "status" ), QString::fromStdString( plan.status ) );
-    if ( !plan.errorMessage.empty() )
-        summary.insert( QStringLiteral( "error" ), QString::fromStdString( plan.errorMessage ) );
-    if ( !plan.outputLayerPath.empty() )
+    summary.insert( QStringLiteral( "id" ),
+                    QString::fromStdString( plan["stepId"].asString() ) );
+    summary.insert( QStringLiteral( "operator" ),
+                    QString::fromStdString( plan["operatorId"].asString() ) );
+    summary.insert( QStringLiteral( "status" ),
+                    QString::fromStdString( plan["status"].asString() ) );
+    const Json::Value &error = plan["errorMessage"];
+    if ( error.isString() && !error.asString().empty() )
+        summary.insert( QStringLiteral( "error" ),
+                        QString::fromStdString( error.asString() ) );
+    const Json::Value &outputPath = plan["outputLayerPath"];
+    if ( outputPath.isString() && !outputPath.asString().empty() )
     {
         QJsonObject output;
-        output.insert( QStringLiteral( "path" ), QString::fromStdString( plan.outputLayerPath ) );
-        if ( plan.outputSizeBytes > 0 )
+        output.insert( QStringLiteral( "path" ),
+                       QString::fromStdString( outputPath.asString() ) );
+        const Json::Value &size = plan["outputSizeBytes"];
+        if ( size.isInt64() && size.asInt64() > 0 )
             output.insert( QStringLiteral( "size" ),
-                           static_cast<double>( plan.outputSizeBytes ) );
-        if ( !plan.outputDigest.empty() )
+                           static_cast<double>( size.asInt64() ) );
+        const Json::Value &digest = plan["outputDigest"];
+        if ( digest.isString() && !digest.asString().empty() )
             output.insert( QStringLiteral( "digest" ),
-                           QString::fromStdString( plan.outputDigest ) );
+                           QString::fromStdString( digest.asString() ) );
         summary.insert( QStringLiteral( "output" ), output );
     }
     return summary;
-}
-
-QString checkpointPathFor( const QString &directory, const QString &runId )
-{
-    return directory + QDir::separator() + QStringLiteral( "checkpoint_%1.json" ).arg( runId );
 }
 
 } // namespace
@@ -108,37 +120,56 @@ ExecutionEvent workflowRunToExecutionEvent( const workflow::WorkflowRun &run,
                                             const QString &state, qint64 startedMs,
                                             qint64 finishedMs )
 {
+    // ONE locked snapshot: the coordinator's fold thread (TaskCenter
+    // callbacks) may mutate the aggregate concurrently, and unlocked
+    // accessors like definition() deliberately escape the run's mutex —
+    // reading them here raced the fold and corrupted the JSON heap. Every
+    // value below comes from the single internally-locked serialization.
+    const Json::Value snapshot = run.toJson();
+
     ExecutionEvent event;
-    event.executionRef = QString::fromStdString( run.runId() );
-    event.workflowId = QString::fromStdString( run.workflowId() );
+    event.executionRef = QString::fromStdString( snapshot["runId"].asString() );
+    event.workflowId = QString::fromStdString( snapshot["workflowId"].asString() );
     if ( event.workflowId.isEmpty() )
-        event.workflowId = QString::fromStdString( run.definition().id );
+        event.workflowId =
+            QString::fromStdString( snapshot["definition"]["id"].asString() );
     event.state = state;
     event.startedMs = startedMs;
     event.finishedMs = finishedMs;
-    event.errorMessage = QString::fromStdString( run.errorMessage() );
-    event.definition = jsonCppToQJson( workflowDefinitionToJson( run.definition() ) )
-                           .toObject();
+    const Json::Value &errorMessage = snapshot["errorMessage"];
+    if ( errorMessage.isString() )
+        event.errorMessage = QString::fromStdString( errorMessage.asString() );
+    event.definition = jsonCppToQJson( snapshot["definition"] ).toObject();
 
-    const auto plans = run.stepPlans();
+    const Json::Value &plans = snapshot["stepPlans"];
+    std::map<std::string, std::pair<double, QString>> identityByStep; // completion identity
     for ( const auto &plan : plans )
+    {
         event.steps.append( stepSummary( plan ) );
+        const Json::Value &digest = plan["outputDigest"];
+        const Json::Value &size = plan["outputSizeBytes"];
+        if ( digest.isString() && !digest.asString().empty() )
+            identityByStep[plan["stepId"].asString()] = std::make_pair(
+                size.isInt64() && size.asInt64() > 0 ? static_cast<double>( size.asInt64() )
+                                                     : -1.0,
+                QString::fromStdString( digest.asString() ) );
+    }
 
-    const std::map<std::string, std::string> artifacts = run.artifacts();
-    for ( const auto &kv : artifacts )
+    const Json::Value &artifacts = snapshot["artifacts"];
+    for ( const std::string &stepId : artifacts.getMemberNames() )
     {
         QJsonObject entry;
-        entry.insert( QStringLiteral( "path" ), QString::fromStdString( kv.second ) );
-        // Enrich with completion identity when the step plan carries it.
-        if ( const auto plan = run.stepPlan( kv.first ) )
+        entry.insert( QStringLiteral( "path" ),
+                      QString::fromStdString( artifacts[stepId].asString() ) );
+        const auto identity = identityByStep.find( stepId );
+        if ( identity != identityByStep.end() )
         {
-            if ( plan->outputSizeBytes > 0 )
-                entry.insert( QStringLiteral( "size" ), plan->outputSizeBytes );
-            if ( !plan->outputDigest.empty() )
-                entry.insert( QStringLiteral( "digest" ),
-                              QString::fromStdString( plan->outputDigest ) );
+            if ( identity->second.first > 0 )
+                entry.insert( QStringLiteral( "size" ), identity->second.first );
+            if ( !identity->second.second.isEmpty() )
+                entry.insert( QStringLiteral( "digest" ), identity->second.second );
         }
-        event.artifacts.insert( QString::fromStdString( kv.first ), entry );
+        event.artifacts.insert( QString::fromStdString( stepId ), entry );
     }
     return event;
 }
@@ -158,30 +189,51 @@ WorkflowExperimentMonitor::~WorkflowExperimentMonitor()
         disconnect( &m_coordinator, nullptr, this, nullptr );
 }
 
+QString WorkflowExperimentMonitor::checkpointPathFor( const QString &runId ) const
+{
+    // Same file the coordinator writes (checkpointPathLocked) and the same
+    // name WorkflowCheckpointManager archives under <dir>/history/.
+    return m_coordinator.checkpointDirectory() + QDir::separator()
+           + QStringLiteral( "checkpoint_%1.json" ).arg( runId );
+}
+
 bool WorkflowExperimentMonitor::enable( const QString &experimentDbPath,
                                         const QString &experimentId,
                                         const QString &experimentName,
                                         const QString &objective,
                                         const QString &datasetDbPath, QString *error )
 {
+    Q_ASSERT( thread() == QThread::currentThread() );
     if ( experimentDbPath.isEmpty() || experimentId.isEmpty() )
     {
         if ( error )
             *error = QStringLiteral( "experiment db path and experiment id are required" );
         return false;
     }
+    // One experiment db per monitor: a second enable() with a DIFFERENT path
+    // would silently record into the first db — refuse instead.
+    if ( !m_experimentDbPath.isEmpty() && m_experimentDbPath != experimentDbPath )
+    {
+        if ( error )
+            *error = QStringLiteral( "monitor already bound to experiment db %1" )
+                         .arg( m_experimentDbPath );
+        return false;
+    }
     if ( !m_store.isOpen() && !m_store.open( experimentDbPath, error ) )
         return false;
+    m_experimentDbPath = experimentDbPath;
 
     if ( !m_bridge )
         m_bridge = std::make_unique<ExperimentRunBridge>( m_store );
 
-    if ( !datasetDbPath.isEmpty() )
+    if ( datasetDbPath.isEmpty() )
     {
-        // The dataset store rides only when the caller pinned its path; a
-        // missing/unopenable dataset db disables pin VERIFICATION, not
-        // recording (recorded runs keep the raw pin ids, honestly unpinned
-        // fingerprints).
+        // An absent dataset db disables pin VERIFICATION for subsequent
+        // submissions; it never keeps a stale store from an earlier call.
+        m_datasetStore.reset();
+    }
+    else if ( !m_datasetStore )
+    {
         m_datasetStore = std::make_unique<sicnu::dataset::DatasetStore>();
         if ( !m_datasetStore->open( datasetDbPath, error ) )
             m_datasetStore.reset();
@@ -224,6 +276,39 @@ void WorkflowExperimentMonitor::setWorkflowPins( const QString &workflowId, cons
         m_bridge->setWorkflowPins( workflowId, pins );
 }
 
+Result<QString> WorkflowExperimentMonitor::recordSubmission( const workflow::WorkflowRun &run,
+                                                             const RunPins &pins )
+{
+    Q_ASSERT( thread() == QThread::currentThread() );
+    if ( !m_bridge )
+    {
+        return Result<QString>::failure( Diagnostic{
+            QStringLiteral( "experiment.bridge_no_target" ),
+            QStringLiteral( "monitor is not enabled" ), DiagnosticSeverity::Error } );
+    }
+    const QString runId = QString::fromStdString( run.runId() );
+    // Per-submission opt-in: only this run's lifecycle is recorded.
+    m_enabledRefs.insert( runId );
+    // Pins bind to THIS run before the start transition lands — immune to
+    // queued-signal reordering or later submissions of the same workflow.
+    if ( !pins.isEmpty() )
+    {
+        const auto attached = m_bridge->attachExecutionPins( runId, pins );
+        if ( !attached )
+            return Result<QString>::failure( attached.diagnostics() );
+    }
+    const ExecutionEvent event =
+        workflowRunToExecutionEvent( run, QStringLiteral( "Running" ), 0, 0 );
+    return m_bridge->handleExecutionEvent( event );
+}
+
+void WorkflowExperimentMonitor::optInResume( const QString &executionRef )
+{
+    Q_ASSERT( thread() == QThread::currentThread() );
+    if ( !executionRef.isEmpty() )
+        m_enabledRefs.insert( executionRef );
+}
+
 QVector<ExperimentRunBridge::StaleDecision> WorkflowExperimentMonitor::reconcileStaleRuns()
 {
     QVector<ExperimentRunBridge::StaleDecision> decisions;
@@ -250,18 +335,28 @@ QVector<ExperimentRunBridge::StaleDecision> WorkflowExperimentMonitor::reconcile
         workflow::WorkflowRunLock probe(
             workflow::WorkflowRunLock::lockPathForRun( directory, executionRef.toStdString() ) );
         QString heldByPid;
-        if ( probe.tryAcquire( &heldByPid ) != workflow::WorkflowRunLock::TryResult::Acquired )
+        const workflow::WorkflowRunLock::TryResult acquired = probe.tryAcquire( &heldByPid );
+        if ( acquired == workflow::WorkflowRunLock::TryResult::HeldByLiveOwner )
             return ExecutionEvidence{ executionRef, QString(), false, /*liveOwner=*/true };
+        if ( acquired != workflow::WorkflowRunLock::TryResult::Acquired )
+        {
+            // Lock file could not be created/locked (deleted dir, …): the
+            // outcome cannot be probed — report, never close.
+            return std::nullopt;
+        }
         // The probe now owns the lock — release immediately so a concurrent
         // recovery/resume in another process is not blocked by a stale probe.
         probe.release();
 
-        QString path = checkpointPathFor( directory, executionRef );
+        QString path = directory + QDir::separator()
+                       + QStringLiteral( "checkpoint_%1.json" ).arg( executionRef );
         if ( !QFile::exists( path ) )
         {
-            // Completed runs are archived under <dir>/history/.
+            // Completed runs are archived under <dir>/history/ (same
+            // filename, same convention as WorkflowCheckpointManager).
             path = directory + QDir::separator() + QStringLiteral( "history" )
-                   + QDir::separator() + QStringLiteral( "checkpoint_%1.json" ).arg( executionRef );
+                   + QDir::separator()
+                   + QStringLiteral( "checkpoint_%1.json" ).arg( executionRef );
             if ( !QFile::exists( path ) )
                 return std::nullopt;
         }
@@ -302,25 +397,23 @@ void WorkflowExperimentMonitor::onRunStateChanged( const QString &runId,
 {
     if ( !m_bridge )
         return;
+    // Per-submission scope: submissions that never opted in are never
+    // recorded (enabling the monitor is not consent for the whole process).
+    if ( !m_enabledRefs.contains( runId ) )
+        return;
     if ( !bridgeExecutionStates().contains( state ) )
         return; // transitional workflow state: no experiment meaning
 
     const long pipelineId = m_coordinator.pipelineIdForRun( runId.toStdString() );
     if ( pipelineId <= 0 && state == QStringLiteral( "Running" ) )
     {
-        // An untracked Running event is ambiguous: either a real submission
-        // whose registration has not landed yet (cross-thread delivery race)
-        // or the ghost of a resume swap (its checkpoint was deleted when the
-        // original run took the pipeline back — recording it would create a
-        // record that can never terminate). The checkpoint disambiguates:
-        // real runs persist theirs BEFORE dispatch, ghosts lose theirs at
-        // the swap. Terminal/Interrupted events are always recorded —
-        // Interrupted reaches the bridge untracked on purpose (startup
-        // recovery reconciles from disk, not from the live map).
-        const QString checkpoint = m_coordinator.checkpointDirectory()
-                                   + QDir::separator()
-                                   + QStringLiteral( "checkpoint_%1.json" ).arg( runId );
-        if ( !QFile::exists( checkpoint ) )
+        // An untracked Running event for an ENABLED ref is ambiguous: either
+        // a resume-swap ghost or a real registration race. The checkpoint
+        // disambiguates: real runs persist theirs BEFORE dispatch, ghosts
+        // lose theirs at the resume swap. (Terminal/Interrupted events are
+        // always recorded — startup recovery reconciles from disk, not from
+        // the live map.)
+        if ( !QFile::exists( checkpointPathFor( runId ) ) )
             return;
     }
 

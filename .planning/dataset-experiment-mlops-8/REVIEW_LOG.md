@@ -57,4 +57,77 @@ Deliberate design points a reviewer should probe (with rationale):
 
 ## Round 1 — adversarial review (subagents), after local builds
 
+Two read-only subagents ran the full diff (`ab57d99da9`): A = architecture/
+correctness, B = tests/performance/portability. Combined verdict:
+**P0: 0, P1: 4, P2: 7, P3: 19**. Remediation (all P1/P2 fixed; P3 fixed or
+justified below):
+
+- **[A-P1-1] Recording was process-wide once enabled.** The monitor now
+  records ONLY submissions that call `recordSubmission()` (per-submission
+  opt-in); the MCP handler binds each accepted submission. `optInResume()`
+  covers continuation of an already-recorded story (resume surfaces).
+- **[A-P1-2] Pin registry was last-writer-wins across submissions** — a
+  pipelined second submission of the same workflow could retroactively
+  re-pin the first run's record. Recording is now SYNCHRONOUS per
+  submission (recordSubmission right after the tracked submit; pins bound
+  to that run's start transition); the queued signal path is an idempotent
+  continuation.
+- **[A-P1-3] Docs claimed stale reconciliation closes Completed records.**
+  Corrected in ADR 0143 + auto-recording.md (completed checkpoints are
+  reported, never closed) and `flush()` now runs in McpServer teardown.
+- **[B-P1-1] Whole-binary E2E hang (structural).** Root causes fixed: the
+  cancelled-case executor spun on a deadline-less loop over by-reference
+  captures (any lost race = hung worker + shutdownForTests join forever).
+  The executor loop is now hard-bounded and captures by value; CTest
+  TIMEOUT 600 added; PERFORMANCE.md wording corrected.
+- **[A-P2-1] Silent pin drops (negative seed; id-less pipeline).** Both are
+  typed `INVALID_ARGUMENTS` refusals now.
+- **[A-P2-2 / fix] `markSucceeded` replaced the metrics document wholesale**,
+  erasing `interrupt_note` on resumed runs — it now MERGES like the other
+  markers.
+- **[B-P2-2] `enable()` with a different experiment db silently kept the
+  first store.** The monitor is now bound to one db path (typed refusal on
+  mismatch); an absent dataset db resets verification state.
+- **[B-P2-1] MCP surface untested.** Two new test_mcp_server cases
+  (recording produces a Completed run + experiment_run_id in the response;
+  missing experiment_id / negative seed refused) plus an
+  `experiment_context` assertion in the data-platform surface test.
+- **[A-P2-3] Thread affinity documented + asserted** (`Q_ASSERT` in
+  enable/recordSubmission; header contract).
+- **[B-P2-4] CTest TIMEOUT 600** for test_mlops8_e2e.
+- P3 fixed: dead `statusToString` removed; live ref→runId map bounded
+  (10k, falls back to the cold-path scan); jsonCpp conversion truncation
+  now marked with "…truncated"; checkpoint filename consolidated in the
+  adapter; debug prints removed; scale test asserts ensureExperiment;
+  misleading test name + stale comment corrected; compare-loop double-copy
+  replaced with references; "Succeeded" → store vocabulary ("completed")
+  in tool text and changelog; split-pin doc wording matches code.
+- P3 justified/documented: RUN_SERIAL on discovered tests is ineffective
+  (pre-existing house pattern; cases are self-contained); the flock probe
+  treats probe failure as "cannot answer" (report, never close — fail
+  closed); `runIdsByExecutionRef` needle-matching retained for the
+  documented cold path (verified: compact serializer emits no spaces, the
+  needle includes the closing quote); forward-decl placement in
+  mcp_server.h; sicnu_add_test's heavy default link set (house pattern).
+
+### Round-1 fix that round-1 reviews caught only in passing
+
+- **[critical, found during remediation] Data race on the workflow
+  definition**: `workflowRunToExecutionEvent` read `definition()` (the
+  run's own mutex is deliberately escaped there) while the coordinator's
+  fold thread serialized the same aggregate — heap corruption, SIGSEGV
+  (reproducible; coredump-backed). The conversion now takes ONE locked
+  `run.toJson()` snapshot and reads everything from it.
+- **[critical, found during remediation] First submission lost its
+  terminal event**: `enable()` (which owns the signal connection) ran
+  after the tracked submit, so both transitions were emitted before the
+  connection existed. The MCP handler now enables BEFORE submission and
+  only binds the run after. The recording test binary also lacked a
+  QCoreApplication — added (queued delivery requires an event queue).
+
+Re-run after remediation: mlops8 bridge 150 ✓, scale 19907 ✓, e2e 6/6 ✓,
+mcp_server 3934 ✓ (incl. new surface cases), platform7 228 ✓,
+experiment_evaluation 162 ✓, data_platform_surface 101 ✓.
+
+
 (pending — to be filled after targeted tests pass)

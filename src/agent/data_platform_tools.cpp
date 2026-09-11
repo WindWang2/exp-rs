@@ -829,9 +829,11 @@ QVariantMap experimentCompare( const QVariantMap &args )
     // but must be visible, not hidden.
     {
         QJsonObject experimentContext;
-        for ( const auto &[side, run] : { std::pair{ QStringLiteral( "a" ), a.value() },
-                                         std::pair{ QStringLiteral( "b" ), b.value() } } )
+        const std::pair<const char *, const sicnu::experiment::ExperimentRun *> sides[] = {
+            { "a", &a.value() }, { "b", &b.value() } };
+        for ( const auto &[side, runPtr] : sides )
         {
+            const auto &run = *runPtr;
             const auto experiment = store->experimentById( run.experimentId() );
             QJsonObject entry;
             entry.insert( QStringLiteral( "experiment_id" ), run.experimentId() );

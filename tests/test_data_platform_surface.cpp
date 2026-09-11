@@ -342,6 +342,14 @@ TEST_CASE( "experiment: tools inspect and compare runs", "[agent][mcp][data_plat
     auto compared = handleDataPlatformTool( QStringLiteral( "experiment:compare" ), compareArgs );
     CHECK( compared.value( QStringLiteral( "verdict" ) ).toString() ==
            QStringLiteral( "comparable" ) );
+    // Goal 8.0 §F: experiment identity + tags ride the comparison so
+    // baseline/treatment grouping is visible.
+    const QVariantMap experimentContext =
+        compared.value( QStringLiteral( "experiment_context" ) ).toMap();
+    CHECK( experimentContext.value( QStringLiteral( "a" ) ).toMap()
+               .value( QStringLiteral( "experiment_id" ) )
+               .toString() == run.experimentId() );
+    CHECK( experimentContext.contains( QStringLiteral( "b" ) ) );
 }
 
 TEST_CASE( "reproducibility:inspect degrades honestly", "[agent][mcp][data_platform][repro]" )

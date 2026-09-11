@@ -13,7 +13,6 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 
-#include <cstdio>
 #include <QUuid>
 
 #include <atomic>
@@ -46,7 +45,6 @@ struct MonitorFixture
 
     MonitorFixture()
     {
-        fprintf( stderr, "[fixture] enter\n" );
         int argc = 1;
         static char arg0[] = "test_mlops8_e2e";
         char *argv[] = { arg0, nullptr };
@@ -60,12 +58,26 @@ struct MonitorFixture
         engine.setMaxWorkers( 2 );
 
         coordinator.setCheckpointDirectory( checkpointDir.path() );
-        fprintf( stderr, "[fixture] done\n" );
     }
 
-    std::unique_ptr<WorkflowExperimentMonitor> enable( const QString &experimentId )
+    std::unique_ptr<WorkflowExperimentMonitor> monitor;
+
+    /// Submits a tracked pipeline AND opts it into recording (the
+    /// per-submission contract under test since the review round).
+    long submitRecorded( const WorkflowDefinition &def )
     {
-        auto monitor = std::make_unique<WorkflowExperimentMonitor>( coordinator );
+        const long pipelineId = coordinator.startTrackedPipeline( def, /*autoLoad=*/false );
+        REQUIRE( pipelineId > 0 );
+        const auto run = coordinator.runForPipeline( pipelineId );
+        REQUIRE( run != nullptr );
+        const auto recorded = monitor->recordSubmission( *run, RunPins{} );
+        REQUIRE( recorded.has_value() );
+        return pipelineId;
+    }
+
+    void enable( const QString &experimentId )
+    {
+        monitor = std::make_unique<WorkflowExperimentMonitor>( coordinator );
         QString error;
         const bool ok = monitor->enable(
             storeDir.filePath( QStringLiteral( "exp.db" ) ), experimentId,
@@ -75,7 +87,6 @@ struct MonitorFixture
         // The fixture asserts through its own connection to the same store
         // (WAL allows concurrent readers; the monitor owns the writer).
         REQUIRE( experimentStore.open( storeDir.filePath( QStringLiteral( "exp.db" ) ) ) );
-        return monitor;
     }
 
     static void waitTerminal( WorkflowRunCoordinator &coordinator, long pipelineId )
@@ -152,13 +163,11 @@ TEST_CASE( "successful tracked pipeline auto-records a Completed experiment run"
     MonitorFixture fx;
     const std::string prefix = "mlops8_ok";
     registerExecutors( prefix );
-    auto monitor = fx.enable( QStringLiteral( "aaaaaaaa-0000-4000-8000-000000000001" ) );
+    fx.enable( QStringLiteral( "aaaaaaaa-0000-4000-8000-000000000001" ) );
 
-    const long pipelineId =
-        fx.coordinator.startTrackedPipeline( twoStepDefinition( prefix ), /*autoLoad=*/false );
-    REQUIRE( pipelineId > 0 );
+    const long pipelineId = fx.submitRecorded( twoStepDefinition( prefix ) );
     MonitorFixture::waitTerminal( fx.coordinator, pipelineId );
-    monitor->flush();
+    fx.monitor->flush();
 
     const auto page = fx.experimentStore.listRuns();
     REQUIRE( page.has_value() );
@@ -196,13 +205,11 @@ TEST_CASE( "failing tracked pipeline auto-records a Failed run with evidence",
     MonitorFixture fx;
     const std::string prefix = "mlops8_fail";
     registerExecutors( prefix, /*secondFails=*/true );
-    auto monitor = fx.enable( QStringLiteral( "aaaaaaaa-0000-4000-8000-000000000002" ) );
+    fx.enable( QStringLiteral( "aaaaaaaa-0000-4000-8000-000000000002" ) );
 
-    const long pipelineId =
-        fx.coordinator.startTrackedPipeline( twoStepDefinition( prefix ), /*autoLoad=*/false );
-    REQUIRE( pipelineId > 0 );
+    const long pipelineId = fx.submitRecorded( twoStepDefinition( prefix ) );
     MonitorFixture::waitTerminal( fx.coordinator, pipelineId );
-    monitor->flush();
+    fx.monitor->flush();
 
     const auto page = fx.experimentStore.listRuns();
     REQUIRE( page.has_value() );
@@ -224,16 +231,19 @@ TEST_CASE( "cancelled tracked pipeline auto-records Cancelled", "[mlops8][e2e]" 
 
     // First executor blocks until we cancel; second never runs.
     auto &engine = sicnu::jobs::JobEngine::instance();
-    std::atomic_bool firstStarted{ false };
-    std::atomic_bool stopRequested{ false };
+    auto flags = std::make_shared<std::pair<std::atomic_bool, std::atomic_bool>>();
+    flags->first.store( false ); // firstStarted
+    flags->second.store( false ); // stopRequested
     engine.registerExecutor( prefix + ":first",
-                             [&]( const sicnu::jobs::JobRequest &,
-                                  sicnu::operators::RSOperatorContext & ) {
-                                 firstStarted.store( true );
-                                 // Cooperative cancellation: exit promptly
-                                 // once the pipeline cancel lands (a job body
-                                 // never throws past the executor boundary).
-                                 while ( !stopRequested.load() )
+                             [flags]( const sicnu::jobs::JobRequest &,
+                                      sicnu::operators::RSOperatorContext & ) {
+                                 flags->first.store( true );
+                                 // Cooperative cancellation with a HARD
+                                 // bound: a job body never spins forever (a
+                                 // lost race must degrade to a clean test
+                                 // failure, never a hung worker).
+                                 for ( int waited = 0;
+                                       waited < 30000 && !flags->second.load(); waited += 10 )
                                      std::this_thread::sleep_for(
                                          std::chrono::milliseconds( 10 ) );
                                  return Json::Value( Json::objectValue );
@@ -245,10 +255,8 @@ TEST_CASE( "cancelled tracked pipeline auto-records Cancelled", "[mlops8][e2e]" 
                                  return Json::Value( Json::objectValue );
                              } );
 
-    auto monitor = fx.enable( QStringLiteral( "aaaaaaaa-0000-4000-8000-000000000003" ) );
-    const long pipelineId =
-        fx.coordinator.startTrackedPipeline( twoStepDefinition( prefix ), /*autoLoad=*/false );
-    REQUIRE( pipelineId > 0 );
+    fx.enable( QStringLiteral( "aaaaaaaa-0000-4000-8000-000000000003" ) );
+    const long pipelineId = fx.submitRecorded( twoStepDefinition( prefix ) );
 
     // Wait until the first step is actually running, then cancel the run.
     bool stepRunning = false;
@@ -267,9 +275,9 @@ TEST_CASE( "cancelled tracked pipeline auto-records Cancelled", "[mlops8][e2e]" 
     }
     REQUIRE( stepRunning );
     REQUIRE( fx.coordinator.cancelRun( pipelineId ) );
-    stopRequested.store( true ); // cooperative executor exit
+    flags->second.store( true ); // cooperative executor exit
     MonitorFixture::waitTerminal( fx.coordinator, pipelineId );
-    monitor->flush();
+    fx.monitor->flush();
 
     // The contract is experiment-state == execution-truth, whatever the
     // engine decided for the racing cancel (Canceled when the cascade won,
@@ -308,15 +316,11 @@ TEST_CASE( "disabled monitor records nothing", "[mlops8][e2e]" )
     // A monitor that never enable()d must be inert — even when attached.
     WorkflowExperimentMonitor monitor( fx.coordinator );
 
-    fprintf( stderr, "[disabled] submitting\n" );
     const long pipelineId =
         fx.coordinator.startTrackedPipeline( twoStepDefinition( prefix ), /*autoLoad=*/false );
     REQUIRE( pipelineId > 0 );
-    fprintf( stderr, "[disabled] submitted pipeline=%ld\n", pipelineId );
     MonitorFixture::waitTerminal( fx.coordinator, pipelineId );
-    fprintf( stderr, "[disabled] terminal reached\n" );
     monitor.flush();
-    fprintf( stderr, "[disabled] flushed\n" );
 
     REQUIRE_FALSE( QFile::exists( fx.storeDir.filePath( QStringLiteral( "exp.db" ) ) ) );
 }
@@ -374,7 +378,7 @@ TEST_CASE( "interrupted run resumes and completes the SAME experiment record",
         REQUIRE_FALSE( manager.saveCheckpoint( run, fx.checkpointDir.path() ).isEmpty() );
     }
 
-    auto monitor = fx.enable( QStringLiteral( "aaaaaaaa-0000-4000-8000-000000000005" ) );
+    fx.enable( QStringLiteral( "aaaaaaaa-0000-4000-8000-000000000005" ) );
 
     // Model the prior session: it recorded this execution as Running before
     // the crash. (An Interrupted event for a never-recorded execution is
@@ -392,17 +396,22 @@ TEST_CASE( "interrupted run resumes and completes the SAME experiment record",
         REQUIRE( fx.experimentStore.upsertRun( prior ).has_value() );
     }
 
-    // Startup recovery marks the run Interrupted (emitted → recorded), then
-    // the explicit resume completes it under the SAME run id.
+    // The resume surface opts the continuation in (the story belongs to the
+    // record the prior submission created).
+    fx.monitor->optInResume( runId );
+
+    // Startup recovery marks the run Interrupted on disk; the enable-time
+    // stale reconciliation advances the record from checkpoint evidence,
+    // then the explicit resume completes it under the SAME run id.
     const auto recovered = fx.coordinator.recoverAtStartup( /*autoResume=*/false );
     REQUIRE( recovered.interruptedRuns == 1 );
-    monitor->flush();
+    fx.monitor->flush();
 
     REQUIRE( fx.coordinator.resumeRun( runId.toStdString() ) > 0 );
     const long pipelineId = fx.coordinator.pipelineIdForRun( runId.toStdString() );
     REQUIRE( pipelineId > 0 );
     MonitorFixture::waitTerminal( fx.coordinator, pipelineId );
-    monitor->flush();
+    fx.monitor->flush();
 
     const auto page = fx.experimentStore.listRuns();
     REQUIRE( page.has_value() );

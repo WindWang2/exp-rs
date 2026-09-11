@@ -62,7 +62,8 @@ TEST_CASE( "stale reconciliation over 20k runs is a bounded report-only scan",
     REQUIRE( store.runCount() == kRunCount );
 
     ExperimentRunBridge bridge( store );
-    bridge.ensureExperiment( experimentId, QStringLiteral( "scale" ) );
+    const auto ensured = bridge.ensureExperiment( experimentId, QStringLiteral( "scale" ) );
+    REQUIRE( ensured.has_value() );
 
     QSet<QString> live;
     for ( qint64 i = 0; i < kLiveCount; ++i )

@@ -85,6 +85,10 @@ public:
 
     void start(QCoreApplication *app);
 
+    /// Drains queued experiment-recording lifecycle events (call at shutdown;
+    /// the destructor also does this).
+    void flushExperimentRecording();
+
     /// Injects DataManager asset authority so the dispatcher commits tool-call
     /// outputs transactionally (TICKET-23) and provenance queries resolve.
     /// Call before start().

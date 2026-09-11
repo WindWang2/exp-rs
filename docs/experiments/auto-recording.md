@@ -18,7 +18,7 @@ For every tracked workflow run of an enabled submission, one
 | any step failed | Failed | `error.error_code = workflow.failed` + the step's error message |
 | cancellation | Cancelled | `cancel_reason` |
 | crash / startup recovery | Interrupted (non-terminal) | `interrupt_note`; a resumed execution re-enters Running on the SAME record |
-| stale at next enable | per checkpoint evidence | Failed/Cancelled closed; Interrupted kept resumable; no-evidence cases reported, never guessed |
+| stale at next enable | per checkpoint evidence | Failed/Cancelled closed; Interrupted kept resumable; no-evidence and completed-checkpoint cases reported, never guessed (close a completed one through the recording path, with its artifacts) |
 
 Records that were never started cannot be closed as successes; terminal
 events for unknown executions are typed errors
@@ -48,13 +48,17 @@ is unchanged and nothing is written anywhere:
 }
 ```
 
-- `experiment_db` + `experiment_id` enable recording; the experiment is
-  created if missing (idempotent).
+- `experiment_db` + `experiment_id` enable recording FOR THIS SUBMISSION;
+  the experiment is created if missing (idempotent). Other workflow runs in
+  the process are not recorded.
 - `dataset_db` turns on pin verification: the dataset version must exist and
-  its committed fingerprint is stamped; split fingerprints are verified from
-  the stored manifest.
+  its committed fingerprint is stamped; a split manifest pin resolves its
+  fingerprint from the stored manifest when present (an unknown manifest id
+  stays recorded with an honestly empty fingerprint, which replay readiness
+  reports as a gap).
 - Pins must be supplied per submission (they are part of the run's identity,
-  which is immutable after start).
+  which is immutable after start). A malformed pin (e.g. a negative seed) is
+  a typed refusal, never a silent drop.
 
 Read results back through the existing tools — `experiment:list`,
 `experiment:inspect`, `experiment:compare`, `reproducibility:inspect`,
@@ -77,6 +81,9 @@ Read results back through the existing tools — `experiment:list`,
   retries, or mutates a run.
 - Evidence is bounded (≤256 steps summarized; artifact identity via
   path/size/digest; full resolved parameters stay in workflow checkpoints).
-- A terminal transition still queued at process exit is recorded on the
-  next `enable()`'s stale reconciliation (checkpoint-evidence based), or
-  immediately via `WorkflowExperimentMonitor::flush()`.
+- A terminal transition still queued at process exit is drained by the MCP
+  server teardown (`flush()`); without that, the next `enable()`'s stale
+  reconciliation closes Failed/Cancelled/Interrupted records from
+  checkpoint evidence — a COMPLETED checkpoint is reported instead of
+  closed (closing it as success without artifact evidence would fabricate
+  output truth).

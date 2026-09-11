@@ -1908,7 +1908,7 @@ target_include_directories(test_mlops8_e2e PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_mlops8_e2e)
+sicnu_discover_tests(test_mlops8_e2e TIMEOUT 600)
 
 
 # Phase C fused-chain equivalence (links through sicnu_task_center which

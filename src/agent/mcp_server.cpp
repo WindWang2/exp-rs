@@ -426,7 +426,7 @@ const MetaToolDef kMetaTools[] = {
       "get_workflow_status for the aggregate view.",
       { { "pipeline", "object", "Pipeline definition: {id, name, steps: [{id, title, operator, params, inputs: [{fromStepId, fromPort, toPort}]}]}. A JSON string is also accepted.", true },
         { "auto_load", "boolean", "Auto-load finished outputs as layers (headless MCP default false).", false },
-        { "experiment_db", "string", "Optional. Path of an ExperimentStore database; when set, this run is auto-recorded into it as a truthful experiment run (Created/Running/Succeeded/Failed/Cancelled/Interrupted) through the authoritative workflow lifecycle. Requires experiment_id.", false },
+        { "experiment_db", "string", "Optional. Path of an ExperimentStore database; when set, this run is auto-recorded into it as a truthful experiment run (created/running/completed/failed/cancelled/interrupted) through the authoritative workflow lifecycle. Requires experiment_id. Recording binds to THIS submission only.", false },
         { "experiment_id", "string", "Target experiment id for auto-recording (created if missing). Required with experiment_db.", false },
         { "experiment_name", "string", "Name used when auto-recording creates the experiment. Optional.", false },
         { "experiment_objective", "string", "Research question recorded for the experiment. Optional.", false },
@@ -656,8 +656,20 @@ McpServer::McpServer(QObject *parent)
     });
 }
 
+void McpServer::flushExperimentRecording()
+{
+    if (m_experimentMonitor)
+        m_experimentMonitor->flush();
+}
+
 McpServer::~McpServer()
 {
+    // Recording is bound to the server lifetime: drain queued lifecycle
+    // events so a run completing right before shutdown is still recorded
+    // (the coordinator emits queued; without this, the terminal transition
+    // would wait for the next enable()'s reconciliation).
+    if (m_experimentMonitor)
+        m_experimentMonitor->flush();
     if (mReader)
     {
         mReader->requestStop();
@@ -2526,26 +2538,53 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
     const bool autoLoad = arguments.value(QStringLiteral("auto_load")).toBool();
 
     // Opt-in experiment auto-recording (goal 8.0 §A): when experiment_db +
-    // experiment_id arrive, tracked runs of THIS submission are recorded
-    // truthfully into the ExperimentStore through the authoritative
-    // coordinator lifecycle. Absent arguments leave behavior identical to a
-    // build without recording (the monitor is created lazily and stays
-    // disabled until then). Pins are registered BEFORE submission so they are
-    // part of the run's immutable identity.
+    // experiment_id arrive, THIS submission is recorded truthfully into the
+    // ExperimentStore through the authoritative coordinator lifecycle.
+    // Absent arguments leave behavior identical to a build without recording.
+    // Recording binds to the SUBMISSION (recordSubmission right after the
+    // tracked submit), never to the process: other runs are not recorded.
     const QString experimentDb =
         arguments.value(QStringLiteral("experiment_db")).toString().trimmed();
+    sicnu::experiment::RunPins pins;
+    bool recordingRequested = false;
+    QString recordedExperimentRunId;
     if (!experimentDb.isEmpty()) {
         const QString experimentId =
             arguments.value(QStringLiteral("experiment_id")).toString().trimmed();
         if (experimentId.isEmpty())
             throw McpToolError(QStringLiteral("run_workflow: experiment_db requires experiment_id"),
                                QStringLiteral("INVALID_ARGUMENTS"), QStringLiteral("validation"));
+        pins.datasetVersionId =
+            arguments.value(QStringLiteral("dataset_version")).toString().trimmed();
+        pins.splitManifestId =
+            arguments.value(QStringLiteral("split_manifest")).toString().trimmed();
+        pins.modelId = arguments.value(QStringLiteral("model_id")).toString().trimmed();
+        pins.modelDigest = arguments.value(QStringLiteral("model_digest")).toString().trimmed();
+        const QVariant seedValue = arguments.value(QStringLiteral("seed"));
+        if (!seedValue.isNull() && seedValue.isValid()) {
+            bool seedOk = false;
+            const qlonglong seed = seedValue.toLongLong(&seedOk);
+            // An explicit pin that is silently dropped would produce an
+            // untruthful record: refuse instead.
+            if (!seedOk || seed < 0)
+                throw McpToolError(QStringLiteral("run_workflow: seed must be a non-negative integer"),
+                                   QStringLiteral("INVALID_ARGUMENTS"), QStringLiteral("validation"));
+            pins.seed = static_cast<quint64>(seed);
+            pins.hasSeed = true;
+        }
+        recordingRequested = true;
+        // Enable BEFORE submission: the coordinator emits transitions the
+        // moment the pipeline is dispatched, so the signal connection (and
+        // the experiment row) must already exist when the terminal
+        // transition fires. recordSubmission() below then binds this
+        // specific run to the recording.
         if (!m_experimentMonitor)
             m_experimentMonitor = std::make_unique<sicnu::experiment::WorkflowExperimentMonitor>(
                 sicnu::workflow::WorkflowRunCoordinator::instance());
         QString recordError;
         if (!m_experimentMonitor->enable(
-                experimentDb, experimentId,
+                experimentDb,
+                arguments.value(QStringLiteral("experiment_id")).toString().trimmed(),
                 arguments.value(QStringLiteral("experiment_name")).toString(),
                 arguments.value(QStringLiteral("experiment_objective")).toString(),
                 arguments.value(QStringLiteral("dataset_db")).toString().trimmed(), &recordError)) {
@@ -2556,50 +2595,49 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
                                QStringLiteral("EXPERIMENT_RECORDING_REFUSED"),
                                QStringLiteral("validation"));
         }
-        sicnu::experiment::RunPins pins;
-        pins.datasetVersionId =
-            arguments.value(QStringLiteral("dataset_version")).toString().trimmed();
-        pins.splitManifestId =
-            arguments.value(QStringLiteral("split_manifest")).toString().trimmed();
-        pins.modelId = arguments.value(QStringLiteral("model_id")).toString().trimmed();
-        pins.modelDigest = arguments.value(QStringLiteral("model_digest")).toString().trimmed();
-        bool seedOk = false;
-        const qlonglong seed = arguments.value(QStringLiteral("seed")).toLongLong(&seedOk);
-        if (seedOk && seed >= 0) {
-            pins.seed = static_cast<quint64>(seed);
-            pins.hasSeed = true;
-        }
-        // Keyed by the definition id: the coordinator generates the run id
-        // internally, so pre-start pin attachment can only target the
-        // workflow being submitted.
-        QString definitionId;
-        if (pipelineArg.typeId() == QMetaType::QString) {
-            const QJsonDocument doc = QJsonDocument::fromJson(pipelineJson.toUtf8());
-            if (doc.isObject())
-                definitionId =
-                    doc.object().value(QStringLiteral("id")).toString().trimmed();
-        } else if (pipelineArg.canConvert<QVariantMap>()) {
-            definitionId = pipelineArg.toMap()
-                               .value(QStringLiteral("id")).toString().trimmed();
-        }
-        if (!definitionId.isEmpty())
-            m_experimentMonitor->setWorkflowPins(definitionId, pins);
-        else
-            SICNU_LOG_ERROR(SicnuLogTags::MCP,
-                            QStringLiteral("run_workflow recording: pipeline carries no id; "
-                                           "pins not attached"));
     }
 
     // Tracked submission (#697): MCP workflows persist checkpoints per step
     // transition and become resumable after a crash instead of vanishing.
     const long pipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipelineJson(
         pipelineJson.toStdString(), autoLoad);
+
+    if (recordingRequested) {
+        if (pipelineId < 0)
+            throw McpToolError(QStringLiteral("run_workflow: pipeline rejected; nothing recorded"),
+                               QStringLiteral("INVALID_PIPELINE"), QStringLiteral("validation"));
+        // Record the submission SYNCHRONOUSLY with its own pins: the run id
+        // is known the moment the tracked submit returns, so identity pins
+        // are part of the record from the first transition — immune to
+        // queued-signal reordering or later submissions of the same
+        // workflow. The queued Running signal then lands as an idempotent
+        // duplicate; later transitions flow through the signal path (this
+        // run only).
+        const auto run = sicnu::workflow::WorkflowRunCoordinator::instance()
+                             .runForPipeline(pipelineId);
+        if (!run)
+            throw McpToolError(QStringLiteral("run_workflow: submitted pipeline is untracked"),
+                               QStringLiteral("INVALID_PIPELINE"), QStringLiteral("validation"));
+        const auto recorded = m_experimentMonitor->recordSubmission(*run, pins);
+        if (!recorded) {
+            SICNU_LOG_ERROR(SicnuLogTags::MCP,
+                            QStringLiteral("run_workflow recording failed: %1")
+                                .arg(recorded.diagnostics().first().message));
+            throw McpToolError(QStringLiteral("run_workflow: experiment recording failed: ")
+                                   + recorded.diagnostics().first().message,
+                               QStringLiteral("EXPERIMENT_RECORDING_REFUSED"),
+                               QStringLiteral("validation"));
+        }
+        recordedExperimentRunId = recorded.value();
+    }
     if (pipelineId < 0)
         throw std::runtime_error(
             "Invalid pipeline definition: expected {id, steps: [{id, operator, params, inputs}]}");
 
     QVariantMap result;
     result[QStringLiteral("pipeline_id")] = static_cast<qlonglong>(pipelineId);
+    if (!recordedExperimentRunId.isEmpty())
+        result[QStringLiteral("experiment_run_id")] = recordedExperimentRunId;
 
     const sicnu::PipelineExecutionInfo info = sicnu::TaskCenter::instance().getPipelineInfo(pipelineId);
     QVariantList steps;
