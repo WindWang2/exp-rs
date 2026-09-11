@@ -41,15 +41,21 @@ host widget interaction
 Events count against the plugin's request concurrency; a wedged plugin
 delays one event, never the UI thread.
 
-## Lifecycle
+## Lifecycle and integration status
 
-- attach: after `plugin.load`, the host fetches the schema and renders it
-  (`PluginRuntimeHost::describeUiSchema` + `PluginUiSchemaRenderer::
-  attachPluginSchema`).
-- reload: re-attachment replaces the previous rendering.
-- unload: `PluginRuntimeHost` detach happens in the same lifecycle slot as
-  the in-process UI release (before the worker dies); in-flight responses
-  for a detached plugin are dropped by generation-free shared ownership.
+Implemented and wired today: the schema validator, the worker
+`ui.describe`/`ui.invoke` surface, the runtime passthroughs
+(`describeUiSchema`/`invokeUi`), the renderer (`PluginUiSchemaRenderer` +
+conformance-kit probe), and the UNLOAD detach (same lifecycle slot as the
+in-process UI release; in-flight responses for a detached plugin are
+dropped by shared ownership).
+
+Shell integration is the workbench track's seam: nothing in the
+application shell calls `attachPluginSchema` yet, so rendered surfaces
+exist for embedders and tests; the renderer refuses to attach from a
+non-GUI thread and state application never re-emits user events
+(`QSignalBlocker`). The protocol contract above is stable against that
+wiring.
 
 ## Authority boundaries (unchanged)
 

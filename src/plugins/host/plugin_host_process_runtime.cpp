@@ -101,8 +101,6 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
         entry->quota.clampTo( mOptions.quotaCeilings );
     }
     spawnOptions.quota = entry->quota;
-    spawnOptions.maxRestarts = mOptions.maxRestarts;
-    spawnOptions.restartWindowMs = mOptions.restartWindowMs;
     spawnOptions.handshakeTimeoutMs = mOptions.handshakeTimeoutMs;
     spawnOptions.killGraceMs = mOptions.killGraceMs;
 
@@ -236,8 +234,6 @@ bool PluginHostProcessRuntime::respawn( const std::string &pluginId,
     spawnOptions.workerPath = mOptions.workerPath;
     spawnOptions.pluginId = pluginId;
     spawnOptions.quota = entry.quota;
-    spawnOptions.maxRestarts = mOptions.maxRestarts;
-    spawnOptions.restartWindowMs = mOptions.restartWindowMs;
     spawnOptions.handshakeTimeoutMs = mOptions.handshakeTimeoutMs;
     spawnOptions.killGraceMs = mOptions.killGraceMs;
 

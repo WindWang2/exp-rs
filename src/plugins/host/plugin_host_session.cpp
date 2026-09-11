@@ -297,10 +297,38 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
         return false;
     }
 
-    // Pre-exec resource bounds are computed BEFORE fork: the child between
-    // fork and exec must stay allocation-free (a multithreaded parent's
-    // heap cannot be safely touched there).
+    // Everything the child touches is computed BEFORE fork: the child
+    // between fork and exec must stay allocation-free (a multithreaded
+    // parent's heap cannot be safely touched there).
     long long memoryLimit = mOptions.quota.workerMemoryBytes;
+    const std::string fdRead = std::string( kIpcReadSwitch ) + fdToString( 3 );
+    const std::string fdWrite = std::string( kIpcWriteSwitch ) + fdToString( 4 );
+    const std::string workerPath = mOptions.workerPath;
+    std::vector<char> execPath( workerPath.begin(), workerPath.end() );
+    execPath.push_back( '\0' );
+    std::vector<char> execRead( fdRead.begin(), fdRead.end() );
+    execRead.push_back( '\0' );
+    std::vector<char> execWrite( fdWrite.begin(), fdWrite.end() );
+    execWrite.push_back( '\0' );
+
+    // Parent-side memory-ceiling sanity: a request above the hard limit
+    // would silently apply no bound in the child.
+    if ( memoryLimit > 0 )
+    {
+        struct ::rlimit addressSpace;
+        if ( ::getrlimit( RLIMIT_AS, &addressSpace ) == 0
+             && addressSpace.rlim_max != RLIM_INFINITY
+             && static_cast<unsigned long long>( memoryLimit )
+                    > static_cast<unsigned long long>( addressSpace.rlim_max ) )
+        {
+            diagnostics.add( PluginDiagnosticCode::ManifestInvalidField,
+                             PluginDiagnosticSeverity::Warning,
+                             "quota workerMemoryBytes exceeds the RLIMIT_AS hard limit ("
+                                 + std::to_string( addressSpace.rlim_max )
+                                 + "); no memory bound will apply",
+                             mOptions.pluginId );
+        }
+    }
 
     const pid_t pid = ::fork();
     if ( pid < 0 )
@@ -333,12 +361,15 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
             addressSpace.rlim_max = static_cast<rlim_t>( memoryLimit );
             ::setrlimit( RLIMIT_AS, &addressSpace );
         }
-        const std::string fdRead = std::string( kIpcReadSwitch ) + fdToString( 3 );
-        const std::string fdWrite = std::string( kIpcWriteSwitch ) + fdToString( 4 );
-        ::execl( mOptions.workerPath.c_str(), mOptions.workerPath.c_str(), fdRead.c_str(),
-                 fdWrite.c_str(), static_cast<char *>( nullptr ) );
+        ::execl( execPath.data(), execPath.data(), execRead.data(), execWrite.data(),
+                 static_cast<char *>( nullptr ) );
         ::_exit( 127 );
     }
+    // Host-side ends never leak into later spawns: with several concurrent
+    // workers, a child that inherited OTHER sessions' pipe ends could write
+    // frames into their streams and would defeat their EOF crash detection.
+    ::fcntl( hostToWorker[ 1 ], F_SETFD, FD_CLOEXEC );
+    ::fcntl( workerToHost[ 0 ], F_SETFD, FD_CLOEXEC );
     ::close( hostToWorker[ 0 ] );
     ::close( workerToHost[ 1 ] );
     mProcessHandle = reinterpret_cast<void *>( static_cast<intptr_t>( pid ) );
@@ -440,18 +471,21 @@ void PluginHostProcessSession::killProcess( const char *reason )
             ::TerminateProcess( mProcessHandle, 9 );
         if ( mProcessHandle )
             ::WaitForSingleObject( mProcessHandle, 5000 );
-    }
-    if ( mProcessHandle )
-    {
-        ::CloseHandle( mProcessHandle );
-        mProcessHandle = nullptr;
-    }
-    if ( mJobHandle )
-    {
-        // Closing the last job handle fires JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE:
-        // every survivor in the job (worker-spawned children included) dies.
-        ::CloseHandle( mJobHandle );
-        mJobHandle = nullptr;
+        // ONLY the exchange winner touches the handles: a concurrent loser
+        // must not close a handle this thread is waiting on (documented UB,
+        // recycled-handle hazard). Kill-on-close of the job reaps survivors.
+        if ( mProcessHandle )
+        {
+            ::CloseHandle( mProcessHandle );
+            mProcessHandle = nullptr;
+        }
+        if ( mJobHandle )
+        {
+            // Closing the last job handle fires JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE:
+            // every survivor in the job (worker-spawned children included) dies.
+            ::CloseHandle( mJobHandle );
+            mJobHandle = nullptr;
+        }
     }
 #else
     const bool wasAlive = mProcessAlive.exchange( false );
@@ -466,14 +500,17 @@ void PluginHostProcessSession::killProcess( const char *reason )
         ::kill( pid, SIGKILL );
         int status = 0;
         ::waitpid( pid, &status, 0 );
+        mProcessHandle = nullptr;
+        mProcessGroupId = -1;
     }
     else if ( mProcessGroupId > 0 )
     {
-        // Worker died by itself (crash): reap the rest of its group.
+        // Worker died by itself (crash): reap the rest of its group. POSIX
+        // kills are idempotent (ESRCH), so a concurrent loser of the
+        // liveness exchange can safely run this too.
         ::kill( static_cast<pid_t>( -mProcessGroupId ), SIGKILL );
+        mProcessGroupId = -1;
     }
-    mProcessHandle = nullptr;
-    mProcessGroupId = -1;
 #endif
     if ( mChannel )
         mChannel->close();
@@ -554,7 +591,7 @@ IpcChannel::Outcome PluginHostProcessSession::request(
 
     // Bounded FIFO gate = maxRequestConcurrency (exact enforcement of the
     // quota; overflow refuses typed instead of queueing without bound).
-    const int gateBudget = std::max( 1000, effectiveDeadline );
+    const int gateBudget = effectiveDeadline;
     if ( !mGate.acquire( gateBudget ) )
     {
         IpcChannel::Outcome outcome;
@@ -626,7 +663,8 @@ IpcChannel::Outcome PluginHostProcessSession::request(
         {
             mProcessAlive = false;
             mProcessHandle = nullptr;
-            mProcessGroupId = -1;
+            // mProcessGroupId deliberately survives: killProcess reaps the
+            // worker's process group on the self-dead path (grandchildren).
         }
 #endif
         if ( !mProcessAlive )
@@ -695,7 +733,8 @@ IpcChannel::Outcome PluginHostProcessSession::requestRaw(
         {
             mProcessAlive = false;
             mProcessHandle = nullptr;
-            mProcessGroupId = -1;
+            // mProcessGroupId deliberately survives: killProcess reaps the
+            // worker's process group on the self-dead path (grandchildren).
         }
 #endif
         if ( !mProcessAlive )

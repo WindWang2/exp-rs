@@ -166,18 +166,21 @@ public:
     Json::Value run( const Json::Value &params, RSOperatorContext &context ) override
     {
         // Bounded, parameterized duration (protocol 1.1 suites use short
-        // slices; default stays the historical 3 s).
-        int seconds = params.get( "seconds", 3 ).asInt();
-        seconds = std::max( 1, std::min( 30, seconds ) );
-        for ( int step = 0; step < seconds * 10 && !context.isCancelled(); ++step )
-            std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+        // slices; "ms" gives sub-second precision for escalation margins).
+        int ms = params.isMember( "ms" ) ? params.get( "ms", 3000 ).asInt()
+                                         : params.get( "seconds", 3 ).asInt() * 1000;
+        ms = std::max( 100, std::min( 30000, ms ) );
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds( ms );
+        while ( std::chrono::steady_clock::now() < deadline && !context.isCancelled() )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
         if ( context.isCancelled() )
             throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
                                                      "slow operator cancelled" );
         Json::Value result( Json::objectValue );
         result["success"] = true;
         result["slept"] = true;
-        result["seconds"] = seconds;
+        result["ms"] = ms;
         return result;
     }
 };
@@ -299,7 +302,12 @@ public:
         const pid_t pid = ::fork();
         if ( pid == 0 )
         {
-            // Grandchild: sleep in a signal-safe loop, then _exit.
+            // Grandchild: close the inherited protocol fds 3/4 FIRST —
+            // holding them would suppress the worker channel's EOF after a
+            // crash and turn the confirm-dead reap into a deadline event.
+            ::close( 3 );
+            ::close( 4 );
+            // Sleep in a signal-safe loop, then _exit.
             for ( int i = 0; i < childSeconds * 10; ++i )
             {
                 struct timespec slice { 0, 100 * 1000 * 1000 };

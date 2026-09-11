@@ -413,29 +413,29 @@ TEST_CASE( "host-side cooperative cancel reaches the worker", "[hostprocess][con
 TEST_CASE( "timeout escalation poisons the session instead of killing a busy worker",
            "[hostprocess][concurrency][poison]" )
 {
-    // Dedicated budgets: 2.5 s deadline ceiling, 400 ms kill grace.
-    Stack stack( 2500, 400 );
+    // Dedicated budgets: 3 s deadline ceiling, 1 s kill grace.
+    Stack stack( 3000, 1000 );
     auto &registry = PluginRegistry::instance();
     REQUIRE( loadOrExplain( kPluginId ) );
 
-    // Sequence (deterministic, margins >= 1 s):
-    //   t=0.0  A starts iso-slow 8 s  -> times out at t=2.5 (ceiling);
-    //          per-id cancel goes out, grace runs t=2.5..2.9.
-    //   t=2.0  B starts iso-slow 2 s  -> would finish at t=4.0, i.e. B is
-    //          IN FLIGHT at A's escalation decision (t=2.9).
-    //   => A's timeout must NOT kill the worker (B is a peer in flight);
-    //      the session is poisoned and the worker dies at drain.
+    // Sequence (deterministic; escalation decision at t = 3.0 + 1.0 = 4.0 s,
+    // B's in-flight window is [1.8, 4.4] s — margins >= 900 ms on BOTH
+    // sides so scheduler jitter cannot flip the poison/kill branch):
+    //   t=0.0  A starts iso-slow 8 s -> times out at t=3.0 (ceiling);
+    //          per-id cancel goes out; grace runs t=3.0..4.0.
+    //   t=1.8  B starts iso-slow 2.6 s -> finishes at t=4.4, i.e. B is IN
+    //          FLIGHT at A's decision -> poison instead of kill.
     Json::Value aResult;
     Json::Value bResult;
     std::thread threadA( [&] {
         Json::Value params( Json::objectValue );
-        params["seconds"] = 8;
+        params["ms"] = 8000;
         aResult = runOperator( stack, "test:iso-slow", params );
     } );
     std::thread threadB( [&] {
-        std::this_thread::sleep_for( std::chrono::milliseconds( 2000 ) );
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1800 ) );
         Json::Value params( Json::objectValue );
-        params["seconds"] = 2;
+        params["ms"] = 2600;
         bResult = runOperator( stack, "test:iso-slow", params );
     } );
     threadA.join();
@@ -502,7 +502,23 @@ TEST_CASE( "ConcurrencyGate is FIFO-fair and bounded", "[hostprocess][gate]" )
 TEST_CASE( "process-group cleanup takes worker-spawned grandchildren with the worker",
            "[hostprocess][orphans]" )
 {
-    auto grandchildAlive = []( pid_t pid ) { return pid > 0 && ::kill( pid, 0 ) == 0; };
+    // kill(pid,0) reports zombies as alive; read /proc state so a reaped
+    // or zombie process counts as gone (non-reaping PID 1 in containers).
+    auto grandchildAlive = []( pid_t pid ) {
+        if ( pid <= 0 || ::kill( pid, 0 ) != 0 )
+            return false;
+        std::ifstream stat( "/proc/" + std::to_string( pid ) + "/stat" );
+        if ( !stat.is_open() )
+            return true; // cannot inspect: keep the liveness answer
+        std::string field;
+        for ( int i = 0; i < 3; ++i )
+        {
+            stat >> field;
+            if ( i == 2 )
+                return field != "Z";
+        }
+        return true;
+    };
     auto waitReaped = [&grandchildAlive]( pid_t pid ) {
         for ( int i = 0; i < 50; ++i )
         {

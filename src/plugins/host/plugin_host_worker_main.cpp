@@ -50,6 +50,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <filesystem>
@@ -340,7 +341,23 @@ private:
                 task = std::move( mTasks.front() );
                 mTasks.pop_front();
             }
-            task();
+            try
+            {
+                task();
+            }
+            catch ( const std::exception &exception )
+            {
+                // A pool task must never kill the worker (the host would
+                // see a crash and burn a restart): answers were the task's
+                // responsibility; a throw here leaves the request to time
+                // out typed on the host instead.
+                std::fprintf( stderr, "exprs_plugin_host_worker: task threw: %s\n",
+                              exception.what() );
+            }
+            catch ( ... )
+            {
+                std::fprintf( stderr, "exprs_plugin_host_worker: task threw (unknown)\n" );
+            }
             {
                 std::lock_guard<std::mutex> lock( mMutex );
                 --mOutstanding;
@@ -706,11 +723,20 @@ void executeModelRuntime( IpcChannel &channel, long long requestId, WorkerSink &
         channel.sendResponse( requestId, result, sendError );
         return;
     }
-    // kInferModel
-    PluginTensorV1 input = parseTensor( params["input"] );
-    const std::string outputTensorName = params.get( "outputTensorName", "" ).asString();
-    const PluginInferenceResultV1 result =
-        ModelRuntimeCache::instance().infer( framework, input, outputTensorName );
+    // kInferModel — malformed tensor JSON must answer typed, never throw
+    // into the pool thread (P2 review remediation).
+    PluginInferenceResultV1 result;
+    try
+    {
+        PluginTensorV1 input = parseTensor( params["input"] );
+        const std::string outputTensorName = params.get( "outputTensorName", "" ).asString();
+        result = ModelRuntimeCache::instance().infer( framework, input, outputTensorName );
+    }
+    catch ( const std::exception &exception )
+    {
+        result.success = false;
+        result.error = std::string( "malformed inference request: " ) + exception.what();
+    }
     Json::Value envelope( Json::objectValue );
     envelope["success"] = result.success;
     envelope["error"] = result.error;
@@ -1007,8 +1033,21 @@ int main( int argc, char **argv )
                                              + exception.what() } );
                     continue;
                 }
-                const exprs::PluginUiSchemaParseResult validated =
-                    exprs::validatePluginUiSchema( schema );
+                exprs::PluginUiSchemaParseResult validated;
+                try
+                {
+                    validated = exprs::validatePluginUiSchema( schema );
+                }
+                catch ( const std::exception &exception )
+                {
+                    // A hostile schema must fail typed, never kill the
+                    // worker (validation digs into plugin-controlled JSON).
+                    channel.sendError( request.id,
+                                       { "E5005",
+                                         std::string( "plugin UI schema validation threw: " )
+                                             + exception.what() } );
+                    continue;
+                }
                 if ( !validated.ok() )
                 {
                     Json::Value details( Json::arrayValue );
@@ -1029,10 +1068,16 @@ int main( int argc, char **argv )
             }
             // ui.invoke -> pool (bounded, may wait on plugin state).
             const Ipc::Envelope uiRequest = std::move( request );
-            const bool posted = pool.post( [this_ = &channel, &cancels, uiProvider, instanceValid,
+            auto uiCancelled = cancels.registerRequest( uiRequest.id );
+            const bool posted = pool.post( [this_ = &channel, &cancels, uiProvider, uiCancelled,
                                             uiRequest] {
-                auto cancelled = cancels.registerRequest( uiRequest.id );
-                (void)cancelled; // events are cooperative; the plugin answers
+                (void)uiCancelled; // events are cooperative; the plugin answers
+                struct Unregister
+                {
+                    CancelRegistry *registry;
+                    long long id;
+                    ~Unregister() { registry->unregisterRequest( id ); }
+                } unregister{ &cancels, uiRequest.id };
                 Json::Value response;
                 try
                 {
@@ -1050,8 +1095,9 @@ int main( int argc, char **argv )
                 result["response"] = response;
                 std::string sendError;
                 this_->sendResponse( uiRequest.id, result, sendError );
-                cancels.unregisterRequest( uiRequest.id );
             } );
+            if ( !posted )
+                cancels.unregisterRequest( uiRequest.id );
             if ( !posted )
                 channel.sendError( uiRequest.id,
                                    { "E6002", "worker is shutting down; request refused" } );
@@ -1067,10 +1113,13 @@ int main( int argc, char **argv )
                 continue;
             }
             const Ipc::Envelope executionRequest = std::move( request );
+            // Registered BEFORE queueing: a cancel frame arriving while the
+            // request waits for a pool slot must not be lost.
+            auto cancelled = cancels.registerRequest( executionRequest.id );
             const bool posted = pool.post( [this_ = &channel, &cancels, &throttle, &sink,
-                                            &manifest, &policy, instanceValid, executionRequest] {
+                                            &manifest, &policy, cancelled, instanceValid,
+                                            executionRequest] {
                 const Ipc::Envelope &request = executionRequest;
-                auto cancelled = cancels.registerRequest( request.id );
                 if ( request.method == kExecuteOperator )
                     executeOperator( *this_, request.id, sink, request.params, cancelled,
                                      manifest.id, throttle, policy );
@@ -1114,8 +1163,11 @@ int main( int argc, char **argv )
                 throttle.forget( request.id );
             } );
             if ( !posted )
+            {
+                cancels.unregisterRequest( executionRequest.id );
                 channel.sendError( executionRequest.id,
                                    { "E6002", "worker is shutting down; request refused" } );
+            }
         }
         else
         {
@@ -1126,12 +1178,18 @@ int main( int argc, char **argv )
 
     // Channel closed (launcher died or crashed): still honour the plugin's
     // shutdown contract inside the worker, then let the process exit.
-    if ( poolStarted )
-        pool.drain( kShutdownDrainTimeoutMs );
+    const bool drained = poolStarted ? pool.drain( kShutdownDrainTimeoutMs ) : true;
     if ( uiProvider )
     {
         delete uiProvider;
         uiProvider = nullptr;
+    }
+    if ( !drained )
+    {
+        // A wedged operator thread was DETACHED (cannot be joined): its
+        // stack may reference main()'s locals. Never return through them —
+        // exit the process right here (the launcher already saw EOF).
+        ::_exit( kExitOk );
     }
     if ( instanceValid )
     {

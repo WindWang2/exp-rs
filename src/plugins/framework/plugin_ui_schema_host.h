@@ -47,9 +47,11 @@ class QAction;
 namespace sicnu::plugins {
 
 /// Delivers one rendered event to the owning plugin and returns its bounded
-/// response. Production implementation wraps
-/// PluginHostProcessRuntime::invokeUi; tests fake it. Implementations must
-/// be thread-safe (called from the renderer's delivery thread).
+/// response. The production delegate wraps
+/// PluginHostProcessRuntime::invokeUi and is created by the SHELL when it
+/// attaches a schema (shell integration is the workbench track's seam);
+/// tests fake it. Implementations must be thread-safe (called from the
+/// renderer's delivery thread).
 class UiInvokeDelegate
 {
 public:

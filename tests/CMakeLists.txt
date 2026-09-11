@@ -7030,7 +7030,7 @@ sicnu_add_sdk_test(test_plugin_host_process)
 target_link_libraries(test_plugin_host_process PRIVATE sicnu_plugins_hostprocess sicnu_operators_core)
 target_compile_definitions(test_plugin_host_process PRIVATE
   SICNU_TEST_ISOLATION_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/isolation_plugin"
-  SICNU_TEST_PLUGIN_HOST_WORKER="${CMAKE_BINARY_DIR}/exprs_plugin_host_worker${CMAKE_EXECUTABLE_SUFFIX}"
+  SICNU_TEST_PLUGIN_HOST_WORKER="$<TARGET_FILE:exprs_plugin_host_worker>"
 )
 
 sicnu_add_test(test_plugin_manifest)

@@ -19,10 +19,11 @@ bounded recovery — the host process stays up.
 ```
 
 - `runtime` defaults to `in-process` (the historical behavior).
-- `runtime: "host-process"` + a `ui` section is REFUSED at validation: the
-  first host slice covers operator / agent-tool / data-provider /
-  model-runtime contributions. Full out-of-process UI transport remains
-  future work (see isolation.md).
+- `runtime: "host-process"` + a `ui` section is allowed only through the
+  DECLARATIVE route: the manifest must declare `access.ui = true` and the
+  binary an `EXPRS_createUiSchemaProviderV1` entry point
+  (see [declarative-ui.md](declarative-ui.md)). Raw widget transport does
+  not exist.
 - `SICNU_PLUGIN_HOST_PROCESS=off` refuses host-process plugins typed
   (E6006) instead of loading them in-process — there is never a silent
   downgrade.
@@ -123,7 +124,8 @@ forced kill there (exitSignal 9 marker on both platforms).
 
 1. Keep the `PluginV1` implementation unchanged — the worker reuses the V1
    entry point; isolation is process-level, not ABI-level.
-2. Add `"runtime": "host-process"` (and drop `ui` if present).
+2. Add `"runtime": "host-process"` (and `access.ui = true` + the schema
+   provider entry point if you contribute UI declaratively).
 3. Declare `access` roots if you read/write files; declare `quotas` to
    lower your own limits (raising them beyond policy is clamped).
 4. Operators must honor cooperative cancellation (the kill ladder is a

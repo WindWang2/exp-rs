@@ -32,7 +32,7 @@ governing principle: **never claim enforcement that does not exist.**
 
 | declaration | host-process runtime | in-process runtime |
 |---|---|---|
-| `filesystem.read/write` roots | enforced at the worker boundary: operator `workDir` and materialized service paths are validated against the declared roots (see below); NOT an OS sandbox — plugin code inside the worker is native and unconstrained | declaration + audit + diagnostics only |
+| `filesystem.read/write` roots | OPT-IN gate: a plugin that DECLARES write roots gets its operator `workDir` validated against those roots (always including the plugin-scoped temp dir); a manifest that declares nothing keeps v1 behavior — the host-provided workDir is not gated. NOT an OS sandbox — plugin code inside the worker is native and unconstrained | declaration + audit + diagnostics only |
 | `network` | **not intercepted** (no claim) | not intercepted |
 | `externalProcess` | gates the external-tool operator path in the host framework; worker-side plugin code is native and unconstrained | same |
 | `gpu.hint` | advisory passthrough to model runtimes | advisory |

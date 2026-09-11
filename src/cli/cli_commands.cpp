@@ -887,10 +887,14 @@ int commandPlugin( QStringList args, const CliIO &io )
         // plugin does not declare.
         const Json::Value &conformance = record.manifest.conformance;
 
+        // Runs the adapter on an OWNED, DETACHED thread with a shared
+        // result slot: a wedged target cannot hang the CLI (a std::async
+        // future would BLOCK its destructor until the task returns — the
+        // exact hang the budgets exist to prevent, P1 review finding).
         const auto executeBounded = []( const std::string &operatorId,
-                                                  const Json::Value &params,
-                                                  int timeoutMs, bool cancelAfterMs,
-                                                  Json::Value &result ) -> bool {
+                                        const Json::Value &params,
+                                        int timeoutMs, bool cancelAfterMs,
+                                        Json::Value &result ) -> bool {
             const auto adapter =
                 sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( operatorId );
             if ( !adapter )
@@ -898,37 +902,68 @@ int commandPlugin( QStringList args, const CliIO &io )
                 result["error"] = "no adapter registered for " + operatorId;
                 return false;
             }
-            auto started = std::async( std::launch::async, [&adapter, &params, cancelAfterMs] {
+            struct BoundedRun
+            {
+                std::mutex mutex;
+                bool finished = false;
+                Json::Value result;
+            };
+            auto state = std::make_shared<BoundedRun>();
+            std::thread runner( [adapter, params, cancelAfterMs, state] {
+                Json::Value local;
                 const auto cancelDeadline = std::chrono::steady_clock::now()
                                             + std::chrono::milliseconds( cancelAfterMs ? 300 : 0 );
-                return adapter->execute(
-                    params, nullptr,
-                    [cancelDeadline, cancelAfterMs]() {
-                        return cancelAfterMs && std::chrono::steady_clock::now() >= cancelDeadline;
-                    } );
+                try
+                {
+                    local = adapter->execute(
+                        params, nullptr,
+                        [cancelDeadline, cancelAfterMs]() {
+                            return cancelAfterMs
+                                   && std::chrono::steady_clock::now() >= cancelDeadline;
+                        } );
+                }
+                catch ( const sicnu::operators::RSOperatorError &error )
+                {
+                    // Typed catch FIRST: the stable numeric code is what
+                    // PT_CANCEL's verdict matches (never message text).
+                    local = Json::Value( Json::objectValue );
+                    local["error"] = error.message();
+                    local["code"] = std::to_string( static_cast<int>( error.code() ) );
+                }
+                catch ( const std::exception &exception )
+                {
+                    local = Json::Value( Json::objectValue );
+                    local["error"] = exception.what();
+                }
+                std::lock_guard<std::mutex> lock( state->mutex );
+                state->result = std::move( local );
+                state->finished = true;
             } );
-            if ( started.wait_for( std::chrono::milliseconds( timeoutMs ) )
-                 != std::future_status::ready )
+            const auto deadline = std::chrono::steady_clock::now()
+                                  + std::chrono::milliseconds( timeoutMs );
+            for ( ;; )
             {
-                // The worker thread cannot be killed safely: detach and let
-                // the result leak into a diagnostic instead of hanging.
-                result["error"] = "execution exceeded the conformance budget ("
-                                      + std::to_string( timeoutMs ) + " ms)";
-                return false;
+                {
+                    std::lock_guard<std::mutex> lock( state->mutex );
+                    if ( state->finished )
+                    {
+                        result = state->result;
+                        runner.join();
+                        return true;
+                    }
+                }
+                if ( std::chrono::steady_clock::now() >= deadline )
+                {
+                    // Abandon the runner thread (detached at scope exit);
+                    // the target's own deadline/kill ladder bounds it.
+                    result = Json::Value( Json::objectValue );
+                    result["error"] = "execution exceeded the conformance budget ("
+                                          + std::to_string( timeoutMs ) + " ms)";
+                    runner.detach();
+                    return false;
+                }
+                std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
             }
-            // Adapter failures arrive BOTH as error envelopes and as thrown
-            // RSOperatorError (rethrown through the future): either is a
-            // legitimate conformance observation, never a crash.
-            try
-            {
-                result = started.get();
-            }
-            catch ( const std::exception &exception )
-            {
-                result = Json::Value( Json::objectValue );
-                result["error"] = exception.what();
-            }
-            return true;
         };
 
         if ( conformance.isMember( "cancelTarget" ) && conformance["cancelTarget"].isString() )
@@ -938,16 +973,22 @@ int commandPlugin( QStringList args, const CliIO &io )
             const bool finished = executeBounded( target, Json::Value( Json::objectValue ),
                                                   20000, true, result );
             const std::string errorText = result.get( "error", "" ).asString();
-            const bool cancelled = errorText.find( "cancel" ) != std::string::npos
-                                   || errorText.find( "E6009" ) != std::string::npos
-                                   || errorText.find( "4000" ) != std::string::npos;
-            const bool pass = finished
-                              && ( cancelled
-                                   || errorText.empty() /* completed before the cancel */ );
-            addCheck( "PT_CANCEL", pass,
-                      pass ? ( cancelled ? "operator answered the cooperative cancel (typed)"
-                                         : "operator completed before the cancel landed" )
-                           : "cancelTarget did not honor cancellation: " + errorText );
+            // Typed matching ONLY: the adapter envelope's "cancelled" flag
+            // (set from RSOperatorError::code == Cancelled), the exception
+            // path's numeric code (4000), or the E6009 transport code.
+            // Message substring matching passed any error merely MENTIONING
+            // "cancel".
+            const std::string resultCode = result.get( "code", "" ).asString();
+            const bool typedCancel =
+                ( result.isMember( "cancelled" ) && result["cancelled"].asBool() )
+                || resultCode == "4000" || errorText.find( "E6009" ) != std::string::npos;
+            const bool completedEarly = finished && errorText.empty();
+            addCheck( "PT_CANCEL", finished && ( typedCancel || completedEarly ),
+                      typedCancel ? "operator answered the cooperative cancel (typed E6009)"
+                      : completedEarly
+                          ? "cancel NOT exercised: operator completed inside the 300 ms "
+                            "cancel window (declare a slower target for a hard verdict)"
+                          : "cancelTarget did not honor cancellation: " + errorText );
         }
         else
         {
@@ -987,8 +1028,9 @@ int commandPlugin( QStringList args, const CliIO &io )
                                        .count();
             const bool pass = allReady;
             addCheck( "PT_CONCURRENCY", pass,
-                      pass ? "3 concurrent executions completed without corruption or hang ("
-                               + std::to_string( elapsedMs ) + " ms)"
+                      pass ? "3 concurrent executions completed without hang or crash ("
+                               + std::to_string( elapsedMs )
+                               + " ms; liveness check — output equivalence is not asserted)"
                            : "concurrent executions hung or misbehaved" );
         }
         else
@@ -1028,8 +1070,9 @@ int commandPlugin( QStringList args, const CliIO &io )
             addCheck( "PT_RESTART", true, "skipped (no conformance.crashTarget declared)" );
         }
 
+        const Json::Value &uiSchemaFlag = conformance.get( "uiSchema", Json::Value( false ) );
         const bool wantsUiSchema =
-            ( conformance.isMember( "uiSchema" ) && conformance["uiSchema"].asBool() )
+            ( conformance.isMember( "uiSchema" ) && uiSchemaFlag.isBool() && uiSchemaFlag.asBool() )
             || ( record.manifest.runtime == exprs_ns::PluginRuntimeKind::HostProcess
                  && record.manifest.hasUi );
         if ( wantsUiSchema )
@@ -1107,12 +1150,22 @@ int commandPlugin( QStringList args, const CliIO &io )
         data["diagnostics"] = diagnostics.toJson();
         Json::Value summary( Json::objectValue );
         int passed = 0;
+        int skipped = 0;
         for ( const Json::Value &check : checks )
         {
             if ( check["ok"].asBool() )
-                ++passed;
+            {
+                // Skipped targets are ok=true (they never fail the run) but
+                // are NOT counted as passes — a plugin declaring nothing
+                // must not look like a 13/13 conformance win.
+                if ( check["detail"].asString().rfind( "skipped", 0 ) == 0 )
+                    ++skipped;
+                else
+                    ++passed;
+            }
         }
         summary["passed"] = passed;
+        summary["skipped"] = skipped;
         summary["total"] = checks.size();
         data["summary"] = summary;
         bool allChecksOk =

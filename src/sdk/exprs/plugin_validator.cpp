@@ -297,7 +297,13 @@ bool PluginManifestValidator::validate( const PluginManifest &manifest,
         // The provider itself is probed at load: absence while hasUi is a
         // load-time diagnostic, not a validation failure (the binary may be
         // a slim refresh of the same manifest).
-        if ( manifest.hasUi && !manifest.access.get( "ui", Json::Value( false ) ).asBool() )
+        const Json::Value &uiAccess = manifest.access.get( "ui", Json::Value( false ) );
+        if ( manifest.hasUi && !uiAccess.isBool() )
+        {
+            fail( PluginDiagnosticCode::ManifestInvalidField, "access",
+                  "access.ui must be a boolean" );
+        }
+        else if ( manifest.hasUi && !uiAccess.asBool() )
         {
             fail( PluginDiagnosticCode::ManifestInvalidField, "runtime",
                   "runtime 'host-process' with a ui section requires access.ui = true "

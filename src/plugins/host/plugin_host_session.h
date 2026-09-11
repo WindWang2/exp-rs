@@ -81,12 +81,8 @@ public:
         std::string pluginId;           ///< for diagnostics
         std::string pluginDirectory;    ///< containment root / ${plugin}
         exprs::PluginQuota quota;
-        /// Bounded restart policy (crash recovery): at most maxRestarts
-        /// respawns inside restartWindowMs; after that the session stays
-        /// dead and requests fail typed until an explicit unload/load
-        /// cycle resets the counter.
-        int maxRestarts = 3;
-        long long restartWindowMs = 60000;
+        // The bounded restart policy is owned by the RUNTIME (respawn()
+        // swaps in a fresh session); the session itself never respawns.
         int handshakeTimeoutMs = 15000;
         /// Grace between the cancel frame and forced kill (kill ladder and
         /// poison-drain checks). Exposed for bounded tests.
@@ -140,7 +136,12 @@ public:
     bool shutdown( int timeoutMs, exprs::PluginDiagnosticLog &diagnostics );
 
     const exprs::PluginQuota &quota() const { return mOptions.quota; }
-    const Json::Value &hello() const { return mHello; }
+    /// Handshake copy (the hello event arrives on the reader thread).
+    Json::Value hello() const
+    {
+        std::lock_guard<std::mutex> lock( mHelloMutex );
+        return mHello;
+    }
 
 private:
     PluginHostProcessSession() = default;
@@ -174,7 +175,7 @@ private:
     std::atomic<unsigned> mGeneration{ 1 };
 
     // Handshake state (written by the channel reader thread).
-    std::mutex mHelloMutex;
+    mutable std::mutex mHelloMutex;
     std::condition_variable mHelloCv;
     bool mHelloReceived = false;
 };

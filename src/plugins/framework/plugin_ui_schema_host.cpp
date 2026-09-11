@@ -15,7 +15,9 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSlider>
+#include <QThread>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -166,7 +168,13 @@ void PluginUiSchemaRenderer::buildControls( QWidget *parent, const Json::Value &
                 binding.readValue = [edit]() { return Json::Value( edit->toPlainText().toStdString() ); };
                 binding.applyValue = [edit]( const Json::Value &value ) {
                     if ( value.isString() )
+                    {
+                        // setPlainText emits textChanged even for identical
+                        // text: without the blocker a plugin echoing state
+                        // would create an infinite invoke feedback loop.
+                        QSignalBlocker blocker( edit );
                         edit->setPlainText( QString::fromStdString( value.asString() ) );
+                    }
                 };
             }
             else
@@ -178,7 +186,10 @@ void PluginUiSchemaRenderer::buildControls( QWidget *parent, const Json::Value &
                 binding.readValue = [edit]() { return Json::Value( edit->text().toStdString() ); };
                 binding.applyValue = [edit]( const Json::Value &value ) {
                     if ( value.isString() )
+                    {
+                        QSignalBlocker blocker( edit );
                         edit->setText( QString::fromStdString( value.asString() ) );
+                    }
                 };
             }
         }
@@ -198,7 +209,10 @@ void PluginUiSchemaRenderer::buildControls( QWidget *parent, const Json::Value &
                 binding.readValue = [spin]() { return Json::Value( spin->value() ); };
                 binding.applyValue = [spin]( const Json::Value &value ) {
                     if ( value.isNumeric() )
+                    {
+                        QSignalBlocker blocker( spin );
                         spin->setValue( value.asDouble() );
+                    }
                 };
             }
             else
@@ -224,8 +238,11 @@ void PluginUiSchemaRenderer::buildControls( QWidget *parent, const Json::Value &
                 };
                 binding.applyValue = [minimum, step, slider]( const Json::Value &value ) {
                     if ( value.isNumeric() )
+                    {
+                        QSignalBlocker blocker( slider );
                         slider->setValue( static_cast<int>( std::lround(
                             ( value.asDouble() - minimum ) / ( step > 0 ? step : 1.0 ) ) ) );
+                    }
                 };
             }
         }
@@ -238,7 +255,10 @@ void PluginUiSchemaRenderer::buildControls( QWidget *parent, const Json::Value &
             binding.readValue = [check]() { return Json::Value( check->isChecked() ); };
             binding.applyValue = [check]( const Json::Value &value ) {
                 if ( value.isBool() )
+                {
+                    QSignalBlocker blocker( check );
                     check->setChecked( value.asBool() );
+                }
             };
         }
         else if ( type == "combo" )
@@ -263,7 +283,10 @@ void PluginUiSchemaRenderer::buildControls( QWidget *parent, const Json::Value &
             binding.applyValue = [combo]( const Json::Value &value ) {
                 const int index = combo->findData( QString::fromStdString( value.asString() ) );
                 if ( index >= 0 )
+                {
+                    QSignalBlocker blocker( combo );
                     combo->setCurrentIndex( index );
+                }
             };
         }
         else if ( type == "button" )
@@ -369,6 +392,14 @@ bool PluginUiSchemaRenderer::attachPluginSchema( const QString &pluginId, const 
     if ( !mShellSink )
     {
         error = "no shell sink installed; declarative UI would never appear";
+        return false;
+    }
+    if ( QThread::currentThread() != thread() )
+    {
+        // Widgets and queued applyState lambdas are bound to the thread
+        // that created the renderer singleton (the GUI thread): attaching
+        // from elsewhere would mutate widgets off-GUI.
+        error = "attachPluginSchema must be called on the renderer's thread";
         return false;
     }
     if ( !schema.isObject() )
@@ -480,12 +511,14 @@ void PluginUiSchemaRenderer::releasePluginUi( const QString &pluginId )
             ++iterator;
             continue;
         }
-        // Block further deliveries, then let the shell sink detach AND
-        // delete the host-owned widgets (same contract as PluginUiHost).
-        // Events already in flight hold a shared_ptr; the cleared delegate
-        // makes their late response a no-op.
-        std::lock_guard<std::mutex> lock( mEventMutex );
-        ( *iterator )->delegate.reset();
+        // Block further deliveries first (events already in flight hold a
+        // shared_ptr; the cleared delegate makes their late response a
+        // no-op). The shell sink runs OUTSIDE the event mutex: it may
+        // re-enter the renderer, and the mutex is non-recursive.
+        {
+            std::lock_guard<std::mutex> lock( mEventMutex );
+            ( *iterator )->delegate.reset();
+        }
         if ( mShellSink )
             mShellSink->releaseUi( pluginId );
         iterator = mRecords.erase( iterator );

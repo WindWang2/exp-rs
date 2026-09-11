@@ -47,6 +47,13 @@ bool boundedString( const Json::Value &value, size_t maxLength )
     return value.isString() && value.asString().size() <= maxLength;
 }
 
+/// Every numeric field is type-checked before any cast so a hostile
+/// schema produces a validation error instead of a jsoncpp LogicError.
+bool boundedNumber( const Json::Value &value )
+{
+    return value.isNull() || value.isNumeric();
+}
+
 /// Validates one control (recursively for groups). Returns false when the
 /// control is structurally invalid (fatal). @p ids accumulates sibling ids.
 bool validateControl( const Json::Value &control, const PluginUiSchemaLimits &limits,
@@ -121,7 +128,7 @@ bool validateControl( const Json::Value &control, const PluginUiSchemaLimits &li
         const Json::Value minimum = control.get( "minimum", 0.0 );
         const Json::Value maximum = control.get( "maximum", 100.0 );
         const Json::Value step = control.get( "step", 1.0 );
-        if ( !minimum.isNumeric() || !maximum.isNumeric() || !step.isNumeric() )
+        if ( !minimum.isNumeric() || !maximum.isNumeric() || !step.isNumeric() )  // already guards
         {
             fail( errors, path, "minimum/maximum/step must be numbers" );
             return false;
@@ -283,9 +290,12 @@ PluginUiSchemaParseResult validatePluginUiSchema( const Json::Value &schema,
         fail( errors, "schema", "must be an object" );
         return result;
     }
-    if ( schema.get( "version", 0 ).asInt() != 1 )
+    const Json::Value &version = schema[ "version" ];
+    if ( !version.isInt() || version.asInt() != 1 )
     {
-        fail( errors, "schema.version", "only version 1 is supported" );
+        // Type-checked BEFORE any cast: a hostile schema ("version": "1")
+        // must fail VALIDATION, never throw through the worker (P2-1).
+        fail( errors, "schema.version", "must be the integer 1" );
         return result;
     }
 

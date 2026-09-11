@@ -304,3 +304,48 @@ TEST_CASE( "staged install verifies declared checksums with rollback", "[plugin]
 
     ::system( "rm -rf /tmp/exprs_test_pkg_ck" );
 }
+
+TEST_CASE( "staged-install sha256 matches reference vectors at block boundaries",
+           "[plugin][package]" )
+{
+    // Padded to 55/56/63/64 bytes: every len%64 class of the hand-rolled
+    // implementation (padding wrap, two-complement block, exact block).
+    const std::vector<std::pair<std::string, std::string>> vectors = {
+        { "a", "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb" },
+        { "ab", "fb8e20fc2e4c3f248c60c39bd652f3c1347298bb977b8b4d5903b85055620603" },
+        { std::string( 55, 'x' ), "d5e285683cd4efc02d021a5c62014694958901005d6f71e89e0989fac77e4072" },
+        { std::string( 56, 'x' ), "04c26261370ee7541549d16dee320c723e3fd14671e66a099afe0a377c16888e" },
+        { std::string( 63, 'x' ), "75220b47218278e656f2013bb8f0c455a25eaf01e86c64924e9d48d89776d6f2" },
+        { std::string( 64, 'x' ), "7ce100971f64e7001e8fe5a51973ecdfe1ced42befe7ee8d5fd6219506b5393c" },
+    };
+    for ( const auto &[ body, digest ] : vectors )
+    {
+        const std::string pkgRoot = "/tmp/exprs_test_pkg_vec";
+        ::system( "rm -rf /tmp/exprs_test_pkg_vec" );
+        ::mkdir( pkgRoot.c_str(), 0755 );
+        const std::string source = pkgRoot + "/org.test.vec";
+        ::mkdir( source.c_str(), 0755 );
+        {
+            std::ofstream payload( source + "/payload.txt", std::ios::trunc );
+            payload << body;
+            std::ofstream manifest( source + "/plugin.json", std::ios::trunc );
+            manifest << R"({
+                "manifest_version": 1,
+                "id": "org.test.vec",
+                "name": "VEC",
+                "version": "1.0.0",
+                "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+                "abi_version": 1,
+                "entrypoint_kind": "manifest",
+                "operators": [],
+                "package": { "checksums": { "payload.txt": ")" << digest << R"(" } }
+            })";
+        }
+        PluginDiagnosticLog log;
+        std::string installed;
+        INFO( "vector length " << body.size() );
+        REQUIRE( PluginPackage::install( source, installed, log ) );
+        REQUIRE( PluginPackage::uninstall( "org.test.vec", log ) );
+    }
+    ::system( "rm -rf /tmp/exprs_test_pkg_vec" );
+}

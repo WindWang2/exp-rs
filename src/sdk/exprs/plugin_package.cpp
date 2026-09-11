@@ -4,6 +4,7 @@
 #include "exprs/plugin_package.h"
 
 #include <algorithm>
+#include <chrono>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -275,7 +276,20 @@ bool verifyChecksums( const std::string &stagingDir, const Json::Value &checksum
 {
     for ( const auto &relativePath : checksums.getMemberNames() )
     {
-        const std::string declared = checksums[ relativePath ].asString();
+        // Type and shape guards BEFORE any use: an empty key would be UB in
+        // front(), and a declared digest that is not 64 hex chars can never
+        // match (fail it here so the error says why).
+        const Json::Value &declaredValue = checksums[ relativePath ];
+        if ( relativePath.empty() || !declaredValue.isString()
+             || declaredValue.asString().size() != 64
+             || declaredValue.asString().find_first_not_of( "0123456789abcdefABCDEF" )
+                    != std::string::npos )
+        {
+            error = "invalid checksum declaration for '" + relativePath
+                        + "' (need a 64-char hex digest)";
+            return false;
+        }
+        const std::string declared = declaredValue.asString();
         if ( declared.find( ".." ) != std::string::npos
              || relativePath.find( ".." ) != std::string::npos
              || relativePath.front() == '/' )
@@ -374,6 +388,25 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
         failure.message = "cannot create staging root " + stagingRoot;
         log.add( failure );
         return false;
+    }
+    // Sweep staging leftovers of CRASHED installs (older than 24 h): only
+    // the current pid's own directory is otherwise removed.
+    {
+        std::error_code sweepError;
+        const auto now = fs::file_time_type::clock::now();
+        fs::directory_iterator stagingIterator( fs::path( stagingRoot ), sweepError );
+        if ( !sweepError )
+        {
+            for ( const fs::directory_entry &entry : stagingIterator )
+            {
+                std::error_code timeError;
+                const auto lastWrite = fs::last_write_time( entry.path(), timeError );
+                if ( timeError )
+                    continue;
+                if ( now - lastWrite > std::chrono::hours( 24 ) )
+                    fs::remove_all( entry.path(), sweepError );
+            }
+        }
     }
     const std::string stagingDir =
         stagingRoot + "/" + manifest.id + "." + std::to_string( currentProcessId() );
