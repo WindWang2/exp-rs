@@ -1,5 +1,6 @@
 // src/agent/contracts/spatial_contracts.cpp
 #include "spatial_contracts.h"
+#include "agent/harness/harness_actions.h"
 
 #include <algorithm>
 
@@ -80,9 +81,30 @@ void attachFactStatus( Json::Value &body )
     "quality_masks", "product_metadata", "feature_count", "geometry_type",
     "fields",
   };
+  // Harness 9.0 review fix: several slots are inserted unconditionally (a
+  // failed lookup stores a null member) and band_roles can carry empty
+  // strings when role resolution failed — those are UNKNOWN facts, and
+  // stamping them "known" would make the honesty contract lie exactly for
+  // the under-described datasets it exists for.
+  const auto knownFact = []( const Json::Value &value ) {
+    if ( value.isNull() )
+      return false;
+    if ( value.isString() && value.asString().empty() )
+      return false;
+    if ( ( value.isArray() || value.isObject() ) && value.empty() )
+      return false;
+    if ( value.isArray() )
+    {
+      for ( const Json::Value &entry : value )
+        if ( !( entry.isString() && entry.asString().empty() ) )
+          return true;
+      return false; // array of only empty strings
+    }
+    return true;
+  };
   Json::Value status( Json::objectValue );
   for ( const char *slot : kSlots )
-    status[slot] = body.isMember( slot ) ? "known" : "unknown";
+    status[slot] = ( body.isMember( slot ) && knownFact( body[slot] ) ) ? "known" : "unknown";
   body["fact_status"] = status;
 }
 
@@ -277,10 +299,12 @@ std::vector<std::string> validateCapabilityCandidate( const Json::Value &candida
 
 Json::Value makeRepairSuggestion( const std::string &action, Json::Value arguments )
 {
-  Json::Value s( Json::objectValue );
-  s["action"] = action;
-  s["arguments"] = arguments.isObject() ? arguments : Json::Value( Json::objectValue );
-  return s;
+  // Harness 9.0 (#881 review): the contracts layer shares ONE action
+  // vocabulary with the harness — every suggested action resolves through
+  // the closed table, whatever layer constructs it. (Same library; the
+  // header carries no harness types, so layering stays include-clean.)
+  return sicnu::agent::harness::resolvedSuggestedAction( action,
+                                                         std::move( arguments ) );
 }
 
 Json::Value makeIssue( const std::string &code, const std::string &severity,

@@ -21,6 +21,7 @@
 #include "agent/mapspec/mapspec_conditions.h"
 #include "agent/spatial_tools/spatial_tool.h"
 
+#include <QDirIterator>
 #include <QFile>
 #include <QRegularExpression>
 #include <QTemporaryDir>
@@ -72,20 +73,12 @@ std::set<std::string> registeredWorkbenchCommands()
 
 std::set<std::string> registeredToolIds()
 {
+  // Full registry sweep — the floor must accept ANY legitimately registered
+  // tool id, not just a hardcoded probe list (review B#6).
   SpatialToolRegistry::instance().registerBuiltinTools();
   std::set<std::string> ids;
-  // registerBuiltinTools registers the platform surface; the harness recipe
-  // of the registry is the authoritative lookup for one id.
-  for ( const char *probe : { "spatial:understand", "spatial:raster_inspect",
-                              "spatial:select_model", "spatial:search_capabilities",
-                              "spatial:workspace_summary", "project:search",
-                              "temporal:preflight_collection",
-                              "harness:search_recipes", "harness:plan", "harness:preflight",
-                              "harness:run_status" } )
-  {
-    if ( SpatialToolRegistry::instance().find( probe ).has_value() )
-      ids.insert( probe );
-  }
+  for ( const auto &tool : SpatialToolRegistry::instance().tools() )
+    ids.insert( tool->name() );
   return ids;
 }
 
@@ -137,6 +130,48 @@ TEST_CASE( "harness action table entries resolve to registered surfaces",
       REQUIRE( parsed.isObject() );
     }
   }
+}
+
+TEST_CASE( "every literal action producer emits vocabulary keys (#881)",
+           "[harness9][actions][drift]" )
+{
+  // The chokepoints route through the vocabulary, but this floor catches a
+  // NEW producer that hardcodes an unknown key: scan every agent-side source
+  // for literal action arguments at the three constructors.
+  const std::set<std::string> known = [ & ] {
+    std::set<std::string> keys;
+    for ( const HarnessActionSpec &spec : harnessActionTable() )
+      keys.insert( spec.key );
+    return keys;
+  }();
+  REQUIRE( known.count( "check_dataset" ) == 1 );
+
+  QDirIterator it( QString::fromStdString( std::string( CMAKE_SOURCE_DIR ) + "/src/agent" ),
+                   { QStringLiteral( "*.cpp" ) }, QDir::Files,
+                   QDirIterator::Subdirectories );
+  static const QRegularExpression pattern(
+    R"pat((?:makeRepairSuggestion|suggestedAction|resolvedSuggestedAction)\(\s*"([A-Za-z0-9_.:]+)")pat" );
+  int scanned = 0;
+  std::vector<std::string> unknown;
+  while ( it.hasNext() )
+  {
+    QFile file( it.next() );
+    if ( !file.open( QIODevice::ReadOnly ) )
+      continue;
+    QTextStream stream( &file );
+    const QString text = stream.readAll();
+    QRegularExpressionMatchIterator matches = pattern.globalMatch( text );
+    while ( matches.hasNext() )
+    {
+      ++scanned;
+      const std::string key = matches.next().captured( 1 ).toStdString();
+      if ( !known.count( key ) )
+        unknown.push_back( key + " (" + it.fileName().toStdString() + ")" );
+    }
+  }
+  INFO( "literal action producers scanned: " << scanned );
+  REQUIRE( scanned >= 3 );
+  REQUIRE( unknown.empty() );
 }
 
 TEST_CASE( "resolvedSuggestedAction issues the resolution contract",
@@ -548,7 +583,11 @@ TEST_CASE( "run summaries are bounded by count and token budget (M6)",
            "[harness9][context][ledger]" )
 {
   ContextLedger &ledger = ContextLedger::instance();
-  const int before = ledger.runSummaries().size();
+  // Relative assertions: the ledger is a process-global and other lanes may
+  // hold entries; this case must hold regardless of their content (review
+  // B#7). Capture both store axes before mutating.
+  const Json::ArrayIndex before = ledger.runSummaries().size();
+  const int beforeTokens = ledger.runSummaryTokens();
 
   Json::Value summary;
   summary["verdict"] = "PASS";
@@ -558,23 +597,29 @@ TEST_CASE( "run summaries are bounded by count and token budget (M6)",
   ledger.recordRunSummary( "run-summary-test-a", summary, 10 ); // replace in place
 
   const Json::Value summaries = ledger.runSummaries();
-  REQUIRE( summaries.size() == static_cast<Json::ArrayIndex>( before + 2 ) );
+  REQUIRE( summaries.size() >= 2 );
   // Newest first: re-recording "a" made it the most recent entry.
   CHECK( summaries[0]["run_id"].asString() == "run-summary-test-a" );
   CHECK( summaries[1]["run_id"].asString() == "run-summary-test-b" );
-  // The token meter reflects the store.
-  CHECK( ledger.runSummaryTokens() >= 20 );
+  // The token meter moved by exactly the two live 10-token entries.
+  CHECK( ledger.runSummaryTokens() == beforeTokens + 20 );
 
-  // A huge summary is backstopped by the count bound, never dropped silently
-  // below one entry; re-recording keeps one row per run id.
+  // A genuinely oversized summary (cost > the whole budget) must not be able
+  // to evict the store below one entry, and re-recording keeps one row per
+  // run id.
+  const std::string filler( 4096, 'x' );
   Json::Value big = summary;
-  for ( int i = 0; i < 64; ++i )
-    big["filler"] = std::string( 512, 'x' );
-  ledger.recordRunSummary( "run-summary-test-big", big, 4000 );
+  big["filler"] = filler;
+  ledger.recordRunSummary( "run-summary-test-big", big,
+                           ContextLedger::kRunSummaryTokenBudget + 1 );
 
   const Json::Value bounded = ledger.runSummaries();
   CHECK( static_cast<int>( bounded.size() ) <= ContextLedger::kMaxRunSummaries );
-  CHECK( ledger.runSummaryTokens() <=
-         ContextLedger::kRunSummaryTokenBudget + 4000 ); // backstop allowance
+  CHECK( bounded.size() >= 1 );
+  CHECK( bounded[0]["run_id"].asString() == "run-summary-test-big" );
+  // After replacing the oversized entry with a small one, the store returns
+  // inside the budget.
+  ledger.recordRunSummary( "run-summary-test-big", summary, 10 );
+  CHECK( ledger.runSummaryTokens() <= ContextLedger::kRunSummaryTokenBudget );
 }
 

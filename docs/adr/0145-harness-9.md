@@ -54,7 +54,8 @@ without introducing a second agent architecture.
    decisions, failure explanation, and reproducibility anchors (run id,
    plan fingerprint, sidecar paths) — read-only projections only.
 9. **Eval corpus 9.0**: new closed categories (invalid_input,
-   modality_mismatch, recovery, long_plan, cartography, prompt_injection);
+   modality_mismatch, recovery, long_plan, cartography, prompt_injection,
+   typed_contract);
    prompt-injection cases pin that hostile metadata stays opaque data and
    never changes deterministic control flow.
 

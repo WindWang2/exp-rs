@@ -5,17 +5,48 @@
       "category": "typed_contract",
       "description": "The preflight answer carries the typed intent contract beside the verdict",
       "fixture": {
-        "kind": "raster", "width": 8, "height": 8,
-        "bands": ["red", "nir"], "nodata": -9999.0,
-        "metadata": {"SICNU_RADIOMETRIC_STATE": "surface_reflectance"}
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0,
+        "metadata": {
+          "SICNU_RADIOMETRIC_STATE": "surface_reflectance"
+        }
       },
       "steps": [
-        {"tool": "harness:preflight",
-         "input": {"intent": "ndvi", "inputs": [{"name": "primary", "ref": "$fixture"}]},
-         "expect": {"success": true, "asserts": [
-           {"path": "preflight.verdict", "equals": "ok"},
-           {"path": "intent_document.schema", "equals": "harness.intent/1.0"},
-           {"path": "intent_document.intent", "equals": "ndvi"}]}}
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "ndvi",
+            "inputs": [
+              {
+                "name": "primary",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "ok"
+              },
+              {
+                "path": "intent_document.schema",
+                "equals": "harness.intent/1.0"
+              },
+              {
+                "path": "intent_document.intent",
+                "equals": "ndvi"
+              }
+            ]
+          }
+        }
       ]
     },
     {
@@ -23,12 +54,33 @@
       "category": "typed_contract",
       "description": "Intent resolution surfaces the typed fact contract, not just a keyword",
       "steps": [
-        {"tool": "harness:resolve_intent",
-         "input": {"goal": "map the flood extent"},
-         "expect": {"success": true, "asserts": [
-           {"path": "intent_document.schema", "equals": "harness.intent/1.0"},
-           {"path": "intent_document.required_facts", "exists": true},
-           {"path": "intent_document.quality_expectations", "exists": true}]}}
+        {
+          "tool": "harness:resolve_intent",
+          "input": {
+            "goal": "map the flood extent"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "intent",
+                "equals": "flood"
+              },
+              {
+                "path": "intent_document.schema",
+                "equals": "harness.intent/1.0"
+              },
+              {
+                "path": "intent_document.required_facts",
+                "exists": true
+              },
+              {
+                "path": "intent_document.quality_expectations",
+                "exists": true
+              }
+            ]
+          }
+        }
       ]
     },
     {
@@ -36,16 +88,39 @@
       "category": "typed_contract",
       "description": "Understoods facts carry status: CRS is known, modality is an assumption",
       "fixture": {
-        "kind": "raster", "width": 8, "height": 8,
-        "bands": ["red", "nir"], "nodata": -9999.0
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0
       },
       "steps": [
-        {"tool": "spatial:understand", "input": {"asset": "$fixture"},
-         "expect": {"success": true, "asserts": [
-           {"path": "dataset_understanding.fact_status.crs", "equals": "known"},
-           {"path": "dataset_understanding.fact_status.modality", "equals": "assumed"},
-           {"path": "dataset_understanding.fact_status.radiometric_state",
-            "equals": "unknown"}]}}
+        {
+          "tool": "spatial:understand",
+          "input": {
+            "asset": "$fixture"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "dataset_understanding.fact_status.crs",
+                "equals": "known"
+              },
+              {
+                "path": "dataset_understanding.fact_status.modality",
+                "equals": "assumed"
+              },
+              {
+                "path": "dataset_understanding.fact_status.radiometric_state",
+                "equals": "unknown"
+              }
+            ]
+          }
+        }
       ]
     },
     {
@@ -53,15 +128,38 @@
       "category": "typed_contract",
       "description": "Metadata-declared facts (radiometric state) are known; absence is unknown",
       "fixture": {
-        "kind": "raster", "width": 8, "height": 8,
-        "bands": ["red", "nir"], "nodata": -9999.0,
-        "metadata": {"SICNU_RADIOMETRIC_STATE": "toa"}
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0,
+        "metadata": {
+          "SICNU_RADIOMETRIC_STATE": "toa"
+        }
       },
       "steps": [
-        {"tool": "spatial:understand", "input": {"asset": "$fixture"},
-         "expect": {"success": true, "asserts": [
-           {"path": "dataset_understanding.fact_status.radiometric_state", "equals": "known"},
-           {"path": "dataset_understanding.radiometric_state", "equals": "toa"}]}}
+        {
+          "tool": "spatial:understand",
+          "input": {
+            "asset": "$fixture"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "dataset_understanding.fact_status.radiometric_state",
+                "equals": "known"
+              },
+              {
+                "path": "dataset_understanding.radiometric_state",
+                "equals": "toa"
+              }
+            ]
+          }
+        }
       ]
     },
     {
@@ -69,18 +167,48 @@
       "category": "typed_contract",
       "description": "Co-pol preference on SAR flood mapping grades as advice and never blocks",
       "fixture": {
-        "kind": "raster", "width": 8, "height": 8,
-        "bands": ["vv"], "nodata": -9999.0,
-        "metadata": {"SICNU_PRODUCT_TYPE": "SENTINEL-1", "SICNU_RADIOMETRIC_STATE": "sigma0"}
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "vv"
+        ],
+        "nodata": -9999.0,
+        "metadata": {
+          "SICNU_PRODUCT_TYPE": "SENTINEL-1",
+          "SICNU_RADIOMETRIC_STATE": "sigma0"
+        }
       },
       "steps": [
-        {"tool": "harness:preflight",
-         "input": {"intent": "sar_flood", "inputs": [
-           {"name": "before", "ref": "$fixture"},
-           {"name": "after", "ref": "$fixture"}]},
-         "expect": {"success": true, "asserts": [
-           {"path": "preflight.verdict", "equals": "ok"},
-           {"path": "preflight.advice", "exists": true}]}}
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "sar_flood",
+            "inputs": [
+              {
+                "name": "before",
+                "ref": "$fixture"
+              },
+              {
+                "name": "after",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "ok"
+              },
+              {
+                "path": "preflight.advice",
+                "exists": true
+              }
+            ]
+          }
+        }
       ]
     }
   ]

@@ -1397,7 +1397,12 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
       summary["intent"] = plan ? plan->intent : "";
       summary["goal"] = plan ? plan->goal : "";
       summary["verdict"] = "FAIL";
-      summary["error"] = run->errorMessage();
+      // Bounded: a pathological engine error chain must not be able to evict
+      // the whole continuity record on its own.
+      std::string runError = run->errorMessage();
+      if ( runError.size() > 2048 )
+        runError = runError.substr( 0, 2048 );
+      summary["error"] = runError;
       Json::Value failedSteps( Json::arrayValue );
       for ( const auto &step : run->stepPlans() )
         if ( !step.errorMessage.empty() )

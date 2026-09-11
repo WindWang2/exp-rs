@@ -35,6 +35,18 @@ const std::vector<HarnessActionSpec> &harnessActionTable()
       "{\"query\": \"reproject\"}", "tool" },
     { "normalize_radiometry", "harness:search_recipes", "",
       "{\"query\": \"radiometric calibration reflectance\"}", "tool" },
+    // Workflow-preflight repair actions (the other makeRepairSuggestion
+    // producer): path problems resolve like dataset checks; the rest edit
+    // the workflow document the agent is holding.
+    { "fix_input_path", "spatial:understand", "workbench.datasetExperiment", "", "tool" },
+    { "fix_schema", "", "", "", "author" },
+    { "break_cycle", "", "", "", "author" },
+    { "fill_params", "", "", "", "author" },
+    { "rename_output", "", "", "", "author" },
+    // Cartography quality repairs execute through the cartography repair
+    // tool (the same loop harness map confirmation drives).
+    { "add_source_note", "cartography:repair", "", "", "tool" },
+    { "add_title", "cartography:repair", "", "", "tool" },
     // Plan-authoring actions: Pi edits the plan document it is holding.
     // Where a supporting lookup exists it is attached as the tool.
     { "rename_input", "", "", "", "author" },

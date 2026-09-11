@@ -9,7 +9,7 @@
 //   * `tool`              — a registered SpatialTool id (agent-executable), or
 //   * `workbench_command` — a registered workbench command id (UI surface).
 // An action key with NEITHER resolution must not exist; the drift floor in
-// tests/test_harness9_actions.cpp cross-checks the table against the live
+// tests/test_harness9_contracts.cpp cross-checks the table against the live
 // SpatialToolRegistry and the workbench command definitions.
 //
 // Wire shape (issued by resolvedSuggestedAction / suggestedAction):

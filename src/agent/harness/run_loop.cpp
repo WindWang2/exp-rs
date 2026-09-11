@@ -43,7 +43,14 @@ constexpr int kMaxDiagnoseAttempts = 5;
 
 int &diagnoseAttempts( const std::string &runId )
 {
+  // Same ownership/threading model as the resume ledger in plan_tools.cpp:
+  // tool execution is serialized by the surfaces that drive it (MCP stdio
+  // loop, copilot UI thread). Bounded by eviction — a pathological stream
+  // of distinct run ids cannot grow the map without end.
   static std::map<std::string, int> kLedger;
+  constexpr size_t kMaxTrackedRuns = 256;
+  if ( kLedger.size() > kMaxTrackedRuns )
+    kLedger.clear();
   return kLedger[ runId ];
 }
 
@@ -188,12 +195,17 @@ class DiagnoseRunTool final : public SpatialTool
                                            error_codes::kInvalidParameter, "validation" );
 
       std::optional<AgentPlan> plan;
+      Json::Value warnings( Json::arrayValue );
       if ( input.isMember( "plan" ) && input["plan"].isObject() )
       {
         AgentPlan parsed;
         HarnessError error;
         if ( readAgentPlan( input["plan"], parsed, error ) )
           plan = parsed;
+        else
+          // A discarded plan would silently disable missing-artifact
+          // detection — surface the parse failure instead (review P2).
+          warnings.append( "plan_unparseable: " + error.code );
       }
 
       auto &coordinator = sicnu::workflow::WorkflowRunCoordinator::instance();
@@ -281,16 +293,16 @@ class DiagnoseRunTool final : public SpatialTool
         {
           const std::string fromStep = output.get( "from_step", "" ).asString();
           const auto it = stepOutput.find( fromStep );
-          if ( it == stepOutput.end() )
-            continue; // the step produced nothing — surfaced as a step failure
-          if ( !QFileInfo::exists( QString::fromStdString( it->second ) ) )
-          {
-            Json::Value missing( Json::objectValue );
-            missing["name"] = output.get( "name", "" ).asString();
-            missing["from_step"] = fromStep;
-            missing["expected_path"] = it->second;
-            missingArtifacts.append( missing );
-          }
+          // A completed run whose producing step recorded no path is just as
+          // missing as one whose file vanished — both are reported.
+          if ( it != stepOutput.end() &&
+               QFileInfo::exists( QString::fromStdString( it->second ) ) )
+            continue;
+          Json::Value missing( Json::objectValue );
+          missing["name"] = output.get( "name", "" ).asString();
+          missing["from_step"] = fromStep;
+          missing["expected_path"] = it != stepOutput.end() ? it->second : "";
+          missingArtifacts.append( missing );
         }
       }
 
@@ -356,6 +368,7 @@ class DiagnoseRunTool final : public SpatialTool
       // same root cause often fails several checks.
       Json::Value deduped( Json::arrayValue );
       std::set<std::string> seen;
+      constexpr int kMaxProposals = 32;
       for ( const Json::Value &proposal : proposals )
       {
         const std::string key = proposal.get( "kind", "" ).asString() + "|" +
@@ -364,6 +377,11 @@ class DiagnoseRunTool final : public SpatialTool
                                 proposal.get( "target_step", "" ).asString();
         if ( !seen.insert( key ).second )
           continue;
+        if ( static_cast<int>( deduped.size() ) >= kMaxProposals )
+        {
+          diagnosis["proposals_truncated"] = true;
+          break;
+        }
         deduped.append( proposal );
       }
 
@@ -372,6 +390,8 @@ class DiagnoseRunTool final : public SpatialTool
       diagnosis["failures"] = failures;
       diagnosis["verification_failures"] = verificationFailures;
       diagnosis["missing_artifacts"] = missingArtifacts;
+      if ( !warnings.empty() )
+        diagnosis["warnings"] = warnings;
 
       if ( attempts >= kMaxDiagnoseAttempts && !deduped.empty() )
       {

@@ -69,11 +69,15 @@ std::string bindingToString( const Json::Value &value )
     return value.asString();
   if ( value.isDouble() && !value.isIntegral() )
   {
+#ifdef __cpp_lib_to_chars
+    // Shortest round-trip decimal form; fallback below keeps older standard
+    // libraries compiling (they render the 17-digit expansion instead).
     char buffer[64];
     const std::to_chars_result result =
       std::to_chars( buffer, buffer + sizeof( buffer ), value.asDouble() );
     if ( result.ec == std::errc() )
       return std::string( buffer, result.ptr );
+#endif
   }
   Json::StreamWriterBuilder builder;
   builder[ "indentation" ] = "";
@@ -196,6 +200,16 @@ std::vector<std::string> RecipeCatalog::validateRecipeMetadata( const Json::Valu
                           "' (known: 1.0, 1.1, 2.0)" );
   }
 
+  // Harness 9.0 (review): the steps array gets an explicit budget — the
+  // degradation fixpoint is O(steps^2) and every documented budget in this
+  // validator is a backstop against hostile documents.
+  if ( recipe.isMember( "steps" ) )
+  {
+    if ( !recipe["steps"].isArray() )
+      problems.push_back( id + ": steps must be an array" );
+    else if ( static_cast<int>( recipe["steps"].size() ) > 64 )
+      problems.push_back( id + ": steps exceed the 64 entry budget" );
+  }
   auto checkStringArray = [ &problems, &id ]( const Json::Value &parent, const char *field,
                                               int budget ) {
     if ( !parent.isMember( field ) )
