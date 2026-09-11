@@ -47,7 +47,49 @@ All notable changes to the `exp-rs` project will be documented in this file.
   drift fixed (`mapspec-reference` current-version header, NoData wiring
   claims, limitations).
 
-## [Unreleased] - 2026-09-08
+### Model Runtime & Multimodal EO Inference Platform 8.0 (goal series, ADR 0143)
+- **Real ONNX Runtime lane (WP-A)**: the 7.0 ORT provider is compiled and
+  executed for the first time (ORT 1.20.1, CPU EP). Real execution fixed
+  three latent defects: a dangling `Ort::TypeInfo` shape view in `warmup()`
+  (read freed memory), the removed `AppendExecutionProvider_CUDA(int)`
+  overload, and the removed `const T*` `CreateTensor` overload; cv::Mat
+  head selection now requests exactly the named output. CMake discovers
+  both official SDK layouts. 11 test cases (2168 assertions) run named
+  N-D multi-input inference, multi-head rank-3/4 selection, dynamic shapes,
+  int64/double/uint8 transport, warmup, health/memory accounting and
+  in-forward cancellation (~25 ms latency); CUDA stays capability-gated.
+- **Grid/CRS authority (WP-C)**: multimodal co-registration now includes
+  semantic CRS equality — identical geotransform numbers under different
+  CRS are refused. `alignment: "reference"` refuses CRS-less feeds. The
+  runtime never warps; caller pre-alignment is recorded via feed
+  `prepared_from` provenance.
+- **Temporal sequence lane (WP-D)**: `temporal_collapse: "sequence"`
+  (layout NCTHW) feeds the explicit rank-5 time axis; `temporal_dynamic`
+  lets the feed define T; feed timestamps are validated strictly
+  increasing; per-frame quality masks follow NoData semantics across the
+  whole window. `rs:infer` gains `named_inputs[]` (paths, bands,
+  timestamps, quality masks, prepared_from) and local STAC collection
+  expansion; remote STAC refuses instead of silently fetching.
+- **Device planner 2.0 (WP-B)**: `DevicePlacementPolicy` (LowestFitting |
+  LeastLoaded) placement knob plus `deviceReport()` per-device pressure
+  snapshot; admission and the bounded pressure valve unchanged.
+- **Pre/post completion (WP-E)**: `postprocess.class_mapping` remaps model
+  classes to product classes in labels products (injective, non-negative,
+  arity-checked; palette keyed by product ids).
+- **Provider resilience (WP-F)**: python worker handshake capability
+  negotiation (max_rank/multi_input/dtypes replace defaults); ONE
+  respawn + replay per session after a mid-exchange worker death
+  (live-but-stuck workers are never restarted — a request is never replayed
+  into a live worker and there are never two delivered responses); exhausted
+  restart budget is a typed ProviderCrash.
+- **Provenance sidecars (WP-G)**: every published raster inference product
+  carries `<output>.prov.json` (model identity/digest, backend/device,
+  per-input grid+CRS verdicts, execution counters, band semantics)
+  published through the governed staged-rename path; sidecar failure
+  removes the product.
+- **Performance evidence (WP-H)**: ORT cold/warm session acquire 21.9/1.2 ms,
+  named N-D forwards ≈ 23k/s, in-forward cancel latency 24.9 ms
+  (`benchmarks/model-runtime-4.json`, schema `model-runtime-bench-ort/1`).
 
 ### Cartography Knowledge, Template & Recipe Platform 6.0 (goal series, ADR 0135)
 - **Declarative correctness fixes**: single-item `fit_content` no longer
