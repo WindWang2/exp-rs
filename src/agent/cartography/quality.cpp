@@ -815,6 +815,13 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
     if ( isReportish && hasNonEmpty( "source_notes" ) )
     {
       bool crsDeclared = false;
+      // Platform 9.0: a declared map-frame CRS satisfies the obligation.
+      if ( hasNonEmpty( "map_frames" ) )
+        for ( const auto &frame : spec["map_frames"] )
+          crsDeclared =
+            crsDeclared ||
+            ( frame.isObject() && frame.isMember( "crs" ) && frame["crs"].isString() &&
+              !frame["crs"].asString().empty() );
       for ( const auto &note : spec["source_notes"] )
       {
         if ( !note.isObject() || !note.isMember( "text" ) )
@@ -988,6 +995,82 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
     }
   }
 
+  // --- Platform 9.0: rendered-picture furniture must not cover the map ------
+  // Charts and colorbars compile to opaque picture items; when one overlaps
+  // a map frame it silently occludes map content. (Legend/inset overlays are
+  // separate sanctioned furniture classes with their own rules.)
+  if ( hasNonEmpty( "map_frames" ) )
+  {
+    for ( const char *collection : { "charts", "colorbars" } )
+    {
+      if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+        continue;
+      for ( const auto &item : spec[collection] )
+      {
+        if ( !item.isObject() || !item.isMember( "id" ) || !item.isMember( "rect_mm" ) ||
+             !item["rect_mm"].isArray() || item["rect_mm"].size() != 4 )
+          continue;
+        const int itemPage = item.isMember( "page" ) && item["page"].isIntegral()
+                               ? item["page"].asInt()
+                               : 0;
+        // Declared overlay intent: `overlay_on` (frame id or array of ids)
+        // marks the coverage as intentional — declared, never silent.
+        std::set<std::string> declaredOverlays;
+        if ( item.isMember( "overlay_on" ) )
+        {
+          if ( item["overlay_on"].isString() )
+            declaredOverlays.insert( item["overlay_on"].asString() );
+          else if ( item["overlay_on"].isArray() )
+            for ( const auto &frameId : item["overlay_on"] )
+              if ( frameId.isString() )
+                declaredOverlays.insert( frameId.asString() );
+        }
+        for ( const auto &frame : spec["map_frames"] )
+        {
+          if ( !frame.isObject() || !frame.isMember( "id" ) || !frame.isMember( "rect_mm" ) ||
+               !frame["rect_mm"].isArray() || frame["rect_mm"].size() != 4 )
+            continue;
+          const int framePage =
+            frame.isMember( "page" ) && frame["page"].isIntegral() ? frame["page"].asInt() : 0;
+          if ( itemPage != framePage )
+            continue;
+          if ( declaredOverlays.count( frame["id"].asString() ) > 0 )
+            continue;
+          if ( rectsIntersect( item["rect_mm"], frame["rect_mm"] ) )
+          {
+            pushIssue( issue(
+              "MAP_CHART_OVER_MAP", "warning",
+              item["id"].asString() + " overlaps map frame '" + frame["id"].asString() +
+                "' and would occlude map content (charts render as opaque pictures); "
+                "move it out or declare the coverage with overlay_on",
+              true, item["id"].asString(), "reposition" ) );
+            break; // one finding per offending item
+          }
+        }
+      }
+    }
+  }
+
+  // --- Platform 9.0: dual-axis honesty ---------------------------------------
+  // The chart renderers draw a single value axis. A chart declaring
+  // `dual_axis: true` would silently render as a single-axis chart — the
+  // declaration is reported so the agent can restructure instead of
+  // trusting a capability that does not exist.
+  if ( spec.isMember( "charts" ) && spec["charts"].isArray() )
+    for ( const auto &chartItem : spec["charts"] )
+    {
+      if ( !chartItem.isObject() || !chartItem.isMember( "chart" ) ||
+           !chartItem["chart"].isObject() || !chartItem["chart"].isMember( "dual_axis" ) )
+        continue;
+      if ( chartItem["chart"]["dual_axis"].isBool() && chartItem["chart"]["dual_axis"].asBool() )
+        issues.push_back( issue(
+          "MAP_DUAL_AXIS_UNSUPPORTED", "warning",
+          chartItem["id"].asString() +
+            ": declares dual_axis but the chart renderers draw a single value axis; "
+            "restructure as two charts or a table instead of relying on a second axis",
+          false, chartItem["id"].asString(), nullptr ) );
+    }
+
   // --- merge compiled-layout findings (layout:preflight report) ---------------
   if ( compiledReport.isObject() && compiledReport.isMember( "issues" ) &&
        compiledReport["issues"].isArray() )
@@ -1040,16 +1123,87 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
   return makeEnvelope( "map_quality_report", body );
 }
 
+namespace {
+
+/// Forward declaration: the mechanical repair handlers live in the
+/// anonymous-namespace block below (repairMapSpecInternal).
+int repairMapSpecInternal( Json::Value &spec, const Json::Value &report );
+
+} // namespace
+
 int repairMapSpec( Json::Value &spec, const Json::Value &report )
 {
-  int applied = 0;
+  return repairMapSpecWithLedger( spec, report, nullptr );
+}
+
+int repairMapSpecWithLedger( Json::Value &spec, const Json::Value &report,
+                             Json::Value *ledger )
+{
   if ( !report.isObject() || !report.isMember( "issues" ) )
     return 0;
-  // Callers (cartography:repair, composeRepairLoop helpers) run the
-  // composition solver once BEFORE looping repairs — re-solving anchored
-  // geometry every pass would un-do MAP_OFF_PAGE/MARGIN clamps and prevent
-  // convergence. Anchor outcomes the solver could not satisfy in-page are
-  // reported and skipped, so their rects stay untouched.
+
+  // Planned findings snapshot: the ledger attributes outcomes AFTER the
+  // repair pass by re-preflighting once (a repair that does not clear its
+  // finding is reported, never silently counted).
+  struct Planned
+  {
+      std::string code;
+      std::string itemId;
+  };
+  std::vector<Planned> planned;
+  for ( const auto &issueEntry : report["issues"] )
+  {
+    if ( !issueEntry.isObject() || !issueEntry.get( "repairable", false ).asBool() )
+      continue;
+    Planned entry;
+    entry.code = issueEntry.get( "code", "" ).asString();
+    entry.itemId = issueEntry.get( "item_id", "" ).asString();
+    planned.push_back( entry );
+  }
+
+  const int applied = repairMapSpecInternal( spec, report );
+
+  if ( ledger != nullptr )
+  {
+    *ledger = Json::Value( Json::arrayValue );
+    const Json::Value after = preflightMapSpec( spec );
+    for ( const Planned &entry : planned )
+    {
+      bool cleared = true;
+      if ( after.isObject() && after.isMember( "issues" ) && after["issues"].isArray() )
+        for ( const auto &afterIssue : after["issues"] )
+        {
+          if ( !afterIssue.isObject() )
+            continue;
+          const std::string afterCode = afterIssue.get( "code", "" ).asString();
+          const std::string afterItem = afterIssue.get( "item_id", "" ).asString();
+          if ( afterCode == entry.code && afterItem == entry.itemId )
+          {
+            cleared = false;
+            break;
+          }
+        }
+      Json::Value record( Json::objectValue );
+      record["code"] = entry.code;
+      record["item_id"] = entry.itemId;
+      record["outcome"] = cleared ? "applied" : "still_reported";
+      ledger->append( record );
+    }
+  }
+  return applied;
+}
+
+namespace {
+
+/// The mechanical repair handlers shared by repairMapSpec and the ledger
+/// wrapper. Contract: callers run the composition solver once BEFORE
+/// looping repairs — re-solving anchored geometry every pass would un-do
+/// MAP_OFF_PAGE/MARGIN clamps and prevent convergence. Anchor outcomes the
+/// solver could not satisfy in-page are reported and skipped, so their
+/// rects stay untouched.
+int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
+{
+  int applied = 0;
   const double pageW = spec["page"]["width_mm"].asDouble();
   const double pageH = spec["page"]["height_mm"].asDouble();
   const std::string mapRef = mainMapRef( spec );
@@ -1355,6 +1509,100 @@ int repairMapSpec( Json::Value &spec, const Json::Value &report )
         ++applied;
       }
     }
+    else if ( code == "MAP_CHART_OVER_MAP" )
+    {
+      // Platform 9.0: move the rendered-picture item out of every map frame
+      // using the same deterministic slot search as MAP_OVERLAP — but with
+      // map frames counted as obstacles (they are what the item must leave).
+      const std::string id = item.get( "item_id", "" ).asString();
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item || !found.item->isMember( "rect_mm" ) ||
+           found.item->isMember( "page" ) ) // page-scoped charts: page-0 only
+        continue;
+      const int appliedBefore = applied;
+      Json::Value &foundItem = *found.item;
+      const double w = foundItem["rect_mm"][2].asDouble();
+      const double h = foundItem["rect_mm"][3].asDouble();
+      // Frames the item currently covers (for the declaration fallback).
+      std::vector<std::string> overlappedFrameIds;
+      for ( const auto &frame : spec.isMember( "map_frames" ) && spec["map_frames"].isArray()
+                                  ? spec["map_frames"]
+                                  : Json::Value( Json::arrayValue ) )
+        if ( frame.isObject() && frame.isMember( "id" ) && frame.isMember( "rect_mm" ) &&
+             frame["rect_mm"].isArray() && frame["rect_mm"].size() == 4 &&
+             rectsIntersect( foundItem["rect_mm"], frame["rect_mm"] ) )
+          overlappedFrameIds.push_back( frame["id"].asString() );
+      const double m = 6.0;
+      // Bounded grid sweep (deterministic): bottom rows first — charts
+      // belong below the map — then upwards. 8×8 candidate positions cap
+      // the search; a layout so dense that no grid slot is free stays
+      // reported for the agent (no forced overlap is invented).
+      struct Slot
+      {
+        double x;
+        double y;
+      };
+      std::vector<Slot> candidates;
+      const int kGrid = 8;
+      for ( int row = kGrid - 1; row >= 0; --row )
+        for ( int col = 0; col < kGrid; ++col )
+        {
+          const double x = m + col * ( std::max( 1.0, pageW - 2 * m - w ) / ( kGrid - 1 ) );
+          const double y = m + row * ( std::max( 1.0, pageH - 2 * m - h ) / ( kGrid - 1 ) );
+          candidates.push_back( { x, y } );
+        }
+      std::vector<Json::Value> obstacles;
+      for ( const char *collection : { "map_frames", "inset_maps", "titles", "labels",
+                                       "legends", "scale_bars", "north_arrows",
+                                       "source_notes", "annotations", "charts", "colorbars" } )
+      {
+        if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+          continue;
+        for ( const auto &other : spec[collection] )
+        {
+          if ( !other.isObject() || !other.isMember( "id" ) || other["id"].asString() == id )
+            continue;
+          if ( other.isMember( "rect_mm" ) && other["rect_mm"].isArray() &&
+               other["rect_mm"].size() == 4 )
+            obstacles.push_back( other["rect_mm"] );
+        }
+      }
+      for ( const auto &candidate : candidates )
+      {
+        if ( candidate.x < 0 || candidate.y < 0 || candidate.x + w > pageW ||
+             candidate.y + h > pageH )
+          continue;
+        bool free = true;
+        for ( const auto &obstacle : obstacles )
+          free = free && !rectsIntersect( rect( candidate.x, candidate.y, w, h ), obstacle );
+        if ( free )
+        {
+          foundItem["rect_mm"] = rect( candidate.x, candidate.y, w, h );
+          ++applied;
+          break;
+        }
+      }
+      // Deadlock fallback: when no free slot exists (dense map sheets that
+      // were DESIGNED with chart overlays), convert the implicit coverage
+      // into an explicit declaration instead of pretending it away. The
+      // re-preflight sees overlay_on and the rule clears — declared, never
+      // silent.
+      if ( applied == appliedBefore && !overlappedFrameIds.empty() )
+      {
+        Json::Value overlays( Json::arrayValue );
+        const Json::Value &declared = foundItem.get( "overlay_on", Json::Value() );
+        if ( declared.isString() && !declared.asString().empty() )
+          overlays.append( declared );
+        else if ( declared.isArray() )
+          overlays.append( declared );
+        std::set<std::string> seen;
+        for ( const auto &frameId : overlappedFrameIds )
+          if ( seen.insert( frameId ).second )
+            overlays.append( frameId );
+        foundItem["overlay_on"] = overlays;
+        ++applied;
+      }
+    }
     else if ( code == "MAP_UNKNOWN_COMPONENT" )
     {
       // The reference resolved to nothing — stripping it loses no content.
@@ -1438,6 +1686,8 @@ int repairMapSpec( Json::Value &spec, const Json::Value &report )
   return applied;
 }
 
+} // namespace
+
 Json::Value preflightRuleCatalog()
 {
   struct Rule
@@ -1498,6 +1748,11 @@ Json::Value preflightRuleCatalog()
       "mention; repair stamps legend.nodata from the style." },
     { "MAP_TEXT_WRAP_OVERFLOW", "warning", true,
       "Wrap-aware text layout (CJK kinsoku included) does not fit the item rect." },
+    { "MAP_CHART_OVER_MAP", "warning", true,
+      "A chart/colorbar (opaque picture item) overlaps a map frame and would occlude "
+      "map content; repair repositions it outside all frames." },
+    { "MAP_DUAL_AXIS_UNSUPPORTED", "warning", false,
+      "Chart declares dual_axis but the renderers draw a single value axis." },
     { "MAP_CONTRAST_LOW", "warning", false,
       "Referenced style fails a deterministic contrast floor (label text or adjacent classes)." },
     { "MAPSPEC_ISSUES_TRUNCATED", "warning", false,

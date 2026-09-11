@@ -40,6 +40,18 @@ Json::Value preflightMapSpec( const Json::Value &spec,
 /// repairs applied.
 int repairMapSpec( Json::Value &spec, const Json::Value &report );
 
+/// Platform 9.0: repair pass WITH a decision ledger. The ledger records, per
+/// repairable finding of `report`, an outcome attributed by re-preflighting
+/// the repaired document exactly once:
+///   "applied"        — the finding's code no longer appears for the item
+///                      (or at all) in the post-repair report;
+///   "still_reported" — the finding survives (the repair did not clear it;
+///                      the agent decides the next step).
+/// Returns the number of repairs applied (same contract as repairMapSpec)
+/// and appends {code, item_id, outcome} entries to `ledger`.
+int repairMapSpecWithLedger( Json::Value &spec, const Json::Value &report,
+                             Json::Value *ledger );
+
 /// Deterministic single-line text-width estimate in millimeters (CJK
 /// fullwidth glyphs count one em, other glyphs 0.55 em, spaces 0.35 em;
 /// 1 pt = 0.3528 mm). Platform-independent by design: the preflight must
