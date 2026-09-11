@@ -1,5 +1,7 @@
 # FINAL REPORT — Cartography Platform 9.0
 
+**Delivered as PR #889 (`feat/cartography-platform-9` → `master`).**
+
 Branch `feat/cartography-platform-9` (base `origin/master` @ `f316dfdbb4`,
 PR base for the 9.0 series). Worktree
 `/home/kevin/projects/rs-studio/exp-rs-cartography-platform-9`.
