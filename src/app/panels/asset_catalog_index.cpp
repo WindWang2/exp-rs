@@ -43,7 +43,6 @@ void AssetCatalogIndex::addOrUpdateAsset( const sicnu::data::AssetSnapshot &snap
   entry.kind = snapshot.kind();
   entry.state = snapshot.state();
   entry.persistence = snapshot.persistence();
-  entry.parentCollectionId = snapshot.parentCollectionId();
   addOrUpdateEntry( entry );
 }
 
@@ -63,12 +62,17 @@ void AssetCatalogIndex::removeAsset( const sicnu::data::AssetId &id )
   if ( it == m_byId.constEnd() )
     return; // unknown id: nothing to do (idempotent)
   const int row = it.value();
-  m_entries.remove( row );
   m_byId.remove( id.toString() );
-  // Reindex the tail (order-preserving removal): bounded by the removed
-  // position's tail length; catalog sizes make a swap-and-pop unnecessary.
-  for ( int i = row; i < m_entries.size(); ++i )
-    m_byId[m_entries[i].id.toString()] = i;
+  if ( row != m_entries.size() - 1 )
+  {
+    // Swap-and-pop: rows are unordered for every consumer (rendering uses
+    // per-entry lookups; order within one filter pass is the catalog's
+    // residual order) — O(1) removal instead of O(tail) per signal, which
+    // would make batch unloads O(N²) on the GUI thread (review B-5).
+    m_entries[row] = m_entries.last();
+    m_byId[m_entries[row].id.toString()] = row;
+  }
+  m_entries.removeLast();
 }
 
 void AssetCatalogIndex::clear()
@@ -87,34 +91,23 @@ QVector<int> AssetCatalogIndex::filterIndices( const QString &substring ) const
       out.append( i );
     return out;
   }
-  const QString needle = substring.trimmed();
   for ( int i = 0; i < m_entries.size(); ++i )
   {
-    const AssetCatalogEntry &entry = m_entries[i];
-    if ( entry.displayName.contains( needle, Qt::CaseInsensitive )
-         || entry.source.contains( needle, Qt::CaseInsensitive )
-         || entry.id.toString().contains( needle, Qt::CaseInsensitive ) )
+    if ( matchesFilter( m_entries[i], substring ) )
       out.append( i );
   }
   return out;
 }
 
-void AssetCatalogIndex::groupIndices(
-  const QVector<int> &indices,
-  QHash<QString, QVector<int>> &byCollection,
-  QVector<int> &standalone ) const
+bool AssetCatalogIndex::matchesFilter( const AssetCatalogEntry &entry,
+                                       const QString &substring )
 {
-  byCollection.clear();
-  standalone.clear();
-  for ( const int i : indices )
-  {
-    const std::optional<sicnu::data::CollectionId> parent =
-      m_entries[i].parentCollectionId;
-    if ( parent.has_value() )
-      byCollection[parent->toString()].append( i );
-    else
-      standalone.append( i );
-  }
+  if ( substring.isEmpty() )
+    return true;
+  const QString needle = substring.trimmed();
+  return entry.displayName.contains( needle, Qt::CaseInsensitive )
+         || entry.source.contains( needle, Qt::CaseInsensitive )
+         || entry.id.toString().contains( needle, Qt::CaseInsensitive );
 }
 
 int AssetCatalogIndex::indexOfAsset( const sicnu::data::AssetId &id ) const

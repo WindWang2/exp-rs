@@ -150,6 +150,40 @@ TEST_CASE( "Raster preview renders a fitted gradient image", "[wb8][preview]" )
     REQUIRE( right > 160 );
 }
 
+TEST_CASE( "Small rasters preview at native size (never upsampled)",
+           "[wb8][preview]" )
+{
+    ensureQgisApplication();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    // 100x50 with a 280x200 target: both dims smaller than the request —
+    // readWindowResampled refuses upsampling, so the preview must clamp to
+    // native size rather than fail (regression for the P0 review finding).
+    const QString path = makeGradientRaster( dir.filePath( "small.tif" ), 100, 50 );
+    const PreviewRender render = renderRasterPreview( path, QSize( 280, 200 ) );
+    REQUIRE( render.status == PreviewRender::Status::Ready );
+    REQUIRE( render.image.width() == 100 );
+    REQUIRE( render.image.height() == 50 );
+}
+
+TEST_CASE( "Overview-less oversized rasters refuse typed (bounded pool)",
+           "[wb8][preview]" )
+{
+    ensureQgisApplication();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString path = makeGradientRaster( dir.filePath( "fine.tif" ), 64, 48 );
+    // Default cap: a 64x48 raster previews normally.
+    REQUIRE( renderRasterPreview( path, QSize( 32, 32 ) ).status
+             == PreviewRender::Status::Ready );
+    // Tiny cap: typed Unsupported naming the limit — an honest refusal
+    // instead of an unbounded native read on the shared scan pool.
+    const PreviewRender capped = renderRasterPreview( path, QSize( 32, 32 ), 100 );
+    REQUIRE( capped.status == PreviewRender::Status::Unsupported );
+    REQUIRE( capped.image.isNull() );
+    REQUIRE_FALSE( capped.error.isEmpty() );
+}
+
 TEST_CASE( "Raster preview paints declared NoData black", "[wb8][preview]" )
 {
     ensureQgisApplication();

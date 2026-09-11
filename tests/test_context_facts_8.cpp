@@ -9,6 +9,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 
+#include <qgsapplication.h>
 #include <qgsmaplayer.h>
 #include <qgsvectorlayer.h>
 
@@ -17,11 +18,15 @@
 namespace
 {
 
-QApplication &testApp()
+void ensureQgisApplication()
 {
-    static int argc = 0;
-    static QApplication app( argc, nullptr );
-    return app;
+    if ( QApplication::instance() )
+        return;
+    static int argc = 1;
+    static char applicationName[] = "test_context_facts_8";
+    static char *argv[] = { applicationName, nullptr };
+    new QgsApplication( argc, argv, true );
+    QgsApplication::initQgis();
 }
 
 namespace ContextRules = sicnu::app::ContextRules;
@@ -39,7 +44,7 @@ QgsVectorLayer *memoryLayer()
 
 TEST_CASE( "prerequisiteFacts exposes the 8.0 fields", "[wb8][context]" )
 {
-    testApp();
+    ensureQgisApplication();
     SelectionContextSnapshot snap;
     snap.hasBroken = true;
     snap.hasInFlightTask = true;
@@ -51,9 +56,9 @@ TEST_CASE( "prerequisiteFacts exposes the 8.0 fields", "[wb8][context]" )
     REQUIRE_FALSE( facts.hasRaster );
 }
 
-TEST_CASE( "suggestedNextAction follows the documented priority", "[wb8][context]" )
+TEST_CASE( "suggestedNextAction follows the implemented priority", "[wb8][context]" )
 {
-    testApp();
+    ensureQgisApplication();
 
     // 1. Empty workspace → import.
     SelectionContextSnapshot empty;
@@ -111,7 +116,7 @@ TEST_CASE( "suggestedNextAction follows the documented priority", "[wb8][context
 TEST_CASE( "SelectionContext picks up the injected in-flight predicate",
            "[wb8][context]" )
 {
-    testApp();
+    ensureQgisApplication();
     sicnu::app::SelectionContext context;
     REQUIRE_FALSE( context.snapshot().hasInFlightTask );
 

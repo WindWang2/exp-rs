@@ -112,9 +112,6 @@ class DataManagerPanel : public QDockWidget
     /// Workbench 8.0: collection children populate on first expand (lazy
     /// detail loading — huge temporal collections stay bounded).
     void onItemExpanded( QTreeWidgetItem *item );
-    /// Workbench 8.0: filter box text changed (coalesced, incremental).
-    void onFilterChanged();
-
   private:
     sicnu::data::AssetId assetForItem( QTreeWidgetItem *item ) const;
     std::optional<sicnu::data::CollectionId> collectionForItem( QTreeWidgetItem *item ) const;
@@ -150,6 +147,7 @@ class DataManagerPanel : public QDockWidget
     QLabel *m_detailTitle = nullptr;
     QLabel *m_previewLabel = nullptr; // bounded async preview (may stay hidden)
     sicnu::app::AssetPreviewService *m_previewService = nullptr; // owned (child)
+    QString m_previewSource; // source of the pane's current/last preview request
     QSplitter *m_splitter = nullptr;
     // Workbench 8.0: large-metadata support (filter + light catalog index).
     QLineEdit *m_filterEdit = nullptr;

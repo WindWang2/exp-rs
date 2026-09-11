@@ -47,7 +47,11 @@ struct AssetCatalogEntry
     sicnu::data::AssetKind kind = sicnu::data::AssetKind::Raster;
     sicnu::data::AssetState state = sicnu::data::AssetState::Ready;
     sicnu::data::PersistencePolicy persistence = sicnu::data::PersistencePolicy::ProjectPersistent;
-    std::optional<sicnu::data::CollectionId> parentCollectionId;
+    // NOTE: collection membership is intentionally NOT mirrored here.
+    // DataManager::addChildToCollection emits no per-asset signal, so the
+    // only authoritative membership source is the collection snapshot's
+    // childAssetIds — renderers must read membership from there (the panel
+    // does), never from this index.
 };
 
 class AssetCatalogIndex
@@ -75,14 +79,10 @@ class AssetCatalogIndex
     /// The return holds indices into entries() — no per-row copies.
     QVector<int> filterIndices( const QString &substring ) const;
 
-    /// Single pass over @p indices splitting entries into per-collection
-    /// buckets and the standalone set (both in catalog order) — the renderer
-    /// builds its tree in O(rows) instead of O(collections × assets).
-    /// Buckets are keyed by CollectionId::toString() (Qt6 has no qHash for
-    /// the id types, and the data headers stay untouched).
-    void groupIndices( const QVector<int> &indices,
-                       QHash<QString, QVector<int>> &byCollection,
-                       QVector<int> &standalone ) const;
+    /// The one filter rule shared by filterIndices() and renderers that walk
+    /// authoritative membership lists (collection->childAssetIds).
+    static bool matchesFilter( const AssetCatalogEntry &entry,
+                               const QString &substring );
 
     int indexOfAsset( const sicnu::data::AssetId &id ) const;
 

@@ -1029,9 +1029,8 @@ QWidget *SchemaFormBuilder::buildArrayItemRow( Field &field, int index )
   hl->addWidget( box, 1 );
   hl->addWidget( rm );
 
-  for ( Field &child : itemFields )
-    connectValueSignals( child );
-
+  // Child signals are already connected inside buildField — connecting
+  // again would double-emit valuesChanged on every edit (review A13).
   field.arrayItems.push_back( std::move( itemFields ) );
   return row;
 }
@@ -1064,6 +1063,18 @@ void SchemaFormBuilder::removeArrayItem( Field &field, int index )
     delete item;
   }
   field.arrayItems.remove( index );
+  // Renumber the visible titles so they keep matching the row positions.
+  for ( int i = 0; i < field.arrayItems.size(); ++i )
+  {
+    if ( QLayoutItem *li = field.arrayLayout->itemAt( i ) )
+    {
+      if ( QWidget *row = li->widget() )
+      {
+        if ( QGroupBox *box = row->findChild<QGroupBox *>() )
+          box->setTitle( tr( "项 %1" ).arg( i + 1 ) );
+      }
+    }
+  }
   updateArrayBoundsUi( field );
   emit valuesChanged();
 }
@@ -1300,15 +1311,26 @@ void SchemaFormBuilder::rebuild( const Json::Value &schema )
 
   // Object arrays: seed minItems rows so required structures are visible
   // (and minItems validation can only fail on partially-filled rows).
-  for ( Field &field : m_fields )
+  // Bounded by maxItems even when a malformed schema declares
+  // minItems > maxItems (review A3 — the naive loop hangs the GUI thread).
+  std::function<void( QVector<Field> & )> seedArrays = [&]( QVector<Field> &fields )
   {
-    if ( field.kind != FieldKind::ObjectArray )
-      continue;
-    const int minItems = minItemsOf( field.prop );
-    while ( field.arrayItems.size() < std::min( minItems, kMaxObjectArrayItems ) )
-      appendArrayItem( field, false );
-    updateArrayBoundsUi( field );
-  }
+    for ( Field &field : fields )
+    {
+      if ( field.kind != FieldKind::ObjectArray )
+        continue;
+      const int minItems = std::min( minItemsOf( field.prop ), kMaxObjectArrayItems );
+      const int maxItems = maxItemsOf( field.prop );
+      while ( field.arrayItems.size() < minItems
+              && ( maxItems < 0 || field.arrayItems.size() < maxItems ) )
+        appendArrayItem( field, false );
+      updateArrayBoundsUi( field );
+      seedArrays( field.children );
+      for ( QVector<Field> &item : field.arrayItems )
+        seedArrays( item );
+    }
+  };
+  seedArrays( m_fields );
 
   // Section order: 输入 → 输出 → 参数 → 高级
   auto addSection = [this]( QGroupBox *box )
@@ -1354,11 +1376,21 @@ void SchemaFormBuilder::refreshComboChoices( FieldKind kind,
                                              const QStringList &ids,
                                              const QStringList &names )
 {
-  for ( Field &field : m_fields )
-  {
-    if ( field.kind != kind || !field.combo )
-      continue;
+  refreshComboChoicesIn( m_fields, kind, ids, names );
+}
 
+void SchemaFormBuilder::refreshComboChoicesIn( QVector<Field> &fields,
+                                               FieldKind kind,
+                                               const QStringList &ids,
+                                               const QStringList &names )
+{
+  // Recursive: nested-object and object-array children receive the same
+  // choice sets as top-level fields (review A6 — a nested raster combo that
+  // never populates is a dead editor).
+  for ( Field &field : fields )
+  {
+    if ( field.kind == kind && field.combo )
+    {
     const QString currentText = field.combo->currentText();
     QString currentData;
     if ( field.combo->currentIndex() >= 0 )
@@ -1391,26 +1423,25 @@ void SchemaFormBuilder::refreshComboChoices( FieldKind kind,
         field.combo->setEditText( currentData );
     }
     field.combo->blockSignals( false );
+    }
+    refreshComboChoicesIn( field.children, kind, ids, names );
+    for ( QVector<Field> &item : field.arrayItems )
+      refreshComboChoicesIn( item, kind, ids, names );
   }
 }
 
 void SchemaFormBuilder::refreshEnumSources()
 {
-  struct Task
+  // Collect PATHS first, resolve each field fresh at apply time — raw Field*
+  // would dangle if a provider re-entered the form (review B-8).
+  QStringList enumPaths;
+  std::function<void( const QVector<Field> & )> collect =
+    [&]( const QVector<Field> &fields )
   {
-    Field *field;
-  };
-  std::vector<Task> tasks;
-  // Collect first, mutate after: the provider may hold a reference to
-  // values() only, never to fields, but keeping the two phases apart makes
-  // re-entrancy impossible by construction.
-  std::function<void( QVector<Field> & )> collect =
-    [&]( QVector<Field> &fields )
-  {
-    for ( Field &f : fields )
+    for ( const Field &f : fields )
     {
       if ( f.kind == FieldKind::Enum && !f.enumSource.isEmpty() && f.combo )
-        tasks.push_back( { &f } );
+        enumPaths.append( f.path );
       collect( f.children );
       for ( int i = 0; i < f.arrayItems.size(); ++i )
         collect( f.arrayItems[i] );
@@ -1419,9 +1450,12 @@ void SchemaFormBuilder::refreshEnumSources()
   collect( m_fields );
 
   const Json::Value currentValues = values();
-  for ( Task &t : tasks )
+  for ( const QString &path : enumPaths )
   {
-    Field &field = *t.field;
+    Field *fieldPtr = findFieldMutable( m_fields, path );
+    if ( !fieldPtr )
+      continue;
+    Field &field = *fieldPtr;
     QVector<SchemaEnumProvider::Choice> choices;
     const bool resolved =
       m_enumProvider
@@ -1714,6 +1748,10 @@ void SchemaFormBuilder::writeFieldValue( Field &field, const Json::Value &value 
         {
           QWidget *row = buildArrayItemRow( field, i );
           field.arrayLayout->addWidget( row );
+          // setValues is signal-silent by contract (3.0): rows created here
+          // did not exist when the outer block pass ran — block before any
+          // value is applied; the outer unblock pass covers them after.
+          setFieldsSignalsBlocked( field.arrayItems.last(), true );
           applyFields( field.arrayItems.last(), value[i] );
         }
         updateArrayBoundsUi( field );
@@ -1722,13 +1760,25 @@ void SchemaFormBuilder::writeFieldValue( Field &field, const Json::Value &value 
   }
 }
 
-void SchemaFormBuilder::collectFields( const QVector<Field> &fields, Json::Value &out ) const
+void SchemaFormBuilder::collectFields( const QVector<Field> &fields,
+                                       const QStringList &required,
+                                       Json::Value &out ) const
 {
   for ( const Field &field : fields )
   {
     // Milestone H: a field hidden by x-ui-visible-when is not collected (the
     // operator schema default applies until its condition holds).
     if ( field.condHidden )
+      continue;
+    // SchemaForm 4.0: an untouched optional group is ABSENT from values() —
+    // the same rule validate() applies (an emitted empty/defaulted object
+    // would be indistinguishable from a configured one).
+    const bool isGroupRequired = required.contains( field.name );
+    if ( field.kind == FieldKind::Object && !isGroupRequired
+         && !groupTouched( field.children ) )
+      continue;
+    if ( field.kind == FieldKind::ObjectArray && !isGroupRequired
+         && field.arrayItems.isEmpty() )
       continue;
     const std::string key = field.name.toStdString();
     switch ( field.kind )
@@ -1831,11 +1881,10 @@ void SchemaFormBuilder::collectFields( const QVector<Field> &fields, Json::Value
         break;
       case FieldKind::Object:
       {
-        // 4.0: nested object → nested JSON. An optional group whose fields
-        // are all empty collects as an empty object (the consumer treats it
-        // as absent; validate() documents the same rule).
+        // 4.0: nested object → nested JSON (untouched optional groups never
+        // reach here — filtered above by the same rule validate() uses).
         Json::Value nested( Json::objectValue );
-        collectFields( field.children, nested );
+        collectFields( field.children, requiredListOf( field.prop ), nested );
         out[key] = nested;
         break;
       }
@@ -1846,7 +1895,7 @@ void SchemaFormBuilder::collectFields( const QVector<Field> &fields, Json::Value
         for ( const QVector<Field> &item : field.arrayItems )
         {
           Json::Value obj( Json::objectValue );
-          collectFields( item, obj );
+          collectFields( item, requiredListOf( field.prop["items"] ), obj );
           arr.append( obj );
         }
         out[key] = arr;
@@ -1859,7 +1908,7 @@ void SchemaFormBuilder::collectFields( const QVector<Field> &fields, Json::Value
 Json::Value SchemaFormBuilder::values() const
 {
   Json::Value out( Json::objectValue );
-  collectFields( m_fields, out );
+  collectFields( m_fields, requiredListOf( m_schema ), out );
   return out;
 }
 
@@ -2344,6 +2393,12 @@ bool SchemaFormBuilder::groupTouched( const QVector<Field> &fields ) const
       if ( !child.arrayItems.isEmpty() )
         return true;
     }
+    else if ( child.kind == FieldKind::Json )
+    {
+      // readFieldValue is empty for the JSON editor — inspect its text.
+      if ( child.plainEdit && !child.plainEdit->toPlainText().trimmed().isEmpty() )
+        return true;
+    }
     else if ( child.kind == FieldKind::Object )
     {
       if ( groupTouched( child.children ) )
@@ -2394,13 +2449,7 @@ void SchemaFormBuilder::scheduleAsyncChecks()
   ++m_checkGeneration;
   const quint64 gen = m_checkGeneration;
 
-  struct CheckJob
-  {
-    QString path;
-    QString check;
-    QString value;
-  };
-  std::vector<CheckJob> jobs;
+  QVector<CheckJob> jobs;
   std::function<void( const QVector<Field> & )> collect =
     [&]( const QVector<Field> &fields )
   {
@@ -2418,7 +2467,9 @@ void SchemaFormBuilder::scheduleAsyncChecks()
           job.path = f.path;
           job.check = check;
           job.value = readFieldValue( f ).trimmed();
-          jobs.push_back( std::move( job ) );
+          job.canonicalTip = tooltipFor( f );
+          job.target = f.widget;
+          jobs.push_back( job );
         }
       }
       collect( f.children );
@@ -2427,61 +2478,69 @@ void SchemaFormBuilder::scheduleAsyncChecks()
     }
   };
   collect( m_fields );
-  if ( jobs.empty() )
+  if ( jobs.isEmpty() )
     return;
 
   QThreadPool &pool = m_checkPool ? *m_checkPool : sicnu::app::RsScanPool::instance().pool();
   for ( const CheckJob &job : jobs )
   {
     if ( job.value.isEmpty() )
-      continue; // nothing to check; stale marks re-evaluate to neutral below
+    {
+      // A cleared value cannot satisfy any check — reset the field's marks
+      // to neutral instead of leaving a stale failure behind (review A10).
+      if ( job.target )
+      {
+        job.target->setProperty(
+          QStringLiteral( "check_%1" ).arg( job.check ).toUtf8().constData(),
+          QVariant() );
+        job.target->setToolTip( job.canonicalTip );
+      }
+      continue;
+    }
     QPointer<SchemaFormBuilder> self( this );
-    const QString value = job.value;
-    pool.start( [self, gen, path = job.path, check = job.check, value]()
+    pool.start( [self, gen, job]()
     {
       // Worker side: no widget access — pure value computation.
       bool ok = true;
-      if ( check == QLatin1String( "path_exists" ) )
-        ok = QFileInfo::exists( value );
+      if ( job.check == QLatin1String( "path_exists" ) )
+        ok = QFileInfo::exists( job.value );
       if ( !self )
         return; // form died while queued: drop, never touch dead state
       const bool result = ok;
       QMetaObject::invokeMethod(
         self.data(),
-        [self, gen, path, check, result]()
+        [self, gen, job, result]()
         {
           if ( self )
-            self->applyAsyncCheckResult( gen, path, check, result );
+            self->applyAsyncCheckResult( gen, job.target, job.check, result,
+                                         job.canonicalTip );
         },
         Qt::QueuedConnection );
     } );
   }
 }
 
-void SchemaFormBuilder::applyAsyncCheckResult( quint64 generation, const QString &path,
-                                               const QString &check, bool ok )
+void SchemaFormBuilder::applyAsyncCheckResult( quint64 generation,
+                                               const QPointer<QWidget> &target,
+                                               const QString &check, bool ok,
+                                               const QString &canonicalTip )
 {
   if ( generation != m_checkGeneration )
-  {
-      return; // superseded by a newer rebuild/edit — stale result dropped
-  }
-  Field *field = findFieldMutable( m_fields, path );
-  if ( !field || !field->widget )
-    return;
+    return; // superseded by a newer rebuild/edit — stale result dropped
+  if ( target.isNull() )
+    return; // the marked editor died — nothing to touch
   const QString key = QStringLiteral( "check_%1" ).arg( check );
-  const QVariant previous = field->widget->property( key.toUtf8().constData() );
-  if ( previous.isValid() && previous.toBool() == ok )
-    return;
-  field->widget->setProperty( key.toUtf8().constData(), ok );
+  target->setProperty( key.toUtf8().constData(), ok );
   // The canonical tooltip stays authoritative; a failed check appends a
-  // visible, screen-reader-reachable hint that clears itself on the next
-  // passing run.
-  QString tip = tooltipFor( *field );
+  // visible, screen-reader-reachable hint. Re-applied on EVERY delivery:
+  // updateValidationUi's error-mark pass rewrites tooltips, so an unchanged
+  // failed result must still restore its hint (review A8).
+  QString tip = canonicalTip;
   if ( !ok )
   {
     if ( check == QLatin1String( "path_exists" ) )
       tip += ( tip.isEmpty() ? QString() : QStringLiteral( "\n" ) )
              + tr( "⚠ 路径不存在（%1）" ).arg( check );
   }
-  field->widget->setToolTip( tip );
+  target->setToolTip( tip );
 }

@@ -53,6 +53,10 @@ struct PreviewLimits
     /// (feature rendering cost is extent-driven; refusing is honest and
     /// keeps the bounded pool free).
     static constexpr long long kMaxVectorFeatures = 200000;
+    /// Rasters WITHOUT overview levels above this pixel count refuse with
+    /// `Unsupported` — a native full-resolution read would occupy a shared
+    /// scan worker for seconds/minutes (bounded-pool discipline).
+    static constexpr long long kMaxNativePreviewPixels = 40000000LL;
     /// Maximum thumbnail edge the renderers accept.
     static constexpr int kMaxEdgePixels = 1024;
     /// Cache defaults.
@@ -77,8 +81,10 @@ struct PreviewRender
 /// Pure raster preview (blocking, thread-agnostic — callers or tests own the
 /// thread). Stretch: per-band min/max excluding NoData/NaN, NoData → black,
 /// flat data → neutral gray. RGB from bands 1-3 when the raster has ≥3
-/// bands, grayscale otherwise.
-PreviewRender renderRasterPreview( const QString &path, const QSize &targetSize );
+/// bands, grayscale otherwise. Never upsamples. Overview-less rasters above
+/// @p maxNativePixels refuse with Unsupported (bounded-pool discipline).
+PreviewRender renderRasterPreview( const QString &path, const QSize &targetSize,
+                                   long long maxNativePixels = PreviewLimits::kMaxNativePreviewPixels );
 
 /// Pure vector preview via QGIS rendering primitives. The layer is created,
 /// rendered and destroyed on the calling thread (never the GUI's project).

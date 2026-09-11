@@ -419,8 +419,11 @@ logic anywhere:
 - **Nested objects**: a property with `type:"object"` AND `properties` (and
   nesting depth < `kMaxObjectDepth` = 4) renders as a recursive sub-group;
   `values()` nests under the key; `validate()` honors the nested `required`
-  list. A non-required group whose fields are all empty counts as absent
-  (optional group). Deeper objects degrade to the 3.0 JSON text editor.
+  list. A non-required group whose fields are all empty counts as ABSENT:
+  `values()` omits the key entirely and `validate()` skips the group — the
+  two agree by construction. Deeper objects degrade to the 3.0 JSON text
+  editor. Nested layer/asset/model combos receive the same pushed choice
+  sets as top-level fields.
 - **Object arrays**: `type:"array"` whose `items` declare an object schema
   render as repeatable item editors (添加/移除; `minItems` seeds rows and
   gates removal, `maxItems` gates the add button). Import via `setValues` is
@@ -435,10 +438,14 @@ logic anywhere:
   visible tooltip hint — never a silent dead list.
 - **Async value checks**: `x-ui-check: "path_exists"` (string or array) runs
   on the bounded `RsScanPool`, debounced 350 ms after edits and forced by
-  `runAsyncChecksNow()` after programmatic `setValues`. Results are
-  generation-gated widget marks (failures append a 路径不存在 tooltip hint);
-  a newer rebuild/edit supersedes older results, and a destroyed form drops
-  them (QPointer + queued invoke). Checks never block Run — they inform.
+  `runAsyncChecksNow()` after programmatic `setValues` (TaskPanelHost calls
+  this on restore). Results are generation-gated widget marks delivered
+  through QPointer-guarded queued calls — a newer rebuild/edit supersedes
+  older results, a destroyed form or editor drops them, and a cleared value
+  resets the mark. Failures append a 路径不存在 tooltip hint that survives
+  validation-mark refreshes; checks never block Run — they inform.
+  Any host MAY install a `SchemaEnumProvider` / check pool; without one,
+  enum sources degrade to free text and checks default to the shared pool.
 - **Accessibility**: every editor at every nesting level carries
   `accessibleName` (schema label) and `accessibleDescription` (canonical
   tooltip), labels keep `setBuddy`, and conditional visibility toggles the
@@ -477,10 +484,14 @@ catalog-scale previews:
 `DataManagerPanel::refresh`:
 
 - `AssetCatalogIndex` is a light, incrementally-maintained projection of the
-  catalog (one entry per asset: id/name/source/kind/state/persistence/
-  parent). DataManager stays the only catalog authority; the index is a
-  disposable projection healed by `rebuild()` and maintained from the
-  per-asset signals. Refresh no longer re-fetches every full snapshot.
+  catalog (one entry per asset: id/name/source/kind/state/persistence).
+  DataManager stays the only catalog authority; the index is a disposable
+  projection healed by `rebuild()` and maintained from the per-asset
+  signals. Refresh no longer re-fetches every full snapshot. Collection
+  MEMBERSHIP is deliberately not mirrored (addChildToCollection emits no
+  per-asset signal): children always render from the authoritative
+  collection snapshot's `childAssetIds`, so membership can never drift out
+  of view.
 - Incremental **filter box** (`dataManagerFilter`): case-insensitive
   substring over display name / source / id, coalesced 250 ms, single
   filter+group pass per refresh (O(assets) light comparisons).
@@ -493,17 +504,22 @@ catalog-scale previews:
   names the exact totals — truncation is never silent.
 - Selection preservation and the panel's test API (`rowText`,
   `selectedAssetId`, …) are unchanged; `test_data_manager_panel` stays the
-  parity suite.
+  parity suite. Note `rowCount()` counts RENDERED top-level rows — it
+  includes the truncation sentinel and is capped by the standalone row cap;
+  it is never a catalog total.
 
 ## 24. Context facts + suggested next action (goal §C)
 
 `SelectionContextSnapshot` gains `hasInFlightTask` (injected predicate — the
 shell binds TaskCenter; the pure layer never touches processing types) and
 `ContextFacts` exposes `hasBrokenLayer` + `hasInFlightTask`.
-`ContextRules::suggestedNextAction` is a deterministic projection (broken →
-editing → raster → vector-editable → temporal → in-flight → empty
+`ContextRules::suggestedNextAction` is a deterministic projection
+(editing → raster → vector-editable → temporal → in-flight → empty
 workspace) returning a **registered** command id plus human text; the
-palette/tests pin that a suggestion can always execute.
+palette/tests pin that a suggestion can always execute. Broken-layer and
+governance-selection facts stay in `ContextFacts` — the registry has no
+relocate/open-result commands yet, and a suggestion that cannot execute
+would be noise.
 
 ## Contracts under test (8.0)
 

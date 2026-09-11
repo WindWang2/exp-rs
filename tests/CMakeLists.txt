@@ -6091,7 +6091,6 @@ add_executable(test_schema_form_4
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
 )
 target_link_libraries(test_schema_form_4 PRIVATE
   Catch2::Catch2WithMain

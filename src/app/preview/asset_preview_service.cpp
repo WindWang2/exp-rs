@@ -28,7 +28,9 @@ namespace sicnu::app
 namespace
 {
 
-/// Fits the raster aspect ratio into the target box (bounded edges).
+/// Fits the raster aspect ratio into the target box (bounded edges). Never
+/// upsamples: readWindowResampled refuses dst > window, so the scale factor
+/// is clamped to 1.0 — small rasters preview at native size.
 QSize fittedSize( int rasterWidth, int rasterHeight, const QSize &target )
 {
   if ( rasterWidth <= 0 || rasterHeight <= 0 || target.isEmpty() )
@@ -37,7 +39,7 @@ QSize fittedSize( int rasterWidth, int rasterHeight, const QSize &target )
     std::min<double>( target.width(), PreviewLimits::kMaxEdgePixels ) / rasterWidth;
   const double scaleY =
     std::min<double>( target.height(), PreviewLimits::kMaxEdgePixels ) / rasterHeight;
-  const double s = std::min( scaleX, scaleY );
+  const double s = std::min( std::min( scaleX, scaleY ), 1.0 );
   return QSize( std::max( 1, static_cast<int>( rasterWidth * s + 0.5 ) ),
                 std::max( 1, static_cast<int>( rasterHeight * s + 0.5 ) ) );
 }
@@ -96,7 +98,8 @@ quint8 scaleToByte( double v, const BandRange &range )
 
 } // namespace
 
-PreviewRender renderRasterPreview( const QString &path, const QSize &targetSize )
+PreviewRender renderRasterPreview( const QString &path, const QSize &targetSize,
+                                   long long maxNativePixels )
 {
   PreviewRender out;
   try
@@ -107,6 +110,21 @@ PreviewRender renderRasterPreview( const QString &path, const QSize &targetSize 
     {
       out.status = PreviewRender::Status::Failed;
       out.error = QStringLiteral( "空栅格或波段数为 0" );
+      return out;
+    }
+
+    // Bound worst-case read time on the shared scan pool: without overview
+    // levels a preview would read every pixel of the raster at native
+    // resolution. Beyond the pixel cap this refuses typed (honest) instead
+    // of occupying a worker for seconds/minutes.
+    if ( meta.overviewCount <= 0
+         && static_cast<long long>( meta.width ) * meta.height > maxNativePixels )
+    {
+      out.status = PreviewRender::Status::Unsupported;
+      out.error = QStringLiteral( "栅格 %1×%2 无内建金字塔，超出预览像素上限 %3（已拒绝以保证界面响应）" )
+                    .arg( meta.width )
+                    .arg( meta.height )
+                    .arg( maxNativePixels );
       return out;
     }
 
@@ -149,23 +167,38 @@ PreviewRender renderRasterPreview( const QString &path, const QSize &targetSize 
       for ( int x = 0; x < dst.width(); ++x )
       {
         const std::size_t idx = static_cast<std::size_t>( y ) * dst.width() + x;
+        if ( bands.size() == 3 )
+        {
+          // Each channel is masked by ITS band's NoData — a NoData in any
+          // component blackens the pixel instead of stretching garbage.
+          bool missing = false;
+          for ( std::size_t b = 0; b < 3; ++b )
+          {
+            if ( isDisplayMissing( values[b * plane + idx],
+                                   meta.bands.at( static_cast<std::size_t>( bands[b] ) - 1 ) ) )
+            {
+              missing = true;
+              break;
+            }
+          }
+          if ( missing )
+          {
+            line[x] = qRgb( 0, 0, 0 );
+            continue;
+          }
+          line[x] = qRgb( scaleToByte( values[idx], ranges[0] ),
+                          scaleToByte( values[plane + idx], ranges[1] ),
+                          scaleToByte( values[2 * plane + idx], ranges[2] ) );
+          continue;
+        }
         if ( isDisplayMissing( values[idx],
                                meta.bands.at( static_cast<std::size_t>( bands[0] ) - 1 ) ) )
         {
           line[x] = qRgb( 0, 0, 0 );
           continue;
         }
-        if ( bands.size() == 3 )
-        {
-          line[x] = qRgb( scaleToByte( values[idx], ranges[0] ),
-                          scaleToByte( values[plane + idx], ranges[1] ),
-                          scaleToByte( values[2 * plane + idx], ranges[2] ) );
-        }
-        else
-        {
-          const quint8 g = scaleToByte( values[idx], ranges[0] );
-          line[x] = qRgb( g, g, g );
-        }
+        const quint8 g = scaleToByte( values[idx], ranges[0] );
+        line[x] = qRgb( g, g, g );
       }
     }
     out.image = image;
@@ -281,17 +314,33 @@ QString AssetPreviewService::cacheKey( const Request &request )
 quint64 AssetPreviewService::requestPreview( const Request &request, QObject *receiver,
                                              std::function<void( const Result & )> callback )
 {
+  Request normalized = request;
+  normalized.path = QDir::fromNativeSeparators( normalized.path );
   const quint64 token = m_nextToken++;
+  if ( receiver == this )
+  {
+    // Self-referential requests behave as receiver-less: the supersede map
+    // would die with the service anyway, and registering it would make the
+    // delivery gate drop every result (found in review B-1).
+    receiver = nullptr;
+  }
   if ( receiver )
   {
-    connect( receiver, &QObject::destroyed, this, [this, receiver]()
-    { m_latestByReceiver.remove( receiver ); }, Qt::UniqueConnection );
+    // Receiver-liveness cleanup. Qt::UniqueConnection is intentionally NOT
+    // used — it is a no-op for lambdas; dedupe via the map instead (one
+    // destroyed-connection per receiver identity, established on the first
+    // request only).
+    if ( !m_latestByReceiver.contains( receiver ) )
+    {
+      connect( receiver, &QObject::destroyed, this, [this, receiver]()
+      { m_latestByReceiver.remove( receiver ); } );
+    }
     m_latestByReceiver[receiver] = token;
   }
 
   // Cache hit → deliver synchronously on the caller's thread (the receiver
   // lives on the caller's thread in every panel use).
-  const QString key = cacheKey( request );
+  const QString key = cacheKey( normalized );
   const auto cached = m_cache.constFind( key );
   if ( cached != m_cache.constEnd() )
   {
@@ -315,7 +364,7 @@ quint64 AssetPreviewService::requestPreview( const Request &request, QObject *re
   flight.receiver = receiver;
   flight.hadReceiver = receiver != nullptr;
   flight.callback = std::move( callback );
-  flight.request = request;
+  flight.request = normalized;
   m_inFlight[token] = std::move( flight );
   dispatch( token );
   return token;
@@ -326,7 +375,7 @@ void AssetPreviewService::dispatch( quint64 token )
   const auto it = m_inFlight.constFind( token );
   if ( it == m_inFlight.constEnd() )
     return;
-  const QString path = QDir::fromNativeSeparators( it->request.path );
+  const QString path = it->request.path;
   const QSize size = it->request.size;
   const Kind kind = it->request.kind;
 
@@ -406,11 +455,19 @@ void AssetPreviewService::onComputed( quint64 token, const PreviewRender &render
 
 void AssetPreviewService::cancel( quint64 token )
 {
-  // Only live tokens matter; the set self-bounds because onComputed removes
-  // entries. The wholesale clear mirrors RsScanPool's bound discipline.
-  if ( m_canceled.size() >= 1024 )
-    m_canceled.clear();
   m_canceled.insert( token );
+  if ( m_canceled.size() >= 1024 )
+  {
+    // Prune only tokens whose delivery already happened (not in flight) —
+    // a wholesale clear could resurrect a still-live canceled request.
+    for ( auto it = m_canceled.begin(); it != m_canceled.end(); )
+    {
+      if ( !m_inFlight.contains( *it ) )
+        it = m_canceled.erase( it );
+      else
+        ++it;
+    }
+  }
 }
 
 void AssetPreviewService::setCacheLimits( int maxEntries, qint64 maxBytes )

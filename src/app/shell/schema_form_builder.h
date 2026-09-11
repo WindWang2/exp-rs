@@ -39,6 +39,7 @@
 #pragma once
 
 #include <QWidget>
+#include <QPointer>
 #include <QStringList>
 #include <QList>
 #include <QVector>
@@ -260,7 +261,8 @@ class SchemaFormBuilder : public QWidget
     /// 4.0: schema properties in x-ui-order (stable name tiebreak).
     static QVector<QPair<QString, Json::Value>> orderedProperties( const Json::Value &objectProp );
     /// 4.0: recursive collection/writing helpers shared by values()/setValues().
-    void collectFields( const QVector<Field> &fields, Json::Value &out ) const;
+    void collectFields( const QVector<Field> &fields, const QStringList &required,
+                        Json::Value &out ) const;
     void applyFields( const QVector<Field> &fields, const Json::Value &params );
     void applyParameterHelp( Field &field, const QString &label );
     static FieldGroup classifyGroup( const QString &name, const Json::Value &prop );
@@ -270,6 +272,8 @@ class SchemaFormBuilder : public QWidget
     void refreshRasterCombos();
     void refreshComboChoices( FieldKind kind, const QStringList &ids,
                               const QStringList &names );
+    void refreshComboChoicesIn( QVector<Field> &fields, FieldKind kind,
+                                const QStringList &ids, const QStringList &names );
     /// 4.0: repopulate dynamic-enum combos from the provider (selection kept).
     void refreshEnumSources();
     QString readFieldValue( const Field &field ) const;
@@ -292,9 +296,22 @@ class SchemaFormBuilder : public QWidget
     // Signal suppression for setValues (recursive over nested children).
     static void setFieldsSignalsBlocked( QVector<Field> &fields, bool blocked );
     // Async x-ui-check machinery (bounded pool + generation cancellation).
+    // Delivery is widget-pointer based (QPointer target captured at schedule
+    // time): marks land on the exact editor even when array-item stored
+    // paths carry stale indices (review A9), and a destroyed editor drops
+    // its result.
+    struct CheckJob
+    {
+      QString path; // diagnostics only
+      QString check;
+      QString value;
+      QString canonicalTip;
+      QPointer<QWidget> target;
+    };
     void scheduleAsyncChecks();
-    void applyAsyncCheckResult( quint64 generation, const QString &path,
-                                const QString &check, bool ok );
+    void applyAsyncCheckResult( quint64 generation, const QPointer<QWidget> &target,
+                                const QString &check, bool ok,
+                                const QString &canonicalTip );
     static QStringList parseChecks( const Json::Value &prop );
 
     QVBoxLayout *m_root = nullptr;

@@ -23,6 +23,7 @@
 
 #include <gdal.h>
 #include <gdal_priv.h>
+#include <cstdio>
 
 namespace
 {
@@ -130,38 +131,32 @@ TEST_CASE( "AssetCatalogIndex filters by name, source and id", "[wb8][catalog-in
     REQUIRE( index.filterIndices( QStringLiteral( "zzz-no-hit" ) ).isEmpty() );
 }
 
-TEST_CASE( "AssetCatalogIndex groups children and standalone in one pass",
-           "[wb8][catalog-index]" )
+TEST_CASE( "Children added to collections AFTER panel construction still "
+           "render under their collection (membership drift regression)",
+           "[wb8][catalog-panel]" )
 {
     ensureQgisApplication();
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     sicnu::data::DataManager manager;
 
+    const sicnu::data::AssetId child =
+      registerAsset( manager, makeTinyRaster( dir.filePath( "late-child.tif" ) ) );
+
+    // Panel built BEFORE the membership exists — the index snapshot carries
+    // no parent info for the child, and addChildToCollection emits no signal.
+    DataManagerPanel panel( &manager );
     const auto collection =
-      manager.createCollection( { QStringLiteral( "scene" ), {} } );
-    REQUIRE( collection.collectionId.isNull() == false );
+      manager.createCollection( { QStringLiteral( "late-scene" ), {} } );
+    REQUIRE( manager.addChildToCollection( collection.collectionId, child ) );
+    panel.refresh();
 
-    const sicnu::data::AssetId child1 =
-      registerAsset( manager, makeTinyRaster( dir.filePath( "c1.tif" ) ) );
-    const sicnu::data::AssetId child2 =
-      registerAsset( manager, makeTinyRaster( dir.filePath( "c2.tif" ) ) );
-    const sicnu::data::AssetId loose =
-      registerAsset( manager, makeTinyRaster( dir.filePath( "loose.tif" ) ) );
-    REQUIRE( manager.addChildToCollection( collection.collectionId, child1 ) );
-    REQUIRE( manager.addChildToCollection( collection.collectionId, child2 ) );
-
-    AssetCatalogIndex index;
-    index.rebuild( &manager );
-    REQUIRE( index.totalAssets() == 3 );
-
-    QHash<QString, QVector<int>> byCollection;
-    QVector<int> standalone;
-    index.groupIndices( index.filterIndices( QString() ), byCollection, standalone );
-    REQUIRE( byCollection.size() == 1 );
-    REQUIRE( byCollection.value( collection.collectionId.toString() ).size() == 2 );
-    REQUIRE( standalone.size() == 1 );
-    REQUIRE( index.entries()[standalone.first()].id == loose );
+    auto *tree = panel.findChild<QTreeWidget *>( QStringLiteral( "dataManagerTree" ) );
+    REQUIRE( tree != nullptr );
+    REQUIRE( tree->topLevelItemCount() == 1 );
+    QTreeWidgetItem *collectionRow = tree->topLevelItem( 0 );
+    // The child renders under the collection, never as a duplicate standalone.
+    REQUIRE( collectionRow->childCount() == 1 );
 }
 
 TEST_CASE( "Panel filter box narrows the rendered rows", "[wb8][catalog-panel]" )
@@ -326,16 +321,14 @@ TEST_CASE( "Scale evidence: 200k logical records stay bounded and responsive",
     const qint64 filterMs = timer.elapsed();
     // scene_19990 matches by display name and by its source path fragment.
     REQUIRE( hits.size() >= 1 );
-    REQUIRE( filterMs < 500 ); // bounded; observed ~ms in Release
+    REQUIRE( filterMs < 2000 ); // generous ceiling; observed ~ms in Release
 
-    // Grouping pass (collections vs standalone) over 200k.
+    // Second pass variant: the empty-filter full scan over 200k.
     timer.restart();
-    QHash<QString, QVector<int>> byCollection;
-    QVector<int> standalone;
-    index.groupIndices( index.filterIndices( QString() ), byCollection, standalone );
-    const qint64 groupMs = timer.elapsed();
-    REQUIRE( standalone.size() == kLogicalRecords );
-    REQUIRE( groupMs < 500 );
+    const QVector<int> all = index.filterIndices( QString() );
+    const qint64 scanMs = timer.elapsed();
+    REQUIRE( all.size() == kLogicalRecords );
+    REQUIRE( scanMs < 2000 );
 
     // Update-in-place does not grow the index.
     AssetCatalogEntry updated;

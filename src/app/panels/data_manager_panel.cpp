@@ -623,9 +623,20 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
     connect( m_dataManager, &sicnu::data::DataManager::assetAboutToUnload, this,
              &DataManagerPanel::scheduleCoalescedRefresh );
     connect( m_dataManager, &sicnu::data::DataManager::collectionAdded, this,
-             &DataManagerPanel::scheduleCoalescedRefresh );
+             [this]( sicnu::data::CollectionId )
+             {
+               // Collection lifecycle events are rare: a full light rebuild
+               // heals any index drift (membership is read from the
+               // authoritative snapshots at render time regardless).
+               m_catalogIndex.rebuild( m_dataManager );
+               scheduleCoalescedRefresh();
+             } );
     connect( m_dataManager, &sicnu::data::DataManager::collectionRemoved, this,
-             &DataManagerPanel::scheduleCoalescedRefresh );
+             [this]( sicnu::data::CollectionId )
+             {
+               m_catalogIndex.rebuild( m_dataManager );
+               scheduleCoalescedRefresh();
+             } );
     connect( m_dataManager, &sicnu::data::DataManager::temporalCollectionAdded, this,
              &DataManagerPanel::scheduleCoalescedRefresh );
     connect( m_dataManager, &sicnu::data::DataManager::temporalCollectionChanged, this,
@@ -656,6 +667,9 @@ void DataManagerPanel::applyHelpTips()
 
 int DataManagerPanel::rowCount() const
 {
+  // Top-level rows INCLUDING the truncation sentinel (when rendered) —
+  // Workbench 8.0 caps standalone rows, so this count is a rendered-row
+  // count, never a catalog total (use the index / sentinel text for those).
   return m_tree->topLevelItemCount();
 }
 
@@ -835,20 +849,35 @@ void DataManagerPanel::populateCollectionChildren(
   if ( collectionItem->childCount() > 0 )
     return; // already populated
   const QString filter = m_filterEdit ? m_filterEdit->text() : QString();
-  const QVector<int> matching = m_catalogIndex.filterIndices( filter );
+  // Membership from the authoritative collection snapshot (review A2);
+  // per-child text filtering via the shared light-entry rule.
   int matchedInCollection = 0;
   int rendered = 0;
-  for ( const int idx : matching )
+  for ( const sicnu::data::AssetId &childId : collection.childAssetIds )
   {
-    const sicnu::AssetCatalogEntry &entry = m_catalogIndex.entries()[idx];
-    if ( !entry.parentCollectionId.has_value()
-         || !( *entry.parentCollectionId == collection.id ) )
+    const int idx = m_catalogIndex.indexOfAsset( childId );
+    const sicnu::AssetCatalogEntry *entry =
+      idx >= 0 ? &m_catalogIndex.entries()[idx] : nullptr;
+    if ( entry && !sicnu::AssetCatalogIndex::matchesFilter( *entry, filter ) )
       continue;
     ++matchedInCollection;
     if ( rendered >= m_standaloneRowCap )
       continue; // keep counting so the sentinel totals stay truthful
-    addIndexRow( collectionItem, entry );
-    ++rendered;
+    if ( entry )
+    {
+      addIndexRow( collectionItem, *entry );
+      ++rendered;
+    }
+    else
+    {
+      // Index lag (e.g. membership changed in the same burst) — fall back
+      // to the full snapshot path so the child never silently vanishes.
+      const std::optional<sicnu::data::AssetSnapshot> snapshot =
+        m_dataManager ? m_dataManager->asset( childId ) : std::nullopt;
+      if ( snapshot.has_value() )
+        addAssetRow( collectionItem, *snapshot );
+      ++rendered;
+    }
   }
   if ( matchedInCollection > rendered )
     addSentinelRow( collectionItem,
@@ -881,13 +910,6 @@ void DataManagerPanel::onItemExpanded( QTreeWidgetItem *item )
     m_dataManager->collection( *collectionId );
   if ( collection.has_value() )
     populateCollectionChildren( item, *collection );
-}
-
-void DataManagerPanel::onFilterChanged()
-{
-  // The textChanged connection coalesces via m_filterDebounce; this slot
-  // exists for programmatic filter changes (tests, restore).
-  m_filterDebounce->start();
 }
 
 void DataManagerPanel::refresh()
@@ -923,25 +945,52 @@ void DataManagerPanel::refresh()
     m_indexBuilt = true;
   }
 
-  // One filter pass, one grouping pass: O(assets) light comparisons, no
-  // snapshot copies. Heavy per-asset data stays a lazy DataManager query.
+  // One filter pass over light entries: O(assets) comparisons, no snapshot
+  // copies. Heavy per-asset data stays a lazy DataManager query.
   const QString filter = m_filterEdit ? m_filterEdit->text() : QString();
   const QVector<int> filtered = m_catalogIndex.filterIndices( filter );
-  QHash<QString, QVector<int>> childrenByCollection;
-  QVector<int> standalone;
-  m_catalogIndex.groupIndices( filtered, childrenByCollection, standalone );
   const bool filtering = !filter.trimmed().isEmpty();
 
+  // Collection membership comes from the AUTHORITATIVE collection snapshot
+  // (childAssetIds): DataManager::addChildToCollection emits no per-asset
+  // signal, so the index cannot mirror membership without drifting (A2).
+  // The index still carries membership-agnostic entry data (name/source/
+  // state) for filtering and standalone rendering.
+  QVector<sicnu::data::CollectionSnapshot> collectionSnapshots;
+  QSet<QString> collectionChildIds;
   for ( const sicnu::data::CollectionId &collectionId : m_dataManager->collections() )
   {
     const std::optional<sicnu::data::CollectionSnapshot> collection =
       m_dataManager->collection( collectionId );
     if ( !collection.has_value() )
       continue;
+    collectionSnapshots.append( *collection );
+    for ( const sicnu::data::AssetId &childId : collection->childAssetIds )
+      collectionChildIds.insert( childId.toString() );
+  }
 
-    const QVector<int> bucket = childrenByCollection.value( collection->id.toString() );
+  // Standalone = filtered entries the collections do NOT claim.
+  QVector<int> standalone;
+  for ( const int idx : filtered )
+  {
+    if ( !collectionChildIds.contains( m_catalogIndex.entries()[idx].id.toString() ) )
+      standalone.append( idx );
+  }
+
+  for ( const sicnu::data::CollectionSnapshot &collection : collectionSnapshots )
+  {
+    // Matching children by the SHARED filter rule over light entries.
+    QVector<int> bucket;
+    for ( const sicnu::data::AssetId &childId : collection.childAssetIds )
+    {
+      const int idx = m_catalogIndex.indexOfAsset( childId );
+      if ( idx >= 0
+           && sicnu::AssetCatalogIndex::matchesFilter(
+             m_catalogIndex.entries()[idx], filter ) )
+        bucket.append( idx );
+    }
     const bool nameMatches =
-      !filtering || collection->displayName.contains( filter.trimmed(), Qt::CaseInsensitive );
+      !filtering || collection.displayName.contains( filter.trimmed(), Qt::CaseInsensitive );
     // With an active filter a collection renders only when it (or a child)
     // matches — unmatched collections disappear instead of hiding matches.
     if ( filtering && !nameMatches && bucket.isEmpty() )
@@ -949,13 +998,13 @@ void DataManagerPanel::refresh()
 
     auto *collectionItem = new QTreeWidgetItem( m_tree );
     configureNameCell( collectionItem,
-                       collection->displayName,
+                       collection.displayName,
                        tr( "集合" ),
                        appIcon( "d_t_b_se" ),
                        tr( "集合" ),
                        QColor( 0x09, 0x69, 0xda ) ); // blue stripe for collections
-    collectionItem->setText( 2, QString::number( collection->childAssetIds.size() ) );
-    collectionItem->setData( 0, kCollectionIdRole, collection->id.toString() );
+    collectionItem->setText( 2, QString::number( collection.childAssetIds.size() ) );
+    collectionItem->setData( 0, kCollectionIdRole, collection.id.toString() );
 
     // Lazy detail loading: huge collections (temporal scene catalogs with
     // 100k+ children) populate on first expand; small ones populate now so
@@ -967,9 +1016,9 @@ void DataManagerPanel::refresh()
       // user or the expansion restore below) triggers the populate.
       collectionItem->setChildIndicatorPolicy( QTreeWidgetItem::ShowIndicator );
       collectionItem->setData( 0, kLazyPopulateRole, true );
-      if ( expandedCollections.contains( collection->id.toString() ) )
+      if ( expandedCollections.contains( collection.id.toString() ) )
       {
-        populateCollectionChildren( collectionItem, *collection );
+        populateCollectionChildren( collectionItem, collection );
         collectionItem->setExpanded( true );
       }
     }
@@ -1432,6 +1481,8 @@ void DataManagerPanel::showAssetDetails( const sicnu::data::AssetSnapshot &snaps
 void DataManagerPanel::showMultiSelectionDetails(
   const QList<sicnu::data::AssetId> &ids )
 {
+  if ( m_previewLabel )
+    m_previewLabel->hide(); // previews are per-asset only (review A11)
   if ( m_detailTitle )
     m_detailTitle->setText( tr( "多选 — %1 项" ).arg( ids.size() ) );
 
@@ -1482,6 +1533,8 @@ void DataManagerPanel::showMultiSelectionDetails(
 void DataManagerPanel::showCollectionDetails(
   const sicnu::data::CollectionSnapshot &collection )
 {
+  if ( m_previewLabel )
+    m_previewLabel->hide(); // previews are per-asset only (review A11)
   if ( m_detailTitle )
     m_detailTitle->setText( tr( "集合元信息 — %1" ).arg( collection.displayName ) );
 
@@ -1572,6 +1625,7 @@ void DataManagerPanel::requestDetailPreview( const sicnu::data::AssetSnapshot &s
   m_previewLabel->show();
   m_previewLabel->setText( tr( "预览加载中…" ) );
   m_previewLabel->setPixmap( QPixmap() );
+  m_previewSource = source;
 
   sicnu::app::AssetPreviewService::Request request;
   request.path = source;
@@ -1582,9 +1636,13 @@ void DataManagerPanel::requestDetailPreview( const sicnu::data::AssetSnapshot &s
   m_previewService->requestPreview(
     request, this, [this]( const sicnu::app::AssetPreviewService::Result &result )
     {
-      // The service guarantees "latest request wins", so this callback is
-      // always for the currently selected asset.
-      if ( !m_previewLabel )
+      // The service guarantees "latest request wins" for THIS panel, but a
+      // collection/multi-selection detour hides the pane without issuing a
+      // superseding request — verify the result still belongs to what the
+      // pane currently shows (review A11).
+      if ( !m_previewLabel || m_previewLabel->isHidden() )
+        return;
+      if ( result.path != m_previewSource )
         return;
       if ( result.status == sicnu::app::PreviewRender::Status::Ready
            && !result.image.isNull() )

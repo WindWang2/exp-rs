@@ -220,6 +220,11 @@ TEST_CASE( "Optional nested groups count as absent while untouched",
     // required inside the group.
     REQUIRE_FALSE( form.hasErrors() );
 
+    // And the untouched group is ABSENT from values() — an emitted empty or
+    // defaulted object would be indistinguishable from a configured one
+    // (values() and validate() agree on the absence rule).
+    REQUIRE_FALSE( form.values().isMember( "advanced" ) );
+
     // Touching the group (filling the child) activates the child's
     // requiredness — which is now satisfied, so still no error.
     Json::Value v;
@@ -578,6 +583,34 @@ TEST_CASE( "Accessibility: nested editors carry schema labels and descriptions",
     REQUIRE( field != nullptr );
     REQUIRE( field->accessibleName() == QStringLiteral( "字段" ) );
     REQUIRE( field->accessibleDescription().contains( QStringLiteral( "字段的说明" ) ) );
+}
+
+TEST_CASE( "Nested layer combos receive pushed choices like top-level fields",
+           "[wb8][schema-form4]" )
+{
+    testApp();
+    const Json::Value schema = parseSchema( R"({
+      "type": "object",
+      "properties": {
+        "grp": { "type": "object", "properties": {
+          "raster": { "type": "string", "x-ui-type": "raster" } } }
+      }
+    })" );
+
+    SchemaFormBuilder form;
+    form.rebuild( schema );
+    form.setRasterLayerChoices( { QStringLiteral( "lyr-1" ) },
+                                { QStringLiteral( "影像 A" ) } );
+
+    QComboBox *nested = nullptr;
+    for ( QComboBox *c : form.findChildren<QComboBox *>() )
+    {
+        if ( c->accessibleName() == QLatin1String( "raster" ) )
+            nested = c;
+    }
+    REQUIRE( nested != nullptr );
+    REQUIRE( nested->count() == 1 );
+    REQUIRE( nested->itemData( 0 ).toString() == "lyr-1" );
 }
 
 TEST_CASE( "Deeply nested object schemas degrade to the JSON editor",

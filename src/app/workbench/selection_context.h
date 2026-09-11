@@ -114,9 +114,11 @@ QString unavailabilityReason( const SelectionContextSnapshot &s, const QString &
 
 /// Workbench 8.0: deterministic "what should I do next" projection — a
 /// stable command id (empty when nothing applies) plus human text. Priority
-/// order: broken source → active edit session → selected raster → selected
-/// vector → selected governed asset → selected result → in-flight task →
-/// empty workspace. Pure; fully unit-testable.
+/// order: active edit session → selected raster → selected editable vector
+/// → temporal data → in-flight task → empty workspace. Only registered
+/// shell commands are suggested; broken-layer and governance-selection
+/// facts stay in ContextFacts (no relocate/open commands exist in the
+/// registry yet). Pure; fully unit-testable.
 struct NextAction
 {
     QString commandId; ///< registry command id ("run.processing"); empty = none
