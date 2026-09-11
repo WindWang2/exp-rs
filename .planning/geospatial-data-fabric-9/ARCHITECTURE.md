@@ -29,8 +29,11 @@ src/geospatial/
   non-finite float-overflowing values with ErrorCode::FidelityLoss (same
   doctrine as the integer gate).
 - atomic_fs::publishStagedFile: POSIX path fsyncs the target directory after
-  rename (best-effort; failure to fsync the dir is surfaced as a typed error
-  only when the fs itself rejects it, not on unsupported fs).
+  rename — best-effort and silent by design: several legitimate filesystems
+  (network/FUSE) reject directory fsync with EINVAL, and failing the publish
+  there would trade a real capability for a durability nicety. The
+  file-content fsync remains the correctness gate; this narrows the crash
+  window for the directory entry.
 
 ### M1 — identity
 `localIdentityToken(path, opts)` → basis = canonical path + size + mtime_ns +
