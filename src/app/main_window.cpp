@@ -8,6 +8,7 @@
 #include "app_paths.h"
 #include "qgis_app_facade.h"
 #include "widgets/rs_empty_state_widget.h"
+#include "workbench/workbench_state.h"
 #include <QStackedWidget>
 
 #ifdef SICNU_EMBED_PYTHON
@@ -464,15 +465,21 @@ void QgisDesktopWindow::setupMapCanvas()
 
 void QgisDesktopWindow::updateCanvasEmptyState()
 {
-    const bool hasLayers = m_mapCanvas && !m_mapCanvas->layers().isEmpty();
+    // Workbench 9.0 M1: project from the shared state model (page 0 =
+    // welcome/empty, page 1 = canvas) instead of probing the canvas here.
+    const int page = m_workbenchState
+                         ? sicnu::app::WorkbenchRules::canvasStackPage( m_workbenchState->phase() )
+                         : ( m_mapCanvas && !m_mapCanvas->layers().isEmpty() ? 1 : 0 );
     if ( m_canvasStack )
-        m_canvasStack->setCurrentIndex( hasLayers ? 1 : 0 );
+        m_canvasStack->setCurrentIndex( page );
 }
 
 void QgisDesktopWindow::updateLayersEmptyState()
 {
-    const bool hasLayers = m_mapCanvas && !m_mapCanvas->layers().isEmpty();
+    const int page = m_workbenchState
+                         ? sicnu::app::WorkbenchRules::canvasStackPage( m_workbenchState->phase() )
+                         : ( m_mapCanvas && !m_mapCanvas->layers().isEmpty() ? 1 : 0 );
     if ( m_layersStack )
-        m_layersStack->setCurrentIndex( hasLayers ? 0 : 1 );
+        m_layersStack->setCurrentIndex( page == 1 ? 0 : 1 );
 }
 

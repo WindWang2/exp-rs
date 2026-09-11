@@ -121,6 +121,7 @@ add_executable(sicnu_geo_rs
     workbench/workbench_host.cpp
     workbench/adapters.cpp
     workbench/selection_context.cpp
+    workbench/workbench_state.cpp
     workbench/command_registry.cpp
     workbench/command_defs.cpp
     workbench/command_palette.cpp
