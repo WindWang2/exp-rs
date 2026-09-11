@@ -72,6 +72,11 @@ struct TileInferenceStats
   /// engine actually verified about each feed's grid before inference.
   /// Truthful — fields stay empty when the raster does not declare them.
   std::vector<GridProvenance> inputGrids;
+  /// Platform 9.0 (M6): per-class pixel counts of Labels/Mask products
+  /// (PRODUCT classes, after the remap), index = product class id. Empty
+  /// for probability/confidence products. Computed during the final
+  /// streaming pass — O(classes) memory, never a second raster read.
+  std::vector<long long> classPixelCounts;
 };
 
 /// Raster-task output mode (Platform 4.0, manifest `output.format`).

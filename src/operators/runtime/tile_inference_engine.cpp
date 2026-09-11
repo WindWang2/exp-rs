@@ -275,6 +275,21 @@ Json::Value buildProvenanceDocument( const ModelInfo &model, const ModelRuntimeP
     heads.append( channels );
   if ( !stats.headChannels.empty() )
     output["head_channels"] = heads;
+  // Platform 9.0 (M6): per-product-class pixel metadata for Labels/Mask.
+  if ( !stats.classPixelCounts.empty() )
+  {
+    Json::Value counts( Json::arrayValue );
+    for ( long long pixels : stats.classPixelCounts )
+      counts.append( static_cast<Json::Int64>( pixels ) );
+    output["class_pixel_counts"] = counts;
+    if ( !model.output.classes.empty() )
+    {
+      Json::Value names( Json::arrayValue );
+      for ( const std::string &cls : model.output.classes )
+        names.append( cls );
+      output["classes"] = names;
+    }
+  }
   prov["output"] = output;
 
   prov["created_utc"] =
@@ -643,13 +658,21 @@ class FeatherAccumulator
                                          ? m_classMapping[static_cast<std::size_t>( best )]
                                          : best;
               outRow[x] = static_cast<float>( productClass );
+              if ( m_classTally && productClass >= 0
+                   && static_cast<std::size_t>( productClass ) < m_classTally->size() )
+                ( *m_classTally )[static_cast<std::size_t>( productClass )]++;
               break;
             }
             case RasterOutputMode::Mask:
-              outRow[x] = ( classes == 1 )
-                            ? ( bestv >= m_maskThreshold ? 1.0f : 0.0f )
-                            : ( best != 0 ? 1.0f : 0.0f );
+            {
+              const float maskValue = ( classes == 1 )
+                                        ? ( bestv >= m_maskThreshold ? 1.0f : 0.0f )
+                                        : ( best != 0 ? 1.0f : 0.0f );
+              outRow[x] = maskValue;
+              if ( m_classTally && static_cast<std::size_t>( maskValue ) < m_classTally->size() )
+                ( *m_classTally )[static_cast<std::size_t>( maskValue )]++;
               break;
+            }
             case RasterOutputMode::Confidence:
               outRow[x] = bestv;
               break;
@@ -692,11 +715,15 @@ class FeatherAccumulator
     std::vector<int> m_classMapping;
     float m_writeNoData = std::numeric_limits<float>::quiet_NaN();
     int m_classCount = 0; // derived modes: how many of the slots are head-0 classes
+    std::vector<long long> *m_classTally = nullptr; // Platform 9.0 (M6), optional
 
   public:
     /// Declared by the engine after construction: how many of the slots are
     /// CLASS planes of head 0 (derived modes), enabling the blended collapse.
     void setClassCount( int classes ) { m_classCount = classes; }
+    /// Platform 9.0 (M6): shared per-product-class tally (engine-owned,
+    /// lives for the whole run).
+    void setClassTally( std::vector<long long> *tally ) { m_classTally = tally; }
 };
 
 TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
@@ -1203,6 +1230,19 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       stats.headChannels = headChannelList;
       if ( uncertaintyHeadIndex >= 0 )
         stats.headChannels[static_cast<std::size_t>( uncertaintyHeadIndex )] += 1;
+      // Platform 9.0 (M6): per-class product metadata for Labels/Mask.
+      if ( mode == RasterOutputMode::Labels || mode == RasterOutputMode::Mask )
+      {
+        // Labels: PRODUCT classes after the remap; Mask: the {0,1} domain.
+        int productClasses = 2;
+        if ( mode == RasterOutputMode::Labels )
+          productClasses = m_model.postprocess.classMapping.empty()
+            ? static_cast<int>( m_model.output.classes.size() )
+            : 1 + *std::max_element( m_model.postprocess.classMapping.begin(),
+                                     m_model.postprocess.classMapping.end() );
+        stats.classPixelCounts.assign(
+          static_cast<std::size_t>( std::max( 1, productClasses ) ), 0 );
+      }
       // Platform 9.0 (M5): with feather blending the accumulator owns ALL
       // output writing — one slot per Probability band, or the head-0 class
       // slots (+ optional blended uncertainty slot) for derived modes.
@@ -1222,6 +1262,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
             static_cast<float>( m_model.postprocess.maskThreshold ),
             m_model.postprocess.classMapping, writeNoData );
           accumulator->setClassCount( head0Classes );
+          accumulator->setClassTally( &stats.classPixelCounts );
         }
       }
       // Record the head layout so downstream consumers can split the stack.
@@ -1469,14 +1510,22 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
               switch ( mode )
               {
                 case RasterOutputMode::Labels:
+                {
                   // Platform 8.0 WP-E: declared product-class remap (model
                   // class → product class). Guarded below so an arity
                   // mismatch refuses loudly instead of indexing OOB.
-                  outRow[col] = static_cast<float>(
+                  const int productClass =
                     m_model.postprocess.classMapping.empty()
                       ? best
-                      : m_model.postprocess.classMapping[static_cast<std::size_t>( best )] );
+                      : m_model.postprocess.classMapping[static_cast<std::size_t>( best )];
+                  outRow[col] = static_cast<float>( productClass );
+                  // Platform 9.0 (M6): per-product-class pixel tally.
+                  if ( productClass >= 0
+                       && static_cast<std::size_t>( productClass )
+                            < stats.classPixelCounts.size() )
+                    stats.classPixelCounts[static_cast<std::size_t>( productClass )]++;
                   break;
+                }
                 case RasterOutputMode::Confidence:
                   outRow[col] = bestv;
                   break;

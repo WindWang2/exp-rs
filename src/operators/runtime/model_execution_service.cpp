@@ -314,6 +314,21 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
   }
   if ( result.rasterStats.batchReductions > 0 )
     payload["batchReductions"] = result.rasterStats.batchReductions;
+  // Platform 9.0 (M6): per-product-class metadata for Labels/Mask products.
+  if ( !result.rasterStats.classPixelCounts.empty() )
+  {
+    Json::Value counts( Json::arrayValue );
+    for ( long long pixels : result.rasterStats.classPixelCounts )
+      counts.append( static_cast<Json::Int64>( pixels ) );
+    payload["classPixelCounts"] = counts;
+    if ( request.outputMode == RasterOutputMode::Labels && !model.output.classes.empty() )
+    {
+      Json::Value names( Json::arrayValue );
+      for ( const std::string &cls : model.output.classes )
+        names.append( cls );
+      payload["classes"] = names;
+    }
+  }
   // Platform 8.0 grid provenance: what was verified about each fed input
   // (co-registration verdicts, CRS, pre-alignment origins). Consumers and
   // the .prov.json sidecar tell the same story.

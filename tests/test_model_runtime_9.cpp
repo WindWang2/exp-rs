@@ -942,3 +942,76 @@ TEST_CASE( "M4: a rank-5 model output is a typed refusal on the raster lane",
                          context, {} ),
                        Catch::Matchers::ContainsSubstring( "rank-4" ) );
 }
+
+// ---------------------------------------------------------------------------
+// M6: per-class product metadata
+// ---------------------------------------------------------------------------
+
+/// Two-class one-hot fake: the input raster's own values (10 / 20) select
+/// the class plane, so the product splits exactly at the value boundary.
+class TwoClassRuntime final : public IModelRuntime
+{
+  public:
+    std::string framework() const override { return "m9-fake"; }
+    std::string backendName() const override { return "m9two"; }
+    std::string deviceName() const override { return "cpu"; }
+    std::string artifactPath() const override { return "fake://m9two"; }
+
+    cv::Mat infer( const cv::Mat &blob ) override
+    {
+      const int B = blob.size[0];
+      const int H = blob.size[2];
+      const int W = blob.size[3];
+      const int dims[4] = { B, 2, H, W };
+      cv::Mat out( 4, dims, CV_32F, cv::Scalar( 0.0f ) );
+      for ( int y = 0; y < H; ++y )
+        for ( int x = 0; x < W; ++x )
+        {
+          const float v = blob.ptr<float>( 0 )[static_cast<std::size_t>( y ) * W + x];
+          const int cls = v > 15.0f ? 1 : 0;
+          out.ptr<float>( 0, cls )[static_cast<std::size_t>( y ) * W + x] = 1.0f;
+        }
+      return out;
+    }
+
+    std::vector<NamedTensor> inferNamed( const std::vector<NamedTensor> &inputs,
+                                         const std::vector<std::string> &outputNames ) override
+    {
+      ( void )outputNames;
+      const cv::Mat mat = inputs.front().second.toMat();
+      return { NamedTensor{ std::string(), TensorBlob::fromMat( infer( mat ) ) } };
+    }
+};
+
+TEST_CASE( "M6: labels products tally per-product-class pixels into payload metadata",
+           "[model9][m6][classes]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  // Left half class 0, right half class 1 → a 50/50 labels product.
+  sicnu::testing::RsSyntheticRasterBuilder builder( 16, 16, 1, GDT_Float32 );
+  builder.withRect( 1, 0, 0, 8, 16, 10.0f );  // exclusive x1/y1: left half
+  builder.withRect( 1, 8, 0, 16, 16, 20.0f ); // right half
+  const QString raster = builder.writeToDisk( dir.filePath( QStringLiteral( "two.tif" ) ) );
+  REQUIRE_FALSE( raster.isEmpty() );
+
+  auto runtime = std::make_shared<TwoClassRuntime>();
+  ModelInfo model;
+  model.name = "m9-classes";
+  model.framework = "m9-fake";
+  model.task = "segmentation";
+  model.tiling.tileSize = 16;
+  model.output.classes = { "left", "right" };
+
+  TileInferenceEngine engine( model, runtime );
+  RSOperatorContext context;
+  TileInferenceRunOptions options;
+  options.outputMode = RasterOutputMode::Labels;
+  const TileInferenceStats stats = engine.run(
+    raster.toStdString(), {}, dir.filePath( QStringLiteral( "labels.tif" ) ).toStdString(),
+    context, options );
+
+  REQUIRE( stats.classPixelCounts.size() == 2 );
+  CHECK( stats.classPixelCounts[0] == 8 * 16 );
+  CHECK( stats.classPixelCounts[1] == 8 * 16 );
+}
