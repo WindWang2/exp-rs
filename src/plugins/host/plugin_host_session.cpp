@@ -71,6 +71,8 @@ bool ConcurrencyGate::acquire( int timeoutMs )
         {
             mWaiters.pop_front();
             ++mActive;
+            if ( mActive > mPeakActive )
+                mPeakActive = mActive;
             return true;
         }
         if ( mWaiters.front() != ticket )
@@ -96,6 +98,18 @@ void ConcurrencyGate::release()
     std::lock_guard<std::mutex> lock( mMutex );
     --mActive;
     mCv.notify_all();
+}
+
+int ConcurrencyGate::waiting() const
+{
+    std::lock_guard<std::mutex> lock( mMutex );
+    return static_cast<int>( mWaiters.size() );
+}
+
+int ConcurrencyGate::peakActive() const
+{
+    std::lock_guard<std::mutex> lock( mMutex );
+    return mPeakActive;
 }
 
 PluginHostProcessSession::~PluginHostProcessSession()
@@ -374,6 +388,7 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
     ::close( workerToHost[ 1 ] );
     mProcessHandle = reinterpret_cast<void *>( static_cast<intptr_t>( pid ) );
     mProcessGroupId = static_cast<long long>( pid );
+    mLastKnownGroup = mProcessGroupId;
     mProcessAlive = true;
     mChannel = std::make_unique<IpcChannel>(
         makeIpcHandleStream( reinterpret_cast<void *>( workerToHost[ 0 ] ),
@@ -480,6 +495,48 @@ int PluginHostProcessSession::effectiveConcurrency() const
 {
     std::lock_guard<std::mutex> stateLock( mStateMutex );
     return std::min( mOptions.quota.maxRequestConcurrency, mWorkerMaxConcurrent );
+}
+
+int PluginHostProcessSession::inFlight() const
+{
+    std::lock_guard<std::mutex> stateLock( mStateMutex );
+    return mInFlight;
+}
+
+int PluginHostProcessSession::peakInFlight() const
+{
+    std::lock_guard<std::mutex> stateLock( mStateMutex );
+    return mPeakInFlight;
+}
+
+std::string PluginHostProcessSession::processGroupState() const
+{
+#ifdef _WIN32
+    return "unknown"; // job-object teardown is enforced by the kernel; the
+                      // POSIX group probe has no Windows equivalent here
+#else
+    const long long group = mLastKnownGroup;
+    if ( group <= 0 )
+        return "unknown";
+    // Signal 0 probe on the NEGATED group id: delivery succeeds while any
+    // member lives, ESRCH proves the group is empty. EPERM cannot decide.
+    if ( ::kill( static_cast<pid_t>( -group ), 0 ) == 0 )
+        return "yes";
+    return errno == ESRCH ? "no" : "unknown";
+#endif
+}
+
+void PluginHostProcessSession::recordLastFailure( const IpcChannel::Outcome &outcome )
+{
+    if ( outcome.status == IpcChannel::Outcome::Status::Ok )
+        return;
+    Json::Value failure( Json::objectValue );
+    failure["status"] = outcome.statusCode();
+    failure["code"] = outcome.error.code;
+    failure["message"] = outcome.error.message;
+    failure["retryable"] = outcome.error.retryable;
+    std::lock_guard<std::mutex> lock( mFailureMutex );
+    mLastFailure = std::move( failure );
 }
 
 void PluginHostProcessSession::killProcess( const char *reason )
@@ -634,10 +691,13 @@ IpcChannel::Outcome PluginHostProcessSession::request(
     {
         std::lock_guard<std::mutex> stateLock( mStateMutex );
         ++mInFlight;
+        if ( mInFlight > mPeakInFlight )
+            mPeakInFlight = mInFlight;
     }
 
     IpcChannel::Outcome outcome;
     outcome = mChannel->request( method, params, effectiveDeadline, cancelPredicate, progressSink );
+    recordLastFailure( outcome );
 
     if ( outcome.status == IpcChannel::Outcome::Status::Timeout )
     {
@@ -719,6 +779,7 @@ IpcChannel::Outcome PluginHostProcessSession::requestRaw(
     // the wait with ChannelClosed; a hung process is handled by the ladder.
     IpcChannel::Outcome outcome =
         mChannel->request( method, params, deadlineMs, cancelPredicate, progressSink );
+    recordLastFailure( outcome );
 
     if ( outcome.status == IpcChannel::Outcome::Status::Timeout )
     {

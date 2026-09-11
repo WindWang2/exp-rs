@@ -18,6 +18,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <future>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -693,3 +694,100 @@ TEST_CASE( "declarative UI survives the crash-recovery sequence", "[hostprocess]
 
     REQUIRE( registry.unload( kPluginId ) );
 }
+
+// -- plugin-platform 9.0: M2 concurrency stress --------------------------------
+
+namespace {
+/// Runs one caller on an async future so the test can BOUND the wait: a
+/// caller that never finishes fails the wait_for (deadlock evidence), it
+/// cannot hang the suite.
+std::future<Json::Value> callAsync( Stack &stack, const char *operatorId, Json::Value params )
+{
+    return std::async( std::launch::async, [&stack, operatorId, params]() {
+        return runOperator( stack, operatorId, params );
+    } );
+}
+} // namespace
+
+TEST_CASE( "interleaved timeout, crash and cancel keep every caller typed",
+           "[hostprocess][stress][p12]" )
+{
+    // 3 rounds of 7 concurrent callers with deliberately colliding fates
+    // (2 hang past the deadline, 2 crash the worker, 3 quick echoes).
+    // Deterministic assertions:
+    //   1. every caller terminates with a typed envelope (success or
+    //      __operatorError) inside a generous wall budget;
+    //   2. the session is consistent at quiesce (inFlight back to 0);
+    //   3. unload at the end succeeds (barrier close, no leaked lease).
+    Stack stack( 3000, 1000 );
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    for ( int round = 0; round < 3; ++round )
+    {
+        constexpr int kCallers = 7;
+        constexpr auto kWallBudget = std::chrono::seconds( 45 );
+        std::vector<std::future<Json::Value>> callers;
+        callers.reserve( kCallers );
+        for ( int i = 0; i < kCallers; ++i )
+        {
+            const int role = i % 4; // 0,1 slow (timeout); 2 crash; 3 echo
+            Json::Value params;
+            if ( role == 0 || role == 1 )
+                params["ms"] = 8000; // far past the 3 s ceiling
+            const char *op = ( role == 0 || role == 1 ) ? "test:iso-slow"
+                             : ( role == 2 )            ? "test:iso-crash"
+                                                        : "test:iso-echo";
+            callers.push_back( callAsync( stack, op, params ) );
+        }
+
+        for ( int i = 0; i < kCallers; ++i )
+        {
+            REQUIRE( callers[ i ].wait_for( kWallBudget ) == std::future_status::ready );
+            const Json::Value result = callers[ i ].get();
+            const bool typed = result[ "success" ].asBool() || result[ "__operatorError" ].asBool();
+            INFO( "round " << round << " caller " << i << ": "
+                           << Json::writeString( Json::StreamWriterBuilder(), result ) );
+            REQUIRE( typed );
+        }
+
+        // Quiesce: in-flight drained on the CURRENT session (any generation).
+        const Json::Value snapshot = stack.runtime->diagnosticsSnapshot();
+        if ( snapshot["plugins"].isMember( kPluginId ) )
+        {
+            INFO( "snapshot: " << Json::writeString( Json::StreamWriterBuilder(), snapshot ) );
+            REQUIRE( snapshot["plugins"][ kPluginId ]["inFlight"].asInt() == 0 );
+        }
+    }
+
+    // Clean teardown after the storm.
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+// -- plugin-platform 9.0: M3 orphan detection ----------------------------------
+
+#ifndef _WIN32
+TEST_CASE( "processGroupState gives honest group evidence across the lifecycle",
+           "[hostprocess][orphans][p12]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // Live worker: its process group HAS a member (the worker itself).
+    Json::Value snapshot = stack.runtime->diagnosticsSnapshot();
+    REQUIRE( snapshot["plugins"][ kPluginId ]["processGroupState"].asString() == "yes" );
+
+    // After a clean unload the group must be GONE — recorded as evidence in
+    // the retiredGroups trail (kill(-pgid, 0) answered ESRCH).
+    REQUIRE( registry.unload( kPluginId ) );
+    snapshot = stack.runtime->diagnosticsSnapshot();
+    REQUIRE( snapshot["retiredGroups"].isMember( kPluginId ) );
+    const std::string state = snapshot["retiredGroups"][ kPluginId ].asString();
+    // EPERM containers report "unknown" honestly; a false "yes" would be
+    // a lie and a "no" without ESRCH evidence impossible.
+    REQUIRE( ( state == "no" || state == "unknown" ) );
+    if ( state == "unknown" )
+        WARN( "process-group probe could not decide (EPERM?); honest unknown recorded" );
+}
+#endif

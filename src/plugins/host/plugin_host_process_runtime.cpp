@@ -313,7 +313,17 @@ bool PluginHostProcessRuntime::unloadPlugin( const std::string &pluginId,
         session = iterator->second->session;
         mSessions.erase( iterator );
     }
-    return session->shutdown( 10000, log );
+    const bool shutdownOk = session->shutdown( 10000, log );
+    // M3 evidence trail: keep the post-shutdown process-group probe result
+    // ("no" = group fully reaped, "unknown" = probe could not decide) so
+    // doctor/debug-bundle can show cleanup evidence AFTER the session is
+    // gone. Recorded for both shutdown outcomes — a forced kill must still
+    // prove (or honestly decline to claim) group cleanup.
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        mRetiredGroups[ pluginId ] = session->processGroupState();
+    }
+    return shutdownOk;
 }
 
 Json::Value PluginHostProcessRuntime::diagnosticsSnapshot() const
@@ -322,6 +332,14 @@ Json::Value PluginHostProcessRuntime::diagnosticsSnapshot() const
     Json::Value snapshot( Json::objectValue );
     snapshot["protocolVersion"] = EXP_RS_HOST_PROTOCOL_VERSION;
     snapshot["workerPath"] = mOptions.workerPath;
+    snapshot["restartPolicy"] = [this] {
+        Json::Value policy( Json::objectValue );
+        policy["maxRestarts"] = mOptions.maxRestarts;
+        policy["windowMs"] = static_cast<Json::Int64>( mOptions.restartWindowMs );
+        policy["restartCount"] = mRestartCount;
+        policy["windowArmed"] = mRestartWindowArmed;
+        return policy;
+    }();
     Json::Value plugins( Json::objectValue );
     for ( const auto &[ pluginId, entry ] : mSessions )
     {
@@ -330,10 +348,21 @@ Json::Value PluginHostProcessRuntime::diagnosticsSnapshot() const
         entryJson["generation"] = entry->session->generation();
         entryJson["poisoned"] = entry->session->isPoisoned();
         entryJson["effectiveConcurrency"] = entry->session->effectiveConcurrency();
+        // M2 observability: in-flight / peak / gate waiters / typed failure.
+        entryJson["inFlight"] = entry->session->inFlight();
+        entryJson["peakInFlight"] = entry->session->peakInFlight();
+        entryJson["gateWaiters"] = entry->session->gateWaiters();
+        entryJson["lastFailure"] = entry->session->lastFailure();
+        // M3 orphan detection: honest group state ("yes"/"no"/"unknown").
+        entryJson["processGroupState"] = entry->session->processGroupState();
         entryJson["quota"] = entry->quota.toJson();
         plugins[ pluginId ] = entryJson;
     }
     snapshot["plugins"] = plugins;
+    Json::Value retired( Json::objectValue );
+    for ( const auto &[ pluginId, state ] : mRetiredGroups )
+        retired[ pluginId ] = state;
+    snapshot["retiredGroups"] = retired;
     return snapshot;
 }
 

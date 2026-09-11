@@ -63,12 +63,18 @@ public:
     /// Releases one slot (wakes the next waiter in order).
     void release();
 
+    /// Callers currently waiting for a slot (observability, M2).
+    int waiting() const;
+    /// Peak concurrently-active slots since construction (monotonic).
+    int peakActive() const;
+
 private:
     mutable std::mutex mMutex;
     std::condition_variable mCv;
     std::deque<unsigned long long> mWaiters;   ///< FIFO tickets
     int mSlots;
     int mActive = 0;
+    int mPeakActive = 0;
     unsigned long long mNextTicket = 1;
 };
 
@@ -130,6 +136,26 @@ public:
     /// hello maxConcurrentRequests) — diagnostic surface.
     int effectiveConcurrency() const;
     unsigned generation() const { return mGeneration; }
+    /// Observability (M2): in-flight requests, monotonic peak, gate waiters.
+    int inFlight() const;
+    int peakInFlight() const;
+    int gateWaiters() const { return mGate.waiting(); }
+    /// Typed last failure ("", code, message): the most recent non-Ok
+    /// outcome this session produced, for doctor/debug-bundle surfaces.
+    Json::Value lastFailure() const
+    {
+        std::lock_guard<std::mutex> lock( mFailureMutex );
+        return mLastFailure;
+    }
+    /// Records one outcome as the typed last failure (no-op for Ok). Used by
+    /// the request paths; public so test harnesses can annotate too.
+    void recordLastFailure( const exprs::IpcChannel::Outcome &outcome );
+    /// Orphan detection (M3): "yes" when the worker's process group still
+    /// has members (alive worker, or worker-spawned survivors), "no" when
+    /// the group is fully reaped, "unknown" when the probe cannot decide
+    /// (EPERM, Windows, no group). FAILS HONEST: never claims clean without
+    /// evidence.
+    std::string processGroupState() const;
     /// True when the worker advertised protocol 1.2 "directionalFrameCaps"
     /// in its hello features (the host then applies per-direction caps after
     /// plugin.load; a 1.1 worker keeps exact 1.1 shared-cap semantics).
@@ -174,14 +200,21 @@ private:
     // the channel or waiting on the channel's own locks).
     mutable std::mutex mStateMutex;
     int mInFlight = 0;
+    int mPeakInFlight = 0;
     bool mPoisoned = false;
     int mWorkerMaxConcurrent = 1;   ///< from worker.hello (protocol 1.1)
     bool mPeerDirectionalCaps = false;  ///< hello features, protocol 1.2
+
+    // Typed last failure (own mutex: written on every request path).
+    mutable std::mutex mFailureMutex;
+    Json::Value mLastFailure;
 
     // OS process plumbing (platform handles owned here).
     void *mProcessHandle = nullptr;   ///< Windows: HANDLE; POSIX: pid as void*
     void *mJobHandle = nullptr;       ///< Windows: job object
     long long mProcessGroupId = -1;   ///< POSIX: worker process group (-pid)
+    long long mLastKnownGroup = -1;   ///< POSIX: group id retained after death
+                                      ///< (orphan probe, M3)
 
     std::atomic<bool> mProcessAlive{ false };
     std::atomic<unsigned> mGeneration{ 1 };

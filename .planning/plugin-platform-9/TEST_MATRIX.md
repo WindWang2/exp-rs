@@ -53,6 +53,17 @@ test_exprs_ipc cancel/timeout paths use generous margins (8.0 noted one
 transient under heavy host load). If a transient reproduces, it is recorded
 here with the load condition, never silently retried into green.
 
+RECORDED TRANSIENT (2026-09-12): test_plugin_host_process
+"concurrent requests run in parallel within the quota" failed once in a full
+run ("restart policy exhausted" = a concurrent recovery was busy when a
+caller's session snapshot was dead) while the host was building 3 other 9.0
+tracks simultaneously (load average 23). The suite passed alone and the full
+suite passed on re-run (163 assertions / 15 cases). The typed-failure-on-
+busy-recovery behavior is by design (atomic respawnArmed collapse); the test
+assumes the worker stays alive, which load starvation violated. Follow-up
+candidate: make the assertion recovery-tolerant; not done in 9.0 because it
+would weaken the crash-ladder regression.
+
 ## Explicitly NOT run on this host
 
 - Windows job-object enforcement (memory/CPU-rate/ActiveProcessLimit):
