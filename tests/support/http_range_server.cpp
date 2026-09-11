@@ -469,6 +469,35 @@ void HttpRangeServer::handleConnection( SocketHandle client )
       }
       return;
     }
+    if ( mBehavior == ServerBehavior::ShortRange && !isHead && rangeStart >= 1024 &&
+         bodySize > 8 && mShortRangeArmed.exchange( false ) )
+    {
+      // 9.0 fault: announce the full window (Content-Length = bodySize, a
+      // well-formed 206 with an honest-looking Content-Range) but send only
+      // a few bytes. The recipient sees a COMPLETE-feeling HTTP answer with
+      // a body shorter than the echoed window — the poison the truncation
+      // gate exists for.
+      std::string head = "HTTP/1.1 206 Partial Content\r\n";
+      for ( const auto &entry : headers )
+        head += entry.first + ": " + entry.second + "\r\n";
+      head += "Content-Length: " + std::to_string( bodySize ) + "\r\n";
+      head += "Connection: close\r\n\r\n";
+      std::size_t sent = 0;
+      while ( sent < head.size() )
+      {
+        const int written = ::send( client, head.data() + sent,
+                                    static_cast<int>( head.size() - sent ), 0 );
+        if ( written <= 0 )
+          break;
+        sent += static_cast<std::size_t>( written );
+      }
+      const std::size_t bytesSent = std::min<std::size_t>( bodySize, 4 );
+      if ( bytesSent > 0 )
+        ::send( client, reinterpret_cast<const char *>( body ),
+                static_cast<int>( bytesSent ), 0 );
+      mBytesServed.fetch_add( bytesSent );
+      return;
+    }
     respond( client, 206, "Partial Content", headers, body, bodySize, isHead,
              mBehavior != ServerBehavior::Truncated );
     return;

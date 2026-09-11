@@ -24,6 +24,7 @@
 #include <cstdio>
 
 #include <algorithm>
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
@@ -33,6 +34,7 @@
 
 using namespace sicnu::geo;
 using sicnu::geo::testsupport::HttpRangeServer;
+using sicnu::geo::testsupport::ServerBehavior;
 
 namespace
 {
@@ -654,4 +656,122 @@ TEST_CASE( "COG overview and window reads through the cache stay bounded and cor
   INFO( "fetched=" << fetched << " payload=" << payload.size() );
   CHECK( fetched * 2 < static_cast<std::uint64_t>( payload.size() ) );
   CHECK( fetched > 0 ); // the reads did go through the ranged cache
+}
+
+// ---------------------------------------------------------------------------
+// 9.0 M2 — truncation gate: a well-formed 206 whose body is shorter than its
+// echoed window must never be served or cached. The read degrades to the
+// /vsicurl/ fallback and stays byte-correct.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "truncated 206 bodies are refused — fallback keeps reads byte-correct",
+           "[io][remote][range_cache][fabric9][truncation]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "short_range" );
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload, ServerBehavior::ShortRange );
+  server.setEtag( "\"short-range-1\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::TrustForever; // isolate the body gate
+  InstalledCache guard( config );
+
+  std::vector<double> expected;
+  {
+    RasterReader local( RasterReader::open( dir + "/scene.tif" ) );
+    expected = local.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    REQUIRE( expected.size() == 256ull * 256 );
+  }
+
+  // Every ranged GET beyond the identity head answers 4 bytes of body —
+  // the cache must throw internally (truncation gate), degrade to the
+  // fallback, and STILL deliver the correct bytes to the reader.
+  RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+  REQUIRE( reader.isOpen() );
+  const std::vector<double> got = reader.readWindow( { 1 }, { 0, 0, 256, 256 } );
+  REQUIRE( got.size() == expected.size() );
+  CHECK( got == expected );
+  REQUIRE( server.shortRangeFired() ); // the fault really fired — no vacuous test
+
+  // A second read stays correct too (the truncated body was never cached).
+  const std::vector<double> again = reader.readWindow( { 1 }, { 0, 0, 256, 256 } );
+  CHECK( again == expected );
+}
+
+// ---------------------------------------------------------------------------
+// 9.0 M2 — bounded concurrent fetch: the global in-flight byte cap is a real
+// gate (observed peak stays at/below the declared bound) while reads across
+// DIFFERENT resources still proceed and stay byte-correct.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "the global in-flight fetch bound holds across concurrent resources",
+           "[io][remote][range_cache][fabric9][admission]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "admission" );
+
+  // Two independent origins; block boundaries make fetch windows big.
+  const std::vector<unsigned char> payloadA = buildTiff( dir + "/a.tif" );
+  const std::vector<unsigned char> payloadB = buildTiff( dir + "/b.tif" );
+  HttpRangeServer serverA( payloadA );
+  HttpRangeServer serverB( payloadB );
+  serverA.setConcurrency( 8 );
+  serverB.setConcurrency( 8 );
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.maxCacheBytes = 16ull * 1024 * 1024;
+  // The 256×256 Float32 window spans ≤ 4 blocks (~256 KiB). Two concurrent
+  // resources fetching ~2 windows each must fit under a 512 KiB in-flight
+  // cap — the gate serializes overflow, it never breaks reads.
+  config.maxConcurrentFetchBytes = 512ull * 1024;
+  InstalledCache guard( config );
+
+  std::vector<double> expectedA;
+  std::vector<double> expectedB;
+  {
+    RasterReader localA( RasterReader::open( dir + "/a.tif" ) );
+    expectedA = localA.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    RasterReader localB( RasterReader::open( dir + "/b.tif" ) );
+    expectedB = localB.readWindow( { 1 }, { 0, 0, 256, 256 } );
+  }
+
+  const std::uint64_t peakBefore = RemoteRangeCache::telemetryJson()["max_in_flight_fetch_bytes"].asUInt64();
+
+  std::atomic<bool> okA{ false };
+  std::atomic<bool> okB{ false };
+  {
+    std::thread readerA( [ & ] {
+      try
+      {
+        RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( serverA.url() ) );
+        okA = reader.readWindow( { 1 }, { 0, 0, 256, 256 } ) == expectedA;
+      }
+      catch ( ... )
+      {
+      }
+    } );
+    std::thread readerB( [ & ] {
+      try
+      {
+        RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( serverB.url() ) );
+        okB = reader.readWindow( { 1 }, { 0, 0, 256, 256 } ) == expectedB;
+      }
+      catch ( ... )
+      {
+      }
+    } );
+    readerA.join();
+    readerB.join();
+  }
+  CHECK( okA.load() );
+  CHECK( okB.load() );
+
+  const Json::Value telemetry = RemoteRangeCache::telemetryJson();
+  const std::uint64_t peak =
+    telemetry["max_in_flight_fetch_bytes"].asUInt64() - peakBefore;
+  CHECK( peak <= config.maxConcurrentFetchBytes );
+  CHECK( telemetry["read_amplification"].isNumeric() );
 }

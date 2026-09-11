@@ -31,6 +31,7 @@
 #include <cpl_vsi_virtual.h>
 
 #include <algorithm>
+#include <condition_variable>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -144,6 +145,48 @@ class CacheStore
     std::atomic<std::uint64_t> invalidations{ 0 };
     std::atomic<std::uint64_t> fallbackReads{ 0 };
     std::atomic<std::uint64_t> revalidations{ 0 };
+    std::atomic<std::uint64_t> dedupHits{ 0 };
+    std::atomic<std::uint64_t> maxInFlightBytes{ 0 };
+
+    // ── 9.0 global fetch admission ─────────────────────────────────────────
+    // Bounds the bytes concurrently in flight across all ranged GETs. The
+    // gate never holds the store mutex and never holds a resource's
+    // fetchMutex ACROSS the wait of a different resource — a waiter blocks
+    // only until other resources' fetches drain. A request larger than the
+    // cap is admitted when NOTHING else is in flight (head-of-line, no
+    // starvation).
+    void admitFetch( std::uint64_t requestedBytes, std::uint64_t cap )
+    {
+      if ( cap == 0 )
+        return; // unlimited
+      std::unique_lock<std::mutex> lock( mAdmissionMutex );
+      while ( mInFlightBytes > 0 && mInFlightBytes + requestedBytes > cap )
+        mAdmissionCv.wait( lock );
+      mInFlightBytes += requestedBytes;
+      // Track the observed peak against the declared bound.
+      std::uint64_t current = mInFlightBytes;
+      std::uint64_t peak = maxInFlightBytes.load();
+      while ( current > peak && !maxInFlightBytes.compare_exchange_weak( peak, current ) )
+      {
+      }
+    }
+
+    void completeFetch( std::uint64_t admittedBytes, std::uint64_t cap )
+    {
+      if ( cap == 0 )
+        return;
+      {
+        std::lock_guard<std::mutex> lock( mAdmissionMutex );
+        mInFlightBytes -= std::min( admittedBytes, mInFlightBytes );
+      }
+      mAdmissionCv.notify_all();
+    }
+
+    std::uint64_t inFlightBytes()
+    {
+      std::lock_guard<std::mutex> lock( mAdmissionMutex );
+      return mInFlightBytes;
+    }
 
     std::shared_ptr<ResourceEntry> findResource( const std::string &key )
     {
@@ -454,7 +497,11 @@ class CacheStore
     std::uint64_t mBytesCached = 0;
     std::uint64_t configGeneration = 1; // bumped on every config update
     std::uint64_t mMaxCacheBytes = 64ull * 1024 * 1024;
-};
+
+    std::mutex mAdmissionMutex;
+    std::condition_variable mAdmissionCv;
+    std::uint64_t mInFlightBytes = 0;
+  };
 
 std::unique_ptr<CacheStore> g_store;
 std::mutex g_storeLifecycleMutex;
@@ -499,10 +546,10 @@ std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint6
   const std::string contentRange = result.headerValue( "content-range" );
   if ( result.httpStatus == 206 || !contentRange.empty() )
   {
-    // A 206 must echo the window it actually serves ("bytes S-E/total",
-    // E may clamp at EOF). Anything else — a wrong offset, an unparseable
-    // range — must never enter the cache as if it were [start,end): a
-    // hostile or broken origin would poison every later reader.
+    // A 206 must echo the window it actually serves ("bytes S-E/total").
+    // Anything else — a wrong offset, an unparseable range — must never
+    // enter the cache as if it were [start,end): a hostile or broken origin
+    // would poison every later reader.
     std::uint64_t echoedStart = 0, echoedEnd = 0;
     const std::string expectedPrefix = "bytes ";
     const bool parseable =
@@ -524,14 +571,35 @@ std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint6
         }
         return true;
       }();
-    if ( parseable && echoedStart == start && echoedEnd + 1 >= result.body.size() + start &&
-         echoedEnd + 1 <= endExclusive )
+    if ( parseable )
+    {
+      // The echoed window must start exactly where the request started and
+      // never reach past the requested window.
+      if ( echoedStart != start || echoedEnd + 1 > endExclusive )
+        throw GeoError( ErrorCode::Unsupported,
+                        "range_cache: origin echoed a mismatched Content-Range window" );
+      // 9.0 truncation gate: the body must carry the WHOLE echoed window.
+      // The only honest shortfall is EOF — an honest origin echoes the
+      // CLAMPED window ("bytes S-E/total" with E below the requested end),
+      // so the echoed window itself is the completeness yardstick; a short
+      // body against any echoed window is a torn transfer and must never be
+      // served or cached.
+      const std::uint64_t windowBytes = echoedEnd - echoedStart + 1;
+      if ( result.body.size() < windowBytes )
+      {
+        Json::Value details;
+        details["status"] = result.httpStatus;
+        details["echoed_bytes"] = static_cast<Json::UInt64>( windowBytes );
+        details["body_bytes"] = static_cast<Json::UInt64>( result.body.size() );
+        throw GeoError( ErrorCode::NetworkError,
+                        "range_cache: origin sent a truncated ranged response",
+                        details );
+      }
       return result.body; // verified window (EOF-clamped ends are fine)
-    if ( !parseable )
-      return result.body; // 206 without a parseable range: treat as opaque
-                          // slice — callers verify coverage before serving
-    throw GeoError( ErrorCode::Unsupported,
-                    "range_cache: origin echoed a mismatched Content-Range window" );
+    }
+    // 206 without a parseable range: treat as an opaque slice — callers
+    // verify coverage before serving.
+    return result.body;
   }
   // A range-ignoring origin answers with the object from byte 0 (possibly
   // cut by the byte budget). The answer serves the request only when it
@@ -789,7 +857,10 @@ class RangeCacheHandle final : public VSIVirtualHandle
       }
       if ( cache.tryServe( mEntry, position, length, destination, mGeneration, blockSize ) )
       {
+        // A concurrent fetch of the same missing run just filled this in —
+        // this read is the request-dedup outcome (no second origin request).
         cache.hits.fetch_add( 1 );
+        cache.dedupHits.fetch_add( 1 );
         return length;
       }
 
@@ -802,6 +873,22 @@ class RangeCacheHandle final : public VSIVirtualHandle
       std::vector<unsigned char> bytes;
       try
       {
+        // Global in-flight byte bound (9.0): admit before the ranged GET,
+        // release after — the gate never holds the store lock and waits
+        // only for other resources' fetches to drain.
+        struct InFlightAdmission
+        {
+          CacheStore &cache;
+          std::uint64_t bytes;
+          std::uint64_t cap;
+          InFlightAdmission( CacheStore &c, std::uint64_t b, std::uint64_t cp )
+            : cache( c ), bytes( b ), cap( cp )
+          {
+            cache.admitFetch( bytes, cap );
+          }
+          ~InFlightAdmission() { cache.completeFetch( bytes, cap ); }
+        } admission( cache, fetchEnd - fetchStart, config.maxConcurrentFetchBytes );
+
         bytes = fetchRange( mEntry->requestUrl, fetchStart, fetchEnd, config );
         cache.coalescedFetches.fetch_add( 1 );
         cache.bytesFetched.fetch_add( bytes.size() );
@@ -1047,6 +1134,7 @@ Json::Value RangeCacheConfig::toJson() const
   json["timeout_seconds"] = timeoutSeconds;
   json["connect_timeout_seconds"] = connectTimeoutSeconds;
   json["max_retries"] = maxRetries;
+  json["max_concurrent_fetch_bytes"] = static_cast<Json::UInt64>( maxConcurrentFetchBytes );
   return json;
 }
 
@@ -1062,6 +1150,12 @@ Json::Value RangeCacheTelemetry::toJson() const
   json["invalidations"] = static_cast<Json::UInt64>( invalidations );
   json["fallback_reads"] = static_cast<Json::UInt64>( fallbackReads );
   json["revalidations"] = static_cast<Json::UInt64>( revalidations );
+  json["dedup_hits"] = static_cast<Json::UInt64>( dedupHits );
+  json["max_in_flight_fetch_bytes"] = static_cast<Json::UInt64>( maxInFlightFetchBytes );
+  // 9.0 read amplification: origin bytes pulled per byte served. 0 when
+  // nothing was served yet (no denominator — never fabricate a ratio).
+  json["read_amplification"] =
+    bytesServed > 0 ? static_cast<double>( bytesFetched ) / static_cast<double>( bytesServed ) : 0.0;
   return json;
 }
 
@@ -1151,8 +1245,11 @@ Json::Value RemoteRangeCache::telemetryJson()
   telemetry.invalidations = g_store->invalidations.load();
   telemetry.fallbackReads = g_store->fallbackReads.load();
   telemetry.revalidations = g_store->revalidations.load();
+  telemetry.dedupHits = g_store->dedupHits.load();
+  telemetry.maxInFlightFetchBytes = g_store->maxInFlightBytes.load();
   Json::Value json = telemetry.toJson();
   json["cached_bytes"] = static_cast<Json::UInt64>( g_store->cachedBytes() );
+  json["in_flight_fetch_bytes"] = static_cast<Json::UInt64>( g_store->inFlightBytes() );
   json["config"] = g_store->config.toJson();
   return json;
 }
