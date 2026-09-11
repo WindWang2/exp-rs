@@ -706,6 +706,9 @@ target_include_directories(qgis_core PRIVATE
 # SICNU_GEO_RS: Plugin architecture subdirectories
 add_subdirectory(src/plugins)
 add_subdirectory(src/operators)
+# Contract Platform 9.0: canonical descriptors, contract graph and the
+# mechanical drift scanners (test/tooling side, zero product runtime cost).
+add_subdirectory(src/contracts)
 # Read-only operator registry adapter for the help layer (CLI/GUI/tests).
 # Must follow src/operators: the adapters link the sicnu_operators target.
 add_subdirectory(src/help/adapters)
