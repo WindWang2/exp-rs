@@ -525,6 +525,8 @@ Json::Value PluginManifest::toJson() const
         json["quotas"] = quotas;
     if ( !conformance.isNull() )
         json["conformance"] = conformance;
+    if ( !package.isNull() )
+        json["package"] = package;
     if ( !description.empty() )
         json["description"] = description;
     if ( !vendor.empty() )
@@ -657,6 +659,8 @@ bool PluginManifest::fromJson( const Json::Value &json, PluginManifest &out,
         out.quotas = json["quotas"];
     if ( json.isMember( "conformance" ) && json["conformance"].isObject() )
         out.conformance = json["conformance"];
+    if ( json.isMember( "package" ) && json["package"].isObject() )
+        out.package = json["package"];
     out.permissions = parsePermissions( json["permissions"], out.warnings );
     for ( const Json::Value &dependency : json["dependencies"] )
     {
