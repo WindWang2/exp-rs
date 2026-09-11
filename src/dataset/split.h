@@ -30,6 +30,11 @@ namespace sicnu::dataset
 /// Serialization schema version of split manifests.
 inline constexpr int kSplitManifestSerializationVersion = 1;
 
+/// Upper bound of distinct class codes materialized into one role's class
+/// distribution of the split summary; beyond it the distribution is replaced
+/// by a truncation flag (bounded metadata, honestly marked).
+inline constexpr int kSplitSummaryMaxClasses = 256;
+
 /// The engine-facing view of one sample.
 struct SplitInput
 {
@@ -52,7 +57,9 @@ struct SplitInput
 };
 
 /// Split configuration (validated). Ratios: train + validation + test must
-/// sum to ~1 when used; k-fold family uses foldCount instead.
+/// sum to ~1 when used; k-fold family uses foldCount instead. Every double
+/// field must be finite: NaN/Inf are validation failures, never silent
+/// degenerate behavior (#875 class).
 struct SplitConfig
 {
     SplitMethod method = SplitMethod::Random;
@@ -61,9 +68,11 @@ struct SplitConfig
     double testRatio = 0.15;
     quint64 seed = 0;      ///< required; 0 is a legal seed, absence is not
     qint64 foldCount = 5;  ///< k-fold family
-    double blockSizeX = 0.0; ///< spatial_block grid size (CRS units)
+    double blockSizeX = 0.0; ///< spatial grid size (CRS units; spatial_block,
+                             ///  spatial_k_fold, spatiotemporal_block)
     double blockSizeY = 0.0;
     double bufferDistance = 0.0; ///< spatial_buffer exclusion (CRS units)
+    qint64 temporalWindowMs = 0; ///< spatiotemporal_block time window length
     QString regionKey;  ///< leave-one-region-out key field name (documentation)
     QJsonObject extra;  ///< method-specific extras (validated per method)
 
@@ -111,6 +120,14 @@ class SplitManifest
     const QJsonObject &leakageSummary() const { return m_leakageSummary; }
     void setLeakageSummary( const QJsonObject &summary ) { m_leakageSummary = summary; }
 
+    /// Role/fold/class summary computed by the engine at generation time:
+    /// total samples, per-role and per-fold counts, per-role class
+    /// distribution (plain methods). Class keys are capped (see
+    /// kSplitSummaryMaxClasses) with an explicit truncation flag — the
+    /// summary is bounded metadata, and truncation is visible, never silent.
+    const QJsonObject &summary() const { return m_summary; }
+    void setSummary( const QJsonObject &summary ) { m_summary = summary; }
+
     const QDateTime &createdAtUtc() const { return m_createdAtUtc; }
     void setCreatedAtUtc( const QDateTime &time ) { m_createdAtUtc = time; }
     const QString &note() const { return m_note; }
@@ -140,6 +157,7 @@ class SplitManifest
     QString m_determinismNote;
     QVector<SplitAssignment> m_assignments;
     QJsonObject m_leakageSummary;
+    QJsonObject m_summary;
     QDateTime m_createdAtUtc;
     QString m_note;
     QString m_fingerprint;

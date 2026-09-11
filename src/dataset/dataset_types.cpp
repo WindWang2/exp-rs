@@ -151,6 +151,7 @@ const Vocabulary<SplitMethod> &splitMethodVocabulary()
         { SplitMethod::KFold, "k_fold" },
         { SplitMethod::SpatialKFold, "spatial_k_fold" },
         { SplitMethod::GroupKFold, "group_k_fold" },
+        { SplitMethod::SpatioTemporalBlock, "spatiotemporal_block" },
     } );
     return vocabulary;
 }
