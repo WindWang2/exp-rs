@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <thread>
@@ -29,6 +30,12 @@ void initializeSockets()
     WSADATA data;
     WSAStartup( MAKEWORD( 2, 2 ), &data );
   } );
+#else
+  // Writing to a socket whose peer already closed raises SIGPIPE and kills
+  // the test process (observed as exit 141 when curl drops the connection
+  // mid-response): the fixture checks send() return values itself — the
+  // signal must not fatal-exit behind its back.
+  std::signal( SIGPIPE, SIG_IGN );
 #endif
 }
 
@@ -115,22 +122,37 @@ HttpRangeServer::~HttpRangeServer()
   // recv() when an fd is CLOSEd elsewhere, and closing here could hit an fd
   // number another component has already reused — only the owning thread
   // closes. The bounded receive window covers anything this misses.
+  // (Copy the set and shutdown OUTSIDE the mutex: a finishing handler needs
+  // the same mutex for its erase — never hold it across any blocking call.)
   {
-    std::lock_guard<std::mutex> lock( mHandlerMutex );
-    for ( const SocketHandle client : mInFlight )
+    std::set<SocketHandle> inFlight;
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      inFlight = mInFlight;
+    }
+    for ( const SocketHandle client : inFlight )
       ::shutdown( client, SD_BOTH );
   }
   if ( mThread.joinable() )
     mThread.join();
   // Concurrent-mode handlers touch fixture state — join every one of them
-  // before the members they reference start disappearing.
+  // before the members they reference start disappearing. Join OUTSIDE the
+  // mutex: a handler's own completion path locks it (mInFlight.erase), so
+  // joining under the lock is a guaranteed self-deadlock.
   {
-    std::lock_guard<std::mutex> lock( mHandlerMutex );
-    for ( std::thread &handler : mHandlers )
+    std::vector<std::thread> toJoin;
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      toJoin = std::move( mHandlers );
+      mHandlers.clear();
+    }
+    for ( std::thread &handler : toJoin )
       if ( handler.joinable() )
         handler.join();
-    mHandlers.clear();
-    mInFlight.clear();
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      mInFlight.clear();
+    }
   }
 }
 

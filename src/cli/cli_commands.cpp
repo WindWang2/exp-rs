@@ -1063,7 +1063,7 @@ int commandData( QStringList args, const CliIO &io )
     const QString sub = args.isEmpty() ? "inspect" : args.takeFirst();
     if ( args.isEmpty() )
         return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {}, "usage: data inspect|doctor|probe|capabilities|product describe|stac <dataset>|identity <url>|cache check <url> [--stats]" );
+                          {}, "usage: data inspect|doctor|probe|capabilities|product describe|stac <dataset>|identity <url>|cache <url> [--bytes N]" );
     const QString path = args.takeFirst();
 
     sicnu::geo::InspectOptions options;
@@ -1147,10 +1147,6 @@ int commandData( QStringList args, const CliIO &io )
         // /vsirangecache/ and reports the cache telemetry delta.
         if ( sub == "cache" )
         {
-            const QString action = args.isEmpty() ? "check" : args.takeFirst();
-            if ( action != "check" )
-                return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                                  {}, "unknown data cache action: " + action.toStdString() );
             std::uint64_t readBytes = 1024 * 1024;
             for ( int i = 0; i + 1 < args.size(); ++i )
             {
@@ -1188,6 +1184,10 @@ int commandData( QStringList args, const CliIO &io )
                                   {}, "cannot open remote source through the range cache: " +
                                           sicnu::geo::ResourceUri::parse( stdPath ).display() );
             }
+            std::vector<char> buffer( static_cast<std::size_t>( readBytes ) );
+            const size_t got = VSIFReadL( buffer.data(), 1, buffer.size(), handle );
+            VSIFCloseL( handle );
+            const Json::Value after = sicnu::geo::RemoteRangeCache::telemetryJson();
             out["bytes_read"] = static_cast<Json::UInt64>( got );
             out["telemetry_delta"]["bytes_served"] =
                 Json::Value( after["bytes_served"].asUInt64() - before["bytes_served"].asUInt64() );

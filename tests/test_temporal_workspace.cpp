@@ -781,7 +781,8 @@ TEST_CASE( "Unregistered remote inputs resolve through the installed identity re
         saved = *current;
     sicnu::data::setExecutionIdentityResolver(
         []( const QString &path ) {
-            return path.contains( QStringLiteral( "provable" ) )
+            // Exact match only — "unprovable.tif" must NOT resolve.
+            return path == QStringLiteral( "https://example.com/provable.tif" )
                        ? QStringLiteral( "ri1:v1:deadbeef" )
                        : QString();
         } );

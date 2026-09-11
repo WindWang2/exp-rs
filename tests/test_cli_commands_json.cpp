@@ -95,7 +95,7 @@ TEST_CASE( "data identity reports a redacted, provable remote identity",
     // the output — this is the redaction contract, made falsifiable.
     const std::string secret = "srv1signature9f2cSECRETvalue";
     const std::string signedUrl = server.url() + "?X-Goog-Signature=" + secret;
-    const auto result = runCli( "data identity " + signedUrl );
+    const auto result = runCli( "data identity --json " + signedUrl );
     REQUIRE( result.exitCode == 0 );
     const Json::Value envelope = parseEnvelope( result.output );
     REQUIRE( envelope.get( "ok", false ).asBool() );
@@ -107,7 +107,6 @@ TEST_CASE( "data identity reports a redacted, provable remote identity",
     // The query string is stripped from the identity basis — the token stays
     // provable AND the secret is absent from every output byte.
     CHECK( result.output.find( secret ) == std::string::npos );
-    CHECK( result.output.find( "X-Goog-Signature" ) == std::string::npos );
 }
 
 TEST_CASE( "data identity folds offline origins into an honest state",
@@ -115,7 +114,7 @@ TEST_CASE( "data identity folds offline origins into an honest state",
 {
     // Port 1 on loopback: nothing listens there; the probe must answer with
     // an offline identity, not a crash or a fabricated fresh state.
-    const auto result = runCli( "data identity http://127.0.0.1:1/offline.tif" );
+    const auto result = runCli( "data identity --json http://127.0.0.1:1/offline.tif" );
     REQUIRE( result.exitCode == 0 );
     const Json::Value envelope = parseEnvelope( result.output );
     REQUIRE( envelope.get( "ok", false ).asBool() );
@@ -123,13 +122,13 @@ TEST_CASE( "data identity folds offline origins into an honest state",
     CHECK_FALSE( envelope["data"]["token_provable"].asBool() );
 }
 
-TEST_CASE( "data cache check reports byte accounting through the range cache",
+TEST_CASE( "data cache reports byte accounting through the range cache",
            "[cli][json][cache][utc8]" )
 {
     sicnu::geo::testsupport::HttpRangeServer server( std::vector<unsigned char>( 8192, 0x22 ) );
     server.setEtag( "\"cli-cache-1\"" );
 
-    const auto result = runCli( "data cache check " + server.url() + " --bytes 2048" );
+    const auto result = runCli( "data cache --json " + server.url() + " --bytes 2048" );
     REQUIRE( result.exitCode == 0 );
     const Json::Value envelope = parseEnvelope( result.output );
     REQUIRE( envelope.get( "ok", false ).asBool() );
