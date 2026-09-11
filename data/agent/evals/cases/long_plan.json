@@ -1,0 +1,60 @@
+{
+  "cases": [
+    {
+      "case_id": "long-plan/eight-step-chained-plan-compiles",
+      "category": "long_plan",
+      "description": "An 8-step chained plan validates, compiles, and carries resource estimates within a byte budget",
+      "steps": [
+        {"tool": "harness:plan", "input": {"plan": {
+          "schema_version": "2.0", "kind": "execution_plan", "plan_id": "plan-long",
+          "intent": "", "goal": "long chained processing chain",
+          "inputs": [{"name": "primary", "ref": "workspace://long_chain/scene.tif"}],
+          "steps": [
+            {"id": "mask", "operator_id": "rs:qa_mask",
+             "params": {"input": "$primary.path", "output": "$outputs.masked"}, "verification": "raster"},
+            {"id": "ndvi", "operator_id": "rs:spectral_index",
+             "params": {"input": "$outputs.masked", "index": "NDVI", "output": "$outputs.ndvi"}, "verification": "raster"},
+            {"id": "smooth", "operator_id": "rs:spectral_index",
+             "params": {"input": "$outputs.ndvi", "index": "NDVI", "output": "$outputs.smooth"}, "verification": "raster"},
+            {"id": "savi", "operator_id": "rs:spectral_index",
+             "params": {"input": "$outputs.smooth", "index": "SAVI", "output": "$outputs.savi"}, "verification": "raster"},
+            {"id": "cls_lo", "operator_id": "rs:threshold_raster",
+             "params": {"input": "$outputs.savi", "output": "$outputs.cls_lo", "thresholdMethod": "statistical"}, "verification": "raster"},
+            {"id": "cls_hi", "operator_id": "rs:threshold_raster",
+             "params": {"input": "$outputs.savi", "output": "$outputs.cls_hi", "thresholdMethod": "statistical"}, "verification": "raster"},
+            {"id": "final", "operator_id": "rs:threshold_raster",
+             "params": {"input": "$outputs.cls_lo", "output": "$outputs.final", "thresholdMethod": "statistical"}, "verification": "raster"},
+            {"id": "report", "operator_id": "rs:threshold_raster",
+             "params": {"input": "$outputs.final", "output": "$outputs.report", "thresholdMethod": "statistical"}, "verification": "raster"}
+          ],
+          "outputs": [
+            {"name": "final", "from_step": "final", "kind": "raster"},
+            {"name": "report", "from_step": "report", "kind": "raster"}
+          ]
+        }}, "expect": {"success": true, "response_bytes_le": 16000, "asserts": [
+          {"path": "compilable", "equals": true},
+          {"path": "estimates", "exists": true},
+          {"path": "workflow_json", "exists": true}]}}
+      ]
+    },
+    {
+      "case_id": "long-plan/recipe-instantiation-step-count-and-budget",
+      "category": "long_plan",
+      "description": "Instantiating a long shipped recipe stays within a bounded response and keeps every step",
+      "fixture": {
+        "kind": "raster", "width": 8, "height": 8,
+        "bands": ["nir", "red", "green", "blue", "swir"], "nodata": -9999.0,
+        "metadata": {"SICNU_RADIOMETRIC_STATE": "surface_reflectance"}
+      },
+      "steps": [
+        {"tool": "harness:instantiate_recipe",
+         "input": {"recipe_id": "harness.optical_bsi",
+                   "bindings": {"slots": {"primary": "$fixture"}, "params": {"threshold": 0.35}},
+                   "output_dir": "$tmp"},
+         "expect": {"success": true, "response_bytes_le": 8000, "asserts": [
+           {"path": "plan.steps", "exists": true},
+           {"path": "estimates", "exists": true}]}}
+      ]
+    }
+  ]
+}
