@@ -2,6 +2,7 @@
 #include "composition.h"
 
 #include "../mapspec/mapspec.h"
+#include "typography.h"
 
 #include <algorithm>
 #include <cmath>
@@ -145,6 +146,8 @@ struct ConstraintRuntime
     std::vector<Json::Value *> items;   ///< resolvable targets, reference order
     std::vector<std::string> itemIds;
     Json::Value contentMm;              ///< fit_content declared content size (copied)
+    Json::Value *textItem = nullptr;    ///< fit_content text_ref source (resolved)
+    std::string textRef;                ///< fit_content text_ref item id
     double gap = 0.0;
     std::string edge;
     std::string direction;
@@ -161,14 +164,22 @@ struct ConstraintRuntime
     bool anchorDecided = false;         ///< anchor_wins decision recorded?
     bool rejected = false;              ///< soft: reverted by a higher-ranked constraint
     bool rejectedDecided = false;       ///< first rejection recorded?
+    bool failedDecided = false;         ///< first permanent failure recorded? (the
+                                        ///  unsat-core restore sweep re-runs the
+                                        ///  real passes and must not duplicate the
+                                        ///  refusal in the ledger)
     std::string failReason;             ///< permanent-failure cause (page_overflow, …)
 };
 
-/// A pending geometry write computed by computeTargets.
+/// A pending geometry write computed by computeTargets. `page >= 0` marks a
+/// page-index write (the one documented non-rect mutation, used only by the
+/// page_break kind); `page < 0` writes `target`.
 struct TargetWrite
 {
     Json::Value *item = nullptr;
     Rect target;
+    int page = -1;
+    std::string stamp;  ///< page_break provenance written alongside the page
 };
 
 class Solver
@@ -187,6 +198,14 @@ class Solver
     void searchCores();   ///< bounded unsat cores for unsatisfied hard constraints
     void applySofts();    ///< SOFT constraints: priority-desc greedy, rank-aware
     void finalize( CompositionResult &result );
+    /// Platform 9.0 scoped re-solve: restrict the run to constraints,
+    /// anchors and clamps touching these item ids (empty = whole document).
+    void setFocusIds( const std::vector<std::string> &ids )
+    {
+      mFocusIds.clear();
+      for ( const std::string &id : ids )
+        mFocusIds.insert( id );
+    }
 
   private:
     Json::Value *findItem( const std::string &id );
@@ -256,6 +275,15 @@ class Solver
     // Platform 8.0: page index → height (mm); page bottoms for the
     // page-aware pin evidence on keep_with / avoid_overlap.
     std::map<int, double> mPageHeights;
+
+    // Platform 9.0: scoped re-solve focus (empty = whole document).
+    std::set<std::string> mFocusIds;
+
+    // Platform 9.0: per-pass trace being collected (borrowed from the
+    // pipeline driver; null outside relaxHard).
+    std::vector<CompositionTraceEntry> *mTrace = nullptr;
+    std::vector<CompositionTraceEntry> mPassesTrace;
+    std::vector<CompositionOscillation> mOscillations;
 
     /// Bottom (max y) of the page `item` is declared on.
     double pageBottomFor( const Json::Value *item ) const
@@ -345,6 +373,17 @@ void Solver::buildRuntimes()
     const std::string kind = constraint["kind"].asString();
     if ( !mapspec::isConstraintKind( kind ) )
       continue; // legacy/free-form constraint items (e.g. frame_style) are not solver input
+    // Platform 9.0 scoped re-solve: constraints that touch none of the focus
+    // items leave the runtimes entirely (anchors/clamps restrict likewise).
+    if ( !mFocusIds.empty() )
+    {
+      bool touchesFocus = false;
+      for ( const auto &reference : constraint["items"] )
+        touchesFocus =
+          touchesFocus || ( reference.isString() && mFocusIds.count( reference.asString() ) > 0 );
+      if ( !touchesFocus )
+        continue;
+    }
     // Review P2: id-less constraints share `kind` as cid and duplicate ids
     // are legal documents — synthesize a unique identity so per-constraint
     // reports can never silently collapse into one deduped entry.
@@ -357,14 +396,20 @@ void Solver::buildRuntimes()
     const int canonicalIndex = declaredIndex;
     ++declaredIndex;
     // Issue #781: arity must know the kind — fit_content is a legal
-    // single-item constraint.
-    const int requiredItems = kind == "fit_content" ? 1 : 2;
+    // single-item constraint, page_break re-pages a single item.
+    const int requiredItems = ( kind == "fit_content" || kind == "page_break" ) ? 1 : 2;
 
     ConstraintRuntime runtime;
     runtime.cid = cid;
     runtime.kind = kind;
     runtime.index = canonicalIndex;
     runtime.contentMm = constraint.get( "content_mm", Json::Value() );
+    // Platform 9.0: text-driven sizing — content may be derived from a
+    // referenced text item at solve time (deterministic typography model).
+    // Explicit content_mm keeps precedence; validation enforces that at
+    // least one of the two is present.
+    if ( constraint.isMember( "text_ref" ) && constraint["text_ref"].isString() )
+      runtime.textRef = constraint["text_ref"].asString();
     // v4 hardness/priority/weight: validated upstream (validateMapSpec);
     // here they are read defensively — anything malformed falls back to the
     // v3 defaults instead of inventing semantics.
@@ -385,6 +430,8 @@ void Solver::buildRuntimes()
       if ( Json::Value *item = findItem( reference.asString() ) )
         runtime.items.push_back( item );
     }
+    if ( !runtime.textRef.empty() )
+      runtime.textItem = findItem( runtime.textRef );
     if ( static_cast<int>( runtime.items.size() ) < requiredItems )
     {
       mReport.add( cid + "|arity",
@@ -430,12 +477,13 @@ void Solver::detectCycles()
   // Leader → follower write edges over positional constraints. A cycle means
   // constraints fight over the same geometry: relaxation stays bounded, and
   // the cycle is diagnosed instead of silently absorbed. fit_content writes
-  // only its own item's size and distribute fixes endpoints, so neither can
-  // participate in a positional cycle.
+  // only its own item's size, distribute fixes endpoints, and page_break
+  // writes a page index (not position), so none can participate in a
+  // positional cycle.
   std::map<std::string, std::set<std::string>> adjacency;
   for ( const auto &c : mConstraints )
   {
-    if ( c.kind == "fit_content" || c.kind == "distribute" )
+    if ( c.kind == "fit_content" || c.kind == "distribute" || c.kind == "page_break" )
       continue;
     if ( c.kind == "stack" )
     {
@@ -518,6 +566,13 @@ bool Solver::resolveAnchors()
       Json::Value &item = mSpec[collection][i];
       if ( !item.isObject() || !item.isMember( "anchor" ) || !item["anchor"].isObject() )
         continue;
+      // Scoped re-solve: anchors WRITE focus items only, but every resolved
+      // anchor still joins mAnchorIds so anchor authority also wins for
+      // constraints reaching a non-focus anchored item.
+      const bool focusRestricted =
+        !mFocusIds.empty() &&
+        ( !item.isMember( "id" ) || !item["id"].isString() ||
+          !mFocusIds.count( item["id"].asString() ) );
       const Json::Value &anchor = item["anchor"];
       if ( !anchor.isMember( "edge" ) || !anchor["edge"].isString() )
         continue;
@@ -564,6 +619,11 @@ bool Solver::resolveAnchors()
       const Rect target{ x, y, rect.w, rect.h };
       if ( !sameRect( rect, target ) )
       {
+        if ( focusRestricted )
+        {
+          mAnchorIds.insert( id );
+          continue;
+        }
         rect.x = x;
         rect.y = y;
         writeRect( item, rect );
@@ -590,6 +650,11 @@ bool Solver::clampSizes()
     {
       Json::Value &item = mSpec[collection][i];
       if ( !item.isObject() )
+        continue;
+      // Scoped re-solve: clamps apply to focus items only.
+      if ( !mFocusIds.empty() &&
+           ( !item.isMember( "id" ) || !item["id"].isString() ||
+             !mFocusIds.count( item["id"].asString() ) ) )
         continue;
       Rect rect;
       if ( !toRect( item, rect ) )
@@ -938,6 +1003,62 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
     {
       content = c.items[0]->get( "content_mm", Json::Value() );
     }
+    if ( ( !content.isArray() || content.size() != 2 || !content[0].isNumeric() ||
+           !content[1].isNumeric() ) &&
+         !c.textRef.empty() )
+    {
+      // Platform 9.0 text-driven sizing: derive the content box from the
+      // referenced text item under the SAME deterministic width model the
+      // preflight uses (no Qt, no font database — platform-independent).
+      //   width  = the widest wrap line at the declared font;
+      //   height = lines × size_pt × mm/pt × leading.
+      // The wrap width is the item's declared rect width when positive,
+      // else its max_size_mm width; with neither the text measures as a
+      // single line. Unresolvable/empty text is a permanent failure, never
+      // a silent zero-size box.
+      const Json::Value *source = c.textItem;
+      const std::string text =
+        source != nullptr && source->isMember( "text" ) && ( *source )["text"].isString()
+          ? ( *source )["text"].asString()
+          : std::string();
+      if ( text.empty() )
+      {
+        if ( failReason )
+          *failReason = "fit_content text_ref '" + c.textRef +
+                        "' does not resolve to an item with text";
+        return Apply::Failed;
+      }
+      double sizePt = 9.0;
+      double lineHeight = kDefaultLineHeightFactor;
+      if ( source->isMember( "font" ) && ( *source )["font"].isObject() )
+      {
+        const Json::Value &font = ( *source )["font"];
+        if ( font.isMember( "size_pt" ) && font["size_pt"].isNumeric() )
+          sizePt = font["size_pt"].asDouble();
+        if ( font.isMember( "line_height" ) && font["line_height"].isNumeric() )
+          lineHeight = font["line_height"].asDouble();
+      }
+      double wrapWidthMm = leader.w;
+      if ( wrapWidthMm <= 0 )
+      {
+        const Json::Value &maxSize = c.items[0]->get( "max_size_mm", Json::Value() );
+        if ( maxSize.isArray() && maxSize.size() == 2 && maxSize[0].isNumeric() )
+          wrapWidthMm = maxSize[0].asDouble();
+      }
+      bool lineBudgetHit = false;
+      const std::vector<std::string> lines =
+        wrapWidthMm > 0
+          ? wrapTextMmBudgeted( text, wrapWidthMm, sizePt, &lineBudgetHit )
+          : std::vector<std::string>{ text };
+      double widthMm = 0.0;
+      for ( const std::string &line : lines )
+        widthMm = std::max( widthMm, measureLineMm( line, sizePt ) );
+      const double heightMm =
+        static_cast<double>( lines.size() ) * sizePt * kMmPerPoint * lineHeight;
+      content = Json::Value( Json::arrayValue );
+      content.append( widthMm );
+      content.append( heightMm );
+    }
     if ( !content.isArray() || content.size() != 2 || !content[0].isNumeric() ||
          !content[1].isNumeric() )
     {
@@ -968,6 +1089,39 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
     return Apply::Applied;
   }
 
+  if ( kind == "page_break" )
+  {
+    // Platform 9.0: move the single declared item to the next declared page.
+    // Idempotent once applied; the target page's existence is validated
+    // upstream and re-checked here so a hand-built document cannot silently
+    // re-page content onto page 0.
+    Json::Value *item = c.items[0];
+    // Idempotent at the document level: the applied break is stamped on the
+    // item, so re-solving a resolved document (compose → preflight →
+    // compose round trips) does not re-break it onto yet another page.
+    const Json::Value &stamp = item->get( "page_break_applied_by", Json::Value() );
+    if ( stamp.isString() && stamp.asString() == c.cid )
+      return Apply::Satisfied;
+    const int currentPage =
+      item->isMember( "page" ) && ( *item )["page"].isIntegral() ? ( *item )["page"].asInt() : 0;
+    const int targetPage = currentPage + 1;
+    if ( mPageHeights.find( targetPage ) == mPageHeights.end() )
+    {
+      if ( failReason )
+        *failReason = "page_break target page " + std::to_string( targetPage ) +
+                      " is not declared";
+      return Apply::Failed;
+    }
+    if ( item->isMember( "page" ) && ( *item )["page"].isIntegral() &&
+         ( *item )["page"].asInt() == targetPage )
+    {
+      ( *item )["page_break_applied_by"] = c.cid;
+      return Apply::Satisfied;
+    }
+    targets.push_back( { item, Rect(), targetPage, c.cid } );
+    return Apply::Applied;
+  }
+
   if ( failReason )
     *failReason = "unsupported constraint kind '" + c.kind + "'";
   return Apply::Failed;
@@ -976,7 +1130,16 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
 void Solver::applyTargets( const std::vector<TargetWrite> &targets )
 {
   for ( const TargetWrite &write : targets )
-    writeRect( *write.item, write.target );
+  {
+    if ( write.page >= 0 )
+    {
+      ( *write.item )["page"] = write.page;
+      if ( !write.stamp.empty() )
+        ( *write.item )["page_break_applied_by"] = write.stamp;
+    }
+    else
+      writeRect( *write.item, write.target );
+  }
 }
 
 bool Solver::holds( const ConstraintRuntime &c ) const
@@ -1034,6 +1197,13 @@ bool Solver::sweepHardOnce()
 {
   bool wrote = resolveAnchors();
   wrote = clampSizes() || wrote;
+  // Platform 9.0: per-pass trace (real passes only — simulations never
+  // touch the trace). The entry records only passes where constraints
+  // actually wrote; anchors/clamps move without a constraint identity and
+  // are covered by the anchors_resolved/sizes_clamped counters.
+  std::vector<std::string> appliedThisPass;
+  bool appliedTruncated = false;
+  const bool traceThisPass = mTrace && !mSimulating;
   for ( auto &c : mConstraints )
   {
     if ( c.isSoft || c.disabled )
@@ -1048,6 +1218,13 @@ bool Solver::sweepHardOnce()
     {
       applyTargets( targets );
       wrote = true;
+      if ( traceThisPass )
+      {
+        if ( static_cast<int>( appliedThisPass.size() ) < kMaxTraceAppliedPerPass )
+          appliedThisPass.push_back( c.cid );
+        else
+          appliedTruncated = true;
+      }
       if ( !mSimulating && !c.decided )
       {
         c.decided = true;
@@ -1069,9 +1246,15 @@ bool Solver::sweepHardOnce()
         // first-class decision, not only a report note). Permanent failures
         // cannot participate in the unsat-core search: no subset removal of
         // OTHER constraints changes the geometry bound that caused them.
-        decide( c, "failed",
-                failReason.empty() ? std::string( "constraint cannot be applied" )
-                                   : failReason );
+        // Recorded once, only in the real run: the unsat-core restore sweep
+        // re-runs the final real pass and must not duplicate the refusal.
+        if ( !c.failedDecided && !mSimulating )
+        {
+          c.failedDecided = true;
+          decide( c, "failed",
+                  failReason.empty() ? std::string( "constraint cannot be applied" )
+                                     : failReason );
+        }
       }
     }
     else if ( outcome == Apply::Blocked )
@@ -1079,11 +1262,29 @@ bool Solver::sweepHardOnce()
       c.blockedInLastPass = true; // inputs may materialize in a later pass
     }
   }
+  // Flush the trace entry only for passes with constraint writes: a
+  // converged final pass records nothing.
+  if ( traceThisPass && !appliedThisPass.empty() )
+  {
+    CompositionTraceEntry entry;
+    entry.pass = mPasses > 0 ? mPasses : 0;
+    entry.moves = static_cast<int>( appliedThisPass.size() );
+    entry.applied = std::move( appliedThisPass );
+    entry.truncated = appliedTruncated;
+    mTrace->push_back( std::move( entry ) );
+  }
   return wrote;
 }
 
 void Solver::relaxHard()
 {
+  std::vector<CompositionTraceEntry> trace;
+  mTrace = &trace;
+  // Platform 9.0 oscillation attribution: constraints that wrote in the
+  // FINAL pass are the fighters behind the non-convergence (a pass with no
+  // writes converges; a pass with writes at exhaustion means geometry was
+  // still flipping).
+  std::vector<CompositionOscillation> oscillations;
   for ( mPasses = 1; mPasses <= kMaxRelaxationPasses; ++mPasses )
   {
     for ( auto &c : mConstraints )
@@ -1094,16 +1295,49 @@ void Solver::relaxHard()
       // Fixpoint: every satisfiable constraint holds, nothing moved this
       // pass — the layout is stable.
       mConverged = true;
+      mTrace = nullptr;
+      mPassesTrace = std::move( trace );
       return;
     }
   }
   mPasses = kMaxRelaxationPasses;
   mConverged = false;
+  mPassesTrace = std::move( trace );
+  mTrace = nullptr;
+  // Fighters: applied in the final (exhausted) pass, in trace order.
+  if ( !mPassesTrace.empty() )
+  {
+    const CompositionTraceEntry &last = mPassesTrace.back();
+    for ( const auto &cid : last.applied )
+    {
+      for ( const auto &c : mConstraints )
+        if ( c.cid == cid )
+        {
+          CompositionOscillation oscillation;
+          oscillation.cid = c.cid;
+          oscillation.kind = c.kind;
+          oscillations.push_back( oscillation );
+          break;
+        }
+    }
+  }
   restoreRects( mPreSolveRects );
   std::string ids;
   for ( const auto &c : mConstraints )
     if ( !c.isSoft && !c.disabled )
       ids += ( ids.empty() ? "" : ", " ) + c.cid;
+  if ( !oscillations.empty() )
+  {
+    std::string fighters;
+    for ( const auto &oscillation : oscillations )
+      fighters += ( fighters.empty() ? "" : ", " ) + oscillation.cid;
+    mReport.add( "|oscillation",
+                 "oscillation detected: " + fighters +
+                   " were still writing when the pass budget was exhausted — a "
+                   "contradictory cycle, not progress; the layout was rolled back "
+                   "to its pre-solve geometry" );
+    mOscillations = std::move( oscillations );
+  }
   mReport.add( "|non-convergence",
                "constraint relaxation did not converge within " +
                  std::to_string( kMaxRelaxationPasses ) + " passes; still active: " +
@@ -1252,13 +1486,20 @@ void Solver::searchCores()
       c.disabled = false;
       c.blockedInLastPass = false;
     }
-    for ( int pass = 0; pass < kMaxRelaxationPasses; ++pass )
+    // Mirror relaxHard exactly — including the #864 rollback: a system that
+    // exhausted the budget in the real run must ALSO exhaust (and roll
+    // back) here, otherwise the restore sweep would park the document in
+    // mid-oscillation geometry instead of the reported pre-solve snapshot.
+    int restorePass = 0;
+    for ( ; restorePass < kMaxRelaxationPasses; ++restorePass )
     {
       for ( auto &c : mConstraints )
         c.blockedInLastPass = false;
       if ( !sweepHardOnce() )
         break;
     }
+    if ( restorePass == kMaxRelaxationPasses )
+      restoreRects( mPreSolveRects );
     // Re-apply anchor authority + failed leave-sweep state for disabled
     // constraints so finalize() counts them exactly as the real run did.
     for ( auto &c : mConstraints )
@@ -1333,10 +1574,14 @@ void Solver::applySofts()
                                         ? std::string( "cannot be applied; it leaves the sweep" )
                                         : failReason + " — it leaves the sweep" ) );
         // Same ledger contract as the hard sweep: the refusal itself is the
-        // decision record.
-        decide( c, "failed",
-                failReason.empty() ? std::string( "constraint cannot be applied" )
-                                   : failReason );
+        // decision record — once (P2-1).
+        if ( !c.failedDecided )
+        {
+          c.failedDecided = true;
+          decide( c, "failed",
+                  failReason.empty() ? std::string( "constraint cannot be applied" )
+                                     : failReason );
+        }
         continue;
       }
       if ( outcome == Apply::Blocked )
@@ -1490,6 +1735,9 @@ void Solver::finalize( CompositionResult &result )
   }
   result.unsatCores = mUnsatCores;
   result.fixpointPolicy = "canonical: hard before soft, priority desc, weight desc, index asc";
+  // Platform 9.0 evidence surfaces.
+  result.oscillations = mOscillations;
+  result.trace = mPassesTrace;
   // Copied last so every report line added while accounting (e.g. blocked
   // softs) is included, in report order.
   for ( const auto &note : mReport.notes() )
@@ -1540,6 +1788,31 @@ Json::Value CompositionResult::toJson() const
   }
   out["violated"] = violatedJson;
   out["unsat_cores"] = unsatCores;
+  // Platform 9.0 evidence surfaces (additive).
+  Json::Value oscillationsJson( Json::arrayValue );
+  for ( const auto &oscillation : oscillations )
+  {
+    Json::Value entry( Json::objectValue );
+    entry["cid"] = oscillation.cid;
+    entry["kind"] = oscillation.kind;
+    oscillationsJson.append( entry );
+  }
+  out["oscillations"] = oscillationsJson;
+  Json::Value traceJson( Json::arrayValue );
+  for ( const auto &entry : trace )
+  {
+    Json::Value passJson( Json::objectValue );
+    passJson["pass"] = entry.pass;
+    passJson["moves"] = entry.moves;
+    Json::Value appliedJson( Json::arrayValue );
+    for ( const auto &cid : entry.applied )
+      appliedJson.append( cid );
+    passJson["applied"] = appliedJson;
+    if ( entry.truncated )
+      passJson["truncated"] = true;
+    traceJson.append( passJson );
+  }
+  out["trace"] = traceJson;
   return out;
 }
 
@@ -1558,6 +1831,35 @@ CompositionResult resolveComposition( Json::Value &spec, double marginDefaultMm 
 
   Report report;
   Solver solver( spec, marginDefaultMm, report );
+  solver.normalize();
+  solver.buildRuntimes();
+  solver.sortCanonical();
+  solver.detectCycles();
+  solver.snapshotGeometry();
+  solver.relaxHard();
+  solver.searchCores();
+  solver.applySofts();
+  solver.finalize( result );
+  return result;
+}
+
+CompositionResult resolveCompositionScoped( Json::Value &spec, double marginDefaultMm,
+                                            const std::vector<std::string> &focusItemIds )
+{
+  CompositionResult result;
+  if ( !spec.isObject() || !spec.isMember( "page" ) || !spec["page"].isObject() )
+    return result;
+  const double pageW = spec["page"].get( "width_mm", 297.0 ).asDouble();
+  const double pageH = spec["page"].get( "height_mm", 210.0 ).asDouble();
+  if ( !( pageW > 0 ) || !( pageH > 0 ) )
+  {
+    result.unsatisfied.push_back( "page geometry must be positive before composition resolves" );
+    return result;
+  }
+
+  Report report;
+  Solver solver( spec, marginDefaultMm, report );
+  solver.setFocusIds( focusItemIds );
   solver.normalize();
   solver.buildRuntimes();
   solver.sortCanonical();

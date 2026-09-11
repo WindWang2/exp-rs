@@ -321,6 +321,54 @@ void checkV3ItemFields( const Json::Value &item, const std::string &id, const st
       }
     }
   }
+  // Platform 9.0: declared chart/colorbar overlay intent. `overlay_on`
+  // names the map frame(s) the item intentionally covers; references must
+  // resolve so a typo can never silently weaken the coverage rule.
+  if ( item.isMember( "overlay_on" ) )
+  {
+    const Json::Value &overlay = item["overlay_on"];
+    if ( overlay.isString() )
+    {
+      if ( overlay.asString().empty() )
+        problems.push_back( id + ": overlay_on must be a non-empty frame id" );
+      else if ( !mapFrameIds.count( overlay.asString() ) )
+        problems.push_back( id + ": overlay_on '" + overlay.asString() +
+                            "' does not resolve to a map frame" );
+    }
+    else if ( overlay.isArray() )
+    {
+      if ( overlay.empty() )
+        problems.push_back( id + ": overlay_on array must not be empty" );
+      for ( const auto &frameId : overlay )
+        if ( !frameId.isString() || frameId.asString().empty() )
+          problems.push_back( id + ": overlay_on entries must be non-empty frame ids" );
+        else if ( !mapFrameIds.count( frameId.asString() ) )
+          problems.push_back( id + ": overlay_on '" + frameId.asString() +
+                              "' does not resolve to a map frame" );
+    }
+    else
+      problems.push_back( id + ": overlay_on must be a frame id or an array of frame ids" );
+  }
+  // Platform 9.0: text items may declare an atlas-driven `expression`
+  // (QGIS-native `[% … %]` label markup; validity is checked at compile) and
+  // a `continuation` block for cross-page references.
+  if ( item.isMember( "expression" ) &&
+       ( !item["expression"].isString() || item["expression"].asString().empty() ) )
+    problems.push_back( id + ": expression must be a non-empty QGIS expression string" );
+  if ( item.isMember( "continuation" ) )
+  {
+    const Json::Value &continuation = item["continuation"];
+    if ( !continuation.isObject() )
+      problems.push_back( id + ": continuation must be an object" );
+    else
+    {
+      if ( continuation.isMember( "label" ) && !continuation["label"].isString() )
+        problems.push_back( id + ": continuation.label must be a string" );
+      if ( item.isMember( "page" ) && item["page"].isIntegral() && item["page"].asInt() < 1 )
+        problems.push_back( id + ": continuation is only meaningful on items moved "
+                                 "past page 0 (declare page or a page_break)" );
+    }
+  }
 }
 
 } // namespace
@@ -342,7 +390,8 @@ bool isConstraintKind( const std::string &kind )
   static const char *const kKinds[] = { "align", "match_width", "match_height", "stack",
                                         "distribute", "above", "below", "left_of",
                                         "right_of", "inside", "keep_with",
-                                        "avoid_overlap", "fit_content" };
+                                        "avoid_overlap", "fit_content",
+                                        "page_break" };
   for ( const char *candidate : kKinds )
     if ( kind == candidate )
       return true;
@@ -633,6 +682,13 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
       if ( info->requiresRect && item.isMember( "rect_mm" ) )
         checkRect( item, id, problems );
 
+      // Platform 9.0: map frames may declare their CRS. Shape-checked here
+      // (non-empty string); presence is a report-quality obligation enforced
+      // by preflight (MAP_MISSING_CRS_NOTE accepts a declared frame CRS).
+      if ( std::string( info->name ) == "map_frames" && item.isMember( "crs" ) &&
+           ( !item["crs"].isString() || item["crs"].asString().empty() ) )
+        problems.push_back( id + ": crs must be a non-empty string (e.g. \"EPSG:4326\")" );
+
       if ( info->mayReferenceMap && item.isMember( "map_ref" ) && item["map_ref"].isString() )
       {
         const std::string mapRef = item["map_ref"].asString();
@@ -648,6 +704,9 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
       if ( std::string( info->name ) == "charts" &&
            ( !item.isMember( "chart" ) || !item["chart"].isObject() ) )
         problems.push_back( id + ": chart needs a 'chart' object" );
+      else if ( std::string( info->name ) == "charts" && item["chart"].isMember( "dual_axis" ) &&
+                !item["chart"]["dual_axis"].isBool() )
+        problems.push_back( id + ": chart.dual_axis must be a boolean" );
 
       // Platform 8.0: NoData legend declaration shape (label/color strings).
       if ( std::string( info->name ) == "legends" && item.isMember( "nodata" ) )
@@ -741,7 +800,7 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
             problems.push_back( cid + ": unknown constraint kind '" + kind +
                                 "' (align|match_width|match_height|stack|distribute|"
                                 "above|below|left_of|right_of|inside|keep_with|"
-                                "avoid_overlap|fit_content|frame_style)" );
+                                "avoid_overlap|fit_content|page_break|frame_style)" );
           continue;
         }
         // v4: explainable-solve surface. Closed vocabulary and bounded
@@ -793,13 +852,76 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
           }
           if ( kind == "fit_content" )
           {
+            // Platform 9.0: content comes from an explicit content_mm or is
+            // derived at solve time from a referenced text item
+            // (text-driven sizing); exactly one of the two is required for a
+            // well-formed declaration.
             const Json::Value &content = constraint.get( "content_mm", Json::Value() );
-            if ( !isPositiveSizeArray( content ) )
-              problems.push_back( cid + ": fit_content needs content_mm [width_mm, height_mm]" );
+            const bool hasContent = isPositiveSizeArray( content );
+            const Json::Value &textRef = constraint.get( "text_ref", Json::Value() );
+            const bool hasTextRef = textRef.isString() && !textRef.asString().empty();
+            if ( hasContent && hasTextRef )
+              problems.push_back( cid + ": fit_content declares both content_mm and "
+                                       "text_ref; content_mm wins — remove one" );
+            else if ( !hasContent && !hasTextRef )
+              problems.push_back( cid + ": fit_content needs content_mm [width_mm, "
+                                       "height_mm] or text_ref <item id>" );
+            else if ( hasTextRef && findMapSpecItem( spec, textRef.asString() ).isNull() )
+              problems.push_back( cid + ": fit_content text_ref '" + textRef.asString() +
+                                  "' does not resolve" );
           }
           if ( constraint.isMember( "gap_mm" ) &&
                ( !constraint["gap_mm"].isNumeric() || constraint["gap_mm"].asDouble() < 0 ) )
             problems.push_back( cid + ": gap_mm must be a non-negative number" );
+          continue;
+        }
+        if ( kind == "page_break" )
+        {
+          // Platform 9.0: one declared item moves to the next declared page.
+          // The target page must exist at validation time so a broken
+          // document can never silently re-page content onto page 0.
+          if ( !constraint.isMember( "items" ) || !constraint["items"].isArray() ||
+               static_cast<int>( constraint["items"].size() ) != 1 )
+          {
+            problems.push_back( cid + ": page_break needs an items array with exactly 1 id" );
+            continue;
+          }
+          const Json::Value &reference = constraint["items"][0];
+          if ( reference.isString() &&
+               findMapSpecItem( spec, reference.asString() ).isNull() )
+            problems.push_back( cid + ": constraint item '" + reference.asString() +
+                                "' does not resolve" );
+          const int declaredPages =
+            spec.isMember( "pages" ) && spec["pages"].isArray()
+              ? static_cast<int>( spec["pages"].size() )
+              : 0;
+          int currentPage = -1;
+          bool alreadyApplied = false;
+          if ( reference.isString() )
+          {
+            const Json::Value location = findMapSpecItem( spec, reference.asString() );
+            if ( !location.isNull() )
+            {
+              const Json::Value &item =
+                spec[location["collection"].asString()][location["index"].asInt()];
+              if ( item.isMember( "page" ) && item["page"].isIntegral() )
+                currentPage = item["page"].asInt();
+              else
+                currentPage = 0;
+              // A resolved document carries the applied-break provenance:
+              // the solver owns that state, validation must not re-flag it.
+              const Json::Value &stamp =
+                item.get( "page_break_applied_by", Json::Value() );
+              alreadyApplied = stamp.isString() && !stamp.asString().empty();
+            }
+          }
+          if ( alreadyApplied )
+            continue;
+          if ( currentPage + 1 > declaredPages )
+            problems.push_back( cid + ": page_break target page " +
+                                std::to_string( currentPage + 1 ) +
+                                " is not declared (pages[] carries " +
+                                std::to_string( declaredPages ) + " entries)" );
           continue;
         }
         if ( !constraint.isMember( "items" ) || !constraint["items"].isArray() ||
@@ -857,6 +979,32 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
           const std::string role = pageEntry["role"].isString() ? pageEntry["role"].asString() : "";
           if ( role != "cover" && role != "map" && role != "report" && role != "appendix" )
             problems.push_back( "page.role must be cover|map|report|appendix" );
+        }
+        // Platform 9.0: master furniture — item ids repeated onto this page.
+        if ( pageEntry.isMember( "furniture" ) )
+        {
+          const Json::Value &furniture = pageEntry["furniture"];
+          if ( !furniture.isArray() )
+            problems.push_back( "page.furniture must be an array of item ids" );
+          else if ( static_cast<int>( furniture.size() ) > 32 )
+            problems.push_back( "page.furniture exceeds the 32 entry budget" );
+          else
+          {
+            std::set<std::string> seen;
+            for ( const auto &reference : furniture )
+            {
+              if ( !reference.isString() || reference.asString().empty() )
+              {
+                problems.push_back( "page.furniture entries must be non-empty item id strings" );
+                continue;
+              }
+              if ( !seen.insert( reference.asString() ).second )
+                problems.push_back( "page.furniture repeats item '" + reference.asString() + "'" );
+              else if ( findMapSpecItem( spec, reference.asString() ).isNull() )
+                problems.push_back( "page.furniture item '" + reference.asString() +
+                                    "' does not resolve" );
+            }
+          }
         }
         if ( pageEntry.isMember( "page_if" ) )
         {

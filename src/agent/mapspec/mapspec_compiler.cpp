@@ -10,6 +10,7 @@
 #include "mapspec.h"
 
 #include <qgsapplication.h>
+#include <qgsexpression.h>
 #include <qgslayout.h>
 #include <qgslayoutitemchart.h>
 #include <qgslayoutitemlabel.h>
@@ -171,6 +172,46 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
     // Evaluation errors are advisory: unevaluable conditions kept their
     // content, and the caller's preflight reports them.
     Q_UNUSED( conditionErrors );
+  }
+
+  // --- Platform 9.0: master furniture expansion -----------------------------
+  // `pages[k].furniture` names items to repeat onto page k+1. Each reference
+  // is materialized as a clone declared next to the original (id
+  // `<id>-p<k+1>`, provenance `master_of: <id>`) BEFORE validation, so the
+  // clone flows through the exact same compile paths (component defaults,
+  // solver, page placement) as hand-declared furniture — one compile path,
+  // no special casing downstream. Unresolvable ids are left alone here;
+  // validateMapSpec reports them (`page.furniture item '…' does not
+  // resolve`), as do id collisions with hand-declared `<id>-p<n>` items.
+  if ( spec.isObject() && spec.isMember( "pages" ) && spec["pages"].isArray() )
+  {
+    const Json::Value pages = spec["pages"]; // stable copy: expansion appends
+    for ( Json::Value::ArrayIndex k = 0; k < pages.size(); ++k )
+    {
+      const Json::Value &pageEntry = pages[k];
+      if ( !pageEntry.isObject() || !pageEntry.isMember( "furniture" ) ||
+           !pageEntry["furniture"].isArray() )
+        continue;
+      const int pageIndex = static_cast<int>( k ) + 1;
+      for ( const auto &reference : pageEntry["furniture"] )
+      {
+        if ( !reference.isString() )
+          continue;
+        const std::string masterId = reference.asString();
+        const Json::Value location = findMapSpecItem( spec, masterId );
+        if ( location.isNull() )
+          continue; // validateMapSpec reports the dangling reference
+        const std::string cloneId = masterId + "-p" + std::to_string( pageIndex );
+        if ( !findMapSpecItem( spec, cloneId ).isNull() )
+          continue; // validateMapSpec reports the duplicate id
+        Json::Value clone =
+          spec[location["collection"].asString()][location["index"].asInt()];
+        clone["id"] = cloneId;
+        clone["page"] = pageIndex;
+        clone["master_of"] = masterId;
+        spec[location["collection"].asString()].append( clone );
+      }
+    }
   }
   const auto problems = validateMapSpec( spec );
   if ( !problems.empty() )
@@ -629,10 +670,36 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
   }
 
   // --- text furniture (token-styled; item font overrides tokens) -----------
+  // Platform 9.0: a declared `expression` compiles to QGIS-native
+  // `[% … %]` label markup — evaluated at render time against the layout
+  // expression context (atlas feature included when the atlas is driving).
+  // An unparseable expression is a compile failure, never silently static
+  // text. `expression` beats `text` when both are declared.
+  const auto textWithExpression = [ & ]( const Json::Value &item, Json::Value &props ) -> bool {
+    if ( !item.isMember( "expression" ) || !item["expression"].isString() )
+      return true;
+    const QString expression =
+      QString::fromStdString( item["expression"].asString() );
+    if ( QgsExpression( expression ).hasParserError() )
+    {
+      if ( error )
+        *error = QStringLiteral( "%1: invalid expression: %2" )
+                   .arg( QString::fromStdString( item["id"].asString() ),
+                         QgsExpression( expression ).parserErrorString() );
+      return false;
+    }
+    props["text"] = QStringLiteral( "[% %1 %]" ).arg( expression ).toStdString();
+    return true;
+  };
   for ( const auto &title : itemsOf( "titles" ) )
   {
     Json::Value props = rectToProps( title["rect_mm"] );
     props["text"] = title.get( "text", "" );
+    if ( !textWithExpression( title, props ) )
+    {
+      LayoutService::instance().deleteLayout( QString::fromStdString( spec["layout_name"].asString() ) );
+      return nullptr;
+    }
     applyTokenTextStyle( props, title, tokens, "title", 18.0 );
     compileTextItem( layout, "title", title["id"].asString(), props, tokens );
   }
@@ -640,6 +707,11 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
   {
     Json::Value props = rectToProps( label["rect_mm"] );
     props["text"] = label.get( "text", "" );
+    if ( !textWithExpression( label, props ) )
+    {
+      LayoutService::instance().deleteLayout( QString::fromStdString( spec["layout_name"].asString() ) );
+      return nullptr;
+    }
     applyTokenTextStyle( props, label, tokens, "body", 9.0 );
     compileTextItem( layout, "label", label["id"].asString(), props, tokens );
   }
@@ -910,6 +982,46 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       }
       props["path"] = path.toStdString();
       compileItem( layout, "picture", colorbar["id"].asString(), props, nullptr );
+    }
+  }
+
+  // --- Platform 9.0: continuation labels (cross-page references) -----------
+  // An item declaring `continuation` and living past page 0 (declared page
+  // or a solver-applied page_break) compiles a small caption naming the
+  // DISPLAY page number (1-based: page index 1 renders as page 2). The
+  // solver has already run, so page_break outcomes participate.
+  for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+  {
+    const char *collection = mapspec::kCollections[c];
+    if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+      continue;
+    for ( const auto &item : spec[collection] )
+    {
+      if ( !item.isObject() || !item.isMember( "continuation" ) ||
+           !item["continuation"].isObject() || !item.isMember( "id" ) ||
+           !item["id"].isString() || !item.isMember( "rect_mm" ) ||
+           !item["rect_mm"].isArray() || item["rect_mm"].size() != 4 )
+        continue;
+      const int pageIndex =
+        item.isMember( "page" ) && item["page"].isIntegral() ? item["page"].asInt() : 0;
+      if ( pageIndex < 1 )
+        continue; // validation already reported page-0 continuations
+      std::string caption = "continued";
+      if ( item["continuation"].isMember( "label" ) &&
+           item["continuation"]["label"].isString() &&
+           !item["continuation"]["label"].asString().empty() )
+        caption = item["continuation"]["label"].asString();
+      caption += " page " + std::to_string( pageIndex + 1 );
+      Json::Value props( Json::objectValue );
+      props["x"] = item["rect_mm"][0].asDouble();
+      props["y"] = item["rect_mm"][1].asDouble() + item["rect_mm"][3].asDouble() + 0.5;
+      props["width"] = item["rect_mm"][2].asDouble();
+      props["height"] = 4.0;
+      props["text"] = caption;
+      applyTokenTextStyle( props, item, tokens, "caption", 6.0 );
+      if ( QgsLayoutItem *captionItem = compileTextItem(
+             layout, "label", item["id"].asString() + "-continuation", props, tokens ) )
+        placeWithParentPage( captionItem, item );
     }
   }
 
