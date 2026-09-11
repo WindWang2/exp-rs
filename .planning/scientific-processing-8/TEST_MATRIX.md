@@ -31,3 +31,24 @@ Populated per milestone; each row = behavior → test case → executed evidence
 ## Resource bounds used in tests
 - Grid sizes ≤ 512×512; vectors ≤ 4 features; no network, no GPU.
 - Rasterization/feature caches bounded by constants documented in the headers.
+
+## Executed evidence (final, post-review-remediation, post master re-merge 226adb8d02)
+
+| Suite | Result |
+|---|---|
+| test_sar_geocoding | PASS — 958 assertions / 7 cases |
+| test_raster_vector | PASS — 119 assertions / 7 cases (incl. >1024-feature + zero-valid-zone regressions) |
+| test_sar_temporal_stats | PASS — 238 assertions / 5 cases |
+| test_spectral_formula_drift | PASS — 145 assertions / 4 cases |
+| test_algorithm_meta_drift | PASS — 2270 assertions (4 new sidecars byte-identical) |
+| test_sar_operators | PASS — 530 assertions / 16 cases |
+| test_sar_kernels | PASS — 89 assertions / 12 cases |
+| test_catalog_size | PASS — budget 160→176 KiB (documented) |
+| test_algorithm_organization | PASS — 593 assertions / 9 cases |
+| test_algorithm_schema | PASS — 31 assertions |
+| test_harness_catalog | PASS — 93 assertions / 5 cases |
+| test_capability_drift | 13/15 — 2 failures PRE-EXISTING on master (zero diff: src/agent, the test file, data/agent; see REVIEW_LOG) |
+
+Commands: `cmake --build build --target <target> -j 2` then
+`./build/tests/<target>` per suite (bounded parallelism; host shared with
+five concurrent 8.0 track worktrees).
