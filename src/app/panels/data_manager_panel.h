@@ -87,6 +87,12 @@ class DataManagerPanel : public QDockWidget
     /// it). Hosts may lower it for constrained displays; never silently —
     /// the sentinel row always names the exact totals.
     void setStandaloneRowCap( int maxRows );
+    /// Workbench 9.0 M7: bounded pagination over the filtered standalone
+    /// catalog. Page size is the standalone row cap; flipping a page re-slices
+    /// the index and re-renders at most that many rows.
+    int standalonePage() const { return m_standalonePage; }
+    void setStandalonePage( int page );
+    int standalonePageCount() const { return m_standalonePageCount; }
     static constexpr int kDefaultStandaloneRowCap = 20000;
 
   signals:
@@ -155,6 +161,12 @@ class DataManagerPanel : public QDockWidget
     sicnu::AssetCatalogIndex m_catalogIndex;
     bool m_indexBuilt = false; ///< first refresh builds the index once
     int m_standaloneRowCap = kDefaultStandaloneRowCap;
+    int m_standalonePage = 0;
+    int m_standalonePageCount = 0;
+    QWidget *m_pagerRow = nullptr;
+    class QToolButton *m_prevPageBtn = nullptr;
+    class QToolButton *m_nextPageBtn = nullptr;
+    class QLabel *m_pageLabel = nullptr;
 };
 
 } // namespace sicnu

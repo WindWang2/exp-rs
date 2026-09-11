@@ -524,8 +524,35 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   m_filterEdit->setClearButtonEnabled( true );
   m_filterEdit->setAccessibleName( tr( "过滤数据资产" ) );
   treePaneLay->addWidget( m_filterEdit );
+
+  // Workbench 9.0 M7: bounded pagination over the filtered catalog — the UI
+  // browses any catalog size in windows of standaloneRowCap rows instead of
+  // truncating past the first window. Hidden while everything fits in one
+  // page (the common case), so small catalogs render exactly as before.
+  auto *pagerRow = new QWidget( treePane );
+  pagerRow->setObjectName( QStringLiteral( "dataManagerPager" ) );
+  auto *pagerLay = new QHBoxLayout( pagerRow );
+  pagerLay->setContentsMargins( 0, 0, 0, 0 );
+  m_prevPageBtn = new QToolButton( pagerRow );
+  m_prevPageBtn->setObjectName( QStringLiteral( "dataManagerPagerPrev" ) );
+  m_prevPageBtn->setText( tr( "上一页" ) );
+  m_prevPageBtn->setAutoRepeat( false );
+  m_pageLabel = new QLabel( pagerRow );
+  m_pageLabel->setObjectName( QStringLiteral( "dataManagerPagerLabel" ) );
+  m_pageLabel->setAccessibleName( tr( "资产分页状态" ) );
+  m_nextPageBtn = new QToolButton( pagerRow );
+  m_nextPageBtn->setObjectName( QStringLiteral( "dataManagerPagerNext" ) );
+  m_nextPageBtn->setText( tr( "下一页" ) );
+  m_nextPageBtn->setAutoRepeat( false );
+  pagerLay->addWidget( m_prevPageBtn );
+  pagerLay->addWidget( m_pageLabel, 1 );
+  pagerLay->addWidget( m_nextPageBtn );
+  pagerRow->setVisible( false );
+  treePaneLay->addWidget( pagerRow );
+  m_pagerRow = pagerRow;
+
   treePaneLay->addWidget( m_tree, 1 );
-  m_treeStack->addWidget( treePane ); // Index 0: Tree (+ filter)
+  m_treeStack->addWidget( treePane ); // Index 0: Tree (+ filter + pager)
 
   m_emptyState = new RsEmptyStateWidget(
       QStringLiteral( "d_t_b_se" ),
@@ -592,8 +619,26 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   m_filterDebounce->setSingleShot( true );
   m_filterDebounce->setInterval( 250 );
   connect( m_filterDebounce, &QTimer::timeout, this, &DataManagerPanel::refresh );
+  connect( m_prevPageBtn, &QToolButton::clicked, this, [this] {
+    if ( m_standalonePage > 0 )
+    {
+      --m_standalonePage;
+      refresh();
+    }
+  } );
+  connect( m_nextPageBtn, &QToolButton::clicked, this, [this] {
+    if ( m_standalonePage + 1 < m_standalonePageCount )
+    {
+      ++m_standalonePage;
+      refresh();
+    }
+  } );
+
   connect( m_filterEdit, &QLineEdit::textChanged, this,
-           [this] { m_filterDebounce->start(); } );
+           [this] {
+               m_standalonePage = 0; // M7: a new filter starts at page 0
+               m_filterDebounce->start();
+           } );
 
   if ( m_dataManager )
   {
@@ -1065,21 +1110,45 @@ void DataManagerPanel::refresh()
     temporalGroup->setExpanded( true );
   }
 
-  // Standalone assets: bounded rendering with truthful truncation.
+  // Standalone assets: bounded pagination (Workbench 9.0 M7). The window is
+  // standaloneRowCap rows; beyond it the pager names the exact slice and
+  // totals instead of a one-way truncation sentinel. Single-page catalogs
+  // render exactly as before (pager hidden, no extra rows).
   {
-    int rendered = 0;
-    for ( const int idx : standalone )
+    m_standalonePageCount =
+      standalone.size() > 0 ? ( standalone.size() + m_standaloneRowCap - 1 ) / m_standaloneRowCap : 0;
+    if ( m_standalonePage >= m_standalonePageCount )
+      m_standalonePage = qMax( 0, m_standalonePageCount - 1 );
+
+    const int begin = m_standalonePage * m_standaloneRowCap;
+    const int end = qMin( standalone.size(), begin + m_standaloneRowCap );
+    for ( int i = begin; i < end; ++i )
+      addIndexRow( nullptr, m_catalogIndex.entries()[standalone[i]] );
+
+    const bool paginated = m_standalonePageCount > 1;
+    if ( paginated )
     {
-      if ( rendered >= m_standaloneRowCap )
-        break;
-      addIndexRow( nullptr, m_catalogIndex.entries()[idx] );
-      ++rendered;
-    }
-    if ( standalone.size() > rendered )
       addSentinelRow( nullptr,
-                      tr( "仅显示前 %1 项 / 共 %2 项资产 — 使用过滤缩小范围" )
-                        .arg( rendered )
-                        .arg( standalone.size() ) );
+                      tr( "第 %1–%2 项 / 共 %3 项资产（第 %4/%5 页）" )
+                        .arg( begin + 1 )
+                        .arg( end )
+                        .arg( standalone.size() )
+                        .arg( m_standalonePage + 1 )
+                        .arg( m_standalonePageCount ) );
+    }
+    if ( m_pagerRow )
+    {
+      m_pagerRow->setVisible( paginated );
+      if ( m_pageLabel )
+        m_pageLabel->setText( tr( "第 %1/%2 页 · 共 %3 项" )
+                                .arg( m_standalonePage + 1 )
+                                .arg( qMax( 1, m_standalonePageCount ) )
+                                .arg( standalone.size() ) );
+      if ( m_prevPageBtn )
+        m_prevPageBtn->setEnabled( m_standalonePage > 0 );
+      if ( m_nextPageBtn )
+        m_nextPageBtn->setEnabled( m_standalonePage + 1 < m_standalonePageCount );
+    }
   }
 
   if ( !previouslySelected.isEmpty() )
