@@ -4,6 +4,7 @@
 #include "app/workbench/marshal_ui.h"
 
 #include <QCoreApplication>
+#include <QThread>
 
 #include <atomic>
 #include <functional>

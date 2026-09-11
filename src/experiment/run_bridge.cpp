@@ -161,7 +161,10 @@ Result<void> ExperimentRunBridge::attachExecutionPins( const QString &executionR
         return VoidResult::success();
     }
 
-    const auto run = m_store->runById( runId );
+    // Not const: the Created-status path below mutates the run record in
+    // place through operator-> before upserting (const std::optional<T>'s
+    // operator-> yields const T* — GCC 16 rejects the discarded qualifiers).
+    auto run = m_store->runById( runId );
     if ( !run )
         return failVoid( QStringLiteral( "experiment.run_not_found" ),
                          QStringLiteral( "run %1 is not in the store" ).arg( runId ) );
