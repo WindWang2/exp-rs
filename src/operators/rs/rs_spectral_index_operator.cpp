@@ -349,9 +349,8 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     // index kernel is strictly element-wise, so block-wise invocation is
     // bit-identical to a full-raster pass. (The scale regime is already
     // resolved ONCE above — declared metadata or the bounded probe; a second
-    // sampled "isScaledDataset" heuristic used to re-derive it here with
-    // hardcoded sentinel guesses and was removed as dead, divergent logic
-    // (#856).)
+    // sampled re-probe heuristic used to re-derive it here with hardcoded
+    // sentinel guesses and was removed as dead, divergent logic (#856).)
     const int blockRows = std::max(1, std::min(256, height));
     const size_t blockSize = static_cast<size_t>(width) * blockRows;
 

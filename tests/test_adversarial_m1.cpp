@@ -218,7 +218,10 @@ TEST_CASE( "Adversarial: DEM flow accumulation endorheic basin enclosed by NoDat
 
     REQUIRE( TerrainFlow::fillDepressions( dem.data(), filled.data(), W, H, kNodata ) );
     CHECK( filled[2 * W + 2] == Approx( 8.0f ) );
-    REQUIRE( TerrainFlow::flowDirections( dem.data(), dir.data(), W, H, kNodata ) );
+    // D8 routes over the FILLED surface (the terrain_flow.h contract) —
+    // routing over the raw DEM would re-introduce the depression the fill
+    // just removed.
+    REQUIRE( TerrainFlow::flowDirections( filled.data(), dir.data(), W, H, kNodata ) );
     REQUIRE( TerrainFlow::flowAccumulation( dir.data(), acc.data(), W, H ) );
 
     // Center cell (2, 2) is a fill flat: #848 (Scientific Algorithms 9.0)

@@ -22,9 +22,9 @@ Invocation: `cmake --build build --target <t> -j4` then run the binary with
 | `test_e2e_open_issues` | fillDepressions / scale-probe / flatten E2E | All tests passed (216 assertions, 47 cases) |
 | `test_spectral_formula_drift` | #856 probe path | All tests passed (145 assertions, 4 cases) |
 | `test_sar_operators` | flatten/correction operator paths | All tests passed (530 assertions, 16 cases) |
-| `test_sar_geocoding` | new over-budget-fallback known-answer case | All tests passed (5768 assertions, 8 cases) |
-| `test_scientific_defects_9` | M0 corpus (after provenance remediation) | All tests passed (116 assertions, 9 cases) |
-| `test_semantic_drift_9` | M1 drift guards | All tests passed (23 assertions, 6 cases) |
+| `test_sar_geocoding` | new over-budget-fallback known-answer case, now asserting `perPixelFallbackPixels` | All tests passed (5769 assertions, 8 cases) |
+| `test_scientific_defects_9` | M0 corpus (post-review remediation: correction-operator ordering regression, band-1 tag consequence) | All tests passed (130 assertions, 10 cases) |
+| `test_semantic_drift_9` | M1 drift guards (identifier anchors post-review) | All tests passed (22 assertions, 6 cases) |
 
 ## M3/M5/M7 audit suites (no code changes — execution evidence)
 
@@ -40,6 +40,9 @@ Invocation: `cmake --build build --target <t> -j4` then run the binary with
 Tolerances note (Reviewer B): gamma0 E2E margin 1e-3 covers float32 DEM /
 geotransform serialization round-trip; EVI margin 1e-4 on 0.6667 covers the
 float32 raster I/O round-trip; both verified against double closed forms.
+
+Post-review remediation full rerun (11 suites): **all green, 9,511
+assertions total**, on the merge of `origin/master` `f316dfdbb4`.
 
 ## Not runnable here / not applicable
 

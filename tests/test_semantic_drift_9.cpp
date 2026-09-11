@@ -32,10 +32,13 @@ TEST_CASE( "Gradient kernels normalize each axis by its own spacing (#855)",
            "[drift][sar][anisotropic]" )
 {
     const std::string sar = readSource( "src/processing/algorithms/sar/sar_terrain.cpp" );
-    // The anisotropic seam is the two-parameter form; the single averaged
-    // scalar must not return.
+    // Positive anchors: the per-axis seam parameters (a signature revert to
+    // a single spacing trips these).
     REQUIRE( sar.find( "cellSizeXMeters" ) != std::string::npos );
     REQUIRE( sar.find( "cellSizeYMeters" ) != std::string::npos );
+    // Negative anchor: the removed averaged-spacing expression. Equivalent
+    // rewrites would evade it; the anisotropic known-answer tests are the
+    // behavioral enforcement — this is a backstop for the exact audited form.
     REQUIRE( sar.find( "0.5 * ( cellX + cellY )" ) == std::string::npos );
     REQUIRE( sar.find( "0.5 * (cellX + cellY)" ) == std::string::npos );
 }
@@ -60,10 +63,13 @@ TEST_CASE( "Priority-flood fill seeds the NoData-adjacent boundary (#848)",
 TEST_CASE( "Typed multi-band SAR outputs declare per-band NoData (#854)",
            "[drift][sar][nodata]" )
 {
-    // The two SAR terrain operators write Float32 + Byte-mask outputs; the
-    // blanket dataset-wide setter cannot express the Byte sentinel and must
-    // stay out of exactly these files (new typed multi-band writers should
-    // use setBandNoDataValue and be added here).
+    // The two SAR terrain operators write all-Float32 outputs carrying a
+    // Byte-VALUED validity mask band; the blanket dataset-wide setter cannot
+    // express the mask's integer sentinel and must stay out of exactly these
+    // files (new mask-carrying writers should use setBandNoDataValue and be
+    // added here). NOTE: this anchor cannot see the DECLARATION ORDER — the
+    // GTiff tag-ordering rule (NaN bands first, mask 255 last) is pinned by
+    // the read-back regression cases in test_scientific_defects_9.
     for ( const char *op :
           { "src/operators/rs/rs_sar_terrain_flatten_operator.cpp",
             "src/operators/rs/rs_sar_terrain_correction_operator.cpp" } )
@@ -80,10 +86,11 @@ TEST_CASE( "Spectral scale probing carries no hardcoded sentinels (#856)",
 {
     const std::string op =
         readSource( "src/operators/rs/rs_spectral_index_operator.cpp" );
-    // The removed #856 dead block invented -9999/65535 sentinel guesses;
-    // sentinel semantics live in nodata_utils (declared metadata) only.
-    REQUIRE( op.find( "65535" ) == std::string::npos );
-    REQUIRE( op.find( "9999" ) == std::string::npos );
+    // The removed #856 dead block invented sentinel guesses; sentinel
+    // semantics live in nodata_utils (declared metadata) only. Anchor on
+    // the removed block's identifier so the re-probe cannot return under
+    // any constant spelling.
+    REQUIRE( op.find( "isScaledDataset" ) == std::string::npos );
 }
 
 TEST_CASE( "Declared numeric scales are finite-validated (#873)",

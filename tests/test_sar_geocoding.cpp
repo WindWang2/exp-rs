@@ -19,7 +19,9 @@
 #include <gdal.h>
 #include <ogr_spatialref.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <random>
 #include <string>
 #include <vector>
@@ -946,6 +948,11 @@ TEST_CASE( "rs:sar_geocode over-budget source window falls back to per-pixel rea
     REQUIRE_NOTHROW( result = op->run( params, ctx ) );
 
     REQUIRE( result["sampledPixels"].asUInt64() == inImageCount );
+    // The operator reports how many cells were sampled through the
+    // per-pixel fallback; over-budget means EVERY in-image cell took it —
+    // this pins the coverage structurally instead of trusting the
+    // test-side budget mirror below.
+    REQUIRE( result["perPixelFallbackPixels"].asUInt64() == inImageCount );
     REQUIRE( result["unresolvedGeometryPixels"].asUInt64() == 0ULL );
 
     // Bilinear on a linear field is exact through the 2x2 fallback too:

@@ -21,7 +21,7 @@
 
 ## Shared seams (minimal, end-of-milestone, additive)
 
-- `tests/CMakeLists.txt` — additive `sicnu_add_test(...)` lines only.
+- `tests/CMakeLists.txt` — additive target blocks in the file's prevailing sibling style.
 - `src/processing/CMakeLists.txt`, `src/operators/CMakeLists.txt` — additive
   source lines.
 - `CHANGELOG.md` — one entry at track end.

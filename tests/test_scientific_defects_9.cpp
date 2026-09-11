@@ -1,8 +1,12 @@
 // test_scientific_defects_9.cpp — Scientific Algorithms 9.0 (M0): regression
 // tests for the verified scientific defects #848, #853, #854, #855, #856 and
-// #873. Every case is written so the pre-fix code fails it (old-code-fails /
-// new-code-passes): the assertions pin the closed-form or contract behavior
-// the defect violated, not the implementation.
+// #873. Every case pins the closed-form or contract behavior the defect
+// violated, not the implementation. Old-code-fails form: the #848/#854/#855/
+// #856/#873 cases fail on the pre-fix code in any build; the two #853 cases
+// are observationally equivalent on the pre-fix code without sanitizers
+// (the out-of-range cast was undefined behavior, flagged by UBSan — see
+// UBSAN_853_EVIDENCE.txt in the planning corpus) and assert the fixed
+// sentinel-classification contract.
 
 #include "processing/algorithms/terrain_flow.h"
 #include "processing/algorithms/sar/sar_terrain.h"
@@ -249,19 +253,20 @@ TEST_CASE( "slopeAspectAt normalizes each axis by its own spacing (#855)",
 namespace
 {
 
-// Run rs:sar_terrain_flatten on the given sigma0/DEM fixtures and open the
-// result. Shared by the #854 and #855 E2E cases.
+// Run a SAR terrain operator (rs:sar_terrain_flatten by default) on the
+// given sigma0/DEM fixtures and open the result. Shared by the #854/#855
+// E2E cases and the correction-operator ordering regression.
 std::unique_ptr<GdalDatasetWrapper>
 runFlatten( QTemporaryDir &dir, sicnu::testing::RsSyntheticRasterBuilder sigma,
             sicnu::testing::RsSyntheticRasterBuilder dem, double incidenceDeg,
-            double lookAzimuthDeg )
+            double lookAzimuthDeg, const char *operatorName = "rs:sar_terrain_flatten" )
 {
     const QString sigmaPath = sigma.writeToDisk( dir.filePath( "sigma0.tif" ) );
     REQUIRE( !sigmaPath.isEmpty() );
     const QString demPath = dem.writeToDisk( dir.filePath( "dem.tif" ) );
     REQUIRE( !demPath.isEmpty() );
 
-    auto op = sicnu::operators::RSOperatorRegistry::instance().create( "rs:sar_terrain_flatten" );
+    auto op = sicnu::operators::RSOperatorRegistry::instance().create( operatorName );
     REQUIRE( op != nullptr );
     sicnu::operators::RSOperatorContext context;
     Json::Value params( Json::objectValue );
@@ -315,6 +320,13 @@ TEST_CASE( "rs:sar_terrain_flatten declares the Byte mask sentinel 255 (#854)",
     const double nd2 = out->bandNoDataValue( 2, &hasNd2 );
     REQUIRE( hasNd2 );
     REQUIRE( nd2 == 255.0 );
+    // Documented GTiff consequence: the single dataset tag re-declares the
+    // float band(s) with the mask's sentinel on re-open — band 1 reads back
+    // 255 even though its real sentinels are IEEE NaN values.
+    bool hasNd1 = false;
+    const double nd1Tag = out->bandNoDataValue( 1, &hasNd1 );
+    REQUIRE( hasNd1 );
+    REQUIRE( nd1Tag == 255.0 );
 
     // The invalid sigma0 pixel carries mask value 255; a valid pixel carries 1.
     // (The mask band is a Float32 band carrying byte-valued 0/1/255 — see the
@@ -333,6 +345,51 @@ TEST_CASE( "rs:sar_terrain_flatten declares the Byte mask sentinel 255 (#854)",
     REQUIRE( out->readBandData( 1, gamma.data(), kW, kH ) );
     REQUIRE( std::isnan( gamma[static_cast<size_t>( 4 ) * kW + 4] ) );
     REQUIRE( std::isfinite( gamma[0] ) );
+}
+
+TEST_CASE( "rs:sar_terrain_correction persists the mask sentinel across re-open (#854)",
+           "[sar][operator][nodata][issue854]" )
+{
+    using namespace sicnu::testing;
+    using namespace sicnu::operators;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // The 3-band default (gamma0 + mask + incidence) is the ordering
+    // regression: with the incidence NaN declared AFTER the mask's 255, the
+    // GTiff tag persisted NaN and the mask's 255 no-data pixels read back as
+    // valid — the #854 defect in the sibling operator. The NaN bands must be
+    // declared FIRST so the mask sentinel is the persisted tag.
+    constexpr int kW = 6;
+    constexpr int kH = 6;
+    RsSyntheticRasterBuilder sigma( kW, kH, 1 );
+    sigma.withCrs( "EPSG:32650" );
+    sigma.withGeoTransform( 500000.0, 10.0, 4000000.0, -20.0 );
+    sigma.withConstantValue( 1, 0.25f );
+    sigma.withPixel( 1, 4, 4, std::numeric_limits<float>::quiet_NaN() );
+
+    RsSyntheticRasterBuilder dem( kW, kH, 1 );
+    dem.withCrs( "EPSG:32650" );
+    dem.withGeoTransform( 500000.0, 10.0, 4000000.0, -20.0 );
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 0; x < kW; ++x )
+            dem.withPixel( 1, x, y, static_cast<float>( 5 * x + 5 * y ) );
+
+    std::unique_ptr<GdalDatasetWrapper> out =
+        runFlatten( dir, sigma, dem, 30.0, 270.0, "rs:sar_terrain_correction" );
+    REQUIRE( out->bandCount() == 3 );
+
+    bool hasNd = false;
+    const double maskNd = out->bandNoDataValue( 2, &hasNd );
+    REQUIRE( hasNd );
+    REQUIRE( maskNd == 255.0 );
+
+    // The invalid sigma0 pixel carries the declared mask sentinel on
+    // re-open, not a valid class value.
+    std::vector<float> mask( static_cast<size_t>( kW ) * kH );
+    REQUIRE( out->readBandData( 2, mask.data(), kW, kH ) );
+    REQUIRE( mask[static_cast<size_t>( 4 ) * kW + 4] == 255.0f );
+    REQUIRE( mask[0] == 1.0f );
 }
 
 // ============================================================================

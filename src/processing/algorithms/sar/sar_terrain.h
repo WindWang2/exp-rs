@@ -86,7 +86,8 @@ bool isLayoverOrShadow( double incidenceLocalDeg, double cosThetaMax );
 /// validity mask is a Float32 band CARRYING byte values (0/1/255) — written
 /// through the typed raw-tile seam and declared NoData 255 by the operator
 /// (#854; the mask sentinel is also the GTiff-serialized dataset tag, so
-/// operators must set band 1's NaN BEFORE the mask's 255).
+/// operators must declare every NaN band FIRST and the mask's 255 LAST of
+/// all bands — the last declaration wins the dataset tag).
 /// DEM and data must share the exact grid (checked here; blocking error).
 /// Returns false on I/O failure or grid mismatch (caller abandons output).
 bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
