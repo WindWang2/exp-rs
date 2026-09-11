@@ -78,12 +78,16 @@ void rejectUnwiredContracts( const ModelInfo &model,
   const bool multiFeeds = !namedInputs.empty();
   for ( const auto &input : model.inputs )
   {
-    if ( input.temporalLength > 0 && !multiFeeds )
+    const bool temporal =
+      input.temporalLength > 0
+      || ( input.temporalCollapse == "sequence" && input.temporalDynamic );
+    if ( temporal && !multiFeeds )
       throw RSOperatorError(
         ErrorCode::InvalidInputData,
-        "Model '" + model.name + "' declares temporal_length=" +
+        "Model '" + model.name + "' declares a temporal input (temporal_length=" +
           std::to_string( input.temporalLength ) +
-          "; provide temporal feed frames through the multi-input request "
+          ( input.temporalDynamic ? ", dynamic T" : "" ) +
+          "); provide temporal feed frames through the multi-input request "
           "(named inputs) — the single-input path would silently run one frame" );
   }
   if ( model.inputs.size() > 1 && !multiFeeds )
@@ -297,6 +301,35 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
   payload["tilesSkippedNoData"] = result.rasterStats.tilesSkippedNoData;
   if ( result.rasterStats.batchReductions > 0 )
     payload["batchReductions"] = result.rasterStats.batchReductions;
+  // Platform 8.0 grid provenance: what was verified about each fed input
+  // (co-registration verdicts, CRS, pre-alignment origins). Consumers and
+  // the .prov.json sidecar tell the same story.
+  if ( !result.rasterStats.inputGrids.empty() )
+  {
+    Json::Value inputs( Json::arrayValue );
+    for ( const GridProvenance &grid : result.rasterStats.inputGrids )
+    {
+      Json::Value input( Json::objectValue );
+      input["name"] = grid.name;
+      input["path"] = grid.path;
+      if ( !grid.preparedFrom.empty() )
+      {
+        Json::Value prepared( Json::arrayValue );
+        for ( const std::string &origin : grid.preparedFrom )
+          prepared.append( origin );
+        input["prepared_from"] = prepared;
+      }
+      if ( !grid.crs.empty() )
+        input["crs"] = grid.crs;
+      input["crs_verified"] = grid.crsVerified;
+      input["width"] = grid.width;
+      input["height"] = grid.height;
+      if ( grid.frames > 1 )
+        input["frames"] = grid.frames;
+      inputs.append( input );
+    }
+    payload["inputs"] = inputs;
+  }
   result.payload = std::move( payload );
   return result;
 }

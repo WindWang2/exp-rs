@@ -1,22 +1,31 @@
 {
-    "cancel_latency_ms": 0.514528,
-    "cold_load_ms": 313.85544,
-    "date": "2026-09-10T05:48:19",
+    "cancel_latency_ms": 0.699531,
+    "cold_load_ms": 410.142075,
+    "date": "2026-09-11T03:23:47",
     "hardware": {
         "cuda": false
     },
     "peak_rss_mb": 0,
-    "pixels_per_sec": 8761926.344321338,
+    "pixels_per_sec": 7253478.131362761,
     "platform7_multi_input": {
-        "run_ms": 29.458764,
+        "run_ms": 35.90921,
         "schema": "model-runtime-bench-7/1",
         "tiles": 64,
-        "tiles_per_sec": 2172.528351834449
+        "tiles_per_sec": 1782.2725701846405
     },
-    "run_ms": 29.918535,
+    "platform8_ort": {
+        "cold_load_ms": 21.934165,
+        "in_forward_cancel_latency_ms": 24.875185,
+        "named_forward_ms_avg": 0.04334746875,
+        "named_forwards_per_sec": 23069.397794998124,
+        "ort_runtime_version": "1.20.1",
+        "schema": "model-runtime-bench-ort/1",
+        "warm_load_ms": 1.238217
+    },
+    "run_ms": 36.140455,
     "schema": "model-runtime-bench/1",
     "tile_size": 64,
     "tiles": 64,
-    "tiles_per_sec": 2139.1421739065768,
-    "warm_load_ms": 0.154701
+    "tiles_per_sec": 1770.8686844147367,
+    "warm_load_ms": 0.189828
 }
