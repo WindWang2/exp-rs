@@ -140,11 +140,17 @@ public:
         return schema;
     }
 
-    Json::Value run( const Json::Value &, RSOperatorContext & ) override
+    Json::Value run( const Json::Value &params, RSOperatorContext & ) override
     {
+        // Optional "bytes" parameter lets suites probe directional caps with
+        // a SMALL request and a LARGE response; the default stays 64 MiB
+        // (the frame-cap adversary the original suites rely on).
+        long long bytes = params.get( "bytes", Json::Value( Json::Int64( 64L * 1024L * 1024L ) ) )
+                              .asInt64();
+        bytes = std::max( 1024LL, std::min( 64LL * 1024LL * 1024LL, bytes ) );
         Json::Value result( Json::objectValue );
         result["success"] = true;
-        result["blob"] = std::string( 64L * 1024L * 1024L, 'f' );
+        result["blob"] = std::string( static_cast<size_t>( bytes ), 'f' );
         return result;
     }
 };

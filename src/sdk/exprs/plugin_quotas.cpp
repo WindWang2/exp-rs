@@ -23,6 +23,20 @@ long long envLongLong( const char *name, long long fallback )
 
 } // namespace
 
+namespace {
+
+/// Clamps an env-provided byte bound into [1024, 1 GiB]: beyond the clamp a
+/// truncated 32-bit long (MSVC) could become 0 = "no bound" (fail-open).
+long long clampedBytes( const char *name, long long fallback )
+{
+    const long long value = envLongLong( name, fallback );
+    if ( value <= 0 )
+        return fallback;
+    return std::min( std::max( value, 1024LL ), 1024LL * 1024LL * 1024LL );
+}
+
+} // namespace
+
 PluginQuota PluginQuota::fromEnvironment()
 {
     PluginQuota quota;
@@ -30,10 +44,11 @@ PluginQuota PluginQuota::fromEnvironment()
         envLongLong( "SICNU_PLUGIN_QUOTA_CONCURRENCY", quota.maxRequestConcurrency ) );
     quota.requestDeadlineMs = static_cast<int>(
         envLongLong( "SICNU_PLUGIN_QUOTA_DEADLINE_MS", quota.requestDeadlineMs ) );
-    quota.maxResponseBytes = static_cast<long>(
-        envLongLong( "SICNU_PLUGIN_QUOTA_RESPONSE_BYTES", quota.maxResponseBytes ) );
+    quota.maxResponseBytes =
+        static_cast<long>( clampedBytes( "SICNU_PLUGIN_QUOTA_RESPONSE_BYTES",
+                                         quota.maxResponseBytes ) );
     quota.maxRequestBytes = static_cast<long>(
-        envLongLong( "SICNU_PLUGIN_QUOTA_REQUEST_BYTES", quota.maxRequestBytes ) );
+        clampedBytes( "SICNU_PLUGIN_QUOTA_REQUEST_BYTES", quota.maxRequestBytes ) );
     quota.workerMemoryBytes =
         envLongLong( "SICNU_PLUGIN_QUOTA_MEMORY_BYTES", quota.workerMemoryBytes );
     quota.workerCpuRatePercent = static_cast<int>(

@@ -132,14 +132,15 @@ void PluginRuntimeHost::installPluginOperator( const std::string &pluginId,
         entry.isExternalTool = op.hasExternalTool;
         if ( op.hasExternalTool )
         {
-            const exprs::PluginRecord *record =
-                exprs::PluginRegistry::instance().record( pluginId );
-            const std::string pluginDir = record ? record->directory : std::string();
+            // Copies under the registry lock (no raw record pointer held).
+            const std::string pluginDir =
+                exprs::PluginRegistry::instance().pluginDirectoryFor( pluginId );
+            const Json::Value access =
+                exprs::PluginRegistry::instance().accessDeclarationFor( pluginId );
             // Capability gate (9.0): explicit access.externalProcess:false
             // produces operators that refuse to spawn (typed PolicyRefused).
             const bool spawnAllowed =
-                record ? exprs::accessBool( record->manifest.access, "externalProcess" ) != 0
-                       : true;
+                exprs::accessBool( access, "externalProcess" ) != 0;
             entry.factory =
                 [op, opId = op.id, pluginDir, spawnAllowed]() -> std::unique_ptr<sicnu::operators::RSOperator> {
                 return std::make_unique<ExternalToolOperator>( opId, op, pluginDir,
@@ -486,10 +487,13 @@ bool PluginRuntimeHost::registerModelRuntime(
     // Capability gate (9.0): a binary-registered runtime for a framework the
     // manifest's access object does not list is refused at the sink — the
     // registration "failure" path is the established honest signal.
+    // LOCK ORDER: the registry lookup (and its copy) happens BEFORE mMutex —
+    // the load path holds the registry lock while entering this sink, so
+    // taking mMutex first would risk an AB-BA inversion.
     {
-        std::lock_guard<std::mutex> lock( mMutex );
-        const exprs::PluginRecord *record = exprs::PluginRegistry::instance().record( pluginId );
-        if ( record && !exprs::modelFrameworkAllowed( record->manifest.access, framework ) )
+        const Json::Value access =
+            exprs::PluginRegistry::instance().accessDeclarationFor( pluginId );
+        if ( !exprs::modelFrameworkAllowed( access, framework ) )
             return false;
     }
     std::lock_guard<std::mutex> lock( mMutex );

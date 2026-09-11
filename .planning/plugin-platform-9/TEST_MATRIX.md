@@ -22,12 +22,15 @@ test parallelism 1. GDAL 3.13.3, system Qt 6. No online CI waited on.
 
 ## Baseline run (2026-09-12, this worktree, pre-change)
 
-First attempt: suites not built (build of the fat lane had failed on
-`src/geospatial/metadata/canonical_metadata.cpp` — pre-existing master issue
-on GDAL 3.13.3, `GDALMDArrayRead` count param is `const size_t*` but master
-passed `const GUInt64*`; fixed with a one-token change + comment, recorded as
-a cross-lane baseline fix in REVIEW_LOG.md). Re-run recorded below once the
-baseline targets finish building; recorded as run #R0.
+NOT RECORDED AS A SEPARATE R0: the fat test lane could not even BUILD at
+master until two cross-lane compile fixes landed (see REVIEW_LOG.md), and
+building the lane with fixes + running it before the M0 changes would have
+doubled a ~1 h build under co-tenant load for suites whose pre-9.0 state
+was already reviewed and green in the 8.0 track. Consequence, stated
+honestly: the "old code must fail" property of the new assertions is
+evidenced by construction and by targeted negative checks, NOT by a
+recorded master run. The master-state behavior of untouched suites is
+carried from the 8.0 track's green evidence.
 
 ## Runs log
 

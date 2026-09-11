@@ -157,7 +157,8 @@ private:
         bool done = false;
     };
 
-    bool sendEnvelope( const Ipc::Envelope &envelope, std::string &error );
+    bool sendEnvelope( const Ipc::Envelope &envelope, std::string &error,
+                       std::string *failureCode = nullptr );
     void readerLoop();
     void handleFrame( const std::string &payload );
     void failAllPending( Outcome::Status status, const std::string &code, const std::string &message );

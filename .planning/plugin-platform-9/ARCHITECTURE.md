@@ -71,11 +71,12 @@ missing is evidence and observability, not a different algorithm.
 - Session tracks `inFlight()`, `peakInFlight()`, dropped events count and
   a **typed last failure** (code+message, set at every typed outcome).
 - No queues are added; E6007 refusal stays the backpressure mechanism.
-- New stress test: N threads × mixed outcomes (deadline expiry with peers
-  in flight → poison-drain; cancel mid-flight; worker crash mid-request)
-  using rendezvous barriers — asserts: every caller gets a typed outcome,
-  no lost slots (`active + waiting == issued` invariant at quiesce),
-  no deadlock (hard test timeout).
+- New stress test: 3 rounds × 7 concurrent callers with colliding fates
+  (2 slow past the deadline, 2 worker crashes, 3 echoes) on async futures
+  with a hard 45 s wait per caller — asserts every caller terminates with
+  a typed envelope, in-flight is 0 at quiesce, and unload stays clean.
+  (Futures, not rendezvous barriers; the slot-accounting invariant is
+  covered by the gate unit tests.)
 
 ## D3 — Process isolation: orphan detection surface (M3)
 
@@ -96,10 +97,13 @@ protocol + entry points (the in-process C++ ABI stays gated by
 api/abi checks; no new C ABI is invented because the host-process path —
 the actual stability boundary — is JSON and needs no struct layout
 pinning; inventing one would be surface without a consumer).
-- New fixture `kitchen_sink_plugin` exports: one operator (cancel-aware,
-  deterministic known-answer), one data provider (in-memory store with
-  declared schemes), one model runtime (identity tensor backend), one
-  agent tool (schema-validated echo), one declarative UI schema provider.
+- AS SHIPPED, the existing `isolation_plugin` integration fixture was
+  extended (instead of a new kitchen-sink fixture): it now exports the
+  misbehavior operators PLUS one data provider (in-memory store with
+  declared schemes), one model runtime (identity tensor backend with an
+  exact known-answer), one agent tool (SpatialTool envelope echo) and the
+  declarative UI provider — every contribution kind over the real worker
+  path.
 - Conformance kit additions are driven by optional manifest
   `conformance` declarations (`dataProviderTarget`, `agentToolTarget`,
   `modelFrameworkTarget`) so third parties opt in exactly like 8.0.
@@ -109,9 +113,11 @@ pinning; inventing one would be surface without a consumer).
 Root cause G6.1/G6.2. describe-side is already hard-capped; invoke-side
 forwards plugin-controlled event JSON to plugin code unchecked.
 - Host-side `validateUiEvent` (bounded contributionId/controlId lengths,
-  eventType whitelist `click|change|submit|custom`, JSON value size cap)
-  refuses with typed E6002-class refusal BEFORE the worker round-trip.
-  `custom` events keep a bounded payload; unknown types refuse.
+  eventType whitelist matching the host renderer's ACTUAL vocabulary —
+  `clicked|changed|command` plus `submit|custom` headroom — and a JSON
+  value size cap) refuses with the new typed **E6010** BEFORE the worker
+  round-trip, without touching the channel. `custom` events keep a bounded
+  payload; unknown types refuse.
 - Schema gains optional, validated, capped control fields `description`
   and `accessibilityLabel` (strings within `maxStringLength`); normalized
   output preserves them. Purely additive; older schemas unaffected.
@@ -120,15 +126,21 @@ forwards plugin-controlled event JSON to plugin code unchecked.
 ## D6 — Packaging 3.0: failure never touches previous-good (M7)
 
 Root cause G7.1. 8.0 has staged install + rollback; the remaining risk is
-the interrupted/foreign state and constraint checking.
-- Install pre-flight: refuse when the staging directory already exists with
-  different content (interrupted install) → clean it only when it is
-  verifiably OUR staging layout (marker file), else fail typed.
-- Dependency constraints checked at install time against installed ids
-  (declared dependency missing → typed failure; satisfied → proceed).
-  Unresolvable constraints were previously only diagnosed at load.
-- Corrupt-package test: truncated/edited payload → checksum mismatch →
-  typed refusal AND previous-good install still loads afterwards.
+the interrupted/foreign state and constraint checking. AS SHIPPED:
+- Interrupted installs: the 8.0 sweep is retained and now VERIFIED by a
+  test that plants a DEAD-process staging leftover (pid+1, 48 h old) and
+  asserts the install removes it. (The marker-file pre-flight sketched
+  here during planning was NOT built — the sweep + same-pid cleanup covers
+  the same failure class.)
+- Dependency constraints: probed at install time against the installed set
+  with semver-ish ranges (^, ~, >=, =, exact, bare; npm 0.x semantics).
+  Satisfied → info diagnostic; unsatisfied → typed E3003 WARNING and the
+  install PROCEEDS. HONEST SCOPE: nothing enforces dependencies at load
+  time (the loader validates spec syntax only) — docs and the diagnostic
+  say "advisory" verbatim.
+- Corrupt-package behavior (checksum mismatch refuses, previous-good
+  survives) was already delivered and tested in 8.0; 9.0 adds the
+  interrupted-staging and dependency tests alongside it.
 - Disk-full cannot be forced portably: covered by the unwritable-target
   test on POSIX (not-run label on Windows) — explicitly recorded, never
   claimed green.
@@ -156,9 +168,12 @@ available, compatible, and pinned" without loading every manifest afresh.
   round-trips over the worker path), `PT_PROCESS_CLEANUP` (worker pid gone
   + process group empty after unload), `PT_QUOTA` (E6007 overload refusal
   observed), `PT_PERMISSIONS` (out-of-root workDir refused E5005).
-- `plugin doctor` gains the per-plugin health snapshot (pid, generation,
-  in-flight/peak, gate waiters, dropped events, restart count, poisoned,
-  typed last failure, capability matrix extract).
+- `plugin doctor` quotes the enforcement matrix and, for a LIVE
+  host-process session, the health snapshot. AS SHIPPED the snapshot
+  carries workerPid, droppedEvents, generation, poisoned, effective
+  concurrency, in-flight/peak/gate waiters, process-group state and the
+  typed last failure; the retired-groups trail and redacted diagnostics
+  live in `plugin debug-bundle` (the full support surface).
 - `plugin debug-bundle <id>` writes a JSON bundle: manifest (as parsed),
   capabilities + enforcement matrix, quotas, health snapshot, diagnostics
   log, index entry — with **secret redaction**: any string value whose KEY

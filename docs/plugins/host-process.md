@@ -45,8 +45,6 @@ Plugin-platform 9.0 additions:
   custom`, serialized-value cap). Refusals are typed E6010 and never tear
   the channel down.
 
-
-
 - Transport: length-prefixed JSON frames (u32 LE + payload, 32 MiB default
   cap) over two inherited OS handles passed in argv — never stdio, so
   plugin `printf` noise lands on a sink and cannot corrupt framing.

@@ -998,3 +998,133 @@ TEST_CASE( "ui.invoke validates events host-side before the worker (E6010)",
 
     REQUIRE( registry.unload( kPluginId ) );
 }
+
+// -- 9.0 review remediation: end-to-end refusal + negotiation evidence --------
+
+namespace {
+/// Re-runs discovery against the CURRENT fixture manifest so capability-gate
+/// tests can rewrite plugin.json after the Stack was constructed.
+void refreshRegistry( sicnu::plugins::PluginHostProcessRuntime &runtime, TestSink &sink,
+                      const std::string &tempDir )
+{
+    auto &registry = PluginRegistry::instance();
+    PluginRegistryOptions options;
+    options.roots = { std::filesystem::path( kFixtureDir ).parent_path().generic_string() };
+    options.tempDirectory = tempDir;
+    options.hostProcessWorkerPath = kWorkerPath;
+    registry.setContributionSink( &sink );
+    registry.setHostProcessRuntime( &runtime );
+    registry.configure( options );
+}
+} // namespace
+
+TEST_CASE( "protocol 1.2 directional caps survive the negotiated path end-to-end",
+           "[hostprocess][p12][caps]" )
+{
+    // THE regression evidence for the 1.1 defect fix: a manifest declaring
+    // ONLY a small maxRequestBytes must NOT cap worker->host responses.
+    // Old behavior: limits.maxFrameBytes = min(req, resp) = 64 KiB was sent
+    // and applied to BOTH worker directions -> the ~1 MiB flood response hit
+    // the worker's send cap (E6003) and tore the channel down.
+    Stack stack;
+    // Re-write the manifest with the quota declared (writeManifest has no
+    // quotas parameter, so extend the JSON after writing): ONLY a small
+    // request quota; the response direction keeps a 4 MiB quota so the
+    // probe response (~1 MiB) is legal.
+    Json::Value quotas( Json::objectValue );
+    quotas["maxRequestBytes"] = Json::Value( Json::Int64( 65536 ) );
+    quotas["maxResponseBytes"] = Json::Value( Json::Int64( 4L * 1024L * 1024L ) );
+    writeManifest( Json::Value() );
+    {
+        std::ifstream in( std::string( kFixtureDir ) + "/plugin.json" );
+        Json::Value manifest;
+        Json::Reader reader;
+        REQUIRE( reader.parse( in, manifest, false ) );
+        in.close();
+        manifest["quotas"] = quotas;
+        Json::StreamWriterBuilder builder;
+        builder["indentation"] = "  ";
+        std::ofstream out( std::string( kFixtureDir ) + "/plugin.json", std::ios::trunc );
+        std::unique_ptr<Json::StreamWriter> writer( builder.newStreamWriter() );
+        writer->write( manifest, &out );
+        out << "\n";
+    }
+    refreshRegistry( *stack.runtime, stack.sink, stack.tempDir );
+
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // SMALL request, ~1 MiB response: the 64 KiB request cap governs only
+    // the host->worker direction. Old behavior applied the shared fallback
+    // min(req, resp) = 64 KiB to BOTH worker directions, so this response
+    // was refused E6003 and tore the channel down.
+    Json::Value params( Json::objectValue );
+    params["bytes"] = Json::Value( Json::Int64( 1024 * 1024 ) );
+    Json::Value flooded = runOperator( stack, "test:iso-flood", params );
+    INFO( "flood result: " << Json::writeString( Json::StreamWriterBuilder(), flooded ) );
+    REQUIRE( flooded["success"].asBool() );
+    REQUIRE( flooded["blob"].asString().size() == 1024u * 1024u );
+
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "explicit access ui:false refuses declarative UI end-to-end (E5005)",
+           "[hostprocess][capabilities][p12]" )
+{
+    Stack stack;
+    Json::Value access( Json::objectValue );
+    access["ui"] = false;
+    writeManifest( access );
+    refreshRegistry( *stack.runtime, stack.sink, stack.tempDir );
+
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    exprs::PluginDiagnosticLog uiLog;
+    Json::Value described = stack.runtime->describeUiSchema( kPluginId, uiLog );
+    REQUIRE_FALSE( described["ok"].asBool() );
+    REQUIRE( described["code"].asString() == "E5005" );
+
+    Json::Value event( Json::objectValue );
+    event["contributionId"] = "dock.status";
+    event["controlId"] = "ping";
+    event["eventType"] = "clicked";
+    Json::Value invoked = stack.runtime->invokeUi( kPluginId, event, 5000, uiLog );
+    REQUIRE_FALSE( invoked["ok"].asBool() );
+    REQUIRE( invoked["code"].asString() == "E5005" );
+
+    // The refusal is policy, not breakage: the worker is still alive.
+    REQUIRE( stack.runtime->isWorkerAlive( kPluginId ) );
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "model framework outside the declared access model fails the load typed",
+           "[hostprocess][capabilities][p12]" )
+{
+    // The fixture registers framework "iso-identity"; declaring a DIFFERENT
+    // framework list means the worker's registration report contains a
+    // framework the declared access model does not allow -> the host gate
+    // refuses the whole load (typed E5005), nothing stays registered.
+    Stack stack;
+    Json::Value access( Json::objectValue );
+    Json::Value modelProvider( Json::objectValue );
+    Json::Value frameworks( Json::arrayValue );
+    frameworks.append( "some-other-framework" );
+    modelProvider["frameworks"] = frameworks;
+    access["modelProvider"] = modelProvider;
+    writeManifest( access );
+    refreshRegistry( *stack.runtime, stack.sink, stack.tempDir );
+
+    auto &registry = PluginRegistry::instance();
+    REQUIRE_FALSE( registry.load( kPluginId ) );
+    bool sawTypedRefusal = false;
+    for ( const auto &item : registry.diagnostics().items() )
+    {
+        if ( item.code == PluginDiagnosticCode::PermissionDenied
+             && item.message.find( "E5005" ) != std::string::npos )
+            sawTypedRefusal = true;
+    }
+    REQUIRE( sawTypedRefusal );
+    REQUIRE( stack.sink.modelFactories.empty() ); // nothing half-registered
+    REQUIRE_FALSE( stack.runtime->isWorkerAlive( kPluginId ) );
+}

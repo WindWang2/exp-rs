@@ -41,10 +41,16 @@ constraint: INFO when satisfied, a typed E3003 WARNING when not.
 Install PROCEEDS either way — install order is the user's business — while
 the load-time gate remains the enforcement point.
 
-Supported ranges (semver-ish): `^X.Y.Z` (same major; `0.x` bounds pin the
-minor), `~X.Y.Z` (same minor), `>=X.Y.Z`, `=X.Y.Z`, `X.Y.Z` (exact) and a
-bare plugin id (any version). An unparsable range is satisfied by nothing
-(fail closed).
+Supported ranges (semver-ish, npm caret semantics): `^X.Y.Z` (same major;
+`0.x` bounds pin the minor, `0.0.x` bounds pin the patch), `~X.Y.Z` (same
+minor), `>=X.Y.Z`, `=X.Y.Z`, `X.Y.Z` (exact) and a bare plugin id (any
+version). An unparsable range is satisfied by nothing (fail closed).
+
+**Honest scope**: the probe is ADVISORY. Nothing enforces dependencies at
+load time — the loader validates the dependency spec SYNTAX only. A plugin
+with unsatisfied dependencies installs, loads and fails at its own
+integration seam; the diagnostic exists so tooling and users see the gap
+early.
 
 ## Interrupted installs
 

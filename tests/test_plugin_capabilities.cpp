@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "exprs/plugin_capabilities.h"
+#include "exprs/plugin_diagnostics.h"
 #include "exprs/plugin_quotas.h"
 
 #include <json/json.h>
@@ -312,15 +313,20 @@ TEST_CASE( "secret redaction strips secret-like values recursively",
     using exprs::isSecretLikeKey;
     using exprs::redactSecrets;
 
-    // Key vocabulary, case-insensitive.
+    // Key vocabulary, case-insensitive (substring match by design).
     REQUIRE( isSecretLikeKey( "password" ) );
     REQUIRE( isSecretLikeKey( "PASSWORD" ) );
     REQUIRE( isSecretLikeKey( "client_secret" ) );
     REQUIRE( isSecretLikeKey( "remote_identity_token" ) );
     REQUIRE( isSecretLikeKey( "api-key" ) );
-    REQUIRE( isSecretLikeKey( "apiKey" ) == false || isSecretLikeKey( "ApiKey" ) );
-    REQUIRE_FALSE( isSecretLikeKey( "tokenize_datasets" ) == false ); // contains token
+    REQUIRE( isSecretLikeKey( "ApiKey" ) ); // lowercased substring "apikey"
+    REQUIRE( isSecretLikeKey( "authorization" ) );
+    REQUIRE( isSecretLikeKey( "Bearer_Token" ) );
+    REQUIRE( isSecretLikeKey( "session_cookie" ) );
+    // Substring semantics: a key CONTAINING the vocabulary matches.
+    REQUIRE( isSecretLikeKey( "tokenize_datasets" ) );
     REQUIRE_FALSE( isSecretLikeKey( "entrypoint" ) );
+    REQUIRE_FALSE( isSecretLikeKey( "signature" ) ); // deliberately not in the vocabulary
 
     Json::Value manifest( Json::objectValue );
     manifest["id"] = "org.test.redact";
@@ -334,6 +340,7 @@ TEST_CASE( "secret redaction strips secret-like values recursively",
     Json::Value item( Json::objectValue );
     item["private_key"] = "-----BEGIN KEY-----";
     item["label"] = "safe";
+    item["credential_version"] = 3; // non-string scalar under a secret-like key
     array.append( item );
     manifest["items"] = array;
 
@@ -346,5 +353,7 @@ TEST_CASE( "secret redaction strips secret-like values recursively",
     REQUIRE( redacted["access"]["auth"]["endpoint"].asString() == "https://example.test" );
     REQUIRE( redacted["items"][0]["private_key"].asString() == "[redacted]" );
     REQUIRE( redacted["items"][0]["label"].asString() == "safe" );
+    // Non-string scalars under secret keys are redacted too.
+    REQUIRE( redacted["items"][0]["credential_version"].asString() == "[redacted]" );
     REQUIRE( redacted["id"].asString() == "org.test.redact" );
 }

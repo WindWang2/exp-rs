@@ -141,11 +141,14 @@ private:
 };
 
 /// Recursively redacts secret-looking values from a JSON tree
-/// (plugin-platform 9.0). A string value whose KEY matches the secret
-/// vocabulary (password/passphrase/secret/token/api[-_]key/credential/
-/// private[-_]key, case-insensitive) is replaced by "[redacted]"; arrays and
-/// nested objects are traversed; the input is never mutated. Used by the
-/// debug bundle and any surface that echoes manifests or logs back to users.
+/// (plugin-platform 9.0). ANY scalar value whose KEY matches the secret
+/// vocabulary (password/passphrase/secret/token/credential/api[-_]key/
+/// private[-_]key/authorization/bearer/cookie, case-insensitive) is
+/// replaced by "[redacted]"; arrays and nested objects are traversed; the
+/// input is never mutated. Used by the debug bundle and any surface that
+/// echoes manifests or logs back to users. Honest boundary: values under
+/// non-secret keys are NOT scanned (a secret embedded in free text under an
+/// innocent key is a plugin-side leak this pass cannot see).
 Json::Value redactSecrets( const Json::Value &value );
 
 /// True when @p key looks like a secret carrier (exposed for tests).

@@ -195,7 +195,8 @@ bool isSecretLikeKey( const std::string &key )
     return contains( "password" ) || contains( "passphrase" ) || contains( "secret" )
            || contains( "token" ) || contains( "credential" ) || contains( "api_key" )
            || contains( "api-key" ) || contains( "apikey" ) || contains( "private_key" )
-           || contains( "private-key" );
+           || contains( "private-key" ) || contains( "authorization" ) || contains( "bearer" )
+           || contains( "cookie" );
 }
 
 Json::Value redactSecrets( const Json::Value &value )
@@ -205,10 +206,16 @@ Json::Value redactSecrets( const Json::Value &value )
         Json::Value redacted( Json::objectValue );
         for ( const std::string &key : value.getMemberNames() )
         {
-            if ( isSecretLikeKey( key ) && value[ key ].isString() )
+            if ( isSecretLikeKey( key ) && !value[ key ].isObject() && !value[ key ].isArray() )
+            {
+                // ANY scalar under a secret-like key is redacted — a number
+                // or boolean secret leaks exactly like a string one.
                 redacted[ key ] = "[redacted]";
+            }
             else
+            {
                 redacted[ key ] = redactSecrets( value[ key ] );
+            }
         }
         return redacted;
     }

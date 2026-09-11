@@ -509,6 +509,19 @@ int PluginHostProcessSession::peakInFlight() const
     return mPeakInFlight;
 }
 
+long long PluginHostProcessSession::workerPid() const
+{
+#ifdef _WIN32
+    return mProcessHandle
+               ? static_cast<long long>( ::GetProcessId( static_cast<HANDLE>( mProcessHandle ) ) )
+               : 0;
+#else
+    return mProcessAlive ? static_cast<long long>(
+               reinterpret_cast<intptr_t>( mProcessHandle ) )
+                         : 0;
+#endif
+}
+
 std::string PluginHostProcessSession::processGroupState() const
 {
 #ifdef _WIN32

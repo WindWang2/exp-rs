@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
 
 using namespace exprs;
 
@@ -160,7 +161,7 @@ TEST_CASE( "exhaustive manifest round trip: every declared field survives",
             "group": "full",
             "description": "operator with everything",
             "memory_policy": "streaming",
-            "determinism": "tolerance",
+            "determinism_grade": "tolerance",
             "supports_cancel": true,
             "schema": { "type": "object" },
             "metadata": { "agent": true },
@@ -177,7 +178,7 @@ TEST_CASE( "exhaustive manifest round trip: every declared field survives",
                 "argv": ["${plugin_dir}/tools/run.sh", "--in", "${input}"],
                 "environment": { "FULL_MODE": "1" },
                 "inherit_environment": false,
-                "working_directory_param": "workdir",
+                "working_directory": "workdir",
                 "timeout_seconds": 120,
                 "stdout_limit_bytes": 1024,
                 "stderr_limit_bytes": 1024
@@ -231,12 +232,46 @@ TEST_CASE( "exhaustive manifest round trip: every declared field survives",
     REQUIRE( PluginManifest::fromJson( first, restored, error ) );
     const Json::Value second = restored.toJson();
 
-    // Byte-identical projections: jsoncpp preserves member insertion order,
-    // so equal documents also produce equal text. Any drift here is a
-    // dropped or renamed field — a compatibility break, caught mechanically.
+    // Idempotence: re-projecting a parsed manifest must be stable.
     Json::StreamWriterBuilder builder;
     builder["indentation"] = "";
     REQUIRE( Json::writeString( builder, first ) == Json::writeString( builder, second ) );
+
+    // COMPLETENESS (the actual regression class): every leaf path present in
+    // the ORIGINAL hand-written document must also exist in `first`. A
+    // toJson() that drops a field makes first lack it — the idempotence
+    // check above cannot see that, this walk can. (jsoncpp object members
+    // are key-sorted, so equal documents also serialize identically.)
+    std::function<void( const Json::Value &, const Json::Value &, const std::string & )>
+        requirePathsSurvive = [&]( const Json::Value &original, const Json::Value &projected,
+                                   const std::string &path ) {
+            if ( original.isObject() )
+            {
+                REQUIRE( projected.isObject() );
+                for ( const std::string &key : original.getMemberNames() )
+                {
+                    const std::string childPath = path + "/" + key;
+                    INFO( "manifest path dropped by toJson(): " << childPath );
+                    REQUIRE( projected.isMember( key ) );
+                    requirePathsSurvive( original[ key ], projected[ key ], childPath );
+                }
+            }
+            else if ( original.isArray() )
+            {
+                REQUIRE( projected.isArray() );
+                REQUIRE( projected.size() == original.size() );
+                for ( Json::ArrayIndex i = 0; i < original.size(); ++i )
+                    requirePathsSurvive( original[ i ], projected[ i ],
+                                         path + "[" + std::to_string( i ) + "]" );
+            }
+            // Leaves: existence already asserted by the parent walk.
+        };
+    {
+        Json::Value originalDocument;
+        Json::Reader reader;
+        REQUIRE( reader.parse( json, originalDocument, false ) );
+        requirePathsSurvive( originalDocument, first, "" );
+    }
 
     // Spot anchors (fail with a message a human can act on):
     REQUIRE( restored.conformance["dataProviderTarget"].asString() == "full:store" );

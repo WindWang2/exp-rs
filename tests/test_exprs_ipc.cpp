@@ -329,6 +329,15 @@ TEST_CASE( "a protocol-corrupting peer closes the channel with E6002", "[ipc][ch
     makeIpcMemoryPipePair( hostSide, workerSide );
 
     IpcChannel host( std::move( hostSide ) );
+    // The request must be IN FLIGHT before the poison frame is written:
+    // otherwise the reader may process the corruption before the request
+    // registers a pending slot and the caller would see the post-close
+    // E6005 instead of the typed violation under test.
+    IpcChannel::Outcome outcome;
+    std::thread requester( [&host, &outcome] {
+        outcome = host.request( "work", {}, 5000 );
+    } );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
     {
         // Raw corrupt envelope through the peer stream.
         IpcFrameLimits limits;
@@ -341,7 +350,7 @@ TEST_CASE( "a protocol-corrupting peer closes the channel with E6002", "[ipc][ch
         REQUIRE( IpcFrame::writeJson( *workerSide, json, limits, error ) );
     }
 
-    auto outcome = host.request( "work", {}, 2000 );
+    requester.join();
     REQUIRE( outcome.status == IpcChannel::Outcome::Status::ProtocolError );
     REQUIRE( outcome.statusCode() == "E6002" );
     // Channel is dead for good; the next request refuses typed.
@@ -421,13 +430,19 @@ TEST_CASE( "the recv cap refuses oversized peer frames (E6003)", "[ipc][channel]
     IpcChannel host( std::move( hostSide ) );
     host.setDirectionalFrameCaps( 0, 1024 );
 
-    // The peer writes an oversized frame straight on the raw stream.
+    // The request must be IN FLIGHT before the oversized frame is written,
+    // or the reader could tear the channel down before the caller registers
+    // (yielding the post-close E6005 instead of the typed E6003 under test).
+    IpcChannel::Outcome outcome;
+    std::thread requester( [&host, &outcome] {
+        outcome = host.request( "work", {}, 5000 );
+    } );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
     std::string error;
     const std::string payload = std::string( 2048, 'z' );
     REQUIRE( writeRawFrame( *workerSide, payload, error ) );
 
-    // The reader tears the channel down with the typed violation.
-    auto outcome = host.request( "work", {}, 2000 );
+    requester.join();
     REQUIRE( outcome.status == IpcChannel::Outcome::Status::ProtocolError );
     REQUIRE( outcome.statusCode() == "E6003" );
     REQUIRE( host.protocolFailure().find( "E6003" ) != std::string::npos );

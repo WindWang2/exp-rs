@@ -680,19 +680,58 @@ void executeDataProvider( IpcChannel &channel, long long requestId, WorkerSink &
         return;
     }
     // Capability gate (protocol 1.2): open/inspect URIs must carry a scheme
-    // the manifest DECLARED for this provider. Enumeration (discover) stays
-    // unfiltered — it is the listing surface. A provider that declares no
-    // schemes keeps the pre-9.0 unrestricted behavior; scheme'd URIs outside
-    // the declaration are a typed policy refusal. Honest boundary: plain
-    // paths (no "://") are not scheme'd URIs and remain governed by the
-    // filesystem seams, not by this gate.
+    // the manifest DECLARED for this provider. The scheme is extracted per
+    // RFC 3986 (a leading ALPHA [ ALPHA / DIGIT / + / - / . ] * ":") and
+    // compared CASE-INSENSITIVELY, so authority-less forms ("file:/x") and
+    // case variants cannot bypass the declaration. Enumeration (discover)
+    // stays unfiltered — it is the listing surface. A provider that declares
+    // no schemes keeps the pre-9.0 unrestricted behavior. Honest boundary:
+    // scheme-less paths remain governed by the filesystem seams, not by
+    // this gate.
     if ( request.method == kInspectData || request.method == kOpenData )
     {
-        const std::string uri = params.get( "uri", "" ).asString();
-        const size_t schemeEnd = uri.find( "://" );
-        if ( schemeEnd != std::string::npos )
+        const Json::Value &uriValue = params.get( "uri", Json::Value() );
+        if ( !uriValue.isNull() && !uriValue.isString() )
         {
-            const std::string scheme = uri.substr( 0, schemeEnd );
+            // Type-check BEFORE any cast: a hostile peer must not be able to
+            // throw out of a pool thread (Json::LogicError would terminate).
+            channel.sendError( requestId, { "E6002", "provider uri must be a string" } );
+            return;
+        }
+        const std::string uri = uriValue.asString();
+        auto isSchemeChar = []( char c ) {
+            return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' )
+                   || ( c >= '0' && c <= '9' ) || c == '+' || c == '-' || c == '.';
+        };
+        // RFC 3986: scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":"
+        std::string scheme;
+        if ( !uri.empty() && ( ( uri[ 0 ] >= 'a' && uri[ 0 ] <= 'z' )
+                               || ( uri[ 0 ] >= 'A' && uri[ 0 ] <= 'Z' ) ) )
+        {
+            size_t position = 1;
+            while ( position < uri.size() && isSchemeChar( uri[ position ] ) )
+                ++position;
+            if ( position < uri.size() && uri[ position ] == ':' )
+                scheme = uri.substr( 0, position );
+        }
+        auto lowerEquals = []( const std::string &a, const std::string &b ) {
+            if ( a.size() != b.size() )
+                return false;
+            for ( size_t i = 0; i < a.size(); ++i )
+            {
+                const char ca = a[ i ] >= 'A' && a[ i ] <= 'Z'
+                                    ? static_cast<char>( a[ i ] - 'A' + 'a' )
+                                    : a[ i ];
+                const char cb = b[ i ] >= 'A' && b[ i ] <= 'Z'
+                                    ? static_cast<char>( b[ i ] - 'A' + 'a' )
+                                    : b[ i ];
+                if ( ca != cb )
+                    return false;
+            }
+            return true;
+        };
+        if ( !scheme.empty() )
+        {
             const ManifestDataProvider *declaration = nullptr;
             const PluginManifest *workerManifest = sink.manifest();
             if ( workerManifest )
@@ -716,7 +755,7 @@ void executeDataProvider( IpcChannel &channel, long long requestId, WorkerSink &
                     const size_t tail = declaredScheme.find( "://" );
                     if ( tail != std::string::npos )
                         declaredScheme.resize( tail );
-                    if ( declaredScheme == scheme )
+                    if ( lowerEquals( declaredScheme, scheme ) )
                     {
                         declared = true;
                         break;
@@ -936,16 +975,17 @@ int main( int argc, char **argv )
 
             // Protocol 1.1/1.2 downward frame-cap negotiation: never raise a
             // cap, only lower it (write side clamps; a violating peer sees
-            // E6003 and the channel dies). maxFrameBytes is the shared 1.1
-            // fallback; maxRequestBytes/maxResponseBytes are the 1.2
-            // per-direction bounds — on THIS side of the channel requests
-            // are RECEIVED and responses/progress are SENT, so the split
-            // fixes the 1.1 defect where a small maxResponseBytes also
-            // capped host->worker request frames.
+            // E6003 and the channel dies). When ANY per-direction bound is
+            // present, maxFrameBytes is IGNORED (fallback-only semantics):
+            // applying both would let the shared min(req, resp) re-create
+            // the 1.1 defect on this 1.2 worker. On THIS side of the channel
+            // requests are RECEIVED and responses/progress are SENT.
             const Json::Value &limits = params["limits"];
             if ( limits.isObject() )
             {
-                if ( limits["maxFrameBytes"].isNumeric() )
+                const bool hasDirectional = limits["maxRequestBytes"].isNumeric()
+                                            || limits["maxResponseBytes"].isNumeric();
+                if ( limits["maxFrameBytes"].isNumeric() && !hasDirectional )
                 {
                     const Json::LargestInt hostCap = limits["maxFrameBytes"].asLargestInt();
                     if ( hostCap > 0 && hostCap <= 0xFFFFFFFFll )
@@ -955,15 +995,13 @@ int main( int argc, char **argv )
                 {
                     const Json::LargestInt cap = limits["maxRequestBytes"].asLargestInt();
                     if ( cap > 0 && cap <= 0xFFFFFFFFll )
-                        channel.setDirectionalFrameCaps( channel.sendFrameCap(),
-                                                         static_cast<uint32_t>( cap ) );
+                        channel.setDirectionalFrameCaps( 0, static_cast<uint32_t>( cap ) );
                 }
                 if ( limits["maxResponseBytes"].isNumeric() )
                 {
                     const Json::LargestInt cap = limits["maxResponseBytes"].asLargestInt();
                     if ( cap > 0 && cap <= 0xFFFFFFFFll )
-                        channel.setDirectionalFrameCaps( static_cast<uint32_t>( cap ),
-                                                         channel.recvFrameCap() );
+                        channel.setDirectionalFrameCaps( static_cast<uint32_t>( cap ), 0 );
                 }
             }
 

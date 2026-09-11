@@ -394,6 +394,11 @@ std::vector<CapabilityEnforcementEntry> pluginCapabilityEnforcementMatrix()
         { "externalProcess", "host-process", L::EnforcedWorker,
           "the operator workDir seam is gated as above; quotas bound worker "
           "children where the OS allows" },
+        { "dataProviders[].schemes", "host-process", L::EnforcedWorker,
+          "open/inspect URIs whose scheme is not declared by the provider "
+          "are refused (E5005, RFC 3986 scheme parse, case-insensitive); "
+          "discover stays unfiltered; scheme-less paths remain governed by "
+          "the filesystem seams" },
         { "externalProcess", "in-process", L::EnforcedHost,
           "manifest external-tool operators refuse to spawn when the manifest "
           "access object declares externalProcess:false (E5005); native code "

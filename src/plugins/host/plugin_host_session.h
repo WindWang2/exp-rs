@@ -150,6 +150,11 @@ public:
     /// Records one outcome as the typed last failure (no-op for Ok). Used by
     /// the request paths; public so test harnesses can annotate too.
     void recordLastFailure( const exprs::IpcChannel::Outcome &outcome );
+    /// Worker process id (diagnostics surface, M10): the OS pid on POSIX,
+    /// the process id from the handle on Windows, 0 when not running.
+    long long workerPid() const;
+    /// Events dropped by the channel's pending-event queue cap (M10).
+    long long droppedEvents() const { return mChannel ? mChannel->droppedEvents() : 0; }
     /// Orphan detection (M3): "yes" when the worker's process group still
     /// has members (alive worker, or worker-spawned survivors), "no" when
     /// the group is fully reaped, "unknown" when the probe cannot decide

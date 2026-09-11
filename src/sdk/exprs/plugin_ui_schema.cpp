@@ -47,13 +47,6 @@ bool boundedString( const Json::Value &value, size_t maxLength )
     return value.isString() && value.asString().size() <= maxLength;
 }
 
-/// Every numeric field is type-checked before any cast so a hostile
-/// schema produces a validation error instead of a jsoncpp LogicError.
-bool boundedNumber( const Json::Value &value )
-{
-    return value.isNull() || value.isNumeric();
-}
-
 /// Validates one control (recursively for groups). Returns false when the
 /// control is structurally invalid (fatal). @p ids accumulates sibling ids.
 bool validateControl( const Json::Value &control, const PluginUiSchemaLimits &limits,
@@ -486,7 +479,17 @@ PluginUiEventParseResult validateUiEvent( const Json::Value &event,
     const Json::Value &value = event[ "value" ];
     if ( !value.isNull() )
     {
-        // The serialized size is the true transport cost; cap it.
+        // Fast path: a plain oversized string is refused without paying the
+        // JSON serialization cost. (General bound: the serialized size is
+        // the true transport cost; the work is O(full value size) — the cap
+        // bounds what is ACCEPTED, not the work spent rejecting.)
+        if ( value.isString() && value.asString().size() > limits.maxEventValueBytes )
+        {
+            fail( result.errors, "event.value",
+                  "string value exceeds the event cap ("
+                      + std::to_string( limits.maxEventValueBytes ) + " bytes)" );
+            return result;
+        }
         Json::StreamWriterBuilder builder;
         builder["indentation"] = "";
         const std::string serialized = Json::writeString( builder, value );

@@ -617,26 +617,28 @@ bool parseVersion( const std::string &text, unsigned &major, unsigned &minor, un
         return false;
     std::istringstream input( text );
     std::string part;
-    if ( !std::getline( input, part, '.' ) )
-        return false;
-    for ( const char c : part )
-        if ( c < '0' || c > '9' )
+    // Each part is at most 9 digits so std::stoul can never overflow (a
+    // crafted dependency range must fail CLOSED, not throw std::out_of_range
+    // out of install()).
+    auto parsePart = []( const std::string &digits, unsigned &out ) {
+        if ( digits.empty() || digits.size() > 9 )
             return false;
-    major = static_cast<unsigned>( std::stoul( part ) );
-    if ( std::getline( input, part, '.' ) )
-    {
-        for ( const char c : part )
+        for ( const char c : digits )
             if ( c < '0' || c > '9' )
                 return false;
-        minor = static_cast<unsigned>( std::stoul( part ) );
+        out = static_cast<unsigned>( std::stoul( digits ) );
+        return true;
+    };
+    if ( !std::getline( input, part, '.' ) || !parsePart( part, major ) )
+        return false;
+    if ( std::getline( input, part, '.' ) )
+    {
+        if ( !parsePart( part, minor ) )
+            return false;
         if ( std::getline( input, part ) )
         {
-            if ( part.empty() )
+            if ( !parsePart( part, patch ) )
                 return false;
-            for ( const char c : part )
-                if ( c < '0' || c > '9' )
-                    return false;
-            patch = static_cast<unsigned>( std::stoul( part ) );
         }
     }
     return true;
@@ -694,7 +696,10 @@ bool PluginPackage::versionSatisfiesRange( const std::string &version, const std
         return vm == bm && vi == bi && vp == bp;
     if ( op == "^" )
     {
-        // [bound, next major) — 0.x bounds pin the minor (npm semantics).
+        // npm caret semantics: [bound, next major). 0.x bounds pin the
+        // minor; 0.0.x bounds pin the patch (^0.0.3 admits only 0.0.3).
+        if ( bm == 0 && bi == 0 )
+            return vm == 0 && vi == 0 && vp == bp;
         if ( bm == 0 )
             return vm == 0 && vi == bi && vp >= bp;
         return vm == bm && !versionLess( vi, vp, 0, bi, bp, 0 );
@@ -757,7 +762,8 @@ int PluginPackage::reportDependencyStatus( const PluginManifest &manifest,
             note.code = PluginDiagnosticCode::DependencyUnresolved;
             note.severity = PluginDiagnosticSeverity::Warning;
             note.message = "dependency NOT satisfied by any installed plugin: " + spec
-                           + " (install proceeds; the load gate enforces it)";
+                           + " (advisory: install proceeds; NOTHING enforces this at "
+                             "load time — load validates the spec syntax only)";
         }
         log.add( note );
     }

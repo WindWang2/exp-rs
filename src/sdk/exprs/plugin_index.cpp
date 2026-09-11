@@ -147,6 +147,8 @@ Json::Value PluginIndex::applyPins( const Json::Value &index,
     Json::Value plugins = annotated["plugins"];
     for ( Json::Value &plugin : plugins )
     {
+        if ( !plugin.isObject() || !plugin["id"].isString() || !plugin["version"].isString() )
+            continue; // hand-edited index entry: leave untouched, never throw
         const std::string id = plugin["id"].asString();
         const auto pin = pinnedVersions.find( id );
         if ( pin == pinnedVersions.end() )

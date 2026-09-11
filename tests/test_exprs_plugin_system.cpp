@@ -360,11 +360,13 @@ TEST_CASE( "version ranges match semver boundaries exactly", "[plugin][package][
     REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "2.0.1", "2.0.0" ) );
     REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "9.9.9", "" ) ); // bare id: any
 
-    // Caret: same major (0.x pins the minor).
+    // Caret: same major (0.x pins the minor, 0.0.x pins the patch — npm).
     REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "2.3.9", "^2.0.0" ) );
     REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "3.0.0", "^2.0.0" ) );
     REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "0.2.9", "^0.2.0" ) );
     REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "0.3.0", "^0.2.0" ) );
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "0.0.3", "^0.0.3" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "0.0.4", "^0.0.3" ) );
 
     // Tilde: same minor.
     REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "2.3.9", "~2.3.0" ) );
@@ -387,10 +389,13 @@ TEST_CASE( "interrupted-install staging leftovers are swept before a new install
     const std::string source = pkgRoot + "/org.test.stale";
     makePluginDir( pkgRoot, "org.test.stale", "stale:echo" );
 
-    // Simulate a crashed install's staging directory (same pid layout) with
-    // garbage content and a 48 h-old timestamp.
-    const std::string stagingDir = exprs::PluginDiscovery::userPluginRoot() + "/.staging/org.test.stale."
-                                   + std::to_string( static_cast<long>( ::getpid() ) );
+    // Simulate a crashed install's staging directory of a DEAD process
+    // (pid+1: the install path only unconditionally removes the CURRENT
+    // pid's directory, so this leftover can only disappear through the
+    // 24 h sweep — the behavior under test).
+    const std::string stagingDir =
+        exprs::PluginDiscovery::userPluginRoot() + "/.staging/org.test.stale."
+        + std::to_string( static_cast<long>( ::getpid() ) + 1 );
     std::error_code ec;
     fs::create_directories( fs::path( stagingDir ) / "junk", ec );
     {
@@ -403,6 +408,8 @@ TEST_CASE( "interrupted-install staging leftovers are swept before a new install
     PluginDiagnosticLog log;
     std::string installed;
     REQUIRE( exprs::PluginPackage::install( source, installed, log ) );
+    // The sweep must have REMOVED the dead process's leftover.
+    REQUIRE_FALSE( fs::exists( fs::path( stagingDir ) ) );
     // The new install holds the real payload, not the crashed staging copy.
     exprs::PluginDiagnostic parseError;
     exprs::PluginManifest installedManifest;

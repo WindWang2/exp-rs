@@ -59,6 +59,41 @@ PluginHostProcessRuntime::PluginHostProcessRuntime( Options options )
         mOptions.workerPath = defaultPluginHostWorkerPath();
 }
 
+namespace {
+
+/// Builds/refreshes the plugin.load "limits" object for ONE peer
+/// (plugin-platform 9.0 peer-awareness, see loadPlugin). Reused by respawn
+/// so a fresh worker always negotiates against ITS OWN advertised features.
+void applyLimitsForPeer( const exprs::PluginQuota &quota, bool peerDirectional,
+                         Json::Value &params )
+{
+    Json::Value limits( Json::objectValue );
+    exprs::IpcFrameLimits transport;
+    const long long requestBytes = quota.maxRequestBytes > 0
+                                       ? quota.maxRequestBytes
+                                       : static_cast<long long>( transport.maxFrameBytes );
+    const long long responseBytes = quota.maxResponseBytes > 0
+                                        ? quota.maxResponseBytes
+                                        : static_cast<long long>( transport.maxFrameBytes );
+    if ( peerDirectional )
+    {
+        if ( requestBytes > 0 && requestBytes < static_cast<long long>( transport.maxFrameBytes ) )
+            limits["maxRequestBytes"] = static_cast<Json::Int64>( requestBytes );
+        if ( responseBytes > 0 && responseBytes < static_cast<long long>( transport.maxFrameBytes ) )
+            limits["maxResponseBytes"] = static_cast<Json::Int64>( responseBytes );
+    }
+    else
+    {
+        const long long sharedFallback = std::min( requestBytes, responseBytes );
+        if ( sharedFallback > 0 && sharedFallback < static_cast<long long>( transport.maxFrameBytes ) )
+            limits["maxFrameBytes"] = static_cast<Json::Int64>( sharedFallback );
+    }
+    limits["maxConcurrentRequests"] = quota.maxRequestConcurrency;
+    params["limits"] = limits;
+}
+
+} // namespace
+
 bool PluginHostProcessRuntime::loadParamsFor( const PluginRecord &record,
                                               HostServicesV1 &services, Json::Value &params,
                                               PluginDiagnosticLog &log ) const
@@ -107,36 +142,6 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
     spawnOptions.handshakeTimeoutMs = mOptions.handshakeTimeoutMs;
     spawnOptions.killGraceMs = mOptions.killGraceMs;
 
-    // Protocol 1.1/1.2 limits negotiation (params travel to the worker with
-    // plugin.load): maxFrameBytes is the shared 1.1 fallback (min of the two
-    // direction bounds); maxRequestBytes / maxResponseBytes are the 1.2
-    // per-direction bounds — worker->host response frames no longer
-    // side-cap host->worker request frames (the 1.1 defect). The dispatch
-    // width is the quota's concurrency (the worker clamps to its own
-    // capability).
-    {
-        Json::Value limits( Json::objectValue );
-        IpcFrameLimits transport;
-        const long long sharedFallback =
-            std::min<long long>( entry->quota.maxRequestBytes > 0
-                                     ? entry->quota.maxRequestBytes
-                                     : static_cast<long long>( transport.maxFrameBytes ),
-                                 entry->quota.maxResponseBytes > 0
-                                     ? entry->quota.maxResponseBytes
-                                     : static_cast<long long>( transport.maxFrameBytes ) );
-        if ( sharedFallback > 0
-             && sharedFallback < static_cast<long long>( transport.maxFrameBytes ) )
-            limits["maxFrameBytes"] = static_cast<Json::Int64>( sharedFallback );
-        if ( entry->quota.maxRequestBytes > 0
-             && entry->quota.maxRequestBytes < static_cast<long>( transport.maxFrameBytes ) )
-            limits["maxRequestBytes"] = static_cast<Json::Int64>( entry->quota.maxRequestBytes );
-        if ( entry->quota.maxResponseBytes > 0
-             && entry->quota.maxResponseBytes < static_cast<long>( transport.maxFrameBytes ) )
-            limits["maxResponseBytes"] = static_cast<Json::Int64>( entry->quota.maxResponseBytes );
-        limits["maxConcurrentRequests"] = entry->quota.maxRequestConcurrency;
-        params["limits"] = limits;
-    }
-
     auto session = PluginHostProcessSession::spawn( spawnOptions, log );
     if ( !session )
     {
@@ -144,6 +149,8 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
                  "could not launch the host-process worker", pluginId );
         return false;
     }
+
+    applyLimitsForPeer( entry->quota, session->peerSupportsDirectionalFrameCaps(), params );
     entry->session = session;
     entry->loadParams = params;
     entry->entrypointPath = record.directory + "/" + record.manifest.entrypoint;
@@ -187,9 +194,12 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
         // Capability gate (9.0): the worker reports frameworks the plugin
         // REGISTERED; the host refuses (typed E5005) any framework the
         // manifest's declared access model does not list — load fails, the
-        // worker is torn down, nothing stays half-registered.
-        const exprs::PluginRecord *record = exprs::PluginRegistry::instance().record( pluginId );
-        const Json::Value &access = record ? record->manifest.access : Json::Value();
+        // worker is torn down (the registry's load path revokes the
+        // registrations made so far), nothing stays half-registered.
+        // accessDeclarationFor COPIES under the registry lock: a raw
+        // record pointer would dangle across a concurrent refresh.
+        const Json::Value access =
+            exprs::PluginRegistry::instance().accessDeclarationFor( pluginId );
         if ( !exprs::modelFrameworkAllowed( access, framework.asString() ) )
         {
             log.add( PluginDiagnosticCode::PermissionDenied, PluginDiagnosticSeverity::Error,
@@ -277,6 +287,10 @@ bool PluginHostProcessRuntime::respawn( const std::string &pluginId,
     auto session = PluginHostProcessSession::spawn( spawnOptions, log );
     if ( !session )
         return false;
+    // The fresh worker negotiated ITS OWN features; rebuild the limits for
+    // this peer before sending the cached plugin.load params.
+    applyLimitsForPeer( entry.quota, session->peerSupportsDirectionalFrameCaps(),
+                        entry.loadParams );
     IpcChannel::Outcome outcome =
         session->requestRaw( kLoadPlugin, entry.loadParams, mOptions.loadTimeoutMs );
     if ( outcome.status != IpcChannel::Outcome::Status::Ok )
@@ -322,6 +336,10 @@ bool PluginHostProcessRuntime::unloadPlugin( const std::string &pluginId,
     // prove (or honestly decline to claim) group cleanup.
     {
         std::lock_guard<std::mutex> lock( mMutex );
+        // Bounded evidence trail (support surface, not a ledger): the most
+        // recent 64 retirements; the oldest entries are dropped.
+        if ( mRetiredGroups.size() >= 64 )
+            mRetiredGroups.erase( mRetiredGroups.begin() );
         mRetiredGroups[ pluginId ] = session->processGroupState();
     }
     return shutdownOk;
@@ -349,6 +367,10 @@ Json::Value PluginHostProcessRuntime::diagnosticsSnapshot() const
         entryJson["generation"] = entry->session->generation();
         entryJson["poisoned"] = entry->session->isPoisoned();
         entryJson["effectiveConcurrency"] = entry->session->effectiveConcurrency();
+        // M10: worker identity + event-drop counter for doctor surfaces.
+        entryJson["workerPid"] = static_cast<Json::Int64>( entry->session->workerPid() );
+        entryJson["droppedEvents"] =
+            static_cast<Json::Int64>( entry->session->droppedEvents() );
         // M2 observability: in-flight / peak / gate waiters / typed failure.
         entryJson["inFlight"] = entry->session->inFlight();
         entryJson["peakInFlight"] = entry->session->peakInFlight();
@@ -387,8 +409,9 @@ Json::Value PluginHostProcessRuntime::describeUiSchema( const std::string &plugi
     // declares ui:false gets a typed policy refusal, never a rendered
     // surface. Undeclared keeps every pre-9.0 behavior.
     {
-        const exprs::PluginRecord *record = exprs::PluginRegistry::instance().record( pluginId );
-        if ( record && exprs::accessBool( record->manifest.access, "ui" ) == 0 )
+        const Json::Value access =
+            exprs::PluginRegistry::instance().accessDeclarationFor( pluginId );
+        if ( exprs::accessBool( access, "ui" ) == 0 )
         {
             result["ok"] = false;
             result["code"] = "E5005";
@@ -461,8 +484,9 @@ Json::Value PluginHostProcessRuntime::invokeUi( const std::string &pluginId,
     // Same capability gate as describeUiSchema (9.0): ui:false refuses
     // event delivery too — a refused surface cannot be invoked either.
     {
-        const exprs::PluginRecord *record = exprs::PluginRegistry::instance().record( pluginId );
-        if ( record && exprs::accessBool( record->manifest.access, "ui" ) == 0 )
+        const Json::Value access =
+            exprs::PluginRegistry::instance().accessDeclarationFor( pluginId );
+        if ( exprs::accessBool( access, "ui" ) == 0 )
         {
             result["ok"] = false;
             result["code"] = "E5005";

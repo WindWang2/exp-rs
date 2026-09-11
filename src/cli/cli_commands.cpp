@@ -626,6 +626,18 @@ int commandPlugin( QStringList args, const CliIO &io )
             data["host_abi_version"] = exprs_ns::pluginAbiVersion();
         }
         data["diagnostics"] = diagnostics.toJson();
+        // Plugin-platform 9.0: doctor quotes the enforcement matrix and, for
+        // a LIVE host-process session, the health snapshot (worker pid,
+        // in-flight, typed last failure, ...). The full support bundle —
+        // including the retired-groups trail and redacted diagnostics — is
+        // `plugin debug-bundle <plugin-id>`.
+        data["capabilityEnforcement"] = exprs_ns::pluginCapabilityEnforcementMatrixJson();
+        {
+            const Json::Value snapshot =
+                sicnu::plugins::PluginRuntimeHost::instance().hostProcessSnapshot();
+            if ( snapshot.isObject() && snapshot["plugins"].isMember( record.manifest.id ) )
+                data["health"] = snapshot["plugins"][ record.manifest.id ];
+        }
         const bool ok = record.state == exprs_ns::PluginState::Validated
                         && !diagnostics.hasErrors();
         return io.finish( ok, "plugin", data,
@@ -913,9 +925,17 @@ int commandPlugin( QStringList args, const CliIO &io )
         // Deterministic temp scope: the plugin's ${temp} (and the worker-side
         // containment temp directory) is THIS run's directory, not the whole
         // system temp — so the PT_PERMISSIONS escape probe escapes it.
-        options.tempDirectory = ( std::filesystem::temp_directory_path()
-                                  / ( "pt9-conformance-" + std::to_string( ::getpid() ) ) )
-                                     .generic_string();
+        options.tempDirectory =
+            ( std::filesystem::temp_directory_path()
+              / ( "pt9-conformance-"
+                  + std::to_string( static_cast<long>(
+#ifdef _WIN32
+                        ::GetCurrentProcessId()
+#else
+                        ::getpid()
+#endif
+                      ) ) ) )
+                .generic_string();
         std::filesystem::create_directories( options.tempDirectory );
         sicnu::plugins::PluginRuntimeHost::instance().bootstrap( options );
 
