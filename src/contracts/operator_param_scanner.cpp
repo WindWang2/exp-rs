@@ -505,10 +505,7 @@ void extractOperator( const FileUnit &unit,
                     const HelperDef *def =
                         resolveHelper( global, unit, fn, storage );
                     if ( !def )
-                    {
-                        std::fprintf(stderr, "[DBG]   fn=%s NOT resolved\n", fn.c_str());
                         continue;
-                    }
                     // NB: std::string::substr returns an owning temporary —
                     // binding it to a string_view would dangle immediately.
                     const std::string helperBody =

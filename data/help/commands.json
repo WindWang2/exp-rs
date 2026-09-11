@@ -766,5 +766,16 @@
       "模型目录",
       "model bench"
     ]
+  },
+  {
+    "id": "command.app.commandPalette",
+    "purpose": "打开命令面板，按名称搜索并执行任意工作台命令。",
+    "prerequisites": [],
+    "related": [],
+    "keywords": [
+      "命令面板",
+      "搜索命令",
+      "command palette"
+    ]
   }
 ]

@@ -58,6 +58,8 @@ class ContractGraph
 
     const std::vector<ContractNode> &nodes() const { return m_nodes; }
     const std::vector<ContractEdge> &edges() const { return m_edges; }
+    std::vector<ContractNode> &nodesMutable() { return m_nodes; }
+    std::vector<ContractEdge> &edgesMutable() { return m_edges; }
 
     /// Structural findings, stable order.
     std::vector<ContractFinding> computeFindings() const;

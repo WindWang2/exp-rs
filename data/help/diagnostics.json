@@ -1822,5 +1822,25 @@
       "模型",
       "兼容"
     ]
+  },
+  {
+    "id": "diagnostic.harness.identity_mismatch",
+    "family": "harness",
+    "code": "IDENTITY_MISMATCH",
+    "title": "身份钉扎不一致",
+    "whatHappened": "声明的数据集/模型/切分身份与实际解析出的实体不一致。",
+    "whyItMatters": "计划绑定的输入不是钉扎的那一份，结果无法对应声明的实验身份。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "核对 plan 中的 dataset/model/split 标识是否指向同一资产",
+      "在数据管理器确认资产版本后再提交执行",
+      "如为有意更换，请更新钉扎声明而不是沿用旧标识"
+    ],
+    "keywords": [
+      "identity",
+      "pin",
+      "身份"
+    ]
   }
 ]

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 namespace sicnu::contracts {
@@ -77,6 +78,7 @@ AssemblyResult buildLiveGraph( const std::string &sourceRoot )
     // ── operators (live registry + scanner facts) ────────────────────────
     OperatorParamScanner scanner( sourceRoot );
     const auto operatorScans = scanner.scanAll();
+    std::set<std::string> operatorIds;
     for ( const auto &op : operatorScans )
     {
         ContractNode node;
@@ -86,6 +88,7 @@ AssemblyResult buildLiveGraph( const std::string &sourceRoot )
         node.attributes = std::vector<std::string>( op.declaredParams.begin(),
                                                     op.declaredParams.end() );
         g.addNode( std::move( node ) );
+        operatorIds.insert( op.operatorId );
     }
 
     // ── commands ─────────────────────────────────────────────────────────
@@ -230,10 +233,32 @@ AssemblyResult buildLiveGraph( const std::string &sourceRoot )
             node.kind = "capability_entry";
             node.origin = file;
             g.addNode( std::move( node ) );
-            if ( id.rfind( "family:", 0 ) != 0 )
+            // capability entries come in two flavours: operator entries
+            // (rs:ndvi, …) and agent-tool entries (cartography:compose, …).
+            // Only operator entries get a capability_for edge — tool entries
+            // reference the tool catalog, not the operator registry.
+            if ( operatorIds.count( id ) )
                 g.addEdge( { "capability_for", id, id, file } );
         }
     }
+
+    // Normalize evidence paths to be relative to the source root so the
+    // canonical serialization is host- and invocation-independent.
+    auto relativize = [ &sourceRoot ]( std::string path ) {
+        if ( path.rfind( sourceRoot, 0 ) == 0 )
+        {
+            path.erase( 0, sourceRoot.size() );
+            if ( !path.empty() && path.front() == '/' )
+                path.erase( 0, 1 );
+        }
+        return path;
+    };
+    for ( auto &n : g.nodesMutable() )
+        n.origin = relativize( n.origin );
+    for ( auto &e : g.edgesMutable() )
+        e.origin = relativize( e.origin );
+    for ( auto &note : result.notes )
+        note = relativize( note );
 
     return result;
 }

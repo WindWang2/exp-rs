@@ -11,9 +11,14 @@
 - `benchmark_contract9` records: operator count, source bytes scanned,
   scan+graph+serialize wall time, peak RSS (getrusage), JSON output.
 
-## Evidence (filled after implementation)
+## Evidence (Release, GCC, linux, 16 cores — exp.bench.contract9.v1)
 
-- PENDING: benchmark JSON + environment (git SHA, build type, compiler).
+- operator_param_scan: ~1511 ms over 136 operator registrations
+  (whole-tree source scan, per-file cap 2 MB)
+- descriptor_projection: ~7 ms for 136 schemas / 936 params
+- graph_assembly: ~1816 ms → 824 nodes / 263 edges
+- graph_serialize: ~5 ms → ~218 KiB canonical JSON
+- Product-runtime cost: zero (tooling/test-side only).
 
 ## Non-goals
 

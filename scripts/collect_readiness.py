@@ -68,6 +68,13 @@ CAPABILITIES = {
     "visual-cartography": ("test_mapspec", "L6:mapspec_visual"),
     "bench-quality7": ("benchmark_quality7", "L7:quality7"),
     "bench-scale8": ("benchmark_scale8", "L7:scale8"),
+    # Contract Platform 9.0: unified contract projection guards.
+    "contract-graph": ("test_contract_platform_9", "L2:contract_platform_9"),
+    "contract-operator-projection": ("test_contract_projection_9", "L2:contract_projection_9"),
+    "contract-command-reference": ("test_command_contract_9", "L2:command_contract_9"),
+    "contract-diagnostics-census": ("test_diagnostics_contract_9", "L2:diagnostics_contract_9"),
+    "contract-capability-floors": ("test_capability_contract_9", "L2:capability_contract_9"),
+    "bench-contract9": ("benchmark_contract9", "L7:contract9"),
 }
 
 # Documented, honest compatibility caveats — copied into every report so the

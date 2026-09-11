@@ -72,15 +72,17 @@ std::vector<ContractFinding> ContractGraph::computeFindings() const
     // Dangling references: edge endpoints without a node.
     for ( const auto &e : m_edges )
     {
-        const bool fromOk = hasNode( kindOfFrom( e.kind ), e.from );
-        if ( !fromOk )
+        const auto kinds = endpointKinds( e.kind );
+        if ( !hasNode( kinds.from, e.from ) )
             findings.push_back(
                 { "dangling_ref", e.kind + ":" + e.from,
-                  "source node missing (" + e.origin + ")" } );
-        if ( !hasNode( kindOfTo( e.kind ), e.to ) )
+                  "source " + kinds.from + " node missing (" + e.origin +
+                      ")" } );
+        if ( !hasNode( kinds.to, e.to ) )
             findings.push_back(
                 { "dangling_ref", e.kind + ":" + e.to,
-                  "target node missing (" + e.origin + ")" } );
+                  "target " + kinds.to + " node missing (" + e.origin +
+                      ")" } );
     }
 
     std::sort( findings.begin(), findings.end(),

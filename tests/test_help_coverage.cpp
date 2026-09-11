@@ -62,19 +62,43 @@ const CompositionReport &composed()
 /// Command ids as registered by the shell (source scan; see file header).
 QStringList scanShellCommandIds()
 {
-    QFile file( QStringLiteral( CMAKE_SOURCE_DIR "/src/app/workbench/command_defs.cpp" ) );
-    if ( !file.open( QIODevice::ReadOnly ) )
-        return {};
-    const QString text = QString::fromUtf8( file.readAll() );
+    // Command registrations live in command_defs.cpp (RS_CMD/base idioms)
+    // and in main_window_workbench.cpp (.id = assignments); scan both so
+    // workbench-window commands (e.g. app.commandPalette) are covered.
+    QStringList texts;
+    QFile commandDefs( QStringLiteral(
+        CMAKE_SOURCE_DIR "/src/app/workbench/command_defs.cpp" ) );
+    if ( commandDefs.open( QIODevice::ReadOnly ) )
+        texts << QString::fromUtf8( commandDefs.readAll() );
 
     QStringList ids;
     QRegularExpression re( QStringLiteral( "\"((?:project|layer|map|workbench|rs|app)\\.[A-Za-z0-9_.]+)\"" ) );
-    auto it = re.globalMatch( text );
-    while ( it.hasNext() ) {
-        const auto match = it.next();
-        const QString id = match.captured( 1 );
-        if ( !ids.contains( id ) )
-            ids << id;
+    for ( const QString &text : texts ) {
+        auto it = re.globalMatch( text );
+        while ( it.hasNext() ) {
+            const auto match = it.next();
+            const QString id = match.captured( 1 );
+            if ( !ids.contains( id ) )
+                ids << id;
+        }
+    }
+
+    // main_window_workbench.cpp registers window-level commands through
+    // `X.id = QStringLiteral( "…" )` assignments (e.g. app.commandPalette);
+    // other "workbench.*" strings there are help contexts, not commands.
+    QFile workbenchWindow( QStringLiteral(
+        CMAKE_SOURCE_DIR "/src/app/main_window_workbench.cpp" ) );
+    if ( workbenchWindow.open( QIODevice::ReadOnly ) ) {
+        const QString windowText = QString::fromUtf8( workbenchWindow.readAll() );
+        QRegularExpression idAssign( QStringLiteral(
+            R"re(\.id\s*=\s*QStringLiteral\s*\(\s*"((?:project|layer|map|workbench|rs|app)\.[A-Za-z0-9_.]+)")re" ) );
+        auto it = idAssign.globalMatch( windowText );
+        while ( it.hasNext() ) {
+            const auto match = it.next();
+            const QString id = match.captured( 1 );
+            if ( !ids.contains( id ) )
+                ids << id;
+        }
     }
     return ids;
 }

@@ -13,8 +13,16 @@ void ErrorCodeScanner::scanEnum( std::string_view headerSrc,
                                  const std::string &enumName,
                                  ErrorCodeReport &out ) const
 {
-    const Span body =
-        findFunctionBody( headerSrc, "enum class " + enumName );
+    // Enums have no parameter list: locate `enum class Name` then the body
+    // brace directly.
+    const std::string token = "enum class " + enumName;
+    const size_t pos = headerSrc.find( token );
+    if ( pos == std::string_view::npos )
+        return;
+    const size_t brace = headerSrc.find( '{', pos );
+    if ( brace == std::string_view::npos )
+        return;
+    const Span body = matchBrace( headerSrc, brace );
     if ( !body.valid() )
         return;
     const std::string_view bodyView = headerSrc.substr(
@@ -28,8 +36,7 @@ void ErrorCodeScanner::scanEnum( std::string_view headerSrc,
     const auto items = splitArgs( headerSrc, body );
     for ( const auto &item : items )
     {
-        const std::string s( headerSrc.substr( item.begin,
-                                               item.end - item.begin ) );
+        const std::string s = codeOnly( headerSrc, item );
         if ( s.empty() )
             continue;
         std::smatch sm;
@@ -43,8 +50,8 @@ void ErrorCodeScanner::scanToStringSwitch( std::string_view src,
                                            ErrorCodeReport &out ) const
 {
     const std::string reStr =
-        R"re(case\s+)" + enumName +
-        R"re(::(\w+)\s*:\s*(?:\n\s*)?return\s+"([^"]+)";)re";
+        "case\\s+" + enumName +
+        "::(\\w+)\\s*:\\s*(?:\\n\\s*)?return\\s+\"([^\"]+)\";";
     const std::string text( src );
     std::regex re( reStr );
     for ( auto it = std::sregex_iterator( text.begin(), text.end(), re );

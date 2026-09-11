@@ -36,18 +36,19 @@ void CommandRefScanner::scanRegistered( std::string_view src,
                                         CommandRefReport &out ) const
 {
     // RS_CMD( d, "project.new", ... ) — shell command macro
-    static const std::regex reMacro(
-        R"re(RS_CMD\s*\(\s*\w+\s*,\s*"([^"]+)")re" );
-    // base( "project.new", ... ) — direct helper call
-    static const std::regex reBase( R"re(\bbase\s*\(\s*"([^"]+)")re" );
-    // paletteDef.id = QStringLiteral( "app.commandPalette" )
-    static const std::regex reIdAssign(
-        R"re(\.id\s*=\s*(?:QStringLiteral|QString::fromUtf8|QString::fromLatin1)\s*\(\s*"([^"]+)")re" );
-
-    for ( const auto &re : { reMacro, reBase, reIdAssign } )
+    const std::string patterns[] = {
+        R"re(RS_CMD\s*\(\s*\w+\s*,\s*"([^"]+)")re",
+        R"re(\bbase\s*\(\s*"([^"]+)")re",
+        // rasterTool( "rs.bandMath", ... ) — local lambda helper in
+        // command_defs.cpp (id-first, like base()).
+        R"re(\brasterTool\s*\(\s*"([^"]+)")re",
+        R"re(\.id\s*=\s*(?:QStringLiteral|QString::fromUtf8|QString::fromLatin1)\s*\(\s*"([^"]+)")re",
+    };
+    for ( const auto &pattern : patterns )
     {
+        const std::regex re( pattern );
         for ( const auto &m :
-              findMatchesWithPos( src, { 0, src.size() }, re ) )
+              findMatchesWithPos( src, { 0, src.size() }, pattern ) )
         {
             std::smatch sm;
             const std::string text( m.whole );
@@ -63,9 +64,10 @@ void CommandRefScanner::scanLookups( std::string_view src,
                                      CommandRefReport &out ) const
 {
     // registry->action( QStringLiteral( "workbench.temporal" ), true )
-    static const std::regex re(
-        R"re(->\s*action\s*\(\s*(?:QStringLiteral\s*\(\s*)?"([^"]+)")re" );
-    for ( const auto &m : findMatchesWithPos( src, { 0, src.size() }, re ) )
+    static const std::string pattern =
+        R"re(->\s*action\s*\(\s*(?:QStringLiteral\s*\(\s*)?"([^"]+)")re";
+    const std::regex re( pattern );
+    for ( const auto &m : findMatchesWithPos( src, { 0, src.size() }, pattern ) )
     {
         std::smatch sm;
         const std::string text( m.whole );
@@ -80,9 +82,10 @@ void CommandRefScanner::scanCtas( std::string_view src,
                                   CommandRefReport &out ) const
 {
     // action.commandId = QStringLiteral( "workbench.temporal" );
-    static const std::regex re(
-        R"re(commandId\s*=\s*(?:QStringLiteral|QString::fromUtf8)\s*\(\s*"([^"]+)")re" );
-    for ( const auto &m : findMatchesWithPos( src, { 0, src.size() }, re ) )
+    static const std::string pattern =
+        R"re(commandId\s*=\s*(?:QStringLiteral|QString::fromUtf8)\s*\(\s*"([^"]+)")re";
+    const std::regex re( pattern );
+    for ( const auto &m : findMatchesWithPos( src, { 0, src.size() }, pattern ) )
     {
         std::smatch sm;
         const std::string text( m.whole );
@@ -98,9 +101,9 @@ void CommandRefScanner::scanPreflightActions( std::string_view src,
 {
     // addBlocker(outcome, code, message, action[, details]) — action is the
     // 4th argument. Same position for addWarning.
-    static const std::regex reCall( R"re(\b(addBlocker|addWarning)\s*\()re" );
+    static const std::string callPattern = R"re(\b(addBlocker|addWarning)\s*\()re";
     for ( const auto &m :
-          findMatchesWithPos( src, { 0, src.size() }, reCall ) )
+          findMatchesWithPos( src, { 0, src.size() }, callPattern ) )
     {
         const size_t openParen = m.pos + m.whole.size() - 1;
         const Span argsSpan = matchParen( src, openParen );

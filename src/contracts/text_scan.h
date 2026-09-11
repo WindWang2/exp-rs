@@ -58,6 +58,11 @@ std::string firstIdentifier( std::string_view src );
 /// literal.
 bool insideLiteralOrComment( std::string_view src, size_t pos );
 
+/// Returns only the code bytes of `range` — comments and string/char
+/// literal contents (including their delimiters) are dropped. Used for
+/// identifier-level parsing over comment-bearing spans.
+std::string codeOnly( std::string_view src, Span range );
+
 /// All occurrences of `regex` inside `span` with capture group 1 (or the
 /// whole match when the pattern has no groups), skipping matches inside
 /// literals/comments.

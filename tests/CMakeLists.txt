@@ -7465,6 +7465,55 @@ sicnu_add_test(test_capability_drift)
 sicnu_link_jsoncpp(test_capability_drift)
 
 
+# Contract Platform 9.0: mechanical implementation↔schema projection guard
+# (the permanent fix class for #872/#879/#880) + canonical descriptor tests.
+sicnu_add_test(test_contract_projection_9)
+target_link_libraries(test_contract_projection_9 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_contract_projection_9)
+
+# Contract Platform 9.0: command/help/action reference graph (#869/#881/#882)
+# and the HelpContentStore single-load regression (#871).
+sicnu_add_test(test_command_contract_9)
+target_link_libraries(test_command_contract_9 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_command_contract_9)
+
+# Contract Platform 9.0: error-taxonomy ↔ diagnostics census (#870).
+sicnu_add_test(test_diagnostics_contract_9)
+target_link_libraries(test_diagnostics_contract_9 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_diagnostics_contract_9)
+
+# Contract Platform 9.0: capability knowledge / tool / recipe floors (M4).
+sicnu_add_test(test_capability_contract_9)
+target_link_libraries(test_capability_contract_9 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_capability_contract_9)
+
+# Contract Platform 9.0: contract inventory graph + snapshot freshness (M0).
+sicnu_add_test(test_contract_platform_9)
+target_link_libraries(test_contract_platform_9 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_contract_platform_9)
+
+# Contract Platform 9.0: contract generation cost baseline (M8). Evidence
+# artifact via `benchmark_contract9 --out <json>`.
+add_executable(benchmark_contract9
+  benchmark_contract9.cpp
+)
+target_link_libraries(benchmark_contract9 PRIVATE
+  sicnu_contracts
+  sicnu_operators
+  Qt6::Core
+)
+if(TARGET jsoncpp)
+  target_link_libraries(benchmark_contract9 PRIVATE jsoncpp)
+endif()
+target_include_directories(benchmark_contract9 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_compile_definitions(benchmark_contract9 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
+
 # Last TEST_INCLUDE_FILES entry: stamp PYTHONHOME / LD_LIBRARY_PATH / QT_IM_MODULE
 # onto every test after Catch PRE_TEST discovery has registered them (#730).
 sicnu_register_test_env_applier()
@@ -7745,6 +7794,13 @@ sicnu_add_header_probes(
   geospatial/util/gdal_compat.h
   geospatial/util/resource_uri.h
   support/bounded_fuzz.h
+  contracts/text_scan.h
+  contracts/contract_descriptor.h
+  contracts/contract_graph.h
+  contracts/operator_param_scanner.h
+  contracts/command_ref_scanner.h
+  contracts/error_code_scanner.h
+  contracts/graph_assembly.h
 )
 
 # Trace chain (task F) + store fault contracts (task E), Verification

@@ -268,6 +268,19 @@ Span functionSignature( std::string_view src, size_t openBrace )
     return {};
 }
 
+std::string codeOnly( std::string_view src, Span range )
+{
+    if ( !range.valid() )
+        return {};
+    const auto kinds = classify( src );
+    std::string out;
+    out.reserve( range.end - range.begin );
+    for ( size_t i = range.begin; i < range.end && i < src.size(); ++i )
+        if ( kinds[i] == ByteKind::Code )
+            out.push_back( src[i] );
+    return out;
+}
+
 std::vector<Span> splitArgs( std::string_view src, Span range )
 {
     std::vector<Span> out;
