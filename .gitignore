@@ -95,6 +95,7 @@ vendor/
 !.planning/scientific-processing-8/
 !.planning/plugin-platform-8/
 !.planning/verification-platform-8/
+!.planning/professional-workbench-9/
 .zcode/
 
 # IDE / editor / OS artifacts
