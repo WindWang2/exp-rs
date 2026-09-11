@@ -443,7 +443,10 @@ TEST_CASE( "geocodeGroundCell: tilted facet matches independent vector math (rea
 
     const double lat = demCenterLat( 2 );
     const double lon = demCenterLon( 3 );
-    const double dzdN = -0.06; // facet rising toward the sensor (satellite at lat 0)
+    const double dzdN = -0.06; // facet rising TOWARD the sensor (satellite at
+                               // lat 0, due south): along the BEAM-TRAVEL
+                               // direction (northward, away from the sensor)
+                               // the terrain FALLS at 3.43° — no fold.
     const double dzdE = 0.0;
 
     GeocodeGeometry g;
@@ -480,20 +483,29 @@ TEST_CASE( "geocodeGroundCell: tilted facet matches independent vector math (rea
 
     REQUIRE( g.localIncidenceDeg == Approx( thetaLDeg ).margin( 1e-9 ) );
     REQUIRE( g.incidenceDeg == Approx( theta0Deg ).margin( 1e-9 ) );
-    REQUIRE( g.rtcFactor == Approx( std::sin( theta0Deg * M_PI / 180.0 )
-                                        / std::sin( thetaLDeg * M_PI / 180.0 ) )
+    REQUIRE( g.rtcFactor == Approx( std::sin( thetaLDeg * M_PI / 180.0 )
+                                        / std::sin( theta0Deg * M_PI / 180.0 ) )
                                 .margin( 1e-12 ) );
-    // The slope toward the sensor (atan(0.06) ≈ 3.43°) exceeds the
-    // near-nadir incidence (θ0 < 2°): classic layover.
-    REQUIRE( g.maskClass == TerrainMaskClass::Layover );
+    // A slope falling along the beam-travel direction never folds and is
+    // not shadowed either (α is far above −θe): class Normal, with the
+    // back-flank brightness the RTC brightens (θL > θ0 → factor > 1).
+    REQUIRE( g.maskClass == TerrainMaskClass::Normal );
+    REQUIRE( g.rtcFactor > 1.0 );
+    REQUIRE( g.localIncidenceDeg > g.incidenceDeg );
 
-    // Mirror the slope (falling toward the sensor): local incidence opens,
-    // the factor drops below 1, no layover.
+    // Mirror the slope: rising ALONG the beam-travel direction at 3.43°,
+    // far steeper than the near-nadir beam (θ0 < 0.25°) — the slant-range
+    // mapping folds: classic layover. The facet normal now leans toward
+    // the sensor, so the local incidence CLOSES toward the flat-earth
+    // value (θL = 3.2° vs 3.66° for the mirrored flank) and the RTC
+    // factor stays above 1 (both flanks sit at θL > θ0 in this
+    // near-nadir geometry — the factor direction is pinned by the
+    // independent ratio below, not by the >1/<1 relation).
     GeocodeGeometry g2;
     REQUIRE( geocodeGroundCell( contract, lat, lon, 0.0, 0.0, -dzdN, &g2 ) );
-    REQUIRE( g2.maskClass == TerrainMaskClass::Normal );
-    REQUIRE( g2.rtcFactor < 1.0 );
-    REQUIRE( g2.localIncidenceDeg > g2.incidenceDeg );
+    REQUIRE( g2.maskClass == TerrainMaskClass::Layover );
+    REQUIRE( g2.rtcFactor > 1.0 );
+    REQUIRE( g2.localIncidenceDeg < g.localIncidenceDeg );
 
     // Degenerate gradients: NaN facet geometry, class Normal, resolved.
     GeocodeGeometry g3;
@@ -665,7 +677,7 @@ TEST_CASE( "rs:sar_geocode tilted DEM: layover class and gamma0 area factor from
     for ( int y = 0; y < kDemH; ++y )
         for ( int x = 0; x < kDemW; ++x )
             dem[static_cast<size_t>( y ) * kDemW + x] =
-                static_cast<float>( 0.01 * dLatMetres * y );
+                static_cast<float>( -0.01 * dLatMetres * y );
     double gt[6];
     demGeoTransform( gt );
     const QString demPath = tmp.filePath( "dem_ramp.tif" );
@@ -713,14 +725,14 @@ TEST_CASE( "rs:sar_geocode tilted DEM: layover class and gamma0 area factor from
             INFO( "rtc cell (" << x << "," << y << ") gamma0=" << gamma0[idx]
                   << " linc=" << localIncidence[idx] );
             REQUIRE( gamma0[idx]
-                     == Approx( 2.0f * static_cast<float>( std::sin( theta0 ) / std::sin( thetaL ) ) )
+                     == Approx( 2.0f * static_cast<float>( std::sin( thetaL ) / std::sin( theta0 ) ) )
                             .epsilon( 1e-3 ) );
         }
     REQUIRE( layoverCells > 0 );
     // The class column and the RTC column agree with the incidence column:
-    // a layover facet's normal leans away from the beam, so its local
-    // incidence OPENS past the reference incidence (thetaL > theta0) and
-    // the area factor compensates below 1.
+    // a layover facet folds the range mapping, its local incidence opens
+    // past the reference incidence (thetaL > theta0 at these near-nadir
+    // cells) and the RTC factor exceeds 1.
     const auto incidence = readBand( tmp.filePath( "geocoded_ramp.tif" ), 3 );
     for ( int y = 1; y < kDemH - 1; ++y )
         for ( int x = 0; x < kDemW; ++x )

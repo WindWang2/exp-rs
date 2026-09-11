@@ -205,8 +205,17 @@ Json::Value RsZonalStatsOperator::run( const Json::Value &params, RSOperatorCont
         throw RSOperatorError( ErrorCode::InvalidInputData,
                                "The zone vector carries no features: " + vectorPath );
 
-    // Accumulators in zone-key order (deterministic CSV ordering).
+    // Accumulators in zone-key order (deterministic CSV ordering). Every
+    // grid-overlapping zone is seeded up front so a zone covering zero
+    // pixel centers still reports a count-0 row — silence would hide
+    // geometry/CRS mistakes (zones fully outside the grid stay in
+    // outsideGridFeatures instead).
     std::map<ZoneKey, ZoneAcc> zones;
+    for ( const CachedFeature &f : cache.features )
+    {
+        if ( f.geometry != nullptr && f.intersects )
+            zones[f.zoneKey];
+    }
 
     size_t medianBudgetLeft = kMedianValueBudget;
     std::uint64_t windowsTouched = 0;
@@ -352,8 +361,20 @@ Json::Value RsZonalStatsOperator::run( const Json::Value &params, RSOperatorCont
                     median = 0.5 * ( lower + mid );
                 }
             }
-            ts << QString::fromStdString( zoneKey ) << "," << band << "," << acc.count << ","
-               << acc.nodata << ",";
+            // RFC-4180: quote the key when it carries a comma, quote or
+            // newline so machine-readable rows cannot be silently corrupted.
+            QString keyText = QString::fromStdString( zoneKey );
+            if ( keyText.contains( QChar( ',' ) ) || keyText.contains( QChar( '"' ) )
+                 || keyText.contains( QChar( '\n' ) ) )
+            {
+                keyText.replace( QChar( '"' ), QStringLiteral( "\"\"" ) );
+                ts << '"' << keyText << '"';
+            }
+            else
+            {
+                ts << keyText;
+            }
+            ts << "," << band << "," << acc.count << "," << acc.nodata << ",";
             if ( acc.count > 0 )
                 ts << QString::fromStdString( formatDouble( acc.min ) ) << ","
                    << QString::fromStdString( formatDouble( acc.max ) ) << ","

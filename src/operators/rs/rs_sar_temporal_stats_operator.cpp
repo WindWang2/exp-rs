@@ -97,9 +97,25 @@ Json::Value RsSarTemporalStatsOperator::executionEstimate() const {
     Json::Value est( Json::objectValue );
     est["tileWidth"] = kTileDim;
     est["tileHeight"] = kTileDim;
-    // One tile window per scene + per-pixel scratch: O(tile × scenes).
+    // One tile window per scene plus output/scratch planes: O(tile × scenes)
+    // for a nominal 4-scene stack; estimateExecution() refines with the
+    // real scene count when parameters are available.
+    constexpr std::uint64_t kNominalScenes = 4;
     est["estimatedRamBytes"] = Json::Value::UInt64(
-        8ULL * kTileDim * kTileDim * sizeof( float ) );
+        ( kNominalScenes + 4ULL ) * kTileDim * kTileDim * sizeof( float ) );
+    return est;
+}
+
+Json::Value RsSarTemporalStatsOperator::estimateExecution( const Json::Value &params ) const {
+    // Actual scene count when the caller provided parameters: per-tile
+    // buffers are one plane per scene plus the kProductBands product planes.
+    std::uint64_t scenes = 4;
+    if ( params.isObject() && params.isMember( "inputs" ) && params["inputs"].isArray() )
+        scenes = params["inputs"].size();
+    Json::Value est = executionEstimate();
+    est["estimatedRamBytes"] = Json::Value::UInt64(
+        ( scenes + kProductBands ) * kTileDim * kTileDim * sizeof( float ) );
+    est["basis"] = "dynamic";
     return est;
 }
 
@@ -162,6 +178,24 @@ Json::Value RsSarTemporalStatsOperator::run( const Json::Value &params, RSOperat
                     + std::to_string( ds->width() ) + "x" + std::to_string( ds->height() )
                     + " but the first scene is " + std::to_string( width ) + "x"
                     + std::to_string( height ) );
+        else
+        {
+            // Same-size but differently placed grids would stack silently
+            // wrong: pin the affine grid AND the CRS to the first scene.
+            const auto gt0 = scenes.front()->geoTransform();
+            const auto gt = ds->geoTransform();
+            for ( int k = 0; k < 6; ++k )
+                if ( std::fabs( gt[k] - gt0[k] ) > 1e-9 )
+                    throw RSOperatorError(
+                        ErrorCode::InvalidInputData,
+                        "Scenes are not co-registered: " + path
+                            + " carries a different geotransform than the first scene" );
+            if ( ds->projection() != scenes[0]->projection() )
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "Scenes are not co-registered: " + path
+                        + " carries a different CRS than the first scene" );
+        }
         scenes.push_back( std::move( ds ) );
     }
 
@@ -235,7 +269,10 @@ Json::Value RsSarTemporalStatsOperator::run( const Json::Value &params, RSOperat
 
     std::vector<std::vector<float>> tiles( nScenes );
     std::vector<double> series( nScenes );
-    std::vector<float> outPlane( static_cast<size_t>( kTileDim ) * kTileDim );
+    // ALL product planes at once: pass 3 writes outPlane[b * tileN + i] for
+    // every band, so the buffer must hold kProductBands planes — a single
+    // plane overflows by ~10 tiles' worth on any full-size interior tile.
+    std::vector<float> outPlane( static_cast<size_t>( kProductBands ) * kTileDim * kTileDim );
     sicnu::sar::SarTemporalStats stats;
 
     const int totalTiles = stream.tileCount();

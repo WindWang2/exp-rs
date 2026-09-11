@@ -108,21 +108,27 @@ geometry, bounded bilinear/nearest samplers); streaming driver:
    `local_incidence` (terrain facet θL), `layover_shadow`
    (0 normal / 1 layover / 2 shadow, NaN NoData).
 3. **Real-geometry classes**: layover/shadow on the map grid use the
-   per-pixel LOS elevation θe = asin(ŝ·û): LAYOVER when the toward-sensor
-   slope α > 90° − θe; SHADOW when α < −θe. These reduce exactly to the
-   §2 constant-geometry conditions when the LOS is constant.
-4. **Honesty rule (unchanged)**: cells whose forward geometry does not
+   per-pixel LOS elevation θe = asin(ŝ·û) and the slope α along the
+   BEAM-TRAVEL horizontal direction (away from the sensor — the direction
+   slant-range monotonicity is measured in): LAYOVER when α > 90° − θe;
+   SHADOW when α < −θe. These reduce exactly to the §2 constant-geometry
+   conditions when the LOS is constant.
+4. **Contract lookup**: the orbit contract is read from the SAR product's
+   own metadata first, with the DEM (the co-registered scene carrier, as
+   the backward product reads it) as fallback — one effective contract per
+   run either way.
+5. **Honesty rule (unchanged)**: cells whose forward geometry does not
    resolve (no zero-Doppler crossing inside the declared segment), whose
    source position falls outside the SAR raster, whose DEM height is
    NoData, or whose resampling taps are non-finite are NaN — counted per
    cause in the result (`unresolvedGeometryPixels`, `outsideImagePixels`,
    `demNoDataPixels`, `sourceNoDataPixels`), never fabricated. Undeclared
    or contradictory orbit contracts are typed refusals.
-5. **Memory**: O(tile + bounded source window); windows above a fixed
+6. **Memory**: O(tile + bounded source window); windows above a fixed
    budget are never materialized (per-pixel bounded reads instead).
    Determinism: bit-exact grade (pure per-pixel math, no parallel
    reductions).
-6. **Evidence**: `tests/test_sar_geocoding.cpp` — analytic circular-orbit
+7. **Evidence**: `tests/test_sar_geocoding.cpp` — analytic circular-orbit
    known answers (row/col/incidence/factor/class), backward∘forward
    round-trip closure < 1 mm, independent-vector-math facet validation,
    sampler NaN/bounds matrix, operator E2E round-trip + layover/RTC
@@ -143,7 +149,8 @@ the N-scene summary. Authority: `processing/algorithms/sar/sar_temporal.h`.
 3. **Robust change**: the per-pixel baseline is the median linear-power
    sample (upper-median selection for even counts, documented); deviations
    are |10·log10(x) − baseline| dB — the log domain makes multiplicative
-   speckle additive, so baseline and deviations are speckle-robust.
+   speckle additive, so baseline and deviations are speckle-robust. Each
+   scene's DECLARED band sentinel is also excluded before the aggregates.
 4. **Products** (fixed band order, `SICNU_SAR_TEMPORAL_BANDS`): mean_db /
    mean_linear / std_dev_linear / cv / min_db / max_db / argmax_date /
    baseline_db / max_log_deviation_db / changed_dates / valid_count.

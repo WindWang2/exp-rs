@@ -475,14 +475,16 @@ TEST_CASE( "rs:zonal_stats: overlapping zones last-wins, sentinel exclusion, "
     const QString ref = tmp.filePath( "values.tif" );
     REQUIRE( writeRaster( ref, values, 10, 10, gt, epsg4326Wkt(), -9999.0f, true ) );
 
-    // a: cols {1..3} x rows {2..4}; b overlaps cols {2,3} (wins there);
-    // c: empty zone (outside the data... same grid but over NoData cell
-    // only); d: geometryless feature.
+    // a: cols {1..3} x rows {2..4}; b (subset rect) overlaps cols {2,3}
+    // and wins there; c: exactly one grid cell; n: a zone over ONLY the
+    // sentinel cell (zero valid pixels — still reports, count 0);
+    // d: geometryless feature.
     const std::string geojson = featureCollection( {
         rectFeature( "1", "a", R"("val":1.0)", 10.55, 14.60, 13.55, 17.60 ),
         rectFeature( "2", "b", R"("val":2.0)", 11.55, 14.60, 13.6, 17.60 ),
         rectFeature( "3", "c", R"("val":3.0)", 15.1, 14.1, 15.9, 14.9 ),
-        R"( {"type":"Feature","id":4,"properties":{"zone":"d","val":4.0},"geometry":null} )",
+        rectFeature( "4", "n", R"("val":9.0)", 12.1, 16.1, 12.9, 16.9 ),
+        R"( {"type":"Feature","id":5,"properties":{"zone":"d","val":4.0},"geometry":null} )",
     } );
     const QString zones = tmp.filePath( "zones.geojson" );
     REQUIRE( writeGeoJson( zones, geojson ) );
@@ -499,8 +501,8 @@ TEST_CASE( "rs:zonal_stats: overlapping zones last-wins, sentinel exclusion, "
     REQUIRE_NOTHROW( result = op->run( params, ctx ) );
 
     REQUIRE( result["geometrylessFeatures"].asUInt64() == 1ULL );
-    REQUIRE( result["zones"].asUInt64() == 3ULL ); // a, b, c
-    REQUIRE( result["rows"].asUInt64() == 3ULL );
+    REQUIRE( result["zones"].asUInt64() == 4ULL ); // a, b, c, n
+    REQUIRE( result["rows"].asUInt64() == 4ULL );
 
     const std::string csv = readCsv( tmp.filePath( "stats.csv" ) );
     // Zone a: cols {1,2,3} x rows {2,3,4} = 9 cells; the overlap with b
@@ -514,19 +516,93 @@ TEST_CASE( "rs:zonal_stats: overlapping zones last-wins, sentinel exclusion, "
         const std::string expectedPrefix = "a,1,3,0,21,41,31,8.164965809,31,0";
         REQUIRE( row.rfind( expectedPrefix, 0 ) == 0 );
     }
-    // Zone b: cols {2,3} x rows {2,3,4} = 6 cells; the sentinel (r3,c2)
-    // falls inside b → 5 valid, 1 nodata; mean of 22,23,33,42,43 = 32.6.
+    // Zone b: cols {2,3} x rows {2,3,4} = 6 cells; the sentinel cell is
+    // re-assigned to the later zone n (last wins) → 5 valid, 0 nodata;
+    // mean of 22,23,33,42,43 = 32.6.
     {
-        const size_t pos = csv.find( "b,1,5,1," );
+        const size_t pos = csv.find( "b,1,5,0," );
         REQUIRE( pos != std::string::npos );
         const size_t eol = csv.find( '\n', pos );
         const std::string row = csv.substr( pos, eol - pos );
-        const std::string expectedPrefix = "b,1,5,1,22,43,32.6,";
+        const std::string expectedPrefix = "b,1,5,0,22,43,32.6,8.957678271,33,0";
         REQUIRE( row.rfind( expectedPrefix, 0 ) == 0 );
     }
     // Zone c: exactly one cell (row center 14.5, col center 15.5) → v=55;
     // stddev of a single sample is 0.
     REQUIRE( csv.find( "c,1,1,0,55,55,55,0,55,0" ) != std::string::npos );
+    // Zone n: covers only the sentinel cell → count 0 row still reports.
+    REQUIRE( csv.find( "n,1,0,1,nan,nan,nan,nan,nan,0" ) != std::string::npos );
+}
+
+
+TEST_CASE( "rs:rasterize + rs:zonal_stats handle vectors beyond one batch (>1024 features)",
+           "[raster-vector][regression]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    // 10x10 grid, v = col + 10*row; 1200 point features over distinct
+    // cells (40 x 30 = 1200 of the 100 cells — points share cells, so
+    // expected valid_pixels counts the DISTINCT burned cells with
+    // last-wins semantics: every cell of the grid is covered).
+    double gt[6] = { 10.0, 1.0, 0.0, 20.0, 0.0, -1.0 };
+    std::vector<float> values( 100 );
+    for ( int r = 0; r < 10; ++r )
+        for ( int c = 0; c < 10; ++c )
+            values[static_cast<size_t>( r ) * 10 + c] = static_cast<float>( c + 10 * r );
+    const QString ref = tmp.filePath( "values.tif" );
+    REQUIRE( writeRaster( ref, values, 10, 10, gt, epsg4326Wkt() ) );
+
+    std::vector<std::string> feats;
+    for ( int i = 0; i < 1200; ++i )
+    {
+        const int cell = i % 100;
+        const int c = cell % 10;
+        const int r = cell / 10;
+        const double x = 10.5 + c; // cell centers
+        const double y = 19.5 - r;
+        feats.push_back( R"( {"type":"Feature","id":)" + std::to_string( i )
+                         + R"(,"properties":{"zone":"p","val":1.0},)"
+                         + R"("geometry":{"type":"Point","coordinates":[)"
+                         + std::to_string( x ) + "," + std::to_string( y ) + "]} }" );
+    }
+    const QString zones = tmp.filePath( "points.geojson" );
+    REQUIRE( writeGeoJson( zones, featureCollection( feats ) ) );
+
+    auto rasterize = RSOperatorRegistry::instance().create( "rs:rasterize" );
+    auto zonal = RSOperatorRegistry::instance().create( "rs:zonal_stats" );
+    REQUIRE( rasterize != nullptr );
+    REQUIRE( zonal != nullptr );
+    RSOperatorContext ctx;
+
+    // Points burn with ALL_TOUCHED semantics via GDAL (a point touches the
+    // pixel containing it); center-selection would drop points between
+    // centers — the operator default burns points reliably.
+    Json::Value rp( Json::objectValue );
+    rp["input"] = ref.toStdString();
+    rp["vector"] = zones.toStdString();
+    rp["value"] = 5.0;
+    rp["allTouched"] = true;
+    rp["output"] = tmp.filePath( "points_burn.tif" ).toStdString();
+    Json::Value rResult;
+    REQUIRE_NOTHROW( rResult = rasterize->run( rp, ctx ) );
+    // 1200 features streamed across 2 batches: exactly 1200 cached (the
+    // batch.append bug would re-process earlier batches and inflate this).
+    REQUIRE( rResult["features"].asUInt64() == 1200ULL );
+    REQUIRE( rResult["burnedPixels"].asUInt64() == 100ULL );
+
+    Json::Value zp( Json::objectValue );
+    zp["input"] = ref.toStdString();
+    zp["vector"] = zones.toStdString();
+    zp["zoneField"] = "zone";
+    zp["output"] = tmp.filePath( "points_stats.csv" ).toStdString();
+    Json::Value zResult;
+    REQUIRE_NOTHROW( zResult = zonal->run( zp, ctx ) );
+    REQUIRE( zResult["features"].asUInt64() == 1200ULL );
+    // The point zone (all 100 cells) is handled through the shared seam.
+    const std::string csv = readCsv( tmp.filePath( "points_stats.csv" ) );
+    REQUIRE( csv.find( "p,1,100,0," ) != std::string::npos );
 }
 
 TEST_CASE( "rs:zonal_stats transforms zone CRS through the foundation policy",

@@ -25,7 +25,24 @@ explicitly deferred — this track implements it plus the other verified gaps.
    contracts audited and documented.
 
 ## Test evidence (executed)
-(status per test binary appended after local execution)
+
+All binaries built and run locally (clang 22.1.8, Debug, ccache;
+`cmake --build build --target <t> -j 2` from build/):
+
+| Suite | Result |
+|---|---|
+| test_sar_geocoding | All tests passed (958 assertions in 7 test cases) |
+| test_raster_vector | All tests passed (119 assertions in 7 test cases) |
+| test_sar_temporal_stats | All tests passed (238 assertions in 5 test cases) |
+| test_spectral_formula_drift | All tests passed (145 assertions in 4 test cases) |
+| test_algorithm_meta_drift | All tests passed (2270 assertions; extended sidecars) |
+| test_sar_operators | All tests passed (530 assertions, 16 cases) |
+| test_sar_kernels | All tests passed (89 assertions, 12 cases) |
+| test_catalog_size | All tests passed (budget raised 160→176 KiB with justification) |
+| test_algorithm_organization | All tests passed (593 assertions, 9 cases) |
+| test_algorithm_schema | All tests passed (31 assertions) |
+| test_harness_catalog | All tests passed (93 assertions, 5 cases) |
+| test_capability_drift | 13/15 cases — 2 failures PRE-EXISTING on master (zero diff in src/agent, the test file, and agent data; see REVIEW_LOG) |
 
 ## Performance/resource evidence
 see PERFORMANCE.md (streaming contracts, bounded parallelism, host context).
@@ -35,11 +52,16 @@ see REVIEW_LOG.md (findings P0-P3 + remediation; 2 read-only subagents).
 
 ## Known limitations / follow-ups
 - Rotated DEM grids refused (family-wide north-up contract).
-- zonal median is budget-bound (flagged truncation, stats stay exact).
+- Zonal median is budget-bound (flagged truncation, stats stay exact).
 - rs:sar_geocode incidence products assume the DEM height is the phase
-  center (no SAR-specific height offset modeling).
+  center (no SAR-specific height offset modeling); the over-budget source-
+  window fallback (per-pixel 2×2 reads) is bounded-but-untested (would need
+  a fixture with a diagonal pass over a large tile).
 - Classification confidence surfaces (OpenCV-dependent) — follow-up.
+- Pre-existing master failures in test_capability_drift (2 cases, harness
+  plan reader / runtime meter) are outside this track's ownership; see
+  REVIEW_LOG for the zero-diff evidence.
 
 ## CI/CD statement
 Online CI/CD was not required and was not waited on; completion is based on
-locally executed, reproducible evidence recorded here.
+locally executed, reproducible evidence recorded here and in TEST_MATRIX.md.

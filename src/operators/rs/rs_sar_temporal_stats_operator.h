@@ -65,6 +65,7 @@ public:
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
+    Json::Value estimateExecution(const Json::Value& params) const override;
     Json::Value run(const Json::Value& params, RSOperatorContext& context) override;
 };
 

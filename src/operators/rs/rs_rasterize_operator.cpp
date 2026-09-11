@@ -148,9 +148,13 @@ Json::Value RsRasterizeOperator::run( const Json::Value &params, RSOperatorConte
                                    + createError.toStdString() );
     out.setBandNoDataValue( 1, std::numeric_limits<double>::quiet_NaN() );
 
-    // Window sweep: windows that no cached feature touches keep NaN.
+    // Window sweep: windows that no cached feature touches keep NaN. Any
+    // failure below removes the partial output instead of leaving a
+    // truncated file at the caller's path (#647 hygiene).
     std::uint64_t burned = 0;
     std::uint64_t windowsTouched = 0;
+    try
+    {
     const int windowsX = ( width + kWindowDim - 1 ) / kWindowDim;
     const int windowsY = ( height + kWindowDim - 1 ) / kWindowDim;
     const int totalWindows = windowsX * windowsY;
@@ -189,15 +193,11 @@ Json::Value RsRasterizeOperator::run( const Json::Value &params, RSOperatorConte
 
             GDALDatasetH mem = createMemWindow( winW, winH );
             if ( mem == nullptr )
-            {
-                out.close();
                 throw RSOperatorError( ErrorCode::GdalError, "Failed to create the MEM rasterization window" );
-            }
             const auto geo = grid.windowGeoBounds( xOff, yOff, winW, winH );
             if ( !rasterizeWindow( mem, 1, geoms, values, geo[0], geo[3], gt[1], gt[5], allTouched ) )
             {
                 GDALClose( mem );
-                out.close();
                 throw RSOperatorError( ErrorCode::GdalError,
                                        "GDALRasterizeGeometries failed on window ("
                                            + std::to_string( xOff ) + ", " + std::to_string( yOff )
@@ -207,7 +207,6 @@ Json::Value RsRasterizeOperator::run( const Json::Value &params, RSOperatorConte
             if ( !readMemWindow( mem, 1, winW, winH, pixels.data() ) )
             {
                 GDALClose( mem );
-                out.close();
                 throw RSOperatorError( ErrorCode::GdalError, "Failed to read back the rasterized window" );
             }
             GDALClose( mem );
@@ -215,20 +214,27 @@ Json::Value RsRasterizeOperator::run( const Json::Value &params, RSOperatorConte
                 if ( std::isfinite( v ) )
                     ++burned;
             if ( !out.writeBandWindow( 1, xOff, yOff, winW, winH, pixels.data() ) )
-            {
-                out.close();
                 throw RSOperatorError( ErrorCode::GdalError,
                                        "Failed to write output window (" + std::to_string( xOff )
                                            + ", " + std::to_string( yOff ) + ")" );
-            }
             context.reportProgress( 0.9 * windowIndex / totalWindows, "Rasterizing" );
         }
+    }
+    }
+    catch ( ... )
+    {
+        out.close();
+        QFile::remove( QString::fromStdString( outputPath ) );
+        throw;
     }
 
     QString closeError;
     if ( !out.closeWithError( &closeError ) )
+    {
+        QFile::remove( QString::fromStdString( outputPath ) );
         throw RSOperatorError( ErrorCode::GdalError,
                                "Failed to finalize output: " + closeError.toStdString() );
+    }
 
     const std::uint64_t total = static_cast<std::uint64_t>( width ) * height;
     Json::Value result( Json::objectValue );

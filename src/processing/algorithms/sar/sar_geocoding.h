@@ -17,14 +17,15 @@
 //   → ellipsoid reference incidence θ0, terrain-facet local incidence θL
 //     (Horn gradients dz/dE, dz/dN rotated into the ENU frame)
 //   → layover/shadow classes from the REAL per-pixel look elevation
-//     θe = asin(ŝ·û): LAYOVER when α > 90° − θe (slope toward the radar
-//     steeper than the beam); SHADOW when α < −θe — the exact
-//     constant-geometry conditions of sar_terrain_geometry.h with θe in
-//     place of 90° − θi (reduces to them when the LOS is constant).
-//   → radiometric-terrain area factor sin θ0 / sin θL (Ulander 1996;
-//     Small 2011 §III): γ0 = σ0 · factor; 1 on flat ground, > 1 on
-//     radar-facing slopes, NaN when sin θL ≤ 0 (facet tilted away — the
-//     layover/shadow class already flags it).
+//     θe = asin(ŝ·û), evaluated on the slope α along the BEAM-TRAVEL
+//     horizontal direction (away from the sensor — the direction slant
+//     range folds in): LAYOVER when α > 90° − θe; SHADOW when α < −θe —
+//     the exact constant-geometry conditions of sar_terrain_geometry.h
+//     with the real per-pixel θe in place of 90° − θi.
+//   → radiometric-terrain correction factor sin θL / sin θ0 (Ulander 1996;
+//     Small 2011 eq. 5): γ0 = σ0 · factor; 1 on flat ground, < 1 on the
+//     beam-facing flank the flat-earth image over-brightens (θL < θ0),
+//     > 1 on back flanks, NaN when sin θL ≤ 0 (facet at/past grazing).
 //
 // All math is double precision and deterministic; the solvers inside
 // forwardRangeDoppler/geolocateZeroDoppler are bounded (sign-scan +
@@ -44,9 +45,10 @@ namespace sicnu::sar
 
 inline double geocodeNaN() { return std::numeric_limits<double>::quiet_NaN(); }
 
-/// A parsed, validated SAR scene timing contract (the same declared keys the
-/// backward orbit product consumes, owned by one parser so the forward and
-/// backward paths cannot drift).
+/// A parsed, validated SAR scene timing contract — the same declared keys
+/// and validation rules the backward orbit product enforces (the backward
+/// path in rs_sar_terrain_masks_operator.cpp revalidates independently and
+/// is pinned to the same tolerances by its own tests).
 struct SarSceneContract
 {
     OrbitSegment orbit;
@@ -84,7 +86,7 @@ struct GeocodeGeometry
     double colF = 0.0;       ///< source SAR column (same rule against imageWidth)
     double incidenceDeg = geocodeNaN();     ///< ellipsoid reference incidence θ0
     double localIncidenceDeg = geocodeNaN(); ///< terrain-facet incidence θL (NaN on degenerate gradients)
-    double rtcFactor = geocodeNaN();        ///< sin θ0 / sin θL (NaN when unphysical)
+    double rtcFactor = geocodeNaN();        ///< sin θL / sin θ0 (NaN when unphysical)
     double lookElevationDeg = geocodeNaN(); ///< REAL LOS elevation above the local horizontal
     TerrainMaskClass maskClass = TerrainMaskClass::Normal;
 };

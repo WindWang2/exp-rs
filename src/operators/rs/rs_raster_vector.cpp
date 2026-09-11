@@ -57,6 +57,8 @@ FeatureCache loadFeatureCache( const FeatureLoadSpec &spec, const RasterGrid &gr
     std::vector<sicnu::geo::VectorFeature> batch;
     while ( reader.nextBatch( batch, 1024 ) )
     {
+        // nextBatch APPENDS to its out vector — consume and clear, or every
+        // later batch would re-process every earlier feature.
         for ( sicnu::geo::VectorFeature &feature : batch )
         {
             CachedFeature cf;
@@ -132,13 +134,20 @@ FeatureCache loadFeatureCache( const FeatureLoadSpec &spec, const RasterGrid &gr
             }
 
             if ( cache.bytes > kFeatureCacheBytes )
+            {
+                // The failing feature is not yet in the cache's destructor
+                // reach — destroy it here instead of leaking it.
+                OGR_G_DestroyGeometry( cf.geometry );
                 throw RSOperatorError(
                     ErrorCode::InvalidInputData,
                     "Vector feature set exceeds the " + std::to_string( kFeatureCacheBytes )
-                        + "-byte cache budget - subset the dataset (spatial or attribute "
-                          "filter) before rasterizing/statistics" );
+                        + "-byte cache budget (at FID " + std::to_string( feature.fid )
+                        + ") - subset the dataset (spatial or attribute filter) "
+                          "before rasterizing/statistics" );
+            }
             cache.features.push_back( std::move( cf ) );
         }
+        batch.clear();
     }
     return cache;
 }
@@ -263,9 +272,10 @@ std::string formatDouble( double v )
 {
     if ( std::isnan( v ) )
         return "nan";
-    char buf[32];
-    std::snprintf( buf, sizeof( buf ), "%.10g", v );
-    return buf;
+    // QString::number is locale-independent (always '.'), unlike snprintf
+    // which follows the process LC_NUMERIC (the GUI process sets the system
+    // locale) and would silently corrupt machine-readable output.
+    return QString::number( v, 'g', 10 ).toStdString();
 }
 
 } // namespace sicnu::operators::rs

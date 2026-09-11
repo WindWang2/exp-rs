@@ -114,9 +114,10 @@ Json::Value RsSarGeocodeOperator::metadata() const {
                                   "refusals, never approximations." );
     meta["prerequisites"].append( "Calibrate first: rs:sar_calibrate -> rs:sar_geocode." );
     meta["prerequisites"].append( "DEM carries a CRS and a north-up geotransform; the DEM defines the output grid." );
-    meta["limitations"].append( "gamma0 applies the per-pixel area factor sin(theta0)/sin(thetaL) "
-                                "(Ulander 1996) from REAL geometry - distinct from the "
-                                "constant-geometry plane-fit model of rs:sar_terrain_flatten." );
+    meta["limitations"].append( "gamma0 applies the per-pixel radiometric-terrain factor "
+                                "sin(thetaL)/sin(theta0) (Ulander 1996, Small 2011 eq. 5) from "
+                                "REAL geometry - distinct from the constant-geometry plane-fit "
+                                "model of rs:sar_terrain_flatten." );
     meta["limitations"].append( "Rotated DEM grids are refused (terrain-family north-up contract)." );
     meta["limitations"].append( "No antenna pattern or fading-noise correction is applied." );
     return meta;
@@ -521,7 +522,7 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
                             case 0: // backscatter: resampled input radiometry
                                 value = backscatter[idx];
                                 break;
-                            case 1: // gamma0 = sigma0 * sin(theta0)/sin(thetaL);
+                            case 1: // gamma0 = sigma0 * sin(thetaL)/sin(theta0);
                                     // NaN factor (facet at/past grazing) stays NaN
                                 if ( facetValid && std::isfinite( backscatter[idx] )
                                      && std::isfinite( geom[idx].rtcFactor ) )

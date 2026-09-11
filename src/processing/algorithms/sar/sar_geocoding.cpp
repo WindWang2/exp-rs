@@ -168,40 +168,45 @@ bool geocodeGroundCell( const SarSceneContract &contract,
         const double cosThetaL = facetx * shx + facety * shy + facetz * shz;
         out->localIncidenceDeg = std::acos( clamp1( cosThetaL ) ) * kRadToDeg;
 
-        // Radiometric-terrain area factor (Ulander 1996): gamma0 = sigma0 ·
-        // sin θ0 / sin θL. NaN when the facet is tilted at or past grazing
-        // (sin θL ≤ 0) — the mask class below flags the same cells.
+        // Radiometric-terrain correction factor (Ulander 1996; Small 2011
+        // eq. 5, NORLIM): gamma0 = sigma0 · sin θL / sin θ0 — the beam-facing
+        // flank (θL < θ0), which the flat-earth image over-brightens, is
+        // dampened and the back flank brightened. NaN when sin θL ≤ 0 (the
+        // facet is tilted at or past grazing).
         const double sinTheta0 = std::sin( out->incidenceDeg * kDegToRad );
         const double sinThetaL = std::sin( out->localIncidenceDeg * kDegToRad );
-        if ( sinThetaL > 0.0 && sinTheta0 >= 0.0 )
-            out->rtcFactor = sinTheta0 / sinThetaL;
+        if ( sinThetaL > 0.0 && sinTheta0 > 0.0 )
+            out->rtcFactor = sinThetaL / sinTheta0;
     }
 
-    // Layover/shadow from the REAL per-pixel look elevation: slope angle
-    // toward the radar along the horizontal look direction vs the elevation
-    // cone. Degenerate (NaN) gradients leave the class Normal — callers mask
-    // through the NaN geometry products, exactly like the constant-geometry
-    // kernel.
+    // Layover/shadow from the REAL per-pixel look elevation, evaluated on
+    // the slope along the BEAM-TRAVEL horizontal direction (away from the
+    // sensor — the direction slant range monotonicity is measured in:
+    // dR/dN ∝ tan θ0 − g, so the range mapping folds exactly when the
+    // along-beam slope exceeds the flat-earth incidence). Degenerate (NaN)
+    // gradients leave the class Normal — callers mask through the NaN
+    // geometry products, exactly like the constant-geometry kernel.
     if ( facetValid )
     {
-        double gx = shx * ex + shy * ey; // horizontal look direction (toward sensor)
-        double gy = shx * nx + shy * ny;
-        double gz = shx * ux + shy * uy; // up component of the look direction
+        // Horizontal look direction pointing AWAY from the sensor (the
+        // direction the beam travels across the ground).
+        double gx = -( shx * ex + shy * ey );
+        double gy = -( shx * nx + shy * ny );
         const double gHoriz = std::sqrt( gx * gx + gy * gy );
         if ( gHoriz > 1e-12 )
         {
-            const double slopeToward = ( dzdE * gx + dzdN * gy ) / gHoriz; // dz per horizontal metre
-            const double alphaDeg = std::atan( slopeToward ) * kRadToDeg;
-            // LAYOVER: slope toward the radar steeper than the beam from
-            // vertical (α > 90° − θe); SHADOW: far slope below the
-            // illumination cone (α < −θe). Reduces to the constant-geometry
-            // conditions when the LOS elevation is constant.
+            const double slopeAlongBeam = ( dzdE * gx + dzdN * gy ) / gHoriz; // dz per horizontal metre
+            const double alphaDeg = std::atan( slopeAlongBeam ) * kRadToDeg;
+            // LAYOVER: the along-beam slope rises steeper than the beam
+            // rises off the ground (α > 90° − θe) — the terrain folds.
+            // SHADOW: the far slope falls below the illumination cone
+            // (α < −θe). Reduces to the constant-geometry conditions of
+            // sar_terrain_geometry.h when the LOS elevation is constant.
             if ( alphaDeg > 90.0 - out->lookElevationDeg )
                 out->maskClass = TerrainMaskClass::Layover;
             else if ( alphaDeg < -out->lookElevationDeg )
                 out->maskClass = TerrainMaskClass::Shadow;
         }
-        (void)gz;
     }
     return true;
 }

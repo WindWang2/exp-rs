@@ -17,13 +17,13 @@ namespace sicnu::operators::rs {
  * time + slant range, bounded bisection solver) → source SAR position →
  * bilinear/nearest radiometry resample → real-line-of-sight geometry
  * (reference and terrain-facet incidence, layover/shadow classes) →
- * optional radiometric-terrain correction gamma0 = sigma0 · sin θ0 / sin θL
- * (Ulander 1996 area factor from REAL per-pixel geometry).
+ * radiometric-terrain correction gamma0 = sigma0 · sin θL / sin θ0
+ * (Ulander 1996 / Small 2011 from REAL per-pixel geometry).
  *
  * Products (fixed five-band Float32 output; order also declared in the
  * result and as SICNU_SAR_GEOCODE_BANDS output metadata):
  *   1 backscatter      resampled radiometry in the input's own domain
- *   2 gamma0           backscatter × sin θ0 / sin θL (RTC)
+ *   2 gamma0           backscatter × sin θL / sin θ0 (RTC)
  *   3 incidence        reference (ellipsoid) incidence θ0, degrees
  *   4 local_incidence  terrain-facet incidence θL, degrees
  *   5 layover_shadow   0 normal, 1 layover, 2 shadow (NaN NoData)

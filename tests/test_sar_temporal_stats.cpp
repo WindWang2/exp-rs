@@ -112,12 +112,8 @@ TEST_CASE( "sarTemporalStats: closed forms on a hand-computed series",
     REQUIRE( s.maxLinear == 8.0 );
     REQUIRE( s.argminDate == 0 );
     REQUIRE( s.argmaxDate == 3 );
-    // Median = 3 (even count, lower+upper averaged? — the kernel takes the
-    // upper-middle nth_element value; for [1,2,4,8] mid=2 → 4? No: the
-    // documented baseline is the nth_element mid sample = 4? It is the
-    // upper median 4? mid = 4/2 = 2 → valid[2] after partition = 4... The
-    // exact 0.5*(2+4) form is NOT what the kernel promises — it anchors at
-    // the nth_element upper-median sample. Read it back here:
+    // Median baseline = the documented upper-median sample: for the even
+    // series [1,2,4,8] the nth_element selection at index n/2 is 4.
     REQUIRE( s.baselineDb == Approx( 10.0 * std::log10( 4.0 ) ).epsilon( 1e-12 ) );
 
     // Log deviations from baseline 10·log10(4) = 6.0206 dB:
