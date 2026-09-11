@@ -80,4 +80,13 @@ bool expandCapabilityPath( const std::string &declared, const std::string &plugi
                            const std::string &workspaceRoot, const std::string &tempDir,
                            std::string &resolved, std::string &error );
 
+/// True when @p candidate resolves (canonicalized; a not-yet-existing tail
+/// is anchored at its deepest existing ancestor, exactly like declared
+/// roots) INSIDE @p root. Empty roots contain nothing. Used by the worker
+/// to gate host-provided paths (operator workDir) against the plugin's
+/// declared write roots; a false result is a typed policy refusal at the
+/// call site — never a silent pass.
+bool pathIsWithinRoot( const std::string &candidate, const std::string &root,
+                       std::string &resolvedCandidate );
+
 } // namespace exprs

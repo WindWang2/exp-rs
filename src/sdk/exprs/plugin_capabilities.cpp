@@ -151,6 +151,34 @@ bool expandCapabilityPath( const std::string &declared, const std::string &plugi
     return true;
 }
 
+bool pathIsWithinRoot( const std::string &candidate, const std::string &root,
+                       std::string &resolvedCandidate )
+{
+    if ( candidate.empty() || root.empty() )
+        return false;
+    // Canonicalize what exists; anchor not-yet-existing tails lexically at
+    // the deepest existing ancestor (mirrors expandCapabilityPath).
+    std::string resolved = PathPolicy::canonical( candidate );
+    if ( resolved.empty() )
+    {
+        std::string anchorError;
+        if ( !expandCapabilityPath( candidate, candidate, "", "", resolved, anchorError ) )
+            return false;
+        if ( resolved.empty() )
+            return false;
+    }
+    resolvedCandidate = resolved;
+    const std::string canonicalRoot = PathPolicy::canonical( root );
+    if ( canonicalRoot.empty() )
+        return false;
+    if ( resolved == canonicalRoot )
+        return true;
+    std::string prefix = canonicalRoot;
+    if ( prefix.back() != '/' )
+        prefix += '/';
+    return resolved.rfind( prefix, 0 ) == 0;
+}
+
 PluginCapabilityParseResult parsePluginAccess(
     const Json::Value &access, const std::string &pluginDir,
     const std::string &workspaceRoot, const std::string &tempDir )

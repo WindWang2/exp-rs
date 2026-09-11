@@ -25,7 +25,8 @@ IpcChannel::IpcChannel( std::unique_ptr<IIpcStream> stream )
 }
 
 IpcChannel::IpcChannel( std::unique_ptr<IIpcStream> stream, Options options )
-    : mStream( std::move( stream ) ), mOptions( options )
+    : mStream( std::move( stream ) ), mOptions( options ),
+      mMaxFrameBytes( options.frameLimits.maxFrameBytes )
 {
     mReader = std::thread( [this] { readerLoop(); } );
 }
@@ -97,6 +98,15 @@ void IpcChannel::setPeerProtocol( int major, int minor )
     mPeerMinor = minor;
 }
 
+void IpcChannel::lowerFrameCap( uint32_t maxFrameBytes )
+{
+    uint32_t current = mMaxFrameBytes.load();
+    while ( maxFrameBytes < current
+            && !mMaxFrameBytes.compare_exchange_weak( current, maxFrameBytes ) )
+    {
+    }
+}
+
 bool IpcChannel::sendEnvelope( const Ipc::Envelope &envelope, std::string &error )
 {
     if ( mClosed )
@@ -106,7 +116,9 @@ bool IpcChannel::sendEnvelope( const Ipc::Envelope &envelope, std::string &error
     }
     const Json::Value json = Ipc::encodeEnvelope( envelope );
     std::lock_guard<std::mutex> lock( mWriteMutex );
-    if ( !IpcFrame::writeJson( *mStream, json, mOptions.frameLimits, error ) )
+    IpcFrameLimits limits;
+    limits.maxFrameBytes = mMaxFrameBytes.load();
+    if ( !IpcFrame::writeJson( *mStream, json, limits, error ) )
     {
         // A write failure means the peer is gone or the frame is too large
         // for the cap: both end the channel.
@@ -164,6 +176,7 @@ IpcChannel::Outcome IpcChannel::request( const std::string &method, const Json::
     const Clock::time_point deadline =
         Clock::now() + std::chrono::milliseconds( deadlineMs > 0 ? deadlineMs : 60000 );
     bool cancelled = false;
+    bool timedOut = false;
 
     {
         std::unique_lock<std::mutex> lock( mMutex );
@@ -196,11 +209,21 @@ IpcChannel::Outcome IpcChannel::request( const std::string &method, const Json::
                 outcome.error.code = "E6004";
                 outcome.error.message = "request deadline of " + std::to_string( deadlineMs )
                                         + " ms passed without a response";
+                timedOut = true;
                 break;
             }
             const auto slice = std::chrono::milliseconds( mOptions.cancelPollMs );
             mResponseCv.wait_for( lock, slice );
         }
+    }
+
+    if ( timedOut )
+    {
+        // Protocol 1.1: the deadline only fails the LOCAL wait, but the
+        // peer must still be told to stop work on THIS id (per-id cancel;
+        // peers in flight are untouched). Kill escalation stays at the
+        // session layer, which owns the process.
+        cancel( id );
     }
 
     if ( cancelled )
@@ -439,6 +462,15 @@ void IpcChannel::handleFrame( const std::string &payload )
             sink = mEventSink;
             if ( !sink )
             {
+                // Bounded queue (protocol 1.1): a peer that floods events
+                // before a sink is installed cannot exhaust host memory.
+                // OLDEST events survive (worker.hello is queued first), the
+                // newest are dropped and counted.
+                if ( mPendingEvents.size() >= mOptions.maxQueuedEvents )
+                {
+                    mDroppedEvents.fetch_add( 1 );
+                    return;
+                }
                 mPendingEvents.push_back( std::move( envelope ) );
                 return;
             }
@@ -458,8 +490,10 @@ void IpcChannel::readerLoop()
             break;
         std::string payload;
         std::string error;
+        IpcFrameLimits limits;
+        limits.maxFrameBytes = mMaxFrameBytes.load();
         const IpcFrame::ReadStatus status =
-            IpcFrame::read( *mStream, payload, mOptions.frameLimits, 200, error );
+            IpcFrame::read( *mStream, payload, limits, 200, error );
         if ( status == IpcFrame::ReadStatus::Timeout )
             continue;
         if ( status == IpcFrame::ReadStatus::Eof )

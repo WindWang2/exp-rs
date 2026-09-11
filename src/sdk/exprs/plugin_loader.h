@@ -114,6 +114,12 @@ public:
     /// verifies the entrypoint symbol exists in the library.
     static bool probeEntrypoint( const std::string &libraryPath, std::string &error );
 
+    /// Resolves @p name from an already-mapped library handle (nullptr when
+    /// absent). Additive seam (plugin-platform 8.0): the host-process worker
+    /// probes OPTIONAL entry points (EXPRS_createUiSchemaProviderV1) on the
+    /// handle it received through take(); absence is a normal answer.
+    static void *resolveLibrarySymbol( void *libraryHandle, const char *name );
+
 private:
     bool loadImpl( const PluginRecord &record, HostServicesV1 &services,
                    PluginContributionSink &sink, PluginDiagnosticLog &log );
