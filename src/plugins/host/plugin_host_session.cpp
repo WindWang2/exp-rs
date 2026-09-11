@@ -126,7 +126,7 @@ std::shared_ptr<PluginHostProcessSession> PluginHostProcessSession::spawn(
 
     auto session = std::shared_ptr<PluginHostProcessSession>( new PluginHostProcessSession() );
     session->mOptions = options;
-    session->mGate.setSlots( options.quota.maxRequestConcurrency );
+    session->mGate.setWidth( options.quota.maxRequestConcurrency );
     if ( !session->spawnWorkerProcess( diagnostics ) )
         return {};
     if ( !session->awaitHandshake( diagnostics ) )
@@ -561,7 +561,7 @@ IpcChannel::Outcome PluginHostProcessSession::request(
         outcome.status = IpcChannel::Outcome::Status::Error;
         outcome.error.code = "E6007";
         outcome.error.message = "plugin request concurrency limit ("
-                                + std::to_string( mGate.slots() )
+                                + std::to_string( mGate.width() )
                                 + ") is saturated; request refused (overload protection)";
         return outcome;
     }

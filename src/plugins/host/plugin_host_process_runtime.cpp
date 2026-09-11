@@ -341,7 +341,10 @@ Json::Value PluginHostProcessRuntime::describeUiSchema( const std::string &plugi
                               ? "ui.describe failed"
                               : outcome.error.message;
         if ( !outcome.error.code.empty() )
+        {
             result["code"] = outcome.error.code;
+            result["error"] = result["error"].asString() + " (" + outcome.error.code + ")";
+        }
         log.add( PluginDiagnosticCode::IpcProtocolError, PluginDiagnosticSeverity::Warning,
                  "ui.describe failed: " + outcome.error.message, pluginId );
         return result;

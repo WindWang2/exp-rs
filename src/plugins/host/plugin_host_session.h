@@ -43,15 +43,15 @@ namespace sicnu::plugins {
 class ConcurrencyGate
 {
 public:
-    explicit ConcurrencyGate( int slots ) : mSlots( slots < 1 ? 1 : slots ) {}
+    explicit ConcurrencyGate( int width ) : mSlots( width < 1 ? 1 : width ) {}
 
     /// Resizes the gate BEFORE traffic (spawn-time quota application only).
-    void setSlots( int slots )
+    void setWidth( int width )
     {
         std::lock_guard<std::mutex> lock( mMutex );
-        mSlots = slots < 1 ? 1 : slots;
+        mSlots = width < 1 ? 1 : width;
     }
-    int slots() const
+    int width() const
     {
         std::lock_guard<std::mutex> lock( mMutex );
         return mSlots;

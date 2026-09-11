@@ -490,7 +490,7 @@ TEST_CASE( "ConcurrencyGate is FIFO-fair and bounded", "[hostprocess][gate]" )
         }
     } );
     std::this_thread::sleep_for( std::chrono::milliseconds( 150 ) );
-    REQUIRE( gate.slots() == 1 );
+    REQUIRE( gate.width() == 1 );
     gate.release(); // free the original slot; FIFO: first waiter wins
     first.join();
     second.join();
@@ -643,4 +643,37 @@ TEST_CASE( "declarative UI schema round-trips through the worker", "[hostprocess
 
     REQUIRE( registry.unload( kPluginId ) );
     REQUIRE_FALSE( stack.runtime->isWorkerAlive( kPluginId ) );
+}
+
+TEST_CASE( "declarative UI survives the crash-recovery sequence", "[hostprocess][uischema]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    exprs::PluginDiagnosticLog uiLog;
+    Json::Value described = stack.runtime->describeUiSchema( kPluginId, uiLog );
+    REQUIRE( described["ok"].asBool() );
+
+    // Crash the worker; the proxy recovers (one bounded respawn + reload)
+    // and the RETRY crashes again (the fixture always crashes): the hosted
+    // session is dead afterwards. A describe on the dead session answers
+    // typed E6005 — it never resurrects plugins on its own.
+    Json::Value crash = runOperator( stack, "test:iso-crash", Json::Value() );
+    REQUIRE( crash["__operatorError"].asBool() );
+    described = stack.runtime->describeUiSchema( kPluginId, uiLog );
+    INFO( "post-crash describe: "
+          << Json::writeString( Json::StreamWriterBuilder(), described ) );
+    REQUIRE_FALSE( described["ok"].asBool() );
+    REQUIRE( described["error"].asString().find( "E6005" ) != std::string::npos );
+
+    // Restore a healthy worker (the conformance kit does exactly this
+    // between PT_RESTART and PT_UI_SCHEMA): unload + load.
+    REQUIRE( registry.unload( kPluginId ) );
+    REQUIRE( loadOrExplain( kPluginId ) );
+    described = stack.runtime->describeUiSchema( kPluginId, uiLog );
+    REQUIRE( described["ok"].asBool() );
+    REQUIRE( described["schema"]["version"].asInt() == 1 );
+
+    REQUIRE( registry.unload( kPluginId ) );
 }

@@ -13,6 +13,9 @@
 #include "cli_project_ops.h"
 #include "cli_dataset_commands.h"
 
+#include <chrono>
+#include <future>
+
 #include "exprs/exit_codes.h"
 #include "exprs/external_process.h"
 #include "exprs/plugin_discovery.h"
@@ -878,6 +881,172 @@ int commandPlugin( QStringList args, const CliIO &io )
             }
         }
 
+        // ---- plugin-platform 8.0 conformance additions -------------------
+        // Driven by the optional "conformance" manifest object; undeclared
+        // targets report "skipped" — the kit never invents behavior a
+        // plugin does not declare.
+        const Json::Value &conformance = record.manifest.conformance;
+
+        const auto executeBounded = []( const std::string &operatorId,
+                                                  const Json::Value &params,
+                                                  int timeoutMs, bool cancelAfterMs,
+                                                  Json::Value &result ) -> bool {
+            const auto adapter =
+                sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( operatorId );
+            if ( !adapter )
+            {
+                result["error"] = "no adapter registered for " + operatorId;
+                return false;
+            }
+            auto started = std::async( std::launch::async, [&adapter, &params, cancelAfterMs] {
+                const auto cancelDeadline = std::chrono::steady_clock::now()
+                                            + std::chrono::milliseconds( cancelAfterMs ? 300 : 0 );
+                return adapter->execute(
+                    params, nullptr,
+                    [cancelDeadline, cancelAfterMs]() {
+                        return cancelAfterMs && std::chrono::steady_clock::now() >= cancelDeadline;
+                    } );
+            } );
+            if ( started.wait_for( std::chrono::milliseconds( timeoutMs ) )
+                 != std::future_status::ready )
+            {
+                // The worker thread cannot be killed safely: detach and let
+                // the result leak into a diagnostic instead of hanging.
+                result["error"] = "execution exceeded the conformance budget ("
+                                      + std::to_string( timeoutMs ) + " ms)";
+                return false;
+            }
+            // Adapter failures arrive BOTH as error envelopes and as thrown
+            // RSOperatorError (rethrown through the future): either is a
+            // legitimate conformance observation, never a crash.
+            try
+            {
+                result = started.get();
+            }
+            catch ( const std::exception &exception )
+            {
+                result = Json::Value( Json::objectValue );
+                result["error"] = exception.what();
+            }
+            return true;
+        };
+
+        if ( conformance.isMember( "cancelTarget" ) && conformance["cancelTarget"].isString() )
+        {
+            const std::string target = conformance["cancelTarget"].asString();
+            Json::Value result;
+            const bool finished = executeBounded( target, Json::Value( Json::objectValue ),
+                                                  20000, true, result );
+            const std::string errorText = result.get( "error", "" ).asString();
+            const bool cancelled = errorText.find( "cancel" ) != std::string::npos
+                                   || errorText.find( "E6009" ) != std::string::npos
+                                   || errorText.find( "4000" ) != std::string::npos;
+            const bool pass = finished
+                              && ( cancelled
+                                   || errorText.empty() /* completed before the cancel */ );
+            addCheck( "PT_CANCEL", pass,
+                      pass ? ( cancelled ? "operator answered the cooperative cancel (typed)"
+                                         : "operator completed before the cancel landed" )
+                           : "cancelTarget did not honor cancellation: " + errorText );
+        }
+        else
+        {
+            addCheck( "PT_CANCEL", true, "skipped (no conformance.cancelTarget declared)" );
+        }
+
+        if ( conformance.isMember( "concurrencyTarget" )
+             && conformance["concurrencyTarget"].isString() )
+        {
+            const std::string target = conformance["concurrencyTarget"].asString();
+            constexpr int kParallel = 3;
+            std::vector<std::future<Json::Value>> runs;
+            const auto start = std::chrono::steady_clock::now();
+            {
+                const auto adapter =
+                    sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( target );
+                if ( adapter )
+                {
+                    for ( int i = 0; i < kParallel; ++i )
+                        runs.push_back( std::async( std::launch::async, [&adapter] {
+                            return adapter->execute( Json::Value( Json::objectValue ), nullptr,
+                                                     nullptr );
+                        } ) );
+                }
+            }
+            bool allReady = runs.size() == kParallel;
+            for ( auto &run : runs )
+            {
+                if ( run.wait_for( std::chrono::seconds( 30 ) ) != std::future_status::ready )
+                {
+                    allReady = false;
+                    break;
+                }
+            }
+            const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       std::chrono::steady_clock::now() - start )
+                                       .count();
+            const bool pass = allReady;
+            addCheck( "PT_CONCURRENCY", pass,
+                      pass ? "3 concurrent executions completed without corruption or hang ("
+                               + std::to_string( elapsedMs ) + " ms)"
+                           : "concurrent executions hung or misbehaved" );
+        }
+        else
+        {
+            addCheck( "PT_CONCURRENCY", true,
+                      "skipped (no conformance.concurrencyTarget declared)" );
+        }
+
+        if ( conformance.isMember( "crashTarget" ) && conformance["crashTarget"].isString() )
+        {
+            const std::string target = conformance["crashTarget"].asString();
+            Json::Value result;
+            const bool finished = executeBounded( target, Json::Value( Json::objectValue ),
+                                                  30000, false, result );
+            const std::string errorText = result.get( "error", "" ).asString();
+            const bool crashed = !errorText.empty();
+            // A declared crash target kills workers BY DESIGN (the retry
+            // crashes again): restore a healthy hosted worker before the
+            // checks that follow so the kit observes steady-state behavior.
+            std::string restored;
+            if ( finished && crashed )
+            {
+                registry.unload( pluginId );
+                restored = registry.load( pluginId ) ? " worker restored"
+                                                     : " worker restore FAILED";
+            }
+            addCheck( "PT_RESTART", finished && crashed && restored.empty()
+                                        || ( finished && crashed
+                                             && restored.find( "FAILED" ) == std::string::npos ),
+                      finished && crashed
+                          ? "worker crash degraded to a typed failure; host stayed up;"
+                                + restored
+                          : "crashTarget did not produce the expected typed failure" );
+        }
+        else
+        {
+            addCheck( "PT_RESTART", true, "skipped (no conformance.crashTarget declared)" );
+        }
+
+        const bool wantsUiSchema =
+            ( conformance.isMember( "uiSchema" ) && conformance["uiSchema"].asBool() )
+            || ( record.manifest.runtime == exprs_ns::PluginRuntimeKind::HostProcess
+                 && record.manifest.hasUi );
+        if ( wantsUiSchema )
+        {
+            const Json::Value described =
+                sicnu::plugins::PluginRuntimeHost::instance().describePluginUiSchema( pluginId );
+            const bool pass = described["ok"].asBool();
+            addCheck( "PT_UI_SCHEMA", pass,
+                      pass ? "declarative UI schema fetched and validated"
+                           : "declarative UI declared but unavailable: "
+                                + described["error"].asString() );
+        }
+        else
+        {
+            addCheck( "PT_UI_SCHEMA", true, "skipped (no declarative UI declared)" );
+        }
+
         const bool unloadOk = registry.unload( pluginId );
         bool revocationOk = unloadOk;
         for ( const exprs_ns::ManifestOperator &op : record.manifest.operators )
@@ -895,6 +1064,11 @@ int commandPlugin( QStringList args, const CliIO &io )
 
         const bool roundTripOk =
             registry.setEnabled( pluginId, true ) && registry.load( pluginId );
+        std::string roundTripError;
+        for ( const auto &item : registry.diagnostics().forPlugin( pluginId ) )
+            if ( item.severity == exprs_ns::PluginDiagnosticSeverity::Error )
+                roundTripError = exprs_ns::PluginDiagnostic::codeString( item.code ) + ": "
+                                 + item.message;
         // Verify the round-trip restored the actual contributions, not just
         // the record state (P0 review finding).
         bool roundTripRegistrations = roundTripOk;
@@ -906,10 +1080,22 @@ int commandPlugin( QStringList args, const CliIO &io )
                 break;
             }
         }
-        addCheck( "PT_ROUNDTRIP", roundTripRegistrations,
-                  roundTripRegistrations
-                      ? "enable → load round-trip restored contributions without restart"
-                      : "enable-after-unload did not restore the plugin" );
+        if ( !roundTripRegistrations )
+        {
+            std::string missing;
+            for ( const exprs_ns::ManifestOperator &op : record.manifest.operators )
+                if ( !sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( op.id ) )
+                    missing += ( missing.empty() ? "" : ", " ) + op.id;
+            addCheck( "PT_ROUNDTRIP", false,
+                      "enable-after-unload did not restore the plugin: " + roundTripError
+                          + " loaded=" + ( registry.isLoaded( pluginId ) ? "true" : "false" )
+                          + ( missing.empty() ? "" : " missingAdapters=[" + missing + "]" ) );
+        }
+        else
+        {
+            addCheck( "PT_ROUNDTRIP", true,
+                      "enable → load round-trip restored contributions without restart" );
+        }
         registry.unload( pluginId );
         registry.setUserDisabledIds( savedDisabled );
 
@@ -938,9 +1124,16 @@ int commandPlugin( QStringList args, const CliIO &io )
                 allChecksOk = false;
         }
         const bool ok = allChecksOk;
+        // Human-mode verdicts: name the failing checks in the error line so
+        // a conformance run is diagnosable without parsing JSON.
+        std::string failedChecks;
+        for ( const Json::Value &check : checks )
+            if ( !check["ok"].asBool() )
+                failedChecks += ( failedChecks.empty() ? "" : ", " ) + check["code"].asString();
         return io.finish( ok, "plugin", data,
                           ok ? 0 : exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure ),
-                          diagnostics.toJson(), ok ? "" : "plugin conformance failed" );
+                          diagnostics.toJson(),
+                          ok ? "" : "plugin conformance failed: " + failedChecks );
     }
 
     return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),

@@ -523,6 +523,8 @@ Json::Value PluginManifest::toJson() const
         json["access"] = access;
     if ( !quotas.isNull() )
         json["quotas"] = quotas;
+    if ( !conformance.isNull() )
+        json["conformance"] = conformance;
     if ( !description.empty() )
         json["description"] = description;
     if ( !vendor.empty() )
@@ -539,6 +541,11 @@ Json::Value PluginManifest::toJson() const
     if ( !entrypoint.empty() )
         json["entrypoint"] = entrypoint;
     json["entrypoint_kind"] = entrypointKindName( entrypointKind );
+    // Round-trip the hosting strategy: the discovery index and the
+    // host-process worker's load params serialize through this method; a
+    // dropped "runtime" silently demoted host-process plugins to
+    // in-process on every cache hit (the fixture crash-in-CLI bug class).
+    json["runtime"] = pluginRuntimeKindName( runtime );
     if ( entrypointKind == PluginEntrypointKind::Python )
         json["python"] = python.toJson();
     Json::Value caps( Json::arrayValue );
@@ -648,6 +655,8 @@ bool PluginManifest::fromJson( const Json::Value &json, PluginManifest &out,
         out.access = json["access"];
     if ( json.isMember( "quotas" ) )
         out.quotas = json["quotas"];
+    if ( json.isMember( "conformance" ) && json["conformance"].isObject() )
+        out.conformance = json["conformance"];
     out.permissions = parsePermissions( json["permissions"], out.warnings );
     for ( const Json::Value &dependency : json["dependencies"] )
     {
