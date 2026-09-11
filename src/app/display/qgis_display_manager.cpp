@@ -212,6 +212,12 @@ struct QgisDisplayManager::Impl {
     int batchUpdateDepth = 0;
     bool batchPendingSync = false;
     quint64 canvasLayerSyncCount = 0;
+
+    ~ViewRecord() {
+      if (bridge) {
+        delete bridge.data();
+      }
+    }
   };
 
   static void syncViewCanvasLayers(ViewRecord *viewRecord) {
@@ -964,6 +970,11 @@ data::Result<void> QgisDisplayManager::removeView(DisplayViewId viewId) {
       (void)removeLayer(layerId);
     // Avoid redundant setCanvasLayers flush immediately before view erasing
     viewIt->second->batchPendingSync = false;
+  }
+
+  if (viewIt->second->bridge) {
+    delete viewIt->second->bridge.data();
+    viewIt->second->bridge = nullptr;
   }
 
   m_impl->views.erase(viewIt);

@@ -34,17 +34,24 @@ class RsScanPool : public QObject
     QThreadPool &pool() { return m_pool; }
 
     /// Opens a new request generation, implicitly superseding every older
-    /// one. Workers carry the returned token and poll isStale() at loop
-    /// boundaries to abandon superseded work promptly.
-    quint64 nextGeneration();
+    /// one for the same owner (or globally if owner is null).
+    quint64 nextGeneration( const void *owner = nullptr );
 
     /// Cancels one specific generation (e.g. its widget going away) without
     /// touching other widgets' in-flight scans.
-    void cancel( quint64 generation );
+    void cancel( quint64 generation, const void *owner = nullptr );
 
     /// Cooperative cancellation flag for @p generation.
-    bool isStale( quint64 generation ) const
+    bool isStale( quint64 generation, const void *owner = nullptr ) const
     {
+        if ( owner )
+        {
+            const std::lock_guard<std::mutex> lock( m_canceledMutex );
+            auto it = m_ownerActiveGeneration.find( owner );
+            if ( it != m_ownerActiveGeneration.end() && generation < it->second )
+                return true;
+            return m_canceled.count( generation ) != 0;
+        }
         if ( generation < m_activeGeneration.load( std::memory_order_acquire ) )
             return true;
         const std::lock_guard<std::mutex> lock( m_canceledMutex );
@@ -58,6 +65,7 @@ class RsScanPool : public QObject
     std::atomic<quint64> m_activeGeneration { 1 };
     mutable std::mutex m_canceledMutex;
     std::unordered_set<quint64> m_canceled;
+    std::unordered_map<const void *, quint64> m_ownerActiveGeneration;
 };
 
 } // namespace sicnu::app

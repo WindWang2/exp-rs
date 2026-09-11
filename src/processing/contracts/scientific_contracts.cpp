@@ -24,7 +24,7 @@ NumericDomainContract domainFromDeclaredScale( double declaredScale )
     // A declared scale is authoritative regardless of magnitude: the product
     // stamped SICNU_NUMERIC_SCALE to say exactly how its stored values map
     // to unit reflectance.
-    contract.divisor = declaredScale > 0.0 ? declaredScale : 1.0;
+    contract.divisor = ( std::isfinite( declaredScale ) && declaredScale > 0.0 ) ? declaredScale : 1.0;
     contract.regime = std::abs( contract.divisor - 1.0 ) > 1e-9
                           ? NumericScaleRegime::DnScale
                           : NumericScaleRegime::UnitReflectance;

@@ -251,13 +251,13 @@ WorkflowRunCoordinator::~WorkflowRunCoordinator() = default;
 
 void WorkflowRunCoordinator::setCheckpointDirectory( const QString &directory )
 {
-    std::lock_guard<std::mutex> lock( m_mutex );
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
     m_checkpointDir = directory;
 }
 
 QString WorkflowRunCoordinator::checkpointDirectory() const
 {
-    std::lock_guard<std::mutex> lock( m_mutex );
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
     return m_checkpointDir.isEmpty() ? WorkflowCheckpointManager::defaultCheckpointDirectory()
                                      : m_checkpointDir;
 }
@@ -276,7 +276,7 @@ QString WorkflowRunCoordinator::checkpointPathLocked( const std::string &runId )
 
 QString WorkflowRunCoordinator::checkpointPathFor( const std::string &runId ) const
 {
-    std::lock_guard<std::mutex> lock( m_mutex );
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
     return checkpointPathLocked( runId );
 }
 
@@ -396,7 +396,7 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     // below adds task ids and current step statuses.
     const qint64 startedMs = QDateTime::currentMSecsSinceEpoch();
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
         persistRunLocked( *run );
         notifyRunStateLocked( *run, startedMs, 0 ); // state Running (issue #754)
     }
@@ -410,7 +410,7 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
         run->setErrorMessage( "Pipeline contains no dispatchable operator steps" );
         run->transitionTo( WorkflowRunState::Failed );
         {
-            std::lock_guard<std::mutex> lock( m_mutex );
+            std::lock_guard<std::recursive_mutex> lock( m_mutex );
             persistRunLocked( *run );
             notifyRunStateLocked( *run, startedMs,
                                   QDateTime::currentMSecsSinceEpoch() );
@@ -434,7 +434,7 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
 
     const std::string freshRunId = run->runId();
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
         if ( !m_connected )
         {
             // Direct connection on purpose: transitions arrive from worker
@@ -504,7 +504,7 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     // pipelines (GUI single tasks, untracked submissions) were folded,
     // discarded and re-paid the hashing cost on every completion.
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
         if ( m_runsByPipeline.find( info.pipelineId ) == m_runsByPipeline.end() )
             return;
     }
@@ -527,7 +527,7 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     // object under the same lock, so a transition either lands entirely
     // before the swap (visible to its merge) or entirely after (folded into
     // the swapped-in run) — never into a discarded object (#720).
-    std::lock_guard<std::mutex> lock( m_mutex );
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
 
     const auto it = m_runsByPipeline.find( info.pipelineId );
     if ( it == m_runsByPipeline.end() )
@@ -674,7 +674,7 @@ WorkflowRunCoordinator::RecoveryReport WorkflowRunCoordinator::recoverAtStartup(
 long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error )
 {
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
         if ( m_resuming.count( runId ) > 0 )
         {
             if ( error )
@@ -689,7 +689,7 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
         const std::string &id;
         ~ResumingGuard()
         {
-            std::lock_guard<std::mutex> lock( self->m_mutex );
+            std::lock_guard<std::recursive_mutex> lock( self->m_mutex );
             self->m_resuming.erase( id );
         }
     } resumingGuard{ this, runId };
@@ -731,19 +731,19 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
         }
     }
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
         m_locksByRunId[runId] = runLock;
     }
 
     QString loadErr;
     std::shared_ptr<WorkflowRun> run;
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
         run = m_checkpoints.loadCheckpoint( path, &loadErr );
     }
     if ( !run )
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
         m_locksByRunId.erase( runId ); // releases the run lock
         if ( error )
             *error = QStringLiteral( "Checkpoint rejected for run %1: %2" )
@@ -756,14 +756,14 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
     // recoverAtStartup pass (the MCP resume_workflow surface has none).
     if ( WorkflowCheckpointManager::reconcileToInterrupted( *run ) )
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
         persistRunLocked( *run );
         notifyRunStateLocked( *run, 0, QDateTime::currentMSecsSinceEpoch() ); // Interrupted
     }
     if ( run->state() != WorkflowRunState::Interrupted && run->state() != WorkflowRunState::Failed
          && run->state() != WorkflowRunState::Canceled )
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
         m_locksByRunId.erase( runId ); // releases the run lock
         if ( error )
             *error = QStringLiteral( "Run %1 is %2 — only interrupted/failed/canceled runs resume" )
@@ -948,7 +948,7 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
         if ( error )
             *error = QStringLiteral( "Run %1 has nothing left to resume" )
                        .arg( QString::fromStdString( runId ) );
-        std::lock_guard<std::mutex> lock( m_mutex );
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
         m_locksByRunId.erase( runId ); // releases the run lock
         return -1;
     }
@@ -961,7 +961,7 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
         run->forceSetState( WorkflowRunState::Failed );
         run->setErrorMessage( "Resume submission failed" );
         {
-            std::lock_guard<std::mutex> lock( m_mutex );
+            std::lock_guard<std::recursive_mutex> lock( m_mutex );
             m_locksByRunId.erase( runId ); // releases the run lock
             persistRunLocked( *run );
         }
@@ -975,7 +975,7 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
     // lineage and a second interruption resumes from the union of both
     // passes (its Completed step plans + artifacts are already inside).
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
         const auto it = m_runsByPipeline.find( pipelineId );
         if ( it != m_runsByPipeline.end() )
         {
@@ -1052,14 +1052,20 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
                         run->setArtifact( fresh.stepId, fresh.outputLayerPath );
                 }
             }
-            m_pipelineByRunId.erase( it->second->runId() );
+            const std::string ghostRunId = it->second->runId();
+            const std::string ghostWfId = it->second->workflowId();
+            emit runStateChanged( QString::fromStdString( ghostRunId ),
+                                  QString::fromStdString( ghostWfId ),
+                                  QStringLiteral( "Canceled" ),
+                                  0, QDateTime::currentMSecsSinceEpoch() );
+            m_pipelineByRunId.erase( ghostRunId );
             // The fresh submission persisted a checkpoint under ITS runId
             // before the swap; recovery would resurrect it as a ghost
             // Interrupted run duplicating this resume (review P1). Its lock
             // is released with it — the ORIGINAL run's lock (held by this
             // resuming process) remains the ownership handle until finalize.
-            QFile::remove( checkpointPathLocked( it->second->runId() ) );
-            m_locksByRunId.erase( it->second->runId() );
+            QFile::remove( checkpointPathLocked( ghostRunId ) );
+            m_locksByRunId.erase( ghostRunId );
             it->second = run;
             m_pipelineByRunId[run->runId()] = pipelineId;
             persistRunLocked( *run );
@@ -1084,7 +1090,7 @@ bool WorkflowRunCoordinator::cancelRun( long pipelineId )
 {
     std::shared_ptr<WorkflowRun> run;
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
         const auto it = m_runsByPipeline.find( pipelineId );
         if ( it == m_runsByPipeline.end() )
             return false;
@@ -1092,7 +1098,7 @@ bool WorkflowRunCoordinator::cancelRun( long pipelineId )
     }
     run->transitionTo( WorkflowRunState::Cancelling );
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
+        std::lock_guard<std::recursive_mutex> lock( m_mutex );
         persistRunLocked( *run );
     }
     return TaskCenter::instance().cancelPipeline( pipelineId );
@@ -1100,7 +1106,7 @@ bool WorkflowRunCoordinator::cancelRun( long pipelineId )
 
 std::shared_ptr<WorkflowRun> WorkflowRunCoordinator::runForPipeline( long pipelineId ) const
 {
-    std::lock_guard<std::mutex> lock( m_mutex );
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
     const auto it = m_runsByPipeline.find( pipelineId );
     if ( it == m_runsByPipeline.end() )
         return nullptr;
@@ -1109,14 +1115,14 @@ std::shared_ptr<WorkflowRun> WorkflowRunCoordinator::runForPipeline( long pipeli
 
 long WorkflowRunCoordinator::pipelineIdForRun( const std::string &runId ) const
 {
-    std::lock_guard<std::mutex> lock( m_mutex );
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
     const auto it = m_pipelineByRunId.find( runId );
     return it != m_pipelineByRunId.end() ? it->second : -1;
 }
 
 std::vector<std::shared_ptr<WorkflowRun>> WorkflowRunCoordinator::runs() const
 {
-    std::lock_guard<std::mutex> lock( m_mutex );
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
     std::vector<std::shared_ptr<WorkflowRun>> out;
     out.reserve( m_runsByPipeline.size() );
     for ( const auto &kv : m_runsByPipeline )

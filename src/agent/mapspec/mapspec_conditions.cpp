@@ -2,6 +2,7 @@
 #include "mapspec_conditions.h"
 
 #include <cctype>
+#include <cmath>
 #include <memory>
 
 namespace sicnu::agent::mapspec {
@@ -387,6 +388,8 @@ bool compareValues( const Json::Value &lhs, const std::string &op, const Json::V
   {
     const double a = lhs.asDouble();
     const double b = rhs.asDouble();
+    if ( std::isnan( a ) || std::isnan( b ) )
+      return ( op == "!=" );
     ordering = a < b ? -1 : ( a > b ? 1 : 0 );
   }
   else if ( strings )
@@ -425,6 +428,8 @@ Json::Value operandValue( const ConditionAst &node, const Json::Value &context, 
     return Json::Value( node.text );
   if ( node.op == ConditionAst::Op::Bool )
     return Json::Value( node.boolValue );
+  if ( node.op == ConditionAst::Op::Has )
+    return Json::Value( resolvePath( context, node.text ) != nullptr );
   const Json::Value *resolved = resolvePath( context, node.text );
   if ( resolved == nullptr )
   {

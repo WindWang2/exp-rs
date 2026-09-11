@@ -366,6 +366,7 @@ void VectorWriter::cancel()
     atomic_fs::discardStaged( mStagedPath );
     mStagedPath.clear();
   }
+  mTransactionActive = false;
   mFinalized = true;
 }
 

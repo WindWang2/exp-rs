@@ -473,3 +473,52 @@ TEST_CASE( "batch write appends in order and names the failing index",
   }
   writer2.cancel();
 }
+
+// Upstream fix formulation (merged from master): the same contract as the
+// M0 tests above, expressed against the shipped #850 fix — kept so both
+// suites guard the behavior.
+TEST_CASE( "VectorWriter move constructor and move assignment preserve active transaction (#850)",
+           "[io][vector][contract][issue850]" )
+{
+  const std::string moveTarget = ( fs::path( scratchDir( "move_tx" ) ) / "moved_ctor.gpkg" ).string();
+  {
+    auto writer1 = sicnu::geo::VectorWriter::create(
+      moveTarget, "move_layer", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+    sicnu::geo::VectorWriter writer2( std::move( writer1 ) );
+
+    Json::Value attrs( Json::objectValue );
+    attrs["name"] = "Chengdu";
+    attrs["value"] = 500.0;
+    attrs["code"] = static_cast<Json::Int64>( 2701 );
+    writer2.writeFeature( attrs, "POINT (104.0668 30.5728)" );
+    writer2.finalize();
+  }
+
+  // Feature must be committed and persisted on disk, NOT rolled back
+  {
+    auto reader = sicnu::geo::VectorReader::open( moveTarget );
+    CHECK( reader.layerInfo().featureCount == 1 );
+  }
+
+  const std::string assignTarget = ( fs::path( scratchDir( "assign_tx" ) ) / "moved_assign.gpkg" ).string();
+  {
+    auto writer1 = sicnu::geo::VectorWriter::create(
+      assignTarget, "assign_layer", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+    sicnu::geo::VectorWriter writer2;
+    writer2 = std::move( writer1 );
+
+    Json::Value attrs( Json::objectValue );
+    attrs["name"] = "Beijing";
+    attrs["value"] = 1000.0;
+    attrs["code"] = static_cast<Json::Int64>( 1100 );
+    writer2.writeFeature( attrs, "POINT (116.4074 39.9042)" );
+    writer2.finalize();
+  }
+
+  // Feature must be committed and persisted on disk, NOT rolled back
+  {
+    auto reader = sicnu::geo::VectorReader::open( assignTarget );
+    CHECK( reader.layerInfo().featureCount == 1 );
+  }
+}
+

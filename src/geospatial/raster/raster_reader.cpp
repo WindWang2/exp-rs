@@ -341,6 +341,12 @@ std::vector<std::uint8_t> RasterReader::readMask( const RasterWindow &window, co
     const std::vector<double> bandValues = readWindow( { effectiveBands[b] }, window );
     for ( std::size_t p = 0; p < pixels; ++p )
     {
+      // Deliberate divergence from the merged master fix (which ORs in an
+      // absolute 1e-6 tolerance for EVERY dtype): an epsilon blind to value
+      // magnitude mis-masks legitimate Float64 values within 1e-6 of the
+      // sentinel, and float-casting large integer sentinels loses precision
+      // past 2^24. Matching in the band's STORAGE precision is exact for
+      // Float64 and correct for Float32 quantization — see sentinelMatches.
       if ( sentinelMatches( *info, bandValues[p] ) )
         mask[p] = 0;
     }

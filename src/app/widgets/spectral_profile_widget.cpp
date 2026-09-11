@@ -51,8 +51,9 @@ SpectralProfileWidget::SpectralProfileWidget( QWidget *parent )
     // Connect to layer removal to clear dangling pointer and close dataset
     connect( QgsProject::instance(), &QgsProject::layerRemoved,
              this, [this]( const QString &layerId ) {
-                 if ( m_rasterLayer && m_rasterLayer->id() == layerId ) {
+                 if ( !m_rasterLayerId.isEmpty() && m_rasterLayerId == layerId ) {
                      m_rasterLayer = nullptr;
+                     m_rasterLayerId.clear();
                      closeDataset();
                      clear();
                  }
@@ -79,6 +80,7 @@ void SpectralProfileWidget::setProfile( const QgsPointXY &point, QgsRasterLayer 
 {
     m_point = point;
     m_rasterLayer = layer;
+    m_rasterLayerId = layer ? layer->id() : QString();
     extractProfile( point, layer );
     update();
 }
