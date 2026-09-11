@@ -3,12 +3,26 @@
     "id": "family:filter",
     "kind": "family_default",
     "family": "filter",
-    "modality": ["optical", "sar", "thermal", "dem"],
-    "resource": { "cost_class": "light", "large_raster_safe": true },
+    "modality": [
+      "optical",
+      "sar",
+      "thermal",
+      "dem"
+    ],
+    "resource": {
+      "cost_class": "light",
+      "large_raster_safe": true
+    },
     "side_effects": false,
     "verification": {
       "expected_kind": "raster",
-      "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction"]
+      "checks": [
+        "existence",
+        "opens",
+        "dimensions",
+        "finite_fraction",
+        "nodata_fraction"
+      ]
     },
     "limitations": [
       "Spatial filters mix neighbouring pixels — never feed filtered products into bi-temporal change science without recording the kernel",
@@ -26,9 +40,16 @@
     "extends": "family:filter",
     "verification": {
       "expected_kind": "raster",
-      "checks": ["existence", "opens", "dimensions", "class_domain"]
+      "checks": [
+        "existence",
+        "opens",
+        "dimensions",
+        "class_domain"
+      ]
     },
-    "limitations": ["Removes small polygonal classes; class domain may shrink by design"]
+    "limitations": [
+      "Removes small polygonal classes; class domain may shrink by design"
+    ]
   },
   {
     "id": "rs:fill_holes",
@@ -39,8 +60,15 @@
     "id": "rs:connected_components",
     "family": "filter",
     "extends": "family:filter",
-    "artifacts": { "output": { "kind": "raster", "dtype": "int32" } },
-    "limitations": ["Component labels are arbitrary integers, not science values"]
+    "artifacts": {
+      "output": {
+        "kind": "raster",
+        "dtype": "int32"
+      }
+    },
+    "limitations": [
+      "Component labels are arbitrary integers, not science values"
+    ]
   },
   {
     "id": "rs:majority_filter",
@@ -48,9 +76,16 @@
     "extends": "family:filter",
     "verification": {
       "expected_kind": "raster",
-      "checks": ["existence", "opens", "dimensions", "class_domain"]
+      "checks": [
+        "existence",
+        "opens",
+        "dimensions",
+        "class_domain"
+      ]
     },
-    "limitations": ["Majority voting assumes categorical input; continuous rasters must not pass through"]
+    "limitations": [
+      "Majority voting assumes categorical input; continuous rasters must not pass through"
+    ]
   },
   {
     "id": "rs:focal_stats",
@@ -61,8 +96,15 @@
     "id": "rs:proximity",
     "family": "filter",
     "extends": "family:filter",
-    "artifacts": { "output": { "kind": "raster", "dtype": "float32" } },
-    "limitations": ["Distance units follow the raster CRS — geographic CRSs give degrees, not meters"]
+    "artifacts": {
+      "output": {
+        "kind": "raster",
+        "dtype": "float32"
+      }
+    },
+    "limitations": [
+      "Distance units follow the raster CRS — geographic CRSs give degrees, not meters"
+    ]
   },
   {
     "id": "rs:local_extrema",
@@ -91,19 +133,75 @@
     "id": "opencv:sobel",
     "family": "filter",
     "extends": "family:filter",
-    "artifacts": { "output": { "kind": "raster", "dtype": "float32" } }
+    "artifacts": {
+      "output": {
+        "kind": "raster",
+        "dtype": "float32"
+      }
+    }
   },
   {
     "id": "opencv:laplacian",
     "family": "filter",
     "extends": "family:filter",
-    "artifacts": { "output": { "kind": "raster", "dtype": "float32" } }
+    "artifacts": {
+      "output": {
+        "kind": "raster",
+        "dtype": "float32"
+      }
+    }
   },
   {
     "id": "opencv:canny",
     "family": "filter",
     "extends": "family:filter",
-    "artifacts": { "output": { "kind": "raster", "dtype": "uint8" } },
-    "limitations": ["Edge map is binary; hysteresis thresholds are scene-dependent"]
+    "artifacts": {
+      "output": {
+        "kind": "raster",
+        "dtype": "uint8"
+      }
+    },
+    "limitations": [
+      "Edge map is binary; hysteresis thresholds are scene-dependent"
+    ]
+  },
+  {
+    "id": "rs:zonal_stats",
+    "family": "filter",
+    "extends": "family:filter",
+    "intents": [
+      "zonal"
+    ],
+    "modality": [
+      "optical",
+      "sar",
+      "thermal",
+      "dem"
+    ],
+    "verification": {
+      "expected_kind": "vector"
+    },
+    "limitations": [
+      "Zones and value raster must describe the same area; CRS is transformed from the zones' declared CRS into the raster CRS",
+      "validCount below minValid yields NaN statistics for that zone"
+    ]
+  },
+  {
+    "id": "rs:rasterize",
+    "family": "filter",
+    "extends": "family:filter",
+    "modality": [
+      "vector"
+    ],
+    "verification": {
+      "expected_kind": "raster",
+      "checks": [
+        "finite_fraction",
+        "nodata_fraction"
+      ]
+    },
+    "limitations": [
+      "The reference raster donates grid/CRS/geotransform; burn attributes come from the vector field named in params"
+    ]
   }
 ]

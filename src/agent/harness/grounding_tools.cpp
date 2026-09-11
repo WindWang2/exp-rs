@@ -281,7 +281,14 @@ class UnderstandTool final : public SpatialTool
         ? sicnu::agent::contracts::datasetUnderstandingFromRasterInspect( inspectOutput )
         : sicnu::agent::contracts::datasetUnderstandingFromVectorInspect( inspectOutput );
       if ( isRaster )
+      {
         understanding["modality"] = inferModality( inspectOutput );
+        // Harness 9.0 (typed context 3.0): modality is a heuristic INFERENCE,
+        // never a declared fact — stamped "assumed" (or "unknown") so
+        // consumers can weigh it accordingly.
+        understanding["fact_status"]["modality"] =
+          understanding["modality"].asString() == "unknown" ? "unknown" : "assumed";
+      }
       understanding["entity"] = resolved->toJson();
       ContextLedger::instance().cacheUnderstanding(
         understandingCacheKey( resolved->path, resolved->revision ), 0, understanding );
@@ -385,6 +392,11 @@ class ContextTool final : public SpatialTool
       // detection and the model contracts/readiness the harness observed.
       context["asset_contexts"] = ContextLedger::instance().assetContexts();
       context["model_contracts"] = ContextLedger::instance().modelContracts();
+      // Harness 9.0 (M6): bounded evidence-aware run summaries + their token
+      // cost, so a continuing conversation recalls verified outcomes without
+      // chat memory.
+      context["run_summaries"] = ContextLedger::instance().runSummaries();
+      context["run_summary_tokens"] = ContextLedger::instance().runSummaryTokens();
       out["context"] = context;
       return SpatialToolResult::ok( std::move( out ) );
     }

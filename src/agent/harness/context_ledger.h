@@ -76,6 +76,24 @@ class ContextLedger {
     /// The bounded model-contract list.
     Json::Value modelContracts() const;
 
+    // Harness 9.0 (M6): evidence-aware run summaries. The continuity record
+    // for long conversations: what a run produced, what verified, what failed,
+    // what rests on assumptions. Written ONLY from authoritative run events
+    // (verification verdicts, step failures) by the plan lifecycle — never
+    // chat memory. Bounded to kMaxRunSummaries entries AND a total
+    // approximate-token budget: the oldest summaries evict first until the
+    // store fits the budget again.
+    static constexpr int kMaxRunSummaries = 12;
+    static constexpr int kRunSummaryTokenBudget = 8192;
+    /// Records (or replaces) the summary for `runId`. `approxTokens` is the
+    /// caller-computed cost (~ bytes/4) of the bounded summary.
+    void recordRunSummary( const std::string &runId, const Json::Value &summary,
+                           int approxTokens );
+    /// The bounded summaries, newest first.
+    Json::Value runSummaries() const;
+    /// Current total approximate token cost of the store.
+    int runSummaryTokens() const;
+
   private:
     ContextLedger() = default;
 
@@ -90,6 +108,10 @@ class ContextLedger {
     // keyed by model id (both bounded arrays of objects).
     Json::Value mAssetContexts{Json::arrayValue};
     Json::Value mModelContracts{Json::arrayValue};
+    // Harness 9.0: run summaries keyed by run id, newest last; parallel
+    // per-entry token costs keep the budget check O(1) amortized.
+    Json::Value mRunSummaries{Json::arrayValue};
+    int mRunSummaryTokens = 0;
 };
 
 } // namespace sicnu::agent::harness

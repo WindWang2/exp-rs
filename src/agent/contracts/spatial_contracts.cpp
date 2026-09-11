@@ -65,6 +65,27 @@ bool isMaskRole( const std::string &role )
 
 } // namespace
 
+
+// Harness 9.0 (typed context 3.0): per-slot fact status — "known" (declared
+// by the file/inspection), "assumed" (heuristic inference, e.g. modality —
+// stamped by the caller), "unknown" (absent). Consumers can now tell an
+// honest unknown apart from a verified fact without comparing to sentinel
+// values. The status map is bounded to the named slots.
+void attachFactStatus( Json::Value &body )
+{
+  static const char *kSlots[] = {
+    "source_kind", "path", "driver", "size", "pixel_size", "extent", "crs",
+    "band_roles", "band_count", "radiometric_state", "sensor", "product_type",
+    "product_id", "processing_level", "acquisition_time", "nodata",
+    "quality_masks", "product_metadata", "feature_count", "geometry_type",
+    "fields",
+  };
+  Json::Value status( Json::objectValue );
+  for ( const char *slot : kSlots )
+    status[slot] = body.isMember( slot ) ? "known" : "unknown";
+  body["fact_status"] = status;
+}
+
 Json::Value datasetUnderstandingFromRasterInspect( const Json::Value &rasterInspect )
 {
   Json::Value body( Json::objectValue );
@@ -142,6 +163,7 @@ Json::Value datasetUnderstandingFromRasterInspect( const Json::Value &rasterInsp
   if ( !maskBands.empty() )
     body["quality_masks"] = maskBands;
 
+  attachFactStatus( body );
   return makeEnvelope( "dataset_understanding", std::move( body ) );
 }
 
@@ -155,6 +177,8 @@ Json::Value datasetUnderstandingFromVectorInspect( const Json::Value &vectorInsp
   body["geometry_type"] = vectorInspect.get( "geometryType", Json::Value() );
   if ( vectorInspect.isMember( "fields" ) )
     body["fields"] = vectorInspect["fields"];
+
+  attachFactStatus( body );
   return makeEnvelope( "dataset_understanding", std::move( body ) );
 }
 

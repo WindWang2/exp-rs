@@ -3,15 +3,18 @@
 
 #include "agent/workspace_state.h"
 #include "band_facts.h"
+#include "capability_knowledge.h"
 #include "contracts/spatial_contracts.h"
 #include "entity_resolver.h"
 #include "grounding_tools.h"
+#include "harness_actions.h"
 #include "operators/framework/model_catalog.h"
 #include "spatial_tools/spatial_tool.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <set>
 #include <string>
 
 namespace sicnu::agent::harness {
@@ -50,9 +53,10 @@ void addBlocker( PreflightOutcome &outcome, const std::string &code,
                  const std::string &message, const std::string &action,
                  Json::Value details = Json::Value() )
 {
+  // Harness 9.0 (#881): the action resolves through the closed vocabulary —
+  // the issued document carries the registered tool / workbench command.
   outcome.issues.append( makeIssueWithCode( code, "error", message, true,
-                                            sicnu::agent::contracts::makeRepairSuggestion(
-                                              action, Json::Value() ) ) );
+                                            resolvedSuggestedAction( action, Json::Value() ) ) );
   outcome.errors.push_back( HarnessError::make( code, message, details ) );
   outcome.checks.append( makeCheck( code, false, code, details ) );
 }
@@ -61,6 +65,17 @@ void addWarning( PreflightOutcome &outcome, const std::string &code,
                  const std::string &message )
 {
   outcome.issues.append( makeIssueWithCode( code, "warning", message, false, Json::Value() ) );
+  outcome.checks.append( makeCheck( code, true, code, Json::Value() ) );
+}
+
+/// Harness 9.0 (M3): the third tier — pure improvements with no correctness
+/// risk (a better polarization choice, a model's resolution window). Advice
+/// never flips the verdict and never lands in assumptions: it is guidance,
+/// not uncertainty.
+void addAdvice( PreflightOutcome &outcome, const std::string &code,
+                const std::string &message )
+{
+  outcome.issues.append( makeIssueWithCode( code, "advice", message, false, Json::Value() ) );
   outcome.checks.append( makeCheck( code, true, code, Json::Value() ) );
 }
 
@@ -634,15 +649,15 @@ void inferenceRules( const std::vector<PreflightInput> &inputs, PreflightOutcome
   const double minRes = manifest.get( "min_resolution_meters", -1.0 ).asDouble();
   const double maxRes = manifest.get( "max_resolution_meters", -1.0 ).asDouble();
   if ( grid.pixelSizeX > 0 && minRes > 0 && grid.pixelSizeX < minRes )
-    addWarning( outcome, error_codes::kModelIncompatible,
-                "Dataset resolution (" + std::to_string( grid.pixelSizeX ) +
-                  " m) is finer than the model's recommended minimum (" +
-                  std::to_string( minRes ) + " m)" );
+    addAdvice( outcome, error_codes::kModelIncompatible,
+               "Dataset resolution (" + std::to_string( grid.pixelSizeX ) +
+                 " m) is finer than the model's recommended minimum (" +
+                 std::to_string( minRes ) + " m)" );
   if ( grid.pixelSizeX > 0 && maxRes > 0 && grid.pixelSizeX > maxRes )
-    addWarning( outcome, error_codes::kModelIncompatible,
-                "Dataset resolution (" + std::to_string( grid.pixelSizeX ) +
-                  " m) is coarser than the model's recommended maximum (" +
-                  std::to_string( maxRes ) + " m)" );
+    addAdvice( outcome, error_codes::kModelIncompatible,
+               "Dataset resolution (" + std::to_string( grid.pixelSizeX ) +
+                 " m) is coarser than the model's recommended maximum (" +
+                 std::to_string( maxRes ) + " m)" );
 }
 
 /// Cross-modality pack (7.0): optical + SAR fused analysis. Both branches
@@ -714,16 +729,16 @@ void floodRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &ou
       const SarFacts facts = sarFacts( input.understanding );
       if ( !facts.polarization.empty() &&
            ( facts.polarization == "vv" || facts.polarization == "hh" ) )
-        addWarning( outcome, "POLARIZATION_MISMATCH",
-                    "Input '" + input.name + "' is " + facts.polarization +
-                      "-pol; co-pol backscatter is wind-sensitive — cross-pol (VH/HV) "
-                      "is preferred for open-water mapping" );
+        addAdvice( outcome, "POLARIZATION_MISMATCH",
+                   "Input '" + input.name + "' is " + facts.polarization +
+                     "-pol; co-pol backscatter is wind-sensitive — cross-pol (VH/HV) "
+                     "is preferred for open-water mapping" );
     }
     else if ( !modality.empty() && modality != "unknown" )
     {
-      addWarning( outcome, "INVALID_RADIOMETRY",
-                  "Flood extents from optical indices miss turbid or vegetated "
-                  "water; validate against an independent reference" );
+      addAdvice( outcome, "INVALID_RADIOMETRY",
+                 "Flood extents from optical indices miss turbid or vegetated "
+                 "water; validate against an independent reference" );
     }
   }
 }
@@ -789,6 +804,7 @@ const std::vector<IntentSpec> &intentSpecTable()
     { "sar", PackKind::SarSingle, {}, false, true },
     { "sar_water", PackKind::SarSingle, {}, false, true },
     { "ship", PackKind::SharedOnly },
+    { "zonal", PackKind::SharedOnly },
     { "classify", PackKind::Classify },
     { "accuracy", PackKind::Classify },
     { "phenology", PackKind::TemporalSeries, {}, false, false, 12 },
@@ -879,14 +895,48 @@ Json::Value PreflightOutcome::toJson( const std::string &subject ) const
   // Surfacing them separately keeps blockers, checks, and honest unknowns
   // apart so the agent sees exactly which science rests on assumptions.
   Json::Value assumptions( Json::arrayValue );
+  // Harness 9.0 (M3): advice-class issues (pure improvements) and the safe
+  // preparation table — blocker actions that name a deterministic data
+  // transform. Preparations are the ONLY class the agent may auto-apply;
+  // everything else stays an explicit human/Pi decision.
+  static const char *kPreparationActions[] = {
+    "reproject_to_reference", "align_to_reference", "normalize_radiometry",
+    "calibrate_consistently",
+  };
+  Json::Value advice( Json::arrayValue );
+  Json::Value preparations( Json::arrayValue );
   for ( const Json::Value &issue : issues )
-    if ( issue.get( "severity", "" ).asString() == "warning" )
+  {
+    const std::string severity = issue.get( "severity", "" ).asString();
+    if ( severity == "warning" )
       assumptions.append( issue );
+    else if ( severity == "advice" )
+      advice.append( issue );
+    if ( severity == "error" && issue.isMember( "suggested_action" ) )
+    {
+      const Json::Value &action = issue["suggested_action"];
+      const std::string actionKey = action.get( "action", "" ).asString();
+      for ( const char *preparation : kPreparationActions )
+      {
+        if ( actionKey == preparation )
+        {
+          Json::Value entry( Json::objectValue );
+          entry["for_issue"] = issue.get( "code", "" ).asString();
+          entry["action"] = action;
+          preparations.append( entry );
+        }
+      }
+    }
+  }
 
   Json::Value doc = sicnu::agent::contracts::makePreflightResult( subject, verdict, issues,
                                                                   checks );
   if ( !assumptions.empty() )
     doc["assumptions"] = assumptions;
+  if ( !advice.empty() )
+    doc["advice"] = advice;
+  if ( !preparations.empty() )
+    doc["preparations"] = preparations;
   return doc;
 }
 
@@ -914,6 +964,127 @@ Json::Value intentRequirements( const std::string &intent )
     doc["modality"] = "sar";
   if ( spec->minScenes > 0 )
     doc["min_scenes"] = spec->minScenes;
+  return doc;
+}
+
+Json::Value typedIntentDocument( const std::string &intent )
+{
+  const IntentSpec *spec = intentSpec( intent );
+  if ( !spec )
+    return Json::Value();
+  Json::Value doc = intentRequirements( intent );
+  doc["schema"] = "harness.intent/1.0";
+
+  // Required facts: what MUST be true about the inputs before the pack can
+  // pass — typed so Pi can ground each one with spatial:understand instead
+  // of guessing.
+  Json::Value requiredFacts( Json::arrayValue );
+  for ( const auto &[ roleLabel, requirement ] : spec->bands )
+  {
+    Json::Value fact( Json::objectValue );
+    fact["fact"] = "band_role:" + bandRequirementRole( requirement );
+    fact["why"] = intent + " requires the " + bandWindowLabel( requirement ) + " band";
+    requiredFacts.append( fact );
+  }
+  if ( spec->requiresPair )
+  {
+    Json::Value fact( Json::objectValue );
+    fact["fact"] = "input_pair";
+    fact["why"] = intent + " compares two comparable epochs";
+    requiredFacts.append( fact );
+  }
+  if ( spec->kind == PackKind::Classify )
+  {
+    Json::Value fact( Json::objectValue );
+    fact["fact"] = "training_samples";
+    fact["why"] = "supervised classification needs a training input named "
+                  "'training' or 'samples'";
+    requiredFacts.append( fact );
+  }
+  if ( spec->kind == PackKind::TemporalSeries )
+  {
+    Json::Value fact( Json::objectValue );
+    fact["fact"] = "temporal_collection";
+    fact["why"] = intent + " orders scenes from a declared temporal collection";
+    requiredFacts.append( fact );
+  }
+  doc["required_facts"] = requiredFacts;
+
+  // Optional facts: absence degrades to a warning (an honest assumption),
+  // never to a blocker and never to fabricated values.
+  Json::Value optionalFacts( Json::arrayValue );
+  auto addOptional = [ &optionalFacts ]( const char *fact, const char *why ) {
+    Json::Value entry( Json::objectValue );
+    entry["fact"] = fact;
+    entry["why"] = why;
+    entry["degrades_to"] = "warning";
+    optionalFacts.append( entry );
+  };
+  if ( spec->kind == PackKind::BandRatio || spec->kind == PackKind::OpticalChange )
+    addOptional( "radiometric_state",
+                 "raw DN vs reflectance changes index comparability" );
+  if ( spec->sarModality )
+  {
+    addOptional( "polarization",
+                 "cross-pol vs co-pol changes water/ship detectability" );
+    addOptional( "calibration_domain",
+                 "comparing scenes across calibration domains is meaningless" );
+  }
+  if ( spec->kind == PackKind::TemporalSeries )
+    addOptional( "acquisition_time",
+                 "scene ordering cannot be verified without acquisition times" );
+  if ( spec->kind == PackKind::Terrain )
+    addOptional( "crs", "slope/aspect in a geographic CRS is a physical error" );
+  doc["optional_facts"] = optionalFacts;
+
+  // Expected products + quality expectations: the union over the capability
+  // knowledge entries serving this intent (the same authoritative layer the
+  // verification derives from — no second schema).
+  Json::Value products( Json::arrayValue );
+  std::set<std::string> checks;
+  bool wantsFinite = false;
+  bool wantsNodata = false;
+  for ( const std::string &operatorId :
+        CapabilityKnowledge::instance().operatorsForIntent( intent ) )
+  {
+    const Json::Value entry = CapabilityKnowledge::instance().entryForOperator( operatorId );
+    for ( const Json::Value &check :
+          entry.get( "verification", Json::Value() ).get( "checks",
+                                                          Json::Value( Json::arrayValue ) ) )
+    {
+      if ( !check.isString() )
+        continue;
+      checks.insert( check.asString() );
+      wantsFinite |= check.asString() == "finite_fraction";
+      wantsNodata |= check.asString() == "nodata_fraction";
+    }
+    const Json::Value artifacts = entry.get( "artifacts", Json::Value() );
+    for ( const std::string &name : artifacts.getMemberNames() )
+    {
+      if ( static_cast<int>( products.size() ) >= 4 )
+        break;
+      Json::Value product( Json::objectValue );
+      product["artifact"] = name;
+      if ( artifacts[ name ].isObject() && artifacts[ name ].isMember( "kind" ) )
+        product["kind"] = artifacts[ name ][ "kind" ];
+      if ( artifacts[ name ].isObject() && artifacts[ name ].isMember( "dtype" ) )
+        product["dtype"] = artifacts[ name ][ "dtype" ];
+      bool duplicate = false;
+      for ( const Json::Value &existing : products )
+        duplicate |= existing == product;
+      if ( !duplicate )
+        products.append( product );
+    }
+  }
+  doc["expected_products"] = products;
+  Json::Value quality( Json::objectValue );
+  for ( const std::string &check : checks )
+    quality["checks"].append( check );
+  if ( wantsFinite )
+    quality["min_finite_fraction"] = 0.5;
+  if ( wantsNodata )
+    quality["max_nodata_fraction"] = 0.9;
+  doc["quality_expectations"] = quality;
   return doc;
 }
 
@@ -1112,6 +1283,8 @@ PreflightOutcome preflightIntent( const std::string &intent,
             input.understanding =
               sicnu::agent::contracts::datasetUnderstandingFromRasterInspect( result.output );
             input.understanding["modality"] = inferModality( result.output );
+            input.understanding["fact_status"]["modality"] =
+              input.understanding["modality"].asString() == "unknown" ? "unknown" : "assumed";
           }
         }
         if ( input.understanding.isNull() )
