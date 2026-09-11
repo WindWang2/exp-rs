@@ -68,6 +68,21 @@ GDALDatasetH datasetOf( const void *handle )
   return static_cast<GDALDatasetH>( const_cast<void *>( handle ) );
 }
 
+/// #874: NoData matching happens in the band's STORAGE precision. Window
+/// reads widen every pixel to double exactly, but a Float32 band stores
+/// float-quantized values — a declared NoData that is not float-exact
+/// (e.g. -9999.9) never compares equal in double space, silently marking
+/// sentinel pixels valid. Narrowing BOTH sides to the stored type matches
+/// what is actually on disk. NaN sentinel handling is separate and exact.
+bool sentinelMatches( const BandInfo &info, double value )
+{
+  if ( info.noDataIsNaN )
+    return std::isnan( value );
+  if ( info.dtype == "Float32" )
+    return static_cast<float>( value ) == static_cast<float>( info.noDataValue );
+  return value == info.noDataValue;
+}
+
 } // namespace
 
 bool clampWindowToRaster( const RasterMetadata &metadata, RasterWindow &window )
@@ -326,9 +341,7 @@ std::vector<std::uint8_t> RasterReader::readMask( const RasterWindow &window, co
     const std::vector<double> bandValues = readWindow( { effectiveBands[b] }, window );
     for ( std::size_t p = 0; p < pixels; ++p )
     {
-      const double value = bandValues[p];
-      const bool invalid = info->noDataIsNaN ? std::isnan( value ) : ( value == info->noDataValue );
-      if ( invalid )
+      if ( sentinelMatches( *info, bandValues[p] ) )
         mask[p] = 0;
     }
   }

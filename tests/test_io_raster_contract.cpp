@@ -12,6 +12,7 @@
 
 using Catch::Approx;
 
+#include <cmath>
 #include <filesystem>
 #include <limits>
 #include <string>
@@ -567,4 +568,101 @@ TEST_CASE( "readBlock and iterateTiles streaming contracts", "[io][raster][contr
     }
   ), sicnu::geo::GeoError );
   CHECK( cancelCount == 2 );
+}
+
+// ---------------------------------------------------------------------------
+// 9.0 M0 — #874: Float32 sentinel matching in the band's storage precision.
+// A declared NoData that is not float-exact (-9999.9) never equals the
+// float-quantized stored pixels in double space; the mask must still mark
+// those pixels invalid. The old strict-double compare failed this test.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "masks match Float32 sentinels in storage precision (issue874)",
+           "[io][raster][contract][issue874]" )
+{
+  const std::string target = ( fs::path( scratchDir( "mask874" ) ) / "sentinel.tif" ).string();
+  sicnu::geo::RasterBandSpec spec;
+  spec.dtype = "Float32";
+  spec.hasNoData = true;
+  spec.noDataValue = -9999.9; // NOT representable in float32
+  sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create( target, 4, 4, { spec }, {} );
+  std::vector<double> values( 16, 1.5 );
+  values[5] = -9999.9;  // narrowed to float on write; widens back exactly
+  values[14] = -9999.9;
+  sicnu::geo::RasterWindow full;
+  full.width = 4;
+  full.height = 4;
+  writer.writeWindow( 1, full, values.data() );
+  writer.finalize();
+
+  sicnu::geo::RasterReader reader = sicnu::geo::RasterReader::open( target );
+  const std::vector<std::uint8_t> mask = reader.readMask( full, { 1 } );
+  REQUIRE( mask.size() == 16 );
+  CHECK( mask[5] == 0 );  // old code: 255 (strict double equality missed it)
+  CHECK( mask[14] == 0 );
+  CHECK( mask[0] == 255 );
+  CHECK( mask[1] == 255 );
+}
+
+TEST_CASE( "Float64 sentinel matching stays exact; NaN nodata unchanged (issue874)",
+           "[io][raster][contract][issue874]" )
+{
+  const std::string target = ( fs::path( scratchDir( "mask874" ) ) / "f64.tif" ).string();
+  sicnu::geo::RasterBandSpec spec;
+  spec.dtype = "Float64";
+  spec.hasNoData = true;
+  spec.noDataValue = -9999.9; // exactly representable in Float64
+  sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create( target, 2, 2, { spec }, {} );
+  std::vector<double> values = { 1.0, -9999.9, 3.0, 4.0 };
+  sicnu::geo::RasterWindow full;
+  full.width = 2;
+  full.height = 2;
+  writer.writeWindow( 1, full, values.data() );
+  writer.finalize();
+
+  sicnu::geo::RasterReader reader = sicnu::geo::RasterReader::open( target );
+  const std::vector<std::uint8_t> mask = reader.readMask( full, { 1 } );
+  REQUIRE( mask.size() == 4 );
+  CHECK( mask[1] == 0 );
+  CHECK( mask[0] == 255 );
+}
+
+// ---------------------------------------------------------------------------
+// 9.0 M0 — Float32 write overflow gate: double→Float32 narrowing of an
+// out-of-range value silently produced ±inf. Now a typed fidelity failure.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Float32 write overflow is a typed fidelity failure",
+           "[io][raster][contract][fidelity]" )
+{
+  const std::string target = ( fs::path( scratchDir( "f32overflow" ) ) / "overflow.tif" ).string();
+  sicnu::geo::RasterBandSpec spec;
+  spec.dtype = "Float32";
+  sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create( target, 2, 2, { spec }, {} );
+  std::vector<double> values( 4, 1.0 );
+  sicnu::geo::RasterWindow full;
+  full.width = 2;
+  full.height = 2;
+
+  values[2] = 1e300; // far beyond FLT_MAX → GDAL would store +inf silently
+  bool threw = false;
+  try
+  {
+    writer.writeWindow( 1, full, values.data() );
+  }
+  catch ( const sicnu::geo::GeoError &error )
+  {
+    threw = true;
+    CHECK( error.code() == sicnu::geo::ErrorCode::FidelityLoss );
+  }
+  CHECK( threw );
+
+  // In-range Float32 values (including precision loss) remain writable.
+  std::vector<double> okValues = { 0.1, -0.1, 1e30, -1e30 };
+  CHECK_NOTHROW( writer.writeWindow( 1, full, okValues.data() ) );
+  writer.finalize();
+
+  sicnu::geo::RasterReader reader = sicnu::geo::RasterReader::open( target );
+  const std::vector<double> stored = reader.readWindow( { 1 }, full );
+  CHECK( std::isfinite( stored[2] ) );
 }

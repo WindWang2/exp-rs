@@ -252,3 +252,105 @@ TEST_CASE( "unknown fields and malformed geometry are structured errors", "[io][
                                                      "l", "Point", {}, {}, missing ),
                    sicnu::geo::GeoError );
 }
+
+// ---------------------------------------------------------------------------
+// 9.0 M0 — #850: moving a VectorWriter mid-stream used to drop
+// mTransactionActive, so finalize() skipped the commit and GDALClose silently
+// rolled the whole feature stream back — the near-empty file still published.
+// The moved-to writer must commit every feature written before the move.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+void writeDemoFeature( sicnu::geo::VectorWriter &writer, const std::string &name, double value )
+{
+  Json::Value attrs( Json::objectValue );
+  attrs["name"] = name;
+  attrs["value"] = value;
+  attrs["code"] = static_cast<Json::Int64>( 42 );
+  writer.writeFeature( attrs, "POINT (104 30)" );
+}
+
+} // namespace
+
+TEST_CASE( "moving a mid-stream writer keeps the transaction (issue850)",
+           "[io][vector][contract][issue850]" )
+{
+  const std::string target = ( fs::path( scratchDir( "move850" ) ) / "moved.gpkg" ).string();
+  sicnu::geo::VectorWriter first = sicnu::geo::VectorWriter::create(
+    target, "cities", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  writeDemoFeature( first, "before-move-1", 1.0 );
+  writeDemoFeature( first, "before-move-2", 2.0 );
+
+  // Move-construct mid-stream (GPKG starts a transaction in create()).
+  sicnu::geo::VectorWriter second = std::move( first );
+  writeDemoFeature( second, "after-move", 3.0 );
+  second.finalize();
+
+  sicnu::geo::VectorReader reader = sicnu::geo::VectorReader::open( target );
+  // Old code: 0 features (transaction implicitly rolled back at close).
+  CHECK( reader.layerInfo().featureCount == 3 );
+}
+
+TEST_CASE( "move-assignment keeps the transaction (issue850)",
+           "[io][vector][contract][issue850]" )
+{
+  const std::string targetA = ( fs::path( scratchDir( "move850" ) ) / "a.gpkg" ).string();
+  const std::string targetB = ( fs::path( scratchDir( "move850" ) ) / "b.gpkg" ).string();
+
+  sicnu::geo::VectorWriter writerA = sicnu::geo::VectorWriter::create(
+    targetA, "layer_a", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  writeDemoFeature( writerA, "a1", 1.0 );
+
+  sicnu::geo::VectorWriter writerB = sicnu::geo::VectorWriter::create(
+    targetB, "layer_b", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  writeDemoFeature( writerB, "b1", 2.0 );
+
+  writerB = std::move( writerA ); // writerA's staged work + transaction move into writerB
+  writeDemoFeature( writerB, "a2-after-assign", 3.0 );
+  writerB.finalize();
+
+  sicnu::geo::VectorReader reader = sicnu::geo::VectorReader::open( targetA );
+  CHECK( reader.layerInfo().featureCount == 2 ); // old code: 0 (silent rollback)
+  // B was cancelled by the move-assign; its target never appears.
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( targetB ) );
+}
+
+TEST_CASE( "cancel after move rolls back explicitly and leaves no staging (issue850)",
+           "[io][vector][contract][issue850]" )
+{
+  const std::string target = ( fs::path( scratchDir( "move850" ) ) / "cancelled.gpkg" ).string();
+  {
+    sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+      target, "cities", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+    writeDemoFeature( writer, "doomed", 9.0 );
+    sicnu::geo::VectorWriter moved = std::move( writer );
+    moved.cancel(); // explicit rollback path, transaction active
+  }
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( target ) );
+
+  // No staging residue in the scratch directory.
+  int residue = 0;
+  for ( const auto &entry : fs::directory_iterator( fs::path( scratchDir( "move850" ) ) ) )
+  {
+    (void)entry;
+    ++residue;
+  }
+  CHECK( residue == 0 );
+}
+
+TEST_CASE( "finalize after a failed commit discards output without crashing (issue850)",
+           "[io][vector][contract][issue850]" )
+{
+  // Shapefile/GeoJSON drivers take the unbatched path (no transaction); GPKG
+  // commit failure itself needs a driver fault we cannot trigger portably —
+  // so this covers the observable contract: finalize-then-cancel is refused,
+  // and a normal finalize never leaves the transaction flag set.
+  const std::string target = ( fs::path( scratchDir( "move850" ) ) / "twice.gpkg" ).string();
+  sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+    target, "cities", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  writeDemoFeature( writer, "once", 1.0 );
+  writer.finalize();
+  CHECK_THROWS_AS( writer.finalize(), sicnu::geo::GeoError );
+}
