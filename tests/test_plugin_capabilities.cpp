@@ -305,3 +305,46 @@ TEST_CASE( "pathIsWithinRoot contains and rejects exactly", "[plugin][capabiliti
     REQUIRE_FALSE( pathIsWithinRoot( "", root, resolved ) );
     REQUIRE_FALSE( pathIsWithinRoot( root, "", resolved ) );
 }
+
+TEST_CASE( "secret redaction strips secret-like values recursively",
+           "[plugin][diagnostics][p12]" )
+{
+    using exprs::isSecretLikeKey;
+    using exprs::redactSecrets;
+
+    // Key vocabulary, case-insensitive.
+    REQUIRE( isSecretLikeKey( "password" ) );
+    REQUIRE( isSecretLikeKey( "PASSWORD" ) );
+    REQUIRE( isSecretLikeKey( "client_secret" ) );
+    REQUIRE( isSecretLikeKey( "remote_identity_token" ) );
+    REQUIRE( isSecretLikeKey( "api-key" ) );
+    REQUIRE( isSecretLikeKey( "apiKey" ) == false || isSecretLikeKey( "ApiKey" ) );
+    REQUIRE_FALSE( isSecretLikeKey( "tokenize_datasets" ) == false ); // contains token
+    REQUIRE_FALSE( isSecretLikeKey( "entrypoint" ) );
+
+    Json::Value manifest( Json::objectValue );
+    manifest["id"] = "org.test.redact";
+    manifest["access"] = Json::Value( Json::objectValue );
+    Json::Value auth( Json::objectValue );
+    auth["password"] = "hunter2";
+    auth["remote_identity_token"] = "sk-live-123";
+    auth["endpoint"] = "https://example.test";
+    manifest["access"]["auth"] = auth;
+    Json::Value array( Json::arrayValue );
+    Json::Value item( Json::objectValue );
+    item["private_key"] = "-----BEGIN KEY-----";
+    item["label"] = "safe";
+    array.append( item );
+    manifest["items"] = array;
+
+    const Json::Value redacted = redactSecrets( manifest );
+    // Original untouched.
+    REQUIRE( manifest["access"]["auth"]["password"].asString() == "hunter2" );
+    // Secrets replaced, non-secrets preserved, structure intact.
+    REQUIRE( redacted["access"]["auth"]["password"].asString() == "[redacted]" );
+    REQUIRE( redacted["access"]["auth"]["remote_identity_token"].asString() == "[redacted]" );
+    REQUIRE( redacted["access"]["auth"]["endpoint"].asString() == "https://example.test" );
+    REQUIRE( redacted["items"][0]["private_key"].asString() == "[redacted]" );
+    REQUIRE( redacted["items"][0]["label"].asString() == "safe" );
+    REQUIRE( redacted["id"].asString() == "org.test.redact" );
+}

@@ -742,6 +742,54 @@ int commandPlugin( QStringList args, const CliIO &io )
         return io.finish( true, "plugin", data, 0 );
     }
 
+    if ( sub == "debug-bundle" )
+    {
+        // Plugin-platform 9.0: one JSON bundle answering "what is this
+        // plugin doing and why is it failing" — manifest, capability
+        // enforcement matrix, quotas, host-process health, typed last
+        // failure, retirement trail and diagnostics. EVERYTHING passes
+        // through secret redaction before it leaves the process.
+        if ( args.isEmpty() )
+        {
+            return io.finish( false, "plugin", {},
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                              {}, "usage: plugin debug-bundle <plugin-id>" );
+        }
+        const std::string pluginId = args.takeFirst().toStdString();
+        const exprs_ns::PluginRecord *record = registry.record( pluginId );
+        if ( !record )
+        {
+            return io.finish( false, "plugin", {},
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency ),
+                              {}, "unknown plugin: " + pluginId );
+        }
+        Json::Value bundle( Json::objectValue );
+        bundle["pluginId"] = pluginId;
+        bundle["state"] = exprs_ns::pluginStateName( record->state );
+        bundle["manifest"] = exprs_ns::redactSecrets( record->manifest.toJson() );
+        Json::Value capabilities( Json::objectValue );
+        capabilities["access"] = exprs_ns::redactSecrets( record->manifest.access );
+        capabilities["enforcementMatrix"] = exprs_ns::pluginCapabilityEnforcementMatrixJson();
+        bundle["capabilities"] = capabilities;
+
+        const Json::Value snapshot =
+            sicnu::plugins::PluginRuntimeHost::instance().hostProcessSnapshot();
+        if ( snapshot.isObject() )
+        {
+            Json::Value health( Json::objectValue );
+            health["protocolVersion"] = snapshot["protocolVersion"];
+            health["restartPolicy"] = snapshot["restartPolicy"];
+            health["session"] = exprs_ns::redactSecrets( snapshot["plugins"][ pluginId ] );
+            health["retiredGroups"] = snapshot["retiredGroups"][ pluginId ];
+            bundle["health"] = health;
+        }
+        Json::Value diagnostics( Json::arrayValue );
+        for ( const auto &item : registry.diagnostics().forPlugin( pluginId ) )
+            diagnostics.append( exprs_ns::redactSecrets( item.toJson() ) );
+        bundle["diagnostics"] = diagnostics;
+        return io.finish( true, "plugin", exprs_ns::redactSecrets( bundle ), 0 );
+    }
+
     if ( sub == "index" )
     {
         // Plugin-platform 9.0: LOCAL/OFFLINE index over the given (or
@@ -1609,7 +1657,7 @@ int commandPlugin( QStringList args, const CliIO &io )
     }
 
     return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                      {}, "usage: plugin list|validate|doctor|test|enable|disable|install|uninstall|inspect ..." );
+                      {}, "usage: plugin list|validate|doctor|test|enable|disable|install|uninstall|inspect|index|debug-bundle ..." );
 }
 
 // ---------------------------------------------------------------------------

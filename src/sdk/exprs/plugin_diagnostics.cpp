@@ -181,4 +181,45 @@ Json::Value PluginDiagnosticLog::toJson() const
     return array;
 }
 
+bool isSecretLikeKey( const std::string &key )
+{
+    // Lowercase once, then substring-match the secret vocabulary. Keys that
+    // merely CONTAIN "token"-like words count too (e.g. "remote_identity_token").
+    std::string lowered;
+    lowered.reserve( key.size() );
+    for ( const char c : key )
+        lowered.push_back( c >= 'A' && c <= 'Z' ? static_cast<char>( c - 'A' + 'a' ) : c );
+    auto contains = [&lowered]( const char *needle ) {
+        return lowered.find( needle ) != std::string::npos;
+    };
+    return contains( "password" ) || contains( "passphrase" ) || contains( "secret" )
+           || contains( "token" ) || contains( "credential" ) || contains( "api_key" )
+           || contains( "api-key" ) || contains( "apikey" ) || contains( "private_key" )
+           || contains( "private-key" );
+}
+
+Json::Value redactSecrets( const Json::Value &value )
+{
+    if ( value.isObject() )
+    {
+        Json::Value redacted( Json::objectValue );
+        for ( const std::string &key : value.getMemberNames() )
+        {
+            if ( isSecretLikeKey( key ) && value[ key ].isString() )
+                redacted[ key ] = "[redacted]";
+            else
+                redacted[ key ] = redactSecrets( value[ key ] );
+        }
+        return redacted;
+    }
+    if ( value.isArray() )
+    {
+        Json::Value redacted( Json::arrayValue );
+        for ( const Json::Value &item : value )
+            redacted.append( redactSecrets( item ) );
+        return redacted;
+    }
+    return value;
+}
+
 } // namespace exprs

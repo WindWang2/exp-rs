@@ -140,4 +140,15 @@ private:
     std::vector<PluginDiagnostic> mItems;
 };
 
+/// Recursively redacts secret-looking values from a JSON tree
+/// (plugin-platform 9.0). A string value whose KEY matches the secret
+/// vocabulary (password/passphrase/secret/token/api[-_]key/credential/
+/// private[-_]key, case-insensitive) is replaced by "[redacted]"; arrays and
+/// nested objects are traversed; the input is never mutated. Used by the
+/// debug bundle and any surface that echoes manifests or logs back to users.
+Json::Value redactSecrets( const Json::Value &value );
+
+/// True when @p key looks like a secret carrier (exposed for tests).
+bool isSecretLikeKey( const std::string &key );
+
 } // namespace exprs
