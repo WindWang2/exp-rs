@@ -45,25 +45,13 @@ Diagnostic wrongThreadDiagnostic()
 }
 
 /// #800 / THREAD AFFINITY CONTRACT (#703): the const readers have no internal
-/// locking either — reading off the owning thread races the mutators'
-/// QVector insert/reallocation and can observe a torn snapshot. The contract
-/// is enforced as a LOUD WARNING rather than an abort (review L P1): known
-/// sanctioned readers still run on JobEngine worker threads today (temporal
-/// operators parse collections via temporal_workspace's findByPath /
-/// temporalCollections reads on the worker), and aborting production jobs in
-/// debug builds would trade a torn-read hazard for a guaranteed crash. The
-/// worker-side readers must migrate to submission-time snapshots
-/// (task_center's #726 pattern); until then this warning marks every
-/// off-affinity read.
-void checkReaderAffinity( const QObject *manager )
-{
-  if ( QThread::currentThread() == manager->thread() )
-    return;
-  qWarning( "DataManager: const accessor called from thread %p off the "
-            "manager's owning thread %p (torn-read hazard, #703/#800)",
-            static_cast<const void *>( QThread::currentThread() ),
-            static_cast<const void *>( manager->thread() ) );
-}
+/// Reader affinity contract, superseded 9.0 (M2, #852 contract-ized): const
+/// readers are served exclusively from the immutable CatalogSnapshot
+/// published atomically on mutations, so they are worker-safe by design —
+/// the previous off-affinity LOUD WARNING marked the very reads the
+/// snapshot contract now sanctions (JobEngine workers parsing temporal
+/// collections). Mutations remain strictly owner-affine and keep their
+/// wrong_thread diagnostics enforcement.
 
 /// Builds the diagnostics for refusing to remove a leased asset, shared by
 /// unload() and reap(). `codePrefix` selects the per-operation code
@@ -775,7 +763,6 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
 
 std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const
 {
-  checkReaderAffinity( this );
   const auto snap = m_impl->getSnapshot();
   if ( !snap )
     return std::nullopt;
@@ -789,7 +776,6 @@ std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const
 
 QVector<AssetSnapshot> DataManager::assets( const AssetQuery &query ) const
 {
-  checkReaderAffinity( this );
   const auto snap = m_impl->getSnapshot();
   if ( !snap )
     return {};
@@ -811,7 +797,6 @@ QVector<AssetSnapshot> DataManager::assets( const AssetQuery &query ) const
 
 std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) const
 {
-  checkReaderAffinity( this );
   if ( path.trimmed().isEmpty() )
     return std::nullopt;
 
@@ -865,14 +850,12 @@ std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) cons
 
 quint64 DataManager::catalogGeneration() const
 {
-  checkReaderAffinity( this );
   const auto snap = m_impl->getSnapshot();
   return snap ? snap->generation : m_impl->catalogGeneration;
 }
 
 std::optional<DerivationRecord> DataManager::provenance( AssetId id ) const
 {
-  checkReaderAffinity( this );
   const auto snap = m_impl->getSnapshot();
   if ( !snap )
     return std::nullopt;
@@ -886,7 +869,6 @@ std::optional<DerivationRecord> DataManager::provenance( AssetId id ) const
 
 QVector<AssetId> DataManager::derivedFrom( AssetId id ) const
 {
-  checkReaderAffinity( this );
   QVector<AssetId> result;
   const auto snap = m_impl->getSnapshot();
   if ( !snap )
@@ -903,7 +885,6 @@ QVector<AssetId> DataManager::derivedFrom( AssetId id ) const
 
 QVector<AssetId> DataManager::derivedOutputsOf( AssetId id ) const
 {
-  checkReaderAffinity( this );
   QVector<AssetId> result;
   const auto snap = m_impl->getSnapshot();
   if ( !snap )
@@ -926,7 +907,6 @@ QVector<AssetId> DataManager::derivedOutputsOf( AssetId id ) const
 
 QVector<AssetId> DataManager::derivedOutputsOfCollection( CollectionId id ) const
 {
-  checkReaderAffinity( this );
   QVector<AssetId> result;
   const auto snap = m_impl->getSnapshot();
   if ( !snap )
@@ -1167,7 +1147,6 @@ Result<void> DataManager::rollbackEdit( AssetId id )
 
 int DataManager::leaseCount( AssetId id ) const
 {
-  checkReaderAffinity( this );
   return static_cast<int>(
     std::count_if( m_impl->leases.begin(), m_impl->leases.end(),
                    [&]( const Impl::LeaseRecord &lease ) {
@@ -1178,7 +1157,6 @@ int DataManager::leaseCount( AssetId id ) const
 
 QVector<LeaseRef> DataManager::leases( AssetId id ) const
 {
-  checkReaderAffinity( this );
   QVector<LeaseRef> result;
   for ( const Impl::LeaseRecord &lease : m_impl->leases )
   {
@@ -1194,7 +1172,6 @@ QVector<LeaseRef> DataManager::leases( AssetId id ) const
 
 bool DataManager::hasActiveEditLease( AssetId id ) const
 {
-  checkReaderAffinity( this );
   for ( const Impl::LeaseRecord &lease : m_impl->leases )
   {
     if ( lease.control->assetId == id && lease.control->active &&
@@ -1206,7 +1183,6 @@ bool DataManager::hasActiveEditLease( AssetId id ) const
 
 UnloadPlan DataManager::planUnload( AssetId id ) const
 {
-  checkReaderAffinity( this );
   AssetRevision revision;
   const auto recordIt = m_impl->findRecord( id );
   if ( recordIt != m_impl->records.end() )
@@ -2225,7 +2201,6 @@ DataManager::restoreTemporalCollection( CollectionId id, quint64 revision,
 
 std::optional<TemporalCollectionRecord> DataManager::temporalCollection( CollectionId id ) const
 {
-  checkReaderAffinity( this );
   const auto snap = m_impl->getSnapshot();
   if ( !snap )
     return std::nullopt;
@@ -2246,7 +2221,6 @@ std::optional<TemporalCollectionRecord> DataManager::temporalCollection( Collect
 
 QVector<TemporalCollectionRecord> DataManager::temporalCollections() const
 {
-  checkReaderAffinity( this );
   const auto snap = m_impl->getSnapshot();
   if ( !snap )
     return {};
