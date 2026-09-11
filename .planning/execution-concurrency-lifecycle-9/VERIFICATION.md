@@ -65,6 +65,12 @@ ninja -C build -j4 test_task_center test_job_engine test_worker_host \
   范围限定 execution 相关套件；结果回填（或如实声明未完成——全树 sanitizer 重编译
   3160 targets，与 10 个并行 track 共享主机时成本过高）。
 
+## 合并 master 后的回归（2026-09-12，merge origin/master = f316dfdbb4）
+
+冲突三文件（task_center.cpp、workflow_run_coordinator.{h,cpp}）保留本分支根因方案、
+弃用 master band-aid（见 ISSUE_TRIAGE 更新节）；合并后全量重跑：
+382+446+174+50+103+**865**+2152+67+267+56 assertions 全绿。
+
 ## 未运行 / 环境不支持（如实声明）
 
 - Windows Job Object 分支：本机 Linux，编译级审查（沿 8.0 声明）。

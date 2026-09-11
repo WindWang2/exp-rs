@@ -73,6 +73,19 @@
 | #873 contracts +Inf 除数 | processing/contracts | out-of-scope |
 | #874 raster reader 相等比较 | geospatial | out-of-scope |
 
+## 2026-09-12 更新：origin/master 的 f316dfdbb4（#853-#882 批量修复）与本分支的关系
+
+master 合入了针对 #860/#862/#876 的 **band-aid** 修复（recursive_mutex 全量转换、
+TaskCenter 准入 +1 worker 宽限、waitForTask 返回空对象），无任何并发回归测试。
+本分支已 merge origin/master 并对三个冲突文件保留根因方案：
+- recursive_mutex（掩盖持锁 emit 的锁序违例）→ 通知队列 drain（消除持锁 emit 本身，
+  评审 A 确认无残留）；#860 的"重入安全"不再依赖递归锁语义。
+- +1 worker 宽限（仅覆盖当前提交线程的 pass；多父阻塞/优先级遮蔽仍死锁）→
+  结构化 transient bypass（有界 8、双边取消、join 规则）。
+- waitForTask 返回空对象（伪造记录，丢失 not-found/not-done 区分）→
+  返回当前真实快照 + trace。
+本分支的确定性回归（旧代码必失败）是这三个 issue 唯一的测试覆盖。
+
 ## 关闭映射（PR 中逐条引用）
 
 - #851/#852/#848/#849/#850 → fixed-by 8f6293bceb（随本 PR 进入远端）。
