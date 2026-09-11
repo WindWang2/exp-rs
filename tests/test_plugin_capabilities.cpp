@@ -127,7 +127,7 @@ TEST_CASE( "quota manifest parsing warns on junk and keeps ceilings for clamping
     quotas["maxRequestConcurrency"] = 32;       // above ceiling -> clamped
     quotas["maxResponseBytes"] = Json::Value( Json::Int64( 1024 ) * 1024 * 1024 ); // above ceiling -> clamped
     quotas["requestDeadlineMs"] = 60000;        // legal, below default ceiling
-    quotas["workerMemoryBytes"] = Json::Value( Json::Int64( 512 ) * 1024 * 1024 );
+    quotas["workerMemoryBytes"] = static_cast<Json::Int64>( 512LL * 1024LL * 1024LL );
     quotas["workerCpuRatePercent"] = 50;
     quotas["maxChildProcesses"] = 2;
     quotas["gpuHint"] = "cuda";

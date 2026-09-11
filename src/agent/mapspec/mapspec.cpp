@@ -2,6 +2,7 @@
 #include "mapspec.h"
 
 #include "mapspec_conditions.h"
+#include "../cartography/typography.h"
 #include "../contracts/spatial_contracts.h"
 
 #include <QtGlobal>
@@ -124,6 +125,66 @@ void checkV2ItemFields( const Json::Value &item, const std::string &id,
     problems.push_back( id + ": page must be a non-negative integer index" );
   if ( item.isMember( "binding" ) && !item["binding"].isObject() )
     problems.push_back( id + ": binding must be an object" );
+  // Platform 8.0: declared typography surface on the font block.
+  if ( item.isMember( "font" ) && item["font"].isObject() )
+  {
+    const Json::Value &font = item["font"];
+    if ( font.isMember( "break_policy" ) &&
+         ( !font["break_policy"].isString() ||
+           !sicnu::agent::cartography::isTextBreakPolicy( font["break_policy"].asString() ) ) )
+      problems.push_back( id + ": font.break_policy must be none|halfwidth" );
+    if ( font.isMember( "line_height" ) &&
+         ( !font["line_height"].isNumeric() || font["line_height"].asDouble() <= 0 ||
+           font["line_height"].asDouble() > 3.0 ) )
+      problems.push_back( id + ": font.line_height must be a number in (0, 3]" );
+  }
+  // Platform 8.0: typed binding surface. Shape-checked, not key-closed —
+  // the goal is better diagnostics for malformed documents without breaking
+  // shipped templates (charts carry mode/data/matrix here too).
+  if ( item.isMember( "binding" ) && item["binding"].isObject() )
+  {
+    const Json::Value &binding = item["binding"];
+    if ( binding.isMember( "mode" ) &&
+         ( !binding["mode"].isString() || binding["mode"].asString().empty() ) )
+      problems.push_back( id + ": binding.mode must be a non-empty string" );
+    for ( const char *member :
+          { "layer", "field", "expression", "x_expression", "y_expression", "filter" } )
+      if ( binding.isMember( member ) && !binding[member].isString() )
+        problems.push_back( id + ": binding." + member + " must be a string" );
+    if ( binding.isMember( "params" ) && !binding["params"].isObject() )
+      problems.push_back( id + ": binding.params must be an object" );
+    if ( binding.isMember( "data" ) )
+    {
+      if ( !binding["data"].isArray() )
+        problems.push_back( id + ": binding.data must be an array" );
+      else if ( static_cast<int>( binding["data"].size() ) > 256 )
+        problems.push_back( id + ": binding.data exceeds the 256 entry budget" );
+    }
+    if ( binding.isMember( "matrix" ) )
+    {
+      const Json::Value &matrix = binding["matrix"];
+      if ( !matrix.isObject() || !matrix.isMember( "labels" ) || !matrix["labels"].isArray() ||
+           !matrix.isMember( "rows" ) || !matrix["rows"].isArray() )
+        problems.push_back( id + ": binding.matrix must be {labels: [n], rows: [n][n]}" );
+      else
+      {
+        const int n = static_cast<int>( matrix["labels"].size() );
+        if ( n > 24 )
+          problems.push_back( id + ": binding.matrix exceeds the 24x24 budget" );
+        else if ( static_cast<int>( matrix["rows"].size() ) != n )
+          problems.push_back( id + ": binding.matrix must be square (rows == labels)" );
+        else
+        {
+          for ( const auto &row : matrix["rows"] )
+            if ( !row.isArray() || static_cast<int>( row.size() ) != n )
+            {
+              problems.push_back( id + ": binding.matrix rows must all carry n entries" );
+              break;
+            }
+        }
+      }
+    }
+  }
   // Platform 6.0 (Milestone C): bounded composite children grammar. Items
   // carry role-qualified blocks materialized from composite components;
   // depth-1, unique roles, small budget — furniture structure, not UI trees.
@@ -234,6 +295,30 @@ void checkV3ItemFields( const Json::Value &item, const std::string &id, const st
           problems.push_back( id + ": locator." + member + " must be positive" );
       if ( locator.isMember( "label" ) && !locator["label"].isString() )
         problems.push_back( id + ": locator.label must be a string" );
+      // Platform 8.0 connector graphics: presence of the (possibly empty)
+      // connector object enables the inset↔target relationship line.
+      if ( locator.isMember( "connector" ) )
+      {
+        if ( !locator["connector"].isObject() )
+          problems.push_back( id + ": locator.connector must be an object" );
+        else
+        {
+          const Json::Value &connector = locator["connector"];
+          if ( connector.isMember( "style" ) )
+          {
+            const std::string style =
+              connector["style"].isString() ? connector["style"].asString() : "";
+            if ( style != "solid" && style != "dash" )
+              problems.push_back( id + ": locator.connector.style must be solid|dash" );
+          }
+          if ( connector.isMember( "stroke_mm" ) &&
+               ( !connector["stroke_mm"].isNumeric() || connector["stroke_mm"].asDouble() <= 0 ||
+                 connector["stroke_mm"].asDouble() > 5.0 ) )
+            problems.push_back( id + ": locator.connector.stroke_mm must be positive (≤ 5 mm)" );
+          if ( connector.isMember( "color" ) && !connector["color"].isString() )
+            problems.push_back( id + ": locator.connector.color must be a string" );
+        }
+      }
     }
   }
 }
@@ -429,6 +514,42 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
        spec["layout_name"].asString().empty() )
     problems.push_back( "missing non-empty string field 'layout_name'" );
 
+  // Platform 8.0 (v5): output declarations. Validation-only surface —
+  // compilation never auto-exports; cartography:compose and the harness map
+  // confirmation surface the declaration so the delivery contract is explicit.
+  if ( spec.isMember( "output" ) )
+  {
+    const Json::Value &output = spec["output"];
+    if ( !output.isObject() )
+      problems.push_back( "output must be an object" );
+    else
+    {
+      if ( output.isMember( "formats" ) )
+      {
+        if ( !output["formats"].isArray() || output["formats"].empty() )
+          problems.push_back( "output.formats must be a non-empty array" );
+        else
+        {
+          if ( static_cast<int>( output["formats"].size() ) > 8 )
+            problems.push_back( "output.formats exceeds the 8 entry budget" );
+          for ( const auto &format : output["formats"] )
+          {
+            if ( !format.isString() ||
+                 ( format.asString() != "png" && format.asString() != "pdf" ) )
+              problems.push_back( "output.formats entries must be \"png\" or \"pdf\"" );
+          }
+        }
+      }
+      if ( output.isMember( "dpi" ) &&
+           ( !output["dpi"].isNumeric() || output["dpi"].asDouble() < 72.0 ||
+             output["dpi"].asDouble() > 1200.0 ) )
+        problems.push_back( "output.dpi must be a number in [72, 1200]" );
+      if ( output.isMember( "dir" ) &&
+           ( !output["dir"].isString() || output["dir"].asString().empty() ) )
+        problems.push_back( "output.dir must be a non-empty string" );
+    }
+  }
+
   double pageW = 0.0;
   double pageH = 0.0;
   if ( !spec.isMember( "page" ) || !spec["page"].isObject() ||
@@ -528,6 +649,18 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
            ( !item.isMember( "chart" ) || !item["chart"].isObject() ) )
         problems.push_back( id + ": chart needs a 'chart' object" );
 
+      // Platform 8.0: NoData legend declaration shape (label/color strings).
+      if ( std::string( info->name ) == "legends" && item.isMember( "nodata" ) )
+      {
+        if ( !item["nodata"].isObject() )
+          problems.push_back( id + ": nodata must be an object" );
+        else
+        {
+          for ( const char *member : { "label", "color" } )
+            if ( item["nodata"].isMember( member ) && !item["nodata"][member].isString() )
+              problems.push_back( id + ": nodata." + member + " must be a string" );
+        }
+      }
       // v2 composition fields.
       checkV2ItemFields( item, id, problems );
       // v3 knowledge-platform fields.

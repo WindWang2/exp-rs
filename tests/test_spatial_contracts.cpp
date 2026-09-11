@@ -81,6 +81,62 @@ TEST_CASE( "DatasetUnderstanding adapts raster inspection output", "[agent][cont
   CHECK_FALSE( validateDatasetUnderstanding( incomplete ).empty() );
 }
 
+TEST_CASE( "DatasetUnderstanding keeps product facts in separate typed slots "
+           "(Harness 8.0 typed context 2.0)",
+           "[agent][contracts][context8]" )
+{
+  // Failing-before: the 7.0 builder folded every SICNU_* key into
+  // "radiometric_state" — the last present key won, so spacecraft and
+  // acquisition date clobbered the radiometric state.
+  Json::Value inspect = sampleRasterInspect();
+  inspect["SICNU_PRODUCT_TYPE"] = "S2MSI2A";
+  inspect["SICNU_SPACECRAFT"] = "SENTINEL-2";
+  inspect["SICNU_ACQUISITION_DATE"] = "2026-08-01T10:30:00Z";
+  inspect["SICNU_PROCESSING_LEVEL"] = "L2A";
+  inspect["SICNU_PRODUCT_ID"] = "S2A_MSIL2A_20260801";
+
+  const Json::Value doc = datasetUnderstandingFromRasterInspect( inspect );
+  CHECK( validateDatasetUnderstanding( doc ).empty() );
+  CHECK( doc["radiometric_state"].asString() == "surface_reflectance" );
+  CHECK( doc["sensor"].asString() == "SENTINEL-2" );
+  CHECK( doc["product_type"].asString() == "S2MSI2A" );
+  CHECK( doc["processing_level"].asString() == "L2A" );
+  CHECK( doc["product_id"].asString() == "S2A_MSIL2A_20260801" );
+  CHECK( doc["acquisition_time"].asString() == "2026-08-01T10:30:00Z" );
+
+  // Bounded product-metadata passthrough (orbit facts ride here as
+  // importers add them) carries every SICNU_* key.
+  CHECK( doc["product_metadata"].isMember( "SICNU_SPACECRAFT" ) );
+  CHECK( doc["product_metadata"].isMember( "SICNU_ACQUISITION_DATE" ) );
+
+  // NoData and quality/mask slots are typed, sparse, and validated.
+  inspect["bands"][3]["nodata"] = -9999.0;
+  inspect["bands"][3]["index"] = 4;
+  Json::Value maskBand( Json::objectValue );
+  maskBand["index"] = 5;
+  maskBand["role"] = "cloud";
+  inspect["bands"].append( maskBand );
+  const Json::Value masked = datasetUnderstandingFromRasterInspect( inspect );
+  REQUIRE( masked["nodata"].size() == 1 );
+  CHECK( masked["nodata"][0]["band"].asInt() == 4 );
+  CHECK( masked["nodata"][0]["nodata"].asDouble() == -9999.0 );
+  REQUIRE( masked["quality_masks"].size() == 1 );
+  CHECK( masked["quality_masks"][0]["role"].asString() == "cloud" );
+  CHECK( validateDatasetUnderstanding( masked ).empty() );
+
+  // Spectral-only scenes carry no empty mask/nodata noise.
+  CHECK_FALSE( doc.isMember( "nodata" ) );
+  CHECK_FALSE( doc.isMember( "quality_masks" ) );
+
+  // Shape violations are caught by the validator.
+  Json::Value malformed = doc;
+  malformed["nodata"] = "not-an-array";
+  CHECK_FALSE( validateDatasetUnderstanding( malformed ).empty() );
+  malformed = doc;
+  malformed["sensor"] = 42;
+  CHECK_FALSE( validateDatasetUnderstanding( malformed ).empty() );
+}
+
 TEST_CASE( "CapabilityCandidate validates compatibility bounds", "[agent][contracts]" )
 {
   const Json::Value candidate = makeCapabilityCandidate(

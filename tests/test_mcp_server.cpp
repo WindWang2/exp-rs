@@ -30,7 +30,10 @@
 #include "processing/providers/qgis_algorithms/provider.h"
 #include "processing/providers/gdal_tools/provider.h"
 #include "processing/providers/otb_tools/provider.h"
+#include <QCoreApplication>
 #include <QTemporaryDir>
+#include "dataset/dataset_types.h"
+#include "experiment/experiment_store.h"
 #include <QThread>
 #include <QTimer>
 #include <gdal_priv.h>
@@ -1009,6 +1012,125 @@ TEST_CASE( "McpServer run_workflow executes agent-generated pipelines", "[agent]
     try
     {
         server.testGetWorkflowStatus( 999999 );
+    }
+    catch ( const std::runtime_error & )
+    {
+        threw = true;
+    }
+    CHECK( threw );
+}
+
+TEST_CASE( "McpServer run_workflow opt-in experiment recording records the run",
+           "[agent][mcp][workflow][mlops8]" )
+{
+    registerNoopOperator();
+    // Queued lifecycle delivery needs a QCoreApplication (event queue).
+    int appArgc = 1;
+    static char appArg0[] = "test_mcp_server";
+    static char *appArgv[] = { appArg0, nullptr };
+    if ( !QCoreApplication::instance() )
+        new QCoreApplication( appArgc, appArgv );
+    TestMcpServer server;
+
+    QTemporaryDir storeDir;
+    const QString experimentDb = storeDir.filePath( QStringLiteral( "exp.db" ) );
+    const QString experimentId = QStringLiteral( "aaaaaaaa-0000-4000-8000-0000000m1001" );
+
+    QVariantMap args;
+    args[QStringLiteral( "pipeline" )] = QStringLiteral( R"({
+        "id": "recorded_pipeline",
+        "name": "recorded noop chain",
+        "steps": [
+            {"id": "s1", "title": "first", "operator": "rs:mcp_noop", "params": {}}
+        ]
+    })" );
+    args[QStringLiteral( "experiment_db" )] = experimentDb;
+    args[QStringLiteral( "experiment_id" )] = experimentId;
+    args[QStringLiteral( "experiment_name" )] = QStringLiteral( "mcp recording" );
+
+    const QVariantMap submitted = server.testRunWorkflow( args );
+    const long pipelineId = submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong();
+    REQUIRE( pipelineId >= 0 );
+    // The submission response carries the experiment run id (recorded
+    // synchronously with the submission).
+    const QString experimentRunId =
+        submitted.value( QStringLiteral( "experiment_run_id" ) ).toString();
+    REQUIRE( !experimentRunId.isEmpty() );
+
+    bool completed = false;
+    for ( int attempt = 0; attempt < 600; ++attempt )
+    {
+        const QVariantMap status = server.testGetWorkflowStatus( pipelineId );
+        if ( status.value( QStringLiteral( "isCompleted" ) ).toBool()
+             || status.value( QStringLiteral( "isFailed" ) ).toBool() )
+        {
+            completed = true;
+            break;
+        }
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+    REQUIRE( completed );
+    // The coordinator's fold finalizes (and emits) slightly AFTER TaskCenter
+    // reports completion: wait until the recorded run leaves Running.
+    sicnu::experiment::ExperimentStore store;
+    REQUIRE( store.open( experimentDb ) );
+    bool recorded_terminal = false;
+    for ( int attempt = 0; attempt < 600; ++attempt )
+    {
+        server.flushExperimentRecording();
+        const auto recorded = store.runById( experimentRunId );
+        if ( recorded && recorded->status() != sicnu::dataset::RunStatus::Running )
+        {
+            recorded_terminal = true;
+            break;
+        }
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+    REQUIRE( recorded_terminal );
+
+    const auto run = store.runById( experimentRunId );
+    REQUIRE( run.has_value() );
+    REQUIRE( run->status() == sicnu::dataset::RunStatus::Completed );
+    CHECK( run->algorithmId() == QStringLiteral( "recorded_pipeline" ) );
+    CHECK( !run->executionRef().isEmpty() );
+}
+
+TEST_CASE( "McpServer run_workflow recording requires experiment_id and valid seed",
+           "[agent][mcp][workflow][mlops8]" )
+{
+    registerNoopOperator();
+    TestMcpServer server;
+
+    QTemporaryDir storeDir;
+    QVariantMap args;
+    args[QStringLiteral( "pipeline" )] = QStringLiteral( R"({
+        "id": "refused_pipeline",
+        "steps": [
+            {"id": "s1", "title": "first", "operator": "rs:mcp_noop", "params": {}}
+        ]
+    })" );
+    args[QStringLiteral( "experiment_db" )] = storeDir.filePath( QStringLiteral( "exp.db" ) );
+
+    // experiment_db without experiment_id is a typed refusal.
+    bool threw = false;
+    try
+    {
+        server.testRunWorkflow( args );
+    }
+    catch ( const std::runtime_error & )
+    {
+        threw = true;
+    }
+    CHECK( threw );
+
+    // A malformed seed pin is refused, never silently dropped.
+    args[QStringLiteral( "experiment_id" )] =
+        QStringLiteral( "aaaaaaaa-0000-4000-8000-0000000m1002" );
+    args[QStringLiteral( "seed" )] = -5;
+    threw = false;
+    try
+    {
+        server.testRunWorkflow( args );
     }
     catch ( const std::runtime_error & )
     {

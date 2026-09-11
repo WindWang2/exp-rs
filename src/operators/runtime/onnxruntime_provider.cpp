@@ -138,7 +138,11 @@ class OnnxRuntimeSession final : public IModelRuntime
           // cache key was built from it). When the CUDA EP or the index is
           // unavailable ORT throws here and we surface the failure instead of
           // silently running on another device.
-          options.AppendExecutionProvider_CUDA( m_cudaIndex );
+          // The C++ API takes the options struct (the int convenience
+          // overload predates ORT 1.20 and no longer exists).
+          OrtCUDAProviderOptions cudaOptions{};
+          cudaOptions.device_id = m_cudaIndex;
+          options.AppendExecutionProvider_CUDA( cudaOptions );
         }
         m_session = std::make_unique<Ort::Session>( *m_env, m_artifactPath.c_str(), options );
       }
@@ -169,6 +173,27 @@ class OnnxRuntimeSession final : public IModelRuntime
     cv::Mat infer( const cv::Mat &nchwBlob ) override
     {
       return inferMatMulti( { NamedBlob{ std::string(), nchwBlob } } ).at( 0 );
+    }
+
+    /// Named-head selection for the cv::Mat path: requests EXACTLY the named
+    /// output from ORT. The default implementation ignores the name (correct
+    /// for single-head runtimes); a multi-head ORT graph whose additional
+    /// heads are not rank-4 would fail the whole forward — so the selection
+    /// is pushed down into the request (Platform 8.0, real-lane finding).
+    cv::Mat infer( const cv::Mat &nchwBlob, const std::string &outputName ) override
+    {
+      if ( outputName.empty() )
+        return infer( nchwBlob );
+      const std::vector<NamedTensor> outs = inferNamed(
+        { NamedTensor{ std::string(), TensorBlob::fromMat( nchwBlob ) } }, { outputName } );
+      if ( outs.size() != 1 )
+        throw std::runtime_error( "ONNX Runtime returned " + std::to_string( outs.size() )
+                                  + " outputs for head '" + outputName + "'" );
+      if ( outs.front().second.rank() != 4 )
+        throw std::runtime_error( "ONNX Runtime output '" + outputName
+                                  + "' is not 4-D NCHW (the cv::Mat path carries rank-4; use "
+                                    "inferNamed for N-D heads)" );
+      return outs.front().second.toMat();
     }
 
     bool supportsMultiInput() const override { return true; }
@@ -238,37 +263,43 @@ class OnnxRuntimeSession final : public IModelRuntime
         ( void )elemType; // consumed through the CreateTensor dtype overloads below
         memoryInfos.push_back( Ort::MemoryInfo::CreateCpu( OrtAllocatorType::OrtArenaAllocator,
                                                            OrtMemType::OrtMemTypeDefault ) );
+        // ORT 1.20 removed the const-T* CreateTensor overload: input tensor
+        // buffers must be handed over as mutable pointers even though the
+        // session only READS them during Run (API contract: the caller may
+        // not mutate them either while the value is alive). blob bytes are
+        // non-const at the ownership level; the const_cast restores the
+        // pointer type ORT demands without copying the payload.
         const std::vector<std::int64_t> &shape = blob.shape;
         switch ( blob.dtype )
         {
           case TensorDType::Float32:
             inputValues.push_back( Ort::Value::CreateTensor<float>(
-              memoryInfos.back(), reinterpret_cast<float *>( blob.bytes.data() ),
+              memoryInfos.back(), reinterpret_cast<float *>( const_cast<std::uint8_t *>( blob.bytes.data() ) ),
               blob.elementCount(), shape.data(), shape.size() ) );
             break;
           case TensorDType::Float64:
             inputValues.push_back( Ort::Value::CreateTensor<double>(
-              memoryInfos.back(), reinterpret_cast<double *>( blob.bytes.data() ),
+              memoryInfos.back(), reinterpret_cast<double *>( const_cast<std::uint8_t *>( blob.bytes.data() ) ),
               blob.elementCount(), shape.data(), shape.size() ) );
             break;
           case TensorDType::Int32:
             inputValues.push_back( Ort::Value::CreateTensor<std::int32_t>(
-              memoryInfos.back(), reinterpret_cast<std::int32_t *>( blob.bytes.data() ),
+              memoryInfos.back(), reinterpret_cast<std::int32_t *>( const_cast<std::uint8_t *>( blob.bytes.data() ) ),
               blob.elementCount(), shape.data(), shape.size() ) );
             break;
           case TensorDType::Int64:
             inputValues.push_back( Ort::Value::CreateTensor<std::int64_t>(
-              memoryInfos.back(), reinterpret_cast<std::int64_t *>( blob.bytes.data() ),
+              memoryInfos.back(), reinterpret_cast<std::int64_t *>( const_cast<std::uint8_t *>( blob.bytes.data() ) ),
               blob.elementCount(), shape.data(), shape.size() ) );
             break;
           case TensorDType::UInt8:
             inputValues.push_back( Ort::Value::CreateTensor<std::uint8_t>(
-              memoryInfos.back(), blob.bytes.data(), blob.elementCount(), shape.data(),
-              shape.size() ) );
+              memoryInfos.back(), const_cast<std::uint8_t *>( blob.bytes.data() ),
+              blob.elementCount(), shape.data(), shape.size() ) );
             break;
           case TensorDType::Int8:
             inputValues.push_back( Ort::Value::CreateTensor<std::int8_t>(
-              memoryInfos.back(), reinterpret_cast<std::int8_t *>( blob.bytes.data() ),
+              memoryInfos.back(), reinterpret_cast<std::int8_t *>( const_cast<std::uint8_t *>( blob.bytes.data() ) ),
               blob.elementCount(), shape.data(), shape.size() ) );
             break;
           case TensorDType::Float16:
@@ -410,8 +441,12 @@ class OnnxRuntimeSession final : public IModelRuntime
           std::vector<std::int64_t> dims;
           try
           {
-            const auto shapeInfo =
-              m_session->GetInputTypeInfo( i ).GetTensorTypeAndShapeInfo();
+            // TypeInfo MUST outlive the shape view: GetTensorTypeAndShapeInfo
+            // on a TypeInfo returns an UNOWNED view, and chaining it off the
+            // temporary destroyed the type info before GetShape() ran (a
+            // latent 7.0 bug this 8.0 real-lane work surfaced).
+            const Ort::TypeInfo typeInfo = m_session->GetInputTypeInfo( i );
+            const auto shapeInfo = typeInfo.GetTensorTypeAndShapeInfo();
             for ( const auto d : shapeInfo.GetShape() )
               dims.push_back( d > 0 ? d : 1 );
           }

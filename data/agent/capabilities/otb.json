@@ -1,0 +1,52 @@
+[
+  {
+    "id": "family:otb",
+    "kind": "family_default",
+    "family": "otb",
+    "modality": ["optical", "sar", "thermal"],
+    "resource": { "cost_class": "heavy", "large_raster_safe": true },
+    "side_effects": true,
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "crs_present", "dimensions", "finite_fraction"]
+    },
+    "limitations": [
+      "Executed through the external OTB process provider; availability depends on the installed OTB application",
+      "Parameter names/units follow OTB conventions — verify against the provider schema before scripting"
+    ]
+  },
+  {
+    "id": "otb:meanshift_segmentation",
+    "family": "otb",
+    "extends": "family:otb",
+    "artifacts": { "output": { "kind": "vector" } },
+    "verification": {
+      "expected_kind": "vector",
+      "checks": ["existence", "opens", "feature_count"]
+    }
+  },
+  {
+    "id": "otb:bundle_to_perfect_sensor",
+    "family": "otb",
+    "extends": "family:otb",
+    "intents": ["preprocess"],
+    "modality": ["optical"]
+  },
+  {
+    "id": "otb:compute_images_statistics",
+    "family": "otb",
+    "extends": "family:otb",
+    "resource": { "cost_class": "light", "large_raster_safe": true }
+  },
+  {
+    "id": "otb:svm_classification",
+    "family": "otb",
+    "extends": "family:otb",
+    "intents": ["classify"],
+    "modality": ["optical", "sar", "thermal"],
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "dimensions", "class_domain"]
+    }
+  }
+]

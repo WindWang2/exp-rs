@@ -131,12 +131,21 @@ rendering something wrong.
 
 ### NoData
 
-`raster.nodata: {value?: number, transparent?: bool, label?: string}` —
-the declared NoData sentinel travels with the style and is validated.
-**Wiring**: `style:apply` does not yet push `nodata` into the QGIS renderer
-(design-system limitation, documented honestly): QGIS-native NoData stays
-configured through the symbology tools. The declarative block is the
-catalog's knowledge surface; renderer wiring is future work.
+`raster.nodata: {value?: number, transparent?: bool, label?: string,
+color?: string}` — the declared NoData sentinel travels with the style,
+is validated, and — since Platform 8.0 — is **applied by `style:apply`**:
+
+- `value` becomes a provider user-nodata range on the declared band
+  (`QgsRasterDataProvider::setUserNoDataValue`), the exact mechanism QGIS
+  uses to treat those pixels as NoData (transparent by default);
+- `transparent: false` shades NoData pixels through
+  `QgsRasterRenderer::setNodataColor` with `color` (default black);
+  a re-apply with `transparent: true` resets the shading (idempotent);
+- `label` remains legend/preflight knowledge (`MAP_NODATA_LEGEND`),
+  never a renderer input.
+
+One-way compilation otherwise still holds: hand edits after apply are not
+tracked back into the StyleSpec.
 
 ### Uncertainty declaration
 

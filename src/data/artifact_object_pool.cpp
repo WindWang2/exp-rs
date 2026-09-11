@@ -176,6 +176,43 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
     return object;
 }
 
+std::optional<PoolObject> ArtifactObjectPool::objectByDigest( const QString &digestHex )
+{
+    if ( !m_enabled || digestHex.isEmpty() )
+        return std::nullopt;
+    // A digest is 64 lowercase hex characters; anything else (including a
+    // path-traversal attempt through a caller-supplied string) is refused
+    // before it ever reaches the filesystem.
+    if ( digestHex.size() != 64 )
+        return std::nullopt;
+    for ( const QChar ch : digestHex )
+    {
+        const bool hex = ( ch >= QLatin1Char( '0' ) && ch <= QLatin1Char( '9' ) )
+                         || ( ch >= QLatin1Char( 'a' ) && ch <= QLatin1Char( 'f' ) );
+        if ( !hex )
+            return std::nullopt;
+    }
+    const QString objectPath = m_objectsDir + QLatin1Char( '/' )
+                               + digestPrefixDir( digestHex ) + QLatin1Char( '/' ) + digestHex;
+    const QFileInfo info( objectPath );
+    if ( !info.isFile() || info.size() <= 0 )
+        return std::nullopt;
+    // Serve only verified bytes: the address claims content, the bytes must
+    // prove it (mirrors lookupExecution's per-object re-verification).
+    QString digestError;
+    const QString actual = artifactContentDigest( objectPath, &digestError );
+    if ( !digestError.isEmpty() || actual != digestHex )
+        return std::nullopt;
+    PoolObject object;
+    object.originalPath = QString(); // unknown: content-addressed, not run-addressed
+    object.digest = digestHex;
+    object.poolPath = objectPath;
+    object.size = info.size();
+    object.msecs = info.lastModified().toMSecsSinceEpoch();
+    object.declared = false;
+    return object;
+}
+
 bool ArtifactObjectPool::recordExecution( const QString &fingerprintHex,
                                           const PoolExecution &execution )
 {

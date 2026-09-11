@@ -45,9 +45,12 @@ digest. Declaring `artifact.checksum` additionally *enforces* the digest
 - `artifact`: `path` (manifest-dir relative or absolute), `checksum`
   (`sha256:<hex>` or bare hex), `size_bytes` (0 = unchecked).
 - `input` (v2) / `inputs` (v3 array): `name`, `data_type`, `dtype`, `layout`
-  (NCHW executed; others rejected), `band_roles`, `width`, `height` (fixed
-  graph input), `temporal_length`, `temporal_collapse` (`channels` only;
-  T-frame execution is not wired and fails loudly at run).
+  (NCHW for raster feeds; `NCTHW` is required for `temporal_collapse:
+  "sequence"`), `band_roles`, `width`, `height` (fixed graph input),
+  `temporal_length`, `temporal_collapse` (`channels` — the 7.0
+  `N,(T·C),H,W` fold — or `sequence` — the 8.0 explicit time axis
+  `N,(T),C,H,W`), `temporal_dynamic` (8.0: the feed defines T; requires
+  `sequence`). See [platform-8](../inference/platform-8.md).
 - `preprocess`: `normalize` (`none` | `linear` | `mean_std`), `mean`, `std`,
   `scale` (linear/mean_std only), `resize` (`none` | `to_input`), `interpolation`
   (`bilinear` | `nearest`), `nodata_policy` (`zero` only).
@@ -56,7 +59,9 @@ digest. Declaring `artifact.checksum` additionally *enforces* the digest
 - `output`: `type`, `tensor_names`, `classes`, `uncertainty`
   (`none` | `entropy` | `margin`), `format` (see below), `detection` (see below).
 - `postprocess`: `mask_threshold` (probability binarization), `nms`,
-  `polygonize`, `simplify` — see execution status below.
+  `polygonize`, `simplify` — see execution status below — and
+  `class_mapping` (8.0: injective model-class → product-class remap for
+  `labels` products).
 - `runtime`: `gpu`, `cpu_fallback`, `estimated_ram_mb`, `estimated_vram_mb`,
   `supports_tiling`, `device` (`cpu` | `cuda` | `cuda:N` | `auto`).
 
@@ -165,9 +170,18 @@ inspected manifest keeps working.
 - `modality`: optical (default) | sar | dem | mask | aux.
 - `alignment`: none (default) | `reference` — the input must be
   co-registered with the primary input; execution REFUSES misaligned feeds
-  instead of warping (reprojection stays a geospatial seam).
+  instead of warping (reprojection stays a geospatial seam). Since 8.0 the
+  verdict includes CRS equality (semantic comparison); with
+  `alignment: "reference"` a feed that declares NO CRS is a refusal.
 - `missing_timestep`: refuse (default) | `zero` (explicit zero-fill of
   missing temporal frames).
+- 8.0: `temporal_collapse: "sequence"` (+ `layout: "NCTHW"`, with a fixed
+  `temporal_length` or `temporal_dynamic: true`) feeds the rank-5
+  `(N,T,C,H,W)` time axis; feed-level `timestamps` (ISO 8601, strictly
+  increasing) and per-frame `quality_masks` (0 = invalid → NoData
+  semantics) ride the `rs:infer` `named_inputs[]` request, alongside
+  `prepared_from` alignment provenance and local `stac_collection`
+  expansion. See [platform-8](../inference/platform-8.md).
 
 ### Typed output heads
 

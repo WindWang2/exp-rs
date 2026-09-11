@@ -12,7 +12,9 @@ qt_add_library(sicnu_experiment STATIC
   experiment_store.cpp
   experiment_store.h
   run_recorder.cpp
+  run_bridge.cpp
   run_recorder.h
+  run_bridge.h
   replay_readiness.cpp
   replay_readiness.h
   comparison_ext.cpp
@@ -36,6 +38,10 @@ target_link_libraries(sicnu_experiment
     Sicnu::dataset
   PRIVATE
     SQLite::SQLite3
+    # Unified trace + fault registry (Verification Platform 8.0): the store
+    # commit seams emit exp.trace.v1 records and probe SICNU_FAULT_POINT.
+    # PRIVATE keeps the science-core layer guards (no GUI/network) intact.
+    sicnu_runtime
 )
 
 # Same layer guard as sicnu_dataset: no GUI, no network in the science core.
