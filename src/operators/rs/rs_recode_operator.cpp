@@ -129,6 +129,11 @@ Json::Value RsRecodeOperator::schema() const {
     props["input"] = makeRasterParam("input", "Input single-band classification label raster");
     props["output"] = makeOutputParam("output", "Output recoded raster path", "tif");
     props["recode_map"] = makeStringParam("recode_map", "Recode mapping dictionary {from_class_id: to_class_id}");
+    // Contract Platform 9.0: the implementation still accepts these legacy
+    // spellings of recode_map (params["map"] / params["recode"]); declaring
+    // them keeps the schema equal to what run() actually consumes.
+    props["map"] = makeStringParam("map", "Legacy alias of recode_map");
+    props["recode"] = makeStringParam("recode", "Legacy alias of recode_map");
 
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeRasterParam("output", "Output raster path");

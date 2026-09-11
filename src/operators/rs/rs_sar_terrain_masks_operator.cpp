@@ -79,6 +79,10 @@ Json::Value RsSarTerrainMasksOperator::schema() const {
     props["heading"] = makeNumberParam( "heading", "Flight heading in degrees clockwise from north [0, 360); required — no scene-metadata fallback is consulted", 0.0 );
     props["lookDirection"] = makeEnumParam( "lookDirection", "Antenna look direction relative to flight heading ('right' or 'left')", s_lookDirs, "right" );
     props["lookAzimuthDeg"] = makeNumberParam( "lookAzimuthDeg", "Explicit antenna look azimuth in degrees clockwise from north; when present overrides heading + lookDirection", 0.0 );
+    // Contract Platform 9.0: legacy spellings the implementation still
+    // accepts (run(): isMember("lookAzimuth") / isMember("look_azimuth")).
+    props["lookAzimuth"] = makeNumberParam( "lookAzimuth", "Legacy alias of lookAzimuthDeg", 0.0 );
+    props["look_azimuth"] = makeNumberParam( "look_azimuth", "Legacy alias of lookAzimuthDeg", 0.0 );
 
     Json::Value outputs( Json::objectValue );
     outputs["output"] = makeRasterParam( "output", "Output raster path" );
