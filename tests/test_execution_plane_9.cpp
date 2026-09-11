@@ -31,6 +31,7 @@
 #include "jobs/job_types.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "processing/framework/task_center.h"
+#include "runtime/observability/fault_registry.h"
 #include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run.h"
 #include "workflow/workflow_run_coordinator.h"
@@ -40,6 +41,13 @@ using namespace sicnu::workflow;
 
 namespace
 {
+
+/// RAII: no armed fault leaks into a later test.
+struct AllDisarmedGuard
+{
+    ~AllDisarmedGuard() { sicnu::runtime::observability::fault::disarmAllFaults(); }
+};
+
 
 void ensureApp9()
 {
@@ -955,4 +963,42 @@ TEST_CASE( "corrupt checkpoint is refused with a typed error and no partial load
     // The corrupt checkpoint stays on disk (quarantine is recovery's job);
     // resume must not have deleted evidence.
     REQUIRE( cpFile.exists() );
+}
+
+TEST_CASE( "checkpoint publish fault point: crash between write and rename leaves no partial state (M6)",
+           "[ep9][checkpoint][fault]" )
+{
+    CoordinatorFixture9 fx;
+    const std::string prefix = "ep9_fault";
+    auto def = twoStepDefinition9( prefix );
+    WorkflowRun run;
+    run.setDefinition( def );
+    REQUIRE( run.setRunId( prefix + "_run" ) );
+    run.forceSetState( WorkflowRunState::Running );
+
+    using namespace sicnu::runtime::observability::fault;
+    AllDisarmedGuard disarmGuard;
+
+    // Injected rename failure — the crash window between the durable temp
+    // write and the atomic publish: the previous checkpoint must survive
+    // (or, with none, no partial file may appear) and the failure is typed.
+    WorkflowCheckpointManager checkpoints;
+    REQUIRE( false == checkpoints.saveCheckpoint( run, fx.checkpointDir.path() ).isEmpty() );
+    const QString goodCheckpoint = fx.checkpointDir.path() + "/checkpoint_ep9_fault_run.json";
+    REQUIRE( QFile::exists( goodCheckpoint ) );
+
+    armFault( { "workflow_checkpoint.publish", Mode::NextN, 1, {} } );
+    REQUIRE( checkpoints.saveCheckpoint( run, fx.checkpointDir.path() ).isEmpty() );
+    // The pre-crash checkpoint is intact — no truncated payload, no tmp leak.
+    REQUIRE( QFile::exists( goodCheckpoint ) );
+    QDir checkpointDir( fx.checkpointDir.path() );
+    REQUIRE( checkpointDir.entryList( QStringList{ QStringLiteral( "*.tmp*" ) }, QDir::Files )
+                 .isEmpty() );
+    // The surviving checkpoint still parses.
+    QString loadError;
+    REQUIRE( checkpoints.loadCheckpoint( goodCheckpoint, &loadError ) != nullptr );
+
+    disarmFault( "workflow_checkpoint.publish" );
+    // Recovery: the next save publishes normally.
+    REQUIRE( false == checkpoints.saveCheckpoint( run, fx.checkpointDir.path() ).isEmpty() );
 }
