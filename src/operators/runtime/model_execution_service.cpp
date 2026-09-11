@@ -321,7 +321,9 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
     for ( long long pixels : result.rasterStats.classPixelCounts )
       counts.append( static_cast<Json::Int64>( pixels ) );
     payload["classPixelCounts"] = counts;
-    if ( request.outputMode == RasterOutputMode::Labels && !model.output.classes.empty() )
+    // Names index the counts only when no remap reorders the product domain.
+    if ( request.outputMode == RasterOutputMode::Labels && !model.output.classes.empty()
+         && model.postprocess.classMapping.empty() )
     {
       Json::Value names( Json::arrayValue );
       for ( const std::string &cls : model.output.classes )

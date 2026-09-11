@@ -949,6 +949,12 @@ std::string ModelInputContract::validate() const
       return "inputs[].preprocess.normalize is mean_std but neither mean nor std is declared";
     if ( preprocess.resize == "to_input" && width <= 0 && height <= 0 )
       return "inputs[].preprocess.resize 'to_input' requires a fixed input width/height";
+    if ( preprocess.pad > 0 )
+      return "inputs[].preprocess.pad is not executed per feed (tile padding is "
+               "grid-global) — declare it in the global preprocess section";
+    if ( !preprocess.resize.empty() && preprocess.resize != "none" )
+      return "inputs[].preprocess.resize '" + preprocess.resize
+               + "' is not executed per feed — declare it in the global preprocess section";
   }
   return {};
 }

@@ -6,7 +6,12 @@
 
 #include <QProcessEnvironment>
 
+#include <algorithm>
+
+#ifdef _WIN32
+#else
 #include <dlfcn.h>
+#endif
 
 #include <cstring>
 
@@ -44,12 +49,19 @@ NvidiaInventory NvidiaInventory::probe()
 {
   NvidiaInventory inventory;
   const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-  if ( env.value( QStringLiteral( "SICNU_MODEL_NO_NVML" ) ) == QStringLiteral( "1" ) )
+  const QString noNvml = env.value( QStringLiteral( "SICNU_MODEL_NO_NVML" ) );
+  if ( noNvml == QStringLiteral( "1" ) || noNvml.compare( QStringLiteral( "true" ), Qt::CaseInsensitive ) == 0 )
   {
-    inventory.unavailableReason = "NVML probe disabled by SICNU_MODEL_NO_NVML=1";
+    inventory.unavailableReason = "NVML probe disabled by SICNU_MODEL_NO_NVML";
     return inventory;
   }
 
+#ifdef _WIN32
+  // The NVML probe is a POSIX-lane feature; Windows builds keep the honest
+  // "unavailable" verdict (the historical env-var detection still applies).
+  inventory.unavailableReason = "NVML probe not implemented on this platform";
+  return inventory;
+#else
   // The versioned soname first (driver installs), then the unversioned
   // development name — either is a real NVML.
   void *handle = dlopen( "libnvidia-ml.so.1", RTLD_LAZY | RTLD_LOCAL );
@@ -97,8 +109,9 @@ NvidiaInventory NvidiaInventory::probe()
     return inventory;
   }
 
-  inventory.devices.reserve( count );
-  for ( unsigned int i = 0; i < count; ++i )
+  // A corrupt driver-reported count must not become a huge allocation.
+  inventory.devices.reserve( std::min<unsigned int>( count, 64 ) );
+  for ( unsigned int i = 0; i < count && i < 64u; ++i )
   {
     NvmlDeviceHandle deviceHandle = nullptr;
     if ( getHandle( i, &deviceHandle ) != kNvmlSuccess || !deviceHandle )
@@ -133,6 +146,7 @@ NvidiaInventory NvidiaInventory::probe()
   dlclose( handle );
   inventory.available = true;
   return inventory;
+#endif
 }
 
 } // namespace sicnu::operators::runtime

@@ -227,10 +227,12 @@ Json::Value RsInferenceOperator::schema() const
       named["type"] = "array";
       named["description"] =
         "Named multi-input/temporal feeds for multi-input models (one object per "
-        "manifest input): {name, paths[], bands[], timestamps[], quality_masks[], "
-        "prepared_from[]}. paths are time-ordered frames; timestamps are ISO 8601 "
-        "(strictly increasing); quality_masks mark invalid pixels per frame; "
-        "prepared_from records pre-aligned source paths (provenance only).";
+        "manifest input): {name, paths[] or stac_collection (+stac_asset), "
+        "bands[], timestamps[], quality_masks[], prepared_from[]}. paths are "
+        "time-ordered frames (a local STAC collection document expands to them); "
+        "timestamps are ISO 8601 (strictly increasing); quality_masks mark "
+        "invalid pixels per frame; prepared_from records pre-aligned source "
+        "paths (provenance only).";
       Json::Value namedItems( Json::objectValue );
       namedItems["type"] = "object";
       named["items"] = namedItems;

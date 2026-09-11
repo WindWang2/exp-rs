@@ -21,36 +21,68 @@ namespace sicnu::operators::runtime {
 namespace {
 
 /// Opens the published product read-only and checks the recorded output
-/// grid (width/height/bands) against the real raster. Returns an empty
-/// string when the geometry agrees (or the sidecar records none), else the
-/// mismatch evidence.
-std::string gridMismatchEvidence( const QString &productPath, const Json::Value &prov )
+/// grid (width/height/bands) against the real raster.
+/// Returns: 0 = geometry agrees (or nothing recorded), 1 = mismatch
+/// (evidence filled), 2 = wrong-typed recorded fields (sidecar malformed).
+int gridMismatchEvidence( const QString &productPath, const Json::Value &prov,
+                          std::string *evidenceOut )
 {
   const Json::Value &output = prov["output"];
   if ( !output.isObject() )
-    return {}; // nothing recorded — nothing to contradict (truthful-empty 8.0 docs)
+    return 0; // nothing recorded — nothing to contradict (truthful-empty 8.0 docs)
+  // Wrong-typed fields are MalformedSidecar evidence, never exceptions
+  // (the "never throws" contract). Tri-state: -1 = wrong type, 0 = absent,
+  // 1 = a real integer was read into *value.
+  const auto typedInt = [ & ]( const char *key, int *value ) -> int {
+    const Json::Value &v = output[key];
+    if ( v.isNull() )
+      return 0;
+    if ( v.isIntegral() )
+    {
+      *value = v.asInt();
+      return 1;
+    }
+    return -1;
+  };
   GDALAllRegister();
   GDALDatasetH dataset = GDALOpen( productPath.toUtf8().constData(), GA_ReadOnly );
   if ( !dataset )
-    return "output raster is no longer openable (deleted or unreadable since publication)";
+  {
+    if ( evidenceOut )
+      *evidenceOut = "output raster is no longer openable (deleted or unreadable since publication)";
+    return 1;
+  }
   const int realWidth = GDALGetRasterXSize( dataset );
   const int realHeight = GDALGetRasterYSize( dataset );
   const int realBands = GDALGetRasterCount( dataset );
   GDALClose( dataset );
   std::string evidence;
-  if ( output.isMember( "width" ) && output["width"].asInt() != realWidth )
-    evidence = "recorded width " + std::to_string( output["width"].asInt() )
-                 + " but the product has " + std::to_string( realWidth );
-  if ( evidence.empty() && output.isMember( "height" )
-       && output["height"].asInt() != realHeight )
-    evidence = "recorded height " + std::to_string( output["height"].asInt() )
-                 + " but the product has " + std::to_string( realHeight );
-  if ( evidence.empty() && output.isMember( "bands" ) && output["bands"].asInt() != realBands )
-    evidence = "recorded band count " + std::to_string( output["bands"].asInt() )
-                 + " but the product has " + std::to_string( realBands );
-  if ( !evidence.empty() )
-    return evidence + " — the sidecar does not describe this product";
-  return {};
+  int recorded = 0;
+  bool typeError = false;
+  const auto field = [ & ]( const char *key, int real ) -> bool {
+    const int state = typedInt( key, &recorded );
+    if ( state < 0 )
+    {
+      evidence = std::string( "recorded '" ) + key + "' is not a number";
+      typeError = true;
+      return true; // stop
+    }
+    if ( state > 0 && recorded != real )
+    {
+      evidence = std::string( "recorded " ) + key + " " + std::to_string( recorded )
+                   + " but the product has " + std::to_string( real );
+      return true;
+    }
+    return false;
+  };
+  const bool mismatch = field( "width", realWidth )
+                          || ( evidence.empty() && field( "height", realHeight ) )
+                          || ( evidence.empty() && field( "bands", realBands ) );
+  if ( !mismatch )
+    return 0;
+  if ( evidenceOut )
+    *evidenceOut = evidence + " — the sidecar does not describe this product";
+  return typeError ? 2 : 1;
 }
 
 } // namespace
@@ -108,7 +140,7 @@ ProvenanceVerdict verifyProductProvenance( const std::string &outputPath,
   verdict.provenance = prov;
 
   if ( !prov.isObject() || !prov.isMember( "schema" )
-       || prov["schema"].asString() != "exp-rs-prov/1" )
+       || !prov["schema"].isString() || prov["schema"].asString() != "exp-rs-prov/1" )
   {
     verdict.state = ProvenanceVerdict::State::UnsupportedSchema;
     verdict.detail = "provenance sidecar schema '"
@@ -120,12 +152,17 @@ ProvenanceVerdict verifyProductProvenance( const std::string &outputPath,
   }
 
   // Expectation checks: model identity, digest, backend.
-  const Json::Value &model = prov["model"];
+  const Json::Value &model = prov.isMember( "model" ) && prov["model"].isObject()
+                               ? prov["model"] : Json::Value( Json::nullValue );
+  const auto stringField = [ & ]( const Json::Value &parent, const char *key ) {
+    if ( parent.isMember( key ) && parent[key].isString() )
+      return parent[key].asString();
+    return std::string();
+  };
   std::string mismatch;
   if ( !expectation.modelIdentityTag.empty() )
   {
-    const std::string tag =
-      model.isMember( "identity_tag" ) ? model["identity_tag"].asString() : std::string();
+    const std::string tag = model.isNull() ? std::string() : stringField( model, "identity_tag" );
     if ( tag != expectation.modelIdentityTag )
       mismatch = "identity tag '" + tag + "' does not match the expected '"
                    + expectation.modelIdentityTag + "'";
@@ -133,16 +170,16 @@ ProvenanceVerdict verifyProductProvenance( const std::string &outputPath,
   if ( mismatch.empty() && !expectation.modelContentDigest.empty() )
   {
     const std::string digest =
-      model.isMember( "content_digest" ) ? model["content_digest"].asString() : std::string();
+      model.isNull() ? std::string() : stringField( model, "content_digest" );
     if ( digest != expectation.modelContentDigest )
       mismatch = "content digest '" + digest + "' does not match the expected '"
                    + expectation.modelContentDigest + "'";
   }
   if ( mismatch.empty() && !expectation.backend.empty() )
   {
-    const Json::Value &execution = prov["execution"];
     const std::string backend =
-      execution.isMember( "backend" ) ? execution["backend"].asString() : std::string();
+      prov.isMember( "execution" ) && prov["execution"].isObject()
+        ? stringField( prov["execution"], "backend" ) : std::string();
     if ( backend != expectation.backend )
       mismatch = "backend '" + backend + "' does not match the expected '"
                    + expectation.backend + "'";
@@ -155,8 +192,16 @@ ProvenanceVerdict verifyProductProvenance( const std::string &outputPath,
   }
 
   // Grid consistency: the recorded output geometry must describe THIS file.
-  const std::string gridEvidence = gridMismatchEvidence( QString::fromStdString( outputPath ), prov );
-  if ( !gridEvidence.empty() )
+  std::string gridEvidence;
+  const int gridState =
+    gridMismatchEvidence( QString::fromStdString( outputPath ), prov, &gridEvidence );
+  if ( gridState == 2 )
+  {
+    verdict.state = ProvenanceVerdict::State::MalformedSidecar;
+    verdict.detail = gridEvidence;
+    return verdict;
+  }
+  if ( gridState == 1 )
   {
     verdict.state = ProvenanceVerdict::State::GridMismatch;
     verdict.detail = gridEvidence;

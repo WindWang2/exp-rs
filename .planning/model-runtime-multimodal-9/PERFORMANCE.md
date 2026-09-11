@@ -15,11 +15,11 @@ Files: `benchmarks/model-runtime-4.json` (CPU + opencv_dnn + ORT-CPU),
 |---|---|---|
 | Session cold load | 398 ms (opencv identity incl. cv init) / 35.3 ms (ORT) | 27.9 ms (CUDA EP init incl.) |
 | Session warm load | 15.8 / 20.5 ms | 7.8 ms |
-| Named 1x2x64x64 forwards | 21,020 /s (0.048 ms avg) | 986 /s (2.47 ms avg) |
+| Named 1x2x64x64 forwards | 21,020 /s (0.048 ms avg) | 986 /s (1.013 ms avg, verification-inclusive) |
 | Tiled 512² 4-band (opencv_dnn, 16px tiles) | 5.58 M px/s | n/a (opencv lane) |
 | In-forward cancel latency | 1.53 ms (ORT CPU) | — |
 | Multi-input/temporal 64 tiles | 46.1 ms (1,387 tiles/s) | — |
-| VRAM free before/after (NVML) | — | 13,934 → 13,914 MiB |
+| VRAM free before/after (NVML) | — | 13,727 → 13,707 MiB (as committed) |
 
 Honest notes:
 - The CUDA per-forward number is dominated by launch + H2D/D2H copy

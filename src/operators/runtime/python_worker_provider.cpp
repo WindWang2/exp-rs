@@ -60,8 +60,12 @@ class PythonWorkerSession final : public IModelRuntime
       // Platform 9.0 (M1): the worker sees EXACTLY the device the registry's
       // resolution picked — CUDA_VISIBLE_DEVICES renumbers it to 0 inside the
       // process, so a worker that asks ORT for cuda:0 cannot land on another
-      // card. CPU-resolved sessions leave the environment untouched.
-      if ( m_resolvedCudaIndex >= 0 )
+      // card. CPU-resolved sessions leave the environment untouched. An
+      // INHERITED mask (deployment-side device restriction) is respected and
+      // never clobbered — the worker keeps the deployment's visibility.
+      if ( m_resolvedCudaIndex >= 0
+           && !QProcessEnvironment::systemEnvironment().contains(
+                QStringLiteral( "CUDA_VISIBLE_DEVICES" ) ) )
       {
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.insert( QStringLiteral( "CUDA_VISIBLE_DEVICES" ),
@@ -289,12 +293,13 @@ class PythonWorkerSession final : public IModelRuntime
       // runtime version in the handshake capabilities block; when it does not,
       // the resolved device still tells the truth about what was requested.
       ProviderRuntimeDetails details;
+      // Honesty contract (model_runtime.h): report only what the WORKER
+      // declared in its handshake — a resolved CUDA index is a request, not
+      // evidence of the EP the worker actually engaged.
       const QStringList providers =
         m_negotiated.value( QStringLiteral( "providers" ) ).toVariant().toStringList();
       if ( !providers.isEmpty() )
         details.executionProvider = providers.join( QStringLiteral( "," ) ).toStdString();
-      else if ( m_resolvedCudaIndex >= 0 )
-        details.executionProvider = "CUDAExecutionProvider";
       details.runtimeVersion =
         m_negotiated.value( QStringLiteral( "runtime_version" ) ).toString().toStdString();
       return details;
@@ -402,7 +407,13 @@ ModelRuntimePtr makePythonWorkerRuntime( const ModelInfo &model,
 
 void registerPythonWorkerProvider( ModelRuntimeRegistry &registry )
 {
-  registry.registerProvider( "python", makePythonWorkerRuntime, ProviderTraits{} );
+  // Platform 9.0 (M2): the worker runs its own runtime (e.g. onnxruntime)
+  // inside the subprocess and can address any CUDA device through the
+  // CUDA_VISIBLE_DEVICES pin — so its traits are a DIRECT-CUDA provider and
+  // the real-driver (NVML) gate promotes GPU resolution for it, exactly like
+  // the onnxruntime provider.
+  registry.registerProvider( "python", makePythonWorkerRuntime,
+                             ProviderTraits{ /*maxAddressableCudaIndex*/ 63 } );
 }
 
 } // namespace sicnu::operators::runtime

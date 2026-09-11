@@ -295,10 +295,13 @@ TEST_CASE( "M3: per-feed preprocessing override normalizes each feed with its OW
   CHECK( runtime->fedMeans[0] == Catch::Approx( 5.0 ).margin( 1e-3 ) );
   // aux: 3 × 10 = 30 — again 3 under the old behavior.
   CHECK( runtime->fedMeans[1] == Catch::Approx( 30.0 ).margin( 1e-3 ) );
-  // Provenance records the EFFECTIVE preprocess per feed.
+  // Provenance records the EFFECTIVE preprocess per feed (with parameters).
   REQUIRE( stats.inputGrids.size() == 2 );
   CHECK( stats.inputGrids[0].preprocessNote == "mean_std" );
-  CHECK( stats.inputGrids[1].preprocessNote == "linear" );
+  CHECK_THAT( stats.inputGrids[1].preprocessNote,
+              Catch::Matchers::ContainsSubstring( "linear" ) );
+  CHECK_THAT( stats.inputGrids[1].preprocessNote,
+              Catch::Matchers::ContainsSubstring( "10" ) );
 }
 
 TEST_CASE( "M3: feeds without an override keep the global contract bit-for-bit",
@@ -774,7 +777,6 @@ TEST_CASE( "M5: feather blending averages the halo overlap with cosine weights",
   auto at = []( const std::vector<float> &img, int x, int y ) {
     return img[static_cast<std::size_t>( y ) * 32 + x];
   };
-  ( void )at;
 
   // Hard-edge stitch: the seam at x=16 steps 10 → 20; the halo overlap on
   // x in [12,16) is cropped away (tile A's core wins up to x=15).
@@ -789,9 +791,10 @@ TEST_CASE( "M5: feather blending averages the halo overlap with cosine weights",
   // x=14 (row 8): tile A core weight 1; tile B halo distance 2/4 → wB = 0.5:
   //   (10·1 + 20·0.5) / 1.5 = 40/3
   CHECK( at( blended, 14, 8 ) == Catch::Approx( 40.0f / 3.0f ).margin( 1e-3 ) );
-  // x=18: tile A halo distance 3/4 → wA = 0.5·(1−cos(3π/4)) ≈ 0.853553;
-  // tile B core weight 1: (10·wA + 20·1) / (wA + 1) ≈ 15.397
-  const double wA = 0.5 * ( 1.0 - std::cos( 3.0 * 3.14159265358979323846 / 4.0 ) );
+  // x=18: tile A halo distance 3/4 → wA = 0.5·(1+cos(3π/4)) ≈ 0.146447
+  // (weight fades with distance from the core); tile B core weight 1:
+  // (10·wA + 20·1) / (wA + 1) ≈ 18.722
+  const double wA = 0.5 * ( 1.0 + std::cos( 3.0 * 3.14159265358979323846 / 4.0 ) );
   CHECK( at( blended, 18, 8 ) == Catch::Approx( ( 10.0 * wA + 20.0 ) / ( wA + 1.0 ) ).margin( 1e-3 ) );
 }
 

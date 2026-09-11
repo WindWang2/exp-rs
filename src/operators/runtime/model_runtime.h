@@ -459,7 +459,8 @@ class ModelRuntimeRegistry
     /// readiness evaluation so cuda:N readiness matches what acquire enforces.
     std::optional<ProviderTraits> providerTraits( const std::string &framework ) const;
 
-    /// Current hardware capabilities (env-overridable detection, cached).
+    /// Current hardware capabilities (env-overridable detection; re-detected
+    /// per call so admission sees live free VRAM — no caching by design).
     ModelHardwareCapabilities hardware() const;
     /// Test seam: pin capabilities; pass nullopt to return to detection.
     void setHardwareForTest( const std::optional<ModelHardwareCapabilities> &capabilities );

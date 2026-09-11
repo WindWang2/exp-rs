@@ -52,19 +52,25 @@ payload + sidecar (`inputs[].preprocess`). Feeds without the override run
 the global contract bit-identically.
 
 `TileInferenceEngine::feedFingerprint(path, bands, maxBytes)` records a
-deterministic identity document per feed: width/height/band dtypes/
-geotransform/CRS/selected bands always; a real SHA-256 content digest
-when the file fits `fingerprint_content_max_bytes` (default 256 MiB),
-else an honest `{bytes, mtime_utc, reason: "file-too-large"}` — the
-fingerprint states exactly what it verified.
+deterministic identity document per feed (its FIRST frame for temporal
+feeds): width/height/band dtypes/geotransform/CRS/selected bands always;
+a real SHA-256 content digest when the file fits
+`fingerprint_content_max_bytes` (default 256 MiB), else an honest
+`{bytes, mtime_utc, reason: "file-too-large"}` — the fingerprint states
+exactly what it verified. Computation is bounded and blocking (memoized
+follow-up noted in the review log).
 
 ## 3. Feather tile blending — M5
 
 `tiling.blend: "feather"` (manifest) or the rs:infer `blend` parameter
 averages overlapping tile windows instead of hard-stitching cropped
 cores: weight 1 inside the core, cosine ramp across the halo
-(`0.5·(1−cos(π·d/halo))`), final pixel = Σ(w·v)/Σw. NaN predictions are
-skipped (weight 0); pixels no tile predicted stay NoData. Requirements
+(`0.5·(1+cos(π·d/halo))`: 1 at the core edge, 0 at the window edge),
+final pixel = Σ(w·v)/Σw. NaN predictions are skipped (weight 0); pixels
+no tile predicted stay NoData; a pixel whose OWN tile's core marked it
+invalid stays NoData even where a neighbor's halo predicted (blending
+refines valid pixels only — it never invents values over invalid ones).
+Requirements
 (typed refusals otherwise): halo > 0 and grid-preserving head geometry;
 `resize_to_input` heads and the multi-input engine refuse feather in 9.0.
 Derived output modes (labels/mask/confidence) blend the CLASS
@@ -88,11 +94,15 @@ aux bytes never reuse a session loaded for the previous package.
 `provenance_verify.h` turns the 8.0 write-side guarantee into a
 consumer-side check: `verifyProductProvenance(outputPath, expectation)`
 returns a typed verdict — `Ok`, `ProductMissing`, `MissingSidecar` (the
-8.0 crash window, now detectable by the consumer), `MalformedSidecar`,
+8.0 crash window, now detectable by the consumer), `MalformedSidecar`
+(including wrong-typed fields — the verifier never throws),
 `UnsupportedSchema`, `ModelMismatch` (identity/digest/backend
 expectation), `GridMismatch` (recorded geometry vs the actual raster) or
 `StaleProduct` (product mtime newer than its sidecar — the rewritten
-product). The Experiment/MLOps evidence seam consumes this function.
+product). This is accident detection, not tamper-proofing. It is the
+function the Experiment/MLOps evidence seam SHOULD call — one typed
+verdict, no re-implementation; wiring it into the recorder UI is a
+follow-up for the MLOps track.
 
 ## 6. Contract truth — M0
 
