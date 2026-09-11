@@ -154,16 +154,19 @@ TEST_CASE( "worker-originated child is admitted beyond a saturated globalMax (#8
     static std::atomic<bool> releaseParent{ false };
     static std::atomic<bool> childCompleted{ false };
     static std::atomic<bool> parentSawWorkerThread{ false };
+    static std::atomic<bool> parentSawChildTerminal{ false };
     static std::atomic<long> parentObservedChildId{ -1 };
     releaseParent.store( false );
     childCompleted.store( false );
     parentSawWorkerThread.store( false );
+    parentSawChildTerminal.store( false );
     parentObservedChildId.store( -1 );
 
     // Parent body: runs ON a JobEngine worker (its slot is the saturated
     // globalMax slot), submits a child from that worker and waits for it.
-    // Pre-fix, the child sat in WaitingResource forever: the parent could
-    // never finish, the single slot never freed — the pool deadlocked.
+    // Pre-fix, the child sat in WaitingResource forever: the parent's
+    // bounded wait times out, the success flag NEVER gets set, and the
+    // REQUIRE below fails deterministically (review B-P1-1).
     engine.registerExecutor( "ep9:parent",
                              [&]( const sicnu::jobs::JobRequest &,
                                   sicnu::operators::RSOperatorContext & ) {
@@ -178,13 +181,11 @@ TEST_CASE( "worker-originated child is admitted beyond a saturated globalMax (#8
                                      waitForCondition9( [&] {
                                          return sicnu::isTerminalStatus(
                                              center.getTaskInfo( child ).status );
-                                     }, 2000 /* ~10s bounded: old code FAILS here */ );
-                                 if ( !finished )
-                                 {
+                                     }, 2000 /* ~10s bounded */ );
+                                 if ( finished )
+                                     parentSawChildTerminal.store( true );
+                                 else
                                      releaseParent.store( true ); // unwind so the suite survives
-                                     Json::Value err( Json::objectValue );
-                                     return err;
-                                 }
                                  return Json::Value();
                              } );
     engine.registerExecutor( "ep9:child",
@@ -200,6 +201,9 @@ TEST_CASE( "worker-originated child is admitted beyond a saturated globalMax (#8
     waitForTerminalStatus9( parent );
 
     REQUIRE( parentSawWorkerThread.load() );
+    // Deterministic old-code-fails flag: only set when the parent observed
+    // its child terminal BEFORE the executor's bounded wait ran out.
+    REQUIRE( parentSawChildTerminal.load() );
     REQUIRE( childCompleted.load() );
     const auto childInfo = center.getTaskInfo( parentObservedChildId.load() );
     REQUIRE( childInfo.status == sicnu::TaskStatus::Completed );
@@ -773,12 +777,17 @@ TEST_CASE( "explain dumps expose admission and run evidence (M7)",
     REQUIRE( runDump.contains( QLatin1String( "runId: run-" ) ) );
     REQUIRE( runDump.contains( QLatin1String( "workflowId: ep9_explain_def" ) ) );
     REQUIRE( runDump.contains( QLatin1String( "step first" ) ) );
-    REQUIRE( !fx.coordinator.explainRun( 987654 ).contains( QLatin1String( "state" ) ) );
-    REQUIRE( fx.coordinator.explainDump().contains( QLatin1String( "pendingNotifications" ) ) );
+    // Positive marker for the unknown-pipeline case (review B-P3-6): never
+    // assert the mere ABSENCE of a word.
+    REQUIRE( fx.coordinator.explainRun( 987654 ).contains(
+        QLatin1String( "no run tracked for pipeline 987654" ) ) );
     REQUIRE( waitForCondition9( [&] {
         const auto snap = fx.coordinator.runForPipeline( pipelineId );
         return snap && snap->state() == WorkflowRunState::Completed;
     } ) );
+    // Data-driven coordinator dump AFTER the run finalized: its flock has
+    // been released by finalizeRunLocked, so the count is deterministic.
+    REQUIRE( fx.coordinator.explainDump().contains( QLatin1String( "runLocks held: 0" ) ) );
 
     engine.clearExecutors();
     center.resetResourceProfileLimits();
@@ -890,8 +899,10 @@ TEST_CASE( "admission structures stay bounded and correct at 100k logical tasks"
     // counts, indexes) with a parked slot holder — the data-structure
     // contract is exercised without executing 100k real jobs. Set
     // SICNU_EP9_STRESS=1 to opt in (keeps the default suite bounded).
+    // SKIP() (review B-P3-3): ctest must report the gate honestly, not a
+    // vacuous pass.
     if ( !qEnvironmentVariableIsSet( "SICNU_EP9_STRESS" ) )
-        return;
+        SKIP();
 
     ensureApp9();
     auto &engine = sicnu::jobs::JobEngine::instance();

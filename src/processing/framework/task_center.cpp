@@ -127,8 +127,11 @@ TaskCenter& TaskCenter::instance()
 QString TaskCenter::explainDump() const
 {
     // 9.0 M7: everything a stuck-run investigation needs, copied under the
-    // lock and formatted outside it. Bounded: fixed fields + one line per
-    // distinct status — never per-task lines (task maps can hold 100k+).
+    // lock and formatted outside it. Bounded OUTPUT: fixed fields + one line
+    // per distinct status — never per-task lines (task maps can hold 100k+).
+    // The O(live tasks) status scan inside the critical section is a
+    // deliberate diagnostics-only stall: explainDump is a human-paced
+    // investigation call, never on a scheduling hot path (review F1/F9).
     struct Snapshot
     {
         bool shuttingDown = false;
@@ -141,6 +144,7 @@ QString TaskCenter::explainDump() const
         int pendingOwnedCancels = 0;
         QMap<TaskStatus, int> statusCounts;
         QMap<ProviderResourceProfile, unsigned int> activeByProfile;
+        QMap<ProviderResourceProfile, unsigned int> profileLimits;
     };
     Snapshot snap;
     {
@@ -157,9 +161,16 @@ QString TaskCenter::explainDump() const
                               + m_pendingLogs.size();
         snap.pendingOwnedCancels = m_pendingOwnedCancels.size();
         snap.activeByProfile = m_active.byProfile;
+        snap.profileLimits = m_profileLimits;
         for ( auto it = m_tasks.constBegin(); it != m_tasks.constEnd(); ++it )
             snap.statusCounts[it->status] += 1;
     }
+    // Review F1: resolved per-profile limits come from the snapshot copies —
+    // limitForProfileLocked (a ...Locked helper) must never run unlocked.
+    auto resolvedProfileLimit = [ this, &snap ]( ProviderResourceProfile profile ) {
+        const unsigned int overridden = snap.profileLimits.value( profile, 0u );
+        return overridden > 0 ? overridden : defaultLimitForProfile( profile );
+    };
 
     auto statusName = []( TaskStatus s ) -> const char * {
         switch ( s )
@@ -196,7 +207,7 @@ QString TaskCenter::explainDump() const
         out += QStringLiteral( "  active[%1]: %2 (limit %3)\n" )
                    .arg( int( it.key() ) )
                    .arg( it.value() )
-                   .arg( limitForProfileLocked( it.key() ) );
+                   .arg( resolvedProfileLimit( it.key() ) );
     out += QStringLiteral( "  queues: readyHeap=%1 pendingLaunches=%2 pendingSignals=%3 pendingOwnedCancels=%4\n" )
                .arg( snap.readyHeapSize )
                .arg( snap.pendingLaunches )
@@ -1550,7 +1561,11 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
     }
     else if ( record.state == sicnu::jobs::JobState::Cancelled )
     {
-        markTaskCanceled( taskId );
+        // Review A-F6: a Cancelled record with NO TaskCenter request stamp
+        // (preserve-on-None below keeps cascades' stamps) is engine-side —
+        // labeling it "user" would be exactly the M3 mislabeling.
+        markTaskCanceled( taskId, QStringLiteral( "Task canceled" ),
+                          TaskCancelReason::Engine );
     }
     else if ( record.state == sicnu::jobs::JobState::Failed )
     {
@@ -1627,7 +1642,7 @@ void TaskCenter::setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newSta
         m_active.ramMb -= taskEstimateMbLocked( task );
         if ( task.isolatedRoute )
             --m_active.isolated;
-        if ( task.workerOriginated )
+        if ( task.transientBypass )
             --m_active.transientChildren;
         const AdmissionDims dims = admissionDimsLocked( task );
         m_active.usage2.tempDiskMb -= dims.tempDiskMb;
@@ -1644,7 +1659,7 @@ void TaskCenter::setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newSta
         m_active.ramMb += taskEstimateMbLocked( task );
         if ( task.isolatedRoute )
             ++m_active.isolated;
-        if ( task.workerOriginated )
+        if ( task.transientBypass )
             ++m_active.transientChildren;
         const AdmissionDims dims = admissionDimsLocked( task );
         m_active.usage2.tempDiskMb += dims.tempDiskMb;
@@ -1655,11 +1670,12 @@ void TaskCenter::setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newSta
     }
     task.status = newStatus;
 
-    // 9.0 M5: actual-usage observation — one relaxed RSS sample on every
-    // terminal transition, into the bounded trace ring (off by default =
-    // one atomic load). Estimates gate admission; this records what the
-    // process actually held at completion for estimate-vs-actual review.
-    if ( isTerminalStatus( newStatus ) )
+    // 9.0 M5: actual-usage observation — one RSS sample on every terminal
+    // transition, into the bounded trace ring. Gated on Trace::enabled()
+    // (review B-P2-1): currentRssMb() parses /proc — an eager argument must
+    // not run 100k times in the gated stress with tracing off.
+    if ( isTerminalStatus( newStatus )
+         && sicnu::runtime::observability::trace::Trace::enabled() )
     {
         traceTaskEvent( "resource", "observed_rss_mb", task.taskId, task.algorithmId,
                         QString::number( m_resourceMonitor.currentRssMb() ) );
@@ -1845,6 +1861,11 @@ void TaskCenter::processNextQueuedTasks()
     // globalMax is saturated, mirroring JobEngine's #798 transient worker
     // allowance at the layer below. The bypass is bounded by
     // kMaxTransientChildren concurrent active transient children.
+    // Review B-P3-1: pass-level probes are read ONCE here — memory pressure
+    // changes on the ~second timescale, never within one transition pass.
+    const bool rssPressureHigh = m_resourceMonitor.memoryPressureHigh();
+    const bool transientCapacityAtPassStart =
+        m_active.transientChildren < kMaxTransientChildren;
     while ( !m_readyHeap.empty() && scanned < scanBudget )
     {
         ReadyEntry entry = m_readyHeap.top();
@@ -1885,6 +1906,12 @@ void TaskCenter::processNextQueuedTasks()
             task.workerOriginated && m_active.transientChildren < kMaxTransientChildren;
         if ( !transientChild && m_active.total >= globalMax )
         {
+            // Fast path (review B-P3-1): with no bypass capacity at pass
+            // start, every deeper candidate is blocked too — the pre-9.0
+            // O(1) saturated behavior. (Capacity can only be consumed, never
+            // gained, within one pass, so the flag cannot go stale favorably.)
+            if ( !transientCapacityAtPassStart )
+                break;
             globalHoldReason = QStringLiteral( "Global worker slots exhausted." );
             resourceBlockedIds.append( entry.taskId );
             requeue.push_back( entry );
@@ -1902,7 +1929,7 @@ void TaskCenter::processNextQueuedTasks()
         // only when the child completes), trading a bounded 8-task overcommit
         // for guaranteed progress. Same direction as the never-starve rule
         // below and JobEngine's #798 worker allowance.
-        if ( m_resourceMonitor.memoryPressureHigh() && !transientChild )
+        if ( rssPressureHigh && !transientChild )
         {
             globalHoldReason = QStringLiteral( "Waiting for memory: process RSS at/above the watermark." );
             resourceBlockedIds.append( entry.taskId );
@@ -2014,6 +2041,10 @@ void TaskCenter::processNextQueuedTasks()
         // from task.isolatedRoute, and charging late would underflow the
         // counter at the leave transition (blocking every later routed task).
         task.isolatedRoute = isolateRoute;
+        // Review A-F3: stamp whether THIS admission actually used the
+        // transient bypass — the budget counter charges bypass-admitted
+        // tasks only, with the same set-before-transition discipline.
+        task.transientBypass = transientChild;
         setTaskStatusLocked( task, TaskStatus::Dispatching );
         if ( task.workerOriginated )
             traceTaskEvent( "admission", "transient_child", entry.taskId, task.algorithmId );
@@ -2608,6 +2639,7 @@ const char *taskCancelReasonName( TaskCancelReason reason )
     case TaskCancelReason::Upstream: return "upstream";
     case TaskCancelReason::Shutdown: return "shutdown";
     case TaskCancelReason::StructuredJoin: return "structured_join";
+    case TaskCancelReason::Engine: return "engine";
     case TaskCancelReason::None: break;
     }
     return "none";

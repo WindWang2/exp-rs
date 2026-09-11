@@ -44,14 +44,30 @@ Diagnostic wrongThreadDiagnostic()
                      DiagnosticSeverity::Error };
 }
 
-/// #800 / THREAD AFFINITY CONTRACT (#703): the const readers have no internal
-/// Reader affinity contract, superseded 9.0 (M2, #852 contract-ized): const
-/// readers are served exclusively from the immutable CatalogSnapshot
-/// published atomically on mutations, so they are worker-safe by design —
-/// the previous off-affinity LOUD WARNING marked the very reads the
-/// snapshot contract now sanctions (JobEngine workers parsing temporal
-/// collections). Mutations remain strictly owner-affine and keep their
-/// wrong_thread diagnostics enforcement.
+/// THREAD AFFINITY CONTRACT (#703/#800), superseded 9.0 (M2, #852
+/// contract-ized) — TWO reader classes with different rules:
+///  * Snapshot-served readers (asset/assets/findByPath/provenance/derived*/
+///    temporalCollection/catalogGeneration) read the immutable
+///    CatalogSnapshot published atomically on mutations: worker-safe by
+///    design — the pre-9.0 off-affinity LOUD WARNING marked exactly these
+///    now-sanctioned reads (JobEngine workers parsing temporal collections).
+///  * Lease/record readers (leaseCount/leases/hasActiveEditLease/planUnload)
+///    iterate the live containers with no lock: they stay OWNER-AFFINE and
+///    keep the loud off-affinity warning — a torn read here is a real
+///    hazard (review A-F2).
+/// Mutations remain strictly owner-affine with wrong_thread diagnostics.
+
+/// Loud, non-fatal off-affinity marker for the live-container readers.
+void checkLeaseReaderAffinity( const QObject *manager )
+{
+  if ( QThread::currentThread() == manager->thread() )
+    return;
+  qWarning( "DataManager: live-container reader called from thread %p off "
+            "the manager's owning thread %p (lease records are not "
+            "snapshot-served; marshal to the owner thread, #703/A-F2)",
+            static_cast<const void *>( QThread::currentThread() ),
+            static_cast<const void *>( manager->thread() ) );
+}
 
 /// Builds the diagnostics for refusing to remove a leased asset, shared by
 /// unload() and reap(). `codePrefix` selects the per-operation code
@@ -850,8 +866,12 @@ std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) cons
 
 quint64 DataManager::catalogGeneration() const
 {
+  // Review A-F2: read the generation through the atomically-published
+  // snapshot, never the plain (mutation-owned) counter — this accessor is
+  // worker-safe by contract. The snapshot is published at construction, so
+  // the fallback is unreachable; return 0 rather than race a raw read.
   const auto snap = m_impl->getSnapshot();
-  return snap ? snap->generation : m_impl->catalogGeneration;
+  return snap ? snap->generation : 0;
 }
 
 std::optional<DerivationRecord> DataManager::provenance( AssetId id ) const
@@ -1147,6 +1167,7 @@ Result<void> DataManager::rollbackEdit( AssetId id )
 
 int DataManager::leaseCount( AssetId id ) const
 {
+  checkLeaseReaderAffinity( this );
   return static_cast<int>(
     std::count_if( m_impl->leases.begin(), m_impl->leases.end(),
                    [&]( const Impl::LeaseRecord &lease ) {
@@ -1157,6 +1178,7 @@ int DataManager::leaseCount( AssetId id ) const
 
 QVector<LeaseRef> DataManager::leases( AssetId id ) const
 {
+  checkLeaseReaderAffinity( this );
   QVector<LeaseRef> result;
   for ( const Impl::LeaseRecord &lease : m_impl->leases )
   {
@@ -1172,6 +1194,7 @@ QVector<LeaseRef> DataManager::leases( AssetId id ) const
 
 bool DataManager::hasActiveEditLease( AssetId id ) const
 {
+  checkLeaseReaderAffinity( this );
   for ( const Impl::LeaseRecord &lease : m_impl->leases )
   {
     if ( lease.control->assetId == id && lease.control->active &&
@@ -1183,6 +1206,7 @@ bool DataManager::hasActiveEditLease( AssetId id ) const
 
 UnloadPlan DataManager::planUnload( AssetId id ) const
 {
+  checkLeaseReaderAffinity( this );
   AssetRevision revision;
   const auto recordIt = m_impl->findRecord( id );
   if ( recordIt != m_impl->records.end() )

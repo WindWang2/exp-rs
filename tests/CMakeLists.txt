@@ -2105,12 +2105,10 @@ target_compile_definitions(test_execution_plane_8 PRIVATE
 
 # Execution / Concurrency / Lifecycle 9.0 — structured hierarchy, transient
 # child admission (#862), lifecycle-safe eventing (#860), ghost-run closure
-# (#876). RUN_SERIAL: cases share the TaskCenter/JobEngine/Coordinator
-# singletons.
+# (#876). RUN_SERIAL: heavy concurrency cases must not share CPU/RSS with
+# other heavy suites (no cross-case singleton sharing — each Catch2 case is
+# its own process via catch_discover_tests).
 sicnu_add_test(test_execution_plane_9 TIMEOUT 2400 RUN_SERIAL TRUE)
-target_compile_definitions(test_execution_plane_9 PRIVATE
-    SICNU_WORKER_EXE="$<TARGET_FILE:sicnu_worker>"
-)
 
 # Phase I persistent workspace catalog.
 sicnu_add_test(test_workspace_catalog TIMEOUT 300)

@@ -71,10 +71,6 @@ class WorkflowRunCoordinator : public QObject {
     /// -1 (@a error explains why).
     long resumeRun( const std::string &runId, QString *error = nullptr );
 
-    /// resumeRun body (#860): every exit path queues notifications under
-    /// m_mutex; the public wrapper drains them outside the lock.
-    long resumeRunImpl( const std::string &runId, QString *error );
-
     /// Cancel a tracked run's pipeline (delegates to TaskCenter::cancelPipeline;
     /// the run state rolls up from the step outcomes).
     bool cancelRun( long pipelineId );
@@ -103,6 +99,13 @@ class WorkflowRunCoordinator : public QObject {
     void setCheckpointDirectory( const QString &directory );
     QString checkpointDirectory() const;
 
+  private:
+    /// resumeRun body (#860 review A-F7): every exit path queues
+    /// notifications under m_mutex; the public wrapper drains them outside
+    /// the lock. Private so no caller can bypass the drain.
+    long resumeRunImpl( const std::string &runId, QString *error );
+
+  public:
     /// Emitted on tracked-run lifecycle transitions — Running when a tracked
     /// pipeline starts, the real terminal state (Completed/Failed/Canceled)
     /// at finalize, and Interrupted when crash recovery reconciles the run.
@@ -110,12 +113,9 @@ class WorkflowRunCoordinator : public QObject {
     /// entries carry truthful started/finished ms (issue #754).
     /// Governance (WorkspaceService::recordRun) subscribes so the runs index
     /// reflects what actually happened instead of fabricating states.
-    /// Delivery is a Qt signal (lifetime-managed, queueable) because the
-    /// coordinator may emit with its internal mutex held: receivers must not
-    /// call back into the coordinator synchronously.
-    /// Mirrored after every persisted run-state transition (issue #754):
-    /// terminal/Interrupted transitions carry truthful started/finished ms.
-    /// One emission per tracked-run state transition.
+    /// Lifecycle-safe eventing 9.0 (#860): emitted ONLY from
+    /// drainRunNotifications, never under m_mutex — a slot may safely call
+    /// back into the coordinator synchronously from any thread.
     //  (Fresh-build repair: churn on master had declared this signal three
     //  times across three signals: sections — moc emitted one body per
     //  declaration and the translation unit failed with C2084.)
@@ -159,6 +159,12 @@ class WorkflowRunCoordinator : public QObject {
     QString checkpointPathFor( const std::string &runId ) const;
 
     mutable std::mutex m_mutex;
+    // LOCK ORDER (9.0 review A-F8): flock(run lock) → m_mutex →
+    // TaskCenter::instance()'s internal m_mutex (taken via
+    // getPipelineInfo/getTaskInfo inside the fold and resume-swap blocks).
+    // NEVER the reverse: TaskCenter must not call the coordinator while
+    // holding its own mutex. TaskCenter signals reach onTaskUpdated via
+    // DirectConnection only from TaskCenter's LOCK-FREE flush paths.
     WorkflowCheckpointManager m_checkpoints;
     QString m_checkpointDir; // empty → defaultCheckpointDirectory()
     std::map<long, std::shared_ptr<WorkflowRun>> m_runsByPipeline;

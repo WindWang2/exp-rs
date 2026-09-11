@@ -80,7 +80,9 @@ enum class TaskCancelReason
     User,          ///< cancelTask / cancelPipeline from a caller surface
     Upstream,      ///< cascade from a failed/canceled DAG parent or owner
     Shutdown,      ///< application shutdown / engine teardown (#684)
-    StructuredJoin ///< owner reached a terminal state first (I9)
+    StructuredJoin, ///< owner reached a terminal state first (I9)
+    Engine         ///< engine-side terminal Cancelled record with no
+                   ///< TaskCenter request stamp (e.g. pre-armed flag)
 };
 
 const char *taskCancelReasonName( TaskCancelReason reason );
@@ -172,6 +174,12 @@ struct AlgorithmTaskInfo {
     /// get the bounded transient admission allowance (#862) and, when the
     /// owner is resolvable, form the ownership edge ownerTaskId→taskId.
     bool workerOriginated = false;
+    /// 9.0 M0 review A-F3: true when THIS admission actually used the
+    /// transient bypass (set at dispatch staging like isolatedRoute). The
+    /// ActiveCounters.transientChildren budget counts only bypass-admitted
+    /// tasks — a worker-originated task admitted through free normal slots
+    /// must not consume the stranded-child budget.
+    bool transientBypass = false;
     /// 9.0 M1: the running task whose executor submitted this task
     /// (resolved via JobEngine::currentJobId at submit time), or -1 for
     /// root submissions. Orthogonal to parentTaskIds (DAG data-dependency
