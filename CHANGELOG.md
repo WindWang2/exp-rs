@@ -4,6 +4,38 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - 2026-09-11
 
+### Professional Remote Sensing Workbench 8.0 (goal series)
+- **SchemaForm 4.0**: schema-driven nested objects (recursive groups with
+  per-group `required`, optional-group absence semantics, depth-capped with
+  JSON-editor degradation); object arrays as repeatable item editors with
+  min/maxItems gating and honest bounded import (≤256, visible truncation
+  hint); dynamic enum choices via an injected `SchemaEnumProvider`
+  (`x-ui-enum-source`) with free-text degradation instead of dead lists;
+  async `x-ui-check` value checks (path_exists) on the bounded RsScanPool
+  with 350 ms debounce, generation cancellation and teardown safety;
+  accessible names/descriptions on every editor at every nesting level.
+- **AssetPreviewService**: the single bounded async owner of catalog
+  previews — raster thumbnails through `RasterReader::readWindowResampled`
+  (Nearest overview policy), vector previews through QGIS's
+  `QgsMapRendererCustomPainterJob` with a typed >200k-feature refusal; LRU
+  cache (64 entries / 32 MiB) keyed by path+size+mtime+target; supersede,
+  cancel and dead-receiver delivery drops (no UAF after teardown). The Data
+  Manager detail pane consumes it lazily on selection.
+- **Data Manager catalog scaling**: light incremental `AssetCatalogIndex`
+  maintained from per-asset signals (refresh no longer re-fetches every full
+  snapshot); coalesced filter box (name/source/id substring); lazy
+  collection children above 50 (populate on first expand); bounded
+  standalone rendering (default 20 000 rows) with a truthful truncation
+  sentinel naming exact totals; selection preservation unchanged.
+- **Context facts 8.0**: `SelectionContextSnapshot.hasInFlightTask` (shell-
+  injected TaskCenter predicate) and `ContextFacts.hasBrokenLayer` /
+  `hasInFlightTask`; `ContextRules::suggestedNextAction` — a deterministic,
+  registry-anchored "what next" projection with unit-tested priority.
+- Contracts documented in `docs/ui-architecture.md` Part IV (§21–§24);
+  tests: `test_schema_form_4`, `test_asset_preview_service`,
+  `test_asset_catalog_index`, `test_context_facts_8`.
+
+
 ### Dataset / Experiment / Scientific MLOps 8.0 (goal series, ADR 0143)
 - **Automatic execution→experiment lifecycle wiring**: the 7.0
   `ExperimentRunRecorder` (previously called by nothing) is now driven by the
@@ -223,8 +255,6 @@ All notable changes to the `exp-rs` project will be documented in this file.
 - **Performance evidence (WP-H)**: ORT cold/warm session acquire 21.9/1.2 ms,
   named N-D forwards ≈ 23k/s, in-forward cancel latency 24.9 ms
   (`benchmarks/model-runtime-4.json`, schema `model-runtime-bench-ort/1`).
->>>>>>> master
->>>>>>> master
 
 ### Cartography Knowledge, Template & Recipe Platform 6.0 (goal series, ADR 0135)
 - **Declarative correctness fixes**: single-item `fit_content` no longer
