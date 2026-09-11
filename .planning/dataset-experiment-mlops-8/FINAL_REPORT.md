@@ -4,7 +4,7 @@ Branch: `feat/dataset-experiment-mlops-8`
 Worktree: `exp-rs-dataset-experiment-mlops-8` (inside main/; separate build dir)
 Base: origin/master `322dfd3876`
 
-## Status: IMPLEMENTATION COMPLETE — local verification in progress
+## Status: COMPLETE (implementation + verification + adversarial review)
 
 ## Baseline (verified against execution-time master)
 
@@ -58,15 +58,44 @@ Base: origin/master `322dfd3876`
   read side unchanged (existing experiment:/reproducibility: tools + CLI
   verbs see recorded runs).
 
-## Verification (local, no CI)
+## Verification (local, no CI; environment: Ninja Release, GCC 16.2.1, Qt6,
+ccache, USE_PRECOMPILED_HEADERS=OFF, tests at -j1, host under concurrent
+track builds)
 
-(filled after builds/tests complete — see TEST_MATRIX.md / PERFORMANCE.md)
+Executed and passed on this branch:
+- test_mlops8_bridge — 150 assertions / 17 cases ✓
+- test_mlops8_scale — 19 907 assertions ✓ (20k runs seeded + 19.9k stale
+  reconciled report-only; 13.4 s wall)
+- test_mlops8_e2e — 6/6 cases ✓ (real tracked pipelines: success/fail/
+  cancel/interrupt-resume/disabled/no-ghost; run individually under host
+  load; TIMEOUT 600)
+- test_mcp_server — 3 934 assertions / 20 cases ✓ (incl. 2 new recording
+  surface cases)
+- Regression: dataset_core 155 ✓, split_leakage 672 ✓,
+  experiment_evaluation 162 ✓, platform7_library 228 ✓,
+  data_platform_surface 101 ✓, workflow_run_coordinator 176 ✓,
+  dataset_e2e_examples 57 ✓ (all pre-review; the review fixes touched only
+  bridge/adapter/mcp_server/tests, and the affected suites were re-run
+  green after remediation and again after the rebase to master 226adb8d02)
+
+Build evidence: sicnu_experiment, sicnu_experiment_bridge, sicnu_agent, and
+all listed test targets compile clean (only pre-existing warnings in vendored
+QGIS core). Exact commands in PERFORMANCE.md.
+
+Honest classification: nothing was "compiled but unexecuted" among the
+targets above; CLI auto-recording is NOT wired (the CLI reads recorded
+stores via existing verbs; wiring the runner is a documented follow-up).
 
 ## Adversarial review
 
-Round 0 self-review: 2×P1 (resume records could never complete; resume-ghost
-Running dangle), 3×P2/P3 — all fixed (REVIEW_LOG.md).
-Round 1 subagent review: (pending)
+Round 0 self-review: 2×P1 + 3×P2/P3 fixed (REVIEW_LOG.md).
+Round 1 (two read-only subagents, full diff): P0 0, P1 4, P2 7, P3 19 —
+ALL P1/P2 fixed, P3 fixed or justified (REVIEW_LOG.md round 1). During
+remediation two additional critical defects were found and fixed: a data
+race on the workflow definition (SIGSEGV, coredump-backed; conversion now
+uses one locked run.toJson() snapshot) and the first-submission terminal
+event loss (enable-before-submit). Affected suites re-run green after
+remediation and after rebase.
 
 ## Known limitations
 
@@ -76,5 +105,10 @@ Round 1 subagent review: (pending)
 - Cross-thread interleaved delivery between a resume swap and its ghost
   event can, in rare races, record a ghost that the next reconciliation
   reports (never closes as success).
-- Pins attach pre-submission keyed by workflow definition id; concurrent
-  runs of the same definition share pin defaults (documented).
+- CLI auto-recording is not wired: `sicnu_geo_rs_cli` pipelines are not
+  auto-recorded (the CLI reads recorded stores through existing verbs);
+  wiring rs_pipeline_runner through the same monitor is a follow-up.
+- resume_workflow does not yet accept recording arguments; a continuation
+  can be opted in via WorkflowExperimentMonitor::optInResume().
+- RUN_SERIAL on sicnu_add_test targets does not propagate to discovered
+  tests (pre-existing house pattern; the new cases are self-contained).
