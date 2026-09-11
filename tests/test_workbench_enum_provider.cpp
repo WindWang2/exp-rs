@@ -20,7 +20,7 @@
 #include "data/data_manager.h"
 
 using sicnu::app::WorkbenchEnumProvider;
-using Choice = sicnu::app::SchemaEnumProvider::Choice;
+using Choice = SchemaEnumProvider::Choice; // global-namespace provider base (8.0 seam)
 
 namespace
 {

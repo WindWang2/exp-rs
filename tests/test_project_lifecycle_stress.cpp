@@ -81,14 +81,17 @@ int runCycle( int cycle )
     REQUIRE( layer->isValid() );
     project.addMapLayer( layer );
   }
-  REQUIRE( project.countMapLayers() == layerCount );
+  REQUIRE( project.mapLayers().size() == layerCount );
 
   // Every third cycle: a secondary view joins the party (clearProject must
   // reach layers across ALL views — regression guard for the multi-view fix).
   sicnu::display::DisplayViewId secondaryId{};
+  QgsMapCanvas secondaryCanvas;
   if ( cycle % 3 == 0 )
   {
-    auto viewId = context->createSecondaryView( context->viewSpec() );
+    const sicnu::display::DisplayViewSpec secondarySpec{
+      &secondaryCanvas, project.layerTreeRoot(), project.layerStore() };
+    auto viewId = context->createSecondaryView( secondarySpec );
     REQUIRE( viewId );
     secondaryId = viewId.value();
     REQUIRE( context->views().size() == 2 );
@@ -102,7 +105,7 @@ int runCycle( int cycle )
 
   const auto cleared = context->clearProject( project );
   REQUIRE( cleared );
-  CHECK( project.countMapLayers() == 0 );
+  CHECK( project.mapLayers().size() == 0 );
 
   if ( !secondaryId.isNull() )
   {
@@ -141,7 +144,7 @@ void runCycleWithEarlyCanvasDeath( int cycle )
   // leave layers behind (async render jobs / bridge deletion order, #859/#857).
   const auto cleared = context->clearProject( project );
   REQUIRE( cleared );
-  CHECK( project.countMapLayers() == 0 );
+  CHECK( project.mapLayers().size() == 0 );
 }
 
 constexpr int kCycles = 24;
@@ -155,7 +158,7 @@ TEST_CASE( "Project lifecycle churn: clear/import/view cycles stay consistent",
   for ( int cycle = 0; cycle < kCycles; ++cycle )
     stagedLayers += runCycle( cycle );
   REQUIRE( stagedLayers == kCycles * 3 );
-  CHECK( QgsProject::instance()->countMapLayers() == 0 );
+  CHECK( QgsProject::instance()->mapLayers().size() == 0 );
 }
 
 TEST_CASE( "Project lifecycle churn: canvas destroyed before clearProject",
@@ -163,7 +166,7 @@ TEST_CASE( "Project lifecycle churn: canvas destroyed before clearProject",
 {
   for ( int cycle = 0; cycle < kCycles; ++cycle )
     runCycleWithEarlyCanvasDeath( cycle );
-  CHECK( QgsProject::instance()->countMapLayers() == 0 );
+  CHECK( QgsProject::instance()->mapLayers().size() == 0 );
 }
 
 int main( int argc, char *argv[] )
