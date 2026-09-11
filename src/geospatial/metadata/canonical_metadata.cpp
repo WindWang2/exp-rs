@@ -1025,7 +1025,11 @@ MultidimMetadata inspectMultidim( const std::string &path, const InspectOptions 
             std::min<std::int64_t>( info.size, static_cast<std::int64_t>( DimensionInfo::kMaxAxisValues ) ) );
           GDALExtendedDataTypeH stringType = GDALExtendedDataTypeCreateString( 0 );
           QuietCplErrors quietAxis;
-          const GUInt64 oneCount = 1;
+          // GDALMDArrayRead takes count as const size_t*: on LP64 Linux,
+          // size_t and GUInt64 are distinct types (mirror of the
+          // spatial-scientist-harness-9 portability fix; kept so this branch
+          // builds on GDAL 3.13.3-2 headers — dedupe at PR time).
+          const std::size_t oneCount = 1;
           const GInt64 oneStep = 1;
           GPtrDiff_t oneStride = 1;
           for ( GUInt64 i = 0; i < axisCount && stringType != nullptr; ++i )
