@@ -20,6 +20,27 @@
 
 namespace sicnu::operators::runtime {
 
+/// One fed input's verified grid identity (Platform 8.0 WP-C): recorded
+/// AFTER the co-registration check passed, for result payloads and the
+/// provenance sidecar. Evidence of what was CHECKED — never a claim that
+/// warping happened (the runtime never warps implicitly).
+struct GridProvenance
+{
+  std::string name;                 ///< feed/input contract name
+  std::string path;                 ///< the raster that was actually fed
+  std::vector<std::string> preparedFrom; ///< original sources when the caller
+                                    ///< pre-aligned through the geospatial
+                                    ///< seam, parallel to the fed frames
+                                    ///< (empty = fed as-is)
+  std::string crs;           ///< CRS authority string ("" = undeclared)
+  bool crsVerified = false;  ///< true when the CRS was CHECKED equal to the
+                             ///< primary feed's CRS; for the primary feed
+                             ///< itself (the reference), true when declared
+  int width = 0;
+  int height = 0;
+  int frames = 1;            ///< temporal frames fed under this grid identity
+};
+
 /// Geometry + counters describing one engine run (also feeds estimates).
 struct TileInferenceStats
 {
@@ -36,6 +57,10 @@ struct TileInferenceStats
   /// Channel count per output head in band order (Platform 3.0 multi-head
   /// layout; the uncertainty band, when any, is counted in its head's entry).
   std::vector<int> headChannels;
+  /// Grid provenance, one entry per fed input (Platform 8.0 WP-C): what the
+  /// engine actually verified about each feed's grid before inference.
+  /// Truthful — fields stay empty when the raster does not declare them.
+  std::vector<GridProvenance> inputGrids;
 };
 
 /// Raster-task output mode (Platform 4.0, manifest `output.format`).
@@ -75,6 +100,22 @@ struct NamedRasterFeed
   std::string name;                ///< manifest input contract name ("" = positional)
   std::vector<std::string> paths;  ///< temporal frames, time-ordered (1 = static)
   std::vector<int> bands;          ///< 1-based band selection (empty = all)
+  /// Platform 8.0 alignment provenance: when the caller pre-aligned these
+  /// frames through the geospatial seam (raster_convert warp), the ORIGINAL
+  /// source paths, parallel to @p paths (empty = fed as-is). Purely
+  /// informational — the engine still verifies the fed grids and records
+  /// both in the provenance sidecar.
+  std::vector<std::string> preparedFrom;
+  /// Platform 8.0 acquisition times (WP-D), parallel to @p paths, ISO 8601.
+  /// Optional; when declared the engine enforces STRICTLY INCREASING time
+  /// order (a misordered series is a typed refusal, never a silent sort).
+  std::vector<std::string> timestamps;
+  /// Platform 8.0 per-frame quality masks (WP-D), parallel to @p paths:
+  /// single-band rasters where 0 = invalid pixel. Invalid pixels follow the
+  /// input's NoData semantics (zeroed for the forward, excluded from the
+  /// valid-coverage gate). Optional; every mask is grid+CRS-verified against
+  /// the primary feed like any other input.
+  std::vector<std::string> qualityMasks;
 };
 
 class TileInferenceEngine
@@ -126,6 +167,28 @@ class TileInferenceEngine
     static std::string gridMismatch( const std::string &primaryPath, int primaryW, int primaryH,
                                      const double *primaryGeoTransform, const std::string &otherPath,
                                      int otherW, int otherH, const double *otherGeoTransform );
+
+    // --- Platform 8.0 WP-C: CRS-aware grid authority -------------------------
+    /**
+     * Co-registration verdicts are geodetic, not numeric: two rasters with
+     * IDENTICAL geotransform numbers under DIFFERENT CRS describe different
+     * places. This check compares the two CRS semantically (GDAL
+     * OGRSpatialReference::IsSame) and returns an empty string when the pair
+     * is acceptable, else a typed refusal naming both CRS.
+     *
+     * Policy (documented, deterministic):
+     *  - both undeclared → acceptable (nothing to compare; historical data);
+     *  - exactly one declared → acceptable when @p strictAlignment is false,
+     *    refusal when true (alignment=reference demands VERIFIED
+     *    co-registration — an unverifiable feed is a misaligned feed);
+     *  - both declared and !IsSame() → refusal always (the 1e-6 geotransform
+     *    check alone would silently pass cross-CRS feeds).
+     * CRS strings may be WKT or any GDAL-parseable authority string; "" =
+     * undeclared.
+     */
+    static std::string crsMismatch( const std::string &primaryPath, const std::string &primaryCrs,
+                                    const std::string &otherPath, const std::string &otherCrs,
+                                    bool strictAlignment );
 
     /// Effective tile geometry for a raster (manifest tiling contract +
     /// fixed graph input size fallback, engine floor of 16 px).

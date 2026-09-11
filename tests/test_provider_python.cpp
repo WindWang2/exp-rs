@@ -147,7 +147,18 @@ TEST_CASE( "worker death maps to ProviderCrash", "[models][python]" )
   REQUIRE( outputs.size() == 1 );
   CHECK( outputs[0].second.dataFloat32()[0] == Catch::Approx( 42.0f ) );
 
-  // Second inference sees a dead worker: typed ProviderCrash.
+  // Platform 8.0 WP-F: the SECOND inference hits the dead worker and
+  // consumes the session's ONE bounded restart — the worker respawns,
+  // re-hand-shakes and the forward replays (the crash worker answers 42
+  // deterministically).
+  {
+    const auto replayed = session->inferNamed( inputs, {} );
+    REQUIRE( replayed.size() == 1 );
+    CHECK( replayed[0].second.dataFloat32()[0] == Catch::Approx( 42.0f ) );
+  }
+
+  // The THIRD inference sees a dead worker again, but the restart budget is
+  // exhausted: typed ProviderCrash, never a respawn loop.
   REQUIRE_THROWS_AS( session->inferNamed( inputs, {} ), std::runtime_error );
   try
   {
@@ -156,6 +167,8 @@ TEST_CASE( "worker death maps to ProviderCrash", "[models][python]" )
   catch ( const std::exception &e )
   {
     CHECK( classifyInferenceError( e.what() ) == InferenceFailureKind::ProviderCrash );
+    CHECK_THAT( e.what(),
+                Catch::Matchers::ContainsSubstring( "restart budget is exhausted" ) );
   }
 }
 
@@ -169,4 +182,34 @@ TEST_CASE( "missing worker script fails the load loudly", "[models][python]" )
     ModelRuntimeRegistry::instance().acquire( model, RequestedDevice::cpu(), &error );
   CHECK_FALSE( session );
   CHECK( error.find( "python worker script not found" ) != std::string::npos );
+}
+
+TEST_CASE( "worker handshake capabilities override the provider defaults",
+           "[models][python][caps]" )
+{
+  ( void )ensureApp();
+  QTemporaryDir dir;
+  const std::string script =
+    ( QFileInfo( __FILE__ ).absolutePath() + QStringLiteral( "/data/py_worker_caps.py" ) )
+      .toStdString();
+  const ModelInfo model = makeWorkerModel( dir, script, "caps-weights.bin" );
+  std::string error;
+  const auto session =
+    ModelRuntimeRegistry::instance().acquire( model, RequestedDevice::cpu(), &error );
+  REQUIRE( session );
+
+  // The worker declared: max_rank 5, no multi-input, float32-only inputs.
+  const auto caps = session->capabilities();
+  CHECK( caps.maxRank == 5 );
+  CHECK_FALSE( caps.multiInput );
+  REQUIRE( caps.inputDtypes.size() == 1 );
+  CHECK( caps.inputDtypes.front() == "float32" );
+
+  // Inference still works within the negotiated surface.
+  std::vector<float> a = { 7.0f };
+  std::vector<NamedTensor> inputs;
+  inputs.push_back( NamedTensor{ "x", TensorBlob::fromFloat32( { 1, 1, 1, 1 }, a.data(), 1 ) } );
+  const auto outputs = session->inferNamed( inputs, {} );
+  REQUIRE( outputs.size() == 1 );
+  CHECK( outputs[0].second.dataFloat32()[0] == Catch::Approx( 7.0f ) );
 }
