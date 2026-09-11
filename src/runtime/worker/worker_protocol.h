@@ -151,7 +151,14 @@ inline bool parseFrame( const std::string &line, Json::Value &frame )
     std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
     if ( !reader->parse( line.data(), line.data() + line.size(), &frame, &errors ) )
         return false;
-    return frame.isMember( "v" ) && frame["v"].asInt() == 1 && frame.isMember( "op" );
+    // isIntegral BEFORE asInt: asInt() throws/aborts on non-numeric values
+    // (e.g. {"v":{}} or {"v":"1"}), so a malformed peer frame must not be
+    // able to crash the host or worker at the protocol gate itself.
+    // isObject FIRST: jsoncpp's isMember()/find() throw LogicError on
+    // non-object roots (arrays, strings, numbers) — a malformed peer frame
+    // must not crash the host or worker at the protocol gate itself.
+    return frame.isObject() && frame.isMember( "v" ) && frame["v"].isInt()
+           && frame["v"].asInt() == 1 && frame.isMember( "op" );
 }
 
 /// True when a ready frame advertises @p cap (frame without "caps" = none).

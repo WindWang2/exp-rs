@@ -4,6 +4,8 @@
 #include <QFile>
 #include <QFileInfo>
 
+#include <chrono>
+
 #include <cpl_conv.h>
 #include <gdal.h>
 #include <ogr_api.h>
@@ -13,6 +15,7 @@
 #include "data/source_descriptor.h"
 #include "gdal/gdal_dataset_wrapper.h"
 #include "runtime/observability/fault_point.h"
+#include "runtime/observability/trace.h"
 
 using namespace sicnu::data;
 
@@ -82,6 +85,40 @@ OutputCommitter::OutputCommitter( DataManager *dataManager, QObject *parent )
 }
 
 CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
+{
+  // Unified-trace adapter (Verification Platform 8.0): one record per commit
+  // attempt carrying the registered AssetId (or the first failure code) and
+  // the commit duration. Disabled path = one relaxed atomic load; the string
+  // building below only runs when a sink is installed.
+  if ( !sicnu::runtime::observability::trace::Trace::enabled() )
+    return commitImpl( request );
+  const auto started = std::chrono::steady_clock::now();
+  const CommitResult result = commitImpl( request );
+  const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+    std::chrono::steady_clock::now() - started ).count();
+
+  sicnu::runtime::observability::trace::TraceEvent trace;
+  trace.event = "commit";
+  trace.phase = "end";
+  trace.durationUs = static_cast<long long>( elapsedUs );
+  trace.detail = request.stablePath.toStdString();
+  if ( result )
+  {
+    trace.status = "ok";
+    trace.artifact = result.value().toString().toStdString();
+  }
+  else
+  {
+    trace.status = "error";
+    const auto &diagnostics = result.diagnostics();
+    if ( !diagnostics.isEmpty() )
+      trace.detail = diagnostics.first().code.toStdString() + ": " + trace.detail;
+  }
+  sicnu::runtime::observability::trace::Trace::publish( trace );
+  return result;
+}
+
+CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request )
 {
   if ( !QFile::exists( request.tempPath ) )
   {

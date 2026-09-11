@@ -1,0 +1,316 @@
+{
+ "schema": "exp.readiness.report.v1",
+ "generated_utc": "2026-09-10T21:43:07.554488+00:00",
+ "git_sha": "95307764f1e92e105e0587241e1c35143089b4e3",
+ "build_dir": "/home/kevin/projects/rs-studio/exp-rs-verification-platform-8/build-clang",
+ "host": {
+  "platform": "linux"
+ },
+ "counts": {
+  "compiled": 30,
+  "passed": 25,
+  "failed": 1,
+  "not_built": 0,
+  "skipped": 0,
+  "timeout": 4,
+  "no_evidence": 0
+ },
+ "overall": "attention",
+ "principle": "not-run is never pass; every capability names its evidence",
+ "capabilities": [
+  {
+   "capability": "header-self-containment",
+   "artifact": "sicnu_header_probes",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "trace-contract",
+   "artifact": "test_trace_contract",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "fault-registry",
+   "artifact": "test_fault_registry",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "diagnostic-report",
+   "artifact": "test_diagnostic_report",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "fuzz-resource-uri",
+   "artifact": "test_contract_fuzz_io",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "fuzz-condition-ast",
+   "artifact": "test_contract_fuzz_lang",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "fuzz-dataset-manifest",
+   "artifact": "test_contract_fuzz_data",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "known-answer-corpus",
+   "artifact": "test_known_answer_corpus",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "portability-contract",
+   "artifact": "test_portability_contract",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "fuzz-worker-ipc-splits",
+   "artifact": "test_contract_fuzz_ipc",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "fuzz-operator-schemas",
+   "artifact": "test_contract_fuzz_ops",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "known-answer-corpus-8",
+   "artifact": "test_known_answer_corpus_8",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "trace-chain-8",
+   "artifact": "test_trace_chain_8",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "io-uri",
+   "artifact": "test_io_uri",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "io-paths",
+   "artifact": "test_io_paths",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "io-range-cache",
+   "artifact": "test_io_range_cache",
+   "compiled_here": true,
+   "executed_status": "timeout"
+  },
+  {
+   "capability": "io-remote-range",
+   "artifact": "test_io_remote_range",
+   "compiled_here": true,
+   "executed_status": "timeout"
+  },
+  {
+   "capability": "io-remote-validator",
+   "artifact": "test_io_remote_validator",
+   "compiled_here": true,
+   "executed_status": "timeout"
+  },
+  {
+   "capability": "io-atomic-failures",
+   "artifact": "test_io_atomic_failures",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "io-raster-contract",
+   "artifact": "test_io_raster_contract",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "io-grid-descriptor",
+   "artifact": "test_io_grid_descriptor",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "io-stac",
+   "artifact": "test_io_stac",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "portable-fault-matrix",
+   "artifact": "test_fault_matrix",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "sdk-ipc-contract",
+   "artifact": "test_exprs_ipc",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "concurrency-stress",
+   "artifact": "test_concurrency_stress",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "posix-fault-injection",
+   "artifact": "test_fault_injection",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "worker-host-lifecycle",
+   "artifact": "test_worker_host",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "visual-cartography",
+   "artifact": "test_mapspec",
+   "compiled_here": true,
+   "executed_status": "failed"
+  },
+  {
+   "capability": "bench-quality7",
+   "artifact": "benchmark_quality7",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "bench-scale8",
+   "artifact": "benchmark_scale8",
+   "compiled_here": true,
+   "executed_status": "timeout"
+  }
+ ],
+ "benchmarks": {
+  "quality7": {
+   "schema": "exp.bench.quality7.v1",
+   "os": "other",
+   "cpu_cores": 16,
+   "build": "release",
+   "note": "wall-clock evidence only \u2014 not a CI gate",
+   "measurements": [
+    {
+     "name": "trace_id_generate",
+     "ops_per_s": 314302,
+     "iterations": 200000
+    },
+    {
+     "name": "trace_ndjson_encode",
+     "ops_per_s": 341441,
+     "iterations": 200000
+    },
+    {
+     "name": "trace_emit_disabled",
+     "ops_per_s": 12598300.0,
+     "iterations": 500000
+    },
+    {
+     "name": "trace_emit_ring",
+     "ops_per_s": 177205,
+     "iterations": 200000
+    },
+    {
+     "name": "fault_probe_disarmed",
+     "ops_per_s": 20280000.0,
+     "iterations": 500000
+    },
+    {
+     "name": "condition_validate",
+     "ops_per_s": 187483,
+     "iterations": 100000
+    },
+    {
+     "name": "condition_evaluate",
+     "ops_per_s": 109410,
+     "iterations": 200000
+    },
+    {
+     "name": "resource_uri_parse",
+     "ops_per_s": 981256,
+     "iterations": 200000
+    },
+    {
+     "name": "job_dispatch_roundtrip",
+     "ops_per_s": 2310300.0,
+     "iterations": 2000
+    }
+   ]
+  },
+  "scale8": {
+   "schema": "exp.bench.scale8.v1",
+   "os": "linux",
+   "cpu_cores": 16,
+   "build": "release",
+   "dataset_rows": 20000,
+   "note": "wall-clock evidence only \u2014 not a gate",
+   "measurements": [
+    {
+     "name": "schedule_1000",
+     "ops_per_s": 26214.7,
+     "iterations": 1000,
+     "note": "JobEngine submit+await of instant callable jobs"
+    },
+    {
+     "name": "schedule_10000",
+     "ops_per_s": 388.946,
+     "iterations": 10000,
+     "note": "JobEngine submit+await of instant callable jobs"
+    },
+    {
+     "name": "schedule_20000",
+     "ops_per_s": 104.587,
+     "iterations": 20000,
+     "note": "JobEngine submit+await of instant callable jobs"
+    },
+    {
+     "name": "dataset_metadata_insert_20000",
+     "ops_per_s": 15006.6,
+     "iterations": 20000,
+     "note": "DatasetStore::createDataset single-threaded bulk"
+    },
+    {
+     "name": "dataset_metadata_page_read",
+     "ops_per_s": 44.5734,
+     "iterations": 20,
+     "note": "listDatasets 1000-row pages over the bulk store"
+    },
+    {
+     "name": "raster_window_reads",
+     "ops_per_s": 152618,
+     "iterations": 256,
+     "note": "64x64 readWindow walk over a 1024x1024 Float32 raster"
+    },
+    {
+     "name": "trace_file_sink_overhead",
+     "ops_per_s": 220437,
+     "iterations": 10000,
+     "note": "emit into a FileTraceSink (4 MiB rotation, 4096 queue)"
+    }
+   ]
+  }
+ },
+ "platform_caveats": [
+  "Windows/MSVC: documented from dev-workstation evidence (docs/verification/PLATFORM_EVIDENCE.md); NOT executed on this host unless it is Windows.",
+  "macOS: GDAL 3.13 ladder exercised via PR #834 evidence; NOT executed on this host.",
+  "Optional-feature omissions (OTB, Python worker, ONNX Runtime) follow the CMake option surface of this build tree; absent targets are reported as not-built, never as passing."
+ ],
+ "ladder_run_utc": "2026-09-10T21:34:36.889530+00:00"
+}

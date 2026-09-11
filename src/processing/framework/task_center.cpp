@@ -22,6 +22,7 @@
 #include "framework/fused_chain.h"
 #include "framework/worker_execution_route.h"
 #include "runtime/observability/execution_telemetry.h"
+#include "runtime/observability/trace.h"
 #include "data/data_manager.h"
 
 #include <QCryptographicHash>
@@ -657,6 +658,69 @@ void TaskCenter::queueTaskLogLocked( long taskId, const QString &message )
     m_pendingLogs.append( PendingLog{ taskId, message } );
 }
 
+namespace
+{
+
+// Unified-trace adapter (Verification Platform 8.0): map every broadcast task
+// snapshot onto one exp.trace.v1 record. flushPendingSignals is THE single
+// funnel where task state leaves TaskCenter (outside m_mutex), so this link
+// of the chain adds no locking, no polling and no second bookkeeping. Cost
+// when tracing is off: one relaxed atomic load per snapshot.
+void traceTaskSnapshot( const AlgorithmTaskInfo &info )
+{
+    if ( !sicnu::runtime::observability::trace::Trace::enabled() )
+        return;
+    using sicnu::runtime::observability::trace::TraceEvent;
+    using sicnu::runtime::observability::trace::Trace;
+    TraceEvent trace;
+    if ( info.pipelineId > 0 )
+        trace.run = "pipeline-" + std::to_string( info.pipelineId );
+    trace.task = std::to_string( info.taskId );
+    trace.job = info.jobId;
+    trace.op = info.algorithmId.toStdString();
+    trace.event = "task_status";
+    switch ( info.status )
+    {
+    case sicnu::TaskStatus::Completed:
+        trace.status = "ok";
+        break;
+    case sicnu::TaskStatus::Failed:
+        trace.status = "error";
+        trace.detail = info.errorMessage.toStdString();
+        break;
+    case sicnu::TaskStatus::Canceled:
+        trace.status = "cancelled";
+        trace.detail = info.errorMessage.toStdString();
+        break;
+    case sicnu::TaskStatus::Cancelling:
+        // Distinct from the final Canceled so consumers can classify an
+        // in-flight cancellation attempt.
+        trace.status = "cancelling";
+        break;
+    case sicnu::TaskStatus::Running:
+        trace.phase = "start";
+        break;
+    case sicnu::TaskStatus::Queued:
+    case sicnu::TaskStatus::Paused:
+    case sicnu::TaskStatus::WaitingResource:
+    case sicnu::TaskStatus::Dispatching:
+        // In-flight, not yet running: visible as pending, no status verdict.
+        trace.phase = "pending";
+        break;
+    default:
+        break;
+    }
+    if ( info.status == sicnu::TaskStatus::Completed && info.startTime.isValid()
+         && info.endTime.isValid() )
+    {
+        trace.durationUs = static_cast<long long>(
+            info.startTime.msecsTo( info.endTime ) ) * 1000;
+    }
+    Trace::publish( trace );
+}
+
+} // namespace
+
 void TaskCenter::flushPendingSignals()
 {
     // Drain until empty so nested mutations from slots still surface.
@@ -674,9 +738,15 @@ void TaskCenter::flushPendingSignals()
             logs.swap( m_pendingLogs );
         }
         for ( const auto &info : added )
+        {
+            traceTaskSnapshot( info );
             emit taskAdded( info );
+        }
         for ( const auto &info : updated )
+        {
+            traceTaskSnapshot( info );
             emit taskUpdated( info );
+        }
         for ( const auto &log : logs )
             emit taskLogAdded( log.taskId, log.message );
     }
