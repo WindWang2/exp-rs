@@ -33,6 +33,14 @@ constexpr Neighbor kNeighbors[8] = {
     { 1, -1, 1.41421353816986083984375f, 128 },
 };
 
+// A decoded D8 code must be a finite float in [0, 128] before any float→int
+// cast: GDAL Float32 sentinels (e.g. -3.4028235e38f) are outside the range
+// of int and casting them is undefined behavior ([conv.fpint], #853).
+inline bool isCastableFlowCode( float d )
+{
+    return std::isfinite( d ) && d >= 0.0f && d <= 128.0f;
+}
+
 } // namespace
 
 bool fillDepressions( const float *dem, float *filled, int width, int height, float nodata )
@@ -52,9 +60,32 @@ bool fillDepressions( const float *dem, float *filled, int width, int height, fl
             filled[i] = dem[i];
             if ( dem[i] == nodata || std::isnan( dem[i] ) )
                 continue;
-            const bool boundary =
+            // The drain boundary is the raster perimeter AND every valid
+            // cell adjacent (8-neighbourhood, matching the flood/routing
+            // step set) to a NoData cell (#848): reprojected/clipped DEMs
+            // carry NoData borders, and seeding only the rectangular rim
+            // left those interiors without a single queue seed — the flood
+            // silently filled nothing and every depression survived into
+            // the D8 graph. Water overflowing a NoData edge leaves the
+            // known surface, so NoData-adjacent valid cells spill at their
+            // own elevation.
+            const bool atPerimeter =
                 x == 0 || y == 0 || x == width - 1 || y == height - 1;
-            if ( boundary )
+            bool bordersNoData = false;
+            if ( !atPerimeter )
+            {
+                for ( const Neighbor &nb : kNeighbors )
+                {
+                    const float vz = dem[static_cast<size_t>( y + nb.dy ) * width
+                                         + ( x + nb.dx )];
+                    if ( vz == nodata || std::isnan( vz ) )
+                    {
+                        bordersNoData = true;
+                        break;
+                    }
+                }
+            }
+            if ( atPerimeter || bordersNoData )
             {
                 done[i] = 1;
                 queue.emplace( dem[i], i );
@@ -138,7 +169,10 @@ bool flowAccumulation( const float *dir, float *acc, int width, int height,
 
     const bool maskNodata = filled != nullptr;
     const auto isDirNoData = []( float d ) {
-        if ( std::isnan( d ) )
+        // Magnitude gate BEFORE the cast — an out-of-range float→int cast is
+        // UB, and Float32 sentinels (±3.4e38, ±Inf, NaN) arrive here from
+        // arbitrary dir buffers (#853).
+        if ( !isCastableFlowCode( d ) )
             return true;
         const int code = static_cast<int>( d );
         if ( static_cast<float>( code ) != d )
@@ -279,8 +313,10 @@ bool watershedLabels( const float *dir, int width, int height,
                 continue;
             // NoData neighbours carry a NaN direction (flowDirections marks
             // them 0/NaN outside the routing graph) — skip before the
-            // float→int cast (UB for NaN).
-            if ( !std::isfinite( dir[nIdx] ) )
+            // float→int cast, whose range must also be validated (#853:
+            // finite-but-huge dir values are UB, isfinite alone is not
+            // enough).
+            if ( !isCastableFlowCode( dir[nIdx] ) )
                 continue;
             const int code = static_cast<int>( dir[nIdx] );
             if ( code != reverseCode( nb.code ) )

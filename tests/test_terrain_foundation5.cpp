@@ -127,7 +127,19 @@ TEST_CASE( "Priority-flood fill raises pits to their spill level", "[terrain][fl
   bar[static_cast<size_t>( 2 ) * kN + 2] = 3.0f; // interior pit, west of the wall
   std::vector<float> filled2( kN * kN );
   REQUIRE( fillDepressions( bar.data(), filled2.data(), kN, kN, kNodata ) );
-  REQUIRE( filled2[static_cast<size_t>( 2 ) * kN + 2] == Catch::Approx( 5.0f ) );
+  // The pit borders NoData (col 1) directly: since 9.0 (#848) it seeds the
+  // flood at its own elevation — a cell that can overflow into the unknown
+  // region is a drainage-boundary cell, never raised. (Pre-9.0 the rim-only
+  // seeding flooded it to 5 from the north row, inventing material in a
+  // cell that already drains off-surface.)
+  REQUIRE( filled2[static_cast<size_t>( 2 ) * kN + 2] == Catch::Approx( 3.0f ) );
+  // The pit two cells east of the wall has no NoData contact: it fills to
+  // the 3-level boundary seed west of it (the west pit drains off-surface
+  // at its own level, so the east pit spills into it at 3, not to the 5
+  // plateau).
+  bar[static_cast<size_t>( 2 ) * kN + 3] = 3.0f;
+  REQUIRE( fillDepressions( bar.data(), filled2.data(), kN, kN, kNodata ) );
+  REQUIRE( filled2[static_cast<size_t>( 2 ) * kN + 3] == Catch::Approx( 3.0f ) );
   REQUIRE( filled2[static_cast<size_t>( 2 ) * kN + 1] == kNodata );
   REQUIRE( filled2[static_cast<size_t>( 2 ) * kN + 4] == Catch::Approx( 8.0f ) );
   REQUIRE( filled2[0] == Catch::Approx( 5.0f ) );

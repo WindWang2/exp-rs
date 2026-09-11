@@ -4,8 +4,13 @@
 // Contracts:
 //   * fillDepressions: priority-flood (Barnes et al. 2014). Every non-NoData
 //     cell is raised to the minimum level at which it drains to the raster
-//     boundary; NoData cells are barriers — they are neither filled nor
-//     routed across (a cell draining into NoData is a sink).
+//     boundary. The boundary is the rectangular rim AND every valid cell
+//     adjacent (8-neighbourhood) to a NoData cell (#848 — reprojected or
+//     clipped DEMs carry NoData borders; seeding only the rim left interior
+//     depressions unfilled, silently corrupting the D8 graph). NoData cells
+//     are barriers — they are neither filled nor routed across (a cell
+//     draining into NoData is a sink); water overflowing a NoData edge
+//     leaves the known surface at the seed's own elevation.
 //   * flowDirections: D8 steepest descent over the FILLED surface (pass the
 //     fillDepressions output). Direction codes are the ESRI powers-of-two
 //     (E=1, SE=2, S=4, SW=8, W=16, NW=32, N=64, NE=64*2=128 — see the table
