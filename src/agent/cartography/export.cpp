@@ -11,11 +11,11 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFontInfo>
-#include <QRegularExpression>
 #include <QSet>
 #include <QTemporaryFile>
 #include <QtGlobal>
 
+#include <algorithm>
 #include <cmath>
 
 namespace sicnu::agent::cartography {
@@ -98,6 +98,17 @@ std::vector<std::string> validateMapExportRequest( const QgsPrintLayout *layout,
     problems.push_back( "dpi must be within [72, 1200]" );
   if ( request.directory.empty() )
     problems.push_back( "directory is required" );
+  // A governed export writes INSIDE the declared directory: a bare file
+  // name is required — no separators, no traversal, no dot shenanigans.
+  if ( !request.file_name.empty() )
+  {
+    if ( request.file_name.find( '/' ) != std::string::npos ||
+         request.file_name.find( '\\' ) != std::string::npos )
+      problems.push_back( "file_name must be a bare name (no path separators)" );
+    else if ( request.file_name == "." || request.file_name == ".." ||
+              request.file_name.rfind( "..", 0 ) == 0 )
+      problems.push_back( "file_name must not be or start with '..'" );
+  }
   if ( !request.pages.empty() && !formatSupportsPageSelection( request.format ) )
     problems.push_back( "page selection is only supported for png on this QGIS build; '" +
                         request.format + "' always exports all pages" );
@@ -190,11 +201,21 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
     result.error = QStringLiteral( "exported file is empty or unreadable" );
     return result;
   }
-  QFile::remove( finalPath ); // POSIX rename over an existing file is not portable
+  // Swap into place: POSIX rename(2) replaces an existing target
+  // atomically; Windows cannot, so fall back to remove+rename there. The
+  // temp file keeps verified bytes until the very end either way.
   if ( !QFile::rename( tempPath, finalPath ) )
   {
-    result.error = QStringLiteral( "cannot move the export into place at '%1'" ).arg( finalPath );
-    return result;
+    if ( !QFile::exists( finalPath ) )
+    {
+      result.error = QStringLiteral( "cannot move the export into place at '%1'" ).arg( finalPath );
+      return result;
+    }
+    if ( !QFile::remove( finalPath ) || !QFile::rename( tempPath, finalPath ) )
+    {
+      result.error = QStringLiteral( "cannot replace the existing export at '%1'" ).arg( finalPath );
+      return result;
+    }
   }
 
   result.ok = true;

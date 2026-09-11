@@ -698,6 +698,15 @@ bool applyStyleSpecToLayer( QgsMapLayer *layer, const Json::Value &styleSpecIn, 
   for ( const std::string &problem : tokenProblems )
     problems << QString::fromStdString( problem );
 
+  // Platform 9.0 honesty: a validated bivariate declaration is contract
+  // knowledge, not a renderer — the applied symbology stays single-axis and
+  // the apply report must say so rather than render silently single-axis.
+  if ( styleSpec.isMember( "bivariate" ) && styleSpec["bivariate"].isObject() )
+    problems << QStringLiteral(
+      "bivariate declared but not renderable in this platform version; the "
+      "applied renderer is single-axis (bivariate ships as contract-gated "
+      "knowledge only)" );
+
   bool appliedAny = false;
   if ( styleSpec.isMember( "raster" ) && styleSpec["raster"].isObject() )
   {

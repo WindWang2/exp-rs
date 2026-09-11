@@ -2,7 +2,55 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
-## [Unreleased] - 2026-09-11
+## [Unreleased] - 2026-09-12
+
+### Intelligent Cartography / MapSpec / Template Platform 9.0
+
+- **Solver 9.0 evidence surfaces**: the bounded composition solver now
+  attributes non-convergence (oscillation) — the constraints still writing
+  when the 24-pass budget was exhausted are named in `oscillations` and a
+  human-readable note; the layout rolls back to its pre-solve snapshot (the
+  #864 contract). A bounded per-pass `trace` records which constraints wrote
+  in each pass. Permanently-failed constraints are recorded in the decisions
+  ledger exactly once across unsat-core restore sweeps.
+- **Text-driven sizing**: `fit_content` accepts `text_ref` — content is
+  derived at solve time from a referenced text item under the deterministic
+  typography model (wrap width = declared rect or max_size width; height =
+  lines × pt × leading). `content_mm` and `text_ref` are mutually exclusive
+  and validated.
+- **Scoped re-solve**: `resolveCompositionScoped` restricts the bounded
+  pipeline to constraints/anchors/clamps touching a focus set (anchor
+  authority stays global), keeping repair loops cheap on large documents.
+- **Multi-page 9.0**: `page_break` constraint kind (validated target page,
+  solver-applied, idempotent); `pages[].furniture` master furniture
+  materialized as provenance-stamped clones (`<id>-p<n>`, `master_of`)
+  through the standard compile path; atlas-driven `expression` on titles and
+  labels compiles to QGIS-native `[% … %]` markup (unparseable expressions
+  are compile failures); `continuation` blocks compile cross-page reference
+  captions with resolved display page numbers.
+- **Thematic 9.0**: raster `scale_ranges` scale-dependent visibility (same
+  scale semantics as the vector `scaledenominator`); `bivariate` symbology
+  is declaration-gated — valid only with an explicit semantic contract, two
+  distinct axes, and per-axis fields/classes.
+- **Charts/tables 9.0**: `MAP_CHART_OVER_MAP` preflight rule + repair
+  (opaque chart/colorbar pictures may not silently cover map frames);
+  `dual_axis` declarations are honestly reported as unsupported by the
+  single-axis renderers (`MAP_DUAL_AXIS_UNSUPPORTED`); numeric formatting
+  pinned locale-independent.
+- **QA 9.0**: `repairMapSpecWithLedger` attributes outcomes per finding
+  (applied / still_reported) via one post-repair preflight; the
+  `cartography:repair` tool surfaces the per-pass ledger; map frames may
+  declare `crs` and satisfy the report CRS obligation.
+- **Export 9.0**: `cartography:export` — governed atomic export (temp file,
+  exporter-result verification, SHA-256 over the written bytes, rename);
+  png supports declared page selection, pdf/svg honestly refuse page
+  selection on this QGIS build; font substitutions reported as diagnostics.
+- **Tools 9.0**: `cartography:explain` (bounded per-item solver + preflight
+  evidence) and `cartography:diff_templates` (bounded semantic template
+  diff) join the typed tool surface; compose provenance carries structured
+  template lineage (`template_provenance`).
+- **Component catalog**: new `table--accuracy-matrix` component; catalog
+  index regenerated.
 
 ### Cloud-Native Geospatial Data Fabric 8.0 (goal series)
 

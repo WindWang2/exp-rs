@@ -221,6 +221,11 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
   // calls see exactly what the compile-time solver would produce. Content
   // fields are identical; only geometry can differ.
   Json::Value spec = specIn;
+  // Platform 9.0: master-furniture clones must obey every rule the hand
+  // declared items obey — expand before solving/rule evaluation so a
+  // pages[].furniture chart clone cannot evade MAP_CHART_OVER_MAP by living
+  // only in the compile working copy.
+  mapspec::expandMasterFurniture( spec );
   const Json::Value tokens = resolveTokenSet( spec );
   const CompositionResult solvedResult = resolveComposition(
     spec, tokenNumber( tokens, "spacing.margin_mm", 12.0 ) );
@@ -1590,14 +1595,20 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
       if ( applied == appliedBefore && !overlappedFrameIds.empty() )
       {
         Json::Value overlays( Json::arrayValue );
+        std::set<std::string> declaredSeen;
         const Json::Value &declared = foundItem.get( "overlay_on", Json::Value() );
         if ( declared.isString() && !declared.asString().empty() )
+        {
           overlays.append( declared );
+          declaredSeen.insert( declared.asString() );
+        }
         else if ( declared.isArray() )
-          overlays.append( declared );
-        std::set<std::string> seen;
+          for ( const auto &frameId : declared )
+            if ( frameId.isString() && !frameId.asString().empty() &&
+                 declaredSeen.insert( frameId.asString() ).second )
+              overlays.append( frameId ); // per-element merge, never nest the array
         for ( const auto &frameId : overlappedFrameIds )
-          if ( seen.insert( frameId ).second )
+          if ( declaredSeen.insert( frameId ).second )
             overlays.append( frameId );
         foundItem["overlay_on"] = overlays;
         ++applied;
@@ -1749,8 +1760,9 @@ Json::Value preflightRuleCatalog()
     { "MAP_TEXT_WRAP_OVERFLOW", "warning", true,
       "Wrap-aware text layout (CJK kinsoku included) does not fit the item rect." },
     { "MAP_CHART_OVER_MAP", "warning", true,
-      "A chart/colorbar (opaque picture item) overlaps a map frame and would occlude "
-      "map content; repair repositions it outside all frames." },
+      "A chart/colorbar (opaque picture item) overlaps a map frame without declared "
+      "overlay_on intent; repair relocates it, or stamps overlay_on when no free "
+      "slot exists." },
     { "MAP_DUAL_AXIS_UNSUPPORTED", "warning", false,
       "Chart declares dual_axis but the renderers draw a single value axis." },
     { "MAP_CONTRAST_LOW", "warning", false,

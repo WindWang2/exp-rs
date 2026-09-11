@@ -40,4 +40,15 @@ the scoped re-solve change and recorded below.
 
 | Benchmark | Build | Input | Baseline (master) | After 9.0 | Ratio |
 |---|---|---|---|---|---|
-| (to be filled at M1/M8) | | | | | |
+| condition_evaluate (mapspec conditions) | Release, this host | 200k iterations | n/a (same code as master) | 777,818 ops/s | — |
+| condition_validate | Release, this host | 100k iterations | n/a | 1,292,150 ops/s | — |
+| test_mapspec full suite wall time | Release, this host | 206 cases / 2492 assertions | (8.0 corpus was 60 cases; not comparable) | 16.4 s wall, 15.0 s user | — |
+
+Solver-evidence additions are bounded-overhead by construction: the trace
+couples to the existing 24-pass loop (≤ 32 cids per entry), oscillation
+derivation scans the last trace entry, and the scoped re-solve is a strict
+subset of the full solve. The chart-over-map repair sweep is capped at
+64 candidate positions; the repair ledger costs exactly one extra
+preflightMapSpec per repair pass (preflight itself is bounded by the
+existing 500-issue and 24-pass caps). No Debug-vs-Release comparisons are
+made; all numbers above are Release on the same host.

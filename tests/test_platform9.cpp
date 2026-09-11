@@ -18,6 +18,7 @@
 #include "agent/cartography/composition.h"
 #include "agent/cartography/quality.h"
 #include "agent/cartography/registry.h"
+#include "agent/cartography/style_compiler.h"
 #include "agent/cartography/style_spec.h"
 #include "agent/cartography/typography.h"
 #include "agent/mapspec/mapspec.h"
@@ -29,6 +30,9 @@
 
 #include <qgslayoutitemlabel.h>
 #include <qgsprintlayout.h>
+#include <qgsrasterlayer.h>
+
+#include <gdal.h>
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -1168,6 +1172,13 @@ TEST_CASE( "M6: dual_axis declarations are honestly reported as unsupported",
 TEST_CASE( "M6: numeric rendering stays locale-independent (C-locale dot)",
            "[platform9][charts][formatting]" )
 {
+  // Scope note (accepted review P3): this pins the C-locale contract of the
+  // exact formatting call the chart/table renderers use
+  // (QString::number(v,'g',n) at chart_registry.cpp) — asserting the drawn
+  // pixels would require OCR. If a renderer switches to locale-aware
+  // APIs, this test still passes; the render-determinism hashes are the
+  // backstop.
+{
   // QString::number(v, 'g', n) is C-locale by contract: the chart
   // renderers rely on it, so pin the exact known-answer the table cells
   // will draw regardless of the host locale.
@@ -1386,6 +1397,9 @@ TEST_CASE( "M10: cartography tools expose the 9.0 typed surface",
            "[platform9][tools]" )
 {
   auto &registry = sicnu::agent::spatial_tools::SpatialToolRegistry::instance();
+  // Must not depend on ambient registration order: other TUs in this binary
+  // may or may not have registered builtins before this case runs.
+  registry.registerBuiltinTools();
   for ( const char *tool : { "cartography:compose", "cartography:preflight",
                              "cartography:repair", "cartography:export",
                              "cartography:explain", "cartography:diff_templates" } )
@@ -1436,4 +1450,385 @@ TEST_CASE( "M10: explain returns bounded per-item evidence",
   const SpatialToolResult missing = ( *explain )->execute( input );
   CHECK( !missing.success );
   CHECK( missing.errorCode == "NOT_FOUND" );
+}
+
+// ---------------------------------------------------------------------------
+// Review-hardening additions: apply-path and edge coverage flagged by the
+// adversarial review.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+Json::Value makeStyleSpec( const std::string &id )
+{
+  Json::Value style( Json::objectValue );
+  style["schema_version"] = "1.0";
+  style["kind"] = "style_spec";
+  style["id"] = id;
+  style["version"] = 1;
+  style["applies_to"] = "raster";
+  return style;
+}
+
+/// Writes a 1-band 4x4 GeoTIFF fixture and returns its path (empty on
+/// failure). Local copy of the platform8 pattern — the helper there is
+/// TU-private.
+QString writeRasterFixture( const QString &dir )
+{
+  const QString path = QDir( dir ).filePath( "p9-scale-fixture.tif" );
+  constexpr int kCols = 4;
+  constexpr int kRows = 4;
+  std::vector<float> cells( kCols * kRows, 1.0f );
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  if ( !driver )
+    return QString();
+  GDALDatasetH dataset = GDALCreate( driver, path.toUtf8().constData(), kCols, kRows, 1,
+                                     GDT_Float32, nullptr );
+  if ( !dataset )
+    return QString();
+  double geotransform[6] = { 0, 1, 0, 0, 0, -1 };
+  GDALSetGeoTransform( dataset, geotransform );
+  GDALRasterBandH band = GDALGetRasterBand( dataset, 1 );
+  CPLErr writeErr = GDALRasterIO( band, GF_Write, 0, 0, kCols, kRows, cells.data(), kCols, kRows,
+                                  GDT_Float32, 0, 0 );
+  GDALClose( dataset );
+  return writeErr == CE_None ? path : QString();
+}
+
+} // namespace
+
+TEST_CASE( "M5: raster scale_ranges reach the layer's scale visibility",
+           "[platform9][thematic][scale][apply]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString path = writeRasterFixture( dir.path() );
+  REQUIRE_FALSE( path.isEmpty() );
+  QgsRasterLayer raster( path, QStringLiteral( "p9-scale" ) );
+  REQUIRE( raster.isValid() );
+
+  Json::Value style = makeStyleSpec( "m5-scale-apply" );
+  style["raster"]["renderertype"] = "singleband_gray";
+  style["raster"]["scale_ranges"] = [] {
+    Json::Value s( Json::objectValue );
+    s["min"] = 500000.0;
+    s["max"] = 1000.0;
+    return s;
+  }();
+  REQUIRE( validateStyleSpec( style ).empty() );
+
+  QStringList problems;
+  QString error;
+  REQUIRE( applyStyleSpecToLayer( &raster, style, &error, &problems ) );
+  CHECK( problems.isEmpty() ); // no bivariate block → no advisory
+  REQUIRE( raster.hasScaleBasedVisibility() );
+  CHECK( raster.minimumScale() == Catch::Approx( 500000.0 ).margin( 1e-6 ) );
+  CHECK( raster.maximumScale() == Catch::Approx( 1000.0 ).margin( 1e-6 ) );
+}
+
+TEST_CASE( "M5: applying a bivariate style reports the single-axis honesty advisory",
+           "[platform9][thematic][bivariate][apply]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString path = writeRasterFixture( dir.path() );
+  REQUIRE_FALSE( path.isEmpty() );
+  QgsRasterLayer raster( path, QStringLiteral( "p9-bivariate" ) );
+  REQUIRE( raster.isValid() );
+
+  Json::Value style = makeStyleSpec( "m5-bivariate-apply" );
+  style["raster"]["renderertype"] = "singleband_gray";
+  style["bivariate"] = [] {
+    Json::Value b( Json::objectValue );
+    b["contract"] = "NDVI vs soil moisture jointly classify drought stress";
+    b["x"] = [] {
+      Json::Value a( Json::objectValue );
+      a["field"] = "ndvi";
+      return a;
+    }();
+    b["y"] = [] {
+      Json::Value a( Json::objectValue );
+      a["field"] = "soil_moisture";
+      return a;
+    }();
+    return b;
+  }();
+  REQUIRE( validateStyleSpec( style ).empty() );
+
+  QStringList problems;
+  QString error;
+  REQUIRE( applyStyleSpecToLayer( &raster, style, &error, &problems ) );
+  bool advisory = false;
+  for ( const QString &problem : problems )
+    advisory = advisory || problem.contains( QLatin1String( "not renderable" ) );
+  REQUIRE( advisory );
+}
+
+TEST_CASE( "M6: overlay_on declares intent — dangling refs flagged, declared "
+           "coverage stays silent",
+           "[platform9][charts][overlay]" )
+{
+  // (a) dangling overlay_on reference is structural.
+  Json::Value spec = makeMapSpec( "m6-overlay", Json::Value() );
+  spec["map_frames"].append( item( "map-1", 12, 24, 190, 140 ) );
+  Json::Value chart( Json::objectValue );
+  chart["id"] = "chart-1";
+  chart["rect_mm"] = [] {
+    Json::Value r( Json::arrayValue );
+    r.append( 40.0 );
+    r.append( 60.0 );
+    r.append( 80.0 );
+    r.append( 60.0 );
+    return r;
+  }();
+  Json::Value chartSpec( Json::objectValue );
+  chartSpec["kind"] = "bar";
+  Json::Value binding( Json::objectValue );
+  binding["mode"] = "inline";
+  chartSpec["binding"] = binding;
+  chart["chart"] = chartSpec;
+  chart["overlay_on"] = "ghost-frame";
+  spec["charts"].append( chart );
+  bool flagged = false;
+  for ( const auto &problem : validateMapSpec( spec ) )
+    flagged = flagged || problem.find( "'ghost-frame' does not resolve" ) != std::string::npos;
+  REQUIRE( flagged );
+
+  // (b) declared coverage: the rule stays silent for that frame.
+  spec["charts"][0]["overlay_on"] = "map-1";
+  REQUIRE( validateMapSpec( spec ).empty() );
+  const Json::Value report = preflightMapSpec( spec );
+  for ( const auto &issueEntry : report["issues"] )
+    REQUIRE( issueEntry["code"].asString() != "MAP_CHART_OVER_MAP" );
+}
+
+TEST_CASE( "M8: page-scoped charts keep the finding with a still_reported ledger",
+           "[platform9][qa][ledger][still-reported]" )
+{
+  // The chart repair deliberately skips page-scoped items (page-0 page
+  // geometry only): the ledger must say still_reported, never claim applied.
+  Json::Value spec = makeMapSpec( "m8-ledger-still", Json::Value() );
+  spec["map_frames"].append( item( "map-1", 12, 24, 190, 140 ) );
+  Json::Value chart( Json::objectValue );
+  chart["id"] = "chart-1";
+  chart["page"] = 0; // explicitly declared: the repair skips it on purpose
+  chart["rect_mm"] = [] {
+    Json::Value r( Json::arrayValue );
+    r.append( 40.0 );
+    r.append( 60.0 );
+    r.append( 80.0 );
+    r.append( 60.0 );
+    return r;
+  }();
+  Json::Value chartSpec( Json::objectValue );
+  chartSpec["kind"] = "bar";
+  Json::Value binding( Json::objectValue );
+  binding["mode"] = "inline";
+  chartSpec["binding"] = binding;
+  chart["chart"] = chartSpec;
+  spec["charts"].append( chart );
+
+  const Json::Value report = preflightMapSpec( spec );
+  Json::Value ledger;
+  repairMapSpecWithLedger( spec, report, &ledger );
+  bool stillReported = false;
+  for ( const auto &entry : ledger )
+    if ( entry["code"].asString() == "MAP_CHART_OVER_MAP" )
+    {
+      CHECK( entry["outcome"].asString() == "still_reported" );
+      stillReported = true;
+    }
+  REQUIRE( stillReported );
+}
+
+TEST_CASE( "M9: validation edges — non-string expression, oversized furniture, "
+           "page-0 continuation",
+           "[platform9][validation][edges]" )
+{
+  Json::Value spec = makeMapSpec( "m9-edges", Json::Value() );
+  spec["titles"].append( item( "t", 12, 6, 60, 10 ) );
+  spec["titles"][0]["text"] = "t";
+  spec["titles"][0]["expression"] = 42; // non-string
+
+  Json::Value page2( Json::objectValue );
+  page2["width_mm"] = 297.0;
+  page2["height_mm"] = 210.0;
+  Json::Value furniture( Json::arrayValue );
+  for ( int i = 0; i < 40; ++i )
+    furniture.append( std::string( "x" ) + std::to_string( i ) ); // > 32 budget
+  page2["furniture"] = furniture;
+  spec["pages"].append( page2 );
+
+  const auto problems = validateMapSpec( spec );
+  bool expressionFlagged = false;
+  bool furnitureFlagged = false;
+  for ( const auto &problem : problems )
+  {
+    expressionFlagged =
+      expressionFlagged || problem.find( "expression must be a non-empty" ) != std::string::npos;
+    furnitureFlagged =
+      furnitureFlagged || problem.find( "32 entry budget" ) != std::string::npos;
+  }
+  REQUIRE( expressionFlagged );
+  REQUIRE( furnitureFlagged );
+
+  // continuation on a page-0 item is flagged (meaningless there).
+  Json::Value doc = makeMapSpec( "m9-edges-continuation", Json::Value() );
+  Json::Value label = item( "l", 12, 24, 60, 8 );
+  label["text"] = "l";
+  label["continuation"] = Json::Value( Json::objectValue );
+  label["continuation"]["label"] = "continued on";
+  doc["labels"].append( label );
+  bool continuationFlagged = false;
+  for ( const auto &problem : validateMapSpec( doc ) )
+    continuationFlagged =
+      continuationFlagged || problem.find( "only meaningful on items moved" ) != std::string::npos;
+  REQUIRE( continuationFlagged );
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial-review regressions (P1/P2 findings).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Review: #864 rollback also restores the page field and the "
+           "page_break stamp",
+           "[platform9][pagebreak][rollback][regression]" )
+{
+  // page_break applies in pass 1 (t → page 1, stamped); the inside/inside
+  // contradiction then exhausts the pass budget. The rollback must undo the
+  // page write too — otherwise the rolled-back rect lands on the wrong page
+  // and a re-solve would absorb the break as already-applied.
+  Json::Value spec = makeMapSpec( "review-pb-rollback", Json::Value() );
+  spec["map_frames"].append( item( "c1", 10, 10, 80, 60 ) );
+  spec["map_frames"].append( item( "c2", 150, 10, 80, 60 ) );
+  spec["titles"].append( item( "x", 70, 35, 20, 20 ) );
+  Json::Value title = item( "t", 12, 100, 60, 10 );
+  title["text"] = "t";
+  spec["titles"].append( title );
+  Json::Value extraPage( Json::objectValue );
+  extraPage["width_mm"] = 297.0;
+  extraPage["height_mm"] = 210.0;
+  spec["pages"].append( extraPage );
+
+  Json::Value a = constraint( "inside", { "c1", "x" } );
+  a["id"] = "pull-left";
+  Json::Value b = constraint( "inside", { "c2", "x" } );
+  b["id"] = "pull-right";
+  Json::Value pb = constraint( "page_break", { "t" } );
+  pb["id"] = "pb-t";
+  spec["constraints"].append( a );
+  spec["constraints"].append( b );
+  spec["constraints"].append( pb );
+
+  const CompositionResult result = resolveComposition( spec, 12.0 );
+  REQUIRE( result.converged == false );
+  // Rolled back: no page move, no applied stamp on t.
+  REQUIRE( spec["titles"][1]["page"].isNull() );
+  REQUIRE( spec["titles"][1]["page_break_applied_by"].isNull() );
+  // The rollback is not a one-way trap: once the contradiction is removed,
+  // the break applies again (the rollback restored its pre-state) and the
+  // stamp lands exactly once. (jsoncpp arrays cannot remove by name —
+  // rebuild the array without the two fighting constraints.)
+  Json::Value kept( Json::arrayValue );
+  for ( const auto &constraint : spec["constraints"] )
+    if ( constraint["id"].asString() != "pull-left" &&
+         constraint["id"].asString() != "pull-right" )
+      kept.append( constraint );
+  spec["constraints"] = kept;
+  const CompositionResult second = resolveComposition( spec, 12.0 );
+  REQUIRE( second.converged );
+  REQUIRE( spec["titles"][1]["page"].asInt() == 1 );
+  REQUIRE( spec["titles"][1]["page_break_applied_by"].asString() == "pb-t" );
+}
+
+TEST_CASE( "Review: the overlay deadlock fallback merges per-element and the "
+           "declared document re-validates",
+           "[platform9][charts][overlay][fallback]" )
+{
+  // Two full-page frames: no free slot can exist, so the repair must fall
+  // back to declaring. map-a is pre-declared (string); map-b overlaps
+  // undeclared. The merged overlay_on must be ["map-a", "map-b"] — flat,
+  // and the repaired document must pass validateMapSpec (a nested array
+  // would be rejected).
+  Json::Value spec = makeMapSpec( "review-overlay-merge", Json::Value() );
+  Json::Value full( Json::arrayValue );
+  full.append( 0.0 );
+  full.append( 0.0 );
+  full.append( 420.0 );
+  full.append( 297.0 );
+  Json::Value mapA = item( "map-a", 0, 0, 420, 297 );
+  mapA["extent"] = [] {
+    Json::Value e( Json::arrayValue );
+    e.append( 116.0 );
+    e.append( 39.0 );
+    e.append( 117.0 );
+    e.append( 40.0 );
+    return e;
+  }();
+  Json::Value mapB = item( "map-b", 0, 0, 420, 297 );
+  spec["map_frames"].append( mapA );
+  spec["map_frames"].append( mapB );
+
+  Json::Value chart( Json::objectValue );
+  chart["id"] = "chart-1";
+  chart["rect_mm"] = [] {
+    Json::Value r( Json::arrayValue );
+    r.append( 100.0 );
+    r.append( 100.0 );
+    r.append( 70.0 );
+    r.append( 44.0 );
+    return r;
+  }();
+  chart["overlay_on"] = "map-a";
+  Json::Value chartSpec( Json::objectValue );
+  chartSpec["kind"] = "bar";
+  Json::Value binding( Json::objectValue );
+  binding["mode"] = "inline";
+  chartSpec["binding"] = binding;
+  chart["chart"] = chartSpec;
+  spec["charts"].append( chart );
+
+  REQUIRE( validateMapSpec( spec ).empty() );
+  const Json::Value report = preflightMapSpec( spec );
+  // map-b coverage is undeclared → flagged.
+  bool flagged = false;
+  for ( const auto &issueEntry : report["issues"] )
+    flagged = flagged || issueEntry["code"].asString() == "MAP_CHART_OVER_MAP";
+  REQUIRE( flagged );
+
+  Json::Value ledger;
+  repairMapSpecWithLedger( spec, report, &ledger );
+  const Json::Value &overlays = spec["charts"][0]["overlay_on"];
+  REQUIRE( overlays.isArray() );
+  REQUIRE( overlays.size() == 2 );
+  CHECK( overlays[0].asString() == "map-a" );
+  CHECK( overlays[1].asString() == "map-b" );
+  // The declared document re-validates cleanly (no nested-array rejection).
+  REQUIRE( validateMapSpec( spec ).empty() );
+}
+
+TEST_CASE( "Review: a second page_break on the same item is rejected",
+           "[platform9][pagebreak][validation]" )
+{
+  Json::Value spec = makeMapSpec( "review-pb-dup", Json::Value() );
+  Json::Value title = item( "t", 12, 6, 60, 10 );
+  title["text"] = "t";
+  spec["titles"].append( title );
+  Json::Value p1( Json::objectValue );
+  p1["width_mm"] = 297.0;
+  p1["height_mm"] = 210.0;
+  Json::Value p2 = p1;
+  spec["pages"].append( p1 );
+  spec["pages"].append( p2 );
+  Json::Value pb1 = constraint( "page_break", { "t" } );
+  pb1["id"] = "pb-1";
+  Json::Value pb2 = constraint( "page_break", { "t" } );
+  pb2["id"] = "pb-2";
+  spec["constraints"].append( pb1 );
+  spec["constraints"].append( pb2 );
+
+  bool flagged = false;
+  for ( const auto &problem : validateMapSpec( spec ) )
+    flagged = flagged || problem.find( "more than one page_break" ) != std::string::npos;
+  REQUIRE( flagged );
 }

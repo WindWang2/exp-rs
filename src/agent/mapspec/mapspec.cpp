@@ -364,7 +364,9 @@ void checkV3ItemFields( const Json::Value &item, const std::string &id, const st
     {
       if ( continuation.isMember( "label" ) && !continuation["label"].isString() )
         problems.push_back( id + ": continuation.label must be a string" );
-      if ( item.isMember( "page" ) && item["page"].isIntegral() && item["page"].asInt() < 1 )
+      const int itemPage =
+        item.isMember( "page" ) && item["page"].isIntegral() ? item["page"].asInt() : 0;
+      if ( itemPage < 1 )
         problems.push_back( id + ": continuation is only meaningful on items moved "
                                  "past page 0 (declare page or a page_break)" );
     }
@@ -535,6 +537,43 @@ bool removeMapSpecItem( Json::Value &spec, const std::string &id )
     }
   }
   return false;
+}
+
+void expandMasterFurniture( Json::Value &spec )
+{
+  if ( !spec.isObject() || !spec.isMember( "pages" ) || !spec["pages"].isArray() )
+    return;
+  const Json::Value pages = spec["pages"]; // stable copy: expansion appends
+  for ( Json::Value::ArrayIndex k = 0; k < pages.size(); ++k )
+  {
+    const Json::Value &pageEntry = pages[k];
+    if ( !pageEntry.isObject() || !pageEntry.isMember( "furniture" ) ||
+         !pageEntry["furniture"].isArray() )
+      continue;
+    // The >32 budget is validated after expansion; skipping oversized
+    // declarations here keeps pre-validation work proportional to valid
+    // input.
+    if ( static_cast<int>( pageEntry["furniture"].size() ) > 32 )
+      continue;
+    const int pageIndex = static_cast<int>( k ) + 1;
+    for ( const auto &reference : pageEntry["furniture"] )
+    {
+      if ( !reference.isString() )
+        continue;
+      const std::string masterId = reference.asString();
+      const Json::Value location = findMapSpecItem( spec, masterId );
+      if ( location.isNull() )
+        continue; // validateMapSpec reports the dangling reference
+      const std::string cloneId = masterId + "-p" + std::to_string( pageIndex );
+      if ( !findMapSpecItem( spec, cloneId ).isNull() )
+        continue; // validateMapSpec reports the duplicate id
+      Json::Value clone = spec[location["collection"].asString()][location["index"].asInt()];
+      clone["id"] = cloneId;
+      clone["page"] = pageIndex;
+      clone["master_of"] = masterId;
+      spec[location["collection"].asString()].append( clone );
+    }
+  }
 }
 
 std::vector<std::string> validateMapSpec( const Json::Value &spec )
@@ -778,6 +817,10 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
   if ( spec.isMember( "constraints" ) && spec["constraints"].isArray() )
   {
     std::set<std::string> constraintIds;
+    // Platform 9.0: at most one page_break per item — the per-item applied
+    // stamp makes a second break on the same item unrepresentable across
+    // compose round trips (it would either re-break or silently no-op).
+    std::set<std::string> pageBrokenItems;
     for ( const auto &constraint : spec["constraints"] )
     {
       // v4: duplicate declared ids would collapse per-constraint reports and
@@ -887,10 +930,17 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
             continue;
           }
           const Json::Value &reference = constraint["items"][0];
-          if ( reference.isString() &&
-               findMapSpecItem( spec, reference.asString() ).isNull() )
+          if ( !reference.isString() )
+          {
+            problems.push_back( cid + ": page_break items[0] must be an item id string" );
+            continue;
+          }
+          if ( findMapSpecItem( spec, reference.asString() ).isNull() )
             problems.push_back( cid + ": constraint item '" + reference.asString() +
                                 "' does not resolve" );
+          if ( !pageBrokenItems.insert( reference.asString() ).second )
+            problems.push_back( cid + ": item '" + reference.asString() +
+                                "' is targeted by more than one page_break" );
           const int declaredPages =
             spec.isMember( "pages" ) && spec["pages"].isArray()
               ? static_cast<int>( spec["pages"].size() )

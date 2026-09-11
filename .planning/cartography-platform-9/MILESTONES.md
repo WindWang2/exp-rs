@@ -48,12 +48,18 @@ target: `test_mapspec` (all cartography test files live there) with new
 
 - [x] Per-category audit recorded (CAPABILITY_MATRIX M3 section).
 - [x] New `table--accuracy-matrix` component (declared accuracy E2E).
-- [x] `accessibility` blocks audited/completed (min_pt, min_contrast) on
-  catalog entries; drift guard updated.
+- [x] DECISION: no decorative `accessibility` blocks stamped onto
+  descriptors — nothing reads them, which would be fake compliance. The
+  real accessibility mechanisms are the MAP_TINY_FONT preflight floor and
+  the WCAG-derived checkStyleContrast advisories (both shipped); the
+  catalog audit confirmed every category maps to existing components.
 
-## M4 — Template composition  【done → commit "feat(cartography): templates 9.0 — multi-parent extends, semantic diff, provenance"】
+## M4 — Template composition  【implemented → verify pending】
 
-- [x] Multi-parent `extends` (ordered merge, acyclic validated).
+- [x] SCOPE CORRECTION from the baseline audit: multi-parent `extends`
+  (ordered left-to-right fold, cycle detection, provenance stamps) is
+  ALREADY fully implemented in Platform 7.0 — pinning it with a disk-catalog
+  regression test instead of re-implementing (no-duplication rule).
 - [x] `cartography:diff_templates` bounded semantic diff.
 - [x] Template provenance stamping + compose echo.
 - [x] Mechanical coverage: every catalog token/component/style/template
@@ -73,10 +79,16 @@ target: `test_mapspec` (all cartography test files live there) with new
 - [x] MAP_FURNITURE_OVER_MAP rule + repair.
 - [x] Known-answer tests (formatting, dual-axis accept/reject, rule fire).
 
-## M7 — Typography 3.0  【done → commit "feat(cartography): typography 3.0 — line-end kinsoku push-out, CJK golden"】
+## M7 — Typography 3.0  【implemented → verify pending】
 
-- [x] Opening-punctuation line-end guard (push-out) with known-answers.
-- [x] CJK visual golden scene (render evidence, out-of-tree goldens).
+- [x] SCOPE CORRECTION from the baseline audit: the kinsoku line-end
+  opening guard already exists in `breakableGaps` (both directions are
+  guarded since 7.0) — pinned with known-answer tests instead of
+  re-implemented.
+- [x] Ellipsis-truncation evidence pinned (truncated + U+2026 + !fits).
+- [x] CJK visual scene already present in the visual harness
+  (`cjk-title` fixture); golden comparison stays opt-in by documented
+  design.
 
 ## M8 — Map QA / Auto-Repair  【done → commit "feat(cartography): QA 9.0 — new rules, repair ledger, CRS declaration"】
 

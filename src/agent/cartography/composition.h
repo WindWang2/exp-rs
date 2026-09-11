@@ -204,8 +204,10 @@ CompositionResult resolveComposition( Json::Value &spec, double marginDefaultMm 
 
 /// Platform 9.0 scoped re-solve: identical pipeline, restricted to the
 /// constraints that touch at least one of `focusItemIds` (anchors and size
-/// clamps apply to focus items only). Used by bounded repair loops so a
-/// later pass cannot pay the full-document solve cost; for a focus set
+/// clamps apply to focus items only). Available for bounded repair loops so
+/// a later pass cannot pay the full-document solve cost (the shipped repair
+/// tool keeps the single full solve per its 6.0 convergence contract); for
+/// a focus set
 /// whose constraints reference only focus items, the focus-set geometry
 /// equals the full solve's geometry on that set (same canonical ordering,
 /// same fixpoint policy).

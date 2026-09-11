@@ -236,7 +236,12 @@ class Solver
     struct RectSnapshot
     {
         Json::Value *item = nullptr;
-        Json::Value rect; ///< deep copy of the item's rect_mm (or null)
+        Json::Value rect;   ///< deep copy of the item's rect_mm (or null)
+        Json::Value page;   ///< deep copy of the item's page (or null) — the
+                            ///  page_break kind writes this field, so the
+                            ///  #864 rollback must restore it too, or a
+                            ///  rolled-back layout lands on the wrong page
+        Json::Value pageBreakStamp; ///< deep copy of page_break_applied_by (or null)
     };
     void saveRects( std::vector<RectSnapshot> &out ) const;
     void restoreRects( const std::vector<RectSnapshot> &snapshots ) const;
@@ -1030,6 +1035,7 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
       }
       double sizePt = 9.0;
       double lineHeight = kDefaultLineHeightFactor;
+      std::string breakPolicy = "none";
       if ( source->isMember( "font" ) && ( *source )["font"].isObject() )
       {
         const Json::Value &font = ( *source )["font"];
@@ -1037,6 +1043,8 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
           sizePt = font["size_pt"].asDouble();
         if ( font.isMember( "line_height" ) && font["line_height"].isNumeric() )
           lineHeight = font["line_height"].asDouble();
+        if ( font.isMember( "break_policy" ) && font["break_policy"].isString() )
+          breakPolicy = font["break_policy"].asString();
       }
       double wrapWidthMm = leader.w;
       if ( wrapWidthMm <= 0 )
@@ -1048,7 +1056,7 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
       bool lineBudgetHit = false;
       const std::vector<std::string> lines =
         wrapWidthMm > 0
-          ? wrapTextMmBudgeted( text, wrapWidthMm, sizePt, &lineBudgetHit )
+          ? wrapTextMmBudgeted( text, wrapWidthMm, sizePt, &lineBudgetHit, breakPolicy )
           : std::vector<std::string>{ text };
       double widthMm = 0.0;
       for ( const std::string &line : lines )
@@ -1112,12 +1120,8 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
                       " is not declared";
       return Apply::Failed;
     }
-    if ( item->isMember( "page" ) && ( *item )["page"].isIntegral() &&
-         ( *item )["page"].asInt() == targetPage )
-    {
-      ( *item )["page_break_applied_by"] = c.cid;
-      return Apply::Satisfied;
-    }
+    // targetPage is currentPage+1 by construction, so an integral page field
+    // can never equal it here — no additional equality short-circuit.
     targets.push_back( { item, Rect(), targetPage, c.cid } );
     return Apply::Applied;
   }
@@ -1202,6 +1206,7 @@ bool Solver::sweepHardOnce()
   // actually wrote; anchors/clamps move without a constraint identity and
   // are covered by the anchors_resolved/sizes_clamped counters.
   std::vector<std::string> appliedThisPass;
+  int appliedTotal = 0;
   bool appliedTruncated = false;
   const bool traceThisPass = mTrace && !mSimulating;
   for ( auto &c : mConstraints )
@@ -1220,6 +1225,7 @@ bool Solver::sweepHardOnce()
       wrote = true;
       if ( traceThisPass )
       {
+        ++appliedTotal;
         if ( static_cast<int>( appliedThisPass.size() ) < kMaxTraceAppliedPerPass )
           appliedThisPass.push_back( c.cid );
         else
@@ -1268,7 +1274,7 @@ bool Solver::sweepHardOnce()
   {
     CompositionTraceEntry entry;
     entry.pass = mPasses > 0 ? mPasses : 0;
-    entry.moves = static_cast<int>( appliedThisPass.size() );
+    entry.moves = appliedTotal;
     entry.applied = std::move( appliedThisPass );
     entry.truncated = appliedTruncated;
     mTrace->push_back( std::move( entry ) );
@@ -1373,6 +1379,12 @@ void Solver::saveRects( std::vector<RectSnapshot> &out ) const
       snapshot.item = &item;
       snapshot.rect = item.isMember( "rect_mm" ) ? item.get( "rect_mm", Json::Value() )
                                                  : Json::Value();
+      snapshot.page = item.isMember( "page" ) ? item.get( "page", Json::Value() )
+                                              : Json::Value();
+      snapshot.pageBreakStamp =
+        item.isMember( "page_break_applied_by" )
+          ? item.get( "page_break_applied_by", Json::Value() )
+          : Json::Value();
       out.push_back( std::move( snapshot ) );
     }
   }
@@ -1386,6 +1398,16 @@ void Solver::restoreRects( const std::vector<RectSnapshot> &snapshots ) const
       snapshot.item->removeMember( "rect_mm" );
     else
       ( *snapshot.item )["rect_mm"] = snapshot.rect;
+    // The page_break writes live outside rect_mm; the rollback restores them
+    // with the same null-means-absent contract.
+    if ( snapshot.page.isNull() )
+      snapshot.item->removeMember( "page" );
+    else
+      ( *snapshot.item )["page"] = snapshot.page;
+    if ( snapshot.pageBreakStamp.isNull() )
+      snapshot.item->removeMember( "page_break_applied_by" );
+    else
+      ( *snapshot.item )["page_break_applied_by"] = snapshot.pageBreakStamp;
   }
 }
 

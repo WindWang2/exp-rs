@@ -1869,12 +1869,18 @@ class ExplainTool final : public SpatialTool
       std::map<std::string, std::vector<std::string>> constraintItems;
       if ( spec.isMember( "constraints" ) && spec["constraints"].isArray() )
       {
+        // Mirror buildRuntimes EXACTLY: only solver kinds consume a
+        // declaration index (legacy/free-form items are skipped there too),
+        // otherwise synthesized kind#index identities diverge and explain
+        // would name the wrong constraint.
         int declaredIndex = 0;
         for ( const auto &constraint : spec["constraints"] )
         {
           if ( !constraint.isObject() || !constraint.isMember( "kind" ) ||
                !constraint["kind"].isString() || !constraint.isMember( "items" ) ||
                !constraint["items"].isArray() )
+            continue;
+          if ( !mapspec::isConstraintKind( constraint["kind"].asString() ) )
             continue;
           std::string cid =
             constraint.isMember( "id" ) && constraint["id"].isString() &&

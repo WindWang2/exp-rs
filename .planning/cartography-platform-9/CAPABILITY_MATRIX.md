@@ -50,7 +50,8 @@ and bounds. Status: **HAS** (exists, do not rebuild — at most extend),
 | descriptor schema v2 validation (variants, defaults, compatibility, layout_constraints) | HAS | `validateComponentDescriptor` |
 | composite children grammar (bounded, role-qualified) | HAS | Platform 6.0 Milestone C |
 | applicability + accessibility + bounds per component | PARTIAL | layout_constraints + validation exist; accessibility tokens are style-level; M3 audits and fills declared `accessibility` (min contrast/min pt) on the catalog entries missing it |
-| catalog drift guard | HAS | `test_knowledge_drift.cpp` + `cartography:lint_catalog` |
+| catalog drift guard | HAS | `test_knowledge_drift.cpp` + `cartography:lint_catalog` (index regenerated with SICNU_CARTOGRAPHY_REGENERATE_INDEX) |
+| accessibility per component | HAS (decision) | real mechanisms are MAP_TINY_FONT + checkStyleContrast; decorative unread descriptor fields rejected as fake compliance |
 
 Per-component audit result (M3): all 12 M3 categories have ≥1 component
 (map_frame→map-frame--{primary,comparison,small-multiples}; title/subtitle;
@@ -67,7 +68,7 @@ for accuracy E2E, add `chart--confusion-matrix` already exists → verify only).
 | Capability | Status | Evidence |
 |---|---|---|
 | template inheritance (`extends` chain resolution) | HAS | TemplateRegistry loadProblems (cycles/unknown parents) |
-| multi-parent inheritance | MISSING | M4: extends accepts ordered array; first-match-wins merge documented + validated acyclic |
+| multi-parent inheritance | HAS (scope correction) | `resolveTemplateChain` folds ordered parent arrays left-to-right with cycle detection + provenance (7.0); M4 PINS it with a disk-catalog test |
 | variants + facets (task/medium/purpose) | HAS | Platform 6.0 Milestone D |
 | component defaults + overrides precedence | HAS | ADR 0130 chain (item > variant > defaults) |
 | semantic template diff | MISSING | M4: `cartography:diff_templates` tool — deterministic structural diff of two resolved templates (slots/defaults/roles/geometry deltas) |

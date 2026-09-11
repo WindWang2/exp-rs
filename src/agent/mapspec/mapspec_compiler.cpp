@@ -175,44 +175,11 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
   }
 
   // --- Platform 9.0: master furniture expansion -----------------------------
-  // `pages[k].furniture` names items to repeat onto page k+1. Each reference
-  // is materialized as a clone declared next to the original (id
-  // `<id>-p<k+1>`, provenance `master_of: <id>`) BEFORE validation, so the
-  // clone flows through the exact same compile paths (component defaults,
-  // solver, page placement) as hand-declared furniture — one compile path,
-  // no special casing downstream. Unresolvable ids are left alone here;
-  // validateMapSpec reports them (`page.furniture item '…' does not
-  // resolve`), as do id collisions with hand-declared `<id>-p<n>` items.
-  if ( spec.isObject() && spec.isMember( "pages" ) && spec["pages"].isArray() )
-  {
-    const Json::Value pages = spec["pages"]; // stable copy: expansion appends
-    for ( Json::Value::ArrayIndex k = 0; k < pages.size(); ++k )
-    {
-      const Json::Value &pageEntry = pages[k];
-      if ( !pageEntry.isObject() || !pageEntry.isMember( "furniture" ) ||
-           !pageEntry["furniture"].isArray() )
-        continue;
-      const int pageIndex = static_cast<int>( k ) + 1;
-      for ( const auto &reference : pageEntry["furniture"] )
-      {
-        if ( !reference.isString() )
-          continue;
-        const std::string masterId = reference.asString();
-        const Json::Value location = findMapSpecItem( spec, masterId );
-        if ( location.isNull() )
-          continue; // validateMapSpec reports the dangling reference
-        const std::string cloneId = masterId + "-p" + std::to_string( pageIndex );
-        if ( !findMapSpecItem( spec, cloneId ).isNull() )
-          continue; // validateMapSpec reports the duplicate id
-        Json::Value clone =
-          spec[location["collection"].asString()][location["index"].asInt()];
-        clone["id"] = cloneId;
-        clone["page"] = pageIndex;
-        clone["master_of"] = masterId;
-        spec[location["collection"].asString()].append( clone );
-      }
-    }
-  }
+  // `pages[k].furniture` names items to repeat onto page k+1; the shared
+  // expansion materializes provenance clones BEFORE validation so clones
+  // flow through the exact same compile paths as hand-declared furniture.
+  expandMasterFurniture( spec );
+
   const auto problems = validateMapSpec( spec );
   if ( !problems.empty() )
   {
