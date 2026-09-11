@@ -2007,10 +2007,12 @@ target_link_libraries(test_mlops9_evidence PRIVATE Sicnu::experiment Sicnu::data
 # MLOps 9.0 scale & durability: 100k-run metadata stress, concurrent
 # readers/writer, corruption refusal, injected commit-fault recovery.
 # RUN_SERIAL: pays 100k single-row transactions by design.
-sicnu_add_test(test_mlops9_scale TIMEOUT 900)
+# RUN_SERIAL TRUE is forwarded through sicnu_discover_tests as a real ctest
+# test property (a target-level RUN_SERIAL would be a no-op for discovered
+# tests — review round 1).
+sicnu_add_test(test_mlops9_scale TIMEOUT 900 RUN_SERIAL TRUE)
 target_link_libraries(test_mlops9_scale PRIVATE
   Sicnu::experiment Sicnu::dataset SQLite::SQLite3 sicnu_runtime)
-set_property(TARGET test_mlops9_scale PROPERTY RUN_SERIAL TRUE)
 
 # MLOps 9.0 CLI auto-recording E2E: real sicnu_geo_rs_cli subprocess with
 # --experiment-record; POSIX spawn (popen) like test_cli_commands_json.

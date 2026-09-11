@@ -492,17 +492,25 @@ void drainCoordinator( long pipelineId )
 /// coordinator's run aggregate — content-identical to what the queued event
 /// would carry (same snapshot code path). flush() drains any duplicate
 /// queued delivery afterwards; the bridge treats repeats idempotently.
-void flushRecording( long pipelineId,
-                     const std::shared_ptr<sicnu::experiment::WorkflowExperimentMonitor> &monitor )
+void RsPipelineRunner::flushRecording( long pipelineId )
 {
-  if ( monitor )
+  if ( !m_monitor )
+    return;
+  const auto aggregate =
+      sicnu::workflow::WorkflowRunCoordinator::instance().runForPipeline( pipelineId );
+  if ( aggregate )
   {
-    const auto aggregate =
-        sicnu::workflow::WorkflowRunCoordinator::instance().runForPipeline( pipelineId );
-    if ( aggregate )
-      monitor->recordAggregateState( *aggregate );
-    monitor->flush();
+    // Never silent: a refused terminal record (e.g. the fold had not landed
+    // within the drain window) leaves a Running record behind and must be
+    // visible in the operator's log (review round 1).
+    const auto recorded = m_monitor->recordAggregateState( *aggregate );
+    if ( !recorded )
+    {
+      reportLog( "warn", "terminal experiment recording not written: " +
+                             recorded.diagnostics().first().message.toStdString() );
+    }
   }
+  m_monitor->flush();
 }
 
 RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Value &pipelineJson )
@@ -565,7 +573,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
         reportLog( "error", result.errorMessage );
         result.success = false;
         drainCoordinator( pipelineId );
-        flushRecording( pipelineId, m_monitor );
+        flushRecording( pipelineId );
         return result;
     }
     // Wait for completion, waking every poll interval to emit progress.
@@ -715,7 +723,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
                                   : pipeInfo.errorMessage.toStdString();
         result.success = false;
         drainCoordinator( pipelineId );
-        flushRecording( pipelineId, m_monitor );
+        flushRecording( pipelineId );
         return result;
       }
 
@@ -725,7 +733,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
         registerStepOutputs( pipelineId );
       }
       reportLog( "info", "Pipeline completed successfully: " + def.title );
-      flushRecording( pipelineId, m_monitor );
+      flushRecording( pipelineId );
       return result;
     }
 
@@ -735,7 +743,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
       result.errorMessage = "Pipeline timed out waiting for TaskCenter";
       reportLog( "error", result.errorMessage );
       drainCoordinator( pipelineId );
-      flushRecording( pipelineId, m_monitor );
+      flushRecording( pipelineId );
       return result;
     }
   }
@@ -999,6 +1007,13 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
   for ( const QString &note : recovery.errors )
     reportLog( "warn", "recovery: " + note.toStdString() );
 
+  // MLOps 9.0: enable recording BEFORE the resume so an invalid
+  // --experiment-record configuration is reported before any execution work,
+  // and so the store exists (holding zero runs for a refused resume —
+  // nothing fabricated) regardless of the resume outcome.
+  if ( m_recordingOptions.enabled && ensureRecordingEnabled() )
+    m_monitor->optInResume( QString::fromStdString( runId ) );
+
   QString resumeError;
   const long pipelineId = coordinator.resumeRun( runId, &resumeError );
   if ( pipelineId < 0 )
@@ -1007,14 +1022,9 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
                           + ( resumeError.isEmpty() ? QStringLiteral( "unknown run" )
                                                     : resumeError ).toStdString();
     reportLog( "error", result.errorMessage );
+    flushRecording( 0 );
     return result;
   }
-
-  // MLOps 9.0: a recording-enabled resume continues the SAME experiment
-  // record (opt-in by execution ref; unknown refs are refused by the bridge
-  // — nobody fabricates history for executions nobody recorded).
-  if ( m_recordingOptions.enabled && ensureRecordingEnabled() )
-    m_monitor->optInResume( QString::fromStdString( runId ) );
 
   reportLog( "info", "Resuming tracked run " + runId + " (pipeline "
                      + std::to_string( pipelineId ) + "): completed steps with "
@@ -1029,7 +1039,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
       sicnu::TaskCenter::instance().cancelPipeline( pipelineId );
       result.errorMessage = "Resumed run interrupted by signal";
       reportLog( "error", result.errorMessage );
-      flushRecording( pipelineId, m_monitor );
+      flushRecording( pipelineId );
       return result;
     }
     const auto pipeInfo = sicnu::TaskCenter::instance().waitForPipeline( pipelineId,
@@ -1121,13 +1131,13 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
           }
           reportLog( "info", "Resumed run completed: " + runId );
         }
-        flushRecording( pipelineId, m_monitor );
+        flushRecording( pipelineId );
         return result;
       }
       // No aggregate (defensive): fall back to the pipeline verdict.
       result.success = pipeInfo.isCompleted;
       result.errorMessage = pipeInfo.errorMessage.toStdString();
-      flushRecording( pipelineId, m_monitor );
+      flushRecording( pipelineId );
       return result;
     }
 
@@ -1136,7 +1146,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
       sicnu::TaskCenter::instance().cancelPipeline( pipelineId );
       result.errorMessage = "Resumed run timed out waiting for TaskCenter";
       reportLog( "error", result.errorMessage );
-      flushRecording( pipelineId, m_monitor );
+      flushRecording( pipelineId );
       return result;
     }
   }

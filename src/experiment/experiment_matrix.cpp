@@ -216,12 +216,18 @@ Result<QVector<MatrixCell>> MatrixDescriptor::enumerateCells() const
     }
 
     // Cell identity last, once every assignment is in place: SHA-256 over
-    // the canonical RFC-8785 form — "same cell" is content identity.
+    // the canonical RFC-8785 form of {matrix_id, assignments}. The matrix id
+    // is part of the identity (review round 1): two matrices with identical
+    // assignment sets are DIFFERENT experiments, so their ledgers and
+    // aggregates must never co-mingle.
     for ( MatrixCell &cell : cells )
     {
+        QJsonObject identity;
+        identity.insert( QStringLiteral( "matrix_id" ), matrixId );
+        identity.insert( QStringLiteral( "assignments" ),
+                         cellIdentityJson( cell.assignments ) );
         cell.cellId = QString::fromUtf8(
-            QCryptographicHash::hash( sicnu::data::canonicalizeJsonRfc8785(
-                                          cellIdentityJson( cell.assignments ) ),
+            QCryptographicHash::hash( sicnu::data::canonicalizeJsonRfc8785( identity ),
                                       QCryptographicHash::Sha256 )
                 .toHex() );
     }
@@ -401,11 +407,24 @@ Result<MatrixAggregate> MatrixAggregator::aggregate(
             cellAggregate.metrics.insert( it.key(), stats );
         }
 
-        cellAggregate.status = anyRecorded
-                                   ? ( anyFailed ? QStringLiteral( "partial" )
-                                                 : QStringLiteral( "recorded" ) )
-                                   : ( anyFailed ? QStringLiteral( "failed" )
-                                                 : QStringLiteral( "missing" ) );
+        bool anyInFlight = false;
+        for ( const QString &runId : cellAggregate.runIds )
+        {
+            const auto run = m_store->runById( runId );
+            if ( run.has_value() &&
+                 ( run->status() == RunStatus::Created ||
+                   run->status() == RunStatus::Running ||
+                   run->status() == RunStatus::Interrupted ||
+                   run->status() == RunStatus::Cancelling ) )
+                anyInFlight = true;
+        }
+        cellAggregate.status =
+            anyRecorded
+                ? ( anyFailed ? QStringLiteral( "partial" )
+                              : QStringLiteral( "recorded" ) )
+                : ( anyFailed ? QStringLiteral( "failed" )
+                              : ( anyInFlight ? QStringLiteral( "in_progress" )
+                                              : QStringLiteral( "missing" ) ) );
         if ( cellAggregate.status == QStringLiteral( "recorded" ) ||
              cellAggregate.status == QStringLiteral( "partial" ) )
             ++aggregate.recordedCells;
@@ -416,6 +435,34 @@ Result<MatrixAggregate> MatrixAggregator::aggregate(
         aggregate.cells.append( cellAggregate );
     }
     return Result<MatrixAggregate>::success( aggregate );
+}
+
+QJsonObject MatrixAggregate::toJson() const
+{
+    QJsonObject json;
+    json.insert( QStringLiteral( "matrix_id" ), matrixId );
+    json.insert( QStringLiteral( "total_cells" ), totalCells );
+    json.insert( QStringLiteral( "recorded_cells" ), recordedCells );
+    json.insert( QStringLiteral( "missing_cells" ), missingCells );
+    json.insert( QStringLiteral( "failed_cells" ), failedCells );
+    QJsonArray cellArray;
+    for ( const CellAggregate &cell : cells )
+    {
+        QJsonObject item;
+        item.insert( QStringLiteral( "cell_id" ), cell.cellId );
+        item.insert( QStringLiteral( "status" ), cell.status );
+        QJsonArray runs;
+        for ( const QString &runId : cell.runIds )
+            runs.append( runId );
+        item.insert( QStringLiteral( "run_ids" ), runs );
+        QJsonObject cellMetrics;
+        for ( auto it = cell.metrics.constBegin(); it != cell.metrics.constEnd(); ++it )
+            cellMetrics.insert( it.key(), it.value().toJson() );
+        item.insert( QStringLiteral( "metrics" ), cellMetrics );
+        cellArray.append( item );
+    }
+    json.insert( QStringLiteral( "cells" ), cellArray );
+    return json;
 }
 
 QStringList MatrixAggregator::paretoCellIds( const MatrixAggregate &aggregate,

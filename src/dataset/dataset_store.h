@@ -117,9 +117,11 @@ class DatasetStore
     /// (possible in stores written before parent validation existed) is a
     /// typed `dataset.parent_not_found` failure, never a silently truncated
     /// chain. Loops or chains deeper than @p maxDepth fail with
-    /// `dataset.version_cycle`.
+    /// `dataset.version_cycle` (default: the same kMaxVersionLineageDepth
+    /// the write path enforces — a chain that can be written can be read).
     sicnu::data::Result<QVector<DatasetVersionRecord>> versionAncestors(
-        const DatasetVersionId &versionId, qint64 maxDepth = 64 ) const;
+        const DatasetVersionId &versionId,
+        qint64 maxDepth = kMaxVersionLineageDepth ) const;
     /// Creates a draft derived from an immutable parent (fork/derive, 9.0):
     /// the parent's canonical manifest becomes the child's starting content
     /// with identity/parent rewritten and the fingerprint left for the usual

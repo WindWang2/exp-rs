@@ -116,9 +116,11 @@ struct CellAggregate
 {
     QString cellId;
     QHash<QString, QString> assignments;
-    /// "recorded" (≥1 linked run), "missing" (no linked run),
-    /// "failed" (all linked runs terminal-failed/cancelled),
-    /// "partial" (some linked runs failed, at least one recorded).
+    /// "recorded" (≥1 linked Completed run), "missing" (no linked run),
+    /// "failed" (linked runs exist, all terminal-failed/cancelled),
+    /// "partial" (some linked runs failed, at least one recorded),
+    /// "in_progress" (linked runs exist, none terminal yet).
+    /// Note: recorded+missing+failed != total when in_progress cells exist.
     QString status;
     QStringList runIds;
     QHash<QString, MetricAggregate> metrics; ///< metric name → aggregate

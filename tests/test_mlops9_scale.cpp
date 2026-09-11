@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <optional>
 #include <thread>
 
 using namespace sicnu::dataset;
@@ -212,10 +213,16 @@ TEST_CASE( "an injected commit fault takes the real failure branch, then recover
     experiment.setName( QStringLiteral( "fault" ) );
     REQUIRE( store.upsertExperiment( experiment ).has_value() );
 
-    armFault( FaultAction{ "experiment_store.commit", Mode::Always, 0, {} } );
-    const auto refused = store.upsertRun( scaleRun( experimentId, 0 ) );
-    disarmFault( "experiment_store.commit" );
-    REQUIRE( !refused.has_value() );
+    // RAII arming: the fault can never leak into a later case on a failure
+    // path (review round 1). Inner scope: the fault is disarmed before the
+    // recovery write below.
+    std::optional<sicnu::data::Result<void>> refused;
+    {
+        const ArmedFault guard{
+            FaultAction{ "experiment_store.commit", Mode::Always, 0, {} } };
+        refused = store.upsertRun( scaleRun( experimentId, 0 ) );
+    }
+    REQUIRE( !refused.value().has_value() );
     // The store is still fully usable: the failed transaction left no half-run.
     REQUIRE( store.runCount() == 0 );
 

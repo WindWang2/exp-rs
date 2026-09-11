@@ -207,7 +207,6 @@ Result<PromotionEvaluation> PromotionEvaluator::evaluate(
 }
 
 Result<QString> PromotionEvaluator::record( const PromotionRequest &request,
-                                            const PromotionEvaluation &evaluation,
                                             const QString &decision,
                                             const QString &decidedBy ) const
 {
@@ -216,6 +215,12 @@ Result<QString> PromotionEvaluator::record( const PromotionRequest &request,
         return Result<QString>::failure( promotionError(
             QStringLiteral( "decision must be pending, approved or rejected" ) ) );
 
+    // The stored verdict is re-derived from the store right here: a caller
+    // cannot persist an eligibility claim the recorded evidence contradicts.
+    const auto evaluation = evaluate( request );
+    if ( !evaluation )
+        return Result<QString>::failure( evaluation.diagnostics() );
+
     PromotionRecord record;
     record.promotionId = ExperimentId::generate().toString();
     record.runId = request.runId;
@@ -223,12 +228,12 @@ Result<QString> PromotionEvaluator::record( const PromotionRequest &request,
     record.modelDigest = request.modelDigest;
     const auto run = m_store->runById( request.runId );
     record.datasetVersionId = run.has_value() ? run->datasetVersionId() : QString();
-    record.verdict = evaluation.eligible ? QStringLiteral( "eligible" )
-                                         : QStringLiteral( "ineligible" );
+    record.verdict = evaluation.value().eligible ? QStringLiteral( "eligible" )
+                                                 : QStringLiteral( "ineligible" );
     record.decision = decision;
     record.decidedBy = decidedBy;
     record.criteriaJson = QString::fromUtf8(
-        QJsonDocument( evaluation.toJson() ).toJson( QJsonDocument::Compact ) );
+        QJsonDocument( evaluation.value().toJson() ).toJson( QJsonDocument::Compact ) );
     record.createdAtUtc = QDateTime::currentDateTimeUtc();
     if ( decision != QStringLiteral( "pending" ) )
         record.decidedAtUtc = QDateTime::currentDateTimeUtc();

@@ -230,8 +230,9 @@ class SampleRecord
     /// Label validity window (9.0): the period over which the label is
     /// scientifically valid (e.g. land cover of a specific season). Invalid
     /// (= empty) bounds mean unbounded on that side; a set window must be
-    /// non-empty (from <= until). Splitting by observation time can then
-    /// refuse labels used outside their validity.
+    /// non-empty (from <= until) and observation times inside it.
+    /// Scope: storage + validation only — split engines do not consult the
+    /// window (threading validity into split-time refusal is future work).
     const QDateTime &validFromUtc() const { return m_validFromUtc; }
     void setValidFromUtc( const QDateTime &time ) { m_validFromUtc = time; }
     const QDateTime &validUntilUtc() const { return m_validUntilUtc; }

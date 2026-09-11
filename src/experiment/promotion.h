@@ -75,13 +75,14 @@ class PromotionEvaluator
     /// Reads only; never mutates.
     Result<PromotionEvaluation> evaluate( const PromotionRequest &request ) const;
 
-    /// Persists the evaluation as promotion evidence with approval metadata
-    /// (@p decision "approved"/"rejected"/"pending", @p decidedBy = who or
-    /// what decided). Idempotent by content: re-recording the same evidence
-    /// with a DIFFERENT decision is a conflict — the approval trail is
-    /// append-only by contract (store `experiment.promotion_conflict`).
+    /// Re-derives the evaluation from the store and persists it as
+    /// promotion evidence with approval metadata (@p decision
+    /// "approved"/"rejected"/"pending", @p decidedBy = who or what decided).
+    /// The verdict stored is ALWAYS the freshly derived one — a caller
+    /// cannot persist an eligibility claim the recorded metrics do not
+    /// support (review round 1). Each record gets a fresh id; immutability
+    /// is enforced at the store layer for a SAME id (content conflict).
     Result<QString> record( const PromotionRequest &request,
-                            const PromotionEvaluation &evaluation,
                             const QString &decision, const QString &decidedBy ) const;
 
   private:

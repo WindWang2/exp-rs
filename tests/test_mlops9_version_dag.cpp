@@ -21,6 +21,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTemporaryDir>
 
 #include <sqlite3.h>
 
@@ -93,7 +94,9 @@ TEST_CASE( "createDraftVersion refuses dangling and cross-dataset parents",
            "[mlops9][dag]" )
 {
     DatasetStore store;
-    const QString path = QStringLiteral( "mlops9_dag_parent.sqlite" );
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+    const QString path = tempDir.filePath( QStringLiteral( "mlops9_dag_parent.sqlite" ) );
     QFile::remove( path );
     REQUIRE( store.open( path ) );
 
@@ -128,14 +131,15 @@ TEST_CASE( "createDraftVersion refuses dangling and cross-dataset parents",
     const auto chain = commitChain( store, datasetId, 2 );
     REQUIRE( chain.size() == 2 );
     store.close();
-    QFile::remove( path );
 }
 
 TEST_CASE( "versionAncestors walks child to root and refuses corrupt lineages",
            "[mlops9][dag]" )
 {
     DatasetStore store;
-    const QString path = QStringLiteral( "mlops9_dag_ancestors.sqlite" );
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+    const QString path = tempDir.filePath( QStringLiteral( "mlops9_dag_ancestors.sqlite" ) );
     QFile::remove( path );
     REQUIRE( store.open( path ) );
 
@@ -208,13 +212,14 @@ TEST_CASE( "versionAncestors walks child to root and refuses corrupt lineages",
     REQUIRE( cycle.diagnostics().first().code == QStringLiteral( "dataset.version_cycle" ) );
 
     store.close();
-    QFile::remove( path );
 }
 
 TEST_CASE( "versionChildren inverts the parent link", "[mlops9][dag]" )
 {
     DatasetStore store;
-    const QString path = QStringLiteral( "mlops9_dag_children.sqlite" );
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+    const QString path = tempDir.filePath( QStringLiteral( "mlops9_dag_children.sqlite" ) );
     QFile::remove( path );
     REQUIRE( store.open( path ) );
     const QString datasetId = DatasetId::generate().toString();
@@ -232,14 +237,15 @@ TEST_CASE( "versionChildren inverts the parent link", "[mlops9][dag]" )
                      DatasetVersionId::fromString( chain.last() ).value() )
                  .isEmpty() );
     store.close();
-    QFile::remove( path );
 }
 
 TEST_CASE( "createDerivedVersion forks committed content into a fresh draft",
            "[mlops9][dag]" )
 {
     DatasetStore store;
-    const QString path = QStringLiteral( "mlops9_dag_derive.sqlite" );
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+    const QString path = tempDir.filePath( QStringLiteral( "mlops9_dag_derive.sqlite" ) );
     QFile::remove( path );
     REQUIRE( store.open( path ) );
     const QString datasetId = DatasetId::generate().toString();
@@ -292,7 +298,6 @@ TEST_CASE( "createDerivedVersion forks committed content into a fresh draft",
     REQUIRE( missing.diagnostics().first().code == QStringLiteral( "dataset.not_found" ) );
 
     store.close();
-    QFile::remove( path );
 }
 
 TEST_CASE( "sample validity windows round-trip and validate (M2)",
@@ -337,7 +342,9 @@ TEST_CASE( "sample validity windows round-trip and validate (M2)",
 
     // Store round-trip: validity survives persistence.
     DatasetStore store;
-    const QString path = QStringLiteral( "mlops9_sample_validity.sqlite" );
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+    const QString path = tempDir.filePath( QStringLiteral( "mlops9_sample_validity.sqlite" ) );
     QFile::remove( path );
     REQUIRE( store.open( path ) );
     const QString datasetId = DatasetId::generate().toString();
@@ -351,5 +358,4 @@ TEST_CASE( "sample validity windows round-trip and validate (M2)",
     REQUIRE( loaded.value().validFromUtc() == from );
     REQUIRE( loaded.value().validUntilUtc() == until );
     store.close();
-    QFile::remove( path );
 }

@@ -31,6 +31,8 @@
 
 #include <gdal_priv.h>
 
+#include <sys/wait.h>
+
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -209,7 +211,7 @@ TEST_CASE( "CLI --experiment-record writes a truthful Completed run", "[mlops9][
     CHECK( recorded.datasetVersionId() == versionId );
     // Verified pin: the dataset fingerprint is stamped from the store.
     CHECK( !recorded.datasetFingerprint().isEmpty() );
-    CHECK( recorded.executionRef() == recorded.executionRef() ); // ref present (non-fabricated)
+    // The execution ref points back at a real tracked workflow run id.
     CHECK( !recorded.executionRef().isEmpty() );
     // Step evidence rides the metrics document under "workflow".
     const QJsonObject workflow =
@@ -265,13 +267,15 @@ TEST_CASE( "recording fabricates nothing for unrecorded executions", "[mlops9][c
     INFO( run.output );
     REQUIRE( run.exitCode != 0 );
 
-    if ( QFile::exists( experimentDb ) )
-    {
-        ExperimentStore store;
-        REQUIRE( store.open( experimentDb ) );
-        const auto runs = store.listRuns( QStringLiteral( "mlops9-ghost" ) );
-        REQUIRE( runs.has_value() );
-        CHECK( runs.value().second.isEmpty() );
-        store.close();
-    }
+    // enable() creates the db unconditionally, so the store MUST exist and
+    // hold the experiment but ZERO runs — the branch is not vacuous.
+    REQUIRE( QFile::exists( experimentDb ) );
+    ExperimentStore store;
+    REQUIRE( store.open( experimentDb ) );
+    const auto ghostExperiment = store.experimentById( QStringLiteral( "mlops9-ghost" ) );
+    REQUIRE( ghostExperiment.has_value() );
+    const auto runs = store.listRuns( QStringLiteral( "mlops9-ghost" ) );
+    REQUIRE( runs.has_value() );
+    CHECK( runs.value().second.isEmpty() );
+    store.close();
 }

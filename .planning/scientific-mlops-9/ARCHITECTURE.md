@@ -11,21 +11,29 @@ stores and execution chain.
 
 ```
 src/dataset/                       (data authority, owned)
-  split.{h,cpp}          M0: validation matrix fix (#875+), SpatioTemporalBlock,
-                         split diagnostics/summary hardening
-  dataset_store*         M1: version DAG (parents, tags, diff), M2 governance extensions
-  leakage_audit/fold_audit  M0: extended audits feeding split summaries
+  split.{h,cpp}          M0: total validation matrix (#875 superset),
+                         SpatioTemporalBlock, guarded grid arithmetic,
+                         bounded generation summaries
+  dataset_types.*        M0: SpatioTemporalBlock vocabulary
+  dataset_store*         M1: write-time lineage validation, ancestors/
+                         children, createDerivedVersion
+  sample.*               M2: temporal validity windows (storage + validation)
+  (leakage_audit/fold_audit unchanged from 7.0/8.0 — verified sufficient)
 
 src/experiment/                    (experiment authority, owned)
-  run_bridge/run_recorder/  M3: lifecycle hardening tests, CLI/resume
-  experiment_store.*          recording surfaces (data-side seams)
-  evaluation.*             M4: automatic scientific evidence schema + slice metrics
-  experiment_matrix (new)  M5: bounded sweep descriptor → submissions through the
-                           existing WorkflowRunCoordinator chain; aggregation
-  comparison_ext.*         M6: identity/artifact/runtime diff, typed incomparability
-  reproduction_*           M7: replay through existing chain, deviation report
-  promotion seam (new)     M8: result→candidate evidence over the model catalog's
-                           stable interface (NO new registry)
+  run_bridge/run_recorder/  M3: CLI/resume recording surfaces (adapter side
+  experiment_store.*          in bridge/; data side here), promotion table
+  evidence.* (new)         M4: schema-versioned evidence projection + metrics
+                           schema versioning (evaluation.*)
+  experiment_matrix (new)  M5: bounded sweep descriptor + ledger + aggregation
+                           (submission stays with the caller through the
+                           existing WorkflowRunCoordinator chain)
+  experiment_types.*       M6: RunComparison artifacts+runtime dimensions
+  replay_deviation (new)   M7: replay deviation verdicts
+  promotion.* (new)        M8: result→candidate evidence over the model
+                           catalog's stable interface (NO new registry)
+  (comparison_ext.*/reproduction_* unchanged — 7.0/8.0 machinery verified
+  sufficient; M7 consumes run comparisons, M6 extends experiment_types)
 
 tests/test_mlops9_*                per-milestone suites; existing suites extended
 ```
@@ -60,6 +68,7 @@ chain with the recorded pins.
 
 - `dataset.split_invalid` (existing) with new typed messages for NaN /
   overflow / degenerate folds / spatiotemporal requirements.
-- New `experiment.matrix_*`, `experiment.comparison_incomparable`,
-  `experiment.replay_*`, `experiment.promotion_*` families as each
-  milestone lands (exact codes in the milestone sections of TEST_MATRIX).
+- New `experiment.matrix_*`, `experiment.evidence_invalid`,
+  `experiment.replay_unknown_run`, `experiment.promotion_*`,
+  `dataset.parent_*`, `dataset.version_cycle` families (exact codes live in
+  the source and are exercised by the test_mlops9_* suites).

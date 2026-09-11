@@ -168,6 +168,9 @@ private:
     /// monitor; failures are reported via the log callback, never fatal —
     /// a recording outage must not change execution semantics.
     void recordSubmission(long pipelineId);
+    /// Terminal recording on a return path (see the .cpp for the rationale);
+    /// a member so failures log through reportLog like every other path.
+    void flushRecording(long pipelineId);
     void reportProgress(int stepIndex, int totalSteps, double stepProgress,
                         const std::string& message) const;
     void reportLog(const std::string& level, const std::string& message) const;

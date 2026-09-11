@@ -111,11 +111,31 @@ Result<ReplayDeviationReport> ReplayDeviationAnalyzer::analyze( const QString &o
     const RunComparison comparison = RunComparison::compare( original.value(), replay.value() );
     report.pinComparison = comparison.toJson();
 
+    // Only IDENTITY pins drive the verdict. The M6 artifacts/runtime
+    // dimensions ride the comparison as diagnostics (review round 1): wall
+    // time beyond the jitter policy or an output-digest drift on equal pins
+    // is reported, but must not flip a same-identity replay to "deviated" —
+    // that verdict is reserved for identity, per the header contract.
+    static const QStringList kIdentityDimensions{
+        QStringLiteral( "dataset" ), QStringLiteral( "split" ),
+        QStringLiteral( "model" ),   QStringLiteral( "algorithm" ),
+        QStringLiteral( "config" ),  QStringLiteral( "seed" ),
+        QStringLiteral( "environment" ),
+    };
     for ( const RunDiffItem &item : comparison.dimensions )
     {
-        if ( item.differs )
+        if ( item.differs && kIdentityDimensions.contains( item.dimension ) )
             report.deviations.append(
                 QStringLiteral( "pin '%1' differs: %2" ).arg( item.dimension, item.detail ) );
+    }
+    // Diagnostics (artifacts/runtime) still surface — as deviations of
+    // record when identity is equal, without deciding the verdict alone.
+    for ( const RunDiffItem &item : comparison.dimensions )
+    {
+        if ( item.differs && !kIdentityDimensions.contains( item.dimension ) )
+            report.deviations.append(
+                QStringLiteral( "diagnostic '%1' differs: %2" )
+                    .arg( item.dimension, item.detail ) );
     }
 
     // Evidence completeness gates the verdict strength.
@@ -141,15 +161,20 @@ Result<ReplayDeviationReport> ReplayDeviationAnalyzer::analyze( const QString &o
         report.verdict = ReplayDeviationReport::Verdict::Identical;
         report.metricDelta = comparison.metricDiff( original.value(), replay.value() );
     }
-    else
+    else if ( original->determinism() != DeterminismGrade::Strict ||
+              replay->determinism() != DeterminismGrade::Strict )
     {
         // Same identity, different outputs: legitimate only under a declared
-        // determinism grade below Strict — the report says so either way.
+        // determinism grade below Strict (either side claiming Strict makes
+        // the mismatch a deviation).
         report.verdict = ReplayDeviationReport::Verdict::Equivalent;
         report.metricDelta = comparison.metricDiff( original.value(), replay.value() );
-        if ( original->determinism() == DeterminismGrade::Strict )
-            report.deviations.append(
-                QStringLiteral( "result fingerprints differ under Strict determinism" ) );
+    }
+    else
+    {
+        report.verdict = ReplayDeviationReport::Verdict::Deviated;
+        report.deviations.append(
+            QStringLiteral( "result fingerprints differ under Strict determinism" ) );
     }
     return Result<ReplayDeviationReport>::success( report );
 }

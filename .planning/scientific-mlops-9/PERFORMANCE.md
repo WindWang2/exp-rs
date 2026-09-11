@@ -11,11 +11,11 @@ compared.
 |---|---|---|---|---|
 | Run seeding | test_mlops9_scale "100k-run store" | 100 000 single-row transactions | seed_ms = 23 286 | (context, not gated) |
 | Paged listing | same | 5 pages × ≤500 runs | five_pages_ms = 57 | < 5 000 ms |
-| Cold-path execution-ref scan | same | 100 000 run JSONs, substring scan | execution_ref_scan_ms = 71 602 (~0.72 ms/run under 3-track load) | < 120 000 ms; documented linear cold path; O(log n) column+index = follow-up for the store owner |
+| Cold-path execution-ref scan | same | 100 000 run JSONs, substring scan over paged ORDER BY reads | execution_ref_scan_ms = 71 602 (~0.72 ms/run under 3-track load) | < 120 000 ms; bounded paged cold path — page re-sorting without a covering (created_ms, run_id) index makes it superlinear in practice (≈4× at 200k, measured model); the index is the store owner's follow-up |
 | Concurrent readers/writer | test_mlops9_scale "concurrent readers" | 400 writes vs 2 spinning readers | all reads/writes succeed; final count exact | correctness gate |
 | CLI E2E | test_mlops9_cli_record (3 cases) | real CLI subprocess ×3 | suite < 60 s incl. 3 process starts | TIMEOUT 300 |
 | Matrix aggregation | test_mlops9_evidence | 4 cells over real store | < 1 s | bounded by cell cap (≤1000) |
-| Split generation | test_mlops9_split | ≤3000 samples/case | suite < 5 s | pure function, O(n) per method (SpatialBuffer accept-loop is O(n·k) in accepted tests — documented) |
+| Split generation | test_mlops9_split | ≤3000 samples/case | suite < 5 s | pure function; O(n) per method except spatial_buffer, whose greedy accept loop is O(n × accepted-test-count) — inherent to the buffer semantics |
 
 ## Resource bounds stated in code
 

@@ -728,7 +728,12 @@ Result<PromotionRecord> PromotionRecord::fromJson( const QJsonObject &json )
         json.value( QStringLiteral( "decided_at_utc" ) ).toString(), Qt::ISODateWithMs );
     const QJsonObject criteria = json.value( QStringLiteral( "criteria" ) ).toObject();
     if ( !criteria.isEmpty() )
-        record.criteriaJson = QString::fromUtf8( QJsonDocument( criteria ).toJson() );
+    {
+        // CANONICAL form (Compact) — equality of stored records compares
+        // this string; formatting drift must never fake a conflict.
+        record.criteriaJson = QString::fromUtf8(
+            QJsonDocument( criteria ).toJson( QJsonDocument::Compact ) );
+    }
     record.createdAtUtc = QDateTime::fromString(
         json.value( QStringLiteral( "created_at_utc" ) ).toString(), Qt::ISODateWithMs );
     if ( record.promotionId.isEmpty() || record.runId.isEmpty() )

@@ -439,8 +439,9 @@ TEST_CASE( "promotion seam: criteria, benchmark gap, approval metadata (M8)",
     CHECK( evaluation.value().missingEvidence.isEmpty() );
 
     // Record approval metadata; the store keeps the evidence readable.
-    auto promotionId = evaluator.record( request, evaluation.value(),
-                                         QStringLiteral( "approved" ),
+    // record() re-derives the verdict internally, so the persisted verdict
+    // always matches the recorded metrics.
+    auto promotionId = evaluator.record( request, QStringLiteral( "approved" ),
                                          QStringLiteral( "release-board" ) );
     REQUIRE( promotionId.has_value() );
     const auto persisted = fixture.store.promotionById( promotionId.value() );
@@ -473,6 +474,12 @@ TEST_CASE( "promotion seam: criteria, benchmark gap, approval metadata (M8)",
     REQUIRE( benchmarkGap.has_value() );
     CHECK( benchmarkGap.value().missingEvidence.contains(
         QStringLiteral( "benchmark_set" ) ) );
+
+    // Idempotent re-save of byte-identical content is NOT a conflict (the
+    // equality is over CANONICAL compact JSON, so a record that round-trips
+    // through the store compares equal to itself — review round 1).
+    auto resaved = fixture.store.savePromotionRecord( persisted.value() );
+    REQUIRE( resaved.has_value() );
 
     // The approval trail is append-only: same id, different content ⇒ conflict.
     PromotionRecord tampered = persisted.value();

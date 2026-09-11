@@ -283,9 +283,10 @@ QVector<SplitAssignment> walkGroupsInOrder( const QStringList &order,
     }
 
     // Degenerate repair: a non-zero-ratio role that ended up EMPTY steals the
-    // LAST group of the role with the largest overshoot (deterministic, keeps
-    // every group atomic). One giant group still refuses via the caller's
-    // guard when nothing can be donated.
+    // group of the role with the largest overshoot; backward iteration with
+    // a >= tie-break resolves ties to the EARLIEST group (deterministic,
+    // keeps every group atomic). One giant group still refuses via the
+    // caller's guard when nothing can be donated.
     auto roleCount = [&]( SplitRole role ) {
         int n = 0;
         for ( const GroupInfo &info : groups )

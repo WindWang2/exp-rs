@@ -57,7 +57,12 @@ QJsonObject RunPins::toJson() const
     if ( !modelDigest.isEmpty() )
         json.insert( QStringLiteral( "model_digest" ), modelDigest );
     if ( hasSeed )
-        json.insert( QStringLiteral( "seed" ), qint64( seed ) );
+    {
+        // Hex STRING: seeds are quint64 and a QJsonValue double loses
+        // precision above 2^53 (review round 1). The numeric form stays
+        // readable in fromJson for records written before this change.
+        json.insert( QStringLiteral( "seed_hex" ), QString::number( seed, 16 ) );
+    }
     return json;
 }
 
@@ -68,8 +73,20 @@ Result<RunPins> RunPins::fromJson( const QJsonObject &json )
     pins.splitManifestId = json.value( QStringLiteral( "split_manifest_id" ) ).toString();
     pins.modelId = json.value( QStringLiteral( "model_id" ) ).toString();
     pins.modelDigest = json.value( QStringLiteral( "model_digest" ) ).toString();
-    if ( json.contains( QStringLiteral( "seed" ) ) )
+    if ( json.contains( QStringLiteral( "seed_hex" ) ) )
     {
+        bool ok = false;
+        pins.seed = json.value( QStringLiteral( "seed_hex" ) )
+                        .toString()
+                        .toULongLong( &ok, 16 );
+        if ( !ok )
+            return failWith<RunPins>( QStringLiteral( "experiment.bridge_invalid_pins" ),
+                                      QStringLiteral( "seed_hex malformed" ) );
+        pins.hasSeed = true;
+    }
+    else if ( json.contains( QStringLiteral( "seed" ) ) )
+    {
+        // Legacy numeric form (precision-capped at 2^53 by JSON doubles).
         const QJsonValue value = json.value( QStringLiteral( "seed" ) );
         if ( !value.isDouble() )
             return failWith<RunPins>( QStringLiteral( "experiment.bridge_invalid_pins" ),

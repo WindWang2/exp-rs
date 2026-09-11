@@ -1030,6 +1030,7 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::createDerivedVersion(
     derived.setVersionId( DatasetVersionId::generate().toString() );
     derived.setParentVersionId( parent->versionId() );
     derived.setFingerprint( QString() ); // stamped by the usual commit path
+    derived.setCreatedAtUtc( QDateTime::currentDateTimeUtc() ); // fresh birth, not inherited
     return createDraftVersion( derived, note );
 }
 
