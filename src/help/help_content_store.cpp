@@ -290,11 +290,7 @@ HelpContentStore::LoadResult HelpContentStore::loadFromDirectory( const QString 
         result.errors << QStringLiteral( "content directory missing: %1" ).arg( directory );
         return result;
     }
-    const QFileInfoList entries =
-        dir.entryInfoList( QStringList{ QStringLiteral( "*.json" ) }, QDir::Files, QDir::Name );
-    for ( const QFileInfo &entry : entries )
-        loadJsonFile( entry.absoluteFilePath(), result.registry, result.errors );
-    // recursive: nested families (e.g. operators/<group>/x.json) are content
+    // recursive: top-level and nested families (e.g. operators/<group>/x.json) are content
     QDirIterator subIt( directory, QStringList{ QStringLiteral( "*.json" ) }, QDir::Files,
                         QDirIterator::Subdirectories );
     while ( subIt.hasNext() )

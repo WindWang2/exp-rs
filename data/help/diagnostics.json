@@ -861,6 +861,45 @@
     ]
   },
   {
+    "id": "diagnostic.operator.device_unavailable",
+    "family": "operator",
+    "code": "DeviceUnavailable",
+    "title": "推理设备不可用",
+    "whatHappened": "请求或选择的计算设备（如 CUDA GPU）缺失或无法寻址。",
+    "severity": "error",
+    "retry": "manual",
+    "whyItMatters": "模型推理无法在指定设备上启动。",
+    "remediation": [
+      "检查显卡驱动与 CUDA 运行时配置",
+      "切换至 CPU 模式或指定可用设备编号"
+    ],
+    "keywords": [
+      "设备不可用",
+      "CUDA",
+      "GPU",
+      "DeviceUnavailable"
+    ]
+  },
+  {
+    "id": "diagnostic.operator.runtime_provider_failed",
+    "family": "operator",
+    "code": "RuntimeProviderFailed",
+    "title": "运行时提供者失败",
+    "whatHappened": "外部模型推理服务崩溃或通信中断。",
+    "severity": "error",
+    "retry": "retryable",
+    "whyItMatters": "模型推理执行中断，无法产出结果。",
+    "remediation": [
+      "检查外部推理后端进程是否正常运行",
+      "重试任务或重新初始化模型运行时"
+    ],
+    "keywords": [
+      "推理引擎",
+      "模型运行时",
+      "RuntimeProviderFailed"
+    ]
+  },
+  {
     "id": "diagnostic.operator.unknown",
     "family": "operator",
     "code": "Unknown",

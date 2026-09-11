@@ -327,7 +327,11 @@ std::vector<std::uint8_t> RasterReader::readMask( const RasterWindow &window, co
     for ( std::size_t p = 0; p < pixels; ++p )
     {
       const double value = bandValues[p];
-      const bool invalid = info->noDataIsNaN ? std::isnan( value ) : ( value == info->noDataValue );
+      const bool invalid = info->noDataIsNaN
+                               ? std::isnan( value )
+                               : ( value == info->noDataValue ||
+                                   static_cast<float>( value ) == static_cast<float>( info->noDataValue ) ||
+                                   std::abs( value - info->noDataValue ) < 1e-6 );
       if ( invalid )
         mask[p] = 0;
     }

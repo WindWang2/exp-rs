@@ -115,8 +115,8 @@ TEST_CASE( "Priority-flood fill raises pits to their spill level", "[terrain][fl
   REQUIRE( filled[0] == Catch::Approx( 5.0f ) );
 
   // NoData column is a barrier: the east half cannot drain through it.
-  // 5x5: col 0 = 5, col 1 = NoData (all rows), cols 2-3 = 5 with a pit at
-  // (2,2), col 4 = 8; boundary rows carry the same pattern.
+  // 5x5: col 0 = 5, col 1 = NoData (all rows), cols 2-3 = 5 with an interior
+  // pit at (3,2) east of the wall, col 4 = 8; boundary rows carry the same pattern.
   constexpr int kN = 5;
   std::vector<float> bar( kN * kN, 5.0f );
   for ( int y = 0; y < kN; ++y )
@@ -124,10 +124,10 @@ TEST_CASE( "Priority-flood fill raises pits to their spill level", "[terrain][fl
     bar[static_cast<size_t>( y ) * kN + 1] = kNodata;
     bar[static_cast<size_t>( y ) * kN + 4] = 8.0f;
   }
-  bar[static_cast<size_t>( 2 ) * kN + 2] = 3.0f; // interior pit, west of the wall
+  bar[static_cast<size_t>( 2 ) * kN + 3] = 3.0f; // interior pit, east of the wall
   std::vector<float> filled2( kN * kN );
   REQUIRE( fillDepressions( bar.data(), filled2.data(), kN, kN, kNodata ) );
-  REQUIRE( filled2[static_cast<size_t>( 2 ) * kN + 2] == Catch::Approx( 5.0f ) );
+  REQUIRE( filled2[static_cast<size_t>( 2 ) * kN + 3] == Catch::Approx( 5.0f ) );
   REQUIRE( filled2[static_cast<size_t>( 2 ) * kN + 1] == kNodata );
   REQUIRE( filled2[static_cast<size_t>( 2 ) * kN + 4] == Catch::Approx( 8.0f ) );
   REQUIRE( filled2[0] == Catch::Approx( 5.0f ) );
@@ -423,3 +423,33 @@ TEST_CASE( "rs:terrain_flow E2E: watershed product with pour points",
   RSOperatorContext ctx2;
   REQUIRE_THROWS_AS( op->run( bad, ctx2 ), RSOperatorError );
 }
+
+TEST_CASE( "Priority-flood fill handles DEM with NoData collar/border (#848)",
+           "[terrain][flow][issue848]" )
+{
+  constexpr int W = 5;
+  constexpr int H = 5;
+  constexpr float kNodataVal = -9999.0f;
+  std::vector<float> dem = {
+    kNodataVal, kNodataVal, kNodataVal, kNodataVal, kNodataVal,
+    kNodataVal,      10.0f,      10.0f,      10.0f, kNodataVal,
+    kNodataVal,      10.0f,       5.0f,      10.0f, kNodataVal,
+    kNodataVal,      10.0f,      10.0f,      10.0f, kNodataVal,
+    kNodataVal, kNodataVal, kNodataVal, kNodataVal, kNodataVal
+  };
+  std::vector<float> filled( W * H, 0.0f );
+  REQUIRE( TerrainFlow::fillDepressions( dem.data(), filled.data(), W, H, kNodataVal ) );
+
+  // Center pit at (2, 2) must be filled to the spill elevation (10.0f)
+  CHECK( filled[2 * W + 2] == Catch::Approx( 10.0f ) );
+
+  // Rim cells remain at 10.0f
+  CHECK( filled[1 * W + 1] == Catch::Approx( 10.0f ) );
+  CHECK( filled[1 * W + 2] == Catch::Approx( 10.0f ) );
+  CHECK( filled[3 * W + 3] == Catch::Approx( 10.0f ) );
+
+  // Outer collar cells must remain NoData
+  CHECK( filled[0] == kNodataVal );
+  CHECK( filled[W * H - 1] == kNodataVal );
+}
+

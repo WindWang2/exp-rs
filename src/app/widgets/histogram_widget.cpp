@@ -43,8 +43,9 @@ HistogramWidget::HistogramWidget( QWidget *parent )
 
     connect( QgsProject::instance(), &QgsProject::layerRemoved,
              this, [this]( const QString &layerId ) {
-                 if ( m_rasterLayer && m_rasterLayer->id() == layerId ) {
+                 if ( !m_rasterLayerId.isEmpty() && m_rasterLayerId == layerId ) {
                      m_rasterLayer = nullptr;
+                     m_rasterLayerId.clear();
                      closeDataset();
                      update();
                  }
@@ -66,7 +67,7 @@ void HistogramWidget::closeDataset()
     // sources for a widget that is gone (results are dropped by the stale
     // check anyway; this ends the work itself).
     if ( m_scanGeneration )
-        sicnu::app::RsScanPool::instance().cancel( m_scanGeneration );
+        sicnu::app::RsScanPool::instance().cancel( m_scanGeneration, this );
     if ( m_cachedDataset ) {
         GDALClose( m_cachedDataset );
         m_cachedDataset = nullptr;
@@ -80,6 +81,7 @@ void HistogramWidget::setRasterLayer( QgsRasterLayer *layer )
     if ( m_rasterLayer.data() == layer )
         return;
     m_rasterLayer = layer;
+    m_rasterLayerId = layer ? layer->id() : QString();
     m_bandCache.clear();
     if ( m_rasterLayer )
     {
@@ -268,7 +270,7 @@ void HistogramWidget::computeHistograms()
     // #797: run the GDAL scan on the dedicated bounded scan pool (never the
     // global pool) and carry a cancellation generation — the worker exits at
     // band boundaries when a newer request supersedes it.
-    const quint64 scanGeneration = sicnu::app::RsScanPool::instance().nextGeneration();
+    const quint64 scanGeneration = sicnu::app::RsScanPool::instance().nextGeneration( this );
     m_scanGeneration = scanGeneration;
     QPointer<HistogramWidget> self = this;
     sicnu::app::RsScanPool::instance().pool().start( [self, source, reqId, bandsToFetch, scanGeneration]() {
@@ -287,7 +289,7 @@ void HistogramWidget::computeHistograms()
         {
             // Cooperative cancellation (#797): abandon superseded scans at
             // band boundaries instead of monopolising a scan worker.
-            if ( sicnu::app::RsScanPool::instance().isStale( scanGeneration ) )
+            if ( sicnu::app::RsScanPool::instance().isStale( scanGeneration, self.data() ) )
             {
                 GDALClose( ds );
                 return;

@@ -290,7 +290,7 @@ void sarChangeRules( const std::vector<PreflightInput> &inputs, PreflightOutcome
     if ( !modality.empty() && modality != "sar" && modality != "unknown" )
       addBlocker( outcome, error_codes::kModalityMismatch,
                   "Input '" + input.name + "' is " + modality + ", not SAR",
-                  "check_dataset", Json::Value() );
+                  "workbench.datasetExperiment", Json::Value() );
     if ( modality == "unknown" )
       addWarning( outcome, "MODALITY_MISMATCH",
                   "Input '" + input.name +
@@ -368,7 +368,7 @@ void classifyRules( const std::vector<PreflightInput> &inputs, PreflightOutcome 
         if ( input.understanding.get( "feature_count", 0 ).asInt() <= 0 )
           addBlocker( outcome, error_codes::kTrainingInvalid,
                       "Training vector '" + input.name + "' has no features",
-                      "check_training", Json::Value() );
+                      "workbench.datasetExperiment", Json::Value() );
       }
     }
   }
@@ -441,7 +441,7 @@ void temporalSeriesRules( const std::vector<PreflightInput> &inputs,
     }
     if ( !sorted )
       addBlocker( outcome, error_codes::kTimeOrderInvalid,
-                  "Collection dates are not in acquisition order", "check_collection" );
+                  "Collection dates are not in acquisition order", "workbench.temporal" );
     const int maxGapDays = facts.get( "max_gap_days", 0 ).asInt();
     if ( maxGapDays > 0 )
       addWarning( outcome, "TIME_ORDER_INVALID",
@@ -553,7 +553,7 @@ void inferenceRules( const std::vector<PreflightInput> &inputs, PreflightOutcome
   {
     addBlocker( outcome, error_codes::kModelNotReady,
                 "Model '" + modelName + "' is not in the model catalog",
-                "select_model", Json::Value() );
+                "workbench.model", Json::Value() );
     return;
   }
 
@@ -571,7 +571,7 @@ void inferenceRules( const std::vector<PreflightInput> &inputs, PreflightOutcome
       addBlocker( outcome, error_codes::kModelIncompatible,
                   "Model '" + modelName + "' does not accept " + datasetModality +
                     " input",
-                  "select_model" );
+                  "workbench.model" );
   }
 
   // Band-role demand.
@@ -593,7 +593,7 @@ void inferenceRules( const std::vector<PreflightInput> &inputs, PreflightOutcome
       addBlocker( outcome, error_codes::kModelIncompatible,
                   "Dataset lacks the '" + role + "' band required by model '" +
                     modelName + "'",
-                  "select_model" );
+                  "workbench.model" );
   }
 
   // Temporal contract.
@@ -929,7 +929,7 @@ void sarSingleRules( const std::vector<PreflightInput> &inputs, PreflightOutcome
     if ( !modality.empty() && modality != "sar" && modality != "unknown" )
       addBlocker( outcome, error_codes::kModalityMismatch,
                   "Input '" + input.name + "' is " + modality + ", not SAR",
-                  "check_dataset", Json::Value() );
+                  "workbench.datasetExperiment", Json::Value() );
     const SarFacts facts = sarFacts( input.understanding );
     if ( !facts.calibrationDeclared )
       addWarning( outcome, "INVALID_RADIOMETRY",
@@ -963,7 +963,7 @@ void terrainRules( const std::vector<PreflightInput> &inputs, PreflightOutcome &
     if ( input.understanding.isMember( "band_count" ) && input.understanding["band_count"].isInt() &&
          input.understanding["band_count"].asInt() < 1 )
       addBlocker( outcome, error_codes::kDatasetNotFound,
-                  "Input '" + input.name + "' has no bands", "check_dataset", Json::Value() );
+                  "Input '" + input.name + "' has no bands", "workbench.datasetExperiment", Json::Value() );
   }
 }
 

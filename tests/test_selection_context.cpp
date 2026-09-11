@@ -367,3 +367,45 @@ TEST_CASE( "ContextRules: layer edit commands explain every disabled state",
   REQUIRE( ContextRules::unavailabilityReason( rwSnap, QStringLiteral( "layer.saveEdits" ) )
                == QObject::tr( "请先开启编辑会话" ) );
 }
+
+TEST_CASE( "SelectionContext: computeSnapshot avoids UAF on deleted layer while preserving address reuse (#849)",
+           "[selection_context][lifecycle][issue-849]" )
+{
+  ensureApp();
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  sicnu::app::SelectionContext ctx;
+  ctx.attachCanvas( &canvas );
+
+  // 1. Create and register layer A
+  auto *layerA = new QgsVectorLayer( QStringLiteral( "Point?crs=EPSG:4326" ),
+                                     QStringLiteral( "layerA" ),
+                                     QStringLiteral( "memory" ) );
+  project->addMapLayer( layerA );
+  canvas.setCurrentLayer( layerA );
+  ctx.refreshNow();
+  REQUIRE( ctx.snapshot().activeLayer == layerA );
+
+  // 2. Remove layerA from project (triggers handleLayerWillBeRemoved and destroys layerA)
+  project->removeMapLayer( layerA->id() );
+
+  // 3. computeSnapshot should safely handle stale pointer without crashing / UAF
+  const auto snapAfterDelete = ctx.snapshot();
+  CHECK( snapAfterDelete.activeLayer == nullptr );
+
+  // 4. Test address reuse: create layer B and register to project
+  auto *layerB = new QgsVectorLayer( QStringLiteral( "Point?crs=EPSG:4326" ),
+                                     QStringLiteral( "layerB" ),
+                                     QStringLiteral( "memory" ) );
+  project->addMapLayer( layerB );
+  canvas.setCurrentLayer( layerB );
+  ctx.refreshNow();
+
+  const auto snapReused = ctx.snapshot();
+  CHECK( snapReused.activeLayer == layerB );
+
+  project->clear();
+}
+

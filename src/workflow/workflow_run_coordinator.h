@@ -135,7 +135,7 @@ class WorkflowRunCoordinator : public QObject {
     QString checkpointPathLocked( const std::string &runId ) const;
     QString checkpointPathFor( const std::string &runId ) const;
 
-    mutable std::mutex m_mutex;
+    mutable std::recursive_mutex m_mutex;
     WorkflowCheckpointManager m_checkpoints;
     QString m_checkpointDir; // empty → defaultCheckpointDirectory()
     std::map<long, std::shared_ptr<WorkflowRun>> m_runsByPipeline;
